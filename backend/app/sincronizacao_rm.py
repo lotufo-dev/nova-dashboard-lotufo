@@ -545,15 +545,17 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
 
 # ------------------------------------------------------------ recebimentos
 
-def _falta_por_titulo(conn, nota_id: int) -> int | None:
+def _falta_por_titulo(conn, nota_id: int, aberto_inteiro: bool = False) -> int | None:
     """Issue #35: o que falta pagar na nota, titulo a titulo (max(0, original - baixado) dos titulos nao
     cancelados): pagamento a mais num titulo (juros) nao compensa a falta de outro. None quando algum titulo
-    nao tem baixa nenhuma (aberto nao e' "pago com diferenca")."""
+    nao tem baixa nenhuma (aberto nao e' "pago com diferenca").
+    Issue #253: com `aberto_inteiro`, o titulo sem baixa entra pelo valor original inteiro em vez de dar None
+    (o a receber e o aviso da Saude querem quanto falta, nao se a nota fecha com diferenca)."""
     falta = 0
     for b in conn.execute("SELECT status_lan, valor_original_centavos, valor_baixado_centavos FROM baixas "
                           "WHERE nota_id=? AND status_lan<>2", (nota_id,)):
-        baixado = b["valor_baixado_centavos"] or 0
-        if b["status_lan"] not in STATUS_RECEBIDO or baixado <= 0:
+        baixado = (b["valor_baixado_centavos"] or 0) if b["status_lan"] in STATUS_RECEBIDO else 0
+        if baixado <= 0 and not aberto_inteiro:
             return None
         falta += max(0, (b["valor_original_centavos"] or 0) - baixado)
     return falta
@@ -744,9 +746,9 @@ def _recebidas_sem_baixa(conn) -> list[dict]:
         if r["medicao_id"] not in a_mao or r["nota_id"] in vistas:
             continue
         vistas.add(r["nota_id"])
-        recebido, devido, _ = _recebido_da_nota(conn, r["nota_id"])
-        if devido - recebido > diretoria.TOLERANCIA_CENTAVOS:
-            out.append({**dict(r), "falta_centavos": devido - recebido})
+        falta = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True)   # titulo a titulo (#253)
+        if falta > diretoria.TOLERANCIA_CENTAVOS:
+            out.append({**dict(r), "falta_centavos": falta})
     return out
 
 
