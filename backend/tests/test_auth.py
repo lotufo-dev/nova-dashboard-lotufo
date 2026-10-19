@@ -1,3 +1,7 @@
+import sqlite3
+
+from fastapi.testclient import TestClient
+
 from app import db, auth
 
 def _conn(tmp_path, monkeypatch):
@@ -443,8 +447,6 @@ def test_escrita_equivalente_em_paralelo_preserva_os_contadores(tmp_path, monkey
 
 # --- #3: limite de tentativas de login por origem (decisao do Leo de 19/10/2026: 20 erradas por IP em 15 min) ---
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 
 def _de(client, ip):
     """Outro client na MESMA app (mesmo limite em memoria), vindo de outro IP."""
@@ -508,6 +510,16 @@ def test_cota_do_ip_volta_depois_da_janela(client, monkeypatch):
     assert _entrar(c).status_code == 429
     agora[0] += 2
     assert _entrar(c).status_code == 200
+
+def test_tentativa_que_cai_em_banco_ocupado_conta_para_o_ip(client, monkeypatch):
+    # /code-review: a senha ja' foi conferida quando o contador da conta esbarra no lock; o 503 nao devolve a vaga
+    def ocupado(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(auth, "autenticar", ocupado)
+    c = _de(client, "10.0.0.10")
+    for _ in range(auth.LIMITE_ORIGEM):
+        assert _entrar(c, "errada").status_code == 503
+    assert _entrar(c, "errada").status_code == 429
 
 def test_limite_por_origem_em_paralelo_nao_passa_do_teto():
     import threading

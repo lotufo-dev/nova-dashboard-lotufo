@@ -114,7 +114,7 @@ def autenticar(conn: sqlite3.Connection, email: str, senha: str) -> dict | None:
                      (row["id"],))
     return dict(row)
 
-# #3 (decisao do Leo de 19/10/2026): no maximo 20 tentativas erradas por IP em 15 minutos. Acima disso o
+# #3 (limite de login por origem; decisao do Leo de 19/10/2026): no maximo 20 tentativas erradas por IP em 15 minutos. Acima disso o
 # login responde 429 ANTES de conferir a senha, entao a tentativa nao conta contra a conta (o lockout de
 # MAX_FALHAS continua como esta'). Login certo nao gasta a cota.
 LIMITE_ORIGEM = 20
@@ -129,7 +129,9 @@ class LimitePorOrigem:
     `reservar` conta a tentativa JA na entrada, sob o lock: 30 pedidos simultaneos do mesmo IP nao passam
     todos pela conferencia antes de o primeiro falhar. Quem entra devolve a vaga com `liberar`.
     """
-    _MAX_ORIGENS = 1000  # acima disso, varre as origens sem tentativa na janela (memoria nao cresce sem fim)
+    # Acima disso, varre as origens sem tentativa na janela. Rede interna: na pratica sao dezenas de IPs; a
+    # memoria fica limitada ao que cabe numa janela de 15 min (no maximo LIMITE_ORIGEM marcas por origem).
+    _MAX_ORIGENS = 1000
 
     def __init__(self, teto: int = LIMITE_ORIGEM, janela_min: int = JANELA_ORIGEM_MIN):
         self.teto, self.janela = teto, janela_min * 60
