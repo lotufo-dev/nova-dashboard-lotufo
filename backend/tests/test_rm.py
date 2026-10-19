@@ -318,6 +318,17 @@ def test_recebida_com_diferenca_audita_evento_novo(conn, cid, tmp_path):
     assert len(_eventos_diferenca(conn, mid)) == 1
 
 
+def test_tolerancia_soma_a_falta_de_todas_as_notas_da_medicao(conn, cid, tmp_path):
+    """A tolerancia e' da MEDICAO: duas notas com R$ 0,99 a menos cada (R$ 1,98 no total) nao fecham."""
+    mid = _medicao(conn, cid, 12, 1500_00)
+    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12"), _nf(101, 500.0, campo="IC 082/2025 - 12")]
+    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 923.01, 1, "2026-09-01T00:00:00-04:00"),
+                                     _baixa(2, 101, 462.0, 461.01, 1, "2026-09-03T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    assert _eventos_diferenca(conn, mid) == []
+
+
 def test_titulo_quitado_sem_diferenca_nao_gera_evento(conn, cid, tmp_path):
     mid = _medicao(conn, cid, 12, 1000_00)
     cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
@@ -339,6 +350,7 @@ def test_tolerancia_exige_baixa_no_titulo(conn, cid, tmp_path):
 @pytest.mark.parametrize("titulos", [
     [(923.20, 923.20, 1), (0.80, 0.0, 0)],     # NF em dois titulos: o de R$ 0,80 ainda aberto
     [(500.0, 549.50, 1), (50.0, 0.0, 0)],      # juros num titulo nao cobrem o outro, aberto
+    [(500.0, 549.50, 1), (50.0, 0.01, 4)],     # ... nem o outro com baixa parcial de 1 centavo
 ])
 def test_tolerancia_exige_baixa_em_cada_titulo_da_nota(conn, cid, tmp_path, titulos):
     """A soma da nota fica dentro de R$ 1,00, mas um titulo nao tem baixa nenhuma: nao e' 'pago com diferenca'."""
