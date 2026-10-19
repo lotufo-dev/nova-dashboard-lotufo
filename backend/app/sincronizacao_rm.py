@@ -587,12 +587,14 @@ def _recebimentos(conn) -> int:
         if not all(x["situacao"] == "ativa" and x["devido_centavos"] > 0 for x in notas):
             continue
         curtas = []
-        if not all(x["recebido_centavos"] >= x["devido_centavos"] for x in notas):
+        # Issue #251: quitada e' falta ZERO titulo a titulo, nao o total da nota (recebido >= devido): juros
+        # num titulo nao quitam outro titulo aberto da mesma nota. Falta zero ja' implica recebido >= devido.
+        faltas = [(x, _falta_por_titulo(conn, x["nota_id"])) for x in notas]
+        if not all(f == 0 for _, f in faltas):
             # Issue #35 (decisao do Leo, 19/10/2026): medicao paga ate' R$ 1,00 abaixo, SOMANDO a falta de
             # todas as notas dela, fecha como recebida; sem percentual. A falta e' contada titulo a titulo
             # (juros num titulo nao cobrem outro) e todo titulo precisa de baixa. A diferenca vai para a
             # auditoria como evento proprio.
-            faltas = [(x, _falta_por_titulo(conn, x["nota_id"])) for x in notas]
             if any(f is None for _, f in faltas) or sum(f for _, f in faltas) > tolerancia:
                 continue
             curtas = [{"nota_id": x["nota_id"], "numero": x["numero"], "devido_centavos": x["devido_centavos"],
