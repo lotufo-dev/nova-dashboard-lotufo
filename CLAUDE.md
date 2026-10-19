@@ -51,6 +51,11 @@ digita pouco e confere; regra, cadastro e instrumento são do Leo, em arquivo ve
   `sessao-manual` é trabalho feito com o Leo (dado de produção, Outlook dele): a orquestradora não pega.
   `redesenho` é tela refeita pelo Higgsfield: a orquestradora implementa e trata como qualquer PR (auto-merge
   liberado pelo Leo em 16/10/2026).
+- **Como se nomeia** (decidido em 19/10/2026). Número de issue ou PR nunca aparece sozinho em resposta,
+  resumo, comentário ou relatório: vai com o nome curto ao lado, "#231 (ofício no envio por fora)"; a PR cita
+  a issue, "PR #238 da #231 (ofício no envio por fora)". Toda issue leva um label `area:*` com a etapa do
+  ciclo (`contrato`, `medicao`, `faturamento`, `nota`, `protocolo`, `pagamento`, `infra`). A branch sobe ao
+  GitHub como `<N>-<nome-curto>` (`231-oficio-envio-por-fora`), pela skill `abrir-pr`.
 - **Orquestradora** (decidido em 13/10/2026): sessão fixa do Leo na pasta principal, em `master`, modelo Opus.
   Quando ele diz "rodada" ou "até acabar", a skill `orquestrar` pega até 10 issues elegíveis, abre uma
   **trabalhadora** por issue (agente `trabalhadora`, worktree próprio, Sonnet; Opus se a issue tem `risco:*`),
