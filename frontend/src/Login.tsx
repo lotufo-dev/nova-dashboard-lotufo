@@ -41,8 +41,11 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
       const eu = await api<Usuario>("/api/auth/eu");
       aoEntrar(eu);
     } catch (falha) {
-      // credencial recusada (4xx) e servidor fora do ar pedem coisas diferentes de quem tenta entrar
-      setErro(falha instanceof ApiErro && falha.status >= 400 && falha.status < 500
+      // credencial recusada (4xx) e servidor fora do ar pedem coisas diferentes de quem tenta entrar.
+      // 429 (#3, limite de login por origem): o computador estourou a cota; "senha errada" levaria a
+      // pedir desbloqueio, que nao resolve. Vale o texto do servidor, ja' em portugues.
+      setErro(falha instanceof ApiErro && falha.status === 429 ? falha.message
+        : falha instanceof ApiErro && falha.status >= 400 && falha.status < 500
         ? "E-mail ou senha inválidos, ou usuário bloqueado. Confira os dois e tente de novo."
         : "Não foi possível falar com o servidor. Tente de novo em instantes.");
     } finally {

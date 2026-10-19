@@ -75,6 +75,9 @@ def create_app() -> FastAPI:
     # A-04 (10/10/2026): corpo acima do teto da' 413 antes de qualquer rota (ver app/limites.py).
     from app.limites import LimiteDeCorpo
     app.add_middleware(LimiteDeCorpo)
+    # #3 (limite de login por origem): cota de tentativas erradas por IP, uma por app
+    from app.auth import LimitePorOrigem
+    app.state.limite_login = LimitePorOrigem()
 
     @app.get("/api/health")
     def health():
