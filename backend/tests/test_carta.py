@@ -1,4 +1,5 @@
 """Carta, capa e divisoria em PDF (bloco 5)."""
+import base64
 import datetime
 import io
 
@@ -69,9 +70,12 @@ def _imagens(pdf: bytes) -> int:
     return sum(len(p.images) for p in pypdf.PdfReader(io.BytesIO(pdf)).pages)
 
 
+_PNG_MINIMO = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
 def _logo_sintetico(pasta, nome="logo.png"):
-    from PIL import Image
-    Image.new("RGB", (40, 16), (200, 30, 30)).save(pasta / nome)
+    (pasta / nome).write_bytes(_PNG_MINIMO)
     return nome
 
 
@@ -90,9 +94,18 @@ def test_emitente_sem_logo_sai_com_cabecalho_de_texto(tmp_path, monkeypatch):
     assert "Consorcio Exemplo" in _texto(pdf)
 
 
-def test_logo_inexistente_ou_fora_da_pasta_de_dados_sai_sem_logo(tmp_path, monkeypatch):
+def test_logo_inexistente_sai_sem_logo(tmp_path, monkeypatch):
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
-    for rel in ("nao-existe.png", "../fora.png"):
-        pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "logo": rel, "fundo": True}))
-        assert _imagens(pdf) == 0
-        assert "Consorcio Exemplo" in _texto(pdf)                    # cai no cabecalho de texto, sem erro
+    pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "logo": "nao-existe.png", "fundo": True}))
+    assert _imagens(pdf) == 0
+    assert "Consorcio Exemplo" in _texto(pdf)                        # cai no cabecalho de texto, sem erro
+
+
+def test_logo_fora_da_pasta_de_dados_e_recusado_mesmo_existindo(tmp_path, monkeypatch):
+    dados = tmp_path / "dados"
+    dados.mkdir()
+    monkeypatch.setenv("DASH_DB_PATH", str(dados / "t.db"))
+    _logo_sintetico(tmp_path, "fora.png")                            # imagem valida, so' que fora da pasta de dados
+    pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "logo": "../fora.png"}))
+    assert _imagens(pdf) == 0
+    assert "Consorcio Exemplo" in _texto(pdf)
