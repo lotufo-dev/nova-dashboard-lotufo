@@ -324,13 +324,13 @@ portaria), `objeto_completo` e comprovante do CNO (`cno_pdf`): YAML do contrato.
 `fundo` do emitente em `cartas.yaml`. Depois: `cadastro validar` → `aplicar --ensaio` → `aplicar`.
 Levantamento das cartas reais: `docs/levantamento-protocolo-2026-09-24.md`.
 
-**Garantia e ART do contrato** (issue #65, decisão de 15/10/2026). No YAML do contrato: `garantia: {apolice, vigencia_fim, arquivo}` e
-`art: {numero, arquivo}` (`art: 123456` em texto continua valendo; `arquivo` é o PDF, dentro da pasta do
-cadastro, copiado por `aplicar`). Cada instrumento `endosso_garantia` com `vigencia_fim` e `apolice` (a do contrato; sem `apolice` o `cadastro validar` recusa) substitui a vigência
+**Garantia do contrato** (issue #65, decisão de 15/10/2026). No YAML do contrato: `garantia: {apolice, vigencia_fim, arquivo}`
+(`arquivo` é o PDF, dentro da pasta do cadastro, copiado por `aplicar`). Cada instrumento `endosso_garantia` com `vigencia_fim` e `apolice` (a do contrato; sem `apolice` o `cadastro validar` recusa) substitui a vigência
 da garantia (vale o de data mais recente; instrumento aplicado não muda, correção é instrumento novo). A garantia
 avisa aos 30 dias (ação aos 15, crítico vencida) para operação e diretoria, na tela Documentos e em Avisos, até
-o marco `baixa_garantia`; contrato sem `garantia` no cadastro não avisa. A ART não vence: o aviso é só "ART não
-anexada" (contrato ativo, fora de encerramento, sem PDF).
+o marco `baixa_garantia`; contrato sem `garantia` no cadastro não avisa. A ART saiu do contrato (#239): não há
+número, PDF nem aviso, e `art:` preenchido no contrato é recusado pelo `cadastro validar` (`art: null` passa). A ART
+continua só como peça `art` do pacote do protocolo, em `pecas` do órgão em `orgaos.yaml`.
 
 **Receita de deploy do bloco 5**: `deploy.ps1` com frontend (a migração 025 aplica na subida; `fpdf2` entra no
 venv pelo `requirements.lock`) → `cadastro aplicar --ensaio` e real (9 órgãos e `geral.cartas`) → `/api/health`.

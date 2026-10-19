@@ -265,7 +265,7 @@ def _garantia(bruto: dict, raiz: Path, c: dict, falha) -> None:
     """Issue #65: `garantia` e' `{apolice, vigencia_fim, arquivo}`; o endosso a substitui. A ART saiu do
     contrato (#239): `art: null` ainda passa, com valor e' recusada."""
     if bruto.get("art") is not None:
-        falha("art", "a ART saiu do contrato; tire a linha art do cadastro (a peça ART do protocolo continua nas pecas do órgão)")
+        falha("art", "a ART saiu do contrato; tire a linha art do cadastro (a peça ART do protocolo continua nas peças do órgão)")
     gar = bruto.get("garantia")
     if gar is None:
         return

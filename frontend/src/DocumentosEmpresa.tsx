@@ -362,7 +362,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                   <div className="vazio">
                     <p className="vazio__titulo">Nenhuma obra contratada direto por esta empresa</p>
                     {(e.consorcios ?? []).length > 0 && (
-                      <p>A garantia das obras em consórcio ficam no consórcio:{" "}
+                      <p>A garantia das obras em consórcio fica no consórcio:{" "}
                         {e.consorcios!.map((x, i) => {
                           const o = porId.get(x);
                           return o ? <Fragment key={x}>{i > 0 && ", "}<Link para={{ tela: "documentos-empresa", id: x, aba: "garantia" }}>{o.entidade}</Link></Fragment> : null;
