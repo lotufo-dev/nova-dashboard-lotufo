@@ -45,7 +45,7 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      número da PR e o **caminho absoluto do worktree** que a trabalhadora devolveu. Ele lê os arquivos lá e
      roda `git -C <worktree> diff origin/master...HEAD`.
    - **Gate Sol**, só se a issue tem label `risco:*`: skill `gate-sol`, passando o caminho do worktree
-     (a skill usa `git -C "<worktree>"`), pela ferramenta Bash.
+     (a skill faz `cd` para o worktree), pela ferramenta Bash.
    - Veredito inválido (resposta vazia, erro, sem "OK" nem lista de achados, **ou "OK" sobre diff vazio**:
      conferir antes `git -C "<worktree>" diff --stat origin/master...HEAD` não vazio): rodar de novo uma vez;
      se continuar inválido, a PR não mergeia sozinha (ver Travas).
