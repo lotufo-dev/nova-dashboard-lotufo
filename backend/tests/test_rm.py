@@ -362,6 +362,48 @@ def test_tolerancia_exige_baixa_em_cada_titulo_da_nota(conn, cid, tmp_path, titu
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
 
 
+@pytest.mark.parametrize("titulos", [
+    [(500.0, 551.0, 1), (50.0, 0.0, 0)],       # issue #251: A com juros cobre o total da nota, B segue aberto
+    [(500.0, 600.0, 1), (50.0, 0.0, 0)],       # ... juros acima do valor do outro titulo inteiro
+    [(500.0, 551.01, 1), (50.01, 0.0, 0)],     # centavo impar nos dois titulos
+])
+def test_juros_de_um_titulo_nao_quitam_outro_aberto(conn, cid, tmp_path, titulos):
+    """Issue #251: o recebido da nota passa do devido (juros no titulo A), mas o titulo B esta' aberto no RM.
+    A nota nao esta' quitada: a falta e' contada titulo a titulo, como no caminho com diferenca da #35."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    baixas = [_baixa(i, 100, orig, pago, st, "2026-09-01T00:00:00-04:00" if st else None)
+              for i, (orig, pago, st) in enumerate(titulos, 1)]
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")], baixas)
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    assert _eventos_diferenca(conn, mid) == []
+
+
+def test_juros_num_titulo_e_outro_curto_dentro_da_tolerancia_audita_a_falta(conn, cid, tmp_path):
+    """Issue #251: total da nota acima do devido, mas o titulo B foi pago 1 centavo abaixo. A falta e' a do
+    titulo B (os juros de A nao a cobrem): fecha pela tolerancia da #35, com o evento de 1 centavo."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 500.0, 551.0, 1, "2026-09-01T00:00:00-04:00"),
+                      _baixa(2, 100, 50.01, 50.0, 1, "2026-09-02T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
+    assert medicoes.detalhe(conn, mid)["estado"] == "recebida"
+    eventos = _eventos_diferenca(conn, mid)
+    assert [e["diferenca_centavos"] for e in eventos] == [1]
+
+
+def test_nota_com_todos_os_titulos_quitados_fecha_sem_evento(conn, cid, tmp_path):
+    """Issue #251: nota em dois titulos, os dois quitados (um com juros): fecha como antes, sem evento."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 500.0, 551.0, 1, "2026-09-01T00:00:00-04:00"),
+                      _baixa(2, 100, 50.01, 50.01, 4, "2026-09-05T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-05")
+    assert _eventos_diferenca(conn, mid) == []
+
+
 def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, tmp_path):
     """Issue #203: o recebimento a mao vale, e a Saude avisa enquanto o RM nao tiver a baixa do titulo. A medicao
     fechada pelo corte nao entra (o titulo aberto dela segue no a receber); com o titulo quitado, o aviso sai."""
