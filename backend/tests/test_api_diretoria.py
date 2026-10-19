@@ -28,3 +28,13 @@ def test_painel_e_qdop_para_a_diretoria_e_401_sem_sessao(client):
     x = client.get("/api/diretoria/qdop.xlsx")
     assert x.status_code == 200 and "QDOP" in x.headers["content-disposition"]
     assert openpyxl.load_workbook(io.BytesIO(x.content)).active["S1"].value == "FRM.EXEMPLO.001"
+
+
+def test_a_receber_so_leitura_e_401_sem_sessao(client):
+    assert client.get("/api/a-receber").status_code == 401
+    c = db.get_conn()
+    auth.criar_usuario(c, "Dir", "dir2@l.com", "senha-forte-123", "diretoria")
+    c.close()
+    _login(client, "dir2@l.com")
+    r = client.get("/api/a-receber")
+    assert r.status_code == 200 and set(r.json()) == {"hoje", "total_a_receber_liberado", "total", "mes", "meses", "por_obra", "itens"}

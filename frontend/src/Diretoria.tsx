@@ -16,8 +16,8 @@ import { Abas } from "./Topo";
 // Carteira (NAVEGACAO.md › Carteira; bloco 8, spec §10.5; redesenho #163, opcao A), a entrada da diretoria, em
 // abas na URL: Resumo (a padrao, so' o essencial), QDOP e Producao; o "Exportar QDOP" fica visivel nas tres. Tudo na COTA da Lotufo, com o vocabulario fixo: medido, faturado, protocolado,
 // recebido. As regras moram em `app/diretoria.py`; o total a receber so' mostra valor depois de conciliado
-// (geral.yaml: diretoria.total_a_receber_liberado). O protocolado por orgao e os reajustes esperando
-// apostilamento moram em A receber; a lista de avisos, na tela de Avisos; o que termina, em Obras.
+// (geral.yaml: diretoria.total_a_receber_liberado). O a receber (por obra, previsto e recebido) mora
+// em A receber; os reajustes esperando apostilamento, na aba Reajuste da obra; a lista de avisos, na tela de Avisos; o que termina, em Obras.
 
 type Grupo = { quantidade: number; valor_centavos: number | null };
 type PorOrgao = Grupo & { orgao: string; maior_dias: number | null };
@@ -465,7 +465,7 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
 }
 
 /** Producao: o mês, onde está o dinheiro, o mês a mês (barras e tabela), os próximos meses e o saldo a executar. */
-function Producao({ p, ir }: { p: Painel; ir: Ir }) {
+function Producao({ p }: { p: Painel }) {
   const d = p.dinheiro, m = p.mes_ano, k = p.carteira;
   // "N de M obras protocolaram" vem do /api/inicio. undefined = carregando; null = nao carregou.
   const [mes, setMes] = useState<ResumoMes | null | undefined>(undefined);
@@ -501,16 +501,6 @@ function Producao({ p, ir }: { p: Painel; ir: Ir }) {
           <Kpi valorTexto={valor(d.protocolado.valor_centavos)} rotulo={`protocolado esperando pagamento (${d.protocolado.quantidade})`} />
           <Kpi valorTexto={brl(d.recebido_mes.valor_centavos)} rotulo={`recebido no mês (${d.recebido_mes.quantidade})`} />
         </ul>
-        {/* o protocolado por orgao (faixas, obras) e os reajustes esperando apostilamento moram em A receber */}
-        <div className="cartao__corpo">
-          <p>
-            Em A receber:{" "}
-            <Link para={{ tela: "a-receber" }} ir={ir}>por órgão e há quanto tempo</Link>{" · "}
-            <Link para={{ tela: "a-receber" }} secao="reajustes" ir={ir}>
-              reajustes esperando apostilamento ({d.reajustes_apostilamento.quantidade})
-            </Link>
-          </p>
-        </div>
       </Secao>
 
       <Secao id="dir-grafico" titulo="Mês a mês" dica={`Previsto e medido em cada competência, até ${fmtCompetencia(m.mes)}.`}>
@@ -626,7 +616,7 @@ export default function Diretoria({ ir, aba = "resumo" }: { ir: Ir; aba?: AbaCar
       {abas}
       {aba === "resumo" && <Resumo p={p} ir={ir} />}
       {aba === "qdop" && <Qdop p={p} ir={ir} />}
-      {aba === "producao" && <Producao p={p} ir={ir} />}
+      {aba === "producao" && <Producao p={p} />}
     </div>
   );
 }

@@ -327,3 +327,91 @@ def test_reajustes_esperando_apostilamento_por_obra(cenario, monkeypatch):
     assert (r["quantidade"], r["maior_dias"]) == (2, 120)
     assert [(x["obra"], x["data_base_mes"], x["dias"]) for x in r["itens"]] == [("Consórcio", "2024-01", 120),
                                                                                ("Própria", "2025-01", 40)]
+
+
+def test_a_receber_total_por_obra_e_lista_na_cota(cenario):
+    c, ids = cenario
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=800001 WHERE contrato_id=? AND numero=14", (ids["propria"],))
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 3, 'execucao', '2026-08', 'protocolada', 1000001)", (ids["consorcio"],))
+    mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=3", (ids["consorcio"],)).lastrowid
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-09-01', 'manual')", (mid,))
+    c.commit()
+    r = diretoria.a_receber(c, HOJE)
+    assert r["total_a_receber_liberado"] is False and r["total"] == {"quantidade": 3, "obras": 2, "valor_centavos": None}
+    assert all(o["valor_centavos"] is None for o in r["por_obra"]) and all(i["valor_centavos"] is None for i in r["itens"])
+    assert all(m["previsto_centavos"] is None for m in r["meses"])
+    ids["liberar"]()
+    r = diretoria.a_receber(c, HOJE)
+    # centavo impar: 1.000.001 x 50% = 500.001 (arredondamento unico em `contratos.cota`); propria na cota cheia
+    assert r["total"] == {"quantidade": 3, "obras": 2, "valor_centavos": 800_001 + 300_000 + 500_001}
+    assert [(o["obra"], o["quantidade"], o["valor_centavos"]) for o in r["por_obra"]] == [
+        ("Própria", 2, 1_100_001), ("Consórcio", 1, 500_001)]
+    assert [(i["obra"], i["numero"], i["protocolada_em"], i["valor_centavos"]) for i in r["itens"]] == [
+        ("Própria", 15, "2026-07-01", 300_000), ("Consórcio", 3, "2026-09-01", 500_001), ("Própria", 14, "2026-09-10", 800_001)]
+    assert sum(i["valor_centavos"] for i in r["itens"]) == sum(o["valor_centavos"] for o in r["por_obra"])
+
+
+def test_a_receber_previsto_pelo_vencimento_e_recebido_pelo_mes_do_recebimento(cenario):
+    c, ids = cenario
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, recebida_em) "
+              "VALUES (?, 20, 'execucao', '2026-07', 'recebida', 250001, '2026-09-15')", (ids["consorcio"],))
+    c.commit()
+    ids["liberar"]()
+    r = diretoria.a_receber(c, HOJE)
+    assert [m["competencia"] for m in r["meses"]] == ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09",
+                                                      "2026-10", "2026-11", "2026-12"]
+    por = {m["competencia"]: m for m in r["meses"]}
+    # julho: a 15 (protocolo 01/07 + 10 dias da SINFRA) e a 2 do consorcio (01/06 + 30 dias do MTPAR, 50% de 400 mil + reajuste)
+    assert por["2026-07"]["previsto_centavos"] == 300_000 + 200_000_000 + 5_000_000
+    assert por["2026-09"]["previsto_centavos"] == 700_000                       # a 14: protocolo 10/09 + 10 dias
+    assert (r["mes"]["competencia"], r["mes"]["atual"], r["mes"]["previsto_centavos"]) == ("2026-09", True, 700_000)
+    assert r["mes"]["recebido_centavos"] == 125_001                              # 250.001 x 50%, arredondado uma vez
+    assert por["2026-10"]["futuro"] is True and por["2026-10"]["recebido_centavos"] is None
+
+
+def test_a_receber_recebido_aparece_antes_de_liberar_e_previsto_nao(cenario):
+    c, _ = cenario
+    r = diretoria.a_receber(c, HOJE)
+    assert r["total_a_receber_liberado"] is False
+    assert r["meses"][2]["recebido_centavos"] is not None and r["meses"][2]["previsto_centavos"] is None
+
+
+def test_a_receber_nota_do_rm_entra_na_lista_e_no_total(cenario):
+    c, ids = cenario
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
+                    "VALUES (1, 900, '000000900', '2026-06-01', 2500000, 'ativa')").lastrowid
+    c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, status_lan) "
+              "VALUES (1, 900, ?, 900, 2500000, 0, 0)", (nid,))
+    mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1", (ids["propria"],)).fetchone()[0]
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+              "VALUES (?, ?, 2500000, 'detectado', 't')", (mid, nid))
+    c.commit()
+    ids["liberar"]()
+    r = diretoria.a_receber(c, HOJE)
+    nota = [i for i in r["itens"] if i["tipo"] == "nota"]
+    assert len(nota) == 1 and nota[0]["medicao_id"] is None and nota[0]["nota_numero"] == "900"
+    assert nota[0]["valor_centavos"] == 2_500_000 and r["total"]["valor_centavos"] == 700_000 + 300_000 + 2_500_000
+
+
+def test_a_receber_recebida_sem_data_do_corte_fica_fora_do_previsto(cenario):
+    c, ids = cenario        # medicao do legado protocolada em 05/09, fechada pelo corte (recebida, sem recebida_em)
+    mid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+                    "VALUES (?, 30, 'execucao', '2026-07', 'recebida', 5000000)", (ids["propria"],)).lastrowid
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-09-05', 'manual')", (mid,))
+    c.commit(); ids["liberar"]()
+    r = diretoria.a_receber(c, HOJE)
+    assert r["mes"]["previsto_centavos"] == 700_000            # so' a 14; os 50.000,00 sem data nao entram
+
+
+def test_a_receber_previsao_futura_nao_conta_medicao_ja_paga(cenario):
+    c, ids = cenario
+    ids["liberar"]()
+    antes = {m["competencia"]: m["previsto_centavos"] for m in diretoria.a_receber(c, HOJE)["meses"]}
+    mid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, recebida_em) "
+                    "VALUES (?, 31, 'execucao', '2026-08', 'recebida', 9000000, ?)", (ids["propria"], HOJE.isoformat())).lastrowid
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, ?, 'manual')", (mid, HOJE.isoformat()))
+    c.commit()                       # protocolada e paga em 24/09; SINFRA (10 dias) venceria em 04/10
+    por = {m["competencia"]: m for m in diretoria.a_receber(c, HOJE)["meses"]}
+    assert all(por[k]["previsto_centavos"] == antes[k] for k in por if por[k]["futuro"])
+    assert por["2026-09"]["recebido_centavos"] == 9_000_000

@@ -359,6 +359,61 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
             "obras": _obras(conn, hoje, avisos), "obras_base": _obras_base(conn), "avisos": avisos}
 
 
+def a_receber(conn, hoje: datetime.date | None = None) -> dict:
+    """Tela A receber (redesenho #162; so' leitura; tudo na cota). O total e a lista sao as cobrancas protocoladas
+    esperando pagamento (medicoes protocoladas e, como no painel da diretoria, as notas do RM em aberto que nenhuma
+    medicao representa), por obra. Antes da conciliacao o valor e' None e as notas do RM ficam fora (como no painel).
+
+    Regra do "previsto" (a confirmar pelo Leo; o sistema nao tem previsao por medicao): o previsto de um mes e' a
+    soma, na cota, das medicoes protocoladas (hoje em aberto ou ja' recebidas) cujo
+    vencimento (data do protocolo ou da emissao + prazo normal do orgao) cai naquele mes. O recebido do mes e' a
+    soma, na cota, das medicoes com `recebida_em` no mes. Seis meses ate o atual e tres a frente."""
+    hoje = hoje or tempo.hoje_local()
+    liberado = _liberado(conn)
+    ms = _medicoes(conn)
+    notas = _notas_em_aberto(conn) if liberado else []
+    abertas = sorted(([m for m in ms if m["estado"] in PROTOCOLADAS] + notas), key=lambda m: (m["protocolo_em"] or "9", m["contrato_id"]))
+    valor = lambda xs: sum(_cota(m) for m in xs) if liberado else None
+    por_obra: dict = {}
+    for m in abertas:
+        por_obra.setdefault(m["contrato_id"], {"contrato_id": m["contrato_id"], "obra": m["obra"], "ms": []})["ms"].append(m)
+    obras = [{"contrato_id": o["contrato_id"], "obra": o["obra"], "quantidade": len(o["ms"]), "valor_centavos": valor(o["ms"])}
+             for o in por_obra.values()]
+    obras.sort(key=lambda o: (-(o["valor_centavos"] or 0), -o["quantidade"], o["obra"]))
+    itens = [{"contrato_id": m["contrato_id"], "obra": m["obra"], "medicao_id": None if m.get("tipo") == "nota" else m["id"],
+              "numero": None if m.get("tipo") == "nota" else m["numero"], "tipo": m.get("tipo") or "execucao",
+              "nota_numero": m.get("nf") if m.get("tipo") == "nota" else None, "competencia": m["competencia"],
+              "protocolada_em": (m["protocolo_em"] or "")[:10] or None, "valor_centavos": _cota(m) if liberado else None}
+             for m in abertas]
+    prazos: dict = {}
+    previsto = dict.fromkeys([_mes(hoje, k) for k in range(-5, 4)], 0)
+    # so' medicoes (a nota do RM repetiria a recebida) e recebida so' com data: o corte de 25/09/2026 fechou o legado como
+    # recebida sem `recebida_em`; essas nao entram no recebido e, por isso, tambem ficam fora do previsto
+    for m in [x for x in ms if x["estado"] in PROTOCOLADAS or (x["estado"] == "recebida" and x["recebida_em"])]:
+        base = _d(m["protocolo_em"])
+        if not base:
+            continue
+        if m["orgao_id"] not in prazos:
+            prazos[m["orgao_id"]] = _prazo(ms, m["orgao_id"], hoje, QUARTIL)
+        mes = _mes(base + datetime.timedelta(days=prazos[m["orgao_id"]]))
+        # meses futuros: so' o que ainda nao foi pago; a recebida conta se o vencimento nao e' posterior ao mes do recebimento
+        if m["estado"] == "recebida" and mes > _mes(hoje) and mes > m["recebida_em"][:7]:
+            continue
+        if mes in previsto:
+            previsto[mes] += _cota(m)
+    recebido = dict.fromkeys(previsto, 0)
+    for m in ms:
+        if m["estado"] == "recebida" and (m["recebida_em"] or "")[:7] in recebido:
+            recebido[m["recebida_em"][:7]] += _cota(m)
+    atual = _mes(hoje)
+    meses = [{"competencia": x, "atual": x == atual, "futuro": x > atual,
+              "previsto_centavos": previsto[x] if liberado else None,
+              "recebido_centavos": None if x > atual else recebido[x]} for x in previsto]
+    return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
+            "total": {"quantidade": len(abertas), "obras": len(obras), "valor_centavos": valor(abertas)},
+            "mes": next(x for x in meses if x["atual"]), "meses": meses, "por_obra": obras, "itens": itens}
+
+
 def avisos_pagamento(conn, hoje: datetime.date | None = None) -> list[dict]:
     """Medicao protocolada ha mais dias que o prazo normal do orgao (so' para a diretoria).
 
