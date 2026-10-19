@@ -580,8 +580,8 @@ def _recebimentos(conn) -> int:
             if conn.execute("SELECT 1 FROM nf_alocacoes WHERE medicao_id=? AND desfeita_em IS NOT NULL "
                             "AND motivo_desfazer LIKE ?", (m["id"], MOTIVO_A_MAO + "%")).fetchone():
                 continue
-        # Recebida quando o TITULO de CADA NF alocada esta quitado (recebido >= devido, o valor liquido
-        # do titulo). Comparar com o bruto da NF nunca fechava por causa das retencoes. NF sem titulo
+        # Recebida quando os TITULOS de CADA NF alocada estao quitados (cada um pelo seu valor liquido; ver
+        # issue #251 abaixo). Comparar com o bruto da NF nunca fechava por causa das retencoes. NF sem titulo
         # (devido=0: titulo ainda nao existe ou foi cancelado) segura a medicao -- nao da' para concluir
         # recebimento do que nao tem lancamento a receber.
         if not all(x["situacao"] == "ativa" and x["devido_centavos"] > 0 for x in notas):
