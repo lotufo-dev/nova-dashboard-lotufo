@@ -110,6 +110,19 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
 "**Até acabar**": terminada a rodada (todas as PRs mergeadas ou paradas), `git pull --ff-only` e voltar ao
 passo 1, até a tabela do `listar-issues` vir vazia ou aparecer `PARAR`. Entre rodadas, nada de deploy.
 
+## Quadro
+
+O quadro "Fila da Dashboard" (projeto 1 da organização `lotufo-dev`) mostra a fila ao Leo em quatro colunas.
+A orquestradora move o cartão da issue: **Em andamento** ao abrir a trabalhadora (passo 3); **Esperando o
+Leo** sempre que pôr `decisao` ou `precisa-do-leo`; **Feito** depois do merge (passo 10). Issue sem cartão
+entra antes de mover (`gh project item-add 1 --owner lotufo-dev --url <url da issue>`).
+
+```bash
+ITEM=$(gh project item-list 1 --owner lotufo-dev --limit 500 --format json -q ".items[] | select(.content.number==<N>) | .id")
+gh project item-edit --id "$ITEM" --project-id PVT_kwDOFHPVk84Bnvvw --field-id PVTSSF_lADOFHPVk84BnvvwzhmS6zQ \
+  --single-select-option-id <69f676e5 Em andamento | fc5944c9 Esperando o Leo | 5ea5a3c3 Feito>
+```
+
 ## O que a orquestradora nunca faz
 
 - Editar código, commitar ou fazer push de código próprio; o que vê de errado vira issue (`gh issue create`).

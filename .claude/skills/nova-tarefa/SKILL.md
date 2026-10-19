@@ -56,4 +56,6 @@ escrever issues que uma sessão consegue executar sozinha com o recorte aprovado
    ```
 
    Sem risco, só o label de área.
-5. Responder ao Leo com a lista: número, título, área e risco.
+5. Pôr cada issue no quadro "Fila da Dashboard", coluna **Na fila** (ou **Esperando o Leo** se saiu com
+   `decisao`), com os comandos da seção "Quadro" da skill `orquestrar` (id da coluna Na fila: `6724fdd6`).
+6. Responder ao Leo com a lista: número, título, área e risco.
