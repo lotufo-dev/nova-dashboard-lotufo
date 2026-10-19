@@ -395,6 +395,8 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
             continue
         if f.get("tratamento") is not None and f["tratamento"] not in TRATAMENTOS:
             falha(f"fiscais[{i}].tratamento", f"use {' ou '.join(TRATAMENTOS)}")
+        if not str(f.get("nome") or "").strip():
+            avisos.append(f"Contrato {c['nome_curto']}: fiscal {str(f['email']).strip().lower()} sem nome")
         c["fiscais"].append({"nome": str(f.get("nome") or ""), "email": str(f["email"]).strip().lower(),
                              "desde": desde, "cargo": f.get("cargo"), "tratamento": f.get("tratamento"),
                              "portaria": f.get("portaria")})
