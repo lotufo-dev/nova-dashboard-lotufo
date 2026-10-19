@@ -1,5 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiErro } from "./api";
 import { NovoProtocolo, ProtocolosDaMedicao } from "./Protocolo";
 import { ir } from "./rota";
 
@@ -33,7 +34,8 @@ describe("Protocolo", () => {
     expect(corpo).toEqual({ etapa: "unico", medicao_ids: [5], numero_oficio: "301" });
   });
 
-  it("na medição, mostra o aviso da conferência e só envia com justificativa", async () => {
+  // issue #213: o que falta não pede mais justificativa escrita; o Enviar abre o aviso "ATENÇÃO" com a lista
+  it("na medição, mostra o aviso da conferência e só envia depois de confirmar o que falta", async () => {
     render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [PROT] }}
       carregar={async () => {}} podeEditar aoMudar={() => {}} />);
     expect(await screen.findByText(/parece não assinado/)).toBeTruthy();
@@ -43,23 +45,62 @@ describe("Protocolo", () => {
       pendencias: [{ codigo: "conferencia", mensagem: "Nenhuma página tem o carimbo" }] });
     fireEvent.click(screen.getByRole("button", { name: /Prévia do e-mail/ }));
     const enviar = await screen.findByRole("button", { name: "Enviar" });
-    // issue #11: o botão fica clicável; o clique sem justificativa diz o que falta, junto do campo
     expect((enviar as HTMLButtonElement).disabled).toBe(false);
-    const campo = screen.getByLabelText(/Justificativa/);
+    expect(screen.queryByLabelText(/Justificativa/)).toBeNull();
     fireEvent.click(enviar);
-    const erro = screen.getByText(/Escreva a justificativa/);
-    expect(erro.getAttribute("role")).toBe("alert");
-    expect(campo.getAttribute("aria-invalid")).toBe("true");
-    expect(document.getElementById(campo.getAttribute("aria-describedby") ?? "")?.contains(erro)).toBe(true);
-    fireEvent.change(campo, { target: { value: "ok" } });
-    fireEvent.click(enviar);
-    expect(screen.getByText(/Escreva a justificativa/)).toBeTruthy();
+    let aviso = screen.getByRole("alertdialog", { name: "ATENÇÃO" });
+    expect(within(aviso).getByText("Nenhuma página tem o carimbo")).toBeTruthy();
+    expect(within(aviso).getByText("Deseja continuar com o envio?")).toBeTruthy();
+    fireEvent.click(within(aviso).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(api.mock.calls.some(c => c[0] === "/api/protocolos/envio")).toBe(false);
-    fireEvent.change(campo, { target: { value: "assinado à mão" } });
-    expect(screen.queryByText(/Escreva a justificativa/)).toBeNull();
     api.mockResolvedValue({});
     fireEvent.click(enviar);
+    aviso = screen.getByRole("alertdialog", { name: "ATENÇÃO" });
+    fireEvent.click(within(aviso).getByRole("button", { name: "Continuar com o envio" }));
     await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/protocolos/envio")).toBe(true));
+    const corpo = JSON.parse(api.mock.calls.find(c => c[0] === "/api/protocolos/envio")![1].body);
+    expect(corpo.confirmadas).toEqual(["Nenhuma página tem o carimbo"]);
+  });
+
+  it("o servidor recusar porque o que falta mudou reabre o aviso com a lista nova", async () => {
+    render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [PROT] }}
+      carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+    fireEvent.click(await screen.findByLabelText(/Incluir neste e-mail/));
+    api.mockResolvedValueOnce({ para: ["protocolo@exemplo.com.br"], copia: [], assunto: "A", corpo: "Bom dia.", anexos: [],
+      total: 0, limite: 26214400, pendencias: [{ codigo: "conferencia", mensagem: "Nenhuma página tem o carimbo" }] });
+    fireEvent.click(screen.getByRole("button", { name: /Prévia do e-mail/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar" }));
+    const nova = ["Nenhuma página tem o carimbo", "Lotufo: CND Federal sem validade hoje"];
+    api.mockRejectedValueOnce(new ApiErro(422, "A lista do que falta mudou", { codigo: "CONFIRMAR_PENDENCIAS", pendencias: nova,
+      itens: [{ codigo: "conferencia", mensagem: nova[0] }, { codigo: "certidao", mensagem: nova[1] }] }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Continuar com o envio" }));
+    const aviso = await screen.findByRole("alertdialog", { name: "ATENÇÃO" });
+    expect(within(aviso).getByText(/mudou desde a sua confirmação/)).toBeTruthy();
+    expect(within(aviso).getByText("Lotufo: CND Federal sem validade hoje")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    // a lista "O que falta" da prévia passa a ser a de agora, com o nível de cada item (certidão é crítica)
+    const linha = screen.getAllByText("Lotufo: CND Federal sem validade hoje").find(x => !aviso.contains(x))!;
+    expect(linha.closest("li")?.textContent).toMatch(/Crítico/i);
+    api.mockResolvedValueOnce({});
+    fireEvent.click(within(aviso).getByRole("button", { name: "Continuar com o envio" }));
+    await waitFor(() => expect(api.mock.calls.filter(c => c[0] === "/api/protocolos/envio")).toHaveLength(2));
+    const ultimo = api.mock.calls.filter(c => c[0] === "/api/protocolos/envio")[1];
+    expect(JSON.parse(ultimo[1].body).confirmadas).toEqual(nova);
+  });
+
+  it("sem nada faltando, o Enviar manda direto, sem aviso", async () => {
+    render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [{ ...PROT, pendencias: [] }] }}
+      carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+    fireEvent.click(await screen.findByLabelText(/Incluir neste e-mail/));
+    api.mockResolvedValueOnce({ para: ["protocolo@exemplo.com.br"], copia: [], assunto: "A", corpo: "Bom dia.", anexos: [],
+      total: 0, limite: 26214400, pendencias: [] });
+    fireEvent.click(screen.getByRole("button", { name: /Prévia do e-mail/ }));
+    api.mockResolvedValue({});
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/protocolos/envio")).toBe(true));
+    expect(JSON.parse(api.mock.calls.find(c => c[0] === "/api/protocolos/envio")![1].body).confirmadas).toBeNull();
   });
 
   // issue #10: o e-mail leva exatamente os protocolos vistos na prévia

@@ -28,9 +28,6 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    `cadastro/`), não abrir trabalhadora: comentar a pergunta na issue, pôr `decisao` e pegar a próxima.
    Se a leitura mostrar label `decisao`, `parar`, `precisa-do-leo` ou `sessao-manual` posto depois da
    listagem, pular a issue.
-   Issue cujo trabalho é todo em caminho protegido (`.github/`, `scripts/deploy.ps1`, `.claude/`,
-   `backend/migrations/`, pelo `## Arquivos prováveis` ou pelo título): pular sem label, só anotar no resumo
-   que é do Leo; não vale gastar trabalhadora numa PR que a trava do passo 8 vai segurar.
 3. **Abrir as trabalhadoras**, todas na mesma mensagem (rodam em paralelo), com
    `subagent_type: trabalhadora`, `isolation: "worktree"`, `run_in_background: true`, e `model: "opus"` se a
    issue tem label `risco:*` (senão deixar o padrão, `sonnet`). Prompt: `Issue #N` e nada mais. Guardar o
@@ -66,18 +63,19 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    - `gh pr view <M> --json isDraft,mergeable -q '.isDraft,.mergeable'` = `false` e `MERGEABLE` (não é draft,
      sem conflito). `UNKNOWN` não é trava: o GitHub calcula depois de cada push; esperar 20 s e reconsultar,
      até 3 vezes. Só `CONFLICTING` segura;
-   - revisor com veredito válido e sem Crítico/Aviso em aberto; gate Sol idem quando se aplica;
+   - revisor com veredito válido e sem Crítico/Aviso em aberto; gate Sol idem quando se aplica. O gate Sol
+     roda quando o codex existe (máquina local). Na nuvem, onde não há codex, não é trava: registrar "gate
+     Sol: não disponível na nuvem" em `## Gates`;
    - **nenhum comentário nem review na PR** (`gh pr view <M> --json comments,reviews`): todo agente posta com
      a conta do Leo, então qualquer comentário na PR conta como dele. Por isso **a orquestradora e a
      trabalhadora nunca comentam na PR**: o que precisam registrar vai no corpo da PR (`gh pr edit`) ou na
      issue (`gh issue comment`);
-   - a PR **não toca** `.github/`, `scripts/deploy.ps1`, `.claude/` nem `backend/migrations/`
-     (`gh pr view <M> --json files -q '.files[].path'`): se tocar, fica para o Leo mergear;
-   - a issue **não tem** label `redesenho`, consultado na hora (`gh issue view <N> --json labels -q
-     '.labels[].name'`): tela refeita pelo Higgsfield é mergeada e posta no ar só com a aprovação do Leo; se
-     tiver, não ligar o auto-merge, pôr `precisa-do-leo` na issue e dizer no resumo que a PR espera o Leo;
    - a CI existe e está rodando ou verde (`gh pr checks <M>`): CI ausente é recusa, não aprovação.
+   Não há trava por arquivo nem por label: redesenho, migração, `risco:*` e PR que toca `.github/`,
+   `scripts/deploy.ps1` ou `.claude/` entram igual às outras (decisão do Leo de 16/10/2026).
    Passou em tudo: `gh pr merge <M> --auto --merge` e comentar na issue "PR #M com auto-merge ligado".
+   **Na nuvem**, onde `gh pr merge --auto` (GraphQL) é bloqueado, o auto-merge se liga por
+   `gh api -X PUT repos/lotufo-dev/nova-dashboard-lotufo/pulls/<M>/ccr/auto_merge`.
    O `master` tem fila de merge (ruleset, desde 15/10/2026): com a CI da PR verde, o GitHub põe a PR na fila,
    junta com o `master` atual e roda a CI de novo nessa mistura (evento `merge_group`) antes de mergear.
    Falhou em alguma: comentar na **issue** qual trava segurou, pôr `precisa-do-leo` na issue e seguir.
@@ -91,7 +89,7 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    (`gh pr merge <M> --disable-auto`), pôr `precisa-do-leo` na issue e seguir.
    **CI vermelha:** primeiro desarmar (`gh pr merge <M> --disable-auto`), senão a correção mergeia sem
    revisão quando a CI do commit novo ficar verde. Depois pegar o log
-   (`gh run list --branch <branch> --limit 1 --json databaseId -q '.[0].databaseId'` e
+   (`gh run list --branch <branch no GitHub> --limit 1 --json databaseId -q '.[0].databaseId'` e
    `gh run view <id> --log-failed`) e mandar à trabalhadora (uma rodada de correção, conta nas duas do passo
    6). Quando ela voltar: passo 5 sobre o diff novo e passo 8 inteiro de novo antes de religar o auto-merge.
    Vermelha de novo, `precisa-do-leo`.
@@ -102,7 +100,8 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
     `git worktree remove "<caminho>"` (se reclamar da junção, antes rode
     `cmd /c rmdir "<caminho>\frontend\node_modules"` e `cmd /c rmdir "<caminho>\backend\.venv"`, que apagam só o
     vínculo) e `git branch -d <branch que a trabalhadora devolveu>` (a remota o GitHub apaga no merge).
-11. **Resumo ao Leo**, em português, uma linha por issue: número, o que mudou (do ponto de vista dele), estado
+11. **Resumo ao Leo**, em português, uma linha por issue: número com o nome curto ("#231 (ofício no envio
+    por fora)"; nunca o número sozinho, aqui nem nos comentários), o que mudou (do ponto de vista dele), estado
     (mergeada / auto-merge ligado, esperando CI / precisa-do-leo: motivo / decisao: pergunta). No fim: quantas
     issues elegíveis sobraram e se há algo com `precisa-do-leo`. Lembrar que o deploy é dele e que, para
     segurar uma PR com auto-merge ligado, ele comenta nela (a orquestradora desarma na próxima conferência)
@@ -111,10 +110,23 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
 "**Até acabar**": terminada a rodada (todas as PRs mergeadas ou paradas), `git pull --ff-only` e voltar ao
 passo 1, até a tabela do `listar-issues` vir vazia ou aparecer `PARAR`. Entre rodadas, nada de deploy.
 
+## Quadro
+
+O quadro "Fila da Dashboard" (projeto 1 da organização `lotufo-dev`) mostra a fila ao Leo em quatro colunas.
+A orquestradora move o cartão da issue: **Em andamento** ao abrir a trabalhadora (passo 3); **Esperando o
+Leo** sempre que pôr `decisao` ou `precisa-do-leo`; **Feito** depois do merge (passo 10). Issue sem cartão
+entra antes de mover (`gh project item-add 1 --owner lotufo-dev --url <url da issue>`).
+
+```bash
+ITEM=$(gh project item-list 1 --owner lotufo-dev --limit 500 --format json -q ".items[] | select(.content.number==<N>) | .id")
+gh project item-edit --id "$ITEM" --project-id PVT_kwDOFHPVk84Bnvvw --field-id PVTSSF_lADOFHPVk84BnvvwzhmS6zQ \
+  --single-select-option-id <69f676e5 Em andamento | fc5944c9 Esperando o Leo | 5ea5a3c3 Feito>
+```
+
 ## O que a orquestradora nunca faz
 
 - Editar código, commitar ou fazer push de código próprio; o que vê de errado vira issue (`gh issue create`).
-- Mergear à força, pular a CI, mexer em PR que o Leo comentou, ou mergear PR de caminho protegido.
+- Mergear à força, pular a CI ou mexer em PR que o Leo comentou.
 - Deploy sem o Leo pedir. Mexer em `C:\DashboardLotufo` ou no banco padrão.
 - Rodar a suíte inteira localmente ou mais de 10 trabalhadoras ao mesmo tempo.
 - Reabrir uma issue com `precisa-do-leo` ou `decisao` antes de o Leo tirar o label.

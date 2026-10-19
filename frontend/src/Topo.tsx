@@ -16,7 +16,8 @@ export function destinoDeHref(href: string): Destino {
     secao: u.hash.replace(/^#/, "") || undefined };
 }
 
-export type Migalha = { rotulo: string; para?: Rota; busca?: Busca };
+/** `fixa`: o link vai sempre ao `para` dela (com a `busca` dela), nunca a origem de onde se chegou. */
+export type Migalha = { rotulo: string; para?: Rota; busca?: Busca; fixa?: boolean };
 
 /** "Obras › MT-388": os ancestrais sao links; o ultimo e' onde se esta'. Quando a origem e' o proprio
  *  ancestral (chegou-se pela lista de Obras filtrada), o link dele volta com os filtros. */
@@ -25,7 +26,7 @@ export function Migalhas({ itens, origem }: { itens: Migalha[]; origem?: Origem 
     <nav className="migalhas" aria-label="Você está em">
       <ol>
         {itens.map((m, i) => {
-          const volta = origem && m.para && origem.tela === m.para.tela ? destinoDeHref(origem.href) : null;
+          const volta = origem && m.para && !m.fixa && origem.tela === m.para.tela ? destinoDeHref(origem.href) : null;
           return (
             <li key={`${m.rotulo}-${i}`} aria-current={i === itens.length - 1 ? "page" : undefined}>
               {m.para && i < itens.length - 1
@@ -53,9 +54,9 @@ export function VoltarOrigem({ origem, alemDe }: { origem: Origem | null; alemDe
 export type Aba<T extends string> = { id: T; rotulo: string; para: Rota };
 
 /** Faixa de abas como links: a aba e' um endereco, e o item atual leva aria-current. */
-export function Abas<T extends string>({ rotulo, itens, atual }: { rotulo: string; itens: Aba<T>[]; atual: T }) {
+export function Abas<T extends string>({ rotulo, itens, atual, classe }: { rotulo: string; itens: Aba<T>[]; atual: T; classe?: string }) {
   return (
-    <nav className="abas" aria-label={rotulo}>
+    <nav className={classe ? `abas ${classe}` : "abas"} aria-label={rotulo}>
       {itens.map(a => (
         <Link key={a.id} className="aba" para={a.para} aria-current={a.id === atual ? "page" : undefined}>
           {a.rotulo}

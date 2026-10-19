@@ -1,0 +1,1861 @@
+/* ---------------------------------------------------------------------------
+   grupolotufo — mundo visual (identidade de 06/10/2026, docs/identidade-visual.md)
+   Claro, indigo como unica cor de marca, tabela como elemento principal.
+   Modo unico claro. Sem dark mode.
+
+   Nomes em portugues, como o resto do codigo. Tokens primeiro, elementos
+   depois, componentes por ultimo. NENHUMA tela deve declarar cor propria:
+   se faltar um tom, ele nasce aqui.
+   --------------------------------------------------------------------------- */
+
+/* ------------------------------------------------------------------- fontes
+
+   IBM Plex Sans (texto) e IBM Plex Mono (numeros e valores) vem do
+   @fontsource, importados em main.tsx: o Vite empacota os .woff2 e o proprio
+   servidor os entrega. Rede interna, sem nuvem — nada de fonts.googleapis.com.
+   ------------------------------------------------------------------------- */
+
+:root {
+  --fonte:         "IBM Plex Sans", system-ui, "Segoe UI", Roboto, sans-serif;
+  --fonte-num:     "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* superficies */
+  --bg:            #F6F8FB;
+  --superficie:    #FFFFFF;
+  --superficie-2:  #F8FAFC;   /* zebra da tabela, rodape de cartao */
+  --neutro-fundo:  #F1F5F9;   /* pilula neutra, contador neutro */
+  /* hover e selecionado: a tinta clara do indigo (identidade: "fundo de destaque suave, hover, selecionado") */
+  --hover:         #EEF0FF;
+  --pressionado:   #E0E7FF;   /* :active de controle neutro */
+  --linha:         #E2E8F0;
+  --linha-suave:   #F1F5F9;   /* divisoria entre linhas da tabela */
+  --linha-forte:   #CBD5E1;
+  --linha-hover:   #94A3B8;
+  --linha-campo:   #CBD5E1;   /* contorno de campo */
+  /* serie "previsto" dos graficos (T8/T9): cinza, para o acento marcar o medido */
+  --previsto:      #CBD5E1;
+
+  /* texto — dois tons de leitura; para hierarquia use peso e tamanho */
+  --texto:         #0F172A;   /* ardosia: titulos e valores */
+  --texto-2:       #64748B;   /* cinza frio: legendas, rotulos de coluna */
+  --texto-menu:    #334155;   /* itens do menu lateral */
+  --texto-fraco:   #94A3B8;   /* SO para controle desabilitado e traco de riscado */
+
+  /* MARCA — indigo, a unica cor da marca (simbolo L, barras de progresso, serie "medido"). */
+  --marca:         #4F46E5;
+
+  /* acento interativo — o mesmo indigo (6,3:1 sobre branco). Botao primario, link, nav ativa, foco. */
+  --acento:        #4F46E5;
+  --acento-forte:  #4338CA;   /* hover */
+  --acento-mais:   #3730A3;   /* :active e texto sobre tinta clara do acento */
+  --acento-fundo:  #EEF0FF;   /* tinta clara */
+  --acento-linha:  #C7D2FE;
+  /* derivado do proprio token: trocar --acento leva o anel de foco junto */
+  --foco:          var(--acento);
+
+  /* semanticas — verde, ambar e vermelho SO para situacao (a marca nao as usa).
+     O tom de TEXTO e' escuro (legivel sobre branco e sobre o fundo tingido); o
+     tom vivo (-ponto) e' para ponto, icone e contorno. */
+  --acao:          #B91C1C;   /* critico, vencido, acao destrutiva */
+  --acao-forte:    #991B1B;
+  --acao-fundo:    #FEF2F2;
+  --acao-linha:    #FECACA;
+  --acao-ponto:    #EF4444;
+  --atencao:       #B45309;   /* pendencia, prazo se aproximando */
+  --atencao-fundo: #FFFBEB;
+  --atencao-linha: #FDE68A;
+  --atencao-ponto: #F59E0B;
+  --ok:            #047857;   /* em dia, concluido, dinheiro recebido */
+  --ok-fundo:      #ECFDF5;
+  --ok-linha:      #A7F3D0;
+  --ok-ponto:      #10B981;
+
+  /* forma: raio 8 em cartao e botao, pilula 999; pagina sem raio nem sombra; sobreposicao
+     (janela, menu, lista de sugestoes) com raio 10 e sombra propria. */
+  --raio-micro:    4px;       /* code, chave de legenda, alvo de clique dentro de celula */
+  --raio-ctrl:     8px;       /* controles */
+  --raio:          8px;       /* superficies */
+  --raio-sobreposicao: 10px;
+  --raio-pilula:   999px;     /* selo, ponto, avatar */
+  --sombra:        0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(15, 23, 42, .06);
+  --sombra-sobreposicao: 0 12px 32px rgba(15, 23, 42, .16), 0 2px 6px rgba(15, 23, 42, .08);
+  /* Trilho (Casca.tsx, 09/10/2026): 64px fechado = a celula do icone; 265px aberto. Fundo = --marca, item ativo =
+     --acento-mais (branco por cima: 10:1), hover = um degrau mais claro que o fundo. */
+  --trilho:        64px;
+  --trilho-aberto: 265px;
+  --trilho-hover:  #5B54E8;
+  --trilho-duracao: 300ms;
+  /* desacelera no fim (a curva medida no TutorBird) */
+  --trilho-curva:  cubic-bezier(.65, 0, .35, 1);
+  /* cortesia antes de FECHAR: uma passada de mouse nao derruba o painel; a abertura e' imediata */
+  --trilho-cortesia: 100ms;
+  /* sombra da borda direita: discreta fechado, presente aberto (as duas medidas no TutorBird) */
+  --trilho-sombra: 2px 0 6px rgba(15, 23, 42, .08);
+  --trilho-sombra-aberto: 8px 0 24px rgba(15, 23, 42, .2);
+
+  /* situacao da medicao (pagina Medicoes, 09/10/2026, prototipo aprovado): fundo e texto da pilula; o texto e' o
+     ponto do cartao. "Enviar nota" usa o indigo da marca (--pressionado / --acento-mais). */
+  --sit-sem-fundo: var(--neutro-fundo);  --sit-sem-texto: #475569;  --sit-sem-linha: var(--linha);
+  --sit-fat-fundo: #FEF3C7;  --sit-fat-texto: #92400E;
+  --sit-nota-fundo: #CCFBF1; --sit-nota-texto: #115E59;
+  --sit-envio-fundo: var(--pressionado); --sit-envio-texto: var(--acento-mais);
+  --sit-pag-fundo: #F3E8FF;  --sit-pag-texto: #6B21A8;
+  /* D3: 1600 no monitor de 1920 da equipe (era 1200: sobrava uma faixa de ~500px vazia enquanto
+     as tabelas rolavam por dentro); a 1366 a pagina ocupa a largura toda de qualquer jeito. */
+  --conteudo:      1600px;
+
+  color-scheme: light;
+}
+
+/* --------------------------------------------------------------- elementos */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* folga de rolagem para a secao da ancora (#notas, #emp-3) nao encostar no topo da janela */
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 16px; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--texto);
+  font-family: var(--fonte);
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  caret-color: var(--acento);
+}
+
+h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; }
+
+/* superficies do navegador: selecao, foco e barra de rolagem tambem sao do mundo */
+::selection { background: var(--acento-linha); color: var(--acento-mais); }
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--foco);
+  outline-offset: 2px;
+  border-radius: var(--raio-ctrl);
+}
+
+/* barra de rolagem fina, no cinza do contorno de campo */
+* { scrollbar-width: thin; scrollbar-color: var(--linha-campo) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--linha-campo);
+  border: 3px solid var(--bg);
+  border-radius: var(--raio-pilula);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--linha-hover); }
+
+/* Controles nus herdam o mundo: as telas da fase 1 (Contratos/Admin) ainda nao
+   usam as classes abaixo e mesmo assim entram no shell sem parecer outro app.
+   As classes .btn/.entrada apenas MODIFICAM o que ja vale aqui. */
+button, input, select, textarea { font: inherit; color: inherit; }
+
+/* `.btn` repete a base para que ANCORA tambem possa ser um botao (link de
+   download do CSV): o seletor de elemento sozinho nao alcanca <a>. */
+button, .btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border: 1px solid var(--linha-forte);
+  border-radius: var(--raio-ctrl);
+  background: var(--superficie);
+  color: var(--texto);
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  /* controle nao tem sombra (nivel 2, D1): a borda `--linha-forte` ja' separa do cartao */
+  transition: background .12s ease, border-color .12s ease;
+}
+button:hover:not(:disabled), .btn:hover:not(:disabled) { background: var(--hover); border-color: var(--linha-hover); color: var(--texto); }
+button:active:not(:disabled), .btn:active:not(:disabled) { background: var(--pressionado); box-shadow: none; }
+button:disabled, .btn:disabled { color: var(--texto-fraco); cursor: not-allowed; box-shadow: none; }
+
+input, select, textarea {
+  height: 32px; padding: 0 10px;
+  /* sem sombra: e' o contorno (#CBD5E1 da identidade) que localiza o campo */
+  border: 1px solid var(--linha-campo);
+  border-radius: var(--raio-ctrl);
+  background: var(--superficie);
+  font-size: 13px;
+  transition: border-color .12s ease;
+}
+/* textarea sai da altura fixa de 32px: com ela o `rows` era ignorado e a carta do protocolo
+   aparecia com uma linha e meia. */
+textarea { height: auto; padding: 8px 10px; line-height: 1.55; resize: vertical; max-width: 78ch; }
+/* Medida da prosa na BASE (DESIGN.md › Typography, 78ch), e nao classe a classe: com a pagina de
+   1600px o historico do contrato e a carta passavam de 200 caracteres por linha. O paragrafo que
+   E' o estado vazio (`p.vazio`) fica de fora: ele centraliza na largura toda do cartao. */
+p, dd { max-width: 78ch; }
+p.vazio { max-width: none; }
+/* hover do campo escurece o contorno */
+input:hover, select:hover, textarea:hover { border-color: var(--texto-2); }
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  border-color: var(--acento); outline-offset: 1px;
+}
+input::placeholder, textarea::placeholder { color: var(--texto-fraco); }
+
+a { color: var(--acento); text-underline-offset: 3px; }
+a:hover { color: var(--acento-forte); }
+
+/* formato literal ("AAAA-MM;valor") na mesma mono dos valores */
+code {
+  font-family: var(--fonte-num);
+  font-size: .92em;
+  padding: 1px 5px;
+  border: 1px solid var(--linha);
+  border-radius: var(--raio-micro);
+  background: var(--superficie-2);
+}
+
+table { border-collapse: collapse; }
+
+/* --------------------------------------------------------------- utilidades */
+
+/* Todo numero e valor passa por aqui: IBM Plex Mono (identidade), algarismos de mesma
+   largura, senao a coluna alinhada a direita "dança" a cada centavo. */
+.num, .col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor,
+.total-receber__valor, .alerta__valor {
+  font-variant-numeric: tabular-nums lining-nums; font-feature-settings: "tnum" 1, "lnum" 1;
+}
+/* `.num` tambem marca frases com contagem ("19 obras · a nova medicao..."): ali fica a Sans com algarismos
+   de mesma largura. A Mono vai so' no valor: celula numerica da tabela, campo numerico e os valores de KPI. */
+td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor,
+.total-receber__valor, .alerta__valor {
+  font-family: var(--fonte-num);
+}
+
+.icone {
+  width: 18px; height: 18px; flex: none;
+  stroke: currentColor; fill: none;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+}
+.icone--p { width: 15px; height: 15px; stroke-width: 1.7; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* "Pular para o conteudo": fora da tela ate' receber o foco do teclado, e entao aparece por cima do
+   trilho, no canto, como um botao. O <main> alvo tem tabIndex -1 so' para receber esse foco. */
+.pular {
+  position: absolute; left: 16px; top: -48px; z-index: 50;
+  padding: 8px 12px;
+  background: var(--superficie); color: var(--acento);
+  border: 1px solid var(--linha-forte); border-radius: var(--raio-ctrl);
+  font-weight: 600; text-decoration: none;
+}
+.pular:focus-visible { top: 12px; }
+.principal:focus { outline: none; }
+
+/* Nome longo (orgao, evidencia) numa linha de tabela de 40px: corta com reticencias
+   e mantem o texto inteiro no `title`. Sem isso um orgao de 60 caracteres quebraria
+   em duas linhas e dobraria a altura da linha. */
+.truncar {
+  /* Teto que acompanha a tela (era 34ch fixo): a 1920 o nome da certidao era cortado com ~250px
+     livres na coluna. 18% da largura da janela: a 1366 da' os 34ch de antes; a 1920, ~47ch. */
+  display: inline-block; max-width: clamp(34ch, 18vw, 60ch);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: bottom;
+}
+/* Nome de obra em tabela DENSA (Medicoes em andamento, Obras, obras da Diretoria): mais estreito,
+   para a coluna que quebra (Motivo, Proximo passo) nao ser espremida a 1366. */
+.truncar--nome { max-width: clamp(20ch, 13vw, 40ch); }
+/* Orgao numa tabela densa (Obras, A receber): mais estreito que o nome da obra, que e' quem identifica a
+   linha. Com o nome cortado sem quebrar, o teto de 18vw passava da largura do cartao a 1366 (round-02). */
+.truncar--orgao { max-width: clamp(12ch, 9vw, 40ch); }
+/* Ate' 2 linhas e reticencias (F-48): numa tabela larga, o nome que corta numa linha so' deixava de ceder
+   largura e a tabela passava a rolar a 1366. Assim a coluna encolhe como antes e a linha nunca passa de
+   duas linhas de texto. */
+.truncar-2l { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: break-word; }
+/* Na grade de largura fixa (F-47) a coluna ja' da' o teto: o nome ocupa a celula inteira e corta nela. */
+.tabela--grade .truncar { display: block; max-width: 100%; }
+/* Numero, data e instrumento numa celula nao quebram no meio ("161/2022/00/00-" / "SINFRA"). */
+.tabela td.num { white-space: nowrap; }
+/* Dado de identificacao (nº de certidao, código de controle): passa de 30 caracteres,
+   nao se le por inteiro na tabela e era ele que empurrava a coluna de acoes para fora
+   do cartao. 12ch mostram o comeco, que e' o que distingue uma emissao da outra; o
+   valor inteiro fica no `title` e no PDF. */
+.truncar--curto { max-width: 12ch; }
+
+/* Documento que NAO quebra no meio: "11.444.777/0001-61" partido em duas linhas vira
+   dois numeros que nao existem. Quem rola, quando nao couber, e' o `.tabela-wrap`. */
+.cnpj { white-space: nowrap; }
+
+/* --------------------------------------------------------------------- shell */
+
+/* Casca de 09/10/2026 (Casca.tsx; prototipo aprovado pelo Leo, mecanismo do trilho do TutorBird medido frame a
+   frame em outro projeto). O trilho e' FIXO e abre POR CIMA do conteudo: no fluxo da pagina so' existe a folga de
+   64px, e a pagina nunca reflui quando ele abre. */
+.shell { min-height: 100vh; padding-left: var(--trilho); }
+.coluna { min-width: 0; min-height: 100vh; display: flex; flex-direction: column; }
+
+/* UM elemento so': a <nav> anima a propria largura e o bloco de dentro (largura fixa, rotulos sem quebra) vai sendo
+   DESCOBERTO pelo corte. `overflow-x: hidden` e' o mecanismo: nenhum pixel do conteudo se move durante a animacao.
+   O REPOUSO descreve tambem a VOLTA, por isso e' aqui que a cortesia de 100ms aparece. */
+.trilho {
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
+  width: var(--trilho);
+  overflow-x: hidden; overflow-y: hidden;
+  background: var(--marca); color: #fff;
+  box-shadow: var(--trilho-sombra);
+  transition: width var(--trilho-duracao) var(--trilho-curva) var(--trilho-cortesia),
+              box-shadow var(--trilho-duracao) var(--trilho-curva) var(--trilho-cortesia);
+}
+/* ABERTO pelo teclado: `:has(:focus-visible)` e nao `:focus-within`, porque o CLIQUE tambem deixa foco no link e,
+   sem remontar a casca, o trilho ficava PRESO aberto depois de clicar e tirar o mouse (furo achado no TutorBird
+   clonado). O Tab abre nos dois sentidos; o clique obedece so' ao ponteiro. Entrada imediata, sem cortesia. */
+.trilho:has(:focus-visible) {
+  width: var(--trilho-aberto); overflow-y: auto; box-shadow: var(--trilho-sombra-aberto);
+  transition: width var(--trilho-duracao) var(--trilho-curva), box-shadow var(--trilho-duracao) var(--trilho-curva);
+}
+/* E pelo ponteiro, so' onde existe hover de verdade: no toque o :hover fica PRESO depois do toque e o trilho cobriria
+   a tela a cada navegacao. No celular ele fica nos 64px, e o toque no icone navega. */
+@media (hover: hover) {
+  .trilho:hover {
+    width: var(--trilho-aberto); overflow-y: auto; box-shadow: var(--trilho-sombra-aberto);
+    transition: width var(--trilho-duracao) var(--trilho-curva), box-shadow var(--trilho-duracao) var(--trilho-curva);
+  }
+  .trilho:hover .trilho__rotulo { opacity: 1; transition: opacity var(--trilho-duracao) var(--trilho-curva); }
+}
+.trilho__bloco { width: var(--trilho-aberto); min-height: 100%; display: flex; flex-direction: column; padding: 16px 0 20px; }
+/* a celula do icone tem a largura do trilho fechado: o icone fica centrado fechado E parado ao abrir, e o rotulo
+   comeca exatamente em 64px, 100% cortado em repouso */
+.trilho__celula { width: var(--trilho); flex: none; display: flex; align-items: center; justify-content: center; }
+.trilho__marca { display: flex; align-items: center; width: var(--trilho-aberto); height: 40px; margin-bottom: 24px; flex: none; }
+.trilho__simbolo { width: 15px; height: auto; color: #fff; }
+.trilho__nome { display: flex; flex-direction: column; }
+.trilho__nome-1 { font-size: 15px; line-height: 18px; font-weight: 600; }
+.trilho__nome-2 { font-size: 11px; line-height: 14px; color: var(--acento-linha); }
+/* a linha inteira tem os 265px: e' ela que veste o ativo e o hover. Fechado, o corte entrega o quadrado de 64px. */
+.trilho__item {
+  display: flex; align-items: center; flex: none;
+  width: var(--trilho-aberto); height: 44px;
+  color: #fff; text-decoration: none; font-size: 15px;
+  transition: background .15s ease;
+}
+.trilho__item:hover { background: var(--trilho-hover); color: #fff; }
+.trilho__item[aria-current="page"] { background: var(--acento-mais); }
+/* o anel de foco da casa e' indigo, a cor do proprio trilho: aqui ele e' branco e puxado para DENTRO (o item ocupa
+   a largura toda e a <nav> corta o que passa da borda) */
+.trilho__item:focus-visible { outline: 2px solid #fff; outline-offset: -4px; border-radius: 0; }
+.trilho__icone { width: 20px; height: 20px; stroke-width: 1.8; }
+/* rotulos com fade na MESMA cadencia da largura (cortesia incluida): a barra anda e as palavras aparecem */
+.trilho__rotulo { white-space: nowrap; opacity: 0; transition: opacity var(--trilho-duracao) var(--trilho-curva) var(--trilho-cortesia); }
+.trilho:has(:focus-visible) .trilho__rotulo { opacity: 1; transition: opacity var(--trilho-duracao) var(--trilho-curva); }
+@media (prefers-reduced-motion: reduce) {
+  /* sem animacao e sem cortesia: o reset de movimento zera duracoes, nao atrasos */
+  .trilho, .trilho:hover, .trilho:has(:focus-visible),
+  .trilho__rotulo, .trilho:hover .trilho__rotulo, .trilho:has(:focus-visible) .trilho__rotulo { transition: none; }
+}
+
+/* Barra superior branca (56px): o titulo da secao e a conta. A linha de baixo e' sombra, nao borda: numa pagina com
+   faixa de abas (Medicoes) a faixa, que vem depois, a cobre e as duas viram um bloco branco so', como no prototipo. */
+.barra {
+  height: 56px; flex: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 0 32px;
+  background: var(--superficie);
+  box-shadow: 0 1px 0 var(--linha);
+}
+.barra__titulo {
+  margin: 0; min-width: 0;
+  font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.conta { position: relative; flex: none; }
+.conta__botao {
+  height: 44px; padding: 0 8px; gap: 8px;
+  border: 0; background: none; color: var(--texto-menu);
+  font-size: 14px; font-weight: 500;
+}
+.conta__botao:hover:not(:disabled), .conta__botao[aria-expanded="true"] { background: var(--neutro-fundo); color: var(--texto); }
+/* avatar de iniciais na tinta clara do indigo */
+.conta__avatar {
+  width: 32px; height: 32px; flex: none;
+  border-radius: var(--raio-pilula);
+  background: var(--acento-fundo); color: var(--acento);
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 600;
+}
+.conta__nome { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conta__seta { transform: rotate(90deg); }
+.conta__menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 45;
+  width: 220px; padding: 6px;
+  background: var(--superficie);
+  border: 1px solid var(--linha); border-radius: var(--raio-sobreposicao);
+  box-shadow: var(--sombra-sobreposicao);
+}
+.conta__menu[hidden] { display: none; }
+.conta__perfil { margin: 0; padding: 6px 10px; font-size: 12px; line-height: 16px; color: var(--texto-2); }
+.conta__item {
+  display: flex; align-items: center; width: 100%; height: 36px; padding: 0 10px;
+  border: 0; border-radius: 6px; background: none;
+  color: var(--texto-menu); font-size: 14px; font-weight: 400; text-decoration: none; text-align: left;
+}
+.conta__item:hover:not(:disabled) { background: var(--neutro-fundo); color: var(--texto); }
+/* erro do proprio shell (falha ao encerrar a sessao): so' no desfecho raro em que o POST de logout falha */
+.conta__erro { margin: 6px 0 0; padding: 8px 10px; font-size: 12px; }
+@media (max-width: 767px) {
+  /* Rede de seguranca do celular: com o trilho de 64px sobram ~311px, e telas ainda nao redesenhadas (Carteira,
+     Documentos, a medicao) tem pecas mais largas que isso. O que passar rola DENTRO da area da tela, e a pagina
+     (trilho e barra) nunca rola de lado. So' aqui: no desktop um overflow no <main> prenderia os menus suspensos. */
+  .principal { overflow-x: auto; }
+  /* abas da obra e da Administracao: rolam na horizontal em vez de alargar a pagina */
+  .abas { overflow-x: auto; scrollbar-width: none; }
+  .abas > .aba { flex: none; white-space: nowrap; }
+  .barra { padding: 0 8px 0 16px; }
+  .barra__titulo { font-size: 18px; line-height: 24px; }
+  /* no celular fica o avatar; o nome esta' no rotulo acessivel do botao */
+  .conta__nome { display: none; }
+}
+
+/* -------------------------------------------------------------- area central */
+
+.principal { min-width: 0; display: flex; flex-direction: column; }
+
+/* Cabecalho da pagina (prototipo): sem barra fixa, no fundo da pagina — titulo 24/600 e a descricao
+   em cinza frio embaixo. */
+.topbar {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  width: 100%; max-width: var(--conteudo);
+  padding: 32px 32px 0;
+}
+/* Titulo longo (consorcio com o nome inteiro) corta com reticencias; o nome inteiro vai no `title` do h1. */
+.topbar__titulo {
+  margin: 0; font-size: 24px; line-height: 32px; letter-spacing: -.01em;
+  max-width: 100%; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* A descricao, embaixo do titulo, quebra linha em vez de cortar. */
+.topbar__meta { color: var(--texto-2); font-size: 14px; line-height: 20px; max-width: 100%; }
+.topbar > .topbar__meta { max-width: 110ch; }
+.topbar > .selo, .topbar > .btn--voltar { flex: none; }
+.topbar__acoes { margin-left: auto; display: flex; gap: 8px; }
+/* Detalhe (obra): duas linhas na faixa fixa — de onde se veio e onde se esta' (breadcrumb) em cima, o
+   titulo com orgao e status embaixo. */
+.topbar--detalhe { align-items: stretch; gap: 8px; padding-top: 24px; }
+.topbar__trilha, .topbar__linha { display: flex; align-items: center; gap: 12px; min-width: 0; }
+/* na linha do titulo da obra a meta (orgao · instrumento) fica ao lado do titulo e cede com reticencias (F-50) */
+.topbar__linha { align-items: baseline; }
+.topbar__linha > .topbar__titulo { flex: 0 1 auto; }
+.topbar__trilha > .topbar__meta, .topbar__linha > .topbar__meta { flex: 0 3 auto; min-width: 12ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar__trilha > .topbar__meta { font-size: 13px; }
+/* fora da aba Medicoes da obra, o essencial dela na linha do breadcrumb, a direita; e a base dos valores ao
+   lado do orgao. Os dois cedem com reticencias (o texto inteiro no `title`) antes de a faixa estourar a
+   largura na tela estreita: a meta comum e' `flex: none`. */
+.topbar__resumo { margin-left: auto; }
+.topbar__resumo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* B-13 (10/10/2026): na pagina da medicao, no celular, o titulo virava "Es…" espremido pela meta; abaixo de 600px
+   a meta (orgao, base dos valores) desce para baixo do titulo e o titulo quebra linha em vez de cortar */
+@media (max-width: 600px) {
+  .topbar__linha--quebra { flex-wrap: wrap; row-gap: 4px; }
+  .topbar__linha--quebra > .topbar__titulo { flex: 1 1 100%; white-space: normal; }
+  .topbar__linha--quebra > .topbar__meta { flex: 0 1 auto; white-space: normal; }
+}
+/* a base dos valores (principio 7) nunca corta: quem cede e' o orgao · instrumento ao lado (F-50) */
+.topbar__base { flex: none; }
+/* Filtros da tela de Avisos: as opcoes separadas, e a escolhida diz que e' a escolhida (negrito, sem sublinhado) */
+.filtros-avisos__linhas { display: grid; gap: 10px; }
+.filtros-avisos__linha { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin: 0; max-width: none; }
+.filtros-avisos__linha a[aria-current="true"] { color: var(--texto); font-weight: 600; text-decoration: none; }
+/* o numero de avisos da obra, depois da linha do resumo: link inteiro, nunca cortado */
+.topbar__avisos { flex: none; }
+a.topbar__avisos { color: var(--acento); text-decoration: underline; text-underline-offset: 3px; }
+a.topbar__avisos:hover { color: var(--acento-forte); }
+.topbar__linha > .selo, .topbar__trilha > .btn--voltar { flex: none; }
+
+.migalhas { min-width: 0; font-size: 13px; color: var(--texto-2); }
+/* uma linha so' (F-50): os ancestrais ficam inteiros e o ultimo item, onde se esta', corta com reticencias */
+.migalhas ol { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+/* o ancestral cede so' depois do item atual e tem teto (nome de obra longo no meio da trilha) */
+.migalhas li { flex: 0 0 auto; max-width: 28ch; min-width: 0; }
+.migalhas li > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.migalhas li[aria-current="page"] { flex: 0 1 auto; min-width: 0; max-width: 40ch; }
+.migalhas li[aria-current="page"] > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.migalhas li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.migalhas li + li::before { content: "›"; color: var(--texto-fraco); }
+.migalhas a { color: var(--texto-2); text-decoration: none; }
+.migalhas a:hover { color: var(--texto); }
+.migalhas li[aria-current="page"] { color: var(--texto); }
+
+.pagina {
+  width: 100%; max-width: var(--conteudo);
+  padding: 24px 32px 40px;
+  display: flex; flex-direction: column; gap: 24px;
+}
+/* A descricao da tela de lista, no alto do conteudo: era a linha cinza embaixo do h1, que subiu para a barra. */
+.pagina__descricao { margin: 0 0 -8px; color: var(--texto-2); font-size: 14px; line-height: 20px; max-width: 110ch; }
+
+/* ------------------------------------------------------------------- cartao */
+
+.cartao {
+  background: var(--superficie);
+  border: 1px solid var(--linha);
+  border-radius: var(--raio);
+  box-shadow: var(--sombra);
+}
+.cartao__cabeca {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--linha);
+}
+.cartao__titulo { margin: 0; font-size: 16px; line-height: 24px; }
+.cartao__dica { font-size: 13px; color: var(--texto-2); }
+.cartao__acoes { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+/* faixa avulsa dentro do cartao (mensagem de erro acima da tabela) */
+.cartao__corpo { padding: 16px 20px; }
+.cartao__rodape {
+  padding: 14px 20px;
+  border-top: 1px solid var(--linha);
+  background: var(--superficie-2);
+  border-radius: 0 0 var(--raio) var(--raio);
+}
+
+/* ------------------------------------------------------------------ botoes */
+
+.btn { text-decoration: none; white-space: nowrap; }
+.btn--primario { background: var(--acento); border-color: var(--acento); color: #fff; }
+/* Botao CHEIO repete a cor do texto no hover e no :active: a base `button:hover` pinta o texto de
+   `--texto` (escuro) e, sem isto, o rotulo ficava escuro sobre o indigo. */
+.btn--primario:hover:not(:disabled) { background: var(--acento-forte); border-color: var(--acento-forte); color: #fff; }
+.btn--primario:active:not(:disabled) { background: var(--acento-mais); border-color: var(--acento-mais); color: #fff; }
+/* Desabilitado volta ao neutro: a base `.btn:disabled` so' apagava o texto, e o
+   indigo cheio com letra cinza continuava gritando "clique" — justamente no botao que
+   o checklist de protocolo trava ate' a pendencia ser assumida. */
+.btn--primario:disabled { background: var(--superficie-2); border-color: var(--linha-forte); color: var(--texto-fraco); }
+.btn--destrutivo { background: var(--acao); border-color: var(--acao); color: #fff; }
+.btn--destrutivo:hover:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: #fff; }
+.btn--destrutivo:active:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: #fff; }
+.btn--pequeno { height: 28px; padding: 0 10px; font-size: 12.5px; }
+.btn--voltar {
+  /* botao ou link ("← Medicoes" e' um <a>, volta para a tela de onde se veio) */
+  display: inline-flex; align-items: center; gap: 4px; text-decoration: none; border-radius: var(--raio-ctrl);
+  height: 26px; padding: 0 8px 0 6px;
+  border: 0; background: none; box-shadow: none;
+  color: var(--texto-2); font-size: 12.5px;
+}
+.btn--voltar:hover:not(:disabled) { background: var(--hover); color: var(--texto); }
+
+/* ------------------------------------------------------------------ tabela */
+
+/* `position: relative` NAO e' enfeite: e' o que faz o wrapper ser o BLOCO CONTINENTE
+   dos descendentes absolutos — os `span.sr-only` dentro das celulas. Com o wrapper
+   estatico, o bloco continente deles era o documento, e a posicao estatica de um
+   sr-only la' pelo meio de uma tabela de 1463px (x ≈ 677) esticava a rolagem do
+   DOCUMENTO mesmo com a tabela recortada aqui dentro: medido em Chrome, `scrollWidth`
+   678 num viewport de 375 na tela de Certidoes. Rolagem interna so' e' interna se o
+   que esta' posicionado dentro dela tambem for. */
+.tabela-wrap { overflow-x: auto; position: relative; }
+/* Tabela de mais de uma tela (F-49): a caixa para na altura da janela (menos topbar, abas e respiro), o
+   cabecalho fica fixo no topo dela e a barra horizontal fica a' vista. A coluna ancorada do cabecalho fica
+   por cima das duas direcoes. */
+.tabela-wrap--alta { overflow: auto; max-height: calc(100vh - 200px); scroll-padding-top: 40px; }
+.tabela-wrap--alta thead th { position: sticky; top: 0; z-index: 2; }
+.tabela-wrap--alta thead th.col-fixa, .tabela-wrap--alta thead th.col-acoes--fixa { z-index: 3; }
+
+.tabela { width: 100%; font-size: 14px; }
+/* cabecalho em cinza frio 12px, sem caixa alta (identidade) */
+.tabela thead th {
+  padding: 10px 12px;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--linha);
+  color: var(--texto-2);
+  font-size: 12px; line-height: 16px; font-weight: 500;
+  text-align: left; white-space: nowrap;
+}
+/* 12px + 20px de linha = os 44px de altura de linha da identidade */
+.tabela tbody td {
+  padding: 12px 12px;
+  border-bottom: 1px solid var(--linha-suave);
+  color: var(--texto-2);
+  vertical-align: middle;
+}
+.tabela th:first-child, .tabela td:first-child { padding-left: 20px; }
+.tabela th:last-child,  .tabela td:last-child  { padding-right: 20px; }
+.tabela tbody tr:last-child td { border-bottom: 0; }
+
+/* zebra por classe, nao por :nth-child: as linhas de painel expandido entram
+   no meio do tbody e embaralhariam a contagem. */
+.tabela tbody tr.par > td { background: var(--superficie-2); }
+.tabela tbody tr.linha { transition: background .12s ease; }
+.tabela tbody tr.linha:hover > td { background: var(--hover); }
+
+/* Cabecalho de GRUPO: um `<tbody>` por entidade na matriz de certidoes, aberto por
+   uma linha `th scope="rowgroup"` (nome · papel) que atravessa a tabela. E' o que tirou
+   as colunas ENTIDADE/PAPEL repetidas de cada linha — 10 colunas viraram 8 e a matriz
+   passou a caber no cartao de 1150px com VALIDADE a vista. Mesma faixa `--superficie-2`
+   do thead, mas em `--texto` 13,5px/600 (e' dado, nao rotulo de coluna): o degrau da
+   tabela em peso de titulo, como o `.forte`. A borda de cima repoe o divisor que o
+   `tr:last-child td { border-bottom: 0 }` do grupo anterior deixa de pintar. */
+.tabela tbody tr.grupo > th {
+  padding: 10px 20px;
+  background: var(--superficie-2);
+  border-top: 1px solid var(--linha);
+  border-bottom: 1px solid var(--linha);
+  color: var(--texto);
+  font-size: 14px; font-weight: 600;
+  text-align: left; white-space: nowrap;
+}
+
+/* linha de totais: fecha a tabela com a mesma densidade, um tom acima.
+   O rotulo da linha e' um `th scope="row"` (cabecalho da linha de totais, nao
+   dado): o `th` entra aqui junto do `td` para que o default do navegador
+   (bold 700 + centralizado) nao mude a aparencia da linha. */
+.tabela tfoot td, .tabela tfoot th {
+  padding: 12px 12px;
+  border-top: 1px solid var(--linha-forte);
+  background: var(--superficie-2);
+  color: var(--texto); font-weight: 600;
+}
+/* so no th: aplicar em `td` tambem venceria `.col-num` e desalinharia os numeros. */
+.tabela tfoot th { text-align: left; }
+.tabela tfoot td:first-child, .tabela tfoot th:first-child { padding-left: 20px; }
+.tabela tfoot td:last-child, .tabela tfoot th:last-child { padding-right: 20px; }
+
+.col-num { text-align: right; white-space: nowrap; }
+/* `.tabela thead th` (text-align: left) vence `.col-num` por especificidade: sem isto o rotulo da
+   coluna de dinheiro ficava a esquerda e os valores a direita, em toda tabela. */
+.tabela thead th.col-num { text-align: right; }
+/* o valor em dinheiro na cor principal (F-61): `.tabela tbody td` (--texto-2) vencia `.dinheiro` sozinho */
+.dinheiro, .tabela tbody td.dinheiro { color: var(--texto); }
+.forte { color: var(--texto); font-weight: 600; }
+
+/* uma linha de protocolo nunca quebra no meio: "08/04/2026 · of. 1042/2026"
+   partido em duas linhas dobrava a altura da linha da tabela. */
+.protocolo { white-space: nowrap; }
+
+/* Coluna de acoes: botao de 28px + 6px de folga = os mesmos 40px das outras
+   linhas. Os botoes NAO quebram linha (uma linha de tabela vale uma linha de
+   altura); se a largura nao couber, quem rola e' o .tabela-wrap. */
+.tabela tbody td.col-acoes { text-align: right; padding-top: 6px; padding-bottom: 6px; }
+.acoes { display: flex; flex-wrap: nowrap; gap: 6px; justify-content: flex-end; }
+.acoes > * { flex: none; }
+.acoes--inicio { justify-content: flex-start; margin-top: 12px; }
+
+/* Coluna de acoes ANCORADA na borda direita do `.tabela-wrap`. A matriz de certidoes
+   tinha 10 colunas e passava de 1300px: num cartao de ~1150px a acao da linha (PDF /
+   Revogar / Não se aplica) era a primeira coisa a sair da tela, e sem nada indicando
+   rolagem ela simplesmente nao existia para quem olhava. Com 8 colunas (grupo por
+   entidade) a matriz cabe em 1440 e a ancora fica de rede de seguranca: so' entra em
+   acao quando a tabela de fato nao cabe (zoom, janela estreita, nome comprido).
+   Fundo OPACO por estado da linha (branco, zebra, hover): a celula fixa fica por cima
+   das outras, e transparente ela mostraria as colunas passando por baixo do texto. */
+.tabela th.col-acoes--fixa, .tabela td.col-acoes--fixa,
+.tabela th.col-fixa, .tabela td.col-fixa {
+  position: sticky; right: 0; z-index: 1;
+  background: var(--superficie);
+}
+/* O cabecalho ancorado segue a faixa do thead: `.tabela th.col-acoes--fixa` acima
+   vence `.tabela thead th` em especificidade e deixava "AÇÕES" branco sobre a faixa.
+   O `text-align` esta' aqui pela razao inversa: o th leva `.col-num`, mas quem vence e'
+   `.tabela thead th` (`text-align: left`), e o rotulo ficava a' esquerda enquanto as
+   celulas da coluna alinhavam a' direita. */
+.tabela thead th.col-acoes--fixa, .tabela thead th.col-fixa { background: var(--superficie); text-align: right; }
+.tabela tbody tr.par > td.col-acoes--fixa, .tabela tbody tr.par > td.col-fixa { background: var(--superficie-2); }
+.tabela tbody tr.linha:hover > td.col-acoes--fixa, .tabela tbody tr.linha:hover > td.col-fixa { background: var(--hover); }
+/* A linha so' aparece com coluna escondida (classe posta pelo React ao medir
+   `scrollWidth > clientWidth`): numa tabela que cabe inteira ela seria uma divisoria
+   inventada. E' SINAL DE BORDA, nao uma segunda sombra — o sistema tem uma so; o
+   `box-shadow` inset de 1px e' a borda pintada por outro caminho, porque `border-left`
+   numa celula `position: sticky` sob `border-collapse: collapse` nao pinta no Chrome
+   (conferido em captura: nenhuma linha aparecia). */
+.tabela-wrap--rola th.col-acoes--fixa, .tabela-wrap--rola td.col-acoes--fixa,
+.tabela-wrap--rola th.col-fixa, .tabela-wrap--rola td.col-fixa {
+  box-shadow: inset 1px 0 0 var(--linha-campo);
+}
+
+/* valor editavel na propria celula: o alvo de clique e' o numero */
+.valor-btn {
+  height: auto; padding: 2px 6px; margin: -2px -6px;
+  border: 0; box-shadow: none; background: none;
+  border-radius: var(--raio-micro);
+  color: var(--texto); font-size: 14px; font-weight: 400;
+}
+.valor-btn:hover:not(:disabled) { background: var(--acento-fundo); color: var(--acento-forte); }
+.valor-btn--vazio { color: var(--texto-2); }
+
+/* Linha inteira clicavel (carteira do painel). O cursor sozinho nao basta — o hover
+   ja vem de `.linha` — e o clique de mouse na linha nao alcanca o teclado: o NOME do
+   registro e' um botao de verdade (`.nome-btn`), que da' o mesmo destino sem custar
+   uma coluna "Abrir" so para isso. */
+.tabela tbody tr.abrivel { cursor: pointer; }
+.nome-btn {
+  height: auto; padding: 2px 6px; margin: -2px -6px;
+  border: 0; box-shadow: none; background: none;
+  border-radius: var(--raio-micro);
+  color: var(--texto); font-size: 14px; font-weight: 600;
+}
+.nome-btn:hover:not(:disabled) { background: var(--acento-fundo); color: var(--acento-forte); }
+.tabela tbody tr.abrivel:hover .nome-btn { color: var(--acento-forte); }
+
+/* Numero negativo onde negativo e' um PROBLEMA (saldo estourado): cor de acao. Nunca
+   so' a cor — quem usa isso poe o icone de alerta com `title` ao lado. */
+/* `.tabela tbody td` (cor --texto-2) vence `.negativo` sozinho por especificidade: a celula do corpo
+   entra aqui junto com a do rodape, senao o saldo negativo da Diretoria saia no cinza dos positivos. */
+.negativo, .tabela tbody td.negativo, .tabela tfoot td.negativo { color: var(--acao); }
+.negativo .icone { vertical-align: -3px; margin-right: 4px; }
+
+/* --------------------------------------------------------- estado (badge) */
+
+/* Estado nunca e' so cor: ponto + rotulo, sempre. */
+.estado { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--texto); }
+.estado__ponto { width: 6px; height: 6px; border-radius: var(--raio-pilula); flex: none; background: var(--texto-fraco); }
+.estado--prevista    .estado__ponto { background: var(--previsto); }
+.estado--espelho_gerado  .estado__ponto { background: var(--previsto); }
+.estado--espelho_enviado .estado__ponto { background: var(--texto-2); }
+.estado--protocolada .estado__ponto { background: var(--texto-2); }
+/* passo normal do fluxo: ponto neutro. O acento e' de interacao, nao de situacao. */
+.estado--nf_emitida  .estado__ponto { background: var(--texto-2); }
+.estado--nota_emitida .estado__ponto { background: var(--texto-2); }
+.estado--recebida    .estado__ponto { background: var(--ok-ponto); }
+/* situacao de uma COMPETENCIA na curva (T8): mesma gramatica ponto + rotulo */
+.estado--aberto     .estado__ponto { background: var(--previsto); }
+.estado--provisorio .estado__ponto { background: var(--atencao-ponto); }
+.estado--atestado   .estado__ponto { background: var(--ok-ponto); }
+.estado--aberto { color: var(--texto-2); }
+.estado--excecao { color: var(--texto-2); text-decoration: line-through; text-decoration-color: var(--texto-fraco); }
+.estado--excecao .estado__ponto { background: var(--texto-fraco); text-decoration: none; }
+
+.cadeado { color: var(--texto-2); display: inline-flex; margin-left: 6px; vertical-align: -2px; }
+
+/* --------------------------------------------------------- alertas do painel */
+
+/* Selo semantico: mesma gramatica do `.estado` (nunca so cor — o selo CARREGA o
+   rotulo do tipo). Tres niveis, e nada alem deles: vencido usa a cor de acao,
+   pendencia usa o chip ambar do `.aviso`, informativo fica neutro. */
+/* Pilula de situacao (identidade): fundo tingido claro + ponto colorido + texto em ardosia. A cor viva
+   do nivel mora em --selo-cor (ponto, icone e o contorno do --forte). */
+.selo {
+  --selo-cor: var(--texto-fraco);
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 1px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--raio-pilula);
+  background: var(--neutro-fundo);
+  color: var(--texto);
+  font-size: 12px; line-height: 18px; font-weight: 500;
+  /* rotulo de tipo DESCONHECIDO (o servidor pode acrescentar um) nao pode
+     estourar a coluna fixa de 152px do `.alerta` e empurrar a mensagem. O corte
+     mora aqui; as RETICENCIAS moram no `.selo__texto` (ver abaixo). */
+  white-space: nowrap; overflow: hidden; max-width: 100%;
+}
+.selo--acao    { --selo-cor: var(--acao-ponto);    background: var(--acao-fundo); }
+.selo--atencao { --selo-cor: var(--atencao-ponto); background: var(--atencao-fundo); }
+/* Quarto nivel, aberto na T8 para o semaforo de certidao: "em dia" e' uma
+   afirmacao positiva que o painel precisa fazer (o verde ja existia declarado e
+   reservado em `--ok-fundo`/`--ok-linha`). Continua chip claro, como os outros —
+   nenhuma semantica ganha fundo solido. */
+.selo--ok      { --selo-cor: var(--ok-ponto);      background: var(--ok-fundo); }
+
+/* Ponto DENTRO do chip. O semaforo de certidao junta as duas gramaticas da casa: o
+   chip carrega o rotulo ("Vence em 9 dias") e o ponto repete a semantica em forma —
+   quem nao distingue as cores le a mesma coisa, e ninguem depende so' da cor. Cor por
+   `currentColor`: o ponto acompanha o modificador do chip sem uma regra por nivel. */
+.selo__ponto { width: 6px; height: 6px; border-radius: var(--raio-pilula); flex: none; background: var(--selo-cor, currentColor); }
+
+/* Reticencias DE VERDADE. `text-overflow` so' funciona em caixa de bloco, e o `.selo`
+   e' `inline-flex`: declarado la', ele nunca desenhava o "…" — o rotulo era cortado
+   no meio da letra e o corte parecia defeito de renderizacao. O texto vem para um
+   filho de bloco proprio, com o `min-width: 0` que destrava o encolhimento do item
+   flex (o padrao `auto` o impede de ficar menor que o conteudo, e ai' nao ha o que
+   cortar). O ponto e o icone ficam de fora, inteiros. */
+.selo__texto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A caixa do rotulo varia com a origem ("pleito não enviado", "Em dia"): a maiuscula inicial e'
+   do selo, e o texto fica como o servidor manda. */
+.selo__texto::first-letter { text-transform: uppercase; }
+.selo > .icone { flex: none; color: var(--selo-cor); }
+/* Contorno cheio: nivel "Acao" dos avisos (D2). Divide o ambar com "Atencao" e se separa pela forma. */
+.selo--forte { border-color: var(--selo-cor); }
+
+/* Chip de VEREDITO na cabeca do cartao (T9: "Pronto para protocolar?"). O truncamento
+   do `.selo` existe para a coluna fixa de 152px da lista de alertas; na cabeca do
+   cartao, que e' uma linha flex sem quebra, ele virava o contrario do que o sistema
+   pede: a 375px o rotulo era comido ate' sobrar so' o ponto, e o estado passava a ser
+   COR PURA. Aqui o chip nao encolhe — quem cede espaco e' o titulo, que quebra em duas
+   linhas sem perder uma letra. */
+.cartao__cabeca .selo { flex: none; }
+
+.alertas { list-style: none; margin: 0; padding: 0; }
+.alertas li + li { border-top: 1px solid var(--linha); }
+
+/* Grade (e nao flex) para que a coluna do selo tenha largura FIXA: com selos de
+   larguras diferentes as mensagens ficariam com a margem esquerda serrilhada e a
+   lista perderia a leitura de cima para baixo. */
+.alerta {
+  display: grid; grid-template-columns: 152px minmax(0, 1fr) auto;
+  align-items: center; gap: 12px;
+  width: 100%; height: auto;
+  padding: 9px 20px;
+  border: 0; border-radius: 0; box-shadow: none; background: none;
+  font-size: 13.5px; font-weight: 400; text-align: left;
+}
+.alerta:hover:not(:disabled) { background: var(--hover); }
+.alerta:focus-visible { outline-offset: -2px; border-radius: 0; }
+.alerta__msg { min-width: 0; color: var(--texto); }
+.alerta__valor { color: var(--texto); text-align: right; white-space: nowrap; }
+/* o selo do aviso tem a largura do rotulo; a coluna de 152px alinha as mensagens, nao estica o chip */
+.alerta > .selo { justify-self: start; }
+/* Na lateral estreita (Medicoes), o selo vai em cima e a mensagem ganha a largura toda: com a coluna fixa de 152px
+   sobravam ~70px para o texto, e cinco criticos empurravam os protocolos do mes para a segunda tela. */
+.alertas--lateral .alerta { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 8px 16px; }
+
+/* ------------------------------------------------------------------- abas */
+
+.abas { display: flex; gap: 2px; border-bottom: 1px solid var(--linha); }
+/* A aba e' um link (<a href>): abre em nova aba do navegador e guarda o endereco da secao. */
+.aba {
+  display: inline-flex; align-items: center; text-decoration: none;
+  height: 36px; padding: 0 12px;
+  border: 0; border-bottom: 2px solid transparent;
+  border-radius: var(--raio-ctrl) var(--raio-ctrl) 0 0;
+  margin-bottom: -1px;
+  background: none; box-shadow: none;
+  color: var(--texto-2); font-size: 14px;
+}
+.aba:hover:not(:disabled) { background: var(--hover); color: var(--texto); }
+.aba[aria-selected="true"], .aba[aria-current="page"] { color: var(--acento); border-bottom-color: var(--acento); font-weight: 600; }
+.aba[aria-selected="true"]:hover, .aba[aria-current="page"]:hover { background: none; }
+
+/* -------------------------------------------------------------- formularios */
+
+.form-inline { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; max-width: 100%; }
+/* filtro com opcao longa (nome de obra do consorcio) nao estica o select pela linha inteira */
+.form-inline select { max-width: 32ch; }
+.campo { display: grid; gap: 4px; }
+/* `min-width: 0` DESTRAVA o encolhimento: o padrao `auto` impede o campo de ficar
+   menor que o controle dentro dele, e a `.entrada--larga` (320px) num cartao de
+   303px em 375 estourava a pagina inteira — o `max-width: 100%` da entrada nunca
+   chegava a valer porque o proprio campo ja media 320. Vale so' na linha de campos:
+   os controles de 168px continuam cada um na sua linha (o flex so' encolhe o item
+   que sozinho nao cabe). */
+.form-inline > .campo { min-width: 0; }
+.campo__rotulo { font-size: 12px; font-weight: 500; color: var(--texto-2); }
+/* Medida de corpo: 78ch e' o mesmo teto da `.saldo__nota` e do `.aviso`. Sem ele a
+   nota de 12px do formulario de certidao corria ~170ch numa tela larga. */
+.campo__nota { font-size: 12px; color: var(--texto-2); max-width: 78ch; }
+.campo__erro { margin: 0; font-size: 12px; color: var(--acao); }
+.entrada--curta { width: 84px; max-width: 100%; }
+.entrada--media { width: 168px; max-width: 100%; }
+.entrada--num { text-align: right; font-variant-numeric: tabular-nums lining-nums; }
+/* textarea: `input, select, textarea` fixa 32px de altura para os controles de uma
+   linha — area de varias linhas precisa desfazer isso. Largura curta de proposito:
+   sao duas colunas ("AAAA-MM;valor"), nao um texto corrido. */
+.entrada--area {
+  height: auto; width: 100%; max-width: 480px;
+  padding: 8px 10px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+/* formulario de bloco (uma coluna) — o .form-inline nao serve para textarea */
+.editor { display: grid; gap: 10px; justify-items: start; }
+/* `>` e nao descendente: o campo que ocupa a largura inteira e' o que e' FILHO do
+   editor (a area de texto da importacao, do cronograma). Como seletor descendente,
+   a regra alcançava tambem os campos dentro de um `.form-inline` aninhado e
+   empilhava um por linha — a linha de controles do formulario de certidao virava
+   uma coluna, desfazendo o proprio `.form-inline`. */
+.editor > .campo { width: 100%; }
+/* O `.form-inline` dentro do editor precisa da largura inteira para poder QUEBRAR:
+   com o `justify-items: start` do grid ele encolheria ate o conteudo, e a linha de
+   campos sairia do cartao em vez de passar para a linha de baixo. */
+.editor > .form-inline { width: 100%; }
+.editor__acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+
+/* resultado de uma acao em lote (quantas linhas entraram + quais nao entraram):
+   um bloco so, para que o leitor de tela anuncie os dois desfechos juntos. */
+.resultado { display: grid; gap: 8px; justify-items: start; max-width: 100%; }
+.resultado p { margin: 0; }
+
+/* Chip de atencao — tratamento UNICO da casa (fundo ambar claro + texto escuro,
+   nunca ambar solido: ambar e' so' de situacao). Serve tanto solto no rodape de um formulario quanto dentro do
+   painel de uma linha de tabela; ate a T9 havia um `.painel__aviso` quase igual
+   e as duas versoes ja divergiam em padding. */
+.aviso {
+  display: inline-flex; align-items: flex-start; gap: 6px;
+  max-width: 78ch; margin: 0; padding: 4px 9px;
+  border: 1px solid var(--atencao-linha);
+  border-radius: var(--raio-ctrl);
+  background: var(--atencao-fundo);
+  font-size: 12.5px; color: var(--atencao);
+}
+.aviso .icone { margin-top: 2px; }
+/* Atencao leva o ponto (D2), com a mesma geometria do ponto do selo; o triangulo e' do critico (CaixaAviso.tsx) */
+.aviso__ponto { width: 6px; height: 6px; margin-top: 7px; flex: none; border-radius: var(--raio-pilula); background: var(--atencao-ponto); }
+/* Aviso de fato CRITICO (saldo negativo, travado): a mesma caixa na cor do critico, para o aviso e o
+   numero que ele explica falarem a mesma cor. Ambar fica para o que pede atencao e nao trava. */
+.aviso--critico { border-color: var(--acao-linha); background: var(--acao-fundo); color: var(--acao); }
+
+/* linha expandida com o formulario da acao — substitui prompt()/confirm().
+   Prefixada com `.tabela tbody` de proposito: sem isso `.tabela tbody td` (que e'
+   mais especifica) vencia e o painel herdava o padding apertado da celula. */
+.tabela tbody tr.painel > td {
+  padding: 16px 20px;
+  background: var(--acento-fundo);
+  border-bottom: 1px solid var(--linha);
+  box-shadow: inset 0 1px 0 var(--acento-linha);
+}
+.painel__titulo { font-size: 12.5px; font-weight: 600; color: var(--texto); margin: 0 0 10px; }
+.painel__rodape { margin: 12px 0 0; }
+
+/* dois cartoes empilhados no mesmo painel de aba (espelho + medicoes) */
+/* minmax(0,1fr): sem isto a coluna cresce ate a tabela mais larga e a pagina inteira passa da tela. */
+.pilha { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+/* Botao filho direto de uma grade (.pilha, .campo) nao estica ate' a largura da
+   coluna: "Descartar" e "Anexar o assinado" viravam faixas de 1.500px com cara de campo de texto. */
+.pilha > button, .pilha > .btn, .campo > button, .campo > .btn { justify-self: start; }
+
+/* Espelho de NF (bloco 2): um cartao por espelho vigente dentro do cartao da obra; a
+   tabela de notas reaproveita `.tabela`, o e-mail e' um formulario em coluna unica. */
+.espelho__item + .espelho__item { border-top: 1px solid var(--linha); }
+.espelho__cabeca { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin-bottom: 10px; }
+.espelho__notas { margin-bottom: 10px; }
+/* F-44: o espelho tem ate' 10 colunas de dinheiro. A saida (1a coluna) nao espreme abaixo de 2 linhas,
+   as colunas de valor usam 8px de respiro e o Liquido fica ancorado a' direita (.col-fixa): quando a
+   tabela rola, o valor que fecha a linha continua a' vista. */
+.tabela.espelho__notas th:first-child, .tabela.espelho__notas td:first-child { min-width: 15rem; }
+.tabela.espelho__notas th.col-num:not(:last-child), .tabela.espelho__notas td.col-num:not(:last-child) { padding-left: 8px; padding-right: 8px; }
+.tabela.espelho__notas th.col-num:last-child, .tabela.espelho__notas td.col-num:last-child { padding-left: 8px; }
+.espelho__medicoes { margin: 10px 0; }
+.espelho__email { display: grid; gap: 10px; max-width: 78ch; }
+.espelho__email textarea, .espelho__email input { width: 100%; box-sizing: border-box; }
+.espelho__item .form-inline { margin-top: 10px; }
+/* botao de arquivo: o <label> e' o botao; o input fica fora da tela, mas focavel */
+.espelho__anexar { position: relative; overflow: hidden; cursor: pointer; }
+.espelho__arquivo { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+/* O input de arquivo e' invisivel (opacity 0 ou sr-only) e recebe o foco: o anel vai no botao-rotulo. */
+label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--foco); outline-offset: 2px; }
+
+/* o unico momento animado da tela: o painel que se abre sob a linha */
+.painel > td > * { animation: abrir-painel .14s cubic-bezier(.16, 1, .3, 1); }
+@keyframes abrir-painel {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .painel > td > * { animation: none; }
+  * { transition-duration: .01ms !important; }
+}
+
+/* ---------------------------------------------------------------- grafico */
+
+/* O SVG e' desenhado no tamanho natural (px = px): esticar por width:100% levaria o
+   texto do eixo junto e os 11px legiveis do contrato virariam 4px ou 30px conforme
+   o numero de meses. Passando da largura do cartao, rola na horizontal. */
+.grafico { padding: 16px 20px 8px; overflow-x: auto; }
+.grafico__svg { display: block; }
+
+.g-grade { stroke: var(--linha); }
+.g-base  { stroke: var(--linha-forte); }
+.g-eixo   { fill: var(--texto-2); font-size: 11px; }
+.g-eixo-x { fill: var(--texto-2); font-size: 11.5px; }
+.g-eixo--pendente, .g-eixo-x--pendente { fill: var(--atencao); font-weight: 600; }
+
+/* D14 (F-101): a barra prevista leva contorno de 1px em --linha-hover para passar de 3:1 (o #cbd5e1 sozinho da' 1,5:1) */
+.g-previsto { fill: var(--previsto); stroke: var(--linha-hover); stroke-width: 1; }
+.g-execucao { fill: var(--acento); }
+/* reajuste e projeto: mesma familia do medido, um tom acima — a distincao entre as
+   series nao pode depender de dois indigos vizinhos. */
+.g-outras   { fill: var(--acento-mais); }
+/* competencia sem lancamento: talo no zero, nunca barra de altura zero */
+.g-talo     { fill: var(--linha-forte); }
+
+/* provisorio (protocolado sem atestado): hachura CLARA por cima da barra, que fica
+   com a cor da propria serie — sobre o indigo, ambar escuro seria invisivel;
+   o ambar de sinal aparece no selo e no rotulo do eixo, sobre branco. */
+.g-hachura { stroke: var(--atencao-linha); stroke-width: 2; }
+.g-provisorio { stroke: var(--atencao-linha); stroke-width: 1.25; stroke-dasharray: 4 3; }
+.g-selo { fill: var(--atencao-fundo); stroke: var(--atencao); stroke-width: 1.25; }
+.g-selo__marca { stroke: var(--atencao); stroke-width: 1.6; stroke-linecap: round; fill: none; }
+
+.legenda {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 10px 20px 14px;
+  border-top: 1px solid var(--linha);
+  font-size: 12.5px; color: var(--texto-2);
+}
+.legenda__item { display: inline-flex; align-items: center; gap: 7px; }
+/* 4px e' o degrau Micro. Era 3px de uso unico: a 11px de lado a diferenca e'
+   imperceptivel, e um quarto raio no sistema so' existia por descuido. */
+.legenda__chave { width: 11px; height: 11px; border-radius: var(--raio-micro); flex: none; }
+.legenda__chave--previsto { background: var(--previsto); box-shadow: inset 0 0 0 1px var(--linha-hover); }
+.legenda__chave--execucao { background: var(--acento); }
+.legenda__chave--outras   { background: var(--acento-mais); }
+.legenda__chave--provisorio {
+  background:
+    repeating-linear-gradient(45deg, var(--atencao-linha) 0 2px, transparent 2px 6px),
+    var(--acento);
+  border: 1px dashed var(--atencao-linha);
+}
+
+/* ------------------------------------------------------------------ saldo */
+
+/* A formula do saldo fica VISIVEL como conta: vigente − medido = saldo, com os tres
+   numeros na tela. A frase que define a regra vem do servidor. */
+.saldo {
+  display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 14px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--linha);
+}
+.saldo__parcela { display: grid; gap: 2px; }
+.saldo__valor { font-size: 15px; font-weight: 600; color: var(--texto); }
+.saldo__parcela--total .saldo__valor { font-size: 22px; letter-spacing: -.02em; line-height: 1.2; }
+.saldo__op { color: var(--texto-2); font-size: 15px; padding-bottom: 2px; }
+.saldo--negativo .saldo__parcela--total .saldo__valor { color: var(--acao); }
+.saldo__nota { flex-basis: 100%; max-width: 78ch; margin: 2px 0 0; font-size: 12px; color: var(--texto-2); }
+
+/* ----------------------------------------------------------------- totais */
+
+/* Faixa de totais de um periodo — irma do `.saldo`, sem a leitura de CONTA (o saldo
+   mostra "vigente − medido = saldo"; aqui sao grandezas lado a lado, cada uma com
+   seu rotulo). Serve para dar numero proprio a serie que o grafico empilha. */
+.totais {
+  display: flex; flex-wrap: wrap; gap: 10px 34px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--linha);
+}
+.totais__item { display: grid; gap: 1px; }
+.totais__valor { font-size: 15px; font-weight: 600; color: var(--texto); }
+
+/* --------------------------------------------------------- erro e vazio */
+
+.erro {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 0; padding: 10px 12px;
+  border: 1px solid var(--acao-linha);
+  border-radius: var(--raio-ctrl);
+  background: var(--acao-fundo);
+  color: var(--acao);
+  font-size: 13px;
+}
+.erro .icone { margin-top: 1px; }
+/* relatorio de erro POR LINHA (importacao de CSV): o mesmo bloco de erro, com a
+   lista das linhas recusadas dentro dele. min-width:0 para o texto longo quebrar
+   em vez de esticar a caixa. */
+.erro > div { min-width: 0; }
+.erro__titulo { margin: 0; font-weight: 600; }
+.erro__linhas { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 2px; }
+
+.vazio { padding: 32px 20px; text-align: center; color: var(--texto-2); font-size: 13.5px; }
+/* Vazio que e' BOA noticia (nenhum alerta): a mesma linguagem, sem o palco de 32px —
+   o painel nao pode gastar meia tela anunciando que nao ha nada de errado. */
+.vazio--curto { padding: 14px 20px; text-align: left; }
+.vazio__titulo { color: var(--texto); font-weight: 600; margin: 0 0 4px; }
+.vazio p { margin: 0 auto; }
+.vazio--curto p { margin: 0; }
+
+/* ----------------------------------------------------------------- resumo */
+
+.resumo { display: flex; align-items: flex-start; gap: 32px; padding: 16px 20px; }
+.resumo__rotulo {
+  display: block;
+  font-size: 12px; font-weight: 500;
+  color: var(--texto-2);
+  margin-bottom: 3px;
+}
+/* resumo com mais itens do que cabem numa linha (Situacao do prazo): quebra em vez de estourar a largura */
+.resumo--quebra { flex-wrap: wrap; row-gap: 14px; }
+/* Grupo de cartoes que sao uma coisa so' (a data-base e os oficios dela; os pedidos de prazo e as cartas): o
+   filete a esquerda diz que andam juntos, sem cartao dentro de cartao. */
+.grupo-cartoes { display: flex; flex-direction: column; gap: 12px; padding-left: 14px; border-left: 3px solid var(--linha-forte); }
+/* indice das data-bases no topo do Reajuste: cada uma com a situacao, um link para o grupo dela */
+.indice-db { display: grid; gap: 6px; }
+.indice-db li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+/* pares rotulo | valor lado a lado (Contrato › Cadastro) */
+.pares { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 20px; margin: 0; }
+.pares > div { display: contents; }
+.pares dt, .pares dd { margin: 0; }
+.pares dt { padding-top: 2px; }
+@media (max-width: 640px) { .pares { grid-template-columns: minmax(0, 1fr); } }
+/* efeito do instrumento: o objeto inteiro, quebrando linha, com largura de leitura */
+.tabela td.efeito { min-width: 28ch; max-width: 60ch; overflow-wrap: anywhere; }
+/* linhas de resumo com rotulo na frente (Instrumentos de prazo, Paralisacoes e endossos) */
+.linhas { display: grid; gap: 6px; }
+.linhas > p { margin: 0; }
+.linhas .resumo__rotulo { display: inline; margin-right: 6px; }
+.resumo__objeto { max-width: 72ch; }
+.resumo__objeto p { margin: 0; }
+.resumo__valor { margin-left: auto; text-align: right; }
+/* Degrau Numero (15px/600, tabular). Era 18px de uso unico — um TERCEIRO tamanho
+   para o trabalho de "numero grande" que Display (22px) e Numero (15px) ja cobrem.
+   Display fica com o total do saldo, que mora na mesma pagina (aba Medicoes) e e' o
+   maior numero da tela; o valor vigente e' uma grandeza entre outras. */
+.resumo__valor strong { font-size: 15px; font-weight: 600; }
+
+/* Pagina com coluna lateral (medicao: o ciclo no principal, a linha do tempo ao lado). Abaixo de 1400px
+   a lateral desce para depois do principal: a 1366 as duas colunas deixavam as tabelas do espelho e das
+   notas rolando por dentro, e o ciclo e' o que se le primeiro. */
+.com-lateral { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: 20px; align-items: start; }
+/* A receber: o nome do orgao e' um `.nome-btn` que abre as obras dele; a seta gira quando abre. O cabecalho de
+   linha do corpo leva o respiro e a borda das celulas (`.tabela tbody td` so' alcanca td). */
+.nome-btn { gap: 4px; text-align: left; }
+.nome-btn .seta { flex: none; transition: transform .15s ease; }
+.nome-btn[aria-expanded="true"] .seta { transform: rotate(90deg); }
+/* F-48: no botao do orgao (A receber), a seta fica no topo e o nome corta ao lado dela. */
+.nome-btn { max-width: 100%; align-items: center; }
+.nome-btn .truncar { min-width: 0; }
+/* Cabecalho de LINHA (F-59): mesmo respiro e mesma divisoria da celula. `.tabela tbody td` so' alcanca td, e a
+   matriz de Documentos e o A receber tinham cada um um remendo (ou nenhum): o nome de uma empresa encostava no
+   da proxima sem divisoria. */
+.tabela tbody th[scope="row"] { padding: 10px 12px; border-bottom: 1px solid var(--linha);
+  text-align: left; font-weight: 400; color: var(--texto); vertical-align: middle; }
+.tabela tbody th[scope="row"]:first-child { padding-left: 20px; }
+.tabela tbody tr:last-child > th[scope="row"] { border-bottom: 0; }
+.tabela tbody tr.par > th[scope="row"] { background: var(--superficie-2); }
+/* Carteira › Resumo: os blocos pequenos (Terminam, Avisos da diretoria) lado a lado; a obra com problema numa
+   linha (farol, obra, o primeiro motivo, "mais N") */
+.cartoes-lado { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+.lista-simples.obras-problema { padding-left: 20px; list-style: none; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; }
+/* F-84: cada li e' subgrade da lista: a coluna do selo tem a largura do maior selo e o texto corre ao lado dele */
+.obras-problema li { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; }
+/* Carteira › QDOP: nove colunas; o cabecalho quebra linha para caber a 1366, e os motivos vem um por linha */
+.tabela.qdop thead th { white-space: normal; vertical-align: bottom; }
+.tabela.qdop td { vertical-align: top; }
+/* F-63 (R3): Motivos com 28ch (com 136px a Regiao Oeste ficava com 240px de altura a 1366); a tabela pode rolar na horizontal dentro da caixa, com a coluna Obra ancorada (regra no fim do arquivo) */
+.tabela.qdop .motivos { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; min-width: 28ch; }
+/* menos respiro entre as colunas para as nove caberem a 1366; as pontas mantem o recuo do cartao */
+.tabela.qdop th, .tabela.qdop td { padding-left: 8px; padding-right: 8px; }
+.tabela.qdop th:first-child, .tabela.qdop td:first-child { padding-left: 20px; }
+.tabela.qdop th:last-child, .tabela.qdop td:last-child { padding-right: 20px; }
+/* o nome longo da obra corta com reticencias (o nome inteiro fica no title) */
+.tabela.qdop .truncar--nome { max-width: 18ch; }
+/* Lista de Obras: nove colunas; o cabecalho quebra linha ("Pedido de prorrogacao") para caber a 1366 sem rolar */
+.tabela.obras-lista thead th { white-space: normal; vertical-align: bottom; }
+.tabela.obras-lista td { vertical-align: top; }
+.tabela.obras-lista th, .tabela.obras-lista td { padding-left: 8px; padding-right: 8px; }
+/* o recuo das pontas volta (a regra acima o tiraria): a tabela alinha com o titulo e os filtros do cartao */
+.tabela.obras-lista th:first-child, .tabela.obras-lista td:first-child { padding-left: 20px; }
+.tabela.obras-lista th:last-child, .tabela.obras-lista td:last-child { padding-right: 20px; }
+/* o instrumento nao parte no hifen (161/2022/00/00-SINFRA), e o oficio tambem nao */
+.tabela.obras-lista .campo__nota.num, .sem-quebra { white-space: nowrap; }
+/* "vencida ha N dias": a cor de acao ganha da cor da nota */
+.campo__nota.negativo { color: var(--acao); }
+/* Matriz de Documentos: a empresa (CNPJ, obras que a exigem, ZIP) na primeira coluna; cada celula com a situacao
+   e, embaixo, o PDF e o "Emitir". Topo alinhado: as celulas tem alturas diferentes. */
+.tabela.matriz th[scope="row"], .tabela.matriz td { vertical-align: top; }
+.tabela.matriz th[scope="row"] { min-width: 140px; max-width: 240px; font-weight: 400; white-space: normal; text-align: left; }
+/* sete colunas de dado: o cabecalho quebra linha (o emissor desce) e o respiro lateral encolhe, para caber a 1366 */
+.matriz thead th { white-space: normal; vertical-align: bottom; }
+.tabela.matriz th, .tabela.matriz td { padding-left: 8px; padding-right: 8px; }
+.tabela.matriz th:first-child, .tabela.matriz td:first-child { padding-left: 20px; }
+.tabela.matriz th:last-child, .tabela.matriz td:last-child { padding-right: 16px; }
+.matriz__empresa > * + * { margin-top: 4px; }
+.matriz__acoes { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: 13px; }
+.matriz__cnpj { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.matriz__cnpj .num { user-select: all; }
+/* o CNPJ ocupa a linha inteira em qualquer largura (N4-02); o Copiar e o ZIP ficam lado a lado embaixo dele, e a nota da copia (N04-06) tambem tem linha propria */
+.matriz__cnpj .campo__nota { flex-basis: 100%; }
+/* nome do arquivo escolhido dentro do botao: corta com reticencias em vez de alargar a linha (o inteiro no title) */
+.arquivo-nome { display: inline-block; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+/* Medicoes: a fila e a lateral (avisos e protocolos do mes) ficam lado a lado ate' 1100px, para os criticos e quem
+   falta protocolar aparecerem sem rolar tambem a 1366. */
+.com-lateral--fila { grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); }
+.familias { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+/* a cabeca da fila: o titulo e os filtros, sem cartao so' deles (os grupos sao os cartoes) */
+.fila__cabeca { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; }
+.fila__titulo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.fila__zero { margin: 0; }
+.lateral__mes { margin: 0; font-size: 13px; }
+.faltam { display: grid; gap: 12px; }
+/* O que a lateral mostra ganha, na tela estreita, uma versao curta logo depois do que falta. */
+.so-estreito { display: none; }
+@media (max-width: 1400px) {
+  .com-lateral { grid-template-columns: minmax(0, 1fr); }
+  .com-lateral.com-lateral--fila { grid-template-columns: minmax(0, 1fr) minmax(240px, 290px); }
+  /* na lateral estreita, 3 criticos (o mapa diz "ate' 5"); o resto esta' em "Ver todos os avisos" */
+  .alertas--lateral li:nth-child(n + 4) { display: none; }
+  .so-largo { display: none; }
+  .so-estreito { display: block; }
+}
+@media (max-width: 1100px) { .com-lateral.com-lateral--fila { grid-template-columns: minmax(0, 1fr); } }
+/* "Ver os N acontecimentos": o summary e' um controle, com a seta que diz se esta' aberto */
+.detalhes > summary { cursor: pointer; color: var(--acento); font-size: 13px; width: fit-content; }
+.detalhes > summary:hover { color: var(--acento-forte); text-decoration: underline; }
+.detalhes[open] > summary { margin-bottom: 10px; }
+/* Cartao que abre inteiro (Novo protocolo com varias medicoes): o `display: flex` do cabecalho tira o
+   triangulo nativo do summary; a seta volta como icone e gira quando o cartao esta' aberto. */
+details.cartao > summary.cartao__cabeca { cursor: pointer; list-style: none; }
+details.cartao > summary.cartao__cabeca::-webkit-details-marker { display: none; }
+details.cartao > summary.cartao__cabeca:hover { background: var(--hover); }
+details.cartao > summary .seta { flex: none; transition: transform .15s ease; }
+details.cartao[open] > summary .seta { transform: rotate(90deg); }
+/* opcoes de radio com legenda (etapa do protocolo): o fieldset sem a moldura do navegador */
+.opcoes { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
+.opcoes > legend { padding: 0; margin-bottom: 6px; }
+
+/* Cabecalho da medicao: estado, proximo passo e valor lado a lado; os atos que nao sao de uma etapa a
+   direita, na mesma faixa (descem para a linha de baixo quando nao cabem). */
+/* (o resumo da obra e da medicao agora e' a grade .resumo-grade, no fim deste arquivo) */
+
+
+/* rotulo que leva ao lar do numero (o saldo, ao cronograma): cor e sublinhado de link */
+a.resumo__rotulo { color: var(--acento); text-decoration: underline; }
+a.resumo__rotulo:hover { color: var(--acento-forte); }
+
+
+.linha-tempo { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: 13px; }
+.linha-tempo li { display: grid; gap: 2px; padding-left: 12px; border-left: 2px solid var(--linha); min-width: 0; overflow-wrap: anywhere; }
+.linha-tempo__data { color: var(--texto-2); font-size: 12px; }
+
+/* -------------------------------------------------------------- certidoes */
+
+/* Campo de ARQUIVO: o unico controle do sistema que traz um botao do proprio
+   navegador dentro de si. Sem estilizar `::file-selector-button`, o formulario de
+   certidao ganharia um botao cinza de outro mundo no meio de uma linha de controles
+   de 32px. A altura vira `auto` porque o botao interno e o nome do arquivo mandam;
+   os 2px de sangria vertical devolvem os mesmos ~32px do resto da linha (a conta
+   esta' logo abaixo, junto do proprio `padding`). */
+.entrada--arquivo {
+  height: auto; max-width: 100%; min-width: 0;
+  /* borda 1 + 2 + botao de 26 + 2 + borda 1 = os mesmos 32px do resto da linha
+     (o `box-sizing: border-box` global faz a borda contar na altura) */
+  padding: 2px 10px 2px 2px;
+  font-size: 13px; color: var(--texto-2);
+}
+/* Degrau Controle (13px, herdado do campo) e altura 26px — o mesmo degrau do botao
+   voltar. A escala de controles do sistema e' 32 / 28 / 26 e nao tem 24. */
+.entrada--arquivo::file-selector-button {
+  box-sizing: border-box;
+  height: 26px; padding: 0 9px; margin-right: 10px;
+  border: 1px solid var(--linha-forte);
+  border-radius: var(--raio-ctrl);
+  background: var(--superficie);
+  color: var(--texto);
+  font: inherit; font-weight: 500;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+.entrada--arquivo::file-selector-button:hover {
+  background: var(--hover); border-color: var(--linha-hover);
+}
+
+/* Campo de observacao/nome: mais larga que a media (168px) porque o conteudo e'
+   frase, nao dado. Continua um degrau de largura nomeado, como as outras. */
+.entrada--larga { width: 320px; max-width: 100%; min-width: 0; }
+
+/* Retorno da leitura do PDF. NAO e' bloco de erro (nada falhou) nem de sucesso
+   (nada foi gravado): e' uma PROPOSTA que o humano confere antes de enviar. Por isso
+   nao herda `.erro` nem `.resultado` — e cada campo reprovado vira um chip de atencao
+   proprio, que e' exatamente o que ele e': uma pendencia deixada para a pessoa. */
+.sugestao { display: grid; gap: 8px; justify-items: start; }
+.sugestao p { margin: 0; }
+.sugestao__avisos {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 6px; justify-items: start;
+}
+
+/* ------------------------------------------------------- responsividade */
+
+@media (max-width: 900px) {
+  .topbar, .pagina { padding-left: 16px; padding-right: 16px; }
+  .topbar { padding-top: 24px; }
+  .resumo { flex-direction: column; gap: 14px; }
+  .resumo__valor { margin-left: 0; text-align: left; }
+  /* selo em cima da mensagem: a coluna fixa de 152px comeria metade da largura */
+  .alerta {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start; gap: 5px;
+    padding-left: 16px; padding-right: 16px;
+  }
+  .totais { gap: 10px 24px; }
+  /* Coluna de acoes ancorada e' remedio de tela LARGA (janela em que a matriz quase
+     cabe). Em 375 ela comeria dois tercos da largura visivel: aqui a tabela inteira
+     rola por dentro do cartao, como as outras. */
+  .tabela th.col-acoes--fixa, .tabela td.col-acoes--fixa,
+  .tabela th.col-fixa, .tabela td.col-fixa {
+    position: static; box-shadow: none;
+  }
+}
+
+/* ------------------------------------------------------- fase 3,5: contadores */
+
+/* Faixa de contadores do Painel da Engenharia e do Painel geral: cada um e' um LINK
+   para onde a acao acontece (fila, secao da pagina). Mesmo cartao da casa, so' que
+   em grade; o numero e' o dado (Display), o rotulo diz o que ele conta. */
+/* D13 (F-100): KPIs em FAIXA dentro do cartao, com divisoria de 1px --linha entre eles, no lugar de um cartao com
+   sombra por numero (a sombra de nivel 1 fica so' no cartao). Uma coluna de 200 a 320px por KPI, lado a lado: a
+   faixa nao quebra em duas linhas (quatro KPIs com "R$ 12.345.678,90" em Display cabem a 1366) e, com tres, cada
+   um ganha ate' 320px em vez de esticar pela largura toda (1600px). */
+.kpis {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 320px);
+  list-style: none; margin: 0; padding: 16px 0;
+}
+.kpi {
+  display: grid; gap: 2px; align-content: start;
+  padding: 0 24px;
+  color: var(--texto);
+  text-decoration: none;
+}
+.kpi + .kpi { border-left: 1px solid var(--linha); }
+.kpi:first-child { padding-left: 20px; }
+/* Degrau Display (DESIGN.md › Typography) em TODO KPI, inclusive o de dinheiro: o valor do mes em
+   15px ao lado de uma contagem em 22px invertia a hierarquia da tela inicial. */
+.kpi__valor { font-size: 22px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; white-space: nowrap; }
+.kpi__rotulo { font-size: 12.5px; color: var(--texto-2); }
+.kpi__acao { font-size: 12px; color: var(--acento); font-weight: 600; margin-top: 4px; }
+
+/* Link de identificacao numa celula (nº do instrumento): o mesmo destino do `.nome-btn`
+   das tabelas, so' que como ancora (a URL existe desde a fase 3,5). */
+/* N05-08: sublinhado fino em --linha-forte para se ler como o mesmo link da obra em outros cartoes; vira --acento no hover */
+.nome-link { font-weight: 600; color: var(--texto); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--linha-forte); }
+.nome-link:hover { color: var(--acento-forte); text-decoration-color: var(--acento); }
+/* `.alerta` como ancora (lista de pendencias): a base de botao nao alcanca <a>. */
+a.alerta { text-decoration: none; color: var(--texto); }
+a.alerta:hover { background: var(--hover); color: var(--texto); }
+
+/* Tela de falha do ErrorBoundary: a ultima rede do app, fora do shell (o shell pode
+   ser justamente o que quebrou). Uma coluna de leitura, o botao que sempre funciona. */
+.falha { max-width: 56ch; margin: 64px auto; padding: 0 24px; display: grid; gap: 12px; justify-items: start; }
+.falha__titulo { margin: 0; font-size: 20px; letter-spacing: -.018em; }
+.falha p { margin: 0; color: var(--texto-2); }
+.falha__detalhe { font-size: 12.5px; color: var(--texto-fraco); word-break: break-word; }
+
+/* Rodape do painel de protocolo com o checklist acoplado: os blocos (veredito,
+   assumir a pendencia, justificativa, aviso do congelamento) empilham. */
+.checklist-ato { display: grid; gap: 8px; justify-items: start; }
+/* Caixa de marcar com o rotulo na mesma linha; o controle nu herda 32px de altura
+   da base `input`, o que empurrava o texto para baixo. */
+.marcar { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.marcar input { height: auto; width: 15px; accent-color: var(--acento); margin: 0; }
+
+/* Listas de conferencia (reconciliacao RM x dashboard): texto corrido, sem tabela. */
+.reconciliacao { display: grid; gap: 10px; }
+.reconciliacao .cartao__titulo { font-size: 14px; }
+.lista-simples { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+
+/* Painel Notas (bloco 3): sob a linha da medicao, mesmo ritmo dos outros paineis. */
+.notas { display: grid; gap: 10px; }
+.notas__tabela { margin: 0; }
+/* B-04 (10/10/2026): a 1024 px a tabela de notas da etapa 3 media 886 px num contêiner de 854 px e cortava a coluna
+   "Nota"; quem empurra sao as seis colunas de dinheiro (mono, sem quebra). Espaco lateral de 8 px em todas as
+   celulas, inclusive a primeira e a ultima: a tabela cai para 854 px, sem rolagem */
+.tabela.tabela--densa thead th, .tabela.tabela--densa tbody td { padding-left: 8px; padding-right: 8px; }
+.notas__conferencia { display: inline-flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.notas__ok { color: var(--ok); font-size: 12px; }
+/* divergencia e' CRITICO (D10): mesma cor do selo "Diverge do espelho" da aba Notas */
+.notas__diverge { color: var(--acao); font-size: 12px; }
+/* G3-11: na tabela das esperadas, so' a celula do campo que diverge; sublinhado alem da cor (nao so' cor) */
+.notas__celula--diverge { color: var(--acao); font-weight: 600; text-decoration: underline wavy; text-underline-offset: 3px; }
+.notas__arredonda { color: var(--texto-2); font-size: 12px; }
+.notas__feito { color: var(--texto-2); }
+
+/* Documentos de protocolo (bloco 4): fila de conferencia das certidoes arrastadas e um cartao
+   por empresa, no mesmo ritmo dos paineis de Notas. */
+/* coluna minmax(0, 1fr): a matriz, mais larga que a tela estreita, rola dentro do quadro dela (Rolagem) em vez de
+   alargar a pagina inteira */
+.documentos { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.documentos__fila { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.documentos__item { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--linha);
+  border-radius: 8px; font-size: 13px; }
+.documentos__arquivo { font-weight: 600; overflow-wrap: anywhere; }
+
+/* ---- Envio de e-mail como no Outlook (2026-09-25, pedido do Leonardo) -------------------------------------
+   Replica a janela de nova mensagem do Outlook na web: cores, bordas e fonte dele, e nao as da dashboard,
+   para quem envia reconhecer a tela. O azul e o do botao Enviar do Outlook. */
+.ol-janela { --ol-azul: #0f6cbd; --ol-azul-escuro: #115ea3; --ol-linha: #e1dfdd; --ol-texto: #242424; --ol-suave: #616161;
+  --foco: var(--ol-azul);
+  font-family: "Aptos", "Segoe UI", "Segoe UI Web (West European)", -apple-system, sans-serif; color: var(--ol-texto);
+  background: #fff; border: 1px solid var(--ol-linha); border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,.08);
+  font-size: 14px; }
+.ol-topo { display: flex; align-items: center; gap: 16px; padding: 12px 12px 8px; }
+.ol-enviar { display: inline-flex; align-items: center; gap: 6px; background: var(--ol-azul, #0f6cbd); color: #fff; border: 0;
+  border-radius: 4px; padding: 6px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+.ol-enviar:hover:not(:disabled), .ol-enviar:active:not(:disabled) { background: var(--ol-azul-escuro, #115ea3); color: #fff; }
+.ol-enviar:disabled { background: #f0f0f0; color: #bdbdbd; cursor: default; }
+.ol-botao { background: #fff; border: 1px solid #d1d1d1; border-radius: 4px; padding: 6px 16px; font: inherit; cursor: pointer; }
+.ol-de { color: var(--ol-texto); }
+.ol-icone { border: 0; background: none; color: #616161; cursor: pointer; padding: 4px; border-radius: 4px;
+  font-size: 20px; line-height: 1; display: inline-flex; }
+.ol-icone:hover { background: #f5f5f5; color: #242424; }
+.ol-descartar { margin-left: auto; }
+.ol-confirmar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 4px 12px 8px; }
+.ol-linha { display: flex; align-items: center; gap: 10px; padding: 4px 12px; }
+.ol-rotulo { min-width: 42px; background: #fff; border: 1px solid #d1d1d1; border-radius: 4px; padding: 4px 10px;
+  font: inherit; color: var(--ol-texto); cursor: pointer; }
+.ol-rotulo:hover { background: #f5f5f5; }
+.ol-campo { position: relative; flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 32px;
+  border-bottom: 1px solid var(--ol-linha); cursor: text; }
+.ol-campo:focus-within { border-bottom: 2px solid var(--ol-azul); }
+.ol-chip { display: inline-flex; align-items: center; gap: 4px; background: #f5f5f5; border: 1px solid #e0e0e0;
+  border-radius: 4px; padding: 1px 4px 1px 6px; white-space: nowrap; }
+.ol-chip__icone { color: #616161; font-size: 12px; }
+.ol-chip button { border: 0; background: none; cursor: pointer; color: #242424; font-size: 16px; line-height: 1; padding: 0 2px; }
+.ol-entrada { flex: 1; min-width: 140px; border: 0; outline: 0; font: inherit; padding: 4px 0; background: transparent; }
+.ol-cco { border: 0; background: none; color: var(--ol-texto); font: inherit; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
+.ol-cco:hover { background: #f5f5f5; }
+.ol-sugestoes { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 300px; margin: 0; padding: 4px 0;
+  list-style: none; background: #fff; border-radius: 4px; box-shadow: 0 8px 16px rgba(0,0,0,.14), 0 0 2px rgba(0,0,0,.12); }
+.ol-sugestao { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; }
+.ol-sugestao--ativa { background: #f5f5f5; outline: 2px solid #242424; outline-offset: -2px; border-radius: 4px; }
+.ol-sugestao__texto { display: grid; }
+.ol-sugestao__nome { color: #242424; }
+.ol-sugestao__email { color: #616161; font-size: 12px; }
+.ol-avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 11px;
+  font-weight: 600; color: #424242; }
+.ol-assunto { padding: 4px 12px; }
+.ol-assunto input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--ol-linha); outline: 0;
+  font: inherit; padding: 8px 0; background: transparent; }
+.ol-assunto input:focus { border-bottom: 2px solid var(--ol-azul); }
+.ol-anexos { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 8px 12px 0; list-style: none; }
+.ol-anexo { display: flex; align-items: center; gap: 8px; max-width: 360px; border: 1px solid var(--ol-linha);
+  border-radius: 4px; padding: 6px 10px; }
+.ol-anexo__tipo { flex: none; min-width: 32px; padding: 3px 4px; border-radius: 3px; font-size: 10px; font-weight: 700;
+  text-align: center; color: #fff; background: #616161; }
+.ol-anexo__tipo--docx, .ol-anexo__tipo--doc { background: #185abd; }
+.ol-anexo__tipo--pdf { background: #c43e1c; }
+.ol-anexo__tipo--xlsx, .ol-anexo__tipo--xls { background: #107c41; }
+.ol-anexo__tipo--zip { background: #8a6d00; }
+.ol-anexo__texto { display: grid; min-width: 0; }
+/* Duas linhas, e nao uma: os anexos de um espelho so' diferem no FIM do nome ("… - Execução Cuiabá",
+   "… - Reajuste Cuiabá"), e com uma linha e reticencias os tres cartoes ficavam iguais. */
+.ol-anexo__nome { overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2; line-clamp: 2; }
+.ol-anexo__tamanho { color: #616161; font-size: 12px; }
+.ol-corpo { padding: 12px 12px 16px; }
+.ol-corpo .ol-editor { width: 100%; box-sizing: border-box; border: 0; min-height: 160px; overflow-wrap: anywhere;
+  font: 11pt "Aptos", "Calibri", "Segoe UI", sans-serif; color: #000; line-height: 1.35; background: transparent; }
+.ol-corpo .ol-editor:focus-visible { outline: 2px solid #0f6cbd; outline-offset: 2px; }
+.ol-corpo .ol-editor p { margin: 0; }
+.ol-corpo .ol-editor ul, .ol-corpo .ol-editor ol { margin: 4px 0; padding-left: 28px; }
+/* barra de formatacao (issue #191): fixa acima do corpo e a mesma, flutuante, perto da selecao */
+.ol-editor-caixa { position: relative; }
+.ol-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 0 0 8px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--ol-linha); }
+.ol-barra--flutuante { position: absolute; z-index: 20; transform: translateY(calc(-100% - 6px)); margin: 0; padding: 4px;
+  max-width: 100%; box-sizing: border-box;
+  background: #fff; border: 1px solid #d1d1d1; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.14); }
+.ol-formato { min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: #242424; font: 14px "Aptos", "Segoe UI", sans-serif; cursor: pointer;
+  display: inline-grid; place-items: center; }
+.ol-formato:hover { background: #f0f0f0; }
+.ol-formato:focus-visible { outline: 2px solid #0f6cbd; outline-offset: 1px; }
+.ol-formato__cor { display: grid; line-height: 1; font-weight: 600; }
+.ol-formato__cor > span { display: block; width: 14px; height: 3px; margin-top: 1px; }
+.ol-formato__realce { background: #FFFF00; padding: 0 2px; line-height: 1.2; }
+.ol-paleta { position: relative; display: inline-block; }
+.ol-paleta__cores { position: absolute; z-index: 21; top: calc(100% + 4px); left: 0; display: flex; gap: 4px; padding: 6px;
+  background: #fff; border: 1px solid #d1d1d1; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.14); }
+.ol-cor { width: 22px; height: 22px; padding: 0; border: 1px solid #c7c7c7; border-radius: 3px; background: #fff;
+  cursor: pointer; font-size: 11px; color: #616161; }
+.ol-cor:focus-visible { outline: 2px solid #0f6cbd; outline-offset: 1px; }
+.ol-assinatura img { display: block; max-width: 600px; width: 100%; height: auto; margin-top: 8px; }
+.ol-sem-assinatura { color: #616161; font-size: 12px; border: 1px dashed var(--ol-linha); border-radius: 4px;
+  padding: 8px 10px; max-width: 60ch; }
+.ol-modal-fundo { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.4); display: grid; place-items: center; }
+.ol-modal { width: min(1100px, 94vw); height: min(640px, 88vh); display: grid; grid-template-rows: auto 1fr auto;
+  background: #fff; border-radius: 8px; box-shadow: 0 25px 60px rgba(0,0,0,.3); font-family: "Aptos", "Segoe UI", sans-serif;
+  color: #242424; font-size: 14px; overflow: hidden; }
+.ol-modal__cabeca { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
+  background: #f0f0f0; font-size: 15px; }
+.ol-modal__corpo { display: grid; grid-template-rows: auto 1fr auto; gap: 8px; padding: 12px 16px; min-height: 0; }
+.ol-busca { border: 1px solid #d1d1d1; border-radius: 4px; padding: 6px 10px; font: inherit; }
+.ol-busca:focus { outline: 2px solid #0f6cbd; outline-offset: -1px; }
+.ol-tabela-wrap { overflow: auto; min-height: 0; overscroll-behavior: contain; }
+.ol-tabela { width: 100%; border-collapse: collapse; }
+.ol-tabela th { position: sticky; top: 0; background: #fff; text-align: left; font-weight: 400; color: #424242;
+  padding: 6px 8px; border-bottom: 1px solid #e1dfdd; }
+.ol-tabela td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; }
+.ol-tabela tbody tr { cursor: pointer; }
+.ol-tabela tbody tr:hover { background: #f5f5f5; }
+.ol-pessoa { display: flex; align-items: center; gap: 10px; }
+.ol-pessoa > span:last-child { display: grid; }
+.ol-vazio { text-align: center; color: #616161; padding: 32px; }
+.ol-escolhidos { border-top: 1px solid #e1dfdd; padding-top: 8px; display: grid; gap: 6px; }
+.ol-escolhidos > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.ol-escolhidos__rotulo { color: #424242; }
+.ol-modal__rodape { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; }
+@media (max-width: 640px) {
+  .ol-sugestoes { width: 100%; }
+  .ol-topo { flex-wrap: wrap; }
+}
+.ol-pendencias { padding: 12px; border-bottom: 1px solid #e1dfdd; background: #fffbf0; border-radius: 8px 8px 0 0; }
+.assinatura-previa { display: block; max-width: 600px; width: 100%; height: auto; border: 1px solid var(--linha, #e1dfdd); border-radius: 4px; }
+.ol-corpo .ol-editor { height: auto; padding: 0; border-radius: 0; max-width: none; }
+.ol-janela input, .ol-janela textarea { box-shadow: none; }
+.ol-entrada { height: auto; padding: 4px 0; border-radius: 0; }
+.ol-assunto input { height: auto; border-radius: 0; padding: 8px 0; }
+.assinatura-alvo { border: 1px dashed var(--linha-forte); border-radius: 6px; padding: 14px; text-align: center; color: var(--texto-2, #5b6472); cursor: pointer; }
+.assinatura-alvo:focus { outline: 2px solid var(--acento); outline-offset: 2px; }
+/* Ajuste fino das linhas Para/Cc/Cco contra o print do Outlook (2026-09-25): botao branco com borda e texto
+   semibold alinhado a primeira linha, etiqueta branca com borda fina, linha do campo cinza escura. */
+.ol-janela .ol-linha { align-items: flex-start; padding: 6px 12px; }
+.ol-janela .ol-rotulo { background: #fff; border: 1px solid #d1d1d1; border-radius: 4px; min-width: 52px; height: 32px;
+  padding: 0 12px; font-weight: 600; color: #242424; box-shadow: none; }
+.ol-janela .ol-rotulo:hover { background: #f5f5f5; border-color: #c7c7c7; }
+.ol-janela .ol-campo { gap: 6px; min-height: 32px; padding: 2px 0 6px; border-bottom: 1px solid #949494; }
+.ol-janela .ol-campo:focus-within { border-bottom: 2px solid #0f6cbd; padding-bottom: 5px; }
+.ol-janela .ol-chip { background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; height: 26px; box-sizing: border-box;
+  padding: 0 4px 0 6px; gap: 4px; color: #242424; font-size: 14px; }
+.ol-janela .ol-chip:hover { background: #f5f5f5; }
+.ol-janela .ol-chip__icone { color: #616161; flex: none; }
+.ol-janela .ol-chip__nome { line-height: 24px; }
+.ol-janela .ol-chip button { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  margin-left: 6px; border: 0; border-radius: 3px; background: none; color: #424242; padding: 0; }
+.ol-janela .ol-chip button:hover { background: #e0e0e0; }
+.ol-janela .ol-entrada { height: 26px; min-width: 120px; }
+.ol-janela .ol-campo__direita { margin-left: auto; align-self: center; }
+.ol-janela .ol-cco { height: 26px; padding: 0 6px; color: #242424; }
+
+/* --------------------------------------------------------- login (F-43) */
+/* Mesmo sistema das telas de dentro: cartao de superficie, campo com rotulo visivel e primario que
+   nao estica. A logo repete a da sidebar. */
+.login { min-height: 100vh; display: grid; place-items: start center; padding: 12vh 16px 24px; background: var(--bg); }
+.login__cartao { width: min(360px, 100%); padding: 24px; display: grid; gap: 16px; }
+.login__cartao > .btn { justify-self: start; }
+.login__titulo { margin: 0; font-size: 20px; line-height: 1.3; }
+
+/* --------------------------------------------------------- pendencias (F-46) */
+/* Lista de pendencias com o nivel no selo: o selo numa coluna, o texto ao lado, alinhados pela linha
+   de base; sem marcador de lista (o selo ja' e' o marcador). */
+.pendencias { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 10px; align-items: baseline; }
+/* subgrid: o li continua caixa (e item de lista para o leitor de tela), alinhado pela grade da lista */
+.pendencias > li { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: baseline; }
+/* o selo fica do tamanho do texto (DESIGN.md › Selo); a coluna e' que acompanha o maior */
+.pendencias > li > .selo { justify-self: start; }
+/* Selo que e' link (a marca "nota diverge" leva as notas): sem sublinhado, o selo e' o alvo; o foco
+   contorna o selo, e o hover escurece o texto dele. */
+.link-selo { text-decoration: none; border-radius: var(--raio-pilula); }
+.link-selo:hover .selo__texto { text-decoration: underline; }
+
+/* --------------------------------------------------------- grade de tabelas irmas (F-47) */
+/* Tabelas empilhadas (grupos da fila, cartoes de avisos, Em andamento x Anteriores) dividem a mesma
+   grade: layout fixo e colunas com largura em px pelo `colgroup`; a coluna sem classe fica com a sobra
+   (nome da obra, texto do aviso, proximo passo). As larguras cabem o conteudo mais longo de cada coluna
+   (a 23a medicao de reajuste, o selo "Nota diverge", um valor na casa dos milhoes) sem quebrar no meio. */
+.tabela--grade { table-layout: fixed; }
+.tabela--grade .selo, .tabela--grade .estado { white-space: nowrap; }
+.tabela--grade col.c-medicao { width: 184px; }
+.tabela--grade col.c-medicao-obra { width: 200px; }
+/* 112px: o cabecalho COMPETENCIA em caixa alta nao cabe em menos (N3-07) */
+.tabela--grade col.c-comp { width: 112px; }
+.tabela--grade col.c-estado { width: 160px; }
+.tabela--grade col.c-valor { width: 152px; }
+.tabela--grade col.c-ha { width: 96px; }
+.tabela--grade col.c-marcas { width: 148px; }
+.tabela--grade col.c-nivel { width: 112px; }
+.tabela--grade col.c-quando { width: 150px; }
+.tabela--grade col.c-valor-aviso { width: 136px; }
+.tabela--grade col.c-onde { width: 200px; }
+.tabela--grade col.c-situacao { width: 220px; }
+.tabela--grade col.c-data { width: 132px; }
+.tabela--grade col.c-acao { width: 120px; }
+/* tabela dentro de um details que e' o corpo do cartao: sem o recuo do corpo, na grade dos outros cartoes */
+.detalhes--tabela > .tabela-wrap { margin-left: -20px; margin-right: -20px; }
+/* No notebook a fila divide a largura com a lateral: as colunas de dado apertam para a Obra nao cair abaixo
+   de ~160px (round-02: a Obra ficava com ~110px e cortava ate' "Coxipó 3ª Etapa"). */
+@media (max-width: 1400px) {
+  .tabela--grade col.c-medicao { width: 128px; }
+  .tabela--grade col.c-ha { width: 92px; }
+  .tabela--grade col.c-marcas { width: 144px; }
+  /* N4-04: a Obra da fila nao perde largura a 1366; 148px para um valor na casa do bilhao caber (N04-03) */
+  .tabela--grade col.c-valor { width: 148px; }
+}
+/* A receber (N3-04): o orgao e' quem identifica a linha; fica com ao menos 16rem e quebra em ate' 2 linhas */
+.tabela th.col-orgao { min-width: 12rem; }
+/* Avisos por obra (F-55): a contagem ao lado do nome, no peso normal e na cor de apoio */
+.tabela tbody tr.grupo > th .grupo__conta { margin-left: 12px; font-weight: 400; font-size: 12.5px; color: var(--texto-2); }
+
+/* A receber (F-60): o total e' o numero principal da tela, em Display 22/600 na cabeca do cartao "Por orgao", com o
+   rotulo embaixo e uma linha de apoio (quanto passa de 60 dias, quantas medicoes e notas). */
+.total-receber__valor { font-size: 22px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; color: var(--texto); white-space: nowrap; }
+.total-receber__rotulo, .total-receber__apoio { font-size: 12.5px; color: var(--texto-2); }
+.total-receber__apoio { margin-top: 2px; }
+.total-receber__nota { margin: 10px 0 0; }
+
+/* A receber (F-62): as obras do orgao aberto sao linhas-filha da tabela, nas mesmas colunas. O recuo de +20px
+   (40px no total) mostra de quem sao, e o fundo do tom acima as agrupa sob a linha do orgao. `col-obra` na regra
+   vence o padding-left: 20px do primeiro th do corpo por especificidade. */
+.tabela tbody th[scope="row"].col-obra:first-child { padding-left: 40px; }
+.tabela tbody tr.obra-filha > th[scope="row"], .tabela tbody tr.obra-filha > td { background: var(--superficie-2); }
+
+/* ----------------------------------------------------------------- resumo em grade (F-53, D11)
+   Resumo da obra e da medicao: 4 colunas iguais, um par empilhado por coluna, para as colunas nao mudarem de
+   lugar entre obras (flex-wrap as embaralhava e separava os pares). Rotulo em cima (resumo__rotulo), valor embaixo.
+   Degraus: o valor principal da tela em Display 22/600; os demais valores e as datas em Valor 15/600. */
+.resumo-grade { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 24px; align-items: start; }
+.resumo-grade__par { display: grid; gap: 14px; align-content: start; min-width: 0; }
+.dado { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.dado .resumo__rotulo { margin-bottom: 1px; }
+.dado__valor { font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--texto); overflow-wrap: anywhere; }
+/* .negativo sozinho empata em especificidade com .dado__valor: este repoe o vermelho do saldo negativo */
+.dado__valor.negativo { color: var(--acao); }
+.dado__valor--principal { font-size: 22px; letter-spacing: -.02em; line-height: 1.2; }
+.dado .campo__nota { margin-top: 2px; }
+/* o botao de editar o valor fica logo abaixo dele, com um respiro */
+.dado .btn { margin-top: 6px; }
+/* os atos da medicao (marcar final, cancelar, desistir) numa faixa propria abaixo da grade */
+.resumo-medicao__atos { margin-top: 14px; }
+/* tela estreita: a grade cai para 2 colunas (so' o par de cada coluna anda junto) e depois para 1 */
+@media (max-width: 1100px) { .resumo-grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .resumo-grade { grid-template-columns: minmax(0, 1fr); } }
+
+/* F-94: o link do Proximo passo (.link.forte) saia preto porque .forte (--texto) vence o "a" (--acento);
+   duas classes vencem: fica na cor do acento com peso 600 */
+.link.forte, a.link.forte { color: var(--acento); font-weight: 600; }
+.link.forte:hover, a.link.forte:hover { color: var(--acento-forte); }
+
+/* Avisos (N4-05): o fato do aviso na cor principal, para ficar acima do apoio (destino e quando); a obra segue em .forte */
+.tabela tbody td.aviso__fato { color: var(--texto); }
+/* resumo recolhido da Atencao: so' "Atencao (N)" fica no acento de link; o mais atrasado e' apoio (N4-05) */
+.detalhes__resto { color: var(--texto-2); }
+
+/* Fila de Medicoes (F-57): o filtro Proximo passo e' uma linha de links com contagem, sob o rotulo; pede largura
+   para os 5 links ficarem na mesma linha e so' quebra quando nao cabem */
+.form-inline > .campo--passos { flex: 1 1 28rem; }
+
+/* Protocolos do mes (F-56b): rotulo em 600 sem caixa alta; obra em 600 e, sob ela, uma linha por medicao aberta
+   (titulo a esquerda, "ha N dias" a direita); sem marcador de lista, recuo de 20px como o corpo do cartao */
+.faltam__rotulo { margin: 0; font-weight: 600; }
+.faltam__rotulo.cartao__corpo { padding-bottom: 6px; }
+.lista-simples.faltam { list-style: none; padding: 0 20px 14px; }
+.faltam__obra > a { font-weight: 600; }
+.faltam__medicoes { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
+.faltam__medicoes li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.faltam__ha { flex: none; white-space: nowrap; font-size: 13px; color: var(--texto-2); }
+.faltam__nota { display: block; margin-top: 2px; }
+
+/* Resumo da medicao (N04-01): o 4o par (valor + atestado) ocupa 2 linhas da coluna 4 e os atos ficam na linha 2,
+   sob as colunas 1 a 3, sem o vazio que a faixa solta deixava. So' vale com o modificador --medicao (a obra nao muda). */
+.resumo-grade--medicao .resumo-grade__par--valor { grid-column: 4; grid-row: 1 / span 2; }
+.resumo-grade--medicao .resumo-medicao__atos { grid-column: 1 / 4; grid-row: 2; align-self: end; margin-top: 0; }
+/* rotulo a esquerda e botao pequeno a direita na mesma linha, alinhados pela base do texto; quebra se faltar largura */
+.dado__cabeca { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; align-self: stretch; min-width: 0; }
+.dado__cabeca .resumo__rotulo { margin-bottom: 0; }
+/* o botao pequeno nao empurra o rotulo e o valor para baixo (N05-03): a linha fica na altura do rotulo */
+.dado__cabeca .btn { margin-top: -6px; margin-bottom: -6px; }
+/* tela estreita: o par do valor volta ao fluxo normal e os atos ocupam a linha inteira */
+@media (max-width: 1100px) {
+  .resumo-grade--medicao .resumo-grade__par--valor { grid-column: auto; grid-row: auto; }
+  .resumo-grade--medicao .resumo-medicao__atos { grid-column: 1 / -1; grid-row: auto; align-self: start; }
+}
+
+/* Matriz de Documentos (N04-02): o anel de foco da ancora da empresa (th#emp-N, foco programatico ao chegar por link)
+   vai para dentro da celula; com o recuo de 2px de fora a regiao de rolagem cortava tres lados dele */
+.matriz__empresa:focus-visible, .matriz__empresa:focus { outline-offset: -2px; }
+/* Copiar e ZIP da empresa (N4-02): 8px de respiro lateral nos dois, para caberem lado a lado nos ~123px da coluna */
+.matriz__cnpj .btn--pequeno { padding-left: 8px; padding-right: 8px; }
+
+/* A receber (N04-10): antes da conciliacao o Display mostra "—" e esta frase, em corpo, diz o motivo */
+.total-receber__conciliar { font-size: 14px; line-height: 1.4; color: var(--texto-2); margin-top: 4px; }
+
+/* F-36a: trecho de code que quebra de linha mantem a borda e o raio nas duas pontas */
+code { -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+
+/* Documentos (F-102, F-88, F-77): "em dia" sem fundo, data do ZIP na cabeca do cartao, nota da matriz sem quebra */
+.estado--ok .estado__ponto { background: var(--ok-ponto); }
+/* cabeca do cartao que ganha a data do ZIP: quebra linha em vez de espremer o titulo e a dica */
+.cartao__cabeca--quebra { flex-wrap: wrap; }
+/* rotulo e campo lado a lado (a data do ZIP na cabeca) */
+.campo--linha { display: flex; align-items: center; gap: 8px; }
+.campo--linha .campo__rotulo { white-space: nowrap; }
+/* a 1366 "ate / data" e "em / data" quebravam no meio: a data da celula e a nota da regularidade ficam inteiras */
+.tabela.matriz .campo__nota.num { white-space: nowrap; }
+
+/* Contagens da Saude (F-65): numeros compactos no degrau Valor 15/600 com o rotulo embaixo, lado a lado; a da reconciliacao e' link para o grupo */
+.contagens { display: flex; flex-wrap: wrap; gap: 12px 32px; list-style: none; margin: 0; padding: 0; }
+.contagens.cartao__corpo { padding: 14px 20px; }
+a.contagem { text-decoration: none; }
+a.contagem .dado__valor { color: var(--acento); }
+a.contagem:hover .dado__valor { color: var(--acento-forte); text-decoration: underline; }
+
+/* Sucesso generico (F-90): confirmacao de acao e "confere"; mesmo visual de notas__ok, sem o nome de Notas */
+.feito { color: var(--ok); font-size: 12px; }
+/* Lista de arquivos com icone de download: sem marcador para nao somar bullet e icone (G2-19) */
+.lista-simples--arquivos { list-style: none; padding-left: 0; }
+/* Icone do "diverge do espelho" (Critico): forma alem da cor, alinhado ao texto de 12px */
+.notas__diverge .icone { vertical-align: -3px; margin-right: 4px; }
+
+/* Obras (F-58, D16): o prazo na cor do nivel do aviso da obra; sem aviso, fica o cinza da nota. Vermelho so' no critico. */
+.campo__nota.prazo--critico { color: var(--acao); }
+.campo__nota.prazo--atencao { color: var(--atencao); }
+/* obra paralisada (D16): a nota quebra depois de "desde" e a data vai inteira embaixo, para nao alargar a coluna */
+.campo__nota.prazo--paralisada { white-space: normal; max-width: 18ch; }
+
+/* Carteira: linha de comparacao dentro do KPI (D8, F-64) e tabela de poucas colunas com largura pelo conteudo (F-83) */
+.kpi__comparacao { font-size: 12.5px; color: var(--texto-2); }
+.kpi__rotulo + .kpi__comparacao { margin-top: 4px; }
+.tabela--estreita { max-width: 760px; }
+/* F-83: o SVG do grafico e' medido por este bloco (a largura do cartao, sem o respiro) */
+.grafico__medida { width: 100%; }
+/* D13: a faixa de KPIs leva uma divisoria em cima do que vem depois dela dentro do mesmo cartao */
+.kpis + .cartao__corpo, .kpis + .tabela-wrap { border-top: 1px solid var(--linha); }
+/* F-84: o texto da obra com problema (nome, motivo, "mais N") corre na coluna ao lado do selo */
+.obras-problema__texto { min-width: 0; }
+.obras-problema__texto > * + * { margin-left: 8px; }
+
+/* F-73: esmaecimento de 24px na borda esquerda do grafico do contrato, SO' quando ele esta rolado (Cronograma.tsx poe data-esq).
+   E' sinal funcional de 'ha mais meses a esquerda', nao decoracao: a mascara so' age sobre o conteudo, nao troca cor. */
+.grafico[data-esq] {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 24px);
+  mask-image: linear-gradient(to right, transparent 0, black 24px);
+}
+/* a mascara cortaria o anel de foco desenhado por fora da caixa: com ela ligada o anel fica por dentro */
+.grafico[data-esq]:focus-visible { outline-offset: -2px; }
+
+/* Checklist de pecas e anexos (F-67): peca, situacao em Selo e acao a direita; o nome do arquivo fica sob a peca. */
+.checklist-pecas { width: 100%; border: 1px solid var(--linha); }
+.checklist-pecas thead th {
+  padding: 8px 12px;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--linha);
+  color: var(--texto-2);
+  font-size: 12px; font-weight: 500;
+  text-align: left; white-space: nowrap;
+}
+.checklist-pecas tbody th, .checklist-pecas tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--linha);
+  vertical-align: middle; text-align: left; font-weight: 400;
+}
+.checklist-pecas tbody tr:last-child > * { border-bottom: 0; }
+.checklist-pecas thead th:nth-child(2), .checklist-pecas tbody td:nth-child(2) { width: 112px; }
+.checklist-pecas thead th.checklist-pecas__acao, .checklist-pecas tbody td.checklist-pecas__acao { width: 176px; text-align: right; }
+.checklist-pecas__nome { display: block; font-size: 13px; font-weight: 600; color: var(--texto); }
+.checklist-pecas__nota, .checklist-pecas__arquivo { display: block; font-size: 12px; color: var(--texto-2); }
+.checklist-pecas__arquivo { overflow-wrap: anywhere; }
+.checklist-pecas__botoes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+
+/* Texto da carta recolhivel (F-67): o resumo e' o rotulo do campo; a seta gira quando abre. */
+.carta-rec > summary { display: flex; align-items: center; gap: 8px; width: fit-content; cursor: pointer; list-style: none; }
+.carta-rec > summary::-webkit-details-marker { display: none; }
+.carta-rec > summary .campo__rotulo { cursor: pointer; }
+.carta-rec > summary:hover .campo__rotulo { color: var(--texto); }
+.carta-rec > summary .seta { flex: none; transition: transform .15s ease; }
+.carta-rec[open] > summary { margin-bottom: 8px; }
+.carta-rec[open] > summary .seta { transform: rotate(90deg); }
+.carta-rec__dica { font-size: 12px; color: var(--texto-2); }
+
+/* Botao com a razao ao lado (F-68: Previa do e-mail desabilitada ate marcar um protocolo). */
+.acao-nota { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+
+/* Campo curto (n. do oficio, dias): 16 caracteres, nao a largura toda (F-89). */
+.entrada--16ch { width: 16ch; max-width: 100%; }
+
+/* Formulario em linha sob uma acao fora de tabela (F-92: descartar, medicao final): o mesmo painel do FormEstado. */
+.painel-inline { display: grid; gap: 12px; padding: 12px 16px; border: 1px solid var(--linha); border-radius: var(--raio); background: var(--superficie-2); }
+.painel-inline .painel__titulo, .painel-inline .painel__rodape { margin: 0; }
+
+/* ------------------------------------------------------------ oficios como secoes do cartao (F-71, F-74)
+   Pedido e pleito deixam de ser cartao irmao com filete de 3px: sao secoes dentro do cartao da data-base
+   (Reajuste) ou de "Pedidos e cartas" (Prazos). O oficio enviado e' uma linha (.pleito-linha) com o desfecho
+   no selo e a data do envio como apoio. O que ainda se trabalha segue no CartaoPleito, sem contorno proprio:
+   so' o filete de 1px entre as secoes. */
+.secoes-pleito > .cartao { border-width: 1px 0 0; border-radius: 0; box-shadow: none; background: transparent; }
+.secoes-pleito > .cartao__corpo, .secoes-pleito > .detalhes { border-top: 1px solid var(--linha); }
+/* logo abaixo da cabeca do cartao pai a divisoria ja existe: a primeira secao nao dobra o traco */
+.cartao__cabeca + .secoes-pleito > :first-child { border-top: 0; }
+.pleito-linha { display: grid; gap: 4px; padding: 12px 20px; border-top: 1px solid var(--linha); }
+.pleito-linha__cabeca { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.pleito-linha__cabeca .selo { flex: none; }
+.pleito-linha > p { margin: 0; }
+/* "Ciclos anteriores": o summary acompanha o respiro lateral das secoes e a lista abre colada nele */
+.pleito-anteriores > summary { padding: 12px 20px; }
+.pleito-anteriores[open] > summary { margin-bottom: 0; }
+/* selo logo abaixo do valor ou da nota na grade do resumo (Situacao do prazo) */
+.resumo-grade .dado > .selo { margin-top: 4px; }
+
+/* F-72: o valor do instrumento pesa como o estado dele. Cancelado: riscado, com o traco em --texto-fraco
+   (unico uso permitido dessa cor no texto) e o texto legivel em --texto-2. Em andamento: --texto-2.
+   Assinado segue em --texto (.dinheiro). Vence o `.tabela tbody td.dinheiro` por ter uma classe a mais. */
+.valor--cancelado { text-decoration: line-through; text-decoration-color: var(--texto-fraco); }
+.tabela tbody td.dinheiro.valor--andamento, .tabela tbody td.dinheiro.valor--cancelado { color: var(--texto-2); }
+
+/* 3o loop: as celulas do meio de Obras e do A receber com 8px de respiro lateral ate' 1400px. O selo "N criticos"
+   (F-58) e a nota "acima do prazo" (F-97) nao quebram, e com 12px as duas tabelas passavam a rolar 21px e 6px a 1366. */
+@media (max-width: 1400px) {
+  .tabela.obras-lista th:not(:first-child):not(:last-child), .tabela.obras-lista td:not(:first-child):not(:last-child),
+  .tabela.a-receber th:not(:first-child):not(:last-child), .tabela.a-receber td:not(:first-child):not(:last-child) {
+    padding-left: 8px; padding-right: 8px;
+  }
+}
+/* F-58: a data do fim nao quebra (td.num), mas a nota embaixo ("vence em 187 dias", "Paralisada desde …") pode
+   quebrar: presa a' data, ela fazia a lista de Obras rolar 21px a 1366. */
+.tabela.obras-lista td.num .campo__nota { white-space: normal; }
+/* N07-02: a nota do prazo ("vence em 9 dias") volta a nao quebrar; so' "o orgao prorroga junto" e "Paralisada desde" quebram */
+.tabela.obras-lista td.num .campo__nota.prazo--data { white-space: nowrap; }
+
+/* Resumo da obra (N04-12): a curva falhou; a palavra "indisponivel" no lugar do valor, sem o peso nem o tamanho do Display */
+.dado__valor.dado__valor--indisponivel { font-size: 15px; font-weight: 400; letter-spacing: 0; color: var(--texto-2); }
+
+/* F-81: "‹ Medicoes" (de onde se veio) e o breadcrumb (onde se esta') nao se leem mais como uma trilha so': o voltar vira botao pequeno com contorno */
+.topbar__trilha > .btn--voltar {
+  border: 1px solid var(--linha-forte); background: var(--superficie);
+  padding: 0 8px 0 5px;
+}
+.topbar__trilha > .btn--voltar:hover:not(:disabled) { border-color: var(--texto-2); }
+
+/* Fila de Medicoes (N04-07/F-78): o rotulo do Obra e o do Proximo passo no mesmo y (a linha nao alinha mais pela base);
+   o grupo de links tem a altura do select (32px), com os links centralizados, e sem o teto de 78ch */
+.fila__cabeca .form-inline { align-items: flex-start; }
+.fila__cabeca .filtros-avisos__linha { min-height: 32px; align-items: center; max-width: none; }
+
+/* F-87: o estado na coluna Marcas da fila nao encosta no selo "nota diverge" (a margem final some se o selo quebra de linha) */
+.tabela--grade td .estado { margin-right: 8px; }
+
+/* F-93: o icone de seta do "onde se resolve" na lateral, no lugar do glifo */
+.alertas--lateral .campo__nota .icone { vertical-align: -3px; margin-right: 4px; }
+
+/* Avisos: a largura do "Onde se resolve" cresce em tela larga (N05-04). Com ~350px livres na coluna Aviso a 1920 o destino
+   quebrava em 2 ou 3 linhas; a 1366 continua 200px (N3-03). Esta regra vem depois da base de 200px, no fim do arquivo. */
+@media (min-width: 1600px) {
+  .tabela--grade col.c-onde { width: 300px; }
+}
+
+/* F-79: o selo do nivel dentro do resumo da Atencao ("o mais urgente: [Atencao] texto") fica na linha do texto */
+.detalhes__resto .selo { margin: 0 4px; vertical-align: middle; }
+
+/* F-96: a linha do cartao "Avisos desta obra" e' um link inteiro; o destino em texto de apoio e o chevron no fim dizem isso.
+   O chevron e' absoluto para nao virar coluna da grade do .alerta (que muda no celular); o respiro da direita e' dele. */
+.alerta--seta { position: relative; padding-right: 48px; }
+.alerta__onde { display: block; margin-top: 4px; font-size: 12.5px; color: var(--texto-2); }
+.alerta__seta { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); flex: none; color: var(--texto-2); }
+a.alerta:hover .alerta__seta { color: var(--texto); }
+
+/* F-63 (R3): a coluna Obra do QDOP fica ancorada a' esquerda quando a tabela rola na horizontal (a 1366, com Motivos a 28ch).
+   Fundo OPACO (as linhas do QDOP nao tem zebra nem hover); o canto do cabecalho fica acima do thead sticky (z 2) e das celulas (z 1). */
+.tabela.qdop th:first-child, .tabela.qdop td:first-child { position: sticky; left: 0; z-index: 1; background: var(--superficie); }
+.tabela.qdop thead th:first-child { z-index: 3; background: var(--superficie); }
+.tabela-wrap--rola .tabela.qdop th:first-child, .tabela-wrap--rola .tabela.qdop td:first-child { box-shadow: inset -1px 0 0 var(--linha-campo); }
+
+/* N07-03: eixo Y fixo do grafico do contrato, fora da caixa que rola (Cronograma.tsx). O quadro alinha o eixo
+   (SVG estreito, mesmas coordenadas y) ao lado da caixa .grafico; o respiro esquerdo do cartao (20px) passa para o quadro
+   e o topo do eixo repete os 16px de padding da caixa, para que o zero das duas coincida. Escopo em .grafico__quadro:
+   o .grafico da Diretoria nao muda. */
+.grafico__quadro { display: flex; align-items: flex-start; padding-left: 20px; }
+.grafico__eixo-y { display: block; flex: none; margin-top: 16px; }
+.grafico__quadro > .grafico { flex: 1 1 auto; min-width: 0; padding-left: 0; }
+
+/* N07-02 / F-58: o nivel do prazo em Obras vai em forma alem da cor. Triangulo (Critico) e ponto (Atencao) antes da
+   nota "vence em N dias"; o ponto e' o mesmo do selo (7px, currentColor), alinhado ao texto de 12px. */
+.prazo__ponto { display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 1px; border-radius: var(--raio-pilula); background: currentColor; }
+.prazo--data .icone { vertical-align: -3px; margin-right: 4px; }
+/* N07-02: abaixo de 1600px o selo de Status da lista de Obras pode quebrar ("Em / encerramento") se a tabela apertar;
+   a folga que a nota do prazo (sem quebra) tomou sai dessa coluna, que so' encolhe quando falta espaco. */
+@media (max-width: 1599px) {
+  .tabela.obras-lista .selo__texto { white-space: normal; }
+}
+/* N07-06: a 1920 sobra largura; o cabecalho de data e o pedido ("CT-201-LT-2026, ha 23 dias") ficam em uma linha */
+@media (min-width: 1600px) {
+  .tabela.obras-lista thead th.col-data { white-space: nowrap; }
+  .tabela.obras-lista td.pedido { white-space: nowrap; }
+}
+
+/* N08-02: o selo de criticos em Obras diz a palavra (DESIGN › Selo) onde cabe; abaixo de 1600px fica o numero, com
+   "N criticos" no title e no texto do leitor de tela (decisao pendente do Leonardo: exceção ao "selo sempre com rotulo") */
+@media (max-width: 1599px) { .criticos__palavra { display: none; } }
+/* N08-02: "de N avisos" nao quebra; a regra que libera a quebra das notas do prazo (td.num .campo__nota) vencia o
+   .sem-quebra por especificidade */
+.tabela.obras-lista td.num .campo__nota.sem-quebra { white-space: nowrap; }
+
+/* Redesenho (09/10/2026): a Mono e' so' do valor. A nota embaixo da data ("vence em 44 dias", "o orgao prorroga
+   junto") e' frase e volta para a Sans; a pilula de situacao nao quebra linha. */
+td.col-num .campo__nota { font-family: var(--fonte); }
+.selo { white-space: nowrap; }
+
+/* ---- só dos protótipos ---- */
+.proto-faixa{position:sticky;top:0;z-index:50;background:var(--atencao-fundo);color:var(--atencao);font-size:13px;text-align:center;padding:4px 16px;border-bottom:1px solid var(--atencao-linha)}
+.proto-faixa a{color:inherit}
+#proto-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--texto);color:#fff;border-radius:8px;padding:10px 16px;font-size:14px;z-index:60;box-shadow:var(--sombra)}
+.conta a.conta__botao{display:inline-flex;align-items:center;gap:8px;color:var(--texto)}

@@ -194,7 +194,7 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
               <tbody key={eid}>
                 <tr className="grupo">
                   <th scope="rowgroup" colSpan={colunas}>
-                    {nome ? <Link para={{ tela: "documentos" }} busca={{ empresa: String(eid) }} secao={`emp-${eid}`}>{nome}</Link> : "Empresa sem nome no cadastro"}
+                    {nome ? <Link para={{ tela: "documentos-empresa", id: eid }}>{nome}</Link> : "Empresa sem nome no cadastro"}
                   </th>
                 </tr>
                 {itens.filter(i => i.entidade_id === eid).map((i, k) => (

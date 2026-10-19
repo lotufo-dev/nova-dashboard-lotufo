@@ -27,12 +27,16 @@ export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria";
 // situacoes do ciclo. "Enviar nota" e "Aguardando pagamento" eram as telas Notas › A enviar e Aguardando pagamento.
 export type AbaMedicoes = "resumo" | "sem-medicao" | "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento";
 
+// Abas da pagina da empresa em Documentos (#161). As Certidoes sao a padrao e nao entram na URL.
+export type AbaDocumentos = "certidoes" | "regularidade" | "garantia";
+
 export type Rota =
   | { tela: "raiz" }
   | { tela: "inicio" }
   | { tela: "medicoes"; aba?: AbaMedicoes }
   | { tela: "avisos" }
   | { tela: "documentos" }
+  | { tela: "documentos-empresa"; id: number; aba?: AbaDocumentos }
   | { tela: "obras" }
   | { tela: "a-receber" }
   | { tela: "notas-envio"; id: number }
@@ -51,6 +55,7 @@ export type Origem = { tela: Rota["tela"]; href: string };
 type EstadoHistorico = { origem?: Origem };
 
 const ABAS: readonly AbaObra[] = ["medicoes", "prazos", "reajuste", "documentos", "contrato"];
+const ABAS_DOCUMENTOS: readonly AbaDocumentos[] = ["certidoes", "regularidade", "garantia"];
 const ABAS_CARTEIRA: readonly AbaCarteira[] = ["resumo", "qdop", "producao"];
 const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria"];
 const ABAS_MEDICOES: readonly AbaMedicoes[] = ["resumo", "sem-medicao", "faturamento", "aguardando-nota", "enviar-nota",
@@ -76,6 +81,10 @@ function ehSimples(s: string): s is Simples {
 
 function ehAba(s: string): s is AbaObra {
   return (ABAS as readonly string[]).includes(s);
+}
+
+function ehAbaDocumentos(s: string): s is AbaDocumentos {
+  return (ABAS_DOCUMENTOS as readonly string[]).includes(s);
 }
 
 function ehAbaCarteira(s: string): s is AbaCarteira {
@@ -125,6 +134,11 @@ export function parseRota(pathname: string): Rota {
   if (a === "notas" && partes.length === 2 && b === "aguardando") return { tela: "medicoes", aba: "aguardando-pagamento" };
   if (a === "notas" && partes.length === 3 && b === "envio" && ehId(c)) return { tela: "notas-envio", id: Number(c) };
   if (a === "medicoes" && partes.length === 2 && ehAbaMedicoes(b)) return b === "resumo" ? { tela: "medicoes" } : { tela: "medicoes", aba: b };
+  // A empresa em Documentos (#161): "/documentos/3" e as outras abas; a padrao vira a forma canonica.
+  if (a === "documentos" && b !== undefined && ehId(b) && partes.length <= 3) {
+    if (partes.length === 2) return { tela: "documentos-empresa", id: Number(b) };
+    if (ehAbaDocumentos(c)) return c === "certidoes" ? { tela: "documentos-empresa", id: Number(b) } : { tela: "documentos-empresa", id: Number(b), aba: c };
+  }
   if (a === "carteira" && partes.length === 2 && ehAbaCarteira(b)) return b === "resumo" ? { tela: "carteira" } : { tela: "carteira", aba: b };
   if (a === "admin" && partes.length === 2 && ehAbaAdmin(b)) return b === "saude" ? { tela: "admin" } : { tela: "admin", aba: b };
   return { tela: "raiz" };
@@ -139,6 +153,7 @@ export function caminhoDe(r: Rota): string {
       return r.aba === "medicoes" ? `/obras/${r.id}` : `/obras/${r.id}/${r.aba}`;
     case "medicao": return `/obras/${r.obra}/medicoes/${r.id}`;
     case "nova-medicao": return `/obras/${r.obra}/medicoes/nova`;
+    case "documentos-empresa": return r.aba && r.aba !== "certidoes" ? `/documentos/${r.id}/${r.aba}` : `/documentos/${r.id}`;
     case "carteira": return r.aba && r.aba !== "resumo" ? `/carteira/${r.aba}` : "/carteira";
     case "admin": return r.aba && r.aba !== "saude" ? `/admin/${r.aba}` : "/admin";
     case "medicoes": return r.aba && r.aba !== "resumo" ? `/medicoes/${r.aba}` : "/medicoes";
@@ -155,9 +170,9 @@ export function hrefDe(r: Rota, busca?: Busca, secao?: string): string {
   return `${caminhoDe(r)}${s ? `?${s}` : ""}${secao ? `#${secao}` : ""}`;
 }
 
-/** Detalhe = tela de UM objeto, com breadcrumb e "← origem" (a obra e a medicao dela). */
+/** Detalhe = tela de UM objeto, com breadcrumb e "← origem" (a obra e a medicao dela, a empresa em Documentos). */
 export function ehDetalhe(r: Rota): boolean {
-  return r.tela === "obra" || r.tela === "medicao" || r.tela === "nova-medicao";
+  return r.tela === "obra" || r.tela === "medicao" || r.tela === "nova-medicao" || r.tela === "documentos-empresa";
 }
 
 /** A origem que um detalhe guarda: a tela de onde se veio; dentro do mesmo detalhe (trocar de aba), a
@@ -256,11 +271,23 @@ export function irHref(href: string) {
   ir(parseRota(u.pathname), { busca: Object.fromEntries(u.searchParams), secao: u.hash.replace(/^#/, "") || undefined });
 }
 
-/** Troca a tela no lugar, mantendo filtros, secao e origem (redirect de rota antiga, raiz -> entrada). */
-export function substituir(destino: Rota) {
-  window.history.replaceState(window.history.state, "",
-    `${caminhoDe(destino)}${window.location.search}${window.location.hash}`);
+/** Troca a tela no lugar, mantendo filtros, secao e origem (redirect de rota antiga, raiz -> entrada). Opcoes:
+ *  `busca`: os filtros passam a ser esses (a rota antiga que muda de dono, como Avisos dentro de Obras);
+ *  `secao`: a ancora passa a ser essa (o endereco antigo que cai numa etapa da medicao);
+ *  `semBusca`: o destino nao leva os filtros do endereco de antes. */
+export type OpcoesSubstituir = { busca?: Busca; secao?: string; semBusca?: boolean };
+export function substituir(destino: Rota, opcoes: OpcoesSubstituir = {}) {
+  const q = opcoes.busca ? new URLSearchParams(opcoes.busca).toString()
+    : opcoes.semBusca ? "" : window.location.search.replace(/^\?/, "");
+  const hash = opcoes.secao !== undefined ? `#${opcoes.secao}` : opcoes.semBusca ? "" : window.location.hash;
+  window.history.replaceState(window.history.state, "", `${caminhoDe(destino)}${q ? `?${q}` : ""}${hash}`);
   avisar();
+}
+
+/** Os filtros com que a rota antiga /avisos abre no lugar novo: os Avisos dentro de Obras, de todas as obras, com os
+ *  filtros que o link tinha (?familia= ?nivel= ?obra= ?agrupar=). */
+export function buscaDosAvisosEmObras(busca: Busca): Busca {
+  return { c: "todas", avisos: "1", ...busca };
 }
 
 /** Muda filtros da tela no lugar: `null` ou "" tira o filtro da URL. */

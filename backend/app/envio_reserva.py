@@ -25,6 +25,14 @@ TABELAS = {"protocolos": "protocolo", "espelhos": "espelho", "pleitos": "pleito"
 # confere os Enviados enquanto o e-mail do outro ainda esta' no Graph, nao ve nada e libera. 15 minutos passa
 # de qualquer envio legitimo, inclusive a sessao de upload de 25 MB em blocos (timeout de 60 s por requisicao).
 IDADE_MINIMA_LIBERACAO = 15
+# Condicao extra da reserva, conferida no MESMO UPDATE (#210): ler a situacao antes de reservar deixava outra
+# pessoa gerar a versao nova no meio, e o e-mail saia com os arquivos velhos. Espelho so' se reserva vigente e
+# sem medicao que ja' tenha espelho vigente mais novo (o "superado" do #208). SQL fixo, nunca do cliente.
+_CONDICAO = {
+    "espelhos": "situacao='vigente' AND NOT EXISTS (SELECT 1 FROM espelho_medicoes em "
+                "JOIN espelho_medicoes em2 ON em2.medicao_id=em.medicao_id JOIN espelhos e2 ON e2.id=em2.espelho_id "
+                "WHERE em.espelho_id=espelhos.id AND e2.situacao='vigente' AND e2.versao > espelhos.versao)",
+}
 
 
 class EnvioEmAndamento(ValueError):
@@ -81,10 +89,11 @@ def reservar(conn, tabela: str, id_: int, usuario_id: int, envio_id_visto: int |
     nesse meio-tempo (a reserva dele ja' foi liberada) e este seria o e-mail repetido.
     """
     t = _tabela(tabela)
+    condicao = f" AND {_CONDICAO[t]}" if t in _CONDICAO else ""
     with db.mutacao(conn):
         cur = conn.execute(
             f"UPDATE {t} SET envio_reservado_em=datetime('now'), envio_reservado_por=? "
-            f"WHERE id=? AND envio_id IS ? AND envio_reservado_em IS NULL",
+            f"WHERE id=? AND envio_id IS ? AND envio_reservado_em IS NULL{condicao}",
             (usuario_id, id_, envio_id_visto))
         if cur.rowcount:
             return
@@ -94,6 +103,8 @@ def reservar(conn, tabela: str, id_: int, usuario_id: int, envio_id_visto: int |
             raise ValueError("registro não encontrado")
         if r["envio_reservado_em"] is not None:
             raise reservado(conn, r["envio_reservado_em"], r["envio_reservado_por"])
+        if condicao and conn.execute(f"SELECT 1 FROM {t} WHERE id=?{condicao}", (id_,)).fetchone() is None:
+            raise ValueError(_recusa_condicao(conn, t, id_))
         e = conn.execute("SELECT usuario_id, enviado_em FROM envios WHERE id=?", (r["envio_id"],)).fetchone()
         if e is None:       # envio_id sem envio (nao deveria existir): recusa sem quebrar
             raise EnvioEmAndamento("Este envio acabou de ser feito por outra pessoa. Confira a caixa de Enviados "
@@ -101,6 +112,14 @@ def reservar(conn, tabela: str, id_: int, usuario_id: int, envio_id_visto: int |
         raise EnvioEmAndamento(
             f"Este envio acabou de ser feito (às {_hora(e['enviado_em'])} por {_nome(conn, e['usuario_id'])}). "
             "Confira a caixa de Enviados antes de repetir.", "ENVIO_CONCLUIDO_NO_MEIO")
+
+
+def _recusa_condicao(conn, tabela: str, id_: int) -> str:
+    """Mensagem de quem perdeu a corrida para a versao nova (so' espelhos tem condicao hoje)."""
+    situacao = conn.execute(f"SELECT situacao FROM {tabela} WHERE id=?", (id_,)).fetchone()[0]
+    if situacao != "vigente":
+        return "esta versão do espelho foi substituída; envie a versão vigente"
+    return "uma medição deste espelho tem espelho mais novo: envie aquela versão"
 
 
 def liberar(conn, tabela: str, id_: int) -> None:

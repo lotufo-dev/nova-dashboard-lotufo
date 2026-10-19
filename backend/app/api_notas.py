@@ -157,6 +157,10 @@ def frc_baixar(medicao_id: ID, formato: str, _=Depends(exigir("ver_paineis", com
     if formato not in ("pdf", "xlsx"):
         raise HTTPException(404, "Arquivo não encontrado")
     _medicao_existe(conn, medicao_id)
+    # issue #169: a FRC que ja' nao bate com as notas nao se baixa (seria assinada com os valores velhos)
+    vigente = frc.situacao(conn, medicao_id).get("frc")
+    if vigente and vigente["desatualizada"]:
+        raise HTTPException(409, frc.DESATUALIZADA)
     try:
         caminho = frc.arquivo(conn, medicao_id, formato)
     except ValueError:

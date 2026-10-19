@@ -211,7 +211,7 @@ export default function MedicoesPagina({ aba, busca, usuario }: { aba: AbaMedico
   } else if (aba === "aguardando-pagamento") {
     conteudo = (
       <>
-        <p className="pagina__descricao">Notas já enviadas ao contratante · na MTPAR, registre aqui o nº do protocolo SIGA</p>
+        <p className="pagina__descricao">Notas já enviadas ao contratante · o nº do protocolo no órgão (SIGA, na MTPAR) se registra na etapa 4 da medição</p>
         <AguardandoPagamento podeEditar={podeEditar} />
       </>
     );

@@ -232,21 +232,47 @@ def test_enviar_mtpar_marca_protocolada_e_liga_o_envio(cenario):
     assert d["enviado_por"] == "Maria" and d["enviado_em"]              # A6: quando e quem enviou
 
 
-def test_enviar_com_pendencia_exige_justificativa_e_nada_muda_antes(cenario):
+def test_enviar_com_pendencia_exige_a_confirmacao_da_lista_e_nada_muda_antes(cenario):
+    """Issue #213: a justificativa escrita deu lugar a' confirmacao do aviso "ATENÇÃO"; sem ela, ou com outra lista,
+    nada sai. A justificativa, se vier, continua gravada."""
     c, ids = cenario
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
     protocolo.montar(c, ids["uid"], pid)                                  # sem assinar: pendencia
     pv = protocolo.previa_envio(c, [pid])
-    with pytest.raises(ValueError, match="justificativa"):
-        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
-    with pytest.raises(ValueError, match="10 caracteres"):
+    faltam = [x["mensagem"] for x in pv["pendencias"]]
+    assert faltam == ["Pacote ainda não assinado"]
+    with pytest.raises(protocolo.ConfirmarPendencias, match="^ATENÇÃO: falta documento") as e:
         protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
-                         justificativa=" . ")
+                         justificativa="assinado fisicamente pelo diretor")       # justificativa nao substitui
+    assert e.value.pendencias == faltam
+    with pytest.raises(protocolo.ConfirmarPendencias, match="mudou"):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[*faltam, "Lotufo: CND Federal sem validade hoje"])
     assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert c.execute("SELECT COUNT(*) FROM audit_log WHERE acao='protocolo.envio_confirmado'").fetchone()[0] == 0
     protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
-                     justificativa="assinado fisicamente pelo diretor")
+                     justificativa="assinado fisicamente pelo diretor", confirmadas=faltam)
     depois = c.execute("SELECT depois FROM audit_log WHERE acao='protocolo.enviar'").fetchone()[0]
     assert json.loads(depois)["justificativa"] == "assinado fisicamente pelo diretor"
+    conf = c.execute("SELECT usuario_id, entidade_id, depois FROM audit_log "
+                     "WHERE acao='protocolo.envio_confirmado'").fetchone()
+    assert (conf["usuario_id"], conf["entidade_id"], json.loads(conf["depois"])) == (ids["uid"], str(pid),
+                                                                                     {"pendencias": faltam})
+
+
+def test_bloqueio_recusa_o_protocolo_mesmo_confirmado(cenario):
+    """Issue #213: certidao vencida continua bloqueio, nao aviso; a confirmacao nao a contorna."""
+    c, ids = cenario
+    c.execute("UPDATE certidoes SET validade='2026-09-10' WHERE tipo_id=?", (documentos.tipo_por_chave(c, "federal")["id"],))
+    c.commit()
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid])
+    assert pv["bloqueio"]
+    with pytest.raises(protocolo.Bloqueio):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
 
 
 def test_sinfra_medicao_nao_protocola_e_nota_protocola_com_o_oficio_da_medicao(cenario):
@@ -266,7 +292,7 @@ def test_sinfra_medicao_nao_protocola_e_nota_protocola_com_o_oficio_da_medicao(c
     # D5: a nota nao leva mais a ficha do CNO; A-18 (10/10/2026): o reajuste irmao ficou fora do e-mail
     assert [x["codigo"] for x in pv2["pendencias"]] == ["irma_fora"]
     protocolo.enviar(c, ids["usuario"], [p2], pv2["para"], pv2["copia"], pv2["assunto"], pv2["corpo"],
-                     justificativa="reajuste vai no próximo e-mail")
+                     confirmadas=[x["mensagem"] for x in pv2["pendencias"]])
     mp = c.execute("SELECT numero_oficio, protocolo_id FROM medicao_protocolos WHERE medicao_id=?",
                    (ids["sinfra_exec"],)).fetchone()
     assert (mp["numero_oficio"], mp["protocolo_id"]) == ("CT-310-LT-2026", p2)

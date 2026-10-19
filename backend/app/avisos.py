@@ -90,11 +90,16 @@ def _de_pagamento(conn, hoje: datetime.date) -> list[dict]:
 
 def _de_garantias(conn, hoje: datetime.date) -> list[dict]:
     """Issue #65: garantia contratual (30/15/vencida) e ART nao anexada, na tela Documentos."""
-    from app import garantias
-    return [aviso(a["tipo"], a["nivel"], a["mensagem"], a["contrato_id"], obra(conn, a["contrato_id"]),
-                  dias=a["dias"], publico=a["publico"], destino={"tela": "documentos"}, data=a["data"],
-                  sentido="prazo" if a["data"] else None)
-            for a in garantias.avisos(conn, hoje)]
+    from app import contratos, garantias
+    out = []
+    for a in garantias.avisos(conn, hoje):
+        c = conn.execute("SELECT entidade_id FROM contratos WHERE id=?", (a["contrato_id"],)).fetchone()
+        # o aviso leva a empresa contratada: a pagina dela em Documentos abre na aba da garantia e da ART
+        out.append({**aviso(a["tipo"], a["nivel"], a["mensagem"], a["contrato_id"], obra(conn, a["contrato_id"]),
+                            dias=a["dias"], publico=a["publico"], destino={"tela": "documentos"}, data=a["data"],
+                            sentido="prazo" if a["data"] else None),
+                    "entidade_id": contratos.entidade_de(c) if c else None})
+    return out
 
 
 FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_pagamento, _de_garantias]

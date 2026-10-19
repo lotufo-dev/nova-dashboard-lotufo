@@ -29,7 +29,10 @@ recorte volta para aprovação antes de ser feito; numa trabalhadora, vira pergu
 
 ## Abrir
 
-1. `git push -u origin HEAD`
+1. `git push -u origin HEAD:<N>-<nome-curto>`, com a branch no GitHub legível, ex.: `231-oficio-envio-por-fora`
+   (número da issue, 2 a 5 palavras do título, minúsculas, sem acento, com hífen). A branch local fica com o
+   nome que tem (a ferramenta do worktree o rastreia). Como os nomes diferem, todo push seguinte é
+   `git push origin HEAD:<N>-<nome-curto>` (o `git push` simples recusa).
 2. Escrever o corpo num arquivo da pasta temporária da sessão, com EXATAMENTE as seções do modelo
    `.github/pull_request_template.md`, nesta ordem:
    - `## O que mudou`: 3 a 6 linhas em português, sem jargão, do ponto de vista do Leo (o que ele passa a ver
@@ -48,16 +51,16 @@ recorte volta para aprovação antes de ser feito; numa trabalhadora, vira pergu
      - [x] revisor-adversarial: N achados, M corrigidos, K refutados com motivo (ou "OK"; numa trabalhadora, "pendente (orquestradora)")
      - [x] Gate Sol: N achados, M corrigidos, K refutados com motivo (ou "não se aplica (issue sem risco marcado)"; numa trabalhadora com risco, "pendente (orquestradora)")
      ```
-3. `gh pr create --base master --title "tipo: descricao (#N)" --body-file "<scratchpad>/pr-<N>.md"`
+3. `gh pr create --base master --head <N>-<nome-curto> --title "tipo: descricao (#N)" --body-file "<scratchpad>/pr-<N>.md"`
    O título repete o título da issue e termina com o número dela.
 
 ## Depois de abrir
 
 ```bash
-M=$(gh pr view --json number -q .number)
-gh issue comment <N> --body "PR #$M aberta"
+M=$(gh pr view <N>-<nome-curto> --json number -q .number)
+gh issue comment <N> --body "PR #$M aberta (<nome curto>)"
 ```
 
 Responder na sessão com o link da PR e as linhas de "Como testar no navegador". Não mergear nem ligar o
 auto-merge aqui: numa sessão manual o merge é do Leo; numa trabalhadora, quem liga o auto-merge é a
-orquestradora, depois dos gates dela (skill `orquestrar`).
+orquestradora, depois dos gates dela (skill `orquestrar`), em qualquer PR aprovada.

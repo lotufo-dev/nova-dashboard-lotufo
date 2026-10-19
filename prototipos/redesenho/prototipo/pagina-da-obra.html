@@ -1,0 +1,506 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Página da obra</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="app-medicoes.css">
+<link rel="stylesheet" href="proto-obras.css">
+<style>
+  /* abaixo de 1280px a lateral entra entre os indicadores e a curva: as duas colunas se desfazem e cada bloco ganha a sua ordem */
+  @media (max-width: 1280px) {
+    .obra-grade { display: flex; flex-direction: column; align-items: stretch; gap: 20px; }
+    .obra-grade__principal, .obra-grade__lateral { display: contents; }
+    #indicadores { order: 1; } #avisos-obra { order: 2; } #execucao { order: 3; } #curva { order: 4; } #secoes { order: 5; }
+  }
+  .topbar__linha .selo { margin-left: auto; }
+  .tabela td .campo__nota { display: block; }
+  .tabela.tabela--grade col.c-medicao-obra { width: 130px; }
+  .curva { position: relative; }
+  .curva__rodape { padding: 0 20px 14px; margin: 0; font-size: 12px; color: var(--texto-2); }
+  .resumo-grade--prazo { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  #secoes, #curva, #indicadores, #execucao, #avisos-obra { min-width: 0; }
+  .tabela td.col-num, .tabela .sit-pilula { white-space: nowrap; }
+  #secoes .painel-aba > .cartao .tabela-wrap { border-top: 0; }
+</style>
+</head>
+<body data-secao="obras" data-titulo="Obras">
+<main id="conteudo">
+  <header class="topbar topbar--detalhe">
+    <div class="topbar__trilha">
+      <nav class="migalhas" aria-label="Caminho"><ol>
+        <li><a href="obras.html">Obras</a></li>
+        <li><a id="mig-contratante" href="obras-lista.html"></a></li>
+        <li aria-current="page"><span id="mig-obra"></span></li>
+      </ol></nav>
+    </div>
+    <div class="topbar__linha topbar__linha--quebra">
+      <h1 class="topbar__titulo topbar__titulo--grande" id="titulo"></h1>
+      <span class="selo" id="status"><span class="selo__ponto" aria-hidden="true"></span><span id="status-txt"></span></span>
+    </div>
+    <p class="topbar__meta" id="meta" style="margin:0"></p>
+  </header>
+
+  <div class="pagina">
+    <div class="obra-grade">
+      <div class="obra-grade__principal">
+        <ul class="indicadores" id="indicadores" aria-label="Números da obra"></ul>
+
+        <section class="cartao curva" id="curva" aria-labelledby="titulo-curva">
+          <div class="cartao__cabeca">
+            <h2 class="cartao__titulo" id="titulo-curva">Curva S</h2>
+            <div class="curva__cabeca-acoes">
+              <p class="filtros-avisos__linha" id="curva-modo">
+                <a href="#" data-modo="acumulado">acumulado</a><a href="#" data-modo="mes">por mês</a>
+              </p>
+              <div class="curva__legenda" aria-hidden="true">
+                <span><span class="curva__chave curva__chave--previsto"></span>Previsto</span>
+                <span><span class="curva__chave curva__chave--medido"></span>Medido</span>
+              </div>
+            </div>
+          </div>
+          <div class="curva__quadro" id="curva-quadro"></div>
+          <p class="curva__rodape" id="curva-rodape"></p>
+          <div class="curva__dica" id="curva-dica" hidden></div>
+        </section>
+
+        <section class="cartao" id="secoes" aria-label="Seções da obra">
+          <div class="abas abas--obra" role="tablist" aria-label="Seções da obra" id="abas"></div>
+          <div id="painel"></div>
+        </section>
+      </div>
+
+      <aside class="obra-grade__lateral">
+        <section class="cartao avisos-obra" id="avisos-obra" aria-labelledby="titulo-avisos-obra">
+          <div class="cartao__cabeca"><h2 class="cartao__titulo" id="titulo-avisos-obra">Avisos desta obra</h2><span class="cartao__dica num" id="avisos-conta"></span></div>
+          <ul class="alertas" id="avisos-lista"></ul>
+          <div class="cartao__rodape" id="avisos-rodape"></div>
+        </section>
+
+        <section class="cartao" id="execucao" aria-labelledby="titulo-execucao">
+          <div class="cartao__cabeca"><h2 class="cartao__titulo" id="titulo-execucao">Execução do contrato</h2></div>
+          <div class="linhas-tempo" id="linhas-tempo"></div>
+        </section>
+      </aside>
+    </div>
+  </div>
+</main>
+<script src="shell.js"></script>
+<script src="proto-obras-dados.js"></script>
+<script>
+(function () {
+  const D = DADOS, F = FMT;
+  const { STATUS, ETAPAS, NIVEL, contratante, medicoesDe, numeros, cronograma, avisos, tituloMedicao } = D;
+  const { brl, fmtData, fmtComp, mesCurto, diasAte, diasTxt, hoje, data, isoDe, addMes, mesesEntre, somaDias, maisDias } = F;
+  const $ = id => document.getElementById(id);
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const selo = (txt, classe = "", forte = false) => '<span class="selo ' + classe + (forte ? " selo--forte" : "") + '"><span class="selo__ponto" aria-hidden="true"></span><span class="selo__texto">' + txt + "</span></span>";
+  const SETA = '<svg class="icone icone--p alerta__seta" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+  const CADEADO = '<span class="cadeado" title="Congelada: o valor protocolado não muda mais"><svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>';
+
+  const url = new URLSearchParams(location.search);
+  const o = D.obra(url.get("o")) || D.obra("ponte");
+  const c = contratante(o.c), n = numeros(o), ms = medicoesDe(o), crono = cronograma(o);
+  const avisosObra = avisos().filter(a => a.obra === o.id);
+  const consorcio = o.consorciadas.length > 0;
+
+  /* ================================================================ cabecalho */
+  document.title = o.nome + " · Obras";
+  $("mig-contratante").textContent = c.nome; $("mig-contratante").href = "obras-lista.html?c=" + c.id;
+  $("mig-obra").textContent = o.nome; $("titulo").textContent = o.nome;
+  const st = STATUS[o.status];
+  $("status").className = "selo " + st.classe; $("status-txt").textContent = st.rotulo;
+  $("meta").innerHTML = esc(c.nome) + " · Contrato " + o.instrumento + " · " + esc(o.empresa)
+    + (o.cotaBp !== 10000 ? " · valores cheios; cota da Lotufo " + F.pctBp(o.cotaBp) : " · valores cheios");
+
+  /* ================================================================ indicadores */
+  const emAndamento = ms.filter(m => m.etapa !== "ok");
+  const aReceber = ms.filter(m => m.nf && m.etapa !== "ok");
+  const ind = [
+    ["Valor vigente", brl(n.vigente), o.cotaBp !== 10000 ? "cota da Lotufo (" + F.pctBp(o.cotaBp) + "): " + brl(n.cota) : (o.delta ? "com aditivo de " + brl(o.delta) : "sem aditivo de valor")],
+    ["Medido (execução)", brl(n.medido), n.pct + "% do valor vigente"],
+    ["Faturado", brl(n.faturado), ms.filter(m => m.nf).length + " notas"],
+    ["A receber", brl(n.aReceber), aReceber.length ? aReceber.length + (aReceber.length === 1 ? " medição" : " medições") + (aReceber.some(m => m.atrasado) ? ", 1 atrasada" : "") : "nada a receber"],
+    ["Saldo do cronograma", brl(n.saldo), "valor vigente − medido", "#cronograma"],
+  ];
+  $("indicadores").innerHTML = ind.map(([r, v, nota, link]) => '<li class="cartao indicador">'
+    + (link ? '<a class="indicador__rotulo" href="?o=' + o.id + '&aba=contrato' + link + '" data-ir-aba="contrato">' + r + "</a>" : '<span class="indicador__rotulo">' + r + "</span>")
+    + '<span class="indicador__valor' + (r === "Saldo do cronograma" && n.saldo < 0 ? " negativo" : "") + '">' + v + '</span><span class="campo__nota">' + nota + "</span></li>").join("");
+
+  /* ================================================================ avisos desta obra */
+  const ondeTxt = a => a.href.startsWith("documentos") ? "Abrir em Documentos" : a.href.startsWith("medicao") ? "Abrir a medição" : "Abrir em " + a.onde.split(" · ")[0];
+  $("avisos-conta").textContent = avisosObra.length ? avisosObra.length + (avisosObra.length === 1 ? " aviso" : " avisos") : "";
+  $("avisos-lista").innerHTML = avisosObra.length
+    ? avisosObra.slice(0, 3).map(a => '<li><a class="alerta alerta--seta" href="' + a.href + '"' + (a.href.startsWith("pagina-da-obra") ? ' data-ir-aba="' + new URLSearchParams(a.href.split("?")[1]).get("aba") + '"' : "")
+      + '><span class="ponto ponto--' + a.nivel + '" aria-hidden="true"></span><span><span class="alerta__msg">' + esc(a.curto) + "</span>"
+      + '<span class="alerta__onde">' + NIVEL[a.nivel].rotulo + " · " + ondeTxt(a) + "</span></span>" + SETA + "</a></li>").join("")
+    : '<li><div class="vazio vazio--curto"><p>Nenhum aviso nesta obra.</p></div></li>';
+  $("avisos-rodape").innerHTML = avisosObra.length
+    ? '<a href="obras-lista.html?c=' + c.id + "&avisos=1&obra=" + o.id + '">Ver ' + (avisosObra.length > 3 ? "todos os " + avisosObra.length + " avisos" : "os avisos") + " da obra na lista de avisos</a>"
+    : '<a href="obras-lista.html?c=' + c.id + '&avisos=1">Ver os avisos de ' + esc(c.nome) + "</a>";
+
+  /* ================================================================ execucao do contrato (linhas do tempo) */
+  function linhaTempo(titulo, ini, fim, extra = {}) {
+    const total = (data(fim) - data(ini)) / 864e5, corrido = (hoje - data(ini)) / 864e5;
+    const pos = Math.max(0, Math.min(100, (corrido / total) * 100));
+    const resto = diasAte(fim);
+    let restoTxt, cls = "";
+    if (o.status === "encerrado") restoTxt = "encerrada em " + fmtData(fim);
+    else if (extra.paralisada) restoTxt = "parada: " + diasTxt(Math.max(resto, 0)) + " no papel";
+    else if (resto > 0) restoTxt = diasTxt(resto) + " restantes";
+    else if (resto === 0) restoTxt = "vence hoje";
+    else { restoTxt = "vencida há " + diasTxt(-resto); cls = " negativo"; }
+    const parado = extra.paralisada ? (diasAte(extra.paralisada) * -1) : 0;
+    const posParada = extra.paralisada ? Math.max(0, Math.min(100, ((data(extra.paralisada) - data(ini)) / 864e5 / total) * 100)) : pos;
+    return '<div class="lt"><p class="lt__titulo"><span>' + titulo + "</span>" + (extra.selo || "") + "</p>"
+      + '<div class="lt__trilho" role="img" aria-label="' + titulo + ": de " + fmtData(ini) + " a " + fmtData(fim) + ", hoje em " + Math.round(pos) + '% do prazo">'
+      + '<span class="lt__feito" style="width:' + posParada + '%"></span>'
+      + (extra.paralisada ? '<span class="lt__feito lt__feito--parado" style="left:' + posParada + "%;width:" + Math.max(0, pos - posParada) + '%;border-radius:0"></span>' : "")
+      + '<span class="lt__hoje" style="left:' + pos + "%;transform:translateX(-" + pos + '%)">Hoje ' + fmtData(isoDe(hoje)) + "</span>"
+      + '<span class="lt__marca" style="left:' + pos + '%"></span></div>'
+      + '<div class="lt__datas"><span>' + fmtData(ini) + "</span><span>" + fmtData(fim) + "</span></div>"
+      + '<p class="lt__resto' + cls + '">' + restoTxt + "</p>"
+      + (extra.nota ? '<p class="lt__nota">' + extra.nota + "</p>" : "") + "</div>";
+  }
+  // a posicao da etiqueta "Hoje": ancorada proporcionalmente, para nao sair do cartao nas pontas; o traco fica no ponto exato
+  const estiloHoje = document.createElement("style");
+  estiloHoje.textContent = ".lt__hoje::after{left:var(--p,50%)}";
+  document.head.appendChild(estiloHoje);
+  $("linhas-tempo").innerHTML =
+    linhaTempo("Execução", o.execIni, o.execFim, o.paralisadaDesde
+      ? { paralisada: o.paralisadaDesde, selo: selo("paralisada desde " + fmtData(o.paralisadaDesde), "selo--atencao"), nota: "Obra paralisada não conta o vencimento da execução." }
+      : {})
+    + linhaTempo("Vigência", o.vigIni, o.vigFim, o.vigAutomatica ? { nota: "o órgão prorroga a vigência junto" } : {});
+  document.querySelectorAll(".lt__hoje").forEach(el => { const p = parseFloat(el.style.left); el.style.setProperty("--p", p + "%"); });
+
+  /* ================================================================ curva S */
+  let modo = url.get("curva") === "mes" ? "mes" : "acumulado";
+  const ultimaMedida = o.ultimaComp || D.COMP_ATUAL;
+  function desenharCurva() {
+    const quadro = $("curva-quadro"), W = Math.max(300, quadro.clientWidth - 24), estreito = W < 560;
+    const H = estreito ? 220 : 280, ML = 48, MR = 12, MT = 14, MB = 28;
+    const iw = W - ML - MR, ih = H - MT - MB, N = crono.length;
+    let acP = 0, acM = 0;
+    const pts = crono.map(p => { acP += p.previsto; if (p.medida) acM += p.execucao; return { ...p, acP, acM: p.medida ? acM : null }; });
+    const maxV = modo === "acumulado" ? Math.max(o.vig, acM) : Math.max(...crono.map(p => Math.max(p.previsto, p.execucao)));
+    const passo = (() => { const bruto = maxV / 5 / 100; const mag = Math.pow(10, Math.floor(Math.log10(bruto))); const k = [1, 2, 2.5, 5, 10].find(k => k * mag >= bruto); return k * mag * 100; })();
+    const topo = Math.ceil(maxV / passo) * passo;
+    const y = v => MT + ih - (v / topo) * ih;
+    const banda = iw / N;
+    const x = i => ML + banda * (i + 0.5);
+    const rotY = v => { const r = v / 100; return r >= 1e6 ? (r / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " mi" : r >= 1e3 ? (r / 1e3).toLocaleString("pt-BR", { maximumFractionDigits: 0 }) + " mil" : r.toLocaleString("pt-BR"); };
+    let s = '<svg class="curva__svg" viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="Curva S: previsto e medido acumulados por competência, de ' + fmtComp(crono[0].comp) + " a " + fmtComp(crono[N - 1].comp) + '">';
+    for (let v = 0; v <= topo + 1; v += passo) s += '<line class="' + (v === 0 ? "c-base" : "c-grade") + '" x1="' + ML + '" x2="' + (W - MR) + '" y1="' + y(v) + '" y2="' + y(v) + '"/><text class="c-eixo" x="' + (ML - 8) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + rotY(v) + "</text>";
+    const cada = Math.max(1, Math.ceil(N / Math.floor(iw / (estreito ? 56 : 64))));
+    crono.forEach((p, i) => { if (i % cada === 0) s += '<text class="c-eixo" x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle">' + mesCurto(p.comp) + "</text>"; });
+    // hoje, na posicao do dia dentro do mes
+    const iHoje = mesesEntre(crono[0].comp, isoDe(hoje).slice(0, 7)) + (hoje.getDate() - 1) / 30;
+    if (iHoje >= -0.5 && iHoje <= N - 0.5) { const xh = ML + banda * (iHoje + 0.5) - banda / 2; s += '<line class="c-hoje" x1="' + xh + '" x2="' + xh + '" y1="' + MT + '" y2="' + (MT + ih) + '"/><text class="c-hoje-txt" x="' + (xh > W - 60 ? xh - 4 : xh + 4) + '" y="' + (MT + 10) + '" text-anchor="' + (xh > W - 60 ? "end" : "start") + '">Hoje</text>'; }
+    if (modo === "acumulado") {
+      const lp = pts.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.acP).toFixed(1)).join("");
+      const med = pts.filter(p => p.acM !== null);
+      const lm = med.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.acM).toFixed(1)).join("");
+      if (med.length) s += '<path class="c-area" d="' + lm + "L" + x(med.length - 1).toFixed(1) + " " + y(0) + "L" + x(0).toFixed(1) + " " + y(0) + 'Z"/>';
+      s += '<path class="c-previsto" d="' + lp + '"/>';
+      if (N <= 40) pts.forEach((p, i) => { s += '<circle class="c-previsto-ponto" cx="' + x(i) + '" cy="' + y(p.acP) + '" r="2.5"/>'; });
+      s += '<path class="c-medido" d="' + lm + '"/>';
+      med.forEach((p, i) => { s += '<circle class="c-medido-ponto" cx="' + x(i) + '" cy="' + y(p.acM) + '" r="3"/>'; });
+    } else {
+      const bw = Math.max(2, Math.min(14, banda * 0.36));
+      crono.forEach((p, i) => {
+        s += '<rect class="g-previsto" x="' + (x(i) - bw - 1) + '" y="' + y(p.previsto) + '" width="' + bw + '" height="' + (y(0) - y(p.previsto)) + '" rx="1.5"/>';
+        if (p.medida && p.execucao) s += '<rect class="' + (p.provisorio ? "g-outras" : "g-execucao") + '" x="' + (x(i) + 1) + '" y="' + y(p.execucao) + '" width="' + bw + '" height="' + (y(0) - y(p.execucao)) + '" rx="1.5"' + (p.provisorio ? ' opacity=".55"' : "") + "/>";
+      });
+    }
+    crono.forEach((p, i) => { s += '<rect class="c-alvo" data-i="' + i + '" x="' + (ML + banda * i) + '" y="' + MT + '" width="' + banda + '" height="' + ih + '"/>'; });
+    s += '<line class="c-guia" id="c-guia" x1="0" x2="0" y1="' + MT + '" y2="' + (MT + ih) + '" visibility="hidden"/></svg>';
+    quadro.innerHTML = s;
+    const dica = $("curva-dica"), guia = $("c-guia");
+    quadro.querySelectorAll(".c-alvo").forEach(r => {
+      r.addEventListener("mouseenter", () => {
+        const i = +r.dataset.i, p = pts[i];
+        guia.setAttribute("x1", x(i)); guia.setAttribute("x2", x(i)); guia.setAttribute("visibility", "visible");
+        dica.innerHTML = "<strong>" + fmtComp(p.comp) + (p.provisorio ? " · provisório" : "") + "</strong>"
+          + (modo === "acumulado"
+            ? '<div class="linha-dica"><span>Previsto acumulado</span><span>' + brl(p.acP) + '</span></div><div class="linha-dica"><span>Medido acumulado</span><span>' + (p.acM === null ? "—" : brl(p.acM)) + "</span></div>"
+              + (p.acM === null ? "" : '<div class="linha-dica"><span>Diferença</span><span>' + brl(p.acM - p.acP) + "</span></div>")
+            : '<div class="linha-dica"><span>Previsto no mês</span><span>' + brl(p.previsto) + '</span></div><div class="linha-dica"><span>Medido no mês</span><span>' + (p.medida ? brl(p.execucao) : "—") + "</span></div>");
+        dica.hidden = false;
+        const cx = quadro.offsetLeft + 8 + x(i) * (quadro.clientWidth - 24) / W + 12;
+        dica.style.left = Math.min(cx, $("curva").clientWidth - dica.offsetWidth - 8) + "px";
+        dica.style.top = (quadro.offsetTop + 16) + "px";
+      });
+      r.addEventListener("mouseleave", () => { dica.hidden = true; guia.setAttribute("visibility", "hidden"); });
+    });
+    document.querySelectorAll("#curva-modo a").forEach(a => a.setAttribute("aria-current", String(a.dataset.modo === modo)));
+    const ultimo = pts.filter(p => p.acM !== null).pop();
+    $("curva-rodape").textContent = modo === "acumulado"
+      ? "Até " + fmtComp(ultimaMedida) + ": previsto " + brl(ultimo ? ultimo.acP : 0) + ", medido " + brl(ultimo ? ultimo.acM : 0) + ". Previsto do cronograma vigente (versão 3); medido de execução."
+      : "Por competência: previsto (cinza) e medido de execução (índigo; mais claro quando ainda é provisório, protocolado sem atestado).";
+  }
+  document.querySelectorAll("#curva-modo a").forEach(a => a.addEventListener("click", e => { e.preventDefault(); modo = a.dataset.modo; desenharCurva(); }));
+  let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(desenharCurva, 120); });
+
+  /* ================================================================ abas */
+  const ABAS = [["medicoes", "Medições", ms.length], ["prazos", "Prazos"], ["reajuste", "Reajuste"], ["documentos", "Documentos"], ["contrato", "Contrato"]];
+  let aba = ABAS.some(a => a[0] === url.get("aba")) ? url.get("aba") : "medicoes";
+  function trocarAba(id, secao) {
+    aba = id;
+    const p = new URLSearchParams(location.search); p.set("o", o.id); p.set("aba", id);
+    history.replaceState(null, "", "?" + p + (secao ? secao : ""));
+    desenharAbas();
+    if (secao) { const alvo = document.querySelector(secao); if (alvo) alvo.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  }
+  function desenharAbas() {
+    $("abas").innerHTML = ABAS.map(([id, r, conta]) => '<button type="button" class="aba" role="tab" aria-selected="' + (id === aba) + '" data-aba="' + id + '">' + r
+      + (conta ? '<span class="aba__conta num">' + conta + "</span>" : "") + "</button>").join("");
+    $("abas").querySelectorAll(".aba").forEach(b => b.addEventListener("click", () => trocarAba(b.dataset.aba)));
+    $("painel").innerHTML = '<div class="painel-aba" role="tabpanel">' + PAINEIS[aba]() + "</div>";
+    ligarPainel();
+  }
+  document.addEventListener("click", e => {
+    const a = e.target.closest("[data-ir-aba]"); if (!a) return;
+    e.preventDefault();
+    const h = a.getAttribute("href") || ""; const i = h.indexOf("#");
+    trocarAba(a.dataset.irAba, i >= 0 ? h.slice(i) : null);
+    if (i < 0) $("secoes").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  /* ---------------------------------------------------------------- aba Medições */
+  let todasAnteriores = false, formAberto = null;
+  const linkMed = m => "medicao.html?obra=" + o.id + "&m=" + (m.tipo === "reajuste" ? "r" : "") + m.numero;
+  const etapaHtml = m => m.etapa === "ok"
+    ? '<span class="estado estado--recebida"><span class="estado__ponto" aria-hidden="true"></span>Recebida</span>'
+    : '<span class="sit-pilula ' + ETAPAS[m.etapa].classe + '">' + ETAPAS[m.etapa].rotulo + "</span>";
+  function linhaMedicao(m, i) {
+    const e = ETAPAS[m.etapa];
+    const passo = m.etapa === "ok" ? "Recebida em " + fmtData(m.recebidaEm)
+      : m.atrasado ? '<span class="atrasado">Pagamento atrasado há ' + diasTxt(m.ha) + "</span>"
+      : esc(e.passo) + (m.desde ? '<span class="campo__nota">desde ' + fmtData(m.desde) + "</span>" : "");
+    const notas = m.diverge ? '<a class="link-selo" href="' + linkMed(m) + '#notas">' + selo("nota diverge", "selo--acao") + "</a>"
+      : m.nf ? "NF " + m.nf : "—";
+    const congelada = ["pag", "ok", "envio"].includes(m.etapa) ? CADEADO : "";
+    return '<tr class="linha abrivel' + (i % 2 ? " par" : "") + '" data-href="' + linkMed(m) + '">'
+      + '<td class="forte"><a class="link" href="' + linkMed(m) + '">' + tituloMedicao(m) + "</a>" + congelada + "</td>"
+      + '<td class="num">' + fmtComp(m.comp) + "</td>"
+      + '<td class="col-num dinheiro num">' + brl(m.valor) + "</td>"
+      + "<td>" + etapaHtml(m) + "</td><td>" + passo + "</td><td>" + notas + "</td></tr>";
+  }
+  function painelMedicoes() {
+    const ant = ms.filter(m => m.etapa === "ok"), vis = todasAnteriores ? ant : ant.slice(0, 6);
+    const acaoPrincipal = o.fluxoAntigo
+      ? '<button type="button" class="btn btn--primario" data-form="manual">+ Nova medição</button>'
+      : '<button type="button" class="btn btn--primario" data-acao="Abriria a etapa 1 (Espelho) da próxima medição: Nº ' + (ms.filter(m => m.tipo === "execucao").length + 1) + ', competência ' + fmtComp(addMes(D.COMP_ATUAL, 1)) + '.">+ Gerar espelho</button>';
+    const mais = '<details class="menu-acoes"><summary class="btn">Mais ações</summary><ul class="menu-acoes__lista">'
+      + '<li><button type="button" data-form="protocolo">Novo protocolo com várias medições</button><span class="campo__nota">O órgão recebe várias medições num protocolo só; ele fica na primeira delas.</span></li>'
+      + '<li><button type="button" data-acao="Baixaria o CSV com as ' + ms.length + ' medições da obra.">Exportar CSV</button></li>'
+      + "</ul></details>";
+    let form = "";
+    if (formAberto === "protocolo") {
+      form = '<section class="cartao formulario-aba" aria-labelledby="t-np"><div class="cartao__cabeca"><h3 class="cartao__titulo" id="t-np">Novo protocolo com várias medições</h3><div class="cartao__acoes"><button type="button" class="btn btn--pequeno" data-form="">Cancelar</button></div></div>'
+        + '<form class="cartao__corpo pilha" onsubmit="return false"><fieldset class="opcoes"><legend class="campo__rotulo">Etapa</legend>'
+        + '<label class="marcar"><input type="radio" name="et" checked> Protocolo da medição</label><label class="marcar"><input type="radio" name="et"> Envio da nota</label></fieldset>'
+        + '<fieldset class="opcoes"><legend class="campo__rotulo">Medições</legend>' + emAndamento.map(m => '<label class="marcar"><input type="checkbox"> ' + tituloMedicao(m) + " · " + fmtComp(m.comp) + ' · <span class="mono">' + brl(m.valor) + "</span></label>").join("") + "</fieldset>"
+        + '<div class="campo"><label class="campo__rotulo" for="np-oficio">Nº do ofício (CT)</label><input id="np-oficio" class="entrada--media" placeholder="CT-000/2026"></div>'
+        + '<div><button type="button" class="btn" data-acao="Criaria o protocolo com as medições marcadas; ele fica na primeira delas.">Criar protocolo</button></div></form></section>';
+    } else if (formAberto === "manual") {
+      form = '<section class="cartao formulario-aba" aria-labelledby="t-nm"><div class="cartao__cabeca"><h3 class="cartao__titulo" id="t-nm">Nova medição</h3><div class="cartao__acoes"><button type="button" class="btn btn--pequeno" data-form="">Cancelar</button></div></div>'
+        + '<form class="cartao__corpo pilha" onsubmit="return false"><p class="campo__nota">Esta obra ainda gera o espelho pelo fluxo antigo: a medição nasce aqui, prevista.</p><div class="form-inline">'
+        + '<div class="campo"><label class="campo__rotulo" for="nm-n">Nº</label><input id="nm-n" class="entrada--curta entrada--num num" value="' + (ms.length + 1) + '"></div>'
+        + '<div class="campo"><label class="campo__rotulo" for="nm-t">Tipo</label><select id="nm-t" class="entrada--media"><option>Execução</option><option>Projeto</option><option>Reajuste</option></select></div>'
+        + '<div class="campo"><label class="campo__rotulo" for="nm-c">Competência</label><input id="nm-c" class="entrada--media num" placeholder="MM/AAAA" value="' + fmtComp(addMes(D.COMP_ATUAL, 1)) + '"></div>'
+        + '<button type="button" class="btn btn--primario" data-acao="Criaria a medição prevista; a página dela recebe as notas e o protocolo.">Criar medição</button></div></form></section>';
+    }
+    const cab = '<div class="painel-aba__cabeca"><span class="nota-rm">' + ms.length + " medições · " + emAndamento.length + " em andamento · RM sincronizado hoje às 07:40</span>"
+      + '<div class="cartao__acoes">' + acaoPrincipal + mais + "</div></div>";
+    const tabela = '<section class="cartao"><div class="tabela-wrap"><table class="tabela"><caption class="sr-only">Medições da obra</caption>'
+      + '<thead><tr><th scope="col">Medição</th><th scope="col">Competência</th><th scope="col" class="col-num">Valor</th><th scope="col">Etapa</th><th scope="col">Próximo passo ou pagamento</th><th scope="col">Notas</th></tr></thead>'
+      + '<tbody><tr class="grupo"><th scope="rowgroup" colspan="6">Em andamento<span class="grupo__conta num">' + (emAndamento.length || "nenhuma") + "</span></th></tr>"
+      + (emAndamento.length ? emAndamento.map(linhaMedicao).join("") : '<tr><td colspan="6">Nenhuma medição aberta nesta obra.</td></tr>') + "</tbody>"
+      + '<tbody><tr class="grupo"><th scope="rowgroup" colspan="6">Anteriores<span class="grupo__conta num">' + ant.length + " recebidas, canceladas ou desistidas</span></th></tr>"
+      + vis.map(linhaMedicao).join("") + "</tbody></table></div>"
+      + (ant.length > 6 ? '<div class="cartao__rodape"><button type="button" class="btn btn--pequeno" id="ver-todas">' + (todasAnteriores ? "Ver só as 6 mais recentes" : "Ver todas as " + ant.length) + "</button></div>" : "")
+      + "</section>";
+    return cab + form + tabela;
+  }
+
+  /* ---------------------------------------------------------------- aba Prazos */
+  const aditivoPrazo = ["ponte", "anel", "terminal", "drenagem"].includes(o.id);
+  const restante = d => d < 0 ? "vencida há " + diasTxt(-d) : d === 0 ? "vence hoje" : "faltam " + diasTxt(d);
+  function painelPrazos() {
+    const folga = Math.round((data(o.vigFim) - data(o.execFim)) / 864e5), exigida = o.folgaExigida || 30;
+    const dado = (rot, val, extra = "") => '<div class="dado"><span class="resumo__rotulo">' + rot + '</span><span class="dado__valor num">' + val + "</span>" + extra + "</div>";
+    const ativo = o.status !== "encerrado";
+    const sit = '<section class="cartao" aria-labelledby="t-sit"><div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-sit">Situação do prazo</h2></div>'
+      + '<div class="cartao__corpo resumo-grade resumo-grade--prazo">'
+      + dado("Execução até", fmtData(o.execFim), (ativo && !o.paralisadaDesde ? '<span class="campo__nota num' + (diasAte(o.execFim) < 0 ? " negativo" : "") + '">' + restante(diasAte(o.execFim)) + "</span>" : "")
+        + (o.paralisadaDesde ? selo("paralisada desde " + fmtData(o.paralisadaDesde), "selo--atencao") : ""))
+      + dado("Vigência até", fmtData(o.vigFim), (ativo ? '<span class="campo__nota num">' + restante(diasAte(o.vigFim)) + "</span>" : "") + (o.vigAutomatica ? '<span class="campo__nota">o órgão prorroga a vigência junto</span>' : ""))
+      + dado("Folga entre execução e vigência", diasTxt(folga), '<span class="campo__nota num">o órgão pede ' + diasTxt(exigida) + "</span>" + (folga < exigida ? selo("folga quebrada", "selo--acao") : ""))
+      + (aditivoPrazo ? '<div class="dado"><span class="resumo__rotulo">Endosso do seguro-garantia</span><span class="dado__valor">1º Termo aditivo de prazo</span><span class="campo__nota">assinado em <span class="num">15/01/2026</span></span>' + selo("endosso registrado", "selo--ok") + "</div>" : "")
+      + '<div class="dado"><span class="resumo__rotulo">Pedido de prorrogação</span>' + (o.pedido
+        ? '<span class="dado__valor"><a href="#oficio-pedido">' + o.pedido.oficio + "</a></span>" + selo("sem instrumento há " + diasTxt(o.pedido.ha), "selo--atencao") + '<span class="campo__nota">enviado em <span class="num">' + fmtData(somaDias(-o.pedido.ha)) + "</span></span>"
+        : '<span class="dado__valor">nenhum em curso</span>') + "</div>"
+      + "</div>"
+      + '<div class="cartao__corpo linhas"><p><span class="resumo__rotulo">Instrumentos de prazo</span> ' + (aditivoPrazo ? "1, o último em 15/01/2026" : "nenhum")
+      + ' · <a href="#instrumentos" data-ir-aba="contrato">ver em Contrato › Instrumentos</a></p>'
+      + '<p><span class="resumo__rotulo">Paralisações e endossos</span> '
+      + [o.paralisadaDesde && "paralisação em " + fmtData(o.paralisadaDesde), aditivoPrazo && "endosso em 20/01/2026"].filter(Boolean).join("; ").replace(/^$/, "nenhum no cadastro")
+      + ' · <a href="#instrumentos" data-ir-aba="contrato">ver em Contrato › Instrumentos</a></p></div></section>';
+
+    const oficios = [];
+    if (aditivoPrazo) oficios.push('<section class="pleito-linha"><div class="pleito-linha__cabeca"><h3 class="cartao__titulo">Pedido de prorrogação · CT-' + (40 + o.instrumento.length) + "/2025</h3>"
+      + selo("atendido pelo 1º Termo aditivo de prazo", "selo--ok") + '</div><p class="campo__nota">180 dias pedidos · enviado em 02/12/2025 · assinado em 15/01/2026</p></section>');
+    if (o.pedido) oficios.push('<section class="pleito-linha" id="oficio-pedido"><div class="pleito-linha__cabeca"><h3 class="cartao__titulo">Pedido de prorrogação · ' + o.pedido.oficio + "</h3>"
+      + selo("sem instrumento há " + diasTxt(o.pedido.ha), "selo--atencao") + '</div><p class="campo__nota">' + o.pedido.dias + " dias pedidos · enviado em " + fmtData(somaDias(-o.pedido.ha)) + "</p></section>");
+    const botao = o.status === "em_encerramento" || o.status === "encerrado" ? ""
+      : o.pedido ? '<div class="cartao__acoes"><a class="btn btn--pequeno" href="#oficio-pedido">Ver o pedido ' + o.pedido.oficio + "</a></div>"
+      : '<div class="cartao__acoes"><button type="button" class="btn btn--primario" data-acao="Abriria o novo pedido de prorrogação, com o histórico do contrato na seção 1 da carta.">Pedir prorrogação</button></div>';
+    const pedidos = '<section class="cartao" aria-labelledby="t-ped"><div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-ped">Pedidos e cartas</h2><span class="cartao__dica num">'
+      + (oficios.length ? oficios.length + (oficios.length === 1 ? " ofício" : " ofícios") : "nenhum ofício ainda") + "</span>" + botao + "</div>"
+      + '<details class="detalhes cartao__corpo"><summary>Histórico do contrato, que entra na carta de prazo</summary>'
+      + "<p>Contrato " + o.instrumento + ", assinado em " + fmtData(o.execIni) + " com " + esc(c.nome) + ", para " + esc(o.objeto.charAt(0).toLowerCase() + o.objeto.slice(1)) + "</p>"
+      + "<p>Ordem de serviço em " + fmtData(o.execIni) + "; execução prevista até " + fmtData(o.execFim) + " e vigência até " + fmtData(o.vigFim) + ".</p></details>"
+      + (oficios.length ? '<div class="secoes-pleito">' + oficios.join("") + "</div>" : "") + "</section>";
+
+    const enc = o.status === "em_encerramento" ? '<section class="cartao" aria-labelledby="t-enc"><div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-enc">Encerramento</h2><span class="cartao__dica">desde ' + fmtData(o.encerramentoDesde) + "</span></div>"
+      + '<ul class="lista-simples cartao__corpo"><li>Conclusão: <span class="num">' + fmtData(o.encerramentoDesde) + '</span></li><li>Recebimento provisório: <span class="num">—</span></li><li>Recebimento definitivo: <span class="num">—</span></li><li>Baixa da garantia: <span class="num">—</span></li><li>Comunicação de conclusão: não enviada</li></ul>'
+      + '<div class="cartao__corpo"><button type="button" class="btn btn--primario" data-acao="Abriria a nova comunicação de conclusão (ofício ao órgão).">Comunicar conclusão</button></div></section>' : "";
+    return sit + pedidos + enc;
+  }
+
+  /* ---------------------------------------------------------------- aba Reajuste */
+  function painelReajuste() {
+    const db = o.dataBase, ROT = { futuro: ["ainda não abriu", ""], pleito_pendente: ["pleito não enviado", "selo--atencao", true], apostilamento_pendente: ["apostilamento pendente", "selo--atencao"], apostilado: ["apostilado", "selo--ok"] };
+    // o aniversario mais recente (ou o primeiro, se ainda nao chegou)
+    let aniv = addMes(db.mes, 12); while (addMes(aniv, 12) + "-01" <= isoDe(hoje)) aniv = addMes(aniv, 12);
+    const anivIso = aniv + "-01", ciclo = aniv.slice(0, 4), d = diasAte(anivIso);
+    const [rot, cls, forte] = ROT[db.situacao];
+    const linhaCiclo = db.situacao === "apostilamento_pendente" ? "aniversário em " + fmtData(anivIso) + " · pleito enviado há " + diasTxt(db.ha)
+      : d >= 0 ? "faz aniversário em " + fmtData(anivIso) + " (faltam " + diasTxt(d) + ")" : "fez aniversário em " + fmtData(anivIso) + " (há " + diasTxt(-d) + ")";
+    const acao = db.situacao === "pleito_pendente" ? '<div class="cartao__acoes"><button type="button" class="btn btn--primario" data-acao="Abriria o novo pleito da data-base ' + fmtComp(db.mes) + '.">Enviar pleito</button></div>'
+      : db.situacao === "apostilamento_pendente" ? '<div class="cartao__acoes"><button type="button" class="btn btn--pequeno" data-acao="Abriria um novo pleito da mesma data-base (reenvio com intenção explícita).">Reenviar pleito</button></div>' : "";
+    const pct = (2 + (o.nome.length % 30) / 10).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%";
+    const apost = db.situacao === "apostilado" ? '<p><span class="resumo__rotulo">Apostilamento</span> AP-0' + (o.nome.length % 9 + 1) + "/" + ciclo + ", de " + fmtData(maisDias(anivIso, 40)) + " · " + pct + " · eficácia " + fmtData(anivIso)
+      + ' · <a href="#instrumentos" data-ir-aba="contrato">ver em Contrato › Instrumentos</a></p>' : "";
+    const secoes = [];
+    if (db.situacao === "apostilamento_pendente") secoes.push('<section class="pleito-linha"><div class="pleito-linha__cabeca"><h3 class="cartao__titulo">Pleito de reajuste (ciclo de ' + ciclo + ") · CT-131/" + ciclo + "</h3>"
+      + selo("sem apostilamento há " + diasTxt(db.ha), "selo--atencao") + '</div><p class="campo__nota">enviado em ' + fmtData(somaDias(-db.ha)) + "</p></section>");
+    if (db.situacao === "apostilado") secoes.push('<section class="pleito-linha"><div class="pleito-linha__cabeca"><h3 class="cartao__titulo">Pleito de reajuste (ciclo de ' + ciclo + ") · CT-0" + (o.nome.length % 9 + 2) + "/" + ciclo + "</h3>"
+      + selo("atendido pelo apostilamento AP-0" + (o.nome.length % 9 + 1) + "/" + ciclo, "selo--ok") + '</div><p class="campo__nota">enviado em ' + fmtData(maisDias(anivIso, 6)) + " · apostilamento de " + fmtData(maisDias(anivIso, 40)) + "</p></section>");
+    const anteriores = mesesEntre(db.mes, aniv) / 12 - 1;
+    if (anteriores > 0) secoes.push('<details class="detalhes pleito-anteriores"><summary>Ciclos anteriores: ' + anteriores + (anteriores === 1 ? " pleito e 1 apostilamento" : " pleitos e " + anteriores + " apostilamentos") + "</summary>"
+      + '<div class="secoes-pleito"><section class="cartao__corpo"><ul class="lista-simples"><li class="num">AP-01/' + (Number(ciclo) - 1) + ", de " + fmtData(maisDias(addMes(aniv, -12) + "-01", 35)) + " · 3,48% · eficácia " + fmtData(addMes(aniv, -12) + "-01") + "</li></ul></section>"
+      + '<section class="pleito-linha"><div class="pleito-linha__cabeca"><h3 class="cartao__titulo">Pleito de reajuste (ciclo de ' + (Number(ciclo) - 1) + ") · CT-077/" + (Number(ciclo) - 1) + "</h3>" + selo("enviado") + '</div><p class="campo__nota">enviado em ' + fmtData(maisDias(addMes(aniv, -12) + "-01", 5)) + "</p></section></div></details>");
+    return '<p class="campo__nota">O reajuste vale a partir do mês do aniversário da data-base; o aviso começa 30 dias antes.</p>'
+      + '<section class="cartao" id="db-' + db.mes + '" aria-labelledby="t-db"><div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-db">Data-base ' + fmtComp(db.mes) + " · " + db.indice + "</h2>" + selo(rot, cls, forte) + acao + "</div>"
+      + '<div class="cartao__corpo linhas"><p class="num">Ciclo de ' + ciclo + " · " + linhaCiclo + "</p>" + apost
+      + (db.situacao === "apostilamento_pendente" ? '<p class="campo__nota">Pleito enviado; falta o apostilamento, que entra pelo cadastro.</p>' : "") + "</div>"
+      + (secoes.length ? '<div class="secoes-pleito">' + secoes.join("") + "</div>" : "") + "</section>";
+  }
+
+  /* ---------------------------------------------------------------- aba Documentos (exigidos) */
+  function itensDocs(natureza) {
+    const empresas = consorcio ? [o.empresa, ...o.consorciadas] : [o.empresa];
+    const tipos = natureza === "execucao" ? ["Certidão federal (CND)", "FGTS (CRF)", "Trabalhista (CNDT)", "Certidão estadual", "Certidão municipal"] : ["Certidão federal (CND)", "FGTS (CRF)", "Trabalhista (CNDT)"];
+    const r = (s => () => { s = (s * 9301 + 49297) % 233280; return s / 233280; })(o.nome.length * 97 + (natureza === "execucao" ? 1 : 7));
+    const itens = [];
+    for (const emp of empresas) {
+      for (const t of tipos) {
+        let sit = "ok", dias = 20 + Math.floor(r() * 150);
+        if (emp.startsWith("Consórcio") && (t === "Certidão estadual" || t === "Certidão municipal")) sit = "nao_se_aplica";
+        if (o.id === "ponte" && emp === "Consórcio Ribeirão" && t.startsWith("Certidão federal")) { sit = "vencendo"; dias = 3; }
+        if (emp === "Engenharia Modelo" && t.startsWith("Trabalhista")) { sit = "vencendo"; dias = 6; }
+        if (o.id === "drenagem" && t === "Certidão municipal") { sit = "pendente"; dias = -2; }
+        itens.push({ emp, t, sit, dias });
+      }
+      if (natureza === "execucao" && emp === o.empresa && c.id === "pm") itens.push({ emp, t: "Regularidade do DP", sit: o.id === "escola" ? "pendente" : "ok", comp: true });
+    }
+    return itens;
+  }
+  function quadroDocs(natureza) {
+    const titulo = natureza === "execucao" ? "Medição" : "Reajuste", pronto = natureza === "execucao" ? "Pronto para protocolar" : "Pronto para enviar o pleito";
+    const itens = itensDocs(natureza), pend = itens.filter(i => i.sit === "pendente").length, vencendo = itens.filter(i => i.sit === "vencendo").length;
+    const quem = consorcio ? o.empresa + " e consorciadas" : o.empresa;
+    const emitir = itens.some(i => i.sit === "pendente" || i.sit === "vencendo");
+    const rot = i => i.sit === "ok" ? "Em dia" : i.sit === "vencendo" ? (i.dias === 1 ? "Vence amanhã" : "Vence em " + i.dias + " dias") : i.sit === "pendente" ? "Pendente" : "Não se aplica";
+    const sitHtml = i => i.sit === "ok" ? '<span class="estado estado--ok"><span class="estado__ponto" aria-hidden="true"></span>Em dia</span>'
+      : selo(rot(i), i.sit === "vencendo" ? "selo--atencao" : i.sit === "pendente" ? "selo--acao" : "");
+    const validade = i => i.comp ? "competência " + fmtComp(D.COMP_ATUAL) : i.sit === "nao_se_aplica" ? "—" : fmtData(somaDias(i.dias));
+    const grupos = [...new Set(itens.map(i => i.emp))].map(emp => '<tbody><tr class="grupo"><th scope="rowgroup" colspan="' + (emitir ? 4 : 3) + '"><a href="documentos.html">' + esc(emp) + "</a></th></tr>"
+      + itens.filter(i => i.emp === emp).map((i, k) => '<tr class="linha' + (k % 2 ? " par" : "") + '"><td class="forte">' + i.t + "</td><td>" + sitHtml(i) + '</td><td class="num">' + validade(i) + "</td>"
+        + (emitir ? "<td>" + ((i.sit === "pendente" || i.sit === "vencendo") && !i.comp ? '<a href="#" data-acao="Abriria o site do órgão emissor em outra aba.">Emitir</a>' : i.comp && i.sit === "pendente" ? '<a href="documentos.html">Anexar</a>' : "") + "</td>" : "") + "</tr>").join("") + "</tbody>").join("");
+    const veredito = pend ? selo(pend === 1 ? "1 pendência" : pend + " pendências", "selo--acao") : selo(pronto, "selo--ok");
+    const frase = pend ? '<p class="aviso aviso--critico"><span class="aviso__ponto" aria-hidden="true" style="background:var(--acao-ponto)"></span>' + esc(quem) + ": " + (pend === 1 ? "1 documento sem validade hoje" : pend + " documentos sem validade hoje") + " — emita no órgão e anexe em Documentos " + (natureza === "execucao" ? "antes de levar a pasta ao protocolo." : "antes de enviar o pleito.") + "</p>"
+      : '<p class="campo__nota">Todas as certidões exigidas de ' + esc(quem) + " estão valendo hoje." + (vencendo ? " " + (vencendo === 1 ? "Uma delas vence em breve — renove" : vencendo + " delas vencem em breve — renove") + (natureza === "execucao" ? " antes do próximo protocolo." : " antes do próximo pleito.") : "") + "</p>";
+    return '<section class="cartao" aria-labelledby="t-doc-' + natureza + '"><div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-doc-' + natureza + '">Documentos exigidos · ' + titulo + "</h2>" + veredito + "</div>"
+      + '<div class="cartao__corpo">' + frase + "</div>"
+      + '<div class="tabela-wrap"><table class="tabela tabela--grade"><caption class="sr-only">Situação hoje de cada documento exigido</caption><thead><tr><th scope="col">Documento</th><th scope="col">Situação</th><th scope="col">Validade</th>'
+      + (emitir ? '<th scope="col"><span class="sr-only">Emitir</span></th>' : "") + "</tr></thead>" + grupos + "</table></div></section>";
+  }
+  const painelDocumentos = () => quadroDocs("execucao") + quadroDocs("reajuste");
+
+  /* ---------------------------------------------------------------- aba Contrato */
+  function painelContrato() {
+    const campos = [["Instrumento", "Contrato " + o.instrumento], ["Órgão", c.nome], ["Objeto", o.objeto], ["Município", o.municipio], ["Lei", "Lei 14.133/2021"],
+      ["Processo", "PRO-" + o.instrumento.replace(/\D/g, "").slice(0, 3) + "/" + o.execIni.slice(0, 4)], ["Centro de custo (RM)", "1.04." + String(o.nome.length * 7).padStart(3, "0")],
+      ["Empresa", o.empresa + (consorcio ? " (" + o.consorciadas.join(", ") + "; cota da Lotufo " + F.pctBp(o.cotaBp) + ")" : "")],
+      ["Início da execução", fmtData(o.execIni)], ["Início da vigência", fmtData(o.vigIni)], ["Datas-base", fmtComp(o.dataBase.mes) + " (" + o.dataBase.indice + ")"]];
+    const cad = '<section class="cartao" aria-labelledby="t-cad"><div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-cad">Cadastro</h2><span class="cartao__dica">só leitura; o cadastro é versionado e aplicado fora da tela</span></div>'
+      + '<dl class="cartao__corpo pares">' + campos.map(([k, v]) => '<div><dt class="campo__rotulo">' + k + "</dt><dd>" + esc(v) + "</dd></div>").join("")
+      + '<div><dt class="campo__rotulo">Fiscais</dt><dd><ul class="lista-simples"><li>Fiscal titular, engenheiro civil, Portaria 112/' + o.execIni.slice(0, 4) + ' (desde <span class="num">' + fmtData(maisDias(o.execIni, 8)) + '</span>)</li><li>Fiscal substituto, engenheiro civil, Portaria 113/' + o.execIni.slice(0, 4) + ' (desde <span class="num">' + fmtData(maisDias(o.execIni, 8)) + "</span>)</li></ul></dd></div></dl></section>";
+
+    // instrumentos, do mais novo ao mais antigo
+    const ins = [];
+    if (o.paralisadaDesde) ins.push([o.paralisadaDesde, "Paralisação", "OP-07/2026", "—", "—", "—"]);
+    if (o.dataBase.situacao === "apostilado") { let a = addMes(o.dataBase.mes, 12); while (addMes(a, 12) + "-01" <= isoDe(hoje)) a = addMes(a, 12);
+      ins.push([maisDias(a + "-01", 40), "Apostilamento de reajuste", "AP-0" + (o.nome.length % 9 + 1) + "/" + a.slice(0, 4), (2 + (o.nome.length % 30) / 10).toLocaleString("pt-BR") + '% · eficácia ' + fmtData(a + "-01") + ' · <a href="#db-' + o.dataBase.mes + '" data-ir-aba="reajuste">data-base ' + fmtComp(o.dataBase.mes) + "</a>", "—", "—"]); }
+    if (o.delta) ins.push(["2026-02-20", "Termo aditivo de valor", "02/2026", "Acréscimo de serviços de contenção", "+" + brl(o.delta), selo("Assinado", "selo--ok") + '<span class="campo__nota num">valor novo ' + brl(o.vig) + " (era " + brl(o.vig - o.delta) + ")</span>"]);
+    if (aditivoPrazo) { ins.push(["2026-01-20", "Endosso do seguro-garantia", "s/n", "—", "—", "—"]);
+      ins.push(["2026-01-15", "Termo aditivo de prazo", "01/2026", '<div class="num">execução até ' + fmtData(o.execFim) + '</div><div class="num">vigência até ' + fmtData(o.vigFim) + "</div>", "—", selo("Assinado", "selo--ok")]); }
+    ins.sort((a, b) => b[0].localeCompare(a[0]));
+    const instr = '<section class="cartao" id="instrumentos" aria-labelledby="t-ins"><div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-ins">Instrumentos</h2><span class="cartao__dica num">' + ins.length + (ins.length === 1 ? " instrumento" : " instrumentos") + "</span></div>"
+      + (ins.length ? '<div class="tabela-wrap"><table class="tabela"><caption class="sr-only">Instrumentos do contrato, do mais novo ao mais antigo</caption><thead><tr><th scope="col">Data</th><th scope="col">Instrumento</th><th scope="col">Número</th><th scope="col">Efeito</th><th scope="col" class="col-num">Δ valor</th><th scope="col">Situação</th></tr></thead><tbody>'
+        + ins.map((l, i) => '<tr class="linha' + (i % 2 ? " par" : "") + '"><td class="num">' + fmtData(l[0]) + "</td><td>" + l[1] + '</td><td class="forte">' + l[2] + '</td><td class="efeito">' + l[3] + '</td><td class="col-num dinheiro num">' + l[4] + "</td><td>" + l[5] + "</td></tr>").join("") + "</tbody></table></div>"
+        : '<div class="vazio"><p class="vazio__titulo">Nenhum instrumento neste contrato</p><p>Aditivos, apostilamentos, paralisações e endossos do contrato aparecem aqui.</p></div>') + "</section>";
+
+    // cronograma: o saldo e a tabela por competencia (a curva fica no alto da pagina)
+    const tot = crono.reduce((a, p) => ({ prev: a.prev + p.previsto, exe: a.exe + (p.medida ? p.execucao : 0), rea: a.rea + p.reajuste }), { prev: 0, exe: 0, rea: 0 });
+    const mesAtual = isoDe(hoje).slice(0, 7);
+    const linhas = crono.map((p, i) => {
+      const tot = p.execucao + p.reajuste;
+      const s = !p.medida || tot === 0 ? '<span class="estado estado--aberto"><span class="estado__ponto" aria-hidden="true"></span>em aberto</span>'
+        : p.provisorio ? '<span class="estado estado--provisorio"><span class="estado__ponto" aria-hidden="true"></span>provisório</span>'
+        : '<span class="estado estado--atestado"><span class="estado__ponto" aria-hidden="true"></span>atestado</span>';
+      return '<tr class="linha' + (i % 2 ? " par" : "") + '"><td class="forte num">' + fmtComp(p.comp) + (p.comp < mesAtual ? CADEADO.replace("Congelada: o valor protocolado não muda mais", "Competência já decorrida: uma nova versão do cronograma não altera este previsto") : "") + "</td>"
+        + '<td class="col-num dinheiro num">' + brl(p.previsto) + '</td><td class="col-num dinheiro num">' + (p.medida && p.execucao ? brl(p.execucao) : "—") + '</td><td class="col-num dinheiro num">' + (p.reajuste ? brl(p.reajuste) : "—") + '</td><td class="col-num dinheiro num">—</td><td>' + s + "</td></tr>";
+    }).join("");
+    const cro = '<section class="cartao" id="cronograma" aria-labelledby="t-cro"><div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-cro">Cronograma</h2><span class="cartao__dica num">versão 3 · ' + crono.length + " competências · publicada em 12/03/2026</span></div>"
+      + '<div class="saldo' + (n.saldo < 0 ? " saldo--negativo" : "") + '"><div class="saldo__parcela"><span class="resumo__rotulo">Vigente</span><span class="saldo__valor num">' + brl(o.vig) + '</span></div><span class="saldo__op" aria-hidden="true">−</span>'
+      + '<div class="saldo__parcela"><span class="resumo__rotulo">Medido (execução)</span><span class="saldo__valor num">' + brl(n.medido) + '</span></div><span class="saldo__op" aria-hidden="true">=</span>'
+      + '<div class="saldo__parcela saldo__parcela--total"><span class="resumo__rotulo">Saldo</span><span class="saldo__valor num">' + brl(n.saldo) + "</span></div>"
+      + '<p class="saldo__nota">Saldo = valor vigente − medido de execução (protocolado ou atestado). Reajuste e projeto não consomem o saldo.</p></div>'
+      + '<details class="detalhes cartao__corpo"><summary>Tabela por competência (' + crono.length + ")</summary>"
+      + '<div class="tabela-wrap"><table class="tabela"><caption class="sr-only">Previsto e medido por competência</caption><thead><tr><th scope="col">Competência</th><th scope="col" class="col-num">Previsto</th><th scope="col" class="col-num">Execução</th><th scope="col" class="col-num">Reajuste</th><th scope="col" class="col-num">Projeto</th><th scope="col">Situação</th></tr></thead><tbody>'
+      + linhas + '</tbody><tfoot><tr><th scope="row">Total</th><td class="col-num num">' + brl(tot.prev) + '</td><td class="col-num num">' + brl(tot.exe) + '</td><td class="col-num num">' + (tot.rea ? brl(tot.rea) : "—") + '</td><td class="col-num num">—</td><td></td></tr></tfoot></table></div></details></section>';
+    return cad + instr + cro;
+  }
+
+  const PAINEIS = { medicoes: painelMedicoes, prazos: painelPrazos, reajuste: painelReajuste, documentos: painelDocumentos, contrato: painelContrato };
+
+  function ligarPainel() {
+    const p = $("painel");
+    p.querySelectorAll("tr.abrivel").forEach(tr => tr.addEventListener("click", e => { if (!e.target.closest("a")) location.href = tr.dataset.href; }));
+    $("ver-todas")?.addEventListener("click", () => { todasAnteriores = !todasAnteriores; desenharAbas(); });
+    p.querySelectorAll("[data-form]").forEach(b => b.addEventListener("click", () => {
+      formAberto = b.dataset.form || null; desenharAbas();
+      const f = p.querySelector(".formulario-aba"); if (f) f.querySelector("input,select")?.focus();
+    }));
+    // o menu fecha ao clicar fora
+    p.querySelectorAll(".menu-acoes").forEach(m => document.addEventListener("click", e => { if (!m.contains(e.target)) m.open = false; }));
+  }
+
+  desenharCurva();
+  desenharAbas();
+  const secaoInicial = location.hash && document.querySelector(location.hash);
+  if (secaoInicial) secaoInicial.scrollIntoView({ block: "start" });
+})();
+</script>
+</body></html>

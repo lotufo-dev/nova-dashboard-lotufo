@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { brl, contar } from "./formato";
 import { IconeAlerta, IconeDocumento } from "./icones";
@@ -11,8 +11,9 @@ import "./aguardandoPagamento.css";
 
 // Aguardando pagamento (redesenho #158, prototipo aprovado pelo Leo em 14/10/2026, opcao D): as notas ja' enviadas
 // ao contratante (medicao `protocolada`), pelo sistema ou registradas por fora, em tres faixas pelo atraso
-// (Atrasadas 45+, Atencao 30 a 44, Em dia), com o painel da nota escolhida ao lado. Na MTPAR o numero do protocolo
-// SIGA e' registrado no painel (D10); sem ele, a marca.
+// (Atrasadas 45+, Atencao 30 a 44, Em dia), com o painel da nota escolhida ao lado. O numero do protocolo no orgao
+// (SIGA, na MTPAR) so' se digita na etapa 4 da pagina da medicao, com o comprovante (decisao de 16/10/2026): aqui a
+// marca "sem protocolo SIGA" leva ate' la'.
 
 type Linha = {
   medicao_id: number; contrato_id: number; obra: string; orgao: string; descricao: string; valor_centavos: number;
@@ -58,27 +59,10 @@ function Parada({ i }: { i: Item }) {
   );
 }
 
-function Painel({ l, podeEditar, aoMudar }: { l: Item; podeEditar: boolean; aoMudar: () => void }) {
-  const [numero, setNumero] = useState(l.numero_orgao ?? "");
-  const [ocupado, setOcupado] = useState(false);
-  const [erro, setErro] = useState("");
-  // B-07 (10/10/2026): registrar nao dizia nada (so' o selo sumia); "Número gravado." por alguns segundos
-  const [gravado, setGravado] = useState("");
-  const relogio = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(relogio.current), []);
-  async function registrar(ev: React.FormEvent) {
-    ev.preventDefault();
-    setOcupado(true); setErro(""); setGravado("");
-    try {
-      await api(`/api/notas/${l.medicao_id}/numero-orgao`, { method: "POST", body: JSON.stringify({ numero: numero.trim() }) });
-      setGravado("Número gravado.");
-      window.clearTimeout(relogio.current);
-      relogio.current = window.setTimeout(() => setGravado(""), 4000);
-      aoMudar();
-    } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); }
-  }
+function Painel({ l, podeEditar }: { l: Item; podeEditar: boolean }) {
   const mtpar = l.familia === "mtpar";
   const rotulo = mtpar ? "Nº do protocolo no SIGA" : "Nº do protocolo no órgão";
+  const etapa4 = { tela: "medicao" as const, obra: l.contrato_id, id: l.medicao_id };
   return (
     <aside id="painel-nota" className="ap__painel" aria-label="Detalhe da nota">
       <h2>{l.obra} · {l.descricao}</h2>
@@ -86,23 +70,17 @@ function Painel({ l, podeEditar, aoMudar }: { l: Item; podeEditar: boolean; aoMu
       <div className="ap__painel-valor">{brl(l.valor_centavos)}</div>
       <div className="ap__painel-envio">Enviada em <span className="num">{data(l.enviada_em)}</span> ·{" "}
         <span className="ap__fraco">{l.origem === "externo" ? "por fora" : "pelo sistema"}</span></div>
-      {mtpar && !l.numero_orgao && <div><Selo classe="selo--atencao">sem protocolo SIGA</Selo></div>}
-      {/* B-09 (10/10/2026): quem so' consulta ve o numero, sem o formulario (que dava 403) */}
-      {podeEditar ? (
-        <form className="ap__campo" onSubmit={registrar}>
-          <label htmlFor={`prot-${l.medicao_id}`}>{rotulo}</label>
-          <div className="ap__form">
-            <input id={`prot-${l.medicao_id}`} className="ap__entrada" name="numero_orgao" autoComplete="off" spellCheck={false} maxLength={100}
-              value={numero} onChange={e => setNumero(e.target.value)} />
-            <button type="submit" className="btn btn--primario" disabled={ocupado || !numero.trim() || numero.trim() === (l.numero_orgao ?? "")}>
-              {ocupado ? "Registrando…" : "Registrar"}</button>
+      <div className="ap__campo">
+        <span className="ap__rotulo">{rotulo}</span>
+        {l.numero_orgao ? <div>{l.numero_orgao}</div> : (
+          <div className="ap__sem-numero">
+            {mtpar && (podeEditar
+              ? <Link para={etapa4} secao="etapa-4" title="Registrar o número na etapa 4 da medição"><Selo classe="selo--atencao">sem protocolo SIGA</Selo></Link>
+              : <Selo classe="selo--atencao">sem protocolo SIGA</Selo>)}
+            {podeEditar && <Link className="ap__link" para={etapa4} secao="etapa-4">Registrar o número na etapa 4 da medição →</Link>}
           </div>
-          <p className={gravado ? "ap__gravado" : "ap__gravado sr-only"} role="status">{gravado}</p>
-          {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
-        </form>
-      ) : (
-        <div className="ap__campo"><span className="ap__rotulo">{rotulo}</span><div>{l.numero_orgao ?? "—"}</div></div>
-      )}
+        )}
+      </div>
       <div className="ap__links">
         <Link className="ap__link" para={{ tela: "medicao", obra: l.contrato_id, id: l.medicao_id }}>Abrir a medição →</Link>
         <Link className="ap__link" para={{ tela: "obra", id: l.contrato_id, aba: "medicoes" }}>Abrir a obra</Link>
@@ -116,7 +94,7 @@ function irAoPainel() {
   if (window.matchMedia?.("(max-width: 1180px)").matches) document.getElementById("painel-nota")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
-export default function AguardandoPagamento({ podeEditar, hoje }: { podeEditar: boolean; hoje?: string }) {
+export default function AguardandoPagamento({ hoje, podeEditar = true }: { hoje?: string; podeEditar?: boolean }) {
   const [linhas, setLinhas] = useState<Linha[] | null>(null);
   const [erro, setErro] = useState("");
   const [escolhida, setEscolhida] = useState<number | null>(null);
@@ -181,7 +159,13 @@ export default function AguardandoPagamento({ podeEditar, hoje }: { podeEditar: 
                       onClick={() => { setEscolhida(i.medicao_id); irAoPainel(); }}
                       onKeyDown={ev => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); setEscolhida(i.medicao_id); irAoPainel(); } }}>
                       <td><span className="ap__obra">{i.obra}</span> · {i.descricao}</td>
-                      <td>{i.orgao}{semSiga(i) && <> <Selo classe="selo--atencao">sem protocolo SIGA</Selo></>}</td>
+                      <td>{i.orgao}{semSiga(i) && (
+                        <> {podeEditar ? (
+                          <span onClick={ev => ev.stopPropagation()} onKeyDown={ev => ev.stopPropagation()}>
+                            <Link para={{ tela: "medicao", obra: i.contrato_id, id: i.medicao_id }} secao="etapa-4"
+                              title="Registrar o número na etapa 4 da medição"><Selo classe="selo--atencao">sem protocolo SIGA</Selo></Link></span>
+                        ) : <Selo classe="selo--atencao">sem protocolo SIGA</Selo>}</>
+                      )}</td>
                       <td className="col-num dinheiro" data-rotulo="Valor">{brl(i.valor_centavos)}</td>
                       <td className="num" data-rotulo="Enviada em">{data(i.enviada_em)}{i.origem === "externo" && <span className="ap__origem">por fora</span>}</td>
                       <td data-rotulo="Parada há"><Parada i={i} /></td>
@@ -192,7 +176,7 @@ export default function AguardandoPagamento({ podeEditar, hoje }: { podeEditar: 
             ))}
           </table>
         </section>
-        <Painel key={atual.medicao_id} l={atual} podeEditar={podeEditar} aoMudar={() => void carregar()} />
+        <Painel key={atual.medicao_id} l={atual} podeEditar={podeEditar} />
       </div>
     </>
   );

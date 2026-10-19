@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
-import { api, apiForm, mensagemDeErro } from "./api";
+import { api, apiForm, baixarArquivo, mensagemDeErro } from "./api";
 import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
-import { ir, trocarBusca, type Busca } from "./rota";
+import { trocarBusca, type Busca } from "./rota";
 import { Link } from "./Link";
-import { fmtDataPura, hojeLocal } from "./tempo";
+import Selo from "./Selo";
+import { fmtDataPura } from "./tempo";
 import "./notas.css";
+import "./enviarNota.css";
 
 // Notas a enviar (2026-10-09; plano docs/superpowers/plans/2026-10-09-notas-envio.md): as notas emitidas que
 // ainda nao foram ao contratante, por grupo de orgao, e o painel do envio escolhido. As regras (o que vai junto,
@@ -23,6 +25,7 @@ export type Envio = {
   grupo: string; a_pedido: boolean; medicao_ids: number[]; descricao: string; notas: NotaEnvio[];
   valor_centavos: number; emitida_em: string | null; dias: number | null; situacao: string;
   aviso: string | null; itens: ItemEnvio[]; protocolo_id: number | null;
+  envio_reservado_em?: string | null;   // so' leitura: o e-mail do envio comecado pode estar saindo (so' entao ha' o que liberar)
   irmas?: Irma[];   // issue #172: SINFRA e Pref. VG: a medicao/reajuste irma com nota emitida fora deste envio
   // issue #188: onde o orgao junta, a outra metade ainda sem as notas segura o envio (situacao "esperando")
   espera?: { medicao_id: number; titulo: string; tipo: string; texto: string } | null;
@@ -50,15 +53,14 @@ function emitida(e: Envio): string {
   return `${plural ? "emitidas" : "emitida"} há ${e.dias} dias`;
 }
 
-/** Inicia (ou reabre) o protocolo do envio com estas medicoes; devolve o id. */
-export async function iniciarEnvio(contratoId: number, medicaoIds: number[], familia?: string): Promise<number> {
+/** Orgaos que levam carta com numero de oficio (MTPAR, SES e prefeituras); a SINFRA (etapa nota) nao. */
+export const pedeOficio = (familia: string) => familia !== "sinfra";
+
+/** Inicia (ou reabre) o protocolo do envio com estas medicoes; devolve o id. O numero do oficio (so' onde o orgao
+ *  pede carta) vem da janela da etapa 4. */
+export async function iniciarEnvio(contratoId: number, medicaoIds: number[], numeroOficio?: string): Promise<number> {
   const corpo: Record<string, unknown> = { contrato_id: contratoId, medicao_ids: medicaoIds };
-  // MTPAR, SES e prefeituras levam carta com numero de oficio; a SINFRA (etapa nota) nao.
-  if (familia && familia !== "sinfra") {
-    const n = window.prompt("Número do ofício desta nota (só o número, ex.: 361)");
-    if (n === null) throw new Error("Envio não iniciado: informe o número do ofício.");
-    corpo.numero_oficio = n.trim();
-  }
+  if (numeroOficio !== undefined) corpo.numero_oficio = numeroOficio.trim();
   const r = await api<{ protocolo_id: number }>("/api/notas/envio/iniciar", { method: "POST",
     body: JSON.stringify(corpo) });
   return r.protocolo_id;
@@ -115,10 +117,18 @@ export function ItensEnvio({ itens, aoMudar, podeEditar = true }: { itens: ItemE
     try { await apiForm(`/api/medicoes/${it.medicao_id}/notas`, fd); aoMudar(); } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); }
   }
 
-  // issue #148: falta a assinada mas a FRC ja' foi gerada: o link para baixa-la fica no proprio item
+  // issue #148: falta a assinada mas a FRC ja' foi gerada: o link para baixa-la fica no proprio item. Issue #169: a FRC
+  // que ficou desatualizada depois de a tela carregar e' recusada pelo servidor; a mensagem aparece e a tela recarrega
+  async function baixar(caminho: string) {
+    setErro("");
+    try { await baixarArquivo(caminho, "FRC.pdf"); } catch (e) { setErro(mensagem(e)); aoMudar(); }
+  }
   const baixarFrc = (it: ItemEnvio) => it.frc_gerada && it.estado !== "ok" && it.medicao_id ? (
     <span className="nota-item__detalhe">
-      <a className="link forte" href={`/api/medicoes/${it.medicao_id}/frc/pdf`}>Baixar a FRC gerada (nº {it.frc_gerada})</a>
+      <a className="link forte" href={`/api/medicoes/${it.medicao_id}/frc/pdf`}
+        onClick={ev => { ev.preventDefault(); void baixar(`/api/medicoes/${it.medicao_id}/frc/pdf`); }}>
+        Baixar a FRC gerada (nº {it.frc_gerada})
+      </a>
     </span>
   ) : null;
 
@@ -184,100 +194,156 @@ export function avisoPorFora(juntas: Irma[], qtdEnvio: number): string {
   return qtdEnvio > 1 ? "Envio registrado: as notas foram para Aguardando pagamento." : "Envio registrado: a nota foi para Aguardando pagamento.";
 }
 
-/** "Registrar envio feito por fora": o e-mail ja' saiu pelo Outlook; data (obrigatoria), observacao e o .eml.
- *  `irmas` (issue #172): onde medicao e reajuste vao juntos, a irma fora deste envio entra marcada no mesmo registro. */
-export function EnvioPorFora({ medicaoIds, irmas = [], aoFeito }: { medicaoIds: number[]; irmas?: Irma[];
-  aoFeito: (irmasJuntas: Irma[]) => void }) {
-  const [aberto, setAberto] = useState(false);
-  const [data, setData] = useState(hojeLocal());
-  const [obs, setObs] = useState("");
-  const [eml, setEml] = useState<File | null>(null);
-  const [ocupado, setOcupado] = useState(false);
-  const [erro, setErro] = useState("");
-  const [fora, setFora] = useState<number[]>([]);   // irmas desmarcadas
+/* ------------------------------------------------------ certidoes, com a validade de cada uma */
 
-  async function gravar(ev: React.FormEvent) {
-    ev.preventDefault();
-    const fd = new FormData();
-    const juntas = irmas.filter(i => !fora.includes(i.medicao_id));
-    for (const id of medicaoIds) fd.append("medicao_ids", String(id));
-    // a irma vai a' parte: o servidor confere de novo se ela pode ir junto (revisor da PR #178)
-    for (const i of juntas) fd.append("irma_ids", String(i.medicao_id));
-    fd.append("enviado_em", data);
-    fd.append("observacao", obs);
-    if (eml) fd.append("eml", eml);
-    setOcupado(true); setErro("");
-    try {
-      await apiForm("/api/notas/envio-externo", fd);
-      setAberto(false);
-      aoFeito(juntas);
-    } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); }
-  }
+export type ItemCertidao = { entidade_id: number; entidade: string | null; tipo: string; chave?: string | null; situacao: string;
+  validade: string | null; dias: number | null; competencia?: string | null };
 
+/** A natureza que decide quais documentos o orgao exige deste envio: reajuste so' quando o envio e' so' de reajuste. */
+export const naturezaDoEnvio = (e: Envio) => (e.notas.length > 0 && e.notas.every(n => n.natureza === "reajuste") ? "reajuste" : "execucao");
+
+/** Os documentos exigidos da obra para o envio, com a validade de cada um (o servidor decide o que vale). */
+export function useCertidoes(contratoId: number, natureza: string): ItemCertidao[] | null {
+  const [itens, setItens] = useState<ItemCertidao[] | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    setItens(null);
+    if (!contratoId) return;
+    api<{ itens: ItemCertidao[] }>(`/api/contratos/${contratoId}/checklist-protocolo?natureza=${natureza}`)
+      .then(r => { if (vivo) setItens(r.itens.filter(i => i.situacao !== "nao_se_aplica" && i.chave !== "regularidade")); })
+      .catch(() => { if (vivo) setItens(null); });
+    return () => { vivo = false; };
+  }, [contratoId, natureza]);
+  return itens;
+}
+
+function textoCertidao(i: ItemCertidao): string {
+  if (i.situacao === "pendente") return "sem validade hoje";
+  const validade = i.validade ? `válida até ${fmtDataPura(i.validade.slice(0, 10))}` : "válida";
+  return i.situacao === "vencendo" && i.dias !== null ? `${validade} · vence em ${i.dias} ${i.dias === 1 ? "dia" : "dias"}` : validade;
+}
+
+/** Uma linha por certidao: o ponto (verde, ambar, vermelho) e a validade, por empresa quando ha mais de uma. */
+export function ListaCertidoes({ itens }: { itens: ItemCertidao[] }) {
+  const empresas = [...new Map(itens.map(i => [i.entidade_id, i.entidade] as const)).entries()];
   return (
-    <div className="nota-porfora">
-      <button type="button" className="botao-link" onClick={() => { setFora([]); setAberto(true); }}>Registrar envio feito por fora</button>
-      <p className="nota-porfora__dica">Quando o e-mail já saiu pelo Outlook: informe a data e anexe o e-mail enviado.</p>
-      {aberto && (
-        <div className="ol-modal-fundo" role="presentation" onMouseDown={() => setAberto(false)}>
-          <form className="cartao nota-modal" role="dialog" aria-modal="true" aria-labelledby="titulo-porfora"
-            onMouseDown={ev => ev.stopPropagation()} onKeyDown={ev => { if (ev.key === "Escape") setAberto(false); }} onSubmit={gravar}>
-            <div className="cartao__cabeca"><h2 className="cartao__titulo" id="titulo-porfora">Registrar envio feito por fora</h2></div>
-            <div className="cartao__corpo pilha">
-              <div className="campo">
-                <label className="campo__rotulo" htmlFor="porfora-data">Data do envio (obrigatória)</label>
-                <input id="porfora-data" type="date" required autoFocus value={data} max={hojeLocal()} onChange={e => setData(e.target.value)} />
-              </div>
-              <div className="campo">
-                <label className="campo__rotulo" htmlFor="porfora-obs">Observação</label>
-                <textarea id="porfora-obs" rows={3} maxLength={2000} value={obs} onChange={e => setObs(e.target.value)} />
-              </div>
-              <div className="campo">
-                <label className="campo__rotulo" htmlFor="porfora-eml">E-mail enviado (.eml, opcional)</label>
-                <input id="porfora-eml" type="file" accept=".eml,message/rfc822" onChange={e => setEml(e.target.files?.[0] ?? null)} />
-              </div>
-              {irmas.map(i => (
-                <label key={i.medicao_id} className="campo--linha">
-                  <input type="checkbox" checked={!fora.includes(i.medicao_id)}
-                    onChange={e => setFora(e.target.checked ? fora.filter(x => x !== i.medicao_id) : [...fora, i.medicao_id])} />
-                  Incluir também {i.tipo === "reajuste" ? "o" : "a"} {i.titulo} (saiu no mesmo e-mail)
-                </label>
-              ))}
-              {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
-              <div className="form-inline">
-                <button type="submit" className="btn btn--primario" disabled={ocupado || !data}>{ocupado ? "Gravando…" : "Registrar"}</button>
-                <button type="button" className="btn" onClick={() => setAberto(false)}>Cancelar</button>
-              </div>
-            </div>
-          </form>
+    <div className="certidoes-bloco">
+      <p className="med-sub">Certidões <span className="campo__nota">— {empresas.length > 1 ? "do consórcio e das consorciadas" : "da empresa"}, conferidas hoje</span></p>
+      {empresas.map(([eid, nome]) => (
+        <div key={eid}>
+          {empresas.length > 1 && <p className="campo__nota certidoes__empresa">{nome ?? "Empresa sem nome no cadastro"}</p>}
+          <ul className="certidoes">
+            {itens.filter(i => i.entidade_id === eid).map(i => (
+              <li key={`${i.entidade_id}-${i.tipo}`}>
+                <span className={`ponto${i.situacao === "pendente" ? " ponto--acao" : i.situacao === "vencendo" ? " ponto--atencao" : ""}`} aria-hidden="true" />
+                <span>{i.tipo}</span> <small>· {textoCertidao(i)}</small>
+              </li>
+            ))}
+          </ul>
         </div>
-      )}
+      ))}
+      <p className="campo__nota certidoes__nota">Certidão vencida bloqueia o envio; emita a nova em{" "}
+        <Link para={{ tela: "documentos" }}>Documentos</Link>.</p>
     </div>
   );
 }
 
-function Painel({ e, aoMudar, podeEditar }: { e: Envio; aoMudar: (msg?: string) => void; podeEditar: boolean }) {
-  const [ocupado, setOcupado] = useState(false);
-  const [erro, setErro] = useState("");
-  const bloqueado = e.situacao === "bloqueado";
-  const esperando = e.situacao === "esperando";
+/* --------------------------------------------------------------- a aba Enviar nota */
 
-  async function enviar() {
-    // o envio acontece na etapa 4 da pagina da medicao (opcao A, 2026-10-09); o protocolo e' iniciado aqui
-    // para o numero do oficio ser pedido uma vez so'
-    setOcupado(true); setErro("");
-    try {
-      if (!e.protocolo_id) await iniciarEnvio(e.contrato_id, e.medicao_ids, e.familia);
-      ir({ tela: "medicao", obra: e.contrato_id, id: e.medicao_ids[0] }, { secao: "etapa-4" });
-    }
-    catch (x) { setErro(mensagem(x)); setOcupado(false); }
+// Medicoes › Enviar nota (#157, opcao B, aprovada em 16/10/2026): a lista a esquerda e, a direita, a nota escolhida
+// com o que vai junto e o que falta. A aba so' mostra e leva: enviar, anexar o que falta e registrar um envio feito
+// fora do sistema se fazem na etapa 4 da pagina da medicao.
+
+type Situacao = "pronto" | "pendencia";
+type FiltroId = "todas" | "prontas" | "pendencia";
+const FILTROS: { id: FiltroId; rotulo: string }[] = [
+  { id: "todas", rotulo: "Todas" }, { id: "prontas", rotulo: "Prontas" }, { id: "pendencia", rotulo: "Com pendência" },
+];
+
+type Resumo = { situacao: Situacao; selo: string; nivel: "" | "selo--ok" | "selo--atencao" | "selo--acao";
+  motivo: string; tom: "neutro" | "atencao" | "bloqueio" };
+
+/** O selo do cartao e a frase do rodape: o que falta, em palavras. So' o bloqueio apaga o botao. `onde`: a aba
+ *  manda anexar na etapa 4 da medicao; la' mesmo, anexa-se no envio. */
+export function resumoDe(e: Envio, onde: "aba" | "etapa" = "aba"): Resumo {
+  if (e.situacao === "bloqueado") {
+    const venc = e.itens.find(i => i.estado === "vencida");
+    return { situacao: "pendencia", selo: venc ? "Certidão vencida" : "Bloqueado", nivel: "selo--acao",
+      motivo: e.aviso ? (/^bloque/i.test(e.aviso) ? e.aviso : `Envio bloqueado: ${e.aviso}`) : "Envio bloqueado.", tom: "bloqueio" };
   }
+  if (e.situacao === "esperando") {
+    const qual = e.espera?.tipo === "execucao" ? "a medição" : "o reajuste";
+    return { situacao: "pendencia", selo: `Esperando ${qual}`, nivel: "selo--atencao",
+      motivo: `Esperando as notas d${qual}.`, tom: "atencao" };
+  }
+  // certidao a menos de 15 dias do vencimento so' avisa: o envio segue pronto, com o aviso ao lado
+  const aviso = e.itens.find(i => i.estado === "aviso");
+  const falta = e.itens.find(i => i.estado === "falta");
+  if (!falta && aviso) {
+    return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok", motivo: e.aviso ?? aviso.detalhe ?? aviso.rotulo, tom: "atencao" };
+  }
+  if (falta) {
+    const rotulo = /^[A-ZÀ-Ý]{2}/.test(falta.rotulo) ? falta.rotulo : falta.rotulo.charAt(0).toLowerCase() + falta.rotulo.slice(1);
+    return { situacao: "pendencia", selo: falta.estado === "falta" ? `Falta ${rotulo}` : falta.rotulo, nivel: "selo--atencao",
+      motivo: e.aviso ?? (onde === "etapa" ? `Falta ${rotulo}: anexe no envio, ou envie assim.`
+        : falta.acao === "anexar_frc"
+          ? "Falta a FRC assinada: anexe na etapa 4 da medição, ou envie assim (a etapa 4 diz o que o envio pede)."
+          : `Falta ${rotulo}: veja na etapa 4 da medição.`), tom: "atencao" };
+  }
+  return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok",
+    motivo: "Tudo pronto: a nota abre na etapa 4 da medição, com o e-mail montado (lá se pede o nº do ofício, quando o órgão exige).", tom: "neutro" };
+}
 
+/** O que vai junto, so' para ler: cada item com o estado e, onde falta algo, o caminho ate' onde se resolve. */
+function ItensLeitura({ e, certidoes }: { e: Envio; certidoes: ItemCertidao[] | null }) {
+  const [erroBaixar, setErroBaixar] = useState("");
+  // issue #169: a FRC desatualizada e' recusada pelo servidor; a mensagem aparece aqui em vez do JSON do erro
+  async function baixar(caminho: string) {
+    setErroBaixar("");
+    try { await baixarArquivo(caminho, "FRC.pdf"); } catch (x) { setErroBaixar(mensagem(x)); }
+  }
+  const aqui = { tela: "medicao" as const, obra: e.contrato_id, id: e.medicao_ids[0] };
+  const itens = certidoes && certidoes.length > 0 ? e.itens.filter(i => !i.chave.startsWith("certidoes")) : e.itens;
   return (
-    <section className="nota-painel" aria-labelledby="titulo-envio">
+    <ul className="nota-itens">
+      {itens.map(it => (
+        <li key={it.chave}>
+          <EstadoItem estado={it.estado} />
+          <span className="nota-item">
+            <span className="nota-item__texto">
+              <span>{it.rotulo}</span>
+              {it.detalhe && <span className={`nota-item__detalhe nota-item__detalhe--${it.estado}`}>{it.detalhe}</span>}
+              {it.acao === "anexar_frc" && it.estado !== "ok" && it.frc_gerada && it.medicao_id && (
+                <span className="nota-item__detalhe">
+                  <a className="link forte" href={`/api/medicoes/${it.medicao_id}/frc/pdf`}
+                    onClick={ev => { ev.preventDefault(); void baixar(`/api/medicoes/${it.medicao_id}/frc/pdf`); }}>Baixar a FRC gerada (nº {it.frc_gerada})</a>
+                </span>
+              )}
+              {it.acao === "anexar_frc" && it.estado !== "ok" && (
+                <span className="nota-item__detalhe">anexe na <Link className="link forte" para={aqui} secao="etapa-4">etapa 4 da medição</Link></span>
+              )}
+              {it.acao === "anexar_regularidade" && (
+                <span className="nota-item__detalhe">anexe em <Link className="link forte" para={{ tela: "documentos" }}>Documentos</Link></span>
+              )}
+            </span>
+          </span>
+        </li>
+      ))}
+      {erroBaixar && <li><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroBaixar}</p></li>}
+    </ul>
+  );
+}
+
+function Painel({ e, podeEditar }: { e: Envio; podeEditar: boolean }) {
+  const r = resumoDe(e);
+  const certidoes = useCertidoes(e.contrato_id, naturezaDoEnvio(e));
+  const aqui = { tela: "medicao" as const, obra: e.contrato_id, id: e.medicao_ids[0] };
+  return (
+    <section className="nota-painel" id="painel-nota" aria-labelledby="titulo-envio">
       <div className="nota-painel__bloco">
-        <h2 className="nota-painel__titulo" id="titulo-envio">{e.obra} — {e.descricao}</h2>
-        <p className="nota-painel__meta">{[e.orgao, e.orgao_sub, notasDe(e)].filter(Boolean).join(" · ")}</p>
+        <h2 className="nota-painel__titulo" id="titulo-envio">{e.obra} · {e.descricao}</h2>
+        <p className="nota-painel__meta">{[e.orgao, e.orgao_sub, notasDe(e), e.dias !== null ? `parada há ${e.dias} ${e.dias === 1 ? "dia" : "dias"}` : "",
+          e.a_pedido ? "a pedido do órgão" : ""].filter(Boolean).join(" · ")}</p>
       </div>
       <div className="nota-painel__bloco">
         <p className="nota-painel__valor nota-mono">{brl(e.valor_centavos)}</p>
@@ -285,27 +351,26 @@ function Painel({ e, aoMudar, podeEditar }: { e: Envio; aoMudar: (msg?: string) 
       </div>
       <div className="nota-painel__junto">
         <span className="nota-painel__sub">O que vai junto</span>
-        <ItensEnvio itens={e.itens} aoMudar={() => aoMudar()} podeEditar={podeEditar} />
+        <ItensLeitura e={e} certidoes={certidoes} />
+        {certidoes && certidoes.length > 0 && <ListaCertidoes itens={certidoes} />}
       </div>
-      {bloqueado && <CaixaAviso nivel="critico">{e.aviso ?? "Envio bloqueado."}</CaixaAviso>}
       {/* issue #188: a medicao e o reajuste vao no mesmo e-mail; sem as notas da outra metade, nao ha' o que iniciar */}
-      {esperando && (
+      {e.situacao === "esperando" && (
         <CaixaAviso nivel="atencao">
           {e.orgao} recebe a medição e o reajuste no mesmo e-mail: {e.espera?.texto ?? "esperando a outra metade"}.
           {" "}Para mandar sem {e.espera?.tipo === "execucao" ? "a medição" : "o reajuste"}, use a saída de emergência na{" "}
-          <Link para={{ tela: "medicao", obra: e.contrato_id, id: e.medicao_ids[0] }} secao="etapa-3">página da medição</Link>.
+          <Link para={aqui} secao="etapa-4">etapa 4 da medição</Link>.
         </CaixaAviso>
       )}
-      {/* B-09 (10/10/2026): a diretoria via o botao e recebia 403; quem so' consulta nao ve as acoes */}
-      {podeEditar && !esperando && <div className="nota-painel__acao">
-        <button type="button" className="btn btn--primario nota-principal" disabled={bloqueado || ocupado} onClick={() => void enviar()}>
-          {ocupado ? "Abrindo…" : "Enviar a nota →"}
-        </button>
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
-        {!bloqueado && <EnvioPorFora medicaoIds={e.medicao_ids} irmas={e.irmas}
-          aoFeito={js => aoMudar(`Envio registrado: ${e.obra} · ${[e.descricao, ...js.map(i => i.titulo)].join(" + ")} `
-            + `${js.length ? "foram" : "foi"} para Aguardando pagamento.`)} />}
-      </div>}
+      <div className="en-rodape">
+        <p className={`en-motivo en-motivo--${r.tom}`}>{r.motivo}</p>
+        <Link className="en-abrir" para={aqui}>Abrir a medição</Link>
+        {/* B-09 (10/10/2026): quem so' consulta ve o que vai no envio, sem o botao */}
+        {podeEditar && e.situacao !== "esperando" && (e.situacao === "bloqueado"
+          ? <button type="button" className="btn btn--primario" disabled>Enviar a nota →</button>
+          : <Link className="btn btn--primario" para={aqui} secao="etapa-4">Enviar a nota →</Link>)}
+      </div>
+      <p className="nota-porfora__dica en-dica">Enviar, anexar o que falta e registrar um envio feito fora do sistema se fazem na etapa 4 da medição.</p>
     </section>
   );
 }
@@ -314,8 +379,6 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
   const [dados, setDados] = useState<ListaEnvios | null>(null);
   const [erro, setErro] = useState("");
   const [sel, setSel] = useState<string | null>(null);
-  const [feito, setFeito] = useState(busca.enviada ? `Nota enviada: ${busca.enviada}. Ela está em Aguardando pagamento.`
-    : busca.registrada ? `Envio registrado: ${busca.registrada} foi para Aguardando pagamento.` : "");
 
   const carregar = useCallback(async () => {
     try { setDados(await api<ListaEnvios>("/api/notas/a-enviar")); setErro(""); } catch (e) { setErro(mensagem(e)); }
@@ -324,14 +387,19 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
 
   const grupo = busca.grupo ?? "";
   const q = busca.q ?? "";
+  const filtro = (FILTROS.find(f => f.id === busca.situacao)?.id ?? "todas") as FiltroId;
   const termo = q.trim().toLocaleLowerCase("pt-BR");
   const envios = dados?.envios ?? [];
-  const filtrados = envios.filter(e => (!grupo || e.grupo === grupo)
+  const doFiltro = (e: Envio, f: FiltroId) => f === "todas" || (f === "prontas" ? resumoDe(e).situacao === "pronto" : resumoDe(e).situacao === "pendencia");
+  const filtrados = envios.filter(e => (!grupo || e.grupo === grupo) && doFiltro(e, filtro)
     && (!termo || [e.obra, e.descricao, e.orgao, ...e.notas.map(n => n.numero)].join(" ").toLocaleLowerCase("pt-BR").includes(termo)));
   const atual = filtrados.find(e => e.chave === sel) ?? filtrados[0] ?? null;
   const grupos = [...GRUPOS, ...[...new Set(envios.map(e => e.grupo))].filter(g => !GRUPOS.includes(g))];
-  const contador = (g: string) => dados?.contadores[g] ?? envios.filter(e => !g || e.grupo === g).length;
-  const comGrupo = (g: string): Busca => (g ? { ...(q ? { q } : {}), grupo: g } : (q ? { q } : {}));
+  const comFiltro = (mudanca: Record<string, string>): Busca => {
+    const novo: Busca = { ...(q ? { q } : {}), ...(grupo ? { grupo } : {}), ...(filtro !== "todas" ? { situacao: filtro } : {}), ...mudanca };
+    for (const k of Object.keys(novo)) if (novo[k] === "" || novo[k] === "todas") delete novo[k];
+    return novo;
+  };
 
   if (!dados) {
     return erro
@@ -340,48 +408,52 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
       : <p className="campo__nota">Carregando as notas…</p>;
   }
 
-  return (
-    <div className="pilha notas-v3">
-      <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
-      <div className="nota-busca-caixa">
-        <svg className="nota-busca__lupa" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
-        <input type="search" className="nota-busca" placeholder="Buscar nota ou obra…" aria-label="Buscar nota ou obra"
-          autoComplete="off" value={q} onChange={e => trocarBusca({ q: e.target.value || null })} />
-      </div>
-      <div className="nota-pilulas" role="group" aria-label="Órgão">
-        <Link className="nota-pilula" para={{ tela: "medicoes", aba: "enviar-nota" }} busca={comGrupo("")} aria-current={grupo === "" ? "true" : undefined}>
-          Todas{" "}<span className="nota-pilula__n num">{contador("Todas")}</span>
-        </Link>
-        {grupos.map(g => (
-          <Link key={g} className="nota-pilula" para={{ tela: "medicoes", aba: "enviar-nota" }} busca={comGrupo(g)} aria-current={grupo === g ? "true" : undefined}>
-            {g}{" "}<span className="nota-pilula__n num">{contador(g)}</span>
-          </Link>
-        ))}
-      </div>
+  if (envios.length === 0) {
+    return (
+      <section className="cartao nota-vazia notas-v3" aria-label="Notas a enviar">
+        <div className="vazio">
+          <span className="nota-vazia__icone" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+              strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+          </span>
+          <p className="vazio__titulo">Nenhuma nota a enviar</p>
+          <p>As próximas aparecem aqui assim que a nota entrar pela sincronização com o RM.</p>
+          <p><Link para={{ tela: "medicoes", aba: "aguardando-pagamento" }}>Ver notas aguardando pagamento</Link></p>
+        </div>
+      </section>
+    );
+  }
 
-      {envios.length === 0 ? (
-        <section className="cartao nota-vazia" aria-label="Notas a enviar">
-          <div className="vazio">
-            <span className="nota-vazia__icone" aria-hidden="true">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-            </span>
-            <p className="vazio__titulo">Nenhuma nota a enviar</p>
-            <p>As próximas aparecem aqui assim que a nota entrar pela sincronização com o RM.</p>
-            <p><Link para={{ tela: "medicoes", aba: "aguardando-pagamento" }}>Ver notas aguardando pagamento</Link></p>
-          </div>
-        </section>
-      ) : (
-        <div className="nota-colunas">
-          <div className="pilha">
+  return (
+    <div className="pilha notas-v3 en">
+      <div className="nota-colunas">
+        <div className="pilha">
+          <div className="en-lista">
+            <div className="nota-busca-caixa">
+              <svg className="nota-busca__lupa" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+              <input type="search" className="nota-busca" placeholder="Buscar nota ou obra…" aria-label="Buscar nota ou obra"
+                autoComplete="off" value={q} onChange={ev => trocarBusca({ q: ev.target.value || null })} />
+            </div>
+            <div className="en-filtros">
+              <div className="nota-pilulas" role="group" aria-label="Situação">
+                {FILTROS.map(f => (
+                  <Link key={f.id} className="nota-pilula" para={{ tela: "medicoes", aba: "enviar-nota" }} busca={comFiltro({ situacao: f.id })}
+                    aria-current={filtro === f.id ? "true" : undefined}>
+                    {f.rotulo}{" "}<span className="nota-pilula__n num">{envios.filter(e => doFiltro(e, f.id)).length}</span>
+                  </Link>
+                ))}
+              </div>
+              <select className="en-orgao" aria-label="Órgão" value={grupo} onChange={ev => trocarBusca({ grupo: ev.target.value || null })}>
+                <option value="">Todos os órgãos</option>
+                {grupos.filter(g => envios.some(e => e.grupo === g)).map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
             {filtrados.length === 0 && (
-              <section className="cartao" aria-label="Notas com esses filtros">
-                <div className="vazio vazio--curto">
-                  <p className="vazio__titulo">Nenhuma nota com esses filtros.</p>
-                  <p><Link para={{ tela: "medicoes", aba: "enviar-nota" }}>Limpar os filtros</Link></p>
-                </div>
-              </section>
+              <div className="vazio vazio--curto">
+                <p className="vazio__titulo">Nenhuma nota com esses filtros.</p>
+                <p><Link para={{ tela: "medicoes", aba: "enviar-nota" }}>Limpar os filtros</Link></p>
+              </div>
             )}
             {grupos.map(g => {
               const itens = filtrados.filter(e => e.grupo === g);
@@ -389,34 +461,38 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
               return (
                 <section key={g} className="pilha nota-grupo" aria-label={g}>
                   <h2 className="nota-grupo__titulo">{g}{itens.some(e => e.a_pedido) ? " · a pedido do órgão" : ""}</h2>
-                  {itens.map(e => (
-                    <button key={e.chave} type="button" className="nota-cartao" aria-pressed={atual?.chave === e.chave}
-                      onClick={() => setSel(e.chave)}>
-                      <span className="nota-cartao__texto">
-                        <span className="nota-cartao__obra">{e.obra}</span>
-                        <span className="nota-cartao__desc">
-                          {[e.descricao, e.notas.length === 1 ? `NF ${e.notas[0].numero}`
-                            : e.notas.length > 1 ? `${e.notas.length} notas: ${e.notas.map(n => n.numero).join(", ")}` : "", emitida(e)]
-                            .filter(Boolean).join(" · ")}
+                  {itens.map(e => {
+                    const r = resumoDe(e);
+                    return (
+                      <button key={e.chave} type="button" className="nota-cartao" aria-pressed={atual?.chave === e.chave}
+                        onClick={() => {
+                          setSel(e.chave);
+                          if (window.matchMedia?.("(max-width: 1100px)").matches) document.getElementById("painel-nota")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+                        }}>
+                        <span className="nota-cartao__texto">
+                          <span className="nota-cartao__obra">{e.obra}</span>
+                          <span className="nota-cartao__desc">
+                            {[e.descricao, e.notas.length === 1 ? `NF ${e.notas[0].numero}`
+                              : e.notas.length > 1 ? `${e.notas.length} notas: ${e.notas.map(n => n.numero).join(", ")}` : "", emitida(e)]
+                              .filter(Boolean).join(" · ")}
+                          </span>
                         </span>
-                        {e.aviso && (
-                          <CaixaAviso nivel={e.situacao === "bloqueado" ? "critico" : "atencao"} como="span">
-                            {e.situacao === "bloqueado" && !/^bloque/i.test(e.aviso) ? `Bloqueado: ${e.aviso}` : e.aviso}
-                          </CaixaAviso>
-                        )}
-                      </span>
-                      <span className={`nota-cartao__valor nota-mono${e.a_pedido ? " nota-cartao__valor--espera" : ""}`}>{brl(e.valor_centavos)}</span>
-                    </button>
-                  ))}
+                        <span className="en-direita">
+                          <span className={`nota-cartao__valor nota-mono${e.a_pedido ? " nota-cartao__valor--espera" : ""}`}>{brl(e.valor_centavos)}</span>
+                          <Selo classe={r.nivel}>{r.selo}</Selo>
+                        </span>
+                      </button>
+                    );
+                  })}
                 </section>
               );
             })}
           </div>
-          <aside className="nota-lateral" aria-label="Envio selecionado">
-            {atual && <Painel key={atual.chave} e={atual} podeEditar={podeEditar} aoMudar={msg => { if (msg) setFeito(msg); void carregar(); }} />}
-          </aside>
         </div>
-      )}
+        <aside className="nota-lateral" aria-label="Envio selecionado">
+          {atual && <Painel key={atual.chave} e={atual} podeEditar={podeEditar} />}
+        </aside>
+      </div>
     </div>
   );
 }

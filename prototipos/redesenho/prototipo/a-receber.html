@@ -1,0 +1,284 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A receber</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<style>
+/* A receber (prototipo #162). So' tokens de base.css. */
+.ar-numeros { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; }
+.ar-numero { padding: 18px 20px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.ar-numero__rotulo { font-size: 13px; color: var(--texto-2); }
+.ar-numero__valor { font-family: var(--fonte-num); font-variant-numeric: tabular-nums; font-size: 28px; line-height: 36px; font-weight: 500;
+  letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 560px) { .ar-numero__valor { font-size: 21px; line-height: 28px; } }
+.ar-numero__apoio { font-size: 12.5px; color: var(--texto-2); }
+.ar-numero__apoio .dinheiro { font-family: var(--fonte-num); }
+
+.ar-grafico { padding: 8px 20px 4px; }
+.ar-grafico svg { display: block; width: 100%; height: auto; overflow: visible; }
+.ar-grafico text { font-family: var(--fonte-num); font-size: 11px; fill: var(--texto-2); }
+.ar-grafico .g-mes { font-family: var(--fonte); font-size: 12px; }
+.ar-grafico .g-mes--atual { fill: var(--acento); font-weight: 600; }
+.ar-grafico .g-grade { stroke: var(--linha-suave); }
+.ar-grafico .g-base { stroke: var(--linha); }
+.ar-grafico .b-previsto { fill: var(--previsto); }
+.ar-grafico .b-recebido { fill: var(--ok-ponto); }
+.ar-grafico .b-previsao { fill: var(--superficie-2); stroke: var(--linha-hover); stroke-width: 1; stroke-dasharray: 4 3; }
+.ar-grafico .g-atual { fill: var(--hover); }
+.ar-grafico .g-alvo { fill: transparent; cursor: pointer; }
+.ar-grafico .g-grupo:focus { outline: none; }
+.ar-grafico .g-grupo:focus-visible .g-alvo, .ar-grafico .g-grupo.selecionado .g-alvo { stroke: var(--acento); stroke-width: 1.5; }
+.ar-grafico .g-grupo:hover .g-alvo { fill: var(--hover); fill-opacity: .5; }
+.ar-grafico .t-previsao { font-family: var(--fonte); font-size: 11px; fill: var(--texto-2); }
+.ar-detalhe { margin: 0; padding: 10px 20px 14px; font-size: 13px; color: var(--texto-2); max-width: none; border-top: 1px solid var(--linha); }
+.ar-detalhe strong { color: var(--texto); font-weight: 500; }
+.ar-detalhe .dinheiro { font-family: var(--fonte-num); }
+.legenda__chave--recebido { background: var(--ok-ponto); }
+.legenda__chave--previsao { background: var(--superficie-2); border: 1px dashed var(--linha-hover); }
+.cartao__cabeca .legenda { border: 0; padding: 0; margin-left: auto; }
+
+.ar-duas { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (min-width: 1100px) { .ar-duas { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); } }
+
+.ar-obras { list-style: none; margin: 0; padding: 4px 0; }
+.ar-obra { display: grid; grid-template-columns: minmax(0, 11rem) minmax(60px, 1fr) 8.5rem; align-items: center; gap: 4px 16px;
+  width: 100%; height: auto; padding: 10px 20px; border: 0; border-radius: 0; background: none; text-align: left; font-weight: 400; font-size: 14px; }
+.ar-obra:hover:not(:disabled) { background: var(--hover); border: 0; }
+.ar-obra[aria-pressed="true"] { background: var(--acento-fundo); }
+.ar-obra__nome { color: var(--texto); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar-obra__nome small { display: block; font-size: 12px; color: var(--texto-2); }
+.ar-obra__trilho { height: 8px; border-radius: var(--raio-pilula); background: var(--linha-suave); overflow: hidden; }
+.ar-obra__barra { display: block; height: 100%; border-radius: var(--raio-pilula); background: var(--marca); }
+.ar-obra__valor { font-family: var(--fonte-num); font-variant-numeric: tabular-nums; color: var(--texto); text-align: right; white-space: nowrap; }
+.ar-obras__total { display: flex; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--linha);
+  background: var(--superficie-2); border-radius: 0 0 var(--raio) var(--raio); font-weight: 600; }
+.ar-obras__total .dinheiro { font-family: var(--fonte-num); }
+@media (max-width: 560px) {
+  .ar-obra { grid-template-columns: minmax(0, 1fr) auto; }
+  .ar-obra__nome { white-space: normal; }
+  .ar-obra__trilho { grid-column: 1 / -1; grid-row: 2; }
+}
+
+.ar-filtro[hidden] { display: none; }
+.ar-filtro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tabela tbody td.ar-forte { color: var(--texto); }
+.tabela tbody td.ar-data { font-family: var(--fonte-num); white-space: nowrap; }
+.tabela tfoot td, .tabela tfoot th { padding: 12px; border-top: 1px solid var(--linha); background: var(--superficie-2); font-weight: 600; text-align: left; }
+.tabela tfoot th:first-child { padding-left: 20px; }
+.tabela tfoot td:last-child { padding-right: 20px; }
+@media (max-width: 720px) {
+  .tabela--empilha thead { display: none; }
+  .tabela--empilha, .tabela--empilha tbody, .tabela--empilha tfoot { display: block; }
+  .tabela--empilha tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; padding: 12px 16px; border-bottom: 1px solid var(--linha-suave); }
+  .tabela--empilha tbody td, .tabela--empilha tfoot td, .tabela--empilha tfoot th { display: block; padding: 0 !important; border: 0 !important; text-align: left; }
+  .tabela--empilha tfoot tr { background: var(--superficie-2); border-bottom: 0; }
+  .tabela--empilha tfoot td:empty { display: none; }
+  .tabela--empilha [data-rotulo]::before { content: attr(data-rotulo); display: block; font-family: var(--fonte); font-size: 12px; color: var(--texto-2); font-weight: 400; }
+  .tabela--empilha .col-largo { grid-column: 1 / -1; }
+  .tabela--empilha td.col-num { text-align: left; }
+}
+</style></head>
+<body data-secao="a-receber" data-titulo="A receber"><main id="conteudo">
+<div class="pagina">
+  <h1 class="sr-only">A receber</h1>
+  <p class="pagina__descricao">Medições protocoladas esperando pagamento e o que entrou no mês. Todos os valores na cota da empresa no contrato.</p>
+
+  <section class="ar-numeros" aria-label="Resumo">
+    <div class="cartao ar-numero">
+      <span class="ar-numero__rotulo">A receber, na cota</span>
+      <span class="ar-numero__valor" id="n-total"></span>
+      <span class="ar-numero__apoio num" id="n-total-apoio"></span>
+    </div>
+    <div class="cartao ar-numero">
+      <span class="ar-numero__rotulo">Previsto em outubro</span>
+      <span class="ar-numero__valor" id="n-previsto"></span>
+      <span class="ar-numero__apoio">o que se esperava receber no mês</span>
+    </div>
+    <div class="cartao ar-numero">
+      <span class="ar-numero__rotulo">Recebido em outubro</span>
+      <span class="ar-numero__valor" id="n-recebido"></span>
+      <span class="ar-numero__apoio num" id="n-recebido-apoio"></span>
+    </div>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-grafico">
+    <div class="cartao__cabeca cartao__cabeca--quebra" style="flex-wrap:wrap">
+      <h2 class="cartao__titulo" id="t-grafico">Previsto × recebido</h2>
+      <div class="legenda">
+        <span class="legenda__item"><span class="legenda__chave legenda__chave--previsto"></span>Previsto</span>
+        <span class="legenda__item"><span class="legenda__chave legenda__chave--recebido"></span>Recebido</span>
+        <span class="legenda__item"><span class="legenda__chave legenda__chave--previsao"></span>Previsão</span>
+      </div>
+    </div>
+    <div class="ar-grafico" id="grafico" role="group" aria-label="Previsto e recebido nos últimos 6 meses e previsão dos próximos 3"></div>
+    <p class="ar-detalhe" id="detalhe" role="status"></p>
+  </section>
+
+  <div class="ar-duas">
+    <section class="cartao" aria-labelledby="t-obras">
+      <div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-obras">Por obra</h2><span class="cartao__dica">clique para ver as medições da obra</span></div>
+      <ul class="ar-obras" id="obras"></ul>
+      <div class="ar-obras__total"><span>Total</span><span class="dinheiro" id="obras-total"></span></div>
+    </section>
+
+    <section class="cartao" aria-labelledby="t-medicoes">
+      <div class="cartao__cabeca cartao__cabeca--quebra" style="flex-wrap:wrap">
+        <h2 class="cartao__titulo" id="t-medicoes">Medições protocoladas esperando pagamento</h2>
+        <div class="ar-filtro" id="filtro" hidden><span class="selo" id="filtro-nome"></span><button type="button" class="btn btn--pequeno" id="limpar">Mostrar todas</button></div>
+      </div>
+      <div class="tabela-wrap">
+        <table class="tabela tabela--empilha">
+          <caption class="sr-only">Medições protocoladas esperando pagamento, na cota</caption>
+          <thead><tr><th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">Protocolada em</th><th scope="col" class="col-num">Valor na cota</th><th scope="col"><span class="sr-only">Abrir</span></th></tr></thead>
+          <tbody id="medicoes"></tbody>
+          <tfoot><tr><th scope="row" class="col-largo" id="med-rodape">Total</th><td></td><td></td><td class="col-num" id="med-total" data-rotulo="Valor na cota"></td><td></td></tr></tfoot>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+</main>
+<script src="shell.js"></script>
+<script>
+(function () {
+  // valores em centavos inteiros (como o sistema); a soma das medicoes e' o total a receber e a soma por obra
+  const MEDICOES = [
+    { obra: "Avenida das Palmeiras", n: 11, comp: "08/2026", prot: "05/09/2026", v: 238816950 },
+    { obra: "Avenida das Palmeiras", n: 12, comp: "09/2026", prot: "10/10/2026", v: 184233050 },
+    { obra: "Terminal Norte", n: 6, comp: "07/2026", prot: "18/08/2026", v: 158703570 },
+    { obra: "Terminal Norte", n: 7, comp: "08/2026", prot: "28/09/2026", v: 162874430 },
+    { obra: "Ponte do Ribeirão", n: 9, comp: "08/2026", prot: "22/09/2026", v: 152188320 },
+    { obra: "Ponte do Ribeirão", n: 10, comp: "09/2026", prot: "14/10/2026", v: 129823680 },
+    { obra: "Hospital Regional", n: 3, comp: "08/2026", prot: "11/09/2026", v: 109822425 },
+    { obra: "Hospital Regional", n: 4, comp: "09/2026", prot: "01/10/2026", v: 138910575 },
+    { obra: "Anel Viário Sul", n: 2, comp: "09/2026", prot: "09/10/2026", v: 101184567 },
+    { obra: "Parque Linear", n: 5, comp: "08/2026", prot: "15/09/2026", v: 84677000 },
+  ];
+  // ultimos 6 meses (o atual por ultimo, ainda aberto) e previsao dos proximos 3
+  const MESES = [
+    { m: "mai", a: 2026, nome: "maio", prev: 381240000, rec: 240511840 },
+    { m: "jun", a: 2026, nome: "junho", prev: 421500000, rec: 280355210 },
+    { m: "jul", a: 2026, nome: "julho", prev: 510488000, rec: 359600475 },
+    { m: "ago", a: 2026, nome: "agosto", prev: 571623000, rec: 390277130 },
+    { m: "set", a: 2026, nome: "setembro", prev: 480311500, rec: 311764005 },
+    { m: "out", a: 2026, nome: "outubro", prev: 419951585, rec: 261248015, atual: true },
+    { m: "nov", a: 2026, nome: "novembro", prev: 442000000, futuro: true },
+    { m: "dez", a: 2026, nome: "dezembro", prev: 470500000, futuro: true },
+    { m: "jan", a: 2027, nome: "janeiro", prev: 521000000, futuro: true },
+  ];
+  const brl = c => "R$ " + (Math.trunc(c / 100)).toLocaleString("pt-BR") + "," + String(c % 100).padStart(2, "0");
+  const mi = c => (c / 1e8).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " mi";
+  const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  const soma = xs => xs.reduce((s, x) => s + x.v, 0);
+
+  // ------------------------------------------------------------ os tres numeros
+  const total = soma(MEDICOES);
+  const obrasN = new Set(MEDICOES.map(m => m.obra)).size;
+  const atual = MESES.find(x => x.atual);
+  document.getElementById("n-total").textContent = brl(total);
+  document.getElementById("n-total-apoio").textContent = MEDICOES.length + " medições protocoladas em " + obrasN + " obras";
+  document.getElementById("n-previsto").textContent = brl(atual.prev);
+  document.getElementById("n-recebido").textContent = brl(atual.rec);
+  document.getElementById("n-recebido-apoio").textContent = Math.round(atual.rec / atual.prev * 100) + "% do previsto · até 16/10/2026";
+
+  // ------------------------------------------------------------ grafico (SVG na largura do cartao)
+  const caixa = document.getElementById("grafico"), detalhe = document.getElementById("detalhe");
+  let escolhido = MESES.indexOf(atual);
+  function contar(i) {
+    const x = MESES[i];
+    const nome = x.nome.charAt(0).toUpperCase() + x.nome.slice(1) + " de " + x.a;
+    if (x.futuro) return "<strong>" + nome + "</strong> (previsão): <span class=\"dinheiro\">" + brl(x.prev) + "</span>";
+    return "<strong>" + nome + "</strong>" + (x.atual ? " (mês atual, até 16/10)" : "") + ": previsto <span class=\"dinheiro\">" + brl(x.prev) +
+      "</span> · recebido <span class=\"dinheiro\">" + brl(x.rec) + "</span> · " + Math.round(x.rec / x.prev * 100) + "% do previsto";
+  }
+  function desenhar() {
+    const W = Math.max(260, caixa.clientWidth - 40);
+    const estreito = W < 560;
+    const H = estreito ? 220 : 260, mt = 26, mb = 28, ml = 40, mr = 4;
+    const ph = H - mt - mb, pw = W - ml - mr;
+    const topo = 600000000;   // eixo de 0 a 6 mi
+    const y = c => mt + ph - (c / topo) * ph;
+    const gw = pw / MESES.length;
+    const bw = Math.min(30, gw * (estreito ? 0.3 : 0.27)), gap = Math.max(2, bw * 0.15);
+    let s = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" aria-hidden="false">';
+    for (let k = 0; k <= 6; k += 2) {
+      const yy = y(k * 1e8);
+      s += '<line class="' + (k ? "g-grade" : "g-base") + '" x1="' + ml + '" x2="' + (W - mr) + '" y1="' + yy + '" y2="' + yy + '"/>';
+      s += '<text x="' + (ml - 8) + '" y="' + (yy + 4) + '" text-anchor="end">' + (k ? k + " mi" : "0") + "</text>";
+    }
+    MESES.forEach((x, i) => {
+      const cx = ml + gw * i + gw / 2;
+      const rot = estreito ? x.m : x.m + "/" + x.a;
+      const titulo = x.nome + " de " + x.a + (x.futuro ? ": previsão " + brl(x.prev) : ": previsto " + brl(x.prev) + ", recebido " + brl(x.rec));
+      s += '<g class="g-grupo' + (i === escolhido ? " selecionado" : "") + '" tabindex="0" role="button" data-i="' + i + '" aria-label="' + esc(titulo) + '"><title>' + esc(titulo) + "</title>";
+      if (x.atual) s += '<rect class="g-atual" x="' + (ml + gw * i + 2) + '" y="' + (mt - 22) + '" width="' + (gw - 4) + '" height="' + (ph + 22 + mb) + '" rx="8"/>';
+      s += '<rect class="g-alvo" x="' + (ml + gw * i + 2) + '" y="' + (mt - 22) + '" width="' + (gw - 4) + '" height="' + (ph + 22 + mb) + '" rx="8"/>';
+      if (x.futuro) {
+        const bx = cx - bw / 2;
+        s += '<rect class="b-previsao" x="' + bx + '" y="' + y(x.prev) + '" width="' + bw + '" height="' + (y(0) - y(x.prev)) + '" rx="3"/>';
+        if (!estreito) s += '<text class="t-previsao" x="' + cx + '" y="' + (y(x.prev) - 18) + '" text-anchor="middle">previsão</text>';
+        s += '<text x="' + cx + '" y="' + (y(x.prev) - 5) + '" text-anchor="middle">' + (estreito ? "" : mi(x.prev)) + "</text>";
+      } else {
+        const x1 = cx - gap / 2 - bw, x2 = cx + gap / 2;
+        s += '<rect class="b-previsto" x="' + x1 + '" y="' + y(x.prev) + '" width="' + bw + '" height="' + (y(0) - y(x.prev)) + '" rx="3"/>';
+        s += '<rect class="b-recebido" x="' + x2 + '" y="' + y(x.rec) + '" width="' + bw + '" height="' + (y(0) - y(x.rec)) + '" rx="3"/>';
+        if (!estreito) {
+          s += '<text x="' + (x1 + bw / 2) + '" y="' + (y(x.prev) - 5) + '" text-anchor="middle">' + mi(x.prev) + "</text>";
+          s += '<text x="' + (x2 + bw / 2) + '" y="' + (y(x.rec) - 5) + '" text-anchor="middle">' + mi(x.rec) + "</text>";
+        }
+      }
+      s += '<text class="g-mes' + (x.atual ? " g-mes--atual" : "") + '" x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle">' + rot + "</text></g>";
+    });
+    caixa.innerHTML = s + "</svg>";
+    detalhe.innerHTML = contar(escolhido) + (estreito ? "" : ' <span class="campo__nota">· clique num mês para ver os valores</span>');
+  }
+  function escolher(i) { escolhido = i; desenhar(); const g = caixa.querySelector('[data-i="' + i + '"]'); if (g) g.focus(); }
+  caixa.addEventListener("click", ev => { const g = ev.target.closest("[data-i]"); if (g) escolher(Number(g.dataset.i)); });
+  caixa.addEventListener("keydown", ev => {
+    const g = ev.target.closest("[data-i]"); if (!g) return;
+    const i = Number(g.dataset.i);
+    if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); escolher(i); }
+    if (ev.key === "ArrowRight" && i < MESES.length - 1) escolher(i + 1);
+    if (ev.key === "ArrowLeft" && i > 0) escolher(i - 1);
+  });
+  let espera; window.addEventListener("resize", () => { clearTimeout(espera); espera = setTimeout(desenhar, 80); });
+  desenhar();
+
+  // ------------------------------------------------------------ por obra e a tabela
+  const porObra = {};
+  MEDICOES.forEach(m => { (porObra[m.obra] = porObra[m.obra] || { obra: m.obra, v: 0, n: 0 }); porObra[m.obra].v += m.v; porObra[m.obra].n++; });
+  const obras = Object.values(porObra).sort((a, b) => b.v - a.v);
+  const maior = obras[0].v;
+  let filtro = null;
+  const ulObras = document.getElementById("obras");
+  function desenharObras() {
+    ulObras.innerHTML = obras.map(o =>
+      '<li><button type="button" class="ar-obra" data-obra="' + esc(o.obra) + '" aria-pressed="' + (filtro === o.obra) + '">' +
+      '<span class="ar-obra__nome">' + esc(o.obra) + "<small>" + (o.n === 1 ? "1 medição" : o.n + " medições") + "</small></span>" +
+      '<span class="ar-obra__trilho" aria-hidden="true"><span class="ar-obra__barra" style="width:' + (o.v / maior * 100).toFixed(1) + '%"></span></span>' +
+      '<span class="ar-obra__valor">' + brl(o.v) + "</span></button></li>").join("");
+  }
+  document.getElementById("obras-total").textContent = brl(obras.reduce((s, o) => s + o.v, 0));
+  ulObras.addEventListener("click", ev => {
+    const b = ev.target.closest("[data-obra]"); if (!b) return;
+    filtro = filtro === b.dataset.obra ? null : b.dataset.obra; desenharObras(); desenharMedicoes();
+  });
+  document.getElementById("limpar").addEventListener("click", () => { filtro = null; desenharObras(); desenharMedicoes(); });
+
+  const tbody = document.getElementById("medicoes");
+  function desenharMedicoes() {
+    const ms = MEDICOES.filter(m => !filtro || m.obra === filtro)
+      .sort((a, b) => a.prot.split("/").reverse().join("").localeCompare(b.prot.split("/").reverse().join("")));
+    tbody.innerHTML = ms.map(m =>
+      '<tr><td class="ar-forte col-largo" data-rotulo="Obra">' + esc(m.obra) + "</td>" +
+      '<td data-rotulo="Medição">' + m.n + "ª <span class=\"campo__nota\">(" + m.comp + ")</span></td>" +
+      '<td class="ar-data" data-rotulo="Protocolada em">' + m.prot + "</td>" +
+      '<td class="col-num dinheiro" data-rotulo="Valor na cota">' + brl(m.v) + "</td>" +
+      '<td><a href="#" data-acao="Abriria a ' + m.n + 'ª medição de ' + esc(m.obra) + ', na etapa do pagamento">Abrir</a></td></tr>').join("");
+    document.getElementById("med-total").textContent = brl(soma(ms));
+    document.getElementById("med-rodape").textContent = filtro ? "Total de " + filtro + " (" + ms.length + ")" : "Total (" + ms.length + " medições)";
+    document.getElementById("filtro").hidden = !filtro;
+    document.getElementById("filtro-nome").textContent = filtro ? "Só " + filtro : "";
+  }
+  desenharObras(); desenharMedicoes();
+})();
+</script>
+</body></html>

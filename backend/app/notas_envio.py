@@ -187,13 +187,18 @@ def _itens(conn, c: dict, familia: str, ms: list[dict], hoje: datetime.date) -> 
         if consorciadas:
             # FRC (2026-10-09): a dashboard gera a FRC sem assinatura na etapa 3; o que vai ao orgao e' a ASSINADA,
             # anexada aqui como documento `fatura` (uma por medicao). Arrastar e soltar no proprio item.
-            frcs = {d["medicao_id"]: d for d in docs if d["tipo_doc"] == "fatura"}
             for m in ms:
-                d = frcs.get(m["id"])
+                # issue #169: so' conta a assinada ligada a' FRC vigente e nao desatualizada (frc.assinada)
+                a = frc.assinada(conn, m["id"])
+                d = a["documento"]
                 # issue #148: a FRC gerada (sem assinatura) vigente, para a etapa 4 oferecer baixa-la; desatualizada
                 # (as notas mudaram depois dela) nao se oferece: assinaria valores velhos
-                g = None if d else frc.situacao(conn, m["id"]).get("frc")
-                detalhe = (f"Assinada anexada · {d['nome']}" if d
+                g = None if d else a["frc"]
+                if a["recusa"]:         # nao se justifica: o envio fica bloqueado (protocolo.frc_recusadas)
+                    curtos.append("FRC fora do cadastro" if a["recusa"] == frc.SEM_CADASTRO
+                                  else "Sem espelho para a FRC" if a["recusa"] == frc.SEM_ESPELHO
+                                  else "FRC assinada não é a da FRC vigente")
+                detalhe = (f"Assinada anexada · {d['nome']}" if d else a["recusa"] if a["recusa"]
                            else "Falta a assinada: as notas mudaram depois da FRC gerada; gere de novo na etapa 3 "
                                 "(Nota fiscal), assine no DocuSign e anexe aqui" if g and g["desatualizada"]
                            else "Falta a assinada: baixe a FRC gerada, assine no DocuSign e anexe aqui" if g
@@ -201,7 +206,8 @@ def _itens(conn, c: dict, familia: str, ms: list[dict], hoje: datetime.date) -> 
                 itens.append({"chave": f"frc:{m['id']}", "medicao_id": m["id"],
                               "rotulo": "FRC assinada" + (f" · {medicoes.titulo(m)}" if len(ms) > 1 else ""),
                               "detalhe": detalhe, "frc_gerada": g["numero"] if g and not g["desatualizada"] else None,
-                              "estado": "ok" if d else "falta", "acao": None if d else "anexar_frc"})
+                              "estado": "ok" if d else "falta", "acao": None if d else "anexar_frc",
+                              "bloqueia": bool(a["recusa"])})
             notas_faltam = [f for f in faltas if not f.endswith("FRC assinada não anexada")]
             itens.append({"chave": "consorcio", "rotulo": "Notas das consorciadas",
                           "detalhe": "; ".join(notas_faltam) or "todas anexadas",
@@ -254,7 +260,8 @@ def _itens(conn, c: dict, familia: str, ms: list[dict], hoje: datetime.date) -> 
 def _irmas(conn, c: dict, familia: str, o: dict, ms: list[dict], hoje: datetime.date) -> list[dict]:
     """Issue #172: onde medicao e reajuste vao no mesmo e-mail (SINFRA, Pref. VG), a irma (mesmo numero, o outro tipo
     do par execucao x reajuste) com nota emitida que ficou fora deste envio, para o registro por fora leva-la junto.
-    Nao se oferece a irma bloqueada (certidao vencida da natureza dela: o registro por fora contornaria o bloqueio)
+    Nao se oferece a irma bloqueada (certidao vencida da natureza dela ou FRC assinada que nao vale: o registro por
+    fora contornaria o bloqueio)
     nem a que tem envio proprio ja' montado ou assinado (o registro descartaria esse protocolo); rascunho nao conta."""
     regras = json.loads(o.get("regras") or "{}")
     if not protocolo.junta_naturezas(regras, o, protocolo._etapa(familia, _etapa(familia))):
@@ -269,7 +276,8 @@ def _irmas(conn, c: dict, familia: str, o: dict, ms: list[dict], hoje: datetime.
                               "AND estado='nota_emitida' ORDER BY id", (c["id"], m["numero"], outro[m["tipo"]])):
             if r["id"] in dentro or any(p["situacao"] != "rascunho" for p in _ativos(conn, _etapa(familia), r["id"])):
                 continue
-            if any(i["estado"] == "vencida" for i in _itens(conn, c, familia, [dict(r)], hoje)[0]):
+            # rodada 3 da PR #179: nem a irma com item que bloqueia (FRC assinada recusada, sem espelho, sem cadastro)
+            if any(i["estado"] == "vencida" or i.get("bloqueia") for i in _itens(conn, c, familia, [dict(r)], hoje)[0]):
                 continue
             achadas[r["id"]] = {"medicao_id": r["id"], "titulo": medicoes.titulo(r), "tipo": r["tipo"]}
     return list(achadas.values())
@@ -281,10 +289,17 @@ def _envio(conn, c: dict, familia: str, o: dict, ms: list[dict], protocolo_id: i
     estados = {i["estado"] for i in itens}
     esperas = [x for m in ms if (x := espera(conn, m, c))]
     # issue #188: a espera vem antes do resto, porque e' ela que segura o envio
-    situacao = "esperando" if esperas else "bloqueado" if "vencida" in estados else \
+    situacao = "esperando" if esperas else \
+        "bloqueado" if "vencida" in estados or any(i.get("bloqueia") for i in itens) else \
         "pendente" if "falta" in estados else "a_pedido" if o["chave"] == "pref-cuiaba" else "pronto"
     if esperas:
         curtos = [esperas[0]["texto"].capitalize(), *curtos]
+    # rodada 4 da PR #179: o pacote montado com a FRC assinada anterior bloqueia o envio; a lista mostra
+    elif protocolo_id and (r := [x for x in protocolo.frc_recusadas(conn, protocolo._linha(conn, protocolo_id))
+                                 if x in protocolo.PACOTE_SEM_A_FRC_VIGENTE]):
+        situacao = "bloqueado"
+        curtos.append("Pacote com a FRC assinada anterior: monte de novo" if r[0] == protocolo.PACOTE_FRC_VELHA
+                      else "Pacote sem a FRC assinada: monte de novo")
     ids = sorted(m["id"] for m in ms)
     emitida = max((m["desde"] for m in ms if m.get("desde")), default=None)
     return {"chave": f"c{c['id']}:" + "-".join(f"m{i}" for i in ids), "contrato_id": c["id"],
@@ -295,7 +310,10 @@ def _envio(conn, c: dict, familia: str, o: dict, ms: list[dict], protocolo_id: i
             "valor_centavos": sum(m.get("valor_centavos") or 0 for m in ms), "emitida_em": emitida,
             "dias": (hoje - datetime.date.fromisoformat(emitida)).days if emitida else None,
             "situacao": situacao, "aviso": " · ".join(dict.fromkeys(curtos)) or None, "itens": itens,
-            "protocolo_id": protocolo_id, "irmas": _irmas(conn, c, familia, o, ms, hoje)}
+            "protocolo_id": protocolo_id, "irmas": _irmas(conn, c, familia, o, ms, hoje),
+            # so' leitura (16/10/2026): o envio comecado cujo e-mail pode estar saindo; a pagina da medicao so' oferece "Liberar envio preso" com ele
+            "envio_reservado_em": (conn.execute("SELECT envio_reservado_em FROM protocolos WHERE id=?", (protocolo_id,)).fetchone() or [None])[0]
+            if protocolo_id else None}
 
 
 # --- lista -----------------------------------------------------------------------------------------
@@ -421,17 +439,19 @@ def detalhe_envio(conn, protocolo_id: int, remetente: str | None = None, hoje: d
     return {"envio": _envio(conn, c, familia, o, ms, protocolo_id, hoje) if ms else None, "familia": familia,
             "etapa": p["etapa"], "protocolo_id": protocolo_id, "situacao_protocolo": p["situacao"], "carta": carta,
             "previa": {k: pv[k] for k in ("para", "copia", "assunto", "corpo", "anexos", "total", "limite", "links")},
+            # issue #213: com pendencia, o Enviar abre o aviso "ATENÇÃO" com esta lista e manda a lista confirmada
             "bloqueio": pv["bloqueio"], "pendencias": [x["mensagem"] for x in pv["pendencias"]],
-            "justificativa_obrigatoria": bool(pv["pendencias"]),
             "extras": [{"id": x["id"], "nome": x["nome"], "tamanho": x["tamanho"]}
                        for x in protocolo._pecas(conn, protocolo_id) if x["tipo"] == protocolo.ANEXO]}
 
 
 def enviar(conn, usuario: dict, protocolo_id: int, para: list[str], copia: list[str], assunto: str, corpo: str,
-           justificativa: str | None, cco: list[str] | None = None, *, anexos_previa: list[dict]) -> int:
+           justificativa: str | None, cco: list[str] | None = None, *, anexos_previa: list[dict],
+           confirmadas: list[str] | None = None) -> int:
     """Envia pelo Outlook de quem esta' logado e marca `protocolada` (protocolo.enviar). Bloqueio -> protocolo.Bloqueio.
     `anexos_previa` (issue #100): os anexos que a tela mostrou; se o servidor montar outros, recusa antes de reservar
-    (protocolo.AnexosMudaram). Obrigatorio (gate Sol S1, PR #141): None nao vira envio sem conferencia."""
+    (protocolo.AnexosMudaram). Obrigatorio (gate Sol S1, PR #141): None nao vira envio sem conferencia.
+    `confirmadas` (issue #213): o que falta, confirmado no aviso; sem ela ou diferente -> protocolo.ConfirmarPendencias."""
     if anexos_previa is None:
         raise ValueError("Faltam os anexos da prévia: abra a prévia de novo para conferir o que vai no e-mail")
     p = protocolo._linha(conn, protocolo_id)
@@ -439,7 +459,7 @@ def enviar(conn, usuario: dict, protocolo_id: int, para: list[str], copia: list[
         raise ValueError("Este protocolo não é de envio de nota")
     # issue #188: a espera pela outra metade e' conferida dentro de protocolo.enviar, sob o lock da reserva
     return protocolo.enviar(conn, usuario, [protocolo_id], para, copia, assunto, corpo, justificativa, cco=cco,
-                            anexos_previa=anexos_previa)
+                            anexos_previa=anexos_previa, confirmadas=confirmadas)
 
 
 # --- envio feito por fora --------------------------------------------------------------------------
@@ -502,9 +522,28 @@ def _conferir_externo(conn, ids: list[int], irmas: set[int]) -> list[dict]:
     return ms
 
 
+REGISTRO_EXTERNO = "o registro do envio"      # issue #230: o que a confirmacao do que falta libera aqui
+
+
+def faltas_externo(conn, ms: list[dict], hoje: datetime.date | None = None) -> list[dict]:
+    """Issue #230: o que falta no registro por fora, na regra do envio (#213): os itens do envio em falta ou vencidos
+    e a FRC recusada, um por linha ("<item>: <detalhe>"). So' avisa: o registro por fora nao ganha bloqueio novo."""
+    c = protocolo._contrato(conn, ms[0]["contrato_id"])
+    if not c.get("orgao_id"):
+        return []
+    familia, _, _ = protocolo._orgao(conn, c)
+    itens = _itens(conn, c, familia, ms, hoje or tempo.hoje_local())[0]
+    return [{"codigo": i["chave"].split(":")[0], "mensagem": f"{i['rotulo']}: {i['detalhe']}"} for i in itens
+            if i["estado"] in ("falta", "vencida") or i.get("bloqueia")]
+
+
 def envio_externo(conn, usuario_id: int, medicao_ids: list[int], enviado_em: str, observacao: str,
-                  eml: tuple[str, bytes] | None = None, irma_ids: list[int] | None = None) -> None:
-    """`irma_ids` (issue #172): a irma marcada no formulario, alem das medicoes do envio (`medicao_ids`)."""
+                  eml: tuple[str, bytes] | None = None, irma_ids: list[int] | None = None,
+                  confirmadas: list[str] | None = None, numero_oficio: str | None = None) -> None:
+    """`irma_ids` (issue #172): a irma marcada no formulario, alem das medicoes do envio (`medicao_ids`).
+    `confirmadas` (issue #230): o que falta, confirmado no aviso; sem ela ou diferente -> protocolo.ConfirmarPendencias.
+    `numero_oficio` (issue #231): o oficio digitado vai para o protocolo da medicao; vazio, o do ultimo envio dela.
+    Conferida aqui e de novo sob o lock; a observacao continua obrigatoria."""
     irmas = set(irma_ids or [])
     ids = sorted(set(medicao_ids or []) | irmas)
     if not set(medicao_ids or []):
@@ -520,19 +559,34 @@ def envio_externo(conn, usuario_id: int, medicao_ids: list[int], enviado_em: str
     obs = (observacao or "").strip()
     if not obs:
         raise ValueError("Informe a observação (como e para quem a nota foi enviada)")
-    _conferir_externo(conn, ids, irmas)
+    ms = _conferir_externo(conn, ids, irmas)
+    oficio = _oficio_externo(conn, ms[0]["contrato_id"], numero_oficio, data)
     if eml:
         if len(eml[1]) > TETO_EML:
             raise ValueError("Arquivo .eml acima de 25 MB")
         if not _e_email(eml[1]):
             raise ValueError(NAO_E_EML)
+    protocolo._conferir_confirmacao(faltas_externo(conn, ms), confirmadas, REGISTRO_EXTERNO)
     gravado: dict = {}
     try:
-        _registrar_externo(conn, usuario_id, ids, irmas, data, obs, eml, gravado)
+        _registrar_externo(conn, usuario_id, ids, irmas, data, obs, eml, gravado, confirmadas, oficio)
     except BaseException:
         if gravado.get("novo"):
             _remover_eml_sem_registro(conn, gravado["rel"])
         raise
+
+
+def _oficio_externo(conn, contrato_id: int, digitado: str | None, data: datetime.date) -> str | None:
+    """Issue #231: o oficio digitado no registro por fora, normalizado como no envio pelo sistema (`iniciar`):
+    `oficios.canonico` com a sigla da entidade do contrato (LT sem entidade; entidade sem sigla, CARTA-NNN-AAAA).
+    O ano, sem ano digitado, e' o do envio: o oficio saiu naquela data."""
+    texto = (digitado or "").strip()
+    if not texto:
+        return None
+    c = protocolo._contrato(conn, contrato_id)
+    sigla = conn.execute("SELECT sigla_oficio FROM entidades WHERE id=?",
+                         (c["entidade_id"],)).fetchone()["sigla_oficio"] if c.get("entidade_id") else "LT"
+    return oficios.canonico(texto, sigla, data.year)
 
 
 def _remover_eml_sem_registro(conn, rel: str) -> None:
@@ -556,11 +610,19 @@ def _remover_eml_sem_registro(conn, rel: str) -> None:
 
 
 def _registrar_externo(conn, usuario_id: int, ids: list[int], irmas: set[int], data: datetime.date, obs: str,
-                       eml: tuple[str, bytes] | None, gravado: dict) -> None:
+                       eml: tuple[str, bytes] | None, gravado: dict, confirmadas: list[str] | None = None,
+                       oficio: str | None = None) -> None:
     rel = sha = None
     with db.mutacao(conn):
         try:
             ms = _conferir_externo(conn, ids, irmas)        # de novo, sob o lock: a corrida perdida e' recusada
+            # issue #230: o que falta, de novo sob o lock; e' esta lista (nao a lida antes) que vai na auditoria e na
+            # ressalva, que junta a observacao e a lista
+            no_lock = faltas_externo(conn, ms)
+            protocolo._conferir_confirmacao(no_lock, confirmadas, REGISTRO_EXTERNO)
+            faltam = [x["mensagem"] for x in no_lock]
+            ressalva = f"Envio feito por fora: {obs}" + \
+                (f"; {protocolo.CONFIRMADO_COM_FALTA}{'; '.join(faltam)}" if faltam else "")
             if eml:     # gate Sol S2 (PR #178): depois das conferencias, para a recusa nao deixar arquivo solto
                 # issue #180: anota se ESTE registro criou o arquivo; o que ja' existia (mesmo hash) nunca e' apagado
                 ja_existia = (arquivos.pasta("evidencias") / f"{arquivos.sha_de(eml[1])}.eml").exists()
@@ -568,8 +630,11 @@ def _registrar_externo(conn, usuario_id: int, ids: list[int], irmas: set[int], d
                 gravado.update(rel=rel, novo=not ja_existia)
             for m in ms:
                 medicoes.registrar_protocolo(conn, usuario_id, m["id"], data.isoformat(),
-                                             protocolo._oficio_da_medicao(conn, m["id"]), None, "manual",
-                                             apesar_das_pendencias=True, justificativa=f"Envio feito por fora: {obs}")
+                                             oficio or protocolo._oficio_da_medicao(conn, m["id"]), None, "manual",
+                                             apesar_das_pendencias=True, justificativa=ressalva)
+                if faltam:      # quem confirmou e quando: o usuario e o carimbo da propria linha da auditoria
+                    auditoria.registrar(conn, usuario_id, "protocolo.envio_confirmado", "medicao", m["id"], None,
+                                        {"pendencias": faltam})
                 conn.execute("UPDATE medicoes SET envio_origem='externo', envio_externo_em=?, envio_externo_obs=? "
                              "WHERE id=?", (data.isoformat(), obs, m["id"]))
                 if rel:
@@ -580,7 +645,12 @@ def _registrar_externo(conn, usuario_id: int, ids: list[int], irmas: set[int], d
                     for p in _ativos(conn, etapa, m["id"]):
                         protocolo.descartar(conn, usuario_id, p["id"], "Envio registrado como feito por fora")
             auditoria.registrar(conn, usuario_id, "notas.envio_externo", "medicao", ids[0], None,
-                                {"medicoes": ids, "enviado_em": data.isoformat(), "observacao": obs, "eml": rel})
+                                {"medicoes": ids, "enviado_em": data.isoformat(), "observacao": obs, "eml": rel,
+                                 **({"numero_oficio": oficio} if oficio else {}),       # issue #231
+                                 # revisor adversarial da PR #237: o registro do protocolo da medicao so' grava a
+                                 # justificativa com certidao pendente; a ressalva "<observacao>; <lista>" fica aqui
+                                 **({"confirmadas": faltam, "ressalva": f"{obs}; {protocolo.CONFIRMADO_COM_FALTA}"
+                                     + "; ".join(faltam)} if faltam else {})})
         except BaseException:
             # gate Sol S1 (PR #199): ainda sob o lock de escrita, antes do ROLLBACK. O arquivo que ESTE registro criou
             # ninguem mais cita (so' este caminho grava .eml em evidencias, sempre sob o lock): sai sem consultar o

@@ -19,7 +19,10 @@ export function envioReservado(e: unknown): e is ApiErro & { corpo: Reserva } {
 const hora = (iso: string | null) => (iso ? iso.slice(11, 16) : "—");     // ISO local: "2026-10-10T10:05:00-04:00"
 
 export default function LiberarEnvio({ tabela, id, reserva, aoLiberar }: {
-  tabela: "protocolos" | "espelhos" | "pleitos"; id: number; reserva: Reserva; aoLiberar: () => void;
+  tabela: "protocolos" | "espelhos" | "pleitos"; id: number; aoLiberar: () => void;
+  /** Sem a reserva (a pessoa abriu a liberacao pelo menu da medicao), a tela nao sabe quem iniciou nem desde quando:
+   *  o servidor decide se ha' o que liberar e se ja' passaram os 15 minutos. */
+  reserva?: Reserva | null;
 }) {
   const campo = useId();
   const declaracao = useId();
@@ -44,8 +47,10 @@ export default function LiberarEnvio({ tabela, id, reserva, aoLiberar }: {
   return (
     <div className="campo">
       <span className="campo__nota">
-        Iniciado às {hora(reserva.reservado_em)} por {reserva.reservado_por_nome ?? "outro usuário"}. Só pode ser
-        liberado a partir das {hora(reserva.liberavel_a_partir_de)}.
+        {reserva
+          ? <>Iniciado às {hora(reserva.reservado_em)} por {reserva.reservado_por_nome ?? "outro usuário"}. Só pode ser
+              liberado a partir das {hora(reserva.liberavel_a_partir_de)}.</>
+          : <>Para o envio que ficou preso: a tela não sabe se o e-mail saiu. O servidor só libera depois de 15 minutos do início.</>}
       </span>
       <label className="campo__rotulo" htmlFor={campo}>Por que liberar (confira antes a caixa de Enviados)</label>
       <textarea id={campo} rows={2} maxLength={2000} value={motivo} onChange={ev => setMotivo(ev.target.value)}

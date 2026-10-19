@@ -1,0 +1,213 @@
+/* Notas a enviar / Enviar a nota / Aguardando pagamento (redesenho v3, 2026-10-09).
+   So' o visual do prototipo aprovado; tudo debaixo de `.notas-v3` para vencer o tokens.css (que carrega
+   depois) sem mexer nas outras telas. Cores sempre pelas variaveis do tokens.css. */
+
+.notas-v3 { --nota-campo: var(--linha-forte); --nota-cinza: var(--superficie-2); }
+.notas-v3 .nota-mono { font-family: var(--fonte-num, "IBM Plex Mono", ui-monospace, monospace);
+  font-variant-numeric: tabular-nums; font-weight: 400; }
+
+/* ---------------------------------------------------------------- lista */
+.notas-v3.pilha { gap: 16px; }
+.notas-v3 .nota-busca-caixa { position: relative; display: flex; align-items: center; }
+.notas-v3 .nota-busca__lupa { position: absolute; left: 12px; color: var(--texto-2); pointer-events: none; }
+.notas-v3 input.nota-busca { width: 100%; max-width: none; height: 40px; padding: 0 12px 0 36px; box-sizing: border-box;
+  border: 1px solid var(--nota-campo); border-radius: var(--raio); background: var(--superficie); font-size: 14px; }
+
+.notas-v3 .nota-pilulas { display: flex; flex-wrap: wrap; gap: 8px; }
+.notas-v3 a.nota-pilula { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 16px; box-sizing: border-box;
+  border: 1px solid var(--nota-campo); border-radius: var(--raio-pilula); background: var(--superficie); color: var(--texto);
+  font-size: 14px; text-decoration: none; }
+.notas-v3 a.nota-pilula:hover { border-color: var(--acento); color: var(--texto); text-decoration: none; }
+.notas-v3 a.nota-pilula[aria-current="true"] { background: var(--acento); border-color: var(--acento); color: #fff; font-weight: 500; }
+.notas-v3 .nota-pilula__n { padding: 0 7px; border-radius: var(--raio-pilula); background: var(--nota-cinza); color: var(--texto-2);
+  font-size: 12px; line-height: 20px; }
+.notas-v3 a.nota-pilula[aria-current="true"] .nota-pilula__n { background: rgb(255 255 255 / .22); color: #fff; }
+
+.notas-v3 .nota-colunas { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.notas-v3 .nota-colunas > .pilha { flex: 3 1 420px; min-width: 0; gap: 16px; }
+.notas-v3 .nota-lateral { flex: 2 1 340px; min-width: 0; }
+
+.notas-v3 .nota-grupo { gap: 10px; }
+.notas-v3 .nota-grupo__titulo { margin: 4px 0 0; font-size: 13px; line-height: 16px; font-weight: 500; color: var(--texto-2); }
+
+.notas-v3 button.nota-cartao { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; height: auto;
+  padding: 16px 20px; text-align: left; white-space: normal; font-weight: 400; color: var(--texto);
+  background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: var(--sombra); }
+.notas-v3 button.nota-cartao:hover:not(:disabled) { background: var(--superficie); border-color: var(--acento-linha); color: var(--texto); }
+.notas-v3 button.nota-cartao[aria-pressed="true"] { padding-left: 17px; border-color: var(--acento-linha); border-left: 4px solid var(--acento);
+  background: var(--acento-fundo); box-shadow: none; }
+.notas-v3 .nota-cartao__texto { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.notas-v3 .nota-cartao__obra { font-size: 16px; line-height: 24px; font-weight: 600; }
+.notas-v3 .nota-cartao__desc { font-size: 14px; line-height: 20px; color: var(--texto-2); }
+.notas-v3 .nota-cartao__valor { flex: none; font-size: 16px; line-height: 24px; white-space: nowrap; color: var(--texto); }
+.notas-v3 .nota-cartao__valor--espera { color: var(--texto-2); }
+/* o aviso do cartao vira linha de texto com o "!" em circulo (sem a caixa) */
+.notas-v3 .nota-cartao .aviso { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 0; border: 0; background: none;
+  font-size: 14px; font-weight: 500; max-width: none; }
+.notas-v3 .nota-cartao .aviso > .icone, .notas-v3 .nota-cartao .aviso > .aviso__ponto { display: none; }
+.notas-v3 .nota-cartao .aviso::before { content: "!"; flex: none; width: 16px; height: 16px; box-sizing: border-box; display: grid;
+  place-items: center; border: 2px solid currentColor; border-radius: var(--raio-pilula); font-size: 10px; line-height: 1; font-weight: 600; }
+
+/* painel do envio escolhido */
+.notas-v3 .nota-painel { display: flex; flex-direction: column; gap: 24px; padding: 24px; box-sizing: border-box; background: var(--superficie);
+  border: 1px solid var(--linha); border-radius: var(--raio);
+  box-shadow: var(--sombra), 0 4px 12px rgb(15 23 42 / .06); }
+.notas-v3 .nota-painel__bloco { display: flex; flex-direction: column; gap: 4px; }
+.notas-v3 .nota-painel__bloco p { margin: 0; }
+.notas-v3 .nota-painel__titulo { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }
+.notas-v3 .nota-painel__meta { color: var(--texto-2); font-size: 14px; }
+.notas-v3 .nota-painel__valor { font-size: 32px; line-height: 40px; font-weight: 500; white-space: nowrap; letter-spacing: -.01em; }
+.notas-v3 .nota-painel__junto { display: flex; flex-direction: column; gap: 12px; }
+.notas-v3 .nota-painel__sub { font-size: 15px; line-height: 22px; font-weight: 600; }
+.notas-v3 .nota-painel__acao { display: flex; flex-direction: column; gap: 12px; }
+.notas-v3 .btn.nota-principal { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 48px;
+  padding: 0 24px; border-radius: var(--raio); font-size: 15px; font-weight: 600; }
+
+/* o que vai junto: icone de estado + texto + acao a direita */
+.notas-v3 .nota-itens { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }
+.notas-v3 .nota-itens > li { display: flex; align-items: flex-start; gap: 12px; }
+.notas-v3 .nota-estado { flex: none; width: 22px; height: 22px; box-sizing: border-box; display: grid; place-items: center;
+  border-radius: var(--raio-pilula); font-size: 13px; line-height: 1; font-weight: 600; }
+.notas-v3 .nota-estado--ok { background: var(--ok); color: #fff; }
+.notas-v3 .nota-estado--aviso, .notas-v3 .nota-estado--falta { border: 2px solid var(--atencao); color: var(--atencao); }
+.notas-v3 .nota-estado--vencida { border: 2px solid var(--acao); color: var(--acao); }
+.notas-v3 .nota-item { flex: 1; min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.notas-v3 .nota-item__texto { display: flex; flex-direction: column; min-width: 0; }
+.notas-v3 .nota-item__detalhe { font-size: 13px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--texto-2); }
+.notas-v3 .nota-item__detalhe--aviso, .notas-v3 .nota-item__detalhe--falta { color: var(--atencao); }
+.notas-v3 .nota-item__detalhe--vencida { color: var(--acao); }
+.notas-v3 .btn.nota-anexar { flex: none; height: 36px; padding: 0 14px; border: 1px solid var(--acento); border-radius: var(--raio);
+  background: var(--superficie); color: var(--acento); font-weight: 600; }
+.notas-v3 .btn.nota-anexar:hover:not(:disabled) { background: var(--acento-fundo); border-color: var(--acento); color: var(--acento); }
+
+/* registrar por fora */
+.notas-v3 .botao-link { height: auto; padding: 0; border: 0; background: none; box-shadow: none; color: var(--acento); font-size: 14px; }
+.notas-v3 .botao-link:hover:not(:disabled) { background: none; color: var(--acento-forte); text-decoration: underline; }
+.notas-v3 .nota-porfora { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
+.notas-v3 .nota-porfora__dica { margin: 0; font-size: 13px; line-height: 18px; color: var(--texto-2); }
+.notas-v3 .nota-modal { width: min(520px, 94vw); text-align: left; }
+
+/* vazio */
+.notas-v3 .nota-vazia .vazio { padding: 56px 20px; font-size: 14px; }
+.notas-v3 .nota-vazia__icone { display: grid; place-items: center; width: 44px; height: 44px; margin: 0 auto 16px; box-sizing: border-box;
+  border: 3px solid var(--ok); border-radius: var(--raio-pilula); color: var(--ok); }
+.notas-v3 .nota-vazia .vazio__titulo { font-size: 17px; line-height: 24px; margin-bottom: 8px; }
+.notas-v3 .nota-vazia .vazio p + p { margin-top: 12px; }
+.notas-v3 .nota-vazia .vazio a { font-weight: 500; text-decoration: none; }
+
+/* ---------------------------------------------------------- enviar a nota */
+.notas-v3.nota-envio__topo .topbar__titulo { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -.01em; }
+.notas-v3.nota-envio__topo .topbar__meta { font-size: 14px; }
+.notas-v3.nota-envio { max-width: 860px; display: flex; flex-direction: column; gap: 16px; }
+
+.notas-v3 .nota-secao { display: flex; gap: 16px; padding: 24px; background: var(--superficie); border: 1px solid var(--linha);
+  border-radius: var(--raio); box-shadow: var(--sombra), 0 4px 12px rgb(15 23 42 / .06); }
+.notas-v3 .nota-passo { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--raio-pilula);
+  font-size: 14px; font-weight: 600; }
+.notas-v3 .nota-passo--atual { background: var(--acento); color: #fff; }
+.notas-v3 .nota-passo--feito { background: var(--ok); color: #fff; }
+.notas-v3 .nota-passo--futuro { background: var(--linha); color: var(--texto-2); }
+.notas-v3 .nota-secao__corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.notas-v3 .nota-secao__corpo > p { margin: 0; }
+.notas-v3 .nota-secao__cabeca { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.notas-v3 .nota-secao__titulo { margin: 2px 0 0; font-size: 17px; line-height: 24px; font-weight: 600; }
+.notas-v3 .nota-secao__acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.notas-v3 .nota-secao__acoes .btn { height: 32px; padding: 0 12px; border-radius: var(--raio); font-size: 13px; font-weight: 500; }
+.notas-v3 .nota-paginas { margin: 4px 0 0; padding-left: 20px; list-style: decimal; }
+.notas-v3 .nota-assinar .btn { height: 48px; padding: 0 20px; border-radius: var(--raio); font-size: 15px; font-weight: 600; }
+
+.notas-v3 .nota-justificativa { display: flex; flex-direction: column; gap: 6px; padding-top: 16px; border-top: 1px solid var(--linha); }
+.notas-v3 .nota-justificativa .campo__rotulo { font-size: 14px; font-weight: 500; color: var(--texto); }
+.notas-v3 .nota-justificativa textarea { width: 100%; max-width: none; box-sizing: border-box; border-color: var(--nota-campo); border-radius: var(--raio); }
+.notas-v3 .nota-justificativa .campo__nota { font-size: 13px; }
+/* documentos complementares (09/10/2026): lista + area de arrastar e soltar */
+.notas-v3 .nota-complementares { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 1px solid var(--linha); }
+.notas-v3 .nota-complementares .campo__rotulo { font-size: 14px; font-weight: 500; color: var(--texto); }
+.notas-v3 .nota-complementares .campo__nota { font-size: 13px; }
+.notas-v3 .nota-complementares__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.notas-v3 .nota-complementares__lista li { display: flex; align-items: center; gap: 12px; }
+.notas-v3 .nota-complementares__nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notas-v3 .nota-complementares__soltar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px;
+  min-height: 64px; padding: 12px; border: 1.5px dashed var(--linha-forte); border-radius: var(--raio); color: var(--texto-2);
+  transition: border-color .15s, background .15s; }
+.notas-v3 .nota-complementares__subtitulo { margin-top: 8px; }
+.notas-v3 .nota-complementares__link { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.notas-v3 .nota-complementares__link .campo { display: flex; flex-direction: column; gap: 4px; flex: 1 1 200px; min-width: 0; margin: 0; }
+.notas-v3 .nota-complementares__link .nota-complementares__url { flex: 2 1 280px; }
+.notas-v3 .nota-complementares__link input { width: 100%; box-sizing: border-box; }
+.notas-v3 .nota-complementares__soltar--sobre { border-color: var(--acento); background: var(--acento-fundo); color: var(--acento-mais); }
+
+.notas-v3 .nota-rodape { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.notas-v3 .nota-rodape__motivo { margin: 0; font-size: 14px; }
+.notas-v3 .nota-rodape__motivo--neutro { color: var(--texto-2); }
+.notas-v3 .nota-rodape__motivo--atencao { color: var(--atencao); }
+.notas-v3 .nota-rodape__motivo--bloqueio { color: var(--acao); }
+.notas-v3 .nota-rodape .nota-porfora { margin-left: auto; max-width: 300px; align-items: flex-end; text-align: right; }
+
+/* O compositor de e-mail (ComporEmail, compartilhado com outras telas) com a cara do prototipo SO' aqui:
+   campos em caixa, rotulo a esquerda, etiquetas em pilula e o botao principal indigo de 48 px. */
+.notas-v3 .ol-janela { font-family: inherit; color: var(--texto); border: 0; box-shadow: none; background: none; font-size: 14px;
+  --foco: var(--acento); display: flex; flex-direction: column; gap: 10px; }
+.notas-v3 .ol-janela .ol-topo { padding: 0 0 6px; gap: 12px; flex-wrap: wrap; }
+.notas-v3 .ol-janela .ol-enviar { height: 48px; padding: 0 24px; gap: 8px; border-radius: var(--raio); background: var(--acento);
+  font-size: 15px; font-weight: 600; }
+.notas-v3 .ol-janela .ol-enviar:hover:not(:disabled), .notas-v3 .ol-janela .ol-enviar:active:not(:disabled) { background: var(--acento-forte); color: #fff; }
+.notas-v3 .ol-janela .ol-enviar:disabled { background: var(--acento-linha); color: #fff; }
+.notas-v3 .ol-janela .ol-de { color: var(--texto-2); font-size: 13px; }
+.notas-v3 .ol-janela .ol-linha { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: start; padding: 0; }
+.notas-v3 .ol-janela .ol-rotulo { justify-self: start; height: auto; min-width: 0; margin-top: 10px; padding: 0; border: 0; background: none;
+  color: var(--texto-2); font-weight: 400; box-shadow: none; }
+.notas-v3 .ol-janela .ol-rotulo:hover { background: none; color: var(--acento); text-decoration: underline; }
+.notas-v3 .ol-janela .ol-campo { gap: 6px; min-height: 40px; padding: 5px 6px; box-sizing: border-box; border: 1px solid var(--nota-campo);
+  border-radius: var(--raio); background: var(--superficie); }
+.notas-v3 .ol-janela .ol-campo:focus-within { border: 1px solid var(--acento); padding: 5px 6px; box-shadow: 0 0 0 1px var(--acento); }
+.notas-v3 .ol-janela .ol-chip { height: 28px; padding: 0 4px 0 10px; gap: 2px; border: 0; border-radius: var(--raio-pilula);
+  background: var(--nota-cinza); color: var(--texto); font-size: 13px; }
+.notas-v3 .ol-janela .ol-chip:hover { background: var(--hover); }
+.notas-v3 .ol-janela .ol-chip__icone { display: none; }
+.notas-v3 .ol-janela .ol-chip__nome { line-height: 28px; }
+.notas-v3 .ol-janela .ol-chip button { margin-left: 2px; color: var(--texto-2); border-radius: var(--raio-pilula); }
+.notas-v3 .ol-janela .ol-entrada { font-size: 13px; }
+.notas-v3 .ol-janela .ol-cco { color: var(--texto-2); font-size: 13px; }
+.notas-v3 .ol-janela .ol-assunto,
+.notas-v3 .ol-janela .ol-corpo,
+.notas-v3 .ol-janela .ol-anexos { margin-left: 76px; padding: 0; }
+.notas-v3 .ol-janela .ol-assunto input { height: 40px; padding: 0 8px; border: 1px solid var(--nota-campo); border-radius: var(--raio);
+  background: var(--superficie); }
+.notas-v3 .ol-janela .ol-assunto input:focus { border: 1px solid var(--acento); box-shadow: 0 0 0 1px var(--acento); }
+.notas-v3 .ol-janela .ol-anexo { border-color: var(--linha); border-radius: var(--raio); }
+.notas-v3 .ol-janela .ol-corpo .ol-editor { padding: 8px; border: 1px solid var(--nota-campo); border-radius: var(--raio);
+  background: var(--superficie); font-family: inherit; font-size: 14px; line-height: 1.5; color: var(--texto); }
+.notas-v3 .ol-janela .ol-corpo .ol-editor:focus { outline: 0; border-color: var(--acento); box-shadow: 0 0 0 1px var(--acento); }
+.notas-v3 .ol-janela + .campo__nota { margin: 0 0 0 76px; font-size: 13px; }
+@media (max-width: 640px) {
+  .notas-v3 .ol-janela .ol-linha { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .notas-v3 .ol-janela .ol-rotulo { margin-top: 0; }
+  .notas-v3 .ol-janela .ol-assunto, .notas-v3 .ol-janela .ol-corpo, .notas-v3 .ol-janela .ol-anexos,
+  .notas-v3 .ol-janela + .campo__nota { margin-left: 0; }
+  .notas-v3 .nota-secao { padding: 16px; gap: 12px; }
+  /* issue #170: a etapa 4 e' estreita no celular (cartao dentro de cartao); o texto do botao quebra de linha em vez de estourar o cartao */
+  .notas-v3 .nota-secao__acoes { min-width: 0; max-width: 100%; }
+  .notas-v3 .nota-secao__acoes .btn { height: auto; min-height: 32px; padding-top: 4px; padding-bottom: 4px; max-width: 100%; white-space: normal; text-align: left; }
+  /* aba Enviar nota no celular (09/10/2026, com o trilho de 64px sobram ~311px): o valor desce para baixo do texto
+     em vez de espremer a descricao numa coluna de uma palavra, e o valor grande do painel pode quebrar */
+  .notas-v3 button.nota-cartao { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .notas-v3 .nota-painel__valor { font-size: 24px; line-height: 32px; white-space: normal; overflow-wrap: anywhere; }
+}
+
+/* ------------------------------------------- FRC do consorcio (etapa 3, 2026-10-09) */
+.notas-v3.frc { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid var(--linha); }
+.notas-v3 .frc__cabeca { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.notas-v3 .frc__titulo { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; }
+.notas-v3 .frc__lista { gap: 10px; }
+.notas-v3 .frc__bloco { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; padding: 16px; border: 1px solid var(--linha);
+  border-radius: var(--raio); background: var(--superficie-2); }
+.notas-v3 .frc__bloco > p { margin: 0; }
+.notas-v3 .frc__bloqueio { font-size: 14px; }
+.notas-v3 .frc__gerar { align-items: flex-end; gap: 12px; }
+.notas-v3 .frc__gerar .entrada--curta { width: 96px; }
+.notas-v3 .frc__ultima { align-self: center; padding-top: 18px; }
+.notas-v3 .frc__assinar { font-size: 13px; line-height: 18px; color: var(--texto-2); }
+/* etapa 4: a FRC assinada se arrasta no proprio item */
+.notas-v3 .nota-item--soltar { flex-direction: column; align-items: stretch; }
+.notas-v3 .nota-item--soltar .nota-complementares__soltar { min-height: 52px; }

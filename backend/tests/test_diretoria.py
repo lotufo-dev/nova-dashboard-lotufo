@@ -5,7 +5,7 @@ import pathlib
 
 import pytest
 
-from app import auth, avisos, cadastro_aplicar, db, diretoria, medicoes
+from app import auth, avisos, cadastro_aplicar, db, diretoria, medicoes, qdop
 from tests.test_protocolo import _contrato
 
 D = datetime.date
@@ -165,6 +165,57 @@ def test_carteira_saldo_ritmo_e_termino(cenario):
     assert k["saldo_centavos"] == 96_100_000 + 399_500_000
     assert "terminando" not in k
     assert k["ritmo_mensal_centavos"] == 33_833_333             # 203.000.000 / 6, meio para cima
+
+
+def test_faturado_no_mes_e_a_regra_do_qdop_fatiada_pelo_mes_da_nota(cenario):
+    c, ids = cenario
+
+    def nota_em(contrato, numero, data, tipo="execucao"):
+        c.execute("UPDATE medicoes SET nota_emitida_em=? WHERE contrato_id=? AND numero=? AND tipo=?", (data, contrato, numero, tipo))
+    nota_em(ids["propria"], 14, "2026-09-05")        # protocolada, 7.000,00: entra
+    nota_em(ids["propria"], 1, "2026-09-20")         # recebida, 8.000,00: entra
+    nota_em(ids["propria"], 15, "2026-06-15")        # faturada em junho: fora de setembro
+    nota_em(ids["propria"], 13, "2026-09-12")        # espelho gerado, sem nota de fato: nao e' faturado
+    nota_em(ids["consorcio"], 2, "2026-09-10")       # 4.000.000,00 a 50%: 2.000.000,00 na cota
+    nota_em(ids["consorcio"], 2, "2026-09-10", "reajuste")   # reajuste nao entra (e' outra coluna do QDOP)
+    c.commit()
+    m = diretoria.painel(c, HOJE)["mes_ano"]
+    assert m["faturado_mes_centavos"] == 700_000 + 800_000 + 200_000_000
+    assert m["notas_faturadas_mes"] == 3
+    # medicao com nota registrada, sem nota no RM (nenhuma linha em notas_fiscais), entra do mesmo jeito
+    assert c.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0] == 0
+
+
+def test_medicao_faturada_sem_data_da_nota_nao_entra_em_mes_nenhum(cenario):
+    c, ids = cenario
+    c.execute("UPDATE medicoes SET nota_emitida_em='2026-09-05' WHERE contrato_id=? AND numero=14", (ids["propria"],))
+    c.commit()
+    assert diretoria.painel(c, HOJE)["mes_ano"]["faturado_mes_centavos"] == 700_000
+    c.execute("UPDATE medicoes SET nota_emitida_em=NULL WHERE contrato_id=? AND numero=14", (ids["propria"],))   # protocolada, sem data da nota
+    c.commit()
+    assert diretoria.painel(c, HOJE)["mes_ano"]["faturado_mes_centavos"] == 0
+    # mas ela segue no "Faturado" acumulado do QDOP
+    assert any(l["faturados"] >= 700_000 for l in qdop.linhas(c, HOJE) if l["contrato_id"] == ids["propria"])
+
+
+def test_faturado_no_mes_bate_com_a_coluna_faturado_do_qdop(cenario):
+    c, ids = cenario
+    c.execute("UPDATE medicoes SET nota_emitida_em='2026-09-15'")      # todas as medicoes com nota no mesmo mes
+    c.commit()
+    total_qdop = sum(l["faturados"] for l in qdop.linhas(c, HOJE))
+    assert total_qdop > 0
+    assert diretoria.painel(c, HOJE)["mes_ano"]["faturado_mes_centavos"] == total_qdop
+    # em outro mes, nada
+    c.execute("UPDATE medicoes SET nota_emitida_em='2026-08-15'")
+    c.commit()
+    assert diretoria.painel(c, HOJE)["mes_ano"]["faturado_mes_centavos"] == 0
+
+
+def test_carteira_por_orgao_traz_vigente_medido_e_obras_para_o_cartao(cenario):
+    c, ids = cenario
+    por = {o["orgao"]: o for o in diretoria.painel(c, HOJE)["carteira"]["por_orgao"]}
+    assert (por["SINFRA - X"]["vigente_centavos"], por["SINFRA - X"]["medido_centavos"], por["SINFRA - X"]["obras"]) == (100_000_000, 3_900_000, 1)
+    assert (por["MTPAR"]["vigente_centavos"], por["MTPAR"]["medido_centavos"]) == (600_000_000, 200_500_000)
 
 
 def test_pagamento_atrasado_so_para_a_diretoria_e_so_liberado(cenario):

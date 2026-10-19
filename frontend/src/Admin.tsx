@@ -14,7 +14,8 @@ import { tituloMedicao } from "./medicao";
 import { brl, ROTULO_ESTADO } from "./Medicoes";
 import { trocarBusca, type AbaAdmin, type Busca } from "./rota";
 import { Link } from "./Link";
-import { fmtCompetencia, fmtDataHora, fmtDataPura, fmtHora } from "./tempo";
+import { fmtCompetencia, fmtDataHora, fmtDataPura, fmtDuracao, fmtHora } from "./tempo";
+import "./admin.css";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { Abas } from "./Topo";
@@ -95,140 +96,153 @@ function EstadoMedicao({ estado }: { estado: string }) {
 
 /* ------------------------------------------------------------------- saude */
 
-function Rm({ aoSincronizar }: { aoSincronizar: () => void }) {
-  const [status, setStatus] = useState<StatusRm | null>(null);
-  const [erro, setErro] = useState("");
-  const [rodando, setRodando] = useState(false);
-  const [concluida, setConcluida] = useState("");
+type Situacao = "ok" | "atencao" | "acao" | "neutra";
+type Cartao = [titulo: string, valor: string, nota: string, situacao: Situacao];
 
-  const carregar = () => api<StatusRm>("/api/rm/status").then(setStatus).catch(e => setErro(falhaDeCarga(e)));
-  useEffect(() => { carregar(); }, []);
-
-  async function sincronizar() {
-    setErro(""); setConcluida(""); setRodando(true);
-    try {
-      const r = await api<{ estado: string; erro?: string }>("/api/rm/sincronizar", { method: "POST" });
-      if (r.estado === "failed") setErro(`A sincronização falhou: ${r.erro ?? "erro desconhecido"}`);
-      else if (r.estado === "success") setConcluida("Sincronização concluída.");
-      await carregar();
-      aoSincronizar();
-    } catch (e) {
-      setErro(mensagem(e));
-    } finally { setRodando(false); }
-  }
-
-  const ultima = status?.rodadas[0] ?? null;
-  const falhou = ultima?.estado === "failed";
-  // o resultado do RM de relance (F-65): sem selo quando nao esta configurado ou ainda nao rodou
-  const estadoRm = !status?.configurado ? null : rodando || status.em_andamento ? "running" : ultima?.estado ?? null;
-  // na falha, "Sincronizar agora" e' o proximo passo: vira primario e sai da cabeca para junto da mensagem que o cita
-  const botaoSincronizar = (primario: boolean) => (
-    <button type="button" className={`btn btn--pequeno${primario ? " btn--primario" : ""}`} onClick={sincronizar}
-      disabled={rodando || !status?.configurado}
-      title={status?.configurado ? "Buscar NFs e baixas no RM agora" : "Configure DASH_RM_* no servidor (runbook)"}>
-      {rodando ? "Sincronizando…" : "Sincronizar agora"}
-    </button>
+/** Um cartao de situacao: ponto colorido + titulo + o valor (a hora) + a nota. A cor nunca vai sozinha: o valor e a nota dizem o mesmo em palavras. */
+function CartaoSituacao({ titulo, valor, nota, situacao }: { titulo: string; valor: string; nota: string; situacao: Situacao }) {
+  return (
+    <li className={`cartao situacao situacao--${situacao}`}>
+      <span className="situacao__ponto" aria-hidden="true" />
+      <h2 className="situacao__titulo">{titulo}</h2>
+      <span className="situacao__valor">{valor}</span>
+      <span className="situacao__nota">{nota}</span>
+    </li>
   );
-  // a ultima que deu certo: a rodada mais nova com sucesso (fica no banco); sem nenhuma entre as 10, a da memoria do
-  // servidor (zera quando ele reinicia)
-  const ultimaBoa = status?.rodadas.find(r => r.estado === "success") ?? null;
-  const quandoBoa = ultimaBoa ? ultimaBoa.terminado_em ?? ultimaBoa.iniciado_em : status?.ultima_sincronizacao ?? null;
+}
+
+const SEM_COPIA = "nenhuma desde que o servidor subiu";
+
+// o backup falhou: atrasado ou uma das tentativas de copia deu erro (o cartao de cima e o cartao Backup usam a mesma regra)
+function backupFalhou(b: Backup | null | undefined): boolean {
+  return !!b && (b.atrasado || !!b.ultimo_snapshot_erro || !!b.ultima_copia_externa_erro
+    || !!b.ultima_copia_arquivos_erro || !!b.ultima_copia_externa_arquivos_erro);
+}
+
+function Situacoes({ status, erroCarga, rodando, b }: { status: StatusRm | null; erroCarga: string; rodando: boolean; b: Backup | null | undefined }) {
+  const neutro = (t: string, v: string, n: string): Cartao => [t, v, n, "neutra"];
+  const T_BACKUP = "Último backup", T_EXTERNA = "Última cópia externa dos arquivos", T_RM = "Sincronização com o RM";
+  const NAO_LEU = "recarregue a página para tentar de novo";
+  // 1. ultimo backup
+  const backup: Cartao = b === undefined ? neutro(T_BACKUP, "carregando…", "")
+    : b === null ? neutro(T_BACKUP, "não foi possível ler", NAO_LEU)
+    : [
+      T_BACKUP, b.ultimo_backup ? fmtDataHora(b.ultimo_backup) : "nenhum",
+      b.atrasado ? "atrasado: sem snapshot recente"
+        : backupFalhou(b) ? "uma das cópias falhou: veja o cartão Backup"
+        : `${b.tamanho_bytes !== null ? `${fmtTamanho(b.tamanho_bytes)} · ` : ""}${contar(b.guardados, "snapshot guardado", "snapshots guardados")}`,
+      backupFalhou(b) ? "acao" : "ok",
+    ];
+  // 2. ultima copia externa dos arquivos (so' existe com pasta externa)
+  const externa: Cartao = b === undefined ? neutro(T_EXTERNA, "carregando…", "")
+    : b === null ? neutro(T_EXTERNA, "não foi possível ler", NAO_LEU)
+    : b.ultima_copia_externa_arquivos_erro
+      ? [T_EXTERNA, b.ultima_copia_externa_arquivos ? fmtDataHora(b.ultima_copia_externa_arquivos) : SEM_COPIA, "a última tentativa falhou", "acao"]
+    : !b.copia_externa_configurada ? neutro(T_EXTERNA, "sem pasta externa", "não há cópia externa a esperar")
+    : b.ultima_copia_externa_arquivos
+      ? [T_EXTERNA, fmtDataHora(b.ultima_copia_externa_arquivos), "notas, espelhos, modelos e evidências", "ok"]
+    : [T_EXTERNA, SEM_COPIA, "notas, espelhos, modelos e evidências", "atencao"];
+  // 3. sincronizacao com o RM
+  const rodadas = status?.rodadas ?? [];
+  const ultima = rodadas[0] ?? null;
+  const boa = rodadas.find(r => r.estado === "success") ?? null;
+  const quandoBoa = boa ? boa.terminado_em ?? boa.iniciado_em : status?.ultima_sincronizacao ?? null;
+  const rm: Cartao = status === null ? neutro(T_RM, erroCarga ? "não foi possível ler" : "carregando…", erroCarga ? NAO_LEU : "")
+    : !status.configurado ? neutro(T_RM, "não configurado", "lançamentos seguem à mão")
+    : rodando || status.em_andamento || ultima?.estado === "running" ? neutro(T_RM, "rodando", rodando ? "buscando no RM agora" : ultima ? `desde ${fmtDataHora(ultima.iniciado_em)}` : "")
+    : ultima === null ? neutro(T_RM, "nenhuma rodada", "ainda não rodou")
+    : ultima.estado === "failed"
+      ? [T_RM, `falhou em ${fmtDataHora(ultima.iniciado_em)}`, quandoBoa ? `a última que deu certo foi em ${fmtDataHora(quandoBoa)}` : "nenhuma deu certo", "acao"]
+    : [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), `deu certo · ${ultima.disparo}`, "ok"];
+  // 4. rodadas com falha, entre as que a tabela mostra
+  const falhas = rodadas.filter(r => r.estado === "failed").length;
+  const comFalha: Cartao = status === null || !status.configurado || rodadas.length === 0
+    ? neutro("Rodadas com falha", "—", rodadas.length === 0 && status?.configurado ? "sem rodadas" : "")
+    : ["Rodadas com falha", `${falhas} ${rodadas.length === 1 ? "na última rodada" : `nas últimas ${rodadas.length} rodadas`}`, falhas ? "veja o motivo na tabela" : "nenhuma", falhas ? "atencao" : "ok"];
+  return (
+    <ul className="situacoes" aria-label="Situação do servidor">
+      {[backup, externa, rm, comFalha].map(([titulo, valor, nota, situacao]) => (
+        <CartaoSituacao key={titulo} titulo={titulo} valor={valor} nota={nota} situacao={situacao} />
+      ))}
+    </ul>
+  );
+}
+
+function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: string }) {
+  const ultima = status?.rodadas[0] ?? null;
   return (
     <section className="cartao" aria-labelledby="titulo-rm">
-      <div className="cartao__cabeca">
-        <h2 className="cartao__titulo" id="titulo-rm">TOTVS RM</h2>
-        {estadoRm && <SeloRodada estado={estadoRm} />}
+      <div className="cartao__cabeca cartao__cabeca--quebra">
+        <h2 className="cartao__titulo" id="titulo-rm">Rodadas de sincronização com o RM</h2>
         <span className="cartao__dica">
-          {status === null ? (erro ? "não foi possível ler o estado do RM" : "carregando…")
-            : status.configurado ? "as NFs e as baixas do RM" : "não configurado neste servidor"}
+          {status === null ? (erroCarga ? "não foi possível ler o estado do RM" : "carregando…")
+            : status.configurado ? status.rodadas.length === 0 ? "as NFs e as baixas do RM"
+              : `as NFs e as baixas do RM · ${status.rodadas.length === 1 ? "a última rodada" : `as últimas ${status.rodadas.length} rodadas`}`
+            : "não configurado neste servidor"}
         </span>
-        {!(status?.configurado && falhou) && <div className="cartao__acoes">{botaoSincronizar(false)}</div>}
       </div>
-
-      {erro && <Erro texto={erro} />}
-      <div role="status">{concluida && !erro && <div className="cartao__corpo"><p className="campo__nota">{concluida}</p></div>}</div>
+      {erroCarga && <Erro texto={erroCarga} />}
 
       {status && !status.configurado && (
         <div className="cartao__corpo">
           <p className="campo__nota">
             Sem RM, o lançamento da NF e o recebimento continuam registrados à mão na medição. Para ligar:
-            conta de serviço no RM, consultas DASH10/DASH11 cadastradas e as variáveis
-            DASH_RM_URL, DASH_RM_USUARIO e DASH_RM_SENHA_ARQUIVO na tarefa — ver docs/runbook.md.
+            conta de serviço no RM, consultas cadastradas e as variáveis de acesso ao RM na tarefa do servidor —
+            ver o manual de produção.
           </p>
         </div>
       )}
+      {status?.configurado && ultima === null && <div className="cartao__corpo"><p>Nenhuma rodada registrada ainda.</p></div>}
 
-      {/* a ultima rodada em destaque: o resultado, a hora e as contagens; a falha em vermelho */}
-      {status?.configurado && (
-        <div className="cartao__corpo pilha">
-          {ultima === null ? <p>Nenhuma rodada registrada ainda.</p>
-            : ultima.estado === "failed" ? (
-              <>
-                <CaixaAviso nivel="critico">
-                    Última rodada: falhou em {fmtDataHora(ultima.iniciado_em)} ({ultima.disparo}). {ultima.erro ?? "Erro desconhecido."}
-                    {quandoBoa ? ` A última que deu certo foi em ${fmtDataHora(quandoBoa)}.` : ` Nenhuma deu certo nas últimas ${status.rodadas.length} rodadas.`}
-                    {" "}“Sincronizar agora” tenta de novo; se a falha se repetir, veja docs/runbook.md.
-                </CaixaAviso>
-                {botaoSincronizar(true)}
-              </>
-            ) : ultima.estado === "running" ? (
-              <p>Última rodada: rodando desde {fmtDataHora(ultima.iniciado_em)} ({ultima.disparo}).</p>
-            ) : (
-              <p>Última rodada: <strong>deu certo</strong> em {fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em)} ({ultima.disparo}).</p>
-            )}
-          {/* as contagens so' da rodada que deu certo: os zeros da que falhou pareceriam resultado */}
-          {ultima && ultima.estado === "success" && (
-            <ul className="contagens" aria-label="Contagens da última rodada">
-              {([
-                [ultima.nfs, "NF", "NFs"], [ultima.baixas, "Baixa", "Baixas"], [ultima.alocacoes, "Alocada", "Alocadas"],
-                [ultima.sugestoes, "Ambígua", "Ambíguas"], [ultima.recebimentos, "Recebida", "Recebidas"],
-              ] as [number, string, string][]).map(([n, um, varios]) => (
-                <li key={varios}>
-                  <div className="dado">
-                    <span className="dado__valor num">{n.toLocaleString("pt-BR")}</span>{" "}
-                    <span className="campo__nota">{n === 1 ? um : varios}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      {/* as contagens so' da rodada que deu certo: os zeros da que falhou pareceriam resultado */}
+      {ultima && ultima.estado === "success" && (
+        <ul className="contagens cartao__corpo" aria-label="Contagens da última rodada">
+          {([
+            [ultima.nfs, "NF", "NFs"], [ultima.baixas, "Baixa", "Baixas"], [ultima.alocacoes, "Alocada", "Alocadas"],
+            [ultima.sugestoes, "Ambígua", "Ambíguas"], [ultima.recebimentos, "Recebida", "Recebidas"],
+          ] as [number, string, string][]).map(([n, um, varios]) => (
+            <li key={varios}>
+              <div className="dado">
+                <span className="dado__valor num">{n.toLocaleString("pt-BR")}</span>{" "}
+                <span className="campo__nota">{n === 1 ? um : varios} na última rodada</span>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
 
       {status && status.rodadas.length > 0 && (
-        <details className="detalhes cartao__corpo">
-          <summary>{status.rodadas.length === 1 ? "A última rodada" : `As últimas ${status.rodadas.length} rodadas`}</summary>
-          <Rolagem rotulo="Rodadas de sincronização com o RM">
-            <table className="tabela">
-              <caption className="sr-only">Últimas rodadas de sincronização com o RM</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Início</th><th scope="col">Disparo</th><th scope="col">Resultado</th>
-                  <th scope="col" className="col-num">NFs</th><th scope="col" className="col-num">Baixas</th>
-                  <th scope="col" className="col-num">Alocadas</th><th scope="col" className="col-num" title="NFs com mais de uma medição candidata: ficam sem vínculo automático">Ambíguas</th>
-                  <th scope="col" className="col-num">Recebidas</th>
+        <Rolagem rotulo="Rodadas de sincronização com o RM">
+          <table className="tabela">
+            <caption className="sr-only">Últimas rodadas de sincronização com o RM</caption>
+            <thead>
+              <tr>
+                <th scope="col">Início</th><th scope="col">Disparo</th><th scope="col">Duração</th><th scope="col">Resultado</th>
+                <th scope="col" className="col-num">NFs</th><th scope="col" className="col-num">Baixas</th>
+                <th scope="col" className="col-num">Alocadas</th><th scope="col" className="col-num" title="NFs com mais de uma medição candidata: ficam sem vínculo automático">Ambíguas</th>
+                <th scope="col" className="col-num">Recebidas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {status.rodadas.map((r, i) => (
+                <tr key={r.id} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                  <td className="num">{fmtDataHora(r.iniciado_em)}</td>
+                  <td>{r.disparo}</td>
+                  <td className="num">{r.terminado_em ? fmtDuracao(r.iniciado_em, r.terminado_em) : "—"}</td>
+                  <td>
+                    <SeloRodada estado={r.estado} />
+                    {r.erro && <div className="campo__nota situacao__erro">{r.erro}</div>}
+                  </td>
+                  <td className="col-num num">{r.nfs.toLocaleString("pt-BR")}</td>
+                  <td className="col-num num">{r.baixas.toLocaleString("pt-BR")}</td>
+                  <td className="col-num num">{r.alocacoes.toLocaleString("pt-BR")}</td>
+                  <td className="col-num num">{r.sugestoes.toLocaleString("pt-BR")}</td>
+                  <td className="col-num num">{r.recebimentos.toLocaleString("pt-BR")}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {status.rodadas.map((r, i) => (
-                  <tr key={r.id} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                    <td className="num">{fmtDataHora(r.iniciado_em)}</td>
-                    <td>{r.disparo}</td>
-                    <td>
-                      <SeloRodada estado={r.estado} />
-                      {r.erro && <div className="campo__nota">{r.erro}</div>}
-                    </td>
-                    <td className="col-num num">{r.nfs.toLocaleString("pt-BR")}</td>
-                    <td className="col-num num">{r.baixas.toLocaleString("pt-BR")}</td>
-                    <td className="col-num num">{r.alocacoes.toLocaleString("pt-BR")}</td>
-                    <td className="col-num num">{r.sugestoes.toLocaleString("pt-BR")}</td>
-                    <td className="col-num num">{r.recebimentos.toLocaleString("pt-BR")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Rolagem>
-        </details>
+              ))}
+            </tbody>
+          </table>
+        </Rolagem>
       )}
     </section>
   );
@@ -243,7 +257,7 @@ function ReconciliacaoResumo({ versao }: { versao: number }) {
   }, [versao]);
   return (
     <section className="cartao" aria-labelledby="titulo-rec-resumo">
-      <div className="cartao__cabeca">
+      <div className="cartao__cabeca cartao__cabeca--quebra">
         <h2 className="cartao__titulo" id="titulo-rec-resumo">Reconciliação RM × dashboard</h2>
         <span className="cartao__dica">o que está de um lado só</span>
       </div>
@@ -283,23 +297,18 @@ function LinhaBackup({ rotulo, em, erro, erroEm, nenhum }: {
   return <p>{rotulo}: {em ? fmtDataHora(em) : nenhum}.</p>;
 }
 
-function Backup() {
-  // undefined = carregando; null = nao deu para ler
-  const [b, setB] = useState<Backup | null | undefined>(undefined);
-  useEffect(() => {
-    api<Backup>("/api/admin/backup").then(setB).catch(() => setB(null));
-  }, []);
-  const falhou = !!b && (b.atrasado || !!b.ultimo_snapshot_erro || !!b.ultima_copia_externa_erro
-    || !!b.ultima_copia_arquivos_erro || !!b.ultima_copia_externa_arquivos_erro);
+// b: undefined = carregando; null = nao deu para ler
+function Backup({ b }: { b: Backup | null | undefined }) {
+  const falhou = backupFalhou(b);
   return (
     <section className="cartao" aria-labelledby="titulo-backup">
-      <div className="cartao__cabeca">
+      <div className="cartao__cabeca cartao__cabeca--quebra">
         <h2 className="cartao__titulo" id="titulo-backup">Backup</h2>
         {/* o resultado de relance: Falhou se esta atrasado ou uma das tentativas falhou; OK com backup em dia */}
         {b && (falhou ? <SeloRodada estado="failed" /> : b.ultimo_backup ? <SeloRodada estado="success" /> : null)}
         <span className="cartao__dica">um snapshot por hora</span>
       </div>
-      <div className="cartao__corpo pilha">
+      <div className="cartao__corpo pilha pilha--curta">
         {b === undefined ? <p>Carregando…</p>
           : b === null ? <p className="campo__nota">Não foi possível ler o estado do backup; recarregue a página para tentar de novo.</p>
           : <>
@@ -333,14 +342,75 @@ function Backup() {
 }
 
 function Saude() {
+  const [status, setStatus] = useState<StatusRm | null>(null);
+  // erroCarga: nao deu para ler o estado do RM; erro/concluida: o resultado de "Sincronizar agora"
+  const [erroCarga, setErroCarga] = useState("");
+  const [erro, setErro] = useState("");
+  const [rodando, setRodando] = useState(false);
+  const [concluida, setConcluida] = useState("");
+  // undefined = carregando; null = nao deu para ler
+  const [b, setB] = useState<Backup | null | undefined>(undefined);
   // depois de "Sincronizar agora", as contagens da reconciliacao sao lidas de novo
   const [versao, setVersao] = useState(0);
+
+  const carregar = () => api<StatusRm>("/api/rm/status").then(s => { setStatus(s); setErroCarga(""); }).catch(e => setErroCarga(falhaDeCarga(e)));
+  useEffect(() => {
+    carregar();
+    api<Backup>("/api/admin/backup").then(setB).catch(() => setB(null));
+  }, []);
+
+  async function sincronizar() {
+    setErro(""); setConcluida(""); setRodando(true);
+    try {
+      const r = await api<{ estado: string; erro?: string }>("/api/rm/sincronizar", { method: "POST" });
+      if (r.estado === "failed") setErro(`A sincronização falhou: ${r.erro ?? "erro desconhecido"}`);
+      else if (r.estado === "success") setConcluida("Sincronização concluída.");
+      await carregar();
+      setVersao(v => v + 1);
+    } catch (e) {
+      setErro(mensagem(e));
+    } finally { setRodando(false); }
+  }
+
+  const ultima = status?.rodadas[0] ?? null;
+  // a ultima que deu certo: a rodada mais nova com sucesso (fica no banco); sem nenhuma entre as 10, a da memoria do
+  // servidor (zera quando ele reinicia)
+  const ultimaBoa = status?.rodadas.find(r => r.estado === "success") ?? null;
+  const quandoBoa = ultimaBoa ? ultimaBoa.terminado_em ?? ultimaBoa.iniciado_em : status?.ultima_sincronizacao ?? null;
   return (
-    <>
-      <Rm aoSincronizar={() => setVersao(v => v + 1)} />
-      <ReconciliacaoResumo versao={versao} />
-      <Backup />
-    </>
+    <div className="saude pilha">
+      <Situacoes status={status} erroCarga={erroCarga} rodando={rodando} b={b} />
+
+      {status?.configurado && ultima?.estado === "failed" && !rodando && !erro && (
+        <CaixaAviso nivel="critico">
+          Última rodada: falhou em {fmtDataHora(ultima.iniciado_em)} ({ultima.disparo}). {ultima.erro ?? "Erro desconhecido."}
+          {quandoBoa ? ` A última que deu certo foi em ${fmtDataHora(quandoBoa)}.` : status.rodadas.length === 1 ? " Nenhuma deu certo na última rodada." : ` Nenhuma deu certo nas últimas ${status.rodadas.length} rodadas.`}
+          {" "}“Sincronizar agora” tenta de novo; se a falha se repetir, veja o manual de produção.
+        </CaixaAviso>
+      )}
+
+      <div className="acoes-saude">
+        <button type="button" className="btn btn--primario" onClick={sincronizar} disabled={rodando || !status?.configurado || status.em_andamento || ultima?.estado === "running"}
+          title={status?.configurado ? "Buscar NFs e baixas no RM agora" : "Configure o acesso ao RM no servidor (manual de produção)"}>
+          {rodando ? "Sincronizando…" : "Sincronizar agora"}
+        </button>
+        <p>
+          {!status ? "" : !status.configurado ? "O RM não está configurado neste servidor."
+            : ultima?.estado === "success" ? <>Última rodada: <strong>deu certo</strong> em {fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em)} ({ultima.disparo}).</>
+            : ultima?.estado === "running" ? `Última rodada: rodando desde ${fmtDataHora(ultima.iniciado_em)} (${ultima.disparo}).`
+            : ultima === null ? "Nenhuma rodada registrada ainda." : ""}
+        </p>
+      </div>
+      {erro && <section className="cartao"><Erro texto={erro} /></section>}
+      <div role="status">{concluida && !erro && <p className="campo__nota">{concluida}</p>}</div>
+
+      <Rodadas status={status} erroCarga={erroCarga} />
+
+      <div className="saude-lado">
+        <ReconciliacaoResumo versao={versao} />
+        <Backup b={b} />
+      </div>
+    </div>
   );
 }
 

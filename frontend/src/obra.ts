@@ -71,3 +71,64 @@ export function reajustePorDataBase<C extends CicloApi, P extends PleitoResumo, 
   return { dataBases, semDataBase: apostilamentos.filter(i => !conhecidas.has(baseDe(i) ?? "")),
     outrosPleitos: pleitos.filter(p => !conhecidas.has(p.data_base_mes ?? "")) };
 }
+
+/* ------------------------------------------------------------ Pagina da obra: curva S e linhas do tempo (#160) */
+
+export type PontoDaCurva = { competencia: string; previsto_centavos: number; medido_execucao_centavos: number;
+  atestado_pendente: boolean };
+export type PontoS = { competencia: string; previsto: number; execucao: number; provisorio: boolean;
+  /** Ate' a ultima competencia com execucao medida; depois dela a curva do medido nao continua. */
+  medida: boolean; acumuladoPrevisto: number; acumuladoMedido: number | null };
+
+/** A curva S da pagina da obra: previsto e medido de execucao, mes a mes e acumulados. O medido acumulado so' vai ate'
+ *  a ultima competencia com execucao medida; antes dela, mes sem medicao conta zero (e' dado, nao ausencia). */
+export function curvaS(pontos: PontoDaCurva[]): PontoS[] {
+  const dados = new Map(pontos.map(p => [p.competencia, p]));
+  const ordenadas = [...dados.keys()].sort();
+  // a API so' manda as competencias que tem previsto ou medido: o eixo do tempo precisa dos meses vazios no meio
+  const ordem: PontoDaCurva[] = [];
+  if (ordenadas.length > 0) {
+    let [a, m] = ordenadas[0].split("-").map(Number);
+    const fim = ordenadas[ordenadas.length - 1];
+    for (;;) {
+      const c = `${a}-${String(m).padStart(2, "0")}`;
+      ordem.push(dados.get(c) ?? { competencia: c, previsto_centavos: 0, medido_execucao_centavos: 0, atestado_pendente: false });
+      if (c >= fim) break;
+      if (++m > 12) { m = 1; a++; }
+    }
+  }
+  let ultima = -1;
+  ordem.forEach((p, i) => { if (p.medido_execucao_centavos > 0) ultima = i; });
+  let acP = 0, acM = 0;
+  return ordem.map((p, i) => {
+    acP += p.previsto_centavos;
+    acM += p.medido_execucao_centavos;
+    const medida = i <= ultima;
+    return { competencia: p.competencia, previsto: p.previsto_centavos, execucao: p.medido_execucao_centavos,
+      provisorio: p.atestado_pendente && p.medido_execucao_centavos > 0, medida,
+      acumuladoPrevisto: acP, acumuladoMedido: medida ? acM : null };
+  });
+}
+
+/** Dias corridos de `a` ate' `b` (datas puras "AAAA-MM-DD", sem fuso: so' aritmetica de calendario em UTC). */
+export function diasEntre(a: string, b: string): number {
+  const t = (s: string) => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); return Date.UTC(y, m - 1, d); };
+  return Math.round((t(b) - t(a)) / 86_400_000);
+}
+
+/** Uma linha do tempo (Execucao ou Vigencia): onde o "hoje" cai entre o inicio e o fim (0 a 100; nulo se o cadastro
+ *  nao tem o inicio) e quantos dias faltam (negativo = vencida). Depende so' da data do dia, entao anda sozinho. */
+export function linhaDoTempo(inicio: string | null, fim: string, hoje: string): { posicao: number | null; restantes: number } {
+  const restantes = diasEntre(hoje, fim);
+  if (!inicio) return { posicao: null, restantes };
+  const total = diasEntre(inicio, fim);
+  const corrido = diasEntre(inicio, hoje);
+  const posicao = total <= 0 ? (corrido >= 0 ? 100 : 0) : Math.max(0, Math.min(100, (corrido / total) * 100));
+  return { posicao, restantes };
+}
+
+export function restantesTexto(restantes: number): string {
+  const n = (d: number) => `${d} ${d === 1 ? "dia" : "dias"}`;
+  return restantes > 0 ? `${n(restantes)} ${restantes === 1 ? "restante" : "restantes"}`
+    : restantes === 0 ? "vence hoje" : `vencida há ${n(-restantes)}`;
+}

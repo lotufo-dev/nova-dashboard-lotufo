@@ -8,8 +8,9 @@ import { DO_ESPELHO, EXCECOES, type Metade } from "./medicao";
 import type { Medicao } from "./Medicoes";
 import Selo from "./Selo";
 
-// Os atos de UMA medicao (valor, protocolo feito fora, recebimento, cancelar ou desistir), num formulario
-// que a tabela da obra abre sob a linha e a pagina da medicao abre na secao do ato. Mesmas chamadas de API
+// Os atos de UMA medicao (valor, recebimento, cancelar ou desistir, medicao final), num formulario
+// que a pagina da medicao abre numa janela. O protocolo feito fora virou o "Registrar envio feito fora do sistema"
+// da etapa 4 (RegistrarFora.tsx). Mesmas chamadas de API
 // de antes; quem abre passa `agir`, que grava, recarrega e diz se a gravacao foi aceita.
 
 // `feito`: a frase de sucesso que a tela anuncia (role=status) quando a gravacao e' aceita.

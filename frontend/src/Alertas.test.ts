@@ -11,7 +11,11 @@ describe("destino do aviso", () => {
     const doc: Aviso = { ...base, tipo: "documentos_empresa", contrato_id: 7, destino: { tela: "documentos" }, entidade_id: 3 };
     const d1 = destinoDoAviso(prazo)!, d2 = destinoDoAviso(doc)!;
     expect(hrefDe(d1.para, undefined, d1.secao)).toBe("/obras/7/prazos");
-    expect(hrefDe(d2.para, d2.busca, d2.secao)).toBe("/documentos?empresa=3#emp-3");
+    expect(hrefDe(d2.para, d2.busca, d2.secao)).toBe("/documentos/3");
+    // #161: o aviso da regularidade do mes cai direto na aba dela, na pagina da empresa
+    const reg: Aviso = { ...base, tipo: "regularidade_mes", contrato_id: null, destino: { tela: "documentos" }, entidade_id: 3 };
+    const dr = destinoDoAviso(reg)!;
+    expect(hrefDe(dr.para, dr.busca, dr.secao)).toBe("/documentos/3/regularidade");
     // A2: o aviso de nota leva as notas da medicao dela
     const nota: Aviso = { ...base, tipo: "nota_divergente", contrato_id: 7, medicao_id: 723, destino: { tela: "contrato", id: 7, aba: "notas" } };
     const d3 = destinoDoAviso(nota)!;
@@ -39,5 +43,15 @@ describe("avisos da obra", () => {
     ];
     expect(avisosDaObra(lista, 7).map(x => x.mensagem)).toEqual([
       "nota 1843 diverge do espelho", "pleito enviado há 187 dias", "execução termina em 22 dias"]);
+  });
+});
+
+describe("aviso de garantia e ART (#161)", () => {
+  it("leva à aba Garantia e ART da empresa contratada", () => {
+    for (const tipo of ["garantia_vencendo", "art_nao_anexada"]) {
+      const a: Aviso = { ...base, tipo, contrato_id: 7, destino: { tela: "documentos" }, entidade_id: 2 };
+      const d = destinoDoAviso(a)!;
+      expect(hrefDe(d.para, d.busca, d.secao)).toBe("/documentos/2/garantia");
+    }
   });
 });

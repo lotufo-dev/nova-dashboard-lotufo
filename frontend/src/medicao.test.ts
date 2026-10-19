@@ -103,3 +103,12 @@ describe("medição", () => {
       "Nota emitida", "Valor protocolado alterado de R$ 1,00 para R$ 2,00 por Maria Exemplo"]);
   });
 });
+
+describe("itensOQueFalta: o espelho a enviar", () => {
+  it("o passo “Enviar o espelho ao faturamento” leva à etapa 2 da página da medição", () => {
+    const m = { id: 1, numero: 3, tipo: "execucao", competencia: "2026-09", estado: "espelho_gerado", valor_protocolado_centavos: 1,
+      valor_atestado_centavos: null, atestado_em: null, recebida_em: null, protocolos: [] };
+    const passo = itensOQueFalta(m, null, [], null).find(i => i.texto === "Enviar o espelho ao faturamento");
+    expect(passo && "secao" in passo ? passo.secao : null).toBe("etapa-2");
+  });
+});

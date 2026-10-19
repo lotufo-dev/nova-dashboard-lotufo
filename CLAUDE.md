@@ -49,14 +49,22 @@ digita pouco e confere; regra, cadastro e instrumento são do Leo, em arquivo ve
 - A fila é o GitHub Issues. Issue com label `decisao` espera resposta do Leo; `precisa-do-leo` espera ele
   olhar uma PR ou falha; `parar` em qualquer issue aberta pausa a orquestradora.
   `sessao-manual` é trabalho feito com o Leo (dado de produção, Outlook dele): a orquestradora não pega.
-  `redesenho` é tela refeita pelo Higgsfield: a orquestradora implementa, mas nunca liga o auto-merge.
+  `redesenho` é tela refeita pelo Higgsfield: a orquestradora implementa e trata como qualquer PR (auto-merge
+  liberado pelo Leo em 16/10/2026).
+- **Como se nomeia** (decidido em 19/10/2026). Número de issue ou PR nunca aparece sozinho em resposta,
+  resumo, comentário ou relatório: vai com o nome curto ao lado, "#231 (ofício no envio por fora)"; a PR cita
+  a issue, "PR #238 da #231 (ofício no envio por fora)". Toda issue leva um label `area:*` com a etapa do
+  ciclo (`contrato`, `medicao`, `faturamento`, `nota`, `protocolo`, `pagamento`, `infra`). A branch sobe ao
+  GitHub como `<N>-<nome-curto>` (`231-oficio-envio-por-fora`), pela skill `abrir-pr`.
 - **Orquestradora** (decidido em 13/10/2026): sessão fixa do Leo na pasta principal, em `master`, modelo Opus.
   Quando ele diz "rodada" ou "até acabar", a skill `orquestrar` pega até 10 issues elegíveis, abre uma
   **trabalhadora** por issue (agente `trabalhadora`, worktree próprio, Sonnet; Opus se a issue tem `risco:*`),
   roda o `revisor-adversarial` (Opus) em toda PR e o gate Sol (codex) nas de risco, manda os achados de volta
-  (2 rodadas no máximo), e liga o auto-merge quando as travas passam (CI verde, sem conflito, sem comentário
-  do Leo, sem tocar `.github/`, `scripts/deploy.ps1`, `.claude/` ou `backend/migrations/`). A orquestradora
-  não edita código e não faz deploy.
+  (2 rodadas no máximo), e liga o auto-merge em qualquer PR quando as travas passam (CI verde, sem conflito,
+  revisor-adversarial sem Crítico/Aviso em aberto, sem comentário do Leo pedindo para segurar; vale também
+  para redesenho, migração, `risco:*` e PR que toca `.github/`, `scripts/deploy.ps1` ou `.claude/`, decisão do
+  Leo de 16/10/2026). O gate Sol roda quando o codex existe; na nuvem não é trava. A orquestradora não edita
+  código e não faz deploy.
 - A trabalhadora não pergunta ao Leo: escolha técnica vira `## Suposições` da PR; regra de negócio sem fonte
   vira pergunta na issue com label `decisao`, e ela para sem PR.
 - Sessão manual em worktree pelo app continua valendo para o que o Leo quiser conduzir: abre em modo Plan,
@@ -64,7 +72,7 @@ digita pouco e confere; regra, cadastro e instrumento são do Leo, em arquivo ve
   gate Sol rodam na própria sessão, como a skill `abrir-pr` descreve.
 - Toda mudança de comportamento sai com teste ao lado dos existentes. Localmente só os testes do módulo
   tocado; a CI é a suíte oficial. `/code-review` em toda PR, com os achados triados e registrados nela.
-- Merge: automático pela orquestradora quando as travas passam; o resto é do Leo, no GitHub, com CI verde.
+- Merge: automático pela orquestradora quando as travas passam; o que ela segurar é do Leo, no GitHub, com CI verde.
   Deploy só pela skill `deploy`, quando ele pedir.
 
 ## Testes

@@ -1,78 +1,89 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { apiForm } from "./api";
-import Documentos, { competenciaDoNome } from "./Documentos";
+import Documentos from "./Documentos";
+import { competenciaDoNome } from "./documentosDados";
 
 vi.mock("./api", async (original) => ({
   ...(await original<typeof import("./api")>()),
   api: vi.fn(async (caminho: string) => {
-    if (caminho === "/api/documentos") return {
-      hoje: "2026-09-23",
-      empresas: [{
-        entidade_id: 1, entidade: "Lotufo", cnpj: "31200101000130", papel: "lotufo", regularidade_exigida: true,
-        regularidade: { situacao: "atrasada", competencia: "2026-06", esperada: "2026-07" },
-        certidoes: [
-          { tipo_id: 2, chave: "fgts", tipo: "CRF/FGTS", link_emissao: "https://consulta-crf.caixa.gov.br/x", exigida: true,
-            situacao: "vencendo", dias: 4, certidao: { id: 7, emissao: "2026-08-29", validade: "2026-09-27", natureza: "negativa", leitura: "manual" } },
-          { tipo_id: 5, chave: "municipal", tipo: "Certidão de Débitos Gerais (Prefeitura de Cuiabá)", link_emissao: "https://x",
-            exigida: true, situacao: "vencida", dias: null, certidao: { id: 8, emissao: "2026-08-20", validade: "2026-09-20", natureza: "negativa" } },
-          { tipo_id: 6, chave: "falencia", tipo: "Certidão de Falência e Recuperação Judicial (TJMT)", link_emissao: "https://x",
-            exigida: false, situacao: "faltando", dias: null, certidao: null },
-        ],
-      }],
-      contratos: [
-        { contrato_id: 5, obra: "Obra Alfa", art: { numero: "1234567", anexada: true, exigida: true },
-          garantia: { apolice: "AP-9", vigencia_fim: "2026-10-05", dias: 12, origem: "endosso", situacao: "vencendo" } },
-        { contrato_id: 6, obra: "Obra Beta", art: { numero: null, anexada: false, exigida: true }, garantia: null },
-      ],
-    };
+    if (caminho === "/api/documentos") return (await import("./documentosTeste")).PAINEL;
     return {};
   }),
   apiForm: vi.fn(),
 }));
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, "", "/"); });
 
 const usuario = { id: 1, nome: "U", email: "u@lotufo.com", perfil: "engenharia" };
 
-test("mostra a empresa, o que vence, o que venceu, a regularidade atrasada e o link de emissão", async () => {
+const nomes = () => screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent).filter(t => !/Anexar/.test(t ?? ""));
+
+test("um cartão por empresa, com a pendência primeiro, a situação geral e a próxima a vencer", async () => {
   render(<Documentos usuario={usuario} />);
-  // a empresa e' a linha da matriz, com a ancora que o aviso de documentos usa
-  await waitFor(() => screen.getByRole("rowheader", { name: /Lotufo/ }));
-  expect(screen.getByRole("rowheader", { name: /Lotufo/ }).id).toBe("emp-1");
-  screen.getByText(/vence em 4 dias/i);
-  // a celula: a situacao no selo e a validade embaixo
-  screen.getByText("vencida");
-  screen.getByText("em 20/09/2026");
-  screen.getByText(/não exigida/i);
-  screen.getByText(/esperada 07\/2026/);
-  expect(screen.getAllByRole("link", { name: /emitir/i })[0].getAttribute("href")).toBe("https://consulta-crf.caixa.gov.br/x");
-  expect(screen.getByRole("link", { name: /ZIP das certidões vigentes/i }).getAttribute("href"))
-    .toBe("/api/documentos/zip?entidade_id=1&data=2026-09-23");
-  screen.getByLabelText(/Escolher PDFs/i);
+  await screen.findByRole("link", { name: "Lotufo" });
+  // o servidor mandou a empresa em dia primeiro; a que tem pendência sobe
+  expect(nomes()).toEqual(["Lotufo", "Consórcio Sem Certidão", "Beta Ltda", "Consórcio Alfa"]);
+  const lotufo = screen.getByRole("link", { name: "Lotufo" }).closest("article")!;
+  const c = within(lotufo);
+  c.getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias · ART não anexada");
+  c.getByText(/Próxima a vencer:/);
+  expect(lotufo.textContent).toContain("FGTS em 27/09/2026");
+  c.getByText("31.200.101/0001-30");
+  c.getByText(/Regularidade do mês \(DP\): atrasada · esperada 07\/2026/);
+  c.getByText("Exigida em 2 obras: Obra Alfa, Obra Beta");
+  // garantia e ART que pedem algo da empresa entram no cartao
+  c.getByText("Garantia de Obra Alfa: vence em 12 dias");
+  c.getByText("ART de Obra Beta: não anexada");
+  // um ponto por certidao, cada um com a situacao para o leitor de tela
+  expect(within(c.getByRole("list", { name: "Certidões" })).getAllByRole("listitem")).toHaveLength(4);
+  c.getByText(": vencida");
+  // o cartao leva a pagina da empresa, que tem endereco proprio
+  expect(screen.getByRole("link", { name: "Lotufo" }).getAttribute("href")).toBe("/documentos/1");
+  // o consorcio diz quem o compoe
+  within(screen.getByRole("link", { name: "Consórcio Alfa" }).closest("article")!).getByText("Consorciadas: Lotufo, Beta Ltda");
 });
 
-test("diretoria não vê onde anexar", async () => {
+test("'Só as com pendência' filtra pela URL e diz o recorte", async () => {
+  const { unmount } = render(<Documentos usuario={usuario} />);
+  await screen.findByRole("link", { name: "Lotufo" });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Só as com pendência" }));
+  expect(window.location.search).toBe("?pendentes=1");
+  unmount();
+  render(<Documentos usuario={usuario} busca={{ pendentes: "1" }} />);
+  await screen.findByRole("link", { name: "Lotufo" });
+  expect(screen.queryByRole("link", { name: "Beta Ltda" })).toBeNull();
+  screen.getByRole("link", { name: "Consórcio Sem Certidão" });
+  screen.getByText(/Mostrando as 2 com pendência, de 4 empresas/);
+  expect((screen.getByRole("checkbox", { name: "Só as com pendência" }) as HTMLInputElement).checked).toBe(true);
+});
+
+test("o Copiar entrega o CNPJ e anuncia", async () => {
+  const gravar = vi.fn(async () => {});
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: gravar } });
+  render(<Documentos usuario={usuario} />);
+  await screen.findByRole("link", { name: "Lotufo" });
+  fireEvent.click(screen.getByRole("button", { name: "Copiar o CNPJ de Lotufo" }));
+  await waitFor(() => expect(gravar).toHaveBeenCalledWith("31200101000130"));
+  await waitFor(() => expect(screen.getAllByText("CNPJ de Lotufo copiado.").length).toBeGreaterThan(0));
+});
+
+test("diretoria vê os cartões e o ZIP, mas não a área de anexar", async () => {
   render(<Documentos usuario={{ ...usuario, perfil: "diretoria" }} />);
-  await waitFor(() => screen.getByRole("rowheader", { name: /Lotufo/ }));
+  await screen.findByRole("link", { name: "Lotufo" });
+  expect(screen.queryByText(/Arraste os PDFs das certidões/)).toBeNull();
   expect(screen.queryByLabelText(/Escolher PDFs/i)).toBeNull();
-  expect(screen.queryByRole("button", { name: /anexar regularidade/i })).toBeNull();
+  screen.getByRole("button", { name: /ZIP das certidões vigentes/ });
 });
 
-test("certidão digitada à mão leva o selo 'digitada' ao lado da data (testes de quebra 10/10, A-19)", async () => {
-  render(<Documentos usuario={usuario} />);
-  await waitFor(() => screen.getByRole("rowheader", { name: /Lotufo/ }));
-  expect(screen.getAllByText("digitada")).toHaveLength(1);          // so' a do FGTS; a municipal veio lida
-});
-
-test("datas lidas implausíveis abrem a digitação já preenchida com o que foi lido (gate Sol S6)", async () => {
+test("área de arrastar no fim: datas lidas implausíveis abrem a digitação já preenchida (gate Sol S6)", async () => {
   vi.mocked(apiForm).mockResolvedValueOnce({
     ok: false, motivo: "datas-implausiveis", digitavel: true,
     mensagem: "As datas lidas (emissão 24/06/2026, validade 21/12/2028) não batem com o prazo normal desta certidão: confira no documento e digite",
     lidos: { entidade_id: 1, tipo: "trabalhista", emissao: "2026-06-24", validade: "2028-12-21", natureza: "negativa" },
   });
   render(<Documentos usuario={usuario} />);
-  await waitFor(() => screen.getByRole("rowheader", { name: /Lotufo/ }));
+  await screen.findByText(/Arraste os PDFs das certidões aqui/);
   fireEvent.change(screen.getByLabelText(/Escolher PDFs/i), { target: { files: [new File(["%PDF"], "cndt.pdf", { type: "application/pdf" })] } });
   await screen.findByText(/não batem com o prazo normal/);
   expect((screen.getByLabelText("Empresa") as HTMLSelectElement).value).toBe("1");
@@ -81,37 +92,52 @@ test("datas lidas implausíveis abrem a digitação já preenchida com o que foi
   expect((screen.getByLabelText(/^Validade/) as HTMLInputElement).value).toBe("2028-12-21");
 });
 
+test("a fila mostra a leitura para conferir e descarta", async () => {
+  vi.mocked(apiForm).mockResolvedValueOnce({
+    ok: true, leitura: { tipo: "fgts", tipo_nome: "FGTS", natureza: "negativa", entidade_id: 1, entidade: "Lotufo",
+      emissao: "2026-09-20", validade: "2026-10-19", numero: "123", validade_calculada: false },
+  });
+  render(<Documentos usuario={usuario} />);
+  await screen.findByText(/Arraste os PDFs das certidões aqui/);
+  fireEvent.change(screen.getByLabelText(/Escolher PDFs/i), { target: { files: [new File(["%PDF"], "crf.pdf", { type: "application/pdf" })] } });
+  await screen.findByText(/válida até 19\/10\/2026/);
+  fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+  expect(screen.queryByText("crf.pdf")).toBeNull();
+});
+
+test("o ZIP abre uma janela com a data e uma caixa por empresa, e diz o que a empresa sem certidão respondeu", async () => {
+  const buscar = vi.fn(async () => new Response(JSON.stringify({ detail: "nenhuma certidão vigente em 2026-09-23" }), { status: 422 }));
+  vi.stubGlobal("fetch", buscar);
+  render(<Documentos usuario={usuario} />);
+  await screen.findByRole("link", { name: "Lotufo" });
+  fireEvent.click(screen.getByRole("button", { name: /ZIP das certidões vigentes/ }));
+  expect((screen.getByLabelText("Certidões vigentes em") as HTMLInputElement).value).toBe("2026-09-23");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Beta Ltda" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Consórcio Alfa" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Consórcio Sem Certidão" }));
+  fireEvent.click(screen.getByRole("button", { name: "Baixar ZIP" }));
+  await screen.findByText(/Lotufo: nenhuma certidão vigente em 2026-09-23/);
+  expect(buscar).toHaveBeenCalledTimes(1);
+  expect(buscar.mock.calls[0]).toEqual(["/api/documentos/zip?entidade_id=1&data=2026-09-23", { credentials: "same-origin" }]);
+});
+
 test("competência pelo nome do arquivo do DP", () => {
   expect(competenciaDoNome("042026 - LOTUFO ENGENHARIA.pdf")).toBe("2026-04");
   expect(competenciaDoNome("Documentos Lotufo.pdf")).toBe("");
 });
 
-test("regularidade: digitar 06/2026 envia a competência como AAAA-MM", async () => {
-  Element.prototype.scrollIntoView = vi.fn();   // o jsdom não tem; o foco devolvido ao botão rola a tela
-  vi.mocked(apiForm).mockResolvedValueOnce({});
-  render(<Documentos usuario={usuario} />);
-  await waitFor(() => screen.getByRole("rowheader", { name: /Lotufo/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Anexar regularidade de Lotufo/ }));
-  const campo = screen.getByLabelText("Competência") as HTMLInputElement;
-  expect(campo.value).toBe("07/2026");              // a esperada vem da API como 2026-07
-  fireEvent.change(screen.getByLabelText(/da regularidade de Lotufo/), { target: { files: [new File(["%PDF"], "x.pdf", { type: "application/pdf" })] } });
-  fireEvent.change(campo, { target: { value: "062026" } });
-  expect(campo.value).toBe("06/2026");
-  fireEvent.click(screen.getByRole("button", { name: /Gravar regularidade/ }));
-  await waitFor(() => expect(apiForm).toHaveBeenCalled());
-  const fd = vi.mocked(apiForm).mock.calls.at(-1)![1] as FormData;
-  expect(fd.get("competencia")).toBe("2026-06");
+test("link salvo da tela antiga (?empresa=N) abre a página da empresa, trocando o endereço", async () => {
+  window.history.replaceState(null, "", "/documentos?empresa=3#emp-3");
+  render(<Documentos usuario={usuario} busca={{ empresa: "3" }} />);
+  await waitFor(() => expect(window.location.pathname).toBe("/documentos/3"));
+  expect(window.location.search).toBe("");
+  expect(window.location.hash).toBe("");
 });
 
-test("garantia com validade e ART sem validade aparecem por obra (issue #65)", async () => {
+test("a garantia vencida de uma obra conta como pendência do cartão e a empresa sem certidão continua na lista", async () => {
   render(<Documentos usuario={usuario} />);
-  await waitFor(() => screen.getByRole("heading", { name: /Garantia e ART por obra/ }));
-  const alfa = screen.getByRole("rowheader", { name: "Obra Alfa" }).closest("tr")!;
-  expect(alfa.textContent).toContain("vence em 12 dias");
-  expect(alfa.textContent).toContain("até 05/10/2026 (endosso) · apólice AP-9");
-  expect(alfa.textContent).toContain("Anexada");
-  expect(alfa.textContent).toContain("nº 1234567");
-  const beta = screen.getByRole("rowheader", { name: "Obra Beta" }).closest("tr")!;
-  expect(beta.textContent).toContain("sem vigência no cadastro");
-  expect(beta.textContent).toContain("não anexada");
+  const c = (await screen.findByRole("link", { name: "Consórcio Sem Certidão" })).closest("article")!;
+  within(c).getByText("Garantia de Obra Delta: vencida");
+  within(c).getByText("Garantia vencida");
+  within(c).getByText("Nenhuma certidão vigente");
 });

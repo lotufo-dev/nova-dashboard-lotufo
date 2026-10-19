@@ -47,7 +47,7 @@ def test_fluxo_completo_pela_api(api):
     assert d["conferencia"]["ok"] is True
     pv = cl.post("/api/protocolos/envio/previa", json={"protocolo_ids": [pid]}).json()
     r = cl.post("/api/protocolos/envio", json={"protocolo_ids": [pid], **{k: pv[k] for k in ("para", "copia", "assunto", "corpo")},
-                                              "justificativa": "sem nota lida pelo RM" if pv["pendencias"] else None})
+                                              "confirmadas": [x["mensagem"] for x in pv["pendencias"]]})
     assert r.status_code == 200, r.text
     assert cl.get(f"/api/protocolos/{pid}").json()["situacao"] == "enviado"
 
@@ -81,14 +81,15 @@ def test_diretoria_nao_cria_protocolo(api):
 # --- envio unico e registrado (pacote 1 da fase 4, 10/10/2026) ---------------------------------------------
 
 def _pronto(cl, cid, mid):
-    """Protocolo montado e assinado + o corpo do POST de envio (com justificativa, que nao atrapalha)."""
+    """Protocolo montado e assinado + o corpo do POST de envio (com justificativa, que nao atrapalha, e o que falta
+    confirmado, issue #213)."""
     pid = cl.post(f"/api/contratos/{cid}/protocolos",
                   json={"etapa": "unico", "medicao_ids": [mid], "numero_oficio": "301"}).json()["id"]
     cl.post(f"/api/protocolos/{pid}/montar", json={})
     cl.post(f"/api/protocolos/{pid}/assinado", files=_pdf_upload(_assinar(cl.get(f"/api/protocolos/{pid}/pacote").content)))
     pv = cl.post("/api/protocolos/envio/previa", json={"protocolo_ids": [pid]}).json()
     return pid, {"protocolo_ids": [pid], **{k: pv[k] for k in ("para", "copia", "assunto", "corpo")},
-                 "justificativa": "teste do envio concorrente"}
+                 "justificativa": "teste do envio concorrente", "confirmadas": [x["mensagem"] for x in pv["pendencias"]]}
 
 
 def _admin(c):
@@ -116,7 +117,7 @@ def test_segundo_envio_durante_o_primeiro_e_recusado(api, monkeypatch):
     def segundo():
         outra = db.get_conn()
         try:
-            protocolo.enviar(outra, u, [pid], *args)
+            protocolo.enviar(outra, u, [pid], *args, confirmadas=corpo["confirmadas"])
         except Exception as e:
             erros.append(e)
         finally:
@@ -124,7 +125,7 @@ def test_segundo_envio_durante_o_primeiro_e_recusado(api, monkeypatch):
 
     falso = CorreioFalso(no_meio=segundo)
     monkeypatch.setattr(correio, "cliente", falso)
-    eid = protocolo.enviar(c, u, [pid], *args)
+    eid = protocolo.enviar(c, u, [pid], *args, confirmadas=corpo["confirmadas"])
     c.close()
     assert [type(e).__name__ for e in erros] == ["EnvioEmAndamento"]
     assert len(falso.enviados) == 1
@@ -222,7 +223,8 @@ def test_envio_de_nota_em_andamento_responde_409(api):
     vistos = [{"nome": a["nome"], "tamanho": a["tamanho"]}
               for a in cl.get(f"/api/notas/envio/{pid}").json()["previa"]["anexos"]]
     r = cl.post(f"/api/notas/envio/{pid}/enviar",
-                json={**{k: corpo[k] for k in ("para", "copia", "assunto", "corpo", "justificativa")}, "anexos": vistos})
+                json={**{k: corpo[k] for k in ("para", "copia", "assunto", "corpo", "justificativa", "confirmadas")},
+                      "anexos": vistos})
     d = r.json()["detail"]
     assert r.status_code == 409 and d["codigo"] == "ENVIO_RESERVADO" and d["reservado_por_nome"] == "Admin"
     assert "em andamento" in d["mensagem"] and d["reservado_em"] and d["liberavel_a_partir_de"]
@@ -333,9 +335,9 @@ def test_justificativa_curta_sem_pendencia_na_previa_nao_impede_marcar_depois_do
             m.setattr(medicoes.checklist, "pronto_para_protocolar", lambda *x: pendente)
             return original(*a, **k)
     monkeypatch.setattr(medicoes, "registrar_protocolo", espia)
-    previa = protocolo.previa_envio                                    # previa limpa (a nota da 23a fica de fora)
-    monkeypatch.setattr(protocolo, "previa_envio", lambda *a, **k: {**previa(*a, **k), "pendencias": []})
-    r = cl.post("/api/protocolos/envio", json={**corpo, "justificativa": "ok"})
+    # previa limpa (a nota da 23a fica de fora), tambem na conferencia sob o lock da reserva (issue #213)
+    monkeypatch.setattr(protocolo, "_pendencias_envio", lambda *a, **k: [])
+    r = cl.post("/api/protocolos/envio", json={**corpo, "justificativa": "ok", "confirmadas": None})
     assert r.status_code == 200, r.text
     assert len(recebidas) == 1 and len(recebidas[0]) >= protocolo.MIN_JUSTIFICATIVA
     assert cl.get(f"/api/medicoes/{mid}").json()["estado"] == "protocolada"

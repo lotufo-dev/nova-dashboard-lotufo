@@ -7,8 +7,10 @@ import zipfile
 
 import pytest
 
-from app import (arquivos, auth, cadastro_aplicar, certidoes, cobranca_certidoes, correio, db, documentos,
-                 notas_envio, protocolo, tempo)
+from app import (arquivos, auth, cadastro_aplicar, certidoes, cobranca_certidoes, correio, db, documentos, frc,
+                 medicoes, notas_envio, protocolo, tempo)
+from tests import test_frc
+from tests.test_frc import _texto, consorcio14, conn, usuario  # noqa: F401  (fixtures do consorcio com FRC)
 from tests.test_protocolo import CARTAS, CINCO, _contrato, _pdf, _textos
 
 D = datetime.date
@@ -315,7 +317,7 @@ def test_envio_pelo_simulador_vira_aguardando_pagamento(api, tmp_path):
     pid = r.json()["protocolo_id"]
     assert _por_contrato(cl.get("/api/notas/a-enviar").json(), ids["sinfra"])[0]["protocolo_id"] == pid
     d = cl.get(f"/api/notas/envio/{pid}").json()
-    assert d["etapa"] == "nota" and d["justificativa_obrigatoria"] is False
+    assert d["etapa"] == "nota" and d["pendencias"] == []         # issue #213: nada falta, nada a confirmar
     r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d))
     assert r.status_code == 200, r.text
     enviado = json.loads(sorted((tmp_path / "sim" / "enviados").glob("*.json"))[0].read_text(encoding="utf-8"))
@@ -353,6 +355,84 @@ def test_envio_feito_por_fora_e_numero_do_siga(api):
     r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(ids["mtpar_exec"])], "enviado_em": "2026-09-15",
                                                  "observacao": "de novo"})
     assert r.status_code == 422                                         # ja' protocolada
+
+
+def _oficio_fora(c, mid):
+    return [r[0] for r in c.execute("SELECT numero_oficio FROM medicao_protocolos WHERE medicao_id=?", (mid,))]
+
+
+def test_registro_por_fora_grava_o_oficio_digitado_no_protocolo_da_medicao(api):
+    """Issue #231: o nº do ofício do registro por fora vai para o protocolo da medição (normalizado como no envio
+    pelo sistema, com a sigla da entidade e o ano do envio), e não mais só no texto da observação."""
+    cl, c, ids = api
+    r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(ids["mtpar_exec"])], "enviado_em": "2026-09-15",
+                                                 "observacao": "Pelo Outlook", "numero_oficio": " 360 "})
+    assert r.status_code == 200, r.text
+    assert _oficio_fora(c, ids["mtpar_exec"]) == ["CT-360-LT-2026"]
+    aud = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+    assert aud["numero_oficio"] == "CT-360-LT-2026" and aud["observacao"] == "Pelo Outlook"
+
+
+def test_registro_por_fora_sem_oficio_segue_o_de_hoje(api):
+    cl, c, ids = api
+    r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(ids["mtpar_exec"])], "enviado_em": "2026-09-15",
+                                                 "observacao": "Pelo Outlook", "numero_oficio": "  "})
+    assert r.status_code == 200, r.text
+    assert _oficio_fora(c, ids["mtpar_exec"]) == [None]
+    aud = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+    assert "numero_oficio" not in aud
+
+
+def test_registro_por_fora_usa_o_ano_do_envio_e_o_ano_digitado(api):
+    cl, c, ids = api
+    r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(ids["mtpar_exec"])], "enviado_em": "2025-12-30",
+                                                 "observacao": "Pelo Outlook", "numero_oficio": "12"})
+    assert r.status_code == 200, r.text
+    assert _oficio_fora(c, ids["mtpar_exec"]) == ["CT-012-LT-2025"]
+    r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(ids["mtpar_reaj"])], "enviado_em": "2026-09-15",
+                                                 "observacao": "Pelo Outlook", "numero_oficio": "CT/361/LT/2025"})
+    assert r.status_code == 200, r.text
+    assert _oficio_fora(c, ids["mtpar_reaj"]) == ["CT-361-LT-2025"]
+
+
+def test_registro_por_fora_usa_a_sigla_como_o_envio_pelo_sistema(api):
+    """Como em `iniciar`: contrato sem entidade usa LT; entidade sem sigla (carta propria) vira CARTA-NNN-AAAA."""
+    cl, c, ids = api
+    c.execute("UPDATE contratos SET entidade_id=NULL WHERE id=?", (ids["mtpar"],)); c.commit()
+    r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(ids["mtpar_exec"])], "enviado_em": "2026-09-15",
+                                                 "observacao": "Pelo Outlook", "numero_oficio": " Ofício 360/2026 "})
+    assert r.status_code == 200, r.text
+    assert _oficio_fora(c, ids["mtpar_exec"]) == ["CT-360-LT-2026"]
+    c.execute("UPDATE entidades SET sigla_oficio=NULL"); c.commit()
+    r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(ids["sinfra_exec"])], "enviado_em": "2026-09-15",
+                                                 "observacao": "Pelo Outlook", "numero_oficio": "48"})
+    assert r.status_code == 200, r.text
+    assert _oficio_fora(c, ids["sinfra_exec"]) == ["CARTA-048-2026"]
+
+
+def test_registro_por_fora_sem_oficio_usa_o_do_ultimo_envio_e_o_digitado_vence(api):
+    cl, c, ids = api
+    for mid, oficio in ((ids["mtpar_exec"], ""), (ids["mtpar_reaj"], "361")):
+        pid = notas_envio.iniciar(c, 1, ids["mtpar"], [mid], "300")
+        c.execute("UPDATE protocolos SET situacao='enviado' WHERE id=?", (pid,)); c.commit()
+        r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(mid)], "enviado_em": "2026-09-15",
+                                                     "observacao": "Pelo Outlook", "numero_oficio": oficio})
+        assert r.status_code == 200, r.text
+    assert _oficio_fora(c, ids["mtpar_exec"]) == ["CT-300-LT-2026"]
+    assert _oficio_fora(c, ids["mtpar_reaj"]) == ["CT-361-LT-2026"]
+
+
+def test_registro_por_fora_recusa_oficio_sem_numero_ou_longo_sem_gravar_nada(api):
+    cl, c, ids = api
+    c.execute("UPDATE contratos SET entidade_id=NULL WHERE id=?", (ids["mtpar"],)); c.commit()   # sem sigla tambem
+    for oficio, trecho in (("por e-mail", "Informe o número do ofício"), ("1" * 41, None)):
+        r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(ids["mtpar_exec"])], "enviado_em": "2026-09-15",
+                                                     "observacao": "Pelo Outlook", "numero_oficio": oficio})
+        assert r.status_code == 422, r.text
+        if trecho:
+            assert trecho in r.json()["detail"]
+    assert _oficio_fora(c, ids["mtpar_exec"]) == []
+    assert c.execute("SELECT COUNT(*) FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0] == 0
 
 
 EML = (b"From: Engenharia <engenharia@exemplo.com.br>\r\nTo: sinfra@orgao-a.exemplo.com.br\r\n"
@@ -623,7 +703,7 @@ def test_sinfra_medicao_sem_o_reajuste_irmao_vira_pendencia(svc):
     pid = notas_envio.iniciar(c, ids["uid"], ids["sinfra"], [ids["sinfra_exec"]])
     pend = notas_envio.detalhe_envio(c, pid, hoje=HOJE)["pendencias"]
     assert [p for p in pend if p.startswith(IRMA)] == [
-        IRMA + ": junte pela opção 'Juntar outra nota desta obra' ou justifique"]
+        IRMA + ": junte pela opção 'Juntar outra nota desta obra' ou confirme o envio sem ela"]
     assert "irma_fora" in [p["codigo"] for p in protocolo.previa_envio(c, [pid], hoje=HOJE)["pendencias"]]
     # VG tambem junta (D9); a MTPAR nao junta: cada nota no seu e-mail, sem pendencia
     p_vg = notas_envio.iniciar(c, ids["uid"], ids["vg"], [ids["vg_exec"]], "254")
@@ -640,7 +720,7 @@ def test_reajuste_irmao_em_outro_envio_separado_tambem_cobra(svc):
     assert notas_envio.detalhe_envio(c, pid, hoje=HOJE)["pendencias"] == [
         "Reajuste da 23ª Medição (mesma competência) está em outro envio separado: na SINFRA e na Pref. VG medição "
         "e reajuste vão no mesmo e-mail — junte pela opção 'Juntar outra nota desta obra' (o outro rascunho é "
-        "descartado) ou justifique"]
+        "descartado) ou confirme o envio sem ela"]
     assert [p.split(" (")[0] for p in notas_envio.detalhe_envio(c, p_reaj, hoje=HOJE)["pendencias"]] == ["23ª Medição"]
     # os dois protocolos no MESMO e-mail: a irma vai junto, nao ha' o que cobrar
     assert "irma_fora" not in [p["codigo"] for p in protocolo.previa_envio(c, [pid, p_reaj], hoje=HOJE)["pendencias"]]
@@ -654,7 +734,7 @@ def test_protocolo_ja_enviado_nao_lista_mais_a_irma_fora(svc):
     assert "irma_fora" in cods()                                          # rascunho: como hoje
     pv = protocolo.previa_envio(c, [pid], hoje=HOJE)
     protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
-                     justificativa="reajuste vai no próximo e-mail")
+                     confirmadas=[x["mensagem"] for x in pv["pendencias"]])
     assert protocolo.detalhe(c, pid, hoje=HOJE)["situacao"] == "enviado"
     assert c.execute("SELECT estado FROM medicoes WHERE id=?", (ids["sinfra_reaj"],)).fetchone()[0] == "nota_emitida"
     assert "irma_fora" not in cods()
@@ -676,17 +756,350 @@ def test_projeto_e_reajuste_do_mesmo_numero_nao_sao_irmas(svc):
     assert [m.split(" (")[0] for m in irmas] == ["23ª Medição"]                  # so' a execucao, nao o projeto
 
 
-def test_envio_sem_o_reajuste_irmao_exige_justificativa(api):
+def _confirmacoes(c) -> list[tuple]:
+    return [(r[0], json.loads(r[1])["pendencias"]) for r in c.execute(
+        "SELECT usuario_id, depois FROM audit_log WHERE acao='protocolo.envio_confirmado' ORDER BY id")]
+
+
+def test_envio_com_documento_faltando_sem_confirmacao_e_recusado(api):
+    """Issue #213: falta documento nao bloqueia, mas sem a confirmacao do aviso nada sai e nada e' gravado."""
     cl, c, ids = api
     pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
                                                     "medicao_ids": [ids["sinfra_exec"]]}).json()["protocolo_id"]
     d = cl.get(f"/api/notas/envio/{pid}").json()
-    assert d["justificativa_obrigatoria"] is True and any(p.startswith(IRMA) for p in d["pendencias"])
+    assert d["bloqueio"] is None and any(p.startswith(IRMA) for p in d["pendencias"])
     r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d))
-    assert r.status_code == 422 and "justificativa" in r.json()["detail"]
-    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
-    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, justificativa="reajuste vai no próximo e-mail"))
+    det = r.json()["detail"]
+    assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS" and det["pendencias"] == d["pendencias"]
+    assert det["mensagem"].startswith("ATENÇÃO: falta documento neste envio")
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0 and _confirmacoes(c) == []
+    assert c.execute("SELECT envio_reservado_em FROM protocolos WHERE id=?", (pid,)).fetchone()[0] is None
+
+
+def test_envio_confirmado_sai_e_grava_quem_quando_e_a_lista(api, monkeypatch):
+    """Issue #213: "Continuar com o envio" manda a lista; a confirmacao (quem, quando, o que faltava) e' gravada na
+    transacao da reserva, ANTES do e-mail; a justificativa escrita nao e' mais exigida."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    original, vistas = correio.enviar_e_registrar, []
+
+    def espia(*a, **k):               # na hora do e-mail, outra conexao ja' le a confirmacao gravada
+        outra = db.get_conn()
+        try:
+            vistas.extend(_confirmacoes(outra))
+        finally:
+            outra.close()
+        return original(*a, **k)
+    monkeypatch.setattr(correio, "enviar_e_registrar", espia)
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=list(reversed(d["pendencias"]))))
     assert r.status_code == 200, r.text
+    uid = c.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    assert vistas == [(uid, d["pendencias"])] and _confirmacoes(c) == vistas
+    em = c.execute("SELECT criado_em FROM audit_log WHERE acao='protocolo.envio_confirmado'").fetchone()[0]
+    assert em
+    p = c.execute("SELECT situacao, justificativa FROM protocolos WHERE id=?", (pid,)).fetchone()
+    assert p["situacao"] == "enviado" and p["justificativa"] == protocolo.CONFIRMADO_COM_FALTA + d["pendencias"][0]
+    depois = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='protocolo.enviar'").fetchone()[0])
+    assert depois["confirmadas"] == d["pendencias"]
+
+
+def test_envio_sem_nada_faltando_nao_grava_confirmacao(api):
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"], "medicao_ids": [
+        ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    assert d["pendencias"] == []
+    assert cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d)).status_code == 200
+    assert _confirmacoes(c) == []
+    assert c.execute("SELECT justificativa FROM protocolos WHERE id=?", (pid,)).fetchone()[0] is None
+
+
+def test_lista_diferente_da_confirmada_e_recusada(api):
+    """Issue #213: a lista mudou entre o aviso e o envio (outro item faltando, ou um a menos): pede nova confirmacao."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    for lista in ([*d["pendencias"], "Falta a certidão federal"], ["Outra coisa"]):
+        r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=lista))
+        det = r.json()["detail"]
+        assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS", r.text
+        assert "mudou" in det["mensagem"] and det["pendencias"] == d["pendencias"]
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0 and _confirmacoes(c) == []
+
+
+def test_confirmacao_antiga_sem_nada_faltando_agora_envia(api):
+    """Code-review da PR: confirmou o que faltava e, antes do clique, tudo foi resolvido; nao ha' o que confirmar."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"], "medicao_ids": [
+        ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    assert d["pendencias"] == []
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=["Falta a certidão federal"]))
+    assert r.status_code == 200, r.text
+    assert _confirmacoes(c) == []
+
+
+def test_auditoria_e_ressalva_usam_a_lista_lida_sob_o_lock(api, monkeypatch):
+    """Revisor adversarial da PR #227: confirmou o que faltava e tudo se resolveu ate' a reserva; a lista que vale e' a
+    lida sob o lock (vazia): nada de confirmacao gravada nem ressalva com o que ja' nao faltava."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    original, chamadas = protocolo._pendencias_envio, []
+
+    def resolve_na_segunda(*a, **k):
+        chamadas.append(1)
+        return original(*a, **k) if len(chamadas) == 1 else []
+    monkeypatch.setattr(protocolo, "_pendencias_envio", resolve_na_segunda)
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"]))
+    assert r.status_code == 200, r.text
+    assert _confirmacoes(c) == []
+    assert c.execute("SELECT justificativa FROM protocolos WHERE id=?", (pid,)).fetchone()[0] is None
+
+
+def test_justificativa_curta_com_confirmacao_nao_vira_pendencia_surgida_depois(api, monkeypatch):
+    """Revisor adversarial da PR #227: pela API, justificativa curta junto da confirmacao nao pode apagar a lista nem
+    marcar a medicao com o texto de pendencia surgida depois do e-mail."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    original, recebidas = medicoes.registrar_protocolo, []
+
+    def espia(*a, **k):
+        recebidas.append(k.get("justificativa"))
+        return original(*a, **k)
+    monkeypatch.setattr(medicoes, "registrar_protocolo", espia)
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"], justificativa="ok"))
+    assert r.status_code == 200, r.text
+    esperado = "ok; " + protocolo.CONFIRMADO_COM_FALTA + d["pendencias"][0]
+    assert c.execute("SELECT justificativa FROM protocolos WHERE id=?", (pid,)).fetchone()[0] == esperado
+    assert recebidas == [esperado] and protocolo.JUSTIFICATIVA_POS_ENVIO not in recebidas
+
+
+def test_recusa_traz_o_codigo_de_cada_item_e_limita_o_tamanho(api):
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    det = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d)).json()["detail"]
+    assert [x["mensagem"] for x in det["itens"]] == det["pendencias"] and "irma_fora" in [x["codigo"] for x in det["itens"]]
+    assert cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=["x" * 2001])).status_code == 422
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+
+
+def test_lista_que_muda_ate_a_reserva_e_recusada_sob_o_lock(api, monkeypatch):
+    """Issue #213: a conferencia se repete sob o lock da reserva; o que mudou depois da primeira leitura recusa sem
+    reservar nem gravar a confirmacao."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    original, chamadas = protocolo._pendencias_envio, []
+
+    def muda_na_segunda(*a, **k):
+        chamadas.append(1)
+        out = original(*a, **k)
+        return out if len(chamadas) == 1 else [*out, {"protocolo_id": pid, "codigo": "certidao",
+                                                      "mensagem": "Lotufo: CND Federal sem validade hoje"}]
+    monkeypatch.setattr(protocolo, "_pendencias_envio", muda_na_segunda)
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"]))
+    det = r.json()["detail"]
+    assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS" and len(chamadas) == 2
+    assert "Lotufo: CND Federal sem validade hoje" in det["pendencias"]
+    assert c.execute("SELECT envio_reservado_em FROM protocolos WHERE id=?", (pid,)).fetchone()[0] is None
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0 and _confirmacoes(c) == []
+
+
+def test_bloqueio_continua_recusando_mesmo_com_confirmacao(api):
+    """Issue #213: bloqueio (certidao vencida, FRC recusada...) nao vira aviso: confirmar nao o contorna."""
+    cl, c, ids = api
+    _validade(c, "federal", "2026-09-10")
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    assert d["bloqueio"]
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"]))
+    assert r.status_code == 409, r.text
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0 and _confirmacoes(c) == []
+
+
+# --- issue #230: o registro por fora tambem pede a confirmacao do que falta ---------------------------
+
+def _sem_nota(c, mid):
+    """A medicao fica sem a nota fiscal anexada: o item "Notas fiscais" do envio vira "falta"."""
+    c.execute("DELETE FROM medicao_documentos WHERE medicao_id=? AND tipo_doc='nfs'", (mid,))
+    c.commit()
+
+
+def _fora(cl, mid, confirmadas=None, observacao="Pelo Outlook, ao fiscal do contrato", eml=None):
+    data = {"medicao_ids": [str(mid)], "enviado_em": "2026-09-15", "observacao": observacao}
+    if confirmadas is not None:
+        data["confirmadas"] = confirmadas
+    return cl.post("/api/notas/envio-externo", data=data,
+                   files={"eml": ("envio.eml", eml, "message/rfc822")} if eml else None)
+
+
+def _confirmacoes_fora(c) -> list[tuple]:
+    return [(r[0], int(r[1]), json.loads(r[2])["pendencias"]) for r in c.execute(
+        "SELECT usuario_id, entidade_id, depois FROM audit_log WHERE acao='protocolo.envio_confirmado' "
+        "AND entidade='medicao' ORDER BY id")]
+
+
+def test_registro_por_fora_com_documento_faltando_sem_confirmacao_e_recusado(api):
+    """Issue #230: falta a nota e a certidao venceu; sem a confirmacao do aviso nada e' registrado nem gravado."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _sem_nota(c, mid)
+    _validade(c, "federal", "2026-09-10")
+    antes = _evidencias()
+    r = _fora(cl, mid, eml=EML)
+    det = r.json()["detail"]
+    assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS", r.text
+    assert det["mensagem"].startswith("ATENÇÃO: falta documento neste envio")
+    assert det["mensagem"].endswith("Confirme para continuar com o registro do envio")
+    assert len(det["pendencias"]) == 2
+    assert any(p.startswith("Notas fiscais (0)") for p in det["pendencias"])
+    assert any("federal vencida em 10/09" in p for p in det["pendencias"])
+    assert c.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "nota_emitida"
+    _sem_registro(c, mid)
+    assert c.execute("SELECT COUNT(*) FROM audit_log WHERE acao IN ('notas.envio_externo', "
+                     "'protocolo.envio_confirmado')").fetchone()[0] == 0
+    assert _evidencias() == antes
+
+
+def test_registro_por_fora_confirmado_grava_a_lista_e_junta_observacao_e_lista(api, monkeypatch):
+    """Issue #230: "Continuar com o registro" manda a lista (em qualquer ordem); a confirmacao vai na auditoria
+    (`protocolo.envio_confirmado`) e a ressalva e' "<observacao>; <lista>". Registro por fora nao ganha bloqueio novo:
+    a certidao vencida so' entra na lista."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _sem_nota(c, mid)
+    _validade(c, "federal", "2026-09-10")
+    lista = _fora(cl, mid).json()["detail"]["pendencias"]
+    original, recebidas = medicoes.registrar_protocolo, []
+
+    def espia(*a, **k):
+        recebidas.append(k.get("justificativa"))
+        return original(*a, **k)
+    monkeypatch.setattr(medicoes, "registrar_protocolo", espia)
+    r = _fora(cl, mid, confirmadas=list(reversed(lista)))
+    assert r.status_code == 200, r.text
+    assert c.execute("SELECT estado, envio_externo_obs FROM medicoes WHERE id=?", (mid,)).fetchone()[:] == \
+        ("protocolada", "Pelo Outlook, ao fiscal do contrato")
+    uid = c.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    assert _confirmacoes_fora(c) == [(uid, mid, lista)]
+    assert recebidas == ["Envio feito por fora: Pelo Outlook, ao fiscal do contrato; "
+                         + protocolo.CONFIRMADO_COM_FALTA + "; ".join(lista)]
+    depois = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+    assert depois["confirmadas"] == lista and depois["observacao"] == "Pelo Outlook, ao fiscal do contrato"
+
+
+def test_ressalva_do_registro_confirmado_fica_gravada_mesmo_com_certidoes_em_dia(api):
+    """Revisor adversarial da PR #237: so' a nota falta e as certidoes estao em dia; o registro do protocolo da medicao
+    nao grava a justificativa nesse caso (o checklist nao acha pendencia), entao a ressalva "<observacao>; <lista>"
+    tem de ficar na auditoria do registro por fora."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _sem_nota(c, mid)
+    lista = _fora(cl, mid).json()["detail"]["pendencias"]
+    assert lista and all("vencida" not in x for x in lista)
+    assert _fora(cl, mid, confirmadas=lista).status_code == 200
+    depois = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+    assert depois["ressalva"] == ("Pelo Outlook, ao fiscal do contrato; " + protocolo.CONFIRMADO_COM_FALTA
+                                  + "; ".join(lista))
+
+
+def test_registro_por_fora_sem_nada_faltando_nao_pede_nem_grava_confirmacao(api, monkeypatch):
+    cl, c, ids = api
+    original, recebidas = medicoes.registrar_protocolo, []
+
+    def espia(*a, **k):
+        recebidas.append(k.get("justificativa"))
+        return original(*a, **k)
+    monkeypatch.setattr(medicoes, "registrar_protocolo", espia)
+    r = _fora(cl, ids["mtpar_exec"], confirmadas=["Notas fiscais (0): confirmada antes"])
+    assert r.status_code == 200, r.text
+    assert _confirmacoes_fora(c) == [] and recebidas == ["Envio feito por fora: Pelo Outlook, ao fiscal do contrato"]
+    depois = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+    assert "confirmadas" not in depois
+
+
+def test_registro_por_fora_continua_exigindo_a_observacao_mesmo_confirmado(api):
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _sem_nota(c, mid)
+    lista = _fora(cl, mid).json()["detail"]["pendencias"]
+    r = _fora(cl, mid, confirmadas=lista, observacao="  ")
+    assert r.status_code == 422 and "observação" in r.json()["detail"]
+    _sem_registro(c, mid)
+
+
+def test_registro_por_fora_com_lista_diferente_da_confirmada_e_recusado(api):
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _sem_nota(c, mid)
+    lista = _fora(cl, mid).json()["detail"]["pendencias"]
+    for outra in ([*lista, "Certidões Lotufo (5): federal vencida em 10/09"], ["Outra coisa"]):
+        r = _fora(cl, mid, confirmadas=outra)
+        det = r.json()["detail"]
+        assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS", r.text
+        assert "mudou" in det["mensagem"] and det["pendencias"] == lista
+    _sem_registro(c, mid)
+    assert _confirmacoes_fora(c) == []
+
+
+def test_registro_por_fora_confere_a_lista_de_novo_sob_o_lock(api, monkeypatch):
+    """Issue #230: a lista e' lida de novo dentro da transacao. A que surgiu depois da confirmacao recusa sem gravar;
+    a que se resolveu nao entra na auditoria nem na ressalva (vale a lista lida sob o lock, nao a de antes)."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _sem_nota(c, mid)
+    lista = _fora(cl, mid).json()["detail"]["pendencias"]
+    original = notas_envio.faltas_externo
+    extra = {"codigo": "certidoes", "mensagem": "Certidões Lotufo (5): federal vencida em 10/09"}
+    registrar, recebidas = medicoes.registrar_protocolo, []
+
+    def espia(*a, **k):
+        recebidas.append(k.get("justificativa"))
+        return registrar(*a, **k)
+    monkeypatch.setattr(medicoes, "registrar_protocolo", espia)
+    for troca in ("surge", "resolve"):
+        chamadas = []
+
+        def na_segunda(*a, **k):
+            chamadas.append(1)
+            out = original(*a, **k)
+            if len(chamadas) == 1:
+                return out
+            return [*out, extra] if troca == "surge" else []
+        monkeypatch.setattr(notas_envio, "faltas_externo", na_segunda)
+        r = _fora(cl, mid, confirmadas=lista)
+        assert len(chamadas) == 2
+        if troca == "surge":
+            det = r.json()["detail"]
+            assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS", r.text
+            assert extra["mensagem"] in det["pendencias"]
+            _sem_registro(c, mid)
+            assert _confirmacoes_fora(c) == []
+        else:
+            assert r.status_code == 200, r.text
+            assert _confirmacoes_fora(c) == []
+            depois = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+            assert "confirmadas" not in depois
+            assert recebidas == ["Envio feito por fora: Pelo Outlook, ao fiscal do contrato"]
+
+
+def test_registro_por_fora_limita_a_lista_confirmada(api):
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    assert _fora(cl, mid, confirmadas=["x" * 2001]).status_code == 422
+    assert _fora(cl, mid, confirmadas=[f"item {i}" for i in range(201)]).status_code == 422
+    _sem_registro(c, mid)
 
 
 # --- testes de quebra 10/10/2026: A-13 (link de qualquer site) e A-11 (qualquer arquivo como .eml) ---
@@ -1227,3 +1640,265 @@ def test_par_da_pagina_traz_a_outra_metade_e_a_liberacao(api):
     sozinha = c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
     assert cl.get(f"/api/medicoes/{sozinha}/par").json()["metades"] == []
     assert cl.get("/api/medicoes/999999/par").status_code == 404
+
+
+# --- issue #169: a FRC assinada do envio e' a da FRC vigente ----------------------------------------
+
+def test_assinada_de_frc_anterior_recusa_o_envio(conn, usuario, consorcio14, _texto, tmp_path, monkeypatch):  # noqa: F811
+    """Gate Sol na PR #168: as notas mudam, a FRC e' gerada de novo e a assinada anexada e' a da versao anterior. O
+    item nao fica pronto e o servidor recusa o envio (bloqueio, sem justificativa possivel) antes de reservar."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    cid, mid = consorcio14
+    n = test_frc.ULTIMA + 1
+    test_frc._anexar(conn, usuario, mid, _texto, test_frc.NOTAS_FRC)
+    conn.execute("UPDATE medicoes SET estado='nota_emitida' WHERE id=?", (mid,))
+    conn.commit()
+    test_frc._assinar(conn, usuario, mid, _texto, f"FRC {n} assinada.pdf")
+    pid = notas_envio.iniciar(conn, usuario["id"], cid, [mid])
+    assert notas_envio.detalhe_envio(conn, pid)["bloqueio"] is None
+    frc.gerar(conn, usuario, mid, n)                       # FRC gerada de novo: a assinada anexada e' da anterior
+    d = notas_envio.detalhe_envio(conn, pid)
+    item = next(i for i in d["envio"]["itens"] if i["chave"] == f"frc:{mid}")
+    assert item["estado"] == "falta" and d["envio"]["situacao"] == "bloqueado"
+    assert "FRC assinada não é a da FRC vigente" in d["envio"]["aviso"]
+    assert d["bloqueio"] == (f"14ª Medição: A FRC assinada anexada não é a da FRC nº {n} vigente: baixe a FRC "
+                             "gerada, assine no DocuSign e anexe aqui")
+    assert not [a for a in d["previa"]["anexos"] if a["origem"] == "frc"]          # a velha nao vai
+    pv = protocolo.previa_envio(conn, [pid])
+    with pytest.raises(protocolo.Bloqueio, match="não é a da FRC nº"):
+        notas_envio.enviar(conn, usuario, pid, pv["para"] or ["orgao@exemplo.com.br"], pv["copia"], pv["assunto"],
+                           pv["corpo"], "justificativa longa o bastante para passar", anexos_previa=pv["anexos"])
+    p = conn.execute("SELECT situacao, envio_id, envio_reservado_em FROM protocolos WHERE id=?", (pid,)).fetchone()
+    assert tuple(p) == ("rascunho", None, None)
+    assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    # a assinada da FRC vigente destrava, e so' ela vai no e-mail
+    test_frc._assinar(conn, usuario, mid, _texto, f"FRC {n} assinada de novo.pdf")
+    d = notas_envio.detalhe_envio(conn, pid)
+    assert d["bloqueio"] is None
+    assert [a["nome"] for a in d["previa"]["anexos"] if a["origem"] == "frc"] == [f"FRC {n} assinada de novo.pdf"]
+
+
+def test_pdf_assinado_da_versao_anterior_com_o_mesmo_numero_e_recusado(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Revisor adversarial na PR #179 (critico 1): baixa a FRC nº N (v1) e assina; troca uma nota; "Gerar de novo"
+    faz a v2 com o mesmo nº N. Anexar o PDF assinado da v1 e' recusado (o texto traz a nota velha); o da v2 entra."""
+    cid, mid = consorcio14
+    n = test_frc.ULTIMA + 1
+    test_frc._anexar(conn, usuario, mid, _texto, test_frc.NOTAS_FRC)
+    v1 = test_frc._texto_da_frc(conn, mid)
+    trocada = ("lotufo", 2290, *test_frc.NOTAS_FRC[2][2:])       # a nota de Cuiaba reemitida com outro numero
+    test_frc._anexar(conn, usuario, mid, _texto, [trocada])
+    assert frc.situacao(conn, mid)["frc"]["desatualizada"] is True
+    frc.gerar(conn, usuario, mid, n)
+    assert frc.situacao(conn, mid)["frc"]["numero"] == n and "2290" in test_frc._texto_da_frc(conn, mid)
+    with pytest.raises(ValueError, match=f"Este PDF não é a FRC nº {n} vigente"):
+        test_frc._assinar(conn, usuario, mid, _texto, f"FRC {n} v1 assinada.pdf", texto=v1)
+    item, _ = test_frc._item_frc(conn, cid, mid)
+    assert item["estado"] == "falta"
+    test_frc._assinar(conn, usuario, mid, _texto, f"FRC {n} v2 assinada.pdf")
+    assert test_frc._item_frc(conn, cid, mid)[0]["estado"] == "ok"
+
+
+# --- rodada 4 da PR #179 (revisor adversarial na rodada 3) ---------------------------------------------------
+
+def _consorcio_nota_emitida(conn, usuario, consorcio14, _texto, nome):  # noqa: F811
+    cid, mid = consorcio14
+    test_frc._anexar(conn, usuario, mid, _texto, test_frc.NOTAS_FRC)
+    conn.execute("UPDATE medicoes SET estado='nota_emitida' WHERE id=?", (mid,))
+    conn.commit()
+    doc = test_frc._assinar(conn, usuario, mid, _texto, nome)["documento_id"]
+    return cid, mid, doc
+
+
+def test_pacote_montado_com_a_assinada_velha_exige_montar_de_novo(conn, usuario, consorcio14, _texto, tmp_path,
+                                                                   monkeypatch):  # noqa: F811
+    """Critico: orgao com as notas DENTRO do pacote (familia mtpar). Assinada A (FRC v1) no pacote montado; a FRC e'
+    gerada de novo e a assinada B (v2) anexada: o bloqueio da A some, mas o pacote ainda leva a A. O envio fica
+    bloqueado ate' montar de novo; o pacote novo leva a B e libera."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    cid, mid, velha = _consorcio_nota_emitida(conn, usuario, consorcio14, _texto, "FRC v1 assinada.pdf")
+    oid = conn.execute("SELECT orgao_id FROM contratos WHERE id=?", (cid,)).fetchone()[0]
+    conn.execute("UPDATE orgaos SET familia='mtpar' WHERE id=?", (oid,))
+    conn.commit()
+    pid = notas_envio.iniciar(conn, usuario["id"], cid, [mid], "301")
+    assert "notas" in protocolo._contexto(conn, protocolo._linha(conn, pid))[2].partes
+    protocolo.montar(conn, usuario["id"], pid)
+    assert json.loads(protocolo._linha(conn, pid)["montado_frcs"]) == [velha]
+    frc.gerar(conn, usuario, mid, test_frc.ULTIMA + 1)
+    nova = test_frc._assinar(conn, usuario, mid, _texto, "FRC v2 assinada.pdf")["documento_id"]
+    assert frc.assinada(conn, mid)["documento"]["id"] == nova
+    assert protocolo.bloqueio(conn, protocolo._linha(conn, pid), HOJE) == protocolo.PACOTE_FRC_VELHA
+    env = notas_envio.detalhe_envio(conn, pid)["envio"]
+    assert env["situacao"] == "bloqueado" and "Pacote com a FRC assinada anterior" in env["aviso"]
+    pv = protocolo.previa_envio(conn, [pid], hoje=HOJE)
+    with pytest.raises(protocolo.Bloqueio, match="O pacote foi montado antes da FRC assinada que vale agora"):
+        protocolo.enviar(conn, usuario, [pid], ["orgao@exemplo.com.br"], [], pv["assunto"], pv["corpo"],
+                         "justificativa longa o bastante para passar", hoje=HOJE)
+    assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    protocolo.montar(conn, usuario["id"], pid)
+    assert json.loads(protocolo._linha(conn, pid)["montado_frcs"]) == [nova]
+    assert protocolo.bloqueio(conn, protocolo._linha(conn, pid), HOJE) is None
+
+
+def test_frc_que_muda_durante_a_reserva_recusa_e_destrava(conn, usuario, consorcio14, _texto, tmp_path,
+                                                          monkeypatch):  # noqa: F811
+    """Aviso: a FRC fica desatualizada entre a previa e a reserva. A conferencia depois da reserva recusa antes do
+    e-mail e destrava a reserva (senao o e-mail sairia sem a FRC assinada, que deixou de valer)."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    cid, mid, _ = _consorcio_nota_emitida(conn, usuario, consorcio14, _texto, "FRC assinada.pdf")
+    pid = notas_envio.iniciar(conn, usuario["id"], cid, [mid])
+    pv = protocolo.previa_envio(conn, [pid])
+    assert pv["bloqueio"] is None and [a for a in pv["anexos"] if a["origem"] == "frc"]
+    reservar = protocolo.envio_reserva.reservar
+
+    def no_meio(conn_, *a, **k):            # outra pessoa troca uma nota enquanto o envio reserva
+        reservar(conn_, *a, **k)
+        conn_.execute("UPDATE frcs SET notas='[]' WHERE medicao_id=? AND substituida_em IS NULL", (mid,))
+    monkeypatch.setattr(protocolo.envio_reserva, "reservar", no_meio)
+    with pytest.raises(protocolo.Bloqueio, match="As notas mudaram depois da FRC nº"):
+        notas_envio.enviar(conn, usuario, pid, pv["para"] or ["orgao@exemplo.com.br"], pv["copia"], pv["assunto"],
+                           pv["corpo"], "justificativa longa o bastante para passar", anexos_previa=pv["anexos"])
+    p = conn.execute("SELECT situacao, envio_id, envio_reservado_em FROM protocolos WHERE id=?", (pid,)).fetchone()
+    assert tuple(p) == ("rascunho", None, None)
+    assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+
+
+def test_irma_com_frc_que_bloqueia_nao_vai_no_registro_por_fora(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Aviso: onde medicao e reajuste vao juntos, a irma cuja FRC assinada bloqueia (aqui: reajuste sem espelho) nao
+    se oferece nem entra no registro por fora, que contornaria o bloqueio do envio."""
+    cid, mid, _ = _consorcio_nota_emitida(conn, usuario, consorcio14, _texto, "FRC assinada.pdf")
+    reaj = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 14, "tipo": "reajuste", "competencia": "2026-08"})
+    conn.execute("UPDATE medicoes SET estado='nota_emitida' WHERE id=?", (reaj,))
+    conn.commit()
+    assert frc.assinada(conn, reaj)["recusa"] == frc.SEM_ESPELHO
+    c = protocolo._contrato(conn, cid)
+    familia, _, o = protocolo._orgao(conn, c)
+    m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (mid,)).fetchone())
+    assert notas_envio._irmas(conn, c, familia, o, [m], HOJE) == []
+    with pytest.raises(ValueError, match="não pode ir neste registro"):
+        notas_envio._conferir_externo(conn, [mid, reaj], {reaj})
+
+
+# --- rodada 5 da PR #179 (revisor adversarial na rodada 4) ---------------------------------------------------
+
+def _mtpar(conn, cid):
+    oid = conn.execute("SELECT orgao_id FROM contratos WHERE id=?", (cid,)).fetchone()[0]
+    conn.execute("UPDATE orgaos SET familia='mtpar' WHERE id=?", (oid,))
+    conn.commit()
+
+
+def test_assinado_do_pacote_anterior_e_recusado_depois_de_montar_de_novo(conn, usuario, consorcio14, _texto,
+                                                                         monkeypatch):  # noqa: F811
+    """Critico: monta com a assinada A (FRC v1), troca uma nota, gera a v2, anexa B e monta de novo; o PDF assinado do
+    pacote ANTERIOR (com a A) passa na semelhanca de paginas, mas nao traz a FRC vigente: o anexo e' recusado. O
+    assinado do pacote de agora entra."""
+    cid, mid, _ = _consorcio_nota_emitida(conn, usuario, consorcio14, _texto, "FRC v1 assinada.pdf")
+    _mtpar(conn, cid)
+    n = test_frc.ULTIMA + 1
+    v1 = test_frc._texto_da_frc(conn, mid)
+    pid = notas_envio.iniciar(conn, usuario["id"], cid, [mid], "301")
+    protocolo.montar(conn, usuario["id"], pid)
+    pacote_v1 = arquivos.caminho_seguro(protocolo._linha(conn, pid)["montado_arquivo"]).read_bytes()
+    test_frc._anexar(conn, usuario, mid, _texto, [("lotufo", 2290, *test_frc.NOTAS_FRC[2][2:])])   # nota reemitida
+    frc.gerar(conn, usuario, mid, n)
+    v2 = test_frc._texto_da_frc(conn, mid)
+    assert "2290" in v2 and "2290" not in v1
+    test_frc._assinar(conn, usuario, mid, _texto, "FRC v2 assinada.pdf")
+    carimbo = "\nDocuSign Envelope ID: 0A1B2C3D-0000-1111-2222-333344445555\n"
+    # o texto de cada pacote como o DocuSign o devolve: o da FRC que ele leva (as notas de teste nao tem texto)
+    textos = {pacote_v1: [v1 + carimbo]}
+    monkeypatch.setattr(protocolo.leitura_pdf, "textos_por_pagina_com_limite", lambda pdf, teto=400: textos[pdf])
+    # o pacote de agora ainda leva a A: assinar de novo nao resolve, a mensagem manda montar de novo
+    with pytest.raises(ValueError, match="O pacote foi montado antes da FRC assinada que vale agora"):
+        protocolo.receber_assinado(conn, usuario["id"], pid, pacote_v1)
+    protocolo.montar(conn, usuario["id"], pid)
+    pacote_v2 = arquivos.caminho_seguro(protocolo._linha(conn, pid)["montado_arquivo"]).read_bytes()
+    textos[pacote_v2] = [v2 + carimbo]
+    with pytest.raises(ValueError, match=f"O assinado não traz a FRC nº {n} vigente da 14ª Medição"):
+        protocolo.receber_assinado(conn, usuario["id"], pid, pacote_v1)
+    # os numeros e valores da v2 numa pagina que nao e' a da FRC (nota, carta) nao contam
+    textos[b"fora"] = [v2.replace("FATURA DE RECEBIMENTO DE CONSÓRCIO", "NOTA FISCAL") + carimbo, v1 + carimbo]
+    with pytest.raises(ValueError, match=f"O assinado não traz a FRC nº {n} vigente"):
+        protocolo.receber_assinado(conn, usuario["id"], pid, b"fora")
+    textos[b"digitalizado"] = ["", ""]
+    with pytest.raises(ValueError, match="O assinado não tem texto para conferir a FRC"):
+        protocolo.receber_assinado(conn, usuario["id"], pid, b"digitalizado")
+    p = protocolo._linha(conn, pid)
+    assert (p["situacao"], p["assinado_arquivo"]) == ("montado", None)
+    # o pacote montado de novo entre a conferencia e a gravacao: a conferencia sob o lock recusa
+    conferir = protocolo.assinatura.conferir
+
+    def no_meio(*a):
+        conn.execute("UPDATE protocolos SET montado_sha256='outro' WHERE id=?", (pid,))
+        conn.commit()
+        return conferir(*a)
+    monkeypatch.setattr(protocolo.assinatura, "conferir", no_meio)
+    with pytest.raises(ValueError, match="O pacote foi montado de novo enquanto o assinado era conferido"):
+        protocolo.receber_assinado(conn, usuario["id"], pid, pacote_v2)
+    monkeypatch.setattr(protocolo.assinatura, "conferir", conferir)
+    conn.execute("UPDATE protocolos SET montado_sha256=? WHERE id=?", (p["montado_sha256"], pid))
+    conn.commit()
+    d = protocolo.receber_assinado(conn, usuario["id"], pid, pacote_v2)
+    assert d["situacao"] == "assinado" and protocolo.bloqueio(conn, protocolo._linha(conn, pid), HOJE) is None
+
+
+def test_pacote_sem_a_frc_assinada_pede_montar_de_novo(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Sugestao: pacote montado antes de qualquer assinada, ou de antes da migracao 041 (montado_frcs NULL), nao
+    leva a assinada que vale: bloqueio com a mensagem de pacote SEM a FRC (nao "leva a anterior")."""
+    cid, mid = consorcio14
+    test_frc._anexar(conn, usuario, mid, _texto, test_frc.NOTAS_FRC)
+    conn.execute("UPDATE medicoes SET estado='nota_emitida' WHERE id=?", (mid,))
+    conn.commit()
+    _mtpar(conn, cid)
+    pid = notas_envio.iniciar(conn, usuario["id"], cid, [mid], "301")
+    protocolo.montar(conn, usuario["id"], pid)                 # sem assinada: o pacote vai sem FRC
+    assert json.loads(protocolo._linha(conn, pid)["montado_frcs"]) == []
+    doc = test_frc._assinar(conn, usuario, mid, _texto, "FRC assinada.pdf")["documento_id"]
+    assert protocolo.bloqueio(conn, protocolo._linha(conn, pid), HOJE) == protocolo.PACOTE_SEM_FRC
+    env = notas_envio.detalhe_envio(conn, pid)["envio"]
+    assert env["situacao"] == "bloqueado" and "Pacote sem a FRC assinada: monte de novo" in env["aviso"]
+    protocolo.montar(conn, usuario["id"], pid)
+    assert json.loads(protocolo._linha(conn, pid)["montado_frcs"]) == [doc]
+    assert protocolo.bloqueio(conn, protocolo._linha(conn, pid), HOJE) is None
+    conn.execute("UPDATE protocolos SET montado_frcs=NULL WHERE id=?", (pid,))      # montado antes da 041
+    conn.commit()
+    assert protocolo.bloqueio(conn, protocolo._linha(conn, pid), HOJE) == protocolo.PACOTE_SEM_FRC
+
+
+def test_anexo_que_muda_de_tamanho_durante_a_reserva_recusa_e_destrava(conn, usuario, consorcio14, _texto, tmp_path,
+                                                                       monkeypatch):  # noqa: F811
+    """Sugestao: sem `anexos_previa` (rota generica de protocolos), uma nota que muda de tamanho entre a previa e a
+    reserva recusa com AnexosMudaram depois da reserva e destrava antes de qualquer e-mail."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    cid, mid, _ = _consorcio_nota_emitida(conn, usuario, consorcio14, _texto, "FRC assinada.pdf")
+    pid = notas_envio.iniciar(conn, usuario["id"], cid, [mid])
+    pv = protocolo.previa_envio(conn, [pid], hoje=HOJE)
+    assert pv["bloqueio"] is None and [a for a in pv["anexos"] if a["origem"] == "nota"]
+    nota = conn.execute("SELECT arquivo FROM medicao_documentos WHERE medicao_id=? AND tipo_doc='nfs' ORDER BY id "
+                        "LIMIT 1", (mid,)).fetchone()[0]
+    reservar = protocolo.envio_reserva.reservar
+
+    def no_meio(conn_, *a, **k):            # o arquivo da nota muda enquanto o envio reserva
+        reservar(conn_, *a, **k)
+        caminho = arquivos.caminho_seguro(nota)
+        caminho.write_bytes(caminho.read_bytes() + b"\n% mais")
+    monkeypatch.setattr(protocolo.envio_reserva, "reservar", no_meio)
+    with pytest.raises(protocolo.AnexosMudaram):
+        protocolo.enviar(conn, usuario, [pid], ["orgao@exemplo.com.br"], [], pv["assunto"], pv["corpo"],
+                         "justificativa longa o bastante para passar", hoje=HOJE)
+    p = conn.execute("SELECT situacao, envio_id, envio_reservado_em FROM protocolos WHERE id=?", (pid,)).fetchone()
+    assert tuple(p) == ("rascunho", None, None)
+    assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+
+
+def test_a_enviar_mostra_se_o_envio_comecado_esta_reservado(api):
+    """So' leitura: a pagina da medicao oferece 'Liberar envio preso' apenas com reserva de fato."""
+    cl, c, ids = api
+    sinfra, = _por_contrato(cl.get("/api/notas/a-enviar").json(), ids["sinfra"])
+    assert sinfra["protocolo_id"] is None and sinfra["envio_reservado_em"] is None
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": sinfra["medicao_ids"]}).json()["protocolo_id"]
+    sinfra, = _por_contrato(cl.get("/api/notas/a-enviar").json(), ids["sinfra"])
+    assert sinfra["protocolo_id"] == pid and sinfra["envio_reservado_em"] is None
+    c.execute("UPDATE protocolos SET envio_reservado_em=datetime('now') WHERE id=?", (pid,)); c.commit()
+    sinfra, = _por_contrato(cl.get("/api/notas/a-enviar").json(), ids["sinfra"])
+    assert sinfra["envio_reservado_em"] is not None

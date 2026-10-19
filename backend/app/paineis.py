@@ -82,6 +82,17 @@ def curva(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     return saida
 
 
+def medido_execucao_por_contrato(conn: sqlite3.Connection) -> dict[int, int]:
+    """O `atestado_execucao_centavos` de `saldo`, de todos os contratos numa consulta so' (a lista de Obras). Mesma
+    regra, e a soma tambem em Python, pelo motivo dito em `saldo`."""
+    medido: dict[int, int] = {}
+    for r in conn.execute(
+            "SELECT contrato_id, COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v "
+            f"FROM medicoes WHERE tipo='execucao' AND estado IN ({_QS})", ESTADOS_VALIDOS):
+        medido[r["contrato_id"]] = medido.get(r["contrato_id"], 0) + r["v"]
+    return medido
+
+
 def saldo(conn: sqlite3.Connection, contrato_id: int) -> dict:
     vig = contratos.vigente(conn, contrato_id)
     # Mesma regra da curva (§6): vale o atestado; enquanto nao ha atestado, entra o

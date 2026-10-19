@@ -1,21 +1,20 @@
 import { useEffect, useState } from "react";
 import Alertas, { avisosDaObra, type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
+import CurvaS from "./CurvaS";
+import ExecucaoContrato from "./ExecucaoContrato";
 import { IconeAlerta } from "./icones";
 import type { Usuario } from "./Login";
-import Espelho from "./Espelho";
-import Medicoes, { brl, NovaMedicaoManual } from "./Medicoes";
+import IniciarProxima from "./IniciarProxima";
+import Medicoes, { brl } from "./Medicoes";
 import { ContratoObra, DocumentosObra } from "./ObraAbas";
+import type { PontoDaCurva } from "./obra";
 import Prazos from "./Prazos";
 import Reajuste from "./Reajuste";
 import { NovoProtocolo } from "./Protocolo";
 import { ir, type AbaObra as Aba, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
 import { Abas, Migalhas, VoltarOrigem } from "./Topo";
-// Validade e' DATA PURA do papel que o orgao emitiu, nao carimbo de instante:
-// fmtData a leria como UTC e a traduziria para Cuiaba (UTC-4), deslocando um dia —
-// exatamente na tela que existe para dizer se da' para protocolar hoje.
-import { fmtDataPura } from "./tempo";
 import { fmtPercentual, baseDosValores } from "./formato";
 import Selo from "./Selo";
 
@@ -23,6 +22,8 @@ import Selo from "./Selo";
 type Cabecalho = {
   id: number; obra: string; orgao: string; instrumento: string;
   valor_vigente_centavos: number; cota_vigente_centavos: number | null; percentual_lotufo_bp: number;
+  // os inicios alimentam as linhas do tempo (#160); nulos quando o cadastro nao os tem
+  execucao_inicio?: string | null; vigencia_inicio?: string | null;
   execucao_fim: string | null; dias_execucao: number | null; vigencia_fim: string | null; dias_vigencia: number | null;
   status: StatusObra;
   // A3: em valor cheio; o a receber e' nulo enquanto o total nao esta' liberado (a conciliar)
@@ -41,81 +42,51 @@ export const STATUS: Record<StatusObra, { rotulo: string; classe: string }> = {
   encerrado: { rotulo: "Encerrado", classe: "" }, rescindido: { rotulo: "Rescindido", classe: "" },
 };
 
-function prazo(fim: string | null, dias: number | null): string {
-  if (!fim) return "—";
-  const n = (d: number) => `${d} ${d === 1 ? "dia" : "dias"}`;
-  const quando = dias === null ? "" : dias < 0 ? ` (vencida há ${n(-dias)})` : ` (${n(dias)})`;
-  return `${fmtDataPura(fim)}${quando}`;
-}
-
-// N04-11 / N08-01: prazo vencido em vermelho, com a mesma regra da lista de Obras: so' em obra ativa fora do
-// encerramento (nos outros casos o backend nao avisa de proposito)
-function vencido(status: StatusObra, dias: number | null): string {
-  return status === "ativo" && dias !== null && dias < 0 ? " negativo" : "";
-}
-
 function percentual(bp: number): string {
   return fmtPercentual(bp / 10000);
 }
 
 // A ORDEM da faixa mora aqui, e nao no JSX: e' a do NAVEGACAO.md (Medicoes · Prazos · Reajuste ·
-// Documentos exigidos · Contrato). As notas moram na pagina de cada medicao e na coluna Notas.
+// Documentos · Contrato). As notas moram na pagina de cada medicao e na coluna Notas.
 const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "medicoes", rotulo: "Medições" },
   { id: "prazos", rotulo: "Prazos" },
   { id: "reajuste", rotulo: "Reajuste" },
-  { id: "documentos", rotulo: "Documentos exigidos" },
+  { id: "documentos", rotulo: "Documentos" },
   { id: "contrato", rotulo: "Contrato" },
 ];
 
-/** Resumo da obra, na aba Medicoes (a que abre): quanto vale, quanto ja' se mediu e quanto falta, quanto
- *  se faturou e quanto os orgaos devem, e os prazos. Valores cheios, com a cota ao lado quando a Lotufo nao
- *  tem 100%. */
-function ResumoObra({ c, contratoId }: { c: Cabecalho; contratoId: number }) {
-  const [saldo, setSaldo] = useState<Saldo | null>(null);
-  // N04-12: a falha da curva nao e' o mesmo que valor nulo; sem isto, o "—" mentia que nao havia medido
-  const [falhou, setFalhou] = useState(false);
-  useEffect(() => {
-    let vivo = true;
-    setFalhou(false);
-    api<{ saldo: Saldo }>(`/api/contratos/${contratoId}/curva`).then(d => { if (vivo) setSaldo(d.saldo); }).catch(() => { if (vivo) setFalhou(true); });
-    return () => { vivo = false; };
-  }, [contratoId]);
+/** Os cinco numeros da obra (desenho de 16/10/2026), sempre no alto, qualquer que seja a aba: quanto vale, quanto
+ *  ja' se mediu, quanto se faturou, quanto os orgaos devem e o saldo do cronograma. Valores cheios, com a cota ao
+ *  lado quando a Lotufo nao tem 100%. O que vem da curva (medido e saldo) mostra "indisponivel" quando a leitura
+ *  falha: a falha nao e' o mesmo que valor nulo. */
+function Indicadores({ c, contratoId, saldo, falhou }: { c: Cabecalho; contratoId: number; saldo: Saldo | null; falhou: boolean }) {
   const cota = c.percentual_lotufo_bp !== 10000;
+  const indisponivel = falhou && !saldo;
+  const medido = saldo ? brl(saldo.atestado_execucao_centavos) : indisponivel ? "indisponível" : "—";
+  const pct = saldo && c.valor_vigente_centavos > 0
+    ? fmtPercentual(saldo.atestado_execucao_centavos / c.valor_vigente_centavos, 1) : null;
   return (
-    <section className="cartao" aria-label="Resumo da obra">
-      {/* grade de 4 colunas, um par por coluna (NAVEGACAO.md): as colunas nao mudam de lugar entre obras */}
-      <div className="cartao__corpo resumo-grade">
-        <div className="resumo-grade__par">
-          <div className="dado"><span className="resumo__rotulo">Valor vigente</span>
-            <span className="dado__valor num">{brl(c.valor_vigente_centavos)}</span>
-            {cota && <span className="campo__nota num">cota da Lotufo ({percentual(c.percentual_lotufo_bp)}): <span className="dinheiro">{brl(c.cota_vigente_centavos)}</span></span>}</div>
-        </div>
-        {/* os mesmos rotulos do cronograma, o lar deles: la' mora a formula do saldo. O saldo e' o valor principal da tela (Display) */}
-        <div className="resumo-grade__par">
-          <div className="dado"><span className="resumo__rotulo">Medido (execução)</span>
-            <span className={`dado__valor num${falhou ? " dado__valor--indisponivel" : ""}`}>{saldo ? brl(saldo.atestado_execucao_centavos) : falhou ? "indisponível" : "—"}</span></div>
-          <div className="dado"><Link className="resumo__rotulo" para={{ tela: "obra", id: contratoId, aba: "contrato" }} secao="cronograma">Saldo do cronograma</Link>
-            <span className={falhou && !saldo ? "dado__valor dado__valor--indisponivel num" : `dado__valor dado__valor--principal num${saldo && saldo.saldo_centavos < 0 ? " negativo" : ""}`}>{saldo ? brl(saldo.saldo_centavos) : falhou ? "indisponível" : "—"}</span>
-            {falhou && !saldo && <span className="campo__nota" role="alert">não foi possível ler o cronograma agora</span>}</div>
-        </div>
-        <div className="resumo-grade__par">
-          <div className="dado"><span className="resumo__rotulo">Faturado</span>
-            <span className="dado__valor num">{c.faturado_centavos === undefined ? "—" : brl(c.faturado_centavos)}</span></div>
-          <div className="dado"><span className="resumo__rotulo">A receber</span>
-            <span className="dado__valor num">{c.a_receber_centavos === undefined || c.a_receber_centavos === null ? "—" : brl(c.a_receber_centavos)}</span>
-            {c.a_receber_centavos === null && <span className="campo__nota">a conciliar</span>}</div>
-        </div>
-        <div className="resumo-grade__par">
-          <div className="dado"><span className="resumo__rotulo">Execução até</span>
-            {/* D16: obra paralisada nao conta o vencimento da execucao (Lei 14.133, art. 115, par. 5o) */}
-            <span className={`dado__valor num${vencido(c.status, c.dias_execucao)}`}>
-              {c.status === "suspenso" && c.execucao_fim ? `${fmtDataPura(c.execucao_fim)} (paralisada)` : prazo(c.execucao_fim, c.dias_execucao)}</span></div>
-          <div className="dado"><span className="resumo__rotulo">Vigência até</span>
-            <span className={`dado__valor num${vencido(c.status, c.dias_vigencia)}`}>{prazo(c.vigencia_fim, c.dias_vigencia)}</span></div>
-        </div>
-      </div>
-    </section>
+    <ul className="indicadores" id="indicadores" aria-label="Números da obra">
+      <li className="cartao indicador"><span className="indicador__rotulo">Valor vigente</span>
+        <span className="indicador__valor">{brl(c.valor_vigente_centavos)}</span>
+        {cota && <span className="campo__nota">cota da Lotufo ({percentual(c.percentual_lotufo_bp)}): <span className="dinheiro num">{brl(c.cota_vigente_centavos)}</span></span>}</li>
+      <li className="cartao indicador"><span className="indicador__rotulo">Medido (execução)</span>
+        <span className={`indicador__valor${indisponivel ? " indicador__valor--indisponivel" : ""}`}>{medido}</span>
+        {pct && <span className="campo__nota">{pct} do valor vigente</span>}</li>
+      <li className="cartao indicador"><span className="indicador__rotulo">Faturado</span>
+        <span className="indicador__valor">{c.faturado_centavos === undefined ? "—" : brl(c.faturado_centavos)}</span></li>
+      <li className="cartao indicador"><span className="indicador__rotulo">A receber</span>
+        <span className="indicador__valor">{c.a_receber_centavos === undefined || c.a_receber_centavos === null ? "—" : brl(c.a_receber_centavos)}</span>
+        {c.a_receber_centavos === null && <span className="campo__nota">a conciliar</span>}</li>
+      {/* os mesmos rotulos do cronograma, o lar deles: la' mora a formula do saldo */}
+      <li className="cartao indicador">
+        <Link className="indicador__rotulo" para={{ tela: "obra", id: contratoId, aba: "contrato" }} secao="cronograma">Saldo do cronograma</Link>
+        <span className={`indicador__valor${indisponivel ? " indicador__valor--indisponivel" : saldo && saldo.saldo_centavos < 0 ? " negativo" : ""}`}>
+          {saldo ? brl(saldo.saldo_centavos) : indisponivel ? "indisponível" : "—"}</span>
+        {indisponivel ? <span className="campo__nota" role="alert">não foi possível ler o cronograma agora</span>
+          : <span className="campo__nota">valor vigente − medido</span>}</li>
+    </ul>
   );
 }
 
@@ -123,7 +94,7 @@ function ResumoObra({ c, contratoId }: { c: Cabecalho; contratoId: number }) {
  *  tela de Avisos filtrada pela obra. O servidor ja' filtra pelo perfil: na diretoria, sao os motivos do farol. */
 function AvisosDaObra({ contratoId, itens }: { contratoId: number; itens: Aviso[] | null | undefined }) {
   const n = itens?.length ?? 0;
-  return <Alertas itens={itens} ir={ir} titulo="Avisos desta obra" limite={3} id="titulo-avisos-obra"
+  return <Alertas itens={itens} ir={ir} titulo="Avisos desta obra" limite={3} lateral id="titulo-avisos-obra"
     vazio="Nenhum aviso nesta obra."
     verTodos={{ para: { tela: "avisos" }, busca: { obra: String(contratoId) }, rotulo: `Ver todos os ${n} avisos da obra` }} />;
 }
@@ -141,8 +112,11 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
   // canal entre os cartoes, gerar/criar incrementa esta chave e a lista de medicoes e o
   // cartao de novo protocolo leem de novo.
   const [versaoMedicoes, setVersaoMedicoes] = useState(0);
-  // os avisos da obra: o cartao da aba Medicoes e o numero na linha do cabecalho das outras abas
+  // os avisos da obra: o cartao da lateral, em qualquer aba
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
+  // a curva (previsto x medido) e o saldo: os indicadores e a curva S leem a mesma resposta.
+  // N04-12: a falha da leitura (null) nao e' o mesmo que obra sem curva.
+  const [curva, setCurva] = useState<{ pontos: PontoDaCurva[]; saldo: Saldo } | null | undefined>(undefined);
 
   useEffect(() => {
     // `vigente` corta o setState de uma resposta que chega depois de a tela ja ter
@@ -155,6 +129,15 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
       .then(d => { if (vigente) setC(d); })
       .catch(e => { if (vigente) setErro(mensagemDeErro(e)); });
     return () => { vigente = false; };
+  }, [contratoId]);
+
+  useEffect(() => {
+    let vivo = true;
+    setCurva(undefined);
+    api<{ curva?: PontoDaCurva[]; saldo: Saldo }>(`/api/contratos/${contratoId}/curva`)
+      .then(d => { if (vivo) setCurva({ pontos: d.curva ?? [], saldo: d.saldo }); })
+      .catch(() => { if (vivo) setCurva(null); });
+    return () => { vivo = false; };
   }, [contratoId]);
 
   useEffect(() => {
@@ -177,28 +160,18 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
       <header className="topbar topbar--detalhe">
         <div className="topbar__trilha">
           <VoltarOrigem origem={origem} alemDe={["obras"]} />
-          <Migalhas origem={origem} itens={[{ rotulo: "Obras", para: { tela: "obras" } }, { rotulo: c?.obra ?? "Obra" }]} />
-          {/* fora da aba Medicoes (onde mora o resumo), o essencial da obra numa linha */}
-          {c && aba !== "medicoes" && (() => {
-            const linha = `valor vigente ${brl(c.valor_vigente_centavos)} · execução até ${prazo(c.execucao_fim, c.dias_execucao)}`;
-            return <span className="topbar__meta topbar__resumo num" title={linha}>{linha}</span>;
-          })()}
-          {/* o numero de avisos leva a tela de Avisos filtrada pela obra; nunca corta, ao contrario da linha acima */}
-          {c && aba !== "medicoes" && avisos && (avisos.length === 0
-            ? <span className="topbar__meta topbar__avisos">nenhum aviso</span>
-            : <Link className="topbar__meta topbar__avisos" para={{ tela: "avisos" }} busca={{ obra: String(contratoId) }}>
-                {avisos.length === 1 ? "1 aviso" : `${avisos.length} avisos`}</Link>)}
+          {/* Obras › contratante › obra. O contratante e' o orgao do contrato; o link dele abre a lista de Obras
+              daquele orgao (a lista ja' filtra por ?orgao=) e nao a origem de onde se chegou. */}
+          <Migalhas origem={origem} itens={[{ rotulo: "Obras", para: { tela: "obras" } },
+            ...(c ? [{ rotulo: c.orgao, para: { tela: "obras" as const }, busca: { orgao: c.orgao }, fixa: true }] : []),
+            { rotulo: c?.obra ?? "Obra" }]} />
         </div>
-        <div className="topbar__linha">
-          <h1 className="topbar__titulo" title={c?.obra}>{c ? c.obra : "Obra"}</h1>
-          {c && <span className="topbar__meta" title={`${c.orgao} · ${c.instrumento}`}>{c.orgao} · {c.instrumento}</span>}
-          {/* principio 7: a pagina da obra e' toda em valor cheio; a cota vai ao lado onde a Lotufo nao tem 100% */}
-          {c && (() => {
-            const base = baseDosValores(c.percentual_lotufo_bp);
-            return <span className="topbar__meta topbar__base" title={base}>{base}</span>;
-          })()}
+        <div className="topbar__linha topbar__linha--quebra">
+          <h1 className="topbar__titulo topbar__titulo--grande" title={c?.obra}>{c ? c.obra : "Obra"}</h1>
           {c && <Selo classe={STATUS[c.status]?.classe ?? ""}>{STATUS[c.status]?.rotulo ?? c.status}</Selo>}
         </div>
+        {/* principio 7: a pagina da obra e' toda em valor cheio; a cota vai ao lado onde a Lotufo nao tem 100% */}
+        {c && <p className="topbar__meta topbar__meta--obra">{c.orgao} · Contrato {c.instrumento} · {baseDosValores(c.percentual_lotufo_bp)}</p>}
       </header>
 
       <div className="pagina">
@@ -212,30 +185,44 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
 
         {/* So depois que o contrato existe: se o GET falhou (404/403), abrir as abas
             faria as filhas repetirem o mesmo erro em cascata. */}
-        {c && <>
-          <Abas rotulo="Seções da obra" atual={aba}
-            itens={ABAS.map(a => ({ id: a.id, rotulo: a.rotulo, para: { tela: "obra" as const, id: contratoId, aba: a.id } }))} />
+        {c && (
+          <div className="obra-grade">
+            <div className="obra-grade__principal">
+              <Indicadores c={c} contratoId={contratoId} saldo={curva ? curva.saldo : null} falhou={curva === null} />
 
-          {aba === "medicoes" && (
-            <div className="pilha">
-              <ResumoObra c={c} contratoId={contratoId} />
-              <AvisosDaObra contratoId={contratoId} itens={avisos} />
-              {/* a medicao nasce do espelho (ou, no fluxo antigo, a mao); gerar recarrega a lista */}
-              {podeEditar && (
-                <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={() => setVersaoMedicoes(v => v + 1)}
-                  aoGerar={id => ir({ tela: "medicao", obra: contratoId, id }, { secao: "etapa-2", forcar: true })}
-                  semRegra={<NovaMedicaoManual contratoId={contratoId} aoCriar={() => setVersaoMedicoes(v => v + 1)} />} />
-              )}
-              <Medicoes contratoId={contratoId} busca={busca} versao={versaoMedicoes} />
-              {podeEditar && <NovoProtocolo contratoId={contratoId} versao={versaoMedicoes} aoMudar={() => setVersaoMedicoes(v => v + 1)} />}
+              <div id="curva"><CurvaS pontos={curva === undefined ? undefined : curva ? curva.pontos : null} contratoId={contratoId} /></div>
+
+              <section className="cartao" id="secoes" aria-label="Seções da obra">
+                <Abas rotulo="Seções da obra" atual={aba} classe="abas--obra"
+                  itens={ABAS.map(a => ({ id: a.id, rotulo: a.rotulo, para: { tela: "obra" as const, id: contratoId, aba: a.id } }))} />
+
+                <div className="painel-aba">
+                  {aba === "medicoes" && (
+                    <div className="pilha">
+                      {/* a medicao nasce do espelho, na etapa 1 da pagina dela (ou, no fluxo antigo, a mao): aqui so' o atalho */}
+                      {podeEditar && <IniciarProxima contratoId={contratoId} versao={versaoMedicoes} aoCriar={() => setVersaoMedicoes(v => v + 1)} />}
+                      <Medicoes contratoId={contratoId} busca={busca} versao={versaoMedicoes} />
+                      {podeEditar && <NovoProtocolo contratoId={contratoId} versao={versaoMedicoes} aoMudar={() => setVersaoMedicoes(v => v + 1)} />}
+                    </div>
+                  )}
+                  {/* um quadro por natureza (medicao, reajuste): o veredito de hoje e empresa x documento */}
+                  {aba === "documentos" && <DocumentosObra contratoId={contratoId} />}
+                  {aba === "reajuste" && <Reajuste contratoId={contratoId} podeEditar={podeEditar} />}
+                  {aba === "prazos" && <Prazos contratoId={contratoId} podeEditar={podeEditar} />}
+                  {aba === "contrato" && <ContratoObra contratoId={contratoId} />}
+                </div>
+              </section>
             </div>
-          )}
-          {/* um quadro por natureza (medicao, reajuste): o veredito de hoje e empresa x documento */}
-          {aba === "documentos" && <DocumentosObra contratoId={contratoId} />}
-          {aba === "reajuste" && <Reajuste contratoId={contratoId} podeEditar={podeEditar} />}
-          {aba === "prazos" && <Prazos contratoId={contratoId} podeEditar={podeEditar} />}
-          {aba === "contrato" && <ContratoObra contratoId={contratoId} />}
-        </>}
+
+            <aside className="obra-grade__lateral" aria-label="Avisos e prazos da obra">
+              <div id="avisos-obra"><AvisosDaObra contratoId={contratoId} itens={avisos} /></div>
+              <div id="execucao">
+                <ExecucaoContrato execucaoInicio={c.execucao_inicio ?? null} execucaoFim={c.execucao_fim}
+                  vigenciaInicio={c.vigencia_inicio ?? null} vigenciaFim={c.vigencia_fim} status={c.status} />
+              </div>
+            </aside>
+          </div>
+        )}
       </div>
     </>
   );

@@ -1,0 +1,511 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Carteira</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<style>
+/* Carteira (#163, opção A). Só o que falta na base, sempre com os tokens. */
+.cart-topo { display: flex; align-items: flex-end; gap: 12px 16px; flex-wrap: wrap; border-bottom: 1px solid var(--linha); }
+.cart-topo .abas { border-bottom: 0; flex: 1 1 auto; min-width: 0; }
+.cart-topo .btn { margin-bottom: 8px; }
+.cart-painel[hidden] { display: none; }
+
+/* os três números do Resumo: cartão com o filete índigo à esquerda */
+.numeros { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); }
+.numero { position: relative; padding: 18px 20px 16px 28px; display: grid; gap: 4px; }
+.numero::before { content: ""; position: absolute; left: 14px; top: 18px; bottom: 18px; width: 4px; border-radius: var(--raio-pilula); background: var(--marca); }
+.numero__rotulo { font-size: 13px; font-weight: 500; color: var(--texto-2); }
+.numero__valor { font-family: var(--fonte-num); font-size: 32px; line-height: 40px; font-weight: 500; letter-spacing: -.02em; color: var(--texto); white-space: nowrap; }
+.numero__apoio { font-size: 12.5px; color: var(--texto-2); }
+.numero__apoio .num { font-family: var(--fonte-num); }
+
+/* curva S */
+.curva { padding: 8px 20px 4px; }
+.curva svg { display: block; width: 100%; }
+.c-prev { fill: none; stroke: var(--linha-hover); stroke-width: 2; }
+.c-med  { fill: none; stroke: var(--acento); stroke-width: 2.5; }
+.c-area { fill: var(--acento-fundo); }
+.c-ponto-prev { fill: var(--superficie); stroke: var(--linha-hover); stroke-width: 2; }
+.c-ponto-med  { fill: var(--acento); stroke: var(--superficie); stroke-width: 1.5; }
+.c-guia { stroke: var(--linha-forte); stroke-dasharray: 3 3; }
+.leitura { font-size: 12.5px; color: var(--texto-2); }
+.leitura .num { font-family: var(--fonte-num); color: var(--texto); }
+.cartao__cabeca--quebra .legenda { padding: 0; border: 0; margin-left: auto; }
+
+/* cartões por contratante */
+.titulo-secao { margin: 8px 0 0; font-size: 16px; line-height: 24px; }
+.contratantes { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
+.contratante { display: grid; gap: 6px; padding: 16px 20px 18px; text-align: left; height: auto; font-weight: 400; cursor: pointer; }
+.contratante:hover { border-color: var(--acento-linha); }
+.contratante__nome { margin: 0 0 6px; font-size: 15px; font-weight: 600; color: var(--texto); }
+.contratante__rotulo { font-size: 12.5px; color: var(--texto-2); }
+.contratante__valor { font-family: var(--fonte-num); font-size: 22px; line-height: 28px; font-weight: 500; color: var(--texto); }
+.contratante__obras { font-size: 12.5px; color: var(--texto-2); }
+.progresso { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; margin-top: 8px; }
+.progresso__rotulo { grid-column: 1 / -1; font-size: 12.5px; color: var(--texto-2); }
+.progresso__trilho { height: 8px; border-radius: var(--raio-pilula); background: var(--neutro-fundo); overflow: hidden; }
+.progresso__feito { display: block; height: 100%; border-radius: var(--raio-pilula); background: var(--marca); }
+.progresso__pct { font-family: var(--fonte-num); font-size: 12.5px; color: var(--texto); }
+.nota-resumo { margin: 0; font-size: 13px; color: var(--texto-2); }
+
+/* QDOP: o painel do farol em cima da tabela */
+.farois { display: flex; flex-wrap: wrap; gap: 8px; }
+.farol-btn { height: 30px; border-radius: var(--raio-pilula); padding: 0 12px; font-size: 12.5px; }
+.farol-btn[aria-pressed="true"] { background: var(--acento-fundo); border-color: var(--acento-linha); color: var(--acento-mais); }
+.farol-btn .num { font-family: var(--fonte-num); }
+.qdop-lado { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
+.conta__botao { display: inline-flex; align-items: center; }
+.qdop td:last-child { min-width: 30ch; }
+.motivos { margin: 0; padding-left: 16px; display: grid; gap: 2px; font-size: 13px; }
+.tabela td.negativo { color: var(--acao); }
+.tabela tfoot td { font-family: var(--fonte-num); }
+
+/* Produção */
+.grafico svg { display: block; }
+.kpis--quebra { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); row-gap: 16px; }
+.cartoes-lado { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
+
+@media (max-width: 767px) {
+  .pagina { padding-top: 16px; gap: 16px; }
+  .numero__valor { font-size: 28px; line-height: 36px; }
+  .cart-topo .btn { margin-bottom: 0; width: 100%; justify-content: center; order: -1; }
+  .cart-topo { border-bottom: 0; }
+  .cart-topo .abas { border-bottom: 1px solid var(--linha); flex-basis: 100%; }
+  .kpis { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); row-gap: 14px; }
+  .kpi, .kpi:first-child { padding: 0 16px; }
+  .kpi + .kpi { border-left: 0; border-top: 1px solid var(--linha); padding-top: 14px; }
+  .kpi__valor { white-space: normal; }
+  .curva { padding: 8px 8px 4px; }
+  .cartao__cabeca { flex-wrap: wrap; }
+  .cartao__cabeca--quebra .legenda { margin-left: 0; }
+}
+</style></head>
+<body data-secao="carteira" data-titulo="Carteira"><main id="conteudo"><div class="pagina">
+
+<div class="cart-topo">
+  <div class="abas" role="tablist" aria-label="Seções da Carteira">
+    <button class="aba" role="tab" id="aba-resumo" aria-controls="p-resumo" data-aba="resumo">Resumo</button>
+    <button class="aba" role="tab" id="aba-qdop" aria-controls="p-qdop" data-aba="qdop">QDOP</button>
+    <button class="aba" role="tab" id="aba-producao" aria-controls="p-producao" data-aba="producao">Produção</button>
+  </div>
+  <button class="btn" type="button" data-acao="Baixaria o QDOP em planilha (.xlsx), no leiaute oficial, com o farol em verde, amarelo e vermelho.">
+    <svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>Exportar QDOP (.xlsx)
+  </button>
+</div>
+
+<!-- ============================================================ RESUMO -->
+<section class="cart-painel pilha" id="p-resumo" role="tabpanel" aria-labelledby="aba-resumo">
+  <ul class="numeros" style="list-style:none;margin:0;padding:0" aria-label="Os números da carteira" id="numeros"></ul>
+
+  <section class="cartao" aria-labelledby="t-curva">
+    <div class="cartao__cabeca cartao__cabeca--quebra">
+      <h2 class="cartao__titulo" id="t-curva">Previsto e medido nos últimos 12 meses</h2>
+      <span class="cartao__dica">acumulado, na cota da Lotufo</span>
+      <div class="legenda">
+        <span class="legenda__item"><span class="legenda__chave legenda__chave--previsto" aria-hidden="true"></span>Previsto</span>
+        <span class="legenda__item"><span class="legenda__chave legenda__chave--execucao" aria-hidden="true"></span>Medido</span>
+      </div>
+    </div>
+    <div class="curva" id="curva"></div>
+    <p class="cartao__corpo leitura" id="leitura" role="status" style="padding-top:4px"></p>
+  </section>
+
+  <h2 class="titulo-secao">Por contratante</h2>
+  <div class="contratantes" id="contratantes"></div>
+  <p class="nota-resumo" id="nota-resumo"></p>
+</section>
+
+<!-- ============================================================ QDOP -->
+<section class="cart-painel pilha" id="p-qdop" role="tabpanel" aria-labelledby="aba-qdop" hidden>
+  <section class="cartao" aria-labelledby="t-problema">
+    <div class="cartao__cabeca cartao__cabeca--quebra">
+      <h2 class="cartao__titulo" id="t-problema">Obras pelo farol</h2>
+      <span class="cartao__dica" id="dica-problema"></span>
+    </div>
+    <div class="cartao__corpo pilha">
+      <div class="farois" id="farois" role="group" aria-label="Filtrar o QDOP pelo farol"></div>
+      <div class="qdop-lado">
+        <div>
+          <p class="campo__rotulo" style="margin:0 0 4px">Terminam</p>
+          <ul class="lista-simples" id="terminam" style="padding-left:16px"></ul>
+          <p class="campo__nota" style="margin:4px 0 0">A execução ou a vigência, como na lista de Obras; as vencidas vêm primeiro.</p>
+        </div>
+        <div>
+          <p class="campo__rotulo" style="margin:0 0 4px">Avisos da diretoria</p>
+          <p style="margin:0"><strong class="num">9</strong> avisos: 2 críticos, 3 de ação e 4 de atenção.</p>
+          <p style="margin:4px 0 0"><a href="obras.html" data-acao="Abriria os Avisos (dentro de Obras), com os 9 avisos da diretoria.">Ver os avisos</a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-qdop">
+    <div class="cartao__cabeca cartao__cabeca--quebra">
+      <h2 class="cartao__titulo" id="t-qdop">QDOP</h2>
+      <span class="cartao__dica" id="dica-qdop"></span>
+    </div>
+    <div class="tabela-wrap tabela-wrap--alta">
+      <table class="tabela qdop">
+        <caption class="sr-only">QDOP, na cota da Lotufo: as obras pelo farol</caption>
+        <thead><tr>
+          <th scope="col">Obra</th><th scope="col">Empreita</th>
+          <th scope="col" class="col-num">Contratual (PI+VA)</th><th scope="col" class="col-num">Faturado</th>
+          <th scope="col" class="col-num">Saldo (contratual − faturado)</th>
+          <th scope="col">Término e vigência</th><th scope="col">Status</th><th scope="col">Farol</th><th scope="col">Motivos</th>
+        </tr></thead>
+        <tbody id="qdop-corpo"></tbody>
+        <tfoot><tr><th scope="row" colspan="2" id="qdop-total-rotulo">Total</th>
+          <td class="col-num" id="qdop-t1"></td><td class="col-num" id="qdop-t2"></td><td class="col-num" id="qdop-t3"></td><td colspan="4"></td></tr></tfoot>
+      </table>
+    </div>
+  </section>
+</section>
+
+<!-- ============================================================ PRODUÇÃO -->
+<section class="cart-painel pilha" id="p-producao" role="tabpanel" aria-labelledby="aba-producao" hidden>
+  <section class="cartao" aria-labelledby="t-mes">
+    <div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-mes">O mês</h2><span class="cartao__dica">Competência 09/2026</span></div>
+    <ul class="kpis" id="kpis-mes" aria-label="O mês"></ul>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-dinheiro">
+    <div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-dinheiro">Onde está o dinheiro</h2>
+      <span class="cartao__dica">medido, faturado, protocolado e recebido, na cota da Lotufo</span></div>
+    <ul class="kpis kpis--quebra" id="kpis-dinheiro" aria-label="Onde está o dinheiro"></ul>
+    <div class="cartao__corpo">
+      <p style="margin:0">Em A receber: <a href="a-receber.html">por órgão e há quanto tempo</a> · <a href="a-receber.html#reajustes">reajustes esperando apostilamento (<span class="num">2</span>)</a></p>
+    </div>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-grafico">
+    <div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-grafico">Mês a mês</h2><span class="cartao__dica">Previsto e medido em cada competência, até 09/2026.</span></div>
+    <div class="grafico" id="barras"></div>
+    <div class="legenda">
+      <span class="legenda__item"><span class="legenda__chave legenda__chave--previsto" aria-hidden="true"></span>previsto</span>
+      <span class="legenda__item"><span class="legenda__chave legenda__chave--execucao" aria-hidden="true"></span>medido</span>
+    </div>
+    <div class="cartao__corpo">
+      <details class="detalhes">
+        <summary>Tabela por competência (12)</summary>
+        <div class="tabela-wrap">
+          <table class="tabela tabela--estreita">
+            <caption class="sr-only">Previsto e medido nos últimos 12 meses, na cota da Lotufo</caption>
+            <thead><tr><th scope="col">Competência</th><th scope="col" class="col-num">Previsto</th><th scope="col" class="col-num">Medido</th></tr></thead>
+            <tbody id="serie-corpo"></tbody>
+            <tfoot><tr><th scope="row">Total</th><td class="col-num" id="serie-tp"></td><td class="col-num" id="serie-tm"></td></tr></tfoot>
+          </table>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <div class="cartoes-lado">
+    <section class="cartao" aria-labelledby="t-proximos">
+      <div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-proximos">Próximos meses</h2>
+        <span class="cartao__dica">Faturamento pelo cronograma; recebimento pela mediana de cada órgão.</span></div>
+      <div class="tabela-wrap">
+        <table class="tabela tabela--estreita">
+          <thead><tr><th scope="col">Mês</th><th scope="col" class="col-num">Faturamento previsto</th><th scope="col" class="col-num">Recebimento previsto</th></tr></thead>
+          <tbody id="proximos-corpo"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="cartao" aria-labelledby="t-saldo">
+      <div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-saldo">Saldo a executar</h2>
+        <span class="cartao__dica">Vigente − medido. O saldo do QDOP é outra conta: contratual − faturado.</span></div>
+      <ul class="kpis kpis--quebra" id="kpis-saldo" aria-label="Saldo a executar"></ul>
+      <div class="tabela-wrap">
+        <table class="tabela tabela--estreita">
+          <caption class="sr-only">Saldo a executar por órgão, na cota da Lotufo</caption>
+          <thead><tr><th scope="col">Órgão</th><th scope="col" class="col-num">Saldo a executar</th><th scope="col" class="col-num">Participação</th></tr></thead>
+          <tbody id="orgao-corpo"></tbody>
+          <tfoot><tr><th scope="row">Total</th><td class="col-num" id="orgao-total"></td><td class="col-num">100,0%</td></tr></tfoot>
+        </table>
+      </div>
+    </section>
+  </div>
+</section>
+
+</div></main>
+<script src="shell.js"></script>
+<script>
+(function () {
+  "use strict";
+  // ------------------------------------------------------------------ dados inventados (centavos, na cota)
+  const HOJE = "2026-10-16";
+  const OBRAS = [
+    { id: 1, obra: "Ponte do Ribeirão", contratante: "Secretaria de Obras", empreita: "Integral", direito: 1, vigente: 1845000000, medido: 911234055, faturado: 864011820, termino: "2027-06-30", vigencia: "2027-09-30", status: "Em andamento", farol: "verde", motivos: [] },
+    { id: 2, obra: "Avenida das Palmeiras", contratante: "Secretaria de Obras", empreita: "Consórcio", direito: .6, vigente: 2231248000, medido: 702051210, faturado: 688051210, termino: "2026-12-15", vigencia: "2027-03-15", status: "Em andamento", farol: "atencao", motivos: ["Termina em 60 dias sem aditivo de prazo"] },
+    { id: 3, obra: "Anel Viário Sul", contratante: "Secretaria de Obras", empreita: "Integral", direito: 1, vigente: 620490000, medido: 591022035, faturado: 591022035, termino: "2026-10-31", vigencia: "2027-01-31", status: "Em encerramento", farol: "acao", motivos: ["Medição final ainda não protocolada", "Termo de recebimento provisório pendente"] },
+    { id: 4, obra: "Terminal Norte", contratante: "Agência de Parcerias", empreita: "Consórcio", direito: .5, vigente: 1988000000, medido: 615000040, faturado: 540288000, termino: "2027-08-31", vigencia: "2027-11-30", status: "Em andamento", farol: "vermelho", motivos: ["Protocolo de 07/2026 sem pagamento há 74 dias", "Certidão municipal vencida há 6 dias", "Reajuste esperando apostilamento há 41 dias"] },
+    { id: 5, obra: "Parque Linear", contratante: "Agência de Parcerias", empreita: "Integral", direito: 1, vigente: 1142030000, medido: 570588012, faturado: 570588012, termino: "2027-04-30", vigencia: "2027-07-31", status: "Em andamento", farol: "verde", motivos: [] },
+    { id: 6, obra: "Escola Modelo", contratante: "Prefeitura Municipal", empreita: "Integral", direito: 1, vigente: 974000000, medido: 602041000, faturado: 561123000, termino: "2027-02-28", vigencia: "2027-05-31", status: "Em andamento", farol: "verde", motivos: [] },
+    { id: 7, obra: "Centro Esportivo", contratante: "Prefeitura Municipal", empreita: "Integral", direito: 1, vigente: 1490512000, medido: 688900375, faturado: 688900375, termino: "2027-09-30", vigencia: "2027-12-31", status: "Em andamento", farol: "atencao", motivos: ["Medição de 09/2026 ainda sem espelho"] },
+    { id: 8, obra: "Viaduto Leste", contratante: "Prefeitura Municipal", empreita: "Integral", direito: 1, vigente: 721000000, medido: 215030000, faturado: 215030000, termino: "2027-05-31", vigencia: "2027-08-31", status: "Suspensa", farol: "acao", motivos: ["Suspensa há 45 dias sem ordem de reinício"] },
+    { id: 9, obra: "Hospital Regional", contratante: "Secretaria de Saúde", empreita: "Consórcio", direito: .4, vigente: 2160000000, medido: 518044290, faturado: 473044290, termino: "2027-10-31", vigencia: "2028-01-31", status: "Em andamento", farol: "atencao", motivos: ["Atestado de 08/2026 pendente há 21 dias"] },
+    { id: 10, obra: "Posto de Saúde Vila Nova", contratante: "Secretaria de Saúde", empreita: "Integral", direito: 1, vigente: 380000000, medido: 312000000, faturado: 312000000, termino: "2026-11-20", vigencia: "2027-02-20", status: "Em andamento", farol: "verde", motivos: [] },
+  ];
+  const BASE = { ativas: 8, encerramento: 1, suspensas: 1 };
+  const SERIE = [
+    ["2025-10", 420512033, 398241537], ["2025-11", 435080912, 412377120], ["2025-12", 310455000, 285120944],
+    ["2026-01", 380210430, 341098275], ["2026-02", 410334120, 396022810], ["2026-03", 460118200, 438450339],
+    ["2026-04", 475290015, 451210477], ["2026-05", 490002310, 422015630], ["2026-06", 505330980, 487120015],
+    ["2026-07", 520114522, 495310228], ["2026-08", 510020000, 470118342], ["2026-09", 495330144, 431226819],
+  ].map(([c, p, m]) => ({ comp: c, previsto: p, medido: m }));
+  const MESMO_MES_ANO_ANTERIOR = 377145020;
+  const FATURADO_MES = { valor: 387421055, notas: 11 };
+  const DINHEIRO = [
+    [214033018, "medido esperando nota", 3], [131590240, "nota emitida esperando protocolo", 2],
+    [948211763, "protocolado esperando pagamento", 7], [402655109, "recebido no mês", 5],
+  ];
+  const PROXIMOS = [["2026-10", 502114300, 455000120], ["2026-11", 488030255, 470215600], ["2026-12", 340500000, null]];
+  const PROTOCOLOS = { feitos: 6, ativas: 9 };
+
+  // ------------------------------------------------------------------ formatos
+  const brl = c => (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const mi = c => "R$ " + (c / 1e8).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " mi";
+  const pct = (f, casas = 1) => f.toLocaleString("pt-BR", { style: "percent", minimumFractionDigits: casas, maximumFractionDigits: casas });
+  const comp = s => s.slice(5, 7) + "/" + s.slice(0, 4);
+  const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  const mesCurto = s => MESES[+s.slice(5, 7) - 1] + "/" + s.slice(2, 4);
+  const data = s => s ? s.slice(8, 10) + "/" + s.slice(5, 7) + "/" + s.slice(0, 4) : "—";
+  const soma = (l, f) => l.reduce((a, x) => a + f(x), 0);
+  const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  const NS = "http://www.w3.org/2000/svg";
+
+  const FAROL = {
+    vermelho: { rotulo: "Crítico", classe: "selo--acao", ordem: 0 },
+    acao: { rotulo: "Ação", classe: "selo--atencao", forte: true, ordem: 1 },
+    atencao: { rotulo: "Atenção", classe: "selo--atencao", ordem: 2 },
+    verde: { rotulo: "Em dia", classe: "selo--ok", ordem: 3 },
+  };
+  const ICONE_ALERTA = '<svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4.5M12 17.2h.01"/></svg>';
+  const ICONE_PROXIMO = '<svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 8l4 4-4 4"/></svg>';
+  function selo(f) {
+    const x = FAROL[f];
+    const forma = f === "vermelho" ? ICONE_ALERTA : x.forte ? ICONE_PROXIMO : '<span class="selo__ponto" aria-hidden="true"></span>';
+    return '<span class="selo ' + x.classe + (x.forte ? " selo--forte" : "") + '">' + forma + '<span class="selo__texto">' + x.rotulo + "</span></span>";
+  }
+
+  // ------------------------------------------------------------------ contas (tudo derivado dos dados acima)
+  const saldoExec = o => o.vigente - o.medido;
+  const totalSaldo = soma(OBRAS, saldoExec);
+  const ano = SERIE.filter(s => s.comp.startsWith("2026"));
+  const medidoAno = soma(ano, s => s.medido), previstoAno = soma(ano, s => s.previsto);
+  const ultimo = SERIE[SERIE.length - 1];
+  const ritmo = Math.round(soma(SERIE.slice(-6), s => s.medido) / 6);
+  const orgaos = [...new Set(OBRAS.map(o => o.contratante))].map(nome => {
+    const l = OBRAS.filter(o => o.contratante === nome);
+    const vig = soma(l, o => o.vigente), med = soma(l, o => o.medido);
+    return { nome, obras: l.length, saldo: vig - med, executado: med / vig, fracao: (vig - med) / totalSaldo };
+  }).sort((a, b) => b.saldo - a.saldo);
+
+  // ------------------------------------------------------------------ abas
+  const abas = [...document.querySelectorAll('[role="tab"]')];
+  let curvaDesenhada = false, barrasDesenhadas = false;
+  function abrir(id, foco) {
+    abas.forEach(a => {
+      const sim = a.dataset.aba === id;
+      a.setAttribute("aria-selected", String(sim)); a.tabIndex = sim ? 0 : -1;
+      document.getElementById(a.getAttribute("aria-controls")).hidden = !sim;
+      if (sim && foco) a.focus();
+    });
+    if (location.hash.slice(1) !== id) history.replaceState(null, "", "#" + id);
+    if (id === "resumo") desenharCurva();
+    if (id === "producao") desenharBarras();
+  }
+  abas.forEach((a, i) => {
+    a.addEventListener("click", () => abrir(a.dataset.aba));
+    a.addEventListener("keydown", e => {
+      const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (d) { e.preventDefault(); abrir(abas[(i + d + abas.length) % abas.length].dataset.aba, true); }
+    });
+  });
+
+  // ------------------------------------------------------------------ Resumo
+  const NUMEROS = [
+    ["Saldo a executar", totalSaldo, '<span class="num">' + brl(totalSaldo) + "</span> · vigente − medido, " + OBRAS.length + " obras"],
+    ["Medido no ano", medidoAno, '<span class="num">' + brl(medidoAno) + "</span> · previsto até 09/2026: " + '<span class="num">' + mi(previstoAno) + "</span>"],
+    ["Faturado no mês", FATURADO_MES.valor, '<span class="num">' + brl(FATURADO_MES.valor) + "</span> · " + FATURADO_MES.notas + " notas emitidas em 10/2026"],
+  ];
+  document.getElementById("numeros").innerHTML = NUMEROS.map(([r, v, apoio]) =>
+    '<li class="cartao numero"><span class="numero__rotulo">' + r + '</span><span class="numero__valor" title="' + brl(v) + '">' + mi(v) +
+    '</span><span class="numero__apoio">' + apoio + "</span></li>").join("");
+
+  document.getElementById("contratantes").innerHTML = orgaos.map(o =>
+    '<button type="button" class="cartao contratante" data-acao="Abriria Obras filtrada por ' + esc(o.nome) + ' (' + o.obras + ' obras).">' +
+    '<h3 class="contratante__nome">' + esc(o.nome) + "</h3>" +
+    '<span class="contratante__rotulo">Saldo a executar</span>' +
+    '<span class="contratante__valor" title="' + brl(o.saldo) + '">' + mi(o.saldo) + "</span>" +
+    '<span class="contratante__obras">' + o.obras + " obras · " + pct(o.fracao) + " do saldo da carteira</span>" +
+    '<span class="progresso"><span class="progresso__rotulo">% executado</span>' +
+    '<span class="progresso__trilho" role="img" aria-label="' + pct(o.executado, 0) + ' executado"><span class="progresso__feito" style="width:' + (o.executado * 100).toFixed(1) + '%"></span></span>' +
+    '<span class="progresso__pct">' + pct(o.executado, 0) + "</span></span></button>").join("");
+
+  const problema = OBRAS.filter(o => o.farol !== "verde").length;
+  document.getElementById("nota-resumo").innerHTML = problema + " de " + OBRAS.length +
+    ' obras com farol em Ação, Atenção ou Crítico · <a href="#qdop" data-ir="qdop">ver no QDOP</a> · o mês, o dinheiro e os próximos meses estão em <a href="#producao" data-ir="producao">Produção</a>.';
+  document.addEventListener("click", e => { const a = e.target.closest("[data-ir]"); if (a) { e.preventDefault(); abrir(a.dataset.ir); window.scrollTo(0, 0); } });
+
+  function escala(max) {
+    const alvo = Math.max(1, max) / 4, mag = Math.pow(10, Math.floor(Math.log10(alvo)));
+    const passo = [1, 2, 2.5, 5, 10].map(m => m * mag).find(p => p >= alvo) || mag * 10;
+    return { topo: Math.ceil(max / passo) * passo, passo };
+  }
+  function el(nome, at, pai) {
+    const n = document.createElementNS(NS, nome);
+    for (const k in at) n.setAttribute(k, at[k]);
+    if (pai) pai.appendChild(n);
+    return n;
+  }
+
+  // Curva S: acumulado do previsto e do medido na janela de 12 meses
+  const acc = []; let ap = 0, am = 0;
+  SERIE.forEach(s => { ap += s.previsto; am += s.medido; acc.push({ comp: s.comp, previsto: ap, medido: am }); });
+  const leitura = document.getElementById("leitura");
+  function ler(i) {
+    const a = acc[i];
+    leitura.innerHTML = "Até " + comp(a.comp) + ": previsto <span class=\"num\">" + brl(a.previsto) + "</span> · medido <span class=\"num\">" +
+      brl(a.medido) + "</span> · " + pct(a.medido / a.previsto) + " do previsto";
+  }
+  function desenharCurva() {
+    const caixa = document.getElementById("curva");
+    const W = Math.max(280, caixa.clientWidth - (innerWidth < 768 ? 16 : 40));
+    const H = innerWidth < 768 ? 220 : 260, mE = 44, mD = 12, T = 22, B = 30;
+    const { topo, passo } = escala(Math.max(...acc.map(a => Math.max(a.previsto, a.medido))));
+    const x = i => mE + (i + .5) * (W - mE - mD) / acc.length;
+    const y = v => T + (1 - v / topo) * (H - T - B);
+    const svg = el("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H, role: "img",
+      "aria-label": "Previsto e medido acumulados de " + comp(acc[0].comp) + " a " + comp(ultimo.comp) + ", em R$ milhões. Ao fim, previsto " + mi(ap) + " e medido " + mi(am) + "." });
+    el("text", { class: "g-eixo", x: mE - 8, y: T - 10, "text-anchor": "end" }, svg).textContent = "R$ mi";
+    for (let v = 0; v <= topo + passo / 2; v += passo) {
+      el("line", { class: v === 0 ? "g-base" : "g-grade", x1: mE, x2: W - mD, y1: y(v), y2: y(v) }, svg);
+      el("text", { class: "g-eixo", x: mE - 8, y: y(v) + 4, "text-anchor": "end" }, svg).textContent = (v / 1e8).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+    }
+    const pular = Math.ceil(46 / ((W - mE - mD) / acc.length));
+    acc.forEach((a, i) => { if ((acc.length - 1 - i) % pular === 0) el("text", { class: "g-eixo-x", x: x(i), y: H - 10, "text-anchor": "middle" }, svg).textContent = mesCurto(a.comp); });
+    const linha = k => acc.map((a, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(a[k]).toFixed(1)).join(" ");
+    el("path", { class: "c-area", d: linha("medido") + " L" + x(acc.length - 1) + " " + y(0) + " L" + x(0) + " " + y(0) + " Z" }, svg);
+    el("path", { class: "c-prev", d: linha("previsto") }, svg);
+    el("path", { class: "c-med", d: linha("medido") }, svg);
+    const guia = el("line", { class: "c-guia", y1: T, y2: y(0), x1: x(acc.length - 1), x2: x(acc.length - 1) }, svg);
+    acc.forEach((a, i) => {
+      el("circle", { class: "c-ponto-prev", cx: x(i), cy: y(a.previsto), r: 3.5 }, svg);
+      el("circle", { class: "c-ponto-med", cx: x(i), cy: y(a.medido), r: 4 }, svg);
+    });
+    const capa = el("rect", { x: mE, y: T, width: W - mE - mD, height: H - T - B, fill: "transparent" }, svg);
+    const mover = ev => {
+      const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width;
+      const i = Math.max(0, Math.min(acc.length - 1, Math.floor((px - mE) / ((W - mE - mD) / acc.length))));
+      guia.setAttribute("x1", x(i)); guia.setAttribute("x2", x(i)); ler(i);
+    };
+    capa.addEventListener("pointermove", mover);
+    capa.addEventListener("pointerdown", mover);
+    capa.addEventListener("pointerleave", () => { guia.setAttribute("x1", x(acc.length - 1)); guia.setAttribute("x2", x(acc.length - 1)); ler(acc.length - 1); });
+    caixa.replaceChildren(svg);
+    ler(acc.length - 1);
+    curvaDesenhada = true;
+  }
+
+  // ------------------------------------------------------------------ QDOP
+  const porFarol = l => [...l].sort((a, b) => FAROL[a.farol].ordem - FAROL[b.farol].ordem || a.id - b.id);
+  let filtro = "todas";
+  const contaF = f => OBRAS.filter(o => o.farol === f).length;
+  function farois() {
+    const itens = [["todas", "Todas", OBRAS.length], ["problema", "Com problema", problema], ["vermelho", "Crítico", contaF("vermelho")],
+      ["acao", "Ação", contaF("acao")], ["atencao", "Atenção", contaF("atencao")], ["verde", "Em dia", contaF("verde")]];
+    document.getElementById("farois").innerHTML = itens.map(([id, r, n]) =>
+      '<button type="button" class="farol-btn" data-farol="' + id + '" aria-pressed="' + (filtro === id) + '">' + r + ' <span class="num">' + n + "</span></button>").join("");
+  }
+  document.getElementById("farois").addEventListener("click", e => {
+    const b = e.target.closest("[data-farol]"); if (!b) return;
+    filtro = b.dataset.farol; farois(); qdop();
+  });
+  document.getElementById("dica-problema").textContent = problema + " de " + OBRAS.length + " obras (" + BASE.ativas + " ativas, " +
+    BASE.encerramento + " em encerramento, " + BASE.suspensas + " suspensa) com farol em Ação, Atenção ou Crítico";
+  function qdop() {
+    const l = porFarol(OBRAS.filter(o => filtro === "todas" || (filtro === "problema" ? o.farol !== "verde" : o.farol === filtro)));
+    document.getElementById("dica-qdop").textContent = l.length + (l.length === 1 ? " obra" : " obras") + ", pelo farol · leiaute do QDOP · na cota da Lotufo";
+    document.getElementById("qdop-corpo").innerHTML = l.map((o, i) => {
+      const saldo = o.vigente - o.faturado, vis = o.motivos.slice(0, 2), mais = o.motivos.length - vis.length;
+      return '<tr class="linha' + (i % 2 ? " par" : "") + '">' +
+        '<td><a class="nome-link truncar truncar--nome" title="' + esc(o.obra) + '" href="obras.html" data-acao="Abriria a página da obra ' + esc(o.obra) + '.">' + esc(o.obra) + "</a></td>" +
+        "<td>" + o.empreita + (o.direito < 1 ? " (" + pct(o.direito, 0) + ")" : "") + "</td>" +
+        '<td class="col-num dinheiro">' + brl(o.vigente) + '</td><td class="col-num dinheiro">' + brl(o.faturado) + "</td>" +
+        '<td class="col-num dinheiro' + (saldo < 0 ? " negativo" : "") + '">' + brl(saldo) + "</td>" +
+        '<td class="num">' + data(o.termino) + '<div class="campo__nota">vig. ' + data(o.vigencia) + "</div></td>" +
+        '<td class="sem-quebra" style="white-space:nowrap">' + o.status + "</td><td>" + selo(o.farol) + "</td>" +
+        "<td>" + (vis.length === 0 ? "—" : '<ul class="motivos">' + vis.map(m => "<li>" + esc(m) + "</li>").join("") +
+          (mais > 0 ? '<li><a href="obras.html" data-acao="Abriria os avisos de ' + esc(o.obra) + '.">mais ' + mais + "</a></li>" : "") + "</ul>") + "</td></tr>";
+    }).join("");
+    document.getElementById("qdop-total-rotulo").textContent = "Total (" + l.length + (l.length === 1 ? " obra)" : " obras)");
+    document.getElementById("qdop-t1").textContent = brl(soma(l, o => o.vigente));
+    document.getElementById("qdop-t2").textContent = brl(soma(l, o => o.faturado));
+    document.getElementById("qdop-t3").textContent = brl(soma(l, o => o.vigente - o.faturado));
+  }
+  // Terminam: pela regra da lista de Obras (o menor entre término e vigência; vencidas contam)
+  const dias = s => Math.round((new Date(s + "T12:00") - new Date(HOJE + "T12:00")) / 864e5);
+  const termina = n => OBRAS.filter(o => Math.min(dias(o.termino), dias(o.vigencia)) <= n).length;
+  document.getElementById("terminam").innerHTML = [[90, "em 90 dias"], [180, "em 6 meses"]].map(([n, q]) => {
+    const k = termina(n);
+    return '<li><a href="obras.html" data-acao="Abriria Obras filtrada pelas que terminam ' + q + '.">' + (k === 1 ? "1 obra termina " : k + " obras terminam ") + q + "</a></li>";
+  }).join("");
+  farois(); qdop();
+
+  // ------------------------------------------------------------------ Produção
+  const kpi = (v, r, comps, dinheiro = true) => '<li class="kpi' + (dinheiro ? " kpi--dinheiro" : "") + '"><span class="kpi__valor num">' + v + '</span><span class="kpi__rotulo">' + r + "</span>" +
+    (comps || []).map(([cr, cv]) => '<span class="kpi__comparacao num">' + cr + ": " + cv + "</span>").join("") + "</li>";
+  document.getElementById("kpis-mes").innerHTML =
+    kpi(brl(ultimo.medido), "medido no mês", [["previsto no mês", brl(ultimo.previsto)], ["mesmo mês do ano anterior", brl(MESMO_MES_ANO_ANTERIOR)]]) +
+    kpi(brl(medidoAno), "acumulado do ano", [["previsto do ano até 09/2026", brl(previstoAno)]]) +
+    kpi(PROTOCOLOS.feitos + " de " + PROTOCOLOS.ativas, "obras ativas protocolaram", null, false);
+  document.getElementById("kpis-dinheiro").innerHTML = DINHEIRO.map(([v, r, n]) => kpi(brl(v), r + " (" + n + ")")).join("");
+  const meses = ritmo ? totalSaldo / ritmo : null;
+  document.getElementById("kpis-saldo").innerHTML = kpi(brl(totalSaldo), "saldo a executar") + kpi(brl(ritmo), "ritmo (média dos últimos 6 meses)") +
+    kpi(meses === null ? "—" : meses.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " meses", "de produção no ritmo atual", null, false);
+  document.getElementById("orgao-corpo").innerHTML = orgaos.map((o, i) =>
+    '<tr class="linha' + (i % 2 ? " par" : "") + '"><td>' + esc(o.nome) + '</td><td class="col-num dinheiro">' + brl(o.saldo) + '</td><td class="col-num">' + pct(o.fracao) + "</td></tr>").join("");
+  document.getElementById("orgao-total").textContent = brl(totalSaldo);
+  document.getElementById("proximos-corpo").innerHTML = PROXIMOS.map(([c, f, r], i) =>
+    '<tr class="linha' + (i % 2 ? " par" : "") + '"><td class="num">' + comp(c) + '</td><td class="col-num dinheiro">' + brl(f) + '</td><td class="col-num' + (r === null ? '">a conciliar' : ' dinheiro">' + brl(r)) + "</td></tr>").join("");
+  document.getElementById("serie-corpo").innerHTML = SERIE.map((s, i) =>
+    '<tr class="linha' + (i % 2 ? " par" : "") + '"><td class="num">' + comp(s.comp) + '</td><td class="col-num dinheiro">' + brl(s.previsto) + '</td><td class="col-num dinheiro">' + brl(s.medido) + "</td></tr>").join("");
+  document.getElementById("serie-tp").textContent = brl(soma(SERIE, s => s.previsto));
+  document.getElementById("serie-tm").textContent = brl(soma(SERIE, s => s.medido));
+
+  // barras mês a mês (o desenho do Cronograma/Diretoria: passo mínimo de 64 px; abaixo disso rola dentro do cartão)
+  function desenharBarras() {
+    const caixa = document.getElementById("barras");
+    const larg = caixa.clientWidth - 40, mE = 52, mD = 14, VAO = 4, T = 24, AL = 180;
+    const PASSO = Math.max(48, Math.floor((larg - mE - mD) / SERIE.length));
+    const LARG = Math.min(32, Math.max(12, Math.round(PASSO / 4)));
+    const BASE_Y = T + AL, H = BASE_Y + 28, W = mE + SERIE.length * PASSO + mD;
+    const { topo, passo } = escala(Math.max(...SERIE.map(s => Math.max(s.previsto, s.medido))));
+    const y = v => BASE_Y - v / topo * AL, alt = v => v <= 0 ? 0 : Math.max(2, v / topo * AL);
+    const svg = el("svg", { class: "grafico__svg", width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img",
+      "aria-label": "Medido e previsto nos últimos 12 meses, em R$ milhões. Os mesmos números estão na tabela por competência, logo abaixo." });
+    el("text", { class: "g-eixo", x: mE - 8, y: T - 9, "text-anchor": "end" }, svg).textContent = "R$ mi";
+    for (let v = 0; v <= topo + passo / 2; v += passo) {
+      el("line", { class: v === 0 ? "g-base" : "g-grade", x1: mE, x2: W - mD, y1: y(v), y2: y(v) }, svg);
+      el("text", { class: "g-eixo", x: mE - 8, y: y(v) + 4, "text-anchor": "end" }, svg).textContent = (v / 1e8).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+    }
+    SERIE.forEach((s, i) => {
+      const cx = mE + i * PASSO + PASSO / 2, g = el("g", {}, svg);
+      el("title", {}, g).textContent = comp(s.comp) + " — previsto " + brl(s.previsto) + " · medido " + brl(s.medido);
+      el("rect", { class: "g-previsto", x: cx - VAO / 2 - LARG, y: BASE_Y - alt(s.previsto), width: LARG, height: alt(s.previsto), rx: 2.5 }, g);
+      el("rect", { class: "g-execucao", x: cx + VAO / 2, y: BASE_Y - alt(s.medido), width: LARG, height: alt(s.medido), rx: 2.5 }, g);
+      el("text", { class: "g-eixo-x", x: cx, y: BASE_Y + 18, "text-anchor": "middle" }, g).textContent = mesCurto(s.comp);
+    });
+    caixa.replaceChildren(svg);
+    barrasDesenhadas = true;
+  }
+
+  let t;
+  addEventListener("resize", () => { clearTimeout(t); t = setTimeout(() => {
+    if (!document.getElementById("p-resumo").hidden) desenharCurva();
+    if (!document.getElementById("p-producao").hidden) desenharBarras();
+  }, 80); });
+  const inicial = ["resumo", "qdop", "producao"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "resumo";
+  abrir(inicial);
+})();
+</script>
+</body></html>

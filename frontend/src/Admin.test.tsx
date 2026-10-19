@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import Admin from "./Admin";
 
@@ -156,8 +156,9 @@ function saudeCom(backup: object) {
 test("Saúde: backup em dia mostra a data e hora do último, a quantidade guardada e nenhum erro", async () => {
   saudeCom(BACKUP_EM_DIA);
   expect(await screen.findByText(/Último backup: 13\/10\/2026 às 07:30/)).toBeTruthy();
-  expect(screen.getByText(/48 snapshots guardados/)).toBeTruthy();
-  expect(screen.getByText(/3,0\sMB/)).toBeTruthy();
+  const cartao = within(screen.getByRole("region", { name: "Backup" }));
+  expect(cartao.getByText(/48 snapshots guardados/)).toBeTruthy();
+  expect(cartao.getByText(/3,0\sMB/)).toBeTruthy();
   expect(screen.getByText(/Última cópia externa: 13\/10\/2026 às 03:00/)).toBeTruthy();
   expect(screen.getByText(/Último erro: nenhum/)).toBeTruthy();
   expect(screen.queryByText(/Backup atrasado/)).toBeNull();
@@ -183,7 +184,8 @@ test("Saúde: sem nenhum backup guardado também é atraso em destaque", async (
   expect((await screen.findByText(/Backup atrasado/)).textContent).toMatch(/nenhum backup guardado/);
   // sem erro registrado, "nenhum erro" desmentiria o alerta; sem pasta externa, não há cópia a esperar
   expect(screen.queryByText(/Último erro: nenhum/)).toBeNull();
-  expect(screen.queryByText(/Última cópia externa/)).toBeNull();
+  const cartao = within(screen.getByRole("region", { name: "Backup" }));
+  expect(cartao.queryByText(/Última cópia externa/)).toBeNull();
 });
 
 // Issue #55: o backup passou a copiar as pastas de notas, espelhos, modelos e evidências; a falha dessa cópia
@@ -212,5 +214,100 @@ test("Backup: cópia externa dos arquivos que não termina aparece; sem pasta ex
   cleanup();
   saudeCom({ ...BACKUP_EM_DIA, copia_externa_configurada: false });
   expect(await screen.findByText(/Última cópia dos arquivos: nenhuma/)).toBeTruthy();
-  expect(screen.queryByText(/Última cópia externa dos arquivos/)).toBeNull();
+  expect(within(screen.getByRole("region", { name: "Backup" })).queryByText(/Última cópia externa dos arquivos/)).toBeNull();
+});
+
+// Redesenho da Administração (#164): a Saúde abre com quatro cartões de situação, cada um com ponto, hora e nota
+const RODADA_BOA = { id: 2, disparo: "agendada", estado: "success", iniciado_em: "2026-10-16T10:40:00-04:00",
+  terminado_em: "2026-10-16T10:40:38-04:00", nfs: 6, baixas: 1, alocacoes: 5, sugestoes: 1, recebimentos: 2, erro: null };
+const RODADA_RUIM = { id: 3, disparo: "manual", estado: "failed", iniciado_em: "2026-10-16T11:40:00-04:00",
+  terminado_em: "2026-10-16T11:41:05-04:00", nfs: 0, baixas: 0, alocacoes: 0, sugestoes: 0, recebimentos: 0,
+  erro: "O RM recusou a conta de serviço." };
+
+function saudeComRm(status: object, backup: object = BACKUP_EM_DIA) {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/rm/status") return status;
+    if (url === "/api/admin/backup") return backup;
+    if (url === "/api/rm/reconciliacao") return {
+      nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
+      totais: { nfs_sem_medicao: 15, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+}
+const cartaoDe = (titulo: string) => screen.getByRole("heading", { name: titulo }).closest("li") as HTMLElement;
+
+test("Saúde: cartões de situação com a hora, a nota e a tabela das rodadas sempre aberta", async () => {
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] });
+  const sync = await screen.findByRole("heading", { name: "Sincronização com o RM" });
+  const rm = sync.closest("li") as HTMLElement;
+  expect(rm.className).toMatch(/situacao--ok/);
+  expect(rm.textContent).toMatch(/16\/10\/2026 às 10:40/);
+  expect(rm.textContent).toMatch(/deu certo · agendada/);
+  expect(await within(cartaoDe("Último backup")).findByText(/48 snapshots guardados/)).toBeTruthy();
+  expect(cartaoDe("Última cópia externa dos arquivos").className).toMatch(/situacao--atencao/); // sem cópia dos arquivos ainda
+  expect(cartaoDe("Rodadas com falha").textContent).toMatch(/0 na última rodada/);
+  // a tabela não fica atrás de um "abrir": já vem visível, com a duração da rodada
+  expect(screen.queryByText(/As últimas \d+ rodadas$/)).toBeNull();
+  expect(screen.getByRole("columnheader", { name: "Duração" })).toBeTruthy();
+  expect(screen.getByText("38 s")).toBeTruthy();
+  expect(screen.getByLabelText("Contagens da última rodada")).toBeTruthy();
+});
+
+test("Saúde: última rodada com falha vira cartão vermelho, caixa com o erro e a última boa, sem nome de máquina na tela", async () => {
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_RUIM, RODADA_BOA] });
+  const rm = (await screen.findByRole("heading", { name: "Sincronização com o RM" })).closest("li") as HTMLElement;
+  expect(rm.className).toMatch(/situacao--acao/);
+  expect(rm.textContent).toMatch(/a última que deu certo foi em 16\/10\/2026 às 10:40/);
+  expect(cartaoDe("Rodadas com falha").textContent).toMatch(/1 nas últimas 2 rodadas/);
+  const caixa = screen.getByText(/Última rodada: falhou em/);
+  expect(caixa.closest(".aviso--critico")).toBeTruthy();
+  expect(caixa.textContent).toMatch(/O RM recusou a conta de serviço/);
+  expect(caixa.textContent).toMatch(/manual de produção/);
+  // as contagens são só da rodada que deu certo
+  expect(screen.queryByLabelText("Contagens da última rodada")).toBeNull();
+  expect(document.body.textContent).not.toMatch(/runbook|DASH_/);
+  expect(screen.getByText("1 min 05 s")).toBeTruthy();
+});
+
+test("Saúde: RM não configurado explica, desliga o Sincronizar agora e não usa variável de ambiente na tela", async () => {
+  saudeComRm({ configurado: false, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [] });
+  expect(await screen.findByText(/Sem RM, o lançamento da NF/)).toBeTruthy();
+  expect(cartaoDe("Sincronização com o RM").textContent).toMatch(/não configurado/);
+  expect((screen.getByRole("button", { name: "Sincronizar agora" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(document.body.textContent).not.toMatch(/runbook|DASH_/);
+  expect(document.body.textContent).toMatch(/manual de produção/);
+});
+
+test("Saúde: as contagens da reconciliação levam ao grupo certo da aba Reconciliação", async () => {
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] });
+  const link = await screen.findByRole("link", { name: /NFs sem medição/ });
+  expect(link.getAttribute("href")).toMatch(/reconciliacao/);
+  expect(link.getAttribute("href")).toMatch(/categoria=nfs/);
+});
+
+test("Saúde: falha só na cópia externa dos arquivos também deixa o cartão do backup vermelho (mesma regra do cartão Backup)", async () => {
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
+    { ...BACKUP_EM_DIA, ultima_copia_arquivos_erro: "1 arquivo(s) sem cópia" });
+  await screen.findByText("Falhou");
+  expect(cartaoDe("Último backup").className).toMatch(/situacao--acao/);
+});
+
+test("Saúde: singular com uma rodada e dica sem 'últimas 0 rodadas'; botão desligado enquanto roda", async () => {
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [{ ...RODADA_RUIM }] });
+  await screen.findByText(/Última rodada: falhou em/);
+  expect(document.body.textContent).toMatch(/Nenhuma deu certo na última rodada\./);
+  expect(document.body.textContent).not.toMatch(/últimas 1 rodadas/);
+  cleanup();
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [] });
+  await screen.findByText("as NFs e as baixas do RM");
+  expect(document.body.textContent).not.toMatch(/últimas 0 rodadas/);
+  cleanup();
+  saudeComRm({ configurado: true, em_andamento: true, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] });
+  await screen.findByText("rodando");
+  expect((screen.getByRole("button", { name: "Sincronizar agora" }) as HTMLButtonElement).disabled).toBe(true);
+  cleanup();
+  saudeComRm({ configurado: false, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] });
+  await screen.findByText(/Sem RM, o lançamento/);
+  expect(cartaoDe("Rodadas com falha").textContent).not.toMatch(/sem rodadas/);
 });

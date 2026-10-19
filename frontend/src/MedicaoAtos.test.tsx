@@ -33,6 +33,7 @@ describe("notaDoEspelho (gate Sol S7)", () => {
   });
 });
 
+// issue #190: o valor se digita como em caixa registradora e vai ao servidor no mesmo formato de antes
 // gate Sol S6 (10/10/2026): o servidor exige 10 caracteres para protocolar com pendencia; a tela acompanha
 describe("FormProtocoloManual", () => {
   afterEach(() => { cleanup(); api.mockReset(); });

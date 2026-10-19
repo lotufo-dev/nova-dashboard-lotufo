@@ -187,7 +187,7 @@ export type ItemChecklist = { entidade_id: number; entidade: string | null; tipo
 export function itensOQueFalta(m: MedicaoBase, faltamNotas: number | null, checklist: ItemChecklist[] | null,
                                protocolo: ProtocoloResumo | null): ItemFalta[] {
   const itens: ItemFalta[] = [];
-  if (m.estado === "espelho_gerado") itens.push({ tipo: "passo", nivel: "neutro", texto: "Enviar o espelho ao faturamento", secao: "espelho" });
+  if (m.estado === "espelho_gerado") itens.push({ tipo: "passo", nivel: "neutro", texto: "Enviar o espelho ao faturamento", secao: "etapa-2" });
   const semNotas = ["espelho_gerado", "espelho_enviado"].includes(m.estado);
   if (semNotas || (faltamNotas ?? 0) > 0) {
     const n = faltamNotas ?? 0;

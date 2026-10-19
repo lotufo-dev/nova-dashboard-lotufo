@@ -1,0 +1,26 @@
+/* Aba Medicoes › Enviar nota (#157, opcao B, aprovada em 16/10/2026): a lista a esquerda, a nota escolhida a direita.
+   Debaixo de `.notas-v3`, como o resto das notas (notas.css). Cores so' dos tokens. */
+
+.notas-v3 .en-lista { background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: var(--sombra);
+  padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.notas-v3 .en-lista .nota-grupo { gap: 0; }
+.notas-v3 .en-lista button.nota-cartao { box-shadow: none; border: 0; border-bottom: 1px solid var(--linha-suave); border-radius: var(--raio); align-items: flex-start; }
+.notas-v3 .en-lista button.nota-cartao[aria-pressed="true"] { border-left: 4px solid var(--acento); }
+.notas-v3 .en-filtros { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.notas-v3 .en-orgao { height: 40px; border-radius: var(--raio); border-color: var(--linha-forte); background: var(--superficie); font-size: 14px; }
+.notas-v3 .en-direita { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
+.notas-v3 .nota-painel { position: sticky; top: 48px; }
+.notas-v3 .en-rodape { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid var(--linha); }
+.notas-v3 .en-rodape .btn--primario { height: 48px; padding: 0 24px; font-size: 15px; font-weight: 600; }
+.notas-v3 .en-motivo { margin: 0; font-size: 13px; color: var(--texto-2); flex: 1 1 100%; }
+.notas-v3 .en-motivo--atencao { color: var(--atencao); }
+.notas-v3 .en-motivo--bloqueio { color: var(--acao); }
+.notas-v3 .en-dica { text-align: left; }
+
+@media (max-width: 767px) {
+  .notas-v3 .en-lista { padding: 8px; }
+  .notas-v3 .en-lista button.nota-cartao { padding: 12px; }
+  .notas-v3 .en-direita { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .notas-v3 .nota-painel { position: static; padding: 16px; }
+  .notas-v3 .en-rodape .btn--primario { width: 100%; justify-content: center; }
+}

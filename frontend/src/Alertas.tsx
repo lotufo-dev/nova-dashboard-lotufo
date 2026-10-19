@@ -30,13 +30,13 @@ export type Aviso = {
 const ABAS_OBRA: readonly string[] = ["medicoes", "prazos", "reajuste", "documentos", "contrato"] satisfies AbaObra[];
 
 /** Para onde o aviso leva: as notas da medicao (aviso de nota, A2), o ciclo da data-base (aviso de reajuste,
- *  A10), a aba da obra, ou a empresa (ancora do cartao dela) em Documentos. */
+ *  A10), a aba da obra, ou a pagina da empresa em Documentos. */
 export function destinoDoAviso(a: Aviso): { para: Rota; secao?: string; busca?: Busca } | null {
   const d = a.destino;
   if (!d) return null;
-  // a empresa em Documentos: a matriz so' com ela (?empresa=, com o cabecalho das colunas a vista) e a linha dela
+  // a empresa em Documentos: a pagina dela (#161); o aviso da regularidade do mes leva direto a aba dela
   if (d.tela === "documentos") return a.entidade_id
-    ? { para: { tela: "documentos" }, busca: { empresa: String(a.entidade_id) }, secao: `emp-${a.entidade_id}` }
+    ? { para: { tela: "documentos-empresa", id: a.entidade_id, aba: a.tipo === "regularidade_mes" ? "regularidade" : a.tipo === "garantia_vencendo" || a.tipo === "art_nao_anexada" ? "garantia" : undefined } }
     : { para: { tela: "documentos" } };
   if (d.aba === "notas" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "notas" };
   if (d.aba === "reajuste" && a.data_base_mes) return { para: { tela: "obra", id: d.id, aba: "reajuste" }, secao: `db-${a.data_base_mes}` };
@@ -107,9 +107,9 @@ export function contagem(itens: Aviso[]): string {
 
 // `verTodos`: onde o resto mora (a tela de Avisos, filtrada); sem ele, o resto abre no lugar.
 export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE, id = "titulo-alertas",
-                                  vazio = "Nenhum aviso. Tudo em dia.", verTodos }:
+                                  vazio = "Nenhum aviso. Tudo em dia.", verTodos, lateral = false }:
     { itens: Aviso[] | null | undefined; ir: Ir; titulo?: string; limite?: number; id?: string; vazio?: string;
-      verTodos?: { para: Rota; busca?: Busca; rotulo: string } }) {
+      verTodos?: { para: Rota; busca?: Busca; rotulo: string }; lateral?: boolean }) {
   const [todos, setTodos] = useState(false);
   // A ordem e' a de quem chama: a do servidor (nivel, dias, obra; `avisos.listar`) ou `porAtraso`.
   const lista = itens ?? [];
@@ -141,7 +141,7 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
           <p className="vazio__titulo">{vazio}</p>
         </div>
       ) : (
-        <ul className="alertas">
+        <ul className={lateral ? "alertas alertas--lateral" : "alertas"}>
           {visiveis.map((a, i) => {
             const selo = SELO[a.nivel] ?? SELO.atencao;
             const destino = destinoDoAviso(a);

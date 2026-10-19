@@ -1,0 +1,27 @@
+/* Administracao > Saude (#164, opcao A aprovada em 16/10/2026): cartoes de situacao, a linha de acao e o par
+   Reconciliacao + Backup. So' o que falta na base (tokens.css), sempre com os tokens. */
+.situacoes { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
+.situacao { padding: 18px 20px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: baseline; }
+.situacao__ponto { width: 10px; height: 10px; border-radius: var(--raio-pilula); background: var(--ok-ponto); align-self: center; }
+.situacao--atencao .situacao__ponto { background: var(--atencao-ponto); }
+.situacao--acao .situacao__ponto { background: var(--acao-ponto); }
+.situacao--neutra .situacao__ponto { background: var(--texto-2); }
+.situacao__titulo { margin: 0; font-size: 15px; font-weight: 600; }
+.situacao__valor { grid-column: 2; font-family: var(--fonte-num); font-size: 16px; color: var(--texto-2); }
+.situacao__nota { grid-column: 2; font-size: 12.5px; color: var(--texto-2); }
+.situacao--acao .situacao__valor { color: var(--acao); }
+.situacao--atencao .situacao__valor { color: var(--atencao); }
+.situacao__erro { white-space: normal; min-width: 32ch; }
+
+.acoes-saude { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+.acoes-saude .btn--primario { height: 40px; padding: 0 20px; font-size: 14px; }
+.acoes-saude p { margin: 0; color: var(--texto-2); font-size: 13px; }
+
+.saude-lado { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); align-items: start; }
+.pilha--curta { gap: 8px; }
+.pilha--curta p { margin: 0; }
+
+@media (max-width: 767px) {
+  .acoes-saude .btn--primario { width: 100%; justify-content: center; }
+  .saude .contagens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+}

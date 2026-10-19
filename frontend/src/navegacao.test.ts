@@ -18,11 +18,14 @@ describe("navegação por perfil", () => {
   it("o item fica marcado também abaixo dele na hierarquia", () => {
     expect(itemDe({ tela: "obra", id: 7, aba: "prazos" })).toBe("obras");
     expect(itemDe({ tela: "carteira" })).toBe("carteira");
+    expect(itemDe({ tela: "obras" })).toBe("obras");
+    expect(itemDe({ tela: "obras" }, { c: "todas", avisos: "1" })).toBe("avisos");   // Avisos abertos dentro de Obras
     expect(itemDe({ tela: "inicio" })).toBe("inicio");
     // a medição, a nova medição e o envio da nota ficam sob Medições
     expect(itemDe({ tela: "medicao", obra: 7, id: 723 })).toBe("medicoes");
     expect(itemDe({ tela: "nova-medicao", obra: 7 })).toBe("medicoes");
     expect(itemDe({ tela: "notas-envio", id: 55 })).toBe("medicoes");
+    expect(itemDe({ tela: "documentos-empresa", id: 3, aba: "garantia" })).toBe("documentos");      // #161
     expect(itemDe({ tela: "medicoes", aba: "enviar-nota" })).toBe("medicoes");
   });
 

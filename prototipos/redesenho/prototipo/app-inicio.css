@@ -1,0 +1,131 @@
+/* Inicio do redesenho (prototipo Inicio-v3, 08/10/2026). Cores pelas variaveis de tokens.css; o valor depois da
+   virgula e' a paleta nova (indigo), para a tela nao quebrar enquanto os tokens trocam. */
+
+.ini {
+  display: flex; flex-direction: column; gap: 24px; min-width: 0;
+  color: var(--texto, #0F172A);
+  font-family: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif; font-size: 14px; line-height: 20px;
+}
+.ini-mono, .ini-cartao__numero, .ini-numero__valor, .ini-barras__valor {
+  font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums;
+}
+.ini-titulo { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; }
+.ini-carregando, .ini-vazio { margin: 0; color: var(--texto-2, #64748B); }
+.ini-vazio { padding: 8px 20px 12px; }
+
+/* cartoes do topo */
+.ini-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.ini-cartao {
+  display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: var(--raio, 8px);
+  background: var(--superficie, #FFFFFF); color: var(--texto, #0F172A); text-decoration: none;
+  border: 1px solid var(--linha, #E2E8F0); box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
+}
+.ini-cartao:hover { border-color: var(--linha-hover, #CBD5E1); }
+.ini-cartao__numero { font-size: 32px; line-height: 36px; font-weight: 500; }
+.ini-cartao__texto { display: flex; flex-direction: column; min-width: 0; }
+.ini-cartao__rotulo { font-weight: 600; }
+.ini-cartao__detalhe { font-size: 13px; line-height: 16px; color: var(--texto-2, #64748B); }
+.ini-cartao__seta { margin-left: auto; font-size: 18px; color: var(--texto-2, #64748B); }
+.ini-cartao--primario {
+  background: var(--acento, #4F46E5); border-color: var(--acento, #4F46E5); color: #FFFFFF;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(79, 70, 229, .25);
+}
+.ini-cartao--primario:hover { background: var(--acento-forte, #4338CA); border-color: var(--acento-forte, #4338CA); }
+.ini-cartao--primario .ini-cartao__detalhe, .ini-cartao--primario .ini-cartao__seta { color: rgba(255, 255, 255, .85); }
+.ini-cartao--acao { border-color: var(--acao-linha, #FECACA); }
+.ini-cartao--acao .ini-cartao__numero { color: var(--acao, #B91C1C); }
+.ini-cartao--atencao { border-color: var(--atencao-linha, #FDE68A); }
+.ini-cartao--atencao .ini-cartao__numero { color: var(--atencao, #B45309); }
+
+/* os 4 numeros */
+.ini-numeros { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.ini-numero, .ini-painel {
+  background: var(--superficie, #FFFFFF); border-radius: var(--raio, 8px);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(15, 23, 42, .06);
+}
+.ini-numero { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ini-numero__rotulo, .ini-numero__base { font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); }
+.ini-numero__valor { font-size: 26px; line-height: 32px; font-weight: 500; overflow-wrap: anywhere; }
+.ini-numero__de { font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 15px; color: var(--texto-2, #64748B); }
+.ini-numero__nota { font-size: 13px; line-height: 16px; color: var(--texto-2, #64748B); }
+.ini-numero__nota--ok { color: var(--ok, #047857); font-weight: 500; }
+.ini-numero__nota--acao { color: var(--acao, #B91C1C); font-weight: 500; }
+.ini-barra { display: block; height: 6px; border-radius: 999px; background: var(--acento-fundo, #EEF0FF); overflow: hidden; }
+.ini-barra > span { display: block; height: 6px; background: var(--acento, #4F46E5); }
+
+/* grafico e prazos */
+.ini-colunas { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
+.ini-painel { min-width: 0; display: flex; flex-direction: column; }
+.ini-painel--grafico { flex: 3 1 420px; padding: 20px; gap: 16px; }
+.ini-painel--prazos { flex: 2 1 340px; }
+.ini-painel__topo { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.ini-painel--prazos .ini-painel__topo { padding: 20px 20px 12px; }
+.ini-painel h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
+.ini-painel__rodape {
+  display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; margin-top: auto; padding-top: 12px;
+  border-top: 1px solid var(--linha, #F1F5F9); font-size: 13px; line-height: 16px; color: var(--texto-2, #64748B);
+}
+.ini-painel__rodape .ini-mono { color: var(--texto, #0F172A); }
+.ini-legenda { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); }
+.ini-legenda > span { display: flex; align-items: center; gap: 6px; }
+.ini-legenda--prazos { margin: 0; gap: 12px; padding: 8px 20px 16px; }
+.ini-chave { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.ini-chave--anterior { background: var(--previsto, #CBD5E1); }
+.ini-chave--atual { background: var(--acento, #4F46E5); }
+
+.ini-sem-medicao {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  padding: 10px 12px; border-radius: var(--raio, 8px);
+  background: var(--atencao-fundo, #FFFBEB); border: 1px solid var(--atencao-linha, #FDE68A);
+}
+.ini-sem-medicao__ultimo { color: var(--texto-2, #475569); }
+.ini-sem-medicao__botao { font-weight: 600; text-decoration: none; color: var(--acento, #4F46E5); }
+.ini-sem-medicao__botao:hover { color: var(--acento-forte, #4338CA); }
+
+.ini-barras { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.ini-barras__linha { display: grid; grid-template-columns: 120px minmax(0, 1fr) 140px; gap: 12px; align-items: center; }
+.ini-barras__nome { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ini-barras__svg { display: block; width: 100%; height: 23px; }
+.ini-barras__anterior { fill: var(--previsto, #CBD5E1); }
+.ini-barras__atual { fill: var(--acento, #4F46E5); }
+.ini-barras__valor { font-size: 13px; text-align: right; }
+
+.ini-ver-todos { font-size: 13px; text-decoration: none; color: var(--acento, #4F46E5); }
+.ini-prazos__cabeca, .ini-prazos__linha {
+  display: grid; grid-template-columns: minmax(0, 1.4fr) 0.8fr 0.9fr; gap: 12px; align-items: center; padding: 6px 20px;
+}
+.ini-prazos__cabeca {
+  padding-top: 8px; padding-bottom: 8px; font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B);
+  border-bottom: 1px solid var(--linha, #E2E8F0);
+}
+.ini-prazos__cabeca > :last-child { text-align: right; }
+.ini-prazos__linha {
+  min-height: 52px; color: var(--texto, #0F172A); text-decoration: none; border-bottom: 1px solid var(--linha, #F1F5F9);
+}
+.ini-prazos__linha:hover { background: var(--hover, #F8FAFC); }
+.ini-prazos__obra { display: flex; flex-direction: column; min-width: 0; }
+.ini-prazos__nome { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ini-prazos__sub { font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); }
+.ini-pilula {
+  justify-self: end; display: flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
+  font-size: 13px; line-height: 20px; white-space: nowrap;
+}
+.ini-pilula--acao { background: var(--acao-fundo, #FEE2E2); }
+.ini-pilula--atencao { background: var(--atencao-fundo, #FEF3C7); }
+.ini-pilula--neutro { background: #F1F5F9; }
+.ini-ponto { display: inline-block; width: 6px; height: 6px; border-radius: 999px; flex: none; }
+.ini-pilula--acao .ini-ponto, .ini-ponto--acao { background: #EF4444; }
+.ini-pilula--atencao .ini-ponto, .ini-ponto--atencao { background: #F59E0B; }
+.ini-pilula--neutro .ini-ponto, .ini-ponto--neutro { background: #94A3B8; }
+
+@media (max-width: 560px) {
+  .ini-barras__linha { grid-template-columns: 88px minmax(0, 1fr); }
+  .ini-barras__valor { grid-column: 2; text-align: left; }
+}
+/* B-13 (10/10/2026): no celular o valor quebrava no meio do numero ("R$ 21.516.276,8" / "5"); numa linha so',
+   com a fonte acompanhando a largura (22px a 375px, 18px a 320px) */
+@media (max-width: 420px) {
+  .ini-numero__valor { white-space: nowrap; font-size: clamp(16px, 5.8vw, 22px); }
+}
+/* numero dentro da pilula de prazo: frase, nao valor (fica na Sans com algarismos alinhados) */
+.ini-pilula .ini-mono { font-family: inherit; }

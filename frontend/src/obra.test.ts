@@ -1,5 +1,50 @@
 import { describe, expect, it } from "vitest";
-import { desfechoDoPedido, instrumentosDaObra, reajustePorDataBase } from "./obra";
+import { curvaS, desfechoDoPedido, diasEntre, instrumentosDaObra, linhaDoTempo, reajustePorDataBase, restantesTexto } from "./obra";
+
+describe("Página da obra: curva S e linhas do tempo", () => {
+  const p = (competencia: string, prev: number, exec: number, pend = false) =>
+    ({ competencia, previsto_centavos: prev, medido_execucao_centavos: exec, atestado_pendente: pend });
+
+  it("a curva acumula previsto e medido e para o medido na última competência medida", () => {
+    const c = curvaS([p("2026-03", 100, 0), p("2026-01", 100, 80), p("2026-02", 100, 0), p("2026-04", 100, 0)]);
+    expect(c.map(x => x.competencia)).toEqual(["2026-01", "2026-02", "2026-03", "2026-04"]);
+    expect(c.map(x => x.acumuladoPrevisto)).toEqual([100, 200, 300, 400]);
+    expect(c.map(x => x.acumuladoMedido)).toEqual([80, null, null, null]);
+    const d = curvaS([p("2026-01", 100, 50), p("2026-02", 100, 0), p("2026-03", 100, 70, true)]);
+    expect(d.map(x => x.acumuladoMedido)).toEqual([50, 50, 120]);
+    expect(d.map(x => x.provisorio)).toEqual([false, false, true]);
+  });
+
+  it("a curva preenche os meses sem previsto nem medido, para o eixo ser de tempo", () => {
+    const c = curvaS([p("2026-01", 100, 10), p("2026-04", 100, 0)]);
+    expect(c.map(x => x.competencia)).toEqual(["2026-01", "2026-02", "2026-03", "2026-04"]);
+    expect(c.map(x => x.acumuladoPrevisto)).toEqual([100, 100, 100, 200]);
+    expect(curvaS([p("2025-12", 1, 0), p("2026-01", 1, 0)]).map(x => x.competencia)).toEqual(["2025-12", "2026-01"]);
+  });
+
+  it("a linha do tempo põe o hoje entre o início e o fim, conta os dias e aceita início ausente", () => {
+    expect(diasEntre("2026-10-16", "2026-10-26")).toBe(10);
+    const meio = linhaDoTempo("2026-01-01", "2026-12-31", "2026-07-02");
+    expect(Math.round(meio.posicao ?? -1)).toBe(50);
+    expect(meio.restantes).toBe(182);
+    expect(linhaDoTempo("2026-01-01", "2026-12-31", "2027-02-01").posicao).toBe(100);
+    expect(linhaDoTempo("2026-01-01", "2026-12-31", "2025-12-01").posicao).toBe(0);
+    expect(linhaDoTempo(null, "2026-12-31", "2026-12-30")).toEqual({ posicao: null, restantes: 1 });
+    expect(linhaDoTempo("2026-12-31", "2026-12-31", "2026-12-31").posicao).toBe(100);
+  });
+
+  it("data malformada dá NaN nos dias, para a tela tratar como sem data final", () => {
+    expect(Number.isNaN(diasEntre("2026-10-16", "abc"))).toBe(true);
+    expect(Number.isNaN(linhaDoTempo("2026-01-01", "", "2026-10-16").restantes)).toBe(true);
+  });
+
+  it("os dias restantes viram texto", () => {
+    expect(restantesTexto(1)).toBe("1 dia restante");
+    expect(restantesTexto(45)).toBe("45 dias restantes");
+    expect(restantesTexto(0)).toBe("vence hoje");
+    expect(restantesTexto(-3)).toBe("vencida há 3 dias");
+  });
+});
 
 const aditivo = (id: number, data: string | null, extra = {}) => ({ id, tipo: "prazo", forma: "termo_aditivo", numero: `${id}º TA`,
   objeto: null, delta_valor_centavos: 0, nova_vigencia_fim: null, nova_execucao_fim: "2027-01-20", status: data ? "assinado" : "em_andamento",

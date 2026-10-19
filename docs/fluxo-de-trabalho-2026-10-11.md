@@ -14,6 +14,13 @@
 > auto-merge quando as travas passam (CI verde, sem conflito, sem comentário do Leo, sem tocar `.github/`,
 > `scripts/deploy.ps1`, `.claude/` ou `backend/migrations/`). Labels novos: `parar` e `precisa-do-leo`.
 > Deploy continua manual. Modelos fixados nos arquivos dos agentes, não na memória pessoal.
+>
+> **Revisto em 16/10/2026:** o Leo liberou o auto-merge em toda PR aprovada (CI verde, sem conflito,
+> `revisor-adversarial` sem Crítico/Aviso, sem comentário do Leo pedindo para segurar), inclusive redesenho,
+> migração, `risco:*` e PR que toca `.github/`, `scripts/deploy.ps1` ou `.claude/`. A lista de arquivos
+> protegidos acima vale como histórico. O gate Sol roda onde há codex; na nuvem não é trava. Deploy segue só
+> pela skill `deploy`, a pedido do Leo. As permissões de escrita no GitHub (`gh api`, `gh pr close`,
+> `gh issue delete`) deixaram de pedir confirmação.
 
 Pedido do Leo: trabalhar neste projeto como os "power users" do r/ClaudeAI descrevem
 (sessões em paralelo com worktrees, toda tarefa em branch/PR, plano antes do código,

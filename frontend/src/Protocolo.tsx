@@ -3,8 +3,8 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import Checklist, { CartaRecolhivel, type ItemChecklist } from "./Checklist";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
-import ErroCampo from "./ErroCampo";
-import { api, apiForm, mensagemDeErro } from "./api";
+import ConfirmarFaltas from "./ConfirmarFaltas";
+import { api, apiForm, ApiErro, mensagemDeErro } from "./api";
 import { IconeAlerta, IconeSeta } from "./icones";
 import { FormMotivo } from "./MedicaoAtos";
 import { brl, ROTULO_ESTADO } from "./Medicoes";
@@ -20,8 +20,6 @@ import Pendencias from "./Pendencias";
 // regras moram em `app/protocolo.py`, nao aqui.
 
 type Etapa = { chave: string; rotulo: string; carta: boolean };
-// Enviar com pendencia exige uma frase (o servidor recusa menos que isso: protocolo.MIN_JUSTIFICATIVA).
-const MIN_JUSTIFICATIVA = 10;
 type PecaCfg = { tipo: string; rotulo: string; exigida: boolean; solto: boolean; naturezas?: string[] };
 type Medicao = { id: number; numero: number; tipo: string; titulo: string; estado: string;
   competencia: string; valor_protocolado_centavos: number | null };
@@ -276,8 +274,8 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
   const idNota = useId();
   // a previa guarda os protocolos com que foi montada: o Enviar manda esses, nao os marcados na hora do clique
   const [previa, setPrevia] = useState<(Previa & { ids: number[]; marca: string }) | null>(null);
-  const [justificativa, setJustificativa] = useState("");
-  const [tentou, setTentou] = useState(false);   // clicou em Enviar: so' ai' o campo mostra o que falta
+  // issue #213: o aviso "ATENÇÃO" aberto pelo Enviar, com o e-mail que espera a confirmacao e a lista do que falta
+  const [confirmar, setConfirmar] = useState<{ m: Mensagem; itens: string[]; mudou: boolean } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState("");
   const [feito, setFeito] = useState("");
@@ -294,33 +292,36 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
     try {
       const p = await api<Previa>("/api/protocolos/envio/previa", { method: "POST", body: JSON.stringify({ protocolo_ids: ids }) });
       setPrevia({ ...p, ids, marca });
-      setJustificativa("");
-      setTentou(false);
+      setConfirmar(null);
     } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); }
   }
 
-  async function enviar(m: Mensagem) {
+  // issue #213: com pendencia na previa, o clique em Enviar so' abre o aviso; nada sai antes do "Continuar"
+  const faltam = (previa?.pendencias ?? []).map(p => p.mensagem);
+  function enviar(m: Mensagem) {
+    if (faltam.length > 0) setConfirmar({ m, itens: faltam, mudou: false });
+    else void enviarConfirmado(m, []);
+  }
+
+  async function enviarConfirmado(m: Mensagem, confirmadas: string[]) {
+    setConfirmar(null);
     setOcupado(true); setErro("");
     try {
       await api("/api/protocolos/envio", { method: "POST", body: JSON.stringify({
-        protocolo_ids: previa!.ids, ...m, justificativa: justificativa || null,
+        protocolo_ids: previa!.ids, ...m, confirmadas: confirmadas.length > 0 ? confirmadas : null,
         // revisor R3 (PR #92): os anexos vistos; documento anexado depois da previa faz o servidor recusar
         anexos: previa!.anexos.map(a => ({ nome: a.nome, tamanho: a.tamanho })) }) });
       setPrevia(null);
       setFeito("Enviado. O e-mail saiu da sua conta Microsoft e ficou registrado.");
       await aoEnviado();
-    } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); }
-  }
-
-  const precisaJustificativa = (previa?.pendencias.length ?? 0) > 0;
-  const faltaJustificativa = precisaJustificativa && justificativa.trim().length < MIN_JUSTIFICATIVA;
-  const erroJustificativa = tentou && faltaJustificativa
-    ? `Escreva a justificativa, com pelo menos ${MIN_JUSTIFICATIVA} caracteres.` : undefined;
-  // o clique em Enviar chega aqui antes do envio: a justificativa que falta aparece junto do campo, com o foco nele
-  function validarAntes(): boolean {
-    setTentou(true);
-    if (faltaJustificativa) document.getElementById("prot-just")?.focus();
-    return !faltaJustificativa;
+    } catch (e) {
+      // o que falta mudou depois do aviso: a previa passa a mostrar a lista de agora e o aviso abre de novo com ela
+      if (e instanceof ApiErro && e.status === 422 && e.corpo?.codigo === "CONFIRMAR_PENDENCIAS") {
+        const itens: Pendencia[] = e.corpo.itens ?? [];
+        setPrevia(p => p && { ...p, pendencias: itens });
+        setConfirmar({ m, itens: itens.map(x => x.mensagem), mudou: confirmadas.length > 0 });
+      } else setErro(mensagem(e));
+    } finally { setOcupado(false); }
   }
 
   return (
@@ -345,22 +346,17 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
           </div>
           <div className="cartao__corpo">
             <ComporEmail ocupado={ocupado} anexos={previa.anexos}
-              validarAntes={validarAntes}
               inicial={{ para: previa.para, copia: previa.copia, cco: [], assunto: previa.assunto, corpo: previa.corpo }}
-              antes={precisaJustificativa && (
+              antes={faltam.length > 0 && (
                 <div className="campo ol-pendencias">
                   <span className="campo__rotulo">O que falta</span>
                   <Pendencias itens={previa.pendencias} />
-                  <label className="campo__rotulo" htmlFor="prot-just">Justificativa (obrigatória para enviar assim)</label>
-                  <textarea id="prot-just" name="justificativa" autoComplete="off" rows={2} maxLength={2000} value={justificativa}
-                    aria-invalid={erroJustificativa ? true : undefined} aria-describedby={erroJustificativa ? "prot-just-erro" : undefined}
-                    onChange={e => setJustificativa(e.target.value)} />
-                  <ErroCampo id="prot-just-erro" erro={erroJustificativa} />
-                  {/* F-69: a condicao do Enviar, logo abaixo do campo que a cumpre */}
-                  <span className="campo__nota">Para enviar assim, a justificativa precisa de {MIN_JUSTIFICATIVA} caracteres.</span>
+                  <span className="campo__nota">Dá para enviar assim: o Enviar pede a sua confirmação antes de o e-mail sair.</span>
                 </div>
               )}
               aoEnviar={enviar} aoDescartar={() => setPrevia(null)} />
+            {confirmar && <ConfirmarFaltas itens={confirmar.itens} mudou={confirmar.mudou} aoCancelar={() => setConfirmar(null)}
+              aoContinuar={() => void enviarConfirmado(confirmar.m, confirmar.itens)} />}
             <p className="campo__nota">O e-mail sai da sua conta Microsoft. Anexos: {mb(previa.total)} de {mb(previa.limite)} permitidos.</p>
           </div>
         </section>
@@ -531,9 +527,11 @@ export function CriarProtocolo({ contratoId, medicaoId, dados, carregar, primari
 /** A secao Protocolo da pagina da medicao: os protocolos que moram nela (em montagem, com o envio, e os
  *  enviados, com quando e quem), o resumo dos que moram em outra medicao, e o que a pagina acrescenta no
  *  fim (os protocolos registrados fora e o "Registrar protocolo feito fora"). */
-export function ProtocolosDaMedicao({ contratoId, medicaoId, dados, erro, carregar, podeEditar, aoMudar, vazio, children }: {
+export function ProtocolosDaMedicao({ contratoId, medicaoId, dados, erro, carregar, podeEditar, aoMudar, vazio, semCartao, children }: {
   contratoId: number; medicaoId: number; dados: Lista | null; erro?: string; carregar: () => Promise<void>; podeEditar: boolean;
   aoMudar: () => void; vazio?: React.ReactNode; children?: React.ReactNode;
+  /** Na etapa 4 da pagina da medicao a moldura e' a da etapa: sem o cartao nem o titulo "Protocolo". */
+  semCartao?: boolean;
 }) {
   const [marcados, setMarcados] = useState<number[]>([]);
   const { daqui, deOutra } = dados ? protocolosDa(dados.protocolos, medicaoId) : { daqui: [], deOutra: [] };
@@ -544,12 +542,15 @@ export function ProtocolosDaMedicao({ contratoId, medicaoId, dados, erro, carreg
   // nao tem carta (a etapa da nota) e so' espera o envio
   const protocolarEProximo = abertos.some(p => p.situacao === "assinado" || !p.tem_carta);
 
+  const Raiz = semCartao ? "div" : "section";
   return (
-    <section className="cartao" id="protocolo" aria-labelledby="titulo-protocolo-medicao">
+    <Raiz className={semCartao ? undefined : "cartao"} id="protocolo" {...(semCartao ? {} : { "aria-labelledby": "titulo-protocolo-medicao" })}>
+      {!semCartao && (
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id="titulo-protocolo-medicao">Protocolo</h2>
       </div>
-      <div className="cartao__corpo pilha">
+      )}
+      <div className={semCartao ? "pilha" : "cartao__corpo pilha"}>
         {!dados && !erro && <p className="campo__nota">Carregando os protocolos…</p>}
         {!dados && erro && (
           <div className="form-inline">
@@ -575,6 +576,6 @@ export function ProtocolosDaMedicao({ contratoId, medicaoId, dados, erro, carreg
         {dados && daqui.length === 0 && deOutra.length === 0 && <p className="campo__nota">{vazio ?? "Nenhum protocolo desta medição."}</p>}
         {children}
       </div>
-    </section>
+    </Raiz>
   );
 }

@@ -142,6 +142,25 @@ def _espelhos_anteriores(conn, contrato_id, numero, tipos) -> list[int]:
     return ids
 
 
+def _recusar_envio_reservado(conn, contrato_id, numero, tipos) -> None:
+    """Espelho vigente destas medicoes com envio ao faturamento reservado nao se substitui (#210): o e-mail que
+    esta' saindo leva os arquivos dele, e a medicao seria marcada enviada com o valor velho. Vale tambem para o
+    misto que ficaria superado (fica vigente, mas a medicao gerada passaria a valer pela versao nova)."""
+    marcas = ",".join("?" * len(tipos))
+    r = conn.execute(
+        "SELECT e.versao, e.envio_reservado_em, e.envio_reservado_por FROM espelhos e "
+        "JOIN espelho_medicoes em ON em.espelho_id=e.id JOIN medicoes m ON m.id=em.medicao_id "
+        "WHERE e.contrato_id=? AND e.numero=? AND e.situacao='vigente' AND e.envio_reservado_em IS NOT NULL "
+        f"AND m.tipo IN ({marcas}) ORDER BY e.versao LIMIT 1", (contrato_id, numero, *tipos)).fetchone()
+    if r is None:
+        return
+    em = envio_reserva.reservado(conn, r["envio_reservado_em"], r["envio_reservado_por"])
+    raise ValueError(f"A versão {r['versao']} deste espelho está sendo enviada ao faturamento (iniciado às "
+                     f"{em.reservado_em[11:16]} por {em.reservado_por_nome}): aguarde o envio terminar para gerar "
+                     "uma versão nova. Se o envio foi interrompido, confira a caixa de Enviados do Outlook e libere "
+                     "o envio.")
+
+
 def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict[str, int],
            periodo: tuple[str, str] | None = None) -> dict:
     _, _, saidas, por_tipo = _calcular(conn, contrato_id, numero, competencia, entradas)
@@ -180,6 +199,7 @@ def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
         # A versao anterior e' a vigente das MESMAS medicoes (#208; a medicao e' unica por
         # contrato+numero+tipo): trocar a competencia e' correcao, nao espelho novo -- substitui, nao duplica.
         anteriores = _espelhos_anteriores(conn, contrato_id, numero, list(por_tipo))
+        _recusar_envio_reservado(conn, contrato_id, numero, list(por_tipo))   # sob o mesmo lock da reserva (#210)
         ids = {tipo: medicoes.criar_para_espelho(conn, usuario["id"], contrato_id, numero, tipo, competencia, valor)
                for tipo, valor in por_tipo.items()}
         # UNIQUE (contrato_id, numero, versao) da 020: a versao segue a sequencia do numero, de todos os tipos
