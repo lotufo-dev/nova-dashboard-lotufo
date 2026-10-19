@@ -394,6 +394,33 @@ def test_a_receber_nota_do_rm_entra_na_lista_e_no_total(cenario):
     assert nota[0]["valor_centavos"] == 2_500_000 and r["total"]["valor_centavos"] == 700_000 + 300_000 + 2_500_000
 
 
+@pytest.mark.parametrize("titulos, falta", [
+    ([(50_000, 55_100, 1), (5_000, 0, 0)], 5_000),      # issue #253: juros em A nao escondem B aberto
+    ([(50_000, 60_000, 1), (5_000, 0, 0)], 5_000),      # ... nem juros acima do valor de B inteiro
+    ([(50_000, 55_100, 1), (5_000, 3_000, 4)], 2_000),  # ... nem a falta de B com baixa parcial
+    ([(50_000, 55_100, 1), (5_000, 5_000, 1)], None),   # todos pagos (um com juros): sai, como hoje
+    ([(50_000, 50_000, 1), (5_000, 4_901, 1)], None),   # ate' R$ 1,00 a menos no total: sai, como hoje
+])
+def test_a_receber_conta_a_falta_da_nota_titulo_a_titulo(cenario, titulos, falta):
+    """Issue #253: a nota em aberto do RM entra no a receber pelo que falta titulo a titulo (a conta da #35 e da
+    #251): pagamento a mais num titulo nao compensa outro titulo aberto da mesma nota."""
+    c, ids = cenario
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
+                    "VALUES (1, 930, '000000930', '2026-06-01', 60000, 'ativa')").lastrowid
+    for i, (orig, baixado, st) in enumerate(titulos, 1):
+        c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+                  "status_lan) VALUES (1, ?, ?, 930, ?, ?, ?)", (9300 + i, nid, orig, baixado, st))
+    mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1", (ids["propria"],)).fetchone()[0]
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+              "VALUES (?, ?, 55000, 'detectado', 't')", (mid, nid))
+    c.commit()
+    ids["liberar"]()
+    r = diretoria.a_receber(c, HOJE)
+    nota = [i["valor_centavos"] for i in r["itens"] if i["tipo"] == "nota"]
+    assert nota == ([] if falta is None else [falta])
+    assert r["total"]["valor_centavos"] == 700_000 + 300_000 + (falta or 0)
+
+
 def test_a_receber_recebida_sem_data_do_corte_fica_fora_do_previsto(cenario):
     c, ids = cenario        # medicao do legado protocolada em 05/09, fechada pelo corte (recebida, sem recebida_em)
     mid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "

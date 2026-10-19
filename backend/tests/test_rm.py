@@ -429,6 +429,25 @@ def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, t
     assert sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"] == []
 
 
+@pytest.mark.parametrize("titulos, falta", [
+    ([(500.0, 551.0, 1), (50.0, 0.0, 0)], 50_00),       # issue #253: juros em A nao escondem B aberto
+    ([(500.0, 551.0, 1), (50.0, 20.0, 4)], 30_00),      # ... nem a falta de B com baixa parcial
+    ([(500.0, 551.0, 1), (50.0, 50.0, 1)], None),       # todos pagos (um com juros): sem aviso
+    ([(500.0, 500.0, 1), (50.0, 49.01, 1)], None),      # ate' R$ 1,00 a menos: sem aviso, como hoje
+])
+def test_recebida_sem_baixa_conta_a_falta_titulo_a_titulo(conn, cid, tmp_path, titulos, falta):
+    """Issue #253: o aviso da Saude (#203) conta a falta da nota titulo a titulo, a conta da #35 e da #251."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 0.0, 0)]))
+    medicoes.mudar_estado(conn, 1, mid, "recebida", "a baixa nao entrou no RM; conferida no extrato", "2026-09-20")
+    baixas = [_baixa(i, 100, orig, pago, st, "2026-09-25T00:00:00-04:00" if st else None)
+              for i, (orig, pago, st) in enumerate(titulos, 1)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, baixas))
+    r = sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"]
+    assert [x["falta_centavos"] for x in r] == ([] if falta is None else [falta])
+
+
 def test_nf_cancelada_desfaz_alocacao(conn, cid, tmp_path):
     mid = _medicao(conn, cid, 12, 1000_00)
     cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")], [])

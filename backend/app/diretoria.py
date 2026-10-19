@@ -90,7 +90,7 @@ def _notas_em_aberto(conn) -> list[dict]:
     medicoes protocoladas: nota sem medicao, ou ligada so' a medicao ja' fechada (recebida pelo corte, por
     exemplo). A obra vem da medicao ligada ou do centro de custo (atual ou anterior); consorcio sem centro, pela
     coligada. So' notas da coligada da entidade do contrato: a NFS-e da Lotufo em obra de consorcio e' repassada
-    pelo consorcio e nao e' cobranca ao orgao. O valor e' o que falta do titulo (liquido), na cota.
+    pelo consorcio e nao e' cobranca ao orgao. O valor e' o que falta dos titulos (liquido), titulo a titulo, na cota.
     Nota ligada a medicao recebida a mao fica fora (issue #203): o registro manual vale, e o titulo ainda aberto
     no RM aparece na Saude, nao de novo no a receber."""
     em_aberto = set(ESPERANDO_NOTA + ESPERANDO_PROTOCOLO + PROTOCOLADAS)
@@ -114,8 +114,9 @@ def _notas_em_aberto(conn) -> list[dict]:
         c = contr.get(cid)
         if c is None or c["col"] != n["coligada"]:
             continue
-        recebido, devido, _ = sincronizacao_rm._recebido_da_nota(conn, n["id"])
-        falta = devido - recebido
+        # Issue #253: a falta e' contada titulo a titulo (a conta da #35 e da #251): juros num titulo nao
+        # escondem outro titulo aberto da mesma nota.
+        falta = sincronizacao_rm._falta_por_titulo(conn, n["id"], aberto_inteiro=True)
         if falta <= TOLERANCIA_CENTAVOS:
             continue
         out.append({"estado": "protocolada", "tipo": "nota", "numero": n["numero"], "nf": _numero_nf(n["numero"]),
