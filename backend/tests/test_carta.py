@@ -1,4 +1,5 @@
 """Carta, capa e divisoria em PDF (bloco 5)."""
+import base64
 import datetime
 import io
 
@@ -63,3 +64,48 @@ def test_fiscal_vigente_e_emitente_sem_cadastro_de_cartas(tmp_path, monkeypatch)
     em = carta.emitente(c, 1)                          # Lotufo semeada na migracao, sem cartas.yaml aplicado
     assert em["cnpj"] == "31.200.101/0001-30" and em["razao_social"]
     c.close()
+
+
+def _imagens(pdf: bytes) -> int:
+    return sum(len(p.images) for p in pypdf.PdfReader(io.BytesIO(pdf)).pages)
+
+
+_PNG_MINIMO = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def _logo_sintetico(pasta, nome="logo.png"):
+    (pasta / nome).write_bytes(_PNG_MINIMO)
+    return nome
+
+
+def test_emitente_com_logo_leva_a_imagem_na_carta(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))      # a pasta de dados e' a do banco
+    emitente = {"razao_social": "Consorcio Exemplo", "logo": _logo_sintetico(tmp_path)}
+    pdf = carta.gerar(_carta(emitente=emitente))
+    assert _imagens(pdf) == 1
+    assert "Consorcio Exemplo" not in _texto(pdf)                    # com logo, sem cabecalho de texto
+
+
+def test_emitente_sem_logo_sai_com_cabecalho_de_texto(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "cnpj": "00.000.000/0001-00"}))
+    assert _imagens(pdf) == 0
+    assert "Consorcio Exemplo" in _texto(pdf)
+
+
+def test_logo_inexistente_sai_sem_logo(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "logo": "nao-existe.png", "fundo": True}))
+    assert _imagens(pdf) == 0
+    assert "Consorcio Exemplo" in _texto(pdf)                        # cai no cabecalho de texto, sem erro
+
+
+def test_logo_fora_da_pasta_de_dados_e_recusado_mesmo_existindo(tmp_path, monkeypatch):
+    dados = tmp_path / "dados"
+    dados.mkdir()
+    monkeypatch.setenv("DASH_DB_PATH", str(dados / "t.db"))
+    _logo_sintetico(tmp_path, "fora.png")                            # imagem valida, so' que fora da pasta de dados
+    pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "logo": "../fora.png"}))
+    assert _imagens(pdf) == 0
+    assert "Consorcio Exemplo" in _texto(pdf)
