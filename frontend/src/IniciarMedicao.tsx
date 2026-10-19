@@ -10,7 +10,7 @@ import { Link } from "./Link";
 // <dialog> nativo com showModal(): o navegador prende o foco dentro dela (o resto da pagina fica inerte), o Esc
 // fecha e o foco volta para o botao que a abriu. O fechar, por qualquer caminho, passa pelo evento `close`.
 
-function destino(o: ObraResumo): Rota {
+export function destino(o: ObraResumo): Rota {
   return o.prevista_id !== null ? { tela: "medicao", obra: o.contrato_id, id: o.prevista_id } : { tela: "nova-medicao", obra: o.contrato_id };
 }
 

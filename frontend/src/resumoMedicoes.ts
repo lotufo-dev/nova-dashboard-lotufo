@@ -16,7 +16,13 @@ export type ObraResumo = {
   contrato_id: number; obra: string; contratante: string; orgao_sub: string | null; aberta: boolean;
   prevista_id: number | null;
   encerramento: boolean;   // A-21 (10/10/2026): em encerramento segue na lista, mas nao conta como "obra ativa"
+  // #154 (aba Sem medicao aberta): ultima medicao, dias desde o fim da competencia dela, a prevista do cronograma
+  // e o numero da proxima. Tudo do servidor.
+  // Execucao e projeto tem numeracao propria; `proxima_tipo` diz a serie do `proxima`.
+  ultima: MedicaoCurta | null; ha_dias: number | null; prevista: MedicaoCurta | null;
+  proxima: number; proxima_tipo: "execucao" | "projeto";
 };
+export type MedicaoCurta = { numero: number; tipo: string; competencia: string };
 export type ResumoMedicoes = {
   hoje: string; contagens: Record<SituacaoOuSem, number>; linhas: LinhaResumo[]; obras: ObraResumo[];
 };
@@ -49,6 +55,11 @@ export function nivelParada(dias: number | null, situacao: SituacaoOuSem): "aten
   if (dias === null) return null;
   if (situacao === "aguardando-pagamento") return dias >= 45 ? "acao" : dias >= 30 ? "atencao" : null;
   return dias > 15 ? "acao" : dias > 7 ? "atencao" : null;
+}
+
+/** "23ª · 01/2026" (numero e competencia "2026-01"); medicao de projeto: "1ª de Projeto · 09/2026". */
+export function textoMedicao(m: MedicaoCurta): string {
+  return `${m.numero}ª${m.tipo === "projeto" ? " de Projeto" : ""} · ${m.competencia.slice(5, 7)}/${m.competencia.slice(0, 4)}`;
 }
 
 export type GrupoContratante = { contratante: string; obras: ObraResumo[] };

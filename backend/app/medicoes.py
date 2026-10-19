@@ -4,6 +4,7 @@ Fase 2: transicoes manuais (importacao); fases 5-6 passam a mover nf_emitida/rec
 por deteccao. Regra de congelamento (spec §5): apos o 1o protocolo (marco externo),
 o valor PROTOCOLADO nao muda mais; o ATESTADO segue editavel (glosa).
 """
+import calendar
 import datetime
 import json
 import logging
@@ -596,15 +597,45 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
 
     abertas = {x["contrato_id"] for x in linhas}
     prevista_de: dict[int, int] = {}
-    for r in conn.execute("SELECT contrato_id, id FROM medicoes WHERE estado='prevista' "
-                          "ORDER BY competencia, numero, id"):
-        prevista_de.setdefault(r["contrato_id"], r["id"])
+    prevista_dados: dict[int, dict] = {}   # a MESMA medicao de prevista_de: o rotulo e o link da aba nao divergem
+    for r in conn.execute("SELECT contrato_id, id, numero, tipo, competencia FROM medicoes WHERE estado='prevista' "
+                          "AND tipo IN ('execucao','projeto') ORDER BY competencia, tipo='projeto', numero, id"):
+        if r["contrato_id"] not in prevista_de:
+            prevista_de[r["contrato_id"]] = r["id"]
+            prevista_dados[r["contrato_id"]] = {"numero": r["numero"], "tipo": r["tipo"], "competencia": r["competencia"]}
+    # #154: ultima medicao de execucao ou projeto (o reajuste repete o numero da execucao; a prevista, a cancelada e
+    # a desistida nao contam), com o tipo. Execucao e projeto sao series de numeracao PROPRIAS: a proxima e' a
+    # prevista, ou a seguinte ao maior numero da serie de execucao (a cancelada tambem ocupa o numero); so' a obra
+    # que nao tem execucao segue a serie de projeto.
+    ultima_de: dict[int, dict] = {}
+    for r in conn.execute("SELECT contrato_id, numero, tipo, competencia FROM medicoes WHERE tipo IN ('execucao','projeto') "
+                          "AND estado NOT IN ('prevista','cancelada','desistida') ORDER BY competencia DESC, numero DESC"):
+        ultima_de.setdefault(r["contrato_id"], {"numero": r["numero"], "tipo": r["tipo"], "competencia": r["competencia"]})
+    maior = {(r[0], r[1]): r[2] for r in conn.execute(
+        "SELECT contrato_id, tipo, MAX(numero) FROM medicoes WHERE tipo IN ('execucao','projeto') GROUP BY contrato_id, tipo")}
+
+    def proxima(cid: int) -> tuple[int, str]:
+        if cid in prevista_dados:
+            p = prevista_dados[cid]
+            return p["numero"], "projeto" if p["tipo"] == "projeto" else "execucao"
+        if (cid, "execucao") in maior or (cid, "projeto") not in maior:
+            return maior.get((cid, "execucao"), 0) + 1, "execucao"
+        return maior[(cid, "projeto")] + 1, "projeto"
+
+    def ha_dias(competencia: str) -> int:
+        """Dias desde o FIM da competencia; competencia ainda em curso: 0 ("hoje"), como no prototipo."""
+        ano, mes = int(competencia[:4]), int(competencia[5:7])
+        return max(0, (hoje - datetime.date(ano, mes, calendar.monthrange(ano, mes)[1])).days)
     ativas = sorted((o for o in obras.values() if o["estado"] == "ativo"), key=lambda o: _chave_nome(o["obra"]))
     lista_obras = [{"contrato_id": o["id"], "obra": o["obra"], "contratante": o["contratante"],
                     "orgao_sub": o["orgao_sub"], "aberta": o["id"] in abertas, "prevista_id": prevista_de.get(o["id"]),
                     # A-21 (10/10/2026): a obra em encerramento segue na lista (mede a final), mas a tela nao a
                     # conta como "obra ativa" (a definicao de `avisos.ativos`, a do Inicio)
-                    "encerramento": bool(o["encerramento_iniciado_em"])}
+                    "encerramento": bool(o["encerramento_iniciado_em"]),
+                    "ultima": ultima_de.get(o["id"]),
+                    "ha_dias": ha_dias(ultima_de[o["id"]]["competencia"]) if o["id"] in ultima_de else None,
+                    "prevista": prevista_dados.get(o["id"]),
+                    "proxima": proxima(o["id"])[0], "proxima_tipo": proxima(o["id"])[1]}
                    for o in ativas]
     contagens = {"sem-medicao": sum(1 for o in lista_obras if not o["aberta"])}
     for s in ORDEM_SITUACAO:

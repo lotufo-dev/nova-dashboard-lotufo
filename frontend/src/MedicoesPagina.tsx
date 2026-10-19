@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import AbaAguardandoNota from "./AbaAguardandoNota";
 import { api, mensagemDeErro } from "./api";
 import AbaFaturamento from "./AbaFaturamento";
+import AbaSemMedicao from "./AbaSemMedicao";
 import AguardandoPagamento from "./AguardandoPagamento";
 import { brl, contar } from "./formato";
 import { IconeAlerta, IconeMais, IconeSeta } from "./icones";
@@ -222,9 +223,7 @@ export default function MedicoesPagina({ aba, busca, usuario }: { aba: AbaMedico
   } else if (aba === "resumo") {
     conteudo = <Resumo dados={dados} podeIniciar={podeIniciar} aoIniciar={() => setIniciando(true)} />;
   } else if (aba === "sem-medicao") {
-    const sem = dados.obras.filter(o => !o.aberta);
-    conteudo = <Quadro id="medicoes-aba" titulo="Sem medição aberta" legenda={contar(sem.length, "obra", "obras")} linhas={[]}
-      sem={sem} gruposAbertos vazio="Toda obra ativa tem medição em andamento." />;
+    conteudo = <AbaSemMedicao obras={dados.obras.filter(o => !o.aberta)} podeIniciar={podeIniciar} aoIniciar={() => setIniciando(true)} />;
   } else if (aba === "faturamento") {
     conteudo = <AbaFaturamento linhas={dados.linhas.filter(l => l.situacao === "faturamento")} podeIniciar={podeIniciar}
       aoIniciar={() => setIniciando(true)} />;
