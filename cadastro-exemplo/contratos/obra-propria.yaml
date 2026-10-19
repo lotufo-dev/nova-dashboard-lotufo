@@ -8,7 +8,6 @@ objeto_completo: 'EXECUÇÃO DAS OBRAS DE PAVIMENTAÇÃO DE EXEMPLO NA RODOVIA E
 municipio: Rondonópolis
 lei: '14.133'
 cno: null
-art: null
 garantia:
   apolice: AP-EXEMPLO-001
   vigencia_fim: '2027-01-15'

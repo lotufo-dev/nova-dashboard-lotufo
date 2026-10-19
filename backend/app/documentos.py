@@ -336,7 +336,7 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     com_docs = {r[0] for r in conn.execute(
         "SELECT entidade_id FROM certidoes UNION SELECT entidade_id FROM regularidades")}
     ordem = {"lotufo": 0, "consorcio": 1, "consorciada": 2}
-    # a empresa contratada de toda obra ativa entra (a garantia e a ART dela moram na pagina da empresa, #161)
+    # a empresa contratada de toda obra ativa entra (a garantia dela mora na pagina da empresa, #161)
     contratadas = {contratos.entidade_de(r) for r in conn.execute("SELECT entidade_id FROM contratos WHERE estado='ativo'")}
     ents = sorted((e for e in entidades.listar(conn)
                    if e["id"] in cert or e["id"] in regs or e["id"] in com_docs or e["id"] in contratadas),
@@ -364,9 +364,9 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
                          "obras": obras, "consorciadas": consorciadas.get(e["id"], []),
                          "consorcios": consorcios.get(e["id"], []),
                          "regularidades_anexadas": _regularidades_anexadas(conn, e["id"])})
-    # Issue #65: garantia (com validade) e ART (sem validade) por contrato ativo, junto das certidoes.
+    # Issue #65: garantia (com validade) por contrato ativo, junto das certidoes.
     obras = [{"contrato_id": r["id"], "obra": nomes[r["id"]], "entidade_id": contratos.entidade_de(r),
-              "garantia": garantias.garantia(conn, r["id"], hoje), "art": garantias.art(conn, r["id"])}
+              "garantia": garantias.garantia(conn, r["id"], hoje)}
              for r in conn.execute("SELECT id, entidade_id FROM contratos WHERE estado='ativo' ORDER BY nome_curto, id")]
     return {"hoje": hoje.isoformat(), "empresas": empresas, "contratos": obras}
 

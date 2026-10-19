@@ -5,7 +5,7 @@ import { IconeAlerta, IconeArquivo, IconeBaixar, IconeClipe, IconeLinkExterno } 
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
-  certidaoPendente, certidoesOrdenadas, NOME_CURTO, pendenciaMaisUrgente, resumoEmpresa, situacaoArt, situacaoCertidao,
+  certidaoPendente, certidoesOrdenadas, NOME_CURTO, pendenciaMaisUrgente, resumoEmpresa, situacaoCertidao,
   situacaoGarantia, type EmpresaDoc,
 } from "./matriz";
 import { type AbaDocumentos, type Origem } from "./rota";
@@ -16,7 +16,7 @@ import { AnexarCertidoes, CnpjCopiar, EmDia, Pilula, Ponto, SituacaoSelo, type A
 import { cnpjBR, competenciaDoNome, ROTULO_TIPO, useCopiarCnpj, usePainel } from "./documentosDados";
 
 /* A pagina de UMA empresa em Documentos (#161): cabecalho com nome, CNPJ e situacao; tres abas, cada uma com
- * endereco (Certidoes, Regularidade do mes, Garantia e ART por obra). A tabela de certidoes traz Emitir, Anexar e Ver
+ * endereco (Certidoes, Regularidade do mes, Garantia por obra). A tabela de certidoes traz Emitir, Anexar e Ver
  * PDF; embaixo, a area de arrastar os PDFs e a fila de leitura. O perfil diretoria so' consulta: sem Anexar, sem
  * area de arrastar e sem gravar a regularidade.
  */
@@ -24,7 +24,7 @@ import { cnpjBR, competenciaDoNome, ROTULO_TIPO, useCopiarCnpj, usePainel } from
 const ABAS: { id: AbaDocumentos; rotulo: string }[] = [
   { id: "certidoes", rotulo: "Certidões" },
   { id: "regularidade", rotulo: "Regularidade do mês" },
-  { id: "garantia", rotulo: "Garantia e ART por obra" },
+  { id: "garantia", rotulo: "Garantia por obra" },
 ];
 
 const REG_TEXTO = { ok: "em dia", atrasada: "atrasada", faltando: "nenhuma anexada" } as const;
@@ -83,7 +83,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
   const obrasDaEmpresa = (painel?.contratos ?? []).filter(k => k.entidade_id === id);
   const nGarantia = obrasDaEmpresa.filter(k => {
     const g = situacaoGarantia(k.garantia, k.garantia ? fmtDataPura(k.garantia.vigencia_fim) : "");
-    return g.nivel === "acao" || g.nivel === "atencao" || situacaoArt(k.art).nivel === "atencao";
+    return g.nivel === "acao" || g.nivel === "atencao";
   }).length;
   const nCert = e ? e.certidoes.filter(certidaoPendente).length : 0;
   const nReg = e?.regularidade && e.regularidade.situacao !== "ok" ? 1 : 0;
@@ -362,7 +362,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                   <div className="vazio">
                     <p className="vazio__titulo">Nenhuma obra contratada direto por esta empresa</p>
                     {(e.consorcios ?? []).length > 0 && (
-                      <p>A garantia e a ART das obras em consórcio ficam no consórcio:{" "}
+                      <p>A garantia das obras em consórcio fica no consórcio:{" "}
                         {e.consorcios!.map((x, i) => {
                           const o = porId.get(x);
                           return o ? <Fragment key={x}>{i > 0 && ", "}<Link para={{ tela: "documentos-empresa", id: x, aba: "garantia" }}>{o.entidade}</Link></Fragment> : null;
@@ -371,15 +371,14 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                   </div>
                 ) : (
                   <>
-                    <p className="doc-painel__dica">A garantia avisa 30 dias antes do fim (ação aos 15); a ART não vence, só precisa estar anexada.</p>
+                    <p className="doc-painel__dica">A garantia avisa 30 dias antes do fim (ação aos 15).</p>
                     <div className="tabela-wrap">
                       <table className="tabela tabela--empilha">
-                        <caption className="sr-only">Garantia e ART por obra</caption>
-                        <thead><tr><th scope="col">Obra</th><th scope="col">Garantia</th><th scope="col">ART</th></tr></thead>
+                        <caption className="sr-only">Garantia por obra</caption>
+                        <thead><tr><th scope="col">Obra</th><th scope="col">Garantia</th></tr></thead>
                         <tbody>
                           {obrasDaEmpresa.map(k => {
                             const g = situacaoGarantia(k.garantia, k.garantia ? fmtDataPura(k.garantia.vigencia_fim) : "");
-                            const a = situacaoArt(k.art);
                             return (
                               <tr key={k.contrato_id}>
                                 <th scope="row" className="col-largo" data-rotulo="Obra">
@@ -388,10 +387,6 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                                 <td data-rotulo="Garantia">
                                   <SituacaoSelo nivel={g.nivel} texto={g.texto} forte={g.forte} />
                                   {g.nota && <div className="campo__nota num">{g.nota}</div>}
-                                </td>
-                                <td data-rotulo="ART">
-                                  <SituacaoSelo nivel={a.nivel} texto={a.texto} />
-                                  {a.nota && <div className="campo__nota num">{a.nota}</div>}
                                 </td>
                               </tr>
                             );

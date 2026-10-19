@@ -261,17 +261,11 @@ def _arquivo_do_cadastro(raiz: Path, rel, campo: str, falha) -> str | None:
     return str(p)
 
 
-def _garantia_e_art(bruto: dict, raiz: Path, c: dict, falha) -> None:
-    """Issue #65. `art` segue valendo como texto (o numero) ou vira `{numero, arquivo}`; `garantia` e'
-    `{apolice, vigencia_fim, arquivo}`. ART nao tem validade; a garantia tem, e o endosso a substitui."""
-    art = bruto.get("art")
-    if isinstance(art, dict):
-        c["art"] = str(art["numero"]).strip() if art.get("numero") not in (None, "") else None
-        c["art_caminho"] = _arquivo_do_cadastro(raiz, art.get("arquivo"), "art.arquivo", falha)
-    elif isinstance(art, (str, int)) and not isinstance(art, bool) and str(art).strip():
-        c["art"] = str(art).strip()
-    elif art is not None:
-        falha("art", "use o número em texto ou {numero, arquivo}")
+def _garantia(bruto: dict, raiz: Path, c: dict, falha) -> None:
+    """Issue #65: `garantia` e' `{apolice, vigencia_fim, arquivo}`; o endosso a substitui. A ART saiu do
+    contrato (#239): `art: null` ainda passa, com valor e' recusada."""
+    if bruto.get("art") is not None:
+        falha("art", "a ART saiu do contrato; tire a linha art do cadastro (a peça ART do protocolo continua nas peças do órgão)")
     gar = bruto.get("garantia")
     if gar is None:
         return
@@ -329,7 +323,7 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
          "orgao": bruto.get("orgao"), "entidade": bruto.get("entidade"),
          "objeto": bruto.get("objeto"), "municipio": bruto.get("municipio"),
          "lei": None if bruto.get("lei") is None else str(bruto["lei"]),
-         "cno": bruto.get("cno"), "art": None,
+         "cno": bruto.get("cno"),
          "numero_processo": bruto.get("numero_processo"),
          "centro_custo_rm": bruto.get("centro_custo_rm"), "status": bruto.get("status"),
          # 2026-09-25: centros que a obra usou antes do atual (notas antigas; so' a conciliacao do legado olha)
@@ -344,9 +338,9 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
          "objeto_completo": (str(bruto["objeto_completo"]).strip() or None) if bruto.get("objeto_completo") else None,
          # 2026-10-07: objeto como as cartas reais o escrevem (vazio = o do QDOP)
          "objeto_carta": (str(bruto["objeto_carta"]).strip() or None) if bruto.get("objeto_carta") else None,
-         "cno_caminho": None, "art_caminho": None, "garantia_apolice": None, "garantia_vigencia_fim": None,
+         "cno_caminho": None, "garantia_apolice": None, "garantia_vigencia_fim": None,
          "garantia_caminho": None}
-    _garantia_e_art(bruto, raiz, c, falha)
+    _garantia(bruto, raiz, c, falha)
     if bruto.get("cno_pdf"):
         cno = _dentro(raiz, bruto["cno_pdf"])
         if cno:

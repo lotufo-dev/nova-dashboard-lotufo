@@ -20,7 +20,7 @@ CINCO = ["federal", "fgts", "trabalhista", "estadual", "municipal"]
 def _contrato(nome, orgao, numero):
     return {"nome_curto": nome, "numero_instrumento": numero, "orgao": orgao, "entidade": "lotufo",
             "objeto": nome, "objeto_completo": f"EXECUÇÃO DA OBRA {nome.upper()}", "municipio": "Cuiabá",
-            "lei": "14.133", "cno": None, "art": None, "numero_processo": None, "centro_custo_rm": None,
+            "lei": "14.133", "cno": None, "numero_processo": None, "centro_custo_rm": None,
             "valor_original_centavos": 100_000_000, "percentual_direito_bp": 10000, "execucao_inicio": "2025-01-01",
             "execucao_fim": "2027-01-01", "vigencia_inicio": None, "vigencia_fim": "2027-04-01", "status": "ativo",
             "status_desde": None, "sem_reajuste": False, "datas_base": [],
@@ -368,3 +368,10 @@ def test_link_sem_a_variavel_recusa_qualquer_host(cenario, monkeypatch, valor):
         with pytest.raises(ValueError, match="não estão liberados neste servidor"):
             protocolo.adicionar_link(c, ids["uid"], pid, "Planilha", url)
     assert protocolo.links(c, pid) == []
+
+
+def test_peca_art_do_protocolo_continua_aceita_no_orgao():
+    """#239: a ART saiu do contrato, mas segue como peca do pacote (SES-MT pede a copia das ARTs)."""
+    from app import api_protocolos, cadastro_arquivos
+    assert "art" in cadastro_arquivos.TIPOS_PECA
+    assert "art" in api_protocolos.TipoPeca.__args__

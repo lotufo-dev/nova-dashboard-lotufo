@@ -46,9 +46,9 @@ describe("avisos da obra", () => {
   });
 });
 
-describe("aviso de garantia e ART (#161)", () => {
-  it("leva à aba Garantia e ART da empresa contratada", () => {
-    for (const tipo of ["garantia_vencendo", "art_nao_anexada"]) {
+describe("aviso de garantia (#161)", () => {
+  it("leva à aba Garantia por obra da empresa contratada", () => {
+    for (const tipo of ["garantia_vencendo"]) {
       const a: Aviso = { ...base, tipo, contrato_id: 7, destino: { tela: "documentos" }, entidade_id: 2 };
       const d = destinoDoAviso(a)!;
       expect(hrefDe(d.para, d.busca, d.secao)).toBe("/documentos/2/garantia");

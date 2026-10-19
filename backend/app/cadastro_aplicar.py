@@ -151,13 +151,13 @@ _ESTADO = {"ativo": "ativo", "suspenso": "suspenso", "em_encerramento": "ativo",
 _EVENTO = {("ativo", "suspenso"): "suspensao", ("suspenso", "ativo"): "retomada",
            ("ativo", "encerrado"): "encerramento", ("suspenso", "encerrado"): "encerramento"}
 _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", "municipio", "lei", "cno",
-                    "art", "numero_processo", "centro_custo_rm", "valor_original_centavos",
+                    "numero_processo", "centro_custo_rm", "valor_original_centavos",
                     "percentual_direito_bp", "execucao_inicio", "execucao_fim", "vigencia_inicio",
                     "vigencia_fim", "sem_reajuste", "encerramento_iniciado_em", "destinatarios_extras",
                     "copia_extras",
                     "estado", "documentos", "objeto_completo", "cno_arquivo", "folga_vigencia_dias",
                     "centros_custo_anteriores_rm", "objeto_carta", "garantia_apolice", "garantia_vigencia_fim",
-                    "garantia_arquivo", "art_arquivo")
+                    "garantia_arquivo")
 _CAMPOS_FISCAL = ("cargo", "tratamento", "portaria")
 
 
@@ -230,7 +230,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
         enc = None
     novo = {"nome_curto": c["nome_curto"], "orgao": nome_orgao, "orgao_id": ids_orgao[c["orgao"]],
             "entidade_id": ids_ent[c["entidade"]], "objeto": c["objeto"], "municipio": c["municipio"],
-            "lei": c["lei"], "cno": c["cno"], "art": c["art"], "numero_processo": c["numero_processo"],
+            "lei": c["lei"], "cno": c["cno"], "numero_processo": c["numero_processo"],
             "centro_custo_rm": c["centro_custo_rm"],
             "valor_original_centavos": c["valor_original_centavos"],
             "percentual_direito_bp": c["percentual_direito_bp"],
@@ -248,12 +248,10 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             "centros_custo_anteriores_rm": _json(c["centros_custo_anteriores_rm"])
             if c.get("centros_custo_anteriores_rm") else None,
             "objeto_carta": c.get("objeto_carta"),
-            # issue #65: garantia (apolice, fim da vigencia, PDF) e PDF da ART
+            # issue #65: garantia (apolice, fim da vigencia, PDF)
             "garantia_apolice": c.get("garantia_apolice"), "garantia_vigencia_fim": c.get("garantia_vigencia_fim"),
             "garantia_arquivo": _no_disco("anexos", c["garantia_caminho"], "pdf", rel["ensaio"])
-            if c.get("garantia_caminho") else None,
-            "art_arquivo": _no_disco("anexos", c["art_caminho"], "pdf", rel["ensaio"]) if c.get("art_caminho")
-            else None}
+            if c.get("garantia_caminho") else None}
     mudou = False
     if ja is None:
         colunas = ["numero_instrumento", *_CAMPOS_CONTRATO]

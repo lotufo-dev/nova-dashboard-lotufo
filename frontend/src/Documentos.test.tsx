@@ -26,15 +26,15 @@ test("um cartão por empresa, com a pendência primeiro, a situação geral e a 
   expect(nomes()).toEqual(["Lotufo", "Consórcio Sem Certidão", "Beta Ltda", "Consórcio Alfa"]);
   const lotufo = screen.getByRole("link", { name: "Lotufo" }).closest("article")!;
   const c = within(lotufo);
-  c.getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias · ART não anexada");
+  c.getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias");
   c.getByText(/Próxima a vencer:/);
   expect(lotufo.textContent).toContain("FGTS em 27/09/2026");
   c.getByText("31.200.101/0001-30");
   c.getByText(/Regularidade do mês \(DP\): atrasada · esperada 07\/2026/);
   c.getByText("Exigida em 2 obras: Obra Alfa, Obra Beta");
-  // garantia e ART que pedem algo da empresa entram no cartao
+  // garantia que pede algo da empresa entram no cartao
   c.getByText("Garantia de Obra Alfa: vence em 12 dias");
-  c.getByText("ART de Obra Beta: não anexada");
+  expect(lotufo.textContent).not.toContain("ART");
   // um ponto por certidao, cada um com a situacao para o leitor de tela
   expect(within(c.getByRole("list", { name: "Certidões" })).getAllByRole("listitem")).toHaveLength(4);
   c.getByText(": vencida");

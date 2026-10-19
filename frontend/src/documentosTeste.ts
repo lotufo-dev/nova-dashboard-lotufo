@@ -45,11 +45,11 @@ export const PAINEL = {
     },
   ],
   contratos: [
-    { contrato_id: 5, obra: "Obra Alfa", entidade_id: 1, art: { numero: "1234567", anexada: true, exigida: true },
+    { contrato_id: 5, obra: "Obra Alfa", entidade_id: 1,
       garantia: { apolice: "AP-9", vigencia_fim: "2026-10-05", dias: 12, origem: "endosso" as const, situacao: "vencendo" as const } },
-    { contrato_id: 6, obra: "Obra Beta", entidade_id: 1, art: { numero: null, anexada: false, exigida: true }, garantia: null },
-    { contrato_id: 8, obra: "Obra Delta", entidade_id: 4, art: { numero: null, anexada: false, exigida: false },
+    { contrato_id: 6, obra: "Obra Beta", entidade_id: 1, garantia: null },
+    { contrato_id: 8, obra: "Obra Delta", entidade_id: 4,
       garantia: { apolice: null, vigencia_fim: "2026-09-01", dias: -22, origem: "contrato" as const, situacao: "vencida" as const } },
-    { contrato_id: 7, obra: "Obra Gama", entidade_id: 2, art: { numero: null, anexada: false, exigida: false }, garantia: null },
+    { contrato_id: 7, obra: "Obra Gama", entidade_id: 2, garantia: null },
   ],
 };
