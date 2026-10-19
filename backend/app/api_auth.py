@@ -2,6 +2,7 @@ import os
 import re
 import secrets
 import sqlite3
+import threading
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from app import auditoria, auth, db
@@ -54,9 +55,33 @@ class LoginIn(BaseModel):
     email: str = Field(max_length=254)
     senha: str
 
+_LOCK_LIMITE = threading.Lock()
+
+def _limite(request: Request) -> auth.LimitePorOrigem:
+    # um por app (create_app cria o seu); cada teste nasce com a cota zerada
+    with _LOCK_LIMITE:  # dois primeiros logins simultaneos nao criam duas cotas
+        lim = getattr(request.app.state, "limite_login", None)
+        if lim is None:
+            lim = request.app.state.limite_login = auth.LimitePorOrigem()
+        return lim
+
 @router.post("/login")
-def login(dados: LoginIn, response: Response, conn: sqlite3.Connection = Depends(conexao)):
-    u = auth.autenticar(conn, dados.email, dados.senha)
+def login(dados: LoginIn, request: Request, response: Response, conn: sqlite3.Connection = Depends(conexao)):
+    # #3: a cota do IP e' conferida ANTES de autenticar(); estourada, a tentativa nao chega a contar contra a
+    # conta. Origem e' o IP da conexao (o uvicorn atende direto, sem proxy na frente: nada de X-Forwarded-For,
+    # que o cliente forjaria). Sem auditoria no 429: o abuso ja' deixou LIMITE_ORIGEM eventos de login falho.
+    lim, origem = _limite(request), (request.client.host if request.client else "")
+    marca = lim.reservar(origem)
+    if marca is None:
+        raise HTTPException(429, "Muitas tentativas de entrar a partir deste computador. Tente de novo em alguns minutos.",
+                            headers={"Retry-After": str(lim.segundos_para_liberar(origem))})
+    falhou = False
+    try:
+        u = auth.autenticar(conn, dados.email, dados.senha)
+        falhou = u is None
+    finally:
+        if not falhou:  # entrou (ou erro do servidor, que nao e' tentativa errada): devolve a vaga
+            lim.liberar(origem, marca)
     if u is None:
         # Tentativa recusada tambem vira evento: sem isso, ataque de forca bruta e
         # bloqueio de conta nao deixam rastro nenhum. Grava-se so o e-mail (em

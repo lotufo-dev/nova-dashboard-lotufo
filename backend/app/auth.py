@@ -1,6 +1,8 @@
 import hashlib
 import secrets
 import sqlite3
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from argon2 import PasswordHasher, extract_parameters
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -111,6 +113,62 @@ def autenticar(conn: sqlite3.Connection, email: str, senha: str) -> dict | None:
         conn.execute("UPDATE usuarios SET tentativas_falhas=0, bloqueado_ate=NULL WHERE id=?",
                      (row["id"],))
     return dict(row)
+
+# #3 (decisao do Leo de 19/10/2026): no maximo 20 tentativas erradas por IP em 15 minutos. Acima disso o
+# login responde 429 ANTES de conferir a senha, entao a tentativa nao conta contra a conta (o lockout de
+# MAX_FALHAS continua como esta'). Login certo nao gasta a cota.
+LIMITE_ORIGEM = 20
+JANELA_ORIGEM_MIN = 15
+
+def _relogio() -> float:
+    return time.monotonic()
+
+class LimitePorOrigem:
+    """Cota de tentativas por origem, em memoria do processo (o servidor e' processo unico; reiniciar zera).
+
+    `reservar` conta a tentativa JA na entrada, sob o lock: 30 pedidos simultaneos do mesmo IP nao passam
+    todos pela conferencia antes de o primeiro falhar. Quem entra devolve a vaga com `liberar`.
+    """
+    _MAX_ORIGENS = 1000  # acima disso, varre as origens sem tentativa na janela (memoria nao cresce sem fim)
+
+    def __init__(self, teto: int = LIMITE_ORIGEM, janela_min: int = JANELA_ORIGEM_MIN):
+        self.teto, self.janela = teto, janela_min * 60
+        self._lock = threading.Lock()
+        self._tentativas: dict[str, list[float]] = {}
+
+    def _vivas(self, origem: str, agora: float) -> list[float]:
+        vivas = [t for t in self._tentativas.get(origem, ()) if agora - t < self.janela]
+        if vivas:
+            self._tentativas[origem] = vivas
+        else:
+            self._tentativas.pop(origem, None)
+        return vivas
+
+    def reservar(self, origem: str) -> float | None:
+        """Marca da tentativa reservada, ou None se a origem estourou a cota."""
+        agora = _relogio()
+        with self._lock:
+            if len(self._tentativas) > self._MAX_ORIGENS:
+                for o in list(self._tentativas):
+                    self._vivas(o, agora)
+            if len(self._vivas(origem, agora)) >= self.teto:
+                return None
+            self._tentativas.setdefault(origem, []).append(agora)
+            return agora
+
+    def liberar(self, origem: str, marca: float) -> None:
+        with self._lock:
+            lista = self._tentativas.get(origem)
+            if lista and marca in lista:
+                lista.remove(marca)
+                if not lista:
+                    del self._tentativas[origem]
+
+    def segundos_para_liberar(self, origem: str) -> int:
+        agora = _relogio()
+        with self._lock:
+            vivas = self._vivas(origem, agora)
+            return max(1, int(self.janela - (agora - min(vivas))) + 1) if vivas else 1
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
