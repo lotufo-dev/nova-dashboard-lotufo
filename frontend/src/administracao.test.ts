@@ -105,7 +105,8 @@ describe("administração", () => {
       "contrato.atualizar", "contrato.criar", "contrato.encerramento", "contrato.mudar_estado", "correio.assinatura",
       "correio.envio", "cronograma.nova_versao", "entidade.coligada_rm", "entidade.criar", "entidade.desativar", "envio.liberar",
       "espelho.enviar", "espelho.gerar", "frc.gerar", "medicao.criar", "medicao.documento", "medicao.estado",
-      "medicao.faturada_legado", "medicao.final", "medicao.numero_orgao", "medicao.protocolo", "medicao.remover_teste",
+      "medicao.faturada_legado", "medicao.final", "medicao.numero_orgao", "medicao.protocolo", "medicao.recebida_com_diferenca",
+      "medicao.remover_teste",
       "medicao.valor_atestado", "medicao.valor_protocolado", "nf.alocar", "nf.desalocar", "nota.conferencia", "nota.confirmacao",
       "nota.justificar", "nota.manual", "notas.envio_externo", "pleito.anexo", "pleito.anexo_removido", "pleito.assinado",
       "pleito.criar", "pleito.descartar", "pleito.enviar", "pleito.montar", "protocolo.assinado", "protocolo.criar",
@@ -117,6 +118,7 @@ describe("administração", () => {
     expect(rotuloAcao("frc.gerar")).toBe("FRC gerada");
     expect(rotuloAcao("medicao.valor_atestado")).toBe("Atestado alterado");
     expect(rotuloAcao("envio.liberar")).toBe("Envio liberado à mão");
+    expect(rotuloAcao("medicao.recebida_com_diferenca")).toBe("Recebida com diferença de até R$ 1,00");   // #35
     expect(rotuloAcao("algo.novo_aqui")).toBe("Algo novo aqui");
   });
 

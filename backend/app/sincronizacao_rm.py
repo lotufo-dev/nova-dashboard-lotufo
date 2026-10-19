@@ -34,7 +34,8 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    quando nao falta nota.
 5. Recebimentos: medicao `protocolada` cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO
    ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira `recebida`, com a maior data de
-   baixa. Parcial fica visivel no detalhe da medicao (recebido por NF), sem mudar de estado.
+   baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
+   `medicao.recebida_com_diferenca`. Parcial fica visivel no detalhe da medicao (recebido por NF), sem mudar de estado.
 
 Toda decisao (alocar, desfazer, mudar estado) e' auditada com usuario NULL = sistema.
 As linhas de NF/baixa nao entram na cadeia (espelho de outro sistema, ver migracao 012).
@@ -567,10 +568,24 @@ def _recebimentos(conn) -> int:
         # valor liquido do titulo). Comparar com o bruto da NF nunca fechava por causa das
         # retencoes. NF sem titulo (devido=0: titulo ainda nao existe ou foi cancelado) segura
         # a medicao -- nao da' para concluir recebimento do que nao tem lancamento a receber.
-        if all(x["situacao"] == "ativa" and x["devido_centavos"] > 0
-               and x["recebido_centavos"] >= x["devido_centavos"] for x in notas):
+        # Issue #35 (decisao do Leo, 19/10/2026): titulo pago ate' R$ 1,00 abaixo do devido conta como quitado
+        # (a mesma tolerancia do a receber da diretoria), desde que tenha baixa; a diferenca vai para a auditoria
+        # como evento proprio. Sem tolerancia percentual.
+        from app import diretoria   # import local: diretoria importa este modulo
+        tolerancia = diretoria.TOLERANCIA_CENTAVOS
+        if all(x["situacao"] == "ativa" and x["devido_centavos"] > 0 and x["recebido_centavos"] > 0
+               and x["devido_centavos"] - x["recebido_centavos"] <= tolerancia for x in notas):
             datas = [x["recebido_em"] for x in notas if x["recebido_em"]]
-            medicoes.mudar_estado(conn, None, m["id"], "recebida", None, max(datas) if datas else None)
+            curtas = [{"nota_id": x["nota_id"], "numero": x["numero"], "devido_centavos": x["devido_centavos"],
+                       "recebido_centavos": x["recebido_centavos"],
+                       "diferenca_centavos": x["devido_centavos"] - x["recebido_centavos"]}
+                      for x in notas if x["recebido_centavos"] < x["devido_centavos"]]
+            with db.mutacao(conn):
+                medicoes.mudar_estado(conn, None, m["id"], "recebida", None, max(datas) if datas else None)
+                if curtas:
+                    auditoria.registrar(conn, None, "medicao.recebida_com_diferenca", "medicao", m["id"], None,
+                                        {"diferenca_centavos": sum(c["diferenca_centavos"] for c in curtas),
+                                         "tolerancia_centavos": tolerancia, "notas": curtas})
             n += 1
     return n
 

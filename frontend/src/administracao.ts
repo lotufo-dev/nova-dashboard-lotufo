@@ -152,6 +152,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "medicao.valor_protocolado": "Valor protocolado alterado", "medicao.valor_atestado": "Atestado alterado",
   "medicao.numero_orgao": "Número do órgão registrado na medição", "medicao.remover_teste": "Medição de teste removida",
   "medicao.documento": "Documento da medição", "medicao.faturada_legado": "Faturamento carregado do legado",
+  "medicao.recebida_com_diferenca": "Recebida com diferença de até R$ 1,00",
   "espelho.gerar": "Espelho gerado", "espelho.enviar": "Espelho enviado",
   "protocolo.criar": "Protocolo criado", "protocolo.peca": "Peça do protocolo anexada",
   "protocolo.peca_removida": "Peça do protocolo removida", "protocolo.montar": "Protocolo montado",
