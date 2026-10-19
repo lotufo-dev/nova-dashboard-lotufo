@@ -89,7 +89,7 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    (`gh pr merge <M> --disable-auto`), pôr `precisa-do-leo` na issue e seguir.
    **CI vermelha:** primeiro desarmar (`gh pr merge <M> --disable-auto`), senão a correção mergeia sem
    revisão quando a CI do commit novo ficar verde. Depois pegar o log
-   (`gh run list --branch <branch> --limit 1 --json databaseId -q '.[0].databaseId'` e
+   (`gh run list --branch <branch no GitHub> --limit 1 --json databaseId -q '.[0].databaseId'` e
    `gh run view <id> --log-failed`) e mandar à trabalhadora (uma rodada de correção, conta nas duas do passo
    6). Quando ela voltar: passo 5 sobre o diff novo e passo 8 inteiro de novo antes de religar o auto-merge.
    Vermelha de novo, `precisa-do-leo`.
@@ -100,7 +100,8 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
     `git worktree remove "<caminho>"` (se reclamar da junção, antes rode
     `cmd /c rmdir "<caminho>\frontend\node_modules"` e `cmd /c rmdir "<caminho>\backend\.venv"`, que apagam só o
     vínculo) e `git branch -d <branch que a trabalhadora devolveu>` (a remota o GitHub apaga no merge).
-11. **Resumo ao Leo**, em português, uma linha por issue: número, o que mudou (do ponto de vista dele), estado
+11. **Resumo ao Leo**, em português, uma linha por issue: número com o nome curto ("#231 (ofício no envio
+    por fora)"; nunca o número sozinho, aqui nem nos comentários), o que mudou (do ponto de vista dele), estado
     (mergeada / auto-merge ligado, esperando CI / precisa-do-leo: motivo / decisao: pergunta). No fim: quantas
     issues elegíveis sobraram e se há algo com `precisa-do-leo`. Lembrar que o deploy é dele e que, para
     segurar uma PR com auto-merge ligado, ele comenta nela (a orquestradora desarma na próxima conferência)

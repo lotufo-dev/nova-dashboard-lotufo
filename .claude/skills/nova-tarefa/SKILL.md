@@ -23,6 +23,10 @@ escrever issues que uma sessão consegue executar sozinha com o recorte aprovado
   - auth: login, sessão, perfil, permissão;
   - envio: e-mail pelo Graph, protocolo enviado ao órgão;
   - banco: migração nova em `backend/migrations/`.
+- **Área**: sempre um label `area:*` com a etapa do ciclo: `area:contrato` (obra, órgão, instrumento,
+  garantia, cadastro), `area:medicao` (medição e espelho de NF), `area:faturamento`, `area:nota` (nota e RM),
+  `area:protocolo` (envio ao órgão, ofício, carta), `area:pagamento` (recebimento) ou `area:infra` (deploy,
+  login, automação do trabalho). Os labels já existem no GitHub.
 - **Perguntar ao Leo só o que a issue não consegue decidir sozinha** (regra de negócio sem fonte, escolha entre
   dois comportamentos que ele vai ver). Tudo de uma vez, numa mensagem só, numerado. Escolha técnica não é
   pergunta: decida e escreva na "Regra de negócio" ou em "Arquivos prováveis".
@@ -48,8 +52,8 @@ escrever issues que uma sessão consegue executar sozinha com o recorte aprovado
 4. Criar cada issue com o corpo num arquivo da pasta temporária da sessão (não no repositório):
 
    ```bash
-   gh issue create --title "tipo: descricao" --body-file "<scratchpad>/issue-1.md" --label "risco:dinheiro"
+   gh issue create --title "tipo: descricao" --body-file "<scratchpad>/issue-1.md" --label "area:nota,risco:dinheiro"
    ```
 
-   Sem risco, omitir `--label`.
-5. Responder ao Leo com a lista: número, título e risco.
+   Sem risco, só o label de área.
+5. Responder ao Leo com a lista: número, título, área e risco.
