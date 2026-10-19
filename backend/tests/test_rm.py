@@ -336,6 +336,20 @@ def test_tolerancia_exige_baixa_no_titulo(conn, cid, tmp_path):
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
 
 
+@pytest.mark.parametrize("titulos", [
+    [(923.20, 923.20, 1), (0.80, 0.0, 0)],     # NF em dois titulos: o de R$ 0,80 ainda aberto
+    [(500.0, 549.50, 1), (50.0, 0.0, 0)],      # juros num titulo nao cobrem o outro, aberto
+])
+def test_tolerancia_exige_baixa_em_cada_titulo_da_nota(conn, cid, tmp_path, titulos):
+    """A soma da nota fica dentro de R$ 1,00, mas um titulo nao tem baixa nenhuma: nao e' 'pago com diferenca'."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    baixas = [_baixa(i, 100, orig, pago, st, "2026-09-01T00:00:00-04:00" if st else None)
+              for i, (orig, pago, st) in enumerate(titulos, 1)]
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")], baixas)
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+
+
 def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, tmp_path):
     """Issue #203: o recebimento a mao vale, e a Saude avisa enquanto o RM nao tiver a baixa do titulo. A medicao
     fechada pelo corte nao entra (o titulo aberto dela segue no a receber); com o titulo quitado, o aviso sai."""

@@ -118,7 +118,7 @@ describe("administração", () => {
     expect(rotuloAcao("frc.gerar")).toBe("FRC gerada");
     expect(rotuloAcao("medicao.valor_atestado")).toBe("Atestado alterado");
     expect(rotuloAcao("envio.liberar")).toBe("Envio liberado à mão");
-    expect(rotuloAcao("medicao.recebida_com_diferenca")).toBe("Recebida com diferença de até R$ 1,00");   // #35
+    expect(rotuloAcao("medicao.recebida_com_diferenca")).toBe("Recebida com diferença dentro da tolerância");   // #35
     expect(rotuloAcao("algo.novo_aqui")).toBe("Algo novo aqui");
   });
 

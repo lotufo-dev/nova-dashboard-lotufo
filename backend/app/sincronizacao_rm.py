@@ -545,7 +545,16 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
 
 # ------------------------------------------------------------ recebimentos
 
+def _todo_titulo_com_baixa(conn, nota_id: int) -> bool:
+    """Issue #35: todo titulo nao cancelado da nota tem baixa (status recebido e valor baixado)."""
+    return all(b["status_lan"] in STATUS_RECEBIDO and (b["valor_baixado_centavos"] or 0) > 0
+               for b in conn.execute("SELECT status_lan, valor_baixado_centavos FROM baixas "
+                                     "WHERE nota_id=? AND status_lan<>2", (nota_id,)))
+
+
 def _recebimentos(conn) -> int:
+    from app import diretoria   # import local: diretoria importa este modulo
+    tolerancia = diretoria.TOLERANCIA_CENTAVOS
     n = 0
     for m in conn.execute("""SELECT m.id, e.coligada_rm,
                                     COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
@@ -564,17 +573,17 @@ def _recebimentos(conn) -> int:
             if conn.execute("SELECT 1 FROM nf_alocacoes WHERE medicao_id=? AND desfeita_em IS NOT NULL "
                             "AND motivo_desfazer LIKE ?", (m["id"], MOTIVO_A_MAO + "%")).fetchone():
                 continue
-        # Recebida quando o TITULO de CADA NF alocada esta quitado (recebido >= devido, o
-        # valor liquido do titulo). Comparar com o bruto da NF nunca fechava por causa das
-        # retencoes. NF sem titulo (devido=0: titulo ainda nao existe ou foi cancelado) segura
-        # a medicao -- nao da' para concluir recebimento do que nao tem lancamento a receber.
-        # Issue #35 (decisao do Leo, 19/10/2026): titulo pago ate' R$ 1,00 abaixo do devido conta como quitado
-        # (a mesma tolerancia do a receber da diretoria), desde que tenha baixa; a diferenca vai para a auditoria
-        # como evento proprio. Sem tolerancia percentual.
-        from app import diretoria   # import local: diretoria importa este modulo
-        tolerancia = diretoria.TOLERANCIA_CENTAVOS
-        if all(x["situacao"] == "ativa" and x["devido_centavos"] > 0 and x["recebido_centavos"] > 0
-               and x["devido_centavos"] - x["recebido_centavos"] <= tolerancia for x in notas):
+        # Recebida quando o TITULO de CADA NF alocada esta quitado: recebido >= devido (o valor liquido
+        # do titulo) ou, issue #35 (decisao do Leo, 19/10/2026), ate' R$ 1,00 abaixo dele -- a mesma
+        # tolerancia do a receber da diretoria, sem percentual -- desde que CADA titulo da nota tenha
+        # baixa (um titulo aberto nao e' "pago com diferenca"). A diferenca aceita vai para a auditoria
+        # como evento proprio. Comparar com o bruto da NF nunca fechava por causa das retencoes. NF sem
+        # titulo (devido=0: titulo ainda nao existe ou foi cancelado) segura a medicao -- nao da' para
+        # concluir recebimento do que nao tem lancamento a receber.
+        if all(x["situacao"] == "ativa" and x["devido_centavos"] > 0
+               and (x["recebido_centavos"] >= x["devido_centavos"]
+                    or (x["devido_centavos"] - x["recebido_centavos"] <= tolerancia
+                        and _todo_titulo_com_baixa(conn, x["nota_id"]))) for x in notas):
             datas = [x["recebido_em"] for x in notas if x["recebido_em"]]
             curtas = [{"nota_id": x["nota_id"], "numero": x["numero"], "devido_centavos": x["devido_centavos"],
                        "recebido_centavos": x["recebido_centavos"],
