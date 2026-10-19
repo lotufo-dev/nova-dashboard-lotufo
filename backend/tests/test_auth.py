@@ -511,6 +511,24 @@ def test_cota_do_ip_volta_depois_da_janela(client, monkeypatch):
     agora[0] += 2
     assert _entrar(c).status_code == 200
 
+def test_producao_nao_aceita_x_forwarded_for():
+    # revisor-adversarial: o uvicorn aceita X-Forwarded-For de 127.0.0.1 por padrao; quem tem sessao no servidor
+    # trocaria de "origem" a cada pedido e furaria a cota. Sem proxy na frente, a origem e' so' a conexao.
+    import pathlib
+    script = (pathlib.Path(__file__).resolve().parents[2] / "scripts" / "rodar_producao.ps1").read_text(encoding="utf-8")
+    comandos = [linha for linha in script.splitlines() if "-m uvicorn" in linha]
+    assert len(comandos) == 2
+    assert all("--no-proxy-headers" in c for c in comandos)
+
+def test_origem_e_a_conexao_mesmo_com_x_forwarded_for(client):
+    # o codigo nao le o cabecalho por conta propria: trocar o X-Forwarded-For nao da' cota nova
+    c = _de(client, "10.0.0.11")
+    for i in range(auth.LIMITE_ORIGEM):
+        assert c.post("/api/auth/login", json={"email": f"z{i}@exemplo.com.br", "senha": "y"},
+                      headers={"X-Forwarded-For": f"192.0.2.{i}"}).status_code == 401
+    assert c.post("/api/auth/login", json={"email": "z@exemplo.com.br", "senha": "y"},
+                  headers={"X-Forwarded-For": "192.0.2.200"}).status_code == 429
+
 def test_tentativa_que_cai_em_banco_ocupado_conta_para_o_ip(client, monkeypatch):
     # /code-review: a senha ja' foi conferida quando o contador da conta esbarra no lock; o 503 nao devolve a vaga
     def ocupado(*a, **k):

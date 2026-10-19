@@ -58,7 +58,7 @@ class LoginIn(BaseModel):
 def login(dados: LoginIn, request: Request, response: Response, conn: sqlite3.Connection = Depends(conexao)):
     # #3 (limite de login por origem): a cota do IP e' conferida ANTES de autenticar(); estourada, a tentativa
     # nao chega a contar contra a conta. Origem e' o IP da conexao como o uvicorn a entrega (ele atende direto, sem
-    # proxy na frente; o X-Forwarded-For so' e' aceito vindo de 127.0.0.1, o proprio servidor). Sem auditoria no
+    # proxy na frente, com --no-proxy-headers em scripts/rodar_producao.ps1: X-Forwarded-For e' ignorado). Sem auditoria no
     # 429: o abuso ja' deixou LIMITE_ORIGEM eventos de login falho. Cota criada uma vez por app (create_app).
     lim, origem = request.app.state.limite_login, (request.client.host if request.client else "")
     marca = lim.reservar(origem)
