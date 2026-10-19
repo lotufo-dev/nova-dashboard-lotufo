@@ -105,19 +105,6 @@ def cancelar(conn: sqlite3.Connection, usuario_id: int, aditivo_id: int, motivo:
                             {"cancelado": False}, {"cancelado": True, "motivo": motivo})
 
 
-def conferencia(conn: sqlite3.Connection, aditivo_id: int) -> dict:
-    """O que a assinatura vai conferir: vigente de agora, delta e o novo esperado."""
-    a = detalhe(conn, aditivo_id)
-    if a is None:
-        raise ValueError("Aditivo não encontrado")
-    vig = contratos.vigente(conn, a["contrato_id"])
-    return {"valor_anterior_centavos": vig["valor_vigente_centavos"],
-            "delta_valor_centavos": a["delta_valor_centavos"],
-            "valor_novo_esperado_centavos": vig["valor_vigente_centavos"] + a["delta_valor_centavos"],
-            "vigencia_fim_vigente": vig["vigencia_fim_vigente"],
-            "execucao_fim_vigente": vig["execucao_fim_vigente"]}
-
-
 def assinar(conn: sqlite3.Connection, usuario_id: int, aditivo_id: int, data_assinatura: str,
             valor_novo_centavos: int, ressalva_reajuste: str | None) -> dict:
     """Confirma a assinatura: delta conferido contra o vigente do momento, datas na ordem.
