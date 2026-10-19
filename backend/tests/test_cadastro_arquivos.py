@@ -298,6 +298,23 @@ def test_cno_inexistente_e_tratamento_invalido_sao_erro(tmp_path):
     assert any("cno_pdf" in e for e in erros) and any("tratamento" in e for e in erros)
 
 
+def test_fiscal_sem_nome_e_aviso_e_o_cadastro_segue(tmp_path):
+    c = {**CONTRATO, "fiscais": [
+        {"email": "Sem.Nome@orgao-a.exemplo.com.br", "desde": "2026-01-01"},
+        {"nome": "  ", "email": "branco@orgao-a.exemplo.com.br", "desde": "2026-02-01"},
+        {"nome": "Ana", "email": "ana@orgao-a.exemplo.com.br", "desde": "2026-03-01"}]}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[c]))
+    assert cad["avisos"] == [
+        "Contrato MT-402: fiscal sem.nome@orgao-a.exemplo.com.br sem nome",
+        "Contrato MT-402: fiscal branco@orgao-a.exemplo.com.br sem nome"]
+    assert len(cad["contratos"][0]["fiscais"]) == 3
+
+
+def test_fiscal_com_nome_nao_gera_aviso(tmp_path):
+    c = {**CONTRATO, "fiscais": [{"nome": "Ana", "email": "ana@orgao-a.exemplo.com.br", "desde": "2026-01-01"}]}
+    assert ca.preparar(_escrever(tmp_path, contratos=[c]))["avisos"] == []
+
+
 def test_cno_fora_da_pasta_do_cadastro_e_erro(tmp_path):
     (tmp_path / "segredo.pdf").write_bytes(b"%PDF-1.7 segredo")          # existe, mas fora da raiz
     erros = _erros(_escrever(tmp_path / "cad", contratos=[{**CONTRATO, "cno_pdf": "../segredo.pdf"}]))
