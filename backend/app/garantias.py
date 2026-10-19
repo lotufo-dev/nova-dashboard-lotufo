@@ -1,8 +1,8 @@
-"""Garantia contratual e ART como documentos do contrato (issue #65, decisao de 15/10/2026).
+"""Garantia contratual como documento do contrato (issue #65, decisao de 15/10/2026; a ART saiu do contrato na #239).
 
 GARANTIA tem validade: o cadastro traz `garantia: {apolice, vigencia_fim, arquivo}` e cada instrumento
 `endosso_garantia` com `vigencia_fim` e `apolice` (so' vale o da apolice do contrato) substitui a vigencia anterior (o mais recente por data vale; o historico
-fica nos instrumentos). ART NAO tem validade (vale pela obra): o unico aviso e' "ART nao anexada".
+fica nos instrumentos).
 
 Aviso de garantia, como o das certidoes: atencao a 30 dias do fim, acao a 15, critico vencida; operacao e
 diretoria. Contrato em encerramento continua avisando ate' o marco `baixa_garantia`; encerrado nao avisa.
@@ -54,12 +54,6 @@ def garantia(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict 
             "situacao": "baixada" if baixada else situacao}
 
 
-def art(conn, contrato_id: int) -> dict:
-    c = conn.execute("SELECT art, art_arquivo, encerramento_iniciado_em FROM contratos WHERE id=?", (contrato_id,)).fetchone()
-    return {"numero": c["art"] if c else None, "anexada": bool(c and c["art_arquivo"]),
-            "exigida": bool(c and c["encerramento_iniciado_em"] is None)}
-
-
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
     """[{tipo, nivel, publico, contrato_id, dias, data, mensagem}] dos contratos ativos (inclui em encerramento)."""
     hoje = hoje or tempo.hoje_local()
@@ -78,8 +72,4 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                     f"garantia vence em {dias} dia{'s' if dias > 1 else ''} ({br})"
             out.append({"tipo": "garantia_vencendo", "nivel": nivel, "publico": ["operacao", "diretoria"],
                         "contrato_id": cid, "dias": dias, "data": g["vigencia_fim"], "mensagem": msg})
-        a = art(conn, cid)
-        if a["exigida"] and not a["anexada"]:
-            out.append({"tipo": "art_nao_anexada", "nivel": "atencao", "publico": ["operacao"],
-                        "contrato_id": cid, "dias": None, "data": None, "mensagem": "ART não anexada"})
     return out

@@ -3,7 +3,7 @@ import { IconeAlerta, IconeRelogio } from "./icones";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
-  certidoesOrdenadas, JANELA_DIAS, matriz, NOME_CURTO, pendenciasDa, proximaAVencer, resumoEmpresa, situacaoArt, situacaoCertidao,
+  certidoesOrdenadas, JANELA_DIAS, matriz, NOME_CURTO, pendenciasDa, proximaAVencer, resumoEmpresa, situacaoCertidao,
   situacaoGarantia, type EmpresaDoc, type Nivel, type ObraDoc,
 } from "./matriz";
 import { substituir, trocarBusca, type Busca } from "./rota";
@@ -19,14 +19,13 @@ import { useCopiarCnpj, usePainel } from "./documentosDados";
 
 const PAPEL: Record<string, string> = { lotufo: "Empresa", consorcio: "Consórcio", consorciada: "Consorciada" };
 
-// Garantia e ART que pedem algo da empresa, como linhas do cartao ("Garantia de Obra X: vence em 20 dias").
+// Garantia que pede algo da empresa, como linhas do cartao ("Garantia de Obra X: vence em 20 dias").
 function avisosDeObras(e: EmpresaDoc, contratos: ObraDoc[]): { nivel: Nivel; texto: string }[] {
   const out: { nivel: Nivel; texto: string }[] = [];
   for (const k of contratos) {
     if (k.entidade_id !== e.entidade_id) continue;
     const g = situacaoGarantia(k.garantia, k.garantia ? fmtDataPura(k.garantia.vigencia_fim) : "");
     if (g.nivel === "acao" || g.nivel === "atencao") out.push({ nivel: g.nivel, texto: `Garantia de ${k.obra}: ${g.texto}` });
-    if (situacaoArt(k.art).nivel === "atencao") out.push({ nivel: "atencao", texto: `ART de ${k.obra}: não anexada` });
   }
   return out;
 }
@@ -202,7 +201,7 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
     <div className="pagina">
       <p className="pagina__descricao">
         Certidões e regularidade de cada empresa. Clique no cartão para ver as certidões, a regularidade do mês e a garantia
-        e ART das obras.
+        das obras.
       </p>
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
       {/* sempre montada: o Copiar aparece para todos os perfis e anuncia aqui */}

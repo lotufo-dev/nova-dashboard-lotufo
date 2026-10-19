@@ -1,4 +1,4 @@
-"""Garantia (com validade) e ART (sem validade) como documentos do contrato: issue #65, decisao de 15/10/2026."""
+"""Garantia (com validade) como documento do contrato: issue #65, decisao de 15/10/2026 (a ART saiu na #239)."""
 import datetime
 import json
 
@@ -19,8 +19,8 @@ def cenario(tmp_path, monkeypatch):
     c.execute("INSERT INTO orgaos (chave, nome, familia, regras) VALUES ('sinfra-x', 'SINFRA X', 'sinfra', ?)",
               (json.dumps({"vigencia_automatica": True, "documentos_medicao": [], "documentos_reajuste": []}),))
     c.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos, "
-              "orgao_id, execucao_fim, vigencia_fim, art_arquivo) VALUES ('SINFRA', 'IC 1/2026', 'Obra A', 'obra', 100, "
-              "(SELECT id FROM orgaos WHERE chave='sinfra-x'), '2027-12-20', '2028-01-30', 'anexos/art.pdf')")
+              "orgao_id, execucao_fim, vigencia_fim) VALUES ('SINFRA', 'IC 1/2026', 'Obra A', 'obra', 100, "
+              "(SELECT id FROM orgaos WHERE chave='sinfra-x'), '2027-12-20', '2028-01-30')")
     cid = c.execute("SELECT MAX(id) FROM contratos").fetchone()[0]
     c.commit()
 
@@ -97,29 +97,20 @@ def test_sem_data_de_garantia_no_cadastro_nao_avisa(cenario):
     assert garantias.garantia(c, ids["contrato"], HOJE) is None and _g(c) == []
 
 
-def test_art_nao_anexada_e_so_aviso_de_ausencia_sem_validade(cenario):
+def test_art_nao_gera_aviso_nem_existe_mais_no_modulo(cenario):
     c, ids = cenario
-    arts = lambda: [a for a in avisos.listar(c, HOJE) if a["tipo"] == "art_nao_anexada"]   # noqa: E731
-    assert arts() == []                                               # com PDF: nada, e nunca vence
-    assert arts() == [] and avisos.listar(c, D(2030, 1, 1)) is not None
-    c.execute("UPDATE contratos SET art_arquivo=NULL"); c.commit()
-    (a,) = arts()
-    assert (a["nivel"], a["dias"], a["data"], a["publico"], a["mensagem"]) == \
-        ("atencao", None, None, ["operacao"], "ART não anexada")
-    assert a["destino"] == {"tela": "documentos"}
-    c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-09-01'"); c.commit()
-    assert arts() == []                                               # em encerramento a ART nao cobra mais
+    assert not hasattr(garantias, "art")
+    assert [a for a in avisos.listar(c, HOJE) if a["tipo"] == "art_nao_anexada"] == []
+    assert [a for a in garantias.avisos(c, HOJE) if a["tipo"] == "art_nao_anexada"] == []
 
 
-def test_painel_de_documentos_traz_garantia_e_art_por_contrato(cenario):
+def test_painel_de_documentos_traz_garantia_por_contrato(cenario):
     c, ids = cenario
     ids["garantia"]("2026-11-01")
     (o,) = documentos.painel(c, HOJE)["contratos"]
     assert o["contrato_id"] == ids["contrato"] and o["obra"] == "Obra A"
     assert (o["garantia"]["situacao"], o["garantia"]["dias"], o["garantia"]["apolice"]) == ("vencendo", 17, "AP-1")
-    assert o["art"] == {"numero": None, "anexada": True, "exigida": True}
-    c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-09-01'"); c.commit()
-    assert documentos.painel(c, HOJE)["contratos"][0]["art"]["exigida"] is False      # painel e aviso concordam
+    assert "art" not in o
 
 
 def test_correcao_de_endosso_vale_mesmo_com_data_anterior(cenario):

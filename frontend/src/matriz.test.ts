@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  certidoesOrdenadas, colunas, matriz, pendenciaMaisUrgente, pendenciasDa, proximaAVencer, resumoEmpresa, situacaoArt,
+  certidoesOrdenadas, colunas, matriz, pendenciaMaisUrgente, pendenciasDa, proximaAVencer, resumoEmpresa,
   situacaoCertidao, situacaoGarantia, type EmpresaDoc, type LinhaCertidao,
 } from "./matriz";
 
@@ -71,7 +71,7 @@ describe("redesenho de Documentos (#161)", () => {
     expect(situacaoCertidao(c("falencia", "ok", 100, false), "x").nivel).toBe("neutro");
   });
 
-  it("garantia e ART: a garantia vence com ação aos 15 dias; a ART só precisa estar anexada", () => {
+  it("garantia: vence com ação aos 15 dias", () => {
     const g = (dias: number, situacao: "ok" | "vencendo" | "vencida" | "baixada") =>
       ({ apolice: "AP-1", vigencia_fim: "2026-12-01", dias, origem: "contrato" as const, situacao });
     expect(situacaoGarantia(null, "")).toMatchObject({ texto: "sem vigência no cadastro", nivel: "neutro" });
@@ -80,23 +80,19 @@ describe("redesenho de Documentos (#161)", () => {
     expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026")).toMatchObject({ texto: "vencida", nivel: "acao", forte: true });
     expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026").nota).toBe("venceu em 01/12/2026 · apólice AP-1");
     expect(situacaoGarantia(g(300, "baixada"), "01/12/2026").nivel).toBe("neutro");
-    expect(situacaoArt({ numero: "9", anexada: true, exigida: true })).toEqual({ texto: "anexada", nota: "nº 9", nivel: "ok" });
-    expect(situacaoArt({ numero: null, anexada: false, exigida: true }).nivel).toBe("atencao");
-    expect(situacaoArt({ numero: null, anexada: false, exigida: false }).texto).toBe("não exigida");
   });
 });
 
-describe("garantia e ART como pendência da empresa (#161)", () => {
-  const obra = (ent: number, dias: number, situacao: "ok" | "vencendo" | "vencida", artAnexada = true) => ({
+describe("garantia como pendência da empresa (#161)", () => {
+  const obra = (ent: number, dias: number, situacao: "ok" | "vencendo" | "vencida") => ({
     contrato_id: ent, obra: `O${ent}`, entidade_id: ent,
-    garantia: { apolice: null, vigencia_fim: "2026-12-01", dias, origem: "contrato" as const, situacao },
-    art: { numero: null, anexada: artAnexada, exigida: true } });
+    garantia: { apolice: null, vigencia_fim: "2026-12-01", dias, origem: "contrato" as const, situacao }, });
   const ok = (id: number) => e(id, [l("federal", "ok", 90)]);
 
   it("conta na pílula, na ordenação, no filtro e na contagem", () => {
-    const obras = [obra(2, 20, "vencendo"), obra(3, -5, "vencida", false), obra(4, 200, "ok")];
+    const obras = [obra(2, 20, "vencendo"), obra(3, -5, "vencida"), obra(4, 200, "ok")];
     expect(resumoEmpresa(ok(2), obras)).toEqual({ texto: "Garantia vence em 20 dias", nivel: "atencao", pendencias: 1 });
-    expect(resumoEmpresa(ok(3), obras)).toEqual({ texto: "Garantia vencida · ART não anexada", nivel: "acao", pendencias: 2 });
+    expect(resumoEmpresa(ok(3), obras)).toEqual({ texto: "Garantia vencida", nivel: "acao", pendencias: 1 });
     expect(resumoEmpresa(ok(4), obras).texto).toBe("Em dia");
     expect(pendenciasDa(ok(3))).toBe(0);                                   // sem as obras, nada muda
     const lista = [ok(4), ok(2), ok(3)];

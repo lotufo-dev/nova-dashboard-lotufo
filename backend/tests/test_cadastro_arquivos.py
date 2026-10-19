@@ -385,27 +385,32 @@ def test_cobranca_de_certidoes_no_geral(tmp_path):
     assert "cobranca_certidoes.para" in erros and "cobranca_certidoes.enviada_por" in erros
 
 
-# --- issue #65: garantia com vigencia, ART com numero e PDF, endosso que traz a nova vigencia ----------
+# --- issue #65: garantia com vigencia, endosso que traz a nova vigencia ----------
 
-def test_garantia_e_art_do_contrato_normalizadas(tmp_path):
+def test_garantia_do_contrato_normalizada(tmp_path):
     raiz = tmp_path / "cad"
     (raiz / "anexos").mkdir(parents=True)
-    (raiz / "anexos" / "art.pdf").write_bytes(b"%PDF-1.4 art")
     (raiz / "anexos" / "gar.pdf").write_bytes(b"%PDF-1.4 gar")
-    c = {**CONTRATO, "art": {"numero": " 1234567 ", "arquivo": "anexos/art.pdf"},
-         "garantia": {"apolice": "AP-9", "vigencia_fim": "2027-03-31", "arquivo": "anexos/gar.pdf"},
+    c = {**CONTRATO, "garantia": {"apolice": "AP-9", "vigencia_fim": "2027-03-31", "arquivo": "anexos/gar.pdf"},
          "instrumentos": [*CONTRATO["instrumentos"], {"chave": "end-1", "tipo": "endosso_garantia",
                                                       "data": "2026-09-01", "vigencia_fim": "2027-09-30", "apolice": "AP-9"}]}
     got = ca.preparar(_escrever(raiz, contratos=[c]))["contratos"][0]
-    assert got["art"] == "1234567" and got["art_caminho"].endswith("art.pdf")
+    assert "art" not in got and "art_caminho" not in got
     assert (got["garantia_apolice"], got["garantia_vigencia_fim"]) == ("AP-9", "2027-03-31")
     assert got["garantia_caminho"].endswith("gar.pdf")
     assert got["instrumentos"][1]["dados"]["vigencia_fim"] == "2027-09-30"
 
 
-def test_art_em_texto_continua_valendo(tmp_path):
-    got = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "art": "98765"}]))["contratos"][0]
-    assert got["art"] == "98765" and got["art_caminho"] is None and got["garantia_vigencia_fim"] is None
+def test_art_null_no_contrato_e_aceito_e_ignorado(tmp_path):
+    got = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "art": None}]))["contratos"][0]
+    assert "art" not in got and got["garantia_vigencia_fim"] is None
+
+
+@pytest.mark.parametrize("valor", ["98765", {"numero": "1", "arquivo": "x.pdf"}])
+def test_art_preenchida_no_contrato_e_recusada_em_portugues(tmp_path, valor):
+    with pytest.raises(Exception) as e:
+        ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "art": valor}]))
+    assert "a ART saiu do contrato" in str(e.value)
 
 
 def test_garantia_sem_data_arquivo_inexistente_e_endosso_com_data_ruim_sao_erro(tmp_path):

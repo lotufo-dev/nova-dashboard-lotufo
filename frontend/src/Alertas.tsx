@@ -36,7 +36,7 @@ export function destinoDoAviso(a: Aviso): { para: Rota; secao?: string; busca?: 
   if (!d) return null;
   // a empresa em Documentos: a pagina dela (#161); o aviso da regularidade do mes leva direto a aba dela
   if (d.tela === "documentos") return a.entidade_id
-    ? { para: { tela: "documentos-empresa", id: a.entidade_id, aba: a.tipo === "regularidade_mes" ? "regularidade" : a.tipo === "garantia_vencendo" || a.tipo === "art_nao_anexada" ? "garantia" : undefined } }
+    ? { para: { tela: "documentos-empresa", id: a.entidade_id, aba: a.tipo === "regularidade_mes" ? "regularidade" : a.tipo === "garantia_vencendo" ? "garantia" : undefined } }
     : { para: { tela: "documentos" } };
   if (d.aba === "notas" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "notas" };
   if (d.aba === "reajuste" && a.data_base_mes) return { para: { tela: "obra", id: d.id, aba: "reajuste" }, secao: `db-${a.data_base_mes}` };

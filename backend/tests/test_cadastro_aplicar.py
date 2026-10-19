@@ -88,7 +88,7 @@ def test_aplicacao_real_fica_registrada_com_o_commit(conn):
 def _contrato(**troca):
     base = {"nome_curto": "MT-402", "numero_instrumento": "019/2024/00/00-SINFRA",
             "orgao": "sinfra-suef1", "entidade": "lotufo", "objeto": "Remanescente da MT-402",
-            "municipio": "Cuiabá", "lei": "14.133", "cno": None, "art": None, "numero_processo": None,
+            "municipio": "Cuiabá", "lei": "14.133", "cno": None, "numero_processo": None,
             "centro_custo_rm": "4.003.016", "valor_original_centavos": 1512720000,
             "percentual_direito_bp": 10000, "execucao_inicio": "2024-03-11", "execucao_fim": "2026-08-28",
             "vigencia_inicio": None, "vigencia_fim": "2026-11-22", "status": "ativo", "status_desde": None,
@@ -251,7 +251,7 @@ def _cad_com_espelho(tmp_path):
                                        "irrf": {"percentual": "1.2", "base": "total", "arredondamento": "round"}}}]}
     contrato = {"nome_curto": "MT-402", "numero_instrumento": "019/2024", "orgao": "sinfra-suef1",
                 "entidade": "lotufo", "objeto": "MT-402", "municipio": None, "lei": None, "cno": None,
-                "art": None, "numero_processo": None, "centro_custo_rm": None, "status": "ativo",
+                "numero_processo": None, "centro_custo_rm": None, "status": "ativo",
                 "status_desde": None, "sem_reajuste": False, "destinatarios_extras": [],
                 "valor_original_centavos": 100, "percentual_direito_bp": 10000,
                 # gate Sol S2 (10/10/2026): sem data de inicio o espelho nao e' gerado
@@ -452,22 +452,22 @@ def test_ensaio_da_frc_nao_grava_nem_copia_o_logo(conn):
     assert not list((db.db_path().parent / "modelos").glob("*.jpg"))
 
 
-# --- issue #65: garantia e ART do contrato, copiadas para a pasta de dados -------------------------
+# --- issue #65: garantia do contrato, copiada para a pasta de dados -------------------------
 
-def test_garantia_e_art_gravadas_e_ensaio_nao_copia(conn, tmp_path):
+def test_garantia_gravada_e_ensaio_nao_copia(conn, tmp_path):
     from app import arquivos
-    art, gar = tmp_path / "art.pdf", tmp_path / "gar.pdf"
-    art.write_bytes(b"%PDF-1.4 art")
+    gar = tmp_path / "gar.pdf"
     gar.write_bytes(b"%PDF-1.4 gar")
-    cad = _cad(contratos=[_contrato(art="123", art_caminho=str(art), garantia_apolice="AP-9",
+    cad = _cad(contratos=[_contrato(garantia_apolice="AP-9",
                                     garantia_vigencia_fim="2027-03-31", garantia_caminho=str(gar))])
     cadastro_aplicar.aplicar(conn, 1, cad, ensaio=True)
-    assert not (arquivos.pasta("anexos") / f"{arquivos.sha_de(b'%PDF-1.4 art')}.pdf").exists()
+    assert not (arquivos.pasta("anexos") / f"{arquivos.sha_de(b'%PDF-1.4 gar')}.pdf").exists()
     cadastro_aplicar.aplicar(conn, 1, cad)
     c = conn.execute("SELECT art, art_arquivo, garantia_apolice, garantia_vigencia_fim, garantia_arquivo "
                      "FROM contratos").fetchone()
-    assert (c["art"], c["garantia_apolice"], c["garantia_vigencia_fim"]) == ("123", "AP-9", "2027-03-31")
-    assert arquivos.caminho_seguro(c["art_arquivo"]).is_file() and arquivos.caminho_seguro(c["garantia_arquivo"]).is_file()
+    assert (c["art"], c["art_arquivo"]) == (None, None)       # a ART saiu do contrato (#239)
+    assert (c["garantia_apolice"], c["garantia_vigencia_fim"]) == ("AP-9", "2027-03-31")
+    assert arquivos.caminho_seguro(c["garantia_arquivo"]).is_file()
     assert cadastro_aplicar.aplicar(conn, 1, cad)["contratos"]["iguais"] == 1
 
 

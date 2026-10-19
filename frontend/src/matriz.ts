@@ -11,8 +11,7 @@ export type LinhaCertidao = {
 export type RegularidadeDoc = { situacao: "ok" | "atrasada" | "faltando"; competencia: string | null; esperada: string };
 export type Garantia = { apolice: string | null; vigencia_fim: string; dias: number; origem: "contrato" | "endosso";
   situacao: "ok" | "vencendo" | "vencida" | "baixada" };
-export type ObraDoc = { contrato_id: number; obra: string; entidade_id?: number; garantia: Garantia | null;
-  art: { numero: string | null; anexada: boolean; exigida: boolean } };
+export type ObraDoc = { contrato_id: number; obra: string; entidade_id?: number; garantia: Garantia | null };
 export type EmpresaDoc = {
   entidade_id: number; entidade: string; cnpj: string; papel: string; certidoes: LinhaCertidao[];
   regularidade_exigida: boolean; regularidade: RegularidadeDoc | null;
@@ -31,29 +30,27 @@ export function certidaoPendente(l: LinhaCertidao): boolean {
   return (l.situacao === "ok" || l.situacao === "vencendo") && l.dias !== null && l.dias <= JANELA_DIAS;
 }
 
-/** O que a garantia e a ART das obras contratadas pela empresa pedem dela (#161): a garantia vencida ou na janela de
- *  atencao e a ART exigida e nao anexada. `garantiasVencidas` sao as que ja' travam. */
+/** O que a garantia das obras contratadas pela empresa pede dela (#161): a garantia vencida ou na janela de
+ *  atencao. `garantiasVencidas` sao as que ja' travam. */
 export function pendenciasDeObras(e: EmpresaDoc, obras: ObraDoc[]) {
   const minhas = obras.filter(k => k.entidade_id === e.entidade_id);
   const gs = minhas.filter(k => { const n = situacaoGarantia(k.garantia, "").nivel; return n === "acao" || n === "atencao"; });
-  const artsFaltando = minhas.filter(k => situacaoArt(k.art).nivel === "atencao").length;
   return {
     garantiasVencidas: gs.filter(k => k.garantia?.situacao === "vencida").length,
     garantiasVencendo: gs.filter(k => k.garantia?.situacao !== "vencida").map(k => k.garantia!.dias),
-    artsFaltando,
-    total: gs.length + artsFaltando,
+    total: gs.length,
   };
 }
 
 /** Quantas pendencias a empresa tem: as certidoes, a regularidade do mes que nao esta' em dia e (com `obras`) a garantia
- *  e a ART das obras dela. */
+ *  das obras dela. */
 export function pendenciasDa(e: EmpresaDoc, obras: ObraDoc[] = []): number {
   const reg = e.regularidade && e.regularidade.situacao !== "ok" ? 1 : 0;
   return e.certidoes.filter(certidaoPendente).length + reg + pendenciasDeObras(e, obras).total;
 }
 
 /** 0 = o que ja' trava (certidao exigida vencida ou faltando, regularidade fora do dia, garantia vencida); 1 = o que
- *  vence em ate' 30 dias ou pede a ART; 2 = nada pendente. */
+ *  vence em ate' 30 dias; 2 = nada pendente. */
 export function gravidade(e: EmpresaDoc, obras: ObraDoc[] = []): number {
   const trava = e.certidoes.some(l => l.exigida && (l.situacao === "vencida" || l.situacao === "faltando"))
     || (e.regularidade !== null && e.regularidade.situacao !== "ok") || pendenciasDeObras(e, obras).garantiasVencidas > 0;
@@ -137,7 +134,6 @@ export function resumoEmpresa(e: EmpresaDoc, obras: ObraDoc[] = []): { texto: st
   if (o.garantiasVencidas) partes.push(o.garantiasVencidas === 1 ? "garantia vencida" : `${o.garantiasVencidas} garantias vencidas`);
   if (o.garantiasVencendo.length === 1) partes.push(`garantia ${venceEm(o.garantiasVencendo[0])}`);
   else if (o.garantiasVencendo.length > 1) partes.push(`${o.garantiasVencendo.length} garantias vencendo`);
-  if (o.artsFaltando) partes.push(o.artsFaltando === 1 ? "ART não anexada" : `${o.artsFaltando} ARTs não anexadas`);
   const texto = partes.length ? partes.join(" · ") : "em dia";
   return { texto: texto.charAt(0).toUpperCase() + texto.slice(1),
     nivel: vencidas || faltas || o.garantiasVencidas ? "acao" : partes.length ? "atencao" : "ok", pendencias: pendenciasDa(e, obras) };
@@ -164,11 +160,4 @@ export function situacaoGarantia(g: Garantia | null, ate: string): { texto: stri
   if (g.situacao === "vencida") return { texto: "vencida", nota, nivel: "acao", forte: true };
   if (g.situacao === "vencendo") return { texto: venceEm(g.dias), nota, nivel: g.dias <= 15 ? "acao" : "atencao" };
   return { texto: "em dia", nota, nivel: "ok" };
-}
-
-/** A ART: anexada (com o numero), exigida e faltando, ou nao exigida. */
-export function situacaoArt(a: ObraDoc["art"]): { texto: string; nota: string; nivel: Nivel } {
-  const nota = a.numero ? `nº ${a.numero}` : "";
-  if (a.anexada) return { texto: "anexada", nota, nivel: "ok" };
-  return { texto: a.exigida ? "não anexada" : "não exigida", nota, nivel: a.exigida ? "atencao" : "neutro" };
 }

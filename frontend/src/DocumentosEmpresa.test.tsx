@@ -26,7 +26,7 @@ test("cabeçalho com caminho, nome, CNPJ, situação e as obras que exigem a emp
   expect(within(caminho).getByRole("link", { name: "Documentos" }).getAttribute("href")).toBe("/documentos");
   expect(within(caminho).getByText("Lotufo").getAttribute("title")).toBe("Lotufo");
   screen.getByText("31.200.101/0001-30");
-  screen.getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias · ART não anexada");
+  screen.getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias");
   expect(screen.getByRole("link", { name: "Obra Alfa" }).getAttribute("href")).toBe("/obras/5/documentos");
   screen.getByText(/também consorciada em/);
   expect(screen.getByRole("link", { name: "Consórcio Alfa" }).getAttribute("href")).toBe("/documentos/2");
@@ -45,9 +45,9 @@ test("as abas têm endereço próprio e mostram a contagem de pendências", asyn
   const reg = within(abas).getByRole("link", { name: /^Regularidade do mês/ });
   expect(reg.getAttribute("href")).toBe("/documentos/1/regularidade");
   within(reg).getByLabelText("1 com pendência");
-  const gar = within(abas).getByRole("link", { name: /^Garantia e ART por obra/ });
+  const gar = within(abas).getByRole("link", { name: /^Garantia por obra/ });
   expect(gar.getAttribute("href")).toBe("/documentos/1/garantia");
-  within(gar).getByLabelText("2 com pendência");                                       // garantia vencendo e ART faltando
+  within(gar).getByLabelText("1 com pendência");                                       // só a garantia vencendo
 });
 
 test("tabela de certidões: Emitir em toda exigida, o primário só na pendência mais urgente, Ver PDF", async () => {
@@ -157,21 +157,20 @@ test("o consórcio não entrega regularidade: manda para as consorciadas", async
   expect(painel.getByRole("link", { name: "Beta Ltda" }).getAttribute("href")).toBe("/documentos/3/regularidade");
 });
 
-test("garantia e ART só das obras contratadas pela empresa, com a situação de cada uma (issue #65)", async () => {
+test("garantia só das obras contratadas pela empresa, com a situação de cada uma (issue #65)", async () => {
   render(<DocumentosEmpresa usuario={usuario} id={1} aba="garantia" />);
   const alfa = (await screen.findByRole("rowheader", { name: "Obra Alfa" })).closest("tr")!;
   expect(alfa.textContent).toContain("vence em 12 dias");
   expect(alfa.textContent).toContain("até 05/10/2026 (endosso) · apólice AP-9");
-  expect(alfa.textContent).toContain("Anexada");
-  expect(alfa.textContent).toContain("nº 1234567");
+  expect(alfa.textContent).not.toContain("ART");
   expect(within(alfa).getByRole("link", { name: "Obra Alfa" }).getAttribute("href")).toBe("/obras/5/documentos");
   const beta = screen.getByRole("rowheader", { name: "Obra Beta" }).closest("tr")!;
   expect(beta.textContent).toContain("sem vigência no cadastro");
-  expect(beta.textContent).toContain("não anexada");
+  expect(screen.queryByRole("columnheader", { name: "ART" })).toBeNull();
   expect(screen.queryByRole("rowheader", { name: "Obra Gama" })).toBeNull();      // e' do consorcio
 });
 
-test("empresa sem obra própria aponta o consórcio, onde ficam a garantia e a ART", async () => {
+test("empresa sem obra própria aponta o consórcio, onde fica a garantia", async () => {
   render(<DocumentosEmpresa usuario={usuario} id={3} aba="garantia" />);
   await screen.findByText("Nenhuma obra contratada direto por esta empresa");
   expect(within(document.querySelector<HTMLElement>(".doc-painel")!).getByRole("link", { name: "Consórcio Alfa" })
@@ -184,7 +183,7 @@ test("consórcio: as consorciadas com a situação de cada uma; a página diz qu
   screen.getByText(/Consórcio · consorciadas:/);
   const lista = screen.getByRole("heading", { name: "Consorciadas" }).parentElement!;
   expect(within(lista).getByRole("link", { name: "Lotufo" }).getAttribute("href")).toBe("/documentos/1");
-  within(lista).getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias · ART não anexada");
+  within(lista).getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias");
   within(lista).getByText("Em dia");
 });
 
@@ -194,7 +193,7 @@ test("empresa que não existe no painel diz isso e volta para a lista", async ()
   expect(screen.getByRole("link", { name: "Ver todas as empresas" }).getAttribute("href")).toBe("/documentos");
 });
 
-test("obra de empresa sem certidão exigida continua visível na aba Garantia e ART (revisor, rodada 1)", async () => {
+test("obra de empresa sem certidão exigida continua visível na aba Garantia por obra (revisor, rodada 1)", async () => {
   render(<DocumentosEmpresa usuario={usuario} id={4} aba="garantia" />);
   const delta = (await screen.findByRole("rowheader", { name: "Obra Delta" })).closest("tr")!;
   expect(delta.textContent).toContain("vencida");
