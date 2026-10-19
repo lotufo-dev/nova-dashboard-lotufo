@@ -465,7 +465,7 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
 }
 
 /** Producao: o mês, onde está o dinheiro, o mês a mês (barras e tabela), os próximos meses e o saldo a executar. */
-function Producao({ p, ir }: { p: Painel; ir: Ir }) {
+function Producao({ p }: { p: Painel }) {
   const d = p.dinheiro, m = p.mes_ano, k = p.carteira;
   // "N de M obras protocolaram" vem do /api/inicio. undefined = carregando; null = nao carregou.
   const [mes, setMes] = useState<ResumoMes | null | undefined>(undefined);
@@ -616,7 +616,7 @@ export default function Diretoria({ ir, aba = "resumo" }: { ir: Ir; aba?: AbaCar
       {abas}
       {aba === "resumo" && <Resumo p={p} ir={ir} />}
       {aba === "qdop" && <Qdop p={p} ir={ir} />}
-      {aba === "producao" && <Producao p={p} ir={ir} />}
+      {aba === "producao" && <Producao p={p} />}
     </div>
   );
 }
