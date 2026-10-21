@@ -92,7 +92,7 @@ def _de_garantias(conn, hoje: datetime.date) -> list[dict]:
     """Issue #65: garantia contratual (30/15/vencida), na tela Documentos."""
     from app import contratos, garantias
     out = []
-    for a in garantias.avisos(conn, hoje):
+    for a in garantias.avisos(conn, hoje) + garantias.avisos_cobertura(conn, hoje):
         c = conn.execute("SELECT entidade_id FROM contratos WHERE id=?", (a["contrato_id"],)).fetchone()
         # o aviso leva a empresa contratada: a pagina dela em Documentos abre na aba da garantia
         out.append({**aviso(a["tipo"], a["nivel"], a["mensagem"], a["contrato_id"], obra(conn, a["contrato_id"]),
