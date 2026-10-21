@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { CartaoPleito, NovoPleito, type Pleito } from "./FluxoOficio";
+import { CartaoPleito, NovoPleito, type Pleito, type Reemissao } from "./FluxoOficio";
 import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
 import { reajustePorDataBase, type CicloApi, type InstrumentoCadastro } from "./obra";
@@ -20,7 +20,15 @@ function rotuloDataBase(mes: string, c: CicloApi) {
   return `${mesAno(mes)}${c.aplica_a ? ` (${c.aplica_a})` : ""}${c.indice ? ` · ${c.indice}` : ""}`;
 }
 
-type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilamento_pendente" | "apostilado" };
+// `pleito`: o enviado mais recente do ciclo (o servidor diz quem ele e'); e' nele que se reitera ou reemite
+type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilamento_pendente" | "apostilado";
+  pleito?: { id: number } | null };
+
+// issue #277: o que o botao faz no pleito vigente do ciclo (o servidor diz quais cabem, em `reemissoes_possiveis`)
+const ACAO_REEMISSAO: Record<Reemissao, { botao: string; titulo: string }> = {
+  reiteracao: { botao: "Reiterar", titulo: "Reiteração do pleito" },
+  cronograma: { botao: "Reemitir cronograma", titulo: "Reemissão do cronograma do pleito" },
+};
 
 // Pleito nao enviado e' a vez da engenharia: nivel "Acao" do D2 (ambar com contorno cheio), o
 // mesmo com que o fato aparece nos avisos. Vermelho fica para o critico.
@@ -60,7 +68,9 @@ function textoApostilamento(i: InstrumentoCadastro): string {
 function desfechoDoPleito(p: Pleito, c?: Ciclo): DesfechoPleito {
   const envio = partesDoEnvio(p);
   const neutro = { classe: "", texto: p.situacao, partes: envio };
-  if (!c || p.situacao !== "enviado") return neutro;
+  // so' o pleito vigente do ciclo (o enviado mais recente) leva o desfecho; os anteriores (reiterados ou
+  // reemitidos) ficam com o envio e a cadeia, sem repetir a espera do ciclo (issue #277)
+  if (!c || p.situacao !== "enviado" || (c.pleito && c.pleito.id !== p.id)) return neutro;
   if (c.situacao === "apostilamento_pendente") {
     return { classe: "selo--atencao", partes: envio,
       texto: c.dias !== null && c.dias >= 0 ? `sem apostilamento há ${dias(c.dias)}` : "sem apostilamento ainda" };
@@ -80,6 +90,8 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   const [apostilamentos, setApostilamentos] = useState<InstrumentoCadastro[]>([]);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
+  // reiteracao ou reemissao sendo criada: a data-base, o pleito anterior e o que se faz com ele
+  const [reemitir, setReemitir] = useState<{ dataBase: string; anterior: Pleito; reemissao: Reemissao } | null>(null);
   // para onde o foco vai quando o formulario fecha: o botao que o abriu (cancelar) ou o pleito criado
   const [foco, setFoco] = useState<string | null>(null);
 
@@ -142,6 +154,11 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const outrosAp = db.apostilamentos.filter(i => i.id !== c.apostilamento?.id);
         const anteriores = db.pleitosAnteriores.length + outrosAp.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
+        // o pleito vigente do ciclo e o que o servidor deixa fazer com ele (reiterar, reemitir o cronograma)
+        const vigente = c.pleito ? dados.pleitos.find(p => p.id === c.pleito!.id) : undefined;
+        const possiveis = vigente?.reemissoes_possiveis ?? [];
+        const reemitindo = reemitir?.dataBase === db.data_base_mes ? reemitir : null;
+        const formAberto = novo === db.data_base_mes || reemitindo !== null;
         return (
           // o cartao e' a data-base: o ciclo, e embaixo, como secoes, os oficios dele e os ciclos anteriores; o
           // aviso de reajuste cai na ancora dele
@@ -157,11 +174,23 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
                   </Link>
                 </div>
               )}
-              {podeEditar && !aberto && c.situacao !== "futuro" && c.situacao !== "apostilado" && novo !== db.data_base_mes && (
+              {podeEditar && !aberto && c.situacao === "pleito_pendente" && !formAberto && (
                 <div className="cartao__acoes">
                   <button type="button" className="btn btn--pequeno" id={`enviar-pleito-${db.data_base_mes}`} onClick={() => setNovo(db.data_base_mes)}>
-                    {c.situacao === "pleito_pendente" ? "Enviar pleito" : "Reenviar pleito"}
+                    Enviar pleito
                   </button>
+                </div>
+              )}
+              {/* depois do envio, o oficio novo nasce ligado ao vigente: reiteracao (MT-PAR e Prefeitura) ou
+                  reemissao do cronograma (apos aditivo); issue #277 */}
+              {podeEditar && !aberto && vigente && possiveis.length > 0 && c.situacao !== "futuro" && !formAberto && (
+                <div className="cartao__acoes">
+                  {possiveis.map(r => (
+                    <button key={r} type="button" className="btn btn--pequeno" id={`reemitir-${r}-${db.data_base_mes}`}
+                      onClick={() => setReemitir({ dataBase: db.data_base_mes, anterior: vigente, reemissao: r })}>
+                      {ACAO_REEMISSAO[r].botao}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -173,8 +202,21 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
               )}
               {c.situacao === "apostilamento_pendente" && <p className="campo__nota">Pleito enviado; falta o apostilamento, que entra pelo cadastro.</p>}
             </div>
-            {(novo === db.data_base_mes || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
+            {(formAberto || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
               <div className="secoes-pleito">
+                {reemitindo && (
+                  <section className="cartao" aria-labelledby={`titulo-reemitir-${db.data_base_mes}`}>
+                    <div className="cartao__cabeca">
+                      <h3 className="cartao__titulo" id={`titulo-reemitir-${db.data_base_mes}`}>
+                        {ACAO_REEMISSAO[reemitindo.reemissao].titulo} {reemitindo.anterior.numero_oficio ?? "sem número"}
+                      </h3>
+                    </div>
+                    <NovoPleito contratoId={contratoId} tipo="reajuste" dataBase={db.data_base_mes}
+                      reemite={{ id: reemitindo.anterior.id, reemissao: reemitindo.reemissao }}
+                      aoCriar={p => { setReemitir(null); setFoco(`oficio-${p.id}`); void carregar(); }}
+                      aoCancelar={() => { setReemitir(null); setFoco(`reemitir-${reemitindo.reemissao}-${db.data_base_mes}`); }} />
+                  </section>
+                )}
                 {novo === db.data_base_mes && (
                   <section className="cartao" aria-labelledby={`titulo-novo-${db.data_base_mes}`}>
                     <div className="cartao__cabeca">

@@ -29,7 +29,23 @@ export type Pleito = {
   conferencia: Conferencia | null; pendencias: Pendencia[]; enviado_em: string | null; envio_justificativa: string | null;
   anexos: { id: number; tipo: string; nome: string; tamanho: number }[];
   exigidos: { tipo: string; rotulo: string }[];
+  // issue #277: a cadeia do pleito de reajuste (original -> reiteracoes/reemissoes) e o que o servidor deixa fazer
+  reemite_pleito_id?: number | null; reemissao?: Reemissao | null; anterior?: EloPleito | null;
+  reemissoes?: EloPleito[]; reemissoes_possiveis?: Reemissao[];
 };
+export type Reemissao = "reiteracao" | "cronograma";
+type EloPleito = { id: number; numero_oficio: string | null; situacao: string; enviado_em: string | null;
+  reemissao: Reemissao | null };
+
+/** A cadeia do pleito numa linha: o que ele reitera/reemite e quem o reiterou/reemitiu depois. */
+export function cadeiaDoPleito(p: Pleito): string[] {
+  const elo = (e: EloPleito) => `${e.numero_oficio ?? "ofício sem número"}${e.situacao === "enviado"
+    ? (e.enviado_em ? `, enviado em ${fmtDataPura(e.enviado_em.slice(0, 10))}` : ", enviado") : ` (${e.situacao})`}`;
+  const out: string[] = [];
+  if (p.anterior) out.push(`${p.reemissao === "reiteracao" ? "Reitera" : "Reemite"} o ${elo(p.anterior)}`);
+  for (const r of p.reemissoes ?? []) out.push(`${r.reemissao === "reiteracao" ? "Reiterado" : "Reemitido"} pelo ${elo(r)}`);
+  return out;
+}
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string;
   anexos: { nome: string; tamanho: number }[]; total: number; limite: number; pendencias: Pendencia[] };
 
@@ -56,8 +72,10 @@ function itensDoPleito(p: Pleito): ItemChecklist[] {
 }
 
 /** Passo 1: numero do oficio e os campos do tipo. */
-export function NovoPleito({ contratoId, tipo, dataBase, aoCriar, aoCancelar }: {
+export function NovoPleito({ contratoId, tipo, dataBase, reemite, aoCriar, aoCancelar }: {
   contratoId: number; tipo: TipoPleito; dataBase?: string; aoCriar: (p: Pleito) => void; aoCancelar: () => void;
+  // reiteracao ou reemissao do cronograma: o oficio novo nasce ligado ao pleito `id` (issue #277)
+  reemite?: { id: number; reemissao: Reemissao };
 }) {
   const [oficio, setOficio] = useState("");
   const [dias, setDias] = useState("");
@@ -69,6 +87,11 @@ export function NovoPleito({ contratoId, tipo, dataBase, aoCriar, aoCancelar }: 
     ev.preventDefault();
     setOcupado(true); setErro("");
     try {
+      if (reemite) {
+        aoCriar(await api<Pleito>(`/api/pleitos/${reemite.id}/reemitir`, { method: "POST",
+          body: JSON.stringify({ reemissao: reemite.reemissao, numero_oficio: oficio }) }));
+        return;
+      }
       aoCriar(await api<Pleito>(`/api/contratos/${contratoId}/pleitos`, { method: "POST", body: JSON.stringify({
         tipo, numero_oficio: oficio, data_base_mes: dataBase ?? null,
         dias: tipo === "prazo" ? Number(dias) || null : null, justificativa: tipo === "prazo" ? justificativa : null }) }));
@@ -178,6 +201,7 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
         {p.origem === "cadastro" && <span className="cartao__dica">enviado antes do sistema (cadastro)</span>}
       </div>
       {desfecho && <p className="cartao__corpo campo__nota">{desfecho}</p>}
+      {cadeiaDoPleito(p).map((t, i) => <p key={i} className="cartao__corpo campo__nota">{t}</p>)}
       {p.origem === "sistema" && p.situacao !== "enviado" && (
         <div className="cartao__corpo pilha">
           {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
