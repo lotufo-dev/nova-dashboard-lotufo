@@ -50,10 +50,12 @@ describe("Cronograma: versões", () => {
     { numero: 3, criado_em: "2026-10-05 04:00:00", chave: "ta-01", origem_documento: "aditivo",
       data_documento: "2026-10-05", instrumento: "ta-01", competencias: 3, total_centavos: 70001, vigente: true },
   ];
-  beforeEach(() => {
-    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO
-      : c.endsWith("/versoes") ? VERSOES : null));
-  });
+  // a vigente que /cronograma devolve, coerente com a lista (versao 3, do cadastro)
+  const VIGENTE = { numero: 3, criado_em: "2026-10-05 04:00:00", origem: "manual",
+    itens: [{ competencia: "2026-10", valor_previsto_centavos: 70001 }] };
+  const servir = (vigente: unknown) => api.mockImplementation((c: string) => Promise.resolve(
+    c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? vigente : c.endsWith("/versoes") ? VERSOES : null));
+  beforeEach(() => { servir(VIGENTE); });
   afterEach(() => { cleanup(); api.mockReset(); });
 
   it("lista as versões na ordem do servidor, com a data e o documento", async () => {
@@ -70,11 +72,23 @@ describe("Cronograma: versões", () => {
     expect(api).toHaveBeenCalledWith("/api/contratos/1/cronograma/versoes");
   });
 
-  it("a dica do cabeçalho diz o documento da vigente, nunca a origem interna", async () => {
+  it("a dica do cabeçalho diz o documento da vigente e a data dele, nunca a origem interna", async () => {
     render(<Cronograma contratoId={1} podeEditar={false} />);
     await screen.findByRole("table", { name: /Versões do cronograma/ });
-    const dica = screen.getByText(/^versão 2 ·/);
+    const dica = screen.getByText(/^versão 3 ·/);
+    expect(dica.textContent).toBe("versão 3 · 1 competência · documento de 05/10/2026");
     expect(dica.getAttribute("title")).toBe("Documento: Termo aditivo · ta-01");
-    expect(document.body.innerHTML).not.toMatch(/Origem do cadastro|sistema"/);
+    expect(document.body.innerHTML).not.toMatch(/Origem do cadastro|manual/);
+  });
+
+  it("a dica casa a versão pelo número, não pela marca de vigente da lista (gate Sol, PR #311)", async () => {
+    // as duas leituras sao independentes: /cronograma pode trazer outra versao que a marcada na lista
+    servir({ numero: 1, criado_em: "2026-09-04 15:00:00", origem: "manual",
+      itens: [{ competencia: "2026-09", valor_previsto_centavos: 50000 }] });
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    const dica = screen.getByText(/^versão 1 ·/);
+    expect(dica.textContent).toBe("versão 1 · 1 competência · publicada em 04/09/2026");
+    expect(dica.getAttribute("title")).toBe("Documento: Sem documento no cadastro");
   });
 });

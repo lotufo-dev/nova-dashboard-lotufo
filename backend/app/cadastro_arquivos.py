@@ -44,6 +44,8 @@ _CICLO = re.compile(r"^([0-9]{4})(-[0-9]{2})?$")
 ORIGENS_CRONOGRAMA = ("contratual", "aditivo", "carta", "smo")
 # Mesmo teto de itens por versao da rota do cronograma (api_cronograma.MAX_ITENS): 50 anos de competencias.
 _MAX_ITENS_CRONOGRAMA = 600
+_CAMPOS_CRONOGRAMA = {"chave", "origem", "data", "instrumento", "itens"}
+_CAMPOS_ITEM_CRONOGRAMA = {"competencia", "valor"}
 
 
 def _lista_documentos(valor, onde: str, erros: list[str]) -> list[str] | None:
@@ -267,6 +269,7 @@ def _cronograma(lista, falha) -> list[dict]:
         falha("cronograma", "use uma lista de versões ({chave, origem, data, instrumento, itens})")
         return []
     out, vistas = [], set()
+    datas: dict[str, str] = {}     # data do documento -> chave da versao que ja a usa
     hoje = tempo.hoje_local().isoformat()
     for i, v in enumerate(lista):
         if not isinstance(v, dict):
@@ -282,6 +285,12 @@ def _cronograma(lista, falha) -> list[dict]:
             continue
         vistas.add(chave)
         ok = True
+        # Gate Sol (PR #311): campo com erro de digitacao (`instrumentoo`) seria ignorado e a versao aplicada
+        # sem ele, imutavel depois.
+        sobra = sorted(str(k) for k in v if k not in _CAMPOS_CRONOGRAMA)
+        if sobra:
+            falha(onde, f"campo desconhecido: {', '.join(sobra)} (use {', '.join(sorted(_CAMPOS_CRONOGRAMA))})")
+            ok = False
         if v.get("origem") not in ORIGENS_CRONOGRAMA:
             falha(f"{onde}.origem", f"use uma de {', '.join(ORIGENS_CRONOGRAMA)}")
             ok = False
@@ -297,6 +306,14 @@ def _cronograma(lista, falha) -> list[dict]:
             elif data > hoje:
                 falha(f"{onde}.data", f"{data} está no futuro; use a data do documento")
                 ok = False
+            elif data in datas:
+                # Gate Sol (PR #311): duas versoes no mesmo dia empatariam no criado_em, e o desempate seria a
+                # ordem de aplicacao (o numero), nao a do YAML.
+                falha(f"{onde}.data", f"mesma data da versão {datas[data]} ({data}); uma versão por data de "
+                                      "documento")
+                ok = False
+            else:
+                datas[data] = chave
         instrumento = v.get("instrumento")
         if instrumento is not None and (not isinstance(instrumento, str) or not instrumento.strip()):
             falha(f"{onde}.instrumento", "use um texto (ex.: a chave do termo aditivo) ou deixe sem")
@@ -315,6 +332,10 @@ def _cronograma(lista, falha) -> list[dict]:
                 falha(aqui, "use {competencia, valor}")
                 ok = False
                 continue
+            sobra = sorted(str(k) for k in it if k not in _CAMPOS_ITEM_CRONOGRAMA)
+            if sobra:
+                falha(aqui, f"campo desconhecido: {', '.join(sobra)} (use competencia e valor)")
+                ok = False
             comp = str(it.get("competencia") or "")
             if not _MES.match(comp):
                 falha(f"{aqui}.competencia", f"use AAAA-MM: {comp!r}")

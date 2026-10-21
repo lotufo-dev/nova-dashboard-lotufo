@@ -338,7 +338,8 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
         if r["chave"] not in do_cadastro:
             raise ValueError(f"{nome}: a versão de cronograma {r['chave']} já foi aplicada e sumiu do cadastro; "
                              "versão aplicada não se apaga (correção é versão nova, com outra chave)")
-    # Ordem do documento (empate: ordem do arquivo): o numero das versoes segue a linha do tempo.
+    # Ordem do documento: o numero das versoes segue a linha do tempo. Nao ha empate: a validacao recusa duas
+    # versoes do cadastro com a mesma data (gate Sol, PR #311).
     ordenadas = sorted(enumerate(c.get("cronograma") or []), key=lambda par: (par[1]["data"], par[0]))
     criadas: list[tuple[int, str]] = []
     for _, v in ordenadas:

@@ -451,10 +451,15 @@ export default function Cronograma({ contratoId, podeEditar }:
   }
 
   // A origem gravada na versao (manual/detectado/aceito) e' interna; a dica mostra o documento (issue #256).
-  const vigenteNaLista = versoes.find(v => v.vigente);
+  // Casada pelo NUMERO da versao que /cronograma devolveu, nao pela marca `vigente` da lista: as duas leituras
+  // sao independentes e podem divergir entre uma publicacao e outra (gate Sol, PR #311).
+  const vigenteNaLista = versao ? versoes.find(v => v.numero === versao.numero) : undefined;
   const dica = versao
     ? `versão ${versao.numero} · ${versao.itens.length} ${versao.itens.length === 1 ? "competência" : "competências"}`
-      + ` · publicada em ${fmtData(versao.criado_em)}`
+      // versao do cadastro: a data e' a do documento; manual: a da publicacao
+      + (vigenteNaLista?.data_documento
+        ? ` · documento de ${fmtDataPura(vigenteNaLista.data_documento)}`
+        : ` · publicada em ${fmtData(versao.criado_em)}`)
     : "sem versão publicada";
 
   const totais = pontos.reduce((a, p) => ({

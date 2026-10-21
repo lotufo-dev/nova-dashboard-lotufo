@@ -529,11 +529,27 @@ def test_cronograma_com_campos_invalidos_e_erro(tmp_path):
 def test_cronograma_com_instrumento_que_nao_e_do_contrato_gera_aviso(tmp_path):
     """`instrumento` nao se corrige depois de aplicado: chave que nao bate com um instrumento do contrato avisa."""
     c = {**CONTRATO, "cronograma": [_versao("v1", "aditivo", instrumento="ta-1"),
-                                    _versao("v2", "aditivo", instrumento="carga-legado")]}
+                                    _versao("v2", "aditivo", "2024-08-01", instrumento="carga-legado")]}
     avisos = ca.preparar(_escrever(tmp_path, contratos=[c]))["avisos"]
     assert [a for a in avisos if "cronograma" in a] == [
         "MT-402: cronograma[v1].instrumento: 'ta-1' não é chave de nenhum instrumento deste contrato; "
         "confira antes de aplicar (versão aplicada não muda)"]
+
+
+def test_cronograma_com_duas_versoes_na_mesma_data_e_erro(tmp_path):
+    """Gate Sol (PR #311): o desempate de mesma data dependeria da ordem de aplicacao, nao do YAML."""
+    c = {**CONTRATO, "cronograma": [_versao("v1", data="2025-01-10"), _versao("v2", data="2025-01-10")]}
+    erros = _erros(_escrever(tmp_path, contratos=[c]))
+    assert any("cronograma[v2].data" in e and "v1" in e and "mesma data" in e for e in erros)
+
+
+def test_cronograma_com_campo_desconhecido_e_erro(tmp_path):
+    """Gate Sol (PR #311): `instrumentoo` seria ignorado e a versao aplicada sem vinculo, imutavel depois."""
+    v = _versao("v1", instrumentoo="ta-01",
+                itens=[{"competencia": "2024-04", "valor": "1,00", "valr": "2,00"}])
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma": [v]}]))
+    assert any("cronograma[v1]" in e and "instrumentoo" in e and "desconhecido" in e for e in erros)
+    assert any("cronograma[v1].itens[0]" in e and "valr" in e and "desconhecido" in e for e in erros)
 
 
 def test_cronograma_que_nao_e_lista_e_erro(tmp_path):
