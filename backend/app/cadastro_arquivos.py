@@ -26,7 +26,8 @@ TIPOS_ADITIVO = {"aditivo_valor": "valor", "aditivo_prazo": "prazo", "aditivo_mi
 TIPOS_OUTROS = ("apostilamento_reajuste", "paralisacao", "reinicio", "marco_encerramento",
                 "endosso_garantia")
 _MES = re.compile(r"^[0-9]{4}-(0[1-9]|1[0-2])$")  # A-14 (10/10/2026): \d casa "٢٠٢٤"
-_TABELAS_DE_PRECOS = {"SINAPI", "SICRO"}           # tabela do orcamento, nunca indice de reajuste (#257)
+# tabela do orcamento, nunca indice de reajuste (#257): como palavra ("Tabela SINAPI", "SICRO/DNIT"), nao so' o texto inteiro
+_TABELAS_DE_PRECOS = re.compile(r"\b(SINAPI|SICRO)\b", re.IGNORECASE)
 # Bloco 4: o que um orgao (ou a excecao de um contrato) pode exigir no protocolo.
 DOCUMENTOS = ("federal", "fgts", "trabalhista", "estadual", "municipal", "falencia", "regularidade")
 # Bloco 5: pecas tecnicas que o orgao pede no protocolo (feitas fora e arrastadas pela operacao).
@@ -379,7 +380,7 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         if not indice:
             falha(f"datas_base[{i}].indice", "obrigatório: diga o índice do reajuste desta data-base "
                                               "(ex.: INCC-DI, FGV/DNIT)")
-        elif indice.upper() in _TABELAS_DE_PRECOS:
+        elif _TABELAS_DE_PRECOS.search(indice):
             falha(f"datas_base[{i}].indice", f"{indice!r} é a tabela de preços do orçamento, não o índice do "
                                               "reajuste; use o índice que corrige a data-base (ex.: INCC-DI, "
                                               "FGV/DNIT) e, se o contrato tem uma base por tabela, diga a parte "
