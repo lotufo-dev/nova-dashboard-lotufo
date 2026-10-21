@@ -47,8 +47,8 @@ class LinhaPrevisaoIn(BaseModel):
     valor_centavos: StrictInt          # 1.5 nao vira 1: dinheiro chega em centavos inteiros ou nao chega
 
 
-class PrevisaoIn(BaseModel):
-    origem: Literal[pleitos.ORIGENS_PREVISAO]
+class PrevisaoDigitadaIn(BaseModel):
+    # sem campo de origem: a digitada e' sempre 'manual'; a 'pleito' so' nasce da planilha relida no servidor
     linhas: list[LinhaPrevisaoIn] = Field(max_length=pleitos.MAX_COMPETENCIAS)
 
 
@@ -146,15 +146,34 @@ def ler_previsao(pid: ID, arquivo: UploadFile = File(...), _=Depends(exigir("edi
         return {"reconhecida": False, "mensagem": str(e), "motivo": e.motivo, "linhas": []}
 
 
-@router.post("/api/pleitos/{pid}/previsao")
-def gravar_previsao(pid: ID, dados: PrevisaoIn, usuario: dict = Depends(exigir("editar_cadastros")),
-                    conn: sqlite3.Connection = Depends(conexao)):
-    _existe(conn, pid)
+def _gravar(conn, pid: int, gravar) -> dict:
     try:
-        pleitos.gravar_previsao(conn, usuario["id"], pid, dados.origem, [x.model_dump() for x in dados.linhas])
+        gravar()
+    except envio_reserva.EnvioEmAndamento as e:
+        raise HTTPException(409, detail=e.detalhe()) from None
+    except leitura_planilha_reajuste.PlanilhaNaoReconhecida as e:
+        raise HTTPException(422, f"{e} ({e.motivo})") from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
+
+
+@router.post("/api/pleitos/{pid}/previsao/planilha")
+def aceitar_previsao_planilha(pid: ID, arquivo: UploadFile = File(...),
+                              usuario: dict = Depends(exigir("editar_cadastros")),
+                              conn: sqlite3.Connection = Depends(conexao)):
+    """Aceite da planilha conferida: o servidor rele o arquivo e grava o que leu, com origem 'pleito'."""
+    _existe(conn, pid)
+    dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=TETO_PLANILHA, tipo="xlsx"))
+    return _gravar(conn, pid, lambda: pleitos.gravar_previsao_planilha(conn, usuario["id"], pid, dados))
+
+
+@router.post("/api/pleitos/{pid}/previsao/digitada")
+def gravar_previsao_digitada(pid: ID, dados: PrevisaoDigitadaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                             conn: sqlite3.Connection = Depends(conexao)):
+    _existe(conn, pid)
+    linhas = [x.model_dump() for x in dados.linhas]
+    return _gravar(conn, pid, lambda: pleitos.gravar_previsao_digitada(conn, usuario["id"], pid, linhas))
 
 
 @router.post("/api/pleitos/{pid}/anexos/{anexo_id}/remover")

@@ -194,7 +194,7 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
           )}
 
           {/* issue #272: a previsao por competencia se confere antes de montar a carta */}
-          {editavel && p.tipo === "reajuste" && <PleitoPrevisao pleitoId={p.id} aoGravar={aoMudar} />}
+          {editavel && p.tipo === "reajuste" && <PleitoPrevisao pleitoId={p.id} dataBase={p.data_base_mes} ciclo={p.ciclo} aoGravar={aoMudar} />}
 
           <div className="pilha">
             {/* montada a carta, o texto recolhe; montar e baixar ficam fora dele, sempre a' vista */}

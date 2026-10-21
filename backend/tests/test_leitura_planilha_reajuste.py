@@ -56,10 +56,51 @@ def test_coluna_inicial_e_indice_variam_entre_as_obras():
 
 
 def test_float_da_planilha_vira_centavos_sem_erro_de_arredondamento():
-    linhas = leitura.ler(planilha_modelo([("1ª Medição", "01/04/2026 a 30/04/2026", 21342.29),
-                                          ("2ª Medição", "01/05/2026 a 31/05/2026", -15.07)]))
-    # 21342.29 * 100 em float da' 2134228.9999...; e indice deflacionario da' reajuste negativo
-    assert [x["valor_centavos"] for x in linhas] == [2134229, -1507]
+    linhas = leitura.ler(planilha_modelo([("1ª Medição", "01/04/2026 a 30/04/2026", 4.35),
+                                          ("2ª Medição", "01/05/2026 a 31/05/2026", 0.29),
+                                          ("3ª Medição", "01/06/2026 a 30/06/2026", -15.07)]))
+    # 4.35 * 100 em float da' 434.99999...; truncar daria 434 e 28 (0.29 * 100 = 28.99999...). E indice
+    # deflacionario da' reajuste negativo, que tambem tem de sair com o centavo certo (-15.07 * 100 = -1507.0000...1)
+    assert [x["valor_centavos"] for x in linhas] == [435, 29, -1507]
+
+
+def test_formula_sem_valor_calculado_nao_some_em_silencio():
+    """Arquivo salvo sem o valor das formulas (gerado por programa): a celula le vazia, mas nao e' vazia."""
+    wb = openpyxl.load_workbook(io.BytesIO(planilha_modelo(outras_abas=())))
+    wb["Resumo"]["E9"] = "=C9*0.05"                 # REAJUSTE da 2a medicao vira formula, sem cache
+    buf = io.BytesIO(); wb.save(buf)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(buf.getvalue())
+    assert "2ª Medição tem fórmula sem o valor calculado" in e.value.motivo
+    # periodo em formula sem cache (o modelo monta o periodo com TEXT(...)) tambem
+    wb["Resumo"]["E9"] = 2000.0
+    wb["Resumo"]["B10"] = '=TEXT(A1,"dd/mm/aaaa")'
+    buf = io.BytesIO(); wb.save(buf)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(buf.getvalue())
+    assert "3ª Medição tem fórmula sem o valor calculado" in e.value.motivo
+
+
+def test_aba_sem_fim_nao_devolve_leitura_parcial(monkeypatch):
+    monkeypatch.setattr(leitura, "MAX_VARRIDAS", 2)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(planilha_modelo())                 # 3 medicoes e o TOTAIS: passa do teto antes do fim
+    assert "grande demais" in e.value.motivo
+
+
+def test_so_as_primeiras_colunas_sao_lidas():
+    """Celula distante (coluna 10.000) nao faz a leitura percorrer a linha inteira: o cabecalho tem de estar perto."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Resumo"
+    ws.cell(1, 10000, "x")
+    ws.cell(6, leitura.MAX_COLUNAS + 1, "MEDIÇÃO"); ws.cell(6, leitura.MAX_COLUNAS + 2, "PERÍODO")
+    ws.cell(6, leitura.MAX_COLUNAS + 3, "REAJUSTE")
+    buf = io.BytesIO(); wb.save(buf)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(buf.getvalue())
+    assert "cabeçalho" in e.value.motivo
+    assert len(leitura.ler(planilha_modelo())) == 3
 
 
 def test_linha_sem_reajuste_fica_de_fora():

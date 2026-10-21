@@ -22,10 +22,12 @@ describe("Previsão de reajuste do pleito", () => {
       { competencia: "2026-04", valor_centavos: -1507, medicao: "2ª Medição", periodo: "01/04/2026 a 30/04/2026" }] });
     api.mockResolvedValue({});
     const aoGravar = vi.fn();
-    render(<PleitoPrevisao pleitoId={9} aoGravar={aoGravar} />);
+    render(<PleitoPrevisao pleitoId={9} dataBase="2024-06" ciclo={2026} aoGravar={aoGravar} />);
     anexar();
     const tabela = await screen.findByRole("table", { name: "Previsão lida da planilha" });
     expect(apiForm.mock.calls[0][0]).toBe("/api/pleitos/9/previsao/ler");
+    // a data-base e o ciclo a que a previsao se liga, acima da tabela de conferencia
+    expect(screen.getByText("Data-base 06/2024, ciclo 2026")).toBeTruthy();
     const linhas = within(tabela).getAllByRole("row");
     expect(linhas).toHaveLength(1 + 2 + 1);                          // cabeca, 2 competencias, total
     expect(linhas[1].textContent).toContain("03/2026");
@@ -35,12 +37,15 @@ describe("Previsão de reajuste do pleito", () => {
     expect(linhas[3].textContent).toContain("R$ 1.219,49");
     // ler nao grava: so' o aceite chama a rota que grava
     expect(api).not.toHaveBeenCalled();
+    expect(apiForm).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Aceitar previsão" }));
-    await waitFor(() => expect(api).toHaveBeenCalledTimes(1));
-    const [caminho, opcoes] = api.mock.calls[0];
-    expect(caminho).toBe("/api/pleitos/9/previsao");
-    expect(JSON.parse(opcoes.body)).toEqual({ origem: "pleito", linhas: [
-      { competencia: "2026-03", valor_centavos: 123456 }, { competencia: "2026-04", valor_centavos: -1507 }] });
+    await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(2));
+    // o aceite devolve a MESMA planilha: o servidor rele e grava o que leu; a tela nao manda origem nem valores
+    const [caminho, fd] = apiForm.mock.calls[1];
+    expect(caminho).toBe("/api/pleitos/9/previsao/planilha");
+    expect((fd as FormData).get("arquivo")).toBe(apiForm.mock.calls[0][1].get("arquivo"));
+    expect([...(fd as FormData).keys()]).toEqual(["arquivo"]);
+    expect(api).not.toHaveBeenCalled();
     expect(await screen.findByText("Previsão gravada: 2 competências.")).toBeTruthy();
     expect(aoGravar).toHaveBeenCalled();
     expect(screen.queryByRole("table")).toBeNull();
@@ -50,7 +55,7 @@ describe("Previsão de reajuste do pleito", () => {
     apiForm.mockResolvedValue({ reconhecida: false, mensagem: "Não reconheci a planilha; digite a previsão",
       motivo: "falta a aba Resumo", linhas: [] });
     api.mockResolvedValue({});
-    render(<PleitoPrevisao pleitoId={9} aoGravar={() => {}} />);
+    render(<PleitoPrevisao pleitoId={9} dataBase="2024-06" ciclo={2026} aoGravar={() => {}} />);
     anexar();
     expect((await screen.findByRole("alert")).textContent).toContain("Não reconheci a planilha; digite a previsão");
     expect(screen.getByText(/falta a aba Resumo/)).toBeTruthy();
@@ -68,12 +73,13 @@ describe("Previsão de reajuste do pleito", () => {
     fireEvent.click(within(tabela).getByRole("checkbox", { name: "Reajuste negativo na linha 2" }));
     fireEvent.click(screen.getByRole("button", { name: "Gravar previsão" }));
     await waitFor(() => expect(api).toHaveBeenCalledTimes(1));
-    expect(JSON.parse(api.mock.calls[0][1].body)).toEqual({ origem: "manual", linhas: [
+    expect(api.mock.calls[0][0]).toBe("/api/pleitos/9/previsao/digitada");
+    expect(JSON.parse(api.mock.calls[0][1].body)).toEqual({ linhas: [
       { competencia: "2026-09", valor_centavos: 150025 }, { competencia: "2026-10", valor_centavos: -1000 }] });
   });
 
   it("linha digitada sem competência ou sem valor não grava e diz o que falta", async () => {
-    render(<PleitoPrevisao pleitoId={9} aoGravar={() => {}} />);
+    render(<PleitoPrevisao pleitoId={9} dataBase="2024-06" ciclo={2026} aoGravar={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Digitar a previsão" }));
     fireEvent.change(screen.getByLabelText("Competência da linha 1"), { target: { value: "2026-09" } });
     fireEvent.click(screen.getByRole("button", { name: "Gravar previsão" }));

@@ -19,15 +19,19 @@ const linhaVazia = (): LinhaDigitada => ({ chave: proximaChave++, competencia: "
 // o CampoValor devolve "1.500,25": os digitos sao os centavos, sem float no caminho
 const centavos = (texto: string) => Number(texto.replace(/\D/g, ""));
 
-export default function PleitoPrevisao({ pleitoId, aoGravar }: { pleitoId: number; aoGravar: () => void }) {
+export default function PleitoPrevisao({ pleitoId, dataBase, ciclo, aoGravar }: {
+  pleitoId: number; dataBase: string | null; ciclo: number | null; aoGravar: () => void;
+}) {
   const [lidas, setLidas] = useState<LinhaLida[] | null>(null);
+  // o aceite manda a MESMA planilha de volta: o servidor rele e grava o que leu (a tela nao decide a origem)
+  const [planilha, setPlanilha] = useState<File | null>(null);
   const [digitadas, setDigitadas] = useState<LinhaDigitada[] | null>(null);
   const [naoReconhecida, setNaoReconhecida] = useState<{ mensagem: string; motivo?: string } | null>(null);
   const [erro, setErro] = useState("");
   const [ok, setOk] = useState("");
   const [ocupado, setOcupado] = useState(false);
 
-  function limpar() { setLidas(null); setDigitadas(null); setNaoReconhecida(null); setErro(""); }
+  function limpar() { setLidas(null); setPlanilha(null); setDigitadas(null); setNaoReconhecida(null); setErro(""); }
 
   async function ler(input: HTMLInputElement) {
     const f = input.files?.[0];
@@ -38,7 +42,7 @@ export default function PleitoPrevisao({ pleitoId, aoGravar }: { pleitoId: numbe
       const fd = new FormData();
       fd.append("arquivo", f);
       const r = await apiForm<Leitura>(`/api/pleitos/${pleitoId}/previsao/ler`, fd);
-      if (r.reconhecida) setLidas(r.linhas);
+      if (r.reconhecida) { setLidas(r.linhas); setPlanilha(f); }
       else {
         setNaoReconhecida({ mensagem: r.mensagem ?? "Não reconheci a planilha; digite a previsão", motivo: r.motivo });
         setDigitadas([linhaVazia()]);
@@ -46,14 +50,21 @@ export default function PleitoPrevisao({ pleitoId, aoGravar }: { pleitoId: numbe
     } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
   }
 
-  async function gravar(origem: "pleito" | "manual", linhas: { competencia: string; valor_centavos: number }[]) {
+  async function gravar(enviar: () => Promise<unknown>, quantas: number) {
     setOcupado(true); setErro("");
     try {
-      await api(`/api/pleitos/${pleitoId}/previsao`, { method: "POST", body: JSON.stringify({ origem, linhas }) });
+      await enviar();
       limpar();
-      setOk(`Previsão gravada: ${contar(linhas.length, "competência", "competências")}.`);
+      setOk(`Previsão gravada: ${contar(quantas, "competência", "competências")}.`);
       aoGravar();
     } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+  }
+
+  function aceitarLida() {
+    if (!planilha || !lidas) return;
+    const fd = new FormData();
+    fd.append("arquivo", planilha);
+    void gravar(() => apiForm(`/api/pleitos/${pleitoId}/previsao/planilha`, fd), lidas.length);
   }
 
   function gravarDigitadas() {
@@ -62,7 +73,9 @@ export default function PleitoPrevisao({ pleitoId, aoGravar }: { pleitoId: numbe
       setErro("Preencha a competência e o valor de todas as linhas (ou remova a linha).");
       return;
     }
-    void gravar("manual", digitadas.map(l => ({ competencia: l.competencia, valor_centavos: (l.negativo ? -1 : 1) * centavos(l.valor) })));
+    const linhas = digitadas.map(l => ({ competencia: l.competencia, valor_centavos: (l.negativo ? -1 : 1) * centavos(l.valor) }));
+    void gravar(() => api(`/api/pleitos/${pleitoId}/previsao/digitada`, { method: "POST", body: JSON.stringify({ linhas }) }),
+      linhas.length);
   }
 
   const mudar = (chave: number, campo: "competencia" | "valor", v: string) =>
@@ -84,6 +97,9 @@ export default function PleitoPrevisao({ pleitoId, aoGravar }: { pleitoId: numbe
             onClick={() => { limpar(); setOk(""); setDigitadas([linhaVazia()]); }}>Digitar a previsão</button>
         )}
       </div>
+      {(lidas || digitadas) && dataBase && (
+        <p className="campo__nota num">Data-base {fmtCompetencia(dataBase)}{ciclo ? `, ciclo ${ciclo}` : ""}</p>
+      )}
       <p aria-live="polite" className="campo__nota">{ok}</p>
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
       {naoReconhecida && (
@@ -109,7 +125,7 @@ export default function PleitoPrevisao({ pleitoId, aoGravar }: { pleitoId: numbe
           </table>
           <div className="acoes acoes--inicio">
             <button type="button" className="btn btn--primario btn--pequeno" disabled={ocupado}
-              onClick={() => void gravar("pleito", lidas.map(l => ({ competencia: l.competencia, valor_centavos: l.valor_centavos })))}>
+              onClick={aceitarLida}>
               Aceitar previsão
             </button>
             <button type="button" className="btn btn--pequeno" disabled={ocupado} onClick={limpar}>Descartar leitura</button>
