@@ -98,3 +98,25 @@ def test_escrita_exige_permissao(client):
     client.headers["X-CSRF-Token"] = r.json()["csrf"]
     assert client.post("/api/contratos/1/cronograma", json={
         "itens": [{"competencia": "2026-09", "valor": "1,00"}]}).status_code == 403
+
+
+def test_lista_de_versoes(client_admin):
+    """Issue #256: a aba Cronograma lista uma linha por versao, com a data do documento quando veio do cadastro."""
+    from app import cronograma, db
+    cid = _contrato(client_admin)
+    assert client_admin.get(f"/api/contratos/{cid}/cronograma/versoes").json() == []
+    conn = db.get_conn()
+    try:
+        cronograma.nova_versao(conn, 1, cid, [("2024-05", 5_00)], "manual", data_documento="2024-04-10")
+        conn.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, "
+                     "data_documento, instrumento) VALUES (1,?,?,?,?,?)", (cid, "ta-01", "aditivo", "2024-04-10", "ta-01"))
+        conn.commit()
+    finally:
+        conn.close()
+    vs = client_admin.get(f"/api/contratos/{cid}/cronograma/versoes").json()
+    assert len(vs) == 1
+    assert {k: vs[0][k] for k in ("numero", "chave", "origem_documento", "data_documento", "instrumento",
+                                  "competencias", "total_centavos", "vigente")} == {
+        "numero": 1, "chave": "ta-01", "origem_documento": "aditivo", "data_documento": "2024-04-10",
+        "instrumento": "ta-01", "competencias": 1, "total_centavos": 5_00, "vigente": True}
+    assert client_admin.get("/api/contratos/9999/cronograma/versoes").status_code == 404
