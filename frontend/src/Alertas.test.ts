@@ -24,8 +24,9 @@ describe("destino do aviso", () => {
     const reaj: Aviso = { ...base, tipo: "reajuste_apostilamento", contrato_id: 7, data_base_mes: "2023-01", destino: { tela: "contrato", id: 7, aba: "reajuste" } };
     const d4 = destinoDoAviso(reaj)!;
     expect(hrefDe(d4.para, undefined, d4.secao)).toBe("/obras/7/reajuste#db-2023-01");
-    // o pagamento atrasado (sem destino proprio) abre nas medicoes em andamento da obra
-    const pag: Aviso = { ...base, tipo: "pagamento_atrasado", contrato_id: 9, destino: { tela: "contrato", id: 9, aba: "medicoes" } };
+    // o aviso da aba Medicoes abre nas medicoes em andamento da obra; o pagamento atrasado saiu (#255) e,
+    // mesmo com a medicao, nao leva mais ao recebimento dela
+    const pag: Aviso = { ...base, tipo: "pagamento_atrasado", contrato_id: 9, medicao_id: 722, destino: { tela: "contrato", id: 9, aba: "medicoes" } };
     const d5 = destinoDoAviso(pag)!;
     expect(hrefDe(d5.para, undefined, d5.secao)).toBe("/obras/9#em-andamento");
   });

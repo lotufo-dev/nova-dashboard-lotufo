@@ -40,10 +40,8 @@ export function destinoDoAviso(a: Aviso): { para: Rota; secao?: string; busca?: 
     : { para: { tela: "documentos" } };
   if (d.aba === "notas" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "notas" };
   if (d.aba === "reajuste" && a.data_base_mes) return { para: { tela: "obra", id: d.id, aba: "reajuste" }, secao: `db-${a.data_base_mes}` };
-  // A12: o pagamento atrasado de uma medicao leva ao recebimento dela; o da nota do RM, as medicoes da obra
-  if (a.tipo === "pagamento_atrasado" && a.medicao_id && d.id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "recebimento" };
   const aba = (ABAS_OBRA.includes(d.aba) ? d.aba : "medicoes") as AbaObra;
-  // na aba Medicoes, as medicoes em andamento (onde o pagamento atrasado se ve), nao o resumo do topo
+  // na aba Medicoes, as medicoes em andamento, nao o resumo do topo
   return { para: { tela: "obra", id: d.id, aba }, secao: aba === "medicoes" ? "em-andamento" : undefined };
 }
 
