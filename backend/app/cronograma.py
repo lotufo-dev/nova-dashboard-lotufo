@@ -113,9 +113,14 @@ def versoes(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     return out
 
 
-def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int) -> dict[str, int]:
+def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int, sem_ultima: bool = False) -> dict[str, int]:
+    """`sem_ultima`: o previsto como estava ANTES da ultima repactuacao (issue #295), isto e', a mesma
+    regra aplicada a linha do tempo sem a versao vigente."""
     efetivo: dict[str, int] = {}
-    for v in _versoes(conn, contrato_id):        # linha do tempo: criado_em, empate pelo numero
+    versoes_do_contrato = _versoes(conn, contrato_id)
+    if sem_ultima:
+        versoes_do_contrato = versoes_do_contrato[:-1]
+    for v in versoes_do_contrato:        # linha do tempo: criado_em, empate pelo numero
         # 'AAAA-MM' do criado_em (UTC no banco) convertido para Cuiaba: e' a
         # fronteira de mes do NEGOCIO que decide o congelamento, nao a de UTC.
         mes_criacao = tempo.mes_local(v["criado_em"])
@@ -136,3 +141,21 @@ def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int) -> dict[str, in
             if comp >= mes_criacao or comp not in efetivo:
                 efetivo[comp] = item["valor_previsto_centavos"]
     return efetivo
+
+
+def curva_comparativa(conn: sqlite3.Connection, contrato_id: int) -> dict:
+    """Issue #295 (spec 2026-10-20 §3.4, D9): o que a curva S desenha alem do vigente.
+
+    `anterior`: previsto por competencia da linha do tempo sem a ultima versao (a linha honesta, porque a curva
+    do SMO e' refeita com o medido a cada aditivo); None quando so' ha uma versao ou nenhuma.
+    `aditivos`: uma marca por versao do cadastro de origem 'aditivo', no mes da data do documento (assinatura),
+    com o nome do termo (o instrumento; na falta, a chave do cadastro)."""
+    vs = versoes(conn, contrato_id)
+    anterior = None
+    if len(vs) >= 2:
+        anterior = [{"competencia": c, "previsto_centavos": v}
+                    for c, v in sorted(previsto_efetivo(conn, contrato_id, sem_ultima=True).items())]
+    aditivos = [{"competencia": v["data_documento"][:7], "data": v["data_documento"],
+                 "nome": v["instrumento"] or v["chave"]}
+                for v in vs if v["origem_documento"] == "aditivo"]
+    return {"anterior": anterior, "aditivos": aditivos}

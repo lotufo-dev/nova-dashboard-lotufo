@@ -214,3 +214,47 @@ def test_lista_de_versoes_traz_os_dados_do_documento(conn, cid):
         (2, "contratual", "contratual", "2024-04-10", 1, 5_00, False),
         (1, None, None, None, 2, 3_01, True)]
     assert vid != vid2
+
+
+# --- issue #295: curva S com a linha anterior a ultima repactuacao e as marcas dos aditivos -----
+
+def _cadastro(conn, cid, numero, chave, origem, data, instrumento=None):
+    vid = conn.execute("SELECT id FROM cronograma_versoes WHERE contrato_id=? AND numero=?", (cid, numero)).fetchone()[0]
+    conn.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, data_documento,"
+                 " instrumento) VALUES (?,?,?,?,?,?)", (vid, cid, chave, origem, data, instrumento))
+    conn.commit()
+
+
+def test_curva_comparativa_traz_a_linha_anterior_a_ultima_repactuacao(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 10_00), ("2025-02", 10_00), ("2025-03", 10_00)], "manual",
+                           data_documento="2024-12-01")
+    cronograma.nova_versao(conn, 1, cid, [("2025-02", 5_00), ("2025-03", 5_00), ("2025-04", 5_00)], "manual",
+                           data_documento="2025-02-10")
+    cronograma.nova_versao(conn, 1, cid, [("2025-03", 1_00), ("2025-05", 1_00)], "manual", data_documento="2025-03-20")
+    r = cronograma.curva_comparativa(conn, cid)
+    # a anterior e' o previsto efetivo SEM a versao 3; a vigente continua sendo a 3
+    assert r["anterior"] == [{"competencia": "2025-01", "previsto_centavos": 10_00},
+                             {"competencia": "2025-02", "previsto_centavos": 5_00},
+                             {"competencia": "2025-03", "previsto_centavos": 5_00},
+                             {"competencia": "2025-04", "previsto_centavos": 5_00}]
+    assert cronograma.previsto_efetivo(conn, cid)["2025-03"] == 1_00
+
+
+def test_curva_comparativa_sem_repactuacao_nao_tem_linha_anterior(conn, cid):
+    assert cronograma.curva_comparativa(conn, cid) == {"anterior": None, "aditivos": []}
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 10_00)], "manual")
+    assert cronograma.curva_comparativa(conn, cid)["anterior"] is None
+
+
+def test_curva_comparativa_marca_cada_aditivo_no_mes_da_assinatura(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 1_00)], "manual", data_documento="2024-12-01")
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 2_00)], "manual", data_documento="2025-06-30")
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 3_00)], "manual", data_documento="2025-09-02")
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 4_00)], "manual", data_documento="2025-10-01")
+    _cadastro(conn, cid, 1, "contratual", "contratual", "2024-12-01")
+    _cadastro(conn, cid, 2, "ta1", "aditivo", "2025-06-30", "1º Termo Aditivo")
+    _cadastro(conn, cid, 3, "ta2", "aditivo", "2025-09-02")          # sem instrumento: vale a chave
+    _cadastro(conn, cid, 4, "smo", "smo", "2025-10-01")              # curva do SMO nao e' aditivo
+    assert cronograma.curva_comparativa(conn, cid)["aditivos"] == [
+        {"competencia": "2025-06", "data": "2025-06-30", "nome": "1º Termo Aditivo"},
+        {"competencia": "2025-09", "data": "2025-09-02", "nome": "ta2"}]

@@ -55,3 +55,14 @@ def test_rotas_da_deteccao_sairam(client_admin):
     for rota in ("/api/sugestoes", "/api/graph/status", "/api/paineis/engenharia",
                  "/api/paineis/consolidado", "/api/paineis/consolidado.csv"):
         assert client_admin.get(rota).status_code == 404, rota
+
+
+def test_curva_traz_a_linha_anterior_e_as_marcas_dos_aditivos(client_admin):
+    cid = _cenario(client_admin)
+    r0 = client_admin.get(f"/api/contratos/{cid}/curva").json()
+    assert r0["anterior"] is None and r0["aditivos"] == []
+    client_admin.post(f"/api/contratos/{cid}/cronograma", json={
+        "itens": [{"competencia": "2026-07", "valor": "100,00"}, {"competencia": "2026-08", "valor": "100,00"}]})
+    r = client_admin.get(f"/api/contratos/{cid}/curva").json()
+    assert r["anterior"] == [{"competencia": "2026-07", "previsto_centavos": 300_00}]
+    assert r["aditivos"] == []

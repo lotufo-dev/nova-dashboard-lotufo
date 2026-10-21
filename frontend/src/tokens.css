@@ -1960,6 +1960,7 @@ a.indicador__rotulo { color: var(--acento); }
 .curva__legenda span { display: inline-flex; align-items: center; gap: 6px; }
 .curva__chave { width: 14px; height: 3px; border-radius: 2px; }
 .curva__chave--previsto { background: var(--linha-hover); }
+.curva__chave--anterior { background: repeating-linear-gradient(90deg, var(--texto-2) 0 4px, transparent 4px 7px); }
 .curva__chave--medido { background: var(--marca); }
 .curva__quadro { position: relative; padding: 12px 16px 8px 8px; }
 .curva__quadro[hidden] { display: none; }
@@ -1970,6 +1971,9 @@ a.indicador__rotulo { color: var(--acento); }
 .c-eixo { fill: var(--texto-2); font-size: 11px; font-family: var(--fonte); }
 .c-previsto { fill: none; stroke: var(--linha-hover); stroke-width: 2; }
 .c-previsto-ponto { fill: var(--superficie); stroke: var(--linha-hover); stroke-width: 1.5; }
+.c-previsto-anterior { fill: none; stroke: var(--texto-2); stroke-width: 2; stroke-dasharray: 6 4; }
+.c-aditivo-linha { stroke: var(--acento-linha); stroke-width: 1; }
+.c-aditivo-txt { fill: var(--acento-mais); font-size: 11px; font-family: var(--fonte); }
 .c-medido { fill: none; stroke: var(--marca); stroke-width: 2.25; }
 .c-medido-ponto { fill: var(--marca); }
 .c-medido-ponto--provisorio { fill: var(--superficie); stroke: var(--marca); stroke-width: 1.5; }
