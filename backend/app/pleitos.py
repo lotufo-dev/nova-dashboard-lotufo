@@ -121,6 +121,30 @@ def _medicao_final(conn, contrato_id: int) -> dict | None:
 
 # --- criar e anexos --------------------------------------------------------------------------------
 
+def _aberto(conn, contrato_id: int, tipo: str, data_base_mes: str | None, ciclo: int | None):
+    """Pleito do sistema, nem enviado nem descartado, do mesmo contrato, tipo e ciclo (o que trava abrir outro)."""
+    return conn.execute("SELECT numero_oficio FROM pleitos WHERE contrato_id=? AND tipo=? AND origem='sistema' "
+                        "AND data_base_mes IS ? AND ciclo IS ? AND situacao NOT IN ('enviado','descartado') "
+                        "LIMIT 1", (contrato_id, tipo, data_base_mes, ciclo)).fetchone()
+
+
+def _original(conn, p: dict) -> dict:
+    """O pedido que a reiteracao cobra: sobe pelas reiteracoes ate' o pleito que nao e' reiteracao."""
+    a = _linha(conn, p["reemite_pleito_id"])
+    vistos = {p["id"]}
+    while _reiteracao(a) and a["reemite_pleito_id"] and a["id"] not in vistos:
+        vistos.add(a["id"])
+        a = _linha(conn, a["reemite_pleito_id"])
+    return a
+
+
+def _textos_reiteracao(conn) -> bool:
+    try:
+        return bool(carta.config(conn).get("pleito_reiteracao"))
+    except ValueError:
+        return False
+
+
 def _vigente(conn, p: dict) -> dict | None:
     """O pleito enviado mais recente do ciclo do pleito: o unico que se reitera ou se reemite."""
     return reajuste._pleito(conn, p["contrato_id"], p["data_base_mes"], p["ciclo"])
@@ -146,8 +170,11 @@ def _recusa_reemissao(conn, anterior: dict, reemissao: str, familia: str | None)
     if reemissao == "reiteracao":
         if familia not in FAMILIAS_REITERACAO:
             return "A reiteração é da MT-PAR e da Prefeitura; nos outros órgãos, reemita o cronograma"
-        if _apostilado(conn, anterior):
-            return "O ciclo já está apostilado: não há o que reiterar"
+        if not _textos_reiteracao(conn):        # sem eles a carta nao monta e o rascunho travaria o ciclo
+            return "Textos da reiteração (pleito_reiteracao) não carregados: rode `cadastro aplicar`"
+    # o apostilamento fecha o ciclo (spec 2026-09-21 §7.2): como o antigo "Reenviar pleito", nada se reemite depois
+    if _apostilado(conn, anterior):
+        return "O ciclo já está apostilado: não há o que reiterar nem reemitir"
     return None
 
 
@@ -156,9 +183,7 @@ def reemissoes_possiveis(conn, p: dict) -> list[str]:
     pleito em aberto no ciclo, que se continua em vez de abrir outro)."""
     if p["tipo"] != "reajuste" or p["situacao"] != "enviado" or not p["data_base_mes"]:
         return []
-    if conn.execute("SELECT 1 FROM pleitos WHERE contrato_id=? AND tipo='reajuste' AND origem='sistema' "
-                    "AND data_base_mes=? AND ciclo IS ? AND situacao NOT IN ('enviado','descartado') LIMIT 1",
-                    (p["contrato_id"], p["data_base_mes"], p["ciclo"])).fetchone():
+    if _aberto(conn, p["contrato_id"], "reajuste", p["data_base_mes"], p["ciclo"]):
         return []
     o = conn.execute("SELECT o.familia FROM contratos c JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
                      (p["contrato_id"],)).fetchone()
@@ -214,9 +239,7 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
         data_base_mes, dias = None, None
     with db.mutacao(conn):
         # dentro do BEGIN IMMEDIATE: dois cliques simultaneos nao abrem dois oficios do mesmo ciclo (issue #9)
-        aberto = conn.execute("SELECT numero_oficio FROM pleitos WHERE contrato_id=? AND tipo=? AND origem='sistema' "
-                              "AND data_base_mes IS ? AND ciclo IS ? AND situacao NOT IN ('enviado','descartado') "
-                              "LIMIT 1", (contrato_id, tipo, data_base_mes, ciclo)).fetchone()
+        aberto = _aberto(conn, contrato_id, tipo, data_base_mes, ciclo)
         if aberto:
             onde = "para este ciclo" if ciclo else "deste tipo"
             raise RascunhoAberto(f"Já há um pleito em aberto {onde} ({ROTULO[tipo].lower()} "
@@ -289,8 +312,10 @@ def _campos(conn, p: dict, c: dict, hoje: datetime.date) -> dict:
                    "data_base_extenso": f"{mes}/{p['data_base_mes'][:4]}",      # "MARÇO/2023", como no CT-122
                    "indice": (b["indice"] if b else None) or "índice do contrato",
                    "mes_aniversario": mes, "aniversario": aniv.strftime("%d/%m/%Y")}
-        if p.get("reemite_pleito_id"):          # reiteracao e reemissao citam o oficio anterior e ha' quanto tempo
-            a = _linha(conn, p["reemite_pleito_id"])
+        if _reiteracao(p) and p.get("reemite_pleito_id"):
+            # a reiteracao cita o pedido original (subindo pelas reiteracoes anteriores) e ha' quanto tempo ele
+            # espera; a reemissao do cronograma e' a carta da familia A de novo e nao usa estes campos
+            a = _original(conn, p)
             enviado = a["enviado_em"][:10] if a["enviado_em"] else None
             campos |= {"oficio_anterior": oficios.na_carta(a["numero_oficio"]) if a["numero_oficio"] else "",
                        "data_oficio_anterior": _br(enviado),

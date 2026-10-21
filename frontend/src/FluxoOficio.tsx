@@ -201,7 +201,7 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
         {p.origem === "cadastro" && <span className="cartao__dica">enviado antes do sistema (cadastro)</span>}
       </div>
       {desfecho && <p className="cartao__corpo campo__nota">{desfecho}</p>}
-      {cadeiaDoPleito(p).map(t => <p key={t} className="cartao__corpo campo__nota">{t}</p>)}
+      {cadeiaDoPleito(p).map((t, i) => <p key={i} className="cartao__corpo campo__nota">{t}</p>)}
       {p.origem === "sistema" && p.situacao !== "enviado" && (
         <div className="cartao__corpo pilha">
           {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}

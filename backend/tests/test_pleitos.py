@@ -275,7 +275,37 @@ def test_reiteracao_recusada_com_o_ciclo_apostilado(cenario):
     c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'ap-1', "
               "'apostilamento_reajuste', '2026-09-01', ?)", (ids["contrato"], json.dumps({"ciclo": 2026})))
     c.commit()
+    # o apostilamento fecha o ciclo: nem reiteracao nem reemissao (como o antigo "Reenviar pleito")
+    assert pleitos.detalhe(c, original)["reemissoes_possiveis"] == []
+    for r in ("reiteracao", "cronograma"):
+        with pytest.raises(ValueError, match="apostilado"):
+            pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "245", reemite_pleito_id=original, reemissao=r)
+
+
+def test_reiteracao_sem_os_textos_no_cadastro_nao_e_oferecida(cenario):
+    """Sem `pleito_reiteracao` no cartas.yaml a carta nao monta; o rascunho travaria o ciclo (RascunhoAberto)."""
+    c, ids = cenario
+    _mtpar(c)
+    original = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
+    _enviar(c, ids, original, D(2026, 6, 15))
+    c.execute("UPDATE cadastro_geral SET valor=json_remove(valor, '$.pleito_reiteracao') WHERE chave='cartas'")
+    c.commit()
     assert pleitos.detalhe(c, original)["reemissoes_possiveis"] == ["cronograma"]
-    with pytest.raises(ValueError, match="apostilado"):
+    with pytest.raises(ValueError, match="pleito_reiteracao"):
         pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "245", reemite_pleito_id=original,
                       reemissao="reiteracao")
+
+
+def test_segunda_reiteracao_cita_o_pedido_original(cenario):
+    c, ids = cenario
+    _mtpar(c)
+    original = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
+    _enviar(c, ids, original, D(2026, 6, 15))
+    r1 = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "245", reemite_pleito_id=original,
+                       reemissao="reiteracao", hoje=D(2026, 9, 1))
+    _enviar(c, ids, r1, D(2026, 9, 1))
+    r2 = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "300", reemite_pleito_id=r1,
+                       reemissao="reiteracao", hoje=D(2026, 10, 30))
+    assert pleitos.detalhe(c, r2)["anterior"]["id"] == r1                # a cadeia liga ao imediato
+    corpo = pleitos.corpo_padrao(c, r2, D(2026, 10, 30))
+    assert "CT/122/LT/2026, de 15/06/2026" in corpo and "137 dias" in corpo    # a carta cobra o pedido original
