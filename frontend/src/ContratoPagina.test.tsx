@@ -77,6 +77,23 @@ describe("Página da obra: o desenho novo", () => {
     expect(within(abas).getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBe("page");
   });
 
+  it("com aditivo de reajuste, o % medido e o saldo usam o vigente de execução (#262)", async () => {
+    responder();
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
+      if (url.endsWith("/cabecalho")) return CABECALHO_COMPLETO;
+      if (url.endsWith("/curva")) return { curva: [], saldo: { vigente_centavos: 100000, vigente_execucao_centavos: 80000,
+        reajuste_contratado_centavos: 20000, atestado_execucao_centavos: 40000, saldo_centavos: 40000, formula: "x" } };
+      return base(url, opcoes);
+    });
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    const lista = await screen.findByRole("list", { name: "Números da obra" });
+    // 400,00 de 800,00 (o vigente de 1.000,00 tem 200,00 de reajuste): 50%, nao 40%
+    await waitFor(() => expect(within(lista).getByText((_, el) =>
+      el?.classList.contains("campo__nota") === true && el.textContent === "50% do vigente de execução")).toBeTruthy());
+    expect(within(lista).getByText("vigente de execução − medido")).toBeTruthy();
+  });
+
   it("a curva S alterna entre acumulado e por mês", async () => {
     responderCompleto();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="prazos" origem={null} busca={{}} />);

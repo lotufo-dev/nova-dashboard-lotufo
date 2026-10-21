@@ -272,8 +272,9 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date) -> dict:
                       else m["valor_protocolado_centavos"] or 0)
                      for m in ms if m["contrato_id"] == c["id"] and m["tipo"] in ("execucao", "projeto")
                      and m["estado"] not in FORA)
-        saldo = contratos.cota(v["valor_vigente_centavos"] - medido, c["percentual_direito_bp"]) or 0
-        vigente_cota = contratos.cota(v["valor_vigente_centavos"], c["percentual_direito_bp"]) or 0
+        # #262: saldo a precos iniciais -- o aditivo de reajuste fica fora, como no saldo da obra (`paineis.saldo`)
+        saldo = contratos.cota(v["valor_vigente_execucao_centavos"] - medido, c["percentual_direito_bp"]) or 0
+        vigente_cota = contratos.cota(v["valor_vigente_execucao_centavos"], c["percentual_direito_bp"]) or 0
         medido_cota = contratos.cota(medido, c["percentual_direito_bp"]) or 0
         ritmo += sum(_cota(m) for m in ms if m["contrato_id"] == c["id"] and m["tipo"] in ("execucao", "projeto")
                      and m["estado"] not in FORA and m["competencia"] in ultimos)

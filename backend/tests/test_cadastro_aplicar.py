@@ -481,3 +481,28 @@ def test_endosso_com_vigencia_aplicado_e_imutavel(conn):
     troca = {**inst, "dados": {"vigencia_fim": "2028-01-01"}}
     with pytest.raises(ValueError, match="já aplicado"):
         cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[troca])]))
+
+
+def test_natureza_do_aditivo_e_gravada_e_padrao_execucao(conn):
+    """#262: o aditivo de reajuste (SES) entra no vigente mas fica fora do saldo; sem natureza, execucao."""
+    reaj = {**AD_VALOR, "chave": "ta-08", "data": "2026-07-30", "delta_valor_centavos": 100_01, "natureza": "reajuste"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR, reaj])]))
+    nat = dict(conn.execute("SELECT chave_cadastro, natureza FROM aditivos").fetchall())
+    assert nat == {"ta-01": "execucao", "ta-08": "reajuste"}
+    v = contratos_mod.vigente(conn, 1)
+    assert v["valor_vigente_centavos"] == 1512720000 + 323606718 + 100_01
+    assert v["valor_vigente_execucao_centavos"] == 1512720000 + 323606718
+    assert v["valor_reajuste_centavos"] == 100_01
+
+
+def test_natureza_de_aditivo_aplicado_pode_ser_corrigida_com_auditoria(conn):
+    """O aditivo carregado antes da #262 nasceu `execucao`; marcar como reajuste nao muda valor nem data
+    (o documento e' o mesmo), entao e' correcao de classificacao, auditada como o numero e o objeto."""
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR])]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**AD_VALOR, "natureza": "reajuste"}])]))
+    assert r["instrumentos"]["alterados"] == ["MT-402/ta-01"]
+    assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] == "reajuste"
+    ult = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.instrumento' ORDER BY id DESC").fetchone()
+    assert json.loads(ult["antes"])["natureza"] == "execucao" and json.loads(ult["depois"])["natureza"] == "reajuste"
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**AD_VALOR, "natureza": "reajuste"}])]))
+    assert r["instrumentos"]["iguais"] == 1
