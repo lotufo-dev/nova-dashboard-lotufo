@@ -464,3 +464,26 @@ def test_endosso_de_outra_apolice_gera_aviso_nao_erro(tmp_path):
     assert any("end-1" in a and "'AP 1'" in a and "diferente da apólice do contrato" in a for a in cad["avisos"])
     c["instrumentos"] = [_endosso("AP-1")]
     assert ca.preparar(_escrever(tmp_path, contratos=[c]))["avisos"] == []
+
+
+# --- issue #257: data-base com indice obrigatorio e aplica_a (spec 2026-10-20 §2.4, D7) ----------
+
+@pytest.mark.parametrize("db_", [{"mes": "2023-04"}, {"mes": "2023-04", "indice": ""},
+                                 {"mes": "2023-04", "indice": "  "}, {"mes": "2023-04", "indice": None}])
+def test_data_base_sem_indice_e_recusada(tmp_path, db_):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": [db_]}]))
+    assert any("datas_base[0].indice" in e and "obrigatório" in e for e in erros)
+
+
+@pytest.mark.parametrize("tabela", ["SINAPI", "sicro", " Sicro "])
+def test_tabela_de_precos_no_indice_e_recusada(tmp_path, tabela):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": [{"mes": "2023-04", "indice": tabela}]}]))
+    assert any("datas_base[0].indice" in e and "tabela de preços" in e and "índice do reajuste" in e for e in erros)
+
+
+def test_aplica_a_e_lido_e_opcional(tmp_path):
+    c = {**CONTRATO, "datas_base": [{"mes": "2022-01", "indice": "INCC-DI", "aplica_a": " itens SINAPI "},
+                                    {"mes": "2022-03", "indice": " FGV/DNIT "}]}
+    dbs = ca.preparar(_escrever(tmp_path, contratos=[c]))["contratos"][0]["datas_base"]
+    assert dbs == [{"mes": "2022-01", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+                   {"mes": "2022-03", "indice": "FGV/DNIT", "aplica_a": ""}]

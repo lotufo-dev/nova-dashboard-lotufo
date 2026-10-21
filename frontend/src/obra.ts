@@ -43,7 +43,7 @@ export function desfechoDoPedido<I extends InstrumentoPrazo>(enviadoEm: string |
     .sort((a, b) => (a.data_assinatura ?? "").localeCompare(b.data_assinatura ?? ""))[0] ?? null;
 }
 
-export type CicloApi = { data_base_mes: string; indice: string | null; ciclo: number; aniversario: string; situacao: string;
+export type CicloApi = { data_base_mes: string; indice: string | null; aplica_a?: string | null; ciclo: number; aniversario: string; situacao: string;
   dias: number | null; apostilamento?: InstrumentoCadastro | null };
 export type PleitoResumo = { id: number; data_base_mes: string | null; ciclo: number | null };
 

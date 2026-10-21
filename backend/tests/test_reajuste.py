@@ -70,6 +70,21 @@ def test_aviso_diz_a_data_base(cenario):
     assert [(a["tipo"], a["data_base_mes"]) for a in reajuste.avisos(c, D(2026, 9, 10))] ==         [("reajuste_apostilamento", "2024-06")]
 
 
+def test_duas_datas_base_geram_dois_avisos_com_aplica_a(cenario):
+    # D7 (2026-10-20): duas bases no mesmo contrato, cada uma com o seu aniversario e a parte a que se aplica
+    c, ids = cenario
+    c.execute("UPDATE contrato_datas_base SET aplica_a='itens SINAPI' WHERE contrato_id=?", (ids["contrato"],))
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice, aplica_a) "
+              "VALUES (?, '2024-09', 'FGV/DNIT', 'itens SICRO')", (ids["contrato"],))
+    c.commit()
+    k = reajuste.ciclos(c, ids["contrato"], D(2026, 9, 1))
+    assert [(x["data_base_mes"], x["aplica_a"]) for x in k] == [("2024-06", "itens SINAPI"), ("2024-09", "itens SICRO")]
+    av = [a for a in reajuste.avisos(c, D(2026, 9, 1)) if a["tipo"] == "reajuste_pleito"]
+    assert [a["data_base_mes"] for a in av] == ["2024-06", "2024-09"]
+    assert "data-base 06/2024 (itens SINAPI)" in av[0]["mensagem"]
+    assert "data-base 09/2024 (itens SICRO)" in av[1]["mensagem"]
+
+
 def test_sem_reajuste_desliga(cenario):
     c, ids = cenario
     c.execute("UPDATE contratos SET sem_reajuste=1 WHERE id=?", (ids["contrato"],)); c.commit()
