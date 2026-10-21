@@ -240,17 +240,43 @@ def desmarcar_final(medicao_id: ID, dados: DesmarcarFinalIn, usuario: dict = Dep
 TETO_PLANILHA = 25 * 1024 * 1024
 
 
-def _anexos(oficio: UploadFile, planilha: UploadFile) -> dict:
+def _pdf_validado(arquivo: UploadFile) -> bytes:
+    dados = b"".join(arquivos.blocos_validados(arquivo))     # tipo, %PDF- e 10 MB (415/413)
+    arquivos.conferir_bytes_parseaveis(dados)                # abre num leitor de verdade (415)
+    return dados
+
+
+def _anexos_validados(oficio: UploadFile, planilha: UploadFile) -> list[tuple[bytes, str]]:
     """Oficio assinado (PDF, com as guardas de app/arquivos.py) e planilha (.xlsx; .pdf onde a planilha/carta e'
-    o proprio boletim da Lotufo, Prefeitura e SES), gravados pelo hash na pasta `planilhas`."""
-    sha = arquivos.receber_pdf(oficio, arquivos.pasta("planilhas"))
+    o proprio boletim da Lotufo, Prefeitura e SES). Os DOIS sao validados antes de gravar qualquer um: recusa da
+    planilha nao deixa o oficio orfao na pasta (gate Sol, rodada 1)."""
     if (planilha.filename or "").lower().endswith(".pdf"):
-        sha_p = arquivos.receber_pdf(planilha, arquivos.pasta("planilhas"))
-        caminho_p = f"planilhas/{sha_p}.pdf"
+        da_planilha = (_pdf_validado(planilha), "pdf")
     else:
-        dados = b"".join(arquivos.blocos_validados(planilha, teto_bytes=TETO_PLANILHA, tipo="xlsx"))
-        caminho_p, sha_p = arquivos.gravar_bytes("planilhas", dados, "xlsx")
-    return {"arquivo": f"planilhas/{sha}.pdf", "sha256": sha, "arquivo_planilha": caminho_p, "sha256_planilha": sha_p}
+        da_planilha = (b"".join(arquivos.blocos_validados(planilha, teto_bytes=TETO_PLANILHA, tipo="xlsx")), "xlsx")
+    return [(_pdf_validado(oficio), "pdf"), da_planilha]
+
+
+def _gravar_e_registrar(conn: sqlite3.Connection, validados: list[tuple[bytes, str]], registrar):
+    """Grava os anexos pelo hash e chama `registrar(anexos)`. Se o registro falhar, apaga o arquivo que esta
+    chamada criou e que nenhuma versao gravada referencia (o mesmo hash pode ser de outra versao: esse fica)."""
+    novos, caminhos = [], []
+    for dados, ext in validados:
+        existia = (arquivos.pasta("planilhas") / f"{arquivos.sha_de(dados)}.{ext}").exists()
+        caminho, sha = arquivos.gravar_bytes("planilhas", dados, ext)
+        caminhos.append((caminho, sha))
+        if not existia:
+            novos.append(caminho)
+    (arq, sha), (arq_p, sha_p) = caminhos
+    try:
+        return registrar({"arquivo": arq, "sha256": sha, "arquivo_planilha": arq_p, "sha256_planilha": sha_p})
+    except BaseException:
+        conn.rollback()
+        for caminho in novos:
+            if conn.execute("SELECT 1 FROM medicao_planilhas WHERE arquivo=? OR arquivo_planilha=?",
+                            (caminho, caminho)).fetchone() is None:
+                arquivos.caminho_seguro(caminho).unlink(missing_ok=True)
+        raise
 
 
 def _centavos(valor: str) -> int:
@@ -290,9 +316,10 @@ def registrar_planilha(contrato_id: ID,
         medicao_planilhas.conferir_registro(conn, contrato_id, dados)   # recusa antes de gravar os anexos
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
-    anexos = _anexos(oficio, planilha)
+    validados = _anexos_validados(oficio, planilha)
     try:
-        return medicao_planilhas.registrar(conn, usuario["id"], contrato_id, dados, anexos)
+        return _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.registrar(
+            conn, usuario["id"], contrato_id, dados, anexos))
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
 
@@ -314,8 +341,9 @@ def revisar_planilha(medicao_id: ID,
         medicao_planilhas.conferir_revisao(conn, medicao_id, dados)   # recusa antes de gravar os anexos
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
-    anexos = _anexos(oficio, planilha)
+    validados = _anexos_validados(oficio, planilha)
     try:
-        return medicao_planilhas.revisar(conn, usuario["id"], medicao_id, dados, anexos)
+        return _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.revisar(
+            conn, usuario["id"], medicao_id, dados, anexos))
     except ValueError as e:
         raise _erro_do_cliente(conn, e)

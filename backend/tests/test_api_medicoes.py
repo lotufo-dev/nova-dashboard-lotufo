@@ -588,6 +588,37 @@ def _mid_unica(cl, cid):
     return cl.get(f"/api/contratos/{cid}/medicoes").json()[0]["id"]
 
 
+def _pasta_planilhas():
+    from app import db
+    pasta = db.db_path().parent / "planilhas"
+    return sorted(p.name for p in pasta.iterdir()) if pasta.exists() else []
+
+
+def test_planilha_invalida_nao_deixa_o_oficio_gravado(client_admin):
+    """Gate Sol rodada 1: os dois anexos sao validados antes de gravar qualquer um."""
+    cid = _contrato(client_admin)
+    arquivos_ = {**_arquivos_planilha(), "planilha": ("planilha.xlsx", b"nao sou zip", XLSX)}
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=arquivos_, data={
+        "numero": 1, "competencia": "2026-07", "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31",
+        "valor": "1,00"})
+    assert r.status_code == 415
+    assert _pasta_planilhas() == []
+
+
+def test_registro_que_falha_depois_de_gravar_apaga_os_anexos_novos(client_admin, monkeypatch):
+    """A recusa dentro da transacao (corrida com outra requisicao) nao deixa arquivo sem versao."""
+    from app import medicao_planilhas
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid).status_code == 201
+    antes = _pasta_planilhas()
+
+    def recusa(*_a, **_k):
+        raise ValueError("Estado da medição mudou concorrentemente; tente novamente")
+    monkeypatch.setattr(medicao_planilhas, "registrar", recusa)
+    assert _nova_planilha(client_admin, cid, 2, "2026-08", "2026-08-01", "2026-08-31").status_code == 422
+    assert _pasta_planilhas() == antes and len(antes) == 2
+
+
 def test_revisao_sem_motivo_recusada_com_motivo_vira_versao_2(client_admin):
     cid = _contrato(client_admin)
     mid = _nova_planilha(client_admin, cid).json()["medicao_id"]

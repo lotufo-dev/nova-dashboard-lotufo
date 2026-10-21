@@ -67,11 +67,15 @@ def avisos(conn, contrato_id: int, tipo: str, numero: int, competencia: str, ini
     return saida
 
 
-def _saldo(conn, contrato_id: int, acumulado: int, pedido: int | None) -> dict:
+def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None) -> dict:
     """saldo = vigente − acumulado anterior (e − pedido, no `saldo_apos_pedido`). Difere de paineis.saldo de
     proposito: o acumulado da planilha/carta conta o pedido ainda nao protocolado das medicoes anteriores (spec
-    §2.1 passo 1, "soma dos aprovados, senao pedidos"), e o painel so' o que ja' foi protocolado."""
+    §2.1 passo 1, "soma dos aprovados, senao pedidos"), e o painel so' o que ja' foi protocolado.
+    So' a execucao tem saldo contra o valor do contrato (como em paineis.saldo); no projeto, os saldos sao nulos."""
     vigente = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
+    if tipo != "execucao":
+        return {"vigente_centavos": vigente, "acumulado_anterior_centavos": acumulado,
+                "saldo_centavos": None, "saldo_apos_pedido_centavos": None}
     return {"vigente_centavos": vigente, "acumulado_anterior_centavos": acumulado,
             "saldo_centavos": vigente - acumulado,
             "saldo_apos_pedido_centavos": None if pedido is None else vigente - acumulado - pedido}
@@ -103,7 +107,7 @@ def sugestao(conn, contrato_id: int, tipo: str = "execucao") -> dict:
     inicio, fim = espelho.periodo_do_mes(competencia)
     acumulado = acumulado_anterior(conn, contrato_id, tipo, numero)
     return {"tipo": tipo, "numero": numero, "numero_orgao": numero_orgao, "competencia": competencia,
-            "periodo_inicio": inicio, "periodo_fim": fim, **_saldo(conn, contrato_id, acumulado, None)}
+            "periodo_inicio": inicio, "periodo_fim": fim, **_saldo(conn, contrato_id, tipo, acumulado, None)}
 
 
 def _conferir_periodo(inicio: str, fim: str) -> None:
@@ -146,8 +150,10 @@ def conferir_registro(conn, contrato_id: int, dados: dict):
     ja = conn.execute("SELECT * FROM medicoes WHERE contrato_id=? AND numero=? AND tipo=?",
                       (contrato_id, numero, tipo)).fetchone()
     if ja is not None and ja["estado"] != "prevista":
+        # so' orienta a revisao onde ela e' aceita (revisor, rodada 1)
+        dica = ": para corrigir a planilha/carta, registre uma revisão" if ja["estado"] in ESTADOS_REVISAO else ""
         raise ValueError(f"{nome_medicao(numero, tipo)} já existe neste contrato e está "
-                         f"{rotulo_estado(ja['estado'])}: para corrigir a planilha/carta, registre uma revisão")
+                         f"{rotulo_estado(ja['estado'])}{dica}")
     return ja
 
 
@@ -198,7 +204,7 @@ def registrar(conn, usuario_id: int, contrato_id: int, dados: dict, anexos: dict
         auditoria.registrar(conn, usuario_id, "medicao.planilha", "medicao", mid, antes, {
             "estado": "planilha_gerada", "numero": numero, "tipo": tipo, "competencia": competencia,
             "numero_orgao": numero_orgao, **_evento(dados, 1, pid, acumulado, anexos, avisos_)})
-        saldo = _saldo(conn, contrato_id, acumulado, dados["valor_centavos"])
+        saldo = _saldo(conn, contrato_id, tipo, acumulado, dados["valor_centavos"])
     return {"medicao_id": mid, "versao": 1, "estado": "planilha_gerada", "avisos": avisos_, **saldo}
 
 
@@ -208,8 +214,15 @@ def revisar(conn, usuario_id: int, medicao_id: int, dados: dict, anexos: dict) -
     motivo = (dados.get("motivo") or "").strip()
     with db.mutacao(conn):
         m = conferir_revisao(conn, medicao_id, dados)
-        versao = conn.execute("SELECT MAX(versao) + 1 FROM medicao_planilhas WHERE medicao_id=?",
-                              (medicao_id,)).fetchone()[0]
+        vigente = conn.execute(
+            "SELECT versao, valor_pedido_centavos, periodo_inicio, periodo_fim, sha256, sha256_planilha "
+            "FROM medicao_planilhas WHERE medicao_id=? ORDER BY versao DESC LIMIT 1", (medicao_id,)).fetchone()
+        # dois cliques em "revisar" nao viram duas versoes iguais (revisor e gate Sol, rodada 1)
+        if (vigente["valor_pedido_centavos"], vigente["periodo_inicio"], vigente["periodo_fim"], vigente["sha256"],
+                vigente["sha256_planilha"]) == (dados["valor_centavos"], dados["periodo_inicio"], dados["periodo_fim"],
+                                                 anexos["sha256"], anexos["sha256_planilha"]):
+            raise ValueError(f"Esta revisão é igual à versão {vigente['versao']} já registrada")
+        versao = vigente["versao"] + 1
         avisos_ = avisos(conn, m["contrato_id"], m["tipo"], m["numero"], m["competencia"], dados["periodo_inicio"])
         acumulado = acumulado_anterior(conn, m["contrato_id"], m["tipo"], m["numero"])
         antes = None
@@ -223,7 +236,9 @@ def revisar(conn, usuario_id: int, medicao_id: int, dados: dict, anexos: dict) -
         pid = _gravar_versao(conn, usuario_id, medicao_id, versao, dados, acumulado, anexos, motivo)
         auditoria.registrar(conn, usuario_id, "medicao.planilha", "medicao", medicao_id, antes,
                             {"motivo": motivo, **_evento(dados, versao, pid, acumulado, anexos, avisos_)})
-        saldo = _saldo(conn, m["contrato_id"], acumulado, dados["valor_centavos"])
+        # o pedido do saldo e' o que FICOU na medicao: depois do envio a revisao nao o troca (gate Sol, rodada 1)
+        pedido = dados["valor_centavos"] if m["estado"] == "planilha_gerada" else m["valor_protocolado_centavos"]
+        saldo = _saldo(conn, m["contrato_id"], m["tipo"], acumulado, pedido)
     return {"medicao_id": medicao_id, "versao": versao, "estado": m["estado"], "avisos": avisos_, **saldo}
 
 

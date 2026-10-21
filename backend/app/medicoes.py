@@ -41,6 +41,9 @@ TRANSICOES = {
     "desistida": set(),
 }
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
+# Issue #281: estados em que o pedido (valor protocolado) e' o da planilha/carta e so' muda por revisao
+ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
+PEDIDO_POR_REVISAO = "Para mudar o pedido, registre uma revisão da planilha/carta"
 # B-12 (10/10/2026): mensagem ao usuario com o tipo e o estado por extenso, nunca o codigo ("(execucao)")
 ROTULO_TIPO = {"execucao": "execução", "reajuste": "reajuste", "projeto": "projeto"}
 ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta registrada",
@@ -239,6 +242,9 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         # (testes de quebra 10/10/2026, A-16): a 631 virou R$ 1,00 depois da nota e nada avisou.
         if campo == "protocolado" and m["valor_protocolado_origem"] == "espelho":
             raise ValueError("O valor desta medição vem do espelho: para mudar, gere o espelho de novo")
+        # Issue #281: da planilha/carta ao boletim, o pedido so' muda por versao nova (com motivo)
+        if campo == "protocolado" and m["estado"] in ESTADOS_PLANILHA:
+            raise ValueError(PEDIDO_POR_REVISAO)
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []
@@ -254,7 +260,8 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         cond = " AND estado NOT IN ('cancelada','desistida')"
         if campo == "protocolado":
             cond += (" AND (congelada=0 OR valor_protocolado_centavos IS NULL)"
-                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho'")
+                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho'"
+                     f" AND estado NOT IN ({','.join(repr(e) for e in ESTADOS_PLANILHA)})")
         cur = conn.execute(f"UPDATE medicoes SET {col_v}=?, {col_o}=?{extra_sql} WHERE id=?{cond}",
                            (centavos, origem, *extra_par, medicao_id))
         db.exigir_uma_linha(cur, "Medição congelada ou encerrada concorrentemente: o valor não pôde ser "

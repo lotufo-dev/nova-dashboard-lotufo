@@ -624,3 +624,56 @@ def test_numero_do_orgao_nao_e_inventado_nem_apagado_na_prevista(conn, contrato_
     assert (s["numero"], s["numero_orgao"]) == (3, None)     # prevista abaixo da ultima: nada a extrapolar
     medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(3, "2026-07", "2026-07-01", "2026-07-31", 1), ANEXOS)
     assert medicoes.detalhe(conn, mid)["numero_orgao"] == 8
+
+
+@pytest.mark.parametrize("estado", ["planilha_gerada", "planilha_enviada", "boletim_recebido"])
+def test_pedido_da_planilha_nao_muda_pelo_valor_avulso(conn, contrato_id, estado):
+    """Gate Sol rodada 1: da planilha ao boletim o pedido so' muda por revisao (versao nova com motivo)."""
+    from app import medicao_planilhas
+    mid = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31",
+                                                                       100_01), ANEXOS)["medicao_id"]
+    conn.execute("UPDATE medicoes SET estado=? WHERE id=?", (estado, mid)); conn.commit()
+    with pytest.raises(ValueError, match="Para mudar o pedido, registre uma revisão da planilha/carta"):
+        medicoes.definir_valor(conn, 1, mid, "protocolado", 200_00, "manual")
+    assert medicoes.detalhe(conn, mid)["valor_protocolado_centavos"] == 100_01
+    medicoes.definir_valor(conn, 1, mid, "atestado", 99_99, "manual")     # o aprovado segue (boletim/glosa)
+
+
+def test_saldo_da_revisao_depois_do_envio_usa_o_pedido_da_medicao(conn, contrato_id):
+    from app import medicao_planilhas
+    mid = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31",
+                                                                       10_000_01), ANEXOS)["medicao_id"]
+    conn.execute("UPDATE medicoes SET estado='planilha_enviada' WHERE id=?", (mid,)); conn.commit()
+    r = medicao_planilhas.revisar(conn, 1, mid, {"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31",
+                                                 "valor_centavos": 5_000_00, "motivo": "Rev01"}, ANEXOS)
+    assert r["saldo_apos_pedido_centavos"] == 100_000_00 - 10_000_01
+
+
+def test_revisao_igual_a_vigente_e_recusada(conn, contrato_id):
+    from app import medicao_planilhas
+    mid = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31",
+                                                                       100), ANEXOS)["medicao_id"]
+    rev = {"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor_centavos": 90, "motivo": "Rev01"}
+    medicao_planilhas.revisar(conn, 1, mid, rev, ANEXOS)
+    with pytest.raises(ValueError, match="Esta revisão é igual à versão 2 já registrada"):
+        medicao_planilhas.revisar(conn, 1, mid, {**rev, "motivo": "clique repetido"}, ANEXOS)
+    # outro arquivo com o mesmo valor e periodo e' revisao de verdade
+    medicao_planilhas.revisar(conn, 1, mid, rev, {**ANEXOS, "sha256_planilha": "c" * 64})
+    assert [v["versao"] for v in medicao_planilhas.versoes(conn, mid)] == [1, 2, 3]
+
+
+def test_numero_cancelado_nao_sugere_revisao(conn, contrato_id):
+    from app import medicao_planilhas
+    _com_valores(conn, contrato_id, 1, "cancelada", 1_00, None)
+    with pytest.raises(ValueError) as e:
+        medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31", 1),
+                                    ANEXOS)
+    assert str(e.value) == "Medição 1 de execução já existe neste contrato e está cancelada"
+
+
+def test_projeto_nao_tem_saldo_contra_o_contrato(conn, contrato_id):
+    from app import medicao_planilhas
+    r = medicao_planilhas.registrar(conn, 1, contrato_id, {**_planilha(1, "2026-07", "2026-07-01", "2026-07-31", 1),
+                                                           "tipo": "projeto"}, ANEXOS)
+    assert r["saldo_centavos"] is None and r["saldo_apos_pedido_centavos"] is None
+    assert medicao_planilhas.sugestao(conn, contrato_id, "projeto")["saldo_centavos"] is None
