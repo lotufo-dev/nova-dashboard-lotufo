@@ -26,6 +26,8 @@ TIPOS_ADITIVO = {"aditivo_valor": "valor", "aditivo_prazo": "prazo", "aditivo_mi
 TIPOS_OUTROS = ("apostilamento_reajuste", "paralisacao", "reinicio", "marco_encerramento",
                 "endosso_garantia")
 _MES = re.compile(r"^[0-9]{4}-(0[1-9]|1[0-2])$")  # A-14 (10/10/2026): \d casa "٢٠٢٤"
+# tabela do orcamento, nunca indice de reajuste (#257): como palavra ("Tabela SINAPI", "SICRO/DNIT"), nao so' o texto inteiro
+_TABELAS_DE_PRECOS = re.compile(r"\b(SINAPI|SICRO)\b", re.IGNORECASE)
 # Bloco 4: o que um orgao (ou a excecao de um contrato) pode exigir no protocolo.
 DOCUMENTOS = ("federal", "fgts", "trabalhista", "estadual", "municipal", "falencia", "regularidade")
 # Bloco 5: pecas tecnicas que o orgao pede no protocolo (feitas fora e arrastadas pela operacao).
@@ -381,7 +383,17 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         if not _MES.match(mes):
             falha(f"datas_base[{i}].mes", f"use AAAA-MM: {mes!r}")
             continue
-        c["datas_base"].append({"mes": mes, "indice": str(db_.get("indice") or "")})
+        # Issue #257 (spec 2026-10-20 §2.4): indice obrigatorio, e e' o do reajuste, nao a tabela de precos
+        indice = str(db_.get("indice") or "").strip()
+        if not indice:
+            falha(f"datas_base[{i}].indice", "obrigatório: diga o índice do reajuste desta data-base "
+                                              "(ex.: INCC-DI, FGV/DNIT)")
+        elif _TABELAS_DE_PRECOS.search(indice):
+            falha(f"datas_base[{i}].indice", f"{indice!r} é a tabela de preços do orçamento, não o índice do "
+                                              "reajuste; use o índice que corrige a data-base (ex.: INCC-DI, "
+                                              "FGV/DNIT) e, se o contrato tem uma base por tabela, diga a parte "
+                                              "em aplica_a (ex.: aplica_a: itens SICRO)")
+        c["datas_base"].append({"mes": mes, "indice": indice, "aplica_a": str(db_.get("aplica_a") or "").strip()})
     if len({d["mes"] for d in c["datas_base"]}) != len(c["datas_base"]):
         falha("datas_base", "mês repetido")
 

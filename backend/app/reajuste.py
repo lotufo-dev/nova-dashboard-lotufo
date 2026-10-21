@@ -78,7 +78,7 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
     c = conn.execute("SELECT sem_reajuste FROM contratos WHERE id=?", (contrato_id,)).fetchone()
     if c is None or c["sem_reajuste"]:
         return []
-    bases = [dict(r) for r in conn.execute("SELECT mes, indice FROM contrato_datas_base WHERE contrato_id=? "
+    bases = [dict(r) for r in conn.execute("SELECT mes, indice, aplica_a FROM contrato_datas_base WHERE contrato_id=? "
                                            "ORDER BY mes", (contrato_id,))]
     out = []
     for b in bases:
@@ -86,7 +86,7 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
         if y is None:
             y = int(b["mes"][:4]) + 1
             aniv = aniversario(b["mes"], y)
-            out.append({"data_base_mes": b["mes"], "indice": b["indice"], "ciclo": y, "aniversario": aniv.isoformat(),
+            out.append({"data_base_mes": b["mes"], "indice": b["indice"], "aplica_a": b["aplica_a"], "ciclo": y, "aniversario": aniv.isoformat(),
                         "situacao": "futuro", "dias": (aniv - hoje).days, "pleito": None, "apostilamento": None})
             continue
         aniv = aniversario(b["mes"], y)
@@ -98,7 +98,7 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
             sit, dias = "apostilamento_pendente", (hoje - datetime.date.fromisoformat(pl["enviado_em"][:10])).days
         else:
             sit, dias = "pleito_pendente", (aniv - hoje).days
-        out.append({"data_base_mes": b["mes"], "indice": b["indice"], "ciclo": y, "aniversario": aniv.isoformat(),
+        out.append({"data_base_mes": b["mes"], "indice": b["indice"], "aplica_a": b["aplica_a"], "ciclo": y, "aniversario": aniv.isoformat(),
                     "situacao": sit, "dias": dias, "pleito": pl, "apostilamento": ap})
     return out
 
@@ -116,6 +116,8 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
         destino = {"tela": "contrato", "id": c["id"], "aba": "reajuste"}
         for k in ciclos(conn, c["id"], hoje):
             base = f"{k['data_base_mes'][5:7]}/{k['data_base_mes'][:4]}"
+            if k.get("aplica_a"):              # D7: com duas bases, o aviso diz a parte do contrato de cada uma
+                base += f" ({k['aplica_a']})"
             aniv = datetime.date.fromisoformat(k["aniversario"])
             if k["situacao"] == "pleito_pendente":
                 quando = (f"faz aniversário em {aniv:%d/%m/%Y} (em {k['dias']} dias)" if k["dias"] >= 0
