@@ -631,6 +631,16 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
     for inst in c["instrumentos"]:
         if inst["corrige"] and inst["corrige"] not in vistos:
             falha("instrumentos", f"{inst['chave']} corrige {inst['corrige']!r}, que não existe")
+    # Gates da PR #317: corrige para si mesmo, ou em roda (a corrige b, b corrige a), tiraria todos da conta
+    corrige_de = {i["chave"]: i["corrige"] for i in c["instrumentos"] if i["corrige"]}
+    for inst in c["instrumentos"]:
+        caminho, k = [inst["chave"]], inst["corrige"]
+        while k and k not in caminho:
+            caminho.append(k)
+            k = corrige_de.get(k)
+        if k:
+            falha("instrumentos", f"{inst['chave']}: a cadeia de correção volta a {k} "
+                                  f"({' → '.join([*caminho, k])}); um termo não corrige a si mesmo")
     # Bloco 7: folga propria do contrato (vence a do orgao; na MTPAR varia por contrato), campos dos
     # instrumentos e pleitos enviados antes do sistema.
     c["folga_vigencia_dias"] = None

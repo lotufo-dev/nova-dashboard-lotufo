@@ -444,6 +444,7 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
                             {"instrumento_chave": p["instrumento_chave"]}, {"instrumento_chave": inst["chave"]})
         rel["alterados"].append(f"{c['nome_curto']}/reajuste {p['numero_oficio']}: atendido por {inst['chave']}")
 
+    corrigidos_por_outro = {i["corrige"] for i in aps if i["corrige"]}
     bases = [d["mes"] for d in c["datas_base"]]
     for inst in ordem:
         dados = inst["dados"]
@@ -456,12 +457,22 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
                              "ciclo determinável; diga data_base e ciclo no termo")
         # a correcao herda o pleito do termo que corrige (a cadeia inteira); a busca por data e' so' do termo original
         cadeia = corrigidos(inst)
-        herdados = conn.execute(
-            f"SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? AND tipo='reajuste' "
-            f"AND instrumento_chave IN ({','.join('?' * len(cadeia))}) ORDER BY id",
+        da_cadeia = conn.execute(
+            f"SELECT id, instrumento_chave, numero_oficio, data_base_mes, ciclo FROM pleitos WHERE contrato_id=? "
+            f"AND tipo='reajuste' AND instrumento_chave IN ({','.join('?' * len(cadeia))}) ORDER BY id",
             (contrato_id, *cadeia)).fetchall() if cadeia else []
-        for p in herdados:
-            ligar(p, inst)
+        # so' herda o pleito do mesmo ciclo e data-base; o de outro ciclo fica sem termo (o termo dele foi corrigido)
+        herdados = [p for p in da_cadeia if (p["data_base_mes"], p["ciclo"]) == (base, ciclo)]
+        mesmos = {p["id"] for p in herdados}
+        for p in da_cadeia:
+            if p["id"] in mesmos:
+                ligar(p, inst)
+            else:
+                conn.execute("UPDATE pleitos SET instrumento_chave=NULL WHERE id=?", (p["id"],))
+                auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", p["id"],
+                                    {"instrumento_chave": p["instrumento_chave"]}, {"instrumento_chave": None})
+                rel["alterados"].append(f"{c['nome_curto']}/reajuste {p['numero_oficio']}: sem termo "
+                                        f"({inst['chave']} corrige {p['instrumento_chave']} para outro ciclo)")
         if base is None or ciclo is None:
             continue
         iid = conn.execute("SELECT id FROM instrumentos WHERE contrato_id=? AND chave=?",
@@ -474,7 +485,8 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
                 [(contrato_id, base, ciclo, x["competencia"], x["valor_centavos"], iid, usuario_id) for x in comps])
             auditoria.registrar(conn, usuario_id, "cadastro.reajuste_previsoes", "instrumento", iid, None,
                                 {"chave": inst["chave"], "data_base_mes": base, "ciclo": ciclo, "competencias": comps})
-        if herdados or conn.execute("SELECT 1 FROM pleitos WHERE contrato_id=? AND instrumento_chave=? LIMIT 1",
+        # termo corrigido nao atende pleito nenhum (senao cada aplicar o religaria e a correcao o desligaria)
+        if inst["chave"] in corrigidos_por_outro or herdados or conn.execute("SELECT 1 FROM pleitos WHERE contrato_id=? AND instrumento_chave=? LIMIT 1",
                                     (contrato_id, inst["chave"])).fetchone():
             continue
         # o pleito que o termo atendeu foi enviado ate' a data do termo (reemissao posterior ainda espera o dela)

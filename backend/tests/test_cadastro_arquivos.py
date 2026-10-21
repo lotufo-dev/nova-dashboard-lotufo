@@ -668,6 +668,23 @@ def test_apostilamento_com_competencias_ou_periodo_invalidos_e_erro(tmp_path, ca
     assert any(f"instrumentos[ap-reaj-1].{trecho}" in e for e in erros), erros
 
 
+def test_corrige_para_si_mesmo_e_recusado(tmp_path):
+    ap = {**_apostilamento(), "corrige": "ap-reaj-1"}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    assert any("cadeia de correção volta a ap-reaj-1" in e for e in erros), erros
+
+
+def test_corrige_em_roda_e_recusado_e_cadeia_linear_passa(tmp_path):
+    a = {**_apostilamento(), "chave": "ap-a", "corrige": "ap-b"}
+    b = {**_apostilamento(), "chave": "ap-b", "corrige": "ap-c"}
+    c = {**_apostilamento(), "chave": "ap-c", "corrige": "ap-a"}
+    erros = _erros(_escrever(tmp_path / "roda", contratos=[{**CONTRATO, "instrumentos": [a, b, c]}]))
+    assert any("ap-a: a cadeia de correção volta a ap-a" in e for e in erros), erros
+    linear = [{**c, "corrige": None}, b, a]
+    cad = ca.preparar(_escrever(tmp_path / "linear", contratos=[{**CONTRATO, "instrumentos": linear}]))
+    assert [i["corrige"] for i in cad["contratos"][0]["instrumentos"]] == [None, "ap-c", "ap-b"]
+
+
 def test_apostilamento_com_competencias_sem_data_base_em_contrato_de_duas_bases_e_erro(tmp_path):
     bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
              {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]

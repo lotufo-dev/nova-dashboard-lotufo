@@ -722,6 +722,26 @@ def test_correcao_herda_o_pleito_do_termo_corrigido_antes_de_buscar_por_data(con
     assert ligados == {"CT-122-LT-2026": "ap-12", "CT-200-LT-2026": None}
 
 
+def test_correcao_para_outro_ciclo_nao_herda_o_pleito_e_ele_fica_sem_termo(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+    # ap-12 corrige ap-11 dizendo que o termo era do ciclo 2025: o pleito de 2026 nao foi atendido por ele
+    outro_ciclo = {**AP_COMP, "chave": "ap-12", "data": "2026-10-01", "corrige": "ap-11",
+                   "dados": {**AP_COMP["dados"], "ciclo": 2025, "periodo": None,
+                             "competencias": [{"competencia": "2025-04", "valor": "1,00"}]}}
+    cad = _cad(contratos=[_contrato(instrumentos=[AP_COMP, outro_ciclo], pleitos_anteriores=[PLEITO_2026])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: sem termo (ap-12 corrige ap-11 para outro ciclo)"]
+    assert reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 10, 20))[0]["situacao"] == \
+        "apostilamento_pendente"
+    # reaplicar nao mexe de novo nem audita de novo
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0]
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == []
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0] == antes
+
+
 def test_competencias_sem_ciclo_determinavel_e_erro_no_aplicar(conn):
     ruim = {**AP_COMP, "dados": {"competencias": [{"competencia": "2026-04", "valor": "1,00"}], "eficacia": "x"},
             "data": "2026-09-15"}
