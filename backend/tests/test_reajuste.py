@@ -193,3 +193,17 @@ def test_previsao_vigente_compara_a_hora_e_nao_o_texto(cenario):
     _previsao(c, cid, "2026-08", 3_05, "manual", criado_em="2026-10-06")
     _previsao(c, cid, "2026-08", 4_07, "manual", criado_em="2026-10-05 23:00:00")
     assert [p["valor_previsto_centavos"] for p in reajuste.previsoes_vigentes(c, cid)] == [1_01, 3_05]
+
+
+def test_previsao_digitada_no_pleito_descartado_tambem_sai_da_conta(cenario):
+    """Issue #272: a digitada (manual) aponta o pleito em que foi feita; descartado o pleito, ela deixa de valer,
+    e a manual sem pleito continua."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    pid = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _previsao(c, cid, "2026-07", 100_01, "manual", pleito_id=pid, criado_em="2026-07-01 09:00:00")
+    _previsao(c, cid, "2026-08", 5_03, "manual", criado_em="2026-07-01 09:00:00")
+    assert [p["valor_previsto_centavos"] for p in reajuste.previsoes_vigentes(c, cid)] == [100_01, 5_03]
+    c.execute("UPDATE pleitos SET situacao='descartado' WHERE id=?", (pid,)); c.commit()
+    assert [p["valor_previsto_centavos"] for p in reajuste.previsoes_vigentes(c, cid)] == [5_03]
