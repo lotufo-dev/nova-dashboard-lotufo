@@ -18,12 +18,14 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    mudança pendente em arquivo versionado (`git status --short` só com `??`).
 2. `git fetch origin` e `git pull --ff-only`: `master` igual a `origin/master`.
 3. Nenhuma issue aberta com label `parar` (o agente `listar-issues` avisa).
-4. No máximo **10 trabalhadoras** ao mesmo tempo nesta máquina (decidido pelo Leo em 13/10/2026; é a produção e a CPU cai sob carga).
+4. Teto de trabalhadoras ao mesmo tempo, pela máquina onde a orquestradora roda: **20 no Mac** (decidido pelo Leo em
+   20/10/2026; não é a produção) e **10 no `<servidor>`** (decidido em 13/10/2026; é a produção e a CPU cai sob
+   carga). No Windows vale 10.
 
 ## Rodada
 
 1. **Listar.** Agent `listar-issues` (`subagent_type: listar-issues`). Guardar a tabela.
-2. **Escolher** as 10 primeiras da tabela. Antes de abrir, ler cada issue (`gh issue view <N>`); se o texto não
+2. **Escolher** as primeiras da tabela, até o teto da máquina (pré-requisito 4). Antes de abrir, ler cada issue (`gh issue view <N>`); se o texto não
    diz o que o Leo quer ver na tela nem dá para deduzir dos documentos (`docs/`, `docs/backlog.md`,
    `cadastro/`), não abrir trabalhadora: comentar a pergunta na issue, pôr `decisao` e pegar a próxima.
    Se a leitura mostrar label `decisao`, `parar`, `precisa-do-leo` ou `sessao-manual` posto depois da
@@ -128,5 +130,5 @@ gh project item-edit --id "$ITEM" --project-id PVT_kwDOFHPVk84Bnvvw --field-id P
 - Editar código, commitar ou fazer push de código próprio; o que vê de errado vira issue (`gh issue create`).
 - Mergear à força, pular a CI ou mexer em PR que o Leo comentou.
 - Deploy sem o Leo pedir. Mexer em `C:\DashboardLotufo` ou no banco padrão.
-- Rodar a suíte inteira localmente ou mais de 10 trabalhadoras ao mesmo tempo.
+- Rodar a suíte inteira localmente ou passar do teto de trabalhadoras da máquina (20 no Mac, 10 no `<servidor>`).
 - Reabrir uma issue com `precisa-do-leo` ou `decisao` antes de o Leo tirar o label.

@@ -57,7 +57,7 @@ digita pouco e confere; regra, cadastro e instrumento são do Leo, em arquivo ve
   ciclo (`contrato`, `medicao`, `faturamento`, `nota`, `protocolo`, `pagamento`, `infra`). A branch sobe ao
   GitHub como `<N>-<nome-curto>` (`231-oficio-envio-por-fora`), pela skill `abrir-pr`.
 - **Orquestradora** (decidido em 13/10/2026): sessão fixa do Leo na pasta principal, em `master`, modelo Opus.
-  Quando ele diz "rodada" ou "até acabar", a skill `orquestrar` pega até 10 issues elegíveis, abre uma
+  Quando ele diz "rodada" ou "até acabar", a skill `orquestrar` pega até 20 issues elegíveis no Mac (10 no servidor), abre uma
   **trabalhadora** por issue (agente `trabalhadora`, worktree próprio, Sonnet; Opus se a issue tem `risco:*`),
   roda o `revisor-adversarial` (Opus) em toda PR e o gate Sol (codex) nas de risco, manda os achados de volta
   (2 rodadas no máximo), e liga o auto-merge em qualquer PR quando as travas passam (CI verde, sem conflito,
