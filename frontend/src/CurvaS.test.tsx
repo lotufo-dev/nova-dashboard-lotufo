@@ -46,6 +46,20 @@ describe("CurvaS: duas linhas, marcas e desvio", () => {
     expect(rodape).toMatch(/contra o anterior: -50,0 p\.p\./);
   });
 
+  it("lista anterior vazia, ou vigente sem pontos, nao desenha a linha anterior; desvio minusculo nao vira -0,0", () => {
+    const vazia = render(<CurvaS pontos={PONTOS} anterior={[]} aditivos={[]} contratoId={1} />);
+    expect(vazia.container.querySelector(".c-previsto-anterior")).toBeNull();
+    cleanup();
+    const semVigente = render(<CurvaS pontos={[]} anterior={ANTERIOR} aditivos={[]} contratoId={1} />);
+    expect(semVigente.container.querySelector(".c-previsto-anterior")).toBeNull();
+    cleanup();
+    const pequeno = render(<CurvaS pontos={[p("2026-01", 100_000_00, 99_990_00), p("2026-02", 100_000_00)]}
+      anterior={[{ competencia: "2026-01", previsto_centavos: 100_000_00 }]} aditivos={[]} contratoId={1} />);
+    const t = pequeno.container.querySelector(".curva__rodape")?.textContent ?? "";
+    expect(t).toMatch(/contra o vigente: 0,0 p\.p\./);
+    expect(t).not.toMatch(/-0,0/);
+  });
+
   it("obra sem versao anterior: so a linha vigente, sem legenda nem desvio da anterior", () => {
     const { container } = render(<CurvaS pontos={PONTOS} anterior={null} aditivos={[]} contratoId={1} />);
     expect(container.querySelector(".c-previsto-anterior")).toBeNull();

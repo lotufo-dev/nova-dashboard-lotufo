@@ -48,7 +48,7 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
     return () => window.removeEventListener("resize", medir);
   }, [pontos]);
 
-  const serie = pontos ? curvaS(pontos, anterior) : [];
+  const serie = pontos ? curvaS(pontos, pontos.length > 0 && anterior?.length ? anterior : null) : [];
   const temAnterior = serie.length > 0 && serie[0].acumuladoAnterior !== null;
   const N = serie.length;
   const W = Math.max(300, largura - 24), estreito = W < 560;
@@ -82,7 +82,7 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
   const bw = Math.max(2, Math.min(14, banda * 0.36));
 
   const sel = sobre !== null ? serie[sobre] : null;
-  const pp = (n: number) => `${n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} p.p.`;
+  const pp = (n: number) => `${(Math.abs(n) < 0.05 ? 0 : n).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} p.p.`;
   const textoDesvio = desvio && desvio.vigente !== null
     ? ` Desvio em ${fmtCompetencia(desvio.competencia)}, contra o vigente: ${pp(desvio.vigente)}${desvio.anterior !== null ? `; contra o anterior: ${pp(desvio.anterior)}` : ""}.`
     : "";
