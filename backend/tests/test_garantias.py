@@ -232,3 +232,12 @@ def test_garantia_que_cobre_fim_mais_folga_nao_avisa_e_sem_garantia_ou_baixada_t
     assert len(_aq(c)) == 1
     ids["instrumento"]("marco_encerramento", "2026-10-01", {"marco": "baixa_garantia"}, "baixa")
     assert _aq(c) == []
+
+
+def test_aviso_de_cobertura_vira_critico_depois_da_data_e_nao_vale_em_encerramento(cenario):
+    c, ids = cenario
+    ids["garantia"]("2027-06-01")
+    assert [a["nivel"] for a in _aq(c, D(2027, 12, 21))] == ["critico"]
+    assert [a["nivel"] for a in _aq(c)] == ["acao"]
+    c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-09-01'"); c.commit()
+    assert _aq(c) == []
