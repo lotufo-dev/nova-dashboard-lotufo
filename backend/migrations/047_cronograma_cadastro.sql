@@ -1,4 +1,4 @@
--- 042: versao de cronograma vinda do cadastro (issue #256; spec 2026-10-20 §2.4 e §3.4).
+-- 047: versao de cronograma vinda do cadastro (issue #256; spec 2026-10-20 §2.4 e §3.4).
 --
 -- `contratos/<obra>.yaml` ganha `cronograma: [{chave, origem, data, instrumento, itens}]`; o `cadastro aplicar`
 -- cria uma `cronograma_versoes` por entrada, com criado_em = data do documento. Esta tabela guarda o que o
