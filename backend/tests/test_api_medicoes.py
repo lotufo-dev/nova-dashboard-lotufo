@@ -520,3 +520,59 @@ def test_recebimento_pela_rota_e_manual_mesmo_com_motivo_que_imita_o_corte(clien
         assert mid in conciliacao.recebidas_a_mao(conn)
     finally:
         conn.close()
+
+
+# issue #287: assinatura no DocuSign (evento informativo)
+def test_registrar_assinatura_aparece_na_linha_do_tempo(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01", "envelope": "Boletim 1 - Obra Alfa"})
+    assert r.status_code == 201
+    eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+    assert [e["texto"] for e in eventos] == [
+        "Boletim assinado no DocuSign em 01/10/2026 (envelope Boletim 1 - Obra Alfa) por Admin"]
+
+
+def test_assinatura_com_data_futura_da_422(client_admin):
+    import datetime
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    futura = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
+    r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": futura, "envelope": "x"})
+    assert r.status_code == 422
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"] == []
+
+
+def test_assinatura_em_medicao_inexistente_da_404(client_admin):
+    assert client_admin.post("/api/medicoes/999999/assinatura", json={"data": "2026-10-01"}).status_code == 404
+
+
+def test_assinatura_nao_gera_nem_exige_aviso(client_admin):
+    from app import avisos, db
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    conn = db.get_conn()
+    antes = avisos.listar(conn, publico="todos")
+    client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01"})
+    assert avisos.listar(conn, publico="todos") == antes      # nem com assinatura, nem sem: nada de aviso
+    assert not any("assin" in a["mensagem"].lower() for a in antes)
+
+
+def test_assinatura_identica_repetida_da_422_e_nao_duplica(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    corpo = {"data": "2026-10-01", "envelope": "Boletim 1"}
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 201
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 422
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={**corpo, "data": "2026-10-02"}).status_code == 201
+    assert len(client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]) == 2
+
+
+def test_assinatura_na_linha_do_tempo_usa_a_data_da_assinatura_e_nao_a_do_registro(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-09-15", "envelope": "Boletim 1"})
+    client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1.000,00"})   # registrado antes (hoje)
+    eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+    assert [e["data"] for e in eventos][0] == "2026-09-15"
+    assert "Boletim assinado no DocuSign" in eventos[0]["texto"]    # vem antes do valor, que e' de hoje

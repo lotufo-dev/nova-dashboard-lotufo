@@ -174,6 +174,48 @@ def _eventos_atesto(conn: sqlite3.Connection, ids: list[int], out: dict[int, lis
                              "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
 
 
+def _eventos_assinatura(conn: sqlite3.Connection, ids: list[int], out: dict[int, list[dict]]) -> None:
+    """Issue #287: a assinatura no DocuSign e' evento (medicao_assinaturas, append-only), uma linha por registro."""
+    for i in range(0, len(ids), LOTE_AUDITORIA):
+        lote = ids[i:i + LOTE_AUDITORIA]
+        for r in conn.execute(
+                "SELECT e.medicao_id, e.envelope, e.assinado_em, e.criado_em, u.nome FROM medicao_assinaturas e "
+                "LEFT JOIN usuarios u ON u.id=e.usuario_id "
+                f"WHERE e.medicao_id IN ({','.join('?' * len(lote))}) ORDER BY e.id", lote):
+            texto = f"Boletim assinado no DocuSign em {_data_br(r['assinado_em'])}"
+            if r["envelope"]:
+                texto += f" (envelope {r['envelope']})"
+            # a data do evento e' a da assinatura (como o atesto), nao a do registro: registrada depois do protocolo,
+            # ela nao pode aparecer depois dele
+            out[r["medicao_id"]].append({"data": r["assinado_em"],
+                                         "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+
+
+def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, assinado_em: str,
+                         envelope: str | None) -> int:
+    """Issue #287: registra que o boletim foi assinado no DocuSign (data e nome do envelope do e-mail de
+    conclusao). Evento informativo, sem estado e sem aviso; correcao e' um registro novo."""
+    try:
+        data = datetime.date.fromisoformat(assinado_em)
+    except (TypeError, ValueError):
+        raise ValueError("Data da assinatura inválida")
+    if data > tempo.hoje_local():
+        raise ValueError("A data da assinatura não pode ser futura")
+    envelope = (envelope or "").strip() or None
+    with db.mutacao(conn):
+        if conn.execute("SELECT 1 FROM medicoes WHERE id=?", (medicao_id,)).fetchone() is None:
+            raise ValueError("Medição não encontrada")
+        if conn.execute("SELECT 1 FROM medicao_assinaturas WHERE medicao_id=? AND assinado_em=? AND envelope IS ?",
+                        (medicao_id, data.isoformat(), envelope)).fetchone():
+            raise ValueError("Esta assinatura já está registrada")     # duplo clique: o registro não se apaga depois
+        cur = conn.execute(
+            "INSERT INTO medicao_assinaturas (medicao_id, envelope, assinado_em, origem, usuario_id) "
+            "VALUES (?,?,?,'manual',?)", (medicao_id, envelope, data.isoformat(), usuario_id))
+        auditoria.registrar(conn, usuario_id, "medicao.assinatura", "medicao", medicao_id, None,
+                            {"assinado_em": data.isoformat(), "envelope": envelope})
+        return cur.lastrowid
+
+
 def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int, list[dict]]:
     """B-02 (10/10/2026): as edicoes de valor da auditoria, por medicao, para a linha do tempo (a tela so' mostrava
     espelho, nota, protocolo e atesto). Gravar o mesmo valor nao vira evento. O atestado vem dos eventos de
@@ -198,6 +240,7 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
                                            # gate Sol S5 (10/10/2026): sem usuario, a autoria e' do sistema
                                            "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
     _eventos_atesto(conn, list(out), out)
+    _eventos_assinatura(conn, list(out), out)
     for eventos in out.values():
         eventos.sort(key=lambda e: e["data"] or "")      # estavel: no mesmo segundo, o protocolado vem antes
     return out

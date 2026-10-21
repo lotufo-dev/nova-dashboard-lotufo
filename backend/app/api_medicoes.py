@@ -199,6 +199,22 @@ def estado(medicao_id: ID, dados: EstadoIn,
     return {"ok": True}
 
 
+class AssinaturaIn(BaseModel):
+    data: datetime.date
+    envelope: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/api/medicoes/{medicao_id}/assinatura", status_code=201)
+def registrar_assinatura(medicao_id: ID, dados: AssinaturaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                         conn: sqlite3.Connection = Depends(conexao)):
+    _medicao_existe(conn, medicao_id)
+    try:
+        aid = medicoes.registrar_assinatura(conn, usuario["id"], medicao_id, dados.data.isoformat(), dados.envelope)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    return {"id": aid}
+
+
 # --- bloco 7: medicao final (poe o contrato em encerramento) ------------------------------------------
 
 class FinalIn(BaseModel):
