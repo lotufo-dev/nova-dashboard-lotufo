@@ -471,7 +471,7 @@ export function FormAssinatura({ m, salvando, agir, aoFechar, erro }: Base) {
         <div className="campo">
           <label className="campo__rotulo" htmlFor="campo-envelope-assinatura">Nome do envelope (opcional)</label>
           <input id="campo-envelope-assinatura" name="envelope" autoComplete="off" className="entrada--larga" maxLength={200}
-            placeholder="Como aparece no e-mail de conclusão do DocuSign" value={envelope}
+            placeholder="Ex.: o nome no e-mail de conclusão do DocuSign…" value={envelope}
             onChange={ev => setEnvelope(ev.target.value)} />
         </div>
         <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Registrando…" : "Registrar assinatura"}</button>
