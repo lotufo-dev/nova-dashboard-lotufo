@@ -181,11 +181,15 @@ MAX_COMPETENCIAS = leitura_planilha_reajuste.MAX_COMPETENCIAS
 _COMPETENCIA = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
 
 
-def gravar_previsao_planilha(conn, usuario_id: int, pleito_id: int, dados: bytes) -> int:
+def gravar_previsao_planilha(conn, usuario_id: int, pleito_id: int, dados: bytes, sha256_conferido: str) -> int:
     """Aceite da planilha conferida: o servidor rele o arquivo e grava o que ELE leu, com origem 'pleito' (a tela
-    nao escolhe a origem nem os valores). Fora do modelo levanta `PlanilhaNaoReconhecida` (um ValueError)."""
+    nao escolhe a origem nem os valores). `sha256_conferido` e' o da leitura que a pessoa viu: outro arquivo no
+    aceite e' recusado. Fora do modelo levanta `PlanilhaNaoReconhecida` (um ValueError)."""
+    sha = arquivos.sha_de(dados)
+    if sha != (sha256_conferido or "").lower():
+        raise ValueError("A planilha do aceite não é a que foi conferida; anexe e confira de novo")
     linhas = leitura_planilha_reajuste.ler(dados)
-    return _gravar_previsao(conn, usuario_id, pleito_id, "pleito", linhas, {"planilha_sha256": arquivos.sha_de(dados)})
+    return _gravar_previsao(conn, usuario_id, pleito_id, "pleito", linhas, {"planilha_sha256": sha})
 
 
 def gravar_previsao_digitada(conn, usuario_id: int, pleito_id: int, linhas: list[dict]) -> int:
@@ -252,8 +256,12 @@ def _gravar_previsao(conn, usuario_id: int, pleito_id: int, origem: str, linhas:
                 "valor_previsto_centavos, origem, pleito_id, usuario_id) VALUES (?,?,?,?,?,?,?,?)",
                 (p["contrato_id"], p["data_base_mes"], p["ciclo"], x["competencia"], x["valor_centavos"],
                  origem, pleito_id, usuario_id)).lastrowid)
-        # a gravada tem de ser a que vale; se outra previsao mais forte continua vencendo, a mutacao desfaz tudo
+        # a gravada tem de ser a que vale; se outra previsao mais forte continua vencendo, a mutacao desfaz tudo.
+        # A do pleito que este reemite nao conta: ela sai da conta quando a reemissao for enviada (sem isso, a
+        # reemissao com previsao digitada ficaria sem saida: recusada antes do envio, e depois do envio tambem)
         for r in reajuste.previsoes_vigentes(conn, p["contrato_id"], p["data_base_mes"]):
+            if r["pleito_id"] is not None and r["pleito_id"] == agora["reemite_pleito_id"]:
+                continue
             if r["ciclo"] == p["ciclo"] and r["competencia"] in vistas and r["id"] not in novas:
                 c = r["competencia"]
                 raise ValueError(f"A previsão de {c[5:]}/{c[:4]} continuaria sendo {_fonte(conn, r)}, que vale "

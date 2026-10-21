@@ -11,7 +11,8 @@ import { fmtCompetencia } from "./tempo";
 // digitar e grava com origem "manual". Ler nao grava nada; cada aceite e' um evento novo.
 
 type LinhaLida = { competencia: string; valor_centavos: number; medicao: string; periodo: string };
-type Leitura = { reconhecida: boolean; linhas: LinhaLida[]; mensagem?: string; motivo?: string };
+type Leitura = { reconhecida: boolean; linhas: LinhaLida[]; sha256?: string; mensagem?: string; motivo?: string };
+type Gravada = { previsao_gravada: number };
 type LinhaDigitada = { chave: number; competencia: string; valor: string; negativo: boolean };
 
 let proximaChave = 1;
@@ -24,7 +25,7 @@ export default function PleitoPrevisao({ pleitoId, dataBase, ciclo, aoGravar }: 
 }) {
   const [lidas, setLidas] = useState<LinhaLida[] | null>(null);
   // o aceite manda a MESMA planilha de volta: o servidor rele e grava o que leu (a tela nao decide a origem)
-  const [planilha, setPlanilha] = useState<File | null>(null);
+  const [planilha, setPlanilha] = useState<{ arquivo: File; sha256: string } | null>(null);
   const [digitadas, setDigitadas] = useState<LinhaDigitada[] | null>(null);
   const [naoReconhecida, setNaoReconhecida] = useState<{ mensagem: string; motivo?: string } | null>(null);
   const [erro, setErro] = useState("");
@@ -42,7 +43,7 @@ export default function PleitoPrevisao({ pleitoId, dataBase, ciclo, aoGravar }: 
       const fd = new FormData();
       fd.append("arquivo", f);
       const r = await apiForm<Leitura>(`/api/pleitos/${pleitoId}/previsao/ler`, fd);
-      if (r.reconhecida) { setLidas(r.linhas); setPlanilha(f); }
+      if (r.reconhecida && r.sha256) { setLidas(r.linhas); setPlanilha({ arquivo: f, sha256: r.sha256 }); }
       else {
         setNaoReconhecida({ mensagem: r.mensagem ?? "Não reconheci a planilha; digite a previsão", motivo: r.motivo });
         setDigitadas([linhaVazia()]);
@@ -50,12 +51,13 @@ export default function PleitoPrevisao({ pleitoId, dataBase, ciclo, aoGravar }: 
     } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
   }
 
-  async function gravar(enviar: () => Promise<unknown>, quantas: number) {
+  // a confirmacao diz quantas competencias o SERVIDOR gravou, nao quantas a tela mandou
+  async function gravar(enviar: () => Promise<Gravada>) {
     setOcupado(true); setErro("");
     try {
-      await enviar();
+      const r = await enviar();
       limpar();
-      setOk(`Previsão gravada: ${contar(quantas, "competência", "competências")}.`);
+      setOk(`Previsão gravada: ${contar(r.previsao_gravada, "competência", "competências")}.`);
       aoGravar();
     } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
   }
@@ -63,8 +65,9 @@ export default function PleitoPrevisao({ pleitoId, dataBase, ciclo, aoGravar }: 
   function aceitarLida() {
     if (!planilha || !lidas) return;
     const fd = new FormData();
-    fd.append("arquivo", planilha);
-    void gravar(() => apiForm(`/api/pleitos/${pleitoId}/previsao/planilha`, fd), lidas.length);
+    fd.append("arquivo", planilha.arquivo);
+    fd.append("sha256", planilha.sha256);      // o servidor recusa se o arquivo relido nao for o conferido
+    void gravar(() => apiForm<Gravada>(`/api/pleitos/${pleitoId}/previsao/planilha`, fd));
   }
 
   function gravarDigitadas() {
@@ -74,8 +77,8 @@ export default function PleitoPrevisao({ pleitoId, dataBase, ciclo, aoGravar }: 
       return;
     }
     const linhas = digitadas.map(l => ({ competencia: l.competencia, valor_centavos: (l.negativo ? -1 : 1) * centavos(l.valor) }));
-    void gravar(() => api(`/api/pleitos/${pleitoId}/previsao/digitada`, { method: "POST", body: JSON.stringify({ linhas }) }),
-      linhas.length);
+    void gravar(() => api<Gravada>(`/api/pleitos/${pleitoId}/previsao/digitada`,
+      { method: "POST", body: JSON.stringify({ linhas }) }));
   }
 
   const mudar = (chave: number, campo: "competencia" | "valor", v: string) =>

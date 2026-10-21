@@ -1,4 +1,5 @@
 """Rotas dos pleitos e da medicao final (bloco 7): fluxo pela API com o simulador do Graph."""
+import hashlib
 import json
 import sqlite3
 import threading
@@ -343,7 +344,11 @@ def _planilha(*linhas):
 
 
 def _aceitar(cl, pid, *linhas):
-    return cl.post(f"/api/pleitos/{pid}/previsao/planilha", files=_arquivo("prev.xlsx", _planilha(*linhas), XLSX))
+    """Como a tela faz: le, e aceita a mesma planilha com o sha256 que a leitura devolveu."""
+    dados = _planilha(*linhas)
+    lida = cl.post(f"/api/pleitos/{pid}/previsao/ler", files=_arquivo("prev.xlsx", dados, XLSX)).json()
+    return cl.post(f"/api/pleitos/{pid}/previsao/planilha", data={"sha256": lida["sha256"]},
+                   files=_arquivo("prev.xlsx", dados, XLSX))
 
 
 def _digitar(cl, pid, linhas):
@@ -355,6 +360,7 @@ def test_aceitar_grava_previsoes_de_origem_pleito_e_aparecem_na_aba_reajuste(api
     pid = _novo_pleito(cl, cid)
     r = _aceitar(cl, pid, ("2026-07", 1234.56), ("2026-08", -0.1))
     assert r.status_code == 200, r.text
+    assert r.json()["previsao_gravada"] == 2           # a contagem que a tela confirma vem do servidor
     grav = _previsoes(cid)
     assert [(p["competencia"], p["valor"], p["origem"], p["pleito_id"], p["data_base_mes"], p["ciclo"]) for p in grav] \
         == [("2026-07", 123456, "pleito", pid, "2024-06", 2026), ("2026-08", -10, "pleito", pid, "2024-06", 2026)]
@@ -387,9 +393,18 @@ def test_origem_pleito_so_nasce_da_planilha_relida_no_servidor(api):
     # a rota antiga, que aceitava a origem do corpo, nao existe mais
     assert cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito", "linhas": linhas}).status_code in (404, 405)
     assert cl.post(f"/api/pleitos/{pid}/previsao/planilha").status_code == 422           # sem arquivo
-    r = cl.post(f"/api/pleitos/{pid}/previsao/planilha",
-                files=_arquivo("outra.xlsx", _planilha_fora_do_modelo(), XLSX))
+    fora = _planilha_fora_do_modelo()
+    r = cl.post(f"/api/pleitos/{pid}/previsao/planilha", data={"sha256": hashlib.sha256(fora).hexdigest()},
+                files=_arquivo("outra.xlsx", fora, XLSX))
     assert r.status_code == 422 and "Não reconheci a planilha" in r.json()["detail"]
+    # a planilha do aceite tem de ser a conferida: sem o sha256, ou com o de outra leitura, nao grava
+    conferida, outra = _planilha(("2026-07", 1.0)), _planilha(("2026-07", 9.0))
+    assert cl.post(f"/api/pleitos/{pid}/previsao/planilha",
+                   files=_arquivo("p.xlsx", conferida, XLSX)).status_code == 422
+    r = cl.post(f"/api/pleitos/{pid}/previsao/planilha", data={"sha256": hashlib.sha256(conferida).hexdigest()},
+                files=_arquivo("p.xlsx", outra, XLSX))
+    assert r.status_code == 422 and "não é a que foi conferida" in r.json()["detail"]
+    assert _previsoes(cid) == []
     r = cl.post(f"/api/pleitos/{pid}/previsao/digitada", json={"origem": "pleito", "linhas": linhas})
     assert r.status_code == 200, r.text
     assert [(p["origem"], p["pleito_id"]) for p in _previsoes(cid)] == [("manual", pid)]
@@ -518,6 +533,22 @@ def test_previsao_que_perderia_para_a_de_outro_pleito_do_ciclo_e_recusada(api):
     vig = {p["competencia"]: p["valor_previsto_centavos"]
            for p in cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]}
     assert vig == {"2026-07": 100, "2026-08": 300}
+
+
+def test_reemissao_aceita_previsao_digitada_mesmo_com_a_lida_do_pleito_que_ela_reemite(api):
+    """Pleito B reemite A (A enviado com previsao lida). A digitada de B nao pode ser recusada por perder para a
+    de A: a de A sai da conta quando B for enviado, e depois do envio B nao aceita mais previsao (sem saida)."""
+    cl, cid, _ = api
+    a, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, a, ("2026-07", 1.0), ("2026-08", 2.0)).status_code == 200
+    assert cl.post(f"/api/pleitos/{a}/enviar", json=corpo).status_code == 200
+    b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
+    c = db.get_conn()          # a reemissao (#277) ainda nao tem tela: liga B a A direto no banco
+    c.execute("UPDATE pleitos SET reemite_pleito_id=? WHERE id=?", (a, b)); c.commit(); c.close()
+    r = _digitar(cl, b, [{"competencia": "2026-07", "valor_centavos": 7}, {"competencia": "2026-08", "valor_centavos": 9}])
+    assert r.status_code == 200, r.text
+    assert r.json()["previsao_gravada"] == 2
+    assert [(p["origem"], p["pleito_id"]) for p in _previsoes(cid)][-2:] == [("manual", b), ("manual", b)]
 
 
 def test_digitada_e_descartada_some_da_aba(api):

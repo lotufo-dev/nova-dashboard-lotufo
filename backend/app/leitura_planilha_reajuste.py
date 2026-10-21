@@ -16,6 +16,8 @@ import unicodedata
 import zipfile
 
 import openpyxl
+from defusedxml import ElementTree       # XML de fora: sem entidade expandida (o openpyxl usa o mesmo)
+from openpyxl.utils import get_column_letter
 
 from app import dinheiro, rm
 
@@ -104,29 +106,38 @@ def ler(dados: bytes) -> list[dict]:
         wb.close()
 
 
-def _formulas_sem_valor(dados: bytes, linhas: list[tuple[int, str]], colunas: tuple[int, ...]) -> list[str]:
-    """Das linhas lidas sem valor (data_only devolve None), as que tem FORMULA na celula: o arquivo foi salvo sem
-    o valor calculado (gerado por programa, ou Excel sem recalculo), e a leitura nao pode tratar como vazio."""
+_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+
+
+def _formulas_sem_valor(dados: bytes, caminho: str, linhas: list[tuple[int, str]],
+                        colunas: tuple[int, ...]) -> list[str]:
+    """Das linhas lidas sem valor (data_only devolve None), as que tem FORMULA sem nenhum valor guardado: o arquivo
+    foi salvo sem calcular (gerado por programa), e a leitura nao pode tratar como vazio. Pelo XML da aba, porque o
+    openpyxl devolve None nos dois casos: formula que da' texto vazio (`=SE(...;"";...)`) o Excel grava com
+    `<v></v>` e e' vazia de verdade; so' a celula com `<f>` e sem `<v>` ficou sem o calculo."""
     nomes = dict(linhas)
-    wb = openpyxl.load_workbook(io.BytesIO(dados), read_only=True, data_only=False)
-    try:
-        ws = wb[ABA]
-        com_formula = []
-        # uma varredura so' (no read_only, pular para uma linha custa reler a aba ate' ela)
-        for numero, linha in enumerate(ws.iter_rows(min_row=min(nomes), max_row=max(nomes), max_col=MAX_COLUNAS,
-                                                    values_only=True), start=min(nomes)):
-            if numero in nomes and any(c < len(linha) and isinstance(linha[c], str) and linha[c].startswith("=")
-                                       for c in colunas):
-                com_formula.append(nomes[numero])
-        return com_formula
-    finally:
-        wb.close()
+    alvo = {f"{get_column_letter(c + 1)}{n}": n for n in nomes for c in colunas}
+    com_formula: list[str] = []
+    with zipfile.ZipFile(io.BytesIO(dados)) as z, z.open(caminho.lstrip("/")) as xml:
+        # uma varredura so', em fluxo (a aba nao vai inteira para a memoria)
+        for _, el in ElementTree.iterparse(xml):
+            if el.tag != f"{_NS}c":
+                continue
+            n = alvo.get(el.get("r", ""))
+            if n is not None and el.find(f"{_NS}f") is not None and nomes[n] not in com_formula:
+                v = el.find(f"{_NS}v")
+                # texto vazio calculado: t="str" com <v></v> (Excel); sem <v>, ou <v> vazio sem tipo (o que o
+                # openpyxl e outros geradores gravam), a formula nunca foi calculada
+                if v is None or (not (v.text or "") and el.get("t") != "str"):
+                    com_formula.append(nomes[n])
+            el.clear()
+    return com_formula
 
 
-def _recusar_formula_sem_valor(dados: bytes, sem_valor: list[tuple[int, str]], *colunas: int) -> None:
+def _recusar_formula_sem_valor(dados: bytes, caminho: str, sem_valor: list[tuple[int, str]], *colunas: int) -> None:
     if not sem_valor:
         return
-    nomes = _formulas_sem_valor(dados, sem_valor, colunas)
+    nomes = _formulas_sem_valor(dados, caminho, sem_valor, colunas)
     if nomes:
         raise PlanilhaNaoReconhecida(f"{nomes[0]} tem fórmula sem o valor calculado; abra a planilha no Excel, "
                                      "salve e anexe de novo")
@@ -136,16 +147,18 @@ def _ler_resumo(wb, dados: bytes) -> list[dict]:
     if ABA not in wb.sheetnames:
         raise PlanilhaNaoReconhecida("falta a aba Resumo")
     ws = wb[ABA]
-    # a dimensao declarada na aba: tabela de medicoes nao passa de alguns milhares de linhas
-    if (ws.max_row or 0) > MAX_VARRIDAS:
-        raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
+    caminho = ws._worksheet_path      # o XML da aba, para distinguir formula sem calculo de formula vazia
     inicio, col_med, col_per, col_reaj = _colunas(ws)
     out: list[dict] = []
     vistas: dict[str, str] = {}
     sem_valor: list[tuple[int, str]] = []
+    # a dimensao declarada nao conta (formatacao ate' a linha 8000 e' comum); o custo fica limitado pelas colunas
+    # lidas e pelo teto de linhas, e depois do teto so' linha com dado recusa (leitura parcial nao serve)
     for n, linha in enumerate(ws.iter_rows(min_row=inicio, max_col=MAX_COLUNAS, values_only=True)):
-        if n >= MAX_VARRIDAS:     # sem TOTAIS e sem fim: leitura parcial nao serve
-            raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
+        if n >= MAX_VARRIDAS:
+            if any(v is not None and str(v).strip() for v in linha):
+                raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
+            continue
         celula = lambda c: linha[c] if c < len(linha) else None   # noqa: E731
         medicao, periodo, valor = celula(col_med), celula(col_per), celula(col_reaj)
         rotulo = _texto(medicao)
@@ -165,7 +178,7 @@ def _ler_resumo(wb, dados: bytes) -> list[dict]:
             raise PlanilhaNaoReconhecida(f"o reajuste de {nome} não é um número")
         comp = _competencia(periodo)
         if comp is None:
-            _recusar_formula_sem_valor(dados, sem_valor, col_med, col_per, col_reaj)
+            _recusar_formula_sem_valor(dados, caminho, sem_valor, col_med, col_per, col_reaj)
             raise PlanilhaNaoReconhecida(f"o período de {nome} não tem data legível")
         if comp in vistas:
             raise PlanilhaNaoReconhecida(f"a competência {comp[5:]}/{comp[:4]} aparece em {vistas[comp]} e em {nome}")
@@ -174,7 +187,7 @@ def _ler_resumo(wb, dados: bytes) -> list[dict]:
             raise PlanilhaNaoReconhecida("competências demais na aba Resumo")
         out.append({"competencia": comp, "valor_centavos": _centavos(valor), "medicao": texto_med,
                     "periodo": periodo.strip() if isinstance(periodo, str) else comp})
-    _recusar_formula_sem_valor(dados, sem_valor, col_med, col_per, col_reaj)
+    _recusar_formula_sem_valor(dados, caminho, sem_valor, col_med, col_per, col_reaj)
     if not out:
         raise PlanilhaNaoReconhecida("nenhuma linha de medição com reajuste na aba Resumo")
     return sorted(out, key=lambda x: x["competencia"])

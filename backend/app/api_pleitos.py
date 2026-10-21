@@ -137,35 +137,38 @@ def anexo(pid: ID, tipo: Literal[pleitos.TIPOS_ANEXO] = Form(...),
 def ler_previsao(pid: ID, arquivo: UploadFile = File(...), _=Depends(exigir("editar_cadastros")),
                  conn: sqlite3.Connection = Depends(conexao)):
     """Le a planilha de previsao (modelo "Mem. e Cron. - Prev. de Reajuste") para a pessoa conferir. Nao grava:
-    o aceite e' `POST /previsao`. Fora do modelo, devolve a mensagem e a tabela vazia para digitar."""
+    o aceite e' `POST /previsao/planilha`, com o `sha256` daqui. Fora do modelo, devolve a mensagem e a tabela
+    vazia para digitar."""
     _existe(conn, pid)
     dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=TETO_PLANILHA, tipo="xlsx"))
     try:
-        return {"reconhecida": True, "linhas": leitura_planilha_reajuste.ler(dados)}
+        return {"reconhecida": True, "linhas": leitura_planilha_reajuste.ler(dados), "sha256": arquivos.sha_de(dados)}
     except leitura_planilha_reajuste.PlanilhaNaoReconhecida as e:
         return {"reconhecida": False, "mensagem": str(e), "motivo": e.motivo, "linhas": []}
 
 
 def _gravar(conn, pid: int, gravar) -> dict:
     try:
-        gravar()
+        n = gravar()
     except envio_reserva.EnvioEmAndamento as e:
         raise HTTPException(409, detail=e.detalhe()) from None
     except leitura_planilha_reajuste.PlanilhaNaoReconhecida as e:
         raise HTTPException(422, f"{e} ({e.motivo})") from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
-    return _detalhe(conn, pid)
+    # quantas competencias o SERVIDOR gravou: e' o que a confirmacao da tela diz
+    return {**_detalhe(conn, pid), "previsao_gravada": n}
 
 
 @router.post("/api/pleitos/{pid}/previsao/planilha")
-def aceitar_previsao_planilha(pid: ID, arquivo: UploadFile = File(...),
+def aceitar_previsao_planilha(pid: ID, arquivo: UploadFile = File(...), sha256: str = Form(..., max_length=64),
                               usuario: dict = Depends(exigir("editar_cadastros")),
                               conn: sqlite3.Connection = Depends(conexao)):
-    """Aceite da planilha conferida: o servidor rele o arquivo e grava o que leu, com origem 'pleito'."""
+    """Aceite da planilha conferida: o servidor rele o arquivo e grava o que leu, com origem 'pleito'. O `sha256`
+    e' o que a leitura devolveu: arquivo diferente do conferido e' recusado."""
     _existe(conn, pid)
     dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=TETO_PLANILHA, tipo="xlsx"))
-    return _gravar(conn, pid, lambda: pleitos.gravar_previsao_planilha(conn, usuario["id"], pid, dados))
+    return _gravar(conn, pid, lambda: pleitos.gravar_previsao_planilha(conn, usuario["id"], pid, dados, sha256))
 
 
 @router.post("/api/pleitos/{pid}/previsao/digitada")

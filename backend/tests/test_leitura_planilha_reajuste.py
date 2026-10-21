@@ -81,6 +81,44 @@ def test_formula_sem_valor_calculado_nao_some_em_silencio():
     assert "3ª Medição tem fórmula sem o valor calculado" in e.value.motivo
 
 
+def _trocar_no_xml_da_aba(dados: bytes, antes: bytes, depois: bytes) -> bytes:
+    import zipfile
+    origem, destino = io.BytesIO(dados), io.BytesIO()
+    with zipfile.ZipFile(origem) as z, zipfile.ZipFile(destino, "w") as novo:
+        for item in z.infolist():
+            conteudo = z.read(item.filename)
+            if item.filename.startswith("xl/worksheets/"):
+                assert antes in conteudo
+                conteudo = conteudo.replace(antes, depois)
+            novo.writestr(item, conteudo)
+    return destino.getvalue()
+
+
+def test_formula_que_da_texto_vazio_continua_vazia():
+    """=SE(...;"";...) calculada: o Excel grava t="str" com <v></v>. E' vazia de verdade; reabrir e salvar nao
+    mudaria nada, entao a planilha nao pode ser recusada por isso: a linha so' fica de fora."""
+    wb = openpyxl.load_workbook(io.BytesIO(planilha_modelo(outras_abas=())))
+    wb["Resumo"]["E9"] = '=IF(C9>0,"",1)'
+    buf = io.BytesIO(); wb.save(buf)
+    dados = _trocar_no_xml_da_aba(buf.getvalue(), b'<c r="E9"><f>', b'<c r="E9" t="str"><f>')
+    assert [x["competencia"] for x in leitura.ler(dados)] == ["2026-03", "2026-05"]
+    # a mesma formula sem nenhum <v> (nunca calculada) e' recusada
+    sem_v = _trocar_no_xml_da_aba(dados, b'<v></v></c>', b'</c>')
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(sem_v)
+    assert "2ª Medição tem fórmula sem o valor calculado" in e.value.motivo
+
+
+def test_formatacao_distante_com_totais_perto_e_lida():
+    """Aba formatada ate' a linha 8000 (a dimensao declarada vai la'), com o TOTAIS na linha 12: le normal."""
+    wb = openpyxl.load_workbook(io.BytesIO(planilha_modelo(outras_abas=())))
+    ws = wb["Resumo"]
+    ws.cell(8000, 1).value = " "
+    buf = io.BytesIO(); wb.save(buf)
+    assert openpyxl.load_workbook(io.BytesIO(buf.getvalue()), read_only=True)["Resumo"].max_row == 8000
+    assert len(leitura.ler(buf.getvalue())) == 3
+
+
 def test_aba_sem_fim_nao_devolve_leitura_parcial(monkeypatch):
     monkeypatch.setattr(leitura, "MAX_VARRIDAS", 2)
     with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:

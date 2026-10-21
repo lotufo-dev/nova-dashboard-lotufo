@@ -17,9 +17,11 @@ describe("Previsão de reajuste do pleito", () => {
   afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
 
   it("lê a planilha, mostra competência × valor para conferir e grava com origem pleito ao aceitar", async () => {
-    apiForm.mockResolvedValue({ reconhecida: true, linhas: [
+    apiForm.mockResolvedValueOnce({ reconhecida: true, sha256: "ab".repeat(32), linhas: [
       { competencia: "2026-03", valor_centavos: 123456, medicao: "1ª Medição", periodo: "23/02/2026 a 31/03/2026" },
       { competencia: "2026-04", valor_centavos: -1507, medicao: "2ª Medição", periodo: "01/04/2026 a 30/04/2026" }] });
+    // a confirmacao usa a contagem do servidor (aqui diferente da tela, de proposito)
+    apiForm.mockResolvedValueOnce({ previsao_gravada: 3 });
     api.mockResolvedValue({});
     const aoGravar = vi.fn();
     render(<PleitoPrevisao pleitoId={9} dataBase="2024-06" ciclo={2026} aoGravar={aoGravar} />);
@@ -44,9 +46,11 @@ describe("Previsão de reajuste do pleito", () => {
     const [caminho, fd] = apiForm.mock.calls[1];
     expect(caminho).toBe("/api/pleitos/9/previsao/planilha");
     expect((fd as FormData).get("arquivo")).toBe(apiForm.mock.calls[0][1].get("arquivo"));
-    expect([...(fd as FormData).keys()]).toEqual(["arquivo"]);
+    // so' o arquivo e o sha256 da leitura conferida (o servidor recusa outro arquivo); nem origem nem valores
+    expect([...(fd as FormData).keys()]).toEqual(["arquivo", "sha256"]);
+    expect((fd as FormData).get("sha256")).toBe("ab".repeat(32));
     expect(api).not.toHaveBeenCalled();
-    expect(await screen.findByText("Previsão gravada: 2 competências.")).toBeTruthy();
+    expect(await screen.findByText("Previsão gravada: 3 competências.")).toBeTruthy();
     expect(aoGravar).toHaveBeenCalled();
     expect(screen.queryByRole("table")).toBeNull();
   });
@@ -54,7 +58,7 @@ describe("Previsão de reajuste do pleito", () => {
   it("planilha fora do modelo mostra o aviso e a tabela vazia para digitar, que grava com origem manual", async () => {
     apiForm.mockResolvedValue({ reconhecida: false, mensagem: "Não reconheci a planilha; digite a previsão",
       motivo: "falta a aba Resumo", linhas: [] });
-    api.mockResolvedValue({});
+    api.mockResolvedValue({ previsao_gravada: 2 });
     render(<PleitoPrevisao pleitoId={9} dataBase="2024-06" ciclo={2026} aoGravar={() => {}} />);
     anexar();
     expect((await screen.findByRole("alert")).textContent).toContain("Não reconheci a planilha; digite a previsão");
@@ -76,6 +80,7 @@ describe("Previsão de reajuste do pleito", () => {
     expect(api.mock.calls[0][0]).toBe("/api/pleitos/9/previsao/digitada");
     expect(JSON.parse(api.mock.calls[0][1].body)).toEqual({ linhas: [
       { competencia: "2026-09", valor_centavos: 150025 }, { competencia: "2026-10", valor_centavos: -1000 }] });
+    expect(await screen.findByText("Previsão gravada: 2 competências.")).toBeTruthy();
   });
 
   it("linha digitada sem competência ou sem valor não grava e diz o que falta", async () => {
