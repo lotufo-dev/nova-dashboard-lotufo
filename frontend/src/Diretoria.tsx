@@ -32,7 +32,7 @@ type MesAno = {
   faturado_mes_centavos: number; notas_faturadas_mes: number;
   serie: { competencia: string; medido_centavos: number; previsto_centavos: number }[];
 };
-type Proximo = { competencia: string; faturamento_previsto_centavos: number; recebimento_previsto_centavos: number | null };
+type Proximo = { competencia: string; faturamento_previsto_centavos: number };
 type Carteira = {
   saldo_centavos: number; ritmo_mensal_centavos: number; meses_de_producao: number | null;
   por_orgao: { orgao: string; saldo_centavos: number; fracao: number; vigente_centavos: number; medido_centavos: number; obras: number }[];
@@ -543,16 +543,14 @@ function Producao({ p }: { p: Painel }) {
       </Secao>
 
       <div className="cartoes-lado">
-        <Secao id="dir-proximos" titulo="Próximos meses" dica="Faturamento pelo cronograma; recebimento pela mediana de cada órgão.">
+        <Secao id="dir-proximos" titulo="Próximos meses" dica="Faturamento pelo cronograma.">
           <Rolagem rotulo="Próximos meses">
             <table className="tabela tabela--estreita">
-              <thead><tr><th scope="col">Mês</th><th scope="col" className="col-num">Faturamento previsto</th>
-                <th scope="col" className="col-num">Recebimento previsto</th></tr></thead>
+              <thead><tr><th scope="col">Mês</th><th scope="col" className="col-num">Faturamento previsto</th></tr></thead>
               <tbody>
                 {p.proximos.map(x => (
                   <tr key={x.competencia}><td className="num">{fmtCompetencia(x.competencia)}</td>
-                    <td className="col-num dinheiro num">{brl(x.faturamento_previsto_centavos)}</td>
-                    <td className="col-num num">{valor(x.recebimento_previsto_centavos)}</td></tr>
+                    <td className="col-num dinheiro num">{brl(x.faturamento_previsto_centavos)}</td></tr>
                 ))}
               </tbody>
             </table>
