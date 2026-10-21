@@ -47,6 +47,23 @@ def _pleito(conn, contrato_id: int, mes_base: str, ciclo: int) -> dict | None:
     return dict(r) if r else None
 
 
+# Origem mais forte primeiro (spec 2026-10-20 §2.2): o apostilamento manda, o pleito vem depois, o manual por ultimo.
+ORDEM_ORIGEM = ("apostilamento", "pleito", "manual")
+
+
+def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None) -> list[dict]:
+    """Previsao vigente de cada competencia (por data-base e ciclo): a mais recente da origem mais forte.
+    As previsoes sao eventos (migracao 043): nada se sobrescreve, a leitura escolhe."""
+    ordem = " ".join(f"WHEN '{o}' THEN {i}" for i, o in enumerate(ORDEM_ORIGEM))
+    filtro, args = ("AND data_base_mes=?", (contrato_id, data_base_mes)) if data_base_mes else ("", (contrato_id,))
+    rows = conn.execute(
+        f"SELECT * FROM (SELECT p.*, ROW_NUMBER() OVER (PARTITION BY data_base_mes, ciclo, competencia "
+        f"ORDER BY CASE origem {ordem} END, criado_em DESC, id DESC) AS _ordem "
+        f"FROM reajuste_previsoes p WHERE contrato_id=? {filtro}) WHERE _ordem=1 "
+        f"ORDER BY data_base_mes, ciclo, competencia", args)
+    return [{k: r[k] for k in r.keys() if k != "_ordem"} for r in rows]
+
+
 def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[dict]:
     """Um ciclo por data-base: o corrente (ou o proximo, `futuro`, antes da primeira janela)."""
     hoje = hoje or tempo.hoje_local()
