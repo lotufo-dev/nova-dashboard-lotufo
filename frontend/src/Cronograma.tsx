@@ -9,11 +9,29 @@ import { brl } from "./Medicoes";
 // no UTC em que o carimbo esta gravado. Ver tempo.ts.
 // competencia vem "AAAA-MM" (formato do CHECK da tabela); na tabela le-se "MM/AAAA",
 // no eixo do grafico "jul/26" — o eixo tem 11px e nao cabe o ano inteiro legivel.
-import { fmtCompetencia as competenciaBR, fmtData, fmtMesCurto as mesCurto, mesAtualLocal } from "./tempo";
+import { fmtCompetencia as competenciaBR, fmtData, fmtDataPura, fmtMesCurto as mesCurto, mesAtualLocal } from "./tempo";
 import Rolagem from "./Rolagem";
 
 type ItemVersao = { competencia: string; valor_previsto_centavos: number };
 type Versao = { numero: number; criado_em: string; origem: string; itens: ItemVersao[] };
+
+// Linha da lista de versoes (issue #256): a que veio do cadastro traz o documento (origem, data,
+// instrumento); a publicada na tela, ou a da carga inicial, vem com esses campos nulos.
+type VersaoLista = {
+  numero: number; criado_em: string; chave: string | null; origem_documento: string | null;
+  data_documento: string | null; instrumento: string | null; competencias: number;
+  total_centavos: number; vigente: boolean;
+};
+
+const ORIGEM_DOCUMENTO: Record<string, string> = {
+  contratual: "Contrato", aditivo: "Termo aditivo", carta: "Carta de repactuação", smo: "Curva do SMO",
+};
+
+function documentoDaVersao(v: VersaoLista): string {
+  if (!v.origem_documento) return "Sem documento (publicada no sistema)";
+  const origem = ORIGEM_DOCUMENTO[v.origem_documento] ?? v.origem_documento;
+  return v.instrumento ? `${origem} · ${v.instrumento}` : origem;
+}
 
 // `pendente_por_tipo` e `medido_projeto_centavos` sao aditivos ao contrato do plano
 // (o servidor ja os manda). `atestado_pendente` qualifica SO a execucao — a serie que
@@ -311,6 +329,7 @@ function Grafico({ pontos, mes }: { pontos: Ponto[]; mes: string }) {
 export default function Cronograma({ contratoId, podeEditar }:
     { contratoId: number; podeEditar: boolean }) {
   const [versao, setVersao] = useState<Versao | null>(null);
+  const [versoes, setVersoes] = useState<VersaoLista[]>([]);
   const [dados, setDados] = useState<Curva | null>(null);
   const [texto, setTexto] = useState("");
   const [carregando, setCarregando] = useState(true);
@@ -332,12 +351,13 @@ export default function Cronograma({ contratoId, podeEditar }:
 
   const carregar = async () => {
     const g = geracao.current;
-    const [v, c] = await Promise.all([
+    const [v, c, vs] = await Promise.all([
       api<Versao | null>(`/api/contratos/${contratoId}/cronograma`),
       api<Curva>(`/api/contratos/${contratoId}/curva`),
+      api<VersaoLista[]>(`/api/contratos/${contratoId}/cronograma/versoes`),
     ]);
     if (g !== geracao.current) return;
-    setVersao(v); setDados(c);
+    setVersao(v); setDados(c); setVersoes(vs);
   };
 
   useEffect(() => {
@@ -346,7 +366,7 @@ export default function Cronograma({ contratoId, podeEditar }:
     // O rascunho do textarea e' o estado transitorio mais perigoso desta tela: um
     // cronograma digitado para o contrato A, sobrevivendo a troca, seria publicado
     // no contrato B com um clique. Ele sai junto com o resto.
-    setVersao(null); setDados(null); setTexto("");
+    setVersao(null); setVersoes([]); setDados(null); setTexto("");
     setErro(""); setSucesso(""); setSalvando(false);
     setCarregando(true);
     carregar()
@@ -582,6 +602,38 @@ export default function Cronograma({ contratoId, podeEditar }:
         </Rolagem>
         </details>
       </>}
+
+      {/* issue #256: uma linha por versao, na ordem em que passaram a valer (data do documento) */}
+      {!carregando && versoes.length > 0 && (
+        <details className="detalhes cartao__corpo">
+        <summary>Versões do cronograma ({versoes.length})</summary>
+        <Rolagem rotulo="Versões do cronograma">
+          <table className="tabela">
+            <caption className="sr-only">Versões do cronograma, da mais antiga à vigente</caption>
+            <thead>
+              <tr>
+                <th scope="col">Versão</th>
+                <th scope="col">Data</th>
+                <th scope="col">Documento</th>
+                <th scope="col" className="col-num">Competências</th>
+                <th scope="col" className="col-num">Total previsto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {versoes.map((v, i) => (
+                <tr key={v.numero} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                  <td className="forte num">{v.numero}{v.vigente && " · vigente"}</td>
+                  <td className="num">{v.data_documento ? fmtDataPura(v.data_documento) : fmtData(v.criado_em)}</td>
+                  <td>{documentoDaVersao(v)}</td>
+                  <td className="col-num num">{v.competencias}</td>
+                  <td className="col-num dinheiro num">{brl(v.total_centavos)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Rolagem>
+        </details>
+      )}
 
       {podeEditar && (
         <form className="cartao__rodape editor" onSubmit={publicar}>

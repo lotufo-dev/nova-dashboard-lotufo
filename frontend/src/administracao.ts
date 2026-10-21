@@ -178,7 +178,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "cadastro.aplicar": "Cadastro aplicado", "cadastro.orgao": "Cadastro: órgão", "cadastro.entidade": "Cadastro: entidade",
   "cadastro.consorciadas": "Cadastro: consorciadas", "cadastro.contrato": "Cadastro: obra", "cadastro.datas_base": "Cadastro: datas-base",
   "cadastro.fiscal": "Cadastro: fiscal", "cadastro.pleito": "Cadastro: pleito", "cadastro.instrumento": "Cadastro: instrumento",
-  "cadastro.geral": "Cadastro: geral", "cadastro.espelho": "Cadastro: espelho",
+  "cadastro.geral": "Cadastro: geral", "cadastro.espelho": "Cadastro: espelho", "cadastro.cronograma": "Cadastro: cronograma",
 };
 const ROTULO_ENTIDADE: Record<string, string> = {
   medicao: "Medição", contrato: "Obra", usuario: "Usuário", entidade: "Entidade", orgao: "Órgão", instrumento: "Instrumento",
