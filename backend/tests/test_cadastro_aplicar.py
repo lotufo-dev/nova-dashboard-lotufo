@@ -230,6 +230,15 @@ def test_texto_descritivo_do_aditivo_pode_ser_corrigido(conn):
     assert conn.execute("SELECT objeto FROM aditivos").fetchone()[0] == "1ª RPFO"
 
 
+def test_ordinal_do_cadastro_e_gravado_e_pode_ser_corrigido(conn):
+    """Issue #261: `ordinal` e' descricao do termo (como o numero): grava e aceita correcao."""
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**AP_PRAZO, "ordinal": 9}])]))
+    assert conn.execute("SELECT ordinal FROM aditivos").fetchone()[0] == 9
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**AP_PRAZO, "ordinal": 10}])]))
+    assert r["instrumentos"]["alterados"] == ["MT-402/ap-10"]
+    assert conn.execute("SELECT ordinal FROM aditivos").fetchone()[0] == 10
+
+
 # --- bloco 2: geral, regra do espelho e modelos ---------------------------------------------
 
 import hashlib
