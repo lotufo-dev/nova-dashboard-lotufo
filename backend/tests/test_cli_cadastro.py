@@ -318,9 +318,9 @@ def test_carregar_medicoes_ensaio_com_o_csv_de_exemplo_relata_e_totaliza(tmp_pat
     assert cli.main(["cadastro", "carregar-medicoes", str(csv_), "--ensaio"]) == 0
     saida = capsys.readouterr().out
     assert "ENSAIO (nada foi gravado): Obra Própria" in saida
-    assert "linha 2: nº 1 execucao 2025-04: nova" in saida
+    assert "linha 2: nº 1 execução 2025-04: nova" in saida
     assert "linha 5: nº 1 reajuste 2025-06: nova" in saida
-    assert "Total: nova 4, igual 0, valor diferente 0, conflito 0, erro 0" in saida
+    assert "Total: nova 4, igual 0, valor diferente 0, incompleta 0, conflito 0, erro 0" in saida
 
 
 def test_carregar_medicoes_ensaio_classifica_e_nao_grava(tmp_path, monkeypatch, capsys):
@@ -346,15 +346,15 @@ def test_carregar_medicoes_ensaio_classifica_e_nao_grava(tmp_path, monkeypatch, 
     capsys.readouterr()
     assert cli.main(["cadastro", "carregar-medicoes", str(arq), "--ensaio"]) == 0
     saida = capsys.readouterr().out
-    assert "linha 2: nº 1 execucao 2025-04: igual" in saida
-    assert "linha 3: nº 2 execucao 2025-05: valor diferente (aprovado: banco R$ 520.000,00, CSV R$ 530.000,00)" in saida
-    assert "linha 4: nº 3 execucao 2025-07: conflito (banco tem competência 2025-06)" in saida
-    assert "linha 5: nº 4 execucao 2025-08: nova" in saida
+    assert "linha 2: nº 1 execução 2025-04: igual" in saida
+    assert "linha 3: nº 2 execução 2025-05: valor diferente (aprovado: banco R$ 520.000,00, CSV R$ 530.000,00)" in saida
+    assert "linha 4: nº 3 execução 2025-07: conflito (banco tem competência 2025-06)" in saida
+    assert "linha 5: nº 4 execução 2025-08: nova" in saida
     assert "linha 6: nº 5 execucao: erro (valor pedido" in saida
     assert "linha 7: nº 6 aditivo: erro (tipo desconhecido" in saida
     assert "linha 8: nº 7 execucao: erro (competência 2027-03 fora do contrato (2025-03 a 2026-12))" in saida
-    assert "linha 9: nº 4 execucao 2025-08: erro (nº 4 execucao repetido (já na linha 5))" in saida
-    assert "Total: nova 1, igual 1, valor diferente 1, conflito 1, erro 4" in saida
+    assert "linha 9: nº 4 execução 2025-08: erro (nº 4 execução repetido (já na linha 5))" in saida
+    assert "Total: nova 1, igual 1, valor diferente 1, incompleta 0, conflito 1, erro 4" in saida
     assert _foto(conn) == antes
 
 
@@ -396,16 +396,16 @@ def _ensaio(tmp_path, linhas, capsys, nome="obra-propria.csv"):
 def test_carregar_medicoes_linha_com_colunas_a_mais_e_erro_e_nao_valor(tmp_path, monkeypatch, capsys):
     """Valor com vírgula sem aspas num CSV separado por vírgula desloca as colunas: erro, nunca R$ 412.345,00."""
     _com_exemplo_aplicado(tmp_path, monkeypatch)
-    codigo, saida = _ensaio(tmp_path, ["nº,tipo,competência,valor pedido", "1,execucao,2025-04,412.345,67"], capsys)
+    codigo, saida = _ensaio(tmp_path, ["nº,tipo,competência,valor pedido,valor aprovado", "1,execucao,2025-04,412.345,67,"], capsys)
     assert codigo == 0
-    assert "linha 2: nº 1 execucao: erro (a linha tem 5 colunas e o cabeçalho tem 4)" in saida
+    assert "linha 2: nº 1 execucao: erro (a linha tem 6 colunas e o cabeçalho tem 5)" in saida
 
 
 def test_carregar_medicoes_cabecalho_com_grau_e_coluna_repetida(tmp_path, monkeypatch, capsys):
     _com_exemplo_aplicado(tmp_path, monkeypatch)
-    codigo, saida = _ensaio(tmp_path, ["N°;Tipo;Competência;Nº. do órgão", "1;execucao;2025-04;1"], capsys)
-    assert codigo == 0 and "linha 2: nº 1 execucao 2025-04: nova" in saida
-    codigo, saida = _ensaio(tmp_path, ["nº;tipo;competência;valor pedido;Valor Pedido"], capsys)
+    codigo, saida = _ensaio(tmp_path, ["N°;Tipo;Competência;Nº. do órgão;Valor pedido;Valor aprovado", "1;execucao;2025-04;1;;"], capsys)
+    assert codigo == 0 and "linha 2: nº 1 execução 2025-04: nova" in saida
+    codigo, saida = _ensaio(tmp_path, ["nº;tipo;competência;valor pedido;Valor Pedido;valor aprovado"], capsys)
     assert codigo == 1 and "coluna repetida no cabeçalho: 'Valor Pedido'" in saida
 
 
@@ -415,23 +415,24 @@ def test_carregar_medicoes_competencia_vale_ate_o_fim_do_aditivo_de_prazo(tmp_pa
                  "VALUES (?, 'prazo', '2027-06-30', 'assinado', '2026-11-01')", (cid,))
     conn.commit()
     codigo, saida = _ensaio(tmp_path, [CAB, "7;7;execucao;2027-03;;1,00;;;;;;;planilha"], capsys)
-    assert "linha 2: nº 7 execucao 2027-03: nova" in saida
+    assert "linha 2: nº 7 execução 2027-03: nova" in saida
 
 
-def test_carregar_medicoes_valor_vazio_no_csv_e_dito_no_relatorio(tmp_path, monkeypatch, capsys):
+def test_carregar_medicoes_valor_vazio_no_csv_com_valor_no_banco_e_incompleta_nunca_igual(tmp_path, monkeypatch, capsys):
     conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
     conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos,"
                  " valor_atestado_centavos) VALUES (?,1,'execucao','2025-04','protocolada',100,90)", (cid,))
     conn.commit()
     codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;1,00;;;;;;;planilha"], capsys)
-    assert "linha 2: nº 1 execucao 2025-04: igual (aprovado vazio no CSV, banco R$ 0,90)" in saida
+    assert "linha 2: nº 1 execução 2025-04: incompleta (aprovado vazio no CSV, banco R$ 0,90)" in saida
+    assert "igual 0" in saida and "incompleta 1" in saida
 
 
 def test_carregar_medicoes_celula_com_quebra_de_linha_numera_pelo_inicio(tmp_path, monkeypatch, capsys):
     _com_exemplo_aplicado(tmp_path, monkeypatch)
     codigo, saida = _ensaio(tmp_path, [CAB, '1;1;execucao;2025-04;;1,00;;;;;;;"fonte em', 'duas linhas"',
                                        "2;2;aditivo;2025-05;;1,00;;;;;;;planilha"], capsys)
-    assert "linha 2: nº 1 execucao 2025-04: nova" in saida
+    assert "linha 2: nº 1 execução 2025-04: nova" in saida
     assert "linha 4: nº 2 aditivo: erro" in saida
 
 
@@ -452,3 +453,69 @@ def test_carregar_medicoes_abre_o_banco_so_para_leitura(tmp_path, monkeypatch, c
     import sqlite3
     c = sqlite3.connect(tmp_path / "t.db")
     assert c.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+
+
+# --- rodada 1 dos gates da PR #307 ---
+
+def test_carregar_medicoes_exige_as_colunas_de_valor(tmp_path, monkeypatch, capsys):
+    """Um CSV exportado sem valores não pode "aprovar" a conferência."""
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _ensaio(tmp_path, ["nº;tipo;competência", "1;execucao;2025-04"], capsys)
+    assert codigo == 1 and "faltam colunas no cabeçalho: valor pedido, valor aprovado" in saida
+
+
+def test_carregar_medicoes_medicao_cancelada_ou_desistida_no_banco_e_conflito(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    for numero, estado in ((1, "cancelada"), (2, "desistida")):
+        conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos,"
+                     " valor_atestado_centavos) VALUES (?,?,'execucao','2025-04',?,100,100)", (cid, numero, estado))
+    conn.commit()
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;1,00;1,00;;;;;;x",
+                                       "2;2;execucao;2025-04;;1,00;1,00;;;;;;x"], capsys)
+    assert "linha 2: nº 1 execução 2025-04: conflito (no banco a medição está cancelada)" in saida
+    assert "linha 3: nº 2 execução 2025-04: conflito (no banco a medição está desistida)" in saida
+    assert "igual 0" in saida
+
+
+def test_carregar_medicoes_mesmo_numero_no_csv_com_outra_competencia_e_conflito(tmp_path, monkeypatch, capsys):
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;1,00;;;;;;;x",
+                                       "1;1;execução;2025-05;;1,00;;;;;;;x",
+                                       "1;1;execucao;2025-04;;2,00;;;;;;;x"], capsys)
+    assert "linha 3: nº 1 execução 2025-05: conflito (a linha 2 tem o mesmo nº com competência 2025-04)" in saida
+    assert "linha 4: nº 1 execução 2025-04: erro (nº 1 execução repetido (já na linha 2))" in saida
+
+
+def test_carregar_medicoes_le_o_banco_numa_transacao_so_e_desfaz(tmp_path, monkeypatch, capsys):
+    from app import carga_medicoes
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    vistas = []
+    original = carga_medicoes.ensaiar
+
+    def espiao(conn, caminho):
+        vistas.append(conn.in_transaction)
+        return original(conn, caminho)
+    monkeypatch.setattr(carga_medicoes, "ensaiar", espiao)
+    codigo, _ = _ensaio(tmp_path, [CAB], capsys)
+    assert codigo == 0 and vistas == [True]
+
+
+def test_carregar_medicoes_tipo_invalido_sugere_rotulos_em_portugues(tmp_path, monkeypatch, capsys):
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;aditivo;2025-04;;1,00;;;;;;;x"], capsys)
+    assert "(use execução, projeto, reajuste)" in saida and "execucao" not in saida
+
+
+def test_carregar_medicoes_banco_inexistente_e_arquivo_ilegivel_falam_portugues(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "nao-existe.db"))
+    codigo, saida = _ensaio(tmp_path, [CAB], capsys)
+    assert codigo == 1 and "Banco não encontrado:" in saida and "Traceback" not in saida
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    for nome, conteudo in (("nulo", (CAB + "\n1;1;exec\x00ucao;2025-04;;;;;;;;;\n").encode()),
+                           ("codificacao", CAB.encode() + b"\n1;1;execucao;2025-04;;\x81;;;;;;;\n")):
+        arq = tmp_path / nome / "obra-propria.csv"
+        arq.parent.mkdir()
+        arq.write_bytes(conteudo)
+        capsys.readouterr()
+        assert cli.main(["cadastro", "carregar-medicoes", str(arq), "--ensaio"]) == 1
+        assert "CSV recusado, nada foi lido:" in capsys.readouterr().out

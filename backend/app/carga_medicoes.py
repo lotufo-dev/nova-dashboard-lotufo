@@ -3,9 +3,10 @@
 So' o ENSAIO: le o CSV de uma obra, confere linha a linha contra o banco e devolve o relatorio. Nao grava nada
 (nem abre transacao de escrita); gravar e' a issue seguinte. A chave e' (obra, numero, tipo).
 
-Categorias por linha: `nova` (nao existe medicao com a chave), `igual`, `valor diferente` (pedido ou aprovado
-diferem do banco) e `conflito` (o mesmo numero e tipo com outra competencia). Linha que nao se le vira `erro`,
-com o numero da linha do arquivo.
+Categorias por linha: `nova` (nao existe medicao com a chave), `igual` (competencia, pedido e aprovado iguais
+aos do banco), `valor diferente` (pedido ou aprovado diferem do banco), `incompleta` (o CSV deixa vazio um valor
+que o banco tem) e `conflito` (o mesmo numero e tipo com outra competencia, no banco ou noutra linha do CSV, ou
+medicao cancelada/desistida no banco). Linha que nao se le vira `erro`, com o numero da linha do arquivo.
 """
 
 import csv
@@ -19,7 +20,10 @@ from app import contratos, dinheiro
 from app.cadastro_arquivos import slug
 
 TIPOS = ("execucao", "projeto", "reajuste")
-CATEGORIAS = ("nova", "igual", "valor diferente", "conflito", "erro")
+ROTULOS = {"execucao": "execução", "projeto": "projeto", "reajuste": "reajuste"}
+CATEGORIAS = ("nova", "igual", "valor diferente", "incompleta", "conflito", "erro")
+# Estados em que a medicao saiu do ciclo: o CSV nao pode dar como "igual" o que o banco encerrou
+ESTADOS_TERMINAIS = ("cancelada", "desistida")
 
 # Cabecalho normalizado (sem acento, minusculas, "nº" vira "no") -> campo
 COLUNAS = {
@@ -37,7 +41,9 @@ COLUNAS = {
     "nf": "nf",
     "fonte": "fonte",
 }
-OBRIGATORIAS = ("numero", "tipo", "competencia")
+OBRIGATORIAS = ("numero", "tipo", "competencia", "valor_pedido", "valor_aprovado")
+ROTULO_COLUNA = {"numero": "nº", "tipo": "tipo", "competencia": "competência", "valor_pedido": "valor pedido",
+                 "valor_aprovado": "valor aprovado"}
 
 
 class CsvInvalido(ValueError):
@@ -84,10 +90,16 @@ def _valor(texto: str, campo: str) -> int | None:
 
 def _ler_texto(caminho: Path) -> str:
     bruto = caminho.read_bytes()
+    if b"\x00" in bruto:
+        raise CsvInvalido("o arquivo tem byte nulo: não é um CSV de texto (salve como CSV no Excel)")
     try:
         return bruto.decode("utf-8-sig")
     except UnicodeDecodeError:
+        pass
+    try:
         return bruto.decode("cp1252")  # CSV salvo pelo Excel em pt-BR
+    except UnicodeDecodeError:
+        raise CsvInvalido("codificação não reconhecida: salve o CSV em UTF-8") from None
 
 
 def ler_csv(caminho: Path) -> list[tuple[int, dict]]:
@@ -95,6 +107,13 @@ def ler_csv(caminho: Path) -> list[tuple[int, dict]]:
     texto = _ler_texto(caminho)
     primeira = texto.split("\n", 1)[0]
     leitor = csv.reader(io.StringIO(texto), delimiter=";" if ";" in primeira else ",")
+    try:
+        return _linhas(leitor)
+    except csv.Error as e:
+        raise CsvInvalido(f"o arquivo não se lê como CSV (linha {leitor.line_num}): {e}") from None
+
+
+def _linhas(leitor) -> list[tuple[int, dict]]:
     try:
         cabecalho = next(leitor)
     except StopIteration:
@@ -109,7 +128,7 @@ def ler_csv(caminho: Path) -> list[tuple[int, dict]]:
         campos.append(COLUNAS[nome])
     faltam = [c for c in OBRIGATORIAS if c not in campos]
     if faltam:
-        raise CsvInvalido(f"faltam colunas no cabeçalho: {', '.join(faltam)}")
+        raise CsvInvalido(f"faltam colunas no cabeçalho: {', '.join(ROTULO_COLUNA[c] for c in faltam)}")
     linhas, inicio = [], leitor.line_num + 1
     for celulas in leitor:
         n_linha, inicio = inicio, leitor.line_num + 1      # a linha onde o registro COMECA (celula com quebra)
@@ -132,7 +151,7 @@ def _interpretar(bruto: dict, janela: tuple[str, str] | None) -> dict:
         raise ValueError(f"nº inválido: {numero!r}")
     tipo = _normalizar(bruto.get("tipo", ""))
     if tipo not in TIPOS:
-        raise ValueError(f"tipo desconhecido: {bruto.get('tipo', '')!r} (use {', '.join(TIPOS)})")
+        raise ValueError(f"tipo desconhecido: {bruto.get('tipo', '')!r} (use {', '.join(ROTULOS.values())})")
     competencia = _competencia(bruto.get("competencia", ""))
     if janela and not janela[0] <= competencia <= janela[1]:
         raise ValueError(f"competência {competencia} fora do contrato ({janela[0]} a {janela[1]})")
@@ -167,7 +186,7 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
     contrato = contrato_da_obra(conn, obra)
     janela = _janela(conn, contrato)
     existentes = {(m["numero"], m["tipo"]): m for m in conn.execute(
-        "SELECT numero, tipo, competencia, valor_protocolado_centavos, valor_atestado_centavos "
+        "SELECT numero, tipo, competencia, estado, valor_protocolado_centavos, valor_atestado_centavos "
         "FROM medicoes WHERE contrato_id=?", (contrato["id"],))}
     linhas, vistas = [], {}
     for n_linha, bruto in ler_csv(caminho):
@@ -177,16 +196,24 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
         except ValueError as e:
             linhas.append({**item, "categoria": "erro", "detalhe": str(e)})
             continue
-        item.update(numero=d["numero"], tipo=d["tipo"], competencia=d["competencia"])
+        rotulo_tipo = ROTULOS[d["tipo"]]
+        item.update(numero=d["numero"], tipo=rotulo_tipo, competencia=d["competencia"])
         chave = (d["numero"], d["tipo"])
         if chave in vistas:
-            linhas.append({**item, "categoria": "erro",
-                           "detalhe": f"nº {d['numero']} {d['tipo']} repetido (já na linha {vistas[chave]})"})
+            n_antes, comp_antes = vistas[chave]
+            if comp_antes != d["competencia"]:
+                linhas.append({**item, "categoria": "conflito",
+                               "detalhe": f"a linha {n_antes} tem o mesmo nº com competência {comp_antes}"})
+            else:
+                linhas.append({**item, "categoria": "erro",
+                               "detalhe": f"nº {d['numero']} {rotulo_tipo} repetido (já na linha {n_antes})"})
             continue
-        vistas[chave] = n_linha
+        vistas[chave] = (n_linha, d["competencia"])
         m = existentes.get(chave)
         if m is None:
             linhas.append({**item, "categoria": "nova", "detalhe": ""})
+        elif m["estado"] in ESTADOS_TERMINAIS:
+            linhas.append({**item, "categoria": "conflito", "detalhe": f"no banco a medição está {m['estado']}"})
         elif m["competencia"] != d["competencia"]:
             linhas.append({**item, "categoria": "conflito",
                            "detalhe": f"banco tem competência {m['competencia']}"})
@@ -194,14 +221,13 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
             difs, vazios = [], []
             for rotulo, campo, col in (("pedido", "valor_pedido", "valor_protocolado_centavos"),
                                        ("aprovado", "valor_aprovado", "valor_atestado_centavos")):
-                if d[campo] is None:
-                    # Celula vazia = o CSV nao informa (nao e' zero): nao compara, mas o relatorio diz
-                    if m[col] is not None:
-                        vazios.append(f"{rotulo} vazio no CSV, banco {_fmt(m[col])}")
+                if d[campo] is None and m[col] is not None:
+                    # Celula vazia = o CSV nao informa (nao e' zero), e por isso nunca da a linha como igual
+                    vazios.append(f"{rotulo} vazio no CSV, banco {_fmt(m[col])}")
                 elif d[campo] != m[col]:
                     difs.append(f"{rotulo}: banco {_fmt(m[col])}, CSV {_fmt(d[campo])}")
-            linhas.append({**item, "categoria": "valor diferente" if difs else "igual",
-                           "detalhe": "; ".join(difs + vazios)})
+            categoria = "valor diferente" if difs else "incompleta" if vazios else "igual"
+            linhas.append({**item, "categoria": categoria, "detalhe": "; ".join(difs + vazios)})
     totais = {c: sum(1 for li in linhas if li["categoria"] == c) for c in CATEGORIAS}
     return {"obra": obra, "contrato": contrato["nome_curto"], "linhas": linhas, "totais": totais}
 

@@ -139,15 +139,29 @@ def _carregar_medicoes(args) -> int:
     if not caminho.is_file():
         print(f"Arquivo não encontrado: {caminho}")
         return 1
-    # Somente leitura: o ensaio não pode gravar nem o modo do diário do banco
-    conn = sqlite3.connect(f"{db.db_path().resolve().as_uri()}?mode=ro", uri=True)
+    banco = db.db_path().resolve()
+    if not banco.is_file():
+        print(f"Banco não encontrado: {banco}")
+        return 1
+    try:
+        # Somente leitura: o ensaio não pode gravar nem o modo do diário do banco
+        conn = sqlite3.connect(f"{banco.as_uri()}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        print(f"Banco não encontrado: {banco}")
+        return 1
     conn.row_factory = sqlite3.Row
     try:
+        conn.execute("BEGIN")       # uma foto só do banco para o relatório inteiro
         rel = carga_medicoes.ensaiar(conn, caminho)
     except carga_medicoes.CsvInvalido as e:
         print(f"CSV recusado, nada foi lido: {e}")
         return 1
+    except sqlite3.DatabaseError:
+        print(f"Banco ilegível ou sem as tabelas do sistema: {banco}")
+        return 1
     finally:
+        if conn.in_transaction:
+            conn.rollback()
         conn.close()
     print(f"ENSAIO (nada foi gravado): {rel['contrato']} ({caminho.name})")
     for li in rel["linhas"]:
