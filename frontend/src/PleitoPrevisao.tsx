@@ -1,0 +1,159 @@
+import { useState } from "react";
+import CampoValor from "./CampoValor";
+import { api, apiForm, mensagemDeErro } from "./api";
+import { brl, contar } from "./formato";
+import { IconeAlerta } from "./icones";
+import { fmtCompetencia } from "./tempo";
+
+// Previsao de reajuste do pleito (issue #272; spec 2026-10-20 §2.2): a pessoa arrasta a planilha do modelo
+// "Mem. e Cron. - Prev. de Reajuste", o servidor le (`app/leitura_planilha_reajuste.py`) e a tela mostra
+// competencia x valor para conferir; aceitar grava com origem "pleito". Fora do modelo, a tabela vem vazia para
+// digitar e grava com origem "manual". Ler nao grava nada; cada aceite e' um evento novo.
+
+type LinhaLida = { competencia: string; valor_centavos: number; medicao: string; periodo: string };
+type Leitura = { reconhecida: boolean; linhas: LinhaLida[]; mensagem?: string; motivo?: string };
+type LinhaDigitada = { chave: number; competencia: string; valor: string };
+
+let proximaChave = 1;
+const linhaVazia = (): LinhaDigitada => ({ chave: proximaChave++, competencia: "", valor: "" });
+// o CampoValor devolve "1.500,25": os digitos sao os centavos, sem float no caminho
+const centavos = (texto: string) => Number(texto.replace(/\D/g, ""));
+
+export default function PleitoPrevisao({ pleitoId, aoGravar }: { pleitoId: number; aoGravar: () => void }) {
+  const [lidas, setLidas] = useState<LinhaLida[] | null>(null);
+  const [digitadas, setDigitadas] = useState<LinhaDigitada[] | null>(null);
+  const [naoReconhecida, setNaoReconhecida] = useState<{ mensagem: string; motivo?: string } | null>(null);
+  const [erro, setErro] = useState("");
+  const [ok, setOk] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+
+  function limpar() { setLidas(null); setDigitadas(null); setNaoReconhecida(null); setErro(""); }
+
+  async function ler(input: HTMLInputElement) {
+    const f = input.files?.[0];
+    input.value = "";
+    if (!f) return;
+    limpar(); setOk(""); setOcupado(true);
+    try {
+      const fd = new FormData();
+      fd.append("arquivo", f);
+      const r = await apiForm<Leitura>(`/api/pleitos/${pleitoId}/previsao/ler`, fd);
+      if (r.reconhecida) setLidas(r.linhas);
+      else {
+        setNaoReconhecida({ mensagem: r.mensagem ?? "Não reconheci a planilha; digite a previsão", motivo: r.motivo });
+        setDigitadas([linhaVazia()]);
+      }
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+  }
+
+  async function gravar(origem: "pleito" | "manual", linhas: { competencia: string; valor_centavos: number }[]) {
+    setOcupado(true); setErro("");
+    try {
+      await api(`/api/pleitos/${pleitoId}/previsao`, { method: "POST", body: JSON.stringify({ origem, linhas }) });
+      limpar();
+      setOk(`Previsão gravada: ${contar(linhas.length, "competência", "competências")}.`);
+      aoGravar();
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+  }
+
+  function gravarDigitadas() {
+    if (!digitadas) return;
+    if (digitadas.some(l => !l.competencia || !l.valor)) {
+      setErro("Preencha a competência e o valor de todas as linhas (ou remova a linha).");
+      return;
+    }
+    void gravar("manual", digitadas.map(l => ({ competencia: l.competencia, valor_centavos: centavos(l.valor) })));
+  }
+
+  const mudar = (chave: number, campo: "competencia" | "valor", v: string) =>
+    setDigitadas(ls => ls && ls.map(l => l.chave === chave ? { ...l, [campo]: v } : l));
+  const total = (lidas ?? []).reduce((s, l) => s + l.valor_centavos, 0);
+
+  return (
+    <div className="pilha">
+      <span className="painel__titulo" id={`previsao-${pleitoId}`}>Previsão de reajuste</span>
+      <p className="campo__nota">A planilha “Mem. e Cron. - Prev. de Reajuste” é lida aqui; confira competência e valor antes de aceitar.</p>
+      <div className="acoes acoes--inicio">
+        <label className="btn btn--pequeno espelho__anexar">
+          Anexar planilha de previsão
+          <input type="file" className="espelho__arquivo" aria-label="Anexar planilha de previsão" name="planilha-previsao"
+            accept=".xlsx" disabled={ocupado} onChange={ev => void ler(ev.currentTarget)} />
+        </label>
+        {!digitadas && (
+          <button type="button" className="btn btn--pequeno" disabled={ocupado}
+            onClick={() => { limpar(); setOk(""); setDigitadas([linhaVazia()]); }}>Digitar a previsão</button>
+        )}
+      </div>
+      <p aria-live="polite" className="campo__nota">{ok}</p>
+      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {naoReconhecida && (
+        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{naoReconhecida.mensagem}
+          {naoReconhecida.motivo ? ` (${naoReconhecida.motivo}).` : "."}</p>
+      )}
+
+      {lidas && (
+        <>
+          <table className="tabela tabela--densa" aria-label="Previsão lida da planilha">
+            <thead><tr><th scope="col">Competência</th><th scope="col">Medição</th><th scope="col">Período</th>
+              <th scope="col" className="num">Reajuste previsto</th></tr></thead>
+            <tbody>
+              {lidas.map(l => (
+                <tr key={l.competencia}>
+                  <th scope="row" className="num">{fmtCompetencia(l.competencia)}</th>
+                  <td>{l.medicao}</td><td className="num">{l.periodo}</td>
+                  <td className="num">{brl(l.valor_centavos)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr><th scope="row" colSpan={3}>Total</th><td className="num">{brl(total)}</td></tr></tfoot>
+          </table>
+          <div className="acoes acoes--inicio">
+            <button type="button" className="btn btn--primario btn--pequeno" disabled={ocupado}
+              onClick={() => void gravar("pleito", lidas.map(l => ({ competencia: l.competencia, valor_centavos: l.valor_centavos })))}>
+              Aceitar previsão
+            </button>
+            <button type="button" className="btn btn--pequeno" disabled={ocupado} onClick={limpar}>Descartar leitura</button>
+          </div>
+        </>
+      )}
+
+      {digitadas && (
+        <>
+          <table className="tabela tabela--densa" aria-label="Previsão digitada">
+            <thead><tr><th scope="col">Competência</th><th scope="col">Reajuste previsto</th><th scope="col"><span className="sr-only">Ações</span></th></tr></thead>
+            <tbody>
+              {digitadas.map((l, i) => (
+                <tr key={l.chave}>
+                  <td>
+                    <input type="month" className="entrada--media" id={`prev-comp-${pleitoId}-${l.chave}`}
+                      aria-label={`Competência da linha ${i + 1}`} value={l.competencia}
+                      onChange={ev => mudar(l.chave, "competencia", ev.target.value)} />
+                  </td>
+                  <td>
+                    <label className="sr-only" htmlFor={`prev-valor-${pleitoId}-${l.chave}`}>Valor previsto da linha {i + 1}</label>
+                    <CampoValor id={`prev-valor-${pleitoId}-${l.chave}`} name={`valor-${l.chave}`} value={l.valor}
+                      ajudaId={`previsao-${pleitoId}`} onChange={v => mudar(l.chave, "valor", v)} />
+                  </td>
+                  <td>
+                    {digitadas.length > 1 && (
+                      <button type="button" className="btn btn--pequeno" aria-label={`Remover a linha ${i + 1}`}
+                        onClick={() => setDigitadas(ls => ls && ls.filter(x => x.chave !== l.chave))}>Remover</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="acoes acoes--inicio">
+            <button type="button" className="btn btn--pequeno" disabled={ocupado}
+              onClick={() => setDigitadas(ls => [...(ls ?? []), linhaVazia()])}>Adicionar competência</button>
+            <button type="button" className="btn btn--primario btn--pequeno" disabled={ocupado} onClick={gravarDigitadas}>
+              Gravar previsão
+            </button>
+            <button type="button" className="btn btn--pequeno" disabled={ocupado} onClick={limpar}>Cancelar</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
