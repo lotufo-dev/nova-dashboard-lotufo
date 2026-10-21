@@ -510,6 +510,7 @@ def test_aplicar_cronograma_duas_vezes_nao_duplica(conn):
     cad = _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL, V_TA])])
     r1 = cadastro_aplicar.aplicar(conn, 1, cad)
     assert r1["cronograma"]["criados"] == ["MT-402/contratual (11/03/2024)", "MT-402/ta-01 (05/10/2026)"]
+    assert not any("vigente" in a for a in r1["avisos"])     # a ultima aplicada e' a vigente: sem aviso
     r2 = cadastro_aplicar.aplicar(conn, 1, cad)
     assert r2["cronograma"] == {"criados": [], "alterados": [], "iguais": 2}
     assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 2
@@ -548,8 +549,10 @@ def test_versao_da_carga_fica_superada_so_pela_versao_do_yaml_de_data_posterior(
                                             ("2026-11", 80_00)], "manual")
     conn.execute("UPDATE cronograma_versoes SET criado_em='2026-09-04 15:00:00'")
     conn.commit()
-    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
     assert cronograma_mod.vigente(conn, 1)["numero"] == 1                  # a carga segue vigente
+    # quem aplica fica sabendo que a versao nova nao mexeu no futuro
+    assert any("MT-402/contratual" in a and "não é a vigente" in a for a in r["avisos"])
     assert cronograma_mod.previsto_efetivo(conn, 1) == {
         "2024-04": 100_01, "2026-08": 50_00, "2026-09": 60_00, "2026-10": 70_00, "2026-11": 80_00}
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL, V_TA])]))

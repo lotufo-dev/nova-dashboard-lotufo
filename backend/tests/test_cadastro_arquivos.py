@@ -526,6 +526,16 @@ def test_cronograma_com_campos_invalidos_e_erro(tmp_path):
         assert trecho in texto, trecho
 
 
+def test_cronograma_com_instrumento_que_nao_e_do_contrato_gera_aviso(tmp_path):
+    """`instrumento` nao se corrige depois de aplicado: chave que nao bate com um instrumento do contrato avisa."""
+    c = {**CONTRATO, "cronograma": [_versao("v1", "aditivo", instrumento="ta-1"),
+                                    _versao("v2", "aditivo", instrumento="carga-legado")]}
+    avisos = ca.preparar(_escrever(tmp_path, contratos=[c]))["avisos"]
+    assert [a for a in avisos if "cronograma" in a] == [
+        "MT-402: cronograma[v1].instrumento: 'ta-1' não é chave de nenhum instrumento deste contrato; "
+        "confira antes de aplicar (versão aplicada não muda)"]
+
+
 def test_cronograma_que_nao_e_lista_e_erro(tmp_path):
     erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma": {"chave": "x"}}]))
     assert any("cronograma" in e and "lista" in e for e in erros)

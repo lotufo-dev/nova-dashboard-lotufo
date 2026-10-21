@@ -511,6 +511,11 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
     _dados_instrumentos(c, falha, avisos)
     c["pleitos_anteriores"] = _pleitos_anteriores(bruto.get("pleitos_anteriores"), c, falha)
     c["cronograma"] = _cronograma(bruto.get("cronograma"), falha)
+    chaves_inst = {i["chave"] for i in c["instrumentos"]}
+    for v in c["cronograma"]:
+        if v["instrumento"] and v["instrumento"] not in chaves_inst:
+            avisos.append(f"{c['nome_curto']}: cronograma[{v['chave']}].instrumento: {v['instrumento']!r} não é chave "
+                          "de nenhum instrumento deste contrato; confira antes de aplicar (versão aplicada não muda)")
     # Bloco 4: excecao por contrato a lista de documentos do orgao.
     docs = {}
     for chave, campo in (("medicao", "documentos_medicao"), ("reajuste", "documentos_reajuste")):

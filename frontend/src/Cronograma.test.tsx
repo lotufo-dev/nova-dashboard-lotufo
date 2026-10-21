@@ -64,7 +64,7 @@ describe("Cronograma: versões", () => {
       .map(l => Array.from(l.querySelectorAll("td"), td => (td.textContent ?? "").replace(/\s/g, " ")).join("|"));
     expect(linhas).toEqual([
       "2|11/03/2024|Contrato|6|R$ 10.000.000,01",
-      "1|04/09/2026|Sem documento (publicada no sistema)|2|R$ 500,00",
+      "1|04/09/2026|Sem documento no cadastro|2|R$ 500,00",
       "3 · vigente|05/10/2026|Termo aditivo · ta-01|3|R$ 700,01",
     ]);
     expect(api).toHaveBeenCalledWith("/api/contratos/1/cronograma/versoes");

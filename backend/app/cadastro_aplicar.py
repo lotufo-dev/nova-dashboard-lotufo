@@ -322,11 +322,11 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             rel["contratos"]["iguais"] += 1
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])
     _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"])
-    _cronograma(conn, usuario_id, cid, c, rel["cronograma"])
+    _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
     return cid
 
 
-def _cronograma(conn, usuario_id, contrato_id, c, rel) -> None:
+def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Issue #256: uma `cronograma_versoes` por entrada do YAML, com criado_em = data do documento.
 
     So' acrescenta. Versao aplicada nao muda nem some (correcao e' versao nova, com outra chave); as
@@ -340,6 +340,7 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel) -> None:
                              "versão aplicada não se apaga (correção é versão nova, com outra chave)")
     # Ordem do documento (empate: ordem do arquivo): o numero das versoes segue a linha do tempo.
     ordenadas = sorted(enumerate(c.get("cronograma") or []), key=lambda par: (par[1]["data"], par[0]))
+    criadas: list[tuple[int, str]] = []
     for _, v in ordenadas:
         rotulo = f"{nome}/{v['chave']} ({'/'.join(reversed(v['data'].split('-')))})"   # DD/MM/AAAA
         itens = sorted(v["itens"])
@@ -357,6 +358,7 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel) -> None:
                                 {"chave": v["chave"], "versao": numero, "origem": v["origem"],
                                  "data_documento": v["data"], "instrumento": v["instrumento"]})
             rel["criados"].append(rotulo)
+            criadas.append((numero, rotulo))
             continue
         gravado = {"origem": ja["origem"], "data": ja["data_documento"], "instrumento": ja["instrumento"],
                    "itens": [tuple(r) for r in conn.execute(
@@ -368,6 +370,14 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel) -> None:
             raise ValueError(f"{rotulo}: versão de cronograma já aplicada não pode ser alterada "
                              f"({', '.join(mudou)}); registre uma versão nova, com outra chave")
         rel["iguais"] += 1
+    # A versao de documento anterior a uma ja gravada (a carga de 04/09/2026, uma publicada na tela) entra
+    # ANTES dela na linha do tempo e nao muda o futuro: quem aplica precisa saber.
+    if criadas:
+        numero, rotulo = criadas[-1]     # a de documento mais recente desta aplicacao
+        vig = cronograma.vigente(conn, contrato_id)["numero"]
+        if numero != vig:
+            avisos.append(f"{rotulo}: versão aplicada, mas não é a vigente (há versão {vig} com data "
+                          "posterior); ela só vale para os meses até a data dessa versão")
 
 
 def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:

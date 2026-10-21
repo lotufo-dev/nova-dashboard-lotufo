@@ -28,7 +28,8 @@ const ORIGEM_DOCUMENTO: Record<string, string> = {
 };
 
 function documentoDaVersao(v: VersaoLista): string {
-  if (!v.origem_documento) return "Sem documento (publicada no sistema)";
+  // publicada na tela ou vinda da carga inicial: o sistema nao sabe de que documento saiu
+  if (!v.origem_documento) return "Sem documento no cadastro";
   const origem = ORIGEM_DOCUMENTO[v.origem_documento] ?? v.origem_documento;
   return v.instrumento ? `${origem} · ${v.instrumento}` : origem;
 }
