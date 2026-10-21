@@ -47,3 +47,25 @@ instrumentos:
   nova_vigencia_fim: '2026-12-28'
 pleitos_anteriores:
 - {tipo: prazo, oficio: CT-001-EX-2026, data: 2026-05-04, dias: 60}
+# Cronograma físico-financeiro, uma versão por documento (issue #256). `data` é a do documento: a versão vale a
+# partir do mês dela, e os meses anteriores ficam com o previsto da versão de antes. origem: contratual, aditivo,
+# carta ou smo. Versão aplicada não muda: correção é versão nova, com outra chave.
+cronograma:
+- chave: contratual
+  origem: contratual
+  data: '2025-03-10'
+  itens:
+  - {competencia: 2025-03, valor: '500.000,00'}
+  - {competencia: 2025-06, valor: '1.500.000,00'}
+  - {competencia: 2025-09, valor: '2.000.000,00'}
+  - {competencia: 2025-12, valor: '2.000.000,00'}
+  - {competencia: 2026-03, valor: '2.000.000,00'}
+  - {competencia: 2026-06, valor: '2.000.000,00'}
+- chave: ta-01
+  origem: aditivo
+  data: '2026-02-02'
+  instrumento: ta-01
+  itens:
+  - {competencia: 2026-03, valor: '1.500.000,00'}
+  - {competencia: 2026-06, valor: '2.000.000,00'}
+  - {competencia: 2026-09, valor: '1.500.000,00'}

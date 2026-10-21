@@ -101,7 +101,7 @@ describe("administração", () => {
     const acoes = ["aditivo.assinar", "aditivo.atualizar", "aditivo.cancelar", "aditivo.carga", "aditivo.criar", "auth.login",
       "auth.login_falha", "auth.logout", "cadastro.aplicar", "cadastro.consorciadas", "cadastro.contrato", "cadastro.datas_base",
       "cadastro.entidade", "cadastro.espelho", "cadastro.fiscal", "cadastro.geral", "cadastro.instrumento", "cadastro.orgao",
-      "cadastro.pleito", "certidao.marcar_estado", "certidao.nao_se_aplica", "certidao.registrar", "certidao_tipo.criar",
+      "cadastro.pleito", "cadastro.cronograma", "certidao.marcar_estado", "certidao.nao_se_aplica", "certidao.registrar", "certidao_tipo.criar",
       "contrato.atualizar", "contrato.criar", "contrato.encerramento", "contrato.mudar_estado", "correio.assinatura",
       "correio.envio", "cronograma.nova_versao", "entidade.coligada_rm", "entidade.criar", "entidade.desativar", "envio.liberar",
       "espelho.enviar", "espelho.gerar", "frc.gerar", "medicao.criar", "medicao.documento", "medicao.estado",

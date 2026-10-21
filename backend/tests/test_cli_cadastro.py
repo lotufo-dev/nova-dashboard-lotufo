@@ -50,6 +50,21 @@ def test_aplicar_grava_e_ensaio_nao(tmp_path, monkeypatch, capsys):
     assert "ENSAIO" in capsys.readouterr().out
 
 
+def test_ensaio_lista_as_versoes_de_cronograma_por_obra(tmp_path, monkeypatch, capsys):
+    """Issue #256: `cadastro aplicar --ensaio` diz quais versoes de cronograma entrariam, por obra."""
+    conn = _banco(tmp_path, monkeypatch)
+    cron = [{"chave": "contratual", "origem": "contratual", "data": "2024-03-11",
+             "itens": [{"competencia": "2024-04", "valor": "1.000,01"}]},
+            {"chave": "ta-01", "origem": "aditivo", "data": "2025-02-10", "instrumento": "ta-01",
+             "itens": [{"competencia": "2025-03", "valor": "2.000,00"}]}]
+    raiz = str(_cadastro(tmp_path / "cad", {**CONTRATO, "cronograma": cron}))
+    assert cli.main(["cadastro", "aplicar", "--raiz", raiz, "--usuario", "leo@l.com", "--ensaio"]) == 0
+    saida = capsys.readouterr().out
+    assert "cronograma: 2 criados" in saida
+    assert "+ MT-402/contratual (11/03/2024)" in saida and "+ MT-402/ta-01 (10/02/2025)" in saida
+    assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 0
+
+
 def test_aplicar_com_usuario_inexistente_sai_um(tmp_path, monkeypatch):
     _banco(tmp_path, monkeypatch)
     raiz = str(_cadastro(tmp_path / "cad"))
@@ -105,6 +120,10 @@ def test_cadastro_exemplo_valida_e_aplica_em_banco_vazio(tmp_path, monkeypatch, 
     assert [r[0] for r in conn.execute("SELECT nome_curto FROM contratos ORDER BY nome_curto")] == [
         "Obra Consórcio", "Obra Própria"]
     assert conn.execute("SELECT COUNT(*) FROM espelho_regras").fetchone()[0] == 2
+    # issue #256: a obra de exemplo traz duas versoes de cronograma, cada uma com a data do documento
+    assert [tuple(r) for r in conn.execute("SELECT chave, data_documento FROM cronograma_versoes_cadastro "
+                                           "ORDER BY data_documento")] == [("contratual", "2025-03-10"),
+                                                                           ("ta-01", "2026-02-02")]
     capsys.readouterr()
     assert cli.main(["cadastro", "aplicar", "--usuario", "leo@l.com"]) == 0     # de novo: nada muda
     assert "contratos: 0 criados, 0 alterados" in capsys.readouterr().out

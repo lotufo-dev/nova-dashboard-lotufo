@@ -8,7 +8,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from app import arquivos, auditoria, contratos, db, oficios, tempo
+from app import arquivos, auditoria, contratos, cronograma, db, oficios, tempo
 from app.cadastro_arquivos import TIPOS_ADITIVO
 
 
@@ -120,7 +120,7 @@ def _consorciadas(conn, usuario_id, ents, ids, rel) -> None:
 def aplicar(conn: sqlite3.Connection, usuario_id: int, cad: dict, ensaio: bool = False,
             commit_hash: str | None = None) -> dict:
     rel = {"orgaos": _rel(), "entidades": _rel(), "contratos": _rel(), "instrumentos": _rel(),
-           "pleitos": _rel(), "geral": _rel(), "espelho": _rel(), "frc": _rel(),
+           "pleitos": _rel(), "cronograma": _rel(), "geral": _rel(), "espelho": _rel(), "frc": _rel(),
            "avisos": list(cad.get("avisos", [])), "ensaio": ensaio}
     try:
         with db.mutacao(conn):
@@ -322,7 +322,63 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             rel["contratos"]["iguais"] += 1
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])
     _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"])
+    _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
     return cid
+
+
+def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
+    """Issue #256: uma `cronograma_versoes` por entrada do YAML, com criado_em = data do documento.
+
+    So' acrescenta. Versao aplicada nao muda nem some (correcao e' versao nova, com outra chave); as
+    versoes sem linha no cadastro (manuais e a carga de 04/09/2026) nao sao tocadas: ficam na linha do
+    tempo e sao superadas pela primeira versao de documento posterior (cronograma.previsto_efetivo)."""
+    nome = c["nome_curto"]
+    do_cadastro = {v["chave"] for v in c.get("cronograma") or []}
+    for r in conn.execute("SELECT chave FROM cronograma_versoes_cadastro WHERE contrato_id=?", (contrato_id,)):
+        if r["chave"] not in do_cadastro:
+            raise ValueError(f"{nome}: a versão de cronograma {r['chave']} já foi aplicada e sumiu do cadastro; "
+                             "versão aplicada não se apaga (correção é versão nova, com outra chave)")
+    # Ordem do documento: o numero das versoes segue a linha do tempo. Nao ha empate: a validacao recusa duas
+    # versoes do cadastro com a mesma data (gate Sol, PR #311).
+    ordenadas = sorted(enumerate(c.get("cronograma") or []), key=lambda par: (par[1]["data"], par[0]))
+    criadas: list[tuple[int, str]] = []
+    for _, v in ordenadas:
+        rotulo = f"{nome}/{v['chave']} ({'/'.join(reversed(v['data'].split('-')))})"   # DD/MM/AAAA
+        itens = sorted(v["itens"])
+        ja = conn.execute("SELECT * FROM cronograma_versoes_cadastro WHERE contrato_id=? AND chave=?",
+                          (contrato_id, v["chave"])).fetchone()
+        if ja is None:
+            numero = cronograma.nova_versao(conn, usuario_id, contrato_id, itens, "manual",
+                                            data_documento=v["data"])
+            vid = conn.execute("SELECT id FROM cronograma_versoes WHERE contrato_id=? AND numero=?",
+                               (contrato_id, numero)).fetchone()[0]
+            conn.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, "
+                         "data_documento, instrumento) VALUES (?,?,?,?,?,?)",
+                         (vid, contrato_id, v["chave"], v["origem"], v["data"], v["instrumento"]))
+            auditoria.registrar(conn, usuario_id, "cadastro.cronograma", "contrato", contrato_id, None,
+                                {"chave": v["chave"], "versao": numero, "origem": v["origem"],
+                                 "data_documento": v["data"], "instrumento": v["instrumento"]})
+            rel["criados"].append(rotulo)
+            criadas.append((numero, rotulo))
+            continue
+        gravado = {"origem": ja["origem"], "data": ja["data_documento"], "instrumento": ja["instrumento"],
+                   "itens": [tuple(r) for r in conn.execute(
+                       "SELECT competencia, valor_previsto_centavos FROM cronograma_itens WHERE versao_id=? "
+                       "ORDER BY competencia", (ja["versao_id"],))]}
+        novo = {"origem": v["origem"], "data": v["data"], "instrumento": v["instrumento"], "itens": itens}
+        mudou = [k for k in novo if gravado[k] != novo[k]]
+        if mudou:
+            raise ValueError(f"{rotulo}: versão de cronograma já aplicada não pode ser alterada "
+                             f"({', '.join(mudou)}); registre uma versão nova, com outra chave")
+        rel["iguais"] += 1
+    # A versao de documento anterior a uma ja gravada (a carga de 04/09/2026, uma publicada na tela) entra
+    # ANTES dela na linha do tempo e nao muda o futuro: quem aplica precisa saber.
+    if criadas:
+        numero, rotulo = criadas[-1]     # a de documento mais recente desta aplicacao
+        vig = cronograma.vigente(conn, contrato_id)["numero"]
+        if numero != vig:
+            avisos.append(f"{rotulo}: versão aplicada, mas não é a vigente (há versão {vig} com data "
+                          "posterior); ela só vale para os meses até a data dessa versão")
 
 
 def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:

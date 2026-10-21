@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Cronograma from "./Cronograma";
 import { ir } from "./rota";
@@ -14,7 +14,8 @@ const CURVA = { curva: [], saldo: { vigente_centavos: 100, atestado_execucao_cen
 describe("Cronograma: guarda de rascunho", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/obras/1/contrato");
-    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO : { versao: 3 }));
+    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO
+      : c.endsWith("/versoes") ? [] : { versao: 3 }));
   });
   afterEach(() => { cleanup(); api.mockReset(); vi.restoreAllMocks(); });
 
@@ -36,5 +37,58 @@ describe("Cronograma: guarda de rascunho", () => {
     ir({ tela: "avisos" });
     expect(confirmar).toHaveBeenCalledTimes(1);
     expect(window.location.pathname).toBe("/avisos");
+  });
+});
+
+// issue #256: uma linha por versao, com a data do documento quando veio do cadastro
+describe("Cronograma: versões", () => {
+  const VERSOES = [
+    { numero: 2, criado_em: "2024-03-11 04:00:00", chave: "contratual", origem_documento: "contratual",
+      data_documento: "2024-03-11", instrumento: null, competencias: 6, total_centavos: 1000000001, vigente: false },
+    { numero: 1, criado_em: "2026-09-04 15:00:00", chave: null, origem_documento: null,
+      data_documento: null, instrumento: null, competencias: 2, total_centavos: 50000, vigente: false },
+    { numero: 3, criado_em: "2026-10-05 04:00:00", chave: "ta-01", origem_documento: "aditivo",
+      data_documento: "2026-10-05", instrumento: "ta-01", competencias: 3, total_centavos: 70001, vigente: true },
+  ];
+  // a vigente que /cronograma devolve, coerente com a lista (versao 3, do cadastro)
+  const VIGENTE = { numero: 3, criado_em: "2026-10-05 04:00:00", origem: "manual",
+    itens: [{ competencia: "2026-10", valor_previsto_centavos: 70001 }] };
+  const servir = (vigente: unknown) => api.mockImplementation((c: string) => Promise.resolve(
+    c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? vigente : c.endsWith("/versoes") ? VERSOES : null));
+  beforeEach(() => { servir(VIGENTE); });
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("lista as versões na ordem do servidor, com a data e o documento", async () => {
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: /Versões do cronograma/ });
+    // celulas separadas por "|" (o espaco do R$ e' o nao separavel do toLocaleString)
+    const linhas = within(tabela).getAllByRole("row").slice(1)
+      .map(l => Array.from(l.querySelectorAll("td"), td => (td.textContent ?? "").replace(/\s/g, " ")).join("|"));
+    expect(linhas).toEqual([
+      "2|11/03/2024|Contrato|6|R$ 10.000.000,01",
+      "1|04/09/2026|Sem documento no cadastro|2|R$ 500,00",
+      "3 · vigente|05/10/2026|Termo aditivo · ta-01|3|R$ 700,01",
+    ]);
+    expect(api).toHaveBeenCalledWith("/api/contratos/1/cronograma/versoes");
+  });
+
+  it("a dica do cabeçalho diz o documento da vigente e a data dele, nunca a origem interna", async () => {
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    const dica = screen.getByText(/^versão 3 ·/);
+    expect(dica.textContent).toBe("versão 3 · 1 competência · documento de 05/10/2026");
+    expect(dica.getAttribute("title")).toBe("Documento: Termo aditivo · ta-01");
+    expect(document.body.innerHTML).not.toMatch(/Origem do cadastro|manual/);
+  });
+
+  it("a dica casa a versão pelo número, não pela marca de vigente da lista (gate Sol, PR #311)", async () => {
+    // as duas leituras sao independentes: /cronograma pode trazer outra versao que a marcada na lista
+    servir({ numero: 1, criado_em: "2026-09-04 15:00:00", origem: "manual",
+      itens: [{ competencia: "2026-09", valor_previsto_centavos: 50000 }] });
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    const dica = screen.getByText(/^versão 1 ·/);
+    expect(dica.textContent).toBe("versão 1 · 1 competência · publicada em 04/09/2026");
+    expect(dica.getAttribute("title")).toBe("Documento: Sem documento no cadastro");
   });
 });

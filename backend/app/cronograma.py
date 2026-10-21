@@ -5,6 +5,12 @@ criada (criado_em). O previsto efetivo de uma competencia e o valor da versao
 mais recente criada ate aquela competencia -- revisar o cronograma nunca
 reescreve meses ja decorridos.
 
+Versao vinda do cadastro (issue #256): criado_em e' a DATA DO DOCUMENTO (aditivo, carta,
+curva do SMO), nao a da carga. Por isso a linha do tempo e' ordenada por criado_em (empate
+pelo numero), nao so pelo numero: a versao contratual de 2024 aplicada depois da carga de
+04/09/2026 vem ANTES dela, e a carga so' fica superada pela primeira versao de documento
+posterior. Para as versoes manuais as duas ordens coincidem (o clamp abaixo garante).
+
 O mes de criacao e o de CUIABA (app/tempo.py), nao o da string UTC gravada:
 uma versao publicada as 21h do dia 31 nasceria no mes seguinte se lida como
 UTC, e congelaria o mes corrente antes da hora.
@@ -15,7 +21,11 @@ from app import auditoria, db, tempo
 
 
 def nova_versao(conn: sqlite3.Connection, usuario_id: int, contrato_id: int,
-                itens: list[tuple[str, int]], origem: str) -> int:
+                itens: list[tuple[str, int]], origem: str, data_documento: str | None = None) -> int:
+    """Cria a proxima versao e devolve o numero dela.
+
+    `data_documento` ('AAAA-MM-DD', so' o cadastro passa): a versao nasce na meia-noite de Cuiaba
+    desse dia, sem o clamp monotonico -- a data e' a do documento, nao a do relogio."""
     if not itens:
         raise ValueError("Versão de cronograma vazia: informe ao menos uma competência")
     comps = [c for c, _ in itens]
@@ -35,8 +45,11 @@ def nova_versao(conn: sqlite3.Connection, usuario_id: int, contrato_id: int,
         # que a coluna e' gravada, e a conversao para Cuiaba (deslocamento fixo) preserva
         # a ordem — converter aqui so trocaria a unidade sem mudar a decisao. Quem converte
         # e' a LEITURA (previsto_efetivo), onde a fronteira de mes e' que importa.
-        agora = conn.execute("SELECT datetime('now')").fetchone()[0]
-        criado_em = max(agora, r["c"] or agora)
+        if data_documento is not None:
+            criado_em = tempo.inicio_do_dia_utc(data_documento)
+        else:
+            agora = conn.execute("SELECT datetime('now')").fetchone()[0]
+            criado_em = max(agora, r["c"] or agora)
         # O SELECT acima e' uma leitura; entre ela e o INSERT outra requisicao pode criar a
         # mesma versao. Quem de fato decide e' o UNIQUE (contrato_id, numero) do schema --
         # sem este catch o perdedor da corrida recebia IntegrityError crua no handler (500).
@@ -52,14 +65,18 @@ def nova_versao(conn: sqlite3.Connection, usuario_id: int, contrato_id: int,
         vid = cur.lastrowid
         conn.executemany("INSERT INTO cronograma_itens (versao_id, competencia, valor_previsto_centavos) VALUES (?,?,?)",
                          [(vid, c, v) for c, v in itens])
+        depois = {"versao": ultimo + 1, "itens": len(itens)}
+        if data_documento is not None:
+            depois["data_documento"] = data_documento
         auditoria.registrar(conn, usuario_id, "cronograma.nova_versao", "contrato", contrato_id,
-                            None, {"versao": ultimo + 1, "itens": len(itens)})
+                            None, depois)
     return ultimo + 1
 
 
 def _versoes(conn, contrato_id: int) -> list[dict]:
+    """Linha do tempo das versoes: pela data em que passam a valer (criado_em), empate pelo numero."""
     return [dict(r) for r in conn.execute(
-        "SELECT * FROM cronograma_versoes WHERE contrato_id=? ORDER BY numero", (contrato_id,))]
+        "SELECT * FROM cronograma_versoes WHERE contrato_id=? ORDER BY criado_em, numero", (contrato_id,))]
 
 
 def _itens(conn, versao_id: int) -> list[dict]:
@@ -77,9 +94,28 @@ def vigente(conn: sqlite3.Connection, contrato_id: int) -> dict | None:
             "itens": _itens(conn, v["id"])}
 
 
+def versoes(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
+    """Todas as versoes, na ordem da linha do tempo, com o que o cadastro diz do documento (issue #256).
+    Versao sem linha no cadastro (manual ou da carga de 04/09/2026) vem com chave, origem, data e instrumento nulos."""
+    linhas = conn.execute(
+        """SELECT v.numero, v.criado_em, v.origem, k.chave, k.origem AS origem_documento, k.data_documento,
+                  k.instrumento, COUNT(i.id) AS competencias,
+                  COALESCE(SUM(i.valor_previsto_centavos), 0) AS total_centavos
+             FROM cronograma_versoes v
+             LEFT JOIN cronograma_versoes_cadastro k ON k.versao_id = v.id
+             LEFT JOIN cronograma_itens i ON i.versao_id = v.id
+            WHERE v.contrato_id=?
+            GROUP BY v.id
+            ORDER BY v.criado_em, v.numero""", (contrato_id,)).fetchall()
+    out = [{**dict(r), "vigente": False} for r in linhas]
+    if out:
+        out[-1]["vigente"] = True     # a mesma que `vigente()` devolve: a ultima da linha do tempo
+    return out
+
+
 def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int) -> dict[str, int]:
     efetivo: dict[str, int] = {}
-    for v in _versoes(conn, contrato_id):        # ordem crescente de numero
+    for v in _versoes(conn, contrato_id):        # linha do tempo: criado_em, empate pelo numero
         # 'AAAA-MM' do criado_em (UTC no banco) convertido para Cuiaba: e' a
         # fronteira de mes do NEGOCIO que decide o congelamento, nao a de UTC.
         mes_criacao = tempo.mes_local(v["criado_em"])

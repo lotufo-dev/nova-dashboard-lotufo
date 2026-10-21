@@ -101,7 +101,8 @@ def _commit(raiz: Path) -> str | None:
 
 def _relatorio(rel: dict) -> None:
     print("ENSAIO (nada foi gravado)" if rel["ensaio"] else "APLICADO")
-    for nome in ("orgaos", "entidades", "contratos", "instrumentos", "pleitos", "geral", "espelho", "frc"):
+    for nome in ("orgaos", "entidades", "contratos", "instrumentos", "pleitos", "cronograma", "geral", "espelho",
+                 "frc"):
         r = rel[nome]
         print(f"  {nome}: {len(r['criados'])} criados, {len(r['alterados'])} alterados, {r['iguais']} iguais")
         for rotulo in r["criados"]:

@@ -1,5 +1,5 @@
 import pytest
-from app import auditoria, auth, contratos, cronograma, db
+from app import auditoria, auth, contratos, cronograma, db, tempo
 from tests.apoio_corrida import ConexaoComCorrida
 
 @pytest.fixture
@@ -167,3 +167,50 @@ def test_auditoria_registrada(conn, cid):
     acoes = [r["acao"] for r in conn.execute("SELECT acao FROM audit_log")]
     assert "cronograma.nova_versao" in acoes
     assert auditoria.verificar_cadeia(conn)
+
+
+# --- issue #256: criado_em = data do documento --------------------------------------------------
+
+def test_versao_com_data_do_documento_nao_sofre_o_clamp(conn, cid):
+    """A versao do cadastro nasce na data do documento, mesmo anterior as que ja existem."""
+    cronograma.nova_versao(conn, 1, cid, [("2026-09", 1_00)], "manual")
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 2_00)], "manual", data_documento="2024-12-31")
+    vs = conn.execute("SELECT numero, criado_em FROM cronograma_versoes ORDER BY numero").fetchall()
+    assert vs[1]["numero"] == 2 and vs[1]["criado_em"] == "2024-12-31 04:00:00"   # meia-noite em Cuiaba
+    assert tempo.mes_local(vs[1]["criado_em"]) == "2024-12"
+
+
+def test_previsto_efetivo_respeita_a_data_do_documento_e_nao_a_ordem_da_carga(conn, cid):
+    """Carga de 04/09/2026 (versao 1) e, depois, a versao contratual de 2024 vinda do cadastro (versao 2): na
+    linha do tempo a de 2024 vem antes, e a carga continua valendo dali em diante."""
+    cronograma.nova_versao(conn, 1, cid, [("2026-08", 10_00), ("2026-10", 20_00)], "manual")
+    conn.execute("UPDATE cronograma_versoes SET criado_em='2026-09-04 15:00:00'")
+    conn.commit()
+    cronograma.nova_versao(conn, 1, cid, [("2024-05", 5_00), ("2026-08", 99_00), ("2026-10", 99_00),
+                                          ("2026-11", 99_00)], "manual", data_documento="2024-04-10")
+    assert cronograma.previsto_efetivo(conn, cid) == {"2024-05": 5_00, "2026-08": 99_00, "2026-10": 20_00}
+    assert cronograma.vigente(conn, cid)["numero"] == 1    # a vigente e' a de documento mais recente
+
+
+def test_documento_no_mesmo_dia_desempata_pelo_numero(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2026-01", 1_00)], "manual", data_documento="2025-06-01")
+    cronograma.nova_versao(conn, 1, cid, [("2026-01", 2_00)], "manual", data_documento="2025-06-01")
+    assert cronograma.vigente(conn, cid)["numero"] == 2
+    assert cronograma.previsto_efetivo(conn, cid) == {"2026-01": 2_00}
+
+
+def test_lista_de_versoes_traz_os_dados_do_documento(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2026-09", 1_01), ("2026-10", 2_00)], "manual")
+    vid = conn.execute("SELECT id FROM cronograma_versoes").fetchone()[0]
+    cronograma.nova_versao(conn, 1, cid, [("2024-05", 5_00)], "manual", data_documento="2024-04-10")
+    vid2 = conn.execute("SELECT id FROM cronograma_versoes WHERE numero=2").fetchone()[0]
+    conn.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, data_documento,"
+                 " instrumento) VALUES (?,?,?,?,?,?)", (vid2, cid, "contratual", "contratual", "2024-04-10", None))
+    conn.commit()
+    vs = cronograma.versoes(conn, cid)
+    # ordem da linha do tempo (documento); a vigente marcada
+    assert [(v["numero"], v["chave"], v["origem_documento"], v["data_documento"], v["competencias"],
+             v["total_centavos"], v["vigente"]) for v in vs] == [
+        (2, "contratual", "contratual", "2024-04-10", 1, 5_00, False),
+        (1, None, None, None, 2, 3_01, True)]
+    assert vid != vid2
