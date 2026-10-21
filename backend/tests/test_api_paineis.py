@@ -58,11 +58,23 @@ def test_rotas_da_deteccao_sairam(client_admin):
 
 
 def test_curva_traz_a_linha_anterior_e_as_marcas_dos_aditivos(client_admin):
+    from app import db
     cid = _cenario(client_admin)
     r0 = client_admin.get(f"/api/contratos/{cid}/curva").json()
     assert r0["anterior"] is None and r0["aditivos"] == []
+    # versao manual nao e' repactuacao: continua sem linha anterior
     client_admin.post(f"/api/contratos/{cid}/cronograma", json={
         "itens": [{"competencia": "2026-07", "valor": "100,00"}, {"competencia": "2026-08", "valor": "100,00"}]})
+    assert client_admin.get(f"/api/contratos/{cid}/curva").json()["anterior"] is None
+    conn = db.get_conn()
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, ordinal) "
+                 "VALUES (?,?,?,?,?)", (cid, "prazo", "assinado", "2026-07-15", 1))
+    vid = conn.execute("SELECT id FROM cronograma_versoes WHERE numero=1").fetchone()[0]
+    conn.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, data_documento)"
+                 " VALUES (?,?,?,?,?)", (vid, cid, "ta1", "aditivo", "2026-07-15"))
+    conn.commit()
+    conn.close()
     r = client_admin.get(f"/api/contratos/{cid}/curva").json()
-    assert r["anterior"] == [{"competencia": "2026-07", "previsto_centavos": 300_00}]
-    assert r["aditivos"] == []
+    assert r["aditivos"] == [{"competencia": "2026-07", "data": "2026-07-15", "nome": "1º TA"}]
+    # a versao 1 e' a unica repactuacao e nao ha nada antes dela
+    assert r["anterior"] is None

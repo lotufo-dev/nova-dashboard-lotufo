@@ -102,7 +102,7 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
           </div>
           <div className="curva__legenda" aria-hidden="true">
             <span><span className="curva__chave curva__chave--previsto" />{temAnterior ? "Previsto vigente" : "Previsto"}</span>
-            {temAnterior && <span><span className="curva__chave curva__chave--anterior" />Previsto anterior à última repactuação</span>}
+            {temAnterior && modo === "acumulado" && <span><span className="curva__chave curva__chave--anterior" />Previsto anterior à última repactuação</span>}
             <span><span className="curva__chave curva__chave--medido" />Medido</span>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import CurvaS from "./CurvaS";
 import { curvaS, desviosEmPP, type PontoDaCurva } from "./obra";
@@ -58,6 +58,12 @@ describe("CurvaS: duas linhas, marcas e desvio", () => {
     const t = pequeno.container.querySelector(".curva__rodape")?.textContent ?? "";
     expect(t).toMatch(/contra o vigente: 0,0 p\.p\./);
     expect(t).not.toMatch(/-0,0/);
+  });
+
+  it("na visao por mes a legenda da linha anterior some (a linha nao e desenhada)", () => {
+    render(<CurvaS pontos={PONTOS} anterior={ANTERIOR} aditivos={[]} contratoId={1} />);
+    fireEvent.click(screen.getByRole("button", { name: "por mês" }));
+    expect(screen.queryByText("Previsto anterior à última repactuação")).toBeNull();
   });
 
   it("obra sem versao anterior: so a linha vigente, sem legenda nem desvio da anterior", () => {
