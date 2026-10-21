@@ -29,6 +29,8 @@ export type Pleito = {
   conferencia: Conferencia | null; pendencias: Pendencia[]; enviado_em: string | null; envio_justificativa: string | null;
   anexos: { id: number; tipo: string; nome: string; tamanho: number }[];
   exigidos: { tipo: string; rotulo: string }[];
+  /** Reajuste: a chave do apostilamento que atendeu o pleito (o cadastro preenche, issue #271). */
+  instrumento_chave?: string | null;
 };
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string;
   anexos: { nome: string; tamanho: number }[]; total: number; limite: number; pendencias: Pendencia[] };

@@ -6,7 +6,8 @@ import { focarPorId } from "./foco";
 import { reajustePorDataBase, type CicloApi, type InstrumentoCadastro } from "./obra";
 import { Link } from "./Link";
 import { fmtCompetencia as mesAno, fmtDataPura } from "./tempo";
-import { fmtPercentual } from "./formato";
+import { brl, fmtPercentual } from "./formato";
+import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { LinhaPleito, partesDoEnvio, pleitoEmLinha, type DesfechoPleito } from "./Prazos";
 
@@ -21,6 +22,46 @@ function rotuloDataBase(mes: string, c: CicloApi) {
 }
 
 type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilamento_pendente" | "apostilado" };
+
+/** Competencia com previsao vigente de apostilamento (issue #271; `reajuste.competencias_apostiladas`): o termo
+ *  com `corrige` aplicado depois ja' vem no lugar do anterior. */
+type CompetenciaApostilada = { data_base_mes: string; ciclo: number; competencia: string; valor_centavos: number;
+  medicao: number | null; instrumento_chave: string; instrumento_numero: string | null; instrumento_data: string };
+
+/** As competencias que o apostilamento lista, mes a mes, com o nº da medicao que ele cita e o termo. */
+function TabelaApostilada({ dataBase, linhas }: { dataBase: string; linhas: CompetenciaApostilada[] }) {
+  const rotulo = `Competências apostiladas da data-base ${mesAno(dataBase)}`;
+  return (
+    <>
+      <p className="resumo__rotulo">Competências apostiladas</p>
+      <Rolagem rotulo={rotulo}>
+        <table className="tabela">
+          <caption className="sr-only">{rotulo}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Competência</th>
+              <th scope="col">Ciclo</th>
+              <th scope="col">Medição</th>
+              <th scope="col" className="col-num">Valor</th>
+              <th scope="col">Apostilamento</th>
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.map((l, i) => (
+              <tr key={`${l.ciclo}-${l.competencia}`} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                <td className="forte num">{mesAno(l.competencia)}</td>
+                <td className="num">{l.ciclo}</td>
+                <td className="num">{l.medicao ? `${l.medicao}ª` : "—"}</td>
+                <td className="col-num dinheiro num">{brl(l.valor_centavos)}</td>
+                <td className="num" title={`de ${fmtDataPura(l.instrumento_data)}`}>{l.instrumento_numero ?? "s/n"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Rolagem>
+    </>
+  );
+}
 
 // Pleito nao enviado e' a vez da engenharia: nivel "Acao" do D2 (ambar com contorno cheio), o
 // mesmo com que o fato aparece nos avisos. Vermelho fica para o critico.
@@ -57,9 +98,16 @@ function textoApostilamento(i: InstrumentoCadastro): string {
 /** O desfecho de um pleito enviado (F-71): com o ciclo corrente, o selo diz se o apostilamento veio (Em dia) ou
  *  se falta (Atencao, com os dias que o servidor conta); a data do envio e' texto de apoio. Sem o ciclo (ciclo
  *  anterior, data-base que saiu do cadastro), o dado nao diz o desfecho: selo neutro. */
-function desfechoDoPleito(p: Pleito, c?: Ciclo): DesfechoPleito {
+function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: Ciclo): DesfechoPleito {
   const envio = partesDoEnvio(p);
   const neutro = { classe: "", texto: p.situacao, partes: envio };
+  // o cadastro ligou o pleito ao termo que o atendeu (issue #271): vale em qualquer ciclo, corrente ou passado
+  const termo = p.situacao === "enviado" && p.instrumento_chave
+    ? apostilamentos.find(i => i.chave === p.instrumento_chave) : undefined;
+  if (termo) {
+    return { classe: "selo--ok", texto: `atendido pelo apostilamento ${termo.numero ?? "s/n"}`,
+      partes: [...envio, `apostilamento de ${fmtDataPura(termo.data)}`] };
+  }
   if (!c || p.situacao !== "enviado") return neutro;
   if (c.situacao === "apostilamento_pendente") {
     return { classe: "selo--atencao", partes: envio,
@@ -76,7 +124,7 @@ function desfechoDoPleito(p: Pleito, c?: Ciclo): DesfechoPleito {
 const emAberto = (p: Pleito) => p.origem === "sistema" && p.situacao !== "enviado" && p.situacao !== "descartado";
 
 export default function Reajuste({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
-  const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[] } | null>(null);
+  const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[]; competencias?: CompetenciaApostilada[] } | null>(null);
   const [apostilamentos, setApostilamentos] = useState<InstrumentoCadastro[]>([]);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
@@ -107,7 +155,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   const cartoes = (ps: Pleito[], ciclo?: Ciclo) => ps.map(p => {
     const contexto = p.ciclo ? `ciclo de ${p.ciclo}` : undefined;
     return pleitoEmLinha(p)
-      ? <LinhaPleito key={p.id} p={p} desfecho={desfechoDoPleito(p, ciclo)} contexto={contexto} />
+      ? <LinhaPleito key={p.id} p={p} desfecho={desfechoDoPleito(p, apostilamentos, ciclo)} contexto={contexto} />
       : <CartaoPleito key={p.id} p={p} podeEditar={podeEditar} aoMudar={() => void carregar()} contexto={contexto} />;
   });
   const nota = "O reajuste vale a partir do mês do aniversário da data-base; o aviso começa 30 dias antes.";
@@ -142,6 +190,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const outrosAp = db.apostilamentos.filter(i => i.id !== c.apostilamento?.id);
         const anteriores = db.pleitosAnteriores.length + outrosAp.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
+        const apostiladas = (dados.competencias ?? []).filter(x => x.data_base_mes === db.data_base_mes);
         return (
           // o cartao e' a data-base: o ciclo, e embaixo, como secoes, os oficios dele e os ciclos anteriores; o
           // aviso de reajuste cai na ancora dele
@@ -172,6 +221,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
                   {" · "}<Link para={contrato} secao="instrumentos">ver em Contrato › Instrumentos</Link></p>
               )}
               {c.situacao === "apostilamento_pendente" && <p className="campo__nota">Pleito enviado; falta o apostilamento, que entra pelo cadastro.</p>}
+              {apostiladas.length > 0 && <TabelaApostilada dataBase={db.data_base_mes} linhas={apostiladas} />}
             </div>
             {(novo === db.data_base_mes || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
               <div className="secoes-pleito">
