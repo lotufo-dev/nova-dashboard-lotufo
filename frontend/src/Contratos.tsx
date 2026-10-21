@@ -282,8 +282,8 @@ export default function Contratos({ ir, busca = {}, perfil = "engenharia" }: { i
               </ul>
             )}
             <p className="resumo-nota">
-              Valores cheios do contrato, sem as obras encerradas. Executado = medido (execução) ÷ valor vigente; saldo a executar = valor
-              vigente − medido (execução). Valor vigente somado: {brl(total.vigente)}.
+              Valores cheios do contrato, sem as obras encerradas. Executado = medido (execução) ÷ vigente de execução; saldo a executar = vigente de
+              execução − medido (execução); o aditivo de reajuste fica fora. Vigente de execução somado: {brl(total.vigente)}.
             </p>
           </>
         )}

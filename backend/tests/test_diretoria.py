@@ -27,7 +27,7 @@ def cenario(tmp_path, monkeypatch):
                  "instrumentos": [{"chave": "ta-1", "tipo": "aditivo_valor", "numero": "1º TA", "objeto": None,
                                    "corrige": None, "pdf": None, "delta_valor_centavos": 200_000_000,
                                    "nova_execucao_fim": None, "nova_vigencia_fim": None, "data": "2025-06-01",
-                                   "dados": {}}]}
+                                   "dados": {}, "natureza": "execucao"}]}
     cadastro_aplicar.aplicar(c, uid, {
         "orgaos": [{"chave": "sinfra-x", "nome": "SINFRA - X", "familia": "sinfra", "cnpj": None,
                     "regras": {"nome_qdop": "SINFRA - SECRETARIA", "tipo_contratante": "PÚBLICO"}},

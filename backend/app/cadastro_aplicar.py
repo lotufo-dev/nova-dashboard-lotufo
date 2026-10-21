@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from app import arquivos, auditoria, contratos, db, oficios, tempo
-from app.cadastro_arquivos import TIPOS_ADITIVO
+from app.cadastro_arquivos import NATUREZAS, TIPOS_ADITIVO, TIPOS_COM_NATUREZA
 
 
 class _Ensaio(Exception):
@@ -392,6 +392,10 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     ja = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=?",
                       (contrato_id, inst["chave"])).fetchone()
     if ja is None:
+        # #262 (gate Sol): o NULL e' so' do legado. Aditivo de valor novo sem natureza voltaria a inflar o saldo.
+        if inst["tipo"] in TIPOS_COM_NATUREZA and novo["delta_valor_centavos"] and novo["natureza"] is None:
+            raise ValueError(f"{rotulo}: aditivo de valor novo precisa de `natureza` "
+                             f"({' ou '.join(NATUREZAS)}): o reajuste fica fora do saldo")
         anterior = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
         cur = conn.execute(
             """INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim,
