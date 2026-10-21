@@ -6,6 +6,7 @@ prazo param e fica so' a comunicacao de conclusao.
 """
 import datetime
 import json
+import re
 
 from app import avisos as _av, contratos, tempo
 
@@ -122,9 +123,23 @@ def resumo(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
                                    "dias": (hoje - enviado).days if enviado else None} if p else None}
 
 
+# Numero do termo no formato contrato/ano/tipo/termo ("099/2020/01/14", "088/2023/02/10-SINFRA"): o
+# ultimo bloco e' o numero do termo. Termo 00 e' o proprio contrato.
+_TERMO_NO_NUMERO = re.compile(r"^\s*\d+/\d{4}/\d{1,2}/(\d{1,3})(?!\d)")
+
+
+def _ordinal(a: dict, contado: int) -> int:
+    """Issue #261: o ordinal do termo sai do numero (sufixo /14), depois do `ordinal` do cadastro e so' na
+    falta dos dois da contagem dos instrumentos carregados (cadastro parcial escreveria "1º" no 14º)."""
+    m = _TERMO_NO_NUMERO.match(a.get("numero") or "")
+    if m and int(m.group(1)) > 0:
+        return int(m.group(1))
+    return a.get("ordinal") or contado
+
+
 def historico_texto(conn, contrato_id: int) -> str:
     """Secao "1. HISTORICO DO CONTRATO" da carta de prazo: um paragrafo por instrumento de prazo, com o
-    ordinal contado por forma (termo aditivo x termo de apostilamento)."""
+    ordinal do termo (`_ordinal`), contado por forma (termo aditivo x termo de apostilamento) na falta dele."""
     c = conn.execute("SELECT * FROM contratos WHERE id=?", (contrato_id,)).fetchone()
     linhas = [f"O Contrato n.º {c['numero_instrumento']} tem execução original até "
               f"{_br(c['execucao_fim'])} e vigência original até {_br(c['vigencia_fim'])}."]
@@ -138,7 +153,7 @@ def historico_texto(conn, contrato_id: int) -> str:
             partes.append(f"término da execução em {_br(a['nova_execucao_fim'])}")
         if a["nova_vigencia_fim"]:
             partes.append(f"da vigência em {_br(a['nova_vigencia_fim'])}")
-        linhas.append(f"O {conta[forma]}º {nome} n.º {a['numero'] or 's/n'} foi assinado em "
+        linhas.append(f"O {_ordinal(a, conta[forma])}º {nome} n.º {a['numero'] or 's/n'} foi assinado em "
                       f"{_br(a['data_assinatura'])}, com {' e '.join(partes)}.")
     return "\n\n".join(linhas)
 
