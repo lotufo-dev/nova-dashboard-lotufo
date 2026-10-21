@@ -4,7 +4,7 @@ import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
 import { api } from "./api";
 import { IconeAlerta } from "./icones";
-import { DO_ESPELHO, EXCECOES, type Metade } from "./medicao";
+import { DA_PLANILHA, DO_ESPELHO, EXCECOES, type Metade } from "./medicao";
 import type { Medicao } from "./Medicoes";
 import Selo from "./Selo";
 
@@ -29,6 +29,7 @@ export function brlCampo(centavos: number | null): string {
 export function valorEditavel(m: Medicao, campo: "protocolado" | "atestado", podeEditar: boolean): boolean {
   return podeEditar && !EXCECOES.includes(m.estado)
     && !(campo === "protocolado" && DO_ESPELHO.includes(m.estado))
+    && !(campo === "protocolado" && DA_PLANILHA.includes(m.estado))
     && !(campo === "protocolado" && m.valor_protocolado_origem === "espelho")
     && !(campo === "protocolado" && m.congelada === 1 && m.valor_protocolado_centavos !== null);
 }

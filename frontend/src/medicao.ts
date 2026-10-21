@@ -25,6 +25,9 @@ export const EXCECOES = ["cancelada", "desistida"];
 export const FINAIS = ["recebida", "cancelada", "desistida"];
 // Estados em que a medicao nasceu no espelho (bloco 2): o valor vem da regra da obra, nao se edita a mao.
 export const DO_ESPELHO = ["espelho_gerado", "espelho_enviado"];
+// Issue #281: da planilha/carta ao boletim o pedido so' muda por revisao da planilha (espelha
+// medicoes.ESTADOS_PLANILHA do servidor, que recusa a edicao avulsa).
+export const DA_PLANILHA = ["planilha_gerada", "planilha_enviada", "boletim_recebido"];
 
 // Espelha medicoes.TRANSICOES do servidor, MENOS `protocolada` (exclusividade de POST /protocolo) e MENOS
 // `nota_emitida` (fecha pela nota, em api_notas). `nf_emitida` e' legado; fica so' o caminho de saida dele.

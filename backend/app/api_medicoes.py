@@ -258,25 +258,14 @@ def _anexos_validados(oficio: UploadFile, planilha: UploadFile) -> list[tuple[by
 
 
 def _gravar_e_registrar(conn: sqlite3.Connection, validados: list[tuple[bytes, str]], registrar):
-    """Grava os anexos pelo hash e chama `registrar(anexos)`. Se o registro falhar, apaga o arquivo que esta
-    chamada criou e que nenhuma versao gravada referencia (o mesmo hash pode ser de outra versao: esse fica)."""
-    novos, caminhos = [], []
-    for dados, ext in validados:
-        existia = (arquivos.pasta("planilhas") / f"{arquivos.sha_de(dados)}.{ext}").exists()
-        caminho, sha = arquivos.gravar_bytes("planilhas", dados, ext)
-        caminhos.append((caminho, sha))
-        if not existia:
-            novos.append(caminho)
-    (arq, sha), (arq_p, sha_p) = caminhos
-    try:
-        return registrar({"arquivo": arq, "sha256": sha, "arquivo_planilha": arq_p, "sha256_planilha": sha_p})
-    except BaseException:
-        conn.rollback()
-        for caminho in novos:
-            if conn.execute("SELECT 1 FROM medicao_planilhas WHERE arquivo=? OR arquivo_planilha=?",
-                            (caminho, caminho)).fetchone() is None:
-                arquivos.caminho_seguro(caminho).unlink(missing_ok=True)
-        raise
+    """Grava os anexos (ja' validados) pelo hash e chama `registrar(anexos)`.
+
+    Nada e' apagado se o registro falhar (gate Sol, rodada 2): a decisao de apagar ficaria fora do BEGIN
+    IMMEDIATE, e no clique duplo com o mesmo PDF a requisicao que falha apagaria o arquivo de que a outra acabou
+    de depender. O arquivo sem versao e' inofensivo: tem o nome do proprio hash e e' reaproveitado no proximo
+    envio do mesmo conteudo."""
+    (arq, sha), (arq_p, sha_p) = (arquivos.gravar_bytes("planilhas", dados, ext) for dados, ext in validados)
+    return registrar({"arquivo": arq, "sha256": sha, "arquivo_planilha": arq_p, "sha256_planilha": sha_p})
 
 
 def _centavos(valor: str) -> int:

@@ -633,7 +633,10 @@ def test_pedido_da_planilha_nao_muda_pelo_valor_avulso(conn, contrato_id, estado
     mid = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31",
                                                                        100_01), ANEXOS)["medicao_id"]
     conn.execute("UPDATE medicoes SET estado=? WHERE id=?", (estado, mid)); conn.commit()
-    with pytest.raises(ValueError, match="Para mudar o pedido, registre uma revisão da planilha/carta"):
+    # depois do boletim a revisao tambem e' recusada: a mensagem nao a sugere (gate Sol, rodada 2)
+    esperada = ("O pedido não pode mais ser alterado depois do boletim do órgão" if estado == "boletim_recebido"
+                else "Para mudar o pedido, registre uma revisão da planilha/carta")
+    with pytest.raises(ValueError, match=esperada):
         medicoes.definir_valor(conn, 1, mid, "protocolado", 200_00, "manual")
     assert medicoes.detalhe(conn, mid)["valor_protocolado_centavos"] == 100_01
     medicoes.definir_valor(conn, 1, mid, "atestado", 99_99, "manual")     # o aprovado segue (boletim/glosa)

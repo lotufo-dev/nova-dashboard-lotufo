@@ -605,18 +605,25 @@ def test_planilha_invalida_nao_deixa_o_oficio_gravado(client_admin):
     assert _pasta_planilhas() == []
 
 
-def test_registro_que_falha_depois_de_gravar_apaga_os_anexos_novos(client_admin, monkeypatch):
-    """A recusa dentro da transacao (corrida com outra requisicao) nao deixa arquivo sem versao."""
-    from app import medicao_planilhas
+def test_registro_que_falha_com_o_mesmo_pdf_nao_apaga_o_arquivo_da_versao(client_admin, monkeypatch):
+    """Gate Sol rodada 2: a requisicao que falha (corrida, clique duplo) nao apaga nada; o arquivo de que a versao
+    ja' registrada depende continua na pasta."""
+    from app import db, medicao_planilhas
     cid = _contrato(client_admin)
-    assert _nova_planilha(client_admin, cid).status_code == 201
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
     antes = _pasta_planilhas()
 
     def recusa(*_a, **_k):
         raise ValueError("Estado da medição mudou concorrentemente; tente novamente")
     monkeypatch.setattr(medicao_planilhas, "registrar", recusa)
-    assert _nova_planilha(client_admin, cid, 2, "2026-08", "2026-08-01", "2026-08-31").status_code == 422
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha("oficio 1 2026-07-01"),
+                          data={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-08-01",
+                                "periodo_fim": "2026-08-31", "valor": "1,00"})
+    assert r.status_code == 422
     assert _pasta_planilhas() == antes and len(antes) == 2
+    v = client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"][0]
+    pasta = db.db_path().parent / "planilhas"
+    assert (pasta / f"{v['sha256']}.pdf").exists() and (pasta / f"{v['sha256_planilha']}.xlsx").exists()
 
 
 def test_revisao_sem_motivo_recusada_com_motivo_vira_versao_2(client_admin):
