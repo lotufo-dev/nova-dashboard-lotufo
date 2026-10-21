@@ -11,8 +11,8 @@ import json
 import re
 from html import escape
 
-from app import (arquivos, assinatura, auditoria, carta, correio, db, envio_reserva, espelhos, medicoes, oficios, pdfs,
-                 prazos, reajuste, tempo)
+from app import (arquivos, assinatura, auditoria, carta, correio, db, dinheiro, envio_reserva, espelhos, medicoes,
+                 oficios, pdfs, prazos, reajuste, tempo)
 from app import html_email
 
 TIPOS = ("reajuste", "prazo", "conclusao")
@@ -173,6 +173,54 @@ def remover_anexo(conn, usuario_id: int, pleito_id: int, anexo_id: int) -> None:
         if n != 1:
             raise ValueError("Anexo não encontrado")
         auditoria.registrar(conn, usuario_id, "pleito.anexo_removido", "pleito", pleito_id, None, {"anexo_id": anexo_id})
+
+
+# --- previsao de reajuste (issue #272; spec 2026-10-20 §2.2) -----------------------------------------
+
+ORIGENS_PREVISAO = ("pleito", "manual")      # o apostilamento entra pelo cadastro, nunca por aqui
+MAX_COMPETENCIAS = 240
+_COMPETENCIA = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
+
+
+def gravar_previsao(conn, usuario_id: int, pleito_id: int, origem: str, linhas: list[dict]) -> int:
+    """Grava a previsao conferida do pleito: uma linha de `reajuste_previsoes` por competencia (evento; aceitar de
+    novo grava outra leva e a leitura escolhe a mais recente). `origem` 'pleito' quando veio da planilha lida e
+    conferida sem mudar; 'manual' quando a pessoa digitou (planilha fora do modelo). Devolve quantas gravou."""
+    if origem not in ORIGENS_PREVISAO:
+        raise ValueError("Origem da previsão inválida")
+    p = _linha(conn, pleito_id)
+    if p["tipo"] != "reajuste":
+        raise ValueError("Previsão de reajuste só no pleito de reajuste")
+    if p["situacao"] == "descartado":
+        raise ValueError("Pleito descartado: a previsão não pode ser gravada")
+    if not p["data_base_mes"] or not p["ciclo"]:
+        raise ValueError("Pleito sem data-base e ciclo: a previsão não tem a que se ligar")
+    if not linhas:
+        raise ValueError("Informe ao menos uma competência com o valor previsto")
+    if len(linhas) > MAX_COMPETENCIAS:
+        raise ValueError(f"No máximo {MAX_COMPETENCIAS} competências por previsão")
+    vistas: set[str] = set()
+    for x in linhas:
+        comp, valor = x.get("competencia"), x.get("valor_centavos")
+        if not isinstance(comp, str) or not _COMPETENCIA.fullmatch(comp):
+            raise ValueError("Competência inválida: use mês e ano")
+        if comp in vistas:
+            raise ValueError(f"A competência {comp[5:]}/{comp[:4]} aparece duas vezes")
+        vistas.add(comp)
+        # bool e' int no Python: True nao e' um centavo
+        if not isinstance(valor, int) or isinstance(valor, bool) or abs(valor) > dinheiro.TETO_CENTAVOS:
+            raise ValueError(f"Valor previsto inválido em {comp[5:]}/{comp[:4]}")
+    ordenadas = sorted(linhas, key=lambda x: x["competencia"])
+    with db.mutacao(conn):
+        for x in ordenadas:
+            conn.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, "
+                         "valor_previsto_centavos, origem, pleito_id, usuario_id) VALUES (?,?,?,?,?,?,?,?)",
+                         (p["contrato_id"], p["data_base_mes"], p["ciclo"], x["competencia"], x["valor_centavos"],
+                          origem, pleito_id, usuario_id))
+        auditoria.registrar(conn, usuario_id, "pleito.previsao", "pleito", pleito_id, None,
+                            {"origem": origem, "data_base_mes": p["data_base_mes"], "ciclo": p["ciclo"],
+                             "competencias": {x["competencia"]: x["valor_centavos"] for x in ordenadas}})
+    return len(ordenadas)
 
 
 # --- carta -----------------------------------------------------------------------------------------

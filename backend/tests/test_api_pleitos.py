@@ -283,3 +283,124 @@ def test_corpo_formatado_do_pleito_sai_sanitizado(api, tmp_path):
     r = cl.post(f"/api/pleitos/{pid}/enviar", json={**corpo, "corpo": PERIGOSO})
     assert r.status_code == 200, r.text
     assert corpo_enviado(tmp_path / "sim") == LIMPO
+
+
+# --- previsao de reajuste lida da planilha do pleito (issue #272; spec 2026-10-20 §2.2) ---------------------
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _previsoes(cid):
+    c = db.get_conn()
+    try:
+        return [dict(r) for r in c.execute("SELECT competencia, valor_previsto_centavos AS valor, origem, pleito_id, "
+                                           "data_base_mes, ciclo, usuario_id FROM reajuste_previsoes "
+                                           "WHERE contrato_id=? ORDER BY id", (cid,))]
+    finally:
+        c.close()
+
+
+def _novo_pleito(cl, cid):
+    return cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
+
+
+def test_planilha_de_previsao_e_lida_para_conferir_sem_gravar(api):
+    from tests.test_leitura_planilha_reajuste import planilha_modelo
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    r = cl.post(f"/api/pleitos/{pid}/previsao/ler", files=_arquivo("Mem. e Cron.xlsx", planilha_modelo(), XLSX))
+    assert r.status_code == 200, r.text
+    assert r.json()["reconhecida"] is True
+    assert [(x["competencia"], x["valor_centavos"]) for x in r.json()["linhas"]] == [
+        ("2026-03", 123456), ("2026-04", 200000), ("2026-05", 10)]
+    assert _previsoes(cid) == []                       # ler so' mostra: quem grava e' o aceite
+
+
+def test_planilha_fora_do_modelo_pede_a_digitacao(api):
+    import io
+
+    import openpyxl
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    wb = openpyxl.Workbook()
+    buf = io.BytesIO()
+    wb.save(buf)
+    r = cl.post(f"/api/pleitos/{pid}/previsao/ler", files=_arquivo("outra.xlsx", buf.getvalue(), XLSX))
+    assert r.status_code == 200, r.text
+    assert r.json() == {"reconhecida": False, "mensagem": "Não reconheci a planilha; digite a previsão",
+                        "motivo": "falta a aba Resumo", "linhas": []}
+    # PDF no lugar da planilha: recusado na entrada, como os outros anexos .xlsx
+    assert cl.post(f"/api/pleitos/{pid}/previsao/ler",
+                   files=_arquivo("x.pdf", b"%PDF-1.4 x", "application/pdf")).status_code == 415
+
+
+def test_aceitar_grava_previsoes_de_origem_pleito_e_aparecem_na_aba_reajuste(api):
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    linhas = [{"competencia": "2026-07", "valor_centavos": 123456}, {"competencia": "2026-08", "valor_centavos": -10}]
+    r = cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito", "linhas": linhas})
+    assert r.status_code == 200, r.text
+    grav = _previsoes(cid)
+    assert [(p["competencia"], p["valor"], p["origem"], p["pleito_id"], p["data_base_mes"], p["ciclo"]) for p in grav] \
+        == [("2026-07", 123456, "pleito", pid, "2024-06", 2026), ("2026-08", -10, "pleito", pid, "2024-06", 2026)]
+    assert all(p["usuario_id"] for p in grav)
+    aba = cl.get(f"/api/contratos/{cid}/reajuste").json()
+    assert [(p["competencia"], p["valor_previsto_centavos"], p["origem"]) for p in aba["previsoes"]] == [
+        ("2026-07", 123456, "pleito"), ("2026-08", -10, "pleito")]
+    # aceitar de novo e' evento novo: o anterior fica, a leitura escolhe o mais recente
+    cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito",
+                                                  "linhas": [{"competencia": "2026-07", "valor_centavos": 5}]})
+    assert len(_previsoes(cid)) == 3
+    vig = {p["competencia"]: p["valor_previsto_centavos"]
+           for p in cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]}
+    assert vig == {"2026-07": 5, "2026-08": -10}
+    c = db.get_conn()
+    try:
+        acoes = [r[0] for r in c.execute("SELECT acao FROM audit_log WHERE entidade='pleito' AND entidade_id=?",
+                                         (str(pid),))]
+    finally:
+        c.close()
+    assert acoes.count("pleito.previsao") == 2
+
+
+def test_previsao_digitada_grava_origem_manual(api):
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    r = cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "manual",
+                                                      "linhas": [{"competencia": "2026-09", "valor_centavos": 700}]})
+    assert r.status_code == 200, r.text
+    assert [(p["origem"], p["pleito_id"]) for p in _previsoes(cid)] == [("manual", pid)]
+
+
+@pytest.mark.parametrize("corpo, trecho", [
+    ({"origem": "pleito", "linhas": []}, None),
+    ({"origem": "apostilamento", "linhas": [{"competencia": "2026-07", "valor_centavos": 1}]}, None),
+    ({"origem": "pleito", "linhas": [{"competencia": "2026-13", "valor_centavos": 1}]}, None),
+    ({"origem": "pleito", "linhas": [{"competencia": "2026-07", "valor_centavos": 1.5}]}, None),
+    ({"origem": "pleito", "linhas": [{"competencia": "2026-07", "valor_centavos": 10**13}]}, None),
+    ({"origem": "pleito", "linhas": [{"competencia": "2026-07", "valor_centavos": 1},
+                                     {"competencia": "2026-07", "valor_centavos": 2}]}, "07/2026"),
+])
+def test_previsao_invalida_e_recusada_sem_gravar(api, corpo, trecho):
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    r = cl.post(f"/api/pleitos/{pid}/previsao", json=corpo)
+    assert r.status_code == 422, r.text
+    if trecho:
+        assert trecho in r.json()["detail"]
+    assert _previsoes(cid) == []
+
+
+def test_previsao_so_no_pleito_de_reajuste_que_vale(api):
+    cl, cid, _ = api
+    linhas = [{"competencia": "2026-07", "valor_centavos": 1}]
+    prazo = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "200", "dias": 30,
+                                                           "justificativa": "atraso na liberacao da area"}).json()["id"]
+    r = cl.post(f"/api/pleitos/{prazo}/previsao", json={"origem": "pleito", "linhas": linhas})
+    assert r.status_code == 422 and "reajuste" in r.json()["detail"]
+    pid = _novo_pleito(cl, cid)
+    cl.post(f"/api/pleitos/{pid}/descartar", json={"motivo": "numero errado"})
+    r = cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito", "linhas": linhas})
+    assert r.status_code == 422 and "descartado" in r.json()["detail"]
+    assert cl.post("/api/pleitos/999999/previsao", json={"origem": "pleito", "linhas": linhas}).status_code == 404
+    assert _previsoes(cid) == []
