@@ -183,7 +183,9 @@ def _eventos_assinatura(conn: sqlite3.Connection, ids: list[int], out: dict[int,
             texto = f"Boletim assinado no DocuSign em {_data_br(r['assinado_em'])}"
             if r["envelope"]:
                 texto += f" (envelope {r['envelope']})"
-            out[r["medicao_id"]].append({"data": r["criado_em"],
+            # a data do evento e' a da assinatura (como o atesto), nao a do registro: registrada depois do protocolo,
+            # ela nao pode aparecer depois dele
+            out[r["medicao_id"]].append({"data": r["assinado_em"],
                                          "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
 
 

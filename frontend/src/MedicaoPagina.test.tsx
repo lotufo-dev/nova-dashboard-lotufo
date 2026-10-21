@@ -108,12 +108,12 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(within(lateral).getByText("Total").closest("div")!.textContent).toContain("10.500,00");
   });
 
-  it("“Mais ações” só tem atestado, medição final, cancelar, desistir e liberar envio preso", async () => {
+  it("“Mais ações” só tem atestado, assinatura, medição final, cancelar, desistir e liberar envio preso", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
     pagina();
     fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
     const itens = within(screen.getByRole("menu")).getAllByRole("menuitem").map(x => x.textContent);
-    expect(itens).toEqual(["Definir o atestado", "Marcar como medição final", "Cancelar a medição", "Registrar desistência"]);
+    expect(itens).toEqual(["Definir o atestado", "Registrar assinatura", "Marcar como medição final", "Cancelar a medição", "Registrar desistência"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Cancelar a medição" }));
     expect(screen.getByRole("heading", { name: "Cancelar a medição", level: 2 })).toBeTruthy();
   });

@@ -566,3 +566,13 @@ def test_assinatura_identica_repetida_da_422_e_nao_duplica(client_admin):
     assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 422
     assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={**corpo, "data": "2026-10-02"}).status_code == 201
     assert len(client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]) == 2
+
+
+def test_assinatura_na_linha_do_tempo_usa_a_data_da_assinatura_e_nao_a_do_registro(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-09-15", "envelope": "Boletim 1"})
+    client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1.000,00"})   # registrado antes (hoje)
+    eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+    assert [e["data"] for e in eventos][0] == "2026-09-15"
+    assert "Boletim assinado no DocuSign" in eventos[0]["texto"]    # vem antes do valor, que e' de hoje

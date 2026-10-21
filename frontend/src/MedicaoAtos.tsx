@@ -431,3 +431,55 @@ export function FormDesmarcarFinal({ m, salvando, agir, aoFechar, erro }: Base) 
   );
 }
 
+
+/** Issue #287: registrar que o boletim foi assinado no DocuSign (data e envelope do e-mail de conclusao).
+ *  Evento informativo: opcional, nao muda o estado e nao gera aviso. */
+function hojeLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function FormAssinatura({ m, salvando, agir, aoFechar, erro }: Base) {
+  const [data, setData] = useState("");
+  const [envelope, setEnvelope] = useState("");
+  const [tentou, setTentou] = useState(false);
+  const hoje = hojeLocal();
+  const falta = !data ? "Informe a data da assinatura." : data > hoje ? "A data da assinatura não pode ser futura." : undefined;
+  const erroData = tentou ? falta : undefined;
+  async function salvar(ev: React.FormEvent) {
+    ev.preventDefault();
+    setTentou(true);
+    if (falta) { document.getElementById("campo-data-assinatura")?.focus(); return; }
+    const ok = await agir(() => api(`/api/medicoes/${m.id}/assinatura`, {
+      method: "POST", body: JSON.stringify({ data, envelope: envelope.trim() || null }),
+    }), "Assinatura registrada.");
+    if (ok) aoFechar();
+  }
+  return (
+    <form onSubmit={salvar} noValidate onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
+      <p className="painel__titulo">Registrar a assinatura da {m.numero}ª medição no DocuSign</p>
+      <Erro erro={erro} />
+      <div className="form-inline">
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor="campo-data-assinatura">Data da assinatura</label>
+          <input id="campo-data-assinatura" name="data_assinatura" autoComplete="off" type="date" className="entrada--media" autoFocus
+            max={hoje} value={data}
+            {...(erroData ? { "aria-invalid": true as const, "aria-describedby": "campo-data-assinatura-erro" } : {})}
+            onChange={ev => setData(ev.target.value)} />
+          <ErroCampo id="campo-data-assinatura-erro" erro={erroData} />
+        </div>
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor="campo-envelope-assinatura">Nome do envelope (opcional)</label>
+          <input id="campo-envelope-assinatura" name="envelope" autoComplete="off" className="entrada--larga" maxLength={200}
+            placeholder="Como aparece no e-mail de conclusão do DocuSign" value={envelope}
+            onChange={ev => setEnvelope(ev.target.value)} />
+        </div>
+        <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Registrando…" : "Registrar assinatura"}</button>
+        <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>
+        <span className="campo__nota">
+          Opcional: não muda o estado da medição. O registro fica na linha do tempo e não se apaga; para corrigir, registre de novo.
+        </span>
+      </div>
+    </form>
+  );
+}
