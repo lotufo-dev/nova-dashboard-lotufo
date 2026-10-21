@@ -290,3 +290,26 @@ def test_previsao_vigente_compara_a_hora_e_nao_o_texto(cenario):
     _previsao(c, cid, "2026-08", 3_05, "manual", criado_em="2026-10-06")
     _previsao(c, cid, "2026-08", 4_07, "manual", criado_em="2026-10-05 23:00:00")
     assert [p["valor_previsto_centavos"] for p in reajuste.previsoes_vigentes(c, cid)] == [1_01, 3_05]
+
+
+def test_competencias_apostiladas_vigentes_com_o_termo_e_a_medicao(cenario):
+    """Issue #271: a aba Reajuste le' as competencias apostiladas vigentes, com o termo que as traz e o nº da
+    medicao que o termo cita; a previsao de pleito ou manual nao entra."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    for chave, data, comps in (("ap-1", "2026-09-15", [{"competencia": "2026-07", "valor": "100,01", "medicao": 30},
+                                                       {"competencia": "2026-08", "valor": "200,03"}]),
+                               ("ap-2", "2026-10-01", [{"competencia": "2026-07", "valor": "110,05", "medicao": 30}])):
+        c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) "
+                  "VALUES (?, ?, 'apostilamento_reajuste', ?, ?, ?)",
+                  (cid, chave, f"{chave}/2026", data, json.dumps({"ciclo": 2026, "competencias": comps})))
+    ap1, ap2 = [r[0] for r in c.execute("SELECT id FROM instrumentos ORDER BY id")]
+    _previsao(c, cid, "2026-07", 100_01, "apostilamento", instrumento_id=ap1, criado_em="2026-09-15 10:00:00")
+    _previsao(c, cid, "2026-08", 200_03, "apostilamento", instrumento_id=ap1, criado_em="2026-09-15 10:00:00")
+    _previsao(c, cid, "2026-07", 110_05, "apostilamento", instrumento_id=ap2, criado_em="2026-10-01 10:00:00")
+    _previsao(c, cid, "2026-09", 50_00, "manual")
+    assert reajuste.competencias_apostiladas(c, cid) == [
+        {"data_base_mes": "2024-06", "ciclo": 2026, "competencia": "2026-07", "valor_centavos": 110_05, "medicao": 30,
+         "instrumento_chave": "ap-2", "instrumento_numero": "ap-2/2026", "instrumento_data": "2026-10-01"},
+        {"data_base_mes": "2024-06", "ciclo": 2026, "competencia": "2026-08", "valor_centavos": 200_03, "medicao": None,
+         "instrumento_chave": "ap-1", "instrumento_numero": "ap-1/2026", "instrumento_data": "2026-09-15"}]

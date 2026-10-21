@@ -79,6 +79,7 @@ def reajuste_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=F
                      conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)
     return {"ciclos": reajuste.ciclos(conn, contrato_id),
+            "competencias": reajuste.competencias_apostiladas(conn, contrato_id),
             "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("reajuste",))]}
 
 

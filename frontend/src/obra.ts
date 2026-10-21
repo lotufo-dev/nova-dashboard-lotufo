@@ -6,7 +6,7 @@ export type AditivoApi = { id: number; tipo: string; forma?: string | null; nume
   status: string; data_assinatura: string | null; ressalva_reajuste?: string | null;
   valor_anterior_centavos?: number | null; valor_novo_centavos?: number | null;
   cancelado_em: string | null; cancelado_motivo?: string | null };
-export type InstrumentoCadastro = { id: number; tipo: string; numero: string | null; data: string; dados: Record<string, unknown> };
+export type InstrumentoCadastro = { id: number; chave?: string; tipo: string; numero: string | null; data: string; dados: Record<string, unknown> };
 export type InstrumentoPrazo = { id: number; numero: string | null; forma?: string | null; data_assinatura: string | null;
   retroativo: boolean };
 

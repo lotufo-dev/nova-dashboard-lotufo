@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Reajuste from "./Reajuste";
+import { brl } from "./formato";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm }));
@@ -34,6 +35,51 @@ describe("Reajuste", () => {
     expect(await screen.findByRole("region", { name: "Data-base 06/2024 (itens SINAPI) · INCC-DI" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Data-base 09/2024 · FGV/DNIT" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "06/2024 (itens SINAPI) · INCC-DI" })).toBeTruthy();
+  });
+
+  it("mostra as competências apostiladas e o pleito atendido pelo termo (issue #271)", async () => {
+    const termo = { id: 5, chave: "ap-12", tipo: "apostilamento_reajuste", numero: "019/2024/02/12", data: "2026-10-01",
+      dados: { data_base: "2024-06", ciclo: 2026 } };
+    const pleito = { id: 3, tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: "CT-122-LT-2026",
+      data_base_mes: "2024-06", ciclo: 2026, dias: null, justificativa: null, situacao: "enviado", corpo_carta: null,
+      montado_paginas: null, assinado_arquivo: null, nome_documento: null, conferencia: null, pendencias: [],
+      enviado_em: "2026-04-23", envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: "ap-12" };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "apostilado", dias: null, pleito, apostilamento: termo }],
+          pleitos: [pleito],
+          competencias: [
+            { data_base_mes: "2024-06", ciclo: 2026, competencia: "2026-07", valor_centavos: 130003, medicao: 30,
+              instrumento_chave: "ap-12", instrumento_numero: "019/2024/02/12", instrumento_data: "2026-10-01" },
+            { data_base_mes: "2024-06", ciclo: 2026, competencia: "2026-08", valor_centavos: -1001, medicao: null,
+              instrumento_chave: "ap-11", instrumento_numero: "019/2024/02/11", instrumento_data: "2026-09-15" }] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: "Competências apostiladas da data-base 06/2024" });
+    const linhas = [...tabela.querySelectorAll("tbody tr")].map(tr => [...tr.querySelectorAll("td,th")].map(c => c.textContent));
+    expect(linhas).toEqual([
+      ["07/2026", "2026", "30ª", brl(130003), "019/2024/02/12"],
+      ["08/2026", "2026", "—", brl(-1001), "019/2024/02/11"]]);
+    expect(brl(-1001).startsWith("−")).toBe(true);           // o reajuste negativo leva o sinal
+    expect(screen.getByText("atendido pelo apostilamento 019/2024/02/12")).toBeTruthy();
+  });
+
+  it("pleito de ciclo anterior ligado a um termo também diz que foi atendido (issue #271)", async () => {
+    const termo = { id: 4, chave: "ap-09", tipo: "apostilamento_reajuste", numero: "019/2024/02/09", data: "2025-08-01",
+      dados: { data_base: "2024-06", ciclo: 2025 } };
+    const pleito = { id: 2, tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: "CT-90-LT-2025",
+      data_base_mes: "2024-06", ciclo: 2025, dias: null, justificativa: null, situacao: "enviado", corpo_carta: null,
+      montado_paginas: null, assinado_arquivo: null, nome_documento: null, conferencia: null, pendencias: [],
+      enviado_em: "2025-06-10", envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: "ap-09" };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "pleito_pendente", dias: 10, pleito: null, apostilamento: null }],
+          pleitos: [pleito], competencias: [] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByText("pleito não enviado");
+    expect(screen.getByText("atendido pelo apostilamento 019/2024/02/09")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   // issue #277: reiteracao (familia B) e reemissao do cronograma ligadas ao pleito anterior

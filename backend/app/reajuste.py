@@ -23,16 +23,38 @@ def _ciclo_corrente(mes_base: str, hoje: datetime.date) -> int | None:
     return max(anos) if anos else None
 
 
+def ciclo_do_apostilamento(dados: dict, data: str) -> int | None:
+    """O ciclo (ano) que o apostilamento fecha: `ciclo`, senao o ano da `eficacia`, senao o da data do termo."""
+    try:
+        return int(str(dados.get("ciclo") or dados.get("eficacia") or data)[:4])      # "2026-06" -> 2026
+    except ValueError:
+        return None
+
+
+def _termo_vale(i: str) -> str:
+    """Resolvedor unico do apostilamento de reajuste que vale (issue #271), como condicao SQL sobre o alias `i` de
+    `instrumentos`: termo corrigido por outro (`corrige` nos dados) nao vale por inteiro, nem nas competencias que a
+    correcao nao repete. Numa cadeia (T3 corrige T2, que corrige T1) cada elo e' corrigido pelo seguinte, entao so' o
+    ultimo vale. Entre os que valem, a precedencia e' `_ORDEM_TERMO`: a data do instrumento, nao a da aplicacao."""
+    return (f"NOT EXISTS (SELECT 1 FROM instrumentos x WHERE x.contrato_id = {i}.contrato_id "
+            f"AND x.tipo = 'apostilamento_reajuste' AND json_extract(x.dados, '$.corrige') = {i}.chave)")
+
+
+def _ordem_termo(i: str) -> str:
+    """O termo mais novo manda (data do documento; empate: o aplicado depois)."""
+    return f"{i}.data DESC, {i}.id DESC"
+
+
 def _apostilamento(conn, contrato_id: int, mes_base: str, ciclo: int, unica: bool) -> dict | None:
     """Apostilamento de reajuste com a mesma data-base e o mesmo ciclo. Sem `data_base` nos dados, vale a
-    data-base unica do contrato; sem `ciclo`, o ano da `eficacia` (ou da data do instrumento)."""
-    for r in conn.execute("SELECT * FROM instrumentos WHERE contrato_id=? AND tipo='apostilamento_reajuste' "
-                          "ORDER BY data DESC, id DESC", (contrato_id,)):
+    data-base unica do contrato; sem `ciclo`, o ano da `eficacia` (ou da data do instrumento). Termo corrigido nao
+    conta (`_termo_vale`)."""
+    for r in conn.execute(f"SELECT * FROM instrumentos i WHERE i.contrato_id=? AND i.tipo='apostilamento_reajuste' "
+                          f"AND {_termo_vale('i')} ORDER BY {_ordem_termo('i')}", (contrato_id,)):
         d = json.loads(r["dados"] or "{}")
         base = d.get("data_base") or (mes_base if unica else None)
-        try:
-            ano = int(str(d.get("ciclo") or d.get("eficacia") or r["data"])[:4])      # "2026-06" -> 2026
-        except ValueError:
+        ano = ciclo_do_apostilamento(d, r["data"])
+        if ano is None:
             continue
         if base == mes_base and ano == ciclo:
             return {**dict(r), "dados": d}
@@ -77,7 +99,10 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
     A reiteracao (issue #277, migracao 050) nao traz cronograma: nao derruba o pleito que reitera. A reemissao do
     cronograma derruba o pleito que ela aponta e, subindo pelas reiteracoes no meio, o pleito que elas reiteram
     (original -> reiteracao -> cronograma novo: o original sai), mas so' depois que a reemissao tem previsoes
-    proprias gravadas."""
+    proprias gravadas.
+
+    Previsao de apostilamento segue o termo (issue #271, `_termo_vale`): termo corrigido sai da conta inteiro, e
+    entre termos que valem manda o de data mais recente, seja qual for a ordem em que o cadastro os aplicou."""
     ordem = " ".join(f"WHEN '{o}' THEN {i}" for i, o in enumerate(ORDEM_ORIGEM))
     filtro, args = ("AND p.data_base_mes=?", (contrato_id, contrato_id, data_base_mes)) if data_base_mes is not None \
         else ("", (contrato_id, contrato_id))
@@ -97,12 +122,34 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
         f"AND NOT EXISTS (SELECT 1 FROM reajuste_previsoes x WHERE x.pleito_id = q.id AND x.origem = 'pleito'))) "
         f"AND q.reemite_pleito_id IS NOT NULL) "
         f"SELECT * FROM (SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.data_base_mes, p.ciclo, p.competencia "
-        f"ORDER BY CASE p.origem {ordem} END, datetime(p.criado_em) DESC, p.id DESC) AS _ordem "
-        f"FROM reajuste_previsoes p WHERE p.contrato_id=? {filtro} "
+        f"ORDER BY CASE p.origem {ordem} END, {_ordem_termo('i')}, datetime(p.criado_em) DESC, p.id DESC) AS _ordem "
+        f"FROM reajuste_previsoes p LEFT JOIN instrumentos i ON i.id = p.instrumento_id "
+        f"WHERE p.contrato_id=? {filtro} AND (p.origem <> 'apostilamento' OR {_termo_vale('i')}) "
         f"AND (p.origem <> 'pleito' OR (NOT EXISTS (SELECT 1 FROM pleitos pl WHERE pl.id = p.pleito_id "
         f"AND pl.situacao = 'descartado') AND p.pleito_id NOT IN (SELECT id FROM derrubado)))) WHERE _ordem=1 "
         f"ORDER BY data_base_mes, ciclo, competencia", args)
     return [{k: r[k] for k in r.keys() if k != "_ordem"} for r in rows]
+
+
+def competencias_apostiladas(conn, contrato_id: int) -> list[dict]:
+    """Issue #271: as competencias cuja previsao vigente vem de apostilamento, com o termo e o nº da medicao que
+    ele cita (do `competencias` do cadastro). Qual termo vale e' o de `previsoes_vigentes` (`_termo_vale`)."""
+    termos, medicoes = {}, {}
+    for r in conn.execute("SELECT id, chave, numero, data, dados FROM instrumentos WHERE contrato_id=? "
+                          "AND tipo='apostilamento_reajuste'", (contrato_id,)):
+        termos[r["id"]] = r
+        itens = json.loads(r["dados"] or "{}").get("competencias") or []
+        medicoes[r["id"]] = {str(x.get("competencia")): x.get("medicao") for x in itens if isinstance(x, dict)}
+    out = []
+    for p in previsoes_vigentes(conn, contrato_id):
+        t = termos.get(p["instrumento_id"]) if p["origem"] == "apostilamento" else None
+        if t is None:
+            continue
+        medicao = medicoes[t["id"]].get(p["competencia"])
+        out.append({"data_base_mes": p["data_base_mes"], "ciclo": p["ciclo"], "competencia": p["competencia"],
+                    "valor_centavos": p["valor_previsto_centavos"], "medicao": medicao,
+                    "instrumento_chave": t["chave"], "instrumento_numero": t["numero"], "instrumento_data": t["data"]})
+    return out
 
 
 def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[dict]:
