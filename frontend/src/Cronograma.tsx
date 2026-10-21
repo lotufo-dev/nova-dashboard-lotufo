@@ -450,6 +450,8 @@ export default function Cronograma({ contratoId, podeEditar }:
     area.current?.focus();
   }
 
+  // A origem gravada na versao (manual/detectado/aceito) e' interna; a dica mostra o documento (issue #256).
+  const vigenteNaLista = versoes.find(v => v.vigente);
   const dica = versao
     ? `versão ${versao.numero} · ${versao.itens.length} ${versao.itens.length === 1 ? "competência" : "competências"}`
       + ` · publicada em ${fmtData(versao.criado_em)}`
@@ -467,7 +469,7 @@ export default function Cronograma({ contratoId, podeEditar }:
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id="titulo-cronograma">Cronograma</h2>
         <span className="cartao__dica num"
-          title={versao ? `Origem do cadastro: ${versao.origem}` : undefined}>
+          title={vigenteNaLista ? `Documento: ${documentoDaVersao(vigenteNaLista)}` : undefined}>
           {carregando ? "carregando…" : dica}
         </span>
       </div>

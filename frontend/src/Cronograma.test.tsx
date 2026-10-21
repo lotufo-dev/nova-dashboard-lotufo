@@ -69,4 +69,12 @@ describe("Cronograma: versões", () => {
     ]);
     expect(api).toHaveBeenCalledWith("/api/contratos/1/cronograma/versoes");
   });
+
+  it("a dica do cabeçalho diz o documento da vigente, nunca a origem interna", async () => {
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    const dica = screen.getByText(/^versão 2 ·/);
+    expect(dica.getAttribute("title")).toBe("Documento: Termo aditivo · ta-01");
+    expect(document.body.innerHTML).not.toMatch(/Origem do cadastro|sistema"/);
+  });
 });
