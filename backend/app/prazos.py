@@ -125,13 +125,14 @@ def resumo(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
 
 # Numero do termo no formato contrato/ano/tipo/termo ("099/2020/01/14", "088/2023/02/10-SINFRA"): o
 # ultimo bloco e' o numero do termo. Termo 00 e' o proprio contrato.
-_TERMO_NO_NUMERO = re.compile(r"^\s*\d+/\d{4}/\d{1,2}/(\d{1,3})(?!\d)")
+# So' o sufixo institucional (ex.: "-SINFRA") pode seguir; qualquer outro resto invalida a leitura.
+_TERMO_NO_NUMERO = re.compile(r"\s*\d+/\d{4}/\d{1,2}/(\d{1,3})(-[A-Z]+)?\s*")
 
 
 def _ordinal(a: dict, contado: int) -> int:
     """Issue #261: o ordinal do termo sai do numero (sufixo /14), depois do `ordinal` do cadastro e so' na
     falta dos dois da contagem dos instrumentos carregados (cadastro parcial escreveria "1º" no 14º)."""
-    m = _TERMO_NO_NUMERO.match(a.get("numero") or "")
+    m = _TERMO_NO_NUMERO.fullmatch(a.get("numero") or "")
     if m and int(m.group(1)) > 0:
         return int(m.group(1))
     return a.get("ordinal") or contado
