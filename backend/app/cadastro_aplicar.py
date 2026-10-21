@@ -322,7 +322,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             rel["contratos"]["iguais"] += 1
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])
     _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"])
-    _apostilamentos_de_reajuste(conn, usuario_id, cid, c)
+    _apostilamentos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"])
     _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
     return cid
 
@@ -402,7 +402,7 @@ def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
             rel["iguais"] += 1
 
 
-def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c) -> None:
+def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
     """Issue #271 (spec 2026-10-20 §2.2): cada competencia do apostilamento vira uma `reajuste_previsoes` de origem
     'apostilamento' (uma vez por instrumento: reaplicar nao duplica), e o ultimo pleito enviado do mesmo ciclo
     recebe `instrumento_chave`. Roda depois dos instrumentos e dos pleitos anteriores, entao o pleito que entra no
@@ -428,6 +428,15 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c) -> None:
 
     for inst in ordenados:
         poe(inst)
+
+    def corrigidos(inst) -> set[str]:
+        """Os termos que este corrige, direta ou indiretamente (correcao de correcao)."""
+        out, k = set(), inst["corrige"]
+        while k and k not in out:
+            out.add(k)
+            k = (por_chave.get(k) or {}).get("corrige")
+        return out
+
     bases = [d["mes"] for d in c["datas_base"]]
     for inst in ordem:
         dados = inst["dados"]
@@ -446,15 +455,18 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c) -> None:
                 [(contrato_id, base, ciclo, x["competencia"], x["valor_centavos"], iid, usuario_id) for x in comps])
             auditoria.registrar(conn, usuario_id, "cadastro.reajuste_previsoes", "instrumento", iid, None,
                                 {"chave": inst["chave"], "data_base_mes": base, "ciclo": ciclo, "competencias": comps})
-        p = conn.execute("SELECT id, instrumento_chave FROM pleitos WHERE contrato_id=? AND tipo='reajuste' "
-                         "AND data_base_mes=? AND ciclo=? AND situacao='enviado' ORDER BY enviado_em DESC, id DESC "
-                         "LIMIT 1", (contrato_id, base, ciclo)).fetchone()
+        # o pleito que o termo atendeu foi enviado ate' a data do termo (reemissao posterior ainda espera o dela)
+        p = conn.execute("SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? "
+                         "AND tipo='reajuste' AND data_base_mes=? AND ciclo=? AND situacao='enviado' "
+                         "AND date(enviado_em) <= date(?) ORDER BY enviado_em DESC, id DESC LIMIT 1",
+                         (contrato_id, base, ciclo, inst["data"])).fetchone()
         if p is None or p["instrumento_chave"] == inst["chave"]:
             continue
-        if p["instrumento_chave"] is None or p["instrumento_chave"] == inst["corrige"]:
+        if p["instrumento_chave"] is None or p["instrumento_chave"] in corrigidos(inst):
             conn.execute("UPDATE pleitos SET instrumento_chave=? WHERE id=?", (inst["chave"], p["id"]))
             auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", p["id"],
                                 {"instrumento_chave": p["instrumento_chave"]}, {"instrumento_chave": inst["chave"]})
+            rel["alterados"].append(f"{c['nome_curto']}/reajuste {p['numero_oficio']}: atendido por {inst['chave']}")
 
 
 # O que torna um aditivo o que ele e': nao muda depois de aplicado (correcao e' instrumento

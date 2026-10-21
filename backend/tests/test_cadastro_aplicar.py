@@ -627,7 +627,7 @@ def test_pleito_que_entra_depois_do_apostilamento_tambem_e_ligado(conn):
 
 
 def test_apostilamento_sem_competencias_nao_grava_previsao_mas_atende_o_pleito(conn):
-    ap = {**AP_REAJ, "dados": {"data_base": "2023-04", "ciclo": 2026, "percentual": "6,76"}}
+    ap = {**AP_REAJ, "data": "2026-09-15", "dados": {"data_base": "2023-04", "ciclo": 2026, "percentual": "6,76"}}
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ap], pleitos_anteriores=[PLEITO_2026])]))
     assert _previsoes(conn) == []
     assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-09"
@@ -667,6 +667,29 @@ def test_termo_e_correcao_aplicados_juntos_a_correcao_vale_mesmo_com_data_anteri
     vig = {p["competencia"]: p["valor_previsto_centavos"] for p in reajuste_mod.previsoes_vigentes(conn, 1)}
     assert vig == {"2026-04": 130003, "2026-05": 200001}
     assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-12"
+
+
+def test_pleito_enviado_depois_do_termo_nao_e_atendido_por_ele(conn):
+    # reemissao depois do termo (aditivo) espera o apostilamento dela; o pleito anterior e' o atendido
+    reemissao = {**PLEITO_2026, "oficio": "CT-200-LT-2026", "data": "2026-11-05"}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
+                                                                    pleitos_anteriores=[PLEITO_2026, reemissao])]))
+    ligados = dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall())
+    assert ligados == {"CT-122-LT-2026": "ap-11", "CT-200-LT-2026": None}
+    # o relatorio do aplicar (e do ensaio) diz qual pleito o termo atendeu
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: atendido por ap-11"]
+
+
+def test_correcao_de_correcao_religa_o_pleito_mesmo_sem_o_termo_do_meio(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])]))
+    # ap-12 corrige ap-11, mas e' de outro ciclo (nao toca o pleito de 2026); ap-13 corrige ap-12
+    meio = {**AP_COMP, "chave": "ap-12", "data": "2026-10-01", "corrige": "ap-11",
+            "dados": {**AP_COMP["dados"], "ciclo": 2025, "periodo": None,
+                      "competencias": [{"competencia": "2025-04", "valor": "1,00"}]}}
+    fim = {**AP_COMP, "chave": "ap-13", "data": "2026-10-10", "corrige": "ap-12"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP, meio, fim],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-13"
 
 
 def test_ensaio_do_apostilamento_nao_grava_previsao(conn):

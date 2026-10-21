@@ -656,6 +656,7 @@ def test_apostilamento_com_competencia_repetida_e_erro(tmp_path):
     ("competencias", [{"competencia": "2026-13", "valor": "1,00"}], "competencias[0].competencia"),
     ("competencias", [{"competencia": "2026-04", "valor": 1234.56}], "competencias[0].valor"),
     ("competencias", [{"competencia": "2026-04"}], "competencias[0].valor"),
+    ("competencias", [{"competencia": "2026-04", "valor": "--1,00"}], "competencias[0].valor"),
     ("competencias", [{"competencia": "2026-04", "valor": "1,00", "medicao": 0}], "competencias[0].medicao"),
     ("competencias", [{"competencia": "2026-04", "valor": "1,00", "medicao": "24ª"}], "competencias[0].medicao"),
     ("competencias", [{"competencia": "2026-04", "valor": "1,00", "medica": 3}], "competencias[0]"),

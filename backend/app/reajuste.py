@@ -82,17 +82,18 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
 def competencias_apostiladas(conn, contrato_id: int) -> list[dict]:
     """Issue #271: as competencias cuja previsao vigente vem de apostilamento, com o termo e o nº da medicao que
     ele cita (do `competencias` do cadastro). Termo com `corrige` gravado depois vale no lugar do anterior."""
-    termos = {r["id"]: r for r in conn.execute(
-        "SELECT id, chave, numero, data, dados FROM instrumentos WHERE contrato_id=? "
-        "AND tipo='apostilamento_reajuste'", (contrato_id,))}
+    termos, medicoes = {}, {}
+    for r in conn.execute("SELECT id, chave, numero, data, dados FROM instrumentos WHERE contrato_id=? "
+                          "AND tipo='apostilamento_reajuste'", (contrato_id,)):
+        termos[r["id"]] = r
+        itens = json.loads(r["dados"] or "{}").get("competencias") or []
+        medicoes[r["id"]] = {str(x.get("competencia")): x.get("medicao") for x in itens if isinstance(x, dict)}
     out = []
     for p in previsoes_vigentes(conn, contrato_id):
         t = termos.get(p["instrumento_id"]) if p["origem"] == "apostilamento" else None
         if t is None:
             continue
-        itens = json.loads(t["dados"] or "{}").get("competencias") or []
-        medicao = next((x.get("medicao") for x in itens
-                        if isinstance(x, dict) and str(x.get("competencia")) == p["competencia"]), None)
+        medicao = medicoes[t["id"]].get(p["competencia"])
         out.append({"data_base_mes": p["data_base_mes"], "ciclo": p["ciclo"], "competencia": p["competencia"],
                     "valor_centavos": p["valor_previsto_centavos"], "medicao": medicao,
                     "instrumento_chave": t["chave"], "instrumento_numero": t["numero"], "instrumento_data": t["data"]})

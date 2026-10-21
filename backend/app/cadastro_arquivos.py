@@ -253,7 +253,7 @@ def _periodo_e_competencias(d: dict) -> tuple[list[dict], list[tuple[str, str]]]
         texto = "" if bruto is None or isinstance(bruto, bool) else str(bruto).strip()
         sinal = -1 if texto.startswith("-") else 1
         try:
-            centavos = sinal * dinheiro.parse_brl(texto.lstrip("-").strip())
+            centavos = sinal * dinheiro.parse_brl(texto[1:].strip() if sinal < 0 else texto)     # um sinal so'
         except ValueError as e:
             problemas.append((f"{aqui}.valor", str(e)))
             continue
