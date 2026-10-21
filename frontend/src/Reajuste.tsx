@@ -15,6 +15,11 @@ import { LinhaPleito, partesDoEnvio, pleitoEmLinha, type DesfechoPleito } from "
 // ciclos passados recolhidos. Com mais de uma data-base, um indice no topo leva a cada uma. O calendario mora
 // em `app/reajuste.py`; a tela so' desenha.
 
+// o mes, a parte do contrato a que a base se aplica (D7: "itens SICRO", "itens SINAPI") e o indice que a corrige
+function rotuloDataBase(mes: string, c: CicloApi) {
+  return `${mesAno(mes)}${c.aplica_a ? ` (${c.aplica_a})` : ""}${c.indice ? ` · ${c.indice}` : ""}`;
+}
+
 type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilamento_pendente" | "apostilado" };
 
 // Pleito nao enviado e' a vez da engenharia: nivel "Acao" do D2 (ambar com contorno cheio), o
@@ -121,7 +126,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
               const s = SITUACAO[db.atual.situacao] ?? { rotulo: db.atual.situacao, classe: "" };
               return (
                 <li key={db.data_base_mes}>
-                  <Link para={aqui} secao={`db-${db.data_base_mes}`}>{mesAno(db.data_base_mes)}{db.atual.indice ? ` · ${db.atual.indice}` : ""}</Link>
+                  <Link para={aqui} secao={`db-${db.data_base_mes}`}>{rotuloDataBase(db.data_base_mes, db.atual)}</Link>
                   <Selo classe={s.classe} forte={s.forte}>{s.rotulo}</Selo>
                 </li>
               );
@@ -142,7 +147,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
           // aviso de reajuste cai na ancora dele
           <section className="cartao" id={`db-${db.data_base_mes}`} key={db.data_base_mes} aria-labelledby={titulo}>
             <div className="cartao__cabeca">
-              <h2 className="cartao__titulo" id={titulo}>Data-base {mesAno(db.data_base_mes)}{c.indice ? ` · ${c.indice}` : ""}</h2>
+              <h2 className="cartao__titulo" id={titulo}>Data-base {rotuloDataBase(db.data_base_mes, c)}</h2>
               <Selo classe={s.classe} forte={s.forte}>{s.rotulo}</Selo>
               {/* com um pleito em aberto no ciclo, o caminho e' continuar nele, nao abrir outro oficio */}
               {podeEditar && aberto && (

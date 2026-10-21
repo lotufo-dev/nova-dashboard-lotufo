@@ -286,13 +286,13 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             auditoria.registrar(conn, usuario_id, "cadastro.contrato", "contrato", cid, antes, depois)
 
     # Datas-base: o cadastro e' a verdade (configuracao, nao historico financeiro).
-    atuais = {r["mes"]: r["indice"] for r in conn.execute(
-        "SELECT mes, indice FROM contrato_datas_base WHERE contrato_id=?", (cid,))}
-    desejadas = {d["mes"]: d["indice"] for d in c["datas_base"]}
+    atuais = {r["mes"]: {"indice": r["indice"], "aplica_a": r["aplica_a"]} for r in conn.execute(
+        "SELECT mes, indice, aplica_a FROM contrato_datas_base WHERE contrato_id=?", (cid,))}
+    desejadas = {d["mes"]: {"indice": d["indice"], "aplica_a": d.get("aplica_a") or ""} for d in c["datas_base"]}
     if atuais != desejadas:
         conn.execute("DELETE FROM contrato_datas_base WHERE contrato_id=?", (cid,))
-        conn.executemany("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?,?,?)",
-                         [(cid, m, i) for m, i in sorted(desejadas.items())])
+        conn.executemany("INSERT INTO contrato_datas_base (contrato_id, mes, indice, aplica_a) VALUES (?,?,?,?)",
+                         [(cid, m, v["indice"], v["aplica_a"]) for m, v in sorted(desejadas.items())])
         mudou = True
         auditoria.registrar(conn, usuario_id, "cadastro.datas_base", "contrato", cid, atuais, desejadas)
 

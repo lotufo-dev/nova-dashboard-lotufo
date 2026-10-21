@@ -18,7 +18,7 @@ const PAINEL = {
              faturado_mes_centavos: 123_456_789, notas_faturadas_mes: 2,
              serie: [{ competencia: "2026-08", medido_centavos: 100_000, previsto_centavos: 150_000 },
                      { competencia: "2026-09", medido_centavos: 150_000, previsto_centavos: 200_000 }] },
-  proximos: [{ competencia: "2026-09", faturamento_previsto_centavos: 200_000, recebimento_previsto_centavos: null }],
+  proximos: [{ competencia: "2026-09", faturamento_previsto_centavos: 200_000 }],
   carteira: { saldo_centavos: 5_000_000, ritmo_mensal_centavos: 100_000, meses_de_producao: 50,
               por_orgao: [{ orgao: "SINFRA", saldo_centavos: 5_000_000, fracao: 1, vigente_centavos: 20_000_000, medido_centavos: 15_000_000, obras: 3 }] },
   obras: [{ contrato_id: 7, seq: 1, obra: "Cavalaria", contratante: "SINFRA", empreita: "PRÓPRIA", direito: 1,
@@ -114,6 +114,9 @@ describe("Carteira", () => {
     expect(screen.getByText("obras ativas protocolaram")).toBeTruthy();
     expect(screen.getByText("mesmo mês do ano anterior: R$ 800,00")).toBeTruthy();
     expect(screen.getByText("Próximos meses")).toBeTruthy();
+    // #255: os próximos meses só trazem o faturamento previsto; o recebimento previsto saiu
+    expect(screen.getByText("Faturamento previsto")).toBeTruthy();
+    expect(screen.queryByText("Recebimento previsto")).toBeNull();
     const saldo = screen.getByRole("table", { name: /Saldo a executar por órgão/ });
     expect(within(saldo).getByText("SINFRA")).toBeTruthy();
     expect(within(saldo).getByText("Total")).toBeTruthy();

@@ -160,6 +160,18 @@ def test_datas_base_sincronizam_e_fiscal_novo_nao_apaga_o_antigo(conn):
     assert conn.execute("SELECT COUNT(*) FROM contrato_fiscais").fetchone()[0] == 2
 
 
+def test_aplica_a_da_data_base_e_gravado_e_mudanca_so_nele_sincroniza(conn):
+    # issue #257: `aplica_a` e' configuracao da data-base como o indice; mudar so' ele tambem atualiza
+    bases = [{"mes": "2022-01", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+             {"mes": "2022-03", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(datas_base=bases)]))
+    assert [tuple(r) for r in conn.execute("SELECT mes, indice, aplica_a FROM contrato_datas_base ORDER BY mes")] == [
+        ("2022-01", "INCC-DI", "itens SINAPI"), ("2022-03", "FGV/DNIT", "itens SICRO")]
+    bases[1] = {**bases[1], "aplica_a": "itens SICRO e DNIT"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(datas_base=bases)]))
+    assert conn.execute("SELECT aplica_a FROM contrato_datas_base WHERE mes='2022-03'").fetchone()[0] == "itens SICRO e DNIT"
+
+
 from app import contratos as contratos_mod
 
 AD_VALOR = {"chave": "ta-01", "tipo": "aditivo_valor", "data": "2026-06-30", "numero": "019/2024/01/01",

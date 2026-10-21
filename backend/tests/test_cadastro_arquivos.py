@@ -557,6 +557,36 @@ def test_cronograma_que_nao_e_lista_e_erro(tmp_path):
     assert any("cronograma" in e and "lista" in e for e in erros)
 
 
+# --- issue #257: data-base com indice obrigatorio e aplica_a (spec 2026-10-20 §2.4, D7) ----------
+
+@pytest.mark.parametrize("db_", [{"mes": "2023-04"}, {"mes": "2023-04", "indice": ""},
+                                 {"mes": "2023-04", "indice": "  "}, {"mes": "2023-04", "indice": None}])
+def test_data_base_sem_indice_e_recusada(tmp_path, db_):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": [db_]}]))
+    assert any("datas_base[0].indice" in e and "obrigatório" in e for e in erros)
+
+
+@pytest.mark.parametrize("tabela", ["SINAPI", "sicro", " Sicro ", "SINAPI não desonerado", "Tabela SINAPI",
+                                    "SICRO/DNIT", "SINAPI/SICRO", "sinapi-jan/22"])
+def test_tabela_de_precos_no_indice_e_recusada(tmp_path, tabela):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": [{"mes": "2023-04", "indice": tabela}]}]))
+    assert any("datas_base[0].indice" in e and "tabela de preços" in e and "índice do reajuste" in e for e in erros)
+
+
+@pytest.mark.parametrize("indice", ["INCC-DI", "FGV/DNIT", "IPCA", "SINAPIX de exemplo"])
+def test_indice_de_reajuste_passa(tmp_path, indice):
+    c = {**CONTRATO, "datas_base": [{"mes": "2023-04", "indice": indice}]}
+    assert ca.preparar(_escrever(tmp_path, contratos=[c]))["contratos"][0]["datas_base"][0]["indice"] == indice
+
+
+def test_aplica_a_e_lido_e_opcional(tmp_path):
+    c = {**CONTRATO, "datas_base": [{"mes": "2022-01", "indice": "INCC-DI", "aplica_a": " itens SINAPI "},
+                                    {"mes": "2022-03", "indice": " FGV/DNIT "}]}
+    dbs = ca.preparar(_escrever(tmp_path, contratos=[c]))["contratos"][0]["datas_base"]
+    assert dbs == [{"mes": "2022-01", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+                   {"mes": "2022-03", "indice": "FGV/DNIT", "aplica_a": ""}]
+
+
 def test_ordinal_do_instrumento(tmp_path):
     """Issue #261: `ordinal` e' inteiro positivo e so' vale para aditivo ou apostilamento de prazo."""
     ta = {"chave": "ta-14", "tipo": "aditivo_prazo", "data": "2026-01-10", "numero": "099/2020/01/14",

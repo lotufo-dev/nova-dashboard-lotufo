@@ -3,18 +3,17 @@
 import { porAtraso, type Aviso, type Nivel } from "./Alertas";
 import { fmtCompetencia } from "./tempo";
 
-export type Familia = "prazo" | "reajuste" | "nota" | "documentos" | "dinheiro" | "outros";
+export type Familia = "prazo" | "reajuste" | "nota" | "documentos" | "outros";
 
-// A ordem dos grupos e' a do mapa; "Outros" guarda o aviso de lar desconhecido, para nada sumir.
+// A ordem dos grupos e' a do mapa; "Outros" guarda o aviso de lar desconhecido, para nada sumir. A familia
+// Dinheiro saiu com o aviso de pagamento atrasado (issue #255), que era o unico dela.
 export const FAMILIAS: { id: Familia; rotulo: string }[] = [
   { id: "prazo", rotulo: "Prazo" }, { id: "reajuste", rotulo: "Reajuste" }, { id: "nota", rotulo: "Nota" },
-  { id: "documentos", rotulo: "Documentos" }, { id: "dinheiro", rotulo: "Dinheiro" }, { id: "outros", rotulo: "Outros" },
+  { id: "documentos", rotulo: "Documentos" }, { id: "outros", rotulo: "Outros" },
 ];
 
-/** A familia e' o lar do aviso: o `destino` que o servidor manda (a aba da obra, ou Documentos). O pagamento
- *  atrasado leva as medicoes da obra e e' Dinheiro pelo tipo (objetos.md › famílias de aviso). */
+/** A familia e' o lar do aviso: o `destino` que o servidor manda (a aba da obra, ou Documentos). */
 export function familiaDoAviso(a: Aviso): Familia {
-  if (a.tipo === "pagamento_atrasado") return "dinheiro";
   const d = a.destino;
   if (d?.tela === "documentos") return "documentos";
   if (d?.tela === "contrato") {
@@ -86,8 +85,7 @@ export function ondeSeResolve(a: Aviso, omitirObra = false): string {
   const obra = !omitirObra && a.obra ? semQuebra(a.obra) : null;
   if (d.aba === "notas") return com(a.medicao_id ? "Notas da medição" : "Notas", obra);
   if (d.aba === "reajuste" && a.data_base_mes) return com("Reajuste", obra, `data\u2011base ${fmtCompetencia(a.data_base_mes)}`);
-  if (a.tipo === "pagamento_atrasado" && a.medicao_id) return com("Recebimento da medição", obra);
-  // a aba Medicoes da obra abre nas medicoes em andamento (o pagamento atrasado da nota do RM cai la')
+  // a aba Medicoes da obra abre nas medicoes em andamento
   if (d.aba === "medicoes" || !d.aba) return com("Em andamento", obra);
   const aba: Record<string, string> = { prazos: "Prazos", reajuste: "Reajuste", documentos: "Documentos exigidos",
     contrato: "Contrato" };
