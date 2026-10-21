@@ -428,14 +428,16 @@ protocolado.
   e por órgão), recebido no mês; à parte, os reajustes esperando apostilamento.
 - **O mês e o ano:** medido da competência atual contra o previsto do cronograma vigente e o mesmo mês do ano
   anterior, acumulado do ano e a série de 12 meses.
-- **Próximos meses:** faturamento previsto pelo cronograma (o recebimento previsto saiu na issue #255).
+- **Próximos meses:** faturamento previsto pelo cronograma (o recebimento previsto saiu na #255, motor de atraso de pagamento).
 - **Carteira:** saldo a executar dos contratos ativos sem encerramento, ritmo (média dos últimos 6 meses), meses de
   produção, participação por órgão e os contratos que terminam nos próximos 183 dias.
 - **Obras:** as linhas do QDOP com farol (vermelho: aviso crítico; acao: aviso de Ação; atencao: aviso de Atenção; verde:
   nenhum) e o motivo.
 
-**Prazo normal do órgão:** saiu da Diretoria na issue #255 (decisão de 19/10/2026): não há mais aviso de
-pagamento atrasado nem recebimento previsto. O a receber mostra só a idade (faixas e maior número de dias).
+**Prazo normal do órgão:** saiu da Diretoria na #255 (motor de atraso de pagamento; decisão de 19/10/2026): não
+há mais aviso de pagamento atrasado nem recebimento previsto. O a receber da Diretoria mostra só a idade (faixas e
+maior número de dias). O "previsto" da tela A receber ainda usa o 3º quartil do órgão (com menos de 10 amostras,
+30 dias); a #255 não tratou dele.
 
 **Total a receber:** enquanto `geral.yaml` tiver `diretoria.total_a_receber_liberado: false`, a tela mostra
 quantidade e dias do protocolado, sem valor ("a conciliar"). Depois da conciliação com a controladoria: trocar para `true`, `cadastro

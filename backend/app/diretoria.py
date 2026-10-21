@@ -1,6 +1,6 @@
 """Tela da diretoria (spec 2026-09-21 §10.5), bloco 8. Tudo na COTA da Lotufo; vocabulario fixo: medido,
-faturado (nota emitida), protocolado, recebido. O total a receber (valor do protocolado) so' aparece com o cadastro liberando (`geral.yaml: diretoria.total_a_receber_liberado`), depois da
-conciliacao com a controladoria.
+faturado (nota emitida), protocolado, recebido. O total a receber (valor do protocolado) so' aparece com o cadastro
+liberando (`geral.yaml: diretoria.total_a_receber_liberado`), depois da conciliacao com a controladoria.
 
 Corte de 2026-09-25 (decisao do Leonardo): o faturado ate o QDOP de 22/09/2026 conta como pago, menos o que o RM
 mostra em aberto. O "a receber" soma as medicoes protocoladas e as cobrancas do RM ainda nao pagas que nenhuma

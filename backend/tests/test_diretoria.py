@@ -96,7 +96,7 @@ def test_motivos_da_obra_um_a_um_sem_o_nome_da_obra(cenario, monkeypatch):
     c, ids = cenario                   # A5: motivos[] estruturado, na ordem dos avisos
     monkeypatch.setattr(diretoria._av, "listar", lambda conn, hoje, publico: [
         avisos.aviso("execucao_vencendo", "critico", "Própria: execução termina em 10 dias", ids["propria"], "Própria", dias=10),
-        avisos.aviso("pagamento_atrasado", "acao", "Própria: 15ª Medição protocolada há 85 dias", ids["propria"], "Própria",
+        avisos.aviso("folga_quebrada", "acao", "Própria: 15ª Medição protocolada há 85 dias", ids["propria"], "Própria",
                      dias=85, valor_centavos=300_000)])
     obra = [o for o in diretoria.painel(c, HOJE)["obras"] if o["contrato_id"] == ids["propria"]][0]
     assert [(m["nivel"], m["texto"], m["dias"]) for m in obra["motivos"]] == [
@@ -109,7 +109,7 @@ def test_farol_separa_acao_de_atencao(cenario, monkeypatch):
     def com(*avisos_):
         monkeypatch.setattr(diretoria._av, "listar", lambda conn, hoje, publico: list(avisos_))
         return [o for o in diretoria.painel(c, HOJE)["obras"] if o["contrato_id"] == ids["propria"]][0]["farol"]
-    a = lambda nivel: avisos.aviso("pagamento_atrasado", nivel, "Própria: aviso", ids["propria"], "Própria", dias=5)
+    a = lambda nivel: avisos.aviso("folga_quebrada", nivel, "Própria: aviso", ids["propria"], "Própria", dias=5)
     assert com(a("atencao")) == "atencao"
     assert com(a("atencao"), a("acao")) == "acao"
     assert com(a("acao"), a("critico")) == "vermelho"
