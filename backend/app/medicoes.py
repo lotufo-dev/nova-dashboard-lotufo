@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 # congelamento (spec §5) contornavel por uma rota so.
 TRANSICOES = {
     "prevista": {"cancelada", "desistida"},
+    # Issue #281: entra pela planilha/carta (medicao_planilhas.registrar); a saida a mao e' o cancelamento.
+    "planilha_gerada": {"cancelada", "desistida"},
     # Estados do espelho (spec 2026-09-21 §2). espelho_gerado -> espelho_enviado e' do SISTEMA
     # (marcar_espelho_enviado, no ato do envio); -> protocolada e' registrar_protocolo.
     # Bloco 3: a nota (PDF lido ou RM) fecha `nota_emitida` (notas.fechar_se_completa, ou a
@@ -41,7 +43,7 @@ TRANSICOES = {
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
 # B-12 (10/10/2026): mensagem ao usuario com o tipo e o estado por extenso, nunca o codigo ("(execucao)")
 ROTULO_TIPO = {"execucao": "execução", "reajuste": "reajuste", "projeto": "projeto"}
-ROTULO_ESTADO = {"prevista": "prevista", "espelho_gerado": "com espelho gerado", "espelho_enviado": "com espelho enviado",
+ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta registrada", "espelho_gerado": "com espelho gerado", "espelho_enviado": "com espelho enviado",
                  "nota_emitida": "com nota emitida", "protocolada": "protocolada", "nf_emitida": "lançada no RM",
                  "recebida": "recebida", "cancelada": "cancelada", "desistida": "desistida"}
 

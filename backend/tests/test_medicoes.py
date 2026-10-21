@@ -497,3 +497,110 @@ def test_banco_aceita_os_estados_do_motor_e_recusa_estado_desconhecido(conn, con
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("UPDATE medicoes SET estado='boletim_inventado' WHERE id=?", (mid,))
     conn.rollback()
+
+
+# --- issue #281: planilha/carta de medicao ---------------------------------------------------------------
+
+ANEXOS = {"arquivo": "planilhas/a.pdf", "sha256": "a" * 64, "arquivo_planilha": "planilhas/b.xlsx",
+          "sha256_planilha": "b" * 64}
+
+
+def _planilha(numero, competencia, inicio, fim, valor, **extra):
+    return {"numero": numero, "tipo": "execucao", "competencia": competencia, "periodo_inicio": inicio,
+            "periodo_fim": fim, "valor_centavos": valor, **extra}
+
+
+def _com_valores(conn, contrato_id, numero, estado, protocolado, atestado):
+    conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+                 "valor_atestado_centavos) VALUES (?,?,'execucao','2026-01',?,?,?)",
+                 (contrato_id, numero, estado, protocolado, atestado))
+    conn.commit()
+
+
+def test_acumulado_anterior_soma_aprovado_senao_pedido(conn, contrato_id):
+    """Spec §2.1 passo 1: acumulado anterior = soma dos aprovados, senao pedidos, das medicoes anteriores do mesmo
+    tipo. Prevista, cancelada e desistida e as de numero igual ou maior ficam de fora. Centavo impar de proposito."""
+    from app import medicao_planilhas
+    _com_valores(conn, contrato_id, 1, "protocolada", 10_000_01, 9_999_99)     # aprovado manda
+    _com_valores(conn, contrato_id, 2, "planilha_gerada", 5_000_03, None)      # sem aprovado: o pedido
+    _com_valores(conn, contrato_id, 3, "cancelada", 7_000_00, 7_000_00)        # fora
+    _com_valores(conn, contrato_id, 4, "prevista", 1_00, None)                 # fora
+    _com_valores(conn, contrato_id, 6, "protocolada", 3_00, 3_00)              # depois da 5: fora
+    conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+                 "VALUES (?, 1, 'reajuste', '2026-01', 'protocolada', 999)", (contrato_id,))   # outro tipo: fora
+    conn.commit()
+    assert medicao_planilhas.acumulado_anterior(conn, contrato_id, "execucao", 5) == 9_999_99 + 5_000_03
+
+
+def test_planilha_cria_versao_1_em_planilha_gerada(conn, contrato_id):
+    from app import medicao_planilhas
+    r = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31",
+                                                                     12_345_67, numero_orgao=3), ANEXOS)
+    d = medicoes.detalhe(conn, r["medicao_id"])
+    assert d["estado"] == "planilha_gerada" and d["valor_protocolado_centavos"] == 12_345_67
+    assert (d["periodo_inicio"], d["periodo_fim"], d["numero_orgao"]) == ("2026-07-01", "2026-07-31", 3)
+    v = medicao_planilhas.versoes(conn, r["medicao_id"])
+    assert [(x["versao"], x["valor_pedido_centavos"], x["motivo"]) for x in v] == [(1, 12_345_67, None)]
+    assert r["saldo_centavos"] == 100_000_00 and r["saldo_apos_pedido_centavos"] == 100_000_00 - 12_345_67
+
+
+def test_planilha_promove_a_prevista_do_mesmo_numero(conn, contrato_id):
+    from app import medicao_planilhas
+    mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "execucao", "competencia": "2026-07"})
+    r = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31", 100),
+                                    ANEXOS)
+    assert r["medicao_id"] == mid and medicoes.detalhe(conn, mid)["estado"] == "planilha_gerada"
+    with pytest.raises(ValueError, match="registre uma revisão"):
+        medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31", 100),
+                                    ANEXOS)
+
+
+def test_revisao_exige_motivo_e_so_antes_do_envio_muda_o_pedido(conn, contrato_id):
+    from app import medicao_planilhas
+    mid = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31",
+                                                                       100_01), ANEXOS)["medicao_id"]
+    rev = {"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor_centavos": 90_03}
+    with pytest.raises(ValueError, match="motivo"):
+        medicao_planilhas.revisar(conn, 1, mid, {**rev, "motivo": "  "}, ANEXOS)
+    assert medicao_planilhas.revisar(conn, 1, mid, {**rev, "motivo": "Rev01 da supervisora"}, ANEXOS)["versao"] == 2
+    assert medicoes.detalhe(conn, mid)["valor_protocolado_centavos"] == 90_03
+    # depois do envio, a revisao so' acrescenta a versao: o pedido congelado e' o da versao enviada
+    conn.execute("UPDATE medicoes SET estado='planilha_enviada' WHERE id=?", (mid,)); conn.commit()
+    assert medicao_planilhas.revisar(conn, 1, mid, {**rev, "valor_centavos": 80_00, "motivo": "Rev02"},
+                                     ANEXOS)["versao"] == 3
+    assert medicoes.detalhe(conn, mid)["valor_protocolado_centavos"] == 90_03
+    conn.execute("UPDATE medicoes SET estado='boletim_recebido' WHERE id=?", (mid,)); conn.commit()
+    with pytest.raises(ValueError, match="antes do boletim"):
+        medicao_planilhas.revisar(conn, 1, mid, {**rev, "motivo": "Rev03"}, ANEXOS)
+    assert [v["versao"] for v in medicao_planilhas.versoes(conn, mid)] == [1, 2, 3]
+
+
+def test_aviso_de_periodo_sobreposto_ou_pulando(conn, contrato_id):
+    from app import medicao_planilhas
+    medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-06-26", "2026-07-25", 1), ANEXOS)
+    junto = medicao_planilhas.avisos(conn, contrato_id, "execucao", 2, "2026-08", "2026-07-26")
+    sobre = medicao_planilhas.avisos(conn, contrato_id, "execucao", 2, "2026-08", "2026-07-20")
+    pula = medicao_planilhas.avisos(conn, contrato_id, "execucao", 2, "2026-09", "2026-08-26")
+    assert junto == []
+    assert len(sobre) == 1 and "sobrepõe" in sobre[0] and "25/07/2026" in sobre[0]
+    assert len(pula) == 1 and "pula" in pula[0]
+
+
+def test_planilha_gerada_pode_ser_cancelada(conn, contrato_id):
+    from app import medicao_planilhas
+    mid = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-07", "2026-07-01", "2026-07-31", 1),
+                                      ANEXOS)["medicao_id"]
+    medicoes.mudar_estado(conn, 1, mid, "cancelada", "lançada no mês errado")
+    assert medicoes.detalhe(conn, mid)["estado"] == "cancelada"
+
+
+def test_sugestao_proximo_numero_e_mes_seguinte(conn, contrato_id):
+    from app import medicao_planilhas
+    medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(4, "2026-11", "2026-11-01", "2026-11-30", 1_000_01,
+                                                                 numero_orgao=12), ANEXOS)
+    s = medicao_planilhas.sugestao(conn, contrato_id)
+    assert (s["numero"], s["numero_orgao"], s["competencia"]) == (5, 13, "2026-12")
+    assert (s["periodo_inicio"], s["periodo_fim"]) == ("2026-12-01", "2026-12-31")
+    assert s["acumulado_anterior_centavos"] == 1_000_01 and s["saldo_centavos"] == 100_000_00 - 1_000_01
+    medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(5, "2026-12", "2026-12-01", "2026-12-31", 1), ANEXOS)
+    assert medicao_planilhas.sugestao(conn, contrato_id)["competencia"] == "2027-01"

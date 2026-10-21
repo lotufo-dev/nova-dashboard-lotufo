@@ -7,10 +7,10 @@ import datetime
 import sqlite3
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from app import espelhos, medicoes, permissoes, tempo
+from app import arquivos, espelhos, medicao_planilhas, medicoes, permissoes, tempo
 from app.api_auth import conexao
 from app.dinheiro import parse_brl
 from app.permissoes import exigir
@@ -136,6 +136,7 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     if d is None:
         raise HTTPException(404, "Medição não encontrada")
     d["edicoes_valor"] = medicoes.edicoes_valor(conn, [medicao_id])[medicao_id]   # B-02 (10/10/2026): linha do tempo
+    d["planilhas"] = medicao_planilhas.versoes(conn, medicao_id)   # issue #281: todas as versoes da planilha/carta
     return d
 
 
@@ -230,3 +231,89 @@ def desmarcar_final(medicao_id: ID, dados: DesmarcarFinalIn, usuario: dict = Dep
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     return medicoes.detalhe(conn, medicao_id)
+
+
+# --- issue #281: planilha/carta de medicao (spec 2026-10-20 §2.1, passo 1) -----------------------------
+
+TETO_PLANILHA = 20 * 1024 * 1024    # mesma folga da planilha editavel do protocolo (api_protocolos)
+
+
+def _anexos(oficio: UploadFile, planilha: UploadFile) -> dict:
+    """Oficio assinado (PDF, com as guardas de app/arquivos.py) e planilha (.xlsx; .pdf onde a planilha/carta e'
+    o proprio boletim da Lotufo, Prefeitura e SES), gravados pelo hash na pasta `planilhas`."""
+    sha = arquivos.receber_pdf(oficio, arquivos.pasta("planilhas"))
+    if (planilha.filename or "").lower().endswith(".pdf"):
+        sha_p = arquivos.receber_pdf(planilha, arquivos.pasta("planilhas"))
+        caminho_p = f"planilhas/{sha_p}.pdf"
+    else:
+        dados = b"".join(arquivos.blocos_validados(planilha, teto_bytes=TETO_PLANILHA, tipo="xlsx"))
+        caminho_p, sha_p = arquivos.gravar_bytes("planilhas", dados, "xlsx")
+    return {"arquivo": f"planilhas/{sha}.pdf", "sha256": sha, "arquivo_planilha": caminho_p, "sha256_planilha": sha_p}
+
+
+def _centavos(valor: str) -> int:
+    centavos = parse_brl(valor)
+    if centavos > MAX_INT64:
+        raise ValueError("Valor monetário fora do limite")
+    return centavos
+
+
+@router.get("/api/contratos/{contrato_id}/planilhas/sugestao")
+def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "projeto"] = Query("execucao"),
+                      usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    _contrato_existe(conn, contrato_id)
+    return medicao_planilhas.sugestao(conn, contrato_id, tipo)
+
+
+@router.post("/api/contratos/{contrato_id}/planilhas", status_code=201)
+def registrar_planilha(contrato_id: ID,
+                       numero: int = Form(..., ge=1, le=999),
+                       tipo: Literal["execucao", "projeto"] = Form("execucao"),
+                       competencia: str = Form(..., pattern=COMPETENCIA),
+                       periodo_inicio: datetime.date = Form(...),
+                       periodo_fim: datetime.date = Form(...),
+                       valor: str = Form(..., max_length=40),
+                       numero_orgao: int | None = Form(None, ge=1, le=9999),
+                       oficio: UploadFile = File(...), planilha: UploadFile = File(...),
+                       usuario: dict = Depends(exigir("editar_cadastros")),
+                       conn: sqlite3.Connection = Depends(conexao)):
+    """"Nova planilha/carta" na obra: a medicao entra em `planilha_gerada` com a versao 1; os avisos de periodo
+    voltam junto com a gravacao (nao a impedem)."""
+    _contrato_existe(conn, contrato_id)
+    try:
+        dados = {"numero": numero, "tipo": tipo, "competencia": competencia, "numero_orgao": numero_orgao,
+                 "periodo_inicio": periodo_inicio.isoformat(), "periodo_fim": periodo_fim.isoformat(),
+                 "valor_centavos": _centavos(valor)}
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    anexos = _anexos(oficio, planilha)
+    try:
+        return medicao_planilhas.registrar(conn, usuario["id"], contrato_id, dados, anexos)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+
+
+@router.post("/api/medicoes/{medicao_id}/planilhas", status_code=201)
+def revisar_planilha(medicao_id: ID,
+                     motivo: str = Form("", max_length=1000),
+                     periodo_inicio: datetime.date = Form(...),
+                     periodo_fim: datetime.date = Form(...),
+                     valor: str = Form(..., max_length=40),
+                     oficio: UploadFile = File(...), planilha: UploadFile = File(...),
+                     usuario: dict = Depends(exigir("editar_cadastros")),
+                     conn: sqlite3.Connection = Depends(conexao)):
+    """Revisao da planilha/carta (Rev01, Rev02...): versao nova, com motivo obrigatorio."""
+    _medicao_existe(conn, medicao_id)
+    if not motivo.strip():
+        raise HTTPException(422, "Informe o motivo da revisão da planilha/carta")
+    try:
+        dados = {"motivo": motivo, "periodo_inicio": periodo_inicio.isoformat(),
+                 "periodo_fim": periodo_fim.isoformat(), "valor_centavos": _centavos(valor)}
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    anexos = _anexos(oficio, planilha)
+    try:
+        return medicao_planilhas.revisar(conn, usuario["id"], medicao_id, dados, anexos)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
