@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { CartaoPleito, NovoPleito, type Pleito, type TipoPleito } from "./FluxoOficio";
+import { CartaoPleito, NovoPleito, cadeiaDoPleito, type Pleito, type TipoPleito } from "./FluxoOficio";
 import CaixaAviso from "./CaixaAviso";
 import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
@@ -72,6 +72,8 @@ export function LinhaPleito({ p, desfecho, contexto }: { p: Pleito; desfecho: De
         <Selo classe={desfecho.classe} forte={desfecho.forte}>{desfecho.texto}</Selo>
       </div>
       {desfecho.partes.length > 0 && <p className="campo__nota">{desfecho.partes.join(" · ")}</p>}
+      {/* issue #277: a cadeia do pleito de reajuste (o que ele reitera e quem o reiterou) */}
+      {cadeiaDoPleito(p).map(t => <p key={t} className="campo__nota">{t}</p>)}
       {p.situacao === "enviado" && p.envio_justificativa && (
         <CaixaAviso nivel="atencao">Enviado com ressalva: {p.envio_justificativa}</CaixaAviso>
       )}
