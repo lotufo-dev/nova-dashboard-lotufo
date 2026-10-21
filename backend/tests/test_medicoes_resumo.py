@@ -101,6 +101,14 @@ def test_estados_novos_do_motor_entram_na_lista_antes_do_espelho(conn, cenario):
     assert medicoes.rotulo_estado("planilha_gerada") == "com planilha/carta gerada"
 
 
+def test_protocolada_com_atesto_posterior_mantem_o_desde(conn, cenario):
+    ids = cenario
+    mid = _medicao(conn, ids["a"], 40, "execucao", "protocolada", 1000, atestado_em="2026-10-18")
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-10-01', 'manual')", (mid,))
+    conn.commit()
+    assert {m["id"]: m["desde"] for m in medicoes.em_andamento(conn)}[mid] == "2026-10-01"
+
+
 def test_contratante_sigla_e_sub_orgao():
     assert medicoes.contratante("sinfra", "sinfra-supu", "SINFRA - SUPU (Pavimentação Urbana)", None) == ("SINFRA", "SUPU")
     assert medicoes.contratante("sinfra", "sinfra-sagpm", "SINFRA - SAGPM / SUOESP", None) == ("SINFRA", "SAGPM / SUOESP")

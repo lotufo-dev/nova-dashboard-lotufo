@@ -484,8 +484,13 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
     out = []
     for r in conn.execute(sql + " ORDER BY c.nome_curto, c.id, m.numero DESC, m.tipo", args):
         # dia de Cuiaba (`_dia`) nos marcos e no criado_em: carimbo UTC das 20h as 24h cairia no dia seguinte
-        marcos = [d.isoformat() for d in map(_dia, (r["espelho_em"], r["nota_emitida_em"], r["protocolado_em"],
-                                                    r["planilha_enviada_em"], r["atestado_em"])) if d]
+        brutos = [r["espelho_em"], r["nota_emitida_em"], r["protocolado_em"]]
+        # marcos do motor so' no estado deles: atesto/glosa posterior numa medicao adiante nao rebaixa o "desde"
+        if r["estado"] == "planilha_enviada":
+            brutos.append(r["planilha_enviada_em"])
+        if r["estado"] == "boletim_recebido":
+            brutos.append(r["atestado_em"])
+        marcos = [d.isoformat() for d in map(_dia, brutos) if d]
         criado = _dia(r["criado_em"])
         out.append({"id": r["id"], "contrato_id": r["contrato_id"],
                     "obra": r["nome_curto"] or r["numero_instrumento"], "numero": r["numero"], "tipo": r["tipo"],
