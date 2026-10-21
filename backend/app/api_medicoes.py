@@ -235,7 +235,9 @@ def desmarcar_final(medicao_id: ID, dados: DesmarcarFinalIn, usuario: dict = Dep
 
 # --- issue #281: planilha/carta de medicao (spec 2026-10-20 §2.1, passo 1) -----------------------------
 
-TETO_PLANILHA = 20 * 1024 * 1024    # mesma folga da planilha editavel do protocolo (api_protocolos)
+# mesmo teto da planilha editavel do protocolo (api_protocolos.TETO_PLANILHA; importar daria ciclo: ele importa
+# este modulo)
+TETO_PLANILHA = 25 * 1024 * 1024
 
 
 def _anexos(oficio: UploadFile, planilha: UploadFile) -> dict:
@@ -285,6 +287,7 @@ def registrar_planilha(contrato_id: ID,
         dados = {"numero": numero, "tipo": tipo, "competencia": competencia, "numero_orgao": numero_orgao,
                  "periodo_inicio": periodo_inicio.isoformat(), "periodo_fim": periodo_fim.isoformat(),
                  "valor_centavos": _centavos(valor)}
+        medicao_planilhas.conferir_registro(conn, contrato_id, dados)   # recusa antes de gravar os anexos
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     anexos = _anexos(oficio, planilha)
@@ -305,11 +308,10 @@ def revisar_planilha(medicao_id: ID,
                      conn: sqlite3.Connection = Depends(conexao)):
     """Revisao da planilha/carta (Rev01, Rev02...): versao nova, com motivo obrigatorio."""
     _medicao_existe(conn, medicao_id)
-    if not motivo.strip():
-        raise HTTPException(422, "Informe o motivo da revisão da planilha/carta")
     try:
         dados = {"motivo": motivo, "periodo_inicio": periodo_inicio.isoformat(),
                  "periodo_fim": periodo_fim.isoformat(), "valor_centavos": _centavos(valor)}
+        medicao_planilhas.conferir_revisao(conn, medicao_id, dados)   # recusa antes de gravar os anexos
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     anexos = _anexos(oficio, planilha)

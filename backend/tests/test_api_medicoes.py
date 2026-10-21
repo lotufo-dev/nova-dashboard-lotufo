@@ -304,7 +304,7 @@ def _no_estado(mid, estado):
         conn.close()
 
 
-@pytest.mark.parametrize("estado", ["prevista", "espelho_gerado", "espelho_enviado"])
+@pytest.mark.parametrize("estado", ["prevista", "planilha_gerada", "espelho_gerado", "espelho_enviado"])
 def test_protocolo_manual_antes_da_nota_exige_justificativa(client_admin, estado):
     from app import db
     mid = _medicao(client_admin, _contrato(client_admin))
@@ -567,6 +567,25 @@ def test_planilha_exige_os_dois_anexos_e_pdf_de_verdade(client_admin):
 def test_planilha_periodo_invertido_da_422(client_admin):
     cid = _contrato(client_admin)
     assert _nova_planilha(client_admin, cid, inicio="2026-07-31", fim="2026-07-01").status_code == 422
+
+
+def test_planilha_recusada_nao_deixa_arquivo_na_pasta(client_admin):
+    from app import db
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid).status_code == 201
+    pasta = db.db_path().parent / "planilhas"
+    antes = sorted(p.name for p in pasta.iterdir())
+    r = _nova_planilha(client_admin, cid, inicio="2026-07-02")     # mesmo nº: recusa, com anexos novos
+    assert r.status_code == 422 and "registre uma revisão" in r.json()["detail"]
+    r = client_admin.post(f"/api/medicoes/{_mid_unica(client_admin, cid)}/planilhas",
+                          files=_arquivos_planilha("sem motivo"),
+                          data={"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "1,00"})
+    assert r.status_code == 422
+    assert sorted(p.name for p in pasta.iterdir()) == antes
+
+
+def _mid_unica(cl, cid):
+    return cl.get(f"/api/contratos/{cid}/medicoes").json()[0]["id"]
 
 
 def test_revisao_sem_motivo_recusada_com_motivo_vira_versao_2(client_admin):

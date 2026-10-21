@@ -570,7 +570,7 @@ def test_revisao_exige_motivo_e_so_antes_do_envio_muda_o_pedido(conn, contrato_i
                                      ANEXOS)["versao"] == 3
     assert medicoes.detalhe(conn, mid)["valor_protocolado_centavos"] == 90_03
     conn.execute("UPDATE medicoes SET estado='boletim_recebido' WHERE id=?", (mid,)); conn.commit()
-    with pytest.raises(ValueError, match="antes do boletim"):
+    with pytest.raises(ValueError, match="está com boletim recebido: a planilha/carta só se revisa antes do boletim"):
         medicao_planilhas.revisar(conn, 1, mid, {**rev, "motivo": "Rev03"}, ANEXOS)
     assert [v["versao"] for v in medicao_planilhas.versoes(conn, mid)] == [1, 2, 3]
 
@@ -604,3 +604,23 @@ def test_sugestao_proximo_numero_e_mes_seguinte(conn, contrato_id):
     assert s["acumulado_anterior_centavos"] == 1_000_01 and s["saldo_centavos"] == 100_000_00 - 1_000_01
     medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(5, "2026-12", "2026-12-01", "2026-12-31", 1), ANEXOS)
     assert medicao_planilhas.sugestao(conn, contrato_id)["competencia"] == "2027-01"
+
+
+def test_sugestao_pula_o_numero_de_medicao_cancelada(conn, contrato_id):
+    """(contrato, numero, tipo) e' UNIQUE: sugerir o nº de uma cancelada levaria a gravacao recusada."""
+    from app import medicao_planilhas
+    _com_valores(conn, contrato_id, 4, "protocolada", 1_00, None)
+    _com_valores(conn, contrato_id, 5, "cancelada", 1_00, None)
+    assert medicao_planilhas.sugestao(conn, contrato_id)["numero"] == 6
+
+
+def test_numero_do_orgao_nao_e_inventado_nem_apagado_na_prevista(conn, contrato_id):
+    from app import medicao_planilhas
+    mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 3, "tipo": "execucao", "competencia": "2026-07"})
+    conn.execute("UPDATE medicoes SET numero_orgao=8 WHERE id=?", (mid,))
+    _com_valores(conn, contrato_id, 4, "protocolada", 1_00, None)
+    conn.execute("UPDATE medicoes SET numero_orgao=10 WHERE numero=4"); conn.commit()
+    s = medicao_planilhas.sugestao(conn, contrato_id)
+    assert (s["numero"], s["numero_orgao"]) == (3, None)     # prevista abaixo da ultima: nada a extrapolar
+    medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(3, "2026-07", "2026-07-01", "2026-07-31", 1), ANEXOS)
+    assert medicoes.detalhe(conn, mid)["numero_orgao"] == 8

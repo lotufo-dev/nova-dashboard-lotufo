@@ -43,7 +43,9 @@ TRANSICOES = {
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
 # B-12 (10/10/2026): mensagem ao usuario com o tipo e o estado por extenso, nunca o codigo ("(execucao)")
 ROTULO_TIPO = {"execucao": "execução", "reajuste": "reajuste", "projeto": "projeto"}
-ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta registrada", "espelho_gerado": "com espelho gerado", "espelho_enviado": "com espelho enviado",
+ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta registrada",
+                 "planilha_enviada": "com planilha/carta enviada", "boletim_recebido": "com boletim recebido",
+                 "espelho_gerado": "com espelho gerado", "espelho_enviado": "com espelho enviado",
                  "nota_emitida": "com nota emitida", "protocolada": "protocolada", "nf_emitida": "lançada no RM",
                  "recebida": "recebida", "cancelada": "cancelada", "desistida": "desistida"}
 
@@ -312,7 +314,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         # A-09 (testes de quebra 10/10/2026): o protocolo registrado a mao antes da nota pulava faturamento,
         # nota e envio sem pedir nada. Vira pendencia da MESMA lista: so' passa assumida e justificada.
         # Gate Sol S3: na ressalva, `pendencias` traz tudo e `certidoes_pendentes` so' as certidoes.
-        sem_nota = exige_nota and atual in ("prevista", *ESTADOS_ESPELHO)
+        sem_nota = exige_nota and atual in ("prevista", "planilha_gerada", *ESTADOS_ESPELHO)   # #281: planilha
         pendencias = [*pendentes, NOTA_NAO_EMITIDA] if sem_nota else list(pendentes)
         if sem_nota:
             motivos.append(NOTA_NAO_EMITIDA)
@@ -333,7 +335,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         # SELECT e o UPDATE outro usuario pode cancelar/mover a medicao. Sem a condicao, o
         # perdedor da corrida sobrescreveria um estado final. Vem ANTES do INSERT para nao
         # deixar protocolo orfao na transacao quando a corrida e perdida.
-        if atual in ("prevista", *ESTADOS_ESPELHO, "nota_emitida"):
+        if atual in ("prevista", "planilha_gerada", *ESTADOS_ESPELHO, "nota_emitida"):
             upd = conn.execute(
                 "UPDATE medicoes SET estado='protocolada', congelada=1 WHERE id=? AND estado=?",
                 (medicao_id, atual))
