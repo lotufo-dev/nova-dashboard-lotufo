@@ -58,7 +58,7 @@ def _lista_documentos(valor, onde: str, erros: list[str]) -> list[str] | None:
     return list(valor)
 _CHAVE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 _CAMPOS_INSTRUMENTO = {"chave", "tipo", "data", "numero", "objeto", "corrige", "delta_valor",
-                       "nova_execucao_fim", "nova_vigencia_fim", "pdf"}
+                       "nova_execucao_fim", "nova_vigencia_fim", "pdf", "ordinal"}
 
 
 class CadastroInvalido(Exception):
@@ -150,7 +150,7 @@ def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
         return None
     inst = {"chave": chave, "tipo": tipo, "numero": bruto.get("numero"), "objeto": bruto.get("objeto"),
             "corrige": bruto.get("corrige"), "pdf": bruto.get("pdf"), "delta_valor_centavos": 0,
-            "nova_execucao_fim": None, "nova_vigencia_fim": None,
+            "nova_execucao_fim": None, "nova_vigencia_fim": None, "ordinal": None,
             "dados": {k: v for k, v in bruto.items() if k not in _CAMPOS_INSTRUMENTO}}
     try:
         inst["data"] = _data(bruto.get("data"))
@@ -176,6 +176,14 @@ def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
     if tipo in TIPOS_OUTROS and (inst["delta_valor_centavos"] or inst["nova_execucao_fim"]
                                  or inst["nova_vigencia_fim"]):
         falha("tipo", f"{tipo} não altera valor nem prazo; use aditivo ou apostilamento de prazo")
+    # Issue #261: ordinal do termo ("14º termo aditivo") quando o numero nao traz o sufixo /14.
+    if bruto.get("ordinal") is not None:
+        if tipo not in TIPOS_ADITIVO:
+            falha("ordinal", f"{tipo} não tem ordinal; o campo vale para aditivo ou apostilamento de prazo")
+        elif _inteiro(bruto["ordinal"], 1) is None:
+            falha("ordinal", f"use um número inteiro a partir de 1 (ex.: 14): {bruto['ordinal']!r}")
+        else:
+            inst["ordinal"] = bruto["ordinal"]
     # `dados` de data viram ISO para o JSON canonico nao depender do parser
     for k, v in list(inst["dados"].items()):
         if isinstance(v, datetime.date):
