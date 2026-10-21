@@ -276,9 +276,9 @@ def test_repactuacao_unica_sem_nada_antes_nao_tem_linha_anterior(conn, cid):
     assert cronograma.curva_comparativa(conn, cid)["anterior"] is None
 
 
-def _aditivo(conn, cid, data, numero=None, ordinal=None, status="assinado", cancelado=None):
-    conn.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, ordinal, cancelado_em)"
-                 " VALUES (?,?,?,?,?,?,?)", (cid, "prazo", status, data, numero, ordinal, cancelado))
+def _aditivo(conn, cid, data, numero=None, ordinal=None, status="assinado", cancelado=None, forma=None):
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, ordinal, cancelado_em, forma)"
+                 " VALUES (?,?,?,?,?,?,?,?)", (cid, "prazo", status, data, numero, ordinal, cancelado, forma))
     conn.commit()
 
 
@@ -287,10 +287,13 @@ def test_marcas_vem_dos_aditivos_assinados_no_mes_da_assinatura(conn, cid):
     _aditivo(conn, cid, "2025-06-30", ordinal=1)
     _aditivo(conn, cid, "2025-11-05", numero="7/2025")
     _aditivo(conn, cid, "2025-12-01")
+    _aditivo(conn, cid, "2025-12-15", numero="099/2020/01/14")                       # ordinal pelo sufixo do numero
+    _aditivo(conn, cid, "2025-12-20", ordinal=3, forma="apostilamento")             # apostilamento nao e' aditivo
     _aditivo(conn, cid, None, status="em_andamento", ordinal=3)                      # nao assinado
     _aditivo(conn, cid, "2025-07-01", ordinal=9, cancelado="2025-07-02 10:00:00")     # cancelado
     assert cronograma.curva_comparativa(conn, cid)["aditivos"] == [
         {"competencia": "2025-06", "data": "2025-06-30", "nome": "1º TA"},
         {"competencia": "2025-09", "data": "2025-09-02", "nome": "2º TA"},
         {"competencia": "2025-11", "data": "2025-11-05", "nome": "TA 7/2025"},
-        {"competencia": "2025-12", "data": "2025-12-01", "nome": "Termo aditivo"}]
+        {"competencia": "2025-12", "data": "2025-12-01", "nome": "Termo aditivo"},
+        {"competencia": "2025-12", "data": "2025-12-15", "nome": "14º TA"}]

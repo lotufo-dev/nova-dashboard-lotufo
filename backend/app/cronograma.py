@@ -17,7 +17,7 @@ UTC, e congelaria o mes corrente antes da hora.
 """
 import sqlite3
 
-from app import auditoria, db, tempo
+from app import auditoria, db, prazos, tempo
 
 
 def nova_versao(conn: sqlite3.Connection, usuario_id: int, contrato_id: int,
@@ -154,7 +154,7 @@ def curva_comparativa(conn: sqlite3.Connection, contrato_id: int) -> dict:
     nunca e' essa versao (a carga de 04/09/2026 e as versoes manuais vem depois dos documentos), por isso nao
     se tira simplesmente a ultima. None sem repactuacao ou sem nada antes dela.
     `aditivos`: uma marca por aditivo ASSINADO e nao cancelado do contrato, no mes da assinatura, com o nome do
-    termo ("3º TA"; sem ordinal, o numero; sem numero, "Termo aditivo")."""
+    termo ("3º TA", com a regra de ordinal da carta de prazo; sem ordinal, o numero; sem numero, "Termo aditivo"). Apostilamento nao e' aditivo e nao leva marca."""
     vs = versoes(conn, contrato_id)
     repactuacoes = [v for v in vs if v["origem_documento"] in ORIGENS_DE_REPACTUACAO]
     anterior = None
@@ -164,7 +164,10 @@ def curva_comparativa(conn: sqlite3.Connection, contrato_id: int) -> dict:
     aditivos = []
     for r in conn.execute("SELECT numero, ordinal, data_assinatura FROM aditivos WHERE contrato_id=? "
                           "AND status='assinado' AND cancelado_em IS NULL AND data_assinatura IS NOT NULL "
+                          "AND COALESCE(forma,'termo_aditivo')='termo_aditivo' "
                           "ORDER BY data_assinatura, id", (contrato_id,)):
-        nome = f"{r['ordinal']}º TA" if r["ordinal"] else (f"TA {r['numero']}" if r["numero"] else "Termo aditivo")
+        # mesma regra da carta de prazo (#261): o sufixo do numero manda, depois a coluna `ordinal`
+        n = prazos._ordinal(dict(r), 0)
+        nome = f"{n}º TA" if n else (f"TA {r['numero']}" if r["numero"] else "Termo aditivo")
         aditivos.append({"competencia": r["data_assinatura"][:7], "data": r["data_assinatura"], "nome": nome})
     return {"anterior": anterior or None, "aditivos": aditivos}
