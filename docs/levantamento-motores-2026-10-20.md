@@ -12,6 +12,10 @@ principal (verdade-base: 1ª página da última medição e do último instrumen
 linha a linha da fase 3 foi feito por 21 leitores Opus (um por obra) e arbitrado pela sessão principal, que
 recomputou por conta própria os cabeçalhos da tabela 1 direto do banco.
 
+**Vocabulário (decidido em 20/10/2026).** *Boletim de medição* é o documento que o órgão emite (na SINFRA, o pacote do
+SMO) com os nomes dos fiscais e da Lotufo para assinar; *planilha/carta de medição* é o que a Lotufo envia antes, com o
+valor pedido. O fluxo por órgão, confirmado no Outlook, está em `docs/decisoes-motores-2026-10-20.md`.
+
 **Fora do levantamento:** BR-163 (contrato privado com a concessionária, sem pasta no SharePoint da engenharia),
 173 Chapada (encerrada, não copiada), e o motor de atraso de pagamento por órgão (sai pela #255).
 
@@ -73,8 +77,9 @@ lados, a fonte e a ação.
 **Hoje.** Medido = soma das medições em `protocolada`, `nf_emitida` ou `recebida`, pelo valor atestado quando há, senão pelo
 protocolado. Saldo = vigente − medido. A curva compara o medido por competência com o previsto efetivo do cronograma.
 
-**Documentos.** O medido real é o acumulado aprovado pelo órgão (capa do SMO na SINFRA, boletim assinado na MT-PAR, CI na
-Prefeitura), que difere do pedido em 6 obras e vem depois de glosa ou revisora em 3.
+**Documentos.** O medido real é o acumulado do boletim do órgão (capa do SMO na SINFRA, boletim provisório assinado na
+MT-PAR, CI e "solicitação de NF" na Prefeitura), que difere do valor pedido na planilha/carta em 6 obras e vem depois de
+glosa ou revisora em 3.
 
 Divergências:
 
@@ -82,7 +87,8 @@ Divergências:
   (de 1 a 13 por obra). As maiores: BRT Lote 1 12ª–14ª (R$ 28,65 mi), Leblon 26ª–28ª (R$ 15,20 mi), Estações 5ª–6ª
   (R$ 11,39 mi), MT-388 11ª–13ª (R$ 10,64 mi), Cultural 22ª–23ª (R$ 8,40 mi), MT-402 24ª–27ª, Alta Floresta 39 reajustes
   (R$ 24,30 mi), Região Oeste reajustes (R$ 4,80 mi).
-- **Valor aprovado.** Zero eventos de atesto em produção: a dashboard só conhece o pedido. Onde o órgão aprovou menos
+- **Valor aprovado.** Zero eventos de atesto em produção: a dashboard só conhece o valor pedido na planilha/carta,
+  nunca o do boletim do órgão. Onde o órgão aprovou menos
   (BRT Lote 1 em toda medição, Atalaia, MT-401, 5 Bairros 23ª revisora, MT-402 revisora, Estações 4ª glosada), o medido da
   dashboard está acima do real.
 - **Valor sem documento.** 13 medições com valor que nenhum documento traz: Região Oeste nº 45, 46 (duplicatas da 49ª e 50ª)
@@ -191,7 +197,7 @@ Divergências:
 
 | Motor | Carregar no cadastro (YAML) | Criar na dashboard | Corrigir (evento novo, com fonte) |
 |---|---|---|---|
-| Painéis | cota do Leblon (49%) | 51 medições de execução e 92 de reajuste; aprovação (atesto) de cada medição aprovada, com data e meio | 13 valores sem documento; 5 obras com NF alocada na medição errada; 1ª de projeto da Estações → Terminais; competência da 32ª da MT-401, da 11ª da Coxipó 2ª e do reajuste da 1ª da Cavalaria; 12ª da Xtreme "prevista" → protocolada; 20ª da Coxipó 3ª parada em espelho |
+| Painéis | cota do Leblon (49%) | 51 medições de execução e 92 de reajuste; o boletim do órgão (atesto) de cada medição aprovada, com data e meio | 13 valores sem documento; 5 obras com NF alocada na medição errada; 1ª de projeto da Estações → Terminais; competência da 32ª da MT-401, da 11ª da Coxipó 2ª e do reajuste da 1ª da Cavalaria; 12ª da Xtreme "prevista" → protocolada; 20ª da Coxipó 3ª parada em espelho |
 | Reajuste | mais de 60 apostilamentos com competências e valores; pleitos de 2024 e 2025; 6 pleitos de 2026; índice certo em 19 contratos; datas-base do 5 Bairros; `aplica_a` | medições de reajuste negativas (MT-401 3, 5 Bairros 1) e as que faltam | pleitos "enviado" já atendidos (5 obras) ligados ao instrumento |
 | Prazos e garantias | garantia e endossos das 21 obras; um instrumento de prazo por termo (≈90); fins originais e início da vigência pela assinatura em 17 contratos; 5 paralisações e 2 retomadas; recebimento definitivo da MT-401; 2 pedidos de prorrogação; data do 3º TA da MT-401 e do 1º TA da Estações | nada | eventos de suspensão/retomada de 04/08/2026 e 21/09/2026 sem documento (MT-402, Coxipó 2ª e 3ª); fim de execução da Coxipó 2ª e 3ª e "4º TA" da Região Oeste marcados como sem documento; vigência da Cavalaria |
 | Cronograma | uma versão por aditivo com a data do documento (≈60 versões), inclusive a vigente de cada obra | nada | as 22 versões da carga marcadas como superadas (não apagadas) |
@@ -225,12 +231,15 @@ Registro que o documento contradiz, ou que não tem documento que o sustente, ou
 
 1. **Cobertura, não digitação.** Onde a medição existe nos dois lados, o valor bate; a dashboard perde as medições
    mais recentes porque a carga foi única (04/09/2026) e nada a alimenta depois além do espelho.
-2. **Protocolo da medição não existe como documento na SINFRA** desde 2025: o fluxo é SMO + DocuSign + NF. A data
-   que existe para todas as obras SINFRA é a aprovação no SMO ("Data de realização"). Carimbo de protocolo só na
-   Prefeitura de Cuiabá e, em parte, na MT-PAR (SIGA). As 627 datas de protocolo da carga legada são o último dia
+2. **O fluxo da SINFRA tem quatro documentos, e a dashboard não guarda nenhum deles**: a planilha/carta da Lotufo
+   (protocolada no SIGA; existe em todas as obras SINFRA, inclusive MT-388 e Leblon, cujas pastas não a guardam), a
+   análise da supervisora, o boletim emitido pelo órgão no SMO ("Data de realização" é a data que vale) e a assinatura
+   no DocuSign. O boletim chega por e-mail só no SUEF II; nas outras superintendências chega por outro canal. Carimbo
+   de protocolo só na Prefeitura de Cuiabá e, em parte, na MT-PAR (SIGA). As 627 datas de protocolo da carga legada são o último dia
    do mês da competência; só 13 protocolos (outubro de 2026) têm data real.
-3. **Valor pedido × valor aprovado divergem com frequência** (BRT Lote 1 em toda medição, Atalaia 5 vezes, MT-401
-   3, Leblon, MT-402, 5 Bairros). A dashboard tem as duas colunas, mas ninguém grava a segunda: 0 eventos de atesto.
+3. **Valor pedido (planilha/carta) × valor aprovado (boletim) divergem com frequência** (BRT Lote 1 em toda
+   medição, Atalaia 5 vezes, MT-401 3, Leblon, MT-402, 5 Bairros): a supervisora devolve a planilha revisada antes de o
+   órgão emitir o boletim. A dashboard tem as duas colunas, mas ninguém grava a segunda: 0 eventos de atesto.
 4. **Reajuste sem apostilamento ou fora da previsão apostilada** em 9 obras; a SINFRA apostila mês a mês vinculado
    ao nº da medição, logo o ciclo anual do motor precisa descer à competência.
 5. **Garantia vencida ou ausente em 16 de 21 obras**; o endosso que cada aditivo exige quase nunca está na pasta.

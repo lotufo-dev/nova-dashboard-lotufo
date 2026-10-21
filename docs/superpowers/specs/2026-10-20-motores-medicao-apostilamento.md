@@ -5,6 +5,15 @@
 `docs/levantamento-motores-2026-10-20.md`). **Autoridade:** complementa a spec de 2026-09-21 (§2, §5, §6, §7, §8,
 §11 e §12); o que ela não contradiz continua valendo. **Revisão:** sem gate Sol nesta etapa (decisão de 19/10/2026);
 revisor-adversarial e gate Sol entram nas PRs da fase 5, pelas regras normais.
+**Revisão de 20/10/2026:** corrigida com a investigação do Outlook (`docs/decisoes-motores-2026-10-20.md`) e com as
+decisões do dono do produto: A+B; carga do contrato inteiro nas obras ativas; a dashboard envia a planilha/carta; o
+boletim entra por arrasto com leitor da capa do SMO.
+
+**Vocabulário.** *Boletim de medição* é o documento que o órgão emite (na SINFRA, o pacote do SMO: capa, resumo, ficha
+do contrato, cálculo reajustado, cronograma) com os nomes dos fiscais e da Lotufo para assinar. *Planilha/carta de
+medição* é o que a Lotufo envia antes, com o valor pedido (ofício CT assinado, planilha editável, memórias, diários,
+ensaios, croqui). Na SINFRA quem gera o boletim é o órgão; a Lotufo não o cria. Na Prefeitura de Cuiabá e na SES o
+boletim é feito pela Lotufo e aprovado depois. Na MT-PAR o rito do boletim não está confirmado (seção 7).
 
 Regras que esta spec respeita e nenhuma opção pode violar: centavos inteiros e arredondamento único; valor
 pedido congelado no envio; correção é evento novo, nunca sobrescrita; sem exclusão física de registro financeiro;
@@ -26,8 +35,9 @@ decidido); e-mail sai da conta de quem clicou, envio único com reserva atômica
    garantia vencida ou ausente nos documentos.
 4. **Cronograma:** 22 versões, todas da carga de 04/09/2026, com 1 a 31 competências; nenhuma por aditivo; não há
    tela para criar versão; a curva S compara o medido com um previsto que ninguém mantém.
-5. **O fluxo real da SINFRA** (SMO + DocuSign + NF) não tem "protocolo" como documento; a data que existe é a
-   aprovação no SMO. O "protocolo" com carimbo só existe na Prefeitura de Cuiabá e, em parte, na MT-PAR.
+5. **O fluxo real da SINFRA** tem quatro passos com documento: a planilha/carta da Lotufo (protocolada no SIGA), a
+   análise da supervisora, o boletim emitido pelo órgão no SMO e a assinatura no DocuSign; a nota sai depois. O
+   "protocolo" com carimbo só existe na Prefeitura de Cuiabá e, em parte, na MT-PAR.
 6. **A medição mais recente está no Outlook, não no SharePoint, em 7 obras.** Qualquer solução que dependa de ler a
    pasta da obra fica um a dois meses atrasada por construção.
 
@@ -55,18 +65,19 @@ Leo. "Risco" é o de produto (dado errado na tela) e o de adoção (a operação
 
 ### B. Motores novos: medição e apostilamento com o fluxo inteiro na dashboard
 
-- **Entra na tela:** a medição nasce na dashboard como **boletim** (período, valor pedido, planilha anexada,
-  ofício de encaminhamento gerado), vai ao fiscal, recebe a **aprovação** (valor aprovado, data, documento do
-  órgão), e só então segue para espelho, nota e protocolo, que já existem. O reajuste da Nª medição nasce do
-  **ciclo de apostilamento**: previsão por competência (da planilha do pleito), pedido, aprovado, apostilado,
-  faturado, cada um com data e documento; divergência entre pedido e previsto, e NF antes do apostilamento, viram
-  aviso. Detalhe em §2.
+- **Entra na tela:** a **planilha/carta** nasce na dashboard (período, valor pedido, ofício assinado e planilha
+  anexados) e é enviada por ela ao órgão, como já acontece com a nota; o **boletim do órgão** entra por arrasto do PDF
+  (valor aprovado, data, número lidos da capa do SMO); a assinatura no DocuSign é registrada com a data; depois seguem
+  espelho, nota e protocolo, que já existem. Na Prefeitura e na SES, onde o boletim é da Lotufo, ele nasce na
+  dashboard. O reajuste da Nª medição nasce do **ciclo de apostilamento**: previsão por competência (da planilha do
+  pleito), pedido, aprovado, apostilado, faturado, cada um com data e documento; divergência entre pedido e previsto, e
+  NF antes do apostilamento, viram aviso. Detalhe em §2.
 - **Sai:** a dependência do SharePoint e do Outlook como fonte da medição; "valor protocolado" como único valor
   da medição; a digitação do reajuste no espelho sem referência.
-- **Custo:** motor de medição 8 a 10 dias; motor de apostilamento 6 a 8 dias. **14 a 18 dias.**
-- **Risco:** médio-alto de adoção (muda o passo zero de quem opera: hoje o boletim é feito na planilha e
-  protocolado no SMO/DocuSign por fora; a dashboard precisa aceitar "feito por fora" em todo passo, como já faz
-  no envio da nota). Sem o histórico (A), curva, saldo e ciclo de reajuste nascem vazios.
+- **Custo:** motor de medição 5 a 7 dias (na SINFRA a dashboard lê um documento pronto em vez de produzir um); motor
+  de apostilamento 6 a 8 dias. **11 a 15 dias.**
+- **Risco:** médio de adoção (o passo zero da operadora muda do Outlook para a dashboard, com o mesmo e-mail e os
+  mesmos anexos; "feito por fora" em todo passo). Sem o histórico (A), curva, saldo e ciclo de reajuste nascem vazios.
 
 ### C. Leitura determinística dos documentos existentes, com fila humana
 
@@ -84,12 +95,12 @@ Leo. "Risco" é o de produto (dado errado na tela) e o de adoção (a operação
   manuscrito, que o OCR não decide; o fluxo continua fora da dashboard (a pessoa arrasta depois do fato), o que
   contradiz "o sistema é onde o trabalho é feito".
 
-### A+B (recomendada)
+### A+B (decidida em 20/10/2026)
 
 Histórico pela carga única e, em cima dele, os dois motores. A carga dá a curva S, o saldo e o ciclo de reajuste
-de cada obra no primeiro dia; os motores impedem que a dashboard volte a atrasar. **20 a 26 dias.** Risco: o de B,
+de cada obra no primeiro dia; os motores impedem que a dashboard volte a atrasar. **17 a 23 dias.** Risco: o de B,
 mitigado por "feito por fora" em todo passo e pela carga que mostra valor na tela antes de pedir mudança de hábito.
-Inclui um pedaço de C: o leitor da capa do SMO dentro do passo "registrar aprovação" (1 issue), porque é onde a
+Inclui um pedaço de C: o leitor da capa do SMO dentro do passo "registrar boletim" (1 issue), porque é onde a
 digitação mais erra (acumulado e data de realização).
 
 ### A+C
@@ -101,9 +112,9 @@ ser o primeiro degrau de A+B (o leitor da capa é reaproveitado inteiro).
 
 ### Recomendação em uma frase
 
-**A+B**, na ordem A (carga, 3 obras por rodada, as ativas de maior saldo primeiro), motor de apostilamento (menor,
-fecha o padrão mais caro: reajuste sem apostila), motor de medição (maior, muda o hábito), com o leitor da capa
-do SMO embutido no passo de aprovação; A+C fica como plano B se a operação pedir para não mudar o passo zero.
+**A+B** (decidida), na ordem A (carga, 3 obras por rodada, as ativas de maior saldo primeiro), motor de
+apostilamento (fecha o padrão mais caro: reajuste sem apostila), motor de medição, com o leitor da capa do SMO
+embutido no passo "registrar boletim".
 
 ## 2. Desenho dos motores
 
@@ -112,79 +123,100 @@ Convenções: tabelas novas só por migração que acrescenta; toda tabela de ev
 (operação, engenharia, diretoria só lê); e-mail pelo mecanismo de `envio_reserva` (reserva atômica, envio único,
 registro antes de sair, "feito por fora" com `.eml`); aviso pelo registro único de `app/avisos.py` (spec §11).
 
-### 2.1 Motor de medição (boletim → aprovação → espelho → nota → protocolo → pagamento)
+### 2.1 Motor de medição (planilha/carta → boletim do órgão → assinatura → espelho → nota → protocolo → pagamento)
 
 **O que muda no conceito.** A medição passa a ter dois valores de direito próprio, ambos já existentes como
-coluna: `valor_protocolado_centavos` é o **pedido** (o boletim que a Lotufo apresenta; congela no envio) e
-`valor_atestado_centavos` é o **aprovado** (o que o órgão aprova; vigente = último evento de `medicao_atestos`).
-Painéis, saldo e diretoria já leem "aprovado, senão pedido": só falta alguém gravar o aprovado. O motor cria o
-passo que grava.
+coluna: `valor_protocolado_centavos` é o **pedido** (o valor da planilha/carta que a Lotufo envia; congela no envio)
+e `valor_atestado_centavos` é o **aprovado** (o valor do boletim do órgão; vigente = último evento de
+`medicao_atestos`). Painéis, saldo e diretoria já leem "aprovado, senão pedido": só falta alguém gravar o aprovado.
+O motor cria os dois passos que gravam.
 
-**Estados** (acrescenta dois antes do espelho; o resto é o de hoje):
+**Estados** (acrescenta três antes do espelho; o resto é o de hoje):
 
 | Estado | Entra quando | Por quem |
 |---|---|---|
 | `prevista` | cronograma vigente tem a competência e não há medição | sistema (como hoje) |
-| `boletim_gerado` | a pessoa cria o boletim: período, valor pedido, planilha, acumulado anterior conferido | operação |
-| `boletim_enviado` | o e-mail de encaminhamento ao fiscal sai pelo sistema, ou a pessoa registra o envio por fora (SMO/DocuSign) com data | sistema, no ato do envio; ou operação com justificativa |
+| `planilha_gerada` | a pessoa registra a planilha/carta: período, valor pedido, ofício assinado e planilha anexados | operação |
+| `planilha_enviada` | o e-mail de protocolo sai pelo sistema (mesmo mecanismo da nota), ou a pessoa registra "enviado por fora" com data, meio e nº do protocolo | sistema, no ato do envio; ou operação |
+| `boletim_recebido` | o PDF do boletim do órgão é arrastado e o evento de aprovação gravado (valor, data, nº) | operação ou engenharia |
 | `espelho_gerado` … `recebida` | como hoje (spec 2026-09-21 §2) | como hoje |
 
-A **aprovação não é estado, é evento** (`medicao_atestos`, com colunas novas): pode vir antes do espelho (SINFRA:
-aprovada no SMO, depois NF) ou depois do protocolo (MT-PAR, Prefeitura, SES: boletim e NF vão juntos, a
-fiscalização aprova depois). O estado diz onde a medição está no fluxo; o evento diz quanto o órgão aceitou e
-quando. Órgão com `etapa` única no cadastro pula `boletim_enviado`: `boletim_gerado` → `espelho_gerado`.
+A **assinatura no DocuSign não é estado, é evento** registrado com a data (feito por fora; o e-mail de conclusão do
+DocuSign dá a data e o nome do envelope). Assinatura parada não gera aviso (decisão de 20/10/2026). Onde o boletim é
+da Lotufo (Prefeitura de Cuiabá, SES), `planilha_gerada` é o próprio boletim e `boletim_recebido` é a aprovação do
+órgão (CI, "solicitação de NF"). Na MT-PAR o ofício vai com a NF e o rito do boletim está pendente (seção 7): o
+motor aceita "feito por fora" em todos os passos.
+
+**Revisões.** A planilha/carta pode ser reenviada em revisão (Rev01, Rev02…, como a supervisora da SINFRA devolve):
+cada reenvio é uma versão nova de `medicao_planilhas`, com motivo; o pedido congelado continua sendo o da primeira
+versão enviada e a tela mostra todas. "Enviado por fora" também aceita revisão.
 
 **Tabelas e migração 042 (só acrescenta):**
 
-- `medicoes`: `periodo_inicio`, `periodo_fim` (como em `espelhos`, obrigatórios a partir de `boletim_gerado`),
-  `boletim_enviado_em`, `boletim_envio_origem` (`sistema`|`externo`), `numero_orgao` (nº da medição no órgão, quando
-  difere do da Lotufo: Região Oeste e Coxipó 3ª têm quatro numerações). O CHECK de `estado` ganha os dois estados.
-- `medicao_boletins` (evento): `medicao_id`, `versao`, `periodo_inicio`, `periodo_fim`, `valor_pedido_centavos`,
-  `acumulado_anterior_centavos`, `arquivo` (PDF ou XLSX da planilha, pelo hash), `sha256`, `origem`
-  (`manual`|`detectado`|`aceito`), `usuario_id`, `criado_em`, `motivo` (da versão nova). Vigente = maior versão;
-  gerar de novo antes do envio cria versão; depois do envio é **reapresentação** (versão com `motivo` obrigatório,
-  e o pedido congelado continua sendo o da versão enviada: a tela mostra os dois).
-- `medicao_atestos` ganha `meio` (`smo`|`oficio`|`email`|`carimbo`|`outro`), `numero_orgao` (nº do processo ou
-  do SMO), `arquivo`, `sha256`, `observacao`. Continua append-only.
-- `envios.tipo` aceita `boletim`; `envio_medicoes` já liga.
+- `medicoes`: `periodo_inicio`, `periodo_fim` (como em `espelhos`, obrigatórios a partir de `planilha_gerada`),
+  `planilha_enviada_em`, `planilha_envio_origem` (`sistema`|`externo`), `numero_orgao` (nº da medição no órgão; é o
+  canônico onde difere do nº da Lotufo, D6). O CHECK de `estado` ganha os três estados.
+- `medicao_planilhas` (evento): `medicao_id`, `versao`, `periodo_inicio`, `periodo_fim`, `valor_pedido_centavos`,
+  `acumulado_anterior_centavos`, `arquivo` (PDF do ofício e XLSX da planilha, pelo hash), `sha256`, `origem`
+  (`manual`|`detectado`|`aceito`), `usuario_id`, `criado_em`, `motivo` (da versão nova). Vigente = maior versão.
+- `medicao_atestos` ganha `meio` (`smo`|`oficio`|`email`|`carimbo`|`ci`|`outro`), `numero_orgao` (nº do processo ou
+  do SMO), `arquivo`, `sha256`, `observacao`. Continua append-only. É o evento "boletim recebido".
+- `medicao_assinaturas` (evento): `medicao_id`, `envelope`, `assinado_em`, `origem` (`manual`), `usuario_id`.
+- `envios.tipo` aceita `planilha`; `envio_medicoes` já liga; `medicao_protocolos` recebe o nº do SIGA devolvido.
 - Carga: nada muda nas medições existentes; as que estão em `prevista` sem valor continuam onde estão.
 
-**O que congela:** o valor pedido no `boletim_enviado` (hoje congela no protocolo, tarde demais: a SINFRA
-aprova antes da NF). Reapresentação não descongela: é versão nova com motivo. O aprovado nunca congela, porque é
-evento: glosa posterior é outro evento, e o vigente é o último.
+**O que congela:** o valor pedido no `planilha_enviada` (hoje congela no protocolo da nota, tarde demais: a SINFRA
+aprova antes da NF). Revisão não descongela: é versão nova com motivo. O aprovado nunca congela, porque é evento:
+glosa posterior é outro evento, e o vigente é o último.
 
 **Quem clica, passo a passo:**
 
-1. Operação: "Novo boletim" na obra → nº (sugerido: último + 1, com o nº do órgão opcional), período (sugerido: mês
-   da competência), valor pedido, planilha arrastada; o sistema mostra o acumulado anterior (soma dos aprovados,
-   senão pedidos) e o saldo, e avisa se o período se sobrepõe ao anterior ou pula um mês.
-2. Operação: "Enviar ao fiscal" (SINFRA: e-mail com a planilha e o ofício de encaminhamento gerado da carta
-   `boletim` em `cartas.yaml`, para os fiscais do contrato e cópias do órgão) **ou** "Registrar envio por fora"
-   (data, meio, comprovante). Reserva atômica, envio único.
-3. Engenharia ou operação: "Registrar aprovação": arrasta a capa do SMO (ou o ofício de aprovação, ou a foto do
-   carimbo) → leitor determinístico (§2.3) preenche valor, data e nº → a pessoa confere e aceita. Sem leitura:
-   três campos digitados. Valor aprovado ≠ pedido mostra a diferença na hora.
-4. Daí em diante, o fluxo de hoje: espelho (o valor do espelho vem do aprovado, senão do pedido; não se digita),
+1. Operação: "Nova planilha/carta" na obra → nº (sugerido: último + 1; nº do órgão onde difere), período (sugerido:
+   mês da competência), valor pedido, ofício CT assinado e planilha arrastados; o sistema mostra o acumulado anterior
+   (soma dos aprovados, senão pedidos) e o saldo, e avisa se o período se sobrepõe ao anterior ou pula um mês.
+2. Operação: "Enviar para protocolo" (e-mail da família do órgão com o texto de hoje, "Encaminho arquivo para
+   protocolo. Encaminho ainda arquivos editáveis para envio à supervisora e fiscalização", anexos: ofício e zip; para
+   os endereços de protocolo do órgão, com as cópias do cadastro) **ou** "Registrar envio por fora" (data, meio,
+   protocolo). Reserva atômica, envio único. O nº do SIGA que o órgão devolve é digitado na medição.
+3. Operação ou engenharia: "Registrar boletim": arrasta o PDF do órgão (capa do SMO, caderno, CI da Prefeitura,
+   "solicitação de NF") → leitor determinístico (§2.3) preenche valor, data e nº → a pessoa confere e aceita. Sem
+   leitura: três campos digitados. Valor aprovado ≠ pedido mostra a diferença na hora.
+4. Operação: "Registrar assinatura" com a data do DocuSign (opcional; sem aviso).
+5. Daí em diante, o fluxo de hoje: espelho (o valor do espelho vem do aprovado, senão do pedido; não se digita),
    faturamento, nota, protocolo, RM.
 
-**E-mail de protocolo:** o protocolo da nota (`protocolos`, etapa `nota`) continua como está. O e-mail novo é o de
-**encaminhamento do boletim** (tipo `boletim`): assunto "CT/nnn/LT/aaaa - Nª Medição (MM/AAAA) - Obra", corpo da
-família do órgão, anexos: ofício gerado, planilha e peças exigidas pelo órgão na etapa `medicao` (`orgaos.pecas`
-já distingue naturezas). Onde o boletim entra no SMO/DocuSign e não por e-mail, o passo é "registrar envio por fora".
+**E-mail:** o protocolo da nota (`protocolos`, etapa `nota`) continua como está. O e-mail novo é o da
+**planilha/carta** (tipo `planilha`): assunto no padrão de hoje ("CT-nnn-LT-aaaa - Nª Medição (MM_AAAA) - IC nnn/aaaa -
+Obra"), corpo da família do órgão, anexos: ofício assinado e zip da planilha, peças exigidas pelo órgão na etapa
+`medicao` (`orgaos.pecas` já distingue naturezas). Na MT-PAR não há esse passo: o ofício vai com a nota.
 
 **Avisos gerados** (acrescentam ao catálogo §11):
 
 | Aviso | Aparece quando | Some quando | Quem vê |
 |---|---|---|---|
-| Boletim do mês não gerado | dia 5 do mês seguinte à competência sem boletim, obra ativa não paralisada | boletim gerado | operação |
-| Boletim sem aprovação | `boletim_enviado` há mais de 15 dias sem evento de aprovação | aprovação registrada | operação |
-| Aprovado abaixo do pedido | evento de aprovação com valor menor que o pedido | reapresentação enviada ou diferença aceita com justificativa | operação, diretoria se > 10% |
-| Medição fora de ordem | boletim com período que pula ou sobrepõe o anterior | corrigido | operação |
+| Planilha do mês não enviada | dia 5 do mês seguinte à competência sem `planilha_enviada`, obra ativa não paralisada | planilha enviada | operação |
+| Pedido sem boletim | `planilha_enviada` há mais de X dias sem boletim registrado; X por órgão (§2.1.1) | boletim registrado | operação; diretoria em 2X |
+| Aprovado abaixo do pedido | evento de boletim com valor menor que o pedido, qualquer diferença (para decidir se contesta ou reapresenta) | revisão enviada ou diferença aceita com justificativa | operação; diretoria acima de 10% |
+| Medição fora de ordem | planilha com período que pula ou sobrepõe o anterior | corrigido | operação |
 
-**Tela:** aba Medições da obra ganha a linha "Boletim" antes de "Espelho" na linha do tempo de cada medição, com
-pedido, aprovado (data, meio, documento) e a diferença; o cartão "Novo boletim" substitui "Gerar espelho" como
-primeiro passo (gerar espelho passa a ser o passo 4, habilitado pela aprovação ou por "seguir sem aprovação" com
-justificativa, para as obras em que a NF vai junto). Lista de medições em andamento ganha os dois estados.
+#### 2.1.1 Prazo X por órgão (do Outlook, 06/2026 a 10/2026)
+
+| Órgão | Pedido → boletim observado | X (atenção) | 2X (diretoria) |
+|---|---|---|---|
+| SINFRA SUEF II | 3, 5 e 7 dias (14ª, 13ª, 12ª MT-388) | 15 | 30 |
+| SINFRA SAGPM/SUOESP | 5 (Estações 7ª), 7 (BRT 15ª), 8 a 9 (Leblon 29ª) | 15 | 30 |
+| SINFRA SUEF I, SUPU, SACID | 7 (Cavalaria 7ª), 13 (MT-402 28ª); SUPU sem par observado | 20 | 40 |
+| Prefeitura de Cuiabá | 10 (Região Oeste, 46ª/50ª) a 46 (Coxipó 3ª, 12ª/20ª) | 30 | 60 |
+| MT-PAR | não há passo de pedido (ofício vai com a NF); vale o aviso de pagamento | — | — |
+| SES | sem e-mail no período (pendente) | 30 | 60 |
+
+Os valores vão para `orgaos.yaml` (`prazo_boletim_dias`), não para o código.
+
+**Tela:** aba Medições da obra ganha as linhas "Planilha/carta", "Boletim" e "Assinatura" antes de "Espelho" na linha
+do tempo de cada medição, com pedido, aprovado (data, meio, documento) e a diferença; o cartão "Nova planilha/carta"
+substitui "Gerar espelho" como primeiro passo (gerar espelho passa a ser o passo 5, habilitado pelo boletim ou por
+"seguir sem boletim" com justificativa, para os órgãos em que a NF vai junto). Lista de medições em andamento ganha os
+três estados.
 
 ### 2.2 Motor de apostilamento (ciclo de reajuste por data-base e por competência)
 
@@ -216,8 +248,8 @@ faturada → recebida**, e cruza as quatro fontes (planilha do pleito, boletim d
 | Estado | Regra |
 |---|---|
 | `prevista` | existe previsão (pleito ou apostilamento) e não há medição de reajuste |
-| `pedida` | medição de reajuste em `boletim_gerado`/`boletim_enviado` |
-| `aprovada` | evento de aprovação na medição de reajuste |
+| `pedida` | medição de reajuste em `planilha_gerada`/`planilha_enviada` |
+| `aprovada` | boletim registrado na medição de reajuste |
 | `apostilada` | apostilamento com a competência (ou percentual MT-PAR com `periodo` que a cobre) |
 | `faturada` | nota emitida |
 | `recebida` | baixa no RM |
@@ -225,15 +257,15 @@ faturada → recebida**, e cruza as quatro fontes (planilha do pleito, boletim d
 Estado do ciclo (já existe: `futuro`, `pleito_pendente`, `apostilamento_pendente`, `apostilado`) ganha
 **`reemitir`**: há aditivo de prazo ou valor assinado depois do último pleito enviado e nenhum pleito posterior.
 
-**O que congela:** o valor pedido da medição de reajuste no envio do boletim (como na execução); as previsões são
+**O que congela:** o valor pedido da medição de reajuste no envio da planilha/carta (como na execução); as previsões são
 eventos (versão nova a cada reemissão); o apostilamento é instrumento (não se altera; correção é instrumento novo
 com `corrige`).
 
 **Quem clica:** operação cria o pleito (já existe) e arrasta a planilha; o sistema lê as previsões e mostra
 a tabela competência × previsto para conferência antes de montar a carta; o Leo aplica o apostilamento pelo
 cadastro quando o termo chega (como hoje, com as competências); a operação cria a medição de reajuste **junto com
-o boletim de execução** (o sistema sugere o valor: o apostilado da competência se houver, senão o previsto no
-pleito, senão vazio; a pessoa confirma ou digita o da planilha); a aprovação entra pelo mesmo passo 3 de §2.1.
+a planilha/carta de execução** (o sistema sugere o valor: o apostilado da competência se houver, senão o previsto no
+pleito, senão vazio; a pessoa confirma ou digita o da planilha); o boletim entra pelo mesmo passo 3 de §2.1.
 O sistema **não calcula índice nem valor**: só compara o que a pessoa digitou com o que está previsto e apostilado.
 
 **E-mail:** o pleito (família A), a reiteração (família B, MT-PAR e Prefeitura) e o ofício de reajuste da Nª
@@ -256,13 +288,13 @@ situação), tabela competência × previsto × pedido × aprovado × apostilado
 célula ao passar o mouse e a linha do tempo do ciclo (pleito, aditivos, reemissões, termo). Diretoria: o bloco
 "reajustes esperando apostilamento" passa a somar por competência, com o valor já medido.
 
-### 2.3 Leitor determinístico da capa do SMO (pedaço de C dentro de A+B)
+### 2.3 Leitor determinístico da capa do SMO (pedaço de C dentro de A+B; decidido em 20/10/2026)
 
-Um leitor em `app/leitura_smo.py`, no padrão de `leitura_nfse`: regex sobre o texto da 1ª e 2ª páginas do pacote
+Um leitor em `app/leitura_smo.py`, no padrão de `leitura_nfse`: regex sobre o texto da 1ª e 2ª páginas do boletim
 do SMO (capa "Nª Medição Provisória", situação "APROVADA", "Data de realização", "Valor desta medição",
 "Faturamento realizado acumulado – Preços iniciais", "Reajustamento", fins de vigência e execução, dias
 paralisados). PDF sem texto (os envelopes DocuSign do BRT Lote 1): OCR local das 2 primeiras páginas, como nas
-certidões; sem OCR, três campos digitados. Saída: proposta de evento de aprovação (valor, data, nº) e, como
+certidões; sem OCR, três campos digitados. Saída: proposta de evento de boletim recebido (valor, data, nº) e, como
 subproduto, conferência dos fins de execução e vigência contra o cadastro (aviso "capa do SMO diz 24/02/2027,
 cadastro diz 06/11/2026": é assim que o 10º apostilamento da MT-402 teria aparecido). Testes contra os textos
 reais já extraídos no vault (copiados para fixture com nomes e números trocados).
@@ -300,7 +332,7 @@ Evidência do levantamento (cruzamento de 20/10/2026; detalhe por obra na sínte
 | Falta | Evidência | O que fazer |
 |---|---|---|
 | Medições recentes | acumulado abaixo do documento em 15 obras (MT-388 faltam 11ª–13ª, R$ 8,6 mi; Leblon 26ª–28ª, R$ 15,2 mi; BRT 12ª–14ª, R$ 28,7 mi; Cultural 22ª–23ª; Maternidade 2ª–4ª; MT-402 24ª–27ª; Xtreme 13ª–14ª; Estações 5ª–6ª; Cavalaria 5ª–6ª; Terminais 1ª; Atalaia 44ª–46ª; Alta Floresta reajustes; Região Oeste reajustes; Orla 25ª e reajustes 21ª–25ª; Espaço Show 26ª) | carga (A); motor de medição evita repetir |
-| Valor aprovado | 0 eventos de atesto; "atestado pendente" marca toda medição; BRT Lote 1 pede o dobro do aprovado em toda medição e a dashboard mostra o pedido | passo "registrar aprovação" (§2.1) |
+| Valor aprovado | 0 eventos de atesto; "atestado pendente" marca toda medição; BRT Lote 1 pede o dobro do aprovado em toda medição e a dashboard mostra o pedido | passo "registrar boletim" (§2.1) |
 | Valor vigente e saldo na mesma base | Alta Floresta: o vigente R$ 186,9 mi bate com o 8º TA porque na SES o reajuste entra por termo aditivo, mas o medido é a preços iniciais (base R$ 160,8 mi), e o saldo sai R$ 26,4 mi maior do que é; Deciolândia R$ 57,4 mi × R$ 66,2 mi (carga legada de R$ 1,2 mi sem documento, 2º TA de R$ 10,0 mi não carregado); Coxipó 3ª e Granito com centavos de diferença | instrumentos de valor um a um no YAML (A); saldo calculado só a preços iniciais, com o reajuste apostilado em série própria |
 | Cota certa | Leblon 50% na dashboard × 49% no contrato (NF 50/50 com a consorciada); diretoria e QDOP saem na cota | D8 |
 | Valor sem documento | Região Oeste nº 45 e 46 duplicam a 49ª e 50ª (+R$ 466 mil) e a 51ª tem valor sem boletim; Coxipó 3ª nº 11 duplica a nº 15 (+R$ 544 mil) e a nº 12 não tem documento; Coxipó 2ª com quatro valores sem fonte (6ª, 9ª, 10ª, 11ª); reajuste da 24ª do Leblon, da 33ª/34ª do Atalaia, da 21ª do 5 Bairros e da 32ª da MT-401 com valores que nenhum documento traz; BRT 3ª com o valor do cronograma repactuado no lugar do aprovado | correção como evento novo, com a fonte; duplicata cancelada com motivo |
@@ -348,20 +380,27 @@ Evidência do levantamento (cruzamento de 20/10/2026; detalhe por obra na sínte
 6. **Conferência automática da capa do SMO** (§2.3) contra prazo e saldo: todo registro de aprovação confere fins
    de execução e vigência, valor do contrato e acumulado; divergência vira aviso "capa do SMO difere do cadastro".
 
-## 5. Decisões para o Leo
+## 5. Decisões
 
-| # | Decisão | Opções | Recomendação |
-|---|---|---|---|
-| D1 | Qual consolidação | A+B; A+C; só A | **A+B**, com A+C como plano B |
-| D2 | Alcance da carga do histórico | todo o contrato desde a 1ª medição; só 2025 em diante; só o que falta para fechar o acumulado atual | **todo o contrato** nas obras ativas (é o que dá curva S e reajuste por ciclo); nas encerradas, só fechar o acumulado |
-| D3 | Boletim por item ou só total | só total e período (v1); por item (planilha orçamentária na dashboard) | **só total na v1**; por item fica para quando a planilha editável entrar |
-| D4 | Aprovação | evento (atesto) registrado à mão com documento; evento com leitor da capa do SMO desde a v1 | **leitor desde a v1**, só SINFRA; outros órgãos à mão |
-| D5 | Onde o instrumento entra | só pelo YAML (regra de hoje); upload na dashboard que gera o YAML para o Leo aplicar | **só pelo YAML**; a dashboard só avisa "capa do SMO cita instrumento que o cadastro não tem" |
-| D6 | Numeração canônica da medição | nº da Lotufo (como hoje) com `numero_orgao` opcional; nº do órgão canônico | **nº da Lotufo** + `numero_orgao` obrigatório onde difere (Região Oeste, Coxipó 3ª, Leblon pasta 30ª) |
-| D7 | 5 Bairros, duas datas-base | reajuste por item aponta para a base (impossível sem planilha); medição de reajuste única com `aplica_a` textual e ciclo pelas duas; duas medições de reajuste por competência | **uma medição, duas bases** (o ofício é um só; o apostilamento também) |
-| D8 | Cota do Leblon | 49% (contrato); 50% (NF e FRC) | **49% no contrato, 50% na regra do espelho** (a cota é do contrato; a NF segue o acordo do consórcio) |
-| D9 | Linha de base da curva S | vigente; anterior à última repactuação; contratual original | **vigente e anterior à última repactuação**, as duas na tela |
-| D10 | Aviso de garantia | contra a vigência da apólice (hoje); contra o fim de execução vigente + folga do órgão | **contra o fim de execução + folga** |
+Decididas em 20/10/2026 (detalhe e provas em `docs/decisoes-motores-2026-10-20.md`):
+
+| # | Decisão | Decidido |
+|---|---|---|
+| D1 | Qual consolidação | **A+B** |
+| D2 | Alcance da carga do histórico | **todo o contrato nas obras ativas**; nas encerradas, só fechar o acumulado |
+| D3 | Boletim por item ou só total | **só total e período**, com a planilha anexada (a planilha é feita fora e revisada pela supervisora) |
+| D4 | Como o boletim entra | **por arrasto do PDF, com leitor da capa do SMO** (só SINFRA); sem leitura de e-mail nem do DocuSign (regra "não lê e-mail", decisão de 24/09/2026) |
+| D5 | Onde o instrumento entra | **só pelo YAML**; a dashboard só avisa "capa do SMO cita instrumento que o cadastro não tem" |
+| D6 | Numeração canônica da medição | **nº do órgão**, nº da Lotufo como apelido onde difere (só Prefeitura: Região Oeste 46ª/50ª, Coxipó 3ª 12ª/20ª) |
+| D7 | 5 Bairros, duas datas-base | **uma medição de reajuste, duas bases** (o ofício e o apostilamento são um só) |
+| D8 | Cota do Leblon | **49% no contrato, 50% na regra do espelho** |
+| D9 | Linha de base da curva S | **vigente e anterior à última repactuação**, as duas na tela |
+| D10 | Aviso de garantia | **contra o fim de execução vigente + folga do órgão** |
+| D11 | Planilha/carta na SINFRA | **obrigatória** (as sete obras SINFRA com e-mail a mostram antes do boletim) |
+| E3 | Quem envia a planilha/carta | **a dashboard**, com reenvio de revisão (Rev01, Rev02…) e "enviado por fora" com data e protocolo |
+| E4 | Aviso de pedido sem boletim | **sim**, X por órgão em `orgaos.yaml` (§2.1.1) |
+| — | Aviso "aprovado abaixo do pedido" | operação em qualquer diferença; diretoria acima de 10% |
+| — | Aviso de assinatura parada | **não existe** |
 
 ## 6. Ordem de entrega (prévia da fase 5)
 
@@ -369,6 +408,15 @@ Evidência do levantamento (cruzamento de 20/10/2026; detalhe por obra na sínte
    (sessão manual). Migração: nenhuma (040 já tem a garantia).
 2. Motor de apostilamento: migração 043, `reajuste_previsoes`, leitura da planilha do pleito, estados por
    competência, 5 avisos, aba Reajuste. Risco: dinheiro.
-3. Motor de medição: migração 042, estados `boletim_*`, `medicao_boletins`, colunas em `medicao_atestos`, e-mail
-   `boletim`, leitor da capa do SMO, 4 avisos, tela. Risco: dinheiro e envio.
+3. Motor de medição: migração 042, estados `planilha_*` e `boletim_recebido`, `medicao_planilhas`,
+   `medicao_assinaturas`, colunas em `medicao_atestos`, e-mail `planilha` com revisão e "enviado por fora", leitor da
+   capa do SMO, 4 avisos com X por órgão, tela. Risco: dinheiro e envio.
 4. Automações 3, 4 e 5 (prazos, garantia, curva S); #255 continua fora.
+
+## 7. Pendências (não confirmadas; o motor aceita "feito por fora" nesses órgãos)
+
+- **MT-PAR:** quem emite e quem assina o boletim; o Outlook só mostra o ofício CT com a NF e a resposta do protocolo.
+- **SES (Alta Floresta):** rito inteiro sem e-mail no período (última medição em 12/2025); vale o compilado do
+  SharePoint e o SIGADOC até a próxima medição mostrar o caminho.
+- **SINFRA SAGPM/SUOESP, SUEF I, SUPU e SACID:** canal do boletim (WhatsApp ou e-mail do fiscal) não confirmado; o
+  SUEF II é a única superintendência que manda o boletim por e-mail.
