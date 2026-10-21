@@ -556,3 +556,13 @@ def test_assinatura_nao_gera_nem_exige_aviso(client_admin):
     client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01"})
     assert avisos.listar(conn, publico="todos") == antes      # nem com assinatura, nem sem: nada de aviso
     assert not any("assin" in a["mensagem"].lower() for a in antes)
+
+
+def test_assinatura_identica_repetida_da_422_e_nao_duplica(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    corpo = {"data": "2026-10-01", "envelope": "Boletim 1"}
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 201
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 422
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={**corpo, "data": "2026-10-02"}).status_code == 201
+    assert len(client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]) == 2

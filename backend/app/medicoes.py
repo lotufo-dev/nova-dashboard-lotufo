@@ -201,6 +201,9 @@ def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: 
     with db.mutacao(conn):
         if conn.execute("SELECT 1 FROM medicoes WHERE id=?", (medicao_id,)).fetchone() is None:
             raise ValueError("Medição não encontrada")
+        if conn.execute("SELECT 1 FROM medicao_assinaturas WHERE medicao_id=? AND assinado_em=? AND envelope IS ?",
+                        (medicao_id, data.isoformat(), envelope)).fetchone():
+            raise ValueError("Esta assinatura já está registrada")     # duplo clique: o registro não se apaga depois
         cur = conn.execute(
             "INSERT INTO medicao_assinaturas (medicao_id, envelope, assinado_em, origem, usuario_id) "
             "VALUES (?,?,?,'manual',?)", (medicao_id, envelope, data.isoformat(), usuario_id))
