@@ -1,7 +1,6 @@
 """Tela da diretoria (spec 2026-09-21 §10.5), bloco 8. Tudo na COTA da Lotufo; vocabulario fixo: medido,
-faturado (nota emitida), protocolado, recebido. O total a receber (valor do protocolado e o recebimento
-previsto) so' aparece com o cadastro liberando (`geral.yaml: diretoria.total_a_receber_liberado`), depois da
-conciliacao com a controladoria.
+faturado (nota emitida), protocolado, recebido. O total a receber (valor do protocolado) so' aparece com o cadastro
+liberando (`geral.yaml: diretoria.total_a_receber_liberado`), depois da conciliacao com a controladoria.
 
 Corte de 2026-09-25 (decisao do Leonardo): o faturado ate o QDOP de 22/09/2026 conta como pago, menos o que o RM
 mostra em aberto. O "a receber" soma as medicoes protocoladas e as cobrancas do RM ainda nao pagas que nenhuma
@@ -17,14 +16,13 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from app import avisos as _av, conciliacao, contratos, cronograma, qdop, reajuste, sincronizacao_rm, tempo
 
-QUARTIL, MEDIANA, MINIMO, PADRAO_DIAS = 0.75, 0.5, 10, 30
+QUARTIL, MINIMO, PADRAO_DIAS = 0.75, 10, 30   # prazo do orgao: so' o "previsto" da tela A receber usa
 ESPERANDO_NOTA = ("espelho_gerado", "espelho_enviado")
 ESPERANDO_PROTOCOLO = ("nota_emitida",)
 PROTOCOLADAS = ("protocolada", "nf_emitida")
 FORA = ("cancelada", "desistida", "prevista")
 FAIXAS = (("ate_30", 0, 30), ("de_31_a_60", 31, 60), ("mais_60", 61, None))
 TOLERANCIA_CENTAVOS = 100      # titulo pago com ate R$ 1,00 de diferenca nao e' divida (arredondamento do RM)
-AVISO_NOTA_MINIMO = 1_000_000  # nota em aberto so' vira aviso a partir de R$ 10 mil na cota; o resto so' soma
 
 
 def _quantil(valores: list[int], q: float) -> int:
@@ -60,12 +58,6 @@ def _prazo(ms: list[dict], orgao_id, hoje: datetime.date, quantil: float) -> int
             and m["recebida_em"][:10] >= desde]
     dias = [d for d in dias if d >= 0]
     return _quantil(dias, quantil) if len(dias) >= MINIMO else PADRAO_DIAS
-
-
-def prazo_orgao(conn, orgao_id: int, hoje: datetime.date, quantil: float = QUARTIL) -> int:
-    """Prazo normal do orgao: 3o quartil dos dias entre o primeiro protocolo e o recebimento das medicoes
-    recebidas nos ultimos 12 meses; com menos de 10 amostras, 30 dias."""
-    return _prazo(_medicoes(conn), orgao_id, hoje, quantil)
 
 
 def _mapa_contratos(conn) -> tuple[dict, dict, dict]:
@@ -179,7 +171,7 @@ def _dinheiro(conn, ms: list[dict], hoje: datetime.date, liberado: bool, notas: 
         o["ms"].append(m)
     orgaos = []
     for orgao_id, o in por_orgao.items():
-        # A4 (mapa de 2026-09-28): as faixas de cada orgao, o prazo normal dele e as obras que ele deve.
+        # A4 (mapa de 2026-09-28): as faixas de cada orgao e as obras que ele deve (o prazo normal saiu na #255).
         por_obra: dict = {}
         for m in o["ms"]:
             por_obra.setdefault(m["contrato_id"], {"obra": m["obra"], "ms": []})["ms"].append(m)
@@ -187,7 +179,6 @@ def _dinheiro(conn, ms: list[dict], hoje: datetime.date, liberado: bool, notas: 
                  for cid, x in por_obra.items()]
         orgaos.append({"orgao_id": orgao_id, "orgao": o["orgao"], **_grupo_rec(o["ms"], liberado),
                        "maior_dias": _maior_dias(o["ms"], hoje), "faixas": _faixas(o["ms"], hoje, liberado),
-                       "prazo_normal_dias": _prazo(ms, orgao_id, hoje, QUARTIL) if orgao_id else None,
                        "obras": sorted(obras, key=lambda x: -(x["maior_dias"] or 0))})
     pendentes = [(c, k) for c in _ativos(conn) for k in reajuste.ciclos(conn, c["id"], hoje)
                  if k["situacao"] == "apostilamento_pendente"]
@@ -245,21 +236,11 @@ def _mes_ano(conn, ms: list[dict], hoje: datetime.date, cache: dict) -> dict:
                        "previsto_centavos": _previsto(conn, _mes(hoje, k), cache)} for k in range(-11, 1)]}
 
 
-def _proximos(conn, ms: list[dict], hoje: datetime.date, liberado: bool, cache: dict,
-              notas: list[dict] = ()) -> list[dict]:
-    meses = [_mes(hoje, k) for k in range(6)]
-    receber = dict.fromkeys(meses, 0)
-    medianas: dict = {}
-    for m in [*ms, *notas]:
-        if m["estado"] not in PROTOCOLADAS or not _d(m["protocolo_em"]):
-            continue
-        if m["orgao_id"] not in medianas:
-            medianas[m["orgao_id"]] = _prazo(ms, m["orgao_id"], hoje, MEDIANA)
-        quando = max(_d(m["protocolo_em"]) + datetime.timedelta(days=medianas[m["orgao_id"]]), hoje)
-        if _mes(quando) in receber:
-            receber[_mes(quando)] += _cota(m)
-    return [{"competencia": x, "faturamento_previsto_centavos": _previsto(conn, x, cache),
-             "recebimento_previsto_centavos": receber[x] if liberado else None} for x in meses]
+def _proximos(conn, hoje: datetime.date, cache: dict) -> list[dict]:
+    """Faturamento previsto (cronograma) dos proximos seis meses. O recebimento previsto, pela mediana do prazo
+    do orgao, saiu com o motor de atraso de pagamento (issue #255, decisao de 19/10/2026)."""
+    return [{"competencia": x, "faturamento_previsto_centavos": _previsto(conn, x, cache)}
+            for x in (_mes(hoje, k) for k in range(6))]
 
 
 def _carteira(conn, ms: list[dict], hoje: datetime.date) -> dict:
@@ -356,7 +337,7 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     avisos = _av.listar(conn, hoje, publico="diretoria")
     return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
             "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas), "mes_ano": _mes_ano(conn, ms, hoje, cache),
-            "proximos": _proximos(conn, ms, hoje, liberado, cache, notas), "carteira": _carteira(conn, ms, hoje),
+            "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje),
             "obras": _obras(conn, hoje, avisos), "obras_base": _obras_base(conn), "avisos": avisos}
 
 
@@ -413,38 +394,3 @@ def a_receber(conn, hoje: datetime.date | None = None) -> dict:
     return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
             "total": {"quantidade": len(abertas), "obras": len(obras), "valor_centavos": valor(abertas)},
             "mes": next(x for x in meses if x["atual"]), "meses": meses, "por_obra": obras, "itens": itens}
-
-
-def avisos_pagamento(conn, hoje: datetime.date | None = None) -> list[dict]:
-    """Medicao protocolada ha mais dias que o prazo normal do orgao (so' para a diretoria).
-
-    So' com o total a receber liberado: antes da conciliacao com a controladoria o historico carregado tem
-    ~420 medicoes "protocoladas" que nunca foram marcadas como recebidas (sem nota ligada), e o aviso
-    acusaria atraso em pagamento que ja' entrou."""
-    hoje = hoje or tempo.hoje_local()
-    liberado = _liberado(conn)
-    if not liberado:
-        return []
-    ms = _medicoes(conn)
-    prazos_q3: dict = {}
-    out = []
-    notas = [n for n in _notas_em_aberto(conn) if _cota(n) >= AVISO_NOTA_MINIMO]
-    for m in [*ms, *notas]:
-        if m["estado"] not in PROTOCOLADAS or m["contrato_estado"] == "encerrado" or not _d(m["protocolo_em"]):
-            continue
-        if m["orgao_id"] not in prazos_q3:
-            prazos_q3[m["orgao_id"]] = _prazo(ms, m["orgao_id"], hoje, QUARTIL)
-        dias, prazo = (hoje - _d(m["protocolo_em"])).days, prazos_q3[m["orgao_id"]]
-        if dias > prazo:
-            if m["tipo"] == "nota":
-                texto = f"NF {m['nf']} emitida há {dias} dias sem pagamento no RM"
-            else:
-                titulo = f"Reajuste da {m['numero']}ª Medição" if m["tipo"] == "reajuste" else f"{m['numero']}ª Medição"
-                texto = f"{titulo} protocolada há {dias} dias"
-            # A12 (2026-09-28): a medicao, para o aviso levar ao recebimento dela; a nota do RM nao tem medicao
-            out.append({**_av.aviso("pagamento_atrasado", "acao",
-                                    f"{texto}; o prazo normal do órgão é {prazo} dias",
-                                    m["contrato_id"], m["obra"], dias=dias, valor_centavos=_cota(m) if liberado else None,
-                                    publico=("diretoria",), data=_d(m["protocolo_em"]).isoformat(), sentido="desde"),
-                        "medicao_id": None if m["tipo"] == "nota" else m["id"]})
-    return out

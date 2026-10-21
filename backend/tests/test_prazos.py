@@ -147,3 +147,43 @@ def test_historico_texto_ordinal_por_forma(cenario):
     assert ("O 1º termo aditivo n.º 001/2025 foi assinado em 10/03/2025, com término da execução em 20/10/2025 "
             "e da vigência em 18/01/2026.") in texto
     assert "O 1º termo de apostilamento n.º 002/2025 foi assinado em 01/09/2025" in texto
+
+
+def test_ordinal_do_historico_pelo_numero_pelo_campo_e_pela_contagem(cenario):
+    """Issue #261: o ordinal sai do numero do termo (sufixo /14), depois do campo `ordinal` do cadastro e so' na
+    falta dos dois da contagem dos instrumentos carregados."""
+    c, ids = cenario
+    ids["aditivo"]("2025-01-10", "2025-12-31", None, numero="099/2020/01/14", chave="ta-14")
+    ids["aditivo"]("2025-03-10", "2026-03-31", None, numero="088/2023/02/10-SINFRA", forma="apostilamento",
+                   chave="ap-10")
+    ids["aditivo"]("2025-06-10", "2026-06-30", None, numero="099/2020/01/15", chave="ta-15")
+    ids["aditivo"]("2025-07-10", "2026-07-31", None, numero="TA s/n", chave="ta-y")
+    c.execute("UPDATE aditivos SET ordinal=99 WHERE chave_cadastro='ta-15'")    # o numero vem antes do campo
+    c.execute("UPDATE aditivos SET ordinal=16 WHERE chave_cadastro='ta-y'")     # sem sufixo, vale o campo
+    ids["aditivo"]("2025-09-10", "2026-09-30", None, numero="001/2026", chave="ta-x")    # sem sufixo nem campo
+    t = prazos.historico_texto(c, ids["contrato"])
+    assert "O 14º termo aditivo n.º 099/2020/01/14" in t
+    assert "O 10º termo de apostilamento n.º 088/2023/02/10-SINFRA" in t
+    assert "O 15º termo aditivo n.º 099/2020/01/15" in t
+    assert "O 16º termo aditivo n.º TA s/n" in t
+    assert "O 4º termo aditivo n.º 001/2026" in t        # contagem: quarto termo aditivo carregado
+
+
+def test_numero_sem_termo_no_fim_cai_na_contagem(cenario):
+    """O sufixo so' vale no formato contrato/ano/tipo/termo; termo 00 (o proprio contrato) nao e' ordinal."""
+    c, ids = cenario
+    ids["aditivo"]("2025-01-10", "2025-12-31", None, numero="099/2020/00/00", chave="ta-a")
+    ids["aditivo"]("2025-02-10", "2026-01-31", None, numero="IC 041/2025", chave="ta-b")
+    t = prazos.historico_texto(c, ids["contrato"])
+    assert "O 1º termo aditivo n.º 099/2020/00/00" in t and "O 2º termo aditivo n.º IC 041/2025" in t
+
+
+def test_numero_com_resto_nao_reconhecido_nao_vale_e_o_ordinal_vence(cenario):
+    """Gate Sol da PR #304: depois do termo so' o sufixo institucional; outro resto deixa o `ordinal` valer."""
+    c, ids = cenario
+    ids["aditivo"]("2025-01-10", "2025-12-31", None, numero="099/2020/01/14/02", chave="ta-a")
+    ids["aditivo"]("2025-02-10", "2026-01-31", None, numero="099/2020/01/14-retificado/15", chave="ta-b")
+    c.execute("UPDATE aditivos SET ordinal=15 WHERE chave_cadastro='ta-b'"); c.commit()
+    t = prazos.historico_texto(c, ids["contrato"])
+    assert "O 1º termo aditivo n.º 099/2020/01/14/02" in t          # sem ordinal: contagem
+    assert "O 15º termo aditivo n.º 099/2020/01/14-retificado/15" in t

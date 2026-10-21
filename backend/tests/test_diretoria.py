@@ -74,13 +74,6 @@ def cenario(tmp_path, monkeypatch):
     c.close()
 
 
-def test_prazo_do_orgao_quartil_e_minimo(cenario):
-    c, ids = cenario                  # 12 medicoes recebidas da SINFRA com 5,5,5,6,6,7,8,9,10,12,20,40 dias
-    assert diretoria.prazo_orgao(c, ids["sinfra"], HOJE) == 10          # posicao ceil(0,75*12)=9 -> 10
-    assert diretoria.prazo_orgao(c, ids["sinfra"], HOJE, quantil=0.5) == 7
-    assert diretoria.prazo_orgao(c, ids["mtpar"], HOJE) == 30            # menos de 10 amostras
-
-
 def test_dinheiro_na_cota_e_por_faixa(cenario):
     c, ids = cenario
     d = diretoria.painel(c, HOJE)["dinheiro"]
@@ -88,11 +81,12 @@ def test_dinheiro_na_cota_e_por_faixa(cenario):
     assert d["protocolado"]["faixas"]["mais_60"]["quantidade"] == 1
 
 
-def test_a_receber_por_orgao_com_faixas_prazo_normal_e_obras(cenario):
+def test_a_receber_por_orgao_com_faixas_e_obras_sem_prazo_normal(cenario):
     c, ids = cenario                   # A4: protocoladas da SINFRA em 10/09 (14 dias) e 01/07 (85 dias)
     ids["liberar"]()
     o = diretoria.painel(c, HOJE)["dinheiro"]["protocolado"]["por_orgao"][0]
-    assert (o["orgao_id"], o["prazo_normal_dias"], o["maior_dias"]) == (ids["sinfra"], 10, 85)
+    assert (o["orgao_id"], o["maior_dias"]) == (ids["sinfra"], 85)
+    assert "prazo_normal_dias" not in o          # issue #255: o prazo normal do orgao saiu
     assert (o["faixas"]["ate_30"]["valor_centavos"], o["faixas"]["mais_60"]["valor_centavos"]) == (700_000, 300_000)
     assert o["obras"] == [{"contrato_id": ids["propria"], "obra": "Própria", "quantidade": 2, "notas_rm": 0,
                            "valor_centavos": 1_000_000, "maior_dias": 85}]
@@ -102,7 +96,7 @@ def test_motivos_da_obra_um_a_um_sem_o_nome_da_obra(cenario, monkeypatch):
     c, ids = cenario                   # A5: motivos[] estruturado, na ordem dos avisos
     monkeypatch.setattr(diretoria._av, "listar", lambda conn, hoje, publico: [
         avisos.aviso("execucao_vencendo", "critico", "Própria: execução termina em 10 dias", ids["propria"], "Própria", dias=10),
-        avisos.aviso("pagamento_atrasado", "acao", "Própria: 15ª Medição protocolada há 85 dias", ids["propria"], "Própria",
+        avisos.aviso("folga_quebrada", "acao", "Própria: 15ª Medição protocolada há 85 dias", ids["propria"], "Própria",
                      dias=85, valor_centavos=300_000)])
     obra = [o for o in diretoria.painel(c, HOJE)["obras"] if o["contrato_id"] == ids["propria"]][0]
     assert [(m["nivel"], m["texto"], m["dias"]) for m in obra["motivos"]] == [
@@ -115,7 +109,7 @@ def test_farol_separa_acao_de_atencao(cenario, monkeypatch):
     def com(*avisos_):
         monkeypatch.setattr(diretoria._av, "listar", lambda conn, hoje, publico: list(avisos_))
         return [o for o in diretoria.painel(c, HOJE)["obras"] if o["contrato_id"] == ids["propria"]][0]["farol"]
-    a = lambda nivel: avisos.aviso("pagamento_atrasado", nivel, "Própria: aviso", ids["propria"], "Própria", dias=5)
+    a = lambda nivel: avisos.aviso("folga_quebrada", nivel, "Própria: aviso", ids["propria"], "Própria", dias=5)
     assert com(a("atencao")) == "atencao"
     assert com(a("atencao"), a("acao")) == "acao"
     assert com(a("acao"), a("critico")) == "vermelho"
@@ -135,7 +129,6 @@ def test_total_a_receber_escondido_ate_liberar(cenario):
     p = diretoria.painel(c, HOJE)
     assert p["total_a_receber_liberado"] is False
     assert p["dinheiro"]["protocolado"]["faixas"]["ate_30"]["valor_centavos"] is None
-    assert p["proximos"][0]["recebimento_previsto_centavos"] is None
     ids["liberar"]()
     p = diretoria.painel(c, HOJE)
     assert p["dinheiro"]["protocolado"]["faixas"]["ate_30"]["valor_centavos"] == 700_000
@@ -149,13 +142,13 @@ def test_mes_e_ano_contra_previsto_e_ano_anterior(cenario):
     assert len(m["serie"]) == 12 and m["serie"][-1]["competencia"] == "2026-09"
 
 
-def test_recebimento_previsto_pela_mediana_do_orgao(cenario):
-    c, ids = cenario                   # protocoladas em 01/07 e 10/09 na SINFRA (mediana 7): as duas ja' passaram
+def test_proximos_meses_so_com_o_faturamento_previsto(cenario):
+    c, ids = cenario                   # issue #255: o recebimento previsto (mediana do orgao) saiu
     ids["liberar"]()
     proximos = diretoria.painel(c, HOJE)["proximos"]
     assert [x["competencia"] for x in proximos] == ["2026-09", "2026-10", "2026-11", "2026-12", "2027-01", "2027-02"]
-    assert proximos[0]["recebimento_previsto_centavos"] == 1_000_000 and proximos[1]["recebimento_previsto_centavos"] == 0
-    assert proximos[0]["faturamento_previsto_centavos"] == 2_000_000
+    assert proximos[0] == {"competencia": "2026-09", "faturamento_previsto_centavos": 2_000_000}
+    assert all(set(x) == {"competencia", "faturamento_previsto_centavos"} for x in proximos)
 
 
 def test_carteira_saldo_ritmo_e_termino(cenario):
@@ -218,16 +211,19 @@ def test_carteira_por_orgao_traz_vigente_medido_e_obras_para_o_cartao(cenario):
     assert (por["MTPAR"]["vigente_centavos"], por["MTPAR"]["medido_centavos"]) == (600_000_000, 200_500_000)
 
 
-def test_pagamento_atrasado_so_para_a_diretoria_e_so_liberado(cenario):
-    c, ids = cenario
-    assert diretoria.avisos_pagamento(c, HOJE) == []           # antes da conciliacao, nada
+def test_protocolada_ha_200_dias_nao_gera_aviso_e_fica_em_mais_de_60(cenario):
+    c, ids = cenario                   # issue #255: o motor de atraso de pagamento por orgao saiu
+    c.execute("UPDATE medicao_protocolos SET data='2026-03-08' WHERE medicao_id=(SELECT id FROM medicoes "
+              "WHERE contrato_id=? AND numero=15)", (ids["propria"],))          # 200 dias antes de 24/09
+    c.commit()
     ids["liberar"]()
-    a = [x for x in diretoria.avisos_pagamento(c, HOJE) if x["dias"] == 85][0]
-    assert a["publico"] == ["diretoria"] and "protocolada há 85 dias; o prazo normal do órgão é 10 dias" in a["mensagem"]
-    # A12: a medicao do aviso (a 15ª, protocolada em 01/07), para levar ao recebimento dela
-    assert a["medicao_id"] == c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=15",
-                                        (ids["propria"],)).fetchone()[0]
-    assert "pagamento_atrasado" in {x["tipo"] for x in avisos.listar(c, HOJE, publico="diretoria")}
+    p = diretoria.painel(c, HOJE)
+    assert not [a for a in p["avisos"] if a["tipo"] == "pagamento_atrasado"]
+    assert not [a for a in avisos.listar(c, HOJE, publico="todos") if a["tipo"] == "pagamento_atrasado"]
+    assert not [m for o in p["obras"] for m in o["motivos"] if m["tipo"] == "pagamento_atrasado"]
+    d = p["dinheiro"]["protocolado"]
+    assert (d["faixas"]["mais_60"]["quantidade"], d["faixas"]["mais_60"]["valor_centavos"]) == (1, 300_000)
+    assert d["valor_centavos"] == 1_000_000 and d["por_orgao"][0]["maior_dias"] == 200
 
 
 def test_nota_em_aberto_no_rm_entra_no_a_receber_sem_contar_duas_vezes(cenario):
@@ -247,8 +243,6 @@ def test_nota_em_aberto_no_rm_entra_no_a_receber_sem_contar_duas_vezes(cenario):
     d = diretoria.painel(c, HOJE)["dinheiro"]["protocolado"]
     assert d["valor_centavos"] == 700_000 + 300_000 + 2_500_000
     assert d["faixas"]["mais_60"]["valor_centavos"] == 300_000 + 2_500_000
-    a = [x for x in diretoria.avisos_pagamento(c, HOJE) if "NF 900" in x["mensagem"]]
-    assert a and "emitida há 115 dias sem pagamento no RM" in a[0]["mensagem"] and a[0]["medicao_id"] is None
     # A14: das 3 cobrancas da SINFRA, 1 e' nota em aberto no RM
     o = d["por_orgao"][0]
     assert (d["notas_rm"], o["quantidade"], o["notas_rm"], o["obras"][0]["notas_rm"]) == (1, 3, 1, 1)
@@ -256,7 +250,7 @@ def test_nota_em_aberto_no_rm_entra_no_a_receber_sem_contar_duas_vezes(cenario):
 
 def test_recebimento_manual_tira_a_nota_do_a_receber_e_o_corte_nao(cenario):
     """Issue #203 (decisao A): medicao recebida a mao pelo admin com NF ligada e titulo aberto no RM nao soma de
-    novo a nota em "a receber" (nem gera aviso de nota atrasada). A medicao fechada pelo corte continua com a
+    novo a nota em "a receber". A medicao fechada pelo corte continua com a
     nota em aberto no a receber, como antes."""
     c, ids = cenario
     uid = c.execute("SELECT id FROM usuarios").fetchone()[0]
@@ -281,7 +275,6 @@ def test_recebimento_manual_tira_a_nota_do_a_receber_e_o_corte_nao(cenario):
     assert d["valor_centavos"] == 300_001                  # so' a nota da medicao fechada pelo corte
     assert d["notas_rm"] == 1
     assert d["faixas"]["mais_60"]["valor_centavos"] == 300_001
-    assert not [x for x in diretoria.avisos_pagamento(c, HOJE) if "NF 910" in x["mensagem"]]
     assert diretoria.da_obra(c, ids["propria"])["a_receber_centavos"] == 300_001
 
 
