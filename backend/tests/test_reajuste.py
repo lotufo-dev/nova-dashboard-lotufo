@@ -135,6 +135,40 @@ def test_previsao_vigente_separa_as_datas_base_e_o_contrato(cenario):
     assert reajuste.previsoes_vigentes(c, cid, data_base_mes="") == []
 
 
+def test_previsao_de_pleito_descartado_nao_vale_e_o_manual_vence(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    pid = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _previsao(c, cid, "2026-07", 100_01, "pleito", pleito_id=pid, criado_em="2026-06-10 09:00:00")
+    _previsao(c, cid, "2026-07", 99_99, "manual", criado_em="2026-07-01 09:00:00")
+    assert [p["valor_previsto_centavos"] for p in reajuste.previsoes_vigentes(c, cid)] == [100_01]
+    c.execute("UPDATE pleitos SET situacao='descartado' WHERE id=?", (pid,)); c.commit()
+    assert [(p["valor_previsto_centavos"], p["origem"]) for p in reajuste.previsoes_vigentes(c, cid)] == [
+        (99_99, "manual")]
+
+
+def test_reemissao_enviada_substitui_o_cronograma_do_pleito_anterior(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    antigo = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _previsao(c, cid, "2026-07", 100_01, "pleito", pleito_id=antigo)
+    _previsao(c, cid, "2026-08", 200_03, "pleito", pleito_id=antigo)    # a reemissao nao traz 2026-08
+    _previsao(c, cid, "2026-08", 150_05, "manual")
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo, situacao, reemite_pleito_id) "
+              "VALUES (?, 'reajuste', '2024-06', 2026, 'rascunho', ?)", (cid, antigo))
+    novo = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _previsao(c, cid, "2026-07", 110_07, "pleito", pleito_id=novo, criado_em="2026-10-01 09:00:00")
+    c.commit()
+    vig = lambda: {p["competencia"]: (p["valor_previsto_centavos"], p["origem"])  # noqa: E731
+                   for p in reajuste.previsoes_vigentes(c, cid)}
+    # reemissao em rascunho: o anterior segue valendo onde a nova nao diz nada
+    assert vig() == {"2026-07": (110_07, "pleito"), "2026-08": (200_03, "pleito")}
+    c.execute("UPDATE pleitos SET situacao='enviado', enviado_em='2026-10-02' WHERE id=?", (novo,)); c.commit()
+    assert vig() == {"2026-07": (110_07, "pleito"), "2026-08": (150_05, "manual")}
+
+
 def test_previsao_vigente_compara_a_hora_e_nao_o_texto(cenario):
     """Carga com data ISO ('T') ou so' o dia nao pode passar na frente de um registro mais novo."""
     c, ids = cenario

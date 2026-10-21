@@ -94,10 +94,26 @@ def test_043_fonte_tem_que_ser_do_mesmo_contrato(conn):
     conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) "
                  "VALUES (2, 'ap-1', 'apostilamento_reajuste', '2026-09-15', '{}')")
     conn.commit()
-    with pytest.raises(sqlite3.IntegrityError, match="outro contrato"):
+    with pytest.raises(sqlite3.IntegrityError, match="não é o reajuste deste contrato"):
         _previsao(conn, origem="pleito", pleito_id=1)
-    with pytest.raises(sqlite3.IntegrityError, match="outro contrato"):
+    with pytest.raises(sqlite3.IntegrityError, match="não é o reajuste deste contrato"):
         _previsao(conn, origem="apostilamento", instrumento_id=1)
     conn.rollback()
     assert _previsao(conn, origem="pleito", contrato_id=2, pleito_id=1)
     assert _previsao(conn, origem="apostilamento", contrato_id=2, instrumento_id=1)
+
+
+def test_043_fonte_do_mesmo_contrato_mas_de_tipo_data_base_ou_ciclo_errado(conn):
+    for tipo, base, ciclo in (("prazo", None, None), ("reajuste", "2024-03", 2026), ("reajuste", "2024-06", 2025)):
+        conn.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo) VALUES (1, ?, ?, ?)",
+                     (tipo, base, ciclo))
+    conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) "
+                 "VALUES (1, 'par-1', 'paralisacao', '2026-09-15', '{}')")
+    conn.commit()
+    for pid in (1, 2, 3):              # prazo; outra data-base; outro ciclo (a previsao e' 2024-06, ciclo 2026)
+        with pytest.raises(sqlite3.IntegrityError, match="não é o reajuste deste contrato"):
+            _previsao(conn, origem="pleito", pleito_id=pid)
+    with pytest.raises(sqlite3.IntegrityError, match="não é o reajuste deste contrato"):
+        _previsao(conn, origem="apostilamento", instrumento_id=1)
+    conn.rollback()
+    assert conn.execute("SELECT COUNT(*) FROM reajuste_previsoes").fetchone()[0] == 0

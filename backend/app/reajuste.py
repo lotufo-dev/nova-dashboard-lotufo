@@ -53,13 +53,21 @@ ORDEM_ORIGEM = ("apostilamento", "pleito", "manual")
 
 def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None) -> list[dict]:
     """Previsao vigente de cada competencia (por data-base e ciclo): a mais recente da origem mais forte.
-    As previsoes sao eventos (migracao 043): nada se sobrescreve, a leitura escolhe."""
+    As previsoes sao eventos (migracao 043): nada se sobrescreve, a leitura escolhe.
+
+    Previsao de pleito so' vale enquanto o pleito vale: pleito descartado, ou reemitido por outro pleito ja'
+    enviado, sai da conta inteiro (a reemissao traz o cronograma todo; competencia que ela nao traz deixa de ter
+    previsao de pleito e cai para o manual, se houver). Reemissao ainda em rascunho nao derruba o anterior."""
     ordem = " ".join(f"WHEN '{o}' THEN {i}" for i, o in enumerate(ORDEM_ORIGEM))
-    filtro, args = ("AND data_base_mes=?", (contrato_id, data_base_mes)) if data_base_mes is not None else ("", (contrato_id,))
+    filtro, args = ("AND p.data_base_mes=?", (contrato_id, data_base_mes)) if data_base_mes is not None \
+        else ("", (contrato_id,))
     rows = conn.execute(
-        f"SELECT * FROM (SELECT p.*, ROW_NUMBER() OVER (PARTITION BY data_base_mes, ciclo, competencia "
-        f"ORDER BY CASE origem {ordem} END, datetime(criado_em) DESC, id DESC) AS _ordem "
-        f"FROM reajuste_previsoes p WHERE contrato_id=? {filtro}) WHERE _ordem=1 "
+        f"SELECT * FROM (SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.data_base_mes, p.ciclo, p.competencia "
+        f"ORDER BY CASE p.origem {ordem} END, datetime(p.criado_em) DESC, p.id DESC) AS _ordem "
+        f"FROM reajuste_previsoes p WHERE p.contrato_id=? {filtro} "
+        f"AND (p.origem <> 'pleito' OR (NOT EXISTS (SELECT 1 FROM pleitos pl WHERE pl.id = p.pleito_id "
+        f"AND pl.situacao = 'descartado') AND NOT EXISTS (SELECT 1 FROM pleitos r "
+        f"WHERE r.reemite_pleito_id = p.pleito_id AND r.situacao = 'enviado')))) WHERE _ordem=1 "
         f"ORDER BY data_base_mes, ciclo, competencia", args)
     return [{k: r[k] for k in r.keys() if k != "_ordem"} for r in rows]
 

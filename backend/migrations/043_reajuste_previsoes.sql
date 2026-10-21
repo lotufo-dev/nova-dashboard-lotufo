@@ -24,14 +24,17 @@ CREATE TABLE IF NOT EXISTS reajuste_previsoes (
 CREATE INDEX IF NOT EXISTS ix_reajuste_previsoes_competencia
     ON reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, id);
 
--- a fonte apontada e' do mesmo contrato (a linha nao se apaga depois, entao a guarda e' na entrada)
+-- a fonte apontada e' a certa (a linha nao se apaga depois, entao a guarda e' na entrada): pleito de reajuste do
+-- mesmo contrato, data-base e ciclo; instrumento de apostilamento de reajuste do mesmo contrato
 CREATE TRIGGER IF NOT EXISTS reajuste_previsoes_fonte_do_contrato BEFORE INSERT ON reajuste_previsoes
 WHEN (NEW.pleito_id IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM pleitos WHERE id = NEW.pleito_id AND contrato_id = NEW.contrato_id))
+      AND NOT EXISTS (SELECT 1 FROM pleitos WHERE id = NEW.pleito_id AND contrato_id = NEW.contrato_id
+                      AND tipo = 'reajuste' AND data_base_mes = NEW.data_base_mes AND ciclo = NEW.ciclo))
   OR (NEW.instrumento_id IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM instrumentos WHERE id = NEW.instrumento_id AND contrato_id = NEW.contrato_id))
+      AND NOT EXISTS (SELECT 1 FROM instrumentos WHERE id = NEW.instrumento_id AND contrato_id = NEW.contrato_id
+                      AND tipo = 'apostilamento_reajuste'))
 BEGIN
-    SELECT RAISE(ABORT, 'Previsão de reajuste aponta pleito ou instrumento de outro contrato');
+    SELECT RAISE(ABORT, 'Previsão de reajuste aponta pleito ou instrumento que não é o reajuste deste contrato, data-base e ciclo');
 END;
 
 CREATE TRIGGER IF NOT EXISTS reajuste_previsoes_sem_update BEFORE UPDATE ON reajuste_previsoes
