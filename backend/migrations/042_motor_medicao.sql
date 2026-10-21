@@ -98,8 +98,11 @@ CREATE TABLE IF NOT EXISTS medicao_planilhas (
     versao INTEGER NOT NULL CHECK (versao >= 1),
     periodo_inicio TEXT,
     periodo_fim TEXT,
-    valor_pedido_centavos INTEGER NOT NULL CHECK (valor_pedido_centavos >= 0),
-    acumulado_anterior_centavos INTEGER NOT NULL CHECK (acumulado_anterior_centavos >= 0),
+    -- centavos inteiros: INTEGER no SQLite e' so' afinidade (100.5 ficaria REAL), por isso o typeof
+    valor_pedido_centavos INTEGER NOT NULL
+        CHECK (typeof(valor_pedido_centavos) = 'integer' AND valor_pedido_centavos >= 0),
+    acumulado_anterior_centavos INTEGER NOT NULL
+        CHECK (typeof(acumulado_anterior_centavos) = 'integer' AND acumulado_anterior_centavos >= 0),
     arquivo TEXT,
     sha256 TEXT,
     arquivo_planilha TEXT,

@@ -154,7 +154,9 @@ def test_042_falha_no_meio_nao_perde_medicoes(antes_da_042):
     c.execute("CREATE VIEW v_medicoes AS SELECT id FROM medicoes"); c.commit()
     with pytest.raises(sqlite3.Error):
         db.migrate(c)
-    c.rollback()
+    # gate Sol: o runner desfaz a transacao aberta pela 042 e as FK voltam a valer na mesma conexao
+    assert not c.in_transaction
+    assert c.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert _foto(c, de_hoje) == antes
     assert c.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='medicoes_nova'").fetchone()[0] == 0
     assert "periodo_inicio" not in _colunas(c, "medicoes")
@@ -212,6 +214,16 @@ def test_planilha_versao_unica_e_revisao_exige_motivo(conn):
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, "
                      "acumulado_anterior_centavos, origem, motivo) VALUES (1,3,1,0,'inventado','m')")
+
+
+def test_planilha_recusa_centavo_fracionario(conn):
+    """Gate Sol: INTEGER no SQLite e' afinidade; 100.5 ficaria REAL e o evento congelaria meio centavo."""
+    for pedido, acumulado in ((100.5, 0), (100, 0.5), ("100,5", 0)):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, "
+                         "acumulado_anterior_centavos, origem) VALUES (1,1,?,?,'manual')", (pedido, acumulado))
+    conn.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, "
+                 "acumulado_anterior_centavos, origem) VALUES (1,1,1_000_01,0,'manual')")
 
 
 def test_colunas_novas_recusam_valor_fora_da_lista(conn):
