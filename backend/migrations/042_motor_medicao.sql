@@ -11,7 +11,17 @@
 -- Reexecutavel (licao da 020): as colunas novas entram ANTES da copia, por ALTER (que o runner pula quando ja'
 -- existem), para a copia listar as mesmas colunas na 1a e na 2a vez; a `_nova` e' apagada antes de recriar
 -- (residuo de execucao interrompida nao impede a proxima).
+--
+-- Atomica: tudo depois do PRAGMA roda numa transacao so' (o PRAGMA foreign_keys nao muda dentro de transacao, por
+-- isso fica fora). Se o processo cair ou um comando falhar entre o DROP de `medicoes` e o RENAME, nada fica
+-- gravado e `medicoes` continua inteira, sem depender da `_nova`.
+--
+-- A 043 (motor de apostilamento, issue #270) acrescenta `data_base_mes` e `ciclo` em `medicoes` e pode rodar ANTES
+-- desta num banco que a recebeu primeiro. Por isso as duas colunas tambem entram aqui por ALTER (pulado quando a
+-- 043 ja' as criou; e a 043 pula o dela quando esta veio antes), com a mesma definicao, e vao na copia: em
+-- qualquer ordem, nada se perde.
 PRAGMA foreign_keys=OFF;
+BEGIN;
 
 -- Medicao: periodo da planilha/carta (como em `espelhos`; obrigatorio a partir de planilha_gerada, cobrado pela
 -- aplicacao), envio da planilha/carta e o numero da medicao no orgao (D6: o canonico onde difere do da Lotufo).
@@ -20,6 +30,9 @@ ALTER TABLE medicoes ADD COLUMN periodo_fim TEXT;
 ALTER TABLE medicoes ADD COLUMN planilha_enviada_em TEXT;
 ALTER TABLE medicoes ADD COLUMN planilha_envio_origem TEXT CHECK (planilha_envio_origem IN ('sistema','externo'));
 ALTER TABLE medicoes ADD COLUMN numero_orgao INTEGER CHECK (numero_orgao >= 1);
+-- as da 043 (ver cabecalho)
+ALTER TABLE medicoes ADD COLUMN data_base_mes TEXT;
+ALTER TABLE medicoes ADD COLUMN ciclo INTEGER;
 
 DROP TABLE IF EXISTS medicoes_nova;
 CREATE TABLE medicoes_nova (
@@ -55,18 +68,22 @@ CREATE TABLE medicoes_nova (
     planilha_enviada_em TEXT,
     planilha_envio_origem TEXT CHECK (planilha_envio_origem IN ('sistema','externo')),
     numero_orgao INTEGER CHECK (numero_orgao >= 1),
+    data_base_mes TEXT,
+    ciclo INTEGER,
     UNIQUE (contrato_id, numero, tipo)
 );
 INSERT INTO medicoes_nova (id, contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos,
     valor_protocolado_origem, valor_atestado_centavos, valor_atestado_origem, motivo_represamento,
     congelada, criado_em, atestado_em, nf_emitida_em, recebida_em, espelho_em, espelho_origem,
     nota_emitida_em, final, final_em, envio_origem, envio_externo_em, envio_externo_obs,
-    periodo_inicio, periodo_fim, planilha_enviada_em, planilha_envio_origem, numero_orgao)
+    periodo_inicio, periodo_fim, planilha_enviada_em, planilha_envio_origem, numero_orgao,
+    data_base_mes, ciclo)
   SELECT id, contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos,
     valor_protocolado_origem, valor_atestado_centavos, valor_atestado_origem, motivo_represamento,
     congelada, criado_em, atestado_em, nf_emitida_em, recebida_em, espelho_em, espelho_origem,
     nota_emitida_em, final, final_em, envio_origem, envio_externo_em, envio_externo_obs,
-    periodo_inicio, periodo_fim, planilha_enviada_em, planilha_envio_origem, numero_orgao
+    periodo_inicio, periodo_fim, planilha_enviada_em, planilha_envio_origem, numero_orgao,
+    data_base_mes, ciclo
   FROM medicoes;
 DROP TABLE medicoes;
 ALTER TABLE medicoes_nova RENAME TO medicoes;
@@ -133,4 +150,5 @@ ALTER TABLE medicao_atestos ADD COLUMN observacao TEXT;
 
 -- `envios.tipo` e' texto livre (019, sem CHECK): o tipo 'planilha' ja' e' aceito, nada a mudar.
 
+COMMIT;
 PRAGMA foreign_keys=ON;

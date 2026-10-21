@@ -63,17 +63,14 @@ def _semear(c):
     c.commit()
 
 
-def _foto(c):
-    """Todas as colunas de hoje de todas as medicoes, mais as filhas."""
-    cols = ", ".join(_colunas_de_hoje)
+def _foto(c, colunas):
+    """As colunas dadas de todas as medicoes, mais as filhas."""
+    cols = ", ".join(colunas)
     return ([tuple(r) for r in c.execute(f"SELECT {cols} FROM medicoes ORDER BY id")],
             [tuple(r) for r in c.execute("SELECT id, medicao_id, valor_centavos, origem, atestado_em, usuario_id, "
                                          "criado_em FROM medicao_atestos ORDER BY id")],
             [tuple(r) for r in c.execute("SELECT * FROM medicao_protocolos ORDER BY id")],
             [tuple(r) for r in c.execute("SELECT * FROM envio_medicoes")])
-
-
-_colunas_de_hoje: list[str] = []
 
 
 def _rodar_script(c):
@@ -85,16 +82,16 @@ def _rodar_script(c):
 def test_042_roda_duas_vezes_e_preserva_as_medicoes_de_todos_os_estados(antes_da_042):
     c = antes_da_042
     _semear(c)
-    _colunas_de_hoje[:] = _colunas(c, "medicoes")
-    antes = _foto(c)
+    de_hoje = _colunas(c, "medicoes")
+    antes = _foto(c, de_hoje)
     db.migrate(c)                                   # 1a vez, pelo runner (como em create_app)
-    assert _foto(c) == antes
+    assert _foto(c, de_hoje) == antes
     c.execute("DELETE FROM schema_migrations WHERE nome=?", (ARQUIVO,)); c.commit()
     db.migrate(c)                                   # 2a vez, inteira
     _rodar_script(c)                                # 3a vez, o script cru
-    assert _foto(c) == antes
+    assert _foto(c, de_hoje) == antes
     # colunas de hoje na mesma ordem, as novas no fim
-    assert _colunas(c, "medicoes")[:len(_colunas_de_hoje)] == _colunas_de_hoje
+    assert _colunas(c, "medicoes")[:len(de_hoje)] == de_hoje
     assert {"periodo_inicio", "periodo_fim", "planilha_enviada_em", "planilha_envio_origem",
             "numero_orgao"} <= set(_colunas(c, "medicoes"))
     assert c.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -119,13 +116,48 @@ def test_042_roda_duas_vezes_e_preserva_as_medicoes_de_todos_os_estados(antes_da
 def test_042_residuo_de_execucao_interrompida_nao_atrapalha(antes_da_042):
     c = antes_da_042
     _semear(c)
-    _colunas_de_hoje[:] = _colunas(c, "medicoes")
-    antes = _foto(c)
+    de_hoje = _colunas(c, "medicoes")
+    antes = _foto(c, de_hoje)
     c.execute("CREATE TABLE medicoes_nova (id INTEGER PRIMARY KEY)"); c.execute("INSERT INTO medicoes_nova VALUES (1)")
     c.commit()
     db.migrate(c)
-    assert _foto(c) == antes
+    assert _foto(c, de_hoje) == antes
     assert c.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_042_depois_da_043_preserva_data_base_e_ciclo(antes_da_042):
+    """Orquestradora: a 043 (issue #270) acrescenta `data_base_mes` e `ciclo` em `medicoes` e pode ter rodado antes
+    desta num banco que a recebeu primeiro. A reconstrucao nao pode perder as duas colunas nem os valores."""
+    c = antes_da_042
+    _semear(c)
+    # o que a 043 faz em `medicoes` (mesmas definicoes)
+    c.execute("ALTER TABLE medicoes ADD COLUMN data_base_mes TEXT")
+    c.execute("ALTER TABLE medicoes ADD COLUMN ciclo INTEGER")
+    c.execute("UPDATE medicoes SET data_base_mes='2025-03', ciclo=id WHERE id % 2 = 0")
+    c.commit()
+    de_hoje = _colunas(c, "medicoes")
+    antes = _foto(c, de_hoje)
+    db.migrate(c)
+    assert _foto(c, de_hoje) == antes
+    assert c.execute("SELECT COUNT(*) FROM medicoes WHERE data_base_mes='2025-03' AND ciclo=id").fetchone()[0] == 4
+    assert _colunas(c, "medicoes").count("ciclo") == 1
+    assert c.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_042_falha_no_meio_nao_perde_medicoes(antes_da_042):
+    """Code-review: a reconstrucao e' uma transacao so'. Uma visao que le `medicoes` faz o RENAME falhar DEPOIS do
+    DROP; sem a transacao, as medicoes so' existiriam na `_nova` (e a proxima execucao a apagaria)."""
+    c = antes_da_042
+    _semear(c)
+    de_hoje = _colunas(c, "medicoes")
+    antes = _foto(c, de_hoje)
+    c.execute("CREATE VIEW v_medicoes AS SELECT id FROM medicoes"); c.commit()
+    with pytest.raises(sqlite3.Error):
+        db.migrate(c)
+    c.rollback()
+    assert _foto(c, de_hoje) == antes
+    assert c.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='medicoes_nova'").fetchone()[0] == 0
+    assert "periodo_inicio" not in _colunas(c, "medicoes")
 
 
 @pytest.fixture
@@ -193,6 +225,14 @@ def test_colunas_novas_recusam_valor_fora_da_lista(conn):
                  "numero_orgao=46, periodo_inicio='2026-05-01', periodo_fim='2026-05-31' WHERE id=1")
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO medicao_assinaturas (medicao_id, assinado_em, origem) VALUES (1,'2026-06-10','x')")
+
+
+def test_042_na_ordem_normal_ja_deixa_as_colunas_da_043(conn):
+    """Na ordem normal (042 antes da 043), as colunas da 043 ja' existem e o ALTER dela e' pulado pelo runner."""
+    cols = _colunas(conn, "medicoes")
+    assert "data_base_mes" in cols and "ciclo" in cols
+    sql = "ALTER TABLE medicoes ADD COLUMN data_base_mes TEXT;\nALTER TABLE medicoes ADD COLUMN ciclo INTEGER;\n"
+    assert db._sem_alters_ja_aplicados(conn, sql).strip() == ""
 
 
 def test_envio_aceita_o_tipo_planilha(conn):
