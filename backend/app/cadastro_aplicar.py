@@ -346,7 +346,7 @@ def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
 
 
 # O que torna um aditivo o que ele e': nao muda depois de aplicado (correcao e' instrumento
-# novo). Numero, objeto e forma sao descricao e podem ser corrigidos.
+# novo). Numero, objeto, forma e ordinal sao descricao e podem ser corrigidos.
 _IMUTAVEL_ADITIVO = ("tipo", "delta_valor_centavos", "nova_execucao_fim", "nova_vigencia_fim",
                      "data_assinatura")
 
@@ -384,7 +384,8 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     novo = {"tipo": TIPOS_ADITIVO[inst["tipo"]], "delta_valor_centavos": inst["delta_valor_centavos"],
             "nova_execucao_fim": inst["nova_execucao_fim"], "nova_vigencia_fim": inst["nova_vigencia_fim"],
             "data_assinatura": inst["data"], "numero": inst["numero"], "objeto": inst["objeto"],
-            "forma": "apostilamento" if inst["tipo"].startswith("apostilamento") else "termo_aditivo"}
+            "forma": "apostilamento" if inst["tipo"].startswith("apostilamento") else "termo_aditivo",
+            "ordinal": inst.get("ordinal")}
     ja = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=?",
                       (contrato_id, inst["chave"])).fetchone()
     if ja is None:
@@ -392,12 +393,12 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
         cur = conn.execute(
             """INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim,
                    nova_execucao_fim, status, data_assinatura, numero, objeto, forma, chave_cadastro,
-                   valor_anterior_centavos, valor_novo_centavos, assinado_por, observacao)
-               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?)""",
+                   valor_anterior_centavos, valor_novo_centavos, assinado_por, observacao, ordinal)
+               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?)""",
             (contrato_id, novo["tipo"], novo["delta_valor_centavos"], novo["nova_vigencia_fim"],
              novo["nova_execucao_fim"], novo["data_assinatura"], novo["numero"], novo["objeto"],
              novo["forma"], inst["chave"], anterior, anterior + novo["delta_valor_centavos"], usuario_id,
-             f"Corrige {inst['corrige']}" if inst["corrige"] else None))
+             f"Corrige {inst['corrige']}" if inst["corrige"] else None, novo["ordinal"]))
         rel["criados"].append(rotulo)
         auditoria.registrar(conn, usuario_id, "cadastro.instrumento", "aditivo", cur.lastrowid, None,
                             {"chave": inst["chave"], **novo})
@@ -409,7 +410,7 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
             raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
                              f"({campo}: {ja[campo]!r} → {novo[campo]!r}); registre um instrumento novo "
                              "com `corrige`")
-    antes, depois = _diferencas(dict(ja), {k: novo[k] for k in ("numero", "objeto", "forma")})
+    antes, depois = _diferencas(dict(ja), {k: novo[k] for k in ("numero", "objeto", "forma", "ordinal")})
     if not depois:
         rel["iguais"] += 1
         return

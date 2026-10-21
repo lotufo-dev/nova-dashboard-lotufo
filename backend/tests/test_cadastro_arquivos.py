@@ -464,3 +464,16 @@ def test_endosso_de_outra_apolice_gera_aviso_nao_erro(tmp_path):
     assert any("end-1" in a and "'AP 1'" in a and "diferente da apólice do contrato" in a for a in cad["avisos"])
     c["instrumentos"] = [_endosso("AP-1")]
     assert ca.preparar(_escrever(tmp_path, contratos=[c]))["avisos"] == []
+
+
+def test_ordinal_do_instrumento(tmp_path):
+    """Issue #261: `ordinal` e' inteiro positivo e so' vale para aditivo ou apostilamento de prazo."""
+    ta = {"chave": "ta-14", "tipo": "aditivo_prazo", "data": "2026-01-10", "numero": "099/2020/01/14",
+          "nova_execucao_fim": "2026-12-31", "ordinal": 14}
+    cad = ca.preparar(_escrever(tmp_path / "ok", contratos=[{**CONTRATO, "instrumentos": [ta]}]))
+    inst = cad["contratos"][0]["instrumentos"][0]
+    assert inst["ordinal"] == 14 and "ordinal" not in inst["dados"]
+    ruins = [{**ta, "ordinal": 0}, {**ta, "chave": "ta-15", "ordinal": "14º"},
+             {"chave": "par-1", "tipo": "paralisacao", "data": "2026-01-10", "ordinal": 2}]
+    erros = _erros(_escrever(tmp_path / "ruim", contratos=[{**CONTRATO, "instrumentos": ruins}]))
+    assert sum("ordinal" in e for e in erros) == 3, erros

@@ -79,6 +79,43 @@ def test_carta_de_prazo_traz_historico_e_novo_fim(cenario):
     assert "de 20/10/2026 para 28/01/2027" in texto
 
 
+def _texto_da_carta_de_prazo(c, ids):
+    pid = pleitos.criar(c, ids["uid"], ids["contrato"], "prazo", "310", dias=100, justificativa="Interferências na via")
+    r = pleitos.montar(c, ids["uid"], pid)
+    paginas = leitura_pdf.textos_por_pagina_com_limite(arquivos.caminho_seguro(r["arquivo"]).read_bytes())
+    return " ".join(" ".join(paginas).split())
+
+
+def test_carta_de_prazo_com_so_o_3o_termo_carregado_diz_3o(cenario):
+    """Issue #261: cadastro parcial; o ordinal vem do numero do termo, nao da contagem."""
+    c, ids = cenario
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_execucao_fim, status, "
+              "data_assinatura, numero, forma) VALUES (?, 'prazo', 0, '2026-10-20', 'assinado', '2026-03-10', "
+              "'099/2020/01/03', 'termo_aditivo')", (ids["contrato"],))
+    c.commit()
+    texto = _texto_da_carta_de_prazo(c, ids)
+    assert "O 3º termo aditivo n.º 099/2020/01/03" in texto and "O 1º termo aditivo" not in texto
+
+
+def test_carta_de_prazo_usa_o_ordinal_do_cadastro(cenario):
+    """Issue #261: com `ordinal` no instrumento do cadastro, vale o `ordinal`."""
+    c, ids = cenario
+    ta = {"chave": "ta-5", "tipo": "aditivo_prazo", "data": "2026-03-10", "numero": "TA s/n", "objeto": None,
+          "corrige": None, "pdf": None, "delta_valor_centavos": 0, "nova_execucao_fim": "2026-12-20",
+          "nova_vigencia_fim": None, "dados": {}, "ordinal": 5}
+    obra = {**_contrato("Obra SINFRA", "sinfra-x", "IC 1/2026"), "datas_base": [{"mes": "2024-06", "indice": "INCC-DI"}],
+            "execucao_fim": "2026-10-20", "vigencia_fim": "2027-01-20", "instrumentos": [ta]}
+    cadastro_aplicar.aplicar(c, ids["uid"], {
+        "orgaos": [{"chave": "sinfra-x", "nome": "SINFRA - X", "familia": "sinfra", "cnpj": None,
+                    "regras": {"protocolo_para": ["sinfra@orgao-a.exemplo.com.br"], "protocolo_copia": ["leo@l.com"],
+                               "documentos_medicao": [], "documentos_reajuste": []}}],
+        "entidades": [{"chave": "lotufo", "nome": "Lotufo Engenharia e Construções Ltda", "cnpj": "31200101000130",
+                       "papel": "lotufo", "coligada_rm": 1, "sigla_oficio": "LT", "nome_curto": "Lotufo"}],
+        "contratos": [obra], "avisos": [], "geral": {"cartas": CARTAS}})
+    texto = _texto_da_carta_de_prazo(c, ids)
+    assert "O 5º termo aditivo n.º TA s/n" in texto
+
+
 def test_enviar_reajuste_fecha_o_aviso_de_pleito(cenario):
     c, ids = cenario
     assert "reajuste_pleito" in {a["tipo"] for a in reajuste.avisos(c, D(2026, 6, 15))}

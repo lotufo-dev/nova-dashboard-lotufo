@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { familiaDoAviso, filtrarAvisos, ondeSeResolve, porFamilia, porObra, quandoDoAviso } from "./avisos";
+import { FAMILIAS, familiaDoAviso, filtrarAvisos, ondeSeResolve, porFamilia, porObra, quandoDoAviso } from "./avisos";
 
 const av = (tipo: string, nivel: Aviso["nivel"], contrato_id: number | null, aba: string | null, data: string | null = null): Aviso => ({
   tipo, nivel, publico: ["operacao"], contrato_id, obra: contrato_id ? `Obra ${contrato_id}` : null, dias: null,
@@ -13,19 +13,26 @@ describe("avisos", () => {
     av("execucao_vencendo", "critico", 12, "prazos", "2026-09-13"),
     { ...av("documentos_empresa", "critico", null, "documentos", "2026-07-26"), entidade_id: 2, entidade: "Oriundi" },
     av("nota_divergente", "critico", 7, "notas"),
-    av("pagamento_atrasado", "acao", 9, "medicoes", "2026-06-01"),
+    av("aviso_de_medicao", "acao", 9, "medicoes", "2026-06-01"),
     av("folga_quebrada", "acao", 15, "prazos"),
     av("tipo_novo", "atencao", 3, null),
   ];
 
-  it("a família vem do lar do aviso (o destino); o pagamento atrasado é Dinheiro; lar desconhecido é Outros", () => {
-    expect(lista.map(familiaDoAviso)).toEqual(["reajuste", "prazo", "documentos", "nota", "dinheiro", "prazo", "outros"]);
+  it("a família vem do lar do aviso (o destino); lar desconhecido é Outros", () => {
+    expect(lista.map(familiaDoAviso)).toEqual(["reajuste", "prazo", "documentos", "nota", "outros", "prazo", "outros"]);
+  });
+
+  it("o pagamento atrasado saiu (#255): sem família Dinheiro e sem destino próprio", () => {
+    expect(FAMILIAS.map(f => f.id)).toEqual(["prazo", "reajuste", "nota", "documentos", "outros"]);
+    const antigo = { ...av("pagamento_atrasado", "acao", 9, "medicoes"), medicao_id: 722 };
+    expect(familiaDoAviso(antigo)).toBe("outros");
+    expect(ondeSeResolve(antigo)).toBe("Em andamento\u00a0· Obra 9");
   });
 
   it("por família, na ordem do mapa, do mais grave ao mais atrasado", () => {
     expect(porFamilia(lista).map(g => `${g.rotulo}: ${g.itens.map(a => a.tipo).join(", ")}`)).toEqual([
       "Prazo: execucao_vencendo, folga_quebrada", "Reajuste: reajuste_apostilamento", "Nota: nota_divergente",
-      "Documentos: documentos_empresa", "Dinheiro: pagamento_atrasado", "Outros: tipo_novo"]);
+      "Documentos: documentos_empresa", "Outros: aviso_de_medicao, tipo_novo"]);
   });
 
   it("por obra, a do aviso mais grave primeiro; os de empresa por empresa (A11), na posição do mais grave", () => {
@@ -49,6 +56,6 @@ describe("avisos", () => {
     expect(ondeSeResolve(lista[1])).toBe("Prazos\u00a0· Obra 12");
     expect(ondeSeResolve(lista[1], true)).toBe("Prazos");
     expect(ondeSeResolve(lista[2])).toBe("Documentos\u00a0· Oriundi");
-    expect(ondeSeResolve({ ...lista[4], medicao_id: 722 })).toBe("Recebimento da medição\u00a0· Obra 9");   // A12
+    expect(ondeSeResolve(lista[4])).toBe("Em andamento\u00a0· Obra 9");
   });
 });
