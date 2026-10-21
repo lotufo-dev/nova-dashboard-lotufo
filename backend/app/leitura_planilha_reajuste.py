@@ -14,16 +14,16 @@ import io
 import re
 import unicodedata
 import zipfile
-from decimal import ROUND_HALF_UP, Decimal
 
 import openpyxl
 
-from app import dinheiro
+from app import dinheiro, rm
 
 ABA = "Resumo"
 MENSAGEM = "Não reconheci a planilha; digite a previsão"
 LINHAS_CABECALHO = 40          # o cabecalho do modelo fica nas primeiras linhas (6 e 7, ou 3 e 4)
-MAX_LINHAS = 240               # 20 anos de medicoes mensais: acima disso nao e' o modelo
+MAX_COMPETENCIAS = 240         # 20 anos de medicoes mensais: acima disso nao e' o modelo (pleitos usa o mesmo)
+MAX_VARRIDAS = 5000            # linhas lidas da aba (as em branco formatadas contam aqui, nao no teto acima)
 _DATA = re.compile(r"([0-9]{2})/([0-9]{2})/([0-9]{4})")
 
 
@@ -59,8 +59,9 @@ def _competencia(periodo) -> str | None:
 
 
 def _centavos(v) -> int:
-    """Reais da planilha (float) -> centavos inteiros, pelo texto do float (21342.29 nao vira 2134228)."""
-    c = int((Decimal(repr(float(v))) * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    """Reais da planilha (float) -> centavos inteiros: o arredondamento unico do projeto (`rm.centavos`, pelo texto
+    do float: 21342.29 nao vira 2134228)."""
+    c = rm.centavos(v)
     if abs(c) > dinheiro.TETO_CENTAVOS:
         raise PlanilhaNaoReconhecida("valor de reajuste acima do máximo aceito")
     return c
@@ -88,40 +89,53 @@ def ler(dados: bytes) -> list[dict]:
     try:
         # read_only: so' a aba Resumo e' lida (as abas de memoria do modelo tem milhares de colunas)
         wb = openpyxl.load_workbook(io.BytesIO(dados), read_only=True, data_only=True)
-    except (zipfile.BadZipFile, KeyError, ValueError, OSError) as e:
+    except zipfile.BadZipFile as e:
         raise PlanilhaNaoReconhecida("o arquivo não abre como planilha .xlsx") from e
+    except Exception as e:   # arquivo de fora: XML quebrado (ParseError e afins) vira digitacao, nao erro 500
+        raise PlanilhaNaoReconhecida("a planilha não pôde ser lida") from e
     try:
-        if ABA not in wb.sheetnames:
-            raise PlanilhaNaoReconhecida("falta a aba Resumo")
-        ws = wb[ABA]
-        inicio, col_med, col_per, col_reaj = _colunas(ws)
-        out: list[dict] = []
-        vistas: dict[str, str] = {}
-        for n, linha in enumerate(ws.iter_rows(min_row=inicio, values_only=True)):
-            if n > MAX_LINHAS:
-                raise PlanilhaNaoReconhecida("linhas demais na aba Resumo")
-            celula = lambda c: linha[c] if c < len(linha) else None   # noqa: E731
-            medicao, periodo, valor = celula(col_med), celula(col_per), celula(col_reaj)
-            rotulo = _texto(medicao)
-            if rotulo.startswith("TOTA"):        # "TOTAIS": acabou a tabela
-                break
-            if not rotulo and periodo is None:   # linha em branco no meio ou no fim
-                continue
-            if valor is None:                    # medicao sem reajuste previsto (formula vazia)
-                continue
-            if not isinstance(valor, int | float) or isinstance(valor, bool):
-                raise PlanilhaNaoReconhecida(f"o reajuste de {str(medicao).strip()} não é um número")
-            comp = _competencia(periodo)
-            if comp is None:
-                raise PlanilhaNaoReconhecida(f"o período de {str(medicao).strip()} não tem data legível")
-            if comp in vistas:
-                raise PlanilhaNaoReconhecida(f"a competência {comp[5:]}/{comp[:4]} aparece em {vistas[comp]} e em "
-                                             f"{str(medicao).strip()}")
-            vistas[comp] = str(medicao).strip()
-            out.append({"competencia": comp, "valor_centavos": _centavos(valor), "medicao": str(medicao).strip(),
-                        "periodo": periodo.strip() if isinstance(periodo, str) else comp})
-        if not out:
-            raise PlanilhaNaoReconhecida("nenhuma linha de medição com reajuste na aba Resumo")
-        return sorted(out, key=lambda x: x["competencia"])
+        return _ler_resumo(wb)
+    except PlanilhaNaoReconhecida:
+        raise
+    except Exception as e:   # arquivo de fora: XML quebrado dentro da aba vira digitacao, nao erro 500
+        raise PlanilhaNaoReconhecida("a aba Resumo não pôde ser lida") from e
     finally:
         wb.close()
+
+
+def _ler_resumo(wb) -> list[dict]:
+    if ABA not in wb.sheetnames:
+        raise PlanilhaNaoReconhecida("falta a aba Resumo")
+    ws = wb[ABA]
+    inicio, col_med, col_per, col_reaj = _colunas(ws)
+    out: list[dict] = []
+    vistas: dict[str, str] = {}
+    for n, linha in enumerate(ws.iter_rows(min_row=inicio, values_only=True)):
+        if n >= MAX_VARRIDAS:
+            break
+        celula = lambda c: linha[c] if c < len(linha) else None   # noqa: E731
+        medicao, periodo, valor = celula(col_med), celula(col_per), celula(col_reaj)
+        rotulo = _texto(medicao)
+        if rotulo.startswith("TOTA"):        # "TOTAIS": acabou a tabela
+            break
+        if not rotulo and periodo is None:   # linha em branco no meio ou no fim
+            continue
+        if valor is None:                    # medicao sem reajuste previsto (formula vazia)
+            continue
+        texto_med = str(medicao).strip() if medicao is not None else ""
+        nome = texto_med or f"a linha {inicio + n}"     # sem rotulo, a linha da planilha identifica (nunca "None")
+        if not isinstance(valor, int | float) or isinstance(valor, bool):
+            raise PlanilhaNaoReconhecida(f"o reajuste de {nome} não é um número")
+        comp = _competencia(periodo)
+        if comp is None:
+            raise PlanilhaNaoReconhecida(f"o período de {nome} não tem data legível")
+        if comp in vistas:
+            raise PlanilhaNaoReconhecida(f"a competência {comp[5:]}/{comp[:4]} aparece em {vistas[comp]} e em {nome}")
+        vistas[comp] = nome
+        if len(out) >= MAX_COMPETENCIAS:
+            raise PlanilhaNaoReconhecida("competências demais na aba Resumo")
+        out.append({"competencia": comp, "valor_centavos": _centavos(valor), "medicao": texto_med,
+                    "periodo": periodo.strip() if isinstance(periodo, str) else comp})
+    if not out:
+        raise PlanilhaNaoReconhecida("nenhuma linha de medição com reajuste na aba Resumo")
+    return sorted(out, key=lambda x: x["competencia"])

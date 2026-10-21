@@ -12,10 +12,10 @@ import { fmtCompetencia } from "./tempo";
 
 type LinhaLida = { competencia: string; valor_centavos: number; medicao: string; periodo: string };
 type Leitura = { reconhecida: boolean; linhas: LinhaLida[]; mensagem?: string; motivo?: string };
-type LinhaDigitada = { chave: number; competencia: string; valor: string };
+type LinhaDigitada = { chave: number; competencia: string; valor: string; negativo: boolean };
 
 let proximaChave = 1;
-const linhaVazia = (): LinhaDigitada => ({ chave: proximaChave++, competencia: "", valor: "" });
+const linhaVazia = (): LinhaDigitada => ({ chave: proximaChave++, competencia: "", valor: "", negativo: false });
 // o CampoValor devolve "1.500,25": os digitos sao os centavos, sem float no caminho
 const centavos = (texto: string) => Number(texto.replace(/\D/g, ""));
 
@@ -62,7 +62,7 @@ export default function PleitoPrevisao({ pleitoId, aoGravar }: { pleitoId: numbe
       setErro("Preencha a competência e o valor de todas as linhas (ou remova a linha).");
       return;
     }
-    void gravar("manual", digitadas.map(l => ({ competencia: l.competencia, valor_centavos: centavos(l.valor) })));
+    void gravar("manual", digitadas.map(l => ({ competencia: l.competencia, valor_centavos: (l.negativo ? -1 : 1) * centavos(l.valor) })));
   }
 
   const mudar = (chave: number, campo: "competencia" | "valor", v: string) =>
@@ -133,6 +133,12 @@ export default function PleitoPrevisao({ pleitoId, aoGravar }: { pleitoId: numbe
                     <label className="sr-only" htmlFor={`prev-valor-${pleitoId}-${l.chave}`}>Valor previsto da linha {i + 1}</label>
                     <CampoValor id={`prev-valor-${pleitoId}-${l.chave}`} name={`valor-${l.chave}`} value={l.valor}
                       ajudaId={`previsao-${pleitoId}`} onChange={v => mudar(l.chave, "valor", v)} />
+                    {/* indice deflacionario da' reajuste negativo; o campo de valor so' aceita digitos */}
+                    <label className="campo__nota">
+                      <input type="checkbox" aria-label={`Reajuste negativo na linha ${i + 1}`} checked={l.negativo}
+                        onChange={ev => setDigitadas(ls => ls && ls.map(x =>
+                          x.chave === l.chave ? { ...x, negativo: ev.target.checked } : x))} />{" "}negativo
+                    </label>
                   </td>
                   <td>
                     {digitadas.length > 1 && (

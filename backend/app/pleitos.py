@@ -11,8 +11,8 @@ import json
 import re
 from html import escape
 
-from app import (arquivos, assinatura, auditoria, carta, correio, db, dinheiro, envio_reserva, espelhos, medicoes,
-                 oficios, pdfs, prazos, reajuste, tempo)
+from app import (arquivos, assinatura, auditoria, carta, correio, db, dinheiro, envio_reserva, espelhos,
+                 leitura_planilha_reajuste, medicoes, oficios, pdfs, prazos, reajuste, tempo)
 from app import html_email
 
 TIPOS = ("reajuste", "prazo", "conclusao")
@@ -178,21 +178,25 @@ def remover_anexo(conn, usuario_id: int, pleito_id: int, anexo_id: int) -> None:
 # --- previsao de reajuste (issue #272; spec 2026-10-20 §2.2) -----------------------------------------
 
 ORIGENS_PREVISAO = ("pleito", "manual")      # o apostilamento entra pelo cadastro, nunca por aqui
-MAX_COMPETENCIAS = 240
+MAX_COMPETENCIAS = leitura_planilha_reajuste.MAX_COMPETENCIAS
 _COMPETENCIA = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
 
 
 def gravar_previsao(conn, usuario_id: int, pleito_id: int, origem: str, linhas: list[dict]) -> int:
     """Grava a previsao conferida do pleito: uma linha de `reajuste_previsoes` por competencia (evento; aceitar de
     novo grava outra leva e a leitura escolhe a mais recente). `origem` 'pleito' quando veio da planilha lida e
-    conferida sem mudar; 'manual' quando a pessoa digitou (planilha fora do modelo). Devolve quantas gravou."""
+    conferida sem mudar; 'manual' quando a pessoa digitou (planilha fora do modelo). Devolve quantas gravou.
+
+    Como nada se apaga, duas guardas mantem a leitura (`reajuste.previsoes_vigentes`) igual ao que a pessoa viu:
+    a leva nova do mesmo pleito traz todas as competencias das anteriores (senao a que saiu continuaria valendo), e
+    a digitada nao vem depois da lida (a do pleito e' mais forte e a digitada nunca valeria)."""
     if origem not in ORIGENS_PREVISAO:
         raise ValueError("Origem da previsão inválida")
     p = _linha(conn, pleito_id)
     if p["tipo"] != "reajuste":
         raise ValueError("Previsão de reajuste só no pleito de reajuste")
-    if p["situacao"] == "descartado":
-        raise ValueError("Pleito descartado: a previsão não pode ser gravada")
+    if p["situacao"] in ("descartado", "enviado"):
+        raise ValueError(f"Pleito {p['situacao']}: a previsão não pode ser gravada (correção é pleito novo)")
     if not p["data_base_mes"] or not p["ciclo"]:
         raise ValueError("Pleito sem data-base e ciclo: a previsão não tem a que se ligar")
     if not linhas:
@@ -212,6 +216,17 @@ def gravar_previsao(conn, usuario_id: int, pleito_id: int, origem: str, linhas: 
             raise ValueError(f"Valor previsto inválido em {comp[5:]}/{comp[:4]}")
     ordenadas = sorted(linhas, key=lambda x: x["competencia"])
     with db.mutacao(conn):
+        # dentro do BEGIN IMMEDIATE: a leva anterior lida aqui e' a que vale na hora de gravar
+        anteriores = conn.execute("SELECT competencia, origem FROM reajuste_previsoes WHERE pleito_id=?",
+                                  (pleito_id,)).fetchall()
+        if origem == "manual" and any(r["origem"] == "pleito" for r in anteriores):
+            raise ValueError("Este pleito já tem a previsão lida da planilha; para corrigir, anexe a planilha "
+                             "corrigida")
+        faltam = sorted({r["competencia"] for r in anteriores} - vistas)
+        if faltam:
+            lista = ", ".join(f"{c[5:]}/{c[:4]}" for c in faltam)
+            raise ValueError(f"A previsão nova não traz {lista}, que a anterior deste pleito tinha; inclua a "
+                             "competência ou reemita o pleito")
         for x in ordenadas:
             conn.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, "
                          "valor_previsto_centavos, origem, pleito_id, usuario_id) VALUES (?,?,?,?,?,?,?,?)",

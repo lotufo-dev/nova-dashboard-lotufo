@@ -348,9 +348,10 @@ def test_aceitar_grava_previsoes_de_origem_pleito_e_aparecem_na_aba_reajuste(api
     assert [(p["competencia"], p["valor_previsto_centavos"], p["origem"]) for p in aba["previsoes"]] == [
         ("2026-07", 123456, "pleito"), ("2026-08", -10, "pleito")]
     # aceitar de novo e' evento novo: o anterior fica, a leitura escolhe o mais recente
-    cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito",
-                                                  "linhas": [{"competencia": "2026-07", "valor_centavos": 5}]})
-    assert len(_previsoes(cid)) == 3
+    r = cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito", "linhas": [
+        {"competencia": "2026-07", "valor_centavos": 5}, {"competencia": "2026-08", "valor_centavos": -10}]})
+    assert r.status_code == 200, r.text
+    assert len(_previsoes(cid)) == 4
     vig = {p["competencia"]: p["valor_previsto_centavos"]
            for p in cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]}
     assert vig == {"2026-07": 5, "2026-08": -10}
@@ -404,3 +405,27 @@ def test_previsao_so_no_pleito_de_reajuste_que_vale(api):
     assert r.status_code == 422 and "descartado" in r.json()["detail"]
     assert cl.post("/api/pleitos/999999/previsao", json={"origem": "pleito", "linhas": linhas}).status_code == 404
     assert _previsoes(cid) == []
+
+
+def test_previsao_nao_entra_no_pleito_ja_enviado(api):
+    """O pleito enviado levou a previsao dele ao orgao: gravar outra por cima mudaria o que foi pedido."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 200
+    r = cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito",
+                                                      "linhas": [{"competencia": "2026-07", "valor_centavos": 1}]})
+    assert r.status_code == 422 and "enviado" in r.json()["detail"]
+    assert _previsoes(cid) == []
+
+
+def test_leva_nova_que_omite_competencia_ou_digitada_depois_da_lida_e_recusada(api):
+    """Nada se apaga: competencia que a leva nova nao traz continuaria valendo, e a digitada perde da lida."""
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    dois = [{"competencia": "2026-07", "valor_centavos": 1}, {"competencia": "2026-08", "valor_centavos": 2}]
+    assert cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito", "linhas": dois}).status_code == 200
+    r = cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito", "linhas": dois[1:]})
+    assert r.status_code == 422 and "07/2026" in r.json()["detail"]
+    r = cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "manual", "linhas": dois})
+    assert r.status_code == 422 and "planilha corrigida" in r.json()["detail"]
+    assert len(_previsoes(cid)) == 2

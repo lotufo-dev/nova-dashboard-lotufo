@@ -115,6 +115,49 @@ def test_periodo_ilegivel_ou_competencia_repetida_nao_e_reconhecida():
     assert "04/2026" in e.value.motivo
 
 
+def test_aba_com_xml_quebrado_cai_na_digitacao_e_nao_em_erro_500():
+    import zipfile
+    origem, destino = io.BytesIO(planilha_modelo(outras_abas=())), io.BytesIO()
+    with zipfile.ZipFile(origem) as z, zipfile.ZipFile(destino, "w") as novo:
+        for item in z.infolist():
+            dados = z.read(item.filename)
+            novo.writestr(item, b"<worksheet><sheetData><row" if item.filename.startswith("xl/worksheets/") else dados)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(destino.getvalue())
+    assert "não pôde ser lida" in e.value.motivo
+
+
+def test_xml_quebrado_no_meio_da_aba_tambem_cai_na_digitacao(monkeypatch):
+    """No modo read_only a aba e' lida aos poucos: o erro pode vir na varredura, depois de abrir."""
+    from xml.etree.ElementTree import ParseError
+
+    def quebra(*a, **k):
+        raise ParseError("unclosed token")
+    monkeypatch.setattr(leitura, "_colunas", quebra)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(planilha_modelo())
+    assert "não pôde ser lida" in e.value.motivo
+
+
+def test_linha_sem_rotulo_de_medicao_nao_mostra_none():
+    linhas = leitura.ler(planilha_modelo([(None, "01/04/2026 a 30/04/2026", 10.0)]))
+    assert linhas[0]["medicao"] == ""
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(planilha_modelo([(None, "01/04/2026 a 30/04/2026", 10.0), ("2ª Medição", "01/04/2026 a 30/04/2026", 1.0)]))
+    assert "None" not in e.value.motivo and "a linha 8" in e.value.motivo
+
+
+def test_linhas_em_branco_formatadas_nao_contam_no_teto():
+    """Modelo sem TOTAIS e com a aba formatada ate' a linha 1000: so' as linhas com valor contam."""
+    wb = openpyxl.load_workbook(io.BytesIO(planilha_modelo(outras_abas=())))
+    ws = wb["Resumo"]
+    ws.delete_rows(12, 2)                        # tira o TOTAIS
+    ws.cell(1000, 1).number_format = "0.00"      # celula vazia formatada: a aba vai ate' a linha 1000
+    ws.cell(1000, 1).value = " "
+    buf = io.BytesIO(); wb.save(buf)
+    assert len(leitura.ler(buf.getvalue())) == 3
+
+
 def test_modelo_sem_nenhuma_linha_de_valor_nao_e_reconhecido():
     with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
         leitura.ler(planilha_modelo([]))

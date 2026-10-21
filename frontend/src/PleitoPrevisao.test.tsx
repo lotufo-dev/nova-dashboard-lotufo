@@ -64,10 +64,12 @@ describe("Previsão de reajuste do pleito", () => {
     fireEvent.click(screen.getByRole("button", { name: "Adicionar competência" }));
     fireEvent.change(within(tabela).getByLabelText("Competência da linha 2"), { target: { value: "2026-10" } });
     fireEvent.paste(within(tabela).getByLabelText("Valor previsto da linha 2"), { clipboardData: { getData: () => "10" } });
+    // indice deflacionario: a linha marcada como negativa vai com o sinal
+    fireEvent.click(within(tabela).getByRole("checkbox", { name: "Reajuste negativo na linha 2" }));
     fireEvent.click(screen.getByRole("button", { name: "Gravar previsão" }));
     await waitFor(() => expect(api).toHaveBeenCalledTimes(1));
     expect(JSON.parse(api.mock.calls[0][1].body)).toEqual({ origem: "manual", linhas: [
-      { competencia: "2026-09", valor_centavos: 150025 }, { competencia: "2026-10", valor_centavos: 1000 }] });
+      { competencia: "2026-09", valor_centavos: 150025 }, { competencia: "2026-10", valor_centavos: -1000 }] });
   });
 
   it("linha digitada sem competência ou sem valor não grava e diz o que falta", async () => {
