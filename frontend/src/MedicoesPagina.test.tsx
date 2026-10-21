@@ -16,7 +16,7 @@ const linha = (extra: Partial<LinhaResumo>): LinhaResumo => ({
 
 const RESUMO: ResumoMedicoes = {
   hoje: "2026-10-09",
-  contagens: { "sem-medicao": 3, faturamento: 0, "aguardando-nota": 0, "enviar-nota": 2, "aguardando-pagamento": 0 },
+  contagens: { "sem-medicao": 3, "planilha-gerada": 0, "planilha-enviada": 0, "boletim-recebido": 0, faturamento: 0, "aguardando-nota": 0, "enviar-nota": 2, "aguardando-pagamento": 0 },
   linhas: [
     linha({}),
     linha({ medicao_id: 72, medicao_ids: [72], numero: 1, titulo: "1ª Medição de Projeto", valor_centavos: 14811701, dias: 24 }),
@@ -54,6 +54,25 @@ describe("Medições com abas", () => {
     const abas = screen.getByRole("navigation", { name: "Seções de Medições" });
     expect(within(abas).getByRole("link", { name: "Resumo" }).getAttribute("aria-current")).toBe("page");
     expect(within(abas).getByRole("link", { name: /Sem medição aberta/ }).textContent).toBe("Sem medição aberta3");
+  });
+
+  it("estados novos do motor: abas e cartões na ordem do ciclo, antes do espelho, com o texto em português", async () => {
+    api.mockResolvedValue({ ...RESUMO, contagens: { ...RESUMO.contagens, "planilha-enviada": 1 },
+      linhas: [linha({ situacao: "planilha-enviada", proximo_passo: "registrar o boletim" })] });
+    render(<MedicoesPagina aba="planilha-enviada" busca={{}} usuario={usuario} />);
+    const abas = await screen.findByRole("navigation", { name: "Seções de Medições" });
+    expect(within(abas).getAllByRole("link").map(a => a.textContent)).toEqual([
+      "Resumo", "Sem medição aberta3", "Planilha/carta gerada0", "Planilha/carta enviada1", "Boletim recebido0",
+      "Enviar ao faturamento0", "Aguardando nota0", "Enviar nota2", "Aguardando pagamento0"]);
+    const quadro = await screen.findByRole("region", { name: "Planilha/carta enviada" });
+    expect(within(quadro).getByText("7ª Medição + Reajuste")).toBeTruthy();
+    expect(quadro.querySelector(".sit-pilula--planilha-enviada")?.textContent).toBe("Planilha/carta enviada");
+  });
+
+  it("aba Boletim recebido vazia diz o que falta", async () => {
+    api.mockResolvedValue(RESUMO);
+    render(<MedicoesPagina aba="boletim-recebido" busca={{}} usuario={usuario} />);
+    expect(await screen.findByText("Nenhum boletim recebido à espera do espelho.")).toBeTruthy();
   });
 
   it("aba Aguardando nota: estado vazio sem medição, e a linha da medição que espera a nota", async () => {
