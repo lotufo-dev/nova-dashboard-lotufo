@@ -68,7 +68,9 @@ function textoApostilamento(i: InstrumentoCadastro): string {
 function desfechoDoPleito(p: Pleito, c?: Ciclo): DesfechoPleito {
   const envio = partesDoEnvio(p);
   const neutro = { classe: "", texto: p.situacao, partes: envio };
-  if (!c || p.situacao !== "enviado") return neutro;
+  // so' o pleito vigente do ciclo (o enviado mais recente) leva o desfecho; os anteriores (reiterados ou
+  // reemitidos) ficam com o envio e a cadeia, sem repetir a espera do ciclo (issue #277)
+  if (!c || p.situacao !== "enviado" || (c.pleito && c.pleito.id !== p.id)) return neutro;
   if (c.situacao === "apostilamento_pendente") {
     return { classe: "selo--atencao", partes: envio,
       texto: c.dias !== null && c.dias >= 0 ? `sem apostilamento há ${dias(c.dias)}` : "sem apostilamento ainda" };

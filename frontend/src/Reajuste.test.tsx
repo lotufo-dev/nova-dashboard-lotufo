@@ -75,6 +75,10 @@ describe("Reajuste", () => {
     render(<Reajuste contratoId={7} podeEditar />);
     expect(await screen.findByText("Reitera o CT-122-LT-2026, enviado em 15/06/2026")).toBeTruthy();
     expect(screen.getByText("Reiterado pelo CT-245-LT-2026, enviado em 30/10/2026")).toBeTruthy();
+    // a espera do ciclo aparece so' no pleito vigente (a reiteracao); o original fica com o selo neutro
+    expect(screen.getAllByText(/^sem apostilamento há 137/)).toHaveLength(1);
+    const original = document.getElementById("oficio-10")!;
+    expect(original.textContent).not.toContain("sem apostilamento");
     // sem reemissao possivel no pleito vigente (servidor), nenhum botao de reiterar
     expect(screen.queryByRole("button", { name: "Reiterar" })).toBeNull();
   });

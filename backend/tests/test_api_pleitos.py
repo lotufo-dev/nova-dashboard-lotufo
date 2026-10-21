@@ -314,9 +314,10 @@ def test_reiteracao_pela_api_liga_ao_anterior_e_segundo_clique_nao_reenvia(api):
     assert _estado(pid)[1] == 2                                         # o original e a reiteracao, uma vez cada
     lista = {p["id"]: p for p in cl.get(f"/api/contratos/{cid}/reajuste").json()["pleitos"]}
     assert [x["id"] for x in lista[original]["reemissoes"]] == [pid] and lista[pid]["anterior"]["id"] == original
-    assert lista[original]["reemissoes_possiveis"] == [] and lista[pid]["reemissoes_possiveis"] == [
-        "reiteracao", "cronograma"]
-    assert cl.get(f"/api/contratos/{cid}/reajuste").json()["ciclos"][0]["pleito"]["id"] == pid
+    # sem aditivo depois do pleito, so' a reiteracao (a reemissao do cronograma pede aditivo)
+    assert lista[original]["reemissoes_possiveis"] == [] and lista[pid]["reemissoes_possiveis"] == ["reiteracao"]
+    ciclo = cl.get(f"/api/contratos/{cid}/reajuste").json()["ciclos"][0]
+    assert (ciclo["pleito"]["id"], ciclo["pedido"]["id"]) == (pid, original)
     # o anterior ja' foi reiterado: reiterar ele de novo e' recusado
     r = cl.post(f"/api/pleitos/{original}/reemitir", json={"reemissao": "reiteracao", "numero_oficio": "250"})
     assert r.status_code == 422 and "mais recente" in r.json()["detail"], r.text

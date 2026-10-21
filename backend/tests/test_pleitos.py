@@ -202,12 +202,20 @@ def _mtpar(c):
     c.execute("UPDATE orgaos SET familia='mtpar'"); c.commit()
 
 
+def _aditivo(c, ids, assinado_em, tipo="prazo"):
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_execucao_fim, status, "
+              "data_assinatura, numero, forma) VALUES (?, ?, 0, '2027-01-20', 'assinado', ?, '002/2026', "
+              "'termo_aditivo')", (ids["contrato"], tipo, assinado_em))
+    c.commit()
+
+
 def test_reiteracao_liga_ao_anterior_e_traz_a_carta_da_familia_b(cenario):
     c, ids = cenario
     _mtpar(c)
     original = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
     _enviar(c, ids, original, D(2026, 6, 15))
-    assert pleitos.detalhe(c, original)["reemissoes_possiveis"] == ["reiteracao", "cronograma"]
+    # sem aditivo depois do pleito, so' a reiteracao (nao ha' prazo minimo para reiterar)
+    assert pleitos.detalhe(c, original)["reemissoes_possiveis"] == ["reiteracao"]
     pid = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "245", reemite_pleito_id=original,
                         reemissao="reiteracao", hoje=D(2026, 10, 30))
     p = pleitos.detalhe(c, pid)
@@ -221,7 +229,7 @@ def test_reiteracao_liga_ao_anterior_e_traz_a_carta_da_familia_b(cenario):
     assert "reiteração" in pleitos.previa_envio(c, pid, hoje=D(2026, 10, 30))["assunto"]
 
 
-def test_reiteracao_enviada_liga_os_dois_e_reabre_a_contagem_do_ciclo(cenario):
+def test_reiteracao_enviada_liga_os_dois_e_nao_zera_a_espera_do_pedido(cenario):
     c, ids = cenario
     _mtpar(c)
     original = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
@@ -234,11 +242,12 @@ def test_reiteracao_enviada_liga_os_dois_e_reabre_a_contagem_do_ciclo(cenario):
     antes = pleitos.detalhe(c, original)
     assert [(x["id"], x["reemissao"], x["situacao"]) for x in antes["reemissoes"]] == [(pid, "reiteracao", "enviado")]
     assert antes["reemissoes_possiveis"] == []                          # so' o mais recente se reitera
-    assert pleitos.detalhe(c, pid)["reemissoes_possiveis"] == ["reiteracao", "cronograma"]
+    assert pleitos.detalhe(c, pid)["reemissoes_possiveis"] == ["reiteracao"]
     k = reajuste.ciclos(c, ids["contrato"], D(2026, 11, 4))[0]
-    assert (k["pleito"]["id"], k["dias"]) == (pid, 5)                  # o pedido sem resposta conta da reiteracao
-    a = {x["tipo"]: x for x in reajuste.avisos(c, D(2026, 11, 4))}
-    assert a["reajuste_apostilamento"]["dias"] == 5 and list(a["reajuste_apostilamento"]["publico"]) == ["operacao"]
+    # a reiteracao e' o pleito vigente, mas a espera pelo apostilamento conta do pedido original
+    assert (k["pleito"]["id"], k["pedido"]["id"], k["dias"]) == (pid, original, 142)
+    a = {x["tipo"]: x for x in reajuste.avisos(c, D(2026, 11, 4))}["reajuste_apostilamento"]
+    assert (a["dias"], a["data"]) == (142, "2026-06-15") and "diretoria" in a["publico"]
     with pytest.raises(ValueError, match="mais recente"):
         pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "250", reemite_pleito_id=original,
                       reemissao="reiteracao", hoje=D(2026, 11, 4))
@@ -251,6 +260,13 @@ def test_reiteracao_so_na_mtpar_e_na_prefeitura_e_de_pleito_enviado(cenario):
         pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "245", reemite_pleito_id=original,
                       reemissao="cronograma")
     _enviar(c, ids, original, D(2026, 6, 15))
+    # reemitir o cronograma pede aditivo de prazo ou valor assinado depois do pleito (estado `reemitir`)
+    _aditivo(c, ids, "2026-05-01")                                       # antes do pleito: nao conta
+    assert pleitos.detalhe(c, original)["reemissoes_possiveis"] == []
+    with pytest.raises(ValueError, match="aditivo"):
+        pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "260", reemite_pleito_id=original,
+                      reemissao="cronograma")
+    _aditivo(c, ids, "2026-08-01", tipo="valor")
     assert pleitos.detalhe(c, original)["reemissoes_possiveis"] == ["cronograma"]
     with pytest.raises(ValueError, match="MT-PAR"):
         pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "245", reemite_pleito_id=original,
@@ -272,6 +288,7 @@ def test_reiteracao_recusada_com_o_ciclo_apostilado(cenario):
     _mtpar(c)
     original = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
     _enviar(c, ids, original, D(2026, 6, 15))
+    _aditivo(c, ids, "2026-08-01")
     c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'ap-1', "
               "'apostilamento_reajuste', '2026-09-01', ?)", (ids["contrato"], json.dumps({"ciclo": 2026})))
     c.commit()
@@ -290,8 +307,9 @@ def test_reiteracao_sem_os_textos_no_cadastro_nao_e_oferecida(cenario):
     _enviar(c, ids, original, D(2026, 6, 15))
     c.execute("UPDATE cadastro_geral SET valor=json_remove(valor, '$.pleito_reiteracao') WHERE chave='cartas'")
     c.commit()
+    _aditivo(c, ids, "2026-08-01")
     assert pleitos.detalhe(c, original)["reemissoes_possiveis"] == ["cronograma"]
-    with pytest.raises(ValueError, match="pleito_reiteracao"):
+    with pytest.raises(ValueError, match="carta de reiteração ainda não está no cadastro"):
         pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "245", reemite_pleito_id=original,
                       reemissao="reiteracao")
 

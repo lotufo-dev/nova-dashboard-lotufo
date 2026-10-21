@@ -171,7 +171,15 @@ def _recusa_reemissao(conn, anterior: dict, reemissao: str, familia: str | None)
         if familia not in FAMILIAS_REITERACAO:
             return "A reiteração é da MT-PAR e da Prefeitura; nos outros órgãos, reemita o cronograma"
         if not _textos_reiteracao(conn):        # sem eles a carta nao monta e o rascunho travaria o ciclo
-            return "Textos da reiteração (pleito_reiteracao) não carregados: rode `cadastro aplicar`"
+            return "O texto da carta de reiteração ainda não está no cadastro"
+    elif reemissao == "cronograma":
+        # spec 2026-10-20 §2.2, estado `reemitir`: aditivo de prazo ou valor assinado depois do ultimo pleito
+        # enviado (o ultimo pedido: a reiteracao nao traz cronograma)
+        pedido = reajuste._pleito(conn, anterior["contrato_id"], anterior["data_base_mes"], anterior["ciclo"],
+                                  sem_reiteracao=True) or anterior
+        if not reajuste.aditivo_depois(conn, anterior["contrato_id"], pedido["enviado_em"]):
+            return ("Não há aditivo de prazo ou valor assinado depois do último pleito: o cronograma de reajuste "
+                    "só se reemite depois de um aditivo")
     # o apostilamento fecha o ciclo (spec 2026-09-21 §7.2): como o antigo "Reenviar pleito", nada se reemite depois
     if _apostilado(conn, anterior):
         return "O ciclo já está apostilado: não há o que reiterar nem reemitir"

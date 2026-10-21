@@ -209,6 +209,49 @@ def test_reiteracao_enviada_nao_derruba_o_cronograma_e_a_reemissao_depois_dela_d
     assert vig() == {"2026-08": (200_03, novo)}
 
 
+def test_reemissao_enviada_sem_previsoes_proprias_nao_derruba_o_anterior(cenario):
+    """Gate Sol da PR #319: a reemissao enviada so' derruba o cronograma do anterior quando ja' tem previsoes
+    gravadas (a leitura da planilha e' outro passo); antes disso o previsto do anterior segue valendo."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    antigo = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _previsao(c, cid, "2026-07", 100_01, "pleito", pleito_id=antigo)
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo, situacao, enviado_em, reemite_pleito_id, "
+              "reemissao) VALUES (?, 'reajuste', '2024-06', 2026, 'enviado', '2026-10-02', ?, 'cronograma')",
+              (cid, antigo))
+    novo = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    c.commit()
+    vig = lambda: {p["competencia"]: (p["valor_previsto_centavos"], p["pleito_id"])  # noqa: E731
+                   for p in reajuste.previsoes_vigentes(c, cid)}
+    assert vig() == {"2026-07": (100_01, antigo)}                       # sem previsoes da reemissao: o anterior fica
+    _previsao(c, cid, "2026-08", 300_05, "pleito", pleito_id=novo)
+    assert vig() == {"2026-08": (300_05, novo)}                         # com elas, o anterior sai
+
+
+def test_reiteracao_nao_zera_a_espera_do_apostilamento_nem_tira_a_diretoria(cenario):
+    """Revisor da PR #319: original ha' mais de 90 dias e reiteracao hoje; o atraso conta do pedido original."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    original = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo, situacao, enviado_em, reemite_pleito_id, "
+              "reemissao) VALUES (?, 'reajuste', '2024-06', 2026, 'enviado', '2026-10-10', ?, 'reiteracao')",
+              (cid, original))
+    reiteracao = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    c.commit()
+    k = reajuste.ciclos(c, cid, D(2026, 10, 10))[0]
+    assert (k["pleito"]["id"], k["pedido"]["id"], k["dias"]) == (reiteracao, original, 122)
+    a = {x["tipo"]: x for x in reajuste.avisos(c, D(2026, 10, 10))}["reajuste_apostilamento"]
+    assert "diretoria" in a["publico"] and (a["dias"], a["data"]) == (122, "2026-06-10")
+    # a reemissao do cronograma e' pedido novo: a espera recomeca dela
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo, situacao, enviado_em, reemite_pleito_id, "
+              "reemissao) VALUES (?, 'reajuste', '2024-06', 2026, 'enviado', '2026-10-20', ?, 'cronograma')",
+              (cid, reiteracao))
+    c.commit()
+    assert reajuste.ciclos(c, cid, D(2026, 10, 25))[0]["dias"] == 5
+
+
 def test_previsao_vigente_compara_a_hora_e_nao_o_texto(cenario):
     """Carga com data ISO ('T') ou so' o dia nao pode passar na frente de um registro mais novo."""
     c, ids = cenario

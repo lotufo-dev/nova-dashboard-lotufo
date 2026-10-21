@@ -39,11 +39,26 @@ def _apostilamento(conn, contrato_id: int, mes_base: str, ciclo: int, unica: boo
     return None
 
 
-def _pleito(conn, contrato_id: int, mes_base: str, ciclo: int) -> dict | None:
-    """O ultimo pleito enviado do ciclo vale (reemissao a cada aditivo e' novo pleito no mesmo ciclo)."""
+def _pleito(conn, contrato_id: int, mes_base: str, ciclo: int, sem_reiteracao: bool = False) -> dict | None:
+    """O ultimo pleito enviado do ciclo vale (reemissao a cada aditivo e' novo pleito no mesmo ciclo).
+    `sem_reiteracao`: o ultimo PEDIDO (pleito original ou reemissao do cronograma). A reiteracao (issue #277) so'
+    cobra o pedido; o tempo sem apostilamento e o "ultimo pleito" do aditivo contam dele, nao dela."""
+    filtro = "AND COALESCE(reemissao, '') <> 'reiteracao' " if sem_reiteracao else ""
     r = conn.execute("SELECT * FROM pleitos WHERE contrato_id=? AND tipo='reajuste' AND data_base_mes=? AND ciclo=? "
-                     "AND situacao='enviado' ORDER BY enviado_em DESC, id DESC LIMIT 1",
+                     f"AND situacao='enviado' {filtro}ORDER BY enviado_em DESC, id DESC LIMIT 1",
                      (contrato_id, mes_base, ciclo)).fetchone()
+    return dict(r) if r else None
+
+
+def aditivo_depois(conn, contrato_id: int, desde: str | None) -> dict | None:
+    """Aditivo de prazo ou valor assinado depois de `desde` (spec 2026-10-20 §2.2, estado `reemitir`): o que
+    pede a reemissao do cronograma de reajuste. Sem `desde`, nenhum."""
+    if not desde:
+        return None
+    r = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND status='assinado' "
+                     "AND tipo IN ('prazo','valor','misto') AND data_assinatura IS NOT NULL "
+                     "AND substr(data_assinatura, 1, 10) > ? ORDER BY data_assinatura DESC, id DESC LIMIT 1",
+                     (contrato_id, desde[:10])).fetchone()
     return dict(r) if r else None
 
 
@@ -61,16 +76,20 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
 
     A reiteracao (issue #277, migracao 050) nao traz cronograma: nao derruba o pleito que reitera. A reemissao do
     cronograma derruba o pleito que ela aponta e, subindo pelas reiteracoes no meio, o pleito que elas reiteram
-    (original -> reiteracao -> cronograma novo: o original sai)."""
+    (original -> reiteracao -> cronograma novo: o original sai), mas so' depois que a reemissao tem previsoes
+    proprias gravadas."""
     ordem = " ".join(f"WHEN '{o}' THEN {i}" for i, o in enumerate(ORDEM_ORIGEM))
     filtro, args = ("AND p.data_base_mes=?", (contrato_id, contrato_id, data_base_mes)) if data_base_mes is not None \
         else ("", (contrato_id, contrato_id))
     rows = conn.execute(
         # `derrubado`: os pleitos cujo cronograma uma reemissao enviada substituiu (sem `reemissao`, antes da 050,
         # a reemissao conta como cronograma)
+        # a reemissao so' derruba quando ja' tem previsoes proprias gravadas (a leitura da planilha do pleito e'
+        # outro passo): sem elas o previsto do anterior segue, em vez de cair para manual ou zero
         f"WITH RECURSIVE derrubado(id) AS (SELECT r.reemite_pleito_id FROM pleitos r WHERE r.contrato_id=? "
         f"AND r.situacao = 'enviado' AND r.reemite_pleito_id IS NOT NULL "
         f"AND COALESCE(r.reemissao, 'cronograma') = 'cronograma' "
+        f"AND EXISTS (SELECT 1 FROM reajuste_previsoes x WHERE x.pleito_id = r.id AND x.origem = 'pleito') "
         f"UNION SELECT q.reemite_pleito_id FROM derrubado d JOIN pleitos q ON q.id = d.id "
         f"WHERE q.reemissao = 'reiteracao' AND q.reemite_pleito_id IS NOT NULL) "
         f"SELECT * FROM (SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.data_base_mes, p.ciclo, p.competencia "
@@ -97,19 +116,22 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
             y = int(b["mes"][:4]) + 1
             aniv = aniversario(b["mes"], y)
             out.append({"data_base_mes": b["mes"], "indice": b["indice"], "aplica_a": b["aplica_a"], "ciclo": y, "aniversario": aniv.isoformat(),
-                        "situacao": "futuro", "dias": (aniv - hoje).days, "pleito": None, "apostilamento": None})
+                        "situacao": "futuro", "dias": (aniv - hoje).days, "pleito": None, "pedido": None,
+                        "apostilamento": None})
             continue
         aniv = aniversario(b["mes"], y)
         ap = _apostilamento(conn, contrato_id, b["mes"], y, len(bases) == 1)
         pl = _pleito(conn, contrato_id, b["mes"], y)
+        # o pedido que espera o apostilamento: a reiteracao nao zera a espera (issue #277)
+        pd = _pleito(conn, contrato_id, b["mes"], y, sem_reiteracao=True) or pl
         if ap:
             sit, dias = "apostilado", None
         elif pl:
-            sit, dias = "apostilamento_pendente", (hoje - datetime.date.fromisoformat(pl["enviado_em"][:10])).days
+            sit, dias = "apostilamento_pendente", (hoje - datetime.date.fromisoformat(pd["enviado_em"][:10])).days
         else:
             sit, dias = "pleito_pendente", (aniv - hoje).days
         out.append({"data_base_mes": b["mes"], "indice": b["indice"], "aplica_a": b["aplica_a"], "ciclo": y, "aniversario": aniv.isoformat(),
-                    "situacao": sit, "dias": dias, "pleito": pl, "apostilamento": ap})
+                    "situacao": sit, "dias": dias, "pleito": pl, "pedido": pd, "apostilamento": ap})
     return out
 
 
@@ -143,6 +165,6 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                                         f"pleito da data-base {base} enviado há {k['dias']} dias; "
                                         f"apostilamento pendente", c["id"], nome, dias=k["dias"],
                                         publico=publico, destino=destino,
-                                        data=k["pleito"]["enviado_em"][:10], sentido="desde"),
+                                        data=(k.get("pedido") or k["pleito"])["enviado_em"][:10], sentido="desde"),
                             "data_base_mes": k["data_base_mes"]})
     return out
