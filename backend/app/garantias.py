@@ -73,3 +73,43 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
             out.append({"tipo": "garantia_vencendo", "nivel": nivel, "publico": ["operacao", "diretoria"],
                         "contrato_id": cid, "dias": dias, "data": g["vigencia_fim"], "mensagem": msg})
     return out
+
+
+def _folga_dias(conn, c: dict) -> int:
+    """Folga entre execucao e vigencia: a do contrato, senao a do orgao, senao 0 (mesma regra de `prazos`)."""
+    if c.get("folga_vigencia_dias") is not None:
+        return int(c["folga_vigencia_dias"])
+    if c.get("orgao_id"):
+        r = conn.execute("SELECT regras FROM orgaos WHERE id=?", (c["orgao_id"],)).fetchone()
+        folga = json.loads(r["regras"] or "{}").get("folga_vigencia_dias") if r else None
+        if folga is not None:
+            return int(folga)
+    return 0
+
+
+def cobertura_exigida(conn, contrato_id: int) -> str | None:
+    """Ate' quando a garantia precisa valer: fim de execucao vigente + folga do orgao (issue #294, D10)."""
+    from app import contratos
+    v = contratos.vigente(conn, contrato_id)
+    exe = _d(v.get("execucao_fim_vigente"))
+    return (exe + datetime.timedelta(days=_folga_dias(conn, v))).isoformat() if exe else None
+
+
+def avisos_cobertura(conn, hoje: datetime.date | None = None) -> list[dict]:
+    """Garantia que nao cobre o fim de execucao vigente + folga: "Endosso necessario ate' dd/mm".
+
+    Soma-se ao `garantia_vencendo` (que olha so' a vigencia da apolice). Some quando o endosso com vigencia
+    suficiente entra (a `garantia()` ja' o considera) ou o contrato e' baixado/encerrado.
+    """
+    hoje = hoje or tempo.hoje_local()
+    out = []
+    for r in conn.execute("SELECT id FROM contratos WHERE estado='ativo' ORDER BY id"):
+        cid = r["id"]
+        g = garantia(conn, cid, hoje)
+        exigida = cobertura_exigida(conn, cid) if g and not g["baixada"] else None
+        if exigida and g["vigencia_fim"][:10] < exigida:
+            br = f"{exigida[8:10]}/{exigida[5:7]}/{exigida[:4]}"
+            out.append({"tipo": "garantia_aquem_execucao", "nivel": "acao", "publico": ["operacao", "diretoria"],
+                        "contrato_id": cid, "dias": (_d(exigida) - hoje).days, "data": exigida,
+                        "mensagem": f"Endosso necessário até {br}: a garantia não cobre o fim da execução"})
+    return out
