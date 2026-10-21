@@ -139,7 +139,9 @@ def _carregar_medicoes(args) -> int:
     if not caminho.is_file():
         print(f"Arquivo não encontrado: {caminho}")
         return 1
-    conn = db.get_conn()
+    # Somente leitura: o ensaio não pode gravar nem o modo do diário do banco
+    conn = sqlite3.connect(f"{db.db_path().resolve().as_uri()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
     try:
         rel = carga_medicoes.ensaiar(conn, caminho)
     except carga_medicoes.CsvInvalido as e:
@@ -160,6 +162,9 @@ def _carregar_medicoes(args) -> int:
 def _cadastro(args) -> int:
     if args.acao == "carregar-medicoes":
         return _carregar_medicoes(args)
+    if args.arquivo:
+        print(f"`cadastro {args.acao}` não recebe arquivo (use `cadastro carregar-medicoes {args.arquivo} --ensaio`)")
+        return 1
     raiz = Path(args.raiz) if args.raiz else raiz_padrao()
     print(f"Cadastro lido de: {raiz}" + (" (exemplo fictício)" if raiz.resolve() == EXEMPLO.resolve() else ""))
     try:

@@ -15,7 +15,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from app import dinheiro
+from app import contratos, dinheiro
 from app.cadastro_arquivos import slug
 
 TIPOS = ("execucao", "projeto", "reajuste")
@@ -45,6 +45,8 @@ class CsvInvalido(ValueError):
 
 
 def _normalizar(texto: str) -> str:
+    # "n°" (grau, comum no Excel) vale "nº"; o ponto de "nº." cai
+    texto = texto.replace("°", "º").replace("º.", "º")
     ascii_ = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"\s+", " ", ascii_.strip().lower())
 
@@ -102,21 +104,29 @@ def ler_csv(caminho: Path) -> list[tuple[int, dict]]:
         nome = _normalizar(coluna)
         if nome not in COLUNAS:
             raise CsvInvalido(f"coluna desconhecida no cabeçalho: {coluna!r}")
+        if COLUNAS[nome] in campos:
+            raise CsvInvalido(f"coluna repetida no cabeçalho: {coluna!r}")
         campos.append(COLUNAS[nome])
     faltam = [c for c in OBRIGATORIAS if c not in campos]
     if faltam:
         raise CsvInvalido(f"faltam colunas no cabeçalho: {', '.join(faltam)}")
-    linhas = []
+    linhas, inicio = [], leitor.line_num + 1
     for celulas in leitor:
+        n_linha, inicio = inicio, leitor.line_num + 1      # a linha onde o registro COMECA (celula com quebra)
         if not any(c.strip() for c in celulas):
             continue
-        linhas.append((leitor.line_num, {campo: (celulas[i].strip() if i < len(celulas) else "")
-                                         for i, campo in enumerate(campos)}))
+        dados = {campo: celulas[i].strip() for i, campo in enumerate(campos) if i < len(celulas)}
+        if len(celulas) != len(campos):
+            # Valor com virgula sem aspas num CSV separado por virgula desloca as colunas: nunca adivinhar
+            dados["_erro"] = f"a linha tem {len(celulas)} colunas e o cabeçalho tem {len(campos)}"
+        linhas.append((n_linha, dados))
     return linhas
 
 
 def _interpretar(bruto: dict, janela: tuple[str, str] | None) -> dict:
     """Valida e converte uma linha. ValueError com a mensagem do primeiro problema."""
+    if bruto.get("_erro"):
+        raise ValueError(bruto["_erro"])
     numero = bruto.get("numero", "")
     if not re.fullmatch(r"[0-9]+", numero) or int(numero) < 1:
         raise ValueError(f"nº inválido: {numero!r}")
@@ -144,9 +154,10 @@ def contrato_da_obra(conn, obra: str):
     return achados[0]
 
 
-def _janela(contrato) -> tuple[str, str] | None:
-    """Competencias aceitas: do mes do inicio ao mes do fim da vigencia. Sem as duas datas, nao confere."""
-    ini, fim = contrato["vigencia_inicio"], contrato["vigencia_fim"]
+def _janela(conn, contrato) -> tuple[str, str] | None:
+    """Competencias aceitas: do mes do inicio ao mes do fim da vigencia, com os aditivos de prazo assinados.
+    Sem as duas datas, nao confere."""
+    ini, fim = contrato["vigencia_inicio"], contratos.vigente(conn, contrato["id"])["vigencia_fim_vigente"]
     return (ini[:7], fim[:7]) if ini and fim else None
 
 
@@ -154,7 +165,7 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
     """Relatorio do ensaio. `obra` padrao: o nome do arquivo sem extensao. So' le o banco."""
     obra = obra or caminho.stem
     contrato = contrato_da_obra(conn, obra)
-    janela = _janela(contrato)
+    janela = _janela(conn, contrato)
     existentes = {(m["numero"], m["tipo"]): m for m in conn.execute(
         "SELECT numero, tipo, competencia, valor_protocolado_centavos, valor_atestado_centavos "
         "FROM medicoes WHERE contrato_id=?", (contrato["id"],))}
@@ -180,11 +191,17 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
             linhas.append({**item, "categoria": "conflito",
                            "detalhe": f"banco tem competência {m['competencia']}"})
         else:
-            difs = [f"{rotulo}: banco {_fmt(m[col])}, CSV {_fmt(d[campo])}"
-                    for rotulo, campo, col in (("pedido", "valor_pedido", "valor_protocolado_centavos"),
-                                               ("aprovado", "valor_aprovado", "valor_atestado_centavos"))
-                    if d[campo] is not None and d[campo] != m[col]]
-            linhas.append({**item, "categoria": "valor diferente" if difs else "igual", "detalhe": "; ".join(difs)})
+            difs, vazios = [], []
+            for rotulo, campo, col in (("pedido", "valor_pedido", "valor_protocolado_centavos"),
+                                       ("aprovado", "valor_aprovado", "valor_atestado_centavos")):
+                if d[campo] is None:
+                    # Celula vazia = o CSV nao informa (nao e' zero): nao compara, mas o relatorio diz
+                    if m[col] is not None:
+                        vazios.append(f"{rotulo} vazio no CSV, banco {_fmt(m[col])}")
+                elif d[campo] != m[col]:
+                    difs.append(f"{rotulo}: banco {_fmt(m[col])}, CSV {_fmt(d[campo])}")
+            linhas.append({**item, "categoria": "valor diferente" if difs else "igual",
+                           "detalhe": "; ".join(difs + vazios)})
     totais = {c: sum(1 for li in linhas if li["categoria"] == c) for c in CATEGORIAS}
     return {"obra": obra, "contrato": contrato["nome_curto"], "linhas": linhas, "totais": totais}
 

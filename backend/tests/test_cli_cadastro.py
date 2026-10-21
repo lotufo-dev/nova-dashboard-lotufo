@@ -383,3 +383,72 @@ def test_carregar_medicoes_obra_desconhecida_ou_cabecalho_errado_sai_um(tmp_path
 def test_carregar_medicoes_converte_reais_com_virgula_em_centavos(texto, centavos):
     from app import carga_medicoes
     assert carga_medicoes._valor(texto, "valor pedido") == centavos
+
+
+def _ensaio(tmp_path, linhas, capsys, nome="obra-propria.csv"):
+    arq = tmp_path / nome
+    arq.write_text("\n".join(linhas) + "\n", "utf-8")
+    capsys.readouterr()
+    codigo = cli.main(["cadastro", "carregar-medicoes", str(arq), "--ensaio"])
+    return codigo, capsys.readouterr().out
+
+
+def test_carregar_medicoes_linha_com_colunas_a_mais_e_erro_e_nao_valor(tmp_path, monkeypatch, capsys):
+    """Valor com vírgula sem aspas num CSV separado por vírgula desloca as colunas: erro, nunca R$ 412.345,00."""
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _ensaio(tmp_path, ["nº,tipo,competência,valor pedido", "1,execucao,2025-04,412.345,67"], capsys)
+    assert codigo == 0
+    assert "linha 2: nº 1 execucao: erro (a linha tem 5 colunas e o cabeçalho tem 4)" in saida
+
+
+def test_carregar_medicoes_cabecalho_com_grau_e_coluna_repetida(tmp_path, monkeypatch, capsys):
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _ensaio(tmp_path, ["N°;Tipo;Competência;Nº. do órgão", "1;execucao;2025-04;1"], capsys)
+    assert codigo == 0 and "linha 2: nº 1 execucao 2025-04: nova" in saida
+    codigo, saida = _ensaio(tmp_path, ["nº;tipo;competência;valor pedido;Valor Pedido"], capsys)
+    assert codigo == 1 and "coluna repetida no cabeçalho: 'Valor Pedido'" in saida
+
+
+def test_carregar_medicoes_competencia_vale_ate_o_fim_do_aditivo_de_prazo(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, nova_vigencia_fim, status, data_assinatura) "
+                 "VALUES (?, 'prazo', '2027-06-30', 'assinado', '2026-11-01')", (cid,))
+    conn.commit()
+    codigo, saida = _ensaio(tmp_path, [CAB, "7;7;execucao;2027-03;;1,00;;;;;;;planilha"], capsys)
+    assert "linha 2: nº 7 execucao 2027-03: nova" in saida
+
+
+def test_carregar_medicoes_valor_vazio_no_csv_e_dito_no_relatorio(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos,"
+                 " valor_atestado_centavos) VALUES (?,1,'execucao','2025-04','protocolada',100,90)", (cid,))
+    conn.commit()
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;1,00;;;;;;;planilha"], capsys)
+    assert "linha 2: nº 1 execucao 2025-04: igual (aprovado vazio no CSV, banco R$ 0,90)" in saida
+
+
+def test_carregar_medicoes_celula_com_quebra_de_linha_numera_pelo_inicio(tmp_path, monkeypatch, capsys):
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _ensaio(tmp_path, [CAB, '1;1;execucao;2025-04;;1,00;;;;;;;"fonte em', 'duas linhas"',
+                                       "2;2;aditivo;2025-05;;1,00;;;;;;;planilha"], capsys)
+    assert "linha 2: nº 1 execucao 2025-04: nova" in saida
+    assert "linha 4: nº 2 aditivo: erro" in saida
+
+
+def test_aplicar_com_arquivo_por_engano_recusa_sem_gravar(tmp_path, monkeypatch, capsys):
+    conn = _banco(tmp_path, monkeypatch)
+    monkeypatch.delenv("DASH_CADASTRO_DIR", raising=False)
+    assert cli.main(["cadastro", "aplicar", "obra-propria.csv", "--usuario", "leo@l.com"]) == 1
+    assert "não recebe arquivo" in capsys.readouterr().out
+    assert conn.execute("SELECT COUNT(*) FROM contratos").fetchone()[0] == 0
+
+
+def test_carregar_medicoes_abre_o_banco_so_para_leitura(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.close()
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;1,00;;;;;;;planilha"], capsys)
+    assert codigo == 0 and "nova 1" in saida
+    import sqlite3
+    c = sqlite3.connect(tmp_path / "t.db")
+    assert c.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
