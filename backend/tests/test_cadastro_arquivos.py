@@ -467,12 +467,12 @@ def test_endosso_de_outra_apolice_gera_aviso_nao_erro(tmp_path):
 
 
 def test_natureza_do_instrumento_de_valor_padrao_execucao_e_aceita_reajuste(tmp_path):
-    """#262: aditivo de valor ganha `natureza` (execucao|reajuste); sem o campo, execucao."""
+    """#262: aditivo de valor ganha `natureza` (execucao|reajuste); sem o campo, None (nao classificado = execucao)."""
     reaj = {"chave": "ta-08", "tipo": "aditivo_valor", "data": "2026-09-01", "delta_valor": "1.000,01",
             "natureza": "reajuste"}
     c = {**CONTRATO, "instrumentos": [*CONTRATO["instrumentos"], reaj]}
     insts = ca.preparar(_escrever(tmp_path, contratos=[c]))["contratos"][0]["instrumentos"]
-    assert [i["natureza"] for i in insts] == ["execucao", "reajuste"]
+    assert [i["natureza"] for i in insts] == [None, "reajuste"]
     assert "natureza" not in insts[1]["dados"]
 
 

@@ -346,8 +346,8 @@ def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
 
 
 # O que torna um aditivo o que ele e': nao muda depois de aplicado (correcao e' instrumento
-# novo). Numero, objeto e forma sao descricao e podem ser corrigidos. A natureza (#262) tambem: classifica o
-# mesmo documento (nao muda valor nem data), e o aditivo carregado antes dela nasceu `execucao`.
+# novo). Numero, objeto e forma sao descricao e podem ser corrigidos. A natureza (#262) aceita so' a primeira
+# classificacao de um aditivo sem natureza (NULL) e trava depois (ver `_aditivo`).
 _IMUTAVEL_ADITIVO = ("tipo", "delta_valor_centavos", "nova_execucao_fim", "nova_vigencia_fim",
                      "data_assinatura")
 
@@ -386,7 +386,8 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
             "nova_execucao_fim": inst["nova_execucao_fim"], "nova_vigencia_fim": inst["nova_vigencia_fim"],
             "data_assinatura": inst["data"], "numero": inst["numero"], "objeto": inst["objeto"],
             "forma": "apostilamento" if inst["tipo"].startswith("apostilamento") else "termo_aditivo",
-            "natureza": inst.get("natureza", "execucao")}
+            # None = nao classificado (conta como execucao); so' o que o YAML declara e' gravado
+            "natureza": inst.get("natureza")}
     ja = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=?",
                       (contrato_id, inst["chave"])).fetchone()
     if ja is None:
@@ -411,6 +412,12 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
             raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
                              f"({campo}: {ja[campo]!r} → {novo[campo]!r}); registre um instrumento novo "
                              "com `corrige`")
+    # #262: a natureza se classifica UMA vez. O aditivo sem classificacao (NULL: aplicado antes da 046, ou sem o
+    # campo no YAML) aceita a primeira, auditada; depois trava como os imutaveis -- inclusive apagar o campo.
+    if ja["natureza"] is not None and ja["natureza"] != novo["natureza"]:
+        raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
+                         f"(natureza: {ja['natureza']!r} → {novo['natureza']!r}); registre um instrumento novo "
+                         "com `corrige`")
     antes, depois = _diferencas(dict(ja), {k: novo[k] for k in ("numero", "objeto", "forma", "natureza")})
     if not depois:
         rel["iguais"] += 1

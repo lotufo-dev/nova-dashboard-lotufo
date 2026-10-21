@@ -166,7 +166,7 @@ def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
         except ValueError as e:
             falha("delta_valor", str(e))
     natureza = bruto.get("natureza")
-    inst["natureza"] = "execucao"
+    inst["natureza"] = None       # sem o campo: nao classificado, conta como execucao (`contratos.vigente`)
     if natureza is not None:
         if tipo not in TIPOS_COM_NATUREZA:
             falha("natureza", f"só vale para instrumento de valor ({', '.join(TIPOS_COM_NATUREZA)})")
