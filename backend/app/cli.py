@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from app import auth, cadastro_aplicar, cadastro_arquivos, conciliacao, db, documentos, legado
+from app import auth, cadastro_aplicar, cadastro_arquivos, carga_medicoes, conciliacao, db, documentos, legado
 
 REPOSITORIO = Path(__file__).resolve().parent.parent.parent
 EXEMPLO = REPOSITORIO / "cadastro-exemplo"
@@ -126,7 +126,40 @@ def _de_outro_cadastro(conn, cad: dict) -> list[str]:
     return achados
 
 
+def _carregar_medicoes(args) -> int:
+    """`cadastro carregar-medicoes <obra>.csv --ensaio` (issue #258): confere o histórico de medições de uma
+    obra contra o banco e imprime o relatório. Só ensaio por enquanto: não grava nada."""
+    if not args.arquivo:
+        print("`cadastro carregar-medicoes` exige o arquivo <obra>.csv")
+        return 1
+    if not args.ensaio:
+        print("Gravar ainda não existe: rode com --ensaio para ver o relatório (nada é gravado).")
+        return 1
+    caminho = Path(args.arquivo)
+    if not caminho.is_file():
+        print(f"Arquivo não encontrado: {caminho}")
+        return 1
+    conn = db.get_conn()
+    try:
+        rel = carga_medicoes.ensaiar(conn, caminho)
+    except carga_medicoes.CsvInvalido as e:
+        print(f"CSV recusado, nada foi lido: {e}")
+        return 1
+    finally:
+        conn.close()
+    print(f"ENSAIO (nada foi gravado): {rel['contrato']} ({caminho.name})")
+    for li in rel["linhas"]:
+        rotulo = f"linha {li['linha']}: nº {li['numero']} {li['tipo']}"
+        if li.get("competencia"):
+            rotulo += f" {li['competencia']}"
+        print(f"  {rotulo}: {li['categoria']}" + (f" ({li['detalhe']})" if li["detalhe"] else ""))
+    print("Total: " + ", ".join(f"{c} {n}" for c, n in rel["totais"].items()))
+    return 0
+
+
 def _cadastro(args) -> int:
+    if args.acao == "carregar-medicoes":
+        return _carregar_medicoes(args)
     raiz = Path(args.raiz) if args.raiz else raiz_padrao()
     print(f"Cadastro lido de: {raiz}" + (" (exemplo fictício)" if raiz.resolve() == EXEMPLO.resolve() else ""))
     try:
@@ -234,7 +267,8 @@ def main(argv: list[str] | None = None) -> int:
     ca.add_argument("--nome", required=True)
     ca.add_argument("--email", required=True)
     cad = sub.add_parser("cadastro")
-    cad.add_argument("acao", choices=["validar", "aplicar"])
+    cad.add_argument("acao", choices=["validar", "aplicar", "carregar-medicoes"])
+    cad.add_argument("arquivo", nargs="?", help="CSV da obra (<obra>.csv), só em `carregar-medicoes`")
     cad.add_argument("--raiz", help="pasta do cadastro (padrão: DASH_CADASTRO_DIR, ou cadastro-exemplo/)")
     cad.add_argument("--usuario", help="e-mail de quem aplica (obrigatório em `aplicar`)")
     cad.add_argument("--ensaio", action="store_true", help="mostra o que mudaria e não grava")

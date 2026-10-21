@@ -290,3 +290,96 @@ def test_cadastro_exemplo_so_tem_dado_ficticio():
     cnpjs = {re.sub(r"\D", "", c) for c in re.findall(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}", texto)}
     assert cnpjs == {ficticios.ORGAO_A, ficticios.LOTUFO, ficticios.INTEGRA, ficticios.GUAXE}     # os de tests/ficticios.py
     assert all(entidades.cnpj_valido(c) for c in cnpjs)
+
+
+# --- carregar-medicoes --ensaio (issue #258) ---
+
+CAB = ("nº;nº do órgão;tipo;competência;período;valor pedido;valor aprovado;data da aprovação;meio;"
+       "nº do processo no órgão;data do protocolo da nota;NF;fonte")
+
+
+def _com_exemplo_aplicado(tmp_path, monkeypatch):
+    monkeypatch.delenv("DASH_CADASTRO_DIR", raising=False)
+    conn = _banco(tmp_path, monkeypatch)
+    assert cli.main(["cadastro", "aplicar", "--usuario", "leo@l.com"]) == 0
+    return conn, conn.execute("SELECT id FROM contratos WHERE nome_curto='Obra Própria'").fetchone()[0]
+
+
+def _foto(conn):
+    return [conn.execute(f"SELECT COUNT(*), COALESCE(SUM(id), 0) FROM {t}").fetchone()[:]
+            for t in ("medicoes", "medicao_atestos", "audit_log", "contrato_eventos")] + [
+        [tuple(r) for r in conn.execute("SELECT * FROM medicoes ORDER BY id")]]
+
+
+def test_carregar_medicoes_ensaio_com_o_csv_de_exemplo_relata_e_totaliza(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    capsys.readouterr()
+    csv_ = cli.EXEMPLO / "medicoes" / "obra-propria.csv"
+    assert cli.main(["cadastro", "carregar-medicoes", str(csv_), "--ensaio"]) == 0
+    saida = capsys.readouterr().out
+    assert "ENSAIO (nada foi gravado): Obra Própria" in saida
+    assert "linha 2: nº 1 execucao 2025-04: nova" in saida
+    assert "linha 5: nº 1 reajuste 2025-06: nova" in saida
+    assert "Total: nova 4, igual 0, valor diferente 0, conflito 0, erro 0" in saida
+
+
+def test_carregar_medicoes_ensaio_classifica_e_nao_grava(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    for numero, tipo, comp, pedido, aprovado in ((1, "execucao", "2025-04", 41234567, 41234567),
+                                                 (2, "execucao", "2025-05", 53890010, 52000000),
+                                                 (3, "execucao", "2025-06", 60125000, None)):
+        conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos,"
+                     " valor_atestado_centavos) VALUES (?,?,?,?,'protocolada',?,?)", (cid, numero, tipo, comp, pedido, aprovado))
+    conn.commit()
+    linhas = [CAB,
+              "1;1;execucao;2025-04;;412.345,67;412.345,67;20/05/2025;e-mail;P1;;;boletim",       # igual
+              "2;2;execução;2025-05;;538.900,10;530.000,00;18/06/2025;e-mail;P2;;;boletim",       # aprovado difere
+              "3;3;execucao;2025-07;;601.250,00;;;;;;;planilha",                                  # conflito
+              "4;4;execucao;2025-08;;1.234,56;;;;;;;planilha",                                    # nova
+              "5;5;execucao;2025-09;;12.34;;;;;;;planilha",                                       # valor inválido
+              "6;6;aditivo;2025-09;;1,00;;;;;;;planilha",                                         # tipo desconhecido
+              "7;7;execucao;2027-03;;1,00;;;;;;;planilha",                                        # fora do contrato
+              "4;4;execucao;2025-08;;1,00;;;;;;;planilha"]                                        # chave repetida
+    arq = tmp_path / "obra-propria.csv"
+    arq.write_text("\n".join(linhas) + "\n", "utf-8")
+    antes = _foto(conn)
+    capsys.readouterr()
+    assert cli.main(["cadastro", "carregar-medicoes", str(arq), "--ensaio"]) == 0
+    saida = capsys.readouterr().out
+    assert "linha 2: nº 1 execucao 2025-04: igual" in saida
+    assert "linha 3: nº 2 execucao 2025-05: valor diferente (aprovado: banco R$ 520.000,00, CSV R$ 530.000,00)" in saida
+    assert "linha 4: nº 3 execucao 2025-07: conflito (banco tem competência 2025-06)" in saida
+    assert "linha 5: nº 4 execucao 2025-08: nova" in saida
+    assert "linha 6: nº 5 execucao: erro (valor pedido" in saida
+    assert "linha 7: nº 6 aditivo: erro (tipo desconhecido" in saida
+    assert "linha 8: nº 7 execucao: erro (competência 2027-03 fora do contrato (2025-03 a 2026-12))" in saida
+    assert "linha 9: nº 4 execucao 2025-08: erro (nº 4 execucao repetido (já na linha 5))" in saida
+    assert "Total: nova 1, igual 1, valor diferente 1, conflito 1, erro 4" in saida
+    assert _foto(conn) == antes
+
+
+def test_carregar_medicoes_sem_ensaio_recusa_e_nao_grava(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    antes = _foto(conn)
+    assert cli.main(["cadastro", "carregar-medicoes", str(cli.EXEMPLO / "medicoes" / "obra-propria.csv")]) == 1
+    assert "--ensaio" in capsys.readouterr().out
+    assert _foto(conn) == antes
+
+
+def test_carregar_medicoes_obra_desconhecida_ou_cabecalho_errado_sai_um(tmp_path, monkeypatch, capsys):
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    arq = tmp_path / "nao-existe.csv"
+    arq.write_text(CAB + "\n", "utf-8")
+    assert cli.main(["cadastro", "carregar-medicoes", str(arq), "--ensaio"]) == 1
+    assert "obra 'nao-existe' não encontrada" in capsys.readouterr().out
+    arq = tmp_path / "obra-propria.csv"
+    arq.write_text("nº;tipo;valor\n1;execucao;1,00\n", "utf-8")
+    assert cli.main(["cadastro", "carregar-medicoes", str(arq), "--ensaio"]) == 1
+    assert "coluna desconhecida no cabeçalho: 'valor'" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("texto,centavos", [("1.234,56", 123456), ("R$ 1.234,56", 123456), ("0,5", 50),
+                                            ("4.075.275,90", 407527590)])
+def test_carregar_medicoes_converte_reais_com_virgula_em_centavos(texto, centavos):
+    from app import carga_medicoes
+    assert carga_medicoes._valor(texto, "valor pedido") == centavos
