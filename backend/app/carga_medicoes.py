@@ -89,7 +89,10 @@ def _valor(texto: str, campo: str) -> int | None:
 
 
 def _ler_texto(caminho: Path) -> str:
-    bruto = caminho.read_bytes()
+    try:
+        bruto = caminho.read_bytes()
+    except OSError:
+        raise CsvInvalido(f"não foi possível ler o arquivo {caminho.name} (sem permissão ou removido)") from None
     if b"\x00" in bruto:
         raise CsvInvalido("o arquivo tem byte nulo: não é um CSV de texto (salve como CSV no Excel)")
     try:
@@ -106,11 +109,14 @@ def ler_csv(caminho: Path) -> list[tuple[int, dict]]:
     """Linhas do CSV como (numero da linha no arquivo, {campo: texto}). Separador `;` (Excel pt-BR) ou `,`."""
     texto = _ler_texto(caminho)
     primeira = texto.split("\n", 1)[0]
-    leitor = csv.reader(io.StringIO(texto), delimiter=";" if ";" in primeira else ",")
+    leitor = csv.reader(io.StringIO(texto), delimiter=";" if ";" in primeira else ",",
+                        strict=True)   # aspas nao fechadas recusam o arquivo, nunca viram linha "igual"
     try:
         return _linhas(leitor)
-    except csv.Error as e:
-        raise CsvInvalido(f"o arquivo não se lê como CSV (linha {leitor.line_num}): {e}") from None
+    except csv.Error:
+        # A mensagem do modulo csv e' em ingles: so' a linha e a causa provavel
+        raise CsvInvalido(f"o arquivo não se lê como CSV (linha {leitor.line_num}): aspas sem fechar ou "
+                          "caractere inválido") from None
 
 
 def _linhas(leitor) -> list[tuple[int, dict]]:
@@ -188,27 +194,39 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
     existentes = {(m["numero"], m["tipo"]): m for m in conn.execute(
         "SELECT numero, tipo, competencia, estado, valor_protocolado_centavos, valor_atestado_centavos "
         "FROM medicoes WHERE contrato_id=?", (contrato["id"],))}
-    linhas, vistas = [], {}
+    lidas = []
     for n_linha, bruto in ler_csv(caminho):
-        item = {"linha": n_linha, "numero": bruto.get("numero", ""), "tipo": bruto.get("tipo", "")}
+        tipo_csv = bruto.get("tipo", "")
+        item = {"linha": n_linha, "numero": bruto.get("numero", ""),
+                "tipo": ROTULOS.get(_normalizar(tipo_csv), tipo_csv)}
         try:
-            d = _interpretar(bruto, janela)
+            lidas.append((item, _interpretar(bruto, janela)))
         except ValueError as e:
-            linhas.append({**item, "categoria": "erro", "detalhe": str(e)})
+            lidas.append(({**item, "categoria": "erro", "detalhe": str(e)}, None))
+    # O mesmo (nº, tipo) com mais de uma competencia no CSV: TODAS as linhas do grupo sao conflito
+    grupos = {}
+    for item, d in lidas:
+        if d is not None:
+            grupos.setdefault((d["numero"], d["tipo"]), []).append((item["linha"], d["competencia"]))
+    linhas, vistas = [], {}
+    for item, d in lidas:
+        if d is None:
+            linhas.append(item)
             continue
         rotulo_tipo = ROTULOS[d["tipo"]]
-        item.update(numero=d["numero"], tipo=rotulo_tipo, competencia=d["competencia"])
+        item = {**item, "numero": d["numero"], "tipo": rotulo_tipo, "competencia": d["competencia"]}
         chave = (d["numero"], d["tipo"])
-        if chave in vistas:
-            n_antes, comp_antes = vistas[chave]
-            if comp_antes != d["competencia"]:
-                linhas.append({**item, "categoria": "conflito",
-                               "detalhe": f"a linha {n_antes} tem o mesmo nº com competência {comp_antes}"})
-            else:
-                linhas.append({**item, "categoria": "erro",
-                               "detalhe": f"nº {d['numero']} {rotulo_tipo} repetido (já na linha {n_antes})"})
+        grupo = grupos[chave]
+        if len({comp for _, comp in grupo}) > 1:
+            outras = ", ".join(f"linha {n} {comp}" for n, comp in grupo if n != item["linha"])
+            linhas.append({**item, "categoria": "conflito",
+                           "detalhe": f"o mesmo nº tem outra competência no CSV ({outras})"})
             continue
-        vistas[chave] = (n_linha, d["competencia"])
+        if chave in vistas:
+            linhas.append({**item, "categoria": "erro",
+                           "detalhe": f"nº {d['numero']} {rotulo_tipo} repetido (já na linha {vistas[chave]})"})
+            continue
+        vistas[chave] = item["linha"]
         m = existentes.get(chave)
         if m is None:
             linhas.append({**item, "categoria": "nova", "detalhe": ""})
@@ -226,6 +244,7 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
                     vazios.append(f"{rotulo} vazio no CSV, banco {_fmt(m[col])}")
                 elif d[campo] != m[col]:
                     difs.append(f"{rotulo}: banco {_fmt(m[col])}, CSV {_fmt(d[campo])}")
+            # Um valor diferente e o outro vazio: "valor diferente", com a celula vazia no detalhe
             categoria = "valor diferente" if difs else "incompleta" if vazios else "igual"
             linhas.append({**item, "categoria": categoria, "detalhe": "; ".join(difs + vazios)})
     totais = {c: sum(1 for li in linhas if li["categoria"] == c) for c in CATEGORIAS}

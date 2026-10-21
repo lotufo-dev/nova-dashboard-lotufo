@@ -350,9 +350,9 @@ def test_carregar_medicoes_ensaio_classifica_e_nao_grava(tmp_path, monkeypatch, 
     assert "linha 3: nº 2 execução 2025-05: valor diferente (aprovado: banco R$ 520.000,00, CSV R$ 530.000,00)" in saida
     assert "linha 4: nº 3 execução 2025-07: conflito (banco tem competência 2025-06)" in saida
     assert "linha 5: nº 4 execução 2025-08: nova" in saida
-    assert "linha 6: nº 5 execucao: erro (valor pedido" in saida
+    assert "linha 6: nº 5 execução: erro (valor pedido" in saida
     assert "linha 7: nº 6 aditivo: erro (tipo desconhecido" in saida
-    assert "linha 8: nº 7 execucao: erro (competência 2027-03 fora do contrato (2025-03 a 2026-12))" in saida
+    assert "linha 8: nº 7 execução: erro (competência 2027-03 fora do contrato (2025-03 a 2026-12))" in saida
     assert "linha 9: nº 4 execução 2025-08: erro (nº 4 execução repetido (já na linha 5))" in saida
     assert "Total: nova 1, igual 1, valor diferente 1, incompleta 0, conflito 1, erro 4" in saida
     assert _foto(conn) == antes
@@ -398,7 +398,7 @@ def test_carregar_medicoes_linha_com_colunas_a_mais_e_erro_e_nao_valor(tmp_path,
     _com_exemplo_aplicado(tmp_path, monkeypatch)
     codigo, saida = _ensaio(tmp_path, ["nº,tipo,competência,valor pedido,valor aprovado", "1,execucao,2025-04,412.345,67,"], capsys)
     assert codigo == 0
-    assert "linha 2: nº 1 execucao: erro (a linha tem 6 colunas e o cabeçalho tem 5)" in saida
+    assert "linha 2: nº 1 execução: erro (a linha tem 6 colunas e o cabeçalho tem 5)" in saida
 
 
 def test_carregar_medicoes_cabecalho_com_grau_e_coluna_repetida(tmp_path, monkeypatch, capsys):
@@ -482,8 +482,14 @@ def test_carregar_medicoes_mesmo_numero_no_csv_com_outra_competencia_e_conflito(
     codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;1,00;;;;;;;x",
                                        "1;1;execução;2025-05;;1,00;;;;;;;x",
                                        "1;1;execucao;2025-04;;2,00;;;;;;;x"], capsys)
-    assert "linha 3: nº 1 execução 2025-05: conflito (a linha 2 tem o mesmo nº com competência 2025-04)" in saida
-    assert "linha 4: nº 1 execução 2025-04: erro (nº 1 execução repetido (já na linha 2))" in saida
+    assert ("linha 2: nº 1 execução 2025-04: conflito (o mesmo nº tem outra competência no CSV "
+            "(linha 3 2025-05, linha 4 2025-04))") in saida
+    assert "linha 3: nº 1 execução 2025-05: conflito" in saida and "linha 4: nº 1 execução 2025-04: conflito" in saida
+    assert "igual 0" in saida and "conflito 3" in saida
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;1,00;;;;;;;x",
+                                       "1;1;execucao;2025-04;;2,00;;;;;;;x"], capsys)
+    assert "linha 2: nº 1 execução 2025-04: nova" in saida
+    assert "linha 3: nº 1 execução 2025-04: erro (nº 1 execução repetido (já na linha 2))" in saida
 
 
 def test_carregar_medicoes_le_o_banco_numa_transacao_so_e_desfaz(tmp_path, monkeypatch, capsys):
@@ -519,3 +525,37 @@ def test_carregar_medicoes_banco_inexistente_e_arquivo_ilegivel_falam_portugues(
         capsys.readouterr()
         assert cli.main(["cadastro", "carregar-medicoes", str(arq), "--ensaio"]) == 1
         assert "CSV recusado, nada foi lido:" in capsys.readouterr().out
+
+
+
+# --- rodada 2 dos gates da PR #307 ---
+
+def test_carregar_medicoes_valor_diferente_com_o_outro_vazio_mostra_a_celula_vazia(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos,"
+                 " valor_atestado_centavos) VALUES (?,1,'execucao','2025-04','protocolada',100,90)", (cid,))
+    conn.commit()
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;2,00;;;;;;;x"], capsys)
+    assert ("linha 2: nº 1 execução 2025-04: valor diferente (pedido: banco R$ 1,00, CSV R$ 2,00; "
+            "aprovado vazio no CSV, banco R$ 0,90)") in saida
+    assert "igual 0" in saida
+
+
+def test_carregar_medicoes_aspas_nao_fechadas_recusam_o_arquivo(tmp_path, monkeypatch, capsys):
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _ensaio(tmp_path, [CAB, '1;1;execucao;2025-04;;1,00;1,00;;;;;;"fonte sem fim'], capsys)
+    assert codigo == 1 and "CSV recusado, nada foi lido: o arquivo não se lê como CSV (linha 2): aspas sem fechar" in saida
+    assert "unexpected" not in saida
+    assert "igual" not in saida.split("CSV recusado")[0]
+
+
+def test_carregar_medicoes_arquivo_sem_leitura_fala_portugues(tmp_path, monkeypatch, capsys):
+    from pathlib import Path as _P
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+
+    def nega(self):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(_P, "read_bytes", nega)
+    codigo, saida = _ensaio(tmp_path, [CAB], capsys)
+    assert codigo == 1
+    assert "CSV recusado, nada foi lido: não foi possível ler o arquivo obra-propria.csv" in saida
