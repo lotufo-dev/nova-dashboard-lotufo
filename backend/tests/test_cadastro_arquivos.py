@@ -623,7 +623,7 @@ def test_apostilamento_com_competencias_e_periodo_e_aceito(tmp_path):
 
 
 def test_apostilamento_so_com_percentual_e_periodo_e_aceito(tmp_path):
-    ap = _apostilamento(percentual="6,76", periodo={"de": "2026-04", "ate": "2027-03"})
+    ap = _apostilamento(percentual="6,76", periodo={"de": "2026-04", "ate": "2027-03"}, eficacia="2026-09-15")
     cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
     inst = cad["contratos"][0]["instrumentos"][0]
     assert inst["dados"]["periodo"] == {"de": "2026-04", "ate": "2027-03"}
@@ -651,6 +651,8 @@ def test_apostilamento_com_competencia_repetida_e_erro(tmp_path):
     ("periodo", {"de": "2026-04"}, "periodo"),
     ("periodo", {"de": "2026-04", "ate": "2026-06", "fim": "x"}, "periodo"),
     ("periodo", "2026-04", "periodo"),
+    ("eficacia", "15/09/2026", "eficacia"),
+    ("eficacia", "2026-09", "eficacia"),
     ("competencias", [], "competencias"),
     ("competencias", "2026-04", "competencias"),
     ("competencias", [{"competencia": "2026-13", "valor": "1,00"}], "competencias[0].competencia"),

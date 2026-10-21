@@ -286,6 +286,13 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
             # "2026-06" (Granito) vale: o reajuste le so' o ano. Nao normaliza: instrumento aplicado nao muda.
             if d.get("ciclo") is not None and not _CICLO.match(str(d["ciclo"])):
                 falha(f"{onde}.ciclo", "use o ano do ciclo (ex.: 2026)")
+            # Issue #271: a eficacia decide o ciclo quando `ciclo` falta; data invalida faria o termo sumir do ciclo
+            if d.get("eficacia") is not None:
+                try:
+                    if not _data(d["eficacia"]):
+                        raise ValueError("vazia")
+                except ValueError:
+                    falha(f"{onde}.eficacia", f"use a data da eficácia (AAAA-MM-DD): {d['eficacia']!r}")
             # Issue #271: competencias e periodo; cada competencia vira previsao da data-base dele
             for campo, msg in _periodo_e_competencias(d)[1]:
                 falha(f"{onde}.{campo}", msg)

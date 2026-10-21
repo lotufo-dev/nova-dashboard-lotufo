@@ -653,9 +653,82 @@ def test_termo_com_corrige_gera_previsoes_novas_que_valem_e_as_antigas_ficam(con
         ("2026-04", 123457, ids["ap-11"]), ("2026-05", 200001, ids["ap-11"]), ("2026-04", 130003, ids["ap-12"])]
     vig = {p["competencia"]: (p["valor_previsto_centavos"], p["instrumento_id"])
            for p in reajuste_mod.previsoes_vigentes(conn, 1)}
-    # a corrigida passa a valer; competencia que a correcao nao traz continua com a do termo anterior
-    assert vig == {"2026-04": (130003, ids["ap-12"]), "2026-05": (200001, ids["ap-11"])}
+    # a correcao passa a valer, e o termo corrigido deixa de valer por inteiro: a competencia que a correcao nao
+    # repete fica sem previsao de apostilamento (gates da PR #317)
+    assert vig == {"2026-04": (130003, ids["ap-12"])}
     assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-12"
+
+
+def test_competencia_listada_por_engano_some_com_a_correcao(conn):
+    errado = {**AP_COMP, "dados": {**AP_COMP["dados"], "periodo": None,
+                                   "competencias": [{"competencia": "2026-04", "valor": "1,01"},
+                                                    {"competencia": "2026-07", "valor": "7,07"}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[errado])]))
+    correcao = {**AP_COMP, "chave": "ap-12", "data": "2026-10-01", "corrige": "ap-11",
+                "dados": {**AP_COMP["dados"], "periodo": None,
+                          "competencias": [{"competencia": "2026-04", "valor": "1,03"},
+                                           {"competencia": "2026-06", "valor": "6,05"}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[errado, correcao])]))
+    vig = {p["competencia"]: p["valor_previsto_centavos"] for p in reajuste_mod.previsoes_vigentes(conn, 1)}
+    assert vig == {"2026-04": 103, "2026-06": 605}
+    assert [x["competencia"] for x in reajuste_mod.competencias_apostiladas(conn, 1)] == ["2026-04", "2026-06"]
+
+
+def _termo(chave, data, valor, corrige=None, ciclo=2026):
+    return {**AP_COMP, "chave": chave, "numero": f"{chave}/2026", "data": data, "corrige": corrige,
+            "dados": {"data_base": "2023-04", "ciclo": ciclo, "competencias": [{"competencia": "2026-04", "valor": valor}]}}
+
+
+def test_termo_antigo_acrescentado_depois_nao_passa_por_cima_do_mais_novo(conn):
+    novo = _termo("ap-novo", "2026-10-01", "2,03")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[novo])]))
+    antigo = _termo("ap-antigo", "2026-08-01", "1,01")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[novo, antigo])]))
+    assert [(x["valor_centavos"], x["instrumento_chave"]) for x in reajuste_mod.competencias_apostiladas(conn, 1)] \
+        == [(203, "ap-novo")]
+
+
+def test_correcao_aplicada_depois_de_termo_mais_novo_nao_passa_por_cima_dele(conn):
+    t1 = _termo("ap-t1", "2026-09-01", "1,01")
+    t3 = _termo("ap-t3", "2026-10-10", "3,03")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1, t3])]))
+    t2 = _termo("ap-t2", "2026-10-01", "2,05", corrige="ap-t1")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1, t3, t2])]))
+    assert [(x["valor_centavos"], x["instrumento_chave"]) for x in reajuste_mod.competencias_apostiladas(conn, 1)] \
+        == [(303, "ap-t3")]
+
+
+def test_termo_corrigido_nao_fecha_o_ciclo(conn):
+    import datetime
+    hoje = datetime.date(2026, 10, 20)
+    t1 = _termo("ap-t1", "2026-09-01", "1,01")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1])]))
+    assert reajuste_mod.ciclos(conn, 1, hoje)[0]["situacao"] == "apostilado"
+    # a correcao diz que o termo era do ciclo 2025: o de 2026 volta a esperar apostilamento
+    t2 = _termo("ap-t2", "2026-10-01", "1,03", corrige="ap-t1", ciclo=2025)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1, t2])]))
+    assert reajuste_mod.ciclos(conn, 1, hoje)[0]["situacao"] == "pleito_pendente"
+
+
+def test_correcao_herda_o_pleito_do_termo_corrigido_antes_de_buscar_por_data(conn):
+    # A foi atendido por T1; B (reemissao) saiu depois de T1 e antes da correcao, e continua esperando o termo dela
+    reemissao = {**PLEITO_2026, "oficio": "CT-200-LT-2026", "data": "2026-09-20"}
+    cad = lambda insts: _cad(contratos=[_contrato(instrumentos=insts, pleitos_anteriores=[PLEITO_2026, reemissao])])  # noqa: E731
+    cadastro_aplicar.aplicar(conn, 1, cad([AP_COMP]))
+    correcao = {**AP_COMP, "chave": "ap-12", "data": "2026-10-01", "corrige": "ap-11"}
+    cadastro_aplicar.aplicar(conn, 1, cad([AP_COMP, correcao]))
+    ligados = dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall())
+    assert ligados == {"CT-122-LT-2026": "ap-12", "CT-200-LT-2026": None}
+
+
+def test_competencias_sem_ciclo_determinavel_e_erro_no_aplicar(conn):
+    ruim = {**AP_COMP, "dados": {"competencias": [{"competencia": "2026-04", "valor": "1,00"}], "eficacia": "x"},
+            "data": "2026-09-15"}
+    ruim["dados"]["ciclo"] = "abc"
+    with pytest.raises(ValueError, match="ciclo"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ruim])]))
+    assert conn.execute("SELECT COUNT(*) FROM instrumentos").fetchone()[0] == 0
 
 
 def test_termo_e_correcao_aplicados_juntos_a_correcao_vale_mesmo_com_data_anterior(conn):
@@ -665,7 +738,7 @@ def test_termo_e_correcao_aplicados_juntos_a_correcao_vale_mesmo_com_data_anteri
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[correcao, AP_COMP],
                                                                 pleitos_anteriores=[PLEITO_2026])]))
     vig = {p["competencia"]: p["valor_previsto_centavos"] for p in reajuste_mod.previsoes_vigentes(conn, 1)}
-    assert vig == {"2026-04": 130003, "2026-05": 200001}
+    assert vig == {"2026-04": 130003}
     assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-12"
 
 

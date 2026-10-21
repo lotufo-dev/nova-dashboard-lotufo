@@ -31,11 +31,26 @@ def ciclo_do_apostilamento(dados: dict, data: str) -> int | None:
         return None
 
 
+def _termo_vale(i: str) -> str:
+    """Resolvedor unico do apostilamento de reajuste que vale (issue #271), como condicao SQL sobre o alias `i` de
+    `instrumentos`: termo corrigido por outro (`corrige` nos dados) nao vale por inteiro, nem nas competencias que a
+    correcao nao repete. Numa cadeia (T3 corrige T2, que corrige T1) cada elo e' corrigido pelo seguinte, entao so' o
+    ultimo vale. Entre os que valem, a precedencia e' `_ORDEM_TERMO`: a data do instrumento, nao a da aplicacao."""
+    return (f"NOT EXISTS (SELECT 1 FROM instrumentos x WHERE x.contrato_id = {i}.contrato_id "
+            f"AND x.tipo = 'apostilamento_reajuste' AND json_extract(x.dados, '$.corrige') = {i}.chave)")
+
+
+def _ordem_termo(i: str) -> str:
+    """O termo mais novo manda (data do documento; empate: o aplicado depois)."""
+    return f"{i}.data DESC, {i}.id DESC"
+
+
 def _apostilamento(conn, contrato_id: int, mes_base: str, ciclo: int, unica: bool) -> dict | None:
     """Apostilamento de reajuste com a mesma data-base e o mesmo ciclo. Sem `data_base` nos dados, vale a
-    data-base unica do contrato; sem `ciclo`, o ano da `eficacia` (ou da data do instrumento)."""
-    for r in conn.execute("SELECT * FROM instrumentos WHERE contrato_id=? AND tipo='apostilamento_reajuste' "
-                          "ORDER BY data DESC, id DESC", (contrato_id,)):
+    data-base unica do contrato; sem `ciclo`, o ano da `eficacia` (ou da data do instrumento). Termo corrigido nao
+    conta (`_termo_vale`)."""
+    for r in conn.execute(f"SELECT * FROM instrumentos i WHERE i.contrato_id=? AND i.tipo='apostilamento_reajuste' "
+                          f"AND {_termo_vale('i')} ORDER BY {_ordem_termo('i')}", (contrato_id,)):
         d = json.loads(r["dados"] or "{}")
         base = d.get("data_base") or (mes_base if unica else None)
         ano = ciclo_do_apostilamento(d, r["data"])
@@ -64,14 +79,18 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
 
     Previsao de pleito so' vale enquanto o pleito vale: pleito descartado, ou reemitido por outro pleito ja'
     enviado, sai da conta inteiro (a reemissao traz o cronograma todo; competencia que ela nao traz deixa de ter
-    previsao de pleito e cai para o manual, se houver). Reemissao ainda em rascunho nao derruba o anterior."""
+    previsao de pleito e cai para o manual, se houver). Reemissao ainda em rascunho nao derruba o anterior.
+
+    Previsao de apostilamento segue o termo (issue #271, `_termo_vale`): termo corrigido sai da conta inteiro, e
+    entre termos que valem manda o de data mais recente, seja qual for a ordem em que o cadastro os aplicou."""
     ordem = " ".join(f"WHEN '{o}' THEN {i}" for i, o in enumerate(ORDEM_ORIGEM))
     filtro, args = ("AND p.data_base_mes=?", (contrato_id, data_base_mes)) if data_base_mes is not None \
         else ("", (contrato_id,))
     rows = conn.execute(
         f"SELECT * FROM (SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.data_base_mes, p.ciclo, p.competencia "
-        f"ORDER BY CASE p.origem {ordem} END, datetime(p.criado_em) DESC, p.id DESC) AS _ordem "
-        f"FROM reajuste_previsoes p WHERE p.contrato_id=? {filtro} "
+        f"ORDER BY CASE p.origem {ordem} END, {_ordem_termo('i')}, datetime(p.criado_em) DESC, p.id DESC) AS _ordem "
+        f"FROM reajuste_previsoes p LEFT JOIN instrumentos i ON i.id = p.instrumento_id "
+        f"WHERE p.contrato_id=? {filtro} AND (p.origem <> 'apostilamento' OR {_termo_vale('i')}) "
         f"AND (p.origem <> 'pleito' OR (NOT EXISTS (SELECT 1 FROM pleitos pl WHERE pl.id = p.pleito_id "
         f"AND pl.situacao = 'descartado') AND NOT EXISTS (SELECT 1 FROM pleitos r "
         f"WHERE r.reemite_pleito_id = p.pleito_id AND r.situacao = 'enviado')))) WHERE _ordem=1 "
@@ -81,7 +100,7 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
 
 def competencias_apostiladas(conn, contrato_id: int) -> list[dict]:
     """Issue #271: as competencias cuja previsao vigente vem de apostilamento, com o termo e o nº da medicao que
-    ele cita (do `competencias` do cadastro). Termo com `corrige` gravado depois vale no lugar do anterior."""
+    ele cita (do `competencias` do cadastro). Qual termo vale e' o de `previsoes_vigentes` (`_termo_vale`)."""
     termos, medicoes = {}, {}
     for r in conn.execute("SELECT id, chave, numero, data, dados FROM instrumentos WHERE contrato_id=? "
                           "AND tipo='apostilamento_reajuste'", (contrato_id,)):
