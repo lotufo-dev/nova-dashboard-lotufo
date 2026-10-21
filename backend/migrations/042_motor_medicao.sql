@@ -29,7 +29,8 @@ ALTER TABLE medicoes ADD COLUMN periodo_inicio TEXT;
 ALTER TABLE medicoes ADD COLUMN periodo_fim TEXT;
 ALTER TABLE medicoes ADD COLUMN planilha_enviada_em TEXT;
 ALTER TABLE medicoes ADD COLUMN planilha_envio_origem TEXT CHECK (planilha_envio_origem IN ('sistema','externo'));
-ALTER TABLE medicoes ADD COLUMN numero_orgao INTEGER CHECK (numero_orgao >= 1);
+ALTER TABLE medicoes ADD COLUMN numero_orgao INTEGER
+    CHECK (numero_orgao IS NULL OR (typeof(numero_orgao) = 'integer' AND numero_orgao >= 1));
 -- as da 043 (ver cabecalho)
 ALTER TABLE medicoes ADD COLUMN data_base_mes TEXT;
 ALTER TABLE medicoes ADD COLUMN ciclo INTEGER;
@@ -67,7 +68,7 @@ CREATE TABLE medicoes_nova (
     periodo_fim TEXT,
     planilha_enviada_em TEXT,
     planilha_envio_origem TEXT CHECK (planilha_envio_origem IN ('sistema','externo')),
-    numero_orgao INTEGER CHECK (numero_orgao >= 1),
+    numero_orgao INTEGER CHECK (numero_orgao IS NULL OR (typeof(numero_orgao) = 'integer' AND numero_orgao >= 1)),
     data_base_mes TEXT,
     ciclo INTEGER,
     UNIQUE (contrato_id, numero, tipo)
@@ -95,7 +96,7 @@ ALTER TABLE medicoes_nova RENAME TO medicoes;
 CREATE TABLE IF NOT EXISTS medicao_planilhas (
     id INTEGER PRIMARY KEY,
     medicao_id INTEGER NOT NULL REFERENCES medicoes(id),
-    versao INTEGER NOT NULL CHECK (versao >= 1),
+    versao INTEGER NOT NULL CHECK (typeof(versao) = 'integer' AND versao >= 1),
     periodo_inicio TEXT,
     periodo_fim TEXT,
     -- centavos inteiros: INTEGER no SQLite e' so' afinidade (100.5 ficaria REAL), por isso o typeof

@@ -226,6 +226,21 @@ def test_planilha_recusa_centavo_fracionario(conn):
                  "acumulado_anterior_centavos, origem) VALUES (1,1,1_000_01,0,'manual')")
 
 
+def test_inteiros_novos_recusam_real_e_texto(conn):
+    """Gate Sol R2: com so' `>= 1`, versao 1.5 ou 'abc' entravam, e 'abc' venceria o MAX(versao)."""
+    for versao in (1.5, "abc", "2,0"):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, "
+                         "acumulado_anterior_centavos, origem, motivo) VALUES (1,?,1,0,'manual','m')", (versao,))
+    for numero in (46.5, "46a", 0):
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE medicoes SET numero_orgao=? WHERE id=1", (numero,))
+    conn.execute("UPDATE medicoes SET numero_orgao=46 WHERE id=1")
+    conn.execute("UPDATE medicoes SET numero_orgao=NULL WHERE id=1")
+    _planilha(conn)
+    assert conn.execute("SELECT MAX(versao) FROM medicao_planilhas").fetchone()[0] == 1
+
+
 def test_colunas_novas_recusam_valor_fora_da_lista(conn):
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO medicao_atestos (medicao_id, valor_centavos, meio) VALUES (1, 1, 'telefone')")
