@@ -30,7 +30,8 @@ type Cabecalho = {
   faturado_centavos?: number; a_receber_centavos?: number | null;
 };
 // O saldo da obra e' o do cronograma (NAVEGACAO.md, principio 7): vigente − medido de execucao atestado.
-type Saldo = { vigente_centavos: number; atestado_execucao_centavos: number; saldo_centavos: number; formula: string };
+type Saldo = { vigente_centavos: number; vigente_execucao_centavos?: number; atestado_execucao_centavos: number;
+  saldo_centavos: number; formula: string };
 
 export type StatusObra = "ativo" | "suspenso" | "em_encerramento" | "encerrado" | "rescindido";
 
@@ -64,8 +65,9 @@ function Indicadores({ c, contratoId, saldo, falhou }: { c: Cabecalho; contratoI
   const cota = c.percentual_lotufo_bp !== 10000;
   const indisponivel = falhou && !saldo;
   const medido = saldo ? brl(saldo.atestado_execucao_centavos) : indisponivel ? "indisponível" : "—";
-  const pct = saldo && c.valor_vigente_centavos > 0
-    ? fmtPercentual(saldo.atestado_execucao_centavos / c.valor_vigente_centavos, 1) : null;
+  // #262: medido e' a precos iniciais; a base e' o vigente sem o aditivo de reajuste
+  const base = saldo?.vigente_execucao_centavos ?? c.valor_vigente_centavos;
+  const pct = saldo && base > 0 ? fmtPercentual(saldo.atestado_execucao_centavos / base, 1) : null;
   return (
     <ul className="indicadores" id="indicadores" aria-label="Números da obra">
       <li className="cartao indicador"><span className="indicador__rotulo">Valor vigente</span>
@@ -73,7 +75,7 @@ function Indicadores({ c, contratoId, saldo, falhou }: { c: Cabecalho; contratoI
         {cota && <span className="campo__nota">cota da Lotufo ({percentual(c.percentual_lotufo_bp)}): <span className="dinheiro num">{brl(c.cota_vigente_centavos)}</span></span>}</li>
       <li className="cartao indicador"><span className="indicador__rotulo">Medido (execução)</span>
         <span className={`indicador__valor${indisponivel ? " indicador__valor--indisponivel" : ""}`}>{medido}</span>
-        {pct && <span className="campo__nota">{pct} do valor vigente</span>}</li>
+        {pct && <span className="campo__nota">{pct} do vigente de execução</span>}</li>
       <li className="cartao indicador"><span className="indicador__rotulo">Faturado</span>
         <span className="indicador__valor">{c.faturado_centavos === undefined ? "—" : brl(c.faturado_centavos)}</span></li>
       <li className="cartao indicador"><span className="indicador__rotulo">A receber</span>
@@ -85,7 +87,7 @@ function Indicadores({ c, contratoId, saldo, falhou }: { c: Cabecalho; contratoI
         <span className={`indicador__valor${indisponivel ? " indicador__valor--indisponivel" : saldo && saldo.saldo_centavos < 0 ? " negativo" : ""}`}>
           {saldo ? brl(saldo.saldo_centavos) : indisponivel ? "indisponível" : "—"}</span>
         {indisponivel ? <span className="campo__nota" role="alert">não foi possível ler o cronograma agora</span>
-          : <span className="campo__nota">valor vigente − medido</span>}</li>
+          : <span className="campo__nota">vigente de execução − medido</span>}</li>
     </ul>
   );
 }

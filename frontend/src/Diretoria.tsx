@@ -289,7 +289,7 @@ function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
         <li className="cartao cart-numero">
           <span className="cart-numero__rotulo">Saldo a executar</span>
           <span className="cart-numero__valor num" title={brl(k.saldo_centavos)}>{mi(k.saldo_centavos)}</span>
-          <span className="cart-numero__apoio"><span className="num">{brl(k.saldo_centavos)}</span> · vigente − medido, {contar(p.obras_base.ativas, "obra ativa", "obras ativas")}</span>
+          <span className="cart-numero__apoio"><span className="num">{brl(k.saldo_centavos)}</span> · vigente de execução − medido, {contar(p.obras_base.ativas, "obra ativa", "obras ativas")}</span>
         </li>
         <li className="cartao cart-numero">
           <span className="cart-numero__rotulo">Medido no ano</span>

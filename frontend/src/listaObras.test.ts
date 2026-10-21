@@ -62,6 +62,12 @@ describe("contratantes (entrada de Obras, #159)", () => {
     expect(pctExecutado(o(9, "Sem valor"))).toBeNull();
   });
 
+  it("com aditivo de reajuste, % e saldo usam o vigente de execução, como a página da obra (#262)", () => {
+    const ses = cheia(7, "SES", 1200_00, 400_00, { valor_vigente_execucao_centavos: 1000_00 });
+    expect(pctExecutado(ses)).toBe(40);
+    expect(resumoContratante([ses])).toMatchObject({ vigente: 1000_00, saldo: 600_00, pct: 40 });
+  });
+
   it("o resumo conta só as obras em andamento; as encerradas só são contadas", () => {
     const r = resumoContratante(lista.filter(x => x.orgao === "MTPAR"));
     expect(r).toMatchObject({ obras: 1, encerradas: 1, vigente: 2000_00, medido: 1000_00, saldo: 1000_00, pct: 50 });

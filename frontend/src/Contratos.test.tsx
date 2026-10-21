@@ -60,6 +60,8 @@ describe("Obras: escolha do contratante e lista", () => {
     expect(linhas[0].textContent).toContain("3 obras");
     expect(linhas[0].textContent).toContain("38%");
     expect(linhas[0].textContent).toMatch(/Saldo a executar \(valor cheio\)\s*R\$\s*3\.750,00/);
+    // #262: a nota diz a base do saldo e do %: o vigente de execucao (sem o aditivo de reajuste)
+    expect(screen.getByText(/saldo a executar = vigente de execução − medido \(execução\)/)).toBeTruthy();
     expect(linhas[1].textContent).toContain("MTPAR");
     expect(linhas[1].textContent).toContain("1 encerrada");
     expect(linhas[2].textContent).toContain("SINFRA");

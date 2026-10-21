@@ -57,6 +57,21 @@ def test_listar_traz_o_medido_de_execucao_e_o_saldo(client_admin):
     assert lista[outro]["medido_execucao_centavos"] == 0 and lista[outro]["saldo_centavos"] == 100_000_000
 
 
+def test_listar_saldo_exclui_o_aditivo_de_reajuste(client_admin):
+    """#262: o vigente da lista continua com o reajuste; o saldo a executar e' a precos iniciais."""
+    from app import db, paineis
+    cid = novo_contrato(NOVO)
+    conn = db.get_conn()
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
+                 "VALUES (?, 'valor', 10_000_01, 'assinado', '2026-03-01', 'reajuste')", (cid,))
+    conn.commit()
+    s = paineis.saldo(conn, cid)
+    conn.close()
+    obra = {c["id"]: c for c in client_admin.get("/api/contratos").json()}[cid]
+    assert obra["valor_vigente_centavos"] == 100_000_000 + 10_000_01
+    assert obra["saldo_centavos"] == 100_000_000 == s["saldo_centavos"]
+
+
 def test_listar_agrupa_o_contratante_como_medicoes(client_admin):
     """Redesenho de Obras (#159): a escolha do contratante agrupa como a tela de Medicoes -- "SINFRA" para toda a
     familia, com a superintendencia em `orgao_sub`; o orgao com sigla propria (MTPAR) fica com ela."""

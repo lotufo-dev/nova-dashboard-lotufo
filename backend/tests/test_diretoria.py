@@ -27,7 +27,7 @@ def cenario(tmp_path, monkeypatch):
                  "instrumentos": [{"chave": "ta-1", "tipo": "aditivo_valor", "numero": "1º TA", "objeto": None,
                                    "corrige": None, "pdf": None, "delta_valor_centavos": 200_000_000,
                                    "nova_execucao_fim": None, "nova_vigencia_fim": None, "data": "2025-06-01",
-                                   "dados": {}}]}
+                                   "dados": {}, "natureza": "execucao"}]}
     cadastro_aplicar.aplicar(c, uid, {
         "orgaos": [{"chave": "sinfra-x", "nome": "SINFRA - X", "familia": "sinfra", "cnpj": None,
                     "regras": {"nome_qdop": "SINFRA - SECRETARIA", "tipo_contratante": "PÚBLICO"}},
@@ -158,6 +158,18 @@ def test_carteira_saldo_ritmo_e_termino(cenario):
     assert k["saldo_centavos"] == 96_100_000 + 399_500_000
     assert "terminando" not in k
     assert k["ritmo_mensal_centavos"] == 33_833_333             # 203.000.000 / 6, meio para cima
+
+
+def test_carteira_saldo_exclui_o_aditivo_de_reajuste(cenario):
+    """#262: o aditivo de reajuste entra no vigente do contrato, mas o saldo a executar e' a precos iniciais."""
+    c, ids = cenario
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
+              "VALUES (?, 'valor', 50_000_001, 'assinado', '2026-03-01', 'reajuste')", (ids["consorcio"],))
+    c.commit()
+    k = diretoria.painel(c, HOJE)["carteira"]
+    assert k["saldo_centavos"] == 96_100_000 + 399_500_000
+    por = {o["orgao"]: o for o in k["por_orgao"]}
+    assert por["MTPAR"]["vigente_centavos"] == 600_000_000      # 50% de 12.000.000,00, sem o reajuste
 
 
 def test_faturado_no_mes_e_a_regra_do_qdop_fatiada_pelo_mes_da_nota(cenario):

@@ -45,6 +45,8 @@ describe("Carteira", () => {
     expect(within(numeros).getByText("Saldo a executar")).toBeTruthy();
     expect(within(numeros).getByText("Medido no ano")).toBeTruthy();
     expect(within(numeros).getByText("Faturado no mês")).toBeTruthy();
+    // #262: o saldo e' a precos iniciais, sem o aditivo de reajuste
+    expect(within(numeros).getByText(/vigente de execução − medido/)).toBeTruthy();
     // o faturado do mês vem do servidor, em milhões, com o valor exato e a contagem de notas na linha de apoio
     expect(within(numeros).getByText("R$ 1,2 mi")).toBeTruthy();
     expect(within(numeros).getByText(/2 medições faturadas em 09\/2026/)).toBeTruthy();

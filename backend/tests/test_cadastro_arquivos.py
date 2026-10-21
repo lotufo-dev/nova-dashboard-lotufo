@@ -466,6 +466,30 @@ def test_endosso_de_outra_apolice_gera_aviso_nao_erro(tmp_path):
     assert ca.preparar(_escrever(tmp_path, contratos=[c]))["avisos"] == []
 
 
+def test_natureza_do_instrumento_de_valor_padrao_execucao_e_aceita_reajuste(tmp_path):
+    """#262: aditivo de valor ganha `natureza` (execucao|reajuste); sem o campo, None (nao classificado = execucao)."""
+    reaj = {"chave": "ta-08", "tipo": "aditivo_valor", "data": "2026-09-01", "delta_valor": "1.000,01",
+            "natureza": "reajuste"}
+    c = {**CONTRATO, "instrumentos": [*CONTRATO["instrumentos"], reaj]}
+    insts = ca.preparar(_escrever(tmp_path, contratos=[c]))["contratos"][0]["instrumentos"]
+    assert [i["natureza"] for i in insts] == [None, "reajuste"]
+    assert "natureza" not in insts[1]["dados"]
+
+
+def test_natureza_so_aceita_execucao_ou_reajuste(tmp_path):
+    ruim = {"chave": "ta-08", "tipo": "aditivo_valor", "data": "2026-09-01", "delta_valor": "1.000,00",
+            "natureza": "Reajuste"}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ruim]}]))
+    assert any("natureza" in e and "execucao" in e and "reajuste" in e for e in erros)
+
+
+def test_natureza_em_instrumento_que_nao_e_de_valor_e_erro(tmp_path):
+    prazo = {"chave": "ap-01", "tipo": "apostilamento_prazo", "data": "2026-09-01",
+             "nova_execucao_fim": "2027-01-01", "natureza": "reajuste"}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [prazo]}]))
+    assert any("natureza" in e for e in erros)
+
+
 def test_ordinal_do_instrumento(tmp_path):
     """Issue #261: `ordinal` e' inteiro positivo e so' vale para aditivo ou apostilamento de prazo."""
     ta = {"chave": "ta-14", "tipo": "aditivo_prazo", "data": "2026-01-10", "numero": "099/2020/01/14",
