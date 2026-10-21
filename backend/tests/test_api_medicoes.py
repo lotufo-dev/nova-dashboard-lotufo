@@ -304,7 +304,7 @@ def _no_estado(mid, estado):
         conn.close()
 
 
-@pytest.mark.parametrize("estado", ["prevista", "espelho_gerado", "espelho_enviado"])
+@pytest.mark.parametrize("estado", ["prevista", "planilha_gerada", "espelho_gerado", "espelho_enviado"])
 def test_protocolo_manual_antes_da_nota_exige_justificativa(client_admin, estado):
     from app import db
     mid = _medicao(client_admin, _contrato(client_admin))
@@ -520,3 +520,157 @@ def test_recebimento_pela_rota_e_manual_mesmo_com_motivo_que_imita_o_corte(clien
         assert mid in conciliacao.recebidas_a_mao(conn)
     finally:
         conn.close()
+
+
+# --- issue #281: planilha/carta de medicao ---------------------------------------------------------------
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _arquivos_planilha(texto="Oficio CT assinado"):
+    from tests.conftest import _pdf_com_texto
+    return {"oficio": ("oficio.pdf", _pdf_com_texto(texto), "application/pdf"),
+            "planilha": ("planilha.xlsx", b"PK\x03\x04" + texto.encode() + b"\x00" * 64, XLSX)}
+
+
+def _nova_planilha(cl, cid, numero=1, competencia="2026-07", inicio="2026-07-01", fim="2026-07-31",
+                   valor="12.345,67", **extra):
+    return cl.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha(f"oficio {numero} {inicio}"),
+                   data={"numero": numero, "competencia": competencia, "periodo_inicio": inicio,
+                         "periodo_fim": fim, "valor": valor, **extra})
+
+
+def test_planilha_cria_versao_1_e_poe_em_planilha_gerada(client_admin):
+    cid = _contrato(client_admin)
+    r = _nova_planilha(client_admin, cid, numero_orgao=7)
+    assert r.status_code == 201, r.text
+    corpo = r.json()
+    assert corpo["versao"] == 1 and corpo["estado"] == "planilha_gerada" and corpo["avisos"] == []
+    assert corpo["acumulado_anterior_centavos"] == 0 and corpo["saldo_apos_pedido_centavos"] == 100_000_00 - 12_345_67
+    d = client_admin.get(f"/api/medicoes/{corpo['medicao_id']}").json()
+    assert d["estado"] == "planilha_gerada" and d["valor_protocolado_centavos"] == 12_345_67
+    assert (d["periodo_inicio"], d["periodo_fim"], d["numero_orgao"]) == ("2026-07-01", "2026-07-31", 7)
+    assert [(p["versao"], p["valor_pedido_centavos"]) for p in d["planilhas"]] == [(1, 12_345_67)]
+
+
+def test_planilha_exige_os_dois_anexos_e_pdf_de_verdade(client_admin):
+    cid = _contrato(client_admin)
+    dados = {"numero": 1, "competencia": "2026-07", "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31",
+             "valor": "1,00"}
+    so_oficio = {"oficio": _arquivos_planilha()["oficio"]}
+    assert client_admin.post(f"/api/contratos/{cid}/planilhas", files=so_oficio, data=dados).status_code == 422
+    falso = {**_arquivos_planilha(), "oficio": ("oficio.pdf", b"nao sou pdf", "application/pdf")}
+    assert client_admin.post(f"/api/contratos/{cid}/planilhas", files=falso, data=dados).status_code == 415
+    assert client_admin.get(f"/api/contratos/{cid}/medicoes").json() == []
+
+
+def test_planilha_periodo_invertido_da_422(client_admin):
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid, inicio="2026-07-31", fim="2026-07-01").status_code == 422
+
+
+def test_planilha_recusada_nao_deixa_arquivo_na_pasta(client_admin):
+    from app import db
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid).status_code == 201
+    pasta = db.db_path().parent / "planilhas"
+    antes = sorted(p.name for p in pasta.iterdir())
+    r = _nova_planilha(client_admin, cid, inicio="2026-07-02")     # mesmo nº: recusa, com anexos novos
+    assert r.status_code == 422 and "registre uma revisão" in r.json()["detail"]
+    r = client_admin.post(f"/api/medicoes/{_mid_unica(client_admin, cid)}/planilhas",
+                          files=_arquivos_planilha("sem motivo"),
+                          data={"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "1,00"})
+    assert r.status_code == 422
+    assert sorted(p.name for p in pasta.iterdir()) == antes
+
+
+def _mid_unica(cl, cid):
+    return cl.get(f"/api/contratos/{cid}/medicoes").json()[0]["id"]
+
+
+def _pasta_planilhas():
+    from app import db
+    pasta = db.db_path().parent / "planilhas"
+    return sorted(p.name for p in pasta.iterdir()) if pasta.exists() else []
+
+
+def test_planilha_invalida_nao_deixa_o_oficio_gravado(client_admin):
+    """Gate Sol rodada 1: os dois anexos sao validados antes de gravar qualquer um."""
+    cid = _contrato(client_admin)
+    arquivos_ = {**_arquivos_planilha(), "planilha": ("planilha.xlsx", b"nao sou zip", XLSX)}
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=arquivos_, data={
+        "numero": 1, "competencia": "2026-07", "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31",
+        "valor": "1,00"})
+    assert r.status_code == 415
+    assert _pasta_planilhas() == []
+
+
+def test_registro_que_falha_com_o_mesmo_pdf_nao_apaga_o_arquivo_da_versao(client_admin, monkeypatch):
+    """Gate Sol rodada 2: a requisicao que falha (corrida, clique duplo) nao apaga nada; o arquivo de que a versao
+    ja' registrada depende continua na pasta."""
+    from app import db, medicao_planilhas
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    antes = _pasta_planilhas()
+
+    def recusa(*_a, **_k):
+        raise ValueError("Estado da medição mudou concorrentemente; tente novamente")
+    monkeypatch.setattr(medicao_planilhas, "registrar", recusa)
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha("oficio 1 2026-07-01"),
+                          data={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-08-01",
+                                "periodo_fim": "2026-08-31", "valor": "1,00"})
+    assert r.status_code == 422
+    assert _pasta_planilhas() == antes and len(antes) == 2
+    v = client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"][0]
+    pasta = db.db_path().parent / "planilhas"
+    assert (pasta / f"{v['sha256']}.pdf").exists() and (pasta / f"{v['sha256_planilha']}.xlsx").exists()
+    # conteudo NOVO (revisor, rodada 2): a limpeza antiga apagaria estes dois; agora ficam (o outro clique pode
+    # ja' depender deles)
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha("oficio novo da 2a"),
+                          data={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-08-01",
+                                "periodo_fim": "2026-08-31", "valor": "1,00"})
+    assert r.status_code == 422
+    assert len(_pasta_planilhas()) == 4 and set(antes) < set(_pasta_planilhas())
+
+
+def test_revisao_sem_motivo_recusada_com_motivo_vira_versao_2(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    rev = {"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "11.000,01"}
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev"), data=rev)
+    assert r.status_code == 422 and "motivo" in r.json()["detail"]
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev01"),
+                          data={**rev, "motivo": "Rev01: supervisora pediu ajuste no item 3"})
+    assert r.status_code == 201, r.text
+    assert r.json()["versao"] == 2
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert [(p["versao"], p["valor_pedido_centavos"], p["motivo"]) for p in d["planilhas"]] == [
+        (1, 12_345_67, None), (2, 11_000_01, "Rev01: supervisora pediu ajuste no item 3")]
+    assert d["valor_protocolado_centavos"] == 11_000_01
+
+
+def test_periodo_sobreposto_ou_pulando_devolve_aviso_e_grava(client_admin):
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid, 1, "2026-07", "2026-06-26", "2026-07-25").json()["avisos"] == []
+    r = _nova_planilha(client_admin, cid, 2, "2026-08", "2026-07-20", "2026-08-25")
+    assert r.status_code == 201 and len(r.json()["avisos"]) == 1 and "sobrepõe" in r.json()["avisos"][0]
+    r = _nova_planilha(client_admin, cid, 3, "2026-10", "2026-09-26", "2026-10-25")
+    assert r.status_code == 201 and len(r.json()["avisos"]) == 1 and "pula" in r.json()["avisos"][0]
+    assert [m["estado"] for m in client_admin.get(f"/api/contratos/{cid}/medicoes").json()] == ["planilha_gerada"] * 3
+
+
+def test_planilha_diretoria_recebe_403(client_admin):
+    from app import auth, db
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@lotufo.com", "senha-forte-123", "diretoria")
+    conn.close()
+    _entrar(client_admin, "dir@lotufo.com")
+    assert _nova_planilha(client_admin, cid, 2, "2026-08", "2026-08-01", "2026-08-31").status_code == 403
+    assert client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha(),
+                             data={"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "1,00",
+                                   "motivo": "Rev01"}).status_code == 403
+    # diretoria so' le: a sugestao (com acumulado e saldo) e a medicao com as versoes
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao").json()["numero"] == 2
+    assert len(client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"]) == 1

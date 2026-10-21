@@ -23,6 +23,14 @@ describe("valorEditavel", () => {
     expect(valorEditavel({ ...base, valor_protocolado_origem: "aceito" }, "protocolado", true)).toBe(true);
     expect(valorEditavel({ ...base, valor_protocolado_origem: null, valor_protocolado_centavos: null }, "protocolado", true)).toBe(true);
   });
+
+  it("da planilha/carta ao boletim o pedido só muda por revisão; o atestado segue editável (#281)", () => {
+    for (const estado of ["planilha_gerada", "planilha_enviada", "boletim_recebido"]) {
+      const m = { ...base, estado, valor_protocolado_origem: "manual" };
+      expect(valorEditavel(m, "protocolado", true)).toBe(false);
+      expect(valorEditavel(m, "atestado", true)).toBe(true);
+    }
+  });
 });
 
 describe("notaDoEspelho (gate Sol S7)", () => {

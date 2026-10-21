@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 # congelamento (spec §5) contornavel por uma rota so.
 TRANSICOES = {
     "prevista": {"cancelada", "desistida"},
+    # Issue #281: entra pela planilha/carta (medicao_planilhas.registrar); a saida a mao e' o cancelamento.
+    "planilha_gerada": {"cancelada", "desistida"},
     # Estados do espelho (spec 2026-09-21 §2). espelho_gerado -> espelho_enviado e' do SISTEMA
     # (marcar_espelho_enviado, no ato do envio); -> protocolada e' registrar_protocolo.
     # Bloco 3: a nota (PDF lido ou RM) fecha `nota_emitida` (notas.fechar_se_completa, ou a
@@ -39,6 +41,10 @@ TRANSICOES = {
     "desistida": set(),
 }
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
+# Issue #281: estados em que o pedido (valor protocolado) e' o da planilha/carta e so' muda por revisao
+ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
+PEDIDO_POR_REVISAO = "Para mudar o pedido, registre uma revisão da planilha/carta"
+PEDIDO_DEPOIS_DO_BOLETIM = "O pedido não pode mais ser alterado depois do boletim do órgão"
 # B-12 (10/10/2026): mensagem ao usuario com o tipo e o estado por extenso, nunca o codigo ("(execucao)")
 ROTULO_TIPO = {"execucao": "execução", "reajuste": "reajuste", "projeto": "projeto"}
 ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta gerada",
@@ -237,6 +243,10 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         # (testes de quebra 10/10/2026, A-16): a 631 virou R$ 1,00 depois da nota e nada avisou.
         if campo == "protocolado" and m["valor_protocolado_origem"] == "espelho":
             raise ValueError("O valor desta medição vem do espelho: para mudar, gere o espelho de novo")
+        # Issue #281: da planilha/carta ao boletim, o pedido so' muda por versao nova (com motivo)
+        if campo == "protocolado" and m["estado"] in ESTADOS_PLANILHA:
+            # depois do boletim nem a revisao e' aceita: so' orienta a revisao onde ela existe (gate Sol, rodada 2)
+            raise ValueError(PEDIDO_DEPOIS_DO_BOLETIM if m["estado"] == "boletim_recebido" else PEDIDO_POR_REVISAO)
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []
@@ -252,7 +262,8 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         cond = " AND estado NOT IN ('cancelada','desistida')"
         if campo == "protocolado":
             cond += (" AND (congelada=0 OR valor_protocolado_centavos IS NULL)"
-                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho'")
+                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho'"
+                     f" AND estado NOT IN ({','.join(repr(e) for e in ESTADOS_PLANILHA)})")
         cur = conn.execute(f"UPDATE medicoes SET {col_v}=?, {col_o}=?{extra_sql} WHERE id=?{cond}",
                            (centavos, origem, *extra_par, medicao_id))
         db.exigir_uma_linha(cur, "Medição congelada ou encerrada concorrentemente: o valor não pôde ser "
@@ -312,7 +323,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         # A-09 (testes de quebra 10/10/2026): o protocolo registrado a mao antes da nota pulava faturamento,
         # nota e envio sem pedir nada. Vira pendencia da MESMA lista: so' passa assumida e justificada.
         # Gate Sol S3: na ressalva, `pendencias` traz tudo e `certidoes_pendentes` so' as certidoes.
-        sem_nota = exige_nota and atual in ("prevista", *ESTADOS_ESPELHO)
+        sem_nota = exige_nota and atual in ("prevista", "planilha_gerada", *ESTADOS_ESPELHO)   # #281: planilha
         pendencias = [*pendentes, NOTA_NAO_EMITIDA] if sem_nota else list(pendentes)
         if sem_nota:
             motivos.append(NOTA_NAO_EMITIDA)
@@ -333,7 +344,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         # SELECT e o UPDATE outro usuario pode cancelar/mover a medicao. Sem a condicao, o
         # perdedor da corrida sobrescreveria um estado final. Vem ANTES do INSERT para nao
         # deixar protocolo orfao na transacao quando a corrida e perdida.
-        if atual in ("prevista", *ESTADOS_ESPELHO, "nota_emitida"):
+        if atual in ("prevista", "planilha_gerada", *ESTADOS_ESPELHO, "nota_emitida"):
             upd = conn.execute(
                 "UPDATE medicoes SET estado='protocolada', congelada=1 WHERE id=? AND estado=?",
                 (medicao_id, atual))
