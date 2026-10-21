@@ -132,3 +132,15 @@ def test_previsao_vigente_separa_as_datas_base_e_o_contrato(cenario):
         ("2024-03", 20_03), ("2024-06", 10_01)]
     assert [p["valor_previsto_centavos"] for p in reajuste.previsoes_vigentes(c, cid, data_base_mes="2024-06")] \
         == [10_01]
+    assert reajuste.previsoes_vigentes(c, cid, data_base_mes="") == []
+
+
+def test_previsao_vigente_compara_a_hora_e_nao_o_texto(cenario):
+    """Carga com data ISO ('T') ou so' o dia nao pode passar na frente de um registro mais novo."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _previsao(c, cid, "2026-07", 1_01, "manual", criado_em="2026-10-05 12:00:00")
+    _previsao(c, cid, "2026-07", 2_03, "manual", criado_em="2026-10-05T10:00:00")
+    _previsao(c, cid, "2026-08", 3_05, "manual", criado_em="2026-10-06")
+    _previsao(c, cid, "2026-08", 4_07, "manual", criado_em="2026-10-05 23:00:00")
+    assert [p["valor_previsto_centavos"] for p in reajuste.previsoes_vigentes(c, cid)] == [1_01, 3_05]

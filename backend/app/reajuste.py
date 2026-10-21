@@ -55,10 +55,10 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
     """Previsao vigente de cada competencia (por data-base e ciclo): a mais recente da origem mais forte.
     As previsoes sao eventos (migracao 043): nada se sobrescreve, a leitura escolhe."""
     ordem = " ".join(f"WHEN '{o}' THEN {i}" for i, o in enumerate(ORDEM_ORIGEM))
-    filtro, args = ("AND data_base_mes=?", (contrato_id, data_base_mes)) if data_base_mes else ("", (contrato_id,))
+    filtro, args = ("AND data_base_mes=?", (contrato_id, data_base_mes)) if data_base_mes is not None else ("", (contrato_id,))
     rows = conn.execute(
         f"SELECT * FROM (SELECT p.*, ROW_NUMBER() OVER (PARTITION BY data_base_mes, ciclo, competencia "
-        f"ORDER BY CASE origem {ordem} END, criado_em DESC, id DESC) AS _ordem "
+        f"ORDER BY CASE origem {ordem} END, datetime(criado_em) DESC, id DESC) AS _ordem "
         f"FROM reajuste_previsoes p WHERE contrato_id=? {filtro}) WHERE _ordem=1 "
         f"ORDER BY data_base_mes, ciclo, competencia", args)
     return [{k: r[k] for k in r.keys() if k != "_ordem"} for r in rows]

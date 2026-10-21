@@ -29,7 +29,8 @@ def _colunas(c, tabela):
 
 def _previsao(c, valor=1_234_57, origem="manual", **extra):
     campos = {"contrato_id": 1, "data_base_mes": "2024-06", "ciclo": 2026, "competencia": "2026-07",
-              "valor_previsto_centavos": valor, "origem": origem, **extra}
+              "valor_previsto_centavos": valor, "origem": origem}
+    campos.update(extra)
     c.execute(f"INSERT INTO reajuste_previsoes ({', '.join(campos)}) VALUES ({', '.join('?' * len(campos))})",
               tuple(campos.values()))
     c.commit()
@@ -79,5 +80,24 @@ def test_043_recusa_origem_desconhecida_valor_nao_inteiro_e_origem_sem_fonte(con
         _previsao(conn, origem="pleito")            # previsao do pleito sem apontar o pleito
     with pytest.raises(sqlite3.IntegrityError):
         _previsao(conn, origem="apostilamento")     # previsao do apostilamento sem apontar o instrumento
+    for mes in ("07/2026", "2026-00", "2026-13", "2026-19"):
+        with pytest.raises(sqlite3.IntegrityError):
+            _previsao(conn, competencia=mes)
     with pytest.raises(sqlite3.IntegrityError):
-        _previsao(conn, competencia="07/2026")
+        _previsao(conn, data_base_mes="2024-13")
+
+
+def test_043_fonte_tem_que_ser_do_mesmo_contrato(conn):
+    conn.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos) "
+                 "VALUES ('MTPAR', '100/2024', 'Obra Beta', 'obra', 100)")
+    conn.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo) VALUES (2, 'reajuste', '2024-06', 2026)")
+    conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) "
+                 "VALUES (2, 'ap-1', 'apostilamento_reajuste', '2026-09-15', '{}')")
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="outro contrato"):
+        _previsao(conn, origem="pleito", pleito_id=1)
+    with pytest.raises(sqlite3.IntegrityError, match="outro contrato"):
+        _previsao(conn, origem="apostilamento", instrumento_id=1)
+    conn.rollback()
+    assert _previsao(conn, origem="pleito", contrato_id=2, pleito_id=1)
+    assert _previsao(conn, origem="apostilamento", contrato_id=2, instrumento_id=1)

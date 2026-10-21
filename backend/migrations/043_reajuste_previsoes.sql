@@ -5,9 +5,11 @@
 CREATE TABLE IF NOT EXISTS reajuste_previsoes (
     id INTEGER PRIMARY KEY,
     contrato_id INTEGER NOT NULL REFERENCES contratos(id),
-    data_base_mes TEXT NOT NULL CHECK (data_base_mes GLOB '[0-9][0-9][0-9][0-9]-[01][0-9]'),
+    data_base_mes TEXT NOT NULL CHECK (data_base_mes GLOB '[0-9][0-9][0-9][0-9]-[01][0-9]'
+        AND substr(data_base_mes, 6, 2) BETWEEN '01' AND '12'),
     ciclo INTEGER NOT NULL CHECK (typeof(ciclo) = 'integer'),
-    competencia TEXT NOT NULL CHECK (competencia GLOB '[0-9][0-9][0-9][0-9]-[01][0-9]'),
+    competencia TEXT NOT NULL CHECK (competencia GLOB '[0-9][0-9][0-9][0-9]-[01][0-9]'
+        AND substr(competencia, 6, 2) BETWEEN '01' AND '12'),
     -- centavos inteiros; sem limite de sinal: indice deflacionario da' reajuste negativo
     valor_previsto_centavos INTEGER NOT NULL CHECK (typeof(valor_previsto_centavos) = 'integer'),
     origem TEXT NOT NULL CHECK (origem IN ('pleito','apostilamento','manual')),
@@ -21,6 +23,16 @@ CREATE TABLE IF NOT EXISTS reajuste_previsoes (
 );
 CREATE INDEX IF NOT EXISTS ix_reajuste_previsoes_competencia
     ON reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, id);
+
+-- a fonte apontada e' do mesmo contrato (a linha nao se apaga depois, entao a guarda e' na entrada)
+CREATE TRIGGER IF NOT EXISTS reajuste_previsoes_fonte_do_contrato BEFORE INSERT ON reajuste_previsoes
+WHEN (NEW.pleito_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM pleitos WHERE id = NEW.pleito_id AND contrato_id = NEW.contrato_id))
+  OR (NEW.instrumento_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM instrumentos WHERE id = NEW.instrumento_id AND contrato_id = NEW.contrato_id))
+BEGIN
+    SELECT RAISE(ABORT, 'Previsão de reajuste aponta pleito ou instrumento de outro contrato');
+END;
 
 CREATE TRIGGER IF NOT EXISTS reajuste_previsoes_sem_update BEFORE UPDATE ON reajuste_previsoes
 BEGIN
