@@ -484,7 +484,8 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
     out = []
     for r in conn.execute(sql + " ORDER BY c.nome_curto, c.id, m.numero DESC, m.tipo", args):
         # dia de Cuiaba (`_dia`) nos marcos e no criado_em: carimbo UTC das 20h as 24h cairia no dia seguinte
-        marcos = [d.isoformat() for d in map(_dia, (r["espelho_em"], r["nota_emitida_em"], r["protocolado_em"])) if d]
+        marcos = [d.isoformat() for d in map(_dia, (r["espelho_em"], r["nota_emitida_em"], r["protocolado_em"],
+                                                    r["planilha_enviada_em"], r["atestado_em"])) if d]
         criado = _dia(r["criado_em"])
         out.append({"id": r["id"], "contrato_id": r["contrato_id"],
                     "obra": r["nome_curto"] or r["numero_instrumento"], "numero": r["numero"], "tipo": r["tipo"],
@@ -563,7 +564,7 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
         "SELECT en.medicao_id, MAX(v.enviado_em) FROM envio_medicoes en JOIN envios v ON v.id=en.envio_id "
         "GROUP BY en.medicao_id").fetchall())
 
-    planilha_de = dict(conn.execute("SELECT medicao_id, MAX(criado_em) FROM medicao_planilhas GROUP BY medicao_id").fetchall())
+    planilha_de = dict(conn.execute("SELECT medicao_id, MIN(criado_em) FROM medicao_planilhas GROUP BY medicao_id").fetchall())
 
     def marco(m: dict) -> datetime.date | None:
         # os tres estados do motor (spec motores §2.1): o marco e' o do proprio estado

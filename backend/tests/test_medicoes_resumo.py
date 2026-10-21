@@ -96,6 +96,8 @@ def test_estados_novos_do_motor_entram_na_lista_antes_do_espelho(conn, cenario):
     env = next(x for x in r["linhas"] if x["situacao"] == "planilha-enviada")
     assert env["dias"] == 2 and env["proximo_passo"] == "registrar o boletim"
     assert [x["estado"] for x in medicoes.em_andamento(conn, estado="boletim_recebido")] == ["boletim_recebido"]
+    # "desde" usa os marcos novos (nao o criado_em); a planilha gerada conta da 1a versao
+    assert {m["estado"]: m["desde"] for m in medicoes.em_andamento(conn)}["planilha_enviada"] == "2026-10-07"
     assert medicoes.rotulo_estado("planilha_gerada") == "com planilha/carta gerada"
 
 
