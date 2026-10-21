@@ -624,6 +624,13 @@ def test_registro_que_falha_com_o_mesmo_pdf_nao_apaga_o_arquivo_da_versao(client
     v = client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"][0]
     pasta = db.db_path().parent / "planilhas"
     assert (pasta / f"{v['sha256']}.pdf").exists() and (pasta / f"{v['sha256_planilha']}.xlsx").exists()
+    # conteudo NOVO (revisor, rodada 2): a limpeza antiga apagaria estes dois; agora ficam (o outro clique pode
+    # ja' depender deles)
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha("oficio novo da 2a"),
+                          data={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-08-01",
+                                "periodo_fim": "2026-08-31", "valor": "1,00"})
+    assert r.status_code == 422
+    assert len(_pasta_planilhas()) == 4 and set(antes) < set(_pasta_planilhas())
 
 
 def test_revisao_sem_motivo_recusada_com_motivo_vira_versao_2(client_admin):

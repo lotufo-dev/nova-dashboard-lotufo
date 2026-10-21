@@ -100,6 +100,9 @@ export function metadeQueEspera(par: ParDaMedicao | null): Metade | null {
 // O proximo passo vem do servidor (`medicoes.PROXIMO_PASSO`); aqui so' o rotulo do mapa e a secao da
 // pagina da medicao onde ele se resolve.
 const PASSOS: Record<string, { rotulo: string; secao: string }> = {
+  "enviar a planilha/carta": { rotulo: "Enviar a planilha/carta", secao: "" },
+  "registrar o boletim": { rotulo: "Registrar o boletim", secao: "" },
+  "gerar o espelho": { rotulo: "Gerar o espelho", secao: "" },
   "enviar ao faturamento": { rotulo: "Enviar ao faturamento", secao: "etapa-2" },
   "anexar as notas": { rotulo: "Nota fiscal", secao: "etapa-3" },
   "protocolar": { rotulo: "Enviar a nota", secao: "etapa-4" },

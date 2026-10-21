@@ -17,7 +17,7 @@ UTC, e congelaria o mes corrente antes da hora.
 """
 import sqlite3
 
-from app import auditoria, db, tempo
+from app import auditoria, db, prazos, tempo
 
 
 def nova_versao(conn: sqlite3.Connection, usuario_id: int, contrato_id: int,
@@ -113,9 +113,14 @@ def versoes(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     return out
 
 
-def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int) -> dict[str, int]:
+def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int, antes_da_versao: int | None = None) -> dict[str, int]:
+    """`antes_da_versao` (numero): so' as versoes que vem ESTRITAMENTE antes dela na linha do tempo -- o previsto
+    como estava antes dessa versao (issue #295)."""
     efetivo: dict[str, int] = {}
-    for v in _versoes(conn, contrato_id):        # linha do tempo: criado_em, empate pelo numero
+    versoes_do_contrato = _versoes(conn, contrato_id)
+    if antes_da_versao is not None:
+        versoes_do_contrato = versoes_do_contrato[:[x["numero"] for x in versoes_do_contrato].index(antes_da_versao)]
+    for v in versoes_do_contrato:        # linha do tempo: criado_em, empate pelo numero
         # 'AAAA-MM' do criado_em (UTC no banco) convertido para Cuiaba: e' a
         # fronteira de mes do NEGOCIO que decide o congelamento, nao a de UTC.
         mes_criacao = tempo.mes_local(v["criado_em"])
@@ -136,3 +141,33 @@ def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int) -> dict[str, in
             if comp >= mes_criacao or comp not in efetivo:
                 efetivo[comp] = item["valor_previsto_centavos"]
     return efetivo
+
+
+ORIGENS_DE_REPACTUACAO = ("aditivo", "carta", "smo")
+
+
+def curva_comparativa(conn: sqlite3.Connection, contrato_id: int) -> dict:
+    """Issue #295 (spec 2026-10-20 §3.4, D9): o que a curva S desenha alem do vigente.
+
+    `anterior`: previsto por competencia ANTES da ultima repactuacao, isto e', das versoes estritamente
+    anteriores a ultima versao da linha do tempo cujo documento e' aditivo, carta ou curva do SMO. A vigente quase
+    nunca e' essa versao (a carga de 04/09/2026 e as versoes manuais vem depois dos documentos), por isso nao
+    se tira simplesmente a ultima. None sem repactuacao ou sem nada antes dela.
+    `aditivos`: uma marca por aditivo ASSINADO e nao cancelado do contrato, no mes da assinatura, com o nome do
+    termo ("3º TA", com a regra de ordinal da carta de prazo; sem ordinal, o numero; sem numero, "Termo aditivo"). Apostilamento nao e' aditivo e nao leva marca."""
+    vs = versoes(conn, contrato_id)
+    repactuacoes = [v for v in vs if v["origem_documento"] in ORIGENS_DE_REPACTUACAO]
+    anterior = None
+    if repactuacoes and vs.index(repactuacoes[-1]) > 0:
+        efetivo = previsto_efetivo(conn, contrato_id, antes_da_versao=repactuacoes[-1]["numero"])
+        anterior = [{"competencia": c, "previsto_centavos": v} for c, v in sorted(efetivo.items())]
+    aditivos = []
+    for r in conn.execute("SELECT numero, ordinal, data_assinatura FROM aditivos WHERE contrato_id=? "
+                          "AND status='assinado' AND cancelado_em IS NULL AND data_assinatura IS NOT NULL "
+                          "AND COALESCE(forma,'termo_aditivo')='termo_aditivo' "
+                          "ORDER BY data_assinatura, id", (contrato_id,)):
+        # mesma regra da carta de prazo (#261): o sufixo do numero manda, depois a coluna `ordinal`
+        n = prazos._ordinal(dict(r), 0)
+        nome = f"{n}º TA" if n else (f"TA {r['numero']}" if r["numero"] else "Termo aditivo")
+        aditivos.append({"competencia": r["data_assinatura"][:7], "data": r["data_assinatura"], "nome": nome})
+    return {"anterior": anterior or None, "aditivos": aditivos}
