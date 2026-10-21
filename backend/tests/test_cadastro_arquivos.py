@@ -598,3 +598,77 @@ def test_ordinal_do_instrumento(tmp_path):
              {"chave": "par-1", "tipo": "paralisacao", "data": "2026-01-10", "ordinal": 2}]
     erros = _erros(_escrever(tmp_path / "ruim", contratos=[{**CONTRATO, "instrumentos": ruins}]))
     assert sum("ordinal" in e for e in erros) == 3, erros
+
+
+# --- issue #271: apostilamento de reajuste com competencias e periodo (spec 2026-10-20 §2.2) ----------------
+
+def _apostilamento(**dados):
+    return {"chave": "ap-reaj-1", "tipo": "apostilamento_reajuste", "data": "2026-09-15", "numero": "019/2024/02/09",
+            "data_base": "2023-04", "ciclo": 2026, **dados}
+
+
+def test_apostilamento_com_competencias_e_periodo_e_aceito(tmp_path):
+    ap = _apostilamento(periodo={"de": "2026-04", "ate": "2026-06"},
+                        competencias=[{"competencia": "2026-04", "valor": "1.234,57", "medicao": 24},
+                                      {"competencia": "2026-05", "valor": "0,01", "medicao": 25},
+                                      {"competencia": "2026-06", "valor": "-10,00"}])
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    inst = cad["contratos"][0]["instrumentos"][0]
+    assert inst["dados"]["periodo"] == {"de": "2026-04", "ate": "2026-06"}
+    # o normalizado em centavos (centavo impar preservado; indice deflacionario da' reajuste negativo)
+    assert ca.competencias_do_apostilamento(inst["dados"]) == [
+        {"competencia": "2026-04", "valor_centavos": 123457, "medicao": 24},
+        {"competencia": "2026-05", "valor_centavos": 1, "medicao": 25},
+        {"competencia": "2026-06", "valor_centavos": -1000, "medicao": None}]
+
+
+def test_apostilamento_so_com_percentual_e_periodo_e_aceito(tmp_path):
+    ap = _apostilamento(percentual="6,76", periodo={"de": "2026-04", "ate": "2027-03"})
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    inst = cad["contratos"][0]["instrumentos"][0]
+    assert inst["dados"]["periodo"] == {"de": "2026-04", "ate": "2027-03"}
+    assert ca.competencias_do_apostilamento(inst["dados"]) == []
+
+
+def test_apostilamento_com_competencia_fora_do_periodo_e_erro(tmp_path):
+    ap = _apostilamento(periodo={"de": "2026-04", "ate": "2026-06"},
+                        competencias=[{"competencia": "2026-04", "valor": "1,00"},
+                                      {"competencia": "2026-07", "valor": "2,00"}])
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    assert any("instrumentos[ap-reaj-1].competencias[1]" in e and "fora do período" in e and "07/2026" in e
+               for e in erros), erros
+
+
+def test_apostilamento_com_competencia_repetida_e_erro(tmp_path):
+    ap = _apostilamento(competencias=[{"competencia": "2026-04", "valor": "1,00"},
+                                      {"competencia": "2026-04", "valor": "2,00"}])
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    assert any("competencias[1]" in e and "competência repetida" in e for e in erros), erros
+
+
+@pytest.mark.parametrize("campo,valor,trecho", [
+    ("periodo", {"de": "2026-06", "ate": "2026-04"}, "periodo"),
+    ("periodo", {"de": "2026-04"}, "periodo"),
+    ("periodo", {"de": "2026-04", "ate": "2026-06", "fim": "x"}, "periodo"),
+    ("periodo", "2026-04", "periodo"),
+    ("competencias", [], "competencias"),
+    ("competencias", "2026-04", "competencias"),
+    ("competencias", [{"competencia": "2026-13", "valor": "1,00"}], "competencias[0].competencia"),
+    ("competencias", [{"competencia": "2026-04", "valor": 1234.56}], "competencias[0].valor"),
+    ("competencias", [{"competencia": "2026-04"}], "competencias[0].valor"),
+    ("competencias", [{"competencia": "2026-04", "valor": "1,00", "medicao": 0}], "competencias[0].medicao"),
+    ("competencias", [{"competencia": "2026-04", "valor": "1,00", "medicao": "24ª"}], "competencias[0].medicao"),
+    ("competencias", [{"competencia": "2026-04", "valor": "1,00", "medica": 3}], "competencias[0]"),
+])
+def test_apostilamento_com_competencias_ou_periodo_invalidos_e_erro(tmp_path, campo, valor, trecho):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [_apostilamento(**{campo: valor})]}]))
+    assert any(f"instrumentos[ap-reaj-1].{trecho}" in e for e in erros), erros
+
+
+def test_apostilamento_com_competencias_sem_data_base_em_contrato_de_duas_bases_e_erro(tmp_path):
+    bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+             {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
+    ap = {k: v for k, v in _apostilamento(competencias=[{"competencia": "2026-04", "valor": "1,00"}]).items()
+          if k != "data_base"}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
+    assert any("instrumentos[ap-reaj-1].data_base" in e for e in erros), erros

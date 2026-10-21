@@ -56,6 +56,27 @@ def test_pleito_de_reajuste_pela_api(api):
     assert ciclo["situacao"] == "apostilamento_pendente"
 
 
+def test_reajuste_da_obra_traz_as_competencias_apostiladas_e_o_termo_do_pleito(api):
+    """Issue #271: a aba Reajuste recebe as competencias apostiladas e o pleito com o termo que o atendeu."""
+    cl, cid, _ = api
+    assert cl.get(f"/api/contratos/{cid}/reajuste").json()["competencias"] == []
+    c = db.get_conn()
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+              "enviado_em, instrumento_chave) VALUES (?, 'reajuste', 'cadastro', '2024-06', 2026, 'CT-1-LT-2026', "
+              "'enviado', '2026-06-10', 'ap-1')", (cid,))
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) VALUES "
+              "(?, 'ap-1', 'apostilamento_reajuste', '001/2026', '2026-09-15', ?)",
+              (cid, '{"ciclo": 2026, "competencias": [{"competencia": "2026-07", "valor": "100,01", "medicao": 30}]}'))
+    iid = c.execute("SELECT id FROM instrumentos").fetchone()[0]
+    c.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, valor_previsto_centavos, "
+              "origem, instrumento_id) VALUES (?, '2024-06', 2026, '2026-07', 10001, 'apostilamento', ?)", (cid, iid))
+    c.commit(); c.close()
+    r = cl.get(f"/api/contratos/{cid}/reajuste").json()
+    assert [(x["competencia"], x["valor_centavos"], x["medicao"], x["instrumento_numero"]) for x in r["competencias"]] \
+        == [("2026-07", 10001, 30, "001/2026")]
+    assert r["pleitos"][0]["instrumento_chave"] == "ap-1"
+
+
 def test_pecas_do_orgao_entram_como_anexo_pela_api(api):
     """Issue #50: a API aceita as pecas que o orgao pede no pleito de reajuste (falencia, contrato social, ...)."""
     cl, cid, _ = api

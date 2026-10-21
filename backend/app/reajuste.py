@@ -23,6 +23,14 @@ def _ciclo_corrente(mes_base: str, hoje: datetime.date) -> int | None:
     return max(anos) if anos else None
 
 
+def ciclo_do_apostilamento(dados: dict, data: str) -> int | None:
+    """O ciclo (ano) que o apostilamento fecha: `ciclo`, senao o ano da `eficacia`, senao o da data do termo."""
+    try:
+        return int(str(dados.get("ciclo") or dados.get("eficacia") or data)[:4])      # "2026-06" -> 2026
+    except ValueError:
+        return None
+
+
 def _apostilamento(conn, contrato_id: int, mes_base: str, ciclo: int, unica: bool) -> dict | None:
     """Apostilamento de reajuste com a mesma data-base e o mesmo ciclo. Sem `data_base` nos dados, vale a
     data-base unica do contrato; sem `ciclo`, o ano da `eficacia` (ou da data do instrumento)."""
@@ -30,9 +38,8 @@ def _apostilamento(conn, contrato_id: int, mes_base: str, ciclo: int, unica: boo
                           "ORDER BY data DESC, id DESC", (contrato_id,)):
         d = json.loads(r["dados"] or "{}")
         base = d.get("data_base") or (mes_base if unica else None)
-        try:
-            ano = int(str(d.get("ciclo") or d.get("eficacia") or r["data"])[:4])      # "2026-06" -> 2026
-        except ValueError:
+        ano = ciclo_do_apostilamento(d, r["data"])
+        if ano is None:
             continue
         if base == mes_base and ano == ciclo:
             return {**dict(r), "dados": d}
@@ -70,6 +77,26 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
         f"WHERE r.reemite_pleito_id = p.pleito_id AND r.situacao = 'enviado')))) WHERE _ordem=1 "
         f"ORDER BY data_base_mes, ciclo, competencia", args)
     return [{k: r[k] for k in r.keys() if k != "_ordem"} for r in rows]
+
+
+def competencias_apostiladas(conn, contrato_id: int) -> list[dict]:
+    """Issue #271: as competencias cuja previsao vigente vem de apostilamento, com o termo e o nº da medicao que
+    ele cita (do `competencias` do cadastro). Termo com `corrige` gravado depois vale no lugar do anterior."""
+    termos = {r["id"]: r for r in conn.execute(
+        "SELECT id, chave, numero, data, dados FROM instrumentos WHERE contrato_id=? "
+        "AND tipo='apostilamento_reajuste'", (contrato_id,))}
+    out = []
+    for p in previsoes_vigentes(conn, contrato_id):
+        t = termos.get(p["instrumento_id"]) if p["origem"] == "apostilamento" else None
+        if t is None:
+            continue
+        itens = json.loads(t["dados"] or "{}").get("competencias") or []
+        medicao = next((x.get("medicao") for x in itens
+                        if isinstance(x, dict) and str(x.get("competencia")) == p["competencia"]), None)
+        out.append({"data_base_mes": p["data_base_mes"], "ciclo": p["ciclo"], "competencia": p["competencia"],
+                    "valor_centavos": p["valor_previsto_centavos"], "medicao": medicao,
+                    "instrumento_chave": t["chave"], "instrumento_numero": t["numero"], "instrumento_data": t["data"]})
+    return out
 
 
 def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[dict]:

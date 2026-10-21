@@ -581,3 +581,95 @@ def test_versao_da_carga_fica_superada_so_pela_versao_do_yaml_de_data_posterior(
     assert cronograma_mod.previsto_efetivo(conn, 1) == {
         "2024-04": 100_01, "2026-08": 50_00, "2026-09": 60_00, "2026-10": 250_00, "2026-12": 400_00}
     assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 3     # nada apagado
+
+
+# --- issue #271: apostilamento com competencias vira previsao e atende o pleito (spec 2026-10-20 §2.2) ----------
+
+from app import reajuste as reajuste_mod
+
+PLEITO_2026 = {"tipo": "reajuste", "oficio": "CT-122-LT-2026", "data": "2026-04-23", "data_base": "2023-04",
+               "ciclo": 2026, "dias": None}
+AP_COMP = {**AP_REAJ, "chave": "ap-11", "data": "2026-09-15", "numero": "019/2024/02/11",
+           "dados": {"data_base": "2023-04", "ciclo": 2026, "periodo": {"de": "2026-04", "ate": "2026-06"},
+                     "competencias": [{"competencia": "2026-04", "valor": "1.234,57", "medicao": 24},
+                                      {"competencia": "2026-05", "valor": "2.000,01", "medicao": 25}]}}
+
+
+def _previsoes(conn):
+    return [tuple(r) for r in conn.execute(
+        "SELECT data_base_mes, ciclo, competencia, valor_previsto_centavos, origem, instrumento_id, usuario_id "
+        "FROM reajuste_previsoes ORDER BY id")]
+
+
+def test_apostilamento_com_competencias_grava_previsoes_e_liga_o_pleito(conn):
+    cad = _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    inst = conn.execute("SELECT id FROM instrumentos WHERE chave='ap-11'").fetchone()[0]
+    assert _previsoes(conn) == [("2023-04", 2026, "2026-04", 123457, "apostilamento", inst, 1),
+                                ("2023-04", 2026, "2026-05", 200001, "apostilamento", inst, 1)]
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.reajuste_previsoes'").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0] == 1
+    # segunda aplicacao: nada duplica, nada se audita de novo
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["instrumentos"]["iguais"] == 1
+    assert len(_previsoes(conn)) == 2
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao IN "
+                        "('cadastro.reajuste_previsoes','cadastro.pleito_atendido')").fetchone()[0] == 2
+
+
+def test_pleito_que_entra_depois_do_apostilamento_tambem_e_ligado(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP])]))
+    assert len(_previsoes(conn)) == 2
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+
+
+def test_apostilamento_sem_competencias_nao_grava_previsao_mas_atende_o_pleito(conn):
+    ap = {**AP_REAJ, "dados": {"data_base": "2023-04", "ciclo": 2026, "percentual": "6,76"}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ap], pleitos_anteriores=[PLEITO_2026])]))
+    assert _previsoes(conn) == []
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-09"
+
+
+def test_apostilamento_de_outro_ciclo_nao_atende_o_pleito(conn):
+    ap = {**AP_COMP, "dados": {**AP_COMP["dados"], "ciclo": 2025, "periodo": None,
+                               "competencias": [{"competencia": "2025-04", "valor": "1,00"}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ap], pleitos_anteriores=[PLEITO_2026])]))
+    assert [p[1:3] for p in _previsoes(conn)] == [(2025, "2025-04")]
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+
+
+def test_termo_com_corrige_gera_previsoes_novas_que_valem_e_as_antigas_ficam(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])]))
+    correcao = {**AP_COMP, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-10-01", "corrige": "ap-11",
+                "dados": {**AP_COMP["dados"], "competencias": [{"competencia": "2026-04", "valor": "1.300,03", "medicao": 24}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP, correcao],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    ids = dict(conn.execute("SELECT chave, id FROM instrumentos").fetchall())
+    # as antigas continuam no historico
+    assert [(p[2], p[3], p[5]) for p in _previsoes(conn)] == [
+        ("2026-04", 123457, ids["ap-11"]), ("2026-05", 200001, ids["ap-11"]), ("2026-04", 130003, ids["ap-12"])]
+    vig = {p["competencia"]: (p["valor_previsto_centavos"], p["instrumento_id"])
+           for p in reajuste_mod.previsoes_vigentes(conn, 1)}
+    # a corrigida passa a valer; competencia que a correcao nao traz continua com a do termo anterior
+    assert vig == {"2026-04": (130003, ids["ap-12"]), "2026-05": (200001, ids["ap-11"])}
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-12"
+
+
+def test_termo_e_correcao_aplicados_juntos_a_correcao_vale_mesmo_com_data_anterior(conn):
+    # a ordem de gravacao segue o `corrige`, nao so' a data: a correcao nunca fica atras do termo que corrige
+    correcao = {**AP_COMP, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-09-01", "corrige": "ap-11",
+                "dados": {**AP_COMP["dados"], "competencias": [{"competencia": "2026-04", "valor": "1.300,03"}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[correcao, AP_COMP],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    vig = {p["competencia"]: p["valor_previsto_centavos"] for p in reajuste_mod.previsoes_vigentes(conn, 1)}
+    assert vig == {"2026-04": 130003, "2026-05": 200001}
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-12"
+
+
+def test_ensaio_do_apostilamento_nao_grava_previsao(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
+                                                                pleitos_anteriores=[PLEITO_2026])]), ensaio=True)
+    assert conn.execute("SELECT COUNT(*) FROM reajuste_previsoes").fetchone()[0] == 0

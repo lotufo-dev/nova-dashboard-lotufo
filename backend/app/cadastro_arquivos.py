@@ -197,6 +197,82 @@ def _inteiro(v, minimo: int) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= minimo else None
 
 
+_CAMPOS_COMPETENCIA_APOSTILADA = {"competencia", "valor", "medicao"}
+_CAMPOS_PERIODO = {"de", "ate"}
+
+
+def _mes_br(mes: str) -> str:
+    return f"{mes[5:7]}/{mes[:4]}"
+
+
+def _periodo_e_competencias(d: dict) -> tuple[list[dict], list[tuple[str, str]]]:
+    """Issue #271 (spec 2026-10-20 §2.2): `periodo: {de, ate}` e `competencias: [{competencia, valor, medicao}]`
+    do apostilamento de reajuste. Devolve as competencias em centavos e os problemas como (campo, mensagem).
+    O valor aceita sinal: indice deflacionario da' reajuste negativo (migracao 043 nao limita o sinal)."""
+    problemas: list[tuple[str, str]] = []
+    de = ate = None
+    per = d.get("periodo")
+    if per is not None:
+        if (not isinstance(per, dict) or set(per) != _CAMPOS_PERIODO
+                or not all(_MES.match(str(per[k] or "")) for k in _CAMPOS_PERIODO)):
+            problemas.append(("periodo", "use {de: AAAA-MM, ate: AAAA-MM}"))
+        elif str(per["de"]) > str(per["ate"]):
+            problemas.append(("periodo", f"o início ({_mes_br(str(per['de']))}) é depois do fim "
+                                         f"({_mes_br(str(per['ate']))})"))
+        else:
+            de, ate = str(per["de"]), str(per["ate"])
+    lista = d.get("competencias")
+    if lista is None:
+        return [], problemas
+    if not isinstance(lista, list) or not lista:
+        problemas.append(("competencias", "use uma lista de {competencia, valor, medicao} com ao menos uma competência"))
+        return [], problemas
+    out, vistas = [], set()
+    for j, it in enumerate(lista):
+        aqui = f"competencias[{j}]"
+        if not isinstance(it, dict):
+            problemas.append((aqui, "use {competencia, valor, medicao}"))
+            continue
+        sobra = sorted(str(k) for k in it if k not in _CAMPOS_COMPETENCIA_APOSTILADA)
+        if sobra:
+            problemas.append((aqui, f"campo desconhecido: {', '.join(sobra)} (use competencia, valor e medicao)"))
+            continue
+        comp = str(it.get("competencia") or "")
+        if not _MES.match(comp):
+            problemas.append((f"{aqui}.competencia", f"use AAAA-MM: {comp!r}"))
+            continue
+        if comp in vistas:
+            problemas.append((aqui, f"competência repetida: {_mes_br(comp)}"))
+            continue
+        vistas.add(comp)
+        if de and not de <= comp <= ate:
+            problemas.append((aqui, f"competência {_mes_br(comp)} fora do período do apostilamento "
+                                    f"({_mes_br(de)} a {_mes_br(ate)})"))
+            continue
+        bruto = it.get("valor")
+        texto = "" if bruto is None or isinstance(bruto, bool) else str(bruto).strip()
+        sinal = -1 if texto.startswith("-") else 1
+        try:
+            centavos = sinal * dinheiro.parse_brl(texto.lstrip("-").strip())
+        except ValueError as e:
+            problemas.append((f"{aqui}.valor", str(e)))
+            continue
+        medicao = it.get("medicao")
+        if medicao is not None and _inteiro(medicao, 1) is None:
+            problemas.append((f"{aqui}.medicao", f"use o nº da medição do órgão, inteiro a partir de 1: {medicao!r}"))
+            continue
+        out.append({"competencia": comp, "valor_centavos": centavos, "medicao": medicao})
+    return out, problemas
+
+
+def competencias_do_apostilamento(dados: dict) -> list[dict]:
+    """As competencias apostiladas em centavos ({competencia, valor_centavos, medicao}), do `dados` ja' validado."""
+    out, problemas = _periodo_e_competencias(dados)
+    if problemas:
+        raise ValueError("; ".join(f"{campo}: {msg}" for campo, msg in problemas))
+    return out
+
+
 def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
     """Bloco 7: campos de `dados` que reajuste e prazos leem, validados e normalizados."""
     meses = {d["mes"] for d in c["datas_base"]}
@@ -210,6 +286,12 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
             # "2026-06" (Granito) vale: o reajuste le so' o ano. Nao normaliza: instrumento aplicado nao muda.
             if d.get("ciclo") is not None and not _CICLO.match(str(d["ciclo"])):
                 falha(f"{onde}.ciclo", "use o ano do ciclo (ex.: 2026)")
+            # Issue #271: competencias e periodo; cada competencia vira previsao da data-base dele
+            for campo, msg in _periodo_e_competencias(d)[1]:
+                falha(f"{onde}.{campo}", msg)
+            if d.get("competencias") is not None and d.get("data_base") is None and len(meses) != 1:
+                falha(f"{onde}.data_base", "o contrato não tem uma data-base só: diga a deste apostilamento "
+                                           "(AAAA-MM, uma das datas_base) para as competências irem ao ciclo certo")
         elif inst["tipo"] == "endosso_garantia":
             if d.get("vigencia_fim") is not None:      # issue #65: o endosso traz a nova vigencia da garantia
                 try:
