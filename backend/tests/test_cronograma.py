@@ -214,3 +214,86 @@ def test_lista_de_versoes_traz_os_dados_do_documento(conn, cid):
         (2, "contratual", "contratual", "2024-04-10", 1, 5_00, False),
         (1, None, None, None, 2, 3_01, True)]
     assert vid != vid2
+
+
+# --- issue #295: curva S com a linha anterior a ultima repactuacao e as marcas dos aditivos -----
+
+def _cadastro(conn, cid, numero, chave, origem, data, instrumento=None):
+    vid = conn.execute("SELECT id FROM cronograma_versoes WHERE contrato_id=? AND numero=?", (cid, numero)).fetchone()[0]
+    conn.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, data_documento,"
+                 " instrumento) VALUES (?,?,?,?,?,?)", (vid, cid, chave, origem, data, instrumento))
+    conn.commit()
+
+
+def _carga(conn, cid, itens):
+    """Versao da carga de 04/09/2026: sem linha no cadastro, criada depois dos documentos."""
+    cronograma.nova_versao(conn, 1, cid, itens, "manual")
+    conn.execute("UPDATE cronograma_versoes SET criado_em='2026-09-04 15:00:00' WHERE numero="
+                 "(SELECT MAX(numero) FROM cronograma_versoes)")
+    conn.commit()
+
+
+def test_anterior_e_o_previsto_antes_da_ultima_repactuacao_mesmo_com_a_carga_depois(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 10_00), ("2025-02", 10_00), ("2025-03", 10_00)], "manual",
+                           data_documento="2024-12-01")
+    cronograma.nova_versao(conn, 1, cid, [("2025-02", 5_00), ("2025-03", 5_00), ("2025-04", 5_00)], "manual",
+                           data_documento="2025-02-10")
+    _cadastro(conn, cid, 1, "contratual", "contratual", "2024-12-01")
+    _cadastro(conn, cid, 2, "ta1", "aditivo", "2025-02-10")
+    _carga(conn, cid, [("2025-03", 1_00), ("2025-05", 1_00)])     # vigente, mas nao e' repactuacao
+    r = cronograma.curva_comparativa(conn, cid)
+    # antes do TA1 so' havia a contratual; a carga (que ja inclui o TA) nao entra
+    assert r["anterior"] == [{"competencia": "2025-01", "previsto_centavos": 10_00},
+                             {"competencia": "2025-02", "previsto_centavos": 10_00},
+                             {"competencia": "2025-03", "previsto_centavos": 10_00}]
+
+
+def test_anterior_usa_a_ultima_de_varias_repactuacoes_e_aceita_carta_e_smo(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 10_00), ("2025-02", 10_00)], "manual", data_documento="2024-12-01")
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 4_00), ("2025-02", 4_00)], "manual", data_documento="2025-01-15")
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 4_00), ("2025-02", 2_00)], "manual", data_documento="2025-01-20")
+    cronograma.nova_versao(conn, 1, cid, [("2025-02", 9_00)], "manual", data_documento="2025-03-01")   # correcao manual
+    _cadastro(conn, cid, 1, "contratual", "contratual", "2024-12-01")
+    _cadastro(conn, cid, 2, "ta1", "aditivo", "2025-01-15")
+    _cadastro(conn, cid, 3, "smo1", "smo", "2025-01-20")
+    assert cronograma.curva_comparativa(conn, cid)["anterior"] == [
+        {"competencia": "2025-01", "previsto_centavos": 4_00}, {"competencia": "2025-02", "previsto_centavos": 4_00}]
+
+
+def test_sem_repactuacao_nao_tem_linha_anterior(conn, cid):
+    assert cronograma.curva_comparativa(conn, cid) == {"anterior": None, "aditivos": []}
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 10_00)], "manual", data_documento="2024-12-01")
+    _cadastro(conn, cid, 1, "contratual", "contratual", "2024-12-01")
+    _carga(conn, cid, [("2025-01", 9_00)])                  # contratual + carga: nada foi repactuado
+    assert cronograma.curva_comparativa(conn, cid)["anterior"] is None
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 8_00)], "manual")     # correcao manual
+    assert cronograma.curva_comparativa(conn, cid)["anterior"] is None
+
+
+def test_repactuacao_unica_sem_nada_antes_nao_tem_linha_anterior(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 10_00)], "manual", data_documento="2024-12-01")
+    _cadastro(conn, cid, 1, "ta1", "aditivo", "2024-12-01")
+    assert cronograma.curva_comparativa(conn, cid)["anterior"] is None
+
+
+def _aditivo(conn, cid, data, numero=None, ordinal=None, status="assinado", cancelado=None, forma=None):
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, ordinal, cancelado_em, forma)"
+                 " VALUES (?,?,?,?,?,?,?,?)", (cid, "prazo", status, data, numero, ordinal, cancelado, forma))
+    conn.commit()
+
+
+def test_marcas_vem_dos_aditivos_assinados_no_mes_da_assinatura(conn, cid):
+    _aditivo(conn, cid, "2025-09-02", ordinal=2)
+    _aditivo(conn, cid, "2025-06-30", ordinal=1)
+    _aditivo(conn, cid, "2025-11-05", numero="7/2025")
+    _aditivo(conn, cid, "2025-12-01")
+    _aditivo(conn, cid, "2025-12-15", numero="099/2020/01/14")                       # ordinal pelo sufixo do numero
+    _aditivo(conn, cid, "2025-12-20", ordinal=3, forma="apostilamento")             # apostilamento nao e' aditivo
+    _aditivo(conn, cid, None, status="em_andamento", ordinal=3)                      # nao assinado
+    _aditivo(conn, cid, "2025-07-01", ordinal=9, cancelado="2025-07-02 10:00:00")     # cancelado
+    assert cronograma.curva_comparativa(conn, cid)["aditivos"] == [
+        {"competencia": "2025-06", "data": "2025-06-30", "nome": "1º TA"},
+        {"competencia": "2025-09", "data": "2025-09-02", "nome": "2º TA"},
+        {"competencia": "2025-11", "data": "2025-11-05", "nome": "TA 7/2025"},
+        {"competencia": "2025-12", "data": "2025-12-01", "nome": "Termo aditivo"},
+        {"competencia": "2025-12", "data": "2025-12-15", "nome": "14º TA"}]

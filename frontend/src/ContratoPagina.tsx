@@ -8,7 +8,7 @@ import type { Usuario } from "./Login";
 import IniciarProxima from "./IniciarProxima";
 import Medicoes, { brl } from "./Medicoes";
 import { ContratoObra, DocumentosObra } from "./ObraAbas";
-import type { PontoDaCurva } from "./obra";
+import type { MarcaAditivo, PontoDaCurva, PrevistoAnterior } from "./obra";
 import Prazos from "./Prazos";
 import Reajuste from "./Reajuste";
 import { NovoProtocolo } from "./Protocolo";
@@ -116,7 +116,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
   // a curva (previsto x medido) e o saldo: os indicadores e a curva S leem a mesma resposta.
   // N04-12: a falha da leitura (null) nao e' o mesmo que obra sem curva.
-  const [curva, setCurva] = useState<{ pontos: PontoDaCurva[]; saldo: Saldo } | null | undefined>(undefined);
+  const [curva, setCurva] = useState<{ pontos: PontoDaCurva[]; saldo: Saldo; anterior: PrevistoAnterior | null; aditivos: MarcaAditivo[] } | null | undefined>(undefined);
 
   useEffect(() => {
     // `vigente` corta o setState de uma resposta que chega depois de a tela ja ter
@@ -134,8 +134,8 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
   useEffect(() => {
     let vivo = true;
     setCurva(undefined);
-    api<{ curva?: PontoDaCurva[]; saldo: Saldo }>(`/api/contratos/${contratoId}/curva`)
-      .then(d => { if (vivo) setCurva({ pontos: d.curva ?? [], saldo: d.saldo }); })
+    api<{ curva?: PontoDaCurva[]; saldo: Saldo; anterior?: PrevistoAnterior | null; aditivos?: MarcaAditivo[] }>(`/api/contratos/${contratoId}/curva`)
+      .then(d => { if (vivo) setCurva({ pontos: d.curva ?? [], saldo: d.saldo, anterior: d.anterior ?? null, aditivos: d.aditivos ?? [] }); })
       .catch(() => { if (vivo) setCurva(null); });
     return () => { vivo = false; };
   }, [contratoId]);
@@ -190,7 +190,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
             <div className="obra-grade__principal">
               <Indicadores c={c} contratoId={contratoId} saldo={curva ? curva.saldo : null} falhou={curva === null} />
 
-              <div id="curva"><CurvaS pontos={curva === undefined ? undefined : curva ? curva.pontos : null} contratoId={contratoId} /></div>
+              <div id="curva"><CurvaS pontos={curva === undefined ? undefined : curva ? curva.pontos : null} contratoId={contratoId} anterior={curva?.anterior} aditivos={curva?.aditivos} /></div>
 
               <section className="cartao" id="secoes" aria-label="Seções da obra">
                 <Abas rotulo="Seções da obra" atual={aba} classe="abas--obra"

@@ -54,7 +54,8 @@ export type Medicao = {
 export { brl };
 
 export const ROTULO_ESTADO: Record<string, string> = {
-  prevista: "Prevista", espelho_gerado: "Espelho gerado", espelho_enviado: "Espelho enviado",
+  prevista: "Prevista", planilha_gerada: "Planilha/carta gerada", planilha_enviada: "Planilha/carta enviada",
+  boletim_recebido: "Boletim recebido", espelho_gerado: "Espelho gerado", espelho_enviado: "Espelho enviado",
   nota_emitida: "Nota emitida", protocolada: "Protocolada", nf_emitida: "Lançada no RM",
   recebida: "Recebida", cancelada: "Cancelada", desistida: "Desistida",
 };
