@@ -39,8 +39,11 @@ type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" 
 const SECAO_ETAPA: Record<string, number> = { espelho: 1, notas: 3, protocolo: 4 };
 
 /** A aba de Medicoes onde esta medicao aparece (o "Medicoes" do caminho do topo volta para la'). */
-export function abaDa(estado: string): "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento" | undefined {
+export function abaDa(estado: string): "planilha-gerada" | "planilha-enviada" | "boletim-recebido" | "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento" | undefined {
   switch (estado) {
+    case "planilha_gerada": return "planilha-gerada";
+    case "planilha_enviada": return "planilha-enviada";
+    case "boletim_recebido": return "boletim-recebido";
     case "espelho_gerado": return "faturamento";
     case "espelho_enviado": return "aguardando-nota";
     case "nota_emitida": return "enviar-nota";

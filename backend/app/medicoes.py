@@ -41,7 +41,9 @@ TRANSICOES = {
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
 # B-12 (10/10/2026): mensagem ao usuario com o tipo e o estado por extenso, nunca o codigo ("(execucao)")
 ROTULO_TIPO = {"execucao": "execução", "reajuste": "reajuste", "projeto": "projeto"}
-ROTULO_ESTADO = {"prevista": "prevista", "espelho_gerado": "com espelho gerado", "espelho_enviado": "com espelho enviado",
+ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta gerada",
+                 "planilha_enviada": "com planilha/carta enviada", "boletim_recebido": "com boletim recebido",
+                 "espelho_gerado": "com espelho gerado", "espelho_enviado": "com espelho enviado",
                  "nota_emitida": "com nota emitida", "protocolada": "protocolada", "nf_emitida": "lançada no RM",
                  "recebida": "recebida", "cancelada": "cancelada", "desistida": "desistida"}
 
@@ -460,7 +462,8 @@ def titulo(m: dict) -> str:
     return f"{m['numero']}ª Medição" + (" de Projeto" if m["tipo"] == "projeto" else "")
 
 
-PROXIMO_PASSO = {"espelho_gerado": "enviar ao faturamento", "espelho_enviado": "anexar as notas",
+PROXIMO_PASSO = {"planilha_gerada": "enviar a planilha/carta", "planilha_enviada": "registrar o boletim",
+                 "boletim_recebido": "gerar o espelho", "espelho_gerado": "enviar ao faturamento", "espelho_enviado": "anexar as notas",
                  "nota_emitida": "protocolar", "protocolada": "aguardando pagamento",
                  "nf_emitida": "aguardando pagamento"}
 
@@ -490,7 +493,8 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
                     "desde": max(marcos) if marcos else (criado.isoformat() if criado else ""),
                     # os marcos crus, para quem precisa do marco da SITUACAO e nao do mais recente (resumo abaixo)
                     "espelho_em": r["espelho_em"], "nota_emitida_em": r["nota_emitida_em"],
-                    "protocolado_em": r["protocolado_em"]})
+                    "protocolado_em": r["protocolado_em"], "planilha_enviada_em": r["planilha_enviada_em"],
+                    "atestado_em": r["atestado_em"]})
     return out
 
 
@@ -499,9 +503,10 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
 # lugar so' (o teste confere). `nf_emitida` e' o legado do bloco 3 (o remapeamento leva a zero) e espera o orgao
 # como a protocolada. `prevista` (criada pelo cronograma, sem espelho) fica de fora DE PROPOSITO: a obra com so'
 # uma prevista esta' "sem medicao aberta" (decisao do Leo).
-SITUACAO = {"espelho_gerado": "faturamento", "espelho_enviado": "aguardando-nota", "nota_emitida": "enviar-nota",
+SITUACAO = {"planilha_gerada": "planilha-gerada", "planilha_enviada": "planilha-enviada",
+            "boletim_recebido": "boletim-recebido", "espelho_gerado": "faturamento", "espelho_enviado": "aguardando-nota", "nota_emitida": "enviar-nota",
             "protocolada": "aguardando-pagamento", "nf_emitida": "aguardando-pagamento"}
-ORDEM_SITUACAO = ("faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento")
+ORDEM_SITUACAO = ("planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento")
 
 # Sigla curta do contratante pela chave do orgao no cadastro (orgaos.chave). A SINFRA sai da familia, com a
 # superintendencia ao lado; o que nao estiver aqui aparece com o nome do cadastro, sem sigla inventada.
@@ -558,7 +563,16 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
         "SELECT en.medicao_id, MAX(v.enviado_em) FROM envio_medicoes en JOIN envios v ON v.id=en.envio_id "
         "GROUP BY en.medicao_id").fetchall())
 
+    planilha_de = dict(conn.execute("SELECT medicao_id, MAX(criado_em) FROM medicao_planilhas GROUP BY medicao_id").fetchall())
+
     def marco(m: dict) -> datetime.date | None:
+        # os tres estados do motor (spec motores §2.1): o marco e' o do proprio estado
+        if m["estado"] == "planilha_gerada":
+            return _dia(planilha_de.get(m["id"]))
+        if m["estado"] == "planilha_enviada":
+            return _dia(m["planilha_enviada_em"])
+        if m["estado"] == "boletim_recebido":
+            return _dia(m["atestado_em"])
         if m["estado"] == "espelho_gerado":
             return _dia(espelho_de.get(m["id"])) or _dia(m["espelho_em"])
         if m["estado"] == "espelho_enviado":

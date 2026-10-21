@@ -704,6 +704,9 @@ a.topbar__avisos:hover { color: var(--acento-forte); }
 .estado { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--texto); }
 .estado__ponto { width: 6px; height: 6px; border-radius: var(--raio-pilula); flex: none; background: var(--texto-fraco); }
 .estado--prevista    .estado__ponto { background: var(--previsto); }
+.estado--planilha_gerada .estado__ponto { background: var(--previsto); }
+.estado--planilha_enviada .estado__ponto { background: var(--texto-2); }
+.estado--boletim_recebido .estado__ponto { background: var(--texto-2); }
 .estado--espelho_gerado  .estado__ponto { background: var(--previsto); }
 .estado--espelho_enviado .estado__ponto { background: var(--texto-2); }
 .estado--protocolada .estado__ponto { background: var(--texto-2); }

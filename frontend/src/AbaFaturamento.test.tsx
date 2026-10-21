@@ -16,7 +16,7 @@ const linha = (extra: Partial<LinhaResumo>): LinhaResumo => ({
 
 const resumo = (linhas: LinhaResumo[]): ResumoMedicoes => ({
   hoje: "2026-10-14",
-  contagens: { "sem-medicao": 0, faturamento: linhas.length, "aguardando-nota": 0, "enviar-nota": 0, "aguardando-pagamento": 0 },
+  contagens: { "planilha-gerada": 0, "planilha-enviada": 0, "boletim-recebido": 0, "sem-medicao": 0, faturamento: linhas.length, "aguardando-nota": 0, "enviar-nota": 0, "aguardando-pagamento": 0 },
   linhas, obras: [],
 });
 
