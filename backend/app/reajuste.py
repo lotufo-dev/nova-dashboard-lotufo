@@ -91,7 +91,11 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
         f"AND COALESCE(r.reemissao, 'cronograma') = 'cronograma' "
         f"AND EXISTS (SELECT 1 FROM reajuste_previsoes x WHERE x.pleito_id = r.id AND x.origem = 'pleito') "
         f"UNION SELECT q.reemite_pleito_id FROM derrubado d JOIN pleitos q ON q.id = d.id "
-        f"WHERE q.reemissao = 'reiteracao' AND q.reemite_pleito_id IS NOT NULL) "
+        # sobe pela reiteracao e pela reemissao que ainda nao tem previsoes proprias (nenhuma das duas traz
+        # cronograma): P1 -> P2 vazio -> P3 com previsoes derruba P2 e P1, sem cronograma hibrido
+        f"WHERE (q.reemissao = 'reiteracao' OR (COALESCE(q.reemissao, 'cronograma') = 'cronograma' "
+        f"AND NOT EXISTS (SELECT 1 FROM reajuste_previsoes x WHERE x.pleito_id = q.id AND x.origem = 'pleito'))) "
+        f"AND q.reemite_pleito_id IS NOT NULL) "
         f"SELECT * FROM (SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.data_base_mes, p.ciclo, p.competencia "
         f"ORDER BY CASE p.origem {ordem} END, datetime(p.criado_em) DESC, p.id DESC) AS _ordem "
         f"FROM reajuste_previsoes p WHERE p.contrato_id=? {filtro} "

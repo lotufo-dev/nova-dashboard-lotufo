@@ -229,6 +229,35 @@ def test_reemissao_enviada_sem_previsoes_proprias_nao_derruba_o_anterior(cenario
     assert vig() == {"2026-08": (300_05, novo)}                         # com elas, o anterior sai
 
 
+@pytest.mark.parametrize("com_reiteracao", [False, True])
+def test_reemissao_com_previsoes_derruba_a_cadeia_inteira_ate_o_ultimo_cronograma(cenario, com_reiteracao):
+    """Gates da PR #319, rodada 2: P1 (com previsoes) -> P2 reemissao sem previsoes [-> reiteracao] -> P3 com
+    previsoes. P3 derruba P2 e P1: nenhuma competencia de P1 que P3 nao traz sobra (sem cronograma hibrido)."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    p1 = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _previsao(c, cid, "2026-07", 100_01, "pleito", pleito_id=p1)
+    _previsao(c, cid, "2026-09", 999_99, "pleito", pleito_id=p1)
+
+    def reemite(anterior, reemissao, enviado_em):
+        c.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo, situacao, enviado_em, "
+                  "reemite_pleito_id, reemissao) VALUES (?, 'reajuste', '2024-06', 2026, 'enviado', ?, ?, ?)",
+                  (cid, enviado_em, anterior, reemissao))
+        c.commit()
+        return c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+
+    p2 = reemite(p1, "cronograma", "2026-08-01")                       # sem previsoes proprias
+    meio = reemite(p2, "reiteracao", "2026-09-01") if com_reiteracao else p2
+    vig = lambda: {p["competencia"]: (p["valor_previsto_centavos"], p["pleito_id"])  # noqa: E731
+                   for p in reajuste.previsoes_vigentes(c, cid)}
+    assert vig() == {"2026-07": (100_01, p1), "2026-09": (999_99, p1)}  # P2 vazio ainda nao derruba P1
+    p3 = reemite(meio, "cronograma", "2026-10-01")
+    _previsao(c, cid, "2026-07", 110_03, "pleito", pleito_id=p3)
+    _previsao(c, cid, "2026-08", 300_05, "pleito", pleito_id=p3)
+    assert vig() == {"2026-07": (110_03, p3), "2026-08": (300_05, p3)}
+
+
 def test_reiteracao_nao_zera_a_espera_do_apostilamento_nem_tira_a_diretoria(cenario):
     """Revisor da PR #319: original ha' mais de 90 dias e reiteracao hoje; o atraso conta do pedido original."""
     c, ids = cenario
