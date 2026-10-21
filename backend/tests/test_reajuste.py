@@ -184,6 +184,31 @@ def test_reemissao_enviada_substitui_o_cronograma_do_pleito_anterior(cenario):
     assert vig() == {"2026-07": (110_07, "pleito"), "2026-08": (150_05, "manual")}
 
 
+def test_reiteracao_enviada_nao_derruba_o_cronograma_e_a_reemissao_depois_dela_derruba(cenario):
+    """Issue #277: a reiteracao (familia B) nao traz cronograma; o do pleito reiterado segue valendo. A reemissao
+    do cronograma feita depois da reiteracao derruba o pleito original, pela cadeia."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    original = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _previsao(c, cid, "2026-07", 100_01, "pleito", pleito_id=original)
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo, situacao, enviado_em, reemite_pleito_id, "
+              "reemissao) VALUES (?, 'reajuste', '2024-06', 2026, 'enviado', '2026-10-01', ?, 'reiteracao')",
+              (cid, original))
+    reiteracao = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    c.commit()
+    vig = lambda: {p["competencia"]: (p["valor_previsto_centavos"], p["pleito_id"])  # noqa: E731
+                   for p in reajuste.previsoes_vigentes(c, cid)}
+    assert vig() == {"2026-07": (100_01, original)}
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo, situacao, enviado_em, reemite_pleito_id, "
+              "reemissao) VALUES (?, 'reajuste', '2024-06', 2026, 'enviado', '2026-10-20', ?, 'cronograma')",
+              (cid, reiteracao))
+    novo = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _previsao(c, cid, "2026-08", 200_03, "pleito", pleito_id=novo)
+    c.commit()
+    assert vig() == {"2026-08": (200_03, novo)}
+
+
 def test_previsao_vigente_compara_a_hora_e_nao_o_texto(cenario):
     """Carga com data ISO ('T') ou so' o dia nao pode passar na frente de um registro mais novo."""
     c, ids = cenario

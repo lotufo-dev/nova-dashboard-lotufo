@@ -57,17 +57,27 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
 
     Previsao de pleito so' vale enquanto o pleito vale: pleito descartado, ou reemitido por outro pleito ja'
     enviado, sai da conta inteiro (a reemissao traz o cronograma todo; competencia que ela nao traz deixa de ter
-    previsao de pleito e cai para o manual, se houver). Reemissao ainda em rascunho nao derruba o anterior."""
+    previsao de pleito e cai para o manual, se houver). Reemissao ainda em rascunho nao derruba o anterior.
+
+    A reiteracao (issue #277, migracao 050) nao traz cronograma: nao derruba o pleito que reitera. A reemissao do
+    cronograma derruba o pleito que ela aponta e, subindo pelas reiteracoes no meio, o pleito que elas reiteram
+    (original -> reiteracao -> cronograma novo: o original sai)."""
     ordem = " ".join(f"WHEN '{o}' THEN {i}" for i, o in enumerate(ORDEM_ORIGEM))
-    filtro, args = ("AND p.data_base_mes=?", (contrato_id, data_base_mes)) if data_base_mes is not None \
-        else ("", (contrato_id,))
+    filtro, args = ("AND p.data_base_mes=?", (contrato_id, contrato_id, data_base_mes)) if data_base_mes is not None \
+        else ("", (contrato_id, contrato_id))
     rows = conn.execute(
+        # `derrubado`: os pleitos cujo cronograma uma reemissao enviada substituiu (sem `reemissao`, antes da 050,
+        # a reemissao conta como cronograma)
+        f"WITH RECURSIVE derrubado(id) AS (SELECT r.reemite_pleito_id FROM pleitos r WHERE r.contrato_id=? "
+        f"AND r.situacao = 'enviado' AND r.reemite_pleito_id IS NOT NULL "
+        f"AND COALESCE(r.reemissao, 'cronograma') = 'cronograma' "
+        f"UNION SELECT q.reemite_pleito_id FROM derrubado d JOIN pleitos q ON q.id = d.id "
+        f"WHERE q.reemissao = 'reiteracao' AND q.reemite_pleito_id IS NOT NULL) "
         f"SELECT * FROM (SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.data_base_mes, p.ciclo, p.competencia "
         f"ORDER BY CASE p.origem {ordem} END, datetime(p.criado_em) DESC, p.id DESC) AS _ordem "
         f"FROM reajuste_previsoes p WHERE p.contrato_id=? {filtro} "
         f"AND (p.origem <> 'pleito' OR (NOT EXISTS (SELECT 1 FROM pleitos pl WHERE pl.id = p.pleito_id "
-        f"AND pl.situacao = 'descartado') AND NOT EXISTS (SELECT 1 FROM pleitos r "
-        f"WHERE r.reemite_pleito_id = p.pleito_id AND r.situacao = 'enviado')))) WHERE _ordem=1 "
+        f"AND pl.situacao = 'descartado') AND p.pleito_id NOT IN (SELECT id FROM derrubado)))) WHERE _ordem=1 "
         f"ORDER BY data_base_mes, ciclo, competencia", args)
     return [{k: r[k] for k in r.keys() if k != "_ordem"} for r in rows]
 

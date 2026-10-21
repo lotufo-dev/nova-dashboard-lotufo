@@ -28,6 +28,12 @@ ROTULO_ANEXO = {"planilha_calculo": "Memória de cálculo do reajuste", "cronogr
                 "documento_representante": "Documento do representante legal", "balanco": "Balanço patrimonial"}
 TIPO_ENVIO = {"reajuste": "pleito_reajuste", "prazo": "carta_prazo", "conclusao": "conclusao"}
 CHAVE_TEXTOS = {"reajuste": "pleito_reajuste", "prazo": "prazo", "conclusao": "conclusao"}
+# Pleito de reajuste que reemite o anterior (issue #277; spec 2026-10-20 §2.2, migracoes 043 e 050): a reiteracao
+# (familia B, so' MT-PAR e Prefeitura) cobra o apostilamento sem cronograma novo; a reemissao do cronograma (apos
+# aditivo) e' o pleito da familia A de novo, com os mesmos anexos.
+REEMISSOES = ("reiteracao", "cronograma")
+FAMILIAS_REITERACAO = ("mtpar", "prefeitura")
+ROTULO_REEMISSAO = {"reiteracao": "Reiteração do pleito de reajuste", "cronograma": "Reemissão do pleito de reajuste"}
 MIN_JUSTIFICATIVA = 10
 _CHUVA = re.compile(r"\bchuv", re.IGNORECASE)
 _MESES = carta.MESES
@@ -66,6 +72,20 @@ def _br(iso: str | None) -> str:
     return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if iso else ""
 
 
+def _reiteracao(p: dict) -> bool:
+    return p.get("reemissao") == "reiteracao"
+
+
+def _rotulo(p: dict) -> str:
+    if not p.get("reemite_pleito_id"):
+        return ROTULO[p["tipo"]]
+    return ROTULO_REEMISSAO[p.get("reemissao") or "cronograma"]        # sem `reemissao` (antes da 050): cronograma
+
+
+def _tipo_envio(p: dict) -> str:
+    return "pleito_reiteracao" if _reiteracao(p) else TIPO_ENVIO[p["tipo"]]
+
+
 def _editavel(p: dict) -> None:
     if p["situacao"] in ("enviado", "descartado"):
         raise ValueError(f"Pleito {p['situacao']}: não pode ser alterado")
@@ -84,6 +104,8 @@ def _exigidos(conn, p: dict) -> tuple[str, ...]:
     """Anexos que o pleito cobra: os da IN e, no reajuste, as pecas que o orgao declara no cadastro."""
     if p["tipo"] != "reajuste":
         return EXIGIDOS[p["tipo"]]
+    if _reiteracao(p):              # a reiteracao so' cobra o apostilamento: o cronograma e' o do pleito anterior
+        return ()
     # sem _orgao(): pleito do cadastro pode ser de contrato sem orgao, e o detalhe nao pode quebrar por isso
     o = conn.execute("SELECT o.regras FROM contratos c JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
                      (p["contrato_id"],)).fetchone()
@@ -99,19 +121,80 @@ def _medicao_final(conn, contrato_id: int) -> dict | None:
 
 # --- criar e anexos --------------------------------------------------------------------------------
 
+def _vigente(conn, p: dict) -> dict | None:
+    """O pleito enviado mais recente do ciclo do pleito: o unico que se reitera ou se reemite."""
+    return reajuste._pleito(conn, p["contrato_id"], p["data_base_mes"], p["ciclo"])
+
+
+def _apostilado(conn, p: dict) -> bool:
+    unica = conn.execute("SELECT COUNT(*) FROM contrato_datas_base WHERE contrato_id=?",
+                         (p["contrato_id"],)).fetchone()[0] == 1
+    return reajuste._apostilamento(conn, p["contrato_id"], p["data_base_mes"], p["ciclo"], unica) is not None
+
+
+def _recusa_reemissao(conn, anterior: dict, reemissao: str, familia: str | None) -> str | None:
+    """Por que `anterior` nao pode ser reiterado/reemitido agora (None: pode). Fora do BEGIN, para a tela; dentro,
+    de novo, para a gravacao."""
+    if anterior["tipo"] != "reajuste" or not anterior["data_base_mes"] or anterior["ciclo"] is None:
+        return "Só o pleito de reajuste se reitera ou se reemite"
+    if anterior["situacao"] != "enviado":
+        return "Só se reitera ou reemite pleito enviado"
+    vig = _vigente(conn, anterior)
+    if vig and vig["id"] != anterior["id"]:
+        return (f"Este pleito já foi seguido pelo {vig['numero_oficio'] or 'ofício sem número'}: reitere ou "
+                "reemita o mais recente")
+    if reemissao == "reiteracao":
+        if familia not in FAMILIAS_REITERACAO:
+            return "A reiteração é da MT-PAR e da Prefeitura; nos outros órgãos, reemita o cronograma"
+        if _apostilado(conn, anterior):
+            return "O ciclo já está apostilado: não há o que reiterar"
+    return None
+
+
+def reemissoes_possiveis(conn, p: dict) -> list[str]:
+    """O que a tela oferece no pleito: reiterar e/ou reemitir o cronograma (vazio quando nada cabe ou ja' ha'
+    pleito em aberto no ciclo, que se continua em vez de abrir outro)."""
+    if p["tipo"] != "reajuste" or p["situacao"] != "enviado" or not p["data_base_mes"]:
+        return []
+    if conn.execute("SELECT 1 FROM pleitos WHERE contrato_id=? AND tipo='reajuste' AND origem='sistema' "
+                    "AND data_base_mes=? AND ciclo IS ? AND situacao NOT IN ('enviado','descartado') LIMIT 1",
+                    (p["contrato_id"], p["data_base_mes"], p["ciclo"])).fetchone():
+        return []
+    o = conn.execute("SELECT o.familia FROM contratos c JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
+                     (p["contrato_id"],)).fetchone()
+    if o is None:
+        return []
+    return [r for r in REEMISSOES if _recusa_reemissao(conn, p, r, o["familia"]) is None]
+
+
 def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str, data_base_mes: str | None = None,
-          dias: int | None = None, justificativa: str | None = None, hoje: datetime.date | None = None) -> int:
+          dias: int | None = None, justificativa: str | None = None, hoje: datetime.date | None = None,
+          reemite_pleito_id: int | None = None, reemissao: str | None = None) -> int:
     hoje = hoje or tempo.hoje_local()
     if tipo not in TIPOS:
         raise ValueError(f"Tipo de pleito inválido: {tipo!r}")
     c = _contrato(conn, contrato_id)
-    _orgao(conn, c)
+    familia = _orgao(conn, c)[0]
     sigla = conn.execute("SELECT sigla_oficio FROM entidades WHERE id=?",
                          (c["entidade_id"],)).fetchone()["sigla_oficio"] if c.get("entidade_id") else "LT"
     canon = oficios.canonico(numero_oficio or "", sigla, hoje.year)
     ciclo = None
     justificativa = (justificativa or "").strip() or None
-    if tipo == "reajuste":
+    anterior = None
+    if reemite_pleito_id is not None or reemissao is not None:
+        if tipo != "reajuste":
+            raise ValueError("Só o pleito de reajuste se reitera ou se reemite")
+        if reemissao not in REEMISSOES or reemite_pleito_id is None:
+            raise ValueError("Diga qual pleito se reitera ou se reemite, e se é reiteração ou cronograma")
+        anterior = _linha(conn, reemite_pleito_id)
+        if anterior["contrato_id"] != contrato_id:
+            raise ValueError("O pleito anterior é de outro contrato")
+        if (motivo := _recusa_reemissao(conn, anterior, reemissao, familia)):
+            raise ValueError(motivo)
+    if anterior:
+        # o mesmo ciclo do anterior (que pode ser um ciclo que ainda espera o apostilamento)
+        data_base_mes, ciclo, dias = anterior["data_base_mes"], anterior["ciclo"], None
+    elif tipo == "reajuste":
         ciclos = {k["data_base_mes"]: k for k in reajuste.ciclos(conn, contrato_id, hoje)}
         if data_base_mes is None and len(ciclos) == 1:
             data_base_mes = next(iter(ciclos))
@@ -139,12 +222,17 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
             raise RascunhoAberto(f"Já há um pleito em aberto {onde} ({ROTULO[tipo].lower()} "
                                  f"{aberto['numero_oficio'] or 'sem número'}): continue nele ou descarte-o antes "
                                  "de criar outro")
+        # de novo dentro do BEGIN: outra aba pode ter enviado outro pleito do ciclo entre a leitura e aqui
+        if anterior and (motivo := _recusa_reemissao(conn, _linha(conn, anterior["id"]), reemissao, familia)):
+            raise ValueError(motivo)
         pid = conn.execute("INSERT INTO pleitos (contrato_id, tipo, data_base_mes, ciclo, dias, justificativa, "
-                           "numero_oficio, usuario_id) VALUES (?,?,?,?,?,?,?,?)",
-                           (contrato_id, tipo, data_base_mes, ciclo, dias, justificativa, canon, usuario_id)).lastrowid
+                           "numero_oficio, usuario_id, reemite_pleito_id, reemissao) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                           (contrato_id, tipo, data_base_mes, ciclo, dias, justificativa, canon, usuario_id,
+                            reemite_pleito_id if anterior else None, reemissao if anterior else None)).lastrowid
         auditoria.registrar(conn, usuario_id, "pleito.criar", "pleito", pid, None,
                             {"tipo": tipo, "numero_oficio": canon, "data_base_mes": data_base_mes, "ciclo": ciclo,
-                             "dias": dias})
+                             "dias": dias, **({"reemite_pleito_id": anterior["id"], "reemissao": reemissao}
+                                              if anterior else {})})
     return pid
 
 
@@ -178,9 +266,10 @@ def remover_anexo(conn, usuario_id: int, pleito_id: int, anexo_id: int) -> None:
 # --- carta -----------------------------------------------------------------------------------------
 
 def _textos(conn, p: dict) -> dict:
-    t = carta.config(conn).get(CHAVE_TEXTOS[p["tipo"]])
+    chave = "pleito_reiteracao" if _reiteracao(p) else CHAVE_TEXTOS[p["tipo"]]     # familia B: textos proprios
+    t = carta.config(conn).get(chave)
     if not t:
-        raise ValueError(f"Textos de {CHAVE_TEXTOS[p['tipo']]} não carregados: rode `cadastro aplicar`")
+        raise ValueError(f"Textos de {chave} não carregados: rode `cadastro aplicar`")
     return t
 
 
@@ -200,6 +289,12 @@ def _campos(conn, p: dict, c: dict, hoje: datetime.date) -> dict:
                    "data_base_extenso": f"{mes}/{p['data_base_mes'][:4]}",      # "MARÇO/2023", como no CT-122
                    "indice": (b["indice"] if b else None) or "índice do contrato",
                    "mes_aniversario": mes, "aniversario": aniv.strftime("%d/%m/%Y")}
+        if p.get("reemite_pleito_id"):          # reiteracao e reemissao citam o oficio anterior e ha' quanto tempo
+            a = _linha(conn, p["reemite_pleito_id"])
+            enviado = a["enviado_em"][:10] if a["enviado_em"] else None
+            campos |= {"oficio_anterior": oficios.na_carta(a["numero_oficio"]) if a["numero_oficio"] else "",
+                       "data_oficio_anterior": _br(enviado),
+                       "dias_sem_resposta": str((hoje - datetime.date.fromisoformat(enviado)).days) if enviado else ""}
     elif p["tipo"] == "prazo":
         fim = prazos.situacao(conn, c["id"], hoje)["execucao_fim"]
         novo = (datetime.date.fromisoformat(fim) + datetime.timedelta(days=p["dias"])).isoformat() if fim else None
@@ -250,7 +345,7 @@ def _carta(conn, p: dict, corpo: str, hoje: datetime.date) -> carta.Carta:
 
 def nome_documento(conn, p: dict) -> str:
     c = _contrato(conn, p["contrato_id"])
-    return f"{p['numero_oficio']} - {_obra(c)} - {ROTULO[p['tipo']]}.pdf"
+    return f"{p['numero_oficio']} - {_obra(c)} - {_rotulo(p)}.pdf"
 
 
 def montar(conn, usuario_id: int, pleito_id: int, corpo: str | None = None, hoje: datetime.date | None = None) -> dict:
@@ -314,7 +409,14 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
 def detalhe(conn, pleito_id: int, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     p = _linha(conn, pleito_id)
-    return {**p, "rotulo": ROTULO[p["tipo"]], "anexos": _anexos_de(conn, pleito_id),
+    # a cadeia (original -> reiteracoes/reemissoes): o anterior e os que reemitem este (sem os descartados)
+    a = conn.execute("SELECT id, numero_oficio, situacao, enviado_em, reemissao FROM pleitos WHERE id=?",
+                     (p["reemite_pleito_id"],)).fetchone() if p["reemite_pleito_id"] else None
+    seguintes = [dict(r) for r in conn.execute(
+        "SELECT id, numero_oficio, situacao, enviado_em, COALESCE(reemissao, 'cronograma') AS reemissao FROM pleitos "
+        "WHERE reemite_pleito_id=? AND situacao<>'descartado' ORDER BY id", (pleito_id,))]
+    return {**p, "rotulo": _rotulo(p), "anterior": dict(a) if a else None, "reemissoes": seguintes,
+            "reemissoes_possiveis": reemissoes_possiveis(conn, p), "anexos": _anexos_de(conn, pleito_id),
             "exigidos": [{"tipo": t, "rotulo": ROTULO_ANEXO[t]} for t in _exigidos(conn, p)],
             "conferencia": json.loads(p["conferencia"] or "null"), "pendencias": pendencias(conn, p, hoje),
             "nome_documento": nome_documento(conn, p) if p["montado_arquivo"] else None}
@@ -404,7 +506,7 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
         raise ValueError("Pleito descartado enquanto se preparava o envio: nada foi enviado")
     try:
-        envio_id = correio.enviar_e_registrar(conn, usuario, TIPO_ENVIO[p["tipo"]], para,
+        envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(p), para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),
                                               _anexos_envio(conn, p), cco=cco)
     except correio.EnvioNaoRegistrado:

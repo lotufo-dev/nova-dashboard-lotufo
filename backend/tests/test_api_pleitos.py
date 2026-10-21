@@ -283,3 +283,76 @@ def test_corpo_formatado_do_pleito_sai_sanitizado(api, tmp_path):
     r = cl.post(f"/api/pleitos/{pid}/enviar", json={**corpo, "corpo": PERIGOSO})
     assert r.status_code == 200, r.text
     assert corpo_enviado(tmp_path / "sim") == LIMPO
+
+
+# --- reiteracao do pleito de reajuste (issue #277) ------------------------------------------------------------
+
+def _reiteracao_pronta(cl, cid):
+    """Pleito original enviado e a reiteracao dele montada, assinada e com a previa (fixture: MT-PAR)."""
+    original, corpo = _pronto(cl, cid)
+    assert cl.post(f"/api/pleitos/{original}/enviar", json=corpo).status_code == 200
+    r = cl.post(f"/api/pleitos/{original}/reemitir", json={"reemissao": "reiteracao", "numero_oficio": "245"})
+    assert r.status_code == 201, r.text
+    p = r.json()
+    assert (p["reemite_pleito_id"], p["reemissao"], p["anterior"]["id"]) == (original, "reiteracao", original)
+    assert "reiteramos" in p["corpo_padrao"] and "CT/122/LT/" in p["corpo_padrao"]
+    pid = p["id"]
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    doc = cl.get(f"/api/pleitos/{pid}/documento")
+    cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc.content), "application/pdf"))
+    pv = cl.post(f"/api/pleitos/{pid}/previa").json()
+    assert pv["pendencias"] == [], pv["pendencias"]                 # reiteracao nao exige cronograma nem memoria
+    return original, pid, {k: pv[k] for k in ("para", "copia", "assunto", "corpo")}
+
+
+def test_reiteracao_pela_api_liga_ao_anterior_e_segundo_clique_nao_reenvia(api):
+    cl, cid, _ = api
+    original, pid, corpo = _reiteracao_pronta(cl, cid)
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 200
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=corpo)              # segundo clique: nada sai de novo
+    assert r.status_code == 422 and "já enviado" in r.json()["detail"], r.text
+    assert _estado(pid)[1] == 2                                         # o original e a reiteracao, uma vez cada
+    lista = {p["id"]: p for p in cl.get(f"/api/contratos/{cid}/reajuste").json()["pleitos"]}
+    assert [x["id"] for x in lista[original]["reemissoes"]] == [pid] and lista[pid]["anterior"]["id"] == original
+    assert lista[original]["reemissoes_possiveis"] == [] and lista[pid]["reemissoes_possiveis"] == [
+        "reiteracao", "cronograma"]
+    assert cl.get(f"/api/contratos/{cid}/reajuste").json()["ciclos"][0]["pleito"]["id"] == pid
+    # o anterior ja' foi reiterado: reiterar ele de novo e' recusado
+    r = cl.post(f"/api/pleitos/{original}/reemitir", json={"reemissao": "reiteracao", "numero_oficio": "250"})
+    assert r.status_code == 422 and "mais recente" in r.json()["detail"], r.text
+
+
+def test_dois_envios_simultaneos_da_reiteracao_mandam_um_so(api, monkeypatch):
+    cl, cid, _ = api
+    _, pid, corpo = _reiteracao_pronta(cl, cid)
+    args = [corpo[k] for k in ("para", "copia", "assunto", "corpo")]
+    c = db.get_conn()
+    u = {"id": c.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0],
+         "email": "admin@lotufo.com"}
+    erros = []
+
+    def segundo():
+        outra = db.get_conn()
+        try:
+            pleitos.enviar(outra, u, pid, *args)
+        except Exception as e:
+            erros.append(e)
+        finally:
+            outra.close()
+
+    falso = CorreioFalso(no_meio=segundo)
+    monkeypatch.setattr(correio, "cliente", falso)
+    eid = pleitos.enviar(c, u, pid, *args)
+    c.close()
+    assert [type(e).__name__ for e in erros] == ["EnvioEmAndamento"]
+    assert len(falso.enviados) == 1
+    assert _estado(pid) == ({"situacao": "enviado", "envio_id": eid, "envio_reservado_em": None}, 2)
+
+
+def test_reemitir_pela_api_valida_em_portugues(api):
+    cl, cid, _ = api
+    rascunho = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
+    r = cl.post(f"/api/pleitos/{rascunho}/reemitir", json={"reemissao": "reiteracao", "numero_oficio": "245"})
+    assert r.status_code == 422 and "enviado" in r.json()["detail"], r.text
+    assert cl.post("/api/pleitos/999999/reemitir", json={"reemissao": "reiteracao", "numero_oficio": "1"}
+                   ).status_code == 404

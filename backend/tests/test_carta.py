@@ -109,3 +109,25 @@ def test_logo_fora_da_pasta_de_dados_e_recusado_mesmo_existindo(tmp_path, monkey
     pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "logo": "../fora.png"}))
     assert _imagens(pdf) == 0
     assert "Consorcio Exemplo" in _texto(pdf)
+
+
+def test_corpo_da_reiteracao_familia_b_preenche_todos_os_campos():
+    """Issue #277: a reiteracao do pleito de reajuste (familia B) tem corpo proprio no cartas.yaml, que cita o
+    oficio anterior, a data dele e ha' quantos dias esta' sem resposta."""
+    import pathlib
+
+    import yaml
+    cartas = yaml.safe_load((pathlib.Path(__file__).parents[2] / "cadastro-exemplo" / "cartas.yaml")
+                            .read_text(encoding="utf-8"))
+    textos = cartas["pleito_reiteracao"]
+    campos = {"razao_social": "CONSTRUTORA EXEMPLO LTDA", "cnpj": "31.200.101/0001-30", "objeto": "DA OBRA ALFA",
+              "instrumento": "099/2024", "oficio_anterior": "CT/068/LT/2026", "data_oficio_anterior": "27/02/2026",
+              "dias_sem_resposta": "202", "data_base_extenso": "MARÇO/2024", "mes_aniversario": "MARÇO",
+              "oficio": "CT-245-LT-2026", "obra": "Obra Alfa", "saudacao": "Bom dia,"}
+    for chave in ("carta_assunto", "carta_corpo", "email_assunto", "email_corpo"):
+        assert "{" not in carta.preencher(textos[chave], campos), chave        # nenhum campo sobrando
+    corpo = carta.preencher(textos["carta_corpo"], campos)
+    assert "CT/068/LT/2026, de 27/02/2026" in corpo and "202 dias" in corpo
+    assert corpo != carta.preencher(cartas["pleito_reajuste"]["carta_corpo"], campos)     # nao e' a familia A
+    t = _texto(carta.gerar(_carta(corpo=corpo, assunto=carta.preencher(textos["carta_assunto"], campos))))
+    assert "reiteração" in t and "CT/068/LT/2026" in t
