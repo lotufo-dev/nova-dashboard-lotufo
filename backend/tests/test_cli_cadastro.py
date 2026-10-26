@@ -935,3 +935,67 @@ def test_carregar_medicoes_banco_ocupado_fala_portugues(tmp_path, monkeypatch, c
     monkeypatch.setattr(carga_medicoes, "gravar", ocupado)
     codigo, saida = _gravar(capsys)
     assert codigo == 1 and "o banco está ocupado por outra gravação" in saida and "locked" not in saida
+
+
+def test_carregar_medicoes_cancelamento_mutuo_ou_em_cadeia_e_erro(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    for n in (4, 5, 6):
+        _existente(conn, cid, n, "2025-07", 100001, 100001)
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys, _csv(tmp_path, ["4;;execucao;2025-07;;;;;;;;;x;5;", "5;;execucao;2025-07;;;;;;;;;x;6;"]))
+    assert codigo == 1 and _foto(conn) == antes
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "4;;execucao;2025-07;;;;;;;;;x;5;",
+                                       "5;;execucao;2025-07;;;;;;;;;x;4;"], capsys)
+    assert "linha 2: nº 4 execução 2025-07: erro (cancelar: a 5ª execução que a substitui também é cancelada neste CSV)" in saida
+    assert "linha 3: nº 5 execução 2025-07: erro (cancelar: a 4ª execução que a substitui também é cancelada neste CSV)" in saida
+
+
+def test_carregar_medicoes_duplicata_com_nf_vinculada_nao_se_cancela(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, 100001)
+    dup = _existente(conn, cid, 5, "2025-07", 100001, 100001)
+    nid = _nf_no_rm(conn, 555, 9555, 100001, 90000, 0, 0)
+    conn.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) VALUES (?,?,100001,'manual')",
+                 (dup, nid))
+    conn.commit()
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;x;4;"], capsys)
+    assert "conflito (tem a NF 555 vinculada: vincule-a à 4ª antes de cancelar a duplicata)" in saida
+
+
+def test_carregar_medicoes_nao_cancela_medicao_no_passo_da_planilha(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, None)
+    _existente(conn, cid, 5, "2025-07", 100001, None, estado="planilha_enviada")
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;x;4;"], capsys)
+    assert "conflito (no banco a medição está planilha_enviada: não se cancela pela carga)" in saida
+
+
+def test_carregar_medicoes_rodar_de_novo_com_pedido_congelado_diferente_nao_deixa_rastro(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 2, "2025-05", 53890011, 53000000)       # so' o pedido difere (congelado)
+    assert _gravar(capsys)[0] == 0
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0 and "pedido diferente não alterado (congelado no protocolo)" in saida
+    assert _foto(conn) == antes
+
+
+def test_carregar_medicoes_corrigir_competencia_nao_separa_execucao_e_reajuste(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 3, "2025-07", 60125000, None)
+    _existente(conn, cid, 3, "2025-07", 1001, None, tipo="reajuste")
+    so_execucao = "3;3;execucao;2025-06;;601.250,00;;;;;;;planilha;;sim"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", so_execucao], capsys)
+    assert "conflito (a 3ª de reajuste continua em 2025-07: corrija as duas no mesmo CSV)" in saida
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [so_execucao, "3;3;reajuste;2025-06;;10,01;;;;;;;planilha;;sim"]))
+    assert codigo == 0, saida
+    assert {r[0] for r in conn.execute("SELECT competencia FROM medicoes WHERE contrato_id=? AND numero=3", (cid,))} == {"2025-06"}
+
+
+def test_carregar_medicoes_correcao_sem_fonte_e_erro(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, 100001)
+    _existente(conn, cid, 5, "2025-07", 100001, 100001)
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;;4;",
+                                       "4;;execucao;2025-07;;1.000,01;999,99;;;;;;;;"], capsys)
+    assert saida.count("erro (correção sem fonte: diga na coluna fonte o documento que corrige)") == 2
