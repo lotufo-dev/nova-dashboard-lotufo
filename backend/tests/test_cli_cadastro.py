@@ -831,3 +831,15 @@ def test_carregar_medicoes_contrato_sem_centro_na_empresa_de_varias_obras_nao_vi
     _nf_no_rm(conn, 101, 9001, 41234567, 38000000, 38000000, 1, "2025-07-10", centro="")
     codigo, saida = _gravar(capsys, _linha_nf(tmp_path, "101"))
     assert codigo == 0 and "o contrato não tem centro de custo do RM no cadastro" in saida, saida
+
+
+def test_carregar_medicoes_banco_ocupado_fala_portugues(tmp_path, monkeypatch, capsys):
+    import sqlite3 as _sql
+    from app import carga_medicoes
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+
+    def ocupado(*a, **k):
+        raise _sql.OperationalError("database is locked")
+    monkeypatch.setattr(carga_medicoes, "gravar", ocupado)
+    codigo, saida = _gravar(capsys)
+    assert codigo == 1 and "o banco está ocupado por outra gravação" in saida and "locked" not in saida

@@ -198,6 +198,18 @@ def _gravar_medicoes(args, caminho: Path) -> int:
         except carga_medicoes.CargaRecusada as e:
             print(f"Recusado, nada foi gravado: {e}")
             return 1
+        except sqlite3.OperationalError as e:
+            # outro escritor (a sincronizacao do RM, a tela) segurando o banco: a transacao foi desfeita
+            print("Recusado, nada foi gravado: o banco está ocupado por outra gravação; rode de novo em instantes"
+                  if "locked" in str(e) or "busy" in str(e) else f"Banco ilegível, nada foi gravado: {db.db_path()}")
+            return 1
+        except sqlite3.DatabaseError:
+            print(f"Banco ilegível, nada foi gravado: {db.db_path()}")
+            return 1
+        except ValueError as e:
+            # recusa de regra no meio da carga (ex.: NF vinculada por outra pessoa ao mesmo tempo)
+            print(f"Recusado, nada foi gravado: {e}")
+            return 1
     finally:
         conn.close()
     print(f"GRAVADO: {rel['contrato']} ({caminho.name}), {rel['criadas']} medição(ões) criada(s)")

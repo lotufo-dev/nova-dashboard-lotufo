@@ -303,7 +303,8 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
             categoria = "valor diferente" if difs else "incompleta" if vazios else "igual"
             linhas.append({**item, "categoria": categoria, "detalhe": "; ".join(difs + vazios)})
     totais = {c: sum(1 for li in linhas if li["categoria"] == c) for c in CATEGORIAS}
-    return {"obra": obra, "contrato": contrato["nome_curto"], "linhas": linhas, "totais": totais}
+    return {"obra": obra, "contrato": contrato["nome_curto"], "contrato_id": contrato["id"], "linhas": linhas,
+            "totais": totais}
 
 
 def _fmt(centavos: int | None) -> str:
@@ -329,21 +330,23 @@ def gravar(conn, usuario_id: int, caminho: Path, obra: str | None = None) -> dic
         if ruins:
             raise CargaRecusada(f"{ruins} linha(s) com erro ou conflito; corrija o CSV (rode com --ensaio para "
                                 "ver quais)")
-        contrato = contrato_da_obra(conn, rel["obra"])
+        cid = rel["contrato_id"]
         coligada = conn.execute("SELECT e.coligada_rm FROM contratos c JOIN entidades e "
-                                "ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?", (contrato["id"],)).fetchone()[0]
+                                "ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?", (cid,)).fetchone()[0]
         criadas = {}
         for li in rel["linhas"]:
             if li["categoria"] == "nova":
-                criadas[_criar(conn, usuario_id, contrato["id"], li)] = li
+                criadas[_criar(conn, usuario_id, cid, li)] = li
                 li["acao"] = "criada"
             elif li["categoria"] in ("valor diferente", "incompleta"):
                 li["acao"] = "não alterada (a carga não corrige medição que já existe)"
             else:
                 li["acao"] = "já existe"
+        from app import diretoria    # import local: diretoria importa sincronizacao_rm
+        mapa = diretoria._mapa_contratos(conn)          # uma vez por carga, nao por medicao
         vinculadas = []
         for mid, li in criadas.items():
-            texto, ok = _vincular_nfs(conn, usuario_id, mid, li["dados"], contrato["id"], coligada)
+            texto, ok = _vincular_nfs(conn, usuario_id, mid, li["dados"], cid, coligada, mapa)
             li["acao"] += texto
             if ok:
                 vinculadas.append(mid)
@@ -352,7 +355,7 @@ def gravar(conn, usuario_id: int, caminho: Path, obra: str | None = None) -> dic
             if conn.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "recebida":
                 li["acao"] += "; recebida (baixa no RM)"
         if criadas:     # rodar de novo sem nada novo nao deixa rastro
-            auditoria.registrar(conn, usuario_id, "medicao.carga_historico", "contrato", contrato["id"], None,
+            auditoria.registrar(conn, usuario_id, "medicao.carga_historico", "contrato", cid, None,
                                 {"arquivo": caminho.name, "criadas": len(criadas),
                                  "linhas": [li["linha"] for li in criadas.values()]})
     rel["criadas"] = len(criadas)
@@ -366,8 +369,8 @@ def _criar(conn, usuario_id: int, contrato_id: int, li: dict) -> int:
         "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, congelada, valor_protocolado_centavos, "
         "valor_protocolado_origem, numero_orgao, periodo_inicio, periodo_fim) "
         "VALUES (?,?,?,?,'protocolada',1,?,?,?,?,?)",
-        (contrato_id, d["numero"], d["tipo"], d["competencia"], d["valor_pedido"],
-         "manual" if d["valor_pedido"] is not None else None, d["numero_orgao"], ini, fim))
+        (contrato_id, d["numero"], d["tipo"], d["competencia"], d["valor_pedido"], "manual", d["numero_orgao"],
+         ini, fim))
     mid = cur.lastrowid
     auditoria.registrar(conn, usuario_id, "medicao.criar", "medicao", mid, None,
                         {"numero": d["numero"], "tipo": d["tipo"], "competencia": d["competencia"],
@@ -395,7 +398,7 @@ def _criar(conn, usuario_id: int, contrato_id: int, li: dict) -> int:
 
 
 def _vincular_nfs(conn, usuario_id: int, medicao_id: int, d: dict, contrato_id: int,
-                  coligada: int | None) -> tuple[str, bool]:
+                  coligada: int | None, mapa: tuple) -> tuple[str, bool]:
     """Vincula as NFs do CSV, TODAS ou nenhuma. Devolve (complemento do relatorio, vinculou).
 
     Cada NF precisa estar no RM da empresa do contrato, ser desta obra pelo centro de custo (o atual ou um dos
@@ -404,13 +407,13 @@ def _vincular_nfs(conn, usuario_id: int, medicao_id: int, d: dict, contrato_id: 
     MT-388, com uma fora do CSV) seria dada como recebida pela sincronizacao seguinte com o RM, que so' segura
     cobertura parcial depois de vinculo desfeito a mao (revisor da #259). A medicao fica protocolada sem nota,
     e a nota segue no a receber pelo centro de custo, como hoje."""
-    from app import diretoria, sincronizacao_rm   # import local: os dois importam medicoes e notas
+    from app import sincronizacao_rm   # import local: importa medicoes e notas
     if not d["nfs"]:
         return "", False
     rotulo = "/".join(d["nfs"])
     if coligada is None:
         return f"; NF {rotulo} não vinculada (empresa do contrato sem coligada no RM)", False
-    _, por_centro, por_coligada = diretoria._mapa_contratos(conn)
+    _, por_centro, por_coligada = mapa
     centros = {cc for (col, cc), donos in por_centro.items() if col == coligada and contrato_id in donos}
     # Contrato sem centro so' se identifica pela coligada quando ela isola a obra (consorcio: uma coligada, um
     # contrato), como na diretoria; na Lotufo (muitas obras, uma coligada) nao ha' como saber de que obra e' a NF

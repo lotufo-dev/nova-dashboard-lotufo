@@ -566,9 +566,9 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
     from app import diretoria   # import local: diretoria importa este modulo
     tolerancia = diretoria.TOLERANCIA_CENTAVOS
     n = 0
-    filtro = f" AND m.id IN ({','.join('?' * len(medicao_ids))})" if medicao_ids is not None else ""
     if medicao_ids == []:
-        return 0
+        return 0                        # "IN ()" nem e' SQL valido
+    filtro = f" AND m.id IN ({','.join('?' * len(medicao_ids))})" if medicao_ids is not None else ""
     for m in conn.execute("""SELECT m.id, e.coligada_rm,
                                     COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
                              FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
