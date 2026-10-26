@@ -21,3 +21,7 @@ QDOP e logo da FRC). Os modelos `.docx` e `.xlsx` são neutros, sem logotipo; o 
 - Obra Própria: contrato da empresa sozinha (100%), com espelho de medição e reajuste.
 - Obra Consórcio: contrato do Consórcio Exemplo (empresa própria 50% e Engenharia Beta 50%), em dois
   municípios, com espelho de medição que rateia entre as duas empresas e os dois municípios.
+
+`medicoes/obra-propria.csv` é o histórico de medições de exemplo da Obra Própria, no formato de
+`cadastro carregar-medicoes <obra>.csv --ensaio` (o nome do arquivo é o slug da obra, como em `contratos/`).
+Separador `;`, valores em reais com vírgula, competência AAAA-MM, datas DD/MM/AAAA.
