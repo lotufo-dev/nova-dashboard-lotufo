@@ -373,13 +373,29 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                 _virar(li, "erro", f"cancelar: a {d['cancelar']}ª {ROTULOS[d['tipo']]} que a substitui também é "
                                    "cancelada neste CSV")
                 continue
-            nfs = [r[0] for r in conn.execute(
-                "SELECT n.numero FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id "
-                "WHERE a.medicao_id=? AND a.desfeita_em IS NULL", (li["medicao_id"],))]
+            nfs = _nfs_vinculadas(conn, li["medicao_id"])
             if nfs:
                 _virar(li, "conflito", f"tem a NF {', '.join(nfs)} vinculada: vincule-a à {d['cancelar']}ª antes de "
                                        "cancelar a duplicata")
                 continue
+            estado = existentes[(d["numero"], d["tipo"])]["estado"]
+            if estado in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
+                # o espelho (e a nota que sai dele) ficaria de uma medicao cancelada: isso se resolve na tela
+                _virar(li, "conflito", f"no banco a medição está {estado}: o espelho é dela; cancele pela tela")
+                continue
+        if li["categoria"] == "correção":
+            atual = existentes[(d["numero"], d["tipo"])]
+            nfs = _nfs_vinculadas(conn, li["medicao_id"])
+            if nfs or atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
+                # espelho e nota levam a competencia antiga: mudar so' a medicao os separaria
+                _virar(li, "conflito", f"a competência {atual['competencia']} já está "
+                                       + (f"na NF {', '.join(nfs)} vinculada" if nfs else "no espelho")
+                                       + ": corrija pela tela")
+                continue
+            anteriores = [m["competencia"] for (n, t), m in existentes.items()
+                          if t == d["tipo"] and n < d["numero"] and m["estado"] not in ESTADOS_TERMINAIS]
+            if anteriores and d["competencia"] < max(anteriores):
+                li["detalhe"] += f"; aviso: fica antes de uma medição anterior, em {max(anteriores)}"
         if li["categoria"] == "correção" and d["tipo"] in ("execucao", "reajuste"):
             for tipo in ("execucao", "reajuste"):     # o par que o envio ao orgao casa; projeto anda sozinho
                 outra = existentes.get((d["numero"], tipo))
@@ -395,6 +411,11 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
             or (d["valor_pedido"] is not None and m["valor_protocolado_centavos"] is None)))   # 1o preenchimento
         if escreve and not d["fonte"]:
             _virar(li, "erro", "correção sem fonte: diga na coluna fonte o documento que corrige")
+
+
+def _nfs_vinculadas(conn, medicao_id: int) -> list[str]:
+    return [r[0] for r in conn.execute("SELECT n.numero FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id "
+                                       "WHERE a.medicao_id=? AND a.desfeita_em IS NULL", (medicao_id,))]
 
 
 def _virar(li: dict, categoria: str, detalhe: str) -> None:

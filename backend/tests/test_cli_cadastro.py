@@ -1015,3 +1015,25 @@ def test_carregar_medicoes_pedido_preenchido_exige_fonte_e_projeto_nao_trava_com
     assert codigo == 0 and "pedido preenchido" in saida
     a = conn.execute("SELECT depois FROM audit_log WHERE acao='medicao.carga_historico' ORDER BY id DESC").fetchone()
     assert json.loads(a[0])["linhas_corrigidas"][0]["fonte"] == "boletim 3"
+
+
+def test_carregar_medicoes_nao_corrige_competencia_com_nf_ou_espelho_nem_cancela_com_espelho(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 1, "2025-03", 100001, None)
+    com_nf = _existente(conn, cid, 3, "2025-07", 100001, None)
+    _existente(conn, cid, 4, "2025-07", 100001, None, estado="espelho_enviado")
+    _existente(conn, cid, 5, "2025-07", 100001, None, estado="espelho_gerado")
+    _existente(conn, cid, 6, "2025-07", 100001, None)
+    nid = _nf_no_rm(conn, 777, 9777, 100001, 90000, 0, 0)
+    conn.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) VALUES (?,?,1,'manual')",
+                 (com_nf, nid))
+    conn.commit()
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência",
+                                       "3;;execucao;2025-06;;1.000,01;;;;;;;doc;;sim",
+                                       "4;;execucao;2025-06;;1.000,01;;;;;;;doc;;sim",
+                                       "5;;execucao;2025-07;;;;;;;;;doc;6;",
+                                       "6;;execucao;2025-04;;1.000,01;;;;;;;doc;;sim"], capsys)
+    assert "linha 2: nº 3 execução 2025-06: conflito (a competência 2025-07 já está na NF 777 vinculada" in saida
+    assert "linha 3: nº 4 execução 2025-06: conflito (a competência 2025-07 já está no espelho" in saida
+    assert "linha 4: nº 5 execução 2025-07: conflito (no banco a medição está espelho_gerado" in saida
+    assert "linha 5: nº 6 execução 2025-04: correção (competência: banco 2025-07, CSV 2025-04; aviso: fica antes" in saida
