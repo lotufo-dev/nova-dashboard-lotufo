@@ -422,7 +422,7 @@ def test_carregar_medicoes_linha_com_colunas_a_mais_e_erro_e_nao_valor(tmp_path,
 
 def test_carregar_medicoes_cabecalho_com_grau_e_coluna_repetida(tmp_path, monkeypatch, capsys):
     _com_exemplo_aplicado(tmp_path, monkeypatch)
-    codigo, saida = _ensaio(tmp_path, ["N°;Tipo;Competência;Nº. do órgão;Valor pedido;Valor aprovado", "1;execucao;2025-04;1;;"], capsys)
+    codigo, saida = _ensaio(tmp_path, ["N°;Tipo;Competência;Nº. do órgão;Valor pedido;Valor aprovado", "1;execucao;2025-04;1;1,00;"], capsys)
     assert codigo == 0 and "linha 2: nº 1 execução 2025-04: nova" in saida
     codigo, saida = _ensaio(tmp_path, ["nº;tipo;competência;valor pedido;Valor Pedido;valor aprovado"], capsys)
     assert codigo == 1 and "coluna repetida no cabeçalho: 'Valor Pedido'" in saida
@@ -600,3 +600,246 @@ def test_carregar_medicoes_arquivo_sem_leitura_fala_portugues(tmp_path, monkeypa
     codigo, saida = _ensaio(tmp_path, [CAB], capsys)
     assert codigo == 1
     assert "CSV recusado, nada foi lido: não foi possível ler o arquivo obra-propria.csv" in saida
+
+
+# ---- issue #259: carregar-medicoes sem --ensaio grava as novas
+
+def _gravar(capsys, arquivo=None, usuario="leo@l.com"):
+    capsys.readouterr()
+    args = ["cadastro", "carregar-medicoes", str(arquivo or cli.EXEMPLO / "medicoes" / "obra-propria.csv")]
+    codigo = cli.main(args + (["--usuario", usuario] if usuario else []))
+    return codigo, capsys.readouterr().out
+
+
+def _nf_no_rm(conn, numero, idmov, valor, titulo, baixado, status, data_baixa=None, coligada=1, centro=None):
+    if centro is None:      # padrao: o centro de custo da Obra Própria no cadastro de exemplo
+        centro = conn.execute("SELECT centro_custo_rm FROM contratos WHERE nome_curto='Obra Própria'").fetchone()[0]
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, "
+                       "centro_custo) VALUES (?,?,?,?,?,?,?)",
+                       (coligada, idmov, str(numero), numero, "2025-05-28", valor, centro)).lastrowid
+    conn.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+                 "status_lan, data_baixa) VALUES (?,?,?,?,?,?,?,?)",
+                 (coligada, idmov, nid, idmov, titulo, baixado, status, data_baixa))
+    conn.commit()
+    return nid
+
+
+def test_carregar_medicoes_grava_as_novas_com_pedido_aprovado_e_evento(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0, saida
+    assert "GRAVADO: Obra Própria (obra-propria.csv), 4 medição(ões) criada(s)" in saida
+    ms = {(m["numero"], m["tipo"]): m for m in conn.execute("SELECT * FROM medicoes WHERE contrato_id=?", (cid,))}
+    assert len(ms) == 4 and all(m["estado"] == "protocolada" and m["congelada"] == 1 for m in ms.values())
+    m2 = ms[(2, "execucao")]
+    assert (m2["valor_protocolado_centavos"], m2["valor_atestado_centavos"], m2["atestado_em"]) == (53890010, 53000000,
+                                                                                                    "2025-06-18")
+    assert (m2["numero_orgao"], m2["periodo_inicio"], m2["periodo_fim"]) == (2, "2025-05-01", "2025-05-31")
+    m3 = ms[(3, "execucao")]
+    assert (m3["valor_protocolado_centavos"], m3["valor_atestado_centavos"]) == (60125000, None)
+    ev = conn.execute("SELECT * FROM medicao_atestos WHERE medicao_id=?", (m2["id"],)).fetchall()
+    assert [(e["valor_centavos"], e["atestado_em"], e["meio"], e["numero_orgao"], e["observacao"]) for e in ev] == [
+        (53000000, "2025-06-18", "email", "PROC-EXEMPLO-0002", "boletim de exemplo 2")]
+    reaj = conn.execute("SELECT meio FROM medicao_atestos WHERE medicao_id=?", (ms[(1, "reajuste")]["id"],)).fetchone()
+    assert reaj["meio"] == "carimbo"
+    assert conn.execute("SELECT COUNT(*) FROM medicao_atestos").fetchone()[0] == 3
+    prot = conn.execute("SELECT data, numero_processo FROM medicao_protocolos WHERE medicao_id=?", (m2["id"],)).fetchall()
+    assert [tuple(p) for p in prot] == [("2025-06-25", "PROC-EXEMPLO-0002")]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='medicao.carga_historico'").fetchone()[0] == 1
+    # o painel da obra soma o aprovado, senao o pedido
+    from app import paineis
+    assert paineis.medido_execucao_por_contrato(conn)[cid] == 41234567 + 53000000 + 60125000
+
+
+def test_carregar_medicoes_segunda_carga_nao_muda_nada(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    assert _gravar(capsys)[0] == 0
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0 and "0 medição(ões) criada(s)" in saida
+    assert "Total: nova 0, igual 4, valor diferente 0, incompleta 0, conflito 0, erro 0" in saida
+    assert _foto(conn) == antes
+
+
+def test_carregar_medicoes_nf_baixada_entra_recebida_e_sem_baixa_protocolada(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _nf_no_rm(conn, 101, 9001, 41234567, 38000000, 38000000, 1, "2025-07-10")    # titulo quitado
+    _nf_no_rm(conn, 108, 9002, 53000000, 49000000, 0, 0)                          # titulo em aberto
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0, saida
+    m1, m2 = (conn.execute("SELECT * FROM medicoes WHERE contrato_id=? AND numero=? AND tipo='execucao'",
+                           (cid, n)).fetchone() for n in (1, 2))
+    assert (m1["estado"], m1["recebida_em"]) == ("recebida", "2025-07-10")
+    assert m2["estado"] == "protocolada"
+    assert "NF 101 vinculada; recebida (baixa no RM)" in saida and "NF 108 vinculada" in saida
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes WHERE regra='carga_historico'").fetchone()[0] == 2
+
+
+def test_carregar_medicoes_nf_fora_do_rm_ou_ja_vinculada_nao_impede(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    nid = _nf_no_rm(conn, 108, 9002, 53000000, 49000000, 0, 0)
+    outra = conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+                         "VALUES (?, 9, 'execucao', '2025-09', 'protocolada')", (cid,)).lastrowid
+    conn.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) "
+                 "VALUES (?,?,1,'manual')", (outra, nid))
+    conn.commit()
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0, saida
+    assert "NF 101 não vinculada (NF 101 não encontrada no RM)" in saida
+    assert "NF 108 não vinculada (NF 108 já está em outra medição)" in saida
+
+
+def test_carregar_medicoes_com_erro_ou_conflito_nao_grava_nada(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    antes = _foto(conn)
+    arq = tmp_path / "obra-propria.csv"
+    arq.write_text("\n".join([CAB, "1;1;execucao;2025-04;;1,00;1,00;;;;;;", "2;2;aditivo;2025-05;;1,00;;;;;;;"]) + "\n",
+                   "utf-8")
+    codigo, saida = _gravar(capsys, arq)
+    assert codigo == 1 and "Recusado, nada foi gravado: 1 linha(s) com erro ou conflito" in saida
+    assert _foto(conn) == antes
+
+
+def test_carregar_medicoes_nao_altera_a_medicao_que_ja_existe(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos,"
+                 " valor_atestado_centavos) VALUES (?, 2, 'execucao', '2025-05', 'protocolada', 53890010, 52000000)",
+                 (cid,))
+    conn.commit()
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0 and "3 medição(ões) criada(s)" in saida
+    assert "valor diferente" in saida and "não alterada" in saida
+    m = conn.execute("SELECT valor_atestado_centavos FROM medicoes WHERE contrato_id=? AND numero=2", (cid,)).fetchone()
+    assert m[0] == 52000000
+
+
+def test_carregar_medicoes_gravar_exige_usuario_e_recusa_meio_ou_periodo_invalidos(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _gravar(capsys, usuario=None)
+    assert codigo == 1 and "Gravar exige --usuario" in saida
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;30/04/2025 a 01/04/2025;1,00;;;;;;;",
+                                       "2;2;execucao;2025-05;;1,00;1,00;;pombo;;;;"], capsys)
+    assert "linha 2: nº 1 execução: erro (período invertido" in saida
+    assert "linha 3: nº 2 execução: erro (meio desconhecido: 'pombo'" in saida
+
+
+def test_carregar_medicoes_nf_de_outra_obra_pelo_centro_de_custo_nao_entra(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    outro = conn.execute("SELECT id FROM contratos WHERE id<>? AND COALESCE(entidade_id, 1)="
+                         "(SELECT COALESCE(entidade_id, 1) FROM contratos WHERE id=?)", (cid, cid)).fetchone()
+    if outro is not None:
+        conn.execute("UPDATE contratos SET centro_custo_rm='CC-OUTRA' WHERE id=?", (outro[0],))
+    conn.execute("UPDATE contratos SET centro_custo_rm='CC-PROPRIA' WHERE id=?", (cid,))
+    _nf_no_rm(conn, 101, 9001, 41234567, 38000000, 38000000, 1, "2025-07-10", centro="CC-OUTRA")   # quitada, outra obra
+    _nf_no_rm(conn, 108, 9002, 53000000, 49000000, 49000000, 1, "2025-07-11", centro="CC-PROPRIA")
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0, saida
+    assert "NF 101 não vinculada (NF 101 é de outra obra no RM, pelo centro de custo)" in saida
+    estados = dict(conn.execute("SELECT numero, estado FROM medicoes WHERE contrato_id=? AND tipo='execucao'", (cid,)))
+    assert estados[1] == "protocolada" and estados[2] == "recebida"
+
+
+def test_carregar_medicoes_nf_que_nao_cobre_o_valor_nao_da_como_recebida(tmp_path, monkeypatch, capsys):
+    # MT-388: a medicao sai em duas notas; so' uma quitada (e a outra fora do CSV) nao fecha a medicao
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _nf_no_rm(conn, 101, 9001, 20617283, 19000000, 19000000, 1, "2025-07-10")     # metade de 412.345,67 (impar)
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0, saida
+    assert ("NF 101 não vinculada (as notas somam R$ 206.172,83 e a medição vale R$ 412.345,67: falta nota no CSV)"
+            in saida)
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+    # nem a sincronizacao seguinte com o RM a da' como recebida (revisor da #259)
+    from app import sincronizacao_rm
+    sincronizacao_rm._recebimentos(conn)
+    m = conn.execute("SELECT estado FROM medicoes WHERE contrato_id=? AND numero=1 AND tipo='execucao'", (cid,)).fetchone()
+    assert m[0] == "protocolada"
+
+
+def test_carregar_medicoes_duas_notas_da_mesma_medicao_quitadas_dao_recebida(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _nf_no_rm(conn, 101, 9001, 20617283, 19000000, 19000000, 1, "2025-07-10")
+    _nf_no_rm(conn, 102, 9003, 20617284, 19000000, 19000000, 1, "2025-07-12")     # 20.617.283 + 20.617.284 = cheio
+    arq = tmp_path / "obra-propria.csv"
+    arq.write_text("\n".join([CAB, "1;1;execucao;2025-04;;412.345,67;412.345,67;20/05/2025;e-mail;;;101/102;x"]) + "\n",
+                   "utf-8")
+    codigo, saida = _gravar(capsys, arq)
+    assert codigo == 0 and "NF 101/102 vinculada; recebida (baixa no RM)" in saida, saida
+    m = conn.execute("SELECT estado, recebida_em FROM medicoes WHERE contrato_id=? AND numero=1", (cid,)).fetchone()
+    assert tuple(m) == ("recebida", "2025-07-12")
+
+
+def test_carregar_medicoes_nova_sem_pedido_e_numero_gigante_sao_erro(tmp_path, monkeypatch, capsys):
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;;1,00;;;;;;",
+                                       "99999999999999999999;1;execucao;2025-05;;1,00;;;;;;;",
+                                       "3;99999999999999999999;execucao;2025-06;;1,00;;;;;;;"], capsys)
+    assert codigo == 0
+    assert "linha 2: nº 1 execução 2025-04: erro (medição nova sem valor pedido)" in saida
+    assert "erro (nº inválido: '99999999999999999999')" in saida
+    assert "erro (nº do órgão inválido: '99999999999999999999')" in saida
+
+
+def test_carregar_medicoes_nf_com_o_centro_de_custo_anterior_da_obra_entra(tmp_path, monkeypatch, capsys):
+    # O RM trocou os centros em 2024: a NF antiga da propria obra traz o centro anterior
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("UPDATE contratos SET centros_custo_anteriores_rm='[\"1.234.000\"]' WHERE id=?", (cid,))
+    _nf_no_rm(conn, 108, 9002, 53000000, 49000000, 49000000, 1, "2025-07-11", centro="1.234.000")
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0 and "NF 108 vinculada; recebida (baixa no RM)" in saida, saida
+
+
+def _linha_nf(tmp_path, nfs, aprovado="412.345,67"):
+    arq = tmp_path / "obra-propria.csv"
+    arq.write_text("\n".join([CAB, f"1;1;execucao;2025-04;;412.345,67;{aprovado};20/05/2025;e-mail;;;{nfs};x"]) + "\n",
+                   "utf-8")
+    return arq
+
+
+def test_carregar_medicoes_nf_um_centavo_abaixo_da_medicao_nao_cobre(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _nf_no_rm(conn, 101, 9001, 41234566, 38000000, 38000000, 1, "2025-07-10")     # R$ 0,01 a menos
+    codigo, saida = _gravar(capsys, _linha_nf(tmp_path, "101"))
+    assert codigo == 0 and "falta nota no CSV" in saida, saida
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+
+
+def test_carregar_medicoes_nf_repetida_na_celula_nao_vincula_nem_quebra(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _nf_no_rm(conn, 101, 9001, 41234567, 38000000, 38000000, 1, "2025-07-10")
+    codigo, saida = _gravar(capsys, _linha_nf(tmp_path, "101/000101"))
+    assert codigo == 0 and "NF 000101 repetida na linha" in saida, saida
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+
+
+def test_carregar_medicoes_centro_de_custo_de_duas_obras_nao_serve(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    centro = conn.execute("SELECT centro_custo_rm FROM contratos WHERE id=?", (cid,)).fetchone()[0]
+    outro = conn.execute("SELECT id FROM contratos WHERE id<>? AND COALESCE(entidade_id, 1)="
+                         "(SELECT COALESCE(entidade_id, 1) FROM contratos WHERE id=?)", (cid, cid)).fetchone()
+    if outro is None:       # o exemplo nao tem outra obra da mesma empresa: cria uma
+        outro = [conn.execute("INSERT INTO contratos (orgao, orgao_id, numero_instrumento, objeto, valor_original_centavos) "
+                              "SELECT orgao, orgao_id, 'IC OUTRA', 'outra', 1 FROM contratos WHERE id=?", (cid,)).lastrowid]
+    conn.execute("UPDATE contratos SET centros_custo_anteriores_rm=? WHERE id=?", (f'["{centro}"]', outro[0]))
+    _nf_no_rm(conn, 101, 9001, 41234567, 38000000, 38000000, 1, "2025-07-10")
+    codigo, saida = _gravar(capsys, _linha_nf(tmp_path, "101"))
+    assert codigo == 0 and "NF 101 tem centro de custo de mais de uma obra no cadastro" in saida, saida
+
+
+def test_carregar_medicoes_contrato_sem_centro_na_empresa_de_varias_obras_nao_vincula(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("UPDATE contratos SET centro_custo_rm=NULL WHERE id=?", (cid,))
+    _nf_no_rm(conn, 101, 9001, 41234567, 38000000, 38000000, 1, "2025-07-10", centro="")
+    codigo, saida = _gravar(capsys, _linha_nf(tmp_path, "101"))
+    assert codigo == 0 and "o contrato não tem centro de custo do RM no cadastro" in saida, saida
+
+
+def test_carregar_medicoes_banco_ocupado_fala_portugues(tmp_path, monkeypatch, capsys):
+    import sqlite3 as _sql
+    from app import carga_medicoes
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+
+    def ocupado(*a, **k):
+        raise _sql.OperationalError("database is locked")
+    monkeypatch.setattr(carga_medicoes, "gravar", ocupado)
+    codigo, saida = _gravar(capsys)
+    assert codigo == 1 and "o banco está ocupado por outra gravação" in saida and "locked" not in saida
