@@ -786,3 +786,48 @@ def test_carregar_medicoes_nf_com_o_centro_de_custo_anterior_da_obra_entra(tmp_p
     _nf_no_rm(conn, 108, 9002, 53000000, 49000000, 49000000, 1, "2025-07-11", centro="1.234.000")
     codigo, saida = _gravar(capsys)
     assert codigo == 0 and "NF 108 vinculada; recebida (baixa no RM)" in saida, saida
+
+
+def _linha_nf(tmp_path, nfs, aprovado="412.345,67"):
+    arq = tmp_path / "obra-propria.csv"
+    arq.write_text("\n".join([CAB, f"1;1;execucao;2025-04;;412.345,67;{aprovado};20/05/2025;e-mail;;;{nfs};x"]) + "\n",
+                   "utf-8")
+    return arq
+
+
+def test_carregar_medicoes_nf_um_centavo_abaixo_da_medicao_nao_cobre(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _nf_no_rm(conn, 101, 9001, 41234566, 38000000, 38000000, 1, "2025-07-10")     # R$ 0,01 a menos
+    codigo, saida = _gravar(capsys, _linha_nf(tmp_path, "101"))
+    assert codigo == 0 and "falta nota no CSV" in saida, saida
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+
+
+def test_carregar_medicoes_nf_repetida_na_celula_nao_vincula_nem_quebra(tmp_path, monkeypatch, capsys):
+    conn, _ = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _nf_no_rm(conn, 101, 9001, 41234567, 38000000, 38000000, 1, "2025-07-10")
+    codigo, saida = _gravar(capsys, _linha_nf(tmp_path, "101/000101"))
+    assert codigo == 0 and "NF 000101 repetida na linha" in saida, saida
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+
+
+def test_carregar_medicoes_centro_de_custo_de_duas_obras_nao_serve(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    centro = conn.execute("SELECT centro_custo_rm FROM contratos WHERE id=?", (cid,)).fetchone()[0]
+    outro = conn.execute("SELECT id FROM contratos WHERE id<>? AND COALESCE(entidade_id, 1)="
+                         "(SELECT COALESCE(entidade_id, 1) FROM contratos WHERE id=?)", (cid, cid)).fetchone()
+    if outro is None:       # o exemplo nao tem outra obra da mesma empresa: cria uma
+        outro = [conn.execute("INSERT INTO contratos (orgao, orgao_id, numero_instrumento, objeto, valor_original_centavos) "
+                              "SELECT orgao, orgao_id, 'IC OUTRA', 'outra', 1 FROM contratos WHERE id=?", (cid,)).lastrowid]
+    conn.execute("UPDATE contratos SET centros_custo_anteriores_rm=? WHERE id=?", (f'["{centro}"]', outro[0]))
+    _nf_no_rm(conn, 101, 9001, 41234567, 38000000, 38000000, 1, "2025-07-10")
+    codigo, saida = _gravar(capsys, _linha_nf(tmp_path, "101"))
+    assert codigo == 0 and "NF 101 tem centro de custo de mais de uma obra no cadastro" in saida, saida
+
+
+def test_carregar_medicoes_contrato_sem_centro_na_empresa_de_varias_obras_nao_vincula(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("UPDATE contratos SET centro_custo_rm=NULL WHERE id=?", (cid,))
+    _nf_no_rm(conn, 101, 9001, 41234567, 38000000, 38000000, 1, "2025-07-10", centro="")
+    codigo, saida = _gravar(capsys, _linha_nf(tmp_path, "101"))
+    assert codigo == 0 and "o contrato não tem centro de custo do RM no cadastro" in saida, saida

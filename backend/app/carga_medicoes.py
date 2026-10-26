@@ -410,8 +410,12 @@ def _vincular_nfs(conn, usuario_id: int, medicao_id: int, d: dict, contrato_id: 
     rotulo = "/".join(d["nfs"])
     if coligada is None:
         return f"; NF {rotulo} não vinculada (empresa do contrato sem coligada no RM)", False
-    _, por_centro, _ = diretoria._mapa_contratos(conn)
+    _, por_centro, por_coligada = diretoria._mapa_contratos(conn)
     centros = {cc for (col, cc), donos in por_centro.items() if col == coligada and contrato_id in donos}
+    # Contrato sem centro so' se identifica pela coligada quando ela isola a obra (consorcio: uma coligada, um
+    # contrato), como na diretoria; na Lotufo (muitas obras, uma coligada) nao ha' como saber de que obra e' a NF
+    if not centros and por_coligada.get(coligada) != [contrato_id]:
+        return f"; NF {rotulo} não vinculada (o contrato não tem centro de custo do RM no cadastro)", False
     achadas, problemas = [], []
     for nf in d["nfs"]:
         numero = int(nf) if nf.isdigit() and len(nf) <= 18 else None
@@ -423,7 +427,13 @@ def _vincular_nfs(conn, usuario_id: int, medicao_id: int, d: dict, contrato_id: 
             continue
         cc = (notas[0]["centro_custo"] or "").strip()
         donos = por_centro.get((coligada, cc), []) if cc else []
-        if (donos and contrato_id not in donos) or (centros and cc not in centros):
+        if any(n["id"] == notas[0]["id"] for n in achadas):
+            problemas.append(f"NF {nf} repetida na linha")
+        elif centros and donos != [contrato_id]:
+            # o centro tem de ser DESTA obra e so' dela: centro de outra obra, ou dividido entre duas, nao serve
+            problemas.append(f"NF {nf} é de outra obra no RM, pelo centro de custo" if contrato_id not in donos
+                             else f"NF {nf} tem centro de custo de mais de uma obra no cadastro")
+        elif not centros and donos:
             problemas.append(f"NF {nf} é de outra obra no RM, pelo centro de custo")
         elif conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
                           (notas[0]["id"],)).fetchone():
@@ -435,7 +445,8 @@ def _vincular_nfs(conn, usuario_id: int, medicao_id: int, d: dict, contrato_id: 
     valor = conn.execute("SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos) FROM medicoes "
                          "WHERE id=?", (medicao_id,)).fetchone()[0]
     soma = sum(n["valor_centavos"] for n in achadas)
-    if soma < valor - diretoria.TOLERANCIA_CENTAVOS:
+    # Sem tolerancia: a de R$ 1,00 (issue #35) e' do pagamento do titulo, nao da nota que fatura a medicao
+    if soma < valor:
         return (f"; NF {rotulo} não vinculada (as notas somam {dinheiro.format_brl(soma)} e a medição vale "
                 f"{dinheiro.format_brl(valor)}: falta nota no CSV)"), False
     for n in achadas:
