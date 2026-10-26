@@ -561,15 +561,19 @@ def _falta_por_titulo(conn, nota_id: int, aberto_inteiro: bool = False) -> int |
     return falta
 
 
-def _recebimentos(conn) -> int:
+def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
+    """`medicao_ids`: so' essas (a carga do historico, issue #259, fecha as que acabou de criar sem mexer nas outras)."""
     from app import diretoria   # import local: diretoria importa este modulo
     tolerancia = diretoria.TOLERANCIA_CENTAVOS
     n = 0
+    filtro = f" AND m.id IN ({','.join('?' * len(medicao_ids))})" if medicao_ids is not None else ""
+    if medicao_ids == []:
+        return 0
     for m in conn.execute("""SELECT m.id, e.coligada_rm,
                                     COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
                              FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
                              JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
-                             WHERE m.estado IN ('protocolada','nf_emitida')"""):
+                             WHERE m.estado IN ('protocolada','nf_emitida')""" + filtro, medicao_ids or ()).fetchall():
         # Bloco 3 (decisao 13 do plano): so' as notas da COLIGADA DA ENTIDADE DO CONTRATO decidem o
         # recebimento. Em obra de consorcio a medicao tambem tem a NFS-e da Lotufo ao orgao
         # (coligada 1, cota, titulo que o consorcio repassa depois): ela nao segura a medicao.

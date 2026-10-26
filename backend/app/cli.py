@@ -129,17 +129,17 @@ def _de_outro_cadastro(conn, cad: dict) -> list[str]:
 
 def _carregar_medicoes(args) -> int:
     """`cadastro carregar-medicoes <obra>.csv --ensaio` (issue #258): confere o histórico de medições de uma
-    obra contra o banco e imprime o relatório. Só ensaio por enquanto: não grava nada."""
+    obra contra o banco e imprime o relatório, sem gravar. Sem `--ensaio` (issue #259), com o OK do Leo no
+    relatório: cria as medições que faltam."""
     if not args.arquivo:
         print("`cadastro carregar-medicoes` exige o arquivo <obra>.csv")
-        return 1
-    if not args.ensaio:
-        print("Gravar ainda não existe: rode com --ensaio para ver o relatório (nada é gravado).")
         return 1
     caminho = Path(args.arquivo)
     if not caminho.is_file():
         print(f"Arquivo não encontrado: {caminho}")
         return 1
+    if not args.ensaio:
+        return _gravar_medicoes(args, caminho)
     banco = db.db_path().resolve()
     if not banco.is_file():
         print(f"Banco não encontrado: {banco}")
@@ -165,12 +165,43 @@ def _carregar_medicoes(args) -> int:
             conn.rollback()
         conn.close()
     print(f"ENSAIO (nada foi gravado): {rel['contrato']} ({caminho.name})")
+    _relatorio_carga(rel)
+    return 0
+
+
+def _relatorio_carga(rel: dict) -> None:
     for li in rel["linhas"]:
         rotulo = f"linha {li['linha']}: nº {li['numero']} {li['tipo']}"
         if li.get("competencia"):
             rotulo += f" {li['competencia']}"
-        print(f"  {rotulo}: {li['categoria']}" + (f" ({li['detalhe']})" if li["detalhe"] else ""))
+        print(f"  {rotulo}: {li['categoria']}" + (f" ({li['detalhe']})" if li["detalhe"] else "")
+              + (f" -> {li['acao']}" if li.get("acao") else ""))
     print("Total: " + ", ".join(f"{c} {n}" for c, n in rel["totais"].items()))
+
+
+def _gravar_medicoes(args, caminho: Path) -> int:
+    if not args.usuario:
+        print("Gravar exige --usuario (e-mail de quem aplica). Para só ver o relatório, use --ensaio.")
+        return 1
+    conn = db.get_conn()
+    try:
+        db.migrate(conn)
+        u = conn.execute("SELECT id FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+        if u is None:
+            print(f"Usuário não encontrado ou inativo: {args.usuario}")
+            return 1
+        try:
+            rel = carga_medicoes.gravar(conn, u["id"], caminho)
+        except carga_medicoes.CsvInvalido as e:
+            print(f"CSV recusado, nada foi gravado: {e}")
+            return 1
+        except carga_medicoes.CargaRecusada as e:
+            print(f"Recusado, nada foi gravado: {e}")
+            return 1
+    finally:
+        conn.close()
+    print(f"GRAVADO: {rel['contrato']} ({caminho.name}), {rel['criadas']} medição(ões) criada(s)")
+    _relatorio_carga(rel)
     return 0
 
 

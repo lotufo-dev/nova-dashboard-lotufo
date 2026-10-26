@@ -1,7 +1,9 @@
-"""Carga do historico de medicoes por CSV (spec 2026-10-20 §2.4, opcao A; issue #258).
+"""Carga do historico de medicoes por CSV (spec 2026-10-20 §2.4, opcao A; issues #258 e #259).
 
-So' o ENSAIO: le o CSV de uma obra, confere linha a linha contra o banco e devolve o relatorio. Nao grava nada
-(nem abre transacao de escrita); gravar e' a issue seguinte. A chave e' (obra, numero, tipo).
+ENSAIO (`ensaiar`): le o CSV de uma obra, confere linha a linha contra o banco e devolve o relatorio, sem gravar.
+GRAVAR (`gravar`): com o OK do Leo no ensaio, cria as medicoes `nova`, numa transacao so' por obra. Nunca altera
+medicao existente (corrigir valor de medicao que ja' esta' no banco e' evento novo, issue #260). A chave e'
+(obra, numero, tipo).
 
 Categorias por linha: `nova` (nao existe medicao com a chave), `igual` (competencia, pedido e aprovado iguais
 aos do banco), `valor diferente` (pedido ou aprovado diferem do banco), `incompleta` (o CSV deixa vazio um valor
@@ -16,7 +18,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from app import contratos, dinheiro
+from app import auditoria, contratos, db, dinheiro
 from app.cadastro_arquivos import slug
 
 TIPOS = ("execucao", "projeto", "reajuste")
@@ -46,8 +48,18 @@ ROTULO_COLUNA = {"numero": "nº", "tipo": "tipo", "competencia": "competência",
                  "valor_aprovado": "valor aprovado"}
 
 
+# Meio da aprovacao no CSV (normalizado) -> `medicao_atestos.meio` (042). Meio desconhecido e' erro da linha:
+# nunca adivinhar. "protocolo fisico" e' o carimbo no oficio entregue no balcao.
+MEIOS = {"e-mail": "email", "email": "email", "smo": "smo", "oficio": "oficio", "carimbo": "carimbo",
+         "protocolo fisico": "carimbo", "ci": "ci", "outro": "outro"}
+
+
 class CsvInvalido(ValueError):
     """O arquivo inteiro nao se le (cabecalho, codificacao, obra): nada a relatar por linha."""
+
+
+class CargaRecusada(ValueError):
+    """O ensaio tem linha com erro ou conflito: nada e' gravado ate' o CSV ser corrigido."""
 
 
 def _normalizar(texto: str) -> str:
@@ -165,11 +177,36 @@ def _interpretar(bruto: dict, janela: tuple[str, str] | None) -> dict:
     competencia = _competencia(bruto.get("competencia", ""))
     if janela and not janela[0] <= competencia <= janela[1]:
         raise ValueError(f"competência {competencia} fora do contrato ({janela[0]} a {janela[1]})")
+    numero_orgao = bruto.get("numero_orgao", "")
+    if numero_orgao and (not re.fullmatch(r"[0-9]+", numero_orgao) or int(numero_orgao) < 1):
+        raise ValueError(f"nº do órgão inválido: {numero_orgao!r}")
+    meio = bruto.get("meio", "")
+    if meio and _normalizar(meio) not in MEIOS:
+        raise ValueError(f"meio desconhecido: {meio!r} (use e-mail, SMO, ofício, carimbo, CI ou outro)")
     return {"numero": int(numero), "tipo": tipo, "competencia": competencia,
+            "numero_orgao": int(numero_orgao) if numero_orgao else None,
+            "periodo": _periodo(bruto.get("periodo", "")),
             "valor_pedido": _valor(bruto.get("valor_pedido", ""), "valor pedido"),
             "valor_aprovado": _valor(bruto.get("valor_aprovado", ""), "valor aprovado"),
             "data_aprovacao": _data(bruto.get("data_aprovacao", ""), "data da aprovação"),
-            "data_protocolo_nota": _data(bruto.get("data_protocolo_nota", ""), "data do protocolo da nota")}
+            "meio": MEIOS[_normalizar(meio)] if meio else None,
+            "processo_orgao": bruto.get("processo_orgao") or None,
+            "data_protocolo_nota": _data(bruto.get("data_protocolo_nota", ""), "data do protocolo da nota"),
+            "nf": bruto.get("nf") or None,
+            "fonte": bruto.get("fonte") or None}
+
+
+def _periodo(texto: str) -> tuple[str, str] | None:
+    """'10/03/2025 a 30/04/2025' -> ('2025-03-10', '2025-04-30'). Vazio: sem periodo."""
+    if not texto:
+        return None
+    partes = re.split(r"\s+a\s+", texto.strip())
+    if len(partes) != 2:
+        raise ValueError(f"período inválido: {texto!r} (use DD/MM/AAAA a DD/MM/AAAA)")
+    ini, fim = _data(partes[0], "data de início do período"), _data(partes[1], "data de fim do período")
+    if ini > fim:
+        raise ValueError(f"período invertido: {texto!r}")
+    return ini, fim
 
 
 def contrato_da_obra(conn, obra: str):
@@ -233,7 +270,7 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
         vistas[chave] = item["linha"]
         m = existentes.get(chave)
         if m is None:
-            linhas.append({**item, "categoria": "nova", "detalhe": ""})
+            linhas.append({**item, "categoria": "nova", "detalhe": "", "dados": d})
         elif m["estado"] in ESTADOS_TERMINAIS:
             linhas.append({**item, "categoria": "conflito", "detalhe": f"no banco a medição está {m['estado']}"})
         elif m["competencia"] != d["competencia"]:
@@ -257,3 +294,103 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
 
 def _fmt(centavos: int | None) -> str:
     return "vazio" if centavos is None else dinheiro.format_brl(centavos)
+
+
+def gravar(conn, usuario_id: int, caminho: Path, obra: str | None = None) -> dict:
+    """Cria as medicoes `nova` do CSV, numa transacao so' (por obra), e devolve o relatorio com o que foi feito.
+
+    Linha com erro ou conflito recusa o arquivo inteiro (CargaRecusada, nada gravado): o CSV se corrige e se
+    roda de novo. `igual` passa (rodar duas vezes nao duplica). `valor diferente` e `incompleta` nao mexem na
+    medicao existente: correcao e' evento novo (issue #260).
+
+    Medicao nova: estado `protocolada` e congelada (e' historico: o pedido ja' saiu), valor pedido como
+    protocolado, aprovado como evento de atesto (data, meio, processo e fonte), protocolo da nota quando o CSV
+    traz a data. A NF do CSV, achada no RM da empresa do contrato, e' vinculada; se o RM ja' tem a baixa que
+    cobre os titulos, a regra de sempre (`sincronizacao_rm._recebimentos`) passa a medicao a `recebida`, com a
+    data da baixa."""
+    from app import sincronizacao_rm   # import local: sincronizacao_rm importa medicoes e notas
+    with db.mutacao(conn):
+        rel = ensaiar(conn, caminho, obra)
+        ruins = rel["totais"]["erro"] + rel["totais"]["conflito"]
+        if ruins:
+            raise CargaRecusada(f"{ruins} linha(s) com erro ou conflito; corrija o CSV (rode com --ensaio para "
+                                "ver quais)")
+        contrato = contrato_da_obra(conn, rel["obra"])
+        coligada = conn.execute("SELECT e.coligada_rm FROM contratos c JOIN entidades e "
+                                "ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?", (contrato["id"],)).fetchone()[0]
+        criadas = {}
+        for li in rel["linhas"]:
+            if li["categoria"] == "nova":
+                criadas[_criar(conn, usuario_id, contrato["id"], li)] = li
+                li["acao"] = "criada"
+            elif li["categoria"] in ("valor diferente", "incompleta"):
+                li["acao"] = "não alterada (a carga não corrige medição que já existe)"
+            else:
+                li["acao"] = "já existe"
+        for mid, li in criadas.items():
+            li["acao"] += _vincular_nf(conn, usuario_id, mid, li["dados"], coligada)
+        sincronizacao_rm._recebimentos(conn, list(criadas))
+        for mid, li in criadas.items():
+            if conn.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "recebida":
+                li["acao"] += "; recebida (baixa no RM)"
+        if criadas:     # rodar de novo sem nada novo nao deixa rastro
+            auditoria.registrar(conn, usuario_id, "medicao.carga_historico", "contrato", contrato["id"], None,
+                                {"arquivo": caminho.name, "criadas": len(criadas),
+                                 "linhas": [li["linha"] for li in criadas.values()]})
+    rel["criadas"] = len(criadas)
+    return rel
+
+
+def _criar(conn, usuario_id: int, contrato_id: int, li: dict) -> int:
+    d = li["dados"]
+    ini, fim = d["periodo"] or (None, None)
+    cur = conn.execute(
+        "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, congelada, valor_protocolado_centavos, "
+        "valor_protocolado_origem, numero_orgao, periodo_inicio, periodo_fim) "
+        "VALUES (?,?,?,?,'protocolada',1,?,?,?,?,?)",
+        (contrato_id, d["numero"], d["tipo"], d["competencia"], d["valor_pedido"],
+         "manual" if d["valor_pedido"] is not None else None, d["numero_orgao"], ini, fim))
+    mid = cur.lastrowid
+    auditoria.registrar(conn, usuario_id, "medicao.criar", "medicao", mid, None,
+                        {"numero": d["numero"], "tipo": d["tipo"], "competencia": d["competencia"],
+                         "estado": "protocolada", "valor_protocolado_centavos": d["valor_pedido"],
+                         "numero_orgao": d["numero_orgao"], "periodo_inicio": ini, "periodo_fim": fim,
+                         "origem": "carga do histórico", "linha": li["linha"], "fonte": d["fonte"]})
+    if d["data_protocolo_nota"]:
+        conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem) "
+                     "VALUES (?,?,?,'manual')", (mid, d["data_protocolo_nota"], d["processo_orgao"]))
+        auditoria.registrar(conn, usuario_id, "medicao.protocolo", "medicao", mid, None,
+                            {"data": d["data_protocolo_nota"], "numero_processo": d["processo_orgao"],
+                             "origem": "manual"})
+    if d["valor_aprovado"] is not None:
+        # Atesto e' evento (039/042): o vigente na medicao e o evento entram juntos
+        conn.execute("UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem='manual', atestado_em=? "
+                     "WHERE id=?", (d["valor_aprovado"], d["data_aprovacao"], mid))
+        conn.execute("INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, "
+                     "meio, numero_orgao, observacao) VALUES (?,?,'manual',?,?,?,?,?)",
+                     (mid, d["valor_aprovado"], d["data_aprovacao"], usuario_id, d["meio"], d["processo_orgao"],
+                      d["fonte"]))
+        auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", mid, None,
+                            {"valor_atestado_centavos": d["valor_aprovado"], "valor_atestado_origem": "manual",
+                             "atestado_em": d["data_aprovacao"], "meio": d["meio"], "fonte": d["fonte"]})
+    return mid
+
+
+def _vincular_nf(conn, usuario_id: int, medicao_id: int, d: dict, coligada: int | None) -> str:
+    """Vincula a NF do CSV, se ela esta' no RM da empresa do contrato. Devolve o complemento do relatorio."""
+    from app import sincronizacao_rm
+    if not d["nf"]:
+        return ""
+    if coligada is None:
+        return f"; NF {d['nf']} não vinculada (empresa do contrato sem coligada no RM)"
+    numero = int(d["nf"]) if d["nf"].isdigit() else None
+    notas = conn.execute("SELECT id FROM notas_fiscais WHERE coligada=? AND situacao='ativa' AND "
+                         "(numero=? OR numero_int=?)", (coligada, d["nf"], numero)).fetchall()
+    if len(notas) != 1:
+        return (f"; NF {d['nf']} não encontrada no RM" if not notas
+                else f"; NF {d['nf']} não vinculada (mais de uma nota com esse número no RM)")
+    if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
+                    (notas[0]["id"],)).fetchone():
+        return f"; NF {d['nf']} não vinculada (já está em outra medição)"
+    sincronizacao_rm.alocar(conn, usuario_id, notas[0]["id"], medicao_id, "manual", None, "carga_historico")
+    return f"; NF {d['nf']} vinculada"

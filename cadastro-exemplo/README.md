@@ -24,4 +24,8 @@ QDOP e logo da FRC). Os modelos `.docx` e `.xlsx` são neutros, sem logotipo; o 
 
 `medicoes/obra-propria.csv` é o histórico de medições de exemplo da Obra Própria, no formato de
 `cadastro carregar-medicoes <obra>.csv --ensaio` (o nome do arquivo é o slug da obra, como em `contratos/`).
-Separador `;`, valores em reais com vírgula, competência AAAA-MM, datas DD/MM/AAAA.
+Separador `;`, valores em reais com vírgula, competência AAAA-MM, datas DD/MM/AAAA, período
+`DD/MM/AAAA a DD/MM/AAAA`, meio `e-mail`, `SMO`, `ofício`, `carimbo` (ou `protocolo físico`), `CI` ou `outro`.
+Sem `--ensaio` e com `--usuario`, o comando cria as medições que faltam (protocoladas, com o aprovado como
+evento de atesto e a NF vinculada quando está no RM; recebida se o RM já tem a baixa). Linha com erro ou
+conflito recusa o arquivo inteiro; medição que já existe não é alterada.
