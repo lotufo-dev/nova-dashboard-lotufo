@@ -108,8 +108,8 @@ def _ler_texto(caminho: Path) -> str:
 def ler_csv(caminho: Path) -> list[tuple[int, dict]]:
     """Linhas do CSV como (numero da linha no arquivo, {campo: texto}). Separador `;` (Excel pt-BR) ou `,`."""
     texto = _ler_texto(caminho)
-    primeira = texto.split("\n", 1)[0]
-    leitor = csv.reader(io.StringIO(texto), delimiter=";" if ";" in primeira else ",",
+    primeira = (texto.splitlines() or [""])[0]   # \r sozinho tambem (CSV do Excel do Mac)
+    leitor = csv.reader(io.StringIO(texto, newline=""), delimiter=";" if ";" in primeira else ",",
                         strict=True)   # aspas nao fechadas recusam o arquivo, nunca viram linha "igual"
     posicao = {"inicio": 1}
     try:

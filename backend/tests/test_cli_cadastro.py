@@ -560,6 +560,17 @@ def test_carregar_medicoes_aspas_nao_fechadas_citam_a_linha_onde_abriram(tmp_pat
     assert codigo == 1 and "o arquivo não se lê como CSV (linha 3): aspas sem fechar" in saida
 
 
+def test_carregar_medicoes_aceita_csv_do_excel_do_mac(tmp_path, monkeypatch, capsys):
+    # "CSV (Macintosh)" termina as linhas so' com \r: tem de ler, nao acusar aspas na linha 1
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    arq = tmp_path / "obra-propria.csv"
+    arq.write_bytes("\r".join([CAB, "1;1;execucao;2025-04;;1,00;1,00;;;;;;", ""]).encode("utf-8"))
+    capsys.readouterr()
+    codigo = cli.main(["cadastro", "carregar-medicoes", str(arq), "--ensaio"])
+    saida = capsys.readouterr().out
+    assert codigo == 0 and "linha 2: nº 1 execução 2025-04: nova" in saida
+
+
 def test_carregar_medicoes_arquivo_sem_leitura_fala_portugues(tmp_path, monkeypatch, capsys):
     from pathlib import Path as _P
     _com_exemplo_aplicado(tmp_path, monkeypatch)
