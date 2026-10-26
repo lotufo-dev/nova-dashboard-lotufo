@@ -55,6 +55,7 @@
 /* ponto e pilula da situacao */
 .sit-ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-pilula); }
 .sit-ponto--sem-medicao { background: var(--sit-sem-texto); }
+.sit-ponto--planilha-gerada, .sit-ponto--planilha-enviada, .sit-ponto--boletim-recebido { background: var(--sit-fat-texto); }
 .sit-ponto--faturamento { background: var(--sit-fat-texto); }
 .sit-ponto--aguardando-nota { background: var(--sit-nota-texto); }
 .sit-ponto--enviar-nota { background: var(--sit-envio-texto); }
@@ -65,6 +66,7 @@
   font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap;
 }
 .sit-pilula--sem-medicao { background: var(--sit-sem-fundo); color: var(--sit-sem-texto); border-color: var(--sit-sem-linha); }
+.sit-pilula--planilha-gerada, .sit-pilula--planilha-enviada, .sit-pilula--boletim-recebido { background: var(--sit-fat-fundo); color: var(--sit-fat-texto); }
 .sit-pilula--faturamento { background: var(--sit-fat-fundo); color: var(--sit-fat-texto); }
 .sit-pilula--aguardando-nota { background: var(--sit-nota-fundo); color: var(--sit-nota-texto); }
 .sit-pilula--enviar-nota { background: var(--sit-envio-fundo); color: var(--sit-envio-texto); }

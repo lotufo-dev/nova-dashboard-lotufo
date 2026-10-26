@@ -149,6 +149,9 @@ function Quadro({ id, titulo, legenda, linhas, sem, gruposAbertos, vazio }:
 }
 
 const VAZIO: Record<Exclude<Situacao, "aguardando-nota">, string> = {
+  "planilha-gerada": "Nenhuma planilha/carta gerada à espera de envio.",
+  "planilha-enviada": "Nenhuma planilha/carta enviada à espera do boletim.",
+  "boletim-recebido": "Nenhum boletim recebido à espera do espelho.",
   faturamento: "Nenhuma medição para enviar ao faturamento.",
   "enviar-nota": "Nenhuma nota a enviar.",
   "aguardando-pagamento": "Nenhuma medição aguardando pagamento.",

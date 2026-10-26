@@ -16,8 +16,8 @@ const CERTIDOES = { itens: [
   { entidade_id: 1, entidade: "Rivoli", tipo: "Federal", chave: "federal", situacao: "ok", validade: "2027-01-12", dias: 90 },
   { entidade_id: 1, entidade: "Rivoli", tipo: "Municipal", chave: "municipal", situacao: "vencendo", validade: "2026-10-22", dias: 6 }] };
 
-function responder(lista: unknown) {
-  api.mockImplementation(async (url: string) => (url.startsWith("/api/contratos/") ? CERTIDOES : lista));
+function responder(lista: unknown, certidoes: unknown = CERTIDOES) {
+  api.mockImplementation(async (url: string) => (url.startsWith("/api/contratos/") ? certidoes : lista));
 }
 
 // Medições › Enviar nota (#157, 16/10/2026): a aba só mostra o que vai junto e o que falta, e leva à etapa 4 da medição
@@ -33,7 +33,7 @@ describe("Aba Enviar nota", () => {
         envio("c20:m700", "Complexo Xtreme", "MTPAR", { medicao_ids: [700], contrato_id: 20 }),
       ],
       contadores: { Todas: 2 },
-    });
+    }, { itens: [] });   // sem certidões carregadas o resumo "Vencida" fica fixo; com elas ele é trocado pela lista, e o teste ficava dependente da ordem das respostas
     render(<NotasAEnviar busca={{}} podeEditar />);
     expect(within(await screen.findByRole("link", { name: /Todas/ })).getByText("2")).toBeTruthy();
     expect(within(screen.getByRole("link", { name: /Prontas/ })).getByText("1")).toBeTruthy();

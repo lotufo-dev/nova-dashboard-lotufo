@@ -15,7 +15,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from app import medicoes, paineis
+from app import cronograma, medicoes, paineis
 from app.api_auth import conexao
 from app.api_medicoes import ID
 from app.dinheiro import format_brl
@@ -72,7 +72,8 @@ def alertas(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
 def curva(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
           conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)
-    return {"curva": paineis.curva(conn, contrato_id), "saldo": paineis.saldo(conn, contrato_id)}
+    return {"curva": paineis.curva(conn, contrato_id), "saldo": paineis.saldo(conn, contrato_id),
+            **cronograma.curva_comparativa(conn, contrato_id)}
 
 
 @router.get("/api/contratos/{contrato_id}/medicoes.csv")

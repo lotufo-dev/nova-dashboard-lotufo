@@ -21,7 +21,8 @@ status_desde: null
 sem_reajuste: false
 datas_base:
 - mes: 2025-01
-  indice: ''
+  indice: FGV/DNIT de exemplo
+  aplica_a: itens de exemplo
 fiscais:
 - nome: Fiscal de Exemplo
   email: fiscal@exemplo.gov.br

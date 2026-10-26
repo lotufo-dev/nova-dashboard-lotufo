@@ -41,7 +41,9 @@ TRANSICOES = {
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
 # B-12 (10/10/2026): mensagem ao usuario com o tipo e o estado por extenso, nunca o codigo ("(execucao)")
 ROTULO_TIPO = {"execucao": "execução", "reajuste": "reajuste", "projeto": "projeto"}
-ROTULO_ESTADO = {"prevista": "prevista", "espelho_gerado": "com espelho gerado", "espelho_enviado": "com espelho enviado",
+ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta gerada",
+                 "planilha_enviada": "com planilha/carta enviada", "boletim_recebido": "com boletim recebido",
+                 "espelho_gerado": "com espelho gerado", "espelho_enviado": "com espelho enviado",
                  "nota_emitida": "com nota emitida", "protocolada": "protocolada", "nf_emitida": "lançada no RM",
                  "recebida": "recebida", "cancelada": "cancelada", "desistida": "desistida"}
 
@@ -172,6 +174,48 @@ def _eventos_atesto(conn: sqlite3.Connection, ids: list[int], out: dict[int, lis
                              "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
 
 
+def _eventos_assinatura(conn: sqlite3.Connection, ids: list[int], out: dict[int, list[dict]]) -> None:
+    """Issue #287: a assinatura no DocuSign e' evento (medicao_assinaturas, append-only), uma linha por registro."""
+    for i in range(0, len(ids), LOTE_AUDITORIA):
+        lote = ids[i:i + LOTE_AUDITORIA]
+        for r in conn.execute(
+                "SELECT e.medicao_id, e.envelope, e.assinado_em, e.criado_em, u.nome FROM medicao_assinaturas e "
+                "LEFT JOIN usuarios u ON u.id=e.usuario_id "
+                f"WHERE e.medicao_id IN ({','.join('?' * len(lote))}) ORDER BY e.id", lote):
+            texto = f"Boletim assinado no DocuSign em {_data_br(r['assinado_em'])}"
+            if r["envelope"]:
+                texto += f" (envelope {r['envelope']})"
+            # a data do evento e' a da assinatura (como o atesto), nao a do registro: registrada depois do protocolo,
+            # ela nao pode aparecer depois dele
+            out[r["medicao_id"]].append({"data": r["assinado_em"],
+                                         "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+
+
+def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, assinado_em: str,
+                         envelope: str | None) -> int:
+    """Issue #287: registra que o boletim foi assinado no DocuSign (data e nome do envelope do e-mail de
+    conclusao). Evento informativo, sem estado e sem aviso; correcao e' um registro novo."""
+    try:
+        data = datetime.date.fromisoformat(assinado_em)
+    except (TypeError, ValueError):
+        raise ValueError("Data da assinatura inválida")
+    if data > tempo.hoje_local():
+        raise ValueError("A data da assinatura não pode ser futura")
+    envelope = (envelope or "").strip() or None
+    with db.mutacao(conn):
+        if conn.execute("SELECT 1 FROM medicoes WHERE id=?", (medicao_id,)).fetchone() is None:
+            raise ValueError("Medição não encontrada")
+        if conn.execute("SELECT 1 FROM medicao_assinaturas WHERE medicao_id=? AND assinado_em=? AND envelope IS ?",
+                        (medicao_id, data.isoformat(), envelope)).fetchone():
+            raise ValueError("Esta assinatura já está registrada")     # duplo clique: o registro não se apaga depois
+        cur = conn.execute(
+            "INSERT INTO medicao_assinaturas (medicao_id, envelope, assinado_em, origem, usuario_id) "
+            "VALUES (?,?,?,'manual',?)", (medicao_id, envelope, data.isoformat(), usuario_id))
+        auditoria.registrar(conn, usuario_id, "medicao.assinatura", "medicao", medicao_id, None,
+                            {"assinado_em": data.isoformat(), "envelope": envelope})
+        return cur.lastrowid
+
+
 def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int, list[dict]]:
     """B-02 (10/10/2026): as edicoes de valor da auditoria, por medicao, para a linha do tempo (a tela so' mostrava
     espelho, nota, protocolo e atesto). Gravar o mesmo valor nao vira evento. O atestado vem dos eventos de
@@ -196,6 +240,7 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
                                            # gate Sol S5 (10/10/2026): sem usuario, a autoria e' do sistema
                                            "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
     _eventos_atesto(conn, list(out), out)
+    _eventos_assinatura(conn, list(out), out)
     for eventos in out.values():
         eventos.sort(key=lambda e: e["data"] or "")      # estavel: no mesmo segundo, o protocolado vem antes
     return out
@@ -460,7 +505,8 @@ def titulo(m: dict) -> str:
     return f"{m['numero']}ª Medição" + (" de Projeto" if m["tipo"] == "projeto" else "")
 
 
-PROXIMO_PASSO = {"espelho_gerado": "enviar ao faturamento", "espelho_enviado": "anexar as notas",
+PROXIMO_PASSO = {"planilha_gerada": "enviar a planilha/carta", "planilha_enviada": "registrar o boletim",
+                 "boletim_recebido": "gerar o espelho", "espelho_gerado": "enviar ao faturamento", "espelho_enviado": "anexar as notas",
                  "nota_emitida": "protocolar", "protocolada": "aguardando pagamento",
                  "nf_emitida": "aguardando pagamento"}
 
@@ -481,7 +527,13 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
     out = []
     for r in conn.execute(sql + " ORDER BY c.nome_curto, c.id, m.numero DESC, m.tipo", args):
         # dia de Cuiaba (`_dia`) nos marcos e no criado_em: carimbo UTC das 20h as 24h cairia no dia seguinte
-        marcos = [d.isoformat() for d in map(_dia, (r["espelho_em"], r["nota_emitida_em"], r["protocolado_em"])) if d]
+        brutos = [r["espelho_em"], r["nota_emitida_em"], r["protocolado_em"]]
+        # marcos do motor so' no estado deles: atesto/glosa posterior numa medicao adiante nao rebaixa o "desde"
+        if r["estado"] == "planilha_enviada":
+            brutos.append(r["planilha_enviada_em"])
+        if r["estado"] == "boletim_recebido":
+            brutos.append(r["atestado_em"])
+        marcos = [d.isoformat() for d in map(_dia, brutos) if d]
         criado = _dia(r["criado_em"])
         out.append({"id": r["id"], "contrato_id": r["contrato_id"],
                     "obra": r["nome_curto"] or r["numero_instrumento"], "numero": r["numero"], "tipo": r["tipo"],
@@ -490,7 +542,8 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
                     "desde": max(marcos) if marcos else (criado.isoformat() if criado else ""),
                     # os marcos crus, para quem precisa do marco da SITUACAO e nao do mais recente (resumo abaixo)
                     "espelho_em": r["espelho_em"], "nota_emitida_em": r["nota_emitida_em"],
-                    "protocolado_em": r["protocolado_em"]})
+                    "protocolado_em": r["protocolado_em"], "planilha_enviada_em": r["planilha_enviada_em"],
+                    "atestado_em": r["atestado_em"]})
     return out
 
 
@@ -499,9 +552,10 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
 # lugar so' (o teste confere). `nf_emitida` e' o legado do bloco 3 (o remapeamento leva a zero) e espera o orgao
 # como a protocolada. `prevista` (criada pelo cronograma, sem espelho) fica de fora DE PROPOSITO: a obra com so'
 # uma prevista esta' "sem medicao aberta" (decisao do Leo).
-SITUACAO = {"espelho_gerado": "faturamento", "espelho_enviado": "aguardando-nota", "nota_emitida": "enviar-nota",
+SITUACAO = {"planilha_gerada": "planilha-gerada", "planilha_enviada": "planilha-enviada",
+            "boletim_recebido": "boletim-recebido", "espelho_gerado": "faturamento", "espelho_enviado": "aguardando-nota", "nota_emitida": "enviar-nota",
             "protocolada": "aguardando-pagamento", "nf_emitida": "aguardando-pagamento"}
-ORDEM_SITUACAO = ("faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento")
+ORDEM_SITUACAO = ("planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento")
 
 # Sigla curta do contratante pela chave do orgao no cadastro (orgaos.chave). A SINFRA sai da familia, com a
 # superintendencia ao lado; o que nao estiver aqui aparece com o nome do cadastro, sem sigla inventada.
@@ -558,7 +612,16 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
         "SELECT en.medicao_id, MAX(v.enviado_em) FROM envio_medicoes en JOIN envios v ON v.id=en.envio_id "
         "GROUP BY en.medicao_id").fetchall())
 
+    planilha_de = dict(conn.execute("SELECT medicao_id, MIN(criado_em) FROM medicao_planilhas GROUP BY medicao_id").fetchall())
+
     def marco(m: dict) -> datetime.date | None:
+        # os tres estados do motor (spec motores §2.1): o marco e' o do proprio estado
+        if m["estado"] == "planilha_gerada":
+            return _dia(planilha_de.get(m["id"]))
+        if m["estado"] == "planilha_enviada":
+            return _dia(m["planilha_enviada_em"])
+        if m["estado"] == "boletim_recebido":
+            return _dia(m["atestado_em"])
         if m["estado"] == "espelho_gerado":
             return _dia(espelho_de.get(m["id"])) or _dia(m["espelho_em"])
         if m["estado"] == "espelho_enviado":

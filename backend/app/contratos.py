@@ -169,7 +169,7 @@ def cadastro_da_obra(conn: sqlite3.Connection, contrato_id: int) -> dict:
                           "WHERE contrato_id=? ORDER BY data, id")
     for i in instrumentos:
         i["dados"] = json.loads(i["dados"] or "{}")
-    return {"datas_base": linhas("SELECT mes, indice FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes"),
+    return {"datas_base": linhas("SELECT mes, indice, aplica_a FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes"),
             "fiscais": linhas("SELECT nome, email, desde, cargo, tratamento, portaria FROM contrato_fiscais "
                               "WHERE contrato_id=? ORDER BY desde, id"),
             "aditivos": linhas("SELECT id, chave_cadastro, forma, tipo, numero, data_assinatura, delta_valor_centavos, "

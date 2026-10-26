@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { brl } from "./Medicoes";
-import { curvaS, type PontoDaCurva } from "./obra";
+import { curvaS, desviosEmPP, type MarcaAditivo, type PontoDaCurva, type PrevistoAnterior } from "./obra";
 import { Link } from "./Link";
 import { useHoje } from "./ExecucaoContrato";
 import { fmtCompetencia, fmtMesCurto } from "./tempo";
@@ -31,7 +31,10 @@ function mesesEntre(a: string, b: string): number {
 }
 
 /** `pontos`: undefined = carregando; null = a leitura falhou (nao e' o mesmo que obra sem curva). */
-export default function CurvaS({ pontos, contratoId }: { pontos: PontoDaCurva[] | null | undefined; contratoId: number }) {
+export default function CurvaS({ pontos, contratoId, anterior = null, aditivos = [] }: {
+  pontos: PontoDaCurva[] | null | undefined; contratoId: number;
+  /** Issue #295: previsto anterior a ultima repactuacao (null = a obra so' tem uma versao) e as marcas dos aditivos. */
+  anterior?: PrevistoAnterior | null; aditivos?: MarcaAditivo[] }) {
   const [modo, setModo] = useState<Modo>("acumulado");
   const [largura, setLargura] = useState(0);
   const [sobre, setSobre] = useState<number | null>(null);
@@ -45,14 +48,15 @@ export default function CurvaS({ pontos, contratoId }: { pontos: PontoDaCurva[] 
     return () => window.removeEventListener("resize", medir);
   }, [pontos]);
 
-  const serie = pontos ? curvaS(pontos) : [];
+  const serie = pontos ? curvaS(pontos, pontos.length > 0 && anterior?.length ? anterior : null) : [];
+  const temAnterior = serie.length > 0 && serie[0].acumuladoAnterior !== null;
   const N = serie.length;
   const W = Math.max(300, largura - 24), estreito = W < 560;
   const H = estreito ? 220 : 280;
   const iw = W - ML - MR, ih = H - MT - MB;
   const ultimo = [...serie].reverse().find(p => p.acumuladoMedido !== null);
   const maxV = N === 0 ? 1 : modo === "acumulado"
-    ? Math.max(serie[N - 1].acumuladoPrevisto, ultimo?.acumuladoMedido ?? 0)
+    ? Math.max(serie[N - 1].acumuladoPrevisto, serie[N - 1].acumuladoAnterior ?? 0, ultimo?.acumuladoMedido ?? 0)
     : Math.max(...serie.map(p => Math.max(p.previsto, p.execucao)));
   const passo = passoRedondo(maxV);
   const topo = Math.max(passo, Math.ceil(maxV / passo) * passo);
@@ -71,12 +75,19 @@ export default function CurvaS({ pontos, contratoId }: { pontos: PontoDaCurva[] 
   const medidos = serie.map((p, i) => ({ p, i })).filter(({ p }) => p.acumuladoMedido !== null);
   const caminho = (lista: { i: number; v: number }[]) => lista.map(({ i, v }, k) => `${k ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join("");
   const linhaPrevisto = caminho(serie.map((p, i) => ({ i, v: p.acumuladoPrevisto })));
+  const linhaAnterior = caminho(serie.map((p, i) => ({ i, v: p.acumuladoAnterior ?? 0 })));
+  const marcas = aditivos.map(a => ({ ...a, i: serie.findIndex(p => p.competencia === a.competencia) })).filter(a => a.i >= 0);
+  const desvio = desviosEmPP(serie);
   const linhaMedido = caminho(medidos.map(({ p, i }) => ({ i, v: p.acumuladoMedido ?? 0 })));
   const bw = Math.max(2, Math.min(14, banda * 0.36));
 
   const sel = sobre !== null ? serie[sobre] : null;
+  const pp = (n: number) => `${(Math.abs(n) < 0.05 ? 0 : n).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} p.p.`;
+  const textoDesvio = desvio && desvio.vigente !== null
+    ? ` Desvio em ${fmtCompetencia(desvio.competencia)}, contra o vigente: ${pp(desvio.vigente)}${desvio.anterior !== null ? `; contra o anterior: ${pp(desvio.anterior)}` : ""}.`
+    : "";
   const rodape = modo === "acumulado"
-    ? (ultimo ? `Até ${fmtCompetencia(ultimo.competencia)}: previsto ${brl(ultimo.acumuladoPrevisto)}, medido ${brl(ultimo.acumuladoMedido ?? 0)}. Previsto do cronograma vigente; medido de execução.`
+    ? (ultimo ? `Até ${fmtCompetencia(ultimo.competencia)}: previsto ${brl(ultimo.acumuladoPrevisto)}, medido ${brl(ultimo.acumuladoMedido ?? 0)}. Previsto do cronograma vigente; medido de execução.${textoDesvio}`
       : "Nenhuma execução medida ainda. Previsto do cronograma vigente.")
     : "Por competência: previsto (cinza) e medido de execução (índigo; mais claro quando ainda é provisório: protocolado, sem atestado).";
 
@@ -90,7 +101,8 @@ export default function CurvaS({ pontos, contratoId }: { pontos: PontoDaCurva[] 
             <button type="button" aria-pressed={modo === "mes"} onClick={() => setModo("mes")}>por mês</button>
           </div>
           <div className="curva__legenda" aria-hidden="true">
-            <span><span className="curva__chave curva__chave--previsto" />Previsto</span>
+            <span><span className="curva__chave curva__chave--previsto" />{temAnterior ? "Previsto vigente" : "Previsto"}</span>
+            {temAnterior && modo === "acumulado" && <span><span className="curva__chave curva__chave--anterior" />Previsto anterior à última repactuação</span>}
             <span><span className="curva__chave curva__chave--medido" />Medido</span>
           </div>
         </div>
@@ -133,6 +145,7 @@ export default function CurvaS({ pontos, contratoId }: { pontos: PontoDaCurva[] 
                 {medidos.length > 0 && (
                   <path className="c-area" d={`${linhaMedido}L${x(medidos[medidos.length - 1].i).toFixed(1)} ${y(0)}L${x(medidos[0].i).toFixed(1)} ${y(0)}Z`} />
                 )}
+                {temAnterior && <path className="c-previsto-anterior" d={linhaAnterior} />}
                 <path className="c-previsto" d={linhaPrevisto} />
                 {N <= 40 && serie.map((p, i) => <circle key={p.competencia} className="c-previsto-ponto" cx={x(i)} cy={y(p.acumuladoPrevisto)} r={2.5} />)}
                 <path className="c-medido" d={linhaMedido} />
@@ -152,6 +165,13 @@ export default function CurvaS({ pontos, contratoId }: { pontos: PontoDaCurva[] 
                 ))}
               </g>
             )}
+            {marcas.map((a, k) => (
+              <g key={`${a.data}-${a.nome}`} className="c-aditivo">
+                <line className="c-aditivo-linha" x1={x(a.i)} x2={x(a.i)} y1={MT} y2={MT + ih} />
+                <text className="c-aditivo-txt" x={x(a.i) + (x(a.i) > W - 110 ? -3 : 3)} y={MT + 22 + (k % 2) * 12}
+                  textAnchor={x(a.i) > W - 110 ? "end" : "start"}>{a.nome}</text>
+              </g>
+            ))}
             {sobre !== null && <line className="c-guia" x1={x(sobre)} x2={x(sobre)} y1={MT} y2={MT + ih} />}
             {serie.map((p, i) => (
               <rect key={p.competencia} className="c-alvo" x={ML + banda * i} y={MT} width={banda} height={ih}
@@ -166,6 +186,9 @@ export default function CurvaS({ pontos, contratoId }: { pontos: PontoDaCurva[] 
               <>
                 <div className="linha-dica"><span>Previsto acumulado</span><span>{brl(sel.acumuladoPrevisto)}</span></div>
                 <div className="linha-dica"><span>Medido acumulado</span><span>{sel.acumuladoMedido === null ? "—" : brl(sel.acumuladoMedido)}</span></div>
+                {sel.acumuladoAnterior !== null && (
+                  <div className="linha-dica"><span>Anterior acumulado</span><span>{brl(sel.acumuladoAnterior)}</span></div>
+                )}
                 {sel.acumuladoMedido !== null && (
                   <div className="linha-dica"><span>Diferença</span><span>{brl(sel.acumuladoMedido - sel.acumuladoPrevisto)}</span></div>
                 )}

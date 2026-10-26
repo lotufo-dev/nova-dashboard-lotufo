@@ -55,3 +55,13 @@ def mes_local(utc_str: str) -> str:
 def hoje_local() -> datetime.date:
     """A data de HOJE para o negocio -- a de Cuiaba, nao a de UTC."""
     return para_local(agora_utc()).date()
+
+
+def inicio_do_dia_utc(data_iso: str) -> str:
+    """'AAAA-MM-DD' (dia do negocio) -> carimbo UTC do SQLite da meia-noite de Cuiaba desse dia.
+
+    E' o inverso de `mes_local` para quem grava uma DATA de documento numa coluna de carimbo
+    (cronograma do cadastro, issue #256): gravar '2026-10-01 00:00:00' leria, em Cuiaba, 30/09."""
+    d = datetime.date.fromisoformat(data_iso)
+    local = datetime.datetime(d.year, d.month, d.day, tzinfo=_TZ)
+    return local.astimezone(_UTC).strftime("%Y-%m-%d %H:%M:%S")

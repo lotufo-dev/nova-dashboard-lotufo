@@ -36,14 +36,12 @@ export function destinoDoAviso(a: Aviso): { para: Rota; secao?: string; busca?: 
   if (!d) return null;
   // a empresa em Documentos: a pagina dela (#161); o aviso da regularidade do mes leva direto a aba dela
   if (d.tela === "documentos") return a.entidade_id
-    ? { para: { tela: "documentos-empresa", id: a.entidade_id, aba: a.tipo === "regularidade_mes" ? "regularidade" : a.tipo === "garantia_vencendo" ? "garantia" : undefined } }
+    ? { para: { tela: "documentos-empresa", id: a.entidade_id, aba: a.tipo === "regularidade_mes" ? "regularidade" : (a.tipo === "garantia_vencendo" || a.tipo === "garantia_aquem_execucao") ? "garantia" : undefined } }
     : { para: { tela: "documentos" } };
   if (d.aba === "notas" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "notas" };
   if (d.aba === "reajuste" && a.data_base_mes) return { para: { tela: "obra", id: d.id, aba: "reajuste" }, secao: `db-${a.data_base_mes}` };
-  // A12: o pagamento atrasado de uma medicao leva ao recebimento dela; o da nota do RM, as medicoes da obra
-  if (a.tipo === "pagamento_atrasado" && a.medicao_id && d.id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "recebimento" };
   const aba = (ABAS_OBRA.includes(d.aba) ? d.aba : "medicoes") as AbaObra;
-  // na aba Medicoes, as medicoes em andamento (onde o pagamento atrasado se ve), nao o resumo do topo
+  // na aba Medicoes, as medicoes em andamento, nao o resumo do topo
   return { para: { tela: "obra", id: d.id, aba }, secao: aba === "medicoes" ? "em-andamento" : undefined };
 }
 

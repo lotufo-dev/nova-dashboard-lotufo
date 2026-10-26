@@ -73,6 +73,14 @@ def obter(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csr
     return cronograma.vigente(conn, contrato_id)
 
 
+@router.get("/versoes")
+def listar_versoes(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                   conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #256: uma linha por versao, na ordem da linha do tempo, com a data do documento quando veio do cadastro."""
+    _contrato_existe(conn, contrato_id)
+    return cronograma.versoes(conn, contrato_id)
+
+
 @router.post("", status_code=201)
 def nova_versao(contrato_id: ID, dados: VersaoIn,
                 usuario: dict = Depends(exigir("editar_cadastros")),

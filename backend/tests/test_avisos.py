@@ -127,3 +127,12 @@ def test_mensagem_sem_prefixo_da_obra_e_datas_com_ano(cenario):
     assert lista and not [a for a in lista if a["mensagem"].startswith("Obra A")]
     execucao = [a for a in lista if a["tipo"] == "execucao_vencendo"][0]
     assert execucao["mensagem"] == "execução termina em 49 dias (20/10/2026)"
+
+
+def test_diretoria_nao_tem_aviso_de_pagamento_atrasado(cenario):
+    c, ids = cenario                          # issue #255: o motor de atraso de pagamento por orgao saiu
+    c.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)",
+              (json.dumps({"total_a_receber_liberado": True}),))
+    c.commit()                                # a 2a medicao esta' protocolada desde 30/07/2026: 200 dias depois
+    lista = avisos.listar(c, D(2027, 2, 15), publico="diretoria")
+    assert "pagamento_atrasado" not in {a["tipo"] for a in lista}

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from app import dinheiro, entidades, espelho, espelho_docx
+from app import dinheiro, entidades, espelho, espelho_docx, tempo
 
 FAMILIAS = ("mtpar", "sinfra", "ses", "prefeitura")
 LEIS = ("8.666", "14.133", "13.303")
@@ -26,6 +26,8 @@ TIPOS_ADITIVO = {"aditivo_valor": "valor", "aditivo_prazo": "prazo", "aditivo_mi
 TIPOS_OUTROS = ("apostilamento_reajuste", "paralisacao", "reinicio", "marco_encerramento",
                 "endosso_garantia")
 _MES = re.compile(r"^[0-9]{4}-(0[1-9]|1[0-2])$")  # A-14 (10/10/2026): \d casa "٢٠٢٤"
+# tabela do orcamento, nunca indice de reajuste (#257): como palavra ("Tabela SINAPI", "SICRO/DNIT"), nao so' o texto inteiro
+_TABELAS_DE_PRECOS = re.compile(r"\b(SINAPI|SICRO)\b", re.IGNORECASE)
 # Bloco 4: o que um orgao (ou a excecao de um contrato) pode exigir no protocolo.
 DOCUMENTOS = ("federal", "fgts", "trabalhista", "estadual", "municipal", "falencia", "regularidade")
 # Bloco 5: pecas tecnicas que o orgao pede no protocolo (feitas fora e arrastadas pela operacao).
@@ -40,6 +42,12 @@ TIPOS_PLEITO = ("reajuste", "prazo", "conclusao")
 # Pecas que o orgao pode pedir no pleito de reajuste (mesma lista de `pleitos.PECAS_ORGAO`).
 PECAS_PLEITO = ("falencia", "contrato_social", "documento_representante", "balanco")
 _CICLO = re.compile(r"^([0-9]{4})(-[0-9]{2})?$")
+# Issue #256 (spec 2026-10-20 §2.4): de que documento veio cada versao do cronograma.
+ORIGENS_CRONOGRAMA = ("contratual", "aditivo", "carta", "smo")
+# Mesmo teto de itens por versao da rota do cronograma (api_cronograma.MAX_ITENS): 50 anos de competencias.
+_MAX_ITENS_CRONOGRAMA = 600
+_CAMPOS_CRONOGRAMA = {"chave", "origem", "data", "instrumento", "itens"}
+_CAMPOS_ITEM_CRONOGRAMA = {"competencia", "valor"}
 
 
 def _lista_documentos(valor, onde: str, erros: list[str]) -> list[str] | None:
@@ -52,7 +60,7 @@ def _lista_documentos(valor, onde: str, erros: list[str]) -> list[str] | None:
     return list(valor)
 _CHAVE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 _CAMPOS_INSTRUMENTO = {"chave", "tipo", "data", "numero", "objeto", "corrige", "delta_valor",
-                       "nova_execucao_fim", "nova_vigencia_fim", "pdf"}
+                       "nova_execucao_fim", "nova_vigencia_fim", "pdf", "ordinal"}
 
 
 class CadastroInvalido(Exception):
@@ -144,7 +152,7 @@ def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
         return None
     inst = {"chave": chave, "tipo": tipo, "numero": bruto.get("numero"), "objeto": bruto.get("objeto"),
             "corrige": bruto.get("corrige"), "pdf": bruto.get("pdf"), "delta_valor_centavos": 0,
-            "nova_execucao_fim": None, "nova_vigencia_fim": None,
+            "nova_execucao_fim": None, "nova_vigencia_fim": None, "ordinal": None,
             "dados": {k: v for k, v in bruto.items() if k not in _CAMPOS_INSTRUMENTO}}
     try:
         inst["data"] = _data(bruto.get("data"))
@@ -170,6 +178,14 @@ def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
     if tipo in TIPOS_OUTROS and (inst["delta_valor_centavos"] or inst["nova_execucao_fim"]
                                  or inst["nova_vigencia_fim"]):
         falha("tipo", f"{tipo} não altera valor nem prazo; use aditivo ou apostilamento de prazo")
+    # Issue #261: ordinal do termo ("14º termo aditivo") quando o numero nao traz o sufixo /14.
+    if bruto.get("ordinal") is not None:
+        if tipo not in TIPOS_ADITIVO:
+            falha("ordinal", f"{tipo} não tem ordinal; o campo vale para aditivo ou apostilamento de prazo")
+        elif _inteiro(bruto["ordinal"], 1) is None:
+            falha("ordinal", f"use um número inteiro a partir de 1 (ex.: 14): {bruto['ordinal']!r}")
+        else:
+            inst["ordinal"] = bruto["ordinal"]
     # `dados` de data viram ISO para o JSON canonico nao depender do parser
     for k, v in list(inst["dados"].items()):
         if isinstance(v, datetime.date):
@@ -248,6 +264,112 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
                 falha(f"{onde}.dias", "use um inteiro > 0")
             item["dias"] = p["dias"]
         out.append(item)
+    return out
+
+
+def _cronograma(lista, falha) -> list[dict]:
+    """Issue #256: `cronograma: [{chave, origem, data, instrumento, itens: [{competencia, valor}]}]`.
+
+    Cada entrada vira uma versao com criado_em = data do documento. Itens em centavos (parse_brl), sem
+    competencia repetida nem valor negativo; chave repetida e' erro (a mesma chave com outro conteudo
+    seria uma versao aplicada mudando)."""
+    if lista is None:
+        return []
+    if not isinstance(lista, list):
+        falha("cronograma", "use uma lista de versões ({chave, origem, data, instrumento, itens})")
+        return []
+    out, vistas = [], set()
+    datas: dict[str, str] = {}     # data do documento -> chave da versao que ja a usa
+    hoje = tempo.hoje_local().isoformat()
+    for i, v in enumerate(lista):
+        if not isinstance(v, dict):
+            falha(f"cronograma[{i}]", "use {chave, origem, data, instrumento, itens}")
+            continue
+        chave = v.get("chave")
+        if not isinstance(chave, str) or not _CHAVE.match(chave):
+            falha(f"cronograma[{i}].chave", f"chave inválida: {chave!r} (minúsculas, números e hífen)")
+            continue
+        onde = f"cronograma[{chave}]"
+        if chave in vistas:
+            falha("cronograma", f"chave repetida: {chave} (cada versão tem a sua chave; versão aplicada não muda)")
+            continue
+        vistas.add(chave)
+        ok = True
+        # Gate Sol (PR #311): campo com erro de digitacao (`instrumentoo`) seria ignorado e a versao aplicada
+        # sem ele, imutavel depois.
+        sobra = sorted(str(k) for k in v if k not in _CAMPOS_CRONOGRAMA)
+        if sobra:
+            falha(onde, f"campo desconhecido: {', '.join(sobra)} (use {', '.join(sorted(_CAMPOS_CRONOGRAMA))})")
+            ok = False
+        if v.get("origem") not in ORIGENS_CRONOGRAMA:
+            falha(f"{onde}.origem", f"use uma de {', '.join(ORIGENS_CRONOGRAMA)}")
+            ok = False
+        try:
+            data = _data(v.get("data"))
+        except ValueError as e:
+            falha(f"{onde}.data", f"data inválida ({e}); use AAAA-MM-DD")
+            data, ok = None, False
+        else:
+            if not data:
+                falha(f"{onde}.data", "obrigatória (data do documento, AAAA-MM-DD)")
+                ok = False
+            elif data > hoje:
+                falha(f"{onde}.data", f"{data} está no futuro; use a data do documento")
+                ok = False
+            elif data in datas:
+                # Gate Sol (PR #311): duas versoes no mesmo dia empatariam no criado_em, e o desempate seria a
+                # ordem de aplicacao (o numero), nao a do YAML.
+                falha(f"{onde}.data", f"mesma data da versão {datas[data]} ({data}); uma versão por data de "
+                                      "documento")
+                ok = False
+            else:
+                datas[data] = chave
+        instrumento = v.get("instrumento")
+        if instrumento is not None and (not isinstance(instrumento, str) or not instrumento.strip()):
+            falha(f"{onde}.instrumento", "use um texto (ex.: a chave do termo aditivo) ou deixe sem")
+            ok = False
+        itens_brutos = v.get("itens")
+        if not isinstance(itens_brutos, list) or not itens_brutos:
+            falha(f"{onde}.itens", "informe ao menos uma competência ({competencia, valor})")
+            continue
+        if len(itens_brutos) > _MAX_ITENS_CRONOGRAMA:
+            falha(f"{onde}.itens", f"máximo de {_MAX_ITENS_CRONOGRAMA} competências por versão")
+            continue
+        itens, comps = [], set()
+        for j, it in enumerate(itens_brutos):
+            aqui = f"{onde}.itens[{j}]"
+            if not isinstance(it, dict):
+                falha(aqui, "use {competencia, valor}")
+                ok = False
+                continue
+            sobra = sorted(str(k) for k in it if k not in _CAMPOS_ITEM_CRONOGRAMA)
+            if sobra:
+                falha(aqui, f"campo desconhecido: {', '.join(sobra)} (use competencia e valor)")
+                ok = False
+            comp = str(it.get("competencia") or "")
+            if not _MES.match(comp):
+                falha(f"{aqui}.competencia", f"use AAAA-MM: {comp!r}")
+                ok = False
+                continue
+            if comp in comps:
+                falha(f"{aqui}.competencia", f"competência repetida: {comp}")
+                ok = False
+                continue
+            comps.add(comp)
+            bruto = it.get("valor")
+            texto = "" if bruto is None or isinstance(bruto, bool) else str(bruto).strip()
+            if texto.startswith("-"):
+                falha(f"{aqui}.valor", f"valor negativo em {comp}; o previsto é zero ou mais")
+                ok = False
+                continue
+            try:
+                itens.append((comp, dinheiro.parse_brl(texto)))
+            except ValueError as e:
+                falha(f"{aqui}.valor", str(e))
+                ok = False
+        if ok:
+            out.append({"chave": chave, "origem": v["origem"], "data": data,
+                        "instrumento": instrumento.strip() if instrumento else None, "itens": itens})
     return out
 
 
@@ -373,7 +495,17 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         if not _MES.match(mes):
             falha(f"datas_base[{i}].mes", f"use AAAA-MM: {mes!r}")
             continue
-        c["datas_base"].append({"mes": mes, "indice": str(db_.get("indice") or "")})
+        # Issue #257 (spec 2026-10-20 §2.4): indice obrigatorio, e e' o do reajuste, nao a tabela de precos
+        indice = str(db_.get("indice") or "").strip()
+        if not indice:
+            falha(f"datas_base[{i}].indice", "obrigatório: diga o índice do reajuste desta data-base "
+                                              "(ex.: INCC-DI, FGV/DNIT)")
+        elif _TABELAS_DE_PRECOS.search(indice):
+            falha(f"datas_base[{i}].indice", f"{indice!r} é a tabela de preços do orçamento, não o índice do "
+                                              "reajuste; use o índice que corrige a data-base (ex.: INCC-DI, "
+                                              "FGV/DNIT) e, se o contrato tem uma base por tabela, diga a parte "
+                                              "em aplica_a (ex.: aplica_a: itens SICRO)")
+        c["datas_base"].append({"mes": mes, "indice": indice, "aplica_a": str(db_.get("aplica_a") or "").strip()})
     if len({d["mes"] for d in c["datas_base"]}) != len(c["datas_base"]):
         falha("datas_base", "mês repetido")
 
@@ -419,6 +551,12 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
             falha("folga_vigencia_dias", "use um inteiro ≥ 0")
     _dados_instrumentos(c, falha, avisos)
     c["pleitos_anteriores"] = _pleitos_anteriores(bruto.get("pleitos_anteriores"), c, falha)
+    c["cronograma"] = _cronograma(bruto.get("cronograma"), falha)
+    chaves_inst = {i["chave"] for i in c["instrumentos"]}
+    for v in c["cronograma"]:
+        if v["instrumento"] and v["instrumento"] not in chaves_inst:
+            avisos.append(f"{c['nome_curto']}: cronograma[{v['chave']}].instrumento: {v['instrumento']!r} não é chave "
+                          "de nenhum instrumento deste contrato; confira antes de aplicar (versão aplicada não muda)")
     # Bloco 4: excecao por contrato a lista de documentos do orgao.
     docs = {}
     for chave, campo in (("medicao", "documentos_medicao"), ("reajuste", "documentos_reajuste")):

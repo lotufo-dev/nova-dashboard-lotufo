@@ -428,21 +428,19 @@ protocolado.
   e por órgão), recebido no mês; à parte, os reajustes esperando apostilamento.
 - **O mês e o ano:** medido da competência atual contra o previsto do cronograma vigente e o mesmo mês do ano
   anterior, acumulado do ano e a série de 12 meses.
-- **Próximos meses:** faturamento previsto pelo cronograma; recebimento previsto = primeiro protocolo + mediana
-  do órgão (o que já passou cai no mês atual).
+- **Próximos meses:** faturamento previsto pelo cronograma (o recebimento previsto saiu na #255, motor de atraso de pagamento).
 - **Carteira:** saldo a executar dos contratos ativos sem encerramento, ritmo (média dos últimos 6 meses), meses de
   produção, participação por órgão e os contratos que terminam nos próximos 183 dias.
 - **Obras:** as linhas do QDOP com farol (vermelho: aviso crítico; acao: aviso de Ação; atencao: aviso de Atenção; verde:
   nenhum) e o motivo.
 
-**Prazo normal do órgão:** 3º quartil (posição mais próxima) dos dias entre o primeiro protocolo e o recebimento
-das medições recebidas nos últimos 12 meses; com menos de 10 amostras, 30 dias. O recebimento previsto usa a
-mediana da mesma amostra. O aviso "pagamento atrasado" (só diretoria) é a medição protocolada há mais dias que o
-prazo normal.
+**Prazo normal do órgão:** saiu da Diretoria na #255 (motor de atraso de pagamento; decisão de 19/10/2026): não
+há mais aviso de pagamento atrasado nem recebimento previsto. O a receber da Diretoria mostra só a idade (faixas e
+maior número de dias). O "previsto" da tela A receber ainda usa o 3º quartil do órgão (com menos de 10 amostras,
+30 dias); a #255 não tratou dele.
 
 **Total a receber:** enquanto `geral.yaml` tiver `diretoria.total_a_receber_liberado: false`, a tela mostra
-quantidade e dias do protocolado, sem valor ("a conciliar"), o recebimento previsto também fica sem valor e o
-aviso de pagamento atrasado não sai. Depois da conciliação com a controladoria: trocar para `true`, `cadastro
+quantidade e dias do protocolado, sem valor ("a conciliar"). Depois da conciliação com a controladoria: trocar para `true`, `cadastro
 validar`, `aplicar --ensaio`, `aplicar`.
 
 **QDOP** (`app/qdop.py`, botão "Exportar QDOP (.xlsx)" ou `GET /api/diretoria/qdop.xlsx`): escrito sobre o modelo
@@ -487,8 +485,7 @@ O faturado até o QDOP de 22/09/2026 conta como pago, menos o que o RM mostra em
 `python -m app.cli conciliacao corte --data 2026-09-22 --usuario <e-mail> [--ensaio]` fecha como `recebida`
 (sem data, motivo na auditoria) as medições do legado que continuam `protocolada` com protocolo até a data. O
 "a receber" da Diretoria soma as medições protocoladas e as cobranças do RM ainda não pagas que nenhuma medição
-em aberto representa (título com mais de R$ 1,00 faltando, na cota, idade pela emissão da nota); o aviso de
-pagamento atrasado de nota só sai a partir de R$ 10 mil. Liberado em `geral.yaml`
+em aberto representa (título com mais de R$ 1,00 faltando, na cota, idade pela emissão da nota). Liberado em `geral.yaml`
 (`diretoria.total_a_receber_liberado: true`). Ordem em produção: backup → `cadastro aplicar` →
 `conciliacao antiga` → `conciliacao corte`.
 

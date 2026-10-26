@@ -13,12 +13,12 @@ import type { Usuario } from "./Login";
 import MaisAcoes, { type ItemAcao } from "./MaisAcoes";
 import { eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, resumoDoPar, rotuloDoBloco, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type ParDaMedicao } from "./medicao";
-import { FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
+import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
 import { brl, type Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
 import { ProtocolosDaMedicao, useProtocolos } from "./Protocolo";
 import { LinhaDoTempo, ResumoMedicao } from "./ResumoLateral";
-import { type Origem, type Rota, useRota } from "./rota";
+import { type AbaMedicoes, type Origem, type Rota, useRota } from "./rota";
 import { Link } from "./Link";
 import Selo from "./Selo";
 import { fmtCompetencia, fmtDataHora, fmtDataPura } from "./tempo";
@@ -33,14 +33,17 @@ import "./etapas.css";
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
-type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "sozinha" | "liberar" | null;
+type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "sozinha" | "liberar" | null;
 
 // Ancoras antigas (#notas, #espelho, #protocolo) abrem a etapa onde a coisa mora hoje.
 const SECAO_ETAPA: Record<string, number> = { espelho: 1, notas: 3, protocolo: 4 };
 
 /** A aba de Medicoes onde esta medicao aparece (o "Medicoes" do caminho do topo volta para la'). */
-export function abaDa(estado: string): "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento" | undefined {
+export function abaDa(estado: string): Exclude<AbaMedicoes, "resumo" | "sem-medicao"> | undefined {
   switch (estado) {
+    case "planilha_gerada": return "planilha-gerada";
+    case "planilha_enviada": return "planilha-enviada";
+    case "boletim_recebido": return "boletim-recebido";
     case "espelho_gerado": return "faturamento";
     case "espelho_enviado": return "aguardando-nota";
     case "nota_emitida": return "enviar-nota";
@@ -213,6 +216,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const preso = (envios.envios ?? []).filter(e => e.protocolo_id !== null && !!e.envio_reservado_em);
   const acoes: ItemAcao[] = !podeEditar ? [] : [
     ...(valorEditavel(m, "atestado", podeEditar) ? [{ id: "atestado", rotulo: m.valor_atestado_centavos === null ? "Definir o atestado" : "Editar o atestado" }] : []),
+    ...(!EXCECOES.includes(m.estado) ? [{ id: "assinatura", rotulo: "Registrar assinatura" }] : []),
     ...(m.final !== 1 && !EXCECOES.includes(m.estado) ? [{ id: "final", rotulo: "Marcar como medição final" }] : []),
     ...(m.final === 1 ? [{ id: "desfinal", rotulo: "Desmarcar a medição final" }] : []),
     ...(PROXIMOS[m.estado] ?? []).filter(e => e !== "recebida").map((e, i) =>
@@ -395,6 +399,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       {painel === "final" && (
         <Janela titulo="Marcar como medição final" aoFechar={fechar}>
           <FormFinal m={m} salvando={salvando} agir={agir} aoFechar={fechar} erro={erro} />
+        </Janela>
+      )}
+      {painel === "assinatura" && (
+        <Janela titulo="Registrar assinatura" aoFechar={fechar}>
+          <FormAssinatura m={m} salvando={salvando} agir={agir} aoFechar={fechar} erro={erro} />
         </Janela>
       )}
       {painel === "desfinal" && (
