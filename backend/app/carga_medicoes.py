@@ -380,8 +380,8 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                 _virar(li, "conflito", f"tem a NF {', '.join(nfs)} vinculada: vincule-a à {d['cancelar']}ª antes de "
                                        "cancelar a duplicata")
                 continue
-        if li["categoria"] == "correção":
-            for tipo in TIPOS:
+        if li["categoria"] == "correção" and d["tipo"] in ("execucao", "reajuste"):
+            for tipo in ("execucao", "reajuste"):     # o par que o envio ao orgao casa; projeto anda sozinho
                 outra = existentes.get((d["numero"], tipo))
                 if (tipo != d["tipo"] and outra is not None and outra["estado"] not in ESTADOS_TERMINAIS
                         and outra["competencia"] == existentes[(d["numero"], d["tipo"])]["competencia"]
@@ -389,9 +389,10 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                     _virar(li, "conflito", f"a {d['numero']}ª de {ROTULOS[tipo]} continua em {outra['competencia']}: "
                                            "corrija as duas no mesmo CSV")
                     break
-        escreve = li["categoria"] in ("cancelamento", "correção") or (
-            li["categoria"] == "valor diferente" and d["valor_aprovado"] is not None
-            and d["valor_aprovado"] != existentes[(d["numero"], d["tipo"])]["valor_atestado_centavos"])
+        m = existentes.get((d["numero"], d["tipo"])) if d else None
+        escreve = li["categoria"] in ("cancelamento", "correção") or (li["categoria"] == "valor diferente" and (
+            (d["valor_aprovado"] is not None and d["valor_aprovado"] != m["valor_atestado_centavos"])
+            or (d["valor_pedido"] is not None and m["valor_protocolado_centavos"] is None)))   # 1o preenchimento
         if escreve and not d["fonte"]:
             _virar(li, "erro", "correção sem fonte: diga na coluna fonte o documento que corrige")
 
@@ -458,7 +459,9 @@ def gravar(conn, usuario_id: int, caminho: Path, obra: str | None = None) -> dic
             auditoria.registrar(conn, usuario_id, "medicao.carga_historico", "contrato", cid, None,
                                 {"arquivo": caminho.name, "criadas": len(criadas), "corrigidas": len(corrigidas),
                                  "linhas": [li["linha"] for li in criadas.values()],
-                                 "linhas_corrigidas": [li["linha"] for li in corrigidas]})
+                                 # a fonte de cada correcao (o pedido preenchido passa por definir_valor, sem ela)
+                                 "linhas_corrigidas": [{"linha": li["linha"], "acao": li["acao"],
+                                                        "fonte": li["dados"]["fonte"]} for li in corrigidas]})
     rel["criadas"], rel["corrigidas"] = len(criadas), len(corrigidas)
     return rel
 

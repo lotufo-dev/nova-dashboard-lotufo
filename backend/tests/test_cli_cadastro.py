@@ -999,3 +999,19 @@ def test_carregar_medicoes_correcao_sem_fonte_e_erro(tmp_path, monkeypatch, caps
     codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;;4;",
                                        "4;;execucao;2025-07;;1.000,01;999,99;;;;;;;;"], capsys)
     assert saida.count("erro (correção sem fonte: diga na coluna fonte o documento que corrige)") == 2
+
+
+def test_carregar_medicoes_pedido_preenchido_exige_fonte_e_projeto_nao_trava_competencia(tmp_path, monkeypatch, capsys):
+    import json
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 3, "2025-06", None, None)
+    _existente(conn, cid, 4, "2025-07", 100001, None)
+    _existente(conn, cid, 4, "2025-07", 100001, None, tipo="projeto")
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "3;3;execucao;2025-06;;601.250,00;;;;;;;;;",
+                                       "4;;execucao;2025-06;;1.000,01;;;;;;;CI;;sim"], capsys)
+    assert "linha 2: nº 3 execução 2025-06: erro (correção sem fonte" in saida
+    assert "linha 3: nº 4 execução 2025-06: correção" in saida
+    codigo, saida = _gravar(capsys, _csv(tmp_path, ["3;3;execucao;2025-06;;601.250,00;;;;;;;boletim 3;;"]))
+    assert codigo == 0 and "pedido preenchido" in saida
+    a = conn.execute("SELECT depois FROM audit_log WHERE acao='medicao.carga_historico' ORDER BY id DESC").fetchone()
+    assert json.loads(a[0])["linhas_corrigidas"][0]["fonte"] == "boletim 3"
