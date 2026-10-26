@@ -111,15 +111,17 @@ def ler_csv(caminho: Path) -> list[tuple[int, dict]]:
     primeira = texto.split("\n", 1)[0]
     leitor = csv.reader(io.StringIO(texto), delimiter=";" if ";" in primeira else ",",
                         strict=True)   # aspas nao fechadas recusam o arquivo, nunca viram linha "igual"
+    posicao = {"inicio": 1}
     try:
-        return _linhas(leitor)
+        return _linhas(leitor, posicao)
     except csv.Error:
-        # A mensagem do modulo csv e' em ingles: so' a linha e a causa provavel
-        raise CsvInvalido(f"o arquivo não se lê como CSV (linha {leitor.line_num}): aspas sem fechar ou "
+        # A mensagem do modulo csv e' em ingles: so' a linha e a causa provavel. Com aspa sem fechar o leitor
+        # vai ate' o fim do arquivo, entao `line_num` seria a ultima linha; cita onde o registro comecou
+        raise CsvInvalido(f"o arquivo não se lê como CSV (linha {posicao['inicio']}): aspas sem fechar ou "
                           "caractere inválido") from None
 
 
-def _linhas(leitor) -> list[tuple[int, dict]]:
+def _linhas(leitor, posicao: dict) -> list[tuple[int, dict]]:
     try:
         cabecalho = next(leitor)
     except StopIteration:
@@ -136,8 +138,10 @@ def _linhas(leitor) -> list[tuple[int, dict]]:
     if faltam:
         raise CsvInvalido(f"faltam colunas no cabeçalho: {', '.join(ROTULO_COLUNA[c] for c in faltam)}")
     linhas, inicio = [], leitor.line_num + 1
+    posicao["inicio"] = inicio
     for celulas in leitor:
         n_linha, inicio = inicio, leitor.line_num + 1      # a linha onde o registro COMECA (celula com quebra)
+        posicao["inicio"] = inicio                         # onde o PROXIMO comeca, se ele nao se ler
         if not any(c.strip() for c in celulas):
             continue
         dados = {campo: celulas[i].strip() for i, campo in enumerate(campos) if i < len(celulas)}
@@ -218,7 +222,7 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
         chave = (d["numero"], d["tipo"])
         grupo = grupos[chave]
         if len({comp for _, comp in grupo}) > 1:
-            outras = ", ".join(f"linha {n} {comp}" for n, comp in grupo if n != item["linha"])
+            outras = ", ".join(f"linha {n} {comp}" for n, comp in grupo if comp != d["competencia"])
             linhas.append({**item, "categoria": "conflito",
                            "detalhe": f"o mesmo nº tem outra competência no CSV ({outras})"})
             continue

@@ -483,7 +483,8 @@ def test_carregar_medicoes_mesmo_numero_no_csv_com_outra_competencia_e_conflito(
                                        "1;1;execução;2025-05;;1,00;;;;;;;x",
                                        "1;1;execucao;2025-04;;2,00;;;;;;;x"], capsys)
     assert ("linha 2: nº 1 execução 2025-04: conflito (o mesmo nº tem outra competência no CSV "
-            "(linha 3 2025-05, linha 4 2025-04))") in saida
+            "(linha 3 2025-05))") in saida   # so' as linhas de OUTRA competencia, nao a 4 (mesma)
+    assert "conflito (o mesmo nº tem outra competência no CSV (linha 2 2025-04, linha 4 2025-04))" in saida
     assert "linha 3: nº 1 execução 2025-05: conflito" in saida and "linha 4: nº 1 execução 2025-04: conflito" in saida
     assert "igual 0" in saida and "conflito 3" in saida
     codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;1,00;;;;;;;x",
@@ -547,6 +548,16 @@ def test_carregar_medicoes_aspas_nao_fechadas_recusam_o_arquivo(tmp_path, monkey
     assert codigo == 1 and "CSV recusado, nada foi lido: o arquivo não se lê como CSV (linha 2): aspas sem fechar" in saida
     assert "unexpected" not in saida
     assert "igual" not in saida.split("CSV recusado")[0]
+
+
+def test_carregar_medicoes_aspas_nao_fechadas_citam_a_linha_onde_abriram(tmp_path, monkeypatch, capsys):
+    # O leitor vai ate' o fim do arquivo procurando o fechamento: a mensagem cita onde a aspa abriu, nao o fim
+    _com_exemplo_aplicado(tmp_path, monkeypatch)
+    codigo, saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2025-04;;1,00;1,00;;;;;;",
+                                       '2;2;execucao;2025-05;;1,00;1,00;;;;;;"fonte sem fim',
+                                       "3;3;execucao;2025-06;;1,00;1,00;;;;;;",
+                                       "4;4;execucao;2025-07;;1,00;1,00;;;;;;"], capsys)
+    assert codigo == 1 and "o arquivo não se lê como CSV (linha 3): aspas sem fechar" in saida
 
 
 def test_carregar_medicoes_arquivo_sem_leitura_fala_portugues(tmp_path, monkeypatch, capsys):
