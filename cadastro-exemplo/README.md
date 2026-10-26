@@ -28,4 +28,7 @@ Separador `;`, valores em reais com vírgula, competência AAAA-MM, datas DD/MM/
 `DD/MM/AAAA a DD/MM/AAAA`, meio `e-mail`, `SMO`, `ofício`, `carimbo` (ou `protocolo físico`), `CI` ou `outro`.
 Sem `--ensaio` e com `--usuario`, o comando cria as medições que faltam (protocoladas, com o aprovado como
 evento de atesto e a NF vinculada quando está no RM; recebida se o RM já tem a baixa). Linha com erro ou
-conflito recusa o arquivo inteiro; medição que já existe não é alterada.
+conflito recusa o arquivo inteiro. Medição que já existe não é sobrescrita: aprovado diferente vira evento novo
+de atesto (o último vale), o pedido congelado fica como está, a coluna opcional `cancelar` (nº da medição que a
+substitui) cancela a duplicata com o motivo, e a coluna opcional `corrige competência` (`sim`) corrige a
+competência errada do banco, com o antes e o depois na auditoria.

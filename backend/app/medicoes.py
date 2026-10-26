@@ -125,7 +125,7 @@ def _linhas_edicoes(conn: sqlite3.Connection, medicao_ids: list[int]) -> list:
             "SELECT a.id, a.acao, a.entidade_id, a.antes, a.depois, a.criado_em, u.nome FROM audit_log a "
             "LEFT JOIN usuarios u ON u.id=a.usuario_id WHERE a.entidade='medicao' "
             f"AND a.entidade_id IN ({','.join('?' * len(lote))}) "
-            "AND a.acao = 'medicao.valor_protocolado'", lote).fetchall()
+            "AND a.acao IN ('medicao.valor_protocolado', 'medicao.estado')", lote).fetchall()
     return sorted(linhas, key=lambda r: r["id"])
 
 
@@ -226,8 +226,17 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
     for r in _linhas_edicoes(conn, list(out)):
         if not (r["entidade_id"] or "").isdigit() or int(r["entidade_id"]) not in out:
             continue
-        col, nome = rotulo[r["acao"]]
         a_d, d_d = _json_dict(r["antes"]), _json_dict(r["depois"])
+        if r["acao"] == "medicao.estado":
+            # Issue #260: cancelamento e desistencia entram na linha do tempo com o motivo (a duplicata cancelada
+            # pela carga do historico diz de qual medicao ela e' copia); as outras transicoes ja' tem marco proprio
+            if d_d and d_d.get("estado") in ("cancelada", "desistida"):
+                texto = f"{'Cancelada' if d_d['estado'] == 'cancelada' else 'Desistida'}" + (
+                    f": {d_d['motivo']}" if d_d.get("motivo") else "")
+                out[int(r["entidade_id"])].append({"data": r["criado_em"],
+                                                   "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+            continue
+        col, nome = rotulo[r["acao"]]
         antes, depois = (a_d or {}).get(col), (d_d or {}).get(col)
         if a_d is None or d_d is None or not isinstance(antes, (int, type(None))) or not isinstance(depois, (int, type(None))):
             log.warning("auditoria da medicao %s com antes/depois ilegivel; evento fora da linha do tempo", r["entidade_id"])
