@@ -576,3 +576,26 @@ def test_assinatura_na_linha_do_tempo_usa_a_data_da_assinatura_e_nao_a_do_regist
     eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
     assert [e["data"] for e in eventos][0] == "2026-09-15"
     assert "Boletim assinado no DocuSign" in eventos[0]["texto"]    # vem antes do valor, que e' de hoje
+
+
+def test_medicao_da_carga_do_historico_aparece_com_pedido_e_aprovado(client_admin, tmp_path):
+    # issue #259: o que a carga grava e' o que a aba Medicoes le
+    from app import carga_medicoes, db
+    cid = novo_contrato({"orgao": "SINFRA", "numero_instrumento": "IC 9/2025",
+                         "objeto": "Obra", "valor_original": "100.000,00"})
+    arq = tmp_path / "obra-carga.csv"
+    arq.write_text("nº;tipo;competência;valor pedido;valor aprovado;data da aprovação;meio\n"
+                   "1;execucao;2025-04;1.000,01;999,99;20/05/2025;SMO\n", "utf-8")
+    conn = db.get_conn()
+    try:
+        conn.execute("UPDATE contratos SET nome_curto='Obra Carga' WHERE id=?", (cid,))   # o cadastro YAML da' o nome
+        conn.commit()
+        uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+        assert carga_medicoes.gravar(conn, uid, arq)["criadas"] == 1
+    finally:
+        conn.close()
+    lista = client_admin.get(f"/api/contratos/{cid}/medicoes").json()
+    m = next(x for x in lista if x["numero"] == 1)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == ("protocolada", 100001, 99999)
+    d = client_admin.get(f"/api/medicoes/{m['id']}").json()
+    assert d["atestado_em"] == "2025-05-20"

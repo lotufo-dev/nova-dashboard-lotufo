@@ -341,15 +341,13 @@ def gravar(conn, usuario_id: int, caminho: Path, obra: str | None = None) -> dic
                 li["acao"] = "não alterada (a carga não corrige medição que já existe)"
             else:
                 li["acao"] = "já existe"
-        cobertas = []
+        vinculadas = []
         for mid, li in criadas.items():
-            li["acao"] += _vincular_nfs(conn, usuario_id, mid, li["dados"], contrato["id"], coligada)
-            if li["dados"]["nfs"] and _notas_cobrem(conn, mid):
-                cobertas.append(mid)
-            elif li["dados"]["nfs"]:
-                li["acao"] += "; notas vinculadas não cobrem o valor da medição: fica protocolada"
-        # So' as que tem nota cobrindo o valor: uma NF quitada de metade da medicao nao a da' como recebida
-        sincronizacao_rm._recebimentos(conn, cobertas)
+            texto, ok = _vincular_nfs(conn, usuario_id, mid, li["dados"], contrato["id"], coligada)
+            li["acao"] += texto
+            if ok:
+                vinculadas.append(mid)
+        sincronizacao_rm._recebimentos(conn, vinculadas)
         for mid, li in criadas.items():
             if conn.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "recebida":
                 li["acao"] += "; recebida (baixa no RM)"
@@ -396,43 +394,50 @@ def _criar(conn, usuario_id: int, contrato_id: int, li: dict) -> int:
     return mid
 
 
-def _notas_cobrem(conn, medicao_id: int) -> bool:
-    from app import diretoria   # import local: diretoria importa sincronizacao_rm
-    m = conn.execute("SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos) AS v FROM medicoes "
-                     "WHERE id=?", (medicao_id,)).fetchone()
-    alocado = conn.execute("SELECT COALESCE(SUM(valor_alocado_centavos), 0) FROM nf_alocacoes WHERE medicao_id=? "
-                           "AND desfeita_em IS NULL", (medicao_id,)).fetchone()[0]
-    return alocado > 0 and alocado >= m["v"] - diretoria.TOLERANCIA_CENTAVOS
+def _vincular_nfs(conn, usuario_id: int, medicao_id: int, d: dict, contrato_id: int,
+                  coligada: int | None) -> tuple[str, bool]:
+    """Vincula as NFs do CSV, TODAS ou nenhuma. Devolve (complemento do relatorio, vinculou).
 
-
-def _vincular_nfs(conn, usuario_id: int, medicao_id: int, d: dict, contrato_id: int, coligada: int | None) -> str:
-    """Vincula as NFs do CSV que estao no RM da empresa do contrato e sao DESTA obra. Devolve o complemento do
-    relatorio. A obra se confere pelo centro de custo (`_contrato_por_centro_custo`, a mesma chave do casamento
-    do RM): NF cujo centro aponta outro contrato nunca entra, mesmo com o numero certo (gate Sol da #259)."""
-    from app import sincronizacao_rm
+    Cada NF precisa estar no RM da empresa do contrato, ser desta obra pelo centro de custo (o atual ou um dos
+    anteriores, a mesma chave da diretoria) e estar livre; e as notas juntas precisam cobrir o valor da medicao.
+    Faltando qualquer uma, nenhuma entra: uma nota vinculada que cobre so' parte (medicao em duas notas, padrao
+    MT-388, com uma fora do CSV) seria dada como recebida pela sincronizacao seguinte com o RM, que so' segura
+    cobertura parcial depois de vinculo desfeito a mao (revisor da #259). A medicao fica protocolada sem nota,
+    e a nota segue no a receber pelo centro de custo, como hoje."""
+    from app import diretoria, sincronizacao_rm   # import local: os dois importam medicoes e notas
     if not d["nfs"]:
-        return ""
+        return "", False
+    rotulo = "/".join(d["nfs"])
     if coligada is None:
-        return f"; NF {'/'.join(d['nfs'])} não vinculada (empresa do contrato sem coligada no RM)"
-    return "".join(_vincular_nf(conn, sincronizacao_rm, usuario_id, medicao_id, nf, contrato_id, coligada)
-                   for nf in d["nfs"])
-
-
-def _vincular_nf(conn, rm_, usuario_id: int, medicao_id: int, nf: str, contrato_id: int, coligada: int) -> str:
-    numero = int(nf) if nf.isdigit() and len(nf) <= 18 else None
-    notas = conn.execute("SELECT id, centro_custo FROM notas_fiscais WHERE coligada=? AND situacao='ativa' AND "
-                         "(numero=? OR numero_int=?)", (coligada, nf, numero)).fetchall()
-    if len(notas) != 1:
-        return (f"; NF {nf} não encontrada no RM" if not notas
-                else f"; NF {nf} não vinculada (mais de uma nota com esse número no RM)")
-    dono = rm_._contrato_por_centro_custo(conn, coligada, notas[0]["centro_custo"])
-    proprio = conn.execute("SELECT TRIM(COALESCE(centro_custo_rm, '')) FROM contratos WHERE id=?",
-                           (contrato_id,)).fetchone()[0]
-    # Outro contrato pelo centro, ou este contrato tem centro e a NF traz outro (obra sem centro cadastrado)
-    if (dono is not None and dono != contrato_id) or (proprio and (notas[0]["centro_custo"] or "").strip() != proprio):
-        return f"; NF {nf} não vinculada (no RM ela é de outra obra, pelo centro de custo)"
-    if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
-                    (notas[0]["id"],)).fetchone():
-        return f"; NF {nf} não vinculada (já está em outra medição)"
-    rm_.alocar(conn, usuario_id, notas[0]["id"], medicao_id, "manual", None, "carga_historico")
-    return f"; NF {nf} vinculada"
+        return f"; NF {rotulo} não vinculada (empresa do contrato sem coligada no RM)", False
+    _, por_centro, _ = diretoria._mapa_contratos(conn)
+    centros = {cc for (col, cc), donos in por_centro.items() if col == coligada and contrato_id in donos}
+    achadas, problemas = [], []
+    for nf in d["nfs"]:
+        numero = int(nf) if nf.isdigit() and len(nf) <= 18 else None
+        notas = conn.execute("SELECT id, valor_centavos, centro_custo FROM notas_fiscais WHERE coligada=? AND "
+                             "situacao='ativa' AND (numero=? OR numero_int=?)", (coligada, nf, numero)).fetchall()
+        if len(notas) != 1:
+            problemas.append(f"NF {nf} não encontrada no RM" if not notas
+                             else f"NF {nf} com mais de uma nota com esse número no RM")
+            continue
+        cc = (notas[0]["centro_custo"] or "").strip()
+        donos = por_centro.get((coligada, cc), []) if cc else []
+        if (donos and contrato_id not in donos) or (centros and cc not in centros):
+            problemas.append(f"NF {nf} é de outra obra no RM, pelo centro de custo")
+        elif conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
+                          (notas[0]["id"],)).fetchone():
+            problemas.append(f"NF {nf} já está em outra medição")
+        else:
+            achadas.append(notas[0])
+    if problemas:
+        return f"; NF {rotulo} não vinculada ({'; '.join(problemas)})", False
+    valor = conn.execute("SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos) FROM medicoes "
+                         "WHERE id=?", (medicao_id,)).fetchone()[0]
+    soma = sum(n["valor_centavos"] for n in achadas)
+    if soma < valor - diretoria.TOLERANCIA_CENTAVOS:
+        return (f"; NF {rotulo} não vinculada (as notas somam {dinheiro.format_brl(soma)} e a medição vale "
+                f"{dinheiro.format_brl(valor)}: falta nota no CSV)"), False
+    for n in achadas:
+        sincronizacao_rm.alocar(conn, usuario_id, n["id"], medicao_id, "manual", None, "carga_historico")
+    return f"; NF {rotulo} vinculada", True

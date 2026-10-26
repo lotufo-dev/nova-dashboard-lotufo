@@ -685,7 +685,8 @@ def test_carregar_medicoes_nf_fora_do_rm_ou_ja_vinculada_nao_impede(tmp_path, mo
     conn.commit()
     codigo, saida = _gravar(capsys)
     assert codigo == 0, saida
-    assert "NF 101 não encontrada no RM" in saida and "NF 108 não vinculada (já está em outra medição)" in saida
+    assert "NF 101 não vinculada (NF 101 não encontrada no RM)" in saida
+    assert "NF 108 não vinculada (NF 108 já está em outra medição)" in saida
 
 
 def test_carregar_medicoes_com_erro_ou_conflito_nao_grava_nada(tmp_path, monkeypatch, capsys):
@@ -733,7 +734,7 @@ def test_carregar_medicoes_nf_de_outra_obra_pelo_centro_de_custo_nao_entra(tmp_p
     _nf_no_rm(conn, 108, 9002, 53000000, 49000000, 49000000, 1, "2025-07-11", centro="CC-PROPRIA")
     codigo, saida = _gravar(capsys)
     assert codigo == 0, saida
-    assert "NF 101 não vinculada (no RM ela é de outra obra, pelo centro de custo)" in saida
+    assert "NF 101 não vinculada (NF 101 é de outra obra no RM, pelo centro de custo)" in saida
     estados = dict(conn.execute("SELECT numero, estado FROM medicoes WHERE contrato_id=? AND tipo='execucao'", (cid,)))
     assert estados[1] == "protocolada" and estados[2] == "recebida"
 
@@ -744,7 +745,12 @@ def test_carregar_medicoes_nf_que_nao_cobre_o_valor_nao_da_como_recebida(tmp_pat
     _nf_no_rm(conn, 101, 9001, 20617283, 19000000, 19000000, 1, "2025-07-10")     # metade de 412.345,67 (impar)
     codigo, saida = _gravar(capsys)
     assert codigo == 0, saida
-    assert "NF 101 vinculada; notas vinculadas não cobrem o valor da medição: fica protocolada" in saida
+    assert ("NF 101 não vinculada (as notas somam R$ 206.172,83 e a medição vale R$ 412.345,67: falta nota no CSV)"
+            in saida)
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+    # nem a sincronizacao seguinte com o RM a da' como recebida (revisor da #259)
+    from app import sincronizacao_rm
+    sincronizacao_rm._recebimentos(conn)
     m = conn.execute("SELECT estado FROM medicoes WHERE contrato_id=? AND numero=1 AND tipo='execucao'", (cid,)).fetchone()
     assert m[0] == "protocolada"
 
@@ -757,7 +763,7 @@ def test_carregar_medicoes_duas_notas_da_mesma_medicao_quitadas_dao_recebida(tmp
     arq.write_text("\n".join([CAB, "1;1;execucao;2025-04;;412.345,67;412.345,67;20/05/2025;e-mail;;;101/102;x"]) + "\n",
                    "utf-8")
     codigo, saida = _gravar(capsys, arq)
-    assert codigo == 0 and "NF 101 vinculada; NF 102 vinculada; recebida (baixa no RM)" in saida, saida
+    assert codigo == 0 and "NF 101/102 vinculada; recebida (baixa no RM)" in saida, saida
     m = conn.execute("SELECT estado, recebida_em FROM medicoes WHERE contrato_id=? AND numero=1", (cid,)).fetchone()
     assert tuple(m) == ("recebida", "2025-07-12")
 
@@ -771,3 +777,12 @@ def test_carregar_medicoes_nova_sem_pedido_e_numero_gigante_sao_erro(tmp_path, m
     assert "linha 2: nº 1 execução 2025-04: erro (medição nova sem valor pedido)" in saida
     assert "erro (nº inválido: '99999999999999999999')" in saida
     assert "erro (nº do órgão inválido: '99999999999999999999')" in saida
+
+
+def test_carregar_medicoes_nf_com_o_centro_de_custo_anterior_da_obra_entra(tmp_path, monkeypatch, capsys):
+    # O RM trocou os centros em 2024: a NF antiga da propria obra traz o centro anterior
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("UPDATE contratos SET centros_custo_anteriores_rm='[\"1.234.000\"]' WHERE id=?", (cid,))
+    _nf_no_rm(conn, 108, 9002, 53000000, 49000000, 49000000, 1, "2025-07-11", centro="1.234.000")
+    codigo, saida = _gravar(capsys)
+    assert codigo == 0 and "NF 108 vinculada; recebida (baixa no RM)" in saida, saida
