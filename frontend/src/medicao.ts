@@ -48,15 +48,10 @@ export function separarMedicoes<M extends { numero: number; tipo: string; estado
            anteriores: ms.filter(m => FINAIS.includes(m.estado)).sort(ordem) };
 }
 
-/** A coluna "Notas" das medicoes da obra: quantas, quantas o RM confirmou e quantas divergem do espelho. */
+/** A coluna "Notas" das medicoes da obra: os numeros das notas, que identificam a linha ("NF 1843, 1844"). */
 export function resumoNotas(m: MedicaoBase): string {
-  const ns = m.notas ?? [];
-  if (ns.length === 0) return "—";
-  const confirmadas = ns.filter(n => n.confirmacao === "confirmada").length;
-  const divergem = notasDivergentes(m).length;
-  return [`${ns.length} ${ns.length === 1 ? "nota" : "notas"}`,
-          confirmadas ? `${confirmadas} ${confirmadas === 1 ? "confirmada" : "confirmadas"} pelo RM` : "",
-          divergem ? `${divergem} ${divergem === 1 ? "diverge" : "divergem"} do espelho` : ""].filter(Boolean).join(" · ");
+  const ns = [...new Set((m.notas ?? []).map(n => String(Number(n.numero) || n.numero)))];
+  return ns.length === 0 ? "—" : `NF ${ns.join(", ")}`;
 }
 
 /** "23ª Medição", "Reajuste da 23ª Medição", "3ª Medição de Projeto" (o mesmo nome do servidor). */
@@ -76,17 +71,6 @@ export type ParDaMedicao = { junta: boolean; orgao: string | null; metades: Meta
 /** Cabeca do bloco: "Execução · 14ª Medição" / "Reajuste da 14ª Medição". */
 export function rotuloDoBloco(m: { numero: number; tipo: string }): string {
   return m.tipo === "execucao" ? `Execução · ${tituloMedicao(m)}` : tituloMedicao(m);
-}
-
-const faltamNotas = (n: number) => n === 1 ? "falta 1 nota" : n > 1 ? `faltam ${n} notas` : "sem notas";
-
-/** O que falta, por bloco: "execução completa · reajuste: faltam 2 notas"; com as duas completas, "notas completas". */
-export function resumoDoPar(metades: Metade[]): string {
-  if (metades.every(x => x.completa)) return "notas completas";
-  return metades.map(x => {
-    const nome = x.tipo === "execucao" ? "execução" : "reajuste";
-    return x.completa ? `${nome} completa` : `${nome}: ${faltamNotas(x.faltam)}`;
-  }).join(" · ");
 }
 
 /** A metade pronta que espera a outra (so' onde o orgao junta), ou null. */

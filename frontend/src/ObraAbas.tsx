@@ -40,12 +40,11 @@ function data(iso: string | null | undefined): string {
   return iso ? fmtDataPura(iso.slice(0, 10)) : "—";
 }
 
-function Cartao({ id, titulo, dica, children }: { id: string; titulo: string; dica?: string; children: React.ReactNode }) {
+function Cartao({ id, titulo, children }: { id: string; titulo: string; children: React.ReactNode }) {
   return (
     <section className="cartao" aria-labelledby={id}>
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id={id}>{titulo}</h2>
-        {dica && <span className="cartao__dica">{dica}</span>}
       </div>
       {children}
     </section>
@@ -110,10 +109,8 @@ function explicacao(i: ItemChecklist): string {
 
 // o ato de cada natureza: a medicao se protocola; o reajuste se pede no pleito
 const NATUREZA = {
-  execucao: { titulo: "Medição", onde: "no protocolo da medição", antes: "antes de levar a pasta ao protocolo",
-              pronto: "Pronto para protocolar" },
-  reajuste: { titulo: "Reajuste", onde: "no pleito de reajuste", antes: "antes de enviar o pleito",
-              pronto: "Pronto para enviar o pleito" },
+  execucao: { titulo: "Medição", onde: "no protocolo da medição", pronto: "Pronto para protocolar" },
+  reajuste: { titulo: "Reajuste", onde: "no pleito de reajuste", pronto: "Pronto para enviar o pleito" },
 };
 
 /** Um quadro por natureza: o veredito de hoje e os documentos de cada empresa (a empresa e' a linha-titulo do
@@ -125,10 +122,6 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
   const id = `titulo-exigidos-${natureza}`;
   const itens = dados?.itens ?? [];
   const pendentes = itens.filter(i => i.situacao === "pendente").length;
-  const aVencer = itens.filter(i => i.situacao === "vencendo").length;
-  // Quantos itens sao sustentados por uma certidao de verdade. Zero aqui com veredito "Pronto" quer dizer que
-  // TODOS os tipos foram declarados "nao se aplica": dizer "todas estao valendo" seria falso.
-  const cobertos = itens.filter(i => i.situacao === "ok" || i.situacao === "vencendo").length;
   // Lista VAZIA nao e' "Pronto": o servidor devolve `pronto: true`, mas o motivo real e' cadastro faltando.
   const temVeredito = dados !== null && itens.length > 0;
   const emitir = (i: ItemChecklist) => (i.situacao === "pendente" || i.situacao === "vencendo") && !!i.link_emissao;
@@ -156,26 +149,18 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
       {!dados && !erro && <div className="vazio"><p>Verificando os documentos das empresas…</p></div>}
       {dados && itens.length === 0 && (
         <div className="vazio">
-          <p className="vazio__titulo">Nenhum documento exigido</p>
-          <p>O cadastro do órgão não exige documentos {n.onde}, então não há o que verificar — isto não quer dizer
-            que a habilitação esteja em dia.</p>
+          <p className="vazio__titulo">Nenhum documento exigido.</p>
         </div>
       )}
 
       {temVeredito && (
         <>
-          <div className="cartao__corpo">
-            {dados.pronto && cobertos === 0 ? (
-              <p className="campo__nota">Nenhuma certidão exigida de {quem} — todos os tipos aplicáveis foram declarados
-                “não se aplica”. Nada trava, mas quem declarou responde pela declaração.</p>
-            ) : dados.pronto ? (
-              <p className="campo__nota">Todas as certidões exigidas de {quem} estão valendo hoje.
-                {aVencer > 0 && ` ${aVencer === 1 ? "Uma delas vence em breve — renove" : `${aVencer} delas vencem em breve — renove`} antes do próximo protocolo.`}</p>
-            ) : (
-              <CaixaAviso nivel="critico">{quem}: {pendentes === 1 ? "1 documento sem validade hoje" : `${pendentes} documentos sem validade hoje`} —
-                  emita no órgão e anexe em Documentos {n.antes}.</CaixaAviso>
-            )}
-          </div>
+          {/* so' o que trava: o veredito "Pronto" ja' esta' no selo do cabecalho */}
+          {!dados.pronto && (
+            <div className="cartao__corpo">
+              <CaixaAviso nivel="critico">{quem}: {pendentes === 1 ? "1 documento sem validade hoje" : `${pendentes} documentos sem validade hoje`}.</CaixaAviso>
+            </div>
+          )}
 
           <Rolagem rotulo={`Documentos exigidos: ${n.titulo}`}>
             <table className="tabela tabela--grade">
@@ -194,15 +179,14 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
               <tbody key={eid}>
                 <tr className="grupo">
                   <th scope="rowgroup" colSpan={colunas}>
-                    {nome ? <Link para={{ tela: "documentos-empresa", id: eid }}>{nome}</Link> : "Empresa sem nome no cadastro"}
+                    {nome ? <Link para={{ tela: "documentos-empresa", id: eid }}>{nome}</Link> : "—"}
                   </th>
                 </tr>
                 {itens.filter(i => i.entidade_id === eid).map((i, k) => (
                   <tr key={`${i.entidade_id}-${i.chave ?? i.tipo_id}`} className={`linha${k % 2 === 1 ? " par" : ""}`}>
                     <td className="forte">{i.tipo}{i.entidade === null && i.jurisdicao ? ` (${JURISDICOES[i.jurisdicao] ?? i.jurisdicao})` : ""}</td>
-                    {/* a explicacao entra como texto sr-only DENTRO do chip (tooltip nao existe para teclado nem
-                        para leitor de tela); o `title` fica na celula, so' como conveniencia de mouse */}
-                    <td title={explicacao(i)}>
+                    {/* a explicacao entra so' como texto sr-only DENTRO do chip, para o leitor de tela */}
+                    <td>
                       {/* D15 (F-102): "Em dia" e' ponto e palavra, sem fundo; o selo fica para Atencao e Critico */}
                       {i.situacao === "ok" ? (
                         <span className="estado estado--ok">
@@ -215,7 +199,7 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
                         </Selo>
                       )}
                     </td>
-                    <td className="num">{i.chave === "regularidade" ? `competência ${mesBR(i.competencia)}` : data(i.validade)}</td>
+                    <td className="num">{i.chave === "regularidade" ? mesBR(i.competencia) : data(i.validade)}</td>
                     {comEmitir && <td>{emitir(i) && (
                       <a href={i.link_emissao!} target="_blank" rel="noreferrer">Emitir<span className="sr-only"> {i.tipo} (abre o site do órgão)</span></a>
                     )}</td>}
@@ -264,7 +248,7 @@ export function ContratoObra({ contratoId }: { contratoId: number }) {
     ["Centro de custo (RM)", texto(dados.centro_custo_rm)], ["Início da execução", data(dados.execucao_inicio)],
     ["Início da vigência", data(dados.vigencia_inicio)],
     ["Datas-base", !cad.dados ? (cad.erro ? "—" : "carregando…")
-      : bases.length === 0 ? "nenhuma no cadastro" : bases.map(b => `${mesBR(b.mes)}${b.indice ? ` (${b.indice})` : ""}`).join(", ")],
+      : bases.length === 0 ? "—" : bases.map(b => `${mesBR(b.mes)}${b.indice ? ` (${b.indice})` : ""}`).join(", ")],
   ];
   const fiscais = cad.dados?.fiscais ?? [];
   return (
@@ -275,11 +259,11 @@ export function ContratoObra({ contratoId }: { contratoId: number }) {
           {campos.map(([k, v]) => <div key={k}><dt className="campo__rotulo">{k}</dt><dd>{v}</dd></div>)}
           <div>
             <dt className="campo__rotulo">Fiscais</dt>
-            <dd>{!cad.dados ? (cad.erro ? "—" : "carregando…") : fiscais.length === 0 ? "nenhum no cadastro" : (
+            <dd>{!cad.dados ? (cad.erro ? "—" : "carregando…") : fiscais.length === 0 ? "—" : (
               <ul className="lista-simples">
                 {fiscais.map(f => (
-                  <li key={`${f.email}-${f.desde}`}>{f.nome || f.email || "sem nome no cadastro"}
-                    {f.cargo ? `, ${f.cargo}` : ""}{f.portaria ? `, ${f.portaria}` : ""} (desde <span className="num">{data(f.desde)}</span>)</li>
+                  <li key={`${f.email}-${f.desde}`}>{f.nome || f.email || "—"}
+                    {f.cargo ? `, ${f.cargo}` : ""}{f.portaria ? `, ${f.portaria}` : ""}</li>
                 ))}
               </ul>
             )}</dd>

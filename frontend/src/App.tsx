@@ -97,17 +97,15 @@ export default function App() {
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "a-receber" && (
             <div className="pagina">
-              <p className="pagina__descricao">Medições protocoladas esperando pagamento e o que entrou no mês · na cota da Lotufo</p>
               <AReceberPagina />
             </div>
           )}
           {rota.tela === "carteira" && (
             <div className="pagina">
-              <p className="pagina__descricao">Na cota da Lotufo</p>
               <Diretoria ir={ir} aba={rota.aba ?? "resumo"} />
             </div>
           )}
-          {rota.tela === "obras" && <Contratos ir={ir} busca={busca} perfil={usuario.perfil} />}
+          {rota.tela === "obras" && <Contratos ir={ir} busca={busca} />}
           {rota.tela === "obra" && (
             // `key` no id: trocar de obra REMONTA a pagina em vez de reaproveitar a
             // instancia. Sem isso, o painel aberto e os rascunhos de formulario da
@@ -128,7 +126,6 @@ export default function App() {
           {rota.tela === "conta" && <div className="pagina"><MinhaConta usuario={usuario} /></div>}
           {rota.tela === "admin" && usuario.perfil === "admin" && (
             <div className="pagina">
-              <p className="pagina__descricao">A saúde do sistema, a reconciliação com o RM, os usuários e a auditoria</p>
               <Admin aba={rota.aba ?? "saude"} busca={busca} eu={usuario.id} />
             </div>
           )}

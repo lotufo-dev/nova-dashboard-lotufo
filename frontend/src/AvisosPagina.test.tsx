@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AvisosPagina from "./AvisosPagina";
 
@@ -9,17 +9,21 @@ const aviso = (extra: Record<string, unknown> = {}) => ({
   destino: { tela: "contrato", id: 7, aba: "prazos" }, data: "2026-10-20", sentido: "prazo", ...extra });
 
 const painel = (avisos: unknown, extra: Record<string, unknown> = {}) =>
-  render(<AvisosPagina busca={{ c: "todas", avisos: "1" }} perfil="admin" avisos={avisos as never} nome="Todas as obras" onFechar={() => {}} {...extra} />);
+  render(<AvisosPagina busca={{ c: "todas", avisos: "1" }} avisos={avisos as never} nome="Todas as obras" onFechar={() => {}} {...extra} />);
 
 describe("Avisos dentro de Obras", () => {
   afterEach(() => { cleanup(); });
 
-  it("o resumo da Atenção traz a obra em negrito, lida do campo e não do texto (#23)", async () => {
+  it("a Atenção recolhida só diz 'Atenção'; a linha traz a obra em negrito, lida do campo e não do texto (#23)", () => {
     const { container } = painel([aviso()]);
-    await screen.findByText(/o mais urgente/);
     const resumo = container.querySelector("summary")!;
-    expect(resumo.querySelector(".forte")?.textContent).toBe("Granito");
-    expect(resumo.textContent).toContain("Granito: execução termina em 20 dias");
+    expect(resumo.textContent).toBe("Atenção");
+    const fato = container.querySelector("td.aviso__fato")!;
+    expect(fato.querySelector(".forte")?.textContent).toBe("Granito");
+    expect(fato.textContent).toContain("Granito: execução termina em 20 dias");
+    // sem a meta do cabeçalho, a contagem por nível e a contagem ao lado de cada tipo
+    expect(container.textContent).not.toMatch(/da operação|\d\sde\satenção|o mais urgente/);
+    expect(screen.getByRole("link", { name: "Prazo" })).toBeTruthy();
   });
 
   it("o título diz o recorte e o botão fecha os avisos", () => {
@@ -44,20 +48,36 @@ describe("Avisos dentro de Obras", () => {
     expect(todas.container.textContent).toContain("Construtora Alfa");
   });
 
-  it("agrupa por tipo ou por obra, com o 'onde se resolve' de cada aviso", () => {
+  it("agrupa por tipo ou por obra, e cada aviso tem o link Abrir para o destino, sem a frase 'onde se resolve'", () => {
     const { container } = painel([aviso({ nivel: "critico" })]);
     expect(container.querySelector("a[aria-current='true']")?.textContent).toBe("por tipo");
     expect(screen.getByRole("link", { name: "por obra" }).getAttribute("href")).toBe("/obras?c=todas&avisos=1&agrupar=obra");
-    expect(screen.getByRole("columnheader", { name: "Onde se resolve" })).toBeTruthy();
-    expect(container.querySelector("tbody a")?.getAttribute("href")).toContain("/obras/7");
+    expect(screen.queryByRole("columnheader", { name: "Onde se resolve" })).toBeNull();
+    const abrir = within(container.querySelector("tbody")!).getByRole("link", { name: "Abrir" });
+    expect(abrir.getAttribute("href")).toContain("/obras/7");
+    expect(container.textContent).not.toContain("Prazos · ");
   });
 
-  it("sem aviso, diz que está tudo em dia; com falha, não afirma isso", () => {
+  it("por obra, a linha do grupo traz só o nome", () => {
+    const { container } = painel([aviso({ nivel: "critico" })], { busca: { c: "todas", avisos: "1", agrupar: "obra" } });
+    const grupo = container.querySelector("tr.grupo")!;
+    expect(grupo.textContent).toBe("Granito");
+  });
+
+  it("filtro por uma obra sem aviso: sem a frase de recorte", () => {
+    painel([aviso()], { busca: { c: "todas", avisos: "1", obra: "99" } });
+    expect(screen.queryByText(/não tem avisos/)).toBeNull();
+    expect(screen.queryByText(/ver de todas as obras/)).toBeNull();
+    expect(screen.getByText("Nenhum aviso com esses filtros.")).toBeTruthy();
+  });
+
+  it("sem aviso, uma linha curta; com falha, não afirma isso", () => {
     painel([]);
-    expect(screen.getByText("Nenhum aviso. Tudo em dia.")).toBeTruthy();
+    expect(screen.getByText("Nenhum aviso.")).toBeTruthy();
+    expect(screen.queryByText(/Tudo em dia/)).toBeNull();
     cleanup();
     painel(null);
     expect(screen.getByRole("alert").textContent).toContain("Não foi possível verificar os avisos");
-    expect(screen.queryByText("Nenhum aviso. Tudo em dia.")).toBeNull();
+    expect(screen.queryByText("Nenhum aviso.")).toBeNull();
   });
 });

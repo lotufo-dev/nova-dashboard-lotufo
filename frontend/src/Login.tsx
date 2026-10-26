@@ -57,7 +57,6 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
     <main className="entrar">
       <div className="entrar__visual">
         <canvas ref={canvasRef} className="entrar__canvas" aria-hidden="true" hidden={sem3d} />
-        <p className="entrar__frase">Medições, protocolos e recebimentos das obras do Grupo Lotufo.</p>
       </div>
       <aside className="entrar__painel">
         <div className="entrar__topo">
@@ -65,19 +64,16 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
             <div className="entrar__simbolo" aria-hidden="true"><i /><i className="v" /><i /><i className="v" /><i /><i /></div>
             <div className="entrar__nome">
               <span className="entrar__marca-nome">grupolotufo</span>
-              <span className="entrar__marca-sub">Plataforma de Obras</span>
             </div>
           </div>
           <div className="entrar__bloco">
             <div className="entrar__cabeca">
               <h1 className="entrar__titulo">Entrar</h1>
-              <p className="entrar__ajuda">Use o e-mail e a senha cadastrados pelo administrador.</p>
             </div>
             <form className="entrar__form" onSubmit={entrar}>
               <label className="entrar__campo">
                 E-mail
                 <input type="email" name="email" autoComplete="username" spellCheck={false} required
-                       placeholder="nome@empresa.com.br"
                        value={email} onChange={e => setEmail(e.target.value)} />
               </label>
               <label className="entrar__campo">
@@ -91,7 +87,6 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
             </form>
           </div>
         </div>
-        <div className="entrar__rodape"><span>© 2026 Grupo Lotufo</span><span>Acesso restrito à rede interna</span></div>
       </aside>
     </main>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { contar, fmtTamanho } from "./formato";
+import { contar } from "./formato";
 import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
 import {
@@ -99,19 +99,17 @@ function EstadoMedicao({ estado }: { estado: string }) {
 type Situacao = "ok" | "atencao" | "acao" | "neutra";
 type Cartao = [titulo: string, valor: string, nota: string, situacao: Situacao];
 
-/** Um cartao de situacao: ponto colorido + titulo + o valor (a hora) + a nota. A cor nunca vai sozinha: o valor e a nota dizem o mesmo em palavras. */
+/** Um cartao de situacao: ponto colorido + titulo + o valor (a hora) + a nota, so' quando ha' falha ou atraso. */
 function CartaoSituacao({ titulo, valor, nota, situacao }: { titulo: string; valor: string; nota: string; situacao: Situacao }) {
   return (
     <li className={`cartao situacao situacao--${situacao}`}>
       <span className="situacao__ponto" aria-hidden="true" />
       <h2 className="situacao__titulo">{titulo}</h2>
       <span className="situacao__valor">{valor}</span>
-      <span className="situacao__nota">{nota}</span>
+      {nota && <span className="situacao__nota">{nota}</span>}
     </li>
   );
 }
-
-const SEM_COPIA = "nenhuma desde que o servidor subiu";
 
 // o backup falhou: atrasado ou uma das tentativas de copia deu erro (o cartao de cima e o cartao Backup usam a mesma regra)
 function backupFalhou(b: Backup | null | undefined): boolean {
@@ -127,41 +125,32 @@ function Situacoes({ status, erroCarga, rodando, b }: { status: StatusRm | null;
   const backup: Cartao = b === undefined ? neutro(T_BACKUP, "carregando…", "")
     : b === null ? neutro(T_BACKUP, "não foi possível ler", NAO_LEU)
     : [
-      T_BACKUP, b.ultimo_backup ? fmtDataHora(b.ultimo_backup) : "nenhum",
-      b.atrasado ? "atrasado: sem snapshot recente"
-        : backupFalhou(b) ? "uma das cópias falhou: veja o cartão Backup"
-        : `${b.tamanho_bytes !== null ? `${fmtTamanho(b.tamanho_bytes)} · ` : ""}${contar(b.guardados, "snapshot guardado", "snapshots guardados")}`,
+      T_BACKUP, b.ultimo_backup ? fmtDataHora(b.ultimo_backup) : "—",
+      b.atrasado ? "atrasado: sem snapshot recente" : backupFalhou(b) ? "uma das cópias falhou" : "",
       backupFalhou(b) ? "acao" : "ok",
     ];
   // 2. ultima copia externa dos arquivos (so' existe com pasta externa)
   const externa: Cartao = b === undefined ? neutro(T_EXTERNA, "carregando…", "")
     : b === null ? neutro(T_EXTERNA, "não foi possível ler", NAO_LEU)
     : b.ultima_copia_externa_arquivos_erro
-      ? [T_EXTERNA, b.ultima_copia_externa_arquivos ? fmtDataHora(b.ultima_copia_externa_arquivos) : SEM_COPIA, "a última tentativa falhou", "acao"]
-    : !b.copia_externa_configurada ? neutro(T_EXTERNA, "sem pasta externa", "não há cópia externa a esperar")
+      ? [T_EXTERNA, b.ultima_copia_externa_arquivos ? fmtDataHora(b.ultima_copia_externa_arquivos) : "—", "a última tentativa falhou", "acao"]
+    : !b.copia_externa_configurada ? neutro(T_EXTERNA, "—", "")
     : b.ultima_copia_externa_arquivos
-      ? [T_EXTERNA, fmtDataHora(b.ultima_copia_externa_arquivos), "notas, espelhos, modelos e evidências", "ok"]
-    : [T_EXTERNA, SEM_COPIA, "notas, espelhos, modelos e evidências", "atencao"];
+      ? [T_EXTERNA, fmtDataHora(b.ultima_copia_externa_arquivos), "", "ok"]
+    : [T_EXTERNA, "nenhuma", "", "atencao"];
   // 3. sincronizacao com o RM
   const rodadas = status?.rodadas ?? [];
   const ultima = rodadas[0] ?? null;
-  const boa = rodadas.find(r => r.estado === "success") ?? null;
-  const quandoBoa = boa ? boa.terminado_em ?? boa.iniciado_em : status?.ultima_sincronizacao ?? null;
   const rm: Cartao = status === null ? neutro(T_RM, erroCarga ? "não foi possível ler" : "carregando…", erroCarga ? NAO_LEU : "")
-    : !status.configurado ? neutro(T_RM, "não configurado", "lançamentos seguem à mão")
-    : rodando || status.em_andamento || ultima?.estado === "running" ? neutro(T_RM, "rodando", rodando ? "buscando no RM agora" : ultima ? `desde ${fmtDataHora(ultima.iniciado_em)}` : "")
-    : ultima === null ? neutro(T_RM, "nenhuma rodada", "ainda não rodou")
+    : !status.configurado ? neutro(T_RM, "não configurado", "")
+    : rodando || status.em_andamento || ultima?.estado === "running" ? neutro(T_RM, "rodando", "")
+    : ultima === null ? neutro(T_RM, "—", "")
     : ultima.estado === "failed"
-      ? [T_RM, `falhou em ${fmtDataHora(ultima.iniciado_em)}`, quandoBoa ? `a última que deu certo foi em ${fmtDataHora(quandoBoa)}` : "nenhuma deu certo", "acao"]
-    : [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), `deu certo · ${ultima.disparo}`, "ok"];
-  // 4. rodadas com falha, entre as que a tabela mostra
-  const falhas = rodadas.filter(r => r.estado === "failed").length;
-  const comFalha: Cartao = status === null || !status.configurado || rodadas.length === 0
-    ? neutro("Rodadas com falha", "—", rodadas.length === 0 && status?.configurado ? "sem rodadas" : "")
-    : ["Rodadas com falha", `${falhas} ${rodadas.length === 1 ? "na última rodada" : `nas últimas ${rodadas.length} rodadas`}`, falhas ? "veja o motivo na tabela" : "nenhuma", falhas ? "atencao" : "ok"];
+      ? [T_RM, `falhou em ${fmtDataHora(ultima.iniciado_em)}`, "", "acao"]
+    : [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), "", "ok"];
   return (
     <ul className="situacoes" aria-label="Situação do servidor">
-      {[backup, externa, rm, comFalha].map(([titulo, valor, nota, situacao]) => (
+      {[backup, externa, rm].map(([titulo, valor, nota, situacao]) => (
         <CartaoSituacao key={titulo} titulo={titulo} valor={valor} nota={nota} situacao={situacao} />
       ))}
     </ul>
@@ -174,42 +163,10 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
     <section className="cartao" aria-labelledby="titulo-rm">
       <div className="cartao__cabeca cartao__cabeca--quebra">
         <h2 className="cartao__titulo" id="titulo-rm">Rodadas de sincronização com o RM</h2>
-        <span className="cartao__dica">
-          {status === null ? (erroCarga ? "não foi possível ler o estado do RM" : "carregando…")
-            : status.configurado ? status.rodadas.length === 0 ? "as NFs e as baixas do RM"
-              : `as NFs e as baixas do RM · ${status.rodadas.length === 1 ? "a última rodada" : `as últimas ${status.rodadas.length} rodadas`}`
-            : "não configurado neste servidor"}
-        </span>
       </div>
       {erroCarga && <Erro texto={erroCarga} />}
 
-      {status && !status.configurado && (
-        <div className="cartao__corpo">
-          <p className="campo__nota">
-            Sem RM, o lançamento da NF e o recebimento continuam registrados à mão na medição. Para ligar:
-            conta de serviço no RM, consultas cadastradas e as variáveis de acesso ao RM na tarefa do servidor —
-            ver o manual de produção.
-          </p>
-        </div>
-      )}
-      {status?.configurado && ultima === null && <div className="cartao__corpo"><p>Nenhuma rodada registrada ainda.</p></div>}
-
-      {/* as contagens so' da rodada que deu certo: os zeros da que falhou pareceriam resultado */}
-      {ultima && ultima.estado === "success" && (
-        <ul className="contagens cartao__corpo" aria-label="Contagens da última rodada">
-          {([
-            [ultima.nfs, "NF", "NFs"], [ultima.baixas, "Baixa", "Baixas"], [ultima.alocacoes, "Alocada", "Alocadas"],
-            [ultima.sugestoes, "Ambígua", "Ambíguas"], [ultima.recebimentos, "Recebida", "Recebidas"],
-          ] as [number, string, string][]).map(([n, um, varios]) => (
-            <li key={varios}>
-              <div className="dado">
-                <span className="dado__valor num">{n.toLocaleString("pt-BR")}</span>{" "}
-                <span className="campo__nota">{n === 1 ? um : varios} na última rodada</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      {status?.configurado && ultima === null && <div className="vazio vazio--curto"><p>Nenhuma rodada.</p></div>}
 
       {status && status.rodadas.length > 0 && (
         <Rolagem rotulo="Rodadas de sincronização com o RM">
@@ -219,7 +176,7 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
               <tr>
                 <th scope="col">Início</th><th scope="col">Disparo</th><th scope="col">Duração</th><th scope="col">Resultado</th>
                 <th scope="col" className="col-num">NFs</th><th scope="col" className="col-num">Baixas</th>
-                <th scope="col" className="col-num">Alocadas</th><th scope="col" className="col-num" title="NFs com mais de uma medição candidata: ficam sem vínculo automático">Ambíguas</th>
+                <th scope="col" className="col-num">Alocadas</th><th scope="col" className="col-num">Ambíguas</th>
                 <th scope="col" className="col-num">Recebidas</th>
               </tr>
             </thead>
@@ -259,7 +216,6 @@ function ReconciliacaoResumo({ versao }: { versao: number }) {
     <section className="cartao" aria-labelledby="titulo-rec-resumo">
       <div className="cartao__cabeca cartao__cabeca--quebra">
         <h2 className="cartao__titulo" id="titulo-rec-resumo">Reconciliação RM × dashboard</h2>
-        <span className="cartao__dica">o que está de um lado só</span>
       </div>
       {erro && <Erro texto={erro} />}
       {!rec && !erro && <div className="vazio"><p>Carregando…</p></div>}
@@ -286,15 +242,14 @@ function ReconciliacaoResumo({ versao }: { versao: number }) {
   );
 }
 
-function LinhaBackup({ rotulo, em, erro, erroEm, nenhum }: {
-  rotulo: string; em: string | null; erro: string | null; erroEm: string | null; nenhum: string;
-}) {
-  if (erro) return (
+/** A falha de uma copia, so' quando ha' falha: a linha da copia que deu certo nao aparece. */
+function LinhaBackup({ rotulo, em, erro, erroEm }: { rotulo: string; em: string | null; erro: string | null; erroEm: string | null }) {
+  if (!erro) return null;
+  return (
     <CaixaAviso nivel="critico">
       {rotulo}: a última tentativa{erroEm ? `, em ${fmtDataHora(erroEm)},` : ""} falhou ({erro}).{em ? ` A última que deu certo foi em ${fmtDataHora(em)}.` : ""}
     </CaixaAviso>
   );
-  return <p>{rotulo}: {em ? fmtDataHora(em) : nenhum}.</p>;
 }
 
 // b: undefined = carregando; null = nao deu para ler
@@ -306,37 +261,28 @@ function Backup({ b }: { b: Backup | null | undefined }) {
         <h2 className="cartao__titulo" id="titulo-backup">Backup</h2>
         {/* o resultado de relance: Falhou se esta atrasado ou uma das tentativas falhou; OK com backup em dia */}
         {b && (falhou ? <SeloRodada estado="failed" /> : b.ultimo_backup ? <SeloRodada estado="success" /> : null)}
-        <span className="cartao__dica">um snapshot por hora</span>
       </div>
-      <div className="cartao__corpo pilha pilha--curta">
-        {b === undefined ? <p>Carregando…</p>
-          : b === null ? <p className="campo__nota">Não foi possível ler o estado do backup; recarregue a página para tentar de novo.</p>
-          : <>
-              {b.atrasado && (
-                <CaixaAviso nivel="critico" role="alert">
-                  {`Backup atrasado: ${b.ultimo_backup ? `o último foi em ${fmtDataHora(b.ultimo_backup)}, há mais de 2 horas.`
-                    : "nenhum backup guardado neste servidor."} Confira a tarefa do servidor e a pasta de backups.`}
-                </CaixaAviso>
-              )}
-              <p>Último backup: {b.ultimo_backup
-                ? `${fmtDataHora(b.ultimo_backup)}${b.tamanho_bytes !== null ? ` (${fmtTamanho(b.tamanho_bytes)})` : ""}`
-                : "nenhum"}.</p>
-              <p>{contar(b.guardados, "snapshot guardado", "snapshots guardados")} neste servidor.</p>
-              {b.ultimo_snapshot_erro && <LinhaBackup rotulo="Último snapshot" em={b.ultimo_snapshot} erro={b.ultimo_snapshot_erro} erroEm={b.ultimo_snapshot_erro_em} nenhum="" />}
-              {/* sem pasta externa configurada nao ha copia a esperar: a linha so' confundiria */}
-              {(b.copia_externa_configurada || b.ultima_copia_externa_erro) &&
-                <LinhaBackup rotulo="Última cópia externa" em={b.ultima_copia_externa} erro={b.ultima_copia_externa_erro} erroEm={b.ultima_copia_externa_erro_em} nenhum="nenhuma desde que o servidor subiu" />}
-              {/* issue #55: notas, espelhos, modelos e evidencias; a externa so' com pasta externa (como a do banco) */}
-              <LinhaBackup rotulo="Última cópia dos arquivos" em={b.ultima_copia_arquivos ?? null} erro={b.ultima_copia_arquivos_erro ?? null}
-                erroEm={b.ultima_copia_arquivos_erro_em ?? null} nenhum="nenhuma desde que o servidor subiu" />
-              {(b.copia_externa_configurada || b.ultima_copia_externa_arquivos_erro) &&
+      {(b === undefined || b === null || falhou) && (
+        <div className="cartao__corpo pilha pilha--curta">
+          {b === undefined ? <p>Carregando…</p>
+            : b === null ? <p className="campo__nota">Não foi possível ler o estado do backup; recarregue a página para tentar de novo.</p>
+            : <>
+                {b.atrasado && (
+                  <CaixaAviso nivel="critico" role="alert">
+                    {`Backup atrasado: ${b.ultimo_backup ? `o último foi em ${fmtDataHora(b.ultimo_backup)}, há mais de 2 horas.`
+                      : "nenhum backup guardado neste servidor."} Confira a tarefa do servidor e a pasta de backups.`}
+                  </CaixaAviso>
+                )}
+                <LinhaBackup rotulo="Último snapshot" em={b.ultimo_snapshot} erro={b.ultimo_snapshot_erro} erroEm={b.ultimo_snapshot_erro_em} />
+                <LinhaBackup rotulo="Última cópia externa" em={b.ultima_copia_externa} erro={b.ultima_copia_externa_erro} erroEm={b.ultima_copia_externa_erro_em} />
+                {/* issue #55: notas, espelhos, modelos e evidencias */}
+                <LinhaBackup rotulo="Última cópia dos arquivos" em={b.ultima_copia_arquivos ?? null} erro={b.ultima_copia_arquivos_erro ?? null}
+                  erroEm={b.ultima_copia_arquivos_erro_em ?? null} />
                 <LinhaBackup rotulo="Última cópia externa dos arquivos" em={b.ultima_copia_externa_arquivos ?? null}
-                  erro={b.ultima_copia_externa_arquivos_erro ?? null} erroEm={b.ultima_copia_externa_arquivos_erro_em ?? null}
-                  nenhum="nenhuma desde que o servidor subiu" />}
-              {/* atrasado sem erro registrado (thread parada, servidor recem-reiniciado): "nenhum erro" desmentiria o alerta */}
-              {!falhou && <p>Último erro: nenhum desde que o servidor subiu.</p>}
-            </>}
-      </div>
+                  erro={b.ultima_copia_externa_arquivos_erro ?? null} erroEm={b.ultima_copia_externa_arquivos_erro_em ?? null} />
+              </>}
+        </div>
+      )}
     </section>
   );
 }
@@ -384,22 +330,17 @@ function Saude() {
       {status?.configurado && ultima?.estado === "failed" && !rodando && !erro && (
         <CaixaAviso nivel="critico">
           Última rodada: falhou em {fmtDataHora(ultima.iniciado_em)} ({ultima.disparo}). {ultima.erro ?? "Erro desconhecido."}
-          {quandoBoa ? ` A última que deu certo foi em ${fmtDataHora(quandoBoa)}.` : status.rodadas.length === 1 ? " Nenhuma deu certo na última rodada." : ` Nenhuma deu certo nas últimas ${status.rodadas.length} rodadas.`}
-          {" "}“Sincronizar agora” tenta de novo; se a falha se repetir, veja o manual de produção.
+          {quandoBoa ? ` A última que deu certo foi em ${fmtDataHora(quandoBoa)}.` : ""}
         </CaixaAviso>
       )}
 
       <div className="acoes-saude">
-        <button type="button" className="btn btn--primario" onClick={sincronizar} disabled={rodando || !status?.configurado || status.em_andamento || ultima?.estado === "running"}
-          title={status?.configurado ? "Buscar NFs e baixas no RM agora" : "Configure o acesso ao RM no servidor (manual de produção)"}>
+        <button type="button" className="btn btn--primario" onClick={sincronizar} disabled={rodando || !status?.configurado || status.em_andamento || ultima?.estado === "running"}>
           {rodando ? "Sincronizando…" : "Sincronizar agora"}
         </button>
-        <p>
-          {!status ? "" : !status.configurado ? "O RM não está configurado neste servidor."
-            : ultima?.estado === "success" ? <>Última rodada: <strong>deu certo</strong> em {fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em)} ({ultima.disparo}).</>
-            : ultima?.estado === "running" ? `Última rodada: rodando desde ${fmtDataHora(ultima.iniciado_em)} (${ultima.disparo}).`
-            : ultima === null ? "Nenhuma rodada registrada ainda." : ""}
-        </p>
+        {/* so' o motivo do bloqueio do botao, quando ha' */}
+        {status && !status.configurado && <p>O RM não está configurado neste servidor.</p>}
+        {status?.configurado && !rodando && (status.em_andamento || ultima?.estado === "running") && <p>Uma rodada está em andamento.</p>}
       </div>
       {erro && <section className="cartao"><Erro texto={erro} /></section>}
       <div role="status">{concluida && !erro && <p className="campo__nota">{concluida}</p>}</div>
@@ -422,20 +363,13 @@ function Grupo({ id, titulo, conta, carregadas, mostrando, verTodas, mais, child
   id: CategoriaRec; titulo: string; conta: { n: number; piso: boolean; haMais: boolean }; carregadas: number; mostrando: number;
   verTodas: React.ReactNode; mais: React.ReactNode; children: React.ReactNode;
 }) {
-  const { n, piso, haMais } = conta;
-  const qtd = quantidadeRec(n, piso);
+  const { haMais } = conta;
   return (
     <section className="cartao" aria-labelledby={`titulo-rec-${id}`}>
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id={`titulo-rec-${id}`}>{titulo}</h2>
-        <span className="cartao__dica num">
-          {n === 0 ? (piso ? "nenhuma entre as já carregadas" : "nenhuma linha")
-            : mostrando < n ? `${mostrando} de ${qtd}` : n === 1 && !piso ? "1 linha" : `${qtd} linhas`}
-        </span>
       </div>
-      {carregadas === 0
-        ? <div className="vazio vazio--curto"><p>{piso ? "Nada desta obra entre as já carregadas." : "Nada de um lado só neste grupo."}</p></div>
-        : children}
+      {carregadas === 0 ? <div className="vazio vazio--curto"><p>Nenhuma linha.</p></div> : children}
       {mostrando < carregadas && <div className="cartao__corpo">{verTodas}</div>}
       {mostrando === carregadas && haMais && <div className="cartao__corpo">{mais}</div>}
     </section>
@@ -509,16 +443,13 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
       <section className="cartao" aria-labelledby="titulo-rec-filtros">
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-rec-filtros">Reconciliação RM × dashboard</h2>
-          <span className="cartao__dica">o que está de um lado só</span>
         </div>
         <div className="cartao__corpo filtros-avisos__linhas">
           <p className="filtros-avisos__linha">
             <span className="resumo__rotulo">Grupo</span>
             <Link para={aqui} busca={com({ categoria: null })} aria-current={categoria === null ? "true" : undefined}>todos</Link>
             {CATEGORIAS_REC.map(c => (
-              <Link key={c.id} para={aqui} busca={com({ categoria: c.id })} aria-current={categoria === c.id ? "true" : undefined}>
-                {c.titulo} <span className="num">({quantidadeRec(conta(c.id).n, conta(c.id).piso)})</span>
-              </Link>
+              <Link key={c.id} para={aqui} busca={com({ categoria: c.id })} aria-current={categoria === c.id ? "true" : undefined}>{c.titulo}</Link>
             ))}
           </p>
           <div className="form-inline">
@@ -533,7 +464,6 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
           </div>
           {/* so' a contagem do recorte na regiao viva: trocar o grupo ou a obra refaz as tabelas */}
           <span className="sr-only" role="status">{linhas === 1 ? "1 linha" : `${linhas.toLocaleString("pt-BR")} linhas`}</span>
-          {filtro !== null && <p className="campo__nota">As NFs sem medição não têm obra e saem com este filtro.</p>}
           {obras === null && <p className="campo__nota">Não foi possível ler as obras: o filtro por obra fica desligado e as alocações desfeitas ficam sem link. Recarregue a página para tentar de novo.</p>}
         </div>
       </section>
@@ -574,7 +504,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
                     <td>{nomeObra(m.contrato_id, m.numero_instrumento)}</td>
                     <td><Link para={{ tela: "medicao", obra: m.contrato_id, id: m.medicao_id }} secao="notas">{tituloMedicao(m)}</Link></td>
                     <td className="num">{fmtCompetencia(m.competencia)}</td>
-                    <td><EstadoMedicao estado={m.estado} />{" "}<span className="campo__nota">sem NF do RM</span></td>
+                    <td><EstadoMedicao estado={m.estado} /></td>
                     <td className="col-num dinheiro num">{m.valor_centavos === null ? "—" : brl(m.valor_centavos)}</td>
                   </tr>
                 ))}
@@ -736,7 +666,6 @@ function Usuarios({ eu }: { eu?: number }) {
       <section className="cartao" aria-labelledby="titulo-usuarios">
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-usuarios">Usuários</h2>
-          <span className="cartao__dica">cada pessoa conecta a própria conta Microsoft em Minha conta</span>
         </div>
         {erro && <Erro texto={erro} />}
         {!usuarios && !erro && <div className="vazio"><p>Carregando…</p></div>}
@@ -780,10 +709,10 @@ function Usuarios({ eu }: { eu?: number }) {
                         </span>
                       ) : "—"}</td>
                       <td>{!u.ativo || contas === null ? "—" : c?.conectada ? (
-                        <><Selo classe="selo--ok">conectada</Selo>{c.token_em && <div className="campo__nota num">em {fmtDataHora(c.token_em)}</div>}</>
+                        <Selo classe="selo--ok">conectada</Selo>
                       ) : contas === undefined ? "…" : <Selo classe="">não conectada</Selo>}</td>
                       <td>
-                        {u.id === eu ? <span className="campo__nota">você</span>
+                        {u.id === eu ? null
                           : redefinir === u.id ? (
                             <form className="form-inline" onSubmit={e => confirmarSenha(e, u)}>
                               <label className="sr-only" htmlFor={`senha-${u.id}`}>Senha nova de {u.nome} (mínimo de 10 caracteres)</label>
@@ -901,9 +830,7 @@ function Auditoria({ busca }: { busca: Busca }) {
   // as opcoes do filtro em ordem alfabetica do rotulo em portugues (o valor segue sendo o codigo da acao)
   const acoes = audit ? [...new Set(audit.eventos.map(e => e.acao))].sort((a, b) => rotuloAcao(a).localeCompare(rotuloAcao(b), "pt-BR")) : [];
   const pessoas = audit ? [...new Set(audit.eventos.map(pessoaDoEvento))] : [];
-  // enquanto houver anteriores no banco, a tela mostra so' os ultimos que ja' chegaram (um "Desde" anterior ao mais
-  // antigo nao traz mais nada ate' carregar mais)
-  const maisAntigo = audit?.eventos[audit.eventos.length - 1]?.criado_em ?? null;
+  // enquanto houver anteriores no banco, a tela mostra so' os ultimos que ja' chegaram ("Carregar mais" traz o resto)
   const haMais = audit?.ha_mais ?? false;
 
   return (
@@ -938,14 +865,8 @@ function Auditoria({ busca }: { busca: Busca }) {
               <input id="aud-desde" type="date" value={f.desde ?? ""} onChange={e => trocarBusca({ desde: e.target.value || null })} />
             </div>
           </div>
-          <p className="cartao__corpo campo__nota">
-            <span role="status">{eventos.length === audit.eventos.length ? contar(eventos.length, "evento", "eventos")
-              : `${eventos.length.toLocaleString("pt-BR")} de ${contar(audit.eventos.length, "evento", "eventos")}`}</span>
-            {" "}({haMais ? `os últimos ${audit.eventos.length.toLocaleString("pt-BR")} registrados`
-              : audit.eventos.length === 1 ? "o único registrado" : `todos os ${audit.eventos.length.toLocaleString("pt-BR")} registrados`}
-            {maisAntigo ? `, desde ${fmtDataHora(maisAntigo)}` : ""}, do mais recente ao mais antigo
-            {haMais ? "; há eventos anteriores" : ""}).
-          </p>
+          {/* so' a contagem do recorte na regiao viva: trocar os filtros refaz a tabela */}
+          <span className="sr-only" role="status">{contar(eventos.length, "evento", "eventos")}</span>
           {nomes === null && (
             <p className="cartao__corpo campo__nota">Não foi possível ler os nomes: a coluna Quem mostra o número de cada usuário. Recarregue a página para tentar de novo.</p>
           )}
@@ -953,8 +874,7 @@ function Auditoria({ busca }: { busca: Busca }) {
             <div className="vazio vazio--curto"><p className="vazio__titulo">Nenhum evento registrado.</p></div>
           ) : eventos.length === 0 ? (
             <div className="vazio vazio--curto">
-              <p className="vazio__titulo">Nenhum evento com esses filtros{haMais ? " entre os já carregados" : ""}.</p>
-              {haMais && <p>Há eventos anteriores ainda não carregados: use Carregar mais.</p>}
+              <p className="vazio__titulo">Nenhum evento com esses filtros.</p>
               <p><Link para={{ tela: "admin", aba: "auditoria" }}>Limpar os filtros</Link></p>
             </div>
           ) : (

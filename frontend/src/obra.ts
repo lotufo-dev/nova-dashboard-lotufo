@@ -85,20 +85,6 @@ export type PontoS = { competencia: string; previsto: number; execucao: number; 
 export type PrevistoAnterior = { competencia: string; previsto_centavos: number }[];
 export type MarcaAditivo = { competencia: string; data: string; nome: string };
 
-/** Desvio do medido contra cada linha, em pontos percentuais, na ultima competencia medida (issue #295). Cada linha
- *  e' lida contra o proprio total (avanco = acumulado / total previsto da linha). Positivo = adiantado. `anterior` e'
- *  null quando a obra nao tem versao anterior; null tambem quando nada foi medido ou a linha nao tem total. */
-export function desviosEmPP(serie: PontoS[]): { competencia: string; vigente: number | null; anterior: number | null } | null {
-  const ult = [...serie].reverse().find(p => p.acumuladoMedido !== null);
-  if (!ult || ult.acumuladoMedido === null) return null;
-  const fim = serie[serie.length - 1];
-  const medido = ult.acumuladoMedido;
-  const pp = (acumulado: number | null, total: number | null) =>
-    acumulado === null || !total ? null : ((medido - acumulado) / total) * 100;
-  return { competencia: ult.competencia, vigente: pp(ult.acumuladoPrevisto, fim.acumuladoPrevisto),
-    anterior: pp(ult.acumuladoAnterior, fim.acumuladoAnterior) };
-}
-
 /** A curva S da pagina da obra: previsto e medido de execucao, mes a mes e acumulados. O medido acumulado so' vai ate'
  *  a ultima competencia com execucao medida; antes dela, mes sem medicao conta zero (e' dado, nao ausencia). */
 export function curvaS(pontos: PontoDaCurva[], anterior?: PrevistoAnterior | null): PontoS[] {
@@ -153,8 +139,3 @@ export function linhaDoTempo(inicio: string | null, fim: string, hoje: string): 
   return { posicao, restantes };
 }
 
-export function restantesTexto(restantes: number): string {
-  const n = (d: number) => `${d} ${d === 1 ? "dia" : "dias"}`;
-  return restantes > 0 ? `${n(restantes)} ${restantes === 1 ? "restante" : "restantes"}`
-    : restantes === 0 ? "vence hoje" : `vencida há ${n(-restantes)}`;
-}

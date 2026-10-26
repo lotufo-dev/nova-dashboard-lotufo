@@ -5,11 +5,10 @@ import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
 import type { Metade } from "./medicao";
-import { iniciarEnvio, ListaCertidoes, mensagem, naturezaDoEnvio, notasDe, pedeOficio, resumoDe, useCertidoes,
+import { iniciarEnvio, ListaCertidoes, mensagem, naturezaDoEnvio, pedeOficio, resumoDe, useCertidoes,
          type Envio, type ListaEnvios } from "./NotasAEnviar";
 import RegistrarFora from "./RegistrarFora";
 import Selo from "./Selo";
-import { fmtDataPura } from "./tempo";
 
 // Etapa 4 da pagina da medicao (#152, opcao B): o envio ao orgao numa tabela de uma linha por envio -- um so' na
 // SINFRA e na Pref. VG (medicao e reajuste no mesmo e-mail), dois lado a lado na MTPAR e na SES --, com o motivo ao
@@ -39,26 +38,28 @@ export function useEnvios(ids: number[]) {
 }
 
 function SeloDocs({ e }: { e: Envio }) {
-  const r = resumoDe(e, "etapa");
+  const r = resumoDe(e);
   return <Selo classe={r.nivel}>{r.situacao === "pronto" ? "Completo" : r.selo}</Selo>;
 }
 
+/** A natureza ao lado da NF so' quando o envio mistura medicao e reajuste: e' o que diz qual nota e' qual. */
 function CelulaNotas({ e }: { e: Envio }) {
+  const mistura = new Set(e.notas.map(n => n.natureza === "reajuste")).size > 1;
   return (
     <div className="envios__nfs">
       {e.notas.map(n => (
-        <span key={`${n.numero}-${n.natureza}`}>NF {n.numero} <small>· {n.natureza === "reajuste" ? "reajuste" : "medição"}</small></span>
+        <span key={`${n.numero}-${n.natureza}`}>NF {n.numero}{mistura && <> <small>· {n.natureza === "reajuste" ? "reajuste" : "medição"}</small></>}</span>
       ))}
     </div>
   );
 }
 
-export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEditar, versaoDocs, aoAnexarItem, aoMudar, pronta, orgao, aoSemAOutra }: {
+export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEditar, versaoDocs, aoAnexarItem, aoMudar, pronta, aoSemAOutra }: {
   medicaoId: number; envios: Envio[] | null; erro: string; recarregarEnvios: () => Promise<void>;
   podeEditar: boolean; versaoDocs: number; aoAnexarItem: () => void;
   /** depois de enviar ou registrar por fora: a pagina le tudo de novo e mostra o aviso */
   aoMudar: (aviso?: string) => void;
-  pronta: Metade | null; orgao: string | null; aoSemAOutra: () => void;
+  pronta: Metade | null; aoSemAOutra: () => void;
 }) {
   const [aberto, setAberto] = useState<number | null>(null);        // protocolo do envio aberto
   const [oficioDe, setOficioDe] = useState<Envio | null>(null);
@@ -92,15 +93,9 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
   const registraveis = envios.filter(e => e.situacao !== "bloqueado" && e.situacao !== "esperando");
   const envioAberto = envios.find(e => e.protocolo_id !== null && e.protocolo_id === aberto) ?? null;
   const pidAberto = envioAberto?.protocolo_id ?? null;
-  const juntos = envios.length === 1 && envios[0].medicao_ids.length > 1;
 
   return (
     <div className="pilha">
-      <p className="campo__nota med-nota-etapa">
-        {juntos ? "Medição e reajuste vão no mesmo e-mail, como o órgão pede."
-          : envios.length > 1 ? "Neste órgão a medição e o reajuste vão em ofícios e e-mails separados: cada um segue quando as suas notas chegam."
-          : ""}
-      </p>
       {erroAcao && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroAcao}</p>}
       <div className="med-caixa">
         <table className="tabela envios">
@@ -109,7 +104,7 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
           </thead>
           <tbody>
             {envios.map(e => {
-              const r = resumoDe(e, "etapa");
+              const r = resumoDe(e);
               const aberta = e.protocolo_id !== null && e.protocolo_id === pidAberto;
               const esperando = e.situacao === "esperando";
               return (
@@ -120,7 +115,7 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
                   <td data-rotulo="Documentos"><SeloDocs e={e} /></td>
                   <td>
                     <div className="envios__acao">
-                      {(r.situacao !== "pronto" || esperando) && <span className={`envios__motivo envios__motivo--${r.tom}`}>{r.motivo}</span>}
+                      {r.motivo && <span className={`envios__motivo envios__motivo--${r.tom}`}>{r.motivo}</span>}
                       {podeEditar && (esperando
                         ? (pronta && <button type="button" className="btn btn--pequeno" onClick={aoSemAOutra}>
                             {pronta.tipo === "execucao" ? "Enviar a medição sem o reajuste…" : "Enviar o reajuste sem a medição…"}</button>)
@@ -139,7 +134,7 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
       {envioAberto && pidAberto && (
         <div className="notas-v3 med-envio" id="envio-aberto" aria-label="Envio aberto">
           <div className="med-envio__cabeca">
-            <h3>{envioAberto.descricao} · {notasDe(envioAberto)} · <span className="nota-mono">{brl(envioAberto.valor_centavos)}</span></h3>
+            <h3>{envioAberto.descricao} · <span className="nota-mono">{brl(envioAberto.valor_centavos)}</span></h3>
             <button type="button" className="btn btn--pequeno" onClick={() => setAberto(null)}>Fechar</button>
           </div>
           <EnviarNota key={pidAberto} protocoloId={pidAberto} podeEditar={podeEditar} versao={versaoDocs}
@@ -153,7 +148,6 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
         <div className="med-bloco notas-v3">
           <div className="nota-porfora">
             <button type="button" className="botao-link" onClick={() => setFora(true)}>Registrar envio feito fora do sistema</button>
-            <p className="nota-porfora__dica">Quando o e-mail ou o protocolo já saiu por fora (Outlook, balcão do órgão): data, nº do ofício e do processo, e o e-mail enviado.</p>
           </div>
         </div>
       )}
@@ -162,10 +156,9 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
       {oficioDe && (
         <Janela titulo="Número do ofício desta nota" aoFechar={() => setOficioDe(null)}>
           <form className="pilha" onSubmit={ev => { ev.preventDefault(); if (oficio.trim()) void iniciar(oficioDe, oficio); }}>
-            <p className="campo__nota">{orgao ? `Na ${orgao} o` : "O"} envio leva carta com número de ofício. Digite só o número, ex.: 361.</p>
             <div className="campo">
               <label className="campo__rotulo" htmlFor="oficio-numero">Nº do ofício</label>
-              <input id="oficio-numero" name="numero_oficio" type="text" autoFocus autoComplete="off" spellCheck={false} maxLength={40} className="entrada--media entrada--num"
+              <input id="oficio-numero" name="numero_oficio" type="text" autoFocus autoComplete="off" spellCheck={false} maxLength={40} className="entrada--media entrada--num" placeholder="Ex.: 361…"
                 value={oficio} onChange={ev => setOficio(ev.target.value)} />
             </div>
             <div className="iniciar__rodape">
@@ -177,10 +170,4 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
       )}
     </div>
   );
-}
-
-/** Resumo de uma linha da etapa 4 ja' feita: quando a nota saiu. */
-export function resumoEnvioFeito(datas: string[]): string | undefined {
-  const d = datas.filter(Boolean).sort().at(-1);
-  return d ? `enviada em ${fmtDataPura(d)}` : undefined;
 }

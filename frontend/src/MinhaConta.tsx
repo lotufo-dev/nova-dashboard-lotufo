@@ -132,14 +132,13 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
   if (podeEditar && !st) return <p className="vazio">{erro || "Carregando…"}</p>;
 
   // Campo de senha com o olho dentro e o erro embaixo
-  const campoSenha = (campo: CampoSenha, id: string, rotulo: string, auto: string, dica: string, nomeOlho: string,
-                      nota?: string) => (
+  const campoSenha = (campo: CampoSenha, id: string, rotulo: string, auto: string, nomeOlho: string) => (
     <div className="campo">
       <label className="campo__rotulo" htmlFor={id}>{rotulo}</label>
       <div className="senha">
-        <input id={id} type={vendo[campo] ? "text" : "password"} autoComplete={auto} placeholder={dica}
+        <input id={id} type={vendo[campo] ? "text" : "password"} autoComplete={auto}
                value={senha[campo]} aria-invalid={errosCampo[campo] ? true : undefined}
-               aria-describedby={[errosCampo[campo] ? `${id}-erro` : "", nota ? `${id}-nota` : ""].filter(Boolean).join(" ") || undefined}
+               aria-describedby={errosCampo[campo] ? `${id}-erro` : undefined}
                onChange={e => digitar(campo, e.target.value)} />
         <button type="button" className="btn olho" aria-pressed={vendo[campo]}
                 aria-label={`Mostrar ${nomeOlho}`}
@@ -147,33 +146,26 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
           {vendo[campo] ? <IconeOlhoFechado /> : <IconeOlho />}
         </button>
       </div>
-      {nota && <p className="campo__nota num" id={`${id}-nota`}>{nota}</p>}
       <p className="campo__erro" id={`${id}-erro`} role={errosCampo[campo] ? "alert" : undefined}>{errosCampo[campo]}</p>
     </div>
   );
-  const k = [...senha.nova].length;   // pontos de codigo, como o len() do servidor
 
   return (
     <div className="coluna-conta">
-      {/* gate Sol S6 (10/10/2026): sem e-mail, sem a frase */}
+      {/* gate Sol S6 (10/10/2026): sem e-mail, sem a linha */}
       <section className="cartao" aria-labelledby="t-sua">
         <header className="cartao__cabeca"><h2 className="cartao__titulo" id="t-sua">Sua conta</h2></header>
         <div className="cartao__corpo">
-          {usuario.email && <p>Você entra com o e-mail <strong>{usuario.email}</strong>.</p>}
-          <p className="campo__nota">
-            Perfil: {rotuloPerfil(usuario.perfil)}.
-            {!podeEditar && " A diretoria não manda e-mail pela dashboard: aqui ficam o e-mail de entrada e a troca de senha."}
-          </p>
+          {usuario.email && <p>E-mail: <strong>{usuario.email}</strong></p>}
+          <p>Perfil: <strong>{rotuloPerfil(usuario.perfil)}</strong></p>
         </div>
       </section>
       <section className="cartao" aria-labelledby="t-senha">
         <header className="cartao__cabeca"><h2 className="cartao__titulo" id="t-senha">Trocar senha</h2></header>
         <form className="cartao__corpo form-senha" onSubmit={trocarSenha} noValidate>
-          {campoSenha("atual", "senha-atual", "Senha atual", "current-password", "Digite sua senha atual", "a senha atual")}
-          {campoSenha("nova", "senha-nova", "Senha nova (mínimo de 10 caracteres)", "new-password", "Digite a nova senha",
-                      "a senha nova", k >= 10 ? `${k} caracteres · tamanho bom` : `${k} de 10 caracteres`)}
-          {campoSenha("confirmar", "senha-confirmar", "Confirmar a senha nova", "new-password", "Confirme a nova senha",
-                      "a confirmação")}
+          {campoSenha("atual", "senha-atual", "Senha atual", "current-password", "a senha atual")}
+          {campoSenha("nova", "senha-nova", "Senha nova (mínimo de 10 caracteres)", "new-password", "a senha nova")}
+          {campoSenha("confirmar", "senha-confirmar", "Confirmar a senha nova", "new-password", "a confirmação")}
           {erroSenha && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroSenha}</p>}
           <button type="submit" className="btn btn--primario botao-largo" disabled={ocupado}>
             {trocandoSenha ? "Trocando…" : "Trocar senha"}
@@ -188,7 +180,6 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
             {st.conectado ? <Selo classe="selo--ok">Conectada</Selo> : <Selo classe="selo--atencao">Não conectada</Selo>}
           </header>
           <div className="cartao__corpo">
-            <p>Os e-mails que você manda pela dashboard saem da sua própria caixa e aparecem nos seus itens enviados.</p>
             {!st.configurado && (
               <p className="aviso" role="alert"><span className="aviso__ponto" aria-hidden="true" />
                 <span>O Microsoft 365 ainda não foi configurado neste servidor.</span></p>
@@ -196,11 +187,10 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
             {st.login.estado === "aguardando" && st.login.user_code && (
               <div className="codigo">
                 <span>
-                  Abra <a href={st.login.verification_uri ?? "#"} target="_blank" rel="noreferrer">{st.login.verification_uri}</a>,
-                  digite o código abaixo e entre com a sua conta da Lotufo.
+                  Abra <a href={st.login.verification_uri ?? "#"} target="_blank" rel="noreferrer">{st.login.verification_uri}</a> e
+                  digite o código:
                 </span>
                 <span className="codigo__valor">{st.login.user_code}</span>
-                <span className="campo__nota">Esta página confere sozinha a cada 5 segundos se você já entrou.</span>
               </div>
             )}
             {st.login.estado === "expirado" && (
@@ -218,8 +208,6 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
               {st.conectado ? "Conectar de novo"
                 : st.login.estado === "aguardando" ? "Pedir outro código" : "Conectar minha conta Microsoft"}
             </button>
-            <p className="campo__nota">Conectar de novo também libera as sugestões de contatos da empresa ao escrever o
-              destinatário, como no Outlook.</p>
           </div>
         </section>
         <section className="cartao" aria-labelledby="t-ass">
@@ -228,7 +216,6 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
             {st.assinatura ? <Selo classe="selo--ok">Cadastrada</Selo> : <Selo>Não cadastrada</Selo>}
           </header>
           <div className="cartao__corpo">
-            <p>A imagem da sua assinatura vai no fim de todo e-mail que você manda pela dashboard (PNG ou JPG, até 1 MB).</p>
             <div className={`assinatura-alvo${arrastando ? " arrastando" : ""}`} tabIndex={0} role="button"
                  aria-label="Colar ou arrastar a imagem da assinatura" aria-describedby="alvo-dica"
                  onPaste={colar} onDragOver={ev => { ev.preventDefault(); setArrastando(true); }}
@@ -238,18 +225,14 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
                    const f = imagemDe(ev.dataTransfer);
                    if (f) void enviarImagem(f); else setErroAss("Arraste um arquivo PNG ou JPG.");
                  }}>
-              {st.assinatura
-                ? <img src={`/api/correio/assinatura?v=${versao}`} alt="Sua assinatura" />
-                : <p className="campo__nota">Nenhuma assinatura cadastrada.</p>}
-              <span className="assinatura-alvo__dica" id="alvo-dica">Clique aqui e cole a imagem (Ctrl+V), ou arraste o arquivo</span>
+              {st.assinatura && <img src={`/api/correio/assinatura?v=${versao}`} alt="Sua assinatura" />}
+              <span className="assinatura-alvo__dica" id="alvo-dica">Cole (Ctrl+V) ou arraste a imagem</span>
             </div>
             {erroAss && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroAss}</p>}
             <details className="detalhes">
               <summary>Onde achar a imagem</summary>
-              <p className="campo__nota">O Outlook do computador guarda a assinatura em{" "}
-                <code className="caminho">%APPDATA%\Microsoft\Signatures</code>, dentro da pasta que termina em “_arquivos”
-                (arquivo image001.png). Cole esse endereço na barra da janela de escolher arquivo. Também dá para copiar a
-                imagem e colar no quadro acima (Ctrl+V), ou arrastar o arquivo para ele.</p>
+              <p className="campo__nota"><code className="caminho">%APPDATA%\Microsoft\Signatures</code>, na pasta que termina
+                em “_arquivos” (image001.png)</p>
             </details>
             <div className="par-botoes">
               <label className="btn btn--primario">

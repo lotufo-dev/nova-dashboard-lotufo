@@ -45,21 +45,24 @@ describe("Carteira", () => {
     expect(within(numeros).getByText("Saldo a executar")).toBeTruthy();
     expect(within(numeros).getByText("Medido no ano")).toBeTruthy();
     expect(within(numeros).getByText("Faturado no mês")).toBeTruthy();
-    // o faturado do mês vem do servidor, em milhões, com o valor exato e a contagem de notas na linha de apoio
+    // o faturado do mês vem do servidor, em milhões, com o valor exato no title e sem linha de apoio
     expect(within(numeros).getByText("R$ 1,2 mi")).toBeTruthy();
-    expect(within(numeros).getByText(/2 medições faturadas em 09\/2026/)).toBeTruthy();
+    expect(within(numeros).queryByText(/medições faturadas/)).toBeNull();
+    expect(numeros.querySelector(".cart-numero__apoio")).toBeNull();
     // curva S acumulada: previsto 150.000 + 200.000 e medido 100.000 + 150.000 até 09/2026
     expect(screen.getByRole("img", { name: /Previsto e medido acumulados de 08\/2026 a 09\/2026/ })).toBeTruthy();
     const leitura = (screen.getByRole("status").textContent ?? "").replace(/\s/g, " ");
     expect(leitura).toContain("previsto R$ 3.500,00");
     expect(leitura).toContain("medido R$ 2.500,00");
+    expect(leitura).not.toContain("do previsto");
+    expect(screen.queryByText("acumulado, na cota da Lotufo")).toBeNull();
     // cartão do contratante: saldo, obras, % executado (15 de 20 milhões) e link para as obras dele
     const cartao = screen.getByRole("link", { name: /SINFRA/ });
     expect(cartao.getAttribute("href")).toContain("orgao=SINFRA");
     expect(within(cartao).getByText("75%")).toBeTruthy();
-    expect(within(cartao).getByText(/3 obras em execução · 100,0% do saldo da carteira/)).toBeTruthy();
-    // a linha das obras com problema leva ao QDOP; o que saiu do Resumo não está mais lá
-    expect(screen.getByText(/1 de 1 obras com farol em Ação, Atenção ou Crítico/)).toBeTruthy();
+    expect(within(cartao).queryByText(/obras em execução/)).toBeNull();
+    // sem a linha "N de M obras com farol…" (as abas já levam ao QDOP e à Produção); o que saiu do Resumo não está mais lá
+    expect(screen.queryByText(/obras com farol em Ação, Atenção ou Crítico/)).toBeNull();
     expect(screen.queryByText("Onde está o dinheiro")).toBeNull();
     expect(screen.queryByText("Terminam")).toBeNull();
   });
@@ -82,13 +85,14 @@ describe("Carteira", () => {
     const tabela = await screen.findByRole("table", { name: /QDOP, na cota da Lotufo/ });
     expect(within(tabela).getByText("Ação")).toBeTruthy();
     expect(within(tabela).getByText("Atenção")).toBeTruthy();
-    expect(within(tabela).getByText("Total (3 obras)")).toBeTruthy();
-    expect(screen.getByText("2 de 3 obras (19 ativas, 2 em encerramento, 1 suspensa) com farol em Ação, Atenção ou Crítico")).toBeTruthy();
+    expect(within(tabela).getByText("Total")).toBeTruthy();
+    expect(screen.queryByText(/com farol em Ação, Atenção ou Crítico/)).toBeNull();
+    // os botoes do farol so' com o rotulo, sem contagem
+    expect(screen.getByRole("button", { name: "Atenção" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^Atenção/ }));
     expect(within(tabela).queryByText("Cavalaria")).toBeNull();
-    expect(within(tabela).getByText("Total (1 obra)")).toBeTruthy();
     // total do recorte: só a "Outra" (contratual 5.000,00; faturado 1.000,00; saldo 4.000,00)
-    const total = within(tabela).getByText("Total (1 obra)").closest("tr") as HTMLElement;
+    const total = within(tabela).getByText("Total").closest("tr") as HTMLElement;
     const txt = (total.textContent ?? "").replace(/\s/g, " ");
     expect(txt).toContain("R$ 5.000,00");
     expect(txt).toContain("R$ 4.000,00");
@@ -102,17 +106,22 @@ describe("Carteira", () => {
     expect(screen.getByText("Terminam")).toBeTruthy();
     expect(await screen.findByText("0 obras terminam em 90 dias")).toBeTruthy();
     expect(screen.getByText("Avisos da diretoria")).toBeTruthy();
-    expect(screen.getByText("Nenhum aviso.")).toBeTruthy();
+    expect(screen.getByText("Avisos da diretoria").nextElementSibling?.textContent).toBe("0 avisos");
+    expect(screen.queryByText(/A execução ou a vigência/)).toBeNull();
   });
 
   it("Produção: o mês, quantas obras protocolaram, onde está o dinheiro (a conciliar) e o saldo por órgão", async () => {
     api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
     render(<Diretoria ir={() => {}} aba="producao" />);
-    expect(await screen.findByText("Onde está o dinheiro")).toBeTruthy();
-    expect(screen.getAllByText("a conciliar").length).toBeGreaterThan(0);
+    expect(await screen.findByText("Onde está o dinheiro (cota)")).toBeTruthy();
+    // protocolado sem conciliar: "—", sem frase
+    expect(screen.getByText("protocolado esperando pagamento").previousElementSibling?.textContent).toBe("—");
+    expect(screen.queryByText("a conciliar")).toBeNull();
+    expect(screen.queryByText(/a conciliar com a controladoria/)).toBeNull();
     expect(await screen.findByText("1 de 3")).toBeTruthy();
     expect(screen.getByText("obras ativas protocolaram")).toBeTruthy();
-    expect(screen.getByText("mesmo mês do ano anterior: R$ 800,00")).toBeTruthy();
+    expect(screen.queryByText(/mesmo mês do ano anterior/)).toBeNull();
+    expect(screen.getByText("medido esperando nota")).toBeTruthy();
     expect(screen.getByText("Próximos meses")).toBeTruthy();
     // #255: os próximos meses só trazem o faturamento previsto; o recebimento previsto saiu
     expect(screen.getByText("Faturamento previsto")).toBeTruthy();
@@ -149,10 +158,10 @@ describe("Carteira", () => {
       expect(texto(l)).toEqual([`${String(i + 1).padStart(2, "0")}/2025`, reais((i + 1) * 100_000), reais((i + 1) * 50_000)]);
     });
     // a tabela mora no "Tabela por competência", recolhido, que o aviso do gráfico cita
-    expect(tabela.closest("details")?.querySelector("summary")?.textContent).toBe("Tabela por competência (12)");
+    expect(tabela.closest("details")?.querySelector("summary")?.textContent).toBe("Tabela por competência");
     // o gráfico (role="img") manda o leitor de tela para a tabela, que fica logo abaixo
     const grafico = screen.getByRole("img", { name: /Tabela por competência/ });
     expect(grafico.getAttribute("aria-label")).toContain("nos últimos 12 meses");
-    expect(screen.getByText("Tabela por competência (12)").tagName).toBe("SUMMARY");
+    expect(screen.getByText("Tabela por competência").tagName).toBe("SUMMARY");
   });
 });

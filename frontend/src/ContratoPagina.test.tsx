@@ -66,6 +66,9 @@ describe("Página da obra: o desenho novo", () => {
     }
     await waitFor(() => expect(within(lista).getByText("R$ 450,00")).toBeTruthy());   // medido de execucao
     expect(within(lista).getByText("R$ 550,00")).toBeTruthy();                         // saldo do cronograma
+    // texto na tela (26/10/2026): os numeros sem legenda embaixo; 100% da Lotufo nao fala de cota
+    expect(lista.textContent).not.toMatch(/do valor vigente|valor vigente −|a conciliar|cota da Lotufo/);
+    expect(document.querySelector(".topbar__meta")!.textContent).toBe("SES · Contrato CT 1/2026");
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
     expect(within(caminho).getByRole("link", { name: "Obras" }).getAttribute("href")).toBe("/obras");
     expect(within(caminho).getByRole("link", { name: "SES" }).getAttribute("href")).toBe("/obras?orgao=SES");
@@ -77,16 +80,26 @@ describe("Página da obra: o desenho novo", () => {
     expect(within(abas).getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBe("page");
   });
 
+  it("em consórcio, o cabeçalho diz a cota uma vez, sem \"valores cheios\"", async () => {
+    responderCompleto();
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, opcoes?: { method?: string }) =>
+      url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, percentual_lotufo_bp: 4000, cota_vigente_centavos: 40000 } : base(url, opcoes));
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    await screen.findByRole("heading", { level: 1, name: "Hospital" });
+    expect(document.querySelector(".topbar__meta")!.textContent).toBe("SES · Contrato CT 1/2026 · cota 40%");
+  });
+
   it("a curva S alterna entre acumulado e por mês", async () => {
     responderCompleto();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="prazos" origem={null} busca={{}} />);
     const curva = (await screen.findByRole("heading", { name: "Curva S" })).closest("section")!;
     await waitFor(() => expect(within(curva).getByRole("img")).toBeTruthy());
     expect(within(curva).getByRole("button", { name: "acumulado" }).getAttribute("aria-pressed")).toBe("true");
-    expect(within(curva).getByText(/Até 09\/2026: previsto R\$ 600,00, medido R\$ 450,00/)).toBeTruthy();
     fireEvent.click(within(curva).getByRole("button", { name: "por mês" }));
     expect(within(curva).getByRole("button", { name: "por mês" }).getAttribute("aria-pressed")).toBe("true");
-    expect(within(curva).getByText(/Por competência: previsto/)).toBeTruthy();
+    // o rodape que repetia os numeros do grafico saiu (CurvaS, texto na tela 26/10/2026)
+    expect(within(curva).queryByText(/Por competência: previsto|Até 09\/2026/)).toBeNull();
   });
 
   it("o hoje das linhas do tempo vem da data do dia e anda sozinho com os dias", async () => {
@@ -98,16 +111,15 @@ describe("Página da obra: o desenho novo", () => {
     expect(within(cartao).getAllByText("Hoje 16/10/2026")).toHaveLength(2);
     expect(within(cartao).getByText("01/01/2026")).toBeTruthy();
     expect(within(cartao).getByText("31/12/2026")).toBeTruthy();
-    expect(within(cartao).getByText("76 dias restantes")).toBeTruthy();
-    expect(within(cartao).getByText("107 dias restantes")).toBeTruthy();
+    // texto na tela (26/10/2026): quantos dias restam nao se escreve; em dia, nenhum selo
+    expect(within(cartao).queryByText(/restantes|vencida/)).toBeNull();
     const antes = (cartao.querySelector(".lt__marca") as HTMLElement).style.left;
     await act(async () => { vi.advanceTimersByTime(24 * 3600 * 1000); });
     expect(within(cartao).getAllByText("Hoje 17/10/2026")).toHaveLength(2);
-    expect(within(cartao).getByText("75 dias restantes")).toBeTruthy();
     expect((cartao.querySelector(".lt__marca") as HTMLElement).style.left).not.toBe(antes);
   });
 
-  it("obra com prazo vencido diz 'vencida há N dias' e sem início cadastrado não inventa o marcador", async () => {
+  it("obra com prazo vencido leva o selo 'vencida' e sem início cadastrado não inventa o marcador", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date("2027-02-05T15:00:00Z"));
     responderCompleto();
@@ -116,9 +128,9 @@ describe("Página da obra: o desenho novo", () => {
       url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, vigencia_inicio: null } : base(url, o));
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
     const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
-    expect(within(cartao).getByText("vencida há 36 dias")).toBeTruthy();
-    expect(within(cartao).getByText("vencida há 5 dias")).toBeTruthy();
-    expect(within(cartao).getByText("Início não cadastrado.")).toBeTruthy();
+    expect(within(cartao).getAllByText("vencida")).toHaveLength(2);
+    expect(within(cartao).queryByText(/vencida há/)).toBeNull();
+    expect(within(cartao).queryByText("Início não cadastrado.")).toBeNull();
     expect(within(cartao).getAllByText(/^Hoje /)).toHaveLength(1);
   });
 
@@ -133,29 +145,27 @@ describe("Página da obra: o desenho novo", () => {
     vi.setSystemTime(new Date(iso));
   };
 
-  it("obra suspensa mostra o selo 'paralisada' e que o vencimento não conta, sem dias", async () => {
-    fixarDia("2026-10-16T15:00:00Z");
+  it("obra suspensa mostra o selo 'paralisada' e o vencimento da execução não conta", async () => {
+    fixarDia("2027-01-05T15:00:00Z");     // execucao vencida (31/12/2026), vigencia em dia
     responderCom({ status: "suspenso" });
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
     const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
     expect(within(cartao).getByText("paralisada")).toBeTruthy();
-    expect(within(cartao).getByText("obra paralisada: o vencimento não conta")).toBeTruthy();
-    expect(within(cartao).queryByText("76 dias restantes")).toBeNull();
-    expect(within(cartao).getByText("107 dias restantes")).toBeTruthy();   // a vigência segue contando
+    expect(within(cartao).queryByText("obra paralisada: o vencimento não conta")).toBeNull();
+    expect(within(cartao).queryByText("vencida")).toBeNull();
   });
 
-  it("contrato encerrado ou rescindido diz isso no lugar dos dias", async () => {
-    fixarDia("2026-10-16T15:00:00Z");
+  it("contrato encerrado ou rescindido não leva selo de vencida nem frase no lugar dos dias", async () => {
+    fixarDia("2027-02-05T15:00:00Z");
     responderCom({ status: "encerrado" });
     const { unmount } = render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
     let cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
-    expect(within(cartao).getAllByText("contrato encerrado")).toHaveLength(2);
-    expect(within(cartao).queryByText(/restantes/)).toBeNull();
+    expect(within(cartao).queryByText(/contrato encerrado|vencida|restantes/)).toBeNull();
     unmount();
     responderCom({ status: "rescindido" });
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
     cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
-    expect(within(cartao).getAllByText("contrato rescindido")).toHaveLength(2);
+    expect(within(cartao).queryByText(/contrato rescindido|vencida/)).toBeNull();
   });
 
   it("o dia vira à meia-noite de Cuiabá, não à do UTC", async () => {
@@ -164,7 +174,6 @@ describe("Página da obra: o desenho novo", () => {
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
     const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
     expect(within(cartao).getAllByText("Hoje 16/10/2026")).toHaveLength(2);
-    expect(within(cartao).getByText("76 dias restantes")).toBeTruthy();
   });
 
   it("data final ilegível mostra só a data, nunca 'NaN dias'", async () => {

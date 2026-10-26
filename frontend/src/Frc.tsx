@@ -4,12 +4,14 @@ import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import { IconeCheck, mensagem } from "./NotasAEnviar";
 import "./notas.css";
+import Selo from "./Selo";
 import { fmtDataPura } from "./tempo";
 
 // FRC (Fatura de Recebimento de Consorcio) gerada pela dashboard (2026-10-09): na etapa 3 de obra de consorcio, a
 // lista das notas esperadas (empresa x municipio, lidas do CONTEUDO do PDF), a area de arrastar as notas e o bloco
 // da FRC (numero digitavel, gerar, baixar PDF e planilha). Gera sozinha quando a ultima nota chega; sai sem
-// assinatura: a assinada (DocuSign) e' anexada no envio das notas (etapa 4). As regras moram no servidor.
+// assinatura: a assinada (DocuSign) e' anexada no envio das notas (etapa 4), e aqui so' ganha o selo. As regras
+// moram no servidor.
 
 type Item = {
   chave: string; empresa: string; municipio: string; esperado_centavos: number; situacao: "anexada" | "falta";
@@ -53,7 +55,6 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
   if (!s.disponivel) return s.motivo ? <p className="campo__nota">FRC do {s.consorcio}: {s.motivo}.</p> : null;
 
   const itens = s.itens ?? [];
-  const faltam = itens.filter(i => i.situacao === "falta").length;
 
   async function anexar(arquivos: FileList | null) {
     const pdfs = Array.from(arquivos ?? []).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
@@ -101,8 +102,7 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
     <div className="notas-v3 frc">
       <div className="frc__cabeca">
         <h3 className="frc__titulo">Notas das consorciadas</h3>
-        <span className="campo__nota">{s.consorcio} · {itens.length === 0 ? "sem notas esperadas"
-          : faltam === 0 ? `as ${itens.length} notas anexadas` : `falta${faltam > 1 ? "m" : ""} ${faltam} de ${itens.length}`}</span>
+        <span className="campo__nota">{s.consorcio}</span>
       </div>
       {itens.length > 0 && (
         <ul className="nota-itens frc__lista" aria-label="Notas esperadas da medição">
@@ -119,13 +119,13 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
                     <span>{i.empresa} · {i.municipio}</span>
                     {i.situacao === "anexada" ? (
                       <span className={`nota-item__detalhe${i.problema ? " nota-item__detalhe--falta" : ""}`}>
-                        anexada · NF nº <span className="nota-mono">{i.numero}</span>
+                        NF nº <span className="nota-mono">{i.numero}</span>
                         {i.valores && <> · <span className="nota-mono">{brl(i.valores.bruto)}</span></>}
                         {i.problema && ` · ${i.problema}`}
                       </span>
                     ) : (
                       <span className="nota-item__detalhe nota-item__detalhe--falta">
-                        falta · esperada <span className="nota-mono">{brl(i.esperado_centavos)}</span> pelo espelho
+                        esperada <span className="nota-mono">{brl(i.esperado_centavos)}</span>
                       </span>
                     )}
                   </span>
@@ -164,11 +164,11 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
           </label>
         </div>
       )}
-      <span className="campo__nota">O número e os valores vêm do conteúdo de cada PDF, não do nome do arquivo.</span>
 
       <div className="frc__bloco">
         <div className="frc__cabeca">
           <h3 className="frc__titulo">FRC</h3>
+          {s.assinada && <Selo classe="selo--ok">Assinada</Selo>}
           {s.frc && (
             <span className="campo__nota">
               nº <span className="nota-mono">{String(s.frc.numero).padStart(5, "0")}</span> gerada em {fmtDataPura(s.frc.data_geracao)}
@@ -181,15 +181,12 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
           <p className="notas__diverge"><IconeAlerta className="icone icone--p" />As notas mudaram depois desta FRC: gere de novo.</p>
         )}
         {s.bloqueio && <p className="nota-item__detalhe--falta frc__bloqueio">{s.bloqueio}</p>}
-        {!s.frc && !s.bloqueio && <p className="campo__nota">Todas as notas anexadas: gere a FRC.</p>}
-        {!s.frc && s.bloqueio && <p className="campo__nota">A FRC é gerada sozinha quando todas as notas esperadas estiverem anexadas.</p>}
         <div className="form-inline frc__gerar">
           <div className="campo">
             <label className="campo__rotulo" htmlFor={`frc-numero-${medicaoId}`}>Número da FRC</label>
             <input id={`frc-numero-${medicaoId}`} name="numero_frc" className="entrada--curta entrada--num num" inputMode="numeric" autoComplete="off" spellCheck={false}
               value={numero} disabled={!podeEditar || ocupado} onChange={ev => setNumero(ev.target.value.replace(/\D/g, "").slice(0, 5))} />
           </div>
-          <span className="campo__nota frc__ultima">Última registrada: <span className="nota-mono">{s.ultima}</span></span>
           {podeEditar && (
             <button type="button" className={`btn${s.frc ? "" : " btn--primario"}`} disabled={ocupado || !!s.bloqueio || !numeroOk}
               onClick={() => void gerar()}>{ocupado ? "Gerando…" : s.frc ? "Gerar de novo" : "Gerar a FRC"}</button>
@@ -201,10 +198,6 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
             </>
           )}
         </div>
-        <p className="frc__assinar">
-          {s.assinada ? <><span className="feito">FRC assinada anexada no envio.</span> </> : null}
-          Assine no DocuSign e anexe a FRC assinada no envio das notas (etapa 4).
-        </p>
       </div>
       <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}

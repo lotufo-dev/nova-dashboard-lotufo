@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { brl } from "./Medicoes";
-import { curvaS, desviosEmPP, type MarcaAditivo, type PontoDaCurva, type PrevistoAnterior } from "./obra";
+import { curvaS, type MarcaAditivo, type PontoDaCurva, type PrevistoAnterior } from "./obra";
 import { Link } from "./Link";
 import { useHoje } from "./ExecucaoContrato";
 import { fmtCompetencia, fmtMesCurto } from "./tempo";
@@ -77,19 +77,10 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
   const linhaPrevisto = caminho(serie.map((p, i) => ({ i, v: p.acumuladoPrevisto })));
   const linhaAnterior = caminho(serie.map((p, i) => ({ i, v: p.acumuladoAnterior ?? 0 })));
   const marcas = aditivos.map(a => ({ ...a, i: serie.findIndex(p => p.competencia === a.competencia) })).filter(a => a.i >= 0);
-  const desvio = desviosEmPP(serie);
   const linhaMedido = caminho(medidos.map(({ p, i }) => ({ i, v: p.acumuladoMedido ?? 0 })));
   const bw = Math.max(2, Math.min(14, banda * 0.36));
 
   const sel = sobre !== null ? serie[sobre] : null;
-  const pp = (n: number) => `${(Math.abs(n) < 0.05 ? 0 : n).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} p.p.`;
-  const textoDesvio = desvio && desvio.vigente !== null
-    ? ` Desvio em ${fmtCompetencia(desvio.competencia)}, contra o vigente: ${pp(desvio.vigente)}${desvio.anterior !== null ? `; contra o anterior: ${pp(desvio.anterior)}` : ""}.`
-    : "";
-  const rodape = modo === "acumulado"
-    ? (ultimo ? `Até ${fmtCompetencia(ultimo.competencia)}: previsto ${brl(ultimo.acumuladoPrevisto)}, medido ${brl(ultimo.acumuladoMedido ?? 0)}. Previsto do cronograma vigente; medido de execução.${textoDesvio}`
-      : "Nenhuma execução medida ainda. Previsto do cronograma vigente.")
-    : "Por competência: previsto (cinza) e medido de execução (índigo; mais claro quando ainda é provisório: protocolado, sem atestado).";
 
   return (
     <section className="cartao curva" aria-labelledby="titulo-curva">
@@ -102,7 +93,7 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
           </div>
           <div className="curva__legenda" aria-hidden="true">
             <span><span className="curva__chave curva__chave--previsto" />{temAnterior ? "Previsto vigente" : "Previsto"}</span>
-            {temAnterior && modo === "acumulado" && <span><span className="curva__chave curva__chave--anterior" />Previsto anterior à última repactuação</span>}
+            {temAnterior && modo === "acumulado" && <span><span className="curva__chave curva__chave--anterior" />Previsto anterior</span>}
             <span><span className="curva__chave curva__chave--medido" />Medido</span>
           </div>
         </div>
@@ -115,7 +106,7 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
       {pontos && N === 0 && (
         <div className="vazio">
           <p className="vazio__titulo">Nenhuma competência prevista ou medida</p>
-          <p>O previsto vem do <Link para={{ tela: "obra", id: contratoId, aba: "contrato" }} secao="cronograma">cronograma</Link> da obra.</p>
+          <p><Link para={{ tela: "obra", id: contratoId, aba: "contrato" }} secao="cronograma">Abrir o cronograma</Link></p>
         </div>
       )}
 
@@ -189,9 +180,6 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
                 {sel.acumuladoAnterior !== null && (
                   <div className="linha-dica"><span>Anterior acumulado</span><span>{brl(sel.acumuladoAnterior)}</span></div>
                 )}
-                {sel.acumuladoMedido !== null && (
-                  <div className="linha-dica"><span>Diferença</span><span>{brl(sel.acumuladoMedido - sel.acumuladoPrevisto)}</span></div>
-                )}
               </>
             ) : (
               <>
@@ -202,7 +190,6 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
           </div>
         )}
       </div>
-      {pontos && N > 0 && <p className="curva__rodape">{rodape}</p>}
     </section>
   );
 }

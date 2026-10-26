@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { avisosDaObra, destinoDoAviso, type Aviso } from "./Alertas";
+import { cleanup, render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import { afterEach, describe, expect, it } from "vitest";
+import Alertas, { avisosDaObra, destinoDoAviso, type Aviso } from "./Alertas";
 import { hrefDe } from "./rota";
 
 const base: Omit<Aviso, "tipo" | "contrato_id" | "destino"> = {
@@ -54,5 +56,25 @@ describe("aviso de garantia (#161)", () => {
       const d = destinoDoAviso(a)!;
       expect(hrefDe(d.para, d.busca, d.secao)).toBe("/documentos/2/garantia");
     }
+  });
+});
+
+describe("cartao de avisos (texto-na-tela, 26/10/2026)", () => {
+  afterEach(cleanup);
+
+  it("sem a contagem por nivel no cabecalho e sem o 'onde se resolve' sob o aviso que ja' e' link", () => {
+    const a: Aviso = { ...base, tipo: "execucao_vencendo", contrato_id: 7, obra: "MT-388", mensagem: "execução termina em 3 dias",
+      destino: { tela: "contrato", id: 7, aba: "prazos" } };
+    const { container } = render(createElement(Alertas, { itens: [a], ir: () => {} }));
+    expect(screen.getByRole("link").getAttribute("href")).toBe("/obras/7/prazos");
+    expect(container.querySelector(".cartao__dica")).toBeNull();
+    expect(container.querySelector(".alerta__onde")).toBeNull();
+    expect(container.textContent).not.toMatch(/de\sação|Prazos/);
+  });
+
+  it("lista vazia: uma linha curta", () => {
+    render(createElement(Alertas, { itens: [], ir: () => {} }));
+    expect(screen.getByText("Nenhum aviso.")).toBeTruthy();
+    expect(screen.queryByText(/Tudo em dia/)).toBeNull();
   });
 });

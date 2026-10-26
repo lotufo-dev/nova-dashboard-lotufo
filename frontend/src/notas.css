@@ -19,9 +19,6 @@
   font-size: 14px; text-decoration: none; }
 .notas-v3 a.nota-pilula:hover { border-color: var(--acento); color: var(--texto); text-decoration: none; }
 .notas-v3 a.nota-pilula[aria-current="true"] { background: var(--acento); border-color: var(--acento); color: #fff; font-weight: 500; }
-.notas-v3 .nota-pilula__n { padding: 0 7px; border-radius: var(--raio-pilula); background: var(--nota-cinza); color: var(--texto-2);
-  font-size: 12px; line-height: 20px; }
-.notas-v3 a.nota-pilula[aria-current="true"] .nota-pilula__n { background: rgb(255 255 255 / .22); color: #fff; }
 
 .notas-v3 .nota-colunas { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
 .notas-v3 .nota-colunas > .pilha { flex: 3 1 420px; min-width: 0; gap: 16px; }
@@ -84,7 +81,6 @@
 .notas-v3 .botao-link { height: auto; padding: 0; border: 0; background: none; box-shadow: none; color: var(--acento); font-size: 14px; }
 .notas-v3 .botao-link:hover:not(:disabled) { background: none; color: var(--acento-forte); text-decoration: underline; }
 .notas-v3 .nota-porfora { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
-.notas-v3 .nota-porfora__dica { margin: 0; font-size: 13px; line-height: 18px; color: var(--texto-2); }
 .notas-v3 .nota-modal { width: min(520px, 94vw); text-align: left; }
 
 /* vazio */
@@ -140,7 +136,6 @@
 .notas-v3 .nota-rodape { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 .notas-v3 .nota-rodape__motivo { margin: 0; font-size: 14px; }
 .notas-v3 .nota-rodape__motivo--neutro { color: var(--texto-2); }
-.notas-v3 .nota-rodape__motivo--atencao { color: var(--atencao); }
 .notas-v3 .nota-rodape__motivo--bloqueio { color: var(--acao); }
 .notas-v3 .nota-rodape .nota-porfora { margin-left: auto; max-width: 300px; align-items: flex-end; text-align: right; }
 
@@ -206,8 +201,6 @@
 .notas-v3 .frc__bloqueio { font-size: 14px; }
 .notas-v3 .frc__gerar { align-items: flex-end; gap: 12px; }
 .notas-v3 .frc__gerar .entrada--curta { width: 96px; }
-.notas-v3 .frc__ultima { align-self: center; padding-top: 18px; }
-.notas-v3 .frc__assinar { font-size: 13px; line-height: 18px; color: var(--texto-2); }
 /* etapa 4: a FRC assinada se arrasta no proprio item */
 .notas-v3 .nota-item--soltar { flex-direction: column; align-items: stretch; }
 .notas-v3 .nota-item--soltar .nota-complementares__soltar { min-height: 52px; }
