@@ -139,3 +139,13 @@ export function linhaDoTempo(inicio: string | null, fim: string, hoje: string): 
   return { posicao, restantes };
 }
 
+/** Selo do prazo (texto na tela, 26/10/2026): so' quando pede acao, nos limites do aviso "Execucao vencendo" (spec
+ *  §11): a ate' 60 dias do fim em Atencao, a ate' 30 ou vencido em Critico. Fora disso, null (quanto falta nao se
+ *  escreve). */
+export function seloDoPrazo(restantes: number | null): { classe: string; texto: string } | null {
+  if (restantes === null || Number.isNaN(restantes) || restantes > 60) return null;
+  const texto = restantes < 0 ? "vencida" : restantes === 0 ? "vence hoje"
+    : `vence em ${restantes} ${restantes === 1 ? "dia" : "dias"}`;
+  return { classe: restantes <= 30 ? "selo--acao" : "selo--atencao", texto };
+}
+

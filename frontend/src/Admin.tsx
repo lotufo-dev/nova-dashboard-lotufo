@@ -363,13 +363,14 @@ function Grupo({ id, titulo, conta, carregadas, mostrando, verTodas, mais, child
   id: CategoriaRec; titulo: string; conta: { n: number; piso: boolean; haMais: boolean }; carregadas: number; mostrando: number;
   verTodas: React.ReactNode; mais: React.ReactNode; children: React.ReactNode;
 }) {
-  const { haMais } = conta;
+  const { piso, haMais } = conta;
   return (
     <section className="cartao" aria-labelledby={`titulo-rec-${id}`}>
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id={`titulo-rec-${id}`}>{titulo}</h2>
       </div>
-      {carregadas === 0 ? <div className="vazio vazio--curto"><p>Nenhuma linha.</p></div> : children}
+      {/* com `piso` ainda ha' linhas por carregar: o grupo nao esta' vazio, so' a pagina carregada */}
+      {carregadas === 0 ? <div className="vazio vazio--curto"><p>{piso ? "Nenhuma linha entre as carregadas." : "Nenhuma linha."}</p></div> : children}
       {mostrando < carregadas && <div className="cartao__corpo">{verTodas}</div>}
       {mostrando === carregadas && haMais && <div className="cartao__corpo">{mais}</div>}
     </section>

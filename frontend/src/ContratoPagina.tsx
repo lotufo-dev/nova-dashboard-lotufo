@@ -52,6 +52,12 @@ const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "contrato", rotulo: "Contrato" },
 ];
 
+/** A cota da Lotufo no cabecalho, so' em consorcio (principio 7): "cota 40% (R$ 400.000,00)". */
+function cotaDaObra(c: Cabecalho): string | null {
+  const cota = baseDosValores(c.percentual_lotufo_bp);
+  return cota && c.cota_vigente_centavos !== null ? `${cota} (${brl(c.cota_vigente_centavos)})` : cota;
+}
+
 /** Os cinco numeros da obra (desenho de 16/10/2026), sempre no alto, qualquer que seja a aba: quanto vale, quanto
  *  ja' se mediu, quanto se faturou, quanto os orgaos devem e o saldo do cronograma. Valores cheios (a cota, quando
  *  a Lotufo nao tem 100%, vai uma vez no cabecalho). O que vem da curva (medido e saldo) mostra "indisponivel"
@@ -160,8 +166,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
           {c && <Selo classe={STATUS[c.status]?.classe ?? ""}>{STATUS[c.status]?.rotulo ?? c.status}</Selo>}
         </div>
         {/* principio 7: a pagina da obra e' toda em valor cheio; a cota vai ao lado so' onde a Lotufo nao tem 100% */}
-        {c && <p className="topbar__meta topbar__meta--obra">{c.orgao} · Contrato {c.instrumento}
-          {baseDosValores(c.percentual_lotufo_bp) ? ` · ${baseDosValores(c.percentual_lotufo_bp)}` : ""}</p>}
+        {c && <p className="topbar__meta topbar__meta--obra">{[c.orgao, `Contrato ${c.instrumento}`, cotaDaObra(c)].filter(Boolean).join(" · ")}</p>}
       </header>
 
       <div className="pagina">

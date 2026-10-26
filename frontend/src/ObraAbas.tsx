@@ -158,7 +158,8 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
           {/* so' o que trava: o veredito "Pronto" ja' esta' no selo do cabecalho */}
           {!dados.pronto && (
             <div className="cartao__corpo">
-              <CaixaAviso nivel="critico">{quem}: {pendentes === 1 ? "1 documento sem validade hoje" : `${pendentes} documentos sem validade hoje`}.</CaixaAviso>
+              <CaixaAviso nivel="critico">{quem}: {pendentes === 1 ? "1 documento sem validade hoje" : `${pendentes} documentos sem validade hoje`}.{" "}
+                <Link className="link" para={{ tela: "documentos" }}>Anexar em Documentos</Link></CaixaAviso>
             </div>
           )}
 

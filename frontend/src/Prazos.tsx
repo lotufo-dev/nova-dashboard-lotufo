@@ -4,7 +4,7 @@ import { CartaoPleito, NovoPleito, cadeiaDoPleito, type Pleito, type TipoPleito 
 import CaixaAviso from "./CaixaAviso";
 import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
-import { desfechoDoPedido, type InstrumentoPrazo } from "./obra";
+import { desfechoDoPedido, seloDoPrazo, type InstrumentoPrazo } from "./obra";
 import { Link } from "./Link";
 import { fmtDataPura } from "./tempo";
 import Selo from "./Selo";
@@ -36,9 +36,10 @@ function data(iso: string | null | undefined): string {
 function dias(n: number): string {
   return `${n}\u00a0${n === 1 ? "dia" : "dias"}`;
 }
-// prazo vencido pede acao: vira selo so' quando acontece (quanto falta nao se escreve)
-function SeloVencida({ d }: { d: number | null }) {
-  return d !== null && d < 0 ? <Selo classe="selo--acao">vencida</Selo> : null;
+// prazo perto do fim ou vencido pede acao: vira selo so' quando acontece (seloDoPrazo)
+function SeloPrazo({ d }: { d: number | null }) {
+  const selo = seloDoPrazo(d);
+  return selo ? <Selo classe={selo.classe}>{selo.texto}</Selo> : null;
 }
 
 /** O desfecho de um ofício enviado (F-71): o selo diz o que aconteceu (atendido ou sem instrumento); a data do
@@ -134,13 +135,15 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
           <div className="dado">
             <span className="resumo__rotulo">Execução até</span>
             <span className="dado__valor num">{data(s.execucao_fim)}</span>
-            {s.execucao_fim && <SeloVencida d={s.dias_execucao} />}
+            {/* os mesmos casos em que o servidor nao avisa (prazos.py): obra em encerramento e, na execucao,
+                obra paralisada (D16); na vigencia, a que o orgao prorroga junto */}
+            {s.execucao_fim && !s.paralisacao && !s.encerramento && <SeloPrazo d={s.dias_execucao} />}
             {s.paralisacao && <Selo classe="selo--atencao">paralisada desde {data(s.paralisacao.desde)}</Selo>}
           </div>
           <div className="dado">
             <span className="resumo__rotulo">Vigência até</span>
             <span className="dado__valor num">{data(s.vigencia_fim)}</span>
-            {s.vigencia_fim && <SeloVencida d={s.dias_vigencia} />}
+            {s.vigencia_fim && !s.vigencia_automatica && !s.encerramento && <SeloPrazo d={s.dias_vigencia} />}
           </div>
           <div className="dado">
             <span className="resumo__rotulo">Folga entre execução e vigência</span>

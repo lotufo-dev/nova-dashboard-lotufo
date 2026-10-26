@@ -30,4 +30,32 @@ describe("Prazos", () => {
     expect(await screen.findByText("vencida")).toBeTruthy();
     expect(screen.getAllByText("vencida")).toHaveLength(1);    // a vigencia segue em dia
   });
+
+  it("prazo perto do fim vira selo com os dias, nos limites do aviso (60 em Atenção, 30 em Crítico)", async () => {
+    api.mockResolvedValue({ situacao: situacao({ dias_execucao: 45, dias_vigencia: 10, vigencia_automatica: false }), historico: "", pleitos: [] });
+    render(<Prazos contratoId={1} podeEditar={false} />);
+    expect((await screen.findByText("vence em 45 dias")).closest(".selo")?.className).toContain("selo--atencao");
+    expect(screen.getByText("vence em 10 dias").closest(".selo")?.className).toContain("selo--acao");
+  });
+
+  it("vigência que o órgão prorroga junto e obra em encerramento não levam selo (o servidor não avisa)", async () => {
+    api.mockResolvedValue({ situacao: situacao({ dias_vigencia: -10 }), historico: "", pleitos: [] });
+    const r = render(<Prazos contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("31/01/2027")).toBeTruthy();
+    expect(screen.queryByText(/vencida|vence /)).toBeNull();
+    r.unmount();
+    api.mockResolvedValue({ situacao: situacao({ dias_execucao: -5, vigencia_automatica: false, dias_vigencia: -5,
+      encerramento: { desde: "2026-10-01", marcos: {}, conclusao_comunicada: false } }), historico: "", pleitos: [] });
+    render(<Prazos contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("31/01/2027")).toBeTruthy();
+    expect(screen.queryByText(/vencida|vence /)).toBeNull();
+  });
+
+  it("obra paralisada não leva selo de vencimento da execução (D16)", async () => {
+    api.mockResolvedValue({ situacao: situacao({ dias_execucao: -5, paralisacao: { desde: "2026-09-01", numero: null } }),
+      historico: "", pleitos: [] });
+    render(<Prazos contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText(/paralisada desde/)).toBeTruthy();
+    expect(screen.queryByText("vencida")).toBeNull();
+  });
 });

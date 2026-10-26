@@ -80,14 +80,14 @@ describe("Página da obra: o desenho novo", () => {
     expect(within(abas).getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("em consórcio, o cabeçalho diz a cota uma vez, sem \"valores cheios\"", async () => {
+  it("em consórcio, o cabeçalho diz a cota e o valor dela uma vez, sem \"valores cheios\"", async () => {
     responderCompleto();
     const base = api.getMockImplementation()!;
     api.mockImplementation(async (url: string, opcoes?: { method?: string }) =>
       url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, percentual_lotufo_bp: 4000, cota_vigente_centavos: 40000 } : base(url, opcoes));
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
     await screen.findByRole("heading", { level: 1, name: "Hospital" });
-    expect(document.querySelector(".topbar__meta")!.textContent).toBe("SES · Contrato CT 1/2026 · cota 40%");
+    expect(document.querySelector(".topbar__meta")!.textContent).toMatch(/^SES · Contrato CT 1\/2026 · cota 40% \(R\$\s400,00\)$/);
   });
 
   it("a curva S alterna entre acumulado e por mês", async () => {

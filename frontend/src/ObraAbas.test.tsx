@@ -19,6 +19,7 @@ describe("Documentos exigidos da obra", () => {
     render(<DocumentosObra contratoId={1} />);
     const quadro = (await screen.findByRole("heading", { name: "Medição" })).closest("section")!;
     expect(await within(quadro).findByText("Lotufo: 1 documento sem validade hoje.")).toBeTruthy();
+    expect(within(quadro).getByRole("link", { name: "Anexar em Documentos" })).toBeTruthy();
   });
 
   it("pronto: só o selo, sem frase de apoio nem aviso", async () => {
