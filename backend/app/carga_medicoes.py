@@ -1,14 +1,17 @@
 """Carga do historico de medicoes por CSV (spec 2026-10-20 §2.4, opcao A; issues #258 e #259).
 
 ENSAIO (`ensaiar`): le o CSV de uma obra, confere linha a linha contra o banco e devolve o relatorio, sem gravar.
-GRAVAR (`gravar`): com o OK do Leo no ensaio, cria as medicoes `nova`, numa transacao so' por obra. Nunca altera
-medicao existente (corrigir valor de medicao que ja' esta' no banco e' evento novo, issue #260). A chave e'
-(obra, numero, tipo).
+GRAVAR (`gravar`): com o OK do Leo no ensaio, numa transacao so' por obra, cria as medicoes `nova` e corrige as
+que ja' existem sem sobrescrever nada (issue #260): aprovado diferente vira evento novo de atesto com a fonte (o
+vigente e' o ultimo), duplicata (coluna `cancelar`) e' cancelada com motivo e competencia errada (coluna
+`corrige competência`) e' corrigida com a auditoria. O pedido de medicao existente nunca muda: foi congelado no
+protocolo. A chave e' (obra, numero, tipo).
 
 Categorias por linha: `nova` (nao existe medicao com a chave), `igual` (competencia, pedido e aprovado iguais
 aos do banco), `valor diferente` (pedido ou aprovado diferem do banco), `incompleta` (o CSV deixa vazio um valor
-que o banco tem) e `conflito` (o mesmo numero e tipo com outra competencia, no banco ou noutra linha do CSV, ou
-medicao cancelada/desistida no banco). Linha que nao se le vira `erro`, com o numero da linha do arquivo.
+que o banco tem), `conflito` (o mesmo numero e tipo com outra competencia, no banco ou noutra linha do CSV, ou
+medicao cancelada/desistida no banco), `cancelamento` (duplicata a cancelar) e `correção` (competencia errada no
+banco, com `corrige competência`). Linha que nao se le vira `erro`, com o numero da linha do arquivo.
 """
 
 import csv
@@ -23,7 +26,7 @@ from app.cadastro_arquivos import slug
 
 TIPOS = ("execucao", "projeto", "reajuste")
 ROTULOS = {"execucao": "execução", "projeto": "projeto", "reajuste": "reajuste"}
-CATEGORIAS = ("nova", "igual", "valor diferente", "incompleta", "conflito", "erro")
+CATEGORIAS = ("nova", "igual", "valor diferente", "incompleta", "cancelamento", "correção", "conflito", "erro")
 # Estados em que a medicao saiu do ciclo: o CSV nao pode dar como "igual" o que o banco encerrou
 ESTADOS_TERMINAIS = ("cancelada", "desistida")
 
@@ -42,6 +45,8 @@ COLUNAS = {
     "data do protocolo da nota": "data_protocolo_nota",
     "nf": "nf",
     "fonte": "fonte",
+    "cancelar": "cancelar",
+    "corrige competencia": "corrige_competencia",
 }
 OBRIGATORIAS = ("numero", "tipo", "competencia", "valor_pedido", "valor_aprovado")
 ROTULO_COLUNA = {"numero": "nº", "tipo": "tipo", "competencia": "competência", "valor_pedido": "valor pedido",
@@ -181,6 +186,14 @@ def _interpretar(bruto: dict, janela: tuple[str, str] | None) -> dict:
     numero_orgao = bruto.get("numero_orgao", "")
     if numero_orgao and (not re.fullmatch(r"[0-9]{1,9}", numero_orgao) or int(numero_orgao) < 1):
         raise ValueError(f"nº do órgão inválido: {numero_orgao!r}")
+    cancelar = bruto.get("cancelar", "")
+    if cancelar and (not re.fullmatch(r"[0-9]{1,9}", cancelar) or int(cancelar) < 1):
+        raise ValueError(f"cancelar: {cancelar!r} não é o nº da medição que substitui esta")
+    if cancelar and int(cancelar) == int(numero):
+        raise ValueError("cancelar: a medição não substitui a si mesma")
+    corrige = _normalizar(bruto.get("corrige_competencia", ""))
+    if corrige not in ("", "sim", "nao"):
+        raise ValueError(f"corrige competência: {bruto.get('corrige_competencia')!r} (use sim ou deixe vazio)")
     meio = bruto.get("meio", "")
     if meio and _normalizar(meio) not in MEIOS:
         raise ValueError(f"meio desconhecido: {meio!r} (use e-mail, SMO, ofício, carimbo, CI ou outro)")
@@ -194,7 +207,9 @@ def _interpretar(bruto: dict, janela: tuple[str, str] | None) -> dict:
             "processo_orgao": bruto.get("processo_orgao") or None,
             "data_protocolo_nota": _data(bruto.get("data_protocolo_nota", ""), "data do protocolo da nota"),
             "nfs": _nfs(bruto.get("nf", "")),
-            "fonte": bruto.get("fonte") or None}
+            "fonte": bruto.get("fonte") or None,
+            "cancelar": int(cancelar) if cancelar else None,
+            "corrige_competencia": corrige == "sim"}
 
 
 def _nfs(texto: str) -> list[str]:
@@ -243,7 +258,7 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
     contrato = contrato_da_obra(conn, obra)
     janela = _janela(conn, contrato)
     existentes = {(m["numero"], m["tipo"]): m for m in conn.execute(
-        "SELECT numero, tipo, competencia, estado, valor_protocolado_centavos, valor_atestado_centavos "
+        "SELECT id, numero, tipo, competencia, estado, valor_protocolado_centavos, valor_atestado_centavos "
         "FROM medicoes WHERE contrato_id=?", (contrato["id"],))}
     lidas = []
     for n_linha, bruto in ler_csv(caminho):
@@ -279,6 +294,9 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
             continue
         vistas[chave] = item["linha"]
         m = existentes.get(chave)
+        if d["cancelar"] is not None:
+            linhas.append(_classificar_cancelamento(item, d, m, existentes, grupos))
+            continue
         if m is None and d["valor_pedido"] is None:
             # Medicao historica nasce protocolada e congelada: sem o pedido ela ficaria congelada sem valor, e o
             # primeiro preenchimento depois nao passaria pelo documento (gate Sol da #259)
@@ -287,9 +305,10 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
             linhas.append({**item, "categoria": "nova", "detalhe": "", "dados": d})
         elif m["estado"] in ESTADOS_TERMINAIS:
             linhas.append({**item, "categoria": "conflito", "detalhe": f"no banco a medição está {m['estado']}"})
-        elif m["competencia"] != d["competencia"]:
+        elif m["competencia"] != d["competencia"] and not d["corrige_competencia"]:
             linhas.append({**item, "categoria": "conflito",
-                           "detalhe": f"banco tem competência {m['competencia']}"})
+                           "detalhe": f"banco tem competência {m['competencia']} (se o banco está errado, marque "
+                                      "\"corrige competência\" com sim)"})
         else:
             difs, vazios = [], []
             for rotulo, campo, col in (("pedido", "valor_pedido", "valor_protocolado_centavos"),
@@ -301,10 +320,108 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
                     difs.append(f"{rotulo}: banco {_fmt(m[col])}, CSV {_fmt(d[campo])}")
             # Um valor diferente e o outro vazio: "valor diferente", com a celula vazia no detalhe
             categoria = "valor diferente" if difs else "incompleta" if vazios else "igual"
-            linhas.append({**item, "categoria": categoria, "detalhe": "; ".join(difs + vazios)})
+            if m["competencia"] != d["competencia"]:
+                categoria, difs = "correção", [f"competência: banco {m['competencia']}, CSV {d['competencia']}", *difs]
+            linhas.append({**item, "categoria": categoria, "detalhe": "; ".join(difs + vazios),
+                           "dados": d, "medicao_id": m["id"]})
+    _conferir_correcoes(conn, linhas, existentes)
     totais = {c: sum(1 for li in linhas if li["categoria"] == c) for c in CATEGORIAS}
     return {"obra": obra, "contrato": contrato["nome_curto"], "contrato_id": contrato["id"], "linhas": linhas,
             "totais": totais}
+
+
+def _classificar_cancelamento(item: dict, d: dict, m, existentes: dict, grupos: dict) -> dict:
+    """Linha com `cancelar`: a medicao do banco e' duplicata da que tem o nº em `cancelar` (mesmo tipo)."""
+    rotulo = ROTULOS[d["tipo"]]
+    substituta = (d["cancelar"], d["tipo"])
+    if m is None:
+        return {**item, "categoria": "erro", "detalhe": f"cancelar: não há {d['numero']}ª {rotulo} no banco"}
+    if m["estado"] == "cancelada":
+        return {**item, "categoria": "igual", "detalhe": "já cancelada"}
+    from app import medicoes   # import local: medicoes importa sincronizacao_rm, que importa notas
+    if "cancelada" not in medicoes.TRANSICOES.get(m["estado"], set()):
+        # a mesma regra de mudar_estado: recebida (recebeu-se por ela), desistida e os passos da planilha/boletim
+        return {**item, "categoria": "conflito", "detalhe": f"no banco a medição está {m['estado']}: não se cancela "
+                                                            "pela carga"}
+    if substituta not in existentes and substituta not in grupos:
+        return {**item, "categoria": "erro", "detalhe": f"cancelar: a {d['cancelar']}ª {rotulo} que a substitui não "
+                                                        "está no banco nem no CSV"}
+    alvo = existentes.get(substituta)
+    if alvo is not None and alvo["estado"] in ESTADOS_TERMINAIS:
+        return {**item, "categoria": "erro", "detalhe": f"cancelar: a {d['cancelar']}ª {rotulo} que a substitui está "
+                                                        f"{alvo['estado']}"}
+    return {**item, "categoria": "cancelamento", "detalhe": f"duplicata da {d['cancelar']}ª {rotulo}",
+            "dados": d, "medicao_id": m["id"]}
+
+
+def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
+    """Regras que pedem o CSV inteiro, depois da classificacao linha a linha (revisores da #260):
+    - a substituta de uma duplicata nao pode ser cancelada pelo mesmo CSV (cancelamento mutuo ou em cadeia tiraria
+      do painel a medicao verdadeira);
+    - duplicata com NF vinculada nao se cancela: a nota ficaria solta no a receber, contando de novo o que a
+      substituta ja' conta; vincula-se a nota a' substituta antes;
+    - corrigir a competencia de um nº nao pode separar a outra metade (execucao x reajuste do mesmo nº, que o
+      envio ao orgao casa por nº e competencia), a menos que o CSV corrija as duas;
+    - correcao (cancelamento, competencia, aprovado novo) leva a fonte: e' o que a auditoria guarda."""
+    canceladas = {(li["dados"]["numero"], li["dados"]["tipo"]) for li in linhas if li["categoria"] == "cancelamento"}
+    novas_comp = {(li["dados"]["numero"], li["dados"]["tipo"]): li["dados"]["competencia"]
+                  for li in linhas if li["categoria"] == "correção"}
+    for li in linhas:
+        d = li.get("dados")
+        if li["categoria"] == "cancelamento":
+            if (d["cancelar"], d["tipo"]) in canceladas:
+                _virar(li, "erro", f"cancelar: a {d['cancelar']}ª {ROTULOS[d['tipo']]} que a substitui também é "
+                                   "cancelada neste CSV")
+                continue
+            nfs = _nfs_vinculadas(conn, li["medicao_id"])
+            if nfs:
+                _virar(li, "conflito", f"tem a NF {', '.join(nfs)} vinculada: vincule-a à {d['cancelar']}ª antes de "
+                                       "cancelar a duplicata")
+                continue
+            estado = existentes[(d["numero"], d["tipo"])]["estado"]
+            if estado in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
+                # o espelho (e a nota que sai dele) ficaria de uma medicao cancelada: isso se resolve na tela
+                _virar(li, "conflito", f"no banco a medição está {estado}: o espelho é dela; cancele pela tela")
+                continue
+        if li["categoria"] == "correção":
+            atual = existentes[(d["numero"], d["tipo"])]
+            nfs = _nfs_vinculadas(conn, li["medicao_id"])
+            if nfs or atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
+                # espelho e nota levam a competencia antiga: mudar so' a medicao os separaria
+                _virar(li, "conflito", f"a competência {atual['competencia']} já está "
+                                       + (f"na NF {', '.join(nfs)} vinculada" if nfs else "no espelho")
+                                       + ": corrija pela tela")
+                continue
+            anteriores = [m["competencia"] for (n, t), m in existentes.items()
+                          if t == d["tipo"] and n < d["numero"] and m["estado"] not in ESTADOS_TERMINAIS]
+            if anteriores and d["competencia"] < max(anteriores):
+                li["detalhe"] += f"; aviso: fica antes de uma medição anterior, em {max(anteriores)}"
+        if li["categoria"] == "correção" and d["tipo"] in ("execucao", "reajuste"):
+            for tipo in ("execucao", "reajuste"):     # o par que o envio ao orgao casa; projeto anda sozinho
+                outra = existentes.get((d["numero"], tipo))
+                if (tipo != d["tipo"] and outra is not None and outra["estado"] not in ESTADOS_TERMINAIS
+                        and outra["competencia"] == existentes[(d["numero"], d["tipo"])]["competencia"]
+                        and novas_comp.get((d["numero"], tipo)) != d["competencia"]):
+                    _virar(li, "conflito", f"a {d['numero']}ª de {ROTULOS[tipo]} continua em {outra['competencia']}: "
+                                           "corrija as duas no mesmo CSV")
+                    break
+        m = existentes.get((d["numero"], d["tipo"])) if d else None
+        escreve = li["categoria"] in ("cancelamento", "correção") or (li["categoria"] == "valor diferente" and (
+            (d["valor_aprovado"] is not None and d["valor_aprovado"] != m["valor_atestado_centavos"])
+            or (d["valor_pedido"] is not None and m["valor_protocolado_centavos"] is None)))   # 1o preenchimento
+        if escreve and not d["fonte"]:
+            _virar(li, "erro", "correção sem fonte: diga na coluna fonte o documento que corrige")
+
+
+def _nfs_vinculadas(conn, medicao_id: int) -> list[str]:
+    return [r[0] for r in conn.execute("SELECT n.numero FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id "
+                                       "WHERE a.medicao_id=? AND a.desfeita_em IS NULL", (medicao_id,))]
+
+
+def _virar(li: dict, categoria: str, detalhe: str) -> None:
+    li["categoria"], li["detalhe"] = categoria, detalhe
+    li.pop("dados", None)
+    li.pop("medicao_id", None)
 
 
 def _fmt(centavos: int | None) -> str:
@@ -338,10 +455,15 @@ def gravar(conn, usuario_id: int, caminho: Path, obra: str | None = None) -> dic
             if li["categoria"] == "nova":
                 criadas[_criar(conn, usuario_id, cid, li)] = li
                 li["acao"] = "criada"
-            elif li["categoria"] in ("valor diferente", "incompleta"):
-                li["acao"] = "não alterada (a carga não corrige medição que já existe)"
+            elif li["categoria"] == "cancelamento":
+                li["acao"], li["gravou"] = _cancelar(conn, usuario_id, li), True
+            elif li["categoria"] in ("valor diferente", "correção"):
+                li["acao"], li["gravou"] = _corrigir(conn, usuario_id, li)
+            elif li["categoria"] == "incompleta":
+                li["acao"] = "não alterada (o CSV não traz o valor que o banco tem)"
             else:
                 li["acao"] = "já existe"
+        corrigidas = [li for li in rel["linhas"] if li.get("gravou")]     # so' o que de fato mudou o banco
         from app import diretoria    # import local: diretoria importa sincronizacao_rm
         mapa = diretoria._mapa_contratos(conn)          # uma vez por carga, nao por medicao
         vinculadas = []
@@ -354,11 +476,14 @@ def gravar(conn, usuario_id: int, caminho: Path, obra: str | None = None) -> dic
         for mid, li in criadas.items():
             if conn.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "recebida":
                 li["acao"] += "; recebida (baixa no RM)"
-        if criadas:     # rodar de novo sem nada novo nao deixa rastro
+        if criadas or corrigidas:     # rodar de novo sem nada novo nao deixa rastro
             auditoria.registrar(conn, usuario_id, "medicao.carga_historico", "contrato", cid, None,
-                                {"arquivo": caminho.name, "criadas": len(criadas),
-                                 "linhas": [li["linha"] for li in criadas.values()]})
-    rel["criadas"] = len(criadas)
+                                {"arquivo": caminho.name, "criadas": len(criadas), "corrigidas": len(corrigidas),
+                                 "linhas": [li["linha"] for li in criadas.values()],
+                                 # a fonte de cada correcao (o pedido preenchido passa por definir_valor, sem ela)
+                                 "linhas_corrigidas": [{"linha": li["linha"], "acao": li["acao"],
+                                                        "fonte": li["dados"]["fonte"]} for li in corrigidas]})
+    rel["criadas"], rel["corrigidas"] = len(criadas), len(corrigidas)
     return rel
 
 
@@ -384,17 +509,68 @@ def _criar(conn, usuario_id: int, contrato_id: int, li: dict) -> int:
                             {"data": d["data_protocolo_nota"], "numero_processo": d["processo_orgao"],
                              "origem": "manual"})
     if d["valor_aprovado"] is not None:
-        # Atesto e' evento (039/042): o vigente na medicao e o evento entram juntos
-        conn.execute("UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem='manual', atestado_em=? "
-                     "WHERE id=?", (d["valor_aprovado"], d["data_aprovacao"], mid))
-        conn.execute("INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, "
-                     "meio, numero_orgao, observacao) VALUES (?,?,'manual',?,?,?,?,?)",
-                     (mid, d["valor_aprovado"], d["data_aprovacao"], usuario_id, d["meio"], d["processo_orgao"],
-                      d["fonte"]))
-        auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", mid, None,
-                            {"valor_atestado_centavos": d["valor_aprovado"], "valor_atestado_origem": "manual",
-                             "atestado_em": d["data_aprovacao"], "meio": d["meio"], "fonte": d["fonte"]})
+        _registrar_atesto(conn, usuario_id, mid, d, None)
     return mid
+
+
+def _registrar_atesto(conn, usuario_id: int, mid: int, d: dict, antes: dict | None) -> None:
+    """Atesto e' evento (039/042): o vigente na medicao e o evento novo entram juntos; o anterior fica na linha do
+    tempo. Sem data no CSV, o dia que ja' valia fica (como em `medicoes.definir_valor`)."""
+    cur = conn.execute("UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem='manual', "
+                       "atestado_em=COALESCE(?, atestado_em) WHERE id=? AND estado NOT IN ('cancelada','desistida')",
+                       (d["valor_aprovado"], d["data_aprovacao"], mid))
+    db.exigir_uma_linha(cur, "Medição encerrada concorrentemente: o aprovado não pôde ser gravado")
+    dia = conn.execute("SELECT atestado_em FROM medicoes WHERE id=?", (mid,)).fetchone()[0]
+    conn.execute("INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, "
+                 "meio, numero_orgao, observacao) VALUES (?,?,'manual',?,?,?,?,?)",
+                 (mid, d["valor_aprovado"], dia, usuario_id, d["meio"], d["processo_orgao"], d["fonte"]))
+    auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", mid, antes,
+                        {"valor_atestado_centavos": d["valor_aprovado"], "valor_atestado_origem": "manual",
+                         "atestado_em": dia, "meio": d["meio"], "fonte": d["fonte"], "origem": "carga do histórico"})
+
+
+def _corrigir(conn, usuario_id: int, li: dict) -> tuple[str, bool]:
+    """Medicao existente que o documento contradiz. Nada se sobrescreve: o aprovado diferente vira evento novo
+    (o vigente e' o ultimo), a competencia errada se corrige com antes/depois na auditoria, e o pedido fica (foi
+    congelado no protocolo; so' o primeiro preenchimento, de quem foi protocolada sem valor, passa)."""
+    from app import medicoes   # import local: medicoes importa sincronizacao_rm, que importa notas
+    d, mid = li["dados"], li["medicao_id"]
+    m = conn.execute("SELECT * FROM medicoes WHERE id=?", (mid,)).fetchone()
+    feito, gravou = [], False
+    if m["competencia"] != d["competencia"]:
+        cur = conn.execute("UPDATE medicoes SET competencia=? WHERE id=? AND competencia=?",
+                           (d["competencia"], mid, m["competencia"]))
+        db.exigir_uma_linha(cur, "Medição alterada concorrentemente: a competência não pôde ser corrigida")
+        auditoria.registrar(conn, usuario_id, "medicao.competencia", "medicao", mid,
+                            {"competencia": m["competencia"]},
+                            {"competencia": d["competencia"], "origem": "carga do histórico", "linha": li["linha"],
+                             "fonte": d["fonte"]})
+        feito.append(f"competência corrigida de {m['competencia']} para {d['competencia']}")
+        gravou = True
+    if d["valor_aprovado"] is not None and d["valor_aprovado"] != m["valor_atestado_centavos"]:
+        _registrar_atesto(conn, usuario_id, mid, d, {"valor_atestado_centavos": m["valor_atestado_centavos"],
+                                                     "atestado_em": m["atestado_em"]})
+        feito.append("aprovado registrado como evento novo" if m["valor_atestado_centavos"] is not None
+                     else "aprovado registrado")
+        gravou = True
+    if d["valor_pedido"] is not None and d["valor_pedido"] != m["valor_protocolado_centavos"]:
+        if m["valor_protocolado_centavos"] is None:
+            medicoes.definir_valor(conn, usuario_id, mid, "protocolado", d["valor_pedido"], "manual")
+            feito.append("pedido preenchido")
+            gravou = True
+        else:
+            feito.append("pedido diferente não alterado (congelado no protocolo)")
+    return "; ".join(feito) or "já existe", gravou
+
+
+def _cancelar(conn, usuario_id: int, li: dict) -> str:
+    """Duplicata: cancelada com o motivo, nunca apagada; sai da soma do painel e do saldo pelo estado."""
+    from app import medicoes
+    d = li["dados"]
+    motivo = f"Duplicata da medição {d['cancelar']} de {ROTULOS[d['tipo']]} (carga do histórico" + (
+        f": {d['fonte']})" if d["fonte"] else ")")
+    medicoes.mudar_estado(conn, usuario_id, li["medicao_id"], "cancelada", motivo, origem="carga do histórico")
+    return f"cancelada ({motivo})"
 
 
 def _vincular_nfs(conn, usuario_id: int, medicao_id: int, d: dict, contrato_id: int,
