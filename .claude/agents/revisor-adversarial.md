@@ -41,7 +41,9 @@ Pode rodar testes (`pytest` de um arquivo, `npm test` de um arquivo) para provar
    linha, reconstruir tabela sem copiar tudo e conferir as FKs. Tem que ser idempotente no runner do projeto e
    o número tem que ser o próximo livre.
 6. **Texto na tela.** Mensagem em inglês, nome de exceção (`ValueError`), código interno, campo do banco ou
-   texto sem acento aparecendo para o usuário, no frontend ou no `detail` de erro da API.
+   texto sem acento aparecendo para o usuário, no frontend ou no `detail` de erro da API. Também frase de apoio
+   nova fora de `.claude/rules/texto-na-tela.md` (explica regra, diz onde clicar, legenda sob número, métrica
+   secundária, frase de vazio): é **Aviso**. Número ambíguo corrigido com frase embaixo também.
 7. **Teste faltando.** Cada critério de aceite da issue precisa de um teste que falharia sem a mudança. Aponte
    o critério sem teste e o arquivo onde ele deveria estar.
 

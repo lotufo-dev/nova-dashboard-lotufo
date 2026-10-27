@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import CaixaAviso from "./CaixaAviso";
 import { baseDosValores } from "./formato";
 import { api, mensagemDeErro } from "./api";
 import Espelho from "./Espelho";
-import { EtapaEnvio, resumoEnvioFeito, useEnvios } from "./EtapaEnvio";
+import { EtapaEnvio, useEnvios } from "./EtapaEnvio";
 import { EtapaCartao, etapaDe, etapaInicial, FaixaVendo, Setas, situacaoDa } from "./Etapas";
 import { FrcConsorcio } from "./Frc";
 import { IconeAlerta } from "./icones";
@@ -11,7 +10,7 @@ import Janela from "./Janela";
 import LiberarEnvio from "./LiberarEnvio";
 import type { Usuario } from "./Login";
 import MaisAcoes, { type ItemAcao } from "./MaisAcoes";
-import { eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, resumoDoPar, rotuloDoBloco, tituloMedicao,
+import { eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, rotuloDoBloco, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type ParDaMedicao } from "./medicao";
 import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
 import { brl, type Medicao } from "./Medicoes";
@@ -197,7 +196,6 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const aberta = vendo ?? etapaInicial(atual, !!m.nota_emitida_em);
   const metades = par?.metades.length === 2 ? par.metades : [];
   const medicaoDa = (id: number) => medicoes.find(x => x.id === id);
-  const umaCompleta = metades.some(x => x.completa) && !metades.every(x => x.completa);
   // #208: o misto que ficou vigente para outra medicao (superado para esta) nao e' o espelho desta
   const espVigente = espelhos.find(e => e.situacao === "vigente" && e.medicoes.some(x => x.id === m.id && !x.superado));
   const abrir = (p: Painel) => { setErro(""); setFeito(""); setPainel(p); };
@@ -238,18 +236,6 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   );
   const corpoEtapa3 = (
     <div className="med-etapa__corpo">
-      {sit(3) === "atual" && <p className="campo__nota">O sistema lê o RM a cada 1 hora e liga a nota sozinho. Se ela não aparecer, anexe o PDF aqui. A nota da
-        Lotufo é lida e conferida contra o espelho; as das consorciadas e a FRC ficam como documentos.</p>}
-      {pronta && (
-        <CaixaAviso nivel="atencao">
-          {par?.orgao ? `Na ${par.orgao}` : "Neste órgão"} a medição e o reajuste vão no mesmo e-mail. O envio ao
-          órgão abre quando chegarem as notas {pronta.tipo === "execucao" ? "do reajuste" : "da medição"}; a saída de emergência
-          (“{pronta.tipo === "execucao" ? "Enviar a medição sem o reajuste…" : "Enviar o reajuste sem a medição…"}”) fica na linha do envio, na etapa 4.
-        </CaixaAviso>
-      )}
-      {metades.length > 0 && !par?.junta && umaCompleta && (
-        <p className="campo__nota">Neste órgão a medição e o reajuste vão em ofícios e e-mails separados: cada um segue quando as suas notas chegam.</p>
-      )}
       <div id="notas">
         {/* issue #188: a execucao e o reajuste da mesma competencia, um bloco para cada; a nota anexada num bloco vai
             para a medicao daquele bloco, e a FRC e' da medicao do bloco */}
@@ -285,12 +271,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       {/* o historico dos envios so' depois de enviada: o nº do protocolo no orgao se registra aqui, com o comprovante */}
       <ProtocolosDaMedicao semCartao contratoId={contratoId} medicaoId={m.id} dados={protocolos.dados} erro={protocolos.erro}
         carregar={protocolos.carregar} podeEditar={podeEditar} aoMudar={() => void carregar().catch(() => {})}
-        vazio={registrados.length > 0 ? "Nenhum envio pelo sistema." : "Nenhum envio desta medição ainda."}>
+        vazio={registrados.length > 0 ? "" : "Nenhum envio desta medição."}>
         {registrados.map(p => (
           <p key={`reg-${p.id}`}>
             Enviada em <span className="num">{fmtDataPura(p.data)}</span>
             {p.numero_oficio ? ` · ofício ${p.numero_oficio}` : ""}{p.numero_processo ? ` · processo ${p.numero_processo}` : ""}
-            <span className="campo__nota"> · registrado fora do sistema</span>
+            {" "}<Selo>Fora do sistema</Selo>
           </p>
         ))}
         {registrados.length > 0 && <NumeroDoOrgaoFora ms={grupo.filter(x => x.protocolos.some(p => !p.protocolo_id) && !FINAIS.includes(x.estado))} junta={!!par?.junta} podeEditar={podeEditar && !FINAIS.includes(m.estado)}
@@ -306,36 +292,29 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       <EtapaEnvio medicaoId={m.id} envios={envios.envios} erro={envios.erro} recarregarEnvios={envios.carregar} podeEditar={podeEditar}
         versaoDocs={versaoNotas + versaoFrc} aoAnexarItem={() => setVersaoFrc(v => v + 1)}
         aoMudar={aviso => { setErro(""); setFeito(aviso ?? ""); recarregar(); }}
-        pronta={pronta} orgao={par?.orgao ?? null} aoSemAOutra={() => abrir("sozinha")} />
+        pronta={pronta} aoSemAOutra={() => abrir("sozinha")} />
     </div>
   );
   const corpoEtapa5 = (
     <div className="med-etapa__corpo">
-      <EtapaPagamento grupo={grupo} junta={!!par?.junta} usuario={usuario} linha={linha}
+      <EtapaPagamento grupo={grupo} junta={!!par?.junta} usuario={usuario}
         protocolos={protocolos.dados?.protocolos ?? []} aqui={aqui}
         aoReceber={x => { setAlvoRecebimento(x); abrir("recebimento"); }} />
     </div>
   );
 
-  const futura = (n: number) => <div className="med-etapa__corpo"><p className="campo__nota">Libera depois da etapa {n - 1}.</p></div>;
   const selo = (nivel: string, texto: string) => (
     <span className={`selo selo--${nivel}`}><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">{texto}</span></span>
   );
-  const resumoEtapas: Record<number, { selo?: React.ReactNode; resumo?: React.ReactNode }> = {
-    1: espVigente ? { selo: selo("ok", `Gerado em ${fmtDataHora(espVigente.criado_em)}`),
-      resumo: `nº ${espVigente.numero} · versão ${espVigente.versao}${espVigente.criado_por_nome ? ` · por ${espVigente.criado_por_nome}` : ""}` }
-      : m.espelho_em ? { selo: selo("ok", `Gerado em ${fmtDataHora(m.espelho_em)}`) }
-      : sit(1) === "feita" ? { resumo: "medição sem espelho pelo sistema" } : {},
-    2: espVigente?.envio ? { selo: selo("ok", `Enviado ao faturamento em ${fmtDataHora(espVigente.envio.enviado_em)}`),
-      resumo: `por ${espVigente.envio.remetente} → caixa do faturamento` } : {},
-    3: { resumo: metades.length > 0 ? resumoDoPar(metades)
-      : m.nota_emitida_em ? `nota emitida em ${fmtDataPura(m.nota_emitida_em.slice(0, 10))}` : undefined },
-    4: { resumo: resumoEnvioFeito(m.protocolos.map(p => p.data)) },
-    5: { resumo: m.estado === "recebida" ? `recebida em ${m.recebida_em ? fmtDataPura(m.recebida_em) : "data não registrada"}` : undefined },
+  // o selo da etapa feita leva a data; a futura so' tem o selo "Libera depois da etapa N" (o corpo fica vazio)
+  const seloEtapa: Record<number, React.ReactNode> = {
+    1: espVigente ? selo("ok", `Gerado em ${fmtDataHora(espVigente.criado_em)}`)
+      : m.espelho_em ? selo("ok", `Gerado em ${fmtDataHora(m.espelho_em)}`) : undefined,
+    2: espVigente?.envio ? selo("ok", `Enviado ao faturamento em ${fmtDataHora(espVigente.envio.enviado_em)}`) : undefined,
   };
   const corpo = (n: number) => {
     if (n === 4 && sit(4) === "futura" && pronta) return corpoEtapa4;   // a saida de emergencia mora na linha do envio
-    if (sit(n) === "futura") return futura(n);
+    if (sit(n) === "futura") return null;
     return [corpoEtapa1, corpoEtapa2, corpoEtapa3, corpoEtapa4, corpoEtapa5][n - 1];
   };
 
@@ -351,8 +330,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
               {cab && <span>{cab.orgao}</span>}
               <span className="num">{fmtCompetencia(m.competencia)}</span>
               {cab && <span>{cab.instrumento}</span>}
-              {/* a medicao declara a base dos valores, como a obra (principio 7) */}
-              {cab && <span title={baseDosValores(cab.percentual_lotufo_bp)}>{baseDosValores(cab.percentual_lotufo_bp)}</span>}
+              {/* a cota, so' em consorcio, como a obra (principio 7) */}
+              {cab && baseDosValores(cab.percentual_lotufo_bp) && <span>{baseDosValores(cab.percentual_lotufo_bp)}</span>}
             </p>
           </div>
           <MaisAcoes itens={acoes} desabilitado={salvando} aoEscolher={id => abrir(id as Painel)} />
@@ -367,13 +346,13 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           <div className="med-principal">
             <Setas atual={atual} vendo={aberta} espera={!!esperaAqui} aoIr={n => setVendo(n === atual && atual !== 0 ? null : n)} />
             <FaixaVendo vendo={aberta} atual={atual} aoVoltar={() => setVendo(null)} />
-            <EtapaCartao key={aberta} n={aberta} atual={atual} selo={resumoEtapas[aberta].selo} resumo={resumoEtapas[aberta].resumo}>
+            <EtapaCartao key={aberta} n={aberta} atual={atual} selo={seloEtapa[aberta]}>
               {corpo(aberta)}
             </EtapaCartao>
           </div>
 
           <aside className="med-lateral" aria-label="Resumo e linha do tempo">
-            <ResumoMedicao m={m} execucao={execucao} reajuste={reajuste} outras={outras} passo={passo} desde={linha?.desde} aqui={aqui}
+            <ResumoMedicao m={m} execucao={execucao} reajuste={reajuste} outras={outras} passo={passo} aqui={aqui}
               contratoId={contratoId} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} />
             <LinhaDoTempo eventos={eventos} />
           </aside>
@@ -418,7 +397,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       )}
       {painel === "sozinha" && pronta && (
         <Janela titulo={pronta.tipo === "execucao" ? "Enviar a medição sem o reajuste" : "Enviar o reajuste sem a medição"} aoFechar={fechar}>
-          <FormSemAOutra pronta={pronta} orgao={par?.orgao ?? null} salvando={salvando} agir={agir} aoFechar={fechar} erro={erro} />
+          <FormSemAOutra pronta={pronta} salvando={salvando} agir={agir} aoFechar={fechar} erro={erro} />
         </Janela>
       )}
       {painel === "liberar" && (
@@ -476,7 +455,6 @@ function CampoNumeroOrgao({ ms, rotulo, podeEditar, aoMudar }: { ms: Medicao[]; 
         <label className="campo__rotulo" htmlFor={id}>Nº do protocolo no órgão{rotulo}</label>
         <input id={id} name="numero_orgao" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100}
           value={numero} disabled={!podeEditar} onChange={ev => setNumero(ev.target.value)} />
-        <span className="campo__nota">Obrigatório; informe o número dado pelo órgão.</span>
       </div>
       {podeEditar && <button type="submit" className="btn btn--pequeno" disabled={ocupado || !numero.trim()}>{ocupado ? "Salvando…" : "Salvar"}</button>}
       {erro && <span className="notas__diverge">{erro}</span>}
@@ -486,8 +464,8 @@ function CampoNumeroOrgao({ ms, rotulo, podeEditar, aoMudar }: { ms: Medicao[]; 
 
 /** Etapa 5: uma linha por pagamento -- uma so' onde o orgao junta medicao e reajuste, duas onde separa --, com as notas,
  *  o valor, quando foi ao orgao (e o nº do protocolo, que se registra na etapa 4) e o que ja' foi pago. */
-function EtapaPagamento({ grupo, junta, usuario, linha, protocolos, aqui, aoReceber }: {
-  grupo: Medicao[]; junta: boolean; usuario: Usuario; linha?: LinhaAndamento;
+function EtapaPagamento({ grupo, junta, usuario, protocolos, aqui, aoReceber }: {
+  grupo: Medicao[]; junta: boolean; usuario: Usuario;
   protocolos: { numero_orgao: string | null; situacao: string; medicoes: { id: number }[] }[]; aqui: Rota; aoReceber: (m: Medicao) => void;
 }) {
   const linhas = junta && grupo.length > 1 ? [grupo] : grupo.map(x => [x]);
@@ -519,8 +497,7 @@ function EtapaPagamento({ grupo, junta, usuario, linha, protocolos, aqui, aoRece
                     <div className="envios__nfs">
                       {notas.length === 0 && nfsDocs.length > 0 && nfsDocs.map(d => <span key={d.id}>NF {d.numero_nf}</span>)}
                       {notas.length === 0 && nfsDocs.length === 0 ? <span>—</span> : notas.map(n => (
-                        <span key={n.nota_id}>NF {Number(n.numero) || n.numero}
-                          {n.recebido_centavos > 0 ? <small> · recebido <span className="num">{brl(n.recebido_centavos)}</span>{n.recebido_em ? ` em ${fmtDataPura(n.recebido_em)}` : ""}</small> : null}</span>
+                        <span key={n.nota_id}>NF {Number(n.numero) || n.numero}</span>
                       ))}
                     </div>
                   </td>
@@ -530,20 +507,16 @@ function EtapaPagamento({ grupo, junta, usuario, linha, protocolos, aqui, aoRece
                       <>
                         <span className="num">{fmtDataPura(enviada)}</span>
                         <span className="res-nota">
-                          {numero ? `protocolo ${numero}` : <>protocolo <Link className="link" para={aqui} secao="etapa-4">a registrar na etapa 4</Link></>}
+                          {numero ? `protocolo ${numero}` : <Link className="link" para={aqui} secao="etapa-4">Registrar o protocolo</Link>}
                         </span>
                       </>
-                    ) : <span className="campo__nota">{encerrada ? "—" : "Depois do envio ao órgão."}</span>}
+                    ) : <span>—</span>}
                   </td>
                   <td data-rotulo="Pagamento">
                     {recebida ? <><Selo classe="selo--ok">Recebido</Selo>{g[0].recebida_em && <span className="res-nota">em {fmtDataPura(g[0].recebida_em)}</span>}</>
-                      : encerrada ? <span className="campo__nota">Medição {g[0].estado}: não há recebimento.</span>
-                      : protocolada ? (
-                        <>
-                          <Selo classe={recebidoParcial ? "selo--ok" : "selo--atencao"}>{recebidoParcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo>
-                          <span className="res-nota">{linha?.desde ? <>desde <span className="num">{fmtDataPura(linha.desde)}</span> · </> : ""}O RM marca a baixa sozinho</span>
-                        </>
-                      ) : <span className="campo__nota">Depois do protocolo.</span>}
+                      : protocolada && !encerrada
+                        ? <Selo classe={recebidoParcial ? "selo--ok" : "selo--atencao"}>{recebidoParcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo>
+                        : <span>—</span>}
                     {/* issue #53: o recebimento a mao e' so' do admin (o servidor recusa outro perfil) */}
                     {usuario.perfil === "admin" && g.filter(x => (PROXIMOS[x.estado] ?? []).includes("recebida")).map(x => (
                       <div key={x.id} className="envios__receber">
@@ -557,7 +530,6 @@ function EtapaPagamento({ grupo, junta, usuario, linha, protocolos, aqui, aoRece
           </tbody>
         </table>
       </div>
-      <p className="campo__nota">O RM marca a baixa sozinho. O recebimento à mão é só da administração e pede o motivo. O nº do protocolo no órgão se registra na etapa 4.</p>
     </div>
   );
 }

@@ -87,7 +87,6 @@ function Complementares({ protocoloId, extras, links, ocupado, agir, aoMudar, em
           {extras.map(x => (
             <li key={x.id}>
               <span className="nota-complementares__nome" title={x.nome}>{x.nome}</span>
-              <span className="campo__nota">{Math.max(1, Math.round(x.tamanho / 1024))} KB</span>
               <ConfirmarRemocao alvo={x.nome} ocupado={ocupado} aviso={aviso}
                 aoConfirmar={() => void agir(async () => {
                   await api(`/api/protocolos/${protocoloId}/pecas/${x.id}/remover`, { method: "POST", body: "{}" });
@@ -108,7 +107,6 @@ function Complementares({ protocoloId, extras, links, ocupado, agir, aoMudar, em
             aria-label="Anexar outro documento em PDF ou .zip" onChange={ev => { const fs = ev.currentTarget.files; anexar(fs); ev.currentTarget.value = ""; }} />
         </label>
       </div>
-      <span className="campo__nota">Vai como anexo separado no e-mail, por exemplo uma justificativa técnica ou o .zip do DocuSign com os relatórios assinados.</span>
 
       <span className="campo__rotulo nota-complementares__subtitulo">Arquivo grande por link do OneDrive</span>
       {links.length > 0 && (
@@ -116,7 +114,6 @@ function Complementares({ protocoloId, extras, links, ocupado, agir, aoMudar, em
           {links.map(x => (
             <li key={x.id}>
               <a className="nota-complementares__nome" href={x.url} target="_blank" rel="noreferrer" title={x.url}>{x.nome}</a>
-              <span className="campo__nota">link</span>
               <ConfirmarRemocao alvo={`o link ${x.nome}`} ocupado={ocupado} aviso={aviso}
                 aoConfirmar={() => void agir(async () => {
                   await api(`/api/protocolos/${protocoloId}/links/${x.id}/remover`, { method: "POST", body: "{}" });
@@ -129,7 +126,7 @@ function Complementares({ protocoloId, extras, links, ocupado, agir, aoMudar, em
       <form className="nota-complementares__link" onSubmit={ev => { ev.preventDefault(); adicionarLink(); }}>
         <label className="campo">
           <span className="campo__nota">Nome do arquivo</span>
-          <input type="text" value={linkNome} maxLength={200} placeholder="Ex.: Documento juntado - 15ª Medição…"
+          <input type="text" value={linkNome} maxLength={200}
             disabled={ocupado} onChange={ev => setLinkNome(ev.target.value)} />
         </label>
         <label className="campo nota-complementares__url">
@@ -139,7 +136,6 @@ function Complementares({ protocoloId, extras, links, ocupado, agir, aoMudar, em
         </label>
         <button type="submit" className="btn btn--pequeno" disabled={ocupado || !linkNome.trim() || !linkUrl.trim()}>Adicionar link</button>
       </form>
-      <span className="campo__nota">Para arquivo que passa do limite do e-mail (25 MB somados): suba no seu OneDrive, copie o link de compartilhamento e cole aqui. O link entra no texto do e-mail. Cole um link do OneDrive ou SharePoint da Lotufo; link de outro endereço é recusado.</span>
     </div>
   );
 }
@@ -229,9 +225,8 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   const montado = det.situacao_protocolo === "montado" || assinado;
   // issue #213: o que falta nao trava o envio; o Enviar abre o aviso "ATENÇÃO" com esta lista
   const faltam = det.pendencias.map(p => typeof p === "string" ? p : p.mensagem);
-  const motivo = det.bloqueio ? det.bloqueio
-    : comCarta && !assinado ? "Libera depois de anexar o assinado."
-    : faltam.length > 0 ? "Falta documento: o envio pede a sua confirmação." : "";
+  // so' o que trava o envio vira frase; o que falta ja' esta' na lista "O que falta"
+  const motivo = det.bloqueio ? det.bloqueio : comCarta && !assinado ? "Libera depois de anexar o assinado." : "";
   // so' o que trava o envio de fato (bloqueio do servidor, carta sem o assinado) apaga o botao
   const travado = !!det.bloqueio || (comCarta && !assinado);
   const paginas = det.carta?.paginas ?? [];
@@ -312,7 +307,6 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
       <ul className="lista-simples">
         {faltam.map((p, i) => <li key={i} className="notas__diverge">{p}</li>)}
       </ul>
-      <span className="campo__nota">Dá para enviar assim: o Enviar pede a sua confirmação antes de o e-mail sair.</span>
     </div>
   );
 
@@ -330,7 +324,6 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
         inicial={{ para: det.previa.para, copia: det.previa.copia, cco: [], assunto: det.previa.assunto, corpo: det.previa.corpo }}
         aoMexer={setEmailMexido} aoEnviar={enviar} aoDescartar={() => embutido.aoDescartar?.()} />
       {refeita && <CaixaAviso nivel="atencao" role="status">A prévia foi refeita com os anexos de agora e o texto voltou ao padrão; confira antes de enviar.</CaixaAviso>}
-      <p className="campo__nota">Texto montado com os anexos prontos; você pode editar. O e-mail sai da sua conta Microsoft.</p>
     </>
   );
 
@@ -345,7 +338,6 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
         <Secao n={1} titulo="O que vai no e-mail" passo="atual">
           <ItensEnvio itens={e.itens} aoMudar={() => void carregar()} podeEditar={false} />
         </Secao>
-        <p className="campo__nota">Seu perfil só consulta esta tela: o envio é da engenharia ou da administração.</p>
       </div>
     );
   }
@@ -365,14 +357,14 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
             <Secao n={1} titulo="O que vai no e-mail" passo="atual" acoes={<>
               <button type="button" className="btn btn--pequeno" disabled={ocupado} onClick={() => void abrirJuntar()}>Juntar outra nota desta obra</button>
               {e.medicao_ids.length > 1 && (
-                <button type="button" className="btn btn--pequeno" disabled={ocupado} title="Este envio fica só com a primeira medição; as outras voltam para a lista"
+                <button type="button" className="btn btn--pequeno" disabled={ocupado}
                   onClick={() => void reiniciar([e.medicao_ids[0]])}>Separar</button>
               )}
             </>}>
               {outros && (
                 <fieldset className="opcoes">
                   <legend className="campo__rotulo">Notas desta obra que ainda não foram enviadas</legend>
-                  {outros.length === 0 ? <p className="campo__nota">Não há outra nota emitida desta obra para juntar.</p> : outros.map(o => (
+                  {outros.length === 0 ? <p className="campo__nota">Nenhuma outra nota desta obra.</p> : outros.map(o => (
                     <label key={o.chave} className="campo--linha">
                       <input type="checkbox" checked={juntar.includes(o.chave)}
                         onChange={ev => setJuntar(ev.target.checked ? [...juntar, o.chave] : juntar.filter(c => c !== o.chave))} />
@@ -400,12 +392,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
           <>
             <Secao n={1} titulo="Ofício" passo={passoOficio}>
               {det.carta?.oficio && <p>Ofício <span className="nota-mono">{det.carta.oficio}</span></p>}
-              {paginas.length > 0 && (
-                <div>
-                  <p className="campo__nota">PDF único, {paginas.length} {paginas.length === 1 ? "página" : "páginas"}, nesta ordem:</p>
-                  <ol className="lista-simples nota-paginas">{paginas.map((p, i) => <li key={i}>{p}</li>)}</ol>
-                </div>
-              )}
+              {paginas.length > 0 && <ol className="lista-simples nota-paginas">{paginas.map((p, i) => <li key={i}>{p}</li>)}</ol>}
               <ItensEnvio itens={e.itens} aoMudar={itemMudou} />
               {complementares}
               {faltamBloco}
@@ -420,34 +407,27 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
               )}
             </Secao>
             <Secao n={2} titulo="Assinar a carta" passo={passoAssinar}>
-              <p>O sistema monta o PDF{paginas.length ? ` de ${paginas.length} páginas` : ""}. Baixe, assine no DocuSign e anexe o PDF assinado.</p>
-              <div className="form-inline nota-assinar">
-                {montado ? <a className="btn" href={`/api/protocolos/${protocoloId}/pacote`}>Baixar para assinar</a>
-                  : <span className="campo__nota">Monte o ofício para baixar.</span>}
-                {montado && (
+              {montado && (
+                <div className="form-inline nota-assinar">
+                  <a className="btn" href={`/api/protocolos/${protocoloId}/pacote`}>Baixar para assinar</a>
                   <label className={`btn espelho__anexar${assinado ? "" : " btn--primario"}`}>
                     {assinado ? "Trocar o assinado" : "Anexar o assinado"}
                     <input type="file" accept="application/pdf" className="espelho__arquivo" disabled={ocupado}
                       aria-label="Anexar o PDF assinado" onChange={ev => anexarAssinado(ev.currentTarget)} />
                   </label>
-                )}
-              </div>
+                </div>
+              )}
               {conferencia && !conferencia.ok && (
                 <ul className="lista-simples">{conferencia.avisos.map(a => <li key={a.codigo} className="notas__diverge">{a.mensagem}</li>)}</ul>
               )}
-              {assinado ? <p className="notas__ok">Assinado conferido.</p>
-                : <p className="campo__nota">O sistema confere se o assinado tem as mesmas {paginas.length || ""} páginas.</p>}
             </Secao>
             <Secao n={3} titulo={`Enviar ao protocolo${e.grupo ? ` da ${e.grupo}` : ""}`} passo={passoEnviar}>{email}</Secao>
           </>
         )}
 
         <div className="nota-rodape">
-          {motivo && <p className={`nota-rodape__motivo nota-rodape__motivo--${det.bloqueio ? "bloqueio" : faltam.length > 0 ? "atencao" : "neutro"}`}>{motivo}</p>}
+          {motivo && <p className={`nota-rodape__motivo nota-rodape__motivo--${det.bloqueio ? "bloqueio" : "neutro"}`}>{motivo}</p>}
         </div>
-        {e.familia === "mtpar" && (
-          <p className="nota-porfora__dica">Depois do envio a nota vai para Aguardando pagamento sem o nº do protocolo do órgão; o número e o comprovante se registram aqui, na etapa 4, depois do envio.</p>
-        )}
       </div>
     </>
   );

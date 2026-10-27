@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FormAssinatura, FormProtocoloManual, FormRecebimento, FormValor, notaDoEspelho, valorEditavel } from "./MedicaoAtos";
+import { FormAssinatura, FormProtocoloManual, FormRecebimento, FormValor, valorEditavel } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
@@ -25,14 +25,6 @@ describe("valorEditavel", () => {
   });
 });
 
-describe("notaDoEspelho (gate Sol S7)", () => {
-  it("diz como mudar o valor que veio do espelho, antes e depois de protocolada", () => {
-    expect(notaDoEspelho(base)).toBe("vem do espelho · para mudar, gere o espelho de novo");
-    expect(notaDoEspelho({ ...base, congelada: 1 })).toBe("vem do espelho · protocolada: corrija por reapresentação");
-    expect(notaDoEspelho({ ...base, valor_protocolado_origem: "aceito" })).toBeNull();
-  });
-});
-
 // issue #190: o valor se digita como em caixa registradora e vai ao servidor no mesmo formato de antes
 // gate Sol S6 (10/10/2026): o servidor exige 10 caracteres para protocolar com pendencia; a tela acompanha
 describe("FormProtocoloManual", () => {
@@ -46,7 +38,9 @@ describe("FormProtocoloManual", () => {
     api.mockResolvedValueOnce({ entidade: "Lotufo", pronto: true, itens: [] });
     const agir = vi.fn(async () => true);
     render(<FormProtocoloManual contratoId={1} m={base} salvando={false} agir={agir} aoFechar={() => {}} />);
-    await screen.findByText(/em dia para protocolar/);
+    await screen.findByText("Documentos em dia");
+    expect(screen.queryByText(/congela o valor protocolado/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Anexar em Documentos" })).toBeNull();
     const botao = screen.getByRole("button", { name: "Registrar protocolo" }) as HTMLButtonElement;
     expect(botao.disabled).toBe(false);
     fireEvent.click(botao);
@@ -65,6 +59,8 @@ describe("FormProtocoloManual", () => {
     const agir = vi.fn(async () => true);
     render(<FormProtocoloManual contratoId={1} m={base} salvando={false} agir={agir} aoFechar={() => {}} />);
     const apesar = await screen.findByLabelText(/Protocolar apesar das pendências/);
+    // a pendencia e' acionavel: o aviso leva aos Documentos
+    expect(screen.getByRole("link", { name: "Anexar em Documentos" }).getAttribute("href")).toBe("/documentos");
     fireEvent.change(screen.getByLabelText("Data do protocolo"), { target: { value: "2026-10-13" } });
     const botao = screen.getByRole("button", { name: "Registrar protocolo" }) as HTMLButtonElement;
     expect(botao.disabled).toBe(false);

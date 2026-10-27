@@ -46,15 +46,14 @@ export default function LiberarEnvio({ tabela, id, reserva, aoLiberar }: {
 
   return (
     <div className="campo">
-      <span className="campo__nota">
-        {reserva
-          ? <>Iniciado às {hora(reserva.reservado_em)} por {reserva.reservado_por_nome ?? "outro usuário"}. Só pode ser
-              liberado a partir das {hora(reserva.liberavel_a_partir_de)}.</>
-          : <>Para o envio que ficou preso: a tela não sabe se o e-mail saiu. O servidor só libera depois de 15 minutos do início.</>}
-      </span>
+      {reserva && (
+        <span className="campo__nota">
+          Iniciado às {hora(reserva.reservado_em)} por {reserva.reservado_por_nome ?? "outro usuário"}. Só pode ser
+          liberado a partir das {hora(reserva.liberavel_a_partir_de)}.
+        </span>
+      )}
       <label className="campo__rotulo" htmlFor={campo}>Por que liberar (confira antes a caixa de Enviados)</label>
-      <textarea id={campo} rows={2} maxLength={2000} value={motivo} onChange={ev => setMotivo(ev.target.value)}
-        placeholder="Mínimo de 10 caracteres — ex.: conferi os Enviados, o e-mail não saiu…" />
+      <textarea id={campo} rows={2} maxLength={2000} value={motivo} onChange={ev => setMotivo(ev.target.value)} />
       <label htmlFor={declaracao}>
         <input id={declaracao} type="checkbox" checked={conferi} onChange={ev => setConferi(ev.target.checked)} />{" "}
         Conferi a caixa de Enviados do Outlook e este e-mail NÃO consta

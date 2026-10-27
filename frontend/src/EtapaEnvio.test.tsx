@@ -34,15 +34,26 @@ describe("Etapa 4: o envio ao órgão", () => {
     expect(within(linhas[0]).getByText("Completo")).toBeTruthy();
     expect(within(linhas[1]).getByText("Reajuste da 7ª medição")).toBeTruthy();
     expect((within(linhas[0]).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByText(/em ofícios e e-mails separados/)).toBeTruthy();
+    expect(screen.queryByText(/e-mails separados|no mesmo e-mail/)).toBeNull();
+    // cada envio tem uma natureza so': a NF vai sem o "· medição"
+    expect(within(linhas[0]).queryByText(/· medição/)).toBeNull();
   });
 
-  it("com documento faltando, “Enviar a nota” segue ativo e o motivo vem ao lado; só o bloqueio desabilita", async () => {
+  it("envio que junta medição e reajuste diz a natureza de cada NF", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ medicao_ids: [631, 632], notas: [{ numero: "2322", natureza: "execucao", valor_centavos: 1 },
+      { numero: "2323", natureza: "reajuste", valor_centavos: 1 }] })]);
+    expect(screen.getByText("· medição")).toBeTruthy();
+    expect(screen.getByText("· reajuste")).toBeTruthy();
+  });
+
+  it("com documento faltando, “Enviar a nota” segue ativo e o selo diz o que falta; só o bloqueio desabilita e ganha motivo", async () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio({ chave: "a", itens: [{ chave: "frc:631", rotulo: "FRC assinada", estado: "falta", acao: "anexar_frc" }] }),
       envio({ chave: "b", situacao: "bloqueado", aviso: "certidão trabalhista vencida" })]);
     const [faltando, bloqueado] = screen.getAllByRole("row").slice(1);
-    expect(within(faltando).getByText("Falta FRC assinada: anexe no envio, ou envie assim.")).toBeTruthy();
+    expect(within(faltando).getByText("Falta FRC assinada")).toBeTruthy();
+    expect(faltando.querySelector(".envios__motivo")).toBeNull();
     expect((within(faltando).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
     expect(within(bloqueado).getByText(/Envio bloqueado: certidão trabalhista vencida/)).toBeTruthy();
     expect((within(bloqueado).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(true);
@@ -92,19 +103,21 @@ describe("Etapa 4: o envio ao órgão", () => {
     const p = montar([envio({ situacao: "esperando", aviso: "esperando as notas do reajuste" })],
       { pronta: { medicao_id: 631, tipo: "execucao", titulo: "7ª Medição", estado: "nota_emitida", faltam: 0, esperadas: [], completa: true, espera: null, liberacao: null } });
     expect(screen.queryByRole("button", { name: "Enviar a nota" })).toBeNull();
+    expect(screen.getByText("Esperando as notas do reajuste.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Enviar a medição sem o reajuste…" }));
     expect(p.aoSemAOutra).toHaveBeenCalled();
     // esperando a outra metade, o registro por fora também espera
     expect(screen.queryByText("Registrar envio feito fora do sistema")).toBeNull();
   });
 
-  it("as certidões vêm com a validade de cada uma", async () => {
+  it("as certidões só mostram a data da que vence", async () => {
     api.mockResolvedValue({ itens: [
       { entidade_id: 1, entidade: "Lotufo", tipo: "FGTS", chave: "fgts", situacao: "ok", validade: "2026-11-30", dias: 40 },
       { entidade_id: 1, entidade: "Lotufo", tipo: "Municipal", chave: "municipal", situacao: "vencendo", validade: "2026-10-22", dias: 6 }] });
     montar([envio()]);
-    expect(await screen.findByText(/válida até 30\/11\/2026/)).toBeTruthy();
-    expect(screen.getByText(/válida até 22\/10\/2026 · vence em 6 dias/)).toBeTruthy();
+    expect(await screen.findByText(/vence em 22\/10\/2026/)).toBeTruthy();
+    expect(screen.queryByText(/30\/11\/2026/)).toBeNull();
+    expect(screen.queryByText(/Certidão vencida/)).toBeNull();
   });
 
   it("erro ao ler os envios e medição fora de Notas a enviar dizem o que houve", () => {
@@ -133,7 +146,7 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
 
   it("data, ofício, processo e .eml opcionais; a irmã vem marcada e o registro leva as duas medições", async () => {
     const p = await abrir([envio({ irmas })]);
-    expect((screen.getByLabelText("Incluir também o Reajuste da 7ª Medição (saiu no mesmo e-mail)") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Incluir também o Reajuste da 7ª Medição") as HTMLInputElement).checked).toBe(true);
     expect(screen.getByLabelText("Nº do ofício (opcional)")).toBeTruthy();
     expect(screen.getByLabelText("Nº do processo no órgão (opcional)")).toBeTruthy();
     expect(screen.getByLabelText("E-mail enviado (.eml, opcional)")).toBeTruthy();
@@ -210,7 +223,7 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
     expect(processo.disabled).toBe(false);
     fireEvent.click(reajuste);
     expect(processo.disabled).toBe(true);
-    expect(screen.getByText(/Cada envio tem o seu/)).toBeTruthy();
+    expect(screen.getByText("Marque um envio só para informar ofício e processo.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText(COMO), { target: { value: "Pelo Outlook" } });
     fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
     await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(2));
@@ -244,7 +257,7 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
 
   it("desmarcada a irmã, o registro leva só a medição do envio", async () => {
     await abrir([envio({ irmas })]);
-    fireEvent.click(screen.getByLabelText("Incluir também o Reajuste da 7ª Medição (saiu no mesmo e-mail)"));
+    fireEvent.click(screen.getByLabelText("Incluir também o Reajuste da 7ª Medição"));
     fireEvent.change(screen.getByLabelText(COMO), { target: { value: "Pelo Outlook" } });
     fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
     await waitFor(() => expect(apiForm).toHaveBeenCalled());
@@ -359,7 +372,7 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
     fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Continuar com o registro" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Sem conexão");
-    fireEvent.click(screen.getByLabelText("Incluir também o Reajuste da 7ª Medição (saiu no mesmo e-mail)"));
+    fireEvent.click(screen.getByLabelText("Incluir também o Reajuste da 7ª Medição"));
     fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
     await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(3));
     expect((apiForm.mock.calls[2][1] as FormData).getAll("confirmadas")).toEqual([]);

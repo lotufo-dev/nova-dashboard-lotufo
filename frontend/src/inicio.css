@@ -24,14 +24,13 @@
 .ini-cartao__numero { font-size: 32px; line-height: 36px; font-weight: 500; }
 .ini-cartao__texto { display: flex; flex-direction: column; min-width: 0; }
 .ini-cartao__rotulo { font-weight: 600; }
-.ini-cartao__detalhe { font-size: 13px; line-height: 16px; color: var(--texto-2, #64748B); }
 .ini-cartao__seta { margin-left: auto; font-size: 18px; color: var(--texto-2, #64748B); }
 .ini-cartao--primario {
   background: var(--acento, #4F46E5); border-color: var(--acento, #4F46E5); color: #FFFFFF;
   box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(79, 70, 229, .25);
 }
 .ini-cartao--primario:hover { background: var(--acento-forte, #4338CA); border-color: var(--acento-forte, #4338CA); }
-.ini-cartao--primario .ini-cartao__detalhe, .ini-cartao--primario .ini-cartao__seta { color: rgba(255, 255, 255, .85); }
+.ini-cartao--primario .ini-cartao__seta { color: rgba(255, 255, 255, .85); }
 .ini-cartao--acao { border-color: var(--acao-linha, #FECACA); }
 .ini-cartao--acao .ini-cartao__numero { color: var(--acao, #B91C1C); }
 .ini-cartao--atencao { border-color: var(--atencao-linha, #FDE68A); }
@@ -44,12 +43,9 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(15, 23, 42, .06);
 }
 .ini-numero { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ini-numero__rotulo, .ini-numero__base { font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); }
+.ini-numero__rotulo { font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); }
 .ini-numero__valor { font-size: 26px; line-height: 32px; font-weight: 500; overflow-wrap: anywhere; }
 .ini-numero__de { font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 15px; color: var(--texto-2, #64748B); }
-.ini-numero__nota { font-size: 13px; line-height: 16px; color: var(--texto-2, #64748B); }
-.ini-numero__nota--ok { color: var(--ok, #047857); font-weight: 500; }
-.ini-numero__nota--acao { color: var(--acao, #B91C1C); font-weight: 500; }
 .ini-barra { display: block; height: 6px; border-radius: 999px; background: var(--acento-fundo, #EEF0FF); overflow: hidden; }
 .ini-barra > span { display: block; height: 6px; background: var(--acento, #4F46E5); }
 
@@ -61,14 +57,8 @@
 .ini-painel__topo { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 .ini-painel--prazos .ini-painel__topo { padding: 20px 20px 12px; }
 .ini-painel h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
-.ini-painel__rodape {
-  display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; margin-top: auto; padding-top: 12px;
-  border-top: 1px solid var(--linha, #F1F5F9); font-size: 13px; line-height: 16px; color: var(--texto-2, #64748B);
-}
-.ini-painel__rodape .ini-mono { color: var(--texto, #0F172A); }
 .ini-legenda { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); }
 .ini-legenda > span { display: flex; align-items: center; gap: 6px; }
-.ini-legenda--prazos { margin: 0; gap: 12px; padding: 8px 20px 16px; }
 .ini-chave { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 .ini-chave--anterior { background: var(--previsto, #CBD5E1); }
 .ini-chave--atual { background: var(--acento, #4F46E5); }
@@ -78,7 +68,6 @@
   padding: 10px 12px; border-radius: var(--raio, 8px);
   background: var(--atencao-fundo, #FFFBEB); border: 1px solid var(--atencao-linha, #FDE68A);
 }
-.ini-sem-medicao__ultimo { color: var(--texto-2, #475569); }
 .ini-sem-medicao__botao { font-weight: 600; text-decoration: none; color: var(--acento, #4F46E5); }
 .ini-sem-medicao__botao:hover { color: var(--acento-forte, #4338CA); }
 
@@ -114,9 +103,9 @@
 .ini-pilula--atencao { background: var(--atencao-fundo, #FEF3C7); }
 .ini-pilula--neutro { background: #F1F5F9; }
 .ini-ponto { display: inline-block; width: 6px; height: 6px; border-radius: 999px; flex: none; }
-.ini-pilula--acao .ini-ponto, .ini-ponto--acao { background: #EF4444; }
-.ini-pilula--atencao .ini-ponto, .ini-ponto--atencao { background: #F59E0B; }
-.ini-pilula--neutro .ini-ponto, .ini-ponto--neutro { background: #94A3B8; }
+.ini-pilula--acao .ini-ponto { background: #EF4444; }
+.ini-pilula--atencao .ini-ponto { background: #F59E0B; }
+.ini-pilula--neutro .ini-ponto { background: #94A3B8; }
 
 @media (max-width: 560px) {
   .ini-barras__linha { grid-template-columns: 88px minmax(0, 1fr); }

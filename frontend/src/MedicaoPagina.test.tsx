@@ -61,20 +61,23 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     const { container } = pagina();
     await screen.findByRole("heading", { name: "Envio ao órgão", level: 2 });
     expect(container.querySelectorAll(".med-etapa")).toHaveLength(1);
-    expect(screen.queryByText(/Você está vendo a etapa/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Voltar à etapa atual" })).toBeNull();
+    // 100% da Lotufo: o cabecalho nao fala de cota nem de "valores cheios"
+    expect(container.querySelector(".med-meta")!.textContent).not.toMatch(/cota|valores cheios/);
     const trilho = screen.getByRole("navigation", { name: "Etapas da medição" });
     expect(trilho.querySelector("[aria-current='step']")!.textContent).toContain("Envio ao órgão");
     fireEvent.click(within(trilho).getByRole("button", { name: /Etapa 3: Nota fiscal/ }));
     expect(screen.getByRole("heading", { name: "Nota fiscal", level: 2 })).toBeTruthy();
     expect(container.querySelectorAll(".med-etapa")).toHaveLength(1);
-    expect(screen.getByText(/Você está vendo a etapa 3, já feita/)).toBeTruthy();
+    expect(screen.queryByText(/Você está vendo a etapa/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Voltar à etapa atual" }));
     expect(screen.getByRole("heading", { name: "Envio ao órgão", level: 2 })).toBeTruthy();
-    expect(screen.queryByText(/Você está vendo a etapa/)).toBeNull();
-    // etapa que ainda não começou: abre, com o aviso de que libera depois
+    expect(screen.queryByRole("button", { name: "Voltar à etapa atual" })).toBeNull();
+    // etapa que ainda não começou: abre, so' com o selo de que libera depois (o corpo nao repete)
     fireEvent.click(within(trilho).getByRole("button", { name: /Etapa 5: Pagamento/ }));
-    expect(screen.getByText(/Você está vendo a etapa 5, que ainda não começou/)).toBeTruthy();
-    expect(screen.getByText("Libera depois da etapa 4.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Voltar à etapa atual" })).toBeTruthy();
+    expect(screen.getByText("Libera depois da etapa 4")).toBeTruthy();
+    expect(screen.queryByText("Libera depois da etapa 4.")).toBeNull();
   });
 
   it("a âncora #etapa-N abre a etapa; as âncoras antigas (#notas) abrem a etapa 3", async () => {
@@ -191,12 +194,14 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
   it("a etapa do espelho mostra a versão mais nova da medição, não o misto superado", async () => {
     abrirEtapa(1);
     const esp = (id: number, versao: number, superado: boolean) => ({ id, numero: 23, versao, situacao: "vigente",
-      criado_em: "2026-10-15 12:00:00", criado_por_nome: null, envio: null,
+      criado_em: `2026-10-1${versao + 3} 16:00:00`, criado_por_nome: null, envio: null,
       medicoes: [{ id: 5, tipo: "execucao", superado }] });
     responder({ "/api/contratos/1/espelho": { espelhos: [esp(7, 1, true), esp(8, 2, false)] } });
     pagina();
-    expect(await screen.findByText(/nº 23 · versão 2/)).toBeTruthy();
-    expect(screen.queryByText(/nº 23 · versão 1/)).toBeNull();
+    // o selo da etapa leva a data do espelho vigente (versao 2, de 15/10); sem a linha "nº · versão · por"
+    expect(await screen.findByText(/Gerado em 15\/10/)).toBeTruthy();
+    expect(screen.queryByText(/Gerado em 14\/10/)).toBeNull();
+    expect(screen.queryByText(/nº 23 · versão/)).toBeNull();
   });
 
   it("etapa 1 é o Espelho e a 2 o Faturamento: o mesmo cartão, uma parte em cada etapa", async () => {
@@ -224,7 +229,8 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
     abrirEtapa(4);
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, protocolos: [REGISTRADO] }] });
     pagina();
-    expect(await screen.findByText(/registrado fora do sistema/)).toBeTruthy();
+    expect(await screen.findByText("Fora do sistema")).toBeTruthy();
+    expect(screen.queryByText(/registrado fora do sistema/)).toBeNull();
     fireEvent.change(screen.getByLabelText("Nº do protocolo no órgão"), { target: { value: "2026.10.004512" } });
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/notas/5/numero-orgao", { method: "POST", body: JSON.stringify({ numero: "2026.10.004512" }) }));
@@ -363,9 +369,9 @@ describe("Página da medição: medição e reajuste", () => {
     expect(await screen.findByRole("region", { name: "Execução · 23ª Medição" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Reajuste da 23ª Medição" })).toBeTruthy();
     expect(container.querySelector("[data-medicao='6']")).toBeTruthy();       // a nota do reajuste vai para o reajuste
-    expect(container.querySelector(".med-etapa__cabeca")!.textContent).toContain("execução completa · reajuste: faltam 2 notas");
-    expect(container.textContent).toContain("Na SINFRA a medição e o reajuste vão no mesmo e-mail. O envio ao órgão abre "
-      + "quando chegarem as notas do reajuste");
+    // a espera ja' esta' no trilho e no proximo passo: a etapa 3 nao explica a regra do orgao nem resume o par
+    expect(container.querySelector(".med-etapa__cabeca")!.textContent).not.toContain("faltam 2 notas");
+    expect(container.textContent).not.toContain("vão no mesmo e-mail");
   });
 
   it("órgão que junta, esperando o reajuste: a etapa 4 é a da vez, em espera, e a saída de emergência está na linha do envio", async () => {
@@ -437,10 +443,11 @@ describe("Página da medição: pagamento (etapa 5)", () => {
     expect(screen.getByLabelText("Motivo")).toBeTruthy();
   });
 
-  it("a engenharia não vê o botão: o RM marca a baixa", async () => {
+  it("a engenharia não vê o botão; a linha só tem o selo, sem explicar o RM", async () => {
     responder();
     pagina("engenharia");
-    expect((await screen.findAllByText(/O RM marca a baixa sozinho/)).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Aguardando o órgão")).toBeTruthy();
+    expect(screen.queryByText(/O RM marca a baixa sozinho/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Registrar recebimento" })).toBeNull();
   });
 
@@ -448,7 +455,7 @@ describe("Página da medição: pagamento (etapa 5)", () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, protocolos: [{ id: 9, data: "2026-10-10", numero_oficio: null,
       numero_processo: null, origem: "manual", protocolo_id: null }] }] });
     pagina();
-    const link = await screen.findByRole("link", { name: "a registrar na etapa 4" });
+    const link = await screen.findByRole("link", { name: "Registrar o protocolo" });
     expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#etapa-4");
   });
 });

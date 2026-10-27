@@ -166,14 +166,31 @@ describe("Protocolo", () => {
   });
 
   // gate Sol S1 (10/10/2026): o numero e' obrigatorio na primeira vez; depois da' para anexar so' o comprovante
-  it("no protocolo enviado, o nº do órgão não é mais rotulado como opcional e explica quando é exigido", async () => {
+  it("no protocolo enviado, o nº do órgão não é rotulado como opcional nem leva frase de ajuda", async () => {
     render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [{ ...PROT, situacao: "enviado", envio_id: 3 }] }}
       carregar={async () => {}} podeEditar aoMudar={() => {}} />);
     const campo = await screen.findByLabelText("Nº do protocolo no órgão");
     expect(screen.queryByText(/opcional/)).toBeNull();
-    const ajuda = document.getElementById(campo.getAttribute("aria-describedby") ?? "");
-    // issue #2: a tela agora tem o campo do comprovante, e a ajuda diz que ele é opcional
-    expect(ajuda?.textContent).toBe("Obrigatório; informe o número dado pelo órgão. Anexe o comprovante em PDF, se tiver.");
+    // texto na tela (26/10/2026): a recusa do servidor explica quando o número falta
+    expect(campo.getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByText(/Obrigatório; informe o número/)).toBeNull();
+  });
+
+  it("prévia: o tamanho dos anexos só aparece quando passa do limite", async () => {
+    const base = { para: ["a@x"], copia: [], assunto: "A", corpo: "C", anexos: [{ nome: "a.pdf", tamanho: 10 }], pendencias: [] };
+    const abrir = async (total: number) => {
+      api.mockResolvedValueOnce({ ...base, total, limite: 100 });
+      render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [{ ...PROT, situacao: "assinado" }] }}
+        carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+      fireEvent.click(await screen.findByRole("checkbox", { name: /Incluir neste e-mail/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Prévia do e-mail/ }));
+      await screen.findByRole("button", { name: "Enviar" });
+    };
+    await abrir(10);
+    expect(screen.queryByText(/Anexos passam do limite|permitidos|O e-mail sai da sua conta/)).toBeNull();
+    cleanup();
+    await abrir(200);
+    expect(screen.getByText(/Anexos passam do limite/).className).toBe("notas__diverge");
   });
 
   // issue #2 (backlog 10/10/2026): o comprovante do órgão sobe pela tela, junto do nº

@@ -53,8 +53,8 @@ describe("Enviar a nota", () => {
   it("diretoria vê o que vai no envio, sem e-mail, anexos nem registro por fora (B-09, 10/10/2026)", async () => {
     api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
     render(<EnviarNota protocoloId={3} podeEditar={false} embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
-    expect(await screen.findByText(/Seu perfil só consulta esta tela/)).toBeTruthy();
-    expect(screen.getByText("O que vai no e-mail")).toBeTruthy();
+    expect(await screen.findByText("O que vai no e-mail")).toBeTruthy();
+    expect(screen.queryByText(/Seu perfil só consulta esta tela/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Enviar o e-mail" })).toBeNull();
     expect(screen.queryByText("Anexar outro documento")).toBeNull();
     expect(screen.queryByText("Registrar envio feito por fora")).toBeNull();
@@ -139,11 +139,11 @@ describe("Enviar a nota", () => {
     });
   });
 
-  it("a ajuda do link diz que só vale o OneDrive ou SharePoint da Lotufo (testes de quebra 10/10, A-13)", async () => {
+  it("o link do OneDrive não tem frase de ajuda: o servidor recusa o endereço errado (testes de quebra 10/10, A-13)", async () => {
     api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
     render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
-    expect(await screen.findByText(/Cole um link do OneDrive ou SharePoint da Lotufo; link de outro endereço é recusado\./))
-      .toBeTruthy();
+    expect(await screen.findByText("Arquivo grande por link do OneDrive")).toBeTruthy();
+    expect(screen.queryByText(/link de outro endereço é recusado|25 MB somados|Vai como anexo separado|O e-mail sai da sua conta/)).toBeNull();
     // issue #118: o endereço permitido é do servidor (DASH_SHAREPOINT_HOSTS); a tela não traz o tenant da empresa
     expect(document.body.innerHTML).not.toMatch(/[a-z0-9-]+(-my)?\.sharepoint\.com/i);
   });

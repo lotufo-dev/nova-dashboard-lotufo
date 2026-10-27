@@ -39,18 +39,9 @@ export function mensagem(e: unknown): string {
   return mensagemDeErro(e);
 }
 
-/** "4 notas de 08/10/2026" / "NF 2322 de 08/10/2026" */
+/** "NF 2322" / "NF 2322, 2323" (vazio sem nota) */
 export function notasDe(e: Envio): string {
-  const qtd = e.notas.length === 1 ? `NF ${e.notas[0].numero}` : `${e.notas.length} notas`;
-  return e.emitida_em ? `${qtd} de ${fmtDataPura(e.emitida_em)}` : qtd;
-}
-
-function emitida(e: Envio): string {
-  const plural = e.notas.length > 1;
-  if (e.dias === null) return "";
-  if (e.dias <= 0) return plural ? "emitidas hoje" : "emitida hoje";
-  if (e.dias === 1) return plural ? "emitidas ontem" : "emitida ontem";
-  return `${plural ? "emitidas" : "emitida"} há ${e.dias} dias`;
+  return e.notas.length ? `NF ${e.notas.map(n => n.numero).join(", ")}` : "";
 }
 
 /** Orgaos que levam carta com numero de oficio (MTPAR, SES e prefeituras); a SINFRA (etapa nota) nao. */
@@ -217,33 +208,35 @@ export function useCertidoes(contratoId: number, natureza: string): ItemCertidao
   return itens;
 }
 
-function textoCertidao(i: ItemCertidao): string {
+function textoCertidao(i: ItemCertidao): string | null {
   if (i.situacao === "pendente") return "sem validade hoje";
-  const validade = i.validade ? `válida até ${fmtDataPura(i.validade.slice(0, 10))}` : "válida";
-  return i.situacao === "vencendo" && i.dias !== null ? `${validade} · vence em ${i.dias} ${i.dias === 1 ? "dia" : "dias"}` : validade;
+  // em dia, o ponto verde basta: a data so' aparece quando esta' para vencer
+  return i.situacao === "vencendo" && i.validade ? `vence em ${fmtDataPura(i.validade.slice(0, 10))}` : null;
 }
 
-/** Uma linha por certidao: o ponto (verde, ambar, vermelho) e a validade, por empresa quando ha mais de uma. */
+/** Uma linha por certidao: o ponto (verde, ambar, vermelho) e a validade so' da que vence, por empresa quando ha mais de uma. O
+ *  caminho para emitir a nova so' aparece com certidao vencida. */
 export function ListaCertidoes({ itens }: { itens: ItemCertidao[] }) {
   const empresas = [...new Map(itens.map(i => [i.entidade_id, i.entidade] as const)).entries()];
+  const vencida = itens.some(i => i.situacao === "pendente");
   return (
     <div className="certidoes-bloco">
-      <p className="med-sub">Certidões <span className="campo__nota">— {empresas.length > 1 ? "do consórcio e das consorciadas" : "da empresa"}, conferidas hoje</span></p>
+      <p className="med-sub">Certidões</p>
       {empresas.map(([eid, nome]) => (
         <div key={eid}>
-          {empresas.length > 1 && <p className="campo__nota certidoes__empresa">{nome ?? "Empresa sem nome no cadastro"}</p>}
+          {empresas.length > 1 && <p className="campo__nota certidoes__empresa">{nome ?? "—"}</p>}
           <ul className="certidoes">
             {itens.filter(i => i.entidade_id === eid).map(i => (
               <li key={`${i.entidade_id}-${i.tipo}`}>
                 <span className={`ponto${i.situacao === "pendente" ? " ponto--acao" : i.situacao === "vencendo" ? " ponto--atencao" : ""}`} aria-hidden="true" />
-                <span>{i.tipo}</span> <small>· {textoCertidao(i)}</small>
+                <span>{i.tipo}</span>{textoCertidao(i) && <> <small>· {textoCertidao(i)}</small></>}
               </li>
             ))}
           </ul>
         </div>
       ))}
-      <p className="campo__nota certidoes__nota">Certidão vencida bloqueia o envio; emita a nova em{" "}
-        <Link para={{ tela: "documentos" }}>Documentos</Link>.</p>
+      {vencida && <p className="campo__nota certidoes__nota">Certidão vencida: emita a nova em{" "}
+        <Link para={{ tela: "documentos" }}>Documentos</Link>.</p>}
     </div>
   );
 }
@@ -251,8 +244,7 @@ export function ListaCertidoes({ itens }: { itens: ItemCertidao[] }) {
 /* --------------------------------------------------------------- a aba Enviar nota */
 
 // Medicoes › Enviar nota (#157, opcao B, aprovada em 16/10/2026): a lista a esquerda e, a direita, a nota escolhida
-// com o que vai junto e o que falta. A aba so' mostra e leva: enviar, anexar o que falta e registrar um envio feito
-// fora do sistema se fazem na etapa 4 da pagina da medicao.
+// com o que vai junto e o que falta. A aba so' mostra e leva a etapa 4 da pagina da medicao.
 
 type Situacao = "pronto" | "pendencia";
 type FiltroId = "todas" | "prontas" | "pendencia";
@@ -263,9 +255,9 @@ const FILTROS: { id: FiltroId; rotulo: string }[] = [
 type Resumo = { situacao: Situacao; selo: string; nivel: "" | "selo--ok" | "selo--atencao" | "selo--acao";
   motivo: string; tom: "neutro" | "atencao" | "bloqueio" };
 
-/** O selo do cartao e a frase do rodape: o que falta, em palavras. So' o bloqueio apaga o botao. `onde`: a aba
- *  manda anexar na etapa 4 da medicao; la' mesmo, anexa-se no envio. */
-export function resumoDe(e: Envio, onde: "aba" | "etapa" = "aba"): Resumo {
+/** O selo do cartao e a frase do rodape. So' o bloqueio apaga o botao; a frase (`motivo`) so' existe quando o envio
+ *  esta' bloqueado ou esperando a outra metade: o que falta ja' esta' no selo e na lista. */
+export function resumoDe(e: Envio): Resumo {
   if (e.situacao === "bloqueado") {
     const venc = e.itens.find(i => i.estado === "vencida");
     return { situacao: "pendencia", selo: venc ? "Certidão vencida" : "Bloqueado", nivel: "selo--acao",
@@ -279,22 +271,16 @@ export function resumoDe(e: Envio, onde: "aba" | "etapa" = "aba"): Resumo {
   // certidao a menos de 15 dias do vencimento so' avisa: o envio segue pronto, com o aviso ao lado
   const aviso = e.itens.find(i => i.estado === "aviso");
   const falta = e.itens.find(i => i.estado === "falta");
-  if (!falta && aviso) {
-    return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok", motivo: e.aviso ?? aviso.detalhe ?? aviso.rotulo, tom: "atencao" };
-  }
+  if (!falta && aviso) return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok", motivo: "", tom: "atencao" };
   if (falta) {
     const rotulo = /^[A-ZÀ-Ý]{2}/.test(falta.rotulo) ? falta.rotulo : falta.rotulo.charAt(0).toLowerCase() + falta.rotulo.slice(1);
     return { situacao: "pendencia", selo: falta.estado === "falta" ? `Falta ${rotulo}` : falta.rotulo, nivel: "selo--atencao",
-      motivo: e.aviso ?? (onde === "etapa" ? `Falta ${rotulo}: anexe no envio, ou envie assim.`
-        : falta.acao === "anexar_frc"
-          ? "Falta a FRC assinada: anexe na etapa 4 da medição, ou envie assim (a etapa 4 diz o que o envio pede)."
-          : `Falta ${rotulo}: veja na etapa 4 da medição.`), tom: "atencao" };
+      motivo: "", tom: "atencao" };
   }
-  return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok",
-    motivo: "Tudo pronto: a nota abre na etapa 4 da medição, com o e-mail montado (lá se pede o nº do ofício, quando o órgão exige).", tom: "neutro" };
+  return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok", motivo: "", tom: "neutro" };
 }
 
-/** O que vai junto, so' para ler: cada item com o estado e, onde falta algo, o caminho ate' onde se resolve. */
+/** O que vai junto, so' para ler: cada item com o estado e, onde falta algo, o link para resolver. */
 function ItensLeitura({ e, certidoes }: { e: Envio; certidoes: ItemCertidao[] | null }) {
   const [erroBaixar, setErroBaixar] = useState("");
   // issue #169: a FRC desatualizada e' recusada pelo servidor; a mensagem aparece aqui em vez do JSON do erro
@@ -320,10 +306,10 @@ function ItensLeitura({ e, certidoes }: { e: Envio; certidoes: ItemCertidao[] | 
                 </span>
               )}
               {it.acao === "anexar_frc" && it.estado !== "ok" && (
-                <span className="nota-item__detalhe">anexe na <Link className="link forte" para={aqui} secao="etapa-4">etapa 4 da medição</Link></span>
+                <span className="nota-item__detalhe"><Link className="link forte" para={aqui} secao="etapa-4">Anexar na etapa 4</Link></span>
               )}
               {it.acao === "anexar_regularidade" && (
-                <span className="nota-item__detalhe">anexe em <Link className="link forte" para={{ tela: "documentos" }}>Documentos</Link></span>
+                <span className="nota-item__detalhe"><Link className="link forte" para={{ tela: "documentos" }}>Anexar em Documentos</Link></span>
               )}
             </span>
           </span>
@@ -341,13 +327,12 @@ function Painel({ e, podeEditar }: { e: Envio; podeEditar: boolean }) {
   return (
     <section className="nota-painel" id="painel-nota" aria-labelledby="titulo-envio">
       <div className="nota-painel__bloco">
-        <h2 className="nota-painel__titulo" id="titulo-envio">{e.obra} · {e.descricao}</h2>
-        <p className="nota-painel__meta">{[e.orgao, e.orgao_sub, notasDe(e), e.dias !== null ? `parada há ${e.dias} ${e.dias === 1 ? "dia" : "dias"}` : "",
-          e.a_pedido ? "a pedido do órgão" : ""].filter(Boolean).join(" · ")}</p>
+        <h2 className="nota-painel__titulo" id="titulo-envio">{e.obra} · {e.descricao}
+          {e.a_pedido && <>{" "}<Selo>A pedido do órgão</Selo></>}</h2>
+        <p className="nota-painel__meta">{[e.orgao, e.orgao_sub, e.emitida_em ? fmtDataPura(e.emitida_em) : ""].filter(Boolean).join(" · ")}</p>
       </div>
       <div className="nota-painel__bloco">
         <p className="nota-painel__valor nota-mono">{brl(e.valor_centavos)}</p>
-        {e.notas.length > 1 && <p className="nota-painel__meta">Soma das {e.notas.length} notas</p>}
       </div>
       <div className="nota-painel__junto">
         <span className="nota-painel__sub">O que vai junto</span>
@@ -357,20 +342,18 @@ function Painel({ e, podeEditar }: { e: Envio; podeEditar: boolean }) {
       {/* issue #188: a medicao e o reajuste vao no mesmo e-mail; sem as notas da outra metade, nao ha' o que iniciar */}
       {e.situacao === "esperando" && (
         <CaixaAviso nivel="atencao">
-          {e.orgao} recebe a medição e o reajuste no mesmo e-mail: {e.espera?.texto ?? "esperando a outra metade"}.
-          {" "}Para mandar sem {e.espera?.tipo === "execucao" ? "a medição" : "o reajuste"}, use a saída de emergência na{" "}
+          {r.motivo.replace(/\.$/, "")}; para enviar sem {e.espera?.tipo === "execucao" ? "ela" : "ele"}, abra a{" "}
           <Link para={aqui} secao="etapa-4">etapa 4 da medição</Link>.
         </CaixaAviso>
       )}
       <div className="en-rodape">
-        <p className={`en-motivo en-motivo--${r.tom}`}>{r.motivo}</p>
+        {r.motivo && e.situacao !== "esperando" && <p className={`en-motivo en-motivo--${r.tom}`}>{r.motivo}</p>}
         <Link className="en-abrir" para={aqui}>Abrir a medição</Link>
         {/* B-09 (10/10/2026): quem so' consulta ve o que vai no envio, sem o botao */}
         {podeEditar && e.situacao !== "esperando" && (e.situacao === "bloqueado"
           ? <button type="button" className="btn btn--primario" disabled>Enviar a nota →</button>
           : <Link className="btn btn--primario" para={aqui} secao="etapa-4">Enviar a nota →</Link>)}
       </div>
-      <p className="nota-porfora__dica en-dica">Enviar, anexar o que falta e registrar um envio feito fora do sistema se fazem na etapa 4 da medição.</p>
     </section>
   );
 }
@@ -416,9 +399,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
               strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
           </span>
-          <p className="vazio__titulo">Nenhuma nota a enviar</p>
-          <p>As próximas aparecem aqui assim que a nota entrar pela sincronização com o RM.</p>
-          <p><Link para={{ tela: "medicoes", aba: "aguardando-pagamento" }}>Ver notas aguardando pagamento</Link></p>
+          <p className="vazio__titulo">Nenhuma nota a enviar.</p>
         </div>
       </section>
     );
@@ -440,7 +421,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
                 {FILTROS.map(f => (
                   <Link key={f.id} className="nota-pilula" para={{ tela: "medicoes", aba: "enviar-nota" }} busca={comFiltro({ situacao: f.id })}
                     aria-current={filtro === f.id ? "true" : undefined}>
-                    {f.rotulo}{" "}<span className="nota-pilula__n num">{envios.filter(e => doFiltro(e, f.id)).length}</span>
+                    {f.rotulo}
                   </Link>
                 ))}
               </div>
@@ -460,7 +441,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
               if (itens.length === 0) return null;
               return (
                 <section key={g} className="pilha nota-grupo" aria-label={g}>
-                  <h2 className="nota-grupo__titulo">{g}{itens.some(e => e.a_pedido) ? " · a pedido do órgão" : ""}</h2>
+                  <h2 className="nota-grupo__titulo">{g}{itens.some(e => e.a_pedido) && <>{" "}<Selo>A pedido do órgão</Selo></>}</h2>
                   {itens.map(e => {
                     const r = resumoDe(e);
                     return (
@@ -471,11 +452,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
                         }}>
                         <span className="nota-cartao__texto">
                           <span className="nota-cartao__obra">{e.obra}</span>
-                          <span className="nota-cartao__desc">
-                            {[e.descricao, e.notas.length === 1 ? `NF ${e.notas[0].numero}`
-                              : e.notas.length > 1 ? `${e.notas.length} notas: ${e.notas.map(n => n.numero).join(", ")}` : "", emitida(e)]
-                              .filter(Boolean).join(" · ")}
-                          </span>
+                          <span className="nota-cartao__desc">{[e.descricao, notasDe(e)].filter(Boolean).join(" · ")}</span>
                         </span>
                         <span className="en-direita">
                           <span className={`nota-cartao__valor nota-mono${e.a_pedido ? " nota-cartao__valor--espera" : ""}`}>{brl(e.valor_centavos)}</span>

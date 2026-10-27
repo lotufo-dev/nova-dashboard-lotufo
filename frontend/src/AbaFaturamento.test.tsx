@@ -32,15 +32,14 @@ const LINHAS = [
 describe("Aba Enviar ao faturamento", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("um quadro por contratante com a quantidade e a soma; o mais parado primeiro", async () => {
+  it("um quadro por contratante, só com o nome; o mais parado primeiro", async () => {
     api.mockResolvedValue(resumo(LINHAS));
     render(<MedicoesPagina aba="faturamento" busca={{}} usuario={usuario} />);
     const sinfra = await screen.findByRole("region", { name: /^SINFRA/ });
-    // 124.890.317 + 47.237.645 = 172.127.962 centavos
-    expect(sinfra.querySelector("h2")?.textContent?.replace(/ /g, " ")).toBe("SINFRA · 2 medições · R$ 1.721.279,62");
-    const titulos = screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent?.replace(/ /g, " "));
+    expect(sinfra.querySelector("h2")?.textContent).toBe("SINFRA");
+    const titulos = screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent);
     expect(titulos[0]).toMatch(/^SINFRA/);
-    expect(titulos[1]).toBe("MTPAR · 1 medição · R$ 318.220,15");
+    expect(titulos[1]).toBe("MTPAR");
     // so' a situacao faturamento entra
     expect(screen.queryByText("Obra de outra etapa")).toBeNull();
   });
@@ -53,8 +52,9 @@ describe("Aba Enviar ao faturamento", () => {
     expect(within(sinfra).getAllByText("R$ 1.248.903,17").length).toBeGreaterThan(0);
     expect(within(sinfra).getByText(/^16\s+dias$/).className).toContain("medicoes__parada--acao");
     const mtpar = screen.getByRole("region", { name: /^MTPAR/ });
-    const par = within(mtpar).getByTitle("Sem a data do marco desta etapa");
+    const par = mtpar.querySelector(".fat-parada") as HTMLElement;
     expect(par.textContent).toBe("—");
+    expect(par.getAttribute("title")).toBeNull();
     expect(within(mtpar).queryByText(/Parada há/)).toBeNull();
   });
 
@@ -98,7 +98,7 @@ describe("Aba Enviar ao faturamento", () => {
   it("contratante nulo (obra fora do cadastro ativo) não derruba a aba", async () => {
     api.mockResolvedValue(resumo([linha({ contratante: null as unknown as string })]));
     render(<MedicoesPagina aba="faturamento" busca={{}} usuario={usuario} />);
-    expect(await screen.findByRole("region", { name: /^Órgão sem cadastro · 1 medição/ })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Órgão sem cadastro" })).toBeTruthy();
   });
 
   it("empate de parada desempata pelo nome; sem marco conta como o menos parado", async () => {

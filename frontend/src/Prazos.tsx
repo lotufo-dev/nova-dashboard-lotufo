@@ -4,7 +4,7 @@ import { CartaoPleito, NovoPleito, cadeiaDoPleito, type Pleito, type TipoPleito 
 import CaixaAviso from "./CaixaAviso";
 import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
-import { desfechoDoPedido, type InstrumentoPrazo } from "./obra";
+import { desfechoDoPedido, seloDoPrazo, type InstrumentoPrazo } from "./obra";
 import { Link } from "./Link";
 import { fmtDataPura } from "./tempo";
 import Selo from "./Selo";
@@ -25,11 +25,9 @@ type Situacao = {
   encerramento: { desde: string; marcos: Record<string, string>; conclusao_comunicada: boolean } | null;
   instrumentos: Instrumento[];
 };
-type Evento = { id: number; tipo: string; numero: string | null; data: string };
 
 const MARCOS: [string, string][] = [["conclusao", "Conclusão"], ["provisorio", "Recebimento provisório"],
   ["definitivo", "Recebimento definitivo"], ["baixa_garantia", "Baixa da garantia"]];
-const EVENTOS: Record<string, string> = { paralisacao: "paralisação", reinicio: "reinício", endosso_garantia: "endosso" };
 
 function data(iso: string | null | undefined): string {
   return iso ? fmtDataPura(iso.slice(0, 10)) : "—";
@@ -38,10 +36,10 @@ function data(iso: string | null | undefined): string {
 function dias(n: number): string {
   return `${n}\u00a0${n === 1 ? "dia" : "dias"}`;
 }
-// quanto falta (ou quanto venceu) para um prazo: texto de apoio embaixo da data, na grade do resumo
-function restante(d: number | null): string | null {
-  if (d === null) return null;
-  return d < 0 ? `vencida há ${dias(-d)}` : d === 0 ? "vence hoje" : d === 1 ? "falta 1 dia" : `faltam ${dias(d)}`;
+// prazo perto do fim ou vencido pede acao: vira selo so' quando acontece (seloDoPrazo)
+function SeloPrazo({ d }: { d: number | null }) {
+  const selo = seloDoPrazo(d);
+  return selo ? <Selo classe={selo.classe}>{selo.texto}</Selo> : null;
 }
 
 /** O desfecho de um ofício enviado (F-71): o selo diz o que aconteceu (atendido ou sem instrumento); a data do
@@ -54,11 +52,10 @@ export function pleitoEmLinha(p: Pleito): boolean {
   return p.situacao === "enviado" || p.origem === "cadastro";
 }
 
-/** O apoio do envio: "enviado em DD/MM/AAAA" (e, se veio do cadastro, que foi antes do sistema). */
+/** A data do envio, que identifica o oficio: "enviado em DD/MM/AAAA". */
 export function partesDoEnvio(p: Pleito): string[] {
-  if (p.situacao !== "enviado") return [];
-  const quando = p.enviado_em ? ` em ${fmtDataPura(p.enviado_em.slice(0, 10))}` : "";
-  return [`enviado${quando}${p.origem === "cadastro" ? ", antes do sistema" : ""}`];
+  if (p.situacao !== "enviado" || !p.enviado_em) return [];
+  return [`enviado em ${fmtDataPura(p.enviado_em.slice(0, 10))}`];
 }
 
 /** Um ofício como seção do cartão pai: título, o selo do desfecho e o apoio. Sem formulário, sem cartão irmão. */
@@ -83,7 +80,6 @@ export function LinhaPleito({ p, desfecho, contexto }: { p: Pleito; desfecho: De
 
 export default function Prazos({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
   const [dados, setDados] = useState<{ situacao: Situacao; historico: string; pleitos: Pleito[] } | null>(null);
-  const [eventos, setEventos] = useState<Evento[] | null>(null);
   // "sem instrumento ha N dias": o numero vem do servidor (a lista de obras, mudanca A9), nao de uma conta da tela
   const [diasPedido, setDiasPedido] = useState<number | null>(null);
   const [erro, setErro] = useState("");
@@ -94,8 +90,7 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
   const carregar = useCallback(async () => {
     try {
       const d = await api<{ situacao: Situacao; historico: string; pleitos: Pleito[] }>(`/api/contratos/${contratoId}/prazos`);
-      const cad = await api<{ instrumentos: Evento[] }>(`/api/contratos/${contratoId}/cadastro`);
-      setDados(d); setEventos(cad.instrumentos.filter(i => i.tipo in EVENTOS));
+      setDados(d);
       if (d.situacao.pedido) {
         const obras = await api<{ id: number; pedido_prorrogacao?: { dias: number | null } | null }[]>("/api/contratos")
           .catch(() => []);
@@ -108,28 +103,24 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
   useEffect(() => { if (foco && focarPorId(foco)) setFoco(null); }, [foco, dados]);
 
   if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
-  if (!dados || !eventos) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
+  if (!dados) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
   const s = dados.situacao;
   const contrato = { tela: "obra" as const, id: contratoId, aba: "contrato" as const };
-  const ultimo = s.instrumentos[s.instrumentos.length - 1];
-  const retroativos = s.instrumentos.filter(i => i.retroativo).length;
   const semInstrumento = diasPedido === null ? "sem instrumento ainda" : `sem instrumento há ${dias(diasPedido)}`;
 
   // o desfecho de cada pedido de prorrogacao enviado: o instrumento que o atendeu (Em dia) ou nenhum ainda
-  // (Atencao, com os dias que o servidor conta); a data do envio e' texto de apoio (F-71)
+  // (Atencao, com os dias que o servidor conta); embaixo, so' a data do envio (F-71)
   const desfecho = (p: Pleito): DesfechoPleito => {
     const envio = partesDoEnvio(p);
     if (p.tipo !== "prazo" || p.situacao !== "enviado") return { classe: "", texto: p.situacao, partes: envio };
-    const pedidos = p.dias ? [`${dias(p.dias)} pedidos`] : [];
     const inst = desfechoDoPedido(p.enviado_em, s.instrumentos);
     if (!inst) {
       return s.pedido?.id === p.id
-        ? { classe: "selo--atencao", texto: semInstrumento, partes: [...pedidos, ...envio] }
-        : { classe: "", texto: "sem instrumento ainda", partes: [...pedidos, ...envio] };
+        ? { classe: "selo--atencao", texto: semInstrumento, partes: envio }
+        : { classe: "", texto: "sem instrumento ainda", partes: envio };
     }
     const nome = inst.numero ?? (inst.forma === "apostilamento" ? "apostilamento" : "termo aditivo");
-    return { classe: "selo--ok", texto: `atendido pelo ${nome}`,
-      partes: [...pedidos, ...envio, `assinado em ${data(inst.data_assinatura)}`] };
+    return { classe: "selo--ok", texto: `atendido pelo ${nome}`, partes: envio };
   };
   const oficios = dados.pleitos.length;
   // pedido que ainda se trabalha (feito no sistema, nem enviado nem descartado): o caminho e' continuar nele
@@ -144,26 +135,25 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
           <div className="dado">
             <span className="resumo__rotulo">Execução até</span>
             <span className="dado__valor num">{data(s.execucao_fim)}</span>
-            {s.execucao_fim && restante(s.dias_execucao) && <span className="campo__nota num">{restante(s.dias_execucao)}</span>}
+            {/* os mesmos casos em que o servidor nao avisa (prazos.py): obra em encerramento e, na execucao,
+                obra paralisada (D16); na vigencia, a que o orgao prorroga junto */}
+            {s.execucao_fim && !s.paralisacao && !s.encerramento && <SeloPrazo d={s.dias_execucao} />}
             {s.paralisacao && <Selo classe="selo--atencao">paralisada desde {data(s.paralisacao.desde)}</Selo>}
           </div>
           <div className="dado">
             <span className="resumo__rotulo">Vigência até</span>
             <span className="dado__valor num">{data(s.vigencia_fim)}</span>
-            {s.vigencia_fim && restante(s.dias_vigencia) && <span className="campo__nota num">{restante(s.dias_vigencia)}</span>}
-            {s.vigencia_automatica && <span className="campo__nota">o órgão prorroga a vigência junto</span>}
+            {s.vigencia_fim && !s.vigencia_automatica && !s.encerramento && <SeloPrazo d={s.dias_vigencia} />}
           </div>
           <div className="dado">
             <span className="resumo__rotulo">Folga entre execução e vigência</span>
             <span className="dado__valor num">{s.folga.real === null ? "—" : dias(s.folga.real)}</span>
-            {s.folga.exigida !== null && <span className="campo__nota num">o órgão pede {dias(s.folga.exigida)}</span>}
             {s.folga.quebrada && <Selo classe="selo--acao">folga quebrada</Selo>}
           </div>
           {s.endosso && (
             <div className="dado">
               <span className="resumo__rotulo">Endosso do seguro-garantia</span>
               <span className="dado__valor">{s.endosso.instrumento ?? "último instrumento"}</span>
-              <span className="campo__nota">assinado em <span className="num">{data(s.endosso.assinado_em)}</span></span>
               <Selo classe={s.endosso.entregue ? "selo--ok" : "selo--atencao"}>
                 {s.endosso.entregue ? "endosso registrado" : "endosso não registrado"}
               </Selo>
@@ -176,21 +166,13 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
                 <span className="dado__valor"><Link para={{ tela: "obra", id: contratoId, aba: "prazos" }} secao={`oficio-${s.pedido.id}`}>
                   {s.pedido.numero_oficio ?? "Ofício"}</Link></span>
                 <Selo classe="selo--atencao">{semInstrumento}</Selo>
-                <span className="campo__nota">enviado em <span className="num">{data(s.pedido.enviado_em)}</span></span>
               </>
-            ) : <span className="dado__valor">nenhum em curso</span>}
+            ) : <span className="dado__valor">—</span>}
           </div>
         </div>
-        {/* a lista dos instrumentos mora em Contrato › Instrumentos: aqui, o resumo e o caminho ate' ela */}
-        <div className="cartao__corpo linhas">
-          <p><span className="resumo__rotulo">Instrumentos de prazo</span>{" "}
-            {ultimo ? `${s.instrumentos.length}, o último em ${data(ultimo.data_assinatura)}` : "nenhum"}
-            {retroativos > 0 && ` · ${retroativos === 1 ? "1 assinado" : `${retroativos} assinados`} depois do fim da execução que prorrogava`}
-            {" · "}<Link para={contrato} secao="instrumentos">ver em Contrato › Instrumentos</Link></p>
-          <p><span className="resumo__rotulo">Paralisações e endossos</span>{" "}
-            {eventos.length === 0 ? "nenhum no cadastro" : <>
-              {eventos.map(e => `${EVENTOS[e.tipo]} em ${data(e.data)}`).join("; ")}
-              {" · "}<Link para={contrato} secao="instrumentos">ver em Contrato › Instrumentos</Link></>}</p>
+        {/* a lista dos instrumentos (aditivos, paralisacoes, endossos) mora em Contrato › Instrumentos */}
+        <div className="cartao__corpo">
+          <Link para={contrato} secao="instrumentos">Abrir os instrumentos</Link>
         </div>
       </section>
 
@@ -198,7 +180,6 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
       <section className="cartao" aria-labelledby="titulo-pedidos">
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-pedidos">Pedidos e cartas</h2>
-          <span className="cartao__dica num">{oficios === 0 ? "nenhum ofício ainda" : oficios === 1 ? "1 ofício" : `${oficios} ofícios`}</span>
           {podeEditar && aberto && (
             <div className="cartao__acoes">
               <Link className="btn btn--pequeno" para={{ tela: "obra", id: contratoId, aba: "prazos" }} secao={`oficio-${aberto.id}`}>
@@ -214,8 +195,8 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
         </div>
         {/* o historico entra na secao 1 da carta de prazo: aberto enquanto se pede a prorrogacao */}
         <details className="detalhes cartao__corpo" key={novo ?? "-"} open={novo === "prazo"}>
-          <summary>Histórico do contrato, que entra na carta de prazo</summary>
-          {dados.historico ? dados.historico.split("\n\n").map((p, i) => <p key={i}>{p}</p>) : <p>Sem histórico no cadastro.</p>}
+          <summary>Histórico do contrato</summary>
+          {dados.historico ? dados.historico.split("\n\n").map((p, i) => <p key={i}>{p}</p>) : <p>—</p>}
         </details>
         {(novo === "prazo" || oficios > 0) && (
           <div className="secoes-pleito">
@@ -238,7 +219,6 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
         <section className="cartao" aria-labelledby="titulo-encerramento">
           <div className="cartao__cabeca">
             <h2 className="cartao__titulo" id="titulo-encerramento">Encerramento</h2>
-            <span className="cartao__dica">desde {data(s.encerramento.desde)}</span>
           </div>
           <ul className="lista-simples cartao__corpo">
             {MARCOS.map(([k, rotulo]) => <li key={k}>{rotulo}: <span className="num">{data(s.encerramento!.marcos[k])}</span></li>)}
