@@ -14,7 +14,7 @@ export type Nivel = "critico" | "acao" | "atencao";
 
 // O destino e' o do servidor, no vocabulario dele ("contrato" + aba); `destinoDoAviso` o traduz para a
 // rota da tela nova, sem mudar o contrato da API.
-export type Destino = { tela: "contrato"; id: number; aba: string } | { tela: "documentos" };
+export type Destino = { tela: "contrato"; id: number; aba: string } | { tela: "documentos" } | { tela: "siga"; processo?: number };
 
 export type Aviso = {
   tipo: string; nivel: Nivel; publico: string[]; contrato_id: number | null; obra: string | null;
@@ -34,6 +34,8 @@ const ABAS_OBRA: readonly string[] = ["medicoes", "prazos", "reajuste", "documen
 export function destinoDoAviso(a: Aviso): { para: Rota; secao?: string; busca?: Busca } | null {
   const d = a.destino;
   if (!d) return null;
+  // #330: a tela SIGA, com o processo do aviso aberto (o do monitor sem leitura abre so' a tela)
+  if (d.tela === "siga") return { para: { tela: "siga" }, busca: d.processo ? { processo: String(d.processo) } : undefined };
   // a empresa em Documentos: a pagina dela (#161); o aviso da regularidade do mes leva direto a aba dela
   if (d.tela === "documentos") return a.entidade_id
     ? { para: { tela: "documentos-empresa", id: a.entidade_id, aba: a.tipo === "regularidade_mes" ? "regularidade" : (a.tipo === "garantia_vencendo" || a.tipo === "garantia_aquem_execucao") ? "garantia" : undefined } }

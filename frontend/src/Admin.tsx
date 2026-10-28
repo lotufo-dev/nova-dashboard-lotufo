@@ -54,6 +54,9 @@ type Backup = { ultimo_backup: string | null; tamanho_bytes: number | null; guar
                 ultima_copia_externa_arquivos?: string | null; ultima_copia_externa_arquivos_erro?: string | null;
                 ultima_copia_externa_arquivos_erro_em?: string | null };
 
+// Issue #330: /api/admin/saude. ultima_leitura = quando o monitor do SIGA mandou a leitura mais recente (nulo: nunca leu)
+type SaudeSiga = { ultima_leitura: string | null; atrasado: boolean; processos: number };
+
 const ROTULO_ESTADO_RODADA: Record<string, string> = { success: "OK", failed: "Falhou", running: "Rodando" };
 // A auditoria chega em paginas dos mais recentes; "Carregar mais" traz as anteriores e os filtros correm sobre
 // tudo o que ja' chegou (a API aceita ate' 500 por pagina).
@@ -117,9 +120,11 @@ function backupFalhou(b: Backup | null | undefined): boolean {
     || !!b.ultima_copia_arquivos_erro || !!b.ultima_copia_externa_arquivos_erro);
 }
 
-function Situacoes({ status, erroCarga, rodando, b }: { status: StatusRm | null; erroCarga: string; rodando: boolean; b: Backup | null | undefined }) {
+function Situacoes({ status, erroCarga, rodando, b, siga }: {
+  status: StatusRm | null; erroCarga: string; rodando: boolean; b: Backup | null | undefined; siga: SaudeSiga | null | undefined;
+}) {
   const neutro = (t: string, v: string, n: string): Cartao => [t, v, n, "neutra"];
-  const T_BACKUP = "Último backup", T_EXTERNA = "Última cópia externa dos arquivos", T_RM = "Sincronização com o RM";
+  const T_BACKUP = "Último backup", T_EXTERNA = "Última cópia externa dos arquivos", T_RM = "Sincronização com o RM", T_SIGA = "Monitor do SIGA";
   const NAO_LEU = "recarregue a página para tentar de novo";
   // 1. ultimo backup
   const backup: Cartao = b === undefined ? neutro(T_BACKUP, "carregando…", "")
@@ -148,9 +153,16 @@ function Situacoes({ status, erroCarga, rodando, b }: { status: StatusRm | null;
     : ultima.estado === "failed"
       ? [T_RM, `falhou em ${fmtDataHora(ultima.iniciado_em)}`, "", "acao"]
     : [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), "", "ok"];
+  // 4. monitor do SIGA (issue #330): a hora da ultima leitura e quantos processos ele acompanha
+  const monitor: Cartao = siga === undefined ? neutro(T_SIGA, "carregando…", "")
+    : siga === null ? neutro(T_SIGA, "não foi possível ler", NAO_LEU)
+    : siga.ultima_leitura === null ? neutro(T_SIGA, "—", "")
+    : [T_SIGA, fmtDataHora(siga.ultima_leitura),
+      `${siga.processos} ${siga.processos === 1 ? "processo" : "processos"}${siga.atrasado ? ", sem leitura recente" : ""}`,
+      siga.atrasado ? "acao" : "ok"];
   return (
     <ul className="situacoes" aria-label="Situação do servidor">
-      {[backup, externa, rm].map(([titulo, valor, nota, situacao]) => (
+      {[backup, externa, rm, monitor].map(([titulo, valor, nota, situacao]) => (
         <CartaoSituacao key={titulo} titulo={titulo} valor={valor} nota={nota} situacao={situacao} />
       ))}
     </ul>
@@ -296,6 +308,7 @@ function Saude() {
   const [concluida, setConcluida] = useState("");
   // undefined = carregando; null = nao deu para ler
   const [b, setB] = useState<Backup | null | undefined>(undefined);
+  const [siga, setSiga] = useState<SaudeSiga | null | undefined>(undefined);
   // depois de "Sincronizar agora", as contagens da reconciliacao sao lidas de novo
   const [versao, setVersao] = useState(0);
 
@@ -303,6 +316,7 @@ function Saude() {
   useEffect(() => {
     carregar();
     api<Backup>("/api/admin/backup").then(setB).catch(() => setB(null));
+    api<{ siga: SaudeSiga }>("/api/admin/saude").then(r => setSiga(r.siga)).catch(() => setSiga(null));
   }, []);
 
   async function sincronizar() {
@@ -325,7 +339,7 @@ function Saude() {
   const quandoBoa = ultimaBoa ? ultimaBoa.terminado_em ?? ultimaBoa.iniciado_em : status?.ultima_sincronizacao ?? null;
   return (
     <div className="saude pilha">
-      <Situacoes status={status} erroCarga={erroCarga} rodando={rodando} b={b} />
+      <Situacoes status={status} erroCarga={erroCarga} rodando={rodando} b={b} siga={siga} />
 
       {status?.configurado && ultima?.estado === "failed" && !rodando && !erro && (
         <CaixaAviso nivel="critico">

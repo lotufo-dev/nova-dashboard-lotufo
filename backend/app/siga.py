@@ -13,6 +13,7 @@ import re
 from urllib.parse import parse_qs, quote, urlsplit
 
 from app import auditoria, db, medicoes, tempo
+from app import avisos as registro_avisos
 from app.feriados import dia_util
 
 SEM_IDENTIFICACAO = "Processo sem o código ou o número do SIGA"
@@ -28,6 +29,9 @@ FOLGA_FUTURO = datetime.timedelta(minutes=10)
 LEITURA_NO_FUTURO = "Data da leitura no futuro: confira o relógio da máquina do robô"
 # Horario em que o robo roda (hora de Cuiaba), nos dias uteis
 ROBO_INICIO, ROBO_FIM = datetime.time(8, 0), datetime.time(17, 30)
+# Processo parado no mesmo setor: aviso de atencao a partir de 5 dias uteis, de acao a partir de 10 (limites do
+# e-mail do robo de 13/10/2026; a tela SIGA usa os mesmos em `siga.ts`)
+DIAS_ATENCAO, DIAS_ACAO = 5, 10
 _CAMPOS_MOV = ("evento", "cad_lotacao", "cad_pessoa", "at_lotacao", "at_pessoa")
 
 
@@ -410,3 +414,54 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
         })
     return {"lido_em": tempo.iso_utc(lido_em) if lido_em else None, "atrasado": atrasado(lido_em, agora),
             "processos": saida}
+
+
+def saude(conn) -> dict:
+    """Administracao > Saude (issue #330): a ultima leitura do monitor e quantos processos ele acompanha."""
+    lido_em = conn.execute("SELECT MAX(lido_em) FROM siga_leituras").fetchone()[0]
+    return {"ultima_leitura": tempo.iso_utc(lido_em) if lido_em else None,
+            "atrasado": atrasado(lido_em, tempo.agora_utc()),
+            "processos": conn.execute("SELECT COUNT(*) FROM siga_processos").fetchone()[0]}
+
+
+def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) -> list[dict]:
+    """Avisos da fila (issue #330). `siga_parado`: processo ligado a medicao ainda nao recebida, 5 dias uteis ou
+    mais parado: os dias contam da maior data entre o inicio no setor e a ultima movimentacao valida, e o nivel
+    segue `DIAS_ATENCAO` e `DIAS_ACAO`. Um so' por medicao: o do processo do protocolo mais recente (sem protocolo
+    vale menos que com; empate, o processo mais novo), porque o antigo fica arquivado no SIGA depois de uma
+    devolucao. `siga_sem_leitura`: um so', quando o robo passou do atraso e ha' processo acompanhado. Processo sem
+    medicao (Outros processos) nao avisa: nao ha' obra nem ato da dashboard que o faca sumir."""
+    agora = agora or tempo.agora_utc()
+    out = []
+    for p in conn.execute(
+            "SELECT sp.id, sp.numero, sp.contrato_id, sp.medicao_id FROM siga_processos sp "
+            "JOIN medicoes m ON m.id=sp.medicao_id WHERE m.estado NOT IN ('cancelada','desistida','recebida') "
+            "AND NOT EXISTS (SELECT 1 FROM siga_processos novo WHERE novo.medicao_id=sp.medicao_id AND "
+            "(COALESCE(novo.protocolo_id, -1) > COALESCE(sp.protocolo_id, -1) OR "
+            "(COALESCE(novo.protocolo_id, -1) = COALESCE(sp.protocolo_id, -1) AND novo.id > sp.id))) "
+            "ORDER BY sp.id").fetchall():
+        leitura = conn.execute("SELECT situacao FROM siga_leituras WHERE processo_id=? ORDER BY lido_em DESC, id DESC "
+                               "LIMIT 1", (p["id"],)).fetchone()
+        movs = [dict(r) for r in conn.execute(
+            "SELECT data, evento, at_lotacao, at_pessoa FROM siga_movimentacoes WHERE processo_id=?", (p["id"],))]
+        d = derivar(leitura["situacao"] if leitura else None, movs, hoje)
+        if d["desde"] is None:
+            continue
+        parado_desde = max(d["desde"], d["ultima"]["data"])[:10]
+        dias = _dias_uteis(datetime.date.fromisoformat(parado_desde), hoje)
+        if dias < DIAS_ATENCAO:
+            continue
+        onde = f" em {d['setor']}" if d["setor"] else ""
+        out.append({**registro_avisos.aviso(
+            "siga_parado", "acao" if dias >= DIAS_ACAO else "atencao",
+            f"processo {p['numero']} parado{onde} há {dias} dias úteis", p["contrato_id"],
+            registro_avisos.obra(conn, p["contrato_id"]), dias=dias,
+            destino={"tela": "siga", "processo": p["id"]}, data=parado_desde, sentido="desde"),
+            "medicao_id": p["medicao_id"]})
+    lido_em = conn.execute("SELECT MAX(lido_em) FROM siga_leituras").fetchone()[0]
+    if atrasado(lido_em, agora) and conn.execute("SELECT 1 FROM siga_processos LIMIT 1").fetchone():
+        local = tempo.para_local(datetime.datetime.fromisoformat(lido_em))
+        out.append(registro_avisos.aviso(
+            "siga_sem_leitura", "acao", f"monitor do SIGA sem leitura desde {local:%d/%m %H:%M}",
+            destino={"tela": "siga"}, data=local.date().isoformat(), sentido="desde"))
+    return out

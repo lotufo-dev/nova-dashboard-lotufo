@@ -59,6 +59,15 @@ describe("SigaPagina", () => {
     expect(within(grupo("Processos de medições")).getByText("Obra Alfa")).toBeTruthy();
   });
 
+  it("?processo= (o 'Abrir' do aviso) abre o painel desse processo; id que não existe cai no primeiro", async () => {
+    const { unmount } = mostrar(painel([ALFA, DELTA]), { processo: String(DELTA.id) });
+    expect((await screen.findByRole("complementary", { name: "Detalhe do processo" })).textContent).toMatch(/Obra Delta/);
+    expect(screen.getByRole("row", { name: /Obra Delta/ }).getAttribute("aria-selected")).toBe("true");
+    unmount();
+    mostrar(painel([ALFA, DELTA]), { processo: "999" });
+    expect((await screen.findByRole("complementary", { name: "Detalhe do processo" })).textContent).toMatch(/Obra Alfa/);
+  });
+
   it("grupo vazio não aparece", async () => {
     mostrar(painel([BETA]));
     await screen.findByText("Outros processos");

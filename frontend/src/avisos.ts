@@ -2,19 +2,20 @@
 // manda pronto (`app/avisos.py`). Nada aqui decide nivel, prazo ou atraso: so' agrupa, filtra e ordena.
 import { porAtraso, type Aviso, type Nivel } from "./Alertas";
 
-export type Familia = "prazo" | "reajuste" | "nota" | "documentos" | "outros";
+export type Familia = "prazo" | "reajuste" | "nota" | "siga" | "documentos" | "outros";
 
 // A ordem dos grupos e' a do mapa; "Outros" guarda o aviso de lar desconhecido, para nada sumir. A familia
 // Dinheiro saiu com o aviso de pagamento atrasado (issue #255), que era o unico dela.
 export const FAMILIAS: { id: Familia; rotulo: string }[] = [
   { id: "prazo", rotulo: "Prazo" }, { id: "reajuste", rotulo: "Reajuste" }, { id: "nota", rotulo: "Nota" },
-  { id: "documentos", rotulo: "Documentos" }, { id: "outros", rotulo: "Outros" },
+  { id: "siga", rotulo: "SIGA" }, { id: "documentos", rotulo: "Documentos" }, { id: "outros", rotulo: "Outros" },
 ];
 
 /** A familia e' o lar do aviso: o `destino` que o servidor manda (a aba da obra, ou Documentos). */
 export function familiaDoAviso(a: Aviso): Familia {
   const d = a.destino;
   if (d?.tela === "documentos") return "documentos";
+  if (d?.tela === "siga") return "siga";
   if (d?.tela === "contrato") {
     if (d.aba === "prazos") return "prazo";
     if (d.aba === "reajuste") return "reajuste";

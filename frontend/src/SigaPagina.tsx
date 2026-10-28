@@ -126,7 +126,7 @@ function irAoPainel() {
 export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Date }) {
   const [dados, setDados] = useState<PainelSiga | null>(null);
   const [erro, setErro] = useState("");
-  const [escolhido, setEscolhido] = useState<number | null>(null);
+  const [escolhido, setEscolhido] = useState<number | null>(() => (/^\d+$/.test(busca.processo ?? "") ? Number(busca.processo) : null));
   const carregar = useCallback(async () => {
     try { setDados(await api<PainelSiga>("/api/siga")); setErro(""); } catch (e) { setErro(mensagemDeErro(e)); }
   }, []);

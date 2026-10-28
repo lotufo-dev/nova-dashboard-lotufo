@@ -23,9 +23,17 @@ describe("avisos", () => {
   });
 
   it("o pagamento atrasado saiu (#255): sem família Dinheiro e sem destino próprio", () => {
-    expect(FAMILIAS.map(f => f.id)).toEqual(["prazo", "reajuste", "nota", "documentos", "outros"]);
+    expect(FAMILIAS.map(f => f.id)).toEqual(["prazo", "reajuste", "nota", "siga", "documentos", "outros"]);
     const antigo = { ...av("pagamento_atrasado", "acao", 9, "medicoes"), medicao_id: 722 };
     expect(familiaDoAviso(antigo)).toBe("outros");
+  });
+
+  it("os avisos do SIGA (#330) formam a família SIGA, entre Nota e Documentos", () => {
+    const parado: Aviso = { ...av("siga_parado", "atencao", 7, null), destino: { tela: "siga", processo: 4 } };
+    const sem: Aviso = { ...av("siga_sem_leitura", "acao", null, null), destino: { tela: "siga" } };
+    expect([parado, sem].map(familiaDoAviso)).toEqual(["siga", "siga"]);
+    expect(porFamilia([...lista, parado, sem]).map(g => g.rotulo)).toEqual(
+      ["Prazo", "Reajuste", "Nota", "SIGA", "Documentos", "Outros"]);
   });
 
   it("por família, na ordem do mapa, do mais grave ao mais atrasado", () => {
