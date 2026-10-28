@@ -494,5 +494,12 @@ def test_desvio_por_obra_no_qdop_pela_linha_anterior_ate_a_ultima_competencia_fe
     # propria: sem repactuacao, pelo vigente; o previsto de 09/2026 (mes corrente) ainda nao conta;
     # medido de execucao protocolada ou recebida = 29 mil sobre 1 mi = 2,9 (o espelho de 09/2026 fica fora)
     assert (obras[ids["propria"]]["desvio_pp"], obras[ids["propria"]]["desvio_base"]) == (2.9, "vigente")
+    # o medido do mes corrente tambem fica fora: uma execucao protocolada de 09/2026 nao mexe no desvio de hoje
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 40, 'execucao', '2026-09', 'protocolada', 5000000)", (ids["propria"],))
+    c.commit()
+    assert {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}[ids["propria"]]["desvio_pp"] == 2.9
+    c.execute("DELETE FROM medicoes WHERE contrato_id=? AND numero=40", (ids["propria"],))
+    c.commit()
     # em outubro, 09/2026 fecha: o previsto de 20 mil entra (29 - 20 mil = 0,9)
     assert {o["contrato_id"]: o for o in diretoria.painel(c, D(2026, 10, 1))["obras"]}[ids["propria"]]["desvio_pp"] == 0.9

@@ -53,10 +53,10 @@ describe("Carteira", () => {
     expect(within(numeros).queryByText(/medições faturadas/)).toBeNull();
     expect(numeros.querySelector(".cart-numero__apoio")).toBeNull();
     // curva S acumulada: previsto 150.000 + 200.000 e medido 100.000 + 150.000 até 09/2026
-    expect(screen.getByRole("img", { name: /Previsto e medido acumulados de 08\/2026 a 09\/2026/ })).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Previsto e medido de execução acumulados de 08\/2026 a 09\/2026/ })).toBeTruthy();
     const leitura = (screen.getByRole("status").textContent ?? "").replace(/\s/g, " ");
     expect(leitura).toContain("previsto R$ 3.500,00");
-    expect(leitura).toContain("medido R$ 2.500,00");
+    expect(leitura).toContain("medido de execução R$ 2.500,00");
     expect(leitura).not.toContain("do previsto");
     expect(screen.queryByText("acumulado, na cota da Lotufo")).toBeNull();
     // cartão do contratante: saldo, obras, % executado (15 de 20 milhões) e link para as obras dele
@@ -73,7 +73,7 @@ describe("Carteira", () => {
   it("Resumo: a curva S da carteira tem o previsto vigente, o anterior à última repactuação e o medido (#296)", async () => {
     api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
     render(<Diretoria ir={() => {}} />);
-    const curva = await screen.findByRole("img", { name: /Previsto e medido acumulados de 08\/2026 a 09\/2026/ });
+    const curva = await screen.findByRole("img", { name: /Previsto e medido de execução acumulados de 08\/2026 a 09\/2026/ });
     // as três linhas: previsto vigente, previsto anterior e medido (vem de curva_carteira, não da série da Produção)
     expect(curva.querySelector(".cart-c-prev")).toBeTruthy();
     expect(curva.querySelector(".cart-c-ant")).toBeTruthy();
@@ -82,6 +82,10 @@ describe("Carteira", () => {
     const leitura = (screen.getByRole("status").textContent ?? "").replace(/\s/g, " ");
     expect(leitura).toContain("previsto anterior R$ 5.000,00");
     expect(screen.getByText("previsto anterior à última repactuação")).toBeTruthy();
+    // a curva conta outra regra de medido que o cartão "Medido no ano": o nome diz qual (revisão da PR #326)
+    expect(screen.getByText("Previsto e medido de execução acumulados nos últimos 12 meses")).toBeTruthy();
+    expect(screen.getByText("medido de execução")).toBeTruthy();
+    expect(leitura).toContain("medido de execução R$ 2.500,00");
   });
 
   it("QDOP: a coluna Desvio (p.p.) mostra o número com sinal e a linha de base, e — sem cronograma (#296)", async () => {
@@ -100,7 +104,8 @@ describe("Carteira", () => {
     };
     expect(celula("Cavalaria").textContent).toBe("−16,7anterior");
     expect(celula("Cavalaria").className).toContain("negativo");
-    expect(within(celula("Cavalaria")).getByText("anterior").getAttribute("title")).toBe("Contra o previsto anterior à última repactuação");
+    // só a palavra da base, sem frase de apoio no ponteiro (texto-na-tela)
+    expect(celula("Cavalaria").querySelector("[title]")).toBeNull();
     expect(celula("Adiantada").textContent).toBe("+2,9vigente");
     expect(celula("Sem cronograma").textContent).toBe("—");
   });

@@ -241,9 +241,9 @@ function CurvaS({ serie }: { serie: PontoCarteira[] }) {
     <>
       <div ref={ref} className="cart-curva">
         <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
-          aria-label={`Previsto e medido acumulados de ${fmtCompetencia(acc[0].competencia)} a ${fmtCompetencia(acc[ultimo].competencia)}, `
+          aria-label={`Previsto e medido de execução acumulados de ${fmtCompetencia(acc[0].competencia)} a ${fmtCompetencia(acc[ultimo].competencia)}, `
             + `nas obras ativas, na cota da Lotufo. Ao fim, previsto ${brl(acc[ultimo].previsto)}, `
-            + `previsto anterior à última repactuação ${brl(acc[ultimo].anterior)} e medido ${brl(acc[ultimo].medido)}.`}>
+            + `previsto anterior à última repactuação ${brl(acc[ultimo].anterior)} e medido de execução ${brl(acc[ultimo].medido)}.`}>
           <text className="g-eixo num" x={mE - 8} y={T - 10} textAnchor="end">{rotulo}</text>
           {grade.map(v => (
             <g key={v}>
@@ -272,7 +272,7 @@ function CurvaS({ serie }: { serie: PontoCarteira[] }) {
       </div>
       <p className="cartao__corpo cart-leitura" role="status">
         Até {fmtCompetencia(a.competencia)}: previsto <span className="num">{brl(a.previsto)}</span> · previsto anterior{" "}
-        <span className="num">{brl(a.anterior)}</span> · medido{" "}
+        <span className="num">{brl(a.anterior)}</span> · medido de execução{" "}
         <span className="num">{brl(a.medido)}</span>
       </p>
     </>
@@ -299,12 +299,12 @@ function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
         </li>
       </ul>
 
-      <Secao id="dir-curva" titulo="Previsto e medido acumulados nos últimos 12 meses">
+      <Secao id="dir-curva" titulo="Previsto e medido de execução acumulados nos últimos 12 meses">
         <CurvaS serie={p.curva_carteira} />
         <div className="legenda">
           <span className="legenda__item"><span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />previsto</span>
           <span className="legenda__item"><span className="legenda__chave legenda__chave--anterior" aria-hidden="true" />previsto anterior à última repactuação</span>
-          <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />medido</span>
+          <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />medido de execução</span>
         </div>
       </Secao>
 
@@ -418,10 +418,7 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                         (a anterior a ultima repactuacao quando a obra tem uma) */}
                     {o.desvio_pp == null ? <td className="col-num num">—</td> : (
                       <td className={`col-num num${o.desvio_pp < 0 ? " negativo" : ""}`}>
-                        {pp(o.desvio_pp)}
-                        <div className="campo__nota" title={o.desvio_base === "anterior" ? "Contra o previsto anterior à última repactuação" : "Contra o previsto vigente"}>
-                          {o.desvio_base}
-                        </div>
+                        {pp(o.desvio_pp)}<div className="campo__nota">{o.desvio_base}</div>
                       </td>
                     )}
                     {/* as duas datas numa coluna so' (as colunas do QDOP cabem a 1366): o termino da execucao e,
