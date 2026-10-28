@@ -166,6 +166,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "nf.alocar": "NF alocada à medição", "nf.desalocar": "Alocação de NF desfeita",
   "nota.confirmacao": "Nota confirmada pelo RM", "nota.conferencia": "Nota conferida", "nota.justificar": "Nota justificada",
   "nota.manual": "Nota lançada à mão", "rm.sincronizacao": "Sincronização com o RM",
+  "siga.vinculo": "Processo do SIGA ligado à medição",
   "aditivo.criar": "Aditivo criado", "aditivo.atualizar": "Aditivo alterado", "aditivo.cancelar": "Aditivo cancelado",
   "aditivo.assinar": "Aditivo assinado", "aditivo.carga": "Aditivos carregados do legado",
   "contrato.criar": "Obra criada", "contrato.atualizar": "Obra alterada", "contrato.mudar_estado": "Mudança de estado da obra",

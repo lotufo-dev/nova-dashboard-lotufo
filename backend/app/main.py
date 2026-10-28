@@ -180,6 +180,8 @@ def create_app() -> FastAPI:
     app.include_router(envios_router)
     app.include_router(paineis_router)
     app.include_router(rm_router)
+    from app.api_siga import router as siga_router
+    app.include_router(siga_router)
     app.include_router(usuarios_router)
 
     if os.environ.get("DASH_SEM_JOBS") != "1":
