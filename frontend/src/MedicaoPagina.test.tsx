@@ -252,6 +252,35 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
       data: "2026-10-14", numero_oficio: null, numero_processo: null, apesar_das_pendencias: true, justificativa: "órgão aceita a CND em até 5 dias" }) }));
   });
 
+  // issue #328: o mesmo campo "Link do SIGA" no registro por fora; o servidor extrai o código e recusa o resto
+  it("“Registrar protocolo feito fora” tem o campo “Link do SIGA” e manda o link", async () => {
+    abrirEtapa(4);
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, protocolos: [REGISTRADO] }],
+      "/api/contratos/1/checklist-protocolo?natureza=execucao": { entidade: "Lotufo", pronto: true, itens: [] } });
+    pagina();
+    fireEvent.click(await screen.findByRole("button", { name: "Registrar protocolo feito fora" }));
+    fireEvent.change(await screen.findByLabelText("Data do protocolo"), { target: { value: "2026-10-14" } });
+    fireEvent.change(screen.getByLabelText(/Link do SIGA/), { target: { value: " https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234 " } });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar protocolo" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/medicoes/5/protocolo", { method: "POST", body: JSON.stringify({
+      data: "2026-10-14", numero_oficio: null, numero_processo: null, link_siga: "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234" }) }));
+  });
+
+  it("a linha do tempo mostra “Processo no SIGA registrado”, do protocolo enviado e do registro por fora", async () => {
+    const ENVIADO = { id: 9, etapa: "unico", etapa_rotulo: "Protocolo", numero_oficio: "CT-301", situacao: "enviado",
+      criado_em: "2026-10-18 10:00:00", enviado_em: "2026-10-19 10:00:00", enviado_por: "Engenharia",
+      medicoes: [{ id: 5, titulo: "23ª Medição" }], pendencias: [], numero_orgao: null,
+      siga: { codigo: "AbCdEf1234", link: null, setor: null, com_quem: null, dias_uteis: null, lido_em: null, registrado_em: "2026-10-20 12:00:00" } };
+    responder({ "/api/contratos/1/protocolos": { ...LISTA, protocolos: [ENVIADO] } });
+    pagina();
+    const lateral = await screen.findByRole("complementary", { name: "Resumo e linha do tempo" });
+    await waitFor(() => expect(within(lateral).getByText("Processo no SIGA registrado")).toBeTruthy());
+    cleanup();
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, protocolos: [REGISTRADO], siga_registrado_em: "2026-10-21 12:00:00" }] });
+    pagina();
+    expect(within(await screen.findByRole("complementary", { name: "Resumo e linha do tempo" })).getByText("Processo no SIGA registrado")).toBeTruthy();
+  });
+
   it("quem só consulta não vê “Registrar protocolo feito fora”", async () => {
     abrirEtapa(4);
     responder();

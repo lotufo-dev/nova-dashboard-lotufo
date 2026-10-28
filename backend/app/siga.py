@@ -8,8 +8,9 @@ As derivacoes (setor, com quem, desde, dias uteis...) vem do `relatorio_html.py`
 13/10/2026; a unica diferenca e' que os dias uteis descontam os feriados nacionais (`app/feriados.py`).
 """
 import datetime
+import os
 import re
-import urllib.parse
+from urllib.parse import parse_qs, quote, urlsplit
 
 from app import auditoria, db, medicoes, tempo
 from app.feriados import dia_util
@@ -19,8 +20,6 @@ SEM_IDENTIFICACAO = "Processo sem o código ou o número do SIGA"
 LINK_INVALIDO = "Link do SIGA inválido: cole o link que o órgão mandou"
 OUTRO_LINK = "Este protocolo já tem outro link do SIGA gravado"
 LIGADO_A_OUTRO = "Este processo do SIGA já está ligado a outro protocolo"
-HOSTS_SIGA = ("sigadoc.mt.gov.br", "www.sigadoc.mt.gov.br")
-URL_ACOMPANHAMENTO = "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar?n="
 _CODIGO = re.compile(r"[A-Za-z0-9]{6,20}")
 MOVIMENTACOES_NA_TELA = 30
 ATRASO = datetime.timedelta(hours=2)
@@ -224,18 +223,21 @@ def gravar_leitura(conn, lido_em: datetime.datetime, processos: list[dict]) -> d
 
 def extrair_codigo(texto: str | None) -> str | None:
     """Codigo do processo (`n=` do link de acompanhamento): aceita o link inteiro ou so' o codigo. Vazio = None.
-    Link de outro dominio, sem `n=` ou com codigo fora de 6 a 20 letras e numeros e' recusado."""
+    O dominio do SIGA e' o do modelo de link (`DASH_SIGA_LINK_MODELO`, fora do repositorio): sem ele so' o codigo
+    colado vale. Link de outro dominio, sem `n=` ou com codigo fora de 6 a 20 letras e numeros e' recusado."""
     texto = (texto or "").strip()
     if not texto:
         return None
     if _CODIGO.fullmatch(texto):
         return texto
+    modelo = link_do_processo("x" * 6)
     try:
-        url = urllib.parse.urlsplit(texto if "://" in texto else "https://" + texto)
-        host, valores = url.hostname, urllib.parse.parse_qs(url.query).get("n", [])
+        url = urlsplit(texto if "://" in texto else "https://" + texto)
+        host, valores = url.hostname, parse_qs(url.query).get("n", [])
+        host_siga = urlsplit(modelo).hostname if modelo else None
     except ValueError:
         raise ValueError(LINK_INVALIDO) from None
-    if url.scheme not in ("http", "https") or host not in HOSTS_SIGA or len(valores) != 1 \
+    if url.scheme not in ("http", "https") or not host or host != host_siga or len(valores) != 1 \
             or not _CODIGO.fullmatch(valores[0]):
         raise ValueError(LINK_INVALIDO)
     return valores[0]
@@ -317,7 +319,7 @@ def do_protocolo(conn, protocolo_id: int, hoje: datetime.date | None = None) -> 
                      "ORDER BY id LIMIT 1", (protocolo_id,)).fetchone()
     if p is None:
         return None
-    saida = {"codigo": p["codigo"], "link": URL_ACOMPANHAMENTO + p["codigo"], "setor": None, "com_quem": None,
+    saida = {"codigo": p["codigo"], "link": link_do_processo(p["codigo"]), "setor": None, "com_quem": None,
              "dias_uteis": None, "lido_em": None,
              "registrado_em": registrado_em(conn, "protocolo", [protocolo_id]).get(protocolo_id)}
     leitura = conn.execute("SELECT situacao, lido_em FROM siga_leituras WHERE processo_id=? "
@@ -335,6 +337,15 @@ def do_protocolo(conn, protocolo_id: int, hoje: datetime.date | None = None) -> 
 
 def processos_para_o_robo(conn) -> list[dict]:
     return [dict(r) for r in conn.execute("SELECT codigo, numero, nome FROM siga_processos ORDER BY id")]
+
+
+def link_do_processo(codigo: str | None) -> str | None:
+    """Link de acompanhamento no SIGA: o modelo (https, com `{codigo}`) vem de `DASH_SIGA_LINK_MODELO`, fora do
+    repositorio. Sem codigo ou sem modelo valido, nao ha' link."""
+    modelo = os.environ.get("DASH_SIGA_LINK_MODELO", "").strip()
+    if not codigo or not modelo.startswith("https://") or "{codigo}" not in modelo:
+        return None
+    return modelo.replace("{codigo}", quote(codigo, safe=""))
 
 
 def painel(conn, agora: datetime.datetime | None = None) -> dict:

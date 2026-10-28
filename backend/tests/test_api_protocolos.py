@@ -14,6 +14,7 @@ from tests.test_protocolo import CARTAS, _assinar, _contrato, _pdf
 @pytest.fixture
 def api(client_admin, tmp_path, monkeypatch):
     monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    monkeypatch.setenv("DASH_SIGA_LINK_MODELO", "https://siga.exemplo.com.br/acompanhar?n={codigo}")    # issue #328
     c = db.get_conn()
     cad = {"orgaos": [{"chave": "mtpar", "nome": "MTPAR", "familia": "mtpar", "cnpj": None,
                        "regras": {"protocolo_para": ["protocolo@orgao-b.exemplo.com.br"], "documentos_medicao": [],
@@ -360,7 +361,7 @@ def test_corpo_formatado_do_protocolo_sai_sanitizado_e_com_link(api, tmp_path):
 
 # --- issue #328: o link do SIGA na etapa 4 -----------------------------------------------------------------
 
-LINK_SIGA = "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar?n=AbCdEf1234"
+LINK_SIGA = "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234"
 MSG_LINK_INVALIDO = "Link do SIGA inválido: cole o link que o órgão mandou"
 
 
@@ -419,14 +420,14 @@ def test_so_o_codigo_tambem_vale_e_repetir_nao_duplica(api):
 
 
 @pytest.mark.parametrize("link", [
-    "https://www.sigadoc.mt.gov.br.evil.example/sigaex/public/app/processoautenticar?n=AbCdEf1234",
-    "https://www.sigadoc.mt.gov.br@evil.example/x?n=AbCdEf1234",
+    "https://siga.exemplo.com.br.evil.example/acompanhar?n=AbCdEf1234",
+    "https://siga.exemplo.com.br@evil.example/x?n=AbCdEf1234",
     "https://evil.example/sigaex/public/app/processoautenticar?n=AbCdEf1234",
-    "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar",
-    "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar?n=curto",
-    "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar?n=AbCdEf1234&n=Outro12345",
-    "https://www.sigadoc.mt.gov.br/x?n=" + "A" * 21,
-    "ftp://www.sigadoc.mt.gov.br/x?n=AbCdEf1234",
+    "https://siga.exemplo.com.br/acompanhar",
+    "https://siga.exemplo.com.br/acompanhar?n=curto",
+    "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234&n=Outro12345",
+    "https://siga.exemplo.com.br/x?n=" + "A" * 21,
+    "ftp://siga.exemplo.com.br/x?n=AbCdEf1234",
     "https://[::1/x?n=AbCdEf1234",
     "não é um link",
 ])
@@ -437,6 +438,17 @@ def test_link_do_siga_de_outro_site_ou_malformado_e_422_e_nada_e_gravado(api, li
     assert r.status_code == 422 and r.json()["detail"] == MSG_LINK_INVALIDO
     assert _siga_processos("codigo") == [] and _auditoria_siga() == []
     assert cl.get(f"/api/protocolos/{pid}").json()["numero_orgao"] is None      # nem o numero do mesmo envio
+
+
+def test_sem_o_modelo_de_link_so_o_codigo_vale_e_nao_ha_link_no_detalhe(api, monkeypatch):
+    monkeypatch.delenv("DASH_SIGA_LINK_MODELO")
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": LINK_SIGA})
+    assert r.status_code == 422 and r.json()["detail"] == MSG_LINK_INVALIDO       # sem o modelo nao ha' dominio a conferir
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": "AbCdEf1234"})
+    assert r.status_code == 200, r.text
+    assert (r.json()["siga"]["codigo"], r.json()["siga"]["link"]) == ("AbCdEf1234", None)
 
 
 def test_link_do_siga_vazio_nao_apaga_o_que_esta_gravado(api):

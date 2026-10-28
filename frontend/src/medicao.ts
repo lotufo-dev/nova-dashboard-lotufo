@@ -12,13 +12,15 @@ export type MedicaoBase = {
   atestado_em: string | null; recebida_em: string | null; nota_emitida_em?: string | null;
   final?: number; final_em?: string | null; protocolos: MarcoProtocolo[]; notas?: NotaDaMedicao[];
   edicoes_valor?: { data: string; texto: string }[];   // B-02 (10/10/2026): da auditoria, texto pronto do servidor
+  siga_registrado_em?: string | null;                  // issue #328: quando o link do SIGA do envio por fora foi gravado
 };
 export type EspelhoResumo = { id: number; numero: number; versao: number; situacao: string; criado_em: string;
   criado_por_nome: string | null; medicoes: { id: number; tipo: string; superado?: boolean }[];
   envio: { enviado_em: string; remetente: string } | null };
 export type ProtocoloResumo = { id: number; etapa_rotulo: string; numero_oficio: string | null; situacao: string;
   criado_em: string; enviado_em?: string | null; enviado_por?: string | null;
-  medicoes: { id: number; titulo: string }[]; pendencias: { codigo: string; mensagem: string }[] };
+  medicoes: { id: number; titulo: string }[]; pendencias: { codigo: string; mensagem: string }[];
+  siga?: { registrado_em: string | null } | null };
 
 // Encerramentos por excecao: nem o atestado muda mais neles (espelha a guarda de medicoes.definir_valor).
 export const EXCECOES = ["cancelada", "desistida"];
@@ -144,11 +146,13 @@ export function eventosDaMedicao(m: MedicaoBase, espelhos: EspelhoResumo[], prot
       doSistema.add(p.id);
       out.push({ data: p.enviado_em, texto: `Protocolo enviado (${nome})${p.enviado_por ? ` por ${p.enviado_por}` : ""}` });
     }
+    if (p.siga?.registrado_em) out.push({ data: p.siga.registrado_em, texto: "Processo no SIGA registrado" });
   }
   // o registro do protocolo na medicao repete o envio feito pelo sistema; o de fora aparece sozinho
   for (const p of m.protocolos.filter(x => !x.protocolo_id || !doSistema.has(x.protocolo_id))) {
     out.push({ data: p.data, texto: `Protocolada${p.numero_oficio ? ` · ofício ${p.numero_oficio}` : ""}${p.numero_processo ? ` · processo ${p.numero_processo}` : ""}` });
   }
+  if (m.siga_registrado_em) out.push({ data: m.siga_registrado_em, texto: "Processo no SIGA registrado" });
   if (m.atestado_em) out.push({ data: m.atestado_em, texto: "Atestada pelo órgão" });
   if (m.recebida_em) out.push({ data: m.recebida_em, texto: "Recebida" });
   if (m.final === 1 && m.final_em) out.push({ data: m.final_em, texto: "Marcada como medição final" });

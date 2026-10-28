@@ -275,6 +275,87 @@ describe("Protocolo", () => {
     });
   });
 
+  // issue #328: o link do SIGA na etapa 4 e a linha "No SIGA"
+  describe("link do SIGA", () => {
+    const LINK = "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234";
+    const SIGA = { codigo: "AbCdEf1234", link: LINK, setor: null as string | null, com_quem: null as string | null,
+      dias_uteis: null as number | null, lido_em: null as string | null, registrado_em: "2026-10-20 12:00:00" };
+    const ENVIADO = { ...PROT, situacao: "enviado", envio_id: 3, numero_orgao: "X-1" };
+    const tela = (p: Record<string, unknown>, podeEditar = true) => {
+      const carregar = vi.fn(async () => {});
+      render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [p as typeof PROT] }}
+        carregar={carregar} podeEditar={podeEditar} aoMudar={() => {}} />);
+      return carregar;
+    };
+
+    it("abaixo do nº do órgão, o campo “Link do SIGA” manda o link e, gravado, mostra “Abrir no SIGA”", async () => {
+      apiForm.mockResolvedValueOnce({ ...ENVIADO, siga: SIGA });
+      const { rerender } = render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [ENVIADO] }}
+        carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+      expect(screen.queryByRole("link", { name: "Abrir no SIGA" })).toBeNull();
+      fireEvent.change(await screen.findByLabelText("Link do SIGA"), { target: { value: ` ${LINK} ` } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalled());
+      const [caminho, fd] = apiForm.mock.calls[0] as [string, FormData];
+      expect(caminho).toBe("/api/protocolos/9/numero-orgao");
+      expect(fd.get("link_siga")).toBe(LINK);
+      rerender(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [{ ...ENVIADO, siga: SIGA }] }}
+        carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+      const abrir = await screen.findByRole("link", { name: "Abrir no SIGA" });
+      expect(abrir.getAttribute("href")).toBe(LINK);
+      expect(abrir.getAttribute("rel")).toContain("noopener");
+      expect(screen.queryByText(/^No SIGA:/)).toBeNull();        // sem leitura do robô, só o link
+    });
+
+    it("sem link digitado, não manda o campo (vazio não apaga o gravado)", async () => {
+      apiForm.mockResolvedValueOnce(ENVIADO);
+      tela(ENVIADO);
+      fireEvent.click(await screen.findByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalled());
+      expect((apiForm.mock.calls[0][1] as FormData).has("link_siga")).toBe(false);
+    });
+
+    it("mostra a recusa do servidor para um link de outro site", async () => {
+      const e = new ApiErro(422, "");
+      e.message = "Link do SIGA inválido: cole o link que o órgão mandou";
+      apiForm.mockRejectedValueOnce(e);
+      tela(ENVIADO);
+      fireEvent.change(await screen.findByLabelText("Link do SIGA"), { target: { value: "https://outro.exemplo.com.br/?n=AbCdEf1234" } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      expect(await screen.findByText("Link do SIGA inválido: cole o link que o órgão mandou")).toBeTruthy();
+    });
+
+    it.each([
+      [2, null], [6, "Atenção"], [11, "Crítico"],
+    ])("com a leitura do robô há %i dias úteis: a linha “No SIGA” e o selo %s", async (dias, selo) => {
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", com_quem: "Fulano", dias_uteis: dias, lido_em: "2026-10-28T15:00:00+00:00" } });
+      expect(await screen.findByText(`No SIGA: COFIN · com Fulano · há ${dias} dias úteis`)).toBeTruthy();
+      const linha = screen.getByText(/^No SIGA:/).parentElement!;
+      expect(within(linha).queryByText("Atenção") !== null).toBe(selo === "Atenção");
+      expect(within(linha).queryByText("Crítico") !== null).toBe(selo === "Crítico");
+      expect(within(linha).getByRole("link", { name: "Abrir no SIGA" })).toBeTruthy();
+    });
+
+    it("na caixa de entrada não há “com quem”, e um dia útil fica no singular", async () => {
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "GABIN", dias_uteis: 1, lido_em: "2026-10-28T15:00:00+00:00" } });
+      expect(await screen.findByText("No SIGA: GABIN · há 1 dia útil")).toBeTruthy();
+    });
+
+    it("quem só consulta não vê o campo, mas vê a linha “No SIGA” e o link", async () => {
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", com_quem: "Fulano", dias_uteis: 6, lido_em: "2026-10-28T15:00:00+00:00" } }, false);
+      expect(await screen.findByText("No SIGA: COFIN · com Fulano · há 6 dias úteis")).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Abrir no SIGA" })).toBeTruthy();
+      expect(screen.queryByLabelText("Link do SIGA")).toBeNull();
+    });
+
+    it("sem link gravado, não mostra nada do SIGA", async () => {
+      tela(ENVIADO);
+      await screen.findByLabelText("Link do SIGA");
+      expect(screen.queryByRole("link", { name: "Abrir no SIGA" })).toBeNull();
+      expect(screen.queryByText(/^No SIGA:/)).toBeNull();
+    });
+  });
+
   // issue #27: carta editada pede confirmação; protocolo enviado não prende a tela
   it("carta editada pede confirmação ao sair; protocolo enviado não prende a tela", () => {
     window.history.replaceState(null, "", "/obras/1/medicoes/5");

@@ -353,6 +353,11 @@ rodada maior vai em mais de um POST com o mesmo `lido_em` (cada um grava só o q
 3. Conferir: `Invoke-RestMethod http://<servidor>/api/siga/processos -Headers @{Authorization = "Bearer <token>"}`
    devolve a lista (vazia antes da primeira rodada).
 
+**Link do SIGA na etapa 4**: a operação cola o link que o órgão mandou (ou só o código do parâmetro `n=`) no campo
+"Link do SIGA" do protocolo enviado ou do registro por fora; o servidor grava o código em `siga_processos`, ligado ao
+protocolo, e o robô passa a acompanhá-lo pela lista de `GET /api/siga/processos`. O domínio aceito é o de
+`DASH_SIGA_LINK_MODELO` (`https://`, com `{codigo}`); sem a variável só o código colado vale.
+
 O processo cujo número é **igual** (maiúsculas, sem espaços) ao "Nº do protocolo no órgão" de um protocolo enviado,
 ou ao número de um envio registrado por fora, fica ligado à medição na rodada seguinte do robô. Número parecido não
 liga.
