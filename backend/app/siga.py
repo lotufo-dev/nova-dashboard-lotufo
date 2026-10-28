@@ -244,10 +244,12 @@ def extrair_codigo(texto: str | None) -> str | None:
 
 
 def _ligar(conn, usuario_id, codigo: str, numero: str | None, nome: str, contrato_id: int,
-           protocolo_id: int | None, medicao_id: int | None, entidade: str, entidade_id: int) -> None:
+           protocolo_id: int | None, medicao_id: int | None, medicoes_alvo: set[int], entidade: str,
+           entidade_id: int) -> None:
     """Cria ou liga o processo do `codigo` ao protocolo (ou, no envio por fora, a' medicao). Nada se sobrescreve:
     o protocolo que ja' tem outro codigo, ou o codigo ja' ligado a outro protocolo, e' recusado. Quem chama abre a
-    transacao (`db.mutacao`) e confere o codigo com `extrair_codigo`."""
+    transacao (`db.mutacao`) e confere o codigo com `extrair_codigo`. `medicoes_alvo`: as medicoes do protocolo; o
+    processo que o robo ja' ligou so' a uma delas (pelo numero do envio por fora) nao e' "de outro protocolo"."""
     numero = sem_espacos(numero) or None
     if protocolo_id is not None:
         proprio = conn.execute("SELECT * FROM siga_processos WHERE protocolo_id=? ORDER BY id LIMIT 1",
@@ -256,6 +258,11 @@ def _ligar(conn, usuario_id, codigo: str, numero: str | None, nome: str, contrat
         proprio = conn.execute("SELECT * FROM siga_processos WHERE medicao_id=? AND protocolo_id IS NULL "
                                "ORDER BY id LIMIT 1", (medicao_id,)).fetchone()
     if proprio is not None and proprio["codigo"] == codigo:
+        # ligado antes pela leitura do robo, ja' com o codigo: so' falta o registro de quem colou o link
+        if entidade_id not in registrado_em(conn, entidade, [entidade_id]):
+            auditoria.registrar(conn, usuario_id, "protocolo.siga", entidade, entidade_id, None,
+                                {"codigo": codigo, "numero": numero, "contrato_id": contrato_id,
+                                 "protocolo_id": protocolo_id, "medicao_id": medicao_id})
         return
     if proprio is not None and proprio["codigo"] is not None:
         raise ValueError(OUTRO_LINK)
@@ -267,7 +274,8 @@ def _ligar(conn, usuario_id, codigo: str, numero: str | None, nome: str, contrat
                      (codigo, numero, proprio["id"]))
     else:
         achado = _achar_processo(conn, codigo, numero)
-        if achado is not None and (achado["protocolo_id"] is not None or achado["medicao_id"] is not None):
+        if achado is not None and (achado["protocolo_id"] is not None
+                                   or achado["medicao_id"] not in (None, *medicoes_alvo)):
             raise ValueError(LIGADO_A_OUTRO)
         alvo = _gravar_processo(conn, codigo, numero, nome)
         conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=? WHERE id=?",
@@ -290,14 +298,14 @@ def registrar_link_protocolo(conn, usuario_id, protocolo_id: int, codigo: str, n
         "WHERE pm.protocolo_id=? ORDER BY m.tipo='reajuste', m.id", (protocolo_id,))]
     nome = f"{' e '.join(medicoes.titulo(m) for m in ms)} - {_obra(conn, contrato_id)}"
     _ligar(conn, usuario_id, codigo, numero, nome, contrato_id, protocolo_id, ms[0]["id"] if len(ms) == 1 else None,
-           "protocolo", protocolo_id)
+           {m["id"] for m in ms}, "protocolo", protocolo_id)
 
 
 def registrar_link_medicao(conn, usuario_id, medicao_id: int, codigo: str, numero: str | None) -> None:
     """Protocolo registrado como feito por fora: nao ha' protocolo, o processo liga so' a' medicao."""
     m = conn.execute("SELECT id, numero, tipo, contrato_id FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
     _ligar(conn, usuario_id, codigo, numero, f"{medicoes.titulo(dict(m))} - {_obra(conn, m['contrato_id'])}",
-           m["contrato_id"], None, medicao_id, "medicao", medicao_id)
+           m["contrato_id"], None, medicao_id, {medicao_id}, "medicao", medicao_id)
 
 
 def registrado_em(conn, entidade: str, ids: list[int]) -> dict[int, str]:

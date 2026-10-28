@@ -1061,7 +1061,7 @@ def registrar_numero_orgao(conn, usuario_id: int, protocolo_id: int, numero: str
     p = _linha(conn, protocolo_id)
     if p["situacao"] != "enviado":
         raise ValueError("Só protocolo enviado recebe o número do órgão")
-    codigo = siga.extrair_codigo(link_siga)     # issue #328: link invalido recusa tudo, antes de gravar o comprovante
+    codigo = siga.extrair_codigo(link_siga)     # issue #328: link malformado ou de outro site recusa tudo, antes do comprovante
     # A-15 (testes de quebra 10/10/2026): vazio gravava NULL e apagava o numero sem aviso. A tela nao oferece
     # apagar; vazio e' erro, e o comprovante nao e' gravado antes da recusa. Gate Sol S1: vazio COM comprovante,
     # e o numero ja' gravado, e' "anexar so' o comprovante" -- o numero fica. Issue #328: vazio so' com o link

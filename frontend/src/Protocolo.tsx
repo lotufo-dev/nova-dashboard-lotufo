@@ -178,7 +178,7 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
   );
 }
 
-// Os mesmos limites dos avisos: a partir de 5 dias uteis no setor o selo e' ambar; a partir de 10, vermelho.
+// Limites da issue #328: a partir de 5 dias uteis no setor o selo e' ambar; a partir de 10, vermelho.
 const DIAS_ATENCAO = 5;
 const DIAS_CRITICO = 10;
 

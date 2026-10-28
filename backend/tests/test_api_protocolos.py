@@ -509,6 +509,32 @@ def test_processo_que_o_robo_ligou_pelo_numero_ganha_o_codigo_do_link(api):
     assert _siga_processos("codigo", "numero", "protocolo_id") == [("AbCdEf1234", "MTPAR-PRO-2026/00123", pid)]
 
 
+def test_processo_ja_ligado_pelo_robo_com_o_mesmo_codigo_ainda_registra_quem_colou_o_link(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    c = db.get_conn()
+    c.execute("INSERT INTO siga_processos (codigo, numero, contrato_id, protocolo_id, medicao_id) VALUES "
+              "('AbCdEf1234', 'X-1', ?, ?, ?)", (cid, pid, mid))
+    c.commit(); c.close()
+    for _ in range(2):
+        r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": LINK_SIGA})
+        assert r.status_code == 200, r.text
+    assert r.json()["siga"]["registrado_em"]            # a linha do tempo ganha o evento
+    assert len(_auditoria_siga()) == 1 and len(_siga_processos("id")) == 1
+
+
+def test_processo_que_o_robo_ligou_so_a_medicao_do_protocolo_passa_a_ser_dele(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    c = db.get_conn()
+    c.execute("INSERT INTO siga_processos (codigo, numero, contrato_id, medicao_id) VALUES ('AbCdEf1234', 'X-1', ?, ?)",
+              (cid, mid))
+    c.commit(); c.close()
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": LINK_SIGA})
+    assert r.status_code == 200, r.text
+    assert _siga_processos("codigo", "protocolo_id", "medicao_id") == [("AbCdEf1234", pid, mid)]
+
+
 def test_detalhe_traz_setor_com_quem_e_dias_uteis_depois_da_leitura_do_robo(api, tmp_path, monkeypatch):
     from app import tempo
     # quarta-feira, 28/10/2026, 12h em Cuiaba
