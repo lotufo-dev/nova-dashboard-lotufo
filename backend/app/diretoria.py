@@ -278,15 +278,20 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date) -> dict:
                           for k, o in sorted(por_orgao.items(), key=lambda kv: -kv[1]["saldo"])]}
 
 
-def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, dict | None, dict]:
-    """A curva S da obra (issue #295), por competencia e em valor CHEIO: o previsto vigente, o anterior a ultima
-    repactuacao (None sem repactuacao) e o medido de execucao nos estados que medem (`paineis._medido`)."""
-    if contrato_id not in cache:
+def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, str, dict, dict]:
+    """A curva S da obra (issue #295), por competencia e em valor CHEIO: o previsto vigente; a linha de base ("anterior"
+    quando a obra tem repactuacao, com o previsto anterior a ela; senao "vigente", com o vigente: decisao do Leo de
+    28/10/2026); e o medido de execucao nos estados que medem (`paineis._medido`). O vigente sai do mesmo `cache` de
+    `_previsto`, para nao ler o cronograma duas vezes."""
+    chave = ("curva", contrato_id)
+    if chave not in cache:
+        if contrato_id not in cache:
+            cache[contrato_id] = cronograma.previsto_efetivo(conn, contrato_id)
+        vigente = cache[contrato_id]
         ant = cronograma.curva_comparativa(conn, contrato_id)["anterior"]
-        cache[contrato_id] = (cronograma.previsto_efetivo(conn, contrato_id),
-                              {a["competencia"]: a["previsto_centavos"] for a in ant} if ant else None,
-                              {c: m["execucao"] for c, m in paineis._medido(conn, contrato_id).items()})
-    return cache[contrato_id]
+        base = ("anterior", {a["competencia"]: a["previsto_centavos"] for a in ant}) if ant else ("vigente", vigente)
+        cache[chave] = (vigente, *base, {c: m["execucao"] for c, m in paineis._medido(conn, contrato_id).items()})
+    return cache[chave]
 
 
 def _curva_carteira(conn, hoje: datetime.date, cache: dict) -> list[dict]:
@@ -296,11 +301,11 @@ def _curva_carteira(conn, hoje: datetime.date, cache: dict) -> list[dict]:
     meses = [_mes(hoje, k) for k in range(-11, 1)]
     out = {m: {"competencia": m, "previsto_centavos": 0, "previsto_anterior_centavos": 0, "medido_centavos": 0} for m in meses}
     for c in _ativos(conn):
-        vigente, anterior, medido = _curva_obra(conn, c["id"], cache)
+        vigente, _, linha_base, medido = _curva_obra(conn, c["id"], cache)
         pct = c["percentual_direito_bp"]
         for m in meses:
             out[m]["previsto_centavos"] += contratos.cota(vigente.get(m, 0), pct) or 0
-            out[m]["previsto_anterior_centavos"] += contratos.cota((vigente if anterior is None else anterior).get(m, 0), pct) or 0
+            out[m]["previsto_anterior_centavos"] += contratos.cota(linha_base.get(m, 0), pct) or 0
             out[m]["medido_centavos"] += contratos.cota(medido.get(m, 0), pct) or 0
     return list(out.values())
 
@@ -310,8 +315,7 @@ def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
     vigente do contrato x 100, ate' a ultima competencia fechada (o mes anterior ao atual), contra a linha anterior a
     ultima repactuacao quando a obra tem uma, senao contra a vigente. Em valor cheio (a razao e' a mesma na cota, sem
     o arredondamento dela); uma casa decimal, meio para cima. Sem cronograma ou sem valor vigente, None."""
-    vigente, anterior, medido = _curva_obra(conn, contrato_id, cache)
-    base, previsto = ("vigente", vigente) if anterior is None else ("anterior", anterior)
+    _, base, previsto, medido = _curva_obra(conn, contrato_id, cache)
     total = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
     if not previsto or not total or total <= 0:
         return {"desvio_pp": None, "desvio_base": None}
@@ -378,13 +382,12 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     ms = _medicoes(conn)
     notas = _notas_em_aberto(conn) if liberado else []
     cache: dict = {}
-    curvas: dict = {}
     avisos = _av.listar(conn, hoje, publico="diretoria")
     return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
             "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas), "mes_ano": _mes_ano(conn, ms, hoje, cache),
             "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje),
-            "curva_carteira": _curva_carteira(conn, hoje, curvas),
-            "obras": _obras(conn, hoje, avisos, curvas), "obras_base": _obras_base(conn), "avisos": avisos}
+            "curva_carteira": _curva_carteira(conn, hoje, cache),
+            "obras": _obras(conn, hoje, avisos, cache), "obras_base": _obras_base(conn), "avisos": avisos}
 
 
 def a_receber(conn, hoje: datetime.date | None = None) -> dict:

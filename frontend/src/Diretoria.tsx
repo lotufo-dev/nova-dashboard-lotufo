@@ -418,7 +418,10 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                         (a anterior a ultima repactuacao quando a obra tem uma) */}
                     {o.desvio_pp == null ? <td className="col-num num">—</td> : (
                       <td className={`col-num num${o.desvio_pp < 0 ? " negativo" : ""}`}>
-                        {pp(o.desvio_pp)}<div className="campo__nota">{o.desvio_base}</div>
+                        {pp(o.desvio_pp)}
+                        <div className="campo__nota" title={o.desvio_base === "anterior" ? "Contra o previsto anterior à última repactuação" : "Contra o previsto vigente"}>
+                          {o.desvio_base}
+                        </div>
                       </td>
                     )}
                     {/* as duas datas numa coluna so' (as colunas do QDOP cabem a 1366): o termino da execucao e,

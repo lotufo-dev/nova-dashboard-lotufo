@@ -100,6 +100,7 @@ describe("Carteira", () => {
     };
     expect(celula("Cavalaria").textContent).toBe("−16,7anterior");
     expect(celula("Cavalaria").className).toContain("negativo");
+    expect(within(celula("Cavalaria")).getByText("anterior").getAttribute("title")).toBe("Contra o previsto anterior à última repactuação");
     expect(celula("Adiantada").textContent).toBe("+2,9vigente");
     expect(celula("Sem cronograma").textContent).toBe("—");
   });
