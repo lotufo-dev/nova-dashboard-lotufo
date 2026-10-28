@@ -103,7 +103,7 @@ type Checklist = {
 /** Registrar protocolo feito FORA do sistema (o "Protocolar" antigo da linha): data, oficio, processo e o
  *  checklist do ato, que trava com certidao pendente ate' o operador assumir e justificar. */
 export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, erro }: Base & { contratoId: number }) {
-  const [proto, setProto] = useState({ data: "", oficio: "", processo: "" });
+  const [proto, setProto] = useState({ data: "", oficio: "", processo: "", siga: "" });
   // `undefined` = ainda lendo; `null` = a leitura falhou (o servidor decide sozinho ao gravar).
   const [checklist, setChecklist] = useState<Checklist | null | undefined>(undefined);
   const [apesar, setApesar] = useState(false);
@@ -142,6 +142,7 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
       method: "POST",
       body: JSON.stringify({
         data: proto.data, numero_oficio: proto.oficio || null, numero_processo: proto.processo || null,
+        ...(proto.siga.trim() ? { link_siga: proto.siga.trim() } : {}),
         // So' quando o operador assumiu a pendencia: sem isso o servidor trava o protocolo com certidao
         // pendente (422) e a mensagem dele aparece aqui.
         ...(apesar ? { apesar_das_pendencias: true, justificativa } : {}),
@@ -173,6 +174,11 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
           <label className="campo__rotulo" htmlFor="campo-processo">Nº do processo no órgão (opcional)</label>
           <input id="campo-processo" name="numero_processo" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100}
             value={proto.processo} onChange={ev => setProto({ ...proto, processo: ev.target.value })} />
+        </div>
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor="campo-siga">Link do SIGA (opcional)</label>
+          <input id="campo-siga" name="link_siga" autoComplete="off" spellCheck={false} className="entrada--larga" maxLength={500}
+            placeholder="https://…?n=…" value={proto.siga} onChange={ev => setProto({ ...proto, siga: ev.target.value })} />
         </div>
       </div>
 

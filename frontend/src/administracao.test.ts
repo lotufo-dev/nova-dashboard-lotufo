@@ -111,14 +111,15 @@ describe("administração", () => {
       "nota.justificar", "nota.manual", "notas.envio_externo", "pleito.anexo", "pleito.anexo_removido", "pleito.assinado",
       "pleito.criar", "pleito.descartar", "pleito.enviar", "pleito.montar", "protocolo.assinado", "protocolo.criar",
       "protocolo.descartar", "protocolo.enviar", "protocolo.link", "protocolo.link_removido", "protocolo.montar",
-      "protocolo.numero_orgao", "protocolo.peca", "protocolo.peca_removida", "regularidade.competencia_corrigida",
+      "protocolo.numero_orgao", "protocolo.peca", "protocolo.peca_removida", "protocolo.siga", "regularidade.competencia_corrigida",
       "regularidade.registrar", "rm.sincronizacao", "siga.vinculo", "usuario.atualizar", "usuario.criar", "usuario.desbloquear",
       "usuario.senha_redefinida", "usuario.senha_trocada"];
     expect(acoes.filter(a => /[._]/.test(rotuloAcao(a)) || rotuloAcao(a) === a)).toEqual([]);
     expect(rotuloAcao("frc.gerar")).toBe("FRC gerada");
     expect(rotuloAcao("medicao.valor_atestado")).toBe("Atestado alterado");
     expect(rotuloAcao("envio.liberar")).toBe("Envio liberado à mão");
-    expect(rotuloAcao("siga.vinculo")).toBe("Processo do SIGA ligado à medição");   // #327
+    expect(rotuloAcao("siga.vinculo")).toBe("Processo do SIGA ligado ao protocolo ou à medição");   // #327, #328
+    expect(rotuloAcao("protocolo.siga")).toBe("Link do SIGA registrado");
     expect(rotuloAcao("medicao.recebida_com_diferenca")).toBe("Recebida com diferença dentro da tolerância");   // #35
     expect(rotuloAcao("algo.novo_aqui")).toBe("Algo novo aqui");
   });
