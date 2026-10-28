@@ -35,10 +35,21 @@ describe("App: a rota antiga /avisos", () => {
   });
 });
 
+const PAINEL_MINIMO = {
+  hoje: "2026-10-28", notas_a_enviar: 0, certidoes: { vencidas: 0, vencendo: 0, itens: [] }, reajustes: [],
+  protocoladas: { obras_protocoladas: 0, obras_ativas: 0, ultima: null },
+  medido: { competencia: "2026-10", anterior_competencia: "2026-09", valor_centavos: 0, anterior_centavos: 0,
+            quantidade: 0, ultimo_lancamento: null },
+  por_contratante: [], recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 0 },
+  a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null }, prazos: [],
+};
+
 describe("App: a tela SIGA", () => {
   const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
     if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [] };
+    // o Inicio (entrada da diretoria) le este painel: sem o corpo minimo ele quebra e derruba a casca
+    if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     return [];
   });
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
@@ -60,6 +71,7 @@ describe("App: a tela SIGA", () => {
     entrar("diretoria");
     window.history.replaceState(null, "", "/siga");
     render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });      // o Início carregou
     await screen.findByRole("navigation", { name: "Navegação principal" });
     expect(within(screen.getByRole("navigation", { name: "Navegação principal" })).queryByRole("link", { name: "SIGA" })).toBeNull();
     expect(window.location.pathname).toBe("/inicio");
