@@ -16,14 +16,14 @@
 /* cartoes do topo */
 .ini-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
 .ini-cartao {
-  display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: var(--raio, 8px);
+  display: flex; align-items: center; gap: 16px; padding: 16px 24px; border-radius: var(--raio, 8px);
   background: var(--superficie, #FFFFFF); color: var(--texto, #0F172A); text-decoration: none;
   border: 1px solid var(--linha, #E2E8F0); box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
 }
 .ini-cartao:hover { border-color: var(--linha-hover, #CBD5E1); }
 .ini-cartao__numero { font-size: 32px; line-height: 36px; font-weight: 500; }
 .ini-cartao__texto { display: flex; flex-direction: column; min-width: 0; }
-.ini-cartao__rotulo { font-weight: 600; }
+.ini-cartao__rotulo { font-size: 16px; line-height: 24px; font-weight: 600; }
 .ini-cartao__seta { margin-left: auto; font-size: 18px; color: var(--texto-2, #64748B); }
 .ini-cartao--primario {
   background: var(--acento, #4F46E5); border-color: var(--acento, #4F46E5); color: #FFFFFF;
@@ -42,15 +42,18 @@
   background: var(--superficie, #FFFFFF); border-radius: var(--raio, 8px);
   box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(15, 23, 42, .06);
 }
+/* rotulo e valor no alto, alinhados entre os quatro; barra e selo descem para o pe' (margin-top: auto) */
 .ini-numero { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ini-numero__rotulo { font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); }
+.ini-numero__valor ~ * { margin-top: auto; }
+.ini-numero__rotulo { font-size: 14px; line-height: 20px; color: var(--texto-2, #64748B); }
 .ini-numero__valor { font-size: 26px; line-height: 32px; font-weight: 500; overflow-wrap: anywhere; }
 .ini-numero__de { font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 15px; color: var(--texto-2, #64748B); }
 .ini-barra { display: block; height: 6px; border-radius: 999px; background: var(--acento-fundo, #EEF0FF); overflow: hidden; }
 .ini-barra > span { display: block; height: 6px; background: var(--acento, #4F46E5); }
 
 /* grafico e prazos */
-.ini-colunas { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
+/* start: cada painel tem a altura do proprio conteudo; esticar o do grafico ate' a altura dos prazos deixava um vao no pe' */
+.ini-colunas { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .ini-painel { min-width: 0; display: flex; flex-direction: column; }
 .ini-painel--grafico { flex: 3 1 420px; padding: 20px; gap: 16px; }
 .ini-painel--prazos { flex: 2 1 340px; }
@@ -71,13 +74,13 @@
 .ini-sem-medicao__botao { font-weight: 600; text-decoration: none; color: var(--acento, #4F46E5); }
 .ini-sem-medicao__botao:hover { color: var(--acento-forte, #4338CA); }
 
-.ini-barras { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-.ini-barras__linha { display: grid; grid-template-columns: 120px minmax(0, 1fr) 140px; gap: 12px; align-items: center; }
-.ini-barras__nome { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ini-barras__svg { display: block; width: 100%; height: 23px; }
+.ini-barras { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 20px; }
+.ini-barras__linha { display: grid; grid-template-columns: 140px minmax(0, 1fr) 160px; gap: 16px; align-items: center; }
+.ini-barras__nome { font-size: 16px; line-height: 24px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ini-barras__svg { display: block; width: 100%; height: 32px; }
 .ini-barras__anterior { fill: var(--previsto, #CBD5E1); }
 .ini-barras__atual { fill: var(--acento, #4F46E5); }
-.ini-barras__valor { font-size: 13px; text-align: right; }
+.ini-barras__valor { font-size: 14px; text-align: right; }
 
 .ini-ver-todos { font-size: 13px; text-decoration: none; color: var(--acento, #4F46E5); }
 .ini-prazos__cabeca, .ini-prazos__linha {
