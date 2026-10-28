@@ -235,7 +235,7 @@ const RODADA_RUIM = { id: 3, disparo: "manual", estado: "failed", iniciado_em: "
   terminado_em: "2026-10-16T11:41:05-04:00", nfs: 0, baixas: 0, alocacoes: 0, sugestoes: 0, recebimentos: 0,
   erro: "O RM recusou a conta de serviço." };
 
-const SIGA_SEM_LEITURA = { ultima_leitura: null, processos: 0 };
+const SIGA_SEM_LEITURA = { ultima_leitura: null, atrasado: false, processos: 0 };
 
 function saudeComRm(status: object, backup: object = BACKUP_EM_DIA, siga: object = SIGA_SEM_LEITURA) {
   api.mockImplementation(async (url: string) => {
@@ -273,12 +273,19 @@ test("Saúde: três cartões de situação com a hora, nota só na falha, e a ta
 // Issue #330: o monitor do SIGA ao lado da saúde do RM
 test("Saúde: cartão Monitor do SIGA com a hora da última leitura e os processos; sem leitura, traço", async () => {
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
-    BACKUP_EM_DIA, { ultima_leitura: "2026-10-28T15:15:00+00:00", processos: 12 });
+    BACKUP_EM_DIA, { ultima_leitura: "2026-10-28T15:15:00+00:00", atrasado: false, processos: 12 });
   await screen.findByRole("heading", { name: "Monitor do SIGA" });
   const cartao = cartaoDe("Monitor do SIGA");
   expect(cartao.textContent).toMatch(/28\/10\/2026 às 11:15/);
   expect(cartao.textContent).toMatch(/12 processos/);
   expect(cartao.className).toMatch(/situacao--ok/);
+  cleanup(); api.mockReset();
+  // robô parado: o cartão fica de ação, como o aviso da fila de Avisos
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
+    BACKUP_EM_DIA, { ultima_leitura: "2026-10-28T15:15:00+00:00", atrasado: true, processos: 12 });
+  await screen.findByRole("heading", { name: "Monitor do SIGA" });
+  expect(cartaoDe("Monitor do SIGA").className).toMatch(/situacao--acao/);
+  expect(cartaoDe("Monitor do SIGA").textContent).toMatch(/12 processos, sem leitura recente/);
   cleanup(); api.mockReset();
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] });
   await screen.findByRole("heading", { name: "Monitor do SIGA" });

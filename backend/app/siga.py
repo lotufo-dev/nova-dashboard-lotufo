@@ -275,33 +275,43 @@ def saude(conn) -> dict:
     """Administracao > Saude (issue #330): a ultima leitura do monitor e quantos processos ele acompanha."""
     lido_em = conn.execute("SELECT MAX(lido_em) FROM siga_leituras").fetchone()[0]
     return {"ultima_leitura": tempo.iso_utc(lido_em) if lido_em else None,
+            "atrasado": atrasado(lido_em, tempo.agora_utc()),
             "processos": conn.execute("SELECT COUNT(*) FROM siga_processos").fetchone()[0]}
 
 
 def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) -> list[dict]:
     """Avisos da fila (issue #330). `siga_parado`: processo ligado a medicao ainda nao recebida, 5 dias uteis ou
-    mais no mesmo setor e sem movimentacao hoje (nivel por `DIAS_ATENCAO` e `DIAS_ACAO`). `siga_sem_leitura`: um
-    so', quando o robo passou do atraso e ha' processo acompanhado. Processo sem medicao (Outros processos) nao
-    avisa: nao ha' obra nem ato da dashboard que o faca sumir."""
+    mais parado: os dias contam da maior data entre o inicio no setor e a ultima movimentacao valida, e o nivel
+    segue `DIAS_ATENCAO` e `DIAS_ACAO`. Um so' por medicao: o do processo do protocolo mais recente (sem protocolo
+    vale menos que com; empate, o processo mais novo), porque o antigo fica arquivado no SIGA depois de uma
+    devolucao. `siga_sem_leitura`: um so', quando o robo passou do atraso e ha' processo acompanhado. Processo sem
+    medicao (Outros processos) nao avisa: nao ha' obra nem ato da dashboard que o faca sumir."""
     agora = agora or tempo.agora_utc()
     out = []
     for p in conn.execute(
             "SELECT sp.id, sp.numero, sp.contrato_id, sp.medicao_id FROM siga_processos sp "
             "JOIN medicoes m ON m.id=sp.medicao_id WHERE m.estado NOT IN ('cancelada','desistida','recebida') "
+            "AND NOT EXISTS (SELECT 1 FROM siga_processos novo WHERE novo.medicao_id=sp.medicao_id AND "
+            "(COALESCE(novo.protocolo_id, -1) > COALESCE(sp.protocolo_id, -1) OR "
+            "(COALESCE(novo.protocolo_id, -1) = COALESCE(sp.protocolo_id, -1) AND novo.id > sp.id))) "
             "ORDER BY sp.id").fetchall():
         leitura = conn.execute("SELECT situacao FROM siga_leituras WHERE processo_id=? ORDER BY lido_em DESC, id DESC "
                                "LIMIT 1", (p["id"],)).fetchone()
         movs = [dict(r) for r in conn.execute(
             "SELECT data, evento, at_lotacao, at_pessoa FROM siga_movimentacoes WHERE processo_id=?", (p["id"],))]
         d = derivar(leitura["situacao"] if leitura else None, movs, hoje)
-        if d["dias_uteis"] is None or d["dias_uteis"] < DIAS_ATENCAO or d["hoje"] > 0:
+        if d["desde"] is None:
+            continue
+        parado_desde = max(d["desde"], d["ultima"]["data"])[:10]
+        dias = _dias_uteis(datetime.date.fromisoformat(parado_desde), hoje)
+        if dias < DIAS_ATENCAO:
             continue
         onde = f" em {d['setor']}" if d["setor"] else ""
         out.append({**registro_avisos.aviso(
-            "siga_parado", "acao" if d["dias_uteis"] >= DIAS_ACAO else "atencao",
-            f"processo {p['numero']} parado{onde} há {d['dias_uteis']} dias úteis", p["contrato_id"],
-            registro_avisos.obra(conn, p["contrato_id"]), dias=d["dias_uteis"],
-            destino={"tela": "siga", "processo": p["id"]}, data=d["desde"][:10], sentido="desde"),
+            "siga_parado", "acao" if dias >= DIAS_ACAO else "atencao",
+            f"processo {p['numero']} parado{onde} há {dias} dias úteis", p["contrato_id"],
+            registro_avisos.obra(conn, p["contrato_id"]), dias=dias,
+            destino={"tela": "siga", "processo": p["id"]}, data=parado_desde, sentido="desde"),
             "medicao_id": p["medicao_id"]})
     lido_em = conn.execute("SELECT MAX(lido_em) FROM siga_leituras").fetchone()[0]
     if atrasado(lido_em, agora) and conn.execute("SELECT 1 FROM siga_processos LIMIT 1").fetchone():

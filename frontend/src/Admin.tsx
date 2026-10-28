@@ -55,7 +55,7 @@ type Backup = { ultimo_backup: string | null; tamanho_bytes: number | null; guar
                 ultima_copia_externa_arquivos_erro_em?: string | null };
 
 // Issue #330: /api/admin/saude. ultima_leitura = quando o monitor do SIGA mandou a leitura mais recente (nulo: nunca leu)
-type SaudeSiga = { ultima_leitura: string | null; processos: number };
+type SaudeSiga = { ultima_leitura: string | null; atrasado: boolean; processos: number };
 
 const ROTULO_ESTADO_RODADA: Record<string, string> = { success: "OK", failed: "Falhou", running: "Rodando" };
 // A auditoria chega em paginas dos mais recentes; "Carregar mais" traz as anteriores e os filtros correm sobre
@@ -157,7 +157,9 @@ function Situacoes({ status, erroCarga, rodando, b, siga }: {
   const monitor: Cartao = siga === undefined ? neutro(T_SIGA, "carregando…", "")
     : siga === null ? neutro(T_SIGA, "não foi possível ler", NAO_LEU)
     : siga.ultima_leitura === null ? neutro(T_SIGA, "—", "")
-    : [T_SIGA, fmtDataHora(siga.ultima_leitura), `${siga.processos} ${siga.processos === 1 ? "processo" : "processos"}`, "ok"];
+    : [T_SIGA, fmtDataHora(siga.ultima_leitura),
+      `${siga.processos} ${siga.processos === 1 ? "processo" : "processos"}${siga.atrasado ? ", sem leitura recente" : ""}`,
+      siga.atrasado ? "acao" : "ok"];
   return (
     <ul className="situacoes" aria-label="Situação do servidor">
       {[backup, externa, rm, monitor].map(([titulo, valor, nota, situacao]) => (

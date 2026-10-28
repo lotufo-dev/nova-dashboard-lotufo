@@ -204,10 +204,34 @@ def test_processo_parado_some_com_movimentacao_de_hoje_ou_medicao_recebida(cenar
     c.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao) VALUES (?,?,?,?)",
               (pid, "2026-10-28 09:30:00", "Despacho", "COFIN/ORGAO")); c.commit()
     assert _de_siga(c) == []                                          # andou hoje
-    assert len(_de_siga(c, D(2026, 10, 29))) == 1                     # amanha volta a contar, ate' nova movimentacao
+    assert _de_siga(c, D(2026, 10, 29)) == []                         # a movimentacao zera a contagem, nao so' no dia
+    assert _de_siga(c, D(2026, 11, 4)) == []                          # 28, 29, 30/10, 3 e 4/11: ainda 4 dias uteis
+    [a] = _de_siga(c, D(2026, 11, 5))                                 # 5 dias uteis depois do despacho, o aviso volta
+    assert (a["nivel"], a["dias"], a["data"]) == ("atencao", 5, "2026-10-28")
+    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 parado em COFIN há 5 dias úteis"
     c.execute("UPDATE medicoes SET estado='recebida' WHERE id=(SELECT medicao_id FROM siga_processos WHERE id=?)", (pid,))
     c.commit()
-    assert _de_siga(c, D(2026, 10, 29)) == []
+    assert _de_siga(c, D(2026, 11, 5)) == []
+
+
+def test_so_o_processo_do_protocolo_mais_recente_da_medicao_avisa(cenario):
+    c, ids = cenario                          # a medicao foi protocolada de novo: o processo antigo ficou arquivado no SIGA
+    for _ in (1, 2):
+        c.execute("INSERT INTO protocolos (contrato_id, etapa, natureza, usuario_id) VALUES (?,?,?,1)",
+                  (ids["contrato"], "unico", "execucao"))
+    p_antigo, p_novo = [r[0] for r in c.execute("SELECT id FROM protocolos ORDER BY id")]
+    primeiro = _processo_siga(c, ids, "2026-10-13 10:00:00", numero="SINFRA-PRO-2026/00001")
+    segundo = _processo_siga(c, ids, "2026-10-13 10:00:00", numero="SINFRA-PRO-2026/00002")
+    c.execute("UPDATE siga_processos SET protocolo_id=? WHERE id=?", (p_antigo, primeiro))
+    c.execute("UPDATE siga_processos SET protocolo_id=? WHERE id=?", (p_novo, segundo)); c.commit()
+    assert [a["destino"]["processo"] for a in _de_siga(c)] == [segundo]
+    # quem decide e' o protocolo, nao a ordem dos processos
+    c.execute("UPDATE siga_processos SET protocolo_id=? WHERE id=?", (p_novo, primeiro))
+    c.execute("UPDATE siga_processos SET protocolo_id=? WHERE id=?", (p_antigo, segundo)); c.commit()
+    assert [a["destino"]["processo"] for a in _de_siga(c)] == [primeiro]
+    # sem protocolo nenhum (envio por fora), vale o processo mais novo
+    c.execute("UPDATE siga_processos SET protocolo_id=NULL"); c.commit()
+    assert [a["destino"]["processo"] for a in _de_siga(c)] == [segundo]
 
 
 def test_processo_cancelado_nao_conta_como_movimentacao_de_hoje(cenario):
