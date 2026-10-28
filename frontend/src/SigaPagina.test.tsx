@@ -165,6 +165,25 @@ describe("SigaPagina", () => {
     expect(window.location.search).toBe("?q=alfa");
   });
 
+  it("rele a cada 15 minutos sem perder a linha aberta; o aviso de atraso aparece quando a resposta nova o traz; ao sair, para", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mostrar(painel([ALFA, BETA]));
+      await screen.findByText("Processos de medições");
+      fireEvent.click(screen.getByRole("row", { name: /Processo Beta/ }));
+      expect(api).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(/O monitor do SIGA não lê/)).toBeNull();
+      api.mockResolvedValue(painel([ALFA, BETA], { atrasado: true, lido_em: "2026-10-28T12:00:00+00:00" }));
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(api).toHaveBeenCalledTimes(2);
+      expect(await screen.findByText("O monitor do SIGA não lê desde 28/10 08:00.")).toBeTruthy();
+      expect(screen.getByRole("complementary", { name: "Detalhe do processo" }).querySelector("h2")?.textContent).toBe("Processo Beta");
+      cleanup();
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      expect(api).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("falha ao ler: avisa em português e deixa tentar de novo", async () => {
     api.mockRejectedValue(new Error("Failed to fetch"));
     render(<SigaPagina busca={{}} agora={AGORA} />);

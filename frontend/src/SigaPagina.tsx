@@ -16,6 +16,7 @@ import "./siga.css";
 // quantos dias uteis e o que andou hoje, com as movimentacoes do escolhido ao lado. A tabela e' a que o Leo
 // aprovou no e-mail do monitor (13/10/2026). Tudo vem de GET /api/siga; aqui so' se desenha.
 
+const RELER_A_CADA_MS = 15 * 60_000;
 const dataOuTraco = (iso: string | null) => (iso ? fmtData(iso) : "—");
 
 function Hoje({ n }: { n: number }) {
@@ -129,7 +130,12 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
   const carregar = useCallback(async () => {
     try { setDados(await api<PainelSiga>("/api/siga")); setErro(""); } catch (e) { setErro(mensagemDeErro(e)); }
   }, []);
-  useEffect(() => { void carregar(); }, [carregar]);
+  // O robo le a cada 15 minutos: com a aba aberta a tela rele no mesmo ritmo (a linha aberta e a busca ficam)
+  useEffect(() => {
+    void carregar();
+    const relogio = window.setInterval(() => { void carregar(); }, RELER_A_CADA_MS);
+    return () => window.clearInterval(relogio);
+  }, [carregar]);
 
   const texto = busca.q ?? "";
   const { medicoes, outros } = useMemo(() => {
