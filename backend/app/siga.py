@@ -9,11 +9,19 @@ As derivacoes (setor, com quem, desde, dias uteis...) vem do `relatorio_html.py`
 """
 import datetime
 import re
+import urllib.parse
 
 from app import auditoria, db, medicoes, tempo
 from app.feriados import dia_util
 
 SEM_IDENTIFICACAO = "Processo sem o código ou o número do SIGA"
+# Link de acompanhamento que o orgao manda por e-mail (issue #328): so' o dominio do SIGA, com o codigo em `n=`
+LINK_INVALIDO = "Link do SIGA inválido: cole o link que o órgão mandou"
+OUTRO_LINK = "Este protocolo já tem outro link do SIGA gravado"
+LIGADO_A_OUTRO = "Este processo do SIGA já está ligado a outro protocolo"
+HOSTS_SIGA = ("sigadoc.mt.gov.br", "www.sigadoc.mt.gov.br")
+URL_ACOMPANHAMENTO = "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar?n="
+_CODIGO = re.compile(r"[A-Za-z0-9]{6,20}")
 MOVIMENTACOES_NA_TELA = 30
 ATRASO = datetime.timedelta(hours=2)
 # Relogio do robo adiantado (ou leitura com data errada) nao pode desligar o aviso de atraso ate' aquela data
@@ -210,6 +218,117 @@ def gravar_leitura(conn, lido_em: datetime.datetime, processos: list[dict]) -> d
                     "at_lotacao, at_pessoa) VALUES (?,?,?,?,?,?,?)", (pid, *mov)).rowcount
             _vincular(conn, pid)
     return {"gravados": len(conferidos), "novas_movimentacoes": novas}
+
+
+# --- link do SIGA colado na etapa 4 (issue #328) -----------------------------------------------------------
+
+def extrair_codigo(texto: str | None) -> str | None:
+    """Codigo do processo (`n=` do link de acompanhamento): aceita o link inteiro ou so' o codigo. Vazio = None.
+    Link de outro dominio, sem `n=` ou com codigo fora de 6 a 20 letras e numeros e' recusado."""
+    texto = (texto or "").strip()
+    if not texto:
+        return None
+    if _CODIGO.fullmatch(texto):
+        return texto
+    try:
+        url = urllib.parse.urlsplit(texto if "://" in texto else "https://" + texto)
+        host, valores = url.hostname, urllib.parse.parse_qs(url.query).get("n", [])
+    except ValueError:
+        raise ValueError(LINK_INVALIDO) from None
+    if url.scheme not in ("http", "https") or host not in HOSTS_SIGA or len(valores) != 1 \
+            or not _CODIGO.fullmatch(valores[0]):
+        raise ValueError(LINK_INVALIDO)
+    return valores[0]
+
+
+def _ligar(conn, usuario_id, codigo: str, numero: str | None, nome: str, contrato_id: int,
+           protocolo_id: int | None, medicao_id: int | None, entidade: str, entidade_id: int) -> None:
+    """Cria ou liga o processo do `codigo` ao protocolo (ou, no envio por fora, a' medicao). Nada se sobrescreve:
+    o protocolo que ja' tem outro codigo, ou o codigo ja' ligado a outro protocolo, e' recusado. Quem chama abre a
+    transacao (`db.mutacao`) e confere o codigo com `extrair_codigo`."""
+    numero = sem_espacos(numero) or None
+    if protocolo_id is not None:
+        proprio = conn.execute("SELECT * FROM siga_processos WHERE protocolo_id=? ORDER BY id LIMIT 1",
+                               (protocolo_id,)).fetchone()
+    else:
+        proprio = conn.execute("SELECT * FROM siga_processos WHERE medicao_id=? AND protocolo_id IS NULL "
+                               "ORDER BY id LIMIT 1", (medicao_id,)).fetchone()
+    if proprio is not None and proprio["codigo"] == codigo:
+        return
+    if proprio is not None and proprio["codigo"] is not None:
+        raise ValueError(OUTRO_LINK)
+    if proprio is not None:
+        # ligado antes so' pelo numero igual (a leitura do robo): ganha o codigo, se nenhum outro processo o tem
+        if conn.execute("SELECT 1 FROM siga_processos WHERE codigo=?", (codigo,)).fetchone():
+            raise ValueError(LIGADO_A_OUTRO)
+        conn.execute("UPDATE siga_processos SET codigo=?, numero=COALESCE(numero, ?) WHERE id=?",
+                     (codigo, numero, proprio["id"]))
+    else:
+        achado = _achar_processo(conn, codigo, numero)
+        if achado is not None and (achado["protocolo_id"] is not None or achado["medicao_id"] is not None):
+            raise ValueError(LIGADO_A_OUTRO)
+        alvo = _gravar_processo(conn, codigo, numero, nome)
+        conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=? WHERE id=?",
+                     (contrato_id, protocolo_id, medicao_id, alvo))
+    auditoria.registrar(conn, usuario_id, "protocolo.siga", entidade, entidade_id, None,
+                        {"codigo": codigo, "numero": numero, "contrato_id": contrato_id,
+                         "protocolo_id": protocolo_id, "medicao_id": medicao_id})
+
+
+def _obra(conn, contrato_id: int) -> str:
+    c = conn.execute("SELECT nome_curto, numero_instrumento FROM contratos WHERE id=?", (contrato_id,)).fetchone()
+    return (c["nome_curto"] or c["numero_instrumento"]) if c else ""
+
+
+def registrar_link_protocolo(conn, usuario_id, protocolo_id: int, codigo: str, numero: str | None) -> None:
+    """Etapa 4 do protocolo enviado pelo sistema. A medicao so' entra no vinculo quando o protocolo leva uma so'."""
+    contrato_id = conn.execute("SELECT contrato_id FROM protocolos WHERE id=?", (protocolo_id,)).fetchone()[0]
+    ms = [dict(r) for r in conn.execute(
+        "SELECT m.id, m.numero, m.tipo FROM protocolo_medicoes pm JOIN medicoes m ON m.id=pm.medicao_id "
+        "WHERE pm.protocolo_id=? ORDER BY m.tipo='reajuste', m.id", (protocolo_id,))]
+    nome = f"{' e '.join(medicoes.titulo(m) for m in ms)} - {_obra(conn, contrato_id)}"
+    _ligar(conn, usuario_id, codigo, numero, nome, contrato_id, protocolo_id, ms[0]["id"] if len(ms) == 1 else None,
+           "protocolo", protocolo_id)
+
+
+def registrar_link_medicao(conn, usuario_id, medicao_id: int, codigo: str, numero: str | None) -> None:
+    """Protocolo registrado como feito por fora: nao ha' protocolo, o processo liga so' a' medicao."""
+    m = conn.execute("SELECT id, numero, tipo, contrato_id FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    _ligar(conn, usuario_id, codigo, numero, f"{medicoes.titulo(dict(m))} - {_obra(conn, m['contrato_id'])}",
+           m["contrato_id"], None, medicao_id, "medicao", medicao_id)
+
+
+def registrado_em(conn, entidade: str, ids: list[int]) -> dict[int, str]:
+    """Quando o link foi gravado (primeiro `protocolo.siga` do objeto; UTC do banco), para a linha do tempo."""
+    out: dict[int, str] = {}
+    for i in range(0, len(ids), 500):
+        lote = [str(x) for x in ids[i:i + 500]]
+        for r in conn.execute(
+                "SELECT entidade_id, MIN(criado_em) FROM audit_log WHERE acao='protocolo.siga' AND entidade=? "
+                f"AND entidade_id IN ({','.join('?' * len(lote))}) GROUP BY entidade_id", [entidade, *lote]):
+            out[int(r[0])] = r[1]
+    return out
+
+
+def do_protocolo(conn, protocolo_id: int, hoje: datetime.date | None = None) -> dict | None:
+    """O que a etapa 4 mostra do processo do protocolo: o link e, havendo leitura, setor, com quem e dias uteis.
+    Sem codigo gravado nao ha' link, e nao ha' nada a mostrar."""
+    p = conn.execute("SELECT id, codigo FROM siga_processos WHERE protocolo_id=? AND codigo IS NOT NULL "
+                     "ORDER BY id LIMIT 1", (protocolo_id,)).fetchone()
+    if p is None:
+        return None
+    saida = {"codigo": p["codigo"], "link": URL_ACOMPANHAMENTO + p["codigo"], "setor": None, "com_quem": None,
+             "dias_uteis": None, "lido_em": None,
+             "registrado_em": registrado_em(conn, "protocolo", [protocolo_id]).get(protocolo_id)}
+    leitura = conn.execute("SELECT situacao, lido_em FROM siga_leituras WHERE processo_id=? "
+                           "ORDER BY lido_em DESC, id DESC LIMIT 1", (p["id"],)).fetchone()
+    if leitura is not None:
+        movs = [dict(r) for r in conn.execute("SELECT data, evento, at_lotacao, at_pessoa FROM siga_movimentacoes "
+                                              "WHERE processo_id=?", (p["id"],))]
+        d = derivar(leitura["situacao"], movs, hoje or tempo.hoje_local())
+        saida.update(setor=d["setor"] or None, com_quem=d["com_quem"] or None, dias_uteis=d["dias_uteis"],
+                     lido_em=tempo.iso_utc(leitura["lido_em"]))
+    return saida
 
 
 # --- leitura -----------------------------------------------------------------------------------------------

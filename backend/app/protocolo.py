@@ -17,7 +17,7 @@ from html import escape
 
 from app import (arquivos, assinatura, auditoria, carta, cadastro_arquivos, certidoes, checklist, correio, db,
                  documentos, envio_reserva, espelhos, frc, leitura_pdf, medicoes, oficios, pdfs, tempo)
-from app import html_email
+from app import html_email, siga
 
 TIPOS_PECA = cadastro_arquivos.TIPOS_PECA
 ROTULO_NATUREZA = {"execucao": "Medição", "projeto": "Projeto", "reajuste": "Reajuste"}
@@ -687,7 +687,8 @@ def detalhe(conn, protocolo_id: int, hoje: datetime.date | None = None) -> dict:
             "pecas": _pecas(conn, protocolo_id), "conferencia": json.loads(p["conferencia"] or "null"),
             "pendencias": pendencias(conn, p, hoje),
             "nome_arquivo": nome_arquivo(conn, p) if p["montado_arquivo"] else None,
-            "enviado_em": envio["enviado_em"] if envio else None, "enviado_por": envio["nome"] if envio else None}
+            "enviado_em": envio["enviado_em"] if envio else None, "enviado_por": envio["nome"] if envio else None,
+            "siga": siga.do_protocolo(conn, protocolo_id, hoje)}      # issue #328
 
 
 def listar(conn, contrato_id: int) -> dict:
@@ -1056,27 +1057,32 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
 
 
 def registrar_numero_orgao(conn, usuario_id: int, protocolo_id: int, numero: str,
-                           comprovante: bytes | None) -> None:
+                           comprovante: bytes | None, link_siga: str | None = None) -> None:
     p = _linha(conn, protocolo_id)
     if p["situacao"] != "enviado":
         raise ValueError("Só protocolo enviado recebe o número do órgão")
+    codigo = siga.extrair_codigo(link_siga)     # issue #328: link invalido recusa tudo, antes de gravar o comprovante
     # A-15 (testes de quebra 10/10/2026): vazio gravava NULL e apagava o numero sem aviso. A tela nao oferece
     # apagar; vazio e' erro, e o comprovante nao e' gravado antes da recusa. Gate Sol S1: vazio COM comprovante,
-    # e o numero ja' gravado, e' "anexar so' o comprovante" -- o numero fica.
-    numero = (numero or "").strip()
-    if not numero:
-        if not comprovante:
+    # e o numero ja' gravado, e' "anexar so' o comprovante" -- o numero fica. Issue #328: vazio so' com o link
+    # tambem passa, e o numero (se houver) fica como esta.
+    digitado = (numero or "").strip()
+    if not digitado:
+        if not comprovante and codigo is None:
             raise ValueError(NUMERO_ORGAO_VAZIO)
-        if not p["numero_orgao"]:
+        if comprovante and not p["numero_orgao"]:
             raise ValueError("Informe o número do protocolo junto com o comprovante")
-        numero = p["numero_orgao"]
+    numero = digitado or p["numero_orgao"]
     rel = arquivos.gravar_bytes("protocolos", comprovante, "pdf")[0] if comprovante else p["comprovante_arquivo"]
     with db.mutacao(conn):
-        conn.execute("UPDATE protocolos SET numero_orgao=?, comprovante_arquivo=? WHERE id=?",
-                     (numero, rel, protocolo_id))
-        auditoria.registrar(conn, usuario_id, "protocolo.numero_orgao", "protocolo", protocolo_id,
-                            {"numero_orgao": p["numero_orgao"], "comprovante": p["comprovante_arquivo"]},
-                            {"numero_orgao": numero, "comprovante": rel})
+        if digitado or comprovante:
+            conn.execute("UPDATE protocolos SET numero_orgao=?, comprovante_arquivo=? WHERE id=?",
+                         (numero, rel, protocolo_id))
+            auditoria.registrar(conn, usuario_id, "protocolo.numero_orgao", "protocolo", protocolo_id,
+                                {"numero_orgao": p["numero_orgao"], "comprovante": p["comprovante_arquivo"]},
+                                {"numero_orgao": numero, "comprovante": rel})
+        if codigo:
+            siga.registrar_link_protocolo(conn, usuario_id, protocolo_id, codigo, numero)
 
 
 def descartar(conn, usuario_id: int, protocolo_id: int, motivo: str) -> None:

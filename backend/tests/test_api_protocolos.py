@@ -1,4 +1,6 @@
 """Rotas do protocolo (bloco 5): fluxo pela API com o simulador do Graph, erros e permissao."""
+import datetime
+import json
 import threading
 import urllib.parse
 
@@ -354,3 +356,207 @@ def test_corpo_formatado_do_protocolo_sai_sanitizado_e_com_link(api, tmp_path):
     assert corpo_enviado(tmp_path / "sim") == (
         LIMPO + '<br>Arquivo: <a href="https://arquivos.exemplo.com.br/a?b=1&amp;c=2">'
                 'https://arquivos.exemplo.com.br/a?b=1&amp;c=2</a>')
+
+
+# --- issue #328: o link do SIGA na etapa 4 -----------------------------------------------------------------
+
+LINK_SIGA = "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar?n=AbCdEf1234"
+MSG_LINK_INVALIDO = "Link do SIGA inválido: cole o link que o órgão mandou"
+
+
+def _enviado(cl, cid, mid):
+    pid, corpo = _pronto(cl, cid, mid)
+    r = cl.post("/api/protocolos/envio", json=corpo)
+    assert r.status_code == 200, r.text
+    return pid
+
+
+def _siga_processos(*campos):
+    c = db.get_conn()
+    try:
+        return [tuple(r) for r in c.execute(f"SELECT {', '.join(campos)} FROM siga_processos ORDER BY id")]
+    finally:
+        c.close()
+
+
+def _auditoria_siga():
+    c = db.get_conn()
+    try:
+        return [dict(r) for r in c.execute("SELECT entidade, entidade_id, depois FROM audit_log "
+                                           "WHERE acao='protocolo.siga' ORDER BY id")]
+    finally:
+        c.close()
+
+
+def test_link_do_siga_valido_grava_o_processo_ligado_ao_protocolo_e_a_medicao(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    assert cl.get(f"/api/protocolos/{pid}").json()["siga"] is None
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "MTPAR-PRO-2026/00123", "link_siga": LINK_SIGA})
+    assert r.status_code == 200, r.text
+    assert r.json()["numero_orgao"] == "MTPAR-PRO-2026/00123"
+    siga = r.json()["siga"]
+    assert siga["codigo"] == "AbCdEf1234" and siga["link"] == LINK_SIGA
+    assert (siga["setor"], siga["com_quem"], siga["dias_uteis"], siga["lido_em"]) == (None, None, None, None)
+    assert siga["registrado_em"]
+    assert _siga_processos("codigo", "numero", "nome", "contrato_id", "protocolo_id", "medicao_id") == [
+        ("AbCdEf1234", "MTPAR-PRO-2026/00123", "23ª Medição - Obra MTPAR", cid, pid, mid)]
+    a = _auditoria_siga()
+    assert [(x["entidade"], x["entidade_id"]) for x in a] == [("protocolo", str(pid))]
+    assert json.loads(a[0]["depois"])["codigo"] == "AbCdEf1234"
+    assert cl.get(f"/api/contratos/{cid}/protocolos").json()["protocolos"][0]["siga"]["codigo"] == "AbCdEf1234"
+
+
+def test_so_o_codigo_tambem_vale_e_repetir_nao_duplica(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    for _ in range(2):
+        r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": " AbCdEf1234 "})
+        assert r.status_code == 200, r.text
+    assert r.json()["siga"]["link"] == LINK_SIGA
+    assert _siga_processos("codigo") == [("AbCdEf1234",)]
+    assert len(_auditoria_siga()) == 1
+
+
+@pytest.mark.parametrize("link", [
+    "https://www.sigadoc.mt.gov.br.evil.example/sigaex/public/app/processoautenticar?n=AbCdEf1234",
+    "https://www.sigadoc.mt.gov.br@evil.example/x?n=AbCdEf1234",
+    "https://evil.example/sigaex/public/app/processoautenticar?n=AbCdEf1234",
+    "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar",
+    "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar?n=curto",
+    "https://www.sigadoc.mt.gov.br/sigaex/public/app/processoautenticar?n=AbCdEf1234&n=Outro12345",
+    "https://www.sigadoc.mt.gov.br/x?n=" + "A" * 21,
+    "ftp://www.sigadoc.mt.gov.br/x?n=AbCdEf1234",
+    "https://[::1/x?n=AbCdEf1234",
+    "não é um link",
+])
+def test_link_do_siga_de_outro_site_ou_malformado_e_422_e_nada_e_gravado(api, link):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": link})
+    assert r.status_code == 422 and r.json()["detail"] == MSG_LINK_INVALIDO
+    assert _siga_processos("codigo") == [] and _auditoria_siga() == []
+    assert cl.get(f"/api/protocolos/{pid}").json()["numero_orgao"] is None      # nem o numero do mesmo envio
+
+
+def test_link_do_siga_vazio_nao_apaga_o_que_esta_gravado(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": LINK_SIGA})
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-2", "link_siga": ""})
+    assert r.status_code == 200 and r.json()["siga"]["codigo"] == "AbCdEf1234"
+    assert _siga_processos("codigo", "protocolo_id") == [("AbCdEf1234", pid)]
+
+
+def test_so_o_link_sem_numero_grava_o_link_e_nao_mexe_no_numero(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "", "link_siga": LINK_SIGA})
+    assert r.status_code == 200, r.text
+    assert r.json()["numero_orgao"] is None and r.json()["siga"]["codigo"] == "AbCdEf1234"
+    assert _siga_processos("codigo", "numero", "protocolo_id") == [("AbCdEf1234", None, pid)]
+    # sem numero, sem link e sem comprovante continua recusado
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "", "link_siga": ""})
+    assert r.status_code == 422 and r.json()["detail"] == protocolo.NUMERO_ORGAO_VAZIO
+
+
+def test_outro_link_no_mesmo_protocolo_e_recusado_e_o_primeiro_fica(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": LINK_SIGA})
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": "ZzYyXx9988"})
+    assert r.status_code == 422 and r.json()["detail"] == "Este protocolo já tem outro link do SIGA gravado"
+    assert _siga_processos("codigo") == [("AbCdEf1234",)]
+
+
+def test_codigo_ja_ligado_a_outro_protocolo_e_recusado(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    c = db.get_conn()
+    uid = c.execute("SELECT id FROM usuarios LIMIT 1").fetchone()[0]
+    outro = c.execute("INSERT INTO protocolos (contrato_id, etapa, natureza, usuario_id, situacao) "
+                      "VALUES (?, 'unico', 'execucao', ?, 'enviado')", (cid, uid)).lastrowid
+    c.execute("INSERT INTO siga_processos (codigo, numero, contrato_id, protocolo_id) VALUES ('AbCdEf1234', 'Y-9', ?, ?)",
+              (cid, outro))
+    c.commit(); c.close()
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": LINK_SIGA})
+    assert r.status_code == 422 and r.json()["detail"] == "Este processo do SIGA já está ligado a outro protocolo"
+    assert _siga_processos("protocolo_id") == [(outro,)]
+
+
+def test_processo_que_o_robo_ligou_pelo_numero_ganha_o_codigo_do_link(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "MTPAR-PRO-2026/00123"})
+    c = db.get_conn()
+    c.execute("INSERT INTO siga_processos (numero, contrato_id, protocolo_id, medicao_id) VALUES "
+              "('MTPAR-PRO-2026/00123', ?, ?, ?)", (cid, pid, mid))
+    c.commit(); c.close()
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "MTPAR-PRO-2026/00123", "link_siga": LINK_SIGA})
+    assert r.status_code == 200, r.text
+    assert _siga_processos("codigo", "numero", "protocolo_id") == [("AbCdEf1234", "MTPAR-PRO-2026/00123", pid)]
+
+
+def test_detalhe_traz_setor_com_quem_e_dias_uteis_depois_da_leitura_do_robo(api, tmp_path, monkeypatch):
+    from app import tempo
+    # quarta-feira, 28/10/2026, 12h em Cuiaba
+    monkeypatch.setattr(tempo, "agora_utc", lambda: datetime.datetime(2026, 10, 28, 16, 0, tzinfo=datetime.timezone.utc))
+    token = tmp_path / "siga-token.txt"
+    token.write_text("token-de-teste-do-siga-0123456789", encoding="utf-8")
+    monkeypatch.setenv("DASH_SIGA_TOKEN_ARQUIVO", str(token))
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": LINK_SIGA})
+    leitura = {"lido_em": "2026-10-28T11:00:00-04:00", "processos": [{
+        "codigo": "AbCdEf1234", "numero": "X-1", "nome": "Processo Alfa",
+        "situacao": "2º Volume - Aguardando Andamento [COFIN, [X]]",
+        "movimentacoes": [{"data": "20/10/2026 10:00:00", "evento": "Recebimento", "cad_lotacao": "PROTOC/ORGAO",
+                           "cad_pessoa": "Beltrano", "at_lotacao": "COFIN/ORGAO", "at_pessoa": "Fulano"}]}]}
+    robo = {"Authorization": "Bearer token-de-teste-do-siga-0123456789"}
+    r = cl.post("/api/siga/leituras", json=leitura, headers=robo)
+    assert r.status_code == 200, r.text
+    siga = cl.get(f"/api/protocolos/{pid}").json()["siga"]
+    assert (siga["setor"], siga["com_quem"], siga["dias_uteis"]) == ("COFIN", "Fulano", 6)     # 20, 21, 22, 23, 26, 27
+    assert siga["lido_em"] == "2026-10-28T15:00:00+00:00"
+
+
+def test_diretoria_ve_o_siga_no_detalhe_mas_nao_grava(api):
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": LINK_SIGA})
+    c = db.get_conn()
+    auth.criar_usuario(c, "Dir", "dir@l.com", "senha-forte-123", "diretoria")
+    c.close()
+    cl.cookies.clear()
+    r = cl.post("/api/auth/login", json={"email": "dir@l.com", "senha": "senha-forte-123"})
+    cl.cookies.set("sessao", r.cookies.get("sessao") or cl.cookies.get("sessao"))
+    cl.headers["X-CSRF-Token"] = r.json()["csrf"]
+    assert cl.get(f"/api/protocolos/{pid}").json()["siga"]["link"] == LINK_SIGA
+    assert cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "X-1", "link_siga": LINK_SIGA}).status_code == 403
+
+
+def _fora(cl, mid, **extra):
+    return cl.post(f"/api/medicoes/{mid}/protocolo", json={
+        "data": "2026-10-20", "numero_processo": "MTPAR-PRO-2026/00123", "apesar_das_pendencias": True,
+        "justificativa": "documentos em dia fora do sistema", **extra})
+
+
+def test_protocolo_feito_fora_com_link_do_siga_liga_o_processo_a_medicao(api):
+    cl, cid, mid = api
+    r = _fora(cl, mid, link_siga=LINK_SIGA)
+    assert r.status_code == 201, r.text
+    assert _siga_processos("codigo", "numero", "nome", "contrato_id", "protocolo_id", "medicao_id") == [
+        ("AbCdEf1234", "MTPAR-PRO-2026/00123", "23ª Medição - Obra MTPAR", cid, None, mid)]
+    a = _auditoria_siga()
+    assert [(x["entidade"], x["entidade_id"]) for x in a] == [("medicao", str(mid))]
+    assert cl.get(f"/api/medicoes/{mid}").json()["siga_registrado_em"]
+    assert cl.get(f"/api/contratos/{cid}/medicoes").json()[0]["siga_registrado_em"]
+
+
+def test_protocolo_feito_fora_sem_link_nao_cria_processo_e_link_invalido_nao_protocola(api):
+    cl, cid, mid = api
+    r = _fora(cl, mid, link_siga="https://evil.example/x?n=AbCdEf1234")
+    assert r.status_code == 422 and r.json()["detail"] == MSG_LINK_INVALIDO
+    assert cl.get(f"/api/medicoes/{mid}").json()["estado"] == "nota_emitida" and _siga_processos("codigo") == []
+    assert _fora(cl, mid).status_code == 201
+    assert _siga_processos("codigo") == [] and cl.get(f"/api/medicoes/{mid}").json()["siga_registrado_em"] is None

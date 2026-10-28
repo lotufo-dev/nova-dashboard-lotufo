@@ -6,6 +6,7 @@ import datetime
 import pytest
 
 from app import auth, db, tempo
+from tests.test_api_protocolos import LINK_SIGA, _enviado, api  # noqa: F401  (a fixture `api` vem de la')
 
 TOKEN = "token-de-teste-do-siga-0123456789"
 UTC = datetime.timezone.utc
@@ -182,3 +183,19 @@ def test_get_siga_logado_traz_derivacoes_e_vinculo(client_admin, com_token, monk
     assert alfa["movimentacoes"][0]["data"] == "2026-10-19T10:00:00-04:00"
     assert alfa["desde"] == "2026-10-19T10:00:00-04:00"
     assert beta["medicao_id"] is None and beta["caixa_entrada"] is True
+
+
+def test_link_gravado_na_etapa_4_aparece_na_lista_do_robo(api, com_token):
+    # issue #328: o robo passa a acompanhar o processo sem ninguem editar arquivo no servidor
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    assert cl.get("/api/siga/processos", headers=_robo()).json() == []
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "MTPAR-PRO-2026/00001", "link_siga": LINK_SIGA})
+    assert r.status_code == 200, r.text
+    assert cl.get("/api/siga/processos", headers=_robo()).json() == [
+        {"codigo": "AbCdEf1234", "numero": "MTPAR-PRO-2026/00001", "nome": "23ª Medição - Obra MTPAR"}]
+    # a leitura seguinte do robo cai no mesmo processo (mesmo codigo) e o painel o mostra ligado ao protocolo e a' medicao
+    cl.post("/api/siga/leituras", json={"lido_em": CORPO["lido_em"], "processos": [
+        {"codigo": "AbCdEf1234", "numero": None, "nome": "Alfa", "situacao": None, "movimentacoes": []}]}, headers=_robo())
+    alfa = cl.get("/api/siga").json()["processos"][0]
+    assert (alfa["protocolo_id"], alfa["medicao_id"], alfa["nome"]) == (pid, mid, "23ª Medição - Obra MTPAR")
