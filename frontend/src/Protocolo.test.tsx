@@ -315,6 +315,24 @@ describe("Protocolo", () => {
       expect((apiForm.mock.calls[0][1] as FormData).has("link_siga")).toBe(false);
     });
 
+    it("com o link já gravado, salvar sem mexer nele não manda link_siga; mudar o link manda o novo", async () => {
+      apiForm.mockResolvedValue({ ...ENVIADO, siga: SIGA });
+      tela({ ...ENVIADO, siga: SIGA });
+      const campo = await screen.findByLabelText("Link do SIGA") as HTMLInputElement;
+      expect(campo.value).toBe(LINK);
+      fireEvent.change(screen.getByLabelText("Nº do protocolo no órgão"), { target: { value: "X-2" } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+      expect((apiForm.mock.calls[0][1] as FormData).has("link_siga")).toBe(false);
+      fireEvent.change(campo, { target: { value: "ZzYyXx9988" } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(2));
+      expect((apiForm.mock.calls[1][1] as FormData).get("link_siga")).toBe("ZzYyXx9988");
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));          // de novo, já gravado: não repete
+      await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(3));
+      expect((apiForm.mock.calls[2][1] as FormData).has("link_siga")).toBe(false);
+    });
+
     it("mostra a recusa do servidor para um link de outro site", async () => {
       const e = new ApiErro(422, "");
       e.message = "Link do SIGA inválido: cole o link que o órgão mandou";

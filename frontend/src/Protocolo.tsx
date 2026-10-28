@@ -202,6 +202,7 @@ function NoSiga({ siga }: { siga?: SigaDoProtocolo | null }) {
 function NumeroOrgao({ p, podeEditar, aoMudar }: { p: ProtocoloDet; podeEditar: boolean; aoMudar: (p?: ProtocoloDet) => void }) {
   const [numero, setNumero] = useState(p.numero_orgao ?? "");
   const [linkSiga, setLinkSiga] = useState(p.siga?.link ?? p.siga?.codigo ?? "");
+  const [linkGravado, setLinkGravado] = useState(p.siga?.link ?? p.siga?.codigo ?? "");     // o que veio preenchido
   const [comprovante, setComprovante] = useState<File | null>(null);
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -211,11 +212,13 @@ function NumeroOrgao({ p, podeEditar, aoMudar }: { p: ProtocoloDet; podeEditar: 
     if (ocupado) return;
     const fd = new FormData();
     fd.append("numero", numero);
-    if (linkSiga.trim()) fd.append("link_siga", linkSiga.trim());       // vazio nao apaga o gravado (servidor)
+    const linkNovo = linkSiga.trim();
+    if (linkNovo && linkNovo !== linkGravado) fd.append("link_siga", linkNovo);     // so' o que mudou; vazio nao apaga
     if (comprovante) fd.append("comprovante", comprovante);
     setOcupado(true); setErro("");
     try {
       aoMudar(await apiForm<ProtocoloDet>(`/api/protocolos/${p.id}/numero-orgao`, fd));
+      if (linkNovo) setLinkGravado(linkNovo);
       setComprovante(null);
       if (entradaArquivo.current) entradaArquivo.current.value = "";
     } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); }

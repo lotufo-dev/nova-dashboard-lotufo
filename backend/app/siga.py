@@ -18,8 +18,8 @@ from app.feriados import dia_util
 SEM_IDENTIFICACAO = "Processo sem o código ou o número do SIGA"
 # Link de acompanhamento que o orgao manda por e-mail (issue #328): so' o dominio do SIGA, com o codigo em `n=`
 LINK_INVALIDO = "Link do SIGA inválido: cole o link que o órgão mandou"
-OUTRO_LINK = "Este protocolo já tem outro link do SIGA gravado"
-LIGADO_A_OUTRO = "Este processo do SIGA já está ligado a outro protocolo"
+LIGADO_A_OUTRO = "Este processo do SIGA já está ligado a outro protocolo ou a outra medição"
+LIGADO_A_OUTRA_MEDICAO = "Este processo do SIGA já está ligado a outra medição"
 _CODIGO = re.compile(r"[A-Za-z0-9]{6,20}")
 MOVIMENTACOES_NA_TELA = 30
 ATRASO = datetime.timedelta(hours=2)
@@ -184,6 +184,12 @@ def _vincular(conn, processo_id: int) -> None:
     achado = _vinculo(conn, p["numero"])
     if achado:
         contrato_id, protocolo_id, medicao_id = achado
+        # issue #328: o processo que um link novo substituiu nao volta ao protocolo (ou a' medicao) pelo numero igual
+        ocupado = conn.execute("SELECT 1 FROM siga_processos WHERE id<>? AND (protocolo_id=? OR "
+                               "(? IS NULL AND medicao_id=? AND protocolo_id IS NULL))",
+                               (processo_id, protocolo_id, protocolo_id, medicao_id)).fetchone()
+        if ocupado:
+            return
         conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=? "
                      "WHERE id=? AND protocolo_id IS NULL AND medicao_id IS NULL", (*achado, processo_id))
         entidade = ("medicao", medicao_id) if medicao_id is not None else ("protocolo", protocolo_id)
@@ -246,43 +252,54 @@ def extrair_codigo(texto: str | None) -> str | None:
 def _ligar(conn, usuario_id, codigo: str, numero: str | None, nome: str, contrato_id: int,
            protocolo_id: int | None, medicao_id: int | None, medicoes_alvo: set[int], entidade: str,
            entidade_id: int) -> None:
-    """Cria ou liga o processo do `codigo` ao protocolo (ou, no envio por fora, a' medicao). Nada se sobrescreve:
-    o protocolo que ja' tem outro codigo, ou o codigo ja' ligado a outro protocolo, e' recusado. Quem chama abre a
-    transacao (`db.mutacao`) e confere o codigo com `extrair_codigo`. `medicoes_alvo`: as medicoes do protocolo; o
-    processo que o robo ja' ligou so' a uma delas (pelo numero do envio por fora) nao e' "de outro protocolo"."""
+    """Cria ou liga o processo do `codigo` ao protocolo (ou, no envio por fora, a' medicao). Link com outro codigo
+    SUBSTITUI o anterior (como o nº do orgao, que se corrige; decisao da orquestradora em 28/10/2026): o processo
+    anterior perde o vinculo e continua gravado, com as leituras. Recusa so' o codigo ja' ligado a outro protocolo
+    ou a outra medicao. Quem chama abre a transacao (`db.mutacao`) e confere o codigo com `extrair_codigo`.
+    `medicoes_alvo`: as medicoes do protocolo; o processo que o robo ja' ligou so' a uma delas (pelo numero do envio
+    por fora) nao e' "de outro protocolo"."""
     numero = sem_espacos(numero) or None
+    ligado_a_outro = LIGADO_A_OUTRA_MEDICAO if protocolo_id is None else LIGADO_A_OUTRO
     if protocolo_id is not None:
         proprio = conn.execute("SELECT * FROM siga_processos WHERE protocolo_id=? ORDER BY id LIMIT 1",
                                (protocolo_id,)).fetchone()
     else:
         proprio = conn.execute("SELECT * FROM siga_processos WHERE medicao_id=? AND protocolo_id IS NULL "
                                "ORDER BY id LIMIT 1", (medicao_id,)).fetchone()
+    depois = {"codigo": codigo, "numero": numero, "contrato_id": contrato_id,
+              "protocolo_id": protocolo_id, "medicao_id": medicao_id}
+    antes = None
     if proprio is not None and proprio["codigo"] == codigo:
         # ligado antes pela leitura do robo, ja' com o codigo: so' falta o registro de quem colou o link
         if entidade_id not in registrado_em(conn, entidade, [entidade_id]):
-            auditoria.registrar(conn, usuario_id, "protocolo.siga", entidade, entidade_id, None,
-                                {"codigo": codigo, "numero": numero, "contrato_id": contrato_id,
-                                 "protocolo_id": protocolo_id, "medicao_id": medicao_id})
+            auditoria.registrar(conn, usuario_id, "protocolo.siga", entidade, entidade_id, None, depois)
         return
-    if proprio is not None and proprio["codigo"] is not None:
-        raise ValueError(OUTRO_LINK)
-    if proprio is not None:
+    if proprio is not None and proprio["codigo"] is None:
         # ligado antes so' pelo numero igual (a leitura do robo): ganha o codigo, se nenhum outro processo o tem
         if conn.execute("SELECT 1 FROM siga_processos WHERE codigo=?", (codigo,)).fetchone():
-            raise ValueError(LIGADO_A_OUTRO)
+            raise ValueError(ligado_a_outro)
         conn.execute("UPDATE siga_processos SET codigo=?, numero=COALESCE(numero, ?) WHERE id=?",
                      (codigo, numero, proprio["id"]))
     else:
         achado = _achar_processo(conn, codigo, numero)
         if achado is not None and (achado["protocolo_id"] is not None
                                    or achado["medicao_id"] not in (None, *medicoes_alvo)):
-            raise ValueError(LIGADO_A_OUTRO)
+            raise ValueError(ligado_a_outro)
+        if proprio is not None:
+            antes = {"codigo": proprio["codigo"]}
+            conn.execute("UPDATE siga_processos SET contrato_id=NULL, protocolo_id=NULL, medicao_id=NULL "
+                         "WHERE id=?", (proprio["id"],))
         alvo = _gravar_processo(conn, codigo, numero, nome)
         conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=? WHERE id=?",
                      (contrato_id, protocolo_id, medicao_id, alvo))
-    auditoria.registrar(conn, usuario_id, "protocolo.siga", entidade, entidade_id, None,
-                        {"codigo": codigo, "numero": numero, "contrato_id": contrato_id,
-                         "protocolo_id": protocolo_id, "medicao_id": medicao_id})
+    auditoria.registrar(conn, usuario_id, "protocolo.siga", entidade, entidade_id, antes, depois)
+
+
+def codigo_do_protocolo(conn, protocolo_id: int) -> str | None:
+    """Codigo do processo hoje ligado ao protocolo (None se nao ha' ou se so' o numero o liga)."""
+    r = conn.execute("SELECT codigo FROM siga_processos WHERE protocolo_id=? ORDER BY id LIMIT 1",
+                     (protocolo_id,)).fetchone()
+    return r["codigo"] if r else None
 
 
 def _obra(conn, contrato_id: int) -> str:

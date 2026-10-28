@@ -1064,11 +1064,12 @@ def registrar_numero_orgao(conn, usuario_id: int, protocolo_id: int, numero: str
     codigo = siga.extrair_codigo(link_siga)     # issue #328: link malformado ou de outro site recusa tudo, antes do comprovante
     # A-15 (testes de quebra 10/10/2026): vazio gravava NULL e apagava o numero sem aviso. A tela nao oferece
     # apagar; vazio e' erro, e o comprovante nao e' gravado antes da recusa. Gate Sol S1: vazio COM comprovante,
-    # e o numero ja' gravado, e' "anexar so' o comprovante" -- o numero fica. Issue #328: vazio so' com o link
-    # tambem passa, e o numero (se houver) fica como esta.
+    # e o numero ja' gravado, e' "anexar so' o comprovante" -- o numero fica. Issue #328: vazio so' com um link NOVO
+    # (codigo diferente do ja' gravado) tambem passa, e o numero (se houver) fica como esta; o mesmo link de novo
+    # nao muda nada e o vazio continua recusado.
     digitado = (numero or "").strip()
     if not digitado:
-        if not comprovante and codigo is None:
+        if not comprovante and (codigo is None or codigo == siga.codigo_do_protocolo(conn, protocolo_id)):
             raise ValueError(NUMERO_ORGAO_VAZIO)
         if comprovante and not p["numero_orgao"]:
             raise ValueError("Informe o número do protocolo junto com o comprovante")
