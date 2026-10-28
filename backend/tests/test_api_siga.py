@@ -30,6 +30,12 @@ CORPO = {
 }
 
 
+@pytest.fixture(autouse=True)
+def relogio(monkeypatch):
+    """Agora = 28/10/2026, 12h em Cuiaba, logo depois da leitura dos testes."""
+    monkeypatch.setattr(tempo, "agora_utc", lambda: datetime.datetime(2026, 10, 28, 16, 0, tzinfo=UTC))
+
+
 @pytest.fixture
 def com_token(tmp_path, monkeypatch):
     arquivo = tmp_path / "siga-token.txt"
@@ -99,6 +105,11 @@ def test_post_sem_codigo_e_sem_numero_e_422_em_portugues(client, com_token):
 def test_post_sem_fuso_no_lido_em_e_422(client, com_token):
     r = client.post("/api/siga/leituras", json={**CORPO, "lido_em": "2026-10-28T11:00:00"}, headers=_robo())
     assert r.status_code == 422
+
+
+def test_post_com_leitura_no_futuro_e_422(client, com_token):
+    r = client.post("/api/siga/leituras", json={**CORPO, "lido_em": "2026-10-28T13:00:00-04:00"}, headers=_robo())
+    assert r.status_code == 422 and "no futuro" in r.json()["detail"]
 
 
 def test_get_processos_com_token_devolve_os_recebidos(client, com_token):

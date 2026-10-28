@@ -10,20 +10,27 @@ As derivacoes (setor, com quem, desde, dias uteis...) vem do `relatorio_html.py`
 import datetime
 import re
 
-from app import db, medicoes, tempo
+from app import auditoria, db, medicoes, tempo
 from app.feriados import dia_util
 
 SEM_IDENTIFICACAO = "Processo sem o código ou o número do SIGA"
 MOVIMENTACOES_NA_TELA = 30
 ATRASO = datetime.timedelta(hours=2)
+# Relogio do robo adiantado (ou leitura com data errada) nao pode desligar o aviso de atraso ate' aquela data
+FOLGA_FUTURO = datetime.timedelta(minutes=10)
+LEITURA_NO_FUTURO = "Data da leitura no futuro: confira o relógio da máquina do robô"
 # Horario em que o robo roda (hora de Cuiaba), nos dias uteis
 ROBO_INICIO, ROBO_FIM = datetime.time(8, 0), datetime.time(17, 30)
 _CAMPOS_MOV = ("evento", "cad_lotacao", "cad_pessoa", "at_lotacao", "at_pessoa")
 
 
+def sem_espacos(numero: str | None) -> str:
+    return re.sub(r"\s+", "", numero or "")
+
+
 def normalizar_numero(numero: str | None) -> str:
     """Numero do processo para comparar: maiusculas e sem espacos. Igual e' igual; parecido nao liga."""
-    return re.sub(r"\s+", "", numero or "").upper()
+    return sem_espacos(numero).upper()
 
 
 def _texto(valor) -> str:
@@ -85,14 +92,18 @@ def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date
 
 
 def atrasado(lido_em: str | None, agora: datetime.datetime) -> bool:
-    """Ultima leitura (UTC do banco) com mais de 2 h num dia util entre 08h00 e 17h30 de Cuiaba."""
+    """Ultima leitura (UTC do banco) com mais de 2 h num dia util entre 08h00 e 17h30 de Cuiaba.
+
+    As 2 h contam a partir das 08h00 quando a ultima leitura e' de antes (a de ontem as 17h30 nao acusa atraso as
+    08h05, antes da primeira rodada do dia)."""
     if not lido_em:
         return False
     local = tempo.para_local(agora)
     if not dia_util(local.date()) or not (ROBO_INICIO <= local.time() <= ROBO_FIM):
         return False
     ultima = datetime.datetime.fromisoformat(lido_em).replace(tzinfo=datetime.timezone.utc)
-    return agora - ultima > ATRASO
+    inicio_do_dia = datetime.datetime.combine(local.date(), ROBO_INICIO, tzinfo=local.tzinfo)
+    return agora - max(ultima, inicio_do_dia) > ATRASO
 
 
 # --- gravacao ----------------------------------------------------------------------------------------------
@@ -103,10 +114,11 @@ def _achar_processo(conn, codigo: str | None, numero: str | None):
         if linha is not None or not numero:
             return linha
         # o mesmo processo ja' recebido so' pelo numero ganha o codigo (campo vazio, nada sobrescrito)
-        return conn.execute("SELECT * FROM siga_processos WHERE codigo IS NULL AND UPPER(REPLACE(numero,' ',''))=? "
-                            "ORDER BY id LIMIT 1", (normalizar_numero(numero),)).fetchone()
-    return conn.execute("SELECT * FROM siga_processos WHERE UPPER(REPLACE(numero,' ',''))=? ORDER BY id LIMIT 1",
-                        (normalizar_numero(numero),)).fetchone()
+        return conn.execute("SELECT * FROM siga_processos WHERE codigo IS NULL AND UPPER(numero)=UPPER(?) "
+                            "ORDER BY id LIMIT 1", (numero,)).fetchone()
+    # o numero chega e e' gravado sem espaco nenhum (gravar_leitura): os dois lados com o mesmo UPPER do SQLite
+    return conn.execute("SELECT * FROM siga_processos WHERE UPPER(numero)=UPPER(?) ORDER BY id LIMIT 1",
+                        (numero,)).fetchone()
 
 
 def _gravar_processo(conn, codigo: str | None, numero: str | None, nome: str | None) -> int:
@@ -145,16 +157,23 @@ def _vincular(conn, processo_id: int) -> None:
         return
     achado = _vinculo(conn, p["numero"])
     if achado:
+        contrato_id, protocolo_id, medicao_id = achado
         conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=? "
                      "WHERE id=? AND protocolo_id IS NULL AND medicao_id IS NULL", (*achado, processo_id))
+        entidade = ("medicao", medicao_id) if medicao_id is not None else ("protocolo", protocolo_id)
+        auditoria.registrar(conn, None, "siga.vinculo", *entidade, None,
+                            {"processo_siga": p["numero"], "contrato_id": contrato_id,
+                             "protocolo_id": protocolo_id, "medicao_id": medicao_id})
 
 
 def gravar_leitura(conn, lido_em: datetime.datetime, processos: list[dict]) -> dict:
     """Uma rodada do robo. Confere tudo antes de gravar: um processo invalido recusa a rodada inteira."""
+    if lido_em > tempo.agora_utc() + FOLGA_FUTURO:
+        raise ValueError(LEITURA_NO_FUTURO)
     lido = lido_em.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     conferidos = []
     for p in processos:
-        codigo, numero = _texto(p.get("codigo")) or None, _texto(p.get("numero")) or None
+        codigo, numero = _texto(p.get("codigo")) or None, sem_espacos(p.get("numero")) or None
         if not codigo and not numero:
             raise ValueError(SEM_IDENTIFICACAO)
         movs = [(_data_iso(m["data"]), *(_texto(m.get(c)) for c in _CAMPOS_MOV))

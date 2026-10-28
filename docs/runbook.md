@@ -339,7 +339,8 @@ venv pelo `requirements.lock`) → `cadastro aplicar --ensaio` e real (9 órgão
 
 O robô do SIGA (fora deste repositório) manda a cada 15 minutos o que leu para `POST /api/siga/leituras` e pergunta
 o que acompanhar em `GET /api/siga/processos`, as duas com `Authorization: Bearer <token>`. As telas leem
-`GET /api/siga` (sessão). Nada se apaga: leitura repetida não cria linha.
+`GET /api/siga` (sessão). Nada se apaga: leitura repetida não cria linha. Cada pedido tem o teto geral de 2 MB:
+rodada maior vai em mais de um POST com o mesmo `lido_em` (cada um grava só o que traz).
 
 1. **Token em arquivo**: `C:\DashboardLotufo\segredos\siga-token.txt` (uma linha, UTF-8, ao menos 32 caracteres
    aleatórios; ex.: `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)`). O mesmo token vai

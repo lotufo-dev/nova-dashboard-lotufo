@@ -5,10 +5,16 @@ import datetime
 
 import pytest
 
-from app import auth, db, siga
+from app import auth, db, siga, tempo
 
 UTC = datetime.timezone.utc
 CUIABA = datetime.timezone(datetime.timedelta(hours=-4))
+
+
+@pytest.fixture(autouse=True)
+def relogio(monkeypatch):
+    """Agora = quarta-feira, 28/10/2026, 16h em Cuiaba: as leituras dos testes nao ficam no futuro."""
+    monkeypatch.setattr(tempo, "agora_utc", lambda: datetime.datetime(2026, 10, 28, 20, 0, tzinfo=UTC))
 
 
 def _mov(data, evento, at_lotacao="", at_pessoa="", cad_lotacao="", cad_pessoa=""):
@@ -91,6 +97,12 @@ def test_atrasado_nos_quatro_casos():
     assert siga.atrasado(None, terca_11h) is False                                               # nunca leu
 
 
+def test_atraso_conta_das_8h_quando_a_ultima_leitura_e_de_ontem():
+    ontem_17h30 = _banco(_cuiaba(2026, 10, 26, 17, 30))
+    assert siga.atrasado(ontem_17h30, _cuiaba(2026, 10, 27, 8, 5)) is False      # antes da primeira rodada do dia
+    assert siga.atrasado(ontem_17h30, _cuiaba(2026, 10, 27, 10, 1)) is True       # duas horas de janela sem leitura
+
+
 # --- gravacao e vinculo -----------------------------------------------------------------------------------
 
 @pytest.fixture
@@ -144,6 +156,11 @@ def test_processo_e_identificado_pelo_codigo_ou_pelo_numero(conn):
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 12), [
         {"codigo": "ABC123", "numero": "orgao-pro-2026/00010 ", "nome": "Processo Alfa", "situacao": None,
          "movimentacoes": []}])
+    # e so' pelo numero, com tabulacao e espaco nao separavel no meio (texto raspado do SIGA)
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 12, 30), [
+        {"codigo": None, "numero": "ORGAO-PRO-2026/\t00010", "nome": None, "situacao": None, "movimentacoes": []},
+        {"codigo": None, "numero": "ORGAO-PRO-\u00a02026/00010", "nome": None, "situacao": None,
+         "movimentacoes": []}])
     # e depois so' pelo codigo
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 13), [
         {"codigo": "ABC123", "numero": None, "nome": "Outro nome", "situacao": None, "movimentacoes": []}])
@@ -158,6 +175,13 @@ def test_processo_sem_codigo_e_sem_numero_e_recusado_sem_gravar_nada(conn):
         siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), [
             *_leitura(), {"codigo": "", "numero": "  ", "nome": "x", "situacao": None, "movimentacoes": []}])
     assert _conta(conn, "siga_processos") == 0
+
+
+def test_leitura_com_data_no_futuro_e_recusada(conn):
+    with pytest.raises(ValueError, match="no futuro"):
+        siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 16, 11), _leitura())
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 16, 9), _leitura())        # folga de 10 minutos no relogio
+    assert _conta(conn, "siga_processos") == 2
 
 
 def test_data_de_movimentacao_invalida_e_recusada(conn):
@@ -190,6 +214,11 @@ def test_vincula_ao_protocolo_pelo_numero_igual(conn):
     pid = _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="sinfra-pro-2026/00001"))
     assert _vinculo(conn) == (7, pid, 31)
+    eventos = conn.execute("SELECT usuario_id, entidade, entidade_id FROM audit_log WHERE acao='siga.vinculo'"
+                           ).fetchall()
+    assert [tuple(e) for e in eventos] == [(None, "medicao", "31")]
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11, 15), _leitura(numero="sinfra-pro-2026/00001"))
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='siga.vinculo'").fetchone()[0] == 1
     painel = siga.painel(conn, _cuiaba(2026, 10, 28, 11, 10))
     p = next(x for x in painel["processos"] if x["codigo"] == "ABC123")
     assert (p["contrato_id"], p["protocolo_id"], p["medicao_id"]) == (7, pid, 31)

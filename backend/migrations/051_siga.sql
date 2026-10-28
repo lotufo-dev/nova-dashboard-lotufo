@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS siga_processos (
     id INTEGER PRIMARY KEY,
     codigo TEXT UNIQUE,                         -- codigo do link de acompanhamento; pode faltar
-    numero TEXT,                                -- ORGAO-PRO-AAAA/NNNNN, como o SIGA escreve; pode faltar
+    numero TEXT,                                -- ORGAO-PRO-AAAA/NNNNN, gravado sem espaco; pode faltar
     nome TEXT,
     contrato_id INTEGER REFERENCES contratos(id),
     protocolo_id INTEGER REFERENCES protocolos(id),
