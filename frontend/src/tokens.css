@@ -983,6 +983,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--foco)
 .legenda__chave--previsto { background: var(--previsto); box-shadow: inset 0 0 0 1px var(--linha-hover); }
 .legenda__chave--execucao { background: var(--acento); }
 .legenda__chave--outras   { background: var(--acento-mais); }
+.legenda__chave--anterior { background: repeating-linear-gradient(90deg, var(--texto-2) 0 4px, transparent 4px 7px); }
 .legenda__chave--provisorio {
   background:
     repeating-linear-gradient(45deg, var(--atencao-linha) 0 2px, transparent 2px 6px),
@@ -1852,6 +1853,8 @@ td.col-num .campo__nota { font-family: var(--fonte); }
 .cart-curva svg { display: block; width: 100%; }
 .cart-c-prev { fill: none; stroke: var(--linha-hover); stroke-width: 2; }
 .cart-c-med { fill: none; stroke: var(--acento); stroke-width: 2.5; }
+/* #296: o previsto anterior a ultima repactuacao, tracejado como o da curva S da obra (.c-previsto-anterior) */
+.cart-c-ant { fill: none; stroke: var(--texto-2); stroke-width: 2; stroke-dasharray: 6 4; }
 .cart-c-area { fill: var(--acento-fundo); }
 .cart-c-ponto-prev { fill: var(--superficie); stroke: var(--linha-hover); stroke-width: 2; }
 .cart-c-ponto-med { fill: var(--acento); stroke: var(--superficie); stroke-width: 1.5; }

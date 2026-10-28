@@ -93,6 +93,7 @@ Fora do escopo do loop (mexem em API, lógica, navegação ou regra), com a orig
 - 2026-09-24 Conciliação com a controladoria (P2): marcar como recebidas as ~420 medições históricas `protocolada` (ou ligar as notas do RM a elas) e só então liberar `diretoria.total_a_receber_liberado`. Até lá o protocolado aparece todo "a conciliar", com 426 medições acima de 60 dias.
 - 2026-09-24 Rota do Oeste lote 2 (linha 36 do QDOP, consórcio 20%) fora do cadastro até a entidade do consórcio ser confirmada (P2). Diferenças de datas do QDOP sem instrumento (Deciolândia, MT-388, Maternidade VG, Terminais BRT) estão em docs/conferencia-qdop-2026-09-22.md.
 - 2026-09-24 O título da coluna S do QDOP ("DESCRIÇÃO DA OBRA") sai preto sobre preto, igual ao oficial; a cor do status (formatação condicional) veio no modelo.
+- 2026-10-28 #296 (curva S da carteira), gate Sol S1: a curva da carteira no Resumo acumula só dentro da janela de 12 meses (parte de zero no primeiro mês), como já fazia; o Leo decide se ela passa a acumular desde o início dos contratos. O desvio em p.p. do QDOP já conta o histórico inteiro.
 
 ## Reestruturação: bloco 7, reajuste e prazos (plano `docs/superpowers/plans/2026-09-24-blocos-5-a-9/bloco-7-reajuste-prazos.md`)
 
