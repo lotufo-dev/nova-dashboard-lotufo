@@ -235,10 +235,13 @@ const RODADA_RUIM = { id: 3, disparo: "manual", estado: "failed", iniciado_em: "
   terminado_em: "2026-10-16T11:41:05-04:00", nfs: 0, baixas: 0, alocacoes: 0, sugestoes: 0, recebimentos: 0,
   erro: "O RM recusou a conta de serviço." };
 
-function saudeComRm(status: object, backup: object = BACKUP_EM_DIA) {
+const SIGA_SEM_LEITURA = { ultima_leitura: null, processos: 0 };
+
+function saudeComRm(status: object, backup: object = BACKUP_EM_DIA, siga: object = SIGA_SEM_LEITURA) {
   api.mockImplementation(async (url: string) => {
     if (url === "/api/rm/status") return status;
     if (url === "/api/admin/backup") return backup;
+    if (url === "/api/admin/saude") return { siga };
     if (url === "/api/rm/reconciliacao") return {
       nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
       totais: { nfs_sem_medicao: 15, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
@@ -265,6 +268,22 @@ test("Saúde: três cartões de situação com a hora, nota só na falha, e a ta
   // sem as contagens repetidas da última rodada, sem dica no cabeçalho e sem "última rodada deu certo" ao lado do botão
   expect(screen.queryByLabelText("Contagens da última rodada")).toBeNull();
   expect(document.body.textContent).not.toMatch(/as NFs e as baixas do RM|deu certo|o que está de um lado só/);
+});
+
+// Issue #330: o monitor do SIGA ao lado da saúde do RM
+test("Saúde: cartão Monitor do SIGA com a hora da última leitura e os processos; sem leitura, traço", async () => {
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
+    BACKUP_EM_DIA, { ultima_leitura: "2026-10-28T15:15:00+00:00", processos: 12 });
+  await screen.findByRole("heading", { name: "Monitor do SIGA" });
+  const cartao = cartaoDe("Monitor do SIGA");
+  expect(cartao.textContent).toMatch(/28\/10\/2026 às 11:15/);
+  expect(cartao.textContent).toMatch(/12 processos/);
+  expect(cartao.className).toMatch(/situacao--ok/);
+  cleanup(); api.mockReset();
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] });
+  await screen.findByRole("heading", { name: "Monitor do SIGA" });
+  expect(cartaoDe("Monitor do SIGA").textContent).toBe("Monitor do SIGA—");
+  expect(cartaoDe("Monitor do SIGA").className).toMatch(/situacao--neutra/);
 });
 
 test("Saúde: última rodada com falha vira cartão vermelho, caixa com o erro e a última boa, sem nome de máquina na tela", async () => {

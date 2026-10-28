@@ -97,3 +97,27 @@ def test_auditoria_traz_a_obra_da_medicao_e_do_protocolo(client_admin):
     assert por_acao["protocolo.criar"]["contrato_id"] == cid
     assert por_acao["medicao.protocolo"]["contrato_id"] is None
     assert por_acao["auth.login"]["contrato_id"] is None
+
+
+def test_saude_traz_a_ultima_leitura_e_os_processos_do_monitor_do_siga(client_admin):
+    # issue #330: sem leitura, nulo; com leitura, o instante (UTC, com fuso explicito) e a contagem
+    assert client_admin.get("/api/admin/saude").json() == {"siga": {"ultima_leitura": None, "processos": 0}}
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        for numero, lido in (("SINFRA-PRO-2026/00001", "2026-10-28 14:00:00"), ("SINFRA-PRO-2026/00002", "2026-10-28 15:15:00")):
+            pid = conn.execute("INSERT INTO siga_processos (numero) VALUES (?)", (numero,)).lastrowid
+            conn.execute("INSERT INTO siga_leituras (processo_id, lido_em) VALUES (?,?)", (pid, lido))
+    conn.close()
+    r = client_admin.get("/api/admin/saude")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"siga": {"ultima_leitura": "2026-10-28T15:15:00+00:00", "processos": 2}}
+
+
+def test_saude_so_para_admin(client_admin):
+    client_admin.post("/api/admin/usuarios", json={"nome": "Eng", "email": "eng@lotufo.com",
+                                                   "senha": "senha-eng-123", "perfil": "engenharia"})
+    r = client_admin.post("/api/auth/login", json={"email": "eng@lotufo.com", "senha": "senha-eng-123"})
+    client_admin.cookies.clear()
+    client_admin.cookies.set("sessao", r.cookies["sessao"])
+    client_admin.headers["X-CSRF-Token"] = r.json()["csrf"]
+    assert client_admin.get("/api/admin/saude").status_code == 403
