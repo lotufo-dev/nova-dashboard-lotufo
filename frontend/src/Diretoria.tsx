@@ -33,6 +33,8 @@ type MesAno = {
   serie: { competencia: string; medido_centavos: number; previsto_centavos: number }[];
 };
 type Proximo = { competencia: string; faturamento_previsto_centavos: number };
+/** Issue #296: a curva S da carteira (obras ativas, cada uma na cota), com o previsto anterior a ultima repactuacao. */
+type PontoCarteira = { competencia: string; previsto_centavos: number; previsto_anterior_centavos: number; medido_centavos: number };
 type Carteira = {
   saldo_centavos: number; ritmo_mensal_centavos: number; meses_de_producao: number | null;
   por_orgao: { orgao: string; saldo_centavos: number; fracao: number; vigente_centavos: number; medido_centavos: number; obras: number }[];
@@ -41,10 +43,11 @@ type Obra = {
   contrato_id: number; seq: number; obra: string; contratante: string; empreita: string; direito: number;
   pi_va: number; faturados: number; saldo: number; pct_recebido: number; status: string; termino: string | null;
   vigencia?: string | null; farol: "verde" | "atencao" | "acao" | "vermelho"; motivo: string; motivos?: Motivo[];
+  desvio_pp?: number | null; desvio_base?: "anterior" | "vigente" | null;
 };
 type ResumoMes = { mes: string; obras_protocoladas: number; obras_ativas: number };
 type Painel = {
-  hoje: string; total_a_receber_liberado: boolean; dinheiro: Dinheiro; mes_ano: MesAno; proximos: Proximo[];
+  hoje: string; total_a_receber_liberado: boolean; dinheiro: Dinheiro; mes_ano: MesAno; curva_carteira: PontoCarteira[]; proximos: Proximo[];
   carteira: Carteira; obras: Obra[]; obras_base: ObrasBase; avisos: Aviso[];
 };
 type ObrasBase = { ativas: number; encerramento: number; suspensas: number; encerradas: number };
@@ -64,6 +67,11 @@ function valor(v: number | null): string {
 }
 function pct(f: number): string {
   return fmtPercentual(f, 1);
+}
+/** Desvio em pontos percentuais, com sinal e uma casa: "+2,9", "−16,7" (menos U+2212, como o `brl`), "0,0". */
+function pp(v: number): string {
+  const t = Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return v > 0 ? `+${t}` : v < 0 ? `−${t}` : t;
 }
 /** "R$ 12,3 mi": o numero grande do Resumo; o valor exato vai no title. */
 function mi(centavos: number): string {
@@ -194,17 +202,18 @@ function useLargura() {
   return { ref, larg };
 }
 
-/** Curva S: o previsto e o medido ACUMULADOS na janela de 12 meses (a soma mês a mês do painel), com a leitura de
- *  cada mês embaixo (passar o ponteiro troca o mês; sem ponteiro, o último). Os valores mês a mês, em tabela, moram
- *  na aba Produção. */
-function CurvaS({ serie }: { serie: MesAno["serie"] }) {
+/** Curva S da carteira (#296): o previsto vigente, o previsto anterior à última repactuação e o medido de execução
+ *  ACUMULADOS na janela de 12 meses (`curva_carteira`, a soma das curvas das obras ativas), com a leitura de cada mês
+ *  embaixo (passar o ponteiro troca o mês; sem ponteiro, o último). */
+function CurvaS({ serie }: { serie: PontoCarteira[] }) {
   const { ref, larg } = useLargura();
   const [sel, setSel] = useState<number | null>(null);
   const acc = useMemo(() => {
-    const out: { competencia: string; previsto: number; medido: number }[] = [];
+    const out: { competencia: string; previsto: number; anterior: number; medido: number }[] = [];
     for (const s of serie) {
       const ant = out[out.length - 1];
-      out.push({ competencia: s.competencia, previsto: (ant?.previsto ?? 0) + s.previsto_centavos, medido: (ant?.medido ?? 0) + s.medido_centavos });
+      out.push({ competencia: s.competencia, previsto: (ant?.previsto ?? 0) + s.previsto_centavos,
+        anterior: (ant?.anterior ?? 0) + s.previsto_anterior_centavos, medido: (ant?.medido ?? 0) + s.medido_centavos });
     }
     return out;
   }, [serie]);
@@ -213,12 +222,12 @@ function CurvaS({ serie }: { serie: MesAno["serie"] }) {
   const i = Math.min(sel ?? ultimo, ultimo);
   const a = acc[i];
   const W = Math.max(280, larg), H = W < 480 ? 220 : 260, mE = 48, mD = 12, T = 22, B = 30;
-  const { topo, passo } = escala(Math.max(1, ...acc.map(x => Math.max(x.previsto, x.medido))));
+  const { topo, passo } = escala(Math.max(1, ...acc.map(x => Math.max(x.previsto, x.anterior, x.medido))));
   const { divisor, rotulo } = unidade(topo);
   const larguraMes = (W - mE - mD) / acc.length;
   const x = (k: number) => mE + (k + 0.5) * larguraMes;
   const y = (v: number) => T + (1 - v / topo) * (H - T - B);
-  const linha = (k: "previsto" | "medido") => acc.map((p, n) => `${n ? "L" : "M"}${x(n).toFixed(1)} ${y(p[k]).toFixed(1)}`).join(" ");
+  const linha = (k: "previsto" | "anterior" | "medido") => acc.map((p, n) => `${n ? "L" : "M"}${x(n).toFixed(1)} ${y(p[k]).toFixed(1)}`).join(" ");
   const grade: number[] = [];
   for (let v = 0; v <= topo + passo / 2; v += passo) grade.push(v);
   const pular = Math.max(1, Math.ceil(46 / larguraMes));
@@ -233,8 +242,8 @@ function CurvaS({ serie }: { serie: MesAno["serie"] }) {
       <div ref={ref} className="cart-curva">
         <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
           aria-label={`Previsto e medido acumulados de ${fmtCompetencia(acc[0].competencia)} a ${fmtCompetencia(acc[ultimo].competencia)}, `
-            + `na cota da Lotufo. Ao fim, previsto ${brl(acc[ultimo].previsto)} e medido ${brl(acc[ultimo].medido)}. `
-            + "Os valores de cada mês estão na aba Produção."}>
+            + `nas obras ativas, na cota da Lotufo. Ao fim, previsto ${brl(acc[ultimo].previsto)}, `
+            + `previsto anterior à última repactuação ${brl(acc[ultimo].anterior)} e medido ${brl(acc[ultimo].medido)}.`}>
           <text className="g-eixo num" x={mE - 8} y={T - 10} textAnchor="end">{rotulo}</text>
           {grade.map(v => (
             <g key={v}>
@@ -247,6 +256,7 @@ function CurvaS({ serie }: { serie: MesAno["serie"] }) {
           {acc.map((p, n) => (ultimo - n) % pular === 0
             && <text key={p.competencia} className="g-eixo-x" x={x(n)} y={H - 10} textAnchor="middle">{mesCurto(p.competencia)}</text>)}
           <path className="cart-c-area" d={`${linha("medido")} L${x(ultimo)} ${y(0)} L${x(0)} ${y(0)} Z`} />
+          <path className="cart-c-ant" d={linha("anterior")} />
           <path className="cart-c-prev" d={linha("previsto")} />
           <path className="cart-c-med" d={linha("medido")} />
           <line className="cart-c-guia" x1={x(i)} x2={x(i)} y1={T} y2={y(0)} />
@@ -261,7 +271,8 @@ function CurvaS({ serie }: { serie: MesAno["serie"] }) {
         </svg>
       </div>
       <p className="cartao__corpo cart-leitura" role="status">
-        Até {fmtCompetencia(a.competencia)}: previsto <span className="num">{brl(a.previsto)}</span> · medido{" "}
+        Até {fmtCompetencia(a.competencia)}: previsto <span className="num">{brl(a.previsto)}</span> · previsto anterior{" "}
+        <span className="num">{brl(a.anterior)}</span> · medido{" "}
         <span className="num">{brl(a.medido)}</span>
       </p>
     </>
@@ -289,9 +300,10 @@ function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
       </ul>
 
       <Secao id="dir-curva" titulo="Previsto e medido acumulados nos últimos 12 meses">
-        <CurvaS serie={m.serie} />
+        <CurvaS serie={p.curva_carteira} />
         <div className="legenda">
           <span className="legenda__item"><span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />previsto</span>
+          <span className="legenda__item"><span className="legenda__chave legenda__chave--anterior" aria-hidden="true" />previsto anterior à última repactuação</span>
           <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />medido</span>
         </div>
       </Secao>
@@ -387,12 +399,13 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
               <tr>
                 <th scope="col">Obra</th><th scope="col">Empreita</th><th scope="col" className="col-num">Contratual (PI+VA)</th>
                 <th scope="col" className="col-num">Faturado</th><th scope="col" className="col-num">Saldo (contratual − faturado)</th>
+                <th scope="col" className="col-num">Desvio (p.p.)</th>
                 <th scope="col">Término e vigência</th><th scope="col">Status</th>
                 <th scope="col">Farol</th><th scope="col">Motivos</th>
               </tr>
             </thead>
             <tbody>
-              {obras.length === 0 && <tr><td colSpan={9}>Nenhuma obra neste farol.</td></tr>}
+              {obras.length === 0 && <tr><td colSpan={10}>Nenhuma obra neste farol.</td></tr>}
               {obras.map(o => {
                 const { visiveis, mais } = motivosDaLinha(o.motivos);
                 return (
@@ -401,6 +414,13 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                     <td>{o.empreita}{o.direito < 1 ? ` (${pct(o.direito)})` : ""}</td>
                     <td className="col-num dinheiro num">{brl(o.pi_va)}</td><td className="col-num dinheiro num">{brl(o.faturados)}</td>
                     <td className={`col-num dinheiro num${o.saldo < 0 ? " negativo" : ""}`}>{brl(o.saldo)}</td>
+                    {/* #296: medido − previsto acumulados ate' o mes fechado, sobre o contratual; embaixo, a linha de base
+                        (a anterior a ultima repactuacao quando a obra tem uma) */}
+                    {o.desvio_pp == null ? <td className="col-num num">—</td> : (
+                      <td className={`col-num num${o.desvio_pp < 0 ? " negativo" : ""}`}>
+                        {pp(o.desvio_pp)}<div className="campo__nota">{o.desvio_base}</div>
+                      </td>
+                    )}
                     {/* as duas datas numa coluna so' (as colunas do QDOP cabem a 1366): o termino da execucao e,
                         embaixo, a vigencia */}
                     <td className="num">{data(o.termino)}<div className="campo__nota">vig. {data(o.vigencia)}</div></td>
@@ -426,7 +446,7 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                 <td className="col-num dinheiro num">{brl(soma(o => o.pi_va))}</td>
                 <td className="col-num dinheiro num">{brl(soma(o => o.faturados))}</td>
                 <td className={`col-num dinheiro num${soma(o => o.saldo) < 0 ? " negativo" : ""}`}>{brl(soma(o => o.saldo))}</td>
-                <td colSpan={4} />
+                <td colSpan={5} />
               </tr>
             </tfoot>
           </table>

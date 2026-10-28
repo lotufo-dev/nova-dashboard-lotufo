@@ -18,13 +18,16 @@ const PAINEL = {
              faturado_mes_centavos: 123_456_789, notas_faturadas_mes: 2,
              serie: [{ competencia: "2026-08", medido_centavos: 100_000, previsto_centavos: 150_000 },
                      { competencia: "2026-09", medido_centavos: 150_000, previsto_centavos: 200_000 }] },
+  curva_carteira: [{ competencia: "2026-08", previsto_centavos: 150_000, previsto_anterior_centavos: 300_000, medido_centavos: 100_000 },
+                   { competencia: "2026-09", previsto_centavos: 200_000, previsto_anterior_centavos: 200_000, medido_centavos: 150_000 }],
   proximos: [{ competencia: "2026-09", faturamento_previsto_centavos: 200_000 }],
   carteira: { saldo_centavos: 5_000_000, ritmo_mensal_centavos: 100_000, meses_de_producao: 50,
               por_orgao: [{ orgao: "SINFRA", saldo_centavos: 5_000_000, fracao: 1, vigente_centavos: 20_000_000, medido_centavos: 15_000_000, obras: 3 }] },
   obras: [{ contrato_id: 7, seq: 1, obra: "Cavalaria", contratante: "SINFRA", empreita: "PRÓPRIA", direito: 1,
             pi_va: 1_000_000, faturados: 400_000, saldo: 600_000, pct_recebido: 0.4, status: "EM ANDAMENTO",
             termino: "2026-12-20", vigencia: "2027-03-20", farol: "vermelho", motivo: "Cavalaria: execução vencida",
-            motivos: [{ tipo: "instrumento_pendente", nivel: "critico", dias: -12, valor_centavos: null, texto: "execução vencida" }] }],
+            motivos: [{ tipo: "instrumento_pendente", nivel: "critico", dias: -12, valor_centavos: null, texto: "execução vencida" }],
+            desvio_pp: -16.7, desvio_base: "anterior" }],
   obras_base: { ativas: 19, encerramento: 2, suspensas: 1, encerradas: 0 },
   avisos: [],
 };
@@ -65,6 +68,40 @@ describe("Carteira", () => {
     expect(screen.queryByText(/obras com farol em Ação, Atenção ou Crítico/)).toBeNull();
     expect(screen.queryByText("Onde está o dinheiro")).toBeNull();
     expect(screen.queryByText("Terminam")).toBeNull();
+  });
+
+  it("Resumo: a curva S da carteira tem o previsto vigente, o anterior à última repactuação e o medido (#296)", async () => {
+    api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
+    render(<Diretoria ir={() => {}} />);
+    const curva = await screen.findByRole("img", { name: /Previsto e medido acumulados de 08\/2026 a 09\/2026/ });
+    // as três linhas: previsto vigente, previsto anterior e medido (vem de curva_carteira, não da série da Produção)
+    expect(curva.querySelector(".cart-c-prev")).toBeTruthy();
+    expect(curva.querySelector(".cart-c-ant")).toBeTruthy();
+    expect(curva.querySelector(".cart-c-med")).toBeTruthy();
+    expect((curva.getAttribute("aria-label") ?? "").replace(/\s/g, " ")).toContain("previsto anterior à última repactuação R$ 5.000,00");
+    const leitura = (screen.getByRole("status").textContent ?? "").replace(/\s/g, " ");
+    expect(leitura).toContain("previsto anterior R$ 5.000,00");
+    expect(screen.getByText("previsto anterior à última repactuação")).toBeTruthy();
+  });
+
+  it("QDOP: a coluna Desvio (p.p.) mostra o número com sinal e a linha de base, e — sem cronograma (#296)", async () => {
+    const semCronograma = { ...PAINEL.obras[0], contrato_id: 8, seq: 2, obra: "Sem cronograma", desvio_pp: null, desvio_base: null };
+    const adiantada = { ...PAINEL.obras[0], contrato_id: 9, seq: 3, obra: "Adiantada", desvio_pp: 2.9, desvio_base: "vigente" };
+    const respostas: Record<string, unknown> = { ...RESPOSTAS, "/api/diretoria": { ...PAINEL, obras: [PAINEL.obras[0], semCronograma, adiantada] } };
+    api.mockImplementation((url: string) => Promise.resolve(respostas[url]));
+    render(<Diretoria ir={() => {}} aba="qdop" />);
+    const tabela = await screen.findByRole("table", { name: /QDOP, na cota da Lotufo/ });
+    const cabecalho = within(tabela).getAllByRole("columnheader").map(h => h.textContent);
+    expect(cabecalho).toContain("Desvio (p.p.)");
+    const coluna = cabecalho.indexOf("Desvio (p.p.)");
+    const celula = (obra: string) => {
+      const linha = within(tabela).getByText(obra).closest("tr") as HTMLElement;
+      return within(linha).getAllByRole("cell")[coluna];
+    };
+    expect(celula("Cavalaria").textContent).toBe("−16,7anterior");
+    expect(celula("Cavalaria").className).toContain("negativo");
+    expect(celula("Adiantada").textContent).toBe("+2,9vigente");
+    expect(celula("Sem cronograma").textContent).toBe("—");
   });
 
   it("o Exportar QDOP aparece nas três abas", async () => {
