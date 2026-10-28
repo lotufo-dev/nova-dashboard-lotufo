@@ -398,7 +398,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
         if derivado["ultima"]:
             derivado["ultima"] = {**derivado["ultima"], "data": tempo.iso_local(derivado["ultima"]["data"])}
         saida.append({
-            "id": p["id"], "codigo": p["codigo"], "numero": p["numero"], "nome": p["nome"],
+            "id": p["id"], "codigo": p["codigo"], "link": link_do_processo(p["codigo"]), "numero": p["numero"], "nome": p["nome"],
             "contrato_id": p["contrato_id"],
             "obra": (p["nome_curto"] or p["numero_instrumento"]) if p["contrato_id"] else None,
             "medicao_id": p["medicao_id"],

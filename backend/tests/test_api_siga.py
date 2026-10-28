@@ -199,3 +199,19 @@ def test_link_gravado_na_etapa_4_aparece_na_lista_do_robo(api, com_token):
         {"codigo": "AbCdEf1234", "numero": None, "nome": "Alfa", "situacao": None, "movimentacoes": []}]}, headers=_robo())
     alfa = cl.get("/api/siga").json()["processos"][0]
     assert (alfa["protocolo_id"], alfa["medicao_id"], alfa["nome"]) == (pid, mid, "23ª Medição - Obra MTPAR")
+
+
+def test_get_siga_traz_o_link_so_com_codigo_e_modelo_configurado(client_admin, com_token, monkeypatch):
+    assert client_admin.post("/api/siga/leituras", json=CORPO, headers=_robo()).status_code == 200
+    monkeypatch.delenv("DASH_SIGA_LINK_MODELO", raising=False)
+    sem_modelo = client_admin.get("/api/siga").json()["processos"]
+    assert [p["link"] for p in sem_modelo] == [None, None]
+    monkeypatch.setenv("DASH_SIGA_LINK_MODELO", "https://siga.exemplo.com.br/acompanhar?n={codigo}")
+    alfa, beta = client_admin.get("/api/siga").json()["processos"]
+    assert alfa["link"] == "https://siga.exemplo.com.br/acompanhar?n=ABC123"
+    assert beta["link"] is None   # sem codigo, sem link
+    # modelo fora de https ou sem o {codigo} nao vira link
+    monkeypatch.setenv("DASH_SIGA_LINK_MODELO", "http://siga.exemplo.com.br/acompanhar?n={codigo}")
+    assert client_admin.get("/api/siga").json()["processos"][0]["link"] is None
+    monkeypatch.setenv("DASH_SIGA_LINK_MODELO", "https://siga.exemplo.com.br/acompanhar")
+    assert client_admin.get("/api/siga").json()["processos"][0]["link"] is None
