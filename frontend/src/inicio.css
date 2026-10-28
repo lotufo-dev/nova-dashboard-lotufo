@@ -16,7 +16,7 @@
 /* cartoes do topo */
 .ini-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
 .ini-cartao {
-  display: flex; align-items: center; gap: 16px; padding: 20px 24px; border-radius: var(--raio, 8px);
+  display: flex; align-items: center; gap: 16px; padding: 16px 24px; border-radius: var(--raio, 8px);
   background: var(--superficie, #FFFFFF); color: var(--texto, #0F172A); text-decoration: none;
   border: 1px solid var(--linha, #E2E8F0); box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
 }
@@ -43,7 +43,7 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(15, 23, 42, .06);
 }
 /* rotulo e valor no alto, alinhados entre os quatro; barra e selo descem para o pe' (margin-top: auto) */
-.ini-numero { padding: 16px 24px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ini-numero { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ini-numero__valor ~ * { margin-top: auto; }
 .ini-numero__rotulo { font-size: 14px; line-height: 20px; color: var(--texto-2, #64748B); }
 .ini-numero__valor { font-size: 26px; line-height: 32px; font-weight: 500; overflow-wrap: anywhere; }
