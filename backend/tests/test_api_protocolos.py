@@ -647,6 +647,35 @@ def test_protocolo_feito_fora_sem_link_nao_cria_processo_e_link_invalido_nao_pro
     assert _siga_processos("codigo") == [] and cl.get(f"/api/medicoes/{mid}").json()["siga_registrado_em"] is None
 
 
+def test_codigo_livre_vale_mesmo_com_o_processo_que_o_robo_ligou_so_pelo_numero(api):
+    # (1) o link X foi colado por engano em outro protocolo e corrigido: X ficou gravado e livre; (2) o robo ligou a
+    # este protocolo, pelo numero igual, um processo sem codigo; (3) colar X aqui nao e' "ligado a outro"
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    c = db.get_conn()
+    c.execute("INSERT INTO siga_processos (codigo, numero) VALUES ('XxXxXx1111', 'N-1')")
+    c.execute("INSERT INTO siga_processos (numero, contrato_id, protocolo_id, medicao_id) VALUES ('N-2', ?, ?, ?)",
+              (cid, pid, mid))
+    c.commit(); c.close()
+    r = cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "N-2", "link_siga": "XxXxXx1111"})
+    assert r.status_code == 200, r.text
+    assert _siga_processos("codigo", "numero", "protocolo_id", "medicao_id") == [
+        ("XxXxXx1111", "N-1", pid, mid), (None, "N-2", None, None)]       # o do numero continua gravado, sem vinculo
+    assert r.json()["siga"]["codigo"] == "XxXxXx1111"
+
+
+def test_codigo_livre_vale_no_registro_por_fora_mesmo_com_processo_ligado_so_pelo_numero(api):
+    cl, cid, mid = api
+    c = db.get_conn()
+    c.execute("INSERT INTO siga_processos (codigo, numero) VALUES ('XxXxXx1111', 'N-1')")
+    c.execute("INSERT INTO siga_processos (numero, contrato_id, medicao_id) VALUES ('MTPAR-PRO-2026/00123', ?, ?)",
+              (cid, mid))
+    c.commit(); c.close()
+    r = _fora(cl, mid, link_siga="XxXxXx1111")
+    assert r.status_code == 201, r.text
+    assert _siga_processos("codigo", "protocolo_id", "medicao_id") == [("XxXxXx1111", None, mid), (None, None, None)]
+
+
 def test_segundo_registro_por_fora_com_outro_link_substitui_o_da_medicao(api):
     # decisao da orquestradora em 28/10/2026: o registro nunca e' recusado por causa do link de outro registro
     cl, cid, mid = api

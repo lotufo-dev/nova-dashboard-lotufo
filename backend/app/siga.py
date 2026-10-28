@@ -274,10 +274,11 @@ def _ligar(conn, usuario_id, codigo: str, numero: str | None, nome: str, contrat
         if entidade_id not in registrado_em(conn, entidade, [entidade_id]):
             auditoria.registrar(conn, usuario_id, "protocolo.siga", entidade, entidade_id, None, depois)
         return
-    if proprio is not None and proprio["codigo"] is None:
-        # ligado antes so' pelo numero igual (a leitura do robo): ganha o codigo, se nenhum outro processo o tem
-        if conn.execute("SELECT 1 FROM siga_processos WHERE codigo=?", (codigo,)).fetchone():
-            raise ValueError(ligado_a_outro)
+    if proprio is not None and proprio["codigo"] is None \
+            and not conn.execute("SELECT 1 FROM siga_processos WHERE codigo=?", (codigo,)).fetchone():
+        # ligado antes so' pelo numero igual (a leitura do robo): ganha o codigo, se nenhum outro processo o tem.
+        # Se o codigo ja' existe (livre ou nao), cai no ramo abaixo: livre, o processo do codigo e' ligado e o que
+        # so' tinha o numero perde o vinculo (continua gravado, com as leituras); ligado a outro, e' recusado.
         conn.execute("UPDATE siga_processos SET codigo=?, numero=COALESCE(numero, ?) WHERE id=?",
                      (codigo, numero, proprio["id"]))
     else:
