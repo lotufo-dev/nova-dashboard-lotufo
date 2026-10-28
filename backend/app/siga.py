@@ -10,6 +10,7 @@ As derivacoes (setor, com quem, desde, dias uteis...) vem do `relatorio_html.py`
 import datetime
 import os
 import re
+from urllib.parse import quote
 
 from app import auditoria, db, medicoes, tempo
 from app.feriados import dia_util
@@ -225,7 +226,7 @@ def link_do_processo(codigo: str | None) -> str | None:
     modelo = os.environ.get("DASH_SIGA_LINK_MODELO", "").strip()
     if not codigo or not modelo.startswith("https://") or "{codigo}" not in modelo:
         return None
-    return modelo.replace("{codigo}", codigo)
+    return modelo.replace("{codigo}", quote(codigo, safe=""))
 
 
 def painel(conn, agora: datetime.datetime | None = None) -> dict:

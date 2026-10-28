@@ -19,6 +19,7 @@ describe("siga", () => {
     expect(tempoNoSetor(p({ desde: "2026-10-26T08:00:00-04:00", dias_uteis: 0 }), agora)).toBe("3 h");
     expect(tempoNoSetor(p({ desde: "2026-10-24T09:00:00-04:00", dias_uteis: 0 }), agora)).toBe("menos de 1 dia útil");
     expect(tempoNoSetor(p({ desde: null, dias_uteis: null }), agora)).toBe("—");
+    expect(tempoNoSetor(p({ desde: "ilegível", dias_uteis: 0 }), agora)).toBe("—");
   });
 
   it("ordem: hoje primeiro (o mais recente no topo), depois mais dias úteis; empate pelo mais antigo no setor", () => {

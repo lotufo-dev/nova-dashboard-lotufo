@@ -47,7 +47,9 @@ export function ordenar(processos: ProcessoSiga[]): ProcessoSiga[] {
 export function tempoNoSetor(p: ProcessoSiga, agora: Date): string {
   if (p.desde === null || p.dias_uteis === null) return "—";
   if (p.dias_uteis >= 1) return p.dias_uteis === 1 ? "1 dia útil" : `${p.dias_uteis} dias úteis`;
-  const minutos = Math.max(1, Math.floor((agora.getTime() - instante(p.desde, agora.getTime())) / 60_000));
+  const desde = instante(p.desde, NaN);
+  if (Number.isNaN(desde)) return "—";
+  const minutos = Math.max(1, Math.floor((agora.getTime() - desde) / 60_000));
   if (minutos < 60) return `${minutos} min`;
   if (minutos < 24 * 60) return `${Math.floor(minutos / 60)} h`;
   return "menos de 1 dia útil";
