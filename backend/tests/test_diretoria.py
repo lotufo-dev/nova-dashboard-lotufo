@@ -435,3 +435,64 @@ def test_a_receber_previsao_futura_nao_conta_medicao_ja_paga(cenario):
     por = {m["competencia"]: m for m in diretoria.a_receber(c, HOJE)["meses"]}
     assert all(por[k]["previsto_centavos"] == antes[k] for k in por if por[k]["futuro"])
     assert por["2026-09"]["recebido_centavos"] == 9_000_000
+
+
+# --- issue #296: curva S da carteira (soma das obras ativas, na cota) e desvio em p.p. por obra no QDOP -----
+
+def _repactuar_consorcio(c, k):
+    """Consorcio: contratual (4 mi em 05/2026, 2 mi em 08/2026) e o 1º TA, que repactua para 3 mi e 1 mi."""
+    from app import cronograma
+    for numero, itens, data, chave, origem in (
+            (1, [("2026-05", 400_000_000), ("2026-08", 200_000_000)], "2024-01-01", "contratual", "contratual"),
+            (2, [("2026-05", 300_000_000), ("2026-08", 100_000_000)], "2025-06-01", "ta1", "aditivo")):
+        cronograma.nova_versao(c, 1, k, itens, "manual", data_documento=data)
+        vid = c.execute("SELECT id FROM cronograma_versoes WHERE contrato_id=? AND numero=?", (k, numero)).fetchone()[0]
+        c.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, data_documento, instrumento)"
+                  " VALUES (?,?,?,?,?,NULL)", (vid, k, chave, origem, data))
+        c.commit()
+
+
+def test_curva_da_carteira_soma_as_obras_ativas_na_cota_com_as_duas_linhas(cenario):
+    c, ids = cenario
+    _repactuar_consorcio(c, ids["consorcio"])
+    curva = diretoria.painel(c, HOJE)["curva_carteira"]
+    assert [p["competencia"] for p in curva] == ["2025-10", "2025-11", "2025-12"] + [f"2026-{m:02d}" for m in range(1, 10)]
+    por = {p["competencia"]: p for p in curva}
+    # 05/2026: o consorcio entra com 50% (TA 3 mi, anterior 4 mi, medido 4 mi) e a propria com o medido de 1 mil
+    assert por["2026-05"] == {"competencia": "2026-05", "previsto_centavos": 150_000_000,
+                              "previsto_anterior_centavos": 200_000_000, "medido_centavos": 200_000_000 + 100_000}
+    # 08/2026: a propria mede 1 mil (recebida) + 7 mil (protocolada); o consorcio so' preve
+    assert por["2026-08"] == {"competencia": "2026-08", "previsto_centavos": 50_000_000,
+                              "previsto_anterior_centavos": 100_000_000, "medido_centavos": 800_000}
+    # 09/2026: a propria nao tem repactuacao e entra na linha anterior com o vigente; o espelho ainda nao mede
+    assert por["2026-09"] == {"competencia": "2026-09", "previsto_centavos": 2_000_000,
+                              "previsto_anterior_centavos": 2_000_000, "medido_centavos": 0}
+    # o reajuste nao e' medido de execucao
+    c.execute("UPDATE medicoes SET tipo='reajuste' WHERE contrato_id=? AND competencia='2026-08'", (ids["propria"],))
+    c.commit()
+    assert {p["competencia"]: p for p in diretoria.painel(c, HOJE)["curva_carteira"]}["2026-08"]["medido_centavos"] == 0
+
+
+def test_curva_da_carteira_deixa_de_fora_a_obra_que_nao_esta_ativa(cenario):
+    c, ids = cenario
+    _repactuar_consorcio(c, ids["consorcio"])
+    c.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (ids["consorcio"],))
+    c.commit()
+    por = {p["competencia"]: p for p in diretoria.painel(c, HOJE)["curva_carteira"]}
+    assert por["2026-05"] == {"competencia": "2026-05", "previsto_centavos": 0, "previsto_anterior_centavos": 0,
+                              "medido_centavos": 100_000}
+
+
+def test_desvio_por_obra_no_qdop_pela_linha_anterior_ate_a_ultima_competencia_fechada(cenario):
+    c, ids = cenario
+    obras = {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}
+    assert (obras[ids["consorcio"]]["desvio_pp"], obras[ids["consorcio"]]["desvio_base"]) == (None, None)  # sem cronograma
+    _repactuar_consorcio(c, ids["consorcio"])
+    obras = {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}
+    # consorcio: medido 4 mi contra o anterior 6 mi ate 08/2026, sobre o vigente de 12 mi: -16,67 -> -16,7
+    assert (obras[ids["consorcio"]]["desvio_pp"], obras[ids["consorcio"]]["desvio_base"]) == (-16.7, "anterior")
+    # propria: sem repactuacao, pelo vigente; o previsto de 09/2026 (mes corrente) ainda nao conta;
+    # medido de execucao protocolada ou recebida = 29 mil sobre 1 mi = 2,9 (o espelho de 09/2026 fica fora)
+    assert (obras[ids["propria"]]["desvio_pp"], obras[ids["propria"]]["desvio_base"]) == (2.9, "vigente")
+    # em outubro, 09/2026 fecha: o previsto de 20 mil entra (29 - 20 mil = 0,9)
+    assert {o["contrato_id"]: o for o in diretoria.painel(c, D(2026, 10, 1))["obras"]}[ids["propria"]]["desvio_pp"] == 0.9
