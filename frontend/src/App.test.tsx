@@ -34,3 +34,35 @@ describe("App: a rota antiga /avisos", () => {
     expect(trilho.getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBeNull();
   });
 });
+
+describe("App: a tela SIGA", () => {
+  const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
+    if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [] };
+    return [];
+  });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  it("a engenharia vê o item SIGA no trilho, logo depois de Avisos, e /siga abre a tela com o título SIGA na barra", async () => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", "/siga");
+    render(<App />);
+    expect(await screen.findByText("Nenhum processo acompanhado.")).toBeTruthy();
+    const trilho = within(screen.getByRole("navigation", { name: "Navegação principal" }));
+    const nomes = trilho.getAllByRole("link").map(l => l.textContent);
+    expect(nomes[nomes.indexOf("Avisos") + 1]).toBe("SIGA");
+    expect(trilho.getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("heading", { level: 1, name: "SIGA" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/siga");
+  });
+
+  it("a diretoria não tem o item e /siga cai na entrada do perfil", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/siga");
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Navegação principal" });
+    expect(within(screen.getByRole("navigation", { name: "Navegação principal" })).queryByRole("link", { name: "SIGA" })).toBeNull();
+    expect(window.location.pathname).toBe("/inicio");
+    expect(api).not.toHaveBeenCalledWith("/api/siga");
+  });
+});

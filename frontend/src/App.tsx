@@ -19,6 +19,7 @@ import MedicaoNova from "./MedicaoNova";
 import Diretoria from "./Diretoria";
 import { entradaDe, itemDe, tituloDaSecao, tituloDe } from "./navegacao";
 import { ABAS_MEDICOES } from "./resumoMedicoes";
+import SigaPagina from "./SigaPagina";
 import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
 
 // Menu e entrada por perfil moram em navegacao.ts (NAVEGACAO.md › Perfis e tela de entrada); o trilho e a barra
@@ -44,7 +45,8 @@ export default function App() {
   // canonico, com os filtros e a secao que vieram.
   useEffect(() => {
     if (!usuario) return;
-    if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")) {
+    if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")
+      || (rota.tela === "siga" && usuario.perfil === "diretoria")) {
       substituir(entradaDe(usuario.perfil));
     } else if (rota.tela === "avisos") {
       // os Avisos moram dentro de Obras (09/10/2026): o item do menu e o link de antes levam para la'
@@ -94,6 +96,7 @@ export default function App() {
         <main className="principal" id="conteudo" tabIndex={-1}>
           {rota.tela === "inicio" && <div className="pagina"><Inicio usuario={usuario} ir={ir} /></div>}
           {rota.tela === "medicoes" && <MedicoesPagina aba={rota.aba ?? "resumo"} busca={busca} usuario={usuario} />}
+          {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} />}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "a-receber" && (
             <div className="pagina">

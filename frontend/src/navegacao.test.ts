@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entradaDe, itemDe, menuDe, tituloDaSecao } from "./navegacao";
+import { entradaDe, itemDe, menuDe, tituloDaSecao, tituloDe } from "./navegacao";
 
 describe("navegação por perfil", () => {
   it("todo perfil entra pelo Início (08/10/2026)", () => {
@@ -9,10 +9,10 @@ describe("navegação por perfil", () => {
   });
 
   it("trilho sem grupos, na ordem do trabalho, com o recorte do perfil; as Notas saíram (viraram abas de Medições)", () => {
-    expect(menuDe("engenharia")).toEqual(["inicio", "medicoes", "obras", "avisos", "documentos", "a-receber"]);
+    expect(menuDe("engenharia")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber"]);
     // decisão 3: a diretoria sem Medições, com a Carteira
     expect(menuDe("diretoria")).toEqual(["inicio", "obras", "avisos", "documentos", "a-receber", "carteira"]);
-    expect(menuDe("admin")).toEqual(["inicio", "medicoes", "obras", "avisos", "documentos", "a-receber", "carteira", "admin"]);
+    expect(menuDe("admin")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "carteira", "admin"]);
   });
 
   it("o item fica marcado também abaixo dele na hierarquia", () => {
@@ -35,5 +35,7 @@ describe("navegação por perfil", () => {
     expect(tituloDaSecao({ tela: "medicoes", aba: "aguardando-nota" })).toBe("Medições");
     expect(tituloDaSecao({ tela: "conta" })).toBe("Minha conta");
     expect(tituloDaSecao({ tela: "a-receber" })).toBe("A receber");
+    expect(tituloDaSecao({ tela: "siga" })).toBe("SIGA");
+    expect(tituloDe("siga")).toBe("SIGA");
   });
 });

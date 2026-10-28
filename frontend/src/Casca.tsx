@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
-import { IconeAjustes, IconeAlerta, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras,
+import { IconeAjustes, IconeAlerta, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
   IconeSeta, IconeSino } from "./icones";
 import type { Usuario } from "./Login";
 import { menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
@@ -20,7 +20,7 @@ import Simbolo from "./Simbolo";
 // Os links sao um conjunto so', sempre no DOM e focaveis, com o rotulo visivel como nome acessivel.
 
 const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement> = {
-  inicio: IconeInicio, medicoes: IconeMedicoes, obras: IconeObras, avisos: IconeSino, documentos: IconeDocumento,
+  inicio: IconeInicio, medicoes: IconeMedicoes, obras: IconeObras, avisos: IconeSino, siga: IconeSiga, documentos: IconeDocumento,
   "a-receber": IconeCifrao, carteira: IconeGrade, admin: IconeAjustes,
 };
 

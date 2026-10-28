@@ -8,7 +8,9 @@ As derivacoes (setor, com quem, desde, dias uteis...) vem do `relatorio_html.py`
 13/10/2026; a unica diferenca e' que os dias uteis descontam os feriados nacionais (`app/feriados.py`).
 """
 import datetime
+import os
 import re
+from urllib.parse import quote
 
 from app import auditoria, db, medicoes, tempo
 from app.feriados import dia_util
@@ -218,6 +220,15 @@ def processos_para_o_robo(conn) -> list[dict]:
     return [dict(r) for r in conn.execute("SELECT codigo, numero, nome FROM siga_processos ORDER BY id")]
 
 
+def link_do_processo(codigo: str | None) -> str | None:
+    """Link de acompanhamento no SIGA: o modelo (https, com `{codigo}`) vem de `DASH_SIGA_LINK_MODELO`, fora do
+    repositorio. Sem codigo ou sem modelo valido, nao ha' link."""
+    modelo = os.environ.get("DASH_SIGA_LINK_MODELO", "").strip()
+    if not codigo or not modelo.startswith("https://") or "{codigo}" not in modelo:
+        return None
+    return modelo.replace("{codigo}", quote(codigo, safe=""))
+
+
 def painel(conn, agora: datetime.datetime | None = None) -> dict:
     agora = agora or tempo.agora_utc()
     hoje = tempo.para_local(agora).date()
@@ -242,7 +253,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
         if derivado["ultima"]:
             derivado["ultima"] = {**derivado["ultima"], "data": tempo.iso_local(derivado["ultima"]["data"])}
         saida.append({
-            "id": p["id"], "codigo": p["codigo"], "numero": p["numero"], "nome": p["nome"],
+            "id": p["id"], "codigo": p["codigo"], "link": link_do_processo(p["codigo"]), "numero": p["numero"], "nome": p["nome"],
             "contrato_id": p["contrato_id"],
             "obra": (p["nome_curto"] or p["numero_instrumento"]) if p["contrato_id"] else None,
             "medicao_id": p["medicao_id"],

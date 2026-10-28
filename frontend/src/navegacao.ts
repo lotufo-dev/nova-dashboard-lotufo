@@ -9,22 +9,22 @@ import type { Rota } from "./rota";
 // para "Obras" com os Avisos abertos.
 
 export type Perfil = "engenharia" | "diretoria" | "admin";
-export type ItemMenu = "inicio" | "medicoes" | "obras" | "avisos" | "documentos" | "a-receber" | "carteira" | "admin";
+export type ItemMenu = "inicio" | "medicoes" | "obras" | "avisos" | "siga" | "documentos" | "a-receber" | "carteira" | "admin";
 
 export const ROTULO: Record<ItemMenu, string> = {
-  inicio: "Início", medicoes: "Medições", obras: "Obras", avisos: "Avisos", documentos: "Documentos", "a-receber": "A receber",
+  inicio: "Início", medicoes: "Medições", obras: "Obras", avisos: "Avisos", siga: "SIGA", documentos: "Documentos", "a-receber": "A receber",
   carteira: "Carteira", admin: "Administração",
 };
 
 // Ordem do trilho.
-const ORDEM: readonly ItemMenu[] = ["inicio", "medicoes", "obras", "avisos", "documentos", "a-receber", "carteira", "admin"];
+const ORDEM: readonly ItemMenu[] = ["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "carteira", "admin"];
 
 // Decisao 3 do mapa: a diretoria sem Medicoes no menu (a rota continua abrindo), e a engenharia com A receber.
 // O Inicio voltou (decisao do Leonardo, 08/10/2026): e' a entrada de todos os perfis, no alto do menu.
 const DO_PERFIL: Record<Perfil, readonly ItemMenu[]> = {
-  engenharia: ["inicio", "medicoes", "avisos", "documentos", "obras", "a-receber"],
+  engenharia: ["inicio", "medicoes", "avisos", "siga", "documentos", "obras", "a-receber"],
   diretoria: ["inicio", "carteira", "avisos", "documentos", "obras", "a-receber"],
-  admin: ["inicio", "medicoes", "avisos", "documentos", "obras", "a-receber", "carteira", "admin"],
+  admin: ["inicio", "medicoes", "avisos", "siga", "documentos", "obras", "a-receber", "carteira", "admin"],
 };
 
 function perfilDe(p: string): Perfil {
