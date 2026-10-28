@@ -102,6 +102,32 @@ def test_post_sem_codigo_e_sem_numero_e_422_em_portugues(client, com_token):
     assert r.status_code == 422 and r.json()["detail"] == "Processo sem o código ou o número do SIGA"
 
 
+@pytest.mark.parametrize("conteudo,codificacao", [(TOKEN, "utf-8-sig"), (TOKEN + "\r\n", "utf-8-sig")])
+def test_arquivo_do_token_com_bom_vale(client, tmp_path, monkeypatch, conteudo, codificacao):
+    # Set-Content -Encoding UTF8 do PowerShell 5.1 grava com BOM
+    arquivo = tmp_path / "siga-token.txt"
+    arquivo.write_bytes(conteudo.encode(codificacao))
+    monkeypatch.setenv("DASH_SIGA_TOKEN_ARQUIVO", str(arquivo))
+    assert client.get("/api/siga/processos", headers=_robo()).status_code == 200
+
+
+def test_arquivo_do_token_em_utf16_e_503_e_nao_500(client, tmp_path, monkeypatch):
+    # o `>` do PowerShell 5.1 grava UTF-16
+    arquivo = tmp_path / "siga-token.txt"
+    arquivo.write_bytes(TOKEN.encode("utf-16"))
+    monkeypatch.setenv("DASH_SIGA_TOKEN_ARQUIVO", str(arquivo))
+    r = client.get("/api/siga/processos", headers=_robo())
+    assert r.status_code == 503 and r.json()["detail"] == "Monitor do SIGA não configurado"
+
+
+def test_data_da_movimentacao_com_espaco_no_fim_e_aceita(client, com_token):
+    corpo = {"lido_em": CORPO["lido_em"], "processos": [{**CORPO["processos"][0], "movimentacoes": [
+        {**CORPO["processos"][0]["movimentacoes"][0], "data": "01/10/2026 08:10:00 "}]}]}
+    r = client.post("/api/siga/leituras", json=corpo, headers=_robo())
+    assert r.status_code == 200, r.text
+    assert r.json()["novas_movimentacoes"] == 1
+
+
 def test_post_sem_fuso_no_lido_em_e_422(client, com_token):
     r = client.post("/api/siga/leituras", json={**CORPO, "lido_em": "2026-10-28T11:00:00"}, headers=_robo())
     assert r.status_code == 422
@@ -147,11 +173,12 @@ def test_get_siga_logado_traz_derivacoes_e_vinculo(client_admin, com_token, monk
     r = client_admin.get("/api/siga")
     assert r.status_code == 200, r.text
     corpo = r.json()
-    assert corpo["lido_em"] == "2026-10-28 15:00:00" and corpo["atrasado"] is False
+    assert corpo["lido_em"] == "2026-10-28T15:00:00+00:00" and corpo["atrasado"] is False
     alfa, beta = corpo["processos"]
     assert (alfa["setor"], alfa["com_quem"], alfa["dias_uteis"], alfa["caixa_entrada"]) == ("COFIN", "Fulano", 7,
                                                                                             False)
     assert (alfa["medicao_id"], alfa["protocolo_id"], alfa["contrato_id"]) == (31, pid, 7)
     assert alfa["medicao_titulo"] == "3ª Medição" and alfa["obra"] == "Obra Alfa"
-    assert alfa["movimentacoes"][0]["data"] == "2026-10-19 10:00:00"
+    assert alfa["movimentacoes"][0]["data"] == "2026-10-19T10:00:00-04:00"
+    assert alfa["desde"] == "2026-10-19T10:00:00-04:00"
     assert beta["medicao_id"] is None and beta["caixa_entrada"] is True

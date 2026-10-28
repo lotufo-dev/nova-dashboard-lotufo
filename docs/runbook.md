@@ -343,8 +343,9 @@ o que acompanhar em `GET /api/siga/processos`, as duas com `Authorization: Beare
 rodada maior vai em mais de um POST com o mesmo `lido_em` (cada um grava só o que traz).
 
 1. **Token em arquivo**: `C:\DashboardLotufo\segredos\siga-token.txt` (uma linha, UTF-8, ao menos 32 caracteres
-   aleatórios; ex.: `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)`). O mesmo token vai
-   para a configuração do robô. Nunca no repositório nem na tarefa agendada.
+   aleatórios). Gerar e gravar sem BOM (o `>` do PowerShell 5.1 grava UTF-16 e o arquivo é recusado):
+   `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [IO.File]::WriteAllText('C:\DashboardLotufo\segredos\siga-token.txt', [Convert]::ToBase64String($b), (New-Object Text.UTF8Encoding $false))`.
+   O mesmo token vai para a configuração do robô. Nunca no repositório nem na tarefa agendada.
 2. **Variável** `DASH_SIGA_TOKEN_ARQUIVO` com o caminho do arquivo, no nível da máquina (como `DASH_RM_ENDERECO`), e
    reiniciar a tarefa de `<servidor>` pela skill `deploy`. O arquivo é lido a cada pedido: trocar o token não pede
    reinício. Sem a variável (ou com o arquivo vazio ou ilegível), as duas rotas do robô respondem 503 "Monitor do

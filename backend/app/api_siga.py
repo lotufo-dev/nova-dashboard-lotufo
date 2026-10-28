@@ -29,9 +29,11 @@ def _token_esperado() -> bytes:
     caminho = os.environ.get("DASH_SIGA_TOKEN_ARQUIVO")
     if not caminho:
         raise HTTPException(503, NAO_CONFIGURADO)
+    # utf-8-sig: o Set-Content -Encoding UTF8 do PowerShell 5.1 grava BOM, que viraria parte do token (401 eterno).
+    # UTF-16 (o `>` do PowerShell 5.1) nao decodifica: 503 com log, nunca 500.
     try:
-        token = Path(caminho).read_text(encoding="utf-8").strip()
-    except OSError:
+        token = Path(caminho).read_text(encoding="utf-8-sig").strip()
+    except (OSError, UnicodeError):
         log.exception("arquivo do token do SIGA ilegivel")
         raise HTTPException(503, NAO_CONFIGURADO) from None
     if not token:
@@ -49,7 +51,7 @@ def exigir_robo(authorization: str | None = Header(default=None)) -> None:
 
 
 class MovimentacaoIn(BaseModel):
-    data: str = Field(max_length=19)                      # DD/MM/AAAA HH:MM:SS
+    data: str = Field(max_length=30)                      # DD/MM/AAAA HH:MM:SS (siga._data_iso confere)
     evento: str | None = Field(default=None, max_length=500)
     cad_lotacao: str | None = Field(default=None, max_length=300)
     cad_pessoa: str | None = Field(default=None, max_length=300)

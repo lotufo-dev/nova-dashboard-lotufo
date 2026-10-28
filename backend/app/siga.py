@@ -63,26 +63,34 @@ def _dias_uteis(desde: datetime.date, hoje: datetime.date) -> int:
     return dias
 
 
+def _sigla(lotacao: str | None) -> str:
+    """'COFIN/ORGAO' -> 'COFIN': a sigla antes da barra, comparada por igualdade (GAB nao e' GABIN)."""
+    return (lotacao or "").split("/")[0].strip().upper()
+
+
 def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date) -> dict:
-    """Movimentacoes com `data` em 'AAAA-MM-DD HH:MM:SS'. As canceladas nao entram em nenhuma conta."""
+    """Movimentacoes com `data` em 'AAAA-MM-DD HH:MM:SS'. As canceladas nao entram em nenhuma conta.
+
+    Na caixa de entrada ninguem recebeu ainda: conta desde a ultima Transferencia (senao a movimentacao mais
+    recente) e nao ha' "com quem". Fora dela, desde o ultimo Recebimento no setor (senao a mais antiga)."""
     validas = sorted((m for m in movimentacoes if "cancelad" not in (m["evento"] or "").lower()),
                      key=lambda m: m["data"])
     setor = _setor(situacao)
     caixa_entrada = "caixa de entrada" in (situacao or "").lower()
-    recebimentos = [m for m in validas if "recebimento" in (m["evento"] or "").lower()
-                    and setor and (m["at_lotacao"] or "").upper().startswith(setor.upper())]
-    transferencias = [m for m in validas if "transfer" in (m["evento"] or "").lower()]
-    if recebimentos:
-        desde = recebimentos[-1]["data"]
-    elif caixa_entrada and transferencias:
-        desde = transferencias[-1]["data"]
+    recebimento = None
+    if caixa_entrada:
+        transferencias = [m for m in validas if "transfer" in (m["evento"] or "").lower()]
+        desde = (transferencias or validas or [{"data": None}])[-1]["data"]
     else:
-        desde = validas[0]["data"] if validas else None
+        recebimentos = [m for m in validas if "recebimento" in (m["evento"] or "").lower()
+                        and setor and _sigla(m["at_lotacao"]) == setor.upper()]
+        recebimento = recebimentos[-1] if recebimentos else None
+        desde = recebimento["data"] if recebimento else (validas[0]["data"] if validas else None)
     hoje_iso = hoje.isoformat()
     return {
         "setor": setor,
         "caixa_entrada": caixa_entrada,
-        "com_quem": recebimentos[-1]["at_pessoa"] if recebimentos else "",
+        "com_quem": recebimento["at_pessoa"] if recebimento else "",
         "desde": desde,
         "dias_uteis": _dias_uteis(datetime.date.fromisoformat(desde[:10]), hoje) if desde else None,
         "hoje": sum(m["data"][:10] == hoje_iso for m in validas),
@@ -131,23 +139,34 @@ def _gravar_processo(conn, codigo: str | None, numero: str | None, nome: str | N
     return linha["id"]
 
 
-def _vinculo(conn, numero: str) -> tuple[int, int | None, int] | None:
-    """(contrato, protocolo, medicao) do protocolo enviado, ou do envio registrado por fora, com o numero IGUAL.
+def _vinculo(conn, numero: str) -> tuple[int, int | None, int | None] | None:
+    """(contrato, protocolo, medicao) do protocolo enviado e/ou do envio registrado por fora com o numero IGUAL.
 
-    Mais de um protocolo com o mesmo numero: o mais antigo (o processo e' o mesmo)."""
+    Sem adivinhar: o numero tem que apontar um unico contrato e no maximo um protocolo; senao nao liga (fica em
+    "Outros processos"). A medicao so' entra quando e' uma so' (protocolo que leva medicao e reajuste liga so' ao
+    protocolo)."""
     alvo = normalizar_numero(numero)
+    contratos, protocolos, medicoes_achadas = set(), set(), set()
     for p in conn.execute("SELECT id, contrato_id, numero_orgao FROM protocolos WHERE situacao='enviado' "
-                          "AND numero_orgao IS NOT NULL ORDER BY id"):
+                          "AND numero_orgao IS NOT NULL").fetchall():
         if normalizar_numero(p["numero_orgao"]) == alvo:
-            medicao = conn.execute("SELECT MIN(medicao_id) FROM protocolo_medicoes WHERE protocolo_id=?",
-                                   (p["id"],)).fetchone()[0]
-            return p["contrato_id"], p["id"], medicao
+            contratos.add(p["contrato_id"]); protocolos.add(p["id"])
+            medicoes_achadas.update(r[0] for r in conn.execute(
+                "SELECT medicao_id FROM protocolo_medicoes WHERE protocolo_id=?", (p["id"],)))
     for mp in conn.execute("SELECT mp.medicao_id, mp.protocolo_id, mp.numero_processo, m.contrato_id "
                            "FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
-                           "WHERE mp.numero_processo IS NOT NULL ORDER BY mp.id"):
+                           "WHERE mp.numero_processo IS NOT NULL").fetchall():
         if normalizar_numero(mp["numero_processo"]) == alvo:
-            return mp["contrato_id"], mp["protocolo_id"], mp["medicao_id"]
-    return None
+            contratos.add(mp["contrato_id"]); medicoes_achadas.add(mp["medicao_id"])
+            if mp["protocolo_id"] is not None:
+                protocolos.add(mp["protocolo_id"])
+    if len(contratos) != 1 or len(protocolos) > 1:
+        return None
+    protocolo_id = next(iter(protocolos), None)
+    medicao_id = next(iter(medicoes_achadas)) if len(medicoes_achadas) == 1 else None
+    if protocolo_id is None and medicao_id is None:
+        return None
+    return next(iter(contratos)), protocolo_id, medicao_id
 
 
 def _vincular(conn, processo_id: int) -> None:
@@ -214,6 +233,14 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
         movs = [dict(r) for r in conn.execute(
             "SELECT data, evento, cad_lotacao, cad_pessoa, at_lotacao, at_pessoa FROM siga_movimentacoes "
             "WHERE processo_id=? ORDER BY data DESC, id DESC", (p["id"],))]
+        derivado = derivar(situacao, movs, hoje)
+        # Na resposta, todo instante com o fuso explicito: as datas do SIGA sao de Cuiaba, o lido_em e' UTC
+        movs = [{**m, "data": tempo.iso_local(m["data"])} for m in movs]
+        for campo in ("desde", "protocolado_em"):
+            if derivado[campo]:
+                derivado[campo] = tempo.iso_local(derivado[campo])
+        if derivado["ultima"]:
+            derivado["ultima"] = {**derivado["ultima"], "data": tempo.iso_local(derivado["ultima"]["data"])}
         saida.append({
             "id": p["id"], "codigo": p["codigo"], "numero": p["numero"], "nome": p["nome"],
             "contrato_id": p["contrato_id"],
@@ -222,7 +249,8 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             "medicao_titulo": medicoes.titulo({"numero": p["m_numero"], "tipo": p["m_tipo"]})
             if p["medicao_id"] else None,
             "protocolo_id": p["protocolo_id"], "situacao": situacao,
-            **derivar(situacao, movs, hoje),
+            **derivado,
             "movimentacoes": movs[:MOVIMENTACOES_NA_TELA],
         })
-    return {"lido_em": lido_em, "atrasado": atrasado(lido_em, agora), "processos": saida}
+    return {"lido_em": tempo.iso_utc(lido_em) if lido_em else None, "atrasado": atrasado(lido_em, agora),
+            "processos": saida}

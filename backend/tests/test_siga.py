@@ -63,6 +63,33 @@ def test_caixa_de_entrada_conta_desde_a_ultima_transferencia():
     assert d["desde"] == "2026-10-20 08:00:00" and d["dias_uteis"] == 2
 
 
+def test_caixa_de_entrada_ignora_recebimento_antigo_no_mesmo_setor():
+    # recebido no COFIN em 01/10, foi ao GABIN, voltou ao COFIN por Transferencia em 26/10 e ninguem recebeu ainda
+    situacao = "2º Volume - Caixa de Entrada [COFIN, [X]]"
+    movs = [_mov("2026-10-01 09:00:00", "Recebimento", at_lotacao="COFIN/ORGAO", at_pessoa="Fulano"),
+            _mov("2026-10-10 09:00:00", "Transferência", at_lotacao="GABIN/ORGAO"),
+            _mov("2026-10-13 09:00:00", "Recebimento", at_lotacao="GABIN/ORGAO", at_pessoa="Beltrano"),
+            _mov("2026-10-26 09:00:00", "Transferência", at_lotacao="COFIN/ORGAO")]
+    d = siga.derivar(situacao, movs, datetime.date(2026, 10, 28))
+    assert (d["com_quem"], d["desde"], d["dias_uteis"]) == ("", "2026-10-26 09:00:00", 2)
+
+
+def test_caixa_de_entrada_sem_transferencia_conta_da_movimentacao_mais_recente():
+    movs = [_mov("2026-10-01 09:00:00", "Cadastro", at_lotacao="COFIN/ORGAO"),
+            _mov("2026-10-26 09:00:00", "Despacho", at_lotacao="COFIN/ORGAO")]
+    d = siga.derivar("1º Volume - Caixa de Entrada [COFIN, [X]]", movs, datetime.date(2026, 10, 28))
+    assert d["desde"] == "2026-10-26 09:00:00" and d["protocolado_em"] == "2026-10-01 09:00:00"
+
+
+def test_recebimento_casa_a_sigla_inteira_do_setor():
+    movs = [_mov("2026-10-01 09:00:00", "Cadastro", at_lotacao="PROTOC/ORGAO"),
+            _mov("2026-10-20 09:00:00", "Recebimento", at_lotacao="GABIN/ORGAO", at_pessoa="Beltrano")]
+    d = siga.derivar("1º Volume - Aguardando Andamento [GAB, [X]]", movs, datetime.date(2026, 10, 28))
+    assert d["setor"] == "GAB" and d["com_quem"] == "" and d["desde"] == "2026-10-01 09:00:00"
+    d = siga.derivar("1º Volume - Aguardando Andamento [GABIN, [X]]", movs, datetime.date(2026, 10, 28))
+    assert d["com_quem"] == "Beltrano"
+
+
 def test_sem_recebimento_no_setor_conta_desde_a_movimentacao_mais_antiga():
     movs = [_mov("2026-10-02 08:00:00", "Recebimento", at_lotacao="PROTOC/ORGAO", at_pessoa="Beltrano"),
             _mov("2026-10-01 08:00:00", "Cadastro", at_lotacao="PROTOC/ORGAO")]
@@ -225,6 +252,46 @@ def test_vincula_ao_protocolo_pelo_numero_igual(conn):
     assert p["obra"] == "Obra Alfa" and p["medicao_titulo"] == "3ª Medição"
 
 
+def test_protocolo_com_duas_medicoes_liga_so_ao_protocolo(conn):
+    pid = _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    conn.execute("INSERT INTO medicoes (id, contrato_id, numero, tipo, competencia, estado) "
+                 "VALUES (30, 7, 3, 'reajuste', '2026-09', 'protocolada')")
+    conn.execute("INSERT INTO protocolo_medicoes (protocolo_id, medicao_id) VALUES (?, 30)", (pid,))
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
+    assert _vinculo(conn) == (7, pid, None)
+    eventos = conn.execute("SELECT entidade, entidade_id FROM audit_log WHERE acao='siga.vinculo'").fetchall()
+    assert [tuple(e) for e in eventos] == [("protocolo", str(pid))]
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11, 15), _leitura(numero="SINFRA-PRO-2026/00001"))
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='siga.vinculo'").fetchone()[0] == 1
+
+
+def test_mesmo_numero_em_dois_contratos_nao_vincula(conn):
+    pid = _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    conn.execute("INSERT INTO contratos (id, orgao, numero_instrumento, objeto, valor_original_centavos, nome_curto) "
+                 "VALUES (8, 'SINFRA', 'IC 2/2026', 'Obra', 100, 'Obra Beta')")
+    conn.execute("INSERT INTO medicoes (id, contrato_id, numero, tipo, competencia, estado) "
+                 "VALUES (41, 8, 1, 'execucao', '2026-09', 'protocolada')")
+    outro = conn.execute("INSERT INTO protocolos (contrato_id, etapa, natureza, usuario_id, situacao, numero_orgao) "
+                         "SELECT 8, 'unico', 'execucao', usuario_id, 'enviado', 'SINFRA-PRO-2026/00001' "
+                         "FROM protocolos WHERE id=?", (pid,)).lastrowid
+    conn.execute("INSERT INTO protocolo_medicoes (protocolo_id, medicao_id) VALUES (?, 41)", (outro,))
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
+    assert _vinculo(conn) == (None, None, None)
+
+
+def test_mesmo_numero_no_protocolo_e_num_envio_por_fora_de_outra_medicao_liga_so_ao_protocolo(conn):
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    conn.execute("INSERT INTO medicoes (id, contrato_id, numero, tipo, competencia, estado) "
+                 "VALUES (32, 7, 4, 'execucao', '2026-10', 'protocolada')")
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem) "
+                 "VALUES (32, '2026-10-20', 'SINFRA-PRO-2026/00001', 'manual')")
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
+    assert _vinculo(conn) == (7, 1, None)     # um protocolo so', mas duas medicoes: so' o protocolo
+
+
 def test_numero_parecido_nao_vincula(conn):
     _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00002"))
@@ -257,12 +324,14 @@ def test_painel_traz_situacao_da_ultima_leitura_e_as_movimentacoes_mais_recentes
                                  "data": f"{d:02d}/09/2026 08:00:00"} for d in range(1, 31)]
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 9), proc)
     painel = siga.painel(conn, _cuiaba(2026, 10, 28, 11))
-    assert painel["lido_em"] == "2026-10-28 13:00:00" and painel["atrasado"] is False
+    assert painel["lido_em"] == "2026-10-28T13:00:00+00:00" and painel["atrasado"] is False
     p = next(x for x in painel["processos"] if x["codigo"] == "ABC123")
     assert p["situacao"].startswith("2º Volume - Caixa de Entrada") and p["setor"] == "GABIN"
     assert len(p["movimentacoes"]) == 30
     assert p["movimentacoes"][0]["evento"] == "Recebimento Cancelado"      # gravada, aparece; so' nao deriva
-    assert p["movimentacoes"][0]["data"] == "2026-10-28 10:00:00"
+    assert p["movimentacoes"][0]["data"] == "2026-10-28T10:00:00-04:00"         # hora de Cuiaba, com o fuso
+    assert p["desde"] == "2026-10-02T09:00:00-04:00" and p["protocolado_em"] == "2026-09-01T08:00:00-04:00"
+    assert p["ultima"]["data"] == "2026-10-28T09:30:00-04:00"
     assert p["medicao_id"] is None and p["obra"] is None
     assert set(p) >= {"id", "codigo", "numero", "nome", "contrato_id", "obra", "medicao_id", "medicao_titulo",
                       "protocolo_id", "situacao", "setor", "com_quem", "caixa_entrada", "desde", "dias_uteis",
