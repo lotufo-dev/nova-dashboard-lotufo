@@ -174,7 +174,7 @@ function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<vo
       </div>
       <div className="campo">
         <label className="campo__rotulo" htmlFor="siga-numero">Nº do processo</label>
-        <input id="siga-numero" className="entrada--media" autoComplete="off" spellCheck={false} maxLength={100} placeholder="ORGAO-PRO-AAAA/NNNNN"
+        <input id="siga-numero" name="numero" className="entrada--media" autoComplete="off" spellCheck={false} maxLength={100} placeholder="ORGAO-PRO-AAAA/NNNNN…"
           value={numero} onChange={e => setNumero(e.target.value)} />
       </div>
       <button type="submit" className="btn btn--primario" disabled={ocupado}>Acompanhar</button>
