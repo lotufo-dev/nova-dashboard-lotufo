@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import { IconeAlerta, IconeLinkExterno, IconeSiga } from "./icones";
 import { Link } from "./Link";
+import type { ObraLista } from "./listaObras";
 import { trocarBusca, type Busca } from "./rota";
 import Selo from "./Selo";
 import {
@@ -51,7 +52,12 @@ function Linha({ p, agora, escolhido, aoEscolher }: { p: ProcessoSiga; agora: Da
             <span className="sg__nome">{p.obra}</span>{" "}
             <Link className="sg__link" para={{ tela: "medicao", obra: p.contrato_id as number, id: p.medicao_id as number }} secao="etapa-4">{p.medicao_titulo}</Link>
           </>
-        ) : <span className="sg__nome">{nomeDoProcesso(p)}</span>}
+        ) : (
+          <>
+            <span className="sg__nome">{nomeDoProcesso(p)}</span>
+            {p.obra && <span className="sg__fraco">{p.obra}</span>}
+          </>
+        )}
       </td>
       <td data-rotulo="Onde está">
         <span>{p.setor || "—"}</span>
@@ -118,6 +124,66 @@ function Painel({ p }: { p: ProcessoSiga }) {
   );
 }
 
+// Link colado na tela SIGA (issue #339): processo sem medicao (aditivo, indenizatorio, avulso). O nome e' da
+// pessoa, porque a pagina do SIGA nao mostra o titulo; a obra e' opcional. O servidor valida e responde em portugues.
+function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<void> }) {
+  const [aberto, setAberto] = useState(false);
+  const [link, setLink] = useState("");
+  const [nome, setNome] = useState("");
+  const [numero, setNumero] = useState("");
+  const [obra, setObra] = useState("");
+  const [obras, setObras] = useState<ObraLista[] | null>(null);
+  const [erro, setErro] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => {
+    if (!aberto || obras !== null) return;
+    api<ObraLista[]>("/api/contratos")
+      .then(lista => setObras([...lista].sort((a, b) => (a.nome_curto || a.numero_instrumento).localeCompare(b.nome_curto || b.numero_instrumento))))
+      .catch(() => setObras([]));
+  }, [aberto, obras]);
+
+  async function enviar(ev: FormEvent) {
+    ev.preventDefault();
+    setOcupado(true); setErro("");
+    try {
+      const { id } = await api<{ id: number }>("/api/siga/processos-avulsos", { method: "POST", body: JSON.stringify({
+        link: link.trim(), nome: nome.trim(), numero: numero.trim() || null, contrato_id: obra ? Number(obra) : null }) });
+      await aoGravar(id);
+      setAberto(false); setLink(""); setNome(""); setNumero(""); setObra("");
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+  }
+
+  if (!aberto) return <button type="button" className="btn btn--pequeno" onClick={() => setAberto(true)}>Acompanhar processo</button>;
+  return (
+    <form className="form-inline sg__novo" onSubmit={enviar} aria-label="Acompanhar processo">
+      <div className="campo">
+        <label className="campo__rotulo" htmlFor="siga-link">Link do SIGA</label>
+        <input id="siga-link" className="entrada--larga" autoComplete="off" spellCheck={false} maxLength={500} placeholder="https://…?n=…"
+          value={link} onChange={e => setLink(e.target.value)} />
+      </div>
+      <div className="campo">
+        <label className="campo__rotulo" htmlFor="siga-nome">Nome</label>
+        <input id="siga-nome" className="entrada--media" autoComplete="off" maxLength={200} value={nome} onChange={e => setNome(e.target.value)} />
+      </div>
+      <div className="campo">
+        <label className="campo__rotulo" htmlFor="siga-obra">Obra</label>
+        <select id="siga-obra" value={obra} onChange={e => setObra(e.target.value)}>
+          <option value="">Sem obra</option>
+          {(obras ?? []).map(o => <option key={o.id} value={o.id}>{o.nome_curto || o.numero_instrumento}</option>)}
+        </select>
+      </div>
+      <div className="campo">
+        <label className="campo__rotulo" htmlFor="siga-numero">Nº do processo</label>
+        <input id="siga-numero" className="entrada--media" autoComplete="off" spellCheck={false} maxLength={100} placeholder="ORGAO-PRO-AAAA/NNNNN"
+          value={numero} onChange={e => setNumero(e.target.value)} />
+      </div>
+      <button type="submit" className="btn btn--primario" disabled={ocupado}>Acompanhar</button>
+      <button type="button" className="btn btn--pequeno" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
+      {erro && <p className="erro sg__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+    </form>
+  );
+}
+
 // ate' 1180 px o painel fica abaixo da lista: ao escolher um processo, leva a vista ate' ele
 function irAoPainel() {
   if (window.matchMedia?.("(max-width: 1180px)").matches) document.getElementById("painel-siga")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
@@ -153,9 +219,20 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
       </div>
     );
   }
+  const gravado = async (id: number) => { await carregar(); setEscolhido(id); };
+  const topo = (
+    <div className="sg__topo">
+      {dados.lido_em && <p className="sg__lido">Lido às <span className="num">{fmtHora(dados.lido_em)}</span></p>}
+      {dados.atrasado && dados.lido_em && (
+        <CaixaAviso nivel="atencao" role="status">O monitor do SIGA não lê desde {fmtData(dados.lido_em).slice(0, 5)} {fmtHora(dados.lido_em)}.</CaixaAviso>
+      )}
+      <AcompanharProcesso aoGravar={gravado} />
+    </div>
+  );
   if (dados.processos.length === 0) {
     return (
-      <div className="pagina">
+      <div className="pagina siga">
+        {topo}
         <section className="sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>Nenhum processo acompanhado.</p></div></section>
       </div>
     );
@@ -168,12 +245,7 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
 
   return (
     <div className="pagina siga">
-      <div className="sg__topo">
-        {dados.lido_em && <p className="sg__lido">Lido às <span className="num">{fmtHora(dados.lido_em)}</span></p>}
-        {dados.atrasado && dados.lido_em && (
-          <CaixaAviso nivel="atencao" role="status">O monitor do SIGA não lê desde {fmtData(dados.lido_em).slice(0, 5)} {fmtHora(dados.lido_em)}.</CaixaAviso>
-        )}
-      </div>
+      {topo}
       <div className="sg__busca-caixa">
         <label className="sr-only" htmlFor="siga-busca">Buscar obra</label>
         <input id="siga-busca" type="search" className="sg__busca" value={texto} placeholder="Buscar obra ou processo…" autoComplete="off"

@@ -193,6 +193,73 @@ describe("SigaPagina", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // issue #339: link colado na tela SIGA
+  const OBRAS = [{ id: 9, orgao: "ORGAO", numero_instrumento: "IC 9/2026", nome_curto: "Obra Zeta", estado: "em_andamento" },
+                 { id: 7, orgao: "ORGAO", numero_instrumento: "IC 7/2026", nome_curto: "Obra Alfa", estado: "em_andamento" }];
+  const NOVO = processo({ id: 8, codigo: "XyZ98765", nome: "Aditivo de prazo", contrato_id: 7, obra: "Obra Alfa",
+    situacao: null, setor: "", com_quem: "", desde: null, dias_uteis: null, ultima: null, protocolado_em: null, movimentacoes: [] });
+  const comFormulario = (antes: ProcessoSiga[], depois: ProcessoSiga[], resposta: () => Promise<unknown>) => {
+    const chamadas: { caminho: string; opts?: RequestInit }[] = [];
+    let gravado = false;
+    api.mockImplementation(async (caminho: string, opts?: RequestInit) => {
+      chamadas.push({ caminho, opts });
+      if (caminho === "/api/contratos") return OBRAS;
+      if (caminho === "/api/siga/processos-avulsos") { const r = await resposta(); gravado = true; return r; }
+      return painel(gravado ? depois : antes);
+    });
+    render(<SigaPagina busca={{}} agora={AGORA} />);
+    return chamadas;
+  };
+  const preencher = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "Acompanhar processo" }));
+    const form = screen.getByRole("form", { name: "Acompanhar processo" });
+    fireEvent.change(within(form).getByLabelText("Link do SIGA"), { target: { value: "https://siga.exemplo.com.br/acompanhar?n=XyZ98765" } });
+    fireEvent.change(within(form).getByLabelText("Nome"), { target: { value: "Aditivo de prazo" } });
+    await within(form).findByRole("option", { name: "Obra Alfa" });
+    fireEvent.change(within(form).getByLabelText("Obra"), { target: { value: "7" } });
+    fireEvent.change(within(form).getByLabelText("Nº do processo"), { target: { value: "ORGAO-PRO-2026/00009" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Acompanhar" }));
+    return form;
+  };
+
+  it("Acompanhar processo: abre o formulário com link, nome, obra (em ordem alfabética, 'Sem obra' primeiro) e número; envia, a lista recarrega e o novo abre no painel", async () => {
+    const chamadas = comFormulario([BETA], [BETA, NOVO], async () => ({ id: 8 }));
+    await preencher();
+    const linha = await screen.findByRole("row", { name: "Aditivo de prazo" });
+    expect(within(linha).getByText("Obra Alfa")).toBeTruthy();
+    expect(screen.getByRole("complementary", { name: "Detalhe do processo" }).querySelector("h2")?.textContent).toBe("Aditivo de prazo");
+    expect(screen.queryByRole("form", { name: "Acompanhar processo" })).toBeNull();
+    const envio = chamadas.find(c => c.caminho === "/api/siga/processos-avulsos");
+    expect(envio?.opts?.method).toBe("POST");
+    expect(JSON.parse(envio?.opts?.body as string)).toEqual({
+      link: "https://siga.exemplo.com.br/acompanhar?n=XyZ98765", nome: "Aditivo de prazo", numero: "ORGAO-PRO-2026/00009", contrato_id: 7 });
+    const opcoes = Array.from(document.querySelectorAll("#siga-obra option")).map(o => o.textContent);
+    expect(opcoes).toEqual([]);   // formulario fechado depois de gravar
+  });
+
+  it("as obras vêm em ordem alfabética depois de 'Sem obra'", async () => {
+    comFormulario([BETA], [BETA], async () => ({ id: 8 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Acompanhar processo" }));
+    await screen.findByRole("option", { name: "Obra Alfa" });
+    expect(Array.from(document.querySelectorAll("#siga-obra option")).map(o => o.textContent)).toEqual(["Sem obra", "Obra Alfa", "Obra Zeta"]);
+  });
+
+  it("erro do servidor aparece no formulário, em português, e nada muda na lista", async () => {
+    const { ApiErro } = await import("./api");
+    comFormulario([BETA], [BETA], async () => { throw new ApiErro(409, "Este processo do SIGA já está sendo acompanhado: Processo Beta"); });
+    const form = await preencher();
+    const alerta = await within(form).findByRole("alert");
+    expect(alerta.textContent).toContain("Este processo do SIGA já está sendo acompanhado: Processo Beta");
+    expect(nomesNoGrupo("Outros processos")).toEqual(["Processo Beta"]);
+    expect((within(form).getByLabelText("Nome") as HTMLInputElement).value).toBe("Aditivo de prazo");
+  });
+
+  it("sem nenhum processo o botão Acompanhar processo também aparece", async () => {
+    mostrar(painel([], { lido_em: null }));
+    await screen.findByText("Nenhum processo acompanhado.");
+    expect(screen.getByRole("button", { name: "Acompanhar processo" })).toBeTruthy();
+  });
+
   it("falha ao ler: avisa em português e deixa tentar de novo", async () => {
     api.mockRejectedValue(new Error("Failed to fetch"));
     render(<SigaPagina busca={{}} agora={AGORA} />);

@@ -21,6 +21,18 @@ SEM_IDENTIFICACAO = "Processo sem o código ou o número do SIGA"
 LINK_INVALIDO = "Link do SIGA inválido: cole o link que o órgão mandou"
 LIGADO_A_OUTRO = "Este processo do SIGA já está ligado a outro protocolo ou a outra medição"
 LIGADO_A_OUTRA_MEDICAO = "Este processo do SIGA já está ligado a outra medição"
+# Processo avulso colado na tela SIGA (issue #339)
+JA_ACOMPANHADO = "Este processo do SIGA já está sendo acompanhado"
+NOME_OBRIGATORIO = "Dê um nome ao processo"
+OBRA_INEXISTENTE = "Obra não encontrada"
+
+
+class JaAcompanhado(ValueError):
+    """O código colado já está em `siga_processos`; `nome` é o do processo existente."""
+
+    def __init__(self, nome: str | None):
+        super().__init__(f"{JA_ACOMPANHADO}: {nome}" if nome else JA_ACOMPANHADO)
+        self.nome = nome
 _CODIGO = re.compile(r"[A-Za-z0-9]{6,20}")
 MOVIMENTACOES_NA_TELA = 30
 ATRASO = datetime.timedelta(hours=2)
@@ -328,6 +340,33 @@ def registrar_link_medicao(conn, usuario_id, medicao_id: int, codigo: str, numer
     m = conn.execute("SELECT id, numero, tipo, contrato_id FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
     _ligar(conn, usuario_id, codigo, numero, f"{medicoes.titulo(dict(m))} - {_obra(conn, m['contrato_id'])}",
            m["contrato_id"], None, medicao_id, {medicao_id}, "medicao", medicao_id)
+
+
+def acompanhar_avulso(conn, usuario_id, link: str | None, numero: str | None, nome: str | None,
+                      contrato_id: int | None) -> int:
+    """Link colado na tela SIGA (issue #339): processo sem medição (aditivo, indenizatório, avulso). A pessoa da' o
+    nome, porque a pagina do SIGA nao mostra o titulo; a obra e' opcional. Codigo ja' acompanhado e' recusado
+    (`JaAcompanhado`, com o nome existente). Processo que o robo ja' mandou so' pelo numero igual ganha o codigo,
+    o nome e a obra. -> id do processo."""
+    codigo = extrair_codigo(link)
+    if not codigo:
+        raise ValueError(LINK_INVALIDO)
+    nome = _texto(nome)
+    if not nome:
+        raise ValueError(NOME_OBRIGATORIO)
+    numero = sem_espacos(numero) or None
+    if contrato_id is not None and conn.execute("SELECT 1 FROM contratos WHERE id=?", (contrato_id,)).fetchone() is None:
+        raise ValueError(OBRA_INEXISTENTE)
+    with db.mutacao(conn):
+        existente = conn.execute("SELECT nome FROM siga_processos WHERE codigo=?", (codigo,)).fetchone()
+        if existente is not None:
+            raise JaAcompanhado(existente["nome"])
+        pid = _gravar_processo(conn, codigo, numero, nome)
+        conn.execute("UPDATE siga_processos SET nome=?, contrato_id=COALESCE(contrato_id, ?) WHERE id=?",
+                     (nome, contrato_id, pid))
+        auditoria.registrar(conn, usuario_id, "protocolo.siga", "siga_processo", pid, None,
+                            {"codigo": codigo, "numero": numero, "nome": nome, "contrato_id": contrato_id})
+    return pid
 
 
 def registrado_em(conn, entidade: str, ids: list[int]) -> dict[int, str]:

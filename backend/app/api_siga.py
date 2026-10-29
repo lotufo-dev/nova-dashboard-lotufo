@@ -3,7 +3,8 @@
 Duas rotas de SERVICO, para o robo: `POST /api/siga/leituras` e `GET /api/siga/processos`. Nao usam sessao nem
 CSRF; exigem `Authorization: Bearer <token>`, com o token lido do arquivo apontado por `DASH_SIGA_TOKEN_ARQUIVO`
 (fora do repositorio; lido a cada pedido, entao trocar o token nao pede reinicio). Sem a variavel, 503.
-Uma rota para as telas: `GET /api/siga`, com sessao e `ver_paineis`.
+Uma rota para as telas: `GET /api/siga`, com sessao e `ver_paineis`. E uma de escrita, `POST /api/siga/processos-avulsos`
+(issue #339): link colado na tela SIGA, com sessao, CSRF e `editar_cadastros`.
 """
 import hmac
 import logging
@@ -89,3 +90,22 @@ def processos_do_robo(conn: sqlite3.Connection = Depends(conexao)):
 def painel(conn: sqlite3.Connection = Depends(conexao), _usuario: dict = Depends(exigir("ver_paineis",
                                                                                          com_csrf=False))):
     return siga.painel(conn)
+
+
+class AvulsoIn(BaseModel):
+    link: str = Field(max_length=500)                 # link inteiro ou so' o codigo (siga.extrair_codigo)
+    nome: str = Field(max_length=200)
+    numero: str | None = Field(default=None, max_length=100)
+    contrato_id: int | None = None
+
+
+@router.post("/api/siga/processos-avulsos")
+def acompanhar_avulso(dados: AvulsoIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    try:
+        pid = siga.acompanhar_avulso(conn, usuario["id"], dados.link, dados.numero, dados.nome, dados.contrato_id)
+    except siga.JaAcompanhado as e:
+        raise HTTPException(409, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return {"id": pid}
