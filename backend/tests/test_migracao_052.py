@@ -32,6 +32,9 @@ def test_052_cria_as_duas_tabelas(conn):
     with pytest.raises(sqlite3.IntegrityError):       # tipo fora da lista
         conn.execute("INSERT INTO siga_rodadas (tipo, completa, processos, iniciada_em) "
                      "VALUES ('outra', 0, '[]', '2026-10-29 14:00:00')")
+    with pytest.raises(sqlite3.IntegrityError):       # rodada com falha e com nao lidos ao mesmo tempo
+        conn.execute("INSERT INTO siga_rodadas (tipo, completa, processos, iniciada_em, terminada_em, falha, "
+                     "nao_lidos) VALUES ('pedido', 0, '[]', '2026-10-29 14:00:00', '2026-10-29 14:01:00', 'caiu', '[]')")
     with pytest.raises(sqlite3.IntegrityError):       # pedido sem quem pediu
         conn.execute("INSERT INTO siga_pedidos (usuario_id, pedido_em) VALUES (NULL, '2026-10-29 14:00:00')")
 

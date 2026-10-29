@@ -566,8 +566,10 @@ def pedir_leitura(conn, usuario_id: int, processo_id: int | None, tarefa: str,
     if not lendo:
         erro = disparar_robo(tarefa)
         with db.mutacao(conn):
-            conn.execute("UPDATE siga_pedidos SET disparado_em=?, erro_disparo=? WHERE id=?",
-                         (_carimbo(agora), erro, pedido["id"]))
+            # dois cliques no mesmo pedido: vale o resultado do clique mais recente, nao o do que respondeu por ultimo
+            conn.execute("UPDATE siga_pedidos SET disparado_em=?, erro_disparo=? WHERE id=? "
+                         "AND (disparado_em IS NULL OR disparado_em <= ?)",
+                         (_carimbo(agora), erro, pedido["id"], _carimbo(agora)))
     return {"id": pedido["id"], "processo_id": pedido["processo_id"], "pedido_em": tempo.iso_utc(pedido["pedido_em"]),
             "novo": novo, "disparado": not lendo and erro is None, "erro_disparo": erro}
 
@@ -577,23 +579,30 @@ def iniciar_rodada(conn, agora: datetime.datetime | None = None) -> dict:
     em aberto, ou quando a ultima rodada completa terminada comecou ha' 14 minutos ou mais (ou nunca houve): e' a
     rodada automatica de 15 em 15 minutos. Senao, so' os processos dos pedidos em aberto. Os pedidos em aberto ficam
     ligados a' rodada. Sem nada a ler nao grava nada: e' o que o robo recebe quando pergunta, antes de encerrar, se
-    chegou pedido novo."""
+    chegou pedido novo. Com rodada aberta ha' menos de 10 minutos (o robo dela pode estar vivo: so' ele chama aqui,
+    porque o Windows nao roda a tarefa duas vezes), devolve a mesma: e' o robo repetindo o "comecei"."""
     agora = agora or tempo.agora_utc()
     with db.mutacao(conn):
-        pedidos = {r[0] for r in conn.execute("SELECT processo_id FROM siga_pedidos WHERE rodada_id IS NULL")}
-        ultima = conn.execute("SELECT MAX(iniciada_em) FROM siga_rodadas WHERE completa=1 "
-                              "AND terminada_em IS NOT NULL").fetchone()[0]
-        por_tempo = ultima is None or agora - _instante(ultima) >= COMPLETA_A_CADA
-        completa = por_tempo or None in pedidos
-        processos = [dict(r) for r in conn.execute("SELECT id, codigo, numero, nome FROM siga_processos ORDER BY id")
-                     if completa or r["id"] in pedidos]
-        if not processos:
-            return {"rodada_id": None, "tipo": None, "processos": []}
-        tipo = "automatica" if por_tempo else "pedido"
-        rodada_id = conn.execute(
-            "INSERT INTO siga_rodadas (tipo, completa, processos, iniciada_em) VALUES (?,?,?,?)",
-            (tipo, int(completa), json.dumps([p["id"] for p in processos]), _carimbo(agora))).lastrowid
-        conn.execute("UPDATE siga_pedidos SET rodada_id=? WHERE rodada_id IS NULL", (rodada_id,))
+        todos = [dict(r) for r in conn.execute("SELECT id, codigo, numero, nome FROM siga_processos ORDER BY id")]
+        aberta = _rodada_em_andamento(conn, agora, ROBO_VIVO)
+        if aberta is not None:
+            rodada_id, tipo = aberta["id"], aberta["tipo"]
+            ids = set(json.loads(aberta["processos"]))
+            processos = [p for p in todos if p["id"] in ids]
+        else:
+            pedidos = {r[0] for r in conn.execute("SELECT processo_id FROM siga_pedidos WHERE rodada_id IS NULL")}
+            ultima = conn.execute("SELECT MAX(iniciada_em) FROM siga_rodadas WHERE completa=1 "
+                                  "AND terminada_em IS NOT NULL").fetchone()[0]
+            por_tempo = ultima is None or agora - _instante(ultima) >= COMPLETA_A_CADA
+            completa = por_tempo or None in pedidos
+            processos = [p for p in todos if completa or p["id"] in pedidos]
+            if not processos:
+                return {"rodada_id": None, "tipo": None, "processos": []}
+            tipo = "automatica" if por_tempo else "pedido"
+            rodada_id = conn.execute(
+                "INSERT INTO siga_rodadas (tipo, completa, processos, iniciada_em) VALUES (?,?,?,?)",
+                (tipo, int(completa), json.dumps([p["id"] for p in processos]), _carimbo(agora))).lastrowid
+            conn.execute("UPDATE siga_pedidos SET rodada_id=? WHERE rodada_id IS NULL", (rodada_id,))
     return {"rodada_id": rodada_id, "tipo": tipo,
             "processos": [{k: p[k] for k in ("codigo", "numero", "nome")} for p in processos]}
 
@@ -654,17 +663,27 @@ def situacao_robo(conn, agora: datetime.datetime | None = None) -> dict:
     proximo disparo aceito."""
     agora = agora or tempo.agora_utc()
     rodada = _rodada_em_andamento(conn, agora)
-    abertos = conn.execute("SELECT p.id, p.processo_id, p.pedido_em, p.disparado_em, u.nome FROM siga_pedidos p "
-                           "JOIN usuarios u ON u.id=p.usuario_id WHERE p.rodada_id IS NULL ORDER BY p.id").fetchall()
+    abertos = conn.execute("SELECT p.id, p.processo_id, p.pedido_em, p.disparado_em, p.erro_disparo, u.nome "
+                           "FROM siga_pedidos p JOIN usuarios u ON u.id=p.usuario_id WHERE p.rodada_id IS NULL "
+                           "ORDER BY p.id").fetchall()
     avisos = []
     disparo = conn.execute("SELECT erro_disparo FROM siga_pedidos WHERE disparado_em IS NOT NULL "
                            "ORDER BY disparado_em DESC, id DESC LIMIT 1").fetchone()
     if disparo is not None and disparo["erro_disparo"]:
         avisos.append(_aviso_robo("disparo", f"O Windows não iniciou o robô: {disparo['erro_disparo']}"))
-    # os 2 minutos contam do ultimo disparo do pedido (o clique repetido dispara de novo), ou do pedido sem disparo
-    if rodada is None and any((p["disparado_em"] or p["pedido_em"]) < _carimbo(agora - SEM_INICIO) for p in abertos):
-        avisos.append(_aviso_robo("sem_inicio",
-                                  "O robô não começou. O usuário dele pode estar desconectado do servidor."))
+    if rodada is None:
+        # Os 2 minutos contam de quando o pedido podia comecar: o ultimo disparo dele (o clique repetido dispara de
+        # novo), o pedido, ou o fim da rodada que o segurou (sem fim, quando ela deixou de estar em andamento). O
+        # pedido cujo disparo o Windows recusou ja' tem o aviso da recusa.
+        anterior = conn.execute("SELECT iniciada_em, terminada_em FROM siga_rodadas ORDER BY id DESC LIMIT 1"
+                                ).fetchone()
+        livre_desde = "" if anterior is None else anterior["terminada_em"] or _carimbo(
+            _instante(anterior["iniciada_em"]) + EM_ANDAMENTO)
+        limite = _carimbo(agora - SEM_INICIO)
+        if any(not p["erro_disparo"] and max(p["disparado_em"] or p["pedido_em"], livre_desde) < limite
+               for p in abertos):
+            avisos.append(_aviso_robo("sem_inicio",
+                                      "O robô não começou. O usuário dele pode estar desconectado do servidor."))
     ultima = conn.execute("SELECT * FROM siga_rodadas WHERE terminada_em IS NOT NULL ORDER BY id DESC LIMIT 1"
                           ).fetchone()
     if ultima is not None and ultima["falha"] is not None:
@@ -672,15 +691,21 @@ def situacao_robo(conn, agora: datetime.datetime | None = None) -> dict:
     elif ultima is not None and ultima["nao_lidos"]:
         nao_lidos = json.loads(ultima["nao_lidos"])
         hora = _hora(ultima["iniciada_em"])
-        avisos += [_aviso_robo("nao_lido", f"não lido às {hora}: {n['motivo']}", n["processo_id"]) for n in nao_lidos]
+        # o processo que a dashboard nao conhece vai identificado no texto, porque nao ha' linha da tela para ele
+        avisos += [_aviso_robo("nao_lido", ("" if n["processo_id"] is not None else
+                                            f"processo {n['numero'] or n['codigo']} ")
+                               + f"não lido às {hora}: {n['motivo']}", n["processo_id"]) for n in nao_lidos]
         # o resumo conta so' os processos da rodada: o robo tambem le a lista dele, que a rodada nao traz
         da_rodada = json.loads(ultima["processos"])
         faltaram = len({n["processo_id"] for n in nao_lidos} & set(da_rodada))
         if faltaram:
             avisos.append(_aviso_robo("nao_lidos", f"{faltaram} de {len(da_rodada)} processos não foram lidos"))
-    for r in conn.execute("SELECT iniciada_em FROM siga_rodadas WHERE terminada_em IS NULL AND iniciada_em < ? "
-                          "AND id > ? ORDER BY id", (_carimbo(agora - EM_ANDAMENTO), ultima["id"] if ultima else 0)):
-        avisos.append(_aviso_robo("nao_terminou", f"A rodada das {_hora(r['iniciada_em'])} não terminou."))
+    # so' a mais recente: rodadas mortas seguidas (todas passando dos 10 minutos) nao viram uma linha cada
+    morta = conn.execute("SELECT iniciada_em FROM siga_rodadas WHERE terminada_em IS NULL AND iniciada_em < ? "
+                         "AND id > ? ORDER BY id DESC LIMIT 1",
+                         (_carimbo(agora - EM_ANDAMENTO), ultima["id"] if ultima else 0)).fetchone()
+    if morta is not None:
+        avisos.append(_aviso_robo("nao_terminou", f"A rodada das {_hora(morta['iniciada_em'])} não terminou."))
     return {
         "estado": "lendo" if rodada is not None else "na_fila" if abertos else "parado",
         "rodada": None if rodada is None else {

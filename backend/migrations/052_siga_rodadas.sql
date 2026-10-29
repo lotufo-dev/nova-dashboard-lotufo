@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS siga_rodadas (
     terminada_em TEXT,                                      -- NULL = sem fim nem falha
     falha TEXT,                                             -- motivo, quando o robo caiu
     nao_lidos TEXT,                                         -- JSON: [{processo_id, codigo, numero, motivo}] no fim
-    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (falha IS NULL OR nao_lidos IS NULL)              -- termina com fim ou com falha, nunca os dois
 );
 CREATE INDEX IF NOT EXISTS siga_rodadas_terminada ON siga_rodadas(terminada_em);
 

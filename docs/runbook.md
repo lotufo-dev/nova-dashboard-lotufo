@@ -404,12 +404,13 @@ ainda em aberto não cria outro pedido, mas dispara de novo.
    por `POST /api/siga/leituras`. No fim, `POST /api/siga/rodadas/<id>/fim` com
    `{"nao_lidos": [{"codigo" ou "numero", "motivo"}]}` ("terminei"); se cair, `POST /api/siga/rodadas/<id>/falha` com
    `{"motivo"}`. Antes de encerrar, o robô pergunta de novo em `POST /api/siga/rodadas` se chegou pedido. Rodada já
-   terminada recusa outro fim ou falha (409). O motivo é gravado com até 300 caracteres.
+   terminada recusa outro fim ou falha (409). O motivo é gravado com até 300 caracteres. "Comecei" repetido com a
+   rodada aberta há menos de 10 minutos devolve a mesma rodada (o robô repetindo por falta de resposta).
 4. **O que a tela mostra** (bloco `robo` de `GET /api/siga`): `lendo` (rodada iniciada há no máximo 12 minutos e
    sem fim), `na_fila` (pedido em aberto) ou `parado`; os pedidos em aberto, com quem pediu e quando; e os avisos:
    o Windows recusou o último disparo, pedido parado há mais de 2 minutos sem rodada, a última rodada terminada
    falhou ou deixou processos sem ler ("não lido às HH:MM: …" por processo e "N de M processos não foram lidos"), e
-   rodada iniciada há mais de 12 minutos sem fim (o Windows encerra o robô aos 10). Cada aviso de rodada vale até
+   rodada iniciada há mais de 12 minutos sem fim (só a mais recente; o Windows encerra o robô aos 10). Cada aviso de rodada vale até
    a próxima rodada terminar sem aquele problema; o do disparo, até o próximo disparo aceito.
 
 ## Tela inicial e avisos (bloco 6)

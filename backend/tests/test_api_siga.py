@@ -481,6 +481,12 @@ def test_rodadas_escolhe_o_que_ler(client_admin, com_token, schtasks, relogio_mo
     assert r["tipo"] == "automatica" and len(r["processos"]) == 2
 
 
+def test_comecei_repetido_devolve_a_rodada_aberta_sem_gravar_outra(client_admin, com_token, schtasks):
+    _com_processos(client_admin)
+    um = _rodada(client_admin)
+    assert _rodada(client_admin) == um and _conta_rodadas() == 1
+
+
 def test_fim_com_nao_lidos_e_falha_aparecem_no_painel(client_admin, com_token, schtasks, relogio_movel):
     alfa, beta = _com_processos(client_admin)
     r = _rodada(client_admin)
