@@ -383,8 +383,9 @@ começando em `https://` e com `{codigo}` no lugar do código do processo (o que
 
 **Atualizar pela tela** (issue #342): quem vê a tela SIGA pede a leitura de um processo ou de todos
 (`POST /api/siga/atualizar`). O servidor grava o pedido e manda o Windows iniciar a tarefa agendada do robô
-(`schtasks /Run /TN <tarefa do robô>`, sem shell, com prazo de 15 segundos); com uma rodada em andamento não dispara,
-e o robô atende o pedido ao terminar a rodada atual.
+(`schtasks /Run /TN <tarefa do robô>`, sem shell, com prazo de 15 segundos); com uma rodada iniciada há menos de 10
+minutos e sem fim não dispara, e o robô atende o pedido ao terminar a rodada atual. Clique repetido com o pedido
+ainda em aberto não cria outro pedido, mas dispara de novo.
 
 1. **Variável** `DASH_SIGA_TAREFA` com o nome da tarefa agendada do robô, no nível da máquina (como
    `DASH_SIGA_TOKEN_ARQUIVO`), e reiniciar a tarefa de `<servidor>` pela skill `deploy`. Sem a variável, os botões

@@ -481,9 +481,12 @@ def test_com_rodada_em_andamento_o_pedido_e_gravado_sem_disparar(conn, robo):
     p = _pedir(conn, robo, robo.ids[0], AGORA + _min(5))
     assert (p["disparado"], p["erro_disparo"]) == (False, None) and robo.chamadas == []
     assert siga.situacao_robo(conn, AGORA + _min(5))["pedidos"][0]["id"] == p["id"]
-    # rodada aberta ha' mais de 12 minutos nao esta' mais em andamento (o Windows encerra o robo aos 10)
-    p2 = _pedir(conn, robo, robo.ids[0], AGORA + _min(12, 1))
+    assert _pedir(conn, robo, robo.ids[0], AGORA + _min(10))["disparado"] is False and robo.chamadas == []
+    # o Windows encerra o robo aos 10 minutos: dai' em diante o clique dispara de novo, mesmo com a tela ainda
+    # mostrando "lendo" ate' os 12 (quando a rodada vira "nao terminou")
+    p2 = _pedir(conn, robo, robo.ids[0], AGORA + _min(10, 1))
     assert p2["id"] == p["id"] and p2["disparado"] is True and len(robo.chamadas) == 1
+    assert siga.situacao_robo(conn, AGORA + _min(10, 1))["estado"] == "lendo"
 
 
 def test_estado_parado_na_fila_e_lendo(conn, robo):
@@ -528,6 +531,18 @@ def test_pedido_parado_ha_mais_de_2_minutos_avisa_que_o_robo_nao_comecou(conn, r
     assert aviso not in _textos(conn, AGORA + _min(10))
 
 
+def test_nao_comecou_conta_do_ultimo_disparo_do_pedido(conn, robo):
+    aviso = "O robô não começou. O usuário dele pode estar desconectado do servidor."
+    robo.resposta.update(codigo=1, erro=b"ERRO: tarefa desabilitada.")
+    _pedir(conn, robo, robo.ids[0], AGORA)
+    assert aviso in _textos(conn, AGORA + _min(5))
+    # o mesmo pedido, disparado de novo e aceito: os 2 minutos contam do disparo novo
+    robo.resposta.update(codigo=0, erro=b"")
+    _pedir(conn, robo, robo.ids[0], AGORA + _min(5))
+    assert _textos(conn, AGORA + _min(7)) == []
+    assert _textos(conn, AGORA + _min(7, 1)) == [aviso]
+
+
 def test_falha_avisa_ate_a_proxima_rodada_terminar_sem_falha(conn, robo):
     r = siga.iniciar_rodada(conn, AGORA)
     siga.falhar_rodada(conn, r["rodada_id"], "O SIGA não abriu", AGORA + _min(1))
@@ -552,6 +567,22 @@ def test_nao_lidos_avisam_por_processo_com_o_resumo_ate_a_proxima_rodada_sem_ele
     r2 = siga.iniciar_rodada(conn, AGORA + _min(5))
     siga.terminar_rodada(conn, r2["rodada_id"], [], AGORA + _min(6))
     assert _textos(conn, AGORA + _min(6)) == []
+
+
+def test_resumo_dos_nao_lidos_conta_cada_processo_da_rodada_uma_vez(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(2))
+    _pedir(conn, robo, robo.ids[0], AGORA + _min(3))
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(3))
+    # o mesmo processo duas vezes e um que nao estava nesta rodada (o robo tambem le a lista dele)
+    siga.terminar_rodada(conn, r2["rodada_id"], [
+        {"codigo": "ABC123", "numero": None, "motivo": "A página do processo não abriu"},
+        {"codigo": None, "numero": "ORGAO-PRO-2026/00010", "motivo": "De novo"},
+        {"codigo": "XYZ999", "numero": None, "motivo": "Processo da lista do robô"}], AGORA + _min(4))
+    assert siga.situacao_robo(conn, AGORA + _min(4))["avisos"] == [
+        {"tipo": "nao_lido", "processo_id": robo.ids[0], "texto": "não lido às 10:03: A página do processo não abriu"},
+        {"tipo": "nao_lido", "processo_id": None, "texto": "não lido às 10:03: Processo da lista do robô"},
+        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 1 processos não foram lidos"}]
 
 
 def test_rodada_sem_fim_ha_mais_de_12_minutos_avisa_ate_outra_terminar(conn, robo):
