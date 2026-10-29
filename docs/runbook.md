@@ -63,7 +63,7 @@ Import-Certificate -FilePath \\<servidor>\...\certs\cert.pem -CertStoreLocation 
 - Senha esquecida: não há reset pela tela hoje; criar outro usuário e desativar o antigo. Dívida registrada.
 
 ## Variáveis de ambiente
-`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db`), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
+`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db`), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
 
 ## TOTVS RM (fase 5, leitura)
 A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_USUARIO` e a senha estão definidos; sem eles o sistema segue com NF e recebimento registrados à mão. Botão "Sincronizar agora" e reconciliação em Administração → TOTVS RM.
@@ -380,6 +380,38 @@ liga.
 **Link "Abrir no SIGA"** (tela SIGA): a variável `DASH_SIGA_LINK_MODELO` guarda o modelo do link de acompanhamento,
 começando em `https://` e com `{codigo}` no lugar do código do processo (o que vem no parâmetro `n=` do link que o
 órgão manda). Sem a variável, ou com modelo sem `https://` ou sem `{codigo}`, a tela não mostra o link.
+
+**Atualizar pela tela** (issue #342): quem vê a tela SIGA pede a leitura de um processo ou de todos
+(`POST /api/siga/atualizar`). O servidor grava o pedido e manda o Windows iniciar a tarefa agendada do robô
+(`schtasks /Run /TN <tarefa do robô>`, sem shell, com prazo de 15 segundos); com uma rodada iniciada há menos de 10
+minutos e sem fim não dispara, e o robô atende o pedido ao terminar a rodada atual. Clique repetido com o pedido
+ainda em aberto não cria outro pedido, mas dispara de novo.
+
+1. **Variável** `DASH_SIGA_TAREFA` com o nome da tarefa agendada do robô, no nível da máquina (como
+   `DASH_SIGA_TOKEN_ARQUIVO`), e reiniciar a tarefa de `<servidor>` pela skill `deploy`. Sem a variável, os botões
+   somem da tela (`pode_atualizar: false` em `GET /api/siga`) e o pedido responde 503.
+2. **Conferir que o servidor inicia a tarefa**: a dashboard roda como SYSTEM, que pode iniciar qualquer tarefa
+   agendada. Num PowerShell de administrador, `schtasks /Query /TN "<tarefa do robô>"` mostra a tarefa com o nome
+   exato da variável. Depois, na tela SIGA, "Atualizar todos": em até 2 minutos `robo.estado` de `GET /api/siga`
+   passa a `lendo`. "O Windows não iniciou o robô: …" traz a saída do `schtasks` (nome errado, tarefa
+   desabilitada); "O robô não começou" quer dizer que o Windows aceitou, mas a tarefa não rodou (o usuário do robô
+   desconectado do servidor).
+3. **Conversa com o robô** (rotas de serviço, com o mesmo token das leituras). No início, `POST /api/siga/rodadas`
+   ("comecei"): o servidor responde `rodada_id`, `tipo` e `processos` (o mesmo formato de `GET /api/siga/processos`).
+   A rodada é completa com pedido "todos" em aberto ou quando a última rodada completa terminada começou há 14
+   minutos ou mais (`tipo: automatica` quando é completa por tempo, que é a da tarefa de 15 em 15 minutos; `pedido`
+   nos demais casos); senão, só os processos pedidos. `rodada_id: null` quer dizer nada a ler. As leituras continuam
+   por `POST /api/siga/leituras`. No fim, `POST /api/siga/rodadas/<id>/fim` com
+   `{"nao_lidos": [{"codigo" ou "numero", "motivo"}]}` ("terminei"); se cair, `POST /api/siga/rodadas/<id>/falha` com
+   `{"motivo"}`. Antes de encerrar, o robô pergunta de novo em `POST /api/siga/rodadas` se chegou pedido. Rodada já
+   terminada recusa outro fim ou falha (409). O motivo é gravado com até 300 caracteres. "Comecei" repetido com a
+   rodada aberta há menos de 10 minutos devolve a mesma rodada (o robô repetindo por falta de resposta).
+4. **O que a tela mostra** (bloco `robo` de `GET /api/siga`): `lendo` (rodada iniciada há no máximo 12 minutos e
+   sem fim), `na_fila` (pedido em aberto) ou `parado`; os pedidos em aberto, com quem pediu e quando; e os avisos:
+   o Windows recusou o último disparo, pedido parado há mais de 2 minutos sem rodada, a última rodada terminada
+   falhou ou deixou processos sem ler ("não lido às HH:MM: …" por processo e "N de M processos não foram lidos"), e
+   rodada iniciada há mais de 12 minutos sem fim (só a mais recente; o Windows encerra o robô aos 10). Cada aviso de rodada vale até
+   a próxima rodada terminar sem aquele problema; o do disparo, até o próximo disparo aceito.
 
 ## Tela inicial e avisos (bloco 6)
 
