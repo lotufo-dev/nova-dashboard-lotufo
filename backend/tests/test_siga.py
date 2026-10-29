@@ -336,3 +336,17 @@ def test_painel_traz_situacao_da_ultima_leitura_e_as_movimentacoes_mais_recentes
     assert set(p) >= {"id", "codigo", "numero", "nome", "contrato_id", "obra", "medicao_id", "medicao_titulo",
                       "protocolo_id", "situacao", "setor", "com_quem", "caixa_entrada", "desde", "dias_uteis",
                       "hoje", "ultima", "protocolado_em", "movimentacoes"}
+
+
+def test_acompanhar_avulso_normaliza_o_numero_e_le_o_codigo_do_link(conn, monkeypatch):
+    # issue #339: o mesmo extrair_codigo da etapa 4; numero gravado sem espacos
+    monkeypatch.setenv("DASH_SIGA_LINK_MODELO", "https://siga.exemplo.com.br/acompanhar?n={codigo}")
+    pid = siga.acompanhar_avulso(conn, None, "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234",
+                                 " ORGAO-PRO-2026/ 00009 ", "  Aditivo  ", None)
+    p = conn.execute("SELECT codigo, numero, nome, contrato_id FROM siga_processos WHERE id=?", (pid,)).fetchone()
+    assert tuple(p) == ("AbCdEf1234", "ORGAO-PRO-2026/00009", "Aditivo", None)
+    with pytest.raises(siga.JaAcompanhado) as e:
+        siga.acompanhar_avulso(conn, None, "AbCdEf1234", None, "Outro", None)
+    assert e.value.nome == "Aditivo"
+    with pytest.raises(ValueError, match="Dê um nome"):
+        siga.acompanhar_avulso(conn, None, "XyZ98765", None, "", None)
