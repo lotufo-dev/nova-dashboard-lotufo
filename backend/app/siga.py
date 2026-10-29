@@ -509,8 +509,12 @@ def _schtasks() -> str:
 
 
 def _saida(dados: bytes | None) -> str:
-    # o schtasks escreve na pagina de codigo OEM do console (cp850 no Windows em portugues)
-    return (dados or b"").decode("oem" if os.name == "nt" else "utf-8", errors="replace").strip()
+    # o schtasks escreve na pagina de codigo do console: UTF-8 quando ele esta' em UTF-8, senao a OEM (cp850 no
+    # Windows em portugues). Byte acentuado da OEM nao forma UTF-8 valido, entao a tentativa em UTF-8 vem primeiro.
+    try:
+        return (dados or b"").decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return dados.decode("oem" if os.name == "nt" else "latin-1", errors="replace").strip()
 
 
 def disparar_robo(tarefa: str) -> str | None:

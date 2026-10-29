@@ -409,6 +409,14 @@ def test_disparo_recusado_devolve_a_saida_cortada_ou_o_prazo(robo):
     assert siga.disparar_robo(TAREFA) == "sem resposta em 15 segundos"
 
 
+def test_saida_do_schtasks_em_utf8_ou_na_pagina_do_console(robo):
+    # com o console em UTF-8 o schtasks escreve UTF-8; sem ele, na pagina OEM (cp850 em portugues)
+    robo.resposta.update(codigo=1, erro="ERRO: O sistema não pode encontrar o arquivo especificado.".encode())
+    assert siga.disparar_robo(TAREFA) == "ERRO: O sistema não pode encontrar o arquivo especificado."
+    robo.resposta.update(codigo=1, erro=b"ERRO: O sistema n\xc6o pode encontrar o arquivo especificado.")
+    assert siga.disparar_robo(TAREFA).startswith("ERRO: O sistema n")
+
+
 def test_sem_rodada_completa_terminada_a_rodada_e_completa_e_automatica(conn, robo):
     r = siga.iniciar_rodada(conn, AGORA)
     assert r["rodada_id"] is not None and r["tipo"] == "automatica"
