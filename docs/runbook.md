@@ -345,13 +345,27 @@ rodada maior vai em mais de um POST com o mesmo `lido_em` (cada um grava só o q
 1. **Token em arquivo**: `C:\DashboardLotufo\segredos\siga-token.txt` (uma linha, UTF-8, ao menos 32 caracteres
    aleatórios). Gerar e gravar sem BOM (o `>` do PowerShell 5.1 grava UTF-16 e o arquivo é recusado):
    `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [IO.File]::WriteAllText('C:\DashboardLotufo\segredos\siga-token.txt', [Convert]::ToBase64String($b), (New-Object Text.UTF8Encoding $false))`.
-   O mesmo token vai para a configuração do robô. Nunca no repositório nem na tarefa agendada.
+   O mesmo token vai para o robô (item 4). Nunca no repositório nem na tarefa agendada.
 2. **Variável** `DASH_SIGA_TOKEN_ARQUIVO` com o caminho do arquivo, no nível da máquina (como `DASH_RM_ENDERECO`), e
    reiniciar a tarefa de `<servidor>` pela skill `deploy`. O arquivo é lido a cada pedido: trocar o token não pede
    reinício. Sem a variável (ou com o arquivo vazio ou ilegível), as duas rotas do robô respondem 503 "Monitor do
    SIGA não configurado"; token errado ou ausente, 401.
 3. Conferir: `Invoke-RestMethod http://<servidor>/api/siga/processos -Headers @{Authorization = "Bearer <token>"}`
    devolve a lista (vazia antes da primeira rodada).
+4. **Lado do robô** (issue #331): o robô guarda o token no cofre de credenciais do Windows da conta em que a tarefa
+   dele roda, pelo `salvar-token-dashboard.bat` da pasta do robô (cola o token uma vez; rodar de novo substitui),
+   como já faz com a senha do MT Login e a conta Microsoft. Ele fala com a dashboard em `http://localhost`, porque
+   roda no mesmo servidor. No início de cada rodada pede a lista (`GET /api/siga/processos`) e a junta com a lista
+   local dele (o mesmo código conta uma vez; processo da dashboard só com número fica fora, porque abrir pelo número
+   exige captcha); no fim, logo depois de gravar o estado local, manda a leitura (`POST /api/siga/leituras`). Dashboard
+   parada, sem token ou token recusado: o robô registra "dashboard: ..." no `dados\monitor.log` dele e a rodada e o
+   e-mail seguem normais.
+5. **Trocar o token**: gerar o arquivo de novo (item 1) e rodar o `salvar-token-dashboard.bat` com o valor novo. Trocado
+   só de um lado, o robô registra 401 no log dele e a leitura para de chegar; nada se perde, a próxima rodada com os
+   dois lados iguais grava tudo.
+6. **Conferir pela tela**: Administração › Saúde mostra a última leitura do monitor e quantos processos ele acompanha;
+   a tela SIGA mostra "Lido às" com a hora da rodada e, sem leitura há mais de 2 horas úteis, "O monitor do SIGA não
+   lê desde …".
 
 **Link do SIGA na etapa 4**: a operação cola o link que o órgão mandou (ou só o código do parâmetro `n=`) no campo
 "Link do SIGA" do protocolo enviado ou do registro por fora; o servidor grava o código em `siga_processos`, ligado ao
