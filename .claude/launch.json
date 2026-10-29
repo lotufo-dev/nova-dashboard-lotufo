@@ -40,7 +40,13 @@
     {
       "name": "prototipos",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8778", "--directory", "prototipos"],
+      "runtimeArgs": ["-m", "http.server", "8778", "--bind", "127.0.0.1", "--directory", "prototipos"],
+      "port": 8778
+    },
+    {
+      "name": "prototipos-mac",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8778", "--bind", "127.0.0.1", "--directory", "prototipos"],
       "port": 8778
     }
   ]
