@@ -294,6 +294,30 @@ def test_processo_que_o_robo_mandou_so_pelo_numero_ganha_codigo_nome_e_obra(api,
     assert cl.get("/api/siga").json()["processos"][0]["contrato_id"] == cid
 
 
+def test_processo_ja_ligado_a_medicao_nao_e_reescrito_pela_tela_siga(api, com_token):
+    # o robo mandou so' o numero igual ao "Nº do protocolo no órgão": a linha ficou ligada ao protocolo e a' medicao
+    cl, cid, mid = api
+    pid = _enviado(cl, cid, mid)
+    assert cl.post(f"/api/protocolos/{pid}/numero-orgao", data={"numero": "MTPAR-PRO-2026/00001"}).status_code == 200
+    cl.post("/api/siga/leituras", json={"lido_em": CORPO["lido_em"], "processos": [
+        {"codigo": None, "numero": "MTPAR-PRO-2026/00001", "nome": "Nome do robô", "situacao": None,
+         "movimentacoes": []}]}, headers=_robo())
+    (p,) = cl.get("/api/siga").json()["processos"]
+    assert (p["protocolo_id"], p["medicao_id"]) == (pid, mid)
+    r = cl.post("/api/siga/processos-avulsos", json={"link": LINK_SIGA, "nome": "Aditivo de prazo",
+                                                     "numero": "MTPAR-PRO-2026/00001"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Este processo do SIGA já está ligado a outro protocolo ou a outra medição"
+    assert cl.get("/api/siga/processos", headers=_robo()).json() == [
+        {"codigo": None, "numero": "MTPAR-PRO-2026/00001", "nome": "Nome do robô"}]
+
+
+def test_contrato_id_fora_do_inteiro_e_422_e_nao_500(api, com_token):
+    cl, _cid, _mid = api
+    r = cl.post("/api/siga/processos-avulsos", json={"link": LINK_SIGA, "nome": "X", "contrato_id": 2 ** 70})
+    assert r.status_code == 422
+
+
 def test_diretoria_nao_cola_link_na_tela_siga(api, com_token):
     cl, _cid, _mid = api
     _diretoria(cl)

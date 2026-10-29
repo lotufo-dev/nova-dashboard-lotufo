@@ -361,10 +361,19 @@ def acompanhar_avulso(conn, usuario_id, link: str | None, numero: str | None, no
         existente = conn.execute("SELECT nome FROM siga_processos WHERE codigo=?", (codigo,)).fetchone()
         if existente is not None:
             raise JaAcompanhado(existente["nome"])
+        # Processo que o robo ja' mandou so' pelo numero: ganha o codigo, o nome e a obra se estiver livre; ligado a
+        # um protocolo ou a uma medicao, nao e' avulso e nao se reescreve por aqui.
+        achado = _achar_processo(conn, codigo, numero)
+        antes = None
+        if achado is not None:
+            if achado["protocolo_id"] is not None or achado["medicao_id"] is not None:
+                raise ValueError(LIGADO_A_OUTRO)
+            antes = {"codigo": achado["codigo"], "numero": achado["numero"], "nome": achado["nome"],
+                     "contrato_id": achado["contrato_id"]}
+            contrato_id = achado["contrato_id"] if achado["contrato_id"] is not None else contrato_id
         pid = _gravar_processo(conn, codigo, numero, nome)
-        conn.execute("UPDATE siga_processos SET nome=?, contrato_id=COALESCE(contrato_id, ?) WHERE id=?",
-                     (nome, contrato_id, pid))
-        auditoria.registrar(conn, usuario_id, "protocolo.siga", "siga_processo", pid, None,
+        conn.execute("UPDATE siga_processos SET nome=?, contrato_id=? WHERE id=?", (nome, contrato_id, pid))
+        auditoria.registrar(conn, usuario_id, "protocolo.siga", "siga_processo", pid, antes,
                             {"codigo": codigo, "numero": numero, "nome": nome, "contrato_id": contrato_id})
     return pid
 

@@ -139,7 +139,7 @@ function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<vo
     if (!aberto || obras !== null) return;
     api<ObraLista[]>("/api/contratos")
       .then(lista => setObras([...lista].sort((a, b) => (a.nome_curto || a.numero_instrumento).localeCompare(b.nome_curto || b.numero_instrumento))))
-      .catch(() => setObras([]));
+      .catch(e => { setObras([]); setErro(mensagemDeErro(e)); });
   }, [aberto, obras]);
 
   async function enviar(ev: FormEvent) {
@@ -219,7 +219,8 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
       </div>
     );
   }
-  const gravado = async (id: number) => { await carregar(); setEscolhido(id); };
+  // o processo novo nao pode sumir atras da busca: ela e' limpa ao gravar
+  const gravado = async (id: number) => { await carregar(); trocarBusca({ q: null }); setEscolhido(id); };
   const topo = (
     <div className="sg__topo">
       {dados.lido_em && <p className="sg__lido">Lido às <span className="num">{fmtHora(dados.lido_em)}</span></p>}

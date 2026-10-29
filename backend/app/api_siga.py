@@ -22,6 +22,7 @@ from app.permissoes import exigir
 router = APIRouter()
 log = logging.getLogger("app.siga")
 
+MAX_INT64 = 9223372036854775807
 NAO_CONFIGURADO = "Monitor do SIGA não configurado"
 TOKEN_INVALIDO = "Token do monitor do SIGA inválido ou ausente"
 
@@ -96,7 +97,7 @@ class AvulsoIn(BaseModel):
     link: str = Field(max_length=500)                 # link inteiro ou so' o codigo (siga.extrair_codigo)
     nome: str = Field(max_length=200)
     numero: str | None = Field(default=None, max_length=100)
-    contrato_id: int | None = None
+    contrato_id: int | None = Field(default=None, ge=1, le=MAX_INT64)
 
 
 @router.post("/api/siga/processos-avulsos")
