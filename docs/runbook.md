@@ -361,8 +361,9 @@ rodada maior vai em mais de um POST com o mesmo `lido_em` (cada um grava só o q
    parada, sem token ou token recusado: o robô registra "dashboard: ..." no `dados\monitor.log` dele e a rodada e o
    e-mail seguem normais.
 5. **Trocar o token**: gerar o arquivo de novo (item 1) e rodar o `salvar-token-dashboard.bat` com o valor novo. Trocado
-   só de um lado, o robô registra 401 no log dele e a leitura para de chegar; nada se perde, a próxima rodada com os
-   dois lados iguais grava tudo.
+   só de um lado, o robô registra 401 no log dele e a leitura para de chegar; as movimentações não se perdem (a
+   próxima rodada com os dois lados iguais manda tudo o que está no SIGA), só as rodadas do intervalo ficam sem
+   registro de leitura.
 6. **Conferir pela tela**: Administração › Saúde mostra a última leitura do monitor e quantos processos ele acompanha;
    a tela SIGA mostra "Lido às" com a hora da rodada e, sem leitura há mais de 2 horas úteis, "O monitor do SIGA não
    lê desde …".
