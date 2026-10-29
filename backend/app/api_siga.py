@@ -5,6 +5,9 @@ CSRF; exigem `Authorization: Bearer <token>`, com o token lido do arquivo aponta
 (fora do repositorio; lido a cada pedido, entao trocar o token nao pede reinicio). Sem a variavel, 503.
 Uma rota para as telas: `GET /api/siga`, com sessao e `ver_paineis`. E uma de escrita, `POST /api/siga/processos-avulsos`
 (issue #339): link colado na tela SIGA, com sessao, CSRF e `editar_cadastros`.
+Issue #342: `POST /api/siga/atualizar` (sessao, CSRF e `ver_paineis`) grava o pedido de leitura e manda o Windows
+iniciar o robo; o robo conversa pelas rotas de servico `POST /api/siga/rodadas` ("comecei"),
+`POST /api/siga/rodadas/{id}/fim` ("terminei") e `POST /api/siga/rodadas/{id}/falha` ("cai"), com o mesmo token.
 """
 import hmac
 import logging
@@ -25,6 +28,7 @@ log = logging.getLogger("app.siga")
 MAX_INT64 = 9223372036854775807
 NAO_CONFIGURADO = "Monitor do SIGA não configurado"
 TOKEN_INVALIDO = "Token do monitor do SIGA inválido ou ausente"
+TAREFA_NAO_CONFIGURADA = "Atualizar pelo SIGA não está disponível neste servidor"
 
 
 def _token_esperado() -> bytes:
@@ -110,3 +114,65 @@ def acompanhar_avulso(dados: AvulsoIn, usuario: dict = Depends(exigir("editar_ca
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return {"id": pid}
+
+
+# --- pedido de leitura pela tela e rodadas do robo (issue #342) --------------------------------------------
+
+class AtualizarIn(BaseModel):
+    processo_id: int | None = Field(default=None, ge=1, le=MAX_INT64)     # sem processo = todos
+
+
+@router.post("/api/siga/atualizar")
+def atualizar(dados: AtualizarIn, usuario: dict = Depends(exigir("ver_paineis")),
+              conn: sqlite3.Connection = Depends(conexao)):
+    """"Atualizar processo" e "Atualizar todos": pedir uma leitura nao muda dado nenhum, entao basta ver a tela."""
+    tarefa = siga.tarefa_do_robo()
+    if not tarefa:
+        raise HTTPException(503, TAREFA_NAO_CONFIGURADA)
+    try:
+        return siga.pedir_leitura(conn, usuario["id"], dados.processo_id, tarefa)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+
+@router.post("/api/siga/rodadas", dependencies=[Depends(exigir_robo)], include_in_schema=False)
+def iniciar_rodada(conn: sqlite3.Connection = Depends(conexao)):
+    return siga.iniciar_rodada(conn)
+
+
+class NaoLidoIn(BaseModel):
+    codigo: str | None = Field(default=None, max_length=100)
+    numero: str | None = Field(default=None, max_length=100)
+    motivo: str = Field(max_length=2000)                  # gravado cortado em 300 caracteres
+
+
+class FimIn(BaseModel):
+    nao_lidos: list[NaoLidoIn] = Field(default_factory=list, max_length=1000)
+
+
+class FalhaIn(BaseModel):
+    motivo: str = Field(max_length=2000)                  # gravado cortado em 300 caracteres
+
+
+def _na_rodada(funcao, conn, rodada_id: int, *args) -> dict:
+    if not 1 <= rodada_id <= MAX_INT64:
+        raise HTTPException(404, siga.RODADA_INEXISTENTE)
+    try:
+        funcao(conn, rodada_id, *args)
+    except siga.RodadaTerminada as e:
+        raise HTTPException(409, str(e)) from None
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return {"rodada_id": rodada_id}
+
+
+@router.post("/api/siga/rodadas/{rodada_id}/fim", dependencies=[Depends(exigir_robo)], include_in_schema=False)
+def terminar_rodada(rodada_id: int, dados: FimIn, conn: sqlite3.Connection = Depends(conexao)):
+    return _na_rodada(siga.terminar_rodada, conn, rodada_id, [n.model_dump() for n in dados.nao_lidos])
+
+
+@router.post("/api/siga/rodadas/{rodada_id}/falha", dependencies=[Depends(exigir_robo)], include_in_schema=False)
+def falhar_rodada(rodada_id: int, dados: FalhaIn, conn: sqlite3.Connection = Depends(conexao)):
+    return _na_rodada(siga.falhar_rodada, conn, rodada_id, dados.motivo)

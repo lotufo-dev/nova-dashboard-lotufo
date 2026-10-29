@@ -2,10 +2,12 @@
 
 Processos e pessoas sao ficticios (repositorio publico)."""
 import datetime
+import subprocess
+from types import SimpleNamespace
 
 import pytest
 
-from app import auth, db, tempo
+from app import auth, db, siga, tempo
 from tests.test_api_protocolos import LINK_SIGA, _enviado, api  # noqa: F401  (a fixture `api` vem de la')
 
 TOKEN = "token-de-teste-do-siga-0123456789"
@@ -325,3 +327,221 @@ def test_diretoria_nao_cola_link_na_tela_siga(api, com_token):
     r = cl.post("/api/siga/processos-avulsos", json={"link": LINK_SIGA, "nome": "X"})
     assert r.status_code == 403
     assert cl.get("/api/siga/processos", headers=_robo()).json() == []
+
+
+# --- botao de atualizar e rodadas do robo (issue #342) -----------------------------------------------------
+
+TAREFA = "Robo SIGA de teste"
+SEM_INICIO = "O robô não começou. O usuário dele pode estar desconectado do servidor."
+
+
+@pytest.fixture
+def schtasks(monkeypatch):
+    """`DASH_SIGA_TAREFA` definida e o `schtasks` trocado por um duble: sucesso, erro ou prazo estourado."""
+    monkeypatch.setenv("DASH_SIGA_TAREFA", TAREFA)
+    chamadas, resposta = [], {"codigo": 0, "saida": b"", "erro": b"", "estoura": False}
+
+    def run(args, **kw):
+        chamadas.append((args, kw))
+        if resposta["estoura"]:
+            raise subprocess.TimeoutExpired(args, kw.get("timeout"))
+        return subprocess.CompletedProcess(args, resposta["codigo"], resposta["saida"], resposta["erro"])
+
+    monkeypatch.setattr(siga.subprocess, "run", run)
+    return SimpleNamespace(chamadas=chamadas, resposta=resposta)
+
+
+@pytest.fixture
+def relogio_movel(monkeypatch):
+    """Comeca as 12h de Cuiaba de 28/10/2026 (16h UTC) e anda quando o teste manda."""
+    agora = [datetime.datetime(2026, 10, 28, 16, 0, tzinfo=UTC)]
+    monkeypatch.setattr(tempo, "agora_utc", lambda: agora[0])
+
+    def andar(minutos, segundos=0):
+        agora[0] += datetime.timedelta(minutes=minutos, seconds=segundos)
+    return andar
+
+
+def _com_processos(cl):
+    """Os dois processos do CORPO (Alfa e Beta), recebidos pelo robo. -> os ids."""
+    assert cl.post("/api/siga/leituras", json=CORPO, headers=_robo()).status_code == 200
+    return [p["id"] for p in cl.get("/api/siga").json()["processos"]]
+
+
+def _robo_painel(cl):
+    return cl.get("/api/siga").json()["robo"]
+
+
+def _rodada(cl):
+    r = cl.post("/api/siga/rodadas", headers=_robo())
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _fim(cl, rodada_id, nao_lidos=()):
+    return cl.post(f"/api/siga/rodadas/{rodada_id}/fim", json={"nao_lidos": list(nao_lidos)}, headers=_robo())
+
+
+def _conta_rodadas():
+    conn = db.get_conn()
+    try:
+        return conn.execute("SELECT COUNT(*) FROM siga_rodadas").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_atualizar_processo_grava_o_pedido_roda_o_schtasks_e_o_painel_mostra_na_fila(client_admin, com_token,
+                                                                                    schtasks):
+    alfa, _beta = _com_processos(client_admin)
+    r = client_admin.post("/api/siga/atualizar", json={"processo_id": alfa})
+    assert r.status_code == 200, r.text
+    pedido = r.json()
+    assert (pedido["processo_id"], pedido["novo"], pedido["disparado"], pedido["erro_disparo"]) == (alfa, True, True,
+                                                                                                   None)
+    ((args, kw),) = schtasks.chamadas
+    assert args[1:] == ["/Run", "/TN", TAREFA] and kw["timeout"] == 15 and not kw.get("shell")
+    painel = client_admin.get("/api/siga").json()
+    assert painel["pode_atualizar"] is True
+    assert painel["robo"]["estado"] == "na_fila" and painel["robo"]["rodada"] is None
+    assert painel["robo"]["pedidos"] == [{"id": pedido["id"], "processo_id": alfa, "usuario": "Admin",
+                                          "pedido_em": "2026-10-28T16:00:00+00:00"}]
+
+
+def test_atualizar_todos_e_segundo_clique_igual_devolve_o_mesmo_pedido(client_admin, com_token, schtasks):
+    _com_processos(client_admin)
+    um = client_admin.post("/api/siga/atualizar", json={}).json()
+    dois = client_admin.post("/api/siga/atualizar", json={}).json()
+    assert um["processo_id"] is None and um["novo"] is True
+    assert dois["id"] == um["id"] and dois["novo"] is False
+    assert [p["processo_id"] for p in _robo_painel(client_admin)["pedidos"]] == [None]
+
+
+def test_atualizar_processo_que_nao_existe_e_422(client_admin, com_token, schtasks):
+    r = client_admin.post("/api/siga/atualizar", json={"processo_id": 999})
+    assert r.status_code == 422 and r.json()["detail"] == "Processo do SIGA não encontrado"
+    assert client_admin.post("/api/siga/atualizar", json={"processo_id": 2 ** 70}).status_code == 422
+    assert schtasks.chamadas == []
+
+
+def test_com_rodada_em_andamento_o_clique_grava_o_pedido_e_nao_roda_o_schtasks(client_admin, com_token, schtasks):
+    alfa, _beta = _com_processos(client_admin)
+    assert _rodada(client_admin)["tipo"] == "automatica"
+    r = client_admin.post("/api/siga/atualizar", json={"processo_id": alfa}).json()
+    assert (r["disparado"], r["erro_disparo"]) == (False, None) and schtasks.chamadas == []
+    robo = _robo_painel(client_admin)
+    assert robo["estado"] == "lendo" and [p["id"] for p in robo["pedidos"]] == [r["id"]]
+    assert robo["rodada"]["tipo"] == "automatica" and robo["rodada"]["processos"] == [alfa, _beta]
+
+
+@pytest.mark.parametrize("resposta,motivo", [
+    ({"codigo": 1, "erro": "ERRO: acesso negado.\r\n".encode()}, "ERRO: acesso negado."),
+    ({"estoura": True}, "sem resposta em 15 segundos"),
+])
+def test_windows_recusou_traz_erro_disparo_e_o_aviso_no_painel(client_admin, com_token, schtasks, resposta, motivo):
+    alfa, _beta = _com_processos(client_admin)
+    schtasks.resposta.update(resposta)
+    r = client_admin.post("/api/siga/atualizar", json={"processo_id": alfa})
+    assert r.status_code == 200, r.text
+    assert (r.json()["disparado"], r.json()["erro_disparo"]) == (False, motivo)
+    assert {"tipo": "disparo", "processo_id": None,
+            "texto": f"O Windows não iniciou o robô: {motivo}"} in _robo_painel(client_admin)["avisos"]
+
+
+def test_sem_a_tarefa_o_clique_e_503_e_o_painel_nao_pode_atualizar(client_admin, com_token, schtasks, monkeypatch):
+    monkeypatch.delenv("DASH_SIGA_TAREFA")
+    alfa, _beta = _com_processos(client_admin)
+    r = client_admin.post("/api/siga/atualizar", json={"processo_id": alfa})
+    assert r.status_code == 503 and r.json()["detail"] == "Atualizar pelo SIGA não está disponível neste servidor"
+    painel = client_admin.get("/api/siga").json()
+    assert painel["pode_atualizar"] is False and painel["robo"]["pedidos"] == [] and schtasks.chamadas == []
+
+
+def test_rodadas_escolhe_o_que_ler(client_admin, com_token, schtasks, relogio_movel):
+    _alfa, beta = _com_processos(client_admin)
+    r = _rodada(client_admin)                      # nunca houve rodada completa: todos, automatica
+    assert r["tipo"] == "automatica" and [p["nome"] for p in r["processos"]] == ["Processo Alfa", "Processo Beta"]
+    assert _fim(client_admin, r["rodada_id"]).json() == {"rodada_id": r["rodada_id"]}
+    relogio_movel(2)
+    assert _rodada(client_admin) == {"rodada_id": None, "tipo": None, "processos": []}    # nada a ler
+    assert _conta_rodadas() == 1
+    client_admin.post("/api/siga/atualizar", json={"processo_id": beta})
+    r = _rodada(client_admin)                      # pedido de um processo: so' ele
+    assert r["tipo"] == "pedido" and r["processos"] == [
+        {"codigo": None, "numero": "ORGAO-PRO-2026/00011", "nome": "Processo Beta"}]
+    _fim(client_admin, r["rodada_id"])
+    relogio_movel(1)
+    client_admin.post("/api/siga/atualizar", json={})
+    r = _rodada(client_admin)                      # pedido "todos": todos, do tipo pedido
+    assert r["tipo"] == "pedido" and len(r["processos"]) == 2
+    _fim(client_admin, r["rodada_id"])
+    relogio_movel(13, 59)
+    assert _rodada(client_admin)["rodada_id"] is None
+    relogio_movel(0, 1)                            # 14 minutos depois da ultima completa: todos, automatica
+    r = _rodada(client_admin)
+    assert r["tipo"] == "automatica" and len(r["processos"]) == 2
+
+
+def test_fim_com_nao_lidos_e_falha_aparecem_no_painel(client_admin, com_token, schtasks, relogio_movel):
+    alfa, beta = _com_processos(client_admin)
+    r = _rodada(client_admin)
+    assert _fim(client_admin, r["rodada_id"], [{"codigo": None, "numero": "ORGAO-PRO-2026/00011",
+                                                 "motivo": "Processo sem código"}]).status_code == 200
+    assert _robo_painel(client_admin)["avisos"] == [
+        {"tipo": "nao_lido", "processo_id": beta, "texto": "não lido às 12:00: Processo sem código"},
+        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 2 processos não foram lidos"}]
+    relogio_movel(1)
+    client_admin.post("/api/siga/atualizar", json={"processo_id": alfa})
+    r = _rodada(client_admin)
+    f = client_admin.post(f"/api/siga/rodadas/{r['rodada_id']}/falha", json={"motivo": "O SIGA não abriu"},
+                          headers=_robo())
+    assert f.status_code == 200, f.text
+    assert _robo_painel(client_admin)["avisos"] == [
+        {"tipo": "falha", "processo_id": None, "texto": "A rodada das 12:01 falhou: O SIGA não abriu"}]
+
+
+def test_rodada_sem_fim_e_pedido_parado_avisam_no_painel(client_admin, com_token, schtasks, relogio_movel):
+    alfa, _beta = _com_processos(client_admin)
+    _rodada(client_admin)
+    relogio_movel(12, 1)
+    robo = _robo_painel(client_admin)
+    assert robo["estado"] == "parado" and [a["texto"] for a in robo["avisos"]] == ["A rodada das 12:00 não terminou."]
+    # a rodada morta nao segura o clique: o servidor dispara de novo
+    client_admin.post("/api/siga/atualizar", json={"processo_id": alfa})
+    assert len(schtasks.chamadas) == 1
+    relogio_movel(2, 1)
+    assert [a["texto"] for a in _robo_painel(client_admin)["avisos"]] == [SEM_INICIO,
+                                                                         "A rodada das 12:00 não terminou."]
+
+
+def test_fim_ou_falha_de_rodada_terminada_e_409_e_de_rodada_que_nao_existe_e_404(client_admin, com_token, schtasks):
+    _com_processos(client_admin)
+    rid = _rodada(client_admin)["rodada_id"]
+    assert _fim(client_admin, rid).status_code == 200
+    for r in (_fim(client_admin, rid),
+              client_admin.post(f"/api/siga/rodadas/{rid}/falha", json={"motivo": "caiu"}, headers=_robo())):
+        assert r.status_code == 409 and r.json()["detail"] == "Esta rodada do SIGA já terminou"
+    assert _fim(client_admin, 999).status_code == 404
+    assert _fim(client_admin, 2 ** 70).status_code == 404
+
+
+def test_rotas_do_robo_recusam_sem_token(client_admin, com_token, schtasks):
+    _com_processos(client_admin)
+    rotas = (("/api/siga/rodadas", None), ("/api/siga/rodadas/1/fim", {"nao_lidos": []}),
+             ("/api/siga/rodadas/1/falha", {"motivo": "caiu"}))
+    for caminho, corpo in rotas:
+        for cabecalho in ({}, {"Authorization": "Bearer errado"}):    # a sessao do admin tambem nao vale
+            assert client_admin.post(caminho, json=corpo, headers=cabecalho).status_code == 401
+    assert _conta_rodadas() == 0
+
+
+def test_atualizar_recusa_sem_login_e_aceita_a_diretoria(api, com_token, schtasks):
+    cl, _cid, _mid = api
+    alfa, _beta = _com_processos(cl)
+    cl.cookies.clear()
+    assert cl.post("/api/siga/atualizar", json={"processo_id": alfa}).status_code == 401
+    _diretoria(cl)
+    r = cl.post("/api/siga/atualizar", json={"processo_id": alfa})
+    assert r.status_code == 200, r.text
+    assert _robo_painel(cl)["pedidos"][0]["usuario"] == "Diretoria"
+    del cl.headers["X-CSRF-Token"]
+    assert cl.post("/api/siga/atualizar", json={}).status_code == 403

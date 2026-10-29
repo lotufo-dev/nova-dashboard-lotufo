@@ -2,6 +2,8 @@
 
 Processos, setores e pessoas sao ficticios (repositorio publico): "Fulano", "Beltrano", "Sicrana"."""
 import datetime
+import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -350,3 +352,228 @@ def test_acompanhar_avulso_normaliza_o_numero_e_le_o_codigo_do_link(conn, monkey
     assert e.value.nome == "Aditivo"
     with pytest.raises(ValueError, match="Dê um nome"):
         siga.acompanhar_avulso(conn, None, "XyZ98765", None, "", None)
+
+
+# --- pedidos de leitura e rodadas do robo (issue #342) -------------------------------------------------------
+
+AGORA = _cuiaba(2026, 10, 28, 10)          # quarta-feira, 10h em Cuiaba
+TAREFA = "Robo SIGA de teste"
+
+
+def _min(minutos, segundos=0):
+    return datetime.timedelta(minutes=minutos, seconds=segundos)
+
+
+@pytest.fixture
+def robo(conn, monkeypatch):
+    """Tres processos acompanhados, uma pessoa que pede e o `schtasks` trocado por um duble."""
+    uid = auth.criar_usuario(conn, "Engenharia", "engenharia@exemplo.com.br", "senha-forte-123", "engenharia")
+    with db.mutacao(conn):
+        ids = [conn.execute("INSERT INTO siga_processos (codigo, numero, nome) VALUES (?,?,?)", p).lastrowid
+               for p in (("ABC123", "ORGAO-PRO-2026/00010", "Processo Alfa"), ("DEF456", None, "Processo Beta"),
+                         (None, "ORGAO-PRO-2026/00012", "Processo Gama"))]
+    chamadas, resposta = [], {"codigo": 0, "saida": b"", "erro": b"", "estoura": False}
+
+    def schtasks(args, **kw):
+        chamadas.append((args, kw))
+        if resposta["estoura"]:
+            raise subprocess.TimeoutExpired(args, kw.get("timeout"))
+        return subprocess.CompletedProcess(args, resposta["codigo"], resposta["saida"], resposta["erro"])
+
+    monkeypatch.setattr(siga.subprocess, "run", schtasks)
+    return SimpleNamespace(uid=uid, ids=ids, chamadas=chamadas, resposta=resposta)
+
+
+def _pedir(conn, robo, processo_id, agora):
+    return siga.pedir_leitura(conn, robo.uid, processo_id, TAREFA, agora)
+
+
+def _textos(conn, agora):
+    return [a["texto"] for a in siga.situacao_robo(conn, agora)["avisos"]]
+
+
+def test_disparo_roda_o_schtasks_sem_shell_com_o_nome_da_tarefa_e_prazo(robo):
+    assert siga.disparar_robo(TAREFA) is None
+    ((args, kw),) = robo.chamadas
+    assert args[0].lower().endswith("schtasks.exe") and args[1:] == ["/Run", "/TN", TAREFA]
+    assert kw["timeout"] == 15 and not kw.get("shell")
+
+
+def test_disparo_recusado_devolve_a_saida_cortada_ou_o_prazo(robo):
+    robo.resposta.update(codigo=1, erro=b"ERRO: " + b"x" * 400)
+    motivo = siga.disparar_robo(TAREFA)
+    assert motivo.startswith("ERRO: x") and len(motivo) == 300
+    robo.resposta.update(codigo=1, erro=b"", saida=b"")
+    assert siga.disparar_robo(TAREFA) == "código de saída 1"
+    robo.resposta.update(estoura=True)
+    assert siga.disparar_robo(TAREFA) == "sem resposta em 15 segundos"
+
+
+def test_sem_rodada_completa_terminada_a_rodada_e_completa_e_automatica(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    assert r["rodada_id"] is not None and r["tipo"] == "automatica"
+    assert r["processos"] == [{"codigo": "ABC123", "numero": "ORGAO-PRO-2026/00010", "nome": "Processo Alfa"},
+                              {"codigo": "DEF456", "numero": None, "nome": "Processo Beta"},
+                              {"codigo": None, "numero": "ORGAO-PRO-2026/00012", "nome": "Processo Gama"}]
+
+
+def test_rodada_completa_por_tempo_aos_14_minutos_da_ultima_completa(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(3))
+    # 13 minutos depois, sem pedido: nada a ler, e nada gravado
+    assert siga.iniciar_rodada(conn, AGORA + _min(13)) == {"rodada_id": None, "tipo": None, "processos": []}
+    assert _conta(conn, "siga_rodadas") == 1
+    # com o pedido de um processo, so' ele
+    _pedir(conn, robo, robo.ids[1], AGORA + _min(13))
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(13))
+    assert r2["tipo"] == "pedido" and [p["codigo"] for p in r2["processos"]] == ["DEF456"]
+    siga.terminar_rodada(conn, r2["rodada_id"], [], AGORA + _min(13, 30))
+    # 14 minutos depois do inicio da ultima completa (a rodada automatica de 15 em 15 minutos), todos
+    r3 = siga.iniciar_rodada(conn, AGORA + _min(14))
+    assert r3["tipo"] == "automatica" and len(r3["processos"]) == 3
+
+
+def test_pedido_todos_faz_rodada_completa_do_tipo_pedido_e_liga_os_pedidos(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(2))
+    um = _pedir(conn, robo, robo.ids[0], AGORA + _min(5))
+    todos = _pedir(conn, robo, None, AGORA + _min(5))
+    assert todos["id"] != um["id"] and todos["processo_id"] is None
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(6))
+    assert r2["tipo"] == "pedido" and len(r2["processos"]) == 3
+    assert {x[0] for x in conn.execute("SELECT rodada_id FROM siga_pedidos")} == {r2["rodada_id"]}
+
+
+def test_rodada_de_pedido_le_so_os_processos_pedidos(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(2))
+    _pedir(conn, robo, robo.ids[2], AGORA + _min(4))
+    _pedir(conn, robo, robo.ids[0], AGORA + _min(5))
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(6))
+    assert r2["tipo"] == "pedido" and [p["nome"] for p in r2["processos"]] == ["Processo Alfa", "Processo Gama"]
+    # pedidos atendidos: o robo pergunta de novo antes de encerrar e nao ha' nada a ler
+    siga.terminar_rodada(conn, r2["rodada_id"], [], AGORA + _min(7))
+    assert siga.iniciar_rodada(conn, AGORA + _min(7))["rodada_id"] is None
+
+
+def test_pedido_repetido_nao_duplica_e_todos_cobre_o_de_um_processo(conn, robo):
+    a1 = _pedir(conn, robo, robo.ids[0], AGORA)
+    a2 = _pedir(conn, robo, robo.ids[0], AGORA + _min(1))
+    assert a2["id"] == a1["id"] and a1["novo"] is True and a2["novo"] is False
+    todos = _pedir(conn, robo, None, AGORA + _min(1))
+    assert todos["id"] != a1["id"] and todos["novo"] is True
+    assert _pedir(conn, robo, robo.ids[1], AGORA + _min(2))["id"] == todos["id"]
+    assert _pedir(conn, robo, None, AGORA + _min(2))["id"] == todos["id"]
+    assert _conta(conn, "siga_pedidos") == 2
+    # depois de atendido, o clique seguinte e' pedido novo
+    siga.iniciar_rodada(conn, AGORA + _min(3))
+    assert _pedir(conn, robo, robo.ids[0], AGORA + _min(4))["novo"] is True
+
+
+def test_pedido_de_processo_que_nao_existe_e_recusado(conn, robo):
+    with pytest.raises(ValueError, match="Processo do SIGA não encontrado"):
+        _pedir(conn, robo, 999, AGORA)
+    assert _conta(conn, "siga_pedidos") == 0 and robo.chamadas == []
+
+
+def test_com_rodada_em_andamento_o_pedido_e_gravado_sem_disparar(conn, robo):
+    siga.iniciar_rodada(conn, AGORA)
+    p = _pedir(conn, robo, robo.ids[0], AGORA + _min(5))
+    assert (p["disparado"], p["erro_disparo"]) == (False, None) and robo.chamadas == []
+    assert siga.situacao_robo(conn, AGORA + _min(5))["pedidos"][0]["id"] == p["id"]
+    # rodada aberta ha' mais de 12 minutos nao esta' mais em andamento (o Windows encerra o robo aos 10)
+    p2 = _pedir(conn, robo, robo.ids[0], AGORA + _min(12, 1))
+    assert p2["id"] == p["id"] and p2["disparado"] is True and len(robo.chamadas) == 1
+
+
+def test_estado_parado_na_fila_e_lendo(conn, robo):
+    s = siga.situacao_robo(conn, AGORA)
+    assert s == {"estado": "parado", "rodada": None, "pedidos": [], "avisos": []}
+    p = _pedir(conn, robo, robo.ids[0], AGORA)
+    s = siga.situacao_robo(conn, AGORA + _min(1))
+    assert s["estado"] == "na_fila" and s["rodada"] is None
+    assert s["pedidos"] == [{"id": p["id"], "processo_id": robo.ids[0], "usuario": "Engenharia",
+                             "pedido_em": "2026-10-28T14:00:00+00:00"}]
+    r = siga.iniciar_rodada(conn, AGORA + _min(1))
+    s = siga.situacao_robo(conn, AGORA + _min(13))
+    assert s["estado"] == "lendo" and s["pedidos"] == []
+    assert s["rodada"] == {"id": r["rodada_id"], "tipo": "automatica", "iniciada_em": "2026-10-28T14:01:00+00:00",
+                           "processos": robo.ids}
+    assert siga.situacao_robo(conn, AGORA + _min(13, 1))["estado"] == "parado"
+
+
+def test_recusa_do_windows_avisa_ate_o_proximo_disparo_aceito(conn, robo):
+    robo.resposta.update(codigo=1, erro="ERRO: acesso negado.\r\n".encode())
+    p = _pedir(conn, robo, robo.ids[0], AGORA)
+    assert (p["disparado"], p["erro_disparo"]) == (False, "ERRO: acesso negado.")
+    assert "O Windows não iniciou o robô: ERRO: acesso negado." in _textos(conn, AGORA)
+    # um clique com rodada em andamento nao e' disparo: o aviso continua
+    siga.iniciar_rodada(conn, AGORA + _min(1))
+    _pedir(conn, robo, robo.ids[1], AGORA + _min(2))
+    assert "O Windows não iniciou o robô: ERRO: acesso negado." in _textos(conn, AGORA + _min(2))
+    robo.resposta.update(codigo=0, erro=b"")
+    _pedir(conn, robo, robo.ids[1], AGORA + _min(14))
+    assert not [t for t in _textos(conn, AGORA + _min(14)) if t.startswith("O Windows")]
+
+
+def test_pedido_parado_ha_mais_de_2_minutos_avisa_que_o_robo_nao_comecou(conn, robo):
+    aviso = "O robô não começou. O usuário dele pode estar desconectado do servidor."
+    _pedir(conn, robo, robo.ids[0], AGORA)
+    assert aviso not in _textos(conn, AGORA + _min(2))
+    assert aviso in _textos(conn, AGORA + _min(2, 1))
+    siga.iniciar_rodada(conn, AGORA + _min(3))
+    assert aviso not in _textos(conn, AGORA + _min(3))
+    # pedido feito com o robo lendo espera a rodada terminar: nao e' "nao comecou"
+    _pedir(conn, robo, robo.ids[1], AGORA + _min(4))
+    assert aviso not in _textos(conn, AGORA + _min(10))
+
+
+def test_falha_avisa_ate_a_proxima_rodada_terminar_sem_falha(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.falhar_rodada(conn, r["rodada_id"], "O SIGA não abriu", AGORA + _min(1))
+    assert _textos(conn, AGORA + _min(1)) == ["A rodada das 10:00 falhou: O SIGA não abriu"]
+    _pedir(conn, robo, robo.ids[0], AGORA + _min(5))
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(5))
+    assert _textos(conn, AGORA + _min(6)) == ["A rodada das 10:00 falhou: O SIGA não abriu"]   # ainda lendo
+    siga.terminar_rodada(conn, r2["rodada_id"], [], AGORA + _min(6))
+    assert _textos(conn, AGORA + _min(6)) == []
+
+
+def test_nao_lidos_avisam_por_processo_com_o_resumo_ate_a_proxima_rodada_sem_eles(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [
+        {"codigo": "DEF456", "numero": None, "motivo": "A página do processo não abriu"},
+        {"codigo": None, "numero": "ORGAO-PRO-2026/ 00012", "motivo": "Processo sem código"}], AGORA + _min(3))
+    assert siga.situacao_robo(conn, AGORA + _min(3))["avisos"] == [
+        {"tipo": "nao_lido", "processo_id": robo.ids[1], "texto": "não lido às 10:00: A página do processo não abriu"},
+        {"tipo": "nao_lido", "processo_id": robo.ids[2], "texto": "não lido às 10:00: Processo sem código"},
+        {"tipo": "nao_lidos", "processo_id": None, "texto": "2 de 3 processos não foram lidos"}]
+    _pedir(conn, robo, robo.ids[1], AGORA + _min(5))
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(5))
+    siga.terminar_rodada(conn, r2["rodada_id"], [], AGORA + _min(6))
+    assert _textos(conn, AGORA + _min(6)) == []
+
+
+def test_rodada_sem_fim_ha_mais_de_12_minutos_avisa_ate_outra_terminar(conn, robo):
+    siga.iniciar_rodada(conn, AGORA)
+    assert _textos(conn, AGORA + _min(12)) == []
+    assert _textos(conn, AGORA + _min(12, 1)) == ["A rodada das 10:00 não terminou."]
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(15))
+    assert _textos(conn, AGORA + _min(16)) == ["A rodada das 10:00 não terminou."]   # a seguinte ainda lendo
+    siga.terminar_rodada(conn, r2["rodada_id"], [], AGORA + _min(17))
+    assert _textos(conn, AGORA + _min(17)) == []
+
+
+def test_rodada_terminada_nao_aceita_outro_fim_nem_falha(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(2))
+    with pytest.raises(siga.RodadaTerminada):
+        siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(3))
+    with pytest.raises(siga.RodadaTerminada):
+        siga.falhar_rodada(conn, r["rodada_id"], "caiu", AGORA + _min(3))
+    with pytest.raises(LookupError):
+        siga.falhar_rodada(conn, 999, "caiu", AGORA + _min(3))
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(20))
+    with pytest.raises(ValueError, match="código ou o número"):
+        siga.terminar_rodada(conn, r2["rodada_id"], [{"codigo": " ", "numero": None, "motivo": "x"}], AGORA + _min(21))
+    assert conn.execute("SELECT terminada_em FROM siga_rodadas WHERE id=?", (r2["rodada_id"],)).fetchone()[0] is None

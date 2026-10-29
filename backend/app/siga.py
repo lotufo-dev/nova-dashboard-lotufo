@@ -1,4 +1,4 @@
-"""Leituras do monitor do SIGA (issue #327).
+"""Leituras do monitor do SIGA (issue #327) e pedidos de leitura pela tela, com as rodadas do robo (issue #342).
 
 O robo do SIGA (Playwright local, fora do repositorio) le a cada 15 minutos a situacao e as movimentacoes de cada
 processo protocolado e manda para `POST /api/siga/leituras`. Aqui: gravar sem apagar nem sobrescrever, ligar o
@@ -8,8 +8,12 @@ As derivacoes (setor, com quem, desde, dias uteis...) vem do `relatorio_html.py`
 13/10/2026; a unica diferenca e' que os dias uteis descontam os feriados nacionais (`app/feriados.py`).
 """
 import datetime
+import json
+import logging
 import os
 import re
+import subprocess
+from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 from app import auditoria, db, medicoes, tempo
@@ -45,6 +49,20 @@ ROBO_INICIO, ROBO_FIM = datetime.time(8, 0), datetime.time(17, 30)
 # e-mail do robo de 13/10/2026; a tela SIGA usa os mesmos em `siga.ts`)
 DIAS_ATENCAO, DIAS_ACAO = 5, 10
 _CAMPOS_MOV = ("evento", "cad_lotacao", "cad_pessoa", "at_lotacao", "at_pessoa")
+# Pedido de leitura pela tela e rodadas do robo (issue #342)
+PROCESSO_INEXISTENTE = "Processo do SIGA não encontrado"
+RODADA_INEXISTENTE = "Rodada do SIGA não encontrada"
+RODADA_TERMINADA = "Esta rodada do SIGA já terminou"
+PRAZO_DISPARO = 15                                    # segundos de espera pelo schtasks
+MAX_MOTIVO = 300
+EM_ANDAMENTO = datetime.timedelta(minutes=12)          # o Windows encerra o robo aos 10
+SEM_INICIO = datetime.timedelta(minutes=2)
+COMPLETA_A_CADA = datetime.timedelta(minutes=14)       # a tarefa agendada roda de 15 em 15 minutos
+log = logging.getLogger("app.siga")
+
+
+class RodadaTerminada(Exception):
+    """Fim ou falha de uma rodada que ja' terminou."""
 
 
 def sem_espacos(numero: str | None) -> str:
@@ -461,7 +479,205 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             "movimentacoes": movs[:MOVIMENTACOES_NA_TELA],
         })
     return {"lido_em": tempo.iso_utc(lido_em) if lido_em else None, "atrasado": atrasado(lido_em, agora),
-            "processos": saida}
+            "processos": saida, "pode_atualizar": bool(tarefa_do_robo()), "robo": situacao_robo(conn, agora)}
+
+
+# --- pedidos de leitura e rodadas do robo (issue #342) -----------------------------------------------------
+
+def tarefa_do_robo() -> str:
+    """Nome da tarefa agendada do robo no Windows (`DASH_SIGA_TAREFA`, fora do repositorio). Vazio: a tela nao pede
+    leitura (Mac, CI, dev)."""
+    return os.environ.get("DASH_SIGA_TAREFA", "").strip()
+
+
+def _carimbo(dt: datetime.datetime) -> str:
+    return dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _instante(carimbo: str) -> datetime.datetime:
+    return datetime.datetime.fromisoformat(carimbo).replace(tzinfo=datetime.timezone.utc)
+
+
+def _hora(carimbo: str) -> str:
+    return f"{tempo.para_local(_instante(carimbo)):%H:%M}"
+
+
+def _schtasks() -> str:
+    # Caminho inteiro: so' pelo nome, o Windows procuraria o executavel tambem na pasta atual antes do System32
+    return str(Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32" / "schtasks.exe")
+
+
+def _saida(dados: bytes | None) -> str:
+    # o schtasks escreve na pagina de codigo OEM do console (cp850 no Windows em portugues)
+    return (dados or b"").decode("oem" if os.name == "nt" else "utf-8", errors="replace").strip()
+
+
+def disparar_robo(tarefa: str) -> str | None:
+    """Pede ao Windows que inicie agora a tarefa do robo. Comando fixo, como lista de argumentos e sem shell: so' o
+    nome da tarefa (da variavel de ambiente) entra nele. -> None se o Windows aceitou; senao o motivo, cortado em
+    300 caracteres."""
+    try:
+        r = subprocess.run([_schtasks(), "/Run", "/TN", tarefa], stdin=subprocess.DEVNULL, capture_output=True,
+                           timeout=PRAZO_DISPARO)
+    except subprocess.TimeoutExpired:
+        return f"sem resposta em {PRAZO_DISPARO} segundos"
+    except OSError:
+        log.exception("schtasks nao executou")
+        return "agendador de tarefas do Windows indisponível"
+    if r.returncode == 0:
+        return None
+    return (_saida(r.stderr) or _saida(r.stdout) or f"código de saída {r.returncode}")[:MAX_MOTIVO]
+
+
+def _rodada_em_andamento(conn, agora: datetime.datetime):
+    """A rodada mais recente sem fim nem falha, iniciada ha' no maximo 12 minutos. O Windows encerra o robo aos 10:
+    a que passou disso morreu sem avisar e nao segura os pedidos seguintes."""
+    return conn.execute("SELECT * FROM siga_rodadas WHERE terminada_em IS NULL AND iniciada_em >= ? "
+                        "ORDER BY id DESC LIMIT 1", (_carimbo(agora - EM_ANDAMENTO),)).fetchone()
+
+
+def pedir_leitura(conn, usuario_id: int, processo_id: int | None, tarefa: str,
+                  agora: datetime.datetime | None = None) -> dict:
+    """Clique em "Atualizar processo" (`processo_id`) ou "Atualizar todos" (None). O pedido em aberto que ja' cobre o
+    clique (o do mesmo processo, ou um "todos") volta no lugar de um novo. Sem rodada em andamento, pede ao Windows
+    que inicie o robo, fora da transacao (o `schtasks` pode levar ate' 15 s); com rodada, nao dispara, porque a
+    tarefa ignoraria a segunda execucao: o robo atende ao terminar a rodada atual."""
+    agora = agora or tempo.agora_utc()
+    with db.mutacao(conn):
+        if processo_id is not None and conn.execute("SELECT 1 FROM siga_processos WHERE id=?",
+                                                    (processo_id,)).fetchone() is None:
+            raise ValueError(PROCESSO_INEXISTENTE)
+        pedido = conn.execute("SELECT id, processo_id, pedido_em FROM siga_pedidos WHERE rodada_id IS NULL "
+                              "AND (processo_id IS NULL OR processo_id IS ?) ORDER BY id LIMIT 1",
+                              (processo_id,)).fetchone()
+        novo = pedido is None
+        if novo:
+            novo_id = conn.execute("INSERT INTO siga_pedidos (processo_id, usuario_id, pedido_em) VALUES (?,?,?)",
+                                   (processo_id, usuario_id, _carimbo(agora))).lastrowid
+            pedido = conn.execute("SELECT id, processo_id, pedido_em FROM siga_pedidos WHERE id=?",
+                                  (novo_id,)).fetchone()
+        lendo = _rodada_em_andamento(conn, agora) is not None
+    erro = None
+    if not lendo:
+        erro = disparar_robo(tarefa)
+        with db.mutacao(conn):
+            conn.execute("UPDATE siga_pedidos SET disparado_em=?, erro_disparo=? WHERE id=?",
+                         (_carimbo(agora), erro, pedido["id"]))
+    return {"id": pedido["id"], "processo_id": pedido["processo_id"], "pedido_em": tempo.iso_utc(pedido["pedido_em"]),
+            "novo": novo, "disparado": not lendo and erro is None, "erro_disparo": erro}
+
+
+def iniciar_rodada(conn, agora: datetime.datetime | None = None) -> dict:
+    """"Comecei" do robo: o servidor decide o que ler. Completa (todos os processos acompanhados) com pedido "todos"
+    em aberto, ou quando a ultima rodada completa terminada comecou ha' 14 minutos ou mais (ou nunca houve): e' a
+    rodada automatica de 15 em 15 minutos. Senao, so' os processos dos pedidos em aberto. Os pedidos em aberto ficam
+    ligados a' rodada. Sem nada a ler nao grava nada: e' o que o robo recebe quando pergunta, antes de encerrar, se
+    chegou pedido novo."""
+    agora = agora or tempo.agora_utc()
+    with db.mutacao(conn):
+        pedidos = {r[0] for r in conn.execute("SELECT processo_id FROM siga_pedidos WHERE rodada_id IS NULL")}
+        ultima = conn.execute("SELECT MAX(iniciada_em) FROM siga_rodadas WHERE completa=1 "
+                              "AND terminada_em IS NOT NULL").fetchone()[0]
+        por_tempo = ultima is None or agora - _instante(ultima) >= COMPLETA_A_CADA
+        completa = por_tempo or None in pedidos
+        processos = [dict(r) for r in conn.execute("SELECT id, codigo, numero, nome FROM siga_processos ORDER BY id")
+                     if completa or r["id"] in pedidos]
+        if not processos:
+            return {"rodada_id": None, "tipo": None, "processos": []}
+        tipo = "automatica" if por_tempo else "pedido"
+        rodada_id = conn.execute(
+            "INSERT INTO siga_rodadas (tipo, completa, processos, iniciada_em) VALUES (?,?,?,?)",
+            (tipo, int(completa), json.dumps([p["id"] for p in processos]), _carimbo(agora))).lastrowid
+        conn.execute("UPDATE siga_pedidos SET rodada_id=? WHERE rodada_id IS NULL", (rodada_id,))
+    return {"rodada_id": rodada_id, "tipo": tipo,
+            "processos": [{k: p[k] for k in ("codigo", "numero", "nome")} for p in processos]}
+
+
+def _rodada_aberta(conn, rodada_id: int) -> None:
+    r = conn.execute("SELECT terminada_em FROM siga_rodadas WHERE id=?", (rodada_id,)).fetchone()
+    if r is None:
+        raise LookupError(RODADA_INEXISTENTE)
+    if r["terminada_em"] is not None:
+        raise RodadaTerminada(RODADA_TERMINADA)
+
+
+def _motivo(texto: str | None) -> str:
+    return _texto(texto)[:MAX_MOTIVO] or "motivo não informado"
+
+
+def terminar_rodada(conn, rodada_id: int, nao_lidos: list[dict], agora: datetime.datetime | None = None) -> None:
+    """"Terminei" do robo, com os processos que ele nao conseguiu ler (codigo ou numero, e o motivo). As leituras
+    chegam a' parte, por `gravar_leitura`. Confere tudo antes de gravar."""
+    agora = agora or tempo.agora_utc()
+    conferidos = []
+    for n in nao_lidos:
+        codigo, numero = _texto(n.get("codigo")) or None, sem_espacos(n.get("numero")) or None
+        if not codigo and not numero:
+            raise ValueError(SEM_IDENTIFICACAO)
+        conferidos.append((codigo, numero, _motivo(n.get("motivo"))))
+    with db.mutacao(conn):
+        _rodada_aberta(conn, rodada_id)
+        lista = []
+        for codigo, numero, motivo in conferidos:
+            p = _achar_processo(conn, codigo, numero)
+            lista.append({"processo_id": p["id"] if p else None, "codigo": codigo, "numero": numero, "motivo": motivo})
+        conn.execute("UPDATE siga_rodadas SET terminada_em=?, nao_lidos=? WHERE id=?",
+                     (_carimbo(agora), json.dumps(lista, ensure_ascii=False), rodada_id))
+
+
+def falhar_rodada(conn, rodada_id: int, motivo: str, agora: datetime.datetime | None = None) -> None:
+    """"Cai" do robo: a rodada termina com falha."""
+    agora = agora or tempo.agora_utc()
+    with db.mutacao(conn):
+        _rodada_aberta(conn, rodada_id)
+        conn.execute("UPDATE siga_rodadas SET terminada_em=?, falha=? WHERE id=?",
+                     (_carimbo(agora), _motivo(motivo), rodada_id))
+
+
+def _aviso_robo(tipo: str, texto: str, processo_id: int | None = None) -> dict:
+    return {"tipo": tipo, "processo_id": processo_id, "texto": texto}
+
+
+def situacao_robo(conn, agora: datetime.datetime | None = None) -> dict:
+    """Bloco `robo` da tela SIGA. `estado`: `lendo` (rodada em andamento), `na_fila` (pedido em aberto sem rodada) ou
+    `parado`. Os avisos de rodada valem ate' a proxima rodada terminar sem aquele problema (a falha e os nao lidos
+    sao os da ultima rodada terminada; a rodada sem fim avisa ate' uma seguinte terminar); o do disparo, ate' o
+    proximo disparo aceito."""
+    agora = agora or tempo.agora_utc()
+    rodada = _rodada_em_andamento(conn, agora)
+    abertos = conn.execute("SELECT p.id, p.processo_id, p.pedido_em, u.nome FROM siga_pedidos p "
+                           "JOIN usuarios u ON u.id=p.usuario_id WHERE p.rodada_id IS NULL ORDER BY p.id").fetchall()
+    avisos = []
+    disparo = conn.execute("SELECT erro_disparo FROM siga_pedidos WHERE disparado_em IS NOT NULL "
+                           "ORDER BY disparado_em DESC, id DESC LIMIT 1").fetchone()
+    if disparo is not None and disparo["erro_disparo"]:
+        avisos.append(_aviso_robo("disparo", f"O Windows não iniciou o robô: {disparo['erro_disparo']}"))
+    if rodada is None and any(p["pedido_em"] < _carimbo(agora - SEM_INICIO) for p in abertos):
+        avisos.append(_aviso_robo("sem_inicio",
+                                  "O robô não começou. O usuário dele pode estar desconectado do servidor."))
+    ultima = conn.execute("SELECT * FROM siga_rodadas WHERE terminada_em IS NOT NULL ORDER BY id DESC LIMIT 1"
+                          ).fetchone()
+    if ultima is not None and ultima["falha"] is not None:
+        avisos.append(_aviso_robo("falha", f"A rodada das {_hora(ultima['iniciada_em'])} falhou: {ultima['falha']}"))
+    elif ultima is not None and ultima["nao_lidos"]:
+        nao_lidos = json.loads(ultima["nao_lidos"])
+        hora = _hora(ultima["iniciada_em"])
+        avisos += [_aviso_robo("nao_lido", f"não lido às {hora}: {n['motivo']}", n["processo_id"]) for n in nao_lidos]
+        if nao_lidos:
+            total = len(json.loads(ultima["processos"]))
+            avisos.append(_aviso_robo("nao_lidos", f"{len(nao_lidos)} de {total} processos não foram lidos"))
+    for r in conn.execute("SELECT iniciada_em FROM siga_rodadas WHERE terminada_em IS NULL AND iniciada_em < ? "
+                          "AND id > ? ORDER BY id", (_carimbo(agora - EM_ANDAMENTO), ultima["id"] if ultima else 0)):
+        avisos.append(_aviso_robo("nao_terminou", f"A rodada das {_hora(r['iniciada_em'])} não terminou."))
+    return {
+        "estado": "lendo" if rodada is not None else "na_fila" if abertos else "parado",
+        "rodada": None if rodada is None else {
+            "id": rodada["id"], "tipo": rodada["tipo"], "iniciada_em": tempo.iso_utc(rodada["iniciada_em"]),
+            "processos": json.loads(rodada["processos"])},
+        "pedidos": [{"id": p["id"], "processo_id": p["processo_id"], "usuario": p["nome"],
+                     "pedido_em": tempo.iso_utc(p["pedido_em"])} for p in abertos],
+        "avisos": avisos,
+    }
 
 
 def saude(conn) -> dict:
