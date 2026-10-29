@@ -36,6 +36,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8777", "--directory", "prototipos/login-3d"],
       "port": 8777
+    },
+    {
+      "name": "prototipos",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8778", "--directory", "prototipos"],
+      "port": 8778
     }
   ]
 }
