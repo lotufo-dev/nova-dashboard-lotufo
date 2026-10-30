@@ -400,22 +400,59 @@ def test_ocr_do_pacote_nao_tem_o_teto_de_paginas_da_certidao(monkeypatch):
 
 
 def test_ocr_do_pacote_vai_ao_subprocesso_no_modo_do_pacote_e_com_o_prazo_do_pacote(monkeypatch):
-    """Se a chamada voltar ao modo "ocr" (teto de 20 paginas da certidao), o envelope do DocuSign e' recusado."""
-    pedidos = []
+    """Se a chamada voltar ao modo "ocr" (teto de 20 paginas da certidao), o envelope do DocuSign e' recusado. O
+    prazo do pacote e' de ponta a ponta: a espera pela vaga do OCR sai dele."""
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
     monkeypatch.setattr(leitura_pdf, "configuracao_ocr", lambda: ("tesseract", "tessdata"))
 
-    def com_limite(pdf, modo, limite=None, opcoes=None):
-        pedidos.append((modo, limite, opcoes))
+    class Vaga:
+        def acquire(self, timeout):
+            esperas.append(timeout)
+            relogio[0] += 8.0          # oito segundos na fila do OCR
+            return True
+
+        def release(self):
+            pass
+    esperas, pedidos = [], []
+    monkeypatch.setattr(leitura_pdf, "_VAGA_OCR", Vaga())
+
+    def com_limite(pdf, modo, limite=None, opcoes=None, ate=None):
+        pedidos.append((modo, limite, opcoes, ate))
         return ["capa", ""]
     monkeypatch.setattr(leitura_pdf, "com_limite", com_limite)
+    prazo = max(leitura_pdf.OCR_TEMPO_LIMITE_S, leitura_pdf.TEMPO_PACOTE_S)
     assert leitura_pdf.paginas_por_ocr_com_limite(b"%PDF-") == ["capa", ""]
-    assert pedidos == [("ocr_pacote", max(leitura_pdf.OCR_TEMPO_LIMITE_S, leitura_pdf.TEMPO_PACOTE_S),
-                        ("tesseract", "tessdata"))]
-    # e o OCR da certidao continua como era
+    assert pedidos == [("ocr_pacote", None, ("tesseract", "tessdata"), 1000.0 + prazo)]
+    assert esperas == [leitura_pdf.TEMPO_LIMITE_S]
+    # e o OCR da certidao continua como era: prazo do filho, sem prazo de ponta a ponta
     leitura_pdf.texto_por_ocr_com_limite(b"%PDF-")
-    assert pedidos[1][:2] == ("ocr", leitura_pdf.OCR_TEMPO_LIMITE_S)
+    assert pedidos[1] == ("ocr", leitura_pdf.OCR_TEMPO_LIMITE_S, ("tesseract", "tessdata"), None)
 
 
+def test_com_limite_com_prazo_de_ponta_a_ponta_desconta_a_espera_pela_vaga(monkeypatch):
+    import time
+    esperas = []
+
+    class Lotada:
+        def acquire(self, timeout):
+            esperas.append(timeout)
+            return False
+    monkeypatch.setattr(leitura_pdf, "_VAGAS", Lotada())
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.com_limite(b"", "paginas", ate=time.monotonic() + 3.0)
+    assert 2.0 < esperas[0] <= 3.0               # nao os `TEMPO_LIMITE_S` fixos de antes
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.com_limite(b"", "paginas")
+    assert esperas[1] == leitura_pdf.TEMPO_LIMITE_S
+
+
+def test_com_limite_com_prazo_de_ponta_a_ponta_mata_o_filho_no_que_sobra():
+    import time
+    inicio = time.monotonic()
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.com_limite(b"", "dormir", limite=60.0, ate=inicio + 1.5)   # o `ate` manda, nao os 60 s
+    assert time.monotonic() - inicio < 10.0
 
 
 # --- de quem e' o CNPJ (achado 3 do gate 3) -------------------------------------------

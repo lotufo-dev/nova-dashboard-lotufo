@@ -616,7 +616,7 @@ def _matar(proc) -> None:
         proc.join(2.0)
 
 
-def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None):
+def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, ate: float | None = None):
     """Roda `_trabalho` num subprocesso e devolve o valor -- ou mata o filho no tempo.
 
     E' a garantia de que a leitura de PDF NAO derruba o servidor: o que o pypdf faz com
@@ -652,10 +652,16 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None):
     morte sem resposta viram `TextoInadequado` de falha interna; qualquer outro vira
     `ValueError("PDF inválido (<classe>): <mensagem>")`, que os chamadores ja convertem
     em 415/422.
+
+    `ate` (capa do SMO, #285): prazo de ponta a ponta, em `time.monotonic()`. A espera pela vaga e o tempo do filho
+    saem do que sobra ate' la', em vez de `TEMPO_LIMITE_S` de espera mais `limite` de filho.
     """
     limite = TEMPO_LIMITE_S if limite is None else limite    # lido na chamada: o teste o troca
-    if not _VAGAS.acquire(timeout=TEMPO_LIMITE_S):
+    espera = TEMPO_LIMITE_S if ate is None else max(0.0, ate - time.monotonic())
+    if not _VAGAS.acquire(timeout=espera):
         raise TextoInadequado(_LOTADO)
+    if ate is not None:
+        limite = max(0.0, ate - time.monotonic())
     try:
         ctx = multiprocessing.get_context("spawn")
         recebe, envia = ctx.Pipe(duplex=False)
@@ -754,14 +760,20 @@ def paginas_por_ocr_com_limite(pdf: bytes) -> list[str] | None:
     """OCR das primeiras paginas de um pacote (capa do SMO, #285), uma lista por pagina; None como no
     `texto_por_ocr_com_limite`. O envelope inteiro passa pela guarda e pelo pdfium antes das 2 paginas: prazo do
     pacote, se maior que o do OCR."""
-    return _ocr_com_limite(pdf, "ocr_pacote", max(OCR_TEMPO_LIMITE_S, TEMPO_PACOTE_S))
+    return _ocr_com_limite(pdf, "ocr_pacote", max(OCR_TEMPO_LIMITE_S, TEMPO_PACOTE_S), ponta_a_ponta=True)
 
 
-def _ocr_com_limite(pdf: bytes, modo: str, prazo: float):
+def _ocr_com_limite(pdf: bytes, modo: str, prazo: float, ponta_a_ponta: bool = False):
+    """`ponta_a_ponta`: o `prazo` conta desde a entrada, com as esperas pela vaga do OCR e pela do PDF dentro dele.
+    Sem ele (certidao, como sempre foi): ate' `TEMPO_LIMITE_S` em cada fila, mais `prazo` para o filho."""
+    ate = time.monotonic() + prazo if ponta_a_ponta else None
     cfg = configuracao_ocr()
-    if cfg is None or not _VAGA_OCR.acquire(timeout=TEMPO_LIMITE_S):
+    espera = TEMPO_LIMITE_S if ate is None else min(TEMPO_LIMITE_S, max(0.0, ate - time.monotonic()))
+    if cfg is None or not _VAGA_OCR.acquire(timeout=espera):
         return None
     try:
+        if ate is not None:
+            return com_limite(pdf, modo, None, cfg, ate=ate)
         return com_limite(pdf, modo, prazo, cfg)
     except (TextoInadequado, ValueError):
         return None

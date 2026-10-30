@@ -58,7 +58,7 @@ def test_capa_sem_situacao_aprovada_e_recusada():
     texto = _txt("capa-texto-aprovada.txt").replace("Provisória - APROVADA", "Provisória - EM ANÁLISE")
     r = leitura_smo.ler(texto)
     assert not r["ok"] and r["motivo"] == "nao-aprovada"
-    assert r["campos"]["situacao"] == "EM ANÁLISE"
+    assert r["campos"]["situacao"] == "EM ANALISE"       # o leitor compara sem acento
     assert r["campos"]["valor_centavos"] == 123456789     # o lido volta, mas nao e' proposta
 
 
@@ -68,9 +68,14 @@ def test_situacao_que_so_comeca_por_aprovada_e_recusada():
     assert (r["ok"], r["motivo"], r["campos"]["situacao"]) == (False, "nao-aprovada", "APROVADA COM RESSALVAS")
 
 
-def test_situacao_nao_engole_o_titulo_seguinte():
+def test_sem_o_rotulo_tipo_depois_da_situacao_nao_e_capa():
+    """O "Tipo" e' o unico fim da situacao (vem em todas as capas reais): sem ele, nada emenda o texto seguinte."""
     texto = _txt("capa-texto-aprovada.txt").replace("APROVADA\nTipo\n: Parcial", "APROVADA\nRESUMO FINANCEIRO")
-    r = leitura_smo.ler(texto)
+    assert leitura_smo.ler(texto)["motivo"] == "capa-nao-encontrada"
+
+
+def test_sobra_depois_da_situacao_no_texto():
+    r = leitura_smo.ler(_txt("capa-texto-aprovada.txt").replace("APROVADA\nTipo", "APROVADA.\nTipo"))
     assert r["ok"] and r["campos"]["situacao"] == "APROVADA"
 
 
@@ -104,6 +109,27 @@ def test_reajustamento_negativo():
     assert (c["valor_centavos"], c["reajuste_centavos"], c["total_centavos"]) == (123456789, -3456789, 120000000)
 
 
+def test_primeira_medicao_presente_igual_ao_acumulado_e_proposta():
+    texto = _txt("capa-texto-aprovada.txt").replace("8.765.432,10", "1.234.567,89").replace("9.222.221,11", "1.234.567,89") \
+        .replace("456.789,01", "0,00").replace("98.765,43", "0,00").replace("1.333.333,32", "1.234.567,89")
+    r = leitura_smo.ler(texto)
+    assert r["ok"]
+    c = r["campos"]
+    assert (c["valor_centavos"], c["reajuste_centavos"], c["total_centavos"]) == (123456789, 0, 123456789)
+    assert (c["acumulado_pi_centavos"], c["acumulado_reajuste_centavos"], c["acumulado_total_centavos"]) == \
+        (123456789, 0, 123456789)
+
+
+def test_acrescimo_e_desconto_da_presente_que_o_acumulado_nao_tem_nao_sao_propostos():
+    # presente com acrescimo 100 e desconto 100 (a soma fecha), acumulado sem as duas linhas (zero)
+    texto = _txt("capa-texto-aprovada.txt").replace("98.765,43\nTotal :\n1.333.333,32",
+                                                    "98.765,43\nAcréscimos :\n100,00\nDescontos :\n100,00\n"
+                                                    "Total :\n1.333.333,32")
+    r = leitura_smo.ler(texto)
+    assert "valor_centavos" not in r["campos"] and "descontos_centavos" not in r["campos"]
+    assert "os valores da presente medição passam do acumulado; confira e digite os valores" in r["avisos"]
+
+
 def test_presente_maior_que_o_acumulado_nao_e_proposta():
     # o mesmo digito trocado no PI e no total da presente: a soma fecha, mas passa do acumulado (8.765.432,10)
     texto = _txt("capa-texto-aprovada.txt").replace("1.234.567,89", "9.234.567,89").replace("1.333.333,32",
@@ -115,7 +141,7 @@ def test_presente_maior_que_o_acumulado_nao_e_proposta():
 
 
 def test_bloco_de_valores_irreconhecivel_avisa():
-    texto = _txt("capa-texto-aprovada.txt").replace("Preços iniciais :\n1.234.567,89", "Precos iniciais :\n1.234.567,89")
+    texto = _txt("capa-texto-aprovada.txt").replace("Preços iniciais :\n1.234.567,89", "Preços iniciais :\n1.234.567")
     r = leitura_smo.ler(texto)
     assert r["motivo"] == "campos-ausentes:valor_centavos"
     assert r["avisos"] == ["presente medição: a capa traz o bloco, mas os valores não foram reconhecidos; "
@@ -150,8 +176,17 @@ def _ocr_bom():
     return _txt("capa-ocr.txt").replace("Total: 564.210,00", "Total: 5.642.100,00")
 
 
+def _ler_ocr(texto: str) -> dict:
+    """Como o `ler_pdf` faz: a p. 1 (oficio) e' o contexto, a p. 2 e' a capa."""
+    oficio, capa = texto.split("Período: 01/03/2026 a 31/03/2026.\n", 1)
+    return leitura_smo.ler(capa, ocr=True, contexto=oficio)
+
+
+_AVISO_OCR = "campos lidos por OCR: confira cada um contra o PDF antes de aceitar"
+
+
 def test_capa_lida_por_ocr_sai_com_aviso_de_conferencia():
-    r = leitura_smo.ler(_ocr_bom(), ocr=True)
+    r = _ler_ocr(_ocr_bom())
     assert r["ok"]
     c = r["campos"]
     assert (c["numero"], c["data_realizacao"], c["periodo"]) == (8, "2026-04-02", ("2026-03-01", "2026-03-31"))
@@ -159,38 +194,46 @@ def test_capa_lida_por_ocr_sai_com_aviso_de_conferencia():
     assert c["acumulado_total_centavos"] == 564210000
     assert (c["vigencia_fim"], c["execucao_fim"], c["dias_paralisados"]) == ("2027-06-06", "2027-03-24", 0)
     # erro sistematico do OCR (o mesmo digito trocado em todos os valores) fecha a soma: o aviso e' obrigatorio
-    assert r["avisos"] == ["valores lidos por OCR: confira cada um contra o PDF antes de aceitar"]
+    assert r["avisos"] == [_AVISO_OCR]
+
+
+def test_ocr_sem_bloco_financeiro_lido_ainda_avisa():
+    texto = _ocr_bom().replace("Total: 5.642.100,00", "Total: 1,00").replace("Total: 686.421,50", "Total: 1,00")
+    r = _ler_ocr(texto)
+    assert "valor_centavos" not in r["campos"] and r["campos"]["numero"] == 8
+    assert r["avisos"][-1] == _AVISO_OCR
 
 
 def test_ocr_com_acumulado_que_nao_fecha_nao_propoe_a_presente():
-    r = leitura_smo.ler(_txt("capa-ocr.txt"), ocr=True)
+    r = _ler_ocr(_txt("capa-ocr.txt"))
     assert r["motivo"] == "campos-ausentes:valor_centavos"
     assert not {"valor_centavos", "acumulado_pi_centavos"} & set(r["campos"])
     assert r["avisos"] == ["acumulado: os valores da capa não fecham com o total impresso; confira e digite os valores",
                            "sem o acumulado lido não há como conferir os valores da presente medição; "
-                           "digite os valores"]
+                           "digite os valores", _AVISO_OCR]
 
 
 def test_ocr_que_emenda_os_rotulos_nao_poe_o_acumulado_na_presente():
     texto = _ocr_bom().replace("Faturamento realizado acumulado\n", "Faturamento realizado acumulado\n"
                                                                    "Faturamento realizado da presente medição\n", 1)
     texto = texto.replace("Total: 5.642.100,00\nFaturamento realizado da presente medição\n", "Total: 5.642.100,00\n")
-    r = leitura_smo.ler(texto, ocr=True)
+    r = _ler_ocr(texto)
     assert "valor_centavos" not in r["campos"]
 
 
-def test_ocr_numero_so_com_o_extenso_que_o_confirma():
+def test_ocr_numero_so_com_o_extenso_de_outra_pagina():
     # sequencial e ordinal lidos errados juntos ("8 - 8º" -> "82 - 82º"): o "(oitava)" do oficio nao confirma
-    r = leitura_smo.ler(_ocr_bom().replace("8-8º Medição", "82-82º Medição"), ocr=True)
+    r = _ler_ocr(_ocr_bom().replace("8-8º Medição", "82-82º Medição"))
     assert r["motivo"] == "campos-ausentes:numero" and "numero" not in r["campos"]
     assert r["avisos"][0] == ("a leitura por OCR traz a 82ª medição, sem o número por extenso que a confirme; "
                               "confira e digite o número")
+    capa = _ocr_bom().split("Período: 01/03/2026 a 31/03/2026.\n", 1)[1]
     # capa sozinha, sem oficio: nao ha confirmacao, a pessoa digita
-    capa = _ocr_bom().split("MEDIÇÃO PROVISÓRIA\n", 1)[1].split("Período: 01/03/2026 a 31/03/2026.\n", 1)[1]
     assert "numero" not in leitura_smo.ler(capa, ocr=True)["campos"]
-    # o oficio em outra pagina (contexto) confirma
-    oficio = _ocr_bom().split("Período: 01/03/2026 a 31/03/2026.\n", 1)[0]
-    assert leitura_smo.ler(capa, ocr=True, contexto=oficio)["campos"]["numero"] == 8
+    # o extenso na propria capa (OCR que duplicou o texto) nao confirma o proprio erro
+    duplicada = capa.replace("Observação :", "Observação : 8ª (oitava) Medição")
+    assert "numero" not in leitura_smo.ler(duplicada, ocr=True)["campos"]
+    assert _ler_ocr(_ocr_bom())["campos"]["numero"] == 8
 
 
 def test_ordinal_por_extenso():
@@ -202,15 +245,40 @@ def test_ordinal_por_extenso():
 
 def test_ocr_com_ordinal_em_letra_e_travessao():
     texto = _ocr_bom().replace("8-8º Medição Provisória - APROVADA", "8 — 8a Medição Provisória — APROVADA")
-    r = leitura_smo.ler(texto, ocr=True)
+    r = _ler_ocr(texto)
     assert r["ok"] and r["campos"]["numero"] == 8
 
 
+def test_ocr_sem_acento_e_em_outra_caixa():
+    texto = _ocr_bom().replace("Relatório de Capa da Medição", "RELATORIO DE CAPA DA MEDICAO") \
+        .replace("Capa da Medição Reajustada", "CAPA DA MEDICAO REAJUSTADA") \
+        .replace("8-8º Medição Provisória", "8-8º MEDICAO PROVISORIA").replace("RESUMO FINANCEIRO", "Resumo Financeiro") \
+        .replace("Preços iniciais", "PRECOS INICIAIS").replace("Data de realização", "Data de realizacao")
+    r = _ler_ocr(texto)
+    assert r["ok"] and (r["campos"]["numero"], r["campos"]["valor_centavos"]) == (8, 65432100)
+
+
+def test_ocr_sobra_depois_da_situacao_nao_recusa():
+    for sobra in ("APROVADA.", "APROVADA |"):
+        r = _ler_ocr(_ocr_bom().replace("APROVADA Tipo", sobra + " Tipo"))
+        assert r["ok"] and r["campos"]["situacao"] == "APROVADA", sobra
+
+
+def test_ocr_situacao_com_minuscula_cai_para_digitacao():
+    r = _ler_ocr(_ocr_bom().replace("APROVADA Tipo", "Aprovada Tipo"))
+    assert (r["ok"], r["motivo"], r["campos"]) == (False, "capa-nao-encontrada", {})
+
+
 def test_ocr_realizacao_antes_do_fim_do_periodo_nao_e_proposta():
-    r = leitura_smo.ler(_ocr_bom().replace("Data de realização: 02/04/2026", "Data de realização: 02/04/2025"),
-                        ocr=True)
+    r = _ler_ocr(_ocr_bom().replace("Data de realização: 02/04/2026", "Data de realização: 02/04/2025"))
     assert r["motivo"] == "campos-ausentes:data_realizacao" and "data_realizacao" not in r["campos"]
     assert "a data de realização é anterior ao fim do período da medição; confira a data" in r["avisos"]
+
+
+def test_ocr_realizacao_sem_periodo_lido_nao_e_proposta():
+    r = _ler_ocr(_ocr_bom().replace("Período da medição : 01/03/2026 a 31/03/2026", "Período da medição : 01/03/2026"))
+    assert "periodo" not in r["campos"] and "data_realizacao" not in r["campos"]
+    assert "sem o período da medição lido não há como conferir a data de realização; digite a data" in r["avisos"]
 
 
 # --- ler_pdf: PDF de texto e PDF imagem --------------------------------------------------------------------
@@ -240,6 +308,16 @@ def test_campos_saem_so_da_pagina_da_capa(monkeypatch):
     monkeypatch.setattr(leitura_pdf, "primeiras_paginas_com_limite", lambda pdf: [ficha, _paginas_texto()[1]])
     r = leitura_smo.ler_pdf(b"%PDF-")
     assert r["ok"] and r["campos"]["vigencia_fim"] == "2027-02-24"
+
+
+def test_marcas_da_capa_espalhadas_em_paginas_diferentes_nao_fazem_capa(monkeypatch):
+    certificado = ("Resumo do certificado Assunto: Complete com o Docusign: 02 - Relatório de Capa da Medição.pdf "
+                   "7 - 7ª Medição Provisória - APROVADA Tipo de assinatura: eletrônica")
+    relatorio = "Relatório de Resumo da Medição RESUMO FINANCEIRO Data de realização : 14/04/2026"
+    monkeypatch.setattr(leitura_pdf, "primeiras_paginas_com_limite", lambda pdf: [certificado, relatorio])
+    assert leitura_smo.e_capa(certificado + " " + relatorio)          # juntas, teriam as tres marcas
+    r = leitura_smo.ler_pdf(b"%PDF-")
+    assert (r["ok"], r["motivo"], r["campos"], r["fonte"]) == (False, "capa-nao-encontrada", {}, None)
 
 
 def test_pdf_imagem_vai_ao_ocr_do_pacote(monkeypatch):
