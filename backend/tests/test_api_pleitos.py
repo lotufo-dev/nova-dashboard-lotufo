@@ -551,6 +551,65 @@ def test_reemissao_aceita_previsao_digitada_mesmo_com_a_lida_do_pleito_que_ela_r
     assert [(p["origem"], p["pleito_id"]) for p in _previsoes(cid)][-2:] == [("manual", b), ("manual", b)]
 
 
+def _ligar(pid, anterior, reemissao, situacao=None):
+    """A reemissao montada direto no banco (o caminho pela tela pede envio e aditivo, fora do que se testa aqui)."""
+    c = db.get_conn()
+    c.execute("UPDATE pleitos SET reemite_pleito_id=?, reemissao=? WHERE id=?", (anterior, reemissao, pid))
+    if situacao:
+        c.execute("UPDATE pleitos SET situacao=? WHERE id=?", (situacao, pid))
+    c.commit()
+    c.close()
+
+
+def test_digitada_da_reemissao_que_perderia_para_a_lida_de_outro_pleito_e_recusada(api):
+    """D enviado com a lida de 07; A, depois, com a lida de 07 (mais nova, vale); B reemite A e digita 07. Quando B
+    for enviado, a de A sai da conta e a lida de D volta a valer contra a digitada de B: B nunca valeria."""
+    cl, cid, _ = api
+    d, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, d, ("2026-07", 1.0)).status_code == 200
+    assert cl.post(f"/api/pleitos/{d}/enviar", json=corpo).status_code == 200
+    a = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
+    assert _aceitar(cl, a, ("2026-07", 2.0)).status_code == 200
+    _ligar(a, None, None, "enviado")
+    b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "124"}).json()["id"]
+    _ligar(b, a, "cronograma")
+    r = _digitar(cl, b, [{"competencia": "2026-07", "valor_centavos": 7}])
+    assert r.status_code == 422, r.text
+    assert "07/2026 continuaria sendo a lida da planilha do pleito" in r.json()["detail"]
+    assert len(_previsoes(cid)) == 2
+
+
+def test_digitada_da_reiteracao_nao_vale_e_e_recusada(api):
+    """A reiteracao nao derruba o pleito que reitera: a lida de A segue valendo contra a digitada da reiteracao."""
+    cl, cid, _ = api
+    a, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, a, ("2026-07", 1.0)).status_code == 200
+    assert cl.post(f"/api/pleitos/{a}/enviar", json=corpo).status_code == 200
+    b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
+    _ligar(b, a, "reiteracao")
+    r = _digitar(cl, b, [{"competencia": "2026-07", "valor_centavos": 7}])
+    assert r.status_code == 422, r.text
+    assert "07/2026 continuaria sendo a lida da planilha do pleito" in r.json()["detail"]
+
+
+def test_digitada_do_cronograma_novo_depois_da_reiteracao_vale_depois_do_envio(api):
+    """A (lida) -> B reitera A -> C reemite o cronograma de B: enviado C, a de A sai da conta pela cadeia, entao a
+    digitada de C e' aceita e passa a valer."""
+    cl, cid, _ = api
+    a, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, a, ("2026-07", 1.0)).status_code == 200
+    assert cl.post(f"/api/pleitos/{a}/enviar", json=corpo).status_code == 200
+    b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
+    _ligar(b, a, "reiteracao", "enviado")
+    c = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "124"}).json()["id"]
+    _ligar(c, b, "cronograma")
+    r = _digitar(cl, c, [{"competencia": "2026-07", "valor_centavos": 7}])
+    assert r.status_code == 200, r.text
+    _ligar(c, b, "cronograma", "enviado")
+    vig = cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]
+    assert [(p["competencia"], p["valor_previsto_centavos"], p["pleito_id"]) for p in vig] == [("2026-07", 7, c)]
+
+
 def test_digitada_e_descartada_some_da_aba(api):
     cl, cid, _ = api
     pid = _novo_pleito(cl, cid)

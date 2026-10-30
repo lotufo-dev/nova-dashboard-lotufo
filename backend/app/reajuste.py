@@ -66,7 +66,8 @@ def aditivo_depois(conn, contrato_id: int, desde: str | None) -> dict | None:
 ORDEM_ORIGEM = ("apostilamento", "pleito", "manual")
 
 
-def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None) -> list[dict]:
+def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None,
+                       como_enviado: int | None = None) -> list[dict]:
     """Previsao vigente de cada competencia (por data-base e ciclo): a mais recente da origem mais forte.
     As previsoes sao eventos (migracao 043): nada se sobrescreve, a leitura escolhe.
 
@@ -78,17 +79,20 @@ def previsoes_vigentes(conn, contrato_id: int, data_base_mes: str | None = None)
     A reiteracao (issue #277, migracao 050) nao traz cronograma: nao derruba o pleito que reitera. A reemissao do
     cronograma derruba o pleito que ela aponta e, subindo pelas reiteracoes no meio, o pleito que elas reiteram
     (original -> reiteracao -> cronograma novo: o original sai), mas so' depois que a reemissao tem previsoes
-    proprias gravadas (lidas ou digitadas nela)."""
+    proprias gravadas (lidas ou digitadas nela).
+
+    `como_enviado`: le como se esse pleito ja' estivesse enviado (o que ele derrubaria sai da conta). E' a conferencia
+    da gravacao da previsao num pleito ainda em rascunho: a previsao dele tem de ser a que vale depois do envio."""
     ordem = " ".join(f"WHEN '{o}' THEN {i}" for i, o in enumerate(ORDEM_ORIGEM))
-    filtro, args = ("AND p.data_base_mes=?", (contrato_id, contrato_id, data_base_mes)) if data_base_mes is not None \
-        else ("", (contrato_id, contrato_id))
+    filtro, args = ("AND p.data_base_mes=?", (contrato_id, como_enviado, contrato_id, data_base_mes)) \
+        if data_base_mes is not None else ("", (contrato_id, como_enviado, contrato_id))
     rows = conn.execute(
         # `derrubado`: os pleitos cujo cronograma uma reemissao enviada substituiu (sem `reemissao`, antes da 050,
         # a reemissao conta como cronograma)
         # a reemissao so' derruba quando ja' tem previsoes proprias gravadas (a leitura da planilha do pleito e'
         # outro passo): sem elas o previsto do anterior segue, em vez de cair para manual ou zero
         f"WITH RECURSIVE derrubado(id) AS (SELECT r.reemite_pleito_id FROM pleitos r WHERE r.contrato_id=? "
-        f"AND r.situacao = 'enviado' AND r.reemite_pleito_id IS NOT NULL "
+        f"AND (r.situacao = 'enviado' OR r.id = ?) AND r.reemite_pleito_id IS NOT NULL "
         f"AND COALESCE(r.reemissao, 'cronograma') = 'cronograma' "
         f"AND EXISTS (SELECT 1 FROM reajuste_previsoes x WHERE x.pleito_id = r.id) "
         f"UNION SELECT q.reemite_pleito_id FROM derrubado d JOIN pleitos q ON q.id = d.id "

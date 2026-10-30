@@ -376,11 +376,9 @@ def _gravar_previsao(conn, usuario_id: int, pleito_id: int, origem: str, linhas:
                 (p["contrato_id"], p["data_base_mes"], p["ciclo"], x["competencia"], x["valor_centavos"],
                  origem, pleito_id, usuario_id)).lastrowid)
         # a gravada tem de ser a que vale; se outra previsao mais forte continua vencendo, a mutacao desfaz tudo.
-        # A do pleito que este reemite nao conta: ela sai da conta quando a reemissao for enviada (sem isso, a
-        # reemissao com previsao digitada ficaria sem saida: recusada antes do envio, e depois do envio tambem)
-        for r in reajuste.previsoes_vigentes(conn, p["contrato_id"], p["data_base_mes"]):
-            if r["pleito_id"] is not None and r["pleito_id"] == agora["reemite_pleito_id"]:
-                continue
+        # A conta e' a de depois do envio deste pleito (`como_enviado`): a reemissao derruba o que reemite (e a
+        # cadeia de reiteracoes acima), a reiteracao nao derruba nada; o resto do ciclo segue na conta
+        for r in reajuste.previsoes_vigentes(conn, p["contrato_id"], p["data_base_mes"], como_enviado=pleito_id):
             if r["ciclo"] == p["ciclo"] and r["competencia"] in vistas and r["id"] not in novas:
                 c = r["competencia"]
                 raise ValueError(f"A previsão de {c[5:]}/{c[:4]} continuaria sendo {_fonte(conn, r)}, que vale "
