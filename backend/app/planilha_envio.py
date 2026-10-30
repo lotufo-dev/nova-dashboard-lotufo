@@ -13,6 +13,7 @@ Modulo proprio, ao lado de `medicao_planilhas` (registro e revisao, #281) e de `
 envio). O texto do e-mail e' do cadastro (`cartas.yaml`, chave `planilha`).
 """
 import datetime
+import hashlib
 import io
 import zipfile
 
@@ -143,6 +144,11 @@ def _editavel(conn, m: dict) -> dict:
     if m["estado"] not in ESTADOS_ENVIO:
         raise ValueError(f"{medicoes.nome_medicao(m['numero'], m['tipo'])} está "
                          f"{medicoes.rotulo_estado(m['estado'])}: as peças da planilha/carta não mudam mais")
+    # com o e-mail saindo (ou preso), as pecas nao mudam: o que vai e' o que foi lido sob a reserva (gate Sol S5)
+    r = conn.execute(f"SELECT envio_reservado_em, envio_reservado_por FROM {TABELA} WHERE medicao_id=? "
+                     "AND envio_id IS NULL AND envio_reservado_em IS NOT NULL LIMIT 1", (m["id"],)).fetchone()
+    if r is not None:
+        raise envio_reserva.reservado(conn, r["envio_reservado_em"], r["envio_reservado_por"])
     return regras
 
 
@@ -273,12 +279,16 @@ def previa(conn, medicao_id: int, numero_oficio: str, remetente: str | None = No
     return {"medicao_id": medicao_id, "planilha_id": v["id"], "versao": v["versao"], "numero_oficio": oficio,
             "para": para, "copia": copia, "assunto": carta.preencher(textos["email_assunto"], campos).strip(),
             "corpo": carta.preencher(textos["email_corpo"], campos).strip(),
-            "anexos": [{"nome": n, "tamanho": len(b), "origem": o} for n, b, o in anexos], "total": total,
+            "anexos": [{"nome": n, "tamanho": len(b), "sha256": hashlib.sha256(b).hexdigest(), "origem": o}
+                       for n, b, o in anexos], "total": total,
             "limite": correio.MAX_TOTAL, "pendencias": pend}
 
 
 def _conferir_anexos(conferidos: list[dict], atuais: list[dict]) -> None:
-    if sorted((a["nome"], a["tamanho"]) for a in conferidos) != sorted((a["nome"], a["tamanho"]) for a in atuais):
+    """Nome, tamanho e conteudo (sha256): a peca trocada por outra de mesmo nome e tamanho tambem recusa (gate Sol S5)."""
+    def chave(lista):
+        return sorted((a["nome"], a["tamanho"], a["sha256"]) for a in lista)
+    if chave(conferidos) != chave(atuais):
         raise AnexosMudaram("Os anexos mudaram depois da prévia: abra a prévia de novo para conferir o que vai no "
                             "e-mail")
 
@@ -288,7 +298,7 @@ def _conferir_anexos(conferidos: list[dict], atuais: list[dict]) -> None:
 def enviar(conn, usuario: dict, medicao_id: int, numero_oficio: str, para: list[str], copia: list[str], assunto: str,
            corpo: str, anexos_previa: list[dict], justificativa: str | None = None, cco: list[str] | None = None,
            hoje: datetime.date | None = None) -> int:
-    """`anexos_previa` (nome e tamanho) e' obrigatorio, como no envio da nota (gate Sol S1, PR #141): o e-mail leva
+    """`anexos_previa` (nome, tamanho e sha256) e' obrigatorio, como no envio da nota (gate Sol S1, PR #141): o e-mail leva
     o que a pessoa conferiu na previa, e nada sai sem essa conferencia."""
     hoje = hoje or tempo.hoje_local()
     # Tudo o que recusa vem ANTES do e-mail (que nao se desfaz).
@@ -317,7 +327,8 @@ def enviar(conn, usuario: dict, medicao_id: int, numero_oficio: str, para: list[
         c, _, _ = _contexto(conn, m)
         v = conn.execute("SELECT * FROM medicao_planilhas WHERE id=?", (pv["planilha_id"],)).fetchone()
         rotulados = _anexos(conn, c, m, dict(v), pv["numero_oficio"])
-        _conferir_anexos([{"nome": n, "tamanho": len(b)} for n, b, _ in rotulados], pv["anexos"])
+        _conferir_anexos([{"nome": n, "tamanho": len(b), "sha256": hashlib.sha256(b).hexdigest()}
+                          for n, b, _ in rotulados], pv["anexos"])
         envio_id = correio.enviar_e_registrar(conn, usuario, TIPO_ENVIO, para, [x.strip() for x in copia if x.strip()],
                                               assunto, pleitos._html(corpo), [(n, b) for n, b, _ in rotulados],
                                               cco=cco)
@@ -335,18 +346,20 @@ def enviar(conn, usuario: dict, medicao_id: int, numero_oficio: str, para: list[
         conn.execute("INSERT OR IGNORE INTO envio_medicoes (envio_id, medicao_id) VALUES (?,?)", (envio_id, medicao_id))
         m = _medicao(conn, medicao_id)
         antes = {k: m[k] for k in ("estado", "valor_protocolado_centavos", "periodo_inicio", "periodo_fim",
-                                   "planilha_enviada_em", "planilha_envio_origem", "congelada")}
-        # 1a versao enviada: o pedido congela no valor DELA (revisao registrada durante o e-mail nao entra)
+                                   "planilha_enviada_em", "planilha_envio_origem")}
+        # 1a versao enviada: o pedido congela no valor DELA (revisao registrada durante o e-mail nao entra). Congela
+        # pelo estado (medicoes.definir_valor recusa o pedido em planilha/carta), nao por `congelada`: esse marcador
+        # tambem congela o valor original do contrato, e a spec 2026-10-20 §2.1 so' congela o PEDIDO (revisor R3)
         primeira = conn.execute(
             "UPDATE medicoes SET estado='planilha_enviada', planilha_enviada_em=?, planilha_envio_origem='sistema', "
-            "congelada=1, valor_protocolado_centavos=?, valor_protocolado_origem='manual', periodo_inicio=?, "
+            "valor_protocolado_centavos=?, valor_protocolado_origem='manual', periodo_inicio=?, "
             "periodo_fim=? WHERE id=? AND estado='planilha_gerada'",
             (hoje.isoformat(), v["valor_pedido_centavos"], v["periodo_inicio"], v["periodo_fim"], medicao_id)).rowcount
         depois = {"envio_id": envio_id, "versao": v["versao"], "planilha_id": v["id"],
                   "numero_oficio": pv["numero_oficio"], "pendencias": pv["pendencias"], "justificativa": justificativa}
         if primeira:
             depois |= {"estado": "planilha_enviada", "planilha_enviada_em": hoje.isoformat(),
-                       "planilha_envio_origem": "sistema", "congelada": 1,
+                       "planilha_envio_origem": "sistema",
                        "valor_protocolado_centavos": v["valor_pedido_centavos"],
                        "periodo_inicio": v["periodo_inicio"], "periodo_fim": v["periodo_fim"]}
         elif m["estado"] != "planilha_enviada":

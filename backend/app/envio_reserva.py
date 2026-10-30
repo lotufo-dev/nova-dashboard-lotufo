@@ -190,6 +190,10 @@ def liberar_manual(conn, usuario_id: int, tabela: str, id_: int, justificativa: 
                              f"aguarde até {_liberavel(r['envio_reservado_em']).strftime('%H:%M')} antes de liberar "
                              "(pode ainda estar saindo)")
         liberar(conn, t, id_)
-        auditoria.registrar(conn, usuario_id, "envio.liberar", TABELAS[t], id_,
+        entidade, objeto, extra = TABELAS[t], id_, {}
+        if t == "medicao_planilha_envios":     # a auditoria aponta a medicao (com link), nao a linha da reserva
+            entidade, objeto = "medicao", conn.execute(f"SELECT medicao_id FROM {t} WHERE id=?", (id_,)).fetchone()[0]
+            extra = {"tabela": t, "reserva_id": id_}
+        auditoria.registrar(conn, usuario_id, "envio.liberar", entidade, objeto,
                             {"reservado_em": r["envio_reservado_em"], "reservado_por": r["envio_reservado_por"]},
-                            {"justificativa": justificativa, "conferi_enviados": True})
+                            {"justificativa": justificativa, "conferi_enviados": True, **extra})

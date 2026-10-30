@@ -22,6 +22,7 @@ class PreviaIn(BaseModel):
 class AnexoConferido(BaseModel):
     nome: str = Field(max_length=300)
     tamanho: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")      # o conteudo conferido (gate Sol S5), como a previa devolve
 
 
 class EnvioIn(BaseModel):
@@ -32,7 +33,7 @@ class EnvioIn(BaseModel):
     assunto: str = Field(min_length=1, max_length=300)
     corpo: str = Field(max_length=20000)
     justificativa: str | None = Field(default=None, max_length=2000)
-    # os anexos que a pessoa conferiu na previa (nome e tamanho): obrigatorio, como no envio da nota; mudou depois
+    # os anexos que a pessoa conferiu na previa (nome, tamanho e sha256): obrigatorio, como no envio da nota; mudou depois
     # dela, o envio recusa
     anexos_previa: list[AnexoConferido] = Field(max_length=60)
 
@@ -79,6 +80,8 @@ def peca(mid: ID, tipo: str = Form(..., max_length=40), arquivo: UploadFile = Fi
         dados, ext = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=pdfs.TETO_BYTES_PACOTE)), "pdf"
     try:
         planilha_envio.adicionar_peca(conn, usuario["id"], mid, tipo, nome, dados, ext)
+    except envio_reserva.EnvioEmAndamento as e:     # e-mail saindo (ou preso): as pecas nao mudam
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return planilha_envio.situacao(conn, mid)
@@ -90,6 +93,8 @@ def remover_peca(mid: ID, peca_id: ID, usuario: dict = Depends(exigir("editar_ca
     _medicao_existe(conn, mid)
     try:
         planilha_envio.remover_peca(conn, usuario["id"], mid, peca_id)
+    except envio_reserva.EnvioEmAndamento as e:
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return planilha_envio.situacao(conn, mid)

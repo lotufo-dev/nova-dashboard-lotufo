@@ -289,11 +289,6 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         # ja e' barrado pelo congelamento.
         if m["estado"] in ("cancelada", "desistida"):
             raise ValueError(f"Medição em estado final ({m['estado']}) não recebe valores")
-        # Issue #281: da planilha/carta ao boletim, o pedido so' muda por versao nova (com motivo). Vem antes
-        # do congelamento (#282: o envio congela) para a recusa orientar a revisao, nao a reapresentacao
-        if campo == "protocolado" and m["estado"] in ESTADOS_PLANILHA:
-            # depois do boletim nem a revisao e' aceita: so' orienta a revisao onde ela existe (gate Sol, rodada 2)
-            raise ValueError(PEDIDO_DEPOIS_DO_BOLETIM if m["estado"] == "boletim_recebido" else PEDIDO_POR_REVISAO)
         # Congelamento barra ALTERACAO do protocolado, nao o primeiro preenchimento: uma
         # medicao protocolada pela deteccao (fase 6) ou registrada sem valor (pendencia
         # "protocolada sem valor" do painel) ainda precisa receber o valor do oficio uma
@@ -304,6 +299,10 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         # (testes de quebra 10/10/2026, A-16): a 631 virou R$ 1,00 depois da nota e nada avisou.
         if campo == "protocolado" and m["valor_protocolado_origem"] == "espelho":
             raise ValueError("O valor desta medição vem do espelho: para mudar, gere o espelho de novo")
+        # Issue #281: da planilha/carta ao boletim, o pedido so' muda por versao nova (com motivo)
+        if campo == "protocolado" and m["estado"] in ESTADOS_PLANILHA:
+            # depois do boletim nem a revisao e' aceita: so' orienta a revisao onde ela existe (gate Sol, rodada 2)
+            raise ValueError(PEDIDO_DEPOIS_DO_BOLETIM if m["estado"] == "boletim_recebido" else PEDIDO_POR_REVISAO)
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []

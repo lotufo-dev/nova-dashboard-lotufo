@@ -6,7 +6,7 @@ import zipfile
 
 import pytest
 
-from app import cadastro_aplicar, correio, db, envio_reserva, medicao_planilhas, planilha_envio, tempo
+from app import cadastro_aplicar, contratos, correio, db, envio_reserva, medicao_planilhas, planilha_envio, tempo
 from tests.test_api_medicoes import XLSX, _arquivos_planilha
 from tests.test_envio_reserva import CorreioFalso
 from tests.test_protocolo import CARTAS, _contrato
@@ -59,7 +59,7 @@ def _peca(cl, mid, tipo="boletim"):
 
 def _corpo(pv: dict, **extra) -> dict:
     return {"numero_oficio": "337", **{k: pv[k] for k in ("para", "copia", "assunto", "corpo")},
-            "anexos_previa": [{"nome": a["nome"], "tamanho": a["tamanho"]} for a in pv["anexos"]], **extra}
+            "anexos_previa": [{k: a[k] for k in ("nome", "tamanho", "sha256")} for a in pv["anexos"]], **extra}
 
 
 def _pronta(cl, cid, **kw):
@@ -168,8 +168,12 @@ def test_pedido_congela_no_envio_e_so_muda_por_revisao(api):
     cl, cid, _ = api
     mid, pv = _pronta(cl, cid, valor="1.000,01")
     assert cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv)).status_code == 200
+    # o envio congela o PEDIDO (pelo estado), nao o valor original do contrato (revisor R3: `congelada` fica 0)
     assert _linha("SELECT congelada, valor_protocolado_centavos FROM medicoes WHERE id=?", mid) == \
-        {"congelada": 1, "valor_protocolado_centavos": 1_000_01}
+        {"congelada": 0, "valor_protocolado_centavos": 1_000_01}
+    c = db.get_conn()
+    contratos.atualizar(c, _usuario()["id"], cid, {"valor_original_centavos": 200_000_001})
+    c.close()
     r = cl.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "999,99"})
     assert r.status_code == 422 and "revisão" in r.text
     _revisar(cl, mid, "1.234,57")
@@ -297,6 +301,9 @@ def test_reserva_presa_da_planilha_se_libera_pela_rota_de_envios(api):
                                              "justificativa": "conferi os Enviados e não saiu",
                                              "conferi_enviados": True})
     assert r.status_code == 200, r.text
+    # a auditoria aponta a medicao (com link na tela), nao a linha da reserva (revisor R2)
+    assert _linha("SELECT entidade, entidade_id FROM audit_log WHERE acao='envio.liberar' ORDER BY id DESC LIMIT 1") \
+        == {"entidade": "medicao", "entidade_id": str(mid)}
     assert cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv)).status_code == 200
 
 
@@ -357,3 +364,45 @@ def test_obra_sem_nome_curto_nao_poe_barra_no_nome_do_anexo(api):
     mid, pv = _pronta(cl, cid)
     assert [a["nome"] for a in pv["anexos"][:2]] == ["CT-337-LT-2026 - IC 082-2025 - 01ª Medição (07.2026).pdf",
                                                     "Planilha - IC 082-2025 - 01ª Medição (07.2026).zip"]
+
+
+def test_peca_de_3_mb_passa_pelo_limite_de_upload(api):
+    """Revisor R1: a rota de pecas esta' em ROTAS_UPLOAD (sem isso o middleware corta em 2 MB com 413)."""
+    cl, cid, _ = api
+    mid = _planilha(cl, cid)
+    grande = b"%PDF-1.4 " + b"0" * (3 * 1024 * 1024)
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha/pecas", data={"tipo": "fotos"},
+                files={"arquivo": ("fotos.pdf", grande, "application/pdf")})
+    assert r.status_code == 200, r.text
+
+
+def test_peca_trocada_por_outra_de_mesmo_nome_e_tamanho_recusa_o_envio(api, monkeypatch):
+    """Gate Sol S5: a conferencia da previa e' pelo conteudo (sha256), nao so' pelo nome e tamanho."""
+    cl, cid, _ = api
+    mid = _planilha(cl, cid)
+    s = _peca(cl, mid, "fotos").json()
+    pv = cl.post(f"/api/medicoes/{mid}/envio-planilha/previa", json={"numero_oficio": "337"}).json()
+    cl.post(f"/api/medicoes/{mid}/envio-planilha/pecas/{s['pecas'][0]['id']}/remover")
+    assert cl.post(f"/api/medicoes/{mid}/envio-planilha/pecas", data={"tipo": "fotos"},
+                   files={"arquivo": ("fotos.pdf", b"%PDF-1.4 FOTOS", "application/pdf")}).status_code == 200
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv, justificativa="sem memória por enquanto"))
+    assert r.status_code == 422 and r.json()["detail"]["codigo"] == "ANEXOS_MUDARAM"
+    assert falso.enviados == []
+
+
+def test_pecas_nao_mudam_com_o_envio_reservado(api):
+    """Gate Sol S5: com o e-mail saindo (ou preso), anexar ou remover peca da' 409."""
+    cl, cid, _ = api
+    mid, pv = _pronta(cl, cid)
+    peca_id = cl.get(f"/api/medicoes/{mid}").json()["envio_planilha"]["pecas"][0]["id"]
+    c = db.get_conn()
+    c.execute("INSERT INTO medicao_planilha_envios (medicao_id, planilha_id, envio_reservado_em, envio_reservado_por) "
+              "VALUES (?,?,datetime('now'),?)", (mid, pv["planilha_id"], _usuario()["id"]))
+    c.commit(); c.close()
+    r = _peca(cl, mid, "fotos")
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ENVIO_RESERVADO"
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha/pecas/{peca_id}/remover")
+    assert r.status_code == 409
+    assert [p["id"] for p in cl.get(f"/api/medicoes/{mid}").json()["envio_planilha"]["pecas"]] == [peca_id]
