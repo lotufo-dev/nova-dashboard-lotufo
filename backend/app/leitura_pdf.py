@@ -430,11 +430,16 @@ def leitor_de_pdf(pdf: bytes, pacote: bool = False) -> pypdf.PdfReader:
     upload que arquiva), sem cada uma lembrar de chama-la. E e' AQUI o unico lugar em
     que ela roda -- ou seja, sempre dentro do subprocesso de `com_limite`.
     """
+    _guarda_de_streams(pdf, pacote)
+    return pypdf.PdfReader(io.BytesIO(pdf))
+
+
+def _guarda_de_streams(pdf: bytes, pacote: bool) -> None:
+    """Os tetos da pre-checagem num lugar so' (o leitor de texto e o OCR usam os mesmos)."""
     if pacote:     # bloco 5: pacote de protocolo (paginas escaneadas em branco comprimem > 50:1)
         conferir_streams(pdf, TETO_STREAM_PACOTE, TETO_STREAMS_PACOTE)
     else:
         conferir_streams(pdf)
-    return pypdf.PdfReader(io.BytesIO(pdf))
 
 
 def texto_de_pdf(pdf: bytes) -> str:
@@ -500,10 +505,7 @@ def texto_por_ocr(pdf: bytes, exe: str, tessdata: str, pacote: bool = False) -> 
     """
     import pypdfium2 as pdfium    # so' o filho do OCR carrega o pdfium
 
-    if pacote:
-        conferir_streams(pdf, TETO_STREAM_PACOTE, TETO_STREAMS_PACOTE)
-    else:
-        conferir_streams(pdf)      # a mesma guarda de bomba da leitura de texto
+    _guarda_de_streams(pdf, pacote)    # a mesma guarda de bomba da leitura de texto
     doc = pdfium.PdfDocument(pdf)
     try:
         if not pacote and len(doc) > TETO_PAGINAS:
@@ -531,9 +533,18 @@ def texto_por_ocr(pdf: bytes, exe: str, tessdata: str, pacote: bool = False) -> 
 
 def primeiras_paginas(pdf: bytes) -> list[str]:
     """Texto das primeiras `OCR_PAGINAS` paginas, sem teto de paginas (capa do SMO, #285: o pacote do DocuSign tem
-    centenas). Guarda de streams do pacote; cada pagina com o teto de caracteres. Roda no filho de `com_limite`."""
-    return [(p.extract_text() or "")[:TETO_CARACTERES_PAGINA]
-            for p in leitor_de_pdf(pdf, pacote=True).pages[:OCR_PAGINAS]]
+    centenas). Guarda de streams do pacote. Roda no filho de `com_limite`."""
+    return [_texto_da_pagina(p) for p in leitor_de_pdf(pdf, pacote=True).pages[:OCR_PAGINAS]]
+
+
+def _texto_da_pagina(p) -> str:
+    # Planilha impressa sai com milhares de espacos; e o carimbo do DocuSign costuma vir no FIM do
+    # texto da pagina. Espaco repetido vira um so', e pagina longa guarda o comeco e o fim.
+    t = re.sub(r"[ \t]{2,}", " ", p.extract_text() or "")
+    if len(t) > TETO_CARACTERES_PAGINA:
+        metade = TETO_CARACTERES_PAGINA // 2
+        t = t[:metade] + "\n" + t[-metade:]
+    return t
 
 
 def textos_por_pagina(pdf: bytes, teto_paginas: int) -> list[str]:
@@ -542,16 +553,7 @@ def textos_por_pagina(pdf: bytes, teto_paginas: int) -> list[str]:
     if len(paginas) > teto_paginas:
         raise TextoInadequado(f"O PDF tem {len(paginas)} páginas, acima do limite de {teto_paginas} "
                               f"— confira o arquivo.")
-    out = []
-    for p in paginas:
-        # Planilha impressa sai com milhares de espacos; e o carimbo do DocuSign costuma vir no FIM do
-        # texto da pagina. Espaco repetido vira um so', e pagina longa guarda o comeco e o fim.
-        t = re.sub(r"[ \t]{2,}", " ", p.extract_text() or "")
-        if len(t) > TETO_CARACTERES_PAGINA:
-            metade = TETO_CARACTERES_PAGINA // 2
-            t = t[:metade] + "\n" + t[-metade:]
-        out.append(t)
-    return out
+    return [_texto_da_pagina(p) for p in paginas]
 
 
 # --- leitura em subprocesso com limite de tempo ---------------------------------------
@@ -745,7 +747,9 @@ def texto_por_ocr_com_limite(pdf: bytes, pacote: bool = False) -> str | None:
     if cfg is None or not _VAGA_OCR.acquire(timeout=TEMPO_LIMITE_S):
         return None
     try:
-        return com_limite(pdf, "ocr_pacote" if pacote else "ocr", OCR_TEMPO_LIMITE_S, cfg)
+        # o envelope inteiro passa pela guarda e pelo pdfium antes das 2 paginas: prazo do pacote, se maior
+        prazo = max(OCR_TEMPO_LIMITE_S, TEMPO_PACOTE_S) if pacote else OCR_TEMPO_LIMITE_S
+        return com_limite(pdf, "ocr_pacote" if pacote else "ocr", prazo, cfg)
     except (TextoInadequado, ValueError):
         return None
     finally:

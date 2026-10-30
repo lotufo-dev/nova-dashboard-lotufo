@@ -35,8 +35,11 @@ _NUM = r"\s*:\s*(-?\s?\d{1,3}(?:\.\d{3})*,\d{2})"
 # Acrescimos e Descontos so' aparecem em algumas capas (MT-401, Estacoes); o desconto vem ora com sinal, ora sem.
 _BLOCO = (r"\s*Preços iniciais" + _NUM + r"\s*Reajustamento" + _NUM + r"(?:\s*Acréscimos" + _NUM + r")?"
           r"(?:\s*Descontos" + _NUM + r")?\s*Total" + _NUM)
-_MEDICAO = re.compile(r"\b(\d{1,3})\s*-\s*(\d{1,3})\s*[ªº°]?\s*Medição (Provisória|Final)\s*-\s*"
-                      r"([A-ZÀ-Ý]+(?![a-zà-ÿ])(?: [A-ZÀ-Ý]+(?![a-zà-ÿ]))*)")
+# "26 - 26ª Medição Provisória - APROVADA"; o OCR troca o ª por "a"/"o" e o traco por "–"/"—". A situacao pega ate'
+# duas palavras em maiusculas (o texto achatado pode emendar "APROVADA RESUMO FINANCEIRO").
+_TRACO = r"\s*[-–—]\s*"
+_MEDICAO = re.compile(r"\b(\d{1,3})" + _TRACO + r"(\d{1,3})\s*(?:[ªº°]|[ao](?=\s))?\s*Medição (Provisória|Final)"
+                      + _TRACO + r"([A-ZÀ-Ý]+(?![a-zà-ÿ])(?: [A-ZÀ-Ý]+(?![a-zà-ÿ]))?)")
 
 
 def _centavos(texto: str) -> int:
@@ -73,6 +76,8 @@ def _bloco(rotulo: str, plano: str, nomes: tuple[str, str, str], c: dict, avisos
     Acrescimo ou desconto na presente medicao vira aviso (o valor da nota pode nao ser o PI); no acumulado, nao."""
     m = re.search(rotulo + _BLOCO, plano)
     if not m:
+        if rotulo in plano:
+            avisos.append(f"{quem}: a capa traz o bloco, mas os valores não foram reconhecidos; digite os valores")
         return
     pi, reaj, acrescimos, descontos, total = (_centavos(x) if x else 0 for x in m.groups())
     if pi + reaj + acrescimos - abs(descontos) != total:
@@ -97,19 +102,20 @@ def ler(texto: str, ocr: bool = False) -> dict:
         return _resultado("sem-texto", {}, [])
     if not _e_capa(plano):
         return _resultado("capa-nao-encontrada", {}, [])
-    plano = plano[plano.find("Capa da Medição"):]      # o oficio da p. 1, quando vem, fica de fora
     c: dict = {}
     avisos: list[str] = []
 
     m = _MEDICAO.search(plano)
     sequencial, ordinal = int(m.group(1)), int(m.group(2))
-    if ordinal > 0:
+    if ocr and sequencial != ordinal:
+        # no texto e' comum (medicao reapresentada, medicao final); no OCR pode ser leitura errada ("8º" lido "82"),
+        # e o numero nao e' proposto
+        avisos.append(f"a leitura da capa traz {sequencial} no sequencial do SMO e {ordinal}ª no nome da medição; "
+                      "confira e digite o número")
+    elif ordinal > 0:
         c["numero"] = ordinal
-    if ocr and sequencial != ordinal:     # no texto e' comum (medicao reapresentada); no OCR pode ser erro de leitura
-        avisos.append(f"a capa traz {sequencial} no sequencial do SMO e {ordinal}ª no nome da medição; "
-                      "vale o da medição, confira")
     c["tipo_medicao"] = "final" if m.group(3) == "Final" else "provisoria"
-    c["situacao"] = m.group(4)
+    c["situacao"] = "APROVADA" if m.group(4).split()[0] == "APROVADA" else m.group(4)
 
     m = re.search(r"Período da medição\s*:\s*" + _DATA + _ATE + _DATA, plano)
     if m:
@@ -153,7 +159,10 @@ def ler_pdf(pdf: bytes) -> dict:
     (PDF de imagem, como os envelopes do BRT Lote 1), tenta o OCR local das mesmas paginas; sem OCR instalado ou com
     OCR que falhou, devolve o resultado do texto e a pessoa digita.
     """
-    texto = "\n".join(leitura_pdf.primeiras_paginas_com_limite(pdf))
+    try:
+        texto = "\n".join(leitura_pdf.primeiras_paginas_com_limite(pdf))
+    except (leitura_pdf.TextoInadequado, ValueError):
+        texto = ""      # o pypdf nao abriu (ou fila, ou prazo): o OCR ainda pode ler; senao a pessoa digita
     lido = ler(texto)
     if lido["motivo"] not in ("sem-texto", "capa-nao-encontrada"):
         return {**lido, "fonte": "texto"}

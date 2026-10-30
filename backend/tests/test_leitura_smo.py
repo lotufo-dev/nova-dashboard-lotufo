@@ -98,13 +98,40 @@ def test_capa_lida_por_ocr_e_soma_que_nao_fecha_nao_e_proposta():
     assert r["avisos"] == ["acumulado: os valores da capa não fecham com o total impresso; confira e digite os valores"]
 
 
-def test_no_ocr_ordinal_diferente_do_sequencial_avisa():
-    texto = _txt("capa-ocr.txt").replace("8-8º Medição", "8-82 Medição")
+def test_no_ocr_ordinal_diferente_do_sequencial_nao_propoe_o_numero():
+    texto = _txt("capa-ocr.txt").replace("8-8º Medição", "8-82 Medição")      # "8º" lido como "82"
     r = leitura_smo.ler(texto, ocr=True)
-    assert r["campos"]["numero"] == 82
+    assert r["motivo"] == "campos-ausentes:numero" and "numero" not in r["campos"]
     assert any("sequencial do SMO" in a for a in r["avisos"])
     # no texto do pypdf a diferenca e' comum (medicao reapresentada) e nao avisa
-    assert leitura_smo.ler(_txt("capa-texto-final-descontos.txt"))["campos"]["numero"] == 32
+    r = leitura_smo.ler(_txt("capa-texto-final-descontos.txt"))
+    assert r["campos"]["numero"] == 32 and not any("sequencial" in a for a in r["avisos"])
+
+
+def test_ocr_com_ordinal_em_letra_e_travessao():
+    texto = _txt("capa-ocr.txt").replace("8-8º Medição Provisória - APROVADA", "8 — 8a Medição Provisória — APROVADA")
+    r = leitura_smo.ler(texto, ocr=True)
+    assert r["ok"] and r["campos"]["numero"] == 8
+
+
+def test_situacao_nao_engole_o_titulo_seguinte():
+    texto = _txt("capa-texto-aprovada.txt").replace("APROVADA\nTipo\n: Parcial", "APROVADA\nRESUMO FINANCEIRO")
+    r = leitura_smo.ler(texto)
+    assert r["ok"] and r["campos"]["situacao"] == "APROVADA"
+
+
+def test_titulo_da_capa_so_no_rodape_nao_quebra_a_leitura():
+    """O pypdf pode por o "Relatório de Capa da Medição" no fim do texto da pagina (capa do BRT)."""
+    r = leitura_smo.ler("Provisória : 7 - 7ª Medição Provisória - APROVADA Tipo Relatório de Capa da Medição")
+    assert r["campos"]["numero"] == 7 and r["motivo"] == "campos-ausentes:data_realizacao,valor_centavos"
+
+
+def test_bloco_de_valores_irreconhecivel_avisa():
+    texto = _txt("capa-texto-aprovada.txt").replace("Preços iniciais :\n1.234.567,89", "Precos iniciais :\n1.234.567,89")
+    r = leitura_smo.ler(texto)
+    assert r["motivo"] == "campos-ausentes:valor_centavos"
+    assert r["avisos"] == ["presente medição: a capa traz o bloco, mas os valores não foram reconhecidos; "
+                           "digite os valores"]
 
 
 # --- ler_pdf: PDF de texto e PDF imagem --------------------------------------------------------------------
@@ -139,6 +166,17 @@ def test_pdf_imagem_sem_ocr_devolve_vazio_para_digitar(monkeypatch):
     r = leitura_smo.ler_pdf(b"%PDF-")          # o conftest desliga o OCR
     assert (r["ok"], r["motivo"], r["fonte"], r["campos"]) == (False, "sem-texto", None, {})
     assert r["faltando"] == list(leitura_smo.CAMPOS)
+
+
+def test_pdf_que_o_leitor_de_texto_recusa_ainda_vai_ao_ocr(monkeypatch):
+    def recusa(pdf):
+        raise ValueError("PDF inválido (PdfReadError): xref")
+    monkeypatch.setattr(leitura_pdf, "primeiras_paginas_com_limite", recusa)
+    monkeypatch.setattr(leitura_pdf, "texto_por_ocr_com_limite", lambda pdf, pacote=False: _txt("capa-ocr.txt"))
+    r = leitura_smo.ler_pdf(b"%PDF-")
+    assert r["ok"] and r["fonte"] == "ocr"
+    monkeypatch.setattr(leitura_pdf, "texto_por_ocr_com_limite", lambda pdf, pacote=False: None)
+    assert (leitura_smo.ler_pdf(b"%PDF-")["motivo"], leitura_smo.ler_pdf(b"%PDF-")["fonte"]) == ("sem-texto", None)
 
 
 def test_ocr_que_nao_acha_capa_fica_com_o_resultado_do_texto(monkeypatch):
