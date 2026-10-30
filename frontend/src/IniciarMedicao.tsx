@@ -75,10 +75,12 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
     if (typeof d.showModal === "function") d.showModal(); else d.setAttribute("open", "");
   }, []);
 
-  const grupos = porContratante(filtrarObras(obras, termo));
+  const visiveis = filtrarObras(obras, termo);
+  const grupos = porContratante(visiveis);
   // jsdom (testes) nao implementa close(): la' o fechar avisa direto quem abriu
   const fechar = () => { const d = janela.current; if (d && typeof d.close === "function") d.close(); else aoFechar(); };
-  const obra = obras.find(o => o.contrato_id === escolhida) ?? null;
+  // a obra escolhida que a busca esconde não vale: o rodapé e o botão seguiriam com ela sem ninguém ver qual é
+  const obra = visiveis.find(o => o.contrato_id === escolhida) ?? null;
 
   function sugerir(o: ObraResumo, t: Tipo) {
     const u = lerSerie(o, t)?.ultima ?? null;
@@ -129,7 +131,8 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
           <button type="button" className="btn btn--primario" onClick={() => ir_({ tela: "medicao", obra: o.contrato_id, id: serie.prevista_id as number })}>
             Começar a {serie.prevista_numero}ª{de} pelo espelho</button></div></>;
     }
-    const pronto = /^[1-9][0-9]{0,2}$/.test(numero) && competencia !== "";
+    const numeroOk = /^[1-9][0-9]{0,2}$/.test(numero);
+    const pronto = numeroOk && competencia !== "";
     return <>{escolhaTipo}
       <div className="iniciar__campos">
         <label className="iniciar__campo" htmlFor="iniciar-numero"><span>Nº da medição{de}</span>
@@ -141,7 +144,7 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
       <div className="iniciar__botoes">{cancelar}
         <button type="button" className="btn btn--primario" disabled={!pronto}
           onClick={() => ir_({ tela: "nova-medicao", obra: o.contrato_id }, { numero, competencia, ...(tipo === "projeto" ? { tipo } : {}) })}>
-          {numero ? `Começar a ${numero}ª${de} pelo espelho` : "Informe o número"}</button></div></>;
+          {!numeroOk ? "Informe o número" : competencia === "" ? "Informe a competência" : `Começar a ${numero}ª${de} de ${o.obra} pelo espelho`}</button></div></>;
   }
 
   return (

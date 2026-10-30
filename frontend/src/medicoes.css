@@ -161,9 +161,9 @@
 .iniciar__fechar { width: 36px; height: 36px; flex: none; padding: 0; justify-content: center; border: 0; background: none; color: var(--texto-2); border-radius: var(--raio-ctrl); cursor: pointer; display: inline-flex; align-items: center; }
 .iniciar__fechar:hover { background: var(--hover); }
 .iniciar__busca { height: 44px; flex: none; margin: 0 24px 12px; width: auto; }
-.iniciar__lista { flex: 1 1 auto; min-height: 120px; overflow-y: auto; border-top: 1px solid var(--linha); padding: 4px 12px 8px; }
+.iniciar__lista { flex: 1 1 auto; min-height: 120px; overflow-y: auto; border-top: 1px solid var(--linha); padding: 0 12px 8px; }
 .iniciar__contratante {
-  position: sticky; top: 0; z-index: 1; margin: 0; padding: 12px 12px 6px; background: var(--superficie);
+  position: sticky; top: 0; z-index: 1; margin: 0; padding: 12px 12px 8px; background: var(--superficie); box-shadow: 0 -1px 0 var(--superficie);
   font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--texto-2);
 }
 .iniciar__obra { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 12px; border-radius: var(--raio-ctrl); cursor: pointer; }
@@ -200,7 +200,7 @@
   .iniciar { width: 100vw; max-width: 100vw; max-height: calc(100dvh - 24px); margin: auto 0 0; border-radius: 12px 12px 0 0; }
   .iniciar__cabeca { padding: 18px 16px 10px; }
   .iniciar__busca { margin: 0 16px 10px; }
-  .iniciar__lista { padding: 4px 4px 8px; }
+  .iniciar__lista { padding: 0 4px 8px; }
   .iniciar__rodape { padding: 14px 16px 16px; }
   .iniciar__botoes { flex-direction: column-reverse; }
   .iniciar__botoes .btn { width: 100%; }
