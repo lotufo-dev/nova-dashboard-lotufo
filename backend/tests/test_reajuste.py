@@ -48,6 +48,30 @@ def test_pleito_enviado_vira_apostilamento_pendente_e_apostilamento_fecha(cenari
     r = reajuste.ciclos(c, ids["contrato"], D(2026, 9, 10))[0]
     assert (r["situacao"], r["dias"]) == ("apostilamento_pendente", 92)
     ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76"})
+    # o cadastro liga o pleito ao termo que o atendeu (issue #271): e' essa ligacao que fecha o ciclo
+    c.execute("UPDATE pleitos SET instrumento_chave='apostilamento_reajuste-2026-09-15'"); c.commit()
+    assert reajuste.ciclos(c, ids["contrato"], D(2026, 9, 20))[0]["situacao"] == "apostilado"
+
+
+def test_termo_do_ciclo_sem_ligacao_nao_atende_o_pleito_vigente(cenario):
+    # gate Sol (PR #317): com pleito enviado, quem fecha o ciclo e' o termo ligado a ele; termo do ciclo que nao o
+    # atendeu (ex.: reemissao enviada depois do termo) deixa o apostilamento pendente, com o aviso
+    c, ids = cenario
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76"})
+    r = reajuste.ciclos(c, ids["contrato"], D(2026, 9, 20))[0]
+    assert (r["situacao"], r["dias"], r["apostilamento"]) == ("apostilamento_pendente", 102, None)
+    assert [a["tipo"] for a in reajuste.avisos(c, D(2026, 9, 20))] == ["reajuste_apostilamento"]
+    c.execute("UPDATE pleitos SET instrumento_chave='apostilamento_reajuste-2026-09-15'"); c.commit()
+    r = reajuste.ciclos(c, ids["contrato"], D(2026, 9, 20))[0]
+    assert (r["situacao"], r["apostilamento"]["chave"]) == ("apostilado", "apostilamento_reajuste-2026-09-15")
+    assert reajuste.avisos(c, D(2026, 9, 20)) == []
+
+
+def test_sem_pleito_enviado_o_termo_do_ciclo_fecha_o_ciclo(cenario):
+    # pleito feito fora do sistema e nao registrado: nao ha' pleito a ligar, o termo do ciclo basta
+    c, ids = cenario
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76"})
     assert reajuste.ciclos(c, ids["contrato"], D(2026, 9, 20))[0]["situacao"] == "apostilado"
 
 

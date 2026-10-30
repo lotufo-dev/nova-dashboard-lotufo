@@ -106,10 +106,7 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
   // o cadastro ligou o pleito ao termo que o atendeu (issue #271): vale em qualquer ciclo, corrente ou passado
   const termo = p.situacao === "enviado" && p.instrumento_chave
     ? apostilamentos.find(i => i.chave === p.instrumento_chave) : undefined;
-  if (termo) {
-    return { classe: "selo--ok", texto: `atendido pelo apostilamento ${termo.numero ?? "s/n"}`,
-      partes: [...envio, `apostilamento de ${fmtDataPura(termo.data)}`] };
-  }
+  if (termo) return { classe: "selo--ok", texto: `atendido pelo apostilamento ${termo.numero ?? "s/n"}`, partes: envio };
   // so' o pleito vigente do ciclo (o enviado mais recente) leva o desfecho; os anteriores (reiterados ou
   // reemitidos) ficam com o envio e a cadeia, sem repetir a espera do ciclo (issue #277)
   if (!c || p.situacao !== "enviado" || (c.pleito && c.pleito.id !== p.id)) return neutro;
@@ -117,9 +114,8 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
     return { classe: "selo--atencao", partes: envio,
       texto: c.dias !== null && c.dias >= 0 ? `sem apostilamento há ${dias(c.dias)}` : "sem apostilamento ainda" };
   }
-  if (c.situacao === "apostilado" && c.apostilamento) {
-    return { classe: "selo--ok", texto: `atendido pelo apostilamento ${c.apostilamento.numero ?? "s/n"}`, partes: envio };
-  }
+  // atendido so' pelo termo ligado ao pleito (acima): sem a ligacao, o ciclo apostilado nao diz que foi este
+  // pleito que o termo atendeu (gate Sol, PR #317)
   return neutro;
 }
 

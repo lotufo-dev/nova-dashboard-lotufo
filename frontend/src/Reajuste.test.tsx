@@ -66,6 +66,23 @@ describe("Reajuste", () => {
     expect(screen.getByText("atendido pelo apostilamento 019/2024/02/12")).toBeTruthy();
   });
 
+  it("pleito vigente sem termo ligado não aparece como atendido, mesmo com o ciclo apostilado (gate Sol, PR #317)", async () => {
+    const termo = { id: 5, chave: "ap-12", tipo: "apostilamento_reajuste", numero: "019/2024/02/12", data: "2026-10-01",
+      dados: { data_base: "2024-06", ciclo: 2026 } };
+    const pleito = { id: 3, tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: "CT-122-LT-2026",
+      data_base_mes: "2024-06", ciclo: 2026, dias: null, justificativa: null, situacao: "enviado", corpo_carta: null,
+      montado_paginas: null, assinado_arquivo: null, nome_documento: null, conferencia: null, pendencias: [],
+      enviado_em: "2026-04-23", envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: null };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "apostilado", dias: null, pleito: { id: 3 }, apostilamento: termo }],
+          pleitos: [pleito], competencias: [] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByText(/CT-122-LT-2026/);
+    expect(screen.queryByText(/atendido pelo apostilamento/)).toBeNull();
+  });
+
   it("pleito de ciclo anterior ligado a um termo também diz que foi atendido (issue #271)", async () => {
     const termo = { id: 4, chave: "ap-09", tipo: "apostilamento_reajuste", numero: "019/2024/02/09", data: "2025-08-01",
       dados: { data_base: "2024-06", ciclo: 2025 } };
