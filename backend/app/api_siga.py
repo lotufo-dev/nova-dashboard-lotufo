@@ -135,9 +135,13 @@ def atualizar(dados: AtualizarIn, usuario: dict = Depends(exigir("ver_paineis"))
         raise HTTPException(422, str(e)) from None
 
 
+class RodadaIn(BaseModel):
+    so_pedidos: bool = False                               # o robo fora do horario: sem rodada automatica (#347)
+
+
 @router.post("/api/siga/rodadas", dependencies=[Depends(exigir_robo)], include_in_schema=False)
-def iniciar_rodada(conn: sqlite3.Connection = Depends(conexao)):
-    return siga.iniciar_rodada(conn)
+def iniciar_rodada(dados: RodadaIn | None = None, conn: sqlite3.Connection = Depends(conexao)):
+    return siga.iniciar_rodada(conn, so_pedidos=bool(dados and dados.so_pedidos))
 
 
 class NaoLidoIn(BaseModel):

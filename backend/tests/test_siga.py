@@ -464,6 +464,19 @@ def test_rodada_de_pedido_le_so_os_processos_pedidos(conn, robo):
     assert siga.iniciar_rodada(conn, AGORA + _min(7))["rodada_id"] is None
 
 
+def test_so_pedidos_nunca_abre_rodada_automatica(conn, robo):
+    # o robo fora do horario (#347): sem pedido nada a ler, mesmo sem rodada completa ha' mais de 14 minutos
+    assert siga.iniciar_rodada(conn, AGORA, so_pedidos=True) == {"rodada_id": None, "tipo": None, "processos": []}
+    assert _conta(conn, "siga_rodadas") == 0
+    _pedir(conn, robo, robo.ids[1], AGORA)
+    r = siga.iniciar_rodada(conn, AGORA + _min(1), so_pedidos=True)
+    assert r["tipo"] == "pedido" and [p["codigo"] for p in r["processos"]] == ["DEF456"]
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(2))
+    _pedir(conn, robo, None, AGORA + _min(30))
+    r = siga.iniciar_rodada(conn, AGORA + _min(30), so_pedidos=True)
+    assert r["tipo"] == "pedido" and len(r["processos"]) == 3
+
+
 def test_pedido_repetido_nao_duplica_e_todos_cobre_o_de_um_processo(conn, robo):
     a1 = _pedir(conn, robo, robo.ids[0], AGORA)
     a2 = _pedir(conn, robo, robo.ids[0], AGORA + _min(1))
