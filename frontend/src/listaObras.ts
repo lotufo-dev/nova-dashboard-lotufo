@@ -8,7 +8,8 @@ import { fmtDias } from "./formato";
 export type ObraLista = {
   id: number; orgao: string; numero_instrumento: string; nome_curto?: string | null; estado: string;
   encerramento_iniciado_em?: string | null; entidade_id?: number | null;
-  valor_vigente_centavos?: number | null; valor_vigente_execucao_centavos?: number | null; execucao_fim_vigente?: string | null; vigencia_fim_vigente?: string | null;
+  valor_vigente_centavos?: number | null; valor_vigente_execucao_centavos?: number | null; valor_reajuste_centavos?: number | null;
+  execucao_fim_vigente?: string | null; vigencia_fim_vigente?: string | null;
   dias_execucao?: number | null; dias_vigencia?: number | null; vigencia_automatica?: boolean; paralisada_desde?: string | null;
   pedido_prorrogacao?: { enviado_em: string; numero_oficio: string | null; dias: number | null } | null;
   // valor cheio: o medido de execucao (atestado; protocolado ate' atestar) e o saldo a executar (vigente − medido)

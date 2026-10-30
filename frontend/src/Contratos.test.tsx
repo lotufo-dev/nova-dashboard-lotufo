@@ -136,8 +136,8 @@ describe("Obras: escolha do contratante e lista", () => {
     expect(window.location.search).toBe("?c=SINFRA&ver=tabela");
     const tabela = await screen.findByRole("table");
     const cabecas = within(tabela).getAllByRole("columnheader").map(c => c.textContent);
-    expect(cabecas).toEqual(["Obra", "Órgão", "Empresa", "Status", "Valor vigente", "Executado", "Fim da execução", "Fim da vigência",
-      "Pedido de prorrogação", "Avisos"]);
+    expect(cabecas).toEqual(["Obra", "Órgão", "Empresa", "Status", "Vigente de execução", "Reajuste contratado", "Executado",
+      "Fim da execução", "Fim da vigência", "Pedido de prorrogação", "Avisos"]);
     const brt = within(tabela).getAllByRole("row").find(r => r.textContent!.includes("Estações BRT"))!;
     expect(brt.textContent).toContain("Alfa");
     expect(brt.textContent).toContain("25%");
@@ -145,12 +145,29 @@ describe("Obras: escolha do contratante e lista", () => {
       .toBe("/obras?c=SINFRA&ver=tabela&avisos=1&obra=1");
     expect(brt.textContent).not.toContain("de 2 avisos");
     // o prazo com aviso ganha o selo do nível; sem aviso, só a data
-    const execBrt = within(brt).getAllByRole("cell")[6];
+    const execBrt = within(brt).getAllByRole("cell")[7];
     expect(execBrt.querySelector(".selo--acao")?.textContent?.replace(/\s/g, " ")).toBe("vence em 100 dias");
     const mt = within(tabela).getAllByRole("row").find(r => r.textContent!.includes("MT-388"))!;
-    const fins = within(mt).getAllByRole("cell").slice(6, 8);
+    const fins = within(mt).getAllByRole("cell").slice(7, 9);
     fins.forEach(c => expect(c.querySelector(".selo")).toBeNull());
     expect(mt.textContent).not.toContain("vence em");
+  });
+
+  it("na tabela, o valor e o % executado na mesma base, o vigente de execução, e o reajuste à parte (#262)", async () => {
+    // vigente de 1.200,00 com 200,00 de aditivo de reajuste e 400,00 medidos: 1.000,00 e 40%, nao 1.200,00 e 40%
+    api.mockImplementation(async (caminho: string) => caminho === "/api/contratos" ? [
+      obra(1, "Estações BRT", { valor_vigente_centavos: 1200_00, valor_vigente_execucao_centavos: 1000_00,
+        valor_reajuste_centavos: 200_00, medido_execucao_centavos: 400_00, saldo_centavos: 600_00 }),
+      obra(2, "MT-388", { orgao: "SINFRA - SUPU", orgao_sub: "SUPU", valor_vigente_centavos: 3000_00,
+        valor_vigente_execucao_centavos: 3000_00, valor_reajuste_centavos: 0, medido_execucao_centavos: 1500_00, saldo_centavos: 1500_00 }),
+    ] : caminho === "/api/entidades" ? [] : caminho === "/api/inicio" ? { avisos: [] } : null);
+    abrir("/obras?c=SINFRA&ver=tabela");
+    const tabela = await screen.findByRole("table");
+    const brt = within(tabela).getAllByRole("row").find(r => r.textContent!.includes("Estações BRT"))!;
+    const cel = within(brt).getAllByRole("cell").map(c => c.textContent!.replace(/\s/g, " "));
+    expect(cel.slice(4, 7)).toEqual(["R$ 1.000,00", "R$ 200,00", "40%"]);
+    const mt = within(tabela).getAllByRole("row").find(r => r.textContent!.includes("MT-388"))!;
+    expect(within(mt).getAllByRole("cell").slice(4, 7).map(c => c.textContent!.replace(/\s/g, " "))).toEqual(["R$ 3.000,00", "—", "50%"]);
   });
 
   it("na tabela, a obra parada mostra o selo Paralisada e o pedido de prorrogação só o ofício", async () => {

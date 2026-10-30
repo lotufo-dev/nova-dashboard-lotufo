@@ -397,7 +397,7 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
             <caption className="sr-only">QDOP, na cota da Lotufo: as obras pelo farol</caption>
             <thead>
               <tr>
-                <th scope="col">Obra</th><th scope="col">Empreita</th><th scope="col" className="col-num">Contratual (PI+VA)</th>
+                <th scope="col">Obra</th><th scope="col">Empreita</th><th scope="col" className="col-num">Contratual de execução (PI+VA)</th>
                 <th scope="col" className="col-num">Faturado</th><th scope="col" className="col-num">Saldo (contratual − faturado)</th>
                 <th scope="col" className="col-num">Desvio (p.p.)</th>
                 <th scope="col">Término e vigência</th><th scope="col">Status</th>
