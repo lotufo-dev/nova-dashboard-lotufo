@@ -1005,6 +1005,8 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--foco)
 .saldo__parcela--total .saldo__valor { font-size: 22px; letter-spacing: -.02em; line-height: 1.2; }
 .saldo__op { color: var(--texto-2); font-size: 15px; padding-bottom: 2px; }
 .saldo--negativo .saldo__parcela--total .saldo__valor { color: var(--acao); }
+/* #262: o aditivo de reajuste fica fora da conta; separado por um filete, nao por um operador */
+.saldo__parcela--aparte { padding-left: 14px; border-left: 1px solid var(--linha); }
 
 /* ----------------------------------------------------------------- totais */
 

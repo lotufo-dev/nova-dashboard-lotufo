@@ -249,15 +249,15 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date) -> dict:
     linhas, ritmo = [], 0
     for c in (x for x in _ativos(conn) if not x["encerramento_iniciado_em"]):
         v = contratos.vigente(conn, c["id"])
+        # #262: o medido e' o de `paineis.saldo` (execucao nos estados que medem), na mesma base do vigente de execucao
+        exe = [m for m in ms if m["contrato_id"] == c["id"] and paineis.mede_execucao(m)]
         medido = sum((m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None
-                      else m["valor_protocolado_centavos"] or 0)
-                     for m in ms if m["contrato_id"] == c["id"] and m["tipo"] in ("execucao", "projeto")
-                     and m["estado"] not in FORA)
-        saldo = contratos.cota(v["valor_vigente_centavos"] - medido, c["percentual_direito_bp"]) or 0
-        vigente_cota = contratos.cota(v["valor_vigente_centavos"], c["percentual_direito_bp"]) or 0
+                      else m["valor_protocolado_centavos"] or 0) for m in exe)
+        # #262: saldo a precos iniciais -- o aditivo de reajuste fica fora, como no saldo da obra (`paineis.saldo`)
+        saldo = contratos.cota(v["valor_vigente_execucao_centavos"] - medido, c["percentual_direito_bp"]) or 0
+        vigente_cota = contratos.cota(v["valor_vigente_execucao_centavos"], c["percentual_direito_bp"]) or 0
         medido_cota = contratos.cota(medido, c["percentual_direito_bp"]) or 0
-        ritmo += sum(_cota(m) for m in ms if m["contrato_id"] == c["id"] and m["tipo"] in ("execucao", "projeto")
-                     and m["estado"] not in FORA and m["competencia"] in ultimos)
+        ritmo += sum(_cota(m) for m in exe if m["competencia"] in ultimos)
         fim = _d(v.get("execucao_fim_vigente"))
         linhas.append({"contrato_id": c["id"], "obra": c["nome_curto"] or c["numero_instrumento"],
                        "orgao_id": c["orgao_id"], "saldo_centavos": saldo,
@@ -312,17 +312,28 @@ def _curva_carteira(conn, hoje: datetime.date, cache: dict) -> list[dict]:
 
 def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
     """Issue #296, decisoes do Leo de 28/10/2026: desvio em p.p. = (medido acumulado - previsto acumulado) / valor
-    vigente do contrato x 100, ate' a ultima competencia fechada (o mes anterior ao atual), contra a linha anterior a
+    vigente de execucao do contrato x 100 (#262: sem o aditivo de reajuste, a mesma base do medido), ate' a ultima competencia fechada (o mes anterior ao atual), contra a linha anterior a
     ultima repactuacao quando a obra tem uma, senao contra a vigente. Em valor cheio (a razao e' a mesma na cota, sem
     o arredondamento dela); uma casa decimal, meio para cima. Sem cronograma ou sem valor vigente, None."""
     _, base, previsto, medido = _curva_obra(conn, contrato_id, cache)
-    total = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
+    total = contratos.vigente(conn, contrato_id)["valor_vigente_execucao_centavos"]
     if not previsto or not total or total <= 0:
         return {"desvio_pp": None, "desvio_base": None}
     ate = _mes(hoje, -1)
     diferenca = sum(v for c, v in medido.items() if c and c <= ate) - sum(v for c, v in previsto.items() if c <= ate)
     pp = (Decimal(diferenca) * 100 / Decimal(total)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
     return {"desvio_pp": float(pp), "desvio_base": base}
+
+
+def _a_precos_iniciais(conn, linha: dict) -> dict:
+    """#262 (gate Sol): a linha da tabela de obras na base do saldo da obra (`paineis.saldo`): PI+VA, VA, saldo e
+    percentuais com o vigente de execucao, sem o aditivo de reajuste, que fica so' na coluna do reajuste. Os
+    faturados ja' sao so' de execucao e projeto. O QDOP exportado continua com o vigente cheio (#352)."""
+    v = contratos.vigente(conn, linha["contrato_id"])
+    pi_va = contratos.cota(v["valor_vigente_execucao_centavos"], v["percentual_direito_bp"]) or 0
+    fat = linha["faturados"]
+    return {"pi_va": pi_va, "va": pi_va - linha["pi"], "saldo": pi_va - fat,
+            "pct_recebido": fat / pi_va if pi_va else 0, "pct_a_receber": (pi_va - fat) / pi_va if pi_va else 0}
 
 
 def _obras(conn, hoje: datetime.date, avisos: list[dict], cache: dict) -> list[dict]:
@@ -342,7 +353,8 @@ def _obras(conn, hoje: datetime.date, avisos: list[dict], cache: dict) -> list[d
         motivos = [{"tipo": a["tipo"], "nivel": a["nivel"], "dias": a["dias"], "valor_centavos": a["valor_centavos"],
                     "texto": a["mensagem"][len(prefixo):] if prefixo and a["mensagem"].startswith(prefixo) else a["mensagem"]}
                    for a in av]
-        out.append({**linha, "farol": farol, "motivo": "; ".join(a["mensagem"] for a in av), "motivos": motivos,
+        out.append({**linha, **_a_precos_iniciais(conn, linha), "farol": farol,
+                    "motivo": "; ".join(a["mensagem"] for a in av), "motivos": motivos,
                     **_desvio(conn, linha["contrato_id"], hoje, cache)})
     return out
 

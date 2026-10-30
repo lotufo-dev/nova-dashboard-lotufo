@@ -82,6 +82,12 @@ def curva(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     return saida
 
 
+def mede_execucao(m) -> bool:
+    """A medicao entra no medido de execucao de `saldo` (a regra das consultas daqui, para quem ja' tem a linha:
+    a carteira da Diretoria, #262): execucao, num dos estados que medem."""
+    return m["tipo"] == "execucao" and m["estado"] in ESTADOS_VALIDOS
+
+
 def medido_execucao_por_contrato(conn: sqlite3.Connection) -> dict[int, int]:
     """O `atestado_execucao_centavos` de `saldo`, de todos os contratos numa consulta so' (a lista de Obras). Mesma
     regra, e a soma tambem em Python, pelo motivo dito em `saldo`."""
@@ -108,11 +114,15 @@ def saldo(conn: sqlite3.Connection, contrato_id: int) -> dict:
         "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v "
         f"FROM medicoes WHERE contrato_id=? AND tipo='execucao' AND estado IN ({_QS})",
         (contrato_id, *ESTADOS_VALIDOS)))
+    # #262 (spec 2026-10-20 §3.2): medido e contratado na mesma base, a precos iniciais. O aditivo de reajuste
+    # (SES) entra no vigente do contrato, mas fica fora do saldo e aparece a parte.
     return {"vigente_centavos": vig["valor_vigente_centavos"],
+            "vigente_execucao_centavos": vig["valor_vigente_execucao_centavos"],
+            "reajuste_contratado_centavos": vig["valor_reajuste_centavos"],
             "atestado_execucao_centavos": atestado,
-            "saldo_centavos": vig["valor_vigente_centavos"] - atestado,
-            "formula": "saldo = vigente − medido (execução: atestado; protocolado enquanto "
-                       "não atestado); reajustes em série própria"}
+            "saldo_centavos": vig["valor_vigente_execucao_centavos"] - atestado,
+            "formula": "saldo = vigente de execução (sem aditivo de reajuste) − medido (execução: atestado; "
+                       "protocolado enquanto não atestado); reajustes em série própria"}
 
 
 # ------------------------------------------------------------------ avisos

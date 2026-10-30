@@ -97,6 +97,8 @@ describe("Carteira", () => {
     const tabela = await screen.findByRole("table", { name: /QDOP, na cota da Lotufo/ });
     const cabecalho = within(tabela).getAllByRole("columnheader").map(h => h.textContent);
     expect(cabecalho).toContain("Desvio (p.p.)");
+    // #262: a tabela soma o contratual sem o aditivo de reajuste (a base do saldo); o rotulo diz a base
+    expect(cabecalho).toContain("Contratual de execução (PI+VA)");
     const coluna = cabecalho.indexOf("Desvio (p.p.)");
     const celula = (obra: string) => {
       const linha = within(tabela).getByText(obra).closest("tr") as HTMLElement;

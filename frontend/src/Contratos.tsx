@@ -325,7 +325,8 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
                     <thead>
                       <tr>
                         <th scope="col">Obra</th><th scope="col">Órgão</th><th scope="col">Empresa</th><th scope="col">Status</th>
-                        <th scope="col" className="col-num">Valor vigente</th><th scope="col" className="col-num">Executado</th>
+                        <th scope="col" className="col-num">Vigente de execução</th>
+                        <th scope="col" className="col-num">Reajuste contratado</th><th scope="col" className="col-num">Executado</th>
                         <th scope="col" className="col-data">Fim da execução</th>
                         <th scope="col" className="col-data">Fim da vigência</th><th scope="col">Pedido de prorrogação</th><th scope="col" className="col-num">Avisos</th>
                       </tr>
@@ -336,6 +337,7 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
                         const prazo = prazos.get(c.id) ?? prazoDaObra(c);
                         const p = c.pedido_prorrogacao;
                         const pct = pctExecutado(c);
+                        const vigente = c.valor_vigente_execucao_centavos ?? c.valor_vigente_centavos;
                         return (
                           <tr key={c.id} className={`linha${i % 2 === 1 ? " par" : ""}`}>
                             <td>
@@ -345,7 +347,9 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
                             <td><span className="truncar-2l" title={c.orgao}>{c.orgao}</span></td>
                             <td>{c.entidade_id != null && empresas ? empresas.get(c.entidade_id) ?? "—" : "—"}</td>
                             <td><Selo classe={s.classe}>{s.rotulo}</Selo></td>
-                            <td className="col-num dinheiro num">{c.valor_vigente_centavos != null ? brl(c.valor_vigente_centavos) : "—"}</td>
+                            {/* #262: o % ao lado e' sobre o vigente de execucao; o aditivo de reajuste fica na coluna dele */}
+                            <td className="col-num dinheiro num">{vigente != null ? brl(vigente) : "—"}</td>
+                            <td className="col-num dinheiro num">{c.valor_reajuste_centavos ? brl(c.valor_reajuste_centavos) : "—"}</td>
                             <td className="col-num num">{pct === null ? "—" : `${pct}%`}</td>
                             <td className="num">
                               <Fim fim={c.execucao_fim_vigente} dias={c.dias_execucao} nivel={prazo.execucao} aberta={status(c) === "ativo"}

@@ -47,9 +47,10 @@ type Ponto = {
   atestado_pendente: boolean;
   pendente_por_tipo?: Record<string, boolean>;
 };
+// #262: o saldo e' a precos iniciais (vigente de execucao); o aditivo de reajuste vem a parte.
 type Saldo = {
-  vigente_centavos: number; atestado_execucao_centavos: number;
-  saldo_centavos: number; formula: string;
+  vigente_centavos: number; vigente_execucao_centavos?: number; reajuste_contratado_centavos?: number;
+  atestado_execucao_centavos: number; saldo_centavos: number; formula: string;
 };
 type Curva = { curva: Ponto[]; saldo: Saldo };
 
@@ -475,8 +476,8 @@ export default function Cronograma({ contratoId, podeEditar }:
       {!carregando && saldo && (
         <div className={`saldo${saldo.saldo_centavos < 0 ? " saldo--negativo" : ""}`}>
           <div className="saldo__parcela">
-            <span className="resumo__rotulo">Vigente</span>
-            <span className="saldo__valor num">{brl(saldo.vigente_centavos)}</span>
+            <span className="resumo__rotulo">Vigente de execução</span>
+            <span className="saldo__valor num">{brl(saldo.vigente_execucao_centavos ?? saldo.vigente_centavos)}</span>
           </div>
           <span className="saldo__op" aria-hidden="true">−</span>
           <div className="saldo__parcela">
@@ -488,8 +489,14 @@ export default function Cronograma({ contratoId, podeEditar }:
             <span className="resumo__rotulo">Saldo</span>
             <span className="saldo__valor num">{brl(saldo.saldo_centavos)}</span>
           </div>
+          {(saldo.reajuste_contratado_centavos ?? 0) !== 0 && (
+            <div className="saldo__parcela saldo__parcela--aparte">
+              <span className="resumo__rotulo">Reajuste contratado (fora do saldo)</span>
+              <span className="saldo__valor num">{brl(saldo.reajuste_contratado_centavos ?? 0)}</span>
+            </div>
+          )}
           {saldo.saldo_centavos < 0 && (
-            <CaixaAviso nivel="critico">Medido acima do valor vigente do contrato.</CaixaAviso>
+            <CaixaAviso nivel="critico">Medido acima do vigente de execução do contrato.</CaixaAviso>
           )}
         </div>
       )}

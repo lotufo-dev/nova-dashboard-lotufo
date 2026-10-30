@@ -60,7 +60,10 @@ def _lista_documentos(valor, onde: str, erros: list[str]) -> list[str] | None:
     return list(valor)
 _CHAVE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 _CAMPOS_INSTRUMENTO = {"chave", "tipo", "data", "numero", "objeto", "corrige", "delta_valor",
-                       "nova_execucao_fim", "nova_vigencia_fim", "pdf", "ordinal"}
+                       "nova_execucao_fim", "nova_vigencia_fim", "pdf", "ordinal", "natureza"}
+# #262 (spec 2026-10-20 §3.2): o aditivo de valor e' de execucao ou de reajuste (SES: reajuste por termo aditivo)
+NATUREZAS = ("execucao", "reajuste")
+TIPOS_COM_NATUREZA = ("aditivo_valor", "aditivo_misto")
 
 
 class CadastroInvalido(Exception):
@@ -170,6 +173,15 @@ def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
             inst["delta_valor_centavos"] = sinal * dinheiro.parse_brl(texto.lstrip("-").strip())
         except ValueError as e:
             falha("delta_valor", str(e))
+    natureza = bruto.get("natureza")
+    inst["natureza"] = None       # sem o campo: nao classificado, conta como execucao (`contratos.vigente`)
+    if natureza is not None:
+        if tipo not in TIPOS_COM_NATUREZA:
+            falha("natureza", f"só vale para instrumento de valor ({', '.join(TIPOS_COM_NATUREZA)})")
+        elif natureza not in NATUREZAS:
+            falha("natureza", f"use {' ou '.join(NATUREZAS)}")
+        else:
+            inst["natureza"] = natureza
     if tipo in ("aditivo_valor",) and inst["delta_valor_centavos"] == 0:
         falha("delta_valor", "aditivo de valor sem delta")
     if tipo in ("aditivo_prazo", "apostilamento_prazo") and not (

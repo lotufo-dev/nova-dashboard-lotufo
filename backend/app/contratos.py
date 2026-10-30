@@ -89,13 +89,18 @@ def mudar_estado(conn, usuario_id: int, contrato_id: int, novo: str, data: str, 
 def vigente(conn: sqlite3.Connection, contrato_id: int) -> dict:
     c = dict(conn.execute("SELECT * FROM contratos WHERE id=?", (contrato_id,)).fetchone())
     valor = c["valor_original_centavos"]
+    reajuste = 0      # #262: aditivo de valor de natureza reajuste (SES) -- no vigente, fora do saldo
     vig_fim, exe_fim = c["vigencia_fim"], c["execucao_fim"]
     for a in conn.execute("""SELECT * FROM aditivos WHERE contrato_id=? AND status='assinado'
                              ORDER BY data_assinatura, id""", (contrato_id,)):
         valor += a["delta_valor_centavos"]
+        if a["natureza"] == "reajuste":
+            reajuste += a["delta_valor_centavos"]
         vig_fim = a["nova_vigencia_fim"] or vig_fim
         exe_fim = a["nova_execucao_fim"] or exe_fim
     return {**c, "entidade_id": entidade_de(c), "valor_vigente_centavos": valor,
+            # a base do saldo: o vigente a precos iniciais (o medido de execucao e' a precos iniciais)
+            "valor_vigente_execucao_centavos": valor - reajuste, "valor_reajuste_centavos": reajuste,
             "cota_vigente_centavos": cota(valor, c["percentual_direito_bp"]),
             "vigencia_fim_vigente": vig_fim, "execucao_fim_vigente": exe_fim}
 
