@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import arquivos, db, espelhos, medicao_planilhas, medicoes, permissoes, siga, tempo
+from app import arquivos, db, espelhos, medicao_planilhas, medicoes, permissoes, planilha_envio, siga, tempo
 from app.api_auth import conexao
 from app.dinheiro import parse_brl
 from app.permissoes import exigir
@@ -141,6 +141,8 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
         raise HTTPException(404, "Medição não encontrada")
     d["edicoes_valor"] = medicoes.edicoes_valor(conn, [medicao_id])[medicao_id]   # B-02 (10/10/2026): linha do tempo
     d["planilhas"] = medicao_planilhas.versoes(conn, medicao_id)   # issue #281: todas as versoes da planilha/carta
+    # issue #282: se a tela oferece "Enviar para protocolo" (nunca na MT-PAR), as versoes enviadas e as pecas
+    d["envio_planilha"] = planilha_envio.situacao(conn, medicao_id)
     d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
     return d
 
