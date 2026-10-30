@@ -8,6 +8,7 @@ import sqlite3
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app import arquivos, db, espelhos, medicao_planilhas, medicoes, permissoes, siga, tempo
@@ -264,8 +265,8 @@ def desmarcar_final(medicao_id: ID, dados: DesmarcarFinalIn, usuario: dict = Dep
 TETO_PLANILHA = 25 * 1024 * 1024
 
 
-def _pdf_validado(arquivo: UploadFile) -> bytes:
-    dados = b"".join(arquivos.blocos_validados(arquivo))     # tipo, %PDF- e 10 MB (415/413)
+def _pdf_validado(arquivo: UploadFile, teto_bytes: int = arquivos.TETO_BYTES) -> bytes:
+    dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=teto_bytes))   # tipo, %PDF- e teto (415/413)
     arquivos.conferir_bytes_parseaveis(dados)                # abre num leitor de verdade (415)
     return dados
 
@@ -275,7 +276,7 @@ def _anexos_validados(oficio: UploadFile, planilha: UploadFile) -> list[tuple[by
     o proprio boletim da Lotufo, Prefeitura e SES). Os DOIS sao validados antes de gravar qualquer um: recusa da
     planilha nao deixa o oficio orfao na pasta (gate Sol, rodada 1)."""
     if (planilha.filename or "").lower().endswith(".pdf"):
-        da_planilha = (_pdf_validado(planilha), "pdf")
+        da_planilha = (_pdf_validado(planilha, TETO_PLANILHA), "pdf")   # gate Sol S5: o teto da planilha, nao 10 MB
     else:
         da_planilha = (b"".join(arquivos.blocos_validados(planilha, teto_bytes=TETO_PLANILHA, tipo="xlsx")), "xlsx")
     return [(_pdf_validado(oficio), "pdf"), da_planilha]
@@ -360,3 +361,23 @@ def revisar_planilha(medicao_id: ID,
             conn, usuario["id"], medicao_id, dados, anexos))
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
+
+
+@router.get("/api/medicoes/{medicao_id}/planilhas/{planilha_id}/{peca}")
+def baixar_anexo_planilha(medicao_id: ID, planilha_id: ID, peca: Literal["oficio", "planilha"],
+                          usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                          conn: sqlite3.Connection = Depends(conexao)):
+    """Gate Sol S3: o oficio e a planilha de cada versao, pela medicao dona da versao."""
+    a = medicao_planilhas.anexo(conn, medicao_id, planilha_id, peca)
+    if a is None or not a["arquivo"]:
+        raise HTTPException(404, "Arquivo não encontrado")
+    try:
+        caminho = arquivos.caminho_seguro(a["arquivo"])
+    except ValueError:
+        raise HTTPException(404, "Arquivo não encontrado") from None
+    if not caminho.is_file():
+        raise HTTPException(404, "Arquivo não encontrado")
+    ext = "xlsx" if caminho.suffix == ".xlsx" else "pdf"
+    tipo = arquivos.MIME_XLSX if ext == "xlsx" else arquivos.MIME
+    nome = f"{'oficio' if peca == 'oficio' else 'planilha'}-medicao-{a['numero']}-versao-{a['versao']}.{ext}"
+    return FileResponse(caminho, media_type=tipo, filename=nome, headers={"X-Content-Type-Options": "nosniff"})

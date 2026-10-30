@@ -249,3 +249,14 @@ def versoes(conn, medicao_id: int) -> list[dict]:
         "p.acumulado_anterior_centavos, p.sha256, p.sha256_planilha, p.origem, p.motivo, p.criado_em, "
         "u.nome AS usuario FROM medicao_planilhas p LEFT JOIN usuarios u ON u.id=p.usuario_id "
         "WHERE p.medicao_id=? ORDER BY p.versao", (medicao_id,))]
+
+
+def anexo(conn, medicao_id: int, planilha_id: int, peca: str) -> dict | None:
+    """O anexo (`oficio` ou `planilha`) de UMA versao, so' se a versao for da medicao pedida (gate Sol S3: a versao
+    de outra medicao nao se baixa pela URL desta). Devolve o caminho gravado, que a rota resolve com
+    `arquivos.caminho_seguro` e nunca expoe, e o que ela precisa para o nome do arquivo."""
+    coluna = {"oficio": "p.arquivo", "planilha": "p.arquivo_planilha"}[peca]
+    r = conn.execute(f"SELECT {coluna} AS arquivo, p.versao, m.numero FROM medicao_planilhas p "
+                     "JOIN medicoes m ON m.id=p.medicao_id WHERE p.id=? AND p.medicao_id=?",
+                     (planilha_id, medicao_id)).fetchone()
+    return dict(r) if r else None

@@ -605,6 +605,44 @@ def test_planilha_invalida_nao_deixa_o_oficio_gravado(client_admin):
     assert _pasta_planilhas() == []
 
 
+def test_planilha_em_pdf_vai_a_25_mb_e_o_oficio_fica_em_10(client_admin):
+    """Gate Sol S5: a planilha/carta em PDF (Prefeitura e SES) tem o teto da planilha (25 MB), nao o do oficio."""
+    from tests.conftest import _pdf_com_texto
+    cid = _contrato(client_admin)
+    grande = _pdf_com_texto("boletim da Lotufo") + b"\n%" + b"0" * (11 * 1024 * 1024) + b"\n"
+    dados = {"numero": 1, "competencia": "2026-07", "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31",
+             "valor": "1,00"}
+    oficio_grande = {**_arquivos_planilha(), "oficio": ("oficio.pdf", grande, "application/pdf")}
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=oficio_grande, data=dados)
+    assert r.status_code == 413 and r.json()["detail"] == "Arquivo acima do limite de 10 MB"
+    planilha_grande = {**_arquivos_planilha(), "planilha": ("boletim.pdf", grande, "application/pdf")}
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=planilha_grande, data=dados)
+    assert r.status_code == 201, r.text
+
+
+def test_baixa_o_oficio_e_a_planilha_de_cada_versao(client_admin):
+    """Gate Sol S3: os anexos de cada versao se baixam pela medicao dona da versao; o caminho gravado nao sai."""
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    versao = client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"][0]
+    assert "arquivo" not in versao and "arquivo_planilha" not in versao
+    r = client_admin.get(f"/api/medicoes/{mid}/planilhas/{versao['id']}/oficio")
+    assert r.status_code == 200 and r.content.startswith(b"%PDF-")
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.headers["x-content-type-options"] == "nosniff"
+    r = client_admin.get(f"/api/medicoes/{mid}/planilhas/{versao['id']}/planilha")
+    assert r.status_code == 200 and r.content.startswith(b"PK\x03\x04") and r.headers["content-type"] == XLSX
+    outra = _nova_planilha(client_admin, cid, 2, "2026-08", "2026-08-01", "2026-08-31").json()["medicao_id"]
+    assert client_admin.get(f"/api/medicoes/{outra}/planilhas/{versao['id']}/oficio").status_code == 404
+    assert client_admin.get(f"/api/medicoes/{mid}/planilhas/{versao['id']}/outro").status_code == 422
+    from app import auth, db
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@lotufo.com", "senha-forte-123", "diretoria")
+    conn.close()
+    _entrar(client_admin, "dir@lotufo.com")      # diretoria le
+    assert client_admin.get(f"/api/medicoes/{mid}/planilhas/{versao['id']}/oficio").status_code == 200
+
+
 def test_registro_que_falha_com_o_mesmo_pdf_nao_apaga_o_arquivo_da_versao(client_admin, monkeypatch):
     """Gate Sol rodada 2: a requisicao que falha (corrida, clique duplo) nao apaga nada; o arquivo de que a versao
     ja' registrada depende continua na pasta."""
