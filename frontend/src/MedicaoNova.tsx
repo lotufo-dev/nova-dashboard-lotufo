@@ -3,7 +3,7 @@ import { api } from "./api";
 import Espelho from "./Espelho";
 import { EtapaCartao, FaixaVendo, Setas } from "./Etapas";
 import type { Usuario } from "./Login";
-import { ir, type Origem } from "./rota";
+import { ir, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
 import { baseDosValores } from "./formato";
 import { Migalhas, VoltarOrigem } from "./Topo";
@@ -15,7 +15,16 @@ import "./etapas.css";
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
 
-export default function MedicaoNova({ contratoId, usuario, origem }: { contratoId: number; usuario: Usuario; origem: Origem | null }) {
+// A janela "Iniciar processo" (#151) manda o número, a competência e a série pela busca da URL
+// (?numero=25&competencia=2026-10&tipo=projeto); valor fora do padrão é ignorado.
+export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }: {
+  contratoId: number; usuario: Usuario; origem: Origem | null; busca?: Busca;
+}) {
+  const numero = /^[1-9][0-9]{0,2}$/.test(busca.numero ?? "") ? busca.numero : "";
+  const competencia = /^\d{4}-(0[1-9]|1[0-2])$/.test(busca.competencia ?? "") ? busca.competencia : "";
+  const tipo: "projeto" | undefined = busca.tipo === "projeto" ? "projeto" : undefined;
+  const inicial = numero || competencia || tipo ? { numero, competencia, tipo } : undefined;
+  const nome = tipo ? "Nova medição de Projeto" : "Nova medição";
   const podeEditar = usuario.perfil === "engenharia" || usuario.perfil === "admin";
   const [cab, setCab] = useState<Cabecalho | null>(null);
   const [vendo, setVendo] = useState(1);
@@ -23,7 +32,7 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
     api<Cabecalho>(`/api/contratos/${contratoId}/cabecalho`).then(setCab).catch(() => setCab(null));
   }, [contratoId]);
   const obra = cab?.obra ?? "Obra";
-  useEffect(() => { document.title = `${obra} · Nova medição · grupolotufo`; }, [obra]);
+  useEffect(() => { document.title = `${obra} · ${nome} · grupolotufo`; }, [obra, nome]);
 
   return (
     <>
@@ -31,13 +40,13 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
         <div className="topbar__trilha">
           <VoltarOrigem origem={origem} alemDe={["obras", "medicoes"]} />
           <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes" } },
-            { rotulo: obra, para: { tela: "obra", id: contratoId, aba: "medicoes" } }, { rotulo: "Nova medição" }]} />
+            { rotulo: obra, para: { tela: "obra", id: contratoId, aba: "medicoes" } }, { rotulo: nome }]} />
         </div>
       </header>
       <div className="pagina med">
         <div className="med-cabeca">
           <div>
-            <h1 title={`${obra} · Nova medição`}>Nova medição</h1>
+            <h1 title={`${obra} · ${nome}`}>{nome}</h1>
             <p className="med-meta">
               <span>{obra}</span>
               {cab && <span>{cab.orgao}</span>}
@@ -54,7 +63,7 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
               {/* as outras etapas so' tem o selo "Libera depois da etapa N" */}
               {vendo === 1 && (
                 <div className="med-etapa__corpo">
-                  <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={() => {}} abrirForm parte="espelho"
+                  <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={() => {}} abrirForm parte="espelho" inicial={inicial}
                     aoGerar={id => ir({ tela: "medicao", obra: contratoId, id }, { forcar: true })}
                     semRegra={<p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}>Lançar a medição à mão</Link></p>} />
                 </div>

@@ -120,7 +120,7 @@ export default function App() {
             // `key` na medicao: trocar de medicao (a da mesma competencia) remonta a pagina e os formularios dela.
             <MedicaoPagina key={`${rota.obra}-${rota.id}`} contratoId={rota.obra} medicaoId={rota.id} usuario={usuario} origem={origem} />
           )}
-          {rota.tela === "nova-medicao" && <MedicaoNova key={rota.obra} contratoId={rota.obra} usuario={usuario} origem={origem} />}
+          {rota.tela === "nova-medicao" && <MedicaoNova key={rota.obra} contratoId={rota.obra} usuario={usuario} origem={origem} busca={busca} />}
           {rota.tela === "documentos" && <Documentos usuario={usuario} busca={busca} />}
           {rota.tela === "documentos-empresa" && (
             // `key` na empresa: trocar de empresa (pelo link de consorciada) remonta a pagina e o formulario da regularidade.

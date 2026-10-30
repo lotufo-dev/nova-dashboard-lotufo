@@ -640,7 +640,8 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
         return _dia(m["protocolado_em"])
 
     grupos: dict[tuple, list[dict]] = {}
-    for m in em_andamento(conn):
+    andamento = em_andamento(conn)
+    for m in andamento:
         grupos.setdefault((m["contrato_id"], m["numero"], m["competencia"], SITUACAO[m["estado"]]), []).append(m)
     linhas = []
     for (cid, _numero, _comp, situacao), ms in grupos.items():
@@ -667,13 +668,48 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
                                -x["numero"], x["titulo"]))
 
     abertas = {x["contrato_id"] for x in linhas}
-    prevista_de: dict[int, int] = {}
-    for r in conn.execute("SELECT contrato_id, id FROM medicoes WHERE estado='prevista' "
+    # #151 (15/10/2026): a janela "Iniciar processo" mostra a medicao aberta (id, numero e passo), a prevista (numero e
+    # competencia) e a ultima de cada serie. Serie de execucao = execucao + reajuste (o reajuste acompanha o numero);
+    # a de Projeto so' existe na obra que ja' teve uma medicao de Projeto.
+    prevista_de: dict[tuple[int, bool], dict] = {}
+    teve_projeto: set[int] = set()
+    for r in conn.execute("SELECT contrato_id, id, numero, tipo, competencia FROM medicoes WHERE estado='prevista' "
                           "ORDER BY competencia, numero, id"):
-        prevista_de.setdefault(r["contrato_id"], r["id"])
+        chave = (r["contrato_id"], r["tipo"] == "projeto")
+        if chave not in prevista_de:   # a mais antiga da serie
+            prevista_de[chave] = {"id": r["id"], "numero": r["numero"], "competencia": r["competencia"]}
+        if chave[1]:
+            teve_projeto.add(r["contrato_id"])
+    aberta_de: dict[tuple[int, bool], dict] = {}
+    for m in andamento:
+        chave = (m["contrato_id"], m["tipo"] == "projeto")
+        atual = aberta_de.get(chave)
+        # a de execucao vence o reajuste do mesmo numero; entre numeros, a maior
+        if atual is None or (m["numero"], m["tipo"] == "execucao") > (atual["numero"], atual["tipo"] == "execucao"):
+            aberta_de[chave] = m
+    ultima_de: dict[tuple[int, bool], dict] = {}
+    for r in conn.execute("SELECT contrato_id, numero, tipo, competencia FROM medicoes "
+                          "WHERE estado NOT IN ('prevista', 'cancelada', 'desistida') ORDER BY numero, id"):
+        if r["tipo"] == "reajuste":
+            continue
+        projeto = r["tipo"] == "projeto"
+        if projeto:
+            teve_projeto.add(r["contrato_id"])
+        ultima_de[(r["contrato_id"], projeto)] = {"numero": r["numero"], "competencia": r["competencia"]}
+
+    def serie(cid: int, projeto: bool) -> dict:
+        m = aberta_de.get((cid, projeto))
+        p = prevista_de.get((cid, projeto))
+        return {"prevista_id": p["id"] if p else None, "prevista_numero": p["numero"] if p else None,
+                "prevista_competencia": p["competencia"] if p else None,
+                "aberta_id": m["id"] if m else None, "aberta_numero": m["numero"] if m else None,
+                "aberta_passo": m["proximo_passo"] if m else None, "ultima": ultima_de.get((cid, projeto))}
+
     ativas = sorted((o for o in obras.values() if o["estado"] == "ativo"), key=lambda o: _chave_nome(o["obra"]))
     lista_obras = [{"contrato_id": o["id"], "obra": o["obra"], "contratante": o["contratante"],
-                    "orgao_sub": o["orgao_sub"], "aberta": o["id"] in abertas, "prevista_id": prevista_de.get(o["id"]),
+                    "orgao_sub": o["orgao_sub"], "aberta": o["id"] in abertas,
+                    **serie(o["id"], False),
+                    "projeto": serie(o["id"], True) if o["id"] in teve_projeto or (o["id"], True) in aberta_de else None,
                     # A-21 (10/10/2026): a obra em encerramento segue na lista (mede a final), mas a tela nao a
                     # conta como "obra ativa" (a definicao de `avisos.ativos`, a do Inicio)
                     "encerramento": bool(o["encerramento_iniciado_em"])}

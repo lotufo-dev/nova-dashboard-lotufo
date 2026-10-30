@@ -60,6 +60,18 @@ describe("Espelho", () => {
     confirmar.mockRestore();
   });
 
+  it("abre o formulário com o número e a competência escolhidos na janela Iniciar processo (#151), sem contar como rascunho", async () => {
+    const confirmar = vi.spyOn(window, "confirm").mockReturnValue(false);
+    window.history.replaceState(null, "", "/obras/1");
+    api.mockResolvedValueOnce({ regra: REGRA, espelhos: [] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} abrirForm inicial={{ numero: "25", competencia: "2026-10" }} />);
+    expect((await screen.findByLabelText("Nº da medição") as HTMLInputElement).value).toBe("25");
+    expect((screen.getByLabelText("Competência") as HTMLInputElement).value).toBe("10/2026");
+    ir({ tela: "avisos" });                       // veio pronto da janela e nao foi mexido: sai sem perguntar
+    expect(confirmar).not.toHaveBeenCalled();
+    confirmar.mockRestore();
+  });
+
   it("conferir manda número, competência e valores e renderiza uma linha por nota", async () => {
     api.mockResolvedValueOnce({ regra: REGRA, espelhos: [] });
     api.mockResolvedValueOnce(PREVIA);
