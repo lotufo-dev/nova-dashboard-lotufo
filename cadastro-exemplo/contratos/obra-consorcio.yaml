@@ -8,7 +8,6 @@ objeto_completo: 'PAVIMENTAÇÃO E DRENAGEM DE VIAS URBANAS NAS CIDADES DE CUIAB
 municipio: Cuiabá e Várzea Grande
 lei: '14.133'
 cno: null
-art: null
 numero_processo: null
 centro_custo_rm: null
 valor_original: 100.000.000,00
@@ -22,7 +21,8 @@ status_desde: null
 sem_reajuste: false
 datas_base:
 - mes: 2025-01
-  indice: ''
+  indice: FGV/DNIT de exemplo
+  aplica_a: itens de exemplo
 fiscais:
 - nome: Fiscal de Exemplo
   email: fiscal@exemplo.gov.br

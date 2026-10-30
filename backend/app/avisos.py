@@ -83,21 +83,27 @@ def _de_reajuste(conn, hoje: datetime.date) -> list[dict]:
     return reajuste.avisos(conn, hoje)
 
 
-def _de_pagamento(conn, hoje: datetime.date) -> list[dict]:
-    from app import diretoria         # bloco 8: pagamento atrasado (so' para a diretoria)
-    return diretoria.avisos_pagamento(conn, hoje)
-
-
 def _de_garantias(conn, hoje: datetime.date) -> list[dict]:
-    """Issue #65: garantia contratual (30/15/vencida) e ART nao anexada, na tela Documentos."""
-    from app import garantias
-    return [aviso(a["tipo"], a["nivel"], a["mensagem"], a["contrato_id"], obra(conn, a["contrato_id"]),
-                  dias=a["dias"], publico=a["publico"], destino={"tela": "documentos"}, data=a["data"],
-                  sentido="prazo" if a["data"] else None)
-            for a in garantias.avisos(conn, hoje)]
+    """Issue #65: garantia contratual (30/15/vencida), na tela Documentos."""
+    from app import contratos, garantias
+    out = []
+    for a in garantias.avisos(conn, hoje) + garantias.avisos_cobertura(conn, hoje):
+        c = conn.execute("SELECT entidade_id FROM contratos WHERE id=?", (a["contrato_id"],)).fetchone()
+        # o aviso leva a empresa contratada: a pagina dela em Documentos abre na aba da garantia
+        out.append({**aviso(a["tipo"], a["nivel"], a["mensagem"], a["contrato_id"], obra(conn, a["contrato_id"]),
+                            dias=a["dias"], publico=a["publico"], destino={"tela": "documentos"}, data=a["data"],
+                            sentido="prazo" if a["data"] else None),
+                    "entidade_id": contratos.entidade_de(c) if c else None})
+    return out
 
 
-FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_pagamento, _de_garantias]
+def _de_siga(conn, hoje: datetime.date) -> list[dict]:
+    """Issue #330: processo parado no SIGA e monitor sem leitura (so' a operacao)."""
+    from app import siga             # import tardio: `siga` importa este modulo (formato do aviso)
+    return siga.avisos(conn, hoje)
+
+
+FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga]
 
 
 def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao") -> list[dict]:

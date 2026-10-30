@@ -93,6 +93,25 @@ export async function apiForm<T = unknown>(caminho: string, dados: FormData): Pr
   return r.json();
 }
 
+/** Download que pode ser recusado (issue #169: FRC desatualizada). Um `<a href>` abriria o JSON do erro no lugar da
+ * tela; aqui a recusa vira `ApiErro` com a mensagem do servidor, e o arquivo baixa com o nome que o servidor deu. */
+export async function baixarArquivo(caminho: string, nomePadrao: string): Promise<void> {
+  const r = await pedir(caminho, { credentials: "include" });
+  if (!r.ok) {
+    const corpo = await r.json().catch(() => ({}));
+    throw new ApiErro(r.status, mensagemErro(corpo, padraoDoStatus(r.status), r.status), corpo?.detail);
+  }
+  const disp = r.headers.get("Content-Disposition") ?? "";
+  const utf8 = /filename\*=utf-8''([^;]+)/i.exec(disp);
+  const simples = /filename="?([^";]+)"?/i.exec(disp);
+  const nome = utf8 ? decodeURIComponent(utf8[1]) : simples ? simples[1] : nomePadrao;
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);     // Firefox e Safari cancelam se revogar ja' no clique
+}
+
 /** Texto de erro para a tela. `ApiErro` ja traz mensagem em portugues (inclusive a falha de rede, status 0);
  * qualquer outra coisa lancada (bug de codigo, erro nativo) nao pode vazar "TypeError: ..." em ingles. */
 export function mensagemDeErro(e: unknown): string {

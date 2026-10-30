@@ -46,6 +46,8 @@ prototipos/*
 !prototipos/login-3d/
 # Prototipo aprovado da #151 (Iniciar medicao), conferido sem dado real em 15/10/2026
 !prototipos/iniciar/
+# Briefing comum do redesenho (#150): só texto, sem dado real
+!prototipos/redesenho/
 
 # Lista local de nomes de pessoas que scripts/vazamento.py barra (o Leo mantem na maquina dele; na CI a parte e pulada)
 scripts/vazamento-nomes.txt

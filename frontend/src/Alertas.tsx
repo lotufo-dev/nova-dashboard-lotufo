@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { IconeAlerta, IconeSeta, IconeSino } from "./icones";
 import Selo from "./Selo";
-import { ondeSeResolve, semRSOrfao } from "./avisos";
+import { semRSOrfao } from "./avisos";
 import { brl } from "./Medicoes";
 import { type AbaObra, type Busca, type Ir, type Rota } from "./rota";
 import { Link } from "./Link";
@@ -14,7 +14,7 @@ export type Nivel = "critico" | "acao" | "atencao";
 
 // O destino e' o do servidor, no vocabulario dele ("contrato" + aba); `destinoDoAviso` o traduz para a
 // rota da tela nova, sem mudar o contrato da API.
-export type Destino = { tela: "contrato"; id: number; aba: string } | { tela: "documentos" };
+export type Destino = { tela: "contrato"; id: number; aba: string } | { tela: "documentos" } | { tela: "siga"; processo?: number };
 
 export type Aviso = {
   tipo: string; nivel: Nivel; publico: string[]; contrato_id: number | null; obra: string | null;
@@ -30,20 +30,20 @@ export type Aviso = {
 const ABAS_OBRA: readonly string[] = ["medicoes", "prazos", "reajuste", "documentos", "contrato"] satisfies AbaObra[];
 
 /** Para onde o aviso leva: as notas da medicao (aviso de nota, A2), o ciclo da data-base (aviso de reajuste,
- *  A10), a aba da obra, ou a empresa (ancora do cartao dela) em Documentos. */
+ *  A10), a aba da obra, ou a pagina da empresa em Documentos. */
 export function destinoDoAviso(a: Aviso): { para: Rota; secao?: string; busca?: Busca } | null {
   const d = a.destino;
   if (!d) return null;
-  // a empresa em Documentos: a matriz so' com ela (?empresa=, com o cabecalho das colunas a vista) e a linha dela
+  // #330: a tela SIGA, com o processo do aviso aberto (o do monitor sem leitura abre so' a tela)
+  if (d.tela === "siga") return { para: { tela: "siga" }, busca: d.processo ? { processo: String(d.processo) } : undefined };
+  // a empresa em Documentos: a pagina dela (#161); o aviso da regularidade do mes leva direto a aba dela
   if (d.tela === "documentos") return a.entidade_id
-    ? { para: { tela: "documentos" }, busca: { empresa: String(a.entidade_id) }, secao: `emp-${a.entidade_id}` }
+    ? { para: { tela: "documentos-empresa", id: a.entidade_id, aba: a.tipo === "regularidade_mes" ? "regularidade" : (a.tipo === "garantia_vencendo" || a.tipo === "garantia_aquem_execucao") ? "garantia" : undefined } }
     : { para: { tela: "documentos" } };
   if (d.aba === "notas" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "notas" };
   if (d.aba === "reajuste" && a.data_base_mes) return { para: { tela: "obra", id: d.id, aba: "reajuste" }, secao: `db-${a.data_base_mes}` };
-  // A12: o pagamento atrasado de uma medicao leva ao recebimento dela; o da nota do RM, as medicoes da obra
-  if (a.tipo === "pagamento_atrasado" && a.medicao_id && d.id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "recebimento" };
   const aba = (ABAS_OBRA.includes(d.aba) ? d.aba : "medicoes") as AbaObra;
-  // na aba Medicoes, as medicoes em andamento (onde o pagamento atrasado se ve), nao o resumo do topo
+  // na aba Medicoes, as medicoes em andamento, nao o resumo do topo
   return { para: { tela: "obra", id: d.id, aba }, secao: aba === "medicoes" ? "em-andamento" : undefined };
 }
 
@@ -89,27 +89,14 @@ export const SELO: Record<Nivel, { rotulo: string; classe: string; forte?: boole
 // segundos. O resto continua a um clique, nunca escondido de vez.
 const LIMITE = 8;
 
-// `itens === null` NAO e' lista vazia: vazio quer dizer "verificamos, esta tudo em dia"; null quer
-// dizer "nao conseguimos verificar". Colapsar os dois faria a tela afirmar que esta tudo em dia
+// `itens === null` NAO e' lista vazia: vazio quer dizer "verificamos, nao ha' aviso"; null quer
+// dizer "nao conseguimos verificar". Colapsar os dois faria a tela afirmar que nao ha' aviso
 // justamente quando ninguem olhou. `undefined` e' "ainda carregando": o cartao ja' ocupa o lugar dele.
-// "5 críticos · 19 de ação · 26 de atenção": a dica diz o PESO da lista, nao so' o tamanho.
-export function contagem(itens: Aviso[]): string {
-  const n = (nivel: Nivel) => itens.filter(a => a.nivel === nivel).length;
-  // nivel que o servidor inventar conta como atencao: o mesmo fallback do selo (`SELO.atencao`)
-  const atencao = itens.length - n("critico") - n("acao");
-  const partes = [
-    [n("critico"), n("critico") === 1 ? "crítico" : "críticos"],
-    [n("acao"), "de\u00a0ação"], [atencao, "de\u00a0atenção"],
-  ] as const;
-  // "23 de atenção" nao quebra no meio (F-56): espaco nao separavel entre o numero e o rotulo
-  return partes.filter(([q]) => q > 0).map(([q, r]) => `${q}\u00a0${r}`).join(" · ");
-}
-
 // `verTodos`: onde o resto mora (a tela de Avisos, filtrada); sem ele, o resto abre no lugar.
 export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE, id = "titulo-alertas",
-                                  vazio = "Nenhum aviso. Tudo em dia.", verTodos }:
+                                  vazio = "Nenhum aviso.", verTodos, lateral = false }:
     { itens: Aviso[] | null | undefined; ir: Ir; titulo?: string; limite?: number; id?: string; vazio?: string;
-      verTodos?: { para: Rota; busca?: Busca; rotulo: string } }) {
+      verTodos?: { para: Rota; busca?: Busca; rotulo: string }; lateral?: boolean }) {
   const [todos, setTodos] = useState(false);
   // A ordem e' a de quem chama: a do servidor (nivel, dias, obra; `avisos.listar`) ou `porAtraso`.
   const lista = itens ?? [];
@@ -121,12 +108,6 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
       <div className="cartao__cabeca">
         <IconeSino className="icone icone--p" />
         <h2 className="cartao__titulo" id={id}>{titulo}</h2>
-        <span className="cartao__dica num">
-          {itens === undefined ? "carregando…"
-            : itens === null ? "indisponível"
-            : itens.length === 0 ? "nenhum"
-            : contagem(itens)}
-        </span>
       </div>
 
       {itens === undefined ? null : itens === null ? (
@@ -141,20 +122,15 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
           <p className="vazio__titulo">{vazio}</p>
         </div>
       ) : (
-        <ul className="alertas">
+        <ul className={lateral ? "alertas alertas--lateral" : "alertas"}>
           {visiveis.map((a, i) => {
             const selo = SELO[a.nivel] ?? SELO.atencao;
             const destino = destinoDoAviso(a);
-            // F-96: a linha inteira e' o link, e nada dizia isso: o destino em texto de apoio e o chevron no fim.
-            // O cartao e' o de uma obra ("Avisos desta obra"): o destino vai sem o nome dela.
-            const onde = destino ? ondeSeResolve(a, true) : "";
+            // F-96: a linha inteira e' o link; o chevron no fim diz isso.
             const conteudo = (
               <>
                 <Selo classe={selo.classe} forte={selo.forte}>{selo.rotulo}</Selo>
-                <span className="alerta__msg">
-                  {semRSOrfao(a.mensagem)}
-                  {onde && <span className="alerta__onde">{onde}</span>}
-                </span>
+                <span className="alerta__msg">{semRSOrfao(a.mensagem)}</span>
                 {/* valor em coluna propria, alinhado a' direita: da' para varrer os valores da lista */}
                 <span className="alerta__valor num">{a.valor_centavos !== null ? brl(a.valor_centavos) : ""}</span>
                 {destino && <IconeSeta className="icone icone--p alerta__seta" />}

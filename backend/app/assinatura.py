@@ -72,7 +72,16 @@ def conferir(montado: list[str], assinado: list[str]) -> dict:
             "paginas_montado": n, "paginas_assinado": a, "certificado": a - n - len(extras) if a > n else 0}
 
 
+def textos(pdf: bytes) -> list[str]:
+    """O texto de cada pagina de um pacote (montado ou assinado), com o teto de paginas do pacote."""
+    return leitura_pdf.textos_por_pagina_com_limite(pdf, pdfs.TETO_PAGINAS_PACOTE)
+
+
+def paginas_com(paginas: list[str], frase: str) -> list[str]:
+    """As paginas cujo texto traz `frase`, sem contar acento, caixa, espaco e pontuacao (o DocuSign quebra linhas)."""
+    alvo = _plano(frase)
+    return [t for t in paginas if alvo in _plano(t)]
+
+
 def conferir_pdfs(montado_pdf: bytes, assinado_pdf: bytes) -> dict:
-    teto = pdfs.TETO_PAGINAS_PACOTE
-    return conferir(leitura_pdf.textos_por_pagina_com_limite(montado_pdf, teto),
-                    leitura_pdf.textos_por_pagina_com_limite(assinado_pdf, teto))
+    return conferir(textos(montado_pdf), textos(assinado_pdf))

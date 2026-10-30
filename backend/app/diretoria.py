@@ -1,7 +1,6 @@
 """Tela da diretoria (spec 2026-09-21 §10.5), bloco 8. Tudo na COTA da Lotufo; vocabulario fixo: medido,
-faturado (nota emitida), protocolado, recebido. O total a receber (valor do protocolado e o recebimento
-previsto) so' aparece com o cadastro liberando (`geral.yaml: diretoria.total_a_receber_liberado`), depois da
-conciliacao com a controladoria.
+faturado (nota emitida), protocolado, recebido. O total a receber (valor do protocolado) so' aparece com o cadastro
+liberando (`geral.yaml: diretoria.total_a_receber_liberado`), depois da conciliacao com a controladoria.
 
 Corte de 2026-09-25 (decisao do Leonardo): o faturado ate o QDOP de 22/09/2026 conta como pago, menos o que o RM
 mostra em aberto. O "a receber" soma as medicoes protocoladas e as cobrancas do RM ainda nao pagas que nenhuma
@@ -15,16 +14,15 @@ import json
 import math
 from decimal import ROUND_HALF_UP, Decimal
 
-from app import avisos as _av, conciliacao, contratos, cronograma, qdop, reajuste, sincronizacao_rm, tempo
+from app import avisos as _av, conciliacao, contratos, cronograma, paineis, qdop, reajuste, sincronizacao_rm, tempo
 
-QUARTIL, MEDIANA, MINIMO, PADRAO_DIAS = 0.75, 0.5, 10, 30
+QUARTIL, MINIMO, PADRAO_DIAS = 0.75, 10, 30   # prazo do orgao: so' o "previsto" da tela A receber usa
 ESPERANDO_NOTA = ("espelho_gerado", "espelho_enviado")
 ESPERANDO_PROTOCOLO = ("nota_emitida",)
 PROTOCOLADAS = ("protocolada", "nf_emitida")
 FORA = ("cancelada", "desistida", "prevista")
 FAIXAS = (("ate_30", 0, 30), ("de_31_a_60", 31, 60), ("mais_60", 61, None))
 TOLERANCIA_CENTAVOS = 100      # titulo pago com ate R$ 1,00 de diferenca nao e' divida (arredondamento do RM)
-AVISO_NOTA_MINIMO = 1_000_000  # nota em aberto so' vira aviso a partir de R$ 10 mil na cota; o resto so' soma
 
 
 def _quantil(valores: list[int], q: float) -> int:
@@ -62,22 +60,9 @@ def _prazo(ms: list[dict], orgao_id, hoje: datetime.date, quantil: float) -> int
     return _quantil(dias, quantil) if len(dias) >= MINIMO else PADRAO_DIAS
 
 
-def prazo_orgao(conn, orgao_id: int, hoje: datetime.date, quantil: float = QUARTIL) -> int:
-    """Prazo normal do orgao: 3o quartil dos dias entre o primeiro protocolo e o recebimento das medicoes
-    recebidas nos ultimos 12 meses; com menos de 10 amostras, 30 dias."""
-    return _prazo(_medicoes(conn), orgao_id, hoje, quantil)
-
-
-def _notas_em_aberto(conn) -> list[dict]:
-    """Cobrancas do RM (nota ativa com titulo nao pago) que nenhuma medicao em aberto representa, no formato das
-    medicoes protocoladas: nota sem medicao, ou ligada so' a medicao ja' fechada (recebida pelo corte, por
-    exemplo). A obra vem da medicao ligada ou do centro de custo (atual ou anterior); consorcio sem centro, pela
-    coligada. So' notas da coligada da entidade do contrato: a NFS-e da Lotufo em obra de consorcio e' repassada
-    pelo consorcio e nao e' cobranca ao orgao. O valor e' o que falta do titulo (liquido), na cota.
-    Nota ligada a medicao recebida a mao fica fora (issue #203): o registro manual vale, e o titulo ainda aberto
-    no RM aparece na Saude, nao de novo no a receber."""
-    em_aberto = set(ESPERANDO_NOTA + ESPERANDO_PROTOCOLO + PROTOCOLADAS)
-    a_mao = conciliacao.recebidas_a_mao(conn)
+def _mapa_contratos(conn) -> tuple[dict, dict, dict]:
+    """Os contratos com a coligada da entidade, e os indices para achar a obra de uma nota do RM sem medicao:
+    por (coligada, centro de custo, atual ou anterior) e, para consorcio sem centro, so' pela coligada."""
     contr = {r["id"]: dict(r) for r in conn.execute("""
         SELECT c.id, c.percentual_direito_bp pct, c.orgao_id, c.estado, COALESCE(c.nome_curto, c.numero_instrumento) obra,
                c.centro_custo_rm, c.centros_custo_anteriores_rm, e.coligada_rm col, o.nome orgao_nome
@@ -89,6 +74,20 @@ def _notas_em_aberto(conn) -> list[dict]:
             por_centro.setdefault((c["col"], cc), []).append(c["id"])
         if not (c["centro_custo_rm"] or "").strip() and c["col"] not in (None, 1):
             por_coligada.setdefault(c["col"], []).append(c["id"])
+    return contr, por_centro, por_coligada
+
+
+def _notas_em_aberto(conn) -> list[dict]:
+    """Cobrancas do RM (nota ativa com titulo nao pago) que nenhuma medicao em aberto representa, no formato das
+    medicoes protocoladas: nota sem medicao, ou ligada so' a medicao ja' fechada (recebida pelo corte, por
+    exemplo). A obra vem da medicao ligada ou do centro de custo (atual ou anterior); consorcio sem centro, pela
+    coligada. So' notas da coligada da entidade do contrato: a NFS-e da Lotufo em obra de consorcio e' repassada
+    pelo consorcio e nao e' cobranca ao orgao. O valor e' o que falta dos titulos (liquido), titulo a titulo, na cota.
+    Nota ligada a medicao recebida a mao fica fora (issue #203): o registro manual vale, e o titulo ainda aberto
+    no RM aparece na Saude, nao de novo no a receber."""
+    em_aberto = set(ESPERANDO_NOTA + ESPERANDO_PROTOCOLO + PROTOCOLADAS)
+    a_mao = conciliacao.recebidas_a_mao(conn)
+    contr, por_centro, por_coligada = _mapa_contratos(conn)
     out = []
     for n in conn.execute("SELECT * FROM notas_fiscais WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL"):
         ligadas = conn.execute("""SELECT m.id, m.contrato_id, m.estado FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id
@@ -107,8 +106,9 @@ def _notas_em_aberto(conn) -> list[dict]:
         c = contr.get(cid)
         if c is None or c["col"] != n["coligada"]:
             continue
-        recebido, devido, _ = sincronizacao_rm._recebido_da_nota(conn, n["id"])
-        falta = devido - recebido
+        # Issue #253: a falta e' contada titulo a titulo (a conta da #35 e da #251): juros num titulo nao
+        # escondem outro titulo aberto da mesma nota.
+        falta = sincronizacao_rm._falta_por_titulo(conn, n["id"], aberto_inteiro=True)
         if falta <= TOLERANCIA_CENTAVOS:
             continue
         out.append({"estado": "protocolada", "tipo": "nota", "numero": n["numero"], "nf": _numero_nf(n["numero"]),
@@ -171,7 +171,7 @@ def _dinheiro(conn, ms: list[dict], hoje: datetime.date, liberado: bool, notas: 
         o["ms"].append(m)
     orgaos = []
     for orgao_id, o in por_orgao.items():
-        # A4 (mapa de 2026-09-28): as faixas de cada orgao, o prazo normal dele e as obras que ele deve.
+        # A4 (mapa de 2026-09-28): as faixas de cada orgao e as obras que ele deve (o prazo normal saiu na #255).
         por_obra: dict = {}
         for m in o["ms"]:
             por_obra.setdefault(m["contrato_id"], {"obra": m["obra"], "ms": []})["ms"].append(m)
@@ -179,7 +179,6 @@ def _dinheiro(conn, ms: list[dict], hoje: datetime.date, liberado: bool, notas: 
                  for cid, x in por_obra.items()]
         orgaos.append({"orgao_id": orgao_id, "orgao": o["orgao"], **_grupo_rec(o["ms"], liberado),
                        "maior_dias": _maior_dias(o["ms"], hoje), "faixas": _faixas(o["ms"], hoje, liberado),
-                       "prazo_normal_dias": _prazo(ms, orgao_id, hoje, QUARTIL) if orgao_id else None,
                        "obras": sorted(obras, key=lambda x: -(x["maior_dias"] or 0))})
     pendentes = [(c, k) for c in _ativos(conn) for k in reajuste.ciclos(conn, c["id"], hoje)
                  if k["situacao"] == "apostilamento_pendente"]
@@ -211,10 +210,25 @@ def _medido(ms: list[dict], mes: str) -> int:
     return sum(_cota(m) for m in ms if m["competencia"] == mes and m["estado"] not in FORA)
 
 
+def _faturado_mes(conn, mes: str) -> dict:
+    """Faturado no mes (decisao do Leo de 16/10/2026, opcao b): as medicoes que receberam a nota no mes, pelo valor
+    atestado (senao o protocolado), na cota. E' a regra da coluna "Faturado" do QDOP (`qdop._faturado`), so'
+    fatiada pelo mes da nota (`nota_emitida_em`, data da nota). So' leitura."""
+    total, quantidade = 0, 0
+    for c in conn.execute("SELECT id, percentual_direito_bp FROM contratos WHERE estado<>'rescindido'"):
+        total += qdop._faturado(conn, c["id"], c["percentual_direito_bp"], False, mes)
+        quantidade += conn.execute("SELECT COUNT(*) FROM medicoes WHERE contrato_id=? AND tipo IN ('execucao','projeto') "
+                                   "AND estado IN ('nota_emitida','protocolada','nf_emitida','recebida') "
+                                   "AND substr(nota_emitida_em,1,7)=?", (c["id"], mes)).fetchone()[0]
+    return {"valor_centavos": total, "notas": quantidade}
+
+
 def _mes_ano(conn, ms: list[dict], hoje: datetime.date, cache: dict) -> dict:
     mes = _mes(hoje)
     meses_ano = [f"{hoje.year:04d}-{k:02d}" for k in range(1, hoje.month + 1)]
-    return {"mes": mes, "medido_mes_centavos": _medido(ms, mes), "previsto_mes_centavos": _previsto(conn, mes, cache),
+    faturado = _faturado_mes(conn, mes)
+    return {"mes": mes, "medido_mes_centavos": _medido(ms, mes),
+            "faturado_mes_centavos": faturado["valor_centavos"], "notas_faturadas_mes": faturado["notas"], "previsto_mes_centavos": _previsto(conn, mes, cache),
             "mesmo_mes_ano_anterior_centavos": _medido(ms, _mes(hoje, -12)),
             "acumulado_ano_centavos": sum(_medido(ms, x) for x in meses_ano),
             "previsto_ano_centavos": sum(_previsto(conn, x, cache) for x in meses_ano),
@@ -222,21 +236,11 @@ def _mes_ano(conn, ms: list[dict], hoje: datetime.date, cache: dict) -> dict:
                        "previsto_centavos": _previsto(conn, _mes(hoje, k), cache)} for k in range(-11, 1)]}
 
 
-def _proximos(conn, ms: list[dict], hoje: datetime.date, liberado: bool, cache: dict,
-              notas: list[dict] = ()) -> list[dict]:
-    meses = [_mes(hoje, k) for k in range(6)]
-    receber = dict.fromkeys(meses, 0)
-    medianas: dict = {}
-    for m in [*ms, *notas]:
-        if m["estado"] not in PROTOCOLADAS or not _d(m["protocolo_em"]):
-            continue
-        if m["orgao_id"] not in medianas:
-            medianas[m["orgao_id"]] = _prazo(ms, m["orgao_id"], hoje, MEDIANA)
-        quando = max(_d(m["protocolo_em"]) + datetime.timedelta(days=medianas[m["orgao_id"]]), hoje)
-        if _mes(quando) in receber:
-            receber[_mes(quando)] += _cota(m)
-    return [{"competencia": x, "faturamento_previsto_centavos": _previsto(conn, x, cache),
-             "recebimento_previsto_centavos": receber[x] if liberado else None} for x in meses]
+def _proximos(conn, hoje: datetime.date, cache: dict) -> list[dict]:
+    """Faturamento previsto (cronograma) dos proximos seis meses. O recebimento previsto, pela mediana do prazo
+    do orgao, saiu com o motor de atraso de pagamento (issue #255, decisao de 19/10/2026)."""
+    return [{"competencia": x, "faturamento_previsto_centavos": _previsto(conn, x, cache)}
+            for x in (_mes(hoje, k) for k in range(6))]
 
 
 def _carteira(conn, ms: list[dict], hoje: datetime.date) -> dict:
@@ -250,26 +254,78 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date) -> dict:
                      for m in ms if m["contrato_id"] == c["id"] and m["tipo"] in ("execucao", "projeto")
                      and m["estado"] not in FORA)
         saldo = contratos.cota(v["valor_vigente_centavos"] - medido, c["percentual_direito_bp"]) or 0
+        vigente_cota = contratos.cota(v["valor_vigente_centavos"], c["percentual_direito_bp"]) or 0
+        medido_cota = contratos.cota(medido, c["percentual_direito_bp"]) or 0
         ritmo += sum(_cota(m) for m in ms if m["contrato_id"] == c["id"] and m["tipo"] in ("execucao", "projeto")
                      and m["estado"] not in FORA and m["competencia"] in ultimos)
         fim = _d(v.get("execucao_fim_vigente"))
         linhas.append({"contrato_id": c["id"], "obra": c["nome_curto"] or c["numero_instrumento"],
                        "orgao_id": c["orgao_id"], "saldo_centavos": saldo,
+                       "vigente_centavos": vigente_cota, "medido_centavos": medido_cota,
                        "execucao_fim": v.get("execucao_fim_vigente"), "dias": (fim - hoje).days if fim else None})
     saldo = sum(x["saldo_centavos"] for x in linhas)
     ritmo_mes = int((Decimal(ritmo) / 6).quantize(Decimal("1"), rounding=ROUND_HALF_UP))  # arredondamento unico
     nomes = {r["id"]: r["nome"] for r in conn.execute("SELECT id, nome FROM orgaos")}
     por_orgao: dict = {}
     for x in linhas:
-        nome = nomes.get(x["orgao_id"], "sem órgão")
-        por_orgao[nome] = por_orgao.get(nome, 0) + x["saldo_centavos"]
+        o = por_orgao.setdefault(nomes.get(x["orgao_id"], "sem órgão"), dict.fromkeys(("saldo", "vigente", "medido", "obras"), 0))
+        o["saldo"] += x["saldo_centavos"]; o["vigente"] += x["vigente_centavos"]; o["medido"] += x["medido_centavos"]; o["obras"] += 1
     return {"saldo_centavos": saldo, "ritmo_mensal_centavos": ritmo_mes,
             "meses_de_producao": round(saldo / ritmo_mes, 1) if ritmo_mes > 0 else None,
-            "por_orgao": [{"orgao": k, "saldo_centavos": v, "fracao": v / saldo if saldo else 0}
-                          for k, v in sorted(por_orgao.items(), key=lambda kv: -kv[1])]}
+            # vigente e medido na cota e o numero de obras, para o cartao por contratante (% executado = medido/vigente)
+            "por_orgao": [{"orgao": k, "saldo_centavos": o["saldo"], "fracao": o["saldo"] / saldo if saldo else 0,
+                           "vigente_centavos": o["vigente"], "medido_centavos": o["medido"], "obras": o["obras"]}
+                          for k, o in sorted(por_orgao.items(), key=lambda kv: -kv[1]["saldo"])]}
 
 
-def _obras(conn, hoje: datetime.date, avisos: list[dict]) -> list[dict]:
+def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, str, dict, dict]:
+    """A curva S da obra (issue #295), por competencia e em valor CHEIO: o previsto vigente; a linha de base ("anterior"
+    quando a obra tem repactuacao, com o previsto anterior a ela; senao "vigente", com o vigente: decisao do Leo de
+    28/10/2026); e o medido de execucao nos estados que medem (`paineis._medido`). O vigente sai do mesmo `cache` de
+    `_previsto`, para nao ler o cronograma duas vezes."""
+    chave = ("curva", contrato_id)
+    if chave not in cache:
+        if contrato_id not in cache:
+            cache[contrato_id] = cronograma.previsto_efetivo(conn, contrato_id)
+        vigente = cache[contrato_id]
+        ant = cronograma.curva_comparativa(conn, contrato_id)["anterior"]
+        base = ("anterior", {a["competencia"]: a["previsto_centavos"] for a in ant}) if ant else ("vigente", vigente)
+        cache[chave] = (vigente, *base, {c: m["execucao"] for c, m in paineis._medido(conn, contrato_id).items()})
+    return cache[chave]
+
+
+def _curva_carteira(conn, hoje: datetime.date, cache: dict) -> list[dict]:
+    """Issue #296 (spec 2026-10-20 §4 item 5): a curva S da carteira, a soma das curvas das obras ativas nos ultimos
+    12 meses, cada obra na sua cota (D8). A obra sem repactuacao entra na linha anterior com o previsto vigente
+    (decisao do Leo de 28/10/2026), para as duas linhas somarem as mesmas obras."""
+    meses = [_mes(hoje, k) for k in range(-11, 1)]
+    out = {m: {"competencia": m, "previsto_centavos": 0, "previsto_anterior_centavos": 0, "medido_centavos": 0} for m in meses}
+    for c in _ativos(conn):
+        vigente, _, linha_base, medido = _curva_obra(conn, c["id"], cache)
+        pct = c["percentual_direito_bp"]
+        for m in meses:
+            out[m]["previsto_centavos"] += contratos.cota(vigente.get(m, 0), pct) or 0
+            out[m]["previsto_anterior_centavos"] += contratos.cota(linha_base.get(m, 0), pct) or 0
+            out[m]["medido_centavos"] += contratos.cota(medido.get(m, 0), pct) or 0
+    return list(out.values())
+
+
+def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
+    """Issue #296, decisoes do Leo de 28/10/2026: desvio em p.p. = (medido acumulado - previsto acumulado) / valor
+    vigente do contrato x 100, ate' a ultima competencia fechada (o mes anterior ao atual), contra a linha anterior a
+    ultima repactuacao quando a obra tem uma, senao contra a vigente. Em valor cheio (a razao e' a mesma na cota, sem
+    o arredondamento dela); uma casa decimal, meio para cima. Sem cronograma ou sem valor vigente, None."""
+    _, base, previsto, medido = _curva_obra(conn, contrato_id, cache)
+    total = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
+    if not previsto or not total or total <= 0:
+        return {"desvio_pp": None, "desvio_base": None}
+    ate = _mes(hoje, -1)
+    diferenca = sum(v for c, v in medido.items() if c and c <= ate) - sum(v for c, v in previsto.items() if c <= ate)
+    pp = (Decimal(diferenca) * 100 / Decimal(total)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    return {"desvio_pp": float(pp), "desvio_base": base}
+
+
+def _obras(conn, hoje: datetime.date, avisos: list[dict], cache: dict) -> list[dict]:
     por_obra: dict = {}
     for a in avisos:
         if a.get("contrato_id"):
@@ -286,7 +342,8 @@ def _obras(conn, hoje: datetime.date, avisos: list[dict]) -> list[dict]:
         motivos = [{"tipo": a["tipo"], "nivel": a["nivel"], "dias": a["dias"], "valor_centavos": a["valor_centavos"],
                     "texto": a["mensagem"][len(prefixo):] if prefixo and a["mensagem"].startswith(prefixo) else a["mensagem"]}
                    for a in av]
-        out.append({**linha, "farol": farol, "motivo": "; ".join(a["mensagem"] for a in av), "motivos": motivos})
+        out.append({**linha, "farol": farol, "motivo": "; ".join(a["mensagem"] for a in av), "motivos": motivos,
+                    **_desvio(conn, linha["contrato_id"], hoje, cache)})
     return out
 
 
@@ -328,40 +385,61 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     avisos = _av.listar(conn, hoje, publico="diretoria")
     return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
             "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas), "mes_ano": _mes_ano(conn, ms, hoje, cache),
-            "proximos": _proximos(conn, ms, hoje, liberado, cache, notas), "carteira": _carteira(conn, ms, hoje),
-            "obras": _obras(conn, hoje, avisos), "obras_base": _obras_base(conn), "avisos": avisos}
+            "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje),
+            "curva_carteira": _curva_carteira(conn, hoje, cache),
+            "obras": _obras(conn, hoje, avisos, cache), "obras_base": _obras_base(conn), "avisos": avisos}
 
 
-def avisos_pagamento(conn, hoje: datetime.date | None = None) -> list[dict]:
-    """Medicao protocolada ha mais dias que o prazo normal do orgao (so' para a diretoria).
+def a_receber(conn, hoje: datetime.date | None = None) -> dict:
+    """Tela A receber (redesenho #162; so' leitura; tudo na cota). O total e a lista sao as cobrancas protocoladas
+    esperando pagamento (medicoes protocoladas e, como no painel da diretoria, as notas do RM em aberto que nenhuma
+    medicao representa), por obra. Antes da conciliacao o valor e' None e as notas do RM ficam fora (como no painel).
 
-    So' com o total a receber liberado: antes da conciliacao com a controladoria o historico carregado tem
-    ~420 medicoes "protocoladas" que nunca foram marcadas como recebidas (sem nota ligada), e o aviso
-    acusaria atraso em pagamento que ja' entrou."""
+    Regra do "previsto" (a confirmar pelo Leo; o sistema nao tem previsao por medicao): o previsto de um mes e' a
+    soma, na cota, das medicoes protocoladas (hoje em aberto ou ja' recebidas) cujo
+    vencimento (data do protocolo ou da emissao + prazo normal do orgao) cai naquele mes. O recebido do mes e' a
+    soma, na cota, das medicoes com `recebida_em` no mes. Seis meses ate o atual e tres a frente."""
     hoje = hoje or tempo.hoje_local()
     liberado = _liberado(conn)
-    if not liberado:
-        return []
     ms = _medicoes(conn)
-    prazos_q3: dict = {}
-    out = []
-    notas = [n for n in _notas_em_aberto(conn) if _cota(n) >= AVISO_NOTA_MINIMO]
-    for m in [*ms, *notas]:
-        if m["estado"] not in PROTOCOLADAS or m["contrato_estado"] == "encerrado" or not _d(m["protocolo_em"]):
+    notas = _notas_em_aberto(conn) if liberado else []
+    abertas = sorted(([m for m in ms if m["estado"] in PROTOCOLADAS] + notas), key=lambda m: (m["protocolo_em"] or "9", m["contrato_id"]))
+    valor = lambda xs: sum(_cota(m) for m in xs) if liberado else None
+    por_obra: dict = {}
+    for m in abertas:
+        por_obra.setdefault(m["contrato_id"], {"contrato_id": m["contrato_id"], "obra": m["obra"], "ms": []})["ms"].append(m)
+    obras = [{"contrato_id": o["contrato_id"], "obra": o["obra"], "quantidade": len(o["ms"]), "valor_centavos": valor(o["ms"])}
+             for o in por_obra.values()]
+    obras.sort(key=lambda o: (-(o["valor_centavos"] or 0), -o["quantidade"], o["obra"]))
+    itens = [{"contrato_id": m["contrato_id"], "obra": m["obra"], "medicao_id": None if m.get("tipo") == "nota" else m["id"],
+              "numero": None if m.get("tipo") == "nota" else m["numero"], "tipo": m.get("tipo") or "execucao",
+              "nota_numero": m.get("nf") if m.get("tipo") == "nota" else None, "competencia": m["competencia"],
+              "protocolada_em": (m["protocolo_em"] or "")[:10] or None, "valor_centavos": _cota(m) if liberado else None}
+             for m in abertas]
+    prazos: dict = {}
+    previsto = dict.fromkeys([_mes(hoje, k) for k in range(-5, 4)], 0)
+    # so' medicoes (a nota do RM repetiria a recebida) e recebida so' com data: o corte de 25/09/2026 fechou o legado como
+    # recebida sem `recebida_em`; essas nao entram no recebido e, por isso, tambem ficam fora do previsto
+    for m in [x for x in ms if x["estado"] in PROTOCOLADAS or (x["estado"] == "recebida" and x["recebida_em"])]:
+        base = _d(m["protocolo_em"])
+        if not base:
             continue
-        if m["orgao_id"] not in prazos_q3:
-            prazos_q3[m["orgao_id"]] = _prazo(ms, m["orgao_id"], hoje, QUARTIL)
-        dias, prazo = (hoje - _d(m["protocolo_em"])).days, prazos_q3[m["orgao_id"]]
-        if dias > prazo:
-            if m["tipo"] == "nota":
-                texto = f"NF {m['nf']} emitida há {dias} dias sem pagamento no RM"
-            else:
-                titulo = f"Reajuste da {m['numero']}ª Medição" if m["tipo"] == "reajuste" else f"{m['numero']}ª Medição"
-                texto = f"{titulo} protocolada há {dias} dias"
-            # A12 (2026-09-28): a medicao, para o aviso levar ao recebimento dela; a nota do RM nao tem medicao
-            out.append({**_av.aviso("pagamento_atrasado", "acao",
-                                    f"{texto}; o prazo normal do órgão é {prazo} dias",
-                                    m["contrato_id"], m["obra"], dias=dias, valor_centavos=_cota(m) if liberado else None,
-                                    publico=("diretoria",), data=_d(m["protocolo_em"]).isoformat(), sentido="desde"),
-                        "medicao_id": None if m["tipo"] == "nota" else m["id"]})
-    return out
+        if m["orgao_id"] not in prazos:
+            prazos[m["orgao_id"]] = _prazo(ms, m["orgao_id"], hoje, QUARTIL)
+        mes = _mes(base + datetime.timedelta(days=prazos[m["orgao_id"]]))
+        # meses futuros: so' o que ainda nao foi pago; a recebida conta se o vencimento nao e' posterior ao mes do recebimento
+        if m["estado"] == "recebida" and mes > _mes(hoje) and mes > m["recebida_em"][:7]:
+            continue
+        if mes in previsto:
+            previsto[mes] += _cota(m)
+    recebido = dict.fromkeys(previsto, 0)
+    for m in ms:
+        if m["estado"] == "recebida" and (m["recebida_em"] or "")[:7] in recebido:
+            recebido[m["recebida_em"][:7]] += _cota(m)
+    atual = _mes(hoje)
+    meses = [{"competencia": x, "atual": x == atual, "futuro": x > atual,
+              "previsto_centavos": previsto[x] if liberado else None,
+              "recebido_centavos": None if x > atual else recebido[x]} for x in previsto]
+    return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
+            "total": {"quantidade": len(abertas), "obras": len(obras), "valor_centavos": valor(abertas)},
+            "mes": next(x for x in meses if x["atual"]), "meses": meses, "por_obra": obras, "itens": itens}

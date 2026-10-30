@@ -41,8 +41,11 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
       const eu = await api<Usuario>("/api/auth/eu");
       aoEntrar(eu);
     } catch (falha) {
-      // credencial recusada (4xx) e servidor fora do ar pedem coisas diferentes de quem tenta entrar
-      setErro(falha instanceof ApiErro && falha.status >= 400 && falha.status < 500
+      // credencial recusada (4xx) e servidor fora do ar pedem coisas diferentes de quem tenta entrar.
+      // 429 (#3, limite de login por origem): o computador estourou a cota; "senha errada" levaria a
+      // pedir desbloqueio, que nao resolve. Vale o texto do servidor, ja' em portugues.
+      setErro(falha instanceof ApiErro && falha.status === 429 ? falha.message
+        : falha instanceof ApiErro && falha.status >= 400 && falha.status < 500
         ? "E-mail ou senha inválidos, ou usuário bloqueado. Confira os dois e tente de novo."
         : "Não foi possível falar com o servidor. Tente de novo em instantes.");
     } finally {
@@ -54,7 +57,6 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
     <main className="entrar">
       <div className="entrar__visual">
         <canvas ref={canvasRef} className="entrar__canvas" aria-hidden="true" hidden={sem3d} />
-        <p className="entrar__frase">Medições, protocolos e recebimentos das obras do Grupo Lotufo.</p>
       </div>
       <aside className="entrar__painel">
         <div className="entrar__topo">
@@ -62,19 +64,16 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
             <div className="entrar__simbolo" aria-hidden="true"><i /><i className="v" /><i /><i className="v" /><i /><i /></div>
             <div className="entrar__nome">
               <span className="entrar__marca-nome">grupolotufo</span>
-              <span className="entrar__marca-sub">Plataforma de Obras</span>
             </div>
           </div>
           <div className="entrar__bloco">
             <div className="entrar__cabeca">
               <h1 className="entrar__titulo">Entrar</h1>
-              <p className="entrar__ajuda">Use o e-mail e a senha cadastrados pelo administrador.</p>
             </div>
             <form className="entrar__form" onSubmit={entrar}>
               <label className="entrar__campo">
                 E-mail
                 <input type="email" name="email" autoComplete="username" spellCheck={false} required
-                       placeholder="nome@empresa.com.br"
                        value={email} onChange={e => setEmail(e.target.value)} />
               </label>
               <label className="entrar__campo">
@@ -88,7 +87,6 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
             </form>
           </div>
         </div>
-        <div className="entrar__rodape"><span>© 2026 Grupo Lotufo</span><span>Acesso restrito à rede interna</span></div>
       </aside>
     </main>
   );

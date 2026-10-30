@@ -1,0 +1,183 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Enviar nota</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="app-medicoes.css">
+<link rel="stylesheet" href="app-notas.css">
+<style>
+[hidden] { display: none !important; }
+/* Medições › Enviar nota (#157, opção B): lista à esquerda, a nota escolhida à direita. */
+.en-filtros { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.en-filtros select { height: 40px; border-radius: var(--raio); border-color: var(--linha-forte); background: var(--superficie); font-size: 14px; }
+.notas-v3 .en-lista { background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: var(--sombra); padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.notas-v3 .en-lista .nota-grupo { gap: 0; }
+.notas-v3 .en-lista button.nota-cartao { box-shadow: none; border: 0; border-bottom: 1px solid var(--linha-suave); border-radius: var(--raio); align-items: flex-start; }
+.notas-v3 .en-lista button.nota-cartao[aria-pressed="true"] { border-left: 4px solid var(--acento); }
+.en-direita { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; }
+.notas-v3 .nota-painel { position: sticky; top: 48px; }
+.en-rodape { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid var(--linha); }
+.en-rodape .btn--primario { height: 48px; padding: 0 24px; font-size: 15px; font-weight: 600; }
+.en-motivo { margin: 0; font-size: 13px; color: var(--texto-2); flex: 1 1 100%; }
+.en-motivo--atencao { color: var(--atencao); }
+.en-motivo--bloqueio { color: var(--acao); }
+.notas-v3 .nota-porfora { align-items: flex-start; text-align: left; }
+.en-certidao small { color: var(--texto-2); }
+.iniciar__rodape { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+@media (max-width: 767px) {
+  .pagina.en { padding: 16px 16px 32px; }
+  .notas-v3 .en-lista { padding: 8px; }
+  .notas-v3 .en-lista button.nota-cartao { padding: 12px; }
+  .en-direita { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .notas-v3 .nota-painel { position: static; padding: 16px; }
+  .en-rodape .btn--primario { width: 100%; justify-content: center; }
+}
+</style></head>
+<body data-secao="medicoes" data-titulo="Medições"><main id="conteudo">
+  <nav class="abas-secao" aria-label="Seções de Medições">
+    <a class="abas-secao__aba" href="#" data-acao="Abriria a aba Resumo">Resumo</a>
+    <a class="abas-secao__aba" href="#" data-acao="Abriria a aba Sem medição aberta">Sem medição aberta <span class="abas-secao__n">3</span></a>
+    <a class="abas-secao__aba" href="#" data-acao="Abriria a aba Enviar ao faturamento">Enviar ao faturamento <span class="abas-secao__n">2</span></a>
+    <a class="abas-secao__aba" href="#" data-acao="Abriria a aba Aguardando nota">Aguardando nota <span class="abas-secao__n">4</span></a>
+    <a class="abas-secao__aba" href="enviar-nota.html" aria-current="page">Enviar nota <span class="abas-secao__n">5</span></a>
+    <a class="abas-secao__aba" href="#" data-acao="Abriria a aba Aguardando pagamento">Aguardando pagamento <span class="abas-secao__n">9</span></a>
+  </nav>
+  <div class="pagina en">
+    <p class="pagina__descricao">Notas emitidas que ainda não foram enviadas ao contratante. Medição e reajuste vão juntos em alguns órgãos e separados em outros.</p>
+    <p class="notas__ok" role="status" id="feito" hidden></p>
+    <div class="pilha notas-v3">
+      <div class="nota-colunas">
+        <div class="pilha">
+          <div class="en-lista">
+            <div class="nota-busca-caixa">
+              <svg class="nota-busca__lupa" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+              <input type="search" class="nota-busca" id="busca" placeholder="Buscar nota ou obra…" aria-label="Buscar nota ou obra" autocomplete="off">
+            </div>
+            <div class="en-filtros">
+              <div class="nota-pilulas" role="group" aria-label="Situação" id="pilulas"></div>
+              <select id="orgao" aria-label="Órgão">
+                <option value="">Todos os órgãos</option>
+              </select>
+            </div>
+            <div id="lista" class="pilha" style="gap:16px"></div>
+          </div>
+        </div>
+        <aside class="nota-lateral" aria-label="Nota escolhida" id="lateral"></aside>
+      </div>
+    </div>
+  </div>
+</main>
+
+
+
+<script src="shell.js"></script>
+<script>
+(function () {
+  const CHECK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
+  const CERT = [["FGTS", "30/11/2026"], ["Federal", "12/01/2027"], ["Trabalhista", "05/02/2027"], ["Estadual", "18/12/2026"], ["Municipal", "22/11/2026"]];
+  // carta = órgão que pede ofício (pergunta o nº ao começar o envio); junta = medição e reajuste no mesmo e-mail
+  const E = [
+    { id: "a", obra: "Ponte do Ribeirão", desc: "7ª Medição + Reajuste", comp: "09/2026", orgao: "Secretaria de Obras", carta: false,
+      notas: [["2322", "Medição", "1.234.567,89"], ["2323", "Reajuste", "98.410,22"]], valor: "1.332.978,11", emitida: "08/10/2026", dias: 6,
+      sit: "pronto", selo: ["ok", "Pronto"], extra: [["ok", "FRC assinada nº 00012 e nº 00013", "anexadas em 10/10/2026"], ["ok", "Atestado de medição", "atestado em 02/10/2026"]],
+      irma: null },
+    { id: "b", obra: "Avenida das Palmeiras", desc: "7ª Medição", comp: "09/2026", orgao: "Secretaria de Obras", carta: false,
+      notas: [["2318", "Medição", "987.654,32"]], valor: "987.654,32", emitida: "07/10/2026", dias: 9,
+      sit: "pendencia", selo: ["atencao", "Falta FRC assinada"], extra: [["falta", "FRC assinada", "falta · a FRC nº 00011 já foi gerada", "frc"], ["ok", "Atestado de medição", "atestado em 01/10/2026"]],
+      motivo: ["atencao", "Falta a FRC assinada: anexe na etapa 4 da medição, ou envie assim (a etapa 4 pede a confirmação)."],
+      irma: "Reajuste da 7ª Medição" },
+    { id: "c", obra: "Terminal Norte", desc: "4ª Medição", comp: "09/2026", orgao: "Agência de Parcerias", carta: true,
+      notas: [["2301", "Medição", "765.432,10"]], valor: "765.432,10", emitida: "02/10/2026", dias: 14,
+      sit: "pendencia", selo: ["acao", "Certidão vencida"], vencida: "Trabalhista", extra: [["ok", "Atestado de medição", "atestado em 28/09/2026"]],
+      motivo: ["bloqueio", "Envio bloqueado: a certidão trabalhista venceu em 12/10/2026. Emita a nova em Documentos para liberar."], bloqueado: true, irma: null },
+    { id: "d", obra: "Hospital Regional", desc: "12ª Medição", comp: "09/2026", orgao: "Secretaria de Saúde", carta: true, pedido: true,
+      notas: [["2320", "Medição", "543.210,00"]], valor: "543.210,00", emitida: "08/10/2026", dias: 6,
+      sit: "pronto", selo: ["ok", "Pronto"], extra: [["ok", "Atestado de medição", "atestado em 03/10/2026"], ["ok", "Relatório fotográfico", "anexado em 07/10/2026"]], irma: null },
+    { id: "e", obra: "Parque Linear", desc: "3ª Medição", comp: "09/2026", orgao: "Prefeitura Municipal", carta: true,
+      notas: [["2319", "Medição", "321.098,76"]], valor: "321.098,76", emitida: "08/10/2026", dias: 6,
+      sit: "pendencia", selo: ["atencao", "Esperando o reajuste"], esperando: true, extra: [["ok", "Atestado de medição", "atestado em 02/10/2026"]], irma: null }
+  ];
+  const S = { filtro: "todas", orgao: "", q: "", sel: "a" };
+  const $ = s => document.querySelector(s);
+  const ORGAOS = [...new Set(E.map(e => e.orgao))];
+  $("#orgao").insertAdjacentHTML("beforeend", ORGAOS.map(o => `<option>${o}</option>`).join(""));
+
+  const selo = (n, t) => `<span class="selo selo--${n}"><span class="selo__ponto"></span><span class="selo__texto">${t}</span></span>`;
+  const estado = e => `<span class="nota-estado nota-estado--${e}" title="${{ ok: "Pronto", falta: "Falta", vencida: "Vencida", aviso: "Atenção" }[e]}">${e === "ok" ? CHECK : '<span aria-hidden="true">!</span>'}</span>`;
+  const notasDe = e => (e.notas.length === 1 ? `NF ${e.notas[0][0]}` : `${e.notas.length} notas: ${e.notas.map(n => n[0]).join(", ")}`);
+  const emitida = e => `${e.notas.length > 1 ? "emitidas" : "emitida"} há ${e.dias} dias`;
+
+  function filtrados() {
+    const q = S.q.trim().toLocaleLowerCase("pt-BR");
+    return E.filter(e => (S.filtro === "todas" || (S.filtro === "prontas" ? e.sit === "pronto" : e.sit === "pendencia"))
+      && (!S.orgao || e.orgao === S.orgao)
+      && (!q || [e.obra, e.desc, e.orgao, ...e.notas.map(n => n[0])].join(" ").toLocaleLowerCase("pt-BR").includes(q)));
+  }
+
+  function renderLista() {
+    const cont = { todas: E.length, prontas: E.filter(e => e.sit === "pronto").length, pendencia: E.filter(e => e.sit === "pendencia").length };
+    $("#pilulas").innerHTML = [["todas", "Todas"], ["prontas", "Prontas"], ["pendencia", "Com pendência"]].map(([k, r]) =>
+      `<a href="#" class="nota-pilula" data-filtro="${k}"${S.filtro === k ? ' aria-current="true"' : ""}>${r} <span class="nota-pilula__n num">${cont[k]}</span></a>`).join("");
+    const f = filtrados();
+    if (!f.some(e => e.id === S.sel)) S.sel = f[0] ? f[0].id : null;
+    if (f.length === 0) {
+      $("#lista").innerHTML = `<div class="vazio vazio--curto"><p class="vazio__titulo">Nenhuma nota com esses filtros.</p><p><a href="#" data-limpar>Limpar os filtros</a></p></div>`;
+    } else {
+      $("#lista").innerHTML = ORGAOS.map(o => {
+        const itens = f.filter(e => e.orgao === o);
+        if (!itens.length) return "";
+        return `<section class="pilha nota-grupo" aria-label="${o}"><h2 class="nota-grupo__titulo">${o}${itens.some(e => e.pedido) ? " · a pedido do órgão" : ""}</h2>
+          ${itens.map(e => `<button type="button" class="nota-cartao" data-sel="${e.id}" aria-pressed="${S.sel === e.id}">
+            <span class="nota-cartao__texto"><span class="nota-cartao__obra">${e.obra}</span>
+              <span class="nota-cartao__desc">${[e.desc, e.comp, notasDe(e), emitida(e)].join(" · ")}</span></span>
+            <span class="en-direita"><span class="nota-cartao__valor nota-mono${e.pedido ? " nota-cartao__valor--espera" : ""}">R$ ${e.valor}</span>${selo(e.selo[0], e.selo[1])}</span>
+          </button>`).join("")}</section>`;
+      }).join("");
+    }
+    renderDetalhe();
+  }
+
+  function renderDetalhe() {
+    const e = E.find(x => x.id === S.sel);
+    if (!e) { $("#lateral").innerHTML = ""; return; }
+    const itens = [
+      ...e.notas.map(n => `<li>${estado("ok")}<span class="nota-item"><span class="nota-item__texto"><span>NF ${n[0]} de ${e.emitida} · ${n[1]}</span><span class="nota-item__detalhe"><span class="nota-mono">R$ ${n[2]}</span> · lida e conferida contra o espelho</span></span></span></li>`),
+      ...e.extra.map(x => x[3] === "frc"
+        ? `<li>${estado("falta")}<span class="nota-item"><span class="nota-item__texto"><span>${x[1]}</span><span class="nota-item__detalhe nota-item__detalhe--falta">${x[2]}</span>
+            <span class="nota-item__detalhe">anexe na <a class="link forte" href="medicao.html#etapa-4">etapa 4 da medição</a></span></span></span></li>`
+        : `<li>${estado(x[0])}<span class="nota-item"><span class="nota-item__texto"><span>${x[1]}</span><span class="nota-item__detalhe">${x[2]}</span></span></span></li>`),
+      ...CERT.map(c => e.vencida === c[0]
+        ? `<li>${estado("vencida")}<span class="nota-item"><span class="nota-item__texto"><span>Certidão ${c[0].toLowerCase()}</span><span class="nota-item__detalhe nota-item__detalhe--vencida">vencida em 12/10/2026</span><span class="nota-item__detalhe">emita em <a class="link forte" href="documentos.html">Documentos</a></span></span></span></li>`
+        : `<li class="en-certidao">${estado("ok")}<span class="nota-item"><span class="nota-item__texto"><span>Certidão ${c[0] === "Federal" ? "federal" : c[0] === "FGTS" ? "do FGTS" : c[0].toLowerCase()} <small>· válida até ${c[1]}</small></span></span></span></li>`)
+    ].join("");
+    const motivo = e.motivo || ["neutro", "Tudo pronto: a nota abre na etapa 4 da medição, com o e-mail montado (lá se pede o nº do ofício, quando o órgão exige)."];
+    $("#lateral").innerHTML = `<section class="nota-painel" aria-labelledby="titulo-envio" id="painel">
+      <div class="nota-painel__bloco"><h2 class="nota-painel__titulo" id="titulo-envio">${e.obra} · ${e.desc}</h2>
+        <p class="nota-painel__meta">${e.orgao} · ${e.notas.length === 1 ? "NF " + e.notas[0][0] : e.notas.length + " notas"} de ${e.emitida} · parada há ${e.dias} dias${e.pedido ? " · a pedido do órgão" : ""}</p></div>
+      <div class="nota-painel__bloco"><p class="nota-painel__valor nota-mono">R$ ${e.valor}</p>${e.notas.length > 1 ? `<p class="nota-painel__meta">Soma das ${e.notas.length} notas</p>` : ""}</div>
+      <div class="nota-painel__junto"><span class="nota-painel__sub">O que vai junto</span><ul class="nota-itens">${itens}</ul></div>
+      ${e.esperando ? `<span class="aviso"><span class="aviso__ponto"></span>A Prefeitura Municipal recebe a medição e o reajuste no mesmo e-mail: faltam as notas do reajuste. Para mandar sem o reajuste, use a saída de emergência na <a href="medicao.html#etapa-4">etapa 4 da medição</a>.</span>` : ""}
+      <div class="en-rodape">
+        <p class="en-motivo en-motivo--${e.esperando ? "atencao" : motivo[0]}">${e.esperando ? "Esperando as notas do reajuste." : motivo[1]}</p>
+        <a href="medicao.html">Abrir a medição</a>
+        ${e.esperando ? "" : e.bloqueado ? `<button type="button" class="btn btn--primario" disabled>Enviar a nota →</button>` : `<a class="btn btn--primario" href="medicao.html#etapa-4">Enviar a nota →</a>`}
+      </div>
+      <p class="nota-porfora__dica" style="text-align:left">Enviar, anexar o que falta e registrar um envio feito fora do sistema se fazem na etapa 4 da medição.</p>
+    </section>`;
+  }
+
+  document.addEventListener("click", ev => {
+    const t = ev.target.closest("[data-filtro],[data-sel],[data-limpar]");
+    if (!t) return;
+    if (t.dataset.filtro) { ev.preventDefault(); S.filtro = t.dataset.filtro; renderLista(); return; }
+    if (t.dataset.sel) {
+      S.sel = t.dataset.sel; renderLista();
+      if (innerWidth < 1100) $("#painel").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (t.hasAttribute("data-limpar")) { ev.preventDefault(); S.filtro = "todas"; S.orgao = ""; S.q = ""; $("#busca").value = ""; $("#orgao").value = ""; renderLista(); return; }
+  });
+  $("#busca").addEventListener("input", ev => { S.q = ev.target.value; renderLista(); });
+  $("#orgao").addEventListener("change", ev => { S.orgao = ev.target.value; renderLista(); });
+  renderLista();
+})();
+</script>
+</body></html>

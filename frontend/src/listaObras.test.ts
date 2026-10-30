@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { filtrarObras, prazoDaObra, type ObraLista } from "./listaObras";
+import type { Aviso } from "./Alertas";
+import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, pctExecutado, prazoDaObra, resumoContratante, type ObraLista } from "./listaObras";
 
 const o = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
   id, orgao: "SINFRA", numero_instrumento: `${id}/2026`, nome_curto: nome, estado: "ativo", ...extra });
@@ -44,5 +45,62 @@ describe("prazo da obra paralisada", () => {
 
   it("obra sem paralisação não tem data", () => {
     expect(prazoDaObra(o(8, "Andando"), []).paralisadaDesde).toBeNull();
+  });
+});
+
+describe("contratantes (entrada de Obras, #159)", () => {
+  const cheia = (id: number, orgao: string, vigente: number, medido: number, extra: Partial<ObraLista> = {}) =>
+    o(id, `Obra ${id}`, { orgao, valor_vigente_centavos: vigente, medido_execucao_centavos: medido, ...extra });
+  const lista = [
+    cheia(1, "SINFRA", 1000_00, 250_00), cheia(2, "SINFRA", 3000_00, 750_00),
+    cheia(3, "MTPAR", 2000_00, 1000_00), cheia(4, "MTPAR", 500_00, 500_00, { estado: "encerrado" }),
+  ];
+
+  it("% executado da obra: medido de execução ÷ valor vigente, inteiro; sem vigente, nulo", () => {
+    expect(pctExecutado(lista[0])).toBe(25);
+    expect(pctExecutado(cheia(9, "X", 0, 0))).toBeNull();
+    expect(pctExecutado(o(9, "Sem valor"))).toBeNull();
+  });
+
+  it("o resumo conta só as obras em andamento; as encerradas só são contadas", () => {
+    const r = resumoContratante(lista.filter(x => x.orgao === "MTPAR"));
+    expect(r).toMatchObject({ obras: 1, encerradas: 1, vigente: 2000_00, medido: 1000_00, saldo: 1000_00, pct: 50 });
+    // a rescindida também fica fora dos números e entra na contagem das encerradas
+    expect(resumoContratante([...lista, cheia(5, "MTPAR", 100_00, 0, { estado: "rescindido" })].filter(x => x.orgao === "MTPAR")))
+      .toMatchObject({ obras: 1, encerradas: 2, vigente: 2000_00 });
+  });
+
+  it("'Todas as obras' é a soma das linhas dos contratantes (obras e saldo)", () => {
+    const todas = resumoContratante(lista);
+    const partes = contratantesDe(lista).map(c => resumoContratante(lista.filter(x => x.orgao === c)));
+    expect(partes.reduce((a, r) => a + r.obras, 0)).toBe(todas.obras);
+    expect(partes.reduce((a, r) => a + r.saldo, 0)).toBe(todas.saldo);
+    expect(todas.saldo).toBe((1000_00 - 250_00) + (3000_00 - 750_00) + (2000_00 - 1000_00));
+    expect(contratantesDe(lista)).toEqual(["MTPAR", "SINFRA"]);
+  });
+
+  it("avisos do contratante: obras com aviso, críticos e o nível mais grave", () => {
+    const av = (nivel: string, contrato_id: number) => ({ tipo: "x", nivel, contrato_id, mensagem: "m" }) as unknown as Aviso;
+    const mapa = new Map<number, Aviso[]>([[1, [av("atencao", 1), av("critico", 1)]], [2, [av("acao", 2)]]]);
+    expect(resumoContratante(lista.filter(x => x.orgao === "SINFRA"), mapa)).toMatchObject({ comAviso: 2, criticos: 1, nivelMax: "critico" });
+    expect(resumoContratante(lista.filter(x => x.orgao === "MTPAR"), mapa)).toMatchObject({ comAviso: 0, criticos: 0, nivelMax: null });
+    expect(avisoPrincipal(mapa.get(1)!)?.nivel).toBe("critico");
+  });
+
+  it("a URL: sem filtro é a escolha do contratante; ?c=, ?orgao= e os filtros de antes abrem a lista", () => {
+    expect(escopoDaUrl({})).toEqual({ escolha: true, orgao: null });
+    expect(escopoDaUrl({ c: "todas" })).toEqual({ escolha: false, orgao: null });
+    expect(escopoDaUrl({ c: "SINFRA" })).toEqual({ escolha: false, orgao: "SINFRA" });
+    expect(escopoDaUrl({ orgao: "SMS-VG" })).toEqual({ escolha: false, orgao: "SMS-VG" });
+    expect(escopoDaUrl({ termina: "90" })).toEqual({ escolha: false, orgao: null });
+    expect(escopoDaUrl({ q: "granito" }).escolha).toBe(false);
+  });
+
+  it("a busca também acha pela empresa e pelo órgão", () => {
+    const l = [cheia(1, "SINFRA", 1, 0, { entidade_id: 5 }), cheia(2, "MTPAR", 1, 0, { entidade_id: 6 })];
+    const empresas = new Map([[5, "Construtora Alfa"], [6, "Beta Engenharia"]]);
+    expect(filtrarObras(l, { q: "alfa", empresas }).map(x => x.id)).toEqual([1]);
+    expect(filtrarObras(l, { q: "mtpar", empresas }).map(x => x.id)).toEqual([2]);
+    expect(filtrarObras(l, { q: "alfa" })).toHaveLength(0);
   });
 });

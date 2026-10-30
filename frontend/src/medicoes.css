@@ -51,10 +51,14 @@
 .medicoes__cartao-rotulo { display: flex; align-items: center; gap: 8px; color: var(--texto-menu); }
 .medicoes__cartao-n { font-family: var(--fonte-num); font-size: 32px; line-height: 40px; font-weight: 500; color: var(--texto); }
 .medicoes__cartao-n--zero { color: var(--texto-2); }
+/* Oito situacoes: em fluxo livre a oitava caia sozinha numa segunda linha, esticada na largura toda. Em computador,
+   quatro por linha (duas linhas cheias); abaixo disso o fluxo livre de antes. */
+@media (min-width: 1100px) { .medicoes__cartoes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 /* ponto e pilula da situacao */
 .sit-ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-pilula); }
 .sit-ponto--sem-medicao { background: var(--sit-sem-texto); }
+.sit-ponto--planilha-gerada, .sit-ponto--planilha-enviada, .sit-ponto--boletim-recebido { background: var(--sit-fat-texto); }
 .sit-ponto--faturamento { background: var(--sit-fat-texto); }
 .sit-ponto--aguardando-nota { background: var(--sit-nota-texto); }
 .sit-ponto--enviar-nota { background: var(--sit-envio-texto); }
@@ -65,6 +69,7 @@
   font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap;
 }
 .sit-pilula--sem-medicao { background: var(--sit-sem-fundo); color: var(--sit-sem-texto); border-color: var(--sit-sem-linha); }
+.sit-pilula--planilha-gerada, .sit-pilula--planilha-enviada, .sit-pilula--boletim-recebido { background: var(--sit-fat-fundo); color: var(--sit-fat-texto); }
 .sit-pilula--faturamento { background: var(--sit-fat-fundo); color: var(--sit-fat-texto); }
 .sit-pilula--aguardando-nota { background: var(--sit-nota-fundo); color: var(--sit-nota-texto); }
 .sit-pilula--enviar-nota { background: var(--sit-envio-fundo); color: var(--sit-envio-texto); }
@@ -79,7 +84,6 @@
 }
 .medicoes__quadro-cabeca { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 16px 14px; }
 .medicoes__quadro-cabeca h2 { margin: 0; font-size: 17px; line-height: 24px; }
-.medicoes__legenda { color: var(--texto-2); font-size: 13px; }
 
 /* Tabela de largura fixa (as colunas caem no mesmo x da tabela de cima e de cada grupo). Abaixo de 820px a caixa
    rola na horizontal por dentro: a faixa e os grupos tem a mesma largura minima da tabela. */
@@ -133,7 +137,6 @@
 .medicoes__seta { color: var(--texto-2); transition: transform .15s ease; }
 .medicoes__grupo[open] .medicoes__seta { transform: rotate(90deg); }
 .medicoes__grupo-nome { font-weight: 600; color: var(--texto); }
-.medicoes__grupo-n { color: var(--texto-2); }
 .medicoes__grupo .medicoes__tabela td:first-child { padding-left: 42px; }
 @media (prefers-reduced-motion: reduce) { .medicoes__seta { transition: none; } }
 
@@ -155,7 +158,6 @@
 .iniciar__caixa { display: flex; flex-direction: column; min-height: 0; max-height: inherit; flex: 1 1 auto; }
 .iniciar__cabeca { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 24px 12px; }
 .iniciar__titulo { margin: 0; font-size: 20px; line-height: 28px; }
-.iniciar__dica { margin: 0; color: var(--texto-2); }
 .iniciar__fechar { width: 36px; height: 36px; flex: none; padding: 0; justify-content: center; border: 0; background: none; color: var(--texto-2); border-radius: var(--raio-ctrl); cursor: pointer; display: inline-flex; align-items: center; }
 .iniciar__fechar:hover { background: var(--hover); }
 .iniciar__busca { height: 44px; flex: none; margin: 0 24px 12px; width: auto; }
@@ -169,11 +171,7 @@
 .iniciar__obra:has(input:checked) { background: var(--acento-fundo); }
 .iniciar__obra input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--acento); }
 .iniciar__obra-nome { font-weight: 600; }
-.iniciar__obra-ult { color: var(--texto-2); }
-.iniciar__obra-sub { display: block; font-size: 13px; line-height: 18px; color: var(--texto-2); }
-.iniciar__obra-sub:empty { display: none; }
-.iniciar__sub--andamento { color: var(--atencao); }
-.iniciar__sub--prevista { color: var(--acento-mais); }
+.iniciar__obra-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; line-height: 18px; color: var(--texto-2); }
 .iniciar__vazio { margin: 0; padding: 24px 12px; color: var(--texto-2); text-align: center; }
 
 .iniciar__rodape { flex: none; display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--linha); padding: 16px 24px 20px; overflow-y: auto; max-height: 55%; }
@@ -183,7 +181,7 @@
 .iniciar__aviso--atencao .icone { color: var(--atencao); }
 .iniciar__aviso--info { background: var(--acento-fundo); border-color: var(--acento-linha); }
 .iniciar__aviso--info .icone { color: var(--acento); }
-.iniciar__nota { margin: 0; color: var(--texto-2); font-size: 13px; line-height: 18px; }
+.iniciar__rotulo { font-size: 13px; font-weight: 500; color: var(--texto-menu); }
 .iniciar__tipo-grupo { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .iniciar__tipo-grupo legend { padding: 0; margin-bottom: 6px; }
 .iniciar__tipo { display: inline-flex; width: fit-content; padding: 3px; gap: 3px; border: 1px solid var(--linha-campo); border-radius: var(--raio-ctrl); }

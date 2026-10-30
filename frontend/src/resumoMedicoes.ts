@@ -4,7 +4,7 @@ import type { AbaMedicoes } from "./rota";
 // GET /api/medicoes/resumo. Situacao, marco, dias parados e a linha unica de medicao + reajuste sao do servidor
 // (`medicoes.resumo`); aqui so' os rotulos, os limiares de cor do "Parada há" e o agrupamento por contratante.
 
-export type Situacao = "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento";
+export type Situacao = "planilha-gerada" | "planilha-enviada" | "boletim-recebido" | "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento";
 export type SituacaoOuSem = "sem-medicao" | Situacao;
 
 export type LinhaResumo = {
@@ -31,6 +31,9 @@ export type ResumoMedicoes = {
 // Na ordem do ciclo; e' a ordem das abas, dos cartoes e das linhas da tabela.
 export const SITUACOES: readonly { id: SituacaoOuSem; rotulo: string }[] = [
   { id: "sem-medicao", rotulo: "Sem medição aberta" },
+  { id: "planilha-gerada", rotulo: "Planilha/carta gerada" },
+  { id: "planilha-enviada", rotulo: "Planilha/carta enviada" },
+  { id: "boletim-recebido", rotulo: "Boletim recebido" },
   { id: "faturamento", rotulo: "Enviar ao faturamento" },
   { id: "aguardando-nota", rotulo: "Aguardando nota" },
   { id: "enviar-nota", rotulo: "Enviar nota" },

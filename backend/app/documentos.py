@@ -320,6 +320,13 @@ def gravar_certidao(conn, usuario_id: int, dados: dict, arquivo: str, sha256: st
 
 # --- painel, avisos, ZIP ----------------------------------------------------------------------
 
+def _regularidades_anexadas(conn, entidade_id: int, limite: int = 12) -> list[dict]:
+    """As ultimas regularidades anexadas da entidade (a mais recente primeiro): competencia e dia do anexo."""
+    return [{"id": r["id"], "competencia": r["competencia"], "anexada_em": tempo.para_local(datetime.datetime.fromisoformat(r["criado_em"])).date().isoformat()}
+            for r in conn.execute("SELECT id, competencia, criado_em FROM regularidades WHERE entidade_id=? "
+                                  "ORDER BY competencia DESC, id DESC LIMIT ?", (entidade_id, limite))]
+
+
 def painel(conn, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     cert, _, regs, obras_de = _exigidos_ativos(conn)
@@ -329,8 +336,17 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     com_docs = {r[0] for r in conn.execute(
         "SELECT entidade_id FROM certidoes UNION SELECT entidade_id FROM regularidades")}
     ordem = {"lotufo": 0, "consorcio": 1, "consorciada": 2}
-    ents = sorted((e for e in entidades.listar(conn) if e["id"] in cert or e["id"] in regs or e["id"] in com_docs),
+    # a empresa contratada de toda obra ativa entra (a garantia dela mora na pagina da empresa, #161)
+    contratadas = {contratos.entidade_de(r) for r in conn.execute("SELECT entidade_id FROM contratos WHERE estado='ativo'")}
+    ents = sorted((e for e in entidades.listar(conn)
+                   if e["id"] in cert or e["id"] in regs or e["id"] in com_docs or e["id"] in contratadas),
                   key=lambda e: (ordem.get(e["papel"], 9), _nome(e)))
+    # Redesenho de Documentos (#161): quem compoe cada consorcio (so' leitura), para a pagina da empresa.
+    consorciadas: dict[int, list[int]] = {}
+    consorcios: dict[int, list[int]] = {}
+    for r in conn.execute("SELECT consorcio_id, consorciada_id FROM entidade_consorciadas ORDER BY consorciada_id"):
+        consorciadas.setdefault(r[0], []).append(r[1])
+        consorcios.setdefault(r[1], []).append(r[0])
     empresas = []
     for e in ents:
         linhas = []
@@ -345,11 +361,13 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
         empresas.append({"entidade_id": e["id"], "entidade": _nome(e), "cnpj": e["cnpj"], "papel": e["papel"],
                          "certidoes": linhas, "regularidade_exigida": e["id"] in regs,
                          "regularidade": situacao_regularidade(conn, e["id"], hoje) if tem_reg else None,
-                         "obras": obras})
-    # Issue #65: garantia (com validade) e ART (sem validade) por contrato ativo, junto das certidoes.
-    obras = [{"contrato_id": r["id"], "obra": nomes[r["id"]], "garantia": garantias.garantia(conn, r["id"], hoje),
-              "art": garantias.art(conn, r["id"])}
-             for r in conn.execute("SELECT id FROM contratos WHERE estado='ativo' ORDER BY nome_curto, id")]
+                         "obras": obras, "consorciadas": consorciadas.get(e["id"], []),
+                         "consorcios": consorcios.get(e["id"], []),
+                         "regularidades_anexadas": _regularidades_anexadas(conn, e["id"])})
+    # Issue #65: garantia (com validade) por contrato ativo, junto das certidoes.
+    obras = [{"contrato_id": r["id"], "obra": nomes[r["id"]], "entidade_id": contratos.entidade_de(r),
+              "garantia": garantias.garantia(conn, r["id"], hoje)}
+             for r in conn.execute("SELECT id, entidade_id FROM contratos WHERE estado='ativo' ORDER BY nome_curto, id")]
     return {"hoje": hoje.isoformat(), "empresas": empresas, "contratos": obras}
 
 

@@ -1,0 +1,140 @@
+/* Documentos (#161): os cartoes das empresas e a pagina da empresa. So' tokens de tokens.css. */
+
+/* ---------------------------------------------------------------- topo da lista */
+.doc-topo { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px 24px; }
+.doc-topo__acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+
+/* chave liga/desliga ("Só as com pendência"): o checkbox de verdade, desenhado como chave */
+.doc-chave { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--texto); user-select: none; }
+.doc-chave input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.doc-chave__trilho { position: relative; width: 36px; height: 20px; flex: none; border-radius: var(--raio-pilula);
+  background: var(--linha-forte); transition: background .15s ease; }
+.doc-chave__trilho::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: var(--raio-pilula); background: var(--superficie); box-shadow: var(--sombra); transition: transform .15s ease; }
+.doc-chave input:checked + .doc-chave__trilho { background: var(--acento); }
+.doc-chave input:checked + .doc-chave__trilho::after { transform: translateX(16px); }
+.doc-chave input:focus-visible + .doc-chave__trilho { outline: 2px solid var(--foco); outline-offset: 2px; }
+
+.doc-legenda { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--texto-2); margin: 0; }
+.doc-legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.doc-legenda .doc-ponto { width: 9px; height: 9px; }
+
+/* ---------------------------------------------------------------- cartoes */
+.emp-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+.emp-cartao { position: relative; display: flex; flex-direction: column; gap: 14px; padding: 20px; min-width: 0;
+  transition: border-color .12s ease; container-type: inline-size; }
+.emp-cartao:hover, .emp-cartao:focus-within { border-color: var(--acento-linha); }
+.emp-cartao__cabeca { display: grid; gap: 2px; min-width: 0; }
+.emp-cartao__nome { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; overflow-wrap: anywhere; }
+/* o cartao inteiro e' o link: o ::after do nome cobre o cartao; o Copiar fica por cima */
+.emp-cartao__nome a { color: var(--texto); text-decoration: none; }
+.emp-cartao__nome a::after { content: ""; position: absolute; inset: 0; border-radius: var(--raio); }
+.emp-cartao__nome a:focus-visible { outline: none; }
+.emp-cartao__nome a:focus-visible::after { outline: 2px solid var(--foco); outline-offset: 2px; }
+.emp-cartao > .doc-pilula { align-self: flex-start; }
+.doc-pilula { font-size: 13px; line-height: 20px; padding: 3px 12px; }
+
+.doc-cnpj { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; color: var(--texto-2); }
+.doc-cnpj .num { font-family: var(--fonte-num); user-select: all; position: relative; z-index: 1; }
+.doc-cnpj button { position: relative; z-index: 1; height: 26px; padding: 0 8px; font-size: 12px; }
+.doc-copia { font-size: 12px; color: var(--ok); }
+
+/* os seis pontos numa linha; no cartao estreito (celular), em duas linhas de tres */
+.doc-pontos { position: relative; z-index: 1; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 4px; }
+.doc-pontos li { display: grid; justify-items: center; gap: 6px; font-size: 12px; color: var(--texto-2); text-align: center; }
+@container (max-width: 330px) { .emp-cartao .doc-pontos { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.doc-ponto { display: inline-block; width: 12px; height: 12px; flex: none; border-radius: var(--raio-pilula); background: var(--linha-forte); }
+.doc-ponto--ok { background: var(--ok-ponto); }
+.doc-ponto--atencao { background: var(--atencao-ponto); }
+.doc-ponto--acao { background: var(--acao-ponto); }
+.doc-ponto--neutro { background: var(--superficie); box-shadow: inset 0 0 0 1.5px var(--linha-hover); }
+
+.emp-cartao__extra { display: grid; gap: 4px; font-size: 12.5px; color: var(--texto-2); }
+.emp-cartao__extra p { margin: 0; display: flex; gap: 6px; align-items: baseline; }
+
+/* ---------------------------------------------------------------- janela do ZIP */
+.doc-janela { border: 1px solid var(--linha); border-radius: var(--raio-sobreposicao); box-shadow: var(--sombra-sobreposicao);
+  padding: 0; width: min(440px, calc(100vw - 32px)); color: var(--texto); background: var(--superficie); }
+.doc-janela::backdrop { background: color-mix(in srgb, var(--texto) 35%, transparent); }
+.doc-janela__cabeca { padding: 16px 20px; border-bottom: 1px solid var(--linha); }
+.doc-janela__cabeca h2 { margin: 0; font-size: 16px; line-height: 24px; }
+.doc-janela__corpo { padding: 16px 20px; display: grid; gap: 14px; }
+.doc-janela__corpo fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+.doc-janela__corpo legend { font-size: 12px; font-weight: 500; color: var(--texto-2); margin-bottom: 4px; }
+.doc-janela__corpo label.doc-marca { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.doc-janela__corpo input[type="checkbox"] { height: 16px; width: 16px; accent-color: var(--acento); }
+.doc-janela__corpo p { margin: 0; }
+.doc-janela__rodape { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--linha);
+  background: var(--superficie-2); border-radius: 0 0 var(--raio-sobreposicao) var(--raio-sobreposicao); }
+
+/* ---------------------------------------------------------------- area de arrastar */
+.doc-zona { display: grid; justify-items: center; gap: 4px; padding: 20px 16px; text-align: center;
+  border: 1.5px dashed var(--acento-linha); border-radius: var(--raio); background: var(--superficie);
+  color: var(--texto-2); font-size: 13.5px; transition: background .12s ease, border-color .12s ease; }
+.doc-zona p { margin: 0; max-width: none; }
+.doc-zona--sobre { background: var(--hover); border-color: var(--acento); }
+.doc-zona__icone { width: 28px; height: 28px; color: var(--acento); }
+.doc-zona__link { height: auto; padding: 0; border: 0; background: none; color: var(--acento); font-size: inherit; font-weight: 500;
+  text-decoration: underline; text-underline-offset: 3px; }
+.doc-zona__link:hover:not(:disabled) { background: none; color: var(--acento-forte); }
+.doc-fila { margin: 0; }
+.doc-digitar__msg { flex-basis: 100%; }
+
+/* ---------------------------------------------------------------- pagina da empresa */
+.doc-cabeca { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; width: 100%; }
+.doc-cabeca__id { display: grid; gap: 8px; min-width: 0; }
+.doc-cabeca__titulo { margin: 0; font-size: 24px; line-height: 32px; overflow-wrap: anywhere; }
+.doc-cabeca__linha { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.doc-cabeca__zip { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.doc-cabeca__zip input { width: 150px; }
+
+.doc-abas-cartao { padding: 0; }
+.doc-abas-cartao > .abas { padding: 0 12px; }
+.aba__conta { margin-left: 6px; min-width: 20px; padding: 0 6px; border-radius: var(--raio-pilula); background: var(--acao-fundo);
+  color: var(--acao); font-size: 12px; line-height: 18px; font-weight: 600; text-align: center; display: inline-block; }
+.doc-painel { padding: 16px; display: grid; gap: 16px; }
+.doc-painel > .tabela-wrap { border: 1px solid var(--linha); border-radius: var(--raio); }
+
+.doc-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.doc-acoes .btn, .doc-acoes button { height: 32px; }
+.doc-acoes .icone { width: 15px; height: 15px; }
+.tabela td.doc-sit .campo__nota { margin-top: 2px; }
+.tabela tbody td.doc-forte { color: var(--texto); }
+.tabela tbody td.doc-data { font-family: var(--fonte-num); color: var(--texto); white-space: nowrap; }
+
+/* consorciadas do consorcio, em linhas curtas */
+.doc-consorciadas-bloco { gap: 8px; }
+.doc-consorciadas { list-style: none; margin: 0; padding: 0; border: 1px solid var(--linha); border-radius: var(--raio); }
+.doc-consorciadas > li { display: grid; grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 1.6fr); align-items: center; gap: 8px 16px; padding: 12px 16px; }
+.doc-consorciadas > li + li { border-top: 1px solid var(--linha-suave); }
+.doc-consorciadas .doc-pontos { gap: 4px; }
+.doc-consorciadas .doc-pontos li { font-size: 11px; }
+.doc-secao-titulo { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
+
+/* regularidade */
+.doc-reg { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.doc-reg__bloco { border: 1px solid var(--linha); border-radius: var(--raio); padding: 16px; display: grid; gap: 10px; align-content: start; }
+.doc-reg__bloco h3 { margin: 0; font-size: 14px; line-height: 20px; }
+.doc-pares { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; font-size: 13.5px; }
+.doc-pares dt { color: var(--texto-2); }
+.doc-pares dd { margin: 0; color: var(--texto); }
+
+/* tabela que vira lista de pares no celular */
+@media (max-width: 720px) {
+  .tabela--empilha thead { display: none; }
+  .tabela--empilha, .tabela--empilha tbody { display: block; }
+  .tabela--empilha tr { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid var(--linha-suave); }
+  .tabela--empilha tbody tr:last-child { border-bottom: 0; }
+  .tabela--empilha tbody td, .tabela--empilha tbody th { display: block; padding: 0 !important; border: 0; text-align: left; }
+  .tabela--empilha [data-rotulo]::before { content: attr(data-rotulo); display: block; font-family: var(--fonte); font-size: 12px; color: var(--texto-2); font-weight: 400; }
+  .tabela--empilha .col-largo { grid-column: 1 / -1; }
+  .doc-consorciadas > li { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+  .doc-consorciadas .doc-pontos { grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; row-gap: 8px; }
+  .doc-cabeca__zip { width: 100%; }
+}
+
+.doc-pilula { max-width: 100%; height: auto; align-items: flex-start; }
+.doc-pilula .selo__texto { white-space: normal; overflow: visible; text-overflow: clip; }
+.doc-pilula .selo__ponto { margin-top: 7px; }
+.doc-abas-cartao > .abas { overflow-x: auto; }
+.doc-abas-cartao .aba { white-space: nowrap; }

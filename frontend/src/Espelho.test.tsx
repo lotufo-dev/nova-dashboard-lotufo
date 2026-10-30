@@ -4,8 +4,8 @@ import { ApiErro } from "./api";
 import Espelho from "./Espelho";
 import { ir } from "./rota";
 
-const { api } = vi.hoisted(() => ({ api: vi.fn() }));
-vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
+const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
+vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm }));
 
 const REGRA = { situacao: "ativa", saidas: 4, entradas: [
   { chave: "medicao", rotulo: "Valor da medição", natureza: "medicao" },
@@ -27,13 +27,21 @@ const ESPELHO = { id: 7, numero: 10, competencia: "2026-05", versao: 1, situacao
   envio: null };
 
 describe("Espelho", () => {
-  afterEach(() => { cleanup(); api.mockReset(); });
+  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
 
-  it("obra sem regra ativa mostra o aviso do fluxo antigo e nenhum botão", async () => {
+  it("obra sem regra ativa não explica o fluxo antigo nem oferece o botão", async () => {
     api.mockResolvedValueOnce({ regra: null, espelhos: [] });
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} />);
-    expect(await screen.findByText(/fluxo antigo/)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Nova medição" })).toBeTruthy();
+    expect(screen.queryByText(/fluxo antigo/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Gerar espelho/ })).toBeNull();
+  });
+
+  it("medição sem regra ativa mostra só \"Nenhum espelho.\"", async () => {
+    api.mockResolvedValueOnce({ regra: null, espelhos: [] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho" />);
+    expect(await screen.findByText("Nenhum espelho.")).toBeTruthy();
+    expect(screen.queryByText(/fluxo antigo/)).toBeNull();
   });
 
   it("o formulário só conta como rascunho depois de preenchido (guarda de saída)", async () => {
@@ -144,6 +152,9 @@ describe("Espelho", () => {
     expect(await screen.findByText("Não enviado ao faturamento")).toBeTruthy();
     expect(screen.getByRole("link", { name: /ESPELHO - MT-388/ }).getAttribute("href")).toBe("/api/espelhos/7/arquivos/3");
     expect(screen.getByRole("button", { name: "Enviar ao faturamento" })).toBeTruthy();
+    // sem tamanho do arquivo nem "versão · gerado por" ao lado
+    expect(screen.queryByText(/KB/)).toBeNull();
+    expect(screen.queryByText(/gerado em/)).toBeNull();
     // "Gerar de novo" parte dos valores da versao vigente
     fireEvent.click(screen.getByRole("button", { name: "Gerar de novo" }));
     expect((screen.getByLabelText("Valor da medição") as HTMLInputElement).value).toBe("634.529,58");
@@ -171,6 +182,77 @@ describe("Espelho", () => {
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 2, tipo: "projeto" }} />);
     expect(await screen.findByRole("link", { name: /ESPELHO - MT-388/ })).toBeTruthy();
     expect(screen.queryByText(/mora/)).toBeNull();
+  });
+
+  // issue #212: o misto superado para a execucao fica so' para leitura na pagina do Projeto, e o anexo vai para o Projeto
+  it("misto com a execução superada: na medição de Projeto, sem enviar nem gerar de novo, e o anexo vai para o Projeto", async () => {
+    const misto = { ...ESPELHO, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_gerado", superado: true },
+      { id: 2, tipo: "projeto", estado: "protocolada" }] };
+    api.mockResolvedValueOnce({ regra: REGRA, espelhos: [misto] });
+    apiForm.mockResolvedValueOnce({ documento_id: 50, repetido: false });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 2, tipo: "projeto" }} />);
+    expect(await screen.findByText(/só para leitura/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Enviar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gerar de novo" })).toBeNull();
+    const arquivo = new File(["%PDF"], "oficio.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/Anexar evidência do órgão/), { target: { files: [arquivo] } });
+    await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+    expect(apiForm.mock.lastCall![0]).toBe("/api/medicoes/2/documentos");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("oficio.pdf anexado como evidência do órgão em: 10ª Medição de Projeto."));
+  });
+
+  it("misto com o Projeto superado: na medição de execução, só leitura com o link para o Projeto e o anexo na execução", async () => {
+    const misto = { ...ESPELHO, medicoes: [{ id: 1, tipo: "execucao", estado: "protocolada" },
+      { id: 2, tipo: "projeto", estado: "espelho_gerado", superado: true }] };
+    api.mockResolvedValueOnce({ regra: REGRA, espelhos: [misto] });
+    apiForm.mockResolvedValueOnce({ documento_id: 51, repetido: false });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} />);
+    const nota = await screen.findByText(/só para leitura/);
+    expect(nota.querySelector("a")?.textContent).toBe("10ª Medição de Projeto");
+    expect(screen.queryByRole("button", { name: /Enviar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gerar de novo" })).toBeNull();
+    const arquivo = new File(["%PDF"], "oficio.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/Anexar evidência do órgão/), { target: { files: [arquivo] } });
+    await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+    expect(apiForm.mock.lastCall![0]).toBe("/api/medicoes/1/documentos");
+  });
+
+  // rodada 1 do revisor da PR #236: "Reajuste da 10ª Medição" e' masculino; as frases nao levam artigo antes do titulo
+  it("misto com o reajuste superado: a nota nomeia o reajuste sem artigo de gênero", async () => {
+    const misto = { ...ESPELHO, medicoes: [{ id: 1, tipo: "execucao", estado: "protocolada" },
+      { id: 3, tipo: "reajuste", estado: "espelho_gerado", superado: true }] };
+    api.mockResolvedValueOnce({ regra: REGRA, espelhos: [misto] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} />);
+    const nota = await screen.findByText(/só para leitura/);
+    expect(nota.textContent).toContain("já existe espelho mais novo para Reajuste da 10ª Medição.");
+    expect(nota.textContent).not.toMatch(/\b(a|à) Reajuste|dela\b/);
+  });
+
+  it("misto com a execução superada: na página do reajuste, o anexo vai para o reajuste e a mensagem o nomeia", async () => {
+    const misto = { ...ESPELHO, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_gerado", superado: true },
+      { id: 3, tipo: "reajuste", estado: "protocolada" }] };
+    api.mockResolvedValueOnce({ regra: REGRA, espelhos: [misto] });
+    apiForm.mockResolvedValueOnce({ documento_id: 52, repetido: false });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 3, tipo: "reajuste" }} />);
+    await screen.findByText(/só para leitura/);
+    const arquivo = new File(["%PDF"], "oficio.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/Anexar evidência do órgão/), { target: { files: [arquivo] } });
+    await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+    expect(apiForm.mock.lastCall![0]).toBe("/api/medicoes/3/documentos");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("oficio.pdf anexado como evidência do órgão em: Reajuste da 10ª Medição."));
+  });
+
+  it("misto com a execução superada, por etapa: nenhuma das duas partes oferece enviar ou gerar de novo", async () => {
+    const misto = { ...ESPELHO, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_gerado", superado: true },
+      { id: 2, tipo: "projeto", estado: "protocolada" }] };
+    api.mockResolvedValue({ regra: REGRA, espelhos: [misto] });
+    render(<>
+      <Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 2, tipo: "projeto" }} parte="espelho" />
+      <Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 2, tipo: "projeto" }} parte="faturamento" />
+    </>);
+    await waitFor(() => expect(screen.getAllByText(/só para leitura/)).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: /Enviar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gerar de novo" })).toBeNull();
   });
 
   it("versão já enviada: reenvio só com a confirmação marcada (S8)", async () => {

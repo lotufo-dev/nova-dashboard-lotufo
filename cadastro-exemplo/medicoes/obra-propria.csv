@@ -1,0 +1,5 @@
+nº;nº do órgão;tipo;competência;período;valor pedido;valor aprovado;data da aprovação;meio;nº do processo no órgão;data do protocolo da nota;NF;fonte
+1;1;execucao;2025-04;10/03/2025 a 30/04/2025;412.345,67;412.345,67;20/05/2025;e-mail;PROC-EXEMPLO-0001;28/05/2025;101;boletim de exemplo 1
+2;2;execucao;2025-05;01/05/2025 a 31/05/2025;538.900,10;530.000,00;18/06/2025;e-mail;PROC-EXEMPLO-0002;25/06/2025;108;boletim de exemplo 2
+3;3;execucao;2025-06;01/06/2025 a 30/06/2025;601.250,00;;;;;;;planilha de exemplo
+1;1;reajuste;2025-06;10/03/2025 a 30/04/2025;12.034,56;12.034,56;10/07/2025;protocolo físico;PROC-EXEMPLO-0003;;;ofício de exemplo

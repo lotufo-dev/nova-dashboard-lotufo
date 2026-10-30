@@ -29,7 +29,7 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
 describe("Início", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("cartões na ordem fixa, números com a base e prazos levando à obra", async () => {
+  it("cartões na ordem fixa, números sem frase de apoio e prazos levando à obra", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     expect(api).toHaveBeenCalledWith("/api/inicio/painel");
@@ -38,20 +38,27 @@ describe("Início", () => {
     expect(cartoes.map(a => a.getAttribute("href"))).toEqual(["/medicoes/enviar-nota", "/documentos", "/obras/7/reajuste"]);
     expect(cartoes[0].textContent).toContain("notas a enviar");
     expect(cartoes[1].textContent).toContain("certidões vencidas ou vencendo");
-    expect(cartoes[1].textContent).toContain("FGTS Encomind · Estadual Guaxe");
-    expect(cartoes[2].textContent).toContain("Complexo Leblon · data-base 01/11/2026");
-    expect(screen.queryByText(/vencem esta semana/)).toBeNull();
+    expect(cartoes[1].textContent).not.toContain("FGTS Encomind");
+    expect(cartoes[2].textContent).not.toContain("data-base");
+    expect(cartoes[0].textContent).not.toContain("emitidas e ainda não enviadas");
 
     const numeros = { textContent: (screen.getByRole("region", { name: "Números do mês" }).textContent ?? "").replace(/ /g, " ") };
     expect(numeros.textContent).toContain("R$ 1.240.000,00");
     // B-01 (10/10/2026): competencia do mes contra o mes anterior inteiro, sem "ate' dia N"
     expect(numeros.textContent).toContain("Medido em outubro");
     expect(numeros.textContent).not.toContain("até dia");
-    expect(numeros.textContent).toContain("▲ 24% sobre setembro");
-    expect(numeros.textContent).toContain("valor cheio · medições da competência");
+    expect(numeros.textContent).not.toContain("sobre setembro");
+    expect(numeros.textContent).not.toContain("valor cheio");
     expect(numeros.textContent).toContain("2 de 18 obras ativas");
-    expect(numeros.textContent).toContain("12 medições recebidas sem data da baixa");
-    expect(numeros.textContent).toContain("R$ 2.100.000,00 há mais de 60 dias");
+    expect(numeros.textContent).not.toContain("Última protocolada");
+    expect(numeros.textContent).not.toContain("sem data da baixa");
+    expect(numeros.textContent).not.toContain("cota da Lotufo");
+    // valor nulo do recebido vira "—"
+    expect(numeros.textContent).toContain("Recebido em 2026—");
+    // atraso que pede acao vira selo, com o valor no title
+    const selo = screen.getByText("mais de 60 dias").closest(".selo");
+    expect(selo?.className).toContain("selo--acao");
+    expect(selo?.getAttribute("title")?.replace(/ /g, " ")).toBe("R$ 2.100.000,00");
 
     expect(screen.queryByText(/Nenhuma medição da competência/)).toBeNull();
     const prazos = within(screen.getByRole("region", { name: "Prazos chegando" }));
@@ -59,7 +66,7 @@ describe("Início", () => {
     expect(prazos.getByRole("link", { name: /Complexo Leblon/ }).getAttribute("href")).toBe("/obras/7/reajuste");
   });
 
-  it("mês sem medição: aviso com o último lançamento e botão para lançar", async () => {
+  it("mês sem medição: aviso e botão para lançar", async () => {
     api.mockResolvedValue(painel({
       medido: { competencia: "2026-10", anterior_competencia: "2026-09",
                 valor_centavos: 0, anterior_centavos: 0, quantidade: 0, ultimo_lancamento: "2026-09-30" },
@@ -68,27 +75,25 @@ describe("Início", () => {
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const aviso = await screen.findByRole("status");
     expect(aviso.textContent).toContain("Nenhuma medição da competência de outubro.");
-    expect(aviso.textContent).toContain("Último lançamento: 30/09/2026.");
+    expect(aviso.textContent).not.toContain("Último lançamento");
     expect(within(aviso).getByRole("link", { name: /Lançar medição/ }).getAttribute("href")).toBe("/medicoes");
     const cartoes = within(screen.getByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
     expect(cartoes[2].getAttribute("href")).toBe("/avisos");
   });
 
-  it("mês atual zerado e mês anterior zerado não viram percentual (gate Sol S7, 10/10/2026)", async () => {
-    const numeros = async () => (await screen.findByRole("region", { name: "Números do mês" })).textContent?.replace(/ /g, " ") ?? "";
-    api.mockResolvedValue(painel({ medido: { competencia: "2026-10", anterior_competencia: "2026-09", valor_centavos: 0,
-      anterior_centavos: 76_593_478_063, quantidade: 0, ultimo_lancamento: "2026-10-09" } }));
+  it("a receber sem nada há mais de 60 dias, ou ainda não liberado, fica sem selo", async () => {
+    api.mockResolvedValue(painel({ a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 0 } }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    let texto = await numeros();
-    expect(texto).toContain("ainda sem medição desta competência · setembro: R$ 765.934.780,63");
-    expect(texto).not.toContain("%");
+    const numeros = await screen.findByRole("region", { name: "Números do mês" });
+    expect(within(numeros).queryByText("mais de 60 dias")).toBeNull();
+    expect(numeros.textContent).not.toContain("nada há mais de 60 dias");
     cleanup();
-    api.mockResolvedValue(painel({ medido: { competencia: "2026-10", anterior_competencia: "2026-09", valor_centavos: 124_000_000,
-      anterior_centavos: 0, quantidade: 2, ultimo_lancamento: "2026-10-09" } }));
+    api.mockResolvedValue(painel({ a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null } }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    texto = await numeros();
-    expect(texto).toContain("setembro sem medição");
-    expect(texto).not.toContain("%");
+    const n2 = await screen.findByRole("region", { name: "Números do mês" });
+    expect(within(n2).queryByText("mais de 60 dias")).toBeNull();
+    expect(n2.textContent).not.toContain("aguardando a conciliação");
+    expect(n2.textContent).toContain("A receber—");
   });
 
   it("saudação pela hora de Cuiabá", () => {

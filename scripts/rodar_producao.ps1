@@ -210,12 +210,14 @@ foreach ($arquivo in $arquivos) {
 }
 
 # --factory: o app só existe depois de create_app() (migrações + snapshot no boot + logs).
+# --no-proxy-headers (#3, limite de login por origem): não há proxy na frente; sem a opção o uvicorn aceita
+# X-Forwarded-For vindo de 127.0.0.1 e quem está no próprio servidor trocaria de origem a cada pedido.
 Set-Location $backend
 $python = Join-Path $backend ".venv\Scripts\python.exe"
 if ($SemTls) {
-    & $python -m uvicorn --factory app.main:create_app --host 0.0.0.0 --port 80
+    & $python -m uvicorn --factory app.main:create_app --no-proxy-headers --host 0.0.0.0 --port 80
 } else {
-    & $python -m uvicorn --factory app.main:create_app `
+    & $python -m uvicorn --factory app.main:create_app --no-proxy-headers `
         --host 0.0.0.0 --port 8443 `
         --ssl-keyfile (Join-Path $certs "chave.pem") --ssl-certfile (Join-Path $certs "cert.pem")
 }

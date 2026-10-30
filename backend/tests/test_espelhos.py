@@ -419,3 +419,127 @@ def test_recusa_com_duas_medicoes_abertas_no_plural(ambiente_projeto):
     with pytest.raises(ValueError, match="Medição 3 de execução e Medição 3 de reajuste estão no mesmo espelho "
                                          "e ainda não foram protocoladas"):
         espelhos.previa(conn, cid, 3, "2026-01", {"projeto": 600})
+
+
+# --- geracao x envio ao faturamento, em duas conexoes (#210) ------------------------------------
+
+def _enviar_no_meio(monkeypatch, antes_de_reservar=None, durante_o_email=None):
+    """Roda `antes_de_reservar` entre a leitura do espelho e a reserva, e `durante_o_email` com o e-mail
+    'saindo' (reserva feita, envio ainda nao registrado): as duas janelas da corrida."""
+    from app import envio_reserva
+    reservar, registrar = envio_reserva.reservar, correio.enviar_e_registrar
+
+    def reservar_atrasado(*a, **k):
+        if antes_de_reservar:
+            antes_de_reservar()
+        return reservar(*a, **k)
+
+    def registrar_atrasado(*a, **k):
+        if durante_o_email:
+            durante_o_email()
+        return registrar(*a, **k)
+    monkeypatch.setattr(envio_reserva, "reservar", reservar_atrasado)
+    monkeypatch.setattr(correio, "enviar_e_registrar", registrar_atrasado)
+
+
+def test_versao_nova_gerada_antes_da_reserva_barra_o_envio_da_antiga(ambiente, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, e1)
+    outra = db.get_conn()
+    novos = []
+    try:
+        _enviar_no_meio(monkeypatch, antes_de_reservar=lambda: novos.append(
+            espelhos.gerar(outra, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")))
+        with pytest.raises(ValueError, match="foi substituída; envie a versão vigente"):
+            espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    finally:
+        outra.close()
+    assert not (tmp_path / "sim").exists()                  # nenhum e-mail saiu
+    d1 = espelhos.detalhe(conn, e1)
+    assert (d1["situacao"], d1["envio_id"], d1["envio_reservado_em"]) == ("substituido", None, None)
+    assert medicoes.detalhe(conn, d1["medicoes"][0]["id"])["estado"] == "espelho_gerado"
+    assert espelhos.detalhe(conn, novos[0])["situacao"] == "vigente"
+
+
+def test_misto_superado_antes_da_reserva_nao_se_envia(ambiente_projeto, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente_projeto
+    a = espelhos.gerar(conn, u, cid, 3, "2026-01", {"medicao": 100, "projeto": 500})
+    medicoes.registrar_protocolo(conn, u["id"], _mid(conn, a, "execucao"), "2026-02-01", "CT-1", None, "manual")
+    p = espelhos.previa_envio(conn, a)
+    outra = db.get_conn()
+    try:
+        _enviar_no_meio(monkeypatch, antes_de_reservar=lambda: espelhos.gerar(outra, u, cid, 3, "2026-01",
+                                                                              {"projeto": 600}))
+        with pytest.raises(ValueError, match="espelho mais novo"):
+            espelhos.enviar(conn, u, a, p["para"], p["copia"], p["assunto"], p["corpo"])
+    finally:
+        outra.close()
+    assert not (tmp_path / "sim").exists()
+    d = espelhos.detalhe(conn, a)
+    assert (d["envio_id"], d["envio_reservado_em"]) == (None, None)
+    assert medicoes.detalhe(conn, _mid(conn, a, "projeto"))["estado"] == "espelho_gerado"
+
+
+def test_reserva_direta_confere_vigente_e_superado(ambiente_projeto):
+    from app import envio_reserva
+    conn, u, cid = ambiente_projeto
+    e1 = espelhos.gerar(conn, u, cid, 2, "2026-01", {"medicao": 100})
+    espelhos.gerar(conn, u, cid, 2, "2026-01", {"medicao": 200})
+    with pytest.raises(ValueError, match="substituída"):
+        envio_reserva.reservar(conn, "espelhos", e1, u["id"])
+    a, _ = _misto_desmembrado(conn, u, cid)
+    with pytest.raises(ValueError, match="espelho mais novo"):
+        envio_reserva.reservar(conn, "espelhos", a, u["id"])
+    assert conn.execute("SELECT COUNT(*) FROM espelhos WHERE envio_reservado_em IS NOT NULL").fetchone()[0] == 0
+
+
+def test_gerar_durante_o_envio_recusa_e_o_envio_termina_com_a_versao_enviada(ambiente, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, e1)
+    outra = db.get_conn()
+    erros = []
+
+    def gerar_na_outra():
+        with pytest.raises(ValueError) as e:
+            espelhos.gerar(outra, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+        erros.append(str(e.value))
+    try:
+        _enviar_no_meio(monkeypatch, durante_o_email=gerar_na_outra)
+        envio_id = espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    finally:
+        outra.close()
+    assert len(erros) == 1 and erros[0].startswith("A versão 1 deste espelho está sendo enviada ao faturamento "
+                                                   "(iniciado às ")
+    assert "por Maria): aguarde o envio terminar" in erros[0]
+    d1 = espelhos.detalhe(conn, e1)
+    assert (d1["situacao"], d1["envio_id"]) == ("vigente", envio_id)
+    assert conn.execute("SELECT COUNT(*) FROM espelhos").fetchone()[0] == 1
+    assert medicoes.detalhe(conn, d1["medicoes"][0]["id"])["valor_protocolado_centavos"] == 100
+    assert medicoes.detalhe(conn, d1["medicoes"][0]["id"])["estado"] == "espelho_enviado"
+    # terminado o envio, a versao nova se gera normalmente
+    e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+    assert espelhos.detalhe(conn, e2)["situacao"] == "vigente"
+
+
+def test_gerar_com_misto_reservado_recusa_mesmo_sem_substituir(ambiente_projeto):
+    """O misto com a execucao protocolada fica vigente, mas a medicao de Projeto passaria a valer pela versao
+    nova enquanto o e-mail leva a velha: tambem recusa."""
+    from app import envio_reserva
+    conn, u, cid = ambiente_projeto
+    a = espelhos.gerar(conn, u, cid, 3, "2026-01", {"medicao": 100, "projeto": 500})
+    medicoes.registrar_protocolo(conn, u["id"], _mid(conn, a, "execucao"), "2026-02-01", "CT-1", None, "manual")
+    envio_reserva.reservar(conn, "espelhos", a, u["id"])
+    outra = db.get_conn()
+    try:
+        with pytest.raises(ValueError, match="está sendo enviada ao faturamento"):
+            espelhos.gerar(outra, u, cid, 3, "2026-01", {"projeto": 600})
+    finally:
+        outra.close()
+    assert conn.execute("SELECT COUNT(*) FROM espelhos").fetchone()[0] == 1
+    # outra medicao do mesmo numero, fora do espelho reservado, nao e' barrada
+    espelhos.gerar(conn, u, cid, 3, "2026-01", {"reajuste": 7})

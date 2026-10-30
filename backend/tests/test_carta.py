@@ -1,4 +1,5 @@
 """Carta, capa e divisoria em PDF (bloco 5)."""
+import base64
 import datetime
 import io
 
@@ -63,3 +64,70 @@ def test_fiscal_vigente_e_emitente_sem_cadastro_de_cartas(tmp_path, monkeypatch)
     em = carta.emitente(c, 1)                          # Lotufo semeada na migracao, sem cartas.yaml aplicado
     assert em["cnpj"] == "31.200.101/0001-30" and em["razao_social"]
     c.close()
+
+
+def _imagens(pdf: bytes) -> int:
+    return sum(len(p.images) for p in pypdf.PdfReader(io.BytesIO(pdf)).pages)
+
+
+_PNG_MINIMO = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def _logo_sintetico(pasta, nome="logo.png"):
+    (pasta / nome).write_bytes(_PNG_MINIMO)
+    return nome
+
+
+def test_emitente_com_logo_leva_a_imagem_na_carta(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))      # a pasta de dados e' a do banco
+    emitente = {"razao_social": "Consorcio Exemplo", "logo": _logo_sintetico(tmp_path)}
+    pdf = carta.gerar(_carta(emitente=emitente))
+    assert _imagens(pdf) == 1
+    assert "Consorcio Exemplo" not in _texto(pdf)                    # com logo, sem cabecalho de texto
+
+
+def test_emitente_sem_logo_sai_com_cabecalho_de_texto(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "cnpj": "00.000.000/0001-00"}))
+    assert _imagens(pdf) == 0
+    assert "Consorcio Exemplo" in _texto(pdf)
+
+
+def test_logo_inexistente_sai_sem_logo(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "logo": "nao-existe.png", "fundo": True}))
+    assert _imagens(pdf) == 0
+    assert "Consorcio Exemplo" in _texto(pdf)                        # cai no cabecalho de texto, sem erro
+
+
+def test_logo_fora_da_pasta_de_dados_e_recusado_mesmo_existindo(tmp_path, monkeypatch):
+    dados = tmp_path / "dados"
+    dados.mkdir()
+    monkeypatch.setenv("DASH_DB_PATH", str(dados / "t.db"))
+    _logo_sintetico(tmp_path, "fora.png")                            # imagem valida, so' que fora da pasta de dados
+    pdf = carta.gerar(_carta(emitente={"razao_social": "Consorcio Exemplo", "logo": "../fora.png"}))
+    assert _imagens(pdf) == 0
+    assert "Consorcio Exemplo" in _texto(pdf)
+
+
+def test_corpo_da_reiteracao_familia_b_preenche_todos_os_campos():
+    """Issue #277: a reiteracao do pleito de reajuste (familia B) tem corpo proprio no cartas.yaml, que cita o
+    oficio anterior, a data dele e ha' quantos dias esta' sem resposta."""
+    import pathlib
+
+    import yaml
+    cartas = yaml.safe_load((pathlib.Path(__file__).parents[2] / "cadastro-exemplo" / "cartas.yaml")
+                            .read_text(encoding="utf-8"))
+    textos = cartas["pleito_reiteracao"]
+    campos = {"razao_social": "CONSTRUTORA EXEMPLO LTDA", "cnpj": "31.200.101/0001-30", "objeto": "DA OBRA ALFA",
+              "instrumento": "099/2024", "oficio_anterior": "CT/068/LT/2026", "data_oficio_anterior": "27/02/2026",
+              "dias_sem_resposta": "202", "data_base_extenso": "MARÇO/2024", "mes_aniversario": "MARÇO",
+              "oficio": "CT-245-LT-2026", "obra": "Obra Alfa", "saudacao": "Bom dia,"}
+    for chave in ("carta_assunto", "carta_corpo", "email_assunto", "email_corpo"):
+        assert "{" not in carta.preencher(textos[chave], campos), chave        # nenhum campo sobrando
+    corpo = carta.preencher(textos["carta_corpo"], campos)
+    assert "CT/068/LT/2026, de 27/02/2026" in corpo and "202 dias" in corpo
+    assert corpo != carta.preencher(cartas["pleito_reajuste"]["carta_corpo"], campos)     # nao e' a familia A
+    t = _texto(carta.gerar(_carta(corpo=corpo, assunto=carta.preencher(textos["carta_assunto"], campos))))
+    assert "reiteração" in t and "CT/068/LT/2026" in t

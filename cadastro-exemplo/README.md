@@ -21,3 +21,14 @@ QDOP e logo da FRC). Os modelos `.docx` e `.xlsx` são neutros, sem logotipo; o 
 - Obra Própria: contrato da empresa sozinha (100%), com espelho de medição e reajuste.
 - Obra Consórcio: contrato do Consórcio Exemplo (empresa própria 50% e Engenharia Beta 50%), em dois
   municípios, com espelho de medição que rateia entre as duas empresas e os dois municípios.
+
+`medicoes/obra-propria.csv` é o histórico de medições de exemplo da Obra Própria, no formato de
+`cadastro carregar-medicoes <obra>.csv --ensaio` (o nome do arquivo é o slug da obra, como em `contratos/`).
+Separador `;`, valores em reais com vírgula, competência AAAA-MM, datas DD/MM/AAAA, período
+`DD/MM/AAAA a DD/MM/AAAA`, meio `e-mail`, `SMO`, `ofício`, `carimbo` (ou `protocolo físico`), `CI` ou `outro`.
+Sem `--ensaio` e com `--usuario`, o comando cria as medições que faltam (protocoladas, com o aprovado como
+evento de atesto e a NF vinculada quando está no RM; recebida se o RM já tem a baixa). Linha com erro ou
+conflito recusa o arquivo inteiro. Medição que já existe não é sobrescrita: aprovado diferente vira evento novo
+de atesto (o último vale), o pedido congelado fica como está, a coluna opcional `cancelar` (nº da medição que a
+substitui) cancela a duplicata com o motivo, e a coluna opcional `corrige competência` (`sim`) corrige a
+competência errada do banco, com o antes e o depois na auditoria.

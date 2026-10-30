@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import Admin from "./Admin";
 import { api, setCsrf } from "./api";
 import AReceberPagina from "./AReceberPagina";
-import AvisosPagina from "./AvisosPagina";
 import { ABAS_ADMIN } from "./administracao";
 import { ABAS_CARTEIRA } from "./carteira";
 import { BarraSuperior, Trilho } from "./Casca";
 import Documentos from "./Documentos";
-import EnviarNota from "./EnviarNota";
+import DocumentosEmpresa from "./DocumentosEmpresa";
+import AbrirEnvio from "./AbrirEnvio";
 import ContratoPagina from "./ContratoPagina";
 import Contratos from "./Contratos";
 import Inicio from "./Inicio";
@@ -15,11 +15,12 @@ import Login, { type Usuario } from "./Login";
 import MedicaoPagina from "./MedicaoPagina";
 import MedicoesPagina from "./MedicoesPagina";
 import MinhaConta from "./MinhaConta";
-import NovaMedicao from "./NovaMedicao";
+import MedicaoNova from "./MedicaoNova";
 import Diretoria from "./Diretoria";
 import { entradaDe, itemDe, tituloDaSecao, tituloDe } from "./navegacao";
 import { ABAS_MEDICOES } from "./resumoMedicoes";
-import { caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
+import SigaPagina from "./SigaPagina";
+import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
 
 // Menu e entrada por perfil moram em navegacao.ts (NAVEGACAO.md › Perfis e tela de entrada); o trilho e a barra
 // superior, em Casca.tsx. O App so' escolhe a tela. Todo perfil entra pelo Inicio (decisao do Leonardo, 08/10/2026).
@@ -44,18 +45,22 @@ export default function App() {
   // canonico, com os filtros e a secao que vieram.
   useEffect(() => {
     if (!usuario) return;
-    if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")) {
+    if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")
+      || (rota.tela === "siga" && usuario.perfil === "diretoria")) {
       substituir(entradaDe(usuario.perfil));
+    } else if (rota.tela === "avisos") {
+      // os Avisos moram dentro de Obras (09/10/2026): o item do menu e o link de antes levam para la'
+      substituir({ tela: "obras" }, { busca: buscaDosAvisosEmObras(busca) });
     } else if (caminhoDe(rota) !== window.location.pathname) {
       substituir(rota);
     }
     // `substituir` e' do modulo (estavel); listar so' o que decide o redirecionamento.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usuario, rota]);
+  }, [usuario, rota, busca]);
 
   useEffect(() => {
     // A obra e a medicao poem o proprio titulo ("MT-388 · Prazos"), quando o cabecalho delas chega.
-    if (rota.tela === "obra" || rota.tela === "medicao") return;
+    if (rota.tela === "obra" || rota.tela === "medicao" || rota.tela === "documentos-empresa") return;
     // a aba da Carteira, da Administracao e de Medicoes entram no titulo ("Carteira · QDOP"), como a da obra
     // ("MT-388 · Prazos")
     const aba = rota.tela === "carteira" && rota.aba && rota.aba !== "resumo" ? ABAS_CARTEIRA.find(a => a.id === rota.aba)?.rotulo
@@ -74,7 +79,7 @@ export default function App() {
 
   // A barra superior diz a SECAO; quem tem titulo proprio (o objeto, ou o "Bom dia" do Inicio) fica com o h1 da
   // pagina, e a barra nao repete um segundo h1.
-  const tituloProprio = ehDetalhe(rota) || rota.tela === "notas-envio" || rota.tela === "inicio";
+  const tituloProprio = ehDetalhe(rota) || rota.tela === "inicio" || rota.tela === "obras";
 
   return (
     <div className="shell">
@@ -84,33 +89,26 @@ export default function App() {
         ev.preventDefault();
         document.getElementById("conteudo")?.focus();
       }}>Pular para o conteúdo</a>
-      <Trilho perfil={usuario.perfil} marcado={itemDe(rota)} ir={ir} />
+      <Trilho perfil={usuario.perfil} marcado={itemDe(rota, busca)} ir={ir} />
 
       <div className="coluna">
         <BarraSuperior titulo={tituloDaSecao(rota)} ehH1={!tituloProprio} usuario={usuario} ir={ir} />
         <main className="principal" id="conteudo" tabIndex={-1}>
           {rota.tela === "inicio" && <div className="pagina"><Inicio usuario={usuario} ir={ir} /></div>}
           {rota.tela === "medicoes" && <MedicoesPagina aba={rota.aba ?? "resumo"} busca={busca} usuario={usuario} />}
-          {rota.tela === "notas-envio" && <EnviarNota key={rota.id} protocoloId={rota.id} podeEditar={usuario.perfil === "engenharia" || usuario.perfil === "admin"} />}
-          {rota.tela === "avisos" && <AvisosPagina busca={busca} perfil={usuario.perfil} />}
+          {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} />}
+          {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "a-receber" && (
             <div className="pagina">
-              <p className="pagina__descricao">Quanto os órgãos devem, e há quanto tempo · na cota da Lotufo</p>
-              <AReceberPagina busca={busca} />
+              <AReceberPagina />
             </div>
           )}
           {rota.tela === "carteira" && (
             <div className="pagina">
-              <p className="pagina__descricao">Na cota da Lotufo</p>
               <Diretoria ir={ir} aba={rota.aba ?? "resumo"} />
             </div>
           )}
-          {rota.tela === "obras" && (
-            <div className="pagina">
-              <p className="pagina__descricao">A situação e o término de cada obra · valores cheios</p>
-              <Contratos ir={ir} busca={busca} />
-            </div>
-          )}
+          {rota.tela === "obras" && <Contratos ir={ir} busca={busca} />}
           {rota.tela === "obra" && (
             // `key` no id: trocar de obra REMONTA a pagina em vez de reaproveitar a
             // instancia. Sem isso, o painel aberto e os rascunhos de formulario da
@@ -122,19 +120,15 @@ export default function App() {
             // `key` na medicao: trocar de medicao (a da mesma competencia) remonta a pagina e os formularios dela.
             <MedicaoPagina key={`${rota.obra}-${rota.id}`} contratoId={rota.obra} medicaoId={rota.id} usuario={usuario} origem={origem} />
           )}
-          {rota.tela === "nova-medicao" && <NovaMedicao key={rota.obra} contratoId={rota.obra} usuario={usuario} busca={busca} />}
-          {rota.tela === "documentos" && (
-            <div className="pagina">
-              <p className="pagina__descricao">
-                De protocolo: certidões e regularidade do mês, que precisam estar válidas no dia do protocolo
-              </p>
-              <Documentos usuario={usuario} busca={busca} />
-            </div>
+          {rota.tela === "nova-medicao" && <MedicaoNova key={rota.obra} contratoId={rota.obra} usuario={usuario} origem={origem} busca={busca} />}
+          {rota.tela === "documentos" && <Documentos usuario={usuario} busca={busca} />}
+          {rota.tela === "documentos-empresa" && (
+            // `key` na empresa: trocar de empresa (pelo link de consorciada) remonta a pagina e o formulario da regularidade.
+            <DocumentosEmpresa key={rota.id} usuario={usuario} id={rota.id} aba={rota.aba ?? "certidoes"} origem={origem} />
           )}
           {rota.tela === "conta" && <div className="pagina"><MinhaConta usuario={usuario} /></div>}
           {rota.tela === "admin" && usuario.perfil === "admin" && (
             <div className="pagina">
-              <p className="pagina__descricao">A saúde do sistema, a reconciliação com o RM, os usuários e a auditoria</p>
               <Admin aba={rota.aba ?? "saude"} busca={busca} eu={usuario.id} />
             </div>
           )}

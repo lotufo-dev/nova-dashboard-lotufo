@@ -1,0 +1,52 @@
+/* Fluxo da medicao em 5 etapas (opcao A, 2026-10-09): barra no alto e um cartao por etapa. */
+
+.etapas-barra { background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: var(--sombra); padding: 16px 20px; }
+.etapas-barra ol { display: flex; flex-wrap: wrap; gap: 8px 4px; margin: 0; padding: 0; list-style: none; }
+.etapas-barra__item { display: flex; align-items: center; flex: 1 1 140px; }
+.etapas-barra__item + .etapas-barra__item::before { content: ""; flex: 0 0 16px; height: 2px; margin-right: 8px; background: var(--linha); }
+.etapas-barra__item a { display: inline-flex; align-items: center; gap: 8px; color: var(--texto-2); text-decoration: none; font-weight: 500; }
+.etapas-barra__item a:hover { color: var(--texto); }
+.etapas-barra__n { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 999px; flex: none;
+  background: var(--neutro-fundo, #F1F5F9); color: var(--texto-2); font-size: 13px; font-weight: 600; }
+.etapas-barra__n svg { width: 14px; height: 14px; }
+.etapas-barra__item--feita .etapas-barra__n { background: var(--ok-ponto, #10B981); color: #fff; }
+.etapas-barra__item--feita a { color: var(--texto); }
+/* issue #188: a etapa da vez parada esperando a outra metade (execucao x reajuste no mesmo e-mail) */
+.etapas-barra__item--espera .etapas-barra__n { background: var(--atencao-ponto); color: #fff; }
+.etapas-barra__item--espera a { color: var(--atencao); font-weight: 600; }
+/* orgao que separa (MTPAR, SES): uma trilha por metade, o nome a esquerda */
+.etapas-barra--trilha { display: flex; align-items: center; gap: 12px; padding: 10px 20px; }
+.etapas-barra--trilha + .etapas-barra--trilha { margin-top: -8px; }
+.etapas-barra--trilha ol { flex: 1; }
+.etapas-barra__trilha { flex: 0 0 72px; color: var(--texto-2); font-size: 13px; font-weight: 600; }
+.notas-blocos { display: flex; flex-direction: column; gap: 20px; }
+.notas-bloco + .notas-bloco { border-top: 1px solid var(--linha); padding-top: 16px; }
+.etapas-barra__item--atual .etapas-barra__n { background: var(--acento); color: #fff; }
+.etapas-barra__item--atual a { color: var(--acento); font-weight: 600; }
+
+.etapa { background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: var(--sombra); scroll-margin-top: 16px; }
+.etapa--atual { border-color: var(--acento); box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(79, 70, 229, .12); }
+.etapa--futura { background: transparent; box-shadow: none; }
+.etapa__cabeca { display: flex; align-items: center; gap: 12px; padding: 16px 20px; }
+.etapa--feita > summary { cursor: pointer; list-style: none; }
+.etapa--feita > summary::-webkit-details-marker { display: none; }
+.etapa--feita > summary::after { content: "›"; margin-left: auto; color: var(--texto-2); font-size: 18px; transition: transform .15s; }
+.etapa--feita[open] > summary::after { transform: rotate(90deg); }
+.etapa__n { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 999px; flex: none; font-size: 14px; font-weight: 600; }
+.etapa__n svg { width: 14px; height: 14px; }
+.etapa__n--feita { background: var(--ok-ponto, #10B981); color: #fff; }
+.etapa__n--atual { background: var(--acento); color: #fff; }
+.etapa__n--futura { background: var(--neutro-fundo, #F1F5F9); color: var(--texto-2); }
+.etapa__titulo { margin: 0; font-size: 17px; line-height: 24px; font-weight: 600; }
+.etapa--futura .etapa__titulo { color: var(--texto-2); font-weight: 500; }
+.etapa__resumo { color: var(--texto-2); font-size: 13.5px; min-width: 0; }
+.etapa__corpo { padding: 0 20px 20px; display: flex; flex-direction: column; gap: 16px; }
+/* os cartoes antigos (Espelho, Notas, Protocolos) entram dentro da etapa sem moldura propria */
+.etapa__corpo > .cartao { border: 0; box-shadow: none; background: none; }
+.etapa__corpo > .cartao > .cartao__cabeca, .etapa__corpo > .cartao > .cartao__corpo { padding-left: 0; padding-right: 0; }
+/* o titulo do cartao do espelho repetiria o da etapa */
+.etapa__corpo > #espelho > .cartao__cabeca, .etapa__corpo > #nova-medicao > .cartao__cabeca { display: none; }
+.etapa__corpo .nota-envio--embutido { padding: 0; max-width: none; }
+
+.btn--grande { height: 44px; padding: 0 22px; font-size: 15px; }
+

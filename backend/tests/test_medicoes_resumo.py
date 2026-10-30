@@ -82,6 +82,33 @@ def test_situacao_cobre_o_mesmo_em_andamento_do_proximo_passo():
     assert set(medicoes.SITUACAO.values()) == set(medicoes.ORDEM_SITUACAO)
 
 
+def test_estados_novos_do_motor_entram_na_lista_antes_do_espelho(conn, cenario):
+    """#291 (spec motores §2.1): planilha gerada/enviada e boletim recebido sao situacoes proprias, contadas e
+    ordenadas antes do espelho, cada uma com o marco do seu estado."""
+    ids = cenario
+    _medicao(conn, ids["a"], 30, "execucao", "boletim_recebido", 1000)
+    _medicao(conn, ids["b"], 31, "execucao", "planilha_enviada", 2000, planilha_enviada_em="2026-10-07")
+    _medicao(conn, ids["d"], 32, "execucao", "planilha_gerada", 3000)
+    conn.commit()
+    r = medicoes.resumo(conn, HOJE)
+    assert [x["situacao"] for x in r["linhas"]][:3] == ["planilha-gerada", "planilha-enviada", "boletim-recebido"]
+    assert r["contagens"]["planilha-gerada"] == r["contagens"]["planilha-enviada"] == r["contagens"]["boletim-recebido"] == 1
+    env = next(x for x in r["linhas"] if x["situacao"] == "planilha-enviada")
+    assert env["dias"] == 2 and env["proximo_passo"] == "registrar o boletim"
+    assert [x["estado"] for x in medicoes.em_andamento(conn, estado="boletim_recebido")] == ["boletim_recebido"]
+    # "desde" usa os marcos novos (nao o criado_em); a planilha gerada conta da 1a versao
+    assert {m["estado"]: m["desde"] for m in medicoes.em_andamento(conn)}["planilha_enviada"] == "2026-10-07"
+    assert medicoes.rotulo_estado("planilha_gerada") == "com planilha/carta gerada"
+
+
+def test_protocolada_com_atesto_posterior_mantem_o_desde(conn, cenario):
+    ids = cenario
+    mid = _medicao(conn, ids["a"], 40, "execucao", "protocolada", 1000, atestado_em="2026-10-18")
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-10-01', 'manual')", (mid,))
+    conn.commit()
+    assert {m["id"]: m["desde"] for m in medicoes.em_andamento(conn)}[mid] == "2026-10-01"
+
+
 def test_contratante_sigla_e_sub_orgao():
     assert medicoes.contratante("sinfra", "sinfra-supu", "SINFRA - SUPU (Pavimentação Urbana)", None) == ("SINFRA", "SUPU")
     assert medicoes.contratante("sinfra", "sinfra-sagpm", "SINFRA - SAGPM / SUOESP", None) == ("SINFRA", "SAGPM / SUOESP")
@@ -110,8 +137,8 @@ def test_resumo_linhas_marcos_e_contagens(conn, cenario):
     assert par["contratante"] == "SINFRA" and par["orgao_sub"] == "SUEF II" and par["marco"] == "2026-10-01"
     assert par["proximo_passo"] == "protocolar"
     assert {x["competencia"] for x in r["linhas"]} == {"2026-09"}   # #155: a competencia da medicao (AAAA-MM)
-    assert r["contagens"] == {"sem-medicao": 1, "faturamento": 1, "aguardando-nota": 2, "enviar-nota": 2,
-                              "aguardando-pagamento": 1}
+    assert r["contagens"] == {"sem-medicao": 1, "planilha-gerada": 0, "planilha-enviada": 0, "boletim-recebido": 0,
+                              "faturamento": 1, "aguardando-nota": 2, "enviar-nota": 2, "aguardando-pagamento": 1}
     # obras ativas (a suspensa fica fora); a D so' tem prevista: sem medicao aberta, com a prevista mais antiga
     obras = {o["obra"]: o for o in r["obras"]}
     assert set(obras) == {"Obra A", "Obra B", "Obra C", "Obra D", "Obra F"}

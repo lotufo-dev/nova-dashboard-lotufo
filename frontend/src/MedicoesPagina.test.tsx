@@ -22,7 +22,7 @@ const obra = (extra: Partial<ObraResumo>): ObraResumo => ({
 
 const RESUMO: ResumoMedicoes = {
   hoje: "2026-10-09",
-  contagens: { "sem-medicao": 3, faturamento: 0, "aguardando-nota": 0, "enviar-nota": 2, "aguardando-pagamento": 0 },
+  contagens: { "sem-medicao": 3, "planilha-gerada": 0, "planilha-enviada": 0, "boletim-recebido": 0, faturamento: 0, "aguardando-nota": 0, "enviar-nota": 2, "aguardando-pagamento": 0 },
   linhas: [
     linha({}),
     linha({ medicao_id: 72, medicao_ids: [72], numero: 1, titulo: "1ª Medição de Projeto", valor_centavos: 14811701, dias: 24 }),
@@ -49,8 +49,9 @@ describe("Medições com abas", () => {
     api.mockResolvedValue(RESUMO);
     render(<MedicoesPagina aba="resumo" busca={{}} usuario={usuario} />);
     const quadro = await screen.findByRole("region", { name: "Todas as obras" });
-    // A-21 (10/10/2026): a obra em encerramento nao conta como ativa; a legenda diz a base
-    expect(within(quadro).getByText("4 obras ativas · 1 em encerramento · 2 medições em andamento")).toBeTruthy();
+    // sem legenda de contagem ao lado do titulo (texto-na-tela, 26/10/2026)
+    expect(quadro.querySelector(".medicoes__legenda")).toBeNull();
+    expect(within(quadro).queryByText(/obras ativas|em andamento/)).toBeNull();
     // a medição abre na etapa pendente (enviar a nota = etapa 4)
     expect(within(quadro).getByRole("link", { name: "7ª Medição + Reajuste" }).getAttribute("href")).toBe("/obras/12/medicoes/70#etapa-4");
     // a segunda medição aberta da mesma obra não repete o nome como link
@@ -59,7 +60,8 @@ describe("Medições com abas", () => {
     // sem medição: grupos por contratante, o maior primeiro, fechados
     const grupos = quadro.querySelectorAll("details");
     expect([...grupos].map(d => d.querySelector("summary")?.textContent)).toEqual(
-      ["SINFRA3 obras sem medição aberta", "MTPAR1 obra sem medição aberta"]);
+      ["SINFRA", "MTPAR"]);
+    expect(quadro.querySelector(".medicoes__faixa")?.textContent).toBe("Sem medição aberta");
     expect([...grupos].every(d => !d.open)).toBe(true);
     // cartão leva à aba; a aba diz a contagem
     const cartoes = screen.getByRole("navigation", { name: "Medições por situação" });
@@ -67,6 +69,25 @@ describe("Medições com abas", () => {
     const abas = screen.getByRole("navigation", { name: "Seções de Medições" });
     expect(within(abas).getByRole("link", { name: "Resumo" }).getAttribute("aria-current")).toBe("page");
     expect(within(abas).getByRole("link", { name: /Sem medição aberta/ }).textContent).toBe("Sem medição aberta3");
+  });
+
+  it("estados novos do motor: abas e cartões na ordem do ciclo, antes do espelho, com o texto em português", async () => {
+    api.mockResolvedValue({ ...RESUMO, contagens: { ...RESUMO.contagens, "planilha-enviada": 1 },
+      linhas: [linha({ situacao: "planilha-enviada", proximo_passo: "registrar o boletim" })] });
+    render(<MedicoesPagina aba="planilha-enviada" busca={{}} usuario={usuario} />);
+    const abas = await screen.findByRole("navigation", { name: "Seções de Medições" });
+    expect(within(abas).getAllByRole("link").map(a => a.textContent)).toEqual([
+      "Resumo", "Sem medição aberta3", "Planilha/carta gerada0", "Planilha/carta enviada1", "Boletim recebido0",
+      "Enviar ao faturamento0", "Aguardando nota0", "Enviar nota2", "Aguardando pagamento0"]);
+    const quadro = await screen.findByRole("region", { name: "Planilha/carta enviada" });
+    expect(within(quadro).getByText("7ª Medição + Reajuste")).toBeTruthy();
+    expect(quadro.querySelector(".sit-pilula--planilha-enviada")?.textContent).toBe("Planilha/carta enviada");
+  });
+
+  it("aba Boletim recebido vazia diz o que falta", async () => {
+    api.mockResolvedValue(RESUMO);
+    render(<MedicoesPagina aba="boletim-recebido" busca={{}} usuario={usuario} />);
+    expect(await screen.findByText("Nenhum boletim recebido à espera do espelho.")).toBeTruthy();
   });
 
   it("aba Aguardando nota: estado vazio sem medição, e a linha da medição que espera a nota", async () => {
@@ -90,13 +111,17 @@ describe("Medições com abas", () => {
     }
     const escolher = (janela: HTMLElement, obra: string) => fireEvent.click(within(janela).getByRole("radio", { name: new RegExp(obra) }));
 
-    it("lista as obras por contratante com a última medição e a situação; sem escolha, o botão espera", async () => {
+    it("lista as obras por contratante com o estado em selo; sem escolha, o botão espera e não há frase de apoio", async () => {
       const janela = await abrir();
-      expect(within(janela).getByText("A medição começa pelo espelho", { exact: false })).toBeTruthy();
       expect(within(janela).getAllByRole("radio")).toHaveLength(5);
-      expect(within(janela).getByRole("radio", { name: /Estações BRT.*7ª em andamento: Enviar nota.*1ª de Projeto em andamento/ })).toBeTruthy();
-      expect(within(janela).getByRole("radio", { name: /MT-388.*última: 23ª · 01\/2026.*Prevista pelo cronograma: 24ª · 09\/2026/ })).toBeTruthy();
+      expect(within(janela).getByRole("radio", { name: /Estações BRT.*SAGPM \/ SUOESP.*Em andamento.*Projeto em andamento/ })).toBeTruthy();
+      expect(within(janela).getByRole("radio", { name: /MT-388.*SUEF II.*Prevista/ })).toBeTruthy();
+      expect(within(janela).getByRole("radio", { name: /Cavalaria.*SACID/ }).closest("label")?.querySelector(".selo")).toBeNull();
       expect((within(janela).getByRole("button", { name: "Escolha uma obra" }) as HTMLButtonElement).disabled).toBe(true);
+      // texto-na-tela (26/10/2026): sem dica sob o título, sem "última: …", sem nota do rodapé
+      expect(janela.querySelector(".iniciar__dica, .iniciar__nota, .iniciar__obra-ult")).toBeNull();
+      expect(within(janela).queryByText(/começa pelo espelho|última:|abre a medição/)).toBeNull();
+      expect(janela.hasAttribute("aria-describedby")).toBe(false);
     });
 
     it("obra em andamento: só abre a medição, sem campos para criar outra", async () => {
@@ -120,6 +145,8 @@ describe("Medições com abas", () => {
     it("obra sem nada: sugere a próxima (virada de ano), deixa mudar e leva ao espelho com número e competência", async () => {
       const janela = await abrir();
       escolher(janela, "Cavalaria");
+      expect(janela.querySelector(".iniciar__nota")).toBeNull();
+      expect(within(janela).queryByText(/Sugestão/)).toBeNull();
       const numero = within(janela).getByLabelText(/Nº da medição/) as HTMLInputElement;
       expect(numero.value).toBe("12");
       expect((within(janela).getByLabelText("Competência") as HTMLInputElement).value).toBe("01/2027");
@@ -167,7 +194,7 @@ describe("Medições com abas", () => {
     it("sem número o botão não segue; a busca filtra e mostra o vazio", async () => {
       const janela = await abrir();
       escolher(janela, "Granito");
-      expect(within(janela).getByText(/ainda não tem medição lançada/)).toBeTruthy();
+      expect(within(janela).queryByText(/ainda não tem medição/)).toBeNull();
       expect((within(janela).getByRole("button", { name: "Informe o número" }) as HTMLButtonElement).disabled).toBe(true);
       fireEvent.change(within(janela).getByRole("searchbox"), { target: { value: "granito" } });
       expect(within(janela).getAllByRole("radio")).toHaveLength(1);
@@ -181,6 +208,19 @@ describe("Medições com abas", () => {
     render(<MedicoesPagina aba="resumo" busca={{}} usuario={{ ...usuario, perfil: "diretoria" }} />);
     await screen.findByRole("region", { name: "Todas as obras" });
     expect(screen.queryByRole("button", { name: /Iniciar processo/ })).toBeNull();
+  });
+
+  it("abas Enviar nota e Aguardando pagamento sem parágrafo de descrição", async () => {
+    api.mockImplementation(async (c: string) => c.includes("a-enviar") ? { envios: [], contadores: {} }
+      : c.includes("aguardando") ? [] : RESUMO);
+    const { container, unmount } = render(<MedicoesPagina aba="enviar-nota" busca={{}} usuario={usuario} />);
+    await screen.findByText("Nenhuma nota a enviar.");
+    expect(container.querySelector(".pagina__descricao")).toBeNull();
+    expect(screen.queryByText(/juntos na SINFRA/)).toBeNull();
+    unmount();
+    const r = render(<MedicoesPagina aba="aguardando-pagamento" busca={{}} usuario={usuario} />);
+    expect(r.container.querySelector(".pagina__descricao")).toBeNull();
+    expect(screen.queryByText(/se registra na etapa 4/)).toBeNull();
   });
 
   it("os filtros da aba Enviar nota vêm da URL e vão para a URL (sobrevivem ao recarregar)", async () => {

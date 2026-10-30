@@ -126,8 +126,60 @@ export function IconeGrade(p: Props) {
   </Svg>;
 }
 
+export function IconeLinkExterno(p: Props) {
+  return <Svg {...p}>
+    <path d="M14 3h7v7M21 3l-9 9" /><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" />
+  </Svg>;
+}
+
+export function IconeClipe(p: Props) {
+  return <Svg {...p}>
+    <path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9" />
+  </Svg>;
+}
+
+export function IconeArquivo(p: Props) {
+  return <Svg {...p}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" />
+  </Svg>;
+}
+
+export function IconeEnviarNuvem(p: Props) {
+  return <Svg {...p}>
+    <path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5" /><path d="M12 12v8M9 15l3-3 3 3" />
+  </Svg>;
+}
+
+export function IconeRelogio(p: Props) {
+  return <Svg {...p}>
+    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+  </Svg>;
+}
+
 export function IconeAjustes(p: Props) {
   return <Svg {...p}>
     <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
+  </Svg>;
+}
+
+export function IconeOlho(p: Props) {
+  return <Svg {...p}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" />
+  </Svg>;
+}
+
+export function IconeOlhoFechado(p: Props) {
+  return <Svg {...p}>
+    <path d="M3 3l18 18" />
+    <path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6" />
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+  </Svg>;
+}
+
+/* Trilho › SIGA: o caminho do processo entre dois setores (origem e destino ligados por um trajeto). */
+export function IconeSiga(p: Props) {
+  return <Svg {...p}>
+    <circle cx="6" cy="19" r="2.5" /><circle cx="18" cy="5" r="2.5" />
+    <path d="M8.5 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5" />
   </Svg>;
 }

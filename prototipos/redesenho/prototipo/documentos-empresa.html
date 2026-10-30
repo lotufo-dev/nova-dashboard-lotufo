@@ -1,0 +1,242 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Documentos da empresa</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="app-documentos.css">
+<style>/* tudo em app-documentos.css */</style></head>
+<body data-secao="documentos" data-titulo="Documentos"><main id="conteudo">
+<header class="topbar topbar--detalhe">
+  <nav class="migalhas" aria-label="Caminho"><ol><li><a href="documentos.html">Documentos</a></li><li aria-current="page"><span id="migalha-nome"></span></li></ol></nav>
+  <div class="doc-cabeca">
+    <div class="doc-cabeca__id">
+      <h1 class="doc-cabeca__titulo" id="nome"></h1>
+      <div class="doc-cabeca__linha">
+        <div class="doc-cnpj">CNPJ <span class="num" id="cnpj"></span><button type="button" id="copiar">Copiar</button><span class="doc-copia" hidden></span></div>
+        <span id="situacao"></span>
+      </div>
+      <p class="doc-cabeca__meta" id="meta"></p>
+    </div>
+    <div class="doc-cabeca__zip">
+      <div class="campo">
+        <label class="campo__rotulo" for="data-zip">ZIP: certidões vigentes em</label>
+        <input type="date" id="data-zip" value="2026-10-16">
+      </div>
+      <button type="button" class="btn" id="baixar-zip">
+        <svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>Baixar ZIP
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="pagina">
+  <p class="sr-only" role="status" id="anuncio"></p>
+  <section class="cartao doc-abas-cartao">
+    <div class="abas" role="tablist" aria-label="Documentos da empresa">
+      <button type="button" class="aba" role="tab" id="aba-certidoes" aria-controls="p-certidoes" data-aba="certidoes">Certidões<span class="aba__conta" id="conta-cert" hidden></span></button>
+      <button type="button" class="aba" role="tab" id="aba-regularidade" aria-controls="p-regularidade" data-aba="regularidade">Regularidade do mês<span class="aba__conta" id="conta-reg" hidden></span></button>
+      <button type="button" class="aba" role="tab" id="aba-garantia" aria-controls="p-garantia" data-aba="garantia">Garantia e ART por obra<span class="aba__conta" id="conta-gar" hidden></span></button>
+    </div>
+
+    <!-- Certidões -->
+    <div class="doc-painel" role="tabpanel" id="p-certidoes" aria-labelledby="aba-certidoes">
+      <p class="doc-painel__dica">Pendência: vencida, falta ou vence em até 30 dias. “Emitir” abre o site do órgão emissor; “Anexar” lê o PDF e coloca na linha certa.</p>
+      <div class="tabela-wrap">
+        <table class="tabela tabela--empilha">
+          <caption class="sr-only">Certidões da empresa</caption>
+          <thead><tr><th scope="col">Certidão</th><th scope="col">Emissão</th><th scope="col">Válida até</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead>
+          <tbody id="certidoes"></tbody>
+        </table>
+      </div>
+      <div id="consorciadas"></div>
+      <div class="doc-zona" id="zona">
+        <svg class="icone doc-zona__icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5"/><path d="M12 12v8M9 15l3-3 3 3"/></svg>
+        <p>Arraste os PDFs das certidões aqui ou <button type="button" class="doc-zona__link" id="escolher">escolha os arquivos</button></p>
+        <p class="doc-zona__nota">O sistema lê a validade de cada PDF e coloca na linha certa; confira e grave.</p>
+        <input type="file" accept="application/pdf" multiple id="arquivos" hidden>
+      </div>
+      <ul class="documentos__fila doc-fila" id="fila" hidden></ul>
+    </div>
+
+    <!-- Regularidade do mês -->
+    <div class="doc-painel" role="tabpanel" id="p-regularidade" aria-labelledby="aba-regularidade" hidden></div>
+
+    <!-- Garantia e ART -->
+    <div class="doc-painel" role="tabpanel" id="p-garantia" aria-labelledby="aba-garantia" hidden></div>
+  </section>
+</div>
+</main>
+<script src="shell.js"></script>
+<script src="documentos-dados.js"></script>
+<script>
+(function () {
+  const D = window.DOC, esc = D.esc;
+  const id = Number(new URLSearchParams(location.search).get("e")) || 1;
+  const e = D.porId(id) || D.EMPRESAS[0];
+  const r = D.resumo(e);
+  document.title = e.nome + " · Documentos";
+
+  // ---------------------------------------------------------------- cabecalho
+  document.getElementById("nome").textContent = e.nome;
+  document.getElementById("migalha-nome").textContent = e.nome;
+  document.getElementById("cnpj").textContent = D.CNPJ;
+  document.getElementById("situacao").innerHTML = D.pilula(r.nivel, r.texto.charAt(0).toUpperCase() + r.texto.slice(1));
+  const link = x => '<a href="documentos-empresa.html?e=' + x.id + '">' + esc(x.nome) + "</a>";
+  const obraLink = o => '<a href="#" data-acao="Abriria a obra ' + esc(o) + ', aba Documentos">' + esc(o) + "</a>";
+  let meta = "";
+  if (e.papel === "consorcio") meta = "Consórcio · consorciadas: " + e.consorciadas.map(i => link(D.porId(i))).join(", ");
+  else if (e.papel === "consorciada") meta = "Consorciada em " + e.consorcios.map(i => link(D.porId(i))).join(", ");
+  else meta = "Empresa" + (e.consorcios.length ? " · também consorciada em " + e.consorcios.map(i => link(D.porId(i))).join(", ") : "");
+  meta += " · exigida em " + e.obras.map(obraLink).join(", ");
+  document.getElementById("meta").innerHTML = meta;
+  document.getElementById("copiar").setAttribute("aria-label", "Copiar o CNPJ de " + e.nome);
+  document.getElementById("copiar").addEventListener("click", ev => D.copiar(ev.currentTarget, e.nome));
+  document.getElementById("baixar-zip").addEventListener("click", () =>
+    window.protoAviso("Baixaria o ZIP das certidões de " + e.nome + " vigentes em " + D.data(document.getElementById("data-zip").value) + "."));
+
+  // ---------------------------------------------------------------- certidoes
+  const IC = {
+    emitir: '<svg class="icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M21 3l-9 9"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/></svg>',
+    anexar: '<svg class="icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/></svg>',
+    pdf: '<svg class="icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>'
+  };
+  // o unico primario da area: o Emitir da pendencia mais urgente
+  const urgente = r.linhas.filter(l => l.pendente).sort((a, b) => (a.dias ?? -999) - (b.dias ?? -999))[0];
+  document.getElementById("certidoes").innerHTML = r.linhas.map(l => {
+    const t = l.tipo;
+    const notas = [];
+    if (l.nota) notas.push(l.nota);
+    if (l.natureza === "positiva_efeito_negativa" && l.situacao !== "vencida") notas.push("positiva c/ efeito de negativa");
+    if (l.nivel === "atencao" && l.validade) notas.push("até " + D.data(l.validade));
+    const digitada = l.leitura === "manual" ? ' <span class="selo">digitada</span>' : "";
+    const acoes = [];
+    if (l.exigida && l.situacao !== "nao_se_aplica")
+      acoes.push('<a href="#" class="btn btn--pequeno' + (l === urgente ? " btn--primario" : "") + '" data-acao="Abriria o site do órgão emissor da certidão ' + esc(t.rotulo) + ' de ' + esc(e.nome) + ' (nova aba)">' + IC.emitir + "Emitir</a>");
+    if (l.situacao !== "nao_se_aplica")
+      acoes.push('<button type="button" class="btn btn--pequeno" data-anexar="' + t.chave + '" aria-label="Anexar certidão ' + esc(t.curto) + '">' + IC.anexar + "Anexar</button>");
+    acoes.push(l.validade
+      ? '<a href="#" class="btn btn--pequeno" data-acao="Abriria o PDF da certidão ' + esc(t.rotulo) + ' de ' + esc(e.nome) + '" aria-label="Ver PDF da certidão ' + esc(t.curto) + '">' + IC.pdf + "Ver PDF</a>"
+      : '<button type="button" class="btn btn--pequeno" disabled title="Sem PDF anexado">' + IC.pdf + "Ver PDF</button>");
+    return "<tr>" +
+      '<td class="doc-forte col-largo" data-rotulo="Certidão">' + esc(t.rotulo) + "</td>" +
+      '<td class="doc-data" data-rotulo="Emissão">' + D.data(l.emissao) + "</td>" +
+      '<td class="doc-data" data-rotulo="Válida até">' + D.data(l.validade) + digitada + "</td>" +
+      '<td class="doc-sit col-largo" data-rotulo="Situação">' + D.selo(l.nivel, l.texto, false) + notas.map(n => '<div class="campo__nota num">' + esc(n) + "</div>").join("") + "</td>" +
+      '<td class="col-largo"><div class="doc-acoes">' + acoes.join("") + "</div></td></tr>";
+  }).join("");
+  const nCert = r.linhas.filter(l => l.pendente).length;
+  if (nCert) { const c = document.getElementById("conta-cert"); c.hidden = false; c.textContent = nCert; c.setAttribute("aria-label", nCert + " com pendência"); }
+
+  // consorcio: as consorciadas, com a situacao de cada uma (a habilitacao e' por CNPJ: o consorcio e cada consorciada)
+  if (e.papel === "consorcio") {
+    document.getElementById("consorciadas").innerHTML =
+      '<div class="pilha" style="gap:8px"><h2 class="doc-secao-titulo">Consorciadas</h2>' +
+      '<p class="doc-painel__dica">A obra do consórcio cobra as certidões dele e as de cada consorciada.</p>' +
+      '<ul class="doc-consorciadas">' + e.consorciadas.map(i => {
+        const x = D.porId(i), rx = D.resumo(x);
+        return "<li><div>" + link(x) + '<div class="campo__nota num">CNPJ ' + D.CNPJ + "</div></div>" +
+          D.pilula(rx.nivel, rx.texto.charAt(0).toUpperCase() + rx.texto.slice(1)) +
+          '<ul class="doc-pontos" aria-label="Certidões de ' + esc(x.nome) + '">' + rx.linhas.map(l =>
+            '<li title="' + esc(l.tipo.rotulo + ": " + l.texto) + '"><span class="doc-ponto doc-ponto--' + l.nivel + '" aria-hidden="true"></span>' + esc(l.tipo.curto) + '<span class="sr-only">: ' + esc(l.texto) + "</span></li>").join("") + "</ul></li>";
+      }).join("") + "</ul></div>";
+  }
+
+  const entrada = document.getElementById("arquivos");
+  const fila = D.montarFila({ zona: document.getElementById("zona"), lista: document.getElementById("fila"), entrada, empresa: e });
+  document.getElementById("escolher").addEventListener("click", () => fila.escolher(null));
+  document.getElementById("certidoes").addEventListener("click", ev => {
+    const b = ev.target.closest("[data-anexar]");
+    if (b) fila.escolher(D.TIPOS.find(t => t.chave === b.dataset.anexar));
+  });
+
+  // ---------------------------------------------------------------- regularidade
+  const pReg = document.getElementById("p-regularidade");
+  if (!e.reg) {
+    pReg.innerHTML = '<div class="vazio"><p class="vazio__titulo">' + (e.papel === "consorcio" ? "O consórcio não entrega regularidade mensal" : "Regularidade mensal não exigida") + "</p>" +
+      (e.papel === "consorcio" ? "<p>Quem entrega o PDF do DP é cada consorciada: " + e.consorciadas.map(i => '<a href="documentos-empresa.html?e=' + i + '#regularidade">' + esc(D.porId(i).nome) + "</a>").join(" e ") + ".</p>" : "") + "</div>";
+  } else {
+    const g = e.reg;
+    if (g.situacao !== "ok") { const c = document.getElementById("conta-reg"); c.hidden = false; c.textContent = "1"; c.setAttribute("aria-label", "1 pendência"); }
+    pReg.innerHTML =
+      '<p class="doc-painel__dica">O PDF do Departamento Pessoal, um por competência. O nome “MMAAAA - …” do arquivo já preenche a competência.</p>' +
+      '<div class="doc-reg">' +
+        '<div class="doc-reg__bloco"><h3>Situação</h3>' +
+          (g.situacao === "ok" ? D.selo("ok", D.REG_TXT.ok) : D.selo("atencao", D.REG_TXT[g.situacao], true)) +
+          '<dl class="doc-pares"><dt>Competência anexada</dt><dd class="num">' + D.mes(g.competencia) + "</dd>" +
+          '<dt>Competência esperada</dt><dd class="num">' + D.mes(g.esperada) + "</dd></dl></div>" +
+        '<form class="doc-reg__bloco" id="form-reg"><h3>Anexar regularidade</h3>' +
+          '<div class="form-inline">' +
+            '<label class="btn btn--pequeno espelho__anexar"><span class="arquivo-nome" id="reg-nome">Escolher PDF</span><span class="sr-only"> da regularidade de ' + esc(e.nome) + '</span>' +
+              '<input type="file" accept="application/pdf" class="espelho__arquivo" id="reg-arquivo"></label>' +
+            '<div class="campo"><label class="campo__rotulo" for="reg-comp">Competência</label>' +
+              '<input id="reg-comp" class="entrada--curta num" inputmode="numeric" placeholder="MM/AAAA" pattern="(0[1-9]|1[0-2])/[0-9]{4}" value="' + D.mes(g.esperada) + '" size="8"></div>' +
+            '<button type="submit" class="btn btn--primario btn--pequeno" id="reg-gravar" disabled>Gravar regularidade</button>' +
+            '<button type="reset" class="btn btn--pequeno">Limpar</button>' +
+          "</div><p class=\"notas__ok\" id=\"reg-ok\" role=\"status\"></p></form>" +
+        '<div class="doc-reg__bloco"><h3>Anexadas</h3><div class="tabela-wrap"><table class="tabela"><thead><tr><th scope="col">Competência</th><th scope="col">Anexada em</th><th scope="col"><span class="sr-only">PDF</span></th></tr></thead><tbody>' +
+          g.historico.map(h => '<tr><td class="doc-data">' + D.mes(h[0]) + '</td><td class="doc-data">' + D.data(h[1]) + '</td><td><a href="#" data-acao="Abriria o PDF da regularidade de ' + D.mes(h[0]) + '">Ver PDF</a></td></tr>').join("") +
+        "</tbody></table></div></div>" +
+      "</div>";
+    const arq = document.getElementById("reg-arquivo"), comp = document.getElementById("reg-comp"), gravar = document.getElementById("reg-gravar");
+    arq.addEventListener("change", () => {
+      const f = arq.files[0];
+      document.getElementById("reg-nome").textContent = f ? f.name : "Escolher PDF";
+      document.getElementById("reg-nome").title = f ? f.name : "";
+      const m = f && /^(0[1-9]|1[0-2])(\d{4})\b/.exec(f.name.trim());
+      if (m) comp.value = m[1] + "/" + m[2];
+      gravar.disabled = !f;
+    });
+    const form = document.getElementById("form-reg");
+    form.addEventListener("reset", () => setTimeout(() => { document.getElementById("reg-nome").textContent = "Escolher PDF"; comp.value = D.mes(g.esperada); gravar.disabled = true; }));
+    form.addEventListener("submit", ev => {
+      ev.preventDefault();
+      if (!comp.checkValidity()) { comp.reportValidity(); return; }
+      window.protoAviso("Gravaria a regularidade de " + comp.value + " para " + e.nome + ".");
+      document.getElementById("reg-ok").textContent = "Regularidade de " + comp.value + " gravada para " + e.nome + " (no protótipo, nada foi salvo).";
+    });
+  }
+
+  // ---------------------------------------------------------------- garantia e ART
+  const pGar = document.getElementById("p-garantia");
+  const obras = D.CONTRATOS.filter(k => k.entidade === e.id);
+  if (!obras.length) {
+    pGar.innerHTML = '<div class="vazio"><p class="vazio__titulo">Nenhuma obra contratada direto por esta empresa</p><p>A garantia e a ART das obras em consórcio ficam no consórcio: ' +
+      e.consorcios.map(i => '<a href="documentos-empresa.html?e=' + i + '#garantia">' + esc(D.porId(i).nome) + "</a>").join(", ") + ".</p></div>";
+  } else {
+    let nGar = 0;
+    pGar.innerHTML = '<p class="doc-painel__dica">A garantia avisa 30 dias antes do fim (ação aos 15); a ART não vence, só precisa estar anexada.</p>' +
+      '<div class="tabela-wrap"><table class="tabela tabela--empilha"><caption class="sr-only">Garantia e ART por obra</caption>' +
+      '<thead><tr><th scope="col">Obra</th><th scope="col">Garantia</th><th scope="col">ART</th></tr></thead><tbody>' +
+      obras.map(k => {
+        const g = D.garantia(k.garantia), a = D.art(k.art);
+        if (g.nivel === "acao" || g.nivel === "atencao" || a.nivel === "atencao") nGar++;
+        return '<tr><th scope="row" class="col-largo" data-rotulo="Obra">' + obraLink(k.obra) + "</th>" +
+          '<td data-rotulo="Garantia">' + D.selo(g.nivel, g.texto, g.forte) + (g.nota ? '<div class="campo__nota num">' + esc(g.nota) + "</div>" : "") + "</td>" +
+          '<td data-rotulo="ART">' + D.selo(a.nivel, a.texto) + (a.nota ? '<div class="campo__nota num">' + esc(a.nota) + "</div>" : "") + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+    if (nGar) { const c = document.getElementById("conta-gar"); c.hidden = false; c.textContent = nGar; c.setAttribute("aria-label", nGar + " com pendência"); }
+  }
+
+  // ---------------------------------------------------------------- abas (no endereco: #certidoes, #regularidade, #garantia)
+  const abas = Array.from(document.querySelectorAll("[data-aba]"));
+  function abrir(nome, foco) {
+    if (!abas.some(a => a.dataset.aba === nome)) nome = "certidoes";
+    abas.forEach(a => {
+      const sel = a.dataset.aba === nome;
+      a.setAttribute("aria-selected", sel); a.tabIndex = sel ? 0 : -1;
+      document.getElementById("p-" + a.dataset.aba).hidden = !sel;
+      if (sel && foco) a.focus();
+    });
+  }
+  abas.forEach((a, i) => {
+    a.addEventListener("click", () => { history.replaceState(null, "", "#" + a.dataset.aba); abrir(a.dataset.aba); });
+    a.addEventListener("keydown", ev => {
+      const d = ev.key === "ArrowRight" ? 1 : ev.key === "ArrowLeft" ? -1 : 0;
+      if (!d) return;
+      const prox = abas[(i + d + abas.length) % abas.length];
+      history.replaceState(null, "", "#" + prox.dataset.aba); abrir(prox.dataset.aba, true);
+    });
+  });
+  abrir(location.hash.slice(1));
+  window.addEventListener("hashchange", () => abrir(location.hash.slice(1)));
+})();
+</script>
+</body></html>

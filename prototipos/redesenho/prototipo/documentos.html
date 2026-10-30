@@ -1,0 +1,149 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Documentos</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="app-documentos.css">
+<style>/* tudo em app-documentos.css */</style></head>
+<body data-secao="documentos" data-titulo="Documentos"><main id="conteudo">
+<div class="pagina">
+  <h1 class="sr-only">Documentos</h1>
+  <p class="sr-only" role="status" id="anuncio"></p>
+
+  <div class="doc-topo">
+    <div class="doc-topo__texto">
+      <p class="pagina__descricao">Certidões e regularidade de cada empresa. Clique no cartão para ver as certidões, a regularidade do mês e a garantia e ART das obras.</p>
+      <p class="campo__nota num" id="recorte" role="status"></p>
+    </div>
+    <div class="doc-topo__acoes">
+      <label class="doc-chave">
+        <input type="checkbox" id="so-pendentes">
+        <span class="doc-chave__trilho" aria-hidden="true"></span>
+        Só as com pendência
+      </label>
+      <button type="button" class="btn btn--primario" id="abrir-zip">
+        <svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>
+        ZIP das certidões vigentes
+      </button>
+    </div>
+  </div>
+
+  <p class="doc-legenda" aria-label="Legenda dos pontos">
+    <span><i class="doc-ponto doc-ponto--ok"></i>em dia</span>
+    <span><i class="doc-ponto doc-ponto--atencao"></i>vence em até 30 dias</span>
+    <span><i class="doc-ponto doc-ponto--acao"></i>vencida ou falta</span>
+    <span><i class="doc-ponto doc-ponto--neutro"></i>não exigida ou não se aplica</span>
+  </p>
+
+  <section aria-label="Empresas">
+    <div class="emp-grade" id="grade"></div>
+    <div class="cartao vazio" id="vazio" hidden><p class="vazio__titulo">Nenhuma empresa com pendência.</p><p>Desligue “Só as com pendência” para ver todas.</p></div>
+  </section>
+
+  <section aria-labelledby="titulo-anexar" class="pilha">
+    <h2 class="doc-secao-titulo" id="titulo-anexar">Anexar certidões de qualquer empresa</h2>
+    <div class="doc-zona" id="zona">
+      <svg class="icone doc-zona__icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 9.5"/><path d="M12 12v8M9 15l3-3 3 3"/></svg>
+      <p>Arraste os PDFs das certidões aqui ou <button type="button" class="doc-zona__link" id="escolher">escolha os arquivos</button></p>
+      <p class="doc-zona__nota">O sistema lê tipo, empresa e validade de cada PDF; confira e grave.</p>
+      <input type="file" accept="application/pdf" multiple id="arquivos" hidden>
+    </div>
+    <ul class="documentos__fila doc-fila" id="fila" hidden></ul>
+  </section>
+</div>
+
+<dialog class="doc-janela" id="janela-zip" aria-labelledby="titulo-zip">
+  <form method="dialog">
+    <div class="doc-janela__cabeca"><h2 id="titulo-zip">ZIP das certidões vigentes</h2></div>
+    <div class="doc-janela__corpo">
+      <div class="campo">
+        <label class="campo__rotulo" for="data-zip">Certidões vigentes em</label>
+        <input type="date" id="data-zip" value="2026-10-16" class="entrada--media">
+        <span class="campo__nota">Para licitação ou protocolo: junta as certidões válidas nessa data.</span>
+      </div>
+      <fieldset id="zip-empresas"><legend>Empresas (um ZIP por empresa)</legend></fieldset>
+    </div>
+    <div class="doc-janela__rodape">
+      <button type="submit" class="btn" value="cancelar">Cancelar</button>
+      <button type="button" class="btn btn--primario" id="baixar-zip">Baixar ZIP</button>
+    </div>
+  </form>
+</dialog>
+</main>
+<script src="shell.js"></script>
+<script src="documentos-dados.js"></script>
+<script>
+(function () {
+  const D = window.DOC, esc = D.esc;
+  const grade = document.getElementById("grade");
+  const chave = document.getElementById("so-pendentes");
+  const params = new URLSearchParams(location.search);
+  chave.checked = params.get("pendentes") === "1";
+
+  const relogio = '<svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+  const seta = '<svg class="icone icone--p seta" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+  const PAPEL = { empresa: "Empresa", consorcio: "Consórcio", consorciada: "Consorciada" };
+
+  function cartao(x) {
+    const e = x.e, r = x.r;
+    const pontos = r.linhas.map(l =>
+      '<li title="' + esc(l.tipo.rotulo + ": " + l.texto + (l.validade ? " · até " + D.data(l.validade) : "")) + '"><span class="doc-ponto doc-ponto--' + l.nivel + '" aria-hidden="true"></span>' +
+      esc(l.tipo.curto) + '<span class="sr-only">: ' + esc(l.texto) + "</span></li>").join("");
+    const extras = [];
+    if (e.reg) extras.push({ nivel: e.reg.situacao === "ok" ? "ok" : "atencao",
+      texto: "Regularidade do mês (DP): " + D.REG_TXT[e.reg.situacao] + (e.reg.situacao === "ok" ? " · " + D.mes(e.reg.competencia) : " · esperada " + D.mes(e.reg.esperada)) });
+    if (e.papel === "consorcio") extras.push({ nivel: null, texto: "Consorciadas: " + e.consorciadas.map(id => D.porId(id).nome).join(", ") });
+    D.avisosObra(e).forEach(a => extras.push(a));
+    extras.push({ nivel: null, texto: "Exigida em " + (e.obras.length === 1 ? "1 obra" : e.obras.length + " obras") + ": " + e.obras.join(", ") });
+    const prox = r.proxima
+      ? "Próxima a vencer: <strong>" + esc(r.proxima.tipo.curto) + " em " + D.data(r.proxima.validade) + "</strong>"
+      : "Nenhuma certidão vigente";
+    return '<article class="cartao emp-cartao">' +
+      '<div class="emp-cartao__cabeca"><span class="emp-cartao__papel">' + PAPEL[e.papel] + '</span>' +
+      '<h2 class="emp-cartao__nome"><a href="documentos-empresa.html?e=' + e.id + '">' + esc(e.nome) + '</a></h2>' +
+      '<div class="doc-cnpj">CNPJ <span class="num">' + D.CNPJ + '</span><button type="button" data-copiar="' + e.id + '" aria-label="Copiar o CNPJ de ' + esc(e.nome) + '">Copiar</button><span class="doc-copia" hidden></span></div></div>' +
+      D.pilula(r.nivel, r.texto.charAt(0).toUpperCase() + r.texto.slice(1)) +
+      '<ul class="doc-pontos" aria-label="Certidões">' + pontos + "</ul>" +
+      '<div class="emp-cartao__extra">' + extras.map(a => "<p>" + (a.nivel ? '<span class="doc-ponto doc-ponto--' + a.nivel + '" aria-hidden="true"></span>' : "") + "<span>" + esc(a.texto) + "</span></p>").join("") + "</div>" +
+      '<div class="emp-cartao__rodape">' + relogio + "<span>" + prox + "</span>" + seta + "</div></article>";
+  }
+
+  function desenhar() {
+    const so = chave.checked;
+    const lista = D.ordenadas(so);
+    const todas = D.ordenadas(false);
+    const pend = todas.filter(x => x.r.pendencias > 0).length;
+    grade.innerHTML = lista.map(cartao).join("");
+    document.getElementById("vazio").hidden = lista.length > 0;
+    document.getElementById("recorte").textContent = (so
+      ? "Mostrando as " + pend + " com pendência, de " + todas.length + " empresas"
+      : todas.length + " empresas · " + pend + " com pendência") + " (pendência: vencida, falta ou vence em até " + D.JANELA + " dias; a regularidade do mês fora do dia também conta). Empresa com problema primeiro.";
+  }
+  chave.addEventListener("change", () => {
+    const u = new URL(location.href);
+    if (chave.checked) u.searchParams.set("pendentes", "1"); else u.searchParams.delete("pendentes");
+    history.replaceState(null, "", u);
+    desenhar();
+  });
+  grade.addEventListener("click", ev => {
+    const b = ev.target.closest("[data-copiar]");
+    if (b) { ev.preventDefault(); ev.stopPropagation(); D.copiar(b, D.porId(Number(b.dataset.copiar)).nome); }
+  });
+  desenhar();
+
+  // janela do ZIP: a data vale para todas; um ZIP por empresa marcada
+  const janela = document.getElementById("janela-zip");
+  document.getElementById("zip-empresas").insertAdjacentHTML("beforeend", D.EMPRESAS.map(e =>
+    '<label class="doc-marca"><input type="checkbox" value="' + e.id + '" checked>' + esc(e.nome) + "</label>").join(""));
+  document.getElementById("abrir-zip").addEventListener("click", () => janela.showModal());
+  document.getElementById("baixar-zip").addEventListener("click", () => {
+    const n = janela.querySelectorAll("#zip-empresas input:checked").length;
+    const d = document.getElementById("data-zip").value;
+    janela.close();
+    window.protoAviso(n === 0 ? "Marque ao menos uma empresa." : "Baixaria " + (n === 1 ? "1 ZIP" : n + " ZIPs") + " com as certidões vigentes em " + D.data(d) + ".");
+  });
+
+  const entrada = document.getElementById("arquivos");
+  const fila = D.montarFila({ zona: document.getElementById("zona"), lista: document.getElementById("fila"), entrada });
+  document.getElementById("escolher").addEventListener("click", () => fila.escolher(null));
+})();
+</script>
+</body></html>

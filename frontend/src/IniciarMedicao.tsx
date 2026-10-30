@@ -3,6 +3,7 @@ import CampoCompetencia from "./CampoCompetencia";
 import { IconeAlerta } from "./icones";
 import { filtrarObras, porContratante, type ObraResumo, type SerieObra } from "./resumoMedicoes";
 import { ir } from "./rota";
+import Selo from "./Selo";
 import { fmtCompetencia } from "./tempo";
 
 // "Iniciar processo de medição" (redesenho #151, protótipo aprovado em 15/10/2026, prototipos/iniciar/): escolher a
@@ -33,9 +34,6 @@ function mesSeguinte(aaaaMm: string): string {
   return mes === 12 ? `${Number(m[1]) + 1}-01` : `${m[1]}-${String(mes + 1).padStart(2, "0")}`;
 }
 
-/** O passo vem do servidor em minuscula ("enviar nota"); na linha da obra ele abre a frase ("Enviar nota"). */
-const maiuscula = (t: string | null) => (t ? t.charAt(0).toLocaleUpperCase("pt-BR") + t.slice(1) : "");
-
 const lerSerie = (o: ObraResumo, tipo: Tipo): SerieObra | null => (tipo === "projeto" ? o.projeto : o);
 
 function Icone({ d, className = "icone icone--p" }: { d: string; className?: string }) {
@@ -43,23 +41,18 @@ function Icone({ d, className = "icone icone--p" }: { d: string; className?: str
     strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>;
 }
 
+/** Segunda linha da obra: o órgão e, só quando acontece, o estado como selo (texto-na-tela, 26/10/2026). */
 function SubObra({ o }: { o: ObraResumo }) {
-  const partes: React.ReactNode[] = [];
-  if (o.orgao_sub) partes.push(o.orgao_sub);
-  if (o.aberta_numero !== null) {
-    partes.push(<span key="a" className="iniciar__sub--andamento">{o.aberta_numero}ª em andamento: {maiuscula(o.aberta_passo)}</span>);
-  } else if (o.prevista_id !== null) {
-    partes.push(<span key="p" className="iniciar__sub--prevista">
-      Prevista pelo cronograma: {o.prevista_numero}ª · {fmtCompetencia(o.prevista_competencia)}</span>);
-  }
-  if (o.projeto) {
-    partes.push(o.projeto.aberta_numero !== null
-      ? <span key="j" className="iniciar__sub--andamento">{o.projeto.aberta_numero}ª de Projeto em andamento</span>
-      : "tem série de Projeto");
-  }
+  const andamento = o.aberta_numero !== null;
+  const prevista = !andamento && o.prevista_id !== null;
+  const projetoAndamento = o.projeto?.aberta_numero != null;
+  if (!o.orgao_sub && !andamento && !prevista && !projetoAndamento) return null;
   return (
     <span className="iniciar__obra-sub">
-      {partes.map((p, i) => <span key={i}>{i > 0 && " · "}{p}</span>)}
+      {o.orgao_sub}
+      {andamento && <Selo classe="selo--atencao">Em andamento</Selo>}
+      {prevista && <Selo>Prevista</Selo>}
+      {projetoAndamento && <Selo classe="selo--atencao">Projeto em andamento</Selo>}
     </span>
   );
 }
@@ -107,7 +100,7 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
     const cancelar = <button type="button" className="btn" onClick={fechar}>Cancelar</button>;
     const escolhaTipo = o.projeto && (
       <fieldset className="iniciar__tipo-grupo">
-        <legend className="iniciar__nota">Esta obra tem duas séries de medição</legend>
+        <legend className="iniciar__rotulo">Série da medição</legend>
         <div className="iniciar__tipo">
           {([["execucao", "Execução"], ["projeto", "Projeto"]] as const).map(([v, rotulo]) => (
             <label key={v}><input type="radio" name="iniciar-tipo" value={v} checked={tipo === v} onChange={() => trocarTipo(o, v)} />{rotulo}</label>
@@ -119,7 +112,7 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
     if (serie.aberta_id !== null) {
       return <>{escolhaTipo}
         <div className="iniciar__aviso iniciar__aviso--atencao" role="status"><IconeAlerta className="icone icone--p" />
-          <span>{o.obra} já tem a {serie.aberta_numero}ª{de} em andamento ({(serie.aberta_passo ?? "").toLowerCase()}). Continue nela em vez de começar outra.</span></div>
+          <span>{o.obra} já tem a {serie.aberta_numero}ª{de} em andamento ({(serie.aberta_passo ?? "").toLowerCase()}).</span></div>
         <div className="iniciar__botoes">{cancelar}
           <button type="button" className="btn btn--primario" onClick={() => ir_({ tela: "medicao", obra: o.contrato_id, id: serie.aberta_id as number })}>
             Abrir a {serie.aberta_numero}ª medição{de}</button></div></>;
@@ -127,7 +120,7 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
     if (serie.prevista_id !== null) {
       return <>{escolhaTipo}
         <div className="iniciar__aviso iniciar__aviso--info" role="status"><Icone d="M12 11v5M12 8h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
-          <span>{o.obra} tem a {serie.prevista_numero}ª{de} prevista pelo cronograma ({fmtCompetencia(serie.prevista_competencia)}). O processo começa por ela, sem criar outra medição.</span></div>
+          <span>{o.obra} tem a {serie.prevista_numero}ª{de} prevista pelo cronograma ({fmtCompetencia(serie.prevista_competencia)}).</span></div>
         <div className="iniciar__campos">
           <label className="iniciar__campo"><span>Nº da medição</span><input name="iniciar-numero-prevista" autoComplete="off" spellCheck={false} value={serie.prevista_numero ?? ""} readOnly /></label>
           <label className="iniciar__campo"><span>Competência</span><input value={porExtenso(serie.prevista_competencia)} readOnly /></label>
@@ -136,12 +129,8 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
           <button type="button" className="btn btn--primario" onClick={() => ir_({ tela: "medicao", obra: o.contrato_id, id: serie.prevista_id as number })}>
             Começar a {serie.prevista_numero}ª{de} pelo espelho</button></div></>;
     }
-    const u = serie.ultima;
     const pronto = /^[1-9][0-9]{0,2}$/.test(numero) && competencia !== "";
     return <>{escolhaTipo}
-      <p className="iniciar__nota">{u
-        ? <>Sugestão: a próxima depois da {u.numero}ª{de} ({fmtCompetencia(u.competencia)}). Mude se precisar.</>
-        : <>Esta obra ainda não tem medição{de} lançada. Informe o número e a competência.</>}</p>
       <div className="iniciar__campos">
         <label className="iniciar__campo" htmlFor="iniciar-numero"><span>Nº da medição{de}</span>
           <input id="iniciar-numero" name="iniciar-numero" inputMode="numeric" autoComplete="off" spellCheck={false} value={numero}
@@ -156,15 +145,12 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
   }
 
   return (
-    <dialog ref={janela} className="iniciar" aria-labelledby="iniciar-titulo" aria-describedby="iniciar-dica" onClose={aoFechar}
+    <dialog ref={janela} className="iniciar" aria-labelledby="iniciar-titulo" onClose={aoFechar}
       // clique no fundo (fora da caixa) fecha, como numa janela comum
       onClick={ev => { if (ev.target === ev.currentTarget) fechar(); }}>
       <div className="iniciar__caixa">
         <div className="iniciar__cabeca">
-          <div>
-            <h2 id="iniciar-titulo" className="iniciar__titulo">Iniciar processo de medição</h2>
-            <p id="iniciar-dica" className="iniciar__dica">Escolha a obra. A medição começa pelo espelho.</p>
-          </div>
+          <h2 id="iniciar-titulo" className="iniciar__titulo">Iniciar processo de medição</h2>
           <button type="button" className="iniciar__fechar" aria-label="Fechar" onClick={fechar}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
               strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -182,7 +168,6 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
                   <input type="radio" name="iniciar-obra" checked={escolhida === o.contrato_id} onChange={() => escolher(o)} />
                   <span>
                     <span className="iniciar__obra-nome">{o.obra}</span>
-                    {o.ultima && <span className="iniciar__obra-ult"> · última: {o.ultima.numero}ª · {fmtCompetencia(o.ultima.competencia)}</span>}
                     <SubObra o={o} />
                   </span>
                 </label>
@@ -192,7 +177,6 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
         </div>
         <div className="iniciar__rodape">
           {obra ? rodape(obra) : <>
-            <p className="iniciar__nota">Obra com medição em andamento abre a medição; com medição prevista, começa por ela.</p>
             <div className="iniciar__botoes"><button type="button" className="btn" onClick={fechar}>Cancelar</button>
               <button type="button" className="btn btn--primario" disabled>Escolha uma obra</button></div></>}
         </div>

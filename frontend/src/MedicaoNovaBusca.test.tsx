@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Usuario } from "./Login";
-import NovaMedicao from "./NovaMedicao";
+import MedicaoNova from "./MedicaoNova";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
@@ -13,11 +13,11 @@ const REGRA = { situacao: "ativa", saidas: 4, entradas: [
 
 function montar(busca: Record<string, string>) {
   api.mockImplementation(async (caminho: string) => caminho.includes("/cabecalho")
-    ? { obra: "Obra Teste", orgao: "SINFRA" } : { regra: REGRA, espelhos: [] });
-  render(<NovaMedicao contratoId={4} usuario={usuario} busca={busca} />);
+    ? { obra: "Obra Teste", orgao: "SINFRA", instrumento: "CT 1/2026", percentual_lotufo_bp: 10000 } : { regra: REGRA, espelhos: [] });
+  render(<MedicaoNova contratoId={4} usuario={usuario} origem={null} busca={busca} />);
 }
 
-describe("Nova medição: número e competência vindos da janela Iniciar processo (#151)", () => {
+describe("Medição nova: número e competência vindos da janela Iniciar processo (#151)", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
   it("?numero=15&competencia=2027-01 abre o formulário preenchido", async () => {
@@ -36,7 +36,7 @@ describe("Nova medição: número e competência vindos da janela Iniciar proces
   it("tipo=projeto: título e número de Projeto, só os valores de Projeto", async () => {
     montar({ numero: "3", competencia: "2026-09", tipo: "projeto" });
     expect((await screen.findByLabelText("Nº da medição de Projeto") as HTMLInputElement).value).toBe("3");
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Nova medição de Projeto");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Nova medição de Projeto");
     expect(screen.getByLabelText("Valor do projeto")).toBeTruthy();
     expect(screen.queryByLabelText("Valor da medição")).toBeNull();
   });

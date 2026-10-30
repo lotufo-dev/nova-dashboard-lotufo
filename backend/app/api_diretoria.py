@@ -17,6 +17,11 @@ def painel(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Conne
     return diretoria.painel(conn)
 
 
+@router.get("/api/a-receber")
+def a_receber(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    return diretoria.a_receber(conn)
+
+
 @router.get("/api/diretoria/qdop.xlsx")
 def qdop_xlsx(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
     try:

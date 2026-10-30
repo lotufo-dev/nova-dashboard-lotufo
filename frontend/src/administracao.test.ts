@@ -101,22 +101,26 @@ describe("administração", () => {
     const acoes = ["aditivo.assinar", "aditivo.atualizar", "aditivo.cancelar", "aditivo.carga", "aditivo.criar", "auth.login",
       "auth.login_falha", "auth.logout", "cadastro.aplicar", "cadastro.consorciadas", "cadastro.contrato", "cadastro.datas_base",
       "cadastro.entidade", "cadastro.espelho", "cadastro.fiscal", "cadastro.geral", "cadastro.instrumento", "cadastro.orgao",
-      "cadastro.pleito", "certidao.marcar_estado", "certidao.nao_se_aplica", "certidao.registrar", "certidao_tipo.criar",
+      "cadastro.pleito", "cadastro.cronograma", "certidao.marcar_estado", "certidao.nao_se_aplica", "certidao.registrar", "certidao_tipo.criar",
       "contrato.atualizar", "contrato.criar", "contrato.encerramento", "contrato.mudar_estado", "correio.assinatura",
       "correio.envio", "cronograma.nova_versao", "entidade.coligada_rm", "entidade.criar", "entidade.desativar", "envio.liberar",
       "espelho.enviar", "espelho.gerar", "frc.gerar", "medicao.criar", "medicao.documento", "medicao.estado",
-      "medicao.faturada_legado", "medicao.final", "medicao.numero_orgao", "medicao.protocolo", "medicao.remover_teste",
+      "medicao.faturada_legado", "medicao.final", "medicao.numero_orgao", "medicao.protocolo", "medicao.recebida_com_diferenca",
+      "medicao.remover_teste",
       "medicao.valor_atestado", "medicao.valor_protocolado", "nf.alocar", "nf.desalocar", "nota.conferencia", "nota.confirmacao",
       "nota.justificar", "nota.manual", "notas.envio_externo", "pleito.anexo", "pleito.anexo_removido", "pleito.assinado",
       "pleito.criar", "pleito.descartar", "pleito.enviar", "pleito.montar", "protocolo.assinado", "protocolo.criar",
       "protocolo.descartar", "protocolo.enviar", "protocolo.link", "protocolo.link_removido", "protocolo.montar",
-      "protocolo.numero_orgao", "protocolo.peca", "protocolo.peca_removida", "regularidade.competencia_corrigida",
-      "regularidade.registrar", "rm.sincronizacao", "usuario.atualizar", "usuario.criar", "usuario.desbloquear",
+      "protocolo.numero_orgao", "protocolo.peca", "protocolo.peca_removida", "protocolo.siga", "regularidade.competencia_corrigida",
+      "regularidade.registrar", "rm.sincronizacao", "siga.vinculo", "usuario.atualizar", "usuario.criar", "usuario.desbloquear",
       "usuario.senha_redefinida", "usuario.senha_trocada"];
     expect(acoes.filter(a => /[._]/.test(rotuloAcao(a)) || rotuloAcao(a) === a)).toEqual([]);
     expect(rotuloAcao("frc.gerar")).toBe("FRC gerada");
     expect(rotuloAcao("medicao.valor_atestado")).toBe("Atestado alterado");
     expect(rotuloAcao("envio.liberar")).toBe("Envio liberado à mão");
+    expect(rotuloAcao("siga.vinculo")).toBe("Processo do SIGA ligado ao protocolo ou à medição");   // #327, #328
+    expect(rotuloAcao("protocolo.siga")).toBe("Link do SIGA registrado");
+    expect(rotuloAcao("medicao.recebida_com_diferenca")).toBe("Recebida com diferença dentro da tolerância");   // #35
     expect(rotuloAcao("algo.novo_aqui")).toBe("Algo novo aqui");
   });
 

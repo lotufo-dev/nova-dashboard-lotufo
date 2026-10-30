@@ -1,4 +1,4 @@
-"""Garantia (com validade) e ART (sem validade) como documentos do contrato: issue #65, decisao de 15/10/2026."""
+"""Garantia (com validade) como documento do contrato: issue #65, decisao de 15/10/2026 (a ART saiu na #239)."""
 import datetime
 import json
 
@@ -19,8 +19,8 @@ def cenario(tmp_path, monkeypatch):
     c.execute("INSERT INTO orgaos (chave, nome, familia, regras) VALUES ('sinfra-x', 'SINFRA X', 'sinfra', ?)",
               (json.dumps({"vigencia_automatica": True, "documentos_medicao": [], "documentos_reajuste": []}),))
     c.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos, "
-              "orgao_id, execucao_fim, vigencia_fim, art_arquivo) VALUES ('SINFRA', 'IC 1/2026', 'Obra A', 'obra', 100, "
-              "(SELECT id FROM orgaos WHERE chave='sinfra-x'), '2027-12-20', '2028-01-30', 'anexos/art.pdf')")
+              "orgao_id, execucao_fim, vigencia_fim) VALUES ('SINFRA', 'IC 1/2026', 'Obra A', 'obra', 100, "
+              "(SELECT id FROM orgaos WHERE chave='sinfra-x'), '2027-12-20', '2028-01-30')")
     cid = c.execute("SELECT MAX(id) FROM contratos").fetchone()[0]
     c.commit()
 
@@ -97,29 +97,20 @@ def test_sem_data_de_garantia_no_cadastro_nao_avisa(cenario):
     assert garantias.garantia(c, ids["contrato"], HOJE) is None and _g(c) == []
 
 
-def test_art_nao_anexada_e_so_aviso_de_ausencia_sem_validade(cenario):
+def test_art_nao_gera_aviso_nem_existe_mais_no_modulo(cenario):
     c, ids = cenario
-    arts = lambda: [a for a in avisos.listar(c, HOJE) if a["tipo"] == "art_nao_anexada"]   # noqa: E731
-    assert arts() == []                                               # com PDF: nada, e nunca vence
-    assert arts() == [] and avisos.listar(c, D(2030, 1, 1)) is not None
-    c.execute("UPDATE contratos SET art_arquivo=NULL"); c.commit()
-    (a,) = arts()
-    assert (a["nivel"], a["dias"], a["data"], a["publico"], a["mensagem"]) == \
-        ("atencao", None, None, ["operacao"], "ART não anexada")
-    assert a["destino"] == {"tela": "documentos"}
-    c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-09-01'"); c.commit()
-    assert arts() == []                                               # em encerramento a ART nao cobra mais
+    assert not hasattr(garantias, "art")
+    assert [a for a in avisos.listar(c, HOJE) if a["tipo"] == "art_nao_anexada"] == []
+    assert [a for a in garantias.avisos(c, HOJE) if a["tipo"] == "art_nao_anexada"] == []
 
 
-def test_painel_de_documentos_traz_garantia_e_art_por_contrato(cenario):
+def test_painel_de_documentos_traz_garantia_por_contrato(cenario):
     c, ids = cenario
     ids["garantia"]("2026-11-01")
     (o,) = documentos.painel(c, HOJE)["contratos"]
     assert o["contrato_id"] == ids["contrato"] and o["obra"] == "Obra A"
     assert (o["garantia"]["situacao"], o["garantia"]["dias"], o["garantia"]["apolice"]) == ("vencendo", 17, "AP-1")
-    assert o["art"] == {"numero": None, "anexada": True, "exigida": True}
-    c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-09-01'"); c.commit()
-    assert documentos.painel(c, HOJE)["contratos"][0]["art"]["exigida"] is False      # painel e aviso concordam
+    assert "art" not in o
 
 
 def test_correcao_de_endosso_vale_mesmo_com_data_anterior(cenario):
@@ -176,3 +167,77 @@ def test_endosso_de_outra_apolice_nao_conta(cenario):
     ids["garantia"]("2026-12-01")
     ids["instrumento"]("endosso_garantia", "2026-09-01", {"apolice": "AP-0", "vigencia_fim": "2027-06-01"}, "end-x")
     assert garantias.garantia(c, ids["contrato"], HOJE)["origem"] == "contrato"
+
+
+# --- issue #294: a garantia cobre o fim de execucao vigente + folga do orgao (D10, 20/10/2026) ---
+
+def _aq(c, hoje=HOJE):
+    return [a for a in avisos.listar(c, hoje, publico="todos") if a["tipo"] == "garantia_aquem_execucao"]
+
+
+def _aditivo_prazo(c, cid, nova_exec, assinatura="2026-10-10"):
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, nova_execucao_fim) "
+              "VALUES (?, 'prazo', 'assinado', ?, ?)", (cid, assinatura, nova_exec))
+    c.commit()
+
+
+def test_prazo_prorrogado_alem_da_garantia_pede_endosso_ate_o_novo_fim_mais_a_folga(cenario):
+    c, ids = cenario
+    ids["garantia"]("2027-12-20")                                   # cobre a execucao original (2027-12-20)
+    assert _aq(c) == []
+    _aditivo_prazo(c, ids["contrato"], "2028-06-30")                # prorrogou alem da garantia
+    (a,) = _aq(c)
+    assert "Endosso necessário até 30/06/2028" in a["mensagem"]
+    assert a["obra"] == "Obra A" and a["publico"] == ["operacao", "diretoria"]
+    assert a["nivel"] == "acao" and a["data"] == "2028-06-30"
+
+
+def test_folga_do_orgao_entra_na_conta(cenario):
+    c, ids = cenario
+    c.execute("UPDATE orgaos SET regras=?", (json.dumps({"folga_vigencia_dias": 90}),)); c.commit()
+    ids["garantia"]("2028-02-01")                                   # cobre 20/12/2027 mas nao +90 (19/03/2028)
+    (a,) = _aq(c)
+    assert "19/03/2028" in a["mensagem"]
+    ids["garantia"]("2028-03-19")                                   # cobre exatamente o fim + folga
+    assert _aq(c) == []
+
+
+def test_folga_propria_do_contrato_vale_mais_que_a_do_orgao(cenario):
+    c, ids = cenario
+    c.execute("UPDATE orgaos SET regras=?", (json.dumps({"folga_vigencia_dias": 90}),))
+    c.execute("UPDATE contratos SET folga_vigencia_dias=10"); c.commit()
+    ids["garantia"]("2027-12-30")                                   # 20/12/2027 + 10
+    assert _aq(c) == []
+    ids["garantia"]("2027-12-29")
+    assert "30/12/2027" in _aq(c)[0]["mensagem"]
+
+
+def test_endosso_com_vigencia_suficiente_faz_o_aviso_sumir(cenario):
+    c, ids = cenario
+    ids["garantia"]("2027-12-20")
+    _aditivo_prazo(c, ids["contrato"], "2028-06-30")
+    assert len(_aq(c)) == 1
+    ids["instrumento"]("endosso_garantia", "2026-10-12", {"apolice": "AP-1", "vigencia_fim": "2028-06-29"}, "end-1")
+    assert len(_aq(c)) == 1                                         # ainda um dia aquem
+    ids["instrumento"]("endosso_garantia", "2026-10-13", {"apolice": "AP-1", "vigencia_fim": "2028-06-30"}, "end-2")
+    assert _aq(c) == []
+
+
+def test_garantia_que_cobre_fim_mais_folga_nao_avisa_e_sem_garantia_ou_baixada_tambem_nao(cenario):
+    c, ids = cenario
+    assert _aq(c) == []                                             # sem data de garantia no cadastro
+    ids["garantia"]("2028-12-31")
+    assert _aq(c) == []
+    ids["garantia"]("2027-01-01")
+    assert len(_aq(c)) == 1
+    ids["instrumento"]("marco_encerramento", "2026-10-01", {"marco": "baixa_garantia"}, "baixa")
+    assert _aq(c) == []
+
+
+def test_aviso_de_cobertura_vira_critico_depois_da_data_e_nao_vale_em_encerramento(cenario):
+    c, ids = cenario
+    ids["garantia"]("2027-06-01")
+    assert [a["nivel"] for a in _aq(c, D(2027, 12, 21))] == ["critico"]
+    assert [a["nivel"] for a in _aq(c)] == ["acao"]
+    c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-09-01'"); c.commit()
+    assert _aq(c) == []

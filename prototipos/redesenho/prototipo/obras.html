@@ -1,0 +1,67 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Obras · Contratantes</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="proto-obras.css">
+</head>
+<body data-secao="obras" data-titulo="Obras">
+<main id="conteudo">
+  <header class="topbar topbar--detalhe">
+    <div class="topbar__trilha">
+      <nav class="migalhas" aria-label="Caminho"><ol><li><a href="index.html">Início</a></li><li aria-current="page"><span>Obras</span></li></ol></nav>
+    </div>
+    <div class="topbar__linha topbar__linha--quebra">
+      <h1 class="topbar__titulo topbar__titulo--grande">Contratantes</h1>
+      <span class="topbar__meta" id="meta"></span>
+      <div class="topbar__acoes"><a class="btn btn--pequeno" id="avisos-todos" href="obras-lista.html?avisos=1"></a></div>
+    </div>
+  </header>
+  <div class="pagina">
+    <ul class="contratantes" id="lista" aria-label="Escolha o contratante"></ul>
+    <p class="resumo-nota" id="nota"></p>
+  </div>
+</main>
+<script src="shell.js"></script>
+<script src="proto-obras-dados.js"></script>
+<script>
+(function () {
+  const { CONTRATANTES, OBRAS, NIVEL, resumo, avisos } = DADOS, { brl } = FMT;
+  const chevron = '<svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function linha(nome, r, href, todas) {
+    const plural = r.obras === 1 ? "obra" : "obras";
+    const enc = r.encerradas ? ' <span class="campo__nota">· ' + r.encerradas + (r.encerradas === 1 ? " encerrada" : " encerradas") + "</span>" : "";
+    let av = '<span class="campo__nota">sem avisos</span>';
+    if (r.comAviso) {
+      const n = NIVEL[r.nivelMax];
+      av = '<span class="ponto ponto--' + r.nivelMax + '" aria-hidden="true"></span><span><span class="texto--' + r.nivelMax + '">'
+        + r.comAviso + " com aviso</span>"
+        + (r.criticos ? '<span class="campo__nota">' + r.criticos + (r.criticos === 1 ? " crítico" : " críticos") + "</span>" : '<span class="campo__nota">o mais grave: ' + n.rotulo.toLowerCase() + "</span>")
+        + "</span>";
+    }
+    return '<li><a class="cartao contratante' + (todas ? " contratante--todas" : "") + '" href="' + href + '">'
+      + '<div><p class="contratante__nome">' + esc(nome) + '</p><span class="contratante__obras num">' + r.obras + " " + plural + "</span>" + enc + "</div>"
+      + '<div class="contratante__exec"><div class="contratante__pct"><strong>' + r.pct + '%</strong><span>executado</span></div>'
+      + '<div class="progresso" role="img" aria-label="' + r.pct + '% executado"><span class="progresso__barra" style="width:' + r.pct + '%"></span></div></div>'
+      + '<div class="contratante__saldo"><span class="contratante__rotulo">Saldo a executar</span><span class="contratante__valor">' + brl(r.saldo) + "</span></div>"
+      + '<div class="contratante__avisos">' + av + "</div>"
+      + chevron + "</a></li>";
+  }
+
+  const total = resumo(OBRAS);
+  let html = linha("Todas as obras", total, "obras-lista.html", true);
+  for (const c of CONTRATANTES) html += linha(c.nome, resumo(OBRAS.filter(o => o.c === c.id)), "obras-lista.html?c=" + c.id, false);
+  document.getElementById("lista").innerHTML = html;
+
+  // conferencia: a linha "Todas" e' a soma das outras (saldo e obras)
+  const partes = CONTRATANTES.map(c => resumo(OBRAS.filter(o => o.c === c.id)));
+  console.assert(partes.reduce((a, r) => a + r.saldo, 0) === total.saldo, "saldo de Todas diferente da soma");
+  console.assert(partes.reduce((a, r) => a + r.obras, 0) === total.obras, "obras de Todas diferente da soma");
+
+  document.getElementById("meta").textContent = CONTRATANTES.length + " contratantes · " + total.obras + " obras em andamento";
+  const nAv = avisos().length;
+  document.getElementById("avisos-todos").textContent = "Avisos (" + nAv + ")";
+  document.getElementById("nota").textContent = "Valores cheios do contrato, sem as obras encerradas. Executado = medido (execução) ÷ valor vigente; saldo a executar = valor vigente − medido (execução). Valor vigente somado: " + brl(total.vig) + ".";
+})();
+</script>
+</body></html>
