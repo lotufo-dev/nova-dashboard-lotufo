@@ -108,9 +108,9 @@ const EU_DIRETORIA = { id: 3, nome: "Diretor", email: "dir@lotufo.com", perfil: 
 describe("MinhaConta › diretoria", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("sem e-mail, a frase do e-mail de login não aparece (gate Sol S6)", () => {
+  it("sem e-mail, a linha do e-mail de login não aparece (gate Sol S6)", () => {
     render(<MinhaConta usuario={{ ...EU_DIRETORIA, email: "" }} />);
-    expect(screen.queryByText(/Você entra com o e-mail/)).toBeNull();
+    expect(screen.queryByText(/E-mail:/)).toBeNull();
     expect(screen.getByRole("button", { name: "Trocar senha" })).toBeTruthy();
   });
 
@@ -121,6 +121,8 @@ describe("MinhaConta › diretoria", () => {
     expect(screen.getByRole("button", { name: "Trocar senha" })).toBeTruthy();
     expect(screen.queryByText("Conta Microsoft")).toBeNull();
     expect(screen.queryByText("Assinatura de e-mail")).toBeNull();
+    // sem a explicação de que a diretoria não manda e-mail
+    expect(screen.queryByText(/não manda e-mail/)).toBeNull();
   });
 });
 
@@ -134,15 +136,17 @@ describe("MinhaConta › redesenho", () => {
     api.mockResolvedValue(status());
     render(<MinhaConta usuario={ENG} />);
     await screen.findByText("Não conectada");
-    expect(screen.getByText("maria@lotufo.com")).toBeTruthy();
-    expect(screen.getByText(/Perfil: Engenharia/)).toBeTruthy();
+    expect(screen.getByText("maria@lotufo.com").closest("p")?.textContent).toBe("E-mail: maria@lotufo.com");
+    expect(screen.getByText("Engenharia").closest("p")?.textContent).toBe("Perfil: Engenharia");
+    // sem as frases de regra da conta Microsoft e da assinatura
+    expect(document.body.textContent).not.toMatch(/saem da sua própria caixa|sugestões de contatos|vai no fim de todo e-mail|confere sozinha|Nenhuma assinatura cadastrada/);
     const titulos = screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent);
     expect(titulos).toEqual(["Sua conta", "Trocar senha", "Conta Microsoft", "Assinatura de e-mail"]);
   });
 
   it("diretoria vê o perfil em Sua conta", () => {
     render(<MinhaConta usuario={EU_DIRETORIA} />);
-    expect(screen.getByText(/Perfil: Diretoria/)).toBeTruthy();
+    expect(screen.getByText("Diretoria").closest("p")?.textContent).toBe("Perfil: Diretoria");
   });
 
   it("campos vazios mostram um erro embaixo de cada um e não chamam a API", async () => {
@@ -158,12 +162,13 @@ describe("MinhaConta › redesenho", () => {
     expect(api).not.toHaveBeenCalled();
   });
 
-  it("senha nova curta diz quantos caracteres tem, e o contador acompanha a digitação", async () => {
+  it("senha nova curta: sem contador nem placeholder; o erro diz quantos caracteres tem", async () => {
     api.mockResolvedValue(status());
     render(<MinhaConta usuario={ENG} />);
     await screen.findByText("Não conectada");
+    expect(screen.getByLabelText(/^Senha nova/).getAttribute("placeholder")).toBeNull();
     fireEvent.change(screen.getByLabelText(/^Senha nova/), { target: { value: "curta" } });
-    expect(screen.getByText("5 de 10 caracteres")).toBeTruthy();
+    expect(screen.queryByText(/\d+ de 10 caracteres/)).toBeNull();
     fireEvent.change(screen.getByLabelText("Senha atual"), { target: { value: "velha-123456" } });
     fireEvent.change(screen.getByLabelText("Confirmar a senha nova"), { target: { value: "curta" } });
     fireEvent.click(screen.getByRole("button", { name: "Trocar senha" }));

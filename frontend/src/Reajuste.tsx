@@ -80,31 +80,25 @@ const SITUACAO: Record<Ciclo["situacao"], { rotulo: string; classe: string; fort
   apostilado: { rotulo: "apostilado", classe: "selo--ok" },
 };
 
-// espaco nao separavel: "3 dias" nao quebra no meio da linha do ciclo
+// espaco nao separavel: "3 dias" nao quebra no meio do selo
 function dias(n: number): string {
   return `${n}\u00a0${n === 1 ? "dia" : "dias"}`;
 }
 
-/** A linha do ciclo: o ano, o aniversario e, com os dias do servidor, ha quanto tempo ou em quanto tempo. */
+/** A linha do ciclo: o ano e o aniversario (quanto falta ou quanto passou nao se escreve; o atraso esta' no selo). */
 function linhaDoCiclo(c: Ciclo): string {
-  const aniv = fmtDataPura(c.aniversario);
-  const quando = c.dias === null ? `aniversário em ${aniv}`
-    : c.situacao === "apostilamento_pendente" ? `aniversário em ${aniv} · pleito enviado há ${dias(c.dias)}`
-    : c.dias >= 0 ? `faz aniversário em ${aniv} (faltam ${dias(c.dias)})`
-    : `fez aniversário em ${aniv} (há ${dias(-c.dias)})`;
-  return `Ciclo de ${c.ciclo} · ${quando}`;
+  return `Ciclo de ${c.ciclo} · aniversário em ${fmtDataPura(c.aniversario)}`;
 }
 
+/** O apostilamento: numero, data e o percentual concedido. */
 function textoApostilamento(i: InstrumentoCadastro): string {
   const pct = i.dados.percentual;
-  const eficacia = typeof i.dados.eficacia === "string" ? i.dados.eficacia : null;
   return [`${i.numero ?? "s/n"}, de ${fmtDataPura(i.data)}`,
-          pct !== undefined && pct !== null ? fmtPercentual(Number(pct) / 100) : "",
-          eficacia ? `eficácia ${fmtDataPura(eficacia.slice(0, 10))}` : ""].filter(Boolean).join(" · ");
+          pct !== undefined && pct !== null ? fmtPercentual(Number(pct) / 100) : ""].filter(Boolean).join(" · ");
 }
 
 /** O desfecho de um pleito enviado (F-71): com o ciclo corrente, o selo diz se o apostilamento veio (Em dia) ou
- *  se falta (Atencao, com os dias que o servidor conta); a data do envio e' texto de apoio. Sem o ciclo (ciclo
+ *  se falta (Atencao, com os dias que o servidor conta); embaixo, so' a data do envio. Sem o ciclo (ciclo
  *  anterior, data-base que saiu do cadastro), o dado nao diz o desfecho: selo neutro. */
 function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: Ciclo): DesfechoPleito {
   const envio = partesDoEnvio(p);
@@ -124,8 +118,7 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
       texto: c.dias !== null && c.dias >= 0 ? `sem apostilamento há ${dias(c.dias)}` : "sem apostilamento ainda" };
   }
   if (c.situacao === "apostilado" && c.apostilamento) {
-    return { classe: "selo--ok", texto: `atendido pelo apostilamento ${c.apostilamento.numero ?? "s/n"}`,
-      partes: [...envio, `apostilamento de ${fmtDataPura(c.apostilamento.data)}`] };
+    return { classe: "selo--ok", texto: `atendido pelo apostilamento ${c.apostilamento.numero ?? "s/n"}`, partes: envio };
   }
   return neutro;
 }
@@ -157,11 +150,10 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
   if (!dados) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
   if (dados.ciclos.length === 0 && dados.pleitos.length === 0 && apostilamentos.length === 0) {
-    return <section className="cartao"><div className="vazio vazio--curto"><p>Sem data-base no cadastro, ou contrato sem reajuste.</p></div></section>;
+    return <section className="cartao"><div className="vazio vazio--curto"><p>Nenhuma data-base.</p></div></section>;
   }
   const { dataBases, semDataBase, outrosPleitos } = reajustePorDataBase(dados.ciclos, dados.pleitos, apostilamentos);
   const aqui = { tela: "obra" as const, id: contratoId, aba: "reajuste" as const };
-  const contrato = { tela: "obra" as const, id: contratoId, aba: "contrato" as const };
   // cada pleito e' uma secao do cartao pai (F-74): o enviado vira linha com o desfecho no selo; o que ainda se
   // trabalha segue no CartaoPleito, que traz o formulario
   const cartoes = (ps: Pleito[], ciclo?: Ciclo) => ps.map(p => {
@@ -170,7 +162,6 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
       ? <LinhaPleito key={p.id} p={p} desfecho={desfechoDoPleito(p, apostilamentos, ciclo)} contexto={contexto} />
       : <CartaoPleito key={p.id} p={p} podeEditar={podeEditar} aoMudar={() => void carregar()} contexto={contexto} />;
   });
-  const nota = "O reajuste vale a partir do mês do aniversário da data-base; o aviso começa 30 dias antes.";
 
   return (
     <div className="pilha">
@@ -179,7 +170,6 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         <section className="cartao" aria-labelledby="titulo-databases">
           <div className="cartao__cabeca">
             <h2 className="cartao__titulo" id="titulo-databases">Data-bases</h2>
-            <span className="cartao__dica">{nota}</span>
           </div>
           <ul className="lista-simples cartao__corpo indice-db">
             {dataBases.map(db => {
@@ -193,7 +183,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
             })}
           </ul>
         </section>
-      ) : <p className="campo__nota">{nota}</p>}
+      ) : null}
 
       {dataBases.map(db => {
         const c = db.atual;
@@ -246,10 +236,8 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
             <div className="cartao__corpo linhas">
               <p className="num">{linhaDoCiclo(c)}</p>
               {c.apostilamento && (
-                <p><span className="resumo__rotulo">Apostilamento</span>{" "}{textoApostilamento(c.apostilamento)}
-                  {" · "}<Link para={contrato} secao="instrumentos">ver em Contrato › Instrumentos</Link></p>
+                <p><span className="resumo__rotulo">Apostilamento</span>{" "}{textoApostilamento(c.apostilamento)}</p>
               )}
-              {c.situacao === "apostilamento_pendente" && <p className="campo__nota">Pleito enviado; falta o apostilamento, que entra pelo cadastro.</p>}
               {apostiladas.length > 0 && <TabelaApostilada dataBase={db.data_base_mes} linhas={apostiladas} />}
             </div>
             {(formAberto || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
@@ -280,9 +268,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
                 {cartoes(db.pleitosDoCiclo, c)}
                 {anteriores > 0 && (
                   <details className="detalhes pleito-anteriores">
-                    <summary>Ciclos anteriores: {[
-                      db.pleitosAnteriores.length ? `${db.pleitosAnteriores.length} ${db.pleitosAnteriores.length === 1 ? "pleito" : "pleitos"}` : "",
-                      outrosAp.length ? `${outrosAp.length} ${outrosAp.length === 1 ? "apostilamento" : "apostilamentos"}` : ""].filter(Boolean).join(" e ")}</summary>
+                    <summary>Ciclos anteriores</summary>
                     <div className="secoes-pleito">
                       {outrosAp.length > 0 && (
                         <section className="cartao__corpo" aria-label={`Apostilamentos anteriores da data-base ${mesAno(db.data_base_mes)}`}>
@@ -303,7 +289,6 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         <section className="cartao" aria-labelledby="titulo-apostilamentos-sem-base">
           <div className="cartao__cabeca">
             <h2 className="cartao__titulo" id="titulo-apostilamentos-sem-base">Apostilamentos sem data-base no cadastro</h2>
-            <span className="cartao__dica">Aparecem na data-base deles quando o cadastro trouxer a data-base.</span>
           </div>
           <ul className="lista-simples cartao__corpo">{semDataBase.map(i => <li key={i.id} className="num">{textoApostilamento(i)}</li>)}</ul>
         </section>

@@ -25,7 +25,9 @@ describe("Notas", () => {
     render(<Notas medicao={medicao} podeEditar aoMudar={() => {}} />);
     await waitFor(() => expect(screen.getByText(/Cuiabá/)).toBeTruthy());
     expect(screen.getAllByText(/719\.190,72/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/falta 1 nota/)).toBeTruthy();
+    expect(screen.getByText("Falta 1 nota")).toBeTruthy();
+    // sem nota ainda: a celula fica com o tracinho, sem "aguardando"
+    expect(screen.queryByText("aguardando")).toBeNull();
     expect(screen.queryByText(/Vincular nota do RM/)).toBeNull();
     // sem nota vinculada, declarar completas nao aparece
     expect(screen.queryByRole("button", { name: /Declarar completas/ })).toBeNull();
@@ -42,7 +44,7 @@ describe("Notas", () => {
       pode_declarar: false,
     });
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/notas completas/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Justificar" }));
     fireEvent.change(screen.getByLabelText(/Justificativa da divergência/), { target: { value: "Arredondamento do município" } });
     api.mockReturnValueOnce(new Promise(() => {}));   // a chamada nunca termina
@@ -69,9 +71,11 @@ describe("Notas", () => {
       pode_declarar: false,
     });
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/notas completas/)).toBeTruthy());
-    expect(screen.getByText(/aguardando o RM/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
+    expect(screen.getByText("aguardando o RM")).toBeTruthy();
     expect(screen.getByText(/diverge do espelho: ISS/)).toBeTruthy();
+    // notas completas: nenhum selo de falta nem frase de contagem
+    expect(screen.queryByText(/notas completas|Falta|Faltam/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Justificar" }));
     expect(screen.getByLabelText(/Justificativa da divergência/)).toBeTruthy();
   });
@@ -88,13 +92,15 @@ describe("Notas", () => {
       pode_declarar: false,
     });
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/notas completas/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
     const linha = screen.getByRole("table").querySelector("tbody tr")!;
     const destacadas = Array.from(linha.querySelectorAll("td.notas__celula--diverge"));
     expect(destacadas).toHaveLength(1);
     expect(destacadas[0].textContent).toContain("14.383,81");
     expect(destacadas[0].textContent).toMatch(/na nota.*14\.385,81/);
     expect(linha.querySelector(".notas__celula--diverge:not(td)")).toBeNull();     // municipio confere
+    // o arredondamento de 1 centavo nao vira frase
+    expect(screen.queryByText(/arredondamento de 1 centavo/)).toBeNull();
   });
 
   it("líquido divergente destaca a célula do Líquido e diz o nome do campo (revisão da PR #97)", async () => {
@@ -108,7 +114,7 @@ describe("Notas", () => {
       pode_declarar: false,
     });
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/notas completas/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
     const destacadas = Array.from(screen.getByRole("table").querySelectorAll("td.notas__celula--diverge"));
     expect(destacadas).toHaveLength(1);
     expect(destacadas[0].textContent).toMatch(/663\.527,23 no espelho; na nota .*663\.577,23/);
@@ -126,7 +132,7 @@ describe("Notas", () => {
       pode_declarar: false,
     });
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/notas completas/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
     expect(screen.getByRole("table").querySelectorAll(".notas__celula--diverge")).toHaveLength(0);
   });
 
@@ -141,7 +147,7 @@ describe("Notas", () => {
       pode_declarar: false,
     });
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/notas completas/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
     const linha = screen.getByRole("table").querySelector("tbody tr")!;
     expect(linha.querySelectorAll("td.notas__celula--diverge")).toHaveLength(0);
     const municipio = linha.querySelector("span.notas__celula--diverge")!;
@@ -213,8 +219,8 @@ describe("Notas: só o botão da ação em curso troca o rótulo", () => {
       <Notas medicao={medicao} rotulo="Execução · 27ª Medição" podeEditar aoMudar={() => {}} />
       <Notas medicao={reajuste} rotulo="Reajuste da 27ª Medição" podeEditar aoMudar={() => {}} />
     </>);
-    expect(await screen.findByText("Execução · 27ª Medição — falta 1 nota")).toBeTruthy();
-    expect(await screen.findByText("Reajuste da 27ª Medição — faltam 2 notas")).toBeTruthy();
+    expect(await screen.findByText("Falta 1 nota")).toBeTruthy();
+    expect(await screen.findByText("Faltam 2 notas")).toBeTruthy();
     const arquivo = new File(["x"], "nota.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText("Anexar notas: Reajuste da 27ª Medição"), { target: { files: [arquivo] } });
     await waitFor(() => expect(apiForm).toHaveBeenCalledWith("/api/medicoes/2/notas", expect.any(FormData)));
@@ -259,14 +265,16 @@ describe("Notas: valor da nota manual (CampoValor)", () => {
   it("sem ser admin, não oferece desfazer o vínculo da nota", async () => {
     api.mockResolvedValueOnce(COM_NOTA);
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/notas completas/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
     expect(screen.queryByRole("button", { name: /Desfazer vínculo/ })).toBeNull();
+    // a nota que confere nao leva "confere" ao lado
+    expect(screen.queryByText("confere")).toBeNull();
   });
 
   it("nota que veio do PDF anexado na medição não oferece desfazer o vínculo (o servidor recusa)", async () => {
     api.mockResolvedValueOnce({ ...COM_NOTA, notas: [{ ...COM_NOTA.notas[0], documento_id: 3, origem_nota: "pdf" }] });
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar podeDesfazer aoMudar={() => {}} />);
-    await waitFor(() => expect(screen.getByText(/notas completas/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
     expect(screen.queryByRole("button", { name: /Desfazer vínculo/ })).toBeNull();
   });
 

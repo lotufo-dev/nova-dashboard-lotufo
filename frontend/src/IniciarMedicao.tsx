@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { filtrarObras, porContratante, type ObraResumo } from "./resumoMedicoes";
 import { ir, type Rota } from "./rota";
 import { Link } from "./Link";
+import Selo from "./Selo";
 
 // "Iniciar processo de medição" (PROVISORIO, 09/10/2026, ate' o prototipo da janela): escolher a obra e ir para a
 // etapa 1. Obra com medicao `prevista` (criada pelo cronograma) abre a pagina DESSA medicao em vez de criar outra
@@ -31,15 +32,12 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
   const fechar = () => janela.current?.close();
 
   return (
-    <dialog ref={janela} className="iniciar" aria-labelledby="iniciar-titulo" aria-describedby="iniciar-dica" onClose={aoFechar}
+    <dialog ref={janela} className="iniciar" aria-labelledby="iniciar-titulo" onClose={aoFechar}
       // clique no fundo (fora da caixa) fecha, como numa janela comum
       onClick={ev => { if (ev.target === ev.currentTarget) fechar(); }}>
       <div className="iniciar__caixa">
         <div className="iniciar__cabeca">
-          <div>
-            <h2 id="iniciar-titulo" className="iniciar__titulo">Iniciar processo de medição</h2>
-            <p id="iniciar-dica" className="iniciar__dica">Escolha a obra</p>
-          </div>
+          <h2 id="iniciar-titulo" className="iniciar__titulo">Iniciar processo de medição</h2>
           <button type="button" className="iniciar__fechar" aria-label="Fechar" onClick={fechar}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
               strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -57,10 +55,8 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
                   <li key={o.contrato_id}>
                     <Link className="iniciar__obra" para={destino(o)} ir={(d, op) => { fechar(); ir(d, op); }}>
                       <span className="iniciar__obra-nome">{o.obra}</span>
-                      <span className="iniciar__obra-sub">
-                        {[o.orgao_sub, o.prevista_id !== null ? "medição prevista no cronograma" : o.aberta ? "já tem medição em andamento" : null]
-                          .filter(Boolean).join(" · ")}
-                      </span>
+                      {o.orgao_sub && <span className="iniciar__obra-sub">{o.orgao_sub}</span>}
+                      {o.prevista_id !== null ? <Selo>Prevista</Selo> : o.aberta ? <Selo>Em andamento</Selo> : null}
                     </Link>
                   </li>
                 ))}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  certidoesOrdenadas, colunas, matriz, pendenciaMaisUrgente, pendenciasDa, proximaAVencer, resumoEmpresa,
+  certidoesOrdenadas, colunas, matriz, pendenciaMaisUrgente, pendenciasDa, resumoEmpresa,
   situacaoCertidao, situacaoGarantia, type EmpresaDoc, type LinhaCertidao,
 } from "./matriz";
 
@@ -49,11 +49,6 @@ describe("redesenho de Documentos (#161)", () => {
       .toEqual({ texto: "Regularidade não anexada", nivel: "atencao", pendencias: 1 });
     // nao exigida e nao se aplica nao pesam
     expect(resumoEmpresa(e(1, [c("federal", "ok", 90), c("falencia", "faltando", null, false), c("municipal", "nao_se_aplica", null)])).texto).toBe("Em dia");
-  });
-
-  it("a próxima a vencer é a vigente exigida que vence primeiro; sem vigente, nada", () => {
-    expect(proximaAVencer(e(1, [c("federal", "ok", 90), c("fgts", "ok", 25), c("municipal", "vencida", null)]))!.chave).toBe("fgts");
-    expect(proximaAVencer(e(1, [c("federal", "vencida", null), c("fgts", "ok", 10, false)]))).toBeNull();
   });
 
   it("os pontos seguem a ordem do desenho e a pendência mais urgente leva o botão principal", () => {

@@ -36,8 +36,9 @@ describe("Medições com abas", () => {
     api.mockResolvedValue(RESUMO);
     render(<MedicoesPagina aba="resumo" busca={{}} usuario={usuario} />);
     const quadro = await screen.findByRole("region", { name: "Todas as obras" });
-    // A-21 (10/10/2026): a obra em encerramento nao conta como ativa; a legenda diz a base
-    expect(within(quadro).getByText("3 obras ativas · 1 em encerramento · 2 medições em andamento")).toBeTruthy();
+    // sem legenda de contagem ao lado do titulo (texto-na-tela, 26/10/2026)
+    expect(quadro.querySelector(".medicoes__legenda")).toBeNull();
+    expect(within(quadro).queryByText(/obras ativas|em andamento/)).toBeNull();
     // a medição abre na etapa pendente (enviar a nota = etapa 4)
     expect(within(quadro).getByRole("link", { name: "7ª Medição + Reajuste" }).getAttribute("href")).toBe("/obras/12/medicoes/70#etapa-4");
     // a segunda medição aberta da mesma obra não repete o nome como link
@@ -46,7 +47,8 @@ describe("Medições com abas", () => {
     // sem medição: grupos por contratante, o maior primeiro, fechados
     const grupos = quadro.querySelectorAll("details");
     expect([...grupos].map(d => d.querySelector("summary")?.textContent)).toEqual(
-      ["SINFRA2 obras sem medição aberta", "MTPAR1 obra sem medição aberta"]);
+      ["SINFRA", "MTPAR"]);
+    expect(quadro.querySelector(".medicoes__faixa")?.textContent).toBe("Sem medição aberta");
     expect([...grupos].every(d => !d.open)).toBe(true);
     // cartão leva à aba; a aba diz a contagem
     const cartoes = screen.getByRole("navigation", { name: "Medições por situação" });
@@ -103,6 +105,19 @@ describe("Medições com abas", () => {
     render(<MedicoesPagina aba="resumo" busca={{}} usuario={{ ...usuario, perfil: "diretoria" }} />);
     await screen.findByRole("region", { name: "Todas as obras" });
     expect(screen.queryByRole("button", { name: /Iniciar processo/ })).toBeNull();
+  });
+
+  it("abas Enviar nota e Aguardando pagamento sem parágrafo de descrição", async () => {
+    api.mockImplementation(async (c: string) => c.includes("a-enviar") ? { envios: [], contadores: {} }
+      : c.includes("aguardando") ? [] : RESUMO);
+    const { container, unmount } = render(<MedicoesPagina aba="enviar-nota" busca={{}} usuario={usuario} />);
+    await screen.findByText("Nenhuma nota a enviar.");
+    expect(container.querySelector(".pagina__descricao")).toBeNull();
+    expect(screen.queryByText(/juntos na SINFRA/)).toBeNull();
+    unmount();
+    const r = render(<MedicoesPagina aba="aguardando-pagamento" busca={{}} usuario={usuario} />);
+    expect(r.container.querySelector(".pagina__descricao")).toBeNull();
+    expect(screen.queryByText(/se registra na etapa 4/)).toBeNull();
   });
 
   it("os filtros da aba Enviar nota vêm da URL e vão para a URL (sobrevivem ao recarregar)", async () => {

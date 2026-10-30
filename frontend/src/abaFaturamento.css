@@ -2,7 +2,6 @@
    Cores so' dos tokens; o quadro e o "Parada há" vem de medicoes.css. */
 .fat-grupos { display: flex; flex-direction: column; gap: 16px; }
 .fat-grupo__cabeca { margin: 0; padding: 16px; border-bottom: 1px solid var(--linha); font-size: 17px; line-height: 24px; font-weight: 600; }
-.fat-grupo__cabeca .dinheiro { font-weight: 500; }
 .fat-lista { list-style: none; margin: 0; padding: 0; }
 .fat-linha {
   display: grid; grid-template-columns: minmax(0, 1fr) 170px 150px auto; align-items: center; gap: 24px;

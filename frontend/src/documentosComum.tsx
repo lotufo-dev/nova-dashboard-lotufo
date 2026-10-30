@@ -66,8 +66,7 @@ export type AnexarRef = { escolher: (tipo?: string) => void };
  *  a digitacao ja' nela e a leitura de outra empresa vem com aviso. */
 export const AnexarCertidoes = forwardRef<AnexarRef, {
   empresas: EmpresaDoc[]; empresaPadrao?: EmpresaDoc; aoGravar: () => Promise<void>; anunciar: (t: string) => void;
-  nota?: string;
-}>(function AnexarCertidoes({ empresas, empresaPadrao, aoGravar, anunciar, nota }, ref) {
+}>(function AnexarCertidoes({ empresas, empresaPadrao, aoGravar, anunciar }, ref) {
   const [fila, setFila] = useState<ItemFila[]>([]);
   const [ocupado, setOcupado] = useState(false);
   const [sobre, setSobre] = useState(false);
@@ -163,7 +162,6 @@ export const AnexarCertidoes = forwardRef<AnexarRef, {
         <IconeEnviarNuvem className="icone doc-zona__icone" />
         <p>Arraste os PDFs das certidões aqui ou{" "}
           <button type="button" className="doc-zona__link" onClick={() => { pedido.current = undefined; entrada.current?.click(); }}>escolher os arquivos</button></p>
-        <p className="doc-zona__nota">{nota ?? "O sistema lê tipo, empresa e validade de cada PDF; confira e grave."}</p>
         <input ref={entrada} type="file" accept="application/pdf" multiple hidden aria-label="Escolher PDFs de certidões para anexar"
           onChange={ev => {
             const input = ev.currentTarget;

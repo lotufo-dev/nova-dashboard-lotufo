@@ -11,6 +11,7 @@ import { brl } from "./Medicoes";
 // no eixo do grafico "jul/26" — o eixo tem 11px e nao cabe o ano inteiro legivel.
 import { fmtCompetencia as competenciaBR, fmtData, fmtDataPura, fmtMesCurto as mesCurto, mesAtualLocal } from "./tempo";
 import Rolagem from "./Rolagem";
+import Selo from "./Selo";
 
 type ItemVersao = { competencia: string; valor_previsto_centavos: number };
 type Versao = { numero: number; criado_em: string; origem: string; itens: ItemVersao[] };
@@ -29,7 +30,7 @@ const ORIGEM_DOCUMENTO: Record<string, string> = {
 
 function documentoDaVersao(v: VersaoLista): string {
   // publicada na tela ou vinda da carga inicial: o sistema nao sabe de que documento saiu
-  if (!v.origem_documento) return "Sem documento no cadastro";
+  if (!v.origem_documento) return "—";
   const origem = ORIGEM_DOCUMENTO[v.origem_documento] ?? v.origem_documento;
   return v.instrumento ? `${origem} · ${v.instrumento}` : origem;
 }
@@ -83,18 +84,17 @@ const COMPETENCIA = /^[0-9]{4}-(0[1-9]|1[0-2])$/;
 const MAX_ITENS = 600;  // mesmo teto do servidor (api_cronograma.MAX_ITENS)
 
 type Linha = { competencia: string; valor: string; centavos: bigint };
-type Analise = { itens: Linha[]; total: bigint; erro: string };
+type Analise = { itens: Linha[]; erro: string };
 
 // Erros do servidor sao 422 em pt-BR e continuam valendo; esta analise so antecipa
 // o que da' para apontar POR LINHA, que a resposta HTTP nao consegue localizar.
 function analisar(texto: string): Analise {
   const itens: Linha[] = [];
   const vistas = new Map<string, number>();
-  let total = 0n;
   const linhas = texto.split(/\r?\n/);
   const cheias = linhas.filter(l => l.trim() !== "").length;
   if (cheias > MAX_ITENS) {
-    return { itens, total, erro: `Máximo de ${MAX_ITENS} competências por versão (há ${cheias}).` };
+    return { itens, erro: `Máximo de ${MAX_ITENS} competências por versão (há ${cheias}).` };
   }
   for (let i = 0; i < linhas.length; i++) {
     const bruta = linhas[i].trim();
@@ -102,27 +102,26 @@ function analisar(texto: string): Analise {
     const n = i + 1;
     const corte = bruta.indexOf(";");
     if (corte < 0) {
-      return { itens, total, erro: `Linha ${n}: falta o ponto e vírgula — use AAAA-MM;valor (ex.: 2026-07;100.000,00).` };
+      return { itens, erro: `Linha ${n}: falta o ponto e vírgula — use AAAA-MM;valor (ex.: 2026-07;100.000,00).` };
     }
     const competencia = bruta.slice(0, corte).trim();
     const valor = bruta.slice(corte + 1).trim();
     if (!COMPETENCIA.test(competencia)) {
-      return { itens, total, erro: `Linha ${n}: “${competencia}” não é uma competência AAAA-MM (ex.: 2026-07).` };
+      return { itens, erro: `Linha ${n}: “${competencia}” não é uma competência AAAA-MM (ex.: 2026-07).` };
     }
     const anterior = vistas.get(competencia);
     if (anterior !== undefined) {
-      return { itens, total, erro: `Linha ${n}: competência ${competenciaBR(competencia)} repetida (já está na linha ${anterior}).` };
+      return { itens, erro: `Linha ${n}: competência ${competenciaBR(competencia)} repetida (já está na linha ${anterior}).` };
     }
     const centavos = parseBrlCentavos(valor);
     if (centavos === null) {
-      return { itens, total, erro: `Linha ${n}: “${valor}” não é um valor em reais (ex.: 100.000,00).` };
+      return { itens, erro: `Linha ${n}: “${valor}” não é um valor em reais (ex.: 100.000,00).` };
     }
     vistas.set(competencia, n);
     itens.push({ competencia, valor, centavos });
-    total += centavos;
   }
-  if (itens.length === 0) return { itens, total, erro: "Informe ao menos uma competência." };
-  return { itens, total, erro: "" };
+  if (itens.length === 0) return { itens, erro: "Informe ao menos uma competência." };
+  return { itens, erro: "" };
 }
 
 /* ------------------------------------------------------------------ grafico */
@@ -313,7 +312,7 @@ function Grafico({ pontos, mes }: { pontos: Ponto[]; mes: string }) {
             {comRotulo && (
               <text className={`g-eixo num${pendente ? " g-eixo--pendente" : ""}`}
                 x={cx} y={BASE + 36} textAnchor="middle">
-                {medidoTotal(p) === 0 ? "em aberto" : numeroEixo(medidoTotal(p), divisor)}
+                {medidoTotal(p) === 0 ? "—" : numeroEixo(medidoTotal(p), divisor)}
               </text>
             )}
           </g>
@@ -450,17 +449,6 @@ export default function Cronograma({ contratoId, podeEditar }:
     area.current?.focus();
   }
 
-  // A origem gravada na versao (manual/detectado/aceito) e' interna; a dica mostra o documento (issue #256).
-  // Casada pelo NUMERO da versao que /cronograma devolveu, nao pela marca `vigente` da lista: as duas leituras
-  // sao independentes e podem divergir entre uma publicacao e outra (gate Sol, PR #311).
-  const vigenteNaLista = versao ? versoes.find(v => v.numero === versao.numero) : undefined;
-  const dica = versao
-    ? `versão ${versao.numero} · ${versao.itens.length} ${versao.itens.length === 1 ? "competência" : "competências"}`
-      // versao do cadastro: a data e' a do documento; manual: a da publicacao
-      + (vigenteNaLista?.data_documento
-        ? ` · documento de ${fmtDataPura(vigenteNaLista.data_documento)}`
-        : ` · publicada em ${fmtData(versao.criado_em)}`)
-    : "sem versão publicada";
 
   const totais = pontos.reduce((a, p) => ({
     previsto: a.previsto + p.previsto_centavos,
@@ -473,10 +461,9 @@ export default function Cronograma({ contratoId, podeEditar }:
     <section className="cartao" aria-labelledby="titulo-cronograma" id="cronograma">
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id="titulo-cronograma">Cronograma</h2>
-        <span className="cartao__dica num"
-          title={vigenteNaLista ? `Documento: ${documentoDaVersao(vigenteNaLista)}` : undefined}>
-          {carregando ? "carregando…" : dica}
-        </span>
+        {/* a versao que /cronograma devolveu (o numero dela, nao a marca `vigente` da lista: gate Sol, PR #311);
+            documento, data e competencias estao na tabela de versoes */}
+        {!carregando && versao && <span className="cartao__dica num">versão {versao.numero}</span>}
       </div>
 
       {erro && <div className="cartao__corpo"><p className="erro" role="alert">
@@ -504,18 +491,12 @@ export default function Cronograma({ contratoId, podeEditar }:
           {saldo.saldo_centavos < 0 && (
             <CaixaAviso nivel="critico">Medido acima do valor vigente do contrato.</CaixaAviso>
           )}
-          {/* a formula e' a do servidor, palavra por palavra: a tela nao reescreve a
-              regra do saldo, so mostra os numeros que entram nela */}
-          <p className="saldo__nota">{saldo.formula}</p>
         </div>
       )}
 
       {!carregando && pontos.length === 0 && (
         <div className="vazio">
-          <p className="vazio__titulo">Nenhuma competência prevista ou medida</p>
-          <p>{podeEditar
-            ? "Publique a primeira versão do cronograma no formulário abaixo — uma linha por competência."
-            : "Quando a engenharia publicar o cronograma, o previsto e o medido aparecem aqui."}</p>
+          <p className="vazio__titulo">Nenhuma competência.</p>
         </div>
       )}
 
@@ -525,7 +506,7 @@ export default function Cronograma({ contratoId, podeEditar }:
         <div className="legenda">
           <span className="legenda__item">
             <span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />
-            Previsto (cronograma vigente; passado congelado)
+            Previsto
           </span>
           <span className="legenda__item">
             <span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />
@@ -537,13 +518,13 @@ export default function Cronograma({ contratoId, podeEditar }:
           </span>
           <span className="legenda__item">
             <span className="legenda__chave legenda__chave--provisorio" aria-hidden="true" />
-            Provisório: protocolado, ainda sem atestado
+            Provisório
           </span>
         </div>
 
         {/* a tabela e' a consulta fina do grafico: recolhida (NAVEGACAO.md › Obra › Contrato) */}
         <details className="detalhes cartao__corpo">
-        <summary>Tabela por competência ({pontos.length})</summary>
+        <summary>Tabela por competência</summary>
         <Rolagem rotulo="Previsto e medido por competência">
           <table className="tabela">
             <caption className="sr-only">Previsto e medido por competência</caption>
@@ -570,7 +551,7 @@ export default function Cronograma({ contratoId, podeEditar }:
                       {competenciaBR(p.competencia)}
                       {congelado && <span className="cadeado">
                         <IconeCadeado className="icone icone--p"
-                          titulo="Competência já decorrida: uma nova versão do cronograma não altera este previsto" />
+                          titulo="Competência congelada" />
                       </span>}
                     </td>
                     <td className="col-num dinheiro num">{valorOuTraco(p.previsto_centavos)}</td>
@@ -614,7 +595,7 @@ export default function Cronograma({ contratoId, podeEditar }:
       {/* issue #256: uma linha por versao, na ordem em que passaram a valer (data do documento) */}
       {!carregando && versoes.length > 0 && (
         <details className="detalhes cartao__corpo">
-        <summary>Versões do cronograma ({versoes.length})</summary>
+        <summary>Versões do cronograma</summary>
         <Rolagem rotulo="Versões do cronograma">
           <table className="tabela">
             <caption className="sr-only">Versões do cronograma, da mais antiga à vigente</caption>
@@ -630,7 +611,7 @@ export default function Cronograma({ contratoId, podeEditar }:
             <tbody>
               {versoes.map((v, i) => (
                 <tr key={v.numero} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                  <td className="forte num">{v.numero}{v.vigente && " · vigente"}</td>
+                  <td className="forte num">{v.numero}{v.vigente && <>{" "}<Selo classe="selo--ok">Vigente</Selo></>}</td>
                   <td className="num">{v.data_documento ? fmtDataPura(v.data_documento) : fmtData(v.criado_em)}</td>
                   <td>{documentoDaVersao(v)}</td>
                   <td className="col-num num">{v.competencias}</td>
@@ -653,29 +634,12 @@ export default function Cronograma({ contratoId, podeEditar }:
             <textarea id="cronograma-itens" ref={area} className="entrada--area num" rows={7}
               spellCheck={false} value={texto}
               placeholder={"2026-09;1.200.000,00\n2026-10;900.000,00…"}
-              aria-describedby={analise.erro && !vazio ? "cronograma-erro cronograma-ajuda" : "cronograma-ajuda"}
+              aria-describedby={analise.erro && !vazio ? "cronograma-erro" : undefined}
               onChange={e => { setTexto(e.target.value); setSucesso(""); }} />
           </div>
 
-          <p className="campo__nota" id="cronograma-ajuda">
-            Uma linha por competência, no formato <code>AAAA-MM;valor</code> — por exemplo{" "}
-            <code>2026-09;1.200.000,00</code>.
-          </p>
-
           {!vazio && analise.erro && <p className="campo__erro" id="cronograma-erro">{analise.erro}</p>}
-          {!vazio && !analise.erro && (
-            <p className="campo__nota num">
-              {analise.itens.length} {analise.itens.length === 1 ? "competência" : "competências"}
-              {" · total previsto "}
-              {analise.total <= BigInt(Number.MAX_SAFE_INTEGER) ? brl(Number(analise.total)) : "acima do exibível"}
-            </p>
-          )}
           <p className={sucesso ? "campo__nota" : "sr-only"} role="status">{sucesso}</p>
-
-          <CaixaAviso nivel="atencao">
-            A nova versão substitui o cronograma futuro por inteiro: competências de {competenciaBR(mes)} em
-            diante que não estiverem na lista deixam de estar previstas. Meses já decorridos permanecem como estão.
-          </CaixaAviso>
 
           <div className="editor__acoes">
             <button type="submit" className="btn btn--primario" disabled={salvando || vazio || analise.erro !== ""}>
@@ -683,8 +647,7 @@ export default function Cronograma({ contratoId, podeEditar }:
               {salvando ? "Publicando…" : "Publicar nova versão"}
             </button>
             {versao && (
-              <button type="button" className="btn" onClick={copiarVigente} disabled={salvando}
-                title="Preenche o campo com as linhas da versão vigente, para você ajustar e publicar a próxima">
+              <button type="button" className="btn" onClick={copiarVigente} disabled={salvando}>
                 Copiar versão vigente
               </button>
             )}

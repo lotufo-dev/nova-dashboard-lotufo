@@ -46,7 +46,7 @@
 .seta--vendo .seta__marca { background: var(--acento); color: var(--superficie); }
 .seta__rotulo { overflow: hidden; text-overflow: ellipsis; }
 
-/* "Voce esta vendo a etapa N, ja' feita" */
+/* "Voltar a' etapa atual", com outra etapa aberta */
 .med-faixa { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 12px 16px; border-radius: var(--raio);
   background: var(--acento-fundo); color: var(--acento-mais); font-size: 14px; }
 .med-faixa .botao-link { font-weight: 600; color: var(--acento-mais); font-size: 14px; }
@@ -57,14 +57,12 @@
 .med-etapa__cabeca { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .med-etapa__n { padding: 4px 12px; border-radius: var(--raio-pilula); background: var(--acento-fundo); color: var(--acento-mais); font-size: 13px; font-weight: 600; }
 .med-etapa__titulo { margin: 0; font-size: 20px; line-height: 28px; }
-.med-etapa__resumo { color: var(--texto-2); font-size: 13px; }
 .med-sub { margin: 0 0 8px; font-size: 15px; line-height: 22px; font-weight: 600; }
 .med-bloco { display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px solid var(--linha); }
 .med-caixa { border: 1px solid var(--linha); border-radius: var(--raio); overflow: hidden; }
 .med-caixa .tabela thead th { background: var(--superficie-2); }
 .med-caixa .tabela-wrap { overflow-x: auto; }
 .med-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.med-nota-etapa:empty { display: none; }
 .med-linhas { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
 .med-linhas li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--linha-suave); }
 .med-linhas li:last-child { border-bottom: 0; }
@@ -80,7 +78,6 @@
 .envios td.col-num { font-family: var(--fonte-num); }
 .envios__nfs { display: flex; flex-direction: column; gap: 2px; }
 .envios__nfs span { white-space: nowrap; }
-.envios__nfs small { color: var(--texto-2); font-size: 12px; }
 .envios__acao { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; }
 .envios__motivo { font-size: 12.5px; color: var(--texto-2); max-width: 26ch; text-align: right; }
 .envios__motivo--atencao { color: var(--atencao); }

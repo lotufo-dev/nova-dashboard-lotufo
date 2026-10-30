@@ -30,7 +30,6 @@
 .entrar__visual::after { content: ""; position: absolute; left: 0; right: 0; pointer-events: none; z-index: 1; }
 .entrar__visual::before { top: 0; height: 150px; background: linear-gradient(#0E0C30 0%, rgba(14, 12, 48, 0) 100%); }
 .entrar__visual::after { bottom: 0; height: 220px; background: linear-gradient(rgba(12, 10, 44, 0) 0%, #0C0A2C 75%); }
-.entrar__frase { position: absolute; z-index: 2; left: 56px; bottom: 48px; margin: 0; color: #A5B4FC; }
 
 .entrar__painel {
   width: 480px;
@@ -50,12 +49,10 @@
 .entrar__simbolo i.v { background: transparent; }
 .entrar__nome { display: flex; flex-direction: column; }
 .entrar__marca-nome { font-size: 18px; line-height: 24px; font-weight: 600; }
-.entrar__marca-sub { font-size: 12px; line-height: 16px; color: var(--entrar-cinza); }
 
 .entrar__bloco { display: flex; flex-direction: column; gap: 24px; }
 .entrar__cabeca { display: flex; flex-direction: column; gap: 4px; }
 .entrar__titulo { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; }
-.entrar__ajuda { margin: 0; color: var(--entrar-cinza); }
 
 .entrar__form { display: flex; flex-direction: column; gap: 16px; }
 .entrar__campo { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 16px; font-weight: 500; }
@@ -87,7 +84,6 @@
 .entrar__botao:hover:not(:disabled) { background: #4338CA; }
 .entrar__botao:disabled { opacity: .7; cursor: default; }
 
-.entrar__rodape { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; line-height: 16px; color: var(--entrar-cinza); }
 
 @media (max-width: 900px) {
   .entrar__visual { display: none; }

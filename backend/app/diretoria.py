@@ -14,7 +14,7 @@ import json
 import math
 from decimal import ROUND_HALF_UP, Decimal
 
-from app import avisos as _av, conciliacao, contratos, cronograma, qdop, reajuste, sincronizacao_rm, tempo
+from app import avisos as _av, conciliacao, contratos, cronograma, paineis, qdop, reajuste, sincronizacao_rm, tempo
 
 QUARTIL, MINIMO, PADRAO_DIAS = 0.75, 10, 30   # prazo do orgao: so' o "previsto" da tela A receber usa
 ESPERANDO_NOTA = ("espelho_gerado", "espelho_enviado")
@@ -278,7 +278,54 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date) -> dict:
                           for k, o in sorted(por_orgao.items(), key=lambda kv: -kv[1]["saldo"])]}
 
 
-def _obras(conn, hoje: datetime.date, avisos: list[dict]) -> list[dict]:
+def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, str, dict, dict]:
+    """A curva S da obra (issue #295), por competencia e em valor CHEIO: o previsto vigente; a linha de base ("anterior"
+    quando a obra tem repactuacao, com o previsto anterior a ela; senao "vigente", com o vigente: decisao do Leo de
+    28/10/2026); e o medido de execucao nos estados que medem (`paineis._medido`). O vigente sai do mesmo `cache` de
+    `_previsto`, para nao ler o cronograma duas vezes."""
+    chave = ("curva", contrato_id)
+    if chave not in cache:
+        if contrato_id not in cache:
+            cache[contrato_id] = cronograma.previsto_efetivo(conn, contrato_id)
+        vigente = cache[contrato_id]
+        ant = cronograma.curva_comparativa(conn, contrato_id)["anterior"]
+        base = ("anterior", {a["competencia"]: a["previsto_centavos"] for a in ant}) if ant else ("vigente", vigente)
+        cache[chave] = (vigente, *base, {c: m["execucao"] for c, m in paineis._medido(conn, contrato_id).items()})
+    return cache[chave]
+
+
+def _curva_carteira(conn, hoje: datetime.date, cache: dict) -> list[dict]:
+    """Issue #296 (spec 2026-10-20 §4 item 5): a curva S da carteira, a soma das curvas das obras ativas nos ultimos
+    12 meses, cada obra na sua cota (D8). A obra sem repactuacao entra na linha anterior com o previsto vigente
+    (decisao do Leo de 28/10/2026), para as duas linhas somarem as mesmas obras."""
+    meses = [_mes(hoje, k) for k in range(-11, 1)]
+    out = {m: {"competencia": m, "previsto_centavos": 0, "previsto_anterior_centavos": 0, "medido_centavos": 0} for m in meses}
+    for c in _ativos(conn):
+        vigente, _, linha_base, medido = _curva_obra(conn, c["id"], cache)
+        pct = c["percentual_direito_bp"]
+        for m in meses:
+            out[m]["previsto_centavos"] += contratos.cota(vigente.get(m, 0), pct) or 0
+            out[m]["previsto_anterior_centavos"] += contratos.cota(linha_base.get(m, 0), pct) or 0
+            out[m]["medido_centavos"] += contratos.cota(medido.get(m, 0), pct) or 0
+    return list(out.values())
+
+
+def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
+    """Issue #296, decisoes do Leo de 28/10/2026: desvio em p.p. = (medido acumulado - previsto acumulado) / valor
+    vigente do contrato x 100, ate' a ultima competencia fechada (o mes anterior ao atual), contra a linha anterior a
+    ultima repactuacao quando a obra tem uma, senao contra a vigente. Em valor cheio (a razao e' a mesma na cota, sem
+    o arredondamento dela); uma casa decimal, meio para cima. Sem cronograma ou sem valor vigente, None."""
+    _, base, previsto, medido = _curva_obra(conn, contrato_id, cache)
+    total = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
+    if not previsto or not total or total <= 0:
+        return {"desvio_pp": None, "desvio_base": None}
+    ate = _mes(hoje, -1)
+    diferenca = sum(v for c, v in medido.items() if c and c <= ate) - sum(v for c, v in previsto.items() if c <= ate)
+    pp = (Decimal(diferenca) * 100 / Decimal(total)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    return {"desvio_pp": float(pp), "desvio_base": base}
+
+
+def _obras(conn, hoje: datetime.date, avisos: list[dict], cache: dict) -> list[dict]:
     por_obra: dict = {}
     for a in avisos:
         if a.get("contrato_id"):
@@ -295,7 +342,8 @@ def _obras(conn, hoje: datetime.date, avisos: list[dict]) -> list[dict]:
         motivos = [{"tipo": a["tipo"], "nivel": a["nivel"], "dias": a["dias"], "valor_centavos": a["valor_centavos"],
                     "texto": a["mensagem"][len(prefixo):] if prefixo and a["mensagem"].startswith(prefixo) else a["mensagem"]}
                    for a in av]
-        out.append({**linha, "farol": farol, "motivo": "; ".join(a["mensagem"] for a in av), "motivos": motivos})
+        out.append({**linha, "farol": farol, "motivo": "; ".join(a["mensagem"] for a in av), "motivos": motivos,
+                    **_desvio(conn, linha["contrato_id"], hoje, cache)})
     return out
 
 
@@ -338,7 +386,8 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
             "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas), "mes_ano": _mes_ano(conn, ms, hoje, cache),
             "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje),
-            "obras": _obras(conn, hoje, avisos), "obras_base": _obras_base(conn), "avisos": avisos}
+            "curva_carteira": _curva_carteira(conn, hoje, cache),
+            "obras": _obras(conn, hoje, avisos, cache), "obras_base": _obras_base(conn), "avisos": avisos}
 
 
 def a_receber(conn, hoje: datetime.date | None = None) -> dict:

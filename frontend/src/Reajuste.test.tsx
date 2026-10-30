@@ -16,9 +16,11 @@ describe("Reajuste", () => {
       : { instrumentos: [] });
     render(<Reajuste contratoId={7} podeEditar />);
     expect(await screen.findByText("pleito não enviado")).toBeTruthy();
-    // um cartao por data-base (com ancora), e a linha do ciclo com os dias do servidor
+    // um cartao por data-base (com ancora), e a linha do ciclo so' com o ano e o aniversario
     expect(screen.getByRole("region", { name: /^Data-base 06\/2024 · INCC-DI/ }).closest("[id]")?.id).toBe("db-2024-06");
-    expect(screen.getByText("Ciclo de 2026 · fez aniversário em 01/06/2026 (há 14 dias)")).toBeTruthy();
+    expect(screen.getByText("Ciclo de 2026 · aniversário em 01/06/2026")).toBeTruthy();
+    // texto na tela (26/10/2026): sem a regra do aniversario
+    expect(screen.queryByText(/vale a partir do mês do aniversário/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Enviar pleito" }));
     expect(screen.getByRole("form", { name: "Novo ofício" }).textContent).toContain("06/2024");
     expect(screen.getByLabelText("Nº do ofício (CT)")).toBeTruthy();

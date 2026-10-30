@@ -5,11 +5,10 @@ import AvisosPagina from "./AvisosPagina";
 import { STATUS, type StatusObra } from "./ContratoPagina";
 import { IconeAlerta } from "./icones";
 import {
-  avisoPrincipal, avisosParaLeitor, avisosPorObra, cDaUrlAntiga, classePrazo, contagemObras, contratanteDaObra, contratantesDe, ehDoContratante, escopoDaUrl, filtrarObras,
+  avisoPrincipal, avisosParaLeitor, avisosPorObra, cDaUrlAntiga, contratanteDaObra, contratantesDe, ehDoContratante, escopoDaUrl, filtrarObras,
   nivelDoPrazo, nomeDaObra, pctExecutado, prazoDaObra, quandoVence, resumoContratante, rotuloCriticos,
   type ObraLista, type PrazoObra, type ResumoContratante,
 } from "./listaObras";
-import { fmtDias } from "./formato";
 import { brl } from "./Medicoes";
 import { trocarBusca, type Busca, type Ir } from "./rota";
 import { Link } from "./Link";
@@ -37,36 +36,30 @@ function status(c: ObraLista): StatusObra {
 
 const obrasN = (k: number) => (k === 1 ? "1 obra" : `${k} obras`);
 
-/** O fim (execucao ou vigencia) com os dias do servidor embaixo, na palavra dos Avisos ("vence em N dias", "vence
- *  hoje", "venceu ha' N dias") e na cor do nivel do aviso da obra (`nivel`; sem aviso, neutro). Obra paralisada
- *  (`paralisada`, so' na execucao): "Paralisada desde DD/MM/AAAA" em Atencao, sem contar o vencimento (D16). */
-function Fim({ fim, dias, automatica, nivel: nivelDoAviso = null, aberta = true, paralisada }: {
-  fim?: string | null; dias?: number | null; automatica?: boolean; nivel?: Nivel | null; aberta?: boolean;
+/** O fim (execucao ou vigencia) e, so' quando o prazo tem aviso (ou ja' venceu), o selo do nivel com os dias do
+ *  servidor, na palavra dos Avisos ("vence em N dias", "venceu ha' N dias"). Obra paralisada (`paralisada`, so' na
+ *  execucao): o selo "Paralisada" em Atencao, com a data no title, sem contar o vencimento (D16). */
+function Fim({ fim, dias, nivel: nivelDoAviso = null, aberta = true, paralisada }: {
+  fim?: string | null; dias?: number | null; nivel?: Nivel | null; aberta?: boolean;
   paralisada?: { desde: string | null };
 }) {
   if (!fim && !paralisada) return <>—</>;
-  // o nivel tambem vai em forma (triangulo no Critico, ponto na Atencao), nao so' na cor (F-58)
   const nivel = nivelDoPrazo(nivelDoAviso, dias, aberta);
+  const selo = nivel ? SELO[nivel] ?? SELO.atencao : null;
   return (
     <>
       {fim ? fmtDataPura(fim.slice(0, 10)) : "—"}
       {paralisada ? (
-        <div className="campo__nota prazo--atencao prazo--paralisada">
-          {paralisada.desde ? <>Paralisada desde <span className="sem-quebra">{fmtDataPura(paralisada.desde.slice(0, 10))}</span></> : "Paralisada"}
-        </div>
-      ) : fim && dias !== null && dias !== undefined && (
-        <div className={`campo__nota prazo--data${classePrazo(nivel)}`}>
-          {nivel === "critico" ? <IconeAlerta className="icone icone--p" /> : nivel ? <span className="prazo__ponto" aria-hidden="true" /> : null}
-          {quandoVence(dias)}
-        </div>
+        <div><Selo classe="selo--atencao" title={paralisada.desde ? fmtDataPura(paralisada.desde.slice(0, 10)) : undefined}>Paralisada</Selo></div>
+      ) : fim && dias !== null && dias !== undefined && selo && (
+        <div><Selo classe={selo.classe} forte={selo.forte}>{quandoVence(dias)}</Selo></div>
       )}
-      {fim && automatica && <div className="campo__nota">o órgão prorroga junto</div>}
     </>
   );
 }
 
-/** A coluna Avisos da tabela: a contagem; com critico, "N críticos" no selo do nivel (triangulo + palavra) e o total
- *  embaixo. Leva aos Avisos da obra, abertos nesta mesma pagina. */
+/** A coluna Avisos da tabela: a contagem; com critico, "N críticos" no selo do nivel (triangulo + palavra).
+ *  Leva aos Avisos da obra, abertos nesta mesma pagina. */
 function AvisosDaObra({ obra, prazo, busca }: { obra: ObraLista; prazo: PrazoObra; busca: Busca }) {
   const c = prazo.criticos;
   return (
@@ -75,7 +68,6 @@ function AvisosDaObra({ obra, prazo, busca }: { obra: ObraLista; prazo: PrazoObr
         <span aria-hidden="true">{c > 0 ? <Selo classe="selo--acao" title={rotuloCriticos(c)}>{c}<span className="criticos__palavra">{c === 1 ? " crítico" : " críticos"}</span></Selo> : prazo.total}</span>
         <span className="sr-only">{avisosParaLeitor(prazo, nomeDaObra(obra))}</span>
       </Link>
-      {c > 0 && prazo.total > c && <div className="campo__nota sem-quebra" aria-hidden="true">de {prazo.total}{" "}avisos</div>}
     </>
   );
 }
@@ -96,27 +88,18 @@ function LinhaContratante({ nome, r, c, todas = false, comAvisos }: { nome: stri
         <div>
           <p className="contratante__nome">{nome}</p>
           <span className="contratante__obras num">{obrasN(r.obras)}</span>
-          {r.encerradas > 0 && <span className="campo__nota"> · {r.encerradas === 1 ? "1 encerrada" : `${r.encerradas} encerradas`}</span>}
         </div>
         <div className="contratante__exec">
           <div className="contratante__pct"><strong>{r.pct}%</strong><span>executado</span></div>
           <div className="progresso" role="img" aria-label={`${r.pct}% executado`}><span className="progresso__barra" style={{ width: `${Math.min(100, Math.max(0, r.pct))}%` }} /></div>
         </div>
         <div className="contratante__saldo">
-          <span className="contratante__rotulo">Saldo a executar (valor cheio)</span>
+          <span className="contratante__rotulo">Saldo a executar</span>
           <span className="contratante__valor">{brl(r.saldo)}</span>
         </div>
         <div className="contratante__avisos">
-          {!comAvisos ? <span className="campo__nota">—</span> : r.comAviso > 0 && nivel ? (
-            <>
-              <span className={`ponto ponto--${nivel}`} aria-hidden="true" />
-              <span>
-                <span className={`texto--${nivel}`}>{r.comAviso} com aviso</span>
-                {r.criticos > 0 ? <span className="campo__nota">{rotuloCriticos(r.criticos)}</span>
-                  : <span className="campo__nota">o mais grave: {SELO[nivel].rotulo.toLowerCase()}</span>}
-              </span>
-            </>
-          ) : <span className="campo__nota">sem avisos</span>}
+          {!comAvisos ? <span className="campo__nota">—</span> : r.criticos > 0 ? <Selo classe="selo--acao">{rotuloCriticos(r.criticos)}</Selo>
+            : r.comAviso > 0 && nivel ? <Selo classe={SELO[nivel].classe} forte={SELO[nivel].forte}>{SELO[nivel].rotulo}</Selo> : null}
         </div>
         <Chevron />
       </Link>
@@ -133,9 +116,7 @@ function CartaoObra({ obra, avisos, ir }: { obra: ObraLista; avisos: Aviso[]; ir
   const nivelP: Nivel = principal && SELO[principal.nivel] ? principal.nivel : "atencao";   // nivel novo do servidor conta como atencao
   const fim = obra.execucao_fim_vigente ? fmtDataPura(obra.execucao_fim_vigente.slice(0, 10)) : null;
   const paralisada = prazoDaObra(obra, avisos).paralisada;
-  const termino = !fim ? "sem data de término"
-    : obra.estado === "encerrado" ? `terminou em ${fim}`
-    : paralisada ? `termina em ${fim}, com o prazo parado` : `termina em ${fim}`;
+  const termino = !fim ? "—" : obra.estado === "encerrado" ? `terminou em ${fim}` : `termina em ${fim}`;
   return (
     <li>
       <Link className="cartao obra-cartao" para={{ tela: "obra", id: obra.id, aba: "medicoes" }} ir={ir}>
@@ -153,20 +134,20 @@ function CartaoObra({ obra, avisos, ir }: { obra: ObraLista; avisos: Aviso[]; ir
             <span>
               <span className="sr-only">{SELO[nivelP].rotulo}: </span>
               {semObra(principal).mensagem}
-              {avisos.length > 1 && <span className="obra-cartao__mais"> · mais {avisos.length - 1}</span>}
             </span>
           </p>
         )}
         <p className="obra-cartao__linha obra-cartao__linha--fim">
           <svg className="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>
           <span>{termino}</span>
+          {paralisada && <Selo classe="selo--atencao">Paralisada</Selo>}
         </p>
       </Link>
     </li>
   );
 }
 
-export default function Contratos({ ir, busca = {}, perfil = "engenharia" }: { ir: Ir; busca?: Busca; perfil?: string }) {
+export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca }) {
   const [lista, setLista] = useState<ObraLista[] | null>(null);
   const [empresas, setEmpresas] = useState<Map<number, string> | null>(new Map());
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
@@ -222,7 +203,6 @@ export default function Contratos({ ir, busca = {}, perfil = "engenharia" }: { i
   const prazos = new Map(doContratante.map(o => [o.id, prazoDaObra(o, porObra?.get(o.id))] as const));
   const paralisadas = new Set([...prazos].filter(([, p]) => p.paralisada).map(([id]) => id));
   const filtradas = filtrarObras(doContratante, { todas, termina, q, paralisadas, empresas });
-  const { titulo, detalhe } = contagemObras(filtradas.length, doContratante.length, { todas, termina, orgao: null, q });
   const aqui = { tela: "obras" as const };
   const com = (m: Record<string, string | null>): Busca => {
     const b: Busca = { ...busca };
@@ -233,10 +213,6 @@ export default function Contratos({ ir, busca = {}, perfil = "engenharia" }: { i
   const nomeLista = orgao ?? "Todas as obras";
   const contratantes = lista ? contratantesDe(lista) : [];
   const total = resumoContratante(lista ?? [], porObra);
-  const resumo = resumoContratante(doContratante, porObra);
-  const meta = !lista ? "" : escolha
-    ? `${contratantes.length === 1 ? "1 contratante" : `${contratantes.length} contratantes`} · ${total.obras} ${total.obras === 1 ? "obra em andamento" : "obras em andamento"}`
-    : `${obrasN(resumo.obras)} · ${resumo.pct}% executado · saldo a executar (valor cheio) ${brl(resumo.saldo)}`;
   const nAvisosLabel = avisos ? ` (${escolha ? avisos.length : avisosDoRecorte.length})` : "";
 
   return (
@@ -248,7 +224,6 @@ export default function Contratos({ ir, busca = {}, perfil = "engenharia" }: { i
         </div>
         <div className="topbar__linha topbar__linha--quebra">
           <h1 className="topbar__titulo topbar__titulo--grande">{escolha ? "Contratantes" : nomeLista}</h1>
-          {meta && <span className="topbar__meta num" title={meta}>{meta}</span>}
           {escolha && (
             <div className="topbar__acoes">
               <Link className="btn btn--pequeno" para={aqui} busca={{ c: "todas", avisos: "1" }}>Avisos{nAvisosLabel}</Link>
@@ -281,10 +256,6 @@ export default function Contratos({ ir, busca = {}, perfil = "engenharia" }: { i
                 ))}
               </ul>
             )}
-            <p className="resumo-nota">
-              Valores cheios do contrato, sem as obras encerradas. Executado = medido (execução) ÷ valor vigente; saldo a executar = valor
-              vigente − medido (execução). Valor vigente somado: {brl(total.vigente)}.
-            </p>
           </>
         )}
 
@@ -320,15 +291,13 @@ export default function Contratos({ ir, busca = {}, perfil = "engenharia" }: { i
             </section>
 
             {avisosAbertos && (
-              <AvisosPagina busca={busca} perfil={perfil} avisos={avisos} escopo={idsDoContratante} nome={nomeLista}
+              <AvisosPagina busca={busca} avisos={avisos} escopo={idsDoContratante} nome={nomeLista}
                 onFechar={() => { trocarBusca({ avisos: null, familia: null, nivel: null, obra: null, agrupar: null }); botaoAvisos.current?.focus(); }} />
             )}
 
-            {/* o titulo diz quantas obras a tela mostra; o recorte em vigor, em palavras, vai junto */}
-            <p className="contagem" role="status">
-              {titulo}{detalhe ? ` ${detalhe}` : ""}
-              {temFiltro && <> · <Link para={aqui} busca={com({ termina: null, q: null })}>Limpar os filtros</Link></>}
-            </p>
+            {temFiltro && filtradas.length > 0 && (
+              <p className="contagem"><Link para={aqui} busca={com({ termina: null, q: null })}>Limpar os filtros</Link></p>
+            )}
 
             {filtradas.length === 0 && (
               <section className="cartao">
@@ -382,11 +351,11 @@ export default function Contratos({ ir, busca = {}, perfil = "engenharia" }: { i
                               <Fim fim={c.execucao_fim_vigente} dias={c.dias_execucao} nivel={prazo.execucao} aberta={status(c) === "ativo"}
                                 paralisada={prazo.paralisada ? { desde: prazo.paralisadaDesde } : undefined} />
                             </td>
-                            <td className="num"><Fim fim={c.vigencia_fim_vigente} dias={c.dias_vigencia} automatica={c.vigencia_automatica} nivel={prazo.vigencia}
+                            <td className="num"><Fim fim={c.vigencia_fim_vigente} dias={c.dias_vigencia} nivel={prazo.vigencia}
                               aberta={status(c) === "ativo" && !c.vigencia_automatica} /></td>
                             <td className="pedido">{p ? (
                               <Link para={{ tela: "obra", id: c.id, aba: "prazos" }}>
-                                <span className="sem-quebra">{p.numero_oficio ?? "ofício"}</span>{p.dias === null ? "" : p.dias === 0 ? ", hoje" : `, há ${fmtDias(p.dias)}`}
+                                <span className="sem-quebra">{p.numero_oficio ?? "ofício"}</span>
                               </Link>
                             ) : "—"}</td>
                             <td className="col-num num">{avisos === null || prazo.total === 0 ? "—" : <AvisosDaObra obra={c} prazo={prazo} busca={busca} />}</td>

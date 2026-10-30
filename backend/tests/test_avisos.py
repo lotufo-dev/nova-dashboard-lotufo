@@ -136,3 +136,157 @@ def test_diretoria_nao_tem_aviso_de_pagamento_atrasado(cenario):
     c.commit()                                # a 2a medicao esta' protocolada desde 30/07/2026: 200 dias depois
     lista = avisos.listar(c, D(2027, 2, 15), publico="diretoria")
     assert "pagamento_atrasado" not in {a["tipo"] for a in lista}
+
+
+# --- avisos do SIGA (issue #330) ---------------------------------------------------------------------------
+
+UTC = datetime.timezone.utc
+SITUACAO_COFIN = "1º Volume - Aguardando Andamento [COFIN, [X]]"
+NUMERO_SIGA = "SINFRA-PRO-2026/00001"
+
+
+def _cuiaba(ano, mes, dia, hora, minuto=0):
+    return datetime.datetime(ano, mes, dia, hora, minuto, tzinfo=datetime.timezone(datetime.timedelta(hours=-4))
+                             ).astimezone(UTC)
+
+
+def _banco(dt):
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _processo_siga(c, ids, recebido_em, lido_em=None, medicao=1, numero=NUMERO_SIGA, outros_movs=()):
+    """Processo recebido no COFIN em `recebido_em` (hora de Cuiaba). `medicao`: 1 (protocolada), 2 ou None (sem medicao)."""
+    medicao_id = None if medicao is None else [r[0] for r in c.execute("SELECT id FROM medicoes ORDER BY id")][medicao - 1]
+    pid = c.execute("INSERT INTO siga_processos (numero, nome, contrato_id, medicao_id) VALUES (?,?,?,?)",
+                    (numero, "Processo Alfa", ids["contrato"] if medicao_id else None, medicao_id)).lastrowid
+    c.execute("INSERT INTO siga_leituras (processo_id, lido_em, situacao) VALUES (?,?,?)",
+              (pid, lido_em or _banco(_cuiaba(2026, 10, 28, 8)), SITUACAO_COFIN))
+    for data, evento in ((recebido_em, "Recebimento"), *outros_movs):
+        c.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao, at_pessoa) VALUES (?,?,?,?,?)",
+                  (pid, data, evento, "COFIN/ORGAO", "Fulano"))
+    c.commit()
+    return pid
+
+
+def _de_siga(c, hoje=D(2026, 10, 28), tipo="siga_parado"):
+    return [a for a in avisos.listar(c, hoje) if a["tipo"] == tipo]
+
+
+def test_processo_parado_ha_7_dias_uteis_e_atencao_com_a_obra_e_o_destino(cenario):
+    c, ids = cenario
+    pid = _processo_siga(c, ids, "2026-10-19 10:00:00")            # 19, 20, 21, 22, 23, 26 e 27/10: 7 dias uteis
+    [a] = _de_siga(c)
+    assert a["nivel"] == "atencao" and a["publico"] == ["operacao"]
+    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 parado em COFIN há 7 dias úteis"
+    assert (a["obra"], a["contrato_id"], a["medicao_id"]) == ("Obra A", ids["contrato"], c.execute(
+        "SELECT medicao_id FROM siga_processos WHERE id=?", (pid,)).fetchone()[0])
+    assert (a["dias"], a["data"], a["sentido"]) == (7, "2026-10-19", "desde")
+    assert a["destino"] == {"tela": "siga", "processo": pid}
+
+
+def test_processo_parado_ha_11_dias_uteis_e_acao_e_com_4_nao_aparece(cenario):
+    c, ids = cenario
+    _processo_siga(c, ids, "2026-10-13 10:00:00")                   # 13 a 27/10 sem o feriado de 12/10: 11 dias uteis
+    [a] = _de_siga(c)
+    assert (a["nivel"], a["dias"]) == ("acao", 11)
+    assert [x["dias"] for x in _de_siga(c, D(2026, 10, 23))] == [8]   # 13 a 22/10
+    assert [x["nivel"] for x in _de_siga(c, D(2026, 10, 23))] == ["atencao"]
+    assert _de_siga(c, D(2026, 10, 15)) == []                         # 13 e 14/10: 2 dias uteis
+    assert _de_siga(c, D(2026, 10, 19)) == []                         # 13, 14, 15 e 16/10: 4 dias uteis
+    assert [x["nivel"] for x in _de_siga(c, D(2026, 10, 20))] == ["atencao"]   # 5 dias uteis
+    assert [x["nivel"] for x in _de_siga(c, D(2026, 10, 27))] == ["acao"]       # 10 dias uteis
+
+
+def test_processo_parado_some_com_movimentacao_de_hoje_ou_medicao_recebida(cenario):
+    c, ids = cenario
+    pid = _processo_siga(c, ids, "2026-10-19 10:00:00")
+    assert len(_de_siga(c)) == 1
+    c.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao) VALUES (?,?,?,?)",
+              (pid, "2026-10-28 09:30:00", "Despacho", "COFIN/ORGAO")); c.commit()
+    assert _de_siga(c) == []                                          # andou hoje
+    assert _de_siga(c, D(2026, 10, 29)) == []                         # a movimentacao zera a contagem, nao so' no dia
+    assert _de_siga(c, D(2026, 11, 4)) == []                          # 28, 29, 30/10, 3 e 4/11: ainda 4 dias uteis
+    [a] = _de_siga(c, D(2026, 11, 5))                                 # 5 dias uteis depois do despacho, o aviso volta
+    assert (a["nivel"], a["dias"], a["data"]) == ("atencao", 5, "2026-10-28")
+    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 parado em COFIN há 5 dias úteis"
+    c.execute("UPDATE medicoes SET estado='recebida' WHERE id=(SELECT medicao_id FROM siga_processos WHERE id=?)", (pid,))
+    c.commit()
+    assert _de_siga(c, D(2026, 11, 5)) == []
+
+
+def test_so_o_processo_do_protocolo_mais_recente_da_medicao_avisa(cenario):
+    c, ids = cenario                          # a medicao foi protocolada de novo: o processo antigo ficou arquivado no SIGA
+    for _ in (1, 2):
+        c.execute("INSERT INTO protocolos (contrato_id, etapa, natureza, usuario_id) VALUES (?,?,?,1)",
+                  (ids["contrato"], "unico", "execucao"))
+    p_antigo, p_novo = [r[0] for r in c.execute("SELECT id FROM protocolos ORDER BY id")]
+    primeiro = _processo_siga(c, ids, "2026-10-13 10:00:00", numero="SINFRA-PRO-2026/00001")
+    segundo = _processo_siga(c, ids, "2026-10-13 10:00:00", numero="SINFRA-PRO-2026/00002")
+    c.execute("UPDATE siga_processos SET protocolo_id=? WHERE id=?", (p_antigo, primeiro))
+    c.execute("UPDATE siga_processos SET protocolo_id=? WHERE id=?", (p_novo, segundo)); c.commit()
+    assert [a["destino"]["processo"] for a in _de_siga(c)] == [segundo]
+    # quem decide e' o protocolo, nao a ordem dos processos
+    c.execute("UPDATE siga_processos SET protocolo_id=? WHERE id=?", (p_novo, primeiro))
+    c.execute("UPDATE siga_processos SET protocolo_id=? WHERE id=?", (p_antigo, segundo)); c.commit()
+    assert [a["destino"]["processo"] for a in _de_siga(c)] == [primeiro]
+    # sem protocolo nenhum (envio por fora), vale o processo mais novo
+    c.execute("UPDATE siga_processos SET protocolo_id=NULL"); c.commit()
+    assert [a["destino"]["processo"] for a in _de_siga(c)] == [segundo]
+
+
+def test_processo_cancelado_nao_conta_como_movimentacao_de_hoje(cenario):
+    c, ids = cenario
+    _processo_siga(c, ids, "2026-10-19 10:00:00", outros_movs=[("2026-10-28 09:30:00", "Despacho Cancelado")])
+    assert len(_de_siga(c)) == 1
+
+
+def test_processo_sem_medicao_nao_gera_aviso(cenario):
+    c, ids = cenario
+    _processo_siga(c, ids, "2026-09-01 10:00:00", medicao=None)       # "Outros processos": 20 dias uteis ou mais
+    assert _de_siga(c) == []
+
+
+def test_aviso_de_processo_parado_entra_na_ordem_do_nivel_e_nao_e_da_diretoria(cenario):
+    c, ids = cenario
+    _processo_siga(c, ids, "2026-10-13 10:00:00")
+    lista = avisos.listar(c, D(2026, 10, 28))
+    assert "siga_parado" in {a["tipo"] for a in lista}
+    niveis = [avisos.NIVEIS.index(a["nivel"]) for a in lista]
+    assert niveis == sorted(niveis)
+    assert "siga_parado" not in {a["tipo"] for a in avisos.listar(c, D(2026, 10, 28), publico="diretoria")}
+
+
+def test_monitor_sem_leitura_ha_mais_de_2_horas_em_dia_util_e_acao(cenario, monkeypatch):
+    c, ids = cenario
+    _processo_siga(c, ids, "2026-10-26 10:00:00", lido_em=_banco(_cuiaba(2026, 10, 27, 8)))
+    terca = D(2026, 10, 27)
+    monkeypatch.setattr(tempo, "agora_utc", lambda: _cuiaba(2026, 10, 27, 11))
+    [a] = _de_siga(c, terca, "siga_sem_leitura")
+    assert a["nivel"] == "acao" and a["publico"] == ["operacao"]
+    assert a["mensagem"] == "monitor do SIGA sem leitura desde 27/10 08:00"
+    assert (a["obra"], a["contrato_id"], a["destino"]) == (None, None, {"tela": "siga"})
+    monkeypatch.setattr(tempo, "agora_utc", lambda: _cuiaba(2026, 10, 27, 10))      # so' 2 horas: ainda nao
+    assert _de_siga(c, terca, "siga_sem_leitura") == []
+    monkeypatch.setattr(tempo, "agora_utc", lambda: _cuiaba(2026, 10, 27, 18))      # fora do horario do robo
+    assert _de_siga(c, terca, "siga_sem_leitura") == []
+    monkeypatch.setattr(tempo, "agora_utc", lambda: _cuiaba(2026, 10, 27, 11))
+    assert "siga_sem_leitura" not in {x["tipo"] for x in avisos.listar(c, terca, publico="diretoria")}
+
+
+def test_monitor_sem_leitura_no_domingo_ou_sem_processo_acompanhado_nao_avisa(cenario, monkeypatch):
+    c, ids = cenario
+    monkeypatch.setattr(tempo, "agora_utc", lambda: _cuiaba(2026, 10, 27, 11))
+    assert _de_siga(c, D(2026, 10, 27), "siga_sem_leitura") == []                    # nenhum processo acompanhado
+    _processo_siga(c, ids, "2026-10-23 10:00:00", lido_em=_banco(_cuiaba(2026, 10, 23, 8)))
+    monkeypatch.setattr(tempo, "agora_utc", lambda: _cuiaba(2026, 10, 25, 11))       # domingo
+    assert _de_siga(c, D(2026, 10, 25), "siga_sem_leitura") == []
+
+
+def test_monitor_sem_leitura_um_so_aviso_mesmo_com_varios_processos(cenario, monkeypatch):
+    c, ids = cenario
+    lido = _banco(_cuiaba(2026, 10, 27, 8))
+    _processo_siga(c, ids, "2026-10-26 10:00:00", lido_em=lido)
+    _processo_siga(c, ids, "2026-10-26 10:00:00", lido_em=lido, medicao=2, numero="SINFRA-PRO-2026/00002")
+    _processo_siga(c, ids, "2026-10-26 10:00:00", lido_em=lido, medicao=None, numero="SINFRA-PRO-2026/00003")
+    monkeypatch.setattr(tempo, "agora_utc", lambda: _cuiaba(2026, 10, 27, 11))
+    assert len(_de_siga(c, D(2026, 10, 27), "siga_sem_leitura")) == 1
