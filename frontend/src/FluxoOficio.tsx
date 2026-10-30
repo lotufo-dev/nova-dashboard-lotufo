@@ -11,6 +11,7 @@ import { fmtTamanho as mb } from "./formato";
 import { fmtCompetencia, fmtDataPura } from "./tempo";
 import Selo from "./Selo";
 import Pendencias from "./Pendencias";
+import PleitoPrevisao from "./PleitoPrevisao";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 
 // Fluxo do oficio (bloco 7): pleito de reajuste, pedido de prorrogacao e comunicacao de conclusao. Mesmo caminho
@@ -215,6 +216,10 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
                 aoRemover={id => agir(() => api(`/api/pleitos/${p.id}/anexos/${id}/remover`, { method: "POST" }))} />
             </div>
           )}
+
+          {/* issue #272: a previsao por competencia se confere antes de montar a carta */}
+          {/* a reiteracao nao traz cronograma (#277): a previsao e' a do pleito reiterado */}
+          {editavel && p.tipo === "reajuste" && p.reemissao !== "reiteracao" && <PleitoPrevisao pleitoId={p.id} dataBase={p.data_base_mes} ciclo={p.ciclo} aoGravar={aoMudar} />}
 
           <div className="pilha">
             {/* montada a carta, o texto recolhe; montar e baixar ficam fora dele, sempre a' vista */}

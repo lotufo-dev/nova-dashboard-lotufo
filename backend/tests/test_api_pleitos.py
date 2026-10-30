@@ -1,4 +1,6 @@
 """Rotas dos pleitos e da medicao final (bloco 7): fluxo pela API com o simulador do Graph."""
+import hashlib
+import json
 import sqlite3
 import threading
 
@@ -283,6 +285,368 @@ def test_corpo_formatado_do_pleito_sai_sanitizado(api, tmp_path):
     r = cl.post(f"/api/pleitos/{pid}/enviar", json={**corpo, "corpo": PERIGOSO})
     assert r.status_code == 200, r.text
     assert corpo_enviado(tmp_path / "sim") == LIMPO
+
+
+# --- previsao de reajuste lida da planilha do pleito (issue #272; spec 2026-10-20 §2.2) ---------------------
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _previsoes(cid):
+    c = db.get_conn()
+    try:
+        return [dict(r) for r in c.execute("SELECT competencia, valor_previsto_centavos AS valor, origem, pleito_id, "
+                                           "data_base_mes, ciclo, usuario_id FROM reajuste_previsoes "
+                                           "WHERE contrato_id=? ORDER BY id", (cid,))]
+    finally:
+        c.close()
+
+
+def _novo_pleito(cl, cid):
+    return cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
+
+
+def test_planilha_de_previsao_e_lida_para_conferir_sem_gravar(api):
+    from tests.test_leitura_planilha_reajuste import planilha_modelo
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    r = cl.post(f"/api/pleitos/{pid}/previsao/ler", files=_arquivo("Mem. e Cron.xlsx", planilha_modelo(), XLSX))
+    assert r.status_code == 200, r.text
+    assert r.json()["reconhecida"] is True
+    assert [(x["competencia"], x["valor_centavos"]) for x in r.json()["linhas"]] == [
+        ("2026-03", 123456), ("2026-04", 200000), ("2026-05", 10)]
+    assert _previsoes(cid) == []                       # ler so' mostra: quem grava e' o aceite
+
+
+def test_planilha_fora_do_modelo_pede_a_digitacao(api):
+    import io
+
+    import openpyxl
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    wb = openpyxl.Workbook()
+    buf = io.BytesIO()
+    wb.save(buf)
+    r = cl.post(f"/api/pleitos/{pid}/previsao/ler", files=_arquivo("outra.xlsx", buf.getvalue(), XLSX))
+    assert r.status_code == 200, r.text
+    assert r.json() == {"reconhecida": False, "mensagem": "Não reconheci a planilha; digite a previsão",
+                        "motivo": "falta a aba Resumo", "linhas": []}
+    # PDF no lugar da planilha: recusado na entrada, como os outros anexos .xlsx
+    assert cl.post(f"/api/pleitos/{pid}/previsao/ler",
+                   files=_arquivo("x.pdf", b"%PDF-1.4 x", "application/pdf")).status_code == 415
+
+
+def _planilha(*linhas):
+    """Planilha do modelo com (competencia 'AAAA-MM', reais) por linha."""
+    from tests.test_leitura_planilha_reajuste import planilha_modelo
+    return planilha_modelo([(f"{i + 1}ª Medição", f"01/{c[5:]}/{c[:4]} a 28/{c[5:]}/{c[:4]}", v)
+                            for i, (c, v) in enumerate(linhas)])
+
+
+def _aceitar(cl, pid, *linhas):
+    """Como a tela faz: le, e aceita a mesma planilha com o sha256 que a leitura devolveu."""
+    dados = _planilha(*linhas)
+    lida = cl.post(f"/api/pleitos/{pid}/previsao/ler", files=_arquivo("prev.xlsx", dados, XLSX)).json()
+    return cl.post(f"/api/pleitos/{pid}/previsao/planilha", data={"sha256": lida["sha256"]},
+                   files=_arquivo("prev.xlsx", dados, XLSX))
+
+
+def _digitar(cl, pid, linhas):
+    return cl.post(f"/api/pleitos/{pid}/previsao/digitada", json={"linhas": linhas})
+
+
+def test_aceitar_grava_previsoes_de_origem_pleito_e_aparecem_na_aba_reajuste(api):
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    r = _aceitar(cl, pid, ("2026-07", 1234.56), ("2026-08", -0.1))
+    assert r.status_code == 200, r.text
+    assert r.json()["previsao_gravada"] == 2           # a contagem que a tela confirma vem do servidor
+    grav = _previsoes(cid)
+    assert [(p["competencia"], p["valor"], p["origem"], p["pleito_id"], p["data_base_mes"], p["ciclo"]) for p in grav] \
+        == [("2026-07", 123456, "pleito", pid, "2024-06", 2026), ("2026-08", -10, "pleito", pid, "2024-06", 2026)]
+    assert all(p["usuario_id"] for p in grav)
+    aba = cl.get(f"/api/contratos/{cid}/reajuste").json()
+    assert [(p["competencia"], p["valor_previsto_centavos"], p["origem"]) for p in aba["previsoes"]] == [
+        ("2026-07", 123456, "pleito"), ("2026-08", -10, "pleito")]
+    # aceitar de novo e' evento novo: o anterior fica, a leitura escolhe o mais recente
+    assert _aceitar(cl, pid, ("2026-07", 0.05), ("2026-08", -0.1)).status_code == 200
+    assert len(_previsoes(cid)) == 4
+    vig = {p["competencia"]: p["valor_previsto_centavos"]
+           for p in cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]}
+    assert vig == {"2026-07": 5, "2026-08": -10}
+    c = db.get_conn()
+    try:
+        depois = [json.loads(r[0]) for r in c.execute(
+            "SELECT depois FROM audit_log WHERE acao='pleito.previsao' AND entidade='pleito' AND entidade_id=?",
+            (str(pid),))]
+    finally:
+        c.close()
+    # a auditoria guarda a impressao digital da planilha que o servidor leu
+    assert len(depois) == 2 and all(len(d["planilha_sha256"]) == 64 for d in depois)
+
+
+def test_origem_pleito_so_nasce_da_planilha_relida_no_servidor(api):
+    """A tela nao escolhe a origem: sem planilha nao ha' 'pleito', e a digitada e' sempre 'manual'."""
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    linhas = [{"competencia": "2026-07", "valor_centavos": 999_99}]
+    # a rota antiga, que aceitava a origem do corpo, nao existe mais
+    assert cl.post(f"/api/pleitos/{pid}/previsao", json={"origem": "pleito", "linhas": linhas}).status_code in (404, 405)
+    assert cl.post(f"/api/pleitos/{pid}/previsao/planilha").status_code == 422           # sem arquivo
+    fora = _planilha_fora_do_modelo()
+    r = cl.post(f"/api/pleitos/{pid}/previsao/planilha", data={"sha256": hashlib.sha256(fora).hexdigest()},
+                files=_arquivo("outra.xlsx", fora, XLSX))
+    assert r.status_code == 422 and "Não reconheci a planilha" in r.json()["detail"]
+    # a planilha do aceite tem de ser a conferida: sem o sha256, ou com o de outra leitura, nao grava
+    conferida, outra = _planilha(("2026-07", 1.0)), _planilha(("2026-07", 9.0))
+    assert cl.post(f"/api/pleitos/{pid}/previsao/planilha",
+                   files=_arquivo("p.xlsx", conferida, XLSX)).status_code == 422
+    r = cl.post(f"/api/pleitos/{pid}/previsao/planilha", data={"sha256": hashlib.sha256(conferida).hexdigest()},
+                files=_arquivo("p.xlsx", outra, XLSX))
+    assert r.status_code == 422 and "não é a que foi conferida" in r.json()["detail"]
+    assert _previsoes(cid) == []
+    r = cl.post(f"/api/pleitos/{pid}/previsao/digitada", json={"origem": "pleito", "linhas": linhas})
+    assert r.status_code == 200, r.text
+    assert [(p["origem"], p["pleito_id"]) for p in _previsoes(cid)] == [("manual", pid)]
+
+
+def _planilha_fora_do_modelo():
+    import io
+
+    import openpyxl
+    buf = io.BytesIO()
+    openpyxl.Workbook().save(buf)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("linhas, trecho", [
+    ([], None),
+    ([{"competencia": "2026-13", "valor_centavos": 1}], None),
+    ([{"competencia": "2026-07", "valor_centavos": 1.5}], None),
+    ([{"competencia": "2026-07", "valor_centavos": 10**13}], None),
+    ([{"competencia": "2026-07", "valor_centavos": 1}, {"competencia": "2026-07", "valor_centavos": 2}], "07/2026"),
+])
+def test_previsao_digitada_invalida_e_recusada_sem_gravar(api, linhas, trecho):
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    r = _digitar(cl, pid, linhas)
+    assert r.status_code == 422, r.text
+    if trecho:
+        assert trecho in r.json()["detail"]
+    assert _previsoes(cid) == []
+
+
+def test_previsao_so_no_pleito_de_reajuste_que_vale(api):
+    cl, cid, _ = api
+    linhas = [{"competencia": "2026-07", "valor_centavos": 1}]
+    prazo = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "200", "dias": 30,
+                                                           "justificativa": "atraso na liberacao da area"}).json()["id"]
+    r = _digitar(cl, prazo, linhas)
+    assert r.status_code == 422 and "reajuste" in r.json()["detail"]
+    pid = _novo_pleito(cl, cid)
+    cl.post(f"/api/pleitos/{pid}/descartar", json={"motivo": "numero errado"})
+    r = _aceitar(cl, pid, ("2026-07", 1.0))
+    assert r.status_code == 422 and "descartado" in r.json()["detail"]
+    assert _digitar(cl, 999999, linhas).status_code == 404
+    assert _previsoes(cid) == []
+
+
+def test_previsao_nao_entra_no_pleito_ja_enviado(api):
+    """O pleito enviado levou a previsao dele ao orgao: gravar outra por cima mudaria o que foi pedido."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 200
+    r = _aceitar(cl, pid, ("2026-07", 1.0))
+    assert r.status_code == 422 and "enviado" in r.json()["detail"]
+    assert _previsoes(cid) == []
+
+
+def test_previsao_nao_entra_com_o_envio_do_pleito_em_andamento(api, monkeypatch):
+    """Com o e-mail saindo (reserva gravada), a situacao ainda e' 'assinado': a guarda le a reserva DENTRO da
+    transacao, como o descarte, e devolve a mesma recusa de envio reservado (409)."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    c = db.get_conn()
+    u = c.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    respostas = []
+
+    def no_meio():
+        respostas.append(_aceitar(cl, pid, ("2026-07", 1.0)))
+
+    monkeypatch.setattr(correio, "cliente", CorreioFalso(no_meio=no_meio))
+    pleitos.enviar(c, {"id": u, "email": "admin@lotufo.com"}, pid,
+                   *[corpo[k] for k in ("para", "copia", "assunto", "corpo", "justificativa")])
+    c.close()
+    assert [r.status_code for r in respostas] == [409]
+    assert respostas[0].json()["detail"]["codigo"] == "ENVIO_RESERVADO"
+    assert _previsoes(cid) == []
+
+
+def test_previsao_lida_e_relida_dentro_da_transacao(api, monkeypatch):
+    """Descarte que entra entre a leitura do pleito e a gravacao: a guarda de dentro do BEGIN IMMEDIATE recusa."""
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    original = pleitos._linha
+    chamadas = []
+
+    def linha_e_descarta(conn, pleito_id):
+        p = original(conn, pleito_id)
+        chamadas.append(1)
+        if len(chamadas) == 1:          # a primeira leitura (fora da transacao) ve o rascunho; depois, descartado
+            outra = db.get_conn()
+            outra.execute("UPDATE pleitos SET situacao='descartado' WHERE id=?", (pleito_id,))
+            outra.commit(); outra.close()
+        return p
+
+    monkeypatch.setattr(pleitos, "_linha", linha_e_descarta)
+    r = _digitar(cl, pid, [{"competencia": "2026-07", "valor_centavos": 1}])
+    assert r.status_code == 422 and "descartado" in r.json()["detail"]
+    assert _previsoes(cid) == []
+
+
+def test_leva_nova_que_omite_competencia_ou_digitada_depois_da_lida_e_recusada(api):
+    """Nada se apaga: competencia que a leva nova nao traz continuaria valendo, e a digitada perde da lida."""
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    assert _aceitar(cl, pid, ("2026-07", 0.01), ("2026-08", 0.02)).status_code == 200
+    r = _aceitar(cl, pid, ("2026-08", 0.02))
+    assert r.status_code == 422 and "07/2026" in r.json()["detail"]
+    assert "reemit" not in r.json()["detail"]          # a reemissao e' da #277; a mensagem nao a promete
+    r = _digitar(cl, pid, [{"competencia": "2026-07", "valor_centavos": 1}, {"competencia": "2026-08", "valor_centavos": 2}])
+    assert r.status_code == 422 and "lida da planilha do pleito CT-122-LT-2026" in r.json()["detail"]
+    assert len(_previsoes(cid)) == 2
+
+
+def test_previsao_que_perderia_para_a_de_outro_pleito_do_ciclo_e_recusada(api):
+    """Pleito A enviado com previsao lida; pleito B no mesmo ciclo digita: a de A continuaria vencendo, entao a
+    tela nao pode dizer "Previsao gravada". Lida contra lida, a mais nova vale e grava."""
+    cl, cid, _ = api
+    a, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, a, ("2026-07", 1.0), ("2026-08", 2.0)).status_code == 200
+    assert cl.post(f"/api/pleitos/{a}/enviar", json=corpo).status_code == 200
+    b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
+    r = _digitar(cl, b, [{"competencia": "2026-08", "valor_centavos": 7}])
+    assert r.status_code == 422, r.text
+    assert "08/2026 continuaria sendo a lida da planilha do pleito CT-122-LT-2026" in r.json()["detail"]
+    assert len(_previsoes(cid)) == 2
+    assert _aceitar(cl, b, ("2026-08", 3.0)).status_code == 200
+    vig = {p["competencia"]: p["valor_previsto_centavos"]
+           for p in cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]}
+    assert vig == {"2026-07": 100, "2026-08": 300}
+
+
+def test_reemissao_aceita_previsao_digitada_mesmo_com_a_lida_do_pleito_que_ela_reemite(api):
+    """Pleito B reemite A (A enviado com previsao lida). A digitada de B nao pode ser recusada por perder para a
+    de A: a de A sai da conta quando B for enviado, e depois do envio B nao aceita mais previsao (sem saida)."""
+    cl, cid, _ = api
+    a, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, a, ("2026-07", 1.0), ("2026-08", 2.0)).status_code == 200
+    assert cl.post(f"/api/pleitos/{a}/enviar", json=corpo).status_code == 200
+    b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
+    c = db.get_conn()          # a reemissao (#277) ainda nao tem tela: liga B a A direto no banco
+    c.execute("UPDATE pleitos SET reemite_pleito_id=? WHERE id=?", (a, b)); c.commit(); c.close()
+    r = _digitar(cl, b, [{"competencia": "2026-07", "valor_centavos": 7}, {"competencia": "2026-08", "valor_centavos": 9}])
+    assert r.status_code == 200, r.text
+    assert r.json()["previsao_gravada"] == 2
+    assert [(p["origem"], p["pleito_id"]) for p in _previsoes(cid)][-2:] == [("manual", b), ("manual", b)]
+
+
+def _ligar(pid, anterior, reemissao, situacao=None):
+    """A reemissao montada direto no banco (o caminho pela tela pede envio e aditivo, fora do que se testa aqui)."""
+    c = db.get_conn()
+    c.execute("UPDATE pleitos SET reemite_pleito_id=?, reemissao=? WHERE id=?", (anterior, reemissao, pid))
+    if situacao:
+        c.execute("UPDATE pleitos SET situacao=? WHERE id=?", (situacao, pid))
+    c.commit()
+    c.close()
+
+
+def test_digitada_da_reemissao_que_perderia_para_a_lida_de_outro_pleito_e_recusada(api):
+    """D enviado com a lida de 07; A, depois, com a lida de 07 (mais nova, vale); B reemite A e digita 07. Quando B
+    for enviado, a de A sai da conta e a lida de D volta a valer contra a digitada de B: B nunca valeria."""
+    cl, cid, _ = api
+    d, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, d, ("2026-07", 1.0)).status_code == 200
+    assert cl.post(f"/api/pleitos/{d}/enviar", json=corpo).status_code == 200
+    a = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
+    assert _aceitar(cl, a, ("2026-07", 2.0)).status_code == 200
+    _ligar(a, None, None, "enviado")
+    b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "124"}).json()["id"]
+    _ligar(b, a, "cronograma")
+    r = _digitar(cl, b, [{"competencia": "2026-07", "valor_centavos": 7}])
+    assert r.status_code == 422, r.text
+    assert "07/2026 continuaria sendo a lida da planilha do pleito" in r.json()["detail"]
+    assert len(_previsoes(cid)) == 2
+
+
+def test_reiteracao_nao_grava_previsao_nem_lida_nem_digitada(api):
+    """A reiteracao nao traz cronograma (#277): nem a planilha lida (que, mais nova, venceria a lida do pleito
+    reiterado) nem a digitada entram nela."""
+    cl, cid, _ = api
+    a, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, a, ("2026-07", 1.0)).status_code == 200
+    assert cl.post(f"/api/pleitos/{a}/enviar", json=corpo).status_code == 200
+    b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
+    _ligar(b, a, "reiteracao")
+    for r in (_aceitar(cl, b, ("2026-07", 9.0)), _digitar(cl, b, [{"competencia": "2026-07", "valor_centavos": 7}])):
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"] == "Reiteração não traz previsão de reajuste: vale a do pleito reiterado"
+    assert len(_previsoes(cid)) == 1
+    vig = cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]
+    assert [(x["valor_previsto_centavos"], x["pleito_id"]) for x in vig] == [(100, a)]
+
+
+def test_digitada_do_cronograma_novo_depois_da_reiteracao_vale_depois_do_envio(api):
+    """A (lida) -> B reitera A -> C reemite o cronograma de B: enviado C, a de A sai da conta pela cadeia, entao a
+    digitada de C e' aceita e passa a valer."""
+    cl, cid, _ = api
+    a, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, a, ("2026-07", 1.0)).status_code == 200
+    assert cl.post(f"/api/pleitos/{a}/enviar", json=corpo).status_code == 200
+    b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
+    _ligar(b, a, "reiteracao", "enviado")
+    c = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "124"}).json()["id"]
+    _ligar(c, b, "cronograma")
+    r = _digitar(cl, c, [{"competencia": "2026-07", "valor_centavos": 7}])
+    assert r.status_code == 200, r.text
+    _ligar(c, b, "cronograma", "enviado")
+    vig = cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]
+    assert [(p["competencia"], p["valor_previsto_centavos"], p["pleito_id"]) for p in vig] == [("2026-07", 7, c)]
+
+
+def _anexar(cl, pid, nome, dados, tipo="planilha_calculo"):
+    r = cl.post(f"/api/pleitos/{pid}/anexos", data={"tipo": tipo}, files=_arquivo(nome, dados, XLSX))
+    assert r.status_code == 200, r.text
+    return [a for a in r.json()["anexos"] if a["nome"] == nome][-1]["id"]
+
+
+def test_planilha_aceita_diferente_da_memoria_anexada_nao_sai(api):
+    """Aceita a planilha B e anexa a A como memoria de calculo: o orgao receberia A com a dashboard mostrando B.
+    A previa aponta e o envio e' recusado (nem com justificativa), antes do e-mail."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, pid, ("2026-07", 2.0)).status_code == 200            # B
+    a = _anexar(cl, pid, "memoria-A.xlsx", _planilha(("2026-07", 1.0)))      # A
+    msg = "A memória de cálculo anexada não é a planilha da previsão aceita"
+    assert msg in [x["mensagem"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=corpo)
+    assert r.status_code == 422 and r.json()["detail"] == msg, r.text
+    assert _estado(pid)[1] == 0                                              # nenhum e-mail saiu
+    # com a B anexada e a A ainda la', continua divergente; tirando a A, sai
+    _anexar(cl, pid, "memoria-B.xlsx", _planilha(("2026-07", 2.0)))
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 422
+    assert cl.post(f"/api/pleitos/{pid}/anexos/{a}/remover").status_code == 200
+    assert msg not in [x["mensagem"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 200
+
+
+def test_digitada_e_descartada_some_da_aba(api):
+    cl, cid, _ = api
+    pid = _novo_pleito(cl, cid)
+    assert _digitar(cl, pid, [{"competencia": "2026-09", "valor_centavos": 700}]).status_code == 200
+    assert len(cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]) == 1
+    cl.post(f"/api/pleitos/{pid}/descartar", json={"motivo": "numero errado"})
+    assert cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"] == []
 
 
 # --- reiteracao do pleito de reajuste (issue #277) ------------------------------------------------------------

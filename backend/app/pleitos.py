@@ -11,8 +11,8 @@ import json
 import re
 from html import escape
 
-from app import (arquivos, assinatura, auditoria, carta, correio, db, envio_reserva, espelhos, medicoes, oficios, pdfs,
-                 prazos, reajuste, tempo)
+from app import (arquivos, assinatura, auditoria, carta, correio, db, dinheiro, envio_reserva, espelhos,
+                 leitura_planilha_reajuste, medicoes, oficios, pdfs, prazos, reajuste, tempo)
 from app import html_email
 
 TIPOS = ("reajuste", "prazo", "conclusao")
@@ -294,6 +294,127 @@ def remover_anexo(conn, usuario_id: int, pleito_id: int, anexo_id: int) -> None:
         auditoria.registrar(conn, usuario_id, "pleito.anexo_removido", "pleito", pleito_id, None, {"anexo_id": anexo_id})
 
 
+# --- previsao de reajuste (issue #272; spec 2026-10-20 §2.2) -----------------------------------------
+
+MAX_COMPETENCIAS = leitura_planilha_reajuste.MAX_COMPETENCIAS
+PREVISAO_NA_REITERACAO = "Reiteração não traz previsão de reajuste: vale a do pleito reiterado"
+MEMORIA_DIVERGENTE = "A memória de cálculo anexada não é a planilha da previsão aceita"
+_COMPETENCIA = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
+
+
+def gravar_previsao_planilha(conn, usuario_id: int, pleito_id: int, dados: bytes, sha256_conferido: str) -> int:
+    """Aceite da planilha conferida: o servidor rele o arquivo e grava o que ELE leu, com origem 'pleito' (a tela
+    nao escolhe a origem nem os valores). `sha256_conferido` e' o da leitura que a pessoa viu: outro arquivo no
+    aceite e' recusado. Fora do modelo levanta `PlanilhaNaoReconhecida` (um ValueError)."""
+    sha = arquivos.sha_de(dados)
+    if sha != (sha256_conferido or "").lower():
+        raise ValueError("A planilha do aceite não é a que foi conferida; anexe e confira de novo")
+    linhas = leitura_planilha_reajuste.ler(dados)
+    return _gravar_previsao(conn, usuario_id, pleito_id, "pleito", linhas, {"planilha_sha256": sha})
+
+
+def gravar_previsao_digitada(conn, usuario_id: int, pleito_id: int, linhas: list[dict]) -> int:
+    """Previsao digitada pela pessoa (planilha fora do modelo, fila humana): sempre origem 'manual'."""
+    return _gravar_previsao(conn, usuario_id, pleito_id, "manual", linhas, {})
+
+
+def _planilha_aceita(conn, pleito_id: int) -> str | None:
+    """sha256 da ultima planilha aceita (origem 'pleito') neste pleito. Vem da auditoria da gravacao, que entra no
+    mesmo commit das previsoes e e' append-only (indice `ix_audit_log_entidade`, migracao 036)."""
+    for r in conn.execute("SELECT depois FROM audit_log WHERE entidade='pleito' AND entidade_id=? "
+                          "AND acao='pleito.previsao' ORDER BY id DESC", (str(pleito_id),)):
+        d = json.loads(r["depois"] or "{}")
+        if d.get("origem") == "pleito":
+            return d.get("planilha_sha256")
+    return None
+
+
+def _memoria_divergente(conn, p: dict) -> bool:
+    """Com previsao lida da planilha, toda planilha .xlsx anexada como memoria de calculo tem de ser a aceita (e
+    ela tem de estar la'): senao o orgao recebe uma planilha e a dashboard mostra outra. Memoria so' em PDF nao se
+    compara (nao ha' como casar PDF com a planilha)."""
+    sha = _planilha_aceita(conn, p["id"]) if p["tipo"] == "reajuste" else None
+    if not sha:
+        return False
+    memorias = {a["sha256"] for a in _anexos_de(conn, p["id"]) if a["tipo"] == "planilha_calculo" and a["ext"] == "xlsx"}
+    return bool(memorias) and memorias != {sha}
+
+
+def _fonte(conn, r) -> str:
+    if r["origem"] == "apostilamento":
+        return "a do apostilamento"
+    num = conn.execute("SELECT numero_oficio FROM pleitos WHERE id=?", (r["pleito_id"],)).fetchone()
+    lida = "lida da planilha" if r["origem"] == "pleito" else "digitada"
+    return f"a {lida} do pleito {(num and num[0]) or 'sem número'}"
+
+
+def _gravar_previsao(conn, usuario_id: int, pleito_id: int, origem: str, linhas: list[dict], extra: dict) -> int:
+    """Uma linha de `reajuste_previsoes` por competencia (evento; aceitar de novo grava outra leva e a leitura
+    escolhe a mais recente). Devolve quantas gravou.
+
+    Como nada se apaga, a leitura (`reajuste.previsoes_vigentes`) tem de dar, depois da gravacao, exatamente o que a
+    pessoa conferiu: a leva nova do mesmo pleito traz todas as competencias das anteriores (senao a que saiu
+    continuaria valendo), e nenhuma competencia gravada pode continuar perdendo para outra previsao mais forte
+    (a lida de outro pleito do ciclo, a lida deste pleito contra a digitada, o apostilamento)."""
+    p = _linha(conn, pleito_id)
+    if p["tipo"] != "reajuste":
+        raise ValueError("Previsão de reajuste só no pleito de reajuste")
+    if _reiteracao(p):               # a reiteracao nao traz cronograma (#277): a previsao e' a do pleito reiterado
+        raise ValueError(PREVISAO_NA_REITERACAO)
+    if not p["data_base_mes"] or not p["ciclo"]:
+        raise ValueError("Pleito sem data-base e ciclo: a previsão não tem a que se ligar")
+    if not linhas:
+        raise ValueError("Informe ao menos uma competência com o valor previsto")
+    if len(linhas) > MAX_COMPETENCIAS:
+        raise ValueError(f"No máximo {MAX_COMPETENCIAS} competências por previsão")
+    vistas: set[str] = set()
+    for x in linhas:
+        comp, valor = x.get("competencia"), x.get("valor_centavos")
+        if not isinstance(comp, str) or not _COMPETENCIA.fullmatch(comp):
+            raise ValueError("Competência inválida: use mês e ano")
+        if comp in vistas:
+            raise ValueError(f"A competência {comp[5:]}/{comp[:4]} aparece duas vezes")
+        vistas.add(comp)
+        # bool e' int no Python: True nao e' um centavo
+        if not isinstance(valor, int) or isinstance(valor, bool) or abs(valor) > dinheiro.TETO_CENTAVOS:
+            raise ValueError(f"Valor previsto inválido em {comp[5:]}/{comp[:4]}")
+    ordenadas = sorted(linhas, key=lambda x: x["competencia"])
+    with db.mutacao(conn):
+        # dentro do BEGIN IMMEDIATE (como em `descartar`): situacao e reserva de envio lidas aqui sao as que valem;
+        # com o e-mail saindo ou ja' enviado, a previsao do pleito e' a que foi com ele
+        agora = _linha(conn, pleito_id)
+        if agora["situacao"] in ("descartado", "enviado"):
+            raise ValueError(f"Pleito {agora['situacao']}: a previsão não pode ser gravada (correção é pleito novo)")
+        if agora["envio_reservado_em"]:
+            raise envio_reserva.reservado(conn, agora["envio_reservado_em"], agora["envio_reservado_por"])
+        anteriores = {r[0] for r in conn.execute("SELECT competencia FROM reajuste_previsoes WHERE pleito_id=?",
+                                                 (pleito_id,))}
+        faltam = sorted(anteriores - vistas)
+        if faltam:
+            lista = ", ".join(f"{c[5:]}/{c[:4]}" for c in faltam)
+            raise ValueError(f"A previsão nova não traz {lista}, que a anterior deste pleito tinha; inclua a "
+                             "competência")
+        novas = set()
+        for x in ordenadas:
+            novas.add(conn.execute(
+                "INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, "
+                "valor_previsto_centavos, origem, pleito_id, usuario_id) VALUES (?,?,?,?,?,?,?,?)",
+                (p["contrato_id"], p["data_base_mes"], p["ciclo"], x["competencia"], x["valor_centavos"],
+                 origem, pleito_id, usuario_id)).lastrowid)
+        # a gravada tem de ser a que vale; se outra previsao mais forte continua vencendo, a mutacao desfaz tudo.
+        # A conta e' a de depois do envio deste pleito (`como_enviado`): a reemissao derruba o que reemite (e a
+        # cadeia de reiteracoes acima), a reiteracao nao derruba nada; o resto do ciclo segue na conta
+        for r in reajuste.previsoes_vigentes(conn, p["contrato_id"], p["data_base_mes"], como_enviado=pleito_id):
+            if r["ciclo"] == p["ciclo"] and r["competencia"] in vistas and r["id"] not in novas:
+                c = r["competencia"]
+                raise ValueError(f"A previsão de {c[5:]}/{c[:4]} continuaria sendo {_fonte(conn, r)}, que vale "
+                                 "mais que esta; esta não seria usada")
+        auditoria.registrar(conn, usuario_id, "pleito.previsao", "pleito", pleito_id, None,
+                            {"origem": origem, "data_base_mes": p["data_base_mes"], "ciclo": p["ciclo"],
+                             "competencias": {x["competencia"]: x["valor_centavos"] for x in ordenadas}, **extra})
+    return len(ordenadas)
+
+
 # --- carta -----------------------------------------------------------------------------------------
 
 def _textos(conn, p: dict) -> dict:
@@ -426,6 +547,8 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     if p["tipo"] == "prazo" and _CHUVA.search(p["justificativa"] or "") and not conn.execute(
             "SELECT 1 FROM instrumentos WHERE contrato_id=? AND tipo='paralisacao' LIMIT 1", (p["contrato_id"],)).fetchone():
         out.append({"codigo": "chuva", "mensagem": "O contrato veda alegar só chuva; cite a ordem de paralisação do órgão"})
+    if _memoria_divergente(conn, p):
+        out.append({"codigo": "memoria_divergente", "mensagem": MEMORIA_DIVERGENTE})
     if p["situacao"] == "rascunho":
         out.append({"codigo": "nao_montado", "mensagem": "Carta ainda não montada"})
     elif not p["assinado_arquivo"]:
@@ -528,6 +651,8 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         raise ValueError("Informe ao menos um destinatário")
     if pv["total"] > correio.MAX_TOTAL:
         raise ValueError("Anexos acima do limite do e-mail")
+    if _memoria_divergente(conn, p):            # a justificativa nao libera: o orgao receberia outra planilha
+        raise ValueError(MEMORIA_DIVERGENTE)
     justificativa = (justificativa or "").strip() or None
     if pv["pendencias"] and len(justificativa or "") < MIN_JUSTIFICATIVA:
         raise ValueError(f"{len(pv['pendencias'])} pendência(s) na prévia: informe a justificativa "
@@ -538,6 +663,10 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
     if _linha(conn, pleito_id)["situacao"] == "descartado":
         envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
         raise ValueError("Pleito descartado enquanto se preparava o envio: nada foi enviado")
+    # anexo trocado ou previsao aceita entre a leitura acima e a reserva: confere de novo, ja' com a reserva
+    if _memoria_divergente(conn, p):
+        envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
+        raise ValueError(MEMORIA_DIVERGENTE)
     try:
         envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(p), para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),

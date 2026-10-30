@@ -45,6 +45,23 @@ describe("Ofício", () => {
     expect(JSON.parse(opcoes.body).justificativa).toBe("memorial segue amanhã");
   });
 
+  // issue #272: a previsão de reajuste se confere no pleito de reajuste em aberto; no de prazo e no enviado, não
+  it("só o pleito de reajuste em aberto oferece a planilha de previsão", () => {
+    const reajuste: Pleito = { ...PLEITO, tipo: "reajuste", rotulo: "Pleito de reajuste", data_base_mes: "2024-06", ciclo: 2026 };
+    const { rerender } = render(<CartaoPleito p={reajuste} podeEditar aoMudar={() => {}} />);
+    expect(screen.getByLabelText("Anexar planilha de previsão")).toBeTruthy();
+    rerender(<CartaoPleito p={PLEITO} podeEditar aoMudar={() => {}} />);
+    expect(screen.queryByLabelText("Anexar planilha de previsão")).toBeNull();
+    rerender(<CartaoPleito p={reajuste} podeEditar={false} aoMudar={() => {}} />);
+    expect(screen.queryByLabelText("Anexar planilha de previsão")).toBeNull();
+    // a reiteracao nao traz cronograma (#277): a previsao e' a do pleito reiterado; a reemissao do cronograma traz
+    const ligado = { reemite_pleito_id: 3, anterior: { id: 3, numero_oficio: "122", situacao: "enviado", enviado_em: "2026-07-01", reemissao: null } };
+    rerender(<CartaoPleito p={{ ...reajuste, ...ligado, reemissao: "reiteracao" }} podeEditar aoMudar={() => {}} />);
+    expect(screen.queryByLabelText("Anexar planilha de previsão")).toBeNull();
+    rerender(<CartaoPleito p={{ ...reajuste, ...ligado, reemissao: "cronograma" }} podeEditar aoMudar={() => {}} />);
+    expect(screen.getByLabelText("Anexar planilha de previsão")).toBeTruthy();
+  });
+
   // issue #27: carta editada pede confirmação; depois de enviada ou descartada, a guarda solta
   it("carta editada pede confirmação ao sair; ofício enviado ou descartado não prende a tela", () => {
     window.history.replaceState(null, "", "/obras/1/prazos");
