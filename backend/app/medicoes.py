@@ -45,6 +45,10 @@ ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
 ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
 PEDIDO_POR_REVISAO = "Para mudar o pedido, registre uma revisão da planilha/carta"
 PEDIDO_DEPOIS_DO_BOLETIM = "O pedido não pode mais ser alterado depois do boletim do órgão"
+# Gate Sol S4 (#281): os estados que recebem protocolo, por extenso. Estes vao a `protocolada` no mesmo passo...
+ESTADOS_PROMOVIDOS_PELO_PROTOCOLO = ("prevista", "planilha_gerada", *ESTADOS_ESPELHO, "nota_emitida")
+# ...e estes ja' foram protocolados: o protocolo seguinte (novo oficio) so' congela. Os demais sao recusados.
+ESTADOS_DE_NOVO_PROTOCOLO = ("protocolada", "nf_emitida")
 # B-12 (10/10/2026): mensagem ao usuario com o tipo e o estado por extenso, nunca o codigo ("(execucao)")
 ROTULO_TIPO = {"execucao": "execução", "reajuste": "reajuste", "projeto": "projeto"}
 ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta gerada",
@@ -356,6 +360,9 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         atual = m["estado"]
         if atual in ("cancelada", "desistida", "recebida"):
             raise ValueError(f"Medição em estado final ({atual}) não recebe protocolo")
+        if atual not in (*ESTADOS_PROMOVIDOS_PELO_PROTOCOLO, *ESTADOS_DE_NOVO_PROTOCOLO):
+            # Gate Sol S4 (#281): planilha enviada e boletim recebido congelariam o pedido sem mudar o estado
+            raise ValueError(f"Medição {rotulo_estado(atual)} não recebe protocolo")
         if exige_nota and atual == "nota_emitida":
             # Issue #188: o protocolo registrado a mao tambem espera a outra metade onde o orgao junta medicao e
             # reajuste (conferido aqui, sob o mesmo lock da gravacao)
@@ -396,7 +403,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         # SELECT e o UPDATE outro usuario pode cancelar/mover a medicao. Sem a condicao, o
         # perdedor da corrida sobrescreveria um estado final. Vem ANTES do INSERT para nao
         # deixar protocolo orfao na transacao quando a corrida e perdida.
-        if atual in ("prevista", "planilha_gerada", *ESTADOS_ESPELHO, "nota_emitida"):
+        if atual in ESTADOS_PROMOVIDOS_PELO_PROTOCOLO:
             upd = conn.execute(
                 "UPDATE medicoes SET estado='protocolada', congelada=1 WHERE id=? AND estado=?",
                 (medicao_id, atual))

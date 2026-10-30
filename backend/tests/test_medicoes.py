@@ -680,3 +680,16 @@ def test_projeto_nao_tem_saldo_contra_o_contrato(conn, contrato_id):
                                                            "tipo": "projeto"}, ANEXOS)
     assert r["saldo_centavos"] is None and r["saldo_apos_pedido_centavos"] is None
     assert medicao_planilhas.sugestao(conn, contrato_id, "projeto")["saldo_centavos"] is None
+
+
+@pytest.mark.parametrize("estado", ["planilha_enviada", "boletim_recebido"])
+def test_protocolo_a_mao_recusado_depois_do_envio_da_planilha(conn, contrato_id, estado):
+    """Gate Sol S4 (#281): nesses estados o protocolo a mao congelava o pedido sem mudar o estado. A lista de estados
+    que recebem protocolo e' explicita; os demais sao recusados e nada e' gravado."""
+    _com_valores(conn, contrato_id, 1, estado, 1_00, None)
+    mid = conn.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1", (contrato_id,)).fetchone()[0]
+    with pytest.raises(ValueError, match=f"Medição {medicoes.rotulo_estado(estado)} não recebe protocolo"):
+        medicoes.registrar_protocolo(conn, 1, mid, "2026-08-05", "CT-1-LT-2026", None, "manual")
+    d = medicoes.detalhe(conn, mid)
+    assert (d["estado"], d["congelada"]) == (estado, 0)
+    assert conn.execute("SELECT COUNT(*) FROM medicao_protocolos WHERE medicao_id=?", (mid,)).fetchone()[0] == 0
