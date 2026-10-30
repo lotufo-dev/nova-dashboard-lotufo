@@ -45,6 +45,7 @@
 @media (prefers-reduced-motion: reduce) { .sg__ponto--lendo { animation: none; } }
 .sg__lendo { color: var(--acento); }
 .sg__nao-lido { color: var(--acao); }
+.sg__vivo:empty { display: contents; }   /* vazio, nao ocupa o gap do topo */
 .sg__avisos { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .sg__acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 

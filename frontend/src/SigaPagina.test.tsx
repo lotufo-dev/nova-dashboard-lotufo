@@ -275,9 +275,9 @@ describe("SigaPagina", () => {
   // issue #343: botoes de atualizar e robo em andamento
   const RODADA = (tipo: "automatica" | "pedido", processos: number[]): Robo => ({
     estado: "lendo", rodada: { id: 4, tipo, iniciada_em: "2026-10-28T15:20:00+00:00", processos }, pedidos: [], avisos: [] });
-  const NA_FILA = (processo_id: number | null): Robo => ({
+  const NA_FILA = (processo_id: number | null, travado = false): Robo => ({
     estado: "na_fila", rodada: null, avisos: [],
-    pedidos: [{ id: 9, processo_id, usuario: "Fulano", pedido_em: "2026-10-28T15:25:00+00:00" }] });
+    pedidos: [{ id: 9, processo_id, usuario: "Fulano", pedido_em: "2026-10-28T15:25:00+00:00", travado }] });
   const botao = (nome: RegExp | string) => screen.getByRole("button", { name: nome }) as HTMLButtonElement;
   const painelDireita = () => screen.getByRole("complementary", { name: "Detalhe do processo" });
 
@@ -349,17 +349,19 @@ describe("SigaPagina", () => {
   it("avisos do robô: os gerais em vermelho no topo, o de processo na linha dele", async () => {
     const avisos = [
       { tipo: "disparo", processo_id: null, texto: "O Windows não iniciou o robô: acesso negado" },
+      { tipo: "sem_inicio", processo_id: null, texto: "O robô não começou. O usuário dele pode estar desconectado do servidor." },
       { tipo: "falha", processo_id: null, texto: "A rodada das 11:00 falhou: SIGA fora do ar" },
       { tipo: "nao_lido", processo_id: DELTA.id, texto: "não lido às 11:00: página não abriu" },
       { tipo: "nao_lidos", processo_id: null, texto: "1 de 2 processos não foram lidos" },
+      { tipo: "nao_terminou", processo_id: null, texto: "A rodada das 10:40 não terminou." },
     ];
     mostrar(painel([ALFA, DELTA], { robo: { ...PARADO, avisos } }));
     await screen.findByText("Processos de medições");
     const topo = screen.getAllByRole("alert").map(a => a.textContent ?? "");
-    expect(topo).toHaveLength(3);
     expect(topo.every(t => t.startsWith("Crítico: "))).toBe(true);
     expect(topo.map(t => t.replace("Crítico: ", ""))).toEqual([
-      "O Windows não iniciou o robô: acesso negado", "A rodada das 11:00 falhou: SIGA fora do ar", "1 de 2 processos não foram lidos"]);
+      "O Windows não iniciou o robô: acesso negado", "O robô não começou. O usuário dele pode estar desconectado do servidor.",
+      "A rodada das 11:00 falhou: SIGA fora do ar", "1 de 2 processos não foram lidos", "A rodada das 10:40 não terminou."]);
     expect(within(screen.getByRole("row", { name: /Obra Delta/ })).getByText("não lido às 11:00: página não abriu")).toBeTruthy();
     expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).queryByText(/não lido/)).toBeNull();
   });
@@ -379,7 +381,7 @@ describe("SigaPagina", () => {
   it("Windows recusou: o botão volta a valer para tentar de novo e a tela não relê a cada 5 segundos", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const robo = { ...NA_FILA(ALFA.id), avisos: [{ tipo: "disparo", processo_id: null, texto: "O Windows não iniciou o robô: acesso negado" }] };
+      const robo = { ...NA_FILA(ALFA.id, true), avisos: [{ tipo: "disparo", processo_id: null, texto: "O Windows não iniciou o robô: acesso negado" }] };
       mostrar(painel([ALFA], { pode_atualizar: true, robo }));
       await screen.findByText("Processos de medições");
       expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" }).hasAttribute("disabled")).toBe(false);

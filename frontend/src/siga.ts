@@ -19,7 +19,8 @@ export type AvisoRobo = { tipo: string; processo_id: number | null; texto: strin
 export type Robo = {
   estado: "lendo" | "na_fila" | "parado";
   rodada: { id: number; tipo: "automatica" | "pedido"; iniciada_em: string; processos: number[] } | null;
-  pedidos: { id: number; processo_id: number | null; usuario: string; pedido_em: string }[];
+  // travado: o Windows recusou o disparo dele ou o robo nao comecou; o clique de novo dispara outra vez
+  pedidos: { id: number; processo_id: number | null; usuario: string; pedido_em: string; travado: boolean }[];
   avisos: AvisoRobo[];
 };
 
@@ -27,17 +28,17 @@ export type PainelSiga = {
   lido_em: string | null; atrasado: boolean; processos: ProcessoSiga[]; pode_atualizar: boolean; robo: Robo;
 };
 
-/** Pedido em aberto que nao vai andar sozinho: o Windows recusou o disparo ou o robo nao comecou. O clique de novo
- *  dispara outra vez (o servidor reaproveita o pedido), entao o botao volta a valer e a tela nao rele a cada 5 s. */
-export function pedidoTravado(robo: Robo): boolean {
-  return robo.rodada === null && robo.avisos.some(a => a.tipo === "disparo" || a.tipo === "sem_inicio");
+/** Ha' pedido que o robo ainda vai atender sozinho? O travado nao conta: a tela nao rele a cada 5 s por ele. */
+export function roboAtivo(robo: Robo): boolean {
+  return robo.rodada !== null || robo.pedidos.some(p => !p.travado);
 }
 
 /** O botao de atualizar um processo (`processoId`) ou todos (null) enquanto o pedido nao foi atendido: "lendo" com a
- *  rodada em andamento que o inclui (no "todos", qualquer rodada), "na_fila" com pedido em aberto que o cobre. */
+ *  rodada em andamento que o inclui (no "todos", qualquer rodada), "na_fila" com pedido em aberto que o cobre. Pedido
+ *  travado nao segura o botao: o clique de novo dispara outra vez (o servidor reaproveita o pedido). */
 export function situacaoDoBotao(robo: Robo, processoId: number | null): "lendo" | "na_fila" | null {
   if (robo.rodada && (processoId === null || robo.rodada.processos.includes(processoId))) return "lendo";
-  if (!pedidoTravado(robo) && robo.pedidos.some(p => p.processo_id === null || p.processo_id === processoId)) return "na_fila";
+  if (robo.pedidos.some(p => !p.travado && (p.processo_id === null || p.processo_id === processoId))) return "na_fila";
   return null;
 }
 

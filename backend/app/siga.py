@@ -672,6 +672,9 @@ def situacao_robo(conn, agora: datetime.datetime | None = None) -> dict:
                            "ORDER BY disparado_em DESC, id DESC LIMIT 1").fetchone()
     if disparo is not None and disparo["erro_disparo"]:
         avisos.append(_aviso_robo("disparo", f"O Windows não iniciou o robô: {disparo['erro_disparo']}"))
+    # Pedido travado (#343): sem rodada, o Windows recusou o ultimo disparo dele ou o robo nao comecou. A tela
+    # libera o botao para disparar de novo; o aviso `disparo` nao serve, porque e' o do ultimo disparo de qualquer pedido.
+    travados = set()
     if rodada is None:
         # Os 2 minutos contam de quando o pedido podia comecar: o ultimo disparo dele (o clique repetido dispara de
         # novo), o pedido, ou o fim da rodada que o segurou (sem fim, quando ela deixou de estar em andamento). O
@@ -681,8 +684,10 @@ def situacao_robo(conn, agora: datetime.datetime | None = None) -> dict:
         livre_desde = "" if anterior is None else anterior["terminada_em"] or _carimbo(
             _instante(anterior["iniciada_em"]) + EM_ANDAMENTO)
         limite = _carimbo(agora - SEM_INICIO)
-        if any(not p["erro_disparo"] and max(p["disparado_em"] or p["pedido_em"], livre_desde) < limite
-               for p in abertos):
+        sem_inicio = {p["id"] for p in abertos
+                      if not p["erro_disparo"] and max(p["disparado_em"] or p["pedido_em"], livre_desde) < limite}
+        travados = sem_inicio | {p["id"] for p in abertos if p["erro_disparo"]}
+        if sem_inicio:
             avisos.append(_aviso_robo("sem_inicio",
                                       "O robô não começou. O usuário dele pode estar desconectado do servidor."))
     ultima = conn.execute("SELECT * FROM siga_rodadas WHERE terminada_em IS NOT NULL ORDER BY id DESC LIMIT 1"
@@ -713,7 +718,7 @@ def situacao_robo(conn, agora: datetime.datetime | None = None) -> dict:
             "id": rodada["id"], "tipo": rodada["tipo"], "iniciada_em": tempo.iso_utc(rodada["iniciada_em"]),
             "processos": json.loads(rodada["processos"])},
         "pedidos": [{"id": p["id"], "processo_id": p["processo_id"], "usuario": p["nome"],
-                     "pedido_em": tempo.iso_utc(p["pedido_em"])} for p in abertos],
+                     "pedido_em": tempo.iso_utc(p["pedido_em"]), "travado": p["id"] in travados} for p in abertos],
         "avisos": avisos,
     }
 

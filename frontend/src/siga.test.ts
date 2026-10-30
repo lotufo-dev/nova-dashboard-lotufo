@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  casaComBusca, nivelDias, ordenar, pedidoTravado, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type ProcessoSiga, type Robo,
+  casaComBusca, nivelDias, ordenar, roboAtivo, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type ProcessoSiga, type Robo,
 } from "./siga";
 
 const p = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
@@ -55,7 +55,8 @@ describe("siga", () => {
 
   it("botão de atualizar: 'lendo' com a rodada que o cobre, 'na_fila' com pedido que o cobre, senão livre", () => {
     const robo = (extra: Partial<Robo>): Robo => ({ estado: "parado", rodada: null, pedidos: [], avisos: [], ...extra });
-    const pedido = (processo_id: number | null) => ({ id: 1, processo_id, usuario: "Fulano", pedido_em: "2026-10-28T15:00:00+00:00" });
+    const pedido = (processo_id: number | null, travado = false) =>
+      ({ id: 1, processo_id, usuario: "Fulano", pedido_em: "2026-10-28T15:00:00+00:00", travado });
     const rodada = { id: 1, tipo: "pedido" as const, iniciada_em: "2026-10-28T15:00:00+00:00", processos: [1] };
     expect([situacaoDoBotao(robo({}), 1), situacaoDoBotao(robo({}), null)]).toEqual([null, null]);
     expect([1, 2, null].map(id => situacaoDoBotao(robo({ rodada }), id))).toEqual(["lendo", null, "lendo"]);
@@ -63,12 +64,18 @@ describe("siga", () => {
     expect([1, 2, null].map(id => situacaoDoBotao(robo({ pedidos: [pedido(null)] }), id))).toEqual(["na_fila", "na_fila", "na_fila"]);
     expect(situacaoDoBotao(robo({ rodada, pedidos: [pedido(2)] }), 2)).toBe("na_fila");
     // pedido travado (Windows recusou, robo nao comecou): o botao volta a valer para disparar de novo
-    for (const tipo of ["disparo", "sem_inicio"]) {
-      const travado = robo({ pedidos: [pedido(null)], avisos: [{ tipo, processo_id: null, texto: "x" }] });
-      expect(pedidoTravado(travado)).toBe(true);
-      expect([1, null].map(id => situacaoDoBotao(travado, id))).toEqual([null, null]);
-    }
-    expect(pedidoTravado(robo({ pedidos: [pedido(1)], avisos: [{ tipo: "falha", processo_id: null, texto: "x" }] }))).toBe(false);
-    expect(pedidoTravado(robo({ rodada, avisos: [{ tipo: "disparo", processo_id: null, texto: "x" }] }))).toBe(false);
+    const travado = robo({ estado: "na_fila", pedidos: [pedido(null, true)] });
+    expect([1, null].map(id => situacaoDoBotao(travado, id))).toEqual([null, null]);
+    expect(situacaoDoBotao(robo({ pedidos: [pedido(null, true), pedido(1)] }), 1)).toBe("na_fila");
+  });
+
+  it("robô ativo (relê a cada 5 s): rodada ou pedido que vai andar sozinho; só pedido travado não conta", () => {
+    const robo = (extra: Partial<Robo>): Robo => ({ estado: "na_fila", rodada: null, pedidos: [], avisos: [], ...extra });
+    const pedido = (travado: boolean) => ({ id: 1, processo_id: null, usuario: "Fulano", pedido_em: "2026-10-28T15:00:00+00:00", travado });
+    const rodada = { id: 1, tipo: "pedido" as const, iniciada_em: "2026-10-28T15:00:00+00:00", processos: [1] };
+    expect(roboAtivo(robo({ estado: "parado" }))).toBe(false);
+    expect(roboAtivo(robo({ pedidos: [pedido(false)] }))).toBe(true);
+    expect(roboAtivo(robo({ pedidos: [pedido(true)] }))).toBe(false);
+    expect(roboAtivo(robo({ estado: "lendo", rodada }))).toBe(true);
   });
 });
