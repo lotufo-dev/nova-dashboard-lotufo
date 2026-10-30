@@ -381,3 +381,44 @@ def baixar_anexo_planilha(medicao_id: ID, planilha_id: ID, peca: Literal["oficio
     tipo = arquivos.MIME_XLSX if ext == "xlsx" else arquivos.MIME
     nome = f"{'oficio' if peca == 'oficio' else 'planilha'}-medicao-{a['numero']}-versao-{a['versao']}.{ext}"
     return FileResponse(caminho, media_type=tipo, filename=nome, headers={"X-Content-Type-Options": "nosniff"})
+
+
+# --- issue #283: planilha/carta enviada por fora e nº do SIGA (spec 2026-10-20 §2.1, passo 2; E3) ---------------
+
+@router.post("/api/medicoes/{medicao_id}/planilhas/envio-externo", status_code=201)
+def envio_externo_planilha(medicao_id: ID,
+                           enviado_em: str = Form(..., max_length=10),
+                           meio: str = Form(..., max_length=medicao_planilhas.TETO_MEIO),
+                           numero_protocolo: str | None = Form(None, max_length=100),
+                           eml: UploadFile | None = File(None),
+                           usuario: dict = Depends(exigir("editar_cadastros")),
+                           conn: sqlite3.Connection = Depends(conexao)):
+    """"Registrar envio por fora" da planilha/carta (ou de uma revisao dela): data, meio, nº do protocolo e .eml."""
+    from app import notas_envio
+    _medicao_existe(conn, medicao_id)
+    dados = {"enviado_em": enviado_em, "meio": meio, "numero_protocolo": numero_protocolo}
+    try:
+        medicao_planilhas.conferir_envio_externo(conn, medicao_id, dados)   # recusa antes de ler o .eml
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    arquivo = (eml.filename, eml.file.read(notas_envio.TETO_EML + 1)) if eml is not None and eml.filename else None
+    try:
+        return medicao_planilhas.registrar_envio_externo(conn, usuario["id"], medicao_id, dados, arquivo)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+
+
+class NumeroSigaIn(BaseModel):
+    numero: str = Field(max_length=100)
+
+
+@router.post("/api/medicoes/{medicao_id}/planilhas/numero-siga")
+def numero_siga_planilha(medicao_id: ID, dados: NumeroSigaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                         conn: sqlite3.Connection = Depends(conexao)):
+    """O nº do SIGA que o orgao devolve depois do envio da planilha/carta (pelo sistema ou por fora)."""
+    _medicao_existe(conn, medicao_id)
+    try:
+        medicao_planilhas.registrar_numero_siga(conn, usuario["id"], medicao_id, dados.numero)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    return {"ok": True}

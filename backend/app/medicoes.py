@@ -25,6 +25,8 @@ TRANSICOES = {
     "prevista": {"cancelada", "desistida"},
     # Issue #281: entra pela planilha/carta (medicao_planilhas.registrar); a saida a mao e' o cancelamento.
     "planilha_gerada": {"cancelada", "desistida"},
+    # Issue #283: entra pelo envio da planilha/carta (medicao_planilhas.registrar_envio_externo); sai como a gerada.
+    "planilha_enviada": {"cancelada", "desistida"},
     # Estados do espelho (spec 2026-09-21 §2). espelho_gerado -> espelho_enviado e' do SISTEMA
     # (marcar_espelho_enviado, no ato do envio); -> protocolada e' registrar_protocolo.
     # Bloco 3: a nota (PDF lido ou RM) fecha `nota_emitida` (notas.fechar_se_completa, ou a
@@ -99,8 +101,13 @@ def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     if r is None:
         return None
     d = dict(r)
+    # Issue #283: `protocolos` e' so' o da nota (o que conta como protocolo nas telas e nos marcos); o nº do SIGA da
+    # planilha/carta (etapa 'planilha', migracao 054) vem a' parte
     d["protocolos"] = [dict(p) for p in conn.execute(
-        "SELECT * FROM medicao_protocolos WHERE medicao_id=? ORDER BY id", (medicao_id,))]
+        "SELECT * FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' ORDER BY id", (medicao_id,))]
+    p = conn.execute("SELECT data, numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='planilha'",
+                     (medicao_id,)).fetchone()
+    d["planilha_siga"] = {"data": p["data"], "numero": p["numero_processo"]} if p else None
     # NFs do RM alocadas a esta medicao, com o recebido de cada uma (fase 5). Import local:
     # sincronizacao_rm importa este modulo.
     from app import sincronizacao_rm
@@ -260,6 +267,8 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
                                            "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
     _eventos_atesto(conn, list(out), out)
     _eventos_assinatura(conn, list(out), out)
+    from app import medicao_planilhas     # issue #283: o envio da planilha/carta (import local: ele importa este)
+    medicao_planilhas.eventos_envio(conn, list(out), out)
     for eventos in out.values():
         eventos.sort(key=lambda e: e["data"] or "")      # estavel: no mesmo segundo, o protocolado vem antes
     return out
@@ -541,7 +550,7 @@ PROXIMO_PASSO = {"planilha_gerada": "enviar a planilha/carta", "planilha_enviada
 def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None) -> list[dict]:
     """Medicoes entre o espelho e o pagamento, com o proximo passo e a data do ultimo marco."""
     sql = ("SELECT m.*, c.nome_curto, c.numero_instrumento, "
-           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id) AS protocolado_em "
+           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em "
            "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id "
            f"WHERE m.estado IN ({','.join('?' * len(PROXIMO_PASSO))})")
     args: list = list(PROXIMO_PASSO)

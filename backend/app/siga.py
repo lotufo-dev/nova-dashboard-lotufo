@@ -211,6 +211,19 @@ def _vinculo(conn, numero: str) -> tuple[int, int | None, int | None] | None:
     return next(iter(contratos)), protocolo_id, medicao_id
 
 
+def _so_da_planilha(conn, medicao_id: int, numero: str, ocupantes: list) -> bool:
+    """Issue #283: o processo `numero` casa com o protocolo da NOTA da medicao e todos os `ocupantes` (ligados a'
+    medicao sem protocolo) casam so' com o nº do SIGA da planilha/carta (etapa 'planilha', migracao 054)."""
+    etapas: dict[str, set[str]] = {"planilha": set(), "nota": set()}
+    for r in conn.execute("SELECT etapa, numero_processo FROM medicao_protocolos WHERE medicao_id=? "
+                          "AND numero_processo IS NOT NULL", (medicao_id,)):
+        etapas[r["etapa"]].add(normalizar_numero(r["numero_processo"]))
+    if normalizar_numero(numero) not in etapas["nota"]:
+        return False
+    return bool(ocupantes) and all(o["numero"] and normalizar_numero(o["numero"]) in etapas["planilha"]
+                                   and normalizar_numero(o["numero"]) not in etapas["nota"] for o in ocupantes)
+
+
 def _vincular(conn, processo_id: int) -> None:
     p = conn.execute("SELECT numero, contrato_id, protocolo_id, medicao_id FROM siga_processos WHERE id=?",
                      (processo_id,)).fetchone()
@@ -220,15 +233,24 @@ def _vincular(conn, processo_id: int) -> None:
     if achado:
         contrato_id, protocolo_id, medicao_id = achado
         # issue #328: o processo que um link novo substituiu nao volta ao protocolo (ou a' medicao) pelo numero igual
-        ocupado = conn.execute("SELECT 1 FROM siga_processos WHERE id<>? AND (protocolo_id=? OR "
-                               "(? IS NULL AND medicao_id=? AND protocolo_id IS NULL))",
-                               (processo_id, protocolo_id, protocolo_id, medicao_id)).fetchone()
-        if ocupado:
-            return
+        ocupantes = conn.execute("SELECT id, numero FROM siga_processos WHERE id<>? AND (protocolo_id=? OR "
+                                 "(? IS NULL AND medicao_id=? AND protocolo_id IS NULL))",
+                                 (processo_id, protocolo_id, protocolo_id, medicao_id)).fetchall()
+        antes = None
+        if ocupantes:
+            # issue #283: o processo da planilha/carta cede ao da nota (o que importa para o pagamento). Ele perde o
+            # vinculo e continua gravado, com as leituras, como o processo que um link novo substitui (`_ligar`)
+            if protocolo_id is not None or medicao_id is None or \
+                    not _so_da_planilha(conn, medicao_id, p["numero"], ocupantes):
+                return
+            for o in ocupantes:
+                conn.execute("UPDATE siga_processos SET contrato_id=NULL, protocolo_id=NULL, medicao_id=NULL "
+                             "WHERE id=?", (o["id"],))
+            antes = {"processos_siga_da_planilha": [o["numero"] for o in ocupantes], "medicao_id": medicao_id}
         conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=? "
                      "WHERE id=? AND protocolo_id IS NULL AND medicao_id IS NULL", (*achado, processo_id))
         entidade = ("medicao", medicao_id) if medicao_id is not None else ("protocolo", protocolo_id)
-        auditoria.registrar(conn, None, "siga.vinculo", *entidade, None,
+        auditoria.registrar(conn, None, "siga.vinculo", *entidade, antes,
                             {"processo_siga": p["numero"], "contrato_id": contrato_id,
                              "protocolo_id": protocolo_id, "medicao_id": medicao_id})
 
