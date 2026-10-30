@@ -15,8 +15,8 @@ import re
 import unicodedata
 import zipfile
 
-import openpyxl
 from defusedxml import ElementTree       # XML de fora: sem entidade expandida (o openpyxl usa o mesmo)
+from openpyxl.reader.excel import ExcelReader
 from openpyxl.utils import get_column_letter
 
 from app import dinheiro, rm
@@ -27,10 +27,17 @@ LINHAS_CABECALHO = 40          # o cabecalho do modelo fica nas primeiras linhas
 MAX_COMPETENCIAS = 240         # 20 anos de medicoes mensais: acima disso nao e' o modelo (pleitos usa o mesmo)
 MAX_VARRIDAS = 5000            # linhas lidas da aba (as em branco formatadas contam aqui, nao no teto acima)
 MAX_COLUNAS = 60               # o cabecalho do modelo ocupa 4 a 7 colunas; celula distante nao entra na leitura
-# teto do XML descompactado da aba Resumo e de cada parte que o openpyxl le inteira ao abrir (estilos, textos): o
-# .xlsx pequeno com milhoes de linhas vazias comprimidas nao pode custar memoria e CPU do servidor. A aba Resumo do
-# modelo tem ~40 linhas; formatada ate' a linha 8000 em 20 colunas, fica perto de 4 MB
+# teto, pelo tamanho descompactado, de cada parte do zip que a leitura abre (a aba Resumo, os estilos, os textos,
+# os rels, a midia de um grafico...) e da soma delas: o .xlsx pequeno com milhoes de linhas vazias comprimidas nao
+# pode custar memoria e CPU do servidor. A aba Resumo do modelo tem ~40 linhas; formatada ate' a linha 8000 em 20
+# colunas, fica perto de 4 MB
 MAX_BYTES_XML = 10_000_000
+# soma do que se descompacta de todas as partes (o modelo real fica em poucos MB). O pior caso medido, 10 MB de
+# textos compartilhados minusculos, custa ~2,5 s ao openpyxl; a soma segura o total perto disso
+MAX_BYTES_PARTES = 15_000_000
+MAX_ENTRADAS = 2000                    # entradas do zip (o .xlsx do modelo tem dezenas; o indice vai todo para a memoria)
+MAX_BYTES_INDICE = 500_000             # o indice (diretorio central) do zip, lido inteiro ao abrir
+GRANDE_DEMAIS = "a planilha é grande demais para o modelo"
 _DATA = re.compile(r"([0-9]{2})/([0-9]{2})/([0-9]{4})")
 
 
@@ -93,15 +100,23 @@ def _colunas(ws) -> tuple[int, int, int, int]:
 
 def ler(dados: bytes) -> list[dict]:
     """Previsao por competencia: [{"competencia": "AAAA-MM", "valor_centavos": int, "medicao", "periodo"}]."""
+    zip_lido = None
     try:
-        _recusar_parte_grande(dados)
-        # read_only: so' a aba Resumo e' lida (as abas de memoria do modelo tem milhares de colunas)
-        wb = openpyxl.load_workbook(io.BytesIO(dados), read_only=True, data_only=True)
+        _recusar_indice_grande(dados)
+        # read_only: so' a aba Resumo e' lida (as abas de memoria do modelo tem milhares de colunas). O leitor do
+        # openpyxl, com o zip trocado pelo que tem teto (`load_workbook` faz o mesmo, sem a troca)
+        leitor = ExcelReader(io.BytesIO(dados), read_only=True, data_only=True)
+        leitor.archive.close()
+        leitor.archive = zip_lido = _ZipComTeto(io.BytesIO(dados))
+        leitor.read()
+        wb = leitor.wb
     except zipfile.BadZipFile as e:
         raise PlanilhaNaoReconhecida("o arquivo não abre como planilha .xlsx") from e
     except PlanilhaNaoReconhecida:
         raise
     except Exception as e:   # arquivo de fora: XML quebrado (ParseError e afins) vira digitacao, nao erro 500
+        if zip_lido is not None and zip_lido.estourou:     # o openpyxl embrulha o erro do teto num ValueError
+            raise PlanilhaNaoReconhecida(GRANDE_DEMAIS) from e
         raise PlanilhaNaoReconhecida("a planilha não pôde ser lida") from e
     try:
         return _ler_resumo(wb, dados)
@@ -116,15 +131,74 @@ def ler(dados: bytes) -> list[dict]:
 _NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
 
-def _recusar_parte_grande(dados: bytes) -> None:
-    """Antes de abrir: as partes XML que o openpyxl le inteiras (tudo menos as abas, lidas sob demanda) com teto
-    pelo tamanho descompactado declarado no zip, sem descompactar nada."""
-    with zipfile.ZipFile(io.BytesIO(dados)) as z:
-        for item in z.infolist():
-            if item.filename.startswith("xl/worksheets/") or not item.filename.endswith((".xml", ".rels")):
-                continue
-            if item.file_size > MAX_BYTES_XML:
-                raise PlanilhaNaoReconhecida("a planilha é grande demais para o modelo")
+def _recusar_indice_grande(dados: bytes) -> None:
+    """Antes de o `zipfile` montar o indice inteiro na memoria: o fim do zip declara quantas entradas ha' e o
+    tamanho do indice (o `zipfile` le exatamente esse tamanho). 0xFFFF/0xFFFFFFFF e' o zip64, que planilha do modelo
+    nao usa. Sem o registro, o `zipfile` recusa o arquivo depois."""
+    fim = dados.rfind(b"PK\x05\x06", max(0, len(dados) - 65_557))
+    if fim < 0 or fim + 16 > len(dados):
+        return
+    entradas = int.from_bytes(dados[fim + 10:fim + 12], "little")
+    indice = int.from_bytes(dados[fim + 12:fim + 16], "little")
+    if entradas >= min(MAX_ENTRADAS, 0xFFFF) or indice > MAX_BYTES_INDICE:
+        raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
+
+
+class _ZipComTeto(zipfile.ZipFile):
+    """O zip que o openpyxl le, com teto no que DE FATO se descompacta: por parte e na soma de todas, sem olhar o
+    nome (o openpyxl acha as partes pelo [Content_Types].xml e pelos rels, entao parte renomeada ou posta em
+    xl/worksheets/ conta igual). Aba que o openpyxl so' abre para achar a dimensao (as outras, no modo read_only)
+    custa os poucos bytes ate' a dimensao; sem a dimensao, ele varre a aba e o teto a para."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.lidos: dict[str, int] = {}       # por parte, o maximo descompactado numa abertura
+        self.estourou = False
+        if len(self.infolist()) >= MAX_ENTRADAS:
+            self.close()
+            raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
+
+    def open(self, name, mode="r", *args, **kwargs):
+        bruto = super().open(name, mode, *args, **kwargs)
+        if mode != "r":
+            return bruto
+        return _LeituraContada(bruto, self, name.filename if isinstance(name, zipfile.ZipInfo) else name)
+
+    def resta(self, nome: str, nesta: int) -> int:
+        outras = sum(v for k, v in self.lidos.items() if k != nome)
+        return min(MAX_BYTES_XML - nesta, MAX_BYTES_PARTES - outras - nesta)
+
+    def contar(self, nome: str, nesta: int) -> None:
+        self.lidos[nome] = max(self.lidos.get(nome, 0), nesta)
+        if nesta > MAX_BYTES_XML or sum(self.lidos.values()) > MAX_BYTES_PARTES:
+            self.estourou = True
+            raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
+
+
+class _LeituraContada:
+    """Uma parte aberta: conta o que se le e para no teto (nunca le mais que o teto mais 1 byte)."""
+
+    def __init__(self, bruto, zip_teto: _ZipComTeto, nome: str):
+        self._bruto, self._zip, self._nome, self._lidos = bruto, zip_teto, nome, 0
+
+    def read(self, n: int | None = -1) -> bytes:
+        limite = self._zip.resta(self._nome, self._lidos) + 1
+        pedaco = self._bruto.read(limite if n is None or n < 0 else min(n, limite))
+        self._lidos += len(pedaco)
+        self._zip.contar(self._nome, self._lidos)
+        return pedaco
+
+    def readable(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        self._bruto.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
 
 def _linhas_xml(dados: bytes, caminho: str):
@@ -144,6 +218,15 @@ def _linhas_xml(dados: bytes, caminho: str):
                 dados_aba.clear()
 
 
+def _sem_calculo(c) -> bool:
+    """Formula sem valor calculado: sem <v>, ou <v> vazio sem tipo (o texto vazio calculado e' t="str" com
+    <v></v>, que o Excel grava e e' vazio de verdade)."""
+    if c.find(f"{_NS}f") is None:
+        return False
+    v = c.find(f"{_NS}v")
+    return v is None or (not (v.text or "") and c.get("t") != "str")
+
+
 def _tem_dado(c, textos) -> bool:
     """Celula com valor nao vazio (o que a varredura do openpyxl contaria como dado; " " nao conta)."""
     tipo, v, inline = c.get("t"), c.find(f"{_NS}v"), c.find(f"{_NS}is")
@@ -161,12 +244,18 @@ def _tem_dado(c, textos) -> bool:
     return bool(texto.strip())
 
 
-def _dado_depois(dados: bytes, caminho: str, ultima: int, textos) -> bool:
-    """Ha' valor em alguma linha depois de `ultima`? Formatacao e formula vazia nao contam."""
+def _recusar_dado_depois(dados: bytes, caminho: str, ultima: int, textos) -> None:
+    """Depois de `ultima` (o teto de linhas), valor recusa (leitura pela metade nao serve), e formula sem valor
+    calculado tambem, como dentro do teto. Formatacao, texto em branco e formula que da' vazio nao contam."""
     for n, linha in _linhas_xml(dados, caminho):
-        if n > ultima and any(_tem_dado(c, textos) for c in linha.iter(f"{_NS}c")):
-            return True
-    return False
+        if n <= ultima:
+            continue
+        for c in linha.iter(f"{_NS}c"):
+            if _sem_calculo(c):
+                raise PlanilhaNaoReconhecida(f"a linha {n} tem fórmula sem o valor calculado; abra a planilha no "
+                                             "Excel, salve e anexe de novo")
+            if _tem_dado(c, textos):
+                raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
 
 
 def _formulas_sem_valor(dados: bytes, caminho: str, linhas: list[tuple[int, str]],
@@ -185,12 +274,10 @@ def _formulas_sem_valor(dados: bytes, caminho: str, linhas: list[tuple[int, str]
             break
         for el in linha.iter(f"{_NS}c"):
             n = alvo.get(el.get("r", ""))
-            if n is not None and el.find(f"{_NS}f") is not None and nomes[n] not in com_formula:
-                v = el.find(f"{_NS}v")
-                # texto vazio calculado: t="str" com <v></v> (Excel); sem <v>, ou <v> vazio sem tipo (o que o
-                # openpyxl e outros geradores gravam), a formula nunca foi calculada
-                if v is None or (not (v.text or "") and el.get("t") != "str"):
-                    com_formula.append(nomes[n])
+            # texto vazio calculado: t="str" com <v></v> (Excel); sem <v>, ou <v> vazio sem tipo (o que o
+            # openpyxl e outros geradores gravam), a formula nunca foi calculada
+            if n is not None and nomes[n] not in com_formula and _sem_calculo(el):
+                com_formula.append(nomes[n])
     return com_formula
 
 
@@ -251,8 +338,8 @@ def _ler_resumo(wb, dados: bytes) -> list[dict]:
         out.append({"competencia": comp, "valor_centavos": _centavos(valor), "medicao": texto_med,
                     "periodo": periodo.strip() if isinstance(periodo, str) else comp})
     else:
-        if lidas >= MAX_VARRIDAS and _dado_depois(dados, caminho, ultima, ws._shared_strings):
-            raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
+        if lidas >= MAX_VARRIDAS:
+            _recusar_dado_depois(dados, caminho, ultima, ws._shared_strings)
     _recusar_formula_sem_valor(dados, caminho, sem_valor, col_med, col_per, col_reaj)
     if not out:
         raise PlanilhaNaoReconhecida("nenhuma linha de medição com reajuste na aba Resumo")

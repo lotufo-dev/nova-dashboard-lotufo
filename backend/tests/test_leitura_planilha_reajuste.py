@@ -198,6 +198,108 @@ def test_dado_depois_do_teto_de_linhas_ainda_recusa(monkeypatch):
     assert len(leitura.ler(_com_linhas_vazias(base, 20, 200, sem_totais=True))) == 3
 
 
+def _refazer(dados: bytes, trocar=None, novas=()) -> bytes:
+    """Remonta o zip: `trocar(nome, conteudo)` devolve o conteudo novo (ou None para tirar a entrada); `novas` sao
+    (nome, conteudo) acrescentados."""
+    import zipfile
+    origem, destino = io.BytesIO(dados), io.BytesIO()
+    with zipfile.ZipFile(origem) as z, zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as novo:
+        for item in z.infolist():
+            conteudo = z.read(item.filename)
+            conteudo = trocar(item.filename, conteudo) if trocar else conteudo
+            if conteudo is not None:
+                novo.writestr(item.filename, conteudo)
+        for nome, conteudo in novas:
+            novo.writestr(nome, conteudo)
+    return destino.getvalue()
+
+
+_SST = ('<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<si><t>Resumo</t></si>{}</sst>')
+_CT_SST = (b'<Override PartName="/%s" '
+           b'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>')
+
+
+@pytest.mark.parametrize("nome", ["xl/s.bin", "xl/worksheets/sharedStrings.xml"])
+def test_parte_renomeada_conta_no_teto(monkeypatch, nome):
+    """Achado do revisor: o openpyxl acha os textos compartilhados pelo [Content_Types].xml, nao pelo nome. Com o
+    nome trocado (ou posto entre as abas), a parte enorme continua sendo lida e tem de contar no teto."""
+    monkeypatch.setattr(leitura, "MAX_BYTES_XML", 50_000)
+    dados = _refazer(planilha_modelo(outras_abas=()),
+                     lambda n, c: c.replace(b"</Types>", _CT_SST % nome.encode()) if n == "[Content_Types].xml" else c,
+                     [(nome, _SST.format("<si><t>a</t></si>" * 5_000).encode())])
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(dados)
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+
+
+def test_rels_da_aba_grande_conta_no_teto(monkeypatch):
+    """Os rels da aba o openpyxl le inteiros mesmo no modo read_only (estao em xl/worksheets/_rels/)."""
+    monkeypatch.setattr(leitura, "MAX_BYTES_XML", 50_000)
+    rels = ('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            + "".join(f'<Relationship Id="r{i}" Type="x" Target="y"/>' for i in range(2_000)) + "</Relationships>")
+    dados = _refazer(planilha_modelo(outras_abas=()), novas=[("xl/worksheets/_rels/sheet1.xml.rels", rels.encode())])
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(dados)
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+
+
+def test_soma_das_partes_abertas_e_entradas_demais_tem_teto(monkeypatch):
+    """Cada parte abaixo do teto, mas a soma das abertas acima; e o zip com entradas demais (o indice vai inteiro
+    para a memoria ao abrir)."""
+    monkeypatch.setattr(leitura, "MAX_BYTES_XML", 50_000)
+    monkeypatch.setattr(leitura, "MAX_BYTES_PARTES", 60_000)
+    estilos = lambda n, c: c.replace(b"</styleSheet>", b"<!--" + b"x" * 30_000 + b"--></styleSheet>") \
+        if n == "xl/styles.xml" else c                                                       # noqa: E731
+    base = _refazer(planilha_modelo(outras_abas=()), estilos)
+    assert len(leitura.ler(base)) == 3                                   # uma parte grande so': passa
+    dados = _refazer(base, lambda n, c: c.replace(b"</Types>", _CT_SST % b"xl/s.xml") if n == "[Content_Types].xml"
+                     else c, [("xl/s.xml", _SST.format("<si><t>a</t></si>" * 2_000).encode())])
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(dados)
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+    monkeypatch.setattr(leitura, "MAX_ENTRADAS", 30)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(_refazer(base, novas=[(f"xl/media/x{i}.bin", b"") for i in range(30)]))
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+
+
+def test_parte_que_nao_se_abre_nao_conta(monkeypatch):
+    """O que nao se le nao custa: parte que nada aponta, e a outra aba grande (as abas de memoria do modelo tem
+    milhares de colunas), da qual o openpyxl so' le ate' a dimensao. Sem a dimensao ele varre a aba inteira, e ai'
+    o teto conta."""
+    monkeypatch.setattr(leitura, "MAX_BYTES_XML", 50_000)
+    dados = _refazer(planilha_modelo(), novas=[("xl/worksheets/sheet9.xml", b"<x/>" * 20_000),
+                                               ("xl/media/image1.png", b"\0" * 60_000)])
+    assert len(leitura.ler(dados)) == 3
+    linhas = b"".join(b'<row r="%d"><c r="A%d" s="0"/></row>' % (n, n) for n in range(1, 3_000))
+    cronograma = _refazer(planilha_modelo(), lambda n, c: c.replace(b"<sheetData></sheetData>",
+                          b"<sheetData>" + linhas + b"</sheetData>") if n == "xl/worksheets/sheet1.xml" else c)
+    assert len(leitura.ler(cronograma)) == 3                     # a aba CRONOGRAMA passa de 50 KB, com dimensao
+    sem_dimensao = _refazer(cronograma, lambda n, c: c.replace(b'<dimension ref="A1:A1"/>', b"")
+                            if n == "xl/worksheets/sheet1.xml" else c)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(sem_dimensao)
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+
+
+def test_formula_sem_valor_depois_do_teto_de_linhas_tambem_recusa(monkeypatch):
+    """Dentro do teto, formula sem valor calculado recusa; depois dele tambem (antes passava como vazia)."""
+    monkeypatch.setattr(leitura, "MAX_VARRIDAS", 50)
+    wb = openpyxl.load_workbook(io.BytesIO(planilha_modelo(outras_abas=())))
+    wb["Resumo"].delete_rows(12, 2)
+    wb["Resumo"]["E500"] = "=C9*2"                     # sem cache: o openpyxl nao calcula
+    buf = io.BytesIO(); wb.save(buf)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(buf.getvalue())
+    assert e.value.motivo == ("a linha 500 tem fórmula sem o valor calculado; abra a planilha no Excel, salve e "
+                              "anexe de novo")
+    # a formula que da' texto vazio (t="str" com <v></v>) depois do teto continua vazia
+    calculada = _trocar_no_xml_da_aba(buf.getvalue(), b'<c r="E500"><f>C9*2</f><v></v></c>',
+                                      b'<c r="E500" t="str"><f>C9*2</f><v></v></c>')
+    assert len(leitura.ler(calculada)) == 3
+
+
 def test_so_as_primeiras_colunas_sao_lidas():
     """Celula distante (coluna 10.000) nao faz a leitura percorrer a linha inteira: o cabecalho tem de estar perto."""
     wb = openpyxl.Workbook()
