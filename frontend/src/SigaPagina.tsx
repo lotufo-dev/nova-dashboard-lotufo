@@ -7,8 +7,8 @@ import type { ObraLista } from "./listaObras";
 import { trocarBusca, type Busca } from "./rota";
 import Selo from "./Selo";
 import {
-  casaComBusca, destinoDaMovimentacao, nivelDias, nomeDoProcesso, ordenar, quemDaMovimentacao, tempoNoSetor,
-  tituloDoEvento, volumeDe, type Movimentacao, type PainelSiga, type ProcessoSiga,
+  casaComBusca, destinoDaMovimentacao, nivelDias, nomeDoProcesso, ordenar, quemDaMovimentacao, roboAtivo, situacaoDoBotao,
+  tempoNoSetor, tituloDoEvento, volumeDe, type Movimentacao, type PainelSiga, type ProcessoSiga, type Robo,
 } from "./siga";
 import { fmtData, fmtDataHora, fmtHora } from "./tempo";
 import "./siga.css";
@@ -18,6 +18,7 @@ import "./siga.css";
 // aprovou no e-mail do monitor (13/10/2026). Tudo vem de GET /api/siga; aqui so' se desenha.
 
 const RELER_A_CADA_MS = 15 * 60_000;
+const RELER_COM_ROBO_MS = 5_000;   // pedido na fila ou rodada em andamento (#343): a tela acompanha o robo
 const dataOuTraco = (iso: string | null) => (iso ? fmtData(iso) : "—");
 
 function Hoje({ n }: { n: number }) {
@@ -38,10 +39,14 @@ function NoSetor({ p, agora }: { p: ProcessoSiga; agora: Date }) {
   return <Selo classe={nivel === "acao" ? "selo--acao" : "selo--atencao"}>{texto}</Selo>;
 }
 
-function Linha({ p, agora, escolhido, aoEscolher }: { p: ProcessoSiga; agora: Date; escolhido: boolean; aoEscolher: () => void }) {
+function Linha({ p, agora, escolhido, aoEscolher, robo }: {
+  p: ProcessoSiga; agora: Date; escolhido: boolean; aoEscolher: () => void; robo: Robo;
+}) {
   const ligado = p.medicao_id !== null && p.contrato_id !== null;
   const volume = volumeDe(p.situacao);
   const ultima = p.ultima;
+  const lendo = robo.rodada?.processos.includes(p.id) ?? false;
+  const avisos = robo.avisos.filter(a => a.processo_id === p.id);
   return (
     <tr className="sg__linha" tabIndex={0} aria-selected={escolhido} aria-label={nomeDoProcesso(p)}
       onClick={ev => { if (!(ev.target as HTMLElement).closest("a")) aoEscolher(); }}
@@ -58,6 +63,8 @@ function Linha({ p, agora, escolhido, aoEscolher }: { p: ProcessoSiga; agora: Da
             {p.obra && <span className="sg__fraco">{p.obra}</span>}
           </>
         )}
+        {lendo && <span className="sg__fraco sg__lendo">lendo...</span>}
+        {avisos.map((a, i) => <span key={i} className="sg__fraco sg__nao-lido">{a.texto}</span>)}
       </td>
       <td data-rotulo="Onde está">
         <span>{p.setor || "—"}</span>
@@ -81,14 +88,14 @@ function Linha({ p, agora, escolhido, aoEscolher }: { p: ProcessoSiga; agora: Da
   );
 }
 
-function Grupo({ titulo, processos, agora, atual, aoEscolher }: {
-  titulo: string; processos: ProcessoSiga[]; agora: Date; atual: number; aoEscolher: (id: number) => void;
+function Grupo({ titulo, processos, agora, atual, aoEscolher, robo }: {
+  titulo: string; processos: ProcessoSiga[]; agora: Date; atual: number; aoEscolher: (id: number) => void; robo: Robo;
 }) {
   if (processos.length === 0) return null;
   return (
     <tbody>
       <tr className="sg__faixa"><td colSpan={7}>{titulo}</td></tr>
-      {processos.map(p => <Linha key={p.id} p={p} agora={agora} escolhido={p.id === atual} aoEscolher={() => aoEscolher(p.id)} />)}
+      {processos.map(p => <Linha key={p.id} p={p} agora={agora} escolhido={p.id === atual} aoEscolher={() => aoEscolher(p.id)} robo={robo} />)}
     </tbody>
   );
 }
@@ -105,17 +112,62 @@ function ItemMovimentacao({ m }: { m: Movimentacao }) {
   );
 }
 
-function Painel({ p }: { p: ProcessoSiga }) {
+// "Atualizar processo" / "Atualizar todos" (#343): pedir leitura nao muda dado, entao quem ve a tela ve o botao.
+// Com pedido ou rodada que ja' cobre o clique, o botao mostra o estado e fica desabilitado.
+function Atualizar({ rotulo, processoId, robo, aoPedir }: {
+  rotulo: string; processoId: number | null; robo: Robo; aoPedir: () => Promise<void>;
+}) {
+  const [erro, setErro] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const situacao = situacaoDoBotao(robo, processoId);
+  async function pedir() {
+    setOcupado(true); setErro("");
+    try {
+      await api("/api/siga/atualizar", { method: "POST", body: JSON.stringify(processoId === null ? {} : { processo_id: processoId }) });
+      await aoPedir();
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+  }
+  return (
+    <>
+      <button type="button" className="btn btn--pequeno" disabled={ocupado || situacao !== null} onClick={() => void pedir()}>
+        {situacao === "lendo" ? "Lendo..." : ocupado || situacao === "na_fila" ? "Na fila" : rotulo}
+      </button>
+      {erro && <p className="erro sg__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+    </>
+  );
+}
+
+// No lugar do "Lido as" enquanto o robo trabalha: a rodada em andamento ou o pedido mais antigo na fila
+function RoboAgora({ robo }: { robo: Robo }) {
+  if (robo.rodada) {
+    return (
+      <p className="sg__lido sg__robo">
+        <i className="sg__ponto sg__ponto--lendo" aria-hidden="true" />
+        Robô lendo agora · começou às <span className="num">{fmtHora(robo.rodada.iniciada_em)}</span> · {robo.rodada.tipo === "automatica" ? "rodada automática" : "pedido feito na tela"}
+      </p>
+    );
+  }
+  const primeiro = robo.pedidos[0];
+  if (!primeiro) return null;
+  return <p className="sg__lido">Pedido de atualização às <span className="num">{fmtHora(primeiro.pedido_em)}</span>, aguardando o robô</p>;
+}
+
+function Painel({ p, dados, aoPedir }: { p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void> }) {
   const movimentacoes = [...p.movimentacoes].sort((a, b) => Date.parse(b.data) - Date.parse(a.data));
   return (
     <aside className="sg__painel" id="painel-siga" aria-label="Detalhe do processo">
       <h2>{nomeDoProcesso(p)}</h2>
       {p.numero && <div className="num">{p.numero}</div>}
       {p.situacao && <div className="sg__situacao">{p.situacao}</div>}
-      {p.link && (
-        <a className="sg__link" href={p.link} target="_blank" rel="noopener noreferrer">
-          Abrir no SIGA<IconeLinkExterno className="icone icone--p" />
-        </a>
+      {(p.link || dados.pode_atualizar) && (
+        <div className="sg__acoes">
+          {p.link && (
+            <a className="sg__link" href={p.link} target="_blank" rel="noopener noreferrer">
+              Abrir no SIGA<IconeLinkExterno className="icone icone--p" />
+            </a>
+          )}
+          {dados.pode_atualizar && <Atualizar rotulo="Atualizar processo" processoId={p.id} robo={dados.robo} aoPedir={aoPedir} />}
+        </div>
       )}
       {movimentacoes.length > 0 && <ol className="sg__movs" aria-label="Movimentações">
         {movimentacoes.map((m, i) => <ItemMovimentacao key={`${m.data}-${i}`} m={m} />)}
@@ -196,12 +248,14 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
   const carregar = useCallback(async () => {
     try { setDados(await api<PainelSiga>("/api/siga")); setErro(""); } catch (e) { setErro(mensagemDeErro(e)); }
   }, []);
-  // O robo le a cada 15 minutos: com a aba aberta a tela rele no mesmo ritmo (a linha aberta e a busca ficam)
+  useEffect(() => { void carregar(); }, [carregar]);
+  // O robo le a cada 15 minutos: com a aba aberta a tela rele no mesmo ritmo (a linha aberta e a busca ficam). Com
+  // pedido na fila ou rodada em andamento, a cada 5 segundos, ate' a leitura nova chegar (pedido travado nao conta).
+  const comRobo = dados !== null && roboAtivo(dados.robo);
   useEffect(() => {
-    void carregar();
-    const relogio = window.setInterval(() => { void carregar(); }, RELER_A_CADA_MS);
+    const relogio = window.setInterval(() => { void carregar(); }, comRobo ? RELER_COM_ROBO_MS : RELER_A_CADA_MS);
     return () => window.clearInterval(relogio);
-  }, [carregar]);
+  }, [carregar, comRobo]);
 
   const texto = busca.q ?? "";
   const { medicoes, outros } = useMemo(() => {
@@ -221,13 +275,23 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
   }
   // o processo novo nao pode sumir atras da busca: ela e' limpa ao gravar
   const gravado = async (id: number) => { await carregar(); trocarBusca({ q: null }); setEscolhido(id); };
+  const robo = dados.robo;
   const topo = (
     <div className="sg__topo">
-      {dados.lido_em && <p className="sg__lido">Lido às <span className="num">{fmtHora(dados.lido_em)}</span></p>}
+      <div className="sg__vivo" aria-live="polite">{robo.estado !== "parado" && <RoboAgora robo={robo} />}</div>
+      {robo.estado === "parado" && dados.lido_em && <p className="sg__lido">Lido às <span className="num">{fmtHora(dados.lido_em)}</span></p>}
       {dados.atrasado && dados.lido_em && (
         <CaixaAviso nivel="atencao" role="status">O monitor do SIGA não lê desde {fmtData(dados.lido_em).slice(0, 5)} {fmtHora(dados.lido_em)}.</CaixaAviso>
       )}
+      {dados.pode_atualizar && <Atualizar rotulo="Atualizar todos" processoId={null} robo={robo} aoPedir={carregar} />}
       <AcompanharProcesso aoGravar={gravado} />
+      {robo.avisos.some(a => a.processo_id === null) && (
+        <div className="sg__avisos">
+          {robo.avisos.filter(a => a.processo_id === null).map((a, i) => (
+            <CaixaAviso key={i} nivel="critico" role="alert">{a.texto}</CaixaAviso>
+          ))}
+        </div>
+      )}
     </div>
   );
   if (dados.processos.length === 0) {
@@ -266,11 +330,11 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
                   <th scope="col" className="col-num">Hoje</th><th scope="col">Última ação</th><th scope="col">Protocolado</th>
                 </tr>
               </thead>
-              <Grupo titulo="Processos de medições" processos={medicoes} agora={agoraDe} atual={atual.id} aoEscolher={escolher} />
-              <Grupo titulo="Outros processos" processos={outros} agora={agoraDe} atual={atual.id} aoEscolher={escolher} />
+              <Grupo titulo="Processos de medições" processos={medicoes} agora={agoraDe} atual={atual.id} aoEscolher={escolher} robo={robo} />
+              <Grupo titulo="Outros processos" processos={outros} agora={agoraDe} atual={atual.id} aoEscolher={escolher} robo={robo} />
             </table>
           </section>
-          <Painel key={atual.id} p={atual} />
+          <Painel key={atual.id} p={atual} dados={dados} aoPedir={carregar} />
         </div>
       )}
     </div>

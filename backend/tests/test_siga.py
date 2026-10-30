@@ -519,7 +519,7 @@ def test_estado_parado_na_fila_e_lendo(conn, robo):
     s = siga.situacao_robo(conn, AGORA + _min(1))
     assert s["estado"] == "na_fila" and s["rodada"] is None
     assert s["pedidos"] == [{"id": p["id"], "processo_id": robo.ids[0], "usuario": "Engenharia",
-                             "pedido_em": "2026-10-28T14:00:00+00:00"}]
+                             "pedido_em": "2026-10-28T14:00:00+00:00", "travado": False}]
     r = siga.iniciar_rodada(conn, AGORA + _min(1))
     s = siga.situacao_robo(conn, AGORA + _min(13))
     assert s["estado"] == "lendo" and s["pedidos"] == []
@@ -540,6 +540,21 @@ def test_recusa_do_windows_avisa_ate_o_proximo_disparo_aceito(conn, robo):
     robo.resposta.update(codigo=0, erro=b"")
     _pedir(conn, robo, robo.ids[1], AGORA + _min(14))
     assert not [t for t in _textos(conn, AGORA + _min(14)) if t.startswith("O Windows")]
+
+
+def test_pedido_travado_e_o_do_proprio_pedido_nao_o_do_ultimo_aviso(conn, robo):
+    travados = lambda agora: {p["processo_id"]: p["travado"] for p in siga.situacao_robo(conn, agora)["pedidos"]}  # noqa: E731
+    robo.resposta.update(codigo=1, erro=b"ERRO: acesso negado.")
+    _pedir(conn, robo, robo.ids[0], AGORA)
+    assert travados(AGORA) == {robo.ids[0]: True}                         # o Windows recusou o disparo dele
+    # a rodada atende o pedido recusado; um pedido feito com o robo lendo nao dispara e o aviso velho continua
+    r = siga.iniciar_rodada(conn, AGORA + _min(1))
+    _pedir(conn, robo, robo.ids[1], AGORA + _min(2))
+    assert travados(AGORA + _min(2)) == {robo.ids[1]: False}               # com rodada, nada esta' travado
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(3))
+    assert any(a["tipo"] == "disparo" for a in siga.situacao_robo(conn, AGORA + _min(3))["avisos"])
+    assert travados(AGORA + _min(3)) == {robo.ids[1]: False}               # o aviso de disparo nao e' dele
+    assert travados(AGORA + _min(5, 1)) == {robo.ids[1]: True}             # robo nao comecou em 2 minutos
 
 
 def test_pedido_parado_ha_mais_de_2_minutos_avisa_que_o_robo_nao_comecou(conn, robo):

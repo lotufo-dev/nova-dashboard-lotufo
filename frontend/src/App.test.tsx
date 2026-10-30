@@ -47,7 +47,8 @@ const PAINEL_MINIMO = {
 describe("App: a tela SIGA", () => {
   const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
     if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
-    if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [] };
+    if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
     // o Inicio (entrada da diretoria) le este painel: sem o corpo minimo ele quebra e derruba a casca
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     return [];

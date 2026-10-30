@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SigaPagina from "./SigaPagina";
-import type { Movimentacao, PainelSiga, ProcessoSiga } from "./siga";
+import type { Movimentacao, PainelSiga, ProcessoSiga, Robo } from "./siga";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
@@ -37,8 +37,9 @@ const BETA = processo({
   setor: "GABIN", caixa_entrada: true, com_quem: "", dias_uteis: 6 });
 const GAMA = processo({ id: 5, nome: "Processo Gama", dias_uteis: 12, setor: "COFIN" });
 
+const PARADO: Robo = { estado: "parado", rodada: null, pedidos: [], avisos: [] };
 const painel = (processos: ProcessoSiga[], extra: Partial<PainelSiga> = {}): PainelSiga =>
-  ({ lido_em: "2026-10-28T15:00:00+00:00", atrasado: false, processos, ...extra });
+  ({ lido_em: "2026-10-28T15:00:00+00:00", atrasado: false, processos, pode_atualizar: false, robo: PARADO, ...extra });
 const mostrar = (dados: PainelSiga, busca: Record<string, string> = {}) => {
   api.mockResolvedValue(dados);
   return render(<SigaPagina busca={busca} agora={AGORA} />);
@@ -269,5 +270,142 @@ describe("SigaPagina", () => {
     api.mockResolvedValue(painel([ALFA]));
     fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
     expect(await screen.findByText("Processos de medições")).toBeTruthy();
+  });
+
+  // issue #343: botoes de atualizar e robo em andamento
+  const RODADA = (tipo: "automatica" | "pedido", processos: number[]): Robo => ({
+    estado: "lendo", rodada: { id: 4, tipo, iniciada_em: "2026-10-28T15:20:00+00:00", processos }, pedidos: [], avisos: [] });
+  const NA_FILA = (processo_id: number | null, travado = false): Robo => ({
+    estado: "na_fila", rodada: null, avisos: [],
+    pedidos: [{ id: 9, processo_id, usuario: "Fulano", pedido_em: "2026-10-28T15:25:00+00:00", travado }] });
+  const botao = (nome: RegExp | string) => screen.getByRole("button", { name: nome }) as HTMLButtonElement;
+  const painelDireita = () => screen.getByRole("complementary", { name: "Detalhe do processo" });
+
+  it("sem o servidor configurado, nenhum botão de atualizar; configurado, 'Atualizar todos' no topo e 'Atualizar processo' no painel", async () => {
+    const { unmount } = mostrar(painel([ALFA]));
+    await screen.findByText("Processos de medições");
+    expect(screen.queryByRole("button", { name: /Atualizar/ })).toBeNull();
+    unmount();
+    mostrar(painel([ALFA], { pode_atualizar: true }));
+    await screen.findByText("Processos de medições");
+    expect(botao("Atualizar todos").disabled).toBe(false);
+    expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" })).toBeTruthy();
+  });
+
+  it("os botões pedem a leitura com e sem processo_id e a tela relê", async () => {
+    const chamadas: { caminho: string; opts?: RequestInit }[] = [];
+    api.mockImplementation(async (caminho: string, opts?: RequestInit) => {
+      chamadas.push({ caminho, opts });
+      return caminho === "/api/siga" ? painel([ALFA], { pode_atualizar: true }) : { id: 9 };
+    });
+    render(<SigaPagina busca={{}} agora={AGORA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Atualizar processo" }));
+    await vi.waitFor(() => expect(chamadas.filter(c => c.caminho === "/api/siga")).toHaveLength(2));
+    fireEvent.click(botao("Atualizar todos"));
+    await vi.waitFor(() => expect(chamadas.filter(c => c.caminho === "/api/siga")).toHaveLength(3));
+    const pedidos = chamadas.filter(c => c.caminho === "/api/siga/atualizar");
+    expect(pedidos.map(c => c.opts?.method)).toEqual(["POST", "POST"]);
+    expect(pedidos.map(c => JSON.parse(c.opts?.body as string))).toEqual([{ processo_id: ALFA.id }, {}]);
+  });
+
+  it("pedido na fila: o botão vira 'Na fila' desabilitado e o topo mostra a hora do pedido no lugar de 'Lido às'", async () => {
+    mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: NA_FILA(ALFA.id) }));
+    await screen.findByText("Processos de medições");
+    expect(within(painelDireita()).getByRole("button", { name: "Na fila" }).hasAttribute("disabled")).toBe(true);
+    expect(botao("Atualizar todos").disabled).toBe(false);           // pedido de um processo nao cobre todos
+    expect(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === "Pedido de atualização às 11:25, aguardando o robô")).toBeTruthy();
+    expect(screen.queryByText(/Lido às/)).toBeNull();
+    fireEvent.click(screen.getByRole("row", { name: /Obra Delta/ }));
+    expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" })).toBeTruthy();
+  });
+
+  it("pedido de todos na fila: os dois botões ficam 'Na fila'", async () => {
+    mostrar(painel([ALFA], { pode_atualizar: true, robo: NA_FILA(null) }));
+    await screen.findByText("Processos de medições");
+    expect(screen.getAllByRole("button", { name: "Na fila" })).toHaveLength(2);
+  });
+
+  it("rodada pedida na tela: indicador no topo, 'lendo...' só nas linhas da rodada e 'Lendo...' nos botões que ela cobre", async () => {
+    mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: RODADA("pedido", [ALFA.id]) }));
+    await screen.findByText("Processos de medições");
+    expect(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === "Robô lendo agora · começou às 11:20 · pedido feito na tela")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).getByText("lendo...")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /Obra Delta/ })).queryByText("lendo...")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Lendo..." }).every(b => b.hasAttribute("disabled"))).toBe(true);
+    expect(screen.queryByRole("button", { name: "Atualizar todos" })).toBeNull();
+    expect(within(painelDireita()).getByRole("button", { name: "Lendo..." })).toBeTruthy();
+    fireEvent.click(screen.getByRole("row", { name: /Obra Delta/ }));
+    expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" })).toBeTruthy();
+  });
+
+  it("rodada automática: o topo diz 'rodada automática' e 'Atualizar todos' fica 'Lendo...'", async () => {
+    mostrar(painel([ALFA], { pode_atualizar: true, robo: RODADA("automatica", [ALFA.id]) }));
+    await screen.findByText("Processos de medições");
+    expect(screen.getByText(/rodada automática/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Atualizar todos" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Lendo..." }).every(b => b.hasAttribute("disabled"))).toBe(true);
+  });
+
+  it("avisos do robô: os gerais em vermelho no topo, o de processo na linha dele", async () => {
+    const avisos = [
+      { tipo: "disparo", processo_id: null, texto: "O Windows não iniciou o robô: acesso negado" },
+      { tipo: "sem_inicio", processo_id: null, texto: "O robô não começou. O usuário dele pode estar desconectado do servidor." },
+      { tipo: "falha", processo_id: null, texto: "A rodada das 11:00 falhou: SIGA fora do ar" },
+      { tipo: "nao_lido", processo_id: DELTA.id, texto: "não lido às 11:00: página não abriu" },
+      { tipo: "nao_lidos", processo_id: null, texto: "1 de 2 processos não foram lidos" },
+      { tipo: "nao_terminou", processo_id: null, texto: "A rodada das 10:40 não terminou." },
+    ];
+    mostrar(painel([ALFA, DELTA], { robo: { ...PARADO, avisos } }));
+    await screen.findByText("Processos de medições");
+    const topo = screen.getAllByRole("alert").map(a => a.textContent ?? "");
+    expect(topo.every(t => t.startsWith("Crítico: "))).toBe(true);
+    expect(topo.map(t => t.replace("Crítico: ", ""))).toEqual([
+      "O Windows não iniciou o robô: acesso negado", "O robô não começou. O usuário dele pode estar desconectado do servidor.",
+      "A rodada das 11:00 falhou: SIGA fora do ar", "1 de 2 processos não foram lidos", "A rodada das 10:40 não terminou."]);
+    expect(within(screen.getByRole("row", { name: /Obra Delta/ })).getByText("não lido às 11:00: página não abriu")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).queryByText(/não lido/)).toBeNull();
+  });
+
+  it("erro do clique aparece em português ao lado do botão", async () => {
+    const { ApiErro } = await import("./api");
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/siga/atualizar") throw new ApiErro(503, "Atualizar pelo SIGA não está disponível neste servidor");
+      return painel([ALFA], { pode_atualizar: true });
+    });
+    render(<SigaPagina busca={{}} agora={AGORA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Atualizar todos" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Atualizar pelo SIGA não está disponível neste servidor");
+    expect(botao("Atualizar todos").disabled).toBe(false);
+  });
+
+  it("Windows recusou: o botão volta a valer para tentar de novo e a tela não relê a cada 5 segundos", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const robo = { ...NA_FILA(ALFA.id, true), avisos: [{ tipo: "disparo", processo_id: null, texto: "O Windows não iniciou o robô: acesso negado" }] };
+      mostrar(painel([ALFA], { pode_atualizar: true, robo }));
+      await screen.findByText("Processos de medições");
+      expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" }).hasAttribute("disabled")).toBe(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(api).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("com o robô ativo relê a cada 5 segundos; ao terminar mostra 'Lido às' novo e volta aos 15 minutos", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mostrar(painel([ALFA], { robo: RODADA("pedido", [ALFA.id]) }));
+      await screen.findByText(/Robô lendo agora/);
+      expect(api).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(api).toHaveBeenCalledTimes(2);
+      api.mockResolvedValue(painel([ALFA], { lido_em: "2026-10-28T15:28:00+00:00" }));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await screen.findByText((_, el) => el?.tagName === "P" && el.textContent === "Lido às 11:28")).toBeTruthy();
+      const depois = api.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(api).toHaveBeenCalledTimes(depois);
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(api.mock.calls.length).toBeGreaterThan(depois);
+    } finally { vi.useRealTimers(); }
   });
 });

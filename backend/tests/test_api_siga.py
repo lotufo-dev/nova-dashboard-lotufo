@@ -404,7 +404,7 @@ def test_atualizar_processo_grava_o_pedido_roda_o_schtasks_e_o_painel_mostra_na_
     assert painel["pode_atualizar"] is True
     assert painel["robo"]["estado"] == "na_fila" and painel["robo"]["rodada"] is None
     assert painel["robo"]["pedidos"] == [{"id": pedido["id"], "processo_id": alfa, "usuario": "Admin",
-                                          "pedido_em": "2026-10-28T16:00:00+00:00"}]
+                                          "pedido_em": "2026-10-28T16:00:00+00:00", "travado": False}]
 
 
 def test_atualizar_todos_e_segundo_clique_igual_devolve_o_mesmo_pedido(client_admin, com_token, schtasks):
