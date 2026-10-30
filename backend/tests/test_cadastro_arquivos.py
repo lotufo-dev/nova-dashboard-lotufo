@@ -685,10 +685,12 @@ def test_corrige_em_roda_e_recusado_e_cadeia_linear_passa(tmp_path):
     assert [i["corrige"] for i in cad["contratos"][0]["instrumentos"]] == [None, "ap-c", "ap-b"]
 
 
-def test_apostilamento_com_competencias_sem_data_base_em_contrato_de_duas_bases_e_erro(tmp_path):
+def test_apostilamento_com_competencias_sem_data_base_em_contrato_de_duas_bases_e_aviso(tmp_path):
+    # gate Sol (PR #317, S2): o validar so' le os arquivos e nao sabe se o termo ja' foi aplicado (com uma base so',
+    # imutavel no YAML); avisa, e o aplicar recusa so' o termo novo (test_cadastro_aplicar)
     bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
              {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
     ap = {k: v for k, v in _apostilamento(competencias=[{"competencia": "2026-04", "valor": "1,00"}]).items()
           if k != "data_base"}
-    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
-    assert any("instrumentos[ap-reaj-1].data_base" in e for e in erros), erros
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
+    assert any("instrumentos[ap-reaj-1]" in a and "data-base" in a for a in cad["avisos"]), cad["avisos"]

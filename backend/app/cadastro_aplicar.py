@@ -452,7 +452,16 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
         ciclo = reajuste.ciclo_do_apostilamento(dados, inst["data"])
         comps = competencias_do_apostilamento(dados)
         if comps and (base is None or ciclo is None):
-            # o validar recusa antes; aqui so' chega cadastro montado a mao: nada de ignorar competencia em silencio
+            # termo ja' aplicado (gate Sol, PR #317, S2): segue na base e no ciclo das previsoes que gravou, mesmo que
+            # o contrato tenha ganhado outra data-base depois; so' o termo novo precisa dizer a dele
+            gravada = conn.execute(
+                "SELECT p.data_base_mes, p.ciclo FROM reajuste_previsoes p JOIN instrumentos i ON i.id = p.instrumento_id "
+                "WHERE i.contrato_id=? AND i.chave=? AND p.origem='apostilamento' LIMIT 1",
+                (contrato_id, inst["chave"])).fetchone()
+            if gravada is not None:
+                base, ciclo = gravada[0], gravada[1]
+        if comps and (base is None or ciclo is None):
+            # nada de ignorar competencia em silencio: o validar so' avisa (nao sabe o que ja' foi aplicado)
             raise ValueError(f"{c['nome_curto']}/{inst['chave']}: apostilamento com competências sem data-base ou "
                              "ciclo determinável; diga data_base e ciclo no termo")
         # a correcao herda o pleito do termo que corrige (a cadeia inteira); a busca por data e' so' do termo original

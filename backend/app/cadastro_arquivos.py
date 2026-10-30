@@ -296,9 +296,11 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
             # Issue #271: competencias e periodo; cada competencia vira previsao da data-base dele
             for campo, msg in _periodo_e_competencias(d)[1]:
                 falha(f"{onde}.{campo}", msg)
+            # gate Sol (PR #317, S2): o validar nao sabe se o termo ja' foi aplicado (quando o contrato tinha uma
+            # base so'; instrumento aplicado nao muda); o aplicar recusa o termo novo e mantem a base gravada do antigo
             if d.get("competencias") is not None and d.get("data_base") is None and len(meses) != 1:
-                falha(f"{onde}.data_base", "o contrato não tem uma data-base só: diga a deste apostilamento "
-                                           "(AAAA-MM, uma das datas_base) para as competências irem ao ciclo certo")
+                avisos.append(f"{c['nome_curto']}: {onde}: o contrato não tem uma data-base só e o apostilamento não "
+                              "diz a dele; se ainda não foi aplicado, o aplicar recusa (diga data_base, AAAA-MM)")
         elif inst["tipo"] == "endosso_garantia":
             if d.get("vigencia_fim") is not None:      # issue #65: o endosso traz a nova vigencia da garantia
                 try:

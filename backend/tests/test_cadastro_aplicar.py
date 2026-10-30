@@ -751,6 +751,31 @@ def test_competencias_sem_ciclo_determinavel_e_erro_no_aplicar(conn):
     assert conn.execute("SELECT COUNT(*) FROM instrumentos").fetchone()[0] == 0
 
 
+def test_termo_aplicado_sem_data_base_segue_na_base_gravada_quando_entra_a_segunda(conn):
+    # gate Sol (PR #317, S2): termo aplicado com uma base so' no contrato, sem `data_base` (imutavel); depois o
+    # cadastro ganha a segunda base. O aplicar nao recusa: o termo segue na base e no ciclo das previsoes gravadas
+    dados = {k: v for k, v in AP_COMP["dados"].items() if k != "data_base"}
+    termo = {**AP_COMP, "dados": dados}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[termo])]))
+    antes = _previsoes(conn)
+    assert {x[0] for x in antes} == {"2023-04"}
+    duas = [{"mes": "2023-04", "indice": "setorial"}, {"mes": "2023-06", "indice": "FGV/DNIT"}]
+    pleito = {**PLEITO_2026}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[termo], datas_base=duas,
+                                                                pleitos_anteriores=[pleito])]))
+    assert _previsoes(conn) == antes
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+
+
+def test_termo_novo_sem_data_base_em_contrato_de_duas_bases_e_erro_no_aplicar(conn):
+    dados = {k: v for k, v in AP_COMP["dados"].items() if k != "data_base"}
+    duas = [{"mes": "2023-04", "indice": "setorial"}, {"mes": "2023-06", "indice": "FGV/DNIT"}]
+    with pytest.raises(ValueError, match="data-base"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**AP_COMP, "dados": dados}],
+                                                                    datas_base=duas)]))
+    assert conn.execute("SELECT COUNT(*) FROM instrumentos").fetchone()[0] == 0
+
+
 def test_termo_e_correcao_aplicados_juntos_a_correcao_vale_mesmo_com_data_anterior(conn):
     # a ordem de gravacao segue o `corrige`, nao so' a data: a correcao nunca fica atras do termo que corrige
     correcao = {**AP_COMP, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-09-01", "corrige": "ap-11",
