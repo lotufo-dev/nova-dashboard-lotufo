@@ -13,7 +13,27 @@ export type ProcessoSiga = {
   protocolado_em: string | null; movimentacoes: Movimentacao[];
 };
 
-export type PainelSiga = { lido_em: string | null; atrasado: boolean; processos: ProcessoSiga[] };
+// Bloco `robo` (issue #342): rodada em andamento, pedidos em aberto (processo_id null = todos) e os avisos ja' com
+// o texto da tela. O aviso com processo_id e' o "nao lido" daquele processo.
+export type AvisoRobo = { tipo: string; processo_id: number | null; texto: string };
+export type Robo = {
+  estado: "lendo" | "na_fila" | "parado";
+  rodada: { id: number; tipo: "automatica" | "pedido"; iniciada_em: string; processos: number[] } | null;
+  pedidos: { id: number; processo_id: number | null; usuario: string; pedido_em: string }[];
+  avisos: AvisoRobo[];
+};
+
+export type PainelSiga = {
+  lido_em: string | null; atrasado: boolean; processos: ProcessoSiga[]; pode_atualizar: boolean; robo: Robo;
+};
+
+/** O botao de atualizar um processo (`processoId`) ou todos (null) enquanto o pedido nao foi atendido: "lendo" com a
+ *  rodada em andamento que o inclui (no "todos", qualquer rodada), "na_fila" com pedido em aberto que o cobre. */
+export function situacaoDoBotao(robo: Robo, processoId: number | null): "lendo" | "na_fila" | null {
+  if (robo.rodada && (processoId === null || robo.rodada.processos.includes(processoId))) return "lendo";
+  if (robo.pedidos.some(p => p.processo_id === null || p.processo_id === processoId)) return "na_fila";
+  return null;
+}
 
 // Os mesmos limites dos avisos: ambar a partir de 5 dias uteis no mesmo setor, vermelho a partir de 10.
 export const DIAS_ATENCAO = 5;

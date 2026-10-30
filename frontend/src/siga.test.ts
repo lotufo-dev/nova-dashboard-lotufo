@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { casaComBusca, nivelDias, ordenar, tempoNoSetor, tituloDoEvento, volumeDe, type ProcessoSiga } from "./siga";
+import {
+  casaComBusca, nivelDias, ordenar, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type ProcessoSiga, type Robo,
+} from "./siga";
 
 const p = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
   id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
@@ -49,5 +51,16 @@ describe("siga", () => {
     const x = p({ obra: "Obra Épsilon", nome: "Processo X", numero: "ORGAO-PRO-2026/00011", medicao_titulo: "2ª Medição" });
     expect(["epsilon", "PROCESSO x", "pro-2026/00011", "", "  "].map(q => casaComBusca(x, q))).toEqual([true, true, true, true, true]);
     expect(casaComBusca(x, "beta")).toBe(false);
+  });
+
+  it("botão de atualizar: 'lendo' com a rodada que o cobre, 'na_fila' com pedido que o cobre, senão livre", () => {
+    const robo = (extra: Partial<Robo>): Robo => ({ estado: "parado", rodada: null, pedidos: [], avisos: [], ...extra });
+    const pedido = (processo_id: number | null) => ({ id: 1, processo_id, usuario: "Fulano", pedido_em: "2026-10-28T15:00:00+00:00" });
+    const rodada = { id: 1, tipo: "pedido" as const, iniciada_em: "2026-10-28T15:00:00+00:00", processos: [1] };
+    expect([situacaoDoBotao(robo({}), 1), situacaoDoBotao(robo({}), null)]).toEqual([null, null]);
+    expect([1, 2, null].map(id => situacaoDoBotao(robo({ rodada }), id))).toEqual(["lendo", null, "lendo"]);
+    expect([1, 2, null].map(id => situacaoDoBotao(robo({ pedidos: [pedido(1)] }), id))).toEqual(["na_fila", null, null]);
+    expect([1, 2, null].map(id => situacaoDoBotao(robo({ pedidos: [pedido(null)] }), id))).toEqual(["na_fila", "na_fila", "na_fila"]);
+    expect(situacaoDoBotao(robo({ rodada, pedidos: [pedido(2)] }), 2)).toBe("na_fila");
   });
 });
