@@ -38,7 +38,13 @@ def test_054_linha_existente_e_de_nota_e_a_planilha_tem_uma_por_medicao(conn):
 
 
 def test_054_reexecutavel(conn):
-    db.migrate(conn)
-    db.migrate(conn)
+    mid = _medicao(conn)
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem, etapa) VALUES (?, '2026-08-03', 'manual', "
+                 "'planilha')", (mid,))
+    conn.commit()
+    conn.execute("DELETE FROM schema_migrations WHERE nome='054_protocolo_etapa.sql'"); conn.commit()
+    db.migrate(conn)                                # a 054 inteira de novo: o ALTER e' pulado, o indice ja' existe
+    assert conn.execute("SELECT 1 FROM schema_migrations WHERE nome='054_protocolo_etapa.sql'").fetchone()
+    assert [tuple(r) for r in conn.execute("SELECT medicao_id, etapa FROM medicao_protocolos")] == [(mid, "planilha")]
     colunas = [r[1] for r in conn.execute("PRAGMA table_info(medicao_protocolos)")]
     assert colunas.count("etapa") == 1

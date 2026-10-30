@@ -310,6 +310,63 @@ def test_vincula_ao_envio_registrado_por_fora(conn):
     assert _vinculo(conn) == (7, None, 31)
 
 
+def _planilha_por_fora(conn):
+    """Issue #283: medicao 31 com o nº do SIGA da planilha/carta (111); a nota ainda nao foi protocolada."""
+    _protocolo_enviado(conn, None)
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem, etapa) "
+                 "VALUES (31, '2026-08-03', 'SINFRA-PRO-2026/00111', 'manual', 'planilha')")
+    conn.commit()
+
+
+def _ligados(conn):
+    return [tuple(r) for r in conn.execute("SELECT numero, contrato_id, medicao_id FROM siga_processos "
+                                           "WHERE codigo IS NOT NULL AND codigo<>'ABC123' ORDER BY id")]
+
+
+def _leitura_unica(numero, codigo):
+    return _leitura(numero=numero, codigo=codigo)[:1]
+
+
+def test_processo_da_nota_toma_o_lugar_do_processo_da_planilha(conn):
+    import json
+    _planilha_por_fora(conn)
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 9), _leitura_unica("SINFRA-PRO-2026/00111", "PLA111"))
+    assert _ligados(conn) == [("SINFRA-PRO-2026/00111", 7, 31)]
+    # a nota protocolada por fora com outro numero
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem) "
+                 "VALUES (31, '2026-09-15', 'SINFRA-PRO-2026/00222', 'manual')")
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), _leitura_unica("SINFRA-PRO-2026/00222", "NOT222"))
+    # o da nota liga; o da planilha perde o vinculo e continua gravado, com as leituras
+    assert _ligados(conn) == [("SINFRA-PRO-2026/00111", None, None), ("SINFRA-PRO-2026/00222", 7, 31)]
+    assert conn.execute("SELECT COUNT(*) FROM siga_leituras l JOIN siga_processos p ON p.id=l.processo_id "
+                        "WHERE p.codigo='PLA111'").fetchone()[0] == 1
+    troca = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='siga.vinculo' ORDER BY id DESC LIMIT 1"
+                         ).fetchone()
+    assert json.loads(troca["antes"]) == {"processos_siga_da_planilha": ["SINFRA-PRO-2026/00111"], "medicao_id": 31}
+    assert json.loads(troca["depois"])["processo_siga"] == "SINFRA-PRO-2026/00222"
+    # a leitura seguinte do processo da planilha nao o liga de volta
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura_unica("SINFRA-PRO-2026/00111", "PLA111"))
+    assert _ligados(conn) == [("SINFRA-PRO-2026/00111", None, None), ("SINFRA-PRO-2026/00222", 7, 31)]
+    # o aviso de processo parado da medicao vem do processo da nota
+    conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=31"); conn.commit()
+    parados = [a for a in siga.avisos(conn, datetime.date(2026, 11, 10)) if a["tipo"] == "siga_parado"]
+    assert [a["medicao_id"] for a in parados] == [31] and "SINFRA-PRO-2026/00222" in parados[0]["mensagem"]
+
+
+def test_so_o_processo_da_nota_desloca_o_da_planilha(conn):
+    # outro processo que casa so' com a planilha (sem nota com o numero dele) nao troca o que ja' esta' ligado
+    _planilha_por_fora(conn)
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 9), _leitura_unica("SINFRA-PRO-2026/00111", "PLA111"))
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem) "
+                 "VALUES (31, '2026-09-15', 'SINFRA-PRO-2026/00222', 'manual')")
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), _leitura_unica("SINFRA-PRO-2026/00222", "NOT222"))
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura_unica("SINFRA-PRO-2026/00222", "OUT222"))
+    assert ("SINFRA-PRO-2026/00222", 7, 31) == _ligados(conn)[1]
+    assert conn.execute("SELECT medicao_id FROM siga_processos WHERE codigo='OUT222'").fetchone()[0] is None
+
+
 def test_vinculo_chega_na_rodada_seguinte_ao_numero_registrado(conn):
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
     assert _vinculo(conn) == (None, None, None)
