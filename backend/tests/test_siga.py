@@ -471,6 +471,8 @@ def test_so_pedidos_nunca_abre_rodada_automatica(conn, robo):
     _pedir(conn, robo, robo.ids[1], AGORA)
     r = siga.iniciar_rodada(conn, AGORA + _min(1), so_pedidos=True)
     assert r["tipo"] == "pedido" and [p["codigo"] for p in r["processos"]] == ["DEF456"]
+    # "comecei" repetido com a rodada aberta: a mesma rodada, tambem com so_pedidos
+    assert siga.iniciar_rodada(conn, AGORA + _min(1, 30), so_pedidos=True)["rodada_id"] == r["rodada_id"]
     siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(2))
     _pedir(conn, robo, None, AGORA + _min(30))
     r = siga.iniciar_rodada(conn, AGORA + _min(30), so_pedidos=True)

@@ -491,9 +491,13 @@ def test_rodadas_so_pedidos_atende_o_pedido_e_nao_abre_rodada_automatica(client_
     r = client_admin.post("/api/siga/rodadas", **so_pedidos).json()
     assert r["tipo"] == "pedido" and [p["nome"] for p in r["processos"]] == ["Processo Alfa"]
     _fim(client_admin, r["rodada_id"])
-    # com so_pedidos falso (ou sem corpo): a rodada automatica de sempre
+    # com so_pedidos falso: a rodada automatica de sempre (sem corpo: test_rodadas_escolhe_o_que_ler)
     r = client_admin.post("/api/siga/rodadas", json={"so_pedidos": False}, headers=_robo()).json()
     assert r["tipo"] == "automatica" and len(r["processos"]) == 2
+    _fim(client_admin, r["rodada_id"])
+    client_admin.post("/api/siga/atualizar", json={})
+    r = client_admin.post("/api/siga/rodadas", **so_pedidos).json()      # pedido "todos": todos, do tipo pedido
+    assert r["tipo"] == "pedido" and len(r["processos"]) == 2
 
 
 def test_comecei_repetido_devolve_a_rodada_aberta_sem_gravar_outra(client_admin, com_token, schtasks):
