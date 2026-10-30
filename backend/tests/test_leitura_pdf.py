@@ -378,6 +378,27 @@ def test_pdf_com_flate_legitimo_continua_sendo_lido():
     assert "29/01/2027" in leitura_pdf.texto_de_pdf(pdf)
 
 
+def test_primeiras_paginas_le_so_duas_e_nao_tem_o_teto_da_certidao():
+    """Capa do SMO (#285): o envelope do DocuSign tem centenas de paginas e a capa vem na p. 1 ou 2."""
+    pdf = _pdf_de_n_paginas(leitura_pdf.TETO_PAGINAS + 5)
+    assert leitura_pdf.primeiras_paginas_com_limite(pdf) == ["", ""]
+
+
+def test_ocr_do_pacote_nao_tem_o_teto_de_paginas_da_certidao(monkeypatch):
+    import types
+    chamadas = []
+
+    def tesseract(cmd, input, **k):
+        chamadas.append(cmd[0])
+        return types.SimpleNamespace(returncode=0, stdout="página".encode())
+    monkeypatch.setattr(leitura_pdf.subprocess, "run", tesseract)
+    pdf = _pdf_de_n_paginas(leitura_pdf.TETO_PAGINAS + 5)
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.texto_por_ocr(pdf, "tesseract", "tessdata")
+    assert leitura_pdf.texto_por_ocr(pdf, "tesseract", "tessdata", pacote=True) == "página\npágina"
+    assert chamadas == ["tesseract", "tesseract"]       # so' as primeiras `OCR_PAGINAS`
+
+
 
 
 # --- de quem e' o CNPJ (achado 3 do gate 3) -------------------------------------------

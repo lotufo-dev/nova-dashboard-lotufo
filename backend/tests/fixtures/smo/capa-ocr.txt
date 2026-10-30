@@ -1,0 +1,48 @@
+Docusign Envelope ID: 00000000-0000-0000-0000-000000000000
+tam
+AE GOVERNO DO ESTADO DE MATO GROSSO
+SECRETARIA DE ESTADO DE INFRA ESTRUTURA E LOGISTICA - SINFRA
+MEDIÇÃO PROVISÓRIA
+
+Assunto: 8a (oitava) medição provisória
+Ref. LC. nº 000/2025/00/00 — SINFRA
+Através do presente , encaminho a V.S2 a 82 (oitava) medição provisória
+Período: 01/03/2026 a 31/03/2026.
+
+Docusign Envelope ID: 00000000-0000-0000-0000-000000000000
+BEM] SINFRA - Secretaria de Estado de Infraestrutura e Logística 06/04/2026 - 10:27
+BK SMO - Sistema de Gestão de Contratos e Medições
+dl Relatório de Capa da Medição Página: 1 de 1
+Capa da Medição Reajustada
+Órgão : SINFRA - SECRETARIA DE ESTADO DE INFRAESTRUTURA
+E LOGÍSTICA
+Setor : SUEF2/SAOR - SUPERINTENDENCIA DE EXECUÇÃO E Processo : SINFRA-PRO-0000/00002
+FISCALIZAÇÃO DE OBRAS 2
+Contrato : 002/2025 - Implantação e pavimentação em Rodovia: MT-997, Data do contrato: 16/07/2025
+Trecho: BR-000 ? Entr. MT-000
+Credor : CONSTRUTORA ALFA LTDA - 31.200.
+101/0001-30
+Período de vigência : 16/07/2025 a 06/06/2027
+Período de execução: 01/08/2025 a 24/03/2027 Dias corridos : 600
+Licitação : Concorrência Pública 0/2024 Dias paralisados :O
+Obra/Serviço :1- Implantação e pavimentação em Rodovia: MT-997 Rodovia : MT-997
+Trecho : BR-000 - Entr. MT-000 Extensão : 43,440 km
+Provisória : 8-8º Medição Provisória - APROVADA Tipo : Parcial
+Período da medição : 01/03/2026 a 31/03/2026 Data de realização: 02/04/2026
+Dias corridos até a presente medição : 242 Dias paralisados até a presente medição : O
+Observação :
+RESUMO FINANCEIRO
+Valor informado PI do contrato : 60.000.000,00
+Valor Aditivo : 3.000.000,00
+Saldo PI do contrato : 57.567.900,00
+Faturamento realizado acumulado
+Preços iniciais : 5.432.100,00
+Reajustamento : 210.000,00
+Total: 564.210,00
+Faturamento realizado da presente medição
+Preços iniciais : 654.321,00
+Reajustamento : 32.100,50
+Total: 686.421,50
+estpmitr atores seit
+Comissão: Fiscal do contrato Supervisão Responsável técnico
+Eng. Fiscal Supervisão Resp. Executora

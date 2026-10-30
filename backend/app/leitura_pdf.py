@@ -492,14 +492,21 @@ def _pgm(bitmap) -> bytes:
     return b"P5\n%d %d\n255\n" % (w, h) + linhas
 
 
-def texto_por_ocr(pdf: bytes, exe: str, tessdata: str) -> str:
-    """Texto das primeiras `OCR_PAGINAS` paginas pelo Tesseract. Roda no filho de `com_limite`."""
+def texto_por_ocr(pdf: bytes, exe: str, tessdata: str, pacote: bool = False) -> str:
+    """Texto das primeiras `OCR_PAGINAS` paginas pelo Tesseract. Roda no filho de `com_limite`.
+
+    `pacote=True` (capa do SMO, #285): o PDF pode ser o envelope inteiro do DocuSign (centenas de paginas, capa na
+    p. 2); vale a guarda de streams do pacote e nao o teto de paginas da certidao. Le' so' as primeiras de todo modo.
+    """
     import pypdfium2 as pdfium    # so' o filho do OCR carrega o pdfium
 
-    conferir_streams(pdf)          # a mesma guarda de bomba da leitura de texto
+    if pacote:
+        conferir_streams(pdf, TETO_STREAM_PACOTE, TETO_STREAMS_PACOTE)
+    else:
+        conferir_streams(pdf)      # a mesma guarda de bomba da leitura de texto
     doc = pdfium.PdfDocument(pdf)
     try:
-        if len(doc) > TETO_PAGINAS:
+        if not pacote and len(doc) > TETO_PAGINAS:
             raise TextoInadequado(f"O PDF tem {len(doc)} páginas — uma certidão tem "
                                   f"poucas; confira o arquivo e {MANUAL}.")
         partes = []
@@ -520,6 +527,13 @@ def texto_por_ocr(pdf: bytes, exe: str, tessdata: str) -> str:
     if len(texto) > TETO_CARACTERES:
         raise TextoInadequado(_TEXTO_DEMAIS.format(n=len(texto)))
     return texto
+
+
+def primeiras_paginas(pdf: bytes) -> list[str]:
+    """Texto das primeiras `OCR_PAGINAS` paginas, sem teto de paginas (capa do SMO, #285: o pacote do DocuSign tem
+    centenas). Guarda de streams do pacote; cada pagina com o teto de caracteres. Roda no filho de `com_limite`."""
+    return [(p.extract_text() or "")[:TETO_CARACTERES_PAGINA]
+            for p in leitor_de_pdf(pdf, pacote=True).pages[:OCR_PAGINAS]]
 
 
 def textos_por_pagina(pdf: bytes, teto_paginas: int) -> list[str]:
@@ -560,6 +574,10 @@ def _trabalho(pdf: bytes, modo: str, envia, opcoes=None) -> None:
             valor = len(leitor_de_pdf(pdf).pages)
         elif modo == "ocr":
             valor = texto_por_ocr(pdf, *opcoes)
+        elif modo == "ocr_pacote":       # capa do SMO (#285): envelope inteiro, OCR so' das primeiras paginas
+            valor = texto_por_ocr(pdf, *opcoes, pacote=True)
+        elif modo == "primeiras_paginas":
+            valor = primeiras_paginas(pdf)
         elif modo == "paginas_texto":
             valor = textos_por_pagina(pdf, opcoes)
         elif modo == "primeira_pagina":    # regularidade do DP (32 a 160 p.): so' o cabecalho da 1a pagina
@@ -693,6 +711,11 @@ def paginas_com_limite(pdf: bytes) -> int:
     return com_limite(pdf, "paginas")
 
 
+def primeiras_paginas_com_limite(pdf: bytes) -> list[str]:
+    """`primeiras_paginas` em subprocesso, com o prazo do pacote (ver `com_limite`)."""
+    return com_limite(pdf, "primeiras_paginas", TEMPO_PACOTE_S)
+
+
 def textos_por_pagina_com_limite(pdf: bytes, teto_paginas: int = 400) -> list[str]:
     """`textos_por_pagina` em subprocesso, com o prazo do pacote (ver `com_limite`)."""
     return com_limite(pdf, "paginas_texto", TEMPO_PACOTE_S, teto_paginas)
@@ -714,14 +737,15 @@ def juntar_com_limite(partes: list[bytes]) -> tuple[bytes, int]:
     return com_limite(b"", "juntar", TEMPO_PACOTE_S, partes)
 
 
-def texto_por_ocr_com_limite(pdf: bytes) -> str | None:
+def texto_por_ocr_com_limite(pdf: bytes, pacote: bool = False) -> str | None:
     """OCR em subprocesso, um por vez. None quando nao ha OCR instalado ou ele nao conseguiu
-    (fila, prazo, Tesseract com erro): quem chama segue como PDF sem texto (campos digitados)."""
+    (fila, prazo, Tesseract com erro): quem chama segue como PDF sem texto (campos digitados).
+    `pacote=True`: sem o teto de paginas da certidao (ver `texto_por_ocr`)."""
     cfg = configuracao_ocr()
     if cfg is None or not _VAGA_OCR.acquire(timeout=TEMPO_LIMITE_S):
         return None
     try:
-        return com_limite(pdf, "ocr", OCR_TEMPO_LIMITE_S, cfg)
+        return com_limite(pdf, "ocr_pacote" if pacote else "ocr", OCR_TEMPO_LIMITE_S, cfg)
     except (TextoInadequado, ValueError):
         return None
     finally:
