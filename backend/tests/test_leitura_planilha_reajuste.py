@@ -126,6 +126,78 @@ def test_aba_sem_fim_nao_devolve_leitura_parcial(monkeypatch):
     assert "grande demais" in e.value.motivo
 
 
+def _com_linhas_vazias(dados: bytes, de: int, quantas: int, colunas: int = 1, sem_totais: bool = False) -> bytes:
+    """A planilha montada de proposito: `quantas` linhas vazias so' com formatacao, que comprimidas quase nao pesam
+    (o .xlsx fica pequeno e a aba descompactada, enorme)."""
+    if sem_totais:
+        wb = openpyxl.load_workbook(io.BytesIO(dados))
+        wb["Resumo"].delete_rows(12, 2)
+        buf = io.BytesIO(); wb.save(buf); dados = buf.getvalue()
+    letras = [openpyxl.utils.get_column_letter(c + 1) for c in range(colunas)]
+    vazias = b"".join(b'<row r="%d">' % n + b"".join(b'<c r="%s%d" s="0"/>' % (x.encode(), n) for x in letras)
+                      + b"</row>" for n in range(de, de + quantas))
+    dados = _trocar_no_xml_da_aba(dados, b"</sheetData>", vazias + b"</sheetData>")
+    # a dimensao declarada vai ate' a ultima linha (como o Excel grava a aba formatada)
+    declarada = b'<dimension ref="A2:F10"/>' if sem_totais else b'<dimension ref="A2:F12"/>'
+    return _trocar_no_xml_da_aba(dados, declarada, b'<dimension ref="A1:F%d"/>' % (de + quantas))
+
+
+def test_planilha_pequena_com_a_aba_enorme_e_recusada_sem_ser_percorrida(monkeypatch):
+    """Achado do revisor: um .xlsx de poucos KB com milhoes de linhas vazias comprimidas consumia 1 GB e 20 s. A aba
+    descompactada acima do teto e' recusada antes da leitura (e o TOTAIS perto nao salva: o custo vem antes)."""
+    monkeypatch.setattr(leitura, "MAX_BYTES_XML", 200_000)
+    dados = _com_linhas_vazias(planilha_modelo(outras_abas=()), 20, 20_000)
+    assert len(dados) < 150_000                      # o arquivo e' pequeno; a aba descompactada passa de 700 KB
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(dados)
+    assert e.value.motivo == "a aba Resumo é grande demais para o modelo"
+
+
+def test_parte_lida_inteira_acima_do_teto_e_recusada(monkeypatch):
+    """Os estilos (e os textos compartilhados) o openpyxl le inteiros ao abrir: tambem tem teto descompactado."""
+    import zipfile
+    monkeypatch.setattr(leitura, "MAX_BYTES_XML", 50_000)
+    origem, destino = io.BytesIO(planilha_modelo(outras_abas=())), io.BytesIO()
+    with zipfile.ZipFile(origem) as z, zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as novo:
+        for item in z.infolist():
+            conteudo = z.read(item.filename)
+            if item.filename == "xl/styles.xml":
+                conteudo = conteudo.replace(b"</styleSheet>", b"<!--" + b"x" * 100_000 + b"--></styleSheet>")
+            novo.writestr(item, conteudo)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(destino.getvalue())
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+
+
+def test_linhas_vazias_alem_do_teto_nao_sao_percorridas_nem_guardadas():
+    """Sem TOTAIS e com 150 mil linhas vazias abaixo da tabela (dentro do teto de bytes): le as 3 medicoes, sem
+    guardar a aba na memoria (antes, a conferencia de formulas guardava cada <row> e a memoria crescia com a aba)."""
+    import tracemalloc
+    dados = _com_linhas_vazias(planilha_modelo(outras_abas=()), 20, 150_000, sem_totais=True)
+    tracemalloc.start()
+    try:
+        assert len(leitura.ler(dados)) == 3
+        _, pico = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert pico < 15_000_000, pico
+
+
+def test_dado_depois_do_teto_de_linhas_ainda_recusa(monkeypatch):
+    """O teto de linhas nao vira leitura pela metade: valor depois dele recusa; so' formatacao, nao."""
+    monkeypatch.setattr(leitura, "MAX_VARRIDAS", 50)
+    base = planilha_modelo(outras_abas=())
+    wb = openpyxl.load_workbook(io.BytesIO(base))
+    wb["Resumo"].delete_rows(12, 2)
+    wb["Resumo"].cell(500, 2, "01/09/2026 a 30/09/2026")
+    wb["Resumo"].cell(501, 2, " ")                       # texto em branco nao e' dado
+    buf = io.BytesIO(); wb.save(buf)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(buf.getvalue())
+    assert "grande demais" in e.value.motivo
+    assert len(leitura.ler(_com_linhas_vazias(base, 20, 200, sem_totais=True))) == 3
+
+
 def test_so_as_primeiras_colunas_sao_lidas():
     """Celula distante (coluna 10.000) nao faz a leitura percorrer a linha inteira: o cabecalho tem de estar perto."""
     wb = openpyxl.Workbook()

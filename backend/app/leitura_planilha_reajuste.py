@@ -27,6 +27,10 @@ LINHAS_CABECALHO = 40          # o cabecalho do modelo fica nas primeiras linhas
 MAX_COMPETENCIAS = 240         # 20 anos de medicoes mensais: acima disso nao e' o modelo (pleitos usa o mesmo)
 MAX_VARRIDAS = 5000            # linhas lidas da aba (as em branco formatadas contam aqui, nao no teto acima)
 MAX_COLUNAS = 60               # o cabecalho do modelo ocupa 4 a 7 colunas; celula distante nao entra na leitura
+# teto do XML descompactado da aba Resumo e de cada parte que o openpyxl le inteira ao abrir (estilos, textos): o
+# .xlsx pequeno com milhoes de linhas vazias comprimidas nao pode custar memoria e CPU do servidor. A aba Resumo do
+# modelo tem ~40 linhas; formatada ate' a linha 8000 em 20 colunas, fica perto de 4 MB
+MAX_BYTES_XML = 10_000_000
 _DATA = re.compile(r"([0-9]{2})/([0-9]{2})/([0-9]{4})")
 
 
@@ -90,10 +94,13 @@ def _colunas(ws) -> tuple[int, int, int, int]:
 def ler(dados: bytes) -> list[dict]:
     """Previsao por competencia: [{"competencia": "AAAA-MM", "valor_centavos": int, "medicao", "periodo"}]."""
     try:
+        _recusar_parte_grande(dados)
         # read_only: so' a aba Resumo e' lida (as abas de memoria do modelo tem milhares de colunas)
         wb = openpyxl.load_workbook(io.BytesIO(dados), read_only=True, data_only=True)
     except zipfile.BadZipFile as e:
         raise PlanilhaNaoReconhecida("o arquivo não abre como planilha .xlsx") from e
+    except PlanilhaNaoReconhecida:
+        raise
     except Exception as e:   # arquivo de fora: XML quebrado (ParseError e afins) vira digitacao, nao erro 500
         raise PlanilhaNaoReconhecida("a planilha não pôde ser lida") from e
     try:
@@ -109,6 +116,59 @@ def ler(dados: bytes) -> list[dict]:
 _NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
 
+def _recusar_parte_grande(dados: bytes) -> None:
+    """Antes de abrir: as partes XML que o openpyxl le inteiras (tudo menos as abas, lidas sob demanda) com teto
+    pelo tamanho descompactado declarado no zip, sem descompactar nada."""
+    with zipfile.ZipFile(io.BytesIO(dados)) as z:
+        for item in z.infolist():
+            if item.filename.startswith("xl/worksheets/") or not item.filename.endswith((".xml", ".rels")):
+                continue
+            if item.file_size > MAX_BYTES_XML:
+                raise PlanilhaNaoReconhecida("a planilha é grande demais para o modelo")
+
+
+def _linhas_xml(dados: bytes, caminho: str):
+    """(numero, elemento <row>) da aba, em fluxo: a linha ja' entregue sai da memoria (a aba nunca fica inteira)."""
+    with zipfile.ZipFile(io.BytesIO(dados)) as z, z.open(caminho.lstrip("/")) as xml:
+        dados_aba, numero = None, 0
+        for evento, el in ElementTree.iterparse(xml, events=("start", "end")):
+            if evento == "start":
+                if el.tag == f"{_NS}sheetData":
+                    dados_aba = el
+                continue
+            if el.tag != f"{_NS}row":
+                continue
+            numero = int(el.get("r") or numero + 1)
+            yield numero, el
+            if dados_aba is not None:
+                dados_aba.clear()
+
+
+def _tem_dado(c, textos) -> bool:
+    """Celula com valor nao vazio (o que a varredura do openpyxl contaria como dado; " " nao conta)."""
+    tipo, v, inline = c.get("t"), c.find(f"{_NS}v"), c.find(f"{_NS}is")
+    if tipo == "inlineStr":
+        texto = "".join(inline.itertext()) if inline is not None else ""
+    elif v is None:
+        return False
+    elif tipo == "s":
+        try:
+            texto = str(textos[int(v.text)])
+        except (TypeError, ValueError, IndexError):
+            return True
+    else:
+        texto = v.text or ""
+    return bool(texto.strip())
+
+
+def _dado_depois(dados: bytes, caminho: str, ultima: int, textos) -> bool:
+    """Ha' valor em alguma linha depois de `ultima`? Formatacao e formula vazia nao contam."""
+    for n, linha in _linhas_xml(dados, caminho):
+        if n > ultima and any(_tem_dado(c, textos) for c in linha.iter(f"{_NS}c")):
+            return True
+    return False
+
+
 def _formulas_sem_valor(dados: bytes, caminho: str, linhas: list[tuple[int, str]],
                         colunas: tuple[int, ...]) -> list[str]:
     """Das linhas lidas sem valor (data_only devolve None), as que tem FORMULA sem nenhum valor guardado: o arquivo
@@ -117,12 +177,13 @@ def _formulas_sem_valor(dados: bytes, caminho: str, linhas: list[tuple[int, str]
     `<v></v>` e e' vazia de verdade; so' a celula com `<f>` e sem `<v>` ficou sem o calculo."""
     nomes = dict(linhas)
     alvo = {f"{get_column_letter(c + 1)}{n}": n for n in nomes for c in colunas}
+    ultima = max(nomes)
     com_formula: list[str] = []
-    with zipfile.ZipFile(io.BytesIO(dados)) as z, z.open(caminho.lstrip("/")) as xml:
-        # uma varredura so', em fluxo (a aba nao vai inteira para a memoria)
-        for _, el in ElementTree.iterparse(xml):
-            if el.tag != f"{_NS}c":
-                continue
+    # uma varredura so', em fluxo, que para na ultima linha procurada (o resto da aba nem e' lido)
+    for numero, linha in _linhas_xml(dados, caminho):
+        if numero > ultima:
+            break
+        for el in linha.iter(f"{_NS}c"):
             n = alvo.get(el.get("r", ""))
             if n is not None and el.find(f"{_NS}f") is not None and nomes[n] not in com_formula:
                 v = el.find(f"{_NS}v")
@@ -130,7 +191,6 @@ def _formulas_sem_valor(dados: bytes, caminho: str, linhas: list[tuple[int, str]
                 # openpyxl e outros geradores gravam), a formula nunca foi calculada
                 if v is None or (not (v.text or "") and el.get("t") != "str"):
                     com_formula.append(nomes[n])
-            el.clear()
     return com_formula
 
 
@@ -148,17 +208,20 @@ def _ler_resumo(wb, dados: bytes) -> list[dict]:
         raise PlanilhaNaoReconhecida("falta a aba Resumo")
     ws = wb[ABA]
     caminho = ws._worksheet_path      # o XML da aba, para distinguir formula sem calculo de formula vazia
+    with zipfile.ZipFile(io.BytesIO(dados)) as z:
+        if z.getinfo(caminho.lstrip("/")).file_size > MAX_BYTES_XML:
+            raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
     inicio, col_med, col_per, col_reaj = _colunas(ws)
     out: list[dict] = []
     vistas: dict[str, str] = {}
     sem_valor: list[tuple[int, str]] = []
-    # a dimensao declarada nao conta (formatacao ate' a linha 8000 e' comum); o custo fica limitado pelas colunas
-    # lidas e pelo teto de linhas, e depois do teto so' linha com dado recusa (leitura parcial nao serve)
-    for n, linha in enumerate(ws.iter_rows(min_row=inicio, max_col=MAX_COLUNAS, values_only=True)):
-        if n >= MAX_VARRIDAS:
-            if any(v is not None and str(v).strip() for v in linha):
-                raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
-            continue
+    # a dimensao declarada nao conta (formatacao ate' a linha 8000 e' comum); o custo fica limitado pelo teto de
+    # bytes da aba, pelas colunas lidas e pelo teto de linhas, onde a varredura para. Depois do teto, so' linha com
+    # dado recusa (leitura parcial nao serve), conferido direto no XML, sem montar linha nenhuma
+    ultima = inicio + MAX_VARRIDAS - 1
+    lidas = 0
+    for n, linha in enumerate(ws.iter_rows(min_row=inicio, max_row=ultima, max_col=MAX_COLUNAS, values_only=True)):
+        lidas = n + 1
         celula = lambda c: linha[c] if c < len(linha) else None   # noqa: E731
         medicao, periodo, valor = celula(col_med), celula(col_per), celula(col_reaj)
         rotulo = _texto(medicao)
@@ -187,6 +250,9 @@ def _ler_resumo(wb, dados: bytes) -> list[dict]:
             raise PlanilhaNaoReconhecida("competências demais na aba Resumo")
         out.append({"competencia": comp, "valor_centavos": _centavos(valor), "medicao": texto_med,
                     "periodo": periodo.strip() if isinstance(periodo, str) else comp})
+    else:
+        if lidas >= MAX_VARRIDAS and _dado_depois(dados, caminho, ultima, ws._shared_strings):
+            raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
     _recusar_formula_sem_valor(dados, caminho, sem_valor, col_med, col_per, col_reaj)
     if not out:
         raise PlanilhaNaoReconhecida("nenhuma linha de medição com reajuste na aba Resumo")
