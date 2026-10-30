@@ -9,7 +9,6 @@ import { IconeAlerta, IconeBaixar, IconeMais } from "./icones";
 import { larDoEspelho, tituloMedicao } from "./medicao";
 import { brl } from "./Medicoes";
 import { Link } from "./Link";
-import { fmtTamanho as kb } from "./formato";
 // data-hora no fuso de Cuiaba (tempo.ts), e nao no do navegador; competencia em MM/AAAA
 import { fmtCompetencia as competenciaBR, fmtDataHora as dataHoraBR, fmtDataPura as dataBR } from "./tempo";
 import Rolagem from "./Rolagem";
@@ -137,16 +136,14 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     return medicao || parte ? <section className={parte ? "espelho-etapa" : "cartao"} id={idSecao}><div className="vazio"><p>Carregando o espelho…</p></div></section> : null;
   }
   if (!regra || regra.situacao !== "ativa") {
-    // `undefined` aqui e' a carga que falhou: sem saber a regra, a tela nao diz "fluxo antigo" nem oferece a
-    // medicao manual (o servidor a recusa numa obra com regra ativa, issue #12, mas a tela nao deve oferece-la)
+    // `undefined` aqui e' a carga que falhou: sem saber a regra, a tela nao oferece a medicao manual (o servidor a
+    // recusa numa obra com regra ativa, issue #12, mas a tela nao deve oferece-la)
     const falhou = regra === undefined;
     if (parte) {
       return (
         <section className="espelho-etapa pilha" id={idSecao}>
           {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</p>}
-          {!falhou && (medicao
-            ? <p className="campo__nota">Esta obra ainda gera o espelho pelo fluxo antigo: esta medição não tem espelho gerado pelo sistema.</p>
-            : semRegra ?? <p className="campo__nota">Esta obra ainda gera o espelho pelo fluxo antigo.</p>)}
+          {!falhou && (medicao ? <div className="vazio"><p>Nenhum espelho.</p></div> : semRegra)}
         </section>
       );
     }
@@ -154,12 +151,10 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
       <section className="cartao" aria-labelledby="titulo-espelho" id={idSecao}>
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-espelho">{titulo}</h2>
-          {/* na obra, o formulario da medicao manual ja' diz isso (e o que fazer) */}
-          {!falhou && (medicao || !semRegra) && <span className="cartao__dica">Esta obra ainda gera o espelho pelo fluxo antigo</span>}
         </div>
         {erro && <div className="cartao__corpo"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />
           {erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</p></div>}
-        {!falhou && !medicao && semRegra}
+        {!falhou && (medicao ? <div className="vazio"><p>Nenhum espelho.</p></div> : semRegra)}
       </section>
     );
   }
@@ -339,12 +334,12 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
 
       {passo.tipo === "form" && so("espelho") && (
         <form className="cartao__corpo" onSubmit={conferir} aria-label="Gerar espelho">
-          <p className="painel__titulo">Gerar espelho: número, competência e os valores informados pelo órgão</p>
+          <p className="painel__titulo">Gerar espelho</p>
           <div className="form-inline">
             <div className="campo">
               <label className="campo__rotulo" htmlFor="esp-numero">Nº da medição</label>
               <input id="esp-numero" name="numero" autoComplete="off" spellCheck={false} className="entrada--curta entrada--num num" required inputMode="numeric"
-                pattern="[0-9]{1,3}" placeholder="Ex.: 10…" value={form.numero}
+                pattern="[0-9]{1,3}" value={form.numero}
                 onChange={e => setForm({ ...form, numero: e.target.value })} />
             </div>
             <div className="campo">
@@ -371,14 +366,11 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
               <div className="campo" key={en.chave}>
                 <label className="campo__rotulo" htmlFor={`esp-${en.chave}`}>{en.rotulo}</label>
                 <CampoValor id={`esp-${en.chave}`} name={en.chave} className="entrada--media num"
-                  value={form.entradas[en.chave] ?? ""} ajudaId="esp-ajuda-valor"
+                  value={form.entradas[en.chave] ?? ""}
                   onChange={v => setForm({ ...form, entradas: { ...form.entradas, [en.chave]: v } })} />
               </div>
             ))}
           </div>
-          <p className="campo__nota" id="esp-ajuda-valor">Digite só os números: os centavos e os pontos entram sozinhos.
-            Campo vazio vale zero; nota com valor zero não é emitida.</p>
-          <p className="campo__nota">O período vem com o mês da competência; mude só quando o espelho cobrir outro intervalo (ex.: 05/02 a 28/02).</p>
           <div className="painel__rodape form-inline">
             <button type="submit" className="btn btn--primario" disabled={ocupado}>{ocupado ? "Conferindo…" : "Conferir"}</button>
             <button type="button" className="btn" onClick={() => setPasso({ tipo: "lista" })}>Voltar</button>
@@ -388,13 +380,13 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
 
       {passo.tipo === "previa" && so("espelho") && (
         <div className="cartao__corpo">
-          <p className="painel__titulo">Conferir antes de gerar: uma linha por nota</p>
+          <p className="painel__titulo">Conferir antes de gerar</p>
           <p className="campo__nota">Período no espelho: <span className="num">{passo.previa.periodo}</span></p>
           {tabelaNotas(passo.previa.saidas)}
           <ul className="lista-simples espelho__medicoes">
             {passo.previa.medicoes.map(m => (
               <li key={m.tipo}>Medição {form.numero} de {TIPO[m.tipo] ?? m.tipo}: {brl(m.valor_centavos)}
-                {m.existente ? ` (já existe, ${m.existente.replace("_", " ")}: vira versão nova)` : " (nova)"}</li>
+                {m.existente && <> <Selo classe="selo--atencao">Versão nova</Selo></>}</li>
             ))}
           </ul>
           {passo.previa.avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
@@ -414,7 +406,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
 
       {passo.tipo === "envio" && so("faturamento") && (
         <div className="cartao__corpo">
-          <p className="painel__titulo">Enviar ao faturamento: espelho nº {passo.espelho.numero} ({competenciaBR(passo.espelho.competencia)}), versão {passo.espelho.versao}</p>
+          <p className="painel__titulo">Enviar ao faturamento</p>
           {passo.previa.avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
           {(passo.espelho.envio || jaEnviado) && (
             <label>
@@ -425,7 +417,6 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
           <ComporEmail key={passo.espelho.id} ocupado={ocupado} anexos={passo.previa.anexos}
             inicial={{ para: passo.previa.para, copia: passo.previa.copia, cco: [], assunto: passo.previa.assunto, corpo: passo.previa.corpo }}
             aoEnviar={enviar} aoDescartar={() => setPasso({ tipo: "lista" })} />
-          <p className="campo__nota">O e-mail sai da sua conta Microsoft e a medição passa a Espelho enviado.</p>
         </div>
       )}
 
@@ -433,22 +424,17 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
         const lar = esp.medicoes.find(x => x.id === larDoEspelho(esp));
         return (
           <div className="cartao__corpo" key={esp.id}>
-            <p>
-              O espelho desta competência (nº {esp.numero}, versão {esp.versao}
-              {esp.envio ? `, enviado ao faturamento em ${dataHoraBR(esp.envio.enviado_em)}` : ", ainda não enviado ao faturamento"}) mora
-              na{" "}
-              {lar
-                ? <Link para={{ tela: "medicao", obra: contratoId, id: lar.id }} secao="espelho">
-                    {tituloMedicao({ numero: esp.numero, tipo: lar.tipo })}
-                  </Link>
-                : "medição de execução"}.
-            </p>
+            {lar && (
+              <p><Link para={{ tela: "medicao", obra: contratoId, id: lar.id }} secao="espelho">
+                Abrir o espelho na {tituloMedicao({ numero: esp.numero, tipo: lar.tipo })}
+              </Link></p>
+            )}
           </div>
         );
       })}
 
       {medicao && passo.tipo === "lista" && vigentes.length === 0 && deOutra.length === 0 && (
-        <div className="vazio"><p>Esta medição não tem espelho gerado pelo sistema.</p></div>
+        <div className="vazio"><p>Nenhum espelho.</p></div>
       )}
 
       {medicao && passo.tipo === "lista" && vigentes.map(esp => {
@@ -461,21 +447,14 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
           {!parte && (
           <div className="espelho__cabeca">
             <strong>Nº {esp.numero} · {competenciaBR(esp.competencia)}</strong>
-            <span className="cartao__dica">versão {esp.versao} · gerado em {dataHoraBR(esp.criado_em)}{esp.criado_por_nome ? ` por ${esp.criado_por_nome}` : ""}</span>
             {/* o estado do envio e' SELO (nao texto de apoio): e' o que diz se falta um passo */}
             {esp.envio
-              ? <>
-                  <Selo classe="selo--ok">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
-                  <span className="cartao__dica">por {esp.envio.remetente} → {esp.envio.para.join(", ")}</span>
-                </>
+              ? <Selo classe="selo--ok">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
               : <Selo classe="selo--atencao" forte>Não enviado ao faturamento</Selo>}
           </div>
           )}
           {so("espelho") && (
-            <div>
-              {parte && <p className="med-sub">Uma linha por nota</p>}
-              <div className={parte ? "med-caixa" : undefined}>{tabelaNotas(esp.saidas)}</div>
-            </div>
+            <div className={parte ? "med-caixa" : undefined}>{tabelaNotas(esp.saidas)}</div>
           )}
           {parte === "espelho" && (
             <ul className="med-linhas med-linhas--caixa">
@@ -488,25 +467,20 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
             </ul>
           )}
           <div>
-            {parte && <p className="med-sub">{parte === "faturamento" ? (esp.envio ? "O que foi enviado" : "O que vai ao faturamento") : "Arquivos gerados"}</p>}
+            {parte && <p className="med-sub">Arquivos</p>}
             <ul className="lista-simples lista-simples--arquivos">
               {esp.arquivos.map(a => (
                 <li key={a.documento_id}>
                   <a href={`/api/espelhos/${esp.id}/arquivos/${a.documento_id}`}><IconeBaixar className="icone icone--p" /> {a.nome}</a>
-                  <span className="num"> ({kb(a.tamanho)})</span>
                 </li>
               ))}
             </ul>
           </div>
-          {parte === "faturamento" && esp.envio && (
-            <p className="campo__nota">Enviado por {esp.envio.remetente} → {esp.envio.para.join(", ")}.</p>
-          )}
           {superadas.map(m => (
             <p className="campo__nota" key={m.id}>
               {/* sem artigo antes do titulo: "Reajuste da 10ª Medicao" e' masculino, as outras femininas */}
-              Este espelho fica só para leitura. Já existe espelho mais novo para:{" "}
+              Este espelho fica só para leitura: já existe espelho mais novo para{" "}
               <Link para={{ tela: "medicao", obra: contratoId, id: m.id }} secao="espelho">{tituloMedicao({ numero: esp.numero, tipo: m.tipo })}</Link>.
-              Enviar ou gerar este de novo voltaria aos valores antigos.
             </p>
           ))}
           {podeEditar && (
@@ -534,11 +508,10 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
 
       {medicao && passo.tipo === "lista" && so("espelho") && substituidos.length > 0 && (
         <details className={parte ? "detalhes" : "detalhes cartao__corpo"}>
-          <summary>Versões anteriores ({substituidos.length})</summary>
+          <summary>Versões anteriores</summary>
           <ul className="lista-simples">
             {substituidos.map(e => (
-              <li key={e.id}>Nº {e.numero} · {competenciaBR(e.competencia)} · versão {e.versao} · substituída
-                {e.motivo ? `: ${e.motivo}` : ""}{e.envio ? ` · tinha sido enviada em ${dataHoraBR(e.envio.enviado_em)}` : ""}</li>
+              <li key={e.id}>Nº {e.numero} · {competenciaBR(e.competencia)} · versão {e.versao}{e.motivo ? ` · ${e.motivo}` : ""}</li>
             ))}
           </ul>
         </details>

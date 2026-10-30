@@ -32,7 +32,7 @@ const AVISOS = [
 
 function Pagina() {
   const { busca, ir } = useRota();
-  return <Contratos ir={ir} busca={busca} perfil="admin" />;
+  return <Contratos ir={ir} busca={busca} />;
 }
 
 function abrir(url: string) {
@@ -59,18 +59,22 @@ describe("Obras: escolha do contratante e lista", () => {
     // 3 obras em andamento (a encerrada fica de fora): vigente 6000,00 e medido 2250,00 -> 38%; saldo 3750,00
     expect(linhas[0].textContent).toContain("3 obras");
     expect(linhas[0].textContent).toContain("38%");
-    expect(linhas[0].textContent).toMatch(/Saldo a executar \(valor cheio\)\s*R\$\s*3\.750,00/);
-    // #262: a nota diz a base do saldo e do %: o vigente de execucao (sem o aditivo de reajuste)
-    expect(screen.getByText(/saldo a executar = vigente de execução − medido \(execução\)/)).toBeTruthy();
+    expect(linhas[0].textContent).toMatch(/Saldo a executar\s*R\$\s*3\.750,00/);
+    expect(linhas[0].textContent).not.toContain("valor cheio");
     expect(linhas[1].textContent).toContain("MTPAR");
-    expect(linhas[1].textContent).toContain("1 encerrada");
+    expect(linhas[1].textContent).not.toContain("encerrada");
     expect(linhas[2].textContent).toContain("SINFRA");
     expect(linhas[2].textContent).toContain("2 obras");
-    expect(linhas[2].textContent).toMatch(/Saldo a executar \(valor cheio\)\s*R\$\s*2\.250,00/);
-    // os avisos do contratante: 1 obra com aviso, 1 crítico
-    expect(linhas[2].textContent).toContain("1 com aviso");
-    expect(linhas[2].textContent).toMatch(/1\scrítico/);
-    expect(linhas[1].textContent).toContain("sem avisos");
+    expect(linhas[2].textContent).toMatch(/Saldo a executar\s*R\$\s*2\.250,00/);
+    // os avisos do contratante: só o selo dos críticos, sem a contagem de obras com aviso
+    expect(linhas[2].querySelector(".selo--acao")?.textContent).toMatch(/1\scrítico/);
+    expect(linhas[2].textContent).not.toContain("com aviso");
+    // sem aviso, nada: nem "sem avisos"
+    expect(linhas[1].querySelector(".selo")).toBeNull();
+    expect(linhas[1].textContent).not.toContain("sem avisos");
+    // sem a meta do topo e sem a nota de regra embaixo
+    expect(screen.queryByText(/contratantes ·/)).toBeNull();
+    expect(screen.queryByText(/Valores cheios do contrato/)).toBeNull();
     expect(linhas[2].getAttribute("href")).toBe("/obras?c=SINFRA");
     expect(linhas[0].getAttribute("href")).toBe("/obras?c=todas");
     expect(screen.getByRole("heading", { level: 1, name: "Contratantes" })).toBeTruthy();
@@ -98,8 +102,9 @@ describe("Obras: escolha do contratante e lista", () => {
     expect(brt.textContent).toContain("25%");
     expect(brt.textContent).toContain("executado");
     expect(brt.textContent).toContain("execução termina em 5 dias");   // o aviso mais grave, sem o nome da obra
-    expect(brt.textContent).toContain("mais 1");
+    expect(brt.textContent).not.toContain("mais 1");
     expect(brt.textContent).toContain("termina em 31/03/2027");
+    expect(screen.queryByText(/de 2 obras/)).toBeNull();
     expect(brt.textContent).not.toContain("Ativo");        // o status só aparece quando não é "Ativo"
     expect(screen.getByRole("heading", { level: 1, name: "SINFRA" })).toBeTruthy();
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
@@ -113,6 +118,9 @@ describe("Obras: escolha do contratante e lista", () => {
     expect(within(lista).getAllByRole("link")).toHaveLength(1);
     expect(lista.textContent).toContain("Suspenso");
     expect(lista.textContent).toContain("Granito");
+    // obra parada: selo, sem a frase "com o prazo parado"
+    expect(within(lista).getByText("Paralisada")).toBeTruthy();
+    expect(lista.textContent).not.toContain("com o prazo parado");
     expect(lista.textContent).not.toContain("Deciolândia");
     fireEvent.click(screen.getByRole("checkbox", { name: "Mostrar as encerradas" }));
     expect(window.location.search).toBe("?c=MTPAR&situacao=todas");
@@ -135,6 +143,32 @@ describe("Obras: escolha do contratante e lista", () => {
     expect(brt.textContent).toContain("25%");
     expect(within(brt).getByRole("link", { name: /2 avisos de Estações BRT, 1 crítico/ }).getAttribute("href"))
       .toBe("/obras?c=SINFRA&ver=tabela&avisos=1&obra=1");
+    expect(brt.textContent).not.toContain("de 2 avisos");
+    // o prazo com aviso ganha o selo do nível; sem aviso, só a data
+    const execBrt = within(brt).getAllByRole("cell")[6];
+    expect(execBrt.querySelector(".selo--acao")?.textContent?.replace(/\s/g, " ")).toBe("vence em 100 dias");
+    const mt = within(tabela).getAllByRole("row").find(r => r.textContent!.includes("MT-388"))!;
+    const fins = within(mt).getAllByRole("cell").slice(6, 8);
+    fins.forEach(c => expect(c.querySelector(".selo")).toBeNull());
+    expect(mt.textContent).not.toContain("vence em");
+  });
+
+  it("na tabela, a obra parada mostra o selo Paralisada e o pedido de prorrogação só o ofício", async () => {
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/contratos") return [obra(3, "Granito", { orgao: "MTPAR", contratante: "MTPAR", estado: "suspenso", paralisada_desde: "2026-09-01",
+        pedido_prorrogacao: { enviado_em: "2026-10-01", numero_oficio: "Of. 12/2026", dias: 25 } })];
+      if (caminho === "/api/entidades") return [];
+      if (caminho === "/api/inicio") return { avisos: [] };
+      throw new Error(`chamada inesperada: ${caminho}`);
+    });
+    abrir("/obras?c=MTPAR&ver=tabela");
+    const tabela = await screen.findByRole("table");
+    const linha = within(tabela).getAllByRole("row")[1];
+    const selo = within(linha).getByText("Paralisada").closest(".selo");
+    expect(selo?.getAttribute("title")).toBe("01/09/2026");
+    expect(linha.textContent).not.toContain("Paralisada desde");
+    expect(linha.textContent).toContain("Of. 12/2026");
+    expect(linha.textContent).not.toMatch(/há 25 dias/);
   });
 
   it("a busca acha pelo nome da empresa e o prazo 'terminam em 90 dias' filtra a lista", async () => {

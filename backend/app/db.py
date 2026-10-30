@@ -215,6 +215,12 @@ def migrate(conn: sqlite3.Connection) -> None:
             sql = _sem_alters_ja_aplicados(conn, sql_file.read_text(encoding="utf-8"))
             try:
                 conn.executescript(sql)
+            except BaseException:
+                # Migracao com BEGIN proprio (042) que falha no meio deixa a transacao aberta: desfaz antes de
+                # religar as FK, porque PRAGMA foreign_keys dentro de transacao e' ignorado pelo SQLite.
+                if conn.in_transaction:
+                    conn.rollback()
+                raise
             finally:
                 # Uma migracao que reconstroi tabela (020) desliga foreign_keys no comeco do
                 # script e religa no fim; se falhar no meio, a conexao nao pode seguir sem FK.

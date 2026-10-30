@@ -13,9 +13,7 @@
 .notas-v3 .en-rodape { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid var(--linha); }
 .notas-v3 .en-rodape .btn--primario { height: 48px; padding: 0 24px; font-size: 15px; font-weight: 600; }
 .notas-v3 .en-motivo { margin: 0; font-size: 13px; color: var(--texto-2); flex: 1 1 100%; }
-.notas-v3 .en-motivo--atencao { color: var(--atencao); }
 .notas-v3 .en-motivo--bloqueio { color: var(--acao); }
-.notas-v3 .en-dica { text-align: left; }
 
 @media (max-width: 767px) {
   .notas-v3 .en-lista { padding: 8px; }

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiForm, mensagemDeErro } from "./api";
 import CampoCompetencia from "./CampoCompetencia";
 import { IconeAlerta, IconeArquivo, IconeBaixar, IconeClipe, IconeLinkExterno } from "./icones";
@@ -34,7 +34,7 @@ function Pontos({ e }: { e: EmpresaDoc }) {
     <ul className="doc-pontos" aria-label={`Certidões de ${e.entidade}`}>
       {certidoesOrdenadas(e).map(l => {
         const s = situacaoCertidao(l, l.certidao ? fmtDataPura(l.certidao.validade) : "");
-        return <li key={l.chave} title={`${l.tipo}: ${s.texto}`}><Ponto nivel={s.nivel} />{NOME_CURTO[l.chave] ?? l.tipo}<span className="sr-only">: {s.texto}</span></li>;
+        return <li key={l.chave}><Ponto nivel={s.nivel} />{NOME_CURTO[l.chave] ?? l.tipo}<span className="sr-only">: {s.texto}</span></li>;
       })}
     </ul>
   );
@@ -90,11 +90,6 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
   const contas: Record<AbaDocumentos, number> = { certidoes: nCert, regularidade: nReg, garantia: nGarantia };
 
   const r = e ? resumoEmpresa(e, painel?.contratos ?? []) : null;
-  const linkEmpresa = (x: number) => {
-    const o = porId.get(x);
-    return o ? <Link para={{ tela: "documentos-empresa", id: x }}>{o.entidade}</Link> : null;
-  };
-  const lista = (ids: number[]) => ids.map((x, i) => <Fragment key={x}>{i > 0 && ", "}{linkEmpresa(x)}</Fragment>);
 
   return (
     <>
@@ -112,18 +107,6 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                   <CnpjCopiar e={e} copia={copia} aoCopiar={() => void copiar(e.entidade_id, e.cnpj, e.entidade)} />
                   <Pilula nivel={r.nivel} texto={r.texto} />
                 </div>
-                <p className="doc-cabeca__meta">
-                  {e.papel === "consorcio" && (e.consorciadas ?? []).length > 0 && <>Consórcio · consorciadas: {lista(e.consorciadas!)}</>}
-                  {e.papel === "consorciada" && (e.consorcios ?? []).length > 0 && <>Consorciada em {lista(e.consorcios!)}</>}
-                  {e.papel === "consorcio" && (e.consorciadas ?? []).length === 0 && "Consórcio"}
-                  {e.papel === "consorciada" && (e.consorcios ?? []).length === 0 && "Consorciada"}
-                  {e.papel === "lotufo" && <>Empresa{(e.consorcios ?? []).length > 0 && <> · também consorciada em {lista(e.consorcios!)}</>}</>}
-                  {(e.obras ?? []).length > 0 && (
-                    <> · exigida em {e.obras!.map((o, i) => (
-                      <Fragment key={o.contrato_id}>{i > 0 && ", "}<Link para={{ tela: "obra", id: o.contrato_id, aba: "documentos" }}>{o.obra}</Link></Fragment>
-                    ))}</>
-                  )}
-                </p>
               </>
             )}
           </div>
@@ -131,8 +114,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
             <div className="doc-cabeca__zip">
               <div className="campo">
                 <label className="campo__rotulo" htmlFor="data-zip">ZIP: certidões vigentes em</label>
-                <input id="data-zip" type="date" value={dataZip || painel!.hoje} onChange={ev => setDataZip(ev.target.value)}
-                  title="O ZIP junta as certidões vigentes nessa data (para licitação ou protocolo)." />
+                <input id="data-zip" type="date" value={dataZip || painel!.hoje} onChange={ev => setDataZip(ev.target.value)} />
               </div>
               <a className="btn" href={`/api/documentos/zip?entidade_id=${e.entidade_id}&data=${dataZip || painel!.hoje}`}
                 aria-label={`Baixar o ZIP das certidões vigentes de ${e.entidade}`}>
@@ -151,7 +133,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
         {!painel && !erro && <p className="campo__nota">Carregando…</p>}
         {painel && !e && (
           <div className="cartao vazio">
-            <p className="vazio__titulo">Essa empresa não tem documento exigido.</p>
+            <p className="vazio__titulo">Nenhum documento exigido.</p>
             <p><Link para={{ tela: "documentos" }}>Ver todas as empresas</Link></p>
           </div>
         )}
@@ -172,10 +154,6 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
               const urgente = pendenciaMaisUrgente(e);
               return (
                 <div className="doc-painel">
-                  <p className="doc-painel__dica">
-                    Pendência: vencida, falta ou vence em até 30 dias. “Emitir” abre o site do órgão emissor; “Anexar” lê o PDF e
-                    coloca na linha certa.
-                  </p>
                   <div className="tabela-wrap">
                     <table className="tabela tabela--empilha">
                       <caption className="sr-only">Certidões de {e.entidade}</caption>
@@ -189,7 +167,6 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                           const curto = NOME_CURTO[l.chave] ?? l.tipo;
                           const s = situacaoCertidao(l, l.certidao ? fmtDataPura(l.certidao.validade) : "");
                           const notas: string[] = [];
-                          if (l.situacao === "nao_se_aplica") notas.push("declarado");
                           if (l.certidao?.natureza === "positiva_efeito_negativa" && l.situacao !== "vencida") notas.push("positiva c/ efeito de negativa");
                           const aplica = l.situacao !== "nao_se_aplica";
                           return (
@@ -226,7 +203,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                                       <IconeArquivo className="icone" />Ver PDF
                                     </a>
                                   ) : (
-                                    <button type="button" className="btn btn--pequeno" disabled title="Sem PDF anexado"
+                                    <button type="button" className="btn btn--pequeno" disabled
                                       aria-label={`Ver PDF da certidão ${curto}`}>
                                       <IconeArquivo className="icone" />Ver PDF
                                     </button>
@@ -244,7 +221,6 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                   {e.papel === "consorcio" && (e.consorciadas ?? []).length > 0 && (
                     <div className="pilha doc-consorciadas-bloco">
                       <h2 className="doc-secao-titulo">Consorciadas</h2>
-                      <p className="doc-painel__dica">A obra do consórcio cobra as certidões dele e as de cada consorciada.</p>
                       <ul className="doc-consorciadas">
                         {e.consorciadas!.map(x => {
                           const o = porId.get(x);
@@ -266,8 +242,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                   )}
 
                   {podeEditar && (
-                    <AnexarCertidoes ref={anexar} empresas={painel.empresas} empresaPadrao={e} aoGravar={carregar} anunciar={setAnuncio}
-                      nota="O sistema lê a validade de cada PDF e coloca na linha certa; confira e grave." />
+                    <AnexarCertidoes ref={anexar} empresas={painel.empresas} empresaPadrao={e} aoGravar={carregar} anunciar={setAnuncio} />
                   )}
                 </div>
               );
@@ -277,20 +252,10 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
               <div className="doc-painel">
                 {!e.regularidade ? (
                   <div className="vazio">
-                    <p className="vazio__titulo">{e.papel === "consorcio" ? "O consórcio não entrega regularidade mensal" : "Regularidade mensal não exigida"}</p>
-                    {e.papel === "consorcio" && (e.consorciadas ?? []).length > 0 && (
-                      <p>Quem entrega o PDF do DP é cada consorciada:{" "}
-                        {e.consorciadas!.map((x, i) => {
-                          const o = porId.get(x);
-                          return o ? <Fragment key={x}>{i > 0 && " e "}<Link para={{ tela: "documentos-empresa", id: x, aba: "regularidade" }}>{o.entidade}</Link></Fragment> : null;
-                        })}.</p>
-                    )}
+                    <p className="vazio__titulo">Regularidade mensal não exigida.</p>
                   </div>
                 ) : (
                   <>
-                    <p className="doc-painel__dica">
-                      O PDF do Departamento Pessoal, um por competência. O nome “MMAAAA - …” do arquivo já preenche a competência.
-                    </p>
                     {/* regiao viva sempre montada (o anuncio falha quando ela nasce ja' com o texto) */}
                     <p className={gravada ? "notas__ok" : "sr-only"} role="status">{gravada}</p>
                     <div className="doc-reg">
@@ -332,7 +297,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                       )}
                       <div className="doc-reg__bloco">
                         <h3>Anexadas</h3>
-                        {(e.regularidades_anexadas ?? []).length === 0 ? <p className="campo__nota">Nenhuma regularidade anexada ainda.</p> : (
+                        {(e.regularidades_anexadas ?? []).length === 0 ? <p className="campo__nota">Nenhuma regularidade anexada.</p> : (
                           <div className="tabela-wrap">
                             <table className="tabela">
                               <thead><tr><th scope="col">Competência</th><th scope="col">Anexada em</th><th scope="col"><span className="sr-only">PDF</span></th></tr></thead>
@@ -360,18 +325,15 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
               <div className="doc-painel">
                 {obrasDaEmpresa.length === 0 ? (
                   <div className="vazio">
-                    <p className="vazio__titulo">Nenhuma obra contratada direto por esta empresa</p>
-                    {(e.consorcios ?? []).length > 0 && (
-                      <p>A garantia das obras em consórcio fica no consórcio:{" "}
-                        {e.consorcios!.map((x, i) => {
-                          const o = porId.get(x);
-                          return o ? <Fragment key={x}>{i > 0 && ", "}<Link para={{ tela: "documentos-empresa", id: x, aba: "garantia" }}>{o.entidade}</Link></Fragment> : null;
-                        })}.</p>
-                    )}
+                    <p className="vazio__titulo">Nenhuma obra.</p>
+                    {/* a garantia das obras em consorcio fica no consorcio: o link e' o caminho ate' ela */}
+                    {(e.consorcios ?? []).map(x => {
+                      const o = porId.get(x);
+                      return o ? <p key={x}><Link para={{ tela: "documentos-empresa", id: x, aba: "garantia" }}>Abrir a garantia de {o.entidade}</Link></p> : null;
+                    })}
                   </div>
                 ) : (
                   <>
-                    <p className="doc-painel__dica">A garantia avisa 30 dias antes do fim (ação aos 15).</p>
                     <div className="tabela-wrap">
                       <table className="tabela tabela--empilha">
                         <caption className="sr-only">Garantia por obra</caption>

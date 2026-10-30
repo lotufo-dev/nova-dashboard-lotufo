@@ -160,6 +160,18 @@ def test_datas_base_sincronizam_e_fiscal_novo_nao_apaga_o_antigo(conn):
     assert conn.execute("SELECT COUNT(*) FROM contrato_fiscais").fetchone()[0] == 2
 
 
+def test_aplica_a_da_data_base_e_gravado_e_mudanca_so_nele_sincroniza(conn):
+    # issue #257: `aplica_a` e' configuracao da data-base como o indice; mudar so' ele tambem atualiza
+    bases = [{"mes": "2022-01", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+             {"mes": "2022-03", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(datas_base=bases)]))
+    assert [tuple(r) for r in conn.execute("SELECT mes, indice, aplica_a FROM contrato_datas_base ORDER BY mes")] == [
+        ("2022-01", "INCC-DI", "itens SINAPI"), ("2022-03", "FGV/DNIT", "itens SICRO")]
+    bases[1] = {**bases[1], "aplica_a": "itens SICRO e DNIT"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(datas_base=bases)]))
+    assert conn.execute("SELECT aplica_a FROM contrato_datas_base WHERE mes='2022-03'").fetchone()[0] == "itens SICRO e DNIT"
+
+
 from app import contratos as contratos_mod
 
 AD_VALOR = {"chave": "ta-01", "tipo": "aditivo_valor", "data": "2026-06-30", "numero": "019/2024/01/01",
@@ -554,3 +566,82 @@ def test_natureza_execucao_declarada_tambem_trava(conn):
     with pytest.raises(ValueError, match="já aplicado"):
         _natureza_aplicada(conn, "reajuste")
     assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] == "execucao"
+
+
+# --- issue #256: cronograma por versao, com a data do documento -------------------------------
+
+from app import cronograma as cronograma_mod
+
+V_CONTRATUAL = {"chave": "contratual", "origem": "contratual", "data": "2024-03-11", "instrumento": None,
+                "itens": [("2024-04", 100_01), ("2026-10", 200_00), ("2026-11", 300_00)]}
+V_TA = {"chave": "ta-01", "origem": "aditivo", "data": "2026-10-05", "instrumento": "ta-01",
+        "itens": [("2026-10", 250_00), ("2026-12", 400_00)]}
+
+
+def test_cronograma_aplicado_cria_uma_versao_por_entrada_com_a_data_do_documento(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_TA, V_CONTRATUAL])]))
+    vs = conn.execute("SELECT v.numero, v.criado_em, k.chave, k.origem, k.data_documento, k.instrumento "
+                      "FROM cronograma_versoes v JOIN cronograma_versoes_cadastro k ON k.versao_id=v.id "
+                      "ORDER BY v.numero").fetchall()
+    # numero pela ordem do documento (nao a do arquivo); criado_em = meia-noite de Cuiaba do dia do documento
+    assert [tuple(v) for v in vs] == [
+        (1, "2024-03-11 04:00:00", "contratual", "contratual", "2024-03-11", None),
+        (2, "2026-10-05 04:00:00", "ta-01", "aditivo", "2026-10-05", "ta-01")]
+    assert cronograma_mod.previsto_efetivo(conn, 1) == {"2024-04": 100_01, "2026-10": 250_00, "2026-12": 400_00}
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cronograma.nova_versao'").fetchone()[0] == 2
+
+
+def test_aplicar_cronograma_duas_vezes_nao_duplica(conn):
+    cad = _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL, V_TA])])
+    r1 = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r1["cronograma"]["criados"] == ["MT-402/contratual (11/03/2024)", "MT-402/ta-01 (05/10/2026)"]
+    assert not any("vigente" in a for a in r1["avisos"])     # a ultima aplicada e' a vigente: sem aviso
+    r2 = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r2["cronograma"] == {"criados": [], "alterados": [], "iguais": 2}
+    assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM cronograma_itens").fetchone()[0] == 5
+
+
+@pytest.mark.parametrize("troca", [{"itens": [("2026-10", 250_01), ("2026-12", 400_00)]},
+                                   {"itens": [("2026-10", 250_00)]},
+                                   {"data": "2026-10-06"}, {"origem": "carta"}, {"instrumento": "ta-02"}])
+def test_versao_de_cronograma_aplicada_nao_se_altera(conn, troca):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_TA])]))
+    with pytest.raises(ValueError, match="já aplicada"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[{**V_TA, **troca}])]))
+    assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 1
+    assert [tuple(r) for r in conn.execute("SELECT competencia, valor_previsto_centavos FROM cronograma_itens "
+                                           "ORDER BY competencia")] == [("2026-10", 250_00), ("2026-12", 400_00)]
+
+
+def test_versao_de_cronograma_aplicada_que_some_do_cadastro_e_recusada(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
+    with pytest.raises(ValueError, match="sumiu"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[])]))
+
+
+def test_ensaio_lista_as_versoes_de_cronograma_e_nao_grava(conn):
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL, V_TA])]), ensaio=True)
+    assert r["cronograma"]["criados"] == ["MT-402/contratual (11/03/2024)", "MT-402/ta-01 (05/10/2026)"]
+    assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 0
+
+
+def test_versao_da_carga_fica_superada_so_pela_versao_do_yaml_de_data_posterior(conn):
+    """As versoes da carga de 04/09/2026 nao se apagam: a versao do YAML com documento ANTERIOR entra antes
+    dela na linha do tempo, e a primeira com documento POSTERIOR a supera."""
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    cronograma_mod.nova_versao(conn, 1, 1, [("2026-08", 50_00), ("2026-09", 60_00), ("2026-10", 70_00),
+                                            ("2026-11", 80_00)], "manual")
+    conn.execute("UPDATE cronograma_versoes SET criado_em='2026-09-04 15:00:00'")
+    conn.commit()
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
+    assert cronograma_mod.vigente(conn, 1)["numero"] == 1                  # a carga segue vigente
+    # quem aplica fica sabendo que a versao nova nao mexeu no futuro
+    assert any("MT-402/contratual" in a and "não é a vigente" in a for a in r["avisos"])
+    assert cronograma_mod.previsto_efetivo(conn, 1) == {
+        "2024-04": 100_01, "2026-08": 50_00, "2026-09": 60_00, "2026-10": 70_00, "2026-11": 80_00}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL, V_TA])]))
+    assert cronograma_mod.vigente(conn, 1)["numero"] == 3                  # o aditivo supera a carga
+    assert cronograma_mod.previsto_efetivo(conn, 1) == {
+        "2024-04": 100_01, "2026-08": 50_00, "2026-09": 60_00, "2026-10": 250_00, "2026-12": 400_00}
+    assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 3     # nada apagado

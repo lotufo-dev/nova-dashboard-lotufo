@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Cronograma from "./Cronograma";
 import { ir } from "./rota";
@@ -14,7 +14,8 @@ const CURVA = { curva: [], saldo: { vigente_centavos: 100, atestado_execucao_cen
 describe("Cronograma: guarda de rascunho", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/obras/1/contrato");
-    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO : { versao: 3 }));
+    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO
+      : c.endsWith("/versoes") ? [] : { versao: 3 }));
   });
   afterEach(() => { cleanup(); api.mockReset(); vi.restoreAllMocks(); });
 
@@ -63,5 +64,89 @@ describe("Cronograma: saldo e reajuste contratado", () => {
     render(<Cronograma contratoId={1} podeEditar={false} />);
     expect(await screen.findByText("Vigente de execução")).toBeTruthy();
     expect(screen.queryByText("Reajuste contratado (fora do saldo)")).toBeNull();
+  });
+});
+
+// issue #256: uma linha por versao, com a data do documento quando veio do cadastro
+describe("Cronograma: versões", () => {
+  const VERSOES = [
+    { numero: 2, criado_em: "2024-03-11 04:00:00", chave: "contratual", origem_documento: "contratual",
+      data_documento: "2024-03-11", instrumento: null, competencias: 6, total_centavos: 1000000001, vigente: false },
+    { numero: 1, criado_em: "2026-09-04 15:00:00", chave: null, origem_documento: null,
+      data_documento: null, instrumento: null, competencias: 2, total_centavos: 50000, vigente: false },
+    { numero: 3, criado_em: "2026-10-05 04:00:00", chave: "ta-01", origem_documento: "aditivo",
+      data_documento: "2026-10-05", instrumento: "ta-01", competencias: 3, total_centavos: 70001, vigente: true },
+  ];
+  // a vigente que /cronograma devolve, coerente com a lista (versao 3, do cadastro)
+  const VIGENTE = { numero: 3, criado_em: "2026-10-05 04:00:00", origem: "manual",
+    itens: [{ competencia: "2026-10", valor_previsto_centavos: 70001 }] };
+  const servir = (vigente: unknown) => api.mockImplementation((c: string) => Promise.resolve(
+    c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? vigente : c.endsWith("/versoes") ? VERSOES : null));
+  beforeEach(() => { servir(VIGENTE); });
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("lista as versões na ordem do servidor, com a data e o documento", async () => {
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: /Versões do cronograma/ });
+    // celulas separadas por "|" (o espaco do R$ e' o nao separavel do toLocaleString)
+    const linhas = within(tabela).getAllByRole("row").slice(1)
+      .map(l => Array.from(l.querySelectorAll("td"), td => (td.textContent ?? "").replace(/\s/g, " ")).join("|"));
+    expect(linhas).toEqual([
+      "2|11/03/2024|Contrato|6|R$ 10.000.000,01",
+      "1|04/09/2026|—|2|R$ 500,00",
+      "3 Vigente|05/10/2026|Termo aditivo · ta-01|3|R$ 700,01",
+    ]);
+    expect(api).toHaveBeenCalledWith("/api/contratos/1/cronograma/versoes");
+  });
+
+  it("a dica do cabeçalho é só o número da versão; documento e data ficam na tabela", async () => {
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    const dica = screen.getByText(/^versão 3/);
+    expect(dica.textContent).toBe("versão 3");
+    expect(dica.getAttribute("title")).toBeNull();
+    expect(document.body.innerHTML).not.toMatch(/Origem do cadastro|manual/);
+    // os contadores ao lado do summary sairam
+    expect(screen.getByText("Versões do cronograma").tagName).toBe("SUMMARY");
+  });
+
+  it("a dica casa a versão pelo número, não pela marca de vigente da lista (gate Sol, PR #311)", async () => {
+    // as duas leituras sao independentes: /cronograma pode trazer outra versao que a marcada na lista
+    servir({ numero: 1, criado_em: "2026-09-04 15:00:00", origem: "manual",
+      itens: [{ competencia: "2026-09", valor_previsto_centavos: 50000 }] });
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    expect(screen.getByText(/^versão 1/).textContent).toBe("versão 1");
+  });
+});
+
+describe("Cronograma: texto na tela", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("o formato de colar fica só no placeholder, sem parágrafo nem aviso fixo; sem a fórmula do saldo", async () => {
+    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO
+      : c.endsWith("/versoes") ? [] : null));
+    render(<Cronograma contratoId={1} podeEditar />);
+    const campo = await screen.findByLabelText("Nova versão do cronograma");
+    expect(campo.getAttribute("placeholder")).toContain("2026-09;1.200.000,00");
+    expect(screen.queryByText(/no formato/)).toBeNull();
+    expect(screen.queryByText(/substitui o cronograma futuro/)).toBeNull();
+    expect(screen.queryByText("x")).toBeNull();          // a formula do servidor
+    fireEvent.change(campo, { target: { value: "2026-10;900,00" } });
+    expect(screen.queryByText(/total previsto/)).toBeNull();
+  });
+
+  it("“Medido acima do vigente de execução” só aparece com o saldo negativo", async () => {
+    const negativo = { ...CURVA, saldo: { ...CURVA.saldo, atestado_execucao_centavos: 200, saldo_centavos: -100 } };
+    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? negativo : c.endsWith("/cronograma") ? VERSAO
+      : c.endsWith("/versoes") ? [] : null));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("Medido acima do vigente de execução do contrato.")).toBeTruthy();
+    cleanup();
+    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO
+      : c.endsWith("/versoes") ? [] : null));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByText("Saldo");
+    expect(screen.queryByText(/Medido acima/)).toBeNull();
   });
 });

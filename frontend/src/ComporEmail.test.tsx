@@ -16,6 +16,18 @@ function escrever(corpo: HTMLElement, html: string) {
 describe("ComporEmail", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
+  it("sem a imagem da assinatura: uma frase com o link para Minha conta, só quando falta", async () => {
+    api.mockResolvedValue({ remetente: "eu@lotufo.com" });
+    render(<ComporEmail ocupado={false} anexos={[]} aoEnviar={() => {}} aoDescartar={() => {}}
+      inicial={{ para: [], copia: [], cco: [], assunto: "A", corpo: "B" }} />);
+    const img = await screen.findByAltText("Sua assinatura");
+    expect(screen.queryByText(/Sem assinatura/)).toBeNull();
+    fireEvent.error(img);
+    const frase = await screen.findByText(/Sem assinatura/);
+    expect(frase.textContent).toBe("Sem assinatura: cadastre a sua em Minha conta.");
+    expect(within(frase).getByRole("link", { name: "Minha conta" }).getAttribute("href")).toBe("/conta");
+  });
+
   it("destinatario vira etiqueta pela sugestao ou pelo e-mail digitado e sai no envio", async () => {
     api.mockImplementation((caminho: string) => {
       if (caminho.startsWith("/api/correio/remetente")) return Promise.resolve({ remetente: "eu@lotufo.com" });

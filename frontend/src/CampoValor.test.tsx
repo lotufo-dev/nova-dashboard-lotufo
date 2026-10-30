@@ -129,15 +129,12 @@ describe("CampoValor: cursor, zero, colar inválido e ajuda", () => {
     expect(screen.getByRole("alert").textContent).toContain("formato inválido");
   });
 
-  it("R2: a ajuda aparece e o campo aponta para ela; com ajudaId, usa a da tela", () => {
+  it("R2: sem frase de ajuda; o campo aponta para o erro só quando há erro (texto na tela, 26/10/2026)", () => {
     render(<Campo />);
-    const ajuda = document.getElementById(campo().getAttribute("aria-describedby") ?? "");
-    expect(ajuda?.textContent).toBe("Digite só os números: os centavos e os pontos entram sozinhos.");
-    cleanup();
-    render(<><p id="fora">ajuda da tela</p><label htmlFor="w">W</label>
-      <CampoValor id="w" name="w" value="" onChange={() => {}} ajudaId="fora" /></>);
-    expect(screen.getByLabelText("W").getAttribute("aria-describedby")).toBe("fora");
+    expect(campo().getAttribute("aria-describedby")).toBeNull();
     expect(screen.queryByText(/Digite só os números/)).toBeNull();
+    fireEvent.change(campo(), { target: { value: "8900000.00" } });
+    expect(campo().getAttribute("aria-describedby")).toBe("v-erro");
   });
 });
 

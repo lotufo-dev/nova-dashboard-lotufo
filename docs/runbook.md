@@ -33,6 +33,46 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
 - Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Parar: `Stop-ScheduledTask -TaskName <tarefa>`; iniciar: `Start-ScheduledTask -TaskName <tarefa>`.
 - Watchdog: `scripts\instalar_watchdog.ps1` registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1` — confere `/api/health` e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
 
+### Deploy a partir do Mac (SSH)
+
+Caminho usado em 15/10/2026 (produção 109c887 para 8954dca, health 200). Vale quando não há sessão PowerShell elevada no
+próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático, backup pré-migração) é o descrito acima.
+
+1. **Conta.** `ssh <servidor>` com a conta local administradora de deploy: a sessão já chega elevada. A conta Azure AD
+   não serve ao OpenSSH do Windows.
+2. **Comandos como script pelo stdin**, nunca inline: `ssh <servidor> 'powershell -NoProfile -ExecutionPolicy Bypass -Command -' < script.ps1`
+   (aspas e `&` inline quebram no PowerShell 5.1). O `script.ps1` é um arquivo temporário no Mac, fora do repositório (nome
+   diferente de `scripts\deploy.ps1`, que é o do projeto). No `-Command -` uma falha de comando nativo não para o script:
+   conferir `$LASTEXITCODE` depois de cada `git` e sair com `exit 1`. Escrever cada conferência numa linha só (bloco de várias
+   linhas pode exigir uma linha em branco depois, no 5.1).
+3. **Primeira chamada, só leitura** (nada muda no servidor): `Set-Location` na pasta principal do projeto; `git switch master`;
+   `git pull --ff-only`; `git rev-parse master origin/master` iguais (senão `exit 1`); conferir administrador numa linha
+   (`if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 1 }`);
+   e imprimir o que vai subir: `git log --oneline "$atual..origin/master"` e `git diff --name-only` de `backend/migrations` e de `frontend`,
+   com `$atual` = `git -C C:\DashboardLotufo\app rev-parse HEAD`. Com isso a sessão avisa o Leo de migração nova (número e o que faz)
+   e escolhe `-SemFrontend` se nada em `frontend/` mudou.
+4. **Segunda chamada, o deploy**: criar o sentinela do watchdog (`New-Item -ItemType File -Path C:\DashboardLotufo\watchdog.pause -Force | Out-Null`),
+   `& .\scripts\deploy.ps1` (ou com `-SemFrontend`), **sem redirecionar stderr** dentro do PowerShell, e ler a linha final:
+   `DEPLOY OK`, `ROLLBACK OK`, `ROLLBACK TAMBEM FALHOU`, `BACKUP PRE-MIGRACAO FALHOU` seguido de `deploy abortado antes do
+   checkout` (nada mudou na produção), `deploy abortado no build; producao segue no commit anterior ...` (a produção segue no
+   commit anterior) ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`. Nos dois casos de
+   "intervir a mao" (`ROLLBACK TAMBEM FALHOU` e este último), **não apagar o sentinela** antes de o diretório pinado voltar ao
+   commit anterior.
+5. **Terceira chamada, conferência**: `Invoke-WebRequest http://localhost/api/health -UseBasicParsing` (200 com `banco: ok`),
+   `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao `origin/master`, e apagar o sentinela
+   (`Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`; `Test-Path` deve dar `False`).
+   Apagar o sentinela também quando o deploy der `ROLLBACK` ou `BACKUP PRE-MIGRACAO FALHOU`.
+6. **Se a chamada do deploy cair** (conexão SSH perdida, timeout da ferramenta) **ou não trouxer a linha final**: o PowerShell
+   remoto pode ter morrido sem rodar o `finally` do `deploy.ps1`, deixando o sentinela e o watchdog pausado. **`/api/health` 200 e
+   `rev-parse` igual ao `origin/master` não provam deploy concluído**: se a queda foi no `npm run build`, o pinado já está no
+   commit novo com o `dist` pela metade e o processo antigo segue no ar (o health só olha o banco). E `DEPLOY OK`/`ROLLBACK`
+   saem na tela, não em `logs\dashboard.log`, que portanto não serve de prova. O que fazer: reconectar, conferir
+   `Test-Path C:\DashboardLotufo\watchdog.pause`, manter (ou recriar) o sentinela e **rodar de novo `& .\scripts\deploy.ps1`**
+   (repetível: checkout, build, reinício, conferência e rollback), até vir a linha final; só então a chamada 3 e apagar o sentinela.
+   Um caminho desacoplado seria uma tarefa agendada avulsa (`Register-ScheduledTask` como SYSTEM, disparada e removida depois),
+   porque o OpenSSH do Windows provavelmente mata os processos da sessão ao fechá-la e `Start-Process` não escapa disso.
+   **Não testado.**
+
 ## Saúde
 `GET /api/health` toca o banco (503 se não responder) e devolve a última rodada de backup: `ultimo_snapshot`, `ultimo_snapshot_erro`, `ultima_copia_arquivos`, `ultima_copia_arquivos_erro`, `ultima_copia_externa`, `ultima_copia_externa_erro`, `ultima_copia_externa_arquivos`, `ultima_copia_externa_arquivos_erro`. Cópia externa com data de ontem ou erro preenchido = olhar o log.
 
@@ -63,7 +103,7 @@ Import-Certificate -FilePath \\<servidor>\...\certs\cert.pem -CertStoreLocation 
 - Senha esquecida: não há reset pela tela hoje; criar outro usuário e desativar o antigo. Dívida registrada.
 
 ## Variáveis de ambiente
-`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db`), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
+`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db`), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
 
 ## TOTVS RM (fase 5, leitura)
 A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_USUARIO` e a senha estão definidos; sem eles o sistema segue com NF e recebimento registrados à mão. Botão "Sincronizar agora" e reconciliação em Administração → TOTVS RM.
@@ -335,6 +375,86 @@ continua só como peça `art` do pacote do protocolo, em `pecas` do órgão em `
 **Receita de deploy do bloco 5**: `deploy.ps1` com frontend (a migração 025 aplica na subida; `fpdf2` entra no
 venv pelo `requirements.lock`) → `cadastro aplicar --ensaio` e real (9 órgãos e `geral.cartas`) → `/api/health`.
 
+## Monitor do SIGA (issue #327)
+
+O robô do SIGA (fora deste repositório) manda a cada 15 minutos o que leu para `POST /api/siga/leituras` e pergunta
+o que acompanhar em `GET /api/siga/processos`, as duas com `Authorization: Bearer <token>`. As telas leem
+`GET /api/siga` (sessão). Nada se apaga: leitura repetida não cria linha. Cada pedido tem o teto geral de 2 MB:
+rodada maior vai em mais de um POST com o mesmo `lido_em` (cada um grava só o que traz).
+
+1. **Token em arquivo**: `C:\DashboardLotufo\segredos\siga-token.txt` (uma linha, UTF-8, ao menos 32 caracteres
+   aleatórios). Gerar e gravar sem BOM (o `>` do PowerShell 5.1 grava UTF-16 e o arquivo é recusado):
+   `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [IO.File]::WriteAllText('C:\DashboardLotufo\segredos\siga-token.txt', [Convert]::ToBase64String($b), (New-Object Text.UTF8Encoding $false))`.
+   O mesmo token vai para o robô (item 4). Nunca no repositório nem na tarefa agendada.
+2. **Variável** `DASH_SIGA_TOKEN_ARQUIVO` com o caminho do arquivo, no nível da máquina (como `DASH_RM_ENDERECO`), e
+   reiniciar a tarefa de `<servidor>` pela skill `deploy`. O arquivo é lido a cada pedido: trocar o token não pede
+   reinício. Sem a variável (ou com o arquivo vazio ou ilegível), as duas rotas do robô respondem 503 "Monitor do
+   SIGA não configurado"; token errado ou ausente, 401.
+3. Conferir: `Invoke-RestMethod http://<servidor>/api/siga/processos -Headers @{Authorization = "Bearer <token>"}`
+   devolve a lista (vazia antes da primeira rodada).
+4. **Lado do robô** (issue #331): o robô guarda o token no cofre de credenciais do Windows da conta em que a tarefa
+   dele roda, pelo `salvar-token-dashboard.bat` da pasta do robô (cola o token uma vez; rodar de novo substitui),
+   como já faz com a senha do MT Login e a conta Microsoft. Ele fala com a dashboard em `http://localhost`, porque
+   roda no mesmo servidor. No início de cada rodada pede a lista (`GET /api/siga/processos`) e a junta com a lista
+   local dele (o mesmo código conta uma vez; processo da dashboard só com número fica fora, porque abrir pelo número
+   exige captcha); no fim, logo depois de gravar o estado local, manda a leitura (`POST /api/siga/leituras`). Dashboard
+   parada, sem token ou token recusado: o robô registra "dashboard: ..." no `dados\monitor.log` dele e a rodada e o
+   e-mail seguem normais.
+5. **Trocar o token**: gerar o arquivo de novo (item 1) e rodar o `salvar-token-dashboard.bat` com o valor novo. Trocado
+   só de um lado, o robô registra 401 no log dele e a leitura para de chegar; as movimentações não se perdem (a
+   próxima rodada com os dois lados iguais manda tudo o que está no SIGA), só as rodadas do intervalo ficam sem
+   registro de leitura.
+6. **Conferir pela tela**: Administração › Saúde mostra a última leitura do monitor e quantos processos ele acompanha;
+   a tela SIGA mostra "Lido às" com a hora da rodada e, sem leitura há mais de 2 horas úteis, "O monitor do SIGA não
+   lê desde …".
+
+**Link do SIGA na etapa 4**: a operação cola o link que o órgão mandou (ou só o código do parâmetro `n=`) no campo
+"Link do SIGA" do protocolo enviado ou do registro por fora; o servidor grava o código em `siga_processos`, ligado ao
+protocolo, e o robô passa a acompanhá-lo pela lista de `GET /api/siga/processos`. O domínio aceito é o de
+`DASH_SIGA_LINK_MODELO` (`https://`, com `{codigo}`); sem a variável só o código colado vale.
+
+O processo cujo número é **igual** (maiúsculas, sem espaços) ao "Nº do protocolo no órgão" de um protocolo enviado,
+ou ao número de um envio registrado por fora, fica ligado à medição na rodada seguinte do robô. Número parecido não
+liga.
+
+**Link "Abrir no SIGA"** (tela SIGA): a variável `DASH_SIGA_LINK_MODELO` guarda o modelo do link de acompanhamento,
+começando em `https://` e com `{codigo}` no lugar do código do processo (o que vem no parâmetro `n=` do link que o
+órgão manda). Sem a variável, ou com modelo sem `https://` ou sem `{codigo}`, a tela não mostra o link.
+
+**Atualizar pela tela** (issue #342): quem vê a tela SIGA pede a leitura de um processo ou de todos
+(`POST /api/siga/atualizar`). O servidor grava o pedido e manda o Windows iniciar a tarefa agendada do robô
+(`schtasks /Run /TN <tarefa do robô>`, sem shell, com prazo de 15 segundos); com uma rodada iniciada há menos de 10
+minutos e sem fim não dispara, e o robô atende o pedido ao terminar a rodada atual. Clique repetido com o pedido
+ainda em aberto não cria outro pedido, mas dispara de novo.
+
+1. **Variável** `DASH_SIGA_TAREFA` com o nome da tarefa agendada do robô, no nível da máquina (como
+   `DASH_SIGA_TOKEN_ARQUIVO`), e reiniciar a tarefa de `<servidor>` pela skill `deploy`. Sem a variável, os botões
+   somem da tela (`pode_atualizar: false` em `GET /api/siga`) e o pedido responde 503.
+2. **Conferir que o servidor inicia a tarefa**: a dashboard roda como SYSTEM, que pode iniciar qualquer tarefa
+   agendada. Num PowerShell de administrador, `schtasks /Query /TN "<tarefa do robô>"` mostra a tarefa com o nome
+   exato da variável. Depois, na tela SIGA, "Atualizar todos": em até 2 minutos `robo.estado` de `GET /api/siga`
+   passa a `lendo`. "O Windows não iniciou o robô: …" traz a saída do `schtasks` (nome errado, tarefa
+   desabilitada); "O robô não começou" quer dizer que o Windows aceitou, mas a tarefa não rodou (o usuário do robô
+   desconectado do servidor).
+3. **Conversa com o robô** (rotas de serviço, com o mesmo token das leituras). No início, `POST /api/siga/rodadas`
+   ("comecei"): o servidor responde `rodada_id`, `tipo` e `processos` (o mesmo formato de `GET /api/siga/processos`).
+   A rodada é completa com pedido "todos" em aberto ou quando a última rodada completa terminada começou há 14
+   minutos ou mais (`tipo: automatica` quando é completa por tempo, que é a da tarefa de 15 em 15 minutos; `pedido`
+   nos demais casos); senão, só os processos pedidos. Fora do horário, o robô manda `{"so_pedidos": true}` (issue
+   #347): o servidor não abre rodada completa por tempo e só atende os pedidos em aberto, que valem a qualquer hora.
+   `rodada_id: null` quer dizer nada a ler. As leituras continuam
+   por `POST /api/siga/leituras`. No fim, `POST /api/siga/rodadas/<id>/fim` com
+   `{"nao_lidos": [{"codigo" ou "numero", "motivo"}]}` ("terminei"); se cair, `POST /api/siga/rodadas/<id>/falha` com
+   `{"motivo"}`. Antes de encerrar, o robô pergunta de novo em `POST /api/siga/rodadas` se chegou pedido. Rodada já
+   terminada recusa outro fim ou falha (409). O motivo é gravado com até 300 caracteres. "Comecei" repetido com a
+   rodada aberta há menos de 10 minutos devolve a mesma rodada (o robô repetindo por falta de resposta).
+4. **O que a tela mostra** (bloco `robo` de `GET /api/siga`): `lendo` (rodada iniciada há no máximo 12 minutos e
+   sem fim), `na_fila` (pedido em aberto) ou `parado`; os pedidos em aberto, com quem pediu e quando; e os avisos:
+   o Windows recusou o último disparo, pedido parado há mais de 2 minutos sem rodada, a última rodada terminada
+   falhou ou deixou processos sem ler ("não lido às HH:MM: …" por processo e "N de M processos não foram lidos"), e
+   rodada iniciada há mais de 12 minutos sem fim (só a mais recente; o Windows encerra o robô aos 10). Cada aviso de rodada vale até
+   a próxima rodada terminar sem aquele problema; o do disparo, até o próximo disparo aceito.
+
 ## Tela inicial e avisos (bloco 6)
 
 **Início** (home da operação e do admin; a diretoria abre o Painel até o bloco 8): três números e os
@@ -428,21 +548,19 @@ protocolado.
   e por órgão), recebido no mês; à parte, os reajustes esperando apostilamento.
 - **O mês e o ano:** medido da competência atual contra o previsto do cronograma vigente e o mesmo mês do ano
   anterior, acumulado do ano e a série de 12 meses.
-- **Próximos meses:** faturamento previsto pelo cronograma; recebimento previsto = primeiro protocolo + mediana
-  do órgão (o que já passou cai no mês atual).
+- **Próximos meses:** faturamento previsto pelo cronograma (o recebimento previsto saiu na #255, motor de atraso de pagamento).
 - **Carteira:** saldo a executar dos contratos ativos sem encerramento, ritmo (média dos últimos 6 meses), meses de
   produção, participação por órgão e os contratos que terminam nos próximos 183 dias.
 - **Obras:** as linhas do QDOP com farol (vermelho: aviso crítico; acao: aviso de Ação; atencao: aviso de Atenção; verde:
   nenhum) e o motivo.
 
-**Prazo normal do órgão:** 3º quartil (posição mais próxima) dos dias entre o primeiro protocolo e o recebimento
-das medições recebidas nos últimos 12 meses; com menos de 10 amostras, 30 dias. O recebimento previsto usa a
-mediana da mesma amostra. O aviso "pagamento atrasado" (só diretoria) é a medição protocolada há mais dias que o
-prazo normal.
+**Prazo normal do órgão:** saiu da Diretoria na #255 (motor de atraso de pagamento; decisão de 19/10/2026): não
+há mais aviso de pagamento atrasado nem recebimento previsto. O a receber da Diretoria mostra só a idade (faixas e
+maior número de dias). O "previsto" da tela A receber ainda usa o 3º quartil do órgão (com menos de 10 amostras,
+30 dias); a #255 não tratou dele.
 
 **Total a receber:** enquanto `geral.yaml` tiver `diretoria.total_a_receber_liberado: false`, a tela mostra
-quantidade e dias do protocolado, sem valor ("a conciliar"), o recebimento previsto também fica sem valor e o
-aviso de pagamento atrasado não sai. Depois da conciliação com a controladoria: trocar para `true`, `cadastro
+quantidade e dias do protocolado, sem valor ("a conciliar"). Depois da conciliação com a controladoria: trocar para `true`, `cadastro
 validar`, `aplicar --ensaio`, `aplicar`.
 
 **QDOP** (`app/qdop.py`, botão "Exportar QDOP (.xlsx)" ou `GET /api/diretoria/qdop.xlsx`): escrito sobre o modelo
@@ -487,8 +605,7 @@ O faturado até o QDOP de 22/09/2026 conta como pago, menos o que o RM mostra em
 `python -m app.cli conciliacao corte --data 2026-09-22 --usuario <e-mail> [--ensaio]` fecha como `recebida`
 (sem data, motivo na auditoria) as medições do legado que continuam `protocolada` com protocolo até a data. O
 "a receber" da Diretoria soma as medições protocoladas e as cobranças do RM ainda não pagas que nenhuma medição
-em aberto representa (título com mais de R$ 1,00 faltando, na cota, idade pela emissão da nota); o aviso de
-pagamento atrasado de nota só sai a partir de R$ 10 mil. Liberado em `geral.yaml`
+em aberto representa (título com mais de R$ 1,00 faltando, na cota, idade pela emissão da nota). Liberado em `geral.yaml`
 (`diretoria.total_a_receber_liberado: true`). Ordem em produção: backup → `cadastro aplicar` →
 `conciliacao antiga` → `conciliacao corte`.
 

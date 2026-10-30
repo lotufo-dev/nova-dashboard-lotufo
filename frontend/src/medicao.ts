@@ -12,13 +12,15 @@ export type MedicaoBase = {
   atestado_em: string | null; recebida_em: string | null; nota_emitida_em?: string | null;
   final?: number; final_em?: string | null; protocolos: MarcoProtocolo[]; notas?: NotaDaMedicao[];
   edicoes_valor?: { data: string; texto: string }[];   // B-02 (10/10/2026): da auditoria, texto pronto do servidor
+  siga_registrado_em?: string | null;                  // issue #328: quando o link do SIGA do envio por fora foi gravado
 };
 export type EspelhoResumo = { id: number; numero: number; versao: number; situacao: string; criado_em: string;
   criado_por_nome: string | null; medicoes: { id: number; tipo: string; superado?: boolean }[];
   envio: { enviado_em: string; remetente: string } | null };
 export type ProtocoloResumo = { id: number; etapa_rotulo: string; numero_oficio: string | null; situacao: string;
   criado_em: string; enviado_em?: string | null; enviado_por?: string | null;
-  medicoes: { id: number; titulo: string }[]; pendencias: { codigo: string; mensagem: string }[] };
+  medicoes: { id: number; titulo: string }[]; pendencias: { codigo: string; mensagem: string }[];
+  siga?: { registrado_em: string | null } | null };
 
 // Encerramentos por excecao: nem o atestado muda mais neles (espelha a guarda de medicoes.definir_valor).
 export const EXCECOES = ["cancelada", "desistida"];
@@ -48,15 +50,10 @@ export function separarMedicoes<M extends { numero: number; tipo: string; estado
            anteriores: ms.filter(m => FINAIS.includes(m.estado)).sort(ordem) };
 }
 
-/** A coluna "Notas" das medicoes da obra: quantas, quantas o RM confirmou e quantas divergem do espelho. */
+/** A coluna "Notas" das medicoes da obra: os numeros das notas, que identificam a linha ("NF 1843, 1844"). */
 export function resumoNotas(m: MedicaoBase): string {
-  const ns = m.notas ?? [];
-  if (ns.length === 0) return "—";
-  const confirmadas = ns.filter(n => n.confirmacao === "confirmada").length;
-  const divergem = notasDivergentes(m).length;
-  return [`${ns.length} ${ns.length === 1 ? "nota" : "notas"}`,
-          confirmadas ? `${confirmadas} ${confirmadas === 1 ? "confirmada" : "confirmadas"} pelo RM` : "",
-          divergem ? `${divergem} ${divergem === 1 ? "diverge" : "divergem"} do espelho` : ""].filter(Boolean).join(" · ");
+  const ns = [...new Set((m.notas ?? []).map(n => String(Number(n.numero) || n.numero)))];
+  return ns.length === 0 ? "—" : `NF ${ns.join(", ")}`;
 }
 
 /** "23ª Medição", "Reajuste da 23ª Medição", "3ª Medição de Projeto" (o mesmo nome do servidor). */
@@ -78,17 +75,6 @@ export function rotuloDoBloco(m: { numero: number; tipo: string }): string {
   return m.tipo === "execucao" ? `Execução · ${tituloMedicao(m)}` : tituloMedicao(m);
 }
 
-const faltamNotas = (n: number) => n === 1 ? "falta 1 nota" : n > 1 ? `faltam ${n} notas` : "sem notas";
-
-/** O que falta, por bloco: "execução completa · reajuste: faltam 2 notas"; com as duas completas, "notas completas". */
-export function resumoDoPar(metades: Metade[]): string {
-  if (metades.every(x => x.completa)) return "notas completas";
-  return metades.map(x => {
-    const nome = x.tipo === "execucao" ? "execução" : "reajuste";
-    return x.completa ? `${nome} completa` : `${nome}: ${faltamNotas(x.faltam)}`;
-  }).join(" · ");
-}
-
 /** A metade pronta que espera a outra (so' onde o orgao junta), ou null. */
 export function metadeQueEspera(par: ParDaMedicao | null): Metade | null {
   return par?.junta ? par.metades.find(x => x.espera) ?? null : null;
@@ -97,6 +83,9 @@ export function metadeQueEspera(par: ParDaMedicao | null): Metade | null {
 // O proximo passo vem do servidor (`medicoes.PROXIMO_PASSO`); aqui so' o rotulo do mapa e a secao da
 // pagina da medicao onde ele se resolve.
 const PASSOS: Record<string, { rotulo: string; secao: string }> = {
+  "enviar a planilha/carta": { rotulo: "Enviar a planilha/carta", secao: "" },
+  "registrar o boletim": { rotulo: "Registrar o boletim", secao: "" },
+  "gerar o espelho": { rotulo: "Gerar o espelho", secao: "" },
   "enviar ao faturamento": { rotulo: "Enviar ao faturamento", secao: "etapa-2" },
   "anexar as notas": { rotulo: "Nota fiscal", secao: "etapa-3" },
   "protocolar": { rotulo: "Enviar a nota", secao: "etapa-4" },
@@ -157,11 +146,13 @@ export function eventosDaMedicao(m: MedicaoBase, espelhos: EspelhoResumo[], prot
       doSistema.add(p.id);
       out.push({ data: p.enviado_em, texto: `Protocolo enviado (${nome})${p.enviado_por ? ` por ${p.enviado_por}` : ""}` });
     }
+    if (p.siga?.registrado_em) out.push({ data: p.siga.registrado_em, texto: "Processo no SIGA registrado" });
   }
   // o registro do protocolo na medicao repete o envio feito pelo sistema; o de fora aparece sozinho
   for (const p of m.protocolos.filter(x => !x.protocolo_id || !doSistema.has(x.protocolo_id))) {
     out.push({ data: p.data, texto: `Protocolada${p.numero_oficio ? ` · ofício ${p.numero_oficio}` : ""}${p.numero_processo ? ` · processo ${p.numero_processo}` : ""}` });
   }
+  if (m.siga_registrado_em) out.push({ data: m.siga_registrado_em, texto: "Processo no SIGA registrado" });
   if (m.atestado_em) out.push({ data: m.atestado_em, texto: "Atestada pelo órgão" });
   if (m.recebida_em) out.push({ data: m.recebida_em, texto: "Recebida" });
   if (m.final === 1 && m.final_em) out.push({ data: m.final_em, texto: "Marcada como medição final" });

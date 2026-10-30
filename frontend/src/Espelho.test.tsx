@@ -29,11 +29,19 @@ const ESPELHO = { id: 7, numero: 10, competencia: "2026-05", versao: 1, situacao
 describe("Espelho", () => {
   afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
 
-  it("obra sem regra ativa mostra o aviso do fluxo antigo e nenhum botão", async () => {
+  it("obra sem regra ativa não explica o fluxo antigo nem oferece o botão", async () => {
     api.mockResolvedValueOnce({ regra: null, espelhos: [] });
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} />);
-    expect(await screen.findByText(/fluxo antigo/)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Nova medição" })).toBeTruthy();
+    expect(screen.queryByText(/fluxo antigo/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Gerar espelho/ })).toBeNull();
+  });
+
+  it("medição sem regra ativa mostra só \"Nenhum espelho.\"", async () => {
+    api.mockResolvedValueOnce({ regra: null, espelhos: [] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho" />);
+    expect(await screen.findByText("Nenhum espelho.")).toBeTruthy();
+    expect(screen.queryByText(/fluxo antigo/)).toBeNull();
   });
 
   it("o formulário só conta como rascunho depois de preenchido (guarda de saída)", async () => {
@@ -132,6 +140,9 @@ describe("Espelho", () => {
     expect(await screen.findByText("Não enviado ao faturamento")).toBeTruthy();
     expect(screen.getByRole("link", { name: /ESPELHO - MT-388/ }).getAttribute("href")).toBe("/api/espelhos/7/arquivos/3");
     expect(screen.getByRole("button", { name: "Enviar ao faturamento" })).toBeTruthy();
+    // sem tamanho do arquivo nem "versão · gerado por" ao lado
+    expect(screen.queryByText(/KB/)).toBeNull();
+    expect(screen.queryByText(/gerado em/)).toBeNull();
     // "Gerar de novo" parte dos valores da versao vigente
     fireEvent.click(screen.getByRole("button", { name: "Gerar de novo" }));
     expect((screen.getByLabelText("Valor da medição") as HTMLInputElement).value).toBe("634.529,58");
@@ -201,7 +212,7 @@ describe("Espelho", () => {
     api.mockResolvedValueOnce({ regra: REGRA, espelhos: [misto] });
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} />);
     const nota = await screen.findByText(/só para leitura/);
-    expect(nota.textContent).toContain("Já existe espelho mais novo para: Reajuste da 10ª Medição.");
+    expect(nota.textContent).toContain("já existe espelho mais novo para Reajuste da 10ª Medição.");
     expect(nota.textContent).not.toMatch(/\b(a|à) Reajuste|dela\b/);
   });
 

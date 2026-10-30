@@ -4,6 +4,7 @@ import { brl, contar } from "./formato";
 import type { Usuario } from "./Login";
 import { type Ir, type Rota } from "./rota";
 import { Link } from "./Link";
+import Selo from "./Selo";
 import { fmtDataPura, fmtMesExtenso } from "./tempo";
 import "./inicio.css";
 
@@ -42,13 +43,12 @@ function faixa(dias: number): "acao" | "atencao" | "neutro" {
   return dias <= 15 ? "acao" : dias <= 45 ? "atencao" : "neutro";
 }
 
-function Cartao({ para, ir, numero, rotulo, detalhe, tom }:
-    { para: Rota; ir: Ir; numero: number; rotulo: string; detalhe: string; tom: "primario" | "acao" | "atencao" | "neutro" }) {
+function Cartao({ para, ir, numero, rotulo, tom }:
+    { para: Rota; ir: Ir; numero: number; rotulo: string; tom: "primario" | "acao" | "atencao" | "neutro" }) {
   return (
     <Link para={para} ir={ir} className={`ini-cartao ini-cartao--${tom}`}>
       <span className="ini-cartao__numero">{numero.toLocaleString("pt-BR")}</span>
-      <span className="ini-cartao__texto"><span className="ini-cartao__rotulo">{rotulo}</span>
-        <span className="ini-cartao__detalhe">{detalhe}</span></span>
+      <span className="ini-cartao__texto"><span className="ini-cartao__rotulo">{rotulo}</span></span>
       <span className="ini-cartao__seta" aria-hidden="true">→</span>
     </Link>
   );
@@ -62,15 +62,6 @@ function Numero({ rotulo, valor, children }: { rotulo: string; valor: React.Reac
       {children}
     </div>
   );
-}
-
-function variacao(atual: number, anterior: number, periodo: string): { texto: string; sobe: boolean } {
-  // gate Sol S7 (10/10/2026): mes atual zerado dava "▼ 100% sobre setembro"; anterior zerado, percentual sem base
-  if (atual === 0) return { texto: `ainda sem medição desta competência · ${periodo}: ${brl(anterior)}`, sobe: false };
-  if (anterior === 0) return { texto: `${periodo} sem medição`, sobe: false };
-  const f = (atual - anterior) / anterior;
-  const pct = Math.round(Math.abs(f) * 100).toLocaleString("pt-BR");
-  return { texto: `${f >= 0 ? "▲" : "▼"} ${pct}% sobre ${periodo}`, sobe: f > 0 };
 }
 
 export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
@@ -101,26 +92,18 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
   const m = p.medido;
   const nomeMes = fmtMesExtenso(m.competencia);
   const nomeAnterior = fmtMesExtenso(m.anterior_competencia);
-  const v = variacao(m.valor_centavos, m.anterior_centavos, nomeAnterior);
 
   // cartao 2: certidoes
   const c = p.certidoes;
   const totalCert = c.vencidas + c.vencendo;
   const rotuloCert = c.vencidas && c.vencendo ? "certidões vencidas ou vencendo" : c.vencidas ? (c.vencidas === 1 ? "certidão vencida" : "certidões vencidas")
     : totalCert === 1 ? "certidão vencendo" : "certidões vencendo";
-  const nomesCert = c.itens.slice(0, 2).map(x => `${x.tipo} ${x.entidade}`).join(" · ");
-  const detalheCert = totalCert === 0 ? "nenhuma vence nos próximos 15 dias"
-    : `${nomesCert}${c.itens.length > 2 ? ` · +${c.itens.length - 2}` : ""}`;
 
   // cartao 3: reajuste a pedir
   const r = p.reajustes;
-  const primeiro = r[0];
-  const detalheReaj = !primeiro ? "nenhuma data-base pedindo pleito"
-    : `${primeiro.obra} · data-base ${fmtDataPura(primeiro.aniversario)}${r.length > 1 ? ` · +${r.length - 1}` : ""}`;
   const paraReaj: Rota = r.length === 1 ? { tela: "obra", id: r[0].contrato_id, aba: "reajuste" } : { tela: "avisos" };
 
   const maior = Math.max(1, ...p.por_contratante.map(x => Math.max(x.atual_centavos, x.anterior_centavos)));
-  const totalAnterior = p.por_contratante.reduce((s, x) => s + x.anterior_centavos, 0);
   const pr = p.protocoladas;
 
   return (
@@ -129,38 +112,24 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
 
       <section aria-label="O que fazer agora" className="ini-cartoes">
         <Cartao para={{ tela: "medicoes", aba: "enviar-nota" }} ir={ir} tom="primario" numero={p.notas_a_enviar}
-          rotulo={p.notas_a_enviar === 1 ? "nota a enviar" : "notas a enviar"}
-          detalhe={p.notas_a_enviar === 0 ? "nenhuma nota esperando envio" : "emitidas e ainda não enviadas ao contratante"} />
-        <Cartao para={{ tela: "documentos" }} ir={ir} numero={totalCert} rotulo={rotuloCert} detalhe={detalheCert}
+          rotulo={p.notas_a_enviar === 1 ? "nota a enviar" : "notas a enviar"} />
+        <Cartao para={{ tela: "documentos" }} ir={ir} numero={totalCert} rotulo={rotuloCert}
           tom={c.vencidas ? "acao" : c.vencendo ? "atencao" : "neutro"} />
         <Cartao para={paraReaj} ir={ir} numero={r.length} rotulo={r.length === 1 ? "reajuste a pedir" : "reajustes a pedir"}
-          detalhe={detalheReaj} tom={r.some(x => x.dias < 0) ? "acao" : r.length ? "atencao" : "neutro"} />
+          tom={r.some(x => x.dias < 0) ? "acao" : r.length ? "atencao" : "neutro"} />
       </section>
 
       <section aria-label="Números do mês" className="ini-numeros">
-        <Numero rotulo={`Medido em ${nomeMes}`} valor={brl(m.valor_centavos)}>
-          <span className={`ini-numero__nota${v.sobe ? " ini-numero__nota--ok" : ""}`}>{v.texto}</span>
-          <span className="ini-numero__base">valor cheio · medições da competência</span>
-        </Numero>
+        <Numero rotulo={`Medido em ${nomeMes}`} valor={brl(m.valor_centavos)} />
         <Numero rotulo={`Obras protocoladas em ${nomeMes}`}
           valor={<>{pr.obras_protocoladas.toLocaleString("pt-BR")} <span className="ini-numero__de">de {contar(pr.obras_ativas, "obra ativa", "obras ativas")}</span></>}>
           <span className="ini-barra" role="presentation">
             <span style={{ width: `${pr.obras_ativas ? Math.round(100 * pr.obras_protocoladas / pr.obras_ativas) : 0}%` }} /></span>
-          <span className="ini-numero__base">{pr.ultima ? `Última protocolada: ${fmtDataPura(pr.ultima)}` : "nenhum protocolo registrado"}</span>
         </Numero>
-        <Numero rotulo={`Recebido em ${p.hoje.slice(0, 4)}`} valor={brl(p.recebido_ano.valor_centavos)}>
-          {p.recebido_ano.valor_centavos === null
-            ? <span className="ini-numero__nota">{contar(p.recebido_ano.sem_data, "medição recebida", "medições recebidas")} sem data da baixa</span>
-            : <span className="ini-numero__nota">{brl(p.recebido_ano.mes_centavos)} em {nomeMes}</span>}
-          <span className="ini-numero__base">cota da Lotufo</span>
-        </Numero>
+        <Numero rotulo={`Recebido em ${p.hoje.slice(0, 4)}`} valor={brl(p.recebido_ano.valor_centavos)} />
         <Numero rotulo="A receber" valor={brl(p.a_receber.valor_centavos)}>
-          {!p.a_receber.liberado
-            ? <span className="ini-numero__nota">aguardando a conciliação</span>
-            : (p.a_receber.mais_60_centavos ?? 0) > 0
-              ? <span className="ini-numero__nota ini-numero__nota--acao">{brl(p.a_receber.mais_60_centavos)} há mais de 60 dias</span>
-              : <span className="ini-numero__nota">nada há mais de 60 dias</span>}
-          <span className="ini-numero__base">cota da Lotufo</span>
+          {p.a_receber.liberado && (p.a_receber.mais_60_centavos ?? 0) > 0 && (
+            <span><Selo classe="selo--acao" title={brl(p.a_receber.mais_60_centavos)}>mais de 60 dias</Selo></span>)}
         </Numero>
       </section>
 
@@ -175,8 +144,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
           </div>
           {m.quantidade === 0 && (
             <div className="ini-sem-medicao" role="status">
-              <span><strong>Nenhuma medição da competência de {nomeMes}.</strong>
-                {m.ultimo_lancamento && <> <span className="ini-sem-medicao__ultimo">Último lançamento: {fmtDataPura(m.ultimo_lancamento)}.</span></>}</span>
+              <strong>Nenhuma medição da competência de {nomeMes}.</strong>
               <Link para={{ tela: "medicoes" }} ir={ir} className="ini-sem-medicao__botao">Lançar medição →</Link>
             </div>
           )}
@@ -195,10 +163,6 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
               ))}
             </ul>
           )}
-          <div className="ini-painel__rodape">
-            <span>{nomeAnterior} <span className="ini-mono">{brl(totalAnterior)}</span></span>
-            <span>{nomeMes} <span className="ini-mono">{brl(m.valor_centavos)}</span></span>
-          </div>
         </section>
 
         <section aria-labelledby="ini-prazos" className="ini-painel ini-painel--prazos">
@@ -206,7 +170,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
             <h2 id="ini-prazos">Prazos chegando</h2>
             <Link para={{ tela: "avisos" }} ir={ir} className="ini-ver-todos">Ver todos</Link>
           </div>
-          {p.prazos.length === 0 ? <p className="ini-vazio">Nenhum prazo nos próximos 90 dias.</p> : (
+          {p.prazos.length === 0 ? <p className="ini-vazio">Nenhum prazo chegando.</p> : (
             <>
               <div className="ini-prazos__cabeca" aria-hidden="true"><span>Obra</span><span>Prazo</span><span>Faltam</span></div>
               {p.prazos.slice(0, PRAZOS_VISIVEIS).map(x => (
@@ -222,11 +186,6 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
               ))}
             </>
           )}
-          <p className="ini-legenda ini-legenda--prazos">
-            <span><i className="ini-ponto ini-ponto--acao" />até 15 dias</span>
-            <span><i className="ini-ponto ini-ponto--atencao" />até 45 dias</span>
-            <span><i className="ini-ponto ini-ponto--neutro" />mais de 45</span>
-          </p>
         </section>
       </div>
     </div>

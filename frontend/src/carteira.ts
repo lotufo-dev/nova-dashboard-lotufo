@@ -19,12 +19,6 @@ export function porFarol<T extends ObraCarteira>(obras: T[]): T[] {
   return [...obras].sort((a, b) => (ORDEM_FAROL[a.farol] ?? 4) - (ORDEM_FAROL[b.farol] ?? 4) || a.seq - b.seq);
 }
 
-/** As obras com problema (farol que nao e' verde), pelo farol, ate' `limite`, e quantas sao ao todo. */
-export function obrasComProblema<T extends ObraCarteira>(obras: T[], limite = 5): { itens: T[]; total: number } {
-  const com = porFarol(obras.filter(o => o.farol !== "verde"));
-  return { itens: com.slice(0, limite), total: com.length };
-}
-
 /** Os motivos que cabem na linha (ate' `max`) e quantos ficam para os avisos da obra. */
 export function motivosDaLinha(motivos: Motivo[] | undefined, max = 2): { visiveis: Motivo[]; mais: number } {
   const m = motivos ?? [];

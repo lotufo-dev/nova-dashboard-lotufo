@@ -8,14 +8,14 @@ import type { Usuario } from "./Login";
 import IniciarProxima from "./IniciarProxima";
 import Medicoes, { brl } from "./Medicoes";
 import { ContratoObra, DocumentosObra } from "./ObraAbas";
-import type { PontoDaCurva } from "./obra";
+import type { MarcaAditivo, PontoDaCurva, PrevistoAnterior } from "./obra";
 import Prazos from "./Prazos";
 import Reajuste from "./Reajuste";
 import { NovoProtocolo } from "./Protocolo";
 import { ir, type AbaObra as Aba, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
 import { Abas, Migalhas, VoltarOrigem } from "./Topo";
-import { fmtPercentual, baseDosValores } from "./formato";
+import { baseDosValores } from "./formato";
 import Selo from "./Selo";
 
 // Bloco 6 (spec §10.3): cabecalho da obra, montado no servidor (`contratos.cabecalho`).
@@ -30,8 +30,7 @@ type Cabecalho = {
   faturado_centavos?: number; a_receber_centavos?: number | null;
 };
 // O saldo da obra e' o do cronograma (NAVEGACAO.md, principio 7): vigente − medido de execucao atestado.
-type Saldo = { vigente_centavos: number; vigente_execucao_centavos?: number; atestado_execucao_centavos: number;
-  saldo_centavos: number; formula: string };
+type Saldo = { vigente_centavos: number; atestado_execucao_centavos: number; saldo_centavos: number; formula: string };
 
 export type StatusObra = "ativo" | "suspenso" | "em_encerramento" | "encerrado" | "rescindido";
 
@@ -43,10 +42,6 @@ export const STATUS: Record<StatusObra, { rotulo: string; classe: string }> = {
   encerrado: { rotulo: "Encerrado", classe: "" }, rescindido: { rotulo: "Rescindido", classe: "" },
 };
 
-function percentual(bp: number): string {
-  return fmtPercentual(bp / 10000);
-}
-
 // A ORDEM da faixa mora aqui, e nao no JSX: e' a do NAVEGACAO.md (Medicoes · Prazos · Reajuste ·
 // Documentos · Contrato). As notas moram na pagina de cada medicao e na coluna Notas.
 const ABAS: { id: Aba; rotulo: string }[] = [
@@ -57,37 +52,35 @@ const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "contrato", rotulo: "Contrato" },
 ];
 
+/** A cota da Lotufo no cabecalho, so' em consorcio (principio 7): "cota 40% (R$ 400.000,00)". */
+function cotaDaObra(c: Cabecalho): string | null {
+  const cota = baseDosValores(c.percentual_lotufo_bp);
+  return cota && c.cota_vigente_centavos !== null ? `${cota} (${brl(c.cota_vigente_centavos)})` : cota;
+}
+
 /** Os cinco numeros da obra (desenho de 16/10/2026), sempre no alto, qualquer que seja a aba: quanto vale, quanto
- *  ja' se mediu, quanto se faturou, quanto os orgaos devem e o saldo do cronograma. Valores cheios, com a cota ao
- *  lado quando a Lotufo nao tem 100%. O que vem da curva (medido e saldo) mostra "indisponivel" quando a leitura
- *  falha: a falha nao e' o mesmo que valor nulo. */
+ *  ja' se mediu, quanto se faturou, quanto os orgaos devem e o saldo do cronograma. Valores cheios (a cota, quando
+ *  a Lotufo nao tem 100%, vai uma vez no cabecalho). O que vem da curva (medido e saldo) mostra "indisponivel"
+ *  quando a leitura falha: a falha nao e' o mesmo que valor nulo. */
 function Indicadores({ c, contratoId, saldo, falhou }: { c: Cabecalho; contratoId: number; saldo: Saldo | null; falhou: boolean }) {
-  const cota = c.percentual_lotufo_bp !== 10000;
   const indisponivel = falhou && !saldo;
   const medido = saldo ? brl(saldo.atestado_execucao_centavos) : indisponivel ? "indisponível" : "—";
-  // #262: medido e' a precos iniciais; a base e' o vigente sem o aditivo de reajuste
-  const base = saldo?.vigente_execucao_centavos ?? c.valor_vigente_centavos;
-  const pct = saldo && base > 0 ? fmtPercentual(saldo.atestado_execucao_centavos / base, 1) : null;
   return (
     <ul className="indicadores" id="indicadores" aria-label="Números da obra">
       <li className="cartao indicador"><span className="indicador__rotulo">Valor vigente</span>
-        <span className="indicador__valor">{brl(c.valor_vigente_centavos)}</span>
-        {cota && <span className="campo__nota">cota da Lotufo ({percentual(c.percentual_lotufo_bp)}): <span className="dinheiro num">{brl(c.cota_vigente_centavos)}</span></span>}</li>
+        <span className="indicador__valor">{brl(c.valor_vigente_centavos)}</span></li>
       <li className="cartao indicador"><span className="indicador__rotulo">Medido (execução)</span>
-        <span className={`indicador__valor${indisponivel ? " indicador__valor--indisponivel" : ""}`}>{medido}</span>
-        {pct && <span className="campo__nota">{pct} do vigente de execução</span>}</li>
+        <span className={`indicador__valor${indisponivel ? " indicador__valor--indisponivel" : ""}`}>{medido}</span></li>
       <li className="cartao indicador"><span className="indicador__rotulo">Faturado</span>
         <span className="indicador__valor">{c.faturado_centavos === undefined ? "—" : brl(c.faturado_centavos)}</span></li>
       <li className="cartao indicador"><span className="indicador__rotulo">A receber</span>
-        <span className="indicador__valor">{c.a_receber_centavos === undefined || c.a_receber_centavos === null ? "—" : brl(c.a_receber_centavos)}</span>
-        {c.a_receber_centavos === null && <span className="campo__nota">a conciliar</span>}</li>
+        <span className="indicador__valor">{c.a_receber_centavos === undefined || c.a_receber_centavos === null ? "—" : brl(c.a_receber_centavos)}</span></li>
       {/* os mesmos rotulos do cronograma, o lar deles: la' mora a formula do saldo */}
       <li className="cartao indicador">
         <Link className="indicador__rotulo" para={{ tela: "obra", id: contratoId, aba: "contrato" }} secao="cronograma">Saldo do cronograma</Link>
         <span className={`indicador__valor${indisponivel ? " indicador__valor--indisponivel" : saldo && saldo.saldo_centavos < 0 ? " negativo" : ""}`}>
           {saldo ? brl(saldo.saldo_centavos) : indisponivel ? "indisponível" : "—"}</span>
-        {indisponivel ? <span className="campo__nota" role="alert">não foi possível ler o cronograma agora</span>
-          : <span className="campo__nota">vigente de execução − medido</span>}</li>
+        {indisponivel && <span className="campo__nota" role="alert">não foi possível ler o cronograma agora</span>}</li>
     </ul>
   );
 }
@@ -97,7 +90,7 @@ function Indicadores({ c, contratoId, saldo, falhou }: { c: Cabecalho; contratoI
 function AvisosDaObra({ contratoId, itens }: { contratoId: number; itens: Aviso[] | null | undefined }) {
   const n = itens?.length ?? 0;
   return <Alertas itens={itens} ir={ir} titulo="Avisos desta obra" limite={3} lateral id="titulo-avisos-obra"
-    vazio="Nenhum aviso nesta obra."
+    vazio="Nenhum aviso."
     verTodos={{ para: { tela: "avisos" }, busca: { obra: String(contratoId) }, rotulo: `Ver todos os ${n} avisos da obra` }} />;
 }
 
@@ -118,7 +111,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
   // a curva (previsto x medido) e o saldo: os indicadores e a curva S leem a mesma resposta.
   // N04-12: a falha da leitura (null) nao e' o mesmo que obra sem curva.
-  const [curva, setCurva] = useState<{ pontos: PontoDaCurva[]; saldo: Saldo } | null | undefined>(undefined);
+  const [curva, setCurva] = useState<{ pontos: PontoDaCurva[]; saldo: Saldo; anterior: PrevistoAnterior | null; aditivos: MarcaAditivo[] } | null | undefined>(undefined);
 
   useEffect(() => {
     // `vigente` corta o setState de uma resposta que chega depois de a tela ja ter
@@ -136,8 +129,8 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
   useEffect(() => {
     let vivo = true;
     setCurva(undefined);
-    api<{ curva?: PontoDaCurva[]; saldo: Saldo }>(`/api/contratos/${contratoId}/curva`)
-      .then(d => { if (vivo) setCurva({ pontos: d.curva ?? [], saldo: d.saldo }); })
+    api<{ curva?: PontoDaCurva[]; saldo: Saldo; anterior?: PrevistoAnterior | null; aditivos?: MarcaAditivo[] }>(`/api/contratos/${contratoId}/curva`)
+      .then(d => { if (vivo) setCurva({ pontos: d.curva ?? [], saldo: d.saldo, anterior: d.anterior ?? null, aditivos: d.aditivos ?? [] }); })
       .catch(() => { if (vivo) setCurva(null); });
     return () => { vivo = false; };
   }, [contratoId]);
@@ -172,8 +165,8 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
           <h1 className="topbar__titulo topbar__titulo--grande" title={c?.obra}>{c ? c.obra : "Obra"}</h1>
           {c && <Selo classe={STATUS[c.status]?.classe ?? ""}>{STATUS[c.status]?.rotulo ?? c.status}</Selo>}
         </div>
-        {/* principio 7: a pagina da obra e' toda em valor cheio; a cota vai ao lado onde a Lotufo nao tem 100% */}
-        {c && <p className="topbar__meta topbar__meta--obra">{c.orgao} · Contrato {c.instrumento} · {baseDosValores(c.percentual_lotufo_bp)}</p>}
+        {/* principio 7: a pagina da obra e' toda em valor cheio; a cota vai ao lado so' onde a Lotufo nao tem 100% */}
+        {c && <p className="topbar__meta topbar__meta--obra">{[c.orgao, `Contrato ${c.instrumento}`, cotaDaObra(c)].filter(Boolean).join(" · ")}</p>}
       </header>
 
       <div className="pagina">
@@ -192,7 +185,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
             <div className="obra-grade__principal">
               <Indicadores c={c} contratoId={contratoId} saldo={curva ? curva.saldo : null} falhou={curva === null} />
 
-              <div id="curva"><CurvaS pontos={curva === undefined ? undefined : curva ? curva.pontos : null} contratoId={contratoId} /></div>
+              <div id="curva"><CurvaS pontos={curva === undefined ? undefined : curva ? curva.pontos : null} contratoId={contratoId} anterior={curva?.anterior} aditivos={curva?.aditivos} /></div>
 
               <section className="cartao" id="secoes" aria-label="Seções da obra">
                 <Abas rotulo="Seções da obra" atual={aba} classe="abas--obra"

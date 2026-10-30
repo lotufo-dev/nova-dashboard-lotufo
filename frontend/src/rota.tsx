@@ -25,7 +25,7 @@ export type AbaCarteira = "resumo" | "qdop" | "producao";
 export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria";
 // Abas de Medicoes (09/10/2026, prototipo aprovado): o Resumo e' a padrao e nao entra na URL; as outras sao as
 // situacoes do ciclo. "Enviar nota" e "Aguardando pagamento" eram as telas Notas › A enviar e Aguardando pagamento.
-export type AbaMedicoes = "resumo" | "sem-medicao" | "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento";
+export type AbaMedicoes = "resumo" | "sem-medicao" | "planilha-gerada" | "planilha-enviada" | "boletim-recebido" | "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento";
 
 // Abas da pagina da empresa em Documentos (#161). As Certidoes sao a padrao e nao entram na URL.
 export type AbaDocumentos = "certidoes" | "regularidade" | "garantia";
@@ -35,6 +35,7 @@ export type Rota =
   | { tela: "inicio" }
   | { tela: "medicoes"; aba?: AbaMedicoes }
   | { tela: "avisos" }
+  | { tela: "siga" }
   | { tela: "documentos" }
   | { tela: "documentos-empresa"; id: number; aba?: AbaDocumentos }
   | { tela: "obras" }
@@ -58,7 +59,7 @@ const ABAS: readonly AbaObra[] = ["medicoes", "prazos", "reajuste", "documentos"
 const ABAS_DOCUMENTOS: readonly AbaDocumentos[] = ["certidoes", "regularidade", "garantia"];
 const ABAS_CARTEIRA: readonly AbaCarteira[] = ["resumo", "qdop", "producao"];
 const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria"];
-const ABAS_MEDICOES: readonly AbaMedicoes[] = ["resumo", "sem-medicao", "faturamento", "aguardando-nota", "enviar-nota",
+const ABAS_MEDICOES: readonly AbaMedicoes[] = ["resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota", "enviar-nota",
   "aguardando-pagamento"];
 // Links antigos (e-mails, favoritos) continuam abrindo a secao que absorveu a aba.
 // A aba Notas saiu (mapa de 2026-09-28): as notas estao na medicao e na coluna Notas das medicoes da obra.
@@ -66,7 +67,7 @@ const ABA_ANTIGA: Record<string, AbaObra> = { protocolo: "medicoes", notas: "med
 
 // Telas de um segmento so' ("/medicoes"), sem parametro, e os nomes antigos de cada uma.
 // Bloco 9: "/engenharia" e "/sugestoes" sairam; por nao estarem aqui, caem na raiz (entrada do perfil).
-const SIMPLES = ["inicio", "medicoes", "avisos", "documentos", "obras", "a-receber", "carteira", "admin", "conta"] as const;
+const SIMPLES = ["inicio", "medicoes", "avisos", "siga", "documentos", "obras", "a-receber", "carteira", "admin", "conta"] as const;
 type Simples = (typeof SIMPLES)[number];
 const SIMPLES_ANTIGAS: Record<string, Simples> = {
   certidoes: "documentos",   // bloco 4: Certidoes virou Documentos de protocolo

@@ -254,12 +254,13 @@ def baixar_comprovante(pid: ID, _=Depends(exigir("ver_paineis", com_csrf=False))
 
 
 @router.post("/api/protocolos/{pid}/numero-orgao")
-def numero_orgao(pid: ID, numero: str = Form("", max_length=100), comprovante: UploadFile | None = File(None),
+def numero_orgao(pid: ID, numero: str = Form("", max_length=100), link_siga: str = Form("", max_length=500),
+                 comprovante: UploadFile | None = File(None),
                  usuario: dict = Depends(exigir("editar_cadastros")), conn: sqlite3.Connection = Depends(conexao)):
     _existe(conn, pid)
     dados = b"".join(arquivos.blocos_validados(comprovante)) if comprovante is not None else None
     try:
-        protocolo.registrar_numero_orgao(conn, usuario["id"], pid, numero, dados)
+        protocolo.registrar_numero_orgao(conn, usuario["id"], pid, numero, dados, link_siga)
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)

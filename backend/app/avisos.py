@@ -83,11 +83,6 @@ def _de_reajuste(conn, hoje: datetime.date) -> list[dict]:
     return reajuste.avisos(conn, hoje)
 
 
-def _de_pagamento(conn, hoje: datetime.date) -> list[dict]:
-    from app import diretoria         # bloco 8: pagamento atrasado (so' para a diretoria)
-    return diretoria.avisos_pagamento(conn, hoje)
-
-
 def _de_garantias(conn, hoje: datetime.date) -> list[dict]:
     """Issue #65: garantia contratual (30/15/vencida), na tela Documentos."""
     from app import contratos, garantias
@@ -102,7 +97,13 @@ def _de_garantias(conn, hoje: datetime.date) -> list[dict]:
     return out
 
 
-FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_pagamento, _de_garantias]
+def _de_siga(conn, hoje: datetime.date) -> list[dict]:
+    """Issue #330: processo parado no SIGA e monitor sem leitura (so' a operacao)."""
+    from app import siga             # import tardio: `siga` importa este modulo (formato do aviso)
+    return siga.avisos(conn, hoje)
+
+
+FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga]
 
 
 def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao") -> list[dict]:

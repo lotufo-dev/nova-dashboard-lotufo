@@ -43,7 +43,7 @@ export function desfechoDoPedido<I extends InstrumentoPrazo>(enviadoEm: string |
     .sort((a, b) => (a.data_assinatura ?? "").localeCompare(b.data_assinatura ?? ""))[0] ?? null;
 }
 
-export type CicloApi = { data_base_mes: string; indice: string | null; ciclo: number; aniversario: string; situacao: string;
+export type CicloApi = { data_base_mes: string; indice: string | null; aplica_a?: string | null; ciclo: number; aniversario: string; situacao: string;
   dias: number | null; apostilamento?: InstrumentoCadastro | null };
 export type PleitoResumo = { id: number; data_base_mes: string | null; ciclo: number | null };
 
@@ -78,12 +78,22 @@ export type PontoDaCurva = { competencia: string; previsto_centavos: number; med
   atestado_pendente: boolean };
 export type PontoS = { competencia: string; previsto: number; execucao: number; provisorio: boolean;
   /** Ate' a ultima competencia com execucao medida; depois dela a curva do medido nao continua. */
-  medida: boolean; acumuladoPrevisto: number; acumuladoMedido: number | null };
+  medida: boolean; acumuladoPrevisto: number; acumuladoMedido: number | null;
+  /** Issue #295: acumulado do previsto anterior a ultima repactuacao; null quando a obra nao tem essa linha. */
+  acumuladoAnterior: number | null };
+/** Previsto por competencia da versao anterior a ultima repactuacao e a marca de cada aditivo (API da curva). */
+export type PrevistoAnterior = { competencia: string; previsto_centavos: number }[];
+export type MarcaAditivo = { competencia: string; data: string; nome: string };
 
 /** A curva S da pagina da obra: previsto e medido de execucao, mes a mes e acumulados. O medido acumulado so' vai ate'
  *  a ultima competencia com execucao medida; antes dela, mes sem medicao conta zero (e' dado, nao ausencia). */
-export function curvaS(pontos: PontoDaCurva[]): PontoS[] {
+export function curvaS(pontos: PontoDaCurva[], anterior?: PrevistoAnterior | null): PontoS[] {
   const dados = new Map(pontos.map(p => [p.competencia, p]));
+  const prevAnt = new Map((anterior ?? []).map(a => [a.competencia, a.previsto_centavos]));
+  // a linha anterior pode ter meses que o vigente nao tem: o eixo e' a uniao
+  for (const c of prevAnt.keys()) {
+    if (!dados.has(c)) dados.set(c, { competencia: c, previsto_centavos: 0, medido_execucao_centavos: 0, atestado_pendente: false });
+  }
   const ordenadas = [...dados.keys()].sort();
   // a API so' manda as competencias que tem previsto ou medido: o eixo do tempo precisa dos meses vazios no meio
   const ordem: PontoDaCurva[] = [];
@@ -99,14 +109,16 @@ export function curvaS(pontos: PontoDaCurva[]): PontoS[] {
   }
   let ultima = -1;
   ordem.forEach((p, i) => { if (p.medido_execucao_centavos > 0) ultima = i; });
-  let acP = 0, acM = 0;
+  let acP = 0, acM = 0, acA = 0;
   return ordem.map((p, i) => {
     acP += p.previsto_centavos;
     acM += p.medido_execucao_centavos;
+    acA += prevAnt.get(p.competencia) ?? 0;
     const medida = i <= ultima;
     return { competencia: p.competencia, previsto: p.previsto_centavos, execucao: p.medido_execucao_centavos,
       provisorio: p.atestado_pendente && p.medido_execucao_centavos > 0, medida,
-      acumuladoPrevisto: acP, acumuladoMedido: medida ? acM : null };
+      acumuladoPrevisto: acP, acumuladoMedido: medida ? acM : null,
+      acumuladoAnterior: anterior ? acA : null };
   });
 }
 
@@ -127,8 +139,13 @@ export function linhaDoTempo(inicio: string | null, fim: string, hoje: string): 
   return { posicao, restantes };
 }
 
-export function restantesTexto(restantes: number): string {
-  const n = (d: number) => `${d} ${d === 1 ? "dia" : "dias"}`;
-  return restantes > 0 ? `${n(restantes)} ${restantes === 1 ? "restante" : "restantes"}`
-    : restantes === 0 ? "vence hoje" : `vencida há ${n(-restantes)}`;
+/** Selo do prazo (texto na tela, 26/10/2026): so' quando pede acao, nos limites do aviso "Execucao vencendo" (spec
+ *  §11): a ate' 60 dias do fim em Atencao, a ate' 30 ou vencido em Critico. Fora disso, null (quanto falta nao se
+ *  escreve). */
+export function seloDoPrazo(restantes: number | null): { classe: string; texto: string } | null {
+  if (restantes === null || Number.isNaN(restantes) || restantes > 60) return null;
+  const texto = restantes < 0 ? "vencida" : restantes === 0 ? "vence hoje"
+    : `vence em ${restantes} ${restantes === 1 ? "dia" : "dias"}`;
+  return { classe: restantes <= 30 ? "selo--acao" : "selo--atencao", texto };
 }
+

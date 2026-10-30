@@ -40,11 +40,9 @@ export function fmtPercentual(fracao: number, casas = 2, fixas = false): string 
   });
 }
 
-/** A base dos valores da obra (NAVEGACAO.md, principio 7): tudo em valor cheio; a cota vai junto quando a
- *  Lotufo nao tem 100%. Usada na topbar da obra e da medicao (F-50). */
-export function baseDosValores(percentualBp: number): string {
-  return percentualBp === 10000 ? "valores cheios (100% da Lotufo)"
-    : `valores cheios · cota da Lotufo: ${fmtPercentual(percentualBp / 10000)}`;
+/** A cota da Lotufo no cabecalho da obra e da medicao (F-50): "cota 40%" so' em consorcio; com 100%, null. */
+export function baseDosValores(percentualBp: number): string | null {
+  return percentualBp === 10000 ? null : `cota ${fmtPercentual(percentualBp / 10000)}`;
 }
 
 // Campo de valor em dinheiro (issue #190): os digitos entram pela direita, como em caixa registradora. Tudo

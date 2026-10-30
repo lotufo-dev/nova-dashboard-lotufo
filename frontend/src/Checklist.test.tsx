@@ -19,3 +19,11 @@ test("Remover a peça pede confirmação; Cancelar não remove nada", () => {
   fireEvent.click(screen.getByRole("button", { name: /Confirmar a remoção:\s*planilha\.pdf/ }));
   expect(aoRemover).toHaveBeenCalledWith(9);
 });
+
+// texto na tela (26/10/2026): a peca mostra o nome e o arquivo, sem o tamanho
+test("a peça não mostra o tamanho do arquivo", () => {
+  render(<Checklist itens={itens} legenda="Peças" editavel={false} ocupado={false}
+    aoAnexar={() => {}} aoRemover={() => {}} />);
+  expect(screen.getByText("planilha.pdf")).toBeTruthy();
+  expect(screen.queryByText(/KB/)).toBeNull();
+});

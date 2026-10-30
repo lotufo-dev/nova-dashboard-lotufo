@@ -490,6 +490,127 @@ def test_natureza_em_instrumento_que_nao_e_de_valor_e_erro(tmp_path):
     assert any("natureza" in e for e in erros)
 
 
+# --- issue #256: cronograma por versao, com a data do documento (spec 2026-10-20 §2.4) -------------
+
+def _versao(chave="contratual", origem="contratual", data="2024-03-11", itens=None, **extra):
+    return {"chave": chave, "origem": origem, "data": data,
+            "itens": itens if itens is not None else [{"competencia": "2024-04", "valor": "1.234,57"},
+                                                      {"competencia": "2024-05", "valor": "2.000,00"}],
+            **extra}
+
+
+def test_cronograma_aceito_e_normalizado_em_centavos(tmp_path):
+    c = {**CONTRATO, "cronograma": [
+        _versao(),
+        _versao("ta-01", "aditivo", "2025-02-10", [{"competencia": "2025-03", "valor": "999,99"}],
+                instrumento="ta-01"),
+        _versao("carta-1", "carta", "2025-08-01", [{"competencia": "2025-09", "valor": 0}]),
+        _versao("smo-1", "smo", "2026-01-15", [{"competencia": "2026-02", "valor": "0,01"}])]}
+    cron = ca.preparar(_escrever(tmp_path, contratos=[c]))["contratos"][0]["cronograma"]
+    assert [(v["chave"], v["origem"], v["data"], v["instrumento"]) for v in cron] == [
+        ("contratual", "contratual", "2024-03-11", None), ("ta-01", "aditivo", "2025-02-10", "ta-01"),
+        ("carta-1", "carta", "2025-08-01", None), ("smo-1", "smo", "2026-01-15", None)]
+    assert cron[0]["itens"] == [("2024-04", 123457), ("2024-05", 200000)]   # centavo impar preservado
+    assert cron[2]["itens"] == [("2025-09", 0)]
+
+
+def test_contrato_sem_cronograma_tem_lista_vazia(tmp_path):
+    assert ca.preparar(_escrever(tmp_path))["contratos"][0]["cronograma"] == []
+
+
+def test_cronograma_com_competencia_repetida_e_erro(tmp_path):
+    itens = [{"competencia": "2024-04", "valor": "1,00"}, {"competencia": "2024-04", "valor": "2,00"}]
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma": [_versao(itens=itens)]}]))
+    assert any("cronograma[contratual]" in e and "competência repetida" in e and "2024-04" in e for e in erros)
+
+
+@pytest.mark.parametrize("valor", ["-1,00", -100, "-0,01"])
+def test_cronograma_com_valor_negativo_e_erro(tmp_path, valor):
+    itens = [{"competencia": "2024-04", "valor": valor}]
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma": [_versao(itens=itens)]}]))
+    assert any("cronograma[contratual]" in e and "negativo" in e for e in erros)
+
+
+def test_cronograma_com_chave_repetida_e_itens_diferentes_e_erro(tmp_path):
+    outra = _versao(itens=[{"competencia": "2024-04", "valor": "9,00"}])
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma": [_versao(), outra]}]))
+    assert any("cronograma" in e and "chave repetida" in e and "contratual" in e for e in erros)
+
+
+def test_cronograma_com_campos_invalidos_e_erro(tmp_path):
+    ruins = [_versao("a1", origem="planilha"), _versao("a2", data=None), _versao("a3", data="2024-02-30"),
+             _versao("a4", itens=[]), _versao("a5", itens=[{"competencia": "04/2024", "valor": "1,00"}]),
+             _versao("a6", itens=[{"competencia": "2024-04", "valor": "1.00"}]), _versao("A 7"),
+             _versao("a8", data="2999-01-01")]
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma": ruins}]))
+    texto = "\n".join(erros)
+    for trecho in ("cronograma[a1].origem", "cronograma[a2].data", "cronograma[a3].data", "cronograma[a4].itens",
+                   "cronograma[a5].itens[0].competencia", "cronograma[a6].itens[0].valor", "cronograma[6].chave",
+                   "cronograma[a8].data"):
+        assert trecho in texto, trecho
+
+
+def test_cronograma_com_instrumento_que_nao_e_do_contrato_gera_aviso(tmp_path):
+    """`instrumento` nao se corrige depois de aplicado: chave que nao bate com um instrumento do contrato avisa."""
+    c = {**CONTRATO, "cronograma": [_versao("v1", "aditivo", instrumento="ta-1"),
+                                    _versao("v2", "aditivo", "2024-08-01", instrumento="carga-legado")]}
+    avisos = ca.preparar(_escrever(tmp_path, contratos=[c]))["avisos"]
+    assert [a for a in avisos if "cronograma" in a] == [
+        "MT-402: cronograma[v1].instrumento: 'ta-1' não é chave de nenhum instrumento deste contrato; "
+        "confira antes de aplicar (versão aplicada não muda)"]
+
+
+def test_cronograma_com_duas_versoes_na_mesma_data_e_erro(tmp_path):
+    """Gate Sol (PR #311): o desempate de mesma data dependeria da ordem de aplicacao, nao do YAML."""
+    c = {**CONTRATO, "cronograma": [_versao("v1", data="2025-01-10"), _versao("v2", data="2025-01-10")]}
+    erros = _erros(_escrever(tmp_path, contratos=[c]))
+    assert any("cronograma[v2].data" in e and "v1" in e and "mesma data" in e for e in erros)
+
+
+def test_cronograma_com_campo_desconhecido_e_erro(tmp_path):
+    """Gate Sol (PR #311): `instrumentoo` seria ignorado e a versao aplicada sem vinculo, imutavel depois."""
+    v = _versao("v1", instrumentoo="ta-01",
+                itens=[{"competencia": "2024-04", "valor": "1,00", "valr": "2,00"}])
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma": [v]}]))
+    assert any("cronograma[v1]" in e and "instrumentoo" in e and "desconhecido" in e for e in erros)
+    assert any("cronograma[v1].itens[0]" in e and "valr" in e and "desconhecido" in e for e in erros)
+
+
+def test_cronograma_que_nao_e_lista_e_erro(tmp_path):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma": {"chave": "x"}}]))
+    assert any("cronograma" in e and "lista" in e for e in erros)
+
+
+# --- issue #257: data-base com indice obrigatorio e aplica_a (spec 2026-10-20 §2.4, D7) ----------
+
+@pytest.mark.parametrize("db_", [{"mes": "2023-04"}, {"mes": "2023-04", "indice": ""},
+                                 {"mes": "2023-04", "indice": "  "}, {"mes": "2023-04", "indice": None}])
+def test_data_base_sem_indice_e_recusada(tmp_path, db_):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": [db_]}]))
+    assert any("datas_base[0].indice" in e and "obrigatório" in e for e in erros)
+
+
+@pytest.mark.parametrize("tabela", ["SINAPI", "sicro", " Sicro ", "SINAPI não desonerado", "Tabela SINAPI",
+                                    "SICRO/DNIT", "SINAPI/SICRO", "sinapi-jan/22"])
+def test_tabela_de_precos_no_indice_e_recusada(tmp_path, tabela):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": [{"mes": "2023-04", "indice": tabela}]}]))
+    assert any("datas_base[0].indice" in e and "tabela de preços" in e and "índice do reajuste" in e for e in erros)
+
+
+@pytest.mark.parametrize("indice", ["INCC-DI", "FGV/DNIT", "IPCA", "SINAPIX de exemplo"])
+def test_indice_de_reajuste_passa(tmp_path, indice):
+    c = {**CONTRATO, "datas_base": [{"mes": "2023-04", "indice": indice}]}
+    assert ca.preparar(_escrever(tmp_path, contratos=[c]))["contratos"][0]["datas_base"][0]["indice"] == indice
+
+
+def test_aplica_a_e_lido_e_opcional(tmp_path):
+    c = {**CONTRATO, "datas_base": [{"mes": "2022-01", "indice": "INCC-DI", "aplica_a": " itens SINAPI "},
+                                    {"mes": "2022-03", "indice": " FGV/DNIT "}]}
+    dbs = ca.preparar(_escrever(tmp_path, contratos=[c]))["contratos"][0]["datas_base"]
+    assert dbs == [{"mes": "2022-01", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+                   {"mes": "2022-03", "indice": "FGV/DNIT", "aplica_a": ""}]
+
+
 def test_ordinal_do_instrumento(tmp_path):
     """Issue #261: `ordinal` e' inteiro positivo e so' vale para aditivo ou apostilamento de prazo."""
     ta = {"chave": "ta-14", "tipo": "aditivo_prazo", "data": "2026-01-10", "numero": "099/2020/01/14",

@@ -1,15 +1,15 @@
-import { brl, contar } from "./formato";
+import { brl } from "./formato";
 import { IconeMais } from "./icones";
 import { Link } from "./Link";
 import { nivelParada, textoParada, type LinhaResumo } from "./resumoMedicoes";
 import { fmtCompetencia } from "./tempo";
 import "./abaFaturamento.css";
 
-// Aba "Enviar ao faturamento" (#155, prototipo aprovado pelo Leo em 14/10/2026): uma caixa por contratante, com a
-// quantidade e a soma, e uma linha por medicao. O botao abre a medicao na etapa 2 (a conferencia de destinatarios e
+// Aba "Enviar ao faturamento" (#155, prototipo aprovado pelo Leo em 14/10/2026): uma caixa por contratante e uma
+// linha por medicao. O botao abre a medicao na etapa 2 (a conferencia de destinatarios e
 // anexos); nao envia direto da lista. "Parada ha'" e' o marco do servidor (`medicoes.resumo`): sem marco, "—".
 
-type GrupoFaturamento = { contratante: string; linhas: LinhaResumo[]; soma: number };
+type GrupoFaturamento = { contratante: string; linhas: LinhaResumo[] };
 
 const maiorParada = (ls: LinhaResumo[]) => Math.max(...ls.map(l => l.dias ?? -1));
 
@@ -20,7 +20,7 @@ function agruparFaturamento(linhas: LinhaResumo[]): GrupoFaturamento[] {
   // o servidor manda contratante nulo quando a obra nao esta' mais ativa no cadastro
   for (const l of linhas) { const c = l.contratante ?? "Órgão sem cadastro"; m.set(c, [...(m.get(c) ?? []), l]); }
   return [...m.entries()]
-    .map(([contratante, ls]) => ({ contratante, linhas: ls, soma: ls.reduce((s, l) => s + (l.valor_centavos ?? 0), 0) }))
+    .map(([contratante, ls]) => ({ contratante, linhas: ls }))
     .sort((a, b) => maiorParada(b.linhas) - maiorParada(a.linhas) || a.contratante.localeCompare(b.contratante, "pt-BR"));
 }
 
@@ -29,7 +29,7 @@ function IconeEnviar() {
 }
 
 function Parada({ l }: { l: LinhaResumo }) {
-  if (l.dias === null) return <span className="fat-parada medicoes__traco" title="Sem a data do marco desta etapa">{"—"}</span>;
+  if (l.dias === null) return <span className="fat-parada medicoes__traco">{"—"}</span>;
   const nivel = nivelParada(l.dias, "faturamento");
   return (
     <span className="fat-parada">
@@ -59,9 +59,7 @@ export default function AbaFaturamento({ linhas, podeIniciar, aoIniciar }:
         <div className="fat-grupos">
           {grupos.map((g, i) => (
             <section key={g.contratante} className="medicoes__quadro" aria-labelledby={`fat-${i}`}>
-              <h2 className="fat-grupo__cabeca" id={`fat-${i}`}>
-                {g.contratante} · {contar(g.linhas.length, "medição", "medições")} · <span className="dinheiro">{brl(g.soma)}</span>
-              </h2>
+              <h2 className="fat-grupo__cabeca" id={`fat-${i}`}>{g.contratante}</h2>
               <ul className="fat-lista">
                 {g.linhas.map(l => (
                   <li key={l.medicao_id} className="fat-linha">

@@ -29,14 +29,24 @@ describe("FRC do consórcio (etapa 3)", () => {
     const lista = await screen.findByRole("list", { name: "Notas esperadas da medição" });
     const [guaxe, encomind] = within(lista).getAllByRole("listitem");
     expect(within(guaxe).getByText("Anexada")).toBeTruthy();
-    expect(guaxe.textContent).toContain("anexada · NF nº 2026204");
+    expect(guaxe.textContent).toContain("NF nº 2026204");
+    expect(guaxe.textContent).not.toContain("anexada ·");
     expect(within(encomind).getByText("Falta")).toBeTruthy();
+    expect(encomind.textContent).not.toContain("pelo espelho");
     expect(screen.getByText(/rascunho/).textContent).toContain("não conta");
     expect((screen.getByLabelText("Número da FRC") as HTMLInputElement).value).toBe("22");
-    expect(screen.getByText(/Última registrada/).textContent).toContain("21");
+    // o bloqueio do servidor diz por que nao gera; sem contador, "última registrada" nem instrucao de onde assinar
+    expect(screen.getByText("Falta 1 nota: Encomind · Várzea Grande")).toBeTruthy();
+    expect(screen.queryByText(/Última registrada|Assine no DocuSign|gerada sozinha|falta 1 de 2|conteúdo de cada PDF/)).toBeNull();
     expect((screen.getByRole("button", { name: "Gerar a FRC" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole("link", { name: "Baixar PDF" })).toBeNull();
-    expect(screen.getByText(/Assine no DocuSign/)).toBeTruthy();
+    expect(screen.queryByText("Assinada")).toBeNull();
+  });
+
+  it("FRC assinada no envio ganha o selo", async () => {
+    api.mockResolvedValue({ ...gerada(false), assinada: true });
+    render(<FrcConsorcio medicaoId={7} podeEditar versao={0} aoMudar={() => {}} />);
+    expect((await screen.findByText("Assinada")).closest(".selo")?.className).toContain("selo--ok");
   });
 
   const gerada = (desatualizada: boolean) => ({

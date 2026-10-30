@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
-import { IconeAjustes, IconeAlerta, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras,
+import { IconeAjustes, IconeAlerta, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
   IconeSeta, IconeSino } from "./icones";
 import type { Usuario } from "./Login";
-import { menuDe, ROTULO, rotaDoItem, rotuloPerfil, type ItemMenu } from "./navegacao";
+import { menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
 import Simbolo from "./Simbolo";
@@ -20,7 +20,7 @@ import Simbolo from "./Simbolo";
 // Os links sao um conjunto so', sempre no DOM e focaveis, com o rotulo visivel como nome acessivel.
 
 const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement> = {
-  inicio: IconeInicio, medicoes: IconeMedicoes, obras: IconeObras, avisos: IconeSino, documentos: IconeDocumento,
+  inicio: IconeInicio, medicoes: IconeMedicoes, obras: IconeObras, avisos: IconeSino, siga: IconeSiga, documentos: IconeDocumento,
   "a-receber": IconeCifrao, carteira: IconeGrade, admin: IconeAjustes,
 };
 
@@ -34,7 +34,6 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
           <span className="trilho__celula"><Simbolo className="trilho__simbolo" /></span>
           <span className="trilho__rotulo trilho__nome">
             <span className="trilho__nome-1">grupolotufo</span>
-            <span className="trilho__nome-2">Plataforma de Obras</span>
           </span>
         </span>
         {/* Links de verdade (<a href>): a URL e' o endereco da tela, e o navegador ganha "abrir em nova aba",
@@ -109,7 +108,6 @@ function Conta({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <IconeSeta className="icone icone--p conta__seta" />
       </button>
       <div className="conta__menu" id={id} hidden={!aberto}>
-        <p className="conta__perfil">{rotuloPerfil(usuario.perfil)}</p>
         <Link className="conta__item" para={{ tela: "conta" }} menu
           ir={(d, o) => { setAberto(false); ir(d, o); }}>Minha conta</Link>
         <button type="button" className="conta__item" disabled={saindo} onClick={() => void sair()}>
