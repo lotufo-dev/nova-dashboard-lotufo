@@ -924,6 +924,27 @@ def test_revisao_tambem_e_enviada_por_fora_e_o_pedido_fica_o_da_primeira(client_
     assert _enviar_por_fora(client_admin, mid, enviado_em="2026-08-11").status_code == 422
 
 
+def test_revisao_enviada_antes_do_primeiro_envio_e_recusada(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid, enviado_em="2026-08-10").status_code == 201
+    client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev01"),
+                      data={"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "11.111,11",
+                            "motivo": "Rev01"})
+    r = _enviar_por_fora(client_admin, mid, enviado_em="2026-08-09")
+    assert r.status_code == 422 and "anterior ao primeiro envio (10/08/2026)" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("estado", ["cancelada", "desistida"])
+def test_planilha_enviada_ainda_se_cancela_ou_desiste(client_admin, estado):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": estado, "motivo": "enviada na obra errada"})
+    assert r.status_code == 200, r.text
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == estado
+
+
 def test_envio_por_fora_recusas(client_admin):
     import datetime
     cid = _contrato(client_admin)

@@ -8,10 +8,9 @@ enviada, e a revisao so' acrescenta a versao. So' total e periodo (D3): a planil
 Modulo proprio, ao lado de `medicoes.py`: o boletim, a assinatura e a lista em andamento (issues irmas) mexem la'.
 """
 import datetime
-import json
 
 from app import arquivos, auditoria, contratos, db, espelho, tempo
-from app.medicoes import _data_br, nome_medicao, rotulo_estado
+from app.medicoes import LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
 TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
@@ -275,15 +274,12 @@ TETO_MEIO = 200
 
 
 def _versao_enviada(conn, medicao_id: int) -> int:
-    """A maior versao ja' enviada, pelos eventos de envio da auditoria (append-only, como `notas_envio.liberacao`).
-    Medicao em `planilha_enviada` sem evento (envio que nao gravou o evento) conta a 1a como enviada."""
+    """A maior versao ja' enviada, pelos eventos de envio da auditoria (append-only, como `notas_envio.liberacao`);
+    0 sem evento. Quem chama trata `planilha_enviada` sem evento como a 1a enviada."""
     maior = 0
     for (depois,) in conn.execute("SELECT depois FROM audit_log WHERE entidade='medicao' AND entidade_id=? AND acao=?",
                                   (str(medicao_id), ENVIO)):
-        try:
-            v = json.loads(depois or "{}").get("versao")
-        except (ValueError, TypeError, AttributeError):
-            v = None
+        v = (_json_dict(depois) or {}).get("versao")
         if isinstance(v, int):
             maior = max(maior, v)
     return maior
@@ -312,6 +308,8 @@ def conferir_envio_externo(conn, medicao_id: int, dados: dict) -> tuple[dict, di
     if m["estado"] == "planilha_enviada" and vigente["versao"] <= max(_versao_enviada(conn, medicao_id), 1):
         raise ValueError(f"A versão {vigente['versao']} da planilha/carta já foi enviada: para enviar de novo, "
                          "registre uma revisão")
+    if m["estado"] == "planilha_enviada" and m["planilha_enviada_em"] and data.isoformat() < m["planilha_enviada_em"]:
+        raise ValueError(f"A data do envio da revisão é anterior ao primeiro envio ({_data_br(m['planilha_enviada_em'])})")
     return dict(m), dict(vigente)
 
 
@@ -409,16 +407,16 @@ def registrar_envio_externo(conn, usuario_id: int, medicao_id: int, dados: dict,
 
 def eventos_envio(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> None:
     """Linha do tempo: um evento por envio da planilha/carta, na data do envio (como a assinatura)."""
-    for i in range(0, len(medicao_ids), 500):
-        lote = [str(x) for x in medicao_ids[i:i + 500]]
+    for i in range(0, len(medicao_ids), LOTE_AUDITORIA):
+        lote = [str(x) for x in medicao_ids[i:i + LOTE_AUDITORIA]]
         for r in conn.execute(
                 "SELECT a.entidade_id, a.depois, u.nome FROM audit_log a LEFT JOIN usuarios u ON u.id=a.usuario_id "
                 f"WHERE a.entidade='medicao' AND a.acao=? AND a.entidade_id IN ({','.join('?' * len(lote))}) "
                 "ORDER BY a.id", (ENVIO, *lote)):
+            d = _json_dict(r["depois"]) or {}
             try:
-                d = json.loads(r["depois"] or "{}")
                 versao, data = int(d.get("versao") or 1), datetime.date.fromisoformat(d["enviado_em"]).isoformat()
-            except (ValueError, TypeError, KeyError, AttributeError):
+            except (ValueError, TypeError, KeyError):
                 continue
             qual = "Planilha/carta" if versao == 1 else f"Versão {versao} da planilha/carta"
             como = "por fora" if d.get("origem") == "externo" else "pelo sistema"
