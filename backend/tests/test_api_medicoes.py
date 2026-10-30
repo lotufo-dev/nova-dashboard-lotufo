@@ -963,7 +963,17 @@ def test_envio_por_fora_recusas(client_admin):
     assert client_admin.get(f"/api/medicoes/{mid}").json()["planilha_enviada_em"] is None
 
 
-def test_numero_do_siga_vai_para_medicao_protocolos_e_aparece_na_linha_do_tempo(client_admin):
+def _linhas_protocolo(mid):
+    from app import db
+    conn = db.get_conn()
+    try:
+        return [tuple(r) for r in conn.execute("SELECT etapa, data, numero_processo, origem FROM medicao_protocolos "
+                                               "WHERE medicao_id=? ORDER BY id", (mid,))]
+    finally:
+        conn.close()
+
+
+def test_numero_do_siga_vai_para_medicao_protocolos_como_da_planilha(client_admin):
     cid = _contrato(client_admin)
     mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
     assert _numero_siga(client_admin, mid, "123.456/2026").status_code == 422      # antes do envio, nao
@@ -973,18 +983,53 @@ def test_numero_do_siga_vai_para_medicao_protocolos_e_aparece_na_linha_do_tempo(
     assert r.status_code == 200, r.text
     d = client_admin.get(f"/api/medicoes/{mid}").json()
     assert d["estado"] == "planilha_enviada"       # o nº do SIGA nao protocola a nota
-    # a linha do tempo da tela (medicao.ts, eventosDaMedicao) mostra cada linha de `protocolos` com o processo
-    assert [(p["data"], p["numero_processo"], p["origem"]) for p in d["protocolos"]] == [
-        ("2026-08-03", "123.456/2026", "manual")]
+    assert _linhas_protocolo(mid) == [("planilha", "2026-08-03", "123.456/2026", "manual")]
+    # a linha do tempo da tela (medicao.ts) le `planilha_siga`; `protocolos` e' so' o da nota
+    assert d["planilha_siga"] == {"data": "2026-08-03", "numero": "123.456/2026"} and d["protocolos"] == []
     # correcao: a mesma linha, com o antes e o depois na auditoria
     assert _numero_siga(client_admin, mid, "123.457/2026").status_code == 200
-    assert [p["numero_processo"] for p in client_admin.get(f"/api/medicoes/{mid}").json()["protocolos"]] == [
-        "123.457/2026"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["planilha_siga"]["numero"] == "123.457/2026"
+    assert len(_linhas_protocolo(mid)) == 1
     import json
     assert [(json.loads(a or "null"), json.loads(b)) for a, b in _auditoria("medicao.numero_siga")] == [
         (None, {"numero_processo": "123.456/2026", "data": "2026-08-03"}),
         ({"numero_processo": "123.456/2026"}, {"numero_processo": "123.457/2026"})]
     assert _numero_siga(client_admin, mid, "123.457/2026").status_code == 422      # o mesmo de novo
+
+
+def test_numero_do_siga_da_planilha_nao_conta_como_protocolo_nos_paineis(client_admin):
+    """Revisor e gate Sol (rodada 1, C1): o nº do SIGA da planilha nao vira a data do protocolo da nota no Inicio,
+    na diretoria nem na lista em andamento; depois do protocolo da nota, a data usada e' a da nota."""
+    import datetime
+    from app import avisos, db, diretoria, inicio, medicoes
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    conn = db.get_conn()
+    try:
+        agosto = datetime.date(2026, 8, 20)
+        antes = avisos.resumo_mes(conn, agosto)
+        assert _numero_siga(client_admin, mid, "123.456/2026").status_code == 200
+        assert avisos.resumo_mes(conn, agosto) == antes and antes["valor_mes_centavos"] == 0
+        assert inicio.painel(conn, agosto)["protocoladas"]["ultima"] is None
+        assert next(m for m in diretoria._medicoes(conn) if m["id"] == mid)["protocolo_em"] is None
+        assert next(m for m in medicoes.em_andamento(conn, contrato_id=cid) if m["id"] == mid)["protocolado_em"] is None
+    finally:
+        conn.close()
+    _no_estado(mid, "nota_emitida")
+    r = client_admin.post(f"/api/medicoes/{mid}/protocolo", json={"data": "2026-09-15", "numero_processo": "777/2026"})
+    assert r.status_code == 201, r.text
+    conn = db.get_conn()
+    try:
+        setembro = avisos.resumo_mes(conn, datetime.date(2026, 9, 20))
+        assert setembro["valor_mes_centavos"] == 12_345_67 and setembro["valor_mes_anterior_centavos"] == 0
+        assert inicio.painel(conn, datetime.date(2026, 9, 20))["protocoladas"]["ultima"] == "2026-09-15"
+        assert next(m for m in diretoria._medicoes(conn) if m["id"] == mid)["protocolo_em"] == "2026-09-15"
+    finally:
+        conn.close()
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert [(p["data"], p["numero_processo"]) for p in d["protocolos"]] == [("2026-09-15", "777/2026")]
+    assert d["planilha_siga"] == {"data": "2026-08-03", "numero": "123.456/2026"}
 
 
 def test_numero_do_siga_vale_tambem_no_boletim_e_no_envio_pelo_sistema(client_admin):
@@ -1003,7 +1048,7 @@ def test_numero_do_siga_vale_tambem_no_boletim_e_no_envio_pelo_sistema(client_ad
     assert r.status_code == 200, r.text
     d = client_admin.get(f"/api/medicoes/{mid}").json()
     assert d["estado"] == "boletim_recebido"
-    assert [(p["data"], p["numero_processo"]) for p in d["protocolos"]] == [("2026-08-05", "999/2026")]
+    assert d["planilha_siga"] == {"data": "2026-08-05", "numero": "999/2026"}
 
 
 def test_numero_do_siga_recusado_depois_do_protocolo_da_nota(client_admin):
@@ -1012,7 +1057,7 @@ def test_numero_do_siga_recusado_depois_do_protocolo_da_nota(client_admin):
     assert _enviar_por_fora(client_admin, mid).status_code == 201
     _no_estado(mid, "protocolada")
     assert _numero_siga(client_admin, mid, "999/2026").status_code == 422
-    assert client_admin.get(f"/api/medicoes/{mid}").json()["protocolos"] == []
+    assert _linhas_protocolo(mid) == []
 
 
 def test_numero_do_protocolo_no_envio_por_fora_e_o_numero_do_siga(client_admin):
@@ -1020,9 +1065,25 @@ def test_numero_do_protocolo_no_envio_por_fora_e_o_numero_do_siga(client_admin):
     mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
     assert _enviar_por_fora(client_admin, mid, numero_protocolo="555/2026").status_code == 201
     d = client_admin.get(f"/api/medicoes/{mid}").json()
-    assert [(p["data"], p["numero_processo"]) for p in d["protocolos"]] == [("2026-08-03", "555/2026")]
+    assert d["planilha_siga"] == {"data": "2026-08-03", "numero": "555/2026"}
     assert _eventos(client_admin, mid) == [
         "Planilha/carta enviada por fora em 03/08/2026 (E-mail ao protocolo, protocolo 555/2026) por Admin"]
+
+
+def test_protocolo_da_revisao_nao_troca_o_numero_do_siga_ja_gravado(client_admin):
+    """Revisor (rodada 1, A2): o nº do protocolo da Rev01 fica no evento do envio; o nº do SIGA gravado so' muda pela
+    rota do nº do SIGA."""
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid, numero_protocolo="555/2026").status_code == 201
+    client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev01"),
+                      data={"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "11.111,11",
+                            "motivo": "Rev01"})
+    assert _enviar_por_fora(client_admin, mid, enviado_em="2026-08-10", numero_protocolo="777/2026").status_code == 201
+    assert _linhas_protocolo(mid) == [("planilha", "2026-08-03", "555/2026", "manual")]
+    assert _eventos(client_admin, mid)[-1] == (
+        "Versão 2 da planilha/carta enviada por fora em 10/08/2026 (E-mail ao protocolo, protocolo 777/2026) por Admin")
+    assert len(_auditoria("medicao.numero_siga")) == 1
 
 
 def test_envio_por_fora_e_numero_do_siga_diretoria_recebe_403(client_admin):

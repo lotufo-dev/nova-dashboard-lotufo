@@ -58,7 +58,7 @@ def _medicoes_do_legado(conn) -> list[dict]:
         SELECT m.id, m.contrato_id, m.numero, m.tipo, m.competencia,
                m.valor_protocolado_centavos, m.valor_atestado_centavos,
                c.numero_instrumento, c.centro_custo_rm, c.centros_custo_anteriores_rm, e.coligada_rm,
-               (SELECT MAX(data) FROM medicao_protocolos p WHERE p.medicao_id=m.id) AS protocolo
+               (SELECT MAX(data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolo
         FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
         JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
         WHERE m.estado='protocolada' AND COALESCE(m.valor_protocolado_origem, '') <> 'espelho'
@@ -235,7 +235,7 @@ def cortar(conn, usuario_id: int, data_corte: str, ensaio: bool) -> dict:
                 FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
                 WHERE m.estado IN ('protocolada', 'nf_emitida') AND COALESCE(m.valor_protocolado_origem, '') <> 'espelho'
                   AND m.competencia < ?
-                  AND (SELECT MAX(data) FROM medicao_protocolos p WHERE p.medicao_id=m.id) <= ?
+                  AND (SELECT MAX(data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') <= ?
                 ORDER BY c.numero_instrumento, m.competencia, m.tipo, m.numero""",
                 (sincronizacao_rm.COMPETENCIA_CORTE_RM, data_corte)).fetchall()
             por_obra = Counter()

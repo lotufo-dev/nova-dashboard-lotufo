@@ -101,8 +101,13 @@ def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     if r is None:
         return None
     d = dict(r)
+    # Issue #283: `protocolos` e' so' o da nota (o que conta como protocolo nas telas e nos marcos); o nº do SIGA da
+    # planilha/carta (etapa 'planilha', migracao 054) vem a' parte
     d["protocolos"] = [dict(p) for p in conn.execute(
-        "SELECT * FROM medicao_protocolos WHERE medicao_id=? ORDER BY id", (medicao_id,))]
+        "SELECT * FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' ORDER BY id", (medicao_id,))]
+    p = conn.execute("SELECT data, numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='planilha'",
+                     (medicao_id,)).fetchone()
+    d["planilha_siga"] = {"data": p["data"], "numero": p["numero_processo"]} if p else None
     # NFs do RM alocadas a esta medicao, com o recebido de cada uma (fase 5). Import local:
     # sincronizacao_rm importa este modulo.
     from app import sincronizacao_rm
@@ -545,7 +550,7 @@ PROXIMO_PASSO = {"planilha_gerada": "enviar a planilha/carta", "planilha_enviada
 def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None) -> list[dict]:
     """Medicoes entre o espelho e o pagamento, com o proximo passo e a data do ultimo marco."""
     sql = ("SELECT m.*, c.nome_curto, c.numero_instrumento, "
-           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id) AS protocolado_em "
+           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em "
            "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id "
            f"WHERE m.estado IN ({','.join('?' * len(PROXIMO_PASSO))})")
     args: list = list(PROXIMO_PASSO)

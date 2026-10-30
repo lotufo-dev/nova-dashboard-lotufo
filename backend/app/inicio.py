@@ -125,7 +125,7 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     pedir = [a for a in reajuste.avisos(conn, hoje) if a["tipo"] == "reajuste_pleito"]
     resumo = avisos.resumo_mes(conn, hoje)
     ultima = conn.execute("SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
-                          "WHERE m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
+                          "WHERE mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
     medido, por_contratante = _medido(conn, hoje)
     return {
         "hoje": hoje.isoformat(),

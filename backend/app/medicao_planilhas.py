@@ -267,8 +267,8 @@ def anexo(conn, medicao_id: int, planilha_id: int, peca: str) -> dict | None:
 ENVIO = "medicao.planilha_envio"          # o envio (por fora; o do sistema, issue #282, grava o mesmo evento)
 NUMERO_SIGA = "medicao.numero_siga"
 ESTADOS_ENVIO = ("planilha_gerada", "planilha_enviada")
-# O nº do SIGA da planilha/carta entra do envio ate' antes do protocolo da nota: nesses estados toda linha de
-# `medicao_protocolos` e' a da planilha/carta (o protocolo da nota leva a medicao a `protocolada` no mesmo passo)
+# O nº do SIGA da planilha/carta entra do envio ate' antes do protocolo da nota. Mora em `medicao_protocolos` com
+# etapa 'planilha' (migracao 054): os paineis, a conciliacao e as telas so' contam a etapa 'nota' como protocolo
 ESTADOS_NUMERO_SIGA = ("planilha_enviada", "boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida")
 TETO_MEIO = 200
 
@@ -313,15 +313,19 @@ def conferir_envio_externo(conn, medicao_id: int, dados: dict) -> tuple[dict, di
     return dict(m), dict(vigente)
 
 
+def _linha_siga(conn, medicao_id: int):
+    return conn.execute("SELECT id, numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='planilha'",
+                        (medicao_id,)).fetchone()
+
+
 def _gravar_numero_siga(conn, usuario_id: int, m: dict, numero: str) -> None:
-    """Dentro da transacao do chamador. A 1a vez cria a linha de `medicao_protocolos` na data do envio da
-    planilha/carta; depois, corrige o numero na mesma linha, com o antes e o depois na auditoria (o mesmo do nº do
-    SIGA do envio da nota por fora, `notas_envio.registrar_numero_orgao`)."""
-    linha = conn.execute("SELECT id, numero_processo FROM medicao_protocolos WHERE medicao_id=? ORDER BY id DESC "
-                         "LIMIT 1", (m["id"],)).fetchone()
+    """Dentro da transacao do chamador. A 1a vez cria a linha da planilha/carta (etapa 'planilha') em
+    `medicao_protocolos`, na data do envio; depois, corrige o numero na mesma linha, com o antes e o depois na
+    auditoria (o mesmo do nº do SIGA do envio da nota por fora, `notas_envio.registrar_numero_orgao`)."""
+    linha = _linha_siga(conn, m["id"])
     if linha is None:
-        conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem) "
-                     "VALUES (?,?,?,'manual')", (m["id"], m["planilha_enviada_em"], numero))
+        conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem, etapa) "
+                     "VALUES (?,?,?,'manual','planilha')", (m["id"], m["planilha_enviada_em"], numero))
         auditoria.registrar(conn, usuario_id, NUMERO_SIGA, "medicao", m["id"], None,
                             {"numero_processo": numero, "data": m["planilha_enviada_em"]})
         return
@@ -386,9 +390,9 @@ def registrar_envio_externo(conn, usuario_id: int, medicao_id: int, dados: dict,
                     "estado": "planilha_enviada", "origem": "externo", "versao": vigente["versao"],
                     "planilha_id": vigente["id"], "enviado_em": data, "meio": meio,
                     "numero_protocolo": protocolo_, "eml": rel})
-                if protocolo_ and (conn.execute("SELECT numero_processo FROM medicao_protocolos WHERE medicao_id=? "
-                                                "ORDER BY id DESC LIMIT 1", (medicao_id,)).fetchone()
-                                   or (None,))[0] != protocolo_:
+                # o nº do protocolo so' vira o nº do SIGA quando ainda nao ha' um: o da revisao fica so' no evento do
+                # envio (corrigir o nº gravado e' pela rota do nº do SIGA)
+                if protocolo_ and _linha_siga(conn, medicao_id) is None:
                     _gravar_numero_siga(conn, usuario_id, m, protocolo_)
             except BaseException:
                 if gravado.get("novo"):         # ainda sob o lock: o arquivo que ESTE registro criou sai
