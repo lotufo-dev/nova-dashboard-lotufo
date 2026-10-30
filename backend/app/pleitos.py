@@ -297,6 +297,8 @@ def remover_anexo(conn, usuario_id: int, pleito_id: int, anexo_id: int) -> None:
 # --- previsao de reajuste (issue #272; spec 2026-10-20 §2.2) -----------------------------------------
 
 MAX_COMPETENCIAS = leitura_planilha_reajuste.MAX_COMPETENCIAS
+PREVISAO_NA_REITERACAO = "Reiteração não traz previsão de reajuste: vale a do pleito reiterado"
+MEMORIA_DIVERGENTE = "A memória de cálculo anexada não é a planilha da previsão aceita"
 _COMPETENCIA = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
 
 
@@ -314,6 +316,28 @@ def gravar_previsao_planilha(conn, usuario_id: int, pleito_id: int, dados: bytes
 def gravar_previsao_digitada(conn, usuario_id: int, pleito_id: int, linhas: list[dict]) -> int:
     """Previsao digitada pela pessoa (planilha fora do modelo, fila humana): sempre origem 'manual'."""
     return _gravar_previsao(conn, usuario_id, pleito_id, "manual", linhas, {})
+
+
+def _planilha_aceita(conn, pleito_id: int) -> str | None:
+    """sha256 da ultima planilha aceita (origem 'pleito') neste pleito. Vem da auditoria da gravacao, que entra no
+    mesmo commit das previsoes e e' append-only (indice `ix_audit_log_entidade`, migracao 036)."""
+    for r in conn.execute("SELECT depois FROM audit_log WHERE entidade='pleito' AND entidade_id=? "
+                          "AND acao='pleito.previsao' ORDER BY id DESC", (str(pleito_id),)):
+        d = json.loads(r["depois"] or "{}")
+        if d.get("origem") == "pleito":
+            return d.get("planilha_sha256")
+    return None
+
+
+def _memoria_divergente(conn, p: dict) -> bool:
+    """Com previsao lida da planilha, toda planilha .xlsx anexada como memoria de calculo tem de ser a aceita (e
+    ela tem de estar la'): senao o orgao recebe uma planilha e a dashboard mostra outra. Memoria so' em PDF nao se
+    compara (nao ha' como casar PDF com a planilha)."""
+    sha = _planilha_aceita(conn, p["id"]) if p["tipo"] == "reajuste" else None
+    if not sha:
+        return False
+    memorias = {a["sha256"] for a in _anexos_de(conn, p["id"]) if a["tipo"] == "planilha_calculo" and a["ext"] == "xlsx"}
+    return bool(memorias) and memorias != {sha}
 
 
 def _fonte(conn, r) -> str:
@@ -335,6 +359,8 @@ def _gravar_previsao(conn, usuario_id: int, pleito_id: int, origem: str, linhas:
     p = _linha(conn, pleito_id)
     if p["tipo"] != "reajuste":
         raise ValueError("Previsão de reajuste só no pleito de reajuste")
+    if _reiteracao(p):               # a reiteracao nao traz cronograma (#277): a previsao e' a do pleito reiterado
+        raise ValueError(PREVISAO_NA_REITERACAO)
     if not p["data_base_mes"] or not p["ciclo"]:
         raise ValueError("Pleito sem data-base e ciclo: a previsão não tem a que se ligar")
     if not linhas:
@@ -521,6 +547,8 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     if p["tipo"] == "prazo" and _CHUVA.search(p["justificativa"] or "") and not conn.execute(
             "SELECT 1 FROM instrumentos WHERE contrato_id=? AND tipo='paralisacao' LIMIT 1", (p["contrato_id"],)).fetchone():
         out.append({"codigo": "chuva", "mensagem": "O contrato veda alegar só chuva; cite a ordem de paralisação do órgão"})
+    if _memoria_divergente(conn, p):
+        out.append({"codigo": "memoria_divergente", "mensagem": MEMORIA_DIVERGENTE})
     if p["situacao"] == "rascunho":
         out.append({"codigo": "nao_montado", "mensagem": "Carta ainda não montada"})
     elif not p["assinado_arquivo"]:
@@ -623,6 +651,8 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         raise ValueError("Informe ao menos um destinatário")
     if pv["total"] > correio.MAX_TOTAL:
         raise ValueError("Anexos acima do limite do e-mail")
+    if _memoria_divergente(conn, p):            # a justificativa nao libera: o orgao receberia outra planilha
+        raise ValueError(MEMORIA_DIVERGENTE)
     justificativa = (justificativa or "").strip() or None
     if pv["pendencias"] and len(justificativa or "") < MIN_JUSTIFICATIVA:
         raise ValueError(f"{len(pv['pendencias'])} pendência(s) na prévia: informe a justificativa "
@@ -633,6 +663,10 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
     if _linha(conn, pleito_id)["situacao"] == "descartado":
         envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
         raise ValueError("Pleito descartado enquanto se preparava o envio: nada foi enviado")
+    # anexo trocado ou previsao aceita entre a leitura acima e a reserva: confere de novo, ja' com a reserva
+    if _memoria_divergente(conn, p):
+        envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
+        raise ValueError(MEMORIA_DIVERGENTE)
     try:
         envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(p), para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),

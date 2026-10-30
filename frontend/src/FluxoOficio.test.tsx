@@ -54,6 +54,12 @@ describe("Ofício", () => {
     expect(screen.queryByLabelText("Anexar planilha de previsão")).toBeNull();
     rerender(<CartaoPleito p={reajuste} podeEditar={false} aoMudar={() => {}} />);
     expect(screen.queryByLabelText("Anexar planilha de previsão")).toBeNull();
+    // a reiteracao nao traz cronograma (#277): a previsao e' a do pleito reiterado; a reemissao do cronograma traz
+    const ligado = { reemite_pleito_id: 3, anterior: { id: 3, numero_oficio: "122", situacao: "enviado", enviado_em: "2026-07-01", reemissao: null } };
+    rerender(<CartaoPleito p={{ ...reajuste, ...ligado, reemissao: "reiteracao" }} podeEditar aoMudar={() => {}} />);
+    expect(screen.queryByLabelText("Anexar planilha de previsão")).toBeNull();
+    rerender(<CartaoPleito p={{ ...reajuste, ...ligado, reemissao: "cronograma" }} podeEditar aoMudar={() => {}} />);
+    expect(screen.getByLabelText("Anexar planilha de previsão")).toBeTruthy();
   });
 
   // issue #27: carta editada pede confirmação; depois de enviada ou descartada, a guarda solta

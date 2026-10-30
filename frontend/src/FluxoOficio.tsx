@@ -218,7 +218,8 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
           )}
 
           {/* issue #272: a previsao por competencia se confere antes de montar a carta */}
-          {editavel && p.tipo === "reajuste" && <PleitoPrevisao pleitoId={p.id} dataBase={p.data_base_mes} ciclo={p.ciclo} aoGravar={aoMudar} />}
+          {/* a reiteracao nao traz cronograma (#277): a previsao e' a do pleito reiterado */}
+          {editavel && p.tipo === "reajuste" && p.reemissao !== "reiteracao" && <PleitoPrevisao pleitoId={p.id} dataBase={p.data_base_mes} ciclo={p.ciclo} aoGravar={aoMudar} />}
 
           <div className="pilha">
             {/* montada a carta, o texto recolhe; montar e baixar ficam fora dele, sempre a' vista */}

@@ -579,17 +579,21 @@ def test_digitada_da_reemissao_que_perderia_para_a_lida_de_outro_pleito_e_recusa
     assert len(_previsoes(cid)) == 2
 
 
-def test_digitada_da_reiteracao_nao_vale_e_e_recusada(api):
-    """A reiteracao nao derruba o pleito que reitera: a lida de A segue valendo contra a digitada da reiteracao."""
+def test_reiteracao_nao_grava_previsao_nem_lida_nem_digitada(api):
+    """A reiteracao nao traz cronograma (#277): nem a planilha lida (que, mais nova, venceria a lida do pleito
+    reiterado) nem a digitada entram nela."""
     cl, cid, _ = api
     a, corpo = _pronto(cl, cid)
     assert _aceitar(cl, a, ("2026-07", 1.0)).status_code == 200
     assert cl.post(f"/api/pleitos/{a}/enviar", json=corpo).status_code == 200
     b = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "123"}).json()["id"]
     _ligar(b, a, "reiteracao")
-    r = _digitar(cl, b, [{"competencia": "2026-07", "valor_centavos": 7}])
-    assert r.status_code == 422, r.text
-    assert "07/2026 continuaria sendo a lida da planilha do pleito" in r.json()["detail"]
+    for r in (_aceitar(cl, b, ("2026-07", 9.0)), _digitar(cl, b, [{"competencia": "2026-07", "valor_centavos": 7}])):
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"] == "Reiteração não traz previsão de reajuste: vale a do pleito reiterado"
+    assert len(_previsoes(cid)) == 1
+    vig = cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]
+    assert [(x["valor_previsto_centavos"], x["pleito_id"]) for x in vig] == [(100, a)]
 
 
 def test_digitada_do_cronograma_novo_depois_da_reiteracao_vale_depois_do_envio(api):
@@ -608,6 +612,32 @@ def test_digitada_do_cronograma_novo_depois_da_reiteracao_vale_depois_do_envio(a
     _ligar(c, b, "cronograma", "enviado")
     vig = cl.get(f"/api/contratos/{cid}/reajuste").json()["previsoes"]
     assert [(p["competencia"], p["valor_previsto_centavos"], p["pleito_id"]) for p in vig] == [("2026-07", 7, c)]
+
+
+def _anexar(cl, pid, nome, dados, tipo="planilha_calculo"):
+    r = cl.post(f"/api/pleitos/{pid}/anexos", data={"tipo": tipo}, files=_arquivo(nome, dados, XLSX))
+    assert r.status_code == 200, r.text
+    return [a for a in r.json()["anexos"] if a["nome"] == nome][-1]["id"]
+
+
+def test_planilha_aceita_diferente_da_memoria_anexada_nao_sai(api):
+    """Aceita a planilha B e anexa a A como memoria de calculo: o orgao receberia A com a dashboard mostrando B.
+    A previa aponta e o envio e' recusado (nem com justificativa), antes do e-mail."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, pid, ("2026-07", 2.0)).status_code == 200            # B
+    a = _anexar(cl, pid, "memoria-A.xlsx", _planilha(("2026-07", 1.0)))      # A
+    msg = "A memória de cálculo anexada não é a planilha da previsão aceita"
+    assert msg in [x["mensagem"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=corpo)
+    assert r.status_code == 422 and r.json()["detail"] == msg, r.text
+    assert _estado(pid)[1] == 0                                              # nenhum e-mail saiu
+    # com a B anexada e a A ainda la', continua divergente; tirando a A, sai
+    _anexar(cl, pid, "memoria-B.xlsx", _planilha(("2026-07", 2.0)))
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 422
+    assert cl.post(f"/api/pleitos/{pid}/anexos/{a}/remover").status_code == 200
+    assert msg not in [x["mensagem"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 200
 
 
 def test_digitada_e_descartada_some_da_aba(api):
