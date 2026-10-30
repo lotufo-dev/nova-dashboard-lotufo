@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from app import arquivos, espelhos, medicao_planilhas, medicoes, permissoes, tempo
+from app import arquivos, db, espelhos, medicao_planilhas, medicoes, permissoes, siga, tempo
 from app.api_auth import conexao
 from app.dinheiro import parse_brl
 from app.permissoes import exigir
@@ -61,6 +61,8 @@ class ProtocoloIn(BaseModel):
     # -- e ai a justificativa e' obrigatoria e vai para a auditoria.
     apesar_das_pendencias: bool = False
     justificativa: str | None = Field(default=None, max_length=500)
+    # Issue #328: o link de acompanhamento do SIGA (ou so' o codigo); o servidor extrai o codigo e recusa o resto
+    link_siga: str | None = Field(default=None, max_length=500)
 
 
 class EstadoIn(BaseModel):
@@ -108,7 +110,8 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     _contrato_existe(conn, contrato_id)
     lista = medicoes.listar(conn, contrato_id)
     edicoes = medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
-    return [{**m, "edicoes_valor": edicoes[m["id"]]} for m in lista]
+    sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
+    return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"])} for m in lista]
 
 
 @router.post("/api/contratos/{contrato_id}/medicoes", status_code=201)
@@ -137,6 +140,7 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
         raise HTTPException(404, "Medição não encontrada")
     d["edicoes_valor"] = medicoes.edicoes_valor(conn, [medicao_id])[medicao_id]   # B-02 (10/10/2026): linha do tempo
     d["planilhas"] = medicao_planilhas.versoes(conn, medicao_id)   # issue #281: todas as versoes da planilha/carta
+    d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
     return d
 
 
@@ -164,9 +168,13 @@ def protocolo(medicao_id: ID, dados: ProtocoloIn,
     # O checklist e' conferido pelo repositorio, dentro da transacao do protocolo (gate
     # Sol da fase 3,5): a rota so' traduz a recusa em 422.
     try:
-        pid, ressalva = medicoes.registrar_protocolo(
-            conn, usuario["id"], medicao_id, dados.data.isoformat(), dados.numero_oficio,
-            dados.numero_processo, "manual", dados.apesar_das_pendencias, dados.justificativa, exige_nota=True)
+        codigo = siga.extrair_codigo(dados.link_siga)       # link invalido recusa antes de gravar qualquer coisa
+        with db.mutacao(conn):
+            pid, ressalva = medicoes.registrar_protocolo(
+                conn, usuario["id"], medicao_id, dados.data.isoformat(), dados.numero_oficio,
+                dados.numero_processo, "manual", dados.apesar_das_pendencias, dados.justificativa, exige_nota=True)
+            if codigo:
+                siga.registrar_link_medicao(conn, usuario["id"], medicao_id, codigo, dados.numero_processo)
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     return {"id": pid, "ressalva": ressalva}
@@ -198,6 +206,22 @@ def estado(medicao_id: ID, dados: EstadoIn,
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     return {"ok": True}
+
+
+class AssinaturaIn(BaseModel):
+    data: datetime.date
+    envelope: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/api/medicoes/{medicao_id}/assinatura", status_code=201)
+def registrar_assinatura(medicao_id: ID, dados: AssinaturaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                         conn: sqlite3.Connection = Depends(conexao)):
+    _medicao_existe(conn, medicao_id)
+    try:
+        aid = medicoes.registrar_assinatura(conn, usuario["id"], medicao_id, dados.data.isoformat(), dados.envelope)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    return {"id": aid}
 
 
 # --- bloco 7: medicao final (poe o contrato em encerramento) ------------------------------------------

@@ -83,33 +83,11 @@ export function quandoVence(dias: number): string {
   return dias > 0 ? `vence em ${fmtDias(dias)}` : dias === 0 ? "vence hoje" : `venceu há ${fmtDias(-dias)}`;
 }
 
-/** A classe da nota do prazo: a cor e' a do nivel do aviso (vermelho so' no critico); sem aviso, o cinza da nota. */
-export function classePrazo(nivel: Nivel | null): string {
-  return nivel === "critico" ? " prazo--critico" : nivel ? " prazo--atencao" : "";
-}
-
-/** O nivel que a nota do prazo mostra: o do aviso da obra; sem aviso, o prazo que ja' venceu (dias < 0) vale Critico
+/** O nivel do selo do prazo: o do aviso da obra; sem aviso, o prazo que ja' venceu (dias < 0) vale Critico
  *  so' quando `podeCritico` (obra ativa fora do encerramento, e fora da vigencia automatica). Nos outros casos o
  *  backend nao avisa de proposito (prazos.py) e a tela nao inventa o nivel (N08-01). */
 export function nivelDoPrazo(nivel: Nivel | null, dias: number | null | undefined, podeCritico = true): Nivel | null {
   return nivel === null && podeCritico && dias !== null && dias !== undefined && dias < 0 ? "critico" : nivel;
-}
-
-/** A contagem do cabecalho: o titulo (o numero) e o detalhe do recorte, em palavras. */
-export function contagemObras(n: number, total: number, f: { todas: boolean; termina: number | null; orgao: string | null; q: string }):
-    { titulo: string; detalhe: string } {
-  const obras = (k: number) => (k === 1 ? "1 obra" : `${k} obras`);
-  const recorte = !!(f.orgao || f.q);
-  const titulo = total === 0 ? "Nenhuma obra"
-    : f.termina ? obras(n)
-    : f.todas && !recorte ? (total === 1 ? "1 obra" : `Todas as ${total} obras`)
-    : `${n} de ${obras(total)}`;
-  const detalhe = [
-    f.termina ? `que ${n === 1 ? "termina" : "terminam"} em ${f.termina === 90 ? "90 dias" : "6 meses"} (a execução ou a vigência; as vencidas primeiro)`
-      : !f.todas && total > 0 ? "(sem as encerradas)" : "",
-    f.orgao ? `· ${f.orgao}` : "", f.q ? `· busca “${f.q}”` : "",
-  ].filter(Boolean).join(" ");
-  return { titulo, detalhe };
 }
 
 /** Texto do "Avisos" para o leitor de tela: a contagem, a obra e quantos sao criticos. */
@@ -209,7 +187,7 @@ export function cDaUrlAntiga(busca: Record<string, string>): string | null {
   return ["termina", "q", "situacao", "ver", "avisos"].some(k => busca[k] !== undefined) ? "todas" : null;
 }
 
-/** O aviso mais grave da obra, para a linha do cartao (o resto vira "mais N"). */
+/** O aviso mais grave da obra, para a linha do cartao. */
 export function avisoPrincipal(avisos: Aviso[]): Aviso | null {
   let melhor: Aviso | null = null;
   for (const a of avisos) {

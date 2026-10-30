@@ -19,7 +19,7 @@ const usuario = { id: 1, nome: "U", email: "u@lotufo.com", perfil: "engenharia" 
 
 const nomes = () => screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent).filter(t => !/Anexar/.test(t ?? ""));
 
-test("um cartão por empresa, com a pendência primeiro, a situação geral e a próxima a vencer", async () => {
+test("um cartão por empresa, com a pendência primeiro, a situação geral e a garantia que vence", async () => {
   render(<Documentos usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   // o servidor mandou a empresa em dia primeiro; a que tem pendência sobe
@@ -27,24 +27,25 @@ test("um cartão por empresa, com a pendência primeiro, a situação geral e a 
   const lotufo = screen.getByRole("link", { name: "Lotufo" }).closest("article")!;
   const c = within(lotufo);
   c.getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias");
-  c.getByText(/Próxima a vencer:/);
-  expect(lotufo.textContent).toContain("FGTS em 27/09/2026");
   c.getByText("31.200.101/0001-30");
-  c.getByText(/Regularidade do mês \(DP\): atrasada · esperada 07\/2026/);
-  c.getByText("Exigida em 2 obras: Obra Alfa, Obra Beta");
-  // garantia que pede algo da empresa entram no cartao
-  c.getByText("Garantia de Obra Alfa: vence em 12 dias");
+  // texto na tela (26/10/2026): sem "proxima a vencer", papel, linha da regularidade (a pilula ja' diz) nem as obras
+  expect(c.queryByText(/Próxima a vencer/)).toBeNull();
+  expect(c.queryByText(/Regularidade do mês \(DP\)/)).toBeNull();
+  expect(c.queryByText(/Exigida em/)).toBeNull();
+  expect(c.queryByText("Empresa")).toBeNull();
+  expect(lotufo.querySelector("li[title]")).toBeNull();
+  // garantia que pede algo da empresa entra no cartao, como selo
+  expect(c.getByText("Garantia de Obra Alfa: vence em 12 dias").closest(".selo")).not.toBeNull();
   expect(lotufo.textContent).not.toContain("ART");
   // um ponto por certidao, cada um com a situacao para o leitor de tela
   expect(within(c.getByRole("list", { name: "Certidões" })).getAllByRole("listitem")).toHaveLength(4);
   c.getByText(": vencida");
   // o cartao leva a pagina da empresa, que tem endereco proprio
   expect(screen.getByRole("link", { name: "Lotufo" }).getAttribute("href")).toBe("/documentos/1");
-  // o consorcio diz quem o compoe
-  within(screen.getByRole("link", { name: "Consórcio Alfa" }).closest("article")!).getByText("Consorciadas: Lotufo, Beta Ltda");
+  expect(within(screen.getByRole("link", { name: "Consórcio Alfa" }).closest("article")!).queryByText(/Consorciadas:/)).toBeNull();
 });
 
-test("'Só as com pendência' filtra pela URL e diz o recorte", async () => {
+test("'Só as com pendência' filtra pela URL, sem frase de recorte", async () => {
   const { unmount } = render(<Documentos usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   fireEvent.click(screen.getByRole("checkbox", { name: "Só as com pendência" }));
@@ -54,7 +55,8 @@ test("'Só as com pendência' filtra pela URL e diz o recorte", async () => {
   await screen.findByRole("link", { name: "Lotufo" });
   expect(screen.queryByRole("link", { name: "Beta Ltda" })).toBeNull();
   screen.getByRole("link", { name: "Consórcio Sem Certidão" });
-  screen.getByText(/Mostrando as 2 com pendência, de 4 empresas/);
+  expect(screen.queryByText(/Mostrando as 2 com pendência/)).toBeNull();
+  expect(screen.queryByText(/Clique no cartão/)).toBeNull();
   expect((screen.getByRole("checkbox", { name: "Só as com pendência" }) as HTMLInputElement).checked).toBe(true);
 });
 
@@ -112,6 +114,7 @@ test("o ZIP abre uma janela com a data e uma caixa por empresa, e diz o que a em
   await screen.findByRole("link", { name: "Lotufo" });
   fireEvent.click(screen.getByRole("button", { name: /ZIP das certidões vigentes/ }));
   expect((screen.getByLabelText("Certidões vigentes em") as HTMLInputElement).value).toBe("2026-09-23");
+  expect(screen.queryByText(/Para licitação ou protocolo/)).toBeNull();
   fireEvent.click(screen.getByRole("checkbox", { name: "Beta Ltda" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Consórcio Alfa" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Consórcio Sem Certidão" }));
@@ -139,5 +142,4 @@ test("a garantia vencida de uma obra conta como pendência do cartão e a empres
   const c = (await screen.findByRole("link", { name: "Consórcio Sem Certidão" })).closest("article")!;
   within(c).getByText("Garantia de Obra Delta: vencida");
   within(c).getByText("Garantia vencida");
-  within(c).getByText("Nenhuma certidão vigente");
 });

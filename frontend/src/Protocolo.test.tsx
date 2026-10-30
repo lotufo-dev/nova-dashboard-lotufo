@@ -166,14 +166,31 @@ describe("Protocolo", () => {
   });
 
   // gate Sol S1 (10/10/2026): o numero e' obrigatorio na primeira vez; depois da' para anexar so' o comprovante
-  it("no protocolo enviado, o nº do órgão não é mais rotulado como opcional e explica quando é exigido", async () => {
+  it("no protocolo enviado, o nº do órgão não é rotulado como opcional nem leva frase de ajuda", async () => {
     render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [{ ...PROT, situacao: "enviado", envio_id: 3 }] }}
       carregar={async () => {}} podeEditar aoMudar={() => {}} />);
     const campo = await screen.findByLabelText("Nº do protocolo no órgão");
     expect(screen.queryByText(/opcional/)).toBeNull();
-    const ajuda = document.getElementById(campo.getAttribute("aria-describedby") ?? "");
-    // issue #2: a tela agora tem o campo do comprovante, e a ajuda diz que ele é opcional
-    expect(ajuda?.textContent).toBe("Obrigatório; informe o número dado pelo órgão. Anexe o comprovante em PDF, se tiver.");
+    // texto na tela (26/10/2026): a recusa do servidor explica quando o número falta
+    expect(campo.getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByText(/Obrigatório; informe o número/)).toBeNull();
+  });
+
+  it("prévia: o tamanho dos anexos só aparece quando passa do limite", async () => {
+    const base = { para: ["a@x"], copia: [], assunto: "A", corpo: "C", anexos: [{ nome: "a.pdf", tamanho: 10 }], pendencias: [] };
+    const abrir = async (total: number) => {
+      api.mockResolvedValueOnce({ ...base, total, limite: 100 });
+      render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [{ ...PROT, situacao: "assinado" }] }}
+        carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+      fireEvent.click(await screen.findByRole("checkbox", { name: /Incluir neste e-mail/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Prévia do e-mail/ }));
+      await screen.findByRole("button", { name: "Enviar" });
+    };
+    await abrir(10);
+    expect(screen.queryByText(/Anexos passam do limite|permitidos|O e-mail sai da sua conta/)).toBeNull();
+    cleanup();
+    await abrir(200);
+    expect(screen.getByText(/Anexos passam do limite/).className).toBe("notas__diverge");
   });
 
   // issue #2 (backlog 10/10/2026): o comprovante do órgão sobe pela tela, junto do nº
@@ -255,6 +272,105 @@ describe("Protocolo", () => {
       fireEvent.change(await screen.findByLabelText("Anexar o comprovante do órgão (PDF)"), { target: { files: [pdf()] } });
       fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
       expect(await screen.findByText("Arquivo acima do limite de 10 MB")).toBeTruthy();
+    });
+  });
+
+  // issue #328: o link do SIGA na etapa 4 e a linha "No SIGA"
+  describe("link do SIGA", () => {
+    const LINK = "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234";
+    const SIGA = { codigo: "AbCdEf1234", link: LINK, setor: null as string | null, com_quem: null as string | null,
+      dias_uteis: null as number | null, lido_em: null as string | null, registrado_em: "2026-10-20 12:00:00" };
+    const ENVIADO = { ...PROT, situacao: "enviado", envio_id: 3, numero_orgao: "X-1" };
+    const tela = (p: Record<string, unknown>, podeEditar = true) => {
+      const carregar = vi.fn(async () => {});
+      render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [p as typeof PROT] }}
+        carregar={carregar} podeEditar={podeEditar} aoMudar={() => {}} />);
+      return carregar;
+    };
+
+    it("abaixo do nº do órgão, o campo “Link do SIGA” manda o link e, gravado, mostra “Abrir no SIGA”", async () => {
+      apiForm.mockResolvedValueOnce({ ...ENVIADO, siga: SIGA });
+      const { rerender } = render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [ENVIADO] }}
+        carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+      expect(screen.queryByRole("link", { name: "Abrir no SIGA" })).toBeNull();
+      fireEvent.change(await screen.findByLabelText("Link do SIGA"), { target: { value: ` ${LINK} ` } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalled());
+      const [caminho, fd] = apiForm.mock.calls[0] as [string, FormData];
+      expect(caminho).toBe("/api/protocolos/9/numero-orgao");
+      expect(fd.get("link_siga")).toBe(LINK);
+      rerender(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [{ ...ENVIADO, siga: SIGA }] }}
+        carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+      const abrir = await screen.findByRole("link", { name: "Abrir no SIGA" });
+      expect(abrir.getAttribute("href")).toBe(LINK);
+      expect(abrir.getAttribute("rel")).toContain("noopener");
+      expect(screen.queryByText(/^No SIGA:/)).toBeNull();        // sem leitura do robô, só o link
+    });
+
+    it("sem link digitado, não manda o campo (vazio não apaga o gravado)", async () => {
+      apiForm.mockResolvedValueOnce(ENVIADO);
+      tela(ENVIADO);
+      fireEvent.click(await screen.findByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalled());
+      expect((apiForm.mock.calls[0][1] as FormData).has("link_siga")).toBe(false);
+    });
+
+    it("com o link já gravado, salvar sem mexer nele não manda link_siga; mudar o link manda o novo", async () => {
+      apiForm.mockResolvedValue({ ...ENVIADO, siga: SIGA });
+      tela({ ...ENVIADO, siga: SIGA });
+      const campo = await screen.findByLabelText("Link do SIGA") as HTMLInputElement;
+      expect(campo.value).toBe(LINK);
+      fireEvent.change(screen.getByLabelText("Nº do protocolo no órgão"), { target: { value: "X-2" } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+      expect((apiForm.mock.calls[0][1] as FormData).has("link_siga")).toBe(false);
+      fireEvent.change(campo, { target: { value: "ZzYyXx9988" } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(2));
+      expect((apiForm.mock.calls[1][1] as FormData).get("link_siga")).toBe("ZzYyXx9988");
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));          // de novo, já gravado: não repete
+      await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(3));
+      expect((apiForm.mock.calls[2][1] as FormData).has("link_siga")).toBe(false);
+    });
+
+    it("mostra a recusa do servidor para um link de outro site", async () => {
+      const e = new ApiErro(422, "");
+      e.message = "Link do SIGA inválido: cole o link que o órgão mandou";
+      apiForm.mockRejectedValueOnce(e);
+      tela(ENVIADO);
+      fireEvent.change(await screen.findByLabelText("Link do SIGA"), { target: { value: "https://outro.exemplo.com.br/?n=AbCdEf1234" } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      expect(await screen.findByText("Link do SIGA inválido: cole o link que o órgão mandou")).toBeTruthy();
+    });
+
+    it.each([
+      [2, null], [6, "Atenção"], [11, "Crítico"],
+    ])("com a leitura do robô há %i dias úteis: a linha “No SIGA” e o selo %s", async (dias, selo) => {
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", com_quem: "Fulano", dias_uteis: dias, lido_em: "2026-10-28T15:00:00+00:00" } });
+      expect(await screen.findByText(`No SIGA: COFIN · com Fulano · há ${dias} dias úteis`)).toBeTruthy();
+      const linha = screen.getByText(/^No SIGA:/).parentElement!;
+      expect(within(linha).queryByText("Atenção") !== null).toBe(selo === "Atenção");
+      expect(within(linha).queryByText("Crítico") !== null).toBe(selo === "Crítico");
+      expect(within(linha).getByRole("link", { name: "Abrir no SIGA" })).toBeTruthy();
+    });
+
+    it("na caixa de entrada não há “com quem”, e um dia útil fica no singular", async () => {
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "GABIN", dias_uteis: 1, lido_em: "2026-10-28T15:00:00+00:00" } });
+      expect(await screen.findByText("No SIGA: GABIN · há 1 dia útil")).toBeTruthy();
+    });
+
+    it("quem só consulta não vê o campo, mas vê a linha “No SIGA” e o link", async () => {
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", com_quem: "Fulano", dias_uteis: 6, lido_em: "2026-10-28T15:00:00+00:00" } }, false);
+      expect(await screen.findByText("No SIGA: COFIN · com Fulano · há 6 dias úteis")).toBeTruthy();
+      expect(screen.getByRole("link", { name: "Abrir no SIGA" })).toBeTruthy();
+      expect(screen.queryByLabelText("Link do SIGA")).toBeNull();
+    });
+
+    it("sem link gravado, não mostra nada do SIGA", async () => {
+      tela(ENVIADO);
+      await screen.findByLabelText("Link do SIGA");
+      expect(screen.queryByRole("link", { name: "Abrir no SIGA" })).toBeNull();
+      expect(screen.queryByText(/^No SIGA:/)).toBeNull();
     });
   });
 

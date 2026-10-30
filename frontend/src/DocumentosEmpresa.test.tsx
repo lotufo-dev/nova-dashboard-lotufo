@@ -19,7 +19,7 @@ const diretoria = { ...usuario, perfil: "diretoria" };
 
 const linhaDa = (nome: RegExp) => screen.getAllByRole("row").find(r => nome.test(r.querySelector("td")?.textContent ?? ""))!;
 
-test("cabeçalho com caminho, nome, CNPJ, situação e as obras que exigem a empresa", async () => {
+test("cabeçalho com caminho, nome, CNPJ e situação, sem a linha de papel e obras", async () => {
   render(<DocumentosEmpresa usuario={usuario} id={1} />);
   await screen.findByRole("heading", { level: 1, name: "Lotufo" });
   const caminho = screen.getByRole("navigation", { name: "Você está em" });
@@ -27,9 +27,9 @@ test("cabeçalho com caminho, nome, CNPJ, situação e as obras que exigem a emp
   expect(within(caminho).getByText("Lotufo").getAttribute("title")).toBe("Lotufo");
   screen.getByText("31.200.101/0001-30");
   screen.getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias");
-  expect(screen.getByRole("link", { name: "Obra Alfa" }).getAttribute("href")).toBe("/obras/5/documentos");
-  screen.getByText(/também consorciada em/);
-  expect(screen.getByRole("link", { name: "Consórcio Alfa" }).getAttribute("href")).toBe("/documentos/2");
+  expect(screen.queryByText(/também consorciada em|exigida em/)).toBeNull();
+  expect(screen.getByLabelText("ZIP: certidões vigentes em").getAttribute("title")).toBeNull();
+  expect(screen.queryByText(/Pendência: vencida, falta/)).toBeNull();
   expect(screen.getByRole("link", { name: /Baixar o ZIP das certidões vigentes de Lotufo/ }).getAttribute("href"))
     .toBe("/api/documentos/zip?entidade_id=1&data=2026-09-23");
 });
@@ -149,12 +149,10 @@ test("o nome do arquivo do DP preenche a competência", async () => {
   expect((screen.getByLabelText("Competência") as HTMLInputElement).value).toBe("05/2026");
 });
 
-test("o consórcio não entrega regularidade: manda para as consorciadas", async () => {
+test("o consórcio não entrega regularidade: uma linha curta, sem explicar quem entrega", async () => {
   render(<DocumentosEmpresa usuario={usuario} id={2} aba="regularidade" />);
-  await screen.findByText("O consórcio não entrega regularidade mensal");
-  const painel = within(document.querySelector<HTMLElement>(".doc-painel")!);
-  expect(painel.getByRole("link", { name: "Lotufo" }).getAttribute("href")).toBe("/documentos/1/regularidade");
-  expect(painel.getByRole("link", { name: "Beta Ltda" }).getAttribute("href")).toBe("/documentos/3/regularidade");
+  await screen.findByText("Regularidade mensal não exigida.");
+  expect(screen.queryByText(/Quem entrega o PDF do DP/)).toBeNull();
 });
 
 test("garantia só das obras contratadas pela empresa, com a situação de cada uma (issue #65)", async () => {
@@ -170,17 +168,18 @@ test("garantia só das obras contratadas pela empresa, com a situação de cada 
   expect(screen.queryByRole("rowheader", { name: "Obra Gama" })).toBeNull();      // e' do consorcio
 });
 
-test("empresa sem obra própria aponta o consórcio, onde fica a garantia", async () => {
+test("empresa sem obra própria leva à garantia do consórcio por um link", async () => {
   render(<DocumentosEmpresa usuario={usuario} id={3} aba="garantia" />);
-  await screen.findByText("Nenhuma obra contratada direto por esta empresa");
-  expect(within(document.querySelector<HTMLElement>(".doc-painel")!).getByRole("link", { name: "Consórcio Alfa" })
+  await screen.findByText("Nenhuma obra.");
+  expect(within(document.querySelector<HTMLElement>(".doc-painel")!).getByRole("link", { name: "Abrir a garantia de Consórcio Alfa" })
     .getAttribute("href")).toBe("/documentos/2/garantia");
+  expect(screen.queryByText(/fica no consórcio/)).toBeNull();
 });
 
-test("consórcio: as consorciadas com a situação de cada uma; a página diz quem compõe o consórcio", async () => {
+test("consórcio: as consorciadas com a situação de cada uma", async () => {
   render(<DocumentosEmpresa usuario={usuario} id={2} />);
   await screen.findByRole("heading", { level: 1, name: "Consórcio Alfa" });
-  screen.getByText(/Consórcio · consorciadas:/);
+  expect(screen.queryByText(/cobra as certidões dele/)).toBeNull();
   const lista = screen.getByRole("heading", { name: "Consorciadas" }).parentElement!;
   expect(within(lista).getByRole("link", { name: "Lotufo" }).getAttribute("href")).toBe("/documentos/1");
   within(lista).getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias");
@@ -189,7 +188,7 @@ test("consórcio: as consorciadas com a situação de cada uma; a página diz qu
 
 test("empresa que não existe no painel diz isso e volta para a lista", async () => {
   render(<DocumentosEmpresa usuario={usuario} id={99} />);
-  await screen.findByText("Essa empresa não tem documento exigido.");
+  await screen.findByText("Nenhum documento exigido.");
   expect(screen.getByRole("link", { name: "Ver todas as empresas" }).getAttribute("href")).toBe("/documentos");
 });
 

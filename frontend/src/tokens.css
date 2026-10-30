@@ -327,7 +327,6 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
 .trilho__simbolo { width: 15px; height: auto; color: #fff; }
 .trilho__nome { display: flex; flex-direction: column; }
 .trilho__nome-1 { font-size: 15px; line-height: 18px; font-weight: 600; }
-.trilho__nome-2 { font-size: 11px; line-height: 14px; color: var(--acento-linha); }
 /* a linha inteira tem os 265px: e' ela que veste o ativo e o hover. Fechado, o corte entrega o quadrado de 64px. */
 .trilho__item {
   display: flex; align-items: center; flex: none;
@@ -389,7 +388,6 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
   box-shadow: var(--sombra-sobreposicao);
 }
 .conta__menu[hidden] { display: none; }
-.conta__perfil { margin: 0; padding: 6px 10px; font-size: 12px; line-height: 16px; color: var(--texto-2); }
 .conta__item {
   display: flex; align-items: center; width: 100%; height: 36px; padding: 0 10px;
   border: 0; border-radius: 6px; background: none;
@@ -487,7 +485,6 @@ a.topbar__avisos:hover { color: var(--acento-forte); }
   display: flex; flex-direction: column; gap: 24px;
 }
 /* A descricao da tela de lista, no alto do conteudo: era a linha cinza embaixo do h1, que subiu para a barra. */
-.pagina__descricao { margin: 0 0 -8px; color: var(--texto-2); font-size: 14px; line-height: 20px; max-width: 110ch; }
 
 /* ------------------------------------------------------------------- cartao */
 
@@ -836,7 +833,7 @@ a.topbar__avisos:hover { color: var(--acento-forte); }
    que sozinho nao cabe). */
 .form-inline > .campo { min-width: 0; }
 .campo__rotulo { font-size: 12px; font-weight: 500; color: var(--texto-2); }
-/* Medida de corpo: 78ch e' o mesmo teto da `.saldo__nota` e do `.aviso`. Sem ele a
+/* Medida de corpo: 78ch e' o mesmo teto do `.aviso`. Sem ele a
    nota de 12px do formulario de certidao corria ~170ch numa tela larga. */
 .campo__nota { font-size: 12px; color: var(--texto-2); max-width: 78ch; }
 .campo__erro { margin: 0; font-size: 12px; color: var(--acao); }
@@ -986,6 +983,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--foco)
 .legenda__chave--previsto { background: var(--previsto); box-shadow: inset 0 0 0 1px var(--linha-hover); }
 .legenda__chave--execucao { background: var(--acento); }
 .legenda__chave--outras   { background: var(--acento-mais); }
+.legenda__chave--anterior { background: repeating-linear-gradient(90deg, var(--texto-2) 0 4px, transparent 4px 7px); }
 .legenda__chave--provisorio {
   background:
     repeating-linear-gradient(45deg, var(--atencao-linha) 0 2px, transparent 2px 6px),
@@ -1007,7 +1005,6 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--foco)
 .saldo__parcela--total .saldo__valor { font-size: 22px; letter-spacing: -.02em; line-height: 1.2; }
 .saldo__op { color: var(--texto-2); font-size: 15px; padding-bottom: 2px; }
 .saldo--negativo .saldo__parcela--total .saldo__valor { color: var(--acao); }
-.saldo__nota { flex-basis: 100%; max-width: 78ch; margin: 2px 0 0; font-size: 12px; color: var(--texto-2); }
 
 /* ----------------------------------------------------------------- totais */
 
@@ -1341,7 +1338,6 @@ a.alerta:hover { background: var(--hover); color: var(--texto); }
 .notas__diverge { color: var(--acao); font-size: 12px; }
 /* G3-11: na tabela das esperadas, so' a celula do campo que diverge; sublinhado alem da cor (nao so' cor) */
 .notas__celula--diverge { color: var(--acao); font-weight: 600; text-decoration: underline wavy; text-underline-offset: 3px; }
-.notas__arredonda { color: var(--texto-2); font-size: 12px; }
 .notas__feito { color: var(--texto-2); }
 
 /* Documentos de protocolo (bloco 4): fila de conferencia das certidoes arrastadas e um cartao
@@ -1549,7 +1545,6 @@ a.alerta:hover { background: var(--hover); color: var(--texto); }
 .tabela--grade col.c-nivel { width: 112px; }
 .tabela--grade col.c-quando { width: 150px; }
 .tabela--grade col.c-valor-aviso { width: 136px; }
-.tabela--grade col.c-onde { width: 200px; }
 .tabela--grade col.c-situacao { width: 220px; }
 .tabela--grade col.c-data { width: 132px; }
 .tabela--grade col.c-acao { width: 120px; }
@@ -1567,7 +1562,6 @@ a.alerta:hover { background: var(--hover); color: var(--texto); }
 /* A receber (N3-04): o orgao e' quem identifica a linha; fica com ao menos 16rem e quebra em ate' 2 linhas */
 .tabela th.col-orgao { min-width: 12rem; }
 /* Avisos por obra (F-55): a contagem ao lado do nome, no peso normal e na cor de apoio */
-.tabela tbody tr.grupo > th .grupo__conta { margin-left: 12px; font-weight: 400; font-size: 12.5px; color: var(--texto-2); }
 
 /* A receber (F-60): o total e' o numero principal da tela, em Display 22/600 na cabeca do cartao "Por orgao", com o
    rotulo embaixo e uma linha de apoio (quanto passa de 60 dias, quantas medicoes e notas). */
@@ -1611,7 +1605,6 @@ a.alerta:hover { background: var(--hover); color: var(--texto); }
 /* Avisos (N4-05): o fato do aviso na cor principal, para ficar acima do apoio (destino e quando); a obra segue em .forte */
 .tabela tbody td.aviso__fato { color: var(--texto); }
 /* resumo recolhido da Atencao: so' "Atencao (N)" fica no acento de link; o mais atrasado e' apoio (N4-05) */
-.detalhes__resto { color: var(--texto-2); }
 
 /* Fila de Medicoes (F-57): o filtro Proximo passo e' uma linha de links com contagem, sob o rotulo; pede largura
    para os 5 links ficarem na mesma linha e so' quebra quando nao cabem */
@@ -1679,15 +1672,8 @@ a.contagem:hover .dado__valor { color: var(--acento-forte); text-decoration: und
 /* Icone do "diverge do espelho" (Critico): forma alem da cor, alinhado ao texto de 12px */
 .notas__diverge .icone { vertical-align: -3px; margin-right: 4px; }
 
-/* Obras (F-58, D16): o prazo na cor do nivel do aviso da obra; sem aviso, fica o cinza da nota. Vermelho so' no critico. */
-.campo__nota.prazo--critico { color: var(--acao); }
-.campo__nota.prazo--atencao { color: var(--atencao); }
-/* obra paralisada (D16): a nota quebra depois de "desde" e a data vai inteira embaixo, para nao alargar a coluna */
-.campo__nota.prazo--paralisada { white-space: normal; max-width: 18ch; }
 
-/* Carteira: linha de comparacao dentro do KPI (D8, F-64) e tabela de poucas colunas com largura pelo conteudo (F-83) */
-.kpi__comparacao { font-size: 12.5px; color: var(--texto-2); }
-.kpi__rotulo + .kpi__comparacao { margin-top: 4px; }
+/* Carteira: tabela de poucas colunas com largura pelo conteudo (F-83) */
 .tabela--estreita { max-width: 760px; }
 /* F-83: o SVG do grafico e' medido por este bloco (a largura do cartao, sem o respiro) */
 .grafico__medida { width: 100%; }
@@ -1725,7 +1711,7 @@ a.contagem:hover .dado__valor { color: var(--acento-forte); text-decoration: und
 .checklist-pecas thead th:nth-child(2), .checklist-pecas tbody td:nth-child(2) { width: 112px; }
 .checklist-pecas thead th.checklist-pecas__acao, .checklist-pecas tbody td.checklist-pecas__acao { width: 176px; text-align: right; }
 .checklist-pecas__nome { display: block; font-size: 13px; font-weight: 600; color: var(--texto); }
-.checklist-pecas__nota, .checklist-pecas__arquivo { display: block; font-size: 12px; color: var(--texto-2); }
+.checklist-pecas__arquivo { display: block; font-size: 12px; color: var(--texto-2); }
 .checklist-pecas__arquivo { overflow-wrap: anywhere; }
 .checklist-pecas__botoes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 
@@ -1737,7 +1723,6 @@ a.contagem:hover .dado__valor { color: var(--acento-forte); text-decoration: und
 .carta-rec > summary .seta { flex: none; transition: transform .15s ease; }
 .carta-rec[open] > summary { margin-bottom: 8px; }
 .carta-rec[open] > summary .seta { transform: rotate(90deg); }
-.carta-rec__dica { font-size: 12px; color: var(--texto-2); }
 
 /* Botao com a razao ao lado (F-68: Previa do e-mail desabilitada ate marcar um protocolo). */
 .acao-nota { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
@@ -1786,7 +1771,6 @@ a.contagem:hover .dado__valor { color: var(--acento-forte); text-decoration: und
    quebrar: presa a' data, ela fazia a lista de Obras rolar 21px a 1366. */
 .tabela.obras-lista td.num .campo__nota { white-space: normal; }
 /* N07-02: a nota do prazo ("vence em 9 dias") volta a nao quebrar; so' "o orgao prorroga junto" e "Paralisada desde" quebram */
-.tabela.obras-lista td.num .campo__nota.prazo--data { white-space: nowrap; }
 
 /* Resumo da obra (N04-12): a curva falhou; a palavra "indisponivel" no lugar do valor, sem o peso nem o tamanho do Display */
 .dado__valor.dado__valor--indisponivel { font-size: 15px; font-weight: 400; letter-spacing: 0; color: var(--texto-2); }
@@ -1809,19 +1793,11 @@ a.contagem:hover .dado__valor { color: var(--acento-forte); text-decoration: und
 /* F-93: o icone de seta do "onde se resolve" na lateral, no lugar do glifo */
 .alertas--lateral .campo__nota .icone { vertical-align: -3px; margin-right: 4px; }
 
-/* Avisos: a largura do "Onde se resolve" cresce em tela larga (N05-04). Com ~350px livres na coluna Aviso a 1920 o destino
-   quebrava em 2 ou 3 linhas; a 1366 continua 200px (N3-03). Esta regra vem depois da base de 200px, no fim do arquivo. */
-@media (min-width: 1600px) {
-  .tabela--grade col.c-onde { width: 300px; }
-}
 
-/* F-79: o selo do nivel dentro do resumo da Atencao ("o mais urgente: [Atencao] texto") fica na linha do texto */
-.detalhes__resto .selo { margin: 0 4px; vertical-align: middle; }
 
 /* F-96: a linha do cartao "Avisos desta obra" e' um link inteiro; o destino em texto de apoio e o chevron no fim dizem isso.
    O chevron e' absoluto para nao virar coluna da grade do .alerta (que muda no celular); o respiro da direita e' dele. */
 .alerta--seta { position: relative; padding-right: 48px; }
-.alerta__onde { display: block; margin-top: 4px; font-size: 12.5px; color: var(--texto-2); }
 .alerta__seta { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); flex: none; color: var(--texto-2); }
 a.alerta:hover .alerta__seta { color: var(--texto); }
 
@@ -1841,8 +1817,6 @@ a.alerta:hover .alerta__seta { color: var(--texto); }
 
 /* N07-02 / F-58: o nivel do prazo em Obras vai em forma alem da cor. Triangulo (Critico) e ponto (Atencao) antes da
    nota "vence em N dias"; o ponto e' o mesmo do selo (7px, currentColor), alinhado ao texto de 12px. */
-.prazo__ponto { display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 1px; border-radius: var(--raio-pilula); background: currentColor; }
-.prazo--data .icone { vertical-align: -3px; margin-right: 4px; }
 /* N07-02: abaixo de 1600px o selo de Status da lista de Obras pode quebrar ("Em / encerramento") se a tabela apertar;
    a folga que a nota do prazo (sem quebra) tomou sai dessa coluna, que so' encolhe quando falta espaco. */
 @media (max-width: 1599px) {
@@ -1873,13 +1847,14 @@ td.col-num .campo__nota { font-family: var(--fonte); }
 .cart-numeros { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
 .cart-numero { position: relative; padding: 18px 20px 16px 28px; display: grid; gap: 4px; }
 .cart-numero::before { content: ""; position: absolute; left: 14px; top: 18px; bottom: 18px; width: 4px; border-radius: var(--raio-pilula); background: var(--marca); }
-.cart-numero__rotulo { font-size: 13px; font-weight: 500; color: var(--texto-2); }
+.cart-numero__rotulo { font-size: 14px; font-weight: 500; color: var(--texto-2); }
 .cart-numero__valor { font-size: 32px; line-height: 40px; font-weight: 500; letter-spacing: -.02em; color: var(--texto); white-space: nowrap; }
-.cart-numero__apoio { font-size: 12.5px; color: var(--texto-2); }
 .cart-curva { padding: 8px 20px 4px; }
 .cart-curva svg { display: block; width: 100%; }
 .cart-c-prev { fill: none; stroke: var(--linha-hover); stroke-width: 2; }
 .cart-c-med { fill: none; stroke: var(--acento); stroke-width: 2.5; }
+/* #296: o previsto anterior a ultima repactuacao, tracejado como o da curva S da obra (.c-previsto-anterior) */
+.cart-c-ant { fill: none; stroke: var(--texto-2); stroke-width: 2; stroke-dasharray: 6 4; }
 .cart-c-area { fill: var(--acento-fundo); }
 .cart-c-ponto-prev { fill: var(--superficie); stroke: var(--linha-hover); stroke-width: 2; }
 .cart-c-ponto-med { fill: var(--acento); stroke: var(--superficie); stroke-width: 1.5; }
@@ -1891,7 +1866,7 @@ td.col-num .campo__nota { font-family: var(--fonte); }
 .cart-contratante { display: grid; gap: 6px; padding: 16px 20px 18px; text-align: left; text-decoration: none; color: var(--texto); height: 100%; box-sizing: border-box; }
 .cart-contratante:hover { border-color: var(--acento-linha); }
 .cart-contratante__nome { margin: 0 0 6px; font-size: 15px; font-weight: 600; color: var(--texto); }
-.cart-contratante__rotulo, .cart-contratante__obras { font-size: 12.5px; color: var(--texto-2); }
+.cart-contratante__rotulo { font-size: 12.5px; color: var(--texto-2); }
 .cart-contratante__valor { font-size: 22px; line-height: 28px; font-weight: 500; color: var(--texto); }
 .cart-progresso { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; margin-top: 8px; }
 .cart-progresso__rotulo { grid-column: 1 / -1; font-size: 12.5px; color: var(--texto-2); }
@@ -1968,7 +1943,6 @@ a.indicador__rotulo { color: var(--acento); }
 .curva__quadro { position: relative; padding: 12px 16px 8px 8px; }
 .curva__quadro[hidden] { display: none; }
 .curva__svg { display: block; max-width: 100%; height: auto; overflow: visible; }
-.curva__rodape { margin: 0; padding: 0 20px 14px; font-size: 12px; color: var(--texto-2); }
 .c-grade { stroke: var(--linha-suave); }
 .c-base { stroke: var(--linha); }
 .c-eixo { fill: var(--texto-2); font-size: 11px; font-family: var(--fonte); }
@@ -2024,8 +1998,6 @@ a.indicador__rotulo { color: var(--acento); }
   border: 2px solid var(--superficie); border-radius: var(--raio-pilula); background: var(--marca); box-shadow: 0 0 0 1px var(--acento-linha);
 }
 .lt__datas { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--texto-2); }
-.lt__resto { margin: 6px 0 0; text-align: right; font-size: 13px; color: var(--texto); font-weight: 500; }
-.lt__resto.negativo { color: var(--acao); }
 .lt__nota { margin: 4px 0 0; font-size: 12px; color: var(--texto-2); text-align: right; }
 .lt__nota--esq { text-align: left; }
 

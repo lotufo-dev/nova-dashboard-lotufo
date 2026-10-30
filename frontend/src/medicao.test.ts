@@ -1,20 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { eventosDaMedicao, itensOQueFalta, larDoEspelho, metadeQueEspera, protocolosDa, resumoDoPar, resumoNotas,
+import { eventosDaMedicao, itensOQueFalta, larDoEspelho, metadeQueEspera, protocolosDa, resumoNotas,
          rotuloDoBloco, separarMedicoes, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type Metade, type ProtocoloResumo } from "./medicao";
 
-// issue #188: o titulo do quadro "Nota fiscal" diz o que falta por bloco
+// issue #188: medicao e reajuste na mesma pagina
 describe("medição e reajuste na mesma página", () => {
   const metade = (tipo: string, extra: Partial<Metade> = {}): Metade => ({ medicao_id: tipo === "execucao" ? 1 : 2, tipo,
     titulo: "", estado: "nota_emitida", faltam: 0, esperadas: [], completa: true, espera: null, liberacao: null, ...extra });
-
-  it("o que falta por bloco", () => {
-    expect(resumoDoPar([metade("execucao"), metade("reajuste", { completa: false, faltam: 2 })]))
-      .toBe("execução completa · reajuste: faltam 2 notas");
-    expect(resumoDoPar([metade("execucao", { completa: false, faltam: 1 }), metade("reajuste", { completa: false, faltam: 2 })]))
-      .toBe("execução: falta 1 nota · reajuste: faltam 2 notas");
-    expect(resumoDoPar([metade("execucao"), metade("reajuste")])).toBe("notas completas");
-  });
 
   it("rótulo do bloco e a metade que espera só onde o órgão junta", () => {
     expect(rotuloDoBloco({ numero: 14, tipo: "execucao" })).toBe("Execução · 14ª Medição");
@@ -56,7 +48,8 @@ describe("medição", () => {
     expect(emAndamento.map(x => `${x.numero}${x.tipo[0]}`)).toEqual(["24e", "23e", "23r"]);
     expect(anteriores.map(x => x.numero)).toEqual([22, 21]);
     expect(resumoNotas({ ...m23, notas: [...m23.notas!, { ...m23.notas![1], nota_id: 9, confirmacao: "confirmada" }] }))
-      .toBe("3 notas · 1 confirmada pelo RM · 1 diverge do espelho");
+      .toBe("NF 1843, 1844");
+    expect(resumoNotas({ ...m23, notas: [] })).toBe("—");
   });
 
   it("o espelho e o protocolo com várias medições têm um lar só", () => {

@@ -4,6 +4,7 @@ import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
 import { api } from "./api";
 import { IconeAlerta } from "./icones";
+import { Link } from "./Link";
 import { DA_PLANILHA, DO_ESPELHO, EXCECOES, type Metade } from "./medicao";
 import type { Medicao } from "./Medicoes";
 import Selo from "./Selo";
@@ -32,13 +33,6 @@ export function valorEditavel(m: Medicao, campo: "protocolado" | "atestado", pod
     && !(campo === "protocolado" && DA_PLANILHA.includes(m.estado))
     && !(campo === "protocolado" && m.valor_protocolado_origem === "espelho")
     && !(campo === "protocolado" && m.congelada === 1 && m.valor_protocolado_centavos !== null);
-}
-
-/** No lugar do botao "Editar o valor": de onde o valor vem e como muda-lo (A-16; gate Sol S7, 10/10/2026). */
-export function notaDoEspelho(m: Medicao): string | null {
-  if (m.valor_protocolado_origem !== "espelho") return null;
-  return m.congelada === 1 ? "vem do espelho · protocolada: corrija por reapresentação"
-    : "vem do espelho · para mudar, gere o espelho de novo";
 }
 
 // `erro`: a recusa do servidor aparece DENTRO do formulario, perto de onde se agiu (a pagina da medicao e'
@@ -92,7 +86,6 @@ function FormValorDoCampo({ m, campo, salvando, agir, aoFechar, erro }: PropsVal
         )}
         <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Salvando…" : "Salvar valor"}</button>
         <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>
-        {campo === "atestado" && <span className="campo__nota">O atestado permanece editável após o protocolo (glosa).</span>}
       </div>
     </form>
   );
@@ -111,7 +104,7 @@ type Checklist = {
 /** Registrar protocolo feito FORA do sistema (o "Protocolar" antigo da linha): data, oficio, processo e o
  *  checklist do ato, que trava com certidao pendente ate' o operador assumir e justificar. */
 export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, erro }: Base & { contratoId: number }) {
-  const [proto, setProto] = useState({ data: "", oficio: "", processo: "" });
+  const [proto, setProto] = useState({ data: "", oficio: "", processo: "", siga: "" });
   // `undefined` = ainda lendo; `null` = a leitura falhou (o servidor decide sozinho ao gravar).
   const [checklist, setChecklist] = useState<Checklist | null | undefined>(undefined);
   const [apesar, setApesar] = useState(false);
@@ -150,6 +143,7 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
       method: "POST",
       body: JSON.stringify({
         data: proto.data, numero_oficio: proto.oficio || null, numero_processo: proto.processo || null,
+        ...(proto.siga.trim() ? { link_siga: proto.siga.trim() } : {}),
         // So' quando o operador assumiu a pendencia: sem isso o servidor trava o protocolo com certidao
         // pendente (422) e a mensagem dele aparece aqui.
         ...(apesar ? { apesar_das_pendencias: true, justificativa } : {}),
@@ -173,14 +167,19 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
         <div className="campo">
           <label className="campo__rotulo" htmlFor="campo-oficio">Nº do ofício (opcional)</label>
           <input id="campo-oficio" name="numero_oficio" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100}
-            placeholder="Ex.: 1234/2026…" value={proto.oficio} onChange={ev => setProto({ ...proto, oficio: ev.target.value })} />
+            value={proto.oficio} onChange={ev => setProto({ ...proto, oficio: ev.target.value })} />
         </div>
         {/* O orgao devolve um numero de PROCESSO quando protocola, e e' por ele que se cobra andamento
             depois — o oficio e' o nosso lado da conversa. */}
         <div className="campo">
           <label className="campo__rotulo" htmlFor="campo-processo">Nº do processo no órgão (opcional)</label>
           <input id="campo-processo" name="numero_processo" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100}
-            placeholder="Ex.: 0001234-56.2026…" value={proto.processo} onChange={ev => setProto({ ...proto, processo: ev.target.value })} />
+            value={proto.processo} onChange={ev => setProto({ ...proto, processo: ev.target.value })} />
+        </div>
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor="campo-siga">Link do SIGA (opcional)</label>
+          <input id="campo-siga" name="link_siga" autoComplete="off" spellCheck={false} className="entrada--larga" maxLength={500}
+            placeholder="https://…?n=…" value={proto.siga} onChange={ev => setProto({ ...proto, siga: ev.target.value })} />
         </div>
       </div>
 
@@ -194,40 +193,32 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
           </CaixaAviso>
         )}
         {checklist && pendentes.length === 0 && (
-          <Selo classe="selo--ok" title={`Documentos de ${checklist.entidade ?? "da entidade"} em dia para protocolar`}>
-            Documentos de {checklist.entidade ?? "da entidade"} em dia para protocolar
-          </Selo>
+          <Selo classe="selo--ok">Documentos em dia</Selo>
         )}
         {checklist && pendentes.length > 0 && (
           <>
             <CaixaAviso nivel="critico" como="span">
                 {pendentes.length === 1 ? "1 documento sem validade hoje" : `${pendentes.length} documentos sem validade hoje`} —{" "}
-                {pendentes.map(i => new Set(pendentes.map(x => x.entidade_id)).size > 1 ? `${i.entidade}: ${i.tipo}` : i.tipo).join(", ")}.
-                Anexe em Documentos antes de protocolar, ou assuma a pendência abaixo.
+                {pendentes.map(i => new Set(pendentes.map(x => x.entidade_id)).size > 1 ? `${i.entidade}: ${i.tipo}` : i.tipo).join(", ")}.{" "}
+                <Link className="link" para={{ tela: "documentos" }}>Anexar em Documentos</Link>
             </CaixaAviso>
             <label className="marcar">
               <input id="campo-apesar" type="checkbox" name="apesar_das_pendencias" checked={apesar} {...ligacao("apesar", "campo-apesar")}
                 onChange={ev => setApesar(ev.target.checked)} />
-              Protocolar apesar das pendências (fica registrado na auditoria)
+              Protocolar apesar das pendências
             </label>
             <ErroCampo id="campo-apesar-erro" erro={erroDe("apesar")} />
             {apesar && (
               <div className="campo">
                 <label className="campo__rotulo" htmlFor="campo-justificativa">Justificativa</label>
                 <input id="campo-justificativa" name="justificativa" autoComplete="off" className="entrada--larga" required maxLength={500}
-                  placeholder="Ex.: órgão aceita a CND em até 5 dias…" value={justificativa} {...ligacao("justificativa", "campo-justificativa")}
+                  value={justificativa} {...ligacao("justificativa", "campo-justificativa")}
                   onChange={ev => setJustificativa(ev.target.value)} />
                 <ErroCampo id="campo-justificativa-erro" erro={erroDe("justificativa")} />
               </div>
             )}
           </>
         )}
-        {/* consequencia do ato, nao pendencia: nota neutra (ambar e' do que trava) */}
-        <span className="campo__nota">
-          {m.estado === "prevista"
-            ? "Protocolar move a medição para protocolada e congela o valor protocolado."
-            : "Protocolar congela o valor protocolado desta medição."}
-        </span>
       </div>
 
       <div className="form-inline painel__rodape">
@@ -275,17 +266,13 @@ export function FormRecebimento({ m, salvando, agir, aoFechar, erro }: Base) {
         <div className="campo">
           <label className="campo__rotulo" htmlFor="campo-motivo-recebimento">Motivo</label>
           <input id="campo-motivo-recebimento" name="motivo" autoComplete="off" className="entrada--larga" required maxLength={1000}
-            placeholder="Ex.: a baixa não entrou no RM; conferida no extrato…" value={motivo}
+            value={motivo}
             {...(erroMotivo ? { "aria-invalid": true as const, "aria-describedby": "campo-motivo-recebimento-erro" } : {})}
             onChange={ev => setMotivo(ev.target.value)} />
           <ErroCampo id="campo-motivo-recebimento-erro" erro={erroMotivo} />
         </div>
         <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Registrando…" : "Registrar recebimento"}</button>
         <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>
-        <span className="campo__nota">
-          Só quando o RM falhar: ele marca o recebimento sozinho quando a baixa entra. Estado final: a medição não volta
-          atrás. O motivo fica registrado na auditoria. Sem a data, a baixa fica “sem data”.
-        </span>
       </div>
     </form>
   );
@@ -310,7 +297,7 @@ export function FormEstado({ m, estado, salvando, agir, aoFechar, erro }: Base &
         <div className="campo">
           <label className="campo__rotulo" htmlFor="campo-motivo">Motivo (opcional)</label>
           <input id="campo-motivo" name="motivo" autoComplete="off" className="entrada--media" maxLength={1000} autoFocus
-            placeholder="Ex.: substituída pela 4ª…" value={motivo} onChange={ev => setMotivo(ev.target.value)} />
+            value={motivo} onChange={ev => setMotivo(ev.target.value)} />
         </div>
         {/* "Cancelar a medição", nunca so "Cancelar": ao lado de um botao de sair do formulario, "Cancelar"
             seria ambiguo. */}
@@ -318,7 +305,6 @@ export function FormEstado({ m, estado, salvando, agir, aoFechar, erro }: Base &
           {salvando ? "Aplicando…" : estado === "cancelada" ? "Cancelar a medição" : "Registrar desistência"}
         </button>
         <button type="button" className="btn" onClick={aoFechar}>Voltar</button>
-        <span className="campo__nota">Estado final: a medição não volta atrás.</span>
       </div>
     </form>
   );
@@ -326,8 +312,8 @@ export function FormEstado({ m, estado, salvando, agir, aoFechar, erro }: Base &
 
 /** Issue #188, saida de emergencia: onde o orgao junta medicao e reajuste no mesmo e-mail, a metade pronta segue
  *  sozinha com uma justificativa (obrigatoria, fica na linha do tempo). A outra vai depois, num envio proprio. */
-export function FormSemAOutra({ pronta, orgao, salvando, agir, aoFechar, erro }: {
-  pronta: Metade; orgao: string | null; salvando: boolean; agir: Agir; aoFechar: () => void; erro?: string;
+export function FormSemAOutra({ pronta, salvando, agir, aoFechar, erro }: {
+  pronta: Metade; salvando: boolean; agir: Agir; aoFechar: () => void; erro?: string;
 }) {
   const [texto, setTexto] = useState("");
   const execucao = pronta.tipo === "execucao";
@@ -342,17 +328,12 @@ export function FormSemAOutra({ pronta, orgao, salvando, agir, aoFechar, erro }:
   return (
     <form onSubmit={salvar} onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
       <p className="painel__titulo">{execucao ? "Enviar a medição sem o reajuste" : "Enviar o reajuste sem a medição"}</p>
-      <p className="campo__nota">
-        {orgao ? `Na ${orgao}` : "Neste órgão"} a medição e o reajuste vão no mesmo e-mail. Diga por que {execucao
-          ? "a medição vai separada" : "o reajuste vai separado"}. Fica registrado na linha do tempo.
-      </p>
       <Erro erro={erro} />
       <div className="form-inline">
         <div className="campo">
           <label className="campo__rotulo" htmlFor="campo-sem-a-outra">Justificativa (obrigatória)</label>
           <textarea id="campo-sem-a-outra" name="justificativa" className="entrada--larga" rows={2} required minLength={10}
-            maxLength={2000} autoFocus value={texto} onChange={ev => setTexto(ev.target.value)}
-            placeholder="Ex.: notas presas no faturamento; o prazo de pagamento não pode esperar…" />
+            maxLength={2000} autoFocus value={texto} onChange={ev => setTexto(ev.target.value)} />
         </div>
         <button type="submit" className="btn btn--primario" disabled={salvando || texto.trim().length < 10}>
           {salvando ? "Liberando…" : execucao ? "Liberar o envio só da medição" : "Liberar o envio só do reajuste"}
@@ -367,7 +348,7 @@ export function FormSemAOutra({ pronta, orgao, salvando, agir, aoFechar, erro }:
  *  mesmo painel do `FormEstado`: titulo, campo e as acoes no fim, com o destrutivo em `btn--destrutivo`. Quem
  *  chama grava; a recusa do servidor aparece onde quem chama mostra o erro dele. */
 export function FormMotivo({ id, titulo, rotulo, placeholder, acao, acaoOcupada, ocupado, aoConfirmar, aoFechar, destrutivo = true }: {
-  id: string; titulo: string; rotulo: string; placeholder: string; acao: string; acaoOcupada: string;
+  id: string; titulo: string; rotulo: string; placeholder?: string; acao: string; acaoOcupada: string;
   ocupado: boolean; aoConfirmar: (motivo: string) => void; aoFechar: () => void; destrutivo?: boolean;
 }) {
   const [motivo, setMotivo] = useState("");
@@ -393,8 +374,7 @@ export function FormMotivo({ id, titulo, rotulo, placeholder, acao, acaoOcupada,
   );
 }
 
-/** Marcar a medicao final (F-92): confirmacao em linha, no lugar de `window.confirm`. O contrato entra em
- *  encerramento, entao o botao diz o que faz e a nota diz a consequencia. */
+/** Marcar a medicao final (F-92): confirmacao em linha, no lugar de `window.confirm`; o botao diz o que faz. */
 export function FormFinal({ m, salvando, agir, aoFechar, erro }: Base) {
   async function salvar(ev: React.FormEvent) {
     ev.preventDefault();
@@ -406,7 +386,6 @@ export function FormFinal({ m, salvando, agir, aoFechar, erro }: Base) {
     <form className="painel-inline" onSubmit={salvar} onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
       <p className="painel__titulo">Marcar a {m.numero}ª como medição final</p>
       <Erro erro={erro} />
-      <p className="campo__nota">O contrato entra em encerramento. Dá para desfazer depois, informando o motivo.</p>
       <div className="form-inline painel__rodape">
         <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Marcando…" : "Marcar como medição final"}</button>
         <button type="button" className="btn" onClick={aoFechar}>Voltar</button>
@@ -421,7 +400,7 @@ export function FormDesmarcarFinal({ m, salvando, agir, aoFechar, erro }: Base) 
     <div>
       <Erro erro={erro} />
       <FormMotivo id="campo-motivo-final" titulo={`Desmarcar a medição final: ${m.numero}ª medição`} rotulo="Motivo (obrigatório)"
-        placeholder="Ex.: haverá mais uma medição…" acao="Desmarcar a medição final" acaoOcupada="Desmarcando…"
+        acao="Desmarcar a medição final" acaoOcupada="Desmarcando…"
         ocupado={salvando} destrutivo={false} aoFechar={aoFechar}
         aoConfirmar={async motivo => {
           const ok = await agir(() => api(`/api/medicoes/${m.id}/final/desmarcar`, { method: "POST", body: JSON.stringify({ motivo }) }),
@@ -432,3 +411,52 @@ export function FormDesmarcarFinal({ m, salvando, agir, aoFechar, erro }: Base) 
   );
 }
 
+
+/** Issue #287: registrar que o boletim foi assinado no DocuSign (data e envelope do e-mail de conclusao).
+ *  Evento informativo: opcional, nao muda o estado e nao gera aviso. */
+function hojeLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function FormAssinatura({ m, salvando, agir, aoFechar, erro }: Base) {
+  const [data, setData] = useState("");
+  const [envelope, setEnvelope] = useState("");
+  const [tentou, setTentou] = useState(false);
+  const hoje = hojeLocal();
+  const falta = !data ? "Informe a data da assinatura." : data > hoje ? "A data da assinatura não pode ser futura." : undefined;
+  const erroData = tentou ? falta : undefined;
+  async function salvar(ev: React.FormEvent) {
+    ev.preventDefault();
+    setTentou(true);
+    if (falta) { document.getElementById("campo-data-assinatura")?.focus(); return; }
+    const ok = await agir(() => api(`/api/medicoes/${m.id}/assinatura`, {
+      method: "POST", body: JSON.stringify({ data, envelope: envelope.trim() || null }),
+    }), "Assinatura registrada.");
+    if (ok) aoFechar();
+  }
+  return (
+    <form onSubmit={salvar} noValidate onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
+      <p className="painel__titulo">Registrar a assinatura da {m.numero}ª medição no DocuSign</p>
+      <Erro erro={erro} />
+      <div className="form-inline">
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor="campo-data-assinatura">Data da assinatura</label>
+          <input id="campo-data-assinatura" name="data_assinatura" autoComplete="off" type="date" className="entrada--media" autoFocus
+            max={hoje} value={data}
+            {...(erroData ? { "aria-invalid": true as const, "aria-describedby": "campo-data-assinatura-erro" } : {})}
+            onChange={ev => setData(ev.target.value)} />
+          <ErroCampo id="campo-data-assinatura-erro" erro={erroData} />
+        </div>
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor="campo-envelope-assinatura">Nome do envelope (opcional)</label>
+          <input id="campo-envelope-assinatura" name="envelope" autoComplete="off" className="entrada--larga" maxLength={200}
+            value={envelope}
+            onChange={ev => setEnvelope(ev.target.value)} />
+        </div>
+        <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Registrando…" : "Registrar assinatura"}</button>
+        <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>
+      </div>
+    </form>
+  );
+}

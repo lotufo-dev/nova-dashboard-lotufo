@@ -57,6 +57,17 @@ def hoje_local() -> datetime.date:
     return para_local(agora_utc()).date()
 
 
+def iso_local(local_str: str) -> str:
+    """'AAAA-MM-DD HH:MM:SS' ja' em hora de Cuiaba (data de documento, ex.: movimentacao do SIGA) -> ISO com o fuso
+    explicito ('2026-10-19T10:00:00-04:00'), para a tela nao a ler como UTC."""
+    return datetime.datetime.fromisoformat(local_str).replace(tzinfo=_TZ).isoformat()
+
+
+def iso_utc(utc_str: str) -> str:
+    """'AAAA-MM-DD HH:MM:SS' (UTC, formato do SQLite) -> ISO com o fuso explicito ('...+00:00')."""
+    return datetime.datetime.fromisoformat(utc_str).replace(tzinfo=_UTC).isoformat()
+
+
 def inicio_do_dia_utc(data_iso: str) -> str:
     """'AAAA-MM-DD' (dia do negocio) -> carimbo UTC do SQLite da meia-noite de Cuiaba desse dia.
 

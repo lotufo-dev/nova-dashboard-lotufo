@@ -21,9 +21,23 @@ describe("Medição que ainda não existe", () => {
     const espelho = container.querySelector("[data-espelho='espelho']")!;
     expect(espelho.getAttribute("data-abre-form")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: /Etapa 4: Envio ao órgão/ }));
-    expect(screen.getByText("Libera depois da etapa 3.")).toBeTruthy();
+    // o selo diz que libera depois; o corpo nao repete
+    expect(screen.getByText("Libera depois da etapa 3")).toBeTruthy();
+    expect(screen.queryByText("Libera depois da etapa 3.")).toBeNull();
     expect(container.querySelector("[data-espelho]")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Voltar à etapa atual" }));
     expect(container.querySelector("[data-espelho]")).not.toBeNull();
+  });
+
+  it("o cabeçalho só diz a cota quando a Lotufo não tem 100%", async () => {
+    api.mockResolvedValue({ obra: "Escola", orgao: "SINFRA", instrumento: "CT 1/2026", percentual_lotufo_bp: 10000 });
+    const { container } = render(<MedicaoNova contratoId={7} usuario={usuario} origem={null} />);
+    await screen.findByText("SINFRA");
+    expect(container.querySelector(".med-meta")!.textContent).not.toMatch(/cota|valores cheios/);
+    cleanup();
+    api.mockResolvedValue({ obra: "Escola", orgao: "SINFRA", instrumento: "CT 1/2026", percentual_lotufo_bp: 4000 });
+    render(<MedicaoNova contratoId={7} usuario={usuario} origem={null} />);
+    expect(await screen.findByText("cota 40%")).toBeTruthy();
+    expect(screen.queryByText(/valores cheios/)).toBeNull();
   });
 });

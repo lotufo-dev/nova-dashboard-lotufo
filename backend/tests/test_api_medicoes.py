@@ -674,3 +674,82 @@ def test_planilha_diretoria_recebe_403(client_admin):
     # diretoria so' le: a sugestao (com acumulado e saldo) e a medicao com as versoes
     assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao").json()["numero"] == 2
     assert len(client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"]) == 1
+
+
+# issue #287: assinatura no DocuSign (evento informativo)
+def test_registrar_assinatura_aparece_na_linha_do_tempo(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01", "envelope": "Boletim 1 - Obra Alfa"})
+    assert r.status_code == 201
+    eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+    assert [e["texto"] for e in eventos] == [
+        "Boletim assinado no DocuSign em 01/10/2026 (envelope Boletim 1 - Obra Alfa) por Admin"]
+
+
+def test_assinatura_com_data_futura_da_422(client_admin):
+    import datetime
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    futura = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
+    r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": futura, "envelope": "x"})
+    assert r.status_code == 422
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"] == []
+
+
+def test_assinatura_em_medicao_inexistente_da_404(client_admin):
+    assert client_admin.post("/api/medicoes/999999/assinatura", json={"data": "2026-10-01"}).status_code == 404
+
+
+def test_assinatura_nao_gera_nem_exige_aviso(client_admin):
+    from app import avisos, db
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    conn = db.get_conn()
+    antes = avisos.listar(conn, publico="todos")
+    client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01"})
+    assert avisos.listar(conn, publico="todos") == antes      # nem com assinatura, nem sem: nada de aviso
+    assert not any("assin" in a["mensagem"].lower() for a in antes)
+
+
+def test_assinatura_identica_repetida_da_422_e_nao_duplica(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    corpo = {"data": "2026-10-01", "envelope": "Boletim 1"}
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 201
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 422
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={**corpo, "data": "2026-10-02"}).status_code == 201
+    assert len(client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]) == 2
+
+
+def test_assinatura_na_linha_do_tempo_usa_a_data_da_assinatura_e_nao_a_do_registro(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-09-15", "envelope": "Boletim 1"})
+    client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1.000,00"})   # registrado antes (hoje)
+    eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+    assert [e["data"] for e in eventos][0] == "2026-09-15"
+    assert "Boletim assinado no DocuSign" in eventos[0]["texto"]    # vem antes do valor, que e' de hoje
+
+
+def test_medicao_da_carga_do_historico_aparece_com_pedido_e_aprovado(client_admin, tmp_path):
+    # issue #259: o que a carga grava e' o que a aba Medicoes le
+    from app import carga_medicoes, db
+    cid = novo_contrato({"orgao": "SINFRA", "numero_instrumento": "IC 9/2025",
+                         "objeto": "Obra", "valor_original": "100.000,00"})
+    arq = tmp_path / "obra-carga.csv"
+    arq.write_text("nº;tipo;competência;valor pedido;valor aprovado;data da aprovação;meio\n"
+                   "1;execucao;2025-04;1.000,01;999,99;20/05/2025;SMO\n", "utf-8")
+    conn = db.get_conn()
+    try:
+        conn.execute("UPDATE contratos SET nome_curto='Obra Carga' WHERE id=?", (cid,))   # o cadastro YAML da' o nome
+        conn.commit()
+        uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+        assert carga_medicoes.gravar(conn, uid, arq)["criadas"] == 1
+    finally:
+        conn.close()
+    lista = client_admin.get(f"/api/contratos/{cid}/medicoes").json()
+    m = next(x for x in lista if x["numero"] == 1)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == ("protocolada", 100001, 99999)
+    d = client_admin.get(f"/api/medicoes/{m['id']}").json()
+    assert d["atestado_em"] == "2025-05-20"

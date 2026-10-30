@@ -1,25 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconeAlerta, IconeRelogio } from "./icones";
+import { IconeAlerta } from "./icones";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
-  certidoesOrdenadas, JANELA_DIAS, matriz, NOME_CURTO, pendenciasDa, proximaAVencer, resumoEmpresa, situacaoCertidao,
+  certidoesOrdenadas, JANELA_DIAS, matriz, NOME_CURTO, resumoEmpresa, situacaoCertidao,
   situacaoGarantia, type EmpresaDoc, type Nivel, type ObraDoc,
 } from "./matriz";
 import { substituir, trocarBusca, type Busca } from "./rota";
-import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
+import { fmtDataPura } from "./tempo";
 import { AnexarCertidoes, CnpjCopiar, Pilula, Ponto } from "./documentosComum";
 import { useCopiarCnpj, usePainel } from "./documentosDados";
+import Selo from "./Selo";
 
 /* Documentos (#161, redesenho aprovado em 16/10/2026): UM CARTAO POR EMPRESA, com a situacao geral, um ponto por
- * certidao e a proxima a vencer; o cartao inteiro leva a pagina da empresa (DocumentosEmpresa.tsx). Quem tem
+ * certidao e a garantia que vence; o cartao inteiro leva a pagina da empresa (DocumentosEmpresa.tsx). Quem tem
  * pendencia vem primeiro. O que e' exigido vem do cadastro do orgao; a tela so' mostra o que o servidor respondeu
  * (`documentos.painel`), sem recalcular regra. Filtro na URL: ?pendentes=1.
  */
 
-const PAPEL: Record<string, string> = { lotufo: "Empresa", consorcio: "Consórcio", consorciada: "Consorciada" };
-
-// Garantia que pede algo da empresa, como linhas do cartao ("Garantia de Obra X: vence em 20 dias").
+// Garantia que pede algo da empresa, como selo do cartao ("Garantia de Obra X: vence em 20 dias").
 function avisosDeObras(e: EmpresaDoc, contratos: ObraDoc[]): { nivel: Nivel; texto: string }[] {
   const out: { nivel: Nivel; texto: string }[] = [];
   for (const k of contratos) {
@@ -86,10 +85,9 @@ function JanelaZip({ empresas, hoje, aoFechar }: { empresas: EmpresaDoc[]; hoje:
         <div className="campo">
           <label className="campo__rotulo" htmlFor="data-zip">Certidões vigentes em</label>
           <input id="data-zip" type="date" className="entrada--media" value={data} onChange={ev => setData(ev.target.value)} />
-          <span className="campo__nota">Para licitação ou protocolo: junta as certidões válidas nessa data.</span>
         </div>
         <fieldset>
-          <legend>Empresas (um ZIP por empresa)</legend>
+          <legend>Empresas</legend>
           {empresas.map(e => (
             <label key={e.entidade_id} className="doc-marca">
               <input type="checkbox" checked={marcadas.has(e.entidade_id)}
@@ -110,31 +108,15 @@ function JanelaZip({ empresas, hoje, aoFechar }: { empresas: EmpresaDoc[]; hoje:
   );
 }
 
-function Cartao({ e, nomes, contratos, copia, aoCopiar }: {
-  e: EmpresaDoc; nomes: Map<number, string>; contratos: ObraDoc[];
+function Cartao({ e, contratos, copia, aoCopiar }: {
+  e: EmpresaDoc; contratos: ObraDoc[];
   copia: { entidade_id: number; ok: boolean } | null; aoCopiar: () => void;
 }) {
   const r = resumoEmpresa(e, contratos);
-  const proxima = proximaAVencer(e);
-  const extras: { nivel: Nivel | null; texto: string; titulo?: string }[] = [];
-  if (e.regularidade) {
-    const g = e.regularidade;
-    extras.push({ nivel: g.situacao === "ok" ? "ok" : "atencao",
-      texto: `Regularidade do mês (DP): ${g.situacao === "ok" ? "em dia" : g.situacao === "faltando" ? "nenhuma anexada" : "atrasada"}${
-        g.situacao === "ok" ? ` · ${mesBR(g.competencia)}` : ` · esperada ${mesBR(g.esperada)}`}` });
-  }
-  const consorciadas = (e.consorciadas ?? []).map(id => nomes.get(id)).filter((n): n is string => !!n);
-  if (consorciadas.length) extras.push({ nivel: null, texto: `Consorciadas: ${consorciadas.join(", ")}` });
-  extras.push(...avisosDeObras(e, contratos));
-  const obras = (e.obras ?? []).map(o => o.obra);
-  if (obras.length) {
-    const lista = obras.length > 3 ? `${obras.slice(0, 3).join(", ")} e mais ${obras.length - 3}` : obras.join(", ");
-    extras.push({ nivel: null, texto: `Exigida em ${obras.length === 1 ? "1 obra" : `${obras.length} obras`}: ${lista}`, titulo: obras.join(", ") });
-  }
+  const garantias = avisosDeObras(e, contratos);
   return (
     <article className="cartao emp-cartao" id={`emp-${e.entidade_id}`}>
       <div className="emp-cartao__cabeca">
-        <span className="emp-cartao__papel">{PAPEL[e.papel] ?? e.papel}</span>
         <h2 className="emp-cartao__nome">
           <Link para={{ tela: "documentos-empresa", id: e.entidade_id }}>{e.entidade}</Link>
         </h2>
@@ -145,24 +127,19 @@ function Cartao({ e, nomes, contratos, copia, aoCopiar }: {
         {certidoesOrdenadas(e).map(l => {
           const s = situacaoCertidao(l, l.certidao ? fmtDataPura(l.certidao.validade) : "");
           return (
-            <li key={l.chave} title={`${l.tipo}: ${s.texto}${l.certidao && l.exigida ? ` · até ${fmtDataPura(l.certidao.validade)}` : ""}`}>
+            <li key={l.chave}>
               <Ponto nivel={s.nivel} />{NOME_CURTO[l.chave] ?? l.tipo}<span className="sr-only">: {s.texto}</span>
             </li>
           );
         })}
       </ul>
-      <div className="emp-cartao__extra">
-        {extras.map(x => (
-          <p key={x.texto} title={x.titulo}>{x.nivel && <Ponto nivel={x.nivel} />}<span>{x.texto}</span></p>
-        ))}
-      </div>
-      <div className="emp-cartao__rodape">
-        <IconeRelogio className="icone icone--p" />
-        <span>{proxima
-          ? <>Próxima a vencer: <strong>{NOME_CURTO[proxima.chave] ?? proxima.tipo} em {fmtDataPura(proxima.certidao!.validade)}</strong></>
-          : "Nenhuma certidão vigente"}</span>
-        <svg className="icone icone--p doc-seta" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-      </div>
+      {garantias.length > 0 && (
+        <div className="emp-cartao__extra">
+          {garantias.map(x => (
+            <p key={x.texto}><Selo classe={x.nivel === "acao" ? "selo--acao" : "selo--atencao"}>{x.texto}</Selo></p>
+          ))}
+        </div>
+      )}
     </article>
   );
 }
@@ -190,32 +167,14 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
   const empresas = painel?.empresas ?? [];
   const porId = new Map(empresas.map(e => [e.entidade_id, e]));
   const lista = ordem.map(id => porId.get(id)).filter((e): e is EmpresaDoc => e !== undefined);
-  const nomes = new Map(empresas.map(e => [e.entidade_id, e.entidade]));
-  const pendentes = empresas.filter(e => pendenciasDa(e, painel?.contratos ?? []) > 0).length;
-  const qtd = empresas.length === 1 ? "1 empresa" : `${empresas.length} empresas`;
-  const recorte = soPendentes
-    ? `Mostrando ${pendentes === 1 ? "a única" : `as ${pendentes}`} com pendência, de ${qtd}`
-    : `${qtd} · ${pendentes === 1 ? "1 com pendência" : `${pendentes} com pendência`}`;
 
   return (
     <div className="pagina">
-      <p className="pagina__descricao">
-        Certidões e regularidade de cada empresa. Clique no cartão para ver as certidões, a regularidade do mês e a garantia
-        das obras.
-      </p>
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
       {/* sempre montada: o Copiar aparece para todos os perfis e anuncia aqui */}
       <p className="sr-only" role="status">{anuncio}</p>
 
       <div className="doc-topo">
-        <div className="doc-topo__texto">
-          {painel && painel.empresas.length > 0 && (
-            <p className="campo__nota num" role="status">
-              {recorte} (pendência: vencida, falta ou vence em até {JANELA_DIAS}{" "}dias; a regularidade do mês fora do dia
-              também conta). Empresa com problema primeiro.
-            </p>
-          )}
-        </div>
         <div className="doc-topo__acoes">
           <label className="doc-chave">
             <input type="checkbox" checked={soPendentes}
@@ -238,19 +197,18 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
 
       {!painel && !erro && <p className="campo__nota">Carregando…</p>}
       {painel && empresas.length === 0 && (
-        <div className="vazio"><p className="vazio__titulo">Nenhuma empresa com documento exigido</p></div>
+        <div className="vazio"><p className="vazio__titulo">Nenhuma empresa.</p></div>
       )}
       {painel && empresas.length > 0 && (
         <section aria-label="Empresas">
           {lista.length === 0 ? (
             <div className="cartao vazio">
               <p className="vazio__titulo">Nenhuma empresa com pendência.</p>
-              <p>Desligue “Só as com pendência” para ver todas.</p>
             </div>
           ) : (
             <div className="emp-grade">
               {lista.map(e => (
-                <Cartao key={e.entidade_id} e={e} nomes={nomes} contratos={painel.contratos ?? []} copia={copia}
+                <Cartao key={e.entidade_id} e={e} contratos={painel.contratos ?? []} copia={copia}
                   aoCopiar={() => void copiar(e.entidade_id, e.cnpj, e.entidade)} />
               ))}
             </div>

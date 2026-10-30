@@ -42,7 +42,7 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
               <span>{obra}</span>
               {cab && <span>{cab.orgao}</span>}
               {cab && <span>{cab.instrumento}</span>}
-              {cab && <span title={baseDosValores(cab.percentual_lotufo_bp)}>{baseDosValores(cab.percentual_lotufo_bp)}</span>}
+              {cab && baseDosValores(cab.percentual_lotufo_bp) && <span>{baseDosValores(cab.percentual_lotufo_bp)}</span>}
             </p>
           </div>
         </div>
@@ -50,15 +50,15 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
           <div className="med-principal">
             <Setas atual={1} vendo={vendo} aoIr={n => setVendo(n === 1 ? 1 : n)} />
             <FaixaVendo vendo={vendo} atual={1} aoVoltar={() => setVendo(1)} />
-            <EtapaCartao key={vendo} n={vendo} atual={1} resumo={vendo === 1 ? "número, competência e os valores informados pelo órgão" : undefined}>
-              <div className="med-etapa__corpo">
-                {vendo === 1 ? (
+            <EtapaCartao key={vendo} n={vendo} atual={1}>
+              {/* as outras etapas so' tem o selo "Libera depois da etapa N" */}
+              {vendo === 1 && (
+                <div className="med-etapa__corpo">
                   <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={() => {}} abrirForm parte="espelho"
                     aoGerar={id => ir({ tela: "medicao", obra: contratoId, id }, { forcar: true })}
-                    semRegra={<p className="campo__nota">Esta obra ainda não gera o espelho pelo sistema: lance a medição à mão na{" "}
-                      <Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}>página da obra</Link>.</p>} />
-                ) : <p className="campo__nota">Libera depois da etapa {vendo - 1}.</p>}
-              </div>
+                    semRegra={<p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}>Lançar a medição à mão</Link></p>} />
+                </div>
+              )}
             </EtapaCartao>
           </div>
         </div>

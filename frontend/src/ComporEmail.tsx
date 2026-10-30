@@ -5,6 +5,7 @@ import { api } from "./api";
 import EditorCorpo from "./EditorCorpo";
 import ErroCampo from "./ErroCampo";
 import { fmtTamanho as tamanho } from "./formato";
+import { Link } from "./Link";
 
 // Busca que nunca derruba a tela: sem resposta (servidor antigo, teste), a janela abre do mesmo jeito.
 function buscar<T>(caminho: string): Promise<T> {
@@ -337,8 +338,7 @@ export default function ComporEmail({ inicial, anexos, ocupado, bloqueado, antes
               onLoad={() => setAssinatura("sim")} onError={() => setAssinatura("nao")} />
           )}
           {assinatura === "nao" && (
-            <p className="ol-sem-assinatura">Sem assinatura: cadastre a imagem da sua assinatura em Minha conta e ela
-              entra no fim de todo e-mail enviado pela dashboard.</p>
+            <p className="ol-sem-assinatura">Sem assinatura: cadastre a sua em <Link para={{ tela: "conta" }}>Minha conta</Link>.</p>
           )}
         </div>
       </div>

@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { curvaS, desfechoDoPedido, diasEntre, instrumentosDaObra, linhaDoTempo, reajustePorDataBase, restantesTexto } from "./obra";
+import { curvaS, desfechoDoPedido, diasEntre, instrumentosDaObra, linhaDoTempo, reajustePorDataBase, seloDoPrazo } from "./obra";
+
+// texto na tela (26/10/2026): o prazo so' vira selo quando pede acao, nos limites do aviso "Execucao vencendo"
+describe("seloDoPrazo", () => {
+  it("nada acima de 60 dias; Atenção até 60; Crítico até 30, no dia e depois de vencido", () => {
+    expect(seloDoPrazo(61)).toBeNull();
+    expect(seloDoPrazo(null)).toBeNull();
+    expect(seloDoPrazo(60)).toEqual({ classe: "selo--atencao", texto: "vence em 60 dias" });
+    expect(seloDoPrazo(30)).toEqual({ classe: "selo--acao", texto: "vence em 30 dias" });
+    expect(seloDoPrazo(1)).toEqual({ classe: "selo--acao", texto: "vence em 1 dia" });
+    expect(seloDoPrazo(0)).toEqual({ classe: "selo--acao", texto: "vence hoje" });
+    expect(seloDoPrazo(-3)).toEqual({ classe: "selo--acao", texto: "vencida" });
+  });
+});
 
 describe("Página da obra: curva S e linhas do tempo", () => {
   const p = (competencia: string, prev: number, exec: number, pend = false) =>
@@ -36,13 +49,6 @@ describe("Página da obra: curva S e linhas do tempo", () => {
   it("data malformada dá NaN nos dias, para a tela tratar como sem data final", () => {
     expect(Number.isNaN(diasEntre("2026-10-16", "abc"))).toBe(true);
     expect(Number.isNaN(linhaDoTempo("2026-01-01", "", "2026-10-16").restantes)).toBe(true);
-  });
-
-  it("os dias restantes viram texto", () => {
-    expect(restantesTexto(1)).toBe("1 dia restante");
-    expect(restantesTexto(45)).toBe("45 dias restantes");
-    expect(restantesTexto(0)).toBe("vence hoje");
-    expect(restantesTexto(-3)).toBe("vencida há 3 dias");
   });
 });
 

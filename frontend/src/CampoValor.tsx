@@ -7,7 +7,6 @@ import { coladoParaBrl, digitosParaBrl, MAX_DIGITOS_VALOR } from "./formato";
 // "50.000,00", "50000,5" ou "50000" le em reais. O valor que sai e' o texto "50.000,00" (ou "" quando vazio),
 // o mesmo formato que as telas ja' mandavam ao servidor.
 
-const AJUDA_VALOR = "Digite só os números: os centavos e os pontos entram sozinhos.";
 const ERRO_COLADO = "Valor colado em formato inválido: use vírgula nos centavos, ex.: 1.234,56";
 
 const soDigitos = (texto: string) => texto.replace(/\D/g, "").replace(/^0+/, "");
@@ -46,12 +45,9 @@ function editar(antes: string, depois: string, tipo: string | undefined, dado: s
 }
 
 export default function CampoValor({ id, name, value, onChange, className = "entrada--media entrada--num num",
-  placeholder = "Ex.: 50.000,00…", required, autoFocus, ajudaId }: {
+  placeholder = "Ex.: 50.000,00…", required, autoFocus }: {
   id: string; name: string; value: string; onChange: (valor: string) => void;
   className?: string; placeholder?: string; required?: boolean; autoFocus?: boolean;
-  /** Id de uma ajuda que a tela ja' mostra (o espelho tem uma so' para todos os valores); sem ele, o campo
-   *  mostra a sua. */
-  ajudaId?: string;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const tudoSelecionado = useRef(false);   // o campo inteiro estava selecionado quando a composicao comecou
@@ -70,12 +66,11 @@ export default function CampoValor({ id, name, value, onChange, className = "ent
     setErro("");
     onChange(r);
   };
-  const ajuda = ajudaId ?? `${id}-ajuda`;
   return (
     <>
       <input ref={ref} id={id} name={name} autoComplete="off" spellCheck={false} className={className} inputMode="numeric"
         placeholder={placeholder} required={required} autoFocus={autoFocus} value={value}
-        aria-invalid={erro ? true : undefined} aria-describedby={erro ? `${ajuda} ${id}-erro` : ajuda}
+        aria-invalid={erro ? true : undefined} aria-describedby={erro ? `${id}-erro` : undefined}
         onChange={ev => {
           const nativo = ev.nativeEvent as Partial<InputEvent>;
           if (nativo.isComposing) return;   // composicao (IME): so' no fim dela
@@ -97,7 +92,6 @@ export default function CampoValor({ id, name, value, onChange, className = "ent
           ev.preventDefault();
           aplicar(emReais(ev.clipboardData.getData("text")));
         }} />
-      {!ajudaId && <span className="campo__nota" id={ajuda}>{AJUDA_VALOR}</span>}
       <ErroCampo id={`${id}-erro`} erro={erro} />
     </>
   );

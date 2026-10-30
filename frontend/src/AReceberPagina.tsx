@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { api, mensagemDeErro } from "./api";
-import { brl, contar } from "./formato";
+import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import { Link } from "./Link";
 import { fmtCompetencia, fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
@@ -28,9 +28,6 @@ const TIPOS: Record<string, string> = { reajuste: "reajuste", projeto: "projeto"
 
 function valor(v: number | null): string { return v === null ? "—" : brl(v); }
 function maiuscula(s: string): string { return s.charAt(0).toUpperCase() + s.slice(1); }
-function pct(rec: number | null, prev: number | null): number | null {
-  return rec === null || prev === null || prev <= 0 ? null : Math.round((rec / prev) * 100);
-}
 /** Valor curto do eixo e das barras: "4,2 mi" ou "850 mil". So' apresentacao; a conta e' em centavos inteiros. */
 function curto(c: number): string {
   if (Math.round(c / 100_000) >= 1000) return `${(c / 100_000_000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} mi`;
@@ -67,8 +64,8 @@ function useLargura() {
   return [ref, w] as const;
 }
 
-function Grafico({ meses, liberado, escolhido, escolher }:
-    { meses: Mes[]; liberado: boolean; escolhido: number; escolher: (i: number) => void }) {
+function Grafico({ meses, escolhido, escolher }:
+    { meses: Mes[]; escolhido: number; escolher: (i: number) => void }) {
   const [ref, largura] = useLargura();
   const W = Math.max(260, largura - 40);
   const estreito = W < 560;
@@ -131,21 +128,18 @@ function Grafico({ meses, liberado, escolhido, escolher }:
             </g>
           );
         })}
-        {!liberado && <text x={ml} y={mt - 8}>Previsto a conciliar com a controladoria</text>}
       </svg>
     </div>
   );
 }
 
-function Detalhe({ m, hoje }: { m: Mes; hoje: string }) {
+function Detalhe({ m }: { m: Mes }) {
   const nome = `${maiuscula(fmtMesExtenso(m.competencia))} de ${m.competencia.slice(0, 4)}`;
   if (m.futuro) return <><strong>{nome}</strong> (previsão): <span className="dinheiro">{valor(m.previsto_centavos)}</span></>;
-  const p = pct(m.recebido_centavos, m.previsto_centavos);
   return (
     <>
-      <strong>{nome}</strong>{m.atual && ` (mês atual, até ${hoje.slice(8, 10)}/${hoje.slice(5, 7)})`}: previsto{" "}
-      <span className="dinheiro">{valor(m.previsto_centavos)}</span> · recebido{" "}
-      <span className="dinheiro">{valor(m.recebido_centavos)}</span>{p !== null && ` · ${p}% do previsto`}
+      <strong>{nome}</strong>: previsto <span className="dinheiro">{valor(m.previsto_centavos)}</span> · recebido{" "}
+      <span className="dinheiro">{valor(m.recebido_centavos)}</span>
     </>
   );
 }
@@ -170,7 +164,6 @@ export default function AReceberPagina() {
   const indiceMes = escolhido ?? Math.max(0, p.meses.findIndex(m => m.atual));
   const mes = p.mes;
   const nomeMes = fmtMesExtenso(mes.competencia);
-  const percentual = pct(mes.recebido_centavos, mes.previsto_centavos);
   const itens = p.itens.filter(i => obra === null || i.contrato_id === obra);
   const obraEscolhida = p.por_obra.find(o => o.contrato_id === obra) ?? null;
   const maior = Math.max(1, ...p.por_obra.map(o => o.valor_centavos ?? o.quantidade));
@@ -182,23 +175,14 @@ export default function AReceberPagina() {
         <div className="cartao ar-numero">
           <span className="ar-numero__rotulo">A receber, na cota</span>
           <span className="ar-numero__valor num">{valor(p.total.valor_centavos)}</span>
-          <span className="ar-numero__apoio num">
-            {liberado
-              ? `${contar(p.total.quantidade, "cobrança", "cobranças")} em ${contar(p.total.obras, "obra", "obras")}`
-              : "valores a conciliar com a controladoria"}
-          </span>
         </div>
         <div className="cartao ar-numero">
           <span className="ar-numero__rotulo">Previsto em {nomeMes}</span>
           <span className="ar-numero__valor num">{valor(mes.previsto_centavos)}</span>
-          <span className="ar-numero__apoio">{liberado ? "vencimentos do mês; o recebido pode incluir pagamentos de outros meses" : "a conciliar com a controladoria"}</span>
         </div>
         <div className="cartao ar-numero">
           <span className="ar-numero__rotulo">Medições recebidas em {nomeMes}</span>
           <span className="ar-numero__valor num">{valor(mes.recebido_centavos)}</span>
-          <span className="ar-numero__apoio num">
-            {percentual !== null && `${percentual}% do previsto · `}até {fmtDataPura(p.hoje)}
-          </span>
         </div>
       </section>
 
@@ -211,8 +195,8 @@ export default function AReceberPagina() {
             <span className="legenda__item"><span className="legenda__chave legenda__chave--previsao" />Previsão</span>
           </div>
         </div>
-        <Grafico meses={p.meses} liberado={liberado} escolhido={indiceMes} escolher={setEscolhido} />
-        <p className="ar-detalhe" role="status"><Detalhe m={p.meses[indiceMes]} hoje={p.hoje} /></p>
+        <Grafico meses={p.meses} escolhido={indiceMes} escolher={setEscolhido} />
+        <p className="ar-detalhe" role="status"><Detalhe m={p.meses[indiceMes]} /></p>
         <table className="sr-only">
           <caption>Previsto e recebido por mês, na cota</caption>
           <thead><tr><th scope="col">Mês</th><th scope="col">Previsto</th><th scope="col">Recebido</th></tr></thead>
@@ -231,7 +215,6 @@ export default function AReceberPagina() {
         <section className="cartao" aria-labelledby="t-obras">
           <div className="cartao__cabeca">
             <h2 className="cartao__titulo" id="t-obras">Por obra</h2>
-            <span className="cartao__dica">clique para ver as cobranças da obra</span>
           </div>
           {p.por_obra.length === 0 ? (
             <div className="vazio vazio--curto"><p>Nenhuma obra com cobrança esperando pagamento.</p></div>
@@ -241,7 +224,7 @@ export default function AReceberPagina() {
                 <li key={o.contrato_id}>
                   <button type="button" className="ar-obra" aria-pressed={obra === o.contrato_id}
                     onClick={() => setObra(obra === o.contrato_id ? null : o.contrato_id)}>
-                    <span className="ar-obra__nome">{o.obra}<small>{contar(o.quantidade, "cobrança", "cobranças")}</small></span>
+                    <span className="ar-obra__nome">{o.obra}</span>
                     <span className="ar-obra__trilho" aria-hidden="true">
                       <span className="ar-obra__barra" style={{ width: `${(((o.valor_centavos ?? o.quantidade) / maior) * 100).toFixed(1)}%` }} />
                     </span>
@@ -300,7 +283,7 @@ export default function AReceberPagina() {
                 <tfoot>
                   <tr>
                     <th scope="row" className="col-largo">
-                      {obraEscolhida ? `Total de ${obraEscolhida.obra} (${itens.length})` : `Total (${contar(itens.length, "cobrança", "cobranças")})`}
+                      {obraEscolhida ? `Total de ${obraEscolhida.obra}` : "Total"}
                     </th>
                     <td /><td />
                     <td className="col-num" data-rotulo="Valor na cota">{valor(totalItens)}</td><td />

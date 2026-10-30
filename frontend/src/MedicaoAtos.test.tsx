@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FormProtocoloManual, FormRecebimento, FormValor, notaDoEspelho, valorEditavel } from "./MedicaoAtos";
+import { FormAssinatura, FormProtocoloManual, FormRecebimento, FormValor, valorEditavel } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
@@ -33,14 +33,6 @@ describe("valorEditavel", () => {
   });
 });
 
-describe("notaDoEspelho (gate Sol S7)", () => {
-  it("diz como mudar o valor que veio do espelho, antes e depois de protocolada", () => {
-    expect(notaDoEspelho(base)).toBe("vem do espelho · para mudar, gere o espelho de novo");
-    expect(notaDoEspelho({ ...base, congelada: 1 })).toBe("vem do espelho · protocolada: corrija por reapresentação");
-    expect(notaDoEspelho({ ...base, valor_protocolado_origem: "aceito" })).toBeNull();
-  });
-});
-
 // issue #190: o valor se digita como em caixa registradora e vai ao servidor no mesmo formato de antes
 // gate Sol S6 (10/10/2026): o servidor exige 10 caracteres para protocolar com pendencia; a tela acompanha
 describe("FormProtocoloManual", () => {
@@ -54,7 +46,9 @@ describe("FormProtocoloManual", () => {
     api.mockResolvedValueOnce({ entidade: "Lotufo", pronto: true, itens: [] });
     const agir = vi.fn(async () => true);
     render(<FormProtocoloManual contratoId={1} m={base} salvando={false} agir={agir} aoFechar={() => {}} />);
-    await screen.findByText(/em dia para protocolar/);
+    await screen.findByText("Documentos em dia");
+    expect(screen.queryByText(/congela o valor protocolado/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Anexar em Documentos" })).toBeNull();
     const botao = screen.getByRole("button", { name: "Registrar protocolo" }) as HTMLButtonElement;
     expect(botao.disabled).toBe(false);
     fireEvent.click(botao);
@@ -73,6 +67,8 @@ describe("FormProtocoloManual", () => {
     const agir = vi.fn(async () => true);
     render(<FormProtocoloManual contratoId={1} m={base} salvando={false} agir={agir} aoFechar={() => {}} />);
     const apesar = await screen.findByLabelText(/Protocolar apesar das pendências/);
+    // a pendencia e' acionavel: o aviso leva aos Documentos
+    expect(screen.getByRole("link", { name: "Anexar em Documentos" }).getAttribute("href")).toBe("/documentos");
     fireEvent.change(screen.getByLabelText("Data do protocolo"), { target: { value: "2026-10-13" } });
     const botao = screen.getByRole("button", { name: "Registrar protocolo" }) as HTMLButtonElement;
     expect(botao.disabled).toBe(false);
@@ -177,5 +173,39 @@ describe("FormRecebimento", () => {
     fireEvent.click(screen.getByRole("button", { name: "Registrar recebimento" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/medicoes/631/estado", {
       method: "POST", body: JSON.stringify({ estado: "recebida", motivo: "a baixa não entrou no RM", data: "2026-09-30" }) }));
+  });
+});
+
+
+describe("FormAssinatura (issue #287)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("manda data e envelope ao servidor", async () => {
+    api.mockResolvedValue({});
+    const agir = vi.fn(async (fn: () => Promise<unknown>) => { await fn(); return true; });
+    render(<FormAssinatura m={base} salvando={false} agir={agir} aoFechar={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Data da assinatura"), { target: { value: "2026-10-01" } });
+    fireEvent.change(screen.getByLabelText(/Nome do envelope/), { target: { value: "  Boletim 7  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar assinatura" }));
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(1));
+    const [url, opcoes] = api.mock.calls[0];
+    expect(url).toBe("/api/medicoes/631/assinatura");
+    expect(JSON.parse(opcoes.body)).toEqual({ data: "2026-10-01", envelope: "Boletim 7" });
+  });
+
+  it("recusa data futura e vazia sem chamar o servidor", () => {
+    const agir = vi.fn(async () => true);
+    render(<FormAssinatura m={base} salvando={false} agir={agir} aoFechar={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Registrar assinatura" }));
+    expect(screen.getByText("Informe a data da assinatura.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Data da assinatura"), { target: { value: "2999-01-01" } });
+    expect(screen.getByText("A data da assinatura não pode ser futura.")).toBeTruthy();
+    expect(agir).not.toHaveBeenCalled();
+  });
+
+  it("mostra a mensagem de erro (422) da API", () => {
+    render(<FormAssinatura m={base} salvando={false} agir={vi.fn(async () => false)} aoFechar={() => {}}
+      erro="A data da assinatura não pode ser futura" />);
+    expect(screen.getByRole("alert").textContent).toContain("A data da assinatura não pode ser futura");
   });
 });
