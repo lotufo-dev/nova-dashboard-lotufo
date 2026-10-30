@@ -98,6 +98,18 @@ familias:
       {lista}
 
       Cordialmente,
+# E-mail da planilha/carta ao protocolo do órgão (issue #282; spec 2026-10-20 §2.1). Igual para todas as famílias;
+# `<campo>_<familia>` vence o comum. Não existe na MT-PAR (o ofício vai com a nota). Campos: {oficio} {medicao}
+# {numero} {competencia} (09/2026) {competencia_sublinhada} (09_2026) {periodo} {instrumento} {obra} {saudacao}
+# {lista_anexos} e {revisao} (vazio na 1ª versão; " - Rev01" na 2ª, " - Rev02" na 3ª...).
+planilha:
+  email_assunto: '{oficio} - {medicao} ({competencia_sublinhada}) - {instrumento} - {obra}{revisao}'
+  email_corpo: |
+    {saudacao}
+
+    Segue arquivo de exemplo para protocolo, com as versões editáveis para a supervisora e a fiscalização.
+
+    Atenciosamente,
 # Pleitos (iguais para todas as famílias; `<campo>_<familia>` vence o comum). Campos próprios:
 # reajuste {data_base} {data_base_extenso} {indice} {mes_aniversario} {aniversario};
 # prazo {historico} {justificativa} {dias} {fim_execucao} {novo_fim_execucao};
