@@ -154,10 +154,33 @@ def test_proximos_meses_so_com_o_faturamento_previsto(cenario):
 def test_carteira_saldo_ritmo_e_termino(cenario):
     c, ids = cenario
     k = diretoria.painel(c, HOJE)["carteira"]
-    # proprio: 1.000.000,00 - 39.000,00 medidos; consorcio: 50% de (12.000.000,00 - 4.010.000,00)
-    assert k["saldo_centavos"] == 96_100_000 + 399_500_000
+    # proprio: 1.000.000,00 - 29.000,00 medidos; consorcio: 50% de (12.000.000,00 - 4.000.000,00). #262 (gate Sol S2):
+    # o espelho gerado (10 mil, propria) e o enviado (10 mil, consorcio) ainda nao medem, como em `paineis.saldo`
+    assert k["saldo_centavos"] == 97_100_000 + 400_000_000
     assert "terminando" not in k
-    assert k["ritmo_mensal_centavos"] == 33_833_333             # 203.000.000 / 6, meio para cima
+    assert k["ritmo_mensal_centavos"] == 33_583_333             # 201.500.000 / 6, meio para cima
+
+
+def test_carteira_mede_so_execucao_nos_estados_que_medem(cenario):
+    """#262 (gate Sol S2): saldo, medido e ritmo da carteira contam o que `paineis.saldo` conta: execucao protocolada,
+    com NF do legado ou recebida. Projeto e espelho (gerado ou enviado) nao reduzem o saldo nem sobem o ritmo."""
+    c, ids = cenario
+    antes = diretoria.painel(c, HOJE)["carteira"]
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 50, 'projeto', '2026-08', 'recebida', 3000001)", (ids["propria"],))
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 51, 'execucao', '2026-08', 'espelho_gerado', 4000001)", (ids["propria"],))
+    c.commit()
+    depois = diretoria.painel(c, HOJE)["carteira"]
+    assert depois["saldo_centavos"] == antes["saldo_centavos"]
+    assert depois["ritmo_mensal_centavos"] == antes["ritmo_mensal_centavos"]
+    assert ({o["orgao"]: o["medido_centavos"] for o in depois["por_orgao"]}
+            == {o["orgao"]: o["medido_centavos"] for o in antes["por_orgao"]})
+    # e a execucao protocolada conta: 1,01 (centavo impar) a menos no saldo da propria
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 52, 'execucao', '2026-08', 'protocolada', 101)", (ids["propria"],))
+    c.commit()
+    assert diretoria.painel(c, HOJE)["carteira"]["saldo_centavos"] == antes["saldo_centavos"] - 101
 
 
 def test_carteira_saldo_exclui_o_aditivo_de_reajuste(cenario):
@@ -167,7 +190,7 @@ def test_carteira_saldo_exclui_o_aditivo_de_reajuste(cenario):
               "VALUES (?, 'valor', 50_000_001, 'assinado', '2026-03-01', 'reajuste')", (ids["consorcio"],))
     c.commit()
     k = diretoria.painel(c, HOJE)["carteira"]
-    assert k["saldo_centavos"] == 96_100_000 + 399_500_000
+    assert k["saldo_centavos"] == 97_100_000 + 400_000_000
     por = {o["orgao"]: o for o in k["por_orgao"]}
     assert por["MTPAR"]["vigente_centavos"] == 600_000_000      # 50% de 12.000.000,00, sem o reajuste
 
@@ -219,8 +242,8 @@ def test_faturado_no_mes_bate_com_a_coluna_faturado_do_qdop(cenario):
 def test_carteira_por_orgao_traz_vigente_medido_e_obras_para_o_cartao(cenario):
     c, ids = cenario
     por = {o["orgao"]: o for o in diretoria.painel(c, HOJE)["carteira"]["por_orgao"]}
-    assert (por["SINFRA - X"]["vigente_centavos"], por["SINFRA - X"]["medido_centavos"], por["SINFRA - X"]["obras"]) == (100_000_000, 3_900_000, 1)
-    assert (por["MTPAR"]["vigente_centavos"], por["MTPAR"]["medido_centavos"]) == (600_000_000, 200_500_000)
+    assert (por["SINFRA - X"]["vigente_centavos"], por["SINFRA - X"]["medido_centavos"], por["SINFRA - X"]["obras"]) == (100_000_000, 2_900_000, 1)
+    assert (por["MTPAR"]["vigente_centavos"], por["MTPAR"]["medido_centavos"]) == (600_000_000, 200_000_000)
 
 
 def test_protocolada_ha_200_dias_nao_gera_aviso_e_fica_em_mais_de_60(cenario):
@@ -515,3 +538,34 @@ def test_desvio_por_obra_no_qdop_pela_linha_anterior_ate_a_ultima_competencia_fe
     c.commit()
     # em outubro, 09/2026 fecha: o previsto de 20 mil entra (29 - 20 mil = 0,9)
     assert {o["contrato_id"]: o for o in diretoria.painel(c, D(2026, 10, 1))["obras"]}[ids["propria"]]["desvio_pp"] == 0.9
+
+
+def _reajuste_no_consorcio(c, ids, valor=240_000_001):
+    """#262: aditivo de reajuste (SES) de 2.400.000,01 no consorcio: entra no vigente, fica fora da base de execucao."""
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
+              "VALUES (?, 'valor', ?, 'assinado', '2026-03-01', 'reajuste')", (ids["consorcio"], valor))
+    c.commit()
+
+
+def test_tabela_de_obras_usa_o_vigente_de_execucao_e_o_qdop_nao_muda(cenario):
+    """#262 (gate Sol S1): na tabela de obras da Diretoria, PI+VA, VA, saldo e percentuais a precos iniciais; o
+    reajuste so' na coluna propria. O QDOP exportado fica como esta' (#352, QDOP com saldo a precos iniciais)."""
+    c, ids = cenario
+    _reajuste_no_consorcio(c, ids)
+    o = {x["contrato_id"]: x for x in diretoria.painel(c, HOJE)["obras"]}[ids["consorcio"]]
+    # 50% de 12.000.000,00 (sem o reajuste); faturado = 50% de 4.000.000,00; reajuste faturado = 50% de 100.000,00
+    assert (o["pi"], o["va"], o["pi_va"]) == (500_000_000, 100_000_000, 600_000_000)
+    assert (o["faturados"], o["reajuste_recebido"], o["saldo"]) == (200_000_000, 5_000_000, 400_000_000)
+    assert (o["pct_recebido"], o["pct_a_receber"]) == (200_000_000 / 600_000_000, 400_000_000 / 600_000_000)
+    q = {x["contrato_id"]: x for x in qdop.linhas(c, HOJE)}[ids["consorcio"]]
+    assert q["pi_va"] == 720_000_001                         # 50% de 14.400.000,01, meio para cima
+
+
+def test_desvio_divide_pelo_vigente_de_execucao(cenario):
+    """#262 (gate Sol S3): o desvio compara medido e previsto a precos iniciais; o denominador tambem."""
+    c, ids = cenario
+    _repactuar_consorcio(c, ids["consorcio"])
+    _reajuste_no_consorcio(c, ids)
+    obras = {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}
+    # -2 mi sobre 12 mi (nao sobre 14,4 mi): -16,7, como sem o reajuste
+    assert obras[ids["consorcio"]]["desvio_pp"] == -16.7

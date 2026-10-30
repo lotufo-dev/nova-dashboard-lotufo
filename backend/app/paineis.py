@@ -82,6 +82,12 @@ def curva(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     return saida
 
 
+def mede_execucao(m) -> bool:
+    """A medicao entra no medido de execucao de `saldo` (a regra das consultas daqui, para quem ja' tem a linha:
+    a carteira da Diretoria, #262): execucao, num dos estados que medem."""
+    return m["tipo"] == "execucao" and m["estado"] in ESTADOS_VALIDOS
+
+
 def medido_execucao_por_contrato(conn: sqlite3.Connection) -> dict[int, int]:
     """O `atestado_execucao_centavos` de `saldo`, de todos os contratos numa consulta so' (a lista de Obras). Mesma
     regra, e a soma tambem em Python, pelo motivo dito em `saldo`."""
