@@ -7,7 +7,7 @@ import type { ObraLista } from "./listaObras";
 import { trocarBusca, type Busca } from "./rota";
 import Selo from "./Selo";
 import {
-  casaComBusca, destinoDaMovimentacao, nivelDias, nomeDoProcesso, ordenar, quemDaMovimentacao, situacaoDoBotao,
+  casaComBusca, destinoDaMovimentacao, nivelDias, nomeDoProcesso, ordenar, pedidoTravado, quemDaMovimentacao, situacaoDoBotao,
   tempoNoSetor, tituloDoEvento, volumeDe, type Movimentacao, type PainelSiga, type ProcessoSiga, type Robo,
 } from "./siga";
 import { fmtData, fmtDataHora, fmtHora } from "./tempo";
@@ -112,8 +112,8 @@ function ItemMovimentacao({ m }: { m: Movimentacao }) {
   );
 }
 
-// "Atualizar processo" / "Atualizar todos" (#343): pedir leitura nao muda dado, entao quem ve a tela ve o botao (a
-// diretoria tambem). Com pedido ou rodada que ja' cobre o clique, o botao mostra o estado e fica desabilitado.
+// "Atualizar processo" / "Atualizar todos" (#343): pedir leitura nao muda dado, entao quem ve a tela ve o botao.
+// Com pedido ou rodada que ja' cobre o clique, o botao mostra o estado e fica desabilitado.
 function Atualizar({ rotulo, processoId, robo, aoPedir }: {
   rotulo: string; processoId: number | null; robo: Robo; aoPedir: () => Promise<void>;
 }) {
@@ -250,8 +250,8 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
   // O robo le a cada 15 minutos: com a aba aberta a tela rele no mesmo ritmo (a linha aberta e a busca ficam). Com
-  // pedido na fila ou rodada em andamento, a cada 5 segundos, ate' a leitura nova chegar.
-  const comRobo = (dados?.robo.estado ?? "parado") !== "parado";
+  // pedido na fila ou rodada em andamento, a cada 5 segundos, ate' a leitura nova chegar (pedido travado nao conta).
+  const comRobo = dados !== null && dados.robo.estado !== "parado" && !pedidoTravado(dados.robo);
   useEffect(() => {
     const relogio = window.setInterval(() => { void carregar(); }, comRobo ? RELER_COM_ROBO_MS : RELER_A_CADA_MS);
     return () => window.clearInterval(relogio);
@@ -278,11 +278,8 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
   const robo = dados.robo;
   const topo = (
     <div className="sg__topo">
-      <div aria-live="polite">
-        {robo.estado !== "parado"
-          ? <RoboAgora robo={robo} />
-          : dados.lido_em && <p className="sg__lido">Lido às <span className="num">{fmtHora(dados.lido_em)}</span></p>}
-      </div>
+      <div aria-live="polite">{robo.estado !== "parado" && <RoboAgora robo={robo} />}</div>
+      {robo.estado === "parado" && dados.lido_em && <p className="sg__lido">Lido às <span className="num">{fmtHora(dados.lido_em)}</span></p>}
       {dados.atrasado && dados.lido_em && (
         <CaixaAviso nivel="atencao" role="status">O monitor do SIGA não lê desde {fmtData(dados.lido_em).slice(0, 5)} {fmtHora(dados.lido_em)}.</CaixaAviso>
       )}

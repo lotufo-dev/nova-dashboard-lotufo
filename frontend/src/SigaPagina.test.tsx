@@ -376,6 +376,18 @@ describe("SigaPagina", () => {
     expect(botao("Atualizar todos").disabled).toBe(false);
   });
 
+  it("Windows recusou: o botão volta a valer para tentar de novo e a tela não relê a cada 5 segundos", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const robo = { ...NA_FILA(ALFA.id), avisos: [{ tipo: "disparo", processo_id: null, texto: "O Windows não iniciou o robô: acesso negado" }] };
+      mostrar(painel([ALFA], { pode_atualizar: true, robo }));
+      await screen.findByText("Processos de medições");
+      expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" }).hasAttribute("disabled")).toBe(false);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(api).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("com o robô ativo relê a cada 5 segundos; ao terminar mostra 'Lido às' novo e volta aos 15 minutos", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

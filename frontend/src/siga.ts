@@ -27,11 +27,17 @@ export type PainelSiga = {
   lido_em: string | null; atrasado: boolean; processos: ProcessoSiga[]; pode_atualizar: boolean; robo: Robo;
 };
 
+/** Pedido em aberto que nao vai andar sozinho: o Windows recusou o disparo ou o robo nao comecou. O clique de novo
+ *  dispara outra vez (o servidor reaproveita o pedido), entao o botao volta a valer e a tela nao rele a cada 5 s. */
+export function pedidoTravado(robo: Robo): boolean {
+  return robo.rodada === null && robo.avisos.some(a => a.tipo === "disparo" || a.tipo === "sem_inicio");
+}
+
 /** O botao de atualizar um processo (`processoId`) ou todos (null) enquanto o pedido nao foi atendido: "lendo" com a
  *  rodada em andamento que o inclui (no "todos", qualquer rodada), "na_fila" com pedido em aberto que o cobre. */
 export function situacaoDoBotao(robo: Robo, processoId: number | null): "lendo" | "na_fila" | null {
   if (robo.rodada && (processoId === null || robo.rodada.processos.includes(processoId))) return "lendo";
-  if (robo.pedidos.some(p => p.processo_id === null || p.processo_id === processoId)) return "na_fila";
+  if (!pedidoTravado(robo) && robo.pedidos.some(p => p.processo_id === null || p.processo_id === processoId)) return "na_fila";
   return null;
 }
 

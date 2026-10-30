@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  casaComBusca, nivelDias, ordenar, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type ProcessoSiga, type Robo,
+  casaComBusca, nivelDias, ordenar, pedidoTravado, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type ProcessoSiga, type Robo,
 } from "./siga";
 
 const p = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
@@ -62,5 +62,13 @@ describe("siga", () => {
     expect([1, 2, null].map(id => situacaoDoBotao(robo({ pedidos: [pedido(1)] }), id))).toEqual(["na_fila", null, null]);
     expect([1, 2, null].map(id => situacaoDoBotao(robo({ pedidos: [pedido(null)] }), id))).toEqual(["na_fila", "na_fila", "na_fila"]);
     expect(situacaoDoBotao(robo({ rodada, pedidos: [pedido(2)] }), 2)).toBe("na_fila");
+    // pedido travado (Windows recusou, robo nao comecou): o botao volta a valer para disparar de novo
+    for (const tipo of ["disparo", "sem_inicio"]) {
+      const travado = robo({ pedidos: [pedido(null)], avisos: [{ tipo, processo_id: null, texto: "x" }] });
+      expect(pedidoTravado(travado)).toBe(true);
+      expect([1, null].map(id => situacaoDoBotao(travado, id))).toEqual([null, null]);
+    }
+    expect(pedidoTravado(robo({ pedidos: [pedido(1)], avisos: [{ tipo: "falha", processo_id: null, texto: "x" }] }))).toBe(false);
+    expect(pedidoTravado(robo({ rodada, avisos: [{ tipo: "disparo", processo_id: null, texto: "x" }] }))).toBe(false);
   });
 });
