@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 class LiberarIn(BaseModel):
-    tabela: Literal["protocolos", "espelhos", "pleitos"]
+    tabela: Literal["protocolos", "espelhos", "pleitos", "medicao_planilha_envios"]
     id: int = Field(ge=1, le=MAX_INT64)
     justificativa: str = Field(max_length=2000)
     conferi_enviados: bool          # declaracao explicita (gate Sol S5)

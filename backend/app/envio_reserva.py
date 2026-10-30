@@ -20,7 +20,9 @@ from app import auditoria, db, tempo
 log = logging.getLogger("app.envio_reserva")
 
 # Lista fixa: o nome da tabela entra no SQL, entao nunca vem do cliente. Valor = entidade na auditoria.
-TABELAS = {"protocolos": "protocolo", "espelhos": "espelho", "pleitos": "pleito"}
+TABELAS = {"protocolos": "protocolo", "espelhos": "espelho", "pleitos": "pleito",
+           # issue #282: uma linha por versao da planilha/carta enviada (migracao 053)
+           "medicao_planilha_envios": "medicao_planilha_envio"}
 # Liberar antes disto pode soltar um envio que AINDA esta' saindo (gate Sol S1, 10/10/2026): quem recebe o 409
 # confere os Enviados enquanto o e-mail do outro ainda esta' no Graph, nao ve nada e libera. 15 minutos passa
 # de qualquer envio legitimo, inclusive a sessao de upload de 25 MB em blocos (timeout de 60 s por requisicao).
@@ -32,6 +34,13 @@ _CONDICAO = {
     "espelhos": "situacao='vigente' AND NOT EXISTS (SELECT 1 FROM espelho_medicoes em "
                 "JOIN espelho_medicoes em2 ON em2.medicao_id=em.medicao_id JOIN espelhos e2 ON e2.id=em2.espelho_id "
                 "WHERE em.espelho_id=espelhos.id AND e2.situacao='vigente' AND e2.versao > espelhos.versao)",
+    # Issue #282: so' a versao vigente da planilha/carta (revisao registrada no meio nao sai com a versao velha) e
+    # so' com a medicao num estado que envia (cancelada no meio nao sai)
+    "medicao_planilha_envios": "NOT EXISTS (SELECT 1 FROM medicao_planilhas p JOIN medicao_planilhas p2 "
+                               "ON p2.medicao_id=p.medicao_id WHERE p.id=medicao_planilha_envios.planilha_id "
+                               "AND p2.versao > p.versao) AND EXISTS (SELECT 1 FROM medicoes m "
+                               "WHERE m.id=medicao_planilha_envios.medicao_id "
+                               "AND m.estado IN ('planilha_gerada','planilha_enviada'))",
 }
 
 
@@ -115,7 +124,16 @@ def reservar(conn, tabela: str, id_: int, usuario_id: int, envio_id_visto: int |
 
 
 def _recusa_condicao(conn, tabela: str, id_: int) -> str:
-    """Mensagem de quem perdeu a corrida para a versao nova (so' espelhos tem condicao hoje)."""
+    """Mensagem de quem perdeu a corrida para a versao nova (ou, na planilha/carta, para a mudanca de estado)."""
+    if tabela == "medicao_planilha_envios":
+        r = conn.execute("SELECT m.estado, (SELECT MAX(p2.versao) FROM medicao_planilhas p2 WHERE "
+                         "p2.medicao_id=e.medicao_id) > p.versao AS superada FROM medicao_planilha_envios e "
+                         "JOIN medicao_planilhas p ON p.id=e.planilha_id JOIN medicoes m ON m.id=e.medicao_id "
+                         "WHERE e.id=?", (id_,)).fetchone()
+        if r["superada"]:
+            return "esta versão da planilha/carta foi revista: envie a versão vigente"
+        from app import medicoes   # import local, como o de protocolo em liberar_manual
+        return f"a medição está {medicoes.rotulo_estado(r['estado'])}: a planilha/carta não pode mais ser enviada"
     situacao = conn.execute(f"SELECT situacao FROM {tabela} WHERE id=?", (id_,)).fetchone()[0]
     if situacao != "vigente":
         return "esta versão do espelho foi substituída; envie a versão vigente"
