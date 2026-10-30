@@ -33,6 +33,46 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
 - Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Parar: `Stop-ScheduledTask -TaskName <tarefa>`; iniciar: `Start-ScheduledTask -TaskName <tarefa>`.
 - Watchdog: `scripts\instalar_watchdog.ps1` registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1` — confere `/api/health` e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
 
+### Deploy a partir do Mac (SSH)
+
+Caminho usado em 15/10/2026 (produção 109c887 para 8954dca, health 200). Vale quando não há sessão PowerShell elevada no
+próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático, backup pré-migração) é o descrito acima.
+
+1. **Conta.** `ssh <servidor>` com a conta local administradora de deploy: a sessão já chega elevada. A conta Azure AD
+   não serve ao OpenSSH do Windows.
+2. **Comandos como script pelo stdin**, nunca inline: `ssh <servidor> 'powershell -NoProfile -ExecutionPolicy Bypass -Command -' < script.ps1`
+   (aspas e `&` inline quebram no PowerShell 5.1). O `script.ps1` é um arquivo temporário no Mac, fora do repositório (nome
+   diferente de `scripts\deploy.ps1`, que é o do projeto). No `-Command -` uma falha de comando nativo não para o script:
+   conferir `$LASTEXITCODE` depois de cada `git` e sair com `exit 1`. Escrever cada conferência numa linha só (bloco de várias
+   linhas pode exigir uma linha em branco depois, no 5.1).
+3. **Primeira chamada, só leitura** (nada muda no servidor): `Set-Location` na pasta principal do projeto; `git switch master`;
+   `git pull --ff-only`; `git rev-parse master origin/master` iguais (senão `exit 1`); conferir administrador numa linha
+   (`if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 1 }`);
+   e imprimir o que vai subir: `git log --oneline "$atual..origin/master"` e `git diff --name-only` de `backend/migrations` e de `frontend`,
+   com `$atual` = `git -C C:\DashboardLotufo\app rev-parse HEAD`. Com isso a sessão avisa o Leo de migração nova (número e o que faz)
+   e escolhe `-SemFrontend` se nada em `frontend/` mudou.
+4. **Segunda chamada, o deploy**: criar o sentinela do watchdog (`New-Item -ItemType File -Path C:\DashboardLotufo\watchdog.pause -Force | Out-Null`),
+   `& .\scripts\deploy.ps1` (ou com `-SemFrontend`), **sem redirecionar stderr** dentro do PowerShell, e ler a linha final:
+   `DEPLOY OK`, `ROLLBACK OK`, `ROLLBACK TAMBEM FALHOU`, `BACKUP PRE-MIGRACAO FALHOU` seguido de `deploy abortado antes do
+   checkout` (nada mudou na produção), `deploy abortado no build; producao segue no commit anterior ...` (a produção segue no
+   commit anterior) ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`. Nos dois casos de
+   "intervir a mao" (`ROLLBACK TAMBEM FALHOU` e este último), **não apagar o sentinela** antes de o diretório pinado voltar ao
+   commit anterior.
+5. **Terceira chamada, conferência**: `Invoke-WebRequest http://localhost/api/health -UseBasicParsing` (200 com `banco: ok`),
+   `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao `origin/master`, e apagar o sentinela
+   (`Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`; `Test-Path` deve dar `False`).
+   Apagar o sentinela também quando o deploy der `ROLLBACK` ou `BACKUP PRE-MIGRACAO FALHOU`.
+6. **Se a chamada do deploy cair** (conexão SSH perdida, timeout da ferramenta) **ou não trouxer a linha final**: o PowerShell
+   remoto pode ter morrido sem rodar o `finally` do `deploy.ps1`, deixando o sentinela e o watchdog pausado. **`/api/health` 200 e
+   `rev-parse` igual ao `origin/master` não provam deploy concluído**: se a queda foi no `npm run build`, o pinado já está no
+   commit novo com o `dist` pela metade e o processo antigo segue no ar (o health só olha o banco). E `DEPLOY OK`/`ROLLBACK`
+   saem na tela, não em `logs\dashboard.log`, que portanto não serve de prova. O que fazer: reconectar, conferir
+   `Test-Path C:\DashboardLotufo\watchdog.pause`, manter (ou recriar) o sentinela e **rodar de novo `& .\scripts\deploy.ps1`**
+   (repetível: checkout, build, reinício, conferência e rollback), até vir a linha final; só então a chamada 3 e apagar o sentinela.
+   Um caminho desacoplado seria uma tarefa agendada avulsa (`Register-ScheduledTask` como SYSTEM, disparada e removida depois),
+   porque o OpenSSH do Windows provavelmente mata os processos da sessão ao fechá-la e `Start-Process` não escapa disso.
+   **Não testado.**
+
 ## Saúde
 `GET /api/health` toca o banco (503 se não responder) e devolve a última rodada de backup: `ultimo_snapshot`, `ultimo_snapshot_erro`, `ultima_copia_arquivos`, `ultima_copia_arquivos_erro`, `ultima_copia_externa`, `ultima_copia_externa_erro`, `ultima_copia_externa_arquivos`, `ultima_copia_externa_arquivos_erro`. Cópia externa com data de ontem ou erro preenchido = olhar o log.
 

@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Sobe o master do GitHub para a produção neste servidor, seguindo docs/runbook.md seção "Subir e derrubar" - sentinela do watchdog, scripts\deploy.ps1 com rollback automático, conferência do /api/health e registro do commit. Usar quando o Leo pedir "deploy", "sobe para produção" ou "põe no ar", depois de a PR estar mergeada.
+description: Sobe o master do GitHub para a produção (no próprio servidor ou do Mac por SSH), seguindo docs/runbook.md seção "Subir e derrubar" - sentinela do watchdog, scripts\deploy.ps1 com rollback automático, conferência do /api/health e registro do commit. Usar quando o Leo pedir "deploy", "sobe para produção" ou "põe no ar", depois de a PR estar mergeada.
 ---
 
 # Deploy em produção
@@ -25,6 +25,28 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
 4. **Sessão elevada** (o script para e inicia a tarefa agendada):
    `([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)`
    → `True`. Se `False`, pedir ao Leo para rodar o deploy num PowerShell aberto como administrador.
+
+## Dois caminhos: local elevado ou SSH
+
+- **Local elevado**: a sessão roda no próprio servidor, num PowerShell como administrador. As pré-condições 3 e 4
+  se conferem direto ali; os comandos abaixo valem como estão.
+- **SSH, a partir do Mac**: runbook, subseção "Deploy a partir do Mac (SSH)". Entrar com `ssh <servidor>` na conta
+  local administradora de deploy (a conta Azure AD não serve); a sessão já vem elevada. Mandar os comandos como
+  **script pelo stdin** (`ssh <servidor> 'powershell -NoProfile -ExecutionPolicy Bypass -Command -' < script.ps1`),
+  nunca inline (aspas e `&` quebram no PowerShell 5.1); conferências numa linha só, e `$LASTEXITCODE` depois de cada
+  `git`, com `exit 1`, porque no `-Command -` falha nativa não para o script. Em **três chamadas em sequência**:
+  1. só leitura: `Set-Location` na pasta principal, `git switch master`, `git pull --ff-only`, `git rev-parse master origin/master`
+     iguais, `IsInRole(...Administrator)` acima dando `True` e o bloco "Antes de rodar" (log, migrações, frontend). Daqui
+     a sessão avisa o Leo da migração e escolhe `-SemFrontend`. As pré-condições 1 e 2 (`gh`) rodam no Mac;
+  2. o deploy: sentinela e "Rodar" itens 1 a 3;
+  3. conferência de saúde e commit, e apagar o sentinela (itens 4 e 5).
+
+  Se a chamada 2 cair ou vier sem a linha final, o `finally` do `deploy.ps1` pode não ter rodado. Health 200 e `rev-parse`
+  igual **não provam** deploy concluído (queda no build deixa o `dist` pela metade com o processo antigo no ar) e
+  `logs\dashboard.log` não traz `DEPLOY OK`/`ROLLBACK`: reconectar, manter o sentinela e **rodar de novo
+  `& .\scripts\deploy.ps1`** (repetível) até vir a linha final; só então conferir e apagar o sentinela (ver runbook).
+- Nos dois: nome de máquina, usuário e IP não entram em texto, commit nem registro (repositório público); usar
+  `<servidor>` e "conta de deploy".
 
 ## Antes de rodar: o que vai subir
 
@@ -63,8 +85,11 @@ git diff --name-only "$atual" origin/master -- frontend
      anterior voltou. Avisar o Leo, não tentar de novo sozinho, olhar `C:\DashboardLotufo\logs\dashboard.log`.
      O rollback não volta o banco: se houve backup pré-migração, dizer ao Leo o caminho do arquivo, que é o
      que se restaura à mão (runbook, "Restaurar o banco a partir de um snapshot") se for preciso.
-   - `ROLLBACK TAMBEM FALHOU - intervir a mao` → avisar o Leo na hora; logs em
-     `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
+   - `deploy abortado no build; producao segue no commit anterior ...` → a versão nova não subiu e a produção
+     segue no commit anterior. Avisar o Leo com o motivo, não tentar de novo sozinho.
+   - `ROLLBACK TAMBEM FALHOU - intervir a mao` ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`
+     → avisar o Leo na hora; logs em `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
+     **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior.
 4. Conferir a saúde na própria máquina (runbook, "Saúde"):
    `Invoke-WebRequest http://localhost/api/health -UseBasicParsing` → 200 com `banco: ok`
    (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
