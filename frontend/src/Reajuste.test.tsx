@@ -83,6 +83,26 @@ describe("Reajuste", () => {
     expect(screen.queryByText(/atendido pelo apostilamento/)).toBeNull();
   });
 
+  it("termo do ciclo corrente sem ligação fica no cartão do ciclo; o corrigido não vira ciclo anterior (PR #317)", async () => {
+    const termo = (id: number, chave: string, numero: string, ciclo: number, corrige?: string) => ({ id, chave,
+      tipo: "apostilamento_reajuste", numero, data: `${ciclo}-09-01`, dados: { data_base: "2024-06", ciclo, ...(corrige ? { corrige } : {}) } });
+    const instrumentos = [termo(1, "ap-26a", "AP-26A", 2026), termo(2, "ap-26b", "AP-26B", 2026, "ap-26a"),
+                          termo(3, "ap-25", "AP-25", 2025)];
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "apostilamento_pendente", dias: 40, pleito: null, apostilamento: null }],
+          pleitos: [], competencias: [] }
+      : { instrumentos });
+    const { container } = render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByText("apostilamento pendente");
+    const corpo = screen.getByText("Ciclo de 2026 · aniversário em 01/06/2026").parentElement!;
+    expect(corpo.textContent).toContain("AP-26B, de 01/09/2026");
+    expect(corpo.textContent).not.toContain("AP-26A");
+    const anteriores = container.querySelector('[aria-label="Apostilamentos anteriores da data-base 06/2024"]');
+    expect([...anteriores!.querySelectorAll("li")].map(li => li.textContent)).toEqual(["AP-25, de 01/09/2025"]);
+    expect(container.textContent).not.toContain("AP-26A");
+  });
+
   it("pleito de ciclo anterior ligado a um termo também diz que foi atendido (issue #271)", async () => {
     const termo = { id: 4, chave: "ap-09", tipo: "apostilamento_reajuste", numero: "019/2024/02/09", data: "2025-08-01",
       dados: { data_base: "2024-06", ciclo: 2025 } };

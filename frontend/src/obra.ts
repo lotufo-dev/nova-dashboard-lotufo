@@ -50,6 +50,18 @@ export type PleitoResumo = { id: number; data_base_mes: string | null; ciclo: nu
 export type DataBase<C extends CicloApi, P, I> = { data_base_mes: string; atual: C;
   pleitosDoCiclo: P[]; pleitosAnteriores: P[]; apostilamentos: I[] };
 
+/** O ciclo (ano) que o apostilamento fecha: `ciclo`, senao o ano da `eficacia`, senao o da data do termo (a regra de
+ *  `reajuste.ciclo_do_apostilamento`). */
+export function cicloDoApostilamento(i: InstrumentoCadastro): number | null {
+  const ano = Number(String(i.dados.ciclo || i.dados.eficacia || i.data).slice(0, 4));
+  return Number.isInteger(ano) && ano > 0 ? ano : null;
+}
+
+/** Os termos que outro apostilamento corrige (`corrige` nos dados): nao valem (`reajuste._termo_vale`). */
+export function termosCorrigidos(lista: InstrumentoCadastro[]): Set<string> {
+  return new Set(lista.map(i => i.dados.corrige).filter((k): k is string => typeof k === "string" && k !== ""));
+}
+
 /** Aba Reajuste: um cartao por data-base, com o ciclo corrente (o que a API manda), os pleitos dele e, a parte,
  *  os pleitos dos ciclos passados. Apostilamento vai para a data-base que ele diz (`dados.data_base`); sem ela,
  *  para a data-base unica do contrato (a regra de `reajuste._apostilamento`); o que nao se sabe onde fica sobra

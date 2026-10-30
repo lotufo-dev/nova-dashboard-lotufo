@@ -3,7 +3,7 @@ import { api, mensagemDeErro } from "./api";
 import { CartaoPleito, NovoPleito, type Pleito, type Reemissao } from "./FluxoOficio";
 import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
-import { reajustePorDataBase, type CicloApi, type InstrumentoCadastro } from "./obra";
+import { cicloDoApostilamento, reajustePorDataBase, termosCorrigidos, type CicloApi, type InstrumentoCadastro } from "./obra";
 import { Link } from "./Link";
 import { fmtCompetencia as mesAno, fmtDataPura } from "./tempo";
 import { brl, fmtPercentual } from "./formato";
@@ -185,7 +185,13 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const c = db.atual;
         const s = SITUACAO[c.situacao] ?? { rotulo: c.situacao, classe: "" };
         const titulo = `titulo-db-${db.data_base_mes}`;
-        const outrosAp = db.apostilamentos.filter(i => i.id !== c.apostilamento?.id);
+        // termos que valem, separados pelo ciclo deles (PR #317): os do ciclo corrente ficam no cartao, mesmo sem
+        // pleito ligado; o corrigido por outro nao vale e sai da aba (segue em Contrato > Instrumentos)
+        const corrigidos = termosCorrigidos(db.apostilamentos);
+        const validos = db.apostilamentos.filter(i => !i.chave || !corrigidos.has(i.chave));
+        const doCiclo = [...(c.apostilamento ? [c.apostilamento] : []),
+          ...validos.filter(i => i.id !== c.apostilamento?.id && cicloDoApostilamento(i) === c.ciclo)];
+        const outrosAp = validos.filter(i => !doCiclo.some(d => d.id === i.id));
         const anteriores = db.pleitosAnteriores.length + outrosAp.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
         const apostiladas = (dados.competencias ?? []).filter(x => x.data_base_mes === db.data_base_mes);
@@ -231,9 +237,9 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
             </div>
             <div className="cartao__corpo linhas">
               <p className="num">{linhaDoCiclo(c)}</p>
-              {c.apostilamento && (
-                <p><span className="resumo__rotulo">Apostilamento</span>{" "}{textoApostilamento(c.apostilamento)}</p>
-              )}
+              {doCiclo.map(i => (
+                <p key={i.id}><span className="resumo__rotulo">Apostilamento</span>{" "}{textoApostilamento(i)}</p>
+              ))}
               {apostiladas.length > 0 && <TabelaApostilada dataBase={db.data_base_mes} linhas={apostiladas} />}
             </div>
             {(formAberto || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
