@@ -51,6 +51,16 @@ export function fmtDataHora(iso: string): string {
   return `${p.day}/${p.month}/${p.year} às ${p.hour}:${p.minute}`;
 }
 
+/** Quanto durou, entre dois carimbos: "38 s" ou "1 min 05 s" ("—" se algum for ilegivel ou o fim vier antes do inicio). */
+export function fmtDuracao(inicio: string, fim: string): string {
+  const a = paraDate(inicio), b = paraDate(fim);
+  if (a === null || b === null || b < a) return "—";
+  const s = Math.round((b.getTime() - a.getTime()) / 1000);
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60), r = s % 60;
+  return m < 60 ? `${m} min ${String(r).padStart(2, "0")} s` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+}
+
 /** Instante -> "HH:MM" em Cuiaba (A-05, 10/10/2026: "bloqueado até 14:35" na lista de usuarios). */
 export function fmtHora(iso: string): string {
   const d = paraDate(iso);

@@ -9,9 +9,8 @@ import { IconeAlerta, IconeBaixar, IconeMais } from "./icones";
 import { larDoEspelho, tituloMedicao } from "./medicao";
 import { brl } from "./Medicoes";
 import { Link } from "./Link";
-import { fmtTamanho as kb } from "./formato";
 // data-hora no fuso de Cuiaba (tempo.ts), e nao no do navegador; competencia em MM/AAAA
-import { fmtCompetencia as competenciaBR, fmtDataHora as dataHoraBR } from "./tempo";
+import { fmtCompetencia as competenciaBR, fmtDataHora as dataHoraBR, fmtDataPura as dataBR } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
@@ -66,13 +65,18 @@ type Passo = { tipo: "lista" } | { tipo: "form" } | { tipo: "previa"; previa: Pr
 // medicao que nasceu dele (na obra do fluxo antigo, mostra `semRegra`, o formulario a mao); com `medicao`,
 // a secao Espelho da pagina da medicao, com os espelhos dela e o envio ao faturamento. O espelho que atende
 // execucao e reajuste mora na medicao de execucao; a de reajuste mostra um resumo com o link.
-export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra, medicao, semRegra, aoGerar, abrirForm: abrirLogo }: {
+export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra, medicao, semRegra, aoGerar, abrirForm: abrirLogo, parte, inicial }: {
   contratoId: number; podeEditar: boolean; aoMudar: () => void; aoSaberRegra?: (ativa: boolean) => void;
   medicao?: { id: number; tipo: string }; semRegra?: React.ReactNode;
   /** Nova medicao (2026-10-09): recebe a medicao que nasceu do espelho, para abrir a pagina dela. */
   aoGerar?: (medicaoId: number) => void;
   /** Abre ja' no formulario (a pagina Nova medicao nao tem outra coisa a mostrar). */
   abrirForm?: boolean;
+  /** Pagina da medicao (#152): `espelho` e' a etapa 1 (os valores, os arquivos, "Gerar de novo"; sem moldura) e
+   *  `faturamento` a etapa 2 (o que foi ao faturamento e o envio). Sem `parte`, o cartao inteiro de antes. */
+  parte?: "espelho" | "faturamento";
+  /** Numero e competencia da medicao prevista, para o formulario abrir preenchido. */
+  inicial?: { numero: number; competencia: string };
 }) {
   const [regra, setRegra] = useState<Regra | null | undefined>(undefined);
   const [espelhos, setEspelhos] = useState<EspelhoDetalhe[]>([]);
@@ -108,7 +112,17 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     const g = geracao.current;
     setRegra(undefined); setEspelhos([]); setPasso({ tipo: "lista" }); setErro(""); setFeito(""); setGerado(null);
     carregar()
-      .then(r => { if (abrirLogo && r?.regra?.situacao === "ativa" && g === geracao.current) setPasso({ tipo: "form" }); })
+      .then(r => {
+        if (!abrirLogo || r?.regra?.situacao !== "ativa" || g !== geracao.current) return;
+        // medicao prevista (do cronograma): o formulario abre com o numero e a competencia dela
+        if (inicial) {
+          const [pi, pf] = mesCivil(inicial.competencia);
+          const novo = { numero: String(inicial.numero), competencia: inicial.competencia, entradas: {}, motivo: "", periodoInicio: pi, periodoFim: pf };
+          baseForm.current = JSON.stringify(novo);
+          setForm(novo);
+        }
+        setPasso({ tipo: "form" });
+      })
       .catch(e => { if (g === geracao.current) setErro(mensagem(e)); });
     return () => { geracao.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,22 +133,28 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
   // e na obra (#nova-medicao), onde a fila manda quem precisa gerar o espelho de uma obra sem medicao aberta
   const idSecao = medicao ? "espelho" : "nova-medicao";
   if (regra === undefined && !erro) {
-    return medicao ? <section className="cartao" id={idSecao}><div className="vazio"><p>Carregando o espelho…</p></div></section> : null;
+    return medicao || parte ? <section className={parte ? "espelho-etapa" : "cartao"} id={idSecao}><div className="vazio"><p>Carregando o espelho…</p></div></section> : null;
   }
   if (!regra || regra.situacao !== "ativa") {
-    // `undefined` aqui e' a carga que falhou: sem saber a regra, a tela nao diz "fluxo antigo" nem oferece a
-    // medicao manual (o servidor a recusa numa obra com regra ativa, issue #12, mas a tela nao deve oferece-la)
+    // `undefined` aqui e' a carga que falhou: sem saber a regra, a tela nao oferece a medicao manual (o servidor a
+    // recusa numa obra com regra ativa, issue #12, mas a tela nao deve oferece-la)
     const falhou = regra === undefined;
+    if (parte) {
+      return (
+        <section className="espelho-etapa pilha" id={idSecao}>
+          {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</p>}
+          {!falhou && (medicao ? <div className="vazio"><p>Nenhum espelho.</p></div> : semRegra)}
+        </section>
+      );
+    }
     return (
       <section className="cartao" aria-labelledby="titulo-espelho" id={idSecao}>
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-espelho">{titulo}</h2>
-          {/* na obra, o formulario da medicao manual ja' diz isso (e o que fazer) */}
-          {!falhou && (medicao || !semRegra) && <span className="cartao__dica">Esta obra ainda gera o espelho pelo fluxo antigo</span>}
         </div>
         {erro && <div className="cartao__corpo"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />
           {erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</p></div>}
-        {!falhou && !medicao && semRegra}
+        {!falhou && (medicao ? <div className="vazio"><p>Nenhum espelho.</p></div> : semRegra)}
       </section>
     );
   }
@@ -218,18 +238,22 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     } finally { setOcupado(false); }
   };
 
-  // Evidencia do orgao (spec §3 passo 1, opcional): o PDF que o orgao mandou vai para a
-  // medicao de EXECUCAO do espelho; aparece na linha da medicao, em Documentos.
+  // Evidencia do orgao (spec §3 passo 1, opcional): o PDF que o orgao mandou vai para a medicao
+  // da pagina; fora dela, para a casa do espelho (execucao viva). Nunca para uma medicao superada (#212).
   const anexarEvidencia = async (esp: EspelhoDetalhe, input: HTMLInputElement) => {
     const arquivo = input.files?.[0];
     if (!arquivo) return;
-    const med = esp.medicoes.find(m => m.tipo === "execucao") ?? esp.medicoes[0];
+    const alvo = medicao && esp.medicoes.some(m => m.id === medicao.id && !m.superado) ? medicao.id : larDoEspelho(esp);
+    const med = esp.medicoes.find(m => m.id === alvo);
+    if (!med) { setFeito(""); setErro("Este espelho não tem medição em vigor para receber o anexo."); input.value = ""; return; }
     setErro(""); setFeito(""); setOcupado(true);
     try {
       const fd = new FormData();
       fd.append("arquivo", arquivo);
       const r = await apiForm<{ documento_id: number; repetido: boolean }>(`/api/medicoes/${med.id}/documentos`, fd);
-      setFeito(r.repetido ? `${arquivo.name} já estava anexado a esta medição.` : `${arquivo.name} anexado à medição ${esp.numero} como evidência do órgão.`);
+      // sem ponto final: a mensagem de `feito` ganha o ponto na hora de mostrar
+      setFeito(r.repetido ? `${arquivo.name} já estava anexado a esta medição`
+        : `${arquivo.name} anexado como evidência do órgão em: ${tituloMedicao({ numero: esp.numero, tipo: med.tipo })}`);
       aoMudar();
     } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); input.value = ""; }
   };
@@ -268,8 +292,12 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     </Rolagem>
   );
 
+  // a etapa da pagina da medicao (`parte`) vai sem moldura propria: a moldura e' a da etapa
+  const Raiz = parte ? "div" : "section";
+  const so = (p: "espelho" | "faturamento") => !parte || parte === p;   // este pedaco aparece nesta parte?
   return (
-    <section className="cartao" aria-labelledby="titulo-espelho" id={idSecao}>
+    <Raiz className={parte ? "espelho-etapa pilha" : "cartao"} {...(parte ? {} : { "aria-labelledby": "titulo-espelho" })} id={idSecao}>
+      {!parte && (
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id="titulo-espelho">{titulo}</h2>
         {podeEditar && passo.tipo === "lista" && !medicao && (
@@ -280,7 +308,11 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
           </div>
         )}
       </div>
+      )}
 
+      {parte && !medicao && podeEditar && passo.tipo === "lista" && (
+        <div><button type="button" className="btn btn--primario" onClick={() => abrirForm()}><IconeMais className="icone icone--p" /> Gerar espelho</button></div>
+      )}
       {erro && <div className="cartao__corpo"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p></div>}
       {passo.tipo === "envio" && reservado?.id === passo.espelho.id && (
         <div className="cartao__corpo"><LiberarEnvio tabela="espelhos" id={reservado.id} reserva={reservado.reserva}
@@ -300,14 +332,14 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
       )}
       </div>
 
-      {passo.tipo === "form" && (
+      {passo.tipo === "form" && so("espelho") && (
         <form className="cartao__corpo" onSubmit={conferir} aria-label="Gerar espelho">
-          <p className="painel__titulo">Gerar espelho: número, competência e os valores informados pelo órgão</p>
+          <p className="painel__titulo">Gerar espelho</p>
           <div className="form-inline">
             <div className="campo">
               <label className="campo__rotulo" htmlFor="esp-numero">Nº da medição</label>
               <input id="esp-numero" name="numero" autoComplete="off" spellCheck={false} className="entrada--curta entrada--num num" required inputMode="numeric"
-                pattern="[0-9]{1,3}" placeholder="Ex.: 10…" value={form.numero}
+                pattern="[0-9]{1,3}" value={form.numero}
                 onChange={e => setForm({ ...form, numero: e.target.value })} />
             </div>
             <div className="campo">
@@ -334,14 +366,11 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
               <div className="campo" key={en.chave}>
                 <label className="campo__rotulo" htmlFor={`esp-${en.chave}`}>{en.rotulo}</label>
                 <CampoValor id={`esp-${en.chave}`} name={en.chave} className="entrada--media num"
-                  value={form.entradas[en.chave] ?? ""} ajudaId="esp-ajuda-valor"
+                  value={form.entradas[en.chave] ?? ""}
                   onChange={v => setForm({ ...form, entradas: { ...form.entradas, [en.chave]: v } })} />
               </div>
             ))}
           </div>
-          <p className="campo__nota" id="esp-ajuda-valor">Digite só os números: os centavos e os pontos entram sozinhos.
-            Campo vazio vale zero; nota com valor zero não é emitida.</p>
-          <p className="campo__nota">O período vem com o mês da competência; mude só quando o espelho cobrir outro intervalo (ex.: 05/02 a 28/02).</p>
           <div className="painel__rodape form-inline">
             <button type="submit" className="btn btn--primario" disabled={ocupado}>{ocupado ? "Conferindo…" : "Conferir"}</button>
             <button type="button" className="btn" onClick={() => setPasso({ tipo: "lista" })}>Voltar</button>
@@ -349,15 +378,15 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
         </form>
       )}
 
-      {passo.tipo === "previa" && (
+      {passo.tipo === "previa" && so("espelho") && (
         <div className="cartao__corpo">
-          <p className="painel__titulo">Conferir antes de gerar: uma linha por nota</p>
+          <p className="painel__titulo">Conferir antes de gerar</p>
           <p className="campo__nota">Período no espelho: <span className="num">{passo.previa.periodo}</span></p>
           {tabelaNotas(passo.previa.saidas)}
           <ul className="lista-simples espelho__medicoes">
             {passo.previa.medicoes.map(m => (
               <li key={m.tipo}>Medição {form.numero} de {TIPO[m.tipo] ?? m.tipo}: {brl(m.valor_centavos)}
-                {m.existente ? ` (já existe, ${m.existente.replace("_", " ")}: vira versão nova)` : " (nova)"}</li>
+                {m.existente && <> <Selo classe="selo--atencao">Versão nova</Selo></>}</li>
             ))}
           </ul>
           {passo.previa.avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
@@ -375,9 +404,9 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
         </div>
       )}
 
-      {passo.tipo === "envio" && (
+      {passo.tipo === "envio" && so("faturamento") && (
         <div className="cartao__corpo">
-          <p className="painel__titulo">Enviar ao faturamento: espelho nº {passo.espelho.numero} ({competenciaBR(passo.espelho.competencia)}), versão {passo.espelho.versao}</p>
+          <p className="painel__titulo">Enviar ao faturamento</p>
           {passo.previa.avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
           {(passo.espelho.envio || jaEnviado) && (
             <label>
@@ -388,7 +417,6 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
           <ComporEmail key={passo.espelho.id} ocupado={ocupado} anexos={passo.previa.anexos}
             inicial={{ para: passo.previa.para, copia: passo.previa.copia, cco: [], assunto: passo.previa.assunto, corpo: passo.previa.corpo }}
             aoEnviar={enviar} aoDescartar={() => setPasso({ tipo: "lista" })} />
-          <p className="campo__nota">O e-mail sai da sua conta Microsoft e a medição passa a Espelho enviado.</p>
         </div>
       )}
 
@@ -396,75 +424,98 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
         const lar = esp.medicoes.find(x => x.id === larDoEspelho(esp));
         return (
           <div className="cartao__corpo" key={esp.id}>
-            <p>
-              O espelho desta competência (nº {esp.numero}, versão {esp.versao}
-              {esp.envio ? `, enviado ao faturamento em ${dataHoraBR(esp.envio.enviado_em)}` : ", ainda não enviado ao faturamento"}) mora
-              na{" "}
-              {lar
-                ? <Link para={{ tela: "medicao", obra: contratoId, id: lar.id }} secao="espelho">
-                    {tituloMedicao({ numero: esp.numero, tipo: lar.tipo })}
-                  </Link>
-                : "medição de execução"}.
-            </p>
+            {lar && (
+              <p><Link para={{ tela: "medicao", obra: contratoId, id: lar.id }} secao="espelho">
+                Abrir o espelho na {tituloMedicao({ numero: esp.numero, tipo: lar.tipo })}
+              </Link></p>
+            )}
           </div>
         );
       })}
 
       {medicao && passo.tipo === "lista" && vigentes.length === 0 && deOutra.length === 0 && (
-        <div className="vazio"><p>Esta medição não tem espelho gerado pelo sistema.</p></div>
+        <div className="vazio"><p>Nenhum espelho.</p></div>
       )}
 
-      {medicao && passo.tipo === "lista" && vigentes.map(esp => (
-        <article className="cartao__corpo espelho__item" key={esp.id} aria-label={`Espelho nº ${esp.numero}`}>
+      {medicao && passo.tipo === "lista" && vigentes.map(esp => {
+        // #212: com uma das medicoes ja' em espelho mais novo, este fica so' para leitura (o servidor recusa
+        // o envio, e gerar de novo partiria dos valores antigos da superada)
+        const superadas = esp.medicoes.filter(m => m.superado);
+        const soLeitura = superadas.length > 0;
+        return (
+        <article className={parte ? "pilha espelho__item" : "cartao__corpo espelho__item"} key={esp.id} aria-label={`Espelho nº ${esp.numero}`}>
+          {!parte && (
           <div className="espelho__cabeca">
             <strong>Nº {esp.numero} · {competenciaBR(esp.competencia)}</strong>
-            <span className="cartao__dica">versão {esp.versao} · gerado em {dataHoraBR(esp.criado_em)}{esp.criado_por_nome ? ` por ${esp.criado_por_nome}` : ""}</span>
             {/* o estado do envio e' SELO (nao texto de apoio): e' o que diz se falta um passo */}
             {esp.envio
-              ? <>
-                  <Selo classe="selo--ok">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
-                  <span className="cartao__dica">por {esp.envio.remetente} → {esp.envio.para.join(", ")}</span>
-                </>
+              ? <Selo classe="selo--ok">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
               : <Selo classe="selo--atencao" forte>Não enviado ao faturamento</Selo>}
           </div>
-          {tabelaNotas(esp.saidas)}
-          <ul className="lista-simples lista-simples--arquivos">
-            {esp.arquivos.map(a => (
-              <li key={a.documento_id}>
-                <a href={`/api/espelhos/${esp.id}/arquivos/${a.documento_id}`}><IconeBaixar className="icone icone--p" /> {a.nome}</a>
-                <span className="num"> ({kb(a.tamanho)})</span>
-              </li>
-            ))}
-          </ul>
+          )}
+          {so("espelho") && (
+            <div className={parte ? "med-caixa" : undefined}>{tabelaNotas(esp.saidas)}</div>
+          )}
+          {parte === "espelho" && (
+            <ul className="med-linhas med-linhas--caixa">
+              {regra.entradas.filter(en => esp.entradas?.[en.chave] !== undefined).map(en => (
+                <li key={en.chave}><span>{en.rotulo.replace(/\s*\(R\$\)\s*$/, "")}</span><span className="num">{brl(esp.entradas[en.chave])}</span></li>
+              ))}
+              {esp.periodo_inicio && esp.periodo_fim && (
+                <li><span>Período no espelho</span><span className="num">{dataBR(esp.periodo_inicio)} a {dataBR(esp.periodo_fim)}</span></li>
+              )}
+            </ul>
+          )}
+          <div>
+            {parte && <p className="med-sub">Arquivos</p>}
+            <ul className="lista-simples lista-simples--arquivos">
+              {esp.arquivos.map(a => (
+                <li key={a.documento_id}>
+                  <a href={`/api/espelhos/${esp.id}/arquivos/${a.documento_id}`}><IconeBaixar className="icone icone--p" /> {a.nome}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+          {superadas.map(m => (
+            <p className="campo__nota" key={m.id}>
+              {/* sem artigo antes do titulo: "Reajuste da 10ª Medicao" e' masculino, as outras femininas */}
+              Este espelho fica só para leitura: já existe espelho mais novo para{" "}
+              <Link para={{ tela: "medicao", obra: contratoId, id: m.id }} secao="espelho">{tituloMedicao({ numero: esp.numero, tipo: m.tipo })}</Link>.
+            </p>
+          ))}
           {podeEditar && (
-            <div className="form-inline">
+            <div className={parte ? "med-acoes" : "form-inline"}>
               {/* primario so' enquanto nao foi enviado: "Enviar de novo" nao e' o proximo passo */}
-              <button type="button" className={`btn btn--pequeno${esp.envio ? "" : " btn--primario"}`} disabled={ocupado} onClick={() => abrirEnvio(esp)}>
-                {esp.envio ? "Enviar de novo" : "Enviar ao faturamento"}
-              </button>
-              <button type="button" className="btn btn--pequeno" onClick={() => abrirForm(esp)}>Gerar de novo</button>
-              <label className="btn btn--pequeno espelho__anexar">
-                Anexar o que o órgão mandou (PDF)
-                <input type="file" name="evidencia" accept="application/pdf" className="espelho__arquivo" disabled={ocupado}
-                  aria-label={`Anexar evidência do órgão à medição ${esp.numero}`}
-                  onChange={ev => anexarEvidencia(esp, ev.currentTarget)} />
-              </label>
+              {so("faturamento") && !soLeitura && (
+                <button type="button" className={`btn btn--pequeno${esp.envio ? "" : " btn--primario"}`} disabled={ocupado} onClick={() => abrirEnvio(esp)}>
+                  {esp.envio ? "Enviar de novo" : "Enviar ao faturamento"}
+                </button>
+              )}
+              {so("espelho") && !soLeitura && <button type="button" className="btn btn--pequeno" onClick={() => abrirForm(esp)}>Gerar de novo</button>}
+              {so("espelho") && (
+                <label className="btn btn--pequeno espelho__anexar">
+                  Anexar o que o órgão mandou (PDF)
+                  <input type="file" name="evidencia" accept="application/pdf" className="espelho__arquivo" disabled={ocupado}
+                    aria-label={`Anexar evidência do órgão à medição ${esp.numero}`}
+                    onChange={ev => anexarEvidencia(esp, ev.currentTarget)} />
+                </label>
+              )}
             </div>
           )}
         </article>
-      ))}
+        );
+      })}
 
-      {medicao && passo.tipo === "lista" && substituidos.length > 0 && (
-        <details className="detalhes cartao__corpo">
-          <summary>Versões anteriores ({substituidos.length})</summary>
+      {medicao && passo.tipo === "lista" && so("espelho") && substituidos.length > 0 && (
+        <details className={parte ? "detalhes" : "detalhes cartao__corpo"}>
+          <summary>Versões anteriores</summary>
           <ul className="lista-simples">
             {substituidos.map(e => (
-              <li key={e.id}>Nº {e.numero} · {competenciaBR(e.competencia)} · versão {e.versao} · substituída
-                {e.motivo ? `: ${e.motivo}` : ""}{e.envio ? ` · tinha sido enviada em ${dataHoraBR(e.envio.enviado_em)}` : ""}</li>
+              <li key={e.id}>Nº {e.numero} · {competenciaBR(e.competencia)} · versão {e.versao}{e.motivo ? ` · ${e.motivo}` : ""}</li>
             ))}
           </ul>
         </details>
       )}
-    </section>
+    </Raiz>
   );
 }

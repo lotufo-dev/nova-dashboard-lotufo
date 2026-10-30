@@ -44,6 +44,7 @@
 .ap__entrada:focus-visible { outline: 2px solid var(--foco); outline-offset: 1px; }
 .ap__form .btn { height: 36px; }
 .ap__gravado { margin: 6px 0 0; color: var(--ok); font-weight: 500; min-height: 20px; }
+.ap__sem-numero { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .ap__links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--linha-suave); }
 .ap__link { color: var(--acento); text-decoration: none; font-weight: 500; }
 .ap__link:hover { color: var(--acento-forte); text-decoration: underline; }

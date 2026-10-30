@@ -1,3 +1,7 @@
+import sqlite3
+
+from fastapi.testclient import TestClient
+
 from app import db, auth
 
 def _conn(tmp_path, monkeypatch):
@@ -439,3 +443,112 @@ def test_escrita_equivalente_em_paralelo_preserva_os_contadores(tmp_path, monkey
         t.join()
     row = conn.execute("SELECT tentativas_falhas, bloqueado_ate FROM usuarios WHERE id=?", (uid,)).fetchone()
     assert (row["tentativas_falhas"], row["bloqueado_ate"]) == (3, None)
+
+
+# --- #3: limite de tentativas de login por origem (decisao do Leo de 19/10/2026: 20 erradas por IP em 15 min) ---
+
+
+def _de(client, ip):
+    """Outro client na MESMA app (mesmo limite em memoria), vindo de outro IP."""
+    return TestClient(client.app, client=(ip, 50000))
+
+def _conta():
+    conn = db.get_conn()
+    try:
+        return conn.execute("SELECT tentativas_falhas, bloqueado_ate FROM usuarios WHERE email='leo@lotufo.com'").fetchone()
+    finally:
+        conn.close()
+
+def _esgotar(c, n=None):
+    # e-mail inexistente: gasta a cota do IP sem trancar conta nenhuma
+    for i in range(auth.LIMITE_ORIGEM if n is None else n):
+        assert c.post("/api/auth/login", json={"email": f"x{i}@exemplo.com.br", "senha": "errada"}).status_code == 401
+
+def _entrar(c, senha="senha-forte-123"):
+    return c.post("/api/auth/login", json={"email": "leo@lotufo.com", "senha": senha})
+
+def test_limite_por_origem_e_o_decidido():
+    assert (auth.LIMITE_ORIGEM, auth.JANELA_ORIGEM_MIN) == (20, 15)
+
+def test_ip_acima_do_teto_recebe_429_sem_contar_contra_a_conta(client):
+    _seed()
+    atacante = _de(client, "10.0.0.66")
+    _esgotar(atacante)
+    r = _entrar(atacante, "errada")
+    assert r.status_code == 429
+    assert int(r.headers["Retry-After"]) > 0
+    assert "tentativas" in r.json()["detail"]
+    linha = _conta()
+    assert linha["tentativas_falhas"] == 0 and linha["bloqueado_ate"] is None
+    # recusa antes de conferir: nem a senha certa entra por esse IP enquanto durar a janela
+    assert _entrar(atacante).status_code == 429
+
+def test_login_certo_de_outro_ip_entra_enquanto_um_ip_abusa(client):
+    _seed()
+    atacante = _de(client, "10.0.0.66")
+    _esgotar(atacante)
+    assert _entrar(atacante, "errada").status_code == 429
+    assert _entrar(_de(client, "10.0.0.7")).status_code == 200
+
+def test_login_certo_nao_gasta_a_cota_do_ip(client):
+    _seed()
+    c = _de(client, "10.0.0.8")
+    _esgotar(c, auth.LIMITE_ORIGEM - 1)
+    for _ in range(3):
+        assert _entrar(c).status_code == 200
+    assert c.post("/api/auth/login", json={"email": "y@exemplo.com.br", "senha": "y"}).status_code == 401
+    assert c.post("/api/auth/login", json={"email": "y@exemplo.com.br", "senha": "y"}).status_code == 429
+
+def test_cota_do_ip_volta_depois_da_janela(client, monkeypatch):
+    _seed()
+    agora = [1000.0]
+    monkeypatch.setattr(auth, "_relogio", lambda: agora[0])
+    c = _de(client, "10.0.0.9")
+    _esgotar(c)
+    assert _entrar(c).status_code == 429
+    agora[0] += auth.JANELA_ORIGEM_MIN * 60 - 1
+    assert _entrar(c).status_code == 429
+    agora[0] += 2
+    assert _entrar(c).status_code == 200
+
+def test_producao_nao_aceita_x_forwarded_for():
+    # revisor-adversarial: o uvicorn aceita X-Forwarded-For de 127.0.0.1 por padrao; quem tem sessao no servidor
+    # trocaria de "origem" a cada pedido e furaria a cota. Sem proxy na frente, a origem e' so' a conexao.
+    import pathlib
+    script = (pathlib.Path(__file__).resolve().parents[2] / "scripts" / "rodar_producao.ps1").read_text(encoding="utf-8")
+    comandos = [linha for linha in script.splitlines() if "-m uvicorn" in linha]
+    assert len(comandos) == 2
+    assert all("--no-proxy-headers" in c for c in comandos)
+
+def test_origem_e_a_conexao_mesmo_com_x_forwarded_for(client):
+    # o codigo nao le o cabecalho por conta propria: trocar o X-Forwarded-For nao da' cota nova
+    c = _de(client, "10.0.0.11")
+    for i in range(auth.LIMITE_ORIGEM):
+        assert c.post("/api/auth/login", json={"email": f"z{i}@exemplo.com.br", "senha": "y"},
+                      headers={"X-Forwarded-For": f"192.0.2.{i}"}).status_code == 401
+    assert c.post("/api/auth/login", json={"email": "z@exemplo.com.br", "senha": "y"},
+                  headers={"X-Forwarded-For": "192.0.2.200"}).status_code == 429
+
+def test_tentativa_que_cai_em_banco_ocupado_conta_para_o_ip(client, monkeypatch):
+    # /code-review: a senha ja' foi conferida quando o contador da conta esbarra no lock; o 503 nao devolve a vaga
+    def ocupado(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(auth, "autenticar", ocupado)
+    c = _de(client, "10.0.0.10")
+    for _ in range(auth.LIMITE_ORIGEM):
+        assert _entrar(c, "errada").status_code == 503
+    assert _entrar(c, "errada").status_code == 429
+
+def test_limite_por_origem_em_paralelo_nao_passa_do_teto():
+    import threading
+    lim = auth.LimitePorOrigem()
+    aceitas = []
+    def tentar():
+        if lim.reservar("10.0.0.1") is not None:
+            aceitas.append(1)
+    ts = [threading.Thread(target=tentar) for _ in range(3 * auth.LIMITE_ORIGEM)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert len(aceitas) == auth.LIMITE_ORIGEM

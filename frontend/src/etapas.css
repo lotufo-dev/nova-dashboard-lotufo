@@ -1,52 +1,166 @@
-/* Fluxo da medicao em 5 etapas (opcao A, 2026-10-09): barra no alto e um cartao por etapa. */
+/* Pagina da medicao (#152, opcao B, aprovada em 16/10/2026): trilho de setas no alto, so' a etapa da vez aberta,
+   Resumo e Linha do tempo a direita. Cores so' dos tokens (tokens.css). */
 
-.etapas-barra { background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: var(--sombra); padding: 16px 20px; }
-.etapas-barra ol { display: flex; flex-wrap: wrap; gap: 8px 4px; margin: 0; padding: 0; list-style: none; }
-.etapas-barra__item { display: flex; align-items: center; flex: 1 1 140px; }
-.etapas-barra__item + .etapas-barra__item::before { content: ""; flex: 0 0 16px; height: 2px; margin-right: 8px; background: var(--linha); }
-.etapas-barra__item a { display: inline-flex; align-items: center; gap: 8px; color: var(--texto-2); text-decoration: none; font-weight: 500; }
-.etapas-barra__item a:hover { color: var(--texto); }
-.etapas-barra__n { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 999px; flex: none;
-  background: var(--neutro-fundo, #F1F5F9); color: var(--texto-2); font-size: 13px; font-weight: 600; }
-.etapas-barra__n svg { width: 14px; height: 14px; }
-.etapas-barra__item--feita .etapas-barra__n { background: var(--ok-ponto, #10B981); color: #fff; }
-.etapas-barra__item--feita a { color: var(--texto); }
+.med { gap: 16px; }
+.med-cabeca { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
+.med-cabeca h1 { margin: 0; font-size: 24px; line-height: 32px; }
+.med-meta { margin: 4px 0 0; color: var(--texto-2); font-size: 14px; max-width: none; }
+.med-meta span + span::before { content: " · "; font-family: var(--fonte); }
+
+/* Mais acoes */
+.med-mais { position: relative; }
+.med-mais > .btn { height: 40px; padding: 0 16px; gap: 6px; border-color: var(--acento); color: var(--acento); font-weight: 600; font-size: 14px; }
+.med-mais > .btn:hover:not(:disabled) { color: var(--acento); }
+.med-mais .conta__menu { width: 300px; max-width: calc(100vw - 96px); }
+.med-mais .conta__item { height: auto; min-height: 36px; padding: 6px 10px; }
+.med-mais .conta__item--perigo { color: var(--acao); }
+.med-mais hr { border: 0; border-top: 1px solid var(--linha); margin: 6px 0; }
+
+.med-grade { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+.med-grade--so-principal { grid-template-columns: minmax(0, 1fr); }
+.med-principal { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.med-lateral { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* trilho de setas */
+.setas ol { display: flex; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.setas li { flex: 1 1 0; min-width: 0; }
+.setas button { width: 100%; height: 48px; padding: 0 12px 0 26px; border: 0; border-radius: 0; justify-content: center; gap: 8px;
+  font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 0 100%, 16px 50%); }
+.setas li:first-child button { padding-left: 14px; border-radius: var(--raio) 0 0 var(--raio); clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 0 100%); }
+.setas li:last-child button { border-radius: 0 var(--raio) var(--raio) 0; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 16px 50%); }
+.seta--feita button { background: var(--ok-fundo); color: var(--ok); }
+.seta--feita button:hover:not(:disabled) { background: var(--ok-linha); color: var(--ok); }
+.seta--atual button, .seta--atual button:hover:not(:disabled) { background: var(--acento); color: var(--superficie); font-weight: 600; }
 /* issue #188: a etapa da vez parada esperando a outra metade (execucao x reajuste no mesmo e-mail) */
-.etapas-barra__item--espera .etapas-barra__n { background: var(--atencao-ponto); color: #fff; }
-.etapas-barra__item--espera a { color: var(--atencao); font-weight: 600; }
-/* orgao que separa (MTPAR, SES): uma trilha por metade, o nome a esquerda */
-.etapas-barra--trilha { display: flex; align-items: center; gap: 12px; padding: 10px 20px; }
-.etapas-barra--trilha + .etapas-barra--trilha { margin-top: -8px; }
-.etapas-barra--trilha ol { flex: 1; }
-.etapas-barra__trilha { flex: 0 0 72px; color: var(--texto-2); font-size: 13px; font-weight: 600; }
+.seta--espera button, .seta--espera button:hover:not(:disabled) { background: var(--atencao-fundo); color: var(--atencao); font-weight: 600; }
+.seta--futura button, .seta--encerrada button { background: var(--neutro-fundo); color: var(--texto-2); }
+.seta--futura button:hover:not(:disabled), .seta--encerrada button:hover:not(:disabled) { background: var(--linha); color: var(--texto); }
+.seta--vendo button, .seta--vendo button:hover:not(:disabled) { background: var(--acento-fundo); color: var(--acento-mais); font-weight: 600; }
+.seta__marca { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; border-radius: var(--raio-pilula); font-size: 12px; font-weight: 600; }
+.seta__marca svg { width: 12px; height: 12px; }
+.seta--feita .seta__marca { background: var(--ok-ponto); color: var(--superficie); }
+.seta--futura .seta__marca, .seta--encerrada .seta__marca { background: var(--superficie); color: var(--texto-2); }
+.seta--atual .seta__marca { background: var(--superficie); color: var(--acento); }
+.seta--espera .seta__marca { background: var(--atencao-ponto); color: var(--superficie); }
+.seta--vendo .seta__marca { background: var(--acento); color: var(--superficie); }
+.seta__rotulo { overflow: hidden; text-overflow: ellipsis; }
+
+/* "Voltar a' etapa atual", com outra etapa aberta */
+.med-faixa { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 12px 16px; border-radius: var(--raio);
+  background: var(--acento-fundo); color: var(--acento-mais); font-size: 14px; }
+.med-faixa .botao-link { font-weight: 600; color: var(--acento-mais); font-size: 14px; }
+
+/* a etapa aberta */
+.med-etapa { padding: 24px; display: flex; flex-direction: column; gap: 20px; scroll-margin-top: 16px; }
+.med-etapa__corpo { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.med-etapa__cabeca { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.med-etapa__n { padding: 4px 12px; border-radius: var(--raio-pilula); background: var(--acento-fundo); color: var(--acento-mais); font-size: 13px; font-weight: 600; }
+.med-etapa__titulo { margin: 0; font-size: 20px; line-height: 28px; }
+.med-sub { margin: 0 0 8px; font-size: 15px; line-height: 22px; font-weight: 600; }
+.med-bloco { display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px solid var(--linha); }
+.med-caixa { border: 1px solid var(--linha); border-radius: var(--raio); overflow: hidden; }
+.med-caixa .tabela thead th { background: var(--superficie-2); }
+.med-caixa .tabela-wrap { overflow-x: auto; }
+.med-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.med-linhas { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.med-linhas li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--linha-suave); }
+.med-linhas li:last-child { border-bottom: 0; }
+.med-linhas--caixa { border-radius: var(--raio); background: var(--superficie-2); }
+
+/* o espelho dentro da etapa (sem a moldura propria do cartao) */
+.espelho-etapa .cartao__corpo { padding: 0; }
+.espelho-etapa .espelho__item { gap: 16px; }
+.espelho-etapa .espelho__notas { min-width: 0; }
+
+/* tabela de envios (etapa 4) e de pagamentos (etapa 5) */
+.tabela.envios tbody td { color: var(--texto); vertical-align: top; }
+.envios td.col-num { font-family: var(--fonte-num); }
+.envios__nfs { display: flex; flex-direction: column; gap: 2px; }
+.envios__nfs span { white-space: nowrap; }
+.envios__acao { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; }
+.envios__motivo { font-size: 12.5px; color: var(--texto-2); max-width: 26ch; text-align: right; }
+.envios__motivo--atencao { color: var(--atencao); }
+.envios__motivo--bloqueio { color: var(--acao); }
+.envios tr.envios--aberto > td { background: var(--acento-fundo); }
+.envios__receber { margin-top: 8px; }
+.btn.btn--envio { height: 38px; padding: 0 16px; font-size: 14px; font-weight: 600; }
+
+/* certidoes, com a validade de cada uma */
+.certidoes-bloco { display: flex; flex-direction: column; gap: 10px; }
+.certidoes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.certidoes li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.certidoes .ponto { width: 8px; height: 8px; border-radius: var(--raio-pilula); background: var(--ok-ponto); flex: none; }
+.certidoes .ponto--atencao { background: var(--atencao-ponto); }
+.certidoes .ponto--acao { background: var(--acao-ponto); }
+.certidoes small { color: var(--texto-2); font-size: 13px; }
+.certidoes__empresa { margin: 4px 0; font-weight: 600; }
+.certidoes__nota { margin: 0; }
+
+/* envio aberto (o e-mail montado sob a linha) */
+.med-envio { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid var(--acento-linha); border-radius: var(--raio); background: var(--superficie-2); }
+.med-envio__cabeca { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.med-envio__cabeca h3 { margin: 0; font-size: 16px; line-height: 24px; }
+.med-envio .nota-envio--embutido { padding: 0; max-width: none; }
+.notas-v3 .nota-rodape .btn--primario, .med-envio .ol-janela .ol-enviar { height: 48px; padding: 0 24px; font-size: 15px; font-weight: 600; }
+.notas-v3 .ol-campo { flex-wrap: wrap; min-width: 0; }
+.notas-v3 .ol-chip { max-width: 100%; min-width: 0; }
+.notas-v3 .ol-chip__nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* notas por bloco (execucao x reajuste) na etapa 3 */
 .notas-blocos { display: flex; flex-direction: column; gap: 20px; }
 .notas-bloco + .notas-bloco { border-top: 1px solid var(--linha); padding-top: 16px; }
-.etapas-barra__item--atual .etapas-barra__n { background: var(--acento); color: #fff; }
-.etapas-barra__item--atual a { color: var(--acento); font-weight: 600; }
 
-.etapa { background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: var(--sombra); scroll-margin-top: 16px; }
-.etapa--atual { border-color: var(--acento); box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(79, 70, 229, .12); }
-.etapa--futura { background: transparent; box-shadow: none; }
-.etapa__cabeca { display: flex; align-items: center; gap: 12px; padding: 16px 20px; }
-.etapa--feita > summary { cursor: pointer; list-style: none; }
-.etapa--feita > summary::-webkit-details-marker { display: none; }
-.etapa--feita > summary::after { content: "›"; margin-left: auto; color: var(--texto-2); font-size: 18px; transition: transform .15s; }
-.etapa--feita[open] > summary::after { transform: rotate(90deg); }
-.etapa__n { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 999px; flex: none; font-size: 14px; font-weight: 600; }
-.etapa__n svg { width: 14px; height: 14px; }
-.etapa__n--feita { background: var(--ok-ponto, #10B981); color: #fff; }
-.etapa__n--atual { background: var(--acento); color: #fff; }
-.etapa__n--futura { background: var(--neutro-fundo, #F1F5F9); color: var(--texto-2); }
-.etapa__titulo { margin: 0; font-size: 17px; line-height: 24px; font-weight: 600; }
-.etapa--futura .etapa__titulo { color: var(--texto-2); font-weight: 500; }
-.etapa__resumo { color: var(--texto-2); font-size: 13.5px; min-width: 0; }
-.etapa__corpo { padding: 0 20px 20px; display: flex; flex-direction: column; gap: 16px; }
-/* os cartoes antigos (Espelho, Notas, Protocolos) entram dentro da etapa sem moldura propria */
-.etapa__corpo > .cartao { border: 0; box-shadow: none; background: none; }
-.etapa__corpo > .cartao > .cartao__cabeca, .etapa__corpo > .cartao > .cartao__corpo { padding-left: 0; padding-right: 0; }
-/* o titulo do cartao do espelho repetiria o da etapa */
-.etapa__corpo > #espelho > .cartao__cabeca, .etapa__corpo > #nova-medicao > .cartao__cabeca { display: none; }
-.etapa__corpo .nota-envio--embutido { padding: 0; max-width: none; }
+/* resumo e linha do tempo */
+.res-lista { margin: 0; display: flex; flex-direction: column; }
+.res-lista > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--linha-suave); }
+.res-lista > div:last-child { border-bottom: 0; }
+.res-lista dt { color: var(--texto-2); }
+.res-lista dd { margin: 0; text-align: right; color: var(--texto); }
+.res-lista .res-total dt, .res-lista .res-total dd { color: var(--texto); font-weight: 600; font-size: 16px; }
+.res-lista .res-total { border-top: 1px solid var(--linha); }
+.res-nota { display: block; font-size: 12px; color: var(--texto-2); }
+.res-nota--link { font-size: 13px; }
+.tempo { margin: 0; padding: 0; list-style: none; }
+.tempo li { position: relative; padding: 0 0 16px 22px; }
+.tempo li::before { content: ""; position: absolute; left: 4px; top: 6px; width: 8px; height: 8px; border-radius: var(--raio-pilula); background: var(--ok-ponto); }
+.tempo li::after { content: ""; position: absolute; left: 7px; top: 18px; bottom: 0; width: 2px; background: var(--linha); }
+.tempo li:last-child { padding-bottom: 0; }
+.tempo li:last-child::after { display: none; }
+.tempo time { display: block; color: var(--texto-2); font-size: 12px; font-family: var(--fonte-num); }
+
+/* janelas (atestado, medicao final, cancelar, registrar fora...) */
+.janela .iniciar__caixa { overflow-y: auto; }
+.janela .painel__titulo { display: none; }
+.janela .form-inline { align-items: flex-end; }
+.janela textarea, .janela input[type="text"], .janela input[type="date"] { max-width: 100%; }
+.iniciar__rodape { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
 
 .btn--grande { height: 44px; padding: 0 22px; font-size: 15px; }
 
+@media (max-width: 1100px) {
+  .med-grade { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 767px) {
+  .pagina.med { padding: 16px 16px 32px; }
+  .setas button { padding: 0 14px 0 18px; justify-content: center; font-size: 13px; gap: 6px; }
+  .setas li:first-child button { padding-left: 8px; }
+  /* so' a seta aberta mostra o nome; as outras ficam so' com o numero */
+  .setas li:not(.seta--rotulo) { flex: 0 0 44px; }
+  .setas li:not(.seta--rotulo) .seta__rotulo { display: none; }
+  .med-cabeca { flex-direction: column; }
+  .med-etapa { padding: 16px 12px; }
+  /* a tabela de envios vira uma pilha de cartoes */
+  .envios, .envios tbody, .envios tr, .envios td { display: block; width: 100%; }
+  .envios thead { display: none; }
+  .envios tr { padding: 12px 0; border-bottom: 1px solid var(--linha); }
+  .envios tr:last-child { border-bottom: 0; }
+  .envios tbody td { padding: 4px 16px; border: 0; text-align: left; }
+  .envios td[data-rotulo]::before { content: attr(data-rotulo); display: block; font-size: 12px; color: var(--texto-2); font-family: var(--fonte); }
+  .envios__acao { justify-content: flex-start; }
+  .envios__motivo { text-align: left; max-width: none; }
+  .med-envio { padding: 12px 0 0; border: 0; border-top: 2px solid var(--acento); border-radius: 0; background: none; }
+  .notas-v3 .nota-secao { flex-direction: column; padding: 12px; gap: 8px; }
+  .notas-v3 .nota-item { flex-wrap: wrap; }
+  .res-lista dd { white-space: normal; }
+}

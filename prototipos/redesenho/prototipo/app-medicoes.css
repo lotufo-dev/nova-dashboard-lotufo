@@ -1,0 +1,173 @@
+/* Pagina Medicoes com abas (09/10/2026, prototipo aprovado pelo Leo; MedicoesPagina.tsx e IniciarMedicao.tsx).
+   Cores so' dos tokens (tokens.css): as da situacao sao --sit-*. */
+
+/* ---------------------------------------------------------------- faixa de abas */
+/* Logo abaixo da barra superior, branca, com a borda de baixo: barra e faixa viram um bloco so'. No celular a faixa
+   rola na horizontal por dentro, e a pagina nao. */
+.abas-secao {
+  display: flex; gap: 4px; flex: none;
+  padding: 0 32px;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--linha);
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+}
+.abas-secao::-webkit-scrollbar { display: none; }
+.abas-secao__aba {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  height: 48px; padding: 0 14px; margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--sit-sem-texto); text-decoration: none; white-space: nowrap;
+}
+.abas-secao__aba:hover { color: var(--texto); }
+.abas-secao__aba[aria-current="page"] { color: var(--acento); font-weight: 600; border-bottom-color: var(--acento); }
+/* anel por dentro: a faixa corta o que passa da borda (rola na horizontal) */
+.abas-secao__aba:focus-visible { outline-offset: -3px; border-radius: var(--raio-micro); }
+.abas-secao__n {
+  padding: 0 7px; border-radius: var(--raio-pilula);
+  background: var(--neutro-fundo); color: var(--sit-sem-texto);
+  font-size: 12px; line-height: 20px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.medicoes { gap: 20px; }
+.medicoes__acoes { display: flex; justify-content: flex-end; }
+.medicoes__iniciar { height: 44px; padding: 0 20px; gap: 8px; font-size: 15px; font-weight: 600; box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
+.medicoes__iniciar .icone { stroke-width: 2.2; }
+
+/* ------------------------------------------------------------------ cartoes */
+.medicoes__cartoes { display: flex; flex-wrap: wrap; gap: 16px; }
+.medicoes__cartao {
+  flex: 1 1 160px;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 16px 18px;
+  background: var(--superficie);
+  border: 1px solid var(--linha); border-radius: var(--raio);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  text-decoration: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.medicoes__cartao:hover { border-color: var(--acento-linha); box-shadow: 0 4px 12px rgba(79, 70, 229, .10); }
+.medicoes__cartao-rotulo { display: flex; align-items: center; gap: 8px; color: var(--texto-menu); }
+.medicoes__cartao-n { font-family: var(--fonte-num); font-size: 32px; line-height: 40px; font-weight: 500; color: var(--texto); }
+.medicoes__cartao-n--zero { color: var(--texto-2); }
+
+/* ponto e pilula da situacao */
+.sit-ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-pilula); }
+.sit-ponto--sem-medicao { background: var(--sit-sem-texto); }
+.sit-ponto--faturamento { background: var(--sit-fat-texto); }
+.sit-ponto--aguardando-nota { background: var(--sit-nota-texto); }
+.sit-ponto--enviar-nota { background: var(--sit-envio-texto); }
+.sit-ponto--aguardando-pagamento { background: var(--sit-pag-texto); }
+.sit-pilula {
+  display: inline-block; padding: 1px 9px;
+  border: 1px solid transparent; border-radius: var(--raio-pilula);
+  font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap;
+}
+.sit-pilula--sem-medicao { background: var(--sit-sem-fundo); color: var(--sit-sem-texto); border-color: var(--sit-sem-linha); }
+.sit-pilula--faturamento { background: var(--sit-fat-fundo); color: var(--sit-fat-texto); }
+.sit-pilula--aguardando-nota { background: var(--sit-nota-fundo); color: var(--sit-nota-texto); }
+.sit-pilula--enviar-nota { background: var(--sit-envio-fundo); color: var(--sit-envio-texto); }
+.sit-pilula--aguardando-pagamento { background: var(--sit-pag-fundo); color: var(--sit-pag-texto); }
+
+/* ------------------------------------------------------------------- quadro */
+.medicoes__quadro {
+  background: var(--superficie);
+  border: 1px solid var(--linha); border-radius: var(--raio);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  overflow: hidden;
+}
+.medicoes__quadro-cabeca { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 16px 14px; }
+.medicoes__quadro-cabeca h2 { margin: 0; font-size: 17px; line-height: 24px; }
+.medicoes__legenda { color: var(--texto-2); font-size: 13px; }
+
+/* Tabela de largura fixa (as colunas caem no mesmo x da tabela de cima e de cada grupo). Abaixo de 820px a caixa
+   rola na horizontal por dentro: a faixa e os grupos tem a mesma largura minima da tabela. */
+.medicoes .tabela-wrap > * { min-width: 820px; }
+.medicoes__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.medicoes__c-obra { width: 19%; }
+.medicoes__c-contratante { width: 17%; }
+.medicoes__c-medicao { width: 20%; }
+.medicoes__c-situacao { width: 17%; }
+.medicoes__c-valor { width: 15%; }
+.medicoes__c-parada { width: 12%; }
+.medicoes__tabela th {
+  padding: 12px 16px; text-align: left;
+  background: var(--superficie-2); border-bottom: 1px solid var(--linha);
+  color: var(--texto-2); font-size: 12px; line-height: 16px; font-weight: 600; white-space: nowrap;
+}
+.medicoes__tabela td { padding: 12px 16px; border-bottom: 1px solid var(--linha-suave); vertical-align: middle; overflow-wrap: anywhere; }
+.medicoes__tabela tr:last-child td { border-bottom: 0; }
+.medicoes__tabela tbody tr:hover td { background: var(--superficie-2); }
+.medicoes__tabela .col-num { text-align: right; white-space: nowrap; }
+.medicoes__obra { color: var(--texto); font-weight: 600; text-decoration: none; }
+.medicoes__obra:hover { color: var(--acento); text-decoration: underline; }
+.medicoes__obra-repete { color: var(--texto-2); padding-left: 4px; }
+.medicoes__medicao { color: var(--acento); text-decoration: none; }
+.medicoes__medicao:hover { color: var(--acento-forte); text-decoration: underline; }
+.medicoes__sub { display: block; font-size: 12px; line-height: 16px; color: var(--texto-2); }
+.medicoes__traco { color: var(--texto-fraco); }
+/* "Parada há": ambar e vermelho so' com o limiar passado (resumoMedicoes.nivelParada) */
+.medicoes__parada { color: var(--texto-menu); white-space: nowrap; }
+.medicoes__parada--atencao { color: var(--atencao); font-weight: 600; }
+.medicoes__parada--acao { color: var(--acao); font-weight: 600; }
+
+.medicoes__faixa {
+  padding: 10px 16px;
+  background: var(--superficie-2);
+  border-top: 1px solid var(--linha); border-bottom: 1px solid var(--linha);
+  color: var(--texto-2); font-size: 12px; line-height: 16px; font-weight: 600;
+}
+/* grupo por contratante: fechado, abre ao clicar; a seta gira */
+.medicoes__grupo { border-bottom: 1px solid var(--linha-suave); }
+.medicoes__grupo:last-child { border-bottom: 0; }
+.medicoes__grupo > summary {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: center; gap: 10px;
+  min-height: 48px; padding: 0 16px;
+}
+.medicoes__grupo > summary::-webkit-details-marker { display: none; }
+.medicoes__grupo > summary:hover { background: var(--superficie-2); }
+.medicoes__grupo > summary:focus-visible { outline-offset: -2px; border-radius: var(--raio-micro); }
+.medicoes__grupo[open] > summary { border-bottom: 1px solid var(--linha-suave); }
+.medicoes__seta { color: var(--texto-2); transition: transform .15s ease; }
+.medicoes__grupo[open] .medicoes__seta { transform: rotate(90deg); }
+.medicoes__grupo-nome { font-weight: 600; color: var(--texto); }
+.medicoes__grupo-n { color: var(--texto-2); }
+.medicoes__grupo .medicoes__tabela td:first-child { padding-left: 42px; }
+@media (prefers-reduced-motion: reduce) { .medicoes__seta { transition: none; } }
+
+@media (max-width: 767px) {
+  .abas-secao { padding: 0 16px; }
+  .medicoes__cartoes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .medicoes__cartao { padding: 12px 14px; min-width: 0; }
+  .medicoes__iniciar { width: 100%; justify-content: center; }
+}
+
+/* ------------------------------------------- janela "Iniciar processo de medição" */
+.iniciar {
+  width: min(560px, calc(100vw - 32px)); max-height: min(640px, calc(100vh - 48px));
+  padding: 0; border: 1px solid var(--linha); border-radius: var(--raio-sobreposicao);
+  box-shadow: var(--sombra-sobreposicao); color: var(--texto);
+}
+.iniciar::backdrop { background: rgba(15, 23, 42, .4); }
+.iniciar__caixa { display: flex; flex-direction: column; gap: 12px; max-height: inherit; padding: 20px; }
+.iniciar__cabeca { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.iniciar__titulo { margin: 0; font-size: 18px; line-height: 24px; }
+.iniciar__dica { margin: 2px 0 0; color: var(--texto-2); }
+.iniciar__fechar { width: 36px; height: 36px; padding: 0; justify-content: center; border: 0; background: none; color: var(--texto-2); }
+.iniciar__busca { width: 100%; height: 40px; flex: none; }
+.iniciar__lista { overflow-y: auto; min-height: 0; display: grid; gap: 12px; }
+.iniciar__grupo ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.iniciar__contratante { margin: 0 0 4px; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--texto-2); }
+.iniciar__obra {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; border-radius: var(--raio-ctrl);
+  color: var(--texto); text-decoration: none;
+}
+.iniciar__obra:hover { background: var(--hover); color: var(--texto); }
+.iniciar__obra:focus-visible { outline-offset: -2px; }
+.iniciar__obra-nome { font-weight: 600; }
+.iniciar__obra-sub { font-size: 12px; line-height: 16px; color: var(--texto-2); }
+.iniciar__obra-sub:empty { display: none; }
+.iniciar__vazio { margin: 0; color: var(--texto-2); }

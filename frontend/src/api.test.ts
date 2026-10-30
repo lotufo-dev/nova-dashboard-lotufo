@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiErro, mensagemDeErro } from "./api";
+import { api, ApiErro, baixarArquivo, mensagemDeErro } from "./api";
 
 function responde(status: number, corpo: unknown) {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(corpo), { status })));
@@ -46,5 +46,30 @@ describe("api: falha de rede", () => {
     expect(mensagemDeErro(new TypeError("Failed to fetch"))).toBe("Algo deu errado. Tente de novo.");
     expect(mensagemDeErro("boom")).toBe("Algo deu errado. Tente de novo.");
     expect(mensagemDeErro(new ApiErro(500, "Servidor indisponível."))).toBe("Servidor indisponível.");
+  });
+});
+
+describe("baixarArquivo (issue #169)", () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("recusa do servidor vira ApiErro com a mensagem, sem baixar nada", async () => {
+    responde(409, { detail: "As notas mudaram depois desta FRC: gere de novo na etapa 3 (Nota fiscal) antes de baixar" });
+    const clique = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const erro = (await baixarArquivo("/api/medicoes/7/frc/pdf", "FRC.pdf").catch(e => e)) as ApiErro;
+    expect(erro).toBeInstanceOf(ApiErro);
+    expect(erro.status).toBe(409);
+    expect(erro.message).toContain("As notas mudaram depois desta FRC");
+    expect(clique).not.toHaveBeenCalled();
+  });
+
+  it("baixa com o nome que o servidor deu", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("pdf", { status: 200, headers: {
+      "Content-Disposition": "attachment; filename*=utf-8''FRC%2022%20-%20CONS%C3%93RCIO.pdf" } })));
+    URL.createObjectURL = vi.fn(() => "blob:x");          // o jsdom nao tem
+    URL.revokeObjectURL = vi.fn();
+    let nome = "";
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { nome = this.download; });
+    await baixarArquivo("/api/medicoes/7/frc/pdf", "FRC.pdf");
+    expect(nome).toBe("FRC 22 - CONSÓRCIO.pdf");
   });
 });

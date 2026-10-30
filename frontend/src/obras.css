@@ -1,0 +1,99 @@
+/* Obras (redesenho #159): a escolha do contratante, a lista de obras em cartoes e os Avisos dentro da pagina.
+   So' o que tokens.css nao tem; cores so' dos tokens. */
+
+.topbar__titulo--grande { font-size: 28px; line-height: 36px; }
+.topbar__acoes .btn { flex: none; }
+.progresso { height: 6px; border-radius: var(--raio-pilula); background: var(--neutro-fundo); overflow: hidden; }
+.progresso__barra { display: block; height: 100%; border-radius: var(--raio-pilula); background: var(--marca); }
+.ponto { display: inline-block; width: 8px; height: 8px; flex: none; border-radius: var(--raio-pilula); background: var(--texto-fraco); }
+.ponto--critico { background: var(--acao-ponto); }
+.ponto--acao, .ponto--atencao { background: var(--atencao-ponto); }
+.texto--critico { color: var(--acao); }
+.texto--acao, .texto--atencao { color: var(--atencao); }
+.chevron { width: 18px; height: 18px; flex: none; color: var(--texto-2); }
+
+/* ------------------------------------------------------------ a escolha do contratante */
+.contratantes { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.contratante {
+  display: grid; align-items: center; gap: 12px 32px;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(220px, 1.6fr) minmax(170px, .9fr) 170px 18px;
+  padding: 20px 24px; color: var(--texto); text-decoration: none;
+  transition: border-color .12s ease, background .12s ease;
+}
+.contratante:hover { border-color: var(--acento-linha); background: var(--superficie); color: var(--texto); }
+.contratante:hover .chevron { color: var(--acento); }
+.contratante--todas { border-color: var(--acento-linha); }
+.contratante__nome { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }
+.contratante__obras { font-size: 14px; color: var(--texto-2); }
+.contratante__exec { display: grid; gap: 8px; }
+.contratante__pct { display: flex; align-items: baseline; gap: 10px; }
+.contratante__pct strong { font-family: var(--fonte-num); font-size: 22px; line-height: 28px; font-weight: 500; }
+.contratante__pct span, .contratante__rotulo { font-size: 13px; color: var(--texto-2); }
+.contratante__saldo { display: grid; gap: 2px; justify-items: end; text-align: right; }
+.contratante__valor { font-family: var(--fonte-num); font-size: 17px; line-height: 24px; font-weight: 500; white-space: nowrap; }
+.contratante__avisos { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.contratante__avisos .campo__nota { display: block; }
+
+@media (max-width: 1100px) {
+  .contratante { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 18px; }
+  .contratante__exec { grid-column: 1 / 3; grid-row: 2; }
+  .contratante__saldo { grid-column: 2; grid-row: 1; }
+  .contratante__avisos { grid-column: 1 / 3; grid-row: 3; }
+  .contratante .chevron { grid-column: 3; grid-row: 1 / 4; }
+}
+@media (max-width: 560px) {
+  .contratante { grid-template-columns: minmax(0, 1fr) 18px; padding: 16px; gap: 10px 12px; }
+  .contratante__saldo { grid-column: 1; grid-row: 3; justify-items: start; text-align: left; }
+  .contratante__exec { grid-column: 1; grid-row: 2; }
+  .contratante__avisos { grid-column: 1; grid-row: 4; }
+  .contratante .chevron { grid-column: 2; grid-row: 1 / 5; }
+}
+
+/* ------------------------------------------------------------ a lista de obras */
+.filtros { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; }
+.filtros .filtros-avisos__linha { gap: 4px 14px; }
+.filtros input[type="search"] { width: 240px; max-width: 100%; }
+.filtros__fim { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.btn--avisos[aria-expanded="true"] { background: var(--acento-fundo); border-color: var(--acento-linha); color: var(--acento-mais); }
+.contagem { margin: 0; font-size: 14px; color: var(--texto-2); }
+
+.obra-cartoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin: 0; padding: 0; list-style: none; }
+@media (max-width: 1100px) { .obra-cartoes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .obra-cartoes { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+.obra-cartoes > li { min-width: 0; }
+.obra-cartao {
+  display: flex; flex-direction: column; gap: 4px; height: 100%; padding: 20px 24px;
+  color: var(--texto); text-decoration: none; transition: border-color .12s ease;
+}
+.obra-cartao:hover { border-color: var(--acento-linha); color: var(--texto); }
+.obra-cartao:hover .obra-cartao__nome { color: var(--acento-forte); }
+.obra-cartao__cabeca { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.obra-cartao__nome { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow-wrap: anywhere; }
+.obra-cartao__orgao { font-size: 14px; color: var(--texto-2); }
+.obra-cartao__pct { display: flex; align-items: baseline; gap: 12px; margin: 14px 0 10px; }
+.obra-cartao__pct strong { font-family: var(--fonte-num); font-size: 36px; line-height: 40px; font-weight: 500; letter-spacing: -.02em; }
+.obra-cartao__pct span { font-size: 14px; color: var(--texto-2); }
+.obra-cartao__linha { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; }
+.obra-cartao__linha + .obra-cartao__linha { margin-top: 8px; }
+.obra-cartao__linha--fim { color: var(--texto-2); margin-top: auto; padding-top: 8px; }
+.obra-cartao__linha .icone { color: var(--texto-2); }
+
+/* ------------------------------------------------------------ os Avisos, dentro de Obras */
+.avisos-area__corpo { display: grid; gap: 16px; }
+.avisos-area__grupos { display: grid; gap: 16px; }
+.avisos-area__grupos > .cartao { box-shadow: none; }
+.avisos-area .tabela--grade col.c-quando { width: 150px; }
+.avisos-area .tabela--grade col.c-valor-aviso { width: 150px; }
+.avisos-area .tabela--grade col.c-abrir { width: 72px; }
+.aviso__fato .forte { margin-right: 2px; }
+.avisos-area__corpo > *, .avisos-area__grupos > * { min-width: 0; }
+.avisos-area .form-inline select { max-width: 100%; }
+@media (max-width: 700px) {
+  /* as colunas fixas (112 + 150 + 72 px) nao cabem no celular: a tabela ganha largura minima e a Rolagem rola,
+     em vez de a coluna "Aviso" ficar sem espaco e o texto se sobrepor */
+  .avisos-area .tabela--grade { min-width: 560px; }
+  .avisos-area .form-inline { flex-wrap: wrap; }
+  .avisos-area .form-inline .campo { min-width: 0; flex: 1 1 140px; }
+  .avisos-area .detalhes > summary { width: auto; max-width: 100%; overflow-wrap: anywhere; }
+  .avisos-area .cartao__cabeca { flex-wrap: wrap; }
+}

@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { avisosDaObra, destinoDoAviso, type Aviso } from "./Alertas";
+import { cleanup, render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import { afterEach, describe, expect, it } from "vitest";
+import Alertas, { avisosDaObra, destinoDoAviso, type Aviso } from "./Alertas";
 import { hrefDe } from "./rota";
 
 const base: Omit<Aviso, "tipo" | "contrato_id" | "destino"> = {
@@ -11,7 +13,11 @@ describe("destino do aviso", () => {
     const doc: Aviso = { ...base, tipo: "documentos_empresa", contrato_id: 7, destino: { tela: "documentos" }, entidade_id: 3 };
     const d1 = destinoDoAviso(prazo)!, d2 = destinoDoAviso(doc)!;
     expect(hrefDe(d1.para, undefined, d1.secao)).toBe("/obras/7/prazos");
-    expect(hrefDe(d2.para, d2.busca, d2.secao)).toBe("/documentos?empresa=3#emp-3");
+    expect(hrefDe(d2.para, d2.busca, d2.secao)).toBe("/documentos/3");
+    // #161: o aviso da regularidade do mes cai direto na aba dela, na pagina da empresa
+    const reg: Aviso = { ...base, tipo: "regularidade_mes", contrato_id: null, destino: { tela: "documentos" }, entidade_id: 3 };
+    const dr = destinoDoAviso(reg)!;
+    expect(hrefDe(dr.para, dr.busca, dr.secao)).toBe("/documentos/3/regularidade");
     // A2: o aviso de nota leva as notas da medicao dela
     const nota: Aviso = { ...base, tipo: "nota_divergente", contrato_id: 7, medicao_id: 723, destino: { tela: "contrato", id: 7, aba: "notas" } };
     const d3 = destinoDoAviso(nota)!;
@@ -20,10 +26,18 @@ describe("destino do aviso", () => {
     const reaj: Aviso = { ...base, tipo: "reajuste_apostilamento", contrato_id: 7, data_base_mes: "2023-01", destino: { tela: "contrato", id: 7, aba: "reajuste" } };
     const d4 = destinoDoAviso(reaj)!;
     expect(hrefDe(d4.para, undefined, d4.secao)).toBe("/obras/7/reajuste#db-2023-01");
-    // o pagamento atrasado (sem destino proprio) abre nas medicoes em andamento da obra
-    const pag: Aviso = { ...base, tipo: "pagamento_atrasado", contrato_id: 9, destino: { tela: "contrato", id: 9, aba: "medicoes" } };
+    // o aviso da aba Medicoes abre nas medicoes em andamento da obra; o pagamento atrasado saiu (#255) e,
+    // mesmo com a medicao, nao leva mais ao recebimento dela
+    const pag: Aviso = { ...base, tipo: "pagamento_atrasado", contrato_id: 9, medicao_id: 722, destino: { tela: "contrato", id: 9, aba: "medicoes" } };
     const d5 = destinoDoAviso(pag)!;
     expect(hrefDe(d5.para, undefined, d5.secao)).toBe("/obras/9#em-andamento");
+    // #330: o processo parado leva a tela SIGA com o processo aberto; o aviso do monitor, a tela
+    const parado: Aviso = { ...base, tipo: "siga_parado", contrato_id: 7, medicao_id: 31, destino: { tela: "siga", processo: 4 } };
+    const d6 = destinoDoAviso(parado)!;
+    expect(hrefDe(d6.para, d6.busca, d6.secao)).toBe("/siga?processo=4");
+    const sem: Aviso = { ...base, tipo: "siga_sem_leitura", contrato_id: null, destino: { tela: "siga" } };
+    const d7 = destinoDoAviso(sem)!;
+    expect(hrefDe(d7.para, d7.busca, d7.secao)).toBe("/siga");
   });
 });
 
@@ -39,5 +53,35 @@ describe("avisos da obra", () => {
     ];
     expect(avisosDaObra(lista, 7).map(x => x.mensagem)).toEqual([
       "nota 1843 diverge do espelho", "pleito enviado há 187 dias", "execução termina em 22 dias"]);
+  });
+});
+
+describe("aviso de garantia (#161)", () => {
+  it("leva à aba Garantia por obra da empresa contratada", () => {
+    for (const tipo of ["garantia_vencendo", "garantia_aquem_execucao"]) {
+      const a: Aviso = { ...base, tipo, contrato_id: 7, destino: { tela: "documentos" }, entidade_id: 2 };
+      const d = destinoDoAviso(a)!;
+      expect(hrefDe(d.para, d.busca, d.secao)).toBe("/documentos/2/garantia");
+    }
+  });
+});
+
+describe("cartao de avisos (texto-na-tela, 26/10/2026)", () => {
+  afterEach(cleanup);
+
+  it("sem a contagem por nivel no cabecalho e sem o 'onde se resolve' sob o aviso que ja' e' link", () => {
+    const a: Aviso = { ...base, tipo: "execucao_vencendo", contrato_id: 7, obra: "MT-388", mensagem: "execução termina em 3 dias",
+      destino: { tela: "contrato", id: 7, aba: "prazos" } };
+    const { container } = render(createElement(Alertas, { itens: [a], ir: () => {} }));
+    expect(screen.getByRole("link").getAttribute("href")).toBe("/obras/7/prazos");
+    expect(container.querySelector(".cartao__dica")).toBeNull();
+    expect(container.querySelector(".alerta__onde")).toBeNull();
+    expect(container.textContent).not.toMatch(/de\sação|Prazos/);
+  });
+
+  it("lista vazia: uma linha curta", () => {
+    render(createElement(Alertas, { itens: [], ir: () => {} }));
+    expect(screen.getByText("Nenhum aviso.")).toBeTruthy();
+    expect(screen.queryByText(/Tudo em dia/)).toBeNull();
   });
 });

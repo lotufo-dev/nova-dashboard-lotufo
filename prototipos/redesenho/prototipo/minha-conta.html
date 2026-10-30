@@ -1,0 +1,258 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Minha conta</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<style>
+/* Minha conta (#165, opção A): coluna centralizada. Só o que falta na base, sempre com os tokens. */
+[hidden] { display: none !important; }
+.conta__botao { display: inline-flex; align-items: center; }
+.coluna-conta { width: 100%; max-width: 720px; margin: 0 auto; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+.coluna-conta .cartao__cabeca { border-bottom: 0; padding-bottom: 4px; flex-wrap: wrap; }
+.coluna-conta .cartao__corpo { padding-top: 8px; padding-bottom: 20px; }
+.coluna-conta p { margin: 0 0 10px; }
+.coluna-conta p:last-child { margin-bottom: 0; }
+
+.proto-estado { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 12px; border: 1px dashed var(--atencao-linha); border-radius: var(--raio); background: var(--atencao-fundo); font-size: 12.5px; color: var(--atencao); }
+.proto-estado button { height: 26px; padding: 0 10px; font-size: 12px; border-radius: var(--raio-pilula); }
+.proto-estado button[aria-pressed="true"] { background: var(--acento-fundo); border-color: var(--acento-linha); color: var(--acento-mais); }
+
+/* formulário de senha em coluna, campos de largura toda com o olho dentro */
+.form-senha { display: grid; gap: 14px; }
+.senha { position: relative; }
+.senha input { width: 100%; height: 40px; padding-right: 44px; font-size: 14px; }
+.senha input[aria-invalid="true"] { border-color: var(--acao-ponto); }
+.olho { position: absolute; right: 4px; top: 4px; width: 32px; height: 32px; padding: 0; justify-content: center; border: 0; background: none; color: var(--texto-2); }
+.olho:hover:not(:disabled) { background: var(--hover); color: var(--texto); border: 0; }
+.botao-largo { width: 100%; height: 40px; justify-content: center; font-size: 14px; }
+.par-botoes { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); margin-top: 16px; }
+.par-botoes > .btn, .par-botoes > button, .par-botoes > label { height: 40px; justify-content: center; font-size: 14px; }
+.feito-caixa { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--ok-linha); border-radius: var(--raio-ctrl); background: var(--ok-fundo); color: var(--ok); font-size: 13px; }
+
+.codigo { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--acento-linha); border-radius: var(--raio-ctrl); background: var(--acento-fundo); margin-bottom: 10px; }
+.codigo__valor { font-family: var(--fonte-num); font-size: 24px; letter-spacing: .12em; color: var(--acento-mais); }
+
+/* assinatura: o quadro recebe colar e arrastar; a prévia fica dentro dele */
+.assinatura-alvo { display: grid; place-items: center; gap: 8px; min-height: 120px; padding: 16px; background: var(--superficie-2); border-radius: var(--raio-ctrl); }
+.assinatura-alvo.arrastando { border-color: var(--acento); background: var(--acento-fundo); color: var(--acento-mais); }
+.assinatura-alvo img { max-width: 100%; max-height: 160px; border: 1px solid var(--linha); border-radius: var(--raio-micro); background: var(--superficie); }
+.assinatura-falsa { width: 100%; max-width: 420px; height: auto; display: block; }
+.assinatura-alvo__dica { font-size: 12.5px; color: var(--texto-2); }
+.caminho { word-break: break-all; }
+
+@media (max-width: 767px) {
+  .pagina { padding-top: 16px; }
+}
+</style></head>
+<body data-secao="" data-titulo="Minha conta"><main id="conteudo"><div class="pagina">
+<div class="coluna-conta">
+
+  <div class="proto-estado" role="group" aria-label="Estado de exemplo do protótipo">
+    <span>Ver como fica:</span>
+    <button type="button" data-estado="conectada" aria-pressed="true">Conectada</button>
+    <button type="button" data-estado="nao">Não conectada</button>
+    <button type="button" data-estado="aguardando">Aguardando o código</button>
+    <button type="button" data-estado="expirado">Código expirado</button>
+    <button type="button" data-estado="recusado">Acesso recusado</button>
+    <button type="button" data-estado="semm365">Microsoft 365 não configurado</button>
+    <button type="button" data-estado="diretoria">Perfil Diretoria</button>
+  </div>
+
+  <section class="cartao" aria-labelledby="t-sua">
+    <header class="cartao__cabeca"><h2 class="cartao__titulo" id="t-sua">Sua conta</h2></header>
+    <div class="cartao__corpo">
+      <p>Você entra com o e-mail <strong>usuario@exemplo.com.br</strong>.</p>
+      <p class="campo__nota" id="perfil-nota">Perfil: Engenharia.</p>
+    </div>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-senha">
+    <header class="cartao__cabeca"><h2 class="cartao__titulo" id="t-senha">Trocar senha</h2></header>
+    <form class="cartao__corpo form-senha" id="form-senha" novalidate>
+      <div class="campo">
+        <label class="campo__rotulo" for="senha-atual">Senha atual</label>
+        <div class="senha"><input id="senha-atual" type="password" autocomplete="current-password" placeholder="Digite sua senha atual" aria-describedby="erro-atual">
+          <button type="button" class="olho" aria-label="Mostrar a senha atual" aria-pressed="false"></button></div>
+        <p class="campo__erro" id="erro-atual" hidden></p>
+      </div>
+      <div class="campo">
+        <label class="campo__rotulo" for="senha-nova">Senha nova (mínimo de 10 caracteres)</label>
+        <div class="senha"><input id="senha-nova" type="password" autocomplete="new-password" placeholder="Digite a nova senha" aria-describedby="erro-nova conta-nova">
+          <button type="button" class="olho" aria-label="Mostrar a senha nova" aria-pressed="false"></button></div>
+        <p class="campo__nota num" id="conta-nova">0 de 10 caracteres</p>
+        <p class="campo__erro" id="erro-nova" hidden></p>
+      </div>
+      <div class="campo">
+        <label class="campo__rotulo" for="senha-confirmar">Confirmar a senha nova</label>
+        <div class="senha"><input id="senha-confirmar" type="password" autocomplete="new-password" placeholder="Confirme a nova senha" aria-describedby="erro-confirmar">
+          <button type="button" class="olho" aria-label="Mostrar a confirmação" aria-pressed="false"></button></div>
+        <p class="campo__erro" id="erro-confirmar" hidden></p>
+      </div>
+      <button type="submit" class="btn btn--primario botao-largo">Trocar senha</button>
+      <p class="feito-caixa" role="status" id="senha-ok" hidden>Senha trocada. As outras sessões abertas com a sua conta foram encerradas.</p>
+    </form>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-ms" id="cartao-ms">
+    <header class="cartao__cabeca"><h2 class="cartao__titulo" id="t-ms">Conta Microsoft</h2><span id="selo-ms"></span></header>
+    <div class="cartao__corpo">
+      <p>Os e-mails que você manda pela plataforma saem da sua própria caixa e aparecem nos seus itens enviados.</p>
+      <div id="ms-estado"></div>
+      <button type="button" class="btn botao-largo" id="conectar"></button>
+      <p class="campo__nota" style="margin-top:10px">Conectar de novo também libera as sugestões de contatos da empresa ao escrever o destinatário, como no Outlook.</p>
+    </div>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-ass" id="cartao-ass">
+    <header class="cartao__cabeca"><h2 class="cartao__titulo" id="t-ass">Assinatura de e-mail</h2><span id="selo-ass"></span></header>
+    <div class="cartao__corpo">
+      <p>A imagem da sua assinatura vai no fim de todo e-mail que você manda pela plataforma (PNG ou JPG, até 1 MB).</p>
+      <div class="assinatura-alvo" id="alvo" tabindex="0" role="button" aria-label="Colar ou arrastar a imagem da assinatura" aria-describedby="alvo-dica"></div>
+      <p class="erro" role="alert" id="ass-erro" hidden style="margin-top:10px"></p>
+      <details class="detalhes" style="margin-top:12px">
+        <summary>Onde achar a imagem</summary>
+        <p class="campo__nota">O Outlook do computador guarda a assinatura em <code class="caminho">%APPDATA%\Microsoft\Signatures</code>, dentro da pasta que
+          termina em “_arquivos” (arquivo image001.png). Cole esse endereço na barra da janela de escolher arquivo. Também dá para copiar a
+          imagem e colar no quadro acima (Ctrl+V), ou arrastar o arquivo para ele.</p>
+      </details>
+      <div class="par-botoes">
+        <label class="btn" id="rotulo-arquivo"><span id="texto-arquivo">Trocar a imagem</span>
+          <input type="file" accept="image/png,image/jpeg" class="sr-only" id="arquivo"></label>
+        <button type="button" class="btn btn--primario" id="teste">Enviar e-mail de teste</button>
+      </div>
+      <p class="campo__nota" id="teste-nota" style="margin-top:8px" hidden>Conecte a sua conta Microsoft para enviar o teste.</p>
+      <div class="acoes acoes--inicio" id="remover-area"></div>
+    </div>
+  </section>
+
+</div>
+</div></main>
+<script src="shell.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const ICONE_ALERTA = '<svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4.5M12 17.2h.01"/></svg>';
+  const OLHO = '<svg class="icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const OLHO_FECHADO = '<svg class="icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+  const selo = (classe, t) => '<span class="selo ' + classe + '"><span class="selo__ponto" aria-hidden="true"></span><span class="selo__texto">' + t + "</span></span>";
+  const ASS_FALSA = '<svg class="assinatura-falsa" viewBox="0 0 420 100" role="img" aria-label="Sua assinatura (imagem de exemplo)">' +
+    '<rect x="0" y="0" width="420" height="100" rx="4" style="fill:var(--superficie);stroke:var(--linha)"/>' +
+    '<rect x="14" y="16" width="56" height="56" rx="4" style="fill:var(--pressionado)"/>' +
+    '<rect x="86" y="18" width="110" height="9" rx="3" style="fill:var(--linha-hover)"/>' +
+    '<rect x="86" y="36" width="170" height="7" rx="3" style="fill:var(--linha-forte)"/>' +
+    '<rect x="86" y="50" width="250" height="7" rx="3" style="fill:var(--linha-forte)"/>' +
+    '<line x1="86" y1="68" x2="330" y2="68" style="stroke:var(--linha)"/>' +
+    '<rect x="86" y="78" width="80" height="7" rx="3" style="fill:var(--linha-forte)"/></svg>';
+
+  // ------------------------------------------------------------------ olhos dos campos de senha
+  document.querySelectorAll(".olho").forEach(b => {
+    b.innerHTML = OLHO;
+    b.addEventListener("click", () => {
+      const inp = b.previousElementSibling, ver = inp.type === "password";
+      inp.type = ver ? "text" : "password";
+      b.setAttribute("aria-pressed", String(ver));
+      b.setAttribute("aria-label", b.getAttribute("aria-label").replace(ver ? "Mostrar" : "Esconder", ver ? "Esconder" : "Mostrar"));
+      b.innerHTML = ver ? OLHO_FECHADO : OLHO;
+    });
+  });
+
+  // ------------------------------------------------------------------ trocar senha (validação no protótipo)
+  const atual = $("senha-atual"), nova = $("senha-nova"), conf = $("senha-confirmar");
+  nova.addEventListener("input", () => {
+    const k = nova.value.length;
+    $("conta-nova").textContent = k >= 10 ? k + " caracteres · tamanho bom" : k + " de 10 caracteres";
+  });
+  function erro(inp, id, txt) {
+    $(id).textContent = txt; $(id).hidden = !txt;
+    if (txt) inp.setAttribute("aria-invalid", "true"); else inp.removeAttribute("aria-invalid");
+    return !!txt;
+  }
+  [atual, nova, conf].forEach(i => i.addEventListener("input", () => { i.removeAttribute("aria-invalid"); $("senha-ok").hidden = true; }));
+  $("form-senha").addEventListener("submit", e => {
+    e.preventDefault();
+    const e1 = erro(atual, "erro-atual", atual.value ? "" : "Digite a sua senha atual.");
+    const e2 = erro(nova, "erro-nova", !nova.value ? "Digite a senha nova." : nova.value.length < 10 ? "A senha nova precisa de pelo menos 10 caracteres (tem " + nova.value.length + ")." : "");
+    const e3 = erro(conf, "erro-confirmar", !conf.value ? "Repita a senha nova." : conf.value !== nova.value ? "A confirmação não bate com a senha nova." : "");
+    if (e1 || e2 || e3) { (e1 ? atual : e2 ? nova : conf).focus(); return; }
+    e.target.reset(); $("conta-nova").textContent = "0 de 10 caracteres";
+    $("senha-ok").hidden = false;
+    window.protoAviso("Protótipo: no sistema, a senha seria trocada e as outras sessões encerradas.");
+  });
+
+  // ------------------------------------------------------------------ conta Microsoft (estados)
+  let estado = "conectada", assinatura = true, imagem = null, confirmando = false;
+  function ms() {
+    const dir = estado === "diretoria";
+    $("cartao-ms").hidden = dir; $("cartao-ass").hidden = dir;
+    $("perfil-nota").textContent = dir ? "Perfil: Diretoria. A diretoria não manda e-mail pela plataforma: aqui ficam o e-mail de entrada e a troca de senha." : "Perfil: Engenharia.";
+    const conectado = estado === "conectada", configurado = estado !== "semm365";
+    $("selo-ms").innerHTML = conectado ? selo("selo--ok", "Conectada") : selo("selo--atencao", "Não conectada");
+    const msgs = {
+      aguardando: '<div class="codigo"><span>Abra <a href="#" data-acao="Abriria a página de login da Microsoft numa aba nova.">microsoft.com/devicelogin</a>, digite o código abaixo e entre com a sua conta da empresa.</span>' +
+        '<span class="codigo__valor" aria-label="Código G7K2 MQ9X">G7K2-MQ9X</span><span class="campo__nota">Esta página confere sozinha a cada 5 segundos se você já entrou.</span></div>',
+      expirado: '<p class="aviso" role="alert"><span class="aviso__ponto" aria-hidden="true"></span><span>O código expirou. Peça outro.</span></p>',
+      recusado: '<p class="aviso aviso--critico" role="alert">' + ICONE_ALERTA + "<span>A Microsoft recusou o acesso. Tente de novo.</span></p>",
+      semm365: '<p class="aviso" role="alert"><span class="aviso__ponto" aria-hidden="true"></span><span>O Microsoft 365 ainda não foi configurado neste servidor.</span></p>',
+    };
+    $("ms-estado").innerHTML = msgs[estado] || "";
+    $("ms-estado").style.marginBottom = msgs[estado] ? "12px" : "0";
+    const b = $("conectar");
+    b.textContent = conectado ? "Conectar de novo" : estado === "aguardando" ? "Pedir outro código" : "Conectar minha conta Microsoft";
+    b.className = "btn botao-largo" + (conectado ? "" : " btn--primario");
+    b.disabled = !configurado;
+    b.dataset.acao = "Pediria à Microsoft um código de acesso; o código e o endereço apareceriam neste cartão.";
+    // assinatura
+    $("selo-ass").innerHTML = assinatura ? selo("selo--ok", "Cadastrada") : selo("", "Não cadastrada");
+    $("alvo").innerHTML = (assinatura ? (imagem ? '<img src="' + imagem + '" alt="Sua assinatura">' : ASS_FALSA) : '<p class="campo__nota" style="margin:0">Nenhuma assinatura cadastrada.</p>') +
+      '<span class="assinatura-alvo__dica" id="alvo-dica">Clique aqui e cole a imagem (Ctrl+V), ou arraste o arquivo</span>';
+    $("texto-arquivo").textContent = assinatura ? "Trocar a imagem" : "Enviar a imagem da assinatura";
+    $("teste").disabled = !conectado;
+    $("teste-nota").hidden = conectado;
+    $("remover-area").innerHTML = !assinatura ? "" : confirmando
+      ? '<span class="campo__nota" style="align-self:center">Remover a assinatura?</span><button type="button" class="btn btn--destrutivo btn--pequeno" id="remover-sim">Remover</button><button type="button" class="btn btn--pequeno" id="remover-nao">Cancelar</button>'
+      : '<button type="button" class="btn btn--voltar" id="remover">Remover a assinatura</button>';
+  }
+  document.querySelector(".proto-estado").addEventListener("click", e => {
+    const b = e.target.closest("[data-estado]"); if (!b) return;
+    estado = b.dataset.estado;
+    document.querySelectorAll("[data-estado]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    ms();
+  });
+  $("teste").addEventListener("click", () => window.protoAviso("E-mail de teste enviado para usuario@exemplo.com.br. Confira a caixa de entrada e os itens enviados."));
+  $("remover-area").addEventListener("click", e => {
+    if (e.target.id === "remover") { confirmando = true; ms(); $("remover-nao").focus(); }
+    else if (e.target.id === "remover-nao") { confirmando = false; ms(); }
+    else if (e.target.id === "remover-sim") { confirmando = false; assinatura = false; imagem = null; ms(); window.protoAviso("Protótipo: no sistema, a assinatura seria removida."); }
+  });
+
+  // ------------------------------------------------------------------ imagem: escolher, colar ou arrastar (só prévia local)
+  const alvo = $("alvo");
+  function mostrarErro(t) { $("ass-erro").innerHTML = t ? ICONE_ALERTA + t : ""; $("ass-erro").hidden = !t; }
+  function usar(f) {
+    if (!f) return;
+    if (!/^image\/(png|jpeg)$/.test(f.type)) return mostrarErro("A imagem precisa ser PNG ou JPG.");
+    if (f.size > 1024 * 1024) return mostrarErro("A imagem passa de 1 MB (" + (f.size / 1048576).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " MB). Use uma menor.");
+    mostrarErro("");
+    if (imagem) URL.revokeObjectURL(imagem);
+    imagem = URL.createObjectURL(f); assinatura = true; ms();
+    window.protoAviso("Protótipo: a imagem aparece aqui, mas não é gravada.");
+  }
+  const daTransferencia = dt => [...((dt && dt.files) || [])].find(x => x.type === "image/png" || x.type === "image/jpeg") || null;
+  alvo.addEventListener("click", () => alvo.focus());
+  alvo.addEventListener("paste", e => {
+    const f = daTransferencia(e.clipboardData);
+    if (f) { e.preventDefault(); usar(f); }
+    else mostrarErro("A área de transferência não tem imagem. Copie a imagem da assinatura (ou o arquivo) e cole de novo.");
+  });
+  alvo.addEventListener("dragover", e => { e.preventDefault(); alvo.classList.add("arrastando"); });
+  alvo.addEventListener("dragleave", () => alvo.classList.remove("arrastando"));
+  alvo.addEventListener("drop", e => {
+    e.preventDefault(); alvo.classList.remove("arrastando");
+    const f = daTransferencia(e.dataTransfer);
+    if (f) usar(f); else mostrarErro("Arraste um arquivo PNG ou JPG.");
+  });
+  $("arquivo").addEventListener("change", e => { usar(e.target.files[0]); e.target.value = ""; });
+
+  ms();
+})();
+</script>
+</body></html>

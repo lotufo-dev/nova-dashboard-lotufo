@@ -18,13 +18,11 @@ def _aditivo(cid):
         conn.close()
 
 
-def test_lista_e_conferencia(client_admin):
+def test_lista_de_aditivos(client_admin):
     cid = _contrato()
     aid = _aditivo(cid)
     assert client_admin.get(f"/api/contratos/{cid}/aditivos").json()[0]["status"] == "em_andamento"
-    c = client_admin.get(f"/api/aditivos/{aid}/conferencia").json()
-    assert c["valor_novo_esperado_centavos"] == 1_250_000_00
-    assert client_admin.get("/api/aditivos/9999/conferencia").status_code == 404
+    assert client_admin.get(f"/api/aditivos/{aid}/conferencia").status_code == 404
 
 
 def test_escrita_de_aditivo_pela_api_saiu(client_admin):

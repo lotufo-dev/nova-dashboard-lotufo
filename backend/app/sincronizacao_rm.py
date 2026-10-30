@@ -34,7 +34,8 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    quando nao falta nota.
 5. Recebimentos: medicao `protocolada` cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO
    ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira `recebida`, com a maior data de
-   baixa. Parcial fica visivel no detalhe da medicao (recebido por NF), sem mudar de estado.
+   baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
+   `medicao.recebida_com_diferenca`. Parcial fica visivel no detalhe da medicao (recebido por NF), sem mudar de estado.
 
 Toda decisao (alocar, desfazer, mudar estado) e' auditada com usuario NULL = sistema.
 As linhas de NF/baixa nao entram na cadeia (espelho de outro sistema, ver migracao 012).
@@ -544,13 +545,35 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
 
 # ------------------------------------------------------------ recebimentos
 
-def _recebimentos(conn) -> int:
+def _falta_por_titulo(conn, nota_id: int, aberto_inteiro: bool = False) -> int | None:
+    """Issue #35: o que falta pagar na nota, titulo a titulo (max(0, original - baixado) dos titulos nao
+    cancelados): pagamento a mais num titulo (juros) nao compensa a falta de outro. None quando algum titulo
+    nao tem baixa nenhuma (aberto nao e' "pago com diferenca").
+    Issue #253: com `aberto_inteiro`, o titulo sem baixa entra pelo valor original inteiro em vez de dar None
+    (o a receber e o aviso da Saude querem quanto falta, nao se a nota fecha com diferenca)."""
+    falta = 0
+    for b in conn.execute("SELECT status_lan, valor_original_centavos, valor_baixado_centavos FROM baixas "
+                          "WHERE nota_id=? AND status_lan<>2", (nota_id,)):
+        baixado = (b["valor_baixado_centavos"] or 0) if b["status_lan"] in STATUS_RECEBIDO else 0
+        if baixado <= 0 and not aberto_inteiro:
+            return None
+        falta += max(0, (b["valor_original_centavos"] or 0) - baixado)
+    return falta
+
+
+def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
+    """`medicao_ids`: so' essas (a carga do historico, issue #259, fecha as que acabou de criar sem mexer nas outras)."""
+    from app import diretoria   # import local: diretoria importa este modulo
+    tolerancia = diretoria.TOLERANCIA_CENTAVOS
     n = 0
+    if medicao_ids == []:
+        return 0                        # "IN ()" nem e' SQL valido
+    filtro = f" AND m.id IN ({','.join('?' * len(medicao_ids))})" if medicao_ids is not None else ""
     for m in conn.execute("""SELECT m.id, e.coligada_rm,
                                     COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
                              FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
                              JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
-                             WHERE m.estado IN ('protocolada','nf_emitida')"""):
+                             WHERE m.estado IN ('protocolada','nf_emitida')""" + filtro, medicao_ids or ()).fetchall():
         # Bloco 3 (decisao 13 do plano): so' as notas da COLIGADA DA ENTIDADE DO CONTRATO decidem o
         # recebimento. Em obra de consorcio a medicao tambem tem a NFS-e da Lotufo ao orgao
         # (coligada 1, cota, titulo que o consorcio repassa depois): ela nao segura a medicao.
@@ -563,15 +586,34 @@ def _recebimentos(conn) -> int:
             if conn.execute("SELECT 1 FROM nf_alocacoes WHERE medicao_id=? AND desfeita_em IS NOT NULL "
                             "AND motivo_desfazer LIKE ?", (m["id"], MOTIVO_A_MAO + "%")).fetchone():
                 continue
-        # Recebida quando o TITULO de CADA NF alocada esta quitado (recebido >= devido, o
-        # valor liquido do titulo). Comparar com o bruto da NF nunca fechava por causa das
-        # retencoes. NF sem titulo (devido=0: titulo ainda nao existe ou foi cancelado) segura
-        # a medicao -- nao da' para concluir recebimento do que nao tem lancamento a receber.
-        if all(x["situacao"] == "ativa" and x["devido_centavos"] > 0
-               and x["recebido_centavos"] >= x["devido_centavos"] for x in notas):
-            datas = [x["recebido_em"] for x in notas if x["recebido_em"]]
+        # Recebida quando os TITULOS de CADA NF alocada estao quitados (cada um pelo seu valor liquido; ver
+        # issue #251 abaixo). Comparar com o bruto da NF nunca fechava por causa das retencoes. NF sem titulo
+        # (devido=0: titulo ainda nao existe ou foi cancelado) segura a medicao -- nao da' para concluir
+        # recebimento do que nao tem lancamento a receber.
+        if not all(x["situacao"] == "ativa" and x["devido_centavos"] > 0 for x in notas):
+            continue
+        curtas = []
+        # Issue #251: quitada e' falta ZERO titulo a titulo, nao o total da nota (recebido >= devido): juros
+        # num titulo nao quitam outro titulo aberto da mesma nota. Falta zero ja' implica recebido >= devido.
+        faltas = [(x, _falta_por_titulo(conn, x["nota_id"])) for x in notas]
+        if not all(f == 0 for _, f in faltas):
+            # Issue #35 (decisao do Leo, 19/10/2026): medicao paga ate' R$ 1,00 abaixo, SOMANDO a falta de
+            # todas as notas dela, fecha como recebida; sem percentual. A falta e' contada titulo a titulo
+            # (juros num titulo nao cobrem outro) e todo titulo precisa de baixa. A diferenca vai para a
+            # auditoria como evento proprio.
+            if any(f is None for _, f in faltas) or sum(f for _, f in faltas) > tolerancia:
+                continue
+            curtas = [{"nota_id": x["nota_id"], "numero": x["numero"], "devido_centavos": x["devido_centavos"],
+                       "recebido_centavos": x["recebido_centavos"], "diferenca_centavos": f}
+                      for x, f in faltas if f > 0]
+        datas = [x["recebido_em"] for x in notas if x["recebido_em"]]
+        with db.mutacao(conn):
             medicoes.mudar_estado(conn, None, m["id"], "recebida", None, max(datas) if datas else None)
-            n += 1
+            if curtas:
+                auditoria.registrar(conn, None, "medicao.recebida_com_diferenca", "medicao", m["id"], None,
+                                    {"diferenca_centavos": sum(c["diferenca_centavos"] for c in curtas),
+                                     "tolerancia_centavos": tolerancia, "notas": curtas})
+        n += 1
     return n
 
 
@@ -708,9 +750,9 @@ def _recebidas_sem_baixa(conn) -> list[dict]:
         if r["medicao_id"] not in a_mao or r["nota_id"] in vistas:
             continue
         vistas.add(r["nota_id"])
-        recebido, devido, _ = _recebido_da_nota(conn, r["nota_id"])
-        if devido - recebido > diretoria.TOLERANCIA_CENTAVOS:
-            out.append({**dict(r), "falta_centavos": devido - recebido})
+        falta = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True)   # titulo a titulo (#253)
+        if falta > diretoria.TOLERANCIA_CENTAVOS:
+            out.append({**dict(r), "falta_centavos": falta})
     return out
 
 

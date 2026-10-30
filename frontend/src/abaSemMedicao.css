@@ -14,7 +14,6 @@
 .sem-medicao__seta { color: var(--texto-2); transition: transform .15s ease; }
 .sem-medicao__grupo[open] .sem-medicao__seta { transform: rotate(90deg); }
 .sem-medicao__grupo-nome { font-weight: 600; color: var(--texto); }
-.sem-medicao__grupo-n { color: var(--texto-2); }
 @media (prefers-reduced-motion: reduce) { .sem-medicao__seta { transition: none; } }
 
 .sem-medicao__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }

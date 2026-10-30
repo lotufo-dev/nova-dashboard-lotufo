@@ -5,25 +5,26 @@ import type { Rota } from "./rota";
 //
 // Trilho de icones (09/10/2026, prototipo aprovado pelo Leo): uma lista so', sem rotulos de grupo, na ordem do
 // trabalho. Cada perfil ve o recorte dele. As Notas (A enviar, Aguardando pagamento) sairam do menu: viraram abas
-// de Medicoes. Avisos fica PROVISORIAMENTE, ate' a pagina Obras ser redesenhada.
+// de Medicoes. Os Avisos moram dentro de Obras (redesenho #159): o item e a rota /avisos continuam, e o App os leva
+// para "Obras" com os Avisos abertos.
 
 export type Perfil = "engenharia" | "diretoria" | "admin";
-export type ItemMenu = "inicio" | "medicoes" | "obras" | "avisos" | "documentos" | "a-receber" | "carteira" | "admin";
+export type ItemMenu = "inicio" | "medicoes" | "obras" | "avisos" | "siga" | "documentos" | "a-receber" | "carteira" | "admin";
 
 export const ROTULO: Record<ItemMenu, string> = {
-  inicio: "Início", medicoes: "Medições", obras: "Obras", avisos: "Avisos", documentos: "Documentos", "a-receber": "A receber",
+  inicio: "Início", medicoes: "Medições", obras: "Obras", avisos: "Avisos", siga: "SIGA", documentos: "Documentos", "a-receber": "A receber",
   carteira: "Carteira", admin: "Administração",
 };
 
 // Ordem do trilho.
-const ORDEM: readonly ItemMenu[] = ["inicio", "medicoes", "obras", "avisos", "documentos", "a-receber", "carteira", "admin"];
+const ORDEM: readonly ItemMenu[] = ["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "carteira", "admin"];
 
 // Decisao 3 do mapa: a diretoria sem Medicoes no menu (a rota continua abrindo), e a engenharia com A receber.
 // O Inicio voltou (decisao do Leonardo, 08/10/2026): e' a entrada de todos os perfis, no alto do menu.
 const DO_PERFIL: Record<Perfil, readonly ItemMenu[]> = {
-  engenharia: ["inicio", "medicoes", "avisos", "documentos", "obras", "a-receber"],
+  engenharia: ["inicio", "medicoes", "avisos", "siga", "documentos", "obras", "a-receber"],
   diretoria: ["inicio", "carteira", "avisos", "documentos", "obras", "a-receber"],
-  admin: ["inicio", "medicoes", "avisos", "documentos", "obras", "a-receber", "carteira", "admin"],
+  admin: ["inicio", "medicoes", "avisos", "siga", "documentos", "obras", "a-receber", "carteira", "admin"],
 };
 
 function perfilDe(p: string): Perfil {
@@ -48,10 +49,13 @@ export function rotaDoItem(i: ItemMenu): Rota {
 
 /** O item do menu que fica marcado: a tela e tudo abaixo dela na hierarquia (Obras na obra; Medicoes na medicao,
  *  na nova medicao e no envio da nota, que nasce da aba Enviar nota). */
-export function itemDe(r: Rota): ItemMenu | "conta" | null {
+export function itemDe(r: Rota, busca: Record<string, string> = {}): ItemMenu | "conta" | null {
   switch (r.tela) {
     case "raiz": return null;
+    // os Avisos moram em Obras (?avisos=1): com eles abertos, o item aceso e' o dos Avisos
+    case "obras": return busca.avisos === "1" ? "avisos" : "obras";
     case "obra": return "obras";
+    case "documentos-empresa": return "documentos";
     case "medicao": case "nova-medicao": case "notas-envio": return "medicoes";
     default: return r.tela;
   }
@@ -62,6 +66,7 @@ export function tituloDe(tela: Rota["tela"]): string {
   switch (tela) {
     case "raiz": return "grupolotufo";
     case "obra": return "Obra";
+    case "documentos-empresa": return "Documentos";
     case "medicao": return "Medição";
     case "nova-medicao": return "Nova medição";
     case "inicio": return "Início";

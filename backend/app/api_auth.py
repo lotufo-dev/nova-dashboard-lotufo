@@ -55,8 +55,21 @@ class LoginIn(BaseModel):
     senha: str
 
 @router.post("/login")
-def login(dados: LoginIn, response: Response, conn: sqlite3.Connection = Depends(conexao)):
+def login(dados: LoginIn, request: Request, response: Response, conn: sqlite3.Connection = Depends(conexao)):
+    # #3 (limite de login por origem): a cota do IP e' conferida ANTES de autenticar(); estourada, a tentativa
+    # nao chega a contar contra a conta. Origem e' o IP da conexao como o uvicorn a entrega (ele atende direto, sem
+    # proxy na frente, com --no-proxy-headers em scripts/rodar_producao.ps1: X-Forwarded-For e' ignorado). Sem auditoria no
+    # 429: o abuso ja' deixou LIMITE_ORIGEM eventos de login falho. Cota criada uma vez por app (create_app).
+    lim, origem = request.app.state.limite_login, (request.client.host if request.client else "")
+    marca = lim.reservar(origem)
+    if marca is None:
+        raise HTTPException(429, "Muitas tentativas de entrar a partir deste computador. Tente de novo em alguns minutos.",
+                            headers={"Retry-After": str(lim.segundos_para_liberar(origem))})
+    # So' quem entra devolve a vaga. Erro no meio (banco ocupado ao gravar o contador, /code-review) fica contado:
+    # a senha pode ja' ter sido conferida.
     u = auth.autenticar(conn, dados.email, dados.senha)
+    if u is not None:
+        lim.liberar(origem, marca)
     if u is None:
         # Tentativa recusada tambem vira evento: sem isso, ataque de forca bruta e
         # bloqueio de conta nao deixam rastro nenhum. Grava-se so o e-mail (em

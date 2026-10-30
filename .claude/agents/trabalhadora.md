@@ -35,8 +35,9 @@ ninguém. Leia antes `CLAUDE.md`, `README.md` e as regras de `.claude/rules/` qu
 
 ## Passo a passo
 
-1. Confira o worktree: `git branch --show-current` e `git status`. Não renomeie a branch (a ferramenta que
-   criou o worktree rastreia o nome); o número da issue vai no título da PR. Se `frontend/node_modules` ou
+1. Confira o worktree: `git branch --show-current` e `git status`. Não renomeie a branch local (a ferramenta que
+   criou o worktree rastreia o nome); no GitHub ela sobe como `<N>-<nome-curto>` (skill `abrir-pr`), e o
+   número da issue vai também no título da PR. Se `frontend/node_modules` ou
    `backend/.venv` não existirem, rode
    `powershell -NoProfile -ExecutionPolicy Bypass -File .claude/hooks/preparar-worktree.ps1` pelo PowerShell.
 2. Leia a issue inteira (`gh issue view <N>`), os arquivos de `## Arquivos prováveis` e os testes existentes
@@ -52,7 +53,7 @@ ninguém. Leia antes `CLAUDE.md`, `README.md` e as regras de `.claude/rules/` qu
    skill `abrir-pr` descreve. Se o prompt veio como "Issue #N, PR #M, worktree <caminho>: corrija estes
    achados", você não cria nada: trabalha nesse caminho (`cd`/`git -C`) e segue o passo 6.
 6. Se a orquestradora mandar achados de volta: para cada um, corrigir com teste, ou refutar com `arquivo:linha`
-   que prova. Commit, push, e atualizar a PR (`gh pr edit <M> --body-file ...`) com o resultado em `## Gates`.
+   que prova. Commit, `git push origin HEAD:<branch no GitHub>`, e atualizar a PR (`gh pr edit <M> --body-file ...`) com o resultado em `## Gates`.
    **Nunca comente na PR** (todo agente posta com a conta do Leo, e comentário na PR é a trava que a tira do
    auto-merge): o que precisar registrar vai no corpo da PR ou na issue.
 
@@ -63,7 +64,8 @@ Uma mensagem curta, só com isto, em português:
 ```
 issue: #N
 estado: PR aberta | PAROU (pergunta na issue) | FALHOU (motivo em uma linha)
-branch: <nome da branch, como está>
+branch: <nome da branch local, como está>
+branch no GitHub: <N>-<nome-curto> (ou nenhuma)
 
 worktree: <caminho absoluto>
 pr: #M (ou nenhuma)

@@ -138,6 +138,20 @@ def test_cabecalho_e_cadastro_da_obra(tmp_path, monkeypatch):
     assert ap["tipo"] == "apostilamento_reajuste" and ap["dados"]["percentual"] == "4,21"
 
 
+def test_cabecalho_traz_o_inicio_da_execucao_e_da_vigencia(tmp_path, monkeypatch):
+    """#160: as linhas do tempo da pagina da obra pedem a data de inicio; sem o cadastro dela, vem nula."""
+    import datetime
+    conn = _conn(tmp_path, monkeypatch)
+    sem = contratos.criar(conn, 1, BASE)
+    com = contratos.criar(conn, 1, {**BASE, "numero_instrumento": "IC 083/2025",
+                                    "execucao_inicio": "2025-07-01", "vigencia_inicio": "2025-06-15"})
+    hoje = datetime.date(2026, 1, 10)
+    c = contratos.cabecalho(conn, com, hoje)
+    assert c["execucao_inicio"] == "2025-07-01" and c["vigencia_inicio"] == "2025-06-15"
+    c0 = contratos.cabecalho(conn, sem, hoje)
+    assert c0["execucao_inicio"] is None and c0["vigencia_inicio"] is None
+
+
 def test_lista_de_obras_traz_a_data_da_paralisacao_para_a_operacao(client, tmp_path):
     """"Paralisada desde" na lista: o aviso e' so' da diretoria, entao a data vem do proprio /api/contratos,
     tambem para obra suspensa (estado que o cadastro do QDOP usa para 'paralisada')."""

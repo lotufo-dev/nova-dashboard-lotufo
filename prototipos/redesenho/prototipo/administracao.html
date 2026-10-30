@@ -1,0 +1,478 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administração</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<style>
+/* Administração (#164, opção A). Só o que falta na base, sempre com os tokens. */
+.conta__botao { display: inline-flex; align-items: center; }
+[hidden] { display: none !important; }
+
+/* só do protótipo: trocar o estado da tela para ver os casos de falha */
+.proto-estado { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 12px; border: 1px dashed var(--atencao-linha); border-radius: var(--raio); background: var(--atencao-fundo); font-size: 12.5px; color: var(--atencao); }
+.proto-estado button { height: 26px; padding: 0 10px; font-size: 12px; border-radius: var(--raio-pilula); }
+.proto-estado button[aria-pressed="true"] { background: var(--acento-fundo); border-color: var(--acento-linha); color: var(--acento-mais); }
+
+/* cartões de situação */
+.situacoes { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
+.situacao { padding: 18px 20px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: baseline; }
+.situacao__ponto { width: 10px; height: 10px; border-radius: var(--raio-pilula); background: var(--ok-ponto); align-self: center; }
+.situacao--atencao .situacao__ponto { background: var(--atencao-ponto); }
+.situacao--acao .situacao__ponto { background: var(--acao-ponto); }
+.situacao--neutra .situacao__ponto { background: var(--texto-fraco); }
+.situacao__titulo { margin: 0; font-size: 15px; font-weight: 600; }
+.situacao__valor { grid-column: 2; font-family: var(--fonte-num); font-size: 16px; color: var(--texto-2); }
+.situacao__nota { grid-column: 2; font-size: 12.5px; color: var(--texto-2); }
+.situacao--acao .situacao__valor { color: var(--acao); }
+.situacao--atencao .situacao__valor { color: var(--atencao); }
+.acoes-saude { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+.acoes-saude .btn--primario { height: 40px; padding: 0 20px; font-size: 14px; }
+.acoes-saude p { margin: 0; color: var(--texto-2); font-size: 13px; }
+.tabela td .campo__nota { white-space: normal; }
+#rodadas-corpo .campo__nota { min-width: 32ch; }
+
+/* reconciliação e auditoria */
+.filtros-avisos__linha button.link-grupo { height: auto; padding: 0; border: 0; background: none; color: var(--acento); font-size: 14px; font-weight: 400; text-decoration: underline; text-underline-offset: 3px; }
+.filtros-avisos__linha button.link-grupo[aria-current="true"] { color: var(--texto); font-weight: 600; text-decoration: none; }
+.form-inline select, .form-inline input { max-width: 100%; }
+.novo-usuario .campo { flex: 1 1 200px; }
+.novo-usuario .campo input, .novo-usuario .campo select { width: 100%; }
+.campo input[aria-invalid="true"] { border-color: var(--acao-ponto); }
+
+@media (max-width: 767px) {
+  .pagina { padding-top: 16px; gap: 16px; }
+  .cartao__cabeca { flex-wrap: wrap; }
+  .acoes-saude .btn--primario { width: 100%; justify-content: center; }
+  .contagens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+}
+</style></head>
+<body data-secao="admin" data-titulo="Administração"><main id="conteudo"><div class="pagina">
+
+<div class="abas" role="tablist" aria-label="Seções da Administração">
+  <button class="aba" role="tab" id="aba-saude" aria-controls="p-saude" data-aba="saude">Saúde</button>
+  <button class="aba" role="tab" id="aba-reconciliacao" aria-controls="p-reconciliacao" data-aba="reconciliacao">Reconciliação</button>
+  <button class="aba" role="tab" id="aba-usuarios" aria-controls="p-usuarios" data-aba="usuarios">Usuários</button>
+  <button class="aba" role="tab" id="aba-auditoria" aria-controls="p-auditoria" data-aba="auditoria">Auditoria</button>
+</div>
+
+<!-- ============================================================ SAÚDE -->
+<section class="adm-painel pilha" id="p-saude" role="tabpanel" aria-labelledby="aba-saude">
+  <div class="proto-estado" role="group" aria-label="Estado de exemplo do protótipo">
+    <span>Ver como fica:</span>
+    <button type="button" data-estado="ok" aria-pressed="true">Tudo em dia</button>
+    <button type="button" data-estado="falhou" aria-pressed="false">Última rodada falhou</button>
+    <button type="button" data-estado="atrasado" aria-pressed="false">Backup atrasado</button>
+    <button type="button" data-estado="semrm" aria-pressed="false">RM não configurado</button>
+  </div>
+
+  <ul class="situacoes" id="situacoes" aria-label="Situação do servidor"></ul>
+
+  <div id="caixa-falha"></div>
+  <div class="acoes-saude">
+    <button type="button" class="btn btn--primario" id="sincronizar" data-acao="Buscaria agora as NFs e as baixas no RM; a rodada nova entraria no alto da tabela.">Sincronizar agora</button>
+    <p id="ultima-rodada"></p>
+  </div>
+
+  <section class="cartao" aria-labelledby="t-rodadas">
+    <div class="cartao__cabeca cartao__cabeca--quebra">
+      <h2 class="cartao__titulo" id="t-rodadas">Rodadas de sincronização com o RM</h2>
+      <span class="cartao__dica" id="dica-rodadas"></span>
+    </div>
+    <ul class="contagens cartao__corpo" id="contagens-rodada" aria-label="Contagens da última rodada"></ul>
+    <div id="rm-nao-config" class="cartao__corpo" hidden>
+      <p class="campo__nota">Sem RM, o lançamento da NF e o recebimento continuam registrados à mão na medição. Para ligar:
+        conta de serviço no RM, consultas cadastradas e as variáveis de acesso ao RM na tarefa do servidor — ver o manual de produção.</p>
+    </div>
+    <div class="tabela-wrap" id="rodadas-wrap">
+      <table class="tabela">
+        <caption class="sr-only">Últimas rodadas de sincronização com o RM</caption>
+        <thead><tr><th scope="col">Início</th><th scope="col">Disparo</th><th scope="col">Duração</th><th scope="col">Resultado</th>
+          <th scope="col" class="col-num">NFs</th><th scope="col" class="col-num">Baixas</th><th scope="col" class="col-num">Alocadas</th>
+          <th scope="col" class="col-num" title="NFs com mais de uma medição candidata: ficam sem vínculo automático">Ambíguas</th><th scope="col" class="col-num">Recebidas</th></tr></thead>
+        <tbody id="rodadas-corpo"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="cartoes-lado" style="grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr))">
+    <section class="cartao" aria-labelledby="t-rec-resumo">
+      <div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-rec-resumo">Reconciliação RM × dashboard</h2>
+        <span class="cartao__dica">o que está de um lado só</span></div>
+      <ul class="contagens cartao__corpo" id="rec-contagens"></ul>
+    </section>
+
+    <section class="cartao" aria-labelledby="t-backup">
+      <div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-backup">Backup</h2><span id="selo-backup"></span>
+        <span class="cartao__dica">um snapshot por hora</span></div>
+      <div class="cartao__corpo pilha" id="backup-corpo" style="gap:8px"></div>
+    </section>
+  </div>
+</section>
+
+<!-- ============================================================ RECONCILIAÇÃO -->
+<section class="adm-painel pilha" id="p-reconciliacao" role="tabpanel" aria-labelledby="aba-reconciliacao" hidden>
+  <section class="cartao" aria-labelledby="t-rec-filtros">
+    <div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-rec-filtros">Reconciliação RM × dashboard</h2>
+      <span class="cartao__dica">o que está de um lado só</span></div>
+    <div class="cartao__corpo filtros-avisos__linhas">
+      <p class="filtros-avisos__linha" id="rec-grupos"><span class="resumo__rotulo">Grupo</span></p>
+      <div class="form-inline">
+        <div class="campo"><label class="campo__rotulo" for="rec-obra">Obra</label>
+          <select id="rec-obra"><option value="">Todas</option></select></div>
+      </div>
+      <span class="sr-only" role="status" id="rec-status"></span>
+      <p class="campo__nota" id="rec-nota-obra" hidden>As NFs sem medição não têm obra e saem com este filtro.</p>
+    </div>
+  </section>
+  <div class="pilha" id="rec-grupos-corpo"></div>
+</section>
+
+<!-- ============================================================ USUÁRIOS -->
+<section class="adm-painel pilha" id="p-usuarios" role="tabpanel" aria-labelledby="aba-usuarios" hidden>
+  <section class="cartao" aria-labelledby="t-usuarios">
+    <div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-usuarios">Usuários</h2>
+      <span class="cartao__dica">cada pessoa conecta a própria conta Microsoft em Minha conta</span></div>
+    <div class="tabela-wrap">
+      <table class="tabela">
+        <caption class="sr-only">Usuários, com o perfil, a situação e a conta Microsoft usada para enviar e-mail</caption>
+        <thead><tr><th scope="col">Nome</th><th scope="col">E-mail</th><th scope="col">Perfil</th><th scope="col">Situação</th>
+          <th scope="col">Bloqueio</th><th scope="col">Conta Microsoft</th><th scope="col"><span class="sr-only">Senha, ativar ou desativar</span></th></tr></thead>
+        <tbody id="usuarios-corpo"></tbody>
+      </table>
+    </div>
+    <p class="sr-only" role="status" id="usuarios-status"></p>
+  </section>
+
+  <section class="cartao" aria-labelledby="t-novo">
+    <div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-novo">Novo usuário</h2></div>
+    <form class="cartao__corpo form-inline novo-usuario" id="form-novo" novalidate>
+      <div class="campo"><label class="campo__rotulo" for="novo-nome">Nome</label><input id="novo-nome" autocomplete="off"></div>
+      <div class="campo"><label class="campo__rotulo" for="novo-email">E-mail</label><input id="novo-email" type="email" autocomplete="off" spellcheck="false"></div>
+      <div class="campo"><label class="campo__rotulo" for="novo-senha">Senha (mínimo de 10 caracteres)</label><input id="novo-senha" type="password" autocomplete="new-password"></div>
+      <div class="campo"><label class="campo__rotulo" for="novo-perfil">Perfil</label>
+        <select id="novo-perfil"><option value="engenharia">Engenharia</option><option value="diretoria">Diretoria</option><option value="admin">Administrador</option></select></div>
+      <button type="submit" class="btn btn--primario">Criar usuário</button>
+    </form>
+    <div class="cartao__corpo" id="novo-erro" hidden style="padding-top:0"></div>
+  </section>
+</section>
+
+<!-- ============================================================ AUDITORIA -->
+<section class="adm-painel pilha" id="p-auditoria" role="tabpanel" aria-labelledby="aba-auditoria" hidden>
+  <section class="cartao" aria-labelledby="t-auditoria">
+    <div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-auditoria">Auditoria</h2>
+      <span class="selo selo--ok"><span class="selo__ponto" aria-hidden="true"></span><span class="selo__texto">cadeia íntegra</span></span>
+      <span class="cartao__dica">registro só de acréscimo: nada se apaga nem se altera</span></div>
+    <div class="cartao__corpo form-inline">
+      <div class="campo"><label class="campo__rotulo" for="aud-acao">Ação</label><select id="aud-acao"></select></div>
+      <div class="campo"><label class="campo__rotulo" for="aud-pessoa">Pessoa</label><select id="aud-pessoa"></select></div>
+      <div class="campo"><label class="campo__rotulo" for="aud-desde">Desde</label><input id="aud-desde" type="date"></div>
+    </div>
+    <p class="cartao__corpo campo__nota" id="aud-conta" style="padding-top:0"></p>
+    <div id="aud-vazio" hidden></div>
+    <div class="tabela-wrap tabela-wrap--alta" id="aud-wrap">
+      <table class="tabela">
+        <caption class="sr-only">Eventos de auditoria, do mais recente ao mais antigo</caption>
+        <thead><tr><th scope="col">Data e hora</th><th scope="col">Quem</th><th scope="col">Ação</th><th scope="col">Objeto</th></tr></thead>
+        <tbody id="aud-corpo"></tbody>
+      </table>
+    </div>
+    <div class="cartao__corpo" id="aud-mais"><button type="button" class="btn btn--pequeno" id="aud-carregar">Carregar mais</button></div>
+  </section>
+</section>
+
+</div></main>
+<script src="shell.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  const brl = c => (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const n = x => x.toLocaleString("pt-BR");
+  const dh = s => s.slice(8, 10) + "/" + s.slice(5, 7) + "/" + s.slice(0, 4) + " " + s.slice(11, 16);
+  const d = s => s.slice(8, 10) + "/" + s.slice(5, 7) + "/" + s.slice(0, 4);
+  const ICONE_ALERTA = '<svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4.5M12 17.2h.01"/></svg>';
+  const selo = (classe, texto) => '<span class="selo ' + classe + '">' + (classe === "selo--acao" ? ICONE_ALERTA : '<span class="selo__ponto" aria-hidden="true"></span>') + '<span class="selo__texto">' + texto + "</span></span>";
+  const seloRodada = e => e === "ok" ? selo("selo--ok", "OK") : e === "falhou" ? selo("selo--acao", "Falhou") : selo("", "Rodando");
+  const caixa = (critico, txt) => '<p class="aviso' + (critico ? " aviso--critico" : "") + '">' + (critico ? ICONE_ALERTA : '<span class="aviso__ponto" aria-hidden="true"></span>') +
+    '<span><span class="sr-only">' + (critico ? "Crítico: " : "Atenção: ") + "</span>" + txt + "</span></p>";
+
+  // ------------------------------------------------------------------ abas
+  const abas = [...document.querySelectorAll('[role="tab"]')];
+  function abrir(id, foco) {
+    abas.forEach(a => {
+      const sim = a.dataset.aba === id;
+      a.setAttribute("aria-selected", String(sim)); a.tabIndex = sim ? 0 : -1;
+      $(a.getAttribute("aria-controls")).hidden = !sim;
+      if (sim && foco) a.focus();
+    });
+    if (location.hash.slice(1) !== id) history.replaceState(null, "", "#" + id);
+  }
+  abas.forEach((a, i) => {
+    a.addEventListener("click", () => abrir(a.dataset.aba));
+    a.addEventListener("keydown", e => {
+      const k = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (k) { e.preventDefault(); abrir(abas[(i + k + abas.length) % abas.length].dataset.aba, true); }
+    });
+  });
+
+  // ------------------------------------------------------------------ Saúde (dados inventados; agora = 16/10/2026 14:52)
+  const RODADAS = [];
+  for (let h = 14, k = 0; k < 10; k++, h--) {
+    const falhou = h === 9;
+    const nf = falhou ? 0 : [6, 4, 9, 3, 5, 7, 2, 4, 8, 3][k];
+    RODADAS.push({ inicio: "2026-10-16T" + String(h).padStart(2, "0") + ":40", disparo: k === 3 ? "manual (Administrador)" : "agendada",
+      duracao: falhou ? "1 min 00 s" : ["38 s", "41 s", "52 s", "35 s", "44 s", "47 s", "31 s", "39 s", "58 s", "36 s"][k],
+      estado: falhou ? "falhou" : "ok", erro: falhou ? "O RM não respondeu em 60 segundos. Nada foi gravado nesta rodada." : null,
+      nfs: nf, baixas: falhou ? 0 : [3, 2, 5, 1, 2, 4, 1, 2, 6, 1][k], alocadas: falhou ? 0 : [5, 4, 8, 3, 4, 6, 2, 3, 7, 3][k],
+      ambiguas: falhou ? 0 : [1, 0, 1, 0, 1, 1, 0, 1, 1, 0][k], recebidas: falhou ? 0 : [2, 1, 3, 1, 1, 2, 0, 1, 4, 1][k] });
+  }
+  const REC = { nfs: 15, medicoes: 3, divergencias: 2, desfeitas: 2, recebidas: 2 };
+  const CATS = [["nfs", "NFs sem medição", ["NF sem medição", "NFs sem medição"]], ["medicoes", "Medições sem NF do RM", ["medição sem NF do RM", "medições sem NF do RM"]],
+    ["divergencias", "Divergências de valor", ["divergência de valor", "divergências de valor"]], ["desfeitas", "Alocações desfeitas", ["alocação desfeita", "alocações desfeitas"]],
+    ["recebidas", "Notas de recebimentos à mão sem baixa no RM", ["nota de recebimento à mão sem baixa no RM", "notas de recebimentos à mão sem baixa no RM"]]];
+  let estado = "ok";
+
+  function saude() {
+    const rod = RODADAS.map(r => ({ ...r }));
+    if (estado === "falhou") Object.assign(rod[0], { estado: "falhou", duracao: "1 min 00 s", erro: "O RM recusou a conta de serviço (senha expirada). Nada foi gravado nesta rodada.", nfs: 0, baixas: 0, alocadas: 0, ambiguas: 0, recebidas: 0 });
+    const semRm = estado === "semrm", atrasado = estado === "atrasado";
+    const falhas24 = rod.filter(r => r.estado === "falhou").length;
+    const ultima = rod[0], boa = rod.find(r => r.estado === "ok");
+    const sit = [
+      ["Último backup", atrasado ? "hoje 11:00" : "hoje 14:00", atrasado ? "atrasado: há mais de 2 horas sem snapshot" : "312 MB · 48 snapshots guardados", atrasado ? "acao" : "ok"],
+      ["Última cópia externa dos arquivos", "ontem 22:10", "notas, espelhos, modelos e evidências", "ok"],
+      ["Sincronização com o RM", semRm ? "não configurado" : ultima.estado === "falhou" ? "falhou há 12 min" : "há 12 min",
+        semRm ? "lançamentos seguem à mão" : ultima.estado === "falhou" ? "a última que deu certo foi às " + boa.inicio.slice(11) : "deu certo · " + ultima.disparo, semRm ? "neutra" : ultima.estado === "falhou" ? "acao" : "ok"],
+      ["Rodadas com falha", semRm ? "—" : falhas24 + " nas últimas 24 h", semRm ? "sem rodadas" : falhas24 ? "veja o motivo na tabela" : "nenhuma", semRm ? "neutra" : falhas24 ? "atencao" : "ok"],
+    ];
+    $("situacoes").innerHTML = sit.map(([t, v, nota, c]) => '<li class="cartao situacao situacao--' + c + '"><span class="situacao__ponto" aria-hidden="true"></span>' +
+      '<h2 class="situacao__titulo">' + t + '</h2><span class="situacao__valor">' + v + '</span><span class="situacao__nota">' + nota + "</span></li>").join("");
+
+    $("caixa-falha").innerHTML = !semRm && ultima.estado === "falhou"
+      ? caixa(true, "Última rodada: falhou em " + dh(ultima.inicio) + " (" + ultima.disparo + "). " + ultima.erro + " A última que deu certo foi em " + dh(boa.inicio) +
+        ". “Sincronizar agora” tenta de novo; se a falha se repetir, veja o manual de produção.")
+      : atrasado ? caixa(true, "Backup atrasado: o último foi em 16/10/2026 11:00, há mais de 2 horas. Confira a tarefa do servidor e a pasta de backups.") : "";
+    $("sincronizar").disabled = semRm;
+    $("sincronizar").title = semRm ? "Configure o acesso ao RM no servidor (manual de produção)" : "Buscar NFs e baixas no RM agora";
+    $("ultima-rodada").innerHTML = semRm ? "O RM não está configurado neste servidor." : ultima.estado === "ok"
+      ? "Última rodada: <strong>deu certo</strong> em " + dh(ultima.inicio) + " (" + ultima.disparo + ")." : "A sincronização roda sozinha a cada hora.";
+
+    $("rm-nao-config").hidden = !semRm;
+    $("rodadas-wrap").hidden = semRm;
+    $("dica-rodadas").textContent = semRm ? "não configurado neste servidor" : "as NFs e as baixas do RM · as últimas " + rod.length + " rodadas";
+    $("contagens-rodada").hidden = semRm || ultima.estado !== "ok";
+    $("contagens-rodada").innerHTML = [[ultima.nfs, "NF", "NFs"], [ultima.baixas, "Baixa", "Baixas"], [ultima.alocadas, "Alocada", "Alocadas"], [ultima.ambiguas, "Ambígua", "Ambíguas"], [ultima.recebidas, "Recebida", "Recebidas"]]
+      .map(([q, um, v]) => '<li><div class="dado"><span class="dado__valor num">' + n(q) + '</span> <span class="campo__nota">' + (q === 1 ? um : v) + " na última rodada</span></div></li>").join("");
+    $("rodadas-corpo").innerHTML = rod.map((r, i) => '<tr class="linha' + (i % 2 ? " par" : "") + '"><td class="num">' + dh(r.inicio) + "</td><td>" + r.disparo +
+      '</td><td class="num">' + r.duracao + "</td><td>" + seloRodada(r.estado) + (r.erro ? '<div class="campo__nota">' + r.erro + "</div>" : "") + "</td>" +
+      ["nfs", "baixas", "alocadas", "ambiguas", "recebidas"].map(k => '<td class="col-num">' + n(r[k]) + "</td>").join("") + "</tr>").join("");
+
+    $("rec-contagens").innerHTML = CATS.map(([id, , [um, v]]) => '<li><a class="dado contagem" href="#reconciliacao" data-cat="' + id + '"><span class="dado__valor num">' + REC[id] +
+      '</span> <span class="campo__nota">' + (REC[id] === 1 ? um : v) + "</span></a></li>").join("");
+
+    $("selo-backup").innerHTML = atrasado ? selo("selo--acao", "Falhou") : selo("selo--ok", "OK");
+    $("backup-corpo").innerHTML = (atrasado ? caixa(true, "Backup atrasado: o último foi em 16/10/2026 11:00, há mais de 2 horas.") : "") +
+      "<p style=\"margin:0\">Último backup: <span class=\"num\">" + (atrasado ? "16/10/2026 11:00 (309 MB)" : "16/10/2026 14:00 (312 MB)") + "</span>.</p>" +
+      "<p style=\"margin:0\"><span class=\"num\">48</span> snapshots guardados neste servidor.</p>" +
+      (atrasado ? caixa(true, "Último snapshot: a última tentativa, em 16/10/2026 12:00, falhou (disco de backup sem espaço livre). A última que deu certo foi em 16/10/2026 11:00.") : "") +
+      "<p style=\"margin:0\">Última cópia externa: <span class=\"num\">16/10/2026 03:00</span>.</p>" +
+      "<p style=\"margin:0\">Última cópia dos arquivos: <span class=\"num\">16/10/2026 02:30</span>.</p>" +
+      "<p style=\"margin:0\">Última cópia externa dos arquivos: <span class=\"num\">15/10/2026 22:10</span>.</p>" +
+      (atrasado ? "" : "<p style=\"margin:0\">Último erro: nenhum desde que o servidor subiu.</p>");
+  }
+  document.querySelector(".proto-estado").addEventListener("click", e => {
+    const b = e.target.closest("[data-estado]"); if (!b) return;
+    estado = b.dataset.estado;
+    document.querySelectorAll("[data-estado]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    saude();
+  });
+  saude();
+
+  // ------------------------------------------------------------------ Reconciliação
+  const OBRAS = ["Anel Viário Sul", "Avenida das Palmeiras", "Centro Esportivo", "Escola Modelo", "Hospital Regional", "Parque Linear", "Ponte do Ribeirão", "Terminal Norte"];
+  OBRAS.forEach(o => $("rec-obra").insertAdjacentHTML("beforeend", "<option>" + o + "</option>"));
+  const NFS = Array.from({ length: 15 }, (_, i) => ({ nf: String(4812 - i * 3), serie: i % 4 === 3 ? "" : "1", coligada: i % 3 === 0 ? 2 : 1,
+    emissao: i === 6 ? null : "2026-" + (i < 8 ? "10" : "09") + "-" + String(i < 8 ? 15 - i : 30 - (i - 8) * 3).padStart(2, "0"),
+    valor: [128440512, 34012000, 9871045, 215300000, 46120788, 1203300, 77450019, 55000000, 18324477, 304150000, 62210430, 9100000, 41503322, 26600100, 13090455][i],
+    livre: ["MED 07 ponte", null, "reajuste 2026", "TERM NORTE 08/26", null, "parque lin.", null, "aditivo 2", null, "hosp reg 06", null, "obra 14", "escola modelo", null, "anel sul final"][i] }));
+  let nfsCarregadas = 12;
+  const MEDS = [
+    { obra: "Terminal Norte", med: "8ª Medição", comp: "08/2026", estado: "nota_emitida", rot: "Nota emitida", valor: 214500000 },
+    { obra: "Escola Modelo", med: "11ª Medição", comp: "09/2026", estado: "recebida", rot: "Recebida", valor: 41023000 },
+    { obra: "Hospital Regional", med: "5ª Medição + Reajuste", comp: "07/2026", estado: "protocolada", rot: "Protocolada", valor: null },
+  ];
+  const DIVS = [
+    { obra: "Ponte do Ribeirão", med: "7ª Medição", comp: "09/2026", valor: 128440512, alocado: 128440000 },
+    { obra: "Parque Linear", med: "12ª Medição", comp: "08/2026", valor: 63300118, alocado: 61210118 },
+  ];
+  const DESF = [
+    { obra: "Avenida das Palmeiras", med: "6ª Medição", nf: "4771/1", em: "2026-10-14T16:22", motivo: "NF era da medição do reajuste", estado: "nota_emitida", rot: "Nota emitida" },
+    { obra: "Centro Esportivo", med: "9ª Medição", nf: "4702/1", em: "2026-10-02T10:05", motivo: "Valor diferente do espelho", estado: "espelho_enviado", rot: "Espelho enviado" },
+  ];
+  const RECS = [
+    { obra: "Anel Viário Sul", med: "14ª Medição", recebida: "2026-10-09", nf: "4690/1", falta: 52300000 },
+    { obra: "Escola Modelo", med: "10ª Medição", recebida: "2026-09-30", nf: "4655/1", falta: 39812000 },
+  ];
+  let cat = null;
+  const quant = (id, l) => l === "nfs" ? REC.nfs : l;
+  function rec() {
+    const obra = $("rec-obra").value;
+    const f = l => obra ? l.filter(x => x.obra === obra) : l;
+    const dados = { nfs: obra ? [] : NFS.slice(0, nfsCarregadas), medicoes: f(MEDS), divergencias: f(DIVS), desfeitas: f(DESF), recebidas: f(RECS) };
+    const total = id => obra ? dados[id].length : REC[id];
+    $("rec-grupos").innerHTML = '<span class="resumo__rotulo">Grupo</span><button type="button" class="link-grupo" data-g=""' + (cat === null ? ' aria-current="true"' : "") + ">todos</button>" +
+      CATS.map(([id, t]) => '<button type="button" class="link-grupo" data-g="' + id + '"' + (cat === id ? ' aria-current="true"' : "") + ">" + t + ' <span class="num">(' + total(id) + ")</span></button>").join("");
+    $("rec-nota-obra").hidden = !obra;
+    const ver = CATS.filter(([id]) => cat === null || cat === id);
+    $("rec-status").textContent = ver.reduce((s, [id]) => s + dados[id].length, 0) + " linhas";
+    const lin = (i, cels) => '<tr class="linha' + (i % 2 ? " par" : "") + '">' + cels + "</tr>";
+    const ob = o => '<a class="nome-link" href="obras.html" data-acao="Abriria a página da obra ' + esc(o) + '.">' + esc(o) + "</a>";
+    const md = m => '<a href="enviar-nota.html" data-acao="Abriria a ' + esc(m) + ', na seção das notas.">' + esc(m) + "</a>";
+    const est = (e, r) => '<span class="estado estado--' + e + '"><span class="estado__ponto" aria-hidden="true"></span>' + r + "</span>";
+    const TAB = {
+      nfs: ["<th>NF</th><th class=\"col-num\">Coligada</th><th>Emissão</th><th class=\"col-num\">Valor</th><th>Campo livre 1 (RM)</th>",
+        (x, i) => lin(i, '<td class="num">' + x.nf + (x.serie ? "/" + x.serie : "") + '</td><td class="col-num">' + x.coligada + '</td><td class="num">' + (x.emissao ? d(x.emissao + "T") : "sem data") + '</td><td class="col-num dinheiro">' + brl(x.valor) + "</td><td>" + (x.livre ? esc(x.livre) : "—") + "</td>")],
+      medicoes: ["<th>Obra</th><th>Medição</th><th>Competência</th><th>Situação</th><th class=\"col-num\">Valor</th>",
+        (x, i) => lin(i, "<td>" + ob(x.obra) + "</td><td>" + md(x.med) + '</td><td class="num">' + x.comp + "</td><td>" + est(x.estado, x.rot) + ' <span class="campo__nota">sem NF do RM</span></td><td class="col-num dinheiro">' + (x.valor === null ? "—" : brl(x.valor)) + "</td>")],
+      divergencias: ["<th>Obra</th><th>Medição</th><th>Competência</th><th class=\"col-num\">Valor da medição</th><th class=\"col-num\">NFs alocadas</th><th class=\"col-num\">Diferença</th>",
+        (x, i) => lin(i, "<td>" + ob(x.obra) + "</td><td>" + md(x.med) + '</td><td class="num">' + x.comp + '</td><td class="col-num dinheiro">' + brl(x.valor) + '</td><td class="col-num dinheiro">' + brl(x.alocado) + '</td><td class="col-num dinheiro">' + brl(x.valor - x.alocado) + "</td>")],
+      desfeitas: ["<th>Obra</th><th>Medição</th><th>NF</th><th>Desfeita em</th><th>Motivo</th><th>Situação da medição</th>",
+        (x, i) => lin(i, "<td>" + ob(x.obra) + "</td><td>" + md(x.med) + '</td><td class="num">' + x.nf + '</td><td class="num">' + dh(x.em) + "</td><td>" + esc(x.motivo) + "</td><td>" + est(x.estado, x.rot) + "</td>")],
+      recebidas: ["<th>Obra</th><th>Medição</th><th>Recebida em</th><th>NF</th><th class=\"col-num\">Em aberto no RM</th>",
+        (x, i) => lin(i, "<td>" + ob(x.obra) + "</td><td>" + md(x.med) + '</td><td class="num">' + d(x.recebida + "T") + '</td><td class="num">' + x.nf + '</td><td class="col-num dinheiro">' + brl(x.falta) + "</td>")],
+    };
+    $("rec-grupos-corpo").innerHTML = ver.map(([id, t]) => {
+      const l = dados[id], mostra = cat === null ? Math.min(l.length, 10) : l.length, tot = total(id);
+      const dica = tot === 0 ? "nenhuma linha" : mostra < tot ? mostra + " de " + tot : tot === 1 ? "1 linha" : tot + " linhas";
+      const corpo = l.length === 0 ? '<div class="vazio vazio--curto"><p>' + (id === "nfs" && obra ? "As NFs sem medição não têm obra: saem com o filtro por obra." : "Nada de um lado só neste grupo.") + "</p></div>"
+        : '<div class="tabela-wrap"><table class="tabela"><caption class="sr-only">' + t + '</caption><thead><tr>' + TAB[id][0].replace(/<th/g, '<th scope="col"') + "</tr></thead><tbody>" + l.slice(0, mostra).map(TAB[id][1]).join("") + "</tbody></table></div>";
+      const rodape = mostra < l.length || (cat === null && mostra < tot) ? '<div class="cartao__corpo"><a href="#reconciliacao" data-cat="' + id + '">Ver as ' + tot + " linhas</a></div>"
+        : id === "nfs" && cat === "nfs" && nfsCarregadas < REC.nfs ? '<div class="cartao__corpo"><button type="button" class="btn btn--pequeno" id="rec-mais">Carregar mais</button></div>' : "";
+      return '<section class="cartao" aria-labelledby="t-g-' + id + '"><div class="cartao__cabeca cartao__cabeca--quebra"><h2 class="cartao__titulo" id="t-g-' + id + '">' + t +
+        '</h2><span class="cartao__dica num">' + dica + "</span></div>" + corpo + rodape + "</section>";
+    }).join("");
+  }
+  document.addEventListener("click", e => {
+    const a = e.target.closest("[data-cat]");
+    if (a) { e.preventDefault(); cat = a.dataset.cat; abrir("reconciliacao"); rec(); scrollTo(0, 0); return; }
+    const g = e.target.closest("[data-g]");
+    if (g) { cat = g.dataset.g || null; rec(); return; }
+    if (e.target.closest("#rec-mais")) { nfsCarregadas = REC.nfs; rec(); }
+  });
+  $("rec-obra").addEventListener("change", rec);
+  rec();
+
+  // ------------------------------------------------------------------ Usuários
+  const PERFIS = { engenharia: "Engenharia", diretoria: "Diretoria", admin: "Administrador" };
+  const USR = [
+    { id: 1, nome: "Administrador", email: "admin@exemplo.com.br", perfil: "admin", ativo: true, bloqueio: null, conta: "2026-10-02T09:14", eu: true },
+    { id: 2, nome: "Engenharia 1", email: "usuario@exemplo.com.br", perfil: "engenharia", ativo: true, bloqueio: null, conta: "2026-10-14T08:02" },
+    { id: 3, nome: "Engenharia 2", email: "usuario2@exemplo.com.br", perfil: "engenharia", ativo: true, bloqueio: "15:20", conta: null },
+    { id: 4, nome: "Engenharia 3", email: "usuario3@exemplo.com.br", perfil: "engenharia", ativo: true, bloqueio: null, conta: "2026-09-28T17:45" },
+    { id: 5, nome: "Diretoria", email: "diretoria@exemplo.com.br", perfil: "diretoria", ativo: true, bloqueio: null, conta: null },
+    { id: 6, nome: "Engenharia 4", email: "usuario4@exemplo.com.br", perfil: "engenharia", ativo: false, bloqueio: null, conta: null },
+  ];
+  let aberto = null; // { id, modo: "senha" | "desativar" }
+  function usuarios() {
+    $("usuarios-corpo").innerHTML = USR.map((u, i) => {
+      let acoes;
+      if (u.eu) acoes = '<span class="campo__nota">você</span>';
+      else if (aberto && aberto.id === u.id && aberto.modo === "senha") acoes = '<form class="form-inline" data-senha="' + u.id + '" novalidate><label class="sr-only" for="senha-' + u.id + '">Senha nova de ' + esc(u.nome) + ' (mínimo de 10 caracteres)</label>' +
+        '<input id="senha-' + u.id + '" type="password" autocomplete="new-password" placeholder="Senha nova (mín. 10)…"><button type="submit" class="btn btn--pequeno btn--primario">Confirmar a senha nova</button>' +
+        '<button type="button" class="btn btn--pequeno" data-cancelar>Cancelar</button><p class="campo__erro" hidden></p></form>';
+      else if (!u.ativo) acoes = '<button type="button" class="btn btn--pequeno" data-acao="Reativaria ' + esc(u.nome) + '; a pessoa volta a entrar com a mesma senha.">Reativar</button>';
+      else if (aberto && aberto.id === u.id && aberto.modo === "desativar") acoes = '<span class="form-inline"><button type="button" class="btn btn--pequeno btn--destrutivo" data-acao="Desativaria ' + esc(u.nome) + ': perde o acesso e as sessões abertas são encerradas.">Confirmar a desativação</button><button type="button" class="btn btn--pequeno" data-cancelar>Cancelar</button></span>';
+      else acoes = '<span class="form-inline"><button type="button" class="btn btn--pequeno" data-abrir="senha" data-id="' + u.id + '">Redefinir senha</button><button type="button" class="btn btn--pequeno" data-abrir="desativar" data-id="' + u.id + '">Desativar</button></span>';
+      return '<tr class="linha' + (i % 2 ? " par" : "") + '"><td style="color:var(--texto)">' + esc(u.nome) + "</td><td>" + esc(u.email) + "</td><td>" +
+        (u.eu ? PERFIS[u.perfil] : '<select aria-label="Perfil de ' + esc(u.nome) + '" data-perfil="' + u.id + '">' + Object.entries(PERFIS).map(([k, r]) => '<option value="' + k + '"' + (k === u.perfil ? " selected" : "") + ">" + r + "</option>").join("") + "</select>") +
+        "</td><td>" + (u.ativo ? '<span class="estado estado--ok"><span class="estado__ponto" aria-hidden="true"></span>Ativo</span>' : selo("", "inativo")) + "</td><td>" +
+        (u.bloqueio ? '<span class="form-inline" style="flex-wrap:nowrap"><span class="num">até ' + u.bloqueio + '</span><button type="button" class="btn btn--pequeno" data-acao="Desbloquearia ' + esc(u.nome) + ' agora.">Desbloquear</button></span>' : "—") +
+        "</td><td>" + (!u.ativo ? "—" : u.conta ? selo("selo--ok", "conectada") + '<div class="campo__nota num">em ' + dh(u.conta) + "</div>" : selo("", "não conectada")) +
+        '</td><td style="white-space:nowrap">' + acoes + "</td></tr>";
+    }).join("");
+    const inp = document.querySelector("[data-senha] input"); if (inp) inp.focus();
+  }
+  $("usuarios-corpo").addEventListener("click", e => {
+    const b = e.target.closest("[data-abrir]");
+    if (b) { aberto = { id: +b.dataset.id, modo: b.dataset.abrir }; usuarios(); return; }
+    if (e.target.closest("[data-cancelar]")) { aberto = null; usuarios(); }
+  });
+  $("usuarios-corpo").addEventListener("change", e => {
+    const s = e.target.closest("[data-perfil]"); if (!s) return;
+    const u = USR.find(x => x.id === +s.dataset.perfil);
+    window.protoAviso("Mudaria o perfil de " + u.nome + " para " + PERFIS[s.value] + ".");
+  });
+  $("usuarios-corpo").addEventListener("submit", e => {
+    e.preventDefault();
+    const f = e.target, u = USR.find(x => x.id === +f.dataset.senha), v = f.querySelector("input").value, err = f.querySelector(".campo__erro");
+    if (v.length < 10) { err.textContent = "A senha nova precisa de pelo menos 10 caracteres."; err.hidden = false; f.querySelector("input").setAttribute("aria-invalid", "true"); return; }
+    aberto = null; usuarios();
+    window.protoAviso("Senha de " + u.nome + " redefinida; as sessões abertas dessa pessoa seriam encerradas.");
+  });
+  usuarios();
+
+  $("form-novo").addEventListener("submit", e => {
+    e.preventDefault();
+    const campos = { nome: $("novo-nome"), email: $("novo-email"), senha: $("novo-senha") };
+    Object.values(campos).forEach(c => c.removeAttribute("aria-invalid"));
+    let erro = null;
+    if (!campos.nome.value.trim()) erro = ["nome", "Informe o nome."];
+    else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(campos.email.value.trim())) erro = ["email", "Informe um e-mail válido."];
+    else if (USR.some(u => u.email === campos.email.value.trim().toLowerCase())) erro = ["email", "Já existe um usuário com este e-mail."];
+    else if (campos.senha.value.length < 10) erro = ["senha", "A senha precisa de pelo menos 10 caracteres."];
+    const caixaErro = $("novo-erro");
+    if (erro) {
+      campos[erro[0]].setAttribute("aria-invalid", "true"); campos[erro[0]].setAttribute("aria-describedby", "novo-erro");
+      caixaErro.innerHTML = '<p class="erro" role="alert">' + ICONE_ALERTA + erro[1] + "</p>"; caixaErro.hidden = false; campos[erro[0]].focus(); return;
+    }
+    caixaErro.hidden = true;
+    window.protoAviso("Criaria o usuário " + campos.nome.value.trim() + " (" + PERFIS[$("novo-perfil").value] + ").");
+    e.target.reset();
+  });
+
+  // ------------------------------------------------------------------ Auditoria
+  const ACOES = { "auth.login": "Entrada no sistema", "auth.login_falha": "Tentativa de entrada recusada", "medicao.estado": "Mudança de estado da medição",
+    "espelho.gerar": "Espelho gerado", "espelho.enviar": "Espelho enviado", "protocolo.enviar": "Protocolo enviado", "nf.alocar": "NF alocada à medição",
+    "nf.desalocar": "Alocação de NF desfeita", "rm.sincronizacao": "Sincronização com o RM", "correio.envio": "E-mail enviado", "usuario.atualizar": "Usuário alterado",
+    "usuario.senha_trocada": "Senha trocada", "cadastro.aplicar": "Cadastro aplicado", "certidao.registrar": "Certidão registrada", "nota.conferencia": "Nota conferida" };
+  const QUEM = ["Engenharia 1", "Engenharia 2", "Engenharia 3", "Administrador", "Diretoria", "sistema"];
+  const OBJ = ["Medição 7ª · Ponte do Ribeirão", "Medição 8ª · Terminal Norte", "Protocolo · Hospital Regional", "Usuário Engenharia 2", "Certidão FGTS", "NF 4771/1", "Obra Escola Modelo", "Cadastro geral", "E-mail · Avenida das Palmeiras", "Medição 11ª · Escola Modelo"];
+  const SEQ = [["rm.sincronizacao", 5, 7], ["correio.envio", 0, 8], ["espelho.enviar", 0, 0], ["nf.alocar", 5, 1], ["auth.login", 0, null], ["medicao.estado", 1, 9], ["auth.login_falha", 1, null],
+    ["rm.sincronizacao", 5, 7], ["nota.conferencia", 2, 5], ["protocolo.enviar", 2, 2], ["espelho.gerar", 0, 0], ["auth.login", 2, null], ["nf.desalocar", 3, 5], ["usuario.atualizar", 3, 3],
+    ["rm.sincronizacao", 5, 7], ["certidao.registrar", 1, 4], ["auth.login", 4, null], ["medicao.estado", 2, 1], ["cadastro.aplicar", 3, 6], ["usuario.senha_trocada", 4, null]];
+  let quando = new Date("2026-10-16T14:41:00");
+  const EVENTOS = [];
+  for (let k = 0; k < 45; k++) {
+    const [a, q, o] = SEQ[k % SEQ.length];
+    quando = new Date(quando.getTime() - (17 + (k * 37) % 95) * 60000);
+    const iso = quando.getFullYear() + "-" + String(quando.getMonth() + 1).padStart(2, "0") + "-" + String(quando.getDate()).padStart(2, "0") + "T" + String(quando.getHours()).padStart(2, "0") + ":" + String(quando.getMinutes()).padStart(2, "0");
+    EVENTOS.push({ id: 9000 - k, em: iso, quem: QUEM[q], acao: a, obj: o === null ? (a.startsWith("auth") ? "—" : "Usuário " + QUEM[q]) : OBJ[o] });
+  }
+  let carregados = 30;
+  const opcoes = (sel, lista, atual) => { sel.innerHTML = '<option value="">Todas</option>' + lista.map(([v, r]) => '<option value="' + v + '"' + (v === atual ? " selected" : "") + ">" + r + "</option>").join(""); };
+  function auditoria() {
+    const base = EVENTOS.slice(0, carregados), ha = carregados < EVENTOS.length;
+    const fa = $("aud-acao").value, fp = $("aud-pessoa").value, fd = $("aud-desde").value;
+    opcoes($("aud-acao"), [...new Set(base.map(e => e.acao))].map(a => [a, ACOES[a]]).sort((x, y) => x[1].localeCompare(y[1], "pt-BR")), fa);
+    opcoes($("aud-pessoa"), [...new Set(base.map(e => e.quem))].map(p => [p, p]), fp);
+    const l = base.filter(e => (!fa || e.acao === fa) && (!fp || e.quem === fp) && (!fd || e.em.slice(0, 10) >= fd));
+    $("aud-conta").innerHTML = '<span role="status">' + (l.length === base.length ? base.length + " eventos" : l.length + " de " + base.length + " eventos") + "</span> (" +
+      (ha ? "os últimos " + base.length + " registrados" : "todos os " + base.length + " registrados") + ", desde " + dh(base[base.length - 1].em) + ", do mais recente ao mais antigo" + (ha ? "; há eventos anteriores" : "") + ").";
+    $("aud-corpo").innerHTML = l.map((e, i) => '<tr class="linha' + (i % 2 ? " par" : "") + '"><td class="num">' + dh(e.em) + "</td><td>" + e.quem + "</td><td>" + ACOES[e.acao] + "</td><td>" +
+      (e.obj === "—" ? "—" : '<a href="#" data-acao="Abriria ' + esc(e.obj) + '.">' + esc(e.obj) + "</a>") + "</td></tr>").join("");
+    $("aud-wrap").hidden = l.length === 0;
+    $("aud-vazio").hidden = l.length > 0;
+    $("aud-vazio").innerHTML = '<div class="vazio vazio--curto"><p class="vazio__titulo">Nenhum evento com esses filtros' + (ha ? " entre os já carregados" : "") + ".</p>" +
+      (ha ? "<p>Há eventos anteriores ainda não carregados: use Carregar mais.</p>" : "") + '<p><a href="#auditoria" id="aud-limpar">Limpar os filtros</a></p></div>';
+    $("aud-mais").hidden = !ha;
+  }
+  ["aud-acao", "aud-pessoa", "aud-desde"].forEach(id => $(id).addEventListener("change", auditoria));
+  $("aud-carregar").addEventListener("click", () => { carregados = EVENTOS.length; auditoria(); });
+  $("aud-vazio").addEventListener("click", e => { if (e.target.id === "aud-limpar") { e.preventDefault(); $("aud-acao").value = ""; $("aud-pessoa").value = ""; $("aud-desde").value = ""; auditoria(); } });
+  auditoria();
+
+  const inicial = ["saude", "reconciliacao", "usuarios", "auditoria"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "saude";
+  abrir(inicial);
+})();
+</script>
+</body></html>

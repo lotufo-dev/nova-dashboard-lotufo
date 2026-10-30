@@ -127,6 +127,26 @@ pleito_reajuste:
     Segue arquivo de exemplo para protocolo.
 
     Atenciosamente,
+# Reiteração do pleito de reajuste sem resposta (família B: MT-PAR e Prefeitura). Além dos campos do reajuste:
+# {oficio_anterior} {data_oficio_anterior} {dias_sem_resposta}. A reemissão do cronograma após aditivo usa
+# `pleito_reajuste` (família A).
+pleito_reiteracao:
+  carta_assunto: 'Ref.: reiteração do pedido de apostilamento do reajuste'
+  carta_corpo: |
+    {razao_social}, CNPJ {cnpj}, responsável pela obra {objeto}, reiteramos o pedido de reajuste do contrato {instrumento} feito no ofício {oficio_anterior}, de {data_oficio_anterior}, sem resposta há {dias_sem_resposta} dias.
+
+    A data-base é {data_base_extenso}; o aniversário do contrato é em {mes_aniversario}.
+
+    Pedimos a formalização do apostilamento.
+
+    Cordialmente,
+  email_assunto: '{oficio}: reiteração do pedido de reajuste, {obra}'
+  email_corpo: |
+    {saudacao}
+
+    Segue arquivo de exemplo para protocolo.
+
+    Atenciosamente,
 prazo:
   carta_assunto: 'Ref.: pedido de mais prazo de execução'
   carta_corpo: |

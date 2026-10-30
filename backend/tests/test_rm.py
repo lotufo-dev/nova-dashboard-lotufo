@@ -257,6 +257,153 @@ def test_titulo_aberto_nao_recebe(conn, cid, tmp_path):
     assert _tem_nf(conn, mid)
 
 
+def _eventos_diferenca(conn, mid) -> list[dict]:
+    return [json.loads(r["depois"]) for r in conn.execute(
+        "SELECT depois FROM audit_log WHERE acao='medicao.recebida_com_diferenca' AND entidade='medicao' "
+        "AND entidade_id=? ORDER BY id", (str(mid),))]
+
+
+@pytest.mark.parametrize("pago, recebe", [
+    (924.00, True),    # quitado: sem diferenca
+    (923.99, True),    # 1 centavo a menos (centavo impar)
+    (923.20, True),    # R$ 0,80 a menos
+    (923.00, True),    # R$ 1,00 a menos: no limite, ainda recebe
+    (922.99, False),   # R$ 1,01 a menos: passa do limite
+    (779.04, False),   # R$ 144,96 a menos
+])
+def test_tolerancia_de_recebimento_ate_um_real(conn, cid, tmp_path, pago, recebe):
+    """Issue #35 (decisao do Leo, 19/10/2026): titulo pago ate' R$ 1,00 abaixo do devido fecha a medicao como
+    recebida; acima disso fica aberta para conferencia. Sem tolerancia percentual."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 924.0, pago, 1, "2026-09-01T00:00:00-04:00")])
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    m = medicoes.detalhe(conn, mid)
+    assert (r["recebimentos"], m["estado"]) == ((1, "recebida") if recebe else (0, "protocolada"))
+    if recebe:
+        assert m["recebida_em"] == "2026-09-01"
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_tolerancia_nao_alcanca_diferenca_grande(conn, cid, tmp_path):
+    """O caso de R$ 2.016,48 a menos do backlog continua aberto para conferencia, sem evento de diferenca."""
+    mid = _medicao(conn, cid, 12, 50_000_00)
+    cli = _simulador(tmp_path, [_nf(100, 50_000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 46_200.0, 44_183.52, 1, "2026-09-01T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    assert _eventos_diferenca(conn, mid) == []
+
+
+def test_recebida_com_diferenca_audita_evento_novo(conn, cid, tmp_path):
+    """A diferenca aceita vai para a auditoria como evento proprio (quem: o sistema), ao lado da mudanca de estado;
+    nada sobrescrito. Medicao com duas notas: a tolerancia vale por titulo e o evento lista so' a que ficou curta."""
+    mid = _medicao(conn, cid, 12, 1500_00)
+    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12"), _nf(101, 500.0, campo="IC 082/2025 - 12")]
+    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 923.99, 1, "2026-09-01T00:00:00-04:00"),
+                                     _baixa(2, 101, 462.0, 462.0, 1, "2026-09-03T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-03")
+    nota = conn.execute("SELECT id, numero FROM notas_fiscais WHERE idmov=100").fetchone()
+    assert _eventos_diferenca(conn, mid) == [{
+        "diferenca_centavos": 1, "tolerancia_centavos": 100,
+        "notas": [{"nota_id": nota["id"], "numero": nota["numero"], "devido_centavos": 924_00,
+                   "recebido_centavos": 923_99, "diferenca_centavos": 1}]}]
+    linha = conn.execute("SELECT usuario_id FROM audit_log WHERE acao='medicao.recebida_com_diferenca'").fetchone()
+    assert linha["usuario_id"] is None
+    assert auditoria.verificar_cadeia(conn)
+    # rodada seguinte: a medicao ja' e' recebida, nada de novo evento
+    sincronizacao_rm.sincronizar(conn, cli)
+    assert len(_eventos_diferenca(conn, mid)) == 1
+
+
+def test_tolerancia_soma_a_falta_de_todas_as_notas_da_medicao(conn, cid, tmp_path):
+    """A tolerancia e' da MEDICAO: duas notas com R$ 0,99 a menos cada (R$ 1,98 no total) nao fecham."""
+    mid = _medicao(conn, cid, 12, 1500_00)
+    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12"), _nf(101, 500.0, campo="IC 082/2025 - 12")]
+    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 923.01, 1, "2026-09-01T00:00:00-04:00"),
+                                     _baixa(2, 101, 462.0, 461.01, 1, "2026-09-03T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    assert _eventos_diferenca(conn, mid) == []
+
+
+def test_titulo_quitado_sem_diferenca_nao_gera_evento(conn, cid, tmp_path):
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 924.0, 924.0, 1, "2026-09-01T00:00:00-04:00")])
+    sincronizacao_rm.sincronizar(conn, cli)
+    assert medicoes.detalhe(conn, mid)["estado"] == "recebida"
+    assert _eventos_diferenca(conn, mid) == []
+
+
+def test_tolerancia_exige_baixa_no_titulo(conn, cid, tmp_path):
+    """Titulo pequeno (ate' R$ 1,00) sem baixa nenhuma nao e' 'pago com diferenca': nada foi recebido."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 0.80, 0.0, 0)])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+
+
+@pytest.mark.parametrize("titulos", [
+    [(923.20, 923.20, 1), (0.80, 0.0, 0)],     # NF em dois titulos: o de R$ 0,80 ainda aberto
+    [(500.0, 549.50, 1), (50.0, 0.0, 0)],      # juros num titulo nao cobrem o outro, aberto
+    [(500.0, 549.50, 1), (50.0, 0.01, 4)],     # ... nem o outro com baixa parcial de 1 centavo
+])
+def test_tolerancia_exige_baixa_em_cada_titulo_da_nota(conn, cid, tmp_path, titulos):
+    """A soma da nota fica dentro de R$ 1,00, mas um titulo nao tem baixa nenhuma: nao e' 'pago com diferenca'."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    baixas = [_baixa(i, 100, orig, pago, st, "2026-09-01T00:00:00-04:00" if st else None)
+              for i, (orig, pago, st) in enumerate(titulos, 1)]
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")], baixas)
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+
+
+@pytest.mark.parametrize("titulos", [
+    [(500.0, 551.0, 1), (50.0, 0.0, 0)],       # issue #251: A com juros cobre o total da nota, B segue aberto
+    [(500.0, 600.0, 1), (50.0, 0.0, 0)],       # ... juros acima do valor do outro titulo inteiro
+    [(500.0, 551.01, 1), (50.01, 0.0, 0)],     # centavo impar nos dois titulos
+])
+def test_juros_de_um_titulo_nao_quitam_outro_aberto(conn, cid, tmp_path, titulos):
+    """Issue #251: o recebido da nota passa do devido (juros no titulo A), mas o titulo B esta' aberto no RM.
+    A nota nao esta' quitada: a falta e' contada titulo a titulo, como no caminho com diferenca da #35."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    baixas = [_baixa(i, 100, orig, pago, st, "2026-09-01T00:00:00-04:00" if st else None)
+              for i, (orig, pago, st) in enumerate(titulos, 1)]
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")], baixas)
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    assert _eventos_diferenca(conn, mid) == []
+
+
+def test_juros_num_titulo_e_outro_curto_dentro_da_tolerancia_audita_a_falta(conn, cid, tmp_path):
+    """Issue #251: total da nota acima do devido, mas o titulo B foi pago 1 centavo abaixo. A falta e' a do
+    titulo B (os juros de A nao a cobrem): fecha pela tolerancia da #35, com o evento de 1 centavo."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 500.0, 551.0, 1, "2026-09-01T00:00:00-04:00"),
+                      _baixa(2, 100, 50.01, 50.0, 1, "2026-09-02T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
+    assert medicoes.detalhe(conn, mid)["estado"] == "recebida"
+    eventos = _eventos_diferenca(conn, mid)
+    assert [e["diferenca_centavos"] for e in eventos] == [1]
+
+
+def test_nota_com_todos_os_titulos_quitados_fecha_sem_evento(conn, cid, tmp_path):
+    """Issue #251: nota em dois titulos, os dois quitados (um com juros): fecha como antes, sem evento."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 500.0, 551.0, 1, "2026-09-01T00:00:00-04:00"),
+                      _baixa(2, 100, 50.01, 50.01, 4, "2026-09-05T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-05")
+    assert _eventos_diferenca(conn, mid) == []
+
+
 def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, tmp_path):
     """Issue #203: o recebimento a mao vale, e a Saude avisa enquanto o RM nao tiver a baixa do titulo. A medicao
     fechada pelo corte nao entra (o titulo aberto dela segue no a receber); com o titulo quitado, o aviso sai."""
@@ -280,6 +427,25 @@ def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, t
     pagas = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-25T00:00:00-04:00"), _baixa(2, 101, 462.0, 0.0, 0)]
     sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))
     assert sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"] == []
+
+
+@pytest.mark.parametrize("titulos, falta", [
+    ([(500.0, 551.0, 1), (50.0, 0.0, 0)], 50_00),       # issue #253: juros em A nao escondem B aberto
+    ([(500.0, 551.0, 1), (50.0, 20.0, 4)], 30_00),      # ... nem a falta de B com baixa parcial
+    ([(500.0, 551.0, 1), (50.0, 50.0, 1)], None),       # todos pagos (um com juros): sem aviso
+    ([(500.0, 500.0, 1), (50.0, 49.01, 1)], None),      # ate' R$ 1,00 a menos: sem aviso, como hoje
+])
+def test_recebida_sem_baixa_conta_a_falta_titulo_a_titulo(conn, cid, tmp_path, titulos, falta):
+    """Issue #253: o aviso da Saude (#203) conta a falta da nota titulo a titulo, a conta da #35 e da #251."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 0.0, 0)]))
+    medicoes.mudar_estado(conn, 1, mid, "recebida", "a baixa nao entrou no RM; conferida no extrato", "2026-09-20")
+    baixas = [_baixa(i, 100, orig, pago, st, "2026-09-25T00:00:00-04:00" if st else None)
+              for i, (orig, pago, st) in enumerate(titulos, 1)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, baixas))
+    r = sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"]
+    assert [x["falta_centavos"] for x in r] == ([] if falta is None else [falta])
 
 
 def test_nf_cancelada_desfaz_alocacao(conn, cid, tmp_path):

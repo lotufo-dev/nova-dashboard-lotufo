@@ -30,7 +30,7 @@ function Situacao({ a }: { a: AditivoApi }) {
   if (a.cancelado_em) return <Selo>Cancelado</Selo>;
   if (a.status === "assinado") return (
     <Selo classe="selo--ok"
-      sufixo={<IconeCadeado className="icone icone--p" titulo="Assinado: congelado, correção é outro aditivo" />}>
+      sufixo={<IconeCadeado className="icone icone--p" titulo="Congelado" />}>
       Assinado
     </Selo>
   );
@@ -75,22 +75,17 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
     <section className="cartao" aria-labelledby="titulo-instrumentos" id="instrumentos">
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id="titulo-instrumentos">Instrumentos</h2>
-        <span className="cartao__dica num">
-          {carregando ? "carregando…" : `${linhas.length} ${linhas.length === 1 ? "instrumento" : "instrumentos"}`}
-        </span>
       </div>
 
       {erro && <div className="cartao__corpo"><p className="erro" role="alert">
         <IconeAlerta className="icone icone--p" />{erro}
       </p></div>}
       {erroCadastro && <div className="cartao__corpo"><p className="campo__nota">
-        Sem os instrumentos do cadastro (paralisações, reinícios, endossos e apostilamentos de reajuste): a leitura
-        do cadastro falhou, como diz o cartão Cadastro acima.</p></div>}
+        Não foi possível ler os instrumentos do cadastro.</p></div>}
 
       {!carregando && !erro && !erroCadastro && linhas.length === 0 && (
         <div className="vazio">
-          <p className="vazio__titulo">Nenhum instrumento neste contrato</p>
-          <p>Aditivos, apostilamentos, paralisações e endossos do contrato aparecem aqui.</p>
+          <p className="vazio__titulo">Nenhum instrumento.</p>
         </div>
       )}
 
@@ -126,9 +121,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
                 return (
                   <tr key={l.chave} className={par}>
                     <td className="num">{data(a.data_assinatura)}</td>
-                    {/* "com prazo": o servidor conta este entre os instrumentos de prazo (a aba Prazos diz quantos) */}
-                    <td>{a.forma === "apostilamento" ? "Apostilamento" : "Termo aditivo"} {ROTULO_TIPO[a.tipo] ?? a.tipo}
-                      {l.dePrazo && a.tipo !== "prazo" ? ", com prazo" : ""}</td>
+                    <td>{a.forma === "apostilamento" ? "Apostilamento" : "Termo aditivo"} {ROTULO_TIPO[a.tipo] ?? a.tipo}</td>
                     <td className="forte">{a.numero ?? "s/n"}</td>
                     {/* o objeto inteiro, que quebra linha: nada so' no passar do mouse */}
                     <td className="efeito">
@@ -144,10 +137,6 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
                         <Selo classe="selo--atencao" sufixo={<span className="sr-only"> — assinado depois do fim da execução que prorroga</span>}>
                           retroativo
                         </Selo>
-                      )}
-                      {a.valor_novo_centavos != null && (
-                        <div className="campo__nota num">valor novo {brl(a.valor_novo_centavos)}
-                          {a.valor_anterior_centavos != null && ` (era ${brl(a.valor_anterior_centavos)})`}</div>
                       )}
                       {/* textos longos: quebram linha dentro da celula, em vez de alargar a tabela */}
                       {a.ressalva_reajuste && <div className="campo__nota">Ressalva de reajuste: {a.ressalva_reajuste}</div>}

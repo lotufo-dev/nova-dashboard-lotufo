@@ -4,7 +4,7 @@ import { api, mensagemDeErro } from "./api";
 import AbaFaturamento from "./AbaFaturamento";
 import AbaSemMedicao from "./AbaSemMedicao";
 import AguardandoPagamento from "./AguardandoPagamento";
-import { brl, contar } from "./formato";
+import { brl } from "./formato";
 import { IconeAlerta, IconeMais, IconeSeta } from "./icones";
 import IniciarMedicao from "./IniciarMedicao";
 import type { Usuario } from "./Login";
@@ -36,8 +36,7 @@ function Contratante({ nome, sub }: { nome: string; sub: string | null }) {
 
 function Parada({ l }: { l: LinhaResumo }) {
   const nivel = nivelParada(l.dias, l.situacao);
-  return <span className={nivel ? `medicoes__parada medicoes__parada--${nivel}` : "medicoes__parada"}
-    title={l.marco ? undefined : "Sem a data do marco desta situação"}>{textoParada(l.dias)}</span>;
+  return <span className={nivel ? `medicoes__parada medicoes__parada--${nivel}` : "medicoes__parada"}>{textoParada(l.dias)}</span>;
 }
 
 // Mesma grade em todas as tabelas da pagina (a de cima e a de cada grupo): as colunas caem no mesmo x.
@@ -83,7 +82,6 @@ function GrupoSem({ contratante, obras, aberto }: { contratante: string; obras: 
       <summary>
         <IconeSeta className="icone icone--p medicoes__seta" />
         <span className="medicoes__grupo-nome">{contratante}</span>
-        <span className="medicoes__grupo-n">{contar(obras.length, "obra", "obras")} sem medição aberta</span>
       </summary>
       <table className="medicoes__tabela">
         <caption className="sr-only">{`${contratante}: obras sem medição aberta`}</caption>
@@ -116,8 +114,8 @@ const CABECA = (
 
 /** O cartao com a tabela: as linhas em andamento (com cabecalho) e, se houver, a faixa "Sem medição aberta" com os
  *  grupos por contratante. */
-function Quadro({ id, titulo, legenda, linhas, sem, gruposAbertos, vazio }:
-    { id: string; titulo: string; legenda: string; linhas: LinhaResumo[]; sem: ObraResumo[] | null;
+function Quadro({ id, titulo, linhas, sem, gruposAbertos, vazio }:
+    { id: string; titulo: string; linhas: LinhaResumo[]; sem: ObraResumo[] | null;
       gruposAbertos: boolean; vazio: string }) {
   const grupos = sem ? porContratante(sem) : [];
   const nada = linhas.length === 0 && grupos.length === 0;
@@ -125,7 +123,6 @@ function Quadro({ id, titulo, legenda, linhas, sem, gruposAbertos, vazio }:
     <section className="medicoes__quadro" aria-labelledby={id}>
       <div className="medicoes__quadro-cabeca">
         <h2 id={id}>{titulo}</h2>
-        <span className="medicoes__legenda">{legenda}</span>
       </div>
       {nada ? <div className="vazio"><p className="vazio__titulo">{vazio}</p></div> : (
         <Rolagem rotulo={titulo}>
@@ -139,7 +136,7 @@ function Quadro({ id, titulo, legenda, linhas, sem, gruposAbertos, vazio }:
           {grupos.length > 0 && (
             <>
               {/* na aba propria nao ha' linhas em andamento acima: a faixa so' repetiria o titulo do quadro */}
-              {linhas.length > 0 && <div className="medicoes__faixa">Sem medição aberta · {contar(sem!.length, "obra", "obras")}</div>}
+              {linhas.length > 0 && <div className="medicoes__faixa">Sem medição aberta</div>}
               {grupos.map(g => <GrupoSem key={g.contratante} contratante={g.contratante} obras={g.obras} aberto={gruposAbertos} />)}
             </>
           )}
@@ -150,6 +147,9 @@ function Quadro({ id, titulo, legenda, linhas, sem, gruposAbertos, vazio }:
 }
 
 const VAZIO: Record<Exclude<Situacao, "aguardando-nota">, string> = {
+  "planilha-gerada": "Nenhuma planilha/carta gerada à espera de envio.",
+  "planilha-enviada": "Nenhuma planilha/carta enviada à espera do boletim.",
+  "boletim-recebido": "Nenhum boletim recebido à espera do espelho.",
   faturamento: "Nenhuma medição para enviar ao faturamento.",
   "enviar-nota": "Nenhuma nota a enviar.",
   "aguardando-pagamento": "Nenhuma medição aguardando pagamento.",
@@ -157,7 +157,6 @@ const VAZIO: Record<Exclude<Situacao, "aguardando-nota">, string> = {
 
 function Resumo({ dados, podeIniciar, aoIniciar }: { dados: ResumoMedicoes; podeIniciar: boolean; aoIniciar: () => void }) {
   const sem = dados.obras.filter(o => !o.aberta);
-  const encerrando = dados.obras.filter(o => o.encerramento).length;
   return (
     <>
       {podeIniciar && (
@@ -179,7 +178,6 @@ function Resumo({ dados, podeIniciar, aoIniciar }: { dados: ResumoMedicoes; pode
         })}
       </nav>
       <Quadro id="medicoes-todas" titulo="Todas as obras" gruposAbertos={false} linhas={dados.linhas} sem={sem}
-        legenda={`${contar(dados.obras.length - encerrando, "obra ativa", "obras ativas")}${encerrando ? ` · ${encerrando} em encerramento` : ""} · ${contar(dados.linhas.length, "medição em andamento", "medições em andamento")}`}
         vazio="Nenhuma obra ativa." />
     </>
   );
@@ -203,19 +201,9 @@ export default function MedicoesPagina({ aba, busca, usuario }: { aba: AbaMedico
 
   let conteudo: React.ReactNode;
   if (aba === "enviar-nota") {
-    conteudo = (
-      <>
-        <p className="pagina__descricao">Notas emitidas que ainda não foram enviadas ao contratante. Medição e reajuste vão juntos na SINFRA e na Prefeitura de VG; separados na MTPAR e na SES.</p>
-        <NotasAEnviar busca={busca} podeEditar={podeEditar} />
-      </>
-    );
+    conteudo = <NotasAEnviar busca={busca} podeEditar={podeEditar} />;
   } else if (aba === "aguardando-pagamento") {
-    conteudo = (
-      <>
-        <p className="pagina__descricao">Notas já enviadas ao contratante · na MTPAR, registre aqui o nº do protocolo SIGA</p>
-        <AguardandoPagamento podeEditar={podeEditar} />
-      </>
-    );
+    conteudo = <AguardandoPagamento podeEditar={podeEditar} />;
   } else if (!dados) {
     conteudo = erro
       ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler as medições: {erro} Recarregue a página para tentar de novo.</p>
@@ -232,7 +220,7 @@ export default function MedicoesPagina({ aba, busca, usuario }: { aba: AbaMedico
       aoIniciar={() => setIniciando(true)} />;
   } else {
     const linhas = dados.linhas.filter(l => l.situacao === aba);
-    conteudo = <Quadro id="medicoes-aba" titulo={rotuloSituacao(aba)} legenda={contar(linhas.length, "medição", "medições")}
+    conteudo = <Quadro id="medicoes-aba" titulo={rotuloSituacao(aba)}
       linhas={linhas} sem={null} gruposAbertos={false} vazio={VAZIO[aba]} />;
   }
 

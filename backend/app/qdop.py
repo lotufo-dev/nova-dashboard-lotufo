@@ -25,13 +25,19 @@ DATAS = {"inicio", "termino", "vigencia"}
 LINHA_DADOS = 14
 
 
-def _faturado(conn, contrato_id: int, pct, reajuste: bool) -> int:
+def _faturado(conn, contrato_id: int, pct, reajuste: bool, mes: str | None = None) -> int:
     """Soma das medicoes faturadas (nota emitida, protocolada, NF emitida do legado, recebida), no atestado
-    quando houver (gate Sol do bloco 8: `nota_emitida` e' faturado no vocabulario da diretoria)."""
+    quando houver (gate Sol do bloco 8: `nota_emitida` e' faturado no vocabulario da diretoria). Com `mes`
+    ("AAAA-MM"), so' as que receberam a nota naquele mes (`nota_emitida_em`, data da nota: a mesma regra, fatiada;
+    o "Faturado no mes" da Carteira, decisao do Leo de 16/10/2026)."""
     cond = "tipo='reajuste'" if reajuste else "tipo IN ('execucao','projeto')"
+    args = (contrato_id,)
+    if mes:
+        cond += " AND substr(nota_emitida_em,1,7)=?"
+        args += (mes,)
     total = conn.execute(f"SELECT COALESCE(SUM(COALESCE(valor_atestado_centavos, valor_protocolado_centavos)), 0) "
                          f"FROM medicoes WHERE contrato_id=? AND estado IN ('nota_emitida','protocolada','nf_emitida','recebida') "
-                         f"AND {cond}", (contrato_id,)).fetchone()[0]
+                         f"AND {cond}", args).fetchone()[0]
     return contratos.cota(total, pct) or 0
 
 

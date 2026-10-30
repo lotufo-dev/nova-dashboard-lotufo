@@ -24,8 +24,6 @@ def test_assinar_confere_delta_e_recalcula_vigente(conn, cid):
     aid = aditivos.criar(conn, 1, cid, {"tipo": "misto", "numero": "1º TA", "delta_valor_centavos": 250_000_00,
                                         "nova_vigencia_fim": "2027-06-30"})
     assert contratos.vigente(conn, cid)["valor_vigente_centavos"] == 1_000_000_00   # rascunho nao conta
-    c = aditivos.conferencia(conn, aid)
-    assert c["valor_novo_esperado_centavos"] == 1_250_000_00
     with pytest.raises(ValueError, match="Conferência"):
         aditivos.assinar(conn, 1, aid, "2026-09-01", 1_200_000_00, None)
     r = aditivos.assinar(conn, 1, aid, "2026-09-01", 1_250_000_00, "reajuste do saldo pela data-base original")

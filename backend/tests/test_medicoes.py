@@ -485,3 +485,15 @@ def test_evento_de_atesto_nao_se_altera_nem_se_apaga(conn, contrato_id):
         conn.execute("DELETE FROM medicao_atestos WHERE medicao_id=?", (mid,))
     conn.rollback()
     assert _atestos(conn, mid) == [(100, "manual", None, 1)]
+
+
+def test_banco_aceita_os_estados_do_motor_e_recusa_estado_desconhecido(conn, contrato_id):
+    """Migracao 042 (issue #280): planilha/carta e boletim sao estados antes do espelho."""
+    import sqlite3
+    mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "execucao", "competencia": "2026-07"})
+    for estado in ("planilha_gerada", "planilha_enviada", "boletim_recebido", "espelho_gerado"):
+        conn.execute("UPDATE medicoes SET estado=? WHERE id=?", (estado, mid))
+        assert medicoes.detalhe(conn, mid)["estado"] == estado
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE medicoes SET estado='boletim_inventado' WHERE id=?", (mid,))
+    conn.rollback()

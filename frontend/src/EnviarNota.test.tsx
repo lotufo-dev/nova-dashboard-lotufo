@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiErro } from "./api";
 import EnviarNota from "./EnviarNota";
-import { EnvioDaMedicao } from "./Etapas";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm }));
@@ -19,7 +18,7 @@ const det = {
     valor_centavos: 100, emitida_em: "2026-10-08", dias: 2, situacao: "pronto", aviso: null, protocolo_id: 3, itens: [] },
   familia: "sinfra", etapa: "nota", situacao_protocolo: "rascunho", carta: null,
   previa: { para: ["orgao@exemplo.com"], copia: [], assunto: "Notas", corpo: "Bom dia.", anexos: [], links: [] },
-  bloqueio: null, pendencias: [], justificativa_obrigatoria: false, extras: [],
+  bloqueio: null, pendencias: [] as string[], extras: [],
 };
 
 describe("Enviar a nota", () => {
@@ -36,7 +35,7 @@ describe("Enviar a nota", () => {
     const cco = screen.getByLabelText(/Cco: digite/);
     fireEvent.change(cco, { target: { value: "oculto@exemplo.com" } });
     fireEvent.blur(cco);
-    fireEvent.click(screen.getByRole("button", { name: "Enviar a nota" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enviar o e-mail" }));
     await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/notas/envio/3/enviar")).toBe(true));
     const [, opcoes] = api.mock.calls.find(c => c[0] === "/api/notas/envio/3/enviar")!;
     expect(JSON.parse(opcoes.body).cco).toEqual(["oculto@exemplo.com"]);
@@ -46,7 +45,7 @@ describe("Enviar a nota", () => {
     api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
     const aoConcluir = vi.fn();
     render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir, aoTrocar: () => {} }} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Enviar a nota" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar o e-mail" }));
     await waitFor(() => expect(aoConcluir).toHaveBeenCalled());
     expect(aoConcluir.mock.calls[0][0]).toMatch(/^Nota enviada às \d{2}:\d{2}\.$/);
   });
@@ -54,45 +53,97 @@ describe("Enviar a nota", () => {
   it("diretoria vê o que vai no envio, sem e-mail, anexos nem registro por fora (B-09, 10/10/2026)", async () => {
     api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
     render(<EnviarNota protocoloId={3} podeEditar={false} embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
-    expect(await screen.findByText(/Seu perfil só consulta esta tela/)).toBeTruthy();
-    expect(screen.getByText("O que vai no e-mail")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Enviar a nota" })).toBeNull();
+    expect(await screen.findByText("O que vai no e-mail")).toBeTruthy();
+    expect(screen.queryByText(/Seu perfil só consulta esta tela/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enviar o e-mail" })).toBeNull();
     expect(screen.queryByText("Anexar outro documento")).toBeNull();
     expect(screen.queryByText("Registrar envio feito por fora")).toBeNull();
     expect(screen.queryByRole("button", { name: /Juntar outra nota/ })).toBeNull();
   });
 
-  it("a meta do topo leva o texto inteiro no title, porque corta com reticências no celular (issue #13)", async () => {
-    api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
-    const { container } = render(<EnviarNota protocoloId={3} podeEditar />);
-    await screen.findByRole("button", { name: "Enviar a nota" });
-    const meta = container.querySelector(".topbar__linha > .topbar__meta")!;
-    expect(meta.getAttribute("title")).toBe(meta.textContent);
-    expect(meta.getAttribute("title")).toContain("SINFRA · SUEF II");
+  // issue #213 (decisão do Leo de 16/10/2026): documento faltando não bloqueia; o Enviar abre o aviso com a lista
+  describe("aviso do que falta", () => {
+    const FALTAM = ["FRC assinada não anexada", "Falta a certidão federal"];
+    const enviados = () => api.mock.calls.filter(c => c[0] === "/api/notas/envio/3/enviar");
+
+    it("abre o ATENÇÃO com a lista; Cancelar não envia nada", async () => {
+      api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3"
+        ? { ...det, pendencias: FALTAM } : {}));
+      render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
+      const botao = await screen.findByRole("button", { name: "Enviar o e-mail" }) as HTMLButtonElement;
+      expect(botao.disabled).toBe(false);
+      expect(screen.queryByLabelText(/Justificativa/)).toBeNull();
+      fireEvent.click(botao);
+      const aviso = screen.getByRole("alertdialog", { name: "ATENÇÃO" });
+      expect(within(aviso).getByText("Faltam 2 itens neste envio:")).toBeTruthy();
+      for (const f of FALTAM) expect(within(aviso).getByText(f)).toBeTruthy();
+      expect(within(aviso).getByText("Deseja continuar com o envio?")).toBeTruthy();
+      expect(document.activeElement).toBe(within(aviso).getByRole("button", { name: "Cancelar" }));
+      fireEvent.click(within(aviso).getByRole("button", { name: "Cancelar" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(enviados()).toHaveLength(0);
+    });
+
+    it("Continuar com o envio manda a lista confirmada", async () => {
+      api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3"
+        ? { ...det, pendencias: FALTAM } : {}));
+      const aoConcluir = vi.fn();
+      render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir, aoTrocar: () => {} }} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Enviar o e-mail" }));
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Continuar com o envio" }));
+      await waitFor(() => expect(aoConcluir).toHaveBeenCalled());
+      expect(JSON.parse(enviados()[0][1].body).confirmadas).toEqual(FALTAM);
+    });
+
+    it("sem nada faltando não há aviso, e o envio não leva confirmação", async () => {
+      api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
+      render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Enviar o e-mail" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      await waitFor(() => expect(enviados()).toHaveLength(1));
+      expect(JSON.parse(enviados()[0][1].body).confirmadas).toBeNull();
+    });
+
+    it("bloqueio continua desabilitando o envio, sem aviso", async () => {
+      api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3"
+        ? { ...det, bloqueio: "FRC assinada recusada", pendencias: FALTAM } : {}));
+      render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
+      const botao = await screen.findByRole("button", { name: "Enviar o e-mail" }) as HTMLButtonElement;
+      expect(botao.disabled).toBe(true);
+      fireEvent.click(botao);
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(enviados()).toHaveLength(0);
+    });
+
+    it("a lista mudou no servidor: o aviso abre de novo com a lista nova e pede nova confirmação", async () => {
+      const NOVA = [...FALTAM, "Falta a regularidade"];
+      let leituras = 0;
+      api.mockImplementation((caminho: string) => {
+        if (caminho === "/api/notas/envio/3") { leituras += 1; return Promise.resolve({ ...det, pendencias: leituras > 1 ? NOVA : FALTAM }); }
+        if (caminho === "/api/notas/envio/3/enviar" && enviados().length === 1) {
+          return Promise.reject(new ApiErro(422, "A lista do que falta mudou", { codigo: "CONFIRMAR_PENDENCIAS", pendencias: NOVA }));
+        }
+        return Promise.resolve({});
+      });
+      const aoConcluir = vi.fn();
+      render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir, aoTrocar: () => {} }} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Enviar o e-mail" }));
+      fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Continuar com o envio" }));
+      const aviso = await screen.findByText(/mudou desde a sua confirmação/);
+      const caixa = aviso.closest("[role=alertdialog]") as HTMLElement;
+      expect(within(caixa).getByText("Falta a regularidade")).toBeTruthy();
+      expect(aoConcluir).not.toHaveBeenCalled();
+      fireEvent.click(within(caixa).getByRole("button", { name: "Continuar com o envio" }));
+      await waitFor(() => expect(aoConcluir).toHaveBeenCalled());
+      expect(JSON.parse(enviados()[1][1].body).confirmadas).toEqual(NOVA);
+    });
   });
 
-  // issue #11: com documento faltando o Enviar não fica apagado; o clique diz o que falta, junto da justificativa
-  it("sem a justificativa pedida, o clique em Enviar a nota mostra o erro no campo e não envia", async () => {
-    api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3"
-      ? { ...det, justificativa_obrigatoria: true, pendencias: ["Falta a certidão federal"] } : {}));
-    render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
-    const botao = await screen.findByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement;
-    expect(botao.disabled).toBe(false);
-    fireEvent.click(botao);
-    const campo = screen.getByLabelText("Justificativa para enviar sem o documento");
-    expect(campo.getAttribute("aria-invalid")).toBe("true");
-    expect(document.getElementById(campo.getAttribute("aria-describedby") ?? "")?.textContent).toContain("pelo menos 10 caracteres");
-    expect(api.mock.calls.some(c => c[0] === "/api/notas/envio/3/enviar")).toBe(false);
-    fireEvent.change(campo, { target: { value: "DP confirmou o envio direto" } });
-    fireEvent.click(botao);
-    await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/notas/envio/3/enviar")).toBe(true));
-  });
-
-  it("a ajuda do link diz que só vale o OneDrive ou SharePoint da Lotufo (testes de quebra 10/10, A-13)", async () => {
+  it("o link do OneDrive não tem frase de ajuda: o servidor recusa o endereço errado (testes de quebra 10/10, A-13)", async () => {
     api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
     render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
-    expect(await screen.findByText(/Cole um link do OneDrive ou SharePoint da Lotufo; link de outro endereço é recusado\./))
-      .toBeTruthy();
+    expect(await screen.findByText("Arquivo grande por link do OneDrive")).toBeTruthy();
+    expect(screen.queryByText(/link de outro endereço é recusado|25 MB somados|Vai como anexo separado|O e-mail sai da sua conta/)).toBeNull();
     // issue #118: o endereço permitido é do servidor (DASH_SHAREPOINT_HOSTS); a tela não traz o tenant da empresa
     expect(document.body.innerHTML).not.toMatch(/[a-z0-9-]+(-my)?\.sharepoint\.com/i);
   });
@@ -109,7 +160,7 @@ describe("Enviar a nota", () => {
     it("o envio leva nome e tamanho dos anexos mostrados na prévia", async () => {
       api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? comFrc([NF]) : {}));
       render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
-      fireEvent.click(await screen.findByRole("button", { name: "Enviar a nota" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Enviar o e-mail" }));
       await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/notas/envio/3/enviar")).toBe(true));
       const [, opcoes] = api.mock.calls.find(c => c[0] === "/api/notas/envio/3/enviar")!;
       expect(JSON.parse(opcoes.body).anexos).toEqual([{ nome: "NFS 2301.pdf", tamanho: 10 }]);
@@ -126,7 +177,7 @@ describe("Enviar a nota", () => {
       fireEvent.change(screen.getByLabelText("Anexar FRC assinada"), { target: { files: [pdf] } });
       await waitFor(() => expect(within(screen.getByRole("list", { name: "Anexos" })).queryByText("FRC 77.pdf")).toBeTruthy());
       expect((screen.getByLabelText("Assunto") as HTMLInputElement).value).toBe("Notas");
-      fireEvent.click(screen.getByRole("button", { name: "Enviar a nota" }));
+      fireEvent.click(screen.getByRole("button", { name: "Enviar o e-mail" }));
       await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/notas/envio/3/enviar")).toBe(true));
       const [, opcoes] = api.mock.calls.find(c => c[0] === "/api/notas/envio/3/enviar")!;
       expect(JSON.parse(opcoes.body).anexos).toEqual([{ nome: "NFS 2301.pdf", tamanho: 10 }, { nome: "FRC 77.pdf", tamanho: 20 }]);
@@ -143,7 +194,7 @@ describe("Enviar a nota", () => {
       render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
       escrever(await screen.findByLabelText("Corpo da mensagem"), "Bom dia. Segue com a observação do fiscal.");
       expect(screen.queryByText(AVISO)).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Enviar a nota" }));
+      fireEvent.click(screen.getByRole("button", { name: "Enviar o e-mail" }));
       expect(await screen.findByText(RECUSA)).toBeTruthy();
       await waitFor(() => expect(within(screen.getByRole("list", { name: "Anexos" })).queryByText("FRC 77.pdf")).toBeTruthy());
       // revisor na PR #141: o texto editado se perdeu na prévia nova; a tela diz isso antes do próximo Enviar
@@ -156,7 +207,7 @@ describe("Enviar a nota", () => {
       api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? atual : {}));
       const props = { protocoloId: 3, podeEditar: true, embutido: { aoConcluir: () => {}, aoTrocar: () => {} } };
       const { rerender } = render(<EnviarNota {...props} versao={0} />);
-      await screen.findByRole("button", { name: "Enviar a nota" });
+      await screen.findByRole("button", { name: "Enviar o e-mail" });
       atual = comFrc([NF, FRC]);
       rerender(<EnviarNota {...props} versao={1} />);
       await waitFor(() => expect(within(screen.getByRole("list", { name: "Anexos" })).queryByText("FRC 77.pdf")).toBeTruthy());
@@ -173,7 +224,7 @@ describe("Enviar a nota", () => {
       });
       render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
       escrever(await screen.findByLabelText("Corpo da mensagem"), "Bom dia. Com a observação do fiscal.");
-      fireEvent.click(screen.getByRole("button", { name: "Enviar a nota" }));
+      fireEvent.click(screen.getByRole("button", { name: "Enviar o e-mail" }));
       expect(await screen.findByText("Envio em andamento por Admin.")).toBeTruthy();
       expect(api.mock.calls.filter(c => c[0] === "/api/notas/envio/3")).toHaveLength(1);
       expect(screen.getByLabelText("Corpo da mensagem").textContent).toBe("Bom dia. Com a observação do fiscal.");
@@ -257,72 +308,5 @@ describe("Enviar a nota", () => {
     escrever(screen.getByLabelText("Corpo da mensagem"), "Bom dia, texto meu.");
     fireEvent.click(screen.getByRole("button", { name: "Remover justificativa.pdf" }));
     expect(screen.getByText("O texto do e-mail que você editou será montado de novo.")).toBeTruthy();
-  });
-
-  it("a lixeira do e-mail editado pergunta antes de sair da tela (issue #27)", async () => {
-    api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
-    window.history.replaceState(null, "", "/notas/envio/3");
-    const confirmar = vi.spyOn(window, "confirm").mockReturnValue(false);
-    render(<EnviarNota protocoloId={3} podeEditar />);
-    fireEvent.change(await screen.findByLabelText("Assunto"), { target: { value: "Outro" } });
-    // #28: a lixeira pergunta na própria janela do e-mail; confirmado, sai sem a segunda pergunta do navegador
-    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
-    expect(window.location.pathname).toBe("/notas/envio/3");
-    fireEvent.click(screen.getByRole("button", { name: "Continuar escrevendo" }));
-    expect(window.location.pathname).toBe("/notas/envio/3");
-    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
-    fireEvent.click(screen.getByRole("button", { name: "Descartar o e-mail" }));
-    expect(confirmar).not.toHaveBeenCalled();
-    expect(window.location.pathname).toBe("/medicoes/enviar-nota");
-    vi.restoreAllMocks();
-  });
-});
-
-// issue #172: na pagina da medicao, o registro por fora vem antes de "Começar o envio", que montaria um rascunho a toa
-describe("Etapa do envio na página da medição", () => {
-  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
-  const lista = { envios: [{ ...det.envio, chave: "c20:m631", medicao_ids: [631], descricao: "7ª medição", protocolo_id: null,
-    irmas: [{ medicao_id: 632, titulo: "Reajuste da 7ª Medição", tipo: "reajuste" }] }], contadores: { Todas: 1 } };
-
-  it("o link aparece antes de Começar o envio e registra a medição e a irmã sem abrir o envio", async () => {
-    api.mockResolvedValue(lista);
-    apiForm.mockResolvedValue({ ok: true });
-    const aoMudar = vi.fn();
-    render(<EnvioDaMedicao medicaoId={631} podeEditar aoMudar={aoMudar} />);
-    expect(await screen.findByRole("button", { name: "Começar o envio" })).toBeTruthy();
-    fireEvent.click(screen.getByText("Registrar envio feito por fora"));
-    expect((screen.getByLabelText("Incluir também o Reajuste da 7ª Medição (saiu no mesmo e-mail)") as HTMLInputElement).checked).toBe(true);
-    fireEvent.change(screen.getByLabelText("Observação"), { target: { value: "Pelo Outlook" } });
-    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
-    await waitFor(() => expect(aoMudar).toHaveBeenCalledWith(
-      "Envio registrado: esta nota e a do Reajuste da 7ª Medição foram para Aguardando pagamento."));
-    const fd = apiForm.mock.calls[0][1] as FormData;
-    expect([fd.getAll("medicao_ids"), fd.getAll("irma_ids")]).toEqual([["631"], ["632"]]);
-    expect(api.mock.calls.some(c => c[0] === "/api/notas/envio/iniciar")).toBe(false);
-  });
-
-  it("envio com medição e reajuste juntos: o aviso fala das notas no plural (revisor da PR #178)", async () => {
-    api.mockResolvedValue({ ...lista, envios: [{ ...lista.envios[0], medicao_ids: [631, 632], irmas: [] }] });
-    apiForm.mockResolvedValue({ ok: true });
-    const aoMudar = vi.fn();
-    render(<EnvioDaMedicao medicaoId={631} podeEditar aoMudar={aoMudar} />);
-    fireEvent.click(await screen.findByText("Registrar envio feito por fora"));
-    fireEvent.change(screen.getByLabelText("Observação"), { target: { value: "Pelo Outlook" } });
-    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
-    await waitFor(() => expect(aoMudar).toHaveBeenCalledWith("Envio registrado: as notas foram para Aguardando pagamento."));
-  });
-
-  it("quem só consulta continua sem o link", async () => {
-    api.mockResolvedValue(lista);
-    render(<EnvioDaMedicao medicaoId={631} podeEditar={false} aoMudar={() => {}} />);
-    expect(await screen.findByText(/7ª medição/)).toBeTruthy();
-    expect(screen.queryByText("Registrar envio feito por fora")).toBeNull();
-  });
-
-  it("envio bloqueado não oferece o registro por fora", async () => {
-    api.mockResolvedValue({ ...lista, envios: [{ ...lista.envios[0], situacao: "bloqueado", aviso: "Federal vencida" }] });
-    render(<EnvioDaMedicao medicaoId={631} podeEditar aoMudar={() => {}} />);
-    expect(await screen.findByRole("button", { name: "Começar o envio" })).toBeTruthy();
-    expect(screen.queryByText("Registrar envio feito por fora")).toBeNull();
   });
 });

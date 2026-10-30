@@ -8,7 +8,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from app import arquivos, auditoria, contratos, db, oficios, tempo
+from app import arquivos, auditoria, contratos, cronograma, db, oficios, tempo
 from app.cadastro_arquivos import TIPOS_ADITIVO
 
 
@@ -120,7 +120,7 @@ def _consorciadas(conn, usuario_id, ents, ids, rel) -> None:
 def aplicar(conn: sqlite3.Connection, usuario_id: int, cad: dict, ensaio: bool = False,
             commit_hash: str | None = None) -> dict:
     rel = {"orgaos": _rel(), "entidades": _rel(), "contratos": _rel(), "instrumentos": _rel(),
-           "pleitos": _rel(), "geral": _rel(), "espelho": _rel(), "frc": _rel(),
+           "pleitos": _rel(), "cronograma": _rel(), "geral": _rel(), "espelho": _rel(), "frc": _rel(),
            "avisos": list(cad.get("avisos", [])), "ensaio": ensaio}
     try:
         with db.mutacao(conn):
@@ -151,13 +151,13 @@ _ESTADO = {"ativo": "ativo", "suspenso": "suspenso", "em_encerramento": "ativo",
 _EVENTO = {("ativo", "suspenso"): "suspensao", ("suspenso", "ativo"): "retomada",
            ("ativo", "encerrado"): "encerramento", ("suspenso", "encerrado"): "encerramento"}
 _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", "municipio", "lei", "cno",
-                    "art", "numero_processo", "centro_custo_rm", "valor_original_centavos",
+                    "numero_processo", "centro_custo_rm", "valor_original_centavos",
                     "percentual_direito_bp", "execucao_inicio", "execucao_fim", "vigencia_inicio",
                     "vigencia_fim", "sem_reajuste", "encerramento_iniciado_em", "destinatarios_extras",
                     "copia_extras",
                     "estado", "documentos", "objeto_completo", "cno_arquivo", "folga_vigencia_dias",
                     "centros_custo_anteriores_rm", "objeto_carta", "garantia_apolice", "garantia_vigencia_fim",
-                    "garantia_arquivo", "art_arquivo")
+                    "garantia_arquivo")
 _CAMPOS_FISCAL = ("cargo", "tratamento", "portaria")
 
 
@@ -230,7 +230,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
         enc = None
     novo = {"nome_curto": c["nome_curto"], "orgao": nome_orgao, "orgao_id": ids_orgao[c["orgao"]],
             "entidade_id": ids_ent[c["entidade"]], "objeto": c["objeto"], "municipio": c["municipio"],
-            "lei": c["lei"], "cno": c["cno"], "art": c["art"], "numero_processo": c["numero_processo"],
+            "lei": c["lei"], "cno": c["cno"], "numero_processo": c["numero_processo"],
             "centro_custo_rm": c["centro_custo_rm"],
             "valor_original_centavos": c["valor_original_centavos"],
             "percentual_direito_bp": c["percentual_direito_bp"],
@@ -248,12 +248,10 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             "centros_custo_anteriores_rm": _json(c["centros_custo_anteriores_rm"])
             if c.get("centros_custo_anteriores_rm") else None,
             "objeto_carta": c.get("objeto_carta"),
-            # issue #65: garantia (apolice, fim da vigencia, PDF) e PDF da ART
+            # issue #65: garantia (apolice, fim da vigencia, PDF)
             "garantia_apolice": c.get("garantia_apolice"), "garantia_vigencia_fim": c.get("garantia_vigencia_fim"),
             "garantia_arquivo": _no_disco("anexos", c["garantia_caminho"], "pdf", rel["ensaio"])
-            if c.get("garantia_caminho") else None,
-            "art_arquivo": _no_disco("anexos", c["art_caminho"], "pdf", rel["ensaio"]) if c.get("art_caminho")
-            else None}
+            if c.get("garantia_caminho") else None}
     mudou = False
     if ja is None:
         colunas = ["numero_instrumento", *_CAMPOS_CONTRATO]
@@ -288,13 +286,13 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             auditoria.registrar(conn, usuario_id, "cadastro.contrato", "contrato", cid, antes, depois)
 
     # Datas-base: o cadastro e' a verdade (configuracao, nao historico financeiro).
-    atuais = {r["mes"]: r["indice"] for r in conn.execute(
-        "SELECT mes, indice FROM contrato_datas_base WHERE contrato_id=?", (cid,))}
-    desejadas = {d["mes"]: d["indice"] for d in c["datas_base"]}
+    atuais = {r["mes"]: {"indice": r["indice"], "aplica_a": r["aplica_a"]} for r in conn.execute(
+        "SELECT mes, indice, aplica_a FROM contrato_datas_base WHERE contrato_id=?", (cid,))}
+    desejadas = {d["mes"]: {"indice": d["indice"], "aplica_a": d.get("aplica_a") or ""} for d in c["datas_base"]}
     if atuais != desejadas:
         conn.execute("DELETE FROM contrato_datas_base WHERE contrato_id=?", (cid,))
-        conn.executemany("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?,?,?)",
-                         [(cid, m, i) for m, i in sorted(desejadas.items())])
+        conn.executemany("INSERT INTO contrato_datas_base (contrato_id, mes, indice, aplica_a) VALUES (?,?,?,?)",
+                         [(cid, m, v["indice"], v["aplica_a"]) for m, v in sorted(desejadas.items())])
         mudou = True
         auditoria.registrar(conn, usuario_id, "cadastro.datas_base", "contrato", cid, atuais, desejadas)
 
@@ -324,7 +322,63 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             rel["contratos"]["iguais"] += 1
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])
     _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"])
+    _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
     return cid
+
+
+def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
+    """Issue #256: uma `cronograma_versoes` por entrada do YAML, com criado_em = data do documento.
+
+    So' acrescenta. Versao aplicada nao muda nem some (correcao e' versao nova, com outra chave); as
+    versoes sem linha no cadastro (manuais e a carga de 04/09/2026) nao sao tocadas: ficam na linha do
+    tempo e sao superadas pela primeira versao de documento posterior (cronograma.previsto_efetivo)."""
+    nome = c["nome_curto"]
+    do_cadastro = {v["chave"] for v in c.get("cronograma") or []}
+    for r in conn.execute("SELECT chave FROM cronograma_versoes_cadastro WHERE contrato_id=?", (contrato_id,)):
+        if r["chave"] not in do_cadastro:
+            raise ValueError(f"{nome}: a versão de cronograma {r['chave']} já foi aplicada e sumiu do cadastro; "
+                             "versão aplicada não se apaga (correção é versão nova, com outra chave)")
+    # Ordem do documento: o numero das versoes segue a linha do tempo. Nao ha empate: a validacao recusa duas
+    # versoes do cadastro com a mesma data (gate Sol, PR #311).
+    ordenadas = sorted(enumerate(c.get("cronograma") or []), key=lambda par: (par[1]["data"], par[0]))
+    criadas: list[tuple[int, str]] = []
+    for _, v in ordenadas:
+        rotulo = f"{nome}/{v['chave']} ({'/'.join(reversed(v['data'].split('-')))})"   # DD/MM/AAAA
+        itens = sorted(v["itens"])
+        ja = conn.execute("SELECT * FROM cronograma_versoes_cadastro WHERE contrato_id=? AND chave=?",
+                          (contrato_id, v["chave"])).fetchone()
+        if ja is None:
+            numero = cronograma.nova_versao(conn, usuario_id, contrato_id, itens, "manual",
+                                            data_documento=v["data"])
+            vid = conn.execute("SELECT id FROM cronograma_versoes WHERE contrato_id=? AND numero=?",
+                               (contrato_id, numero)).fetchone()[0]
+            conn.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, "
+                         "data_documento, instrumento) VALUES (?,?,?,?,?,?)",
+                         (vid, contrato_id, v["chave"], v["origem"], v["data"], v["instrumento"]))
+            auditoria.registrar(conn, usuario_id, "cadastro.cronograma", "contrato", contrato_id, None,
+                                {"chave": v["chave"], "versao": numero, "origem": v["origem"],
+                                 "data_documento": v["data"], "instrumento": v["instrumento"]})
+            rel["criados"].append(rotulo)
+            criadas.append((numero, rotulo))
+            continue
+        gravado = {"origem": ja["origem"], "data": ja["data_documento"], "instrumento": ja["instrumento"],
+                   "itens": [tuple(r) for r in conn.execute(
+                       "SELECT competencia, valor_previsto_centavos FROM cronograma_itens WHERE versao_id=? "
+                       "ORDER BY competencia", (ja["versao_id"],))]}
+        novo = {"origem": v["origem"], "data": v["data"], "instrumento": v["instrumento"], "itens": itens}
+        mudou = [k for k in novo if gravado[k] != novo[k]]
+        if mudou:
+            raise ValueError(f"{rotulo}: versão de cronograma já aplicada não pode ser alterada "
+                             f"({', '.join(mudou)}); registre uma versão nova, com outra chave")
+        rel["iguais"] += 1
+    # A versao de documento anterior a uma ja gravada (a carga de 04/09/2026, uma publicada na tela) entra
+    # ANTES dela na linha do tempo e nao muda o futuro: quem aplica precisa saber.
+    if criadas:
+        numero, rotulo = criadas[-1]     # a de documento mais recente desta aplicacao
+        vig = cronograma.vigente(conn, contrato_id)["numero"]
+        if numero != vig:
+            avisos.append(f"{rotulo}: versão aplicada, mas não é a vigente (há versão {vig} com data "
+                          "posterior); ela só vale para os meses até a data dessa versão")
 
 
 def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
@@ -348,7 +402,7 @@ def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
 
 
 # O que torna um aditivo o que ele e': nao muda depois de aplicado (correcao e' instrumento
-# novo). Numero, objeto e forma sao descricao e podem ser corrigidos.
+# novo). Numero, objeto, forma e ordinal sao descricao e podem ser corrigidos.
 _IMUTAVEL_ADITIVO = ("tipo", "delta_valor_centavos", "nova_execucao_fim", "nova_vigencia_fim",
                      "data_assinatura")
 
@@ -386,7 +440,8 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     novo = {"tipo": TIPOS_ADITIVO[inst["tipo"]], "delta_valor_centavos": inst["delta_valor_centavos"],
             "nova_execucao_fim": inst["nova_execucao_fim"], "nova_vigencia_fim": inst["nova_vigencia_fim"],
             "data_assinatura": inst["data"], "numero": inst["numero"], "objeto": inst["objeto"],
-            "forma": "apostilamento" if inst["tipo"].startswith("apostilamento") else "termo_aditivo"}
+            "forma": "apostilamento" if inst["tipo"].startswith("apostilamento") else "termo_aditivo",
+            "ordinal": inst.get("ordinal")}
     ja = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=?",
                       (contrato_id, inst["chave"])).fetchone()
     if ja is None:
@@ -394,12 +449,12 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
         cur = conn.execute(
             """INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim,
                    nova_execucao_fim, status, data_assinatura, numero, objeto, forma, chave_cadastro,
-                   valor_anterior_centavos, valor_novo_centavos, assinado_por, observacao)
-               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?)""",
+                   valor_anterior_centavos, valor_novo_centavos, assinado_por, observacao, ordinal)
+               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?)""",
             (contrato_id, novo["tipo"], novo["delta_valor_centavos"], novo["nova_vigencia_fim"],
              novo["nova_execucao_fim"], novo["data_assinatura"], novo["numero"], novo["objeto"],
              novo["forma"], inst["chave"], anterior, anterior + novo["delta_valor_centavos"], usuario_id,
-             f"Corrige {inst['corrige']}" if inst["corrige"] else None))
+             f"Corrige {inst['corrige']}" if inst["corrige"] else None, novo["ordinal"]))
         rel["criados"].append(rotulo)
         auditoria.registrar(conn, usuario_id, "cadastro.instrumento", "aditivo", cur.lastrowid, None,
                             {"chave": inst["chave"], **novo})
@@ -411,7 +466,7 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
             raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
                              f"({campo}: {ja[campo]!r} → {novo[campo]!r}); registre um instrumento novo "
                              "com `corrige`")
-    antes, depois = _diferencas(dict(ja), {k: novo[k] for k in ("numero", "objeto", "forma")})
+    antes, depois = _diferencas(dict(ja), {k: novo[k] for k in ("numero", "objeto", "forma", "ordinal")})
     if not depois:
         rel["iguais"] += 1
         return

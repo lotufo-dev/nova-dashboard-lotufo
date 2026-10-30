@@ -1,7 +1,7 @@
 """Protocolo de medicao (bloco 5; spec 2026-09-21 §3 passos 4 a 7): criar, pecas, carta, pacote, assinado,
 previa e envio. Tudo o que recusa vem do servico (`protocolo`); aqui so' validacao de entrada e HTTP."""
 import sqlite3
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -38,6 +38,10 @@ class AnexoVistoIn(BaseModel):
     tamanho: int
 
 
+# issue #213: a lista do aviso "ATENÇÃO" confirmada pela pessoa (cada item e' uma linha do que falta)
+Confirmadas = Annotated[list[Annotated[str, Field(max_length=2000)]] | None, Field(default=None, max_length=200)]
+
+
 class EnvioIn(PreviaIn):
     para: list[str] = Field(max_length=30)
     copia: list[str] = Field(max_length=30)
@@ -47,6 +51,8 @@ class EnvioIn(PreviaIn):
     justificativa: str | None = Field(default=None, max_length=2000)
     # issue #10: os anexos que a pessoa viu na previa; se o servidor montar outros, o envio e' recusado
     anexos: list[AnexoVistoIn] | None = Field(default=None, max_length=200)
+    # issue #213: o que falta, como a pessoa viu e confirmou no aviso "ATENÇÃO"
+    confirmadas: Confirmadas = None
 
 
 class DescartarIn(BaseModel):
@@ -225,10 +231,14 @@ def enviar(dados: EnvioIn, usuario: dict = Depends(exigir("editar_cadastros")),
         eid = protocolo.enviar(conn, {"id": usuario["id"], "email": usuario["email"]}, dados.protocolo_ids,
                                _emails(dados.para), _emails(dados.copia), dados.assunto.strip(), dados.corpo,
                                dados.justificativa, cco=_emails(dados.cco),
-                               anexos_previa=None if dados.anexos is None else [a.model_dump() for a in dados.anexos])
+                               anexos_previa=None if dados.anexos is None else [a.model_dump() for a in dados.anexos],
+                               confirmadas=dados.confirmadas)
     except envio_reserva.EnvioEmAndamento as e:
         conn.rollback()
         raise HTTPException(409, detail=e.detalhe()) from None
+    except protocolo.ConfirmarPendencias as e:
+        conn.rollback()
+        raise HTTPException(422, detail=e.detalhe()) from None
     except (ValueError, graph.ErroGraph) as e:
         conn.rollback()
         raise HTTPException(422, str(e)) from None
@@ -244,12 +254,13 @@ def baixar_comprovante(pid: ID, _=Depends(exigir("ver_paineis", com_csrf=False))
 
 
 @router.post("/api/protocolos/{pid}/numero-orgao")
-def numero_orgao(pid: ID, numero: str = Form("", max_length=100), comprovante: UploadFile | None = File(None),
+def numero_orgao(pid: ID, numero: str = Form("", max_length=100), link_siga: str = Form("", max_length=500),
+                 comprovante: UploadFile | None = File(None),
                  usuario: dict = Depends(exigir("editar_cadastros")), conn: sqlite3.Connection = Depends(conexao)):
     _existe(conn, pid)
     dados = b"".join(arquivos.blocos_validados(comprovante)) if comprovante is not None else None
     try:
-        protocolo.registrar_numero_orgao(conn, usuario["id"], pid, numero, dados)
+        protocolo.registrar_numero_orgao(conn, usuario["id"], pid, numero, dados, link_siga)
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)

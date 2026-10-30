@@ -154,6 +154,8 @@ def cabecalho(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | 
             "orgao": o["nome"] if o else v["orgao"], "instrumento": v["numero_instrumento"],
             "valor_vigente_centavos": v["valor_vigente_centavos"], "cota_vigente_centavos": v["cota_vigente_centavos"],
             "percentual_lotufo_bp": v["percentual_direito_bp"] or DIREITO_INTEGRAL_BP,
+            # os inicios (so' leitura) alimentam as linhas do tempo da pagina da obra; nulos quando o cadastro nao os tem
+            "execucao_inicio": v.get("execucao_inicio"), "vigencia_inicio": v.get("vigencia_inicio"),
             "execucao_fim": v["execucao_fim_vigente"], "dias_execucao": _dias_ate(v["execucao_fim_vigente"], hoje),
             "vigencia_fim": v["vigencia_fim_vigente"], "dias_vigencia": _dias_ate(v["vigencia_fim_vigente"], hoje),
             "status": status}
@@ -167,7 +169,7 @@ def cadastro_da_obra(conn: sqlite3.Connection, contrato_id: int) -> dict:
                           "WHERE contrato_id=? ORDER BY data, id")
     for i in instrumentos:
         i["dados"] = json.loads(i["dados"] or "{}")
-    return {"datas_base": linhas("SELECT mes, indice FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes"),
+    return {"datas_base": linhas("SELECT mes, indice, aplica_a FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes"),
             "fiscais": linhas("SELECT nome, email, desde, cargo, tratamento, portaria FROM contrato_fiscais "
                               "WHERE contrato_id=? ORDER BY desde, id"),
             "aditivos": linhas("SELECT id, chave_cadastro, forma, tipo, numero, data_assinatura, delta_valor_centavos, "

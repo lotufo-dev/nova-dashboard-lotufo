@@ -1,12 +1,17 @@
-"""Garantia contratual e ART como documentos do contrato (issue #65, decisao de 15/10/2026).
+"""Garantia contratual como documento do contrato (issue #65, decisao de 15/10/2026; a ART saiu do contrato na #239).
 
 GARANTIA tem validade: o cadastro traz `garantia: {apolice, vigencia_fim, arquivo}` e cada instrumento
 `endosso_garantia` com `vigencia_fim` e `apolice` (so' vale o da apolice do contrato) substitui a vigencia anterior (o mais recente por data vale; o historico
-fica nos instrumentos). ART NAO tem validade (vale pela obra): o unico aviso e' "ART nao anexada".
+fica nos instrumentos).
 
 Aviso de garantia, como o das certidoes: atencao a 30 dias do fim, acao a 15, critico vencida; operacao e
 diretoria. Contrato em encerramento continua avisando ate' o marco `baixa_garantia`; encerrado nao avisa.
 Contrato sem data de garantia no cadastro nao avisa (nao ha' o que contar).
+
+Segundo aviso (issue #294, D10 de 20/10/2026): `garantia_aquem_execucao`, "Endosso necessario ate' dd/mm", quando a
+vigencia da garantia (apolice ou ultimo endosso) nao cobre o fim de execucao vigente + a folga (do contrato, senao
+do orgao, senao 0). Acao; critico se a data ja' passou. Some quando o endosso com vigencia suficiente e' carregado.
+Contrato em encerramento nao recebe este (a execucao ja' acabou).
 """
 import datetime
 import json
@@ -54,12 +59,6 @@ def garantia(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict 
             "situacao": "baixada" if baixada else situacao}
 
 
-def art(conn, contrato_id: int) -> dict:
-    c = conn.execute("SELECT art, art_arquivo, encerramento_iniciado_em FROM contratos WHERE id=?", (contrato_id,)).fetchone()
-    return {"numero": c["art"] if c else None, "anexada": bool(c and c["art_arquivo"]),
-            "exigida": bool(c and c["encerramento_iniciado_em"] is None)}
-
-
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
     """[{tipo, nivel, publico, contrato_id, dias, data, mensagem}] dos contratos ativos (inclui em encerramento)."""
     hoje = hoje or tempo.hoje_local()
@@ -78,8 +77,47 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                     f"garantia vence em {dias} dia{'s' if dias > 1 else ''} ({br})"
             out.append({"tipo": "garantia_vencendo", "nivel": nivel, "publico": ["operacao", "diretoria"],
                         "contrato_id": cid, "dias": dias, "data": g["vigencia_fim"], "mensagem": msg})
-        a = art(conn, cid)
-        if a["exigida"] and not a["anexada"]:
-            out.append({"tipo": "art_nao_anexada", "nivel": "atencao", "publico": ["operacao"],
-                        "contrato_id": cid, "dias": None, "data": None, "mensagem": "ART não anexada"})
+    return out
+
+
+def _folga_dias(conn, c: dict) -> int:
+    """Folga entre execucao e vigencia: a do contrato, senao a do orgao, senao 0 (mesma regra de `prazos`)."""
+    if c.get("folga_vigencia_dias") is not None:
+        return int(c["folga_vigencia_dias"])
+    if c.get("orgao_id"):
+        r = conn.execute("SELECT regras FROM orgaos WHERE id=?", (c["orgao_id"],)).fetchone()
+        folga = json.loads(r["regras"] or "{}").get("folga_vigencia_dias") if r else None
+        if folga is not None:
+            return int(folga)
+    return 0
+
+
+def cobertura_exigida(conn, contrato_id: int) -> str | None:
+    """Ate' quando a garantia precisa valer: fim de execucao vigente + folga do orgao (issue #294, D10)."""
+    from app import contratos
+    v = contratos.vigente(conn, contrato_id)
+    exe = _d(v.get("execucao_fim_vigente"))
+    return (exe + datetime.timedelta(days=_folga_dias(conn, v))).isoformat() if exe else None
+
+
+def avisos_cobertura(conn, hoje: datetime.date | None = None) -> list[dict]:
+    """Garantia que nao cobre o fim de execucao vigente + folga: "Endosso necessario ate' dd/mm".
+
+    Soma-se ao `garantia_vencendo` (que olha so' a vigencia da apolice). Some quando o endosso com vigencia
+    suficiente entra (a `garantia()` ja' o considera) ou o contrato e' baixado/encerrado.
+    """
+    hoje = hoje or tempo.hoje_local()
+    out = []
+    # contrato em encerramento ja' nao ganha prazo: pedir endosso para a execucao que acabou nao leva a nada
+    for r in conn.execute("SELECT id FROM contratos WHERE estado='ativo' AND encerramento_iniciado_em IS NULL "
+                          "ORDER BY id"):
+        cid = r["id"]
+        g = garantia(conn, cid, hoje)
+        exigida = cobertura_exigida(conn, cid) if g and not g["baixada"] else None
+        if exigida and g["vigencia_fim"][:10] < exigida:
+            br = f"{exigida[8:10]}/{exigida[5:7]}/{exigida[:4]}"
+            dias = (_d(exigida) - hoje).days
+            out.append({"tipo": "garantia_aquem_execucao", "nivel": "critico" if dias < 0 else "acao",
+                        "publico": ["operacao", "diretoria"], "contrato_id": cid, "dias": dias, "data": exigida,
+                        "mensagem": f"Endosso necessário até {br}: a garantia não cobre o fim da execução"})
     return out

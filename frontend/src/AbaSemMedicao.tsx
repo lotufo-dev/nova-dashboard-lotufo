@@ -1,4 +1,3 @@
-import { contar } from "./formato";
 import { IconeDocumento, IconeMais, IconeSeta } from "./icones";
 import { destino } from "./IniciarMedicao";
 import { Link } from "./Link";
@@ -42,7 +41,6 @@ export default function AbaSemMedicao({ obras, podeIniciar, aoIniciar }:
       <section className="medicoes__quadro sem-medicao" aria-labelledby="sem-medicao-titulo">
         <div className="medicoes__quadro-cabeca">
           <h2 id="sem-medicao-titulo">Sem medição aberta</h2>
-          <span className="medicoes__legenda">{contar(obras.length, "obra", "obras")}</span>
         </div>
         {grupos.length === 0 ? (
           <div className="vazio">
@@ -54,7 +52,6 @@ export default function AbaSemMedicao({ obras, podeIniciar, aoIniciar }:
             <summary>
               <IconeSeta className="icone icone--p sem-medicao__seta" />
               <span className="sem-medicao__grupo-nome">{g.contratante}</span>
-              <span className="sem-medicao__grupo-n">· {contar(g.obras.length, "obra", "obras")}</span>
             </summary>
             <table className="sem-medicao__tabela">
               <caption className="sr-only">{`${g.contratante}: obras sem medição aberta`}</caption>

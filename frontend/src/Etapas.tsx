@@ -1,14 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
-import { api } from "./api";
-import EnviarNota from "./EnviarNota";
-import { IconeAlerta } from "./icones";
-import { Link } from "./Link";
-import type { Rota } from "./rota";
-import { avisoPorFora, EnvioPorFora, iniciarEnvio, IconeCheck, mensagem, notasDe, type Envio, type ListaEnvios } from "./NotasAEnviar";
+import { IconeCheck } from "./NotasAEnviar";
 import "./etapas.css";
 
-// Fluxo da medicao numa pagina so' (opcao A, 2026-10-09): Espelho, Faturamento, Nota fiscal, Envio ao orgao e
-// Pagamento. A etapa da vez vem do estado da medicao; as feitas ficam recolhidas, as seguintes bloqueadas.
+// Fluxo da medicao numa pagina so' (opcao B, aprovada em 16/10/2026): trilho de 5 etapas em setas -- Espelho,
+// Faturamento, Nota fiscal, Envio ao orgao e Pagamento --, com so' a etapa aberta. A da vez vem do estado da
+// medicao; clicar numa feita abre no lugar da atual, com a faixa para voltar.
 
 export const ETAPAS = ["Espelho", "Faturamento", "Nota fiscal", "Envio ao órgão", "Pagamento"] as const;
 
@@ -30,35 +25,34 @@ export function situacaoDa(n: number, atual: number): SituacaoEtapa {
   return atual === 0 || n < atual ? "feita" : n === atual ? "atual" : "futura";
 }
 
-/** A barra no alto: cada etapa e' um link para o cartao dela. `espera` (issue #188): a etapa da vez esta' parada
- *  esperando a outra metade (execucao x reajuste no mesmo e-mail). `rotulo`: a trilha de uma das metades, onde o
- *  orgao separa medicao e reajuste (MTPAR, SES). */
-export function BarraEtapas({ atual, espera = false, rotulo, pagina }: {
-  atual: number; espera?: boolean; rotulo?: string;
-  pagina?: Rota;   // trilha da OUTRA metade: os passos levam aos cartoes da pagina dela (gate Sol S3, #188)
+/** A etapa que a pagina abre: a da vez; tudo feito abre o pagamento; encerrada por excecao abre a ultima que teve
+ *  dado (a nota, se saiu, senao o espelho). */
+export function etapaInicial(atual: number, temNota: boolean): number {
+  if (atual === 0) return temNota ? 3 : 1;
+  return Math.min(atual, 5);
+}
+
+/** O trilho no alto: cinco setas, cada uma abre a etapa dela na pagina. `espera` (issue #188): a etapa da vez esta'
+ *  parada esperando a outra metade (execucao x reajuste no mesmo e-mail). Medicao encerrada por excecao
+ *  (`atual` 0) mostra o trilho neutro: nenhuma etapa "feita" nem "da vez". */
+export function Setas({ atual, vendo, aoIr, espera = false }: {
+  atual: number; vendo: number; aoIr: (n: number) => void; espera?: boolean;
 }) {
   return (
-    <nav className={`etapas-barra${rotulo ? " etapas-barra--trilha" : ""}`}
-      aria-label={rotulo ? `Etapas: ${rotulo.toLocaleLowerCase("pt-BR")}` : "Etapas da medição"}>
-      {rotulo && <span className="etapas-barra__trilha">{rotulo}</span>}
+    <nav className="setas" aria-label="Etapas da medição">
       <ol>
         {ETAPAS.map((t, i) => {
           const n = i + 1;
-          const s = situacaoDa(n, atual);
+          const s = atual === 0 ? "encerrada" : situacaoDa(n, atual);
           const parada = espera && s === "atual";
+          const aberta = n === vendo;
           return (
-            <li key={t} className={`etapas-barra__item etapas-barra__item--${parada ? "espera" : s}`} aria-current={s === "atual" ? "step" : undefined}>
-              {pagina ? (
-                <Link para={pagina} secao={`etapa-${n}`}>
-                  <span className="etapas-barra__n" aria-hidden="true">{s === "feita" ? <IconeCheck /> : n}</span>
-                  <span>{t}</span>
-                </Link>
-              ) : (
-                <a href={`#etapa-${n}`}>
-                  <span className="etapas-barra__n" aria-hidden="true">{s === "feita" ? <IconeCheck /> : n}</span>
-                  <span>{parada ? `${t} · em espera` : t}</span>
-                </a>
-              )}
+            <li key={t} className={`seta seta--${parada ? "espera" : s}${aberta && s !== "atual" ? " seta--vendo" : ""}${aberta ? " seta--rotulo" : ""}`}
+              aria-current={s === "atual" ? "step" : undefined}>
+              <button type="button" title={t} aria-label={`Etapa ${n}: ${t}${parada ? " · em espera" : ""}`} onClick={() => aoIr(n)}>
+                <span className="seta__marca" aria-hidden="true">{s === "feita" ? <IconeCheck /> : n}</span>
+                <span className="seta__rotulo">{t}</span>
+              </button>
             </li>
           );
         })}
@@ -67,93 +61,31 @@ export function BarraEtapas({ atual, espera = false, rotulo, pagina }: {
   );
 }
 
-/** O cartao de uma etapa. Feita: recolhida (abre no clique; `aberta` a abre quando ainda ha' o que fazer nela, como
- *  a FRC do consorcio na etapa 3). Futura: so' o titulo e o que a libera. */
-export function Etapa({ n, situacao, resumo, aberta, children }: {
-  n: number; situacao: SituacaoEtapa; resumo?: React.ReactNode; aberta?: boolean; children?: React.ReactNode;
-}) {
-  const titulo = ETAPAS[n - 1];
-  const marca = <span className={`etapa__n etapa__n--${situacao}`} aria-hidden="true">{situacao === "feita" ? <IconeCheck /> : n}</span>;
-  if (situacao === "feita") {
-    return (
-      <details className="etapa etapa--feita" id={`etapa-${n}`} open={aberta || undefined}>
-        <summary className="etapa__cabeca">{marca}<span className="etapa__titulo">{titulo}</span>
-          {resumo && <span className="etapa__resumo">{resumo}</span>}</summary>
-        <div className="etapa__corpo">{children}</div>
-      </details>
-    );
-  }
-  if (situacao === "futura") {
-    return (
-      <section className="etapa etapa--futura" id={`etapa-${n}`} aria-label={`Etapa ${n}: ${titulo}`}>
-        <div className="etapa__cabeca">{marca}<span className="etapa__titulo">{titulo}</span>
-          <span className="etapa__resumo">libera depois da etapa {n - 1}</span></div>
-      </section>
-    );
-  }
+/** "Voltar à etapa atual": a etapa aberta no lugar da atual (a seta dela ja' marca qual e'). */
+export function FaixaVendo({ vendo, atual, aoVoltar }: { vendo: number; atual: number; aoVoltar: () => void }) {
+  // medicao encerrada por excecao nao tem "etapa atual"; tudo feito (6) volta ao pagamento
+  if (atual === 0 || vendo === Math.min(atual, 5)) return null;
   return (
-    <section className="etapa etapa--atual" id={`etapa-${n}`} aria-labelledby={`etapa-${n}-titulo`}>
-      <div className="etapa__cabeca">{marca}<h2 className="etapa__titulo" id={`etapa-${n}-titulo`}>{titulo}</h2>
-        {resumo && <span className="etapa__resumo">{resumo}</span>}</div>
-      <div className="etapa__corpo">{children}</div>
-    </section>
+    <div className="med-faixa">
+      <button type="button" className="botao-link" onClick={aoVoltar}>Voltar à etapa atual</button>
+    </div>
   );
 }
 
-/** Etapa 4 na pagina da medicao: o envio de Notas a enviar que contem esta medicao (medicao e reajuste juntos
- *  quando o orgao junta). Sem protocolo ainda, um botao o inicia; com protocolo, o envio aparece aqui mesmo. */
-export function EnvioDaMedicao({ medicaoId, podeEditar, aoMudar, versaoDocs = 0, aoAnexarItem }: {
-  medicaoId: number; podeEditar: boolean; aoMudar: (aviso?: string) => void; versaoDocs?: number;
-  aoAnexarItem?: () => void;   // issue #148: FRC assinada anexada aqui fecha a etapa 3
+/** O cartao da etapa aberta: "Etapa N", o titulo e a situacao. */
+export function EtapaCartao({ n, atual, selo, children }: {
+  n: number; atual: number; selo?: React.ReactNode; children?: React.ReactNode;
 }) {
-  const [envio, setEnvio] = useState<Envio | null | undefined>(undefined);
-  const [pid, setPid] = useState<number | null>(null);
-  const [erro, setErro] = useState("");
-  const [ocupado, setOcupado] = useState(false);
-
-  const carregar = useCallback(async () => {
-    try {
-      const l = await api<ListaEnvios>("/api/notas/a-enviar");
-      const e = l.envios.find(x => x.medicao_ids.includes(medicaoId)) ?? null;
-      setEnvio(e); setPid(e?.protocolo_id ?? null); setErro("");
-    } catch (x) { setErro(mensagem(x)); setEnvio(null); }
-  }, [medicaoId]);
-  useEffect(() => { void carregar(); }, [carregar]);
-
-  if (envio === undefined) return <p className="campo__nota">Conferindo o envio…</p>;
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler o envio: {erro}</p>;
-  if (!envio) {
-    return <p className="campo__nota">Esta medição não aparece em Notas a enviar: confira se a obra tem o órgão no cadastro.</p>;
-  }
-  if (pid) {
-    // issue #100: NF ou FRC anexada na etapa 3 com o envio aberto faz o envio ler os anexos de novo
-    return <EnviarNota key={pid} protocoloId={pid} podeEditar={podeEditar} versao={versaoDocs}
-      embutido={{ aoConcluir: aoMudar, aoTrocar: setPid, aoAnexarItem }} />;
-  }
-  const outras = envio.medicao_ids.length > 1;
-  if (envio.situacao === "esperando") {
-    // issue #188: o orgao junta medicao e reajuste; sem as notas da outra metade, o envio nao comeca aqui
-    return <p className="campo__nota">{envio.descricao} · {envio.aviso ?? "esperando a outra metade"}.</p>;
-  }
+  const s = atual === 0 ? "encerrada" : situacaoDa(n, atual);
   return (
-    <div className="pilha">
-      <p>{envio.descricao} · {notasDe(envio)}{outras ? " · vão no mesmo e-mail, como o órgão pede" : ""}.</p>
-      {envio.aviso && <p className="campo__nota">{envio.aviso}</p>}
-      {podeEditar && (
-        <div className="form-inline">
-          <button type="button" className="btn btn--primario btn--grande" disabled={ocupado || envio.situacao === "bloqueado"}
-            onClick={async () => {
-              setOcupado(true); setErro("");
-              try { setPid(await iniciarEnvio(envio.contrato_id, envio.medicao_ids, envio.familia)); }
-              catch (x) { setErro(mensagem(x)); }
-              finally { setOcupado(false); }
-            }}>{ocupado ? "Abrindo…" : "Começar o envio"}</button>
-          {envio.situacao === "bloqueado" && <span className="campo__nota">Envio bloqueado: veja os documentos em Notas a enviar.</span>}
-        </div>
-      )}
-      {/* issue #172: o e-mail que ja' saiu se registra sem "Começar o envio", que montaria um rascunho a toa */}
-      {podeEditar && envio.situacao !== "bloqueado" && <EnvioPorFora medicaoIds={envio.medicao_ids} irmas={envio.irmas}
-        aoFeito={js => aoMudar(avisoPorFora(js, envio.medicao_ids.length))} />}
-    </div>
+    <section className="cartao med-etapa" id={`etapa-${n}`} aria-labelledby={`etapa-${n}-titulo`}>
+      <div className="med-etapa__cabeca">
+        <span className="med-etapa__n">Etapa {n}</span>
+        <h2 className="med-etapa__titulo" id={`etapa-${n}-titulo`}>{ETAPAS[n - 1]}</h2>
+        {selo ?? (s === "feita" ? <span className="selo selo--ok"><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">Feita</span></span>
+          : s === "futura" ? <span className="selo"><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">Libera depois da etapa {n - 1}</span></span> : null)}
+      </div>
+      {children}
+    </section>
   );
 }

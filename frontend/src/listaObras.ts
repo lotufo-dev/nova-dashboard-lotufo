@@ -11,11 +11,17 @@ export type ObraLista = {
   valor_vigente_centavos?: number | null; execucao_fim_vigente?: string | null; vigencia_fim_vigente?: string | null;
   dias_execucao?: number | null; dias_vigencia?: number | null; vigencia_automatica?: boolean; paralisada_desde?: string | null;
   pedido_prorrogacao?: { enviado_em: string; numero_oficio: string | null; dias: number | null } | null;
+  // valor cheio: o medido de execucao (atestado; protocolado ate' atestar) e o saldo a executar (vigente − medido)
+  medido_execucao_centavos?: number | null; saldo_centavos?: number | null;
+  // o contratante, como em Medicoes ("SINFRA" para toda a familia, com a superintendencia em `orgao_sub`)
+  contratante?: string | null; orgao_sub?: string | null;
 };
 
 /** `paralisadas`: os ids das obras paralisadas (`prazoDaObra`); a execucao delas nao vence (D16). */
 export type FiltroObras = {
   todas?: boolean; orgao?: string | null; termina?: number | null; q?: string | null; paralisadas?: ReadonlySet<number>;
+  /** O nome da empresa de cada obra (`entidade_id`): a busca tambem acha pela empresa. */
+  empresas?: ReadonlyMap<number, string> | null;
 };
 
 // "Em andamento": a obra que ainda nao foi encerrada nem rescindida (inclui a suspensa e a em encerramento).
@@ -77,33 +83,11 @@ export function quandoVence(dias: number): string {
   return dias > 0 ? `vence em ${fmtDias(dias)}` : dias === 0 ? "vence hoje" : `venceu há ${fmtDias(-dias)}`;
 }
 
-/** A classe da nota do prazo: a cor e' a do nivel do aviso (vermelho so' no critico); sem aviso, o cinza da nota. */
-export function classePrazo(nivel: Nivel | null): string {
-  return nivel === "critico" ? " prazo--critico" : nivel ? " prazo--atencao" : "";
-}
-
-/** O nivel que a nota do prazo mostra: o do aviso da obra; sem aviso, o prazo que ja' venceu (dias < 0) vale Critico
+/** O nivel do selo do prazo: o do aviso da obra; sem aviso, o prazo que ja' venceu (dias < 0) vale Critico
  *  so' quando `podeCritico` (obra ativa fora do encerramento, e fora da vigencia automatica). Nos outros casos o
  *  backend nao avisa de proposito (prazos.py) e a tela nao inventa o nivel (N08-01). */
 export function nivelDoPrazo(nivel: Nivel | null, dias: number | null | undefined, podeCritico = true): Nivel | null {
   return nivel === null && podeCritico && dias !== null && dias !== undefined && dias < 0 ? "critico" : nivel;
-}
-
-/** A contagem do cabecalho: o titulo (o numero) e o detalhe do recorte, em palavras. */
-export function contagemObras(n: number, total: number, f: { todas: boolean; termina: number | null; orgao: string | null; q: string }):
-    { titulo: string; detalhe: string } {
-  const obras = (k: number) => (k === 1 ? "1 obra" : `${k} obras`);
-  const recorte = !!(f.orgao || f.q);
-  const titulo = total === 0 ? "Nenhuma obra"
-    : f.termina ? obras(n)
-    : f.todas && !recorte ? (total === 1 ? "1 obra" : `Todas as ${total} obras`)
-    : `${n} de ${obras(total)}`;
-  const detalhe = [
-    f.termina ? `que ${n === 1 ? "termina" : "terminam"} em ${f.termina === 90 ? "90 dias" : "6 meses"} (a execução ou a vigência; as vencidas primeiro)`
-      : !f.todas && total > 0 ? "(sem as encerradas)" : "",
-    f.orgao ? `· ${f.orgao}` : "", f.q ? `· busca “${f.q}”` : "",
-  ].filter(Boolean).join(" ");
-  return { titulo, detalhe };
 }
 
 /** Texto do "Avisos" para o leitor de tela: a contagem, a obra e quantos sao criticos. */
@@ -129,6 +113,86 @@ export function filtrarObras(lista: ObraLista[], f: FiltroObras): ObraLista[] {
   return lista.filter(o => (f.todas || !FORA.has(o.estado))
       && (!f.orgao || o.orgao === f.orgao)
       && (!f.termina || terminaEm(o, f.termina, parada(o)))
-      && (!q || paraBusca(nomeDaObra(o)).includes(q) || paraBusca(o.numero_instrumento).includes(q)))
+      && (!q || paraBusca(nomeDaObra(o)).includes(q) || paraBusca(o.numero_instrumento).includes(q)
+        || paraBusca(o.orgao).includes(q) || paraBusca(o.contratante ?? "").includes(q) || (o.entidade_id != null && paraBusca(f.empresas?.get(o.entidade_id) ?? "").includes(q))))
     .sort((a, b) => (f.termina ? primeiroFim(a, parada(a)) - primeiroFim(b, parada(b)) : 0) || nomeDaObra(a).localeCompare(nomeDaObra(b), "pt-BR"));
+}
+
+/* --------------------------------------------------- contratantes (a entrada de Obras, redesenho #159) */
+
+/** O valor vigente e o medido de execucao da obra, em valor cheio; o que a API nao deu conta como zero. */
+const vigenteDe = (o: ObraLista) => o.valor_vigente_centavos ?? 0;
+const medidoDe = (o: ObraLista) => o.medido_execucao_centavos ?? 0;
+
+/** Quanto da obra ja' foi executado, em %, inteiro: medido de execucao ÷ valor vigente. Sem valor vigente, nulo. */
+export function pctExecutado(o: ObraLista): number | null {
+  const v = vigenteDe(o);
+  return v > 0 ? Math.round((medidoDe(o) * 100) / v) : null;
+}
+
+export type ResumoContratante = {
+  obras: number; encerradas: number; vigente: number; medido: number; saldo: number; pct: number;
+  comAviso: number; criticos: number; nivelMax: Nivel | null;
+};
+
+/** O resumo de um grupo de obras: so' as em andamento (nem encerradas nem rescindidas) entram nos numeros; as
+ *  encerradas (e rescindidas) sao so' contadas. O saldo e' vigente − medido somados, entao a linha "Todas as obras" e' a soma das
+ *  linhas dos contratantes. `criticos`: avisos criticos; `comAviso`: obras com algum aviso. */
+export function resumoContratante(obras: ObraLista[], avisos: ReadonlyMap<number, Aviso[]> | null = null): ResumoContratante {
+  const ativas = obras.filter(o => !FORA.has(o.estado));
+  const r: ResumoContratante = { obras: ativas.length, encerradas: obras.filter(o => FORA.has(o.estado)).length,
+    vigente: 0, medido: 0, saldo: 0, pct: 0, comAviso: 0, criticos: 0, nivelMax: null };
+  for (const o of ativas) {
+    r.vigente += vigenteDe(o); r.medido += medidoDe(o); r.saldo += vigenteDe(o) - medidoDe(o);
+    const av = avisos?.get(o.id) ?? [];
+    if (av.length) r.comAviso += 1;
+    for (const a of av) {
+      if (a.nivel === "critico") r.criticos += 1;
+      const n: Nivel = GRAVIDADE[a.nivel] === undefined ? "atencao" : a.nivel;
+      if (r.nivelMax === null || GRAVIDADE[n] < GRAVIDADE[r.nivelMax]) r.nivelMax = n;
+    }
+  }
+  r.pct = r.vigente > 0 ? Math.round((r.medido * 100) / r.vigente) : 0;
+  return r;
+}
+
+/** O contratante da obra: a sigla do orgao do cadastro, a mesma de Medicoes ("SINFRA" para a familia toda); sem ela,
+ *  o nome do orgao. */
+export const contratanteDaObra = (o: ObraLista) => o.contratante || o.orgao;
+
+/** A obra e' do contratante `nome`? O link de antes (`?orgao=SINFRA - SUEF II`) traz o nome inteiro do orgao: vale. */
+export const ehDoContratante = (o: ObraLista, nome: string) => contratanteDaObra(o) === nome || o.orgao === nome;
+
+/** Os contratantes que tem obra, na ordem do nome. */
+export function contratantesDe(lista: ObraLista[]): string[] {
+  return [...new Set(lista.map(contratanteDaObra))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+/** O contratante da URL: `?c=todas` e' "Todas as obras" (sem recorte de orgao); `?c=<orgao>` (ou o `?orgao=` dos
+ *  links de antes) e' um orgao. Sem `c`, a pagina e' a escolha do contratante, a menos que haja um filtro de antes
+ *  (`?termina=`, `?q=`, `?situacao=`): esses links abrem a lista de todas as obras, como abriam, e a tela poe `c`
+ *  na URL (`cDaUrlAntiga`) para que limpar o ultimo filtro nao volte a escolha. */
+export function escopoDaUrl(busca: Record<string, string>): { escolha: boolean; orgao: string | null } {
+  const c = busca.c ?? busca.orgao ?? "";
+  if (c && c !== "todas") return { escolha: false, orgao: c };
+  const antigo = ["termina", "q", "situacao", "ver", "avisos"].some(k => busca[k] !== undefined);
+  return { escolha: !c && !antigo, orgao: null };
+}
+
+/** O `c` que um link de antes ainda nao tem: `?orgao=X` vira `?c=X` e os filtros soltos (`?termina=`, `?q=`...) viram
+ *  `?c=todas`. Nulo quando a URL ja' esta' no formato novo (ou e' a escolha do contratante). */
+export function cDaUrlAntiga(busca: Record<string, string>): string | null {
+  if (busca.c !== undefined) return null;
+  if (busca.orgao) return busca.orgao;
+  return ["termina", "q", "situacao", "ver", "avisos"].some(k => busca[k] !== undefined) ? "todas" : null;
+}
+
+/** O aviso mais grave da obra, para a linha do cartao. */
+export function avisoPrincipal(avisos: Aviso[]): Aviso | null {
+  let melhor: Aviso | null = null;
+  for (const a of avisos) {
+    const g = GRAVIDADE[a.nivel] ?? GRAVIDADE.atencao;
+    if (melhor === null || g < (GRAVIDADE[melhor.nivel] ?? GRAVIDADE.atencao)) melhor = a;
+  }
+  return melhor;
 }

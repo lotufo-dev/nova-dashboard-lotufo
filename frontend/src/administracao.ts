@@ -152,6 +152,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "medicao.valor_protocolado": "Valor protocolado alterado", "medicao.valor_atestado": "Atestado alterado",
   "medicao.numero_orgao": "Número do órgão registrado na medição", "medicao.remover_teste": "Medição de teste removida",
   "medicao.documento": "Documento da medição", "medicao.faturada_legado": "Faturamento carregado do legado",
+  "medicao.recebida_com_diferenca": "Recebida com diferença dentro da tolerância",
   "espelho.gerar": "Espelho gerado", "espelho.enviar": "Espelho enviado",
   "protocolo.criar": "Protocolo criado", "protocolo.peca": "Peça do protocolo anexada",
   "protocolo.peca_removida": "Peça do protocolo removida", "protocolo.montar": "Protocolo montado",
@@ -165,6 +166,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "nf.alocar": "NF alocada à medição", "nf.desalocar": "Alocação de NF desfeita",
   "nota.confirmacao": "Nota confirmada pelo RM", "nota.conferencia": "Nota conferida", "nota.justificar": "Nota justificada",
   "nota.manual": "Nota lançada à mão", "rm.sincronizacao": "Sincronização com o RM",
+  "siga.vinculo": "Processo do SIGA ligado ao protocolo ou à medição", "protocolo.siga": "Link do SIGA registrado",
   "aditivo.criar": "Aditivo criado", "aditivo.atualizar": "Aditivo alterado", "aditivo.cancelar": "Aditivo cancelado",
   "aditivo.assinar": "Aditivo assinado", "aditivo.carga": "Aditivos carregados do legado",
   "contrato.criar": "Obra criada", "contrato.atualizar": "Obra alterada", "contrato.mudar_estado": "Mudança de estado da obra",
@@ -177,7 +179,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "cadastro.aplicar": "Cadastro aplicado", "cadastro.orgao": "Cadastro: órgão", "cadastro.entidade": "Cadastro: entidade",
   "cadastro.consorciadas": "Cadastro: consorciadas", "cadastro.contrato": "Cadastro: obra", "cadastro.datas_base": "Cadastro: datas-base",
   "cadastro.fiscal": "Cadastro: fiscal", "cadastro.pleito": "Cadastro: pleito", "cadastro.instrumento": "Cadastro: instrumento",
-  "cadastro.geral": "Cadastro: geral", "cadastro.espelho": "Cadastro: espelho",
+  "cadastro.geral": "Cadastro: geral", "cadastro.espelho": "Cadastro: espelho", "cadastro.cronograma": "Cadastro: cronograma",
 };
 const ROTULO_ENTIDADE: Record<string, string> = {
   medicao: "Medição", contrato: "Obra", usuario: "Usuário", entidade: "Entidade", orgao: "Órgão", instrumento: "Instrumento",

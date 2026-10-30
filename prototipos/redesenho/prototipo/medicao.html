@@ -1,0 +1,798 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Página da medição</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="app-medicoes.css">
+<link rel="stylesheet" href="app-etapas.css">
+<link rel="stylesheet" href="app-notas.css">
+<style>
+[hidden] { display: none !important; }
+/* Página da medição (#152, opção B): setas no alto, só a etapa da vez aberta, resumo e linha do tempo à direita. */
+.med { gap: 16px; }
+.mono { font-family: var(--fonte-num); font-variant-numeric: tabular-nums; }
+.dir { text-align: right; }
+
+/* seletor do protótipo */
+.proto-ver { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; justify-content: flex-end; font-size: 12px; color: var(--texto-2); }
+.proto-ver__grupo { display: inline-flex; border: 1px solid var(--linha); border-radius: var(--raio-pilula); background: var(--superficie); padding: 2px; }
+.proto-ver__grupo button { height: 24px; padding: 0 10px; border: 0; border-radius: var(--raio-pilula); background: none; font-size: 12px; font-weight: 500; color: var(--texto-2); }
+.proto-ver__grupo button[aria-pressed="true"] { background: var(--acento-fundo); color: var(--acento-mais); }
+
+/* cabeça */
+.med-cabeca { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
+.med-cabeca h1 { margin: 0; font-size: 24px; line-height: 32px; }
+.med-meta { margin: 4px 0 0; color: var(--texto-2); font-size: 14px; max-width: none; }
+.med-meta span + span::before { content: " · "; font-family: var(--fonte); }
+.res-lista dd { white-space: nowrap; }
+.med-rodape-fim > .btn--primario { height: 48px; padding: 0 24px; font-size: 15px; font-weight: 600; }
+.notas-v3 .ol-campo { flex-wrap: wrap; min-width: 0; }
+.notas-v3 .ol-chip { max-width: 100%; min-width: 0; }
+.notas-v3 .ol-chip__nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.med-mais { position: relative; }
+.med-mais > .btn { height: 40px; padding: 0 16px; border-color: var(--acento); color: var(--acento); font-weight: 600; font-size: 14px; }
+.med-mais > .btn:hover:not(:disabled) { color: var(--acento); }
+.med-mais .conta__menu { width: 300px; max-width: calc(100vw - 96px); }
+.med-mais .conta__item { height: auto; min-height: 36px; padding: 6px 10px; }
+.med-mais .conta__item--perigo { color: var(--acao); }
+.med-mais hr { border: 0; border-top: 1px solid var(--linha); margin: 6px 0; }
+.med-mais .conta__perfil { padding-top: 8px; }
+
+.med-grade { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+.med-principal { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.med-lateral { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* setas */
+.setas ol { display: flex; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.setas li { flex: 1 1 0; min-width: 0; }
+.setas button { width: 100%; height: 48px; padding: 0 12px 0 26px; border: 0; border-radius: 0; justify-content: center; gap: 8px;
+  font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 0 100%, 16px 50%); }
+.setas li:first-child button { padding-left: 14px; border-radius: var(--raio) 0 0 var(--raio); clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 0 100%); }
+.setas li:last-child button { border-radius: 0 var(--raio) var(--raio) 0; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 16px 50%); }
+.seta--feita button { background: var(--ok-fundo); color: var(--ok); }
+.seta--feita button:hover:not(:disabled) { background: var(--ok-linha); color: var(--ok); }
+.seta--atual button, .seta--atual button:hover:not(:disabled) { background: var(--acento); color: var(--superficie); font-weight: 600; }
+.seta--futura button { background: var(--neutro-fundo); color: var(--texto-2); }
+.seta--futura button:hover:not(:disabled) { background: var(--linha); color: var(--texto); }
+.seta--vendo button, .seta--vendo button:hover:not(:disabled) { background: var(--acento-fundo); color: var(--acento-mais); font-weight: 600; }
+.seta__marca { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; border-radius: var(--raio-pilula); font-size: 12px; font-weight: 600; }
+.seta--feita .seta__marca { background: var(--ok-ponto); color: var(--superficie); }
+.seta--futura .seta__marca { background: var(--superficie); color: var(--texto-2); }
+.seta--atual .seta__marca { background: var(--superficie); color: var(--acento); }
+.seta--vendo .seta__marca { background: var(--acento); color: var(--superficie); }
+.seta__rotulo { overflow: hidden; text-overflow: ellipsis; }
+
+/* faixa "vendo etapa feita" */
+.med-faixa { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 12px 16px; border-radius: var(--raio);
+  background: var(--acento-fundo); color: var(--acento-mais); font-size: 14px; }
+.med-faixa a { font-weight: 600; }
+
+/* etapa */
+.med-etapa { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+.med-etapa__cabeca { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.med-etapa__n { padding: 4px 12px; border-radius: var(--raio-pilula); background: var(--acento-fundo); color: var(--acento-mais); font-size: 13px; font-weight: 600; }
+.med-etapa__titulo { margin: 0; font-size: 20px; line-height: 28px; }
+.med-etapa__resumo { color: var(--texto-2); font-size: 13px; }
+.med-sub { margin: 0 0 8px; font-size: 15px; line-height: 22px; font-weight: 600; }
+.med-bloco { display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px solid var(--linha); }
+.med-caixa { border: 1px solid var(--linha); border-radius: var(--raio); overflow: hidden; }
+.med-caixa .tabela thead th { background: var(--superficie-2); }
+.med-caixa .tabela-wrap { overflow-x: auto; }
+.med-nota-proto { margin: 0; padding: 8px 12px; border: 1px dashed var(--linha-forte); border-radius: var(--raio); color: var(--texto-2); font-size: 12.5px; max-width: none; }
+.med-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.med-linhas { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.med-linhas li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--linha-suave); }
+.med-linhas li:last-child { border-bottom: 0; }
+.med-linhas--caixa { border-radius: var(--raio); background: var(--superficie-2); }
+
+/* tabela de envios (etapa 4) e pagamentos (etapa 5) */
+.tabela.envios tbody td { color: var(--texto); vertical-align: top; }
+.envios td.col-num { font-family: var(--fonte-num); }
+.envios__nfs { display: flex; flex-direction: column; gap: 2px; }
+.envios__nfs span { white-space: nowrap; }
+.envios__nfs small { color: var(--texto-2); font-size: 12px; }
+.envios__acao { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; }
+.envios__motivo { font-size: 12.5px; color: var(--texto-2); max-width: 26ch; text-align: right; }
+.envios__motivo--atencao { color: var(--atencao); }
+.envios__motivo--bloqueio { color: var(--acao); }
+.envios tr.envios--aberto > td { background: var(--acento-fundo); }
+.btn.btn--envio { height: 38px; padding: 0 16px; font-size: 14px; font-weight: 600; }
+
+/* certidões */
+.certidoes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.certidoes li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.certidoes .ponto { width: 8px; height: 8px; border-radius: var(--raio-pilula); background: var(--ok-ponto); flex: none; }
+.certidoes .ponto--atencao { background: var(--atencao-ponto); }
+.certidoes small { color: var(--texto-2); font-size: 13px; }
+
+/* envio aberto (detalhe da linha) */
+.med-envio { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid var(--acento-linha); border-radius: var(--raio); background: var(--superficie-2); }
+.med-envio__cabeca { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.med-envio__cabeca h3 { margin: 0; font-size: 16px; line-height: 24px; }
+.notas-v3 .nota-rodape .btn--primario { height: 48px; padding: 0 24px; font-size: 15px; font-weight: 600; }
+.med-rodape-fim { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px 16px; padding-top: 16px; border-top: 1px solid var(--linha); }
+.med-rodape-fim .nota-rodape__motivo { margin-right: auto; }
+
+/* resumo e linha do tempo */
+.res-lista { margin: 0; display: flex; flex-direction: column; }
+.res-lista > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--linha-suave); }
+.res-lista > div:last-child { border-bottom: 0; }
+.res-lista dt { color: var(--texto-2); }
+.res-lista dd { margin: 0; text-align: right; color: var(--texto); }
+.res-lista .res-total dt, .res-lista .res-total dd { color: var(--texto); font-weight: 600; font-size: 16px; }
+.res-lista .res-total { border-top: 1px solid var(--linha); }
+.res-nota { display: block; font-size: 12px; color: var(--texto-2); }
+.tempo { margin: 0; padding: 0; list-style: none; }
+.tempo li { position: relative; padding: 0 0 16px 22px; }
+.tempo li::before { content: ""; position: absolute; left: 4px; top: 6px; width: 8px; height: 8px; border-radius: var(--raio-pilula); background: var(--ok-ponto); }
+.tempo li::after { content: ""; position: absolute; left: 7px; top: 18px; bottom: 0; width: 2px; background: var(--linha); }
+.tempo li:last-child { padding-bottom: 0; }
+.tempo li:last-child::after { display: none; }
+.tempo li.tempo--futuro::before { background: var(--linha-forte); }
+.tempo time { display: block; color: var(--texto-2); font-size: 12px; font-family: var(--fonte-num); }
+
+/* janela */
+.iniciar__caixa .form-inline { align-items: flex-end; }
+.iniciar__rodape { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.iniciar textarea, .iniciar input[type="text"], .iniciar input[type="date"] { max-width: 100%; }
+
+@media (max-width: 1100px) {
+  .med-grade { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 767px) {
+  .pagina.med { padding: 16px 16px 32px; }
+  .setas button { padding: 0 14px 0 18px; justify-content: center; font-size: 13px; gap: 6px; }
+  .setas li:first-child button { padding-left: 8px; }
+  .setas li:not(.seta--rotulo) { flex: 0 0 44px; }
+  .setas li:not(.seta--rotulo) .seta__rotulo { display: none; }
+  .med-etapa { padding: 16px; }
+  .med-cabeca { flex-direction: column; }
+  /* tabela de envios vira uma pilha de cartões */
+  .envios, .envios tbody, .envios tr, .envios td { display: block; width: 100%; }
+  .envios thead { display: none; }
+  .envios tr { padding: 12px 0; border-bottom: 1px solid var(--linha); }
+  .envios tr:last-child { border-bottom: 0; }
+  .envios tbody td { padding: 4px 16px; border: 0; text-align: left; }
+  .envios td[data-rotulo]::before { content: attr(data-rotulo); display: block; font-size: 12px; color: var(--texto-2); font-family: var(--fonte); }
+  .envios__acao { justify-content: flex-start; }
+  .envios__motivo { text-align: left; max-width: none; }
+  .med-etapa { padding: 16px 12px; }
+  .notas-v3.med-envio { padding: 12px 0 0; border: 0; border-top: 2px solid var(--acento); border-radius: 0; background: none; }
+  .notas-v3 .nota-secao { flex-direction: column; padding: 12px; gap: 8px; }
+  .notas-v3 .nota-item { flex-wrap: wrap; }
+  .res-lista dd { white-space: normal; }
+  .med-rodape-fim { justify-content: stretch; }
+  .med-rodape-fim .btn--primario { width: 100%; justify-content: center; }
+}
+</style></head>
+<body data-secao="medicoes" data-titulo="Medições"><main id="conteudo"><div class="pagina med">
+
+  <div class="proto-ver" aria-label="Opções do protótipo">
+    <span>Ver como:</span>
+    <span class="proto-ver__grupo" role="group" aria-label="Órgão">
+      <button type="button" data-ver="sinfra">SINFRA (um envio)</button>
+      <button type="button" data-ver="mtpar">MTPAR (dois envios)</button>
+    </span>
+    <span class="proto-ver__grupo" role="group" aria-label="Etapa da vez">
+      <button type="button" data-atual="4">Na etapa 4</button>
+      <button type="button" data-atual="5">Na etapa 5</button>
+    </span>
+    <span class="proto-ver__grupo" role="group" aria-label="Envio">
+      <button type="button" data-estado="normal">Envio normal</button>
+      <button type="button" data-estado="esperando">Esperando a outra metade</button>
+      <button type="button" data-estado="preso">Envio preso</button>
+      <button type="button" data-estado="final">Medição final</button>
+    </span>
+  </div>
+
+  <nav class="migalhas" aria-label="Caminho"><ol>
+    <li><a href="enviar-nota.html">Medições</a></li>
+    <li><a href="pagina-da-obra.html">Ponte do Ribeirão</a></li>
+    <li aria-current="page"><span>7ª Medição + Reajuste</span></li>
+  </ol></nav>
+
+  <header class="med-cabeca">
+    <div>
+      <h1>7ª Medição + Reajuste</h1>
+      <p class="med-meta"><span>Ponte do Ribeirão</span><span id="cab-orgao">Agência de Parcerias</span><span class="mono">09/2026</span><span>Contrato 014/2025</span><span>valores cheios · cota da Lotufo: 60%</span></p>
+    </div>
+    <div class="med-mais">
+      <button type="button" class="btn" id="mais-botao" aria-haspopup="menu" aria-expanded="false" aria-controls="mais-menu">Mais ações
+        <svg class="icone icone--p" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="conta__menu" id="mais-menu" role="menu" hidden>
+        <button type="button" class="conta__item" role="menuitem" data-dialogo="atestado">Editar o atestado</button>
+        <button type="button" class="conta__item" role="menuitem" data-dialogo="final" id="item-final">Marcar como medição final</button>
+        <hr>
+        <button type="button" class="conta__item conta__item--perigo" role="menuitem" data-dialogo="cancelar">Cancelar a medição</button>
+        <button type="button" class="conta__item conta__item--perigo" role="menuitem" data-dialogo="desistir">Registrar desistência</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="med-grade">
+    <div class="med-principal">
+      <nav class="setas" aria-label="Etapas da medição"><ol id="setas"></ol></nav>
+      <div class="med-faixa" id="faixa" role="status" hidden></div>
+
+      <!-- ETAPA 1 · ESPELHO (o que a tela Nova medição faz hoje) -->
+      <section class="cartao med-etapa" data-etapa="1" aria-labelledby="et1" hidden>
+        <div class="med-etapa__cabeca">
+          <span class="med-etapa__n">Etapa 1</span><h2 class="med-etapa__titulo" id="et1">Espelho</h2>
+          <span class="selo selo--ok"><span class="selo__ponto"></span><span class="selo__texto">Gerado em 03/10/2026 16:40</span></span>
+          <span class="med-etapa__resumo">nº 7 · 09/2026 · versão 2 · por Usuário de exemplo</span>
+        </div>
+
+        <div id="esp-lista" class="pilha">
+          <div>
+            <p class="med-sub">Uma linha por nota</p>
+            <div class="med-caixa"><div class="tabela-wrap">
+              <table class="tabela espelho__notas">
+                <thead><tr><th>Saída</th><th class="col-num">Valor</th><th class="col-num">Mão de obra</th><th class="col-num">Material</th><th class="col-num">INSS</th><th class="col-num">ISS</th><th class="col-num">IRRF</th><th class="col-num">Líquido</th></tr></thead>
+                <tbody>
+                  <tr><td>Medição · Lotufo · Vila Serrana</td><td class="col-num">740.740,73</td><td class="col-num">370.370,36</td><td class="col-num">370.370,37</td><td class="col-num">40.740,74</td><td class="col-num">18.518,52</td><td class="col-num">8.888,89</td><td class="col-num">672.592,58</td></tr>
+                  <tr><td>Medição · Consorciada · Vila Serrana</td><td class="col-num">493.827,16</td><td class="col-num">246.913,58</td><td class="col-num">246.913,58</td><td class="col-num">27.160,49</td><td class="col-num">12.345,68</td><td class="col-num">5.925,93</td><td class="col-num">448.395,06</td></tr>
+                  <tr><td>Reajuste · Lotufo · Vila Serrana</td><td class="col-num">59.046,13</td><td class="col-num">29.523,06</td><td class="col-num">29.523,07</td><td class="col-num">3.247,54</td><td class="col-num">1.476,15</td><td class="col-num">708,55</td><td class="col-num">53.613,89</td></tr>
+                  <tr><td>Reajuste · Consorciada · Vila Serrana</td><td class="col-num">39.364,09</td><td class="col-num">19.682,04</td><td class="col-num">19.682,05</td><td class="col-num">2.165,02</td><td class="col-num">984,10</td><td class="col-num">472,37</td><td class="col-num">35.742,60</td></tr>
+                </tbody>
+              </table>
+            </div></div>
+          </div>
+          <ul class="med-linhas med-linhas--caixa">
+            <li><span>7ª Medição de execução</span><span class="mono">R$ 1.234.567,89</span></li>
+            <li><span>Reajuste da 7ª Medição</span><span class="mono">R$ 98.410,22</span></li>
+            <li><span>Período no espelho</span><span class="mono">01/09/2026 a 30/09/2026</span></li>
+          </ul>
+          <div>
+            <p class="med-sub">Arquivos gerados</p>
+            <ul class="lista-simples lista-simples--arquivos">
+              <li><a href="#" data-acao="Baixaria o espelho da medição (.docx)">Espelho nº 7 · Medição.docx</a> <span class="num">(48 KB)</span></li>
+              <li><a href="#" data-acao="Baixaria o espelho do reajuste (.docx)">Espelho nº 7 · Reajuste.docx</a> <span class="num">(41 KB)</span></li>
+            </ul>
+          </div>
+          <div>
+            <p class="med-sub">O que o órgão mandou</p>
+            <p class="campo__nota" style="margin:0 0 8px">Boletim de medição do órgão.pdf · anexado em 02/10/2026 · aparece também em Documentos</p>
+            <div class="med-acoes">
+              <button type="button" class="btn btn--pequeno" id="esp-gerar-de-novo">Gerar de novo</button>
+              <button type="button" class="btn btn--pequeno" data-acao="Abriria a escolha do PDF que o órgão mandou">Anexar o que o órgão mandou (PDF)</button>
+            </div>
+          </div>
+          <details class="detalhes">
+            <summary>Versões anteriores (1)</summary>
+            <ul class="lista-simples"><li>Nº 7 · 09/2026 · versão 1 · substituída: valor do reajuste corrigido · tinha sido enviada em 03/10/2026 11:05</li></ul>
+          </details>
+          <p class="med-nota-proto">Medição que ainda não existe (a antiga tela “Nova medição”): a página abre nesta etapa já com o formulário abaixo; gerar o espelho cria a medição e a página passa à etapa 2. Obra que ainda não gera espelho pelo sistema: no lugar do formulário, “Esta obra ainda não gera o espelho pelo sistema: lance a medição à mão na página da obra”, com o link.</p>
+        </div>
+
+        <form id="esp-form" class="pilha" hidden aria-label="Gerar espelho">
+          <p class="painel__titulo">Gerar espelho: número, competência e os valores informados pelo órgão</p>
+          <div class="form-inline">
+            <div class="campo"><label class="campo__rotulo" for="f-num">Nº da medição</label><input id="f-num" class="entrada--curta entrada--num" inputmode="numeric" value="7"></div>
+            <div class="campo"><label class="campo__rotulo" for="f-comp">Competência</label><input id="f-comp" class="entrada--media entrada--num" placeholder="MM/AAAA" value="09/2026"></div>
+            <div class="campo"><label class="campo__rotulo" for="f-de">Período: de</label><input id="f-de" type="date" class="entrada--media" value="2026-09-01"></div>
+            <div class="campo"><label class="campo__rotulo" for="f-ate">até</label><input id="f-ate" type="date" class="entrada--media" value="2026-09-30"></div>
+            <div class="campo"><label class="campo__rotulo" for="f-v1">Valor da medição (R$)</label><input id="f-v1" class="entrada--media entrada--num" value="1.234.567,89"></div>
+            <div class="campo"><label class="campo__rotulo" for="f-v2">Valor do reajuste (R$)</label><input id="f-v2" class="entrada--media entrada--num" value="98.410,22"></div>
+          </div>
+          <p class="campo__nota">Digite só os números: os centavos e os pontos entram sozinhos. Campo vazio vale zero; nota com valor zero não é emitida.</p>
+          <p class="campo__nota">O período vem com o mês da competência; mude só quando o espelho cobrir outro intervalo (ex.: 05/02 a 28/02).</p>
+          <div class="form-inline"><button type="button" class="btn btn--primario" id="esp-conferir">Conferir</button><button type="button" class="btn" data-voltar-esp>Voltar</button></div>
+        </form>
+
+        <div id="esp-previa" class="pilha" hidden>
+          <p class="painel__titulo">Conferir antes de gerar: uma linha por nota</p>
+          <p class="campo__nota">Período no espelho: <span class="num">01/09/2026 a 30/09/2026</span></p>
+          <div class="med-caixa"><div class="tabela-wrap"><table class="tabela espelho__notas">
+            <thead><tr><th>Saída</th><th class="col-num">Valor</th><th class="col-num">INSS</th><th class="col-num">ISS</th><th class="col-num">IRRF</th><th class="col-num">Líquido</th></tr></thead>
+            <tbody>
+              <tr><td>Medição · Lotufo · Vila Serrana</td><td class="col-num">740.740,73</td><td class="col-num">40.740,74</td><td class="col-num">18.518,52</td><td class="col-num">8.888,89</td><td class="col-num">672.592,58</td></tr>
+              <tr><td>Medição · Consorciada · Vila Serrana</td><td class="col-num">493.827,16</td><td class="col-num">27.160,49</td><td class="col-num">12.345,68</td><td class="col-num">5.925,93</td><td class="col-num">448.395,06</td></tr>
+              <tr><td>Reajuste · Lotufo · Vila Serrana</td><td class="col-num">59.046,13</td><td class="col-num">3.247,54</td><td class="col-num">1.476,15</td><td class="col-num">708,55</td><td class="col-num">53.613,89</td></tr>
+              <tr><td>Reajuste · Consorciada · Vila Serrana</td><td class="col-num">39.364,09</td><td class="col-num">2.165,02</td><td class="col-num">984,10</td><td class="col-num">472,37</td><td class="col-num">35.742,60</td></tr>
+            </tbody></table></div></div>
+          <ul class="lista-simples espelho__medicoes">
+            <li>Medição 7 de execução: <span class="mono">R$ 1.234.567,89</span> (já existe, nota emitida: vira versão nova)</li>
+            <li>Medição 7 de reajuste: <span class="mono">R$ 98.410,22</span> (já existe, nota emitida: vira versão nova)</li>
+          </ul>
+          <span class="aviso"><span class="aviso__ponto"></span>As notas já emitidas não mudam sozinhas: a versão nova pede notas novas ao faturamento.</span>
+          <div class="campo"><label class="campo__rotulo" for="f-motivo">Motivo da nova versão (opcional)</label><input id="f-motivo" type="text" class="entrada--larga"></div>
+          <div class="form-inline"><button type="button" class="btn btn--primario" data-acao="Geraria o espelho nº 7, versão 3">Gerar</button><button type="button" class="btn" id="esp-previa-voltar">Voltar</button></div>
+        </div>
+      </section>
+
+      <!-- ETAPA 2 · FATURAMENTO -->
+      <section class="cartao med-etapa" data-etapa="2" aria-labelledby="et2" hidden>
+        <div class="med-etapa__cabeca">
+          <span class="med-etapa__n">Etapa 2</span><h2 class="med-etapa__titulo" id="et2">Faturamento</h2>
+          <span class="selo selo--ok"><span class="selo__ponto"></span><span class="selo__texto">Enviado ao faturamento em 06/10/2026 09:40</span></span>
+          <span class="med-etapa__resumo">por Usuário de exemplo → caixa do faturamento</span>
+        </div>
+        <div>
+          <p class="med-sub">O que foi enviado</p>
+          <div class="med-caixa"><table class="tabela">
+            <thead><tr><th>Arquivo</th><th class="dir">Ações</th></tr></thead>
+            <tbody>
+              <tr><td style="color:var(--texto)">Espelho nº 7 · Medição.docx <span class="num">(48 KB)</span></td><td class="dir"><a href="#" data-acao="Baixaria o arquivo">Baixar</a></td></tr>
+              <tr><td style="color:var(--texto)">Espelho nº 7 · Reajuste.docx <span class="num">(41 KB)</span></td><td class="dir"><a href="#" data-acao="Baixaria o arquivo">Baixar</a></td></tr>
+            </tbody></table></div>
+        </div>
+        <div>
+          <p class="med-sub">Totais enviados</p>
+          <ul class="med-linhas med-linhas--caixa">
+            <li><span>Medição</span><span class="mono">R$ 1.234.567,89</span></li>
+            <li><span>Reajuste</span><span class="mono">R$ 98.410,22</span></li>
+          </ul>
+        </div>
+        <div class="med-acoes"><button type="button" class="btn btn--pequeno" id="fat-de-novo">Enviar de novo</button></div>
+        <div id="fat-envio" class="pilha notas-v3" hidden>
+          <p class="painel__titulo">Enviar ao faturamento: espelho nº 7 (09/2026), versão 2</p>
+          <label class="marcar"><input type="checkbox" style="height:auto"> Confirmo o reenvio desta versão (substitui o envio anterior)</label>
+          <div id="fat-email"></div>
+          <div class="form-inline"><button type="button" class="btn btn--primario" data-acao="Enviaria ao faturamento pela sua conta Microsoft">Enviar ao faturamento</button><button type="button" class="btn" id="fat-descartar">Descartar</button></div>
+          <p class="campo__nota">O e-mail sai da sua conta Microsoft e a medição passa a Espelho enviado.</p>
+        </div>
+      </section>
+
+      <!-- ETAPAS 3, 4 e 5: desenhadas pelo script (mudam com o órgão e a etapa da vez) -->
+      <section class="cartao med-etapa" data-etapa="3" aria-labelledby="et3" hidden></section>
+      <section class="cartao med-etapa" data-etapa="4" aria-labelledby="et4" hidden></section>
+      <section class="cartao med-etapa" data-etapa="5" aria-labelledby="et5" hidden></section>
+    </div>
+
+    <aside class="med-lateral" aria-label="Resumo e linha do tempo">
+      <section class="cartao" aria-labelledby="t-resumo">
+        <div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-resumo">Resumo da medição</h2></div>
+        <div class="cartao__corpo"><dl class="res-lista" id="resumo"></dl></div>
+      </section>
+      <section class="cartao" aria-labelledby="t-tempo">
+        <div class="cartao__cabeca"><h2 class="cartao__titulo" id="t-tempo">Linha do tempo</h2></div>
+        <div class="cartao__corpo"><ol class="tempo" id="tempo"></ol></div>
+      </section>
+    </aside>
+  </div>
+</div></main>
+
+<dialog class="iniciar" id="janela" aria-labelledby="janela-titulo">
+  <div class="iniciar__caixa">
+    <div class="iniciar__cabeca"><h2 class="iniciar__titulo" id="janela-titulo"></h2>
+      <button type="button" class="iniciar__fechar" data-fechar aria-label="Fechar"><svg class="icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div id="janela-corpo" class="pilha"></div>
+  </div>
+</dialog>
+
+<script src="shell.js"></script>
+<script>
+(function () {
+  const ETAPAS = ["Espelho", "Faturamento", "Nota fiscal", "Envio ao órgão", "Pagamento"];
+  const CHECK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
+  const S = { v: "mtpar", atual: 4, vendo: 4, aberto: null, oficioPedido: false, estado: "normal" };
+  const $ = s => document.querySelector(s);
+  const ORGAO = { sinfra: "Secretaria de Obras", mtpar: "Agência de Parcerias" };
+
+  const selo = (nivel, txt) => `<span class="selo selo--${nivel}"><span class="selo__ponto"></span><span class="selo__texto">${txt}</span></span>`;
+  const estadoItem = e => `<span class="nota-estado nota-estado--${e}" title="${{ ok: "Pronto", aviso: "Atenção", falta: "Falta", vencida: "Vencida" }[e]}">${e === "ok" ? CHECK : '<span aria-hidden="true">!</span>'}</span>`;
+  const item = (e, rotulo, detalhe, extra = "") => `<li>${estadoItem(e)}<span class="nota-item"><span class="nota-item__texto"><span>${rotulo}</span>${detalhe ? `<span class="nota-item__detalhe nota-item__detalhe--${e}">${detalhe}</span>` : ""}</span>${extra}</span></li>`;
+
+  function email({ para, cc, assunto, anexos, corpo }) {
+    const chip = n => `<span class="ol-chip"><span class="ol-chip__nome">${n}</span><button type="button" aria-label="Remover ${n}" data-acao="Tiraria ${n} do e-mail">×</button></span>`;
+    const tipo = n => (n.split(".").pop() || "pdf").toLowerCase();
+    return `<div class="ol-janela">
+      <span class="ol-de">De: sua conta Microsoft (Usuário de exemplo)</span>
+      <div class="ol-linha"><button type="button" class="ol-rotulo" data-acao="Abriria os contatos">Para</button><div class="ol-campo">${para.map(chip).join("")}<input class="ol-entrada" aria-label="Para: digite um nome ou e-mail"></div></div>
+      <div class="ol-linha"><button type="button" class="ol-rotulo" data-acao="Abriria os contatos">Cc</button><div class="ol-campo">${cc.map(chip).join("")}<input class="ol-entrada" aria-label="Cc: digite um nome ou e-mail"></div></div>
+      <div class="ol-assunto"><input aria-label="Assunto" value="${assunto}" style="width:100%"></div>
+      <ul class="ol-anexos" aria-label="Anexos">${anexos.map(a => `<li class="ol-anexo" title="${a[0]}"><span class="ol-anexo__tipo ol-anexo__tipo--${tipo(a[0])}">${tipo(a[0]).toUpperCase()}</span><span class="ol-anexo__texto"><span class="ol-anexo__nome">${a[0]}</span><span class="ol-anexo__tamanho">${a[1]}</span></span></li>`).join("")}</ul>
+      <div class="ol-corpo"><div class="ol-editor" contenteditable="true" aria-label="Texto do e-mail">${corpo}</div></div>
+    </div><p class="campo__nota">Texto montado com os anexos prontos; você pode editar. O e-mail sai da sua conta Microsoft.</p>`;
+  }
+
+  /* ------------------------------------------------------------ dados por órgão */
+  const NF = {
+    m1: ["NF 2322", "Lotufo", "740.740,73"], m2: ["NF 845", "consorciada", "493.827,16"],
+    r1: ["NF 2323", "Lotufo", "59.046,13"], r2: ["NF 846", "consorciada", "39.364,09"]
+  };
+  function envios() {
+    if (S.v === "sinfra" && S.estado === "esperando") return [{
+      id: "unico", rotulo: "Medição + Reajuste", nfs: [NF.m1, NF.m2], valor: "1.234.567,89", esperando: true,
+      docs: ["atencao", "Faltam as notas do reajuste"], motivo: ["atencao", "Esperando as notas do reajuste: vão no mesmo e-mail, como o órgão pede."],
+      carta: null, enviado: "10/10/2026 15:02", protocolo: "—", ressalva: null
+    }];
+    if (S.v === "sinfra") return [{
+      id: "unico", rotulo: "Medição + Reajuste", nfs: [NF.m1, NF.m2, NF.r1, NF.r2], valor: "1.332.978,11",
+      docs: ["atencao", "Falta FRC assinada do reajuste"], motivo: ["atencao", "Falta a FRC assinada do reajuste: anexe no envio, ou envie assim (pede confirmação)."],
+      carta: null, enviado: "10/10/2026 15:02", protocolo: "—", ressalva: "FRC do reajuste assinada no dia seguinte; o órgão aceitou por e-mail."
+    }];
+    return [
+      { id: "med", rotulo: "Medição", nfs: [NF.m1, NF.m2], valor: "1.234.567,89", docs: ["ok", "Completo"], motivo: ["neutro", "Pronto: ofício assinado e conferido."],
+        carta: { oficio: "361/2026", montado: true, assinado: true }, enviado: "10/10/2026 15:02", protocolo: "2026.10.004512", ressalva: null },
+      { id: "rea", rotulo: "Reajuste", nfs: [NF.r1, NF.r2], valor: "98.410,22", docs: ["atencao", "Falta FRC assinada"], motivo: ["atencao", "Falta a FRC assinada; o envio ainda não começou (envia assim com confirmação)."],
+        carta: { oficio: null, montado: false, assinado: false }, enviado: "11/10/2026 09:18", protocolo: "", ressalva: "FRC assinada enviada depois, em ofício próprio." }
+    ];
+  }
+
+  /* ------------------------------------------------------------------- etapa 3 */
+  function etapa3() {
+    const bloco = (titulo, nf, nfc, frc, liq, assinada, pdfSemLeitura) => `
+      <div class="med-bloco">
+        <p class="med-sub">${titulo} <span class="campo__nota">— notas completas</span></p>
+        <div class="med-caixa"><div class="tabela-wrap"><table class="tabela notas__tabela">
+          <thead><tr><th>Saída</th><th class="col-num">Valor</th><th class="col-num">INSS</th><th class="col-num">ISS</th><th class="col-num">IRRF</th><th class="col-num">Líquido</th><th>Nota</th></tr></thead>
+          <tbody><tr><td>${titulo.includes("Reajuste") ? "Reajuste" : "Medição"} · Lotufo · Vila Serrana</td>${nf.map(v => `<td class="col-num">${v}</td>`).join("")}
+            <td style="color:var(--texto)"><span class="num">${titulo.includes("Reajuste") ? "nº 2323 · 08/10/2026 · aguardando o RM" : "nº 2322 · 08/10/2026 · confirmada pelo RM"}</span> · <span class="feito">confere</span>
+            <button type="button" class="btn btn--pequeno" data-dialogo="desfazer">Desfazer vínculo</button></td></tr></tbody>
+        </table></div></div>
+        ${pdfSemLeitura ? `<p class="campo__nota" style="margin:0"><a href="#" data-acao="Abriria o PDF">nota-reajuste-digitalizada.pdf</a> — PDF sem leitura, ainda sem os dados da nota <button type="button" class="btn btn--pequeno" data-abre="manual">Informar número, data e valor</button></p>
+        <form class="form-inline" id="manual" hidden><span class="campo__nota">nota-reajuste-digitalizada.pdf: informe os dados da nota</span>
+          <div class="campo"><label class="campo__rotulo" for="m-n">Número da nota</label><input id="m-n" class="entrada--curta entrada--num"></div>
+          <div class="campo"><label class="campo__rotulo" for="m-e">Emissão</label><input id="m-e" type="date" class="entrada--media"></div>
+          <div class="campo"><label class="campo__rotulo" for="m-v">Valor bruto (R$)</label><input id="m-v" class="entrada--media entrada--num"></div>
+          <button type="button" class="btn btn--primario" data-acao="Registraria a nota digitada">Registrar nota</button><button type="button" class="btn" data-fecha="manual">Deixar só o arquivo</button></form>` : ""}
+        <div class="form-inline"><button type="button" class="btn btn--pequeno" data-acao="Abriria a escolha das notas em PDF">Anexar notas (PDF)</button>
+          <button type="button" class="btn btn--pequeno" data-dialogo="declarar">Declarar as notas completas…</button></div>
+        <div class="notas-v3 frc">
+          <div class="frc__cabeca"><h3 class="frc__titulo">Notas das consorciadas</h3><span class="campo__nota">Consórcio Ponte do Ribeirão · a nota esperada anexada</span></div>
+          <ul class="nota-itens frc__lista">${item("ok", "Construtora Parceira · Vila Serrana", `anexada · ${nfc[0]} · <span class="nota-mono">R$ ${nfc[2]}</span>`)}</ul>
+          <div class="nota-complementares__soltar"><span>Arraste as notas (PDF) aqui ou</span><button type="button" class="btn btn--pequeno" data-acao="Abriria a escolha das notas das consorciadas">Anexar notas</button></div>
+          <span class="campo__nota">O número e os valores vêm do conteúdo de cada PDF, não do nome do arquivo.</span>
+          <div class="frc__bloco">
+            <div class="frc__cabeca"><h3 class="frc__titulo">FRC</h3><span class="campo__nota">nº <span class="nota-mono">${frc}</span> gerada em 09/10/2026 por Usuário de exemplo · bruto <span class="nota-mono">R$ ${titulo.includes("Reajuste") ? "98.410,22" : "1.234.567,89"}</span> · líquido <span class="nota-mono">R$ ${liq}</span></span></div>
+            <div class="form-inline frc__gerar">
+              <div class="campo"><label class="campo__rotulo">Número da FRC</label><input class="entrada--curta entrada--num" value="${Number(frc)}"></div>
+              <span class="campo__nota frc__ultima">Última registrada: <span class="nota-mono">00013</span></span>
+              <button type="button" class="btn" data-acao="Geraria a FRC de novo">Gerar de novo</button>
+              <button type="button" class="btn" data-acao="Baixaria o PDF da FRC">Baixar PDF</button>
+              <button type="button" class="btn" data-acao="Baixaria a planilha da FRC">Baixar planilha</button>
+            </div>
+            <p class="frc__assinar">${assinada ? '<span class="feito">FRC assinada anexada no envio.</span> ' : ""}Assine no DocuSign; a FRC assinada se anexa no envio das notas (etapa 4), e só lá.</p>
+          </div>
+        </div>
+      </div>`;
+    const aviso = S.v === "sinfra"
+      ? `<p class="campo__nota" style="margin:0">Na Secretaria de Obras a medição e o reajuste vão no mesmo e-mail. Se as notas de uma metade atrasarem, o envio da outra espera; a saída de emergência (“Enviar a medição sem o reajuste…”) fica na linha do envio, na etapa 4.</p>`
+      : `<p class="campo__nota" style="margin:0">Neste órgão a medição e o reajuste vão em ofícios e e-mails separados: cada um segue quando as suas notas chegam.</p>`;
+    return cabeca(3, "nota emitida em 08/10/2026 · medição e reajuste com as notas completas") + `
+      <p class="campo__nota" style="margin:0">O sistema lê o RM a cada 1 hora e liga a nota sozinho. Se ela não aparecer, anexe o PDF aqui. A nota da Lotufo é lida e conferida contra o espelho; as das consorciadas e a FRC ficam como documentos.</p>
+      ${aviso}
+      ${bloco("7ª Medição", ["740.740,73", "40.740,74", "18.518,52", "8.888,89", "672.592,58"], NF.m2, "00012", "1.120.987,64", true, false)}
+      ${bloco("Reajuste da 7ª Medição", ["59.046,13", "3.247,54", "1.476,15", "708,55", "53.613,89"], NF.r2, "00013", "89.356,49", false, true)}`;
+  }
+
+  /* ------------------------------------------------------------------- etapa 4 */
+  const certidoes = `<div class="med-bloco"><p class="med-sub">Certidões <span class="campo__nota">— da Lotufo e da consorciada, conferidas hoje</span></p>
+    <ul class="certidoes">
+      <li><span class="ponto"></span>FGTS <small>· válida até 30/11/2026</small></li>
+      <li><span class="ponto"></span>Federal (tributos e dívida ativa) <small>· válida até 12/01/2027</small></li>
+      <li><span class="ponto"></span>Trabalhista <small>· válida até 05/02/2027</small></li>
+      <li><span class="ponto"></span>Estadual <small>· válida até 18/12/2026</small></li>
+      <li><span class="ponto ponto--atencao"></span>Municipal <small>· válida até 22/10/2026 · vence em 6 dias</small></li>
+    </ul>
+    <p class="campo__nota" style="margin:0">Certidão vencida bloqueia o envio; emita a nova em <a href="documentos.html">Documentos</a>.</p></div>`;
+
+  function nfsCelula(e) { return `<div class="envios__nfs">${e.nfs.map(n => `<span>${n[0]} <small>· ${n[1]}</small></span>`).join("")}</div>`; }
+
+  function etapa4() {
+    const lista = envios();
+    if (S.atual > 4) {
+      // etapa feita: o histórico dos envios e o nº do protocolo no órgão (só se registra aqui)
+      return cabeca(4, `enviada em ${lista[0].enviado.slice(0, 10)}`) + `
+      ${lista.map(e => `<div class="med-bloco">
+        <p class="med-sub">${e.rotulo}${e.carta ? ` · Ofício ${e.carta.oficio || "362/2026"}` : ""} <span class="campo__nota">· enviado em <span class="num">${e.enviado}</span> por Usuário de exemplo</span></p>
+        <div class="envios__nfs">${e.nfs.map(n => `<span>${n[0]} <small>· ${n[1]} · <span class="mono">R$ ${n[2]}</span></small></span>`).join("")}</div>
+        ${e.ressalva ? `<span class="aviso"><span class="aviso__ponto"></span>Enviado com ressalva: ${e.ressalva}</span>` : ""}
+        <form class="form-inline">
+          <div class="campo"><label class="campo__rotulo">Nº do protocolo no órgão</label><input class="entrada--media" value="${e.protocolo === "—" ? "" : e.protocolo}">
+            <span class="campo__nota">Obrigatório; informe o número dado pelo órgão. Anexe o comprovante em PDF, se tiver.</span></div>
+          <div class="campo"><span class="campo__rotulo">Comprovante do órgão</span><div class="form-inline">
+            <button type="button" class="btn btn--pequeno" data-acao="Abriria a escolha do comprovante (PDF)">${e.protocolo && e.protocolo !== "—" ? "Trocar o comprovante" : "Anexar o comprovante"}</button>
+            ${e.protocolo && e.protocolo !== "—" ? '<button type="button" class="btn btn--pequeno" data-acao="Baixaria o comprovante">Baixar o comprovante</button>' : ""}</div></div>
+          <button type="button" class="btn btn--pequeno" data-acao="Gravaria o nº do protocolo no órgão">Salvar</button>
+        </form>
+        <div class="med-acoes"><button type="button" class="btn btn--pequeno" data-acao="Baixaria o e-mail enviado (.eml) e o pacote">Ver o que foi enviado</button></div>
+      </div>`).join("")}
+      <div class="med-bloco"><p class="campo__nota" style="margin:0">Exemplo de envio registrado fora do sistema: enviado em <span class="num">09/10/2026</span> · ofício 360/2026 · processo 0001234-56.2026 · e-mail anexado</p></div>`;
+    }
+    const linhas = lista.map(e => `<tr data-envio="${e.id}" class="${S.aberto === e.id ? "envios--aberto" : ""}">
+      <td data-rotulo="Envio"><strong>${e.rotulo}</strong>${e.carta && e.carta.oficio ? `<br><small class="campo__nota">Ofício ${e.carta.oficio}</small>` : ""}</td>
+      <td data-rotulo="Nota fiscal">${nfsCelula(e)}</td>
+      <td data-rotulo="Valor" class="col-num">R$ ${e.valor}</td>
+      <td data-rotulo="Documentos">${selo(e.docs[0], e.docs[1])}</td>
+      <td><div class="envios__acao"><span class="envios__motivo envios__motivo--${e.motivo[0]}">${e.motivo[1]}</span>
+        ${e.esperando ? `<button type="button" class="btn btn--pequeno" data-dialogo="sozinha">Enviar a medição sem o reajuste…</button>`
+          : `<button type="button" class="btn btn--primario btn--envio" data-abrir-envio="${e.id}">${S.aberto === e.id ? "Fechar o envio" : "Enviar a nota"}</button>`}</div></td>
+    </tr>`).join("");
+    const aberto = lista.find(e => e.id === S.aberto);
+    const preso = S.estado === "preso" ? `<div class="aviso aviso--critico" role="alert" style="display:flex;flex-direction:column;gap:8px;max-width:none;padding:12px 14px;font-size:13px">
+        <strong>Envio preso: o envio da ${lista[0].rotulo.toLowerCase()} começou às 10:05 (Usuário de exemplo) e não terminou. A tela não sabe se o e-mail saiu.</strong>
+        <span>Só pode ser liberado a partir das 10:20. Confira antes a caixa de Enviados do Outlook.</span>
+        <div class="campo"><label class="campo__rotulo" for="lib-m">Por que liberar</label><textarea id="lib-m" rows="2" placeholder="Mínimo de 10 caracteres — ex.: conferi os Enviados, o e-mail não saiu…"></textarea></div>
+        <label class="marcar" style="color:var(--texto)"><input type="checkbox" style="height:auto"> Conferi a caixa de Enviados do Outlook e este e-mail NÃO consta</label>
+        <div><button type="button" class="btn btn--pequeno" data-acao="Liberaria o envio (fica na auditoria com o motivo)">Liberar envio</button></div></div>` : "";
+    return cabeca(4, S.v === "sinfra" ? "medição e reajuste vão no mesmo e-mail" : "medição e reajuste em ofícios e e-mails separados") + preso + `
+      <div class="med-caixa"><table class="tabela envios">
+        <thead><tr><th>Envio</th><th>Nota fiscal</th><th class="col-num">Valor</th><th>Documentos</th><th></th></tr></thead>
+        <tbody>${linhas}</tbody></table></div>
+      ${aberto ? detalheEnvio(aberto) : ""}
+      ${certidoes}
+      <div class="med-bloco notas-v3"><div class="nota-porfora" style="align-items:flex-start;text-align:left">
+        <button type="button" class="botao-link" data-dialogo="fora">Registrar envio feito fora do sistema</button>
+        <p class="nota-porfora__dica">Quando o e-mail ou o protocolo já saiu por fora (Outlook, balcão do órgão): data, nº do ofício e do processo, e o e-mail enviado.</p></div></div>`;
+  }
+
+  function detalheEnvio(e) {
+    const itens = `<ul class="nota-itens">
+      ${e.nfs.map(n => item("ok", `${n[0]} de 08/10/2026 · ${n[1]}`, `<span class="nota-mono">R$ ${n[2]}</span> · lida e conferida`)).join("")}
+      ${e.id === "med" ? item("ok", "FRC assinada nº 00012", "anexada em 10/10/2026") :
+        `<li>${estadoItem("falta")}<span class="nota-item nota-item--soltar"><span class="nota-item__texto"><span>FRC assinada do reajuste</span>
+          <span class="nota-item__detalhe nota-item__detalhe--falta">falta · a FRC nº 00013 já foi gerada</span>
+          <span class="nota-item__detalhe">a FRC nº 00013 gerada se baixa na <a class="link forte" href="#" data-ir="3">etapa 3</a></span></span>
+          <span class="nota-complementares__soltar"><span>Arraste a FRC assinada aqui ou</span><button type="button" class="btn nota-anexar" data-acao="Abriria a escolha da FRC assinada">Anexar</button></span></span></li>`}
+      ${item("ok", "Atestado de medição", "atestado pelo órgão em 02/10/2026")}
+      ${item("ok", "Certidões da empresa", "as 5 em dia (lista abaixo, com a validade de cada uma)")}
+    </ul>`;
+    const complementares = `<div class="nota-complementares"><span class="campo__rotulo">Documentos complementares</span>
+      <div class="nota-complementares__soltar"><span>Arraste o PDF ou .zip aqui ou</span><button type="button" class="btn btn--pequeno" data-acao="Abriria a escolha do documento (PDF ou .zip)">Anexar outro documento</button></div>
+      <span class="campo__nota">Vai como anexo separado no e-mail, por exemplo uma justificativa técnica ou o .zip do DocuSign com os relatórios assinados.</span>
+      <span class="campo__rotulo nota-complementares__subtitulo">Arquivo grande por link do OneDrive</span>
+      <div class="nota-complementares__link"><label class="campo"><span class="campo__nota">Nome do arquivo</span><input type="text" placeholder="Ex.: Documento juntado - 7ª Medição…"></label>
+        <label class="campo nota-complementares__url"><span class="campo__nota">Link do OneDrive</span><input type="url" placeholder="https://…sharepoint.com/…"></label>
+        <button type="button" class="btn btn--pequeno" data-acao="Adicionaria o link ao texto do e-mail">Adicionar link</button></div>
+      <span class="campo__nota">Para arquivo que passa do limite do e-mail (25 MB somados): suba no seu OneDrive, copie o link de compartilhamento e cole aqui. O link entra no texto do e-mail.</span></div>`;
+    const pend = e.motivo[0] === "atencao";
+    const justificativa = pend ? `<p class="notas__diverge" style="margin:0;font-size:13px">Falta a FRC assinada do reajuste. Dá para enviar assim: o sistema mostra o que falta e pede a confirmação.</p>` : "";
+    const orgao = ORGAO[S.v];
+    const anexos = [[`NF ${e.nfs.map(n => n[0].slice(3)).join(", ")}.pdf`, "312 KB"], ["FRC 00012 assinada.pdf", "184 KB"], ["Atestado da 7ª medição.pdf", "96 KB"], ["Certidões.pdf", "420 KB"]];
+    const mail = email({ para: [`Protocolo · ${orgao}`], cc: ["Fiscal do contrato"], assunto: `Ponte do Ribeirão · ${e.rotulo} da 7ª medição · 09/2026${e.carta ? ` · Ofício ${e.carta.oficio || "362/2026"}` : ""}`,
+      anexos: e.carta ? [[`Ofício ${e.carta.oficio || "362/2026"} assinado.pdf`, "1,2 MB"]] : anexos,
+      corpo: `<p>Prezados,</p><p>Encaminhamos ${e.nfs.length > 2 ? "as notas fiscais da 7ª medição e do reajuste" : "as notas fiscais"} do contrato 014/2025 (Ponte do Ribeirão), competência 09/2026, com os documentos exigidos.</p><p>Atenciosamente,</p>` });
+    let corpo, motivoFinal, travado = false;
+    if (!e.carta) {
+      corpo = `<section class="nota-secao nota-secao--atual"><span class="nota-passo nota-passo--atual">1</span><div class="nota-secao__corpo">
+          <div class="nota-secao__cabeca"><h4 class="nota-secao__titulo">O que vai no e-mail</h4><span class="nota-secao__acoes">
+            <button type="button" class="btn btn--pequeno" data-abre="juntar">Juntar outra nota desta obra</button>
+            <button type="button" class="btn btn--pequeno" data-acao="Este envio ficaria só com a medição; o reajuste voltaria para a lista" title="Este envio fica só com a primeira medição; as outras voltam para a lista">Separar</button></span></div>
+          <fieldset class="opcoes" id="juntar" hidden><legend class="campo__rotulo">Notas desta obra que ainda não foram enviadas</legend>
+            <p class="campo__nota">Não há outra nota emitida desta obra para juntar.</p>
+            <div class="form-inline"><button type="button" class="btn btn--pequeno" data-fecha="juntar">Cancelar</button></div></fieldset>
+          ${itens}${complementares}${justificativa}</div></section>
+        <section class="nota-secao nota-secao--futuro"><span class="nota-passo nota-passo--futuro">2</span><div class="nota-secao__corpo">
+          <div class="nota-secao__cabeca"><h4 class="nota-secao__titulo">Para quem vai</h4></div>${mail}</div></section>`;
+      motivoFinal = pend ? ["atencao", "Falta a FRC assinada: ao enviar, o sistema pede a confirmação."] : ["neutro", ""];
+    } else {
+      const c = e.carta, oficio = c.oficio || "362/2026";
+      const pOf = c.montado ? "feito" : "atual", pAs = c.assinado ? "feito" : c.montado ? "atual" : "futuro", pEn = c.assinado ? "atual" : "futuro";
+      const n = (p, k) => `<span class="nota-passo nota-passo--${p}">${p === "feito" ? CHECK : k}</span>`;
+      corpo = `<section class="nota-secao nota-secao--${pOf}">${n(pOf, 1)}<div class="nota-secao__corpo">
+          <div class="nota-secao__cabeca"><h4 class="nota-secao__titulo">Ofício</h4><span class="nota-secao__acoes"><button type="button" class="btn btn--pequeno" data-dialogo="descartar">Descartar este envio</button></span></div>
+          <p>Ofício <span class="nota-mono">${oficio}</span></p>
+          <div><p class="campo__nota" style="margin:0">PDF único, 6 páginas, nesta ordem:</p>
+            <ol class="lista-simples nota-paginas"><li>Ofício ${oficio}</li><li>${e.nfs[0][0]} (Lotufo)</li><li>${e.nfs[1][0]} (consorciada)</li><li>FRC assinada</li><li>Atestado de medição</li><li>Certidões</li></ol></div>
+          ${itens}${complementares}${justificativa}
+          ${c.montado ? "" : '<div class="form-inline"><button type="button" class="btn btn--primario" data-acao="Montaria o PDF do ofício">Montar</button></div>'}</div></section>
+        <section class="nota-secao nota-secao--${pAs}">${n(pAs, 2)}<div class="nota-secao__corpo">
+          <div class="nota-secao__cabeca"><h4 class="nota-secao__titulo">Assinar a carta</h4></div>
+          <p>O sistema monta o PDF de 6 páginas. Baixe, assine no DocuSign e anexe o PDF assinado.</p>
+          <div class="form-inline nota-assinar">${c.montado ? `<button type="button" class="btn" data-acao="Baixaria o PDF para assinar">Baixar para assinar</button>
+            <button type="button" class="btn${c.assinado ? "" : " btn--primario"}" data-acao="Abriria a escolha do PDF assinado">${c.assinado ? "Trocar o assinado" : "Anexar o assinado"}</button>` : '<span class="campo__nota">Monte o ofício para baixar.</span>'}</div>
+          ${c.assinado ? '<p class="notas__ok">Assinado conferido: 6 páginas com o carimbo do envelope.</p>' : '<p class="campo__nota">O sistema confere se o assinado tem as mesmas 6 páginas.</p>'}</div></section>
+        <section class="nota-secao nota-secao--${pEn}">${n(pEn, 3)}<div class="nota-secao__corpo">
+          <div class="nota-secao__cabeca"><h4 class="nota-secao__titulo">Enviar ao protocolo da ${orgao}</h4></div>${mail}</div></section>`;
+      travado = !c.assinado;
+      motivoFinal = travado ? ["bloqueio", "Libera depois de anexar o assinado."] : pend ? ["atencao", "Falta a FRC assinada: ao enviar, o sistema pede a confirmação."] : ["neutro", ""];
+    }
+    return `<div class="notas-v3 med-envio" id="envio-aberto" aria-label="Envio aberto">
+      <div class="med-envio__cabeca"><h3>${e.rotulo} · ${e.nfs.map(n => n[0]).join(", ")} · <span class="nota-mono">R$ ${e.valor}</span></h3>
+        <button type="button" class="btn btn--pequeno" data-abrir-envio="${e.id}">Fechar</button></div>
+      ${corpo}
+      <div class="med-rodape-fim">
+        ${motivoFinal[1] ? `<p class="nota-rodape__motivo nota-rodape__motivo--${motivoFinal[0]}">${motivoFinal[1]}</p>` : ""}
+        <button type="button" class="btn btn--primario" ${travado ? "disabled" : ""} data-enviar-email="${pend ? "falta" : ""}">Enviar o e-mail</button>
+      </div>
+      ${S.v === "mtpar" ? '<p class="nota-porfora__dica">Depois do envio a nota vai para Aguardando pagamento sem o nº do protocolo do órgão; o número e o comprovante se registram aqui, na etapa 4, depois do envio.</p>' : ""}
+    </div>`;
+  }
+
+  /* ------------------------------------------------------------------- etapa 5 */
+  function etapa5() {
+    const lista = envios();
+    const feita = S.atual >= 5;
+    const linhas = lista.map((e, i) => {
+      let sit, acoes = "";
+      if (!feita) sit = `<span class="campo__nota">Depois do envio ao órgão.</span>`;
+      else if (i === 0) {
+        sit = `${selo("ok", "Recebido em parte")}<div class="envios__nfs" style="margin-top:6px"><span>${e.nfs[0][0]}: recebido <span class="mono">R$ ${e.nfs[0][2]}</span> em 14/10/2026</span><span>${e.nfs[1][0]}: aguardando o órgão</span></div>`;
+      } else sit = `${selo("atencao", "Aguardando o órgão")}<span class="res-nota">desde 11/10/2026 · o RM marca a baixa sozinho</span>`;
+      if (feita) acoes = `<button type="button" class="btn btn--pequeno" data-dialogo="recebimento">Registrar recebimento</button>`;
+      return `<tr><td data-rotulo="Envio"><strong>${e.rotulo}</strong></td><td data-rotulo="Nota fiscal">${nfsCelula(e)}</td>
+        <td data-rotulo="Valor" class="col-num">R$ ${e.valor}</td>
+        <td data-rotulo="Enviado ao órgão"><span class="num">${feita ? e.enviado.slice(0, 10) : "—"}</span>${feita ? `<span class="res-nota">protocolo ${e.protocolo && e.protocolo !== "—" ? e.protocolo : "a registrar na etapa 4"}</span>` : ""}</td>
+        <td data-rotulo="Pagamento">${sit}${acoes ? `<div style="margin-top:8px">${acoes}</div>` : ""}</td></tr>`;
+    }).join("");
+    return cabeca(5, feita ? "aguardando o órgão desde 10/10/2026" : "libera depois da etapa 4") + `
+      <div class="med-caixa"><table class="tabela envios">
+        <thead><tr><th>Envio</th><th>Nota fiscal</th><th class="col-num">Valor</th><th>Enviado ao órgão</th><th>Pagamento</th></tr></thead>
+        <tbody>${linhas}</tbody></table></div>
+      <p class="campo__nota" style="margin:0">O RM marca a baixa sozinho. O recebimento à mão é só da administração (botão da linha) e pede o motivo. O nº do protocolo no órgão só aparece aqui; registra-se na etapa 4.</p>`;
+  }
+
+  function cabeca(n, resumo) {
+    const sit = n < S.atual ? selo("ok", "Feita") : n > S.atual ? selo("", "Libera depois da etapa " + (n - 1)) : "";
+    return `<div class="med-etapa__cabeca"><span class="med-etapa__n">Etapa ${n}</span><h2 class="med-etapa__titulo" id="et${n}">${ETAPAS[n - 1]}</h2>${sit}${resumo ? `<span class="med-etapa__resumo">${resumo}</span>` : ""}</div>`;
+  }
+
+  /* ------------------------------------------------------------ resumo e tempo */
+  function resumo() {
+    const pag = S.atual >= 5;
+    $("#resumo").innerHTML = `
+      <div><dt>Situação</dt><dd><span class="sit-pilula sit-pilula--${pag ? "aguardando-pagamento" : "enviar-nota"}">${pag ? "Aguardando pagamento" : "Enviar nota"}</span></dd></div>
+      <div><dt>Próximo passo</dt><dd>${pag ? "Aguardar o pagamento" : '<a class="link forte" href="#" data-ir="4">Enviar a nota</a>'}<span class="res-nota">desde ${pag ? "11/10/2026" : "08/10/2026"}</span></dd></div>
+      <div><dt>Competência</dt><dd class="mono">09/2026</dd></div>
+      <div><dt>Valor da medição<span class="res-nota">vem do espelho · muda gerando o espelho de novo</span></dt><dd class="mono">R$ 1.234.567,89</dd></div>
+      <div><dt>Reajuste</dt><dd class="mono">R$ 98.410,22</dd></div>
+      <div class="res-total"><dt>Total</dt><dd class="mono">R$ 1.332.978,11</dd></div>
+      <div><dt>Atestado<span class="res-nota">atestada em 02/10/2026 · editável em Mais ações</span></dt><dd class="mono">R$ 1.234.567,89</dd></div>
+      <div><dt>Medição final</dt><dd>${S.estado === "final" ? "Sim · contrato em encerramento" : "Não"}</dd></div>
+      <div><dt>Da mesma competência</dt><dd><span class="res-nota">nenhuma outra medição</span></dd></div>`;
+    const ev = [
+      ["01/10/2026 08:15", "Medição iniciada"],
+      ["02/10/2026", "Atestada pelo órgão: R$ 1.234.567,89"],
+      ["03/10/2026 10:12", "Espelho nº 7, versão 1, gerado"],
+      ["03/10/2026 16:40", "Espelho nº 7, versão 2: valor do reajuste corrigido"],
+      ["06/10/2026 09:40", "Espelho enviado ao faturamento"],
+      ["08/10/2026 11:02", "Notas 2322 (medição) e 2323 (reajuste) emitidas"],
+      ["09/10/2026 14:20", "FRC nº 00012 e nº 00013 geradas"]
+    ];
+    if (S.v === "mtpar") ev.push(["10/10/2026 10:05", "Ofício 361/2026 montado e assinado"]);
+    if (S.atual >= 5) {
+      if (S.v === "mtpar") ev.push(["10/10/2026 15:02", "Medição enviada ao órgão"], ["11/10/2026 09:18", "Reajuste enviado ao órgão, com ressalva"]);
+      else ev.push(["10/10/2026 15:02", "Medição e reajuste enviados ao órgão, com ressalva"]);
+      ev.push(["14/10/2026", "NF 2322 recebida: R$ 740.740,73"]);
+    }
+    $("#tempo").innerHTML = ev.reverse().map(e => `<li><time>${e[0]}</time>${e[1]}</li>`).join("");
+  }
+
+  /* --------------------------------------------------------------------- render */
+  function render() {
+    document.querySelectorAll("[data-ver]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.ver === S.v)));
+    document.querySelectorAll("[data-estado]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.estado === S.estado)));
+    const fin = $("#item-final"); fin.textContent = S.estado === "final" ? "Desmarcar a medição final" : "Marcar como medição final"; fin.dataset.dialogo = S.estado === "final" ? "desfinal" : "final";
+    document.querySelectorAll("[data-atual]").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.atual) === S.atual)));
+    document.querySelectorAll("[data-so]").forEach(el => (el.hidden = el.dataset.so !== S.v));
+    $("#cab-orgao").textContent = ORGAO[S.v];
+    $("#setas").innerHTML = ETAPAS.map((t, i) => {
+      const n = i + 1, sit = n < S.atual ? "feita" : n === S.atual ? "atual" : "futura";
+      const vendo = n === S.vendo && n !== S.atual;
+      return `<li class="seta--${sit}${vendo ? " seta--vendo" : ""}${n === S.vendo ? " seta--rotulo" : ""}"${sit === "atual" ? ' aria-current="step"' : ""}><button type="button" data-ir="${n}" title="${t}">
+        <span class="seta__marca" aria-hidden="true">${sit === "feita" ? CHECK : n}</span><span class="seta__rotulo">${t}</span></button></li>`;
+    }).join("");
+    const f = $("#faixa");
+    if (S.vendo === S.atual) f.hidden = true;
+    else {
+      f.hidden = false;
+      f.innerHTML = S.vendo < S.atual
+        ? `Você está vendo a etapa ${S.vendo}, já feita · <a href="#" data-ir="${S.atual}">Voltar à etapa atual</a>`
+        : `Você está vendo a etapa ${S.vendo}, que ainda não começou · <a href="#" data-ir="${S.atual}">Voltar à etapa atual</a>`;
+    }
+    document.querySelector('[data-etapa="3"]').innerHTML = etapa3();
+    document.querySelector('[data-etapa="4"]').innerHTML = etapa4();
+    document.querySelector('[data-etapa="5"]').innerHTML = etapa5();
+    document.querySelectorAll(".med-etapa").forEach(s => (s.hidden = Number(s.dataset.etapa) !== S.vendo));
+    resumo();
+  }
+
+  /* ----------------------------------------------------------------- janelas */
+  const J = {
+    atestado: ["Editar o atestado: 7ª medição", `<div class="form-inline"><div class="campo"><label class="campo__rotulo" for="j1">Valor (R$)</label><input id="j1" class="entrada--media entrada--num" value="1.234.567,89"></div>
+      <div class="campo"><label class="campo__rotulo" for="j2">Atestada em (opcional)</label><input id="j2" type="date" class="entrada--media" value="2026-10-02"></div></div>
+      <p class="campo__nota">O atestado permanece editável após o protocolo (glosa). O valor da medição vem do espelho e não se edita à mão: muda gerando o espelho de novo.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" data-acao="Gravaria o valor atestado">Salvar valor</button><button type="button" class="btn" data-fechar>Cancelar</button></div>`],
+    sozinha: ["Enviar a medição sem o reajuste", `<p>Na Secretaria de Obras a medição e o reajuste vão no mesmo e-mail. Diga por que a medição precisa seguir sem o reajuste.</p>
+      <div class="campo"><label class="campo__rotulo" for="j3">Justificativa (obrigatória)</label><textarea id="j3" rows="3" placeholder="Ex.: notas presas no faturamento; o prazo de pagamento não pode esperar…"></textarea></div>
+      <p class="campo__nota">Só aparece quando uma metade está pronta e a outra ainda espera as notas. O mesmo vale ao contrário: “Enviar o reajuste sem a medição…”.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" data-acao="Liberaria o envio só da medição">Liberar o envio só da medição</button><button type="button" class="btn" data-fechar>Voltar</button></div>`],
+    fora: ["Registrar envio feito fora do sistema", `<p class="campo__nota">Para o que já saiu por fora: e-mail pelo Outlook ou protocolo no balcão do órgão. As notas vão para Aguardando pagamento.</p>
+      <div class="form-inline"><div class="campo"><label class="campo__rotulo" for="j4">Data do envio (obrigatória)</label><input id="j4" type="date" class="entrada--media" value="2026-10-16"></div>
+      <div class="campo"><label class="campo__rotulo" for="j8">Nº do ofício (opcional)</label><input id="j8" type="text" placeholder="Ex.: 1234/2026…"></div>
+      <div class="campo"><label class="campo__rotulo" for="j9">Nº do processo no órgão (opcional)</label><input id="j9" type="text" placeholder="Ex.: 0001234-56.2026…"></div></div>
+      <div class="campo"><label class="campo__rotulo" for="j6">E-mail enviado (.eml, opcional)</label><input id="j6" type="file" accept=".eml" style="height:auto;padding:6px"></div>
+      <div class="campo"><label class="campo__rotulo" for="j5">Observação</label><textarea id="j5" rows="2"></textarea></div>
+      <fieldset class="opcoes"><legend class="campo__rotulo">O que saiu neste envio</legend>__ENVIOS__</fieldset>
+      <p class="campo__nota">Registrar congela o valor protocolado das medições marcadas.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" id="fora-ok">Registrar</button><button type="button" class="btn" data-fechar>Cancelar</button></div>`],
+    recebimento: ["Registrar recebimento", `<div class="campo"><label class="campo__rotulo" for="j11">Data da baixa (opcional)</label><input id="j11" type="date" class="entrada--media"></div>
+      <div class="campo"><label class="campo__rotulo" for="j12">Motivo</label><input id="j12" type="text" placeholder="Ex.: a baixa não entrou no RM; conferida no extrato…"></div>
+      <p class="campo__nota">Só a administração registra o recebimento à mão.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" data-acao="Registraria o recebimento">Registrar recebimento</button><button type="button" class="btn" data-fechar>Cancelar</button></div>`],
+    final: ["Marcar como medição final", `<p class="campo__nota">O contrato entra em encerramento. Dá para desfazer depois, no mesmo menu (o item vira “Desmarcar a medição final”), informando o motivo.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" data-acao="Marcaria a 7ª como medição final">Marcar como medição final</button><button type="button" class="btn" data-fechar>Voltar</button></div>`],
+    desfinal: ["Desmarcar a medição final", `<div class="campo"><label class="campo__rotulo" for="j19">Motivo (obrigatório)</label><input id="j19" type="text" placeholder="Ex.: haverá mais uma medição…"></div>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" data-acao="Desmarcaria a medição final">Desmarcar a medição final</button><button type="button" class="btn" data-fechar>Voltar</button></div>`],
+    cancelar: ["Cancelar a medição", `<div class="campo"><label class="campo__rotulo" for="j13">Motivo (opcional)</label><input id="j13" type="text" placeholder="Ex.: substituída pela 8ª…"></div>
+      <p class="campo__nota">Estado final: a medição não volta atrás.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--destrutivo" data-acao="Cancelaria a medição">Cancelar a medição</button><button type="button" class="btn" data-fechar>Voltar</button></div>`],
+    desistir: ["Registrar desistência", `<div class="campo"><label class="campo__rotulo" for="j14">Motivo (opcional)</label><input id="j14" type="text"></div>
+      <p class="campo__nota">Estado final: a medição não volta atrás.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--destrutivo" data-acao="Registraria a desistência">Registrar desistência</button><button type="button" class="btn" data-fechar>Voltar</button></div>`],
+    desfazer: ["Desfazer o vínculo da nota", `<div class="campo"><label class="campo__rotulo" for="j15">Motivo</label><input id="j15" type="text"></div>
+      <p class="campo__nota">A medição não muda de estado; a nota não volta a casar sozinha pelo RM. Só a administração vê este botão.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" data-acao="Desfaria o vínculo">Desfazer o vínculo</button><button type="button" class="btn" data-fechar>Voltar</button></div>`],
+    declarar: ["Declarar as notas completas", `<div class="campo"><label class="campo__rotulo" for="j16">Justificativa</label><input id="j16" type="text" placeholder="Ex.: um município não teve serviço neste mês…"></div>
+      <p class="campo__nota">Só aparece quando falta nota esperada e já há alguma vinculada. Também há “Justificar” ao lado de uma nota que diverge do espelho.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" data-acao="Declararia as notas completas">Declarar completas</button><button type="button" class="btn" data-fechar>Voltar</button></div>`],
+    descartar: ["Descartar este envio", `<div class="campo"><label class="campo__rotulo" for="j17">Motivo (obrigatório)</label><input id="j17" type="text" placeholder="Ex.: medição refeita…"></div>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--destrutivo" data-acao="Descartaria o envio (o ofício montado)">Descartar o envio</button><button type="button" class="btn" data-fechar>Voltar</button></div>`],
+    atencao: ["ATENÇÃO", `<div class="aviso" style="display:block;max-width:none;font-size:14px;padding:10px 12px"><strong>ATENÇÃO: falta __FALTA__.</strong> Deseja continuar?</div>
+      <ul class="lista-simples">__LISTA__</ul>
+      <p class="campo__nota">Continuar fica registrado na auditoria, com o que faltava.</p>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" data-acao="__ACAO__">Continuar</button><button type="button" class="btn" data-fechar>Voltar</button></div>`],
+    oficio: ["Número do ofício desta nota", `<div class="campo"><label class="campo__rotulo" for="j18">Só o número, ex.: 361</label><input id="j18" type="text" class="entrada--media entrada--num" value="362"></div>
+      <div class="iniciar__rodape"><button type="button" class="btn btn--primario" id="oficio-ok">Começar o envio</button><button type="button" class="btn" data-fechar>Cancelar</button></div>`]
+  };
+  const janela = $("#janela");
+  function faltas() { return envios().filter(e => e.docs[0] !== "ok" && !e.esperando).map(e => "FRC assinada " + (e.id === "unico" ? "do reajuste" : "do " + e.rotulo.toLowerCase())); }
+  function abrirJanela(k, sub = {}) {
+    $("#janela-titulo").textContent = J[k][0];
+    let h = J[k][1];
+    if (k === "fora") h = h.replace("__ENVIOS__", envios().map(e => `<label class="marcar campo--linha"><input type="checkbox" checked style="height:auto"> ${e.rotulo} · ${e.nfs.map(n => n[0]).join(", ")}</label>`).join(""));
+    for (const x in sub) h = h.split(x).join(sub[x]);
+    $("#janela-corpo").innerHTML = h;
+    fecharMenu();
+    if (janela.showModal) janela.showModal(); else janela.setAttribute("open", "");
+  }
+  function fecharJanela() { if (janela.close) janela.close(); else janela.removeAttribute("open"); }
+
+  /* ------------------------------------------------------------------- menu */
+  const mb = $("#mais-botao"), mm = $("#mais-menu");
+  function fecharMenu() { mm.hidden = true; mb.setAttribute("aria-expanded", "false"); }
+  mb.addEventListener("click", e => { e.stopPropagation(); const ab = mm.hidden; mm.hidden = !ab; mb.setAttribute("aria-expanded", String(ab)); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") fecharMenu(); });
+
+  /* ------------------------------------------------------------- cliques */
+  document.addEventListener("click", e => {
+    if (!e.target.closest("#mais-menu") && !e.target.closest("#mais-botao")) fecharMenu();
+    if (e.target.closest("#janela [data-acao]")) setTimeout(fecharJanela, 0);
+    const t = e.target.closest("[data-ver],[data-atual],[data-ir],[data-dialogo],[data-fechar],[data-abrir-envio],[data-abre],[data-fecha],[data-estado],[data-enviar-email],#fora-ok,#oficio-ok,#esp-gerar-de-novo,#esp-conferir,[data-voltar-esp],#esp-previa-voltar,#fat-de-novo,#fat-descartar");
+    if (!t) return;
+    if (t.dataset.ver) { S.v = t.dataset.ver; S.aberto = null; render(); return; }
+    if (t.dataset.atual) { S.atual = Number(t.dataset.atual); S.vendo = S.atual; S.aberto = null; render(); return; }
+    if (t.dataset.estado) { S.estado = t.dataset.estado; if (S.estado === "esperando") { S.v = "sinfra"; S.atual = 4; } if (S.estado === "preso") S.atual = 4; S.vendo = S.atual; S.aberto = null; render(); return; }
+    if (t.hasAttribute("data-enviar-email")) {
+      const f = faltas().filter(x => S.v === "sinfra" || x.includes(S.aberto === "rea" ? "reajuste" : "medição"));
+      if (f.length) abrirJanela("atencao", { __FALTA__: f.join(", "), __LISTA__: f.map(x => `<li>${x}</li>`).join(""), __ACAO__: "Enviaria a nota pela sua conta Microsoft, registrando o que faltava" });
+      else window.protoAviso("Enviaria a nota pela sua conta Microsoft (envio único, registrado antes de sair)");
+      return;
+    }
+    if (t.id === "fora-ok") {
+      const f = faltas();
+      if (f.length) abrirJanela("atencao", { __FALTA__: f.join(", "), __LISTA__: f.map(x => `<li>${x}</li>`).join(""), __ACAO__: "Registraria o envio feito fora do sistema, com o que faltava" });
+      else { fecharJanela(); window.protoAviso("Registraria o envio feito fora do sistema"); }
+      return;
+    }
+    if (t.dataset.ir) { e.preventDefault(); S.vendo = Number(t.dataset.ir); render(); $(".setas").scrollIntoView({ block: "nearest" }); return; }
+    if (t.dataset.dialogo) { abrirJanela(t.dataset.dialogo); return; }
+    if (t.hasAttribute("data-fechar")) { fecharJanela(); return; }
+    if (t.dataset.abre) { document.getElementById(t.dataset.abre).hidden = false; return; }
+    if (t.dataset.fecha) { document.getElementById(t.dataset.fecha).hidden = true; return; }
+    if (t.dataset.abrirEnvio) {
+      const id = t.dataset.abrirEnvio;
+      if (S.aberto === id) { S.aberto = null; render(); return; }
+      const env = envios().find(x => x.id === id);
+      // órgão com carta e envio ainda não começado: pede o nº do ofício uma vez só
+      if (env.carta && !env.carta.oficio && !S.oficioPedido) { S.pendente = id; abrirJanela("oficio"); return; }
+      S.aberto = id; render(); document.getElementById("envio-aberto").scrollIntoView({ behavior: "smooth", block: "start" }); return;
+    }
+    if (t.id === "oficio-ok") { S.oficioPedido = true; fecharJanela(); S.aberto = S.pendente; render(); document.getElementById("envio-aberto").scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (t.id === "esp-gerar-de-novo") { $("#esp-lista").hidden = true; $("#esp-form").hidden = false; return; }
+    if (t.id === "esp-conferir") { $("#esp-form").hidden = true; $("#esp-previa").hidden = false; return; }
+    if (t.hasAttribute("data-voltar-esp")) { $("#esp-form").hidden = true; $("#esp-lista").hidden = false; return; }
+    if (t.id === "esp-previa-voltar") { $("#esp-previa").hidden = true; $("#esp-form").hidden = false; return; }
+    if (t.id === "fat-de-novo") { $("#fat-envio").hidden = false; t.hidden = true; return; }
+    if (t.id === "fat-descartar") { $("#fat-envio").hidden = true; $("#fat-de-novo").hidden = false; return; }
+  });
+
+  $("#fat-email").innerHTML = email({ para: ["Faturamento"], cc: [], assunto: "Espelho de NF · Ponte do Ribeirão · 7ª medição · 09/2026 (versão 2)",
+    anexos: [["Espelho nº 7 · Medição.docx", "48 KB"], ["Espelho nº 7 · Reajuste.docx", "41 KB"]],
+    corpo: "<p>Bom dia,</p><p>Seguem os espelhos de NF da 7ª medição e do reajuste da Ponte do Ribeirão, competência 09/2026, para emissão das notas.</p><p>Obrigado.</p>" });
+  if (location.hash === "#etapa-4") S.vendo = 4;
+  render();
+})();
+</script>
+</body></html>

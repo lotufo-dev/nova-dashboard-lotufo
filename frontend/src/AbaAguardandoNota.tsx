@@ -1,4 +1,4 @@
-import { brl, contar } from "./formato";
+import { brl } from "./formato";
 import { IconeMais, IconeSeta } from "./icones";
 import { Link } from "./Link";
 import { passoDe } from "./medicao";
@@ -15,8 +15,7 @@ import "./abaAguardandoNota.css";
 function Parada({ l }: { l: LinhaResumo }) {
   const nivel = nivelParada(l.dias, l.situacao);
   return (
-    <span className={nivel ? `medicoes__parada medicoes__parada--${nivel}` : "medicoes__parada"}
-      title={l.marco ? undefined : "Sem a data do envio ao faturamento"}>
+    <span className={nivel ? `medicoes__parada medicoes__parada--${nivel}` : "medicoes__parada"}>
       {nivel && <i className={`aba-nota__ponto aba-nota__ponto--${nivel}`} aria-hidden="true" />}
       {textoParada(l.dias)}
       {nivel && <span className="sr-only">{nivel === "acao" ? ", atrasada" : ", atenção"}</span>}
@@ -72,14 +71,7 @@ export default function AbaAguardandoNota({ linhas, podeIniciar, aoIniciar }:
     <section className="medicoes__quadro" aria-labelledby="aba-nota-titulo">
       <div className="medicoes__quadro-cabeca">
         <h2 id="aba-nota-titulo">Aguardando nota</h2>
-        <span className="medicoes__legenda">{contar(linhas.length, "medição", "medições")}</span>
       </div>
-      <p className="aba-nota__info">
-        <svg className="icone icone--p" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8h.01" />
-        </svg>
-        A nota aparece aqui sozinha quando o faturamento a emite no RM.
-      </p>
       <table className="aba-nota__tabela">
         <caption className="sr-only">Medições aguardando a nota fiscal</caption>
         <colgroup>

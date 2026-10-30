@@ -1,0 +1,69 @@
+/* A receber (redesenho #162, prototipo aprovado em 16/10/2026). So' tokens de tokens.css. */
+.ar-numeros { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; }
+.ar-numero { padding: 18px 20px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.ar-numero__rotulo { font-size: 14px; color: var(--texto-2); }
+.ar-numero__valor { font-family: var(--fonte-num); font-variant-numeric: tabular-nums; font-size: 28px; line-height: 36px; font-weight: 500;
+  letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 560px) { .ar-numero__valor { font-size: 21px; line-height: 28px; } }
+
+.ar-grafico { padding: 8px 20px 4px; }
+.ar-grafico svg { display: block; width: 100%; height: auto; overflow: visible; }
+.ar-grafico text { font-family: var(--fonte-num); font-size: 11px; fill: var(--texto-2); }
+.ar-grafico .g-mes { font-family: var(--fonte); font-size: 12px; }
+.ar-grafico .g-mes--atual { fill: var(--acento); font-weight: 600; }
+.ar-grafico .g-grade { stroke: var(--linha-suave); }
+.ar-grafico .g-base { stroke: var(--linha); }
+.ar-grafico .b-previsto { fill: var(--previsto); }
+.ar-grafico .b-recebido { fill: var(--ok-ponto); }
+.ar-grafico .b-previsao { fill: var(--superficie-2); stroke: var(--linha-hover); stroke-width: 1; stroke-dasharray: 4 3; }
+.ar-grafico .g-atual { fill: var(--hover); }
+.ar-grafico .g-alvo { fill: transparent; cursor: pointer; }
+.ar-grafico .g-grupo:focus { outline: none; }
+.ar-grafico .g-grupo:focus-visible .g-alvo, .ar-grafico .g-grupo.selecionado .g-alvo { stroke: var(--acento); stroke-width: 1.5; }
+.ar-grafico .g-grupo:hover .g-alvo { fill: var(--hover); fill-opacity: .5; }
+.ar-grafico .t-previsao { font-family: var(--fonte); }
+.ar-detalhe { margin: 0; padding: 10px 20px 14px; font-size: 13px; color: var(--texto-2); max-width: none; border-top: 1px solid var(--linha); }
+.ar-detalhe strong { color: var(--texto); font-weight: 500; }
+.ar-detalhe .dinheiro { font-family: var(--fonte-num); }
+.legenda__chave--recebido { background: var(--ok-ponto); }
+.legenda__chave--previsao { background: var(--superficie-2); border: 1px dashed var(--linha-hover); }
+.ar-cabeca-legenda { border: 0; padding: 0; margin-left: auto; }
+
+.ar-duas { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (min-width: 1100px) { .ar-duas { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); } }
+
+.ar-obras { list-style: none; margin: 0; padding: 4px 0; }
+.ar-obra { display: grid; grid-template-columns: minmax(0, 11rem) minmax(60px, 1fr) 8.5rem; align-items: center; gap: 4px 16px;
+  width: 100%; height: auto; padding: 10px 20px; border: 0; border-radius: 0; background: none; text-align: left; font-weight: 400; font-size: 14px; }
+.ar-obra:hover:not(:disabled) { background: var(--hover); border: 0; }
+.ar-obra[aria-pressed="true"] { background: var(--acento-fundo); }
+.ar-obra__nome { color: var(--texto); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar-obra__trilho { height: 8px; border-radius: var(--raio-pilula); background: var(--linha-suave); overflow: hidden; }
+.ar-obra__barra { display: block; height: 100%; border-radius: var(--raio-pilula); background: var(--marca); }
+.ar-obra__valor { font-family: var(--fonte-num); font-variant-numeric: tabular-nums; color: var(--texto); text-align: right; white-space: nowrap; }
+.ar-obras__total { display: flex; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--linha);
+  background: var(--superficie-2); border-radius: 0 0 var(--raio) var(--raio); font-weight: 600; }
+.ar-obras__total .dinheiro { font-family: var(--fonte-num); }
+@media (max-width: 560px) {
+  .ar-obra { grid-template-columns: minmax(0, 1fr) auto; }
+  .ar-obra__nome { white-space: normal; }
+  .ar-obra__trilho { grid-column: 1 / -1; grid-row: 2; }
+}
+
+.ar-filtro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ar-tabela tbody td.ar-forte { color: var(--texto); }
+.ar-tabela tbody td.ar-data { font-family: var(--fonte-num); white-space: nowrap; }
+.ar-tabela tfoot td, .ar-tabela tfoot th { padding: 12px; border-top: 1px solid var(--linha); background: var(--superficie-2); font-weight: 600; text-align: left; }
+.ar-tabela tfoot th:first-child { padding-left: 20px; }
+.ar-tabela tfoot td:last-child { padding-right: 20px; }
+@media (max-width: 720px) {
+  .ar-tabela thead { display: none; }
+  .ar-tabela, .ar-tabela tbody, .ar-tabela tfoot { display: block; }
+  .ar-tabela tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; padding: 12px 16px; border-bottom: 1px solid var(--linha-suave); }
+  .ar-tabela tbody td, .ar-tabela tfoot td, .ar-tabela tfoot th { display: block; padding: 0 !important; border: 0 !important; text-align: left; }
+  .ar-tabela tfoot tr { background: var(--superficie-2); border-bottom: 0; }
+  .ar-tabela tfoot td:empty { display: none; }
+  .ar-tabela [data-rotulo]::before { content: attr(data-rotulo); display: block; font-family: var(--fonte); font-size: 12px; color: var(--texto-2); font-weight: 400; }
+  .ar-tabela .col-largo { grid-column: 1 / -1; }
+  .ar-tabela td.col-num { text-align: left; }
+}

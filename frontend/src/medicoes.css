@@ -51,10 +51,14 @@
 .medicoes__cartao-rotulo { display: flex; align-items: center; gap: 8px; color: var(--texto-menu); }
 .medicoes__cartao-n { font-family: var(--fonte-num); font-size: 32px; line-height: 40px; font-weight: 500; color: var(--texto); }
 .medicoes__cartao-n--zero { color: var(--texto-2); }
+/* Oito situacoes: em fluxo livre a oitava caia sozinha numa segunda linha, esticada na largura toda. Em computador,
+   quatro por linha (duas linhas cheias); abaixo disso o fluxo livre de antes. */
+@media (min-width: 1100px) { .medicoes__cartoes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 /* ponto e pilula da situacao */
 .sit-ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-pilula); }
 .sit-ponto--sem-medicao { background: var(--sit-sem-texto); }
+.sit-ponto--planilha-gerada, .sit-ponto--planilha-enviada, .sit-ponto--boletim-recebido { background: var(--sit-fat-texto); }
 .sit-ponto--faturamento { background: var(--sit-fat-texto); }
 .sit-ponto--aguardando-nota { background: var(--sit-nota-texto); }
 .sit-ponto--enviar-nota { background: var(--sit-envio-texto); }
@@ -65,6 +69,7 @@
   font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap;
 }
 .sit-pilula--sem-medicao { background: var(--sit-sem-fundo); color: var(--sit-sem-texto); border-color: var(--sit-sem-linha); }
+.sit-pilula--planilha-gerada, .sit-pilula--planilha-enviada, .sit-pilula--boletim-recebido { background: var(--sit-fat-fundo); color: var(--sit-fat-texto); }
 .sit-pilula--faturamento { background: var(--sit-fat-fundo); color: var(--sit-fat-texto); }
 .sit-pilula--aguardando-nota { background: var(--sit-nota-fundo); color: var(--sit-nota-texto); }
 .sit-pilula--enviar-nota { background: var(--sit-envio-fundo); color: var(--sit-envio-texto); }
@@ -79,7 +84,6 @@
 }
 .medicoes__quadro-cabeca { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 16px 14px; }
 .medicoes__quadro-cabeca h2 { margin: 0; font-size: 17px; line-height: 24px; }
-.medicoes__legenda { color: var(--texto-2); font-size: 13px; }
 
 /* Tabela de largura fixa (as colunas caem no mesmo x da tabela de cima e de cada grupo). Abaixo de 820px a caixa
    rola na horizontal por dentro: a faixa e os grupos tem a mesma largura minima da tabela. */
@@ -133,7 +137,6 @@
 .medicoes__seta { color: var(--texto-2); transition: transform .15s ease; }
 .medicoes__grupo[open] .medicoes__seta { transform: rotate(90deg); }
 .medicoes__grupo-nome { font-weight: 600; color: var(--texto); }
-.medicoes__grupo-n { color: var(--texto-2); }
 .medicoes__grupo .medicoes__tabela td:first-child { padding-left: 42px; }
 @media (prefers-reduced-motion: reduce) { .medicoes__seta { transition: none; } }
 
@@ -154,14 +157,13 @@
 .iniciar__caixa { display: flex; flex-direction: column; gap: 12px; max-height: inherit; padding: 20px; }
 .iniciar__cabeca { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .iniciar__titulo { margin: 0; font-size: 18px; line-height: 24px; }
-.iniciar__dica { margin: 2px 0 0; color: var(--texto-2); }
 .iniciar__fechar { width: 36px; height: 36px; padding: 0; justify-content: center; border: 0; background: none; color: var(--texto-2); }
 .iniciar__busca { width: 100%; height: 40px; flex: none; }
 .iniciar__lista { overflow-y: auto; min-height: 0; display: grid; gap: 12px; }
 .iniciar__grupo ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .iniciar__contratante { margin: 0 0 4px; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--texto-2); }
 .iniciar__obra {
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
   padding: 8px 10px; border-radius: var(--raio-ctrl);
   color: var(--texto); text-decoration: none;
 }
@@ -169,5 +171,4 @@
 .iniciar__obra:focus-visible { outline-offset: -2px; }
 .iniciar__obra-nome { font-weight: 600; }
 .iniciar__obra-sub { font-size: 12px; line-height: 16px; color: var(--texto-2); }
-.iniciar__obra-sub:empty { display: none; }
 .iniciar__vazio { margin: 0; color: var(--texto-2); }
