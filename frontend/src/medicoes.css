@@ -195,6 +195,8 @@
 .iniciar__campo input { height: 40px; width: 100%; min-width: 0; padding: 0 10px; border: 1px solid var(--linha-campo); border-radius: var(--raio-ctrl); font-family: var(--fonte-num); }
 .iniciar__campo input[readonly] { background: var(--superficie-2); color: var(--texto-menu); }
 .iniciar__botoes { display: flex; justify-content: flex-end; gap: 10px; }
+/* o rótulo do botão leva o nome da obra: no celular passa da largura, então quebra em vez de vazar */
+.iniciar__botoes .btn { white-space: normal; height: auto; min-height: 32px; padding-block: 5px; line-height: 20px; }
 
 @media (max-width: 767px) {
   .iniciar { width: 100vw; max-width: 100vw; max-height: calc(100dvh - 24px); margin: auto 0 0; border-radius: 12px 12px 0 0; }
