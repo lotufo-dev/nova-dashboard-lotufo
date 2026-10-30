@@ -20,11 +20,11 @@ const LINHAS = [
 describe("Aba Aguardando nota", () => {
   afterEach(() => { cleanup(); window.history.replaceState(null, "", "/"); });
 
-  it("mostra o aviso, a contagem e cada linha com valor, data de envio e parada", () => {
+  it("mostra cada linha com valor, data de envio e parada, sem contagem nem frase de apoio", () => {
     render(<AbaAguardandoNota linhas={LINHAS} podeIniciar aoIniciar={() => {}} />);
     const quadro = screen.getByRole("region", { name: "Aguardando nota" });
-    expect(within(quadro).getByText("4 medições")).toBeTruthy();
-    expect(within(quadro).getByText("A nota aparece aqui sozinha quando o faturamento a emite no RM.")).toBeTruthy();
+    expect(within(quadro).queryByText("4 medições")).toBeNull();
+    expect(within(quadro).queryByText(/aparece aqui sozinha/)).toBeNull();
     for (const c of ["Obra", "Contratante", "Medição", "Valor", "Enviada ao faturamento em", "Parada há"])
       expect(within(quadro).getByRole("columnheader", { name: c })).toBeTruthy();
     const l1 = within(quadro).getByRole("row", { name: /Integra BRT/ });

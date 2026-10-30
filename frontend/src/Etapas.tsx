@@ -61,22 +61,20 @@ export function Setas({ atual, vendo, aoIr, espera = false }: {
   );
 }
 
-/** "Você está vendo a etapa N, já feita · Voltar à etapa atual": a etapa aberta no lugar da atual. */
+/** "Voltar à etapa atual": a etapa aberta no lugar da atual (a seta dela ja' marca qual e'). */
 export function FaixaVendo({ vendo, atual, aoVoltar }: { vendo: number; atual: number; aoVoltar: () => void }) {
   // medicao encerrada por excecao nao tem "etapa atual"; tudo feito (6) volta ao pagamento
   if (atual === 0 || vendo === Math.min(atual, 5)) return null;
   return (
-    <div className="med-faixa" role="status">
-      <span>Você está vendo a etapa {vendo}, {vendo < atual ? "já feita" : "que ainda não começou"}</span>
-      <span aria-hidden="true">·</span>
+    <div className="med-faixa">
       <button type="button" className="botao-link" onClick={aoVoltar}>Voltar à etapa atual</button>
     </div>
   );
 }
 
-/** O cartao da etapa aberta: "Etapa N", o titulo, a situacao e o resumo de uma linha. */
-export function EtapaCartao({ n, atual, resumo, selo, children }: {
-  n: number; atual: number; resumo?: React.ReactNode; selo?: React.ReactNode; children?: React.ReactNode;
+/** O cartao da etapa aberta: "Etapa N", o titulo e a situacao. */
+export function EtapaCartao({ n, atual, selo, children }: {
+  n: number; atual: number; selo?: React.ReactNode; children?: React.ReactNode;
 }) {
   const s = atual === 0 ? "encerrada" : situacaoDa(n, atual);
   return (
@@ -86,7 +84,6 @@ export function EtapaCartao({ n, atual, resumo, selo, children }: {
         <h2 className="med-etapa__titulo" id={`etapa-${n}-titulo`}>{ETAPAS[n - 1]}</h2>
         {selo ?? (s === "feita" ? <span className="selo selo--ok"><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">Feita</span></span>
           : s === "futura" ? <span className="selo"><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">Libera depois da etapa {n - 1}</span></span> : null)}
-        {resumo && <span className="med-etapa__resumo">{resumo}</span>}
       </div>
       {children}
     </section>

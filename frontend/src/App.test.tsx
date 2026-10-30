@@ -34,3 +34,48 @@ describe("App: a rota antiga /avisos", () => {
     expect(trilho.getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBeNull();
   });
 });
+
+const PAINEL_MINIMO = {
+  hoje: "2026-10-28", notas_a_enviar: 0, certidoes: { vencidas: 0, vencendo: 0, itens: [] }, reajustes: [],
+  protocoladas: { obras_protocoladas: 0, obras_ativas: 0, ultima: null },
+  medido: { competencia: "2026-10", anterior_competencia: "2026-09", valor_centavos: 0, anterior_centavos: 0,
+            quantidade: 0, ultimo_lancamento: null },
+  por_contratante: [], recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 0 },
+  a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null }, prazos: [],
+};
+
+describe("App: a tela SIGA", () => {
+  const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
+    if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+    // o Inicio (entrada da diretoria) le este painel: sem o corpo minimo ele quebra e derruba a casca
+    if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
+    return [];
+  });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  it("a engenharia vê o item SIGA no trilho, logo depois de Avisos, e /siga abre a tela com o título SIGA na barra", async () => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", "/siga");
+    render(<App />);
+    expect(await screen.findByText("Nenhum processo acompanhado.")).toBeTruthy();
+    const trilho = within(screen.getByRole("navigation", { name: "Navegação principal" }));
+    const nomes = trilho.getAllByRole("link").map(l => l.textContent);
+    expect(nomes[nomes.indexOf("Avisos") + 1]).toBe("SIGA");
+    expect(trilho.getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("heading", { level: 1, name: "SIGA" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/siga");
+  });
+
+  it("a diretoria não tem o item e /siga cai na entrada do perfil", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/siga");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });      // o Início carregou
+    await screen.findByRole("navigation", { name: "Navegação principal" });
+    expect(within(screen.getByRole("navigation", { name: "Navegação principal" })).queryByRole("link", { name: "SIGA" })).toBeNull();
+    expect(window.location.pathname).toBe("/inicio");
+    expect(api).not.toHaveBeenCalledWith("/api/siga");
+  });
+});

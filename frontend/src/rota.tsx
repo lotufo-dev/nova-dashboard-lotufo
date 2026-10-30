@@ -35,6 +35,7 @@ export type Rota =
   | { tela: "inicio" }
   | { tela: "medicoes"; aba?: AbaMedicoes }
   | { tela: "avisos" }
+  | { tela: "siga" }
   | { tela: "documentos" }
   | { tela: "documentos-empresa"; id: number; aba?: AbaDocumentos }
   | { tela: "obras" }
@@ -66,7 +67,7 @@ const ABA_ANTIGA: Record<string, AbaObra> = { protocolo: "medicoes", notas: "med
 
 // Telas de um segmento so' ("/medicoes"), sem parametro, e os nomes antigos de cada uma.
 // Bloco 9: "/engenharia" e "/sugestoes" sairam; por nao estarem aqui, caem na raiz (entrada do perfil).
-const SIMPLES = ["inicio", "medicoes", "avisos", "documentos", "obras", "a-receber", "carteira", "admin", "conta"] as const;
+const SIMPLES = ["inicio", "medicoes", "avisos", "siga", "documentos", "obras", "a-receber", "carteira", "admin", "conta"] as const;
 type Simples = (typeof SIMPLES)[number];
 const SIMPLES_ANTIGAS: Record<string, Simples> = {
   certidoes: "documentos",   // bloco 4: Certidoes virou Documentos de protocolo

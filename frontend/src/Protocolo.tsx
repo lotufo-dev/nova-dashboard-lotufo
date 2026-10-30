@@ -7,7 +7,6 @@ import ConfirmarFaltas from "./ConfirmarFaltas";
 import { api, apiForm, ApiErro, mensagemDeErro } from "./api";
 import { IconeAlerta, IconeSeta } from "./icones";
 import { FormMotivo } from "./MedicaoAtos";
-import { brl, ROTULO_ESTADO } from "./Medicoes";
 import { fmtTamanho as mb } from "./formato";
 import { protocolosDa } from "./medicao";
 import { Link } from "./Link";
@@ -34,7 +33,10 @@ export type ProtocoloDet = {
   conferencia: Conferencia | null; medicoes: Medicao[]; pecas: Peca[]; pendencias: Pendencia[];
   envio_id: number | null; numero_orgao: string | null; comprovante_arquivo?: string | null; justificativa: string | null; criado_em: string;
   enviado_em?: string | null; enviado_por?: string | null;   // A6: quando saiu e quem mandou
+  siga?: SigaDoProtocolo | null;                              // issue #328: o processo no SIGA, quando o link foi gravado
 };
+export type SigaDoProtocolo = { codigo: string; link: string | null; setor: string | null; com_quem: string | null;
+  dias_uteis: number | null; lido_em: string | null; registrado_em: string | null };
 export type Lista = { familia: string; etapas: Etapa[]; pecas: PecaCfg[]; medicoes: Medicao[]; protocolos: ProtocoloDet[] };
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string;
   anexos: { nome: string; tamanho: number }[]; total: number; limite: number; pendencias: Pendencia[] };
@@ -49,13 +51,12 @@ function mensagem(e: unknown): string {
 
 // As pecas do orgao como checklist (F-67). "Falta" e' Atencao: peca exigida sem anexo e' pendencia que se envia
 // com justificativa (app/protocolo.py), nao bloqueio. Peca anexada de um tipo que a etapa nao pede aparece em
-// "Outras pecas", so' para remover.
+// "Outras pecas", so' para remover. Sem nota por item: a situacao (falta/opcional) ja' diz se e' exigida.
 function itensDoProtocolo(p: ProtocoloDet, pecasCfg: PecaCfg[]): ItemChecklist[] {
   const arquivosDe = (tipo: string) => p.pecas.filter(x => x.tipo === tipo).map(x => ({ id: x.id, nome: x.nome, tamanho: x.tamanho }));
   const itens: ItemChecklist[] = pecasCfg.map((cfg): ItemChecklist => {
     const arquivos = arquivosDe(cfg.tipo);
-    const nota = [cfg.exigida ? "Exigida" : "", cfg.solto ? "vai solta no e-mail" : ""].filter(Boolean).join(" · ");
-    return { chave: cfg.tipo, rotulo: cfg.rotulo, nota: nota || undefined, arquivos,
+    return { chave: cfg.tipo, rotulo: cfg.rotulo, arquivos,
       situacao: arquivos.length > 0 ? "anexada" : cfg.exigida ? "falta" : "opcional",
       aceita: cfg.tipo === "planilha" ? ".xlsx" : "application/pdf" };
   });
@@ -122,8 +123,7 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
           <div className="pilha">
             {/* montado o pacote, a carta recolhe; montar e baixar ficam fora dela, sempre a' vista */}
             <CartaRecolhivel id={`carta-${p.id}`} linhas={9} valor={corpo} desabilitado={!editavel} aoMudar={setCorpo}
-              montada={!!p.nome_arquivo} dicaMontada="pacote montado; abra para editar"
-              nota="Linha em branco separa parágrafos; “# ” abre título; “i.” ou “1.” é item de lista." />
+              montada={!!p.nome_arquivo} />
             {editavel && (
               <div className="form-inline">
                 {/* primario so' enquanto o pacote nao foi montado: depois dele, montar de novo nao e' o passo */}
@@ -151,11 +151,9 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
             </label>
           </div>
         )}
-        {p.conferencia && (
-          p.conferencia.ok
-            ? <p className="notas__ok">Assinado conferido: {p.conferencia.paginas_montado} páginas com o carimbo do envelope
-                {p.conferencia.certificado ? `, mais ${p.conferencia.certificado} de certificado` : ""}.</p>
-            : <ul className="lista-simples">{p.conferencia.avisos.map(a => <li key={a.codigo} className="notas__diverge">{a.mensagem}</li>)}</ul>
+        {/* so' a divergencia do assinado aparece; conferido, o selo "assinado" do cabecalho basta */}
+        {p.conferencia && !p.conferencia.ok && (
+          <ul className="lista-simples">{p.conferencia.avisos.map(a => <li key={a.codigo} className="notas__diverge">{a.mensagem}</li>)}</ul>
         )}
 
         {p.pendencias.length > 0 && p.situacao !== "enviado" && (
@@ -171,7 +169,7 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
         )}
         {editavel && p.situacao !== "enviado" && (descartando
           ? <FormMotivo id={`descartar-${p.id}`} titulo="Descartar este protocolo" rotulo="Motivo (obrigatório)"
-              placeholder="Ex.: medição refeita…" acao="Descartar o protocolo" acaoOcupada="Descartando…" ocupado={ocupado}
+              acao="Descartar o protocolo" acaoOcupada="Descartando…" ocupado={ocupado}
               aoFechar={() => setDescartando(false)}
               aoConfirmar={motivo => agir(async () => { await api(`/api/protocolos/${p.id}/descartar`, { method: "POST", body: JSON.stringify({ motivo }) }); })} />
           : <button type="button" className="btn btn--pequeno" disabled={ocupado} onClick={() => setDescartando(true)}>Descartar</button>)}
@@ -180,8 +178,31 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
   );
 }
 
+// Limites da issue #328: a partir de 5 dias uteis no setor o selo e' ambar; a partir de 10, vermelho.
+const DIAS_ATENCAO = 5;
+const DIAS_CRITICO = 10;
+
+/** "No SIGA: COFIN · com Fulano · há 6 dias úteis" + o link. Sem leitura do robo ainda, so' o link. */
+function NoSiga({ siga }: { siga?: SigaDoProtocolo | null }) {
+  if (!siga || (!siga.link && siga.dias_uteis === null && !siga.setor)) return null;
+  const dias = siga.dias_uteis;
+  const partes = [siga.setor, siga.com_quem && `com ${siga.com_quem}`,
+    dias === null ? null : dias === 0 ? "hoje" : `há ${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`].filter(Boolean);
+  const selo = dias === null ? null : dias >= DIAS_CRITICO ? <Selo classe="selo--acao">Crítico</Selo>
+    : dias >= DIAS_ATENCAO ? <Selo classe="selo--atencao">Atenção</Selo> : null;
+  return (
+    <p className="form-inline">
+      {partes.length > 0 && <span>No SIGA: {partes.join(" · ")}</span>}
+      {selo}
+      {siga.link && <a className="link" href={siga.link} target="_blank" rel="noopener noreferrer">Abrir no SIGA</a>}
+    </p>
+  );
+}
+
 function NumeroOrgao({ p, podeEditar, aoMudar }: { p: ProtocoloDet; podeEditar: boolean; aoMudar: (p?: ProtocoloDet) => void }) {
   const [numero, setNumero] = useState(p.numero_orgao ?? "");
+  const [linkSiga, setLinkSiga] = useState(p.siga?.link ?? p.siga?.codigo ?? "");
+  const [linkGravado, setLinkGravado] = useState(p.siga?.link ?? p.siga?.codigo ?? "");     // o que veio preenchido
   const [comprovante, setComprovante] = useState<File | null>(null);
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -191,23 +212,37 @@ function NumeroOrgao({ p, podeEditar, aoMudar }: { p: ProtocoloDet; podeEditar: 
     if (ocupado) return;
     const fd = new FormData();
     fd.append("numero", numero);
+    const linkNovo = linkSiga.trim();
+    if (linkNovo && linkNovo !== linkGravado) fd.append("link_siga", linkNovo);     // so' o que mudou; vazio nao apaga
     if (comprovante) fd.append("comprovante", comprovante);
     setOcupado(true); setErro("");
     try {
       aoMudar(await apiForm<ProtocoloDet>(`/api/protocolos/${p.id}/numero-orgao`, fd));
+      if (linkNovo) setLinkGravado(linkNovo);
       setComprovante(null);
       if (entradaArquivo.current) entradaArquivo.current.value = "";
     } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); }
   }
   return (
+    <>
     <form className="form-inline" onSubmit={salvar}>
       {/* a justificativa do envio aparece uma vez so', como ressalva, em quem desenha o enviado */}
-      <div className="campo">
-        <label className="campo__rotulo" htmlFor={`orgao-${p.id}`}>Nº do protocolo no órgão</label>
-        <input id={`orgao-${p.id}`} name="numero_orgao" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100} value={numero} disabled={!podeEditar} onChange={e => setNumero(e.target.value)}
-          aria-describedby={`orgao-ajuda-${p.id}`} />
-        {/* gate Sol S1 (10/10/2026): vazio so' passa para anexar o comprovante de um numero ja' gravado */}
-        <span className="campo__nota" id={`orgao-ajuda-${p.id}`}>Obrigatório; informe o número dado pelo órgão. Anexe o comprovante em PDF, se tiver.</span>
+      <div className="pilha">
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor={`orgao-${p.id}`}>Nº do protocolo no órgão</label>
+          {/* gate Sol S1 (10/10/2026): vazio so' passa para anexar o comprovante de um numero ja' gravado; o erro do
+              servidor explica na hora */}
+          <input id={`orgao-${p.id}`} name="numero_orgao" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100} value={numero} disabled={!podeEditar} onChange={e => setNumero(e.target.value)} />
+        </div>
+        {/* issue #328: o link que o orgao manda por e-mail; e' por ele que o robo acompanha o processo. Quem so'
+            consulta nao ve o campo, ve a linha "No SIGA" logo abaixo */}
+        {podeEditar && (
+          <div className="campo">
+            <label className="campo__rotulo" htmlFor={`siga-${p.id}`}>Link do SIGA</label>
+            <input id={`siga-${p.id}`} name="link_siga" autoComplete="off" spellCheck={false} className="entrada--larga" maxLength={500}
+              placeholder="https://…?n=…" value={linkSiga} onChange={e => setLinkSiga(e.target.value)} />
+          </div>
+        )}
       </div>
       {(podeEditar || p.comprovante_arquivo) && (
         <div className="campo">
@@ -228,6 +263,8 @@ function NumeroOrgao({ p, podeEditar, aoMudar }: { p: ProtocoloDet; podeEditar: 
       {podeEditar && <button type="submit" className="btn btn--pequeno" disabled={ocupado}>{ocupado ? "Salvando…" : "Salvar"}</button>}
       {erro && <span className="notas__diverge">{erro}</span>}
     </form>
+    <NoSiga siga={p.siga} />
+    </>
   );
 }
 
@@ -351,13 +388,14 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
                 <div className="campo ol-pendencias">
                   <span className="campo__rotulo">O que falta</span>
                   <Pendencias itens={previa.pendencias} />
-                  <span className="campo__nota">Dá para enviar assim: o Enviar pede a sua confirmação antes de o e-mail sair.</span>
                 </div>
               )}
               aoEnviar={enviar} aoDescartar={() => setPrevia(null)} />
             {confirmar && <ConfirmarFaltas itens={confirmar.itens} mudou={confirmar.mudou} aoCancelar={() => setConfirmar(null)}
               aoContinuar={() => void enviarConfirmado(confirmar.m, confirmar.itens)} />}
-            <p className="campo__nota">O e-mail sai da sua conta Microsoft. Anexos: {mb(previa.total)} de {mb(previa.limite)} permitidos.</p>
+            {previa.total > previa.limite && (
+              <p className="notas__diverge">Anexos passam do limite: {mb(previa.total)} de {mb(previa.limite)} permitidos.</p>
+            )}
           </div>
         </section>
       )}
@@ -418,7 +456,6 @@ export function NovoProtocolo({ contratoId, versao = 0, aoMudar }: { contratoId:
       <summary className="cartao__cabeca">
         <IconeSeta className="icone icone--p seta" />
         <span className="cartao__titulo">Novo protocolo com várias medições</span>
-        <span className="cartao__dica">O órgão recebe várias medições num protocolo só; ele fica na primeira delas.</span>
       </summary>
       <form className="cartao__corpo pilha" onSubmit={criar} aria-label="Novo protocolo com várias medições">
         <fieldset className="opcoes">
@@ -430,15 +467,14 @@ export function NovoProtocolo({ contratoId, versao = 0, aoMudar }: { contratoId:
             </label>
           ))}
         </fieldset>
-        {dados.medicoes.length === 0 ? <p className="campo__nota">Nenhuma medição em andamento nesta obra.</p> : (
+        {dados.medicoes.length === 0 ? <p className="campo__nota">Nenhuma medição em andamento.</p> : (
           <fieldset className="opcoes">
             <legend className="campo__rotulo">Medições</legend>
             {dados.medicoes.map(m => (
               <label key={m.id} className="campo--linha">
                 <input type="checkbox" checked={novo.medicoes.includes(m.id)}
                   onChange={ev => setNovo({ ...novo, medicoes: ev.target.checked ? [...novo.medicoes, m.id] : novo.medicoes.filter(x => x !== m.id) })} />
-                {m.titulo} ({fmtCompetencia(m.competencia)}) · {ROTULO_ESTADO[m.estado] ?? m.estado}
-                {m.valor_protocolado_centavos != null ? ` · ${brl(m.valor_protocolado_centavos)}` : ""}
+                {m.titulo} ({fmtCompetencia(m.competencia)})
               </label>
             ))}
           </fieldset>
@@ -567,9 +603,8 @@ export function ProtocolosDaMedicao({ contratoId, medicaoId, dados, erro, carreg
           aoEnviado={async () => { setMarcados([]); await recarregar(); }} />
         {deOutra.map(p => (
           <p key={p.id}>
-            {p.etapa_rotulo}{p.numero_oficio ? ` · ${p.numero_oficio}` : ""} ({SITUACAO[p.situacao] ?? p.situacao}) reúne{" "}
-            {p.medicoes.map(m => m.titulo).join(" e ")} e mora na{" "}
-            <Link para={{ tela: "medicao", obra: contratoId, id: p.medicoes[0].id }} secao="protocolo">{p.medicoes[0].titulo}</Link>.
+            {p.etapa_rotulo}{p.numero_oficio ? ` · ${p.numero_oficio}` : ""} ({SITUACAO[p.situacao] ?? p.situacao}):{" "}
+            <Link para={{ tela: "medicao", obra: contratoId, id: p.medicoes[0].id }} secao="protocolo">{p.medicoes[0].titulo}</Link>
           </p>
         ))}
         {enviados.map(p => <Enviado key={p.id} p={p} podeEditar={podeEditar} aoMudar={() => void recarregar()} comMedicoes={p.medicoes.length > 1} />)}

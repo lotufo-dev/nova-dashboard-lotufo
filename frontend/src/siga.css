@@ -1,0 +1,82 @@
+/* Tela SIGA (#329). Mesmo desenho da lista com painel de Aguardando pagamento: tabela em grupos e, ao lado, o processo
+   escolhido. Tokens de tokens.css; tudo debaixo de `.sg`/`.sg__*`. */
+
+.sg__topo { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.sg__topo:empty { display: none; }
+.sg__lido { margin: 0; color: var(--texto-2); font-size: 14px; }
+.sg__busca-caixa { max-width: 420px; }
+.sg__topo > .sg__novo { flex-basis: 100%; }
+.sg__erro { flex-basis: 100%; margin: 0; }
+.sg__busca { width: 100%; height: 40px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--linha-forte); border-radius: var(--raio); background: var(--superficie); font-size: 14px; }
+.sg__busca:focus-visible { outline: 2px solid var(--foco); outline-offset: 1px; }
+
+.sg { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+.sg__quadro { background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: 0 1px 2px rgba(15, 23, 42, .04); overflow: hidden; }
+
+.sg__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.sg__tabela th { padding: 12px 12px; text-align: left; background: var(--superficie-2); border-bottom: 1px solid var(--linha); color: var(--texto-2); font-size: 12px; line-height: 16px; font-weight: 600; white-space: nowrap; }
+.sg__tabela td { padding: 12px 12px; height: 44px; border-bottom: 1px solid var(--linha-suave); vertical-align: middle; overflow-wrap: anywhere; }
+.sg__tabela tbody:last-child tr:last-child td { border-bottom: 0; }
+.sg__tabela .col-num { text-align: right; }
+.sg__c-proc { width: 22%; } .sg__c-onde { width: 14%; } .sg__c-quem { width: 12%; } .sg__c-setor { width: 14%; }
+.sg__c-hoje { width: 7%; } .sg__c-ultima { width: 19%; } .sg__c-prot { width: 12%; }
+
+.sg__faixa td { background: var(--superficie-2); font-weight: 600; height: 40px; padding-top: 8px; padding-bottom: 8px; border-top: 1px solid var(--linha); }
+
+.sg__linha { cursor: pointer; }
+.sg__linha:hover td { background: var(--superficie-2); }
+.sg__linha:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
+.sg__linha[aria-selected="true"] td { background: var(--hover); }
+.sg__linha[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--acento); }
+.sg__nome { color: var(--texto); font-weight: 600; }
+.sg__fraco { display: block; font-size: 12px; line-height: 16px; color: var(--texto-2); }
+.sg__traco { color: var(--texto-fraco); }
+.sg__link { color: var(--acento); text-decoration: none; font-weight: 500; }
+.sg__link:hover { color: var(--acento-forte); text-decoration: underline; }
+
+.sg__ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-pilula); display: inline-block; }
+.sg__ponto--hoje { background: var(--ok-ponto); }
+.sg__hoje { display: inline-flex; align-items: center; gap: 6px; }
+
+/* robo em andamento e nao lidos (#343) */
+.sg__robo { display: inline-flex; align-items: center; gap: 8px; color: var(--texto); }
+.sg__ponto--lendo { background: var(--acento); animation: sg-pulsar 1.4s ease-in-out infinite; }
+@keyframes sg-pulsar { 50% { opacity: .3; transform: scale(.7); } }
+@media (prefers-reduced-motion: reduce) { .sg__ponto--lendo { animation: none; } }
+.sg__lendo { color: var(--acento); }
+.sg__nao-lido { color: var(--acao); }
+.sg__vivo:empty { display: contents; }   /* vazio, nao ocupa o gap do topo */
+.sg__avisos { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.sg__acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+
+.sg__painel { position: sticky; top: 16px; background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: var(--sombra); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.sg__painel h2 { margin: 0; font-size: 18px; line-height: 24px; }
+.sg__situacao { color: var(--texto-menu); }
+.sg__painel .sg__link { display: inline-flex; align-items: center; gap: 6px; }
+.sg__movs { list-style: none; margin: 0; padding: 14px 0 0; border-top: 1px solid var(--linha-suave); display: flex; flex-direction: column; gap: 12px; max-height: 420px; overflow-y: auto; }
+.sg__mov { display: flex; flex-direction: column; gap: 2px; }
+.sg__mov-data { color: var(--texto-2); font-size: 12px; line-height: 16px; }
+.sg__mov-evento { font-weight: 500; }
+
+.sg__vazio { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 16px; text-align: center; color: var(--texto-menu); }
+.sg__vazio .icone { width: 32px; height: 32px; color: var(--texto-2); stroke-width: 1.5; }
+.sg__vazio p { margin: 0; font-size: 15px; }
+
+@media (max-width: 1180px) {
+  .sg { grid-template-columns: minmax(0, 1fr); }
+  .sg__painel { position: static; }
+}
+
+/* celular: a tabela vira cartoes */
+@media (max-width: 767px) {
+  .sg__tabela, .sg__tabela tbody, .sg__tabela tr, .sg__tabela td { display: block; width: 100%; }
+  .sg__tabela colgroup, .sg__tabela thead { display: none; }
+  .sg__tabela tr.sg__linha { padding: 12px 16px; border-bottom: 1px solid var(--linha-suave); }
+  .sg__tabela td { height: auto; padding: 0; border: 0; }
+  .sg__tabela td + td { margin-top: 4px; }
+  .sg__tabela td[data-rotulo]::before { content: attr(data-rotulo) " "; color: var(--texto-2); font-size: 12px; font-family: var(--fonte); }
+  .sg__tabela td.col-num { text-align: left; }
+  .sg__faixa td { padding: 8px 16px; }
+  .sg__linha[aria-selected="true"] { background: var(--hover); box-shadow: inset 3px 0 0 var(--acento); }
+  .sg__linha[aria-selected="true"] td, .sg__linha[aria-selected="true"] td:first-child { background: none; box-shadow: none; }
+}

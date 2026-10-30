@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from app import auth, cadastro_aplicar, cadastro_arquivos, conciliacao, db, documentos, legado
+from app import auth, cadastro_aplicar, cadastro_arquivos, carga_medicoes, conciliacao, db, documentos, legado
 
 REPOSITORIO = Path(__file__).resolve().parent.parent.parent
 EXEMPLO = REPOSITORIO / "cadastro-exemplo"
@@ -127,7 +127,102 @@ def _de_outro_cadastro(conn, cad: dict) -> list[str]:
     return achados
 
 
+def _carregar_medicoes(args) -> int:
+    """`cadastro carregar-medicoes <obra>.csv --ensaio` (issue #258): confere o histórico de medições de uma
+    obra contra o banco e imprime o relatório, sem gravar. Sem `--ensaio` (issue #259), com o OK do Leo no
+    relatório: cria as medições que faltam."""
+    if not args.arquivo:
+        print("`cadastro carregar-medicoes` exige o arquivo <obra>.csv")
+        return 1
+    caminho = Path(args.arquivo)
+    if not caminho.is_file():
+        print(f"Arquivo não encontrado: {caminho}")
+        return 1
+    if not args.ensaio:
+        return _gravar_medicoes(args, caminho)
+    banco = db.db_path().resolve()
+    if not banco.is_file():
+        print(f"Banco não encontrado: {banco}")
+        return 1
+    try:
+        # Somente leitura: o ensaio não pode gravar nem o modo do diário do banco
+        conn = sqlite3.connect(f"{banco.as_uri()}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        print(f"Banco não encontrado: {banco}")
+        return 1
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("BEGIN")       # uma foto só do banco para o relatório inteiro
+        rel = carga_medicoes.ensaiar(conn, caminho)
+    except carga_medicoes.CsvInvalido as e:
+        print(f"CSV recusado, nada foi lido: {e}")
+        return 1
+    except sqlite3.DatabaseError:
+        print(f"Banco ilegível ou sem as tabelas do sistema: {banco}")
+        return 1
+    finally:
+        if conn.in_transaction:
+            conn.rollback()
+        conn.close()
+    print(f"ENSAIO (nada foi gravado): {rel['contrato']} ({caminho.name})")
+    _relatorio_carga(rel)
+    return 0
+
+
+def _relatorio_carga(rel: dict) -> None:
+    for li in rel["linhas"]:
+        rotulo = f"linha {li['linha']}: nº {li['numero']} {li['tipo']}"
+        if li.get("competencia"):
+            rotulo += f" {li['competencia']}"
+        print(f"  {rotulo}: {li['categoria']}" + (f" ({li['detalhe']})" if li["detalhe"] else "")
+              + (f" -> {li['acao']}" if li.get("acao") else ""))
+    print("Total: " + ", ".join(f"{c} {n}" for c, n in rel["totais"].items()))
+
+
+def _gravar_medicoes(args, caminho: Path) -> int:
+    if not args.usuario:
+        print("Gravar exige --usuario (e-mail de quem aplica). Para só ver o relatório, use --ensaio.")
+        return 1
+    conn = db.get_conn()
+    try:
+        db.migrate(conn)
+        u = conn.execute("SELECT id FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+        if u is None:
+            print(f"Usuário não encontrado ou inativo: {args.usuario}")
+            return 1
+        try:
+            rel = carga_medicoes.gravar(conn, u["id"], caminho)
+        except carga_medicoes.CsvInvalido as e:
+            print(f"CSV recusado, nada foi gravado: {e}")
+            return 1
+        except carga_medicoes.CargaRecusada as e:
+            print(f"Recusado, nada foi gravado: {e}")
+            return 1
+        except sqlite3.OperationalError as e:
+            # outro escritor (a sincronizacao do RM, a tela) segurando o banco: a transacao foi desfeita
+            print("Recusado, nada foi gravado: o banco está ocupado por outra gravação; rode de novo em instantes"
+                  if "locked" in str(e) or "busy" in str(e) else f"Banco ilegível, nada foi gravado: {db.db_path()}")
+            return 1
+        except sqlite3.DatabaseError:
+            print(f"Banco ilegível, nada foi gravado: {db.db_path()}")
+            return 1
+        except ValueError as e:
+            # recusa de regra no meio da carga (ex.: NF vinculada por outra pessoa ao mesmo tempo)
+            print(f"Recusado, nada foi gravado: {e}")
+            return 1
+    finally:
+        conn.close()
+    print(f"GRAVADO: {rel['contrato']} ({caminho.name}), {rel['criadas']} medição(ões) criada(s)")
+    _relatorio_carga(rel)
+    return 0
+
+
 def _cadastro(args) -> int:
+    if args.acao == "carregar-medicoes":
+        return _carregar_medicoes(args)
+    if args.arquivo:
+        print(f"`cadastro {args.acao}` não recebe arquivo (use `cadastro carregar-medicoes {args.arquivo} --ensaio`)")
+        return 1
     raiz = Path(args.raiz) if args.raiz else raiz_padrao()
     print(f"Cadastro lido de: {raiz}" + (" (exemplo fictício)" if raiz.resolve() == EXEMPLO.resolve() else ""))
     try:
@@ -235,7 +330,8 @@ def main(argv: list[str] | None = None) -> int:
     ca.add_argument("--nome", required=True)
     ca.add_argument("--email", required=True)
     cad = sub.add_parser("cadastro")
-    cad.add_argument("acao", choices=["validar", "aplicar"])
+    cad.add_argument("acao", choices=["validar", "aplicar", "carregar-medicoes"])
+    cad.add_argument("arquivo", nargs="?", help="CSV da obra (<obra>.csv), só em `carregar-medicoes`")
     cad.add_argument("--raiz", help="pasta do cadastro (padrão: DASH_CADASTRO_DIR, ou cadastro-exemplo/)")
     cad.add_argument("--usuario", help="e-mail de quem aplica (obrigatório em `aplicar`)")
     cad.add_argument("--ensaio", action="store_true", help="mostra o que mudaria e não grava")

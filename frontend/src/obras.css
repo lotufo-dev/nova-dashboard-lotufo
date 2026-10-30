@@ -33,7 +33,6 @@
 .contratante__valor { font-family: var(--fonte-num); font-size: 17px; line-height: 24px; font-weight: 500; white-space: nowrap; }
 .contratante__avisos { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .contratante__avisos .campo__nota { display: block; }
-.resumo-nota { margin: 0; font-size: 13px; color: var(--texto-2); }
 
 @media (max-width: 1100px) {
   .contratante { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 18px; }
@@ -78,7 +77,6 @@
 .obra-cartao__linha + .obra-cartao__linha { margin-top: 8px; }
 .obra-cartao__linha--fim { color: var(--texto-2); margin-top: auto; padding-top: 8px; }
 .obra-cartao__linha .icone { color: var(--texto-2); }
-.obra-cartao__mais { color: var(--texto-2); font-size: 12.5px; }
 
 /* ------------------------------------------------------------ os Avisos, dentro de Obras */
 .avisos-area__corpo { display: grid; gap: 16px; }
@@ -86,17 +84,16 @@
 .avisos-area__grupos > .cartao { box-shadow: none; }
 .avisos-area .tabela--grade col.c-quando { width: 150px; }
 .avisos-area .tabela--grade col.c-valor-aviso { width: 150px; }
-.avisos-area .tabela--grade col.c-onde { width: 260px; }
+.avisos-area .tabela--grade col.c-abrir { width: 72px; }
 .aviso__fato .forte { margin-right: 2px; }
 .avisos-area__corpo > *, .avisos-area__grupos > * { min-width: 0; }
 .avisos-area .form-inline select { max-width: 100%; }
 @media (max-width: 700px) {
-  /* as colunas fixas (112 + 150 + 260 px) nao cabem no celular: a tabela ganha largura minima e a Rolagem rola,
+  /* as colunas fixas (112 + 150 + 72 px) nao cabem no celular: a tabela ganha largura minima e a Rolagem rola,
      em vez de a coluna "Aviso" ficar sem espaco e o texto se sobrepor */
-  .avisos-area .tabela--grade { min-width: 720px; }
+  .avisos-area .tabela--grade { min-width: 560px; }
   .avisos-area .form-inline { flex-wrap: wrap; }
   .avisos-area .form-inline .campo { min-width: 0; flex: 1 1 140px; }
   .avisos-area .detalhes > summary { width: auto; max-width: 100%; overflow-wrap: anywhere; }
-  .avisos-area .detalhes__resto { display: block; margin-top: 4px; }
   .avisos-area .cartao__cabeca { flex-wrap: wrap; }
 }

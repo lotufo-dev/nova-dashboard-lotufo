@@ -45,4 +45,11 @@ describe("LiberarEnvio", () => {
     expect(JSON.parse(api.mock.calls[0][1].body)).toEqual({
       tabela: "espelhos", id: 7, justificativa: "conferi os Enviados: não saiu", conferi_enviados: true });
   });
+
+  it("sem a reserva (aberto pelo menu), nenhuma frase de apoio: só o campo, a declaração e o botão", () => {
+    const { container } = render(<LiberarEnvio tabela="protocolos" id={3} aoLiberar={() => {}} />);
+    expect(container.querySelector(".campo__nota")).toBeNull();
+    expect(screen.queryByText(/15 minutos|não sabe se o e-mail saiu/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Liberar envio" })).toBeTruthy();
+  });
 });

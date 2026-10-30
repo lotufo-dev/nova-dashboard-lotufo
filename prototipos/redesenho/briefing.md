@@ -84,4 +84,6 @@ valores "R$ 1.234.567,89" em mono. Nada copiado do banco ou do cadastro.
 | #164 | Administração | Saúde, Reconciliação, Usuários e Auditoria | Nada decidido. |
 | #165 | Minha conta | Conta e troca de senha | Minha conta e Sair ficam na barra superior (09/10/2026). |
 
-Regra de todas: a tela nova não perde nenhum dado nem ação que a de hoje tem.
+Regra de todas: a tela nova não perde nenhuma ação nem número que alguém usa para decidir. Frase de apoio, legenda
+sob número, explicação de regra e contador secundário não contam como dado e não passam para a tela nova
+(`.claude/rules/texto-na-tela.md`, 26/10/2026).

@@ -7,7 +7,7 @@ import { EXCECOES, notasDivergentes, passoDe, resumoNotas, separarMedicoes, titu
 import { type Busca } from "./rota";
 import { Link } from "./Link";
 // competencia vem "AAAA-MM" (formato do CHECK da tabela); na tela le-se "MM/AAAA"
-import { fmtCompetencia as competenciaBR, fmtDataHora, fmtDataPura as dataBR } from "./tempo";
+import { fmtCompetencia as competenciaBR, fmtDataPura as dataBR } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 
@@ -66,11 +66,10 @@ export function Estado({ m }: { m: Medicao }) {
     <span className={`estado estado--${m.estado}${excecao ? " estado--excecao" : ""}`}>
       <span className="estado__ponto" aria-hidden="true" />
       {ROTULO_ESTADO[m.estado] ?? m.estado}
-      {m.final === 1 && <Selo classe="selo--atencao" title="O contrato está em encerramento">final</Selo>}
+      {m.final === 1 && <Selo classe="selo--atencao">final</Selo>}
       {m.congelada === 1 && (
         <span className="cadeado">
-          <IconeCadeado className="icone icone--p"
-            titulo="Congelada: o valor protocolado não muda mais (registre reapresentação)" />
+          <IconeCadeado className="icone icone--p" titulo="Congelada" />
         </span>
       )}
     </span>
@@ -87,7 +86,8 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
   const [andamento, setAndamento] = useState<Map<number, LinhaAndamento>>(new Map());
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
-  // Carimbo de frescor do RM (spec §6): discreto. `null` = a leitura falhou ou ainda nao chegou.
+  // Situacao do RM (spec §6): so' a falha da ultima sincronizacao aparece, como selo. `null` = a leitura falhou
+  // ou ainda nao chegou.
   const [frescor, setFrescor] = useState<Frescor | null>(null);
   // Geracao da leitura: resposta de outra obra (ou de antes de um recarregamento) nao escreve no estado.
   const geracao = useRef(0);
@@ -115,9 +115,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
   const { emAndamento, anteriores } = separarMedicoes(itens);
   const todas = busca.anteriores === "todas";
   const visiveis = todas ? anteriores : anteriores.slice(0, RECENTES);
-  const rm = frescor && (frescor.configurado
-    ? `RM ${frescor.ultima_sincronizacao ? `sincronizado ${fmtDataHora(frescor.ultima_sincronizacao)}` : "sem rodada ainda"}${frescor.ultimo_erro ? " (a última falhou)" : ""}`
-    : "RM não ligado");
+  const rmFalhou = !!(frescor?.configurado && frescor.ultimo_erro);
 
   if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
   if (carregando) return <section className="cartao"><div className="vazio"><p>Carregando medições…</p></div></section>;
@@ -127,13 +125,10 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
       <section className="cartao" aria-labelledby="titulo-em-andamento" id="em-andamento">
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-em-andamento">Em andamento</h2>
-          <span className="cartao__dica num">
-            {emAndamento.length === 0 ? "nenhuma" : `${emAndamento.length} ${emAndamento.length === 1 ? "medição" : "medições"}`}
-            {rm ? ` · ${rm}` : ""}
-          </span>
+          {rmFalhou && <Selo classe="selo--atencao">Sincronização com o RM falhou</Selo>}
         </div>
         {emAndamento.length === 0 ? (
-          <div className="vazio vazio--curto"><p>Nenhuma medição aberta nesta obra.</p></div>
+          <div className="vazio vazio--curto"><p>Nenhuma medição aberta.</p></div>
         ) : (
           <Rolagem rotulo="Medições em andamento da obra">
             {/* grade comum com "Anteriores", logo abaixo (F-47): o dinheiro das duas tabelas cai na mesma coluna */}
@@ -160,7 +155,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                       <td className="num">{competenciaBR(m.competencia)}</td>
                       <td><Estado m={m} /></td>
                       <td className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
-                      <td>{passo ? passo.rotulo : "—"}{linha?.desde && <span className="campo__nota"> · desde {dataBR(linha.desde)}</span>}</td>
+                      <td>{passo ? passo.rotulo : "—"}</td>
                       <td>{notasDivergentes(m).length > 0
                         ? <Link className="link-selo" para={destino} secao="notas"><Selo classe="selo--acao">nota diverge</Selo></Link> : "—"}</td>
                     </tr>
@@ -175,9 +170,6 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
       <section className="cartao" aria-labelledby="titulo-anteriores">
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-anteriores">Anteriores</h2>
-          <span className="cartao__dica num">
-            {anteriores.length === 0 ? "nenhuma" : `${anteriores.length} ${anteriores.length === 1 ? "recebida, cancelada ou desistida" : "recebidas, canceladas ou desistidas"}`}
-          </span>
           {/* sem medicao nenhuma nao ha' o que exportar (F-95) */}
           {itens.length > 0 && (
             <div className="cartao__acoes">
@@ -253,13 +245,12 @@ export function NovaMedicaoManual({ contratoId, aoCriar }: { contratoId: number;
 
   return (
     <form className="cartao__corpo pilha" onSubmit={criar} aria-label="Nova medição">
-      <p className="campo__nota">Esta obra ainda gera o espelho pelo fluxo antigo: a medição nasce aqui, prevista.</p>
       <div className="form-inline">
         <div className="campo">
           <label className="campo__rotulo" htmlFor="nova-numero">Nº</label>
           <input id="nova-numero" name="numero" autoComplete="off" spellCheck={false} className="entrada--curta entrada--num num" required
             inputMode="numeric" pattern="[0-9]{1,3}" title="Número da medição (1 a 999)"
-            placeholder="1…" value={novo.numero} onChange={e => setNovo({ ...novo, numero: e.target.value })} />
+            value={novo.numero} onChange={e => setNovo({ ...novo, numero: e.target.value })} />
         </div>
         <div className="campo">
           <label className="campo__rotulo" htmlFor="nova-tipo">Tipo</label>

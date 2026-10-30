@@ -7,6 +7,7 @@ import { tituloMedicao } from "./medicao";
 import type { Medicao } from "./Medicoes";
 import { fmtDataPura } from "./tempo";
 import Rolagem from "./Rolagem";
+import Selo from "./Selo";
 
 // Notas da medicao (bloco 3, spec §3 passo 3 e §7.1): a pessoa arrasta os PDFs que o faturamento
 // devolveu; o sistema le a nota da Lotufo, confere contra a saida do espelho e fecha "nota emitida"
@@ -205,31 +206,27 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
   // IBS e CBS so' entram na tabela quando alguma saida os traz (como no espelho)
   const temIbsCbs = (dados?.esperadas ?? []).some(e => e.ibs !== null || e.cbs !== null);
 
-  const situacaoNota = (n: NotaVinculada) => {
-    const partes = [`nº ${Number(n.numero) || n.numero}`, dataBR(n.emissao), SITUACAO[n.confirmacao] ?? n.confirmacao];
-    if (n.leitura === "manual") partes.push("digitada");
-    return partes.join(" · ");
-  };
+  // a nota se identifica pelo numero e pela data; a situacao no RM e' selo
+  const situacaoNota = (n: NotaVinculada) => (
+    <><span className="num">nº {Number(n.numero) || n.numero} · {dataBR(n.emissao)}</span>{" "}<Selo>{SITUACAO[n.confirmacao] ?? n.confirmacao}</Selo></>
+  );
 
+  // so' a divergencia aparece (o que confere ou arredonda 1 centavo nao pede nada)
   const conferencia = (n: NotaVinculada) => {
     const div = n.conferencia.filter(d => d.grau === "divergente");
-    const arr = n.conferencia.filter(d => d.grau === "arredondamento");
-    if (div.length === 0 && arr.length === 0) return <span className="feito">confere</span>;
+    if (div.length === 0) return null;
     return (
-      <span className="notas__conferencia">
-        {div.length > 0 && (
-          <span className="notas__diverge">
-            <IconeAlerta className="icone icone--p" />
-            diverge do espelho: {div.map(d => `${CAMPO[d.campo] ?? d.campo} (espelho ${typeof d.espelho === "number" ? brl(d.espelho) : d.espelho ?? "—"}, nota ${typeof d.nota === "number" ? brl(d.nota) : d.nota ?? "—"})`).join("; ")}
-            {n.justificativa ? ` · justificado: ${n.justificativa}` : ""}
-          </span>
-        )}
-        {arr.length > 0 && <span className="notas__arredonda">arredondamento de 1 centavo: {arr.map(d => CAMPO[d.campo] ?? d.campo).join(", ")}</span>}
+      <>{" "}<span className="notas__conferencia">
+        <span className="notas__diverge">
+          <IconeAlerta className="icone icone--p" />
+          diverge do espelho: {div.map(d => `${CAMPO[d.campo] ?? d.campo} (espelho ${typeof d.espelho === "number" ? brl(d.espelho) : d.espelho ?? "—"}, nota ${typeof d.nota === "number" ? brl(d.nota) : d.nota ?? "—"})`).join("; ")}
+          {n.justificativa ? ` · justificado: ${n.justificativa}` : ""}
+        </span>
         {podeEditar && div.length > 0 && !n.justificativa && justificar?.nota_id !== n.nota_id && (
           <button type="button" className="btn btn--pequeno" disabled={ocupado}
             onClick={() => setJustificar({ nota_id: n.nota_id, texto: "" })}>Justificar</button>
         )}
-      </span>
+      </span></>
     );
   };
 
@@ -238,9 +235,9 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
       <p className="painel__titulo">
         {/* o nome inteiro da medicao: "Reajuste da 23ª Medição" nao e' a 23ª de execucao */}
         {rotulo ?? tituloMedicao(medicao)}
-        {dados && (dados.esperadas.length > 0
-          ? (dados.faltam > 0 ? ` — falta${dados.faltam === 1 ? "" : "m"} ${dados.faltam} nota${dados.faltam === 1 ? "" : "s"}` : " — notas completas")
-          : (dados.notas.length > 0 ? ` — ${dados.notas.length} nota${dados.notas.length === 1 ? "" : "s"} vinculada${dados.notas.length === 1 ? "" : "s"}` : " — nenhuma nota ainda"))}
+        {dados && dados.esperadas.length > 0 && dados.faltam > 0 && (
+          <>{" "}<Selo classe="selo--atencao">{dados.faltam === 1 ? "Falta 1 nota" : `Faltam ${dados.faltam} notas`}</Selo></>
+        )}
       </p>
 
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
@@ -287,7 +284,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                     {celula("iss", e.iss)}{celula("irrf", e.irrf)}
                     {temIbsCbs && <>{celula("ibs", e.ibs)}{celula("cbs", e.cbs)}</>}
                     {celula("liquido", e.liquido)}
-                    <td>{n ? <><span className="num">{situacaoNota(n)}</span>{" \u00b7\u00a0"}{conferencia(n)}{botaoDesfazer(n)}</> : <span className="campo__nota">aguardando</span>}</td>
+                    <td>{n ? <>{situacaoNota(n)}{conferencia(n)}{botaoDesfazer(n)}</> : "—"}</td>
                   </tr>
                 );
               })}
@@ -300,7 +297,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
         <ul className="lista-simples">
           {soltas.map(n => (
             <li key={n.nota_id}>
-              <span className="num">NF {situacaoNota(n)} · {brl(n.valor_centavos)}</span>{" \u00b7\u00a0"}{dados && dados.esperadas.length > 0 ? conferencia(n) : conferencia(n)}{botaoDesfazer(n)}
+              NF {situacaoNota(n)}{" "}<span className="num">{brl(n.valor_centavos)}</span>{conferencia(n)}{botaoDesfazer(n)}
             </li>
           ))}
         </ul>
@@ -329,7 +326,6 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
           </div>
           <button type="submit" className="btn btn--primario" disabled={ocupado}>{acao === "desfazer" ? "Desfazendo…" : "Desfazer o vínculo"}</button>
           <button type="button" className="btn" onClick={() => setDesfazer(null)}>Voltar</button>
-          <span className="campo__nota">A medição não muda de estado; a nota não volta a casar sozinha pelo RM.</span>
         </form>
       )}
 
@@ -345,7 +341,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
           {(dados?.documentos_sem_nota ?? []).map(d => (
             <li key={d.documento_id}>
               <a className="link" href={`/api/medicoes/${medicao.id}/documentos/${d.documento_id}`}>{d.nome}</a>
-              {" "}— PDF sem leitura, ainda sem os dados da nota{" "}
+              {" "}— PDF sem leitura{" "}
               <button type="button" className="btn btn--pequeno" disabled={ocupado}
                 onClick={() => setManual({ documento_id: d.documento_id, nome: d.nome, numero: "", emissao: "", valor: "" })}>
                 Informar número, data e valor
@@ -357,7 +353,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
 
       {podeEditar && manual && (
         <form className="form-inline" onSubmit={enviarManual}>
-          <span className="campo__nota">{manual.nome}: informe os dados da nota</span>
+          <span className="campo__nota">{manual.nome}</span>
           <div className="campo">
             <label className="campo__rotulo" htmlFor={`nota-numero-${medicao.id}`}>Número da nota</label>
             <input id={`nota-numero-${medicao.id}`} name="numero" autoComplete="off" spellCheck={false} className="entrada--curta entrada--num num" required inputMode="numeric" pattern="[0-9]{1,9}"
@@ -391,15 +387,12 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
           </label>
         </div>
       )}
-      {podeEditar && (
-        <p className="campo__nota">A nota da Lotufo é lida e conferida contra o espelho; as das consorciadas e a FRC ficam como documentos.</p>
-      )}
 
       {podeEditar && dados && dados.pode_declarar && dados.faltam > 0 && dados.notas.length > 0 && (
         <form className="form-inline" onSubmit={enviarDeclaracao}>
           <div className="campo">
             <label className="campo__rotulo" htmlFor={`nota-declarar-${medicao.id}`}>Declarar as notas completas — justificativa</label>
-            <input id={`nota-declarar-${medicao.id}`} name="declaracao" autoComplete="off" className="entrada--larga" required maxLength={1000} placeholder="Ex.: Cuiabá não teve serviço neste mês…"
+            <input id={`nota-declarar-${medicao.id}`} name="declaracao" autoComplete="off" className="entrada--larga" required maxLength={1000}
               value={declarar} onChange={ev => setDeclarar(ev.target.value)} />
           </div>
           <button type="submit" className="btn btn--pequeno" disabled={ocupado}>{acao === "declarar" ? "Gravando…" : "Declarar completas"}</button>

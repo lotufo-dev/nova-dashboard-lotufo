@@ -29,7 +29,7 @@ const RESPOSTA = {
 afterEach(() => { cleanup(); api.mockReset(); });
 
 describe("A receber", () => {
-  it("mostra os tres numeros do alto com o percentual do previsto", async () => {
+  it("mostra os tres numeros do alto sem frase de apoio", async () => {
     api.mockResolvedValue(RESPOSTA);
     render(<AReceberPagina />);
     const resumo = await screen.findByRole("region", { name: "Resumo" });
@@ -37,16 +37,16 @@ describe("A receber", () => {
     expect(within(resumo).getByText("A receber, na cota").nextSibling?.textContent).toMatch(/R\$\s*15\.000,03/);
     expect(within(resumo).getByText("Previsto em outubro").nextSibling?.textContent).toMatch(/R\$\s*20\.000,00/);
     expect(within(resumo).getByText("Medições recebidas em outubro").nextSibling?.textContent).toMatch(/R\$\s*10\.000,01/);
-    expect(within(resumo).getByText(/50% do previsto · até 16\/10\/2026/)).toBeTruthy();
+    expect(resumo.textContent).not.toMatch(/do previsto|até 16\/10|cobranças em/);
   });
 
   it("clicar num mes do grafico troca o detalhe; o mes atual vem escolhido e a previsao so' tem previsto", async () => {
     api.mockResolvedValue(RESPOSTA);
     render(<AReceberPagina />);
     const detalhe = (await screen.findAllByRole("status"))[0];
-    expect(detalhe.textContent).toMatch(/Outubro de 2026 \(mês atual, até 16\/10\)/);
+    expect(detalhe.textContent).toMatch(/^Outubro de 2026: previsto/);
     fireEvent.click(screen.getByRole("button", { name: /^agosto de 2026: previsto/ }));
-    expect(detalhe.textContent).toMatch(/Agosto de 2026: previsto R\$\s*13\.000,00 · recebido R\$\s*12\.500,00 · 96% do previsto/);
+    expect(detalhe.textContent).toMatch(/Agosto de 2026: previsto R\$\s*13\.000,00 · recebido R\$\s*12\.500,00$/);
     fireEvent.click(screen.getByRole("button", { name: /^dezembro de 2026: previsão/ }));
     expect(detalhe.textContent).toMatch(/Dezembro de 2026 \(previsão\): R\$\s*22\.000,00/);
   });
@@ -69,7 +69,7 @@ describe("A receber", () => {
     expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 4 + 1);                    // cabeca, 4 cobrancas, rodape
     fireEvent.click(screen.getByRole("button", { name: /Terminal Norte/ }));
     expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 2 + 1);
-    expect(within(tabela).getByText(/Total de Terminal Norte \(2\)/)).toBeTruthy();
+    expect(within(tabela).getByText("Total de Terminal Norte")).toBeTruthy();
     expect(within(tabela).getAllByText(/R\$\s*5\.000,01/).length).toBeGreaterThan(0);
     expect(screen.getByText("Só Terminal Norte")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Mostrar todas" }));
@@ -86,7 +86,7 @@ describe("A receber", () => {
     expect(screen.getByRole("link", { name: "Abrir a obra Terminal Norte" })).toBeTruthy();
   });
 
-  it("antes da conciliacao o valor e' tracinho e a tela diz que ha' valores a conciliar", async () => {
+  it("antes da conciliacao o valor e' tracinho, sem frase de conciliacao", async () => {
     api.mockResolvedValue({
       ...RESPOSTA, total_a_receber_liberado: false, total: { quantidade: 4, obras: 2, valor_centavos: null },
       mes: { ...MESES[5], previsto_centavos: null }, meses: MESES.map(m => ({ ...m, previsto_centavos: null })),
@@ -95,7 +95,7 @@ describe("A receber", () => {
     render(<AReceberPagina />);
     const resumo = await screen.findByRole("region", { name: "Resumo" });
     expect(within(resumo).getByText("A receber, na cota").nextSibling?.textContent).toBe("—");
-    expect(within(resumo).getByText("valores a conciliar com a controladoria")).toBeTruthy();
+    expect(screen.queryByText(/a conciliar com a controladoria/)).toBeNull();
     expect(within(resumo).getByText("Medições recebidas em outubro").nextSibling?.textContent).toMatch(/R\$\s*10\.000,01/);
   });
 

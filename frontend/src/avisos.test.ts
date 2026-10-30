@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { FAMILIAS, familiaDoAviso, filtrarAvisos, ondeSeResolve, porFamilia, porObra, quandoDoAviso } from "./avisos";
+import { FAMILIAS, familiaDoAviso, filtrarAvisos, porFamilia, porObra, quandoDoAviso } from "./avisos";
 
 const av = (tipo: string, nivel: Aviso["nivel"], contrato_id: number | null, aba: string | null, data: string | null = null): Aviso => ({
   tipo, nivel, publico: ["operacao"], contrato_id, obra: contrato_id ? `Obra ${contrato_id}` : null, dias: null,
@@ -23,10 +23,17 @@ describe("avisos", () => {
   });
 
   it("o pagamento atrasado saiu (#255): sem família Dinheiro e sem destino próprio", () => {
-    expect(FAMILIAS.map(f => f.id)).toEqual(["prazo", "reajuste", "nota", "documentos", "outros"]);
+    expect(FAMILIAS.map(f => f.id)).toEqual(["prazo", "reajuste", "nota", "siga", "documentos", "outros"]);
     const antigo = { ...av("pagamento_atrasado", "acao", 9, "medicoes"), medicao_id: 722 };
     expect(familiaDoAviso(antigo)).toBe("outros");
-    expect(ondeSeResolve(antigo)).toBe("Em andamento\u00a0· Obra 9");
+  });
+
+  it("os avisos do SIGA (#330) formam a família SIGA, entre Nota e Documentos", () => {
+    const parado: Aviso = { ...av("siga_parado", "atencao", 7, null), destino: { tela: "siga", processo: 4 } };
+    const sem: Aviso = { ...av("siga_sem_leitura", "acao", null, null), destino: { tela: "siga" } };
+    expect([parado, sem].map(familiaDoAviso)).toEqual(["siga", "siga"]);
+    expect(porFamilia([...lista, parado, sem]).map(g => g.rotulo)).toEqual(
+      ["Prazo", "Reajuste", "Nota", "SIGA", "Documentos", "Outros"]);
   });
 
   it("por família, na ordem do mapa, do mais grave ao mais atrasado", () => {
@@ -49,13 +56,5 @@ describe("avisos", () => {
   it("filtra por família, nível e obra, como a URL pede", () => {
     expect(filtrarAvisos(lista, { familia: "prazo", nivel: "critico" }).map(a => a.tipo)).toEqual(["execucao_vencendo"]);
     expect(filtrarAvisos(lista, { obra: 7 }).map(a => a.tipo)).toEqual(["reajuste_apostilamento", "nota_divergente"]);
-  });
-
-  it("diz onde se resolve, com a data-base do aviso de reajuste (A10)", () => {
-    expect(ondeSeResolve({ ...lista[0], data_base_mes: "2023-01" })).toBe("Reajuste\u00a0· Obra 7\u00a0· data\u2011base 01/2023");
-    expect(ondeSeResolve(lista[1])).toBe("Prazos\u00a0· Obra 12");
-    expect(ondeSeResolve(lista[1], true)).toBe("Prazos");
-    expect(ondeSeResolve(lista[2])).toBe("Documentos\u00a0· Oriundi");
-    expect(ondeSeResolve(lista[4])).toBe("Em andamento\u00a0· Obra 9");
   });
 });

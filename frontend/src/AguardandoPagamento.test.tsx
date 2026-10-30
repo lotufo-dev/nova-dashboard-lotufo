@@ -22,7 +22,7 @@ const faixa = (nome: RegExp) => screen.getByText(nome).closest("tbody") as HTMLE
 describe("Aguardando pagamento", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("divide em Atrasadas (45+), Atenção (30 a 44) e Em dia, com subtotal e total", async () => {
+  it("divide em Atrasadas (45+), Atenção (30 a 44) e Em dia, com o total; a faixa é só o rótulo", async () => {
     api.mockResolvedValue(cinco());
     render(<AguardandoPagamento hoje={HOJE} />);
     await screen.findByText(/Atrasadas \(45 dias ou mais\)/);
@@ -35,8 +35,9 @@ describe("Aguardando pagamento", () => {
     const emDia = faixa(/Em dia/);
     expect(within(emDia).getByText(/MT-388/)).toBeTruthy();      // 29 dias
     expect(within(emDia).getByText(/Leblon/)).toBeTruthy();
-    expect(atencao.textContent).toContain("2 · R$");
-    expect(screen.getByText(/5 notas/)).toBeTruthy();
+    expect(atencao.querySelector(".ap__faixa-rotulo")?.textContent).toBe("Atenção (30 a 44 dias)");
+    expect(screen.getByText("Total").textContent).toMatch(/^Total R\$\s5\.000,00$/);
+    expect(screen.queryByText(/5 notas|em notas aguardando pagamento/)).toBeNull();
   });
 
   it("Parada há: âmbar a partir de 30 dias, vermelho a partir de 45", async () => {
@@ -69,10 +70,15 @@ describe("Aguardando pagamento", () => {
     for (const marca of screen.getAllByText("sem protocolo SIGA")) {
       expect(marca.closest("a")!.getAttribute("href")).toBe("/obras/13/medicoes/1#etapa-4");
     }
-    expect(within(painel).getByRole("link", { name: /Registrar o número na etapa 4/ }).getAttribute("href")).toBe("/obras/13/medicoes/1#etapa-4");
+    // a marca ja' e' o link: sem o link de texto repetido ao lado, nem title explicando
+    expect(within(painel).queryByRole("link", { name: /Registrar o número/ })).toBeNull();
+    expect(painel.querySelector("a[title]")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
     fireEvent.click(screen.getByRole("row", { name: /MT-402/ }));
-    expect(within(screen.getByRole("complementary", { name: "Detalhe da nota" })).getByText("Nº do protocolo no órgão")).toBeTruthy();
+    const outro = screen.getByRole("complementary", { name: "Detalhe da nota" });
+    expect(within(outro).getByText("Nº do protocolo no órgão")).toBeTruthy();
+    // fora da MTPAR nao ha' marca: o link curto leva a' etapa 4
+    expect(within(outro).getByRole("link", { name: "Registrar o número →" }).getAttribute("href")).toBe("/obras/13/medicoes/2#etapa-4");
     expect(screen.getAllByText("sem protocolo SIGA")).toHaveLength(1);   // so' a linha da Granito
   });
 
@@ -80,7 +86,7 @@ describe("Aguardando pagamento", () => {
     api.mockResolvedValue([cinco()[0]]);
     render(<AguardandoPagamento hoje={HOJE} podeEditar={false} />);
     expect((await screen.findAllByText("sem protocolo SIGA")).length).toBe(2);
-    expect(screen.queryByRole("link", { name: /Registrar o número na etapa 4/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Registrar o número/ })).toBeNull();
     expect(screen.getAllByText("sem protocolo SIGA").some(x => x.closest("a"))).toBe(false);
   });
 

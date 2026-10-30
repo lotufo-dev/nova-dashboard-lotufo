@@ -139,13 +139,6 @@ export function resumoEmpresa(e: EmpresaDoc, obras: ObraDoc[] = []): { texto: st
     nivel: vencidas || faltas || o.garantiasVencidas ? "acao" : partes.length ? "atencao" : "ok", pendencias: pendenciasDa(e, obras) };
 }
 
-/** A certidao exigida e vigente que vence primeiro (o "Proxima a vencer" do cartao), ou null. */
-export function proximaAVencer(e: EmpresaDoc): LinhaCertidao | null {
-  const vigentes = e.certidoes.filter(l => l.exigida && l.certidao !== null && l.dias !== null && l.dias >= 0
-    && (l.situacao === "ok" || l.situacao === "vencendo"));
-  return vigentes.sort((a, b) => a.dias! - b.dias!)[0] ?? null;
-}
-
 /** A pendencia mais urgente da tabela da empresa: a unica que leva o botao principal ("Emitir"). Sem dias (vencida
  *  ou faltando) vem antes de quem ainda vigora. */
 export function pendenciaMaisUrgente(e: EmpresaDoc): LinhaCertidao | null {

@@ -66,19 +66,21 @@ describe("Cronograma: versões", () => {
       .map(l => Array.from(l.querySelectorAll("td"), td => (td.textContent ?? "").replace(/\s/g, " ")).join("|"));
     expect(linhas).toEqual([
       "2|11/03/2024|Contrato|6|R$ 10.000.000,01",
-      "1|04/09/2026|Sem documento no cadastro|2|R$ 500,00",
-      "3 · vigente|05/10/2026|Termo aditivo · ta-01|3|R$ 700,01",
+      "1|04/09/2026|—|2|R$ 500,00",
+      "3 Vigente|05/10/2026|Termo aditivo · ta-01|3|R$ 700,01",
     ]);
     expect(api).toHaveBeenCalledWith("/api/contratos/1/cronograma/versoes");
   });
 
-  it("a dica do cabeçalho diz o documento da vigente e a data dele, nunca a origem interna", async () => {
+  it("a dica do cabeçalho é só o número da versão; documento e data ficam na tabela", async () => {
     render(<Cronograma contratoId={1} podeEditar={false} />);
     await screen.findByRole("table", { name: /Versões do cronograma/ });
-    const dica = screen.getByText(/^versão 3 ·/);
-    expect(dica.textContent).toBe("versão 3 · 1 competência · documento de 05/10/2026");
-    expect(dica.getAttribute("title")).toBe("Documento: Termo aditivo · ta-01");
+    const dica = screen.getByText(/^versão 3/);
+    expect(dica.textContent).toBe("versão 3");
+    expect(dica.getAttribute("title")).toBeNull();
     expect(document.body.innerHTML).not.toMatch(/Origem do cadastro|manual/);
+    // os contadores ao lado do summary sairam
+    expect(screen.getByText("Versões do cronograma").tagName).toBe("SUMMARY");
   });
 
   it("a dica casa a versão pelo número, não pela marca de vigente da lista (gate Sol, PR #311)", async () => {
@@ -87,8 +89,37 @@ describe("Cronograma: versões", () => {
       itens: [{ competencia: "2026-09", valor_previsto_centavos: 50000 }] });
     render(<Cronograma contratoId={1} podeEditar={false} />);
     await screen.findByRole("table", { name: /Versões do cronograma/ });
-    const dica = screen.getByText(/^versão 1 ·/);
-    expect(dica.textContent).toBe("versão 1 · 1 competência · publicada em 04/09/2026");
-    expect(dica.getAttribute("title")).toBe("Documento: Sem documento no cadastro");
+    expect(screen.getByText(/^versão 1/).textContent).toBe("versão 1");
+  });
+});
+
+describe("Cronograma: texto na tela", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("o formato de colar fica só no placeholder, sem parágrafo nem aviso fixo; sem a fórmula do saldo", async () => {
+    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO
+      : c.endsWith("/versoes") ? [] : null));
+    render(<Cronograma contratoId={1} podeEditar />);
+    const campo = await screen.findByLabelText("Nova versão do cronograma");
+    expect(campo.getAttribute("placeholder")).toContain("2026-09;1.200.000,00");
+    expect(screen.queryByText(/no formato/)).toBeNull();
+    expect(screen.queryByText(/substitui o cronograma futuro/)).toBeNull();
+    expect(screen.queryByText("x")).toBeNull();          // a formula do servidor
+    fireEvent.change(campo, { target: { value: "2026-10;900,00" } });
+    expect(screen.queryByText(/total previsto/)).toBeNull();
+  });
+
+  it("“Medido acima do valor vigente” só aparece com o saldo negativo", async () => {
+    const negativo = { ...CURVA, saldo: { ...CURVA.saldo, atestado_execucao_centavos: 200, saldo_centavos: -100 } };
+    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? negativo : c.endsWith("/cronograma") ? VERSAO
+      : c.endsWith("/versoes") ? [] : null));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("Medido acima do valor vigente do contrato.")).toBeTruthy();
+    cleanup();
+    api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO
+      : c.endsWith("/versoes") ? [] : null));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByText("Saldo");
+    expect(screen.queryByText(/Medido acima/)).toBeNull();
   });
 });

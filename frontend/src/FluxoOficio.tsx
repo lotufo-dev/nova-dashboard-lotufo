@@ -30,7 +30,23 @@ export type Pleito = {
   conferencia: Conferencia | null; pendencias: Pendencia[]; enviado_em: string | null; envio_justificativa: string | null;
   anexos: { id: number; tipo: string; nome: string; tamanho: number }[];
   exigidos: { tipo: string; rotulo: string }[];
+  // issue #277: a cadeia do pleito de reajuste (original -> reiteracoes/reemissoes) e o que o servidor deixa fazer
+  reemite_pleito_id?: number | null; reemissao?: Reemissao | null; anterior?: EloPleito | null;
+  reemissoes?: EloPleito[]; reemissoes_possiveis?: Reemissao[];
 };
+export type Reemissao = "reiteracao" | "cronograma";
+type EloPleito = { id: number; numero_oficio: string | null; situacao: string; enviado_em: string | null;
+  reemissao: Reemissao | null };
+
+/** A cadeia do pleito numa linha: o que ele reitera/reemite e quem o reiterou/reemitiu depois. */
+export function cadeiaDoPleito(p: Pleito): string[] {
+  const elo = (e: EloPleito) => `${e.numero_oficio ?? "ofício sem número"}${e.situacao === "enviado"
+    ? (e.enviado_em ? `, enviado em ${fmtDataPura(e.enviado_em.slice(0, 10))}` : ", enviado") : ` (${e.situacao})`}`;
+  const out: string[] = [];
+  if (p.anterior) out.push(`${p.reemissao === "reiteracao" ? "Reitera" : "Reemite"} o ${elo(p.anterior)}`);
+  for (const r of p.reemissoes ?? []) out.push(`${r.reemissao === "reiteracao" ? "Reiterado" : "Reemitido"} pelo ${elo(r)}`);
+  return out;
+}
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string;
   anexos: { nome: string; tamanho: number }[]; total: number; limite: number; pendencias: Pendencia[] };
 
@@ -41,13 +57,13 @@ function mensagem(e: unknown): string {
 }
 
 // Os anexos do oficio como checklist (F-67). Tudo o que o servidor lista em `exigidos` e' exigido, entao sem
-// arquivo e' "Falta" (Atencao: se envia com justificativa, como no protocolo). Anexo de um tipo que nao esta'
+// arquivo e' "Falta" (Atencao: se envia com justificativa, como no protocolo); a situacao basta, sem nota "Exigida". Anexo de um tipo que nao esta'
 // entre os exigidos aparece em "Outros anexos", so' para remover.
 function itensDoPleito(p: Pleito): ItemChecklist[] {
   const arquivosDe = (tipo: string) => p.anexos.filter(a => a.tipo === tipo).map(a => ({ id: a.id, nome: a.nome, tamanho: a.tamanho }));
   const itens: ItemChecklist[] = p.exigidos.map((x): ItemChecklist => {
     const arquivos = arquivosDe(x.tipo);
-    return { chave: x.tipo, rotulo: x.rotulo, nota: "Exigida", arquivos, situacao: arquivos.length > 0 ? "anexada" : "falta",
+    return { chave: x.tipo, rotulo: x.rotulo, arquivos, situacao: arquivos.length > 0 ? "anexada" : "falta",
       aceita: ".xlsx,application/pdf" };
   });
   const conhecidos = new Set(p.exigidos.map(x => x.tipo));
@@ -57,8 +73,10 @@ function itensDoPleito(p: Pleito): ItemChecklist[] {
 }
 
 /** Passo 1: numero do oficio e os campos do tipo. */
-export function NovoPleito({ contratoId, tipo, dataBase, aoCriar, aoCancelar }: {
+export function NovoPleito({ contratoId, tipo, dataBase, reemite, aoCriar, aoCancelar }: {
   contratoId: number; tipo: TipoPleito; dataBase?: string; aoCriar: (p: Pleito) => void; aoCancelar: () => void;
+  // reiteracao ou reemissao do cronograma: o oficio novo nasce ligado ao pleito `id` (issue #277)
+  reemite?: { id: number; reemissao: Reemissao };
 }) {
   const [oficio, setOficio] = useState("");
   const [dias, setDias] = useState("");
@@ -70,6 +88,11 @@ export function NovoPleito({ contratoId, tipo, dataBase, aoCriar, aoCancelar }: 
     ev.preventDefault();
     setOcupado(true); setErro("");
     try {
+      if (reemite) {
+        aoCriar(await api<Pleito>(`/api/pleitos/${reemite.id}/reemitir`, { method: "POST",
+          body: JSON.stringify({ reemissao: reemite.reemissao, numero_oficio: oficio }) }));
+        return;
+      }
       aoCriar(await api<Pleito>(`/api/contratos/${contratoId}/pleitos`, { method: "POST", body: JSON.stringify({
         tipo, numero_oficio: oficio, data_base_mes: dataBase ?? null,
         dias: tipo === "prazo" ? Number(dias) || null : null, justificativa: tipo === "prazo" ? justificativa : null }) }));
@@ -91,7 +114,7 @@ export function NovoPleito({ contratoId, tipo, dataBase, aoCriar, aoCancelar }: 
           <div className="campo">
             <label className="campo__rotulo" htmlFor="prazo-dias">Dias de prorrogação</label>
             <input id="prazo-dias" name="dias" autoComplete="off" spellCheck={false} className="entrada--16ch" type="number" min={1} required
-              placeholder="Ex.: 60…" value={dias} onChange={e => setDias(e.target.value)} />
+              value={dias} onChange={e => setDias(e.target.value)} />
           </div>
           <div className="campo">
             <label className="campo__rotulo" htmlFor="prazo-just">Justificativa (vai na seção “2. DO PEDIDO”)</label>
@@ -176,9 +199,10 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
         <Selo classe={p.situacao === "enviado" ? "selo--ok" : ""}>
           {p.situacao === "enviado" ? `enviado ${p.enviado_em ? fmtDataPura(p.enviado_em.slice(0, 10)) : ""}` : p.situacao}
         </Selo>
-        {p.origem === "cadastro" && <span className="cartao__dica">enviado antes do sistema (cadastro)</span>}
+        {p.origem === "cadastro" && <Selo>Antes do sistema</Selo>}
       </div>
       {desfecho && <p className="cartao__corpo campo__nota">{desfecho}</p>}
+      {cadeiaDoPleito(p).map((t, i) => <p key={i} className="cartao__corpo campo__nota">{t}</p>)}
       {p.origem === "sistema" && p.situacao !== "enviado" && (
         <div className="cartao__corpo pilha">
           {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
@@ -199,8 +223,7 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
           <div className="pilha">
             {/* montada a carta, o texto recolhe; montar e baixar ficam fora dele, sempre a' vista */}
             <CartaRecolhivel id={`carta-pleito-${p.id}`} linhas={12} valor={corpo} desabilitado={!editavel} aoMudar={setCorpo}
-              montada={!!p.nome_documento} dicaMontada="carta montada; abra para editar"
-              nota="Linha em branco separa parágrafos; “# ” abre título." />
+              montada={!!p.nome_documento} />
             {editavel && (
               <div className="form-inline">
                 {/* primario so' enquanto a carta nao foi montada: depois dela o passo e' assinar e enviar */}
@@ -227,10 +250,9 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
               </label>
             </div>
           )}
-          {p.conferencia && (
-            p.conferencia.ok
-              ? <p className="notas__ok">Assinado conferido: {p.conferencia.paginas_montado} páginas com o carimbo do envelope.</p>
-              : <ul className="lista-simples">{p.conferencia.avisos.map(a => <li key={a.codigo} className="notas__diverge">{a.mensagem}</li>)}</ul>
+          {/* so' a divergencia do assinado aparece; conferido, o selo da situacao basta */}
+          {p.conferencia && !p.conferencia.ok && (
+            <ul className="lista-simples">{p.conferencia.avisos.map(a => <li key={a.codigo} className="notas__diverge">{a.mensagem}</li>)}</ul>
           )}
 
           {p.pendencias.length > 0 && (
@@ -247,7 +269,7 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
           )}
           {editavel && (descartando
             ? <FormMotivo id={`descartar-pleito-${p.id}`} titulo="Descartar este ofício" rotulo="Motivo (obrigatório)"
-                placeholder="Ex.: número do ofício errado…" acao="Descartar o ofício" acaoOcupada="Descartando…" ocupado={ocupado}
+                acao="Descartar o ofício" acaoOcupada="Descartando…" ocupado={ocupado}
                 aoFechar={() => setDescartando(false)}
                 aoConfirmar={motivo => void agir(() => api(`/api/pleitos/${p.id}/descartar`, { method: "POST", body: JSON.stringify({ motivo }) }))} />
             : <button type="button" className="btn btn--pequeno" disabled={ocupado} onClick={() => setDescartando(true)}>Descartar</button>)}
@@ -265,13 +287,14 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
                     <textarea id={`pl-just-${p.id}`} name="justificativa" autoComplete="off" rows={2} maxLength={2000} value={justificativa}
                       aria-invalid={erroJustificativa ? true : undefined} aria-describedby={erroJustificativa ? `pl-just-${p.id}-erro` : undefined}
                       onChange={e => setJustificativa(e.target.value)} />
+                    {/* F-69: a condicao do Enviar aparece no erro do campo, quando o Enviar e' clicado sem ela */}
                     <ErroCampo id={`pl-just-${p.id}-erro`} erro={erroJustificativa} />
-                    {/* F-69: a condicao do Enviar, logo abaixo do campo que a cumpre */}
-                    <span className="campo__nota">Para enviar com pendência, a justificativa precisa de {MIN_JUSTIFICATIVA} caracteres.</span>
                   </div>
                 )}
                 aoEnviar={enviar} aoDescartar={() => setPrevia(null)} />
-              <p className="campo__nota">O e-mail sai da sua conta Microsoft. Anexos: {mb(previa.total)} de {mb(previa.limite)} permitidos.</p>
+              {previa.total > previa.limite && (
+                <p className="notas__diverge">Anexos passam do limite: {mb(previa.total)} de {mb(previa.limite)} permitidos.</p>
+              )}
             </div>
           )}
         </div>

@@ -30,3 +30,14 @@ describe("Login: recusas", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Confira os dois e tente de novo.");
   });
 });
+
+describe("Login: só o que se usa para entrar", () => {
+  afterEach(cleanup);
+
+  it("sem frase de apoio, subtítulo da marca, ajuda, placeholder de e-mail nem rodapé", () => {
+    const { container } = render(<Login aoEntrar={() => {}} />);
+    expect(screen.getByRole("heading", { name: "Entrar" })).toBeTruthy();
+    expect(container.textContent).not.toMatch(/Medições, protocolos|Plataforma de Obras|cadastrados pelo administrador|rede interna|©/);
+    expect(screen.getByLabelText("E-mail").getAttribute("placeholder")).toBeNull();
+  });
+});

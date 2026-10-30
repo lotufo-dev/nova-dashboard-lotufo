@@ -151,7 +151,7 @@ export default function PleitoPrevisao({ pleitoId, dataBase, ciclo, aoGravar }: 
                   <td>
                     <label className="sr-only" htmlFor={`prev-valor-${pleitoId}-${l.chave}`}>Valor previsto da linha {i + 1}</label>
                     <CampoValor id={`prev-valor-${pleitoId}-${l.chave}`} name={`valor-${l.chave}`} value={l.valor}
-                      ajudaId={`previsao-${pleitoId}`} onChange={v => mudar(l.chave, "valor", v)} />
+                      onChange={v => mudar(l.chave, "valor", v)} />
                     {/* indice deflacionario da' reajuste negativo; o campo de valor so' aceita digitos */}
                     <label className="campo__nota">
                       <input type="checkbox" aria-label={`Reajuste negativo na linha ${i + 1}`} checked={l.negativo}

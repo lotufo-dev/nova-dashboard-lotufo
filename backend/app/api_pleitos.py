@@ -25,6 +25,11 @@ class CriarIn(BaseModel):
     justificativa: str | None = Field(default=None, max_length=20000)
 
 
+class ReemitirIn(BaseModel):
+    reemissao: Literal["reiteracao", "cronograma"]
+    numero_oficio: str = Field(min_length=1, max_length=40)
+
+
 class MontarIn(BaseModel):
     corpo: str | None = Field(default=None, max_length=20000)
 
@@ -108,6 +113,22 @@ def criar(contrato_id: ID, dados: CriarIn, usuario: dict = Depends(exigir("edita
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
+
+
+@router.post("/api/pleitos/{pid}/reemitir", status_code=201)
+def reemitir(pid: ID, dados: ReemitirIn, usuario: dict = Depends(exigir("editar_cadastros")),
+             conn: sqlite3.Connection = Depends(conexao)):
+    """Reiteracao (familia B) ou reemissao do cronograma: pleito novo de reajuste ligado a este (issue #277)."""
+    _existe(conn, pid)
+    contrato_id = conn.execute("SELECT contrato_id FROM pleitos WHERE id=?", (pid,)).fetchone()[0]
+    try:
+        novo = pleitos.criar(conn, usuario["id"], contrato_id, "reajuste", dados.numero_oficio,
+                             reemite_pleito_id=pid, reemissao=dados.reemissao)
+    except pleitos.RascunhoAberto as e:
+        raise HTTPException(409, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return _detalhe(conn, novo)
 
 
 @router.get("/api/pleitos/{pid}")

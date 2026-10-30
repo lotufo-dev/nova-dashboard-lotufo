@@ -5,7 +5,7 @@ describe("rota", () => {
   it("toda rota tem um caminho canônico e volta igual", () => {
     const rotas: Rota[] = [
       { tela: "inicio" }, { tela: "medicoes" }, { tela: "carteira" }, { tela: "obras" },
-      { tela: "documentos" }, { tela: "admin" }, { tela: "conta" }, { tela: "avisos" },
+      { tela: "documentos" }, { tela: "admin" }, { tela: "conta" }, { tela: "avisos" }, { tela: "siga" },
       { tela: "obra", id: 7, aba: "medicoes" },
       { tela: "medicao", obra: 7, id: 723 },
       { tela: "obra", id: 7, aba: "documentos" },

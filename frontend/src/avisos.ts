@@ -1,21 +1,21 @@
 // Regras de APRESENTACAO da tela de Avisos (NAVEGACAO.md › Avisos): funcoes puras sobre o aviso que o servidor
 // manda pronto (`app/avisos.py`). Nada aqui decide nivel, prazo ou atraso: so' agrupa, filtra e ordena.
 import { porAtraso, type Aviso, type Nivel } from "./Alertas";
-import { fmtCompetencia } from "./tempo";
 
-export type Familia = "prazo" | "reajuste" | "nota" | "documentos" | "outros";
+export type Familia = "prazo" | "reajuste" | "nota" | "siga" | "documentos" | "outros";
 
 // A ordem dos grupos e' a do mapa; "Outros" guarda o aviso de lar desconhecido, para nada sumir. A familia
 // Dinheiro saiu com o aviso de pagamento atrasado (issue #255), que era o unico dela.
 export const FAMILIAS: { id: Familia; rotulo: string }[] = [
   { id: "prazo", rotulo: "Prazo" }, { id: "reajuste", rotulo: "Reajuste" }, { id: "nota", rotulo: "Nota" },
-  { id: "documentos", rotulo: "Documentos" }, { id: "outros", rotulo: "Outros" },
+  { id: "siga", rotulo: "SIGA" }, { id: "documentos", rotulo: "Documentos" }, { id: "outros", rotulo: "Outros" },
 ];
 
 /** A familia e' o lar do aviso: o `destino` que o servidor manda (a aba da obra, ou Documentos). */
 export function familiaDoAviso(a: Aviso): Familia {
   const d = a.destino;
   if (d?.tela === "documentos") return "documentos";
+  if (d?.tela === "siga") return "siga";
   if (d?.tela === "contrato") {
     if (d.aba === "prazos") return "prazo";
     if (d.aba === "reajuste") return "reajuste";
@@ -67,27 +67,5 @@ export function quandoDoAviso(a: Aviso): string {
   return a.dias >= 0 ? `${d}` : `há ${d}`;
 }
 
-/** Hifen nao separavel (U+2011) nos codigos e nomes exibidos: "MT-388" e "data-base" nao partem no hifen (N4-03). */
-const semQuebra = (t: string) => t.replace(/-/g, "\u2011");
-
 /** O "R$" nao fica orfao no fim da linha: o espaco depois dele nao separa (N04-09). A mensagem vem pronta do servidor. */
 export const semRSOrfao = (t: string) => t.replace(/R\$ /g, "R$\u00a0");
-
-/** Para onde o clique leva, no formato "Destino · Obra" ("Prazos · Granito"): o destino primeiro, sem artigo, para
- *  nao errar o genero do nome da obra (N4-03). O espaco antes do ponto nao separa: o "·" nao abre linha (N05-04).
- *  `omitirObra`: o aviso ja' esta' no grupo da obra (ou da empresa), que traz o nome no titulo; ai a frase fica so' com o destino. */
-export function ondeSeResolve(a: Aviso, omitirObra = false): string {
-  const d = a.destino;
-  if (!d) return "";
-  const com = (destino: string, ...resto: (string | null | undefined)[]) =>
-    [destino, ...resto].filter(Boolean).join("\u00a0· ");
-  if (d.tela === "documentos") return com("Documentos", !omitirObra && a.entidade ? semQuebra(a.entidade) : null);
-  const obra = !omitirObra && a.obra ? semQuebra(a.obra) : null;
-  if (d.aba === "notas") return com(a.medicao_id ? "Notas da medição" : "Notas", obra);
-  if (d.aba === "reajuste" && a.data_base_mes) return com("Reajuste", obra, `data\u2011base ${fmtCompetencia(a.data_base_mes)}`);
-  // a aba Medicoes da obra abre nas medicoes em andamento
-  if (d.aba === "medicoes" || !d.aba) return com("Em andamento", obra);
-  const aba: Record<string, string> = { prazos: "Prazos", reajuste: "Reajuste", documentos: "Documentos exigidos",
-    contrato: "Contrato" };
-  return com(aba[d.aba] ?? "Medições", obra);
-}

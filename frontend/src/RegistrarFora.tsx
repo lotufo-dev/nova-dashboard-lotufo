@@ -110,8 +110,6 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
   return (
     <Janela titulo="Registrar envio feito fora do sistema" aoFechar={fechar}>
       <form className="pilha" onSubmit={registrar}>
-        <p className="campo__nota">Para o que já saiu por fora: e-mail pelo Outlook ou protocolo no balcão do órgão. As notas vão
-          para Aguardando pagamento.</p>
         <div className="form-inline">
           <div className="campo">
             <label className="campo__rotulo" htmlFor="porfora-data">Data do envio (obrigatória)</label>
@@ -127,7 +125,7 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
             <label className="campo__rotulo" htmlFor="porfora-processo">Nº do processo no órgão (opcional)</label>
             <input id="porfora-processo" name="numero_processo" type="text" autoComplete="off" spellCheck={false} maxLength={100} placeholder="Ex.: 0001234-56.2026…"
               value={processo} disabled={marcados.length !== 1} onChange={e => setProcesso(e.target.value)} />
-            {marcados.length > 1 && <span className="campo__nota">Cada envio tem o seu ofício e o seu processo: marque um só para informá-los.</span>}
+            {marcados.length > 1 && <span className="campo__nota">Marque um envio só para informar ofício e processo.</span>}
           </div>
         </div>
         <div className="campo">
@@ -136,7 +134,7 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
         </div>
         <div className="campo">
           <label className="campo__rotulo" htmlFor="porfora-obs">Como e para quem a nota foi enviada</label>
-          <textarea id="porfora-obs" rows={2} maxLength={2000} required value={obs} placeholder="Ex.: pelo Outlook, ao fiscal do contrato…"
+          <textarea id="porfora-obs" rows={2} maxLength={2000} required value={obs}
             onChange={e => setObs(e.target.value)} />
         </div>
         <fieldset className="opcoes">
@@ -155,13 +153,12 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
                       setIrmasFora(ev.target.checked ? irmasFora.filter(x => x !== i.medicao_id) : [...irmasFora, i.medicao_id]);
                       setConfirmadas({});     // outra composicao: a lista confirmada era a das medicoes de antes
                     }} />
-                  Incluir também {i.tipo === "reajuste" ? "o" : "a"} {i.titulo} (saiu no mesmo e-mail)
+                  Incluir também {i.tipo === "reajuste" ? "o" : "a"} {i.titulo}
                 </label>
               ))}
             </div>
           ))}
         </fieldset>
-        <p className="campo__nota">Registrar congela o valor protocolado das medições marcadas.</p>
         {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
         <div className="iniciar__rodape">
           <button type="submit" className="btn btn--primario" disabled={ocupado || !data || !obs.trim()}>{ocupado ? "Gravando…" : "Registrar"}</button>

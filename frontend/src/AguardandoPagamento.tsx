@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import { brl, contar } from "./formato";
+import { brl } from "./formato";
 import { IconeAlerta, IconeDocumento } from "./icones";
 import { mensagem } from "./NotasAEnviar";
 import { Link } from "./Link";
@@ -13,7 +13,7 @@ import "./aguardandoPagamento.css";
 // ao contratante (medicao `protocolada`), pelo sistema ou registradas por fora, em tres faixas pelo atraso
 // (Atrasadas 45+, Atencao 30 a 44, Em dia), com o painel da nota escolhida ao lado. O numero do protocolo no orgao
 // (SIGA, na MTPAR) so' se digita na etapa 4 da pagina da medicao, com o comprovante (decisao de 16/10/2026): aqui a
-// marca "sem protocolo SIGA" leva ate' la'.
+// marca "sem protocolo SIGA" (ou, fora da MTPAR, o link "Registrar o número") leva ate' la'.
 
 type Linha = {
   medicao_id: number; contrato_id: number; obra: string; orgao: string; descricao: string; valor_centavos: number;
@@ -49,7 +49,7 @@ const faixaDe = (i: Item): Faixa["id"] => i.nivel ?? "ok";
 const semSiga = (l: Linha) => l.familia === "mtpar" && !l.numero_orgao;
 
 function Parada({ i }: { i: Item }) {
-  if (i.dias === null) return <span className="ap__traco" title="Sem a data de envio desta nota">—</span>;
+  if (i.dias === null) return <span className="ap__traco">—</span>;
   return (
     <span className="ap__parada-caixa">
       {i.nivel && <i className={`ap__ponto ap__ponto--${i.nivel}`} aria-hidden="true" />}
@@ -68,16 +68,16 @@ function Painel({ l, podeEditar }: { l: Item; podeEditar: boolean }) {
       <h2>{l.obra} · {l.descricao}</h2>
       <div className="ap__painel-orgao">{l.orgao}</div>
       <div className="ap__painel-valor">{brl(l.valor_centavos)}</div>
-      <div className="ap__painel-envio">Enviada em <span className="num">{data(l.enviada_em)}</span> ·{" "}
-        <span className="ap__fraco">{l.origem === "externo" ? "por fora" : "pelo sistema"}</span></div>
+      <div className="ap__painel-envio">Enviada em <span className="num">{data(l.enviada_em)}</span>
+        {l.origem === "externo" && <> · <span className="ap__fraco">por fora</span></>}</div>
       <div className="ap__campo">
         <span className="ap__rotulo">{rotulo}</span>
         {l.numero_orgao ? <div>{l.numero_orgao}</div> : (
           <div className="ap__sem-numero">
-            {mtpar && (podeEditar
-              ? <Link para={etapa4} secao="etapa-4" title="Registrar o número na etapa 4 da medição"><Selo classe="selo--atencao">sem protocolo SIGA</Selo></Link>
-              : <Selo classe="selo--atencao">sem protocolo SIGA</Selo>)}
-            {podeEditar && <Link className="ap__link" para={etapa4} secao="etapa-4">Registrar o número na etapa 4 da medição →</Link>}
+            {mtpar ? (podeEditar
+              ? <Link para={etapa4} secao="etapa-4"><Selo classe="selo--atencao">sem protocolo SIGA</Selo></Link>
+              : <Selo classe="selo--atencao">sem protocolo SIGA</Selo>)
+              : podeEditar ? <Link className="ap__link" para={etapa4} secao="etapa-4">Registrar o número →</Link> : <span className="ap__traco">—</span>}
           </div>
         )}
       </div>
@@ -129,7 +129,7 @@ export default function AguardandoPagamento({ hoje, podeEditar = true }: { hoje?
 
   return (
     <>
-      <p className="ap__total"><span className="dinheiro">{brl(total)}</span> em notas aguardando pagamento · {contar(itens.length, "nota", "notas")}</p>
+      <p className="ap__total">Total <span className="dinheiro">{brl(total)}</span></p>
       <div className="ap">
         <section className="ap__quadro" aria-label="Notas aguardando pagamento">
           <table className="ap__tabela" role="grid">
@@ -147,7 +147,7 @@ export default function AguardandoPagamento({ hoje, podeEditar = true }: { hoje?
                   <td colSpan={5}>
                     <span className="ap__faixa-rotulo">
                       <i className={`ap__ponto ap__ponto--${g.f.id}`} aria-hidden="true" />
-                      {g.f.rotulo} · {g.itens.length} · <span className="dinheiro">{brl(g.itens.reduce((s, i) => s + i.valor_centavos, 0))}</span>
+                      {g.f.rotulo}
                     </span>
                   </td>
                 </tr>
@@ -162,8 +162,7 @@ export default function AguardandoPagamento({ hoje, podeEditar = true }: { hoje?
                       <td>{i.orgao}{semSiga(i) && (
                         <> {podeEditar ? (
                           <span onClick={ev => ev.stopPropagation()} onKeyDown={ev => ev.stopPropagation()}>
-                            <Link para={{ tela: "medicao", obra: i.contrato_id, id: i.medicao_id }} secao="etapa-4"
-                              title="Registrar o número na etapa 4 da medição"><Selo classe="selo--atencao">sem protocolo SIGA</Selo></Link></span>
+                            <Link para={{ tela: "medicao", obra: i.contrato_id, id: i.medicao_id }} secao="etapa-4"><Selo classe="selo--atencao">sem protocolo SIGA</Selo></Link></span>
                         ) : <Selo classe="selo--atencao">sem protocolo SIGA</Selo>}</>
                       )}</td>
                       <td className="col-num dinheiro" data-rotulo="Valor">{brl(i.valor_centavos)}</td>
