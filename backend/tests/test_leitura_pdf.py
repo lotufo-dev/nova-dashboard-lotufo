@@ -395,8 +395,25 @@ def test_ocr_do_pacote_nao_tem_o_teto_de_paginas_da_certidao(monkeypatch):
     pdf = _pdf_de_n_paginas(leitura_pdf.TETO_PAGINAS + 5)
     with pytest.raises(leitura_pdf.TextoInadequado):
         leitura_pdf.texto_por_ocr(pdf, "tesseract", "tessdata")
-    assert leitura_pdf.texto_por_ocr(pdf, "tesseract", "tessdata", pacote=True) == "página\npágina"
+    assert leitura_pdf.paginas_por_ocr(pdf, "tesseract", "tessdata", pacote=True) == ["página", "página"]
     assert chamadas == ["tesseract", "tesseract"]       # so' as primeiras `OCR_PAGINAS`
+
+
+def test_ocr_do_pacote_vai_ao_subprocesso_no_modo_do_pacote_e_com_o_prazo_do_pacote(monkeypatch):
+    """Se a chamada voltar ao modo "ocr" (teto de 20 paginas da certidao), o envelope do DocuSign e' recusado."""
+    pedidos = []
+    monkeypatch.setattr(leitura_pdf, "configuracao_ocr", lambda: ("tesseract", "tessdata"))
+
+    def com_limite(pdf, modo, limite=None, opcoes=None):
+        pedidos.append((modo, limite, opcoes))
+        return ["capa", ""]
+    monkeypatch.setattr(leitura_pdf, "com_limite", com_limite)
+    assert leitura_pdf.paginas_por_ocr_com_limite(b"%PDF-") == ["capa", ""]
+    assert pedidos == [("ocr_pacote", max(leitura_pdf.OCR_TEMPO_LIMITE_S, leitura_pdf.TEMPO_PACOTE_S),
+                        ("tesseract", "tessdata"))]
+    # e o OCR da certidao continua como era
+    leitura_pdf.texto_por_ocr_com_limite(b"%PDF-")
+    assert pedidos[1][:2] == ("ocr", leitura_pdf.OCR_TEMPO_LIMITE_S)
 
 
 
