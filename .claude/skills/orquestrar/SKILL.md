@@ -45,7 +45,7 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      número da PR e o **caminho absoluto do worktree** que a trabalhadora devolveu. Ele lê os arquivos lá e
      roda `git -C <worktree> diff origin/master...HEAD`.
    - **Gate Sol**, só se a issue tem label `risco:*`: skill `gate-sol`, passando o caminho do worktree
-     (a skill faz `cd` para o worktree), pela ferramenta Bash.
+     (a skill faz o `cd` dentro de um subshell, que não muda o diretório da sessão), pela ferramenta Bash.
    - Veredito inválido (resposta vazia, erro, sem "OK" nem lista de achados, **ou "OK" sobre diff vazio**:
      conferir antes `git -C "<worktree>" diff --stat origin/master...HEAD` não vazio): rodar de novo uma vez;
      se continuar inválido, a PR não mergeia sozinha (ver Travas).
@@ -94,7 +94,8 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    6). Quando ela voltar: passo 5 sobre o diff novo e passo 8 inteiro de novo antes de religar o auto-merge.
    Vermelha de novo, `precisa-do-leo`.
 10. **Depois do merge** de cada PR (e no `PAROU`/`FALHOU` do passo 4): `git pull --ff-only` na pasta
-    principal e remover o worktree da trabalhadora, pelo PowerShell na pasta principal (o hook de remoção só
+    principal (com `cd` explícito para ela: o diretório do Bash da sessão persiste entre chamadas e pode ainda estar
+    dentro de um worktree) e remover o worktree da trabalhadora, pelo PowerShell na pasta principal (o hook de remoção só
     roda quando o Claude remove sozinho). **Só remover caminho que contém `\.claude\worktrees\`**; a produção
     (`C:\DashboardLotufo\app`) também é worktree deste repositório e nunca entra aqui.
     `git worktree remove "<caminho>"` (se reclamar da junção, antes rode

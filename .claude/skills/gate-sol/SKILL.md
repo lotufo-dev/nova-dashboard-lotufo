@@ -29,15 +29,19 @@ lido pelo stdin com `-` no lugar do prompt.
 
 Antes, garantir que o `master` de comparação está em dia: `git fetch origin` e, se `master` local estiver
 atrás de `origin/master`, use `origin/master...HEAD` no lugar de `master...HEAD`. Quando a orquestradora
-chama a skill, a branch está no worktree da trabalhadora, não na pasta atual: faça o `cd` para o worktree
-antes de tudo. **Conferir antes que o diff não é vazio** (`git diff --stat origin/master...HEAD`): diff vazio
+chama a skill, a branch está no worktree da trabalhadora, não na pasta atual: entre no worktree com o `cd`
+do subshell abaixo (nunca com um `cd` solto). **Conferir antes que o diff não é vazio** (`git diff --stat origin/master...HEAD`): diff vazio
 dá "OK" do codex sem ele ter lido nada, e isso não é veredito.
 
-O bloco abaixo vai **inteiro numa única chamada do Bash**: o diretório de trabalho volta ao original entre
-chamadas, então um `cd` solto não vale para a chamada seguinte. `<worktree>` é o caminho absoluto que a
-orquestradora passou; numa sessão manual, é a pasta atual do worktree (`pwd`).
+O bloco abaixo vai **inteiro numa única chamada do Bash, dentro de um subshell** `( ... )`: o `cd` fica dentro
+do subshell e não muda o diretório da sessão. Isso importa porque, na sessão principal (a da orquestradora), o
+diretório do Bash persiste de uma chamada para a outra; um `cd` solto deixaria a orquestradora dentro do
+worktree da trabalhadora, e o `git pull` seguinte rodaria na branch errada ou a remoção do worktree falharia.
+`<worktree>` é o caminho absoluto que a orquestradora passou; numa sessão manual, é a pasta atual do worktree
+(`pwd`).
 
 ```bash
+(
 cd "<worktree>" || exit 1
 git diff --quiet origin/master...HEAD; rc=$?; [ "$rc" -eq 1 ] || { echo "diff vazio ou erro no git diff (rc=$rc)"; exit 1; }
 ENTRADA="<scratchpad>/gate-sol-<N>-entrada.md"
@@ -49,6 +53,7 @@ PEDIDO
 git diff origin/master...HEAD >> "$ENTRADA" || { echo "git diff falhou"; exit 1; }
 rm -f "<scratchpad>/gate-sol-<N>.md"
 codex exec -m gpt-5.6-sol -o "<scratchpad>/gate-sol-<N>.md" - < "$ENTRADA" || { echo "codex falhou"; exit 1; }
+)
 ```
 
 - `<N>` é o número da issue; `<scratchpad>` é a pasta temporária da sessão. O `-o` guarda só a resposta final;
