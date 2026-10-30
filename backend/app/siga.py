@@ -574,13 +574,14 @@ def pedir_leitura(conn, usuario_id: int, processo_id: int | None, tarefa: str,
             "novo": novo, "disparado": not lendo and erro is None, "erro_disparo": erro}
 
 
-def iniciar_rodada(conn, agora: datetime.datetime | None = None) -> dict:
+def iniciar_rodada(conn, agora: datetime.datetime | None = None, so_pedidos: bool = False) -> dict:
     """"Comecei" do robo: o servidor decide o que ler. Completa (todos os processos acompanhados) com pedido "todos"
     em aberto, ou quando a ultima rodada completa terminada comecou ha' 14 minutos ou mais (ou nunca houve): e' a
     rodada automatica de 15 em 15 minutos. Senao, so' os processos dos pedidos em aberto. Os pedidos em aberto ficam
     ligados a' rodada. Sem nada a ler nao grava nada: e' o que o robo recebe quando pergunta, antes de encerrar, se
     chegou pedido novo. Com rodada aberta ha' menos de 10 minutos (o robo dela pode estar vivo: so' ele chama aqui,
-    porque o Windows nao roda a tarefa duas vezes), devolve a mesma: e' o robo repetindo o "comecei"."""
+    porque o Windows nao roda a tarefa duas vezes), devolve a mesma: e' o robo repetindo o "comecei".
+    `so_pedidos` (o robo fora do horario, issue #347): nunca completa por tempo, so' os pedidos em aberto."""
     agora = agora or tempo.agora_utc()
     with db.mutacao(conn):
         todos = [dict(r) for r in conn.execute("SELECT id, codigo, numero, nome FROM siga_processos ORDER BY id")]
@@ -593,7 +594,7 @@ def iniciar_rodada(conn, agora: datetime.datetime | None = None) -> dict:
             pedidos = {r[0] for r in conn.execute("SELECT processo_id FROM siga_pedidos WHERE rodada_id IS NULL")}
             ultima = conn.execute("SELECT MAX(iniciada_em) FROM siga_rodadas WHERE completa=1 "
                                   "AND terminada_em IS NOT NULL").fetchone()[0]
-            por_tempo = ultima is None or agora - _instante(ultima) >= COMPLETA_A_CADA
+            por_tempo = not so_pedidos and (ultima is None or agora - _instante(ultima) >= COMPLETA_A_CADA)
             completa = por_tempo or None in pedidos
             processos = [p for p in todos if completa or p["id"] in pedidos]
             if not processos:
