@@ -234,7 +234,8 @@ def test_mtpar_nao_oferece_o_envio_da_planilha(api, monkeypatch):
     assert r.status_code == 422 and "MT-PAR" in r.json()["detail"]
     r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json={
         "numero_oficio": "337", "para": ["protocolo@orgao-b.exemplo.com.br"], "copia": [], "assunto": "x",
-        "corpo": "x"})
+        "corpo": "x", "anexos_previa": []})
+    assert "MT-PAR" in r.json()["detail"]
     assert r.status_code == 422 and falso.enviados == []
     assert _linha("SELECT estado FROM medicoes WHERE id=?", mid) == {"estado": "planilha_gerada"}
 
@@ -273,7 +274,7 @@ def test_peca_anexada_depois_da_previa_recusa_o_envio_e_destrava(api, monkeypatc
     falso = CorreioFalso()
     monkeypatch.setattr(correio, "cliente", falso)
     r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
-    assert r.status_code == 422 and "prévia" in r.json()["detail"]
+    assert r.status_code == 422 and r.json()["detail"]["codigo"] == "ANEXOS_MUDARAM"
     assert falso.enviados == []
     assert _linha("SELECT envio_reservado_em FROM medicao_planilha_envios WHERE medicao_id=?", mid) in \
         (None, {"envio_reservado_em": None})
@@ -285,10 +286,13 @@ def test_reserva_presa_da_planilha_se_libera_pela_rota_de_envios(api):
     c = db.get_conn()
     c.execute("INSERT INTO medicao_planilha_envios (medicao_id, planilha_id, envio_reservado_em, envio_reservado_por) "
               "VALUES (?,?,datetime('now','-30 minutes'),?)", (mid, pv["planilha_id"], _usuario()["id"]))
-    rid = c.execute("SELECT MAX(id) FROM medicao_planilha_envios").fetchone()[0]
     c.commit(); c.close()
     r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
     assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ENVIO_RESERVADO"
+    # a tela acha a reserva presa na propria medicao (tabela e id para a liberacao)
+    reserva = cl.get(f"/api/medicoes/{mid}").json()["envio_planilha"]["reserva"]
+    assert reserva["tabela"] == "medicao_planilha_envios" and reserva["reservado_por"] == "Admin"
+    rid = reserva["id"]
     r = cl.post("/api/envios/liberar", json={"tabela": "medicao_planilha_envios", "id": rid,
                                              "justificativa": "conferi os Enviados e não saiu",
                                              "conferi_enviados": True})
@@ -318,3 +322,38 @@ def test_planilha_xlsx_nao_vira_peca_do_orgao(api):
                 files={"arquivo": ("p.xlsx", b"PK\x03\x04planilha" + b"\x00" * 64, XLSX)})
     assert r.status_code == 422
     assert planilha_envio.TIPO_ENVIO == "planilha"
+
+
+def test_envio_sem_a_conferencia_da_previa_e_recusado(api, monkeypatch):
+    cl, cid, _ = api
+    mid, pv = _pronta(cl, cid)
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    corpo = _corpo(pv)
+    del corpo["anexos_previa"]
+    assert cl.post(f"/api/medicoes/{mid}/envio-planilha", json=corpo).status_code == 422
+    assert falso.enviados == []
+
+
+def test_medicao_ja_enviada_fora_do_sistema_nao_reenvia_a_mesma_versao(api):
+    """Carga do historico ou envio por fora: a medicao ja' esta' em planilha_enviada sem envio pelo sistema."""
+    cl, cid, _ = api
+    mid = _planilha(cl, cid)
+    c = db.get_conn()
+    c.execute("UPDATE medicoes SET estado='planilha_enviada', planilha_envio_origem='externo', "
+              "planilha_enviada_em='2026-08-03' WHERE id=?", (mid,))
+    c.commit(); c.close()
+    s = cl.get(f"/api/medicoes/{mid}").json()["envio_planilha"]
+    assert s["disponivel"] is False and "já foi enviada" in s["motivo"]
+    _revisar(cl, mid, "13.000,00")
+    assert cl.get(f"/api/medicoes/{mid}").json()["envio_planilha"]["disponivel"] is True
+
+
+def test_obra_sem_nome_curto_nao_poe_barra_no_nome_do_anexo(api):
+    cl, cid, _ = api
+    c = db.get_conn()
+    c.execute("UPDATE contratos SET nome_curto=NULL WHERE id=?", (cid,))
+    c.commit(); c.close()
+    mid, pv = _pronta(cl, cid)
+    assert [a["nome"] for a in pv["anexos"][:2]] == ["CT-337-LT-2026 - IC 082-2025 - 01ª Medição (07.2026).pdf",
+                                                    "Planilha - IC 082-2025 - 01ª Medição (07.2026).zip"]

@@ -32,8 +32,9 @@ class EnvioIn(BaseModel):
     assunto: str = Field(min_length=1, max_length=300)
     corpo: str = Field(max_length=20000)
     justificativa: str | None = Field(default=None, max_length=2000)
-    # os anexos que a pessoa conferiu na previa (nome e tamanho): mudou depois dela, o envio recusa
-    anexos_previa: list[AnexoConferido] | None = Field(default=None, max_length=60)
+    # os anexos que a pessoa conferiu na previa (nome e tamanho): obrigatorio, como no envio da nota; mudou depois
+    # dela, o envio recusa
+    anexos_previa: list[AnexoConferido] = Field(max_length=60)
 
 
 @router.post("/api/medicoes/{mid}/envio-planilha/previa")
@@ -50,15 +51,17 @@ def previa(mid: ID, dados: PreviaIn, usuario: dict = Depends(exigir("editar_cada
 def enviar(mid: ID, dados: EnvioIn, usuario: dict = Depends(exigir("editar_cadastros")),
            conn: sqlite3.Connection = Depends(conexao)):
     _medicao_existe(conn, mid)
-    conferidos = [a.model_dump() for a in dados.anexos_previa] if dados.anexos_previa is not None else None
     try:
         eid = planilha_envio.enviar(
             conn, {"id": usuario["id"], "email": usuario["email"]}, mid, dados.numero_oficio, _emails(dados.para),
-            _emails(dados.copia), dados.assunto.strip(), dados.corpo, dados.justificativa, cco=_emails(dados.cco),
-            anexos_previa=conferidos)
+            _emails(dados.copia), dados.assunto.strip(), dados.corpo, [a.model_dump() for a in dados.anexos_previa],
+            dados.justificativa, cco=_emails(dados.cco))
     except envio_reserva.EnvioEmAndamento as e:
         conn.rollback()
         raise HTTPException(409, detail=e.detalhe()) from None
+    except planilha_envio.AnexosMudaram as e:      # a tela reabre a previa pelo `codigo`, como no envio da nota
+        conn.rollback()
+        raise HTTPException(422, detail={"codigo": e.codigo, "mensagem": str(e)}) from None
     except (ValueError, graph.ErroGraph) as e:
         conn.rollback()
         raise HTTPException(422, str(e)) from None

@@ -17,6 +17,7 @@ import io
 import zipfile
 
 from app import arquivos, auditoria, carta, correio, db, envio_reserva, espelhos, medicoes, oficios, pleitos, tempo
+from app.protocolo import AnexosMudaram     # a mesma recusa (com `codigo`) do envio da nota e do protocolo
 
 TABELA = "medicao_planilha_envios"
 TIPO_ENVIO = "planilha"
@@ -28,10 +29,6 @@ EXTENSOES_PECA = ("pdf", "xlsx")
 ROTULO_NATUREZA = {"execucao": "Medição", "projeto": "Projeto", "reajuste": "Reajuste"}
 # data fixa dentro do zip: o mesmo arquivo da o mesmo zip (e o mesmo tamanho) na previa e no envio
 _DATA_ZIP = (1980, 1, 1, 0, 0, 0)
-
-
-class AnexosMudaram(ValueError):
-    """Os anexos de agora nao sao os que a pessoa conferiu na previa (como `protocolo.AnexosMudaram`)."""
 
 
 # --- leitura ---------------------------------------------------------------------------------------
@@ -58,9 +55,12 @@ def _vigente(conn, medicao_id: int) -> dict | None:
     return dict(r) if r else None
 
 
-def _enviada(conn, planilha_id: int) -> bool:
-    return conn.execute(f"SELECT 1 FROM {TABELA} WHERE planilha_id=? AND envio_id IS NOT NULL",
-                        (planilha_id,)).fetchone() is not None
+def _ultima_enviada(conn, m: dict) -> int:
+    """A maior versao ja' enviada. Medicao em `planilha_enviada` sem envio pelo sistema (carga do historico, envio
+    por fora) tem ao menos a 1a enviada: so' a revisao sai daqui, nunca a mesma planilha/carta de novo."""
+    r = conn.execute(f"SELECT MAX(p.versao) FROM {TABELA} e JOIN medicao_planilhas p ON p.id=e.planilha_id "
+                     "WHERE e.medicao_id=? AND e.envio_id IS NOT NULL", (m["id"],)).fetchone()[0] or 0
+    return max(r, 1) if m["estado"] == "planilha_enviada" else r
 
 
 def _recusa(conn, m: dict) -> str | None:
@@ -80,7 +80,7 @@ def _recusa(conn, m: dict) -> str | None:
     v = _vigente(conn, m["id"])
     if v is None:
         return f"{nome} não tem planilha/carta registrada"
-    if _enviada(conn, v["id"]):
+    if v["versao"] <= _ultima_enviada(conn, m):
         return f"A versão {v['versao']} da planilha/carta já foi enviada: para enviar de novo, registre uma revisão"
     return None
 
@@ -93,6 +93,15 @@ def envios(conn, medicao_id: int) -> list[dict]:
         "LEFT JOIN usuarios u ON u.id=v.usuario_id WHERE e.medicao_id=? ORDER BY p.versao", (medicao_id,))]
 
 
+def _reserva(conn, medicao_id: int) -> dict | None:
+    """Envio reservado e nao concluido (em andamento, ou preso depois de uma falha): a tela precisa do id para
+    oferecer a liberacao (`POST /api/envios/liberar`), como no protocolo e no pleito."""
+    r = conn.execute(f"SELECT e.id, e.envio_reservado_em, u.nome AS reservado_por FROM {TABELA} e "
+                     "LEFT JOIN usuarios u ON u.id=e.envio_reservado_por WHERE e.medicao_id=? AND e.envio_id IS NULL "
+                     "AND e.envio_reservado_em IS NOT NULL ORDER BY e.id DESC LIMIT 1", (medicao_id,)).fetchone()
+    return {"tabela": TABELA, **dict(r)} if r else None
+
+
 def situacao(conn, medicao_id: int) -> dict:
     """O que a tela precisa para oferecer (ou nao) o botao "Enviar para protocolo"."""
     m = _medicao(conn, medicao_id)
@@ -103,7 +112,7 @@ def situacao(conn, medicao_id: int) -> dict:
     except ValueError:
         pedidas = []
     return {"disponivel": motivo is None, "motivo": motivo, "envios": envios(conn, medicao_id),
-            "pecas": pecas(conn, medicao_id),
+            "reserva": _reserva(conn, medicao_id), "pecas": pecas(conn, medicao_id),
             "pecas_do_orgao": [{"tipo": x["tipo"], "rotulo": x["rotulo"], "exigida": x["exigida"]} for x in pedidas]}
 
 
@@ -185,7 +194,9 @@ def _revisao(versao: int) -> str:
 def _base(c: dict, m: dict, versao: int) -> str:
     """`{obra} - {nº}ª Medição ({MM.AAAA})`, o mesmo miolo do nome do pacote do protocolo (spec 2026-09-21 §4.4)."""
     comp = f"{m['competencia'][5:7]}.{m['competencia'][:4]}"
-    return f"{pleitos._obra(c)} - {m['numero']:02d}ª {ROTULO_NATUREZA[m['tipo']]} ({comp}){_revisao(versao)}"
+    # obra sem nome curto cai no nº do instrumento ("045/2025"): a barra viraria pasta dentro do zip
+    obra = pleitos._obra(c).replace("/", "-").replace("\\", "-")
+    return f"{obra} - {m['numero']:02d}ª {ROTULO_NATUREZA[m['tipo']]} ({comp}){_revisao(versao)}"
 
 
 def _zip(nome: str, dados: bytes) -> bytes:
@@ -275,8 +286,10 @@ def _conferir_anexos(conferidos: list[dict], atuais: list[dict]) -> None:
 # --- envio -----------------------------------------------------------------------------------------
 
 def enviar(conn, usuario: dict, medicao_id: int, numero_oficio: str, para: list[str], copia: list[str], assunto: str,
-           corpo: str, justificativa: str | None = None, cco: list[str] | None = None,
-           anexos_previa: list[dict] | None = None, hoje: datetime.date | None = None) -> int:
+           corpo: str, anexos_previa: list[dict], justificativa: str | None = None, cco: list[str] | None = None,
+           hoje: datetime.date | None = None) -> int:
+    """`anexos_previa` (nome e tamanho) e' obrigatorio, como no envio da nota (gate Sol S1, PR #141): o e-mail leva
+    o que a pessoa conferiu na previa, e nada sai sem essa conferencia."""
     hoje = hoje or tempo.hoje_local()
     # Tudo o que recusa vem ANTES do e-mail (que nao se desfaz).
     pv = previa(conn, medicao_id, numero_oficio, hoje=hoje)
@@ -285,8 +298,7 @@ def enviar(conn, usuario: dict, medicao_id: int, numero_oficio: str, para: list[
         raise ValueError("Informe ao menos um destinatário")
     if pv["total"] > correio.MAX_TOTAL:
         raise ValueError("Anexos acima do limite do e-mail")
-    if anexos_previa is not None:
-        _conferir_anexos(anexos_previa, pv["anexos"])
+    _conferir_anexos(anexos_previa, pv["anexos"])
     justificativa = (justificativa or "").strip() or None
     if pv["pendencias"] and len(justificativa or "") < MIN_JUSTIFICATIVA:
         raise ValueError(f"{len(pv['pendencias'])} pendência(s) na prévia: informe a justificativa "
