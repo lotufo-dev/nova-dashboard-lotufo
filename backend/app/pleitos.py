@@ -153,7 +153,9 @@ def _vigente(conn, p: dict) -> dict | None:
 def _apostilado(conn, p: dict) -> bool:
     unica = conn.execute("SELECT COUNT(*) FROM contrato_datas_base WHERE contrato_id=?",
                          (p["contrato_id"],)).fetchone()[0] == 1
-    return reajuste._apostilamento(conn, p["contrato_id"], p["data_base_mes"], p["ciclo"], unica) is not None
+    # o mesmo criterio da aba e dos avisos (reajuste.apostilamento_do_ciclo): termo do ciclo que nao atendeu o
+    # pleito vigente nao fecha o ciclo (revisor R2 e gate Sol S1, PR #317)
+    return reajuste.apostilamento_do_ciclo(conn, p["contrato_id"], p["data_base_mes"], p["ciclo"], unica) is not None
 
 
 def _recusa_reemissao(conn, anterior: dict, reemissao: str, familia: str | None) -> str | None:

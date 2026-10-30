@@ -71,6 +71,33 @@ def _termo_do_pleito(conn, contrato_id: int, pleito: dict) -> dict | None:
     return {**dict(r), "dados": json.loads(r["dados"] or "{}")} if r else None
 
 
+def _termo_do_pedido(conn, contrato_id: int, pleito: dict) -> dict | None:
+    """O termo ligado ao pleito ou, subindo pelas reiteracoes (`reemite_pleito_id`), ao pedido que elas reiteram
+    (revisor, PR #317): a reiteracao nao traz cronograma, entao o termo que atendeu o pedido tambem fecha a
+    reiteracao enviada depois dele. A reemissao do cronograma e' pedido novo e para a subida: espera o termo dela."""
+    p, vistos = pleito, set()
+    while p is not None and p["id"] not in vistos:
+        vistos.add(p["id"])
+        termo = _termo_do_pleito(conn, contrato_id, p)
+        if termo is not None:
+            return termo
+        if p.get("reemissao") != "reiteracao" or not p.get("reemite_pleito_id"):
+            return None
+        r = conn.execute("SELECT * FROM pleitos WHERE id=?", (p["reemite_pleito_id"],)).fetchone()
+        p = dict(r) if r else None
+    return None
+
+
+def apostilamento_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, unica: bool) -> dict | None:
+    """O termo que fecha o ciclo, o unico criterio da aba, dos avisos e da recusa de reiterar/reemitir (gate Sol e
+    revisor, PR #317): com pleito enviado no ciclo, o termo ligado ao vigente (ou ao pedido que ele reitera); sem
+    pleito enviado registrado, o apostilamento do ciclo (`_apostilamento`)."""
+    pl = _pleito(conn, contrato_id, mes_base, ciclo)
+    if pl:
+        return _termo_do_pedido(conn, contrato_id, pl)
+    return _apostilamento(conn, contrato_id, mes_base, ciclo, unica)
+
+
 def _pleito(conn, contrato_id: int, mes_base: str, ciclo: int, sem_reiteracao: bool = False) -> dict | None:
     """O ultimo pleito enviado do ciclo vale (reemissao a cada aditivo e' novo pleito no mesmo ciclo).
     `sem_reiteracao`: o ultimo PEDIDO (pleito original ou reemissao do cronograma). A reiteracao (issue #277) so'
@@ -181,14 +208,10 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
                         "apostilamento": None})
             continue
         aniv = aniversario(b["mes"], y)
-        ap = _apostilamento(conn, contrato_id, b["mes"], y, len(bases) == 1)
+        ap = apostilamento_do_ciclo(conn, contrato_id, b["mes"], y, len(bases) == 1)
         pl = _pleito(conn, contrato_id, b["mes"], y)
         # o pedido que espera o apostilamento: a reiteracao nao zera a espera (issue #277)
         pd = _pleito(conn, contrato_id, b["mes"], y, sem_reiteracao=True) or pl
-        # com pleito enviado, quem fecha o ciclo e' o termo ligado ao pleito vigente (gate Sol, PR #317): o termo do
-        # ciclo que nao o atendeu (reemissao enviada depois dele) nao some com a espera
-        if pl:
-            ap = _termo_do_pleito(conn, contrato_id, pl)
         if ap:
             sit, dias = "apostilado", None
         elif pl:

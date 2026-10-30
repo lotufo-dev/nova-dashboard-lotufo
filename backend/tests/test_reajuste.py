@@ -68,6 +68,35 @@ def test_termo_do_ciclo_sem_ligacao_nao_atende_o_pleito_vigente(cenario):
     assert reajuste.avisos(c, D(2026, 9, 20)) == []
 
 
+def test_reiteracao_enviada_depois_do_termo_nao_reabre_o_ciclo(cenario):
+    # revisor (PR #317, R1): P1 em 10/06, termo de 15/09, reiteracao R em 20/09; o aplicar liga P1 (ultimo enviado
+    # ate' a data do termo). A reiteracao nao traz cronograma: o termo ligado ao pedido fecha o ciclo
+    c, ids = cenario
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    p1 = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, enviado_em, "
+              "reemite_pleito_id, reemissao) VALUES (?, 'reajuste', 'sistema', '2024-06', 2026, 'CT-2-LT-2026', "
+              "'enviado', '2026-09-20', ?, 'reiteracao')", (ids["contrato"], p1))
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76"})
+    c.execute("UPDATE pleitos SET instrumento_chave='apostilamento_reajuste-2026-09-15' WHERE id=?", (p1,)); c.commit()
+    r = reajuste.ciclos(c, ids["contrato"], D(2026, 10, 30))[0]
+    assert (r["situacao"], r["apostilamento"]["chave"]) == ("apostilado", "apostilamento_reajuste-2026-09-15")
+    assert reajuste.avisos(c, D(2026, 10, 30)) == []
+
+
+def test_reemissao_do_cronograma_depois_do_termo_espera_o_dela(cenario):
+    # a reemissao do cronograma traz pedido novo: o termo ligado ao pleito anterior nao a atende
+    c, ids = cenario
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    p1 = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, enviado_em, "
+              "reemite_pleito_id, reemissao) VALUES (?, 'reajuste', 'sistema', '2024-06', 2026, 'CT-2-LT-2026', "
+              "'enviado', '2026-09-20', ?, 'cronograma')", (ids["contrato"], p1))
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76"})
+    c.execute("UPDATE pleitos SET instrumento_chave='apostilamento_reajuste-2026-09-15' WHERE id=?", (p1,)); c.commit()
+    assert reajuste.ciclos(c, ids["contrato"], D(2026, 10, 30))[0]["situacao"] == "apostilamento_pendente"
+
+
 def test_sem_pleito_enviado_o_termo_do_ciclo_fecha_o_ciclo(cenario):
     # pleito feito fora do sistema e nao registrado: nao ha' pleito a ligar, o termo do ciclo basta
     c, ids = cenario
