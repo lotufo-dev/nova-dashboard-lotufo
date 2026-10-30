@@ -9,7 +9,7 @@ import "./abaSemMedicao.css";
 // clicar). Por obra: ultima medicao, ha' quanto tempo (do fim da competencia dela, sem cor), a prevista do
 // cronograma e "Iniciar a Nª medicao". Tudo vem de GET /api/medicoes/resumo; a tela so' desenha.
 
-function Linha({ o }: { o: ObraResumo }) {
+function Linha({ o, podeIniciar }: { o: ObraResumo; podeIniciar: boolean }) {
   return (
     <tr>
       <td><Link className="sem-medicao__obra" para={{ tela: "obra", id: o.contrato_id, aba: "medicoes" }}>{o.obra}</Link></td>
@@ -20,8 +20,8 @@ function Linha({ o }: { o: ObraResumo }) {
       <td className={o.prevista ? undefined : "sem-medicao__so-tela"}>
         {o.prevista ? <span className="sem-medicao__prevista">Prevista: {textoMedicao(o.prevista)}</span>
           : <span className="sem-medicao__traco">—</span>}</td>
-      <td className="sem-medicao__acao">
-        <Link className="sem-medicao__iniciar-link" para={destino(o)}>Iniciar a {o.proxima}ª medição{o.proxima_tipo === "projeto" ? " de Projeto" : ""}</Link></td>
+      <td className={podeIniciar ? "sem-medicao__acao" : "sem-medicao__acao sem-medicao__so-tela"}>
+        {podeIniciar && <Link className="sem-medicao__iniciar-link" para={destino(o)}>Iniciar a {o.proxima}ª medição{o.proxima_tipo === "projeto" ? " de Projeto" : ""}</Link>}</td>
     </tr>
   );
 }
@@ -64,7 +64,7 @@ export default function AbaSemMedicao({ obras, podeIniciar, aoIniciar }:
                   <th scope="col"><span className="sr-only">Ação</span></th>
                 </tr>
               </thead>
-              <tbody>{g.obras.map(o => <Linha key={o.contrato_id} o={o} />)}</tbody>
+              <tbody>{g.obras.map(o => <Linha key={o.contrato_id} o={o} podeIniciar={podeIniciar} />)}</tbody>
             </table>
           </details>
         ))}

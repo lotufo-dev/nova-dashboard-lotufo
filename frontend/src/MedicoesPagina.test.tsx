@@ -99,6 +99,16 @@ describe("Medições com abas", () => {
     expect(screen.queryByRole("button", { name: /Iniciar processo/ })).toBeNull();
   });
 
+  it("aba Sem medição aberta: a diretoria vê as obras mas nenhum link de iniciar medição", async () => {
+    api.mockResolvedValue(RESUMO);
+    render(<MedicoesPagina aba="sem-medicao" busca={{}} usuario={{ ...usuario, perfil: "diretoria" }} />);
+    const quadro = await screen.findByRole("region", { name: "Sem medição aberta" });
+    expect(within(quadro).getByRole("link", { name: "Granito" })).toBeTruthy();
+    expect(within(quadro).getByText("Prevista: 24ª · 09/2026")).toBeTruthy();
+    expect(screen.queryAllByRole("link", { name: /^Iniciar a/ })).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /Iniciar processo/ })).toBeNull();
+  });
+
   it("estados novos do motor: abas e cartões na ordem do ciclo, antes do espelho, com o texto em português", async () => {
     api.mockResolvedValue({ ...RESUMO, contagens: { ...RESUMO.contagens, "planilha-enviada": 1 },
       linhas: [linha({ situacao: "planilha-enviada", proximo_passo: "registrar o boletim" })] });
