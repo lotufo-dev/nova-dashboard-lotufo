@@ -43,6 +43,10 @@ TRANSICOES = {
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
 # Issue #281: estados em que o pedido (valor protocolado) e' o da planilha/carta e so' muda por revisao
 ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
+# Issue #284: a medicao que ja' existe antes do espelho; o espelho a leva a `espelho_gerado`. Nas sem boletim, so'
+# com "seguir sem boletim" e justificativa (decisao do Leo de 03/11/2026: prevista, planilha gerada ou enviada).
+ESTADOS_ANTES_DO_ESPELHO = ("prevista", *ESTADOS_PLANILHA)
+ESTADOS_SEM_BOLETIM = ("prevista", "planilha_gerada", "planilha_enviada")
 PEDIDO_POR_REVISAO = "Para mudar o pedido, registre uma revisão da planilha/carta"
 PEDIDO_DEPOIS_DO_BOLETIM = "O pedido não pode mais ser alterado depois do boletim do órgão"
 # Gate Sol S4 (#281): os estados que recebem protocolo, por extenso. Estes vao a `protocolada` no mesmo passo...
@@ -136,7 +140,7 @@ def _linhas_edicoes(conn: sqlite3.Connection, medicao_ids: list[int]) -> list:
             "SELECT a.id, a.acao, a.entidade_id, a.antes, a.depois, a.criado_em, u.nome FROM audit_log a "
             "LEFT JOIN usuarios u ON u.id=a.usuario_id WHERE a.entidade='medicao' "
             f"AND a.entidade_id IN ({','.join('?' * len(lote))}) "
-            "AND a.acao IN ('medicao.valor_protocolado', 'medicao.estado')", lote).fetchall()
+            "AND a.acao IN ('medicao.valor_protocolado', 'medicao.estado', 'medicao.sem_boletim')", lote).fetchall()
     return sorted(linhas, key=lambda r: r["id"])
 
 
@@ -332,6 +336,13 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
         if not (r["entidade_id"] or "").isdigit() or int(r["entidade_id"]) not in out:
             continue
         a_d, d_d = _json_dict(r["antes"]), _json_dict(r["depois"])
+        if r["acao"] == "medicao.sem_boletim":
+            # issue #284: o espelho gerado sem o boletim do orgao, com a justificativa de quem seguiu
+            if d_d and d_d.get("justificativa"):
+                texto = f"Espelho gerado sem boletim: {d_d['justificativa']}"
+                out[int(r["entidade_id"])].append({"data": r["criado_em"],
+                                                   "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+            continue
         if r["acao"] == "medicao.estado":
             # Issue #260: cancelamento e desistencia entram na linha do tempo com o motivo (a duplicata cancelada
             # pela carga do historico diz de qual medicao ela e' copia); as outras transicoes ja' tem marco proprio
@@ -579,12 +590,26 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
                             {"estado": atual, "motivo": motivo_antes}, depois)
 
 
+def valor_travado(m) -> tuple[int, str] | None:
+    """Issue #284: o valor que o espelho tem de usar, (centavos, fonte): o aprovado do boletim (vigente = ultimo
+    evento), senao o pedido (planilha/carta ou valor registrado a mao). O valor que o proprio espelho gravou nao
+    trava: ele e' o digitado e muda gerando de novo."""
+    if m["valor_atestado_centavos"] is not None:
+        return m["valor_atestado_centavos"], "aprovado"
+    if m["valor_protocolado_centavos"] is not None and m["valor_protocolado_origem"] != "espelho":
+        return m["valor_protocolado_centavos"], "pedido"
+    return None
+
+
 def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tipo: str,
                        competencia: str, valor_centavos: int) -> int:
     """A medicao nasce ao gerar o espelho (spec §2). Gerar de novo atualiza o valor enquanto a
-    medicao nao foi protocolada; depois disso correcao e' fora do escopo (nao ha' glosa pos-protocolo)."""
+    medicao nao foi protocolada; depois disso correcao e' fora do escopo (nao ha' glosa pos-protocolo).
+    Issue #284: a medicao que ja' existe antes do espelho (prevista, planilha/carta, boletim) vai a `espelho_gerado`
+    sem trocar o pedido; com valor travado (aprovado ou pedido), o pedido nunca e' sobrescrito pelo espelho."""
     with db.mutacao(conn):
-        ja = conn.execute("SELECT id, estado, valor_protocolado_centavos FROM medicoes "
+        ja = conn.execute("SELECT id, estado, competencia, valor_protocolado_centavos, valor_protocolado_origem, "
+                          "valor_atestado_centavos FROM medicoes "
                           "WHERE contrato_id=? AND numero=? AND tipo=?", (contrato_id, numero, tipo)).fetchone()
         if ja is None:
             cur = conn.execute(
@@ -595,9 +620,30 @@ def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tip
                                 {"numero": numero, "tipo": tipo, "competencia": competencia,
                                  "estado": "espelho_gerado", "valor_protocolado_centavos": valor_centavos})
             return cur.lastrowid
+        if ja["estado"] in ESTADOS_ANTES_DO_ESPELHO:
+            # o pedido fica; sem pedido (prevista vazia), o valor do espelho entra como o de hoje
+            pedido = ja["valor_protocolado_centavos"]
+            novo = {"estado": "espelho_gerado", "competencia": competencia,
+                    "valor_protocolado_centavos": valor_centavos if pedido is None else pedido,
+                    "valor_protocolado_origem": "espelho" if pedido is None else ja["valor_protocolado_origem"]}
+            cur = conn.execute(
+                "UPDATE medicoes SET estado='espelho_gerado', competencia=?, valor_protocolado_centavos=?, "
+                "valor_protocolado_origem=? WHERE id=? AND estado=?",
+                (competencia, novo["valor_protocolado_centavos"], novo["valor_protocolado_origem"], ja["id"],
+                 ja["estado"]))
+            db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+            auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", ja["id"],
+                                {k: ja[k] for k in novo}, {**novo, "valor_do_espelho_centavos": valor_centavos})
+            return ja["id"]
         if ja["estado"] not in ESTADOS_ESPELHO:
             raise ValueError(f"{nome_medicao(numero, tipo)} já está {rotulo_estado(ja['estado'])}: o espelho não pode ser "
                              "gerado de novo depois de protocolada")
+        if valor_travado(ja) is not None:
+            # o valor do espelho e' o travado (conferido em espelhos._calcular); o pedido nao muda
+            cur = conn.execute("UPDATE medicoes SET competencia=? WHERE id=? AND estado IN ('espelho_gerado','espelho_enviado')",
+                               (competencia, ja["id"]))
+            db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+            return ja["id"]
         cur = conn.execute("UPDATE medicoes SET valor_protocolado_centavos=?, valor_protocolado_origem='espelho', "
                            "competencia=? WHERE id=? AND estado IN ('espelho_gerado','espelho_enviado')",
                            (valor_centavos, competencia, ja["id"]))
