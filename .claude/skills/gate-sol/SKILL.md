@@ -22,7 +22,7 @@ Rodar pela ferramenta **Bash** (Git Bash), não pelo PowerShell: o PowerShell 5.
 pipe e estraga os acentos do diff. O codex só lê o texto, não executa nada (o sandbox do codex no Windows
 não abre subprocessos, então não peça para ele rodar testes ou `git`).
 
-**Rodar de dentro do worktree** (`cd "<worktree>"`), que já é um repositório git: assim o codex não precisa de
+**Rodar de dentro do worktree** (o `cd "<worktree>"` do subshell abaixo, nunca solto), que já é um repositório git: assim o codex não precisa de
 `--skip-git-repo-check`, e a proteção do worktree recusa o comando que leva essa opção (visto na issue #75).
 **Nunca use `--skip-git-repo-check`.** O pedido e o diff inteiro vão **juntos num único arquivo de entrada**,
 lido pelo stdin com `-` no lugar do prompt.
@@ -63,6 +63,25 @@ codex exec -m gpt-5.6-sol -o "<scratchpad>/gate-sol-<N>.md" - < "$ENTRADA" || { 
 - Ajuste o foco do prompt ao risco da issue (ex.: `risco:envio` → "e-mail que sai duas vezes, estado gravado
   antes de o Graph aceitar"), como foi feito nos gates dos blocos 1 a 8.
 - Diff grande demora: rodar com `timeout` de 600000 ms ou em segundo plano.
+
+## Sem cota ("usage limit")
+
+O codex usa a cota da assinatura ChatGPT do Leo. Se a saída (do comando ou do arquivo do `-o`) trouxer
+"usage limit" (ou "limite de uso"), **não é veredito inválido e rodar de novo no mesmo dia não adianta**:
+a cota volta no dia seguinte. Não insistir; registrar em `## Gates` da PR:
+
+```
+- [ ] Gate Sol: sem cota em DD/MM
+```
+
+O que fazer depende de quanto o Sol já cobriu:
+
+- **A rodada 1 do Sol já rodou sobre o diff inteiro** (só a conferência da correção ficou sem Sol): o
+  `revisor-adversarial` cobre o diff novo da correção, e o gate vale como cumprido; anotar "rodada 1 do Sol
+  cobriu o diff inteiro, correção revisada só pelo revisor".
+- **Nem a rodada 1 rodou**: a PR **não mergeia sozinha** (sem auto-merge, `precisa-do-leo` na issue com o
+  motivo). Quando a cota voltar, o Leo ou a próxima rodada roda o gate pela skill, e só então se liga o
+  auto-merge.
 
 ## Depois da resposta: uma rodada de correção
 

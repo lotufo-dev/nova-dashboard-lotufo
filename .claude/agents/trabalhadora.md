@@ -50,12 +50,17 @@ ninguém. Leia antes `CLAUDE.md`, `README.md` e as regras de `.claude/rules/` qu
    ficam como **"pendente (orquestradora)"** na seção `## Gates`, porque quem os roda é a orquestradora.
    Se a skill `code-review` não estiver disponível para você, escreva em `## Gates` "/code-review: não rodou
    (subagente)", nunca "0 achados"; a orquestradora roda. A resposta final é a do formato abaixo, não a que a
-   skill `abrir-pr` descreve. Se o prompt veio como "Issue #N, PR #M, worktree <caminho>: corrija estes
-   achados", você não cria nada: trabalha nesse caminho (`cd`/`git -C`) e segue o passo 6.
+   skill `abrir-pr` descreve. Se o prompt veio como "Issue #N, PR #M, branch no GitHub <branch>: corrija
+   estes achados", a PR já existe e você não cria nada: o seu worktree (isolado, como o de qualquer
+   trabalhadora) nasceu do `master`, então primeiro `git fetch origin` e
+   `git switch -c <branch> origin/<branch>` (branch local nova a partir da remota da PR; git em outro
+   worktree a ferramenta recusa) e siga o passo 6.
 6. Se a orquestradora mandar achados de volta: para cada um, corrigir com teste, ou refutar com `arquivo:linha`
-   que prova. Commit, `git push origin HEAD:<branch no GitHub>`, e atualizar a PR (`gh pr edit <M> --body-file ...`) com o resultado em `## Gates`.
+   que prova. Commit, `git push origin HEAD:<branch no GitHub>` (na correção, a mesma branch remota da PR), e atualizar a PR (`gh pr edit <M> --body-file ...`) com o resultado em `## Gates`.
    **Nunca comente na PR** (todo agente posta com a conta do Leo, e comentário na PR é a trava que a tira do
    auto-merge): o que precisar registrar vai no corpo da PR ou na issue.
+   Na correção, responda no formato abaixo com `estado: PR corrigida`, a sua branch local, o **seu**
+   worktree (é nele que está o commit novo, e é o caminho que o revisor vai ler) e `sha-antes`/`sha-depois`.
 
 ## Resposta para a orquestradora
 
