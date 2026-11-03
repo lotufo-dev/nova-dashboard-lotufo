@@ -791,3 +791,137 @@ def test_medicao_da_carga_do_historico_aparece_com_pedido_e_aprovado(client_admi
     assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == ("protocolada", 100001, 99999)
     d = client_admin.get(f"/api/medicoes/{m['id']}").json()
     assert d["atestado_em"] == "2025-05-20"
+
+
+# --- issue #284: boletim do orgao (evento de atesto com o PDF) ----------------------------------------------
+
+def _boletim(texto="Boletim SMO 14"):
+    from tests.conftest import _pdf_com_texto
+    return {"arquivo": ("boletim.pdf", _pdf_com_texto(texto), "application/pdf")}
+
+
+def _registrar_boletim(cl, mid, valor="12.000,01", data="2026-08-10", numero="SMO 14/2026", texto="Boletim SMO 14",
+                       **extra):
+    return cl.post(f"/api/medicoes/{mid}/boletim", files=_boletim(texto),
+                   data={"valor": valor, "data": data, "numero_orgao": numero, **extra})
+
+
+def _planilha_enviada(cl):
+    """Medicao com o pedido de R$ 12.345,67 (planilha/carta) e a planilha ja' enviada ao orgao."""
+    mid = _nova_planilha(cl, _contrato(cl)).json()["medicao_id"]
+    _no_estado(mid, "planilha_enviada")
+    return mid
+
+
+def _atestos(mid):
+    from app import db
+    conn = db.get_conn()
+    try:
+        return [dict(r) for r in conn.execute("SELECT * FROM medicao_atestos WHERE medicao_id=? ORDER BY id", (mid,))]
+    finally:
+        conn.close()
+
+
+def test_registrar_boletim_grava_o_evento_e_mostra_pedido_aprovado_e_diferenca(client_admin):
+    mid = _planilha_enviada(client_admin)
+    r = _registrar_boletim(client_admin, mid, meio="smo")
+    assert r.status_code == 201, r.text
+    corpo = r.json()
+    # pedido 12.345,67, aprovado 12.000,01 (centavo impar): diferenca de -345,66
+    assert (corpo["estado"], corpo["pedido_centavos"], corpo["aprovado_centavos"], corpo["diferenca_centavos"]) == (
+        "boletim_recebido", 12_345_67, 12_000_01, -345_66)
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_protocolado_centavos"], d["valor_atestado_centavos"], d["atestado_em"]) == (
+        "boletim_recebido", 12_345_67, 12_000_01, "2026-08-10")
+    assert d["diferenca_centavos"] == -345_66
+    [b] = d["boletins"]
+    assert (b["id"], b["valor_centavos"], b["atestado_em"], b["meio"], b["numero_orgao"], b["usuario"]) == (
+        corpo["id"], 12_000_01, "2026-08-10", "smo", "SMO 14/2026", "Admin")
+    [ev] = _atestos(mid)
+    assert ev["arquivo"].startswith("boletins/") and ev["sha256"] == b["sha256"] and len(ev["sha256"]) == 64
+    a = client_admin.get(f"/api/medicoes/{mid}/boletins/{b['id']}")
+    assert a.status_code == 200 and a.content.startswith(b"%PDF-")
+    assert client_admin.get(f"/api/medicoes/{mid}/boletins/999999").status_code == 404
+
+
+def test_segundo_boletim_glosa_e_evento_novo_e_o_vigente_e_o_ultimo(client_admin):
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    r = _registrar_boletim(client_admin, mid, valor="11.999,99", data="2026-08-20", texto="Boletim com glosa")
+    assert r.status_code == 201, r.text
+    assert (r.json()["aprovado_centavos"], r.json()["diferenca_centavos"]) == (11_999_99, -345_68)
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_atestado_centavos"], d["atestado_em"]) == ("boletim_recebido", 11_999_99, "2026-08-20")
+    assert d["valor_protocolado_centavos"] == 12_345_67               # o pedido nao muda com o boletim
+    assert [b["valor_centavos"] for b in d["boletins"]] == [12_000_01, 11_999_99]
+    assert [e["valor_centavos"] for e in _atestos(mid)] == [12_000_01, 11_999_99]
+
+
+def test_boletim_identico_repetido_da_422_e_nao_duplica(client_admin):
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    r = _registrar_boletim(client_admin, mid)
+    assert r.status_code == 422 and "já está registrado" in r.json()["detail"]
+    assert len(_atestos(mid)) == 1
+
+
+def test_boletim_na_planilha_ainda_nao_enviada_da_422(client_admin):
+    # spec §2.1: o boletim vem depois do envio da planilha/carta (pelo sistema ou registrado por fora)
+    mid = _nova_planilha(client_admin, _contrato(client_admin)).json()["medicao_id"]
+    r = _registrar_boletim(client_admin, mid)
+    assert r.status_code == 422 and "envio da planilha/carta" in r.json()["detail"]
+    assert _atestos(mid) == [] and client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_gerada"
+
+
+def test_boletim_na_prevista_grava_o_evento_e_a_prevista_fica(client_admin):
+    # a medicao sem planilha/carta (fluxo antigo) guarda o aprovado com o documento; o estado nao pula a planilha
+    mid = _medicao(client_admin, _contrato(client_admin))
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_atestado_centavos"], len(d["boletins"])) == ("prevista", 12_000_01, 1)
+    assert d["diferenca_centavos"] is None                      # sem pedido, sem diferenca
+
+
+@pytest.mark.parametrize("estado", ["espelho_gerado", "nota_emitida", "protocolada"])
+def test_boletim_depois_do_espelho_e_glosa_e_nao_muda_o_estado(client_admin, estado):
+    mid = _planilha_enviada(client_admin)
+    _no_estado(mid, estado)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_atestado_centavos"]) == (estado, 12_000_01)
+
+
+def test_boletim_recusas(client_admin):
+    mid = _planilha_enviada(client_admin)
+    import datetime
+    futura = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
+    assert _registrar_boletim(client_admin, mid, data=futura).status_code == 422
+    assert _registrar_boletim(client_admin, mid, valor="abc").status_code == 422
+    assert _registrar_boletim(client_admin, mid, meio="pombo").status_code == 422
+    sem_pdf = client_admin.post(f"/api/medicoes/{mid}/boletim", data={"valor": "1,00", "data": "2026-08-10"})
+    assert sem_pdf.status_code == 422
+    falso = client_admin.post(f"/api/medicoes/{mid}/boletim", data={"valor": "1,00", "data": "2026-08-10"},
+                              files={"arquivo": ("b.pdf", b"nao e pdf", "application/pdf")})
+    assert falso.status_code == 415
+    assert client_admin.post("/api/medicoes/999999/boletim", files=_boletim(),
+                             data={"valor": "1,00", "data": "2026-08-10"}).status_code == 404
+    cancelada = _medicao(client_admin, _contrato(client_admin), 3)
+    _no_estado(cancelada, "cancelada")
+    r = _registrar_boletim(client_admin, cancelada)
+    assert r.status_code == 422 and "cancelada" in r.json()["detail"]
+    assert _atestos(mid) == [] and _atestos(cancelada) == []
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_enviada"
+
+
+def test_boletim_diretoria_recebe_403_e_engenharia_registra(client_admin):
+    from app import auth, db
+    mid = _planilha_enviada(client_admin)
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@lotufo.com", "senha-forte-123", "diretoria")
+    auth.criar_usuario(conn, "Eng", "eng@lotufo.com", "senha-forte-123", "engenharia")
+    conn.close()
+    _entrar(client_admin, "dir@lotufo.com")
+    assert _registrar_boletim(client_admin, mid).status_code == 403
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["boletins"] == []      # diretoria le
+    _entrar(client_admin, "eng@lotufo.com")
+    assert _registrar_boletim(client_admin, mid).status_code == 201

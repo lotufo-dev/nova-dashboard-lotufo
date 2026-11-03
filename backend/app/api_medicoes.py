@@ -144,6 +144,7 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     # issue #282: se a tela oferece "Enviar para protocolo" (nunca na MT-PAR), as versoes enviadas e as pecas
     d["envio_planilha"] = planilha_envio.situacao(conn, medicao_id)
     d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
+    d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
     return d
 
 
@@ -383,3 +384,49 @@ def baixar_anexo_planilha(medicao_id: ID, planilha_id: ID, peca: Literal["oficio
     tipo = arquivos.MIME_XLSX if ext == "xlsx" else arquivos.MIME
     nome = f"{'oficio' if peca == 'oficio' else 'planilha'}-medicao-{a['numero']}-versao-{a['versao']}.{ext}"
     return FileResponse(caminho, media_type=tipo, filename=nome, headers={"X-Content-Type-Options": "nosniff"})
+
+
+# --- issue #284: boletim do orgao (spec 2026-10-20 §2.1, passo 3; D4) -----------------------------------------
+
+@router.post("/api/medicoes/{medicao_id}/boletim", status_code=201)
+def registrar_boletim(medicao_id: ID,
+                      valor: str = Form(..., max_length=40),
+                      data: datetime.date = Form(...),
+                      numero_orgao: str | None = Form(None, max_length=100),
+                      meio: Literal["smo", "oficio", "email", "carimbo", "ci", "outro"] | None = Form(None),
+                      observacao: str | None = Form(None, max_length=500),
+                      arquivo: UploadFile = File(...),
+                      usuario: dict = Depends(exigir("editar_cadastros")),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """"Registrar boletim": valor aprovado, data e nº digitados, com o PDF do orgao. Devolve pedido, aprovado e a
+    diferenca."""
+    _medicao_existe(conn, medicao_id)
+    try:
+        dados = {"valor_centavos": _centavos(valor), "data": data.isoformat(), "numero_orgao": numero_orgao,
+                 "meio": meio, "observacao": observacao}
+        medicoes.conferir_boletim(conn, medicao_id, dados)      # recusa antes de gravar o PDF
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    pdf = _pdf_validado(arquivo, TETO_PLANILHA)   # o pacote do SMO (capa, resumo, calculo, cronograma) passa de 10 MB
+    caminho, sha = arquivos.gravar_bytes("boletins", pdf, "pdf")
+    try:
+        return medicoes.registrar_boletim(conn, usuario["id"], medicao_id, dados, {"arquivo": caminho, "sha256": sha})
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+
+
+@router.get("/api/medicoes/{medicao_id}/boletins/{atesto_id}")
+def baixar_boletim(medicao_id: ID, atesto_id: ID,
+                   usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                   conn: sqlite3.Connection = Depends(conexao)):
+    a = medicoes.arquivo_boletim(conn, medicao_id, atesto_id)
+    if a is None or not a["arquivo"]:
+        raise HTTPException(404, "Arquivo não encontrado")
+    try:
+        caminho = arquivos.caminho_seguro(a["arquivo"])
+    except ValueError:
+        raise HTTPException(404, "Arquivo não encontrado") from None
+    if not caminho.is_file():
+        raise HTTPException(404, "Arquivo não encontrado")
+    return FileResponse(caminho, media_type=arquivos.MIME, filename=f"boletim-medicao-{a['numero']}-{atesto_id}.pdf",
+                        headers={"X-Content-Type-Options": "nosniff"})

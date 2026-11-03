@@ -99,6 +99,7 @@ def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     if r is None:
         return None
     d = dict(r)
+    d["diferenca_centavos"] = diferenca(d)      # issue #284: aprovado do boletim menos o pedido
     d["protocolos"] = [dict(p) for p in conn.execute(
         "SELECT * FROM medicao_protocolos WHERE medicao_id=? ORDER BY id", (medicao_id,))]
     # NFs do RM alocadas a esta medicao, com o recebido de cada uma (fase 5). Import local:
@@ -224,6 +225,100 @@ def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: 
         auditoria.registrar(conn, usuario_id, "medicao.assinatura", "medicao", medicao_id, None,
                             {"assinado_em": data.isoformat(), "envelope": envelope})
         return cur.lastrowid
+
+
+# --- issue #284: boletim do orgao (spec 2026-10-20 §2.1, passo 3; D4) -----------------------------------------
+MEIOS_BOLETIM = ("smo", "oficio", "email", "carimbo", "ci", "outro")     # o CHECK de medicao_atestos.meio (042)
+
+
+def diferenca(m) -> int | None:
+    """Aprovado menos pedido; sem um dos dois, nao ha' diferenca."""
+    if m["valor_atestado_centavos"] is None or m["valor_protocolado_centavos"] is None:
+        return None
+    return m["valor_atestado_centavos"] - m["valor_protocolado_centavos"]
+
+
+def tem_boletim(conn, medicao_id: int) -> bool:
+    """O boletim do orgao registrado com o documento (o atesto digitado a mao, sem PDF, nao conta)."""
+    return conn.execute("SELECT 1 FROM medicao_atestos WHERE medicao_id=? AND arquivo IS NOT NULL LIMIT 1",
+                        (medicao_id,)).fetchone() is not None
+
+
+def conferir_boletim(conn: sqlite3.Connection, medicao_id: int, dados: dict):
+    """Recusas do boletim (ValueError), sem gravar nada: a rota chama ANTES de gravar o PDF, e `registrar_boletim`
+    de novo dentro da transacao. Devolve a medicao e o dia do boletim."""
+    try:
+        dia = datetime.date.fromisoformat(dados["data"])
+    except (TypeError, ValueError):
+        raise ValueError("Data do boletim inválida")
+    if dia > tempo.hoje_local():
+        raise ValueError("A data do boletim não pode ser futura")
+    if (dados.get("meio") or None) not in (None, *MEIOS_BOLETIM):
+        raise ValueError("Meio do boletim inválido")
+    m = conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    if m is None:
+        raise ValueError("Medição não encontrada")
+    if m["estado"] in ("cancelada", "desistida"):
+        raise ValueError(f"{nome_medicao(m['numero'], m['tipo'])} está {rotulo_estado(m['estado'])}: "
+                         "não recebe boletim")
+    if m["estado"] == "planilha_gerada":
+        # spec §2.1: o boletim vem depois do envio da planilha/carta (pelo sistema ou registrado por fora)
+        raise ValueError("Registre o envio da planilha/carta antes do boletim do órgão")
+    return m, dia
+
+
+def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, dados: dict, anexo: dict) -> dict:
+    """O boletim do orgao e' um evento de atesto (medicao_atestos, append-only) com o meio, o nº no orgao e o PDF;
+    o aprovado vigente (`valor_atestado_centavos`) e' o do ultimo evento. Na planilha/carta enviada a medicao vai a
+    `boletim_recebido`; nos estados seguintes e' glosa (evento novo, estado igual); a prevista (sem planilha/carta)
+    guarda o evento e fica prevista. O pedido nao muda."""
+    meio = dados.get("meio") or None
+    numero = (dados.get("numero_orgao") or "").strip() or None
+    observacao = (dados.get("observacao") or "").strip() or None
+    valor = dados["valor_centavos"]
+    with db.mutacao(conn):
+        m, dia = conferir_boletim(conn, medicao_id, dados)
+        atual = m["estado"]
+        ultimo = conn.execute("SELECT valor_centavos, atestado_em, sha256 FROM medicao_atestos WHERE medicao_id=? "
+                              "ORDER BY id DESC LIMIT 1", (medicao_id,)).fetchone()
+        if ultimo is not None and (ultimo["valor_centavos"], ultimo["atestado_em"], ultimo["sha256"]) == (
+                valor, dia.isoformat(), anexo["sha256"]):
+            raise ValueError("Este boletim já está registrado")    # clique duplo: o evento nao se apaga depois
+        novo = "boletim_recebido" if atual == "planilha_enviada" else atual
+        cur = conn.execute(
+            "UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem='manual', atestado_em=?, estado=? "
+            "WHERE id=? AND estado=?", (valor, dia.isoformat(), novo, medicao_id, atual))
+        db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+        aid = conn.execute(
+            "INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, meio, "
+            "numero_orgao, arquivo, sha256, observacao) VALUES (?,?,'manual',?,?,?,?,?,?,?)",
+            (medicao_id, valor, dia.isoformat(), usuario_id, meio, numero, anexo["arquivo"], anexo["sha256"],
+             observacao)).lastrowid
+        antes = {"estado": atual, "valor_atestado_centavos": m["valor_atestado_centavos"],
+                 "valor_atestado_origem": m["valor_atestado_origem"], "atestado_em": m["atestado_em"]}
+        auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", medicao_id, antes, {
+            "estado": novo, "valor_atestado_centavos": valor, "valor_atestado_origem": "manual",
+            "atestado_em": dia.isoformat(), "boletim": {"atesto_id": aid, "meio": meio, "numero_orgao": numero,
+                                                       "sha256": anexo["sha256"], "observacao": observacao}})
+        pedido = m["valor_protocolado_centavos"]
+    return {"id": aid, "estado": novo, "pedido_centavos": pedido, "aprovado_centavos": valor,
+            "diferenca_centavos": None if pedido is None else valor - pedido}
+
+
+def boletins(conn: sqlite3.Connection, medicao_id: int) -> list[dict]:
+    """Os boletins registrados (eventos de atesto com meio ou documento), do primeiro ao vigente."""
+    return [{**dict(r), "tem_arquivo": bool(r["tem_arquivo"])} for r in conn.execute(
+        "SELECT e.id, e.valor_centavos, e.atestado_em, e.meio, e.numero_orgao, e.sha256, e.observacao, e.criado_em, "
+        "e.arquivo IS NOT NULL AS tem_arquivo, u.nome AS usuario FROM medicao_atestos e "
+        "LEFT JOIN usuarios u ON u.id=e.usuario_id "
+        "WHERE e.medicao_id=? AND (e.meio IS NOT NULL OR e.arquivo IS NOT NULL) ORDER BY e.id", (medicao_id,))]
+
+
+def arquivo_boletim(conn: sqlite3.Connection, medicao_id: int, atesto_id: int) -> dict | None:
+    """O PDF de UM boletim, so' se o evento for da medicao pedida."""
+    r = conn.execute("SELECT e.arquivo, m.numero FROM medicao_atestos e JOIN medicoes m ON m.id=e.medicao_id "
+                     "WHERE e.id=? AND e.medicao_id=?", (atesto_id, medicao_id)).fetchone()
+    return dict(r) if r else None
 
 
 def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int, list[dict]]:
