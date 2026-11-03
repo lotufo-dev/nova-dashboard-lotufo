@@ -141,7 +141,7 @@ function TabelaPrevisao({ previsoes, ciclo }: { previsoes: Previsao[]; ciclo: nu
           </tr>
         ))}
       </tbody>
-      <tfoot><tr><th scope="row">Total</th><td className="num">{brl(total)}</td><td /></tr></tfoot>
+      <tfoot><tr><th scope="row">Total previsto</th><td className="num">{brl(total)}</td><td /></tr></tfoot>
     </table>
   );
 }

@@ -54,8 +54,10 @@ describe("Reajuste", () => {
     api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
       ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
                      situacao: "apostilado", dias: null, pleito: null, apostilamento: null }], pleitos: [],
+          // a de 11/2026 e' de apostilamento mas nao esta' na tabela do apostilamento: continua na previsao
           previsoes: [prev("2026-07", 130003, "apostilamento"), prev("2026-08", 20005, "apostilamento"),
-                      prev("2026-09", 700, "pleito"), prev("2026-10", 301, "manual")],
+                      prev("2026-09", 700, "pleito"), prev("2026-10", 301, "manual"),
+                      prev("2026-11", 2, "apostilamento")],
           competencias: [apostilada("2026-07", 130003), apostilada("2026-08", 20005)] }
       : { instrumentos: [] });
     render(<Reajuste contratoId={7} podeEditar={false} />);
@@ -63,8 +65,9 @@ describe("Reajuste", () => {
     const previsao = screen.getByRole("table", { name: "Previsão de reajuste do ciclo de 2026" });
     const competencias = (t: HTMLElement) => [...t.querySelectorAll("tbody tr")].map(tr => tr.firstElementChild?.textContent);
     expect(competencias(apostiladas)).toEqual(["07/2026", "08/2026"]);
-    expect(competencias(previsao)).toEqual(["09/2026", "10/2026"]);   // uma linha por competência no cartão
-    expect(previsao.querySelector("tfoot")?.textContent).toContain(brl(1001));   // o total soma só o previsto
+    expect(competencias(previsao)).toEqual(["09/2026", "10/2026", "11/2026"]);   // uma linha por competência
+    // o rodape diz o que soma: so' as linhas da previsao, nao o reajuste do ciclo inteiro
+    expect(previsao.querySelector("tfoot")?.textContent).toBe(`Total previsto${brl(1003)}`);
   });
 
   it("mostra a parte do contrato de cada data-base ao lado do mês (issue #257)", async () => {
