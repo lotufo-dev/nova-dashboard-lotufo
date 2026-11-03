@@ -103,17 +103,16 @@ def _plano_com_mapa(texto: str | None) -> tuple[str, list[int]]:
 
 
 def _situacao(texto: str, mapa: list[int], m: re.Match) -> str:
-    """A situacao como impressa (com acento), espacos reduzidos e sem pontuacao ou separador no fim (sobra de OCR:
-    "APROVADA.", "APROVADA |", "APROVADA -", "APROVADA )"). O recorte engole os acentos combinantes (NFD) que vem
-    depois do ultimo caractere casado, e a limpeza so' tira pontuacao, simbolo, separador e controle, nunca marca:
-    "APROVADÁ" decomposto e "APROVADA" com cedilha solta nao viram "APROVADA"."""
-    fim = mapa[m.end(4) - 1] + 1
-    while fim < len(texto) and unicodedata.category(texto[fim])[0] == "M":
-        fim += 1
-    original = re.sub(r"\s+", " ", unicodedata.normalize("NFC", texto[mapa[m.start(4)]:fim]))
-    while original and unicodedata.category(original[-1])[0] in "PSZC":
-        original = original[:-1]
-    return original.strip()
+    """A situacao como impressa (com acento): o texto ORIGINAL inteiro entre o traco e o "Tipo", com tudo o que o
+    `_plano` ignora (marca combinante solta, antes ou depois, e acento desenhado como glifo, "´", "¨", "˜"); so'
+    depois normalizado (NFC, espacos reduzidos) e limpo no fim de pontuacao, separador, controle e da barra "|" do
+    OCR ("APROVADA.", "APROVADA |", "APROVADA -", "APROVADA )"). Marca e simbolo ficam: "APROVADA´" nao e' aprovacao."""
+    ini = mapa[m.start(4) - 1] + 1          # logo depois do ultimo caractere do traco e dos espacos que o seguem
+    fim = mapa[m.end(0)]                    # o "T" do "Tipo" (o `\s*` antes dele ja' foi consumido)
+    original = re.sub(r"\s+", " ", unicodedata.normalize("NFC", texto[ini:fim])).strip()
+    while original and (original[-1] == "|" or unicodedata.category(original[-1])[0] in "PZC"):
+        original = original[:-1].rstrip()
+    return original
 
 
 def _ordinal_por_extenso(texto: str) -> int | None:

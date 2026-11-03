@@ -1,6 +1,7 @@
 """Leitor da capa do boletim do SMO (#285). Fixtures sinteticas no leiaute das capas reais (nomes e numeros
 trocados): texto do pypdf com rotulo e valor em linhas separadas, e texto do OCR com os pares na mesma linha."""
 import pathlib
+import unicodedata
 
 from app import leitura_pdf, leitura_smo
 
@@ -105,6 +106,28 @@ def test_acento_combinante_no_primeiro_ou_no_ultimo_caractere_da_situacao_nao_so
         assert (r["ok"], r["motivo"], r["campos"]["situacao"]) == (False, "nao-aprovada", esperada), situacao
         ocr = _ocr_bom().split("Período: 01/03/2026 a 31/03/2026.\n", 1)[1].replace("APROVADA Tipo", situacao + " Tipo")
         assert leitura_smo.ler(ocr, ocr=True)["ok"] is False, situacao
+
+
+def test_marca_solta_ou_acento_desenhado_em_volta_da_situacao_nao_some():
+    """Gate Sol e revisor, ultima passada da rodada 3: marca combinante solta antes do primeiro caractere ou depois de
+    um espaco final, e acento desenhado como glifo proprio (U+00B4, U+00A8, U+02DC, categoria Sk), ficavam fora do
+    recorte ou eram limpos, e a capa aprovava."""
+    capa = _txt("capa-texto-aprovada.txt")
+    capa_ocr = _ocr_bom().split("Período: 01/03/2026 a 31/03/2026.\n", 1)[1]
+    for situacao in ("\u0301APROVADA", "APROVADA \u0301", "APROVADA\u00b4", "APROVADA\u00a8", "APROVADA\u02dc",
+                     "APROVADA \u00b4."):
+        r = leitura_smo.ler(capa.replace("APROVADA\nTipo", situacao + "\nTipo"))
+        assert (r["ok"], r["motivo"]) == (False, "nao-aprovada"), ascii(situacao)
+        r = leitura_smo.ler(capa_ocr.replace("APROVADA Tipo", situacao + " Tipo"), ocr=True)
+        assert r["ok"] is False, ascii(situacao)
+
+
+def test_aprovada_legitima_continua_aprovada():
+    capa = _txt("capa-texto-aprovada.txt")
+    assert leitura_smo.ler(unicodedata.normalize("NFD", capa))["ok"]       # pagina inteira decomposta
+    for sobra in ("APROVADA", "APROVADA.", "APROVADA -", "APROVADA |", "APROVADA\t"):
+        r = leitura_smo.ler(capa.replace("APROVADA\nTipo", sobra + "\nTipo"))
+        assert r["ok"] and r["campos"]["situacao"] == "APROVADA", ascii(sobra)
 
 
 def test_qualquer_pontuacao_no_fim_da_situacao_nao_conta():
