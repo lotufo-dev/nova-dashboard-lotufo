@@ -599,6 +599,23 @@ def test_tabela_de_obras_mede_como_a_carteira(cenario):
     assert obras[ids["propria"]]["faturados"] == 2_900_000 + 50_000_000 + 3_000_001   # a coluna do QDOP fica
 
 
+def test_tabela_e_carteira_leem_as_mesmas_medicoes(cenario, monkeypatch):
+    """#262 (gate Sol, rodada 3): a tabela de obras tira o medido da mesma leitura de medicoes da carteira. Uma
+    medicao que passa de nota emitida a protocolada no meio do painel nao deixa os dois saldos diferentes."""
+    c, ids = cenario
+    _medir(c, ids["propria"], 60, "nota_emitida", 5_000_000)
+    c.commit()
+    original = avisos.listar
+
+    def protocola_no_meio(conn, *a, **k):         # roda depois da leitura das medicoes do painel
+        conn.execute("UPDATE medicoes SET estado='protocolada' WHERE contrato_id=? AND numero=60", (ids["propria"],))
+        conn.commit()
+        return original(conn, *a, **k)
+    monkeypatch.setattr(avisos, "listar", protocola_no_meio)
+    tabela, carteira, _ = _saldos(c)
+    assert tabela[ids["propria"]] == carteira["SINFRA - X"] == 97_100_000
+
+
 def test_saldo_da_tabela_aplica_a_cota_uma_vez(cenario):
     """#262 (revisao, rodada 3): saldo = cota(vigente de execucao - medido), arredondamento unico, como na carteira.
     Consorcio a 50%: 12.000.000,00 - 4.000.000,01 = 7.999.999,99 -> 4.000.000,00 (meio para cima); duas cotas
