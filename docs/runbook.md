@@ -661,11 +661,12 @@ endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HT
   resto do script pelo stdin e ele para no meio.
 - Não há credencial do GitHub na VM: o clone público não precisa; o `git pull` do cadastro privado precisa (decisão pendente).
 
-**Corte (só com o OK do dono do produto; parada de uns 10 minutos para a operação).**
+**Corte (feito em 03/11/2026 às 17:00 com o OK do dono do produto; parada de uns 10 minutos para a operação). O roteiro abaixo é o que foi executado.**
 
 1. Avisar a operação da hora. Conferir que a VM responde: `http://<vm>:8080/api/health` 200.
 2. Em `<servidor>`, nesta ordem: sentinela `New-Item -ItemType File C:\DashboardLotufo\watchdog.pause`;
-   `Stop-ScheduledTask DashboardLotufoWatchdog` e `Stop-ScheduledTask DashboardLotufo` (sem desinstalar: é o rollback);
+   `Disable-ScheduledTask` e `Stop-ScheduledTask` nas duas tarefas, watchdog primeiro (só parar não basta: o gatilho do watchdog
+   repete a cada 3 min e o da tarefa principal dispara no boot; sem desinstalar, porque é o rollback);
    conferir que nada mais escuta na 80 (`Get-NetTCPConnection -LocalPort 80 -State Listen`); **só então** o snapshot:
    `scripts\backup_pre_migracao.ps1 -Banco C:\DashboardLotufo\dados\dashboard.db -PastaBackups C:\DashboardLotufo\dados\backups
    -Python C:\DashboardLotufo\app\backend\.venv\Scripts\python.exe -Rotulo CORTE` (a API de backup do SQLite funciona com o
@@ -674,16 +675,24 @@ endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HT
    (`dados\dashboard.db`, `-wal`, `-shm`) para uma pasta de quarentena, como na seção "Restaurar o banco". Depois copiar: o
    snapshot `dashboard-PRE-CORTE-...db` (vira `dados\dashboard.db`; o snapshot não tem `-wal`/`-shm`), `dados\notas`, `espelhos`, `modelos`, `evidencias`, `certidoes`,
    `assinaturas`; `segredos` inteiro (`rm.txt`, `rm-endereco.txt` se houver, `sharepoint-hosts.txt`, `siga-token.txt`,
-   `usuarios\` com os tokens Microsoft de cada pessoa); o clone `cadastro`. Conferir contagem e `Get-FileHash` dos dois lados.
+   `usuarios\` com os tokens Microsoft de cada pessoa); o clone `cadastro`. Empacotar com o `tar.exe` do próprio Windows
+   (`tar -cf C:\Temp\corte.tar -C C:\DashboardLotufo dados/notas ... segredos cadastro`), levar pelo Mac com `scp` e conferir
+   tamanho e `Get-FileHash` dos dois lados; apagar o `.tar` das duas máquinas e do Mac depois (ele carrega os segredos).
+   `dados\backups` e os `dashboard-PRE-*.db` antigos da raiz de `dados` ficam no servidor antigo como histórico.
    Sem os tokens, cada pessoa reconecta a conta Microsoft em Minha conta (não é erro, só trabalho a mais).
 4. Na VM: `integrity_check` do banco (seção "Restaurar o banco"); variáveis de máquina `DASH_SIGA_TOKEN_ARQUIVO`,
    `DASH_SIGA_LINK_MODELO` (copiar os valores de `<servidor>`); `DASH_SIGA_TAREFA` só se o robô do SIGA também mudar para a VM
-   (ver decisões). `Start-ScheduledTask DashboardLotufo`, `/api/health` 200 com `banco: ok`, `cadastro aplicar --usuario <e-mail do admin>
+   (sem ela os botões "Atualizar" da tela SIGA ficam escondidos). Credencial do cadastro privado: token de leitura do GitHub em
+   `segredos\github-cadastro.git-credentials` (formato `https://x-access-token:<token>@github.com`) e, no `.git\config` do clone,
+   `[credential]` com uma linha `helper =` vazia (desliga o Git Credential Manager) e `helper = store --file=C:/DashboardLotufo/segredos/github-cadastro.git-credentials`
+   (barra normal: com `\` o git lê o caminho como escape e o token não é achado). `Start-ScheduledTask DashboardLotufo`, `/api/health` 200 com `banco: ok`, `cadastro aplicar --usuario <e-mail do admin>
    --raiz C:\DashboardLotufo\cadastro --ensaio` sem diferença (seção "Cadastro versionado"), `Start-ScheduledTask DashboardLotufoWatchdog`, apagar o sentinela. Login de cada pessoa da operação.
-5. Endereço novo para a operação: `http://<vm>:8080` (o nome da VM está no DNS do domínio; o apelido de hoje precisava de
-   linha no `hosts`). Robô do SIGA: trocar o endereço da dashboard para `http://<vm>:8080` (repositório do robô).
-6. **Rollback** em uma linha: em `<servidor>`, `Start-ScheduledTask DashboardLotufo; Start-ScheduledTask DashboardLotufoWatchdog;
-   Remove-Item C:\DashboardLotufo\watchdog.pause`, e a operação volta ao endereço antigo. Na VM, sentinela primeiro e depois
+5. Endereço novo para a operação: `http://<vm>:8080` (o nome da VM está no DNS do domínio e resolve em qualquer PC da empresa;
+   o apelido antigo precisava de linha no `hosts`). Máquina fora do domínio (o Mac de desenvolvimento, em outra VLAN) usa o IP
+   ou uma linha no `hosts`. Robô do SIGA: trocar o endereço da dashboard para `http://<vm>:8080` (repositório do robô).
+6. **Rollback** em uma linha: em `<servidor>`, `Enable-ScheduledTask DashboardLotufo; Enable-ScheduledTask DashboardLotufoWatchdog;
+   Start-ScheduledTask DashboardLotufo; Start-ScheduledTask DashboardLotufoWatchdog; Remove-Item C:\DashboardLotufo\watchdog.pause`,
+   e a operação volta ao endereço antigo. Na VM, sentinela primeiro e depois
    `Stop-ScheduledTask` do watchdog e da tarefa (sem o sentinela o watchdog da VM religa em 3 minutos e ficam duas instâncias
    no ar). O que foi digitado na VM depois do corte não volta sozinho (fica no banco da VM).
 7. Depois de uma semana estável: `Unregister-ScheduledTask` das duas tarefas em `<servidor>`, desligar a regra
@@ -691,7 +700,12 @@ endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HT
 
 **Decisões pendentes (03/11/2026).** Data do corte; robô do SIGA (fica em `<servidor>` apontando para a VM, e o botão
 "Atualizar" da tela SIGA deixa de funcionar porque ele dispara a tarefa agendada na própria máquina, ou muda para a VM junto);
-credencial do GitHub na VM para o `git pull` do cadastro privado; pasta de cópia externa (`-BackupExterno`) para a VM.
+cópia externa: a tarefa da VM aponta para a pasta de rede do servidor de arquivos (`-BackupExterno \\<servidor-de-arquivos>\...`)
+e a conta de computador da VM (`<vm>$`) recebeu Modificar na pasta (NTFS, pelo Explorer numa sessão do domínio na própria VM)
+e Change no compartilhamento (`Grant-SmbShareAccess -Name <compartilhamento> -AccountName "<domínio>\<vm>$" -AccessRight Change
+-CimSession <servidor-de-arquivos>`, pelo nome DNS: por IP o WinRM recusa); de um PC fora do domínio a busca da conta de
+computador não funciona. Teste: tarefa avulsa como SYSTEM na VM gravando um arquivo na pasta; o robô do SIGA ficou em `<servidor>` com o
+endereço da dashboard trocado para a VM (cópia do arquivo original ao lado), até ser refeito para rodar na VM sem janela.
 
 ## Riscos conhecidos
 - Leitura e validação de PDF (rotas de documentos, notas e aditivos) rodam em subprocesso com limite de 10 s de parede e são interrompidas ao estourar: o filho é morto e o cliente recebe 422/415 sem derrubar o servidor. **Custo por chamada ≈ 2 s sob uvicorn no Windows** (0,3–1 s medido em teste; `spawn` + importar pypdf, e o processo do servidor está mais carregado que o do pytest). **Pior caso de parede: até 10 s esperando vaga (só 2 leituras simultâneas) + 10 s de leitura + até 4 s de encerramento, ≈ 24 s.** **No máximo 2 leituras simultâneas**: a terceira espera uma vaga pelo mesmo orçamento de 10 s e é recusada com 422 "tente de novo em alguns segundos" (415 no upload) — não fica pendurada. A pré-checagem de bomba de descompressão roda **dentro do filho**, antes do pypdf: recusa só o stream Flate que expande mais de 50:1 (4 MB por stream, 16 MB no total); o que ela não consegue medir (filtro desconhecido, PDF cifrado, dicionário fora da janela de 8 KB, `/Length` indireto) é ignorado e fica por conta do limite de tempo. Tetos que continuam valendo: 10 MB, 20 páginas, 60 mil caracteres. Limites conhecidos: (a) a memória do filho não é limitada além do kill por tempo — PDF que infle muito em menos de 10 s consome RAM até terminar ou ser morto; (b) **cada filho morto por timeout deixa 1 handle do Windows no processo do servidor** (medido; inerente a `spawn` + `terminate`) — só cresce com upload hostil repetido, e a tarefa agendada reinicia o processo.
