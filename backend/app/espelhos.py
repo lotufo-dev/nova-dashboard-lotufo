@@ -125,7 +125,8 @@ def _recusar_planilha_sendo_enviada(conn, numero: int, existentes: dict[str, dic
 
 
 def _calcular(conn, contrato_id, numero, competencia, entradas):
-    """Devolve (regra, contrato, saidas, valor por tipo, entradas usadas, medicoes existentes, travados)."""
+    """Devolve (regra, contrato, saidas, valor por tipo, entradas usadas, medicoes existentes,
+    (travados, opcionais))."""
     r = _exigir_ativa(conn, contrato_id)
     regra = r["regra"]
     chaves = {e["chave"] for e in regra["entradas"]}
@@ -134,8 +135,10 @@ def _calcular(conn, contrato_id, numero, competencia, entradas):
         raise ValueError(f"entrada desconhecida para esta obra: {sorted(estranhas)}")
     existentes = _existentes(conn, contrato_id, numero)
     travados = _travados(existentes)
-    # issue #284: o valor que a medicao ja' tem (aprovado, senao pedido) vem preenchido e nao muda
-    entradas = espelho.entradas_pela_medicao(regra, entradas, travados)
+    # issue #284: o valor que a medicao ja' tem (aprovado, senao pedido) vem preenchido e nao muda; a medicao ainda
+    # sem boletim so' entra se a pessoa a puser (nada digitado = fica fora deste espelho)
+    opcionais = {m["tipo"] for m in _sem_boletim(conn, existentes, set(existentes))}
+    entradas = espelho.entradas_pela_medicao(regra, entradas, travados, opcionais)
     saidas = espelho.calcular(regra, entradas, competencia)
     if not saidas:
         raise ValueError("nenhuma nota a emitir: todos os valores estão zerados")
@@ -145,7 +148,7 @@ def _calcular(conn, contrato_id, numero, competencia, entradas):
     for s in saidas:
         s["nome_arquivo"] = espelho.nome_arquivo(regra, por_chave[s["chave"]], _obra(c), numero, competencia,
                                                  nome_emissor(s["emissor"]))
-    return r, c, saidas, espelho.valor_por_natureza(regra, entradas), entradas, existentes, travados
+    return r, c, saidas, espelho.valor_por_natureza(regra, entradas), entradas, existentes, (travados, opcionais)
 
 
 def _medicoes_por_espelho(conn, contrato_id, numero) -> dict[int, list[dict]]:
@@ -207,7 +210,8 @@ def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict
            periodo: tuple[str, str] | None = None) -> dict:
     """A previa nao recusa a falta do boletim: mostra (`sem_boletim` em cada medicao) para a tela pedir a
     justificativa; quem recusa e' `gerar`. `travados` e `entradas` dizem o valor que veio da medicao (#284)."""
-    _, _, saidas, por_tipo, entradas, existentes, travados = _calcular(conn, contrato_id, numero, competencia, entradas)
+    _, _, saidas, por_tipo, entradas, existentes, (travados, opcionais) = _calcular(conn, contrato_id, numero,
+                                                                                   competencia, entradas)
     _espelhos_anteriores(conn, contrato_id, numero, list(por_tipo))
     sem = {m["tipo"] for m in _sem_boletim(conn, existentes, por_tipo)}
     avisos, meds = [], []
@@ -230,8 +234,9 @@ def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict
                      "sem_boletim": tipo in sem})
     return {"saidas": saidas, "medicoes": meds, "avisos": avisos, "periodo": espelho.periodo(competencia, periodo),
             "entradas": entradas,
-            "travados": [{"tipo": t, "valor_centavos": v, "fonte": f} for t, (v, f) in sorted(travados.items())
-                         if t in por_tipo]}
+            # todos os valores que vem das medicoes deste numero, tambem os da medicao sem boletim que ficou fora
+            "travados": [{"tipo": t, "valor_centavos": v, "fonte": f, "sem_boletim": t in opcionais}
+                         for t, (v, f) in sorted(travados.items())]}
 
 
 def _conferir_boletim(conn, numero: int, existentes: dict[str, dict], tipos, justificativa: str | None) -> list[dict]:
@@ -252,6 +257,7 @@ def _conferir_boletim(conn, numero: int, existentes: dict[str, dict], tipos, jus
 def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
           entradas: dict[str, int], motivo: str | None = None, periodo: tuple[str, str] | None = None,
           justificativa_sem_boletim: str | None = None) -> int:
+    # `travados` aqui e' o par (travados, opcionais), conferido de novo sob o lock
     r, c, saidas, por_tipo, entradas, existentes, travados = _calcular(conn, contrato_id, numero, competencia, entradas)
     _conferir_boletim(conn, numero, existentes, por_tipo, justificativa_sem_boletim)   # recusa antes de montar
     modelos = {k: arquivos.caminho_seguro(m["arquivo"]).read_bytes() for k, m in r["modelos"].items()}
@@ -265,11 +271,11 @@ def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
         # contrato+numero+tipo): trocar a competencia e' correcao, nao espelho novo -- substitui, nao duplica.
         anteriores = _espelhos_anteriores(conn, contrato_id, numero, list(por_tipo))
         _recusar_envio_reservado(conn, contrato_id, numero, list(por_tipo))   # sob o mesmo lock da reserva (#210)
-        # #284, sob o lock: boletim registrado entre a conta e a gravacao muda o valor que o espelho tem de usar
+        # #284, sob o lock: boletim, revisao ou cancelamento entre a conta e a gravacao mudam o valor que o espelho
+        # tem de usar (ou se a medicao entra sozinha)
         agora = _existentes(conn, contrato_id, numero)
-        if _travados(agora) != travados:
-            raise ValueError("O valor da medição mudou enquanto o espelho era gerado (boletim registrado): "
-                             "confira e gere de novo")
+        if (_travados(agora), {m["tipo"] for m in _sem_boletim(conn, agora, set(agora))}) != travados:
+            raise ValueError("A medição mudou enquanto o espelho era gerado: confira os valores e gere de novo")
         _recusar_planilha_sendo_enviada(conn, numero, agora, por_tipo)
         sem_boletim = _conferir_boletim(conn, numero, agora, por_tipo, justificativa_sem_boletim)
         ids = {tipo: medicoes.criar_para_espelho(conn, usuario["id"], contrato_id, numero, tipo, competencia, valor)

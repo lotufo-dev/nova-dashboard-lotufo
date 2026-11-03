@@ -332,7 +332,7 @@ def _planilha_enviada(cid, numero=23, pedido=12_345_67):
 def test_api_seguir_sem_boletim_exige_justificativa(client_admin, ambiente_api):
     cid = ambiente_api
     mid = _planilha_enviada(cid)
-    corpo = {"numero": 23, "competencia": "2026-01", "entradas": {}}
+    corpo = {"numero": 23, "competencia": "2026-01", "entradas": {"medicao": "12.345,67"}}
     p = client_admin.post(f"/api/contratos/{cid}/espelho/previa", json=corpo)
     assert p.status_code == 200, p.text
     assert p.json()["medicoes"][0]["sem_boletim"] is True and p.json()["entradas"] == {"medicao": 12_345_67}

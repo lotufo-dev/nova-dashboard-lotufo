@@ -409,6 +409,11 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         if campo == "protocolado" and m["estado"] in ESTADOS_PLANILHA:
             # depois do boletim nem a revisao e' aceita: so' orienta a revisao onde ela existe (gate Sol, rodada 2)
             raise ValueError(PEDIDO_DEPOIS_DO_BOLETIM if m["estado"] == "boletim_recebido" else PEDIDO_POR_REVISAO)
+        # Issue #284: o espelho leva a medicao da planilha/carta adiante sem trocar o pedido; dali em diante ele
+        # tambem nao muda a mao (congela no envio da planilha, spec §2.1)
+        if campo == "protocolado" and conn.execute("SELECT 1 FROM medicao_planilhas WHERE medicao_id=? LIMIT 1",
+                                                   (medicao_id,)).fetchone():
+            raise ValueError("O pedido vem da planilha/carta e não se altera à mão")
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []
@@ -634,6 +639,11 @@ def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tip
             db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
             auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", ja["id"],
                                 {k: ja[k] for k in novo}, {**novo, "valor_do_espelho_centavos": valor_centavos})
+            if pedido is None:
+                # o valor novo tem o evento proprio, como na medicao que nasce no espelho (linha do tempo)
+                auditoria.registrar(conn, usuario_id, "medicao.valor_protocolado", "medicao", ja["id"],
+                                    {"valor_protocolado_centavos": None},
+                                    {"valor_protocolado_centavos": valor_centavos, "valor_protocolado_origem": "espelho"})
             return ja["id"]
         if ja["estado"] not in ESTADOS_ESPELHO:
             raise ValueError(f"{nome_medicao(numero, tipo)} já está {rotulo_estado(ja['estado'])}: o espelho não pode ser "

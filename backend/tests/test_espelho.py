@@ -333,6 +333,18 @@ def test_mais_de_um_campo_a_divisao_e_digitada_e_tem_de_somar_o_aprovado():
         espelho.entradas_pela_medicao(r, {}, {"execucao": (1_000_01, "aprovado")})
 
 
+def test_tipo_opcional_sem_nada_digitado_fica_fora_e_digitado_tem_de_bater():
+    # a medicao ainda sem boletim nao entra sozinha no espelho: so' quando a pessoa a poe (e com o valor travado)
+    r = _regra_duas_fontes()
+    trav = {"execucao": (1_000_01, "pedido"), "reajuste": (300_01, "pedido")}
+    saida = espelho.entradas_pela_medicao(r, {"fonte-a": 500_00, "fonte-b": 500_01}, trav, {"reajuste"})
+    assert saida == {"fonte-a": 500_00, "fonte-b": 500_01}
+    assert espelho.valor_por_natureza(r, saida) == {"execucao": 1_000_01}
+    assert espelho.entradas_pela_medicao(r, {"fonte-a": 1_000_01, "reajuste": 300_01}, trav, {"reajuste"})["reajuste"] == 300_01
+    with pytest.raises(ValueError, match="R\\$ 300,01"):
+        espelho.entradas_pela_medicao(r, {"fonte-a": 1_000_01, "reajuste": 300_00}, trav, {"reajuste"})
+
+
 def test_tipo_sem_valor_ou_que_a_regra_nao_gera_fica_como_esta():
     assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 7}, {}) == {"medicao": 7}
     assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 7}, {"projeto": (9, "aprovado")}) == {"medicao": 7}

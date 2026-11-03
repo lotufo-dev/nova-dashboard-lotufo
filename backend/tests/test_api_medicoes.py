@@ -891,6 +891,16 @@ def test_boletim_depois_do_espelho_e_glosa_e_nao_muda_o_estado(client_admin, est
     assert (d["estado"], d["valor_atestado_centavos"]) == (estado, 12_000_01)
 
 
+def test_pedido_da_planilha_nao_muda_a_mao_depois_do_espelho(client_admin):
+    # o espelho leva a medicao adiante sem trocar o pedido; editar o valor nao pode reabri-lo
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    _no_estado(mid, "espelho_gerado")
+    r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1,00"})
+    assert r.status_code == 422 and "planilha/carta" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 12_345_67
+
+
 def test_boletim_recusas(client_admin):
     mid = _planilha_enviada(client_admin)
     import datetime
