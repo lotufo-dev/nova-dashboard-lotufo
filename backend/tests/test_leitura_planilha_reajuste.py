@@ -460,6 +460,38 @@ def test_localizador_zip64_antes_do_fim_e_recusado():
     assert e.value.motivo == "a planilha é grande demais para o modelo"
 
 
+def test_assinatura_do_fim_gravada_no_proprio_fim_nao_esconde_o_zip64():
+    """Rodada 4 (revisor, medido): com o deslocamento do fim classico valendo `PK\\x05\\x06` (o zip64 ignora esse
+    campo), a busca pela ultima assinatura achava o campo, saia sem conferir, e o zip64 passava. O fim e' achado
+    como o `zipfile` acha."""
+    import zipfile
+    dados = _com_zip64(planilha_modelo())
+    dados = dados[:-6] + b"PK\x05\x06" + dados[-2:]          # o campo de deslocamento do fim classico
+    with zipfile.ZipFile(io.BytesIO(dados)) as z:            # o zipfile abre: usa o deslocamento do zip64
+        assert len(z.infolist()) == 10
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(dados)
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+
+
+def test_contagem_do_fim_falsificada_e_recusada_antes_de_montar_o_indice(monkeypatch):
+    """Rodada 4 (Sol): o fim classico declara poucas entradas e o indice tem muitas (o `zipfile` percorre pelo
+    tamanho, e o openpyxl montava todos os registros antes do teto recusar). Contam os registros do indice, antes de
+    qualquer `ZipFile`."""
+    import zipfile
+    monkeypatch.setattr(leitura, "MAX_ENTRADAS", 30)
+    dados = _refazer(planilha_modelo(outras_abas=()), novas=[(f"xl/media/x{i}.bin", b"") for i in range(40)])
+    fim = dados.rfind(b"PK\x05\x06")
+    dados = dados[:fim + 8] + (5).to_bytes(2, "little") * 2 + dados[fim + 12:]
+    montados = []
+    real = zipfile.ZipFile._RealGetContents
+    monkeypatch.setattr(zipfile.ZipFile, "_RealGetContents", lambda self: montados.append(1) or real(self))
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(dados)
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+    assert montados == []
+
+
 def test_varredura_da_aba_conta_no_mesmo_teto_da_leitura(monkeypatch):
     """Achado do revisor: a varredura do XML depois do teto de linhas abria outro zip, fora do teto, e relia a aba
     inteira. Agora conta na soma: as outras partes mais a aba inteira passam da soma e a leitura e' recusada."""

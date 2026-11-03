@@ -142,15 +142,28 @@ def _recusar_indice_grande(dados: bytes) -> None:
     tamanho do indice (o `zipfile` le exatamente esse tamanho). 0xFFFF/0xFFFFFFFF e' o zip64, que planilha do modelo
     nao usa; o localizador do zip64 (`PK\x06\x07`, nos 20 bytes antes do fim) tambem recusa: com ele o `zipfile`
     troca a contagem e o tamanho do fim classico pelos do registro zip64. Sem o registro, o `zipfile` recusa o
-    arquivo depois."""
-    fim = dados.rfind(b"PK\x05\x06", max(0, len(dados) - 65_557))
-    if fim < 0 or fim + 16 > len(dados):
-        return
+    arquivo depois.
+
+    O fim e' achado como o `zipfile` acha (sem comentario, nos ultimos 22 bytes; senao a ultima assinatura dos
+    ultimos 64 KB): a assinatura pode estar gravada dentro do proprio fim (no campo de deslocamento). E a contagem
+    declarada pode mentir (o `zipfile` percorre o indice pelo tamanho): contam os registros do indice de fato."""
+    n = len(dados)
+    if n >= 22 and dados[n - 22:n - 18] == b"PK\x05\x06" and dados[n - 2:] == b"\0\0":
+        fim = n - 22
+    else:
+        fim = dados.rfind(b"PK\x05\x06", max(0, n - 65_557))
+    if fim < 0:
+        return                         # sem o fim, o `zipfile` recusa antes de montar o indice
+    if fim + 22 > n:
+        raise PlanilhaNaoReconhecida("o arquivo não abre como planilha .xlsx")
     if fim >= 20 and dados[fim - 20:fim - 16] == b"PK\x06\x07":
         raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
     entradas = int.from_bytes(dados[fim + 10:fim + 12], "little")
     indice = int.from_bytes(dados[fim + 12:fim + 16], "little")
     if entradas >= min(MAX_ENTRADAS, 0xFFFF) or indice > MAX_BYTES_INDICE:
+        raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
+    # o `zipfile` le o indice nos `indice` bytes antes do fim (o deslocamento declarado so' acerta o prefixo)
+    if dados.count(b"PK\x01\x02", max(0, fim - indice), fim) >= MAX_ENTRADAS:
         raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
 
 
