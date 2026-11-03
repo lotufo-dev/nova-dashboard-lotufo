@@ -671,6 +671,42 @@ def test_aditivo_entre_a_carteira_e_as_obras_nao_muda_a_base(cenario, monkeypatc
     assert o["desvio_pp"] == -16.7                       # com o aditivo lido de novo daria -2/14,4 = -13,9
 
 
+def test_painel_le_uma_fotografia_do_banco(cenario, monkeypatch):
+    """#262 (revisor, rodada 3): o painel inteiro le numa transacao de leitura so'. Um `cadastro aplicar` em outra
+    conexao muda o consorcio de 50% para 40% no meio da montagem: a escrita grava sem esperar (WAL, a leitura nao
+    segura a escrita) e o painel continua todo em 50% (PI, VA, PI+VA e direito da mesma linha batem)."""
+    c, ids = cenario
+    assert c.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    original = diretoria._curva_carteira
+
+    def cadastro_no_meio(conn, *a, **k):             # depois da carteira, antes das obras
+        outra = db.get_conn()
+        try:
+            outra.execute("UPDATE contratos SET percentual_direito_bp=4000 WHERE id=?", (ids["consorcio"],))
+            outra.commit()
+        finally:
+            outra.close()
+        return original(conn, *a, **k)
+    monkeypatch.setattr(diretoria, "_curva_carteira", cadastro_no_meio)
+    p = diretoria.painel(c, HOJE)
+    o = {x["contrato_id"]: x for x in p["obras"]}[ids["consorcio"]]
+    assert o["va"] == o["pi_va"] - o["pi"] == 100_000_000
+    assert (o["direito"], o["pi"], o["pi_va"]) == (0.5, 500_000_000, 600_000_000)
+    assert not c.in_transaction                        # a transacao de leitura fechou
+    monkeypatch.setattr(diretoria, "_curva_carteira", original)
+    o = {x["contrato_id"]: x for x in diretoria.painel(c, HOJE)["obras"]}[ids["consorcio"]]
+    assert (o["direito"], o["pi_va"]) == (0.4, 480_000_000)      # a escrita gravou; o painel seguinte a ve
+
+
+def test_painel_dentro_de_transacao_aberta_nao_a_fecha(cenario):
+    """#262: com transacao ja' aberta por quem chamou, o painel le nela e a deixa aberta."""
+    c, ids = cenario
+    c.execute("BEGIN")
+    assert diretoria.painel(c, HOJE)["obras"]
+    assert c.in_transaction
+    c.rollback()
+
+
 def test_saldo_da_tabela_aplica_a_cota_uma_vez(cenario):
     """#262 (revisao, rodada 3): saldo = cota(vigente de execucao - medido), arredondamento unico, como na carteira.
     Consorcio a 50%: 12.000.000,00 - 4.000.000,01 = 7.999.999,99 -> 4.000.000,00 (meio para cima); duas cotas

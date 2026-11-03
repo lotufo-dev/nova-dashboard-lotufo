@@ -9,6 +9,7 @@ medicao em aberto representa (`_notas_em_aberto`), com a idade contada da emissa
 Valor de uma medicao: o atestado quando houver, senao o protocolado (a mesma regra do "medido" dos paineis),
 convertido para a cota uma vez, com o arredondamento unico de `contratos.cota`.
 """
+import contextlib
 import datetime
 import json
 import math
@@ -417,18 +418,36 @@ def _obras_base(conn) -> dict:
     return base
 
 
+@contextlib.contextmanager
+def _leitura_unica(conn):
+    """#262 (revisor): o painel inteiro le uma fotografia so' do banco. Uma transacao de leitura (BEGIN adiado: a
+    fotografia e' a da primeira leitura) faz `qdop.linhas`, carteira, curva, previsto e medicoes verem o mesmo
+    estado, mesmo com um `cadastro aplicar` ou uma medicao gravando em outra conexao no meio. Em WAL (`db.get_conn`)
+    a leitura nao segura a escrita de ninguem. Com transacao ja' aberta por quem chamou, le nela e nao a fecha."""
+    if conn.in_transaction:
+        yield
+        return
+    conn.execute("BEGIN")
+    try:
+        yield
+    finally:
+        if conn.in_transaction:
+            conn.commit()                # so' houve leitura; commit so' encerra a transacao
+
+
 def painel(conn, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
-    liberado = _liberado(conn)
-    ms = _medicoes(conn)
-    notas = _notas_em_aberto(conn) if liberado else []
-    cache: dict = {}
-    avisos = _av.listar(conn, hoje, publico="diretoria")
-    return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
-            "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas), "mes_ano": _mes_ano(conn, ms, hoje, cache),
-            "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje, cache),
-            "curva_carteira": _curva_carteira(conn, hoje, cache),
-            "obras": _obras(conn, ms, hoje, avisos, cache), "obras_base": _obras_base(conn), "avisos": avisos}
+    with _leitura_unica(conn):
+        liberado = _liberado(conn)
+        ms = _medicoes(conn)
+        notas = _notas_em_aberto(conn) if liberado else []
+        cache: dict = {}
+        avisos = _av.listar(conn, hoje, publico="diretoria")
+        return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
+                "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas), "mes_ano": _mes_ano(conn, ms, hoje, cache),
+                "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje, cache),
+                "curva_carteira": _curva_carteira(conn, hoje, cache),
+                "obras": _obras(conn, ms, hoje, avisos, cache), "obras_base": _obras_base(conn), "avisos": avisos}
 
 
 def a_receber(conn, hoje: datetime.date | None = None) -> dict:
