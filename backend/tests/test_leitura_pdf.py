@@ -456,10 +456,12 @@ def test_com_limite_com_prazo_de_ponta_a_ponta_mata_o_filho_no_que_sobra():
     assert time.monotonic() - inicio < leitura_pdf._FOLGA_MATAR_S + 1.5 + 1.0
 
 
-def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0):
-    """`spawn` que leva `spawn_s` no relogio falso; o filho responde depois de `responde_em` s (None: nunca) e nao
-    sai sozinho, entao todo `join` gasta o que pede. Devolve a lista de `get_context` chamados."""
+def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0, erro_recv=None, eventos=None):
+    """`spawn` que leva `spawn_s` no relogio falso; o filho responde depois de `responde_em` s (None: nunca), nao
+    sai sozinho e ignora o `terminate`, entao todo `join` gasta o que pede e so' o `kill` o derruba. `erro_recv`:
+    excecao que o `recv` levanta. Devolve a lista de `get_context` chamados; `eventos` recebe "kill" e "close"."""
     contextos = []
+    eventos = [] if eventos is None else eventos
 
     class Recebe:
         def poll(self, t):
@@ -470,6 +472,8 @@ def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0):
             return True
 
         def recv(self):
+            if erro_recv is not None:
+                raise erro_recv
             return ("ok", 3)
 
         def close(self):
@@ -489,13 +493,17 @@ def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0):
             relogio[0] += t
 
         def is_alive(self):
-            return True
+            return self.exitcode is None
 
         def terminate(self):
             pass
 
         def kill(self):
-            pass
+            eventos.append("kill")
+            self.exitcode = -9
+
+        def close(self):
+            eventos.append("close")
 
     class Ctx:
         def Pipe(self, duplex):
@@ -546,6 +554,40 @@ def test_com_limite_sem_prazo_para_o_filho_nem_o_cria(monkeypatch):
     with pytest.raises(leitura_pdf.TextoInadequado):
         leitura_pdf.com_limite(b"", "paginas", ate=1060.0)
     assert contextos == [] and relogio[0] <= 1060.0
+
+
+def test_com_limite_com_prazo_spawn_que_come_a_folga_de_matar_nao_passa_do_prazo(monkeypatch):
+    """Gate Sol, rodada 3 da correcao: com `ate` = inicio + 6 s, a pre-checagem passa (sobram 2 s alem da folga), o
+    `spawn` de 5 s come a folga e o `_matar` de 4 s fixos chegava a inicio + 9 s."""
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+    eventos = []
+    _filho_falso(monkeypatch, relogio, eventos=eventos)
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.com_limite(b"", "paginas", ate=1006.0)
+    assert relogio[0] <= 1006.0 and "kill" in eventos     # no prazo, e o filho ainda recebe o `kill`
+
+
+def test_com_limite_erro_inesperado_depois_do_spawn_mata_o_filho_antes_de_soltar_a_vaga(monkeypatch):
+    """Gate Sol, rodada 3 da correcao: `recv` levantando OSError (ou MemoryError) soltava a vaga com o filho vivo,
+    furando o teto de duas leituras simultaneas."""
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+    eventos = []
+
+    class Vaga:
+        def acquire(self, timeout):
+            return True
+
+        def release(self):
+            eventos.append("release")
+    monkeypatch.setattr(leitura_pdf, "_VAGAS", Vaga())
+    for erro in (OSError("cano quebrado"), MemoryError()):
+        eventos.clear()
+        _filho_falso(monkeypatch, relogio, responde_em=1.0, erro_recv=erro, eventos=eventos)
+        with pytest.raises(type(erro)):
+            leitura_pdf.com_limite(b"", "paginas")
+        assert eventos == ["kill", "close", "release"], erro
 
 
 # --- de quem e' o CNPJ (achado 3 do gate 3) -------------------------------------------

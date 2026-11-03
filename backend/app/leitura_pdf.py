@@ -611,13 +611,16 @@ def _trabalho(pdf: bytes, modo: str, envia, opcoes=None) -> None:
 _FOLGA_MATAR_S = 4.0
 
 
-def _matar(proc) -> None:
-    """Derruba o filho: `terminate`, dois segundos de folga, `kill` se ainda vive."""
+def _matar(proc, ate: float | None = None) -> None:
+    """Derruba o filho: `terminate`, dois segundos de folga, `kill` se ainda vive. Com `ate`, cada espera vai so' ate'
+    o prazo (o `spawn` lento pode ter comido a folga): o `kill` sai mesmo sem tempo para esperar por ele."""
+    def espera() -> float:
+        return 2.0 if ate is None else max(0.0, min(2.0, ate - time.monotonic()))
     proc.terminate()
-    proc.join(2.0)
+    proc.join(espera())
     if proc.is_alive():
         proc.kill()
-        proc.join(2.0)
+        proc.join(espera())
 
 
 def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, ate: float | None = None):
@@ -684,24 +687,28 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, 
             recebe.close()
             envia.close()
             raise
-        envia.close()      # so' o filho escreve: e' o que faz o `recv` ver o fim do cano
+        # Daqui em diante, qualquer saida (estouro, `recv` com OSError/MemoryError, o que for) mata e recolhe o filho
+        # ANTES de a vaga ser solta: filho vivo fora da vaga furava o teto de duas leituras.
         try:
+            envia.close()      # so' o filho escreve: e' o que faz o `recv` ver o fim do cano
             if ate is not None:
                 limite = restante()       # depois do `spawn`: o tempo dele sai do prazo
             if not recebe.poll(limite):
-                _matar(proc)
                 raise TextoInadequado(_DEMOROU.format(s=int(limite)))
             try:
                 resposta = recebe.recv()
             except EOFError:              # o filho morreu sem responder
                 resposta = None
             proc.join(2.0 if ate is None else min(2.0, restante()))
-            if proc.is_alive():
-                _matar(proc)
         finally:
-            recebe.close()
-            if proc.exitcode is not None:
-                proc.close()
+            try:
+                if proc.is_alive():
+                    _matar(proc, ate)
+            finally:
+                envia.close()
+                recebe.close()
+                if proc.exitcode is not None:
+                    proc.close()
     finally:
         _VAGAS.release()
     if resposta is None:
