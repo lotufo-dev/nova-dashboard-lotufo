@@ -356,6 +356,33 @@ def valor_por_natureza(regra: dict, entradas: dict[str, int]) -> dict[str, int]:
     return soma
 
 
+def entradas_pela_medicao(regra: dict, entradas: dict[str, int],
+                          travados: dict[str, tuple[int, str]]) -> dict[str, int]:
+    """Issue #284 (decisao do Leo de 03/11/2026): o espelho deixa de ser digitado onde a medicao ja' tem valor.
+    `travados` e' {tipo: (centavos, fonte)}, com o aprovado do boletim, senao o pedido (`fonte` = "aprovado" ou
+    "pedido"). Natureza com um campo so': o valor vem preenchido e nao muda (digitado diferente recusa). Com mais de
+    um campo: a divisao e' digitada e tem de somar o valor. Devolve as entradas com o preenchido."""
+    saida = dict(entradas)
+    for tipo, (valor, fonte) in travados.items():
+        campos = [e for e in regra["entradas"] if TIPO_POR_NATUREZA[e["natureza"]] == tipo]
+        if not campos:
+            continue
+        natureza = ROTULO_NATUREZA[campos[0]["natureza"]].lower()
+        origem = "aprovado do boletim" if fonte == "aprovado" else "pedido da planilha/carta"
+        if len(campos) == 1:
+            chave, digitado = campos[0]["chave"], int(saida.get(campos[0]["chave"]) or 0)
+            if digitado and digitado != valor:
+                raise ValueError(f"{campos[0]['rotulo']}: o valor de {natureza} é o {origem} (R$ {_fmt(valor)}); "
+                                 f"foi digitado R$ {_fmt(digitado)}")
+            saida[chave] = valor
+            continue
+        soma = sum(int(saida.get(e["chave"]) or 0) for e in campos)
+        if soma != valor:
+            raise ValueError(f"A divisão dos valores de {natureza} soma R$ {_fmt(soma)} e não bate com o {origem} "
+                             f"(R$ {_fmt(valor)})")
+    return saida
+
+
 def _fmt(centavos: int) -> str:
     inteiro, cent = divmod(abs(centavos), 100)
     return ("-" if centavos < 0 else "") + f"{inteiro:,}".replace(",", ".") + f",{cent:02d}"

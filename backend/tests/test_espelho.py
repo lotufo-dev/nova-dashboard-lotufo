@@ -279,3 +279,60 @@ def test_texto_da_obra_numero_com_zero_e_extenso_minusculo():
     assert "texto" not in regra_simples()        # sem declarar, a regra (e o sha256 dela) nao muda
     with pytest.raises(espelho.RegraInvalida, match="texto"):
         espelho.normalizar({**MT388, "texto": {"caixa": True}})
+
+
+# --- issue #284: o valor do espelho vem do aprovado do boletim, senao do pedido ---------------------------
+
+def _regra_duas_fontes():
+    """Como a obra com dois valores digitados de medicao (duas fontes de recurso) e um de reajuste."""
+    return espelho.normalizar({
+        "contrato": "X", "situacao": "ativa",
+        "entradas": [{"chave": "fonte-a", "rotulo": "Medição fonte A", "natureza": "medicao"},
+                     {"chave": "fonte-b", "rotulo": "Medição fonte B", "natureza": "medicao"},
+                     {"chave": "reajuste", "rotulo": "Valor do reajuste", "natureza": "reajuste"}],
+        "retencoes": BASE,
+        "saidas": [{"chave": "saida-a", "natureza": "medicao", "valor": "fonte-a", "emissor": "lotufo",
+                    "municipio": "Cuiabá", "modelo": "a.docx"},
+                   {"chave": "saida-b", "natureza": "medicao", "valor": "fonte-b", "emissor": "lotufo",
+                    "municipio": "Cuiabá", "modelo": "b.docx"},
+                   {"chave": "saida-r", "natureza": "reajuste", "valor": "reajuste", "emissor": "lotufo",
+                    "municipio": "Cuiabá", "modelo": "r.docx"}]})
+
+
+def test_campo_unico_vem_preenchido_com_o_aprovado():
+    # centavo impar: o valor do boletim entra inteiro, sem arredondar nada
+    saida = espelho.entradas_pela_medicao(regra_simples(), {"reajuste": 50_00},
+                                          {"execucao": (1_234_567, "aprovado")})
+    assert saida == {"medicao": 1_234_567, "reajuste": 50_00}
+    assert espelho.valor_por_natureza(regra_simples(), saida) == {"execucao": 1_234_567, "reajuste": 50_00}
+
+
+def test_campo_unico_digitado_igual_passa_e_diferente_recusa_com_os_dois_valores():
+    assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 1_234_567},
+                                         {"execucao": (1_234_567, "aprovado")})["medicao"] == 1_234_567
+    with pytest.raises(ValueError) as e:
+        espelho.entradas_pela_medicao(regra_simples(), {"medicao": 1_000_000}, {"execucao": (1_234_567, "aprovado")})
+    assert "R$ 12.345,67" in str(e.value) and "R$ 10.000,00" in str(e.value) and "aprovado" in str(e.value)
+
+
+def test_sem_aprovado_vale_o_pedido():
+    with pytest.raises(ValueError, match="pedido"):
+        espelho.entradas_pela_medicao(regra_simples(), {"medicao": 1}, {"execucao": (2, "pedido")})
+    assert espelho.entradas_pela_medicao(regra_simples(), {}, {"execucao": (2, "pedido")}) == {"medicao": 2}
+
+
+def test_mais_de_um_campo_a_divisao_e_digitada_e_tem_de_somar_o_aprovado():
+    # rateio com residuo: 1.000,01 dividido em 500,00 + 500,01
+    r = _regra_duas_fontes()
+    ok = espelho.entradas_pela_medicao(r, {"fonte-a": 500_00, "fonte-b": 500_01}, {"execucao": (1_000_01, "aprovado")})
+    assert ok == {"fonte-a": 500_00, "fonte-b": 500_01}
+    with pytest.raises(ValueError) as e:
+        espelho.entradas_pela_medicao(r, {"fonte-a": 500_00, "fonte-b": 500_00}, {"execucao": (1_000_01, "aprovado")})
+    assert "R$ 1.000,00" in str(e.value) and "R$ 1.000,01" in str(e.value)
+    with pytest.raises(ValueError, match="R\\$ 1.000,01"):     # nada digitado: a soma zero tambem nao bate
+        espelho.entradas_pela_medicao(r, {}, {"execucao": (1_000_01, "aprovado")})
+
+
+def test_tipo_sem_valor_ou_que_a_regra_nao_gera_fica_como_esta():
+    assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 7}, {}) == {"medicao": 7}
+    assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 7}, {"projeto": (9, "aprovado")}) == {"medicao": 7}
