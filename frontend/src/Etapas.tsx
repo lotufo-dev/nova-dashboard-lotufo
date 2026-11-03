@@ -10,7 +10,8 @@ export const ETAPAS = ["Espelho", "Faturamento", "Nota fiscal", "Envio ao órgã
 /** 1..5 = a etapa da vez; 6 = tudo feito (recebida); 0 = medicao encerrada por excecao (cancelada, desistida). */
 export function etapaDe(estado: string): number {
   switch (estado) {
-    case "prevista": return 1;
+    // issue #281: a planilha/carta e o boletim vem antes do espelho; nao sao encerramento (gate Sol S2)
+    case "prevista": case "planilha_gerada": case "planilha_enviada": case "boletim_recebido": return 1;
     case "espelho_gerado": return 2;
     case "espelho_enviado": return 3;
     case "nota_emitida": return 4;

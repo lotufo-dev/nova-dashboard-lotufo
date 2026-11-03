@@ -23,6 +23,10 @@ log = logging.getLogger(__name__)
 # congelamento (spec §5) contornavel por uma rota so.
 TRANSICOES = {
     "prevista": {"cancelada", "desistida"},
+    # Issue #281: entra pela planilha/carta (medicao_planilhas.registrar); a saida a mao e' o cancelamento.
+    "planilha_gerada": {"cancelada", "desistida"},
+    # Issue #283: entra pelo envio da planilha/carta (medicao_planilhas.registrar_envio_externo); sai como a gerada.
+    "planilha_enviada": {"cancelada", "desistida"},
     # Estados do espelho (spec 2026-09-21 §2). espelho_gerado -> espelho_enviado e' do SISTEMA
     # (marcar_espelho_enviado, no ato do envio); -> protocolada e' registrar_protocolo.
     # Bloco 3: a nota (PDF lido ou RM) fecha `nota_emitida` (notas.fechar_se_completa, ou a
@@ -39,6 +43,14 @@ TRANSICOES = {
     "desistida": set(),
 }
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
+# Issue #281: estados em que o pedido (valor protocolado) e' o da planilha/carta e so' muda por revisao
+ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
+PEDIDO_POR_REVISAO = "Para mudar o pedido, registre uma revisão da planilha/carta"
+PEDIDO_DEPOIS_DO_BOLETIM = "O pedido não pode mais ser alterado depois do boletim do órgão"
+# Gate Sol S4 (#281): os estados que recebem protocolo, por extenso. Estes vao a `protocolada` no mesmo passo...
+ESTADOS_PROMOVIDOS_PELO_PROTOCOLO = ("prevista", "planilha_gerada", *ESTADOS_ESPELHO, "nota_emitida")
+# ...e estes ja' foram protocolados: o protocolo seguinte (novo oficio) so' congela. Os demais sao recusados.
+ESTADOS_DE_NOVO_PROTOCOLO = ("protocolada", "nf_emitida")
 # B-12 (10/10/2026): mensagem ao usuario com o tipo e o estado por extenso, nunca o codigo ("(execucao)")
 ROTULO_TIPO = {"execucao": "execução", "reajuste": "reajuste", "projeto": "projeto"}
 ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta gerada",
@@ -89,8 +101,13 @@ def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     if r is None:
         return None
     d = dict(r)
+    # Issue #283: `protocolos` e' so' o da nota (o que conta como protocolo nas telas e nos marcos); o nº do SIGA da
+    # planilha/carta (etapa 'planilha', migracao 054) vem a' parte
     d["protocolos"] = [dict(p) for p in conn.execute(
-        "SELECT * FROM medicao_protocolos WHERE medicao_id=? ORDER BY id", (medicao_id,))]
+        "SELECT * FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' ORDER BY id", (medicao_id,))]
+    p = conn.execute("SELECT data, numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='planilha'",
+                     (medicao_id,)).fetchone()
+    d["planilha_siga"] = {"data": p["data"], "numero": p["numero_processo"]} if p else None
     # NFs do RM alocadas a esta medicao, com o recebido de cada uma (fase 5). Import local:
     # sincronizacao_rm importa este modulo.
     from app import sincronizacao_rm
@@ -250,6 +267,8 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
                                            "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
     _eventos_atesto(conn, list(out), out)
     _eventos_assinatura(conn, list(out), out)
+    from app import medicao_planilhas     # issue #283: o envio da planilha/carta (import local: ele importa este)
+    medicao_planilhas.eventos_envio(conn, list(out), out)
     for eventos in out.values():
         eventos.sort(key=lambda e: e["data"] or "")      # estavel: no mesmo segundo, o protocolado vem antes
     return out
@@ -289,6 +308,10 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         # (testes de quebra 10/10/2026, A-16): a 631 virou R$ 1,00 depois da nota e nada avisou.
         if campo == "protocolado" and m["valor_protocolado_origem"] == "espelho":
             raise ValueError("O valor desta medição vem do espelho: para mudar, gere o espelho de novo")
+        # Issue #281: da planilha/carta ao boletim, o pedido so' muda por versao nova (com motivo)
+        if campo == "protocolado" and m["estado"] in ESTADOS_PLANILHA:
+            # depois do boletim nem a revisao e' aceita: so' orienta a revisao onde ela existe (gate Sol, rodada 2)
+            raise ValueError(PEDIDO_DEPOIS_DO_BOLETIM if m["estado"] == "boletim_recebido" else PEDIDO_POR_REVISAO)
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []
@@ -304,7 +327,8 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         cond = " AND estado NOT IN ('cancelada','desistida')"
         if campo == "protocolado":
             cond += (" AND (congelada=0 OR valor_protocolado_centavos IS NULL)"
-                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho'")
+                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho'"
+                     f" AND estado NOT IN ({','.join(repr(e) for e in ESTADOS_PLANILHA)})")
         cur = conn.execute(f"UPDATE medicoes SET {col_v}=?, {col_o}=?{extra_sql} WHERE id=?{cond}",
                            (centavos, origem, *extra_par, medicao_id))
         db.exigir_uma_linha(cur, "Medição congelada ou encerrada concorrentemente: o valor não pôde ser "
@@ -345,6 +369,9 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         atual = m["estado"]
         if atual in ("cancelada", "desistida", "recebida"):
             raise ValueError(f"Medição em estado final ({atual}) não recebe protocolo")
+        if atual not in (*ESTADOS_PROMOVIDOS_PELO_PROTOCOLO, *ESTADOS_DE_NOVO_PROTOCOLO):
+            # Gate Sol S4 (#281): planilha enviada e boletim recebido congelariam o pedido sem mudar o estado
+            raise ValueError(f"Medição {rotulo_estado(atual)} não recebe protocolo")
         if exige_nota and atual == "nota_emitida":
             # Issue #188: o protocolo registrado a mao tambem espera a outra metade onde o orgao junta medicao e
             # reajuste (conferido aqui, sob o mesmo lock da gravacao)
@@ -364,7 +391,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         # A-09 (testes de quebra 10/10/2026): o protocolo registrado a mao antes da nota pulava faturamento,
         # nota e envio sem pedir nada. Vira pendencia da MESMA lista: so' passa assumida e justificada.
         # Gate Sol S3: na ressalva, `pendencias` traz tudo e `certidoes_pendentes` so' as certidoes.
-        sem_nota = exige_nota and atual in ("prevista", *ESTADOS_ESPELHO)
+        sem_nota = exige_nota and atual in ("prevista", "planilha_gerada", *ESTADOS_ESPELHO)   # #281: planilha
         pendencias = [*pendentes, NOTA_NAO_EMITIDA] if sem_nota else list(pendentes)
         if sem_nota:
             motivos.append(NOTA_NAO_EMITIDA)
@@ -385,7 +412,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         # SELECT e o UPDATE outro usuario pode cancelar/mover a medicao. Sem a condicao, o
         # perdedor da corrida sobrescreveria um estado final. Vem ANTES do INSERT para nao
         # deixar protocolo orfao na transacao quando a corrida e perdida.
-        if atual in ("prevista", *ESTADOS_ESPELHO, "nota_emitida"):
+        if atual in ESTADOS_PROMOVIDOS_PELO_PROTOCOLO:
             upd = conn.execute(
                 "UPDATE medicoes SET estado='protocolada', congelada=1 WHERE id=? AND estado=?",
                 (medicao_id, atual))
@@ -523,7 +550,7 @@ PROXIMO_PASSO = {"planilha_gerada": "enviar a planilha/carta", "planilha_enviada
 def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None) -> list[dict]:
     """Medicoes entre o espelho e o pagamento, com o proximo passo e a data do ultimo marco."""
     sql = ("SELECT m.*, c.nome_curto, c.numero_instrumento, "
-           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id) AS protocolado_em "
+           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em "
            "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id "
            f"WHERE m.estado IN ({','.join('?' * len(PROXIMO_PASSO))})")
     args: list = list(PROXIMO_PASSO)

@@ -136,8 +136,13 @@ def conferir_parseavel(caminho: Path) -> None:
     `leitura_pdf` (implementacao unica de "como este projeto abre um PDF"), em
     subprocesso com limite de tempo: PDF hostil e' morto la' e vira 415 aqui.
     """
+    conferir_bytes_parseaveis(caminho.read_bytes())
+
+
+def conferir_bytes_parseaveis(dados: bytes) -> None:
+    """`conferir_parseavel` sobre bytes ja' lidos (issue #281: dois anexos validados antes de gravar qualquer um)."""
     try:
-        if not leitura_pdf.paginas_com_limite(caminho.read_bytes()):
+        if not leitura_pdf.paginas_com_limite(dados):
             raise ValueError("PDF sem páginas")
     except leitura_pdf.TextoInadequado as e:
         raise HTTPException(415, str(e)) from e
