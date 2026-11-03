@@ -120,12 +120,38 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
   return neutro;
 }
 
+// Previsao vigente por competencia (issue #272; `reajuste.previsoes_vigentes` escolhe a mais recente da origem mais
+// forte). A tabela completa do ciclo (pedido, aprovado, apostilado...) e' da #275; aqui so' o previsto e a origem.
+type Previsao = { data_base_mes: string; ciclo: number; competencia: string; valor_previsto_centavos: number;
+  origem: "pleito" | "manual" | "apostilamento" };
+const ORIGEM: Record<Previsao["origem"], string> = {
+  pleito: "planilha do pleito", manual: "digitada", apostilamento: "apostilamento" };
+
+function TabelaPrevisao({ previsoes, ciclo }: { previsoes: Previsao[]; ciclo: number }) {
+  const total = previsoes.reduce((s, p) => s + p.valor_previsto_centavos, 0);
+  return (
+    <table className="tabela tabela--densa" aria-label={`Previsão de reajuste do ciclo de ${ciclo}`}>
+      <thead><tr><th scope="col">Competência</th><th scope="col" className="num">Previsto</th><th scope="col">Origem</th></tr></thead>
+      <tbody>
+        {previsoes.map(p => (
+          <tr key={p.competencia}>
+            <th scope="row" className="num">{mesAno(p.competencia)}</th>
+            <td className="num">{brl(p.valor_previsto_centavos)}</td>
+            <td>{ORIGEM[p.origem] ?? p.origem}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot><tr><th scope="row">Total previsto</th><td className="num">{brl(total)}</td><td /></tr></tfoot>
+    </table>
+  );
+}
+
 // pleito que ainda se trabalha: feito no sistema, nem enviado nem descartado (o mesmo corte do CartaoPleito)
 const emAberto = (p: Pleito) => p.origem === "sistema" && p.situacao !== "enviado" && p.situacao !== "descartado";
 
 export default function Reajuste({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
   const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[]; competencias?: CompetenciaApostilada[];
-    bases_dos_termos?: BaseDoTermo[] } | null>(null);
+    bases_dos_termos?: BaseDoTermo[]; previsoes?: Previsao[] } | null>(null);
   const [apostilamentos, setApostilamentos] = useState<InstrumentoCadastro[]>([]);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
@@ -202,6 +228,11 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const anteriores = db.pleitosAnteriores.length + outrosAp.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
         const apostiladas = (dados.competencias ?? []).filter(x => x.data_base_mes === db.data_base_mes);
+        // a competencia apostilada fica so' na tabela do apostilamento: a da previsao traz o que ainda e' previsto
+        // (planilha do pleito e digitada), e o total dela soma so' isso
+        const previsoes = (dados.previsoes ?? []).filter(p => p.data_base_mes === db.data_base_mes && p.ciclo === c.ciclo
+          && !(p.origem === "apostilamento"
+               && apostiladas.some(x => x.ciclo === p.ciclo && x.competencia === p.competencia)));
         // o pleito vigente do ciclo e o que o servidor deixa fazer com ele (reiterar, reemitir o cronograma)
         const vigente = c.pleito ? dados.pleitos.find(p => p.id === c.pleito!.id) : undefined;
         const possiveis = vigente?.reemissoes_possiveis ?? [];
@@ -249,6 +280,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
               ))}
               {apostiladas.length > 0 && <TabelaApostilada dataBase={db.data_base_mes} linhas={apostiladas} />}
             </div>
+            {previsoes.length > 0 && <TabelaPrevisao previsoes={previsoes} ciclo={c.ciclo} />}
             {(formAberto || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
               <div className="secoes-pleito">
                 {reemitindo && (

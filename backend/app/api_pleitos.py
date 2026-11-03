@@ -5,9 +5,9 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
-from app import arquivos, envio_reserva, graph, pdfs, pleitos, prazos, reajuste
+from app import arquivos, envio_reserva, graph, leitura_planilha_reajuste, pdfs, pleitos, prazos, reajuste
 from app.api_auth import conexao
 from app.api_espelhos import _emails
 from app.api_medicoes import ID, MAX_INT64, _contrato_existe
@@ -47,6 +47,16 @@ class DescartarIn(BaseModel):
     motivo: str = Field(min_length=1, max_length=500)
 
 
+class LinhaPrevisaoIn(BaseModel):
+    competencia: str = Field(max_length=7)
+    valor_centavos: StrictInt          # 1.5 nao vira 1: dinheiro chega em centavos inteiros ou nao chega
+
+
+class PrevisaoDigitadaIn(BaseModel):
+    # sem campo de origem: a digitada e' sempre 'manual'; a 'pleito' so' nasce da planilha relida no servidor
+    linhas: list[LinhaPrevisaoIn] = Field(max_length=pleitos.MAX_COMPETENCIAS)
+
+
 def _existe(conn, pid: int) -> None:
     if not 1 <= pid <= MAX_INT64 or conn.execute("SELECT 1 FROM pleitos WHERE id=?", (pid,)).fetchone() is None:
         raise HTTPException(404, "Pleito não encontrado")
@@ -81,7 +91,8 @@ def reajuste_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=F
     return {"ciclos": reajuste.ciclos(conn, contrato_id),
             "competencias": reajuste.competencias_apostiladas(conn, contrato_id),
             "bases_dos_termos": reajuste.bases_dos_termos(conn, contrato_id),
-            "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("reajuste",))]}
+            "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("reajuste",))],
+            "previsoes": reajuste.previsoes_vigentes(conn, contrato_id)}
 
 
 @router.get("/api/contratos/{contrato_id}/prazos")
@@ -140,9 +151,57 @@ def anexo(pid: ID, tipo: Literal[pleitos.TIPOS_ANEXO] = Form(...),
         dados, ext = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=pdfs.TETO_BYTES_PACOTE)), "pdf"
     try:
         pleitos.adicionar_anexo(conn, usuario["id"], pid, tipo, nome, dados, ext)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: os anexos sao os que vao nele
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
+
+
+@router.post("/api/pleitos/{pid}/previsao/ler")
+def ler_previsao(pid: ID, arquivo: UploadFile = File(...), _=Depends(exigir("editar_cadastros")),
+                 conn: sqlite3.Connection = Depends(conexao)):
+    """Le a planilha de previsao (modelo "Mem. e Cron. - Prev. de Reajuste") para a pessoa conferir. Nao grava:
+    o aceite e' `POST /previsao/planilha`, com o `sha256` daqui. Fora do modelo, devolve a mensagem e a tabela
+    vazia para digitar."""
+    _existe(conn, pid)
+    dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=TETO_PLANILHA, tipo="xlsx"))
+    try:
+        return {"reconhecida": True, "linhas": leitura_planilha_reajuste.ler(dados), "sha256": arquivos.sha_de(dados)}
+    except leitura_planilha_reajuste.PlanilhaNaoReconhecida as e:
+        return {"reconhecida": False, "mensagem": str(e), "motivo": e.motivo, "linhas": []}
+
+
+def _gravar(conn, pid: int, gravar) -> dict:
+    try:
+        n = gravar()
+    except envio_reserva.EnvioEmAndamento as e:
+        raise HTTPException(409, detail=e.detalhe()) from None
+    except leitura_planilha_reajuste.PlanilhaNaoReconhecida as e:
+        raise HTTPException(422, f"{e} ({e.motivo})") from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    # quantas competencias o SERVIDOR gravou: e' o que a confirmacao da tela diz
+    return {**_detalhe(conn, pid), "previsao_gravada": n}
+
+
+@router.post("/api/pleitos/{pid}/previsao/planilha")
+def aceitar_previsao_planilha(pid: ID, arquivo: UploadFile = File(...), sha256: str = Form(..., max_length=64),
+                              usuario: dict = Depends(exigir("editar_cadastros")),
+                              conn: sqlite3.Connection = Depends(conexao)):
+    """Aceite da planilha conferida: o servidor rele o arquivo e grava o que leu, com origem 'pleito'. O `sha256`
+    e' o que a leitura devolveu: arquivo diferente do conferido e' recusado."""
+    _existe(conn, pid)
+    dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=TETO_PLANILHA, tipo="xlsx"))
+    return _gravar(conn, pid, lambda: pleitos.gravar_previsao_planilha(conn, usuario["id"], pid, dados, sha256))
+
+
+@router.post("/api/pleitos/{pid}/previsao/digitada")
+def gravar_previsao_digitada(pid: ID, dados: PrevisaoDigitadaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                             conn: sqlite3.Connection = Depends(conexao)):
+    _existe(conn, pid)
+    linhas = [x.model_dump() for x in dados.linhas]
+    return _gravar(conn, pid, lambda: pleitos.gravar_previsao_digitada(conn, usuario["id"], pid, linhas))
 
 
 @router.post("/api/pleitos/{pid}/anexos/{anexo_id}/remover")
@@ -151,6 +210,8 @@ def remover_anexo(pid: ID, anexo_id: ID, usuario: dict = Depends(exigir("editar_
     _existe(conn, pid)
     try:
         pleitos.remover_anexo(conn, usuario["id"], pid, anexo_id)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: os anexos sao os que vao nele
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -162,6 +223,8 @@ def montar(pid: ID, dados: MontarIn, usuario: dict = Depends(exigir("editar_cada
     _existe(conn, pid)
     try:
         pleitos.montar(conn, usuario["id"], pid, dados.corpo)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: a carta e' a que vai nele
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -181,6 +244,8 @@ def assinado(pid: ID, arquivo: UploadFile = File(...), usuario: dict = Depends(e
     pdf = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=pdfs.TETO_BYTES_PACOTE))
     try:
         pleitos.receber_assinado(conn, usuario["id"], pid, pdf)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: a carta e' a que vai nele
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Reajuste from "./Reajuste";
 import { brl } from "./formato";
@@ -24,6 +24,50 @@ describe("Reajuste", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar pleito" }));
     expect(screen.getByRole("form", { name: "Novo ofício" }).textContent).toContain("06/2024");
     expect(screen.getByLabelText("Nº do ofício (CT)")).toBeTruthy();
+  });
+
+  it("mostra a previsão gravada do ciclo, competência × valor com a origem (issue #272)", async () => {
+    const prev = (competencia: string, valor: number, origem: string, ciclo = 2026) => ({ data_base_mes: "2024-06",
+      ciclo, competencia, valor_previsto_centavos: valor, origem, pleito_id: 3 });
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "pleito_pendente", dias: -14, pleito: null, apostilamento: null }], pleitos: [],
+          previsoes: [prev("2026-07", 123456, "pleito"), prev("2026-08", 700, "manual"), prev("2025-07", 1, "pleito", 2025)] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar />);
+    const tabela = await screen.findByRole("table", { name: "Previsão de reajuste do ciclo de 2026" });
+    const linhas = within(tabela).getAllByRole("row");
+    expect(linhas).toHaveLength(1 + 2 + 1);                   // so' o ciclo corrente; cabeca e total
+    expect(linhas[1].textContent).toContain("07/2026");
+    expect(linhas[1].textContent).toContain("R$ 1.234,56");
+    expect(linhas[1].textContent).toContain("planilha do pleito");
+    expect(linhas[2].textContent).toContain("digitada");
+    expect(linhas[3].textContent).toContain("R$ 1.241,56");
+  });
+
+  it("competência apostilada aparece só na tabela do apostilamento, não de novo na previsão (#271 com #272)", async () => {
+    const prev = (competencia: string, valor: number, origem: string) => ({ data_base_mes: "2024-06", ciclo: 2026,
+      competencia, valor_previsto_centavos: valor, origem, pleito_id: origem === "apostilamento" ? null : 3 });
+    const apostilada = (competencia: string, valor: number) => ({ data_base_mes: "2024-06", ciclo: 2026, competencia,
+      valor_centavos: valor, medicao: null, instrumento_chave: "ap-12", instrumento_numero: "019/2024/02/12",
+      instrumento_data: "2026-10-01" });
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "apostilado", dias: null, pleito: null, apostilamento: null }], pleitos: [],
+          // a de 11/2026 e' de apostilamento mas nao esta' na tabela do apostilamento: continua na previsao
+          previsoes: [prev("2026-07", 130003, "apostilamento"), prev("2026-08", 20005, "apostilamento"),
+                      prev("2026-09", 700, "pleito"), prev("2026-10", 301, "manual"),
+                      prev("2026-11", 2, "apostilamento")],
+          competencias: [apostilada("2026-07", 130003), apostilada("2026-08", 20005)] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const apostiladas = await screen.findByRole("table", { name: "Competências apostiladas da data-base 06/2024" });
+    const previsao = screen.getByRole("table", { name: "Previsão de reajuste do ciclo de 2026" });
+    const competencias = (t: HTMLElement) => [...t.querySelectorAll("tbody tr")].map(tr => tr.firstElementChild?.textContent);
+    expect(competencias(apostiladas)).toEqual(["07/2026", "08/2026"]);
+    expect(competencias(previsao)).toEqual(["09/2026", "10/2026", "11/2026"]);   // uma linha por competência
+    // o rodape diz o que soma: so' as linhas da previsao, nao o reajuste do ciclo inteiro
+    expect(previsao.querySelector("tfoot")?.textContent).toBe(`Total previsto${brl(1003)}`);
   });
 
   it("mostra a parte do contrato de cada data-base ao lado do mês (issue #257)", async () => {
