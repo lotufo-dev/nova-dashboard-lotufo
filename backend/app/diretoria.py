@@ -272,14 +272,15 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date, cache: dict) -> dict:
         # #262: o medido e' o de `paineis.saldo` (execucao nos estados que medem), na mesma base do vigente de execucao
         exe = [m for m in ms if m["contrato_id"] == c["id"] and paineis.mede_execucao(m)]
         medido = medidos.get(c["id"], 0)
+        pct = v["percentual_direito_bp"]   # #262: o percentual do mesmo vigente que a tabela de obras reaproveita
         # #262: saldo a precos iniciais -- o aditivo de reajuste fica fora, como no saldo da obra (`paineis.saldo`)
-        saldo = contratos.cota(v["valor_vigente_execucao_centavos"] - medido, c["percentual_direito_bp"]) or 0
-        vigente_cota = contratos.cota(v["valor_vigente_execucao_centavos"], c["percentual_direito_bp"]) or 0
-        medido_cota = contratos.cota(medido, c["percentual_direito_bp"]) or 0
+        saldo = contratos.cota(v["valor_vigente_execucao_centavos"] - medido, pct) or 0
+        vigente_cota = contratos.cota(v["valor_vigente_execucao_centavos"], pct) or 0
+        medido_cota = contratos.cota(medido, pct) or 0
         # #262: o cheio da janela, na cota uma vez por contrato (arredondamento unico, como o medido)
         ritmo += contratos.cota(sum((m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None
                                      else m["valor_protocolado_centavos"] or 0)
-                                    for m in exe if m["competencia"] in ultimos), c["percentual_direito_bp"]) or 0
+                                    for m in exe if m["competencia"] in ultimos), pct) or 0
         fim = _d(v.get("execucao_fim_vigente"))
         linhas.append({"contrato_id": c["id"], "obra": c["nome_curto"] or c["numero_instrumento"],
                        "orgao_id": c["orgao_id"], "saldo_centavos": saldo,
@@ -338,7 +339,7 @@ def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
     ultima repactuacao quando a obra tem uma, senao contra a vigente. Em valor cheio (a razao e' a mesma na cota, sem
     o arredondamento dela); uma casa decimal, meio para cima. Sem cronograma ou sem valor vigente, None."""
     _, base, previsto, medido = _curva_obra(conn, contrato_id, cache)
-    total = contratos.vigente(conn, contrato_id)["valor_vigente_execucao_centavos"]
+    total = _vigente(conn, contrato_id, cache)["valor_vigente_execucao_centavos"]
     if not previsto or not total or total <= 0:
         return {"desvio_pp": None, "desvio_base": None}
     ate = _mes(hoje, -1)

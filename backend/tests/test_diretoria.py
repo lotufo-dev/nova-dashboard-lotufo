@@ -2,6 +2,7 @@
 import datetime
 import json
 import pathlib
+import sys
 
 import pytest
 
@@ -614,6 +615,60 @@ def test_tabela_e_carteira_leem_as_mesmas_medicoes(cenario, monkeypatch):
     monkeypatch.setattr(avisos, "listar", protocola_no_meio)
     tabela, carteira, _ = _saldos(c)
     assert tabela[ids["propria"]] == carteira["SINFRA - X"] == 97_100_000
+
+
+def test_medido_da_tabela_e_da_carteira_vale_o_atestado(cenario):
+    """#262 (gate Sol, rodada 3): com atestado, o medido de execucao e' o atestado, nao o protocolado."""
+    c, ids = cenario
+    _medir(c, ids["propria"], 60, "protocolada", 10_000_000)
+    c.execute("UPDATE medicoes SET valor_atestado_centavos=3000001 WHERE contrato_id=? AND numero=60", (ids["propria"],))
+    c.commit()
+    tabela, carteira, _ = _saldos(c)
+    assert tabela[ids["propria"]] == carteira["SINFRA - X"] == 97_100_000 - 3_000_001
+
+
+def test_carteira_usa_o_percentual_do_vigente_que_a_tabela_reaproveita(cenario, monkeypatch):
+    """#262 (gate Sol, rodada 3): a carteira aplica a cota com o percentual do mesmo `contratos.vigente` que a tabela
+    reaproveita, nao com o da linha lida antes. O percentual do consorcio muda de 50% para 40% logo depois da lista
+    de contratos da carteira: as duas mostram 40% de (12.000.000,00 - 4.000.000,00) = 3.200.000,00."""
+    c, ids = cenario
+    original = diretoria._ativos
+
+    def muda_depois_da_lista(conn):
+        linhas = original(conn)
+        if sys._getframe(1).f_code.co_name in ("_carteira", "<genexpr>") and not getattr(muda_depois_da_lista, "feito", False):
+            conn.execute("UPDATE contratos SET percentual_direito_bp=4000 WHERE id=?", (ids["consorcio"],))
+            conn.commit()
+            muda_depois_da_lista.feito = True
+        return linhas
+    monkeypatch.setattr(diretoria, "_ativos", muda_depois_da_lista)
+    p = diretoria.painel(c, HOJE)
+    assert muda_depois_da_lista.feito
+    o = {x["contrato_id"]: x for x in p["obras"]}[ids["consorcio"]]
+    por = {x["orgao"]: x for x in p["carteira"]["por_orgao"]}["MTPAR"]
+    assert o["saldo"] == por["saldo_centavos"] == 320_000_000
+    assert o["pi_va"] == por["vigente_centavos"] == 480_000_000
+
+
+def test_aditivo_entre_a_carteira_e_as_obras_nao_muda_a_base(cenario, monkeypatch):
+    """#262 (gate Sol, rodada 3): carteira, tabela e desvio usam o mesmo vigente do painel. Um aditivo de execucao de
+    2.400.000,00 que chega depois da carteira nao entra na tabela nem no denominador do desvio (-2 mi sobre 12 mi)."""
+    c, ids = cenario
+    _repactuar_consorcio(c, ids["consorcio"])
+    original = diretoria._curva_carteira
+
+    def aditivo_no_meio(conn, *a, **k):              # roda depois da carteira e antes das obras
+        conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
+                     "VALUES (?, 'valor', 240000000, 'assinado', '2026-03-01', 'execucao')", (ids["consorcio"],))
+        conn.commit()
+        return original(conn, *a, **k)
+    monkeypatch.setattr(diretoria, "_curva_carteira", aditivo_no_meio)
+    p = diretoria.painel(c, HOJE)
+    o = {x["contrato_id"]: x for x in p["obras"]}[ids["consorcio"]]
+    por = {x["orgao"]: x for x in p["carteira"]["por_orgao"]}["MTPAR"]
+    assert o["pi_va"] == por["vigente_centavos"] == 600_000_000
+    assert o["saldo"] == por["saldo_centavos"] == 400_000_000
+    assert o["desvio_pp"] == -16.7                       # com o aditivo lido de novo daria -2/14,4 = -13,9
 
 
 def test_saldo_da_tabela_aplica_a_cota_uma_vez(cenario):
