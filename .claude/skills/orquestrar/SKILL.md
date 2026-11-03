@@ -68,18 +68,24 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    da PR. O caminho é:
    - Mandar a lista inteira à mesma trabalhadora (`SendMessage` com o nome dela), pedindo para corrigir com
      teste ou refutar com `arquivo:linha`, e atualizar a PR. Ela ainda está no worktree dela e é a opção
-     preferida. Conta como "não respondeu" o `SendMessage` avisar que o agente já encerrou ou não existe, ou
-     passarem 15 min sem retorno.
-   - Se ela não responder (o agente já encerrou), abrir uma `trabalhadora` **nova, isolada como sempre**
+     preferida. Só conta como "não respondeu" o `SendMessage` avisar que o agente já encerrou ou não existe; **sem
+     prazo em minutos** (uma trabalhadora corrigindo com teste pode demorar, e duas corrigindo a mesma PR
+     deixam o push da segunda recusado e o `<sha-antes>` sem bater).
+   - Se ela não responder (nesse sentido), conferir antes que `gh pr view <M> --json headRefOid` ainda é
+     o `<sha-antes>` e então abrir uma `trabalhadora` **nova, isolada como sempre**
      (`isolation: "worktree"`, `run_in_background: true`), com o prompt "Issue #N, PR #M, branch no GitHub
      `<branch>`: corrija estes achados" e a lista. No worktree novo ela aponta a branch local dela para
-     `origin/<branch>` (`git fetch origin` e `git reset --hard origin/<branch>`, sem renomear a branch), corrige
+     `origin/<branch>` (`git fetch origin` e `git checkout -B "$(git branch --show-current)" origin/<branch>`, sem renomear a
+     branch), corrige
      com teste e faz `git push origin HEAD:<branch>`, a mesma branch remota da PR. O worktree original da PR fica parado
      no commit antigo; não importa, o que vale é o remoto.
    - Quando a correção voltar, rodar o `revisor-adversarial` de novo **só sobre o diff novo**, passando no
      prompt o **caminho do worktree de quem corrigiu** (o da trabalhadora nova, se foi ela; ele tem o commit
-     novo, o original não) e o intervalo `<sha-antes>..HEAD`. O gate Sol, quando se aplica e há cota, roda
-     desse mesmo caminho. **Duas rodadas no máximo**; se ainda sobrar Crítico ou Aviso não refutado, marcar a
+     novo, o original não) e o intervalo `<sha-antes>..HEAD`. O gate Sol não roda de novo sobre a
+     correção, salvo se ela mexeu em lógica de dinheiro ou de envio de forma grande (regra da skill
+     `gate-sol`); nesse caso, havendo cota, roda desse mesmo caminho só sobre o diff novo. **Duas rodadas no
+     máximo**, a menos que o próprio Leo escolha a PR para mais uma correção (só se ele pedir; não é
+     automático); se ainda sobrar Crítico ou Aviso não refutado, marcar a
      PR como draft (`gh pr ready --undo <M>`), pôr `precisa-do-leo` na issue, e seguir.
 7. **Preencher `## Gates` na PR** (`gh pr edit <M> --body-file ...`, mantendo o resto do corpo) com o resultado
    do revisor e do gate Sol, no formato da skill `abrir-pr`.
@@ -90,7 +96,7 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    - revisor com veredito válido e sem Crítico/Aviso em aberto; gate Sol idem quando se aplica. O gate Sol
      roda quando o codex existe (máquina local). Na nuvem, onde não há codex, não é trava: registrar "gate
      Sol: não disponível na nuvem" em `## Gates`. Sem cota do codex vale o passo 5 (só mergeia sozinha se a
-     rodada 1 do Sol já cobriu o diff inteiro);
+     rodada 1 do Sol já cobriu o diff inteiro e a correção não mexeu em dinheiro ou envio de forma grande);
    - **nenhum comentário nem review na PR** (`gh pr view <M> --json comments,reviews`): todo agente posta com
      a conta do Leo, então qualquer comentário na PR conta como dele. Por isso **a orquestradora e a
      trabalhadora nunca comentam na PR**: o que precisam registrar vai no corpo da PR (`gh pr edit`) ou na
