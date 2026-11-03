@@ -607,6 +607,10 @@ def _trabalho(pdf: bytes, modo: str, envia, opcoes=None) -> None:
         envia.close()
 
 
+# Pior caso de `_matar`: os dois `join(2.0)`. Com prazo de ponta a ponta (`ate`), sai do tempo do filho.
+_FOLGA_MATAR_S = 4.0
+
+
 def _matar(proc) -> None:
     """Derruba o filho: `terminate`, dois segundos de folga, `kill` se ainda vive."""
     proc.terminate()
@@ -654,15 +658,20 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, 
     em 415/422.
 
     `ate` (capa do SMO, #285): prazo de ponta a ponta, em `time.monotonic()`. A espera pela vaga e o tempo do filho
-    saem do que sobra ate' la', em vez de `TEMPO_LIMITE_S` de espera mais `limite` de filho.
+    saem do que sobra ate' la', em vez de `TEMPO_LIMITE_S` de espera mais `limite` de filho. O que sobra e' medido
+    DEPOIS do `spawn` (que no Windows sob carga leva segundos) e ja' sem a folga de `_matar`, e o `join` do filho que
+    respondeu tambem cabe nele: nem o filho que nunca responde passa de `ate`. Sem tempo para o filho depois da
+    vaga, nem o cria.
     """
     limite = TEMPO_LIMITE_S if limite is None else limite    # lido na chamada: o teste o troca
     espera = TEMPO_LIMITE_S if ate is None else max(0.0, ate - time.monotonic())
     if not _VAGAS.acquire(timeout=espera):
         raise TextoInadequado(_LOTADO)
-    if ate is not None:
-        limite = max(0.0, ate - time.monotonic())
+    def restante() -> float:
+        return max(0.0, ate - time.monotonic() - _FOLGA_MATAR_S)
     try:
+        if ate is not None and restante() <= 0.0:
+            raise TextoInadequado(_DEMOROU.format(s=int(max(0.0, ate - time.monotonic()))))
         ctx = multiprocessing.get_context("spawn")
         recebe, envia = ctx.Pipe(duplex=False)
         try:
@@ -677,6 +686,8 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, 
             raise
         envia.close()      # so' o filho escreve: e' o que faz o `recv` ver o fim do cano
         try:
+            if ate is not None:
+                limite = restante()       # depois do `spawn`: o tempo dele sai do prazo
             if not recebe.poll(limite):
                 _matar(proc)
                 raise TextoInadequado(_DEMOROU.format(s=int(limite)))
@@ -684,7 +695,7 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, 
                 resposta = recebe.recv()
             except EOFError:              # o filho morreu sem responder
                 resposta = None
-            proc.join(2.0)
+            proc.join(2.0 if ate is None else min(2.0, restante()))
             if proc.is_alive():
                 _matar(proc)
         finally:
