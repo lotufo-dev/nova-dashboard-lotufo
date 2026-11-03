@@ -104,10 +104,16 @@ def _plano_com_mapa(texto: str | None) -> tuple[str, list[int]]:
 
 def _situacao(texto: str, mapa: list[int], m: re.Match) -> str:
     """A situacao como impressa (com acento), espacos reduzidos e sem pontuacao ou separador no fim (sobra de OCR:
-    "APROVADA.", "APROVADA |", "APROVADA -", "APROVADA )")."""
-    original = texto[mapa[m.start(4)]:mapa[m.end(4) - 1] + 1]
-    original = re.sub(r"\s+", " ", unicodedata.normalize("NFC", original))
-    return re.sub(r"[\W_]+$", "", original).strip()
+    "APROVADA.", "APROVADA |", "APROVADA -", "APROVADA )"). O recorte engole os acentos combinantes (NFD) que vem
+    depois do ultimo caractere casado, e a limpeza so' tira pontuacao, simbolo, separador e controle, nunca marca:
+    "APROVADÁ" decomposto e "APROVADA" com cedilha solta nao viram "APROVADA"."""
+    fim = mapa[m.end(4) - 1] + 1
+    while fim < len(texto) and unicodedata.category(texto[fim])[0] == "M":
+        fim += 1
+    original = re.sub(r"\s+", " ", unicodedata.normalize("NFC", texto[mapa[m.start(4)]:fim]))
+    while original and unicodedata.category(original[-1])[0] in "PSZC":
+        original = original[:-1]
+    return original.strip()
 
 
 def _ordinal_por_extenso(texto: str) -> int | None:

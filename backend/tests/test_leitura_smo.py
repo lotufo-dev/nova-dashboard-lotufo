@@ -95,6 +95,18 @@ def test_situacao_com_acento_nao_vira_aprovada():
     assert (r["motivo"], r["campos"]["situacao"], r["campos"]["numero"]) == ("nao-aprovada", "EM ANÁLISE", 7)
 
 
+def test_acento_combinante_no_primeiro_ou_no_ultimo_caractere_da_situacao_nao_some():
+    """Gate Sol e revisor, rodada 3: o acento decomposto (NFD) depois do ultimo caractere ficava fora do recorte e a
+    limpeza do fim apagava marca solta; "APROVADÁ" e "APROVADA" com cedilha saiam "APROVADA" e aprovavam."""
+    capa = _txt("capa-texto-aprovada.txt")
+    for situacao, esperada in (("A\u0301PROVADA", "ÁPROVADA"), ("APROVADA\u0301", "APROVADÁ"),
+                               ("APROVADA\u0327", "APROVADA\u0327"), ("APROVADA\u0301.", "APROVADÁ")):
+        r = leitura_smo.ler(capa.replace("APROVADA\nTipo", situacao + "\nTipo"))
+        assert (r["ok"], r["motivo"], r["campos"]["situacao"]) == (False, "nao-aprovada", esperada), situacao
+        ocr = _ocr_bom().split("Período: 01/03/2026 a 31/03/2026.\n", 1)[1].replace("APROVADA Tipo", situacao + " Tipo")
+        assert leitura_smo.ler(ocr, ocr=True)["ok"] is False, situacao
+
+
 def test_qualquer_pontuacao_no_fim_da_situacao_nao_conta():
     for sobra in ("APROVADA -", "APROVADA –", "APROVADA —", "APROVADA!", "APROVADA )", "APROVADA (", "APROVADA -.",
                   "APROVADA _"):
