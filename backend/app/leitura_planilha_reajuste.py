@@ -37,6 +37,10 @@ MAX_BYTES_XML = 10_000_000
 MAX_BYTES_PARTES = 15_000_000
 MAX_ENTRADAS = 2000                    # entradas do zip (o .xlsx do modelo tem dezenas; o indice vai todo para a memoria)
 MAX_BYTES_INDICE = 500_000             # o indice (diretorio central) do zip, lido inteiro ao abrir
+MAX_ABAS = 200                         # o modelo tem poucas abas; cada uma o openpyxl abre ao carregar
+# o teto conta o que sai da descompressao; BZIP2/LZMA descompactam a parte inteira antes de devolver o primeiro
+# pedaco (o teto nao os segura). O Excel grava so' estes dois
+COMPRESSOES = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
 GRANDE_DEMAIS = "a planilha é grande demais para o modelo"
 _DATA = re.compile(r"([0-9]{2})/([0-9]{2})/([0-9]{4})")
 
@@ -105,7 +109,7 @@ def ler(dados: bytes) -> list[dict]:
         _recusar_indice_grande(dados)
         # read_only: so' a aba Resumo e' lida (as abas de memoria do modelo tem milhares de colunas). O leitor do
         # openpyxl, com o zip trocado pelo que tem teto (`load_workbook` faz o mesmo, sem a troca)
-        leitor = ExcelReader(io.BytesIO(dados), read_only=True, data_only=True)
+        leitor = _Leitor(io.BytesIO(dados), read_only=True, data_only=True)
         leitor.archive.close()
         leitor.archive = zip_lido = _ZipComTeto(io.BytesIO(dados))
         leitor.read()
@@ -119,10 +123,12 @@ def ler(dados: bytes) -> list[dict]:
             raise PlanilhaNaoReconhecida(GRANDE_DEMAIS) from e
         raise PlanilhaNaoReconhecida("a planilha não pôde ser lida") from e
     try:
-        return _ler_resumo(wb, dados)
+        return _ler_resumo(wb)
     except PlanilhaNaoReconhecida:
         raise
     except Exception as e:   # arquivo de fora: XML quebrado dentro da aba vira digitacao, nao erro 500
+        if zip_lido.estourou:
+            raise PlanilhaNaoReconhecida(GRANDE_DEMAIS) from e
         raise PlanilhaNaoReconhecida("a aba Resumo não pôde ser lida") from e
     finally:
         wb.close()
@@ -134,10 +140,14 @@ _NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 def _recusar_indice_grande(dados: bytes) -> None:
     """Antes de o `zipfile` montar o indice inteiro na memoria: o fim do zip declara quantas entradas ha' e o
     tamanho do indice (o `zipfile` le exatamente esse tamanho). 0xFFFF/0xFFFFFFFF e' o zip64, que planilha do modelo
-    nao usa. Sem o registro, o `zipfile` recusa o arquivo depois."""
+    nao usa; o localizador do zip64 (`PK\x06\x07`, nos 20 bytes antes do fim) tambem recusa: com ele o `zipfile`
+    troca a contagem e o tamanho do fim classico pelos do registro zip64. Sem o registro, o `zipfile` recusa o
+    arquivo depois."""
     fim = dados.rfind(b"PK\x05\x06", max(0, len(dados) - 65_557))
     if fim < 0 or fim + 16 > len(dados):
         return
+    if fim >= 20 and dados[fim - 20:fim - 16] == b"PK\x06\x07":
+        raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
     entradas = int.from_bytes(dados[fim + 10:fim + 12], "little")
     indice = int.from_bytes(dados[fim + 12:fim + 16], "little")
     if entradas >= min(MAX_ENTRADAS, 0xFFFF) or indice > MAX_BYTES_INDICE:
@@ -157,6 +167,9 @@ class _ZipComTeto(zipfile.ZipFile):
         if len(self.infolist()) >= MAX_ENTRADAS:
             self.close()
             raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
+        if any(i.compress_type not in COMPRESSOES for i in self.infolist()):
+            self.close()
+            raise PlanilhaNaoReconhecida("a planilha usa uma compressão que o Excel não grava")
 
     def open(self, name, mode="r", *args, **kwargs):
         bruto = super().open(name, mode, *args, **kwargs)
@@ -173,6 +186,19 @@ class _ZipComTeto(zipfile.ZipFile):
         if nesta > MAX_BYTES_XML or sum(self.lidos.values()) > MAX_BYTES_PARTES:
             self.estourou = True
             raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
+
+
+class _Leitor(ExcelReader):
+    """O leitor do openpyxl que recusa, antes de abrir as abas, as abas demais e as que apontam para a mesma parte:
+    no modo read_only cada aba e' aberta ao carregar (para achar a dimensao; sem ela, a parte inteira) e o teto
+    conta cada parte uma vez so', entao a mesma parte repetida em centenas de abas seria relida sem contar."""
+
+    def read_worksheets(self):
+        alvos = [rel.target for _, rel in self.parser.find_sheets()]
+        if len(alvos) > MAX_ABAS or len(set(alvos)) != len(alvos):
+            self.archive.estourou = True    # o openpyxl embrulha o erro num ValueError: `ler` olha a marca
+            raise PlanilhaNaoReconhecida(GRANDE_DEMAIS)
+        super().read_worksheets()
 
 
 class _LeituraContada:
@@ -201,9 +227,10 @@ class _LeituraContada:
         self.close()
 
 
-def _linhas_xml(dados: bytes, caminho: str):
-    """(numero, elemento <row>) da aba, em fluxo: a linha ja' entregue sai da memoria (a aba nunca fica inteira)."""
-    with zipfile.ZipFile(io.BytesIO(dados)) as z, z.open(caminho.lstrip("/")) as xml:
+def _linhas_xml(arquivo: zipfile.ZipFile, caminho: str):
+    """(numero, elemento <row>) da aba, em fluxo: a linha ja' entregue sai da memoria (a aba nunca fica inteira).
+    `arquivo` e' o zip com teto que o openpyxl leu (`wb._archive`): a varredura conta no mesmo teto."""
+    with arquivo.open(caminho.lstrip("/")) as xml:
         dados_aba, numero = None, 0
         for evento, el in ElementTree.iterparse(xml, events=("start", "end")):
             if evento == "start":
@@ -244,10 +271,10 @@ def _tem_dado(c, textos) -> bool:
     return bool(texto.strip())
 
 
-def _recusar_dado_depois(dados: bytes, caminho: str, ultima: int, textos) -> None:
+def _recusar_dado_depois(arquivo: zipfile.ZipFile, caminho: str, ultima: int, textos) -> None:
     """Depois de `ultima` (o teto de linhas), valor recusa (leitura pela metade nao serve), e formula sem valor
     calculado tambem, como dentro do teto. Formatacao, texto em branco e formula que da' vazio nao contam."""
-    for n, linha in _linhas_xml(dados, caminho):
+    for n, linha in _linhas_xml(arquivo, caminho):
         if n <= ultima:
             continue
         for c in linha.iter(f"{_NS}c"):
@@ -258,7 +285,7 @@ def _recusar_dado_depois(dados: bytes, caminho: str, ultima: int, textos) -> Non
                 raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
 
 
-def _formulas_sem_valor(dados: bytes, caminho: str, linhas: list[tuple[int, str]],
+def _formulas_sem_valor(arquivo: zipfile.ZipFile, caminho: str, linhas: list[tuple[int, str]],
                         colunas: tuple[int, ...]) -> list[str]:
     """Das linhas lidas sem valor (data_only devolve None), as que tem FORMULA sem nenhum valor guardado: o arquivo
     foi salvo sem calcular (gerado por programa), e a leitura nao pode tratar como vazio. Pelo XML da aba, porque o
@@ -269,7 +296,7 @@ def _formulas_sem_valor(dados: bytes, caminho: str, linhas: list[tuple[int, str]
     ultima = max(nomes)
     com_formula: list[str] = []
     # uma varredura so', em fluxo, que para na ultima linha procurada (o resto da aba nem e' lido)
-    for numero, linha in _linhas_xml(dados, caminho):
+    for numero, linha in _linhas_xml(arquivo, caminho):
         if numero > ultima:
             break
         for el in linha.iter(f"{_NS}c"):
@@ -281,23 +308,24 @@ def _formulas_sem_valor(dados: bytes, caminho: str, linhas: list[tuple[int, str]
     return com_formula
 
 
-def _recusar_formula_sem_valor(dados: bytes, caminho: str, sem_valor: list[tuple[int, str]], *colunas: int) -> None:
+def _recusar_formula_sem_valor(arquivo: zipfile.ZipFile, caminho: str, sem_valor: list[tuple[int, str]],
+                               *colunas: int) -> None:
     if not sem_valor:
         return
-    nomes = _formulas_sem_valor(dados, caminho, sem_valor, colunas)
+    nomes = _formulas_sem_valor(arquivo, caminho, sem_valor, colunas)
     if nomes:
         raise PlanilhaNaoReconhecida(f"{nomes[0]} tem fórmula sem o valor calculado; abra a planilha no Excel, "
                                      "salve e anexe de novo")
 
 
-def _ler_resumo(wb, dados: bytes) -> list[dict]:
+def _ler_resumo(wb) -> list[dict]:
     if ABA not in wb.sheetnames:
         raise PlanilhaNaoReconhecida("falta a aba Resumo")
     ws = wb[ABA]
     caminho = ws._worksheet_path      # o XML da aba, para distinguir formula sem calculo de formula vazia
-    with zipfile.ZipFile(io.BytesIO(dados)) as z:
-        if z.getinfo(caminho.lstrip("/")).file_size > MAX_BYTES_XML:
-            raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
+    arquivo = wb._archive             # o zip com teto: as varreduras abaixo contam no mesmo teto da leitura
+    if arquivo.getinfo(caminho.lstrip("/")).file_size > MAX_BYTES_XML:
+        raise PlanilhaNaoReconhecida("a aba Resumo é grande demais para o modelo")
     inicio, col_med, col_per, col_reaj = _colunas(ws)
     out: list[dict] = []
     vistas: dict[str, str] = {}
@@ -328,7 +356,7 @@ def _ler_resumo(wb, dados: bytes) -> list[dict]:
             raise PlanilhaNaoReconhecida(f"o reajuste de {nome} não é um número")
         comp = _competencia(periodo)
         if comp is None:
-            _recusar_formula_sem_valor(dados, caminho, sem_valor, col_med, col_per, col_reaj)
+            _recusar_formula_sem_valor(arquivo, caminho, sem_valor, col_med, col_per, col_reaj)
             raise PlanilhaNaoReconhecida(f"o período de {nome} não tem data legível")
         if comp in vistas:
             raise PlanilhaNaoReconhecida(f"a competência {comp[5:]}/{comp[:4]} aparece em {vistas[comp]} e em {nome}")
@@ -339,8 +367,8 @@ def _ler_resumo(wb, dados: bytes) -> list[dict]:
                     "periodo": periodo.strip() if isinstance(periodo, str) else comp})
     else:
         if lidas >= MAX_VARRIDAS:
-            _recusar_dado_depois(dados, caminho, ultima, ws._shared_strings)
-    _recusar_formula_sem_valor(dados, caminho, sem_valor, col_med, col_per, col_reaj)
+            _recusar_dado_depois(arquivo, caminho, ultima, ws._shared_strings)
+    _recusar_formula_sem_valor(arquivo, caminho, sem_valor, col_med, col_per, col_reaj)
     if not out:
         raise PlanilhaNaoReconhecida("nenhuma linha de medição com reajuste na aba Resumo")
     return sorted(out, key=lambda x: x["competencia"])

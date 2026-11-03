@@ -415,3 +415,82 @@ def test_modelo_sem_nenhuma_linha_de_valor_nao_e_reconhecido():
     with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
         leitura.ler(planilha_modelo([]))
     assert "nenhuma" in e.value.motivo
+
+
+# --- rodada 3 do revisor (30/10): compressao, zip64 e as varreduras no mesmo teto ------------------------------
+
+def test_parte_em_bzip2_ou_lzma_e_recusada_antes_de_abrir():
+    """O teto conta o que sai da descompressao, mas BZIP2/LZMA descompactam a parte inteira antes de devolver o
+    primeiro pedaco: o zip com uma parte nesses formatos e' recusado ao abrir (o Excel so' grava STORED/DEFLATED)."""
+    import zipfile
+    for tipo in (zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA):
+        origem, destino = io.BytesIO(planilha_modelo()), io.BytesIO()
+        with zipfile.ZipFile(origem) as z, zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as novo:
+            for item in z.infolist():
+                novo.writestr(item.filename, z.read(item.filename),
+                              compress_type=tipo if item.filename == "xl/styles.xml" else zipfile.ZIP_DEFLATED)
+        with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+            leitura.ler(destino.getvalue())
+        assert e.value.motivo == "a planilha usa uma compressão que o Excel não grava"
+
+
+def _com_zip64(dados: bytes) -> bytes:
+    """O mesmo zip com o registro e o localizador do zip64 antes do fim classico (o fim classico continua pequeno,
+    como no zip adulterado; aqui o registro zip64 repete os valores verdadeiros, entao o `zipfile` abre normalmente)."""
+    fim = dados.rfind(b"PK\x05\x06")
+    entradas = int.from_bytes(dados[fim + 10:fim + 12], "little")
+    tamanho = int.from_bytes(dados[fim + 12:fim + 16], "little")
+    inicio = int.from_bytes(dados[fim + 16:fim + 20], "little")
+    registro = (b"PK\x06\x06" + (44).to_bytes(8, "little") + (45).to_bytes(2, "little") * 2 + b"\0" * 8
+                + entradas.to_bytes(8, "little") * 2 + tamanho.to_bytes(8, "little") + inicio.to_bytes(8, "little"))
+    localizador = b"PK\x06\x07" + b"\0" * 4 + fim.to_bytes(8, "little") + (1).to_bytes(4, "little")
+    return dados[:fim] + registro + localizador + dados[fim:]
+
+
+def test_localizador_zip64_antes_do_fim_e_recusado():
+    """Achado do revisor: com o localizador zip64 o `zipfile` troca a contagem e o tamanho do indice do fim classico
+    (que o pre-teste olha) pelos do registro zip64; 24 MB com 280 mil entradas vazias alocavam ~300 MB. O modelo nao
+    usa zip64: o localizador recusa antes de o `zipfile` abrir."""
+    import zipfile
+    dados = _com_zip64(planilha_modelo())
+    with zipfile.ZipFile(io.BytesIO(dados)) as z:          # o arquivo adulterado abre (o zip64 vale para o zipfile)
+        assert len(z.infolist()) == 10
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(dados)
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+
+
+def test_varredura_da_aba_conta_no_mesmo_teto_da_leitura(monkeypatch):
+    """Achado do revisor: a varredura do XML depois do teto de linhas abria outro zip, fora do teto, e relia a aba
+    inteira. Agora conta na soma: as outras partes mais a aba inteira passam da soma e a leitura e' recusada."""
+    import zipfile
+    monkeypatch.setattr(leitura, "MAX_VARRIDAS", 50)
+    dados = _com_linhas_vazias(planilha_modelo(outras_abas=()), 20, 50_000, sem_totais=True)
+    with zipfile.ZipFile(io.BytesIO(dados)) as z:
+        aba = z.getinfo("xl/worksheets/sheet1.xml").file_size
+        outras = sum(i.file_size for i in z.infolist()) - aba
+    assert aba > 2_000_000
+    assert len(leitura.ler(dados)) == 3                      # no teto do servidor, passa
+    monkeypatch.setattr(leitura, "MAX_BYTES_PARTES", outras + 1_000_000)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(dados)
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+
+
+def test_abas_que_apontam_para_a_mesma_parte_ou_abas_demais_sao_recusadas(monkeypatch):
+    """Achado do revisor: o teto conta cada parte uma vez, e o openpyxl abre cada aba ao carregar (sem a dimensao,
+    a parte inteira): centenas de abas apontando para a mesma parte reliam 9 MB cada. A aba repetida recusa, e as
+    abas demais tambem."""
+    sheet = ('<sheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" name="Copia{}" '
+             'sheetId="{}" state="visible" r:id="rId1"/>')
+    repetidas = _refazer(planilha_modelo(), lambda n, c: c.replace(
+        b"</sheets>", "".join(sheet.format(i, 10 + i) for i in range(3)).encode() + b"</sheets>")
+        if n == "xl/workbook.xml" else c)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(repetidas)
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
+    assert len(leitura.ler(planilha_modelo())) == 3          # duas abas, cada uma na sua parte
+    monkeypatch.setattr(leitura, "MAX_ABAS", 1)
+    with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
+        leitura.ler(planilha_modelo())
+    assert e.value.motivo == "a planilha é grande demais para o modelo"
