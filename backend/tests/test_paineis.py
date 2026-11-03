@@ -57,6 +57,45 @@ def test_saldo_formula_visivel(conn, cid):
     assert s["vigente_centavos"] == 1_000_00 and s["atestado_execucao_centavos"] == 240_00
     assert s["saldo_centavos"] == 760_00 and "vigente" in s["formula"]
 
+def _aditivo(conn, cid, delta, natureza, data="2026-01-10"):
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
+                 "VALUES (?, 'valor', ?, 'assinado', ?, ?)", (cid, delta, data, natureza))
+    conn.commit()
+
+def test_saldo_exclui_o_aditivo_de_reajuste_e_mostra_o_reajuste_a_parte(conn, cid):
+    """Spec 2026-10-20 §3.2 (#262): o medido e' a precos iniciais; o aditivo de reajuste (SES) fica fora do saldo
+    e aparece em serie propria. Centavo impar para pegar arredondamento escondido."""
+    _aditivo(conn, cid, 200_01, "execucao")
+    _aditivo(conn, cid, 133_33, "reajuste", data="2026-02-10")
+    _medir(conn, cid, 1, "execucao", "2026-07", 250_00, atestado=240_00)
+    s = paineis.saldo(conn, cid)
+    assert s["vigente_centavos"] == 1_000_00 + 200_01 + 133_33             # o contrato vale tudo isso
+    assert s["vigente_execucao_centavos"] == 1_000_00 + 200_01
+    assert s["reajuste_contratado_centavos"] == 133_33
+    assert s["saldo_centavos"] == 1_000_00 + 200_01 - 240_00               # sem o reajuste
+    assert "reajuste" in s["formula"]
+
+def test_saldo_sem_aditivo_de_reajuste_e_o_de_antes(conn, cid):
+    _aditivo(conn, cid, 200_01, "execucao")
+    _medir(conn, cid, 1, "execucao", "2026-07", 250_00, atestado=240_00)
+    s = paineis.saldo(conn, cid)
+    assert s["vigente_execucao_centavos"] == s["vigente_centavos"] == 1_200_01
+    assert s["reajuste_contratado_centavos"] == 0
+    assert s["saldo_centavos"] == 1_200_01 - 240_00
+
+def test_aditivo_gravado_antes_da_natureza_conta_como_execucao(conn, cid):
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura) "
+                 "VALUES (?, 'valor', 50_00, 'assinado', '2026-01-10')", (cid,))
+    conn.commit()
+    assert paineis.saldo(conn, cid)["saldo_centavos"] == 1_050_00
+
+def test_aditivo_de_reajuste_em_andamento_nao_conta(conn, cid):
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, natureza) "
+                 "VALUES (?, 'valor', 99_00, 'em_andamento', 'reajuste')", (cid,))
+    conn.commit()
+    s = paineis.saldo(conn, cid)
+    assert s["reajuste_contratado_centavos"] == 0 and s["saldo_centavos"] == 1_000_00
+
 def test_pendencia_e_por_serie_nao_por_competencia(conn, cid):
     # execucao atestada + reajuste so protocolado no MESMO mes: a pendencia do
     # reajuste nao pode contaminar a execucao (series independentes, §6)

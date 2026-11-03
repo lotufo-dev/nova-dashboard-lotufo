@@ -24,7 +24,8 @@ const PAINEL = {
   carteira: { saldo_centavos: 5_000_000, ritmo_mensal_centavos: 100_000, meses_de_producao: 50,
               por_orgao: [{ orgao: "SINFRA", saldo_centavos: 5_000_000, fracao: 1, vigente_centavos: 20_000_000, medido_centavos: 15_000_000, obras: 3 }] },
   obras: [{ contrato_id: 7, seq: 1, obra: "Cavalaria", contratante: "SINFRA", empreita: "PRÓPRIA", direito: 1,
-            pi_va: 1_000_000, faturados: 400_000, saldo: 600_000, pct_recebido: 0.4, status: "EM ANDAMENTO",
+            // #262: faturado (QDOP, com projeto) e saldo (execucao - medido de execucao) nao fecham entre si
+            pi_va: 1_000_000, faturados: 450_000, saldo: 600_000, pct_recebido: 0.4, status: "EM ANDAMENTO",
             termino: "2026-12-20", vigencia: "2027-03-20", farol: "vermelho", motivo: "Cavalaria: execução vencida",
             motivos: [{ tipo: "instrumento_pendente", nivel: "critico", dias: -12, valor_centavos: null, texto: "execução vencida" }],
             desvio_pp: -16.7, desvio_base: "anterior" }],
@@ -97,6 +98,11 @@ describe("Carteira", () => {
     const tabela = await screen.findByRole("table", { name: /QDOP, na cota da Lotufo/ });
     const cabecalho = within(tabela).getAllByRole("columnheader").map(h => h.textContent);
     expect(cabecalho).toContain("Desvio (p.p.)");
+    // #262: a tabela soma o contratual sem o aditivo de reajuste (a base do saldo); o rotulo diz a base
+    expect(cabecalho).toContain("Contratual de execução (PI+VA)");
+    // #262 (revisao, rodada 3): o saldo e' o contratual de execucao menos o medido de execucao, nao menos o faturado
+    expect(cabecalho).toContain("Saldo (contratual de execução − medido)");
+    expect(cabecalho).not.toContain("Saldo (contratual − faturado)");
     const coluna = cabecalho.indexOf("Desvio (p.p.)");
     const celula = (obra: string) => {
       const linha = within(tabela).getByText(obra).closest("tr") as HTMLElement;
@@ -120,7 +126,7 @@ describe("Carteira", () => {
   });
 
   it("QDOP: o farol de Ação e o de Atenção têm rótulos diferentes (D10), o filtro recorta e o total acompanha", async () => {
-    const outra = { ...PAINEL.obras[0], contrato_id: 8, seq: 2, obra: "Outra", farol: "atencao", pi_va: 500_000, faturados: 100_000, saldo: 400_000 };
+    const outra = { ...PAINEL.obras[0], contrato_id: 8, seq: 2, obra: "Outra", farol: "atencao", pi_va: 500_000, faturados: 150_000, saldo: 400_000 };
     const verde = { ...PAINEL.obras[0], contrato_id: 9, seq: 3, obra: "Tranquila", farol: "verde", motivos: [] };
     const respostas: Record<string, unknown> = { ...RESPOSTAS, "/api/diretoria": { ...PAINEL, obras: [{ ...PAINEL.obras[0], farol: "acao" }, outra, verde] } };
     api.mockImplementation((url: string) => Promise.resolve(respostas[url]));
@@ -134,10 +140,11 @@ describe("Carteira", () => {
     expect(screen.getByRole("button", { name: "Atenção" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^Atenção/ }));
     expect(within(tabela).queryByText("Cavalaria")).toBeNull();
-    // total do recorte: só a "Outra" (contratual 5.000,00; faturado 1.000,00; saldo 4.000,00)
+    // total do recorte: só a "Outra" (contratual 5.000,00; faturado 1.500,00; saldo do servidor 4.000,00)
     const total = within(tabela).getByText("Total").closest("tr") as HTMLElement;
     const txt = (total.textContent ?? "").replace(/\s/g, " ");
     expect(txt).toContain("R$ 5.000,00");
+    expect(txt).toContain("R$ 1.500,00");
     expect(txt).toContain("R$ 4.000,00");
   });
 

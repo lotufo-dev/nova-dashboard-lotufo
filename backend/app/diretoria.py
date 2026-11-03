@@ -9,6 +9,7 @@ medicao em aberto representa (`_notas_em_aberto`), com a idade contada da emissa
 Valor de uma medicao: o atestado quando houver, senao o protocolado (a mesma regra do "medido" dos paineis),
 convertido para a cota uma vez, com o arredondamento unico de `contratos.cota`.
 """
+import contextlib
 import datetime
 import json
 import math
@@ -243,21 +244,44 @@ def _proximos(conn, hoje: datetime.date, cache: dict) -> list[dict]:
             for x in (_mes(hoje, k) for k in range(6))]
 
 
-def _carteira(conn, ms: list[dict], hoje: datetime.date) -> dict:
+def _vigente(conn, contrato_id: int, cache: dict) -> dict:
+    """`contratos.vigente` lido uma vez por painel: a carteira e a tabela de obras usam o mesmo (#262)."""
+    chave = ("vigente", contrato_id)
+    if chave not in cache:
+        cache[chave] = contratos.vigente(conn, contrato_id)
+    return cache[chave]
+
+
+def _medido_execucao(ms: list[dict]) -> dict[int, int]:
+    """#262: o medido de execucao CHEIO por contrato (`paineis.mede_execucao`, a regra de `paineis.saldo`), tirado da
+    mesma leitura de medicoes do painel (`ms`), para a carteira e a tabela de obras nao divergirem na mesma resposta."""
+    medido: dict[int, int] = {}
+    for m in ms:
+        if paineis.mede_execucao(m):
+            valor = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"] or 0
+            medido[m["contrato_id"]] = medido.get(m["contrato_id"], 0) + valor
+    return medido
+
+
+def _carteira(conn, ms: list[dict], hoje: datetime.date, cache: dict) -> dict:
     """Contratos ativos sem encerramento iniciado: o que ainda vai ser executado."""
     ultimos = {_mes(hoje, k) for k in range(-5, 1)}
     linhas, ritmo = [], 0
+    medidos = _medido_execucao(ms)
     for c in (x for x in _ativos(conn) if not x["encerramento_iniciado_em"]):
-        v = contratos.vigente(conn, c["id"])
-        medido = sum((m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None
-                      else m["valor_protocolado_centavos"] or 0)
-                     for m in ms if m["contrato_id"] == c["id"] and m["tipo"] in ("execucao", "projeto")
-                     and m["estado"] not in FORA)
-        saldo = contratos.cota(v["valor_vigente_centavos"] - medido, c["percentual_direito_bp"]) or 0
-        vigente_cota = contratos.cota(v["valor_vigente_centavos"], c["percentual_direito_bp"]) or 0
-        medido_cota = contratos.cota(medido, c["percentual_direito_bp"]) or 0
-        ritmo += sum(_cota(m) for m in ms if m["contrato_id"] == c["id"] and m["tipo"] in ("execucao", "projeto")
-                     and m["estado"] not in FORA and m["competencia"] in ultimos)
+        v = _vigente(conn, c["id"], cache)
+        # #262: o medido e' o de `paineis.saldo` (execucao nos estados que medem), na mesma base do vigente de execucao
+        exe = [m for m in ms if m["contrato_id"] == c["id"] and paineis.mede_execucao(m)]
+        medido = medidos.get(c["id"], 0)
+        pct = v["percentual_direito_bp"]   # #262: o percentual do mesmo vigente que a tabela de obras reaproveita
+        # #262: saldo a precos iniciais -- o aditivo de reajuste fica fora, como no saldo da obra (`paineis.saldo`)
+        saldo = contratos.cota(v["valor_vigente_execucao_centavos"] - medido, pct) or 0
+        vigente_cota = contratos.cota(v["valor_vigente_execucao_centavos"], pct) or 0
+        medido_cota = contratos.cota(medido, pct) or 0
+        # #262: o cheio da janela, na cota uma vez por contrato (arredondamento unico, como o medido)
+        ritmo += contratos.cota(sum((m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None
+                                     else m["valor_protocolado_centavos"] or 0)
+                                    for m in exe if m["competencia"] in ultimos), pct) or 0
         fim = _d(v.get("execucao_fim_vigente"))
         linhas.append({"contrato_id": c["id"], "obra": c["nome_curto"] or c["numero_instrumento"],
                        "orgao_id": c["orgao_id"], "saldo_centavos": saldo,
@@ -312,11 +336,11 @@ def _curva_carteira(conn, hoje: datetime.date, cache: dict) -> list[dict]:
 
 def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
     """Issue #296, decisoes do Leo de 28/10/2026: desvio em p.p. = (medido acumulado - previsto acumulado) / valor
-    vigente do contrato x 100, ate' a ultima competencia fechada (o mes anterior ao atual), contra a linha anterior a
+    vigente de execucao do contrato x 100 (#262: sem o aditivo de reajuste, a mesma base do medido), ate' a ultima competencia fechada (o mes anterior ao atual), contra a linha anterior a
     ultima repactuacao quando a obra tem uma, senao contra a vigente. Em valor cheio (a razao e' a mesma na cota, sem
     o arredondamento dela); uma casa decimal, meio para cima. Sem cronograma ou sem valor vigente, None."""
     _, base, previsto, medido = _curva_obra(conn, contrato_id, cache)
-    total = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
+    total = _vigente(conn, contrato_id, cache)["valor_vigente_execucao_centavos"]
     if not previsto or not total or total <= 0:
         return {"desvio_pp": None, "desvio_base": None}
     ate = _mes(hoje, -1)
@@ -325,12 +349,29 @@ def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
     return {"desvio_pp": float(pp), "desvio_base": base}
 
 
-def _obras(conn, hoje: datetime.date, avisos: list[dict], cache: dict) -> list[dict]:
+def _a_precos_iniciais(conn, linha: dict, medido: int, cache: dict) -> dict:
+    """#262 (gate Sol): a linha da tabela de obras na base do saldo da obra (`paineis.saldo`) e da carteira, logo
+    acima na tela: PI+VA, VA, saldo e percentuais com o vigente de execucao, sem o aditivo de reajuste, que fica so'
+    na coluna do reajuste. `medido` e' o de execucao nos estados que medem, CHEIO (`_medido_execucao`, da mesma
+    leitura de medicoes e do mesmo vigente da carteira); a coluna "faturados" continua a do QDOP. O saldo aplica a
+    cota uma vez sobre o saldo cheio, como a carteira; os percentuais sao a razao no cheio (a mesma na cota, sem o
+    arredondamento dela). O QDOP exportado continua com o vigente cheio (#352)."""
+    v = _vigente(conn, linha["contrato_id"], cache)
+    pct = v["percentual_direito_bp"]
+    execucao = v["valor_vigente_execucao_centavos"]
+    pi_va = contratos.cota(execucao, pct) or 0
+    return {"pi_va": pi_va, "va": pi_va - linha["pi"], "saldo": contratos.cota(execucao - medido, pct) or 0,
+            "pct_recebido": medido / execucao if execucao else 0,
+            "pct_a_receber": (execucao - medido) / execucao if execucao else 0}
+
+
+def _obras(conn, ms: list[dict], hoje: datetime.date, avisos: list[dict], cache: dict) -> list[dict]:
     por_obra: dict = {}
     for a in avisos:
         if a.get("contrato_id"):
             por_obra.setdefault(a["contrato_id"], []).append(a)
     out = []
+    medido = _medido_execucao(ms)
     for linha in qdop.linhas(conn, hoje):
         av = por_obra.get(linha["contrato_id"], [])
         # D10: o farol separa os niveis do aviso: critico = vermelho; acao = acao; o resto (atencao) = atencao
@@ -342,7 +383,8 @@ def _obras(conn, hoje: datetime.date, avisos: list[dict], cache: dict) -> list[d
         motivos = [{"tipo": a["tipo"], "nivel": a["nivel"], "dias": a["dias"], "valor_centavos": a["valor_centavos"],
                     "texto": a["mensagem"][len(prefixo):] if prefixo and a["mensagem"].startswith(prefixo) else a["mensagem"]}
                    for a in av]
-        out.append({**linha, "farol": farol, "motivo": "; ".join(a["mensagem"] for a in av), "motivos": motivos,
+        out.append({**linha, **_a_precos_iniciais(conn, linha, medido.get(linha["contrato_id"], 0), cache), "farol": farol,
+                    "motivo": "; ".join(a["mensagem"] for a in av), "motivos": motivos,
                     **_desvio(conn, linha["contrato_id"], hoje, cache)})
     return out
 
@@ -376,18 +418,36 @@ def _obras_base(conn) -> dict:
     return base
 
 
+@contextlib.contextmanager
+def _leitura_unica(conn):
+    """#262 (revisor): o painel inteiro le uma fotografia so' do banco. Uma transacao de leitura (BEGIN adiado: a
+    fotografia e' a da primeira leitura) faz `qdop.linhas`, carteira, curva, previsto e medicoes verem o mesmo
+    estado, mesmo com um `cadastro aplicar` ou uma medicao gravando em outra conexao no meio. Em WAL (`db.get_conn`)
+    a leitura nao segura a escrita de ninguem. Com transacao ja' aberta por quem chamou, le nela e nao a fecha."""
+    if conn.in_transaction:
+        yield
+        return
+    conn.execute("BEGIN")
+    try:
+        yield
+    finally:
+        if conn.in_transaction:
+            conn.commit()                # so' houve leitura; commit so' encerra a transacao
+
+
 def painel(conn, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
-    liberado = _liberado(conn)
-    ms = _medicoes(conn)
-    notas = _notas_em_aberto(conn) if liberado else []
-    cache: dict = {}
-    avisos = _av.listar(conn, hoje, publico="diretoria")
-    return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
-            "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas), "mes_ano": _mes_ano(conn, ms, hoje, cache),
-            "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje),
-            "curva_carteira": _curva_carteira(conn, hoje, cache),
-            "obras": _obras(conn, hoje, avisos, cache), "obras_base": _obras_base(conn), "avisos": avisos}
+    with _leitura_unica(conn):
+        liberado = _liberado(conn)
+        ms = _medicoes(conn)
+        notas = _notas_em_aberto(conn) if liberado else []
+        cache: dict = {}
+        avisos = _av.listar(conn, hoje, publico="diretoria")
+        return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
+                "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas), "mes_ano": _mes_ano(conn, ms, hoje, cache),
+                "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje, cache),
+                "curva_carteira": _curva_carteira(conn, hoje, cache),
+                "obras": _obras(conn, ms, hoje, avisos, cache), "obras_base": _obras_base(conn), "avisos": avisos}
 
 
 def a_receber(conn, hoje: datetime.date | None = None) -> dict:

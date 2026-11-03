@@ -176,7 +176,8 @@ from app import contratos as contratos_mod
 
 AD_VALOR = {"chave": "ta-01", "tipo": "aditivo_valor", "data": "2026-06-30", "numero": "019/2024/01/01",
             "objeto": "1ª revisão em fase de obra", "corrige": None, "pdf": None,
-            "delta_valor_centavos": 323606718, "nova_execucao_fim": None, "nova_vigencia_fim": None, "dados": {}}
+            "delta_valor_centavos": 323606718, "nova_execucao_fim": None, "nova_vigencia_fim": None, "dados": {},
+            "natureza": "execucao"}
 AP_PRAZO = {"chave": "ap-10", "tipo": "apostilamento_prazo", "data": "2026-08-26", "numero": "019/2024/02/10",
             "objeto": None, "corrige": None, "pdf": None, "delta_valor_centavos": 0,
             "nova_execucao_fim": "2027-02-24", "nova_vigencia_fim": "2027-05-25", "dados": {}}
@@ -502,6 +503,69 @@ def test_endosso_com_vigencia_aplicado_e_imutavel(conn):
     troca = {**inst, "dados": {"vigencia_fim": "2028-01-01"}}
     with pytest.raises(ValueError, match="já aplicado"):
         cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[troca])]))
+
+
+def test_natureza_do_aditivo_e_gravada(conn):
+    """#262: o aditivo de reajuste (SES) entra no vigente mas fica fora do saldo."""
+    reaj = {**AD_VALOR, "chave": "ta-08", "data": "2026-07-30", "delta_valor_centavos": 100_01, "natureza": "reajuste"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR, reaj])]))
+    nat = dict(conn.execute("SELECT chave_cadastro, natureza FROM aditivos").fetchall())
+    assert nat == {"ta-01": "execucao", "ta-08": "reajuste"}
+    v = contratos_mod.vigente(conn, 1)
+    assert v["valor_vigente_centavos"] == 1512720000 + 323606718 + 100_01
+    assert v["valor_vigente_execucao_centavos"] == 1512720000 + 323606718
+    assert v["valor_reajuste_centavos"] == 100_01
+
+
+def test_aditivo_de_valor_novo_sem_natureza_e_recusado(conn):
+    """Gate Sol (#262): o NULL e' so' do legado. Aditivo de valor novo sem `natureza` voltaria a inflar o saldo
+    em silencio, entao o aplicar recusa e nada e' gravado. Instrumento sem valor (prazo) nao precisa."""
+    sem = {k: v for k, v in AD_VALOR.items() if k != "natureza"}
+    with pytest.raises(ValueError, match="natureza"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[sem])]))
+    assert conn.execute("SELECT COUNT(*) FROM aditivos").fetchone()[0] == 0
+    misto = {**sem, "chave": "tm-01", "tipo": "aditivo_misto", "nova_execucao_fim": "2027-01-31"}
+    with pytest.raises(ValueError, match="natureza"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[misto])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_PRAZO])]))
+    assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] is None
+
+
+def _legado(conn):
+    """Aditivo aplicado antes da 046: a coluna ficou NULL (nao classificado, conta como execucao)."""
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR])]))
+    conn.execute("UPDATE aditivos SET natureza=NULL"); conn.commit()
+
+
+def _natureza_aplicada(conn, natureza):
+    inst = {**AD_VALOR, "natureza": natureza}
+    if natureza is None:
+        del inst["natureza"]
+    return cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[inst])]))
+
+
+def test_natureza_primeira_classificacao_aceita_e_troca_depois_recusada(conn):
+    """O aditivo legado (NULL) aceita a PRIMEIRA classificacao, auditada; depois ela trava como valor e data:
+    trocar ou apagar o campo e' recusado e nada muda."""
+    _legado(conn)
+    assert _natureza_aplicada(conn, None)["instrumentos"]["iguais"] == 1          # legado sem o campo: igual
+    r = _natureza_aplicada(conn, "reajuste")
+    assert r["instrumentos"]["alterados"] == ["MT-402/ta-01"]
+    assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] == "reajuste"
+    ult = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.instrumento' ORDER BY id DESC").fetchone()
+    assert json.loads(ult["antes"])["natureza"] is None and json.loads(ult["depois"])["natureza"] == "reajuste"
+    assert _natureza_aplicada(conn, "reajuste")["instrumentos"]["iguais"] == 1
+    for troca in ("execucao", None):                     # trocar, ou apagar sem querer, nao passa
+        with pytest.raises(ValueError, match="já aplicado.*natureza.*corrige"):
+            _natureza_aplicada(conn, troca)
+        assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] == "reajuste"
+
+
+def test_natureza_execucao_declarada_tambem_trava(conn):
+    _natureza_aplicada(conn, "execucao")
+    with pytest.raises(ValueError, match="já aplicado"):
+        _natureza_aplicada(conn, "reajuste")
+    assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] == "execucao"
 
 
 # --- issue #256: cronograma por versao, com a data do documento -------------------------------

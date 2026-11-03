@@ -8,7 +8,8 @@ import { fmtDias } from "./formato";
 export type ObraLista = {
   id: number; orgao: string; numero_instrumento: string; nome_curto?: string | null; estado: string;
   encerramento_iniciado_em?: string | null; entidade_id?: number | null;
-  valor_vigente_centavos?: number | null; execucao_fim_vigente?: string | null; vigencia_fim_vigente?: string | null;
+  valor_vigente_centavos?: number | null; valor_vigente_execucao_centavos?: number | null; valor_reajuste_centavos?: number | null;
+  execucao_fim_vigente?: string | null; vigencia_fim_vigente?: string | null;
   dias_execucao?: number | null; dias_vigencia?: number | null; vigencia_automatica?: boolean; paralisada_desde?: string | null;
   pedido_prorrogacao?: { enviado_em: string; numero_oficio: string | null; dias: number | null } | null;
   // valor cheio: o medido de execucao (atestado; protocolado ate' atestar) e o saldo a executar (vigente − medido)
@@ -120,8 +121,9 @@ export function filtrarObras(lista: ObraLista[], f: FiltroObras): ObraLista[] {
 
 /* --------------------------------------------------- contratantes (a entrada de Obras, redesenho #159) */
 
-/** O valor vigente e o medido de execucao da obra, em valor cheio; o que a API nao deu conta como zero. */
-const vigenteDe = (o: ObraLista) => o.valor_vigente_centavos ?? 0;
+/** O valor vigente e o medido de execucao da obra, em valor cheio; o que a API nao deu conta como zero. O vigente e'
+ *  o de execucao (#262): o medido e' a precos iniciais, entao o aditivo de reajuste fica fora do % e do saldo. */
+const vigenteDe = (o: ObraLista) => o.valor_vigente_execucao_centavos ?? o.valor_vigente_centavos ?? 0;
 const medidoDe = (o: ObraLista) => o.medido_execucao_centavos ?? 0;
 
 /** Quanto da obra ja' foi executado, em %, inteiro: medido de execucao ÷ valor vigente. Sem valor vigente, nulo. */
