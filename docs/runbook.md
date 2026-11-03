@@ -669,8 +669,9 @@ endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HT
    -Python C:\DashboardLotufo\app\backend\.venv\Scripts\python.exe -Rotulo CORTE` (snapshot seguro com o servidor no ar);
    `Stop-ScheduledTask DashboardLotufoWatchdog` e `Stop-ScheduledTask DashboardLotufo` (sem desinstalar: é o rollback).
    Conferir que nada mais escuta na 80 (`Get-NetTCPConnection -LocalPort 80 -State Listen`).
-3. Na VM, com a tarefa parada (`Stop-ScheduledTask` das duas e o sentinela), copiar: o snapshot `dashboard-PRE-CORTE-...db`
-   (vira `dados\dashboard.db`; `-wal`/`-shm` não vão), `dados\notas`, `espelhos`, `modelos`, `evidencias`, `certidoes`,
+3. Na VM, com a tarefa parada (`Stop-ScheduledTask` das duas e o sentinela), mover o banco vazio da VM e os companheiros
+   (`dados\dashboard.db`, `-wal`, `-shm`) para uma pasta de quarentena, como na seção "Restaurar o banco". Depois copiar: o
+   snapshot `dashboard-PRE-CORTE-...db` (vira `dados\dashboard.db`; o snapshot não tem `-wal`/`-shm`), `dados\notas`, `espelhos`, `modelos`, `evidencias`, `certidoes`,
    `assinaturas`; `segredos` inteiro (`rm.txt`, `rm-endereco.txt` se houver, `sharepoint-hosts.txt`, `siga-token.txt`,
    `usuarios\` com os tokens Microsoft de cada pessoa); o clone `cadastro`. Conferir contagem e `Get-FileHash` dos dois lados.
    Sem os tokens, cada pessoa reconecta a conta Microsoft em Minha conta (não é erro, só trabalho a mais).
