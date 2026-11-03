@@ -13,6 +13,7 @@ export type MedicaoBase = {
   final?: number; final_em?: string | null; protocolos: MarcoProtocolo[]; notas?: NotaDaMedicao[];
   edicoes_valor?: { data: string; texto: string }[];   // B-02 (10/10/2026): da auditoria, texto pronto do servidor
   siga_registrado_em?: string | null;                  // issue #328: quando o link do SIGA do envio por fora foi gravado
+  planilha_siga?: { data: string; numero: string | null } | null;   // issue #283: nº do SIGA da planilha/carta
 };
 export type EspelhoResumo = { id: number; numero: number; versao: number; situacao: string; criado_em: string;
   criado_por_nome: string | null; medicoes: { id: number; tipo: string; superado?: boolean }[];
@@ -156,6 +157,8 @@ export function eventosDaMedicao(m: MedicaoBase, espelhos: EspelhoResumo[], prot
     out.push({ data: p.data, texto: `Protocolada${p.numero_oficio ? ` · ofício ${p.numero_oficio}` : ""}${p.numero_processo ? ` · processo ${p.numero_processo}` : ""}` });
   }
   if (m.siga_registrado_em) out.push({ data: m.siga_registrado_em, texto: "Processo no SIGA registrado" });
+  // issue #283: o nº do SIGA da planilha/carta nao e' protocolo da nota (`protocolos` so' traz o da nota)
+  if (m.planilha_siga?.numero) out.push({ data: m.planilha_siga.data, texto: `Nº do SIGA da planilha/carta: ${m.planilha_siga.numero}` });
   if (m.atestado_em) out.push({ data: m.atestado_em, texto: "Atestada pelo órgão" });
   if (m.recebida_em) out.push({ data: m.recebida_em, texto: "Recebida" });
   if (m.final === 1 && m.final_em) out.push({ data: m.final_em, texto: "Marcada como medição final" });

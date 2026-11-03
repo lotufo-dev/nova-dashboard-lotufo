@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Reajuste from "./Reajuste";
+import { brl } from "./formato";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm }));
@@ -36,6 +37,126 @@ describe("Reajuste", () => {
     expect(await screen.findByRole("region", { name: "Data-base 06/2024 (itens SINAPI) · INCC-DI" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Data-base 09/2024 · FGV/DNIT" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "06/2024 (itens SINAPI) · INCC-DI" })).toBeTruthy();
+  });
+
+  it("mostra as competências apostiladas e o pleito atendido pelo termo (issue #271)", async () => {
+    const termo = { id: 5, chave: "ap-12", tipo: "apostilamento_reajuste", numero: "019/2024/02/12", data: "2026-10-01",
+      dados: { data_base: "2024-06", ciclo: 2026 } };
+    const pleito = { id: 3, tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: "CT-122-LT-2026",
+      data_base_mes: "2024-06", ciclo: 2026, dias: null, justificativa: null, situacao: "enviado", corpo_carta: null,
+      montado_paginas: null, assinado_arquivo: null, nome_documento: null, conferencia: null, pendencias: [],
+      enviado_em: "2026-04-23", envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: "ap-12" };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "apostilado", dias: null, pleito, apostilamento: termo }],
+          pleitos: [pleito],
+          competencias: [
+            { data_base_mes: "2024-06", ciclo: 2026, competencia: "2026-07", valor_centavos: 130003, medicao: 30,
+              instrumento_chave: "ap-12", instrumento_numero: "019/2024/02/12", instrumento_data: "2026-10-01" },
+            { data_base_mes: "2024-06", ciclo: 2026, competencia: "2026-08", valor_centavos: -1001, medicao: null,
+              instrumento_chave: "ap-11", instrumento_numero: "019/2024/02/11", instrumento_data: "2026-09-15" }] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: "Competências apostiladas da data-base 06/2024" });
+    const linhas = [...tabela.querySelectorAll("tbody tr")].map(tr => [...tr.querySelectorAll("td,th")].map(c => c.textContent));
+    expect(linhas).toEqual([
+      ["07/2026", "2026", "30ª", brl(130003), "019/2024/02/12"],
+      ["08/2026", "2026", "—", brl(-1001), "019/2024/02/11"]]);
+    expect(brl(-1001).startsWith("−")).toBe(true);           // o reajuste negativo leva o sinal
+    expect(screen.getByText("atendido pelo apostilamento 019/2024/02/12")).toBeTruthy();
+  });
+
+  it("pleito vigente sem termo ligado não aparece como atendido, mesmo com o ciclo apostilado (gate Sol, PR #317)", async () => {
+    const termo = { id: 5, chave: "ap-12", tipo: "apostilamento_reajuste", numero: "019/2024/02/12", data: "2026-10-01",
+      dados: { data_base: "2024-06", ciclo: 2026 } };
+    const pleito = { id: 3, tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: "CT-122-LT-2026",
+      data_base_mes: "2024-06", ciclo: 2026, dias: null, justificativa: null, situacao: "enviado", corpo_carta: null,
+      montado_paginas: null, assinado_arquivo: null, nome_documento: null, conferencia: null, pendencias: [],
+      enviado_em: "2026-04-23", envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: null };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "apostilado", dias: null, pleito: { id: 3 }, apostilamento: termo }],
+          pleitos: [pleito], competencias: [] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByText(/CT-122-LT-2026/);
+    expect(screen.queryByText(/atendido pelo apostilamento/)).toBeNull();
+  });
+
+  it("termo do ciclo corrente sem ligação fica no cartão do ciclo; o corrigido não vira ciclo anterior (PR #317)", async () => {
+    const termo = (id: number, chave: string, numero: string, ciclo: number, corrige?: string) => ({ id, chave,
+      tipo: "apostilamento_reajuste", numero, data: `${ciclo}-09-01`, dados: { data_base: "2024-06", ciclo, ...(corrige ? { corrige } : {}) } });
+    const instrumentos = [termo(1, "ap-26a", "AP-26A", 2026), termo(2, "ap-26b", "AP-26B", 2026, "ap-26a"),
+                          termo(3, "ap-25", "AP-25", 2025)];
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "apostilamento_pendente", dias: 40, pleito: null, apostilamento: null }],
+          pleitos: [], competencias: [] }
+      : { instrumentos });
+    const { container } = render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByText("apostilamento pendente");
+    const corpo = screen.getByText("Ciclo de 2026 · aniversário em 01/06/2026").parentElement!;
+    expect(corpo.textContent).toContain("AP-26B, de 01/09/2026");
+    expect(corpo.textContent).not.toContain("AP-26A");
+    const anteriores = container.querySelector('[aria-label="Apostilamentos anteriores da data-base 06/2024"]');
+    expect([...anteriores!.querySelectorAll("li")].map(li => li.textContent)).toEqual(["AP-25, de 01/09/2025"]);
+    expect(container.textContent).not.toContain("AP-26A");
+  });
+
+  it("termo sem data-base vai para a base que a API resolveu, uma vez só, mesmo com duas bases (rodada 3, PR #317)", async () => {
+    const termo = { id: 11, chave: "ap-11", tipo: "apostilamento_reajuste", numero: "AP-11", data: "2026-09-15",
+      dados: { ciclo: 2026 } };
+    const ciclo = { ciclo: 2026, dias: null, pleito: null };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...ciclo, data_base_mes: "2024-04", indice: "SICRO", aniversario: "2026-04-01",
+                     situacao: "pleito_pendente", dias: -10, apostilamento: null },
+                   { ...ciclo, data_base_mes: "2024-06", indice: "INCC-DI", aniversario: "2026-06-01",
+                     situacao: "apostilado", apostilamento: termo }],
+          pleitos: [], competencias: [], bases_dos_termos: [{ instrumento_id: 11, data_base_mes: "2024-06" }] }
+      : { instrumentos: [termo] });
+    const { container } = render(<Reajuste contratoId={7} podeEditar={false} />);
+    const cartao = await screen.findByRole("region", { name: /^Data-base 06\/2024 · INCC-DI/ });
+    expect(cartao.textContent).toContain("AP-11, de 15/09/2026");
+    expect(screen.queryByRole("region", { name: "Apostilamentos sem data-base no cadastro" })).toBeNull();
+    expect(container.textContent!.split("AP-11, de 15/09/2026").length - 1).toBe(1);
+  });
+
+  it("termo corrigido por outro de outra data-base sai da aba inteira (rodada 3, PR #317)", async () => {
+    // T2 (base 2024-04) corrige T1 (base 2024-06); T0 nao tem base que se saiba e e' corrigido por T3
+    const termo = (id: number, chave: string, numero: string, dados: Record<string, unknown>) => ({ id, chave,
+      tipo: "apostilamento_reajuste", numero, data: "2026-09-01", dados: { ciclo: 2026, ...dados } });
+    const instrumentos = [termo(1, "t1", "T-1", { data_base: "2024-06" }), termo(2, "t2", "T-2", { data_base: "2024-04", corrige: "t1" }),
+                          termo(3, "t0", "T-0", {}), termo(4, "t3", "T-3", { data_base: "2024-04", corrige: "t0" })];
+    const ciclo = { ciclo: 2026, situacao: "apostilamento_pendente", dias: 40, pleito: null, apostilamento: null };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...ciclo, data_base_mes: "2024-04", indice: "SICRO", aniversario: "2026-04-01" },
+                   { ...ciclo, data_base_mes: "2024-06", indice: "INCC-DI", aniversario: "2026-06-01" }],
+          pleitos: [], competencias: [] }
+      : { instrumentos });
+    const { container } = render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByRole("region", { name: /^Data-base 06\/2024 · INCC-DI/ });
+    expect(container.textContent).toContain("T-2, de 01/09/2026");
+    expect(container.textContent).not.toContain("T-1,");
+    expect(container.textContent).not.toContain("T-0,");
+    expect(screen.queryByRole("region", { name: "Apostilamentos sem data-base no cadastro" })).toBeNull();
+  });
+
+  it("pleito de ciclo anterior ligado a um termo também diz que foi atendido (issue #271)", async () => {
+    const termo = { id: 4, chave: "ap-09", tipo: "apostilamento_reajuste", numero: "019/2024/02/09", data: "2025-08-01",
+      dados: { data_base: "2024-06", ciclo: 2025 } };
+    const pleito = { id: 2, tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: "CT-90-LT-2025",
+      data_base_mes: "2024-06", ciclo: 2025, dias: null, justificativa: null, situacao: "enviado", corpo_carta: null,
+      montado_paginas: null, assinado_arquivo: null, nome_documento: null, conferencia: null, pendencias: [],
+      enviado_em: "2025-06-10", envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: "ap-09" };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+                     situacao: "pleito_pendente", dias: 10, pleito: null, apostilamento: null }],
+          pleitos: [pleito], competencias: [] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByText("pleito não enviado");
+    expect(screen.getByText("atendido pelo apostilamento 019/2024/02/09")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   // issue #277: reiteracao (familia B) e reemissao do cronograma ligadas ao pleito anterior

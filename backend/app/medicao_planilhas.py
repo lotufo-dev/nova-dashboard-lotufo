@@ -9,8 +9,8 @@ Modulo proprio, ao lado de `medicoes.py`: o boletim, a assinatura e a lista em a
 """
 import datetime
 
-from app import auditoria, contratos, db, espelho, tempo
-from app.medicoes import _data_br, nome_medicao, rotulo_estado
+from app import arquivos, auditoria, contratos, db, espelho, tempo
+from app.medicoes import LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
 TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
@@ -260,3 +260,172 @@ def anexo(conn, medicao_id: int, planilha_id: int, peca: str) -> dict | None:
                      "JOIN medicoes m ON m.id=p.medicao_id WHERE p.id=? AND p.medicao_id=?",
                      (planilha_id, medicao_id)).fetchone()
     return dict(r) if r else None
+
+
+# --- issue #283: planilha/carta enviada por fora e nº do SIGA (spec 2026-10-20 §2.1, passo 2; E3) -------------
+
+ENVIO = "medicao.planilha_envio"          # o envio (por fora; o do sistema, issue #282, grava o mesmo evento)
+NUMERO_SIGA = "medicao.numero_siga"
+ESTADOS_ENVIO = ("planilha_gerada", "planilha_enviada")
+# O nº do SIGA da planilha/carta entra do envio ate' antes do protocolo da nota. Mora em `medicao_protocolos` com
+# etapa 'planilha' (migracao 054): os paineis, a conciliacao e as telas so' contam a etapa 'nota' como protocolo
+ESTADOS_NUMERO_SIGA = ("planilha_enviada", "boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida")
+TETO_MEIO = 200
+
+
+def _versao_enviada(conn, medicao_id: int) -> int:
+    """A maior versao ja' enviada, pelos eventos de envio da auditoria (append-only, como `notas_envio.liberacao`);
+    0 sem evento. Quem chama trata `planilha_enviada` sem evento como a 1a enviada."""
+    maior = 0
+    for (depois,) in conn.execute("SELECT depois FROM audit_log WHERE entidade='medicao' AND entidade_id=? AND acao=?",
+                                  (str(medicao_id), ENVIO)):
+        v = (_json_dict(depois) or {}).get("versao")
+        if isinstance(v, int):
+            maior = max(maior, v)
+    return maior
+
+
+def conferir_envio_externo(conn, medicao_id: int, dados: dict) -> tuple[dict, dict]:
+    """Recusas do "enviado por fora" (ValueError), sem gravar nada: a rota chama antes de ler o .eml e
+    `registrar_envio_externo` de novo sob o lock. Devolve (medicao, versao vigente da planilha/carta).
+    Na 1a vez a medicao esta' em `planilha_gerada`; depois, so' uma revisao ainda nao enviada vai (E3)."""
+    try:
+        data = datetime.date.fromisoformat(dados.get("enviado_em") or "")
+    except (TypeError, ValueError):
+        raise ValueError("Data do envio inválida (use AAAA-MM-DD)") from None
+    if data > tempo.hoje_local():
+        raise ValueError("A data do envio não pode ser futura")
+    if not (dados.get("meio") or "").strip():
+        raise ValueError("Informe o meio do envio (como a planilha/carta foi enviada)")
+    m = conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    vigente = conn.execute("SELECT id, versao FROM medicao_planilhas WHERE medicao_id=? ORDER BY versao DESC LIMIT 1",
+                           (medicao_id,)).fetchone()
+    if vigente is None:
+        raise ValueError("Esta medição não tem planilha/carta registrada para enviar")
+    if m["estado"] not in ESTADOS_ENVIO:
+        raise ValueError(f"{nome_medicao(m['numero'], m['tipo'])} está {rotulo_estado(m['estado'])}: "
+                         "a planilha/carta só se envia antes do boletim do órgão")
+    if m["estado"] == "planilha_enviada" and vigente["versao"] <= max(_versao_enviada(conn, medicao_id), 1):
+        raise ValueError(f"A versão {vigente['versao']} da planilha/carta já foi enviada: para enviar de novo, "
+                         "registre uma revisão")
+    if m["estado"] == "planilha_enviada" and m["planilha_enviada_em"] and data.isoformat() < m["planilha_enviada_em"]:
+        raise ValueError(f"A data do envio da revisão é anterior ao primeiro envio ({_data_br(m['planilha_enviada_em'])})")
+    return dict(m), dict(vigente)
+
+
+def _linha_siga(conn, medicao_id: int):
+    return conn.execute("SELECT id, numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='planilha'",
+                        (medicao_id,)).fetchone()
+
+
+def _gravar_numero_siga(conn, usuario_id: int, m: dict, numero: str) -> None:
+    """Dentro da transacao do chamador. A 1a vez cria a linha da planilha/carta (etapa 'planilha') em
+    `medicao_protocolos`, na data do envio; depois, corrige o numero na mesma linha, com o antes e o depois na
+    auditoria (o mesmo do nº do SIGA do envio da nota por fora, `notas_envio.registrar_numero_orgao`)."""
+    linha = _linha_siga(conn, m["id"])
+    if linha is None:
+        conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem, etapa) "
+                     "VALUES (?,?,?,'manual','planilha')", (m["id"], m["planilha_enviada_em"], numero))
+        auditoria.registrar(conn, usuario_id, NUMERO_SIGA, "medicao", m["id"], None,
+                            {"numero_processo": numero, "data": m["planilha_enviada_em"]})
+        return
+    if linha["numero_processo"] == numero:
+        raise ValueError("Este número do SIGA já está registrado")
+    conn.execute("UPDATE medicao_protocolos SET numero_processo=? WHERE id=?", (numero, linha["id"]))
+    auditoria.registrar(conn, usuario_id, NUMERO_SIGA, "medicao", m["id"],
+                        {"numero_processo": linha["numero_processo"]}, {"numero_processo": numero})
+
+
+def registrar_numero_siga(conn, usuario_id: int, medicao_id: int, numero: str) -> None:
+    """O nº do SIGA que o orgao devolve, nos dois caminhos do envio (sistema e por fora)."""
+    numero = (numero or "").strip()
+    if not numero:
+        raise ValueError("Informe o número do SIGA")
+    with db.mutacao(conn):
+        m = conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+        if m["estado"] not in ESTADOS_NUMERO_SIGA or not m["planilha_enviada_em"]:
+            raise ValueError(f"{nome_medicao(m['numero'], m['tipo'])} está {rotulo_estado(m['estado'])}: "
+                             "o número do SIGA vem depois do envio da planilha/carta e antes do protocolo da nota")
+        _gravar_numero_siga(conn, usuario_id, dict(m), numero)
+
+
+def registrar_envio_externo(conn, usuario_id: int, medicao_id: int, dados: dict,
+                            eml: tuple[str, bytes] | None = None) -> dict:
+    """"Enviado por fora": data, meio, nº do protocolo (opcional; e' o nº do SIGA) e o .eml (opcional, com a mesma
+    conferencia do envio da nota por fora). A 1a vez poe a medicao em `planilha_enviada` com origem `externo` e
+    congela o pedido; uma revisao enviada por fora so' registra o envio dela (o pedido fica o da 1a enviada)."""
+    from app import notas_envio       # import local: notas_envio importa protocolo, que importa medicoes
+    conferir_envio_externo(conn, medicao_id, dados)
+    if eml:
+        if len(eml[1]) > notas_envio.TETO_EML:
+            raise ValueError("Arquivo .eml acima de 25 MB")
+        if not notas_envio._e_email(eml[1]):
+            raise ValueError(notas_envio.NAO_E_EML)
+    data = datetime.date.fromisoformat(dados["enviado_em"]).isoformat()     # "20260803" grava "2026-08-03"
+    meio = dados["meio"].strip()
+    protocolo_ = (dados.get("numero_protocolo") or "").strip() or None
+    gravado: dict = {}
+    try:
+        with db.mutacao(conn):
+            try:
+                m, vigente = conferir_envio_externo(conn, medicao_id, dados)     # de novo, sob o lock
+                rel = None
+                if eml:     # depois das conferencias: a recusa nao deixa arquivo solto (mesmo de notas_envio)
+                    ja_existia = (arquivos.pasta("evidencias") / f"{arquivos.sha_de(eml[1])}.eml").exists()
+                    rel, sha = arquivos.gravar_bytes("evidencias", eml[1], "eml")
+                    gravado.update(rel=rel, novo=not ja_existia)
+                    conn.execute("INSERT OR IGNORE INTO medicao_documentos (medicao_id, fonte, tipo_doc, nome, "
+                                 "item_id, arquivo, sha256, tamanho) VALUES (?,'operacao','evidencia_orgao',?,?,?,?,?)",
+                                 (medicao_id, (eml[0] or "envio.eml")[-200:], sha, rel, sha, len(eml[1])))
+                antes = None
+                if m["estado"] == "planilha_gerada":
+                    antes = {k: m[k] for k in ("estado", "planilha_enviada_em", "planilha_envio_origem", "congelada")}
+                    cur = conn.execute(
+                        "UPDATE medicoes SET estado='planilha_enviada', planilha_enviada_em=?, "
+                        "planilha_envio_origem='externo', congelada=1 WHERE id=? AND estado='planilha_gerada'",
+                        (data, medicao_id))
+                    db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+                    m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone())
+                auditoria.registrar(conn, usuario_id, ENVIO, "medicao", medicao_id, antes, {
+                    "estado": "planilha_enviada", "origem": "externo", "versao": vigente["versao"],
+                    "planilha_id": vigente["id"], "enviado_em": data, "meio": meio,
+                    "numero_protocolo": protocolo_, "eml": rel})
+                # o nº do protocolo so' vira o nº do SIGA quando ainda nao ha' um: o da revisao fica so' no evento do
+                # envio (corrigir o nº gravado e' pela rota do nº do SIGA)
+                if protocolo_ and _linha_siga(conn, medicao_id) is None:
+                    _gravar_numero_siga(conn, usuario_id, m, protocolo_)
+            except BaseException:
+                if gravado.get("novo"):         # ainda sob o lock: o arquivo que ESTE registro criou sai
+                    try:
+                        arquivos.caminho_seguro(gravado["rel"]).unlink(missing_ok=True)
+                        gravado["novo"] = False
+                    except Exception:
+                        pass
+                raise
+    except BaseException:
+        if gravado.get("novo"):                 # falha no proprio COMMIT
+            notas_envio._remover_eml_sem_registro(conn, gravado["rel"])
+        raise
+    return {"medicao_id": medicao_id, "estado": "planilha_enviada", "versao": vigente["versao"]}
+
+
+def eventos_envio(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> None:
+    """Linha do tempo: um evento por envio da planilha/carta, na data do envio (como a assinatura)."""
+    for i in range(0, len(medicao_ids), LOTE_AUDITORIA):
+        lote = [str(x) for x in medicao_ids[i:i + LOTE_AUDITORIA]]
+        for r in conn.execute(
+                "SELECT a.entidade_id, a.depois, u.nome FROM audit_log a LEFT JOIN usuarios u ON u.id=a.usuario_id "
+                f"WHERE a.entidade='medicao' AND a.acao=? AND a.entidade_id IN ({','.join('?' * len(lote))}) "
+                "ORDER BY a.id", (ENVIO, *lote)):
+            d = _json_dict(r["depois"]) or {}
+            try:
+                versao, data = int(d.get("versao") or 1), datetime.date.fromisoformat(d["enviado_em"]).isoformat()
+            except (ValueError, TypeError, KeyError):
+                continue
+            qual = "Planilha/carta" if versao == 1 else f"Versão {versao} da planilha/carta"
+            como = "por fora" if d.get("origem") == "externo" else "pelo sistema"
+            detalhe = ", ".join(x for x in (d.get("meio"), d.get("numero_protocolo") and
+                                            f"protocolo {d['numero_protocolo']}") if x)
+            texto = f"{qual} enviada {como} em {_data_br(data)}" + (f" ({detalhe})" if detalhe else "")
+            out[int(r["entidade_id"])].append({"data": data, "texto": f"{texto} por {r['nome']}" if r["nome"]
+                                               else f"{texto} pelo sistema"})

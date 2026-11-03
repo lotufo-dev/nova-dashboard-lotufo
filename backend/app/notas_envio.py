@@ -675,7 +675,7 @@ def _protocolo_enviado(conn, medicao_id: int):
 
 def _ultimo_protocolo(conn, medicao_id: int):
     return conn.execute("SELECT id, data, numero_processo FROM medicao_protocolos WHERE medicao_id=? "
-                        "ORDER BY id DESC LIMIT 1", (medicao_id,)).fetchone()
+                        "AND etapa='nota' ORDER BY id DESC LIMIT 1", (medicao_id,)).fetchone()
 
 
 def aguardando_pagamento(conn) -> list[dict]:
