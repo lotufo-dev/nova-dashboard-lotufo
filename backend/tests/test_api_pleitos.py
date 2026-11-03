@@ -1,4 +1,5 @@
 """Rotas dos pleitos e da medicao final (bloco 7): fluxo pela API com o simulador do Graph."""
+import functools
 import hashlib
 import json
 import sqlite3
@@ -364,8 +365,11 @@ def test_planilha_fora_do_modelo_pede_a_digitacao(api):
                    files=_arquivo("x.pdf", b"%PDF-1.4 x", "application/pdf")).status_code == 415
 
 
+@functools.lru_cache(maxsize=None)
 def _planilha(*linhas):
-    """Planilha do modelo com (competencia 'AAAA-MM', reais) por linha."""
+    """Planilha do modelo com (competencia 'AAAA-MM', reais) por linha. Os mesmos bytes para as mesmas linhas: o
+    openpyxl grava a hora no arquivo, e a planilha aceita e a anexada (o mesmo sha256) nao podem depender de o
+    segundo virar entre uma e outra."""
     from tests.test_leitura_planilha_reajuste import planilha_modelo
     return planilha_modelo([(f"{i + 1}ª Medição", f"01/{c[5:]}/{c[:4]} a 28/{c[5:]}/{c[:4]}", v)
                             for i, (c, v) in enumerate(linhas)])

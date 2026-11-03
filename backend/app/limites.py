@@ -33,6 +33,7 @@ ROTAS_UPLOAD = tuple((metodo, re.compile(padrao)) for metodo, padrao in (
     ("POST", rf"/api/medicoes/{_ID}/envio-planilha/pecas"),       # issue #282: pecas do orgao no e-mail da planilha
     ("POST", r"/api/notas/envio-externo"),                        # .eml do envio feito fora
     ("POST", rf"/api/pleitos/{_ID}/(anexos|assinado)"),
+    ("POST", rf"/api/pleitos/{_ID}/previsao/(ler|planilha)"),     # issue #272: ler e aceitar a planilha de previsao
     ("POST", rf"/api/protocolos/{_ID}/(pecas|assinado|numero-orgao)"),
 ))
 
