@@ -2,7 +2,9 @@
 # Padrão: HTTPS na porta 8443 (pré-requisito: scripts\gerar_certificado.ps1).
 # -SemTls: HTTP na porta 80 (http://<servidor>), sem certificado a instalar nas
 # máquinas da rede — decisão do Leonardo em 2026-09-02; a senha trafega em claro
-# dentro da rede interna. Pré-requisito comum: `npm run build` em frontend\.
+# dentro da rede interna. -Porta troca a porta (ex.: 8080 na VM em que a 80 é do IIS);
+# sem ela vale a padrão de cada modo (80 em HTTP, 8443 em HTTPS).
+# Pré-requisito comum: `npm run build` em frontend\.
 #
 # Árvore de produção SEPARADA do repositório (parecer de 2026-09-01): banco, snapshots
 # e logs ficam em -Raiz (padrão C:\DashboardLotufo), nunca em backend\dados\ — essa
@@ -13,6 +15,9 @@ param(
     [string]$Raiz = "C:\DashboardLotufo",
     [string]$BackupExterno = "",
     [switch]$SemTls,
+    # Porta do servidor. 0 = padrao do modo: 80 com -SemTls, 8443 com TLS.
+    [ValidateRange(0, 65535)]
+    [int]$Porta = 0,
     # TOTVS RM (fase 5, leitura). Os tres juntos ligam a sincronizacao horaria; sem eles
     # o servidor sobe com o RM desligado. A senha fica num ARQUIVO de uma linha dentro
     # de $Raiz\segredos (ACL endurecida abaixo), nunca em variavel da tarefa.
@@ -53,6 +58,9 @@ foreach ($chave in "DASH_DEV", "DASH_SEM_JOBS", "DASH_SEM_FRONTEND", "DASH_DIST_
     Remove-Item -Path ("Env:" + $chave) -ErrorAction SilentlyContinue
 }
 if ($SemTls) { $env:DASH_SEM_TLS = "1" }
+if ($Porta -eq 0) {
+    if ($SemTls) { $Porta = 80 } else { $Porta = 8443 }
+}
 
 # Falhar alto se não houver build: sem isto o servidor sobe "funcionando", só que
 # sem interface nenhuma — a "/" devolve 404 e ninguém entende por quê.
@@ -215,9 +223,9 @@ foreach ($arquivo in $arquivos) {
 Set-Location $backend
 $python = Join-Path $backend ".venv\Scripts\python.exe"
 if ($SemTls) {
-    & $python -m uvicorn --factory app.main:create_app --no-proxy-headers --host 0.0.0.0 --port 80
+    & $python -m uvicorn --factory app.main:create_app --no-proxy-headers --host 0.0.0.0 --port $Porta
 } else {
     & $python -m uvicorn --factory app.main:create_app --no-proxy-headers `
-        --host 0.0.0.0 --port 8443 `
+        --host 0.0.0.0 --port $Porta `
         --ssl-keyfile (Join-Path $certs "chave.pem") --ssl-certfile (Join-Path $certs "cert.pem")
 }
