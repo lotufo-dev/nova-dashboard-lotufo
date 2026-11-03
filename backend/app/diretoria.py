@@ -257,7 +257,10 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date) -> dict:
         saldo = contratos.cota(v["valor_vigente_execucao_centavos"] - medido, c["percentual_direito_bp"]) or 0
         vigente_cota = contratos.cota(v["valor_vigente_execucao_centavos"], c["percentual_direito_bp"]) or 0
         medido_cota = contratos.cota(medido, c["percentual_direito_bp"]) or 0
-        ritmo += sum(_cota(m) for m in exe if m["competencia"] in ultimos)
+        # #262: o cheio da janela, na cota uma vez por contrato (arredondamento unico, como o medido)
+        ritmo += contratos.cota(sum((m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None
+                                     else m["valor_protocolado_centavos"] or 0)
+                                    for m in exe if m["competencia"] in ultimos), c["percentual_direito_bp"]) or 0
         fim = _d(v.get("execucao_fim_vigente"))
         linhas.append({"contrato_id": c["id"], "obra": c["nome_curto"] or c["numero_instrumento"],
                        "orgao_id": c["orgao_id"], "saldo_centavos": saldo,
@@ -325,15 +328,20 @@ def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
     return {"desvio_pp": float(pp), "desvio_base": base}
 
 
-def _a_precos_iniciais(conn, linha: dict) -> dict:
-    """#262 (gate Sol): a linha da tabela de obras na base do saldo da obra (`paineis.saldo`): PI+VA, VA, saldo e
-    percentuais com o vigente de execucao, sem o aditivo de reajuste, que fica so' na coluna do reajuste. Os
-    faturados ja' sao so' de execucao e projeto. O QDOP exportado continua com o vigente cheio (#352)."""
+def _a_precos_iniciais(conn, linha: dict, medido: int) -> dict:
+    """#262 (gate Sol): a linha da tabela de obras na base do saldo da obra (`paineis.saldo`) e da carteira, logo
+    acima na tela: PI+VA, VA, saldo e percentuais com o vigente de execucao, sem o aditivo de reajuste, que fica so'
+    na coluna do reajuste. `medido` e' o de execucao nos estados que medem, CHEIO (`paineis.medido_execucao_por_contrato`,
+    a regra de `paineis.mede_execucao`); a coluna "faturados" continua a do QDOP. O saldo aplica a cota uma vez sobre
+    o saldo cheio, como a carteira; os percentuais sao a razao no cheio (a mesma na cota, sem o arredondamento dela).
+    O QDOP exportado continua com o vigente cheio (#352)."""
     v = contratos.vigente(conn, linha["contrato_id"])
-    pi_va = contratos.cota(v["valor_vigente_execucao_centavos"], v["percentual_direito_bp"]) or 0
-    fat = linha["faturados"]
-    return {"pi_va": pi_va, "va": pi_va - linha["pi"], "saldo": pi_va - fat,
-            "pct_recebido": fat / pi_va if pi_va else 0, "pct_a_receber": (pi_va - fat) / pi_va if pi_va else 0}
+    pct = v["percentual_direito_bp"]
+    execucao = v["valor_vigente_execucao_centavos"]
+    pi_va = contratos.cota(execucao, pct) or 0
+    return {"pi_va": pi_va, "va": pi_va - linha["pi"], "saldo": contratos.cota(execucao - medido, pct) or 0,
+            "pct_recebido": medido / execucao if execucao else 0,
+            "pct_a_receber": (execucao - medido) / execucao if execucao else 0}
 
 
 def _obras(conn, hoje: datetime.date, avisos: list[dict], cache: dict) -> list[dict]:
@@ -342,6 +350,7 @@ def _obras(conn, hoje: datetime.date, avisos: list[dict], cache: dict) -> list[d
         if a.get("contrato_id"):
             por_obra.setdefault(a["contrato_id"], []).append(a)
     out = []
+    medido = paineis.medido_execucao_por_contrato(conn)
     for linha in qdop.linhas(conn, hoje):
         av = por_obra.get(linha["contrato_id"], [])
         # D10: o farol separa os niveis do aviso: critico = vermelho; acao = acao; o resto (atencao) = atencao
@@ -353,7 +362,7 @@ def _obras(conn, hoje: datetime.date, avisos: list[dict], cache: dict) -> list[d
         motivos = [{"tipo": a["tipo"], "nivel": a["nivel"], "dias": a["dias"], "valor_centavos": a["valor_centavos"],
                     "texto": a["mensagem"][len(prefixo):] if prefixo and a["mensagem"].startswith(prefixo) else a["mensagem"]}
                    for a in av]
-        out.append({**linha, **_a_precos_iniciais(conn, linha), "farol": farol,
+        out.append({**linha, **_a_precos_iniciais(conn, linha, medido.get(linha["contrato_id"], 0)), "farol": farol,
                     "motivo": "; ".join(a["mensagem"] for a in av), "motivos": motivos,
                     **_desvio(conn, linha["contrato_id"], hoje, cache)})
     return out

@@ -569,3 +569,53 @@ def test_desvio_divide_pelo_vigente_de_execucao(cenario):
     obras = {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}
     # -2 mi sobre 12 mi (nao sobre 14,4 mi): -16,7, como sem o reajuste
     assert obras[ids["consorcio"]]["desvio_pp"] == -16.7
+
+
+def _medir(c, contrato, numero, estado, valor, tipo="execucao", comp="2026-08"):
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, ?, ?, ?, ?, ?)", (contrato, numero, tipo, comp, estado, valor))
+
+
+def _saldos(c):
+    p = diretoria.painel(c, HOJE)
+    tabela = {o["contrato_id"]: o["saldo"] for o in p["obras"]}
+    carteira = {o["orgao"]: o["saldo_centavos"] for o in p["carteira"]["por_orgao"]}
+    return tabela, carteira, {o["contrato_id"]: o for o in p["obras"]}
+
+
+def test_tabela_de_obras_mede_como_a_carteira(cenario):
+    """#262 (revisao, rodada 3): o saldo da tabela de obras desconta o mesmo medido da carteira, logo acima na tela
+    (`paineis.mede_execucao`): projeto recebido e execucao so' com nota emitida nao abatem o saldo."""
+    c, ids = cenario
+    _medir(c, ids["propria"], 60, "recebida", 50_000_000, tipo="projeto")
+    _medir(c, ids["propria"], 61, "nota_emitida", 3_000_001)
+    c.commit()
+    tabela, carteira, obras = _saldos(c)
+    assert tabela[ids["propria"]] == carteira["SINFRA - X"] == 97_100_000      # 1.000.000,00 - 29.000,00
+    assert tabela[ids["consorcio"]] == carteira["MTPAR"] == 400_000_000
+    # os percentuais na mesma base: medido de execucao sobre o vigente de execucao
+    assert obras[ids["propria"]]["pct_recebido"] == 2_900_000 / 100_000_000
+    assert obras[ids["propria"]]["pct_a_receber"] == 97_100_000 / 100_000_000
+    assert obras[ids["propria"]]["faturados"] == 2_900_000 + 50_000_000 + 3_000_001   # a coluna do QDOP fica
+
+
+def test_saldo_da_tabela_aplica_a_cota_uma_vez(cenario):
+    """#262 (revisao, rodada 3): saldo = cota(vigente de execucao - medido), arredondamento unico, como na carteira.
+    Consorcio a 50%: 12.000.000,00 - 4.000.000,01 = 7.999.999,99 -> 4.000.000,00 (meio para cima); duas cotas
+    arredondadas dariam 6.000.000,00 - 2.000.000,01 = 3.999.999,99."""
+    c, ids = cenario
+    _medir(c, ids["consorcio"], 60, "protocolada", 1)
+    c.commit()
+    tabela, carteira, _ = _saldos(c)
+    assert tabela[ids["consorcio"]] == carteira["MTPAR"] == 400_000_000
+
+
+def test_ritmo_aplica_a_cota_uma_vez_por_contrato(cenario):
+    """#262 (revisao, rodada 3): o ritmo soma o cheio da janela e aplica a cota uma vez por contrato, como o medido.
+    Doze execucoes de 1 centavo no consorcio a 50%: cota(4.000.000,12) = 2.000.000,06 (nao 2.000.000,12, que viria
+    de doze cotas de 0,5 centavo arredondadas para cima). 201.500.006 / 6 = 33.583.334,33 -> 33.583.334."""
+    c, ids = cenario
+    for i in range(12):
+        _medir(c, ids["consorcio"], 60 + i, "protocolada", 1)
+    c.commit()
+    assert diretoria.painel(c, HOJE)["carteira"]["ritmo_mensal_centavos"] == 33_583_334
