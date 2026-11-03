@@ -338,13 +338,20 @@ def _numeros_nf(docs: list[dict]) -> str:
     return ", ".join(dict.fromkeys(nomes)) or "NF"
 
 
+def _valor_da_nota(m: dict) -> int:
+    """Issue #284 (decisao do Leo de 03/11/2026): a nota sai pelo aprovado do boletim, senao pelo pedido (como
+    notas.py confere a nota); o pedido fica congelado na medicao."""
+    v = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
+    return v or 0
+
+
 def _lista(conn, p: dict, familia: str, regras: dict, ms: list[dict]) -> str:
     """Itens da carta: notas (numero e valor), certidoes, pecas. SES numera; as outras usam i., ii."""
     e = _etapa(familia, p["etapa"])
     itens = []
     docs = _docs_nota(conn, [m["id"] for m in ms])
     if familia == "ses":
-        total = sum(m["valor_protocolado_centavos"] or 0 for m in ms)
+        total = sum(_valor_da_nota(m) for m in ms)
         itens.append(f"Nota Fiscal – R$ {_brl(total)}")
     elif "notas" in e.partes:
         itens.append(f"Nota fiscal de prestação de serviços – {_numeros_nf(docs)}")
@@ -363,7 +370,7 @@ def _lista(conn, p: dict, familia: str, regras: dict, ms: list[dict]) -> str:
     else:                             # como no CT-301: "i. ...;" e o ultimo com ponto final
         linhas = [f"{romanos[k]}. {t}{'.' if k == len(itens) - 1 else ';'}" for k, t in enumerate(itens)]
     if familia == "ses" and len(ms) > 1:           # "Sendo: 41ª Medição – R$ ..." logo abaixo da nota
-        linhas[1:1] = [f"   Sendo: {titulo(m)} – R$ {_brl(m['valor_protocolado_centavos'] or 0)}" for m in ms]
+        linhas[1:1] = [f"   Sendo: {titulo(m)} – R$ {_brl(_valor_da_nota(m))}" for m in ms]
     return "\n".join(linhas)
 
 
