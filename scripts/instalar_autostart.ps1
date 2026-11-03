@@ -13,6 +13,9 @@ param(
     [string]$Raiz = "C:\DashboardLotufo",
     [string]$BackupExterno = "",
     [switch]$SemTls,
+    # Porta do servidor, repassada a rodar_producao.ps1 so quando informada (0 = padrao
+    # do modo: 80 com -SemTls, 8443 com TLS). Ex.: 8080 na VM em que a 80 e' do IIS.
+    [int]$Porta = 0,
     # Repassados a rodar_producao.ps1: RM (fase 5) e Microsoft 365 (fase 6).
     [string]$RmUrl = "",
     [string]$RmUsuario = "",
@@ -82,6 +85,7 @@ if ($aberturas.Count -gt 0) {
 $argumentos = "-NoProfile -ExecutionPolicy Bypass -File `"$roteiro`" -Raiz `"$Raiz`""
 if ($BackupExterno) { $argumentos += " -BackupExterno `"$BackupExterno`"" }
 if ($SemTls) { $argumentos += " -SemTls" }
+if ($Porta -ne 0) { $argumentos += " -Porta $Porta" }
 if ($RmUsuario -and $RmSenhaArquivo) {
     $argumentos += " -RmUsuario `"$RmUsuario`" -RmSenhaArquivo `"$RmSenhaArquivo`""
     if ($RmUrl) { $argumentos += " -RmUrl `"$RmUrl`"" }

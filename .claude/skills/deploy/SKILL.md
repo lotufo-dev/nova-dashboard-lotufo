@@ -73,7 +73,7 @@ git diff --name-only "$atual" origin/master -- frontend
    (o `deploy.ps1` também cria e apaga o sentinela sozinho; criar antes não atrapalha.)
 2. Na pasta principal, pela ferramenta PowerShell, **sem redirecionar stderr** (nada de `2>&1` ou `*>&1`: o
    PowerShell 5.1 transforma o aviso do Vite em erro fatal, cabeçalho do script), com timeout de 600000 ms:
-   `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend`
+   `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend` (e `-Porta <porta>` se a produção não está na 80)
 3. Ler a saída:
    - `sem migracao nova; sem backup pre-migracao` ou `BACKUP PRE-MIGRACAO: <caminho>` → guardar o caminho do
      backup para o registro.
@@ -91,7 +91,8 @@ git diff --name-only "$atual" origin/master -- frontend
      → avisar o Leo na hora; logs em `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
      **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior.
 4. Conferir a saúde na própria máquina (runbook, "Saúde"):
-   `Invoke-WebRequest http://localhost/api/health -UseBasicParsing` → 200 com `banco: ok`
+   `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok`
+   (a porta é a de `-Porta` do `deploy.ps1`, padrão 80 em HTTP, quando o `:80` pode ser omitido)
    (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
    `origin/master`.
 5. Apagar o sentinela: `Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`

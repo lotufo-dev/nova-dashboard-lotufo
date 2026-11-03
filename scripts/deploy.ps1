@@ -18,7 +18,8 @@
 param(
     [string]$Ref = "origin/master",
     [string]$AppDir = "C:\DashboardLotufo\app",
-    [switch]$SemFrontend   # pula npm/build quando a mudanca e' so backend/docs
+    [switch]$SemFrontend,  # pula npm/build quando a mudanca e' so backend/docs
+    [int]$Porta = 80       # porta em que a producao responde (8080 na VM em que a 80 e' do IIS)
 )
 $ErrorActionPreference = "Stop"
 $pause = "C:\DashboardLotufo\watchdog.pause"
@@ -27,7 +28,7 @@ $lock = Join-Path $AppDir "backend\requirements.lock"
 if (-not (Test-Path $py)) { throw "venv da producao ausente em $py (setup inicial do diretorio pinado nao feito)" }
 
 function Saudavel {
-    try { return ((Invoke-WebRequest "http://localhost/api/health" -TimeoutSec 12 -UseBasicParsing).StatusCode -eq 200) }
+    try { return ((Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing).StatusCode -eq 200) }
     catch { return $false }
 }
 function Construir([string]$alvo) {
@@ -49,24 +50,24 @@ function Reconstruir {
     }
 }
 function DonoDaPorta {
-    $c = Get-NetTCPConnection -LocalPort 80 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    $c = Get-NetTCPConnection -LocalPort $Porta -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $c) { return $null }
     return Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)"
 }
 # Servidor ORFAO do Agendador (incidente de 2026-09-21): Stop-ScheduledTask nao o mata, ele
-# segura a porta 80, a instancia nova morre com WinError 10048 e o health 200 que se ve e' o
+# segura a porta, a instancia nova morre com WinError 10048 e o health 200 que se ve e' o
 # do processo ANTIGO. Por isso: quem sobrar na porta depois do Stop e' morto aqui -- so' se
 # for o uvicorn da dashboard; qualquer outro dono da porta aborta o deploy.
 function LiberarPorta {
     $dono = DonoDaPorta
     if (-not $dono) { return }
     if ($dono.CommandLine -notmatch "uvicorn" -or $dono.CommandLine -notmatch "app\.main") {
-        throw "porta 80 ocupada por processo que nao e' a dashboard (PID $($dono.ProcessId): $($dono.Name)); nada foi morto"
+        throw "porta $Porta ocupada por processo que nao e' a dashboard (PID $($dono.ProcessId): $($dono.Name)); nada foi morto"
     }
-    Write-Warning "servidor orfao na porta 80 (PID $($dono.ProcessId), criado em $($dono.CreationDate)) -> encerrando"
+    Write-Warning "servidor orfao na porta $Porta (PID $($dono.ProcessId), criado em $($dono.CreationDate)) -> encerrando"
     Stop-Process -Id $dono.ProcessId -Force
     Start-Sleep -Seconds 3
-    if (DonoDaPorta) { throw "porta 80 continua ocupada depois de encerrar o PID $($dono.ProcessId)" }
+    if (DonoDaPorta) { throw "porta $Porta continua ocupada depois de encerrar o PID $($dono.ProcessId)" }
 }
 function Reiniciar {
     Stop-ScheduledTask -TaskName "DashboardLotufo"; Start-Sleep -Seconds 3
@@ -80,7 +81,7 @@ function SaudavelENovo {
     if (-not (Saudavel)) { return $false }
     $dono = DonoDaPorta
     if (-not $dono -or $dono.CreationDate -lt $script:reinicioEm) {
-        Write-Warning "health 200, mas o dono da porta 80 e' anterior ao reinicio (PID $($dono.ProcessId), $($dono.CreationDate))"
+        Write-Warning "health 200, mas o dono da porta $Porta e' anterior ao reinicio (PID $($dono.ProcessId), $($dono.CreationDate))"
         return $false
     }
     return $true
