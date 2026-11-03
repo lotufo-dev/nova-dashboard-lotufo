@@ -103,6 +103,44 @@ describe("Reajuste", () => {
     expect(container.textContent).not.toContain("AP-26A");
   });
 
+  it("termo sem data-base vai para a base que a API resolveu, uma vez só, mesmo com duas bases (rodada 3, PR #317)", async () => {
+    const termo = { id: 11, chave: "ap-11", tipo: "apostilamento_reajuste", numero: "AP-11", data: "2026-09-15",
+      dados: { ciclo: 2026 } };
+    const ciclo = { ciclo: 2026, dias: null, pleito: null };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...ciclo, data_base_mes: "2024-04", indice: "SICRO", aniversario: "2026-04-01",
+                     situacao: "pleito_pendente", dias: -10, apostilamento: null },
+                   { ...ciclo, data_base_mes: "2024-06", indice: "INCC-DI", aniversario: "2026-06-01",
+                     situacao: "apostilado", apostilamento: termo }],
+          pleitos: [], competencias: [], bases_dos_termos: [{ instrumento_id: 11, data_base_mes: "2024-06" }] }
+      : { instrumentos: [termo] });
+    const { container } = render(<Reajuste contratoId={7} podeEditar={false} />);
+    const cartao = await screen.findByRole("region", { name: /^Data-base 06\/2024 · INCC-DI/ });
+    expect(cartao.textContent).toContain("AP-11, de 15/09/2026");
+    expect(screen.queryByRole("region", { name: "Apostilamentos sem data-base no cadastro" })).toBeNull();
+    expect(container.textContent!.split("AP-11, de 15/09/2026").length - 1).toBe(1);
+  });
+
+  it("termo corrigido por outro de outra data-base sai da aba inteira (rodada 3, PR #317)", async () => {
+    // T2 (base 2024-04) corrige T1 (base 2024-06); T0 nao tem base que se saiba e e' corrigido por T3
+    const termo = (id: number, chave: string, numero: string, dados: Record<string, unknown>) => ({ id, chave,
+      tipo: "apostilamento_reajuste", numero, data: "2026-09-01", dados: { ciclo: 2026, ...dados } });
+    const instrumentos = [termo(1, "t1", "T-1", { data_base: "2024-06" }), termo(2, "t2", "T-2", { data_base: "2024-04", corrige: "t1" }),
+                          termo(3, "t0", "T-0", {}), termo(4, "t3", "T-3", { data_base: "2024-04", corrige: "t0" })];
+    const ciclo = { ciclo: 2026, situacao: "apostilamento_pendente", dias: 40, pleito: null, apostilamento: null };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...ciclo, data_base_mes: "2024-04", indice: "SICRO", aniversario: "2026-04-01" },
+                   { ...ciclo, data_base_mes: "2024-06", indice: "INCC-DI", aniversario: "2026-06-01" }],
+          pleitos: [], competencias: [] }
+      : { instrumentos });
+    const { container } = render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByRole("region", { name: /^Data-base 06\/2024 · INCC-DI/ });
+    expect(container.textContent).toContain("T-2, de 01/09/2026");
+    expect(container.textContent).not.toContain("T-1,");
+    expect(container.textContent).not.toContain("T-0,");
+    expect(screen.queryByRole("region", { name: "Apostilamentos sem data-base no cadastro" })).toBeNull();
+  });
+
   it("pleito de ciclo anterior ligado a um termo também diz que foi atendido (issue #271)", async () => {
     const termo = { id: 4, chave: "ap-09", tipo: "apostilamento_reajuste", numero: "019/2024/02/09", data: "2025-08-01",
       dados: { data_base: "2024-06", ciclo: 2025 } };

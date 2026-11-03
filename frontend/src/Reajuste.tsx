@@ -3,7 +3,8 @@ import { api, mensagemDeErro } from "./api";
 import { CartaoPleito, NovoPleito, type Pleito, type Reemissao } from "./FluxoOficio";
 import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
-import { cicloDoApostilamento, reajustePorDataBase, termosCorrigidos, type CicloApi, type InstrumentoCadastro } from "./obra";
+import { cicloDoApostilamento, reajustePorDataBase, termosCorrigidos, type BaseDoTermo, type CicloApi,
+  type InstrumentoCadastro } from "./obra";
 import { Link } from "./Link";
 import { fmtCompetencia as mesAno, fmtDataPura } from "./tempo";
 import { brl, fmtPercentual } from "./formato";
@@ -123,7 +124,8 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
 const emAberto = (p: Pleito) => p.origem === "sistema" && p.situacao !== "enviado" && p.situacao !== "descartado";
 
 export default function Reajuste({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
-  const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[]; competencias?: CompetenciaApostilada[] } | null>(null);
+  const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[]; competencias?: CompetenciaApostilada[];
+    bases_dos_termos?: BaseDoTermo[] } | null>(null);
   const [apostilamentos, setApostilamentos] = useState<InstrumentoCadastro[]>([]);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
@@ -148,7 +150,13 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   if (dados.ciclos.length === 0 && dados.pleitos.length === 0 && apostilamentos.length === 0) {
     return <section className="cartao"><div className="vazio vazio--curto"><p>Nenhuma data-base.</p></div></section>;
   }
-  const { dataBases, semDataBase, outrosPleitos } = reajustePorDataBase(dados.ciclos, dados.pleitos, apostilamentos);
+  const { dataBases, semDataBase, outrosPleitos } = reajustePorDataBase(dados.ciclos, dados.pleitos, apostilamentos,
+    dados.bases_dos_termos);
+  // o corrigido por outro nao vale e sai da aba (segue em Contrato > Instrumentos), seja qual for a data-base da
+  // correcao (PR #317)
+  const corrigidos = termosCorrigidos(apostilamentos);
+  const vale = (i: InstrumentoCadastro) => !i.chave || !corrigidos.has(i.chave);
+  const semBase = semDataBase.filter(vale);
   const aqui = { tela: "obra" as const, id: contratoId, aba: "reajuste" as const };
   // cada pleito e' uma secao do cartao pai (F-74): o enviado vira linha com o desfecho no selo; o que ainda se
   // trabalha segue no CartaoPleito, que traz o formulario
@@ -186,9 +194,8 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const s = SITUACAO[c.situacao] ?? { rotulo: c.situacao, classe: "" };
         const titulo = `titulo-db-${db.data_base_mes}`;
         // termos que valem, separados pelo ciclo deles (PR #317): os do ciclo corrente ficam no cartao, mesmo sem
-        // pleito ligado; o corrigido por outro nao vale e sai da aba (segue em Contrato > Instrumentos)
-        const corrigidos = termosCorrigidos(db.apostilamentos);
-        const validos = db.apostilamentos.filter(i => !i.chave || !corrigidos.has(i.chave));
+        // pleito ligado
+        const validos = db.apostilamentos.filter(vale);
         const doCiclo = [...(c.apostilamento ? [c.apostilamento] : []),
           ...validos.filter(i => i.id !== c.apostilamento?.id && cicloDoApostilamento(i) === c.ciclo)];
         const outrosAp = validos.filter(i => !doCiclo.some(d => d.id === i.id));
@@ -287,12 +294,12 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         );
       })}
 
-      {semDataBase.length > 0 && (
+      {semBase.length > 0 && (
         <section className="cartao" aria-labelledby="titulo-apostilamentos-sem-base">
           <div className="cartao__cabeca">
             <h2 className="cartao__titulo" id="titulo-apostilamentos-sem-base">Apostilamentos sem data-base no cadastro</h2>
           </div>
-          <ul className="lista-simples cartao__corpo">{semDataBase.map(i => <li key={i.id} className="num">{textoApostilamento(i)}</li>)}</ul>
+          <ul className="lista-simples cartao__corpo">{semBase.map(i => <li key={i.id} className="num">{textoApostilamento(i)}</li>)}</ul>
         </section>
       )}
 

@@ -62,14 +62,20 @@ export function termosCorrigidos(lista: InstrumentoCadastro[]): Set<string> {
   return new Set(lista.map(i => i.dados.corrige).filter((k): k is string => typeof k === "string" && k !== ""));
 }
 
+/** A data-base de cada termo como o servidor a resolveu (`reajuste.bases_dos_termos`). */
+export type BaseDoTermo = { instrumento_id: number; data_base_mes: string | null };
+
 /** Aba Reajuste: um cartao por data-base, com o ciclo corrente (o que a API manda), os pleitos dele e, a parte,
- *  os pleitos dos ciclos passados. Apostilamento vai para a data-base que ele diz (`dados.data_base`); sem ela,
- *  para a data-base unica do contrato (a regra de `reajuste._apostilamento`); o que nao se sabe onde fica sobra
- *  em `semDataBase`, e pleito de data-base que o contrato nao tem mais, em `outrosPleitos`. */
+ *  os pleitos dos ciclos passados. Apostilamento vai para a data-base que o servidor resolveu (`bases`, a regra de
+ *  `reajuste.base_do_termo`); sem ela, a que ele diz (`dados.data_base`) ou a data-base unica do contrato; o que
+ *  nao se sabe onde fica sobra em `semDataBase`, e pleito de data-base que o contrato nao tem mais, em
+ *  `outrosPleitos`. */
 export function reajustePorDataBase<C extends CicloApi, P extends PleitoResumo, I extends InstrumentoCadastro>(
-    ciclos: C[], pleitos: P[], apostilamentos: I[]): { dataBases: DataBase<C, P, I>[]; semDataBase: I[]; outrosPleitos: P[] } {
+    ciclos: C[], pleitos: P[], apostilamentos: I[], bases: BaseDoTermo[] = []): { dataBases: DataBase<C, P, I>[]; semDataBase: I[]; outrosPleitos: P[] } {
   const unica = ciclos.length === 1 ? ciclos[0].data_base_mes : null;
+  const resolvida = new Map(bases.map(b => [b.instrumento_id, b.data_base_mes]));
   const baseDe = (i: I): string | null => {
+    if (resolvida.has(i.id)) return resolvida.get(i.id) ?? null;
     const d = i.dados.data_base;
     return typeof d === "string" && d ? d.slice(0, 7) : unica;
   };
