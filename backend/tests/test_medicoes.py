@@ -61,6 +61,16 @@ def test_transicoes_de_estado(conn, contrato_id):
         medicoes.mudar_estado(conn, 1, mid, "cancelada", None)  # recebida e final
 
 
+@pytest.mark.parametrize("estado", ["planilha_enviada", "boletim_recebido"])
+@pytest.mark.parametrize("fim", ["cancelada", "desistida"])
+def test_planilha_enviada_e_boletim_recebido_podem_ser_encerrados(conn, contrato_id, estado, fim):
+    # #284 (revisor): sem isso a medicao ficava presa na obra sem regra de espelho
+    mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "execucao", "competencia": "2026-07"})
+    conn.execute("UPDATE medicoes SET estado=? WHERE id=?", (estado, mid)); conn.commit()
+    medicoes.mudar_estado(conn, 1, mid, fim, "obra paralisada pelo órgão")
+    assert medicoes.detalhe(conn, mid)["estado"] == fim
+
+
 def test_espelho_enviado_vai_a_nota_emitida_com_data(conn, contrato_id):
     mid = medicoes.criar_para_espelho(conn, 1, contrato_id, 7, "execucao", "2026-08", 100_000)
     medicoes.marcar_espelho_enviado(conn, 1, mid)

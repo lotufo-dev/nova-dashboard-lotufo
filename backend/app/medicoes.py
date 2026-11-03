@@ -25,6 +25,9 @@ TRANSICOES = {
     "prevista": {"cancelada", "desistida"},
     # Issue #281: entra pela planilha/carta (medicao_planilhas.registrar); a saida a mao e' o cancelamento.
     "planilha_gerada": {"cancelada", "desistida"},
+    # Issue #284: enviada ao orgao e com o boletim recebido, a medicao tambem pode ser encerrada a mao
+    "planilha_enviada": {"cancelada", "desistida"},
+    "boletim_recebido": {"cancelada", "desistida"},
     # Estados do espelho (spec 2026-09-21 §2). espelho_gerado -> espelho_enviado e' do SISTEMA
     # (marcar_espelho_enviado, no ato do envio); -> protocolada e' registrar_protocolo.
     # Bloco 3: a nota (PDF lido ou RM) fecha `nota_emitida` (notas.fechar_se_completa, ou a
@@ -49,6 +52,7 @@ ESTADOS_ANTES_DO_ESPELHO = ("prevista", *ESTADOS_PLANILHA)
 ESTADOS_SEM_BOLETIM = ("prevista", "planilha_gerada", "planilha_enviada")
 PEDIDO_POR_REVISAO = "Para mudar o pedido, registre uma revisão da planilha/carta"
 PEDIDO_DEPOIS_DO_BOLETIM = "O pedido não pode mais ser alterado depois do boletim do órgão"
+APROVADO_PELO_BOLETIM = "O aprovado vem do boletim do órgão: para corrigir ou registrar glosa, registre um boletim novo"
 # Gate Sol S4 (#281): os estados que recebem protocolo, por extenso. Estes vao a `protocolada` no mesmo passo...
 ESTADOS_PROMOVIDOS_PELO_PROTOCOLO = ("prevista", "planilha_gerada", *ESTADOS_ESPELHO, "nota_emitida")
 # ...e estes ja' foram protocolados: o protocolo seguinte (novo oficio) so' congela. Os demais sao recusados.
@@ -259,6 +263,8 @@ def conferir_boletim(conn: sqlite3.Connection, medicao_id: int, dados: dict):
         raise ValueError("A data do boletim não pode ser futura")
     if (dados.get("meio") or None) not in (None, *MEIOS_BOLETIM):
         raise ValueError("Meio do boletim inválido")
+    if not (dados.get("numero_orgao") or "").strip():
+        raise ValueError("Informe o nº do boletim no órgão (processo ou SMO)")    # issue: "valor aprovado, data e nº"
     m = conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
     if m is None:
         raise ValueError("Medição não encontrada")
@@ -274,8 +280,9 @@ def conferir_boletim(conn: sqlite3.Connection, medicao_id: int, dados: dict):
 def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, dados: dict, anexo: dict) -> dict:
     """O boletim do orgao e' um evento de atesto (medicao_atestos, append-only) com o meio, o nº no orgao e o PDF;
     o aprovado vigente (`valor_atestado_centavos`) e' o do ultimo evento. Na planilha/carta enviada a medicao vai a
-    `boletim_recebido`; nos estados seguintes e' glosa (evento novo, estado igual); a prevista (sem planilha/carta)
-    guarda o evento e fica prevista. O pedido nao muda."""
+    `boletim_recebido`; nos estados seguintes e' glosa (evento novo, estado igual). A prevista vai a
+    `boletim_recebido` na obra que gera espelho (o passo seguinte); na do fluxo antigo guarda o evento e fica
+    prevista, porque o protocolo nao recebe `boletim_recebido`. O pedido nao muda."""
     meio = dados.get("meio") or None
     numero = (dados.get("numero_orgao") or "").strip() or None
     observacao = (dados.get("observacao") or "").strip() or None
@@ -283,12 +290,17 @@ def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int
     with db.mutacao(conn):
         m, dia = conferir_boletim(conn, medicao_id, dados)
         atual = m["estado"]
-        ultimo = conn.execute("SELECT valor_centavos, atestado_em, sha256 FROM medicao_atestos WHERE medicao_id=? "
-                              "ORDER BY id DESC LIMIT 1", (medicao_id,)).fetchone()
-        if ultimo is not None and (ultimo["valor_centavos"], ultimo["atestado_em"], ultimo["sha256"]) == (
-                valor, dia.isoformat(), anexo["sha256"]):
-            raise ValueError("Este boletim já está registrado")    # clique duplo: o evento nao se apaga depois
-        novo = "boletim_recebido" if atual == "planilha_enviada" else atual
+        # Repeticao (clique duplo, pedido atrasado) e' o mesmo boletim de QUALQUER evento ja' gravado, com o mesmo
+        # documento, valor, dia, nº, meio e observacao (gate Sol): a repeticao atrasada de A depois da correcao B nao
+        # volta o valor; corrigir so' o nº, o meio ou a observacao e' um evento novo. O evento nao se apaga depois.
+        if conn.execute("SELECT 1 FROM medicao_atestos WHERE medicao_id=? AND valor_centavos=? AND atestado_em=? "
+                        "AND sha256=? AND numero_orgao IS ? AND meio IS ? AND observacao IS ? LIMIT 1",
+                        (medicao_id, valor, dia.isoformat(), anexo["sha256"], numero, meio, observacao)).fetchone():
+            raise ValueError("Este boletim já está registrado")
+        regra_ativa = conn.execute("SELECT 1 FROM espelho_regras WHERE contrato_id=? AND situacao='ativa'",
+                                   (m["contrato_id"],)).fetchone() is not None
+        novo = ("boletim_recebido" if atual == "planilha_enviada" or (atual == "prevista" and regra_ativa)
+                else atual)
         cur = conn.execute(
             "UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem='manual', atestado_em=?, estado=? "
             "WHERE id=? AND estado=?", (valor, dia.isoformat(), novo, medicao_id, atual))
@@ -414,6 +426,10 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         if campo == "protocolado" and conn.execute("SELECT 1 FROM medicao_planilhas WHERE medicao_id=? LIMIT 1",
                                                    (medicao_id,)).fetchone():
             raise ValueError("O pedido vem da planilha/carta e não se altera à mão")
+        # Issue #284 (gate Sol): com boletim registrado, o aprovado so' muda por boletim novo (com o documento);
+        # o atesto digitado ficaria fora da lista de boletins e o espelho sairia por ele
+        if campo == "atestado" and tem_boletim(conn, medicao_id):
+            raise ValueError(APROVADO_PELO_BOLETIM)
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []

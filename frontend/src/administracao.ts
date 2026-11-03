@@ -154,6 +154,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "medicao.documento": "Documento da medição", "medicao.faturada_legado": "Faturamento carregado do legado",
   "medicao.recebida_com_diferenca": "Recebida com diferença dentro da tolerância",
   "medicao.planilha_envio": "Planilha/carta enviada ao protocolo", "medicao.planilha_peca": "Peça da planilha/carta",
+  "medicao.sem_boletim": "Espelho gerado sem boletim",
   "espelho.gerar": "Espelho gerado", "espelho.enviar": "Espelho enviado",
   "protocolo.criar": "Protocolo criado", "protocolo.peca": "Peça do protocolo anexada",
   "protocolo.peca_removida": "Peça do protocolo removida", "protocolo.montar": "Protocolo montado",

@@ -865,6 +865,47 @@ def test_boletim_identico_repetido_da_422_e_nao_duplica(client_admin):
     assert len(_atestos(mid)) == 1
 
 
+def test_repeticao_atrasada_do_primeiro_boletim_nao_volta_o_valor(client_admin):
+    # gate Sol: A gravado, B gravado como correcao, A repetido depois: recusa (o vigente fica o B)
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    assert _registrar_boletim(client_admin, mid, valor="11.999,99", texto="Boletim corrigido").status_code == 201
+    assert _registrar_boletim(client_admin, mid).status_code == 422
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_atestado_centavos"] == 11_999_99
+    # corrigir so' o nº (mesmo PDF, valor e dia) e' evento novo
+    r = _registrar_boletim(client_admin, mid, valor="11.999,99", texto="Boletim corrigido", numero="SMO 15/2026")
+    assert r.status_code == 201, r.text
+    assert [e["numero_orgao"] for e in _atestos(mid)] == ["SMO 14/2026", "SMO 14/2026", "SMO 15/2026"]
+
+
+def test_boletim_sem_numero_no_orgao_da_422(client_admin):
+    mid = _planilha_enviada(client_admin)
+    for numero in ("", "   "):
+        r = _registrar_boletim(client_admin, mid, numero=numero)
+        assert r.status_code == 422 and "nº do boletim" in r.json()["detail"]
+    assert _atestos(mid) == []
+
+
+def test_atestado_a_mao_recusado_depois_do_boletim(client_admin):
+    # gate Sol: com boletim, o aprovado so' muda por boletim novo (com o documento)
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "atestado", "valor": "11.000,00"})
+    assert r.status_code == 422 and "registre um boletim novo" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_atestado_centavos"] == 12_000_01
+    assert len(_atestos(mid)) == 1
+
+
+def test_boletim_na_prevista_da_obra_com_espelho_vai_a_boletim_recebido(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)          # criada antes da regra: depois dela a obra so' cria pelo espelho
+    _com_regra_de_espelho(cid, "ativa")
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_atestado_centavos"], d["valor_protocolado_centavos"]) == (
+        "boletim_recebido", 12_000_01, None)
+
+
 def test_boletim_na_planilha_ainda_nao_enviada_da_422(client_admin):
     # spec §2.1: o boletim vem depois do envio da planilha/carta (pelo sistema ou registrado por fora)
     mid = _nova_planilha(client_admin, _contrato(client_admin)).json()["medicao_id"]
@@ -874,7 +915,7 @@ def test_boletim_na_planilha_ainda_nao_enviada_da_422(client_admin):
 
 
 def test_boletim_na_prevista_grava_o_evento_e_a_prevista_fica(client_admin):
-    # a medicao sem planilha/carta (fluxo antigo) guarda o aprovado com o documento; o estado nao pula a planilha
+    # obra do fluxo antigo (sem regra de espelho): o protocolo nao recebe `boletim_recebido`, entao a prevista fica
     mid = _medicao(client_admin, _contrato(client_admin))
     assert _registrar_boletim(client_admin, mid).status_code == 201
     d = client_admin.get(f"/api/medicoes/{mid}").json()
@@ -910,7 +951,8 @@ def test_boletim_recusas(client_admin):
     assert _registrar_boletim(client_admin, mid, meio="pombo").status_code == 422
     sem_pdf = client_admin.post(f"/api/medicoes/{mid}/boletim", data={"valor": "1,00", "data": "2026-08-10"})
     assert sem_pdf.status_code == 422
-    falso = client_admin.post(f"/api/medicoes/{mid}/boletim", data={"valor": "1,00", "data": "2026-08-10"},
+    falso = client_admin.post(f"/api/medicoes/{mid}/boletim",
+                              data={"valor": "1,00", "data": "2026-08-10", "numero_orgao": "SMO 1"},
                               files={"arquivo": ("b.pdf", b"nao e pdf", "application/pdf")})
     assert falso.status_code == 415
     assert client_admin.post("/api/medicoes/999999/boletim", files=_boletim(),

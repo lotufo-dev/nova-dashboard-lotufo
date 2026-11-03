@@ -107,6 +107,11 @@ def _sem_boletim(conn, existentes: dict[str, dict], tipos) -> list[dict]:
             if t in tipos and m["estado"] in medicoes.ESTADOS_SEM_BOLETIM and not medicoes.tem_boletim(conn, m["id"])]
 
 
+def _opcionais(conn, existentes: dict[str, dict]) -> set[str]:
+    return ({m["tipo"] for m in _sem_boletim(conn, existentes, set(existentes))}
+            | {t for t, m in existentes.items() if m["estado"] in medicoes.ESTADOS_ESPELHO})
+
+
 def _recusar_planilha_sendo_enviada(conn, numero: int, existentes: dict[str, dict], tipos) -> None:
     """A planilha/carta com o e-mail ao orgao saindo (ou preso) nao ganha espelho: o envio poe a medicao em
     `planilha_enviada` com o pedido que ele leva."""
@@ -135,9 +140,10 @@ def _calcular(conn, contrato_id, numero, competencia, entradas):
         raise ValueError(f"entrada desconhecida para esta obra: {sorted(estranhas)}")
     existentes = _existentes(conn, contrato_id, numero)
     travados = _travados(existentes)
-    # issue #284: o valor que a medicao ja' tem (aprovado, senao pedido) vem preenchido e nao muda; a medicao ainda
-    # sem boletim so' entra se a pessoa a puser (nada digitado = fica fora deste espelho)
-    opcionais = {m["tipo"] for m in _sem_boletim(conn, existentes, set(existentes))}
+    # issue #284: o valor que a medicao ja' tem (aprovado, senao pedido) vem preenchido e nao muda. So' entra
+    # sozinha a que espera o espelho (boletim recebido); a ainda sem boletim e a que ja' tem espelho (revisor: o
+    # espelho so' de reajuste nao pode puxar a execucao ja' enviada) entram se a pessoa as puser (nada digitado = fora)
+    opcionais = _opcionais(conn, existentes)
     entradas = espelho.entradas_pela_medicao(regra, entradas, travados, opcionais)
     saidas = espelho.calcular(regra, entradas, competencia)
     if not saidas:
@@ -213,7 +219,8 @@ def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict
     _, _, saidas, por_tipo, entradas, existentes, (travados, opcionais) = _calcular(conn, contrato_id, numero,
                                                                                    competencia, entradas)
     _espelhos_anteriores(conn, contrato_id, numero, list(por_tipo))
-    sem = {m["tipo"] for m in _sem_boletim(conn, existentes, por_tipo)}
+    sem_todos = {m["tipo"] for m in _sem_boletim(conn, existentes, set(existentes))}
+    sem = sem_todos & set(por_tipo)
     avisos, meds = [], []
     for tipo, valor in por_tipo.items():
         ex = existentes.get(tipo)
@@ -234,9 +241,10 @@ def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict
                      "sem_boletim": tipo in sem})
     return {"saidas": saidas, "medicoes": meds, "avisos": avisos, "periodo": espelho.periodo(competencia, periodo),
             "entradas": entradas,
-            # todos os valores que vem das medicoes deste numero, tambem os da medicao sem boletim que ficou fora
-            "travados": [{"tipo": t, "valor_centavos": v, "fonte": f, "sem_boletim": t in opcionais}
-                         for t, (v, f) in sorted(travados.items())]}
+            # todos os valores que vem das medicoes deste numero, tambem os da medicao que ficou fora (`opcional`:
+            # so' entra digitada; `sem_boletim`: entra com a justificativa)
+            "travados": [{"tipo": t, "valor_centavos": v, "fonte": f, "opcional": t in opcionais,
+                          "sem_boletim": t in sem_todos} for t, (v, f) in sorted(travados.items())]}
 
 
 def _conferir_boletim(conn, numero: int, existentes: dict[str, dict], tipos, justificativa: str | None) -> list[dict]:
@@ -274,7 +282,7 @@ def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
         # #284, sob o lock: boletim, revisao ou cancelamento entre a conta e a gravacao mudam o valor que o espelho
         # tem de usar (ou se a medicao entra sozinha)
         agora = _existentes(conn, contrato_id, numero)
-        if (_travados(agora), {m["tipo"] for m in _sem_boletim(conn, agora, set(agora))}) != travados:
+        if (_travados(agora), _opcionais(conn, agora)) != travados:
             raise ValueError("A medição mudou enquanto o espelho era gerado: confira os valores e gere de novo")
         _recusar_planilha_sendo_enviada(conn, numero, agora, por_tipo)
         sem_boletim = _conferir_boletim(conn, numero, agora, por_tipo, justificativa_sem_boletim)
