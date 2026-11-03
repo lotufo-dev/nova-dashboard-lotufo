@@ -227,8 +227,12 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const outrosAp = validos.filter(i => !doCiclo.some(d => d.id === i.id));
         const anteriores = db.pleitosAnteriores.length + outrosAp.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
-        const previsoes = (dados.previsoes ?? []).filter(p => p.data_base_mes === db.data_base_mes && p.ciclo === c.ciclo);
         const apostiladas = (dados.competencias ?? []).filter(x => x.data_base_mes === db.data_base_mes);
+        // a competencia apostilada fica so' na tabela do apostilamento: a da previsao traz o que ainda e' previsto
+        // (planilha do pleito e digitada), e o total dela soma so' isso
+        const previsoes = (dados.previsoes ?? []).filter(p => p.data_base_mes === db.data_base_mes && p.ciclo === c.ciclo
+          && !(p.origem === "apostilamento"
+               && apostiladas.some(x => x.ciclo === p.ciclo && x.competencia === p.competencia)));
         // o pleito vigente do ciclo e o que o servidor deixa fazer com ele (reiterar, reemitir o cronograma)
         const vigente = c.pleito ? dados.pleitos.find(p => p.id === c.pleito!.id) : undefined;
         const possiveis = vigente?.reemissoes_possiveis ?? [];
