@@ -458,8 +458,9 @@ def test_com_limite_com_prazo_de_ponta_a_ponta_mata_o_filho_no_que_sobra():
 
 def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0, erro_recv=None, eventos=None):
     """`spawn` que leva `spawn_s` no relogio falso; o filho responde depois de `responde_em` s (None: nunca), nao
-    sai sozinho e ignora o `terminate`, entao todo `join` gasta o que pede e so' o `kill` o derruba. `erro_recv`:
-    excecao que o `recv` levanta. Devolve a lista de `get_context` chamados; `eventos` recebe "kill" e "close"."""
+    sai sozinho e ignora o `terminate`, entao todo `join` gasta o que pede e so' o `kill` o derruba -- e o `kill` e'
+    assincrono, como no sistema: o filho so' fica recolhido (`exitcode`) depois de um `join` com espera depois dele.
+    `erro_recv`: excecao que o `recv` levanta. Devolve a lista de `get_context` chamados; `eventos` recebe "kill" e "close"."""
     contextos = []
     eventos = [] if eventos is None else eventos
 
@@ -489,8 +490,12 @@ def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0, erro_recv=
         def start(self):
             relogio[0] += spawn_s
 
+        morto = False
+
         def join(self, t=None):
             relogio[0] += t
+            if self.morto and t > 0:
+                self.exitcode = -9
 
         def is_alive(self):
             return self.exitcode is None
@@ -500,7 +505,7 @@ def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0, erro_recv=
 
         def kill(self):
             eventos.append("kill")
-            self.exitcode = -9
+            self.morto = True
 
         def close(self):
             eventos.append("close")
@@ -562,10 +567,21 @@ def test_com_limite_com_prazo_spawn_que_come_a_folga_de_matar_nao_passa_do_prazo
     relogio = [1000.0]
     monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
     eventos = []
+
+    class Vaga:
+        def acquire(self, timeout):
+            return True
+
+        def release(self):
+            eventos.append("release")
+    monkeypatch.setattr(leitura_pdf, "_VAGAS", Vaga())
     _filho_falso(monkeypatch, relogio, eventos=eventos)
     with pytest.raises(leitura_pdf.TextoInadequado):
         leitura_pdf.com_limite(b"", "paginas", ate=1006.0)
-    assert relogio[0] <= 1006.0 and "kill" in eventos     # no prazo, e o filho ainda recebe o `kill`
+    # o `terminate` espera so' o que sobra do prazo; depois do `kill`, o filho e' sempre recolhido (`close`) antes
+    # de soltar a vaga, mesmo passando do prazo ate' o teto do recolhimento (ultima passada da rodada 3)
+    assert eventos == ["kill", "close", "release"]
+    assert relogio[0] <= 1006.0 + leitura_pdf._TETO_RECOLHER_S
 
 
 def test_com_limite_erro_inesperado_depois_do_spawn_mata_o_filho_antes_de_soltar_a_vaga(monkeypatch):

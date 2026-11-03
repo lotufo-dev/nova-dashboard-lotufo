@@ -609,18 +609,20 @@ def _trabalho(pdf: bytes, modo: str, envia, opcoes=None) -> None:
 
 # Pior caso de `_matar`: os dois `join(2.0)`. Com prazo de ponta a ponta (`ate`), sai do tempo do filho.
 _FOLGA_MATAR_S = 4.0
+# Espera fixa pelo filho depois do `kill`, com ou sem prazo: a vaga so' e' solta com o filho recolhido, e o prazo de
+# ponta a ponta pode passar ate' isto quando o `spawn` lento comeu a folga (rodada 3 do #285).
+_TETO_RECOLHER_S = 2.0
 
 
 def _matar(proc, ate: float | None = None) -> None:
-    """Derruba o filho: `terminate`, dois segundos de folga, `kill` se ainda vive. Com `ate`, cada espera vai so' ate'
-    o prazo (o `spawn` lento pode ter comido a folga): o `kill` sai mesmo sem tempo para esperar por ele."""
-    def espera() -> float:
-        return 2.0 if ate is None else max(0.0, min(2.0, ate - time.monotonic()))
+    """Derruba o filho: `terminate`, dois segundos de folga, `kill` se ainda vive. Com `ate`, a espera depois do
+    `terminate` vai so' ate' o prazo (o `spawn` lento pode ter comido a folga); a do `kill` e' sempre
+    `_TETO_RECOLHER_S`, para o filho estar recolhido antes de a vaga ser solta."""
     proc.terminate()
-    proc.join(espera())
+    proc.join(2.0 if ate is None else max(0.0, min(2.0, ate - time.monotonic())))
     if proc.is_alive():
         proc.kill()
-        proc.join(espera())
+        proc.join(_TETO_RECOLHER_S)
 
 
 def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, ate: float | None = None):
@@ -663,8 +665,9 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, 
     `ate` (capa do SMO, #285): prazo de ponta a ponta, em `time.monotonic()`. A espera pela vaga e o tempo do filho
     saem do que sobra ate' la', em vez de `TEMPO_LIMITE_S` de espera mais `limite` de filho. O que sobra e' medido
     DEPOIS do `spawn` (que no Windows sob carga leva segundos) e ja' sem a folga de `_matar`, e o `join` do filho que
-    respondeu tambem cabe nele: nem o filho que nunca responde passa de `ate`. Sem tempo para o filho depois da
-    vaga, nem o cria.
+    respondeu tambem cabe nele: o filho que nunca responde nao passa de `ate`, salvo quando o `spawn` comeu a folga
+    e o `kill` ainda precisa de ate' `_TETO_RECOLHER_S` para recolher o filho antes de soltar a vaga. Sem tempo para
+    o filho depois da vaga, nem o cria.
     """
     limite = TEMPO_LIMITE_S if limite is None else limite    # lido na chamada: o teste o troca
     espera = TEMPO_LIMITE_S if ate is None else max(0.0, ate - time.monotonic())
