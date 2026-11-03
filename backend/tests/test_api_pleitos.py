@@ -696,7 +696,7 @@ def test_planilha_anexada_na_outra_aba_durante_o_envio_nao_vai_no_email(api, mon
 
     def confere_e_a_outra_aba_anexa(conn, p):
         estado = original(conn, p)
-        if conn.execute("SELECT envio_reservado_em FROM pleitos WHERE id=?", (pid,)).fetchone()[0]:
+        if not erros and conn.execute("SELECT envio_reservado_em FROM pleitos WHERE id=?", (pid,)).fetchone()[0]:
             outra = db.get_conn()
             try:
                 pleitos.adicionar_anexo(outra, _uid(), pid, "planilha_calculo", "memoria-A.xlsx",
@@ -744,8 +744,103 @@ def test_memoria_tirada_depois_da_reserva_sem_justificativa_nao_sai(api, monkeyp
     monkeypatch.setattr(envio_reserva, "reservar", reserva_e_some_a_memoria)
     sem = {k: v for k, v in corpo.items() if k != "justificativa"}
     r = cl.post(f"/api/pleitos/{pid}/enviar", json=sem)
-    assert r.status_code == 422 and r.json()["detail"] == "A planilha da previsão aceita não está anexada", r.text
+    assert r.status_code == 422 and "a prévia mudou enquanto se preparava o envio" in r.json()["detail"], r.text
     assert _estado(pid) == ({"situacao": "assinado", "envio_id": None, "envio_reservado_em": None}, 0)
+
+
+def test_cronograma_tirado_entre_a_previa_e_a_reserva_nao_sai(api, monkeypatch):
+    """Rodada 4 (Sol): a previa sem pendencia; a outra aba tira o cronograma (anexo exigido) antes da reserva. As
+    pendencias se recalculam depois da reserva: a nova recusa, destrava e nenhum e-mail sai sem o cronograma."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    _anexar(cl, pid, "memoria.xlsx", b"PK\x03\x04memoria")
+    r = cl.post(f"/api/pleitos/{pid}/anexos", data={"tipo": "cronograma"},
+                files=_arquivo("cronograma.pdf", b"%PDF-1.4 cronograma", "application/pdf"))
+    crono = [a for a in r.json()["anexos"] if a["tipo"] == "cronograma"][0]["id"]
+    assert cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"] == []
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    reservar = envio_reserva.reservar
+
+    def a_outra_aba_tira_e_reserva(conn, *a, **k):
+        outra = db.get_conn()
+        try:
+            pleitos.remover_anexo(outra, _uid(), pid, crono)
+        finally:
+            outra.close()
+        reservar(conn, *a, **k)
+
+    monkeypatch.setattr(envio_reserva, "reservar", a_outra_aba_tira_e_reserva)
+    sem = {k: v for k, v in corpo.items() if k != "justificativa"}
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=sem)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"].startswith("Cronograma físico-financeiro: não anexado: a prévia mudou"), r.text
+    assert _estado(pid) == ({"situacao": "assinado", "envio_id": None, "envio_reservado_em": None}, 0)
+
+
+def test_montar_que_atravessa_o_envio_nao_reabre_o_pleito(api, monkeypatch):
+    """Rodada 4 (revisor, com prova): `montar` comeca na aba A, a aba B envia, e o `montar` gravava a carta nova e
+    a situacao 'montado' por cima do enviado; assinada de novo, saia um segundo oficio. Agora o `montar` confere
+    dentro da transacao e recusa: o pleito segue enviado e um e-mail so' saiu."""
+    from app import carta
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    gerar, enviados = carta.gerar, []
+
+    def gera_e_a_outra_aba_envia(c):
+        pdf = gerar(c)
+        if not enviados:
+            enviados.append(cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code)
+        return pdf
+
+    monkeypatch.setattr(carta, "gerar", gera_e_a_outra_aba_envia)
+    r = cl.post(f"/api/pleitos/{pid}/montar", json={})
+    assert enviados == [200]
+    assert r.status_code == 422 and "enviado" in r.json()["detail"], r.text
+    estado, emails = _estado(pid)
+    assert estado["situacao"] == "enviado" and emails == 1
+
+
+def test_montar_e_assinado_com_o_envio_reservado_recusam(api):
+    """Rodada 4 (revisor): com o e-mail saindo, a carta e' a que vai nele: montar e anexar o assinado recusam com a
+    mesma recusa do envio (409 ENVIO_RESERVADO) e nada muda."""
+    cl, cid, _ = api
+    pid, _ = _pronto(cl, cid)
+    doc = cl.get(f"/api/pleitos/{pid}/documento").content
+    antes = _estado(pid)[0]
+    c = db.get_conn()
+    envio_reserva.reservar(c, "pleitos", pid, _uid())
+    c.close()
+    for r in (cl.post(f"/api/pleitos/{pid}/montar", json={}),
+              cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc), "application/pdf"))):
+        assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ENVIO_RESERVADO", r.text
+    assert _estado(pid)[0]["situacao"] == antes["situacao"] == "assinado"
+
+
+def test_assinado_conferido_contra_carta_que_foi_remontada_e_recusado(api, monkeypatch):
+    """Rodada 4 (revisor): o assinado se confere contra a carta montada lida antes da transacao; se a outra aba
+    remonta a carta nesse meio, o assinado conferido e' o da carta velha e e' recusado."""
+    from app import assinatura
+    cl, cid, _ = api
+    pid, _ = _pronto(cl, cid)
+    doc = cl.get(f"/api/pleitos/{pid}/documento").content
+    conferir, feito = assinatura.conferir_pdfs, []
+
+    def confere_e_a_outra_aba_remonta(montado, assinado):
+        conf = conferir(montado, assinado)
+        if not feito:
+            feito.append(1)
+            outra = db.get_conn()
+            try:
+                pleitos.montar(outra, _uid(), pid, "Corpo novo da carta, montada na outra aba.")
+            finally:
+                outra.close()
+        return conf
+
+    monkeypatch.setattr(assinatura, "conferir_pdfs", confere_e_a_outra_aba_remonta)
+    r = cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc), "application/pdf"))
+    assert r.status_code == 422 and r.json()["detail"] == pleitos.CARTA_REMONTADA, r.text
+    assert _estado(pid)[0]["situacao"] == "montado"
 
 
 def test_digitada_e_descartada_some_da_aba(api):

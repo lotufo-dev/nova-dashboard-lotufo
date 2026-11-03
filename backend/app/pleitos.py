@@ -267,13 +267,15 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
     return pid
 
 
-def _anexos_mudaveis(conn, pleito_id: int) -> None:
-    """Dentro do BEGIN IMMEDIATE (como em `_gravar_previsao`): com o e-mail saindo, os anexos sao os que foram
-    conferidos depois da reserva e vao no e-mail; trocar um ali mandaria ao orgao o que nao se conferiu."""
+def _anexos_mudaveis(conn, pleito_id: int) -> dict:
+    """Dentro do BEGIN IMMEDIATE (como em `_gravar_previsao`): com o e-mail saindo, a carta e os anexos sao os que
+    foram conferidos depois da reserva e vao no e-mail; trocar um ali mandaria ao orgao o que nao se conferiu. E
+    enviado (ou descartado) enquanto se montava ou conferia, nao volta a ser editavel. Devolve a linha relida."""
     agora = _linha(conn, pleito_id)
     _editavel(agora)
     if agora["envio_reservado_em"]:
         raise envio_reserva.reservado(conn, agora["envio_reservado_em"], agora["envio_reservado_por"])
+    return agora
 
 
 def adicionar_anexo(conn, usuario_id: int, pleito_id: int, tipo: str, nome: str, dados: bytes, ext: str) -> int:
@@ -311,6 +313,7 @@ MAX_COMPETENCIAS = leitura_planilha_reajuste.MAX_COMPETENCIAS
 PREVISAO_NA_REITERACAO = "Reiteração não traz previsão de reajuste: vale a do pleito reiterado"
 MEMORIA_DIVERGENTE = "A memória de cálculo anexada não é a planilha da previsão aceita"
 MEMORIA_AUSENTE = "A planilha da previsão aceita não está anexada"
+CARTA_REMONTADA = "A carta foi montada de novo enquanto se conferia o assinado; baixe a carta nova e assine de novo"
 _COMPETENCIA = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
 
 
@@ -530,6 +533,7 @@ def montar(conn, usuario_id: int, pleito_id: int, corpo: str | None = None, hoje
     n = pdfs.paginas(pdf)
     rel, sha = arquivos.gravar_bytes("pleitos", pdf, "pdf")
     with db.mutacao(conn):
+        _anexos_mudaveis(conn, pleito_id)
         conn.execute("UPDATE pleitos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
                      "assinado_arquivo=NULL, assinado_sha256=NULL, conferencia=NULL, situacao='montado' WHERE id=?",
                      (corpo, rel, sha, n, pleito_id))
@@ -546,6 +550,8 @@ def receber_assinado(conn, usuario_id: int, pleito_id: int, pdf: bytes) -> dict:
     conf = assinatura.conferir_pdfs(_bytes(p["montado_arquivo"]), pdf)
     rel, sha = arquivos.gravar_bytes("pleitos", pdf, "pdf")
     with db.mutacao(conn):
+        if _anexos_mudaveis(conn, pleito_id)["montado_sha256"] != p["montado_sha256"]:
+            raise ValueError(CARTA_REMONTADA)
         conn.execute("UPDATE pleitos SET assinado_arquivo=?, assinado_sha256=?, conferencia=?, situacao='assinado' "
                      "WHERE id=?", (rel, sha, json.dumps(conf), pleito_id))
         auditoria.registrar(conn, usuario_id, "pleito.assinado", "pleito", pleito_id, None,
@@ -682,20 +688,32 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
     # Reserva atomica antes do e-mail (10/10/2026): dois cliques simultaneos nao mandam duas cartas ao orgao.
     envio_reserva.reservar(conn, "pleitos", pleito_id, usuario["id"], p["envio_id"])
     # descartado entre a leitura acima e a reserva (outra aba): nada sai (com a reserva, `descartar` ja' recusa)
-    if _linha(conn, pleito_id)["situacao"] == "descartado":
+    atual = _linha(conn, pleito_id)
+    if atual["situacao"] == "descartado":
         envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
         raise ValueError("Pleito descartado enquanto se preparava o envio: nada foi enviado")
-    # anexo trocado ou previsao aceita entre a leitura acima e a reserva: confere de novo, ja' com a reserva. Daqui
-    # ate' o e-mail os anexos nao mudam (`_anexos_mudaveis` recusa com a reserva): o que se confere e' o que vai
-    memoria = _memoria_da_previsao(conn, p)
-    if memoria == "divergente" or (memoria == "ausente" and not any(x["codigo"] == "memoria_ausente"
-                                                                   for x in pv["pendencias"])):
+    # Ja' com a reserva, a carta e os anexos nao mudam ate' o e-mail (`_anexos_mudaveis` recusa): confere tudo de
+    # novo sobre a linha relida e manda exatamente isso. Memoria divergente, anexos acima do limite ou pendencia que
+    # a pessoa nao viu na previa (cronograma tirado na outra aba, carta remontada) param aqui, sem e-mail
+    pv_reservado = previa_envio(conn, pleito_id, hoje=hoje)
+    vistas = {x["mensagem"] for x in pv["pendencias"]}
+    novas = [x["mensagem"] for x in pv_reservado["pendencias"] if x["mensagem"] not in vistas]
+    if _memoria_divergente(conn, atual):
+        recusa = MEMORIA_DIVERGENTE
+    elif pv_reservado["total"] > correio.MAX_TOTAL:
+        recusa = "Anexos acima do limite do e-mail"
+    elif novas:
+        recusa = f"{novas[0]}: a prévia mudou enquanto se preparava o envio e nada foi enviado; confira de novo"
+    else:
+        recusa = None
+    if recusa:
         envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
-        raise ValueError(MEMORIA_DIVERGENTE if memoria == "divergente" else MEMORIA_AUSENTE)
+        raise ValueError(recusa)
+    pv = pv_reservado                       # a auditoria registra as pendencias do que de fato saiu
     try:
-        envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(p), para,
+        envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(atual), para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),
-                                              _anexos_envio(conn, p), cco=cco)
+                                              _anexos_envio(conn, atual), cco=cco)
     except correio.EnvioNaoRegistrado:
         raise                                       # o e-mail saiu: a reserva fica e segura a repeticao
     except Exception:

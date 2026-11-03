@@ -221,6 +221,8 @@ def montar(pid: ID, dados: MontarIn, usuario: dict = Depends(exigir("editar_cada
     _existe(conn, pid)
     try:
         pleitos.montar(conn, usuario["id"], pid, dados.corpo)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: a carta e' a que vai nele
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -240,6 +242,8 @@ def assinado(pid: ID, arquivo: UploadFile = File(...), usuario: dict = Depends(e
     pdf = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=pdfs.TETO_BYTES_PACOTE))
     try:
         pleitos.receber_assinado(conn, usuario["id"], pid, pdf)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: a carta e' a que vai nele
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
