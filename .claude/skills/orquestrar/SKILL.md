@@ -73,7 +73,7 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      deixam o push da segunda recusado e o `<sha-antes>` sem bater).
    - Se ela não responder (nesse sentido), conferir antes `gh pr view <M> --json headRefOid`. Se já **não** é o
      `<sha-antes>`, a correção subiu enquanto se esperava: não abrir ninguém, rodar o `revisor-adversarial`
-     sobre `<sha-antes>..<headRefOid>` no worktree original (a correção subiu de lá).
+     sobre `<sha-antes>..<headRefOid>` no worktree de quem corrigiu (o da trabalhadora que não respondeu).
      Se ainda é o `<sha-antes>`, abrir uma `trabalhadora` **nova, isolada como sempre**
      (`isolation: "worktree"`, `run_in_background: true`), com o prompt "Issue #N, PR #M, branch no GitHub
      `<branch>`: corrija estes achados" e a lista. No worktree novo ela aponta a branch local dela para
@@ -83,14 +83,19 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      no commit antigo; não importa, o que vale é o remoto.
    - Quando a correção voltar, rodar o `revisor-adversarial` de novo **só sobre o diff novo**, passando no
      prompt o **caminho do worktree de quem corrigiu** (o da trabalhadora nova, se foi ela; ele tem o commit
-     novo, o original não) e o intervalo `<sha-antes>..HEAD`. O gate Sol não roda de novo sobre a
+     novo, o original não) e o intervalo `<sha-antes>..HEAD` (se a correção incluiu `git merge origin/master`, esse intervalo traria o
+     código de outras PRs: nesse caso o revisor recebe `origin/master...HEAD`). O gate Sol não roda de novo sobre a
      correção, salvo se ela mexeu em lógica de dinheiro ou de envio de forma grande (regra da skill
      `gate-sol`); nesse caso, havendo cota, roda desse mesmo caminho só sobre o diff novo. **Duas rodadas no
      máximo**, a menos que o próprio Leo escolha a PR para mais uma correção (só se ele pedir; não é
-     automático); a fonte é o comentário do Leo na issue #356 (orquestrar: correção isolada), de 03/11. Quando essa
-     rodada extra passa nas travas, a orquestradora tira o draft (`gh pr ready <M>`) e o label
-     `precisa-do-leo` da issue antes do passo 8. Se ainda sobrar Crítico ou Aviso não refutado, marcar a
-     PR como draft (`gh pr ready --undo <M>`), pôr `precisa-do-leo` na issue, e seguir.
+     automático); a fonte é a decisão do Leo na sessão de 03/11/2026, registrada pela orquestradora na issue #356
+     (orquestrar: correção isolada). Quando o revisor (e o Sol, se aplicável) dessa rodada extra volta sem
+     Crítico/Aviso em aberto, a orquestradora tira o draft (`gh pr ready <M>`) e o label `precisa-do-leo` da
+     issue, e só então vai ao passo 8 (a trava de lá exige `isDraft` = `false`). Se ainda sobrar Crítico ou Aviso não refutado, marcar a
+     PR como draft (`gh pr ready --undo <M>`), pôr `precisa-do-leo` na issue, e seguir. **Mesma família de achado
+     pela 2ª vez em pontos diferentes:** a orquestradora pede à trabalhadora a correção que fecha a família
+     inteira, não o ponto (exemplos de 03/11/2026: leitura única do painel por transação; recorte do texto
+     original inteiro).
 7. **Preencher `## Gates` na PR** (`gh pr edit <M> --body-file ...`, mantendo o resto do corpo) com o resultado
    do revisor e do gate Sol, no formato da skill `abrir-pr`.
 8. **Travas, todas, antes de ligar o auto-merge:**
@@ -123,10 +128,10 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    `gh pr view <M> --json comments,reviews`: apareceu comentário ou review, é o Leo; desarmar na hora
    (`gh pr merge <M> --disable-auto`), pôr `precisa-do-leo` na issue e seguir.
    **CI vermelha:** primeiro desarmar (`gh pr merge <M> --disable-auto`), senão a correção mergeia sem
-   revisão quando a CI do commit novo ficar verde. Depois pegar o log
+   revisão quando a CI do commit novo ficar verde. Anotar o `<sha-antes>` (`gh pr view <M> --json headRefOid`) e pegar o log
    (`gh run list --branch <branch no GitHub> --limit 1 --json databaseId -q '.[0].databaseId'` e
    `gh run view <id> --log-failed`) e mandar à trabalhadora (uma rodada de correção, conta nas duas do passo
-   6). Quando ela voltar: a conferência do passo 6 (revisor sobre `<sha-antes>..HEAD` no worktree de quem corrigiu, e Sol só se a correção mexeu de forma grande em dinheiro ou envio) e o passo 8 inteiro de novo antes de religar o auto-merge.
+   6). Quando ela voltar: a conferência do passo 6 (revisor sobre `<sha-antes>..HEAD` no worktree de quem corrigiu, ou sobre `origin/master...HEAD` se a correção incluiu `git merge origin/master`, e Sol só se a correção mexeu de forma grande em dinheiro ou envio) e o passo 8 inteiro de novo antes de religar o auto-merge.
    Vermelha de novo, `precisa-do-leo`.
 10. **Depois do merge** de cada PR (e no `PAROU`/`FALHOU` do passo 4): `git pull --ff-only` na pasta
     principal (com `cd` explícito para ela: o diretório do Bash da sessão persiste entre chamadas e pode ainda estar
