@@ -95,6 +95,14 @@ describe("medição", () => {
     expect(eventosDaMedicao(m, [], []).map(e => e.texto)).toEqual([
       "Nota emitida", "Valor protocolado alterado de R$ 1,00 para R$ 2,00 por Maria Exemplo"]);
   });
+
+  it("linha do tempo mostra o nº do SIGA da planilha/carta, que não é protocolo da nota (issue #283)", () => {
+    const m = { ...m23, nota_emitida_em: null, estado: "planilha_enviada", protocolos: [],
+      planilha_siga: { data: "2026-08-03", numero: "123.456/2026" } };
+    const textos = eventosDaMedicao(m, [], []).map(e => e.texto);
+    expect(textos).toEqual(["Nº do SIGA da planilha/carta: 123.456/2026"]);
+    expect(textos.some(t => t.startsWith("Protocolada"))).toBe(false);
+  });
 });
 
 describe("itensOQueFalta: o espelho a enviar", () => {
