@@ -632,6 +632,61 @@ produção e com OK do Leonardo para cada um:
 
 Até o item 2, os dois argumentos seguem na tarefa sem efeito: `rodar_producao.ps1` os aceita e ignora.
 
+## Mudar de servidor (VM nova, porta 8080)
+
+Decisão de 03/11/2026: a dashboard sai da máquina de hoje (`<servidor>`, que é a estação de trabalho e o servidor do RM) para
+uma VM do TI (`<vm>`). A VM é compartilhada (servidor de sessões do RM, IIS na 80, antivírus corporativo), então a dashboard
+responde em **`http://<vm>:8080`** (`-Porta 8080` nos scripts, issue #361). De fora da rede o acesso é pela VPN da empresa
+(OpenVPN Connect, decisão do TI); a porta 8080 só aceita rede interna e faixas privadas (regra de firewall abaixo). Sem Tailscale
+nem túnel na VM.
+
+**O que a VM tem (preparo feito em 03/11/2026, sem tocar a produção).** Python 3.12, Git, Tesseract 5.4 (instaladores
+oficiais, hash conferido), Node 24. `C:\DashboardLotufo` com a mesma estrutura e ACL da produção (`app` é um **clone** em
+detached HEAD, não worktree; `deploy.ps1` funciona igual), `dados\tessdata\por.traineddata`, `segredos\rm.txt`, venv e
+`frontend\dist` construídos, tarefa `DashboardLotufo` (com `-Porta 8080`), `DashboardLotufoWatchdog` (`-Porta 8080`) e a regra
+de firewall `New-NetFirewallRule -DisplayName "Dashboard Lotufo HTTP 8080" -Direction Inbound -Protocol TCP -LocalPort 8080
+-Action Allow -Profile Domain,Private -RemoteAddress 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`. O RM responde da VM pelo mesmo
+endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HTTP 500 às consultas e não serve.
+
+**Peculiaridades da VM.**
+- O antivírus intercepta HTTPS: `npm ci` falha com `SELF_SIGNED_CERT_IN_CHAIN`. Resolvido com a variável de máquina
+  `NODE_USE_SYSTEM_CA=1` (o Node passa a confiar no repositório de certificados do Windows; `pip` e `git` já confiam). Sem ela
+  o `deploy.ps1` para no `npm ci`.
+- A VM **não alcança** `<servidor>` (SSH, HTTP e SMB fechados no sentido VM → servidor); o contrário funciona. Cópia de
+  segredos e dados: pelo Mac (`scp` de um lado e do outro, arquivo apagado do Mac em seguida) ou por RDP. Nunca pelo repositório.
+- Por SSH, script longo (git, pip, npm) vai por `scp` e roda com `powershell -File`: no `-Command -` o comando nativo consome o
+  resto do script pelo stdin e ele para no meio.
+- Não há credencial do GitHub na VM: o clone público não precisa; o `git pull` do cadastro privado precisa (decisão pendente).
+
+**Corte (só com o OK do Leonardo; parada de uns 10 minutos para a operação).**
+
+1. Avisar a operação da hora. Conferir que a VM responde: `http://<vm>:8080/api/health` 200.
+2. Em `<servidor>`: sentinela `New-Item -ItemType File C:\DashboardLotufo\watchdog.pause`;
+   `scripts\backup_pre_migracao.ps1 -Banco C:\DashboardLotufo\dados\dashboard.db -PastaBackups C:\DashboardLotufo\dados\backups
+   -Python C:\DashboardLotufo\app\backend\.venv\Scripts\python.exe -Rotulo CORTE` (snapshot seguro com o servidor no ar);
+   `Stop-ScheduledTask DashboardLotufoWatchdog` e `Stop-ScheduledTask DashboardLotufo` (sem desinstalar: é o rollback).
+   Conferir que nada mais escuta na 80 (`Get-NetTCPConnection -LocalPort 80 -State Listen`).
+3. Na VM, com a tarefa parada (`Stop-ScheduledTask` das duas e o sentinela), copiar: o snapshot `dashboard-PRE-CORTE-...db`
+   (vira `dados\dashboard.db`; `-wal`/`-shm` não vão), `dados\notas`, `espelhos`, `modelos`, `evidencias`, `certidoes`,
+   `assinaturas`; `segredos` inteiro (`rm.txt`, `rm-endereco.txt` se houver, `sharepoint-hosts.txt`, `siga-token.txt`,
+   `usuarios\` com os tokens Microsoft de cada pessoa); o clone `cadastro`. Conferir contagem e `Get-FileHash` dos dois lados.
+   Sem os tokens, cada pessoa reconecta a conta Microsoft em Minha conta (não é erro, só trabalho a mais).
+4. Na VM: `integrity_check` do banco (seção "Restaurar o banco"); variáveis de máquina `DASH_SIGA_TOKEN_ARQUIVO`,
+   `DASH_SIGA_LINK_MODELO` (copiar os valores de `<servidor>`); `DASH_SIGA_TAREFA` só se o robô do SIGA também mudar para a VM
+   (ver decisões). `Start-ScheduledTask DashboardLotufo`, `/api/health` 200 com `banco: ok`, `cadastro aplicar --ensaio`
+   sem diferença, `Start-ScheduledTask DashboardLotufoWatchdog`, apagar o sentinela. Login de cada pessoa da operação.
+5. Endereço novo para a operação: `http://<vm>:8080` (o nome da VM está no DNS do domínio; o apelido de hoje precisava de
+   linha no `hosts`). Robô do SIGA: trocar o endereço da dashboard para `http://<vm>:8080` (repositório do robô).
+6. **Rollback** em uma linha: em `<servidor>`, `Start-ScheduledTask DashboardLotufo; Start-ScheduledTask DashboardLotufoWatchdog;
+   Remove-Item C:\DashboardLotufo\watchdog.pause`, e a operação volta ao endereço antigo. Parar a tarefa na VM. O que foi
+   digitado na VM depois do corte não volta sozinho (fica no banco da VM).
+7. Depois de uma semana estável: `Unregister-ScheduledTask` das duas tarefas em `<servidor>`, desligar a regra
+   `Dashboard Lotufo HTTP 80`, manter os backups locais de lá até a cópia externa da VM estar configurada.
+
+**Decisões pendentes (03/11/2026).** Data do corte; robô do SIGA (fica em `<servidor>` apontando para a VM, e o botão
+"Atualizar" da tela SIGA deixa de funcionar porque ele dispara a tarefa agendada na própria máquina, ou muda para a VM junto);
+credencial do GitHub na VM para o `git pull` do cadastro privado; pasta de cópia externa (`-BackupExterno`) para a VM.
+
 ## Riscos conhecidos
 - Leitura e validação de PDF (rotas de documentos, notas e aditivos) rodam em subprocesso com limite de 10 s de parede e são interrompidas ao estourar: o filho é morto e o cliente recebe 422/415 sem derrubar o servidor. **Custo por chamada ≈ 2 s sob uvicorn no Windows** (0,3–1 s medido em teste; `spawn` + importar pypdf, e o processo do servidor está mais carregado que o do pytest). **Pior caso de parede: até 10 s esperando vaga (só 2 leituras simultâneas) + 10 s de leitura + até 4 s de encerramento, ≈ 24 s.** **No máximo 2 leituras simultâneas**: a terceira espera uma vaga pelo mesmo orçamento de 10 s e é recusada com 422 "tente de novo em alguns segundos" (415 no upload) — não fica pendurada. A pré-checagem de bomba de descompressão roda **dentro do filho**, antes do pypdf: recusa só o stream Flate que expande mais de 50:1 (4 MB por stream, 16 MB no total); o que ela não consegue medir (filtro desconhecido, PDF cifrado, dicionário fora da janela de 8 KB, `/Length` indireto) é ignorado e fica por conta do limite de tempo. Tetos que continuam valendo: 10 MB, 20 páginas, 60 mil caracteres. Limites conhecidos: (a) a memória do filho não é limitada além do kill por tempo — PDF que infle muito em menos de 10 s consome RAM até terminar ou ser morto; (b) **cada filho morto por timeout deixa 1 handle do Windows no processo do servidor** (medido; inerente a `spawn` + `terminate`) — só cresce com upload hostil repetido, e a tarefa agendada reinicia o processo.
 - O backup roda como thread do processo do servidor (não há worker separado); com `--workers` maior que 1 cada processo faria a sua rodada. Hoje é processo único.
