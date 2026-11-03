@@ -212,16 +212,21 @@ def _vinculo(conn, numero: str) -> tuple[int, int | None, int | None] | None:
 
 
 def _so_da_planilha(conn, medicao_id: int, numero: str, ocupantes: list) -> bool:
-    """Issue #283: o processo `numero` casa com o protocolo da NOTA da medicao e todos os `ocupantes` (ligados a'
-    medicao sem protocolo) casam so' com o nº do SIGA da planilha/carta (etapa 'planilha', migracao 054)."""
-    etapas: dict[str, set[str]] = {"planilha": set(), "nota": set()}
-    for r in conn.execute("SELECT etapa, numero_processo FROM medicao_protocolos WHERE medicao_id=? "
-                          "AND numero_processo IS NOT NULL", (medicao_id,)):
-        etapas[r["etapa"]].add(normalizar_numero(r["numero_processo"]))
-    if normalizar_numero(numero) not in etapas["nota"]:
+    """Issue #283: o processo `numero` casa com o protocolo da NOTA da medicao e nenhum dos `ocupantes` (ligados a'
+    medicao sem protocolo) e' o da nota: o numero deles nao esta' entre os da nota e eles nao entraram pelo link
+    colado na medicao (`protocolo.siga` com o codigo deles). Nao exige o numero na linha da planilha/carta (etapa
+    'planilha', migracao 054): corrigido o nº do SIGA da planilha, o processo que o robo ligou pelo numero antigo
+    tambem cede."""
+    notas = {normalizar_numero(r[0]) for r in conn.execute(
+        "SELECT numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' "
+        "AND numero_processo IS NOT NULL", (medicao_id,))}
+    if normalizar_numero(numero) not in notas:
         return False
-    return bool(ocupantes) and all(o["numero"] and normalizar_numero(o["numero"]) in etapas["planilha"]
-                                   and normalizar_numero(o["numero"]) not in etapas["nota"] for o in ocupantes)
+    colados = {r[0] for r in conn.execute(
+        "SELECT json_extract(depois, '$.codigo') FROM audit_log WHERE acao='protocolo.siga' AND entidade='medicao' "
+        "AND entidade_id=?", (medicao_id,))}
+    return bool(ocupantes) and all((not o["numero"] or normalizar_numero(o["numero"]) not in notas)
+                                   and (not o["codigo"] or o["codigo"] not in colados) for o in ocupantes)
 
 
 def _vincular(conn, processo_id: int) -> None:
@@ -233,7 +238,7 @@ def _vincular(conn, processo_id: int) -> None:
     if achado:
         contrato_id, protocolo_id, medicao_id = achado
         # issue #328: o processo que um link novo substituiu nao volta ao protocolo (ou a' medicao) pelo numero igual
-        ocupantes = conn.execute("SELECT id, numero FROM siga_processos WHERE id<>? AND (protocolo_id=? OR "
+        ocupantes = conn.execute("SELECT id, codigo, numero FROM siga_processos WHERE id<>? AND (protocolo_id=? OR "
                                  "(? IS NULL AND medicao_id=? AND protocolo_id IS NULL))",
                                  (processo_id, protocolo_id, protocolo_id, medicao_id)).fetchall()
         antes = None

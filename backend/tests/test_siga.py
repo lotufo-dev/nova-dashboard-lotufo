@@ -367,6 +367,35 @@ def test_so_o_processo_da_nota_desloca_o_da_planilha(conn):
     assert conn.execute("SELECT medicao_id FROM siga_processos WHERE codigo='OUT222'").fetchone()[0] is None
 
 
+def test_processo_da_nota_toma_o_lugar_do_da_planilha_com_o_numero_corrigido(conn):
+    # o robo ligou o 111; a pessoa corrigiu o nº do SIGA da planilha para 112 (mesma linha) antes de a nota chegar
+    _planilha_por_fora(conn)
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 9), _leitura_unica("SINFRA-PRO-2026/00111", "PLA111"))
+    conn.execute("UPDATE medicao_protocolos SET numero_processo='SINFRA-PRO-2026/00112' "
+                 "WHERE medicao_id=31 AND etapa='planilha'")
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem) "
+                 "VALUES (31, '2026-09-15', 'SINFRA-PRO-2026/00222', 'manual')")
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), _leitura_unica("SINFRA-PRO-2026/00222", "NOT222"))
+    assert _ligados(conn) == [("SINFRA-PRO-2026/00111", None, None), ("SINFRA-PRO-2026/00222", 7, 31)]
+    conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=31"); conn.commit()
+    parados = [a for a in siga.avisos(conn, datetime.date(2026, 11, 10)) if a["tipo"] == "siga_parado"]
+    assert [a["medicao_id"] for a in parados] == [31] and "SINFRA-PRO-2026/00222" in parados[0]["mensagem"]
+
+
+def test_link_colado_na_medicao_nao_cede_ao_processo_da_nota(conn):
+    # o processo que a pessoa ligou colando o link fica: o robo nao o troca pelo numero igual ao da nota
+    _planilha_por_fora(conn)
+    uid = conn.execute("SELECT id FROM usuarios ORDER BY id LIMIT 1").fetchone()[0]
+    with db.mutacao(conn):
+        siga.registrar_link_medicao(conn, uid, 31, "LNK111", "SINFRA-PRO-2026/00111")
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem) "
+                 "VALUES (31, '2026-09-15', 'SINFRA-PRO-2026/00222', 'manual')")
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), _leitura_unica("SINFRA-PRO-2026/00222", "NOT222"))
+    assert _ligados(conn) == [("SINFRA-PRO-2026/00111", 7, 31), ("SINFRA-PRO-2026/00222", None, None)]
+
+
 def test_vinculo_chega_na_rodada_seguinte_ao_numero_registrado(conn):
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
     assert _vinculo(conn) == (None, None, None)
