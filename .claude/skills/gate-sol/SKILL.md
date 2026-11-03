@@ -52,21 +52,24 @@ DIFF:
 PEDIDO
 git diff origin/master...HEAD >> "$ENTRADA" || { echo "git diff falhou"; exit 1; }
 rm -f "<scratchpad>/gate-sol-<N>.md"
-codex exec -m gpt-5.6-sol -o "<scratchpad>/gate-sol-<N>.md" - < "$ENTRADA" || { echo "codex falhou"; exit 1; }
+codex exec -m gpt-5.6-sol -o "<scratchpad>/gate-sol-<N>.md" - < "$ENTRADA" > "<scratchpad>/gate-sol-<N>.log" 2>&1 || { echo "codex falhou:"; tail -n 20 "<scratchpad>/gate-sol-<N>.log"; exit 1; }
 )
 ```
 
 - `<N>` é o número da issue; `<scratchpad>` é a pasta temporária da sessão. O `-o` guarda só a resposta final;
   o `-` manda o codex ler o prompt (pedido + diff) do stdin, que aqui vem do arquivo de entrada.
+- A saída do codex (stdout e stderr) vai para `<scratchpad>/gate-sol-<N>.log`, e o `codex falhou:` mostra o
+  fim dele: é lá que aparece o "usage limit" (ver "Sem cota", abaixo).
 - Depois de rodar, **ler o arquivo do `-o`** (`<scratchpad>/gate-sol-<N>.md`). Ausente, vazio, ou sem "OK" nem
-  lista de achados: veredito inválido; rodar de novo uma vez.
+  lista de achados: veredito inválido; rodar de novo uma vez (antes, olhar o `.log`: se for "usage limit",
+  é o caso "Sem cota", abaixo, e rodar de novo não adianta).
 - Ajuste o foco do prompt ao risco da issue (ex.: `risco:envio` → "e-mail que sai duas vezes, estado gravado
   antes de o Graph aceitar"), como foi feito nos gates dos blocos 1 a 8.
 - Diff grande demora: rodar com `timeout` de 600000 ms ou em segundo plano.
 
 ## Sem cota ("usage limit")
 
-O codex usa a cota da assinatura ChatGPT do Leo. Se a saída (do comando ou do arquivo do `-o`) trouxer
+O codex usa a cota da assinatura ChatGPT do Leo. Se a saída (o `codex falhou:` do comando, o `.log` ou o arquivo do `-o`) trouxer
 "usage limit" (ou "limite de uso"), **não é veredito inválido e rodar de novo no mesmo dia não adianta**:
 a cota volta no dia seguinte. Não insistir; registrar em `## Gates` da PR:
 
@@ -76,11 +79,13 @@ a cota volta no dia seguinte. Não insistir; registrar em `## Gates` da PR:
 
 O que fazer depende de quanto o Sol já cobriu:
 
-- **A rodada 1 do Sol já rodou sobre o diff inteiro** (só a conferência da correção ficou sem Sol): o
-  `revisor-adversarial` cobre o diff novo da correção, e o gate vale como cumprido; anotar "rodada 1 do Sol
-  cobriu o diff inteiro, correção revisada só pelo revisor".
-- **Nem a rodada 1 rodou**: a PR **não mergeia sozinha** (sem auto-merge, `precisa-do-leo` na issue com o
-  motivo). Quando a cota voltar, o Leo ou a próxima rodada roda o gate pela skill, e só então se liga o
+- **A rodada 1 do Sol já rodou sobre o diff inteiro** (só a conferência da correção ficou sem Sol) **e a
+  correção não mexeu em lógica de dinheiro ou de envio de forma grande**: o `revisor-adversarial` cobre o diff
+  novo da correção, e o gate vale como cumprido; anotar "rodada 1 do Sol cobriu o diff inteiro, correção
+  revisada só pelo revisor".
+- **Nem a rodada 1 rodou, ou a correção mexeu nessa lógica de forma grande**: a PR **não mergeia sozinha**
+  (sem auto-merge, `precisa-do-leo` na issue com o motivo). Quando a cota voltar, o Leo pede à orquestradora
+  que rode o gate pela skill (a rodada seguinte não pega issue com `precisa-do-leo`), e só então se liga o
   auto-merge.
 
 ## Depois da resposta: uma rodada de correção

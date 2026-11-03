@@ -52,10 +52,12 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      (a skill faz o `cd` dentro de um subshell, que não muda o diretório da sessão), pela ferramenta Bash.
    - **Codex sem cota** ("usage limit" na saída): não é veredito inválido e rodar de novo não adianta (a cota
      é da assinatura do Leo e volta no dia seguinte). Registrar "Gate Sol: sem cota em DD/MM" em `## Gates`.
-     Se a rodada 1 do Sol já tinha coberto o diff inteiro da PR, o `revisor-adversarial` cobre a correção
-     (passo 6) e o gate segue como cumprido. Se nem a rodada 1 rodou, a PR **não mergeia sozinha**: sem
-     auto-merge, `precisa-do-leo` na issue dizendo que falta só o gate Sol, e no resumo ao Leo que ele roda
-     quando a cota voltar (skill `gate-sol`).
+     Se a rodada 1 do Sol já tinha coberto o diff inteiro da PR e a correção não mexeu em lógica de dinheiro
+     ou de envio de forma grande, o `revisor-adversarial` cobre a correção (passo 6) e o gate segue como
+     cumprido. Se nem a rodada 1 rodou, ou a correção mexeu nessa lógica de forma grande, a PR **não mergeia
+     sozinha**: sem auto-merge, `precisa-do-leo` na issue dizendo que falta só o gate Sol, e no resumo ao Leo
+     que o gate roda quando a cota voltar, a pedido dele (skill `gate-sol`; `listar-issues` não devolve
+     issue com `precisa-do-leo`, então a rodada seguinte não a pega sozinha).
    - Veredito inválido (resposta vazia, erro, sem "OK" nem lista de achados, **ou "OK" sobre diff vazio**:
      conferir antes `git -C "<worktree>" diff --stat origin/master...HEAD` não vazio): rodar de novo uma vez;
      se continuar inválido, a PR não mergeia sozinha (ver Travas).
@@ -66,12 +68,13 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    da PR. O caminho é:
    - Mandar a lista inteira à mesma trabalhadora (`SendMessage` com o nome dela), pedindo para corrigir com
      teste ou refutar com `arquivo:linha`, e atualizar a PR. Ela ainda está no worktree dela e é a opção
-     preferida.
+     preferida. Conta como "não respondeu" o `SendMessage` avisar que o agente já encerrou ou não existe, ou
+     passarem 15 min sem retorno.
    - Se ela não responder (o agente já encerrou), abrir uma `trabalhadora` **nova, isolada como sempre**
      (`isolation: "worktree"`, `run_in_background: true`), com o prompt "Issue #N, PR #M, branch no GitHub
-     `<branch>`: corrija estes achados" e a lista. No worktree novo ela cria uma branch local a partir de
-     `origin/<branch>` (`git fetch origin` e `git switch -c <branch> origin/<branch>`), corrige com teste e
-     faz `git push origin HEAD:<branch>`, a mesma branch remota da PR. O worktree original da PR fica parado
+     `<branch>`: corrija estes achados" e a lista. No worktree novo ela aponta a branch local dela para
+     `origin/<branch>` (`git fetch origin` e `git reset --hard origin/<branch>`, sem renomear a branch), corrige
+     com teste e faz `git push origin HEAD:<branch>`, a mesma branch remota da PR. O worktree original da PR fica parado
      no commit antigo; não importa, o que vale é o remoto.
    - Quando a correção voltar, rodar o `revisor-adversarial` de novo **só sobre o diff novo**, passando no
      prompt o **caminho do worktree de quem corrigiu** (o da trabalhadora nova, se foi ela; ele tem o commit
@@ -122,7 +125,8 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
     (`C:\DashboardLotufo\app`) também é worktree deste repositório e nunca entra aqui.
     `git worktree remove "<caminho>"` (se reclamar da junção, antes rode
     `cmd /c rmdir "<caminho>\frontend\node_modules"` e `cmd /c rmdir "<caminho>\backend\.venv"`, que apagam só o
-    vínculo) e `git branch -d <branch local que cada uma devolveu>` (a remota o GitHub apaga no merge).
+    vínculo) e `git branch -d <branch local que cada uma devolveu>` (se recusar com a PR já `MERGED`, `-D` vale: o commit
+    está no `master` pelo merge da PR; a remota o GitHub apaga no merge).
 11. **Resumo ao Leo**, em português, uma linha por issue: número com o nome curto ("#231 (ofício no envio
     por fora)"; nunca o número sozinho, aqui nem nos comentários), o que mudou (do ponto de vista dele), estado
     (mergeada / auto-merge ligado, esperando CI / precisa-do-leo: motivo / decisao: pergunta). No fim: quantas

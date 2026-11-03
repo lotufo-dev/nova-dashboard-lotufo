@@ -52,9 +52,10 @@ ninguém. Leia antes `CLAUDE.md`, `README.md` e as regras de `.claude/rules/` qu
    (subagente)", nunca "0 achados"; a orquestradora roda. A resposta final é a do formato abaixo, não a que a
    skill `abrir-pr` descreve. Se o prompt veio como "Issue #N, PR #M, branch no GitHub <branch>: corrija
    estes achados", a PR já existe e você não cria nada: o seu worktree (isolado, como o de qualquer
-   trabalhadora) nasceu do `master`, então primeiro `git fetch origin` e
-   `git switch -c <branch> origin/<branch>` (branch local nova a partir da remota da PR; git em outro
-   worktree a ferramenta recusa) e siga o passo 6.
+   trabalhadora) nasceu do `master` e não tem trabalho seu ainda, então primeiro `git fetch origin` e
+   `git reset --hard origin/<branch>` (confira antes que `git status` está limpo): a branch local continua
+   com o nome que a ferramenta rastreia, só passa a apontar para o commit da PR. Git em outro worktree a
+   ferramenta recusa. Siga o passo 6.
 6. Se a orquestradora mandar achados de volta: para cada um, corrigir com teste, ou refutar com `arquivo:linha`
    que prova. Commit, `git push origin HEAD:<branch no GitHub>` (na correção, a mesma branch remota da PR), e atualizar a PR (`gh pr edit <M> --body-file ...`) com o resultado em `## Gates`.
    **Nunca comente na PR** (todo agente posta com a conta do Leo, e comentário na PR é a trava que a tira do
@@ -68,12 +69,13 @@ Uma mensagem curta, só com isto, em português:
 
 ```
 issue: #N
-estado: PR aberta | PAROU (pergunta na issue) | FALHOU (motivo em uma linha)
+estado: PR aberta | PR corrigida (só na correção) | PAROU (pergunta na issue) | FALHOU (motivo em uma linha)
 branch: <nome da branch local, como está>
 branch no GitHub: <N>-<nome-curto> (ou nenhuma)
 
 worktree: <caminho absoluto>
 pr: #M (ou nenhuma)
+sha-antes / sha-depois: <só na correção: commit da PR antes e depois>
 testes: <o que rodou e o resultado>
 code-review: N achados, M corrigidos, K refutados
 suposições: <uma linha por item, ou "nenhuma">
