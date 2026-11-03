@@ -363,6 +363,7 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
     - corrigir a competencia de um nº nao pode separar a outra metade (execucao x reajuste do mesmo nº, que o
       envio ao orgao casa por nº e competencia), a menos que o CSV corrija as duas;
     - correcao (cancelamento, competencia, aprovado novo) leva a fonte: e' o que a auditoria guarda."""
+    from app import medicoes   # import local: medicoes importa sincronizacao_rm, que importa notas
     canceladas = {(li["dados"]["numero"], li["dados"]["tipo"]) for li in linhas if li["categoria"] == "cancelamento"}
     novas_comp = {(li["dados"]["numero"], li["dados"]["tipo"]): li["dados"]["competencia"]
                   for li in linhas if li["categoria"] == "correção"}
@@ -383,13 +384,19 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                 # o espelho (e a nota que sai dele) ficaria de uma medicao cancelada: isso se resolve na tela
                 _virar(li, "conflito", f"no banco a medição está {estado}: o espelho é dela; cancele pela tela")
                 continue
+            if estado in medicoes.ESTADOS_PLANILHA:
+                # revisor da #281: a planilha/carta (oficio anexado) e' dela; o mesmo caminho do espelho
+                _virar(li, "conflito", f"no banco a medição está {estado}: a planilha/carta é dela; cancele pela tela")
+                continue
         if li["categoria"] == "correção":
             atual = existentes[(d["numero"], d["tipo"])]
             nfs = _nfs_vinculadas(conn, li["medicao_id"])
-            if nfs or atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
+            na_planilha = atual["estado"] in medicoes.ESTADOS_PLANILHA     # revisor da #281: a planilha leva o periodo
+            if nfs or na_planilha or atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
                 # espelho e nota levam a competencia antiga: mudar so' a medicao os separaria
                 _virar(li, "conflito", f"a competência {atual['competencia']} já está "
-                                       + (f"na NF {', '.join(nfs)} vinculada" if nfs else "no espelho")
+                                       + (f"na NF {', '.join(nfs)} vinculada" if nfs
+                                          else "na planilha/carta" if na_planilha else "no espelho")
                                        + ": corrija pela tela")
                 continue
             anteriores = [m["competencia"] for (n, t), m in existentes.items()

@@ -970,6 +970,24 @@ def test_carregar_medicoes_nao_cancela_medicao_no_passo_da_planilha(tmp_path, mo
     assert "conflito (no banco a medição está planilha_enviada: não se cancela pela carga)" in saida
 
 
+def test_carregar_medicoes_nao_cancela_medicao_com_planilha_gerada(tmp_path, monkeypatch, capsys):
+    # revisor da #281: `planilha_gerada` se cancela pela tela (TRANSICOES), mas tem o oficio anexado: a carga nao
+    # a cancela como duplicata
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, None)
+    _existente(conn, cid, 5, "2025-07", 100001, None, estado="planilha_gerada")
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;x;4;"], capsys)
+    assert "conflito (no banco a medição está planilha_gerada: a planilha/carta é dela; cancele pela tela)" in saida
+
+
+def test_carregar_medicoes_nao_corrige_competencia_com_planilha_gerada(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, None, estado="planilha_gerada")
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência",
+                                       "4;;execucao;2025-06;;1.000,01;;;;;;;doc;;sim"], capsys)
+    assert "conflito (a competência 2025-07 já está na planilha/carta: corrija pela tela)" in saida
+
+
 def test_carregar_medicoes_rodar_de_novo_com_pedido_congelado_diferente_nao_deixa_rastro(tmp_path, monkeypatch, capsys):
     conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
     _existente(conn, cid, 2, "2025-05", 53890011, 53000000)       # so' o pedido difere (congelado)

@@ -171,6 +171,8 @@ def create_app() -> FastAPI:
     app.include_router(protocolos_router)
     from app.api_pleitos import router as pleitos_router
     app.include_router(pleitos_router)
+    from app.api_planilha_envio import router as planilha_envio_router
+    app.include_router(planilha_envio_router)
     from app.api_diretoria import router as diretoria_router
     app.include_router(diretoria_router)
     app.include_router(notas_router)
