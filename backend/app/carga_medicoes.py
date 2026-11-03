@@ -385,8 +385,12 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                 _virar(li, "conflito", f"no banco a medição está {estado}: o espelho é dela; cancele pela tela")
                 continue
             if estado in medicoes.ESTADOS_PLANILHA:
-                # revisor da #281: a planilha/carta (oficio anexado) e' dela; o mesmo caminho do espelho
-                _virar(li, "conflito", f"no banco a medição está {estado}: a planilha/carta é dela; cancele pela tela")
+                # revisor da #281: a planilha/carta (oficio anexado) e' dela; o mesmo caminho do espelho. #284: a
+                # prevista pode ir a boletim_recebido sem planilha; ai' o documento dela e' o boletim
+                doc = "o boletim" if estado == "boletim_recebido" and not conn.execute(
+                    "SELECT 1 FROM medicao_planilhas WHERE medicao_id=? LIMIT 1",
+                    (existentes[(d["numero"], d["tipo"])]["id"],)).fetchone() else "a planilha/carta"
+                _virar(li, "conflito", f"no banco a medição está {estado}: {doc} é dela; cancele pela tela")
                 continue
         if li["categoria"] == "correção":
             atual = existentes[(d["numero"], d["tipo"])]

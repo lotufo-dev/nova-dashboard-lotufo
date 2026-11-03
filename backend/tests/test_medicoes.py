@@ -71,6 +71,18 @@ def test_planilha_enviada_e_boletim_recebido_podem_ser_encerrados(conn, contrato
     assert medicoes.detalhe(conn, mid)["estado"] == fim
 
 
+def test_em_andamento_com_boletim_recebido_mostra_o_aprovado(conn, contrato_id):
+    # #284: a prevista sem pedido que recebeu o boletim nao aparece com "—"; com pedido, vale o aprovado
+    sem = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "execucao", "competencia": "2026-07"})
+    com = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 2, "tipo": "execucao", "competencia": "2026-08"})
+    conn.execute("UPDATE medicoes SET estado='boletim_recebido', valor_atestado_centavos=70001 WHERE id=?", (sem,))
+    conn.execute("UPDATE medicoes SET estado='boletim_recebido', valor_atestado_centavos=99999, "
+                 "valor_protocolado_centavos=100001, valor_protocolado_origem='manual' WHERE id=?", (com,))
+    conn.commit()
+    valores = {m["id"]: m["valor_centavos"] for m in medicoes.em_andamento(conn, contrato_id)}
+    assert valores == {sem: 70001, com: 99999}
+
+
 def test_espelho_enviado_vai_a_nota_emitida_com_data(conn, contrato_id):
     mid = medicoes.criar_para_espelho(conn, 1, contrato_id, 7, "execucao", "2026-08", 100_000)
     medicoes.marcar_espelho_enviado(conn, 1, mid)

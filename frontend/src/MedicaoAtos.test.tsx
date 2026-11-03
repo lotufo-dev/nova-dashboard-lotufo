@@ -19,6 +19,11 @@ describe("valorEditavel", () => {
     expect(valorEditavel(base, "atestado", true)).toBe(true);
   });
 
+  it("com boletim do órgão registrado, o atestado não se edita à mão (#284)", () => {
+    expect(valorEditavel({ ...base, boletins: [{ id: 1, tem_arquivo: true }] }, "atestado", true)).toBe(false);
+    expect(valorEditavel({ ...base, boletins: [{ id: 1, tem_arquivo: false }] }, "atestado", true)).toBe(true);   // carga
+  });
+
   it("valor aceito ou manual segue editável depois da nota", () => {
     expect(valorEditavel({ ...base, valor_protocolado_origem: "aceito" }, "protocolado", true)).toBe(true);
     expect(valorEditavel({ ...base, valor_protocolado_origem: null, valor_protocolado_centavos: null }, "protocolado", true)).toBe(true);

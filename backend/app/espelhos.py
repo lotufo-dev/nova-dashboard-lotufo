@@ -107,6 +107,15 @@ def _sem_boletim(conn, existentes: dict[str, dict], tipos) -> list[dict]:
             if t in tipos and m["estado"] in medicoes.ESTADOS_SEM_BOLETIM and not medicoes.tem_boletim(conn, m["id"])]
 
 
+def _retrato(conn, contrato_id, numero, existentes: dict[str, dict]) -> tuple:
+    """O que a geracao confere de novo sob o lock (gate Sol, #284): cada medicao do numero com o estado exato e os
+    valores, e os espelhos vigentes com o envio. O envio da v1 terminado durante a montagem do .docx muda o retrato
+    (espelho_gerado -> espelho_enviado e o envio_id), e a v2 nao substitui a v1 enviada sem ninguem ver."""
+    return (sorted(tuple(sorted(m.items())) for m in existentes.values()),
+            [tuple(r) for r in conn.execute("SELECT id, versao, envio_id FROM espelhos WHERE contrato_id=? AND numero=? "
+                                            "AND situacao='vigente' ORDER BY id", (contrato_id, numero))])
+
+
 def _opcionais(conn, existentes: dict[str, dict]) -> set[str]:
     return ({m["tipo"] for m in _sem_boletim(conn, existentes, set(existentes))}
             | {t for t, m in existentes.items() if m["estado"] in medicoes.ESTADOS_ESPELHO})
@@ -265,8 +274,9 @@ def _conferir_boletim(conn, numero: int, existentes: dict[str, dict], tipos, jus
 def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
           entradas: dict[str, int], motivo: str | None = None, periodo: tuple[str, str] | None = None,
           justificativa_sem_boletim: str | None = None) -> int:
-    # `travados` aqui e' o par (travados, opcionais), conferido de novo sob o lock
+    # `travados` aqui e' o par (travados, opcionais), conferido de novo sob o lock, com o retrato das medicoes
     r, c, saidas, por_tipo, entradas, existentes, travados = _calcular(conn, contrato_id, numero, competencia, entradas)
+    retrato = _retrato(conn, contrato_id, numero, existentes)
     _conferir_boletim(conn, numero, existentes, por_tipo, justificativa_sem_boletim)   # recusa antes de montar
     modelos = {k: arquivos.caminho_seguro(m["arquivo"]).read_bytes() for k, m in r["modelos"].items()}
     # so' calculo antes da transacao: preencher os modelos nao toca banco nem disco
@@ -282,7 +292,8 @@ def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
         # #284, sob o lock: boletim, revisao ou cancelamento entre a conta e a gravacao mudam o valor que o espelho
         # tem de usar (ou se a medicao entra sozinha)
         agora = _existentes(conn, contrato_id, numero)
-        if (_travados(agora), _opcionais(conn, agora)) != travados:
+        if ((_travados(agora), _opcionais(conn, agora)) != travados
+                or _retrato(conn, contrato_id, numero, agora) != retrato):
             raise ValueError("A medição mudou enquanto o espelho era gerado: confira os valores e gere de novo")
         _recusar_planilha_sendo_enviada(conn, numero, agora, por_tipo)
         sem_boletim = _conferir_boletim(conn, numero, agora, por_tipo, justificativa_sem_boletim)

@@ -732,7 +732,10 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
         out.append({"id": r["id"], "contrato_id": r["contrato_id"],
                     "obra": r["nome_curto"] or r["numero_instrumento"], "numero": r["numero"], "tipo": r["tipo"],
                     "titulo": titulo(r), "competencia": r["competencia"], "estado": r["estado"],
-                    "valor_centavos": r["valor_protocolado_centavos"], "proximo_passo": PROXIMO_PASSO[r["estado"]],
+                    # #284: com o boletim recebido, o valor e' o que o espelho vai usar (aprovado, senao pedido)
+                    "valor_centavos": ((valor_travado(r) or (None,))[0] if r["estado"] == "boletim_recebido"
+                                       else r["valor_protocolado_centavos"]),
+                    "proximo_passo": PROXIMO_PASSO[r["estado"]],
                     "desde": max(marcos) if marcos else (criado.isoformat() if criado else ""),
                     # os marcos crus, para quem precisa do marco da SITUACAO e nao do mais recente (resumo abaixo)
                     "espelho_em": r["espelho_em"], "nota_emitida_em": r["nota_emitida_em"],

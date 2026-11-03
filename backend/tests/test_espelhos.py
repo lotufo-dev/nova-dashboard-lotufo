@@ -677,6 +677,30 @@ def test_prevista_com_boletim_nao_pede_justificativa(ambiente):
         "espelho_gerado", 700_01, 700_01)
 
 
+def test_envio_da_v1_terminado_durante_a_geracao_da_v2_recusa_a_v2(ambiente, tmp_path, monkeypatch):
+    # gate Sol (#284): A comeca a v2, B termina o envio da v1 enquanto o .docx e' montado; A nao grava por cima
+    from app import espelho_docx
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, e1)
+    preencher, outra = espelho_docx.preencher, db.get_conn()
+
+    def preencher_com_envio(*a, **k):
+        if not conn.execute("SELECT envio_id FROM espelhos WHERE id=?", (e1,)).fetchone()[0]:
+            espelhos.enviar(outra, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+        return preencher(*a, **k)
+    monkeypatch.setattr(espelho_docx, "preencher", preencher_com_envio)
+    try:
+        with pytest.raises(ValueError, match="mudou enquanto o espelho era gerado"):
+            espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+    finally:
+        outra.close()
+    d1 = espelhos.detalhe(conn, e1)
+    assert d1["situacao"] == "vigente" and d1["envio_id"] is not None
+    assert conn.execute("SELECT COUNT(*) FROM espelhos").fetchone()[0] == 1
+
+
 def test_espelho_so_de_projeto_nao_puxa_a_execucao_ja_enviada(ambiente_projeto):
     # revisor (#284): a execucao com glosa depois do espelho enviado nao entra sozinha no espelho do projeto
     conn, u, cid = ambiente_projeto
