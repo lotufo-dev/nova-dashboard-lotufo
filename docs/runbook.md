@@ -661,14 +661,15 @@ endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HT
   resto do script pelo stdin e ele para no meio.
 - Não há credencial do GitHub na VM: o clone público não precisa; o `git pull` do cadastro privado precisa (decisão pendente).
 
-**Corte (só com o OK do Leonardo; parada de uns 10 minutos para a operação).**
+**Corte (só com o OK do dono do produto; parada de uns 10 minutos para a operação).**
 
 1. Avisar a operação da hora. Conferir que a VM responde: `http://<vm>:8080/api/health` 200.
-2. Em `<servidor>`: sentinela `New-Item -ItemType File C:\DashboardLotufo\watchdog.pause`;
+2. Em `<servidor>`, nesta ordem: sentinela `New-Item -ItemType File C:\DashboardLotufo\watchdog.pause`;
+   `Stop-ScheduledTask DashboardLotufoWatchdog` e `Stop-ScheduledTask DashboardLotufo` (sem desinstalar: é o rollback);
+   conferir que nada mais escuta na 80 (`Get-NetTCPConnection -LocalPort 80 -State Listen`); **só então** o snapshot:
    `scripts\backup_pre_migracao.ps1 -Banco C:\DashboardLotufo\dados\dashboard.db -PastaBackups C:\DashboardLotufo\dados\backups
-   -Python C:\DashboardLotufo\app\backend\.venv\Scripts\python.exe -Rotulo CORTE` (snapshot seguro com o servidor no ar);
-   `Stop-ScheduledTask DashboardLotufoWatchdog` e `Stop-ScheduledTask DashboardLotufo` (sem desinstalar: é o rollback).
-   Conferir que nada mais escuta na 80 (`Get-NetTCPConnection -LocalPort 80 -State Listen`).
+   -Python C:\DashboardLotufo\app\backend\.venv\Scripts\python.exe -Rotulo CORTE` (a API de backup do SQLite funciona com o
+   servidor parado). Snapshot antes da parada perderia o que a operação, o RM ou um envio gravasse no intervalo.
 3. Na VM, com a tarefa parada (`Stop-ScheduledTask` das duas e o sentinela), mover o banco vazio da VM e os companheiros
    (`dados\dashboard.db`, `-wal`, `-shm`) para uma pasta de quarentena, como na seção "Restaurar o banco". Depois copiar: o
    snapshot `dashboard-PRE-CORTE-...db` (vira `dados\dashboard.db`; o snapshot não tem `-wal`/`-shm`), `dados\notas`, `espelhos`, `modelos`, `evidencias`, `certidoes`,
@@ -677,13 +678,14 @@ endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HT
    Sem os tokens, cada pessoa reconecta a conta Microsoft em Minha conta (não é erro, só trabalho a mais).
 4. Na VM: `integrity_check` do banco (seção "Restaurar o banco"); variáveis de máquina `DASH_SIGA_TOKEN_ARQUIVO`,
    `DASH_SIGA_LINK_MODELO` (copiar os valores de `<servidor>`); `DASH_SIGA_TAREFA` só se o robô do SIGA também mudar para a VM
-   (ver decisões). `Start-ScheduledTask DashboardLotufo`, `/api/health` 200 com `banco: ok`, `cadastro aplicar --ensaio`
-   sem diferença, `Start-ScheduledTask DashboardLotufoWatchdog`, apagar o sentinela. Login de cada pessoa da operação.
+   (ver decisões). `Start-ScheduledTask DashboardLotufo`, `/api/health` 200 com `banco: ok`, `cadastro aplicar --usuario <e-mail do admin>
+   --raiz C:\DashboardLotufo\cadastro --ensaio` sem diferença (seção "Cadastro versionado"), `Start-ScheduledTask DashboardLotufoWatchdog`, apagar o sentinela. Login de cada pessoa da operação.
 5. Endereço novo para a operação: `http://<vm>:8080` (o nome da VM está no DNS do domínio; o apelido de hoje precisava de
    linha no `hosts`). Robô do SIGA: trocar o endereço da dashboard para `http://<vm>:8080` (repositório do robô).
 6. **Rollback** em uma linha: em `<servidor>`, `Start-ScheduledTask DashboardLotufo; Start-ScheduledTask DashboardLotufoWatchdog;
-   Remove-Item C:\DashboardLotufo\watchdog.pause`, e a operação volta ao endereço antigo. Parar a tarefa na VM. O que foi
-   digitado na VM depois do corte não volta sozinho (fica no banco da VM).
+   Remove-Item C:\DashboardLotufo\watchdog.pause`, e a operação volta ao endereço antigo. Na VM, sentinela primeiro e depois
+   `Stop-ScheduledTask` do watchdog e da tarefa (sem o sentinela o watchdog da VM religa em 3 minutos e ficam duas instâncias
+   no ar). O que foi digitado na VM depois do corte não volta sozinho (fica no banco da VM).
 7. Depois de uma semana estável: `Unregister-ScheduledTask` das duas tarefas em `<servidor>`, desligar a regra
    `Dashboard Lotufo HTTP 80`, manter os backups locais de lá até a cópia externa da VM estar configurada.
 
