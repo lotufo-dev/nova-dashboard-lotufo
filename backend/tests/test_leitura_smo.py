@@ -58,7 +58,7 @@ def test_capa_sem_situacao_aprovada_e_recusada():
     texto = _txt("capa-texto-aprovada.txt").replace("Provisória - APROVADA", "Provisória - EM ANÁLISE")
     r = leitura_smo.ler(texto)
     assert not r["ok"] and r["motivo"] == "nao-aprovada"
-    assert r["campos"]["situacao"] == "EM ANALISE"       # o leitor compara sem acento
+    assert r["campos"]["situacao"] == "EM ANÁLISE"       # como impressa, com o acento
     assert r["campos"]["valor_centavos"] == 123456789     # o lido volta, mas nao e' proposta
 
 
@@ -77,6 +77,35 @@ def test_sem_o_rotulo_tipo_depois_da_situacao_nao_e_capa():
 def test_sobra_depois_da_situacao_no_texto():
     r = leitura_smo.ler(_txt("capa-texto-aprovada.txt").replace("APROVADA\nTipo", "APROVADA.\nTipo"))
     assert r["ok"] and r["campos"]["situacao"] == "APROVADA"
+
+
+def test_situacao_com_acento_nao_vira_aprovada():
+    """So' marcas e rotulos casam sem acento; a situacao e' comparada como o SMO a imprimiu (gate Sol, rodada 3)."""
+    for capa, kw in ((_txt("capa-texto-aprovada.txt"), {}), (None, {"ocr": True})):
+        if capa is None:
+            capa = _ocr_bom().split("Período: 01/03/2026 a 31/03/2026.\n", 1)[1]
+        r = leitura_smo.ler(capa.replace("APROVADA\nTipo", "APROVÁDA\nTipo").replace("APROVADA Tipo", "APROVÁDA Tipo"),
+                            **kw)
+        assert (r["ok"], r["motivo"], r["campos"]["situacao"]) == (False, "nao-aprovada", "APROVÁDA"), kw
+    # acento decomposto (A + acento combinante) tambem nao some
+    r = leitura_smo.ler(_txt("capa-texto-aprovada.txt").replace("APROVADA\nTipo", "APROVA\u0301DA\nTipo"))
+    assert (r["ok"], r["motivo"]) == (False, "nao-aprovada")
+    # e o resto da capa continua sendo lido sem acento
+    r = leitura_smo.ler(_txt("capa-texto-aprovada.txt").replace("APROVADA\nTipo", "EM ANÁLISE\nTipo"))
+    assert (r["motivo"], r["campos"]["situacao"], r["campos"]["numero"]) == ("nao-aprovada", "EM ANÁLISE", 7)
+
+
+def test_qualquer_pontuacao_no_fim_da_situacao_nao_conta():
+    for sobra in ("APROVADA -", "APROVADA –", "APROVADA —", "APROVADA!", "APROVADA )", "APROVADA (", "APROVADA -.",
+                  "APROVADA _"):
+        r = leitura_smo.ler(_txt("capa-texto-aprovada.txt").replace("APROVADA\nTipo", sobra + "\nTipo"))
+        assert r["ok"] and r["campos"]["situacao"] == "APROVADA", sobra
+
+
+def test_ordinal_colado_na_palavra_medicao():
+    r = leitura_smo.ler(_txt("capa-texto-aprovada.txt").replace("7 - 7ª Medição Provisória - APROVADA",
+                                                                "7 - 7ªMedição Provisória - APROVADA"))
+    assert r["ok"] and r["campos"]["numero"] == 7
 
 
 def test_campos_ausentes_voltam_na_lista_e_o_resto_e_lido():

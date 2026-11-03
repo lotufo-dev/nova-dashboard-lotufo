@@ -14,8 +14,8 @@ teriam as marcas nunca viram capa.
 
 O numero da medicao e' o ordinal ("32ª Medição Final"), nao o sequencial do SMO que vem antes do traco
 ("29 - 32ª ..."): costumam coincidir e diferem na medicao final e quando o SMO renumerou (medicao reapresentada).
-Situacao e' o texto entre o traco e o rotulo "Tipo" (assim em todas as capas reais); so' "APROVADA", exato, e'
-aprovacao. Valores em centavos inteiros: "Faturamento realizado da presente medicao" da' o valor a precos iniciais
+Situacao e' o texto entre o traco e o rotulo "Tipo" (assim em todas as capas reais), tirado do texto ORIGINAL, com
+os acentos, e sem pontuacao no fim; so' "APROVADA", exato, e' aprovacao ("APROVÁDA" nao e'). Valores em centavos inteiros: "Faturamento realizado da presente medicao" da' o valor a precos iniciais
 (o da NF da medicao), o reajustamento (o da NF do reajuste) e o total; o mesmo para o acumulado. Fins de vigencia e
 de execucao e dias paralisados saem para a conferencia contra o cadastro.
 
@@ -51,7 +51,7 @@ _BLOCO = (r"\s*Precos iniciais" + _NUM + r"\s*Reajustamento" + _NUM + r"(?:\s*Ac
 # "26 - 26ª Medição Provisória - APROVADA Tipo" (sem acento, o ª vira "a" e o º vira "o"; o OCR troca o traco por
 # "–"/"—"). Em todas as 123 capas reais a situacao vem seguida do rotulo "Tipo": e' o unico delimitador.
 _TRACO = r"\s*[-–—]\s*"
-_MEDICAO = re.compile(r"\b(\d{1,3})" + _TRACO + r"(\d{1,3})\s*(?:°|[ao](?=\s))?\s*Medicao (Provisoria|Final)"
+_MEDICAO = re.compile(r"\b(\d{1,3})" + _TRACO + r"(\d{1,3})\s*(?:°|[ao](?=\s|medicao))?\s*Medicao (Provisoria|Final)"
                       + _TRACO + r"(.{1,60}?)\s*(?=\bTipo\b)", _I)
 _EXTENSO = re.compile(r"\b\d{1,3}\s*\S{0,2}\s*\(([A-Za-z ]{4,40})\)\s*medi", _I)
 _UNIDADES = {"primeir": 1, "segund": 2, "terceir": 3, "quart": 4, "quint": 5, "sext": 6, "setim": 7, "oitav": 8,
@@ -81,8 +81,33 @@ def _iso(dmy: str) -> str | None:
 
 def _plano(texto: str | None) -> str:
     """Texto sem acento (ª -> a, º -> o) e com espacos e quebras de linha reduzidos a um espaco."""
-    t = unicodedata.normalize("NFKD", texto or "")
-    return re.sub(r"\s+", " ", "".join(ch for ch in t if not unicodedata.combining(ch)))
+    return _plano_com_mapa(texto)[0]
+
+
+def _plano_com_mapa(texto: str | None) -> tuple[str, list[int]]:
+    """`_plano` e, para cada caractere dele, a posicao do caractere de `texto` de onde saiu: o que casa no texto sem
+    acento (a situacao) e' recortado do original, onde "APROVÁDA" ainda nao e' "APROVADA"."""
+    saida: list[str] = []
+    mapa: list[int] = []
+    for i, ch in enumerate(texto or ""):
+        if re.match(r"\s", ch):
+            if not saida or saida[-1] != " ":
+                saida.append(" ")
+                mapa.append(i)
+            continue
+        for c in unicodedata.normalize("NFKD", ch):
+            if not unicodedata.combining(c):
+                saida.append(c)
+                mapa.append(i)
+    return "".join(saida), mapa
+
+
+def _situacao(texto: str, mapa: list[int], m: re.Match) -> str:
+    """A situacao como impressa (com acento), espacos reduzidos e sem pontuacao ou separador no fim (sobra de OCR:
+    "APROVADA.", "APROVADA |", "APROVADA -", "APROVADA )")."""
+    original = texto[mapa[m.start(4)]:mapa[m.end(4) - 1] + 1]
+    original = re.sub(r"\s+", " ", unicodedata.normalize("NFC", original))
+    return re.sub(r"[\W_]+$", "", original).strip()
 
 
 def _ordinal_por_extenso(texto: str) -> int | None:
@@ -151,14 +176,13 @@ def ler(texto: str, ocr: bool = False, contexto: str = "") -> dict:
     volta mesmo assim, para a pessoa so' completar. `ocr=True` aperta as regras (ver o modulo); `contexto` e' o
     texto das OUTRAS paginas lidas (o oficio), unico lugar de onde sai a confirmacao do numero por extenso.
     """
-    plano = _plano(texto)
+    plano, mapa = _plano_com_mapa(texto)
     if not plano.strip():
         return _resultado("sem-texto", {}, [])
     if not e_capa(plano):
         return _resultado("capa-nao-encontrada", {}, [])
     m = _MEDICAO.search(plano)
-    # sobra de OCR entre a situacao e o "Tipo" ("APROVADA.", "APROVADA |") nao conta
-    situacao = re.sub(r"[\s.,;:|/\\]+$", "", m.group(4)).strip()
+    situacao = _situacao(texto, mapa, m)
     if ocr and situacao != situacao.upper():
         return _resultado("capa-nao-encontrada", {}, [])   # minuscula onde o SMO so' imprime maiuscula: OCR torto
     c: dict = {}
