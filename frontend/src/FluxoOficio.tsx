@@ -29,6 +29,8 @@ export type Pleito = {
   conferencia: Conferencia | null; pendencias: Pendencia[]; enviado_em: string | null; envio_justificativa: string | null;
   anexos: { id: number; tipo: string; nome: string; tamanho: number }[];
   exigidos: { tipo: string; rotulo: string }[];
+  /** Reajuste: a chave do apostilamento que atendeu o pleito (o cadastro preenche, issue #271). */
+  instrumento_chave?: string | null;
   // issue #277: a cadeia do pleito de reajuste (original -> reiteracoes/reemissoes) e o que o servidor deixa fazer
   reemite_pleito_id?: number | null; reemissao?: Reemissao | null; anterior?: EloPleito | null;
   reemissoes?: EloPleito[]; reemissoes_possiveis?: Reemissao[];

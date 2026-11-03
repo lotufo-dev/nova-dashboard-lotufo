@@ -291,12 +291,45 @@ def test_reiteracao_recusada_com_o_ciclo_apostilado(cenario):
     _aditivo(c, ids, "2026-08-01")
     c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'ap-1', "
               "'apostilamento_reajuste', '2026-09-01', ?)", (ids["contrato"], json.dumps({"ciclo": 2026})))
+    c.execute("UPDATE pleitos SET instrumento_chave='ap-1' WHERE id=?", (original,))   # o cadastro liga (issue #271)
     c.commit()
     # o apostilamento fecha o ciclo: nem reiteracao nem reemissao (como o antigo "Reenviar pleito")
     assert pleitos.detalhe(c, original)["reemissoes_possiveis"] == []
     for r in ("reiteracao", "cronograma"):
         with pytest.raises(ValueError, match="apostilado"):
             pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "245", reemite_pleito_id=original, reemissao=r)
+
+
+def test_termo_do_ciclo_sem_ligacao_nao_recusa_a_reiteracao(cenario):
+    # gate Sol (PR #317, S1): o termo que o cadastro nao ligou ao pleito nao fecha o ciclo (como na aba)
+    c, ids = cenario
+    _mtpar(c)
+    original = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
+    _enviar(c, ids, original, D(2026, 6, 15))
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'ap-1', "
+              "'apostilamento_reajuste', '2026-09-01', ?)", (ids["contrato"], json.dumps({"ciclo": 2026})))
+    c.commit()
+    assert reajuste.ciclos(c, ids["contrato"], D(2026, 10, 30))[0]["situacao"] == "apostilamento_pendente"
+    assert pleitos.detalhe(c, original)["reemissoes_possiveis"] == ["reiteracao"]
+
+
+def test_reemissao_enviada_depois_do_termo_continua_reiteravel(cenario):
+    # revisor (PR #317, R2): o termo ligado ao pleito anterior nao atende a reemissao do cronograma enviada depois;
+    # a aba mostra o apostilamento pendente, e a reemissao pode ser reiterada (mesmo criterio de reajuste.ciclos)
+    c, ids = cenario
+    _mtpar(c)
+    original = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
+    _enviar(c, ids, original, D(2026, 6, 15))
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, enviado_em, "
+              "reemite_pleito_id, reemissao) VALUES (?, 'reajuste', 'cadastro', '2024-06', 2026, 'CT-260-LT-2026', "
+              "'enviado', '2026-09-20', ?, 'cronograma')", (ids["contrato"], original))
+    p2 = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'ap-1', "
+              "'apostilamento_reajuste', '2026-09-01', ?)", (ids["contrato"], json.dumps({"ciclo": 2026})))
+    c.execute("UPDATE pleitos SET instrumento_chave='ap-1' WHERE id=?", (original,))
+    c.commit()
+    assert reajuste.ciclos(c, ids["contrato"], D(2026, 10, 30))[0]["situacao"] == "apostilamento_pendente"
+    assert pleitos.detalhe(c, p2)["reemissoes_possiveis"] == ["reiteracao"]
 
 
 def test_reiteracao_sem_os_textos_no_cadastro_nao_e_oferecida(cenario):
