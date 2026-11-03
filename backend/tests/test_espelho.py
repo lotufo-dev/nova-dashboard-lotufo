@@ -302,17 +302,24 @@ def _regra_duas_fontes():
 def test_campo_unico_vem_preenchido_com_o_aprovado():
     # centavo impar: o valor do boletim entra inteiro, sem arredondar nada
     saida = espelho.entradas_pela_medicao(regra_simples(), {"reajuste": 50_00},
-                                          {"execucao": (1_234_567, "aprovado")})
+                                          {"execucao": (1_234_567, "boletim")})
     assert saida == {"medicao": 1_234_567, "reajuste": 50_00}
     assert espelho.valor_por_natureza(regra_simples(), saida) == {"execucao": 1_234_567, "reajuste": 50_00}
 
 
 def test_campo_unico_digitado_igual_passa_e_diferente_recusa_com_os_dois_valores():
     assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 1_234_567},
-                                         {"execucao": (1_234_567, "aprovado")})["medicao"] == 1_234_567
+                                         {"execucao": (1_234_567, "boletim")})["medicao"] == 1_234_567
     with pytest.raises(ValueError) as e:
-        espelho.entradas_pela_medicao(regra_simples(), {"medicao": 1_000_000}, {"execucao": (1_234_567, "aprovado")})
+        espelho.entradas_pela_medicao(regra_simples(), {"medicao": 1_000_000}, {"execucao": (1_234_567, "boletim")})
     assert "R$ 12.345,67" in str(e.value) and "R$ 10.000,00" in str(e.value) and "aprovado" in str(e.value)
+
+
+def test_atestado_digitado_sem_boletim_vale_como_aprovado_e_a_mensagem_nao_cita_o_boletim():
+    # decisao do Leo de 03/11/2026: o atestado digitado (sem PDF) vale como aprovado no espelho
+    with pytest.raises(ValueError) as e:
+        espelho.entradas_pela_medicao(regra_simples(), {"medicao": 1}, {"execucao": (2, "atestado")})
+    assert "o aprovado (R$ 0,02)" in str(e.value) and "boletim" not in str(e.value)
 
 
 def test_sem_aprovado_vale_o_pedido():
@@ -324,13 +331,13 @@ def test_sem_aprovado_vale_o_pedido():
 def test_mais_de_um_campo_a_divisao_e_digitada_e_tem_de_somar_o_aprovado():
     # rateio com residuo: 1.000,01 dividido em 500,00 + 500,01
     r = _regra_duas_fontes()
-    ok = espelho.entradas_pela_medicao(r, {"fonte-a": 500_00, "fonte-b": 500_01}, {"execucao": (1_000_01, "aprovado")})
+    ok = espelho.entradas_pela_medicao(r, {"fonte-a": 500_00, "fonte-b": 500_01}, {"execucao": (1_000_01, "boletim")})
     assert ok == {"fonte-a": 500_00, "fonte-b": 500_01}
     with pytest.raises(ValueError) as e:
-        espelho.entradas_pela_medicao(r, {"fonte-a": 500_00, "fonte-b": 500_00}, {"execucao": (1_000_01, "aprovado")})
+        espelho.entradas_pela_medicao(r, {"fonte-a": 500_00, "fonte-b": 500_00}, {"execucao": (1_000_01, "boletim")})
     assert "R$ 1.000,00" in str(e.value) and "R$ 1.000,01" in str(e.value)
     with pytest.raises(ValueError, match="R\\$ 1.000,01"):     # nada digitado: a soma zero tambem nao bate
-        espelho.entradas_pela_medicao(r, {}, {"execucao": (1_000_01, "aprovado")})
+        espelho.entradas_pela_medicao(r, {}, {"execucao": (1_000_01, "boletim")})
 
 
 def test_tipo_opcional_sem_nada_digitado_fica_fora_e_digitado_tem_de_bater():
@@ -347,4 +354,4 @@ def test_tipo_opcional_sem_nada_digitado_fica_fora_e_digitado_tem_de_bater():
 
 def test_tipo_sem_valor_ou_que_a_regra_nao_gera_fica_como_esta():
     assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 7}, {}) == {"medicao": 7}
-    assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 7}, {"projeto": (9, "aprovado")}) == {"medicao": 7}
+    assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 7}, {"projeto": (9, "boletim")}) == {"medicao": 7}

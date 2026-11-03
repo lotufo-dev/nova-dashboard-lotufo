@@ -83,6 +83,19 @@ def test_em_andamento_com_boletim_recebido_mostra_o_aprovado(conn, contrato_id):
     assert valores == {sem: 70001, com: 99999}
 
 
+def test_em_andamento_mostra_o_aprovado_em_todo_estado(conn, contrato_id):
+    # #284: espelho gerado com atestado diferente do pedido: a linha mostra o aprovado; sem atestado, o pedido
+    com = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 3, "tipo": "execucao", "competencia": "2026-09"})
+    sem = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 4, "tipo": "execucao", "competencia": "2026-10"})
+    conn.execute("UPDATE medicoes SET estado='espelho_gerado', valor_protocolado_centavos=100001, "
+                 "valor_protocolado_origem='espelho', valor_atestado_centavos=99999 WHERE id=?", (com,))
+    conn.execute("UPDATE medicoes SET estado='espelho_gerado', valor_protocolado_centavos=50001, "
+                 "valor_protocolado_origem='espelho' WHERE id=?", (sem,))
+    conn.commit()
+    valores = {m["id"]: m["valor_centavos"] for m in medicoes.em_andamento(conn, contrato_id)}
+    assert valores == {com: 99999, sem: 50001}
+
+
 def test_espelho_enviado_vai_a_nota_emitida_com_data(conn, contrato_id):
     mid = medicoes.criar_para_espelho(conn, 1, contrato_id, 7, "execucao", "2026-08", 100_000)
     medicoes.marcar_espelho_enviado(conn, 1, mid)

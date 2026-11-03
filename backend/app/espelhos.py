@@ -88,15 +88,19 @@ def _existentes(conn, contrato_id, numero) -> dict[str, dict]:
         "FROM medicoes WHERE contrato_id=? AND numero=?", (contrato_id, numero))}
 
 
-def _travados(existentes: dict[str, dict]) -> dict[str, tuple[int, str]]:
+def _travados(conn, existentes: dict[str, dict]) -> dict[str, tuple[int, str]]:
     """Issue #284: {tipo: (centavos, fonte)} das medicoes que o espelho ainda alcanca (antes do espelho ou nele):
-    o aprovado do boletim, senao o pedido. A protocolada nao entra: o espelho dela nao se gera mais."""
+    o aprovado, senao o pedido; `fonte` e' "boletim", "atestado" ou "pedido". A protocolada nao entra: o espelho
+    dela nao se gera mais."""
     out = {}
     for tipo, m in existentes.items():
         if m["estado"] in (*medicoes.ESTADOS_ANTES_DO_ESPELHO, *medicoes.ESTADOS_ESPELHO):
             v = medicoes.valor_travado(m)
             if v is not None:
-                out[tipo] = v
+                # a fonte diz de onde veio o aprovado: do boletim (com o PDF) ou do atestado digitado, que tambem
+                # vale (decisao do Leo de 03/11/2026)
+                fonte = v[1] if v[1] != "aprovado" else ("boletim" if medicoes.tem_boletim(conn, m["id"]) else "atestado")
+                out[tipo] = (v[0], fonte)
     return out
 
 
@@ -107,13 +111,31 @@ def _sem_boletim(conn, existentes: dict[str, dict], tipos) -> list[dict]:
             if t in tipos and m["estado"] in medicoes.ESTADOS_SEM_BOLETIM and not medicoes.tem_boletim(conn, m["id"])]
 
 
-def _retrato(conn, contrato_id, numero, existentes: dict[str, dict]) -> tuple:
-    """O que a geracao confere de novo sob o lock (gate Sol, #284): cada medicao do numero com o estado exato e os
-    valores, e os espelhos vigentes com o envio. O envio da v1 terminado durante a montagem do .docx muda o retrato
-    (espelho_gerado -> espelho_enviado e o envio_id), e a v2 nao substitui a v1 enviada sem ninguem ver."""
-    return (sorted(tuple(sorted(m.items())) for m in existentes.values()),
-            [tuple(r) for r in conn.execute("SELECT id, versao, envio_id FROM espelhos WHERE contrato_id=? AND numero=? "
-                                            "AND situacao='vigente' ORDER BY id", (contrato_id, numero))])
+def _vigentes(conn, contrato_id, numero) -> list[tuple]:
+    """(id, versao, envio_id, tipo) de cada medicao nos espelhos vigentes do numero."""
+    return [tuple(r) for r in conn.execute(
+        "SELECT e.id, e.versao, e.envio_id, m.tipo FROM espelhos e JOIN espelho_medicoes em ON em.espelho_id=e.id "
+        "JOIN medicoes m ON m.id=em.medicao_id WHERE e.contrato_id=? AND e.numero=? AND e.situacao='vigente' "
+        "ORDER BY e.id, m.tipo", (contrato_id, numero))]
+
+
+def _retrato(existentes: dict[str, dict], vigentes: list[tuple], tipos, travados) -> tuple:
+    """O que a geracao confere de novo sob o lock (gate Sol, #284), so' dos tipos gerados agora: cada medicao com o
+    estado exato, os valores e o travado, e os espelhos vigentes que tem alguma delas, com o envio. O envio (ou
+    reenvio) da v1 terminado durante a montagem do .docx muda o retrato, e a v2 nao substitui a v1 enviada sem
+    ninguem ver; o reenvio do espelho de outra medicao (a execucao, na geracao so' do projeto) nao recusa."""
+    tipos = sorted(set(tipos))
+    return ([tuple(sorted(existentes[t].items())) if t in existentes else None for t in tipos],
+            [travados.get(t) for t in tipos],
+            sorted({(i, v, envio) for i, v, envio, t in vigentes if t in tipos}))
+
+
+def _regra_crua(conn, contrato_id) -> tuple | None:
+    """A linha da regra do espelho como esta' no banco (situacao, regra, modelos, sha256): capturada no inicio da
+    geracao e conferida sob o lock (gate Sol, #284), e o sha gravado no espelho e' o capturado."""
+    r = conn.execute("SELECT situacao, regra, modelos, sha256 FROM espelho_regras WHERE contrato_id=?",
+                     (contrato_id,)).fetchone()
+    return tuple(r) if r else None
 
 
 def _opcionais(conn, existentes: dict[str, dict]) -> set[str]:
@@ -148,7 +170,7 @@ def _calcular(conn, contrato_id, numero, competencia, entradas):
     if estranhas:
         raise ValueError(f"entrada desconhecida para esta obra: {sorted(estranhas)}")
     existentes = _existentes(conn, contrato_id, numero)
-    travados = _travados(existentes)
+    travados = _travados(conn, existentes)
     # issue #284: o valor que a medicao ja' tem (aprovado, senao pedido) vem preenchido e nao muda. So' entra
     # sozinha a que espera o espelho (boletim recebido); a ainda sem boletim e a que ja' tem espelho (revisor: o
     # espelho so' de reajuste nao pode puxar a execucao ja' enviada) entram se a pessoa as puser (nada digitado = fora)
@@ -274,26 +296,30 @@ def _conferir_boletim(conn, numero: int, existentes: dict[str, dict], tipos, jus
 def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
           entradas: dict[str, int], motivo: str | None = None, periodo: tuple[str, str] | None = None,
           justificativa_sem_boletim: str | None = None) -> int:
-    # `travados` aqui e' o par (travados, opcionais), conferido de novo sob o lock, com o retrato das medicoes
-    r, c, saidas, por_tipo, entradas, existentes, travados = _calcular(conn, contrato_id, numero, competencia, entradas)
-    retrato = _retrato(conn, contrato_id, numero, existentes)
+    # #284 (gate Sol): a regra e os espelhos vigentes capturados ANTES da conta; sob o lock, o retrato dos tipos
+    # gerados e a regra sao conferidos de novo, e o sha gravado e' o desta captura (nao o relido depois do .docx)
+    regra0, vigentes0 = _regra_crua(conn, contrato_id), _vigentes(conn, contrato_id, numero)
+    r, c, saidas, por_tipo, entradas, existentes, (travados, _) = _calcular(conn, contrato_id, numero, competencia,
+                                                                           entradas)
+    retrato = _retrato(existentes, vigentes0, por_tipo, travados)
     _conferir_boletim(conn, numero, existentes, por_tipo, justificativa_sem_boletim)   # recusa antes de montar
     modelos = {k: arquivos.caminho_seguro(m["arquivo"]).read_bytes() for k, m in r["modelos"].items()}
     # so' calculo antes da transacao: preencher os modelos nao toca banco nem disco
     gerados = [(s, espelho_docx.preencher(modelos[s["chave"]], espelho.formatar_controles(
                    s, numero, competencia, r["regra"].get("texto"), periodo)))
                for s in saidas]
-    regra_sha = conn.execute("SELECT sha256 FROM espelho_regras WHERE contrato_id=?", (contrato_id,)).fetchone()[0]
+    regra_sha = regra0[3] if regra0 else None       # regra que surgiu no meio: a conferencia abaixo recusa
     with db.mutacao(conn):
         # A versao anterior e' a vigente das MESMAS medicoes (#208; a medicao e' unica por
         # contrato+numero+tipo): trocar a competencia e' correcao, nao espelho novo -- substitui, nao duplica.
         anteriores = _espelhos_anteriores(conn, contrato_id, numero, list(por_tipo))
         _recusar_envio_reservado(conn, contrato_id, numero, list(por_tipo))   # sob o mesmo lock da reserva (#210)
-        # #284, sob o lock: boletim, revisao ou cancelamento entre a conta e a gravacao mudam o valor que o espelho
-        # tem de usar (ou se a medicao entra sozinha)
+        if _regra_crua(conn, contrato_id) != regra0:
+            raise ValueError("A regra do espelho desta obra mudou enquanto o espelho era gerado: gere de novo")
+        # #284, sob o lock: boletim, revisao, envio ou cancelamento entre a conta e a gravacao mudam o valor que o
+        # espelho tem de usar ou o espelho que ele substitui
         agora = _existentes(conn, contrato_id, numero)
-        if ((_travados(agora), _opcionais(conn, agora)) != travados
-                or _retrato(conn, contrato_id, numero, agora) != retrato):
+        if _retrato(agora, _vigentes(conn, contrato_id, numero), por_tipo, _travados(conn, agora)) != retrato:
             raise ValueError("A medição mudou enquanto o espelho era gerado: confira os valores e gere de novo")
         _recusar_planilha_sendo_enviada(conn, numero, agora, por_tipo)
         sem_boletim = _conferir_boletim(conn, numero, agora, por_tipo, justificativa_sem_boletim)

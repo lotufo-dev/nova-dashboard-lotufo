@@ -359,8 +359,8 @@ def valor_por_natureza(regra: dict, entradas: dict[str, int]) -> dict[str, int]:
 def entradas_pela_medicao(regra: dict, entradas: dict[str, int], travados: dict[str, tuple[int, str]],
                           opcionais: frozenset[str] | set[str] = frozenset()) -> dict[str, int]:
     """Issue #284 (decisao do Leo de 03/11/2026): o espelho deixa de ser digitado onde a medicao ja' tem valor.
-    `travados` e' {tipo: (centavos, fonte)}, com o aprovado do boletim, senao o pedido (`fonte` = "aprovado" ou
-    "pedido"). Natureza com um campo so': o valor vem preenchido e nao muda (digitado diferente recusa). Com mais de
+    `travados` e' {tipo: (centavos, fonte)}, com o aprovado, senao o pedido (`fonte` = "boletim" para o aprovado do
+    boletim do orgao, "atestado" para o digitado sem boletim, ou "pedido"). Natureza com um campo so': o valor vem preenchido e nao muda (digitado diferente recusa). Com mais de
     um campo: a divisao e' digitada e tem de somar o valor. Devolve as entradas com o preenchido.
     `opcionais` sao os tipos que podem ficar fora deste espelho (a medicao ainda sem boletim, que so' entra com
     "seguir sem boletim"): nada digitado = fora; digitado, tem de ser o valor travado."""
@@ -370,7 +370,7 @@ def entradas_pela_medicao(regra: dict, entradas: dict[str, int], travados: dict[
         if not campos:
             continue
         natureza = ROTULO_NATUREZA[campos[0]["natureza"]].lower()
-        origem = "aprovado do boletim" if fonte == "aprovado" else "pedido"
+        origem = {"boletim": "aprovado do boletim", "atestado": "aprovado"}.get(fonte, "pedido")
         soma = sum(int(saida.get(e["chave"]) or 0) for e in campos)
         if tipo in opcionais and soma == 0:
             continue

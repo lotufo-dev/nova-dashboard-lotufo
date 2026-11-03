@@ -580,7 +580,7 @@ def test_espelho_da_medicao_com_boletim_usa_o_aprovado_e_nao_sobrescreve_o_pedid
     p = espelhos.previa(conn, cid, 23, "2026-01", {})
     assert p["medicoes"] == [{"tipo": "execucao", "valor_centavos": 12_000_01, "existente": "boletim_recebido",
                               "sem_boletim": False}]
-    assert p["travados"] == [{"tipo": "execucao", "valor_centavos": 12_000_01, "fonte": "aprovado",
+    assert p["travados"] == [{"tipo": "execucao", "valor_centavos": 12_000_01, "fonte": "boletim",
                               "opcional": False, "sem_boletim": False}]
     eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {})
     m = medicoes.detalhe(conn, mid)
@@ -588,6 +588,17 @@ def test_espelho_da_medicao_com_boletim_usa_o_aprovado_e_nao_sobrescreve_o_pedid
         "espelho_gerado", 12_345_67, "manual", 12_000_01)
     assert espelhos.detalhe(conn, eid)["entradas"] == {"medicao": 12_000_01}
     assert "12.000,01" in _texto_docx(conn, eid)
+
+
+def test_atestado_digitado_sem_boletim_trava_o_valor_com_a_fonte_atestado(ambiente):
+    # decisao do Leo de 03/11/2026: vale como aprovado; a trava do boletim continua (nao ha' PDF)
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
+    medicoes.definir_valor(conn, u["id"], mid, "atestado", 12_000_01, "manual", "2026-02-10")
+    p = espelhos.previa(conn, cid, 23, "2026-01", {"medicao": 12_000_01})
+    assert p["travados"] == [{"tipo": "execucao", "valor_centavos": 12_000_01, "fonte": "atestado", "opcional": True,
+                              "sem_boletim": True}]
+    assert p["medicoes"][0]["sem_boletim"] is True
 
 
 def test_digitado_diferente_do_aprovado_recusa_com_os_dois_valores(ambiente):
@@ -699,6 +710,79 @@ def test_envio_da_v1_terminado_durante_a_geracao_da_v2_recusa_a_v2(ambiente, tmp
     d1 = espelhos.detalhe(conn, e1)
     assert d1["situacao"] == "vigente" and d1["envio_id"] is not None
     assert conn.execute("SELECT COUNT(*) FROM espelhos").fetchone()[0] == 1
+
+
+def _durante_a_montagem(monkeypatch, acao):
+    """Roda `acao` uma vez, no meio da montagem do .docx (entre a conta e a gravacao)."""
+    from app import espelho_docx
+    preencher, feito = espelho_docx.preencher, []
+
+    def preencher_com_acao(*a, **k):
+        if not feito:
+            feito.append(1)
+            acao()
+        return preencher(*a, **k)
+    monkeypatch.setattr(espelho_docx, "preencher", preencher_com_acao)
+
+
+def test_regra_trocada_durante_a_montagem_recusa_e_o_sha_e_o_capturado(ambiente, monkeypatch):
+    from app import espelho_docx
+    conn, u, cid = ambiente
+    sha0 = conn.execute("SELECT sha256 FROM espelho_regras WHERE contrato_id=?", (cid,)).fetchone()[0]
+    preencher, outra = espelho_docx.preencher, db.get_conn()
+
+    def trocar_regra():
+        outra.execute("UPDATE espelho_regras SET situacao='prova', sha256='outro' WHERE contrato_id=?", (cid,))
+        outra.commit()
+    try:
+        _durante_a_montagem(monkeypatch, trocar_regra)
+        with pytest.raises(ValueError, match="regra do espelho desta obra mudou"):
+            espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    finally:
+        outra.close()
+    assert conn.execute("SELECT COUNT(*) FROM espelhos").fetchone()[0] == 0
+    # sem troca, o sha gravado e' o da regra lida no inicio
+    conn.execute("UPDATE espelho_regras SET situacao='ativa', sha256=? WHERE contrato_id=?", (sha0, cid)); conn.commit()
+    monkeypatch.setattr(espelho_docx, "preencher", preencher)
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    assert espelhos.detalhe(conn, eid)["regra_sha256"] == sha0
+
+
+def test_reenvio_da_v1_durante_a_geracao_da_v2_recusa(ambiente, tmp_path, monkeypatch):
+    # so' o envio_id muda (a medicao ja' estava em espelho_enviado): a v2 nao substitui o reenvio sem ninguem ver
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, e1)
+    espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    envio1 = espelhos.detalhe(conn, e1)["envio_id"]
+    outra = db.get_conn()
+    try:
+        _durante_a_montagem(monkeypatch, lambda: espelhos.enviar(outra, u, e1, p["para"], p["copia"], p["assunto"],
+                                                                 p["corpo"], reenviar=True))
+        with pytest.raises(ValueError, match="mudou enquanto o espelho era gerado"):
+            espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+    finally:
+        outra.close()
+    d1 = espelhos.detalhe(conn, e1)
+    assert d1["situacao"] == "vigente" and d1["envio_id"] != envio1
+
+
+def test_reenvio_da_execucao_durante_a_geracao_so_do_projeto_nao_recusa(ambiente_projeto, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente_projeto
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, e1)
+    espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    outra = db.get_conn()
+    try:
+        _durante_a_montagem(monkeypatch, lambda: espelhos.enviar(outra, u, e1, p["para"], p["copia"], p["assunto"],
+                                                                 p["corpo"], reenviar=True))
+        e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"projeto": 500})
+    finally:
+        outra.close()
+    assert [m["tipo"] for m in espelhos.detalhe(conn, e2)["medicoes"]] == ["projeto"]
+    assert espelhos.detalhe(conn, e1)["situacao"] == "vigente"
 
 
 def test_espelho_so_de_projeto_nao_puxa_a_execucao_ja_enviada(ambiente_projeto):

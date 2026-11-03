@@ -302,4 +302,22 @@ describe("Espelho", () => {
     const corpo = JSON.parse(api.mock.calls.find(c => c[0] === "/api/contratos/1/espelho" && c[1]?.method === "POST")![1].body);
     expect(corpo.justificativa_sem_boletim).toBe("NF vai junto com o ofício");
   });
+
+  it("a origem do valor diz boletim só quando há boletim; o atestado digitado aparece como aprovado (#284)", async () => {
+    const com = (fonte: string, sem_boletim: boolean) => ({ ...PREVIA, periodo: "01/05/2026 A 31/05/2026",
+      medicoes: [{ tipo: "execucao", valor_centavos: 63452958, existente: sem_boletim ? "planilha_enviada" : "boletim_recebido", sem_boletim }],
+      travados: [{ tipo: "execucao", valor_centavos: 63452958, fonte, opcional: sem_boletim, sem_boletim }] });
+    for (const [fonte, sem, rotulo] of [["atestado", true, "(aprovado)"], ["boletim", false, "(aprovado do boletim)"]] as const) {
+      cleanup(); api.mockReset();
+      api.mockResolvedValueOnce({ regra: REGRA, espelhos: [] });
+      api.mockResolvedValueOnce(com(fonte, sem));
+      render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} abrirForm inicial={{ numero: 10, competencia: "2026-05" }} />);
+      fireEvent.change(await screen.findByLabelText("Valor da medição"), { target: { value: "634.529,58" } });
+      fireEvent.click(screen.getByRole("button", { name: "Conferir" }));
+      await screen.findByRole("button", { name: "Gerar" });
+      const linha = screen.getByText(/Medição 10 de execução \(/).textContent ?? "";
+      expect(linha).toContain(rotulo);
+      if (sem) expect(linha).not.toContain("do boletim");
+    }
+  });
 });

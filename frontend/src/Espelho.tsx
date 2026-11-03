@@ -31,7 +31,9 @@ type Saida = {
 // justificativa); `travados` = o valor que veio da medicao (aprovado do boletim, senao pedido)
 type Previa = { saidas: Saida[]; medicoes: { tipo: string; valor_centavos: number; existente: string | null; sem_boletim?: boolean }[];
   avisos: string[]; periodo: string;
-  travados?: { tipo: string; valor_centavos: number; fonte: "aprovado" | "pedido"; opcional: boolean; sem_boletim: boolean }[] };
+  travados?: { tipo: string; valor_centavos: number; fonte: "boletim" | "atestado" | "pedido"; opcional: boolean; sem_boletim: boolean }[] };
+// de onde veio o valor travado: o aprovado do boletim, o atestado digitado (vale como aprovado) ou o pedido
+const ORIGEM_TRAVADO: Record<string, string> = { boletim: "aprovado do boletim", atestado: "aprovado", pedido: "pedido" };
 const MIN_JUSTIFICATIVA_SEM_BOLETIM = 10;    // espelhos.MIN_JUSTIFICATIVA_SEM_BOLETIM
 const ESTADOS_ESPELHO = ["espelho_gerado", "espelho_enviado"];
 type Arquivo = { documento_id: number; saida: string; nome: string; tamanho: number };
@@ -405,7 +407,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
               const trav = passo.previa.travados?.find(t => t.tipo === m.tipo);
               return (
                 <li key={m.tipo}>Medição {form.numero} de {TIPO[m.tipo] ?? m.tipo}
-                  {trav ? (trav.fonte === "aprovado" ? " (aprovado do boletim)" : " (pedido)") : ""}: {brl(m.valor_centavos)}
+                  {trav ? ` (${ORIGEM_TRAVADO[trav.fonte] ?? "pedido"})` : ""}: {brl(m.valor_centavos)}
                   {m.existente && ESTADOS_ESPELHO.includes(m.existente) && <> <Selo classe="selo--atencao">Versão nova</Selo></>}</li>
               );
             })}
