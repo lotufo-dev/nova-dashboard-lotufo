@@ -687,30 +687,27 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
                          f"(ao menos {MIN_JUSTIFICATIVA} caracteres) para enviar assim")
     # Reserva atomica antes do e-mail (10/10/2026): dois cliques simultaneos nao mandam duas cartas ao orgao.
     envio_reserva.reservar(conn, "pleitos", pleito_id, usuario["id"], p["envio_id"])
-    # descartado entre a leitura acima e a reserva (outra aba): nada sai (com a reserva, `descartar` ja' recusa)
-    atual = _linha(conn, pleito_id)
-    if atual["situacao"] == "descartado":
-        envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
-        raise ValueError("Pleito descartado enquanto se preparava o envio: nada foi enviado")
-    # Ja' com a reserva, a carta e os anexos nao mudam ate' o e-mail (`_anexos_mudaveis` recusa): confere tudo de
-    # novo sobre a linha relida e manda exatamente isso. Memoria divergente, anexos acima do limite ou pendencia que
-    # a pessoa nao viu na previa (cronograma tirado na outra aba, carta remontada) param aqui, sem e-mail
-    pv_reservado = previa_envio(conn, pleito_id, hoje=hoje)
-    vistas = {x["mensagem"] for x in pv["pendencias"]}
-    novas = [x["mensagem"] for x in pv_reservado["pendencias"] if x["mensagem"] not in vistas]
-    if _memoria_divergente(conn, atual):
-        recusa = MEMORIA_DIVERGENTE
-    elif pv_reservado["total"] > correio.MAX_TOTAL:
-        recusa = "Anexos acima do limite do e-mail"
-    elif novas:
-        recusa = f"{novas[0]}: a prévia mudou enquanto se preparava o envio e nada foi enviado; confira de novo"
-    else:
-        recusa = None
-    if recusa:
-        envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
-        raise ValueError(recusa)
-    pv = pv_reservado                       # a auditoria registra as pendencias do que de fato saiu
+    # Da reserva ao e-mail, tudo dentro do mesmo `try`: qualquer recusa ou erro (anexo que nao se le do disco,
+    # orgao que saiu do contrato) destrava e sobe; so' o e-mail que saiu sem registro segura a reserva
     try:
+        # descartado entre a leitura acima e a reserva (outra aba): nada sai (com a reserva, `descartar` ja' recusa)
+        atual = _linha(conn, pleito_id)
+        if atual["situacao"] == "descartado":
+            raise ValueError("Pleito descartado enquanto se preparava o envio: nada foi enviado")
+        # Ja' com a reserva, a carta e os anexos nao mudam ate' o e-mail (`_anexos_mudaveis` recusa): confere tudo
+        # de novo sobre a linha relida e manda exatamente isso. Memoria divergente, anexos acima do limite ou
+        # pendencia que a pessoa nao viu na previa (cronograma tirado na outra aba, carta remontada) param aqui
+        pv_reservado = previa_envio(conn, pleito_id, hoje=hoje)
+        vistas = {x["mensagem"] for x in pv["pendencias"]}
+        novas = [x["mensagem"] for x in pv_reservado["pendencias"] if x["mensagem"] not in vistas]
+        if _memoria_divergente(conn, atual):
+            raise ValueError(MEMORIA_DIVERGENTE)
+        if pv_reservado["total"] > correio.MAX_TOTAL:
+            raise ValueError("Anexos acima do limite do e-mail")
+        if novas:
+            raise ValueError(f"{novas[0]}: a prévia mudou enquanto se preparava o envio e nada foi enviado; "
+                             "confira de novo")
+        pv = pv_reservado                       # a auditoria registra as pendencias do que de fato saiu
         envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(atual), para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),
                                               _anexos_envio(conn, atual), cco=cco)

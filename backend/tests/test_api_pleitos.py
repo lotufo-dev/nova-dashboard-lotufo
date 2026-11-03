@@ -801,6 +801,61 @@ def test_montar_que_atravessa_o_envio_nao_reabre_o_pleito(api, monkeypatch):
     assert estado["situacao"] == "enviado" and emails == 1
 
 
+def test_anexo_que_falha_na_leitura_depois_da_reserva_destrava(api, monkeypatch):
+    """Rodada 5 (Sol): a previa refeita depois da reserva le os anexos do disco; se a leitura falha, nada sai e a
+    reserva nao pode ficar presa (409 ate' a liberacao manual)."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    ler = pleitos._bytes
+
+    def falha_com_a_reserva(rel):
+        c = db.get_conn()
+        try:
+            reservado = c.execute("SELECT envio_reservado_em FROM pleitos WHERE id=?", (pid,)).fetchone()[0]
+        finally:
+            c.close()
+        if reservado:
+            raise OSError("anexo ilegível no disco")
+        return ler(rel)
+
+    monkeypatch.setattr(pleitos, "_bytes", falha_com_a_reserva)
+    c = db.get_conn()
+    try:
+        with pytest.raises(OSError):
+            pleitos.enviar(c, {"id": _uid(), "email": "admin@lotufo.com"}, pid, corpo["para"], corpo["copia"],
+                           corpo["assunto"], corpo["corpo"], corpo["justificativa"])
+    finally:
+        c.close()
+    assert falso.enviados == []
+    assert _estado(pid) == ({"situacao": "assinado", "envio_id": None, "envio_reservado_em": None}, 0)
+
+
+def test_assinado_que_atravessa_o_envio_nao_reabre_o_pleito(api, monkeypatch):
+    """Sugestao do Sol (rodada 5): o envio sai enquanto o assinado se confere; o assinado e' recusado e o pleito
+    segue enviado, com um e-mail so'."""
+    from app import assinatura
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    doc = cl.get(f"/api/pleitos/{pid}/documento").content
+    conferir, enviados = assinatura.conferir_pdfs, []
+
+    def confere_e_a_outra_aba_envia(montado, assinado):
+        conf = conferir(montado, assinado)
+        if not enviados:
+            enviados.append(cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code)
+        return conf
+
+    monkeypatch.setattr(assinatura, "conferir_pdfs", confere_e_a_outra_aba_envia)
+    r = cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc), "application/pdf"))
+    assert enviados == [200]
+    assert r.status_code == 422 and "enviado" in r.json()["detail"], r.text
+    estado, emails = _estado(pid)
+    assert estado["situacao"] == "enviado" and emails == 1
+
+
 def test_montar_e_assinado_com_o_envio_reservado_recusam(api):
     """Rodada 4 (revisor): com o e-mail saindo, a carta e' a que vai nele: montar e anexar o assinado recusam com a
     mesma recusa do envio (409 ENVIO_RESERVADO) e nada muda."""
