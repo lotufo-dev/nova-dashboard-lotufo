@@ -104,6 +104,69 @@ def test_sem_pleito_enviado_o_termo_do_ciclo_fecha_o_ciclo(cenario):
     assert reajuste.ciclos(c, ids["contrato"], D(2026, 9, 20))[0]["situacao"] == "apostilado"
 
 
+def _termo_sem_base_aplicado_e_segunda_base(c, ids):
+    """Termo sem `data_base` aplicado quando o contrato tinha uma base so' (gravou as previsoes na 2024-06); depois o
+    contrato ganha a 2a data-base (revisor e gate Sol, rodada 3, PR #317)."""
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"ciclo": 2026, "percentual": "6,76",
+                                                              "competencias": [{"competencia": "2026-07", "valor": "1,00"}]})
+    iid = c.execute("SELECT MAX(id) FROM instrumentos").fetchone()[0]
+    _previsao(c, ids["contrato"], "2026-07", 100, "apostilamento", instrumento_id=iid)
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2024-04', 'SICRO')", (ids["contrato"],))
+    c.commit()
+    return iid
+
+
+def test_termo_sem_data_base_segue_fechando_o_ciclo_depois_da_segunda_base(cenario):
+    # sem pleito registrado, o termo fecha o ciclo da base em que gravou as previsoes; nao vira "ambiguo"
+    c, ids = cenario
+    _termo_sem_base_aplicado_e_segunda_base(c, ids)
+    k = {x["data_base_mes"]: x for x in reajuste.ciclos(c, ids["contrato"], D(2026, 9, 20))}
+    assert (k["2024-06"]["situacao"], k["2024-06"]["apostilamento"]["chave"]) == \
+        ("apostilado", "apostilamento_reajuste-2026-09-15")
+    assert k["2024-04"]["situacao"] == "pleito_pendente"       # o termo nao vai para a outra base
+    assert [a["data_base_mes"] for a in reajuste.avisos(c, D(2026, 9, 20))] == ["2024-04"]
+
+
+def test_base_dos_termos_resolvida_para_a_aba(cenario):
+    # a aba recebe a base de cada termo: `data_base`, senao a unica, senao a das previsoes gravadas; sem nenhuma, None
+    c, ids = cenario
+    iid = _termo_sem_base_aplicado_e_segunda_base(c, ids)
+    ids["instrumento"]("apostilamento_reajuste", "2026-10-01", {"data_base": "2024-04", "ciclo": 2026})
+    ids["instrumento"]("apostilamento_reajuste", "2026-10-02", {"ciclo": 2026})
+    bases = {x["instrumento_id"]: x["data_base_mes"] for x in reajuste.bases_dos_termos(c, ids["contrato"])}
+    assert [bases[iid], bases[iid + 1], bases[iid + 2]] == ["2024-06", "2024-04", None]
+
+
+def _reiteracao(c, cid, anterior, enviado_em, numero):
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, enviado_em, "
+              "reemite_pleito_id, reemissao) VALUES (?, 'reajuste', 'sistema', '2024-06', 2026, ?, 'enviado', ?, ?, "
+              "'reiteracao')", (cid, numero, enviado_em, anterior))
+    c.commit()
+    return c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+
+
+def test_termo_do_pedido_sobe_por_duas_reiteracoes(cenario):
+    # P1 <- R1 <- R2: o termo ligado a P1 fecha o ciclo com R2 como pleito vigente
+    c, ids = cenario
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    p1 = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    r1 = _reiteracao(c, ids["contrato"], p1, "2026-08-10", "CT-2-LT-2026")
+    _reiteracao(c, ids["contrato"], r1, "2026-09-20", "CT-3-LT-2026")
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"data_base": "2024-06", "ciclo": 2026})
+    c.execute("UPDATE pleitos SET instrumento_chave='apostilamento_reajuste-2026-09-15' WHERE id=?", (p1,)); c.commit()
+    r = reajuste.ciclos(c, ids["contrato"], D(2026, 10, 30))[0]
+    assert (r["situacao"], r["apostilamento"]["chave"]) == ("apostilado", "apostilamento_reajuste-2026-09-15")
+
+
+def test_laco_em_reemite_pleito_id_nao_trava_e_fica_pendente(cenario):
+    # dado torto (R1 reitera R2 e R2 reitera R1): a subida para no laco, sem termo
+    c, ids = cenario
+    r1 = _reiteracao(c, ids["contrato"], None, "2026-08-10", "CT-2-LT-2026")
+    r2 = _reiteracao(c, ids["contrato"], r1, "2026-09-20", "CT-3-LT-2026")
+    c.execute("UPDATE pleitos SET reemite_pleito_id=? WHERE id=?", (r2, r1)); c.commit()
+    assert reajuste.ciclos(c, ids["contrato"], D(2026, 10, 30))[0]["situacao"] == "apostilamento_pendente"
+
+
 def test_avisos_niveis_e_diretoria_depois_de_90_dias(cenario):
     c, ids = cenario
     a = {x["tipo"]: x for x in reajuste.avisos(c, D(2026, 6, 15))}

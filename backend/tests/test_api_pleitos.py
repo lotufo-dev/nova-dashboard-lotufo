@@ -75,6 +75,13 @@ def test_reajuste_da_obra_traz_as_competencias_apostiladas_e_o_termo_do_pleito(a
     assert [(x["competencia"], x["valor_centavos"], x["medicao"], x["instrumento_numero"]) for x in r["competencias"]] \
         == [("2026-07", 10001, 30, "001/2026")]
     assert r["pleitos"][0]["instrumento_chave"] == "ap-1"
+    # a base de cada termo vem resolvida (rodada 3, PR #317): sem `data_base`, a base das previsoes que ele gravou,
+    # mesmo depois que o contrato ganha a 2a data-base
+    c = db.get_conn()
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2024-04', 'SICRO')", (cid,))
+    c.commit(); c.close()
+    assert cl.get(f"/api/contratos/{cid}/reajuste").json()["bases_dos_termos"] == \
+        [{"instrumento_id": iid, "data_base_mes": "2024-06"}]
 
 
 def test_pecas_do_orgao_entram_como_anexo_pela_api(api):
