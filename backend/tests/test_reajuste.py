@@ -105,12 +105,12 @@ def test_sem_pleito_enviado_o_termo_do_ciclo_fecha_o_ciclo(cenario):
 
 
 def _termo_sem_base_aplicado_e_segunda_base(c, ids):
-    """Termo sem `data_base` aplicado quando o contrato tinha uma base so' (gravou as previsoes na 2024-06); depois o
-    contrato ganha a 2a data-base (revisor e gate Sol, rodada 3, PR #317)."""
-    ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"ciclo": 2026, "percentual": "6,76",
-                                                              "competencias": [{"competencia": "2026-07", "valor": "1,00"}]})
+    """Termo sem `data_base` aplicado quando o contrato tinha uma base so' (o aplicar guardou a 2024-06 no termo,
+    migracao 055); depois o contrato ganha a 2a data-base (revisor e gate Sol, rodada 3, PR #317). O caminho inteiro
+    pelo aplicar esta' em test_cadastro_aplicar."""
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"ciclo": 2026, "percentual": "6,76"})
     iid = c.execute("SELECT MAX(id) FROM instrumentos").fetchone()[0]
-    _previsao(c, ids["contrato"], "2026-07", 100, "apostilamento", instrumento_id=iid)
+    c.execute("UPDATE instrumentos SET data_base_mes='2024-06' WHERE id=?", (iid,))
     c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2024-04', 'SICRO')", (ids["contrato"],))
     c.commit()
     return iid
@@ -128,7 +128,7 @@ def test_termo_sem_data_base_segue_fechando_o_ciclo_depois_da_segunda_base(cenar
 
 
 def test_base_dos_termos_resolvida_para_a_aba(cenario):
-    # a aba recebe a base de cada termo: `data_base`, senao a unica, senao a das previsoes gravadas; sem nenhuma, None
+    # a aba recebe a base de cada termo: `data_base`, senao a guardada no termo, senao a unica; sem nenhuma, None
     c, ids = cenario
     iid = _termo_sem_base_aplicado_e_segunda_base(c, ids)
     ids["instrumento"]("apostilamento_reajuste", "2026-10-01", {"data_base": "2024-04", "ciclo": 2026})

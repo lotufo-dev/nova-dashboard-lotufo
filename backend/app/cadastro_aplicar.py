@@ -448,11 +448,11 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
     bases = [d["mes"] for d in c["datas_base"]]
     for inst in ordem:
         dados = inst["dados"]
-        iid = conn.execute("SELECT id FROM instrumentos WHERE contrato_id=? AND chave=?",
-                           (contrato_id, inst["chave"])).fetchone()[0]
-        # termo ja' aplicado (gate Sol, PR #317, S2): segue na base das previsoes que gravou, mesmo que o contrato
-        # tenha ganhado outra data-base depois; so' o termo novo precisa dizer a dele (o resolvedor e' o da aba)
-        base = reajuste.base_do_termo(conn, iid, dados, bases[0] if len(bases) == 1 else None)
+        iid, guardada = conn.execute("SELECT id, data_base_mes FROM instrumentos WHERE contrato_id=? AND chave=?",
+                                     (contrato_id, inst["chave"])).fetchone()
+        # termo ja' aplicado (gate Sol, PR #317): segue na base guardada quando foi aplicado, mesmo que o contrato
+        # tenha ganhado ou trocado de data-base depois; o termo novo sem base nem chega aqui (_base_do_termo_novo)
+        base = reajuste.base_do_termo(dados, guardada, bases[0] if len(bases) == 1 else None)
         ciclo = reajuste.ciclo_do_apostilamento(dados, inst["data"])
         comps = competencias_do_apostilamento(dados)
         if comps and (base is None or ciclo is None):
@@ -575,15 +575,29 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     auditoria.registrar(conn, usuario_id, "cadastro.instrumento", "aditivo", ja["id"], antes, depois)
 
 
+def _base_do_termo_novo(conn, contrato_id, inst, rotulo) -> str:
+    """A data-base que o apostilamento de reajuste novo guarda (migracao 055): a dele, senao a base unica do contrato
+    agora (as datas-base deste aplicar ja' estao gravadas). Termo sem base ou ciclo determinavel e' recusado, com ou
+    sem competencias (gate Sol, rodada 3, PR #317): gravado, ele seria imutavel, tiraria do ciclo o termo que corrige
+    e nunca fecharia ciclo nenhum."""
+    bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=?", (contrato_id,))]
+    base = reajuste.base_do_termo(inst["dados"], None, bases[0] if len(bases) == 1 else None)
+    if base is None or reajuste.ciclo_do_apostilamento(inst["dados"], inst["data"]) is None:
+        raise ValueError(f"{rotulo}: apostilamento de reajuste sem data-base ou ciclo determinável; "
+                         "diga data_base e ciclo no termo")
+    return base
+
+
 def _outro(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     novo = {"tipo": inst["tipo"], "numero": inst["numero"], "data": inst["data"],
             "dados": _json({**inst["dados"], "objeto": inst["objeto"], "corrige": inst["corrige"]})}
     ja = conn.execute("SELECT * FROM instrumentos WHERE contrato_id=? AND chave=?",
                       (contrato_id, inst["chave"])).fetchone()
     if ja is None:
-        cur = conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados, pdf) "
-                           "VALUES (?,?,?,?,?,?,?)", (contrato_id, inst["chave"], novo["tipo"],
-                                                      novo["numero"], novo["data"], novo["dados"], inst["pdf"]))
+        base = _base_do_termo_novo(conn, contrato_id, inst, rotulo) if inst["tipo"] == "apostilamento_reajuste" else None
+        cur = conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados, pdf, data_base_mes) "
+                           "VALUES (?,?,?,?,?,?,?,?)", (contrato_id, inst["chave"], novo["tipo"], novo["numero"],
+                                                        novo["data"], novo["dados"], inst["pdf"], base))
         rel["criados"].append(rotulo)
         auditoria.registrar(conn, usuario_id, "cadastro.instrumento", "instrumento", cur.lastrowid, None,
                             {"chave": inst["chave"], **novo})

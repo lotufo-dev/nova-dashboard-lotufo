@@ -776,6 +776,54 @@ def test_termo_novo_sem_data_base_em_contrato_de_duas_bases_e_erro_no_aplicar(co
     assert conn.execute("SELECT COUNT(*) FROM instrumentos").fetchone()[0] == 0
 
 
+DUAS_BASES = [{"mes": "2023-04", "indice": "setorial"}, {"mes": "2023-06", "indice": "FGV/DNIT"}]
+SO_PERCENTUAL = {**AP_REAJ, "chave": "ap-11", "data": "2026-09-15", "numero": "019/2024/02/11",
+                 "dados": {"ciclo": 2026, "percentual": "6,76"}}
+
+
+def _situacao(conn):
+    import datetime
+    return {k["data_base_mes"]: k["situacao"] for k in reajuste_mod.ciclos(conn, 1, datetime.date(2026, 10, 1))}
+
+
+def test_termo_so_com_percentual_guarda_a_base_e_segue_fechando_o_ciclo_quando_entra_a_segunda(conn):
+    # Gate Sol (rodada 3, PR #317), item 1: termo sem `data_base` e sem competencias (estilo MT-PAR), aplicado com uma
+    # base so'; nao grava previsao. A base vai junto com o termo, e a 2a base nao reabre o ciclo
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[SO_PERCENTUAL])]))
+    assert conn.execute("SELECT data_base_mes FROM instrumentos WHERE chave='ap-11'").fetchone()[0] == "2023-04"
+    assert _previsoes(conn) == []
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[SO_PERCENTUAL], datas_base=DUAS_BASES)]))
+    assert _situacao(conn) == {"2023-04": "apostilado", "2023-06": "pleito_pendente"}
+    assert reajuste_mod.bases_dos_termos(conn, 1)[0]["data_base_mes"] == "2023-04"
+
+
+def test_termo_novo_sem_base_que_corrige_outro_e_recusado_e_nada_muda(conn):
+    # item 2: em contrato de duas bases, o termo novo sem `data_base` e sem competencias que corrige outro era gravado,
+    # tirava o anterior do ciclo e desligava o pleito dele, e depois era ignorado; agora o aplicar recusa
+    t1 = {**SO_PERCENTUAL, "dados": {"data_base": "2023-04", "ciclo": 2026, "percentual": "6,76"}}
+    cad = dict(datas_base=DUAS_BASES, pleitos_anteriores=[PLEITO_2026])
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1], **cad)]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+    t2 = {**SO_PERCENTUAL, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-09-20", "corrige": "ap-11",
+          "dados": {"ciclo": 2026, "percentual": "6,80"}}
+    with pytest.raises(ValueError, match="data-base"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1, t2], **cad)]))
+    assert conn.execute("SELECT COUNT(*) FROM instrumentos").fetchone()[0] == 1
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+    assert _situacao(conn)["2023-04"] == "apostilado"
+
+
+def test_base_guardada_do_termo_vence_a_base_unica_nova(conn):
+    # item 3: o termo gravou previsoes na 2023-04 e o cadastro troca a base unica para 2023-06; o termo fica na 2023-04
+    dados = {k: v for k, v in AP_COMP["dados"].items() if k != "data_base"}
+    termo = {**AP_COMP, "dados": dados}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[termo])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[termo],
+                                                                datas_base=[{"mes": "2023-06", "indice": "FGV/DNIT"}])]))
+    assert _situacao(conn) == {"2023-06": "pleito_pendente"}
+    assert reajuste_mod.bases_dos_termos(conn, 1)[0]["data_base_mes"] == "2023-04"
+
+
 def test_termo_e_correcao_aplicados_juntos_a_correcao_vale_mesmo_com_data_anterior(conn):
     # a ordem de gravacao segue o `corrige`, nao so' a data: a correcao nunca fica atras do termo que corrige
     correcao = {**AP_COMP, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-09-01", "corrige": "ap-11",

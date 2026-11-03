@@ -45,17 +45,12 @@ def _ordem_termo(i: str) -> str:
     return f"{i}.data DESC, {i}.id DESC"
 
 
-def base_do_termo(conn, termo_id: int, dados: dict, unica: str | None) -> str | None:
+def base_do_termo(dados: dict, guardada: str | None, unica: str | None) -> str | None:
     """A data-base de um apostilamento, resolvida num lugar so' (revisor e gate Sol, rodada 3, PR #317): `data_base`
-    nos dados; senao a data-base unica do contrato (`unica`); senao a das previsoes que o termo gravou quando foi
-    aplicado (o contrato tinha uma base so' e ganhou outra depois; instrumento aplicado nao muda)."""
-    if dados.get("data_base"):
-        return dados["data_base"]
-    if unica:
-        return unica
-    r = conn.execute("SELECT data_base_mes FROM reajuste_previsoes WHERE instrumento_id=? AND origem='apostilamento' "
-                     "ORDER BY id LIMIT 1", (termo_id,)).fetchone()
-    return r[0] if r else None
+    nos dados; senao a que ficou guardada no termo quando ele foi aplicado (`instrumentos.data_base_mes`, migracao
+    055: a base unica daquele momento, que nao muda quando o contrato ganha ou troca de base); so' o termo sem base
+    guardada cai na data-base unica de agora (`unica`)."""
+    return dados.get("data_base") or guardada or unica
 
 
 def bases_dos_termos(conn, contrato_id: int) -> list[dict]:
@@ -63,8 +58,9 @@ def bases_dos_termos(conn, contrato_id: int) -> list[dict]:
     cartao certo; None quando nao se sabe."""
     bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=?", (contrato_id,))]
     unica = bases[0] if len(bases) == 1 else None
-    return [{"instrumento_id": r["id"], "data_base_mes": base_do_termo(conn, r["id"], json.loads(r["dados"] or "{}"), unica)}
-            for r in conn.execute("SELECT id, dados FROM instrumentos WHERE contrato_id=? "
+    return [{"instrumento_id": r["id"],
+             "data_base_mes": base_do_termo(json.loads(r["dados"] or "{}"), r["data_base_mes"], unica)}
+            for r in conn.execute("SELECT id, dados, data_base_mes FROM instrumentos WHERE contrato_id=? "
                                   "AND tipo='apostilamento_reajuste' ORDER BY id", (contrato_id,))]
 
 
@@ -74,7 +70,7 @@ def _apostilamento(conn, contrato_id: int, mes_base: str, ciclo: int, unica: boo
     for r in conn.execute(f"SELECT * FROM instrumentos i WHERE i.contrato_id=? AND i.tipo='apostilamento_reajuste' "
                           f"AND {_termo_vale('i')} ORDER BY {_ordem_termo('i')}", (contrato_id,)):
         d = json.loads(r["dados"] or "{}")
-        base = base_do_termo(conn, r["id"], d, mes_base if unica else None)
+        base = base_do_termo(d, r["data_base_mes"], mes_base if unica else None)
         ano = ciclo_do_apostilamento(d, r["data"])
         if ano is None:
             continue

@@ -64,8 +64,8 @@ def test_reajuste_da_obra_traz_as_competencias_apostiladas_e_o_termo_do_pleito(a
     c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
               "enviado_em, instrumento_chave) VALUES (?, 'reajuste', 'cadastro', '2024-06', 2026, 'CT-1-LT-2026', "
               "'enviado', '2026-06-10', 'ap-1')", (cid,))
-    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) VALUES "
-              "(?, 'ap-1', 'apostilamento_reajuste', '001/2026', '2026-09-15', ?)",
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados, data_base_mes) VALUES "
+              "(?, 'ap-1', 'apostilamento_reajuste', '001/2026', '2026-09-15', ?, '2024-06')",
               (cid, '{"ciclo": 2026, "competencias": [{"competencia": "2026-07", "valor": "100,01", "medicao": 30}]}'))
     iid = c.execute("SELECT id FROM instrumentos").fetchone()[0]
     c.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, valor_previsto_centavos, "
@@ -75,8 +75,8 @@ def test_reajuste_da_obra_traz_as_competencias_apostiladas_e_o_termo_do_pleito(a
     assert [(x["competencia"], x["valor_centavos"], x["medicao"], x["instrumento_numero"]) for x in r["competencias"]] \
         == [("2026-07", 10001, 30, "001/2026")]
     assert r["pleitos"][0]["instrumento_chave"] == "ap-1"
-    # a base de cada termo vem resolvida (rodada 3, PR #317): sem `data_base`, a base das previsoes que ele gravou,
-    # mesmo depois que o contrato ganha a 2a data-base
+    # a base de cada termo vem resolvida (rodada 3, PR #317): sem `data_base`, a guardada no termo quando foi
+    # aplicado (migracao 055), mesmo depois que o contrato ganha a 2a data-base
     c = db.get_conn()
     c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2024-04', 'SICRO')", (cid,))
     c.commit(); c.close()

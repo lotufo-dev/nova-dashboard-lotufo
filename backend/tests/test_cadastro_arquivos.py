@@ -694,3 +694,13 @@ def test_apostilamento_com_competencias_sem_data_base_em_contrato_de_duas_bases_
           if k != "data_base"}
     cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
     assert any("instrumentos[ap-reaj-1]" in a and "data-base" in a for a in cad["avisos"]), cad["avisos"]
+
+
+def test_apostilamento_sem_competencias_sem_data_base_em_contrato_de_duas_bases_tambem_e_aviso(tmp_path):
+    # Gate Sol (rodada 3, PR #317): o termo so' com percentual (ou so' com `corrige`) tambem precisa da base; o aplicar
+    # recusa o termo novo com ou sem competencias
+    bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+             {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
+    ap = {k: v for k, v in _apostilamento(percentual="6,76").items() if k != "data_base"}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
+    assert any("instrumentos[ap-reaj-1]" in a and "data-base" in a for a in cad["avisos"]), cad["avisos"]
