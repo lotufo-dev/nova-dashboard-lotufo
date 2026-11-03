@@ -53,8 +53,9 @@ ninguém. Leia antes `CLAUDE.md`, `README.md` e as regras de `.claude/rules/` qu
    skill `abrir-pr` descreve. Se o prompt veio como "Issue #N, PR #M, branch no GitHub <branch>: corrija
    estes achados", a PR já existe e você não cria nada: o seu worktree (isolado, como o de qualquer
    trabalhadora) nasceu do `master` e não tem trabalho seu ainda, então primeiro `git fetch origin` e
-   `git checkout -B "$(git branch --show-current)" origin/<branch>` (confira antes que `git status` está
-   limpo): a branch local continua com o nome que a ferramenta rastreia, só passa a apontar para o commit
+   `git checkout -B <nome lido> origin/<branch>`, com o nome da branch local que o passo 1 já mostrou
+   escrito por extenso (sem `$(...)`: substituição de comando pode pedir aprovação e, em segundo plano, o
+   improviso é renomear a branch; confira antes que `git status` está limpo): a branch local continua com o nome que a ferramenta rastreia, só passa a apontar para o commit
    da PR. Git em outro worktree a
    ferramenta recusa. Siga o passo 6.
 6. Se a orquestradora mandar achados de volta: para cada um, corrigir com teste, ou refutar com `arquivo:linha`

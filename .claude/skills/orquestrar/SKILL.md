@@ -71,12 +71,14 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      preferida. Só conta como "não respondeu" o `SendMessage` avisar que o agente já encerrou ou não existe; **sem
      prazo em minutos** (uma trabalhadora corrigindo com teste pode demorar, e duas corrigindo a mesma PR
      deixam o push da segunda recusado e o `<sha-antes>` sem bater).
-   - Se ela não responder (nesse sentido), conferir antes que `gh pr view <M> --json headRefOid` ainda é
-     o `<sha-antes>` e então abrir uma `trabalhadora` **nova, isolada como sempre**
+   - Se ela não responder (nesse sentido), conferir antes `gh pr view <M> --json headRefOid`. Se já **não** é o
+     `<sha-antes>`, a correção subiu enquanto se esperava: não abrir ninguém, rodar o `revisor-adversarial`
+     sobre `<sha-antes>..<headRefOid>` no worktree original (a correção subiu de lá).
+     Se ainda é o `<sha-antes>`, abrir uma `trabalhadora` **nova, isolada como sempre**
      (`isolation: "worktree"`, `run_in_background: true`), com o prompt "Issue #N, PR #M, branch no GitHub
      `<branch>`: corrija estes achados" e a lista. No worktree novo ela aponta a branch local dela para
-     `origin/<branch>` (`git fetch origin` e `git checkout -B "$(git branch --show-current)" origin/<branch>`, sem renomear a
-     branch), corrige
+     `origin/<branch>` (`git fetch origin` e `git checkout -B <nome da branch local lido com git branch --show-current> origin/<branch>`, o nome
+     literal, sem substituição de comando e sem renomear a branch), corrige
      com teste e faz `git push origin HEAD:<branch>`, a mesma branch remota da PR. O worktree original da PR fica parado
      no commit antigo; não importa, o que vale é o remoto.
    - Quando a correção voltar, rodar o `revisor-adversarial` de novo **só sobre o diff novo**, passando no
@@ -85,7 +87,9 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      correção, salvo se ela mexeu em lógica de dinheiro ou de envio de forma grande (regra da skill
      `gate-sol`); nesse caso, havendo cota, roda desse mesmo caminho só sobre o diff novo. **Duas rodadas no
      máximo**, a menos que o próprio Leo escolha a PR para mais uma correção (só se ele pedir; não é
-     automático); se ainda sobrar Crítico ou Aviso não refutado, marcar a
+     automático); a fonte é o comentário do Leo na issue #356 (orquestrar: correção isolada), de 03/11. Quando essa
+     rodada extra passa nas travas, a orquestradora tira o draft (`gh pr ready <M>`) e o label
+     `precisa-do-leo` da issue antes do passo 8. Se ainda sobrar Crítico ou Aviso não refutado, marcar a
      PR como draft (`gh pr ready --undo <M>`), pôr `precisa-do-leo` na issue, e seguir.
 7. **Preencher `## Gates` na PR** (`gh pr edit <M> --body-file ...`, mantendo o resto do corpo) com o resultado
    do revisor e do gate Sol, no formato da skill `abrir-pr`.
@@ -122,7 +126,7 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    revisão quando a CI do commit novo ficar verde. Depois pegar o log
    (`gh run list --branch <branch no GitHub> --limit 1 --json databaseId -q '.[0].databaseId'` e
    `gh run view <id> --log-failed`) e mandar à trabalhadora (uma rodada de correção, conta nas duas do passo
-   6). Quando ela voltar: passo 5 sobre o diff novo e passo 8 inteiro de novo antes de religar o auto-merge.
+   6). Quando ela voltar: a conferência do passo 6 (revisor sobre `<sha-antes>..HEAD` no worktree de quem corrigiu, e Sol só se a correção mexeu de forma grande em dinheiro ou envio) e o passo 8 inteiro de novo antes de religar o auto-merge.
    Vermelha de novo, `precisa-do-leo`.
 10. **Depois do merge** de cada PR (e no `PAROU`/`FALHOU` do passo 4): `git pull --ff-only` na pasta
     principal (com `cd` explícito para ela: o diretório do Bash da sessão persiste entre chamadas e pode ainda estar
