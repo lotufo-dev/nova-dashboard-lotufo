@@ -632,12 +632,120 @@ def test_planilha_aceita_diferente_da_memoria_anexada_nao_sai(api):
     r = cl.post(f"/api/pleitos/{pid}/enviar", json=corpo)
     assert r.status_code == 422 and r.json()["detail"] == msg, r.text
     assert _estado(pid)[1] == 0                                              # nenhum e-mail saiu
+    assert _estado(pid)[0]["envio_reservado_em"] is None                     # recusado antes de reservar
     # com a B anexada e a A ainda la', continua divergente; tirando a A, sai
     _anexar(cl, pid, "memoria-B.xlsx", _planilha(("2026-07", 2.0)))
     assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 422
     assert cl.post(f"/api/pleitos/{pid}/anexos/{a}/remover").status_code == 200
     assert msg not in [x["mensagem"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
     assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 200
+
+
+def test_memoria_so_em_pdf_com_planilha_aceita_pede_justificativa(api):
+    """Rodada 3 (achado 4): aceita a planilha B e anexa so' o PDF da memoria. Nao ha' como casar o PDF com a
+    planilha: a previa aponta que a aceita nao esta' anexada e o envio sem justificativa e' recusado."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, pid, ("2026-07", 2.0)).status_code == 200
+    r = cl.post(f"/api/pleitos/{pid}/anexos", data={"tipo": "planilha_calculo"},
+                files=_arquivo("memoria-A.pdf", b"%PDF-1.4 memoria A", "application/pdf"))
+    assert r.status_code == 200, r.text
+    pend = cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]
+    assert {"codigo": "memoria_ausente", "mensagem": "A planilha da previsão aceita não está anexada"} in pend
+    sem = {k: v for k, v in corpo.items() if k != "justificativa"}
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=sem)
+    assert r.status_code == 422 and "justificativa" in r.json()["detail"], r.text
+    assert _estado(pid)[1] == 0
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json=corpo).status_code == 200      # com justificativa, sai
+
+
+def _uid():
+    c = db.get_conn()
+    try:
+        return c.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    finally:
+        c.close()
+
+
+def test_anexo_nao_entra_nem_sai_com_o_envio_reservado(api):
+    """Rodada 3 (achado 1): com o e-mail saindo, anexar ou remover pela outra aba e' recusado com a mesma
+    recusa do envio (409 ENVIO_RESERVADO), e nada muda nos anexos."""
+    cl, cid, _ = api
+    pid, _ = _pronto(cl, cid)
+    aid = _anexar(cl, pid, "memoria-B.xlsx", _planilha(("2026-07", 2.0)))
+    c = db.get_conn()
+    envio_reserva.reservar(c, "pleitos", pid, _uid())
+    c.close()
+    r = cl.post(f"/api/pleitos/{pid}/anexos", data={"tipo": "planilha_calculo"},
+                files=_arquivo("memoria-A.xlsx", _planilha(("2026-07", 1.0)), XLSX))
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ENVIO_RESERVADO", r.text
+    r = cl.post(f"/api/pleitos/{pid}/anexos/{aid}/remover")
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ENVIO_RESERVADO", r.text
+    assert [a["nome"] for a in cl.get(f"/api/pleitos/{pid}").json()["anexos"]] == ["memoria-B.xlsx"]
+
+
+def test_planilha_anexada_na_outra_aba_durante_o_envio_nao_vai_no_email(api, monkeypatch):
+    """Rodada 3 (achado 1): aceita e anexada a B; a outra aba anexa a A entre a conferencia depois da reserva e a
+    leitura dos anexos do e-mail. A A e' recusada e o orgao recebe so' a B."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, pid, ("2026-07", 2.0)).status_code == 200
+    _anexar(cl, pid, "memoria-B.xlsx", _planilha(("2026-07", 2.0)))
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    original, erros, levados = pleitos._memoria_da_previsao, [], []
+
+    def confere_e_a_outra_aba_anexa(conn, p):
+        estado = original(conn, p)
+        if conn.execute("SELECT envio_reservado_em FROM pleitos WHERE id=?", (pid,)).fetchone()[0]:
+            outra = db.get_conn()
+            try:
+                pleitos.adicionar_anexo(outra, _uid(), pid, "planilha_calculo", "memoria-A.xlsx",
+                                        _planilha(("2026-07", 1.0)), "xlsx")
+            except Exception as e:
+                erros.append(e)
+            finally:
+                outra.close()
+        return estado
+
+    enviar_original = correio.enviar_e_registrar
+
+    def registra_anexos(conn, usuario, tipo, para, copia, assunto, html, anexos, **k):
+        levados.extend(n for n, _ in anexos)
+        return enviar_original(conn, usuario, tipo, para, copia, assunto, html, anexos, **k)
+
+    monkeypatch.setattr(pleitos, "_memoria_da_previsao", confere_e_a_outra_aba_anexa)
+    monkeypatch.setattr(correio, "enviar_e_registrar", registra_anexos)
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=corpo)
+    assert r.status_code == 200, r.text
+    assert [type(e).__name__ for e in erros] == ["EnvioEmAndamento"]
+    assert "memoria-A.xlsx" not in levados and "memoria-B.xlsx" in levados
+
+
+def test_memoria_tirada_depois_da_reserva_sem_justificativa_nao_sai(api, monkeypatch):
+    """Rodada 3 (achado 4): a previa nao tinha pendencia; entre ela e a reserva a planilha aceita sai da memoria.
+    A conferencia depois da reserva recusa o envio sem justificativa e destrava."""
+    cl, cid, _ = api
+    pid, corpo = _pronto(cl, cid)
+    assert _aceitar(cl, pid, ("2026-07", 2.0)).status_code == 200
+    aid = _anexar(cl, pid, "memoria-B.xlsx", _planilha(("2026-07", 2.0)))
+    cl.post(f"/api/pleitos/{pid}/anexos", data={"tipo": "cronograma"},
+            files=_arquivo("cronograma.pdf", b"%PDF-1.4 cronograma", "application/pdf"))
+    assert cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"] == []
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    reservar = envio_reserva.reservar
+
+    def reserva_e_some_a_memoria(conn, *a, **k):
+        reservar(conn, *a, **k)
+        outra = db.get_conn()
+        outra.execute("UPDATE pleito_anexos SET removido_em=datetime('now') WHERE id=?", (aid,))
+        outra.commit()
+        outra.close()
+
+    monkeypatch.setattr(envio_reserva, "reservar", reserva_e_some_a_memoria)
+    sem = {k: v for k, v in corpo.items() if k != "justificativa"}
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=sem)
+    assert r.status_code == 422 and r.json()["detail"] == "A planilha da previsão aceita não está anexada", r.text
+    assert _estado(pid) == ({"situacao": "assinado", "envio_id": None, "envio_reservado_em": None}, 0)
 
 
 def test_digitada_e_descartada_some_da_aba(api):

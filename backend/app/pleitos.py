@@ -267,6 +267,15 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
     return pid
 
 
+def _anexos_mudaveis(conn, pleito_id: int) -> None:
+    """Dentro do BEGIN IMMEDIATE (como em `_gravar_previsao`): com o e-mail saindo, os anexos sao os que foram
+    conferidos depois da reserva e vao no e-mail; trocar um ali mandaria ao orgao o que nao se conferiu."""
+    agora = _linha(conn, pleito_id)
+    _editavel(agora)
+    if agora["envio_reservado_em"]:
+        raise envio_reserva.reservado(conn, agora["envio_reservado_em"], agora["envio_reservado_por"])
+
+
 def adicionar_anexo(conn, usuario_id: int, pleito_id: int, tipo: str, nome: str, dados: bytes, ext: str) -> int:
     if tipo not in TIPOS_ANEXO:
         raise ValueError(f"Tipo de anexo inválido: {tipo!r}")
@@ -276,6 +285,7 @@ def adicionar_anexo(conn, usuario_id: int, pleito_id: int, tipo: str, nome: str,
     _editavel(p)
     rel, sha = arquivos.gravar_bytes("pleitos", dados, ext)
     with db.mutacao(conn):
+        _anexos_mudaveis(conn, pleito_id)
         aid = conn.execute("INSERT INTO pleito_anexos (pleito_id, tipo, nome, arquivo, sha256, tamanho, ext) "
                            "VALUES (?,?,?,?,?,?,?)", (pleito_id, tipo, nome, rel, sha, len(dados), ext)).lastrowid
         auditoria.registrar(conn, usuario_id, "pleito.anexo", "pleito", pleito_id, None,
@@ -287,6 +297,7 @@ def remover_anexo(conn, usuario_id: int, pleito_id: int, anexo_id: int) -> None:
     p = _linha(conn, pleito_id)
     _editavel(p)
     with db.mutacao(conn):
+        _anexos_mudaveis(conn, pleito_id)
         n = conn.execute("UPDATE pleito_anexos SET removido_em=datetime('now') "
                          "WHERE id=? AND pleito_id=? AND removido_em IS NULL", (anexo_id, pleito_id)).rowcount
         if n != 1:
@@ -299,6 +310,7 @@ def remover_anexo(conn, usuario_id: int, pleito_id: int, anexo_id: int) -> None:
 MAX_COMPETENCIAS = leitura_planilha_reajuste.MAX_COMPETENCIAS
 PREVISAO_NA_REITERACAO = "Reiteração não traz previsão de reajuste: vale a do pleito reiterado"
 MEMORIA_DIVERGENTE = "A memória de cálculo anexada não é a planilha da previsão aceita"
+MEMORIA_AUSENTE = "A planilha da previsão aceita não está anexada"
 _COMPETENCIA = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
 
 
@@ -329,15 +341,22 @@ def _planilha_aceita(conn, pleito_id: int) -> str | None:
     return None
 
 
-def _memoria_divergente(conn, p: dict) -> bool:
-    """Com previsao lida da planilha, toda planilha .xlsx anexada como memoria de calculo tem de ser a aceita (e
-    ela tem de estar la'): senao o orgao recebe uma planilha e a dashboard mostra outra. Memoria so' em PDF nao se
-    compara (nao ha' como casar PDF com a planilha)."""
+def _memoria_da_previsao(conn, p: dict) -> str | None:
+    """Com previsao lida da planilha, toda planilha .xlsx anexada como memoria de calculo tem de ser a aceita:
+    senao o orgao recebe uma planilha e a dashboard mostra outra ('divergente', o envio e' recusado). Sem nenhuma
+    .xlsx na memoria (so' PDF, ou nada) a aceita nao esta' la' ('ausente'): pendencia que a justificativa libera,
+    porque o PDF pode ser a mesma planilha impressa e nao ha' como casar um com o outro. None: nada a apontar."""
     sha = _planilha_aceita(conn, p["id"]) if p["tipo"] == "reajuste" else None
     if not sha:
-        return False
+        return None
     memorias = {a["sha256"] for a in _anexos_de(conn, p["id"]) if a["tipo"] == "planilha_calculo" and a["ext"] == "xlsx"}
-    return bool(memorias) and memorias != {sha}
+    if not memorias:
+        return "ausente"
+    return "divergente" if memorias != {sha} else None
+
+
+def _memoria_divergente(conn, p: dict) -> bool:
+    return _memoria_da_previsao(conn, p) == "divergente"
 
 
 def _fonte(conn, r) -> str:
@@ -547,8 +566,11 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     if p["tipo"] == "prazo" and _CHUVA.search(p["justificativa"] or "") and not conn.execute(
             "SELECT 1 FROM instrumentos WHERE contrato_id=? AND tipo='paralisacao' LIMIT 1", (p["contrato_id"],)).fetchone():
         out.append({"codigo": "chuva", "mensagem": "O contrato veda alegar só chuva; cite a ordem de paralisação do órgão"})
-    if _memoria_divergente(conn, p):
+    memoria = _memoria_da_previsao(conn, p)
+    if memoria == "divergente":
         out.append({"codigo": "memoria_divergente", "mensagem": MEMORIA_DIVERGENTE})
+    elif memoria == "ausente":
+        out.append({"codigo": "memoria_ausente", "mensagem": MEMORIA_AUSENTE})
     if p["situacao"] == "rascunho":
         out.append({"codigo": "nao_montado", "mensagem": "Carta ainda não montada"})
     elif not p["assinado_arquivo"]:
@@ -663,10 +685,13 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
     if _linha(conn, pleito_id)["situacao"] == "descartado":
         envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
         raise ValueError("Pleito descartado enquanto se preparava o envio: nada foi enviado")
-    # anexo trocado ou previsao aceita entre a leitura acima e a reserva: confere de novo, ja' com a reserva
-    if _memoria_divergente(conn, p):
+    # anexo trocado ou previsao aceita entre a leitura acima e a reserva: confere de novo, ja' com a reserva. Daqui
+    # ate' o e-mail os anexos nao mudam (`_anexos_mudaveis` recusa com a reserva): o que se confere e' o que vai
+    memoria = _memoria_da_previsao(conn, p)
+    if memoria == "divergente" or (memoria == "ausente" and not any(x["codigo"] == "memoria_ausente"
+                                                                   for x in pv["pendencias"])):
         envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
-        raise ValueError(MEMORIA_DIVERGENTE)
+        raise ValueError(MEMORIA_DIVERGENTE if memoria == "divergente" else MEMORIA_AUSENTE)
     try:
         envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(p), para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),

@@ -149,6 +149,8 @@ def anexo(pid: ID, tipo: Literal[pleitos.TIPOS_ANEXO] = Form(...),
         dados, ext = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=pdfs.TETO_BYTES_PACOTE)), "pdf"
     try:
         pleitos.adicionar_anexo(conn, usuario["id"], pid, tipo, nome, dados, ext)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: os anexos sao os que vao nele
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -206,6 +208,8 @@ def remover_anexo(pid: ID, anexo_id: ID, usuario: dict = Depends(exigir("editar_
     _existe(conn, pid)
     try:
         pleitos.remover_anexo(conn, usuario["id"], pid, anexo_id)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: os anexos sao os que vao nele
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
