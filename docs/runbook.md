@@ -700,9 +700,11 @@ endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HT
 
 **Decisões pendentes (03/11/2026).** Data do corte; robô do SIGA (fica em `<servidor>` apontando para a VM, e o botão
 "Atualizar" da tela SIGA deixa de funcionar porque ele dispara a tarefa agendada na própria máquina, ou muda para a VM junto);
-cópia externa: a tarefa da VM já aponta para a pasta de rede do servidor de arquivos (`-BackupExterno \\<servidor-de-arquivos>\...`),
-mas a conta de computador da VM (`<vm>$`) ainda não tem Modificar nela (compartilhamento e NTFS), então o health acusa
-`ultima_copia_externa_erro` "acesso negado" e os snapshots ficam só no disco da VM; o robô do SIGA ficou em `<servidor>` com o
+cópia externa: a tarefa da VM aponta para a pasta de rede do servidor de arquivos (`-BackupExterno \\<servidor-de-arquivos>\...`)
+e a conta de computador da VM (`<vm>$`) recebeu Modificar na pasta (NTFS, pelo Explorer numa sessão do domínio na própria VM)
+e Change no compartilhamento (`Grant-SmbShareAccess -Name <compartilhamento> -AccountName "<domínio>\<vm>$" -AccessRight Change
+-CimSession <servidor-de-arquivos>`, pelo nome DNS: por IP o WinRM recusa); de um PC fora do domínio a busca da conta de
+computador não funciona. Teste: tarefa avulsa como SYSTEM na VM gravando um arquivo na pasta; o robô do SIGA ficou em `<servidor>` com o
 endereço da dashboard trocado para a VM (cópia do arquivo original ao lado), até ser refeito para rodar na VM sem janela.
 
 ## Riscos conhecidos
