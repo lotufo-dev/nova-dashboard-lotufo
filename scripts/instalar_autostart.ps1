@@ -15,6 +15,7 @@ param(
     [switch]$SemTls,
     # Porta do servidor, repassada a rodar_producao.ps1 so quando informada (0 = padrao
     # do modo: 80 com -SemTls, 8443 com TLS). Ex.: 8080 na VM em que a 80 e' do IIS.
+    [ValidateRange(0, 65535)]
     [int]$Porta = 0,
     # Repassados a rodar_producao.ps1: RM (fase 5) e Microsoft 365 (fase 6).
     [string]$RmUrl = "",

@@ -73,7 +73,7 @@ git diff --name-only "$atual" origin/master -- frontend
    (o `deploy.ps1` também cria e apaga o sentinela sozinho; criar antes não atrapalha.)
 2. Na pasta principal, pela ferramenta PowerShell, **sem redirecionar stderr** (nada de `2>&1` ou `*>&1`: o
    PowerShell 5.1 transforma o aviso do Vite em erro fatal, cabeçalho do script), com timeout de 600000 ms:
-   `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend` (e `-Porta <porta>` se a produção não está na 80)
+   `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend` (a porta vem da tarefa agendada; `-Porta <porta>` só confere e aborta se não bater)
 3. Ler a saída:
    - `sem migracao nova; sem backup pre-migracao` ou `BACKUP PRE-MIGRACAO: <caminho>` → guardar o caminho do
      backup para o registro.

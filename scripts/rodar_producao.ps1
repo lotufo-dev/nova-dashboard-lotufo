@@ -16,6 +16,7 @@ param(
     [string]$BackupExterno = "",
     [switch]$SemTls,
     # Porta do servidor. 0 = padrao do modo: 80 com -SemTls, 8443 com TLS.
+    [ValidateRange(0, 65535)]
     [int]$Porta = 0,
     # TOTVS RM (fase 5, leitura). Os tres juntos ligam a sincronizacao horaria; sem eles
     # o servidor sobe com o RM desligado. A senha fica num ARQUIVO de uma linha dentro

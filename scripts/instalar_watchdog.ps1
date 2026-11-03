@@ -9,6 +9,7 @@
 # http://localhost:<porta>/api/health. Ex.: -Porta 8080 na VM em que a 80 e' do IIS.
 [CmdletBinding()]
 param(
+    [ValidateRange(1, 65535)]
     [int]$Porta = 80
 )
 $ErrorActionPreference = "Stop"

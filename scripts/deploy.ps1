@@ -19,13 +19,33 @@ param(
     [string]$Ref = "origin/master",
     [string]$AppDir = "C:\DashboardLotufo\app",
     [switch]$SemFrontend,  # pula npm/build quando a mudanca e' so backend/docs
-    [int]$Porta = 80       # porta em que a producao responde (8080 na VM em que a 80 e' do IIS)
+    # Porta em que a producao responde. 0 = ler dos argumentos da tarefa DashboardLotufo
+    # (-Porta N; sem ele, 80). Informada e diferente da tarefa, o deploy aborta antes do checkout.
+    [ValidateRange(0, 65535)]
+    [int]$Porta = 0
 )
 $ErrorActionPreference = "Stop"
 $pause = "C:\DashboardLotufo\watchdog.pause"
 $py = Join-Path $AppDir "backend\.venv\Scripts\python.exe"
 $lock = Join-Path $AppDir "backend\requirements.lock"
 if (-not (Test-Path $py)) { throw "venv da producao ausente em $py (setup inicial do diretorio pinado nao feito)" }
+
+# A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
+# um deploy na 80 acharia o IIS como dono da porta e abortaria DEPOIS do checkout, sem rollback.
+function PortaDaTarefa {
+    $tarefa = Get-ScheduledTask -TaskName "DashboardLotufo" -ErrorAction SilentlyContinue
+    if (-not $tarefa) { return 0 }
+    $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
+    if ($argumentosTarefa -match "-Porta (\d+)") { return [int]$Matches[1] }
+    return 80
+}
+$portaTarefa = PortaDaTarefa
+if ($Porta -eq 0) {
+    if ($portaTarefa -eq 0) { throw "tarefa DashboardLotufo nao encontrada; informe -Porta ou instale a tarefa (instalar_autostart.ps1)" }
+    $Porta = $portaTarefa
+} elseif ($portaTarefa -ne 0 -and $Porta -ne $portaTarefa) {
+    throw "-Porta $Porta nao bate com a tarefa DashboardLotufo (porta $portaTarefa); nada foi alterado"
+}
 
 function Saudavel {
     try { return ((Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing).StatusCode -eq 200) }
