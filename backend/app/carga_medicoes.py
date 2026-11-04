@@ -395,7 +395,8 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
             # #383: a planilha/carta enviada ao orgao (#282) congela a competencia em qualquer estado seguinte
             # (protocolada sem NF inclusive); a data fica na medicao mesmo depois do protocolo
             enviada = bool(atual["planilha_enviada_em"])
-            if nfs or na_planilha or enviada or atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
+            no_espelho = atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida")
+            if nfs or na_planilha or enviada or no_espelho:
                 # espelho e nota levam a competencia antiga: mudar so' a medicao os separaria
                 _virar(li, "conflito", f"a competência {atual['competencia']} já está "
                                        + (f"na NF {', '.join(nfs)} vinculada" if nfs
@@ -551,10 +552,11 @@ def _corrigir(conn, usuario_id: int, li: dict) -> tuple[str, bool]:
     if m["competencia"] != d["competencia"]:
         # #383: `planilha_enviada_em IS NULL` defende da corrida com o envio da planilha/carta (#282), que congela
         # a competencia entre o ensaio e a gravacao
-        cur = conn.execute("UPDATE medicoes SET competencia=? WHERE id=? AND competencia=? AND planilha_enviada_em IS NULL",
+        cur = conn.execute("UPDATE medicoes SET competencia=? "
+                           "WHERE id=? AND competencia=? AND planilha_enviada_em IS NULL",
                            (d["competencia"], mid, m["competencia"]))
-        db.exigir_uma_linha(cur, "Medição alterada concorrentemente (ou planilha/carta enviada no meio): a competência "
-                                 "não pôde ser corrigida")
+        db.exigir_uma_linha(cur, "Medição alterada concorrentemente (ou planilha/carta enviada no meio): "
+                                 "a competência não pôde ser corrigida")
         auditoria.registrar(conn, usuario_id, "medicao.competencia", "medicao", mid,
                             {"competencia": m["competencia"]},
                             {"competencia": d["competencia"], "origem": "carga do histórico", "linha": li["linha"],
