@@ -66,6 +66,8 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    (`<N>-<nome-curto>`). O agente `trabalhadora` tem `isolation: worktree`: toda instância nasce no próprio
    worktree e a ferramenta recusa `git` em outro, então **não existe** trabalhadora "apontada" para o worktree
    da PR. O caminho é:
+   - A trabalhadora devolve **um push só** por rodada de correção (a CI cancela e recomeça a cada push): não rodar o
+     revisor em commit intermediário, só sobre `<sha-antes>..<sha-depois>` da resposta dela.
    - Mandar a lista inteira à mesma trabalhadora (`SendMessage` com o nome dela), pedindo para corrigir com
      teste ou refutar com `arquivo:linha`, e atualizar a PR. Ela ainda está no worktree dela e é a opção
      preferida. Só conta como "não respondeu" o `SendMessage` avisar que o agente já encerrou ou não existe; **sem
