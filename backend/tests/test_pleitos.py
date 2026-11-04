@@ -9,6 +9,9 @@ import yaml
 from app import arquivos, auth, cadastro_aplicar, correio, db, graph, leitura_pdf, medicoes, pleitos, reajuste, tempo
 from tests.test_protocolo import _assinar, _contrato
 
+# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 D = datetime.date
 CARTAS = yaml.safe_load((pathlib.Path(__file__).parents[2] / "cadastro-exemplo" / "cartas.yaml").read_text(encoding="utf-8"))
 

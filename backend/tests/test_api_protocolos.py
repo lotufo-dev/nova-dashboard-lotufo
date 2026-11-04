@@ -10,6 +10,9 @@ from app import auditoria, auth, cadastro_aplicar, correio, db, graph, medicoes,
 from tests.test_envio_reserva import CorreioFalso, sempre_travado
 from tests.test_protocolo import CARTAS, _assinar, _contrato, _pdf
 
+# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 
 @pytest.fixture
 def api(client_admin, tmp_path, monkeypatch):
