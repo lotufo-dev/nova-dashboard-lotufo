@@ -108,7 +108,8 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    - `gh pr view <M> --json isDraft,mergeable -q '.isDraft,.mergeable'` = `false` e `MERGEABLE` (não é draft,
      sem conflito). `UNKNOWN` não é trava: o GitHub calcula depois de cada push; esperar 20 s e reconsultar,
      até 3 vezes. Só `CONFLICTING` segura;
-   - revisor com veredito válido e sem Crítico/Aviso em aberto; gate Sol idem quando se aplica. O gate Sol
+   - revisor com veredito válido, sem Crítico em aberto e sem Aviso que não tenha virado issue (número em
+     `## Gates`, passo 6); gate Sol idem quando se aplica. O gate Sol
      roda quando o codex existe (máquina local). Na nuvem, onde não há codex, não é trava: registrar "gate
      Sol: não disponível na nuvem" em `## Gates`. Sem cota do codex vale o passo 5 (só mergeia sozinha se a
      rodada 1 do Sol já cobriu o diff inteiro e a correção não mexeu em dinheiro ou envio de forma grande);
@@ -126,19 +127,27 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    junta com o `master` atual e roda a CI de novo nessa mistura (evento `merge_group`) antes de mergear.
    Falhou em alguma: comentar na **issue** qual trava segurou, pôr `precisa-do-leo` na issue e seguir.
 9. **Vigiar a PR depois do auto-merge.** Para cada PR com auto-merge ligado, lançar o vigia versionado ao lado
-   desta skill, em segundo plano (Bash com `run_in_background: true`): `.claude/skills/orquestrar/vigia.sh <M>`
-   (no Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File .claude/skills/orquestrar/vigia.ps1 <M>`).
+   desta skill, em segundo plano (Bash com `run_in_background: true`), pelo **caminho absoluto da pasta principal**
+   (o `cd` do Bash pode estar num worktree antigo sem o arquivo): `<pasta principal>/.claude/skills/orquestrar/vigia.sh <M>`
+   (no Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File <pasta principal>\.claude\skills\orquestrar\vigia.ps1 <M>`).
    Não escrever vigia no scratchpad: um vigia que só espera "mergeada ou fora da fila" deixou a PR #320 (planilha de
-   previsão de reajuste) 1h32 com a CI vermelha em 03/11/2026, porque a PR nunca entrou na fila. O vigia confere a
-   cada minuto e termina na primeira palavra abaixo; quando voltar, a orquestradora faz o que a linha manda:
+   previsão de reajuste) 1h32 com a CI vermelha em 03/11/2026, porque a PR nunca entrou na fila. O vigia faz uma consulta
+   GraphQL a cada 2 minutos e termina na primeira palavra abaixo; quando voltar, a orquestradora faz o que a linha manda:
    - `MERGED`: passo 10.
+   - `ERRO` (saída 2: PR inexistente ou `gh` falhando): conferir `gh auth status`; se a PR existe, relançar o
+     vigia; senão `precisa-do-leo` na issue.
    - `CI_VERMELHA` (algum check da branch com falha; não espera a fila): **CI vermelha**, abaixo.
-   - `FILA_VERMELHA` (o grupo da fila, `gh run list --event merge_group --limit 5`, branch
+   - `FILA_VERMELHA` (o grupo da fila, `gh run list --event merge_group --limit 20`, branch
      `gh-readonly-queue/master/pr-<M>-...`, falhou): em geral choque com outra PR que entrou antes; tratar como CI
      vermelha, pedindo à trabalhadora `git merge origin/master` junto da correção.
-   - `AUTO_MERGE_DESLIGADO` (o GitHub desliga sozinho quando a fila falha, ou alguém desligou): reconsultar
-     `gh pr view <M> --json state,statusCheckRollup`; se a causa é falha, CI vermelha; se a CI está verde e ninguém
-     comentou, religar com `gh pr merge <M> --auto --merge` depois de repetir as travas do passo 8.
+   - `AUTO_MERGE_DESLIGADO` (nem auto-merge armado nem PR na fila; o script já trata como armada a PR que entrou
+     direto na fila, sem `autoMergeRequest`). Antes de religar, ver por que desligou: (1) o `AutoMergeDisabledEvent`
+     mais recente da linha do tempo (`gh api graphql -f query='{repository(owner:"lotufo-dev",name:"nova-dashboard-lotufo"){pullRequest(number:<M>){timelineItems(last:5,itemTypes:[AUTO_MERGE_DISABLED_EVENT]){nodes{... on AutoMergeDisabledEvent{reason reasonCode createdAt actor{login}}}}}}}'`):
+     `manually_disabled` por outra pessoa que não a orquestradora é o Leo, então `precisa-do-leo` e **não religar**;
+     (2) `gh pr view <M> --json mergeable,mergeStateStatus`: `CONFLICTING`/`DIRTY` (tirada da fila por
+     `merge_conflict`) é conflito, então mandar a trabalhadora fazer `git merge origin/master`, como na fila
+     vermelha; (3) check ou fila com falha é CI vermelha. Só com CI verde, sem conflito e sem desligamento manual,
+     religar com `gh pr merge <M> --auto --merge` depois de repetir as travas do passo 8.
    - `COMENTARIO` (comentário ou review novo; é o Leo): desarmar na hora (`gh pr merge <M> --disable-auto`), pôr
      `precisa-do-leo` na issue e seguir.
    - `FECHADA`: registrar na issue e seguir para o passo 10 sem pull.
