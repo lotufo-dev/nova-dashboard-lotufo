@@ -125,25 +125,17 @@ export function NovoPleito({ contratoId, tipo, dataBase, reemite, sugestao, aoCr
         <>
           <div className="campo">
             <label className="campo__rotulo" htmlFor="prazo-dias">Dias de prorrogação</label>
-            <input id="prazo-dias" name="dias" autoComplete="off" spellCheck={false} className="entrada--16ch" type="number" min={1} required
+            {/* max: o teto do pedido na API (api_pleitos.CriarIn.dias, 3.650 dias) */}
+            <input id="prazo-dias" name="dias" autoComplete="off" spellCheck={false} className="entrada--16ch" type="number" min={1} max={3650} required
               aria-describedby={sugestao ? "prazo-dias-sugestao" : undefined}
               value={dias} onChange={e => setDias(e.target.value)} />
             {sugestao && (
-              <div id="prazo-dias-sugestao">
-                {sugestao.dias !== null ? (
-                  <>
-                    <p className="campo__nota">
-                      Sugestão: {sugestao.dias} dias (saldo {brl(sugestao.saldo_centavos)}, ritmo {brl(sugestao.ritmo_centavos)}/mês)
-                    </p>
-                    <p className="campo__nota">
-                      {`Ritmo: medido de ${fmtCompetencia(sugestao.de)} a ${fmtCompetencia(sugestao.ate)} `
-                        + `(${brl(sugestao.medido_periodo_centavos)}) ÷ ${sugestao.meses} meses, contado a partir do fim `
-                        + `da execução em ${fmtDataPura(sugestao.execucao_fim ?? "")}; novo fim em `
-                        + `${fmtDataPura(sugestao.novo_fim ?? "")}. Confira e mude se precisar.`}
-                    </p>
-                  </>
-                ) : <p className="campo__nota">Sem sugestão de dias. {sugestao.motivo}</p>}
-              </div>
+              <p className="campo__nota" id="prazo-dias-sugestao">
+                {sugestao.dias !== null
+                  ? `Sugestão: ${sugestao.dias} ${sugestao.dias === 1 ? "dia" : "dias"} (saldo ${brl(sugestao.saldo_centavos)}, `
+                    + `ritmo ${brl(sugestao.ritmo_centavos)}/mês de ${fmtCompetencia(sugestao.de)} a ${fmtCompetencia(sugestao.ate)})`
+                  : `Sem sugestão de dias. ${sugestao.motivo ?? ""}`}
+              </p>
             )}
           </div>
           <div className="campo">

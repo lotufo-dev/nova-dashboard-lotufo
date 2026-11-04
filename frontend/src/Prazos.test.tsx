@@ -62,14 +62,15 @@ describe("Prazos", () => {
   // issue #292: a carta de prazo sugere os dias pelo ritmo dos ultimos 6 meses; a pessoa confirma ou muda
   const sugestao = (extra: Record<string, unknown> = {}) => ({
     saldo_centavos: 20000000, medido_periodo_centavos: 30000001, ritmo_centavos: 5000000, meses: 6, de: "2026-04",
-    ate: "2026-09", execucao_fim: "2026-10-20", novo_fim: "2027-02-20", dias: 123, motivo: null, ...extra });
+    ate: "2026-09", execucao_fim: "2026-10-20", novo_fim: "2027-02-15", dias: 123, motivo: null, ...extra });
 
   it("pedir prorrogação mostra a sugestão com a conta e o campo de dias preenchido e editável", async () => {
     api.mockResolvedValue({ situacao: situacao(), historico: "", sugestao: sugestao(), pleitos: [] });
     render(<Prazos contratoId={1} podeEditar={true} />);
     fireEvent.click(await screen.findByRole("button", { name: "Pedir prorrogação" }));
-    expect(screen.getByText(/^Sugestão: 123 dias \(saldo R\$\s200\.000,00, ritmo R\$\s50\.000,00\/mês\)$/)).toBeTruthy();
-    expect(screen.getByText(/medido de 04\/2026 a 09\/2026 \(R\$\s300\.000,01\) ÷ 6 meses.*20\/10\/2026.*20\/02\/2027/)).toBeTruthy();
+    expect(screen.getByText(/^Sugestão: 123 dias \(saldo R\$\s200\.000,00, ritmo R\$\s50\.000,00\/mês de 04\/2026 a 09\/2026\)$/)).toBeTruthy();
+    // a conta cabe numa linha: sem frase de apoio explicando a regra (texto-na-tela.md)
+    expect(screen.queryByText(/Confira e mude|contado a partir/)).toBeNull();
     const campo = screen.getByLabelText("Dias de prorrogação") as HTMLInputElement;
     expect(campo.value).toBe("123");
     fireEvent.change(campo, { target: { value: "150" } });
@@ -85,5 +86,13 @@ describe("Prazos", () => {
     expect(screen.getByText(`Sem sugestão de dias. ${motivo}`)).toBeTruthy();
     expect(screen.queryByText(/^Sugestão:/)).toBeNull();
     expect((screen.getByLabelText("Dias de prorrogação") as HTMLInputElement).value).toBe("");
+  });
+
+  it("sugestão de 1 dia no singular, e o campo tem o teto do pedido", async () => {
+    api.mockResolvedValue({ situacao: situacao(), historico: "", sugestao: sugestao({ dias: 1 }), pleitos: [] });
+    render(<Prazos contratoId={1} podeEditar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Pedir prorrogação" }));
+    expect(screen.getByText(/^Sugestão: 1 dia \(/)).toBeTruthy();
+    expect((screen.getByLabelText("Dias de prorrogação") as HTMLInputElement).max).toBe("3650");
   });
 });
