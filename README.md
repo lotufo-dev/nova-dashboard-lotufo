@@ -57,7 +57,7 @@ cd frontend && npm test && npm run typecheck && npm run lint
 
 A CI roda o backend em dois jobs: `backend` (Ubuntu, `pytest -n 4 -m "not windows"`, com pytest-xdist) e
 `backend-windows` (`pytest -m "windows or pdf"`). Marcador `windows`: só vale no Windows (`tests/test_backup.py`); roda só
-no `backend-windows`. Marcador `pdf`: gera PDF com a Arial da produção (`test_carta`, `test_frc`, `test_protocolo`, `test_pdfs`, `test_notas_envio`, `test_notas`, `test_pleitos`, `test_api_protocolos`, `test_api_pleitos`; para achar os módulos, `grep -lE "carta\.gerar|frc\.gerar|protocolo\.montar|pleitos\.montar|conferir_pdfs|textos_por_pagina_com_limite|_texto_da_frc|/montar" backend/tests/*.py`);
+no `backend-windows`. Marcador `pdf`: gera PDF com a Arial da produção (`test_carta`, `test_frc`, `test_protocolo`, `test_pdfs`, `test_notas_envio`, `test_pleitos`, `test_api_protocolos`, `test_api_pleitos`, `test_envio_reserva`, `test_api_siga`; para achar os módulos, `grep -lE "carta\.gerar|frc\.gerar|protocolo\.montar|pleitos\.montar|conferir_pdfs|textos_por_pagina_com_limite|_texto_da_frc|protocolo\.criar|/montar" backend/tests/*.py` acha os candidatos, e o que decide é a medição: um plugin do pytest que conta as chamadas a `FPDF.output` por módulo; `test_notas` e `test_api_admin` casam com o grep e geram 0 PDFs, por isso ficam sem o marcador);
 roda nos dois jobs (Helvetica no Ubuntu, Arial no Windows).
 
 Recriar o ambiente igual ao testado: `.venv\Scripts\python -m pip install -r requirements.lock`

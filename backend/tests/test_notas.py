@@ -10,9 +10,6 @@ from app import (auth, avisos, cadastro_aplicar, cadastro_arquivos, contratos, d
 from tests import ficticios
 from tests.conftest import CADASTRO_EXEMPLO, _pdf_com_texto
 
-# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
-pytestmark = pytest.mark.pdf
-
 FIX = pathlib.Path(__file__).parent / "fixtures" / "nfse"
 # O cadastro-exemplo usa os CNPJs ficticios das fixtures (tests/ficticios.py): alfa (empresa propria), beta
 # (consorciada) e o orgao A.
