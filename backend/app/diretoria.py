@@ -182,7 +182,7 @@ def _dinheiro(conn, ms: list[dict], hoje: datetime.date, liberado: bool, notas: 
                        "maior_dias": _maior_dias(o["ms"], hoje), "faixas": _faixas(o["ms"], hoje, liberado),
                        "obras": sorted(obras, key=lambda x: -(x["maior_dias"] or 0))})
     pendentes = [(c, k) for c in _ativos(conn) for k in reajuste.ciclos(conn, c["id"], hoje)
-                 if k["situacao"] == "apostilamento_pendente"]
+                 if k["situacao"] in reajuste.SEM_APOSTILAMENTO]
     mes = _mes(hoje)
     return {"medido_esperando_nota": _grupo([m for m in ms if m["estado"] in ESPERANDO_NOTA]),
             "nota_esperando_protocolo": _grupo([m for m in ms if m["estado"] in ESPERANDO_PROTOCOLO]),

@@ -213,6 +213,19 @@ describe("Reajuste", () => {
   const cicloPendente = (pleitoId: number) => ({ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026,
     aniversario: "2026-06-01", situacao: "apostilamento_pendente", dias: 137, pleito: { id: pleitoId }, apostilamento: null });
 
+  it("aditivo depois do pleito mostra o ciclo com o cronograma de reajuste a reemitir (issue #273)", async () => {
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloPendente(10), situacao: "reemitir", dias: 92 }],
+          pleitos: [enviado({ id: 10, numero_oficio: "CT-122-LT-2026", enviado_em: "2026-06-10",
+            reemissoes_possiveis: ["cronograma"] })] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar />);
+    expect((await screen.findAllByText("cronograma de reajuste a reemitir")).length).toBeGreaterThan(0);
+    // continua sem apostilamento: o pleito vigente diz desde quando espera
+    expect(screen.getByText(/^sem apostilamento há 92\sdias$/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reemitir cronograma" })).toBeTruthy();
+  });
+
   it("no pleito enviado, Reiterar abre o ofício ligado ao anterior", async () => {
     api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
       ? { ciclos: [cicloPendente(10)], pleitos: [enviado({ id: 10, numero_oficio: "CT-122-LT-2026", enviado_em: "2026-06-15",
