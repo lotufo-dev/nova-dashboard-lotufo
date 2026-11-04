@@ -187,3 +187,84 @@ def test_numero_com_resto_nao_reconhecido_nao_vale_e_o_ordinal_vence(cenario):
     t = prazos.historico_texto(c, ids["contrato"])
     assert "O 1º termo aditivo n.º 099/2020/01/14/02" in t          # sem ordinal: contagem
     assert "O 15º termo aditivo n.º 099/2020/01/14-retificado/15" in t
+
+
+# --- issue #292: sugestao de dias da carta de prorrogacao pelo ritmo dos ultimos 6 meses -------------------
+
+def _medicao(c, cid, numero, competencia, atestado=None, protocolado=None, estado="recebida", tipo="execucao"):
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+              "valor_atestado_centavos) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (cid, numero, tipo, competencia, estado, protocolado, atestado))
+    c.commit()
+
+
+def _valor(c, cid, centavos):
+    c.execute("UPDATE contratos SET valor_original_centavos=? WHERE id=?", (centavos, cid)); c.commit()
+
+
+def test_sugestao_pelo_ritmo_dos_ultimos_6_meses(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_000_01)   # centavo impar
+    # janela de hoje 15/10/2026: competencias 2026-04 a 2026-09; fora dela (03 e 10) entra no saldo, nao no ritmo
+    _medicao(c, cid, 1, "2026-03", atestado=400_000_00)
+    _medicao(c, cid, 2, "2026-05", atestado=200_000_00)
+    _medicao(c, cid, 3, "2026-07", protocolado=100_000_01, estado="protocolada")   # sem atestado: vale o protocolado
+    _medicao(c, cid, 4, "2026-09", atestado=0)
+    _medicao(c, cid, 5, "2026-08", protocolado=999_999_00, estado="cancelada")     # cancelada nao mede
+    _medicao(c, cid, 6, "2026-06", protocolado=50_000_00, tipo="reajuste")       # reajuste nao e' execucao
+    _medicao(c, cid, 7, "2026-10", atestado=100_000_00)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    # saldo 1.000.000,01 - 800.000,01 = 200.000,00; medido nos 6 meses 300.000,01; ritmo 50.000,00/mes (arred. 1x)
+    assert (s["saldo_centavos"], s["medido_periodo_centavos"], s["ritmo_centavos"]) == (200_000_00, 300_000_01, 50_000_00)
+    assert (s["meses"], s["de"], s["ate"], s["motivo"]) == (6, "2026-04", "2026-09", None)
+    # 200.000,00 x 6 / 300.000,01 = 3,99999... meses a partir de 20/10/2026: 3 meses (20/01/2027) + 0,99999 de 31 dias
+    assert (s["execucao_fim"], s["novo_fim"], s["dias"]) == ("2026-10-20", "2027-02-20", 123)
+
+
+def test_sugestao_meses_inteiros_contam_no_calendario_a_partir_do_fim(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 900_00)
+    _medicao(c, cid, 1, "2026-09", atestado=300_00)
+    # saldo 600,00; ritmo 300,00/6 = 50,00/mes; 12 meses exatos de 20/10/2026 -> 20/10/2027
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert (s["ritmo_centavos"], s["novo_fim"], s["dias"]) == (50_00, "2027-10-20", 365)
+
+
+def test_sem_medicao_nos_6_meses_nao_sugere_e_diz_por_que(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 900_00)
+    _medicao(c, cid, 1, "2026-03", atestado=300_00)   # antes da janela
+    _medicao(c, cid, 2, "2026-10", atestado=100_00)   # mes corrente, fora da janela
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert (s["dias"], s["ritmo_centavos"], s["saldo_centavos"]) == (None, None, 500_00)
+    assert s["motivo"] == "Sem medição de execução de 04/2026 a 09/2026: sem ritmo para sugerir os dias."
+
+
+def test_saldo_zero_nao_sugere(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 300_00)
+    _medicao(c, cid, 1, "2026-09", atestado=300_00)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert (s["dias"], s["saldo_centavos"], s["ritmo_centavos"]) == (None, 0, 50_00)
+    assert s["motivo"] == "Sem saldo a executar: não há dias a sugerir."
+
+
+def test_sem_fim_de_execucao_nao_sugere(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    c.execute("UPDATE contratos SET execucao_fim=NULL WHERE id=?", (cid,)); c.commit()
+    _medicao(c, cid, 1, "2026-09", atestado=50)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert s["dias"] is None and s["motivo"] == "Sem fim de execução no cadastro: não há de onde contar os dias."
+
+
+def test_janela_atravessa_o_ano(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _medicao(c, cid, 1, "2025-08", atestado=10)
+    s = prazos.sugestao_dias(c, cid, D(2026, 2, 3))
+    assert (s["de"], s["ate"]) == ("2025-08", "2026-01")

@@ -4,11 +4,15 @@ O relogio e' a EXECUCAO. Vigencia so' conta onde o orgao nao prorroga sozinho. P
 suspende o relogio. Instrumento retroativo e' sinalizado, nunca recusado. Em encerramento os avisos de
 prazo param e fica so' a comunicacao de conclusao.
 """
+import calendar
 import datetime
 import json
+import math
 import re
+from decimal import Decimal
+from fractions import Fraction
 
-from app import avisos as _av, contratos, tempo
+from app import avisos as _av, contratos, dinheiro, tempo
 
 DIAS_EXECUCAO, DIAS_CRITICO, DIAS_VIGENCIA = 60, 30, 60
 ENDOSSO_PRAZO, ENDOSSO_JANELA = 5, 60
@@ -157,6 +161,58 @@ def historico_texto(conn, contrato_id: int) -> str:
         linhas.append(f"O {_ordinal(a, conta[forma])}º {nome} n.º {a['numero'] or 's/n'} foi assinado em "
                       f"{_br(a['data_assinatura'])}, com {' e '.join(partes)}.")
     return "\n\n".join(linhas)
+
+
+MESES_RITMO = 6
+
+
+def _somar_meses(d: datetime.date, n: int) -> datetime.date:
+    """`d` mais `n` meses no calendario; dia que o mes nao tem vira o ultimo dele (31/01 + 1 = 28/02)."""
+    a, m = divmod(d.month - 1 + n, 12)
+    ano, mes = d.year + a, m + 1
+    return datetime.date(ano, mes, min(d.day, calendar.monthrange(ano, mes)[1]))
+
+
+def _mm_aaaa(comp: str) -> str:
+    return f"{comp[5:7]}/{comp[:4]}"
+
+
+def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
+    """Issue #292 (spec 2026-10-20 §4 item 3): os dias de prorrogacao que a carta de prazo sugere. Saldo a executar
+    (o de `paineis.saldo`: vigente de execucao menos o medido, #262) dividido pelo ritmo, que e' o medido de execucao
+    nas `MESES_RITMO` competencias fechadas (as anteriores ao mes de `hoje`) dividido por elas; os meses que faltam
+    contam no calendario a partir do fim de execucao vigente, e a fracao do ultimo mes arredonda para cima. Sem fim de
+    execucao, sem saldo ou sem medicao na janela, `dias` e' None e `motivo` diz por que. E' so' sugestao: a pessoa
+    confirma ou muda o numero antes de criar o oficio, e o envio segue o caminho de sempre."""
+    from app import paineis   # paineis -> avisos; aqui dentro para nao virar ciclo de import
+    hoje = hoje or tempo.hoje_local()
+    sal = paineis.saldo(conn, contrato_id)
+    exe = contratos.vigente(conn, contrato_id).get("execucao_fim_vigente")
+    exe_d = _d(exe)
+    primeiro = hoje.replace(day=1)
+    meses = [_somar_meses(primeiro, -i).strftime("%Y-%m") for i in range(MESES_RITMO, 0, -1)]
+    # mesma regra do medido de `paineis.saldo` (execucao, estados que medem, atestado ou protocolado); soma em Python
+    medido = sum(r["v"] for r in conn.execute(
+        "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v FROM medicoes "
+        f"WHERE contrato_id=? AND tipo='execucao' AND estado IN ({','.join('?' * len(paineis.ESTADOS_VALIDOS))}) "
+        f"AND competencia IN ({','.join('?' * len(meses))})", (contrato_id, *paineis.ESTADOS_VALIDOS, *meses)))
+    saldo = sal["saldo_centavos"]
+    out = {"saldo_centavos": saldo, "medido_periodo_centavos": medido, "meses": MESES_RITMO, "de": meses[0],
+           "ate": meses[-1], "ritmo_centavos": dinheiro._aplicar(Decimal(medido) / MESES_RITMO, "round2")
+           if medido > 0 else None, "execucao_fim": exe, "novo_fim": None, "dias": None, "motivo": None}
+    if not exe_d:
+        return {**out, "motivo": "Sem fim de execução no cadastro: não há de onde contar os dias."}
+    if saldo <= 0:
+        return {**out, "motivo": "Sem saldo a executar: não há dias a sugerir."}
+    if medido <= 0:
+        return {**out, "motivo": f"Sem medição de execução de {_mm_aaaa(meses[0])} a {_mm_aaaa(meses[-1])}: "
+                                 "sem ritmo para sugerir os dias."}
+    faltam = Fraction(saldo * MESES_RITMO, medido)   # meses, exato (sem float)
+    inteiros = math.floor(faltam)
+    fim = _somar_meses(exe_d, inteiros)
+    extra = math.ceil((_somar_meses(exe_d, inteiros + 1) - fim).days * (faltam - inteiros))
+    novo = fim + datetime.timedelta(days=extra)
+    return {**out, "novo_fim": novo.isoformat(), "dias": (novo - exe_d).days}
 
 
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
