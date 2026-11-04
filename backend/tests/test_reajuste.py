@@ -443,3 +443,186 @@ def test_competencias_apostiladas_vigentes_com_o_termo_e_a_medicao(cenario):
          "instrumento_chave": "ap-2", "instrumento_numero": "ap-2/2026", "instrumento_data": "2026-10-01"},
         {"data_base_mes": "2024-06", "ciclo": 2026, "competencia": "2026-08", "valor_centavos": 200_03, "medicao": None,
          "instrumento_chave": "ap-1", "instrumento_numero": "ap-1/2026", "instrumento_data": "2026-09-15"}]
+
+
+# --- issue #273: estado do ciclo `reemitir` e estados por competencia (spec 2026-10-20 §2.2) ---
+
+def _aditivo(c, cid, tipo, assinado_em, status="assinado"):
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura) VALUES (?,?,?,?)",
+              (cid, tipo, status, assinado_em))
+    c.commit()
+
+
+def test_aditivo_depois_do_pleito_poe_o_ciclo_em_reemitir(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    _aditivo(c, cid, "prazo", "2026-06-01")                 # antes do pleito: nao pede reemissao
+    _aditivo(c, cid, "escopo", "2026-07-01")                # escopo nao e' prazo nem valor
+    _aditivo(c, cid, "valor", "2026-07-15", status="em_andamento")   # ainda nao assinado
+    assert reajuste.ciclos(c, cid, D(2026, 9, 10))[0]["situacao"] == "apostilamento_pendente"
+    _aditivo(c, cid, "prazo", "2026-08-01")
+    r = reajuste.ciclos(c, cid, D(2026, 9, 10))[0]
+    assert (r["situacao"], r["dias"], r["aditivo"]["data_assinatura"]) == ("reemitir", 92, "2026-08-01")
+    # o ciclo continua sem apostilamento: o aviso segue valendo
+    assert [a["tipo"] for a in reajuste.avisos(c, D(2026, 9, 10))] == ["reajuste_apostilamento"]
+
+
+def test_reiteracao_depois_do_aditivo_nao_tira_do_reemitir_e_a_reemissao_tira(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    p1 = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _aditivo(c, cid, "misto", "2026-08-01")
+    _reiteracao(c, cid, p1, "2026-08-20", "CT-2-LT-2026")
+    assert reajuste.ciclos(c, cid, D(2026, 9, 10))[0]["situacao"] == "reemitir"
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, enviado_em, "
+              "reemite_pleito_id, reemissao) VALUES (?, 'reajuste', 'sistema', '2024-06', 2026, 'CT-3-LT-2026', "
+              "'enviado', '2026-09-01', ?, 'cronograma')", (cid, p1))
+    c.commit()
+    r = reajuste.ciclos(c, cid, D(2026, 9, 10))[0]
+    assert (r["situacao"], r["dias"], r["aditivo"]) == ("apostilamento_pendente", 9, None)
+
+
+def test_ciclo_apostilado_nao_vai_para_reemitir(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    ids["instrumento"]("apostilamento_reajuste", "2026-07-15", {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76"})
+    c.execute("UPDATE pleitos SET instrumento_chave='apostilamento_reajuste-2026-07-15'"); c.commit()
+    _aditivo(c, cid, "prazo", "2026-08-01")
+    assert reajuste.ciclos(c, cid, D(2026, 9, 10))[0]["situacao"] == "apostilado"
+
+
+def _medicao(c, cid, numero, competencia, estado, pedido=None, aprovado=None, data_base=None, ciclo=None):
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+              "valor_atestado_centavos, data_base_mes, ciclo) VALUES (?, ?, 'reajuste', ?, ?, ?, ?, ?, ?)",
+              (cid, numero, competencia, estado, pedido, aprovado, data_base, ciclo))
+    c.commit()
+    return c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
+
+
+def _nota(c, medicao_id, valor, situacao="ativa"):
+    c.execute("INSERT INTO notas_fiscais (coligada, numero, valor_centavos, situacao, origem) VALUES (1, ?, ?, ?, 'pdf')",
+              (f"NF-{medicao_id}", valor, situacao))
+    nid = c.execute("SELECT MAX(id) FROM notas_fiscais").fetchone()[0]
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) VALUES (?, ?, ?, 'manual')",
+              (medicao_id, nid, valor))
+    c.commit()
+
+
+def _por_competencia(c, cid, data_base="2024-06", ciclo=2026):
+    grupo = next(g for g in reajuste.competencias_por_ciclo(c, cid)
+                 if (g["data_base_mes"], g["ciclo"]) == (data_base, ciclo))
+    return {x["competencia"]: x for x in grupo["competencias"]}
+
+
+def test_estado_de_cada_competencia_do_ciclo(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    for comp, valor in (("2026-07", 100_01), ("2026-08", 200_03), ("2026-09", 300_05), ("2026-11", 500_07),
+                        ("2026-12", 600_09)):
+        _previsao(c, cid, comp, valor, "manual")
+    ids["instrumento"]("apostilamento_reajuste", "2026-10-20",
+                       {"data_base": "2024-06", "ciclo": 2026,
+                        "competencias": [{"competencia": "2026-10", "valor": "400,11", "medicao": 4}]})
+    ap = c.execute("SELECT MAX(id) FROM instrumentos").fetchone()[0]
+    _previsao(c, cid, "2026-10", 400_11, "apostilamento", instrumento_id=ap, criado_em="2026-10-20 10:00:00")
+    _medicao(c, cid, 2, "2026-08", "planilha_enviada", pedido=201_01)
+    _medicao(c, cid, 3, "2026-09", "boletim_recebido", pedido=300_05, aprovado=299_99)
+    _medicao(c, cid, 4, "2026-10", "planilha_gerada", pedido=400_11)
+    m5 = _medicao(c, cid, 5, "2026-11", "nota_emitida", pedido=500_07, aprovado=500_07)
+    _nota(c, m5, 500_07)
+    m6 = _medicao(c, cid, 6, "2026-12", "recebida", pedido=600_09, aprovado=600_09)
+    _nota(c, m6, 600_09)
+    _medicao(c, cid, 7, "2026-12", "cancelada", pedido=1)          # cancelada nao conta
+
+    x = _por_competencia(c, cid)
+    assert {k: v["estado"] for k, v in x.items()} == {
+        "2026-07": "prevista", "2026-08": "pedida", "2026-09": "aprovada", "2026-10": "apostilada",
+        "2026-11": "faturada", "2026-12": "recebida"}
+    assert (x["2026-07"]["previsto_centavos"], x["2026-07"]["previsto_origem"], x["2026-07"]["pedido_centavos"]) == \
+        (100_01, "manual", None)
+    assert (x["2026-08"]["previsto_centavos"], x["2026-08"]["pedido_centavos"]) == (200_03, 201_01)
+    assert (x["2026-09"]["pedido_centavos"], x["2026-09"]["aprovado_centavos"]) == (300_05, 299_99)
+    assert (x["2026-10"]["apostilado_centavos"], x["2026-10"]["apostilamento_chave"], x["2026-10"]["apostilada"]) == \
+        (400_11, "apostilamento_reajuste-2026-10-20", True)
+    assert (x["2026-11"]["faturado_centavos"], x["2026-11"]["apostilada"], x["2026-11"]["recebida_em"]) == \
+        (500_07, False, None)
+    assert (x["2026-12"]["medicao_numero"], x["2026-12"]["faturado_centavos"]) == (6, 600_09)
+
+
+def test_nota_cancelada_e_alocacao_desfeita_nao_faturam(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _previsao(c, cid, "2026-07", 100_01, "manual")
+    m = _medicao(c, cid, 1, "2026-07", "boletim_recebido", pedido=100_01, aprovado=100_01)
+    _nota(c, m, 100_01, situacao="cancelada")
+    _previsao(c, cid, "2026-08", 200_03, "manual")
+    m2 = _medicao(c, cid, 2, "2026-08", "boletim_recebido", pedido=200_03, aprovado=200_03)
+    _nota(c, m2, 200_03)
+    c.execute("UPDATE nf_alocacoes SET desfeita_em='2026-09-01', motivo_desfazer='errada' WHERE medicao_id=?", (m2,))
+    c.commit()
+    x = _por_competencia(c, cid)
+    assert [(x[k]["estado"], x[k]["faturado_centavos"]) for k in ("2026-07", "2026-08")] == \
+        [("aprovada", None), ("aprovada", None)]
+
+
+def test_medicao_sem_motor_com_valor_pedido_vale_como_pedida(cenario):
+    # enquanto o motor de medicao nao cobre tudo, a medicao de reajuste com valor pedido conta como pedida; a que
+    # so' existe (prevista, sem valor) nao muda o estado
+    c, ids = cenario
+    cid = ids["contrato"]
+    _previsao(c, cid, "2026-07", 100_01, "manual")
+    _previsao(c, cid, "2026-08", 200_03, "manual")
+    _medicao(c, cid, 1, "2026-07", "prevista", pedido=100_01)
+    _medicao(c, cid, 2, "2026-08", "prevista")
+    x = _por_competencia(c, cid)
+    assert (x["2026-07"]["estado"], x["2026-08"]["estado"]) == ("pedida", "prevista")
+
+
+def test_percentual_da_mtpar_com_periodo_apostila_as_competencias_cobertas(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    for comp in ("2026-05", "2026-06", "2027-05", "2027-06"):
+        _previsao(c, cid, comp, 100_01, "manual")
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15",
+                       {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76",
+                        "periodo": {"de": "2026-06", "ate": "2027-05"}})
+    x = _por_competencia(c, cid)
+    assert {k: (v["estado"], v["apostilada"]) for k, v in x.items()} == {
+        "2026-05": ("prevista", False), "2026-06": ("apostilada", True), "2027-05": ("apostilada", True),
+        "2027-06": ("prevista", False)}
+    assert (x["2026-06"]["apostilado_centavos"], x["2026-06"]["apostilado_percentual"],
+            x["2026-06"]["apostilamento_chave"]) == (None, "6,76", "apostilamento_reajuste-2026-09-15")
+
+
+def test_percentual_de_termo_corrigido_ou_de_outro_ciclo_nao_apostila(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _previsao(c, cid, "2026-07", 100_01, "manual")
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15",
+                       {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76",
+                        "periodo": {"de": "2026-06", "ate": "2027-05"}})
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-20",
+                       {"data_base": "2024-06", "ciclo": 2025, "percentual": "3,00",
+                        "periodo": {"de": "2026-06", "ate": "2027-05"}})      # outro ciclo
+    ids["instrumento"]("apostilamento_reajuste", "2026-10-01",
+                       {"data_base": "2024-06", "ciclo": 2026, "corrige": "apostilamento_reajuste-2026-09-15",
+                        "percentual": "6,80", "periodo": {"de": "2026-08", "ate": "2027-05"}})
+    x = _por_competencia(c, cid)["2026-07"]
+    assert (x["estado"], x["apostilada"]) == ("prevista", False)
+
+
+def test_medicao_sem_base_gravada_vai_para_o_ciclo_da_competencia(cenario):
+    # medicao de reajuste antiga, sem data-base/ciclo gravados: com uma base so', o ciclo e' o do aniversario
+    # (jun/2026 a mai/2027 = ciclo 2026); gravados, valem os dela
+    c, ids = cenario
+    cid = ids["contrato"]
+    _medicao(c, cid, 1, "2026-05", "planilha_gerada", pedido=10_01)
+    _medicao(c, cid, 2, "2026-06", "planilha_gerada", pedido=20_03)
+    _medicao(c, cid, 3, "2026-07", "planilha_gerada", pedido=30_05, data_base="2024-06", ciclo=2027)
+    assert list(_por_competencia(c, cid, ciclo=2025)) == ["2026-05"]
+    assert list(_por_competencia(c, cid, ciclo=2026)) == ["2026-06"]
+    assert list(_por_competencia(c, cid, ciclo=2027)) == ["2026-07"]
+    assert _por_competencia(c, cid, ciclo=2026)["2026-06"]["estado"] == "pedida"

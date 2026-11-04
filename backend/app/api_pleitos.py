@@ -92,7 +92,9 @@ def reajuste_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=F
             "competencias": reajuste.competencias_apostiladas(conn, contrato_id),
             "bases_dos_termos": reajuste.bases_dos_termos(conn, contrato_id),
             "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("reajuste",))],
-            "previsoes": reajuste.previsoes_vigentes(conn, contrato_id)}
+            "previsoes": reajuste.previsoes_vigentes(conn, contrato_id),
+            # issue #273: estado e valor de cada fonte por competencia, por data-base e ciclo
+            "competencias_por_ciclo": reajuste.competencias_por_ciclo(conn, contrato_id)}
 
 
 @router.get("/api/contratos/{contrato_id}/prazos")
