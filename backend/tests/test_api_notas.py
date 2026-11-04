@@ -141,3 +141,79 @@ def test_protocolo_feito_fora_depois_da_nota_pelo_caminho_real(client_admin, amb
     r = client_admin.post(f"/api/medicoes/{mid}/protocolo", json={"data": "2026-09-20"})
     assert r.status_code == 201 and r.json()["ressalva"] is None, r.text
     assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "protocolada"
+
+
+# --- issue #289 (PR #382): ponte da planilha/carta ao espelho, ate' o boletim da #284 ---------------------------
+
+def _planilha_enviada(cl, cid, numero=27, competencia="2026-08", valor="719.190,72"):
+    from tests.test_api_medicoes import _arquivos_planilha
+    r = cl.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha(f"oficio {numero}"),
+                data={"numero": numero, "competencia": competencia, "periodo_inicio": f"{competencia}-01",
+                      "periodo_fim": f"{competencia}-28", "valor": valor})
+    assert r.status_code == 201, r.text
+    mid = r.json()["medicao_id"]
+    r = cl.post(f"/api/medicoes/{mid}/planilhas/envio-externo", data={"enviado_em": "2026-09-02", "meio": "Balcão"})
+    assert r.status_code == 201, r.text
+    return mid
+
+
+def test_prevista_planilha_enviada_espelho_e_nota_de_ponta_a_ponta(client_admin, ambiente_api, monkeypatch):
+    """prevista -> planilha registrada -> enviada -> espelho gerado -> enviado ao faturamento -> nota emitida. Sem a
+    ponte, o espelho de uma medicao em planilha_enviada era 422 e a medicao nao saia dali."""
+    cid = ambiente_api
+    conn = db.get_conn()
+    conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+                 "VALUES (?, 27, 'execucao', '2026-08', 'prevista')", (cid,))
+    conn.commit(); conn.close()
+    mid = _planilha_enviada(client_admin, cid)
+    corpo = {"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "719.190,72"}}
+    p = client_admin.post(f"/api/contratos/{cid}/espelho/previa", json=corpo)
+    assert p.status_code == 200, p.text
+    assert p.json()["medicoes"][0]["existente"] is None        # 1o espelho, nao "versao nova"
+    r = client_admin.post(f"/api/contratos/{cid}/espelho", json=corpo)
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    # o pedido congelado no envio nao muda; so' o estado anda
+    assert (d["estado"], d["valor_protocolado_centavos"], d["planilha_enviada_em"]) == (
+        "espelho_gerado", 719_190_72, "2026-09-02")
+    eid = r.json()["espelho_id"]
+    pe = client_admin.get(f"/api/espelhos/{eid}/envio").json()
+    e = client_admin.post(f"/api/espelhos/{eid}/enviar", json={k: pe[k] for k in ("para", "copia", "assunto", "corpo")})
+    assert e.status_code == 200, e.text
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "espelho_enviado"
+    esp = client_admin.get(f"/api/espelhos/{eid}").json()
+    saida = next(s for s in esp["saidas"] if s["natureza"] == "medicao")
+    _fixar_texto(monkeypatch, _nota_como({**saida, "municipio": "Cuiabá"}, 3107))
+    r = client_admin.post(f"/api/medicoes/{mid}/notas", files={"arquivo": ("3107.pdf", PDF, "application/pdf")})
+    assert r.status_code == 201, r.text
+    assert r.json()["estado"] == "nota_emitida"
+
+
+def test_espelho_da_planilha_com_outro_valor_ou_competencia_e_recusado(client_admin, ambiente_api):
+    """O espelho repete o pedido e a competencia da planilha/carta: o pedido nao se troca pelo espelho."""
+    cid = ambiente_api
+    mid = _planilha_enviada(client_admin, cid)
+    outro = {"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "719.190,73"}}
+    for rota in ("espelho/previa", "espelho"):
+        r = client_admin.post(f"/api/contratos/{cid}/{rota}", json=outro)
+        assert r.status_code == 422 and "difere do pedido" in r.json()["detail"]
+        assert "R$ 719.190,73" in r.json()["detail"] and "R$ 719.190,72" in r.json()["detail"]
+    r = client_admin.post(f"/api/contratos/{cid}/espelho", json={**outro, "competencia": "2026-09",
+                                                                  "entradas": {"medicao": "719.190,72"}})
+    assert r.status_code == 422 and "competência 08/2026" in r.json()["detail"]
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_protocolado_centavos"]) == ("planilha_enviada", 719_190_72)
+
+
+def test_espelho_da_prevista_promove_a_medicao(client_admin, ambiente_api):
+    """Nota do revisor (PR #382): a prevista recebia 422 "depois de protocolada" ao gerar o espelho."""
+    cid = ambiente_api
+    conn = db.get_conn()
+    mid = conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+                       "VALUES (?, 31, 'execucao', '2026-08', 'prevista')", (cid,)).lastrowid
+    conn.commit(); conn.close()
+    r = client_admin.post(f"/api/contratos/{cid}/espelho",
+                          json={"numero": 31, "competencia": "2026-09", "entradas": {"medicao": "1.000,01"}})
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_protocolado_centavos"], d["competencia"]) == ("espelho_gerado", 1_000_01, "2026-09")

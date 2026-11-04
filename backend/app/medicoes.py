@@ -43,6 +43,10 @@ TRANSICOES = {
     "desistida": set(),
 }
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
+# Issue #289: estados que o espelho promove a `espelho_gerado` (pelo sistema, em criar_para_espelho). A planilha/carta
+# gerada ou enviada vai direto ao espelho enquanto o boletim (#284) nao existe: a #284 troca essa ponte pelo registro
+# do boletim (ou "seguir sem boletim"). Nao entram em TRANSICOES: a mudanca a mao continuaria sem espelho.
+ESTADOS_ANTES_DO_ESPELHO = ("prevista", "planilha_gerada", "planilha_enviada")
 # Issue #281: estados em que o pedido (valor protocolado) e' o da planilha/carta e so' muda por revisao
 ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
 PEDIDO_POR_REVISAO = "Para mudar o pedido, registre uma revisão da planilha/carta"
@@ -493,6 +497,46 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
                             {"estado": atual, "motivo": motivo_antes}, depois)
 
 
+def conferir_espelho_da_planilha(conn, ja: dict, numero: int, tipo: str, competencia: str, valor_centavos: int) -> None:
+    """Issue #289 (ponte ate' a #284): a medicao que veio da planilha/carta so' recebe espelho com o MESMO pedido e
+    a mesma competencia. O pedido nao se troca aqui (congela no envio; antes dele, muda pela revisao), e o espelho
+    com outro valor deixaria a medicao e o documento do faturamento divergentes."""
+    if ja["estado"] not in ("planilha_gerada", "planilha_enviada"):
+        return
+    from app import dinheiro       # import local, como os outros deste modulo
+    if ja["competencia"] != competencia:
+        raise ValueError(f"{nome_medicao(numero, tipo)} tem a planilha/carta da competência "
+                         f"{ja['competencia'][5:7]}/{ja['competencia'][:4]}: gere o espelho nessa competência")
+    if ja["valor_protocolado_centavos"] != valor_centavos:
+        raise ValueError(f"O valor do espelho ({dinheiro.format_brl(valor_centavos)}) difere do pedido da "
+                         f"planilha/carta da {nome_medicao(numero, tipo)} "
+                         f"({dinheiro.format_brl(ja['valor_protocolado_centavos'] or 0)})")
+
+
+def _promover_ao_espelho(conn, usuario_id: int, medicao_id: int, numero: int, tipo: str, competencia: str,
+                         valor_centavos: int) -> int:
+    """Dentro da transacao de criar_para_espelho. Prevista (correcao do 422 de "depois de protocolada" que a
+    prevista recebia) entra com o valor do espelho; planilha gerada ou enviada (issue #289, ponte ate' o boletim da
+    #284) entra com o pedido dela, que o espelho precisa repetir. So' o estado anda; o pedido nao muda."""
+    m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone())
+    conferir_espelho_da_planilha(conn, m, numero, tipo, competencia, valor_centavos)
+    if m["estado"] == "prevista":
+        cur = conn.execute("UPDATE medicoes SET estado='espelho_gerado', valor_protocolado_centavos=?, "
+                           "valor_protocolado_origem='espelho', competencia=? WHERE id=? AND estado='prevista'",
+                           (valor_centavos, competencia, medicao_id))
+        depois = {"estado": "espelho_gerado", "valor_protocolado_centavos": valor_centavos,
+                  "valor_protocolado_origem": "espelho", "competencia": competencia, "origem": "espelho"}
+    else:
+        cur = conn.execute("UPDATE medicoes SET estado='espelho_gerado' WHERE id=? AND estado=?",
+                           (medicao_id, m["estado"]))
+        depois = {"estado": "espelho_gerado", "origem": "espelho"}
+    db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", medicao_id,
+                        {"estado": m["estado"], "valor_protocolado_centavos": m["valor_protocolado_centavos"],
+                         "competencia": m["competencia"]}, depois)
+    return medicao_id
+
+
 def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tipo: str,
                        competencia: str, valor_centavos: int) -> int:
     """A medicao nasce ao gerar o espelho (spec §2). Gerar de novo atualiza o valor enquanto a
@@ -509,6 +553,8 @@ def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tip
                                 {"numero": numero, "tipo": tipo, "competencia": competencia,
                                  "estado": "espelho_gerado", "valor_protocolado_centavos": valor_centavos})
             return cur.lastrowid
+        if ja["estado"] in ESTADOS_ANTES_DO_ESPELHO:
+            return _promover_ao_espelho(conn, usuario_id, ja["id"], numero, tipo, competencia, valor_centavos)
         if ja["estado"] not in ESTADOS_ESPELHO:
             raise ValueError(f"{nome_medicao(numero, tipo)} já está {rotulo_estado(ja['estado'])}: o espelho não pode ser "
                              "gerado de novo depois de protocolada")

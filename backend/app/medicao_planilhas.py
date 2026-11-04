@@ -72,13 +72,16 @@ def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None
     proposito: o acumulado da planilha/carta conta o pedido ainda nao protocolado das medicoes anteriores (spec
     §2.1 passo 1, "soma dos aprovados, senao pedidos"), e o painel so' o que ja' foi protocolado.
     So' a execucao tem saldo contra o valor do contrato (como em paineis.saldo); no projeto, os saldos sao nulos."""
-    vigente = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
+    c = contratos.vigente(conn, contrato_id)
+    vigente = c["valor_vigente_centavos"]
+    # a base do saldo e' a da execucao, como a do painel (#262, paineis.saldo): o aditivo de reajuste nao entra
+    base = c["valor_vigente_execucao_centavos"]
     if tipo != "execucao":
         return {"vigente_centavos": vigente, "acumulado_anterior_centavos": acumulado,
                 "saldo_centavos": None, "saldo_apos_pedido_centavos": None}
     return {"vigente_centavos": vigente, "acumulado_anterior_centavos": acumulado,
-            "saldo_centavos": vigente - acumulado,
-            "saldo_apos_pedido_centavos": None if pedido is None else vigente - acumulado - pedido}
+            "saldo_centavos": base - acumulado,
+            "saldo_apos_pedido_centavos": None if pedido is None else base - acumulado - pedido}
 
 
 def sugestao(conn, contrato_id: int, tipo: str = "execucao") -> dict:
@@ -308,6 +311,12 @@ def conferir_envio_externo(conn, medicao_id: int, dados: dict) -> tuple[dict, di
     if m["estado"] == "planilha_enviada" and vigente["versao"] <= max(_versao_enviada(conn, medicao_id), 1):
         raise ValueError(f"A versão {vigente['versao']} da planilha/carta já foi enviada: para enviar de novo, "
                          "registre uma revisão")
+    # a versao que esta' saindo pelo sistema (reserva ativa) nao se registra por fora: seriam dois envios da mesma
+    reservada = conn.execute("SELECT 1 FROM medicao_planilha_envios WHERE planilha_id=? AND envio_id IS NULL "
+                             "AND envio_reservado_em IS NOT NULL", (vigente["id"],)).fetchone()
+    if reservada is not None:
+        raise ValueError(f"A versão {vigente['versao']} da planilha/carta está sendo enviada pelo sistema: aguarde o "
+                         "envio terminar (ou libere o envio preso) antes de registrar o envio por fora")
     if m["estado"] == "planilha_enviada" and m["planilha_enviada_em"] and data.isoformat() < m["planilha_enviada_em"]:
         raise ValueError(f"A data do envio da revisão é anterior ao primeiro envio ({_data_br(m['planilha_enviada_em'])})")
     return dict(m), dict(vigente)
@@ -379,10 +388,12 @@ def registrar_envio_externo(conn, usuario_id: int, medicao_id: int, dados: dict,
                                  (medicao_id, (eml[0] or "envio.eml")[-200:], sha, rel, sha, len(eml[1])))
                 antes = None
                 if m["estado"] == "planilha_gerada":
-                    antes = {k: m[k] for k in ("estado", "planilha_enviada_em", "planilha_envio_origem", "congelada")}
+                    antes = {k: m[k] for k in ("estado", "planilha_enviada_em", "planilha_envio_origem")}
+                    # o pedido congela pelo estado, como no envio pelo sistema; `congelada` e' do protocolo da nota
+                    # (ele tambem congela o valor original do contrato)
                     cur = conn.execute(
                         "UPDATE medicoes SET estado='planilha_enviada', planilha_enviada_em=?, "
-                        "planilha_envio_origem='externo', congelada=1 WHERE id=? AND estado='planilha_gerada'",
+                        "planilha_envio_origem='externo' WHERE id=? AND estado='planilha_gerada'",
                         (data, medicao_id))
                     db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
                     m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone())
