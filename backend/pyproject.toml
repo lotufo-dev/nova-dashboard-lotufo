@@ -59,8 +59,11 @@ dependencies = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # `windows`: teste que so' vale no Windows (backup e ACL). A CI roda `-m "not windows"` no Ubuntu
-# (job backend, com -n 4) e `-m windows` no job backend-windows.
-markers = ["windows: exercita caminho e ferramenta do Windows (roda no job backend-windows da CI)"]
+# (job backend, com -n 4) e `-m "windows or pdf"` no job backend-windows.
+markers = [
+    "windows: exercita caminho e ferramenta do Windows (roda so no job backend-windows da CI)",
+    "pdf: gera PDF com a fonte da producao (Arial do Windows); roda no backend (Helvetica) e no backend-windows (Arial)",
+]
 
 # ruff (hook PostToolUse do Claude, .claude/hooks/formatar.ps1). 120 = estilo que o codigo ja tem
 # (p99 das linhas de app/ = 118). Sem `ruff format`: em 11/10/2026 ele reformataria a maior parte

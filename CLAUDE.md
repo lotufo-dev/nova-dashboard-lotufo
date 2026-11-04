@@ -77,7 +77,7 @@ digita pouco e confere; regra, cadastro e instrumento são do Leo, em arquivo ve
 
 ## Testes
 
-- Backend: `cd backend && .venv\Scripts\python -m pytest -q` (~930 testes). Frontend: `cd frontend && npm test`,
+- Backend: `cd backend && .venv\Scripts\python -m pytest -q` (~1850 testes; a CI roda `-n 4 -m "not windows"` no Ubuntu e `-m "windows or pdf"` no job `backend-windows`, ver README). Frontend: `cd frontend && npm test`,
   `npm run typecheck`, `npm run lint`. Esses são os comandos da CI; **localmente, só o arquivo de teste do
   módulo tocado** (`pytest -q tests/test_x.py`, `npm test -- <arquivo>`), porque a suíte inteira em dois
   worktrees derruba a CPU desta máquina, que é a produção. Num worktree, `.venv` e `node_modules` são junções para os do tree

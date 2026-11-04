@@ -12,6 +12,9 @@ from fpdf import FPDF
 from app import (arquivos, auth, cadastro_aplicar, carta, certidoes, correio, db, documentos, graph, leitura_pdf,
                  protocolo, tempo)
 
+# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 D = datetime.date
 CARTAS = yaml.safe_load((pathlib.Path(__file__).parents[2] / "cadastro-exemplo" / "cartas.yaml").read_text(encoding="utf-8"))
 CINCO = ["federal", "fgts", "trabalhista", "estadual", "municipal"]
@@ -132,7 +135,8 @@ def test_objeto_carta_vence_o_do_qdop_no_ref_e_no_corpo(cenario):
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
     assert "responsável pela obra Complexo Cultural da Praça da família, envia" in protocolo.corpo_padrao(c, pid)
     texto = " ".join(_textos(protocolo.montar(c, ids["uid"], pid)["arquivo"])[0].split())
-    assert "099/2024/MTPAR – Complexo Cultural da Praça da família" in texto
+    # Sem Arial (Ubuntu/Mac) a carta cai em Helvetica e o travessao vira hifen: normaliza para cobrir os dois ramos.
+    assert "099/2024/MTPAR - Complexo Cultural da Praça da família" in texto.replace("–", "-")
     assert "EXECUÇÃO DA OBRA" not in texto and "relativos ao Reajuste da 23ª Medição" in texto
 
 

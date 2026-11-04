@@ -19,8 +19,8 @@ on:
 # Na fila de merge cada grupo tem commit proprio, entao tambem cai no grupo pelo sha.
 # Backend em dois jobs (issue #367): `backend` roda o grosso da suite no Ubuntu com pytest-xdist
 # (-n 4, `-m "not windows"`), porque o disco do runner Windows levava 11 a 14 min; `backend-windows`
-# roda so' o que tem o marcador `windows` (backup e ACL, tests/test_backup.py), que exercita
-# caminho e ferramenta do Windows, o sistema da producao.
+# roda `-m "windows or pdf"`: backup e ACL (tests/test_backup.py) e os modulos que geram PDF com a
+# Arial da producao (carta, FRC, protocolo, pdfs), que no Ubuntu so' passam pelo ramo Helvetica.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
@@ -117,7 +117,7 @@ jobs:
       - run: python -m pytest -q -n 4 -m "not windows"
         working-directory: backend
 
-  # So' o que exercita caminho e ferramenta do Windows (marcador `windows`).
+  # Marcador `windows` (caminho e ferramenta do Windows) e `pdf` (ramo Arial da carta/FRC).
   backend-windows:
     runs-on: windows-latest
     steps:
@@ -129,7 +129,7 @@ jobs:
           cache-dependency-path: backend/requirements.lock
       - run: python -m pip install -r requirements.lock
         working-directory: backend
-      - run: python -m pytest -q -m windows
+      - run: python -m pytest -q -m "windows or pdf"
         working-directory: backend
 
   frontend:

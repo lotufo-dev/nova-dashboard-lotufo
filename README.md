@@ -56,8 +56,9 @@ cd frontend && npm test && npm run typecheck && npm run lint
 ```
 
 A CI roda o backend em dois jobs: `backend` (Ubuntu, `pytest -n 4 -m "not windows"`, com pytest-xdist) e
-`backend-windows` (`pytest -m windows`, só o que exercita caminho e ferramenta do Windows, como `tests/test_backup.py`).
-Teste que só vale no Windows leva `pytestmark = pytest.mark.windows` (ou `@pytest.mark.windows`).
+`backend-windows` (`pytest -m "windows or pdf"`). Marcador `windows`: só vale no Windows (`tests/test_backup.py`); roda só
+no `backend-windows`. Marcador `pdf`: gera PDF com a Arial da produção (`test_carta`, `test_frc`, `test_protocolo`, `test_pdfs`);
+roda nos dois jobs (Helvetica no Ubuntu, Arial no Windows).
 
 Recriar o ambiente igual ao testado: `.venv\Scripts\python -m pip install -r requirements.lock`
 (faixas suportadas em `backend/pyproject.toml`) e `npm ci` em `frontend`.
