@@ -533,10 +533,10 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
   });
 
-  it("diretoria: sem o formulário; o cartão abre só para ler", async () => {
+  it("diretoria: sem o formulário (vê o espelho só para ler); o cartão abre só para ler", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
     const { container } = pagina("diretoria");
-    await screen.findByRole("heading", { name: "Espelho", level: 2 });
+    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
     cleanup();
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });

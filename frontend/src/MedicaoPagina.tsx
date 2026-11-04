@@ -227,15 +227,16 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // issue #289: o primeiro passo e' a planilha/carta (execucao e projeto; o reajuste continua pelo espelho). A prevista
   // abre o formulario dela; registrada, o cartao dela fica no alto da etapa, e o espelho so' aparece depois do boletim.
   const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
-  const novaPlanilha = comPlanilha && m.estado === "prevista" && !espVigente;
+  // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
+  const novaPlanilha = podeEditar && comPlanilha && m.estado === "prevista" && !espVigente;
   const antesDoBoletim = m.estado === "planilha_gerada" || m.estado === "planilha_enviada";
   const corpoEtapa1 = (
     <div className="med-etapa__corpo">
-      {novaPlanilha && podeEditar && (
+      {novaPlanilha && (
         <NovaPlanilhaCarta contratoId={contratoId} tipo={m.tipo as TipoPlanilha} inicial={{ numero: m.numero, competencia: m.competencia }}
           aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
       )}
-      {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha medicaoId={m.id} podeEditar={podeEditar} aoMudar={recarregar} />}
+      {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar} />}
       {!novaPlanilha && !antesDoBoletim && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
           abrirForm={m.estado === "prevista" && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />

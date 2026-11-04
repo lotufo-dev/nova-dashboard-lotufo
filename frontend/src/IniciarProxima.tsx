@@ -33,7 +33,8 @@ export default function IniciarProxima({ contratoId, versao, aoCriar }: { contra
       </section>
     );
   }
-  const prevista = medicoes?.find(x => x.estado === "prevista");
+  // a planilha/carta e' de execucao e projeto: a prevista de reajuste nao entra no atalho (ela segue pelo espelho)
+  const prevista = medicoes?.find(x => x.estado === "prevista" && x.tipo !== "reajuste");
   // sem a lista (a leitura falhou), o rotulo nao inventa um numero
   const numero = prevista ? prevista.numero : medicoes ? medicoes.reduce((mx, x) => Math.max(mx, x.numero), 0) + 1 : null;
   return (

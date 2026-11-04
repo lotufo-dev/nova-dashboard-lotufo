@@ -120,24 +120,37 @@ function CamposDoPedido({ prefixo, form, setForm, comCompetencia, tentou }: {
   );
 }
 
-/** Os avisos de periodo do servidor (sobreposto, pulando dias, competencia anterior), enquanto a pessoa digita. */
-function useAvisos(contratoId: number, tipo: TipoPlanilha, numero: string, competencia: string, inicio: string): string[] {
-  const [avisos, setAvisos] = useState<string[]>([]);
+/** O que o servidor confere enquanto a pessoa digita: os avisos de periodo (sobreposto, pulando dias, competencia
+ *  anterior) e o acumulado anterior e o saldo DO Nº digitado. `numero` diz de qual nº e' a leitura. */
+type Conferencia = { numero: string; avisos: string[]; acumulado_anterior_centavos: number | null; saldo_centavos: number | null };
+
+function useConferencia(contratoId: number, tipo: string, numero: string, competencia: string, inicio: string): Conferencia | null {
+  const [conf, setConf] = useState<Conferencia | null>(null);
   useEffect(() => {
     if (!/^\d{1,3}$/.test(numero) || !/^\d{4}-\d{2}$/.test(competencia) || !/^\d{4}-\d{2}-\d{2}$/.test(inicio)) {
-      setAvisos([]);
+      setConf(null);
       return;
     }
     let vivo = true;
     const t = setTimeout(() => {
       const q = new URLSearchParams({ tipo, numero, competencia, periodo_inicio: inicio });
-      api<{ avisos: string[] }>(`/api/contratos/${contratoId}/planilhas/avisos?${q}`)
-        .then(r => { if (vivo) setAvisos(r.avisos ?? []); })
-        .catch(() => { if (vivo) setAvisos([]); });       // aviso nao impede: sem a leitura, nada aparece
+      api<Omit<Conferencia, "numero">>(`/api/contratos/${contratoId}/planilhas/avisos?${q}`)
+        .then(r => { if (vivo) setConf({ numero, avisos: r.avisos ?? [], acumulado_anterior_centavos: r.acumulado_anterior_centavos ?? null,
+          saldo_centavos: r.saldo_centavos ?? null }); })
+        .catch(() => { if (vivo) setConf(null); });       // aviso nao impede: sem a leitura, nada aparece
     }, 300);
     return () => { vivo = false; clearTimeout(t); };
   }, [contratoId, tipo, numero, competencia, inicio]);
-  return avisos;
+  return conf;
+}
+
+/** Acumulado anterior e saldo do nº que esta' no formulario: o da conferencia desse nº, senao o da sugestao quando o nº
+ *  e' o sugerido; de outro nº, "—" (o acumulado depende do nº). */
+export function saldoDoNumero(numero: string, sug: { numero: number; acumulado_anterior_centavos: number; saldo_centavos: number | null },
+  conf: Conferencia | null): { acumulado: number | null; saldo: number | null } {
+  if (conf && conf.numero === numero) return { acumulado: conf.acumulado_anterior_centavos, saldo: conf.saldo_centavos };
+  if (String(sug.numero) === numero) return { acumulado: sug.acumulado_anterior_centavos, saldo: sug.saldo_centavos };
+  return { acumulado: null, saldo: null };
 }
 
 /** Passo 1: "Nova planilha/carta". `inicial`: a medicao prevista que este registro promove (nº e competencia dela). */
@@ -162,16 +175,19 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
         if (!vivo) return;
         setSug(s);
         const competencia = inicialCompetencia ?? s.competencia;
-        const [ini, fim] = inicialCompetencia ? mesCivil(inicialCompetencia) : [s.periodo_inicio, s.periodo_fim];
+        // o periodo sugerido vale para a competencia sugerida; a prevista de outra competencia abre no mes dela
+        const [ini, fim] = competencia === s.competencia ? [s.periodo_inicio, s.periodo_fim] : mesCivil(competencia);
         setNumero(String(inicialNumero ?? s.numero));
-        setNumeroOrgao(s.numero_orgao !== null ? String(s.numero_orgao) : "");
+        // o nº do orgao sugerido e' o do nº sugerido; na prevista fica vazio e o servidor mantem o que ela ja' tem
+        setNumeroOrgao(s.numero_orgao !== null && (inicialNumero ?? s.numero) === s.numero ? String(s.numero_orgao) : "");
         setForm(f => ({ ...f, competencia, inicio: ini, fim }));
       })
       .catch(e => { if (vivo) setErroSug(mensagemDeErro(e)); });
     return () => { vivo = false; };
   }, [contratoId, tipo, inicialNumero, inicialCompetencia]);
 
-  const avisos = useAvisos(contratoId, tipo, numero, form.competencia, form.inicio);
+  const conf = useConferencia(contratoId, tipo, numero, form.competencia, form.inicio);
+  const avisos = conf?.avisos ?? [];
   const pedido = centavosDoTexto(form.valor);
 
   async function registrar(ev: React.FormEvent) {
@@ -196,6 +212,7 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
 
   if (erroSug) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir a planilha/carta: {erroSug}</p>;
   if (!sug) return <p role="status">Carregando…</p>;
+  const saldo = saldoDoNumero(numero, sug, conf);
 
   return (
     <form className="cartao__corpo pilha" onSubmit={registrar} aria-label="Nova planilha/carta">
@@ -215,11 +232,11 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
       </div>
       <CamposDoPedido prefixo="pl" form={form} setForm={setForm} comCompetencia tentou={tentou} />
       <dl className="planilha__saldo">
-        <div><dt>Acumulado anterior</dt><dd className="num">{brl(sug.acumulado_anterior_centavos)}</dd></div>
-        <div><dt>Saldo</dt><dd className="num">{brl(sug.saldo_centavos)}</dd></div>
-        {sug.saldo_centavos !== null && pedido !== null && (
+        <div><dt>Acumulado anterior</dt><dd className="num">{brl(saldo.acumulado)}</dd></div>
+        <div><dt>Saldo</dt><dd className="num">{brl(saldo.saldo)}</dd></div>
+        {saldo.saldo !== null && pedido !== null && (
           <div><dt>Saldo depois do pedido</dt>
-            <dd className={`num${sug.saldo_centavos - pedido < 0 ? " planilha__negativo" : ""}`}>{brl(sug.saldo_centavos - pedido)}</dd></div>
+            <dd className={`num${saldo.saldo - pedido < 0 ? " planilha__negativo" : ""}`}>{brl(saldo.saldo - pedido)}</dd></div>
         )}
       </dl>
       {avisos.length > 0 && (
@@ -244,7 +261,7 @@ type SituacaoEnvio = {
   pecas: Peca[]; pecas_do_orgao: { tipo: string; rotulo: string; exigida: boolean }[];
 };
 export type DetalhePlanilha = {
-  id: number; numero: number; tipo: string; estado: string; planilha_enviada_em: string | null;
+  id: number; contrato_id: number; numero: number; tipo: string; competencia: string; estado: string; planilha_enviada_em: string | null;
   planilha_envio_origem: string | null; planilhas: Versao[]; envio_planilha: SituacaoEnvio;
   planilha_siga: { data: string | null; numero: string | null } | null;
 };
@@ -272,7 +289,10 @@ function itensDasPecas(s: SituacaoEnvio): ItemChecklist[] {
 }
 
 /** O cartao da planilha/carta na etapa 1 da medicao. `podeEditar` falso (diretoria): so' le, sem nenhum botao. */
-export function CartaoPlanilha({ medicaoId, podeEditar, aoMudar }: { medicaoId: number; podeEditar: boolean; aoMudar: () => void }) {
+// `estado`: o da medicao na pagina; quando ele muda por outra etapa (a pagina recarregou), o cartao le de novo
+export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar }: {
+  medicaoId: number; estado?: string; podeEditar: boolean; aoMudar: () => void;
+}) {
   const base = useId();
   const [d, setD] = useState<DetalhePlanilha | null>(null);
   const [erro, setErro] = useState("");
@@ -293,7 +313,7 @@ export function CartaoPlanilha({ medicaoId, podeEditar, aoMudar }: { medicaoId: 
     api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`).then(x => { if (vivo) setD(x); })
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
     return () => { vivo = false; };
-  }, [medicaoId]);
+  }, [medicaoId, estado]);
 
   /** Executa, recarrega o cartao e avisa a pagina. Devolve se gravou. */
   async function agir(f: () => Promise<unknown>, mensagemFeito: string): Promise<boolean> {
@@ -491,7 +511,7 @@ export function CartaoPlanilha({ medicaoId, podeEditar, aoMudar }: { medicaoId: 
             }} />
         )}
         {editavel && painel === "revisao" && vigente && (
-          <Revisao vigente={vigente} ocupado={ocupado} aoFechar={() => setPainel(null)}
+          <Revisao medicao={d} vigente={vigente} ocupado={ocupado} aoFechar={() => setPainel(null)}
             aoRegistrar={async fd => {
               const ok = await agir(() => apiForm(`/api/medicoes/${medicaoId}/planilhas`, fd), "Revisão registrada.");
               if (ok) setPainel(null);
@@ -557,14 +577,16 @@ function EnvioPorFora({ medicaoId, ocupado, aoFechar, aoRegistrar }: {
 }
 
 /** Revisao da planilha/carta (Rev01, Rev02...): versao nova, com motivo obrigatorio. */
-function Revisao({ vigente, ocupado, aoFechar, aoRegistrar }: {
-  vigente: Versao; ocupado: boolean; aoFechar: () => void; aoRegistrar: (fd: FormData) => Promise<void>;
+function Revisao({ medicao, vigente, ocupado, aoFechar, aoRegistrar }: {
+  medicao: DetalhePlanilha; vigente: Versao; ocupado: boolean; aoFechar: () => void; aoRegistrar: (fd: FormData) => Promise<void>;
 }) {
   const [motivo, setMotivo] = useState("");
   const [form, setForm] = useState<FormPedido>({ competencia: "", inicio: vigente.periodo_inicio, fim: vigente.periodo_fim,
     valor: digitosParaBrl(String(vigente.valor_pedido_centavos)), oficio: null, planilha: null });
   const [tentou, setTentou] = useState(false);
   const proxima = rotuloVersao(vigente.versao + 1);
+  // os mesmos avisos de periodo da 1a versao, enquanto a pessoa muda o periodo da revisao
+  const avisos = useConferencia(medicao.contrato_id, medicao.tipo, String(medicao.numero), medicao.competencia, form.inicio)?.avisos ?? [];
   const erroMotivo = tentou && !motivo.trim() ? "Informe o motivo da revisão." : undefined;
   function registrar(ev: React.FormEvent) {
     ev.preventDefault();
@@ -594,6 +616,7 @@ function Revisao({ vigente, ocupado, aoFechar, aoRegistrar }: {
         <ErroCampo id="rev-motivo-erro" erro={erroMotivo} />
       </div>
       <CamposDoPedido prefixo="rev" form={form} setForm={setForm} comCompetencia={false} tentou={tentou} />
+      {avisos.length > 0 && <div role="status">{avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}</div>}
       <div className="form-inline">
         <button type="submit" className="btn btn--primario" disabled={ocupado}>{ocupado ? "Registrando…" : "Registrar revisão"}</button>
         <button type="button" className="btn" onClick={aoFechar}>Voltar</button>

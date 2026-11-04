@@ -708,6 +708,11 @@ def test_avisos_do_periodo_na_hora_sem_gravar(client_admin):
     assert r.json()["avisos"] == []
     r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-08-03"})
     assert len(r.json()["avisos"]) == 1 and "pula" in r.json()["avisos"][0]
+    # o acumulado e o saldo sao os do nº consultado, nao os do nº sugerido
+    assert r.json()["acumulado_anterior_centavos"] == 12_345_67
+    r1 = client_admin.get(url, params={"numero": 1, "competencia": "2026-07", "periodo_inicio": "2026-06-26"})
+    assert r1.json()["acumulado_anterior_centavos"] == 0
+    assert r1.json()["saldo_centavos"] - r.json()["saldo_centavos"] == 12_345_67
     # so' le: nada foi gravado
     assert len(client_admin.get(f"/api/contratos/{cid}/medicoes").json()) == 1
     assert client_admin.get(url, params={"numero": 2, "competencia": "2026-8",

@@ -18,18 +18,22 @@ function anexar(rotulo: string, f: File) {
 describe("Nova planilha/carta", () => {
   afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
 
+  // a conferencia devolve o acumulado DO nº consultado: 10.000,00 por medicao anterior, contrato de 100.000,00
   function responder(avisos: (inicio: string) => string[] = () => []) {
     api.mockImplementation(async (url: string) => {
       if (url.startsWith("/api/contratos/9/planilhas/sugestao")) return SUGESTAO;
       if (url.startsWith("/api/contratos/9/planilhas/avisos")) {
-        return { avisos: avisos(new URLSearchParams(url.split("?")[1]).get("periodo_inicio") ?? "") };
+        const q = new URLSearchParams(url.split("?")[1]);
+        const acumulado = (Number(q.get("numero")) - 1) * 10_000_00;
+        return { avisos: avisos(q.get("periodo_inicio") ?? ""), acumulado_anterior_centavos: acumulado,
+          saldo_centavos: 100_000_00 - acumulado };
       }
       return {};
     });
   }
 
   it("sugere nº e período, mostra o acumulado anterior e o saldo, e o saldo depois do pedido", async () => {
-    responder();
+    api.mockImplementation(async (url: string) => (url.includes("/sugestao") ? SUGESTAO : new Promise(() => {})));
     render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
     expect(((await screen.findByLabelText("Nº da medição")) as HTMLInputElement).value).toBe("4");
     expect((screen.getByLabelText("Período: de") as HTMLInputElement).value).toBe("2026-08-01");
@@ -77,12 +81,27 @@ describe("Nova planilha/carta", () => {
     expect((fd.get("planilha") as File).name).toBe("planilha.xlsx");
   });
 
-  it("a medição prevista entra com o nº e a competência dela", async () => {
+  it("a medição prevista entra com o nº e a competência dela, sem o nº do órgão de outro nº", async () => {
     responder();
+    api.mockImplementation(async (url: string) => (url.includes("/sugestao") ? { ...SUGESTAO, numero_orgao: 9 } : { avisos: [] }));
     render(<NovaPlanilhaCarta contratoId={9} inicial={{ numero: 6, competencia: "2026-02" }} aoRegistrar={() => {}} />);
     expect(((await screen.findByLabelText("Nº da medição")) as HTMLInputElement).value).toBe("6");
     expect((screen.getByLabelText("Período: de") as HTMLInputElement).value).toBe("2026-02-01");
     expect((screen.getByLabelText("até") as HTMLInputElement).value).toBe("2026-02-28");
+    // o 9 e' o do nº sugerido (4): na prevista o campo fica vazio e o servidor mantem o que ela ja' tem
+    expect((screen.getByLabelText("Nº no órgão") as HTMLInputElement).value).toBe("");
+  });
+
+  it("trocar o nº troca o acumulado e o saldo pelos do nº digitado", async () => {
+    responder();
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    const saldo = (await screen.findByText("Acumulado anterior")).closest("dl")!;
+    await waitFor(() => expect(saldo.textContent).toContain("R$\u00a030.000,00"));
+    fireEvent.change(screen.getByLabelText("Nº da medição"), { target: { value: "2" } });
+    // antes da leitura do nº novo, nada de numero de outra medicao
+    expect(saldo.textContent).not.toContain("R$\u00a030.000,00");
+    await waitFor(() => expect(saldo.textContent).toContain("R$\u00a010.000,00"));
+    expect(saldo.textContent).toContain("R$\u00a090.000,00");
   });
 });
 
@@ -91,7 +110,7 @@ describe("Nova planilha/carta", () => {
 const V1 = { id: 31, versao: 1, periodo_inicio: "2026-08-01", periodo_fim: "2026-08-31", valor_pedido_centavos: 12_345_67,
   acumulado_anterior_centavos: 0, motivo: null, criado_em: "2026-09-01 12:00:00", usuario: "Operação" };
 function detalhe(extra: Partial<DetalhePlanilha> = {}, envio: Partial<DetalhePlanilha["envio_planilha"]> = {}): DetalhePlanilha {
-  return { id: 5, numero: 4, tipo: "execucao", estado: "planilha_gerada", planilha_enviada_em: null, planilha_envio_origem: null,
+  return { id: 5, contrato_id: 9, numero: 4, tipo: "execucao", competencia: "2026-08", estado: "planilha_gerada", planilha_enviada_em: null, planilha_envio_origem: null,
     planilhas: [V1], planilha_siga: null, ...extra,
     envio_planilha: { disponivel: true, motivo: null, envios: [], reserva: null, pecas: [], pecas_do_orgao: [], ...envio } };
 }
@@ -181,7 +200,8 @@ describe("Cartão da planilha/carta", () => {
   });
 
   it("a revisão pede o motivo; com ele, grava a versão nova (Rev01)", async () => {
-    api.mockResolvedValue(detalhe({ estado: "planilha_enviada", planilha_enviada_em: "2026-09-03" }, { disponivel: false, motivo: "já enviada" }));
+    api.mockImplementation(async (url: string) => (url.startsWith("/api/contratos/9/planilhas/avisos") ? { avisos: [SOBREPOE] }
+      : detalhe({ estado: "planilha_enviada", planilha_enviada_em: "2026-09-03" }, { disponivel: false, motivo: "já enviada" })));
     apiForm.mockResolvedValue({ medicao_id: 5, versao: 2, estado: "planilha_enviada", avisos: [] });
     render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
     fireEvent.click(await screen.findByRole("button", { name: "Registrar revisão" }));
@@ -192,6 +212,8 @@ describe("Cartão da planilha/carta", () => {
     anexar("Planilha (.xlsx ou PDF)", new File(["PK"], "planilha-rev01.xlsx"));
     fireEvent.click(within(form).getByRole("button", { name: "Registrar revisão" }));
     expect(await screen.findByText("Informe o motivo da revisão.")).toBeTruthy();
+    // a revisao avisa o periodo sobreposto como a 1a versao
+    expect(await screen.findByText(SOBREPOE)).toBeTruthy();
     expect(apiForm).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("Motivo (obrigatório)"), { target: { value: "Supervisora pediu ajuste no item 3" } });
     fireEvent.click(within(form).getByRole("button", { name: "Registrar revisão" }));

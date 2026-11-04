@@ -28,6 +28,12 @@ describe("Atalho Nova planilha/carta da Nª medição (página da obra)", () => 
     expect((await screen.findByRole("link", { name: "Nova planilha/carta da 3ª medição" })).getAttribute("href")).toBe("/obras/9/medicoes/8");
   });
 
+  it("prevista de reajuste não entra no atalho da planilha/carta", async () => {
+    responder("ativa", [{ id: 5, numero: 6, tipo: "execucao", estado: "recebida" }, { id: 7, numero: 6, tipo: "reajuste", estado: "prevista" }]);
+    render(<IniciarProxima contratoId={9} versao={0} aoCriar={() => {}} />);
+    expect((await screen.findByRole("link", { name: "Nova planilha/carta da 7ª medição" })).getAttribute("href")).toBe("/obras/9/medicoes/nova");
+  });
+
   it("obra do fluxo antigo: continua com a medição à mão, sem o atalho", async () => {
     responder(null, []);
     render(<IniciarProxima contratoId={9} versao={0} aoCriar={() => {}} />);
