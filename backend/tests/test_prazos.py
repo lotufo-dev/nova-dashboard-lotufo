@@ -322,7 +322,8 @@ def test_acima_do_teto_do_pedido_nao_sugere(cenario):
     _valor(c, cid, 1_006_00)
     _medicao(c, cid, 1, "2026-09", atestado=6_00)   # ritmo 1,00; saldo 1.000,00 = 1.000 meses
     s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
-    assert s["dias"] is None and s["motivo"] == prazos.ACIMA_DO_TETO and "3.650 dias" in s["motivo"]
+    assert s["dias"] is None and s["motivo"] == prazos.ACIMA_DO_TETO
+    assert s["motivo"] == "No ritmo dos últimos 6 meses o pedido passaria de 3.650 dias, o máximo."
 
 
 def test_ritmo_irrisorio_nao_derruba_a_aba(cenario):
@@ -342,3 +343,14 @@ def test_fim_de_execucao_no_ano_9999_nao_derruba_a_aba(cenario):
     _medicao(c, cid, 1, "2026-09", atestado=60)
     s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
     assert s["dias"] is None and "não há dias a pedir" in s["motivo"]
+
+
+def test_mes_exato_nao_calcula_o_mes_seguinte(cenario):
+    """1 mes exato de 15/11/9999: conclusao 15/12/9999, 1 dia depois do fim vigente. O mes seguinte (01/10000) nao
+    existe; com resto zero ele nao pode entrar na conta, senao a sugestao some com o motivo errado."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 700); _fim(c, cid, "9999-12-14")
+    _medicao(c, cid, 1, "9999-10", atestado=600)   # ritmo 1,00; saldo 1,00 = 1 mes
+    s = prazos.sugestao_dias(c, cid, D(9999, 11, 15))
+    assert (s["novo_fim"], s["dias"], s["motivo"]) == ("9999-12-15", 1, None)

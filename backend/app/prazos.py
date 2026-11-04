@@ -165,7 +165,7 @@ def historico_texto(conn, contrato_id: int) -> str:
 
 MESES_RITMO = 6
 TETO_DIAS = 3650   # o mesmo teto do pedido na API (api_pleitos.CriarIn.dias)
-ACIMA_DO_TETO = "No ritmo dos últimos 6 meses o pedido passaria de 3.650 dias, o máximo: sem sugestão de dias."
+ACIMA_DO_TETO = "No ritmo dos últimos 6 meses o pedido passaria de 3.650 dias, o máximo."
 
 
 def _somar_meses(d: datetime.date, n: int) -> datetime.date:
@@ -218,7 +218,8 @@ def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     inteiros = math.floor(faltam)
     try:
         fim = _somar_meses(hoje, inteiros)
-        extra = math.ceil((_somar_meses(hoje, inteiros + 1) - fim).days * (faltam - inteiros))
+        resto = faltam - inteiros   # mes exato: o mes seguinte nem entra na conta (perto do ano 9999 ele nao existe)
+        extra = math.ceil((_somar_meses(hoje, inteiros + 1) - fim).days * resto) if resto else 0
         conclusao = fim + datetime.timedelta(days=extra)
     except (ValueError, OverflowError):   # saldo enorme num ritmo irrisorio: a data passaria do ano 9999
         return {**out, "motivo": ACIMA_DO_TETO}
