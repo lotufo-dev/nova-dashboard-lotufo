@@ -310,6 +310,20 @@ def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "projeto"] = Qu
     return medicao_planilhas.sugestao(conn, contrato_id, tipo)
 
 
+@router.get("/api/contratos/{contrato_id}/planilhas/avisos")
+def avisos_planilha(contrato_id: ID, numero: int = Query(..., ge=1, le=999),
+                    competencia: str = Query(..., pattern=COMPETENCIA),
+                    periodo_inicio: datetime.date = Query(...),
+                    tipo: Literal["execucao", "projeto"] = Query("execucao"),
+                    usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                    conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #289: os avisos de periodo (sobreposto, pulando dias, competencia anterior) enquanto a pessoa preenche a
+    planilha/carta, pela mesma regra que o registro devolve. So' le."""
+    _contrato_existe(conn, contrato_id)
+    return {"avisos": medicao_planilhas.avisos(conn, contrato_id, tipo, numero, competencia,
+                                               periodo_inicio.isoformat())}
+
+
 @router.post("/api/contratos/{contrato_id}/planilhas", status_code=201)
 def registrar_planilha(contrato_id: ID,
                        numero: int = Form(..., ge=1, le=999),

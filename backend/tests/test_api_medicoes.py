@@ -697,6 +697,25 @@ def test_periodo_sobreposto_ou_pulando_devolve_aviso_e_grava(client_admin):
     assert [m["estado"] for m in client_admin.get(f"/api/contratos/{cid}/medicoes").json()] == ["planilha_gerada"] * 3
 
 
+# issue #289: a tela avisa o periodo sobreposto enquanto a pessoa digita, antes de gravar (mesma regra do registro)
+def test_avisos_do_periodo_na_hora_sem_gravar(client_admin):
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid, 1, "2026-07", "2026-06-26", "2026-07-25").status_code == 201
+    url = f"/api/contratos/{cid}/planilhas/avisos"
+    r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-20"})
+    assert r.status_code == 200 and len(r.json()["avisos"]) == 1 and "sobrepõe" in r.json()["avisos"][0]
+    r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-26"})
+    assert r.json()["avisos"] == []
+    r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-08-03"})
+    assert len(r.json()["avisos"]) == 1 and "pula" in r.json()["avisos"][0]
+    # so' le: nada foi gravado
+    assert len(client_admin.get(f"/api/contratos/{cid}/medicoes").json()) == 1
+    assert client_admin.get(url, params={"numero": 2, "competencia": "2026-8",
+                                         "periodo_inicio": "2026-07-26"}).status_code == 422
+    assert client_admin.get("/api/contratos/999999/planilhas/avisos", params={
+        "numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-26"}).status_code == 404
+
+
 def test_planilha_diretoria_recebe_403(client_admin):
     from app import auth, db
     cid = _contrato(client_admin)
