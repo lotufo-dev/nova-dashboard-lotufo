@@ -17,8 +17,10 @@ on:
 # nada e' cancelado nem fica em fila: cada merge precisa da propria execucao verde (a skill
 # deploy confere o commit), e um grupo so' por branch cancelaria ate' a execucao que espera.
 # Na fila de merge cada grupo tem commit proprio, entao tambem cai no grupo pelo sha.
-# O job backend continua no Windows de proposito, mesmo custando em dobro: a suite curta
-# (issue #88) e' o que resolve a conta, nao trocar de sistema.
+# Backend em dois jobs (issue #367): `backend` roda o grosso da suite no Ubuntu com pytest-xdist
+# (-n 4, `-m "not windows"`), porque o disco do runner Windows levava 11 a 14 min; `backend-windows`
+# roda `-m "windows or pdf"`: backup e ACL (tests/test_backup.py) e os modulos que geram PDF com a
+# Arial da producao (carta, FRC, protocolo, pdfs), que no Ubuntu so' passam pelo ramo Helvetica.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
@@ -100,9 +102,23 @@ jobs:
             exit 1
           fi
 
+  # Nome mantido: e' check obrigatorio do ruleset `master protegida`.
   backend:
-    # Windows de proposito: e' o sistema da producao (<servidor>) e os testes de
-    # backup/ACL exercitam caminhos e ferramentas do Windows.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - run: python -m pip install -r requirements.lock
+        working-directory: backend
+      - run: python -m pytest -q -n 4 -m "not windows"
+        working-directory: backend
+
+  # Marcador `windows` (caminho e ferramenta do Windows) e `pdf` (ramo Arial da carta/FRC).
+  backend-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -113,7 +129,7 @@ jobs:
           cache-dependency-path: backend/requirements.lock
       - run: python -m pip install -r requirements.lock
         working-directory: backend
-      - run: python -m pytest -q
+      - run: python -m pytest -q -m "windows or pdf"
         working-directory: backend
 
   frontend:

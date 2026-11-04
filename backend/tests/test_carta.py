@@ -5,7 +5,12 @@ import io
 
 import pypdf
 
+import pytest
+
 from app import carta
+
+# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
 
 
 def _texto(pdf: bytes) -> str:

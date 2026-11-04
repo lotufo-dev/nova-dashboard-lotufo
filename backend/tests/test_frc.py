@@ -17,6 +17,9 @@ from app import cadastro_aplicar, cadastro_arquivos, espelho, espelhos, frc, lei
 from tests.conftest import CADASTRO_EXEMPLO, _pdf_com_texto
 from tests.test_notas import CNPJ_BETA, CNPJ_PROPRIA, _fixture, _texto, conn, usuario  # noqa: F401  (fixtures)
 
+# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 LOTUFO, BETA = CNPJ_PROPRIA, CNPJ_BETA
 CONSORCIO = "consorcio-exemplo"
 ULTIMA = 40                      # a ultima FRC emitida antes do sistema: a primeira gerada sai 41
