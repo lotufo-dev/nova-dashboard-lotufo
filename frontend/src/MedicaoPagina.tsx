@@ -229,7 +229,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // ---------------------------------------------------------------- etapas
   // issue #289: o primeiro passo e' a planilha/carta (execucao e projeto, na obra com regra de espelho ativa; o
   // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela fica no alto da
-  // etapa, com o espelho logo abaixo (ponte ate' o boletim da #284: o espelho repete o pedido da planilha/carta).
+  // etapa. Enviada, o espelho aparece logo abaixo (ponte ate' o boletim da #284: o espelho repete o pedido da
+  // planilha/carta); so' gerada, ainda nao (a ponte substitui o boletim, nao o envio ao protocolo).
   const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
   // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
   const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;
@@ -240,9 +241,9 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
       )}
       {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar} />}
-      {!novaPlanilha && (
+      {!novaPlanilha && m.estado !== "planilha_gerada" && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
-          abrirForm={["prevista", "planilha_gerada", "planilha_enviada"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+          abrirForm={["prevista", "planilha_enviada"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
       )}
     </div>
   );

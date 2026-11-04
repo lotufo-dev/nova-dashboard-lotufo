@@ -34,6 +34,12 @@ describe("Atalho Nova planilha/carta da Nª medição (página da obra)", () => 
     expect((await screen.findByRole("link", { name: "Nova planilha/carta da 7ª medição" })).getAttribute("href")).toBe("/obras/9/medicoes/nova");
   });
 
+  it("prevista de projeto não entra no atalho: o nº é o seguinte da execução (gate Sol, PR #382, rodada 2)", async () => {
+    responder("ativa", [{ id: 5, numero: 6, tipo: "execucao", estado: "recebida" }, { id: 9, numero: 20, tipo: "projeto", estado: "prevista" }]);
+    render(<IniciarProxima contratoId={9} versao={0} aoCriar={() => {}} />);
+    expect((await screen.findByRole("link", { name: "Nova planilha/carta da 7ª medição" })).getAttribute("href")).toBe("/obras/9/medicoes/nova");
+  });
+
   it("o nº do atalho é o seguinte da execução, como o do formulário (gate Sol, PR #382)", async () => {
     responder("ativa", [{ id: 5, numero: 6, tipo: "execucao", estado: "recebida" }, { id: 9, numero: 20, tipo: "projeto", estado: "recebida" }]);
     render(<IniciarProxima contratoId={9} versao={0} aoCriar={() => {}} />);

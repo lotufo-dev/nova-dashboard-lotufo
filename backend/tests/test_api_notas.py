@@ -217,3 +217,65 @@ def test_espelho_da_prevista_promove_a_medicao(client_admin, ambiente_api):
     assert r.status_code == 201, r.text
     d = client_admin.get(f"/api/medicoes/{mid}").json()
     assert (d["estado"], d["valor_protocolado_centavos"], d["competencia"]) == ("espelho_gerado", 1_000_01, "2026-09")
+
+
+def test_espelho_gerado_de_novo_nao_reescreve_o_pedido_enviado(client_admin, ambiente_api):
+    """Rodada 2 (PR #382): depois da ponte, gerar o espelho de novo com outro valor e' recusado (previa e geracao) e o
+    pedido enviado continua o mesmo; com o mesmo valor, a versao nova sai e a medicao nao muda."""
+    cid = ambiente_api
+    mid = _planilha_enviada(client_admin, cid)
+    corpo = {"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "719.190,72"}}
+    assert client_admin.post(f"/api/contratos/{cid}/espelho", json=corpo).status_code == 201
+    divergente = {**corpo, "entradas": {"medicao": "1,00"}}
+    for rota in ("espelho/previa", "espelho"):
+        r = client_admin.post(f"/api/contratos/{cid}/{rota}", json=divergente)
+        assert r.status_code == 422 and "difere do pedido" in r.json()["detail"], r.text
+    r = client_admin.post(f"/api/contratos/{cid}/espelho", json={**corpo, "competencia": "2026-09"})
+    assert r.status_code == 422 and "competência 08/2026" in r.json()["detail"]
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_protocolado_centavos"], d["valor_protocolado_origem"], d["competencia"]) == (
+        "espelho_gerado", 719_190_72, "manual", "2026-08")
+    assert client_admin.post(f"/api/contratos/{cid}/espelho", json=corpo).status_code == 201
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["valor_protocolado_centavos"], d["valor_protocolado_origem"]) == (719_190_72, "manual")
+
+
+def test_pedido_enviado_nao_se_edita_a_mao_depois_da_ponte(client_admin, ambiente_api):
+    """Rodada 2 (PR #382): em espelho_gerado (fora dos estados da planilha/carta), o PUT do protocolado continua 422."""
+    cid = ambiente_api
+    mid = _planilha_enviada(client_admin, cid)
+    assert client_admin.post(f"/api/contratos/{cid}/espelho", json={
+        "numero": 27, "competencia": "2026-08", "entradas": {"medicao": "719.190,72"}}).status_code == 201
+    r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1,00"})
+    assert r.status_code == 422 and "congelou no envio da planilha/carta" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 719_190_72
+
+
+def test_planilha_gerada_nao_vai_ao_espelho_sem_o_envio(client_admin, ambiente_api):
+    """Rodada 2 (PR #382): a ponte substitui o boletim, nao o envio ao protocolo."""
+    from tests.test_api_medicoes import _arquivos_planilha
+    cid = ambiente_api
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha("oficio 27"),
+                          data={"numero": 27, "competencia": "2026-08", "periodo_inicio": "2026-08-01",
+                                "periodo_fim": "2026-08-31", "valor": "719.190,72"})
+    mid = r.json()["medicao_id"]
+    corpo = {"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "719.190,72"}}
+    for rota in ("espelho/previa", "espelho"):
+        r = client_admin.post(f"/api/contratos/{cid}/{rota}", json=corpo)
+        assert r.status_code == 422 and "envie ao protocolo" in r.json()["detail"], r.text
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_gerada"
+
+
+def test_espelho_recusa_com_a_revisao_saindo_pelo_sistema(client_admin, ambiente_api):
+    """Rodada 2 (PR #382): com uma versao reservada para o envio ao protocolo, o espelho espera o e-mail terminar."""
+    cid = ambiente_api
+    mid = _planilha_enviada(client_admin, cid)
+    conn = db.get_conn()
+    pid = conn.execute("SELECT id FROM medicao_planilhas WHERE medicao_id=?", (mid,)).fetchone()[0]
+    conn.execute("INSERT INTO medicao_planilha_envios (medicao_id, planilha_id, envio_reservado_em, envio_reservado_por) "
+                 "VALUES (?,?,datetime('now'),1)", (mid, pid))
+    conn.commit(); conn.close()
+    r = client_admin.post(f"/api/contratos/{cid}/espelho",
+                          json={"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "719.190,72"}})
+    assert r.status_code == 422 and "está sendo enviada ao protocolo" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_enviada"

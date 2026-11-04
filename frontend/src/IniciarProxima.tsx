@@ -33,8 +33,9 @@ export default function IniciarProxima({ contratoId, versao, aoCriar }: { contra
       </section>
     );
   }
-  // a planilha/carta e' de execucao e projeto: a prevista de reajuste nao entra no atalho (ela segue pelo espelho)
-  const prevista = medicoes?.find(x => x.estado === "prevista" && x.tipo !== "reajuste");
+  // o atalho e' o da serie de execucao, a mesma da sugestao do formulario: a prevista de reajuste segue pelo espelho e a
+  // de projeto tem serie propria (abre pela pagina dela)
+  const prevista = medicoes?.find(x => x.estado === "prevista" && x.tipo === "execucao");
   // sem a lista (a leitura falhou), o rotulo nao inventa um numero
   // o nº seguinte da execucao, como a sugestao do formulario (medicao_planilhas.sugestao); o reajuste divide o nº com
   // ela, o projeto tem serie propria
