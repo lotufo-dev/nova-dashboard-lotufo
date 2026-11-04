@@ -623,11 +623,97 @@ def test_percentual_da_mtpar_com_periodo_apostila_as_competencias_cobertas(cenar
                        {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76",
                         "periodo": {"de": "2026-06", "ate": "2027-05"}})
     x = _por_competencia(c, cid)
+    # cada mes do periodo entra, mesmo sem previsao digitada (gate Sol, rodada 1, PR #381)
+    cobertos = [f"2026-{m:02d}" for m in range(6, 13)] + [f"2027-{m:02d}" for m in range(1, 6)]
     assert {k: (v["estado"], v["apostilada"]) for k, v in x.items()} == {
-        "2026-05": ("prevista", False), "2026-06": ("apostilada", True), "2027-05": ("apostilada", True),
-        "2027-06": ("prevista", False)}
+        "2026-05": ("prevista", False), **{k: ("apostilada", True) for k in cobertos}, "2027-06": ("prevista", False)}
     assert (x["2026-06"]["apostilado_centavos"], x["2026-06"]["apostilado_percentual"],
             x["2026-06"]["apostilamento_chave"]) == (None, "6,76", "apostilamento_reajuste-2026-09-15")
+    assert (x["2026-07"]["previsto_centavos"], x["2026-07"]["estado"]) == (None, "apostilada")
+
+
+def test_periodo_sem_percentual_so_delimita_as_competencias_da_lista(cenario):
+    # gate Sol (rodada 1, PR #381): termo abril a junho com valores so' de abril e maio nao apostila junho
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15",
+                       {"data_base": "2024-06", "ciclo": 2026, "periodo": {"de": "2026-07", "ate": "2026-09"},
+                        "competencias": [{"competencia": "2026-07", "valor": "100,01"},
+                                         {"competencia": "2026-08", "valor": "200,03"}]})
+    ap = c.execute("SELECT MAX(id) FROM instrumentos").fetchone()[0]
+    for comp, valor in (("2026-07", 100_01), ("2026-08", 200_03)):
+        _previsao(c, cid, comp, valor, "apostilamento", instrumento_id=ap, criado_em="2026-09-15 10:00:00")
+    _previsao(c, cid, "2026-09", 300_05, "manual")
+    x = _por_competencia(c, cid)
+    assert {k: (v["estado"], v["apostilado_centavos"]) for k, v in x.items()} == {
+        "2026-07": ("apostilada", 100_01), "2026-08": ("apostilada", 200_03), "2026-09": ("prevista", None)}
+
+
+def test_protocolada_sem_nota_e_pedida_e_com_nota_e_faturada(cenario):
+    # revisor (rodada 1, PR #381): o protocolo promove prevista e planilha_gerada direto a protocolada, sem nota
+    c, ids = cenario
+    cid = ids["contrato"]
+    _medicao(c, cid, 1, "2026-07", "protocolada", pedido=100_01)
+    m2 = _medicao(c, cid, 2, "2026-08", "protocolada", pedido=200_03)
+    c.execute("UPDATE medicoes SET nota_emitida_em='2026-09-01' WHERE id=?", (m2,))
+    m3 = _medicao(c, cid, 3, "2026-09", "protocolada", pedido=300_05)
+    _nota(c, m3, 300_05)
+    c.commit()
+    x = _por_competencia(c, cid)
+    assert [(x[k]["estado"], x[k]["faturado_centavos"]) for k in ("2026-07", "2026-08", "2026-09")] == \
+        [("pedida", None), ("faturada", None), ("faturada", 300_05)]
+
+
+def test_faturado_em_consorcio_so_conta_a_nota_da_coligada_do_contrato(cenario):
+    # gate Sol (rodada 1, PR #381): a medicao guarda o cheio; a fatura do consorcio (coligada dele) e' o faturado,
+    # a NFS-e da Lotufo pela cota (outra coligada) nao soma por cima
+    c, ids = cenario
+    cid = ids["contrato"]
+    c.execute("INSERT INTO entidades (nome, cnpj, papel, coligada_rm) VALUES ('Consórcio Exemplo', '31200303000181', "
+              "'consorcio', 90)")
+    c.execute("UPDATE contratos SET entidade_id=(SELECT MAX(id) FROM entidades) WHERE id=?", (cid,))
+    m = _medicao(c, cid, 1, "2026-07", "nota_emitida", pedido=10_000_000_07)
+    for numero, coligada, valor in (("21", 90, 10_000_000_07), ("3102", 1, 2_000_000_02)):
+        c.execute("INSERT INTO notas_fiscais (coligada, numero, valor_centavos, origem) VALUES (?, ?, ?, 'pdf')",
+                  (coligada, numero, valor))
+        c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) "
+                  "VALUES (?, (SELECT MAX(id) FROM notas_fiscais), ?, 'manual')", (m, valor))
+    c.commit()
+    x = _por_competencia(c, cid)["2026-07"]
+    assert (x["estado"], x["faturado_centavos"]) == ("faturada", 10_000_000_07)
+
+
+def test_complemento_soma_pedido_aprovado_e_faturado_das_medicoes(cenario):
+    # revisor (rodada 1, PR #381): o complemento aparece na linha da competencia
+    c, ids = cenario
+    cid = ids["contrato"]
+    _previsao(c, cid, "2026-07", 12_000_00, "manual")
+    m3 = _medicao(c, cid, 3, "2026-07", "recebida", pedido=10_000_00, aprovado=9_999_99)
+    _nota(c, m3, 9_999_99)
+    _medicao(c, cid, 7, "2026-07", "planilha_gerada", pedido=2_000_01)
+    x = _por_competencia(c, cid)["2026-07"]
+    assert (x["estado"], x["medicao_numero"], x["medicoes"], x["pedido_centavos"], x["aprovado_centavos"],
+            x["faturado_centavos"]) == ("recebida", 3, [3, 7], 12_000_01, 9_999_99, 9_999_99)
+
+
+def test_medicao_sem_base_em_contrato_de_duas_bases_nao_some(cenario):
+    # gate Sol (rodada 1, PR #381): duas datas-base com previsao da mesma competencia e medicao sem base gravada:
+    # entra nas duas, marcada como incerta, em vez de sumir
+    c, ids = cenario
+    cid = ids["contrato"]
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2024-08', 'SICRO')", (cid,))
+    _previsao(c, cid, "2026-09", 100_01, "manual")
+    _previsao(c, cid, "2026-09", 200_03, "manual", data_base="2024-08")
+    _previsao(c, cid, "2026-10", 300_05, "manual", data_base="2024-08")
+    _medicao(c, cid, 1, "2026-09", "planilha_gerada", pedido=300_04)
+    _medicao(c, cid, 2, "2026-10", "planilha_gerada", pedido=300_05)
+    a = _por_competencia(c, cid)["2026-09"]
+    b = _por_competencia(c, cid, data_base="2024-08")
+    assert (a["estado"], a["pedido_centavos"], a["data_base_incerta"]) == ("pedida", 300_04, True)
+    assert (b["2026-09"]["estado"], b["2026-09"]["data_base_incerta"]) == ("pedida", True)
+    # so' uma base tem previsao da competencia: vai para ela, sem incerteza
+    assert (b["2026-10"]["estado"], b["2026-10"]["data_base_incerta"]) == ("pedida", False)
+    assert "2026-10" not in _por_competencia(c, cid)
 
 
 def test_percentual_de_termo_corrigido_ou_de_outro_ciclo_nao_apostila(cenario):
