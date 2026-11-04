@@ -3,6 +3,7 @@ import { api } from "./api";
 import { EtapaCartao, FaixaVendo, Setas } from "./Etapas";
 import type { Usuario } from "./Login";
 import { ir, type Origem } from "./rota";
+import { Link } from "./Link";
 import { NovaPlanilhaCarta } from "./PlanilhaCarta";
 import { baseDosValores } from "./formato";
 import { Migalhas, VoltarOrigem } from "./Topo";
@@ -19,8 +20,12 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
   const podeEditar = usuario.perfil === "engenharia" || usuario.perfil === "admin";
   const [cab, setCab] = useState<Cabecalho | null>(null);
   const [vendo, setVendo] = useState(1);
+  // issue #289: a planilha/carta e' o 1o passo so' na obra que gera a medicao pelo espelho; a outra lanca a mao
+  const [regraAtiva, setRegraAtiva] = useState<boolean | null>(null);
   useEffect(() => {
     api<Cabecalho>(`/api/contratos/${contratoId}/cabecalho`).then(setCab).catch(() => setCab(null));
+    api<{ regra: { situacao: string } | null }>(`/api/contratos/${contratoId}/espelho`)
+      .then(r => setRegraAtiva(r.regra?.situacao === "ativa")).catch(() => setRegraAtiva(false));
   }, [contratoId]);
   const obra = cab?.obra ?? "Obra";
   useEffect(() => { document.title = `${obra} · Nova medição · grupolotufo`; }, [obra]);
@@ -56,10 +61,10 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
                 <div className="med-etapa__corpo">
                   {/* issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1); registrada, a
                       pagina da medicao abre com o cartao dela */}
-                  {podeEditar
+                  {!podeEditar || regraAtiva === null ? null : regraAtiva
                     ? <NovaPlanilhaCarta contratoId={contratoId}
                         aoRegistrar={r => ir({ tela: "medicao", obra: contratoId, id: r.medicao_id }, { forcar: true })} />
-                    : <p>—</p>}
+                    : <p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}>Lançar a medição à mão</Link></p>}
                 </div>
               )}
             </EtapaCartao>

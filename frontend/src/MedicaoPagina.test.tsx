@@ -8,7 +8,7 @@ const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm }));
 // Cada cartao tem fluxo proprio; aqui so' importa que, ao avisar a pagina, ela releia o que os outros mostram.
 vi.mock("./Espelho", () => ({
-  default: ({ parte }: { parte?: string }) => <div data-espelho={parte} />,
+  default: ({ parte, abrirForm }: { parte?: string; abrirForm?: boolean }) => <div data-espelho={parte} data-abre-form={String(!!abrirForm)} />,
 }));
 // issue #289: a planilha/carta tem teste proprio (PlanilhaCarta.test.tsx); aqui so' importa onde ela aparece
 vi.mock("./PlanilhaCarta", () => ({
@@ -501,45 +501,53 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
   it("medição prevista de execução abre a Nova planilha/carta, sem o formulário do espelho", async () => {
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-nova-planilha='23']")).not.toBeNull());
     expect(container.querySelector("[data-espelho]")).toBeNull();
     expect(container.querySelector("[data-cartao-planilha]")).toBeNull();
   });
 
-  it("com a planilha/carta registrada ou enviada: o cartão dela, ainda sem o espelho", async () => {
+  it("com a planilha/carta registrada ou enviada: o cartão dela e o espelho logo abaixo (ponte até a #284)", async () => {
     for (const estado of ["planilha_gerada", "planilha_enviada"]) {
-      responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado }] });
+      responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado }] });
       const { container } = pagina();
       await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-      expect(container.querySelector("[data-espelho]")).toBeNull();
+      // o formulario do espelho ja' abre: na pagina da medicao o Espelho nao tem o botao "Gerar espelho"
+      expect(container.querySelector("[data-espelho='espelho']")!.getAttribute("data-abre-form")).toBe("true");
       expect(container.querySelector("[data-nova-planilha]")).toBeNull();
       cleanup();
     }
   });
 
   it("depois do boletim: o cartão da planilha/carta e o espelho", async () => {
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "boletim_recebido" }] });
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "boletim_recebido" }] });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
     expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull();
   });
 
+  it("obra fora do fluxo do espelho: a prevista continua pelo espelho, sem o formulário (gate Sol, PR #382)", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+    expect(container.querySelector("[data-nova-planilha]")).toBeNull();
+  });
+
   it("reajuste previsto continua pelo espelho", async () => {
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, tipo: "reajuste", estado: "prevista" }] });
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, tipo: "reajuste", estado: "prevista" }] });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
   });
 
   it("diretoria: sem o formulário (vê o espelho só para ler); o cartão abre só para ler", async () => {
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
     const { container } = pagina("diretoria");
     await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
     cleanup();
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
     const segundo = pagina("diretoria");
     await waitFor(() => expect(segundo.container.querySelector("[data-cartao-planilha='5']")!.getAttribute("data-pode-editar")).toBe("false"));
   });

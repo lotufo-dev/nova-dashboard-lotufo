@@ -36,7 +36,10 @@ export default function IniciarProxima({ contratoId, versao, aoCriar }: { contra
   // a planilha/carta e' de execucao e projeto: a prevista de reajuste nao entra no atalho (ela segue pelo espelho)
   const prevista = medicoes?.find(x => x.estado === "prevista" && x.tipo !== "reajuste");
   // sem a lista (a leitura falhou), o rotulo nao inventa um numero
-  const numero = prevista ? prevista.numero : medicoes ? medicoes.reduce((mx, x) => Math.max(mx, x.numero), 0) + 1 : null;
+  // o nº seguinte da execucao, como a sugestao do formulario (medicao_planilhas.sugestao); o reajuste divide o nº com
+  // ela, o projeto tem serie propria
+  const numero = prevista ? prevista.numero
+    : medicoes ? medicoes.filter(x => x.tipo === "execucao").reduce((mx, x) => Math.max(mx, x.numero), 0) + 1 : null;
   return (
     <div className="medicoes__acoes" id="nova-medicao">
       <Link className="btn btn--primario medicoes__iniciar"

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CartaoPlanilha, centavosDoTexto, NovaPlanilhaCarta, rotuloVersao, seloDoEnvio, type DetalhePlanilha } from "./PlanilhaCarta";
+import { CartaoPlanilha, centavosDoTexto, dataDoEnvio, NovaPlanilhaCarta, rotuloVersao, seloDoEnvio, type DetalhePlanilha } from "./PlanilhaCarta";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm }));
@@ -235,6 +235,20 @@ describe("Cartão da planilha/carta", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  it("a lista de envios traz o do sistema no dia de Cuiabá e o de fora com o selo", async () => {
+    api.mockResolvedValue(detalhe({ estado: "planilha_enviada", planilha_enviada_em: "2026-09-02",
+      planilhas: [V1, { ...V1, id: 32, versao: 2, motivo: "Rev01" }] }, { disponivel: false, envios: [
+      { planilha_id: 31, versao: 1, numero_oficio: null, enviado_em: "2026-09-02", usuario: "Operação", origem: "externo" },
+      { planilha_id: 32, versao: 2, numero_oficio: "CT-302-LT-2026", enviado_em: "2026-09-04 01:30:00", usuario: "Operação", origem: "sistema" }] }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    const original = (await screen.findByText(/^Original enviada em/)).closest("li")!;
+    expect(original.textContent).toContain("02/09/2026");
+    expect(within(original).getByText("Fora do sistema")).toBeTruthy();
+    const rev = screen.getByText(/^Rev01 enviada em/).closest("li")!;
+    expect(rev.textContent).toContain("03/09/2026");
+    expect(within(rev).queryByText("Fora do sistema")).toBeNull();
+  });
+
   it("medição sem planilha/carta registrada: o cartão não aparece", async () => {
     api.mockResolvedValue(detalhe({ planilhas: [] }));
     const { container } = render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
@@ -250,5 +264,9 @@ describe("Ajudantes da planilha/carta", () => {
     expect([rotuloVersao(1), rotuloVersao(2), rotuloVersao(11)]).toEqual(["Original", "Rev01", "Rev10"]);
     expect(seloDoEnvio("2026-09-03")).toBe("Enviada em 03/09");
     expect(seloDoEnvio(null)).toBeNull();
+    // gate Sol (PR #382): o envio pelo sistema as 21h30 em Cuiaba (01h30 UTC do dia seguinte) e' do dia 03
+    const base = { planilha_id: 1, versao: 1, numero_oficio: null, usuario: null };
+    expect(dataDoEnvio({ ...base, enviado_em: "2026-09-04 01:30:00", origem: "sistema" })).toBe("03/09/2026");
+    expect(dataDoEnvio({ ...base, enviado_em: "2026-09-02", origem: "externo" })).toBe("02/09/2026");
   });
 });

@@ -11,7 +11,7 @@ import { IconeAlerta } from "./icones";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import Pendencias from "./Pendencias";
 import Selo from "./Selo";
-import { fmtDataPura, fmtHora, hojeLocal } from "./tempo";
+import { fmtData, fmtDataPura, fmtHora, hojeLocal } from "./tempo";
 import "./planilhaCarta.css";
 
 // Planilha/carta da medicao (issue #289; spec 2026-10-20 §2.1, "Quem clica", passos 1 e 2). O cartao "Nova
@@ -254,9 +254,18 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
 type Versao = { id: number; versao: number; periodo_inicio: string; periodo_fim: string; valor_pedido_centavos: number;
   acumulado_anterior_centavos: number; motivo: string | null; criado_em: string; usuario: string | null };
 type Peca = { id: number; tipo: string; nome: string; tamanho: number };
+/** Um envio da planilha/carta: pelo sistema (`enviado_em` instante UTC) ou por fora (a data informada, sem hora). */
+export type EnvioPlanilha = { planilha_id: number | null; versao: number; numero_oficio: string | null; enviado_em: string;
+  usuario: string | null; origem?: "sistema" | "externo" };
+
+/** O dia do envio em Cuiaba: o instante do sistema vira o dia local (21h em Cuiaba nao e' o dia seguinte). */
+export function dataDoEnvio(e: EnvioPlanilha): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(e.enviado_em) ? fmtDataPura(e.enviado_em) : fmtData(e.enviado_em);
+}
+
 type SituacaoEnvio = {
   disponivel: boolean; motivo: string | null;
-  envios: { planilha_id: number; versao: number; numero_oficio: string | null; enviado_em: string; usuario: string | null }[];
+  envios: EnvioPlanilha[];
   reserva: { id: number; envio_reservado_em: string | null; reservado_por: string | null } | null;
   pecas: Peca[]; pecas_do_orgao: { tipo: string; rotulo: string; exigida: boolean }[];
 };
@@ -436,8 +445,8 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar }: {
         {s.envios.length > 0 && (
           <ul className="lista-simples">
             {s.envios.map(e => (
-              <li key={e.planilha_id}>{rotuloVersao(e.versao)} enviada em <span className="num">{fmtDataPura(e.enviado_em.slice(0, 10))}</span>
-                {e.numero_oficio ? ` · ofício ${e.numero_oficio}` : ""}</li>
+              <li key={`${e.origem}-${e.versao}`}>{rotuloVersao(e.versao)} enviada em <span className="num">{dataDoEnvio(e)}</span>
+                {e.numero_oficio ? ` · ofício ${e.numero_oficio}` : ""}{e.origem === "externo" && <> <Selo>Fora do sistema</Selo></>}</li>
             ))}
           </ul>
         )}
