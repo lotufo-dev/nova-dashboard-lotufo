@@ -295,9 +295,9 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
 
     A medicao de reajuste vai para a data-base e o ciclo gravados nela; sem eles (medicao anterior ao motor), para a
     unica data-base do contrato e para o ciclo da previsao da competencia ou, sem previsao, o do aniversario. Com duas
-    datas-base e nada gravado, a medicao entra em cada candidata (as que tem previsao da competencia, senao todas)
-    com `data_base_incerta`: nada some em silencio, e quem soma sabe que a linha se repete. Cancelada ou desistida
-    nao conta.
+    datas-base e nada gravado, se so' uma tem previsao da competencia, vai para ela; senao entra uma vez so' no grupo
+    sem data-base (`data_base_mes` e `ciclo` nulos, linhas com `data_base_incerta`): nada some em silencio e nada
+    conta em dobro quando se somam as datas-base. Cancelada ou desistida nao conta.
 
     Varias medicoes na mesma competencia (complemento): pedido, aprovado e faturado sao a soma delas, `medicoes` lista
     os numeros, e o estado e a medicao principal sao os da mais adiantada (empate: maior numero). O faturado so' conta
@@ -339,10 +339,13 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
                             "WHERE c.id=?", (contrato_id,)).fetchone()[0]
     faturado, com_nf = {}, set()
     for r in conn.execute(
-            "SELECT a.medicao_id, SUM(CASE WHEN ? IS NULL OR n.coligada = ? THEN a.valor_alocado_centavos END) "
+            # so' NF elegivel (da coligada do contrato) cria o grupo: a NFS-e da Lotufo em obra de consorcio nem
+            # fatura nem marca `faturada` (como `diretoria._notas_em_aberto`)
+            "SELECT a.medicao_id, SUM(a.valor_alocado_centavos) "
             "FROM nf_alocacoes a JOIN notas_fiscais n ON n.id = a.nota_id JOIN medicoes m ON m.id = a.medicao_id "
-            "WHERE m.contrato_id=? AND a.desfeita_em IS NULL AND n.situacao = 'ativa' GROUP BY a.medicao_id",
-            (coligada, coligada, contrato_id)):
+            "WHERE m.contrato_id=? AND a.desfeita_em IS NULL AND n.situacao = 'ativa' "
+            "AND (? IS NULL OR n.coligada = ?) GROUP BY a.medicao_id",
+            (contrato_id, coligada, coligada)):
         com_nf.add(r[0])
         faturado[r[0]] = r[1]
     com_atesto = {r[0] for r in conn.execute("SELECT DISTINCT e.medicao_id FROM medicao_atestos e "
@@ -356,21 +359,26 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
         else:
             candidatas = [b for b in bases if (b, comp) in previstas] or bases
         passo = _passo_da_medicao(m, m["id"] in com_nf, m["id"] in com_atesto)
-        for base in candidatas:
-            ciclo = m["ciclo"]
-            if ciclo is None:
-                ciclos_previstos = previstas.get((base, comp), set())
-                ciclo = next(iter(ciclos_previstos)) if len(ciclos_previstos) == 1 \
-                    else _ciclo_da_competencia(base, comp)
-            if ciclo is None:
-                continue
-            x = linha(base, ciclo, comp)
+        if len(candidatas) != 1:
+            # data-base ambigua: entra uma vez so', no grupo sem data-base, para nada contar em dobro
+            x = linha(None, None, comp)
             x["_medicoes"].append((passo, m["numero"], m))
-            if len(candidatas) > 1:
-                x["data_base_incerta"] = True
+            x["data_base_incerta"] = True
+            continue
+        base = candidatas[0]
+        ciclo = m["ciclo"]
+        if ciclo is None:
+            ciclos_previstos = previstas.get((base, comp), set())
+            ciclo = next(iter(ciclos_previstos)) if len(ciclos_previstos) == 1 \
+                else _ciclo_da_competencia(base, comp)
+        if ciclo is None:
+            continue
+        linha(base, ciclo, comp)["_medicoes"].append((passo, m["numero"], m))
 
-    grupos: dict[tuple[str, int], list[dict]] = {}
-    for (base, ciclo, comp), x in sorted(linhas.items()):
+    grupos: dict[tuple[str | None, int | None], list[dict]] = {}
+    # o grupo sem data-base (medicoes de base ambigua) vai por ultimo
+    for (base, ciclo, comp), x in sorted(linhas.items(), key=lambda kv: (kv[0][0] is None, kv[0][0] or "",
+                                                                        kv[0][1] or 0, kv[0][2])):
         if not x["apostilada"]:
             t = next((t for t in percentuais if (t["base"], t["ciclo"]) == (base, ciclo)
                       and t["de"] <= comp <= t["ate"]), None)

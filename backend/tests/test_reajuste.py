@@ -697,23 +697,48 @@ def test_complemento_soma_pedido_aprovado_e_faturado_das_medicoes(cenario):
 
 
 def test_medicao_sem_base_em_contrato_de_duas_bases_nao_some(cenario):
-    # gate Sol (rodada 1, PR #381): duas datas-base com previsao da mesma competencia e medicao sem base gravada:
-    # entra nas duas, marcada como incerta, em vez de sumir
+    # gate Sol (rodadas 1 e 2, PR #381): duas datas-base com previsao da mesma competencia e medicao sem base
+    # gravada: entra uma vez so', no grupo sem data-base, em vez de sumir ou de contar nas duas
     c, ids = cenario
     cid = ids["contrato"]
     c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2024-08', 'SICRO')", (cid,))
     _previsao(c, cid, "2026-09", 100_01, "manual")
     _previsao(c, cid, "2026-09", 200_03, "manual", data_base="2024-08")
     _previsao(c, cid, "2026-10", 300_05, "manual", data_base="2024-08")
-    _medicao(c, cid, 1, "2026-09", "planilha_gerada", pedido=300_04)
-    _medicao(c, cid, 2, "2026-10", "planilha_gerada", pedido=300_05)
+    _medicao(c, cid, 2, "2026-09", "planilha_gerada", pedido=300_04)
+    _medicao(c, cid, 3, "2026-09", "planilha_gerada", pedido=50_01, data_base="2024-06", ciclo=2026)
+    _medicao(c, cid, 4, "2026-10", "planilha_gerada", pedido=300_05)
     a = _por_competencia(c, cid)["2026-09"]
     b = _por_competencia(c, cid, data_base="2024-08")
-    assert (a["estado"], a["pedido_centavos"], a["data_base_incerta"]) == ("pedida", 300_04, True)
-    assert (b["2026-09"]["estado"], b["2026-09"]["data_base_incerta"]) == ("pedida", True)
+    sem_base = _por_competencia(c, cid, data_base=None, ciclo=None)
+    assert (a["estado"], a["pedido_centavos"], a["medicoes"], a["data_base_incerta"]) == ("pedida", 50_01, [3], False)
+    assert (b["2026-09"]["estado"], b["2026-09"]["pedido_centavos"]) == ("prevista", None)
+    assert list(sem_base) == ["2026-09"]
+    assert (sem_base["2026-09"]["pedido_centavos"], sem_base["2026-09"]["medicoes"],
+            sem_base["2026-09"]["data_base_incerta"]) == (300_04, [2], True)
+    # somando todas as datas-base, cada medicao conta uma vez: 300,04 + 50,01 + 300,05
+    total = sum(x["pedido_centavos"] or 0 for g in reajuste.competencias_por_ciclo(c, cid) for x in g["competencias"])
+    assert total == 300_04 + 50_01 + 300_05
     # so' uma base tem previsao da competencia: vai para ela, sem incerteza
     assert (b["2026-10"]["estado"], b["2026-10"]["data_base_incerta"]) == ("pedida", False)
     assert "2026-10" not in _por_competencia(c, cid)
+    assert reajuste.competencias_por_ciclo(c, cid)[-1]["data_base_mes"] is None      # o grupo sem base vai por ultimo
+
+
+def test_nf_so_de_outra_coligada_nao_fatura_a_medicao_de_consorcio(cenario):
+    # gate Sol e revisor (rodada 2, PR #381): em consorcio, a NFS-e da Lotufo (outra coligada) sozinha nao fatura
+    c, ids = cenario
+    cid = ids["contrato"]
+    c.execute("INSERT INTO entidades (nome, cnpj, papel, coligada_rm) VALUES ('Consórcio Exemplo', '31200303000181', "
+              "'consorcio', 90)")
+    c.execute("UPDATE contratos SET entidade_id=(SELECT MAX(id) FROM entidades) WHERE id=?", (cid,))
+    m = _medicao(c, cid, 1, "2026-07", "espelho_enviado", pedido=10_000_000_07)
+    c.execute("INSERT INTO notas_fiscais (coligada, numero, valor_centavos, origem) VALUES (1, '3102', 2000000_02, 'pdf')")
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) "
+              "VALUES (?, (SELECT MAX(id) FROM notas_fiscais), 2000000_02, 'manual')", (m,))
+    c.commit()
+    x = _por_competencia(c, cid)["2026-07"]
+    assert (x["estado"], x["faturado_centavos"]) == ("pedida", None)
 
 
 def test_percentual_de_termo_corrigido_ou_de_outro_ciclo_nao_apostila(cenario):
