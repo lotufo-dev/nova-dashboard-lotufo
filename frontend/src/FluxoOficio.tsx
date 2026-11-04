@@ -7,7 +7,7 @@ import ErroCampo from "./ErroCampo";
 import { api, apiForm, mensagemDeErro } from "./api";
 import { IconeAlerta } from "./icones";
 import { FormMotivo } from "./MedicaoAtos";
-import { fmtTamanho as mb } from "./formato";
+import { brl, fmtTamanho as mb } from "./formato";
 import { fmtCompetencia, fmtDataPura } from "./tempo";
 import Selo from "./Selo";
 import Pendencias from "./Pendencias";
@@ -74,14 +74,24 @@ function itensDoPleito(p: Pleito): ItemChecklist[] {
   return itens;
 }
 
+/** Issue #292: os dias que o servidor sugere para a carta de prazo (`prazos.sugestao_dias`): saldo a executar no
+ *  ritmo das ultimas competencias fechadas. `dias` nulo: nao sugere, e `motivo` diz por que. */
+export type SugestaoDias = {
+  saldo_centavos: number; medido_periodo_centavos: number; ritmo_centavos: number | null; meses: number;
+  de: string; ate: string; execucao_fim: string | null; novo_fim: string | null; dias: number | null;
+  motivo: string | null;
+};
+
 /** Passo 1: numero do oficio e os campos do tipo. */
-export function NovoPleito({ contratoId, tipo, dataBase, reemite, aoCriar, aoCancelar }: {
+export function NovoPleito({ contratoId, tipo, dataBase, reemite, sugestao, aoCriar, aoCancelar }: {
   contratoId: number; tipo: TipoPleito; dataBase?: string; aoCriar: (p: Pleito) => void; aoCancelar: () => void;
   // reiteracao ou reemissao do cronograma: o oficio novo nasce ligado ao pleito `id` (issue #277)
   reemite?: { id: number; reemissao: Reemissao };
+  // pedido de prazo: a sugestao preenche o campo de dias, e a pessoa confirma ou muda (issue #292)
+  sugestao?: SugestaoDias | null;
 }) {
   const [oficio, setOficio] = useState("");
-  const [dias, setDias] = useState("");
+  const [dias, setDias] = useState(tipo === "prazo" && sugestao?.dias ? String(sugestao.dias) : "");
   const [justificativa, setJustificativa] = useState("");
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -116,7 +126,25 @@ export function NovoPleito({ contratoId, tipo, dataBase, reemite, aoCriar, aoCan
           <div className="campo">
             <label className="campo__rotulo" htmlFor="prazo-dias">Dias de prorrogação</label>
             <input id="prazo-dias" name="dias" autoComplete="off" spellCheck={false} className="entrada--16ch" type="number" min={1} required
+              aria-describedby={sugestao ? "prazo-dias-sugestao" : undefined}
               value={dias} onChange={e => setDias(e.target.value)} />
+            {sugestao && (
+              <div id="prazo-dias-sugestao">
+                {sugestao.dias !== null ? (
+                  <>
+                    <p className="campo__nota">
+                      Sugestão: {sugestao.dias} dias (saldo {brl(sugestao.saldo_centavos)}, ritmo {brl(sugestao.ritmo_centavos)}/mês)
+                    </p>
+                    <p className="campo__nota">
+                      {`Ritmo: medido de ${fmtCompetencia(sugestao.de)} a ${fmtCompetencia(sugestao.ate)} `
+                        + `(${brl(sugestao.medido_periodo_centavos)}) ÷ ${sugestao.meses} meses, contado a partir do fim `
+                        + `da execução em ${fmtDataPura(sugestao.execucao_fim ?? "")}; novo fim em `
+                        + `${fmtDataPura(sugestao.novo_fim ?? "")}. Confira e mude se precisar.`}
+                    </p>
+                  </>
+                ) : <p className="campo__nota">Sem sugestão de dias. {sugestao.motivo}</p>}
+              </div>
+            )}
           </div>
           <div className="campo">
             <label className="campo__rotulo" htmlFor="prazo-just">Justificativa (vai na seção “2. DO PEDIDO”)</label>
