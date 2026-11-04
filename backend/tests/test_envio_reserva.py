@@ -10,6 +10,10 @@ import pytest
 from app import correio, db, protocolo
 from tests.test_protocolo import cenario  # noqa: F401  (fixture)
 
+# Gera PDF (a carta, por protocolo.criar) com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois
+# jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 
 class CorreioFalso:
     """No lugar de `correio.cliente`: conta os e-mails, demora `espera` segundos e pode rodar `no_meio` com o
