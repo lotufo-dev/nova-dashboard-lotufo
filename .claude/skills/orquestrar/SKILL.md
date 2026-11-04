@@ -123,7 +123,8 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    Não há trava por arquivo nem por label: redesenho, migração, `risco:*` e PR que toca `.github/`,
    `scripts/deploy.ps1` ou `.claude/` entram igual às outras (decisão do Leo de 16/10/2026).
    Passou em tudo: gravar a hora (`date -u +%Y-%m-%dT%H:%M:%SZ`), `gh pr merge <M> --auto --merge` e comentar na
-   issue "PR #M com auto-merge ligado às HH:MM UTC" (a hora gravada). Essa hora é o armamento que o passo 9 usa.
+   issue "PR #M com auto-merge ligado às AAAA-MM-DDTHH:MM:SSZ" (a hora gravada, com segundos, por exemplo
+   "PR #320 com auto-merge ligado às 2026-11-04T17:48:40Z"). Essa hora é o armamento que o passo 9 usa.
    **Na nuvem**, onde `gh pr merge --auto` (GraphQL) é bloqueado, o auto-merge se liga por
    `gh api -X PUT repos/lotufo-dev/nova-dashboard-lotufo/pulls/<M>/ccr/auto_merge`.
    O `master` tem fila de merge (ruleset, desde 15/10/2026): com a CI da PR verde, o GitHub põe a PR na fila,
@@ -151,10 +152,10 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    - `AUTO_MERGE_DESLIGADO` (nem auto-merge armado nem PR na fila; o script já trata como armada a PR que entrou
      direto na fila, sem `autoMergeRequest`). Todo agente posta com a conta do Leo, então o `actor.login` não separa
      a orquestradora do Leo: o que separa é o tempo. Seja `<armamento>` a hora do último "PR #M com auto-merge ligado
-     às HH:MM UTC" que a orquestradora registrou na issue (passo 8). Antes de religar, ver por que desligou, com uma
+     às AAAA-MM-DDTHH:MM:SSZ" que a orquestradora registrou na issue (passo 8). Antes de religar, ver por que desligou, com uma
      consulta só (eventos de desligamento e de saída da fila):
      `gh api graphql -f query='{repository(owner:"lotufo-dev",name:"nova-dashboard-lotufo"){pullRequest(number:<M>){mergeable mergeStateStatus a:timelineItems(last:5,itemTypes:[AUTO_MERGE_DISABLED_EVENT]){nodes{... on AutoMergeDisabledEvent{reason reasonCode createdAt}}} f:timelineItems(last:5,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{... on RemovedFromMergeQueueEvent{reason createdAt}}}}}}'`.
-     (1) `AutoMergeDisabledEvent` com `createdAt` **posterior** ao `<armamento>` e `reason` `manually_disabled` é o
+     (1) `AutoMergeDisabledEvent` com `createdAt` **posterior** ao `<armamento>` e `reasonCode` `manually_disabled` é o
      Leo (a orquestradora só desarma antes de religar, e religar grava novo `<armamento>`): `precisa-do-leo` e **não
      religar**; os eventos anteriores ao `<armamento>` são desarmes da própria orquestradora e não contam. (2) Sem
      desarme posterior, olhar o `RemovedFromMergeQueueEvent` mais recente (posterior ao `<armamento>`): `reason` de
