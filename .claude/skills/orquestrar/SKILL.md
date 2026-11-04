@@ -91,11 +91,17 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      automático); a fonte é a decisão do Leo na sessão de 03/11/2026, registrada pela orquestradora na issue #356
      (orquestrar: correção isolada). Quando o revisor (e o Sol, se aplicável) dessa rodada extra volta sem
      Crítico/Aviso em aberto, a orquestradora tira o draft (`gh pr ready <M>`) e o label `precisa-do-leo` da
-     issue, e só então vai ao passo 8 (a trava de lá exige `isDraft` = `false`). Se ainda sobrar Crítico ou Aviso não refutado, marcar a
-     PR como draft (`gh pr ready --undo <M>`), pôr `precisa-do-leo` na issue, e seguir. **Mesma família de achado
+     issue, e só então vai ao passo 8 (a trava de lá exige `isDraft` = `false`). Se ainda sobrar Crítico ou Aviso não refutado, ver o teto abaixo. **Mesma família de achado
      pela 2ª vez em pontos diferentes:** a orquestradora pede à trabalhadora a correção que fecha a família
      inteira, não o ponto (exemplos de 03/11/2026: leitura única do painel por transação; recorte do texto
      original inteiro).
+   - **Teto real de duas rodadas** (decisão do Leo de 03/11/2026, #368 (vigia da CI e teto de rodadas)). Depois da
+     segunda rodada de correção, cada Crítico ou Aviso que sobrar, não refutado, vira **issue nova**
+     (`gh issue create`, modelo `tarefa.md`, label `area:*` e `risco:*` quando couber, "Origem: achado do revisor
+     na PR #M, rodada 2"). A orquestradora escreve em `## Gates` da PR o número de cada issue aberta (por exemplo
+     "Aviso sem correção, virou a #412 (nome curto)"). Se o que sobrou é só **Aviso**, a PR segue para o passo 8.
+     **Crítico** que sobra continua segurando a PR: draft (`gh pr ready --undo <M>`), `precisa-do-leo` na issue,
+     e seguir. Rodada extra só por pedido do Leo, registrado na issue.
 7. **Preencher `## Gates` na PR** (`gh pr edit <M> --body-file ...`, mantendo o resto do corpo) com o resultado
    do revisor e do gate Sol, no formato da skill `abrir-pr`.
 8. **Travas, todas, antes de ligar o auto-merge:**
@@ -119,19 +125,32 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    O `master` tem fila de merge (ruleset, desde 15/10/2026): com a CI da PR verde, o GitHub põe a PR na fila,
    junta com o `master` atual e roda a CI de novo nessa mistura (evento `merge_group`) antes de mergear.
    Falhou em alguma: comentar na **issue** qual trava segurou, pôr `precisa-do-leo` na issue e seguir.
-9. **Esperar a CI e a fila** das PRs com auto-merge: `gh pr checks <M> --watch` em segundo plano (Bash com
-   `run_in_background: true`); a CI leva 20 a 30 min, e a fila roda a CI outra vez antes do merge. A PR só
-   terminou quando `gh pr view <M> --json state` der `MERGED`. **Fila vermelha:** o GitHub tira a PR da fila e
-   desliga o auto-merge sozinho; o log está em `gh run list --event merge_group --limit 5` (branch
-   `gh-readonly-queue/master/pr-<M>-...`). Em geral é choque com outra PR que entrou antes: tratar como CI
-   vermelha (abaixo), pedindo à trabalhadora `git merge origin/master` junto da correção. **Enquanto espera**, a cada 5 min reconsultar
-   `gh pr view <M> --json comments,reviews`: apareceu comentário ou review, é o Leo; desarmar na hora
-   (`gh pr merge <M> --disable-auto`), pôr `precisa-do-leo` na issue e seguir.
+9. **Vigiar a PR depois do auto-merge.** Para cada PR com auto-merge ligado, lançar o vigia versionado ao lado
+   desta skill, em segundo plano (Bash com `run_in_background: true`): `.claude/skills/orquestrar/vigia.sh <M>`
+   (no Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File .claude/skills/orquestrar/vigia.ps1 <M>`).
+   Não escrever vigia no scratchpad: um vigia que só espera "mergeada ou fora da fila" deixou a PR #320 (planilha de
+   previsão de reajuste) 1h32 com a CI vermelha em 03/11/2026, porque a PR nunca entrou na fila. O vigia confere a
+   cada minuto e termina na primeira palavra abaixo; quando voltar, a orquestradora faz o que a linha manda:
+   - `MERGED`: passo 10.
+   - `CI_VERMELHA` (algum check da branch com falha; não espera a fila): **CI vermelha**, abaixo.
+   - `FILA_VERMELHA` (o grupo da fila, `gh run list --event merge_group --limit 5`, branch
+     `gh-readonly-queue/master/pr-<M>-...`, falhou): em geral choque com outra PR que entrou antes; tratar como CI
+     vermelha, pedindo à trabalhadora `git merge origin/master` junto da correção.
+   - `AUTO_MERGE_DESLIGADO` (o GitHub desliga sozinho quando a fila falha, ou alguém desligou): reconsultar
+     `gh pr view <M> --json state,statusCheckRollup`; se a causa é falha, CI vermelha; se a CI está verde e ninguém
+     comentou, religar com `gh pr merge <M> --auto --merge` depois de repetir as travas do passo 8.
+   - `COMENTARIO` (comentário ou review novo; é o Leo): desarmar na hora (`gh pr merge <M> --disable-auto`), pôr
+     `precisa-do-leo` na issue e seguir.
+   - `FECHADA`: registrar na issue e seguir para o passo 10 sem pull.
+   - `SEM_MUDANCA` (60 minutos sem mudar nada nos checks): reconsultar `gh pr view <M> --json state,mergeStateStatus`
+     e `gh pr checks <M>`; se a PR está só esperando, relançar o vigia; se está travada (por exemplo CI que não
+     começou), tratar como CI vermelha ou avisar o Leo.
+   A PR só terminou quando `gh pr view <M> --json state` der `MERGED`. A CI leva 20 a 30 min e a fila a roda outra vez.
    **CI vermelha:** primeiro desarmar (`gh pr merge <M> --disable-auto`), senão a correção mergeia sem
    revisão quando a CI do commit novo ficar verde. Anotar o `<sha-antes>` (`gh pr view <M> --json headRefOid`) e pegar o log
    (`gh run list --branch <branch no GitHub> --limit 1 --json databaseId -q '.[0].databaseId'` e
    `gh run view <id> --log-failed`) e mandar à trabalhadora (uma rodada de correção, conta nas duas do passo
-   6). Quando ela voltar: a conferência do passo 6 (revisor sobre `<sha-antes>..HEAD` no worktree de quem corrigiu, ou sobre `origin/master...HEAD` se a correção incluiu `git merge origin/master`, e Sol só se a correção mexeu de forma grande em dinheiro ou envio) e o passo 8 inteiro de novo antes de religar o auto-merge.
+   6). Quando ela voltar: a conferência do passo 6 (revisor sobre `<sha-antes>..HEAD` no worktree de quem corrigiu, ou sobre `origin/master...HEAD` se a correção incluiu `git merge origin/master`, e Sol só se a correção mexeu de forma grande em dinheiro ou envio) e o passo 8 inteiro de novo antes de religar o auto-merge (e de lançar o vigia de novo).
    Vermelha de novo, `precisa-do-leo`.
 10. **Depois do merge** de cada PR (e no `PAROU`/`FALHOU` do passo 4): `git pull --ff-only` na pasta
     principal (com `cd` explícito para ela: o diretório do Bash da sessão persiste entre chamadas e pode ainda estar
