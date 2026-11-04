@@ -164,6 +164,7 @@ def historico_texto(conn, contrato_id: int) -> str:
 
 
 MESES_RITMO = 6
+TETO_MESES = 1200   # 100 anos
 
 
 def _somar_meses(d: datetime.date, n: int) -> datetime.date:
@@ -208,6 +209,9 @@ def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
         return {**out, "motivo": f"Sem medição de execução de {_mm_aaaa(meses[0])} a {_mm_aaaa(meses[-1])}: "
                                  "sem ritmo para sugerir os dias."}
     faltam = Fraction(saldo * MESES_RITMO, medido)   # meses, exato (sem float)
+    if faltam > TETO_MESES:   # medicao irrisoria na janela: a data passaria do ano 9999 e a aba inteira cairia
+        return {**out, "motivo": "No ritmo dos últimos 6 meses o saldo levaria mais de 100 anos: "
+                                 "sem sugestão de dias."}
     inteiros = math.floor(faltam)
     fim = _somar_meses(exe_d, inteiros)
     extra = math.ceil((_somar_meses(exe_d, inteiros + 1) - fim).days * (faltam - inteiros))

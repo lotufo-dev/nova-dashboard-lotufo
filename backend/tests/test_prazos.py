@@ -268,3 +268,13 @@ def test_janela_atravessa_o_ano(cenario):
     _medicao(c, cid, 1, "2025-08", atestado=10)
     s = prazos.sugestao_dias(c, cid, D(2026, 2, 3))
     assert (s["de"], s["ate"]) == ("2025-08", "2026-01")
+
+
+def test_ritmo_irrisorio_nao_derruba_a_aba(cenario):
+    """Saldo de R$ 10 milhoes contra R$ 1,00 medido na janela: 60 milhoes de meses passariam do ano 9999."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 10_000_000_00 + 1_00)
+    _medicao(c, cid, 1, "2026-09", atestado=1_00)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert s["dias"] is None and "mais de 100 anos" in s["motivo"]
