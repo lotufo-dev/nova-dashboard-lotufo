@@ -519,6 +519,15 @@ def conferir_espelho_da_planilha(conn, ja: dict, numero: int, tipo: str, compete
                     "AND envio_reservado_em IS NOT NULL", (ja["id"],)).fetchone() is not None:
         raise ValueError(f"A planilha/carta da {nome_medicao(numero, tipo)} está sendo enviada ao protocolo: aguarde "
                          "o envio terminar (ou libere o envio preso) antes de gerar o espelho")
+    # revisao registrada e ainda nao enviada (rodada extra, PR #382): a ponte a levaria a `espelho_gerado`, onde ela
+    # nao sai mais por caminho nenhum. A vigente tem de ser a ultima enviada (pelo sistema ou por fora).
+    if ja["estado"] == "planilha_enviada":
+        from app import planilha_envio      # import local: planilha_envio importa este modulo
+        vigente = conn.execute("SELECT MAX(versao) FROM medicao_planilhas WHERE medicao_id=?",
+                               (ja["id"],)).fetchone()[0] or 0
+        if vigente > planilha_envio._ultima_enviada(conn, {"id": ja["id"], "estado": ja["estado"]}):
+            raise ValueError(f"A {nome_medicao(numero, tipo)} tem revisão da planilha/carta registrada e não enviada: "
+                             "envie ao protocolo (ou registre o envio por fora) antes de gerar o espelho")
     from app import dinheiro       # import local, como os outros deste modulo
     if ja["competencia"] != competencia:
         raise ValueError(f"{nome_medicao(numero, tipo)} tem a planilha/carta da competência "

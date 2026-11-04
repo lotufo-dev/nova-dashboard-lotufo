@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api, apiForm, ApiErro, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import CampoCompetencia from "./CampoCompetencia";
@@ -289,6 +289,15 @@ export function seloDoEnvio(enviadaEm: string | null): string | null {
   return m ? `Enviada em ${m[3]}/${m[2]}` : null;
 }
 
+/** Revisao registrada e ainda nao enviada: em `planilha_enviada`, a vigente acima da ultima enviada (pelo sistema ou
+ *  por fora; sem envio listado, a 1a conta como enviada, como em planilha_envio._ultima_enviada). */
+export function revisaoPendente(d: DetalhePlanilha): boolean {
+  if (d.estado !== "planilha_enviada" || d.planilhas.length === 0) return false;
+  const vigente = Math.max(...d.planilhas.map(v => v.versao));
+  const enviada = Math.max(1, ...d.envio_planilha.envios.map(e => e.versao));
+  return vigente > enviada;
+}
+
 function itensDasPecas(s: SituacaoEnvio): ItemChecklist[] {
   return s.pecas_do_orgao.map(p => {
     const arquivos = s.pecas.filter(x => x.tipo === p.tipo).map(x => ({ id: x.id, nome: x.nome, tamanho: x.tamanho }));
@@ -299,8 +308,10 @@ function itensDasPecas(s: SituacaoEnvio): ItemChecklist[] {
 
 /** O cartao da planilha/carta na etapa 1 da medicao. `podeEditar` falso (diretoria): so' le, sem nenhum botao. */
 // `estado`: o da medicao na pagina; quando ele muda por outra etapa (a pagina recarregou), o cartao le de novo
-export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar }: {
+// `aoRevisaoPendente`: avisa a pagina se ha' revisao registrada e nao enviada (o espelho espera por ela, PR #382)
+export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevisaoPendente }: {
   medicaoId: number; estado?: string; podeEditar: boolean; aoMudar: () => void;
+  aoRevisaoPendente?: (pendente: boolean) => void;
 }) {
   const base = useId();
   const [d, setD] = useState<DetalhePlanilha | null>(null);
@@ -323,6 +334,10 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar }: {
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
     return () => { vivo = false; };
   }, [medicaoId, estado]);
+  const avisarPendente = useRef(aoRevisaoPendente);
+  useEffect(() => { avisarPendente.current = aoRevisaoPendente; });
+  const pendente = d ? revisaoPendente(d) : null;
+  useEffect(() => { if (pendente !== null) avisarPendente.current?.(pendente); }, [pendente]);
 
   /** Executa, recarrega o cartao e avisa a pagina. Devolve se gravou. */
   async function agir(f: () => Promise<unknown>, mensagemFeito: string): Promise<boolean> {

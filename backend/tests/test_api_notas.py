@@ -279,3 +279,25 @@ def test_espelho_recusa_com_a_revisao_saindo_pelo_sistema(client_admin, ambiente
                           json={"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "719.190,72"}})
     assert r.status_code == 422 and "está sendo enviada ao protocolo" in r.json()["detail"]
     assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_enviada"
+
+
+def test_espelho_espera_a_revisao_registrada_ser_enviada(client_admin, ambiente_api):
+    """Rodada extra (PR #382): Original enviada, Rev01 registrada e nao enviada: o espelho e' recusado (previa e
+    geracao), a medicao fica em planilha_enviada; enviada a Rev01 por fora, o espelho passa com o pedido congelado."""
+    from tests.test_api_medicoes import _arquivos_planilha
+    cid = ambiente_api
+    mid = _planilha_enviada(client_admin, cid)
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev01"),
+                          data={"periodo_inicio": "2026-08-01", "periodo_fim": "2026-08-28", "valor": "700.000,01",
+                                "motivo": "Rev01: supervisora devolveu"})
+    assert r.status_code == 201, r.text
+    corpo = {"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "719.190,72"}}
+    for rota in ("espelho/previa", "espelho"):
+        r = client_admin.post(f"/api/contratos/{cid}/{rota}", json=corpo)
+        assert r.status_code == 422 and "revisão da planilha/carta registrada e não enviada" in r.json()["detail"], r.text
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_enviada"
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas/envio-externo", data={"enviado_em": "2026-09-03", "meio": "Balcão"})
+    assert r.status_code == 201, r.text
+    assert client_admin.post(f"/api/contratos/{cid}/espelho", json=corpo).status_code == 201
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_protocolado_centavos"]) == ("espelho_gerado", 719_190_72)

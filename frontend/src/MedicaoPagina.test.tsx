@@ -13,8 +13,10 @@ vi.mock("./Espelho", () => ({
 // issue #289: a planilha/carta tem teste proprio (PlanilhaCarta.test.tsx); aqui so' importa onde ela aparece
 vi.mock("./PlanilhaCarta", () => ({
   NovaPlanilhaCarta: ({ inicial }: { inicial?: { numero: number } }) => <div data-nova-planilha={inicial?.numero} />,
-  CartaoPlanilha: ({ medicaoId, podeEditar }: { medicaoId: number; podeEditar: boolean }) =>
-    <div data-cartao-planilha={medicaoId} data-pode-editar={String(podeEditar)} />,
+  CartaoPlanilha: ({ medicaoId, podeEditar, aoRevisaoPendente }: { medicaoId: number; podeEditar: boolean; aoRevisaoPendente?: (p: boolean) => void }) =>
+    <div data-cartao-planilha={medicaoId} data-pode-editar={String(podeEditar)}>
+      <button type="button" onClick={() => aoRevisaoPendente?.(true)}>Revisão pendente (teste)</button>
+    </div>,
 }));
 vi.mock("./Frc", () => ({
   FrcConsorcio: ({ medicaoId }: { medicaoId: number }) => <div data-frc={medicaoId} />,
@@ -525,6 +527,15 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
       expect(container.querySelector("[data-nova-planilha]")).toBeNull();
       cleanup();
     }
+  });
+
+  it("com revisão registrada e não enviada, o formulário do espelho não aparece (rodada extra, PR #382)", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Revisão pendente (teste)" }));
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+    expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull();
   });
 
   it("depois do boletim: o cartão da planilha/carta e o espelho", async () => {

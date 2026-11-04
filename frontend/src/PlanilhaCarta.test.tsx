@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CartaoPlanilha, centavosDoTexto, dataDoEnvio, NovaPlanilhaCarta, rotuloVersao, seloDoEnvio, type DetalhePlanilha } from "./PlanilhaCarta";
+import { CartaoPlanilha, centavosDoTexto, dataDoEnvio, NovaPlanilhaCarta, revisaoPendente, rotuloVersao, seloDoEnvio, type DetalhePlanilha } from "./PlanilhaCarta";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm }));
@@ -247,6 +247,21 @@ describe("Cartão da planilha/carta", () => {
     const rev = screen.getByText(/^Rev01 enviada em/).closest("li")!;
     expect(rev.textContent).toContain("03/09/2026");
     expect(within(rev).queryByText("Fora do sistema")).toBeNull();
+  });
+
+  it("revisão registrada e não enviada é pendente; enviada (por fora serve), deixa de ser; e o cartão avisa a página", async () => {
+    const env = (versao: number, origem: "sistema" | "externo") =>
+      ({ planilha_id: 30 + versao, versao, numero_oficio: null, enviado_em: "2026-09-02", usuario: null, origem });
+    const rev = { estado: "planilha_enviada", planilha_enviada_em: "2026-09-02", planilhas: [V1, { ...V1, id: 32, versao: 2, motivo: "Rev01" }] };
+    expect(revisaoPendente(detalhe(rev, { envios: [env(1, "sistema")] }))).toBe(true);
+    // sem envio listado (historico), a 1a conta como enviada
+    expect(revisaoPendente(detalhe(rev, { envios: [] }))).toBe(true);
+    expect(revisaoPendente(detalhe(rev, { envios: [env(1, "sistema"), env(2, "externo")] }))).toBe(false);
+    expect(revisaoPendente(detalhe({ estado: "planilha_enviada", planilha_enviada_em: "2026-09-02" }, { envios: [] }))).toBe(false);
+    api.mockResolvedValue(detalhe(rev, { envios: [env(1, "sistema")] }));
+    const aoRevisaoPendente = vi.fn();
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} aoRevisaoPendente={aoRevisaoPendente} />);
+    await waitFor(() => expect(aoRevisaoPendente).toHaveBeenCalledWith(true));
   });
 
   it("medição sem planilha/carta registrada: o cartão não aparece", async () => {
