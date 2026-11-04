@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Vigia de uma PR com auto-merge ligado (skill orquestrar, passo 9).
-# Uso: vigia.sh <numero da PR> [intervalo em segundos (120)] [limite sem mudanca em minutos (60)]
+# Uso: vigia.sh <numero da PR> [intervalo em segundos (120)] [limite sem mudanca em minutos (60)] [hora de referencia UTC, AAAA-MM-DDTHH:MM:SSZ]
+# Hora de referencia: so contam execucoes da fila (merge_group) criadas a partir dela. A orquestradora grava a hora
+# (date -u +%Y-%m-%dT%H:%M:%SZ) ANTES do `gh pr merge --auto` e passa aqui: com a CI ja verde a PR entra direto na
+# fila e a execucao nasce ~20 s depois, antes de o vigia subir. Sem o argumento vale agora menos 10 minutos.
 # Roda em segundo plano e termina na primeira destas situacoes, imprimindo o motivo na primeira palavra:
 #   MERGED                PR mergeada
 #   FECHADA               PR fechada sem merge
 #   COMENTARIO            ha comentario ou review na PR (e do Leo; o passo 8 exige zero)
 #   CI_VERMELHA           algum check da branch da PR terminou em falha (nao espera a fila)
-#   FILA_VERMELHA         a PR saiu da fila e um grupo da fila (merge_group) criado depois do inicio do vigia falhou
+#   FILA_VERMELHA         a PR saiu da fila e um grupo da fila (merge_group) criado a partir da hora de referencia falhou
 #   AUTO_MERGE_DESLIGADO  nem auto-merge armado nem PR na fila (o GitHub desliga quando a fila falha; o Leo pode desligar)
 #   SEM_MUDANCA           nada mudou nos checks por N minutos (a orquestradora reconsulta e relanca)
 # Saida 0 em qualquer um dos motivos acima; 2 (ERRO) se a PR nao existe ou o gh falha de forma repetida.
@@ -19,8 +22,19 @@ LIMITE_MIN="${3:-60}"
 REPO_DONO="${VIGIA_DONO:-lotufo-dev}"
 REPO_NOME="${VIGIA_REPO:-nova-dashboard-lotufo}"
 case "$PR" in
-  ''|*[!0-9]*) echo "ERRO uso: vigia.sh <numero da PR> [intervalo] [limite em minutos]" >&2; exit 2 ;;
+  ''|*[!0-9]*) echo "ERRO uso: vigia.sh <numero da PR> [intervalo] [limite em minutos] [hora de referencia UTC]" >&2; exit 2 ;;
 esac
+
+REFERENCIA="${4:-}"
+if [ -n "$REFERENCIA" ]; then
+  case "$REFERENCIA" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) inicio_iso="$REFERENCIA" ;;
+    *) echo "ERRO hora de referencia deve ser AAAA-MM-DDTHH:MM:SSZ (UTC)" >&2; exit 2 ;;
+  esac
+else
+  # date do Linux e do Windows (GNU) ou do Mac (BSD)
+  inicio_iso=$(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-10M +%Y-%m-%dT%H:%M:%SZ)
+fi
 
 CONSULTA='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){
   state isInMergeQueue mergeStateStatus autoMergeRequest{enabledAt} comments{totalCount} reviews{totalCount}
@@ -46,7 +60,6 @@ if [ -z "$linha" ]; then
   exit 2
 fi
 
-inicio_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ultima_assinatura=""
 ultima_mudanca=$(date +%s)
 falhas=0
@@ -77,7 +90,7 @@ while true; do
   fi
 
   if [ "$na_fila" = "false" ]; then
-    # So acusa fila vermelha quem saiu da fila, e so execucao criada depois que este vigia comecou.
+    # So acusa fila vermelha quem saiu da fila, e so execucao criada a partir da hora de referencia.
     grupo=$(gh run list --event merge_group --limit 20 --json headBranch,conclusion,databaseId,createdAt \
       -q ".[] | select((.headBranch | test(\"/pr-$PR-\")) and .createdAt >= \"$inicio_iso\" and (.conclusion==\"failure\" or .conclusion==\"timed_out\")) | .databaseId" 2>/dev/null | head -1 || true)
     if [ -n "$grupo" ]; then
