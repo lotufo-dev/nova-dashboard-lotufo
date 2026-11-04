@@ -5,11 +5,17 @@
 #
 # Este script atualiza esse diretorio para um commit e reinicia, com o watchdog pausado
 # (senao ele reergueria no meio) e ROLLBACK automatico para o commit anterior se a saude
-# nao voltar. Rodar como administrador (Stop/Start da tarefa exige).
+# nao voltar. Rodar como administrador (parar/iniciar a tarefa exige).
 #
 # Fluxo de deploy: (1) commit+push no tree de dev; (2) rodar este script (Ref=origin/master).
 # Os dados (banco/logs/backups) ficam em -Raiz (C:\DashboardLotufo), fora do codigo, e nao
 # sao alterados (o banco so' e' lido, no backup pre-migracao). .venv, node_modules e dist do diretorio pinado sao reconstruidos aqui.
+#
+# Agendador de tarefas SEM cmdlets CIM (issue #386): em 2026-11-04 um deploy ficou mais de
+# 10 minutos parado em Get-ScheduledTask porque o provedor CIM do agendador nao respondia,
+# enquanto schtasks.exe respondia em segundos. Toda conversa com o agendador passa por
+# schtasks.exe num processo filho com tempo limite (30 s); estouro antes do checkout aborta
+# sem tocar no pinado, estouro no reinicio volta o pinado ao commit anterior.
 #
 # Chamar SEM redirecionar stderr (nada de *>&1): com ErrorActionPreference=Stop o PowerShell
 # 5.1 transforma o aviso do Vite em erro fatal. Este arquivo fica so' com ASCII (sem BOM, o
@@ -22,51 +28,109 @@ param(
     # Porta em que a producao responde. 0 = ler dos argumentos da tarefa DashboardLotufo
     # (-Porta N; sem ele, 80). Informada e diferente da tarefa, o deploy aborta antes do checkout.
     [ValidateRange(0, 65535)]
-    [int]$Porta = 0
+    [int]$Porta = 0,
+    # Tempo limite, em segundos, de cada chamada ao agendador de tarefas (schtasks.exe).
+    # Estouro = "agendador de tarefas nao respondeu". So' para prova em servidor de revisao.
+    [ValidateRange(1, 600)]
+    [int]$LimiteAgendador = 30,
+    # So' para prova: nome de um executavel que finge ser o schtasks.exe (ex.: um .cmd que dorme
+    # mais que -LimiteAgendador), para ver o estouro de tempo sem travar o agendador de verdade.
+    [string]$Schtasks = "schtasks.exe"
 )
 $ErrorActionPreference = "Stop"
 $pause = "C:\DashboardLotufo\watchdog.pause"
+$tarefaNome = "DashboardLotufo"
 $py = Join-Path $AppDir "backend\.venv\Scripts\python.exe"
 $lock = Join-Path $AppDir "backend\requirements.lock"
 if (-not (Test-Path $py)) { throw "venv da producao ausente em $py (setup inicial do diretorio pinado nao feito)" }
 
+# Uma linha de progresso por etapa, com hora: quem acompanha por SSH sabe onde o script esta'.
+function Etapa([string]$texto) { Write-Host ("[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $texto) }
+
+# Le a saida redirecionada do schtasks. O /XML declara UTF-16 mas costuma sair nos bytes da
+# pagina de codigo; se vier UTF-16 de verdade (NUL no meio), le de novo como Unicode.
+function LerSaida([string]$arquivo) {
+    $texto = Get-Content $arquivo -Raw -ErrorAction SilentlyContinue
+    if ($texto -and $texto.IndexOf([char]0) -ge 0) { $texto = Get-Content $arquivo -Raw -Encoding Unicode -ErrorAction SilentlyContinue }
+    if ($null -eq $texto) { return "" }
+    return $texto
+}
+# Chama schtasks.exe num processo filho e espera no maximo $LimiteAgendador segundos.
+# Devolve @{ Estourou; Codigo; Saida }. Estouro mata o processo filho e devolve Estourou=$true;
+# quem chama decide o que fazer (abortar, voltar o pinado). Saida vai para arquivo temporario,
+# nao para pipe: pipe cheio travaria o filho e o WaitForExit.
+function Agendador([string[]]$argumentos) {
+    $saidaArq = [System.IO.Path]::GetTempFileName()
+    $erroArq = [System.IO.Path]::GetTempFileName()
+    try {
+        $p = Start-Process -FilePath $Schtasks -ArgumentList $argumentos -NoNewWindow -PassThru `
+            -RedirectStandardOutput $saidaArq -RedirectStandardError $erroArq
+        $null = $p.Handle   # sem isto o PowerShell 5.1 pode devolver ExitCode nulo
+        if (-not $p.WaitForExit($LimiteAgendador * 1000)) {
+            try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+            return @{ Estourou = $true; Codigo = -1; Saida = "" }
+        }
+        $saida = ((LerSaida $saidaArq) + "`n" + (LerSaida $erroArq))
+        return @{ Estourou = $false; Codigo = $p.ExitCode; Saida = $saida }
+    } finally {
+        Remove-Item $saidaArq, $erroArq -Force -ErrorAction SilentlyContinue
+    }
+}
+$msgAgendador = "deploy abortado: agendador de tarefas nao respondeu"
+
 # A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
 # um deploy na 80 acharia o IIS como dono da porta e abortaria DEPOIS do checkout, sem rollback.
+# Le o XML da tarefa (schtasks /Query /XML): os argumentos saem em <Arguments>, sem depender do
+# idioma dos cabecalhos do /FO LIST.
 function PortaDaTarefa {
-    $tarefa = Get-ScheduledTask -TaskName "DashboardLotufo" -ErrorAction SilentlyContinue
-    if (-not $tarefa) { return 0 }
-    $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
-    if ($argumentosTarefa -match "-Porta (\d+)") { return [int]$Matches[1] }
+    $r = Agendador @("/Query", "/TN", $tarefaNome, "/XML")
+    if ($r.Estourou) {
+        Write-Host "$msgAgendador (schtasks /Query levou mais de $LimiteAgendador s); nada foi alterado" -ForegroundColor Red
+        exit 1
+    }
+    if ($r.Codigo -ne 0) { return 0 }   # tarefa nao existe
+    if ($r.Saida -notmatch "<Arguments>([^<]*)</Arguments>") {
+        throw "nao consegui ler os argumentos da tarefa $tarefaNome no XML do schtasks; nada foi alterado"
+    }
+    if ($Matches[1] -match "-Porta (\d+)") { return [int]$Matches[1] }
     return 80
 }
 $portaTarefa = PortaDaTarefa
 if ($Porta -eq 0) {
-    if ($portaTarefa -eq 0) { throw "tarefa DashboardLotufo nao encontrada; informe -Porta ou instale a tarefa (instalar_autostart.ps1)" }
+    if ($portaTarefa -eq 0) { throw "tarefa $tarefaNome nao encontrada; informe -Porta ou instale a tarefa (instalar_autostart.ps1)" }
     $Porta = $portaTarefa
 } elseif ($portaTarefa -ne 0 -and $Porta -ne $portaTarefa) {
-    throw "-Porta $Porta nao bate com a tarefa DashboardLotufo (porta $portaTarefa); nada foi alterado"
+    throw "-Porta $Porta nao bate com a tarefa $tarefaNome (porta $portaTarefa); nada foi alterado"
 }
+Etapa "porta lida: $Porta (tarefa $tarefaNome, agendador respondeu)"
 
 function Saudavel {
     try { return ((Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing).StatusCode -eq 200) }
     catch { return $false }
 }
 function Construir([string]$alvo) {
+    Etapa "fetch"
     & git -C $AppDir fetch --quiet
     if ($LASTEXITCODE -ne 0) { throw "git fetch falhou" }
+    Etapa "checkout $alvo"
     & git -C $AppDir checkout --quiet --detach $alvo
     if ($LASTEXITCODE -ne 0) { throw "git checkout $alvo falhou (diretorio pinado sujo?)" }
     Reconstruir
 }
 function Reconstruir {
+    Etapa "pip install (requirements.lock)"
     & $py -m pip install --quiet --disable-pip-version-check -r $lock
     if ($LASTEXITCODE -ne 0) { throw "pip install do requirements.lock falhou" }
     if (-not $SemFrontend) {
         Push-Location (Join-Path $AppDir "frontend")
         try {
+            Etapa "npm ci"
             & npm ci --silent; if ($LASTEXITCODE -ne 0) { throw "npm ci falhou" }
+            Etapa "npm run build"
             & npm run build;   if ($LASTEXITCODE -ne 0) { throw "npm run build falhou" }
         } finally { Pop-Location }
+    } else {
+        Etapa "npm: pulado (-SemFrontend)"
     }
 }
 function DonoDaPorta {
@@ -74,7 +138,7 @@ function DonoDaPorta {
     if (-not $c) { return $null }
     return Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)"
 }
-# Servidor ORFAO do Agendador (incidente de 2026-09-21): Stop-ScheduledTask nao o mata, ele
+# Servidor ORFAO do Agendador (incidente de 2026-09-21): parar a tarefa nao o mata, ele
 # segura a porta, a instancia nova morre com WinError 10048 e o health 200 que se ve e' o
 # do processo ANTIGO. Por isso: quem sobrar na porta depois do Stop e' morto aqui -- so' se
 # for o uvicorn da dashboard; qualquer outro dono da porta aborta o deploy.
@@ -89,15 +153,30 @@ function LiberarPorta {
     Start-Sleep -Seconds 3
     if (DonoDaPorta) { throw "porta $Porta continua ocupada depois de encerrar o PID $($dono.ProcessId)" }
 }
+# Para e inicia a tarefa por schtasks /End e /Run. Estouro de tempo lanca uma excecao com a
+# mensagem $msgAgendador, que o fluxo principal trata voltando o pinado. /End que falha (tarefa
+# ja' parada, instancia orfa) so' avisa: LiberarPorta cuida do que sobrou na porta. /Run que falha e' fatal.
+function ComandoTarefa([string]$verbo, [bool]$fatal) {
+    $r = Agendador @("/$verbo", "/TN", $tarefaNome)
+    if ($r.Estourou) { throw "$msgAgendador (schtasks /$verbo levou mais de $LimiteAgendador s)" }
+    if ($r.Codigo -ne 0) {
+        $texto = "schtasks /$verbo $tarefaNome falhou (codigo $($r.Codigo)): $($r.Saida.Trim())"
+        if ($fatal) { throw $texto }
+        Write-Warning $texto
+    }
+}
 function Reiniciar {
-    Stop-ScheduledTask -TaskName "DashboardLotufo"; Start-Sleep -Seconds 3
+    Etapa "reinicio: parando a tarefa $tarefaNome"
+    ComandoTarefa "End" $false; Start-Sleep -Seconds 3
     LiberarPorta
     $script:reinicioEm = Get-Date
-    Start-ScheduledTask -TaskName "DashboardLotufo"; Start-Sleep -Seconds 15
+    Etapa "reinicio: iniciando a tarefa $tarefaNome"
+    ComandoTarefa "Run" $true; Start-Sleep -Seconds 15
 }
 # Saude so' vale se quem responde NASCEU depois do reinicio: health 200 de processo antigo
 # nao prova que o commit novo esta' no ar.
 function SaudavelENovo {
+    Etapa "saude: conferindo http://localhost:$Porta/api/health"
     if (-not (Saudavel)) { return $false }
     $dono = DonoDaPorta
     if (-not $dono -or $dono.CreationDate -lt $script:reinicioEm) {
@@ -106,6 +185,18 @@ function SaudavelENovo {
     }
     return $true
 }
+# Volta o diretorio pinado para $anterior sem fetch (a rede pode ser a causa) e so' reconstroi
+# se o HEAD saiu de $anterior: se a falha foi no fetch/checkout do alvo, o HEAD nunca saiu e o
+# build nao e' refeito (npm/vite esvaziariam o dist servido com a producao no ar).
+function VoltarPinado([string]$anterior) {
+    $atual = (& git -C $AppDir rev-parse HEAD).Trim()
+    if ($atual -ne $anterior) {
+        Etapa "voltando o diretorio pinado para $anterior"
+        & git -C $AppDir checkout --quiet --detach $anterior
+        if ($LASTEXITCODE -ne 0) { throw "git checkout $anterior falhou" }
+        Reconstruir
+    }
+}
 
 $anterior = (& git -C $AppDir rev-parse HEAD).Trim()
 New-Item -ItemType File -Path $pause -Force | Out-Null   # segura o watchdog durante o deploy
@@ -113,6 +204,7 @@ try {
     # Backup pre-migracao (issue #75): se o commit novo mexe em backend/migrations, snapshot
     # do banco de producao ANTES do checkout; se falhar, o deploy nao acontece. O rollback
     # do codigo mais abaixo NAO restaura o banco (restauracao manual pelo runbook).
+    Etapa "fetch (o que vai subir)"
     & git -C $AppDir fetch --quiet
     if ($LASTEXITCODE -ne 0) { throw "git fetch falhou" }
     $alvo = (& git -C $AppDir rev-parse $Ref)
@@ -137,16 +229,8 @@ try {
     try { Construir $alvo }
     catch {
         Write-Warning "Construir $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
-        # Sem fetch (a rede pode ser a causa) e so reconstroi se o HEAD saiu de $anterior:
-        # se a falha foi no fetch/checkout do alvo, o HEAD nunca saiu e o build nao e refeito
-        # (npm/vite esvaziariam o dist servido com a producao no ar).
         try {
-            $atual = (& git -C $AppDir rev-parse HEAD).Trim()
-            if ($atual -ne $anterior) {
-                & git -C $AppDir checkout --quiet --detach $anterior
-                if ($LASTEXITCODE -ne 0) { throw "git checkout $anterior falhou" }
-                Reconstruir
-            }
+            VoltarPinado $anterior
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
             $onde = (& git -C $AppDir rev-parse HEAD).Trim()
@@ -155,15 +239,35 @@ try {
         exit 1
     }
     $novo = (& git -C $AppDir rev-parse HEAD).Trim()
-    Reiniciar
+    # Agendador sem resposta no reinicio (depois do checkout): nao da' para parar nem reiniciar
+    # nada, entao o pinado volta ao commit anterior (o processo no ar, se houver, e' o antigo) e
+    # a producao e' conferida a mao.
+    try { Reiniciar }
+    catch {
+        $motivo = $_.Exception.Message
+        Write-Warning "reinicio falhou: $motivo -> voltando o diretorio pinado para $anterior"
+        try {
+            VoltarPinado $anterior
+            Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior - conferir a producao a mao (o processo no ar, se houver, e' o anterior)" -ForegroundColor Red
+        } catch {
+            $onde = (& git -C $AppDir rev-parse HEAD).Trim()
+            Write-Host "deploy abortado no reinicio ($motivo) E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior)" -ForegroundColor Red
+        }
+        exit 1
+    }
     if (SaudavelENovo) {
         $fim = "DEPLOY OK: $anterior -> $novo (health 200, processo novo)"
         if ($backup) { $fim += " - backup pre-migracao: $backup" }
         Write-Host $fim -ForegroundColor Green
     } else {
         Write-Warning "Saude NAO voltou -> ROLLBACK para $anterior"
-        Construir $anterior
-        Reiniciar
+        try {
+            Construir $anterior
+            Reiniciar
+        } catch {
+            Write-Host "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message)) - intervir a mao (ver watchdog.log e dashboard.log)" -ForegroundColor Red
+            exit 1
+        }
         if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow }
         else { Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log)" -ForegroundColor Red }
         exit 1

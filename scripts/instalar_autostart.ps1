@@ -115,4 +115,4 @@ $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccou
 Register-ScheduledTask -TaskName "DashboardLotufo" -Action $acao -Trigger $gatilho `
     -Principal $principal -Settings $config -Force | Out-Null
 
-Write-Host "Tarefa 'DashboardLotufo' instalada. Inicie com: Start-ScheduledTask -TaskName DashboardLotufo"
+Write-Host "Tarefa 'DashboardLotufo' instalada. Inicie com: schtasks /Run /TN DashboardLotufo (sem cmdlet CIM, issue #386)"

@@ -23,7 +23,7 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
   tarefas agendadas e o nome do serviço do RM não aparecem aqui. Neste documento são `<servidor>`, `<servidor-rm>`, `<porta-da-api>`,
   `<tarefa>` e `<tarefa-do-watchdog>`. Os valores reais vêm de variável de ambiente (`DASH_SERVIDOR`, `DASH_RM_ENDERECO`) ou de arquivo
   local em `C:\DashboardLotufo\segredos` (`rm-endereco.txt`); ver `scripts\rodar_producao.ps1`.
-  O nome real das tarefas sai de `Get-ScheduledTask | Where-Object TaskName -like '*Dashboard*'`.
+  O nome real das tarefas sai de `schtasks /Query /FO CSV | Select-String Dashboard` (pelo `schtasks.exe`, não pelos cmdlets `*-ScheduledTask`: ver "Agendador sem CIM" abaixo).
 - **Produção roda de um diretório PINADO** (mitigação [16], 2026-09-10): a tarefa agendada executa `C:\DashboardLotufo\app\scripts\rodar_producao.ps1` — um **worktree git dedicado** (detached HEAD num commit), com seu próprio `backend\.venv` e `frontend\dist`. O tree de dev (`C:\Users\...\Nova Dashboard Lotufo`) é **só para desenvolver**; editar/trocar branch lá NÃO muda a produção, e um reboot no meio de uma edição também não. Os dados (banco/logs/backups) ficam em `-Raiz` (`C:\DashboardLotufo`), fora do código.
 - **Deploy** (após commit+push no dev): `scripts\deploy.ps1 [-Ref origin/master] [-SemFrontend] [-Porta 8080]` (elevado; sem `-Porta`, usa a porta registrada na tarefa agendada, e com `-Porta` diferente dela aborta antes do checkout) — pausa o watchdog, atualiza o diretório pinado (git checkout + `requirements.lock` + build), reinicia, confere a saúde e faz **rollback automático** para o commit anterior se não voltar. Se o build (`pip`/`npm`/`vite`) falhar depois do checkout, o script volta o diretório pinado para o commit anterior (checkout direto, sem `git fetch`, e reconstrução só se o HEAD tinha saído dele), imprime que a produção segue nele e sai com código 1 (issue #78); se a volta também falhar, avisa para intervir à mão. Setup inicial do diretório pinado: `git worktree add --detach C:\DashboardLotufo\app <commit>`, depois `python -m venv` + `pip install -r backend\requirements.lock` e `npm ci && npm run build` em `frontend`.
 - **Backup pré-migração** (automático no deploy, desde a issue #75): antes de trocar o código, o `deploy.ps1` compara o commit atual do diretório pinado com o novo (`git diff --name-only <atual> <novo> -- backend/migrations`). Sem mudança em migrações, imprime `sem migracao nova; sem backup pre-migracao` e segue. Com mudança, chama `scripts\backup_pre_migracao.ps1`, que tira um snapshot do banco de produção com o servidor ainda no ar (API de backup do SQLite, pelo Python do diretório pinado; nunca cópia do `.db`, que perderia o `-wal`), confere o `integrity_check` e grava `C:\DashboardLotufo\dados\backups\dashboard-PRE-<7 caracteres do commit novo>-<AAAAMMDD-HHMMSS>.db`. O caminho sai em `BACKUP PRE-MIGRACAO: <caminho>` e de novo na linha final `DEPLOY OK`. Se o snapshot falhar, sai `BACKUP PRE-MIGRACAO FALHOU: <motivo>`, o deploy para **antes** do checkout (produção segue no commit anterior, código e banco intactos), o watchdog é solto e o script sai com código 1. **O rollback automático só volta o código, não o banco**: se a versão nova migrou o banco e for preciso voltar também os dados, restaurar à mão o arquivo `dashboard-PRE-...` impresso no deploy, pela seção "Restaurar o banco a partir de um snapshot". Se o mesmo deploy foi tentado mais de uma vez (rollback e nova tentativa), o banco já pode ter migrado na primeira: o arquivo certo é o `dashboard-PRE-<commit>` **mais antigo** daquele commit.
@@ -32,7 +32,17 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
 - Dev: ver README ("Rodar em desenvolvimento").
 - Produção (manual, avançado): `scripts\rodar_producao.ps1 [-SemTls] [-Porta 8080] [-Raiz C:\DashboardLotufo] [-BackupExterno \\servidor\backups\dashboard]` (elevado, a partir do diretório pinado). Hoje: `-SemTls`, sem cópia externa.
 - **Porta** (issue #361): os quatro scripts (`rodar_producao.ps1`, `instalar_autostart.ps1`, `instalar_watchdog.ps1`, `deploy.ps1`) aceitam `-Porta`; sem ela vale o padrão de hoje (80 em HTTP com `-SemTls`, 8443 em HTTPS), e a produção atual não precisa reinstalar nada. Numa máquina em que a 80 é de outro serviço (IIS na VM nova), passar a mesma porta nos quatro (ex.: `-Porta 8080`) e liberar essa porta no firewall (seção "HTTP ou HTTPS"). Neste documento `http://localhost:<porta>/api/health` é a saúde nessa porta.
-- Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Porta 8080] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Parar: `Stop-ScheduledTask -TaskName <tarefa>`; iniciar: `Start-ScheduledTask -TaskName <tarefa>`.
+- Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Porta 8080] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Parar: `schtasks /End /TN <tarefa>`; iniciar: `schtasks /Run /TN <tarefa>`.
+- **Agendador sem CIM** (issue #386, 04/11/2026): um deploy por SSH ficou mais de 10 minutos parado em `Get-ScheduledTask` porque o
+  provedor CIM do Agendador de Tarefas (`root/Microsoft/Windows/TaskScheduler`) não respondia, enquanto `schtasks /Query` e a API COM
+  `Schedule.Service` respondiam em segundos. Desde então `deploy.ps1` e `watchdog.ps1` falam com o agendador só por `schtasks.exe`
+  (`/Query /XML` para ler a porta da tarefa, `/End` e `/Run` para parar e iniciar), cada chamada num processo filho com **30 s de
+  limite** (`-LimiteAgendador`). Estouro na leitura da porta imprime `deploy abortado: agendador de tarefas nao respondeu` e sai com
+  código 1 **antes do checkout**, sem tocar no pinado nem criar o sentinela; estouro no reinício (depois do build) volta o pinado ao
+  commit anterior e imprime `deploy abortado no reinicio (...)`, com a produção a conferir à mão. O script imprime uma linha
+  `[HH:mm:ss] etapa` em cada passo (porta lida, fetch, checkout, pip, npm, reinício, saúde). Nos comandos à mão, preferir
+  `schtasks /Query|/End|/Run /TN <tarefa>` aos cmdlets; `instalar_autostart.ps1` e `instalar_watchdog.ps1` ainda registram a tarefa por
+  `Register-ScheduledTask` (instalação única, interativa, com o operador olhando).
 - Watchdog: `scripts\instalar_watchdog.ps1 [-Porta 8080]` registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1 -Url http://localhost:<porta>/api/health` — confere `/api/health` na porta de `-Porta` (padrão 80 em HTTP) e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
 
 ### Deploy a partir do Mac (SSH)
@@ -75,6 +85,33 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    Um caminho desacoplado seria uma tarefa agendada avulsa (`Register-ScheduledTask` como SYSTEM, disparada e removida depois),
    porque o OpenSSH do Windows provavelmente mata os processos da sessão ao fechá-la e `Start-Process` não escapa disso.
    **Não testado.**
+7. **Se o script não imprimir nada em 2 minutos**: desde a issue #386 o `deploy.ps1` imprime `[HH:mm:ss] etapa` a cada passo, e a
+   única espera longa legítima é dentro de `git`, `pip` ou `npm` (fetch lento, `npm ci` na VM leva minutos). Abrir **outra** sessão
+   SSH e conferir se um deles está rodando: `tasklist /FI "IMAGENAME eq git.exe"`, `tasklist /FI "IMAGENAME eq python.exe"`,
+   `tasklist /FI "IMAGENAME eq node.exe"` (ou `Get-Process git,python,node -ErrorAction SilentlyContinue`). Com um deles ativo,
+   esperar. Sem nenhum deles e sem linha nova, o script está preso fora do build (agendador, rede do health): aí sim abortar a
+   chamada, reconectar e seguir o item 6 (manter o sentinela, rodar de novo). Não matar `git`/`pip`/`npm` no meio.
+
+#### Variante sem pasta de desenvolvimento no servidor (VM, desde 03/11/2026)
+
+Na VM de produção não existe o tree de dev: só o clone pinado `C:\DashboardLotufo\app` (detached HEAD). O roteiro acima vale com
+três trocas:
+
+1. **O `deploy.ps1` roda da cópia pinada**: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\DashboardLotufo\app\scripts\deploy.ps1 [-SemFrontend]`,
+   direto como comando do `ssh` (um `-File`, sem aspas nem `&`, dispensa o script pelo stdin; e no `-Command -` um comando nativo
+   consumiria o resto do stdin, seção "Mudar de servidor"). O sentinela vai numa chamada curta antes
+   (`ssh <vm> 'powershell -NoProfile -Command "New-Item -ItemType File -Path C:\DashboardLotufo\watchdog.pause -Force | Out-Null"'`);
+   o próprio script também o cria. **A cópia pinada é a do commit que está no ar**: uma mudança no próprio `deploy.ps1` só vale a
+   partir do deploy seguinte. Para subir uma correção do próprio script, copiar antes `deploy.ps1` e `backup_pre_migracao.ps1` de
+   `origin/master` para uma pasta fora do pinado e rodar de lá (`git -C C:\DashboardLotufo\app fetch`, depois
+   `git -C C:\DashboardLotufo\app show origin/master:scripts/deploy.ps1 | Set-Content -Encoding ascii C:\Temp\deploy\deploy.ps1`,
+   idem para `backup_pre_migracao.ps1`; o script acha o backup pelo próprio diretório).
+2. **"O que vai subir" lê o pinado**, não uma pasta de dev: `git -C C:\DashboardLotufo\app fetch`, `$atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()`,
+   `git -C C:\DashboardLotufo\app log --oneline "$atual..origin/master"` e os dois `git -C C:\DashboardLotufo\app diff --name-only "$atual" origin/master -- backend/migrations` / `-- frontend`.
+   Não há `git switch`/`git pull` (o checkout é o próprio deploy).
+3. **A conferência** é a mesma (`/api/health` na porta da tarefa, `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
+   `origin/master`, apagar o sentinela), e vale a regra do item 7 acima: nada impresso em 2 minutos, conferir por outra sessão se
+   `git`/`pip`/`npm` estão rodando.
 
 ## Saúde
 `GET /api/health` toca o banco (503 se não responder) e devolve a última rodada de backup: `ultimo_snapshot`, `ultimo_snapshot_erro`, `ultima_copia_arquivos`, `ultima_copia_arquivos_erro`, `ultima_copia_externa`, `ultima_copia_externa_erro`, `ultima_copia_externa_arquivos`, `ultima_copia_externa_arquivos_erro`. Cópia externa com data de ontem ou erro preenchido = olhar o log.

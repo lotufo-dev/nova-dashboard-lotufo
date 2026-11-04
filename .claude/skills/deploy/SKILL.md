@@ -19,9 +19,12 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
 1. **PR mergeada** no GitHub: `gh pr view <M> --json state,mergeCommit -q '.state+" "+.mergeCommit.oid'` → `MERGED`.
 2. **CI verde no master**: `gh run list --branch master --workflow ci --limit 1` → `completed success` no
    commit do merge.
-3. **Pasta principal em `master` atualizado** (é de lá que o `scripts\deploy.ps1` roda):
-   `git switch master` e `git pull --ff-only` na pasta principal do projeto; `git rev-parse master origin/master`
-   iguais.
+3. **De onde o `deploy.ps1` roda.** No servidor com pasta de desenvolvimento: pasta principal em `master`
+   atualizado (`git switch master` e `git pull --ff-only`; `git rev-parse master origin/master` iguais). Na VM de
+   produção **não há pasta de desenvolvimento**: o script roda da cópia pinada
+   `C:\DashboardLotufo\app\scripts\deploy.ps1` (runbook, "Variante sem pasta de desenvolvimento no servidor"), e a
+   cópia é a do commit que está no ar: mudança no próprio `deploy.ps1` só vale no deploy seguinte (o runbook diz
+   como rodar a versão nova de uma pasta fora do pinado).
 4. **Sessão elevada** (o script para e inicia a tarefa agendada):
    `([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)`
    → `True`. Se `False`, pedir ao Leo para rodar o deploy num PowerShell aberto como administrador.
@@ -41,6 +44,13 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
   2. o deploy: sentinela e "Rodar" itens 1 a 3;
   3. conferência de saúde e commit, e apagar o sentinela (itens 4 e 5).
 
+  Na VM (sem pasta de dev): a chamada 2 é `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\DashboardLotufo\app\scripts\deploy.ps1 [-SemFrontend]'`
+  (um `-File` direto, sem script pelo stdin), com o sentinela numa chamada curta antes; a chamada 1 usa
+  `git -C C:\DashboardLotufo\app fetch` e `log`/`diff` contra `origin/master`, sem `switch`/`pull` (runbook, variante).
+  **Se o script não imprimir nada em 2 minutos** (ele imprime `[HH:mm:ss] etapa` a cada passo desde a issue #386), abrir
+  outra sessão SSH e conferir se `git`, `python` (pip) ou `node` (npm) estão rodando (`tasklist /FI "IMAGENAME eq git.exe"`
+  etc.): rodando, esperar; parados e sem linha nova, abortar a chamada e seguir o item "Se a chamada 2 cair".
+
   Se a chamada 2 cair ou vier sem a linha final, o `finally` do `deploy.ps1` pode não ter rodado. Health 200 e `rev-parse`
   igual **não provam** deploy concluído (queda no build deixa o `dist` pela metade com o processo antigo no ar) e
   `logs\dashboard.log` não traz `DEPLOY OK`/`ROLLBACK`: reconectar, manter o sentinela e **rodar de novo
@@ -56,6 +66,8 @@ git log --oneline "$atual..origin/master"
 git diff --name-only "$atual" origin/master -- backend/migrations
 git diff --name-only "$atual" origin/master -- frontend
 ```
+
+Na VM, sem pasta de dev, os três últimos levam `git -C C:\DashboardLotufo\app` e antes deles `git -C C:\DashboardLotufo\app fetch`.
 
 - **Migração nova** (arquivo adicionado, alterado, removido ou renomeado em `backend/migrations/`): dizer ao Leo **explicitamente**, antes de rodar,
   o número e o que ela faz (ler o `.sql`: só acrescenta coluna/tabela/índice, ou mexe em dados). Pelo runbook,
@@ -73,8 +85,13 @@ git diff --name-only "$atual" origin/master -- frontend
    (o `deploy.ps1` também cria e apaga o sentinela sozinho; criar antes não atrapalha.)
 2. Na pasta principal, pela ferramenta PowerShell, **sem redirecionar stderr** (nada de `2>&1` ou `*>&1`: o
    PowerShell 5.1 transforma o aviso do Vite em erro fatal, cabeçalho do script), com timeout de 600000 ms:
-   `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend` (a porta vem da tarefa agendada; `-Porta <porta>` só confere e aborta se não bater)
-3. Ler a saída:
+   `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend` (a porta vem da tarefa agendada; `-Porta <porta>` só confere e aborta se não bater).
+   Na VM: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\DashboardLotufo\app\scripts\deploy.ps1 [-SemFrontend]`.
+3. Ler a saída (uma linha `[HH:mm:ss] etapa` por passo: porta lida, fetch, checkout, pip, npm, reinício, saúde):
+   - `deploy abortado: agendador de tarefas nao respondeu` (sai com código 1, antes do checkout, sem sentinela) → nada mudou
+     na produção; o Agendador de Tarefas do servidor está sem responder (issue #386). Avisar o Leo, não tentar de novo sozinho.
+   - `deploy abortado no reinicio (...)` (sai com código 1) → o pinado voltou ao commit anterior, mas o agendador não respondeu
+     na hora de parar/iniciar: conferir à mão se a produção está no ar (`/api/health`) e avisar o Leo.
    - `sem migracao nova; sem backup pre-migracao` ou `BACKUP PRE-MIGRACAO: <caminho>` → guardar o caminho do
      backup para o registro.
    - `BACKUP PRE-MIGRACAO FALHOU: <motivo>` seguido de `deploy abortado antes do checkout` (sai com código 1)

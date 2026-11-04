@@ -8,11 +8,18 @@
 # NAO restaura durante manutencao: se existir o arquivo-sentinela $Pausa, sai sem mexer
 # (o deploy cria o sentinela antes de parar a producao e apaga depois). Faz dupla checagem
 # com 15s de intervalo para nao reiniciar por um blip de rede transitorio.
+#
+# Fala com o agendador por schtasks.exe, nunca por cmdlet CIM (issue #386: o provedor CIM do
+# agendador pode ficar sem responder), com tempo limite de 30 s por chamada; estouro vai
+# para o log e o script sai com 1 (a tarefa do watchdog repete em 3 min).
 param(
     [string]$Url = "http://localhost/api/health",
     [string]$Tarefa = "DashboardLotufo",
     [string]$Log = "C:\DashboardLotufo\logs\watchdog.log",
-    [string]$Pausa = "C:\DashboardLotufo\watchdog.pause"
+    [string]$Pausa = "C:\DashboardLotufo\watchdog.pause",
+    # Tempo limite, em segundos, de cada chamada ao agendador (schtasks.exe).
+    [ValidateRange(1, 600)]
+    [int]$LimiteAgendador = 30
 )
 
 function Escrever($m) {
@@ -29,15 +36,42 @@ Start-Sleep -Seconds 15
 if (Test-Path $Pausa) { exit 0 }
 if (Saudavel) { exit 0 }                       # foi so um blip transitorio
 
+# schtasks.exe num processo filho com tempo limite; saida em arquivo temporario (pipe cheio travaria).
+function Agendador([string[]]$argumentos) {
+    $saidaArq = [System.IO.Path]::GetTempFileName()
+    $erroArq = [System.IO.Path]::GetTempFileName()
+    try {
+        $p = Start-Process -FilePath "schtasks.exe" -ArgumentList $argumentos -NoNewWindow -PassThru `
+            -RedirectStandardOutput $saidaArq -RedirectStandardError $erroArq
+        $null = $p.Handle   # sem isto o PowerShell 5.1 pode devolver ExitCode nulo
+        if (-not $p.WaitForExit($LimiteAgendador * 1000)) {
+            try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+            return @{ Estourou = $true; Codigo = -1; Saida = "" }
+        }
+        $saida = ((Get-Content $saidaArq -Raw -ErrorAction SilentlyContinue) + " " + (Get-Content $erroArq -Raw -ErrorAction SilentlyContinue))
+        return @{ Estourou = $false; Codigo = $p.ExitCode; Saida = ("" + $saida).Trim() }
+    } finally {
+        Remove-Item $saidaArq, $erroArq -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Escrever "SEM RESPOSTA em $Url -> reiniciando a tarefa $Tarefa"
-try { Stop-ScheduledTask -TaskName $Tarefa -ErrorAction SilentlyContinue } catch {}
-Start-Sleep -Seconds 3
-try {
-    Start-ScheduledTask -TaskName $Tarefa
-    Escrever "Start-ScheduledTask disparado"
-} catch {
-    Escrever ("FALHA ao iniciar: " + $_.Exception.Message)
+$fim = Agendador @("/End", "/TN", $Tarefa)
+if ($fim.Estourou) {
+    Escrever "agendador de tarefas nao respondeu (schtasks /End levou mais de $LimiteAgendador s)"
     exit 1
 }
+if ($fim.Codigo -ne 0) { Escrever ("schtasks /End devolveu " + $fim.Codigo + ": " + $fim.Saida + " (segue para o /Run)") }
+Start-Sleep -Seconds 3
+$inicio = Agendador @("/Run", "/TN", $Tarefa)
+if ($inicio.Estourou) {
+    Escrever "agendador de tarefas nao respondeu (schtasks /Run levou mais de $LimiteAgendador s)"
+    exit 1
+}
+if ($inicio.Codigo -ne 0) {
+    Escrever ("FALHA ao iniciar (schtasks /Run devolveu " + $inicio.Codigo + "): " + $inicio.Saida)
+    exit 1
+}
+Escrever "schtasks /Run disparado"
 Start-Sleep -Seconds 25
 Escrever ("pos-restart saudavel=" + (Saudavel))
