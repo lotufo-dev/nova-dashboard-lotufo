@@ -102,7 +102,9 @@ def _medicoes_existentes(conn, contrato_id, numero, tipos) -> dict[str, dict]:
         return {}
     marcas = ",".join("?" * len(tipos))
     return {m["tipo"]: dict(m) for m in conn.execute(
-        f"SELECT id, tipo, estado FROM medicoes WHERE contrato_id=? AND numero=? AND tipo IN ({marcas})",
+        f"SELECT id, tipo, estado, competencia, valor_protocolado_centavos, planilha_enviada_em FROM medicoes "
+        f"WHERE contrato_id=? "
+        f"AND numero=? AND tipo IN ({marcas})",
         (contrato_id, numero, *tipos))}
 
 
@@ -169,10 +171,14 @@ def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict
     avisos, meds = [], []
     for tipo, valor in por_tipo.items():
         ex = existentes.get(tipo)
-        if ex and ex["estado"] not in medicoes.ESTADOS_ESPELHO:
+        # issue #289: prevista e planilha/carta enviada recebem o 1o espelho; a planilha/carta enviada, o 1o e os
+        # seguintes, so' com o pedido e a competencia dela; a gerada ainda nao (medicoes.conferir_espelho_da_planilha)
+        if ex and ex["estado"] not in (*medicoes.ESTADOS_ANTES_DO_ESPELHO, *medicoes.ESTADOS_ESPELHO, "planilha_gerada"):
             raise ValueError(f"{medicoes.nome_medicao(numero, tipo)} já está {medicoes.rotulo_estado(ex['estado'])}: "
                              "não pode gerar espelho de novo")
-        if ex:
+        if ex and (ex["estado"] == "planilha_gerada" or ex["planilha_enviada_em"]):
+            medicoes.conferir_espelho_da_planilha(conn, ex, numero, tipo, competencia, valor)
+        if ex and ex["estado"] in medicoes.ESTADOS_ESPELHO:
             avisos.append(f"{medicoes.nome_medicao(numero, tipo)} já tem espelho: será gerada uma versão nova")
         # A-20: so' aviso -- pode ser medicao atrasada de verdade. A propria medicao (gerar de novo) nao conta.
         ultima = conn.execute(
@@ -182,7 +188,7 @@ def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict
         if ultima and competencia < ultima["competencia"]:
             avisos.append(f"Competência {_mes_br(competencia)} é anterior à da última medição "
                           f"(nº {ultima['numero']}, {_mes_br(ultima['competencia'])}): confira")
-        meds.append({"tipo": tipo, "valor_centavos": valor, "existente": ex["estado"] if ex else None})
+        meds.append({"tipo": tipo, "valor_centavos": valor, "existente": ex["estado"] if ex and ex["estado"] in medicoes.ESTADOS_ESPELHO else None})
     return {"saidas": saidas, "medicoes": meds, "avisos": avisos, "periodo": espelho.periodo(competencia, periodo)}
 
 

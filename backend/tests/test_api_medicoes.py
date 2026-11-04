@@ -697,6 +697,30 @@ def test_periodo_sobreposto_ou_pulando_devolve_aviso_e_grava(client_admin):
     assert [m["estado"] for m in client_admin.get(f"/api/contratos/{cid}/medicoes").json()] == ["planilha_gerada"] * 3
 
 
+# issue #289: a tela avisa o periodo sobreposto enquanto a pessoa digita, antes de gravar (mesma regra do registro)
+def test_avisos_do_periodo_na_hora_sem_gravar(client_admin):
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid, 1, "2026-07", "2026-06-26", "2026-07-25").status_code == 201
+    url = f"/api/contratos/{cid}/planilhas/avisos"
+    r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-20"})
+    assert r.status_code == 200 and len(r.json()["avisos"]) == 1 and "sobrepõe" in r.json()["avisos"][0]
+    r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-26"})
+    assert r.json()["avisos"] == []
+    r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-08-03"})
+    assert len(r.json()["avisos"]) == 1 and "pula" in r.json()["avisos"][0]
+    # o acumulado e o saldo sao os do nº consultado, nao os do nº sugerido
+    assert r.json()["acumulado_anterior_centavos"] == 12_345_67
+    r1 = client_admin.get(url, params={"numero": 1, "competencia": "2026-07", "periodo_inicio": "2026-06-26"})
+    assert r1.json()["acumulado_anterior_centavos"] == 0
+    assert r1.json()["saldo_centavos"] - r.json()["saldo_centavos"] == 12_345_67
+    # so' le: nada foi gravado
+    assert len(client_admin.get(f"/api/contratos/{cid}/medicoes").json()) == 1
+    assert client_admin.get(url, params={"numero": 2, "competencia": "2026-8",
+                                         "periodo_inicio": "2026-07-26"}).status_code == 422
+    assert client_admin.get("/api/contratos/999999/planilhas/avisos", params={
+        "numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-26"}).status_code == 404
+
+
 def test_planilha_diretoria_recebe_403(client_admin):
     from app import auth, db
     cid = _contrato(client_admin)
@@ -837,13 +861,61 @@ def test_envio_por_fora_poe_em_planilha_enviada_com_origem_externo_e_data(client
     d = client_admin.get(f"/api/medicoes/{mid}").json()
     assert (d["estado"], d["planilha_enviada_em"], d["planilha_envio_origem"]) == (
         "planilha_enviada", "2026-08-03", "externo")
-    # o pedido congela no envio (centavo impar: 12.345,67)
-    assert d["congelada"] == 1 and d["valor_protocolado_centavos"] == 12_345_67
+    # o pedido congela no envio (centavo impar: 12.345,67) pelo estado, como no envio pelo sistema; `congelada` fica 0
+    # porque ele tambem congela o valor original do contrato, e isso e' do protocolo da nota (gate Sol, PR #382)
+    assert d["congelada"] == 0 and d["valor_protocolado_centavos"] == 12_345_67
     assert d["protocolos"] == []      # sem nº do protocolo, nada em medicao_protocolos ainda
     assert _eventos(client_admin, mid) == ["Planilha/carta enviada por fora em 03/08/2026 (E-mail ao protocolo) por Admin"]
     r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1,01"})
     assert r.status_code == 422
     assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 12_345_67
+
+
+def test_envio_por_fora_nao_congela_o_valor_original_do_contrato(client_admin):
+    """Gate Sol (PR #382): depois do envio por fora o contrato ainda aceita a correcao do valor original."""
+    from app import contratos, db
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    conn = db.get_conn()
+    try:
+        assert conn.execute("SELECT 1 FROM medicoes WHERE contrato_id=? AND congelada=1", (cid,)).fetchone() is None
+        contratos.atualizar(conn, 1, cid, {"valor_original_centavos": 100_000_01})
+        assert contratos.vigente(conn, cid)["valor_original_centavos"] == 100_000_01
+    finally:
+        conn.close()
+
+
+def test_envio_por_fora_recusa_a_versao_reservada_pelo_sistema(client_admin):
+    """Gate Sol (PR #382): com o e-mail da versao saindo pelo sistema (reserva ativa), o registro por fora recusa."""
+    from app import db
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    pid = client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"][0]["id"]
+    conn = db.get_conn()
+    conn.execute("INSERT INTO medicao_planilha_envios (medicao_id, planilha_id, envio_reservado_em, envio_reservado_por) "
+                 "VALUES (?,?,datetime('now'),1)", (mid, pid))
+    conn.commit()
+    conn.close()
+    r = _enviar_por_fora(client_admin, mid)
+    assert r.status_code == 422 and "está sendo enviada pelo sistema" in r.json()["detail"]
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["planilha_enviada_em"]) == ("planilha_gerada", None)
+
+
+def test_saldo_da_planilha_fica_fora_do_aditivo_de_reajuste(client_admin):
+    """Revisor (PR #382): o saldo da planilha/carta e' o da execucao, como o do painel (#262)."""
+    from app import db, paineis
+    cid = _contrato(client_admin)
+    conn = db.get_conn()
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
+                 "VALUES (?, 'valor', 10_000_01, 'assinado', '2026-03-01', 'reajuste')", (cid,))
+    conn.commit()
+    painel = paineis.saldo(conn, cid)
+    conn.close()
+    s = client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao").json()
+    assert s["vigente_centavos"] == 110_000_01 == painel["vigente_centavos"]
+    assert s["saldo_centavos"] == 100_000_00 == painel["saldo_centavos"]
 
 
 def test_envio_por_fora_com_eml_guarda_a_evidencia(client_admin):

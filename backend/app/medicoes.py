@@ -43,6 +43,14 @@ TRANSICOES = {
     "desistida": set(),
 }
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
+# Issue #289: estados que o espelho promove a `espelho_gerado` (pelo sistema, em criar_para_espelho). A planilha/carta
+# ENVIADA vai direto ao espelho enquanto o boletim (#284) nao existe: a #284 troca essa ponte pelo registro do boletim
+# (ou "seguir sem boletim"). A gerada nao: a ponte substitui o boletim, nao o envio ao protocolo. Nao entram em
+# TRANSICOES: a mudanca a mao continuaria sem espelho.
+ESTADOS_ANTES_DO_ESPELHO = ("prevista", "planilha_enviada")
+PLANILHA_SEM_ENVIO = ("está com a planilha/carta gerada: envie ao protocolo (ou registre o envio por fora) antes de "
+                      "gerar o espelho")
+PEDIDO_ENVIADO = "O pedido congelou no envio da planilha/carta: não muda à mão"
 # Issue #281: estados em que o pedido (valor protocolado) e' o da planilha/carta e so' muda por revisao
 ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
 PEDIDO_POR_REVISAO = "Para mudar o pedido, registre uma revisão da planilha/carta"
@@ -312,6 +320,10 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         if campo == "protocolado" and m["estado"] in ESTADOS_PLANILHA:
             # depois do boletim nem a revisao e' aceita: so' orienta a revisao onde ela existe (gate Sol, rodada 2)
             raise ValueError(PEDIDO_DEPOIS_DO_BOLETIM if m["estado"] == "boletim_recebido" else PEDIDO_POR_REVISAO)
+        # Issue #289 (PR #382): enviada a planilha/carta, o pedido nao muda a mao em estado nenhum (a ponte ao espelho
+        # leva a medicao a `espelho_gerado`, fora de ESTADOS_PLANILHA)
+        if campo == "protocolado" and m["planilha_enviada_em"]:
+            raise ValueError(PEDIDO_ENVIADO)
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []
@@ -327,7 +339,7 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         cond = " AND estado NOT IN ('cancelada','desistida')"
         if campo == "protocolado":
             cond += (" AND (congelada=0 OR valor_protocolado_centavos IS NULL)"
-                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho'"
+                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho' AND planilha_enviada_em IS NULL"
                      f" AND estado NOT IN ({','.join(repr(e) for e in ESTADOS_PLANILHA)})")
         cur = conn.execute(f"UPDATE medicoes SET {col_v}=?, {col_o}=?{extra_sql} WHERE id=?{cond}",
                            (centavos, origem, *extra_par, medicao_id))
@@ -493,12 +505,69 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
                             {"estado": atual, "motivo": motivo_antes}, depois)
 
 
+def conferir_espelho_da_planilha(conn, ja: dict, numero: int, tipo: str, competencia: str, valor_centavos: int) -> None:
+    """Issue #289 (ponte ate' a #284): a medicao cuja planilha/carta foi enviada so' recebe espelho, o 1o ou os
+    seguintes, com o MESMO pedido e a mesma competencia: o pedido congelou no envio, e o espelho com outro valor
+    deixaria a medicao e o documento do faturamento divergentes. A planilha/carta gerada ainda nao recebe espelho.
+    `ja` traz estado, competencia, valor_protocolado_centavos e planilha_enviada_em."""
+    if ja["estado"] == "planilha_gerada":
+        raise ValueError(f"{nome_medicao(numero, tipo)} {PLANILHA_SEM_ENVIO}")
+    if not ja.get("planilha_enviada_em"):
+        return
+    # uma versao saindo pelo sistema (reserva ativa) segura o espelho: o e-mail ainda vai registrar o envio dela
+    if conn.execute("SELECT 1 FROM medicao_planilha_envios WHERE medicao_id=? AND envio_id IS NULL "
+                    "AND envio_reservado_em IS NOT NULL", (ja["id"],)).fetchone() is not None:
+        raise ValueError(f"A planilha/carta da {nome_medicao(numero, tipo)} está sendo enviada ao protocolo: aguarde "
+                         "o envio terminar (ou libere o envio preso) antes de gerar o espelho")
+    # revisao registrada e ainda nao enviada (rodada extra, PR #382): a ponte a levaria a `espelho_gerado`, onde ela
+    # nao sai mais por caminho nenhum. A vigente tem de ser a ultima enviada (pelo sistema ou por fora).
+    if ja["estado"] == "planilha_enviada":
+        from app import planilha_envio      # import local: planilha_envio importa este modulo
+        vigente = conn.execute("SELECT MAX(versao) FROM medicao_planilhas WHERE medicao_id=?",
+                               (ja["id"],)).fetchone()[0] or 0
+        if vigente > planilha_envio._ultima_enviada(conn, {"id": ja["id"], "estado": ja["estado"]}):
+            raise ValueError(f"A {nome_medicao(numero, tipo)} tem revisão da planilha/carta registrada e não enviada: "
+                             "envie ao protocolo (ou registre o envio por fora) antes de gerar o espelho")
+    from app import dinheiro       # import local, como os outros deste modulo
+    if ja["competencia"] != competencia:
+        raise ValueError(f"{nome_medicao(numero, tipo)} tem a planilha/carta da competência "
+                         f"{ja['competencia'][5:7]}/{ja['competencia'][:4]}: gere o espelho nessa competência")
+    if ja["valor_protocolado_centavos"] != valor_centavos:
+        raise ValueError(f"O valor do espelho ({dinheiro.format_brl(valor_centavos)}) difere do pedido da "
+                         f"planilha/carta da {nome_medicao(numero, tipo)} "
+                         f"({dinheiro.format_brl(ja['valor_protocolado_centavos'] or 0)})")
+
+
+def _promover_ao_espelho(conn, usuario_id: int, medicao_id: int, numero: int, tipo: str, competencia: str,
+                         valor_centavos: int) -> int:
+    """Dentro da transacao de criar_para_espelho. Prevista (correcao do 422 de "depois de protocolada" que a
+    prevista recebia) entra com o valor do espelho; a planilha/carta enviada (issue #289, ponte ate' o boletim da
+    #284) entra com o pedido dela, que o espelho precisa repetir. So' o estado anda; o pedido nao muda."""
+    m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone())
+    conferir_espelho_da_planilha(conn, m, numero, tipo, competencia, valor_centavos)
+    if m["estado"] == "prevista":
+        cur = conn.execute("UPDATE medicoes SET estado='espelho_gerado', valor_protocolado_centavos=?, "
+                           "valor_protocolado_origem='espelho', competencia=? WHERE id=? AND estado='prevista'",
+                           (valor_centavos, competencia, medicao_id))
+        depois = {"estado": "espelho_gerado", "valor_protocolado_centavos": valor_centavos,
+                  "valor_protocolado_origem": "espelho", "competencia": competencia, "origem": "espelho"}
+    else:
+        cur = conn.execute("UPDATE medicoes SET estado='espelho_gerado' WHERE id=? AND estado=?",
+                           (medicao_id, m["estado"]))
+        depois = {"estado": "espelho_gerado", "origem": "espelho"}
+    db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", medicao_id,
+                        {"estado": m["estado"], "valor_protocolado_centavos": m["valor_protocolado_centavos"],
+                         "competencia": m["competencia"]}, depois)
+    return medicao_id
+
+
 def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tipo: str,
                        competencia: str, valor_centavos: int) -> int:
     """A medicao nasce ao gerar o espelho (spec §2). Gerar de novo atualiza o valor enquanto a
     medicao nao foi protocolada; depois disso correcao e' fora do escopo (nao ha' glosa pos-protocolo)."""
     with db.mutacao(conn):
-        ja = conn.execute("SELECT id, estado, valor_protocolado_centavos FROM medicoes "
+        ja = conn.execute("SELECT id, estado, valor_protocolado_centavos, competencia, planilha_enviada_em FROM medicoes "
                           "WHERE contrato_id=? AND numero=? AND tipo=?", (contrato_id, numero, tipo)).fetchone()
         if ja is None:
             cur = conn.execute(
@@ -509,9 +578,18 @@ def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tip
                                 {"numero": numero, "tipo": tipo, "competencia": competencia,
                                  "estado": "espelho_gerado", "valor_protocolado_centavos": valor_centavos})
             return cur.lastrowid
+        if ja["estado"] == "planilha_gerada":
+            raise ValueError(f"{nome_medicao(numero, tipo)} {PLANILHA_SEM_ENVIO}")
+        if ja["estado"] in ESTADOS_ANTES_DO_ESPELHO:
+            return _promover_ao_espelho(conn, usuario_id, ja["id"], numero, tipo, competencia, valor_centavos)
         if ja["estado"] not in ESTADOS_ESPELHO:
             raise ValueError(f"{nome_medicao(numero, tipo)} já está {rotulo_estado(ja['estado'])}: o espelho não pode ser "
                              "gerado de novo depois de protocolada")
+        if ja["planilha_enviada_em"]:
+            # gerar de novo o espelho da planilha/carta enviada (PR #382, rodada 2): o pedido congelado fica; o espelho
+            # novo tem de repeti-lo, e nada na medicao muda
+            conferir_espelho_da_planilha(conn, dict(ja), numero, tipo, competencia, valor_centavos)
+            return ja["id"]
         cur = conn.execute("UPDATE medicoes SET valor_protocolado_centavos=?, valor_protocolado_origem='espelho', "
                            "competencia=? WHERE id=? AND estado IN ('espelho_gerado','espelho_enviado')",
                            (valor_centavos, competencia, ja["id"]))

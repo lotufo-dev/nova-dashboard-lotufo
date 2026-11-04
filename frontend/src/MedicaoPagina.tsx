@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { baseDosValores } from "./formato";
 import { api, mensagemDeErro } from "./api";
 import Espelho from "./Espelho";
+import { CartaoPlanilha, NovaPlanilhaCarta, type TipoPlanilha } from "./PlanilhaCarta";
 import { EtapaEnvio, useEnvios } from "./EtapaEnvio";
 import { EtapaCartao, etapaDe, etapaInicial, FaixaVendo, Setas, situacaoDa } from "./Etapas";
 import { FrcConsorcio } from "./Frc";
@@ -59,6 +60,10 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const [medicoes, setMedicoes] = useState<Medicao[] | null>(null);
   const [andamento, setAndamento] = useState<LinhaAndamento[]>([]);
   const [espelhos, setEspelhos] = useState<EspelhoResumo[]>([]);
+  // issue #289: a planilha/carta e' o 1o passo so' na obra que gera a medicao pelo espelho (regra ativa)
+  const [regraAtiva, setRegraAtiva] = useState(false);
+  // revisao da planilha/carta registrada e nao enviada: o espelho espera o envio dela (PR #382, rodada extra)
+  const [revisaoPendente, setRevisaoPendente] = useState(false);
   // issue #188: a execucao e o reajuste da mesma competencia (as notas dos dois, a espera e a liberacao)
   const [par, setPar] = useState<ParDaMedicao | null>(null);
   const [erro, setErro] = useState("");
@@ -88,12 +93,13 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     const [lista, abertas, esp, duas] = await Promise.all([
       api<Medicao[]>(`/api/contratos/${contratoId}/medicoes`),
       api<LinhaAndamento[]>(`/api/medicoes/andamento?contrato_id=${contratoId}`).catch(() => []),
-      api<{ espelhos: EspelhoResumo[] }>(`/api/contratos/${contratoId}/espelho`).catch(() => ({ espelhos: [] })),
+      api<{ espelhos: EspelhoResumo[]; regra?: { situacao: string } | null }>(`/api/contratos/${contratoId}/espelho`)
+        .catch(() => ({ espelhos: [], regra: null })),
       // sem o par a pagina fica como antes (um bloco so'): a falha aqui nao derruba a medicao
       api<ParDaMedicao>(`/api/medicoes/${medicaoId}/par`).catch(() => null),
     ]);
     if (g !== geracao.current) return;
-    setMedicoes(lista); setAndamento(abertas); setEspelhos(esp.espelhos ?? []);
+    setMedicoes(lista); setAndamento(abertas); setEspelhos(esp.espelhos ?? []); setRegraAtiva(esp.regra?.situacao === "ativa");
     setPar(duas && Array.isArray(duas.metades) ? duas : null);
   }, [contratoId, medicaoId]);
 
@@ -223,10 +229,25 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   ];
 
   // ---------------------------------------------------------------- etapas
+  // issue #289: o primeiro passo e' a planilha/carta (execucao e projeto, na obra com regra de espelho ativa; o
+  // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela fica no alto da
+  // etapa. Enviada, o espelho aparece logo abaixo (ponte ate' o boletim da #284: o espelho repete o pedido da
+  // planilha/carta); so' gerada, ainda nao (a ponte substitui o boletim, nao o envio ao protocolo).
+  const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
+  // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
+  const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;
   const corpoEtapa1 = (
     <div className="med-etapa__corpo">
-      <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
-        abrirForm={m.estado === "prevista" && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+      {novaPlanilha && (
+        <NovaPlanilhaCarta contratoId={contratoId} tipo={m.tipo as TipoPlanilha} inicial={{ numero: m.numero, competencia: m.competencia }}
+          aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
+      )}
+      {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
+        aoRevisaoPendente={setRevisaoPendente} />}
+      {!novaPlanilha && m.estado !== "planilha_gerada" && !(m.estado === "planilha_enviada" && revisaoPendente) && (
+        <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
+          abrirForm={["prevista", "planilha_enviada"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+      )}
     </div>
   );
   const corpoEtapa2 = (

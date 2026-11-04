@@ -1,0 +1,39 @@
+/* Planilha/carta da medicao (issue #289): area de soltar do oficio e da planilha, e o acumulado e o saldo. */
+
+.planilha__arquivos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.planilha__arquivos > .campo { flex: 1 1 260px; min-width: 0; }
+
+.planilha__soltar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 8px 6px 12px;
+  border: 1px dashed var(--linha-forte);
+  border-radius: var(--raio-ctrl);
+  background: var(--superficie-2);
+}
+.planilha__soltar--sobre { border-color: var(--acento); background: var(--acento-fundo); }
+
+.planilha__arquivo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.planilha__arquivo--vazio { color: var(--texto-2); }
+
+.planilha__saldo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 32px;
+  margin: 0;
+}
+.planilha__saldo dt { color: var(--texto-2); font-size: 13px; }
+.planilha__saldo dd { margin: 2px 0 0; font-weight: 600; white-space: nowrap; }
+.planilha__negativo { color: var(--acao); }
