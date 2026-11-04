@@ -93,8 +93,10 @@ Na VM, sem pasta de dev, os três últimos levam `git -C C:\DashboardLotufo\app`
      que a sessão criou** (item 5; o watchdog não pode ficar pausado sem prazo) e avisar o Leo, sem tentar de novo sozinho.
      O mesmo vale para `BACKUP PRE-MIGRACAO FALHOU`.
    - `deploy abortado no reinicio (...)` (sai com código 1) → o pinado voltou ao commit anterior, mas o agendador não respondeu
-     na hora de parar ou iniciar a tarefa. A linha diz se a tarefa foi religada e quem está na porta (PID e hora de criação);
-     não presumir que é o processo anterior: conferir `/api/health` e o dono da porta à mão e avisar o Leo.
+     na hora de parar ou iniciar a tarefa. Se a parada tinha começado, o script refaz parar → liberar porta → iniciar com o
+     commit anterior e só diz "religada" com health 200 de processo novo; senão imprime "NAO esta' comprovadamente no ar",
+     mantém o sentinela e pede `schtasks /End` e `/Run` à mão. Nos dois casos a linha traz quem está na porta (PID e hora de
+     criação): conferir `/api/health` à mão e avisar o Leo.
    - `sem migracao nova; sem backup pre-migracao` ou `BACKUP PRE-MIGRACAO: <caminho>` → guardar o caminho do
      backup para o registro.
    - `BACKUP PRE-MIGRACAO FALHOU: <motivo>` seguido de `deploy abortado antes do checkout` (sai com código 1)
@@ -109,7 +111,8 @@ Na VM, sem pasta de dev, os três últimos levam `git -C C:\DashboardLotufo\app`
      segue no commit anterior. Avisar o Leo com o motivo, não tentar de novo sozinho.
    - `ROLLBACK TAMBEM FALHOU - intervir a mao` ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`
      → avisar o Leo na hora; logs em `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
-     **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior.
+     **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior (desde a #386 o próprio script o mantém
+     nesses casos e imprime `sentinela ... MANTIDO`).
 4. Conferir a saúde na própria máquina (runbook, "Saúde"):
    `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok`
    (a porta é a de `-Porta` do `deploy.ps1`, padrão 80 em HTTP, quando o `:80` pode ser omitido)

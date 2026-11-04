@@ -142,9 +142,9 @@ function ComandoTarefa([string]$verbo, [bool]$fatal) {
 }
 function Reiniciar {
     Etapa "reinicio: parando a tarefa $tarefaNome"
+    $script:tarefaParada = $true   # ANTES do /End: um /End cujo cliente estourou pode ter parado a tarefa
     ComandoTarefa "End" $false; Start-Sleep -Seconds 3
     LiberarPorta
-    $script:tarefaParada = $true   # daqui em diante a producao esta' fora ate' o /Run
     $script:reinicioEm = Get-Date
     Etapa "reinicio: iniciando a tarefa $tarefaNome"
     ComandoTarefa "Run" $true
@@ -162,6 +162,15 @@ function SaudavelENovo {
         return $false
     }
     return $true
+}
+# Quem esta' na porta, para a linha final; a consulta passa pelo WMI (sem tempo limite), por isso
+# fica protegida e so' roda depois de qualquer tentativa de religar.
+function DiagnosticoPorta {
+    try {
+        $dono = DonoDaPorta
+        if ($dono) { return "na porta $Porta esta' o PID $($dono.ProcessId), criado em $($dono.CreationDate)" }
+        return "ninguem escuta na porta $Porta"
+    } catch { return "nao foi possivel consultar a porta $Porta ($($_.Exception.Message))" }
 }
 # Volta o diretorio pinado para $anterior sem fetch (a rede pode ser a causa) e so' reconstroi
 # se o HEAD saiu de $anterior: se a falha foi no fetch/checkout do alvo, o HEAD nunca saiu e o
@@ -211,39 +220,42 @@ try {
             VoltarPinado $anterior
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
+            $script:manterSentinela = $true
             $onde = (& git -C $AppDir rev-parse HEAD).Trim()
-            Write-Host "deploy abortado no build E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior)" -ForegroundColor Red
+            Write-Host "deploy abortado no build E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior); sentinela do watchdog mantido" -ForegroundColor Red
         }
         exit 1
     }
     $novo = (& git -C $AppDir rev-parse HEAD).Trim()
     # Agendador sem resposta no reinicio (depois do checkout): o pinado volta ao commit anterior e,
-    # se a tarefa ja' tinha sido parada (falha no /Run), tenta religa-la uma vez com o codigo anterior;
-    # se nem isso, a producao esta' FORA e a mensagem diz para religar a mao.
+    # se a fase de parada comecou (a tarefa pode estar parada, ou no ar com o commit novo), refaz o
+    # ciclo parar -> liberar porta -> iniciar com o commit anterior e so' afirma o que conferiu
+    # (saude 200 de processo novo). Se nem isso, a producao esta' FORA, o sentinela fica e a
+    # mensagem diz para religar a mao.
     try { Reiniciar }
     catch {
         $motivo = $_.Exception.Message
         Write-Warning "reinicio falhou: $motivo -> voltando o diretorio pinado para $anterior"
         try {
             VoltarPinado $anterior
-            # Um /Run cujo cliente foi morto ainda pode chegar ao servico: quem esta' na porta
-            # e' impresso (PID e criacao), nao presumido.
-            $dono = DonoDaPorta
-            $naPorta = if ($dono) { "na porta $Porta esta' o PID $($dono.ProcessId), criado em $($dono.CreationDate)" } else { "ninguem escuta na porta $Porta" }
             if ($script:tarefaParada) {
                 Etapa "religando a tarefa $tarefaNome com o commit anterior"
-                $r = Agendar @("/Run", "/TN", $tarefaNome)
-                if ($r.Estourou -or $r.Codigo -ne 0) {
-                    Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior, mas a tarefa $tarefaNome foi parada e NAO religou ($naPorta) - religar a mao com schtasks /Run /TN $tarefaNome quando o agendador responder" -ForegroundColor Red
+                $religou = $false
+                try { Reiniciar; $religou = SaudavelENovo } catch { Write-Warning "religar falhou: $($_.Exception.Message)" }
+                $naPorta = DiagnosticoPorta
+                if ($religou) {
+                    Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior e tarefa $tarefaNome religada com ele (health 200, processo novo; $naPorta)" -ForegroundColor Red
                 } else {
-                    Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior e tarefa $tarefaNome religada com ele ($naPorta) - conferir /api/health a mao" -ForegroundColor Red
+                    $script:manterSentinela = $true
+                    Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior, mas a tarefa $tarefaNome NAO esta' comprovadamente no ar com ele ($naPorta) - intervir a mao: schtasks /End e /Run /TN $tarefaNome quando o agendador responder, conferir /api/health; sentinela do watchdog mantido" -ForegroundColor Red
                 }
             } else {
-                Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior; a tarefa nao chegou a ser parada ($naPorta) - conferir /api/health a mao" -ForegroundColor Red
+                Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior; a tarefa nao chegou a ser parada ($(DiagnosticoPorta)) - conferir /api/health a mao" -ForegroundColor Red
             }
         } catch {
+            $script:manterSentinela = $true
             $onde = (& git -C $AppDir rev-parse HEAD).Trim()
-            Write-Host "deploy abortado no reinicio ($motivo) E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior)" -ForegroundColor Red
+            Write-Host "deploy abortado no reinicio ($motivo) E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior); sentinela do watchdog mantido" -ForegroundColor Red
         }
         exit 1
     }
@@ -257,13 +269,21 @@ try {
             Construir $anterior
             Reiniciar
         } catch {
-            Write-Host "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message)) - intervir a mao (ver watchdog.log e dashboard.log)" -ForegroundColor Red
+            $script:manterSentinela = $true
+            Write-Host "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message)) - intervir a mao (ver watchdog.log e dashboard.log); sentinela do watchdog mantido" -ForegroundColor Red
             exit 1
         }
         if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow }
-        else { Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log)" -ForegroundColor Red }
+        else {
+            $script:manterSentinela = $true
+            Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log); sentinela do watchdog mantido" -ForegroundColor Red
+        }
         exit 1
     }
 } finally {
-    Remove-Item $pause -Force -ErrorAction SilentlyContinue   # solta o watchdog
+    # Solta o watchdog, salvo nos caminhos de "intervir a mao": com o pinado num commit ou build que
+    # nao se provou, o watchdog nao pode reerguer sozinho (runbook). O operador apaga o sentinela
+    # depois de conferir.
+    if ($script:manterSentinela) { Write-Host "sentinela $pause MANTIDO: watchdog pausado ate' o operador conferir o pinado e apaga-lo" -ForegroundColor Yellow }
+    else { Remove-Item $pause -Force -ErrorAction SilentlyContinue }
 }

@@ -39,8 +39,10 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
   (`/Query /XML` para ler a porta da tarefa, `/End` e `/Run` para parar e iniciar), cada chamada num processo filho com **30 s de
   limite** (`-LimiteAgendador`). Estouro na leitura da porta imprime `deploy abortado: agendador de tarefas nao respondeu` e sai com
   código 1 **antes do checkout**, sem tocar no pinado nem criar o sentinela (o sentinela criado à mão antes é apagado pelo operador);
-  estouro no reinício (depois do build) volta o pinado ao commit anterior, religa a tarefa com ele se ela já tinha sido parada, e
-  imprime `deploy abortado no reinicio (...)` com quem está na porta (PID e criação), com a produção a conferir à mão. O script imprime uma linha
+  estouro no reinício (depois do build) volta o pinado ao commit anterior e, se a parada tinha começado, refaz parar → liberar
+  porta → iniciar com ele, afirmando "religada" só com health 200 de processo novo; senão imprime que a tarefa não está
+  comprovadamente no ar, com quem está na porta (PID e criação), e **mantém o sentinela** (como em `ROLLBACK TAMBEM FALHOU` e nas
+  voltas que falham: o script imprime `sentinela ... MANTIDO` e o operador o apaga depois de conferir o pinado). O script imprime uma linha
   `[HH:mm:ss] etapa` em cada passo (porta lida, fetch, checkout, pip, npm, reinício, saúde). Nos comandos à mão, preferir
   `schtasks /Query|/End|/Run /TN <tarefa>` aos cmdlets; `instalar_autostart.ps1` e `instalar_watchdog.ps1` ainda registram a tarefa por
   `Register-ScheduledTask` (instalação única, interativa, com o operador olhando).
