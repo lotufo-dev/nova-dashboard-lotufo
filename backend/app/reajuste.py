@@ -220,8 +220,26 @@ def competencias_apostiladas(conn, contrato_id: int) -> list[dict]:
 # cuja regra se cumpre. `apostilada` nao depende da medicao; por isso cada competencia diz tambem se e' apostilada
 # (nota antes do apostilamento fica `faturada` com `apostilada` falso).
 ESTADOS_COMPETENCIA = ("prevista", "pedida", "aprovada", "apostilada", "faturada", "recebida")
-_MEDICAO_PEDIDA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
+_MEDICAO_PEDIDA = ("planilha_gerada", "planilha_enviada", "boletim_recebido", "espelho_gerado", "espelho_enviado")
+# `protocolada` e' o protocolo da nota (migracao 054: o da planilha/carta nao muda o estado), depois da nota emitida
 _MEDICAO_FATURADA = ("nota_emitida", "protocolada", "nf_emitida", "recebida")
+_PEDIDA, _APROVADA_PASSO, _APOSTILADA, _FATURADA, _RECEBIDA = 1, 2, 3, 4, 5
+
+
+def _passo_da_medicao(m, faturado: int | None, com_atesto: bool) -> int:
+    """O passo de `ESTADOS_COMPETENCIA` a que a medicao de reajuste chegou sozinha (o apostilamento e' do termo).
+    Enquanto o motor de medicao nao cobre tudo, o valor pedido gravado ja' conta como pedida; aprovada e' o boletim
+    registrado (evento de atesto ou valor aprovado)."""
+    me = m["estado"]
+    if me == "recebida":
+        return _RECEBIDA
+    if me in _MEDICAO_FATURADA or faturado is not None:
+        return _FATURADA
+    if me == "boletim_recebido" or com_atesto or m["valor_atestado_centavos"] is not None:
+        return _APROVADA_PASSO
+    if me in _MEDICAO_PEDIDA or m["valor_protocolado_centavos"] is not None:
+        return _PEDIDA
+    return 0
 # ciclo enviado e ainda sem apostilamento: com ou sem cronograma a reemitir, o aviso e a diretoria seguem valendo
 SEM_APOSTILAMENTO = ("apostilamento_pendente", "reemitir")
 
@@ -257,7 +275,8 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
     A medicao de reajuste vai para a data-base e o ciclo gravados nela; sem eles (medicao anterior ao motor), para a
     unica data-base do contrato (com duas, a que tem previsao da competencia, se for uma so') e para o ciclo da
     previsao da competencia ou, sem previsao, o do aniversario. Cancelada ou desistida nao conta. Duas medicoes na
-    mesma competencia: vale a de maior numero."""
+    mesma competencia: vale a mais adiantada (empate: a de maior numero), para o complemento recem-criado nao
+    esconder o que a outra ja' faturou ou recebeu."""
     c = conn.execute("SELECT sem_reajuste FROM contratos WHERE id=?", (contrato_id,)).fetchone()
     if c is None or c["sem_reajuste"]:
         return []
@@ -288,6 +307,9 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
         "SELECT a.medicao_id, SUM(a.valor_alocado_centavos) FROM nf_alocacoes a JOIN notas_fiscais n ON n.id = a.nota_id "
         "JOIN medicoes m ON m.id = a.medicao_id WHERE m.contrato_id=? AND a.desfeita_em IS NULL "
         "AND n.situacao = 'ativa' GROUP BY a.medicao_id", (contrato_id,))}
+    com_atesto = {r[0] for r in conn.execute("SELECT DISTINCT e.medicao_id FROM medicao_atestos e "
+                                             "JOIN medicoes m ON m.id = e.medicao_id WHERE m.contrato_id=?",
+                                             (contrato_id,))}
     for m in conn.execute("SELECT * FROM medicoes WHERE contrato_id=? AND tipo='reajuste' "
                           "AND estado NOT IN ('cancelada','desistida') ORDER BY numero, id", (contrato_id,)):
         base = m["data_base_mes"] or unica
@@ -304,7 +326,10 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
         if ciclo is None:
             continue
         x = linha(base, ciclo, m["competencia"])
-        x.update(medicao_id=m["id"], medicao_numero=m["numero"], medicao_estado=m["estado"],
+        passo = _passo_da_medicao(m, faturado.get(m["id"]), m["id"] in com_atesto)
+        if x["medicao_id"] is not None and (x["_passo"], x["medicao_numero"]) > (passo, m["numero"]):
+            continue
+        x.update(medicao_id=m["id"], medicao_numero=m["numero"], medicao_estado=m["estado"], _passo=passo,
                  pedido_centavos=m["valor_protocolado_centavos"], aprovado_centavos=m["valor_atestado_centavos"],
                  faturado_centavos=faturado.get(m["id"]), recebida_em=m["recebida_em"])
 
@@ -316,15 +341,8 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
                       and t["de"] <= comp <= t["ate"]), None)
             if t:
                 x.update(apostilada=True, apostilado_percentual=t["percentual"], apostilamento_chave=t["chave"])
-        me = x["medicao_estado"]
-        feitos = [True,
-                  me is not None and (me in _MEDICAO_PEDIDA or me in _MEDICAO_FATURADA
-                                      or x["pedido_centavos"] is not None),
-                  me is not None and (me == "boletim_recebido" or x["aprovado_centavos"] is not None),
-                  x["apostilada"],
-                  me in _MEDICAO_FATURADA or x["faturado_centavos"] is not None,
-                  me == "recebida"]
-        x["estado"] = ESTADOS_COMPETENCIA[max(i for i, f in enumerate(feitos) if f)]
+        passo = max(x.pop("_passo", 0), _APOSTILADA if x["apostilada"] else 0)
+        x["estado"] = ESTADOS_COMPETENCIA[passo]
         grupos.setdefault((base, ciclo), []).append(x)
     return [{"data_base_mes": b, "ciclo": y, "competencias": xs} for (b, y), xs in grupos.items()]
 

@@ -568,6 +568,39 @@ def test_nota_cancelada_e_alocacao_desfeita_nao_faturam(cenario):
         [("aprovada", None), ("aprovada", None)]
 
 
+def test_faturado_soma_as_notas_da_medicao_com_centavo_impar(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    m = _medicao(c, cid, 1, "2026-07", "nota_emitida", pedido=500_07, aprovado=500_07)
+    _nota(c, m, 250_03)
+    _nota(c, m, 250_04)
+    x = _por_competencia(c, cid)["2026-07"]
+    assert (x["estado"], x["faturado_centavos"]) == ("faturada", 500_07)
+
+
+def test_complemento_na_mesma_competencia_nao_esconde_a_medicao_recebida(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    m3 = _medicao(c, cid, 3, "2026-09", "recebida", pedido=300_05, aprovado=300_05)
+    _nota(c, m3, 300_05)
+    _medicao(c, cid, 8, "2026-09", "prevista")
+    x = _por_competencia(c, cid)["2026-09"]
+    assert (x["estado"], x["medicao_numero"], x["faturado_centavos"]) == ("recebida", 3, 300_05)
+
+
+def test_boletim_registrado_segue_aprovado_depois_do_espelho(cenario):
+    # o espelho vem depois do boletim: a medicao que ja' passou dele nao volta a `pedida`
+    c, ids = cenario
+    cid = ids["contrato"]
+    m = _medicao(c, cid, 1, "2026-07", "espelho_gerado", pedido=100_01)
+    c.execute("INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em) "
+              "VALUES (?, 99_99, 'manual', '2026-08-10')", (m,))
+    c.commit()
+    _medicao(c, cid, 2, "2026-08", "espelho_enviado", pedido=200_03)
+    x = _por_competencia(c, cid)
+    assert (x["2026-07"]["estado"], x["2026-08"]["estado"]) == ("aprovada", "pedida")
+
+
 def test_medicao_sem_motor_com_valor_pedido_vale_como_pedida(cenario):
     # enquanto o motor de medicao nao cobre tudo, a medicao de reajuste com valor pedido conta como pedida; a que
     # so' existe (prevista, sem valor) nao muda o estado
