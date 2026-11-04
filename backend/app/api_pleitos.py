@@ -99,7 +99,9 @@ def reajuste_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=F
 def prazos_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
                    conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)
+    # issue #292: os dias que a carta de prazo sugere pelo ritmo dos ultimos 6 meses (a pessoa confirma ou muda)
     return {"situacao": prazos.situacao(conn, contrato_id), "historico": prazos.historico_texto(conn, contrato_id),
+            "sugestao": prazos.sugestao_dias(conn, contrato_id),
             "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("prazo", "conclusao"))]}
 
 
