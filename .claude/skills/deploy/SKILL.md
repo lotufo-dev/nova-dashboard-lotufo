@@ -88,10 +88,13 @@ Na VM, sem pasta de dev, os três últimos levam `git -C C:\DashboardLotufo\app`
    `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend` (a porta vem da tarefa agendada; `-Porta <porta>` só confere e aborta se não bater).
    Na VM: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\DashboardLotufo\app\scripts\deploy.ps1 [-SemFrontend]`.
 3. Ler a saída (uma linha `[HH:mm:ss] etapa` por passo: porta lida, fetch, checkout, pip, npm, reinício, saúde):
-   - `deploy abortado: agendador de tarefas nao respondeu` (sai com código 1, antes do checkout, sem sentinela) → nada mudou
-     na produção; o Agendador de Tarefas do servidor está sem responder (issue #386). Avisar o Leo, não tentar de novo sozinho.
+   - `deploy abortado: agendador de tarefas nao respondeu` (sai com código 1, antes do checkout; o script não criou nem apagou
+     sentinela) → nada mudou na produção; o Agendador de Tarefas do servidor está sem responder (issue #386). **Apagar o sentinela
+     que a sessão criou** (item 5; o watchdog não pode ficar pausado sem prazo) e avisar o Leo, sem tentar de novo sozinho.
+     O mesmo vale para `BACKUP PRE-MIGRACAO FALHOU`.
    - `deploy abortado no reinicio (...)` (sai com código 1) → o pinado voltou ao commit anterior, mas o agendador não respondeu
-     na hora de parar/iniciar: conferir à mão se a produção está no ar (`/api/health`) e avisar o Leo.
+     na hora de parar ou iniciar a tarefa. A linha diz se a tarefa foi religada e quem está na porta (PID e hora de criação);
+     não presumir que é o processo anterior: conferir `/api/health` e o dono da porta à mão e avisar o Leo.
    - `sem migracao nova; sem backup pre-migracao` ou `BACKUP PRE-MIGRACAO: <caminho>` → guardar o caminho do
      backup para o registro.
    - `BACKUP PRE-MIGRACAO FALHOU: <motivo>` seguido de `deploy abortado antes do checkout` (sai com código 1)

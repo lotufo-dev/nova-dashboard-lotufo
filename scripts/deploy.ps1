@@ -128,11 +128,12 @@ function LiberarPorta {
     if (DonoDaPorta) { throw "porta $Porta continua ocupada depois de encerrar o PID $($dono.ProcessId)" }
 }
 # Para e inicia a tarefa por schtasks /End e /Run. Estouro de tempo lanca uma excecao com a
-# mensagem $msgAgendador, que o fluxo principal trata voltando o pinado. /End que falha (tarefa
+# mensagem propria, que o fluxo principal trata voltando o pinado. /End que falha (tarefa
 # ja' parada, instancia orfa) so' avisa: LiberarPorta cuida do que sobrou na porta. /Run que falha e' fatal.
 function ComandoTarefa([string]$verbo, [bool]$fatal) {
     $r = Agendar @("/$verbo", "/TN", $tarefaNome)
-    if ($r.Estourou) { throw "$msgAgendador (schtasks /$verbo levou mais de $LimiteAgendador s)" }
+    # Texto proprio, sem o "$msgAgendador" de antes do checkout: aqui a producao pode ter mudado.
+    if ($r.Estourou) { throw "agendador de tarefas nao respondeu ao schtasks /$verbo (mais de $LimiteAgendador s)" }
     if ($r.Codigo -ne 0) {
         $texto = "schtasks /$verbo $tarefaNome falhou (codigo $($r.Codigo)): $($r.Saida)"
         if ($fatal) { throw $texto }
@@ -225,16 +226,20 @@ try {
         Write-Warning "reinicio falhou: $motivo -> voltando o diretorio pinado para $anterior"
         try {
             VoltarPinado $anterior
+            # Um /Run cujo cliente foi morto ainda pode chegar ao servico: quem esta' na porta
+            # e' impresso (PID e criacao), nao presumido.
+            $dono = DonoDaPorta
+            $naPorta = if ($dono) { "na porta $Porta esta' o PID $($dono.ProcessId), criado em $($dono.CreationDate)" } else { "ninguem escuta na porta $Porta" }
             if ($script:tarefaParada) {
                 Etapa "religando a tarefa $tarefaNome com o commit anterior"
                 $r = Agendar @("/Run", "/TN", $tarefaNome)
                 if ($r.Estourou -or $r.Codigo -ne 0) {
-                    Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior, mas a tarefa $tarefaNome foi parada e NAO religou: PRODUCAO FORA DO AR - religar a mao com schtasks /Run /TN $tarefaNome quando o agendador responder" -ForegroundColor Red
+                    Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior, mas a tarefa $tarefaNome foi parada e NAO religou ($naPorta) - religar a mao com schtasks /Run /TN $tarefaNome quando o agendador responder" -ForegroundColor Red
                 } else {
-                    Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior e tarefa $tarefaNome religada com ele - conferir /api/health a mao" -ForegroundColor Red
+                    Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior e tarefa $tarefaNome religada com ele ($naPorta) - conferir /api/health a mao" -ForegroundColor Red
                 }
             } else {
-                Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior; a tarefa nao chegou a ser parada (processo anterior segue no ar) - conferir /api/health a mao" -ForegroundColor Red
+                Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior; a tarefa nao chegou a ser parada ($naPorta) - conferir /api/health a mao" -ForegroundColor Red
             }
         } catch {
             $onde = (& git -C $AppDir rev-parse HEAD).Trim()

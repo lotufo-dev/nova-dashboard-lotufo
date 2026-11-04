@@ -38,8 +38,9 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
   `Schedule.Service` respondiam em segundos. Desde então `deploy.ps1` e `watchdog.ps1` falam com o agendador só por `schtasks.exe` (função comum em `scripts\comum_agendador.ps1`)
   (`/Query /XML` para ler a porta da tarefa, `/End` e `/Run` para parar e iniciar), cada chamada num processo filho com **30 s de
   limite** (`-LimiteAgendador`). Estouro na leitura da porta imprime `deploy abortado: agendador de tarefas nao respondeu` e sai com
-  código 1 **antes do checkout**, sem tocar no pinado nem criar o sentinela; estouro no reinício (depois do build) volta o pinado ao
-  commit anterior e imprime `deploy abortado no reinicio (...)`, com a produção a conferir à mão. O script imprime uma linha
+  código 1 **antes do checkout**, sem tocar no pinado nem criar o sentinela (o sentinela criado à mão antes é apagado pelo operador);
+  estouro no reinício (depois do build) volta o pinado ao commit anterior, religa a tarefa com ele se ela já tinha sido parada, e
+  imprime `deploy abortado no reinicio (...)` com quem está na porta (PID e criação), com a produção a conferir à mão. O script imprime uma linha
   `[HH:mm:ss] etapa` em cada passo (porta lida, fetch, checkout, pip, npm, reinício, saúde). Nos comandos à mão, preferir
   `schtasks /Query|/End|/Run /TN <tarefa>` aos cmdlets; `instalar_autostart.ps1` e `instalar_watchdog.ps1` ainda registram a tarefa por
   `Register-ScheduledTask` (instalação única, interativa, com o operador olhando).
@@ -90,7 +91,10 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    SSH e conferir se um deles está rodando: `tasklist /FI "IMAGENAME eq git.exe"`, `tasklist /FI "IMAGENAME eq python.exe"`,
    `tasklist /FI "IMAGENAME eq node.exe"` (ou `Get-Process git,python,node -ErrorAction SilentlyContinue`). Com um deles ativo,
    esperar. Sem nenhum deles e sem linha nova, o script está preso fora do build (agendador, rede do health): aí sim abortar a
-   chamada, reconectar e seguir o item 6 (manter o sentinela, rodar de novo). Não matar `git`/`pip`/`npm` no meio.
+   chamada, reconectar e seguir o item 6 (manter o sentinela, rodar de novo). Não matar `git`/`pip`/`npm` no meio. Preso depois
+   de `reinicio: parando a tarefa`, a produção pode já estar fora: `LiberarPorta` e a conferência de saúde ainda usam
+   `Get-NetTCPConnection` e `Get-CimInstance Win32_Process` (WMI, sem tempo limite; só o provedor do agendador travou em 04/11, não se
+   provou que o WMI inteiro responde). Nesse caso, `schtasks /Run /TN <tarefa>` à mão e conferir `/api/health`.
 
 #### Variante sem pasta de desenvolvimento no servidor (VM, desde 03/11/2026)
 
