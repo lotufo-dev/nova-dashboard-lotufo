@@ -8,7 +8,8 @@ import { NovaMedicaoManual, type Medicao } from "./Medicoes";
 // Na aba Medicoes da obra, o antigo cartao "Gerar espelho" virou o atalho "Iniciar a Nª medição" (16/10/2026): a
 // medicao se inicia na pagina dela, na etapa 1 (Espelho). Com medicao prevista no cronograma, o atalho abre a pagina
 // dessa medicao; sem ela, a pagina da medicao nova. Obra do fluxo antigo (sem regra de espelho) continua com a
-// medicao a mao.
+// medicao a mao. Issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1), e o atalho diz
+// isso: "Nova planilha/carta da Nª medição".
 
 export default function IniciarProxima({ contratoId, versao, aoCriar }: { contratoId: number; versao: number; aoCriar: () => void }) {
   const [ativa, setAtiva] = useState<boolean | null>(null);
@@ -39,7 +40,7 @@ export default function IniciarProxima({ contratoId, versao, aoCriar }: { contra
     <div className="medicoes__acoes" id="nova-medicao">
       <Link className="btn btn--primario medicoes__iniciar"
         para={prevista ? { tela: "medicao", obra: contratoId, id: prevista.id } : { tela: "nova-medicao", obra: contratoId }}>
-        <IconeMais className="icone" />{numero === null ? "Iniciar a próxima medição" : `Iniciar a ${numero}ª medição`}
+        <IconeMais className="icone" />{numero === null ? "Nova planilha/carta" : `Nova planilha/carta da ${numero}ª medição`}
       </Link>
     </div>
   );

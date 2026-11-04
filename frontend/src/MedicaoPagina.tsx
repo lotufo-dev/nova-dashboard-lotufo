@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { baseDosValores } from "./formato";
 import { api, mensagemDeErro } from "./api";
 import Espelho from "./Espelho";
+import { CartaoPlanilha, NovaPlanilhaCarta, type TipoPlanilha } from "./PlanilhaCarta";
 import { EtapaEnvio, useEnvios } from "./EtapaEnvio";
 import { EtapaCartao, etapaDe, etapaInicial, FaixaVendo, Setas, situacaoDa } from "./Etapas";
 import { FrcConsorcio } from "./Frc";
@@ -223,10 +224,22 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   ];
 
   // ---------------------------------------------------------------- etapas
+  // issue #289: o primeiro passo e' a planilha/carta (execucao e projeto; o reajuste continua pelo espelho). A prevista
+  // abre o formulario dela; registrada, o cartao dela fica no alto da etapa, e o espelho so' aparece depois do boletim.
+  const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
+  const novaPlanilha = comPlanilha && m.estado === "prevista" && !espVigente;
+  const antesDoBoletim = m.estado === "planilha_gerada" || m.estado === "planilha_enviada";
   const corpoEtapa1 = (
     <div className="med-etapa__corpo">
-      <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
-        abrirForm={m.estado === "prevista" && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+      {novaPlanilha && podeEditar && (
+        <NovaPlanilhaCarta contratoId={contratoId} tipo={m.tipo as TipoPlanilha} inicial={{ numero: m.numero, competencia: m.competencia }}
+          aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
+      )}
+      {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha medicaoId={m.id} podeEditar={podeEditar} aoMudar={recarregar} />}
+      {!novaPlanilha && !antesDoBoletim && (
+        <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
+          abrirForm={m.estado === "prevista" && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+      )}
     </div>
   );
   const corpoEtapa2 = (

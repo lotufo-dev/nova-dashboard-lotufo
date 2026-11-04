@@ -10,6 +10,12 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 vi.mock("./Espelho", () => ({
   default: ({ parte }: { parte?: string }) => <div data-espelho={parte} />,
 }));
+// issue #289: a planilha/carta tem teste proprio (PlanilhaCarta.test.tsx); aqui so' importa onde ela aparece
+vi.mock("./PlanilhaCarta", () => ({
+  NovaPlanilhaCarta: ({ inicial }: { inicial?: { numero: number } }) => <div data-nova-planilha={inicial?.numero} />,
+  CartaoPlanilha: ({ medicaoId, podeEditar }: { medicaoId: number; podeEditar: boolean }) =>
+    <div data-cartao-planilha={medicaoId} data-pode-editar={String(podeEditar)} />,
+}));
 vi.mock("./Frc", () => ({
   FrcConsorcio: ({ medicaoId }: { medicaoId: number }) => <div data-frc={medicaoId} />,
 }));
@@ -486,5 +492,55 @@ describe("Página da medição: pagamento (etapa 5)", () => {
     pagina();
     const link = await screen.findByRole("link", { name: "Registrar o protocolo" });
     expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#etapa-4");
+  });
+});
+
+// issue #289: a etapa 1 começa pela planilha/carta (execução e projeto); o espelho vem depois do boletim
+describe("Página da medição: a planilha/carta na etapa 1", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/obras/1/medicoes/5"));
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("medição prevista de execução abre a Nova planilha/carta, sem o formulário do espelho", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-nova-planilha='23']")).not.toBeNull());
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+    expect(container.querySelector("[data-cartao-planilha]")).toBeNull();
+  });
+
+  it("com a planilha/carta registrada ou enviada: o cartão dela, ainda sem o espelho", async () => {
+    for (const estado of ["planilha_gerada", "planilha_enviada"]) {
+      responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado }] });
+      const { container } = pagina();
+      await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+      expect(container.querySelector("[data-espelho]")).toBeNull();
+      expect(container.querySelector("[data-nova-planilha]")).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("depois do boletim: o cartão da planilha/carta e o espelho", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "boletim_recebido" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull();
+  });
+
+  it("reajuste previsto continua pelo espelho", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, tipo: "reajuste", estado: "prevista" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+    expect(container.querySelector("[data-nova-planilha]")).toBeNull();
+  });
+
+  it("diretoria: sem o formulário; o cartão abre só para ler", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
+    const { container } = pagina("diretoria");
+    await screen.findByRole("heading", { name: "Espelho", level: 2 });
+    expect(container.querySelector("[data-nova-planilha]")).toBeNull();
+    cleanup();
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
+    const segundo = pagina("diretoria");
+    await waitFor(() => expect(segundo.container.querySelector("[data-cartao-planilha='5']")!.getAttribute("data-pode-editar")).toBe("false"));
   });
 });
