@@ -324,7 +324,7 @@ def test_linha_sem_reajuste_fica_de_fora():
 @pytest.mark.parametrize("dados, motivo", [
     (b"PK\x03\x04 nao e' planilha", "não abre"),
     (planilha_modelo(outras_abas=()), None),        # so' a aba Resumo: ainda e' o modelo
-])
+], ids=["nao-e-zip", "so-aba-resumo"])
 def test_arquivo_que_nao_abre_e_aba_unica(dados, motivo):
     if motivo:
         with pytest.raises(leitura.PlanilhaNaoReconhecida) as e:
