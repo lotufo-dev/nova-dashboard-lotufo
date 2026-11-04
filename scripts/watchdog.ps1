@@ -36,34 +36,17 @@ Start-Sleep -Seconds 15
 if (Test-Path $Pausa) { exit 0 }
 if (Saudavel) { exit 0 }                       # foi so um blip transitorio
 
-# schtasks.exe num processo filho com tempo limite; saida em arquivo temporario (pipe cheio travaria).
-function Agendador([string[]]$argumentos) {
-    $saidaArq = [System.IO.Path]::GetTempFileName()
-    $erroArq = [System.IO.Path]::GetTempFileName()
-    try {
-        $p = Start-Process -FilePath "schtasks.exe" -ArgumentList $argumentos -NoNewWindow -PassThru `
-            -RedirectStandardOutput $saidaArq -RedirectStandardError $erroArq
-        $null = $p.Handle   # sem isto o PowerShell 5.1 pode devolver ExitCode nulo
-        if (-not $p.WaitForExit($LimiteAgendador * 1000)) {
-            try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
-            return @{ Estourou = $true; Codigo = -1; Saida = "" }
-        }
-        $saida = ((Get-Content $saidaArq -Raw -ErrorAction SilentlyContinue) + " " + (Get-Content $erroArq -Raw -ErrorAction SilentlyContinue))
-        return @{ Estourou = $false; Codigo = $p.ExitCode; Saida = ("" + $saida).Trim() }
-    } finally {
-        Remove-Item $saidaArq, $erroArq -Force -ErrorAction SilentlyContinue
-    }
-}
+. (Join-Path $PSScriptRoot "comum_agendador.ps1")   # Agendador: schtasks.exe com tempo limite
 
 Escrever "SEM RESPOSTA em $Url -> reiniciando a tarefa $Tarefa"
-$fim = Agendador @("/End", "/TN", $Tarefa)
+$fim = Agendador @("/End", "/TN", $Tarefa) $LimiteAgendador
 if ($fim.Estourou) {
     Escrever "agendador de tarefas nao respondeu (schtasks /End levou mais de $LimiteAgendador s)"
     exit 1
 }
 if ($fim.Codigo -ne 0) { Escrever ("schtasks /End devolveu " + $fim.Codigo + ": " + $fim.Saida + " (segue para o /Run)") }
 Start-Sleep -Seconds 3
-$inicio = Agendador @("/Run", "/TN", $Tarefa)
+$inicio = Agendador @("/Run", "/TN", $Tarefa) $LimiteAgendador
 if ($inicio.Estourou) {
     Escrever "agendador de tarefas nao respondeu (schtasks /Run levou mais de $LimiteAgendador s)"
     exit 1

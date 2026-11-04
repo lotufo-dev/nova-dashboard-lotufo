@@ -35,7 +35,7 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
 - Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Porta 8080] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Parar: `schtasks /End /TN <tarefa>`; iniciar: `schtasks /Run /TN <tarefa>`.
 - **Agendador sem CIM** (issue #386, 04/11/2026): um deploy por SSH ficou mais de 10 minutos parado em `Get-ScheduledTask` porque o
   provedor CIM do Agendador de Tarefas (`root/Microsoft/Windows/TaskScheduler`) não respondia, enquanto `schtasks /Query` e a API COM
-  `Schedule.Service` respondiam em segundos. Desde então `deploy.ps1` e `watchdog.ps1` falam com o agendador só por `schtasks.exe`
+  `Schedule.Service` respondiam em segundos. Desde então `deploy.ps1` e `watchdog.ps1` falam com o agendador só por `schtasks.exe` (função comum em `scripts\comum_agendador.ps1`)
   (`/Query /XML` para ler a porta da tarefa, `/End` e `/Run` para parar e iniciar), cada chamada num processo filho com **30 s de
   limite** (`-LimiteAgendador`). Estouro na leitura da porta imprime `deploy abortado: agendador de tarefas nao respondeu` e sai com
   código 1 **antes do checkout**, sem tocar no pinado nem criar o sentinela; estouro no reinício (depois do build) volta o pinado ao
@@ -103,9 +103,10 @@ três trocas:
    (`ssh <vm> 'powershell -NoProfile -Command "New-Item -ItemType File -Path C:\DashboardLotufo\watchdog.pause -Force | Out-Null"'`);
    o próprio script também o cria. **A cópia pinada é a do commit que está no ar**: uma mudança no próprio `deploy.ps1` só vale a
    partir do deploy seguinte. Para subir uma correção do próprio script, copiar antes `deploy.ps1` e `backup_pre_migracao.ps1` de
-   `origin/master` para uma pasta fora do pinado e rodar de lá (`git -C C:\DashboardLotufo\app fetch`, depois
+   `origin/master` para uma pasta fora do pinado e rodar de lá (`New-Item -ItemType Directory -Force C:\Temp\deploy | Out-Null`,
+   `git -C C:\DashboardLotufo\app fetch`, depois
    `git -C C:\DashboardLotufo\app show origin/master:scripts/deploy.ps1 | Set-Content -Encoding ascii C:\Temp\deploy\deploy.ps1`,
-   idem para `backup_pre_migracao.ps1`; o script acha o backup pelo próprio diretório).
+   idem para `comum_agendador.ps1` e `backup_pre_migracao.ps1`; o script acha os dois pelo próprio diretório).
 2. **"O que vai subir" lê o pinado**, não uma pasta de dev: `git -C C:\DashboardLotufo\app fetch`, `$atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()`,
    `git -C C:\DashboardLotufo\app log --oneline "$atual..origin/master"` e os dois `git -C C:\DashboardLotufo\app diff --name-only "$atual" origin/master -- backend/migrations` / `-- frontend`.
    Não há `git switch`/`git pull` (o checkout é o próprio deploy).
