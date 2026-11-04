@@ -46,7 +46,7 @@ ninguém. Leia antes `CLAUDE.md`, `README.md` e as regras de `.claude/rules/` qu
 3. Escreva primeiro o teste de cada critério de aceite; rode e veja falhar.
 4. Implemente até os testes passarem. Commits pequenos, em português.
 5. Siga a skill `abrir-pr` do passo "Antes de abrir" até "Depois de abrir". Nela, você faz os passos 1 a 3
-   (commits, testes do que tocou, `/code-review` triado) e abre a PR; o `revisor-adversarial` e o gate Sol
+   (commits, testes do que tocou, `/code-review` triado) e abre a PR (**um push só** com tudo, depois `gh pr create`: a CI cancela e recomeça a cada push); o `revisor-adversarial` e o gate Sol
    ficam como **"pendente (orquestradora)"** na seção `## Gates`, porque quem os roda é a orquestradora.
    Se a skill `code-review` não estiver disponível para você, escreva em `## Gates` "/code-review: não rodou
    (subagente)", nunca "0 achados"; a orquestradora roda. A resposta final é a do formato abaixo, não a que a
@@ -59,7 +59,10 @@ ninguém. Leia antes `CLAUDE.md`, `README.md` e as regras de `.claude/rules/` qu
    da PR. Git em outro worktree a
    ferramenta recusa. Siga o passo 6.
 6. Se a orquestradora mandar achados de volta: para cada um, corrigir com teste, ou refutar com `arquivo:linha`
-   que prova. Commit, `git push origin HEAD:<branch no GitHub>` (na correção, a mesma branch remota da PR), e atualizar a PR (`gh pr edit <M> --body-file ...`) com o resultado em `## Gates`.
+   que prova. Commit (um por achado é bom), rode os testes do módulo tocado e só então faça **um** `git push origin HEAD:<branch no GitHub>`
+   (na correção, a mesma branch remota da PR), **um push por rodada de correção**: a CI cancela e recomeça a cada push, e
+   `sha-depois` é o commit desse push único. Se a orquestradora pediu `git merge origin/master` junto, a mescla entra no mesmo
+   push. Depois atualize a PR (`gh pr edit <M> --body-file ...`) com o resultado em `## Gates`.
    **Nunca comente na PR** (todo agente posta com a conta do Leo, e comentário na PR é a trava que a tira do
    auto-merge): o que precisar registrar vai no corpo da PR ou na issue.
    Na correção, responda no formato abaixo com `estado: PR corrigida`, a sua branch local, o **seu**
