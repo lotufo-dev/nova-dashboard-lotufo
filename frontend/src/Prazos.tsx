@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { CartaoPleito, NovoPleito, cadeiaDoPleito, type Pleito, type TipoPleito } from "./FluxoOficio";
+import { CartaoPleito, NovoPleito, cadeiaDoPleito, type Pleito, type SugestaoDias, type TipoPleito } from "./FluxoOficio";
 import CaixaAviso from "./CaixaAviso";
 import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
@@ -25,6 +25,9 @@ type Situacao = {
   encerramento: { desde: string; marcos: Record<string, string>; conclusao_comunicada: boolean } | null;
   instrumentos: Instrumento[];
 };
+
+// issue #292: `sugestao`, os dias que a carta de prazo sugere (app/prazos.py `sugestao_dias`)
+type Dados = { situacao: Situacao; historico: string; sugestao?: SugestaoDias | null; pleitos: Pleito[] };
 
 const MARCOS: [string, string][] = [["conclusao", "Conclusão"], ["provisorio", "Recebimento provisório"],
   ["definitivo", "Recebimento definitivo"], ["baixa_garantia", "Baixa da garantia"]];
@@ -79,7 +82,7 @@ export function LinhaPleito({ p, desfecho, contexto }: { p: Pleito; desfecho: De
 }
 
 export default function Prazos({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
-  const [dados, setDados] = useState<{ situacao: Situacao; historico: string; pleitos: Pleito[] } | null>(null);
+  const [dados, setDados] = useState<Dados | null>(null);
   // "sem instrumento ha N dias": o numero vem do servidor (a lista de obras, mudanca A9), nao de uma conta da tela
   const [diasPedido, setDiasPedido] = useState<number | null>(null);
   const [erro, setErro] = useState("");
@@ -89,7 +92,7 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
 
   const carregar = useCallback(async () => {
     try {
-      const d = await api<{ situacao: Situacao; historico: string; pleitos: Pleito[] }>(`/api/contratos/${contratoId}/prazos`);
+      const d = await api<Dados>(`/api/contratos/${contratoId}/prazos`);
       setDados(d);
       if (d.situacao.pedido) {
         const obras = await api<{ id: number; pedido_prorrogacao?: { dias: number | null } | null }[]>("/api/contratos")
@@ -203,7 +206,7 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
             {novo === "prazo" && (
               <section className="cartao" aria-labelledby="titulo-novo-pedido">
                 <div className="cartao__cabeca"><h3 className="cartao__titulo" id="titulo-novo-pedido">Novo pedido de prorrogação</h3></div>
-                <NovoPleito contratoId={contratoId} tipo="prazo"
+                <NovoPleito contratoId={contratoId} tipo="prazo" sugestao={dados.sugestao}
                   aoCriar={p => { setNovo(null); setFoco(`oficio-${p.id}`); void carregar(); }}
                   aoCancelar={() => { setNovo(null); setFoco("pedir-prorrogacao"); }} />
               </section>

@@ -111,6 +111,14 @@ def test_medicao_final_pela_api_poe_o_contrato_em_encerramento(api):
     assert cl.get("/api/pleitos/999999").status_code == 404
 
 
+def test_prazos_da_obra_traz_a_sugestao_de_dias(api):
+    """Issue #292: a aba Prazos recebe a conta da sugestao (saldo, ritmo, janela) junto com o historico."""
+    cl, cid, _ = api
+    s = cl.get(f"/api/contratos/{cid}/prazos").json()["sugestao"]
+    assert {"saldo_centavos", "ritmo_centavos", "meses", "de", "ate", "dias", "novo_fim", "motivo"} <= set(s)
+    assert s["meses"] == 6
+
+
 # --- envio unico e registrado (pacote 1 da fase 4, 10/10/2026) ---------------------------------------------
 
 def _pronto(cl, cid):

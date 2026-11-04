@@ -187,3 +187,170 @@ def test_numero_com_resto_nao_reconhecido_nao_vale_e_o_ordinal_vence(cenario):
     t = prazos.historico_texto(c, ids["contrato"])
     assert "O 1º termo aditivo n.º 099/2020/01/14/02" in t          # sem ordinal: contagem
     assert "O 15º termo aditivo n.º 099/2020/01/14-retificado/15" in t
+
+
+# --- issue #292: sugestao de dias da carta de prorrogacao pelo ritmo dos ultimos 6 meses -------------------
+
+def _medicao(c, cid, numero, competencia, atestado=None, protocolado=None, estado="recebida", tipo="execucao"):
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+              "valor_atestado_centavos) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (cid, numero, tipo, competencia, estado, protocolado, atestado))
+    c.commit()
+
+
+def _valor(c, cid, centavos):
+    c.execute("UPDATE contratos SET valor_original_centavos=? WHERE id=?", (centavos, cid)); c.commit()
+
+
+def _fim(c, cid, data):
+    c.execute("UPDATE contratos SET execucao_fim=? WHERE id=?", (data, cid)); c.commit()
+
+
+def test_sugestao_pelo_ritmo_dos_ultimos_6_meses(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_000_01)   # centavo impar
+    # janela de hoje 15/10/2026: competencias 2026-04 a 2026-09; fora dela (03 e 10) entra no saldo, nao no ritmo
+    _medicao(c, cid, 1, "2026-03", atestado=400_000_00)
+    _medicao(c, cid, 2, "2026-05", atestado=200_000_00)
+    _medicao(c, cid, 3, "2026-07", protocolado=100_000_01, estado="protocolada")   # sem atestado: vale o protocolado
+    _medicao(c, cid, 4, "2026-09", atestado=0)
+    _medicao(c, cid, 5, "2026-08", protocolado=999_999_00, estado="cancelada")     # cancelada nao mede
+    _medicao(c, cid, 6, "2026-06", protocolado=50_000_00, tipo="reajuste")       # reajuste nao e' execucao
+    _medicao(c, cid, 7, "2026-10", atestado=100_000_00)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    # saldo 1.000.000,01 - 800.000,01 = 200.000,00; medido nos 6 meses 300.000,01; ritmo 50.000,00/mes (arred. 1x)
+    assert (s["saldo_centavos"], s["medido_periodo_centavos"], s["ritmo_centavos"]) == (200_000_00, 300_000_01, 50_000_00)
+    assert (s["meses"], s["de"], s["ate"], s["motivo"]) == (6, "2026-04", "2026-09", None)
+    # 4 meses no ritmo mostrado: conclusao 15/02/2027 (hoje + 4 meses); pedido = 15/02/2027 - 20/10/2026
+    assert (s["execucao_fim"], s["novo_fim"], s["dias"]) == ("2026-10-20", "2027-02-15", 118)
+
+
+def test_sugestao_so_os_dias_depois_do_fim_vigente(cenario):
+    """Fim em 20/12, 4 meses de saldo a partir de 15/10: a obra termina em 15/02; o pedido e' de 20/12 a 15/02."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2026-12-20")
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)   # ritmo 100,00; saldo 400,00
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert (s["novo_fim"], s["dias"]) == ("2027-02-15", 57)
+
+
+def test_sugestao_com_execucao_ja_vencida_conta_de_hoje(cenario):
+    """Fim em 31/01/2026, pedido em 15/10/2026 com 3 meses de saldo: o novo fim e' 15/01/2027, depois do pedido."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 900_00); _fim(c, cid, "2026-01-31")
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)   # ritmo 100,00; saldo 300,00
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert (s["novo_fim"], s["dias"]) == ("2027-01-15", 349)
+
+
+def test_conclusao_antes_do_fim_vigente_nao_sugere(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2027-12-20")
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert s["dias"] is None and s["novo_fim"] == "2027-02-15"
+    assert s["motivo"] == ("No ritmo de 04/2026 a 09/2026 a obra termina em 15/02/2027, até o fim da execução "
+                           "(20/12/2027): não há dias a pedir.")
+
+
+def test_fracao_do_ultimo_mes_arredonda_para_cima(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 375_00)
+    _medicao(c, cid, 1, "2026-09", atestado=300_00)
+    # saldo 75,00 / ritmo 50,00 = 1,5 mes: 15/11 + metade de 30 dias = 30/11/2026; pedido de 20/10 a 30/11
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert (s["ritmo_centavos"], s["novo_fim"], s["dias"]) == (50_00, "2026-11-30", 41)
+
+
+def test_sem_medicao_nos_6_meses_nao_sugere_e_diz_por_que(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 900_00)
+    _medicao(c, cid, 1, "2026-03", atestado=300_00)   # antes da janela
+    _medicao(c, cid, 2, "2026-10", atestado=100_00)   # mes corrente, fora da janela
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert (s["dias"], s["ritmo_centavos"], s["saldo_centavos"]) == (None, None, 500_00)
+    assert s["motivo"] == "Sem medição de execução de 04/2026 a 09/2026: sem ritmo para sugerir os dias."
+
+
+def test_ritmo_que_arredonda_a_zero_nao_sugere(cenario):
+    """R$ 0,01 em 6 meses: a tela mostraria R$ 0,00/mes; a conta tem de bater com o que se mostra."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _medicao(c, cid, 1, "2026-09", atestado=1)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert (s["dias"], s["ritmo_centavos"]) == (None, 0)
+    assert s["motivo"] == "Ritmo de 04/2026 a 09/2026 abaixo de R$ 0,01/mês: sem ritmo para sugerir os dias."
+
+
+def test_saldo_zero_nao_sugere(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 300_00)
+    _medicao(c, cid, 1, "2026-09", atestado=300_00)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert (s["dias"], s["saldo_centavos"], s["ritmo_centavos"]) == (None, 0, 50_00)
+    assert s["motivo"] == "Sem saldo a executar: não há dias a sugerir."
+
+
+def test_sem_fim_de_execucao_nao_sugere(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _fim(c, cid, None)
+    _medicao(c, cid, 1, "2026-09", atestado=50)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert s["dias"] is None and s["motivo"] == "Sem fim de execução no cadastro: não há de onde contar os dias."
+
+
+def test_janela_atravessa_o_ano(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _medicao(c, cid, 1, "2025-08", atestado=10)
+    s = prazos.sugestao_dias(c, cid, D(2026, 2, 3))
+    assert (s["de"], s["ate"]) == ("2025-08", "2026-01")
+
+
+def test_acima_do_teto_do_pedido_nao_sugere(cenario):
+    """A API recusa pedido acima de 3.650 dias: a sugestao nao pode preencher o campo com um numero que da 422."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_006_00)
+    _medicao(c, cid, 1, "2026-09", atestado=6_00)   # ritmo 1,00; saldo 1.000,00 = 1.000 meses
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert s["dias"] is None and s["motivo"] == prazos.ACIMA_DO_TETO
+    assert s["motivo"] == "No ritmo dos últimos 6 meses o pedido passaria de 3.650 dias, o máximo."
+
+
+def test_ritmo_irrisorio_nao_derruba_a_aba(cenario):
+    """Saldo de R$ 10 milhoes contra R$ 1,00 medido na janela: bilhoes de meses passariam do ano 9999."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 10_000_000_00 + 1_00)
+    _medicao(c, cid, 1, "2026-09", atestado=1_00)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert s["dias"] is None and s["motivo"] == prazos.ACIMA_DO_TETO
+
+
+def test_fim_de_execucao_no_ano_9999_nao_derruba_a_aba(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _fim(c, cid, "9999-12-31")
+    _medicao(c, cid, 1, "2026-09", atestado=60)
+    s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
+    assert s["dias"] is None and "não há dias a pedir" in s["motivo"]
+
+
+def test_mes_exato_nao_calcula_o_mes_seguinte(cenario):
+    """1 mes exato de 15/11/9999: conclusao 15/12/9999, 1 dia depois do fim vigente. O mes seguinte (01/10000) nao
+    existe; com resto zero ele nao pode entrar na conta, senao a sugestao some com o motivo errado."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 700); _fim(c, cid, "9999-12-14")
+    _medicao(c, cid, 1, "9999-10", atestado=600)   # ritmo 1,00; saldo 1,00 = 1 mes
+    s = prazos.sugestao_dias(c, cid, D(9999, 11, 15))
+    assert (s["novo_fim"], s["dias"], s["motivo"]) == ("9999-12-15", 1, None)
