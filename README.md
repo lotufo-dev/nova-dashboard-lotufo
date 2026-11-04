@@ -55,6 +55,10 @@ cd backend && .venv\Scripts\python -m pytest -q
 cd frontend && npm test && npm run typecheck && npm run lint
 ```
 
+A CI roda o backend em dois jobs: `backend` (Ubuntu, `pytest -n 4 -m "not windows"`, com pytest-xdist) e
+`backend-windows` (`pytest -m windows`, só o que exercita caminho e ferramenta do Windows, como `tests/test_backup.py`).
+Teste que só vale no Windows leva `pytestmark = pytest.mark.windows` (ou `@pytest.mark.windows`).
+
 Recriar o ambiente igual ao testado: `.venv\Scripts\python -m pip install -r requirements.lock`
 (faixas suportadas em `backend/pyproject.toml`) e `npm ci` em `frontend`.
 
@@ -90,7 +94,7 @@ E no `~/.zshrc`: `export DASH_SERVIDOR=` seguido do nome do servidor de produç�
 - Backend: `cd backend && DASH_DEV=1 DASH_SEM_JOBS=1 .venv/bin/python -m uvicorn --factory app.main:create_app --reload --port 8080`.
   Frontend igual ao Windows (`cd frontend && npm run dev`). No app do Claude: `backend-dev-mac`, `frontend-dev-mac`
   e `prototipo-login-mac` em `.claude/launch.json`.
-- Testes: `cd backend && .venv/bin/python -m pytest -q` e os de frontend acima. A suíte oficial é a CI (Windows);
+- Testes: `cd backend && .venv/bin/python -m pytest -q` e os de frontend acima. A suíte oficial é a CI (Ubuntu, mais o job `backend-windows`);
   teste que só vale no Windows é pulado ou pode falhar no Mac.
 - Os hooks do Claude passam por `.claude/hooks/rodar.sh`, que roda o `.ps1` no Windows e o `.sh` de mesmo nome
   no Mac; num worktree, `node_modules` e `.venv` viram links simbólicos para os do clone principal.

@@ -9,6 +9,7 @@ colorama==0.4.6
 cryptography==50.0.1
 defusedxml==0.7.1
 et_xmlfile==2.0.0
+execnet==2.1.1
 fastapi==0.141.1
 fonttools==4.66.0
 fpdf2==2.8.8
@@ -29,6 +30,7 @@ Pygments==2.21.0
 pypdf==6.16.2
 pypdfium2==5.13.0
 pytest==9.1.1
+pytest-xdist==3.8.0
 python-multipart==0.0.32
 PyYAML==6.0.3
 ruff==0.17.0
