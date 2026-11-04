@@ -164,7 +164,8 @@ def historico_texto(conn, contrato_id: int) -> str:
 
 
 MESES_RITMO = 6
-TETO_MESES = 1200   # 100 anos
+TETO_DIAS = 3650   # o mesmo teto do pedido na API (api_pleitos.CriarIn.dias)
+ACIMA_DO_TETO = "No ritmo dos últimos 6 meses o pedido passaria de 3.650 dias, o máximo: sem sugestão de dias."
 
 
 def _somar_meses(d: datetime.date, n: int) -> datetime.date:
@@ -179,12 +180,14 @@ def _mm_aaaa(comp: str) -> str:
 
 
 def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
-    """Issue #292 (spec 2026-10-20 §4 item 3): os dias de prorrogacao que a carta de prazo sugere. Saldo a executar
-    (o de `paineis.saldo`: vigente de execucao menos o medido, #262) dividido pelo ritmo, que e' o medido de execucao
-    nas `MESES_RITMO` competencias fechadas (as anteriores ao mes de `hoje`) dividido por elas; os meses que faltam
-    contam no calendario a partir do fim de execucao vigente, e a fracao do ultimo mes arredonda para cima. Sem fim de
-    execucao, sem saldo ou sem medicao na janela, `dias` e' None e `motivo` diz por que. E' so' sugestao: a pessoa
-    confirma ou muda o numero antes de criar o oficio, e o envio segue o caminho de sempre."""
+    """Issue #292 (spec 2026-10-20 §4 item 3): os dias de prorrogacao que a carta de prazo sugere. Ritmo = medido de
+    execucao nas `MESES_RITMO` competencias fechadas (as anteriores ao mes de `hoje`) dividido por elas, arredondado
+    uma vez a centavos (e' esse o ritmo da tela e o da conta); meses que faltam = saldo a executar (o de
+    `paineis.saldo`: vigente de execucao menos o medido, #262) / ritmo; conclusao estimada = `hoje` mais esses meses
+    no calendario (a fracao do ultimo mes arredonda para cima); dias = conclusao estimada menos o fim de execucao
+    vigente. Sem fim de execucao, sem saldo, sem ritmo, com conclusao ate' o fim vigente ou acima do teto do pedido,
+    `dias` e' None e `motivo` diz por que. E' so' sugestao: a pessoa confirma ou muda o numero ao criar o oficio, e o
+    envio segue o caminho de sempre (carta, assinado, envio)."""
     from app import paineis   # paineis -> avisos; aqui dentro para nao virar ciclo de import
     hoje = hoje or tempo.hoje_local()
     sal = paineis.saldo(conn, contrato_id)
@@ -198,25 +201,35 @@ def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
         f"WHERE contrato_id=? AND tipo='execucao' AND estado IN ({','.join('?' * len(paineis.ESTADOS_VALIDOS))}) "
         f"AND competencia IN ({','.join('?' * len(meses))})", (contrato_id, *paineis.ESTADOS_VALIDOS, *meses)))
     saldo = sal["saldo_centavos"]
+    ritmo = dinheiro._aplicar(Decimal(medido) / MESES_RITMO, "round2") if medido > 0 else None
     out = {"saldo_centavos": saldo, "medido_periodo_centavos": medido, "meses": MESES_RITMO, "de": meses[0],
-           "ate": meses[-1], "ritmo_centavos": dinheiro._aplicar(Decimal(medido) / MESES_RITMO, "round2")
-           if medido > 0 else None, "execucao_fim": exe, "novo_fim": None, "dias": None, "motivo": None}
+           "ate": meses[-1], "ritmo_centavos": ritmo, "execucao_fim": exe, "novo_fim": None, "dias": None,
+           "motivo": None}
+    janela = f"de {_mm_aaaa(meses[0])} a {_mm_aaaa(meses[-1])}"
     if not exe_d:
         return {**out, "motivo": "Sem fim de execução no cadastro: não há de onde contar os dias."}
     if saldo <= 0:
         return {**out, "motivo": "Sem saldo a executar: não há dias a sugerir."}
     if medido <= 0:
-        return {**out, "motivo": f"Sem medição de execução de {_mm_aaaa(meses[0])} a {_mm_aaaa(meses[-1])}: "
-                                 "sem ritmo para sugerir os dias."}
-    faltam = Fraction(saldo * MESES_RITMO, medido)   # meses, exato (sem float)
-    if faltam > TETO_MESES:   # medicao irrisoria na janela: a data passaria do ano 9999 e a aba inteira cairia
-        return {**out, "motivo": "No ritmo dos últimos 6 meses o saldo levaria mais de 100 anos: "
-                                 "sem sugestão de dias."}
+        return {**out, "motivo": f"Sem medição de execução {janela}: sem ritmo para sugerir os dias."}
+    if not ritmo:
+        return {**out, "motivo": f"Ritmo {janela} abaixo de R$ 0,01/mês: sem ritmo para sugerir os dias."}
+    faltam = Fraction(saldo, ritmo)   # meses, exato (sem float), com o mesmo ritmo que a tela mostra
     inteiros = math.floor(faltam)
-    fim = _somar_meses(exe_d, inteiros)
-    extra = math.ceil((_somar_meses(exe_d, inteiros + 1) - fim).days * (faltam - inteiros))
-    novo = fim + datetime.timedelta(days=extra)
-    return {**out, "novo_fim": novo.isoformat(), "dias": (novo - exe_d).days}
+    try:
+        fim = _somar_meses(hoje, inteiros)
+        extra = math.ceil((_somar_meses(hoje, inteiros + 1) - fim).days * (faltam - inteiros))
+        conclusao = fim + datetime.timedelta(days=extra)
+    except (ValueError, OverflowError):   # saldo enorme num ritmo irrisorio: a data passaria do ano 9999
+        return {**out, "motivo": ACIMA_DO_TETO}
+    dias = (conclusao - exe_d).days
+    if dias <= 0:
+        return {**out, "novo_fim": conclusao.isoformat(),
+                "motivo": f"No ritmo {janela} a obra termina em {_br(conclusao.isoformat())}, até o fim da execução "
+                          f"({_br(exe)}): não há dias a pedir."}
+    if dias > TETO_DIAS:
+        return {**out, "novo_fim": conclusao.isoformat(), "motivo": ACIMA_DO_TETO}
+    return {**out, "novo_fim": conclusao.isoformat(), "dias": dias}
 
 
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
