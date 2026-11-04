@@ -23,7 +23,7 @@ function rotuloDataBase(mes: string, c: CicloApi) {
 }
 
 // `pleito`: o enviado mais recente do ciclo (o servidor diz quem ele e'); e' nele que se reitera ou reemite
-type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilamento_pendente" | "apostilado";
+type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilamento_pendente" | "reemitir" | "apostilado";
   pleito?: { id: number } | null };
 
 // issue #277: o que o botao faz no pleito vigente do ciclo (o servidor diz quais cabem, em `reemissoes_possiveis`)
@@ -78,6 +78,8 @@ const SITUACAO: Record<Ciclo["situacao"], { rotulo: string; classe: string; fort
   futuro: { rotulo: "ainda não abriu", classe: "" },
   pleito_pendente: { rotulo: "pleito não enviado", classe: "selo--atencao", forte: true },
   apostilamento_pendente: { rotulo: "apostilamento pendente", classe: "selo--atencao" },
+  // issue #273: aditivo de prazo ou valor assinado depois do ultimo pleito enviado; a vez e' da engenharia
+  reemitir: { rotulo: "cronograma de reajuste a reemitir", classe: "selo--atencao", forte: true },
   apostilado: { rotulo: "apostilado", classe: "selo--ok" },
 };
 
@@ -111,7 +113,7 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
   // so' o pleito vigente do ciclo (o enviado mais recente) leva o desfecho; os anteriores (reiterados ou
   // reemitidos) ficam com o envio e a cadeia, sem repetir a espera do ciclo (issue #277)
   if (!c || p.situacao !== "enviado" || (c.pleito && c.pleito.id !== p.id)) return neutro;
-  if (c.situacao === "apostilamento_pendente") {
+  if (c.situacao === "apostilamento_pendente" || c.situacao === "reemitir") {
     return { classe: "selo--atencao", partes: envio,
       texto: c.dias !== null && c.dias >= 0 ? `sem apostilamento há ${dias(c.dias)}` : "sem apostilamento ainda" };
   }
