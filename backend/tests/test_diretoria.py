@@ -358,6 +358,17 @@ def test_reajustes_esperando_apostilamento_por_obra(cenario, monkeypatch):
                                                                                ("Própria", "2025-01", 40)]
 
 
+def test_ciclo_a_reemitir_continua_esperando_apostilamento(cenario, monkeypatch):
+    # issue #273: o cronograma a reemitir nao tira o ciclo do bloco "reajustes esperando apostilamento"
+    c, ids = cenario
+    ciclos = {ids["propria"]: [{"situacao": "reemitir", "data_base_mes": "2025-01", "dias": 40,
+                                "aniversario": "2025-01-01", "pleito": {"enviado_em": "2026-05-01T10:00:00"},
+                                "apostilamento": None}]}
+    monkeypatch.setattr(diretoria.reajuste, "ciclos", lambda conn, cid, hoje=None: ciclos.get(cid, []))
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert (r["quantidade"], r["maior_dias"]) == (1, 40)
+
+
 def test_a_receber_total_por_obra_e_lista_na_cota(cenario):
     c, ids = cenario
     c.execute("UPDATE medicoes SET valor_protocolado_centavos=800001 WHERE contrato_id=? AND numero=14", (ids["propria"],))

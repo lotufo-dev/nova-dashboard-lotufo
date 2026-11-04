@@ -90,6 +90,40 @@ def test_reajuste_da_obra_traz_as_competencias_apostiladas_e_o_termo_do_pleito(a
         [{"instrumento_id": iid, "data_base_mes": "2024-06"}]
 
 
+def test_reajuste_da_obra_traz_o_estado_de_cada_competencia_e_o_ciclo_a_reemitir(api, monkeypatch):
+    """Issue #273: por data-base e ciclo, as competencias com o estado e o valor de cada fonte; aditivo de prazo
+    assinado depois do pleito poe o ciclo em `reemitir`."""
+    import datetime
+
+    from app import tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 9, 10))     # ciclo 2026 da base 2024-06
+    cl, cid, _ = api
+    assert cl.get(f"/api/contratos/{cid}/reajuste").json()["competencias_por_ciclo"] == []
+    c = db.get_conn()
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+              "enviado_em) VALUES (?, 'reajuste', 'cadastro', '2024-06', 2026, 'CT-1-LT-2026', 'enviado', '2026-06-10')",
+              (cid,))
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura) VALUES (?, 'prazo', 'assinado', "
+              "'2026-08-01')", (cid,))
+    c.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, valor_previsto_centavos, "
+              "origem) VALUES (?, '2024-06', 2026, '2026-07', 10001, 'manual')", (cid,))
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 1, 'reajuste', '2026-07', 'planilha_enviada', 10003)", (cid,))
+    c.commit(); c.close()
+    r = cl.get(f"/api/contratos/{cid}/reajuste").json()
+    assert r["ciclos"][0]["situacao"] == "reemitir"
+    assert r["ciclos"][0]["aditivo"]["data_assinatura"] == "2026-08-01"
+    [grupo] = r["competencias_por_ciclo"]
+    assert (grupo["data_base_mes"], grupo["ciclo"]) == ("2024-06", 2026)
+    [x] = grupo["competencias"]
+    assert {k: x[k] for k in ("competencia", "estado", "previsto_centavos", "previsto_origem", "pedido_centavos",
+                              "aprovado_centavos", "apostilada", "apostilado_centavos", "faturado_centavos",
+                              "recebida_em", "medicao_numero")} == {
+        "competencia": "2026-07", "estado": "pedida", "previsto_centavos": 10001, "previsto_origem": "manual",
+        "pedido_centavos": 10003, "aprovado_centavos": None, "apostilada": False, "apostilado_centavos": None,
+        "faturado_centavos": None, "recebida_em": None, "medicao_numero": 1}
+
+
 def test_pecas_do_orgao_entram_como_anexo_pela_api(api):
     """Issue #50: a API aceita as pecas que o orgao pede no pleito de reajuste (falencia, contrato social, ...)."""
     cl, cid, _ = api
