@@ -91,7 +91,9 @@ def login(dados: LoginIn, request: Request, response: Response, conn: sqlite3.Co
     # evento que a explica, nem evento de login sem sessao.
     with db.mutacao(conn):
         token, csrf = auth.criar_sessao(conn, u["id"])
-        auditoria.registrar(conn, u["id"], "auth.login", depois=acesso)
+        # Gate Sol S2: o perfil de quem entrou, so' no login certo (no recusado diria que a conta existe); o alerta de
+        # origem nova de administrador vale por ele, e nao pelo perfil de hoje
+        auditoria.registrar(conn, u["id"], "auth.login", depois={**acesso, "perfil": u["perfil"]})
     # secure=False em dev (proxy HTTP do Vite) e em producao HTTP na rede interna
     # (DASH_SEM_TLS=1, decisao de 2026-09-02: sem certificado a instalar em cada
     # maquina). O navegador rejeita cookie "secure" fora de HTTPS.

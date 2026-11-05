@@ -40,8 +40,10 @@ def saude_do_backup(usuario: dict = Depends(exigir("administrar", com_csrf=False
 def saude(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
           conn: sqlite3.Connection = Depends(conexao)):
     """Administracao > Saude: a situacao do monitor do SIGA (issue #330), ao lado da do RM e do backup, e o bloco
-    Seguranca (issue #418): `[{nivel, mensagem, data}]`, montado por `app/seguranca.py`."""
-    return {"siga": siga.saude(conn), "seguranca": seguranca.itens(conn)}
+    Seguranca (issue #418): `[{nivel, mensagem, data}]`, montado por `app/seguranca.py`, com no maximo
+    `seguranca.ITENS_NA_TELA` itens; `seguranca_fora` diz quantos ficaram de fora."""
+    itens, fora = seguranca.bloco(conn)
+    return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora}
 
 
 @router.get("/contas-microsoft")

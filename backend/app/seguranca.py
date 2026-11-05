@@ -18,6 +18,8 @@ ACESSOS_NA_TELA = 10
 JANELA_ORIGEM = datetime.timedelta(days=30)
 # Quanto tempo o item fica no bloco depois do login que o criou
 DURACAO_ITEM = datetime.timedelta(days=7)
+# Teto da lista do bloco; o resto vira contagem (`bloco`)
+ITENS_NA_TELA = 20
 
 _UTC = datetime.timezone.utc
 # A primeira marca que aparece decide: Edge e Opera tambem dizem "Chrome/", Chrome tambem diz "Safari/"
@@ -79,14 +81,17 @@ def _carimbo(dt: datetime.datetime) -> str:
 
 def _origem_nova(conn, agora: datetime.datetime) -> list[dict]:
     """Login certo de administrador, nos ultimos `DURACAO_ITEM`, de uma origem que nao aparece nos logins certos
-    desse mesmo administrador nos `JANELA_ORIGEM` anteriores. O perfil e' o de hoje: quem deixou de ser administrador
-    sai do bloco. Login sem origem (antes do #418) nao gera item nem conta como origem vista."""
+    dessa mesma pessoa nos `JANELA_ORIGEM` anteriores. Gate Sol S2: administrador e' o perfil NO MOMENTO do login,
+    gravado no evento (quem e' promovido depois nao vira "Administrador entrou"; quem e' rebaixado depois nao esconde
+    o acesso); login gravado antes disso cai no perfil de hoje. A origem vista conta qualquer login certo da pessoa,
+    tambem os de antes de ela ser administradora. Login sem origem (antes do #418) nao gera item nem conta como vista."""
     desde = agora - DURACAO_ITEM - JANELA_ORIGEM
     ultimo: dict[tuple[int, str], datetime.datetime] = {}
     out = []
     for r in conn.execute(
-            "SELECT a.usuario_id, a.criado_em, json_extract(a.depois, '$.origem') AS origem, u.nome FROM audit_log a "
-            "JOIN usuarios u ON u.id = a.usuario_id WHERE a.acao='auth.login' AND u.perfil='admin' "
+            "SELECT a.usuario_id, a.criado_em, json_extract(a.depois, '$.origem') AS origem, "
+            "COALESCE(json_extract(a.depois, '$.perfil'), u.perfil) AS perfil, u.nome FROM audit_log a "
+            "JOIN usuarios u ON u.id = a.usuario_id WHERE a.acao='auth.login' "
             "AND a.criado_em >= ? AND a.criado_em <= ? ORDER BY a.id", (_carimbo(desde), _carimbo(agora))):
         if r["origem"] is None:
             continue
@@ -94,13 +99,21 @@ def _origem_nova(conn, agora: datetime.datetime) -> list[dict]:
         chave = (r["usuario_id"], r["origem"])
         anterior = ultimo.get(chave)
         ultimo[chave] = quando
-        if quando > agora - DURACAO_ITEM and (anterior is None or quando - anterior > JANELA_ORIGEM):
+        if (r["perfil"] == "admin" and quando > agora - DURACAO_ITEM
+                and (anterior is None or quando - anterior > JANELA_ORIGEM)):
             out.append({"nivel": "atencao", "data": tempo.iso_utc(r["criado_em"]),
                         "mensagem": f"Administrador {r['nome']} entrou de uma origem nova ({r['origem'] or 'desconhecida'})"})
     return out[::-1]
 
 
 def itens(conn, agora: datetime.datetime | None = None) -> list[dict]:
-    """Bloco Seguranca de Administracao > Saude: `[{nivel, mensagem, data}]`, do mais novo ao mais antigo."""
+    """Bloco Seguranca de Administracao > Saude: `[{nivel, mensagem, data}]`, do mais novo ao mais antigo (empate
+    mantem a ordem de gravacao, do mais novo ao mais antigo)."""
     agora = agora or tempo.agora_utc()
-    return _origem_nova(conn, agora)
+    return sorted(_origem_nova(conn, agora), key=lambda i: i["data"], reverse=True)
+
+
+def bloco(conn, agora: datetime.datetime | None = None) -> tuple[list[dict], int]:
+    """Gate Sol S3: os `ITENS_NA_TELA` itens mais novos e quantos ficaram de fora."""
+    todos = itens(conn, agora)
+    return todos[:ITENS_NA_TELA], max(0, len(todos) - ITENS_NA_TELA)

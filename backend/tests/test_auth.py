@@ -576,14 +576,16 @@ def test_login_grava_origem_e_navegador_no_evento(client):
     r = _de(client, "10.0.0.21").post("/api/auth/login", json={"email": "leo@lotufo.com", "senha": "senha-forte-123"},
                                        headers={"User-Agent": CHROME_WINDOWS})
     assert r.status_code == 200, r.text
-    # a cadeia continua integra: o evento passa pelo registrar, so' com o `depois` preenchido
-    assert _ultimo("auth.login") == (uid, {"origem": "10.0.0.21", "navegador": CHROME_WINDOWS}, True)
+    # a cadeia continua integra: o evento passa pelo registrar, so' com o `depois` preenchido. Gate Sol S2: o perfil
+    # de quem entrou vai junto (o alerta de origem nova vale pelo perfil no momento do login, nao pelo de hoje)
+    assert _ultimo("auth.login") == (uid, {"origem": "10.0.0.21", "navegador": CHROME_WINDOWS, "perfil": "admin"}, True)
 
 def test_login_falho_grava_origem_e_navegador_junto_do_email(client):
     _seed()
     r = _de(client, "10.0.0.22").post("/api/auth/login", json={"email": "leo@lotufo.com", "senha": "errada"},
                                        headers={"User-Agent": CHROME_WINDOWS})
     assert r.status_code == 401
+    # sem perfil no login falho: diria que a conta existe (e qual o perfil dela) a quem le a auditoria do e-mail digitado
     assert _ultimo("auth.login_falha") == (None, {"email": "leo@lotufo.com", "origem": "10.0.0.22",
                                                   "navegador": CHROME_WINDOWS}, True)
 

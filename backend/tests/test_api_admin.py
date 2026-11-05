@@ -212,3 +212,59 @@ def test_seguranca_negada_a_engenharia_e_diretoria(client_admin):
         r = c.post("/api/auth/login", json={"email": f"{perfil}@lotufo.com", "senha": "senha-forte-123"})
         c.cookies.set("sessao", r.cookies["sessao"])
         assert c.get("/api/admin/saude").status_code == 403
+
+
+def _novo(client, nome, email, perfil):
+    r = client.post("/api/admin/usuarios", json={"nome": nome, "email": email, "senha": "senha-forte-123", "perfil": perfil})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_seguranca_vale_o_perfil_no_momento_do_login(client_admin):
+    # Gate Sol S2: promovida depois do login nao vira "Administrador entrou"; rebaixada depois continua avisando
+    promovida = _novo(client_admin, "Promovida", "promovida@lotufo.com", "engenharia")
+    rebaixada = _novo(client_admin, "Rebaixada", "rebaixada@lotufo.com", "admin")
+    _login_de(client_admin, "10.0.0.61", "promovida@lotufo.com")
+    _login_de(client_admin, "10.0.0.62", "rebaixada@lotufo.com")
+    assert client_admin.put(f"/api/admin/usuarios/{promovida}", json={"perfil": "admin"}).status_code == 200
+    assert client_admin.put(f"/api/admin/usuarios/{rebaixada}", json={"perfil": "engenharia"}).status_code == 200
+    assert [i["mensagem"] for i in _seguranca(client_admin)] == [
+        "Administrador Rebaixada entrou de uma origem nova (10.0.0.62)",
+        "Administrador Admin entrou de uma origem nova (testclient)"]
+    # ja' administradora: a origem que ela usou como engenharia nos 30 dias anteriores conta como vista; outra, nao
+    _login_de(client_admin, "10.0.0.61", "promovida@lotufo.com")
+    _login_de(client_admin, "10.0.0.63", "promovida@lotufo.com")
+    assert [i["mensagem"] for i in _seguranca(client_admin)][0] == "Administrador Promovida entrou de uma origem nova (10.0.0.63)"
+    assert len(_seguranca(client_admin)) == 3
+
+
+def test_seguranca_login_sem_perfil_gravado_usa_o_perfil_de_hoje(client_admin):
+    # login gravado antes do perfil ir para o evento: vale o perfil atual da pessoa
+    from app import auditoria
+    eng = _novo(client_admin, "Engenheira da obra", "eng@lotufo.com", "engenharia")
+    admin_id = client_admin.get("/api/auth/eu").json()["id"]
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        auditoria.registrar(conn, admin_id, "auth.login", depois={"origem": "10.0.0.64", "navegador": None})
+        auditoria.registrar(conn, eng, "auth.login", depois={"origem": "10.0.0.65", "navegador": None})
+    conn.close()
+    assert [i["mensagem"] for i in _seguranca(client_admin)] == [
+        "Administrador Admin entrou de uma origem nova (10.0.0.64)",
+        "Administrador Admin entrou de uma origem nova (testclient)"]
+
+
+def test_seguranca_devolve_no_maximo_20_e_diz_quantos_ficaram_de_fora(client_admin):
+    # Gate Sol S3: a lista tem teto; o que passa dele vira contagem
+    from app import auditoria, seguranca
+    assert client_admin.get("/api/admin/saude").json()["seguranca_fora"] == 0
+    admin_id = client_admin.get("/api/auth/eu").json()["id"]
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        for i in range(25):
+            auditoria.registrar(conn, admin_id, "auth.login",
+                                depois={"origem": f"10.0.3.{i}", "navegador": None, "perfil": "admin"})
+    conn.close()
+    corpo = client_admin.get("/api/admin/saude").json()
+    assert seguranca.ITENS_NA_TELA == 20
+    assert (len(corpo["seguranca"]), corpo["seguranca_fora"]) == (20, 6)       # 25 + o login do client_admin
+    assert corpo["seguranca"][0]["mensagem"].endswith("(10.0.3.24)")            # do mais novo ao mais antigo
