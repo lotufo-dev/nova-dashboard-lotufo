@@ -533,7 +533,7 @@ def situacao(local: Path, externa_configurada: bool, agora: datetime.datetime) -
     arq_erro_em, arq_erro = _erro_dos_arquivos(e["ultima_copia_arquivos_erro"])
     arq_ext_erro_em, arq_ext_erro = _erro_dos_arquivos(e["ultima_copia_externa_arquivos_erro"])
     from app import copia_dono  # import tardio: copia_dono importa este modulo
-    dono_em, dono_erro = _erro_para_tela(e["ultima_copia_dono_erro"], "não foi possível gerar a cópia do dono")
+    dono_em, dono_erro = _erro_dos_arquivos(e["ultima_copia_dono_erro"])  # frase nossa (_motivo), sem caminho
     dono_ultima = copia_dono.ultima_copia(local)
     dono_ok = copia_dono.configurada(local.parent.parent)  # backups -> dados -> <raiz>
     return {

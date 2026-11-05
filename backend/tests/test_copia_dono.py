@@ -138,3 +138,40 @@ def test_atrasada_acima_de_8_dias(raiz):
     assert copia_dono.atrasada(_pasta(raiz), agora) is False
     assert copia_dono.atrasada(_pasta(raiz), agora + datetime.timedelta(days=9)) is True
     assert backup.situacao(_pasta(raiz), False, agora)["ultima_copia_dono"]
+
+
+@pytest.mark.parametrize("codificacao", ["utf-8-sig", "utf-16"])
+def test_chave_salva_pelo_powershell_com_bom_ou_utf16_funciona(raiz, dono, codificacao):
+    # `>`/Out-File do PowerShell 5.1 grava UTF-16LE; Set-Content -Encoding UTF8 grava BOM
+    (raiz / "segredos" / "chave-publica-dono.txt").write_bytes(f"{dono.to_public()}\r\n".encode(codificacao))
+    assert copia_dono.configurada(raiz) is True
+    assert _abrir(copia_dono.gerar(raiz, _pasta(raiz)), dono).getnames()
+
+
+def test_arquivo_da_chave_ilegivel_nao_derruba_a_situacao_do_backup(raiz):
+    (raiz / "segredos" / "chave-publica-dono.txt").write_bytes(b"\xff\x00\xc3\x28\x80")
+    assert backup.situacao(_pasta(raiz), False, tempo.agora_utc())["copia_dono_configurada"] is True
+    with pytest.raises(copia_dono.CopiaDonoErro, match="não foi possível ler"):
+        copia_dono.gerar(raiz, _pasta(raiz))
+
+
+def test_rodada_semanal_refaz_a_conferencia_dentro_do_lock(raiz):
+    copia_dono.gerar(raiz, _pasta(raiz))  # o botao acabou de gerar
+    antes = copia_dono.copias(_pasta(raiz))
+    assert copia_dono.gerar(raiz, _pasta(raiz), so_se_vencida=True) is None
+    assert copia_dono.copias(_pasta(raiz)) == antes
+
+
+def test_chave_privada_na_pasta_de_segredos_recusa_o_pacote(raiz, dono):
+    (raiz / "segredos" / "chave-privada-dono.txt").write_text(f"{dono}\n", encoding="utf-8")
+    with pytest.raises(copia_dono.CopiaDonoErro, match="chave privada"):
+        copia_dono.gerar(raiz, _pasta(raiz))
+    assert not (_pasta(raiz) / "dono").exists()
+
+
+def test_erro_de_chave_privada_chega_inteiro_a_situacao(raiz, dono):
+    (raiz / "segredos" / "chave-publica-dono.txt").write_text(f"{dono}\n", encoding="utf-8")
+    with pytest.raises(copia_dono.CopiaDonoErro):
+        copia_dono.gerar_e_registrar(raiz, _pasta(raiz))
+    s = backup.situacao(_pasta(raiz), False, tempo.agora_utc())
+    assert "chave privada" in s["ultima_copia_dono_erro"] and s["ultima_copia_dono_erro_em"]

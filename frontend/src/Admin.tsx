@@ -284,9 +284,8 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
   return (
     <div className="cartao__corpo pilha pilha--curta">
       <p>
-        Cópia do dono:{" "}
         {!b.copia_dono_configurada ? "Cópia do dono não configurada"
-          : b.ultima_copia_dono ? fmtDataHora(b.ultima_copia_dono) : "—"}
+          : `Cópia do dono: ${b.ultima_copia_dono ? fmtDataHora(b.ultima_copia_dono) : "—"}`}
       </p>
       {b.copia_dono_configurada && b.copia_dono_atrasada && (
         <CaixaAviso nivel="critico">

@@ -150,15 +150,15 @@ def test_copia_dono_botao_so_admin_e_sem_chave_nao_gera(client_admin):
     assert client_admin.post("/api/admin/copia-dono").status_code == 403
 
 
-def test_copia_dono_botao_gera_e_a_saude_mostra_a_data(client_admin):
+def test_copia_dono_botao_gera_e_a_saude_mostra_a_data(client_admin, tmp_path, monkeypatch):
     import pytest
     pytest.importorskip("pyrage")
     from pyrage import x25519
     from app import backup, db
-    raiz = backup.pasta_local().parent.parent
-    (raiz / "segredos").mkdir(parents=True, exist_ok=True)
-    (raiz / "segredos" / "chave-publica-dono.txt").write_text(str(x25519.Identity.generate().to_public()),
-                                                              encoding="utf-8")
+    chave = tmp_path / "chave-publica-dono.txt"  # fora de pastas compartilhadas entre testes
+    chave.write_text(str(x25519.Identity.generate().to_public()), encoding="utf-8")
+    monkeypatch.setenv("DASH_CHAVE_PUBLICA_DONO", str(chave))
+    monkeypatch.delenv("DASH_CADASTRO_DIR", raising=False)  # nunca empacota o cadastro real
     backup.criar_snapshot(db.db_path(), backup.pasta_local())
     r = client_admin.post("/api/admin/copia-dono")
     assert r.status_code == 200, r.text

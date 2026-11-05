@@ -52,22 +52,36 @@ def pasta_cadastro(raiz: Path) -> Path:
     return Path(env) if env else raiz / "cadastro"
 
 
+def _texto_da_chave(arquivo: Path) -> str:
+    """Le o arquivo da chave em UTF-8 (com ou sem BOM) ou UTF-16 (o `>` e o `Out-File` do PowerShell 5.1
+    gravam UTF-16LE; o `Set-Content -Encoding UTF8` grava BOM). Texto ilegivel: UnicodeDecodeError."""
+    bruto = arquivo.read_bytes()
+    if bruto.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return bruto.decode("utf-16")
+    try:
+        return bruto.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return bruto.decode("utf-16")
+
+
 def carregar_destinatario(raiz: Path):
     """O destinatario age (chave publica). Sem arquivo ou vazio: NaoConfigurada.
     Chave privada no lugar da publica e' recusada: ela nunca deve estar no servidor."""
     arquivo = arquivo_chave_publica(raiz)
     try:
-        texto = arquivo.read_text(encoding="utf-8")
+        texto = _texto_da_chave(arquivo)
     except FileNotFoundError:
         raise NaoConfigurada(NAO_CONFIGURADA) from None
+    except UnicodeError:
+        raise CopiaDonoErro("não foi possível ler o arquivo da chave pública (grave-o em UTF-8)") from None
     if "AGE-SECRET-KEY" in texto.upper():
         raise CopiaDonoErro("o arquivo da chave contém uma chave privada; coloque só a chave pública "
                             "(age1...) e apague a privada do servidor")
     linhas = [l.strip() for l in texto.splitlines() if l.strip() and not l.lstrip().startswith("#")]
     if not linhas:
         raise NaoConfigurada(NAO_CONFIGURADA)
+    from pyrage import x25519
     try:
-        from pyrage import x25519
         return x25519.Recipient.from_str(linhas[0])
     except Exception:
         raise CopiaDonoErro("a chave pública do dono é inválida (esperado age1...)") from None
@@ -76,9 +90,9 @@ def carregar_destinatario(raiz: Path):
 def configurada(raiz: Path) -> bool:
     """Ha' chave publica no arquivo (sem validar o formato: isso e' da geracao, que acusa o erro)."""
     try:
-        texto = arquivo_chave_publica(raiz).read_text(encoding="utf-8")
-    except OSError:
-        return False
+        texto = _texto_da_chave(arquivo_chave_publica(raiz))
+    except (OSError, ValueError):
+        return arquivo_chave_publica(raiz).exists()  # ilegivel: a geracao acusa o erro
     return any(l.strip() and not l.lstrip().startswith("#") for l in texto.splitlines())
 
 
@@ -109,15 +123,15 @@ def atrasada(pasta_backups: Path, agora: datetime.datetime) -> bool:
     return ultima is None or agora - ultima > ATRASO_MAX
 
 
-def _ultimo_snapshot_valido(pasta_backups: Path) -> Path:
+def _snapshots_validos(pasta_backups: Path):
+    """Do mais novo ao mais antigo, so' os que passam no ensaio de restauracao."""
     horarios = sorted((a for a in pasta_backups.glob(backup.PADRAO) if backup._NOME.match(a.name)), reverse=True)
     for a in horarios:
         try:
             backup.verificar_snapshot(a)
-            return a
-        except backup.SnapshotInvalido:
+        except (backup.SnapshotInvalido, FileNotFoundError):
             continue
-    raise CopiaDonoErro("nenhum snapshot válido para copiar")
+        yield a
 
 
 def _sem_git(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
@@ -126,6 +140,11 @@ def _sem_git(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
 
 def montar_tar(snapshot: Path, segredos: Path, cadastro: Path) -> bytes:
     """O `.tar` em memoria: banco/<snapshot>, segredos/ e cadastro/ (sem a pasta .git)."""
+    if segredos.is_dir():
+        for arq in segredos.rglob("*"):
+            if arq.is_file() and b"AGE-SECRET-KEY" in arq.read_bytes().upper():
+                raise CopiaDonoErro("há uma chave privada na pasta de segredos do servidor; "
+                                    "apague-a e deixe só a chave pública")
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tar:
         tar.add(snapshot, arcname=f"banco/{snapshot.name}")
@@ -135,50 +154,74 @@ def montar_tar(snapshot: Path, segredos: Path, cadastro: Path) -> bytes:
     return buf.getvalue()
 
 
-def gerar(raiz: Path, pasta_backups: Path) -> Path:
-    """Gera a copia cifrada e devolve o caminho. Levanta NaoConfigurada sem chave publica."""
+def _vencida(pasta_backups: Path) -> bool:
+    ultima = ultima_copia(pasta_backups)
+    return ultima is None or tempo.agora_utc() - ultima >= INTERVALO
+
+
+def gerar(raiz: Path, pasta_backups: Path, so_se_vencida: bool = False) -> Path | None:
+    """Gera a copia cifrada e devolve o caminho. Levanta NaoConfigurada sem chave publica.
+    `so_se_vencida` (rodada semanal): refaz a conferencia dos 7 dias DENTRO do lock, para que o
+    botao e a rodada ao mesmo tempo nao gerem duas copias; devolve None se outra acabou de gerar."""
     with _lock:
+        if so_se_vencida and not _vencida(pasta_backups):
+            return None
         destinatario = carregar_destinatario(raiz)
         import pyrage
-        snapshot = _ultimo_snapshot_valido(pasta_backups)
-        cifrado = pyrage.encrypt(montar_tar(snapshot, raiz / "segredos", pasta_cadastro(raiz)), [destinatario])
+        tar = None
+        for snapshot in _snapshots_validos(pasta_backups):
+            try:
+                tar = montar_tar(snapshot, raiz / "segredos", pasta_cadastro(raiz))
+                break
+            except FileNotFoundError:
+                if snapshot.exists():
+                    raise  # o que faltou foi outro arquivo, nao o snapshot rotacionado pelo backup
+        if tar is None:
+            raise CopiaDonoErro("nenhum snapshot válido para copiar")
+        cifrado = pyrage.encrypt(tar, [destinatario])
+        del tar
         pasta = pasta_dono(pasta_backups)
         pasta.mkdir(parents=True, exist_ok=True)
         carimbo = f"{tempo.para_local(tempo.agora_utc()):%Y%m%d-%H%M%S}"
         destino = pasta / f"dashboard-dono-{carimbo}.tar.age"
+        if destino.exists():
+            raise CopiaDonoErro("já existe uma cópia deste mesmo segundo; tente de novo")
+        esperado = hashlib.sha256(cifrado).hexdigest()
         parcial = pasta / f"{destino.name}.tmp"
         try:
             with open(parcial, "wb") as f:
                 f.write(cifrado)
                 f.flush()
                 os.fsync(f.fileno())
-            if backup._sha256(parcial) != hashlib.sha256(cifrado).hexdigest():
+            if backup._sha256(parcial) != esperado:
                 raise CopiaDonoErro("a cópia gravada não confere com o que foi cifrado")
+            # o .sha256 antes do rename: queda no meio nunca deixa copia sem checksum
+            (pasta / f"{destino.name}.sha256").write_text(f"{esperado}  {destino.name}\n", encoding="utf-8")
             parcial.replace(destino)
         except BaseException:
             parcial.unlink(missing_ok=True)
+            (pasta / f"{destino.name}.sha256").unlink(missing_ok=True)
             raise
-        (pasta / f"{destino.name}.sha256").write_text(f"{backup._sha256(destino)}  {destino.name}\n",
-                                                      encoding="utf-8")
         for velha in copias(pasta_backups)[:-MANTER]:
             velha.unlink(missing_ok=True)
             (pasta / f"{velha.name}.sha256").unlink(missing_ok=True)
         return destino
 
 
-def gerar_e_registrar(raiz: Path, pasta_backups: Path) -> Path:
+def gerar_e_registrar(raiz: Path, pasta_backups: Path, so_se_vencida: bool = False) -> Path | None:
     """`gerar` + `backup.ESTADO` (o que o health e a Saude mostram)."""
     agora = tempo.para_local(tempo.agora_utc()).isoformat(timespec="seconds")
     try:
-        destino = gerar(raiz, pasta_backups)
+        destino = gerar(raiz, pasta_backups, so_se_vencida)
     except NaoConfigurada:
         raise
     except Exception as e:
         backup.ESTADO["ultima_copia_dono_erro"] = f"{agora}: {_motivo(e)}"
         log.exception("copia do dono falhou")
         raise
-    backup.ESTADO["ultima_copia_dono"] = agora
-    backup.ESTADO["ultima_copia_dono_erro"] = None
+    if destino is not None:
+        backup.ESTADO["ultima_copia_dono"] = agora
+        backup.ESTADO["ultima_copia_dono_erro"] = None
     return destino
 
 
@@ -194,7 +237,7 @@ def rodada_semanal(raiz: Path, pasta_backups: Path) -> None:
     if ultima is not None and tempo.agora_utc() - ultima < INTERVALO:
         return
     try:
-        gerar_e_registrar(raiz, pasta_backups)
+        gerar_e_registrar(raiz, pasta_backups, so_se_vencida=True)
     except NaoConfigurada:
         return
     except Exception:
