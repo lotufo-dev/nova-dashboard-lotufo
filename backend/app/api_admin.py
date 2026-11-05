@@ -1,7 +1,7 @@
 import datetime
 import sqlite3
 from fastapi import APIRouter, Depends, Query
-from app import auditoria, backup, correio, siga, tempo
+from app import auditoria, backup, correio, instalacao, siga, tempo
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -32,8 +32,10 @@ def listar_auditoria(limite: int = Query(default=100, ge=1, le=500),
 @router.get("/backup")
 def saude_do_backup(usuario: dict = Depends(exigir("administrar", com_csrf=False))):
     """Administracao > Saude (issue #31): ultimo backup, quantos estao guardados, ultimo erro
-    e se esta atrasado (mais de 2 h sem snapshot). So' admin: traz caminhos e erros do servidor."""
-    return backup.situacao(backup.pasta_local(), backup.pasta_externa() is not None, tempo.agora_utc())
+    e se esta atrasado (mais de 2 h sem snapshot). So' admin: traz caminhos e erros do servidor. Na instalacao nao
+    autorizada a copia externa nao roda (issue #417, main.py): a tela mostra o estado efetivo, nao o configurado."""
+    externa = backup.pasta_externa() is not None and instalacao.ligada()
+    return backup.situacao(backup.pasta_local(), externa, tempo.agora_utc())
 
 
 @router.get("/saude")

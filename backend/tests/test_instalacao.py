@@ -66,6 +66,43 @@ def test_nome_da_maquina_vem_do_sistema_e_nao_da_variavel(monkeypatch):
     assert instalacao.maquina_atual() not in ("", "NOME-FALSO-DA-COPIA")
 
 
+class _Kernel32Falso:
+    """No lugar do kernel32 do Windows: devolve o nome pela API, como o GetComputerNameW."""
+
+    def __init__(self, nome, ok=True):
+        self.nome, self.ok, self.chamadas = nome, ok, 0
+
+    def GetComputerNameW(self, buffer, tamanho):
+        self.chamadas += 1
+        if not self.ok:
+            return 0
+        buffer.value = self.nome
+        return 1
+
+
+def _windows_falso(monkeypatch, kernel32):
+    import ctypes
+    import sys
+    from types import SimpleNamespace
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(kernel32=kernel32), raising=False)
+
+
+def test_no_windows_o_nome_vem_da_api_e_nao_da_variavel(monkeypatch):
+    kernel32 = _Kernel32Falso("MAQUINA-DA-API")
+    _windows_falso(monkeypatch, kernel32)
+    monkeypatch.setenv("COMPUTERNAME", "NOME-FALSO-DA-COPIA")
+    assert instalacao.maquina_atual() == "MAQUINA-DA-API"
+    assert kernel32.chamadas == 1
+
+
+def test_no_windows_sem_resposta_da_api_cai_no_nome_de_rede(monkeypatch):
+    import platform
+    _windows_falso(monkeypatch, _Kernel32Falso("", ok=False))
+    monkeypatch.setenv("COMPUTERNAME", "NOME-FALSO-DA-COPIA")
+    assert instalacao.maquina_atual() == platform.node()
+
+
 @pytest.mark.instalacao_real
 def test_sem_arquivo_e_copia_por_ausencia(chave, ambiente):
     assert instalacao.verificar() == {"instalacao": "nao-autorizada", "motivo": "ausente"}
@@ -240,6 +277,15 @@ def _rm_simulado(tmp_path, monkeypatch):
     (pasta / f"{rm.CONSULTA_NF}.json").write_text("[]", encoding="utf-8")
     (pasta / f"{rm.CONSULTA_BAIXA}.json").write_text("[]", encoding="utf-8")
     monkeypatch.setenv("DASH_RM_SIMULADOR", str(pasta))
+
+
+def test_saude_mostra_a_copia_externa_desligada_no_modo_copia(client_admin, monkeypatch, tmp_path):
+    """Gate Sol da PR #437: na copia a copia externa nao roda (main.py); a Saude nao pode dize-la configurada."""
+    monkeypatch.setenv("DASH_BACKUP_EXTERNO", str(tmp_path / "externo"))
+    monkeypatch.setattr(instalacao, "_estado", {"instalacao": "autorizada", "motivo": None})
+    assert client_admin.get("/api/admin/backup").json()["copia_externa_configurada"] is True
+    monkeypatch.setattr(instalacao, "_estado", COPIA)
+    assert client_admin.get("/api/admin/backup").json()["copia_externa_configurada"] is False
 
 
 def test_sincronizar_agora_recusa_no_modo_copia(client_admin, monkeypatch, tmp_path):
