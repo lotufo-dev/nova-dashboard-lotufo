@@ -107,8 +107,8 @@ def test_saude_traz_a_ultima_leitura_os_processos_e_o_atraso_do_monitor_do_siga(
     UTC = datetime.timezone.utc
     agora = datetime.datetime(2026, 10, 28, 16, 0, tzinfo=UTC)          # quarta, 12h00 em Cuiaba
     monkeypatch.setattr(tempo, "agora_utc", lambda: agora)
-    assert client_admin.get("/api/admin/saude").json() == {
-        "siga": {"ultima_leitura": None, "atrasado": False, "processos": 0}}
+    assert client_admin.get("/api/admin/saude").json()["siga"] == {
+        "ultima_leitura": None, "atrasado": False, "processos": 0}
     conn = db.get_conn()
     with db.mutacao(conn):
         for numero, lido in (("SINFRA-PRO-2026/00001", "2026-10-28 14:00:00"), ("SINFRA-PRO-2026/00002", "2026-10-28 15:15:00")):
@@ -117,7 +117,7 @@ def test_saude_traz_a_ultima_leitura_os_processos_e_o_atraso_do_monitor_do_siga(
     conn.close()
     r = client_admin.get("/api/admin/saude")
     assert r.status_code == 200, r.text
-    assert r.json() == {"siga": {"ultima_leitura": "2026-10-28T15:15:00+00:00", "atrasado": False, "processos": 2}}
+    assert r.json()["siga"] == {"ultima_leitura": "2026-10-28T15:15:00+00:00", "atrasado": False, "processos": 2}
     monkeypatch.setattr(tempo, "agora_utc", lambda: agora + datetime.timedelta(hours=2))   # 14h00: 2h45 sem leitura
     assert client_admin.get("/api/admin/saude").json()["siga"]["atrasado"] is True
 
@@ -130,3 +130,85 @@ def test_saude_so_para_admin(client_admin):
     client_admin.cookies.set("sessao", r.cookies["sessao"])
     client_admin.headers["X-CSRF-Token"] = r.json()["csrf"]
     assert client_admin.get("/api/admin/saude").status_code == 403
+
+
+# --- #418: bloco Seguranca da Saude: administrador entrando de uma origem nova -------------------------
+
+from fastapi.testclient import TestClient
+
+
+def _login_de(client, ip, email="admin@lotufo.com", senha="senha-forte-123"):
+    r = TestClient(client.app, client=(ip, 50000)).post("/api/auth/login", json={"email": email, "senha": senha})
+    assert r.status_code == 200, r.text
+
+
+def _seguranca(client):
+    r = client.get("/api/admin/saude")
+    assert r.status_code == 200, r.text
+    return r.json()["seguranca"]
+
+
+def _recuar_logins(dias):
+    """Os logins ja' gravados passam a ter acontecido `dias` atras (o registrar carimba com o relogio do banco)."""
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        conn.execute("UPDATE audit_log SET criado_em=datetime(criado_em, ?) WHERE acao='auth.login'", (f"-{dias} days",))
+    conn.close()
+
+
+def test_seguranca_avisa_administrador_que_entra_de_origem_nova(client_admin):
+    # o login do client_admin e' o primeiro desse administrador: a origem dele e' nova
+    itens = _seguranca(client_admin)
+    assert [(i["nivel"], i["mensagem"]) for i in itens] == [
+        ("atencao", "Administrador Admin entrou de uma origem nova (testclient)")]
+    assert itens[0]["data"].endswith("+00:00")
+    _login_de(client_admin, "10.0.0.51")
+    _login_de(client_admin, "10.0.0.51")                    # a segunda vez a origem ja' foi vista: um item so'
+    assert [i["mensagem"] for i in _seguranca(client_admin)] == [
+        "Administrador Admin entrou de uma origem nova (10.0.0.51)",
+        "Administrador Admin entrou de uma origem nova (testclient)"]
+
+
+def test_seguranca_nao_avisa_origem_vista_nos_30_dias_anteriores(client_admin):
+    _login_de(client_admin, "10.0.0.52")
+    _recuar_logins(10)                                      # testclient e 10.0.0.52 vistos ha' 10 dias
+    _login_de(client_admin, "10.0.0.52")
+    assert _seguranca(client_admin) == []
+
+
+def test_seguranca_avisa_origem_vista_so_antes_dos_30_dias(client_admin):
+    _recuar_logins(31)                                      # testclient visto ha' 31 dias: fora da janela
+    _login_de(client_admin, "testclient")
+    assert [i["mensagem"] for i in _seguranca(client_admin)] == [
+        "Administrador Admin entrou de uma origem nova (testclient)"]
+
+
+def test_seguranca_item_fica_7_dias(client_admin, monkeypatch):
+    from app import tempo
+    agora = tempo.agora_utc()
+    monkeypatch.setattr(tempo, "agora_utc", lambda: agora + datetime.timedelta(days=6, hours=23))
+    assert len(_seguranca(client_admin)) == 1
+    monkeypatch.setattr(tempo, "agora_utc", lambda: agora + datetime.timedelta(days=7, minutes=1))
+    assert _seguranca(client_admin) == []
+
+
+def test_seguranca_nao_avisa_quem_nao_e_administrador_nem_login_falho(client_admin):
+    for perfil in ("engenharia", "diretoria"):
+        client_admin.post("/api/admin/usuarios", json={"nome": perfil, "email": f"{perfil}@lotufo.com",
+                                                       "senha": "senha-forte-123", "perfil": perfil})
+        _login_de(client_admin, "10.0.0.53", f"{perfil}@lotufo.com")
+    r = TestClient(client_admin.app, client=("10.0.0.54", 50000)).post(
+        "/api/auth/login", json={"email": "admin@lotufo.com", "senha": "senha-errada-1"})
+    assert r.status_code == 401
+    assert [i["mensagem"] for i in _seguranca(client_admin)] == [
+        "Administrador Admin entrou de uma origem nova (testclient)"]
+
+
+def test_seguranca_negada_a_engenharia_e_diretoria(client_admin):
+    for perfil in ("engenharia", "diretoria"):
+        client_admin.post("/api/admin/usuarios", json={"nome": perfil, "email": f"{perfil}@lotufo.com",
+                                                       "senha": "senha-forte-123", "perfil": perfil})
+        c = TestClient(client_admin.app)
+        r = c.post("/api/auth/login", json={"email": f"{perfil}@lotufo.com", "senha": "senha-forte-123"})
+        c.cookies.set("sessao", r.cookies["sessao"])
+        assert c.get("/api/admin/saude").status_code == 403

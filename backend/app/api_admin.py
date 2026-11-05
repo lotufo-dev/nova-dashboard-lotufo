@@ -1,7 +1,7 @@
 import datetime
 import sqlite3
 from fastapi import APIRouter, Depends, Query
-from app import auditoria, backup, correio, siga, tempo
+from app import auditoria, backup, correio, seguranca, siga, tempo
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -39,8 +39,9 @@ def saude_do_backup(usuario: dict = Depends(exigir("administrar", com_csrf=False
 @router.get("/saude")
 def saude(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
           conn: sqlite3.Connection = Depends(conexao)):
-    """Administracao > Saude: a situacao do monitor do SIGA (issue #330), ao lado da do RM e do backup."""
-    return {"siga": siga.saude(conn)}
+    """Administracao > Saude: a situacao do monitor do SIGA (issue #330), ao lado da do RM e do backup, e o bloco
+    Seguranca (issue #418): `[{nivel, mensagem, data}]`, montado por `app/seguranca.py`."""
+    return {"siga": siga.saude(conn), "seguranca": seguranca.itens(conn)}
 
 
 @router.get("/contas-microsoft")

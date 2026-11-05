@@ -279,3 +279,108 @@ def test_trocar_senha_exige_csrf(client_admin):
     del client_admin.headers["X-CSRF-Token"]
     r = client_admin.post("/api/auth/senha", json={"senha_atual": NOVO["senha"], "senha_nova": "senha-nova-456"})
     assert r.status_code == 403
+
+
+# --- #418: ultimos acessos de cada pessoa (Administracao > Usuarios e Minha conta) ------------------
+
+from fastapi.testclient import TestClient
+
+from app import auditoria, seguranca
+
+FIREFOX_LINUX = "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0"
+
+def _login_de(client, ip, email, senha, ua="testclient"):
+    """Login vindo de outro IP, na MESMA app (o banco e' o mesmo); nao mexe na sessao do `client`."""
+    return TestClient(client.app, client=(ip, 50000)).post(
+        "/api/auth/login", json={"email": email, "senha": senha}, headers={"User-Agent": ua})
+
+def test_ultimos_acessos_da_pessoa_com_sucesso_e_falha_do_mais_novo_ao_mais_antigo(client_admin):
+    uid = client_admin.post("/api/admin/usuarios", json=NOVO).json()["id"]
+    assert _login_de(client_admin, "10.0.0.31", NOVO["email"], "senha-errada-1").status_code == 401
+    assert _login_de(client_admin, "10.0.0.32", NOVO["email"], NOVO["senha"], FIREFOX_LINUX).status_code == 200
+    # falha de outro e-mail e login de outra pessoa nao entram na lista da Maria
+    assert _login_de(client_admin, "10.0.0.33", "outra@lotufo.com", "senha-errada-1").status_code == 401
+    assert _login_de(client_admin, "10.0.0.34", "admin@lotufo.com", "senha-forte-123").status_code == 200
+
+    r = client_admin.get(f"/api/admin/usuarios/{uid}/acessos")
+    assert r.status_code == 200, r.text
+    acessos = r.json()
+    assert [(a["sucesso"], a["origem"], a["navegador"]) for a in acessos] == [
+        (True, "10.0.0.32", "Firefox no Linux"), (False, "10.0.0.31", "testclient")]
+    assert all(a["data"].endswith("+00:00") for a in acessos)   # instante UTC com o fuso explicito; a tela mostra Cuiaba
+
+def test_ultimos_acessos_sao_no_maximo_10(client_admin):
+    uid = client_admin.post("/api/admin/usuarios", json=NOVO).json()["id"]
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        for i in range(12):
+            auditoria.registrar(conn, uid, "auth.login", depois={"origem": f"10.0.1.{i}", "navegador": None})
+    conn.close()
+    acessos = client_admin.get(f"/api/admin/usuarios/{uid}/acessos").json()
+    assert [a["origem"] for a in acessos] == [f"10.0.1.{i}" for i in range(11, 1, -1)]
+    assert acessos[0]["navegador"] is None
+
+def test_login_antigo_sem_origem_aparece_com_traco_e_conta_nova_nao_herda_falha_anterior(client_admin):
+    # eventos de antes do #418 nao tem `depois`; a falha de um e-mail antes de a conta existir nao e' da pessoa
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        auditoria.registrar(conn, None, "auth.login_falha", "usuario", None, depois={"email": NOVO["email"]})
+    conn.close()
+    uid = client_admin.post("/api/admin/usuarios", json=NOVO).json()["id"]
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        conn.execute("UPDATE audit_log SET criado_em=datetime(criado_em, '-1 day') WHERE acao='auth.login_falha'")
+        auditoria.registrar(conn, uid, "auth.login")
+    conn.close()
+    acessos = client_admin.get(f"/api/admin/usuarios/{uid}/acessos").json()
+    assert [(a["sucesso"], a["origem"], a["navegador"]) for a in acessos] == [(True, None, None)]
+
+def test_acessos_de_usuario_inexistente_404(client_admin):
+    r = client_admin.get("/api/admin/usuarios/99999/acessos")
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Usuário não encontrado"
+
+def test_acessos_de_outra_pessoa_negados_a_engenharia_e_diretoria(client_admin):
+    admin_id = client_admin.get("/api/auth/eu").json()["id"]
+    for perfil in ("engenharia", "diretoria"):
+        email = f"{perfil}@lotufo.com"
+        client_admin.post("/api/admin/usuarios", json={"nome": perfil, "email": email,
+                                                       "senha": "senha-forte-123", "perfil": perfil})
+        admin = _entrar(client_admin, "admin@lotufo.com", "senha-forte-123")
+        _entrar(client_admin, email, "senha-forte-123")
+        meu_id = client_admin.get("/api/auth/eu").json()["id"]
+        assert client_admin.get(f"/api/admin/usuarios/{admin_id}/acessos").status_code == 403
+        # nem os proprios pela rota de administracao: os proprios saem em Minha conta
+        assert client_admin.get(f"/api/admin/usuarios/{meu_id}/acessos").status_code == 403
+        _como(client_admin, *admin)
+
+def test_minha_conta_mostra_so_os_proprios_acessos(client_admin):
+    client_admin.post("/api/admin/usuarios", json=NOVO)
+    assert _login_de(client_admin, "10.0.0.41", NOVO["email"], "senha-errada-1").status_code == 401
+    _entrar(client_admin, NOVO["email"], NOVO["senha"])
+    r = client_admin.get("/api/auth/acessos")
+    assert r.status_code == 200, r.text
+    assert [(a["sucesso"], a["origem"]) for a in r.json()] == [(True, "testclient"), (False, "10.0.0.41")]
+
+def test_minha_conta_sem_sessao_401(client):
+    assert client.get("/api/auth/acessos").status_code == 401
+
+@pytest.mark.parametrize("ua, resumo", [
+    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+     "Chrome no Windows"),
+    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 "
+     "Edg/130.0.0.0", "Edge no Windows"),
+    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+     "Safari no macOS"),
+    ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 "
+     "Mobile/15E148 Safari/604.1", "Safari no iOS"),
+    ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+     "Chrome no Android"),
+    (FIREFOX_LINUX, "Firefox no Linux"),
+    ("curl/8.4.0", "curl/8.4.0"),
+    ("python-requests/2.32.3", "python-requests/2.32.3"),
+    ("", None),
+    (None, None),
+])
+def test_navegador_resumido(ua, resumo):
+    assert seguranca.resumir_navegador(ua) == resumo
