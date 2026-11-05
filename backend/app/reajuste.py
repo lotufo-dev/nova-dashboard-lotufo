@@ -483,12 +483,13 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
     return [{"data_base_mes": b, "ciclo": y, "competencias": xs} for (b, y), xs in grupos.items()]
 
 
-def apostilamento_da_medicao(conn, medicao: dict) -> dict | None:
+def apostilamento_da_medicao(conn, medicao: dict, grupos: list[dict] | None = None) -> dict | None:
     """Issue #278: o apostilamento que cobre a competencia desta medicao de reajuste (chave, numero e data do termo),
     pela mesma leitura da aba Reajuste (`competencias_por_ciclo`): a competencia na lista do termo ou no `periodo` do
     percentual (MT-PAR), so' termo que vale. None quando nenhum cobre, quando a competencia nao entra em ciclo (antes
-    do 1o aniversario) ou quando a data-base da medicao e' incerta."""
-    for g in competencias_por_ciclo(conn, medicao["contrato_id"]):
+    do 1o aniversario) ou quando a data-base da medicao e' incerta. `grupos`: a leitura ja' feita do contrato (varias
+    medicoes de uma vez). O numero identifica a medicao de reajuste no contrato (UNIQUE contrato, numero, tipo)."""
+    for g in grupos if grupos is not None else competencias_por_ciclo(conn, medicao["contrato_id"]):
         for x in g["competencias"]:
             if x["competencia"] != medicao["competencia"] or medicao["numero"] not in x["medicoes"]:
                 continue

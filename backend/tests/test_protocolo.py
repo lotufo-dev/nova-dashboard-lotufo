@@ -309,6 +309,21 @@ def test_oficio_de_reajuste_mtpar_cita_o_apostilamento_e_a_competencia(cenario):
     assert "Apostilamento" not in protocolo.corpo_padrao(c, p_exec)         # o oficio da execucao nao muda
 
 
+def test_oficio_com_um_reajuste_sem_termo_nao_cita_o_termo_do_outro(cenario):
+    # code-review da PR: com dois reajustes no mesmo oficio e so' um coberto, a carta nao diz que os dois sao do termo
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 24, 'reajuste', '2027-09', 'nota_emitida', 1000001)", (ids["mtpar"],))
+    m24 = c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
+    c.commit()
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"], m24], "303")
+    corpo = protocolo.corpo_padrao(c, pid)
+    assert "001/2025/03/02" not in corpo and "Termo de Apostilamento nº {apostilamento}" in corpo
+    assert [x["mensagem"] for x in protocolo.detalhe(c, pid)["pendencias"] if x["codigo"] == "sem_apostilamento"] == [
+        "Nenhum apostilamento cobre 09/2027; a nota de reajuste não pode sair antes dele"]
+
+
 def test_reajuste_sem_apostilamento_avisa_na_montagem_e_o_envio_exige_justificativa(cenario):
     c, ids = cenario
     _data_base_e_termo(c, ids["mtpar"], termo=False)

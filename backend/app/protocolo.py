@@ -380,10 +380,13 @@ def _termos_de_reajuste(conn, ms: list[dict]) -> tuple[list[dict], list[str]]:
     as competencias (MM/AAAA) que nenhum cobre."""
     termos: dict[str, dict] = {}
     sem: list[str] = []
+    grupos: dict[int, list[dict]] = {}          # a leitura do ciclo por competencia, uma vez por contrato
     for m in ms:
         if m["tipo"] != "reajuste":
             continue
-        t = reajuste.apostilamento_da_medicao(conn, m)
+        if m["contrato_id"] not in grupos:
+            grupos[m["contrato_id"]] = reajuste.competencias_por_ciclo(conn, m["contrato_id"])
+        t = reajuste.apostilamento_da_medicao(conn, m, grupos[m["contrato_id"]])
         comp = f"{m['competencia'][5:7]}/{m['competencia'][:4]}"
         if t:
             termos.setdefault(t["chave"], t)
@@ -395,10 +398,12 @@ def _termos_de_reajuste(conn, ms: list[dict]) -> tuple[list[dict], list[str]]:
 def _campos(conn, p: dict, c: dict, familia: str, regras: dict, ms: list[dict]) -> dict:
     em = carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}
     m0 = ms[0]
-    # issue #278: {apostilamento} e' o nº do termo que cobre a competencia do reajuste; sem termo (ou sem numero no
-    # cadastro), o campo fica a' vista no texto, como todo dado que falta (`carta._Campos`), e o aviso vai nas pendencias
-    numeros = [t["numero"] for t in _termos_de_reajuste(conn, ms)[0] if t["numero"]]
-    return {**({"apostilamento": " e ".join(numeros)} if numeros else {}),
+    # issue #278: {apostilamento} e' o nº do termo que cobre a competencia do reajuste. So' entra quando todo reajuste do
+    # oficio tem termo com numero: senao o campo fica a' vista no texto, como todo dado que falta (`carta._Campos`), em
+    # vez de a carta citar como de todos o termo de um so'; a competencia sem termo vai nas pendencias
+    termos, sem = _termos_de_reajuste(conn, ms)
+    numeros = [t["numero"] for t in termos]
+    return {**({"apostilamento": " e ".join(numeros)} if numeros and all(numeros) and not sem else {}),
             "razao_social": em.get("razao_social", ""), "cnpj": em.get("cnpj", ""),
             "oficio": p["numero_oficio"] or "",
             "oficio_barra": oficios.na_carta(p["numero_oficio"]) if p["numero_oficio"] else "", "medicao": " e ".join(titulo(m) for m in ms),
