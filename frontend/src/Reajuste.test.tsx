@@ -26,48 +26,181 @@ describe("Reajuste", () => {
     expect(screen.getByLabelText("Nº do ofício (CT)")).toBeTruthy();
   });
 
-  it("mostra a previsão gravada do ciclo, competência × valor com a origem (issue #272)", async () => {
-    const prev = (competencia: string, valor: number, origem: string, ciclo = 2026) => ({ data_base_mes: "2024-06",
-      ciclo, competencia, valor_previsto_centavos: valor, origem, pleito_id: 3 });
+  // issue #275: uma linha de `competencias_por_ciclo` (reajuste.competencias_por_ciclo), so' prevista por padrao
+  const comp = (competencia: string, extra: Record<string, unknown> = {}) => ({ competencia, estado: "prevista",
+    previsto_centavos: null, previsto_origem: null, medicao_id: null, medicao_numero: null, medicao_estado: null,
+    medicoes: [], pedido_centavos: null, aprovado_centavos: null, apostilada: false, apostilado_centavos: null,
+    apostilado_percentual: null, apostilamento_chave: null, medicao_orgao: null, faturado_centavos: null,
+    recebida_em: null, data_base_incerta: false, avisos: [], ...extra });
+  const cicloAberto = { data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
+    situacao: "apostilamento_pendente", dias: 40, pleito: null, apostilamento: null, aditivos: [] };
+  const celulas = (tr: Element) => [...tr.querySelectorAll("td,th")];
+
+  it("mostra a tabela do ciclo, competência × previsto × pedido × aprovado × apostilado × nota × recebido, com a origem no título (issue #275)", async () => {
+    const termo = { id: 5, chave: "ap-12", tipo: "apostilamento_reajuste", numero: "019/2024/02/12", data: "2026-10-01",
+      dados: { data_base: "2024-06", ciclo: 2026 } };
     api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
-      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
-                     situacao: "pleito_pendente", dias: -14, pleito: null, apostilamento: null }], pleitos: [],
-          previsoes: [prev("2026-07", 123456, "pleito"), prev("2026-08", 700, "manual"), prev("2025-07", 1, "pleito", 2025)] }
-      : { instrumentos: [] });
-    render(<Reajuste contratoId={7} podeEditar />);
-    const tabela = await screen.findByRole("table", { name: "Previsão de reajuste do ciclo de 2026" });
-    const linhas = within(tabela).getAllByRole("row");
-    expect(linhas).toHaveLength(1 + 2 + 1);                   // so' o ciclo corrente; cabeca e total
-    expect(linhas[1].textContent).toContain("07/2026");
-    expect(linhas[1].textContent).toContain("R$ 1.234,56");
-    expect(linhas[1].textContent).toContain("planilha do pleito");
-    expect(linhas[2].textContent).toContain("digitada");
-    expect(linhas[3].textContent).toContain("R$ 1.241,56");
+      ? { ciclos: [cicloAberto], pleitos: [],
+          competencias_por_ciclo: [
+            { data_base_mes: "2024-06", ciclo: 2025, competencias: [comp("2025-07", { previsto_centavos: 5, previsto_origem: "manual" })] },
+            { data_base_mes: "2024-06", ciclo: 2026, competencias: [
+              comp("2026-07", { estado: "recebida", previsto_centavos: 100_01, previsto_origem: "pleito", medicao_numero: 3,
+                medicoes: [3], pedido_centavos: 100_01, aprovado_centavos: 99_99, apostilada: true,
+                apostilado_centavos: 100_01, apostilamento_chave: "ap-12", medicao_orgao: 30, faturado_centavos: 99_99,
+                recebida_em: "2026-10-15" }),
+              comp("2026-08", { previsto_centavos: 200_03, previsto_origem: "manual" }),
+              comp("2026-09", { estado: "pedida", medicao_numero: 7, medicoes: [4, 7], pedido_centavos: 301_01 })] },
+            { data_base_mes: "2024-06", ciclo: 2027, competencias: [comp("2027-06", { previsto_centavos: 9, previsto_origem: "manual" })] }] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
+    expect(within(tabela).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
+      ["Competência", "Previsto", "Pedido", "Aprovado", "Apostilado", "Nota", "Recebido", "Situação"]);
+    const [jul, ago, set] = [...tabela.querySelectorAll("tbody tr")];
+    expect(celulas(jul).map(c => c.textContent)).toEqual(
+      ["07/2026", brl(100_01), brl(100_01), brl(99_99), brl(100_01), brl(99_99), "15/10/2026", "recebida"]);
+    // a origem de cada celula ao passar o mouse
+    expect(celulas(jul).slice(1, 7).map(c => c.getAttribute("title"))).toEqual([
+      "Origem: planilha do pleito", "Origem: 3ª medição de reajuste", "Origem: boletim da 3ª medição de reajuste",
+      "Origem: apostilamento 019/2024/02/12, de 01/10/2026 (30ª medição)",
+      "Origem: notas fiscais da 3ª medição de reajuste", "Origem: baixa no RM da 3ª medição de reajuste"]);
+    // celula vazia: traco e sem titulo
+    expect(celulas(ago).map(c => c.textContent)).toEqual(["08/2026", brl(200_03), "—", "—", "—", "—", "—", "prevista"]);
+    expect(celulas(ago)[1].getAttribute("title")).toBe("Origem: digitada");
+    expect(celulas(ago).slice(2, 7).every(c => !c.hasAttribute("title"))).toBe(true);
+    // complemento: o pedido soma as medicoes da competencia
+    expect(celulas(set)[2].getAttribute("title")).toBe("Origem: 4ª e 7ª medições de reajuste");
+    // o rodape soma cada coluna de dinheiro com o centavo impar
+    expect(celulas(tabela.querySelector("tfoot tr")!).map(c => c.textContent)).toEqual(
+      ["Total", brl(300_04), brl(401_02), brl(99_99), brl(100_01), brl(99_99), "", ""]);
+    // as tabelas antigas (previsao e apostiladas) nao voltam: a da competencia traz as duas colunas
+    expect(screen.queryByRole("table", { name: /^Previsão de reajuste/ })).toBeNull();
+    expect(screen.queryByRole("table", { name: /^Competências apostiladas/ })).toBeNull();
+    // o ciclo anterior fica recolhido em "Ciclos anteriores"
+    const anterior = screen.getByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2025" });
+    expect(anterior.closest("details")?.querySelector("summary")?.textContent).toBe("Ciclos anteriores");
+    // previsao de ciclo seguinte (lancada antes da janela abrir) fica a' vista, no cartao da data-base
+    const seguinte = screen.getByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2027" });
+    expect(seguinte.closest("details")).toBeNull();
+    expect(seguinte.closest("section")?.id).toBe("db-2024-06");
   });
 
-  it("competência apostilada aparece só na tabela do apostilamento, não de novo na previsão (#271 com #272)", async () => {
-    const prev = (competencia: string, valor: number, origem: string) => ({ data_base_mes: "2024-06", ciclo: 2026,
-      competencia, valor_previsto_centavos: valor, origem, pleito_id: origem === "apostilamento" ? null : 3 });
-    const apostilada = (competencia: string, valor: number) => ({ data_base_mes: "2024-06", ciclo: 2026, competencia,
-      valor_centavos: valor, medicao: null, instrumento_chave: "ap-12", instrumento_numero: "019/2024/02/12",
-      instrumento_data: "2026-10-01" });
+  it("marca a competência com aviso: fora da previsão, sem apostilamento e nota antes do termo (issue #275)", async () => {
     api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
-      ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
-                     situacao: "apostilado", dias: null, pleito: null, apostilamento: null }], pleitos: [],
-          // a de 11/2026 e' de apostilamento mas nao esta' na tabela do apostilamento: continua na previsao
-          previsoes: [prev("2026-07", 130003, "apostilamento"), prev("2026-08", 20005, "apostilamento"),
-                      prev("2026-09", 700, "pleito"), prev("2026-10", 301, "manual"),
-                      prev("2026-11", 2, "apostilamento")],
-          competencias: [apostilada("2026-07", 130003), apostilada("2026-08", 20005)] }
+      ? { ciclos: [cicloAberto], pleitos: [],
+          competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026, competencias: [
+            comp("2026-07", { estado: "pedida", previsto_centavos: 100_01, previsto_origem: "manual", medicoes: [1],
+              pedido_centavos: 101_02, avisos: ["fora_da_previsao"] }),
+            comp("2026-08", { estado: "aprovada", medicoes: [2], pedido_centavos: 200_03, aprovado_centavos: 200_03,
+              avisos: ["sem_apostilamento"] }),
+            comp("2026-09", { estado: "faturada", medicoes: [3], pedido_centavos: 300_05, aprovado_centavos: 300_05,
+              faturado_centavos: 300_05, avisos: ["sem_apostilamento", "nota_antes_do_apostilamento"] }),
+            comp("2026-10", { estado: "apostilada", apostilada: true, apostilado_percentual: "6,76",
+              apostilamento_chave: "ap-mtpar" })] }] }
       : { instrumentos: [] });
     render(<Reajuste contratoId={7} podeEditar={false} />);
-    const apostiladas = await screen.findByRole("table", { name: "Competências apostiladas da data-base 06/2024" });
-    const previsao = screen.getByRole("table", { name: "Previsão de reajuste do ciclo de 2026" });
-    const competencias = (t: HTMLElement) => [...t.querySelectorAll("tbody tr")].map(tr => tr.firstElementChild?.textContent);
-    expect(competencias(apostiladas)).toEqual(["07/2026", "08/2026"]);
-    expect(competencias(previsao)).toEqual(["09/2026", "10/2026", "11/2026"]);   // uma linha por competência
-    // o rodape diz o que soma: so' as linhas da previsao, nao o reajuste do ciclo inteiro
-    expect(previsao.querySelector("tfoot")?.textContent).toBe(`Total previsto${brl(1003)}`);
+    const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
+    const situacao = [...tabela.querySelectorAll("tbody tr")].map(tr => celulas(tr)[7]);
+    const selos = (td: Element) => [...td.querySelectorAll(".selo")].map(s => [s.textContent, s.className]);
+    expect(selos(situacao[0])).toEqual([["pedida", "selo"], ["fora da previsão", "selo selo--atencao"]]);
+    expect(situacao[0].querySelector(".selo--atencao")?.getAttribute("title")).toBe(
+      `Pedido ${brl(101_02)}; previsto ${brl(100_01)}`);
+    expect(selos(situacao[1])).toEqual([["aprovada", "selo"], ["sem apostilamento", "selo selo--atencao"]]);
+    // a nota antes do termo e' o critico: um selo so', o mais grave
+    expect(selos(situacao[2])).toEqual([["faturada", "selo"], ["nota antes do apostilamento", "selo selo--acao"]]);
+    expect(selos(situacao[3])).toEqual([["apostilada", "selo"]]);
+    // o percentual da MT-PAR no lugar do valor apostilado
+    expect(celulas(tabela.querySelectorAll("tbody tr")[3])[4].textContent).toBe("6,76%");
+  });
+
+  it("o percentual do termo no cabeçalho do ciclo lê a vírgula do cadastro (issue #275)", async () => {
+    const termo = { id: 6, chave: "ap-mtpar", tipo: "apostilamento_reajuste", numero: "AP-2", data: "2026-05-11",
+      dados: { data_base: "2024-06", ciclo: 2026, percentual: "3,80" } };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloAberto, situacao: "apostilado", dias: null, apostilamento: termo }], pleitos: [] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const corpo = (await screen.findByText("Ciclo de 2026 · aniversário em 01/06/2026")).parentElement!;
+    expect(corpo.textContent).toContain("AP-2, de 11/05/2026 · 3,8%");
+    expect(corpo.textContent).not.toContain("NaN");
+  });
+
+  it("mostra a linha do tempo do ciclo: pleito, aditivo, reemissão, reiteração e termo, em ordem (issue #275)", async () => {
+    const termo = { id: 5, chave: "ap-12", tipo: "apostilamento_reajuste", numero: "019/2024/02/12", data: "2026-11-03",
+      dados: { data_base: "2024-06", ciclo: 2026 } };
+    const pleito = (id: number, numero: string, enviado_em: string, extra: Record<string, unknown> = {}) => ({ id,
+      tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: numero, data_base_mes: "2024-06",
+      ciclo: 2026, dias: null, justificativa: null, situacao: "enviado", corpo_carta: null, montado_paginas: null,
+      assinado_arquivo: null, nome_documento: null, conferencia: null, pendencias: [], enviado_em,
+      envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: null, ...extra });
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloAberto, situacao: "apostilado", dias: null, pleito: { id: 12 }, apostilamento: termo,
+                     aditivos: [{ id: 2, numero: "2º TA", tipo: "prazo", data_assinatura: "2026-08-01" }] }],
+          pleitos: [
+            pleito(12, "CT-245-LT-2026", "2026-10-30 09:00:00", { rotulo: "Reiteração do pleito de reajuste",
+              reemissao: "reiteracao", reemite_pleito_id: 11, instrumento_chave: "ap-12" }),
+            pleito(11, "CT-200-LT-2026", "2026-09-20", { rotulo: "Reemissão do pleito de reajuste",
+              reemissao: "cronograma", reemite_pleito_id: 10 }),
+            pleito(10, "CT-122-LT-2026", "2026-06-10"),
+            pleito(9, "CT-90-LT-2025", "2025-06-10", { ciclo: 2025 })] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const tempo = await screen.findByRole("list", { name: "Linha do tempo do ciclo de 2026" });
+    expect([...tempo.querySelectorAll("li")].map(li => li.textContent)).toEqual([
+      "10/06/2026Pleito de reajuste CT-122-LT-2026 enviado",
+      "01/08/2026Aditivo de prazo 2º TA assinado",
+      "20/09/2026Reemissão do pleito de reajuste CT-200-LT-2026 enviada",
+      "30/10/2026Reiteração do pleito de reajuste CT-245-LT-2026 enviada",
+      "03/11/2026Apostilamento 019/2024/02/12"]);
+  });
+
+  it("ciclo sem pleito enviado nem termo não tem linha do tempo (issue #275)", async () => {
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloAberto, situacao: "pleito_pendente", dias: 10 }], pleitos: [] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByText("pleito não enviado");
+    expect(screen.queryByRole("list", { name: /^Linha do tempo/ })).toBeNull();
+  });
+
+  it("para a diretoria, nenhum botão de ação aparece na aba (issue #275)", async () => {
+    const vigente = { id: 10, tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "sistema", numero_oficio: "CT-122-LT-2026",
+      data_base_mes: "2024-09", ciclo: 2026, dias: null, justificativa: null, situacao: "enviado", corpo_carta: "Texto",
+      montado_paginas: 1, assinado_arquivo: "x.pdf", nome_documento: "x.pdf", conferencia: null, pendencias: [],
+      enviado_em: "2026-06-15", envio_justificativa: null, anexos: [], exigidos: [], reemite_pleito_id: null,
+      reemissao: null, anterior: null, reemissoes: [], reemissoes_possiveis: ["reiteracao", "cronograma"] };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloAberto, situacao: "pleito_pendente", dias: 10 },
+                   { ...cicloAberto, data_base_mes: "2024-09", aniversario: "2026-09-01", pleito: { id: 10 } }],
+          pleitos: [vigente],
+          competencias_por_ciclo: [{ data_base_mes: "2024-09", ciclo: 2026, competencias: [
+            comp("2026-09", { estado: "aprovada", medicoes: [2], pedido_centavos: 1, aprovado_centavos: 1,
+              avisos: ["sem_apostilamento"] })] }] }
+      : { instrumentos: [] });
+    const { unmount } = render(<Reajuste contratoId={7} podeEditar />);
+    // quem edita ve as acoes do ciclo (a prova de que a diretoria as perderia)
+    expect(await screen.findByRole("button", { name: "Enviar pleito" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reiterar" })).toBeTruthy();
+    unmount();
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByRole("table", { name: "Reajuste por competência da data-base 09/2024, ciclo de 2026" });
+    expect(screen.queryAllByRole("button")).toEqual([]);
+    expect(screen.getByText("sem apostilamento")).toBeTruthy();       // a marca do aviso continua para quem so' le
+  });
+
+  it("competência fora das datas-base do cadastro não some (issue #275)", async () => {
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [cicloAberto], pleitos: [],
+          competencias_por_ciclo: [
+            { data_base_mes: "2023-03", ciclo: 2025, competencias: [comp("2025-04", { previsto_centavos: 7, previsto_origem: "manual" })] },
+            { data_base_mes: null, ciclo: null, competencias: [comp("2026-09", { estado: "pedida", medicoes: [2],
+              pedido_centavos: 300_04, data_base_incerta: true })] }] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const cartao = await screen.findByRole("region", { name: "Reajuste fora das datas-base do cadastro" });
+    expect(within(cartao).getByRole("table", { name: "Reajuste por competência da data-base 03/2023, ciclo de 2025" })).toBeTruthy();
+    const semBase = within(cartao).getByRole("table", { name: "Reajuste por competência sem data-base definida" });
+    expect(semBase.querySelector("tbody tr")?.textContent).toContain(brl(300_04));
   });
 
   it("mostra a parte do contrato de cada data-base ao lado do mês (issue #257)", async () => {
@@ -94,18 +227,24 @@ describe("Reajuste", () => {
       ? { ciclos: [{ data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
                      situacao: "apostilado", dias: null, pleito, apostilamento: termo }],
           pleitos: [pleito],
+          // o termo que o cadastro nao manda mais (ap-11) ainda se nomeia pela lista das competencias apostiladas
           competencias: [
             { data_base_mes: "2024-06", ciclo: 2026, competencia: "2026-07", valor_centavos: 130003, medicao: 30,
               instrumento_chave: "ap-12", instrumento_numero: "019/2024/02/12", instrumento_data: "2026-10-01" },
             { data_base_mes: "2024-06", ciclo: 2026, competencia: "2026-08", valor_centavos: -1001, medicao: null,
-              instrumento_chave: "ap-11", instrumento_numero: "019/2024/02/11", instrumento_data: "2026-09-15" }] }
+              instrumento_chave: "ap-11", instrumento_numero: "019/2024/02/11", instrumento_data: "2026-09-15" }],
+          competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026, competencias: [
+            comp("2026-07", { estado: "apostilada", apostilada: true, apostilado_centavos: 130003,
+              apostilamento_chave: "ap-12", medicao_orgao: 30 }),
+            comp("2026-08", { estado: "apostilada", apostilada: true, apostilado_centavos: -1001,
+              apostilamento_chave: "ap-11" })] }] }
       : { instrumentos: [termo] });
     render(<Reajuste contratoId={7} podeEditar={false} />);
-    const tabela = await screen.findByRole("table", { name: "Competências apostiladas da data-base 06/2024" });
-    const linhas = [...tabela.querySelectorAll("tbody tr")].map(tr => [...tr.querySelectorAll("td,th")].map(c => c.textContent));
-    expect(linhas).toEqual([
-      ["07/2026", "2026", "30ª", brl(130003), "019/2024/02/12"],
-      ["08/2026", "2026", "—", brl(-1001), "019/2024/02/11"]]);
+    const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
+    const apostilado = [...tabela.querySelectorAll("tbody tr")].map(tr => celulas(tr)[4]);
+    expect(apostilado.map(c => [c.textContent, c.getAttribute("title")])).toEqual([
+      [brl(130003), "Origem: apostilamento 019/2024/02/12, de 01/10/2026 (30ª medição)"],
+      [brl(-1001), "Origem: apostilamento 019/2024/02/11, de 15/09/2026"]]);
     expect(brl(-1001).startsWith("−")).toBe(true);           // o reajuste negativo leva o sinal
     expect(screen.getByText("atendido pelo apostilamento 019/2024/02/12")).toBeTruthy();
   });
@@ -123,7 +262,8 @@ describe("Reajuste", () => {
           pleitos: [pleito], competencias: [] }
       : { instrumentos: [termo] });
     render(<Reajuste contratoId={7} podeEditar={false} />);
-    await screen.findByText(/CT-122-LT-2026/);
+    // o ofício aparece na seção dele e na linha do tempo do ciclo (issue #275)
+    await screen.findByRole("heading", { name: /CT-122-LT-2026/ });
     expect(screen.queryByText(/atendido pelo apostilamento/)).toBeNull();
   });
 

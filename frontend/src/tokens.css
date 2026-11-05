@@ -1752,6 +1752,9 @@ a.contagem:hover .dado__valor { color: var(--acento-forte); text-decoration: und
 /* "Ciclos anteriores": o summary acompanha o respiro lateral das secoes e a lista abre colada nele */
 .pleito-anteriores > summary { padding: 12px 20px; }
 .pleito-anteriores[open] > summary { margin-bottom: 0; }
+/* issue #275: na tabela por competencia do reajuste, o estado e a marca do aviso na Situacao (ancorada a' direita,
+   `.col-fixa`): lado a lado quando cabem, um embaixo do outro quando a tabela aperta */
+.reajuste-competencias .selos { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 /* selo logo abaixo do valor ou da nota na grade do resumo (Situacao do prazo) */
 .resumo-grade .dado > .selo { margin-top: 4px; }
 
