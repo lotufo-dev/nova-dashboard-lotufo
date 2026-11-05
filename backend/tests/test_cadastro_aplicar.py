@@ -587,7 +587,8 @@ def test_cronograma_aplicado_cria_uma_versao_por_entrada_com_a_data_do_documento
     assert [tuple(v) for v in vs] == [
         (1, "2024-03-11 04:00:00", "contratual", "contratual", "2024-03-11", None),
         (2, "2026-10-05 04:00:00", "ta-01", "aditivo", "2026-10-05", "ta-01")]
-    assert cronograma_mod.previsto_efetivo(conn, 1) == {"2024-04": 100_01, "2026-10": 250_00, "2026-12": 400_00}
+    # o aditivo (issue #396) substitui a curva inteira: o previsto da contratual que ele nao traz sai
+    assert cronograma_mod.previsto_efetivo(conn, 1) == {"2026-10": 250_00, "2026-12": 400_00}
     assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cronograma.nova_versao'").fetchone()[0] == 2
 
 
@@ -643,7 +644,7 @@ def test_versao_da_carga_fica_superada_so_pela_versao_do_yaml_de_data_posterior(
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL, V_TA])]))
     assert cronograma_mod.vigente(conn, 1)["numero"] == 3                  # o aditivo supera a carga
     assert cronograma_mod.previsto_efetivo(conn, 1) == {
-        "2024-04": 100_01, "2026-08": 50_00, "2026-09": 60_00, "2026-10": 250_00, "2026-12": 400_00}
+        "2026-10": 250_00, "2026-12": 400_00}      # issue #396: o aditivo substitui a curva inteira
     assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 3     # nada apagado
 
 
