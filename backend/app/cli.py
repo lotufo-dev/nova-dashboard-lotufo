@@ -176,7 +176,12 @@ def _relatorio_carga(rel: dict) -> None:
             rotulo += f" {li['competencia']}"
         print(f"  {rotulo}: {li['categoria']}" + (f" ({li['detalhe']})" if li["detalhe"] else "")
               + (f" -> {li['acao']}" if li.get("acao") else ""))
+        for aviso in li.get("avisos", []):
+            print(f"    AVISO: {aviso}")
     print("Total: " + ", ".join(f"{c} {n}" for c, n in rel["totais"].items()))
+    a = rel["avisos_nf"]
+    if a["janela"] or a["nao_encontrada"]:
+        print(f"Avisos de NF: {a['janela']} linhas sem NF por janela, {a['nao_encontrada']} com NF não encontrada")
 
 
 def _gravar_medicoes(args, caminho: Path) -> int:
