@@ -72,3 +72,21 @@ def test_obras_ativas_tem_uma_definicao_nas_tres_rotas(client_admin):
     assert sum(1 for o in obras if o["encerramento"]) == 1
     assert diretoria["obras_base"] == {"ativas": inicio, "encerramento": 1, "suspensas": 1, "encerradas": 0}
     assert len(diretoria["obras"]) == sum(diretoria["obras_base"].values()) == 4
+
+
+def test_cadastro_da_obra_traz_o_indice_da_data_base_depois_do_aplicar(client_admin):
+    # issue #397: a tela da obra le o indice de contrato_datas_base (ObraAbas.tsx), nunca a tabela de precos
+    from app import cadastro_aplicar, db
+    from tests.test_cadastro_aplicar import _cad, _contrato
+    cid = _obra(client_admin)
+    conn = db.get_conn()
+    conn.execute("UPDATE contratos SET indice_reajuste='SINAPI', numero_instrumento='019/2024/00/00-SINFRA' "
+                 "WHERE id=?", (cid,))
+    conn.commit()
+    valor = conn.execute("SELECT valor_original_centavos FROM contratos WHERE id=?", (cid,)).fetchone()[0]
+    c = _contrato(valor_original_centavos=valor, datas_base=[{"mes": "2023-04", "indice": "INCC-DI/FGV"}])
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]))
+    assert conn.execute("SELECT indice_reajuste FROM contratos WHERE id=?", (cid,)).fetchone()[0] == "INCC-DI/FGV"
+    conn.close()
+    bases = client_admin.get(f"/api/contratos/{cid}/cadastro").json()["datas_base"]
+    assert [b["indice"] for b in bases] == ["INCC-DI/FGV"]
