@@ -437,19 +437,20 @@ _CAMPOS_PLEITO = (("data", "enviado_em", "data"), ("dias", "dias", "dias"), ("ci
 def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Bloco 7: pleitos enviados antes do sistema viram `pleitos` de origem 'cadastro', ja' enviados.
     So' acrescenta (a chave e' contrato + tipo + oficio). Pleito ja' gravado com outro dado no YAML continua como
-    esta' e vira aviso (a correcao pelo YAML e' a issue #399)."""
+    esta' e vira aviso; data e oficio se corrigem com `corrige` (issue #399, `_corrigir_pleito`)."""
     sigla = conn.execute("SELECT e.sigla_oficio FROM contratos k JOIN entidades e ON e.id=k.entidade_id "
                          "WHERE k.id=?", (contrato_id,)).fetchone()
     sigla = sigla[0] if sigla else "LT"
     # issue #399: o pleito corrigido sai da lista; escrito de outro jeito (CT/001, 1) a validacao do arquivo nao o ve
-    corrigidos = {(p["tipo"], _canon_alvo(p, sigla), p["data_base"] or "")
-                  for p in c.get("pleitos_anteriores") or [] if p.get("corrige")}
+    corrigidos = [(p["tipo"], *_alvo_escrito(p, sigla), p["data_base"] or "")
+                  for p in c.get("pleitos_anteriores") or [] if p.get("corrige")]
     for p in c.get("pleitos_anteriores") or []:
         canon = oficios.canonico(p["oficio"], sigla, int(p["data"][:4]))
         if p.get("corrige"):
-            _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel)
+            _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel, avisos)
             continue
-        if (p["tipo"], canon, p["data_base"] or "") in corrigidos:
+        if any(t == p["tipo"] and b == (p["data_base"] or "") and _bate(canon, alvo, exato)
+               for t, alvo, exato, b in corrigidos):
             raise ValueError(f"{c['nome_curto']}: o pleito {canon} ({p['tipo']}) é corrigido por outro item; tire-o "
                              "da lista (o item com corrige o substitui)")
         cur = conn.execute(
@@ -473,26 +474,37 @@ def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
                       if gravado is not None and p.get(chave) != gravado[coluna]]
             if difere:
                 avisos.append(f"{rotulo}: {', '.join(difere)} no YAML difere do gravado; o gravado fica "
-                              "(correção de pleito anterior aplicado: issue #399)")
+                              "(para corrigir a data ou o ofício, use corrige: {oficio, data})")
 
 
 def _br(iso: str) -> str:
     return "/".join(reversed(iso[:10].split("-")))
 
 
-def _canon_alvo(p: dict, sigla: str) -> str:
-    """O oficio gravado que `corrige` aponta; sem ano escrito, o ano da data gravada (ou, sem ela, da nova)."""
-    return oficios.canonico(p["corrige"]["oficio"], sigla, int((p["corrige"]["data"] or p["data"])[:4]))
+def _alvo_escrito(p: dict, sigla: str) -> tuple[str, bool]:
+    """O oficio gravado que `corrige` aponta, e se ele e' exato. Exato quando o ano esta' escrito no oficio ou vem
+    `corrige.data` (o ano dela). Sem os dois, o ano nao se sabe (gate Sol, PR #411): vale so' o numero, e o pleito
+    gravado e' procurado entre os existentes (`_alvo_gravado`)."""
+    alvo = p["corrige"]
+    canon = oficios.canonico(alvo["oficio"], sigla, int((alvo["data"] or p["data"])[:4]))
+    if alvo["data"] or oficios._ANO.search(alvo["oficio"]):
+        return canon, True
+    return canon.rsplit("-", 1)[0] + "-", False
 
 
-def _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel) -> None:
+def _bate(numero: str | None, alvo: str, exato: bool) -> bool:
+    return numero == alvo if exato else bool(numero) and numero.startswith(alvo) and len(numero) == len(alvo) + 4
+
+
+def _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel, avisos) -> None:
     """Issue #399: `corrige: {oficio, data?}` troca `enviado_em` e `numero_oficio` de um pleito do cadastro ja' gravado
     (a carta real, nao a copia sem protocolo). Pleito da tela nao se corrige pelo YAML. Com a data trocada, a ligacao ao
     termo e' desfeita aqui e refeita pela data nova em `_apostilamentos_de_reajuste`, que roda logo depois; o prazo se
     le' da data."""
     alvo = p["corrige"]
     nome = c["nome_curto"]
-    canon_antigo = _canon_alvo(p, sigla)
+    escrito, exato = _alvo_escrito(p, sigla)
+    mostra = escrito if exato else f"{escrito}<ano>"
 
     def achar(numero, so_cadastro=False):
         filtro = "AND origem='cadastro' " if so_cadastro else "AND situacao<>'descartado' "
@@ -501,46 +513,91 @@ def _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel) -> 
                             "ORDER BY origem='cadastro' DESC, id LIMIT 1",
                             (contrato_id, p["tipo"], numero, p["data_base"])).fetchone()
 
-    if canon != canon_antigo:
-        # segunda aplicacao com o oficio trocado: o pleito ja' esta' com o oficio e a data novos, e foi esta correcao
-        # que o renomeou (mesmo que depois a tela tenha usado o numero antigo)
-        novo = achar(canon, so_cadastro=True)
-        if novo is not None and (novo["enviado_em"] or "")[:10] == p["data"] and conn.execute(
-                "SELECT 1 FROM audit_log WHERE acao='cadastro.pleito' AND entidade='pleito' AND entidade_id=? "
-                "AND json_extract(antes, '$.numero_oficio')=? LIMIT 1", (str(novo["id"]), canon_antigo)).fetchone():
-            rel["iguais"] += 1
-            return
-    g = achar(canon_antigo)
+    # reaplicacao (gate Sol, PR #411): o pleito esta' com o oficio e a data novos E a auditoria mostra que foi esta
+    # correcao que o levou ate' la' (oficio e, se dita, data de antes), mesmo que a tela tenha usado o numero antigo
+    novo = achar(canon, so_cadastro=True)
+    if novo is not None and (novo["enviado_em"] or "")[:10] == p["data"]:
+        for antes_txt, depois_txt in conn.execute(
+                "SELECT antes, depois FROM audit_log WHERE acao='cadastro.pleito' AND entidade='pleito' "
+                "AND entidade_id=? AND antes IS NOT NULL ORDER BY id DESC", (str(novo["id"]),)):
+            antes, depois = json.loads(antes_txt), json.loads(depois_txt or "{}")
+            if (_bate(antes.get("numero_oficio", depois.get("numero_oficio", canon)), escrito, exato)
+                    and (not alvo["data"] or (antes.get("enviado_em") or p["data"])[:10] == alvo["data"])
+                    and depois.get("numero_oficio", canon) == canon
+                    and (depois.get("enviado_em") or p["data"])[:10] == p["data"]):
+                rel["iguais"] += 1
+                _avisa_diferencas(novo, p, f"{nome}/{p['tipo']} {canon}", avisos)
+                return
+    if exato:
+        g = achar(escrito)
+    else:
+        # sem ano: o pleito gravado com esse numero, se for um so' (o de outro ano nao se corrige por engano)
+        achados = [r for r in conn.execute(
+            "SELECT * FROM pleitos WHERE contrato_id=? AND tipo=? AND COALESCE(data_base_mes, '')=COALESCE(?, '') "
+            "AND situacao<>'descartado' ORDER BY id", (contrato_id, p["tipo"], p["data_base"]))
+            if _bate(r["numero_oficio"], escrito, False)]
+        if len(achados) > 1:
+            raise ValueError(f"{nome}: há mais de um pleito {mostra} ({p['tipo']}): "
+                             f"{', '.join(r['numero_oficio'] for r in achados)}; escreva o ano em corrige.oficio "
+                             "ou diga corrige.data")
+        g = achados[0] if achados else None
     if g is None:
-        raise ValueError(f"{nome}: pleito {canon_antigo} ({p['tipo']}) a corrigir não existe no banco")
+        raise ValueError(f"{nome}: pleito {mostra} ({p['tipo']}) a corrigir não existe no banco (num banco montado "
+                         "do zero, tire o corrige do item)")
+    canon_antigo = g["numero_oficio"]
     if g["origem"] != "cadastro":
         raise ValueError(f"{nome}: o pleito {canon_antigo} ({p['tipo']}) foi criado pela tela e não se corrige "
                          "pelo cadastro")
+    if p["tipo"] == "reajuste" and g["ciclo"] != p["ciclo"]:
+        raise ValueError(f"{nome}: o pleito {canon_antigo} (reajuste) está gravado no ciclo {g['ciclo']}, não "
+                         f"{p['ciclo']}; corrige troca só a data e o ofício")
     gravada = (g["enviado_em"] or "")[:10]
-    if gravada == p["data"] and g["numero_oficio"] == canon:
-        rel["iguais"] += 1
-        return
     if alvo["data"] and gravada != alvo["data"]:
         raise ValueError(f"{nome}: o pleito {canon_antigo} ({p['tipo']}) está gravado com a data {_br(gravada)}, "
                          f"não {_br(alvo['data'])}")
-    if canon != g["numero_oficio"] and (achar(canon) is not None or achar(canon, so_cadastro=True) is not None):
+    if gravada == p["data"] and canon_antigo == canon:
+        rel["iguais"] += 1                     # sem data antiga dita e nada a trocar
+        _avisa_diferencas(g, p, f"{nome}/{p['tipo']} {canon}", avisos)
+        return
+    if canon != canon_antigo and (achar(canon) is not None or achar(canon, so_cadastro=True) is not None):
         raise ValueError(f"{nome}: já existe pleito {canon} ({p['tipo']}); a correção de {canon_antigo} "
                          "repetiria o ofício")
+    data_mudou = gravada != p["data"]
     # so' a data muda a ligacao ao termo; trocar so' o oficio mantem o termo que atende o pleito
-    chave = g["instrumento_chave"] if gravada == p["data"] else None
-    antes = {"enviado_em": g["enviado_em"], "numero_oficio": g["numero_oficio"],
-             "instrumento_chave": g["instrumento_chave"]}
+    chave = None if data_mudou else g["instrumento_chave"]
+    antes = {"enviado_em": g["enviado_em"], "numero_oficio": canon_antigo, "instrumento_chave": g["instrumento_chave"]}
     depois = {"enviado_em": p["data"], "numero_oficio": canon, "instrumento_chave": chave}
     conn.execute("UPDATE pleitos SET enviado_em=?, numero_oficio=?, instrumento_chave=? WHERE id=?",
                  (p["data"], canon, chave, g["id"]))
     a, d = _diferencas(antes, depois)
     auditoria.registrar(conn, usuario_id, "cadastro.pleito", "pleito", g["id"], a, d)
+    if data_mudou and p["tipo"] == "reajuste":
+        # revisor e gate Sol (PR #411): a data nova pode mudar qual pleito do ciclo o termo atende. Desliga os outros
+        # pleitos do mesmo ciclo e `_apostilamentos_de_reajuste` religa todos pela regra de sempre (o ultimo enviado
+        # ate' a data do termo), chegando ao mesmo estado de uma aplicacao do zero
+        for o in conn.execute("SELECT id, instrumento_chave FROM pleitos WHERE contrato_id=? AND tipo='reajuste' "
+                              "AND data_base_mes=? AND ciclo=? AND instrumento_chave IS NOT NULL AND id<>?",
+                              (contrato_id, g["data_base_mes"], g["ciclo"], g["id"])).fetchall():
+            conn.execute("UPDATE pleitos SET instrumento_chave=NULL WHERE id=?", (o["id"],))
+            auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", o["id"],
+                                {"instrumento_chave": o["instrumento_chave"]}, {"instrumento_chave": None})
     mudancas = []
-    if gravada != p["data"]:
+    if data_mudou:
         mudancas.append(f"data {_br(gravada)} → {_br(p['data'])}")
-    if canon != g["numero_oficio"]:
-        mudancas.append(f"ofício {g['numero_oficio']} → {canon}")
+    if canon != canon_antigo:
+        mudancas.append(f"ofício {canon_antigo} → {canon}")
     rel["alterados"].append(f"{nome}/{p['tipo']}: pleito {canon_antigo}: {', '.join(mudancas)}")
+    _avisa_diferencas(g, p, f"{nome}/{p['tipo']} {canon}", avisos)
+
+
+def _avisa_diferencas(gravado, p, rotulo, avisos) -> None:
+    """Revisor e gate Sol (PR #411): o que `corrige` nao troca (dias, valor, objeto) e difere do gravado vira o mesmo
+    aviso do pleito sem `corrige` (#398); o ciclo diferente ja' parou antes."""
+    difere = [nome for chave, coluna, nome in _CAMPOS_PLEITO
+              if chave not in ("data", "ciclo") and p.get(chave) != gravado[coluna]]
+    if difere:
+        avisos.append(f"{rotulo}: {', '.join(difere)} no YAML difere do gravado; o gravado fica "
+                      "(corrige troca só a data e o ofício)")
 
 
 def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
