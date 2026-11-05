@@ -771,6 +771,30 @@ def test_ciclo_ou_data_base_invalido_no_aditivo_e_erro(tmp_path, extra, campo):
     assert any(f"instrumentos[ta-08].{campo}" in e for e in erros), erros
 
 
+@pytest.mark.parametrize("ciclo, trecho", [
+    ("2025-99", "quatro dígitos"),             # formato: so' o ano
+    (2023, "de 2024 a 2026"),                  # no ano da data-base (2023-04) ou antes
+    (2027, "de 2024 a 2026"),                  # depois do ciclo da assinatura (20/10/2026)
+])
+def test_ciclo_do_aditivo_fora_do_intervalo_ou_do_formato_e_erro(tmp_path, ciclo, trecho):
+    # gate Sol (rodada extra, PR #407): de ano_base + 1 ao ciclo do ultimo aniversario ate' a assinatura
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [{**TA_REAJ, "ciclo": ciclo}]}]))
+    assert any("instrumentos[ta-08].ciclo" in e and trecho in e for e in erros), erros
+
+
+def test_ciclo_do_aditivo_nas_pontas_do_intervalo_e_aceito(tmp_path):
+    for ciclo in (2024, 2026):
+        c = {**CONTRATO, "instrumentos": [{**TA_REAJ, "ciclo": ciclo}]}
+        assert ca.preparar(_escrever(tmp_path / str(ciclo), contratos=[c]))["contratos"][0]["instrumentos"][0][
+            "dados"]["ciclo"] == ciclo
+
+
+def test_ciclo_do_aditivo_assinado_antes_do_primeiro_aniversario_e_erro(tmp_path):
+    cedo = {**TA_REAJ, "data": "2024-03-31", "ciclo": 2024}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [cedo]}]))
+    assert any("instrumentos[ta-08].ciclo" in e and "antes do primeiro aniversário" in e for e in erros), erros
+
+
 def test_aditivo_de_reajuste_em_contrato_de_duas_bases_e_aviso(tmp_path):
     bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
              {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
