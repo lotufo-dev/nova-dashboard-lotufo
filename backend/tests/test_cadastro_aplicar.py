@@ -1486,3 +1486,133 @@ def test_corrige_que_aponta_para_o_estado_atual_sem_correcao_registrada_e_erro(c
     with pytest.raises(ValueError, match="já está com a data 06/05/2026 e esse ofício, sem correção registrada; "
                                          "tire o corrige do item"):
         cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[sobra])]))
+
+
+# --- issue #414: termo de correcao ligado pela regra antiga (data do proprio termo) e' religado ------------------
+
+CT120 = {**PLEITO_2026, "oficio": "CT-120-LT-2026", "data": "2026-04-01"}     # P1: antes de ap-11 (01/05)
+CT130 = {**PLEITO_2026, "oficio": "CT-130-LT-2026", "data": "2026-06-01"}     # P2: reemissao entre ap-11 e ap-12
+
+
+def _atendidos(conn):
+    return conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0]
+
+
+def _legado_p2_t2(conn, instrumentos=(T1, T2), pleitos=(CT120, CT130)):
+    """O estado que a carga de antes da PR #411 deixou: ap-12 corrige ap-11 e foi ligado pela data dele (01/07), ao
+    CT-130 (reemissao), e nao pela data de ap-11 (01/05), ao CT-120."""
+    cad = _cad(contratos=[_contrato(instrumentos=list(instrumentos), pleitos_anteriores=list(pleitos))])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    conn.execute("UPDATE pleitos SET instrumento_chave=NULL WHERE numero_oficio='CT-120-LT-2026'")
+    conn.execute("UPDATE pleitos SET instrumento_chave='ap-12' WHERE numero_oficio='CT-130-LT-2026'")
+    conn.commit()
+    return cad
+
+
+RELIGADO = ["MT-402/reajuste CT-130-LT-2026: sem termo (ap-12 religado ao CT-120-LT-2026, o último enviado até "
+            "01/05/2026)",
+            "MT-402/reajuste CT-120-LT-2026: atendido por ap-12 (religado)"]
+
+
+def test_termo_de_correcao_ligado_pela_regra_antiga_e_religado_com_auditoria(conn):
+    import datetime
+    cad = _legado_p2_t2(conn)
+    assert _ligacoes(conn) == {"CT-120-LT-2026": None, "CT-130-LT-2026": "ap-12"}
+    assert reajuste_mod.ciclos(conn, 1, datetime.date(2026, 10, 20))[0]["situacao"] == "apostilado"
+    antes = _atendidos(conn)
+    # o ensaio mostra a mudanca e nao grava
+    r = cadastro_aplicar.aplicar(conn, 1, cad, ensaio=True)
+    assert r["pleitos"]["alterados"] == RELIGADO
+    assert _ligacoes(conn) == {"CT-120-LT-2026": None, "CT-130-LT-2026": "ap-12"}
+    assert _atendidos(conn) == antes
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == RELIGADO
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-12", "CT-130-LT-2026": None}
+    # auditoria dos dois lados: a reemissao perde o termo, o pleito do termo original o ganha
+    ids = dict(conn.execute("SELECT numero_oficio, id FROM pleitos").fetchall())
+    eventos = [(int(r[0]), json.loads(r[1]), json.loads(r[2])) for r in conn.execute(
+        "SELECT entidade_id, antes, depois FROM audit_log WHERE acao='cadastro.pleito_atendido' ORDER BY id")][antes:]
+    assert eventos == [(ids["CT-130-LT-2026"], {"instrumento_chave": "ap-12"}, {"instrumento_chave": None}),
+                       (ids["CT-120-LT-2026"], {"instrumento_chave": None}, {"instrumento_chave": "ap-12"})]
+    # a reemissao volta a esperar o termo dela
+    assert reajuste_mod.ciclos(conn, 1, datetime.date(2026, 10, 20))[0]["situacao"] == "apostilamento_pendente"
+
+
+def test_segunda_reaplicacao_do_termo_religado_e_igual_e_nao_audita(conn):
+    cad = _legado_p2_t2(conn)
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log WHERE entidade='pleito'").fetchone()[0]
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"] == {"criados": [], "alterados": [], "iguais": 2}
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-12", "CT-130-LT-2026": None}
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE entidade='pleito'").fetchone()[0] == antes
+
+
+def test_ciclo_sem_cadeia_de_correcao_nao_e_tocado_pela_religacao(conn):
+    # ap-05 (ciclo 2025, sem correcao) atendeu o CT-050; o CT-060, enviado antes de ap-05, entrou depois no cadastro.
+    # A ligacao do termo original fica como esta': so' o termo de correcao se reconfere
+    ap05 = {**AP_COMP, "chave": "ap-05", "numero": "019/2024/02/05", "data": "2025-09-01",
+            "dados": {**AP_COMP["dados"], "ciclo": 2025, "periodo": None,
+                      "competencias": [{"competencia": "2025-04", "valor": "1,00"}]}}
+    ct050 = {**PLEITO_2026, "oficio": "CT-050-LT-2025", "data": "2025-05-01", "ciclo": 2025}
+    ct060 = {**PLEITO_2026, "oficio": "CT-060-LT-2025", "data": "2025-08-01", "ciclo": 2025}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ap05], pleitos_anteriores=[ct050])]))
+    cad = _legado_p2_t2(conn, instrumentos=(ap05, T1, T2), pleitos=(ct050, ct060, CT120, CT130))
+    assert _ligacoes(conn) == {"CT-050-LT-2025": "ap-05", "CT-060-LT-2025": None,
+                               "CT-120-LT-2026": None, "CT-130-LT-2026": "ap-12"}
+    de_2025 = [str(i) for (i,) in conn.execute("SELECT id FROM pleitos WHERE ciclo=2025")]
+    sql = f"SELECT COUNT(*) FROM audit_log WHERE entidade='pleito' AND entidade_id IN ({','.join('?' * len(de_2025))})"
+    eventos = conn.execute(sql, de_2025).fetchone()[0]
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == RELIGADO
+    assert _ligacoes(conn) == {"CT-050-LT-2025": "ap-05", "CT-060-LT-2025": None,
+                               "CT-120-LT-2026": "ap-12", "CT-130-LT-2026": None}
+    assert conn.execute(sql, de_2025).fetchone()[0] == eventos
+
+
+def test_correcao_de_correcao_que_herdou_a_ligacao_antiga_e_religada(conn):
+    # ap-12 ficou ligado pela regra antiga ao CT-130; ap-13 corrige ap-12 e herda a ligacao: se reconfere do mesmo jeito
+    _legado_p2_t2(conn)
+    t3 = {**AP_COMP, "chave": "ap-13", "numero": "019/2024/02/13", "data": "2026-08-01", "corrige": "ap-12"}
+    cad = _cad(contratos=[_contrato(instrumentos=[T1, T2, t3], pleitos_anteriores=[CT120, CT130])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-13", "CT-130-LT-2026": None}
+    antes = _atendidos(conn)
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+    assert _atendidos(conn) == antes
+
+
+def test_termo_de_correcao_sem_pleito_ate_a_data_do_original_perde_a_ligacao_antiga_com_aviso(conn):
+    # sem o CT-120 no cadastro, pela data de ap-11 nao ha' pleito: a ligacao antiga ao CT-130 sai, com aviso
+    cad = _legado_p2_t2(conn, pleitos=(CT130,))
+    assert _ligacoes(conn) == {"CT-130-LT-2026": "ap-12"}
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-130-LT-2026": None}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-130-LT-2026: sem termo (ap-12 religado: nenhum pleito do "
+                                         "ciclo enviado até 01/05/2026)"]
+    assert any(a.startswith("MT-402/ap-12: ") and "CT-130-LT-2026 saiu" in a for a in r["avisos"]), r["avisos"]
+    antes = _atendidos(conn)
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == [] and not any("MT-402/ap-12" in a for a in r["avisos"])
+    assert _atendidos(conn) == antes
+
+
+def test_correcao_da_data_de_pleito_nao_perde_a_ligacao_ao_aditivo_de_reajuste(conn):
+    # comentario da #414: a correcao de data desliga os pleitos do ciclo, inclusive o ligado ao aditivo de reajuste
+    # (#390); o aplicar o religa como numa aplicacao do zero
+    errado = {**PLEITO_2026, "data": "2026-10-20"}        # depois do aditivo (30/07)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ],
+                                                                pleitos_anteriores=[CT120, errado])]))
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ta-08", "CT-122-LT-2026": None}
+    # ainda depois do aditivo: o CT-120 continua atendido por ele
+    tarde = {**PLEITO_2026, "data": "2026-08-15", "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-10-20"}}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[CT120, tarde])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ta-08", "CT-122-LT-2026": None}
+    antes = _atendidos(conn)
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+    assert _atendidos(conn) == antes
+    # antes do aditivo: o ultimo enviado ate' a assinatura passa a ser o atendido
+    cedo = {**PLEITO_2026, "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-08-15"}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[CT120, cedo])]))
+    assert _ligacoes(conn) == {"CT-120-LT-2026": None, "CT-122-LT-2026": "ta-08"}
