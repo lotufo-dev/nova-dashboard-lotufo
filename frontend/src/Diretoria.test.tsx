@@ -6,13 +6,14 @@ const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
 const g = (quantidade: number, valor_centavos: number | null) => ({ quantidade, valor_centavos });
+type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
 const PAINEL = {
   hoje: "2026-09-24", total_a_receber_liberado: false,
   dinheiro: {
     medido_esperando_nota: g(2, 150_000), nota_esperando_protocolo: g(0, 0), recebido_mes: g(0, 0),
     protocolado: { ...g(2, null), faixas: { ate_30: g(1, null), de_31_a_60: g(0, null), mais_60: g(1, null) },
                    por_orgao: [{ orgao: "SINFRA", ...g(2, null), maior_dias: 85 }] },
-    reajustes_apostilamento: { quantidade: 1, maior_dias: 92 } },
+    reajustes_apostilamento: { quantidade: 1, maior_dias: 92, competencias: 0, valor_centavos: 0, obras: [] as ReajusteObra[] } },
   mes_ano: { mes: "2026-09", medido_mes_centavos: 150_000, previsto_mes_centavos: 200_000,
              mesmo_mes_ano_anterior_centavos: 80_000, acumulado_ano_centavos: 1_000_000, previsto_ano_centavos: 2_000_000,
              faturado_mes_centavos: 123_456_789, notas_faturadas_mes: 2,
@@ -24,7 +25,8 @@ const PAINEL = {
   carteira: { saldo_centavos: 5_000_000, ritmo_mensal_centavos: 100_000, meses_de_producao: 50,
               por_orgao: [{ orgao: "SINFRA", saldo_centavos: 5_000_000, fracao: 1, vigente_centavos: 20_000_000, medido_centavos: 15_000_000, obras: 3 }] },
   obras: [{ contrato_id: 7, seq: 1, obra: "Cavalaria", contratante: "SINFRA", empreita: "PRÓPRIA", direito: 1,
-            pi_va: 1_000_000, faturados: 400_000, saldo: 600_000, pct_recebido: 0.4, status: "EM ANDAMENTO",
+            // #262: faturado (QDOP, com projeto) e saldo (execucao - medido de execucao) nao fecham entre si
+            pi_va: 1_000_000, faturados: 450_000, saldo: 600_000, pct_recebido: 0.4, status: "EM ANDAMENTO",
             termino: "2026-12-20", vigencia: "2027-03-20", farol: "vermelho", motivo: "Cavalaria: execução vencida",
             motivos: [{ tipo: "instrumento_pendente", nivel: "critico", dias: -12, valor_centavos: null, texto: "execução vencida" }],
             desvio_pp: -16.7, desvio_base: "anterior" }],
@@ -97,6 +99,11 @@ describe("Carteira", () => {
     const tabela = await screen.findByRole("table", { name: /QDOP, na cota da Lotufo/ });
     const cabecalho = within(tabela).getAllByRole("columnheader").map(h => h.textContent);
     expect(cabecalho).toContain("Desvio (p.p.)");
+    // #262: a tabela soma o contratual sem o aditivo de reajuste (a base do saldo); o rotulo diz a base
+    expect(cabecalho).toContain("Contratual de execução (PI+VA)");
+    // #262 (revisao, rodada 3): o saldo e' o contratual de execucao menos o medido de execucao, nao menos o faturado
+    expect(cabecalho).toContain("Saldo (contratual de execução − medido)");
+    expect(cabecalho).not.toContain("Saldo (contratual − faturado)");
     const coluna = cabecalho.indexOf("Desvio (p.p.)");
     const celula = (obra: string) => {
       const linha = within(tabela).getByText(obra).closest("tr") as HTMLElement;
@@ -120,7 +127,7 @@ describe("Carteira", () => {
   });
 
   it("QDOP: o farol de Ação e o de Atenção têm rótulos diferentes (D10), o filtro recorta e o total acompanha", async () => {
-    const outra = { ...PAINEL.obras[0], contrato_id: 8, seq: 2, obra: "Outra", farol: "atencao", pi_va: 500_000, faturados: 100_000, saldo: 400_000 };
+    const outra = { ...PAINEL.obras[0], contrato_id: 8, seq: 2, obra: "Outra", farol: "atencao", pi_va: 500_000, faturados: 150_000, saldo: 400_000 };
     const verde = { ...PAINEL.obras[0], contrato_id: 9, seq: 3, obra: "Tranquila", farol: "verde", motivos: [] };
     const respostas: Record<string, unknown> = { ...RESPOSTAS, "/api/diretoria": { ...PAINEL, obras: [{ ...PAINEL.obras[0], farol: "acao" }, outra, verde] } };
     api.mockImplementation((url: string) => Promise.resolve(respostas[url]));
@@ -134,10 +141,11 @@ describe("Carteira", () => {
     expect(screen.getByRole("button", { name: "Atenção" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^Atenção/ }));
     expect(within(tabela).queryByText("Cavalaria")).toBeNull();
-    // total do recorte: só a "Outra" (contratual 5.000,00; faturado 1.000,00; saldo 4.000,00)
+    // total do recorte: só a "Outra" (contratual 5.000,00; faturado 1.500,00; saldo do servidor 4.000,00)
     const total = within(tabela).getByText("Total").closest("tr") as HTMLElement;
     const txt = (total.textContent ?? "").replace(/\s/g, " ");
     expect(txt).toContain("R$ 5.000,00");
+    expect(txt).toContain("R$ 1.500,00");
     expect(txt).toContain("R$ 4.000,00");
   });
 
@@ -176,6 +184,34 @@ describe("Carteira", () => {
     const kpis = screen.getAllByRole("listitem").filter(i => i.classList.contains("kpi"));
     expect(kpis.length).toBe(10);
     kpis.forEach(i => { expect(i.parentElement?.tagName).toBe("UL"); expect(i.hasAttribute("role")).toBe(false); });
+  });
+
+  it("Produção: os reajustes esperando apostilamento listam por obra as competências e o medido, com o total (#279)", async () => {
+    const reajustes = { quantidade: 2, maior_dias: 120, competencias: 5, valor_centavos: 750_004,
+      obras: [{ contrato_id: 7, obra: "Cavalaria", competencias: 3, valor_centavos: 650_003 },
+              { contrato_id: 8, obra: "Consórcio Sul", competencias: 2, valor_centavos: 100_001 }] };
+    const painel = { ...PAINEL, dinheiro: { ...PAINEL.dinheiro, reajustes_apostilamento: reajustes } };
+    api.mockImplementation((url: string) => Promise.resolve(url === "/api/diretoria" ? painel : RESPOSTAS[url]));
+    render(<Diretoria ir={() => {}} aba="producao" />);
+    const tabela = await screen.findByRole("table", { name: /Reajustes esperando apostilamento/ });
+    expect(within(tabela).getAllByRole("columnheader").map(h => h.textContent)).toEqual(["Obra", "Competências", "Medido"]);
+    const texto = (l: HTMLElement) => within(l).getAllByRole("cell").map(c => (c.textContent ?? "").replace(/\s/g, " "));
+    const [, primeira, segunda, total] = within(tabela).getAllByRole("row");
+    expect(texto(primeira)).toEqual(["Cavalaria", "3", "R$ 6.500,03"]);
+    expect(texto(segunda)).toEqual(["Consórcio Sul", "2", "R$ 1.000,01"]);
+    expect((total.textContent ?? "").replace(/\s/g, " ")).toBe("Total5R$ 7.500,04");
+    // a obra leva ao reajuste dela
+    expect(within(tabela).getByRole("link", { name: "Cavalaria" }).getAttribute("href")).toBe("/obras/7/reajuste");
+    // so' o rotulo e o valor: sem os dias nem a contagem de ciclos
+    expect(screen.queryByText(/120/)).toBeNull();
+  });
+
+  it("Produção: sem reajuste esperando apostilamento, uma linha no lugar da tabela", async () => {
+    api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
+    render(<Diretoria ir={() => {}} aba="producao" />);
+    expect(await screen.findByText("Reajustes esperando apostilamento (cota)")).toBeTruthy();
+    expect(screen.getByText("Nenhum reajuste esperando apostilamento.")).toBeTruthy();
+    expect(screen.queryByRole("table", { name: /Reajustes esperando apostilamento/ })).toBeNull();
   });
 
   it("QDOP: exporta a planilha e mostra os motivos da obra", async () => {

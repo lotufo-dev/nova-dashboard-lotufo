@@ -176,7 +176,8 @@ from app import contratos as contratos_mod
 
 AD_VALOR = {"chave": "ta-01", "tipo": "aditivo_valor", "data": "2026-06-30", "numero": "019/2024/01/01",
             "objeto": "1ª revisão em fase de obra", "corrige": None, "pdf": None,
-            "delta_valor_centavos": 323606718, "nova_execucao_fim": None, "nova_vigencia_fim": None, "dados": {}}
+            "delta_valor_centavos": 323606718, "nova_execucao_fim": None, "nova_vigencia_fim": None, "dados": {},
+            "natureza": "execucao"}
 AP_PRAZO = {"chave": "ap-10", "tipo": "apostilamento_prazo", "data": "2026-08-26", "numero": "019/2024/02/10",
             "objeto": None, "corrige": None, "pdf": None, "delta_valor_centavos": 0,
             "nova_execucao_fim": "2027-02-24", "nova_vigencia_fim": "2027-05-25", "dados": {}}
@@ -504,6 +505,69 @@ def test_endosso_com_vigencia_aplicado_e_imutavel(conn):
         cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[troca])]))
 
 
+def test_natureza_do_aditivo_e_gravada(conn):
+    """#262: o aditivo de reajuste (SES) entra no vigente mas fica fora do saldo."""
+    reaj = {**AD_VALOR, "chave": "ta-08", "data": "2026-07-30", "delta_valor_centavos": 100_01, "natureza": "reajuste"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR, reaj])]))
+    nat = dict(conn.execute("SELECT chave_cadastro, natureza FROM aditivos").fetchall())
+    assert nat == {"ta-01": "execucao", "ta-08": "reajuste"}
+    v = contratos_mod.vigente(conn, 1)
+    assert v["valor_vigente_centavos"] == 1512720000 + 323606718 + 100_01
+    assert v["valor_vigente_execucao_centavos"] == 1512720000 + 323606718
+    assert v["valor_reajuste_centavos"] == 100_01
+
+
+def test_aditivo_de_valor_novo_sem_natureza_e_recusado(conn):
+    """Gate Sol (#262): o NULL e' so' do legado. Aditivo de valor novo sem `natureza` voltaria a inflar o saldo
+    em silencio, entao o aplicar recusa e nada e' gravado. Instrumento sem valor (prazo) nao precisa."""
+    sem = {k: v for k, v in AD_VALOR.items() if k != "natureza"}
+    with pytest.raises(ValueError, match="natureza"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[sem])]))
+    assert conn.execute("SELECT COUNT(*) FROM aditivos").fetchone()[0] == 0
+    misto = {**sem, "chave": "tm-01", "tipo": "aditivo_misto", "nova_execucao_fim": "2027-01-31"}
+    with pytest.raises(ValueError, match="natureza"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[misto])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_PRAZO])]))
+    assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] is None
+
+
+def _legado(conn):
+    """Aditivo aplicado antes da 046: a coluna ficou NULL (nao classificado, conta como execucao)."""
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR])]))
+    conn.execute("UPDATE aditivos SET natureza=NULL"); conn.commit()
+
+
+def _natureza_aplicada(conn, natureza):
+    inst = {**AD_VALOR, "natureza": natureza}
+    if natureza is None:
+        del inst["natureza"]
+    return cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[inst])]))
+
+
+def test_natureza_primeira_classificacao_aceita_e_troca_depois_recusada(conn):
+    """O aditivo legado (NULL) aceita a PRIMEIRA classificacao, auditada; depois ela trava como valor e data:
+    trocar ou apagar o campo e' recusado e nada muda."""
+    _legado(conn)
+    assert _natureza_aplicada(conn, None)["instrumentos"]["iguais"] == 1          # legado sem o campo: igual
+    r = _natureza_aplicada(conn, "reajuste")
+    assert r["instrumentos"]["alterados"] == ["MT-402/ta-01"]
+    assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] == "reajuste"
+    ult = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.instrumento' ORDER BY id DESC").fetchone()
+    assert json.loads(ult["antes"])["natureza"] is None and json.loads(ult["depois"])["natureza"] == "reajuste"
+    assert _natureza_aplicada(conn, "reajuste")["instrumentos"]["iguais"] == 1
+    for troca in ("execucao", None):                     # trocar, ou apagar sem querer, nao passa
+        with pytest.raises(ValueError, match="já aplicado.*natureza.*corrige"):
+            _natureza_aplicada(conn, troca)
+        assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] == "reajuste"
+
+
+def test_natureza_execucao_declarada_tambem_trava(conn):
+    _natureza_aplicada(conn, "execucao")
+    with pytest.raises(ValueError, match="já aplicado"):
+        _natureza_aplicada(conn, "reajuste")
+    assert conn.execute("SELECT natureza FROM aditivos").fetchone()[0] == "execucao"
+
+
 # --- issue #256: cronograma por versao, com a data do documento -------------------------------
 
 from app import cronograma as cronograma_mod
@@ -523,7 +587,8 @@ def test_cronograma_aplicado_cria_uma_versao_por_entrada_com_a_data_do_documento
     assert [tuple(v) for v in vs] == [
         (1, "2024-03-11 04:00:00", "contratual", "contratual", "2024-03-11", None),
         (2, "2026-10-05 04:00:00", "ta-01", "aditivo", "2026-10-05", "ta-01")]
-    assert cronograma_mod.previsto_efetivo(conn, 1) == {"2024-04": 100_01, "2026-10": 250_00, "2026-12": 400_00}
+    # o aditivo (issue #396) substitui a curva inteira: o previsto da contratual que ele nao traz sai
+    assert cronograma_mod.previsto_efetivo(conn, 1) == {"2026-10": 250_00, "2026-12": 400_00}
     assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cronograma.nova_versao'").fetchone()[0] == 2
 
 
@@ -579,5 +644,1345 @@ def test_versao_da_carga_fica_superada_so_pela_versao_do_yaml_de_data_posterior(
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL, V_TA])]))
     assert cronograma_mod.vigente(conn, 1)["numero"] == 3                  # o aditivo supera a carga
     assert cronograma_mod.previsto_efetivo(conn, 1) == {
-        "2024-04": 100_01, "2026-08": 50_00, "2026-09": 60_00, "2026-10": 250_00, "2026-12": 400_00}
+        "2026-10": 250_00, "2026-12": 400_00}      # issue #396: o aditivo substitui a curva inteira
     assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 3     # nada apagado
+
+
+# --- issue #395: cronograma_superadas tira a carga de 04/09/2026 da linha do tempo -------------------------
+
+def _com_carga(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    cronograma_mod.nova_versao(conn, 1, 1, [("2026-08", 50_00), ("2026-09", 60_00), ("2026-10", 70_00),
+                                            ("2026-11", 80_00)], "manual")
+    conn.execute("UPDATE cronograma_versoes SET criado_em='2026-09-04 15:00:00'")
+    conn.commit()
+
+
+def test_cronograma_superadas_supera_a_carga_com_auditoria(conn):
+    _com_carga(conn)
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL],
+                                                                    cronograma_superadas=[1])]))
+    assert "MT-402: versão 1 superada" in r["cronograma"]["alterados"]
+    assert not any("não é a vigente" in a for a in r["avisos"])        # a do documento passou a mandar
+    assert cronograma_mod.vigente(conn, 1)["numero"] == 2
+    assert cronograma_mod.previsto_efetivo(conn, 1) == {"2024-04": 100_01, "2026-10": 200_00, "2026-11": 300_00}
+    sup = conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0]
+    assert sup is not None
+    aud = conn.execute("SELECT entidade, entidade_id, depois FROM audit_log "
+                       "WHERE acao='cadastro.cronograma_superada'").fetchall()
+    assert [(a[0], a[1], json.loads(a[2])) for a in aud] == [("contrato", "1", {"versao": 1, "superada_em": sup})]
+    assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 2     # nada apagado
+
+
+def test_cronograma_superadas_segunda_aplicacao_e_igual_e_tirar_da_lista_nao_dessupera(conn):
+    _com_carga(conn)
+    cad = _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL], cronograma_superadas=[1])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    sup = conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0]
+    r2 = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r2["cronograma"] == {"criados": [], "alterados": [], "iguais": 2}      # a versao 2 e a superada
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] == sup
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.cronograma_superada'").fetchone()[0] == 1
+
+
+def test_ensaio_relata_a_versao_superada_e_nao_grava(conn):
+    _com_carga(conn)
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma_superadas=[1])]), ensaio=True)
+    assert r["cronograma"]["alterados"] == ["MT-402: versão 1 superada"]
+    # sem versao de documento no YAML, a obra fica sem vigente: quem aplica fica sabendo no ensaio
+    assert any("MT-402" in a and "sem cronograma vigente" in a for a in r["avisos"])
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] is None
+
+
+def test_cronograma_superadas_com_numero_inexistente_e_recusado(conn):
+    _com_carga(conn)
+    with pytest.raises(ValueError, match="versão 7 não existe"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma_superadas=[1, 7])]))
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] is None
+
+
+def test_cronograma_superadas_com_versao_do_cadastro_e_recusado(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
+    with pytest.raises(ValueError, match="versão 1 veio do cadastro .*contratual"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL],
+                                                                    cronograma_superadas=[1])]))
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes").fetchone()[0] is None
+
+
+# --- issue #271: apostilamento com competencias vira previsao e atende o pleito (spec 2026-10-20 §2.2) ----------
+
+from app import reajuste as reajuste_mod
+
+PLEITO_2026 = {"tipo": "reajuste", "oficio": "CT-122-LT-2026", "data": "2026-04-23", "data_base": "2023-04",
+               "ciclo": 2026, "dias": None}
+AP_COMP = {**AP_REAJ, "chave": "ap-11", "data": "2026-09-15", "numero": "019/2024/02/11",
+           "dados": {"data_base": "2023-04", "ciclo": 2026, "periodo": {"de": "2026-04", "ate": "2026-06"},
+                     "competencias": [{"competencia": "2026-04", "valor": "1.234,57", "medicao": 24},
+                                      {"competencia": "2026-05", "valor": "2.000,01", "medicao": 25}]}}
+
+
+def _previsoes(conn):
+    return [tuple(r) for r in conn.execute(
+        "SELECT data_base_mes, ciclo, competencia, valor_previsto_centavos, origem, instrumento_id, usuario_id "
+        "FROM reajuste_previsoes ORDER BY id")]
+
+
+def test_apostilamento_com_competencias_grava_previsoes_e_liga_o_pleito(conn):
+    cad = _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    inst = conn.execute("SELECT id FROM instrumentos WHERE chave='ap-11'").fetchone()[0]
+    assert _previsoes(conn) == [("2023-04", 2026, "2026-04", 123457, "apostilamento", inst, 1),
+                                ("2023-04", 2026, "2026-05", 200001, "apostilamento", inst, 1)]
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.reajuste_previsoes'").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0] == 1
+    # segunda aplicacao: nada duplica, nada se audita de novo
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["instrumentos"]["iguais"] == 1
+    assert len(_previsoes(conn)) == 2
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao IN "
+                        "('cadastro.reajuste_previsoes','cadastro.pleito_atendido')").fetchone()[0] == 2
+
+
+def test_pleito_que_entra_depois_do_apostilamento_tambem_e_ligado(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP])]))
+    assert len(_previsoes(conn)) == 2
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+
+
+def test_apostilamento_sem_competencias_nao_grava_previsao_mas_atende_o_pleito(conn):
+    ap = {**AP_REAJ, "data": "2026-09-15", "dados": {"data_base": "2023-04", "ciclo": 2026, "percentual": "6,76"}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ap], pleitos_anteriores=[PLEITO_2026])]))
+    assert _previsoes(conn) == []
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-09"
+
+
+def test_apostilamento_de_outro_ciclo_nao_atende_o_pleito(conn):
+    ap = {**AP_COMP, "dados": {**AP_COMP["dados"], "ciclo": 2025, "periodo": None,
+                               "competencias": [{"competencia": "2025-04", "valor": "1,00"}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ap], pleitos_anteriores=[PLEITO_2026])]))
+    assert [p[1:3] for p in _previsoes(conn)] == [(2025, "2025-04")]
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+
+
+def test_termo_com_corrige_gera_previsoes_novas_que_valem_e_as_antigas_ficam(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])]))
+    correcao = {**AP_COMP, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-10-01", "corrige": "ap-11",
+                "dados": {**AP_COMP["dados"], "competencias": [{"competencia": "2026-04", "valor": "1.300,03", "medicao": 24}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP, correcao],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    ids = dict(conn.execute("SELECT chave, id FROM instrumentos").fetchall())
+    # as antigas continuam no historico
+    assert [(p[2], p[3], p[5]) for p in _previsoes(conn)] == [
+        ("2026-04", 123457, ids["ap-11"]), ("2026-05", 200001, ids["ap-11"]), ("2026-04", 130003, ids["ap-12"])]
+    vig = {p["competencia"]: (p["valor_previsto_centavos"], p["instrumento_id"])
+           for p in reajuste_mod.previsoes_vigentes(conn, 1)}
+    # a correcao passa a valer, e o termo corrigido deixa de valer por inteiro: a competencia que a correcao nao
+    # repete fica sem previsao de apostilamento (gates da PR #317)
+    assert vig == {"2026-04": (130003, ids["ap-12"])}
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-12"
+
+
+def test_competencia_listada_por_engano_some_com_a_correcao(conn):
+    errado = {**AP_COMP, "dados": {**AP_COMP["dados"], "periodo": None,
+                                   "competencias": [{"competencia": "2026-04", "valor": "1,01"},
+                                                    {"competencia": "2026-07", "valor": "7,07"}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[errado])]))
+    correcao = {**AP_COMP, "chave": "ap-12", "data": "2026-10-01", "corrige": "ap-11",
+                "dados": {**AP_COMP["dados"], "periodo": None,
+                          "competencias": [{"competencia": "2026-04", "valor": "1,03"},
+                                           {"competencia": "2026-06", "valor": "6,05"}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[errado, correcao])]))
+    vig = {p["competencia"]: p["valor_previsto_centavos"] for p in reajuste_mod.previsoes_vigentes(conn, 1)}
+    assert vig == {"2026-04": 103, "2026-06": 605}
+    assert [x["competencia"] for x in reajuste_mod.competencias_apostiladas(conn, 1)] == ["2026-04", "2026-06"]
+
+
+def _termo(chave, data, valor, corrige=None, ciclo=2026):
+    return {**AP_COMP, "chave": chave, "numero": f"{chave}/2026", "data": data, "corrige": corrige,
+            "dados": {"data_base": "2023-04", "ciclo": ciclo, "competencias": [{"competencia": "2026-04", "valor": valor}]}}
+
+
+def test_termo_antigo_acrescentado_depois_nao_passa_por_cima_do_mais_novo(conn):
+    novo = _termo("ap-novo", "2026-10-01", "2,03")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[novo])]))
+    antigo = _termo("ap-antigo", "2026-08-01", "1,01")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[novo, antigo])]))
+    assert [(x["valor_centavos"], x["instrumento_chave"]) for x in reajuste_mod.competencias_apostiladas(conn, 1)] \
+        == [(203, "ap-novo")]
+
+
+def test_correcao_aplicada_depois_de_termo_mais_novo_nao_passa_por_cima_dele(conn):
+    t1 = _termo("ap-t1", "2026-09-01", "1,01")
+    t3 = _termo("ap-t3", "2026-10-10", "3,03")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1, t3])]))
+    t2 = _termo("ap-t2", "2026-10-01", "2,05", corrige="ap-t1")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1, t3, t2])]))
+    assert [(x["valor_centavos"], x["instrumento_chave"]) for x in reajuste_mod.competencias_apostiladas(conn, 1)] \
+        == [(303, "ap-t3")]
+
+
+def test_termo_corrigido_nao_fecha_o_ciclo(conn):
+    import datetime
+    hoje = datetime.date(2026, 10, 20)
+    t1 = _termo("ap-t1", "2026-09-01", "1,01")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1])]))
+    assert reajuste_mod.ciclos(conn, 1, hoje)[0]["situacao"] == "apostilado"
+    # a correcao diz que o termo era do ciclo 2025: o de 2026 volta a esperar apostilamento
+    t2 = _termo("ap-t2", "2026-10-01", "1,03", corrige="ap-t1", ciclo=2025)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1, t2])]))
+    assert reajuste_mod.ciclos(conn, 1, hoje)[0]["situacao"] == "pleito_pendente"
+
+
+def test_correcao_herda_o_pleito_do_termo_corrigido_antes_de_buscar_por_data(conn):
+    # A foi atendido por T1; B (reemissao) saiu depois de T1 e antes da correcao, e continua esperando o termo dela
+    reemissao = {**PLEITO_2026, "oficio": "CT-200-LT-2026", "data": "2026-09-20"}
+    cad = lambda insts: _cad(contratos=[_contrato(instrumentos=insts, pleitos_anteriores=[PLEITO_2026, reemissao])])  # noqa: E731
+    cadastro_aplicar.aplicar(conn, 1, cad([AP_COMP]))
+    correcao = {**AP_COMP, "chave": "ap-12", "data": "2026-10-01", "corrige": "ap-11"}
+    cadastro_aplicar.aplicar(conn, 1, cad([AP_COMP, correcao]))
+    ligados = dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall())
+    assert ligados == {"CT-122-LT-2026": "ap-12", "CT-200-LT-2026": None}
+
+
+def test_correcao_para_outro_ciclo_nao_herda_o_pleito_e_ele_fica_sem_termo(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+    # ap-12 corrige ap-11 dizendo que o termo era do ciclo 2025: o pleito de 2026 nao foi atendido por ele
+    outro_ciclo = {**AP_COMP, "chave": "ap-12", "data": "2026-10-01", "corrige": "ap-11",
+                   "dados": {**AP_COMP["dados"], "ciclo": 2025, "periodo": None,
+                             "competencias": [{"competencia": "2025-04", "valor": "1,00"}]}}
+    cad = _cad(contratos=[_contrato(instrumentos=[AP_COMP, outro_ciclo], pleitos_anteriores=[PLEITO_2026])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: sem termo (ap-12 corrige ap-11 para outro ciclo)"]
+    assert reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 10, 20))[0]["situacao"] == \
+        "apostilamento_pendente"
+    # reaplicar nao mexe de novo nem audita de novo
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0]
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == []
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0] == antes
+
+
+def test_competencias_sem_ciclo_determinavel_e_erro_no_aplicar(conn):
+    ruim = {**AP_COMP, "dados": {"competencias": [{"competencia": "2026-04", "valor": "1,00"}], "eficacia": "x"},
+            "data": "2026-09-15"}
+    ruim["dados"]["ciclo"] = "abc"
+    with pytest.raises(ValueError, match="ciclo"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ruim])]))
+    assert conn.execute("SELECT COUNT(*) FROM instrumentos").fetchone()[0] == 0
+
+
+def test_termo_aplicado_sem_data_base_segue_na_base_gravada_quando_entra_a_segunda(conn):
+    # gate Sol (PR #317, S2): termo aplicado com uma base so' no contrato, sem `data_base` (imutavel); depois o
+    # cadastro ganha a segunda base. O aplicar nao recusa: o termo segue na base e no ciclo das previsoes gravadas
+    dados = {k: v for k, v in AP_COMP["dados"].items() if k != "data_base"}
+    termo = {**AP_COMP, "dados": dados}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[termo])]))
+    antes = _previsoes(conn)
+    assert {x[0] for x in antes} == {"2023-04"}
+    duas = [{"mes": "2023-04", "indice": "setorial"}, {"mes": "2023-06", "indice": "FGV/DNIT"}]
+    pleito = {**PLEITO_2026}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[termo], datas_base=duas,
+                                                                pleitos_anteriores=[pleito])]))
+    assert _previsoes(conn) == antes
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+
+
+def test_termo_novo_sem_data_base_em_contrato_de_duas_bases_e_erro_no_aplicar(conn):
+    dados = {k: v for k, v in AP_COMP["dados"].items() if k != "data_base"}
+    duas = [{"mes": "2023-04", "indice": "setorial"}, {"mes": "2023-06", "indice": "FGV/DNIT"}]
+    with pytest.raises(ValueError, match="data-base"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**AP_COMP, "dados": dados}],
+                                                                    datas_base=duas)]))
+    assert conn.execute("SELECT COUNT(*) FROM instrumentos").fetchone()[0] == 0
+
+
+DUAS_BASES = [{"mes": "2023-04", "indice": "setorial"}, {"mes": "2023-06", "indice": "FGV/DNIT"}]
+SO_PERCENTUAL = {**AP_REAJ, "chave": "ap-11", "data": "2026-09-15", "numero": "019/2024/02/11",
+                 "dados": {"ciclo": 2026, "percentual": "6,76"}}
+
+
+def _situacao(conn):
+    import datetime
+    return {k["data_base_mes"]: k["situacao"] for k in reajuste_mod.ciclos(conn, 1, datetime.date(2026, 10, 1))}
+
+
+def test_termo_so_com_percentual_guarda_a_base_e_segue_fechando_o_ciclo_quando_entra_a_segunda(conn):
+    # Gate Sol (rodada 3, PR #317), item 1: termo sem `data_base` e sem competencias (estilo MT-PAR), aplicado com uma
+    # base so'; nao grava previsao. A base vai junto com o termo, e a 2a base nao reabre o ciclo
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[SO_PERCENTUAL])]))
+    assert conn.execute("SELECT data_base_mes FROM instrumentos WHERE chave='ap-11'").fetchone()[0] == "2023-04"
+    assert _previsoes(conn) == []
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[SO_PERCENTUAL], datas_base=DUAS_BASES)]))
+    assert _situacao(conn) == {"2023-04": "apostilado", "2023-06": "pleito_pendente"}
+    assert reajuste_mod.bases_dos_termos(conn, 1)[0]["data_base_mes"] == "2023-04"
+
+
+def test_termo_novo_sem_base_que_corrige_outro_e_recusado_e_nada_muda(conn):
+    # item 2: em contrato de duas bases, o termo novo sem `data_base` e sem competencias que corrige outro era gravado,
+    # tirava o anterior do ciclo e desligava o pleito dele, e depois era ignorado; agora o aplicar recusa
+    t1 = {**SO_PERCENTUAL, "dados": {"data_base": "2023-04", "ciclo": 2026, "percentual": "6,76"}}
+    cad = dict(datas_base=DUAS_BASES, pleitos_anteriores=[PLEITO_2026])
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1], **cad)]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+    t2 = {**SO_PERCENTUAL, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-09-20", "corrige": "ap-11",
+          "dados": {"ciclo": 2026, "percentual": "6,80"}}
+    with pytest.raises(ValueError, match="data-base"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[t1, t2], **cad)]))
+    assert conn.execute("SELECT COUNT(*) FROM instrumentos").fetchone()[0] == 1
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-11"
+    assert _situacao(conn)["2023-04"] == "apostilado"
+
+
+def test_base_guardada_do_termo_vence_a_base_unica_nova(conn):
+    # item 3: o termo gravou previsoes na 2023-04 e o cadastro troca a base unica para 2023-06; o termo fica na 2023-04
+    dados = {k: v for k, v in AP_COMP["dados"].items() if k != "data_base"}
+    termo = {**AP_COMP, "dados": dados}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[termo])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[termo],
+                                                                datas_base=[{"mes": "2023-06", "indice": "FGV/DNIT"}])]))
+    assert _situacao(conn) == {"2023-06": "pleito_pendente"}
+    assert reajuste_mod.bases_dos_termos(conn, 1)[0]["data_base_mes"] == "2023-04"
+
+
+def test_termo_e_correcao_aplicados_juntos_a_correcao_vale_mesmo_com_data_anterior(conn):
+    # a ordem de gravacao segue o `corrige`, nao so' a data: a correcao nunca fica atras do termo que corrige
+    correcao = {**AP_COMP, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-09-01", "corrige": "ap-11",
+                "dados": {**AP_COMP["dados"], "competencias": [{"competencia": "2026-04", "valor": "1.300,03"}]}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[correcao, AP_COMP],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    vig = {p["competencia"]: p["valor_previsto_centavos"] for p in reajuste_mod.previsoes_vigentes(conn, 1)}
+    assert vig == {"2026-04": 130003}
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-12"
+
+
+def test_pleito_enviado_depois_do_termo_nao_e_atendido_por_ele(conn):
+    # reemissao depois do termo (aditivo) espera o apostilamento dela; o pleito anterior e' o atendido
+    reemissao = {**PLEITO_2026, "oficio": "CT-200-LT-2026", "data": "2026-11-05"}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
+                                                                    pleitos_anteriores=[PLEITO_2026, reemissao])]))
+    ligados = dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall())
+    assert ligados == {"CT-122-LT-2026": "ap-11", "CT-200-LT-2026": None}
+    # o relatorio do aplicar (e do ensaio) diz qual pleito o termo atendeu
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: atendido por ap-11"]
+
+
+def test_correcao_de_correcao_religa_o_pleito_mesmo_sem_o_termo_do_meio(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])]))
+    # ap-12 corrige ap-11, mas e' de outro ciclo (nao toca o pleito de 2026); ap-13 corrige ap-12
+    meio = {**AP_COMP, "chave": "ap-12", "data": "2026-10-01", "corrige": "ap-11",
+            "dados": {**AP_COMP["dados"], "ciclo": 2025, "periodo": None,
+                      "competencias": [{"competencia": "2025-04", "valor": "1,00"}]}}
+    fim = {**AP_COMP, "chave": "ap-13", "data": "2026-10-10", "corrige": "ap-12"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP, meio, fim],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ap-13"
+
+
+def test_ensaio_do_apostilamento_nao_grava_previsao(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
+                                                                pleitos_anteriores=[PLEITO_2026])]), ensaio=True)
+    assert conn.execute("SELECT COUNT(*) FROM reajuste_previsoes").fetchone()[0] == 0
+
+
+# --- issue #399: correcao de pleito anterior aplicado pelo YAML ---------------------------------------
+
+from app import pleitos as pleitos_mod
+
+PRAZO_ERRADO = {"tipo": "prazo", "oficio": "CT-001-LT-2026", "data": "2026-08-14", "data_base": None,
+                "ciclo": None, "dias": 180}
+PRAZO_CERTO = {**PRAZO_ERRADO, "data": "2026-05-06", "corrige": {"oficio": "CT-001-LT-2026", "data": "2026-08-14"}}
+
+
+def _pleito_auditoria(conn):
+    return [(json.loads(r[0] or "null"), json.loads(r[1])) for r in conn.execute(
+        "SELECT antes, depois FROM audit_log WHERE acao='cadastro.pleito' ORDER BY id")]
+
+
+def test_correcao_da_data_do_pleito_grava_audita_e_e_igual_depois(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == ["MT-402/prazo: pleito CT-001-LT-2026: data 14/08/2026 → 06/05/2026"]
+    # a aba Prazos lista o pleito com a data nova; nao nasceu outro
+    lista = pleitos_mod.listar(conn, 1, ("prazo", "conclusao"))
+    assert [(p["numero_oficio"], p["enviado_em"]) for p in lista] == [("CT-001-LT-2026", "2026-05-06")]
+    antes, depois = _pleito_auditoria(conn)[-1]
+    assert antes == {"enviado_em": "2026-08-14"} and depois == {"enviado_em": "2026-05-06"}
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"] == {"criados": [], "alterados": [], "iguais": 1}
+    assert len(_pleito_auditoria(conn)) == 2          # a criacao e a correcao, nada mais
+
+
+def test_ensaio_da_correcao_relata_e_nao_grava(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO])]), ensaio=True)
+    assert any("pleito CT-001-LT-2026: data 14/08/2026 → 06/05/2026" in x for x in r["pleitos"]["alterados"])
+    assert conn.execute("SELECT enviado_em FROM pleitos").fetchone()[0] == "2026-08-14"
+    assert len(_pleito_auditoria(conn)) == 1
+
+
+def test_correcao_troca_o_oficio_e_reaplicar_e_igual(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    novo = {**PRAZO_ERRADO, "oficio": "CT-007-LT-2026", "corrige": {"oficio": "CT-001-LT-2026", "data": None}}
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[novo])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == ["MT-402/prazo: pleito CT-001-LT-2026: ofício CT-001-LT-2026 → CT-007-LT-2026"]
+    assert [tuple(x) for x in conn.execute("SELECT numero_oficio, enviado_em FROM pleitos")] == [
+        ("CT-007-LT-2026", "2026-08-14")]
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["iguais"] == 1
+
+
+def test_corrigir_pleito_que_nao_existe_ou_com_data_gravada_diferente_e_erro(conn):
+    with pytest.raises(ValueError, match="pleito CT-001-LT-2026 \\(prazo\\) a corrigir não existe"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    errada = {**PRAZO_CERTO, "corrige": {"oficio": "CT-001-LT-2026", "data": "2026-08-15"}}
+    with pytest.raises(ValueError, match="gravado com a data 14/08/2026, não 15/08/2026"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[errada])]))
+    assert conn.execute("SELECT enviado_em FROM pleitos").fetchone()[0] == "2026-08-14"
+
+
+def test_pleito_criado_pela_tela_nao_se_corrige_pelo_cadastro(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    conn.execute("INSERT INTO pleitos (contrato_id, tipo, origem, dias, numero_oficio, situacao, enviado_em) "
+                 "VALUES (1, 'prazo', 'sistema', 180, 'CT-001-LT-2026', 'enviado', '2026-08-14')")
+    conn.commit()
+    with pytest.raises(ValueError, match="pleito CT-001-LT-2026 \\(prazo\\) foi criado pela tela"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO])]))
+    assert conn.execute("SELECT enviado_em FROM pleitos").fetchone()[0] == "2026-08-14"
+
+
+def test_correcao_da_data_religa_o_pleito_de_reajuste_ao_termo(conn):
+    # aplicado com a data da copia (depois do termo de 15/09): o termo nao o atende
+    errado = {**PLEITO_2026, "data": "2026-10-20"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[errado])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+    certo = {**PLEITO_2026, "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-10-20"}}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[certo])]))
+    assert tuple(conn.execute("SELECT enviado_em, instrumento_chave FROM pleitos").fetchone()) == ("2026-04-23", "ap-11")
+    assert "MT-402/reajuste CT-122-LT-2026: atendido por ap-11" in r["pleitos"]["alterados"]
+    # e o contrario: corrigida para depois do termo, a ligacao se desfaz
+    tarde = {**PLEITO_2026, "data": "2026-10-20", "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-04-23"}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[tarde])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+    antes, depois = _pleito_auditoria(conn)[-1]
+    assert antes == {"enviado_em": "2026-04-23", "instrumento_chave": "ap-11"}
+    assert depois == {"enviado_em": "2026-10-20", "instrumento_chave": None}
+
+
+def test_correcao_so_do_oficio_mantem_o_termo_que_atende_o_pleito(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])]))
+    novo = {**PLEITO_2026, "oficio": "CT-123-LT-2026", "corrige": {"oficio": "CT-122-LT-2026", "data": None}}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[novo])]))
+    assert tuple(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchone()) == ("CT-123-LT-2026", "ap-11")
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste: pleito CT-122-LT-2026: ofício CT-122-LT-2026 → CT-123-LT-2026"]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0] == 1
+
+
+def test_numero_antigo_usado_depois_pela_tela_nao_trava_a_reaplicacao(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    novo = {**PRAZO_ERRADO, "oficio": "CT-007-LT-2026", "corrige": {"oficio": "CT-001-LT-2026", "data": None}}
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[novo])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    conn.execute("INSERT INTO pleitos (contrato_id, tipo, origem, dias, numero_oficio, situacao, enviado_em) "
+                 "VALUES (1, 'prazo', 'sistema', 90, 'CT-001-LT-2026', 'enviado', '2026-10-01')")
+    conn.commit()
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["iguais"] == 1
+
+
+def test_pleito_corrigido_escrito_de_outro_jeito_na_lista_e_erro(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    velho = {**PRAZO_ERRADO, "oficio": "CT/001/LT/2026"}
+    novo = {**PRAZO_ERRADO, "oficio": "CT-007-LT-2026", "corrige": {"oficio": "CT-001-LT-2026", "data": None}}
+    with pytest.raises(ValueError, match="CT-001-LT-2026 \\(prazo\\) é corrigido por outro item"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[novo, velho])]))
+
+
+
+
+# --- issue #390: o aditivo de valor de natureza reajuste (SES) atende o pleito como o apostilamento ---
+
+TA_REAJ = {**AD_VALOR, "chave": "ta-08", "numero": "019/2024/01/08", "data": "2026-07-30",
+           "delta_valor_centavos": 100_01, "natureza": "reajuste"}
+
+
+def test_pleito_enviado_antes_do_aditivo_de_reajuste_fica_ligado_a_ele(conn):
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ta-08"
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: atendido por ta-08"]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0] == 1
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))[0]
+    assert (k["ciclo"], k["situacao"], k["apostilamento"]["numero"]) == (2026, "apostilado", "019/2024/01/08")
+    # reaplicar nao religa nem audita de novo
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == []
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0] == 1
+
+
+def test_aditivo_de_execucao_nao_atende_pleito_e_o_de_reajuste_nao_pega_o_enviado_depois(conn):
+    execucao = {**TA_REAJ, "chave": "ta-07", "natureza": "execucao"}
+    depois = {**PLEITO_2026, "oficio": "CT-200-LT-2026", "data": "2026-08-05"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[execucao],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[execucao, TA_REAJ],
+                                                                pleitos_anteriores=[PLEITO_2026, depois])]))
+    ligados = dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall())
+    assert ligados == {"CT-122-LT-2026": "ta-08", "CT-200-LT-2026": None}
+
+
+def test_ciclo_declarado_no_aditivo_liga_o_pleito_desse_ciclo_e_nao_o_do_ciclo_da_data(conn):
+    # revisor (PR #407): o termo do reajuste de 2025 assinado depois do aniversario de 2026, com o pleito de 2026 ja'
+    # enviado: o `ciclo` do cadastro liga o pleito de 2025; o de 2026 segue esperando (o aviso dele nao some)
+    pleito_2025 = {**PLEITO_2026, "oficio": "CT-90-LT-2025", "data": "2025-04-20", "ciclo": 2025}
+    tardio = {**TA_REAJ, "dados": {"ciclo": 2025}}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[tardio],
+                                                                    pleitos_anteriores=[pleito_2025, PLEITO_2026])]))
+    ligados = dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall())
+    assert ligados == {"CT-090-LT-2025": "ta-08", "CT-122-LT-2026": None}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-090-LT-2025: atendido por ta-08"]
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))[0]
+    assert (k["ciclo"], k["situacao"]) == (2026, "apostilamento_pendente")
+
+
+PLEITO_2025 = {**PLEITO_2026, "oficio": "CT-90-LT-2025", "data": "2025-04-20", "ciclo": 2025}
+
+
+def _ta(conn):
+    return tuple(conn.execute("SELECT data_base_mes, ciclo_reajuste FROM aditivos WHERE chave_cadastro='ta-08'").fetchone())
+
+
+def test_ciclo_declarado_fica_guardado_e_vale_sem_pleito(conn):
+    # revisor e gate Sol (rodada 2, PR #407; migracao 058): base 2023-04, termo de 2025 assinado em 30/07/2026 com
+    # `ciclo: 2025`, sem pleito: o 2025 fica apostilado pelo aditivo e o 2026 continua pendente
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**TA_REAJ, "dados": {"ciclo": 2025}}])]))
+    assert _ta(conn) == ("2023-04", 2025)
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2025, True)["chave"] == "ta-08"
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))[0]
+    assert (k["ciclo"], k["situacao"]) == (2026, "pleito_pendente")
+
+
+def test_reaplicar_com_ciclo_declarado_move_a_ligacao_para_o_pleito_desse_ciclo(conn):
+    # gate Sol (rodada 2): a primeira aplicacao, sem `ciclo`, liga o pleito de 2026 pela data; a segunda, com
+    # `ciclo: 2025`, tira a ligacao do de 2026 e liga o de 2025, auditado
+    pleitos = [PLEITO_2025, PLEITO_2026]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=pleitos)]))
+    assert dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall()) == \
+        {"CT-090-LT-2025": None, "CT-122-LT-2026": "ta-08"}
+    assert _ta(conn) == ("2023-04", None)
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**TA_REAJ, "dados": {"ciclo": 2025}}],
+                                                                    pleitos_anteriores=pleitos)]))
+    assert dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall()) == \
+        {"CT-090-LT-2025": "ta-08", "CT-122-LT-2026": None}
+    assert _ta(conn) == ("2023-04", 2025)
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: sem termo (ta-08 atende o ciclo 2025)",
+                                         "MT-402/reajuste CT-090-LT-2025: atendido por ta-08"]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0] == 3
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))[0]
+    assert (k["ciclo"], k["situacao"]) == (2026, "apostilamento_pendente")
+    # reaplicar de novo nao mexe; trocar o ciclo ja' guardado e' instrumento novo
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**TA_REAJ, "dados": {"ciclo": 2025}}],
+                                                                    pleitos_anteriores=pleitos)]))
+    assert r["pleitos"]["alterados"] == []
+    with pytest.raises(ValueError, match="ciclo_reajuste"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**TA_REAJ, "dados": {"ciclo": 2024}}],
+                                                                    pleitos_anteriores=pleitos)]))
+
+
+def test_reaplicar_com_ciclo_sem_pleito_tira_a_ligacao_com_aviso(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ta-08"
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**TA_REAJ, "dados": {"ciclo": 2025}}],
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+    assert any("MT-402/ta-08" in a and "ciclo 2025" in a and "CT-122-LT-2026 saiu" in a for a in r["avisos"]), r["avisos"]
+
+
+def test_aditivo_aplicado_antes_da_058_recebe_a_base_unica_no_proximo_aplicar(conn):
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    conn.execute("UPDATE aditivos SET data_base_mes=NULL WHERE chave_cadastro='ta-08'"); conn.commit()
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ta(conn) == ("2023-04", None)
+    assert r["instrumentos"]["alterados"] == ["MT-402/ta-08"]
+    # o contrato ganha outra base, sem declaracao: o aditivo segue na que guardou
+    cad2 = _cad(contratos=[_contrato(instrumentos=[TA_REAJ], datas_base=[{"mes": "2023-04", "indice": "setorial"},
+                                                                         {"mes": "2023-06", "indice": "SICRO"}])])
+    cadastro_aplicar.aplicar(conn, 1, cad2)
+    assert _ta(conn) == ("2023-04", None)
+
+
+MISTO = {**TA_REAJ, "tipo": "aditivo_misto", "nova_execucao_fim": "2027-06-30"}
+
+
+def test_misto_de_reajuste_com_prazo_novo_que_atende_o_pleito_deixa_o_ciclo_apostilado(conn):
+    # gate Sol (rodada 2): o termo ligado concede o reajuste do ciclo; a prorrogacao nao reabre este ciclo
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[MISTO], pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] == "ta-08"
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))[0]
+    assert (k["ciclo"], k["situacao"], k["aditivo"]) == (2026, "apostilado", None)
+
+
+def test_misto_de_reajuste_de_outro_ciclo_com_prazo_novo_pede_reemissao_do_pleito_ja_enviado(conn):
+    # o termo de 2025 com prorrogacao, assinado depois do pleito de 2026: o 2025 fica apostilado e o 2026, cujo
+    # cronograma saiu antes do prazo novo, vai para reemitir
+    misto = {**MISTO, "dados": {"ciclo": 2025}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[misto],
+                                                                pleitos_anteriores=[PLEITO_2025, PLEITO_2026])]))
+    assert dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall()) == \
+        {"CT-090-LT-2025": "ta-08", "CT-122-LT-2026": None}
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))[0]
+    assert (k["ciclo"], k["situacao"], k["aditivo"]["chave_cadastro"]) == (2026, "reemitir", "ta-08")
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2025, True)["chave"] == "ta-08"
+
+
+# --- issue #409: aditivo corrigido por outro (`corrige`, migracao 059) sai do motor e a ligacao passa adiante ---
+
+TA_CORR = {**TA_REAJ, "chave": "ta-09", "numero": "019/2024/01/09", "data": "2026-08-15", "corrige": "ta-08"}
+
+
+def _trilha_pleitos(conn):
+    return [(json.loads(a), json.loads(d)) for a, d in conn.execute(
+        "SELECT antes, depois FROM audit_log WHERE acao='cadastro.pleito_atendido' ORDER BY id")]
+
+
+def test_aditivo_que_corrige_o_de_reajuste_para_outro_ciclo_move_a_ligacao_com_auditoria(conn):
+    # gate Sol (rodada 2, PR #407): o TA1 (ta-08) atendia o pleito de 2026; o TA2 (ta-09) o corrige para o ciclo
+    # 2025. So' o 2025 fica apostilado, o 2026 volta a esperar o termo, e a auditoria registra as duas pontas
+    pleitos = [PLEITO_2025, PLEITO_2026]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=pleitos)]))
+    assert _ligacoes(conn) == {"CT-090-LT-2025": None, "CT-122-LT-2026": "ta-08"}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "dados": {"ciclo": 2025}}],
+                                    pleitos_anteriores=pleitos)])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-090-LT-2025": "ta-09", "CT-122-LT-2026": None}
+    assert r["pleitos"]["alterados"] == [
+        "MT-402/reajuste CT-122-LT-2026: sem termo (ta-09 corrige ta-08 para o ciclo 2025)",
+        "MT-402/reajuste CT-090-LT-2025: atendido por ta-09"]
+    assert _trilha_pleitos(conn) == [({"instrumento_chave": None}, {"instrumento_chave": "ta-08"}),
+                                     ({"instrumento_chave": "ta-08"}, {"instrumento_chave": None}),
+                                     ({"instrumento_chave": None}, {"instrumento_chave": "ta-09"})]
+    assert conn.execute("SELECT corrige_chave FROM aditivos WHERE chave_cadastro='ta-09'").fetchone()[0] == "ta-08"
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2025, True)["chave"] == "ta-09"
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, True) is None
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-09"]
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 20))[0]
+    assert (k["ciclo"], k["situacao"], k["apostilamento"]) == (2026, "apostilamento_pendente", None)
+    # reaplicar e' igual: nada se religa nem se audita de novo
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == [] and r["instrumentos"]["alterados"] == []
+    assert len(_trilha_pleitos(conn)) == 3
+
+
+def test_correcao_do_aditivo_no_mesmo_ciclo_herda_o_pleito_do_corrigido(conn):
+    # como no apostilamento (PR #411): a correcao atende o pleito que o corrigido atendeu, e nao a reemissao enviada
+    # entre as datas dos dois (que segue esperando o termo dela)
+    reemissao = {**PLEITO_2026, "oficio": "CT-130-LT-2026", "data": "2026-08-01"}
+    pleitos = [PLEITO_2026, reemissao]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=pleitos)]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08", "CT-130-LT-2026": None}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR], pleitos_anteriores=pleitos)])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-09", "CT-130-LT-2026": None}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: atendido por ta-09 (corrige ta-08)"]
+    assert _trilha_pleitos(conn)[-1] == ({"instrumento_chave": "ta-08"}, {"instrumento_chave": "ta-09"})
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-09"]
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+
+
+def test_correcao_do_aditivo_aplicada_do_zero_atende_o_pleito_do_corrigido(conn):
+    # banco montado do zero com os dois aditivos: o resultado e' o mesmo da aplicacao em duas vezes
+    reemissao = {**PLEITO_2026, "oficio": "CT-130-LT-2026", "data": "2026-08-01"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR],
+                                                                pleitos_anteriores=[PLEITO_2026, reemissao])]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-09", "CT-130-LT-2026": None}
+
+
+def test_corrige_do_aditivo_fica_gravado_e_trava(conn):
+    # issue #410 (gate Sol, rodada 1, PR #452): o aditivo aplicado sem `corrige` nao o ganha depois (o retrato dele
+    # foi gravado somando o corrigido); o gravado com `corrige` trava -- trocar ou tirar e' erro
+    def cad(corrige):
+        return _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "corrige": corrige}])])
+    cadastro_aplicar.aplicar(conn, 1, cad(None))
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-08", "ta-09"]
+    with pytest.raises(ValueError, match="não pode ganhar `corrige`"):
+        cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))
+    assert conn.execute("SELECT corrige_chave FROM aditivos WHERE chave_cadastro='ta-09'").fetchone()[0] is None
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-08", "ta-09"]
+
+
+def test_corrige_gravado_do_aditivo_trava(conn):
+    def cad(corrige):
+        return _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "corrige": corrige}])])
+    cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-09"]
+    assert cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))["instrumentos"]["alterados"] == []
+    with pytest.raises(ValueError, match="corrige: 'ta-08' → None"):
+        cadastro_aplicar.aplicar(conn, 1, cad(None))
+    with pytest.raises(ValueError, match="corrige: 'ta-08' → 'ta-07'"):
+        cadastro_aplicar.aplicar(conn, 1, cad("ta-07"))
+
+
+def test_aditivo_de_prazo_que_corrige_o_de_reajuste_nao_o_tira_nem_trava(conn):
+    # /code-review: o aditivo de prazo corrige outra coisa no de reajuste (o prazo); o reajuste segue valendo, a
+    # ligacao fica, e o `corrige` dele nao trava o aplicar (o motor nao o le)
+    prazo = {**AD_VALOR, "chave": "ta-10", "tipo": "aditivo_prazo", "numero": "019/2024/01/10", "data": "2026-08-20",
+             "delta_valor_centavos": 0, "nova_execucao_fim": "2027-06-30", "natureza": None, "corrige": "ta-08"}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, prazo], pleitos_anteriores=[PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08"}
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-08"]
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**prazo, "corrige": None}],
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    assert r["instrumentos"]["alterados"] == [] and r["pleitos"]["alterados"] == []
+
+
+def test_correcao_sem_base_determinavel_tira_a_ligacao_do_corrigido_com_aviso(conn):
+    # /code-review: o contrato ganhou a segunda data-base e a correcao nao declara a dela; o corrigido deixa de valer
+    # e o pleito dele volta a esperar o termo, com aviso (nada some em silencio)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    duas = [{"mes": "2023-04", "indice": "setorial"}, {"mes": "2023-06", "indice": "SICRO"}]
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR], datas_base=duas,
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": None}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: sem termo (ta-09 corrige ta-08)"]
+    assert any("MT-402/ta-09" in a and "CT-122-LT-2026" in a and "ligação saiu" in a for a in r["avisos"]), r["avisos"]
+    assert _trilha_pleitos(conn)[-1] == ({"instrumento_chave": "ta-08"}, {"instrumento_chave": None})
+
+
+@pytest.mark.parametrize("com_correcao", [False, True])
+def test_pleito_do_ciclo_cadastrado_tarde_e_o_atendido_com_ou_sem_correcao(conn, com_correcao):
+    # gate Sol (rodada 1, PR #433), refutado com este teste: o CT-125, enviado depois do CT-122 e antes da assinatura
+    # do TA1, entra no cadastro depois. Sem correcao, o TA1 passa a atende-lo (a ligacao se reconfere pela data a cada
+    # aplicar, rodada 2 da PR #407); com o TA2 corrigindo o TA1 no mesmo ciclo, o TA2 atende o mesmo pleito, como o
+    # termo de correcao do apostilamento (#414). Herdar o CT-122 daria resultados diferentes nos dois casos
+    tarde = {**PLEITO_2026, "oficio": "CT-125-LT-2026", "data": "2026-06-10"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08"}
+    instrumentos = [TA_REAJ, TA_CORR] if com_correcao else [TA_REAJ]
+    cad = _cad(contratos=[_contrato(instrumentos=instrumentos, pleitos_anteriores=[PLEITO_2026, tarde])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    termo = "ta-09" if com_correcao else "ta-08"
+    assert _ligacoes(conn) == {"CT-122-LT-2026": None, "CT-125-LT-2026": termo}
+    saiu = ("sem termo (ta-09 corrige ta-08 e atende o CT-125-LT-2026, o último enviado até 30/07/2026)"
+            if com_correcao else "sem termo (ta-08 atende o ciclo 2026)")
+    assert r["pleitos"]["alterados"] == [f"MT-402/reajuste CT-122-LT-2026: {saiu}",
+                                         f"MT-402/reajuste CT-125-LT-2026: atendido por {termo}"]
+    assert not any("ligação saiu" in a for a in r["avisos"]), r["avisos"]
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 20))[0]
+    assert (k["ciclo"], k["situacao"], k["apostilamento"]["chave"]) == (2026, "apostilado", termo)
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+
+
+@pytest.mark.parametrize("ciclo_do_aditivo", [None, 2025])
+def test_aditivo_que_corrige_um_apostilamento_nao_mexe_no_pleito_dele(conn, ciclo_do_aditivo):
+    # revisor (rodada 1, PR #433): `corrige` entre tabelas nao tem efeito. O ap-09 (ciclo 2025) segue com o pleito de
+    # 2025, de outro ciclo (o ta-08 cai em 2026 pela data) ou do mesmo (`ciclo: 2025`), e reaplicar e' "igual"
+    ap = {**AP_REAJ, "dados": {"data_base": "2023-04", "ciclo": 2025}}
+    ta = {**TA_REAJ, "corrige": "ap-09", "dados": {"ciclo": ciclo_do_aditivo} if ciclo_do_aditivo else {}}
+    cad = _cad(contratos=[_contrato(instrumentos=[ap, ta], pleitos_anteriores=[PLEITO_2025, PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn)["CT-090-LT-2025"] == "ap-09"
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2025, True)["chave"] == "ap-09"
+    auditorias = len(_trilha_pleitos(conn))
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == [] and _ligacoes(conn)["CT-090-LT-2025"] == "ap-09"
+    assert len(_trilha_pleitos(conn)) == auditorias
+
+
+@pytest.mark.parametrize("ciclo_do_termo", [2026, 2025])
+def test_apostilamento_que_corrige_um_aditivo_nao_mexe_no_pleito_dele(conn, ciclo_do_termo):
+    # issue #442, espelho da PR #433: `corrige` so' tem efeito entre instrumentos da mesma tabela. O ta-08 segue com o
+    # pleito de 2026, com o apostilamento no mesmo ciclo ou em outro, e o segundo aplicar sai "igual", sem auditoria nova
+    ap = {**AP_REAJ, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-08-15", "corrige": "ta-08",
+          "dados": {"data_base": "2023-04", "ciclo": ciclo_do_termo}}
+    pleitos = [PLEITO_2025, PLEITO_2026]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=pleitos)]))
+    assert _ligacoes(conn) == {"CT-090-LT-2025": None, "CT-122-LT-2026": "ta-08"}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, ap], pleitos_anteriores=pleitos)])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    esperado = {"CT-090-LT-2025": "ap-12" if ciclo_do_termo == 2025 else None, "CT-122-LT-2026": "ta-08"}
+    assert _ligacoes(conn) == esperado
+    auditorias = len(_trilha_pleitos(conn))
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == [] and _ligacoes(conn) == esperado
+    assert len(_trilha_pleitos(conn)) == auditorias
+
+# --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
+
+from app import prazos as prazos_mod
+
+PEDIDO_VALOR = {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "data_base": None, "ciclo": None,
+                "dias": None, "valor_centavos": 100000001, "objeto": "1ª RPFO"}
+
+
+def test_pleito_de_valor_e_gravado_com_o_valor_e_o_objeto_e_nao_duplica(conn):
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["criados"] == ["MT-402/valor CT-001-LT-2026"]
+    linha = conn.execute("SELECT tipo, origem, situacao, enviado_em, numero_oficio, valor_centavos, objeto "
+                         "FROM pleitos").fetchone()
+    assert tuple(linha) == ("valor", "cadastro", "enviado", "2026-03-27", "CT-001-LT-2026", 100000001, "1ª RPFO")
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"] == {"criados": [], "alterados": [], "iguais": 1}
+
+
+def test_pedido_de_valor_sem_aditivo_depois_fica_sem_resposta(conn):
+    # o aditivo de valor assinado ANTES do pedido nao o atende; o de prazo depois dele tambem nao
+    antes = {**AD_VALOR, "data": "2026-01-15"}
+    prazo = {**AP_PRAZO, "data": "2026-04-10"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[antes, prazo],
+                                                                pleitos_anteriores=[PEDIDO_VALOR])]))
+    [p] = prazos_mod.pedidos_de_valor(conn, 1)
+    assert (p["numero_oficio"], p["enviado_em"], p["valor_centavos"], p["objeto"]) == (
+        "CT-001-LT-2026", "2026-03-27", 100000001, "1ª RPFO")
+    assert p["atendido_por"] is None
+
+
+def test_pedido_de_valor_e_ligado_ao_aditivo_de_valor_assinado_depois(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])]))
+    assert prazos_mod.pedidos_de_valor(conn, 1)[0]["atendido_por"] is None
+    # o aditivo entra numa carga posterior do cadastro: a ligacao e' pela data, na leitura
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR],
+                                                                pleitos_anteriores=[PEDIDO_VALOR])]))
+    [p] = prazos_mod.pedidos_de_valor(conn, 1)
+    assert p["atendido_por"] == {"numero": "019/2024/01/01", "data_assinatura": "2026-06-30", "rotulo": "1º TA"}
+
+
+def test_pedido_de_valor_e_atendido_pelo_primeiro_aditivo_de_valor_depois_dele(conn):
+    ta2 = {**AD_VALOR, "chave": "ta-02", "data": "2026-09-30", "numero": "019/2024/01/02"}
+    segundo = {**PEDIDO_VALOR, "oficio": "CT-050-LT-2026", "data": "2026-07-10", "objeto": "2ª RPFO"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR, ta2],
+                                                                pleitos_anteriores=[PEDIDO_VALOR, segundo])]))
+    por_oficio = {p["numero_oficio"]: p["atendido_por"]["rotulo"] for p in prazos_mod.pedidos_de_valor(conn, 1)}
+    assert por_oficio == {"CT-001-LT-2026": "1º TA", "CT-050-LT-2026": "2º TA"}
+
+
+def test_pleito_de_valor_mudado_no_yaml_fica_como_gravado_e_vira_aviso(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])]))
+    mudado = {**PEDIDO_VALOR, "valor_centavos": 120000000, "objeto": "1ª RPFO revista"}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[mudado])]))
+    assert r["pleitos"]["iguais"] == 1
+    assert "MT-402/valor CT-001-LT-2026: valor, objeto no YAML difere do gravado; o gravado fica " \
+           "(para corrigir a data ou o ofício, use corrige: {oficio, data})" in r["avisos"]
+    assert conn.execute("SELECT valor_centavos FROM pleitos").fetchone()[0] == 100000001
+    # igual de verdade: sem aviso
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])]))
+    assert not any("difere do gravado" in a for a in r["avisos"])
+
+
+def test_pleito_de_prazo_com_outra_data_no_yaml_vira_aviso(conn):
+    prazo = {"tipo": "prazo", "oficio": "331", "data": "2025-11-10", "data_base": None, "ciclo": None, "dias": 120}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[prazo])]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[{**prazo, "data": "2025-08-10"}])]))
+    assert any(a.startswith("MT-402/prazo CT-331-LT-2025: data no YAML difere do gravado") for a in r["avisos"])
+
+
+def test_supressao_e_aditivo_de_reajuste_nao_atendem_o_pedido_de_valor(conn):
+    supressao = {**AD_VALOR, "delta_valor_centavos": -1000001}
+    de_reajuste = {**AD_VALOR, "chave": "ta-02", "data": "2026-07-30", "numero": "019/2024/01/02",
+                   "natureza": "reajuste"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[supressao, de_reajuste],
+                                                                pleitos_anteriores=[PEDIDO_VALOR])]))
+    assert prazos_mod.pedidos_de_valor(conn, 1)[0]["atendido_por"] is None
+
+
+def test_indice_reajuste_vem_da_data_base_unica_e_reaplicar_e_igual(conn):
+    # issue #397: a coluna do contrato e' derivada de contrato_datas_base, nunca a tabela de precos
+    conn.execute("INSERT INTO contratos (orgao, numero_instrumento, objeto, valor_original_centavos, indice_reajuste) "
+                 "VALUES ('SINFRA','019/2024/00/00-SINFRA','MT-402',1512720000,'SINAPI')")
+    conn.commit()
+    c = _contrato(datas_base=[{"mes": "2023-04", "indice": "INCC-DI/FGV"}])
+    ensaio = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]), ensaio=True)
+    assert ensaio["contratos"]["alterados"] == ["MT-402"]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]))
+    assert conn.execute("SELECT indice_reajuste FROM contratos").fetchone()[0] == "INCC-DI/FGV"
+    linha = conn.execute("SELECT * FROM audit_log WHERE acao='cadastro.contrato' ORDER BY id DESC LIMIT 1").fetchone()
+    assert "SINAPI" in json.dumps(dict(linha)) and "INCC-DI/FGV" in json.dumps(dict(linha))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]))
+    assert r["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+
+
+def test_indice_reajuste_com_duas_bases_traz_as_duas_com_aplica_a(conn):
+    bases = [{"mes": "2022-03", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"},
+             {"mes": "2022-01", "indice": "INCC-DI", "aplica_a": "itens SINAPI"}]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(datas_base=bases)]))
+    assert conn.execute("SELECT indice_reajuste FROM contratos").fetchone()[0] == \
+        "2022-01: INCC-DI (itens SINAPI); 2022-03: FGV/DNIT (itens SICRO)"
+
+
+# --- PR #411, rodada 1: revisor-adversarial e gate Sol ---------------------------------------------------------
+
+def _ligacoes(conn):
+    return dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos ORDER BY id").fetchall())
+
+
+def test_correcao_da_data_reavalia_o_termo_ja_ligado_a_outro_pleito_do_ciclo(conn):
+    # ap-11 (15/09) atende o CT-120 (01/03); o CT-122 entrou com a data da copia (20/10), depois do termo
+    ct120 = {**PLEITO_2026, "oficio": "CT-120-LT-2026", "data": "2026-03-01"}
+    errado = {**PLEITO_2026, "data": "2026-10-20"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
+                                                                pleitos_anteriores=[ct120, errado])]))
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-11", "CT-122-LT-2026": None}
+    certo = {**PLEITO_2026, "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-10-20"}}
+    cad = _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[ct120, certo])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    # o mesmo estado da aplicacao do zero: o termo atende o ultimo pleito enviado ate' a data dele
+    assert _ligacoes(conn) == {"CT-120-LT-2026": None, "CT-122-LT-2026": "ap-11"}
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, True) is not None
+    desligado = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.pleito_atendido' "
+                             "AND entidade_id=(SELECT id FROM pleitos WHERE numero_oficio='CT-120-LT-2026') "
+                             "ORDER BY id DESC LIMIT 1").fetchone()
+    assert json.loads(desligado[0]) == {"instrumento_chave": "ap-11"} and json.loads(desligado[1]) == {"instrumento_chave": None}
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["iguais"] == 2
+    assert _ligacoes(conn) == {"CT-120-LT-2026": None, "CT-122-LT-2026": "ap-11"}
+
+
+def test_corrige_sem_ano_nem_data_nao_escolhe_entre_dois_anos(conn):
+    de_2025 = {**PRAZO_ERRADO, "oficio": "CT-001-LT-2025", "data": "2025-12-20"}
+    de_2026 = {**PRAZO_ERRADO, "oficio": "CT-001-LT-2026", "data": "2026-02-01"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[de_2025, de_2026])]))
+    novo = {**de_2025, "data": "2026-01-05", "corrige": {"oficio": "1", "data": None}}
+    with pytest.raises(ValueError, match="há mais de um pleito CT-001-LT-<ano> \\(prazo\\)"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[novo, de_2026])]))
+    assert [tuple(r) for r in conn.execute("SELECT numero_oficio, enviado_em FROM pleitos ORDER BY id")] == [
+        ("CT-001-LT-2025", "2025-12-20"), ("CT-001-LT-2026", "2026-02-01")]
+
+
+def test_corrige_sem_ano_acha_o_unico_gravado_mesmo_de_outro_ano(conn):
+    de_2025 = {**PRAZO_ERRADO, "oficio": "CT-001-LT-2025", "data": "2025-12-20"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[de_2025])]))
+    novo = {**de_2025, "data": "2026-01-05", "corrige": {"oficio": "1", "data": None}}
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[novo])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert [tuple(r) for r in conn.execute("SELECT numero_oficio, enviado_em FROM pleitos")] == [
+        ("CT-001-LT-2025", "2026-01-05")]
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["iguais"] == 1
+
+
+def test_corrige_avisa_dias_diferente_do_gravado_e_recusa_ciclo_diferente(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO, PLEITO_2026])]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[
+        {**PRAZO_CERTO, "dias": 120}, PLEITO_2026])]))
+    assert "MT-402/prazo CT-001-LT-2026: dias no YAML difere do gravado; o gravado fica " \
+           "(corrige troca só a data e o ofício)" in r["avisos"]
+    assert conn.execute("SELECT dias FROM pleitos WHERE tipo='prazo'").fetchone()[0] == 180
+    outro_ciclo = {**PLEITO_2026, "ciclo": 2025, "data": "2026-04-20", "corrige": {"oficio": "CT-122-LT-2026", "data": None}}
+    with pytest.raises(ValueError, match="gravado no ciclo 2026, não 2025"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO, outro_ciclo])]))
+
+
+def test_corrige_com_data_antiga_que_nao_bate_com_o_banco_nao_vira_igual(conn):
+    # o banco ja' esta' em 06/05 sem ter passado por esta correcao: a data antiga dita (14/08) nao tem prova
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[{**PRAZO_ERRADO, "data": "2026-05-06"}])]))
+    with pytest.raises(ValueError, match="gravado com a data 06/05/2026, não 14/08/2026"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO])]))
+
+
+def test_correcao_de_pedido_de_valor(conn):
+    errado = {**PEDIDO_VALOR, "data": "2026-06-27"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[errado])]))
+    certo = {**PEDIDO_VALOR, "corrige": {"oficio": "CT-001-LT-2026", "data": "2026-06-27"}}
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[certo])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == ["MT-402/valor: pleito CT-001-LT-2026: data 27/06/2026 → 27/03/2026"]
+    assert not any("difere do gravado" in a for a in r["avisos"])
+    assert tuple(conn.execute("SELECT enviado_em, valor_centavos, objeto FROM pleitos").fetchone()) == (
+        "2026-03-27", 100000001, "1ª RPFO")
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["iguais"] == 1
+
+
+# --- PR #411, rodada 2 -------------------------------------------------------------------------------------------
+
+T1 = {**AP_COMP, "chave": "ap-11", "data": "2026-05-01"}
+T2 = {**AP_COMP, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-07-01", "corrige": "ap-11"}
+
+
+def test_correcao_da_data_mantem_a_heranca_do_termo_de_correcao(conn):
+    # ap-11 (01/05) atende o CT-120 (01/04); o CT-130 (01/06) e' reemissao ainda sem termo; ap-12 corrige ap-11
+    ct120 = {**PLEITO_2026, "oficio": "CT-120-LT-2026", "data": "2026-04-01"}
+    ct130 = {**PLEITO_2026, "oficio": "CT-130-LT-2026", "data": "2026-06-01"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[T1], pleitos_anteriores=[ct120, ct130])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[T1, T2], pleitos_anteriores=[ct120, ct130])]))
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-12", "CT-130-LT-2026": None}
+    certo = {**ct120, "data": "2026-04-02", "corrige": {"oficio": "CT-120-LT-2026", "data": "2026-04-01"}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[T1, T2], pleitos_anteriores=[certo, ct130])]))
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-12", "CT-130-LT-2026": None}
+
+
+def test_termo_de_correcao_aplicado_do_zero_atende_o_pleito_do_termo_original(conn):
+    ct120 = {**PLEITO_2026, "oficio": "CT-120-LT-2026", "data": "2026-04-01"}
+    ct130 = {**PLEITO_2026, "oficio": "CT-130-LT-2026", "data": "2026-06-01"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[T1, T2], pleitos_anteriores=[ct120, ct130])]))
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-12", "CT-130-LT-2026": None}
+
+
+def test_correcao_num_ciclo_nao_mexe_no_termo_de_outro_ciclo(conn):
+    ap05 = {**AP_COMP, "chave": "ap-05", "numero": "019/2024/02/05", "data": "2025-09-01",
+            "dados": {**AP_COMP["dados"], "ciclo": 2025, "periodo": None,
+                      "competencias": [{"competencia": "2025-04", "valor": "1,00"}]}}
+    ct050 = {**PLEITO_2026, "oficio": "CT-050-LT-2025", "data": "2025-05-01", "ciclo": 2025}
+    errado = {**PLEITO_2026, "data": "2026-10-20"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ap05, AP_COMP],
+                                                                pleitos_anteriores=[ct050, errado])]))
+    assert _ligacoes(conn) == {"CT-050-LT-2025": "ap-05", "CT-122-LT-2026": None}
+    id050 = conn.execute("SELECT id FROM pleitos WHERE numero_oficio='CT-050-LT-2025'").fetchone()[0]
+    eventos = conn.execute("SELECT COUNT(*) FROM audit_log WHERE entidade='pleito' AND entidade_id=?",
+                           (str(id050),)).fetchone()[0]
+    certo = {**PLEITO_2026, "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-10-20"}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ap05, AP_COMP],
+                                                                pleitos_anteriores=[ct050, certo])]))
+    assert _ligacoes(conn) == {"CT-050-LT-2025": "ap-05", "CT-122-LT-2026": "ap-11"}
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE entidade='pleito' AND entidade_id=?",
+                        (str(id050),)).fetchone()[0] == eventos
+
+
+def test_reaplicacao_da_correcao_com_ciclo_trocado_no_yaml_e_erro(conn):
+    errado = {**PLEITO_2026, "data": "2026-10-20"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[errado])]))
+    certo = {**PLEITO_2026, "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-10-20"}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[certo])]))
+    with pytest.raises(ValueError, match="gravado no ciclo 2026, não 2025"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[{**certo, "ciclo": 2025}])]))
+
+
+def test_corrige_que_aponta_para_o_estado_atual_sem_correcao_registrada_e_erro(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[{**PRAZO_ERRADO, "data": "2026-05-06"}])]))
+    sobra = {**PRAZO_CERTO, "corrige": {"oficio": "CT-001-LT-2026", "data": None}}
+    with pytest.raises(ValueError, match="já está com a data 06/05/2026 e esse ofício, sem correção registrada; "
+                                         "tire o corrige do item"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[sobra])]))
+
+
+# --- issue #414: termo de correcao ligado pela regra antiga (data do proprio termo) e' religado ------------------
+
+CT120 = {**PLEITO_2026, "oficio": "CT-120-LT-2026", "data": "2026-04-01"}     # P1: antes de ap-11 (01/05)
+CT130 = {**PLEITO_2026, "oficio": "CT-130-LT-2026", "data": "2026-06-01"}     # P2: reemissao entre ap-11 e ap-12
+
+
+def _atendidos(conn):
+    return conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0]
+
+
+def _legado_p2_t2(conn, instrumentos=(T1, T2), pleitos=(CT120, CT130)):
+    """O estado que a carga de antes da PR #411 deixou: ap-12 corrige ap-11 e foi ligado pela data dele (01/07), ao
+    CT-130 (reemissao), e nao pela data de ap-11 (01/05), ao CT-120."""
+    cad = _cad(contratos=[_contrato(instrumentos=list(instrumentos), pleitos_anteriores=list(pleitos))])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    conn.execute("UPDATE pleitos SET instrumento_chave=NULL WHERE numero_oficio='CT-120-LT-2026'")
+    conn.execute("UPDATE pleitos SET instrumento_chave='ap-12' WHERE numero_oficio='CT-130-LT-2026'")
+    conn.commit()
+    return cad
+
+
+RELIGADO = ["MT-402/reajuste CT-130-LT-2026: sem termo (ap-12 religado ao CT-120-LT-2026, o último enviado até "
+            "01/05/2026)",
+            "MT-402/reajuste CT-120-LT-2026: atendido por ap-12 (religado)"]
+
+
+def test_termo_de_correcao_ligado_pela_regra_antiga_e_religado_com_auditoria(conn):
+    import datetime
+    cad = _legado_p2_t2(conn)
+    assert _ligacoes(conn) == {"CT-120-LT-2026": None, "CT-130-LT-2026": "ap-12"}
+    assert reajuste_mod.ciclos(conn, 1, datetime.date(2026, 10, 20))[0]["situacao"] == "apostilado"
+    antes = _atendidos(conn)
+    # o ensaio mostra a mudanca e nao grava
+    r = cadastro_aplicar.aplicar(conn, 1, cad, ensaio=True)
+    assert r["pleitos"]["alterados"] == RELIGADO
+    assert _ligacoes(conn) == {"CT-120-LT-2026": None, "CT-130-LT-2026": "ap-12"}
+    assert _atendidos(conn) == antes
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == RELIGADO
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-12", "CT-130-LT-2026": None}
+    # auditoria dos dois lados: a reemissao perde o termo, o pleito do termo original o ganha
+    ids = dict(conn.execute("SELECT numero_oficio, id FROM pleitos").fetchall())
+    eventos = [(int(r[0]), json.loads(r[1]), json.loads(r[2])) for r in conn.execute(
+        "SELECT entidade_id, antes, depois FROM audit_log WHERE acao='cadastro.pleito_atendido' ORDER BY id")][antes:]
+    assert eventos == [(ids["CT-130-LT-2026"], {"instrumento_chave": "ap-12"}, {"instrumento_chave": None}),
+                       (ids["CT-120-LT-2026"], {"instrumento_chave": None}, {"instrumento_chave": "ap-12"})]
+    # a reemissao volta a esperar o termo dela
+    assert reajuste_mod.ciclos(conn, 1, datetime.date(2026, 10, 20))[0]["situacao"] == "apostilamento_pendente"
+
+
+def test_segunda_reaplicacao_do_termo_religado_e_igual_e_nao_audita(conn):
+    cad = _legado_p2_t2(conn)
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log WHERE entidade='pleito'").fetchone()[0]
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"] == {"criados": [], "alterados": [], "iguais": 2}
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-12", "CT-130-LT-2026": None}
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE entidade='pleito'").fetchone()[0] == antes
+
+
+def test_ciclo_sem_cadeia_de_correcao_nao_e_tocado_pela_religacao(conn):
+    # ap-05 (ciclo 2025, sem correcao) atendeu o CT-050; o CT-060, enviado antes de ap-05, entrou depois no cadastro.
+    # A ligacao do termo original fica como esta': so' o termo de correcao se reconfere
+    ap05 = {**AP_COMP, "chave": "ap-05", "numero": "019/2024/02/05", "data": "2025-09-01",
+            "dados": {**AP_COMP["dados"], "ciclo": 2025, "periodo": None,
+                      "competencias": [{"competencia": "2025-04", "valor": "1,00"}]}}
+    ct050 = {**PLEITO_2026, "oficio": "CT-050-LT-2025", "data": "2025-05-01", "ciclo": 2025}
+    ct060 = {**PLEITO_2026, "oficio": "CT-060-LT-2025", "data": "2025-08-01", "ciclo": 2025}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ap05], pleitos_anteriores=[ct050])]))
+    cad = _legado_p2_t2(conn, instrumentos=(ap05, T1, T2), pleitos=(ct050, ct060, CT120, CT130))
+    assert _ligacoes(conn) == {"CT-050-LT-2025": "ap-05", "CT-060-LT-2025": None,
+                               "CT-120-LT-2026": None, "CT-130-LT-2026": "ap-12"}
+    de_2025 = [str(i) for (i,) in conn.execute("SELECT id FROM pleitos WHERE ciclo=2025")]
+    sql = f"SELECT COUNT(*) FROM audit_log WHERE entidade='pleito' AND entidade_id IN ({','.join('?' * len(de_2025))})"
+    eventos = conn.execute(sql, de_2025).fetchone()[0]
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == RELIGADO
+    assert _ligacoes(conn) == {"CT-050-LT-2025": "ap-05", "CT-060-LT-2025": None,
+                               "CT-120-LT-2026": "ap-12", "CT-130-LT-2026": None}
+    assert conn.execute(sql, de_2025).fetchone()[0] == eventos
+
+
+def test_correcao_de_correcao_que_herdou_a_ligacao_antiga_e_religada(conn):
+    # ap-12 ficou ligado pela regra antiga ao CT-130; ap-13 corrige ap-12 e herda a ligacao: se reconfere do mesmo jeito
+    _legado_p2_t2(conn)
+    t3 = {**AP_COMP, "chave": "ap-13", "numero": "019/2024/02/13", "data": "2026-08-01", "corrige": "ap-12"}
+    cad = _cad(contratos=[_contrato(instrumentos=[T1, T2, t3], pleitos_anteriores=[CT120, CT130])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ap-13", "CT-130-LT-2026": None}
+    antes = _atendidos(conn)
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+    assert _atendidos(conn) == antes
+
+
+def test_termo_de_correcao_sem_pleito_ate_a_data_do_original_perde_a_ligacao_antiga_com_aviso(conn):
+    # sem o CT-120 no cadastro, pela data de ap-11 nao ha' pleito: a ligacao antiga ao CT-130 sai, com aviso
+    cad = _legado_p2_t2(conn, pleitos=(CT130,))
+    assert _ligacoes(conn) == {"CT-130-LT-2026": "ap-12"}
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-130-LT-2026": None}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-130-LT-2026: sem termo (ap-12 religado: nenhum pleito do "
+                                         "ciclo enviado até 01/05/2026)"]
+    assert any(a.startswith("MT-402/ap-12: ") and "CT-130-LT-2026 saiu" in a for a in r["avisos"]), r["avisos"]
+    antes = _atendidos(conn)
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == [] and not any("MT-402/ap-12" in a for a in r["avisos"])
+    assert _atendidos(conn) == antes
+
+
+def test_pleito_esperado_atendido_por_outro_termo_nao_tira_a_heranca_e_avisa(conn):
+    # code-review (#414): ap-11 atendeu o CT-100; o CT-120, que entrou depois, foi pego pelo aditivo ta-08. Pela data de
+    # ap-11 a correcao atenderia o CT-120, que e' do aditivo: nada de adivinhar, a heranca fica e o aplicar avisa
+    ct100 = {**PLEITO_2026, "oficio": "CT-100-LT-2026", "data": "2026-03-01"}
+    ta = {**TA_REAJ, "data": "2026-04-15", "dados": {"ciclo": 2026}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[T1], pleitos_anteriores=[ct100])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[T1, ta], pleitos_anteriores=[ct100, CT120])]))
+    assert _ligacoes(conn) == {"CT-100-LT-2026": "ap-11", "CT-120-LT-2026": "ta-08"}
+    cad = _cad(contratos=[_contrato(instrumentos=[T1, ta, T2], pleitos_anteriores=[ct100, CT120])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-100-LT-2026": "ap-12", "CT-120-LT-2026": "ta-08"}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-100-LT-2026: atendido por ap-12"]
+    assert any(a.startswith("MT-402/ap-12: ") and "CT-120-LT-2026" in a and "ta-08" in a for a in r["avisos"]), r["avisos"]
+    antes = _atendidos(conn)
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+    assert _atendidos(conn) == antes
+
+
+def test_correcao_da_data_de_pleito_nao_perde_a_ligacao_ao_aditivo_de_reajuste(conn):
+    # comentario da #414: a correcao de data desliga os pleitos do ciclo, inclusive o ligado ao aditivo de reajuste
+    # (#390); o aplicar o religa como numa aplicacao do zero
+    errado = {**PLEITO_2026, "data": "2026-10-20"}        # depois do aditivo (30/07)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ],
+                                                                pleitos_anteriores=[CT120, errado])]))
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ta-08", "CT-122-LT-2026": None}
+    # ainda depois do aditivo: o CT-120 continua atendido por ele
+    tarde = {**PLEITO_2026, "data": "2026-08-15", "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-10-20"}}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[CT120, tarde])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-120-LT-2026": "ta-08", "CT-122-LT-2026": None}
+    antes = _atendidos(conn)
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+    assert _atendidos(conn) == antes
+    # antes do aditivo: o ultimo enviado ate' a assinatura passa a ser o atendido
+    cedo = {**PLEITO_2026, "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-08-15"}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[CT120, cedo])]))
+    assert _ligacoes(conn) == {"CT-120-LT-2026": None, "CT-122-LT-2026": "ta-08"}
+
+
+# --- issue #410: base inferida cede a declaracao; legado segue a base do pleito ligado; correcao conta so' uma vez ---
+
+def _ta_origem(conn):
+    return tuple(conn.execute("SELECT data_base_mes, data_base_origem FROM aditivos "
+                              "WHERE chave_cadastro='ta-08'").fetchone())
+
+
+def _ultima_auditoria_do_aditivo(conn):
+    antes, depois = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.instrumento' "
+                                 "ORDER BY id DESC LIMIT 1").fetchone()
+    return json.loads(antes), json.loads(depois)
+
+
+def test_declaracao_de_data_base_sobrescreve_a_inferida_com_auditoria(conn):
+    # aplicado sem `data_base` com a base unica 2023-04; o contrato ganha a 2023-06 e o YAML passa a declarar que o
+    # termo e' dela: a declarada entra, auditada, e o ciclo 2026 que fecha e' o da 2023-06
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ])]))
+    assert _ta_origem(conn) == ("2023-04", "unica")
+    declarado = {**TA_REAJ, "dados": {"data_base": "2023-06"}}
+    cad = _cad(contratos=[_contrato(instrumentos=[declarado], datas_base=DUAS_BASES)])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ta_origem(conn) == ("2023-06", "declarada")
+    assert r["instrumentos"]["alterados"] == ["MT-402/ta-08"]
+    assert _ultima_auditoria_do_aditivo(conn) == ({"data_base_mes": "2023-04", "data_base_origem": "unica"},
+                                                  {"data_base_mes": "2023-06", "data_base_origem": "declarada"})
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-06", 2026, False)["chave"] == "ta-08"
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, False) is None
+    ks = {k["data_base_mes"]: k for k in reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))}
+    assert ks["2023-06"]["apostilamento"]["chave"] == "ta-08"
+    assert ks["2023-04"]["apostilamento"] is None
+    # reaplicar e' igual; a declarada trava
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["instrumentos"]["alterados"] == []
+    with pytest.raises(ValueError, match="data_base_mes: '2023-06' → '2023-04'"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+            instrumentos=[{**TA_REAJ, "dados": {"data_base": "2023-04"}}], datas_base=DUAS_BASES)]))
+    assert _ta_origem(conn) == ("2023-06", "declarada")
+
+
+def test_declaracao_diferente_da_base_declarada_e_recusada(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+        instrumentos=[{**TA_REAJ, "dados": {"data_base": "2023-04"}}], datas_base=DUAS_BASES)]))
+    assert _ta_origem(conn) == ("2023-04", "declarada")
+    with pytest.raises(ValueError, match="data_base_mes: '2023-04' → '2023-06'"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+            instrumentos=[{**TA_REAJ, "dados": {"data_base": "2023-06"}}], datas_base=DUAS_BASES)]))
+
+
+def test_base_gravada_antes_da_061_cede_a_declaracao_e_a_mesma_declaracao_trava(conn):
+    # sem origem (aplicado entre a 058 e a 061): conta como inferida; a mesma base declarada so' marca a origem
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ])]))
+    conn.execute("UPDATE aditivos SET data_base_origem=NULL WHERE chave_cadastro='ta-08'"); conn.commit()
+    igual = {**TA_REAJ, "dados": {"data_base": "2023-04"}}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[igual], datas_base=DUAS_BASES)]))
+    assert _ta_origem(conn) == ("2023-04", "declarada")
+    assert r["instrumentos"]["alterados"] == ["MT-402/ta-08"]
+    with pytest.raises(ValueError, match="data_base_mes"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+            instrumentos=[{**TA_REAJ, "dados": {"data_base": "2023-06"}}], datas_base=DUAS_BASES)]))
+
+
+def test_aditivo_legado_ligado_a_pleito_segue_na_base_do_pleito_quando_o_contrato_troca_a_base_unica(conn):
+    # aplicado antes da 058 (base vazia) e ligado ao pleito da base 2023-04; o contrato troca a base unica para a
+    # 2023-06 antes do primeiro aplicar depois da 058: o aditivo fica na 2023-04 e a ligacao ao pleito nao se perde
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08"}
+    conn.execute("UPDATE aditivos SET data_base_mes=NULL, data_base_origem=NULL WHERE chave_cadastro='ta-08'")
+    conn.commit()
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026],
+                                    datas_base=[{"mes": "2023-06", "indice": "FGV/DNIT"}])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ta_origem(conn) == ("2023-04", "pleito")
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08"}
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["instrumentos"]["alterados"] == []
+
+
+def test_aditivo_legado_ligado_a_pleitos_de_duas_bases_exige_declaracao(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    conn.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+                 "enviado_em, instrumento_chave) VALUES (1,'reajuste','cadastro','2023-06',2026,'CT-123-LT-2026',"
+                 "'enviado','2026-06-23','ta-08')")
+    conn.execute("UPDATE aditivos SET data_base_mes=NULL, data_base_origem=NULL WHERE chave_cadastro='ta-08'")
+    conn.commit()
+    with pytest.raises(ValueError, match="ta-08.*data_base"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], datas_base=DUAS_BASES,
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    assert _ta_origem(conn) == (None, None)
+
+
+def test_aditivo_de_reajuste_corrigido_sai_do_valor_vigente(conn):
+    # comentario da issue (PR #433 da #409): TA1 (+R$ 100,01) e TA2 (+R$ 100,01, corrige o TA1) -- o vigente e o
+    # reajuste contratado contam so' o TA2, e o retrato do TA2 nao carrega o delta do TA1
+    original = _contrato()["valor_original_centavos"]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ])]))
+    v = contratos_mod.vigente(conn, 1)
+    assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 100_01, 100_01)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR])]))
+    v = contratos_mod.vigente(conn, 1)
+    assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 100_01, 100_01)
+    assert v["valor_vigente_execucao_centavos"] == original
+    assert tuple(conn.execute("SELECT valor_anterior_centavos, valor_novo_centavos FROM aditivos "
+                              "WHERE chave_cadastro='ta-09'").fetchone()) == (original, original + 100_01)
+
+
+def test_aditivo_de_reajuste_corrigido_aplicado_do_zero_sai_do_valor_vigente(conn):
+    original = _contrato()["valor_original_centavos"]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR])]))
+    assert contratos_mod.vigente(conn, 1)["valor_vigente_centavos"] == original + 100_01
+    assert tuple(conn.execute("SELECT valor_anterior_centavos, valor_novo_centavos FROM aditivos "
+                              "WHERE chave_cadastro='ta-09'").fetchone()) == (original, original + 100_01)
+
+
+def test_aditivo_de_prazo_que_corrige_o_de_reajuste_nao_tira_o_valor_dele(conn):
+    original = _contrato()["valor_original_centavos"]
+    prazo = {**AD_VALOR, "chave": "ta-10", "tipo": "aditivo_prazo", "numero": "019/2024/01/10", "data": "2026-08-20",
+             "delta_valor_centavos": 0, "nova_execucao_fim": "2027-06-30", "natureza": None, "corrige": "ta-08"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, prazo])]))
+    assert contratos_mod.vigente(conn, 1)["valor_vigente_centavos"] == original + 100_01
+
+
+TA_CORR2 = {**TA_REAJ, "chave": "ta-10", "numero": "019/2024/01/10", "data": "2026-09-01", "corrige": "ta-08",
+            "delta_valor_centavos": 120_01}
+
+
+def test_duas_correcoes_de_reajuste_do_mesmo_aditivo_sao_recusadas(conn):
+    # gate Sol (rodada 1, PR #452): TA2 e TA3 corrigindo o TA1 somariam as duas no vigente; nada e' gravado
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "delta_valor_centavos": 110_01}, TA_CORR2])])
+    with pytest.raises(ValueError, match="ta-09 já corrige ta-08"):
+        cadastro_aplicar.aplicar(conn, 1, cad)
+    assert conn.execute("SELECT COUNT(*) FROM aditivos").fetchone()[0] == 0
+    # a cadeia (TA3 corrige TA2) e' o caminho: so' o ultimo conta
+    original = _contrato()["valor_original_centavos"]
+    cadeia = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "delta_valor_centavos": 110_01},
+                                                     {**TA_CORR2, "corrige": "ta-09"}])])
+    cadastro_aplicar.aplicar(conn, 1, cadeia)
+    v = contratos_mod.vigente(conn, 1)
+    assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 120_01, 120_01)
+    assert tuple(conn.execute("SELECT valor_anterior_centavos, valor_novo_centavos FROM aditivos "
+                              "WHERE chave_cadastro='ta-10'").fetchone()) == (original, original + 120_01)
+
+
+def test_correcao_com_data_anterior_a_do_corrigido_grava_o_retrato_depois_dele(conn):
+    # gate Sol (rodada 2, PR #452): a correcao (e a correcao da correcao) com data anterior a do termo corrigido e'
+    # gravada depois dele; cada retrato parte do vigente sem o corrigido
+    original = _contrato()["valor_original_centavos"]
+    ta2 = {**TA_CORR, "data": "2026-07-20", "delta_valor_centavos": 110_01}
+    ta3 = {**TA_CORR2, "data": "2026-07-10", "corrige": "ta-09"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ta3, ta2, TA_REAJ])]))
+    retratos = {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT chave_cadastro, valor_anterior_centavos, valor_novo_centavos FROM aditivos")}
+    assert retratos == {"ta-08": (original, original + 100_01), "ta-09": (original, original + 110_01),
+                        "ta-10": (original, original + 120_01)}
+    v = contratos_mod.vigente(conn, 1)
+    assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 120_01, 120_01)
+
+
+def test_primeiro_ciclo_gravado_e_conferido_contra_a_base_guardada(conn):
+    # gate Sol (rodada 1, PR #452): base 2023-04 guardada (unica na aplicacao); com duas bases e sem `data_base` o
+    # validar so' confere o formato, e o aplicar recusa o ciclo fora de 2024..2026 (termo de 30/07/2026)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ])]))
+    for ciclo in (2099, 2023):
+        with pytest.raises(ValueError, match="use um ciclo de 2024 a 2026"):
+            cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+                instrumentos=[{**TA_REAJ, "dados": {"ciclo": ciclo}}], datas_base=DUAS_BASES)]))
+    assert _ta(conn) == ("2023-04", None)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+        instrumentos=[{**TA_REAJ, "dados": {"ciclo": 2025}}], datas_base=DUAS_BASES)]))
+    assert _ta(conn) == ("2023-04", 2025)
+
+
+def test_base_declarada_nova_e_conferida_contra_o_ciclo_guardado(conn):
+    # o ciclo 2024 guardado com a base 2023-04; declarar a base 2023-06 com ele seguiria valendo (2024..2026); um
+    # termo de 2026-05 com ciclo 2026 na base 2023-04 nao pode passar para a 2023-06 (aniversario em junho)
+    maio = {**TA_REAJ, "data": "2026-05-20", "dados": {"ciclo": 2026}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[maio])]))
+    with pytest.raises(ValueError, match="use um ciclo de 2024 a 2025"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+            instrumentos=[{**maio, "dados": {"ciclo": 2026, "data_base": "2023-06"}}], datas_base=DUAS_BASES)]))

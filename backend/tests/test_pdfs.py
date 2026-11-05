@@ -8,6 +8,9 @@ from starlette.datastructures import Headers, UploadFile
 from app import arquivos, carta, leitura_pdf, pdfs
 
 
+# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 def test_juntar_preserva_a_ordem_e_o_texto_por_pagina():
     a = carta.pagina_titulo(["PRIMEIRA"])
     b = carta.pagina_titulo(["SEGUNDA"])

@@ -2,10 +2,16 @@
 import base64
 import datetime
 import io
+import os
 
 import pypdf
 
+import pytest
+
 from app import carta
+
+# Gera PDF com a fonte da lista de candidatas (Arial no Windows e no Mac, Liberation Sans no Linux da CI).
+pytestmark = pytest.mark.pdf
 
 
 def _texto(pdf: bytes) -> str:
@@ -34,10 +40,61 @@ def test_carta_leva_os_dados_e_as_marcas_do_corpo():
     assert "# 2." not in t                        # a marca de titulo nao vai para o papel
 
 
-def test_sem_arial_cai_na_helvetica_sem_quebrar(monkeypatch, tmp_path):
-    monkeypatch.setattr(carta, "_ARIAL", tmp_path / "nao-existe.ttf")
+def _sem_candidatas(monkeypatch, tmp_path):
+    monkeypatch.setattr(carta, "_FONTES", ((tmp_path / "nao-existe.ttf", tmp_path / "nao-existe-negrito.ttf"),))
+    monkeypatch.delenv("DASH_FONTE_CARTA", raising=False)
+    monkeypatch.delenv("DASH_FONTE_CARTA_NEGRITO", raising=False)
+
+
+def _fonte_real():
+    """O par de TTF que esta maquina tem; na CI (variavel CI) a falta dele e' erro, nao pulo (issue #385)."""
+    par = carta.fonte_carta()
+    if par is None:
+        if os.environ.get("CI"):
+            pytest.fail("CI sem fonte Unicode para a carta: o job precisa da Liberation Sans (fonts-liberation)")
+        pytest.skip("maquina sem Arial nem Liberation Sans")
+    return par
+
+
+def test_sem_candidata_cai_na_helvetica_sem_quebrar(monkeypatch, tmp_path):
+    _sem_candidatas(monkeypatch, tmp_path)
+    assert carta.fonte_carta() is None
     t = _texto(carta.gerar(_carta()))
     assert "MT-PAR" in t and "CT/301/LT/2026" in t
+    assert "099/2024/MTPAR - Complexo Cultural" in t               # plano B latin-1: travessao vira hifen
+
+
+def test_travessao_sai_no_pdf_com_a_fonte_da_lista():
+    _fonte_real()
+    t = _texto(carta.gerar(_carta()))
+    assert "099/2024/MTPAR – Complexo Cultural" in t
+    assert "NF nº 2311" in t and "Nota fiscal – NF" in t
+
+
+def test_variavel_de_ambiente_aponta_outro_ttf(monkeypatch, tmp_path):
+    regular, negrito = _fonte_real()
+    _sem_candidatas(monkeypatch, tmp_path)
+    (tmp_path / "outra.ttf").write_bytes(regular.read_bytes())
+    (tmp_path / "outra-negrito.ttf").write_bytes(negrito.read_bytes())
+    monkeypatch.setenv("DASH_FONTE_CARTA", str(tmp_path / "outra.ttf"))
+    monkeypatch.setenv("DASH_FONTE_CARTA_NEGRITO", str(tmp_path / "outra-negrito.ttf"))
+    assert carta.fonte_carta() == (tmp_path / "outra.ttf", tmp_path / "outra-negrito.ttf")
+    assert "MTPAR – Complexo Cultural" in _texto(carta.gerar(_carta()))
+
+
+def test_variavel_so_com_o_regular_nao_vale(monkeypatch, tmp_path):
+    regular, _ = _fonte_real()
+    _sem_candidatas(monkeypatch, tmp_path)
+    monkeypatch.setenv("DASH_FONTE_CARTA", str(regular))
+    assert carta.fonte_carta() is None
+
+
+def test_primeira_candidata_com_os_dois_arquivos_vence(monkeypatch, tmp_path):
+    regular, negrito = _fonte_real()
+    _sem_candidatas(monkeypatch, tmp_path)
+    so_regular = (regular, tmp_path / "falta.ttf")
+    monkeypatch.setattr(carta, "_FONTES", (so_regular, (regular, negrito), (negrito, regular)))
+    assert carta.fonte_carta() == (regular, negrito)
 
 
 def test_pagina_titulo_e_data_extenso_e_preencher():
@@ -131,3 +188,101 @@ def test_corpo_da_reiteracao_familia_b_preenche_todos_os_campos():
     assert corpo != carta.preencher(cartas["pleito_reajuste"]["carta_corpo"], campos)     # nao e' a familia A
     t = _texto(carta.gerar(_carta(corpo=corpo, assunto=carta.preencher(textos["carta_assunto"], campos))))
     assert "reiteração" in t and "CT/068/LT/2026" in t
+
+
+# --- issue #293: curva S em xlsx anexa a carta de prorrogacao --------------------------------------
+
+def _planilha(dados: bytes):
+    import openpyxl
+    return openpyxl.load_workbook(io.BytesIO(dados)).active
+
+
+def test_curva_s_em_xlsx_abre_com_as_colunas_e_os_valores():
+    """Spec 2026-10-20 §4 item 3 e D9: competencia, previsto vigente, previsto anterior a ultima repactuacao e
+    medido, acumulados; o centavo inteiro vira real uma vez so', na celula (sem arredondar de novo)."""
+    linhas = [{"competencia": "2025-12", "previsto_vigente_centavos": 100_000_00,
+               "previsto_anterior_centavos": 120_000_00, "medido_centavos": 90_123_45},
+              {"competencia": "2026-01", "previsto_vigente_centavos": 250_000_01,
+               "previsto_anterior_centavos": 300_000_00, "medido_centavos": None}]
+    ws = _planilha(carta.curva_s_xlsx(linhas))
+    assert ws.title == "Curva S"
+    assert [x.value for x in ws[1]] == ["Competência", "Previsto vigente", "Previsto anterior", "Medido"]
+    assert [[x.value for x in linha] for linha in ws.iter_rows(min_row=2)] == [
+        [datetime.datetime(2025, 12, 1), 100000, 120000, 90123.45],
+        [datetime.datetime(2026, 1, 1), 250000.01, 300000, None]]          # depois do ultimo mes medido, vazio
+    assert ws["A2"].number_format == "mm/yyyy"
+    assert {ws[f"{col}2"].number_format for col in "BCD"} == {"#,##0.00"}
+
+
+def test_curva_s_mesmas_linhas_dao_os_mesmos_bytes(monkeypatch):
+    """Rodada 2 da PR #436: o sha256 do xlsx e' a impressao da curva; o relogio nao pode muda-lo."""
+    import time
+    linhas = [{"competencia": "2026-03", "previsto_vigente_centavos": 1_00, "previsto_anterior_centavos": None,
+               "medido_centavos": 50}]
+    monkeypatch.setattr(time, "time", lambda: 1_700_000_000.0)
+    antes = carta.curva_s_xlsx(linhas)
+    monkeypatch.setattr(time, "time", lambda: 1_800_000_000.0)
+    assert carta.curva_s_xlsx(linhas) == antes
+    assert carta.curva_s_xlsx([{**linhas[0], "medido_centavos": 51}]) != antes
+
+
+def test_curva_s_sem_repactuacao_deixa_o_previsto_anterior_vazio():
+    ws = _planilha(carta.curva_s_xlsx([{"competencia": "2026-03", "previsto_vigente_centavos": 1_00,
+                                        "previsto_anterior_centavos": None, "medido_centavos": 50}]))
+    assert [x.value for x in ws[1]] == ["Competência", "Previsto vigente", "Previsto anterior", "Medido"]
+    assert [x.value for x in ws[2]] == [datetime.datetime(2026, 3, 1), 1, None, 0.5]
+
+
+def test_curva_s_lida_de_volta_da_o_conteudo_em_centavos_mesmo_salva_pelo_openpyxl_comum():
+    """Issue #447: a conferencia compara o conteudo (competencia e centavos inteiros), nao os bytes; o mesmo xlsx
+    salvo pelo `wb.save` comum (outra data no zip e nas propriedades) le o mesmo conteudo."""
+    import openpyxl
+    linhas = [{"competencia": "2025-12", "previsto_vigente_centavos": 100_000_00,
+               "previsto_anterior_centavos": 120_000_00, "medido_centavos": 90_123_45},
+              {"competencia": "2026-01", "previsto_vigente_centavos": 250_000_01,
+               "previsto_anterior_centavos": None, "medido_centavos": None}]
+    gerado = carta.curva_s_xlsx(linhas)
+    assert carta.ler_curva_s(gerado) == carta.conteudo_curva_s(linhas) == [
+        ("2025-12", 100_000_00, 120_000_00, 90_123_45), ("2026-01", 250_000_01, None, None)]
+    wb = openpyxl.load_workbook(io.BytesIO(gerado))
+    outro = io.BytesIO()
+    wb.save(outro)
+    assert outro.getvalue() != gerado
+    assert carta.ler_curva_s(outro.getvalue()) == carta.conteudo_curva_s(linhas)
+    assert carta.ler_curva_s(carta.curva_s_xlsx([{**linhas[0], "medido_centavos": 90_123_46}])) != \
+        carta.conteudo_curva_s(linhas[:1])
+
+
+def test_curva_s_ilegivel_ou_de_outro_formato_recusa():
+    import openpyxl
+    with pytest.raises(ValueError):
+        carta.ler_curva_s(b"PK\x03\x04truncado")
+    wb = openpyxl.Workbook()
+    wb.active.append(["Outra", "planilha"])
+    saida = io.BytesIO()
+    wb.save(saida)
+    with pytest.raises(ValueError, match="cabeçalho"):
+        carta.ler_curva_s(saida.getvalue())
+
+
+def test_curva_s_lida_em_centavos_exatos_ate_o_teto():
+    """Gate Sol na PR #455 (S3): o centavo lido e' o gravado, sem a multiplicacao de float, ate' o teto da curva
+    (R$ 10 trilhoes); acima dele, ou com fracao de centavo, a leitura recusa (a curva vira ilegivel, nunca
+    "igual com 1 centavo de diferenca")."""
+    import random
+    sorteio = random.Random(447)
+    valores = [1, 7, 99, 101, 10_05, 123_456_789_01, 999_999_999_999_99, carta.TETO_CURVA_S_CENTAVOS - 1] + \
+        [sorteio.randrange(carta.TETO_CURVA_S_CENTAVOS) for _ in range(300)]
+    linhas = [{"competencia": f"{2000 + i // 12:04d}-{i % 12 + 1:02d}", "previsto_vigente_centavos": v,
+               "previsto_anterior_centavos": v, "medido_centavos": v} for i, v in enumerate(valores)]
+    assert carta.ler_curva_s(carta.curva_s_xlsx(linhas)) == carta.conteudo_curva_s(linhas)
+    for fora in (3585351136095505, carta.TETO_CURVA_S_CENTAVOS):
+        with pytest.raises(ValueError):
+            carta.ler_curva_s(carta.curva_s_xlsx([{**linhas[0], "medido_centavos": fora}]))
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(carta.curva_s_xlsx(linhas[:1])))
+    wb.active["D2"] = 0.001                                     # fracao de centavo nao e' a curva gerada
+    saida = io.BytesIO()
+    wb.save(saida)
+    with pytest.raises(ValueError, match="centavo exato"):
+        carta.ler_curva_s(saida.getvalue())

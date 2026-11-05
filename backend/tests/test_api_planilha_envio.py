@@ -406,3 +406,24 @@ def test_pecas_nao_mudam_com_o_envio_reservado(api):
     r = cl.post(f"/api/medicoes/{mid}/envio-planilha/pecas/{peca_id}/remover")
     assert r.status_code == 409
     assert [p["id"] for p in cl.get(f"/api/medicoes/{mid}").json()["envio_planilha"]["pecas"]] == [peca_id]
+
+
+def _por_fora(cl, mid, enviado_em):
+    r = cl.post(f"/api/medicoes/{mid}/planilhas/envio-externo", data={"enviado_em": enviado_em, "meio": "Balcão"})
+    assert r.status_code == 201, r.text
+
+
+def test_revisao_enviada_por_fora_nao_sai_de_novo_pelo_sistema(api):
+    """Gate Sol (PR #382): Original e Rev01 enviadas por fora; a vigente (2) ja' foi enviada, entao o sistema nao
+    oferece o envio nem abre a previa, e a lista de envios traz os dois, com a origem."""
+    cl, cid, _ = api
+    mid = _planilha(cl, cid)
+    _por_fora(cl, mid, "2026-08-03")
+    _revisar(cl, mid, "12.000,01")
+    _por_fora(cl, mid, "2026-08-05")
+    s = cl.get(f"/api/medicoes/{mid}").json()["envio_planilha"]
+    assert s["disponivel"] is False and "versão 2" in s["motivo"]
+    assert [(e["versao"], e["origem"], e["enviado_em"]) for e in s["envios"]] == [
+        (1, "externo", "2026-08-03"), (2, "externo", "2026-08-05")]
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha/previa", json={"numero_oficio": "337"})
+    assert r.status_code == 422 and "versão 2" in r.json()["detail"]

@@ -25,13 +25,21 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
   local em `C:\DashboardLotufo\segredos` (`rm-endereco.txt`); ver `scripts\rodar_producao.ps1`.
   O nome real das tarefas sai de `Get-ScheduledTask | Where-Object TaskName -like '*Dashboard*'`.
 - **Produção roda de um diretório PINADO** (mitigação [16], 2026-09-10): a tarefa agendada executa `C:\DashboardLotufo\app\scripts\rodar_producao.ps1` — um **worktree git dedicado** (detached HEAD num commit), com seu próprio `backend\.venv` e `frontend\dist`. O tree de dev (`C:\Users\...\Nova Dashboard Lotufo`) é **só para desenvolver**; editar/trocar branch lá NÃO muda a produção, e um reboot no meio de uma edição também não. Os dados (banco/logs/backups) ficam em `-Raiz` (`C:\DashboardLotufo`), fora do código.
-- **Deploy** (após commit+push no dev): `scripts\deploy.ps1 [-Ref origin/master] [-SemFrontend]` (elevado) — pausa o watchdog, atualiza o diretório pinado (git checkout + `requirements.lock` + build), reinicia, confere a saúde e faz **rollback automático** para o commit anterior se não voltar. Se o build (`pip`/`npm`/`vite`) falhar depois do checkout, o script volta o diretório pinado para o commit anterior (checkout direto, sem `git fetch`, e reconstrução só se o HEAD tinha saído dele), imprime que a produção segue nele e sai com código 1 (issue #78); se a volta também falhar, avisa para intervir à mão. Setup inicial do diretório pinado: `git worktree add --detach C:\DashboardLotufo\app <commit>`, depois `python -m venv` + `pip install -r backend\requirements.lock` e `npm ci && npm run build` em `frontend`.
+- **Deploy** (após commit+push no dev): `scripts\deploy.ps1 [-Ref origin/master] [-SemFrontend] [-Porta 8080]` (elevado; sem `-Porta`, usa a porta registrada na tarefa agendada, e com `-Porta` diferente dela aborta antes do checkout) — pausa o watchdog, atualiza o diretório pinado (git checkout + `requirements.lock` + build), reinicia, confere a saúde e faz **rollback automático** para o commit anterior se não voltar. Se o build (`pip`/`npm`/`vite`) falhar depois do checkout, o script volta o diretório pinado para o commit anterior (checkout direto, sem `git fetch`, e reconstrução só se o HEAD tinha saído dele), imprime que a produção segue nele e sai com código 1 (issue #78); se a volta também falhar, avisa para intervir à mão. Setup inicial do diretório pinado: `git worktree add --detach C:\DashboardLotufo\app <commit>`, depois `python -m venv` + `pip install -r backend\requirements.lock` e `npm ci && npm run build` em `frontend`.
 - **Backup pré-migração** (automático no deploy, desde a issue #75): antes de trocar o código, o `deploy.ps1` compara o commit atual do diretório pinado com o novo (`git diff --name-only <atual> <novo> -- backend/migrations`). Sem mudança em migrações, imprime `sem migracao nova; sem backup pre-migracao` e segue. Com mudança, chama `scripts\backup_pre_migracao.ps1`, que tira um snapshot do banco de produção com o servidor ainda no ar (API de backup do SQLite, pelo Python do diretório pinado; nunca cópia do `.db`, que perderia o `-wal`), confere o `integrity_check` e grava `C:\DashboardLotufo\dados\backups\dashboard-PRE-<7 caracteres do commit novo>-<AAAAMMDD-HHMMSS>.db`. O caminho sai em `BACKUP PRE-MIGRACAO: <caminho>` e de novo na linha final `DEPLOY OK`. Se o snapshot falhar, sai `BACKUP PRE-MIGRACAO FALHOU: <motivo>`, o deploy para **antes** do checkout (produção segue no commit anterior, código e banco intactos), o watchdog é solto e o script sai com código 1. **O rollback automático só volta o código, não o banco**: se a versão nova migrou o banco e for preciso voltar também os dados, restaurar à mão o arquivo `dashboard-PRE-...` impresso no deploy, pela seção "Restaurar o banco a partir de um snapshot". Se o mesmo deploy foi tentado mais de uma vez (rollback e nova tentativa), o banco já pode ter migrado na primeira: o arquivo certo é o `dashboard-PRE-<commit>` **mais antigo** daquele commit.
 - **Deploy da issue #110 (FRC e cobrança de certidão pelo cadastro): `cadastro aplicar` no mesmo passo.** Logo depois do `deploy.ps1`, `cadastro aplicar --ensaio` e real com `--raiz` do cadastro real (seção "Cadastro versionado"); o relatório deve trazer `frc: 0 criados, 2 alterados` e `cobranca_certidoes` criado no geral. Sem isso, a FRC do Integra BRT é recusada ("Logo da FRC não encontrado na pasta de dados: aplique o cadastro") e a cobrança de certidões só registra no log.
+- **Deploy da issue #271 (apostilamento com competências; pleito atendido pelo termo): `cadastro aplicar` no mesmo passo.** Logo depois do `deploy.ps1`, `cadastro aplicar --ensaio` e real com `--raiz` do cadastro real (seção "Cadastro versionado"); o relatório deve trazer, em pleitos alterados, `<obra>/reajuste <ofício>: atendido por <chave>` para cada apostilamento de reajuste já aplicado com pleito enviado no ciclo. Sem isso, o ciclo desse pleito aparece como "apostilamento pendente" (com aviso, que vai à diretoria depois de 90 dias) até o próximo `aplicar`. O termo só liga o pleito enviado até a data dele: se o pleito de produção (pedido original ou reemissão do cronograma) tiver data posterior à do termo, ele não é ligado e o ciclo fica pendente; a reiteração posterior não atrapalha (o termo do pedido que ela reitera fecha o ciclo).
+- **Deploy da issue #409 (aditivo de reajuste corrigido por outro; migração 059): `cadastro aplicar` no mesmo passo.** Logo depois do `deploy.ps1`, `cadastro aplicar --ensaio` e real com `--raiz` do cadastro real. O aditivo de reajuste corrigido por outro aditivo de reajuste (`corrige`) deixa de fechar ciclo assim que a 059 roda; é o `aplicar` que passa o pleito dele à correção (mesmo ciclo: `<obra>/reajuste <ofício>: atendido por <chave> (corrige <chave antiga>)`) ou o tira (outro ciclo: `sem termo (<chave> corrige <chave antiga> para o ciclo <ano>)`). Sem isso, o ciclo desse pleito aparece como "apostilamento pendente" até o próximo `aplicar`. Contrato sem aditivo com `corrige` não muda.
+- **Deploy da issue #417 (instalação assinada): arquivo na VM antes e `deploy.ps1` novo, uma vez só.**
+  1. Antes de rodar, `Test-Path C:\DashboardLotufo\segredos\instalacao.json` deve dar `True`. Se der `False`, parar: assinar e copiar pela seção "Instalação assinada".
+  2. Rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, não o do diretório pinado. O PowerShell lê o script inteiro antes do checkout, e o antigo só confere o 200: sem o arquivo, ele terminaria em `DEPLOY OK` com a produção em modo cópia, sem e-mail e sem RM. Os comandos estão na seção "Instalação assinada", item "Primeiro deploy".
+  3. Pelo Mac, esses comandos vão num `.ps1` temporário copiado para a VM com `scp` e rodado com `powershell -NoProfile -ExecutionPolicy Bypass -File`. No `-Command -` o `git fetch` consome o resto do script pelo stdin, e o script para no meio.
+  4. Logo depois, `/api/health` com `instalacao: autorizada`. Se não vier, voltar à mão como diz o "Primeiro deploy".
 - Dev: ver README ("Rodar em desenvolvimento").
-- Produção (manual, avançado): `scripts\rodar_producao.ps1 [-SemTls] [-Raiz C:\DashboardLotufo] [-BackupExterno \\servidor\backups\dashboard]` (elevado, a partir do diretório pinado). Hoje: `-SemTls`, sem cópia externa.
-- Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Parar: `Stop-ScheduledTask -TaskName <tarefa>`; iniciar: `Start-ScheduledTask -TaskName <tarefa>`.
-- Watchdog: `scripts\instalar_watchdog.ps1` registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1` — confere `/api/health` e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
+- Produção (manual, avançado): `scripts\rodar_producao.ps1 [-SemTls] [-Porta 8080] [-Raiz C:\DashboardLotufo] [-BackupExterno \\servidor\backups\dashboard]` (elevado, a partir do diretório pinado). Hoje: `-SemTls`, sem cópia externa.
+- **Porta** (issue #361): os quatro scripts (`rodar_producao.ps1`, `instalar_autostart.ps1`, `instalar_watchdog.ps1`, `deploy.ps1`) aceitam `-Porta`; sem ela vale o padrão de hoje (80 em HTTP com `-SemTls`, 8443 em HTTPS), e a produção atual não precisa reinstalar nada. Numa máquina em que a 80 é de outro serviço (IIS na VM nova), passar a mesma porta nos quatro (ex.: `-Porta 8080`) e liberar essa porta no firewall (seção "HTTP ou HTTPS"). Neste documento `http://localhost:<porta>/api/health` é a saúde nessa porta.
+- Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Porta 8080] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Parar: `Stop-ScheduledTask -TaskName <tarefa>`; iniciar: `Start-ScheduledTask -TaskName <tarefa>`.
+- Watchdog: `scripts\instalar_watchdog.ps1 [-Porta 8080]` registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1 -Url http://localhost:<porta>/api/health` — confere `/api/health` na porta de `-Porta` (padrão 80 em HTTP) e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
 
 ### Deploy a partir do Mac (SSH)
 
@@ -52,13 +60,14 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    com `$atual` = `git -C C:\DashboardLotufo\app rev-parse HEAD`. Com isso a sessão avisa o Leo de migração nova (número e o que faz)
    e escolhe `-SemFrontend` se nada em `frontend/` mudou.
 4. **Segunda chamada, o deploy**: criar o sentinela do watchdog (`New-Item -ItemType File -Path C:\DashboardLotufo\watchdog.pause -Force | Out-Null`),
-   `& .\scripts\deploy.ps1` (ou com `-SemFrontend`), **sem redirecionar stderr** dentro do PowerShell, e ler a linha final:
+   `& .\scripts\deploy.ps1` (ou com `-SemFrontend`; a porta vem da tarefa agendada, `-Porta <porta>` só para conferir), **sem redirecionar stderr** dentro do PowerShell, e ler a linha final:
    `DEPLOY OK`, `ROLLBACK OK`, `ROLLBACK TAMBEM FALHOU`, `BACKUP PRE-MIGRACAO FALHOU` seguido de `deploy abortado antes do
    checkout` (nada mudou na produção), `deploy abortado no build; producao segue no commit anterior ...` (a produção segue no
    commit anterior) ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`. Nos dois casos de
    "intervir a mao" (`ROLLBACK TAMBEM FALHOU` e este último), **não apagar o sentinela** antes de o diretório pinado voltar ao
    commit anterior.
-5. **Terceira chamada, conferência**: `Invoke-WebRequest http://localhost/api/health -UseBasicParsing` (200 com `banco: ok`),
+5. **Terceira chamada, conferência**: `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` (200 com `banco: ok` e `instalacao: autorizada`, seção "Instalação assinada";
+   a porta é a de `-Porta`, padrão 80 em HTTP, quando dá para omitir o `:80`),
    `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao `origin/master`, e apagar o sentinela
    (`Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`; `Test-Path` deve dar `False`).
    Apagar o sentinela também quando o deploy der `ROLLBACK` ou `BACKUP PRE-MIGRACAO FALHOU`.
@@ -74,7 +83,79 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    **Não testado.**
 
 ## Saúde
-`GET /api/health` toca o banco (503 se não responder) e devolve a última rodada de backup: `ultimo_snapshot`, `ultimo_snapshot_erro`, `ultima_copia_arquivos`, `ultima_copia_arquivos_erro`, `ultima_copia_externa`, `ultima_copia_externa_erro`, `ultima_copia_externa_arquivos`, `ultima_copia_externa_arquivos_erro`. Cópia externa com data de ontem ou erro preenchido = olhar o log.
+`GET /api/health` toca o banco (503 se não responder) e devolve a última rodada de backup: `ultimo_snapshot`, `ultimo_snapshot_erro`, `ultima_copia_arquivos`, `ultima_copia_arquivos_erro`, `ultima_copia_externa`, `ultima_copia_externa_erro`, `ultima_copia_externa_arquivos`, `ultima_copia_externa_arquivos_erro`. Cópia externa com data de ontem ou erro preenchido = olhar o log. Traz também `instalacao` (`autorizada`, `nao-autorizada` ou `dev`) e `instalacao_motivo` (seção "Instalação assinada"). Traz ainda `commit` (7 caracteres do clone, lido na subida).
+
+### Código em produção diferente do último deploy (issue #421)
+O `scripts\deploy.ps1` grava `<raiz>\deploy-atual.json` (commit, data e sha256 do manifesto de `frontend\dist`) depois do build e antes de reiniciar; o rollback regrava. O servidor confere na subida e de hora em hora (não em dev, e não enquanto `watchdog.pause` existir): HEAD do clone, `git status --porcelain` vazio e manifesto do `dist`. Diferença = item crítico "Código em produção diferente do último deploy" em Administração > Saúde > Segurança (com contagens, sem nomes de arquivo) e uma linha `seguranca.arvore_alterada` na auditoria por diferença nova. Sem o arquivo = item de atenção "Sem registro do último deploy" até o próximo deploy. O deploy seguinte limpa o item. Para gravar o registro sem deploy: `python -m app.cli integridade registrar --raiz C:\DashboardLotufo` (no `backend` do clone, com o venv dele).
+
+## Instalação assinada (issue #417)
+Copiar a pasta de produção para outra máquina não basta para ter uma dashboard funcionando. Na subida o servidor lê `C:\DashboardLotufo\segredos\instalacao.json` (`<raiz>\segredos`, a pasta ao lado de `dados`, onde está o banco; a variável `DASH_INSTALACAO_ARQUIVO` troca o caminho) e confere a assinatura do dono e o nome da máquina (o `COMPUTERNAME`, lido do Windows e não da variável de ambiente). A conferência é só na subida: arquivo novo vale a partir do próximo reinício.
+
+- **Autorizada**: tudo funciona; `/api/health` mostra `instalacao: autorizada`.
+- **Modo cópia** (arquivo ausente ou que não se lê, assinatura que não confere ou outra máquina): `/api/health` continua 200 (o watchdog não reinicia em laço), com `instalacao: nao-autorizada` e `instalacao_motivo` `ausente`, `ilegivel`, `assinatura` ou `maquina`, sem caminho de arquivo. Login e leitura continuam. Todo envio de e-mail recusa com "Envio desligado: instalação não autorizada." antes da reserva (nada fica preso); "Sincronizar agora" recusa com "Sincronização desligada: instalação não autorizada."; a sincronização horária do RM e a cobrança de certidões não sobem; o backup local continua, a cópia externa (`-BackupExterno`) não. Toda tela, inclusive o login, mostra a faixa vermelha "Instalação não autorizada da Dashboard Lotufo. Envio de e-mail e sincronização com o RM estão desligados." O `logs\dashboard.log` registra `instalacao NAO autorizada (motivo: ...)` na subida.
+- **Dev** (`DASH_DEV=1`) e testes: `instalacao: dev`, nada desligado, arquivo não exigido.
+- **Deploy**: depois do build e **antes de parar a produção**, o `deploy.ps1` roda com o código novo `python -m app.cli instalacao verificar --arquivo <raiz>\segredos\instalacao.json` (sai 0 só com `Instalação autorizada para esta máquina.`, sem o atalho do dev). A `<raiz>` é a do `-Raiz` gravado na tarefa agendada, a mesma que o `rodar_producao.ps1` usa; dela sai também o banco do backup pré-migração. `-Raiz` informado e diferente da tarefa aborta antes do checkout, como a porta. Recusado, o deploy para ali, sem migrar o banco (as migrações só rodam na subida) e sem trocar o processo: aviso `instalacao nao autorizada para o commit novo` e linha final `deploy abortado no build; producao segue no commit anterior ...`. Depois do reinício ele ainda exige `instalacao: autorizada` no health; outro valor conta como falha (aviso `health 200, mas a instalacao nao esta autorizada: ...`) e dispara o rollback. O rollback confere só o 200 (o commit anterior pode nem ter o campo); se ele voltar em modo cópia, o `ROLLBACK OK` vem seguido do aviso `producao de volta, mas em modo copia: ...`. Por essa conferência, o `deploy.ps1` só sobe commit que já tem a instalação assinada.
+- **Primeiro deploy com a instalação assinada (PR #437 da #417), uma vez só.** O PowerShell lê o `deploy.ps1` inteiro antes do checkout, e o do diretório pinado ainda é o antigo, que só confere o 200: rodado dali, sem o arquivo ele terminaria em `DEPLOY OK` com a produção em modo cópia (sem e-mail e sem RM). Nesta vez:
+  1. Copiar o arquivo assinado para a VM (subseção abaixo) e conferir `Test-Path C:\DashboardLotufo\segredos\instalacao.json` → `True`.
+  2. Rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, com os scripts que ele chama pelo `$PSScriptRoot` ao lado (hoje `backup_pre_migracao.ps1`; depois da #386, também `comum_agendador.ps1`): `New-Item -ItemType Directory -Force C:\Temp\deploy | Out-Null`, `git -C C:\DashboardLotufo\app fetch`, `git -C C:\DashboardLotufo\app show origin/master:scripts/deploy.ps1 | Set-Content -Encoding ascii C:\Temp\deploy\deploy.ps1` (idem os outros) e `& C:\Temp\deploy\deploy.ps1`, com o sentinela e o resto como em "Subir e derrubar". **Pelo Mac**, esses comandos vão num `.ps1` temporário no Mac (fora do repositório), copiado para a VM com `scp script.ps1 <vm>:C:/Temp/deploy-417.ps1` e rodado com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\deploy-417.ps1'`, nunca pelo stdin (`-Command -`): ali o `git fetch` consome o resto do script e ele para no meio. Conferir `$LASTEXITCODE` depois de cada `git` e apagar o `.ps1` no fim.
+  3. Logo depois, conferir no `/api/health` a `instalacao: autorizada`. Se não vier (o script antigo rodou por engano, por exemplo), voltar à mão para o commit anterior com o script **dele**: os mesmos comandos do passo 2 com `git show <anterior>:scripts/...` para `C:\Temp\deploy-anterior` e `& C:\Temp\deploy-anterior\deploy.ps1 -Ref <anterior>`; depois resolver o arquivo e repetir o passo 2.
+
+### Chave do dono (uma vez, no Mac)
+`cd ~/dev/nova-dashboard-lotufo/backend && .venv/bin/python -m app.cli instalacao gerar-chave --saida ~/.lotufo` grava `instalacao-privada.pem` (permissão 0600) e `instalacao-publica.pem` e imprime a pública; nunca sobrescreve uma chave que já existe. A privada fica só com o dono, com uma cópia cifrada fora do Mac; nunca vai ao servidor nem ao repositório. A pública está embutida em `backend/app/instalacao.py` (`CHAVE_PUBLICA`): trocar de chave é uma PR, e todo arquivo assinado com a chave antiga passa a dar `assinatura`. A chave atual foi gerada em 05/11/2026 pelo comando do comentário da issue #417 (`~/.lotufo/instalacao-privada.pem`).
+
+### Assinar e copiar para a máquina (no Mac)
+A produção roda na VM (`<vm>`, seção "Mudar de servidor"); o SSH é o mesmo do deploy.
+1. Nome da máquina: `ssh <vm> "cmd /c echo %COMPUTERNAME%"` (maiúsculas e minúsculas não importam).
+2. Assinar: `.venv/bin/python -m app.cli instalacao assinar --chave ~/.lotufo/instalacao-privada.pem --maquina <nome> --saida ~/.lotufo/instalacao-<nome>.json`. O comando recusa, sem gravar nada, chave que não é a embutida no código e `--saida` que já existe (para assinar de novo, apagar o arquivo antigo antes).
+3. Copiar: `scp ~/.lotufo/instalacao-<nome>.json <vm>:C:/DashboardLotufo/segredos/instalacao.json` (conta administradora de deploy; a pasta `segredos` tem a ACL de SYSTEM e Administradores e o arquivo herda). Conferir: `ssh <vm> "cmd /c type C:\DashboardLotufo\segredos\instalacao.json"`.
+4. Não editar o arquivo, nem abrir e salvar no Bloco de Notas: ele vale exatamente como saiu do `assinar` (o fim de linha do Windows também serve); qualquer outro byte diferente dá `assinatura`.
+5. Reiniciar a tarefa (com o sentinela do watchdog) ou fazer o deploy e conferir `/api/health`: `instalacao: autorizada`, sem faixa na tela.
+
+### Faixa vermelha no servidor oficial
+O servidor subiu em modo cópia. O motivo está no `/api/health`: `ausente` (arquivo fora de `segredos` ou com outro nome: copiar de novo), `ilegivel` (o arquivo está lá, mas o servidor não consegue lê-lo: conferir a ACL de `segredos` e do arquivo, sem copiar de novo), `assinatura` (arquivo alterado ou assinado com outra chave: assinar de novo), `maquina` (assinado para outro nome; o `COMPUTERNAME` mudou: assinar com o nome atual). Depois, reiniciar a tarefa e conferir o health.
+
+### Trocar de máquina
+Assinar para o nome da máquina nova e copiar para a `segredos` dela antes da primeira subida (seção "Mudar de servidor"). O arquivo da máquina antiga não vale na nova (motivo `maquina`), e o da nova não vale na antiga.
+
+## Sentinela (issue #423)
+Uma thread do servidor lê o log de Segurança do Windows a cada 5 minutos (`wevtutil`, sem dependência nova) e põe no bloco Segurança de Administração > Saúde, por 7 dias, o que indica cópia ou leitura de dados e segredos de dentro da VM ou pela rede. Só roda no Windows e fora de `DASH_DEV=1`; no resto, a Saúde mostra "Sentinela não roda neste ambiente". Cada achado também vira linha `seguranca.sentinela` na auditoria (evento, conta, processo, pasta, quantidade, hora).
+
+### Pré-requisitos (uma vez, na VM, como administrador)
+`<raiz>` é a pasta de produção (a que tem `dados`, `segredos` e `cadastro`). Subcategorias pelo GUID, porque o Windows está em português.
+```powershell
+auditpol /set /subcategory:"{0CCE921D-69AE-11D9-BED3-505054503030}" /success:enable   # Sistema de Arquivos
+auditpol /set /subcategory:"{0CCE922F-69AE-11D9-BED3-505054503030}" /success:enable   # Alteração da política de auditoria
+wevtutil sl Security /ms:268435456                                                    # log de 256 MB
+$raiz = '<raiz>'
+foreach ($p in 'dados','segredos','cadastro') {
+  $acl = Get-Acl -Path "$raiz\$p"
+  foreach ($sid in 'S-1-5-4','S-1-5-2') {   # INTERATIVO e REDE
+    $id = New-Object System.Security.Principal.SecurityIdentifier $sid
+    $regra = New-Object System.Security.AccessControl.FileSystemAuditRule($id, 'Read,Write,Delete,ChangePermissions', 'ContainerInherit,ObjectInherit', 'None', 'Success')
+    $acl.AddAuditRule($regra)
+  }
+  Set-Acl -Path "$raiz\$p" -AclObject $acl
+}
+```
+O servidor, o antivírus e o backup rodam como SYSTEM, que não carrega INTERATIVO nem REDE: o volume fica baixo e só aparece quem entrou na VM ou leu pela rede (`\\<servidor>\C$`).
+
+### Lista de contas e processos conhecidos
+`<raiz>\segredos\sentinela.json` (fora do repositório). Acesso a arquivo (4663) só deixa de gerar item quando a conta **e** o processo estão na lista; a conta pode vir com ou sem domínio. Contas listadas também não geram o aviso de logon com privilégio (4672). Exemplo com nomes fictícios:
+```json
+{"contas": ["SERVIDOR\\operador.exemplo", "admin.exemplo"], "processos": ["explorer.exe", "robocopy.exe"]}
+```
+O ponto de leitura do log (último registro lido) fica no banco, na auditoria (`seguranca.sentinela.ponto`), na mesma transação dos achados; `<raiz>\dados\sentinela.json` é só uma cópia, com as falhas em aberto e os avisos do dia. Na primeira leitura com sucesso a sentinela só marca o ponto de partida do log; não lê o histórico. Se a cópia for apagada, ficar ilegível ou apontar além do ponto gravado no banco, a rodada seguinte grava o item crítico "Estado da sentinela apagado, ilegível ou alterado" e segue do ponto do banco, sem pular nenhum evento. A SACL precisa auditar Delete (regra acima); a sentinela confere esse direito e acusa "SACL ausente" se faltar.
+
+### O que vira item
+- **4663** nas três pastas, agrupado por conta, processo, pasta e hora: "Leitura de segredos por explorer.exe (<conta>), 12 arquivos". `segredos` e `dados` são críticos, `cadastro` é ação.
+- **4670** (permissão trocada nas três pastas): crítico.
+- **4672** (logon com privilégio especial) de conta fora da lista e fora das contas de sistema: um item por conta por dia, atenção.
+- **4698 a 4702** (tarefa criada, apagada, habilitada, desabilitada, alterada) com nome começando por `DashboardLotufo`: crítico. O próprio deploy mexe nessas tarefas; um item no horário de um deploy é esperado.
+- **1102** (log limpo) e **4719** (política de auditoria alterada): crítico.
+- A cada rodada, `auditpol /get` e a leitura da SACL conferem que a auditoria e a SACL continuam no lugar: "Auditoria de arquivos desligada", "Auditoria da alteração da política desligada" ou "SACL ausente em <pasta>" (crítico). Se a sentinela não consegue ler o log, a auditoria ou a SACL, vira item de atenção. Cada falha vira item quando começa e é regravada uma vez por dia enquanto durar, para não sumir da Saúde ao fim dos 7 dias com a sentinela ainda cega; corrigida e falhando de novo, avisa outra vez.
+
+### Limites
+Quem administra a VM pode desligar a auditoria ou limpar o log, mas cada uma dessas ações gera o próprio evento (4719, 1102), que a sentinela lê antes de perder o acesso. Parar o servidor para a sentinela (e o resumo diário some: tratado na issue de alertas). Eventos entre o fim da rodada e o início de uma limpeza do log podem se perder se o log for limpo antes da próxima rodada.
 
 ## Restaurar o banco a partir de um snapshot
 1. Parar o servidor (tarefa agendada e qualquer uvicorn em 8080/8443).
@@ -84,11 +165,18 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
 5. Devolver os arquivos que o banco cita (notas, espelhos, modelos, evidências), da cópia local ou da externa (`<pasta externa>\arquivos`), sem apagar o que já está em `dados`: `cd backend; .venv\Scripts\python -c "from pathlib import Path; from app import backup; print(backup.copiar_arquivos(Path(r'C:\DashboardLotufo\dados\backups\arquivos'), Path(r'C:\DashboardLotufo\dados'), conferir=True), 'arquivos copiados')"`. Copia o que falta, relê pelo sha256 o que já está em `dados` e troca o estragado, e confere cada cópia. Se terminar com "arquivo(s) sem cópia", os listados estão estragados também no backup: tentar a outra cópia (local ou externa).
 6. Subir o servidor; as migrações pendentes rodam sozinhas em `create_app()`.
 
+## Cópia do dono
+Uma vez por semana (primeira rodada do backup depois de 7 dias da cópia anterior) e a qualquer hora pelo botão "Gerar cópia do dono agora" em Administração › Saúde (só admin), o servidor gera `dados\backups\dono\dashboard-dono-AAAAMMDD-HHMMSS.tar.age` (+ `.sha256`; ficam as 4 mais recentes). É um `.tar` cifrado no formato age (X25519) para a chave pública do dono, com o último snapshot válido, a pasta `segredos` e o clone do cadastro (sem `.git`). O `.tar` é montado em memória: nada em claro vai ao disco. A chave privada nunca está no servidor; o código recusa chave privada como configuração e não decifra nada.
+- **Configurar (uma vez).** No Mac: `cd backend; python -m app.cli dono gerar-chave --saida <pasta>` (ou `rage-keygen`). Guarde `chave-privada-dono.txt` no cofre do dono e leve **só** a pública para a VM, em `<raiz>\segredos\chave-publica-dono.txt` (a variável `DASH_CHAVE_PUBLICA_DONO` aponta outro arquivo). Sem a chave pública nada é gerado e a Saúde mostra "Cópia do dono não configurada".
+- **Saúde.** `/api/health` e a tela mostram `ultima_copia_dono` e `ultima_copia_dono_erro`; mais de 8 dias sem cópia aparece em destaque na Saúde.
+- **Abrir no Mac.** Copiar o `.tar.age` (conferir o `.sha256`) e `rage -d -i <chave privada> <arquivo>.tar.age > pacote.tar`; `tar -xf pacote.tar` traz `banco/`, `segredos/` e `cadastro/`. Siga "Restaurar o banco a partir de um snapshot" com o `.db` de `banco/`.
+
 ## HTTP ou HTTPS
-Decisão de 2026-09-02: produção em **HTTP na porta 80** (`http://<servidor>`), com `-SemTls` em `rodar_producao.ps1` e `instalar_autostart.ps1`. Ninguém precisa instalar certificado; a senha trafega em claro só dentro da rede interna. `DASH_SEM_TLS=1` tira a flag `secure` do cookie de sessão (o resto continua igual). Voltar a HTTPS = reinstalar a tarefa sem `-SemTls` e seguir a seção abaixo. Liberar a porta no firewall do servidor (uma vez, como administrador):
+Decisão de 2026-09-02: produção em **HTTP na porta 80** (`http://<servidor>`), com `-SemTls` em `rodar_producao.ps1` e `instalar_autostart.ps1`. Ninguém precisa instalar certificado; a senha trafega em claro só dentro da rede interna. `DASH_SEM_TLS=1` tira a flag `secure` do cookie de sessão (o resto continua igual). Voltar a HTTPS = reinstalar a tarefa sem `-SemTls` e seguir a seção abaixo. Outra porta (VM em que a 80 é do IIS): `-Porta 8080` nos scripts de autostart, watchdog e deploy, e a regra de firewall abaixo com essa porta. Liberar a porta no firewall do servidor (uma vez, como administrador):
 ```
 New-NetFirewallRule -DisplayName "Dashboard Lotufo HTTP 80" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -Profile Domain,Private
 ```
+Em outra porta, trocar o `80` do `-LocalPort` e do `-DisplayName` pela porta de `-Porta` (ex.: `"Dashboard Lotufo HTTP 8080"` e `-LocalPort 8080`).
 
 ## Certificado nos navegadores (só no modo HTTPS)
 O certificado é autoassinado: cada máquina da rede precisa confiar nele uma vez, como administrador:
@@ -101,9 +189,28 @@ Import-Certificate -FilePath \\<servidor>\...\certs\cert.pem -CertStoreLocation 
 - Primeiro administrador: `cd backend; $env:DASH_DB_PATH='C:\DashboardLotufo\dados\dashboard.db'; .venv\Scripts\python -m app.cli criar-admin --nome ... --email ...`.
 - Demais usuários (inclusive o segundo administrador): tela Administração → Usuários.
 - Senha esquecida: não há reset pela tela hoje; criar outro usuário e desativar o antigo. Dívida registrada.
+- Mexer em usuário ou sessão direto no banco não funciona, por desenho (issue #422): criar ou apagar uma conta, mudar
+  qualquer coluna dela fora o contador de senha errada (`tentativas_falhas`, `bloqueado_ate`), e criar, mudar ou apagar
+  uma sessão pelo `sqlite3`, DB Browser ou script avulso falha com "no such function: dash_conexao_app" e nada muda (os
+  gatilhos da migração 062 só deixam passar a conexão da aplicação). Use a tela Administração → Usuários ou
+  `python -m app.cli` (`criar-admin`, `desbloquear`, `redefinir-senha`). **Limite conhecido:** a proteção para o
+  `sqlite3`, o DB Browser e o script comum; um script Python que registre ele mesmo a função `dash_conexao_app` passa
+  pelos gatilhos, e apagar a linha final da auditoria não quebra a cadeia (a âncora fora do banco é a issue #424).
+  Apagar ou trocar esses gatilhos, ou adulterar a cadeia da auditoria, aparece em Administração → Saúde › Segurança na
+  conferência seguinte (de hora em hora e no boot), como "Proteção da tabela de usuários removida", "Proteção da
+  tabela de sessões removida" ou "Cadeia da auditoria quebrada", e a proteção removida vira "Alerta de segurança" na
+  auditoria (uma vez por incidente; "Alerta de segurança resolvido" quando volta). Para repor os gatilhos: o comando do
+  parágrafo seguinte e reiniciar o serviço (a migração recria os seis).
+- **Rollback para um commit anterior à issue #422** (automático do `deploy.ps1` ou à mão): o código antigo não
+  registra `dash_conexao_app`, e com os gatilhos no banco ninguém entra (o login cria sessão) nem se cria ou altera
+  usuário, embora o `/api/health` responda 200. Logo depois do rollback, com o serviço parado, no diretório `backend`
+  do diretório pinado: `.venv\Scripts\python -c "import sqlite3; c=sqlite3.connect(r'C:\DashboardLotufo\dados\dashboard.db'); c.executescript('DROP TRIGGER IF EXISTS usuarios_protecao_insert; DROP TRIGGER IF EXISTS usuarios_protecao_delete; DROP TRIGGER IF EXISTS usuarios_protecao_update; DROP TRIGGER IF EXISTS sessoes_protecao_insert; DROP TRIGGER IF EXISTS sessoes_protecao_delete; DROP TRIGGER IF EXISTS sessoes_protecao_update;'); c.execute('DELETE FROM schema_migrations WHERE nome=?', ('062_protecao_usuarios.sql',)); c.commit(); print('gatilhos:', c.execute('SELECT COUNT(*) FROM sqlite_master WHERE name LIKE ?', ('%_protecao_%',)).fetchone()[0], 'migracao 062:', c.execute('SELECT COUNT(*) FROM schema_migrations WHERE nome=?', ('062_protecao_usuarios.sql',)).fetchone()[0])"`.
+  Tem que imprimir `gatilhos: 0 migracao 062: 0`; outra coisa, não suba e refaça. Sem aspas duplas nem `$` dentro do
+  comando, de propósito: o PowerShell repassa o texto ao Python sem mexer. Depois, subir o serviço. O próximo deploy
+  de um commit com a #422 recria os gatilhos.
 
 ## Variáveis de ambiente
-`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db`), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
+`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db` e sobe a instalação como `dev`), `DASH_INSTALACAO_ARQUIVO` (troca o caminho do arquivo da instalação assinada), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_CHAVE_PUBLICA_DONO` (cópia do dono), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
 
 ## TOTVS RM (fase 5, leitura)
 A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_USUARIO` e a senha estão definidos; sem eles o sistema segue com NF e recebimento registrados à mão. Botão "Sincronizar agora" e reconciliação em Administração → TOTVS RM.
@@ -147,6 +254,95 @@ A pasta vem de `DASH_CADASTRO_DIR` (produção: `C:\DashboardLotufo\cadastro`, c
    `.venv\Scripts\python -m app.cli cadastro aplicar --usuario <e-mail do admin> --ensaio` e conferir o relatório;
    repetir sem `--ensaio`. O snapshot horário do backup cobre o antes.
 4. Instrumento assinado já aplicado não se altera: correção é instrumento novo com `corrige: <chave>`.
+
+O esquema de cada tipo de instrumento (apostilamento de reajuste SINFRA e MT-PAR, retificação, paralisação e reinício, endosso de garantia, aditivo de reajuste, `datas_base` com `aplica_a`, `pleitos_anteriores`) está comentado em `cadastro-exemplo/contratos/obra-propria.yaml`.
+
+## Carga do histórico de medições
+
+Caminho de uma carga de medições por CSV, do Mac à produção (`cadastro carregar-medicoes`, issue #262). Uma obra por arquivo; o nome do arquivo é o slug da obra, como em `contratos/`. O exemplo fictício é `cadastro-exemplo/medicoes/obra-propria.csv`.
+
+### O CSV
+
+Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho. Dinheiro como texto brasileiro (`412.345,67`), datas `DD/MM/AAAA`, competência `AAAA-MM` ou `MM/AAAA`. A chave de cada medição é (obra, nº, tipo). Colunas:
+
+| Coluna | O que é |
+|---|---|
+| `nº` | número da medição na obra (obrigatória) |
+| `nº do órgão` | número da medição no órgão, se diferente |
+| `tipo` | `execucao`, `projeto` ou `reajuste` (obrigatória) |
+| `competência` | mês da medição (obrigatória) |
+| `período` | período medido, texto livre (`10/03/2025 a 30/04/2025`) |
+| `valor pedido` | valor cheio protocolado (obrigatória); vira o valor congelado da medição |
+| `valor aprovado` | valor aprovado pelo órgão (obrigatória; pode ficar vazio na linha, e então não há atesto) |
+| `data da aprovação` | data do atesto |
+| `meio` | como veio a aprovação: `e-mail`, `smo`, `ofício`, `carimbo`, `protocolo físico`, `ci` ou `outro`; meio desconhecido é erro da linha |
+| `nº do processo no órgão` | processo do órgão |
+| `data do protocolo da nota` | data em que a nota foi protocolada no órgão |
+| `NF` | número da NF, procurada no RM da empresa do contrato e vinculada se achada |
+| `fonte` | de onde veio o dado (boletim, planilha, ofício); fica no atesto e na auditoria |
+| `cancelar` | opcional: nº da medição que substitui esta; a linha é duplicata dela e será cancelada com motivo |
+| `corrige competência` | opcional: `sim` corrige a competência de uma medição que já existe com outra |
+
+### Onde o CSV mora
+
+`medicoes/<slug>.csv` no repositório privado `lotufo-cadastro` (clone em `C:\DashboardLotufo\cadastro` na produção). **Nunca** no repositório público: só o exemplo fictício fica aqui.
+
+### Passo a passo
+
+1. **Ensaio no Mac**, numa cópia do snapshot horário (nunca no banco padrão nem em produção):
+
+   ```bash
+   scp <vm>:C:/DashboardLotufo/dados/backups/dashboard-AAAAMMDD-HHMMSS.db "$TMPDIR/ensaio.db"
+   cd backend
+   DASH_DEV=1 DASH_SEM_JOBS=1 DASH_DB_PATH="$TMPDIR/ensaio.db" \
+     .venv/bin/python -m app.cli cadastro carregar-medicoes <pasta do cadastro>/medicoes/<slug>.csv --ensaio
+   ```
+
+2. **Ler o relatório**: uma linha por linha do CSV (`linha N: nº X tipo competência: categoria`) e o `Total:` no fim. Categorias:
+   - `nova`: não existe medição com a chave; será criada (protocolada, congelada, com atesto, protocolo da nota e NF).
+   - `igual`: competência, pedido e aprovado já batem; não faz nada (rodar duas vezes não duplica).
+   - `valor diferente`: pedido ou aprovado diferem do banco; o pedido existente nunca muda, o aprovado novo entra como evento novo de atesto com a fonte.
+   - `incompleta`: o CSV deixa vazio um valor que o banco tem; não altera.
+   - `cancelamento` e `correção`: efeito das colunas `cancelar` e `corrige competência`.
+   - `conflito`: mesmo nº e tipo com outra competência, medição cancelada/desistida no banco, ou competência já presente em NF, espelho ou planilha/carta em andamento (estado da planilha: planilha gerada, planilha enviada ou boletim recebido). **Conflito nunca se força**: o CSV se corrige e o ensaio se repete.
+   - `erro`: a linha não se lê (valor, data, meio, competência); o relatório traz o número da linha do arquivo.
+
+   Qualquer `erro` ou `conflito` faz a gravação recusar o arquivo inteiro, sem gravar nada.
+3. **OK do Leo** sobre o relatório do ensaio, antes de qualquer gravação.
+4. **Produção, pela VM, em dois scripts**: o `--ensaio` sai com 0 mesmo com linhas `correção` ou `valor diferente`, então o código de saída não substitui a leitura do relatório. Por isso o ensaio de produção e a gravação nunca ficam no mesmo script: primeiro o script 1 (atualizar o clone e ensaiar), depois a leitura do relatório e a conferência do `planilha_enviada_em`, e só com o OK o script 2 (gravar). A sessão `ssh` abre na pasta do perfil da conta, não em `C:\DashboardLotufo\app\backend`; por isso os dois começam com `Set-Location`. Comando nativo não encontrado não altera `$LASTEXITCODE`, então o `Set-Location` vem antes e cada comando nativo é seguido da checagem.
+
+   **Script 1, pull e ensaio** (não grava nada):
+
+   ```powershell
+   Set-Location C:\DashboardLotufo\app\backend -ErrorAction Stop
+   git -C C:\DashboardLotufo\cadastro pull --ff-only
+   if ($LASTEXITCODE -ne 0) { exit 1 }
+   $env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"
+   $env:DASH_DB_PATH = "C:\DashboardLotufo\dados\dashboard.db"
+   $csv = "C:\DashboardLotufo\cadastro\medicoes\<slug>.csv"
+   .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --ensaio
+   if ($LASTEXITCODE -ne 0) { exit 1 }
+   ```
+
+   **Entre os dois**: ler o relatório do ensaio de produção (o que mudou desde o ensaio do Mac, categorias do passo 2) e, em cada linha `correção`, conferir o `planilha_enviada_em` (seção "Regra: competência de medição com planilha ou carta enviada"). Qualquer `erro`, `conflito` ou linha inesperada: parar, corrigir o CSV no repositório privado e repetir o script 1. O `-ErrorAction Stop` no `Set-Location` é necessário: no PowerShell 5.1 um `Set-Location` que falha só mostra o erro e o script segue na pasta errada. "Arquivo não encontrado" no script 1 significa que o CSV não está nesse caminho (ainda não chegou ao repositório privado, ou o `<slug>` está errado). "Banco não encontrado" com o caminho certo indica que a conta de deploy não tem leitura no arquivo do banco; "Banco ilegível" fica para banco corrompido ou `-wal`/`-shm` sem leitura.
+
+   **Script 2, gravação** (só depois do OK sobre o relatório de produção):
+
+   ```powershell
+   Set-Location C:\DashboardLotufo\app\backend -ErrorAction Stop
+   $env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"
+   $env:DASH_DB_PATH = "C:\DashboardLotufo\dados\dashboard.db"
+   $csv = "C:\DashboardLotufo\cadastro\medicoes\<slug>.csv"
+   .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --usuario <e-mail do admin>
+   if ($LASTEXITCODE -ne 0) { exit 1 }
+   ```
+
+   Pelo Mac, cada script vai num `.ps1` temporário no Mac, fora do repositório, e roda na VM (`<vm>`, não `<servidor>`) com `-File`: no `-Command -` o comando nativo (`git`, `python`) consome o resto do script pelo stdin e ele para no meio (ver "Mudar de servidor"). Copiar com `scp script.ps1 <vm>:C:/Temp/x.ps1` ou, se o `scp` falhar, por stdin: `ssh <vm> 'powershell -NoProfile -Command "[Console]::In.ReadToEnd() | Set-Content -Path C:\Temp\x.ps1 -Encoding ASCII"' < script.ps1`; rodar com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\x.ps1'` e apagar o `x.ps1` depois. O shell remoto é PowerShell 5.1: sem `&&`, usar `;`. O `git pull` do cadastro privado precisa de credencial do GitHub na VM; se falhar, o script 1 sai com 1 antes do ensaio, que não deve rodar com o CSV velho. A gravação é uma transação por obra e termina em `GRAVADO: <obra> (<arquivo>), N medição(ões) criada(s)`. O snapshot horário do backup cobre o antes.
+5. **Conferir**: `GET /api/health` com `banco: ok`; a aba Medições da obra mostra as medições novas; e o `audit_log` tem a ação `medicao.carga_historico` no contrato, com arquivo, criadas, corrigidas e as linhas. Rodar de novo sem nada novo não deixa rastro.
+
+### Regra: competência de medição com planilha ou carta enviada
+
+A carga **não** recusa a correção de competência (`corrige competência = sim`) de uma medição `protocolada` que já teve a planilha/carta enviada (`planilha_enviada_em` preenchido) e não tem NF vinculada: só recusa, como `conflito`, quando a medição está num estado da planilha, num estado de espelho, com a nota emitida, ou tem NF. Até a issue #383 entrar, o operador confere o `planilha_enviada_em` de cada linha `correção` do ensaio antes de gravar (na página da medição, ou numa consulta à tabela `medicoes` da cópia do banco usada no ensaio), e a correção de competência dessa medição vai pela tela, não pelo CSV (tirar a linha ou a marca `sim`). Quando a #383 entrar, atualizar esta regra.
 
 ## Espelho de NF (bloco 2)
 
@@ -508,7 +704,15 @@ fim da execução que prorroga é marcado "retroativo" e nunca recusado.
 
 **Pleitos** (`app/pleitos.py`): reajuste, prorrogação de prazo e comunicação de conclusão, com o mesmo caminho do
 protocolo (ofício gerado, anexos, montar, assinar no DocuSign, arrastar o assinado, prévia, enviar). Anexos
-exigidos: memória de cálculo e cronograma no reajuste, cronograma no prazo. Justificativa de prazo que fala em
+exigidos: memória de cálculo e cronograma no reajuste, cronograma no prazo. No prazo, a "Curva S.xlsx" (competência,
+previsto vigente, previsto anterior à última repactuação e medido, acumulados; issue #293) entra sozinha nos anexos ao
+criar o pedido e é trocada pela do dia a cada "montar" (fica em `curvas/` na pasta de dados). Ela não se remove, e o
+nome "Curva S.xlsx" não se usa em anexo arrastado no prazo. O "O que falta", a prévia e o envio comparam as células da
+curva anexada (competência e centavos) com a curva dos dados de agora, não os bytes do xlsx (issue #447: o zip muda
+com o sistema e as versões do openpyxl sem o dado mudar). Curva que falta, que mudou desde o "montar" (cronograma
+novo, medição mudada ou cancelada, versões superadas) ou cujo arquivo sumiu de `curvas/` ou não bate com o sha256
+trava o envio, e a justificativa não libera; o botão "Atualizar curva S" troca (ou regrava) a curva sem montar a carta
+de novo, então a assinada do DocuSign fica. Sem previsto vigente, não há curva. Justificativa de prazo que fala em
 chuva sem paralisação cadastrada vira pendência. Destinatários: `protocolo_para` do órgão, fiscal vigente e
 `destinatarios_extras`; cópia `protocolo_copia` do órgão mais `copia_extras` do contrato. Textos em `cartas.yaml` (`pleito_reajuste`, `prazo`,
 `conclusao`; `<campo>_<família>` vence o comum: o reajuste da SINFRA cita a IN 001/2024).
@@ -531,6 +735,10 @@ pleitos_anteriores:                 # enviados antes do sistema; não duplicam a
 - {tipo: reajuste, oficio: CT-122-LT-2026, data: 2026-04-23, data_base: 2023-03, ciclo: 2026}
 - {tipo: prazo, oficio: CT-282-LT-2026, data: 2026-08-07, dias: 180}
 - {tipo: conclusao, oficio: CT-245-LT-2026, data: 2026-07-31}
+# corrigir pleito já aplicado com data ou ofício errado (#399): o item com `corrige` substitui o antigo na lista;
+# só pleito do cadastro (o da tela não se corrige aqui); `data` dentro de `corrige` é a gravada, opcional, e confere
+- {tipo: prazo, oficio: CT-300-LT-2026, data: 2026-05-06, dias: 180, corrige: {oficio: CT-300-LT-2026, data: 2026-08-14}}
+- {tipo: valor, oficio: CT-301-LT-2026, data: 2026-03-27, valor: '1.000.000,00', objeto: 1ª RPFO}  # pedido de aditivo de valor; atendido pelo aditivo de valor assinado depois
 ```
 
 **Receita de deploy do bloco 7**: `deploy.ps1` com frontend (migração 026 na subida) → `cadastro aplicar
@@ -630,6 +838,78 @@ produção e com OK do Leonardo para cada um:
 | 2 | Tirar os argumentos `-GraphSite` e `-GraphCaixa` da tarefa agendada e apagar `C:\DashboardLotufo\segredos\graph.txt` (token da leitura) | bloco 9 em produção; depois de retirar os argumentos, `deploy.ps1` com health 200 |
 
 Até o item 2, os dois argumentos seguem na tarefa sem efeito: `rodar_producao.ps1` os aceita e ignora.
+
+## Mudar de servidor (VM nova, porta 8080)
+
+Decisão de 03/11/2026: a dashboard sai da máquina de hoje (`<servidor>`, que é a estação de trabalho e o servidor do RM) para
+uma VM do TI (`<vm>`). A VM é compartilhada (servidor de sessões do RM, IIS na 80, antivírus corporativo), então a dashboard
+responde em **`http://<vm>:8080`** (`-Porta 8080` nos scripts, issue #361). De fora da rede o acesso é pela VPN da empresa
+(OpenVPN Connect, decisão do TI); a porta 8080 só aceita rede interna e faixas privadas (regra de firewall abaixo). Sem Tailscale
+nem túnel na VM.
+
+**O que a VM tem (preparo feito em 03/11/2026, sem tocar a produção).** Python 3.12, Git, Tesseract 5.4 (instaladores
+oficiais, hash conferido), Node 24. `C:\DashboardLotufo` com a mesma estrutura e ACL da produção (`app` é um **clone** em
+detached HEAD, não worktree; `deploy.ps1` funciona igual), `dados\tessdata\por.traineddata`, `segredos\rm.txt`, venv e
+`frontend\dist` construídos, tarefa `DashboardLotufo` (com `-Porta 8080`), `DashboardLotufoWatchdog` (`-Porta 8080`) e a regra
+de firewall `New-NetFirewallRule -DisplayName "Dashboard Lotufo HTTP 8080" -Direction Inbound -Protocol TCP -LocalPort 8080
+-Action Allow -Profile Domain,Private -RemoteAddress 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`. O RM responde da VM pelo mesmo
+endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HTTP 500 às consultas e não serve.
+
+**Peculiaridades da VM.**
+- O antivírus intercepta HTTPS: `npm ci` falha com `SELF_SIGNED_CERT_IN_CHAIN`. Resolvido com a variável de máquina
+  `NODE_USE_SYSTEM_CA=1` (o Node passa a confiar no repositório de certificados do Windows; `pip` e `git` já confiam). Sem ela
+  o `deploy.ps1` para no `npm ci`.
+- A VM **não alcança** `<servidor>` (SSH, HTTP e SMB fechados no sentido VM → servidor); o contrário funciona. Cópia de
+  segredos e dados: pelo Mac (`scp` de um lado e do outro, arquivo apagado do Mac em seguida) ou por RDP. Nunca pelo repositório.
+- Por SSH, script longo (git, pip, npm) vai por `scp` e roda com `powershell -File`: no `-Command -` o comando nativo consome o
+  resto do script pelo stdin e ele para no meio.
+- Não há credencial do GitHub na VM: o clone público não precisa; o `git pull` do cadastro privado precisa (decisão pendente).
+
+**Corte (feito em 03/11/2026 às 17:00 com o OK do dono do produto; parada de uns 10 minutos para a operação). O roteiro abaixo é o que foi executado.**
+
+1. Avisar a operação da hora. Conferir que a VM responde: `http://<vm>:8080/api/health` 200.
+2. Em `<servidor>`, nesta ordem: sentinela `New-Item -ItemType File C:\DashboardLotufo\watchdog.pause`;
+   `Disable-ScheduledTask` e `Stop-ScheduledTask` nas duas tarefas, watchdog primeiro (só parar não basta: o gatilho do watchdog
+   repete a cada 3 min e o da tarefa principal dispara no boot; sem desinstalar, porque é o rollback);
+   conferir que nada mais escuta na 80 (`Get-NetTCPConnection -LocalPort 80 -State Listen`); **só então** o snapshot:
+   `scripts\backup_pre_migracao.ps1 -Banco C:\DashboardLotufo\dados\dashboard.db -PastaBackups C:\DashboardLotufo\dados\backups
+   -Python C:\DashboardLotufo\app\backend\.venv\Scripts\python.exe -Rotulo CORTE` (a API de backup do SQLite funciona com o
+   servidor parado). Snapshot antes da parada perderia o que a operação, o RM ou um envio gravasse no intervalo.
+3. Na VM, com a tarefa parada (`Stop-ScheduledTask` das duas e o sentinela), mover o banco vazio da VM e os companheiros
+   (`dados\dashboard.db`, `-wal`, `-shm`) para uma pasta de quarentena, como na seção "Restaurar o banco". Depois copiar: o
+   snapshot `dashboard-PRE-CORTE-...db` (vira `dados\dashboard.db`; o snapshot não tem `-wal`/`-shm`), `dados\notas`, `espelhos`, `modelos`, `evidencias`, `certidoes`,
+   `assinaturas`; `segredos` inteiro (`rm.txt`, `rm-endereco.txt` se houver, `sharepoint-hosts.txt`, `siga-token.txt`,
+   `usuarios\` com os tokens Microsoft de cada pessoa); o clone `cadastro`. Empacotar com o `tar.exe` do próprio Windows
+   (`tar -cf C:\Temp\corte.tar -C C:\DashboardLotufo dados/notas ... segredos cadastro`), levar pelo Mac com `scp` e conferir
+   tamanho e `Get-FileHash` dos dois lados; apagar o `.tar` das duas máquinas e do Mac depois (ele carrega os segredos).
+   `dados\backups` e os `dashboard-PRE-*.db` antigos da raiz de `dados` ficam no servidor antigo como histórico.
+   Sem os tokens, cada pessoa reconecta a conta Microsoft em Minha conta (não é erro, só trabalho a mais).
+4. Na VM: `integrity_check` do banco (seção "Restaurar o banco"); variáveis de máquina `DASH_SIGA_TOKEN_ARQUIVO`,
+   `DASH_SIGA_LINK_MODELO` (copiar os valores de `<servidor>`); `DASH_SIGA_TAREFA` só se o robô do SIGA também mudar para a VM
+   (sem ela os botões "Atualizar" da tela SIGA ficam escondidos). Credencial do cadastro privado: token de leitura do GitHub em
+   `segredos\github-cadastro.git-credentials` (formato `https://x-access-token:<token>@github.com`) e, no `.git\config` do clone,
+   `[credential]` com uma linha `helper =` vazia (desliga o Git Credential Manager) e `helper = store --file=C:/DashboardLotufo/segredos/github-cadastro.git-credentials`
+   (barra normal: com `\` o git lê o caminho como escape e o token não é achado). `Start-ScheduledTask DashboardLotufo`, `/api/health` 200 com `banco: ok`, `cadastro aplicar --usuario <e-mail do admin>
+   --raiz C:\DashboardLotufo\cadastro --ensaio` sem diferença (seção "Cadastro versionado"), `Start-ScheduledTask DashboardLotufoWatchdog`, apagar o sentinela. Login de cada pessoa da operação.
+5. Endereço novo para a operação: `http://<vm>:8080` (o nome da VM está no DNS do domínio e resolve em qualquer PC da empresa;
+   o apelido antigo precisava de linha no `hosts`). Máquina fora do domínio (o Mac de desenvolvimento, em outra VLAN) usa o IP
+   ou uma linha no `hosts`. Robô do SIGA: trocar o endereço da dashboard para `http://<vm>:8080` (repositório do robô).
+6. **Rollback** em uma linha: em `<servidor>`, `Enable-ScheduledTask DashboardLotufo; Enable-ScheduledTask DashboardLotufoWatchdog;
+   Start-ScheduledTask DashboardLotufo; Start-ScheduledTask DashboardLotufoWatchdog; Remove-Item C:\DashboardLotufo\watchdog.pause`,
+   e a operação volta ao endereço antigo. Na VM, sentinela primeiro e depois
+   `Stop-ScheduledTask` do watchdog e da tarefa (sem o sentinela o watchdog da VM religa em 3 minutos e ficam duas instâncias
+   no ar). O que foi digitado na VM depois do corte não volta sozinho (fica no banco da VM).
+7. Depois de uma semana estável: `Unregister-ScheduledTask` das duas tarefas em `<servidor>`, desligar a regra
+   `Dashboard Lotufo HTTP 80`, manter os backups locais de lá até a cópia externa da VM estar configurada.
+
+**Decisões pendentes (03/11/2026).** Data do corte; robô do SIGA (fica em `<servidor>` apontando para a VM, e o botão
+"Atualizar" da tela SIGA deixa de funcionar porque ele dispara a tarefa agendada na própria máquina, ou muda para a VM junto);
+cópia externa: a tarefa da VM aponta para a pasta de rede do servidor de arquivos (`-BackupExterno \\<servidor-de-arquivos>\...`)
+e a conta de computador da VM (`<vm>$`) recebeu Modificar na pasta (NTFS, pelo Explorer numa sessão do domínio na própria VM)
+e Change no compartilhamento (`Grant-SmbShareAccess -Name <compartilhamento> -AccountName "<domínio>\<vm>$" -AccessRight Change
+-CimSession <servidor-de-arquivos>`, pelo nome DNS: por IP o WinRM recusa); de um PC fora do domínio a busca da conta de
+computador não funciona. Teste: tarefa avulsa como SYSTEM na VM gravando um arquivo na pasta; o robô do SIGA ficou em `<servidor>` com o
+endereço da dashboard trocado para a VM (cópia do arquivo original ao lado), até ser refeito para rodar na VM sem janela.
 
 ## Riscos conhecidos
 - Leitura e validação de PDF (rotas de documentos, notas e aditivos) rodam em subprocesso com limite de 10 s de parede e são interrompidas ao estourar: o filho é morto e o cliente recebe 422/415 sem derrubar o servidor. **Custo por chamada ≈ 2 s sob uvicorn no Windows** (0,3–1 s medido em teste; `spawn` + importar pypdf, e o processo do servidor está mais carregado que o do pytest). **Pior caso de parede: até 10 s esperando vaga (só 2 leituras simultâneas) + 10 s de leitura + até 4 s de encerramento, ≈ 24 s.** **No máximo 2 leituras simultâneas**: a terceira espera uma vaga pelo mesmo orçamento de 10 s e é recusada com 422 "tente de novo em alguns segundos" (415 no upload) — não fica pendurada. A pré-checagem de bomba de descompressão roda **dentro do filho**, antes do pypdf: recusa só o stream Flate que expande mais de 50:1 (4 MB por stream, 16 MB no total); o que ela não consegue medir (filtro desconhecido, PDF cifrado, dicionário fora da janela de 8 KB, `/Length` indireto) é ignorado e fica por conta do limite de tempo. Tetos que continuam valendo: 10 MB, 20 páginas, 60 mil caracteres. Limites conhecidos: (a) a memória do filho não é limitada além do kill por tempo — PDF que infle muito em menos de 10 s consome RAM até terminar ou ser morto; (b) **cada filho morto por timeout deixa 1 handle do Windows no processo do servidor** (medido; inerente a `spawn` + `terminate`) — só cresce com upload hostil repetido, e a tarefa agendada reinicia o processo.

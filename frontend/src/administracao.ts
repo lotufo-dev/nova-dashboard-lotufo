@@ -145,6 +145,7 @@ export type FiltroAuditoria = { acao?: string | null; pessoa?: string | null; de
 const ROTULO_ACAO: Record<string, string> = {
   "auth.login": "Entrada no sistema", "usuario.login": "Entrada no sistema",
   "auth.login_falha": "Tentativa de entrada recusada", "auth.logout": "Saída do sistema",
+  "seguranca.alerta": "Alerta de segurança", "seguranca.alerta_resolvido": "Alerta de segurança resolvido",
   "usuario.criar": "Usuário criado", "usuario.atualizar": "Usuário alterado", "usuario.desbloquear": "Usuário desbloqueado",
   "usuario.senha_redefinida": "Senha redefinida pelo admin", "usuario.senha_trocada": "Senha trocada",
   "medicao.criar": "Medição criada", "medicao.estado": "Mudança de estado da medição",
@@ -164,7 +165,8 @@ const ROTULO_ACAO: Record<string, string> = {
   "envio.liberar": "Envio liberado à mão", "notas.envio_externo": "Envio feito por fora registrado", "frc.gerar": "FRC gerada",
   "pleito.criar": "Pleito criado", "pleito.anexo": "Anexo do pleito", "pleito.anexo_removido": "Anexo do pleito removido",
   "pleito.montar": "Pleito montado", "pleito.assinado": "Pleito assinado", "pleito.enviar": "Pleito enviado",
-  "pleito.descartar": "Pleito descartado",
+  "pleito.descartar": "Pleito descartado", "pleito.curva_s": "Curva S do pleito gerada",
+  "pleito.curva_s_removida": "Curva S do pleito retirada",
   "nf.alocar": "NF alocada à medição", "nf.desalocar": "Alocação de NF desfeita",
   "nota.confirmacao": "Nota confirmada pelo RM", "nota.conferencia": "Nota conferida", "nota.justificar": "Nota justificada",
   "nota.manual": "Nota lançada à mão", "rm.sincronizacao": "Sincronização com o RM",

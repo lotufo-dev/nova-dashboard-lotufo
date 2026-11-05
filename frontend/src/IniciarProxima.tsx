@@ -8,7 +8,8 @@ import { NovaMedicaoManual, type Medicao } from "./Medicoes";
 // Na aba Medicoes da obra, o antigo cartao "Gerar espelho" virou o atalho "Iniciar a Nª medição" (16/10/2026): a
 // medicao se inicia na pagina dela, na etapa 1 (Espelho). Com medicao prevista no cronograma, o atalho abre a pagina
 // dessa medicao; sem ela, a pagina da medicao nova. Obra do fluxo antigo (sem regra de espelho) continua com a
-// medicao a mao.
+// medicao a mao. Issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1), e o atalho diz
+// isso: "Nova planilha/carta da Nª medição".
 
 export default function IniciarProxima({ contratoId, versao, aoCriar }: { contratoId: number; versao: number; aoCriar: () => void }) {
   const [ativa, setAtiva] = useState<boolean | null>(null);
@@ -32,14 +33,19 @@ export default function IniciarProxima({ contratoId, versao, aoCriar }: { contra
       </section>
     );
   }
-  const prevista = medicoes?.find(x => x.estado === "prevista");
+  // o atalho e' o da serie de execucao, a mesma da sugestao do formulario: a prevista de reajuste segue pelo espelho e a
+  // de projeto tem serie propria (abre pela pagina dela)
+  const prevista = medicoes?.find(x => x.estado === "prevista" && x.tipo === "execucao");
   // sem a lista (a leitura falhou), o rotulo nao inventa um numero
-  const numero = prevista ? prevista.numero : medicoes ? medicoes.reduce((mx, x) => Math.max(mx, x.numero), 0) + 1 : null;
+  // o nº seguinte da execucao, como a sugestao do formulario (medicao_planilhas.sugestao); o reajuste divide o nº com
+  // ela, o projeto tem serie propria
+  const numero = prevista ? prevista.numero
+    : medicoes ? medicoes.filter(x => x.tipo === "execucao").reduce((mx, x) => Math.max(mx, x.numero), 0) + 1 : null;
   return (
     <div className="medicoes__acoes" id="nova-medicao">
       <Link className="btn btn--primario medicoes__iniciar"
         para={prevista ? { tela: "medicao", obra: contratoId, id: prevista.id } : { tela: "nova-medicao", obra: contratoId }}>
-        <IconeMais className="icone" />{numero === null ? "Iniciar a próxima medição" : `Iniciar a ${numero}ª medição`}
+        <IconeMais className="icone" />{numero === null ? "Nova planilha/carta" : `Nova planilha/carta da ${numero}ª medição`}
       </Link>
     </div>
   );

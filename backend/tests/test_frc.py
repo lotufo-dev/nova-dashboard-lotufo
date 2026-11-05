@@ -8,6 +8,7 @@ sobre 40%, 1,2% sobre o total). O cadastro da FRC do consorcio de exemplo e' sem
 producao ele mora na migracao 032."""
 import io
 import json
+import os
 
 import openpyxl
 import pypdf
@@ -16,6 +17,9 @@ import pytest
 from app import cadastro_aplicar, cadastro_arquivos, espelho, espelhos, frc, leitura_pdf, medicoes, notas, notas_envio, protocolo
 from tests.conftest import CADASTRO_EXEMPLO, _pdf_com_texto
 from tests.test_notas import CNPJ_BETA, CNPJ_PROPRIA, _fixture, _texto, conn, usuario  # noqa: F401  (fixtures)
+
+# Gera PDF com a fonte da lista de candidatas de app/carta.py (Liberation Sans no Linux da CI).
+pytestmark = pytest.mark.pdf
 
 LOTUFO, BETA = CNPJ_PROPRIA, CNPJ_BETA
 CONSORCIO = "consorcio-exemplo"
@@ -555,3 +559,20 @@ def test_numero_digitado_abaixo_da_semente_reproduz_a_frc_ja_emitida(conn, usuar
     for trecho in ("00050", "CONSÓRCIO EXEMPLO", "EMPRESA CONSORCIADA", "ENGENHARIA BETA S.A.",
                    "28° MEDIÇÃO DA OBRA DE EXEMPLO, PERÍODO 01/08/2026 A 31/08/2026", "AGENCIA: 0001-0", "9.240.000,07"):
         assert trecho in t, trecho
+
+
+def test_frc_usa_a_fonte_da_lista_e_cai_na_helvetica_sem_candidata(monkeypatch, tmp_path):
+    from app import carta
+    if carta.fonte_carta() is None:
+        if os.environ.get("CI"):
+            pytest.fail("CI sem fonte Unicode para a FRC: o job precisa da Liberation Sans (fonts-liberation)")
+        pytest.skip("maquina sem Arial nem Liberation Sans")
+    pdf = frc._Pdf()
+    assert (pdf.fonte, pdf.unicode) == ("Frc", True)
+    assert pdf.t("Obra – Medição") == "Obra – Medição"
+    monkeypatch.setattr(carta, "_FONTES", ((tmp_path / "nao-existe.ttf", tmp_path / "nao-existe-negrito.ttf"),))
+    monkeypatch.delenv("DASH_FONTE_CARTA", raising=False)
+    monkeypatch.delenv("DASH_FONTE_CARTA_NEGRITO", raising=False)
+    pdf = frc._Pdf()
+    assert (pdf.fonte, pdf.unicode) == ("Helvetica", False)
+    assert pdf.t("Obra – Medição") == "Obra - Medição"

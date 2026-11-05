@@ -40,6 +40,33 @@ describe("Cronograma: guarda de rascunho", () => {
   });
 });
 
+// #262 (spec 2026-10-20 §3.2): saldo a precos iniciais; o aditivo de reajuste aparece a parte, fora da conta
+describe("Cronograma: saldo e reajuste contratado", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+  const comSaldo = (saldo: object) => api.mockImplementation((c: string) =>
+    Promise.resolve(c.endsWith("/curva") ? { curva: [], saldo } : VERSAO));
+
+  it("com aditivo de reajuste: a conta usa o vigente de execução e o reajuste fica à parte", async () => {
+    comSaldo({ vigente_centavos: 133301, vigente_execucao_centavos: 120001, reajuste_contratado_centavos: 13300,
+      atestado_execucao_centavos: 24000, saldo_centavos: 96001, formula: "f" });
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("Vigente de execução")).toBeTruthy();
+    expect(screen.getByText("R$ 1.200,01")).toBeTruthy();
+    expect(screen.getByText("R$ 960,01")).toBeTruthy();
+    expect(screen.getByText("Reajuste contratado (fora do saldo)")).toBeTruthy();
+    expect(screen.getByText("R$ 133,00")).toBeTruthy();
+    expect(screen.queryByText("R$ 1.333,01")).toBeNull();
+  });
+
+  it("sem aditivo de reajuste: sem a linha do reajuste", async () => {
+    comSaldo({ vigente_centavos: 100000, vigente_execucao_centavos: 100000, reajuste_contratado_centavos: 0,
+      atestado_execucao_centavos: 0, saldo_centavos: 100000, formula: "f" });
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("Vigente de execução")).toBeTruthy();
+    expect(screen.queryByText("Reajuste contratado (fora do saldo)")).toBeNull();
+  });
+});
+
 // issue #256: uma linha por versao, com a data do documento quando veio do cadastro
 describe("Cronograma: versões", () => {
   const VERSOES = [
@@ -91,6 +118,20 @@ describe("Cronograma: versões", () => {
     await screen.findByRole("table", { name: /Versões do cronograma/ });
     expect(screen.getByText(/^versão 1/).textContent).toBe("versão 1");
   });
+
+  it("a versão superada pelo cadastro continua na lista, marcada com a data (issue #395)", async () => {
+    const comSuperada = [
+      { ...VERSOES[0], vigente: true },
+      { ...VERSOES[1], superada_em: "2026-11-05 15:00:00" },
+    ];
+    api.mockImplementation((c: string) => Promise.resolve(
+      c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? { ...VIGENTE, numero: 2 }
+        : c.endsWith("/versoes") ? comSuperada : null));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: /Versões do cronograma/ });
+    const primeiras = within(tabela).getAllByRole("row").slice(1).map(l => (l.querySelector("td")?.textContent ?? ""));
+    expect(primeiras).toEqual(["2 Vigente", "1 Superada em 05/11/2026"]);
+  });
 });
 
 describe("Cronograma: texto na tela", () => {
@@ -109,17 +150,49 @@ describe("Cronograma: texto na tela", () => {
     expect(screen.queryByText(/total previsto/)).toBeNull();
   });
 
-  it("“Medido acima do valor vigente” só aparece com o saldo negativo", async () => {
+  it("“Medido acima do vigente de execução” só aparece com o saldo negativo", async () => {
     const negativo = { ...CURVA, saldo: { ...CURVA.saldo, atestado_execucao_centavos: 200, saldo_centavos: -100 } };
     api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? negativo : c.endsWith("/cronograma") ? VERSAO
       : c.endsWith("/versoes") ? [] : null));
     render(<Cronograma contratoId={1} podeEditar={false} />);
-    expect(await screen.findByText("Medido acima do valor vigente do contrato.")).toBeTruthy();
+    expect(await screen.findByText("Medido acima do vigente de execução do contrato.")).toBeTruthy();
     cleanup();
     api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? VERSAO
       : c.endsWith("/versoes") ? [] : null));
     render(<Cronograma contratoId={1} podeEditar={false} />);
     await screen.findByText("Saldo");
     expect(screen.queryByText(/Medido acima/)).toBeNull();
+  });
+});
+
+// issue #413: o cadeado bate com o servidor (depois de repactuacao, mes passado sem previsto tambem e' congelado)
+describe("Cronograma: cadeado depois da repactuação", () => {
+  const ponto = (competencia: string, previsto: number) => ({ competencia, previsto_centavos: previsto,
+    medido_execucao_centavos: 0, medido_reajuste_centavos: 0, medido_projeto_centavos: 0, atestado_pendente: false });
+  const curva = { curva: [ponto("2020-02", 0), ponto("2020-03", 5000)], saldo: CURVA.saldo };
+  const lista = (origem: string | null, superada: string | null = null) => [{
+    numero: 1, criado_em: "2020-02-10 12:00:00", chave: "c", origem_documento: origem, data_documento: null,
+    instrumento: null, competencias: 2, total_centavos: 5000, vigente: true, superada_em: superada }];
+  const servir = (versoes: unknown) => api.mockImplementation((c: string) => Promise.resolve(
+    c.endsWith("/curva") ? curva : c.endsWith("/cronograma") ? VERSAO : c.endsWith("/versoes") ? versoes : null));
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("com repactuação, o mês passado sem previsto também leva o cadeado", async () => {
+    servir(lista("carta"));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    expect(document.querySelectorAll(".cadeado").length).toBe(2);
+  });
+
+  it("sem repactuação (ou com ela superada), só o mês passado com previsto leva o cadeado", async () => {
+    servir(lista("contratual"));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    expect(document.querySelectorAll(".cadeado").length).toBe(1);
+    cleanup();
+    servir(lista("carta", "2026-11-05 15:00:00"));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    expect(document.querySelectorAll(".cadeado").length).toBe(1);
   });
 });

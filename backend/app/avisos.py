@@ -137,7 +137,7 @@ def resumo_mes(conn, hoje: datetime.date | None = None) -> dict:
     ids_ativos = {c["id"] for c in ativos(conn)}
     linhas = conn.execute(
         "SELECT m.id, m.contrato_id, COALESCE(m.valor_protocolado_centavos, 0) AS valor, MIN(mp.data) AS data "
-        "FROM medicoes m JOIN medicao_protocolos mp ON mp.medicao_id=m.id "
+        "FROM medicoes m JOIN medicao_protocolos mp ON mp.medicao_id=m.id AND mp.etapa='nota' "     # #283: so' o da nota
         "WHERE m.estado NOT IN ('cancelada','desistida') GROUP BY m.id").fetchall()
     no_mes = [r for r in linhas if (r["data"] or "")[:7] == mes]
     protocolaram = {r["contrato_id"] for r in no_mes} & ids_ativos

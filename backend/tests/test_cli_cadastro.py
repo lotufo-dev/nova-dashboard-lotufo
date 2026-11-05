@@ -124,6 +124,19 @@ def test_cadastro_exemplo_valida_e_aplica_em_banco_vazio(tmp_path, monkeypatch, 
     assert [tuple(r) for r in conn.execute("SELECT chave, data_documento FROM cronograma_versoes_cadastro "
                                            "ORDER BY data_documento")] == [("contratual", "2025-03-10"),
                                                                            ("ta-01", "2026-02-02")]
+    # issue #392: o exemplo traz um instrumento de cada tipo que o cadastro real usa
+    cid = conn.execute("SELECT id FROM contratos WHERE nome_curto='Obra Própria'").fetchone()[0]
+    tipos = {r[0] for r in conn.execute("SELECT tipo FROM instrumentos WHERE contrato_id=?", (cid,))}
+    assert {"apostilamento_reajuste", "paralisacao", "reinicio", "endosso_garantia"} <= tipos
+    assert conn.execute("SELECT COUNT(*) FROM instrumentos WHERE contrato_id=? AND tipo='apostilamento_reajuste' "
+                        "AND chave LIKE '%-ret'", (cid,)).fetchone()[0] == 1
+    assert {r[0] for r in conn.execute("SELECT tipo FROM aditivos WHERE contrato_id=?", (cid,))} >= {"valor", "prazo"}
+    assert conn.execute("SELECT COUNT(*) FROM aditivos WHERE contrato_id=? AND natureza='reajuste'",
+                        (cid,)).fetchone()[0] == 1
+    assert [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=? AND aplica_a<>'' "
+                                       "ORDER BY mes", (cid,))] == ["2024-06", "2025-01"]
+    from app import reajuste
+    assert any(c["situacao"] == "apostilado" for c in reajuste.ciclos(conn, cid))
     capsys.readouterr()
     assert cli.main(["cadastro", "aplicar", "--usuario", "leo@l.com"]) == 0     # de novo: nada muda
     assert "contratos: 0 criados, 0 alterados" in capsys.readouterr().out
@@ -600,6 +613,49 @@ def test_carregar_medicoes_arquivo_sem_leitura_fala_portugues(tmp_path, monkeypa
     codigo, saida = _ensaio(tmp_path, [CAB], capsys)
     assert codigo == 1
     assert "CSV recusado, nada foi lido: não foi possível ler o arquivo obra-propria.csv" in saida
+
+
+# ---- issue #394: ensaio avisa NF fora da janela do RM
+
+def _competencia_passada(meses):
+    import datetime
+    hoje = datetime.date.today()
+    n = hoje.year * 12 + hoje.month - 1 - meses
+    return f"{n // 12:04d}-{n % 12 + 1:02d}"
+
+
+def _ensaio_com_nf(tmp_path, monkeypatch, capsys, linhas):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("UPDATE contratos SET vigencia_inicio='2020-01-01', vigencia_fim='2099-12-31' WHERE id=?", (cid,))
+    conn.commit()
+    return _ensaio(tmp_path, [CAB, *linhas], capsys)[1], conn
+
+
+def test_carregar_medicoes_ensaio_avisa_nf_ausente_anterior_a_janela_do_rm(tmp_path, monkeypatch, capsys):
+    saida, _ = _ensaio_com_nf(tmp_path, monkeypatch, capsys, ["1;1;execucao;2023-05;;1.000,00;;;;;;777;planilha"])
+    assert "linha 2: nº 1 execução 2023-05: nova" in saida
+    assert "AVISO: NF 777 anterior à janela do RM; entra sem vínculo" in saida
+    assert "não encontrada no RM" not in saida
+    assert "1 linhas sem NF por janela, 0 com NF não encontrada" in saida
+
+
+def test_carregar_medicoes_ensaio_avisa_nf_ausente_dentro_da_janela_como_nao_encontrada(tmp_path, monkeypatch, capsys):
+    comp = _competencia_passada(1)
+    saida, _ = _ensaio_com_nf(tmp_path, monkeypatch, capsys, [f"1;1;execucao;{comp};;1.000,00;;;;;;777;planilha"])
+    assert "AVISO: NF 777 não encontrada no RM" in saida
+    assert "anterior à janela" not in saida
+    assert "0 linhas sem NF por janela, 1 com NF não encontrada" in saida
+
+
+def test_carregar_medicoes_ensaio_nf_encontrada_ou_sem_nf_nao_avisa(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    conn.execute("UPDATE contratos SET vigencia_inicio='2020-01-01', vigencia_fim='2099-12-31' WHERE id=?", (cid,))
+    conn.commit()
+    _nf_no_rm(conn, 777, 9100, 100000, 100000, 0, 0)
+    saida = _ensaio(tmp_path, [CAB, "1;1;execucao;2023-05;;1.000,00;;;;;;777;planilha",
+                               "2;2;execucao;2023-06;;1.000,00;;;;;;;planilha"], capsys)[1]
+    assert "AVISO" not in saida and "Avisos de NF" not in saida
+    assert "Total: nova 2," in saida
 
 
 # ---- issue #259: carregar-medicoes sem --ensaio grava as novas

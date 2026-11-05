@@ -8,6 +8,8 @@ import pytest
 
 from app import backup
 
+# Roda no Linux da CI (issue #385); o que so' vale no Windows (trava de arquivo aberto) se pula com skipif.
+
 def test_snapshot_e_rotacao(tmp_path):
     origem = tmp_path / "app.db"
     conn = sqlite3.connect(origem)

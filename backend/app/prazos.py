@@ -4,11 +4,15 @@ O relogio e' a EXECUCAO. Vigencia so' conta onde o orgao nao prorroga sozinho. P
 suspende o relogio. Instrumento retroativo e' sinalizado, nunca recusado. Em encerramento os avisos de
 prazo param e fica so' a comunicacao de conclusao.
 """
+import calendar
 import datetime
 import json
+import math
 import re
+from decimal import Decimal
+from fractions import Fraction
 
-from app import avisos as _av, contratos, tempo
+from app import avisos as _av, contratos, dinheiro, tempo
 
 DIAS_EXECUCAO, DIAS_CRITICO, DIAS_VIGENCIA = 60, 30, 60
 ENDOSSO_PRAZO, ENDOSSO_JANELA = 5, 60
@@ -138,6 +142,32 @@ def _ordinal(a: dict, contado: int) -> int:
     return a.get("ordinal") or contado
 
 
+def pedidos_de_valor(conn, contrato_id: int) -> list[dict]:
+    """Issue #398: os pedidos de aditivo de valor (RPFO, readequacao) do cadastro, do mais recente ao mais antigo,
+    cada um com o aditivo que o atendeu: o primeiro aditivo de valor (acrescimo de execucao) assinado no dia do envio ou depois (a mesma
+    ligacao por data do pedido de prorrogacao, em `situacao`), ou None (sem resposta). O ordinal do termo e' o de
+    `_ordinal`, contado entre os termos aditivos assinados do contrato na falta dele."""
+    aditivos, conta = [], {}
+    for a in conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND status='assinado' "
+                          "AND data_assinatura IS NOT NULL ORDER BY data_assinatura, id", (contrato_id,)):
+        a = dict(a)
+        forma = a.get("forma") or "termo_aditivo"
+        conta[forma] = conta.get(forma, 0) + 1
+        # acrescimo de execucao: supressao (delta negativo) e aditivo de reajuste (SES, #262) nao respondem a RPFO
+        if a["tipo"] in ("valor", "misto") and a["delta_valor_centavos"] > 0 and a.get("natureza") != "reajuste":
+            nome = "TA" if forma == "termo_aditivo" else "apostilamento"
+            aditivos.append({"numero": a["numero"], "data_assinatura": a["data_assinatura"],
+                             "rotulo": f"{_ordinal(a, conta[forma])}º {nome}"})
+    out = []
+    for p in conn.execute("SELECT id, numero_oficio, enviado_em, valor_centavos, objeto FROM pleitos "
+                          "WHERE contrato_id=? AND tipo='valor' AND situacao='enviado' "
+                          "ORDER BY enviado_em DESC, id DESC", (contrato_id,)):
+        p = dict(p)
+        p["atendido_por"] = next((a for a in aditivos if a["data_assinatura"] >= (p["enviado_em"] or "")[:10]), None)
+        out.append(p)
+    return out
+
+
 def historico_texto(conn, contrato_id: int) -> str:
     """Secao "1. HISTORICO DO CONTRATO" da carta de prazo: um paragrafo por instrumento de prazo, com o
     ordinal do termo (`_ordinal`), contado por forma (termo aditivo x termo de apostilamento) na falta dele."""
@@ -157,6 +187,76 @@ def historico_texto(conn, contrato_id: int) -> str:
         linhas.append(f"O {_ordinal(a, conta[forma])}º {nome} n.º {a['numero'] or 's/n'} foi assinado em "
                       f"{_br(a['data_assinatura'])}, com {' e '.join(partes)}.")
     return "\n\n".join(linhas)
+
+
+MESES_RITMO = 6
+TETO_DIAS = 3650   # o mesmo teto do pedido na API (api_pleitos.CriarIn.dias)
+ACIMA_DO_TETO = "No ritmo dos últimos 6 meses o pedido passaria de 3.650 dias, o máximo."
+
+
+def _somar_meses(d: datetime.date, n: int) -> datetime.date:
+    """`d` mais `n` meses no calendario; dia que o mes nao tem vira o ultimo dele (31/01 + 1 = 28/02)."""
+    a, m = divmod(d.month - 1 + n, 12)
+    ano, mes = d.year + a, m + 1
+    return datetime.date(ano, mes, min(d.day, calendar.monthrange(ano, mes)[1]))
+
+
+def _mm_aaaa(comp: str) -> str:
+    return f"{comp[5:7]}/{comp[:4]}"
+
+
+def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
+    """Issue #292 (spec 2026-10-20 §4 item 3): os dias de prorrogacao que a carta de prazo sugere. Ritmo = medido de
+    execucao nas `MESES_RITMO` competencias fechadas (as anteriores ao mes de `hoje`) dividido por elas, arredondado
+    uma vez a centavos (e' esse o ritmo da tela e o da conta); meses que faltam = saldo a executar (o de
+    `paineis.saldo`: vigente de execucao menos o medido, #262) / ritmo; conclusao estimada = `hoje` mais esses meses
+    no calendario (a fracao do ultimo mes arredonda para cima); dias = conclusao estimada menos o fim de execucao
+    vigente. Sem fim de execucao, sem saldo, sem ritmo, com conclusao ate' o fim vigente ou acima do teto do pedido,
+    `dias` e' None e `motivo` diz por que. E' so' sugestao: a pessoa confirma ou muda o numero ao criar o oficio, e o
+    envio segue o caminho de sempre (carta, assinado, envio)."""
+    from app import paineis   # paineis -> avisos; aqui dentro para nao virar ciclo de import
+    hoje = hoje or tempo.hoje_local()
+    sal = paineis.saldo(conn, contrato_id)
+    exe = contratos.vigente(conn, contrato_id).get("execucao_fim_vigente")
+    exe_d = _d(exe)
+    primeiro = hoje.replace(day=1)
+    meses = [_somar_meses(primeiro, -i).strftime("%Y-%m") for i in range(MESES_RITMO, 0, -1)]
+    # mesma regra do medido de `paineis.saldo` (execucao, estados que medem, atestado ou protocolado); soma em Python
+    medido = sum(r["v"] for r in conn.execute(
+        "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v FROM medicoes "
+        f"WHERE contrato_id=? AND tipo='execucao' AND estado IN ({','.join('?' * len(paineis.ESTADOS_VALIDOS))}) "
+        f"AND competencia IN ({','.join('?' * len(meses))})", (contrato_id, *paineis.ESTADOS_VALIDOS, *meses)))
+    saldo = sal["saldo_centavos"]
+    ritmo = dinheiro._aplicar(Decimal(medido) / MESES_RITMO, "round2") if medido > 0 else None
+    out = {"saldo_centavos": saldo, "medido_periodo_centavos": medido, "meses": MESES_RITMO, "de": meses[0],
+           "ate": meses[-1], "ritmo_centavos": ritmo, "execucao_fim": exe, "novo_fim": None, "dias": None,
+           "motivo": None}
+    janela = f"de {_mm_aaaa(meses[0])} a {_mm_aaaa(meses[-1])}"
+    if not exe_d:
+        return {**out, "motivo": "Sem fim de execução no cadastro: não há de onde contar os dias."}
+    if saldo <= 0:
+        return {**out, "motivo": "Sem saldo a executar: não há dias a sugerir."}
+    if medido <= 0:
+        return {**out, "motivo": f"Sem medição de execução {janela}: sem ritmo para sugerir os dias."}
+    if not ritmo:
+        return {**out, "motivo": f"Ritmo {janela} abaixo de R$ 0,01/mês: sem ritmo para sugerir os dias."}
+    faltam = Fraction(saldo, ritmo)   # meses, exato (sem float), com o mesmo ritmo que a tela mostra
+    inteiros = math.floor(faltam)
+    try:
+        fim = _somar_meses(hoje, inteiros)
+        resto = faltam - inteiros   # mes exato: o mes seguinte nem entra na conta (perto do ano 9999 ele nao existe)
+        extra = math.ceil((_somar_meses(hoje, inteiros + 1) - fim).days * resto) if resto else 0
+        conclusao = fim + datetime.timedelta(days=extra)
+    except (ValueError, OverflowError):   # saldo enorme num ritmo irrisorio: a data passaria do ano 9999
+        return {**out, "motivo": ACIMA_DO_TETO}
+    dias = (conclusao - exe_d).days
+    if dias <= 0:
+        return {**out, "novo_fim": conclusao.isoformat(),
+                "motivo": f"No ritmo {janela} a obra termina em {_br(conclusao.isoformat())}, até o fim da execução "
+                          f"({_br(exe)}): não há dias a pedir."}
+    if dias > TETO_DIAS:
+        return {**out, "novo_fim": conclusao.isoformat(), "motivo": ACIMA_DO_TETO}
+    return {**out, "novo_fim": conclusao.isoformat(), "dias": dias}
 
 
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:

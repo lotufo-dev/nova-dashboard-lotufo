@@ -38,7 +38,7 @@ def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
         contratante, orgao_sub = medicoes.contratante(o["familia"], o["chave"], o["nome"], o["orgao_texto"])
         feito = medido.get(c["id"], 0)
         saida.append({**c, **prazos.resumo(conn, c["id"], hoje), "contratante": contratante, "orgao_sub": orgao_sub,
-                      "medido_execucao_centavos": feito, "saldo_centavos": c["valor_vigente_centavos"] - feito})
+                      "medido_execucao_centavos": feito, "saldo_centavos": c["valor_vigente_execucao_centavos"] - feito})
     return saida
 
 

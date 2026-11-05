@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from app import dinheiro, entidades, espelho, espelho_docx, tempo
+from app import dinheiro, entidades, espelho, espelho_docx, reajuste, tempo
 
 FAMILIAS = ("mtpar", "sinfra", "ses", "prefeitura")
 LEIS = ("8.666", "14.133", "13.303")
@@ -38,10 +38,11 @@ TRATAMENTOS = ("Senhor", "Senhora")
 TIPOS_CONTRATANTE = ("PÚBLICO", "PRIVADO")
 # Bloco 7: marcos do encerramento (aba Prazos) e tipos de pleito enviados antes do sistema.
 MARCOS = ("conclusao", "provisorio", "definitivo", "baixa_garantia")
-TIPOS_PLEITO = ("reajuste", "prazo", "conclusao")
+TIPOS_PLEITO = ("reajuste", "prazo", "conclusao", "valor")   # valor: pedido de aditivo de valor (#398)
 # Pecas que o orgao pode pedir no pleito de reajuste (mesma lista de `pleitos.PECAS_ORGAO`).
 PECAS_PLEITO = ("falencia", "contrato_social", "documento_representante", "balanco")
 _CICLO = re.compile(r"^([0-9]{4})(-[0-9]{2})?$")
+_CICLO_ADITIVO = re.compile(r"^[0-9]{4}$")       # o aditivo de reajuste (issue #390) diz so' o ano: 2025-99 e' erro
 # Issue #256 (spec 2026-10-20 §2.4): de que documento veio cada versao do cronograma.
 ORIGENS_CRONOGRAMA = ("contratual", "aditivo", "carta", "smo")
 # Mesmo teto de itens por versao da rota do cronograma (api_cronograma.MAX_ITENS): 50 anos de competencias.
@@ -60,7 +61,17 @@ def _lista_documentos(valor, onde: str, erros: list[str]) -> list[str] | None:
     return list(valor)
 _CHAVE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 _CAMPOS_INSTRUMENTO = {"chave", "tipo", "data", "numero", "objeto", "corrige", "delta_valor",
-                       "nova_execucao_fim", "nova_vigencia_fim", "pdf", "ordinal"}
+                       "nova_execucao_fim", "nova_vigencia_fim", "pdf", "ordinal", "natureza"}
+# #262 (spec 2026-10-20 §3.2): o aditivo de valor e' de execucao ou de reajuste (SES: reajuste por termo aditivo)
+NATUREZAS = ("execucao", "reajuste")
+TIPOS_COM_NATUREZA = ("aditivo_valor", "aditivo_misto")
+
+
+def _corretor_de_valor(inst: dict) -> bool:
+    """Issue #410: o aditivo de reajuste com valor que corrige outro termo; ele substitui o corrigido no vigente
+    (`contratos.vigente`, pelo criterio de `reajuste.aditivo_de_reajuste`), entao cada termo tem no maximo um."""
+    return bool(inst.get("corrige") and inst["tipo"] in TIPOS_COM_NATUREZA and inst.get("natureza") == "reajuste"
+                and inst.get("delta_valor_centavos"))
 
 
 class CadastroInvalido(Exception):
@@ -170,6 +181,15 @@ def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
             inst["delta_valor_centavos"] = sinal * dinheiro.parse_brl(texto.lstrip("-").strip())
         except ValueError as e:
             falha("delta_valor", str(e))
+    natureza = bruto.get("natureza")
+    inst["natureza"] = None       # sem o campo: nao classificado, conta como execucao (`contratos.vigente`)
+    if natureza is not None:
+        if tipo not in TIPOS_COM_NATUREZA:
+            falha("natureza", f"só vale para instrumento de valor ({', '.join(TIPOS_COM_NATUREZA)})")
+        elif natureza not in NATUREZAS:
+            falha("natureza", f"use {' ou '.join(NATUREZAS)}")
+        else:
+            inst["natureza"] = natureza
     if tipo in ("aditivo_valor",) and inst["delta_valor_centavos"] == 0:
         falha("delta_valor", "aditivo de valor sem delta")
     if tipo in ("aditivo_prazo", "apostilamento_prazo") and not (
@@ -197,6 +217,82 @@ def _inteiro(v, minimo: int) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= minimo else None
 
 
+_CAMPOS_COMPETENCIA_APOSTILADA = {"competencia", "valor", "medicao"}
+_CAMPOS_PERIODO = {"de", "ate"}
+
+
+def _mes_br(mes: str) -> str:
+    return f"{mes[5:7]}/{mes[:4]}"
+
+
+def _periodo_e_competencias(d: dict) -> tuple[list[dict], list[tuple[str, str]]]:
+    """Issue #271 (spec 2026-10-20 §2.2): `periodo: {de, ate}` e `competencias: [{competencia, valor, medicao}]`
+    do apostilamento de reajuste. Devolve as competencias em centavos e os problemas como (campo, mensagem).
+    O valor aceita sinal: indice deflacionario da' reajuste negativo (migracao 043 nao limita o sinal)."""
+    problemas: list[tuple[str, str]] = []
+    de = ate = None
+    per = d.get("periodo")
+    if per is not None:
+        if (not isinstance(per, dict) or set(per) != _CAMPOS_PERIODO
+                or not all(_MES.match(str(per[k] or "")) for k in _CAMPOS_PERIODO)):
+            problemas.append(("periodo", "use {de: AAAA-MM, ate: AAAA-MM}"))
+        elif str(per["de"]) > str(per["ate"]):
+            problemas.append(("periodo", f"o início ({_mes_br(str(per['de']))}) é depois do fim "
+                                         f"({_mes_br(str(per['ate']))})"))
+        else:
+            de, ate = str(per["de"]), str(per["ate"])
+    lista = d.get("competencias")
+    if lista is None:
+        return [], problemas
+    if not isinstance(lista, list) or not lista:
+        problemas.append(("competencias", "use uma lista de {competencia, valor, medicao} com ao menos uma competência"))
+        return [], problemas
+    out, vistas = [], set()
+    for j, it in enumerate(lista):
+        aqui = f"competencias[{j}]"
+        if not isinstance(it, dict):
+            problemas.append((aqui, "use {competencia, valor, medicao}"))
+            continue
+        sobra = sorted(str(k) for k in it if k not in _CAMPOS_COMPETENCIA_APOSTILADA)
+        if sobra:
+            problemas.append((aqui, f"campo desconhecido: {', '.join(sobra)} (use competencia, valor e medicao)"))
+            continue
+        comp = str(it.get("competencia") or "")
+        if not _MES.match(comp):
+            problemas.append((f"{aqui}.competencia", f"use AAAA-MM: {comp!r}"))
+            continue
+        if comp in vistas:
+            problemas.append((aqui, f"competência repetida: {_mes_br(comp)}"))
+            continue
+        vistas.add(comp)
+        if de and not de <= comp <= ate:
+            problemas.append((aqui, f"competência {_mes_br(comp)} fora do período do apostilamento "
+                                    f"({_mes_br(de)} a {_mes_br(ate)})"))
+            continue
+        bruto = it.get("valor")
+        texto = "" if bruto is None or isinstance(bruto, bool) else str(bruto).strip()
+        sinal = -1 if texto.startswith("-") else 1
+        try:
+            centavos = sinal * dinheiro.parse_brl(texto[1:].strip() if sinal < 0 else texto)     # um sinal so'
+        except ValueError as e:
+            problemas.append((f"{aqui}.valor", str(e)))
+            continue
+        medicao = it.get("medicao")
+        if medicao is not None and _inteiro(medicao, 1) is None:
+            problemas.append((f"{aqui}.medicao", f"use o nº da medição do órgão, inteiro a partir de 1: {medicao!r}"))
+            continue
+        out.append({"competencia": comp, "valor_centavos": centavos, "medicao": medicao})
+    return out, problemas
+
+
+def competencias_do_apostilamento(dados: dict) -> list[dict]:
+    """As competencias apostiladas em centavos ({competencia, valor_centavos, medicao}), do `dados` ja' validado."""
+    out, problemas = _periodo_e_competencias(dados)
+    if problemas:
+        raise ValueError("; ".join(f"{campo}: {msg}" for campo, msg in problemas))
+    return out
+
+
 def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
     """Bloco 7: campos de `dados` que reajuste e prazos leem, validados e normalizados."""
     meses = {d["mes"] for d in c["datas_base"]}
@@ -204,12 +300,68 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
                 if i["tipo"] in ("aditivo_prazo", "apostilamento_prazo", "aditivo_misto")}
     for inst in c["instrumentos"]:
         d, onde = inst["dados"], f"instrumentos[{inst['chave']}]"
+        if inst["tipo"] in TIPOS_COM_NATUREZA:
+            # issue #390 (revisor, PR #407): no aditivo de reajuste, `ciclo` diz o ciclo que ele atende (o termo
+            # assinado depois do aniversario seguinte) e o aplicar liga o pleito desse ciclo; nada fica engolido
+            base_ok = None
+            if d.get("data_base") is not None:
+                if inst.get("natureza") != "reajuste":
+                    falha(f"{onde}.data_base", "só vale no aditivo de natureza reajuste")
+                elif str(d["data_base"]) not in meses:
+                    falha(f"{onde}.data_base", "use AAAA-MM de uma das datas_base do contrato")
+                else:
+                    base_ok = str(d["data_base"])
+            elif len(meses) == 1:
+                base_ok = next(iter(meses))
+            if d.get("ciclo") is not None:
+                if inst.get("natureza") != "reajuste":
+                    falha(f"{onde}.ciclo", "só vale no aditivo de natureza reajuste")
+                elif not _CICLO_ADITIVO.match(str(d["ciclo"])):
+                    falha(f"{onde}.ciclo", f"use o ano do ciclo, com quatro dígitos (ex.: 2026): {d['ciclo']!r}")
+                elif base_ok is not None:
+                    # gate Sol (rodada extra, PR #407): o ciclo vai do ano seguinte ao da base ao ciclo da assinatura
+                    primeiro, ultimo = int(base_ok[:4]) + 1, reajuste.ciclo_do_aditivo(base_ok, str(inst["data"]))
+                    if ultimo is None:
+                        falha(f"{onde}.ciclo", f"o aditivo foi assinado antes do primeiro aniversário da data-base "
+                                               f"{base_ok}; não atende ciclo nenhum")
+                    elif not primeiro <= int(d["ciclo"]) <= ultimo:
+                        falha(f"{onde}.ciclo", f"use um ciclo de {primeiro} a {ultimo} (do ano seguinte ao da "
+                                               f"data-base {base_ok} ao do último aniversário até a assinatura)")
+            # a base guardada no aditivo (migracao 058) vale com qualquer numero de bases; sem ela, com mais de uma, o
+            # aditivo novo nao tem base (o ja' aplicado segue na que guardou quando a base era unica)
+            if inst.get("natureza") == "reajuste" and len(meses) != 1 and d.get("data_base") is None:
+                avisos.append(f"{c['nome_curto']}: {onde}: o contrato não tem uma data-base só e o aditivo de "
+                              "reajuste não diz a dele (data_base, AAAA-MM); se ainda não foi aplicado, ele não fecha "
+                              "ciclo nem atende pleito")
         if inst["tipo"] == "apostilamento_reajuste":
             if d.get("data_base") is not None and str(d["data_base"]) not in meses:
                 falha(f"{onde}.data_base", "use AAAA-MM de uma das datas_base do contrato")
             # "2026-06" (Granito) vale: o reajuste le so' o ano. Nao normaliza: instrumento aplicado nao muda.
             if d.get("ciclo") is not None and not _CICLO.match(str(d["ciclo"])):
                 falha(f"{onde}.ciclo", "use o ano do ciclo (ex.: 2026)")
+            # Issue #271: a eficacia decide o ciclo quando `ciclo` falta; data invalida faria o termo sumir do ciclo
+            if d.get("eficacia") is not None:
+                try:
+                    if not _data(d["eficacia"]):
+                        raise ValueError("vazia")
+                except ValueError:
+                    falha(f"{onde}.eficacia", f"use a data da eficácia (AAAA-MM-DD): {d['eficacia']!r}")
+            # Issue #391: sem `ciclo` o termo cai no ano da eficacia (ou da data) e instrumento aplicado nao muda
+            if d.get("ciclo") is None:
+                ano = reajuste.ciclo_do_apostilamento(d, inst["data"])
+                if ano is not None:
+                    pelo = "eficacia" if d.get("eficacia") else "data"
+                    avisos.append(f"{c['nome_curto']}: {onde}: apostilamento sem ciclo; vai contar no ciclo {ano} "
+                                  f"(pelo campo {pelo}). Diga ciclo: AAAA")
+            # Issue #271: competencias e periodo; cada competencia vira previsao da data-base dele
+            for campo, msg in _periodo_e_competencias(d)[1]:
+                falha(f"{onde}.{campo}", msg)
+            # gate Sol (PR #317, S2 e rodada 3): o validar nao sabe se o termo ja' foi aplicado (quando o contrato tinha
+            # uma base so'; instrumento aplicado nao muda); o aplicar recusa o termo novo, com ou sem competencias, e
+            # mantem a base guardada do antigo (migracao 055)
+            if d.get("data_base") is None and len(meses) != 1:
+                avisos.append(f"{c['nome_curto']}: {onde}: o contrato não tem uma data-base só e o apostilamento não "
+                              "diz a dele; se ainda não foi aplicado, o aplicar recusa (diga data_base, AAAA-MM)")
         elif inst["tipo"] == "endosso_garantia":
             if d.get("vigencia_fim") is not None:      # issue #65: o endosso traz a nova vigencia da garantia
                 try:
@@ -252,8 +404,24 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
             falha(onde, "oficio e data são obrigatórios")
             continue
         item = {"tipo": p["tipo"], "oficio": str(p["oficio"]).strip(), "data": data, "data_base": None,
-                "ciclo": None, "dias": None}
-        if p["tipo"] == "reajuste":
+                "ciclo": None, "dias": None, "valor_centavos": None, "objeto": None}
+        for campo in ("valor", "objeto"):
+            if p["tipo"] != "valor" and p.get(campo) is not None:
+                falha(f"{onde}.{campo}", "só vale no pedido de valor (tipo: valor)")
+        if p["tipo"] == "valor":
+            # issue #398: pedido de aditivo de valor (RPFO, readequacao); so' o valor pedido e o objeto
+            for campo in ("dias", "data_base", "ciclo"):
+                if p.get(campo) is not None:
+                    falha(f"{onde}.{campo}", "não vale no pedido de valor")
+            try:
+                item["valor_centavos"] = dinheiro.parse_brl(str(p.get("valor") or ""))
+            except ValueError as e:
+                falha(f"{onde}.valor", f"obrigatório no pedido de valor: {e}")
+            else:
+                if item["valor_centavos"] <= 0:
+                    falha(f"{onde}.valor", "use um valor maior que zero")
+            item["objeto"] = str(p.get("objeto") or "").strip() or None
+        elif p["tipo"] == "reajuste":
             if str(p.get("data_base") or "") not in meses:
                 falha(f"{onde}.data_base", "use uma das datas_base do contrato (AAAA-MM)")
             if _inteiro(p.get("ciclo"), 2000) is None:
@@ -263,8 +431,62 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
             if _inteiro(p["dias"], 1) is None:
                 falha(f"{onde}.dias", "use um inteiro > 0")
             item["dias"] = p["dias"]
+        # issue #399: `corrige: {oficio, data?}` corrige a data e/ou o oficio de um pleito ja' aplicado
+        item["corrige"] = _corrige_pleito(p.get("corrige"), f"{onde}.corrige", falha)
         out.append(item)
+    # um oficio pode cobrir duas datas-base (migracao 026): a chave do pleito leva a data-base
+    alvos = [(x["tipo"], x["corrige"]["oficio"], x["data_base"]) for x in out if x["corrige"]]
+    if len(alvos) != len(set(alvos)):
+        falha("pleitos_anteriores", "dois itens corrigem o mesmo pleito")
+    for i, x in enumerate(out):
+        if not x["corrige"] and (x["tipo"], x["oficio"], x["data_base"]) in alvos:
+            falha(f"pleitos_anteriores[{i}]", f"o pleito {x['oficio']} é corrigido por outro item: tire este da "
+                  "lista (o item com corrige o substitui)")
     return out
+
+
+def _corrige_pleito(v, onde: str, falha) -> dict | None:
+    """Issue #399: identifica o pleito gravado pelo oficio (obrigatorio) e, se vier, confere a data gravada."""
+    if v is None:
+        return None
+    if not isinstance(v, dict) or set(v) - {"oficio", "data"}:
+        falha(onde, "use {oficio: <ofício gravado>, data: <data gravada, opcional>}")
+        return None
+    oficio = str(v.get("oficio") or "").strip()
+    if not oficio:
+        falha(f"{onde}.oficio", "obrigatório: o número do ofício do pleito gravado")
+        return None
+    try:
+        data = _data(v.get("data"))
+    except ValueError as e:
+        falha(f"{onde}.data", str(e))
+        return None
+    return {"oficio": oficio, "data": data}
+
+
+# Gate Sol (PR #406): acima do int64 o `aplicar` estourava com OverflowError ao consultar o numero no SQLite.
+# 1.000.000 de versoes e' folga larga sobre qualquer contrato real.
+MAX_VERSAO_SUPERADA = 1_000_000
+
+
+def _cronograma_superadas(lista, falha) -> list[int]:
+    """Issue #395: `cronograma_superadas: [<numero da versao>]`, versoes ja gravadas sem linha no cadastro (a carga
+    de 04/09/2026, as manuais) que deixam de valer. Se o numero existe e nao veio do cadastro, quem confere e' o
+    `aplicar` (precisa do banco)."""
+    if lista is None:
+        return []
+    if not isinstance(lista, list):
+        falha("cronograma_superadas", "use uma lista de números de versão (ex.: [1])")
+        return []
+    out: list[int] = []
+    for i, n in enumerate(lista):
+        if _inteiro(n, 1) is None or n > MAX_VERSAO_SUPERADA:
+            falha(f"cronograma_superadas[{i}]", f"número de versão inválido: {n!r} (use um inteiro de 1 a {MAX_VERSAO_SUPERADA})")
+        elif n in out:
+            falha("cronograma_superadas", f"versão {n} repetida")
+        else:
+            out.append(n)
+    return sorted(out)
 
 
 def _cronograma(lista, falha) -> list[dict]:
@@ -542,6 +764,25 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
     for inst in c["instrumentos"]:
         if inst["corrige"] and inst["corrige"] not in vistos:
             falha("instrumentos", f"{inst['chave']} corrige {inst['corrige']!r}, que não existe")
+    # Gates da PR #317: corrige para si mesmo, ou em roda (a corrige b, b corrige a), tiraria todos da conta
+    corrige_de = {i["chave"]: i["corrige"] for i in c["instrumentos"] if i["corrige"]}
+    for inst in c["instrumentos"]:
+        caminho, k = [inst["chave"]], inst["corrige"]
+        while k and k not in caminho:
+            caminho.append(k)
+            k = corrige_de.get(k)
+        if k:
+            falha("instrumentos", f"{inst['chave']}: a cadeia de correção volta a {k} "
+                                  f"({' → '.join([*caminho, k])}); um termo não corrige a si mesmo")
+    # Issue #410 (gate Sol, rodada 1, PR #452): duas correcoes de reajuste do mesmo termo somariam as duas no vigente
+    corretores: dict[str, str] = {}
+    for inst in c["instrumentos"]:
+        if _corretor_de_valor(inst):
+            if inst["corrige"] in corretores:
+                falha("instrumentos", f"{inst['chave']} e {corretores[inst['corrige']]} corrigem {inst['corrige']}; "
+                                      f"a correção da correção corrige a correção (corrige: "
+                                      f"{corretores[inst['corrige']]})")
+            corretores.setdefault(inst["corrige"], inst["chave"])
     # Bloco 7: folga propria do contrato (vence a do orgao; na MTPAR varia por contrato), campos dos
     # instrumentos e pleitos enviados antes do sistema.
     c["folga_vigencia_dias"] = None
@@ -552,6 +793,7 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
     _dados_instrumentos(c, falha, avisos)
     c["pleitos_anteriores"] = _pleitos_anteriores(bruto.get("pleitos_anteriores"), c, falha)
     c["cronograma"] = _cronograma(bruto.get("cronograma"), falha)
+    c["cronograma_superadas"] = _cronograma_superadas(bruto.get("cronograma_superadas"), falha)
     chaves_inst = {i["chave"] for i in c["instrumentos"]}
     for v in c["cronograma"]:
         if v["instrumento"] and v["instrumento"] not in chaves_inst:

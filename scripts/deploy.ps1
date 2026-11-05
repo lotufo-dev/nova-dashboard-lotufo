@@ -18,7 +18,14 @@
 param(
     [string]$Ref = "origin/master",
     [string]$AppDir = "C:\DashboardLotufo\app",
-    [switch]$SemFrontend   # pula npm/build quando a mudanca e' so backend/docs
+    [switch]$SemFrontend,  # pula npm/build quando a mudanca e' so backend/docs
+    # Porta em que a producao responde. 0 = ler dos argumentos da tarefa DashboardLotufo
+    # (-Porta N; sem ele, 80). Informada e diferente da tarefa, o deploy aborta antes do checkout.
+    [ValidateRange(0, 65535)]
+    [int]$Porta = 0,
+    # Raiz dos dados (banco, segredos). Vazio = ler dos argumentos da tarefa DashboardLotufo (-Raiz "..."; sem ele,
+    # o padrao do rodar_producao.ps1). Informada e diferente da tarefa, o deploy aborta antes do checkout.
+    [string]$Raiz = ""
 )
 $ErrorActionPreference = "Stop"
 $pause = "C:\DashboardLotufo\watchdog.pause"
@@ -26,9 +33,59 @@ $py = Join-Path $AppDir "backend\.venv\Scripts\python.exe"
 $lock = Join-Path $AppDir "backend\requirements.lock"
 if (-not (Test-Path $py)) { throw "venv da producao ausente em $py (setup inicial do diretorio pinado nao feito)" }
 
-function Saudavel {
-    try { return ((Invoke-WebRequest "http://localhost/api/health" -TimeoutSec 12 -UseBasicParsing).StatusCode -eq 200) }
+# A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
+# um deploy na 80 acharia o IIS como dono da porta e abortaria DEPOIS do checkout, sem rollback.
+function PortaDaTarefa {
+    $tarefa = Get-ScheduledTask -TaskName "DashboardLotufo" -ErrorAction SilentlyContinue
+    if (-not $tarefa) { return 0 }
+    $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
+    if ($argumentosTarefa -match "-Porta (\d+)") { return [int]$Matches[1] }
+    return 80
+}
+$portaTarefa = PortaDaTarefa
+if ($Porta -eq 0) {
+    if ($portaTarefa -eq 0) { throw "tarefa DashboardLotufo nao encontrada; informe -Porta ou instale a tarefa (instalar_autostart.ps1)" }
+    $Porta = $portaTarefa
+} elseif ($portaTarefa -ne 0 -and $Porta -ne $portaTarefa) {
+    throw "-Porta $Porta nao bate com a tarefa DashboardLotufo (porta $portaTarefa); nada foi alterado"
+}
+
+# A raiz tambem e' a da tarefa (issue #417, gate Sol da PR #437): dela saem o arquivo da instalacao conferido antes do
+# reinicio e o banco do backup pre-migracao. Com a producao em outro disco, conferir C:\ recusaria o arquivo valido, ou
+# aceitaria um velho enquanto o servidor confere o da raiz certa. O instalar_autostart.ps1 sempre grava -Raiz "...".
+function RaizDaTarefa {
+    $tarefa = Get-ScheduledTask -TaskName "DashboardLotufo" -ErrorAction SilentlyContinue
+    if (-not $tarefa) { return "" }
+    $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
+    if ($argumentosTarefa -match '-Raiz\s+(?:"([^"]+)"|(\S+))') {
+        if ($Matches[1]) { return $Matches[1] }
+        return $Matches[2]
+    }
+    return "C:\DashboardLotufo"
+}
+$raizTarefa = RaizDaTarefa
+if (-not $Raiz) {
+    if ($raizTarefa) { $Raiz = $raizTarefa } else { $Raiz = "C:\DashboardLotufo" }
+} elseif ($raizTarefa -and $Raiz.TrimEnd("\") -ne $raizTarefa.TrimEnd("\")) {
+    throw "-Raiz $Raiz nao bate com a tarefa DashboardLotufo (raiz $raizTarefa); nada foi alterado"
+}
+$instalacaoArquivo = Join-Path $Raiz "segredos\instalacao.json"   # o mesmo que o rodar_producao.ps1 passa ao servidor
+$banco = Join-Path $Raiz "dados\dashboard.db"
+
+# Instalacao assinada (issue #417): depois do deploy so' vale o health 200 com instalacao "autorizada" (arquivo
+# assinado para esta maquina em <raiz>\segredos\instalacao.json). Modo copia (arquivo ausente, ilegivel, assinatura
+# ou maquina) conta como falha e dispara o rollback. O rollback confere so' o 200: o commit anterior pode nem ter o campo.
+function Saudavel([switch]$ExigirInstalacao) {
+    try { $resposta = Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing }
     catch { return $false }
+    if ($resposta.StatusCode -ne 200) { return $false }
+    if (-not $ExigirInstalacao) { return $true }
+    $saude = $null
+    try { $saude = $resposta.Content | ConvertFrom-Json } catch { $saude = $null }
+    if ($saude -and $saude.instalacao -eq "autorizada") { return $true }
+    if ($saude) { $situacao = "$($saude.instalacao) (motivo: $($saude.instalacao_motivo))" } else { $situacao = "health ilegivel" }
+    Write-Warning "health 200, mas a instalacao nao esta autorizada: $situacao - ver docs\runbook.md (Instalacao assinada)"
+    return $false
 }
 function Construir([string]$alvo) {
     & git -C $AppDir fetch --quiet
@@ -48,25 +105,45 @@ function Reconstruir {
         } finally { Pop-Location }
     }
 }
+# Issue #417: antes de parar a producao, o codigo NOVO (ja' no pinado, depois do build) confere o arquivo da
+# instalacao. Sem "autorizada" o deploy para aqui: as migracoes so' rodam na subida, entao o banco nao e' migrado e o
+# processo no ar nao e' trocado; o catch do Construir volta o pinado para o commit anterior.
+function ConferirInstalacao {
+    Push-Location (Join-Path $AppDir "backend")
+    try { & $py -m app.cli instalacao verificar --arquivo $instalacaoArquivo }
+    finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { throw "instalacao nao autorizada para o commit novo - ver docs\runbook.md (Instalacao assinada)" }
+}
+# Issue #421: registro do que foi implantado (commit e manifesto do dist) em <raiz>\deploy-atual.json, que o servidor
+# confere de hora em hora. Gravado ANTES de reiniciar, para a conferencia da subida ja' achar o registro novo; falha
+# aqui so' avisa (o item "Sem registro do ultimo deploy" aparece na Saude).
+function RegistrarDeploy {
+    Push-Location (Join-Path $AppDir "backend")
+    $codigo = 1
+    try { & $py -m app.cli integridade registrar --raiz $Raiz; $codigo = $LASTEXITCODE }
+    catch { Write-Warning "registro do deploy: $($_.Exception.Message)" }
+    finally { Pop-Location }
+    if ($codigo -ne 0) { Write-Warning "registro do deploy (deploy-atual.json) nao gravado - ver docs\runbook.md (Saude)" }
+}
 function DonoDaPorta {
-    $c = Get-NetTCPConnection -LocalPort 80 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    $c = Get-NetTCPConnection -LocalPort $Porta -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $c) { return $null }
     return Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)"
 }
 # Servidor ORFAO do Agendador (incidente de 2026-09-21): Stop-ScheduledTask nao o mata, ele
-# segura a porta 80, a instancia nova morre com WinError 10048 e o health 200 que se ve e' o
+# segura a porta, a instancia nova morre com WinError 10048 e o health 200 que se ve e' o
 # do processo ANTIGO. Por isso: quem sobrar na porta depois do Stop e' morto aqui -- so' se
 # for o uvicorn da dashboard; qualquer outro dono da porta aborta o deploy.
 function LiberarPorta {
     $dono = DonoDaPorta
     if (-not $dono) { return }
     if ($dono.CommandLine -notmatch "uvicorn" -or $dono.CommandLine -notmatch "app\.main") {
-        throw "porta 80 ocupada por processo que nao e' a dashboard (PID $($dono.ProcessId): $($dono.Name)); nada foi morto"
+        throw "porta $Porta ocupada por processo que nao e' a dashboard (PID $($dono.ProcessId): $($dono.Name)); nada foi morto"
     }
-    Write-Warning "servidor orfao na porta 80 (PID $($dono.ProcessId), criado em $($dono.CreationDate)) -> encerrando"
+    Write-Warning "servidor orfao na porta $Porta (PID $($dono.ProcessId), criado em $($dono.CreationDate)) -> encerrando"
     Stop-Process -Id $dono.ProcessId -Force
     Start-Sleep -Seconds 3
-    if (DonoDaPorta) { throw "porta 80 continua ocupada depois de encerrar o PID $($dono.ProcessId)" }
+    if (DonoDaPorta) { throw "porta $Porta continua ocupada depois de encerrar o PID $($dono.ProcessId)" }
 }
 function Reiniciar {
     Stop-ScheduledTask -TaskName "DashboardLotufo"; Start-Sleep -Seconds 3
@@ -76,14 +153,23 @@ function Reiniciar {
 }
 # Saude so' vale se quem responde NASCEU depois do reinicio: health 200 de processo antigo
 # nao prova que o commit novo esta' no ar.
-function SaudavelENovo {
-    if (-not (Saudavel)) { return $false }
+function SaudavelENovo([switch]$ExigirInstalacao) {
+    if (-not (Saudavel -ExigirInstalacao:$ExigirInstalacao)) { return $false }
     $dono = DonoDaPorta
     if (-not $dono -or $dono.CreationDate -lt $script:reinicioEm) {
-        Write-Warning "health 200, mas o dono da porta 80 e' anterior ao reinicio (PID $($dono.ProcessId), $($dono.CreationDate))"
+        Write-Warning "health 200, mas o dono da porta $Porta e' anterior ao reinicio (PID $($dono.ProcessId), $($dono.CreationDate))"
         return $false
     }
     return $true
+}
+# Depois do ROLLBACK OK: o commit anterior pode ja' conferir a instalacao (issue #417) e ter voltado em modo copia, sem
+# envio de e-mail e sem RM. Commit anterior ao #417 nao tem o campo e nao avisa.
+function AvisarSeCopia {
+    try { $saude = (Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing).Content | ConvertFrom-Json }
+    catch { return }
+    if ($saude.instalacao -and $saude.instalacao -ne "autorizada") {
+        Write-Warning "producao de volta, mas em modo copia: instalacao $($saude.instalacao) (motivo: $($saude.instalacao_motivo)), sem envio de e-mail e sem RM - ver docs\runbook.md (Instalacao assinada)"
+    }
 }
 
 $anterior = (& git -C $AppDir rev-parse HEAD).Trim()
@@ -101,8 +187,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "git diff das migracoes falhou" }
     $backup = $null
     if ($migracoes) {
-        $backup = & (Join-Path $PSScriptRoot "backup_pre_migracao.ps1") -Banco "C:\DashboardLotufo\dados\dashboard.db" `
-            -PastaBackups "C:\DashboardLotufo\dados\backups" -Python $py -Rotulo $alvo.Substring(0, 7)
+        $backup = & (Join-Path $PSScriptRoot "backup_pre_migracao.ps1") -Banco $banco `
+            -PastaBackups (Join-Path $Raiz "dados\backups") -Python $py -Rotulo $alvo.Substring(0, 7)
         if ($LASTEXITCODE -ne 0 -or -not $backup) {
             Write-Host "deploy abortado antes do checkout; producao segue em $anterior" -ForegroundColor Red
             exit 1
@@ -113,9 +199,10 @@ try {
     }
     # Construir pode lancar depois do checkout (pip/npm/build): o diretorio pinado nao pode ficar
     # num commit que nao subiu (issue #78). Volta para $anterior (checkout + reconstrucao) e sai com 1.
-    try { Construir $alvo }
+    # A conferencia da instalacao (issue #417) entra no mesmo try: recusada, a producao nem para.
+    try { Construir $alvo; ConferirInstalacao }
     catch {
-        Write-Warning "Construir $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
+        Write-Warning "Construir ou conferir a instalacao de $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
         # Sem fetch (a rede pode ser a causa) e so reconstroi se o HEAD saiu de $anterior:
         # se a falha foi no fetch/checkout do alvo, o HEAD nunca saiu e o build nao e refeito
         # (npm/vite esvaziariam o dist servido com a producao no ar).
@@ -125,6 +212,7 @@ try {
                 & git -C $AppDir checkout --quiet --detach $anterior
                 if ($LASTEXITCODE -ne 0) { throw "git checkout $anterior falhou" }
                 Reconstruir
+                RegistrarDeploy
             }
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
@@ -134,16 +222,18 @@ try {
         exit 1
     }
     $novo = (& git -C $AppDir rev-parse HEAD).Trim()
+    RegistrarDeploy
     Reiniciar
-    if (SaudavelENovo) {
+    if (SaudavelENovo -ExigirInstalacao) {
         $fim = "DEPLOY OK: $anterior -> $novo (health 200, processo novo)"
         if ($backup) { $fim += " - backup pre-migracao: $backup" }
         Write-Host $fim -ForegroundColor Green
     } else {
         Write-Warning "Saude NAO voltou -> ROLLBACK para $anterior"
         Construir $anterior
+        RegistrarDeploy
         Reiniciar
-        if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow }
+        if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
         else { Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log)" -ForegroundColor Red }
         exit 1
     }

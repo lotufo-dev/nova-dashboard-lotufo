@@ -59,8 +59,11 @@ def _vigente(conn, medicao_id: int) -> dict | None:
 def _ultima_enviada(conn, m: dict) -> int:
     """A maior versao ja' enviada. Medicao em `planilha_enviada` sem envio pelo sistema (carga do historico, envio
     por fora) tem ao menos a 1a enviada: so' a revisao sai daqui, nunca a mesma planilha/carta de novo."""
+    from app import medicao_planilhas
     r = conn.execute(f"SELECT MAX(p.versao) FROM {TABELA} e JOIN medicao_planilhas p ON p.id=e.planilha_id "
                      "WHERE e.medicao_id=? AND e.envio_id IS NOT NULL", (m["id"],)).fetchone()[0] or 0
+    # os envios por fora tambem contam, por versao (gate Sol, PR #382): a Rev01 registrada por fora nao sai de novo
+    r = max(r, medicao_planilhas._versao_enviada(conn, m["id"]))
     return max(r, 1) if m["estado"] == "planilha_enviada" else r
 
 
@@ -87,11 +90,22 @@ def _recusa(conn, m: dict) -> str | None:
 
 
 def envios(conn, medicao_id: int) -> list[dict]:
-    """As versoes ja' enviadas pelo sistema, da 1a a ultima (a linha do tempo da medicao)."""
-    return [dict(r) for r in conn.execute(
+    """As versoes ja' enviadas, da 1a a ultima (a linha do tempo da medicao): pelo sistema (`origem` sistema,
+    `enviado_em` instante UTC) e por fora (`origem` externo, `enviado_em` a data informada, sem hora)."""
+    from app import medicao_planilhas
+    lista = [{**dict(r), "origem": "sistema"} for r in conn.execute(
         f"SELECT e.planilha_id, p.versao, e.numero_oficio, e.envio_id, v.enviado_em, u.nome AS usuario "
         f"FROM {TABELA} e JOIN medicao_planilhas p ON p.id=e.planilha_id JOIN envios v ON v.id=e.envio_id "
         "LEFT JOIN usuarios u ON u.id=v.usuario_id WHERE e.medicao_id=? ORDER BY p.versao", (medicao_id,))]
+    for r in conn.execute("SELECT a.depois, u.nome FROM audit_log a LEFT JOIN usuarios u ON u.id=a.usuario_id "
+                          "WHERE a.entidade='medicao' AND a.entidade_id=? AND a.acao=? ORDER BY a.id",
+                          (str(medicao_id), medicao_planilhas.ENVIO)):
+        d = medicoes._json_dict(r["depois"]) or {}
+        if d.get("origem") == "externo" and isinstance(d.get("versao"), int):
+            lista.append({"planilha_id": d.get("planilha_id"), "versao": d["versao"], "numero_oficio": None,
+                          "envio_id": None, "enviado_em": d.get("enviado_em"), "usuario": r["nome"],
+                          "origem": "externo", "meio": d.get("meio"), "numero_protocolo": d.get("numero_protocolo")})
+    return sorted(lista, key=lambda x: x["versao"])
 
 
 def _reserva(conn, medicao_id: int) -> dict | None:

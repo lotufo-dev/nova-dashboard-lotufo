@@ -5,10 +5,10 @@ requires-python = ">=3.12"
 # Faixas presas ao major instalado hoje: sem limite superior, um `pip install`
 # futuro traz um major novo e quebra a producao sem ninguem mexer no codigo.
 # A reproducao exata do ambiente esta em requirements.lock (pip freeze).
-# cryptography NAO entra aqui: e' dependencia so do scripts\gerar_certificado.ps1,
-# instalada a mao (o proprio script diz como). Ela aparece no lock porque o freeze
-# retrata o venv real.
 dependencies = [
+    # Assinatura Ed25519 do arquivo da instalacao (app/instalacao.py, issue #417): fora do servidor
+    # oficial a dashboard sobe em modo copia. Tambem e' a que o scripts\gerar_certificado.ps1 usa.
+    "cryptography>=50.0,<51.0",
     "fastapi>=0.141,<1.0",
     "uvicorn>=0.52,<1.0",
     "argon2-cffi>=25.1,<26.0",
@@ -54,10 +54,19 @@ dependencies = [
     # app/espelho_docx.py). python-docx nao le w:sdt; lxml preserva os prefixos de namespace
     # que o Word exige (mc:Ignorable).
     "lxml>=5.0,<7.0",
+    # Copia cifrada semanal para a chave do dono (app/copia_dono.py, issue #419): formato age,
+    # X25519. PINADO EXATO: o formato do pacote e' o que o dono decifra no Mac com age/rage.
+    "pyrage==1.4.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A CI roda a suite inteira num job so', no Ubuntu, com -n 4 (issue #385). Teste que so' vale no Windows
+# usa skipif no proprio teste. `pdf` marca os modulos que geram PDF (carta, FRC, protocolo), para achar e
+# medir com o plugin tests/contar_pdfs.py; nao separa job.
+markers = [
+    "pdf: gera PDF com a fonte da carta (Arial no Windows e no Mac, Liberation Sans no Linux da CI)",
+]
 
 # ruff (hook PostToolUse do Claude, .claude/hooks/formatar.ps1). 120 = estilo que o codigo ja tem
 # (p99 das linhas de app/ = 118). Sem `ruff format`: em 11/10/2026 ele reformataria a maior parte

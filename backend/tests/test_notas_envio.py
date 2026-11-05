@@ -13,6 +13,9 @@ from tests import test_frc
 from tests.test_frc import _texto, consorcio14, conn, usuario  # noqa: F401  (fixtures do consorcio com FRC)
 from tests.test_protocolo import CARTAS, CINCO, _contrato, _pdf, _textos
 
+# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 D = datetime.date
 HOJE = D(2026, 9, 16)
 

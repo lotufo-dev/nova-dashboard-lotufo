@@ -7,6 +7,71 @@ def test_health(client):
     corpo = r.json()
     assert corpo["status"] == "ok" and corpo["banco"] == "ok"
     assert "ultimo_snapshot" in corpo["backup"]
+    # issue #417: os testes rodam como dev (conftest)
+    assert (corpo["instalacao"], corpo["instalacao_motivo"]) == ("dev", None)
+
+
+def test_health_mostra_o_commit_de_7_caracteres(client, monkeypatch):
+    from app import integridade
+    monkeypatch.setattr(integridade, "_commit", "abc1234")
+    monkeypatch.setattr(integridade, "_commit_lido", True)
+    assert client.get("/api/health").json()["commit"] == "abc1234"
+
+
+def test_commit_atual_le_o_head_do_clone(monkeypatch):
+    from app import integridade
+    monkeypatch.setattr(integridade, "_commit_lido", False)
+    monkeypatch.setattr(integridade, "commit_do_clone", lambda clone: "0123456789abcdef")
+    assert integridade.commit_atual() == "0123456"
+
+
+def _app_de_verdade(tmp_path, monkeypatch, maquina="MAQUINA-TESTE"):
+    """App fora do dev, com o banco em <raiz>/dados: a instalacao e' conferida de verdade na subida."""
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    monkeypatch.delenv("DASH_DEV", raising=False)
+    monkeypatch.delenv("DASH_INSTALACAO_ARQUIVO", raising=False)
+    from app import instalacao
+    monkeypatch.setattr(instalacao, "maquina_atual", lambda: maquina)
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "dados" / "dashboard.db"))
+    monkeypatch.setenv("DASH_SEM_JOBS", "1")
+    monkeypatch.setenv("DASH_SEM_FRONTEND", "1")
+    return TestClient(create_app())
+
+
+def _assinar_para(tmp_path, monkeypatch, maquina):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from app import instalacao
+    privada = Ed25519PrivateKey.generate()
+    monkeypatch.setattr(instalacao, "CHAVE_PUBLICA", privada.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode("ascii"))
+    arquivo = tmp_path / "segredos" / "instalacao.json"
+    arquivo.parent.mkdir(parents=True)
+    arquivo.write_bytes(instalacao.assinar(privada, maquina))
+
+
+@pytest.mark.instalacao_real
+def test_health_200_no_modo_copia_com_o_motivo_e_sem_caminho(tmp_path, monkeypatch):
+    """O watchdog so' olha o 200: no modo copia ele nao pode reiniciar o servidor em laco."""
+    with _app_de_verdade(tmp_path, monkeypatch) as c:
+        r = c.get("/api/health")
+    assert r.status_code == 200
+    corpo = r.json()
+    assert (corpo["status"], corpo["banco"]) == ("ok", "ok")
+    assert (corpo["instalacao"], corpo["instalacao_motivo"]) == ("nao-autorizada", "ausente")
+    assert str(tmp_path) not in r.text and "instalacao.json" not in r.text and "segredos" not in r.text
+
+
+@pytest.mark.instalacao_real
+@pytest.mark.parametrize("assinado_para, motivo", [("MAQUINA-TESTE", None), ("OUTRA-MAQUINA", "maquina")])
+def test_health_com_o_arquivo_assinado(tmp_path, monkeypatch, assinado_para, motivo):
+    _assinar_para(tmp_path, monkeypatch, assinado_para)
+    with _app_de_verdade(tmp_path, monkeypatch) as c:
+        r = c.get("/api/health")
+    assert r.status_code == 200
+    assert (r.json()["instalacao"], r.json()["instalacao_motivo"]) == \
+        ("autorizada" if motivo is None else "nao-autorizada", motivo)
 
 
 def test_health_acusa_copia_dos_arquivos_que_nao_termina(client, monkeypatch):

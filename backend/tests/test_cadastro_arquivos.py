@@ -466,6 +466,30 @@ def test_endosso_de_outra_apolice_gera_aviso_nao_erro(tmp_path):
     assert ca.preparar(_escrever(tmp_path, contratos=[c]))["avisos"] == []
 
 
+def test_natureza_do_instrumento_de_valor_padrao_execucao_e_aceita_reajuste(tmp_path):
+    """#262: aditivo de valor ganha `natureza` (execucao|reajuste); sem o campo, None (nao classificado = execucao)."""
+    reaj = {"chave": "ta-08", "tipo": "aditivo_valor", "data": "2026-09-01", "delta_valor": "1.000,01",
+            "natureza": "reajuste"}
+    c = {**CONTRATO, "instrumentos": [*CONTRATO["instrumentos"], reaj]}
+    insts = ca.preparar(_escrever(tmp_path, contratos=[c]))["contratos"][0]["instrumentos"]
+    assert [i["natureza"] for i in insts] == [None, "reajuste"]
+    assert "natureza" not in insts[1]["dados"]
+
+
+def test_natureza_so_aceita_execucao_ou_reajuste(tmp_path):
+    ruim = {"chave": "ta-08", "tipo": "aditivo_valor", "data": "2026-09-01", "delta_valor": "1.000,00",
+            "natureza": "Reajuste"}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ruim]}]))
+    assert any("natureza" in e and "execucao" in e and "reajuste" in e for e in erros)
+
+
+def test_natureza_em_instrumento_que_nao_e_de_valor_e_erro(tmp_path):
+    prazo = {"chave": "ap-01", "tipo": "apostilamento_prazo", "data": "2026-09-01",
+             "nova_execucao_fim": "2027-01-01", "natureza": "reajuste"}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [prazo]}]))
+    assert any("natureza" in e for e in erros)
+
+
 # --- issue #256: cronograma por versao, com a data do documento (spec 2026-10-20 §2.4) -------------
 
 def _versao(chave="contratual", origem="contratual", data="2024-03-11", itens=None, **extra):
@@ -557,6 +581,23 @@ def test_cronograma_que_nao_e_lista_e_erro(tmp_path):
     assert any("cronograma" in e and "lista" in e for e in erros)
 
 
+# --- issue #395: cronograma_superadas (numeros de versao ja gravados sem linha no cadastro) --------------
+
+def test_cronograma_superadas_aceita_lista_de_inteiros(tmp_path):
+    c = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma_superadas": [3, 1]}]))["contratos"][0]
+    assert c["cronograma_superadas"] == [1, 3]
+
+
+def test_contrato_sem_cronograma_superadas_tem_lista_vazia(tmp_path):
+    assert ca.preparar(_escrever(tmp_path))["contratos"][0]["cronograma_superadas"] == []
+
+
+@pytest.mark.parametrize("valor", [1, "1", [0], [-1], ["1"], [1.5], [True], [None], [1, 1], [9223372036854775808], [1_000_001]])
+def test_cronograma_superadas_invalido_e_erro(tmp_path, valor):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma_superadas": valor}]))
+    assert any("cronograma_superadas" in e for e in erros)
+
+
 # --- issue #257: data-base com indice obrigatorio e aplica_a (spec 2026-10-20 §2.4, D7) ----------
 
 @pytest.mark.parametrize("db_", [{"mes": "2023-04"}, {"mes": "2023-04", "indice": ""},
@@ -598,3 +639,315 @@ def test_ordinal_do_instrumento(tmp_path):
              {"chave": "par-1", "tipo": "paralisacao", "data": "2026-01-10", "ordinal": 2}]
     erros = _erros(_escrever(tmp_path / "ruim", contratos=[{**CONTRATO, "instrumentos": ruins}]))
     assert sum("ordinal" in e for e in erros) == 3, erros
+
+
+# --- issue #271: apostilamento de reajuste com competencias e periodo (spec 2026-10-20 §2.2) ----------------
+
+def _apostilamento(**dados):
+    return {"chave": "ap-reaj-1", "tipo": "apostilamento_reajuste", "data": "2026-09-15", "numero": "019/2024/02/09",
+            "data_base": "2023-04", "ciclo": 2026, **dados}
+
+
+def test_apostilamento_com_competencias_e_periodo_e_aceito(tmp_path):
+    ap = _apostilamento(periodo={"de": "2026-04", "ate": "2026-06"},
+                        competencias=[{"competencia": "2026-04", "valor": "1.234,57", "medicao": 24},
+                                      {"competencia": "2026-05", "valor": "0,01", "medicao": 25},
+                                      {"competencia": "2026-06", "valor": "-10,00"}])
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    inst = cad["contratos"][0]["instrumentos"][0]
+    assert inst["dados"]["periodo"] == {"de": "2026-04", "ate": "2026-06"}
+    # o normalizado em centavos (centavo impar preservado; indice deflacionario da' reajuste negativo)
+    assert ca.competencias_do_apostilamento(inst["dados"]) == [
+        {"competencia": "2026-04", "valor_centavos": 123457, "medicao": 24},
+        {"competencia": "2026-05", "valor_centavos": 1, "medicao": 25},
+        {"competencia": "2026-06", "valor_centavos": -1000, "medicao": None}]
+
+
+def test_apostilamento_so_com_percentual_e_periodo_e_aceito(tmp_path):
+    ap = _apostilamento(percentual="6,76", periodo={"de": "2026-04", "ate": "2027-03"}, eficacia="2026-09-15")
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    inst = cad["contratos"][0]["instrumentos"][0]
+    assert inst["dados"]["periodo"] == {"de": "2026-04", "ate": "2027-03"}
+    assert ca.competencias_do_apostilamento(inst["dados"]) == []
+
+
+def test_apostilamento_com_competencia_fora_do_periodo_e_erro(tmp_path):
+    ap = _apostilamento(periodo={"de": "2026-04", "ate": "2026-06"},
+                        competencias=[{"competencia": "2026-04", "valor": "1,00"},
+                                      {"competencia": "2026-07", "valor": "2,00"}])
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    assert any("instrumentos[ap-reaj-1].competencias[1]" in e and "fora do período" in e and "07/2026" in e
+               for e in erros), erros
+
+
+def test_apostilamento_com_competencia_repetida_e_erro(tmp_path):
+    ap = _apostilamento(competencias=[{"competencia": "2026-04", "valor": "1,00"},
+                                      {"competencia": "2026-04", "valor": "2,00"}])
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    assert any("competencias[1]" in e and "competência repetida" in e for e in erros), erros
+
+
+@pytest.mark.parametrize("campo,valor,trecho", [
+    ("periodo", {"de": "2026-06", "ate": "2026-04"}, "periodo"),
+    ("periodo", {"de": "2026-04"}, "periodo"),
+    ("periodo", {"de": "2026-04", "ate": "2026-06", "fim": "x"}, "periodo"),
+    ("periodo", "2026-04", "periodo"),
+    ("eficacia", "15/09/2026", "eficacia"),
+    ("eficacia", "2026-09", "eficacia"),
+    ("competencias", [], "competencias"),
+    ("competencias", "2026-04", "competencias"),
+    ("competencias", [{"competencia": "2026-13", "valor": "1,00"}], "competencias[0].competencia"),
+    ("competencias", [{"competencia": "2026-04", "valor": 1234.56}], "competencias[0].valor"),
+    ("competencias", [{"competencia": "2026-04"}], "competencias[0].valor"),
+    ("competencias", [{"competencia": "2026-04", "valor": "--1,00"}], "competencias[0].valor"),
+    ("competencias", [{"competencia": "2026-04", "valor": "1,00", "medicao": 0}], "competencias[0].medicao"),
+    ("competencias", [{"competencia": "2026-04", "valor": "1,00", "medicao": "24ª"}], "competencias[0].medicao"),
+    ("competencias", [{"competencia": "2026-04", "valor": "1,00", "medica": 3}], "competencias[0]"),
+])
+def test_apostilamento_com_competencias_ou_periodo_invalidos_e_erro(tmp_path, campo, valor, trecho):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [_apostilamento(**{campo: valor})]}]))
+    assert any(f"instrumentos[ap-reaj-1].{trecho}" in e for e in erros), erros
+
+
+def test_corrige_para_si_mesmo_e_recusado(tmp_path):
+    ap = {**_apostilamento(), "corrige": "ap-reaj-1"}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    assert any("cadeia de correção volta a ap-reaj-1" in e for e in erros), erros
+
+
+def test_corrige_em_roda_e_recusado_e_cadeia_linear_passa(tmp_path):
+    a = {**_apostilamento(), "chave": "ap-a", "corrige": "ap-b"}
+    b = {**_apostilamento(), "chave": "ap-b", "corrige": "ap-c"}
+    c = {**_apostilamento(), "chave": "ap-c", "corrige": "ap-a"}
+    erros = _erros(_escrever(tmp_path / "roda", contratos=[{**CONTRATO, "instrumentos": [a, b, c]}]))
+    assert any("ap-a: a cadeia de correção volta a ap-a" in e for e in erros), erros
+    linear = [{**c, "corrige": None}, b, a]
+    cad = ca.preparar(_escrever(tmp_path / "linear", contratos=[{**CONTRATO, "instrumentos": linear}]))
+    assert [i["corrige"] for i in cad["contratos"][0]["instrumentos"]] == [None, "ap-c", "ap-b"]
+
+
+def test_apostilamento_com_competencias_sem_data_base_em_contrato_de_duas_bases_e_aviso(tmp_path):
+    # gate Sol (PR #317, S2): o validar so' le os arquivos e nao sabe se o termo ja' foi aplicado (com uma base so',
+    # imutavel no YAML); avisa, e o aplicar recusa so' o termo novo (test_cadastro_aplicar)
+    bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+             {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
+    ap = {k: v for k, v in _apostilamento(competencias=[{"competencia": "2026-04", "valor": "1,00"}]).items()
+          if k != "data_base"}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
+    assert any("instrumentos[ap-reaj-1]" in a and "data-base" in a for a in cad["avisos"]), cad["avisos"]
+
+
+def test_apostilamento_sem_competencias_sem_data_base_em_contrato_de_duas_bases_tambem_e_aviso(tmp_path):
+    # Gate Sol (rodada 3, PR #317): o termo so' com percentual (ou so' com `corrige`) tambem precisa da base; o aplicar
+    # recusa o termo novo com ou sem competencias
+    bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+             {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
+    ap = {k: v for k, v in _apostilamento(percentual="6,76").items() if k != "data_base"}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
+    assert any("instrumentos[ap-reaj-1]" in a and "data-base" in a for a in cad["avisos"]), cad["avisos"]
+
+
+# --- issue #399: correcao de pleito anterior aplicado com dado errado ---------------------------------
+
+def _com_pleitos(pleitos):
+    return [{**CONTRATO, "pleitos_anteriores": pleitos}]
+
+
+def test_corrige_em_pleito_normaliza_com_data_opcional(tmp_path):
+    pleitos = [{"tipo": "prazo", "oficio": "CT-001-LT-2026", "data": "2026-05-06", "dias": 180,
+                "corrige": {"oficio": "CT-001-LT-2026", "data": "2026-08-14"}},
+               {"tipo": "conclusao", "oficio": "CT-002-LT-2026", "data": "2026-05-07",
+                "corrige": {"oficio": "CT-009-LT-2026"}},
+               {"tipo": "conclusao", "oficio": "CT-003-LT-2026", "data": "2026-05-08"}]
+    ps = ca.preparar(_escrever(tmp_path, contratos=_com_pleitos(pleitos)))["contratos"][0]["pleitos_anteriores"]
+    assert [p["corrige"] for p in ps] == [{"oficio": "CT-001-LT-2026", "data": "2026-08-14"},
+                                          {"oficio": "CT-009-LT-2026", "data": None}, None]
+
+
+@pytest.mark.parametrize("corrige, campo", [
+    ({"data": "2026-08-14"}, "corrige.oficio"),
+    ({"oficio": " "}, "corrige.oficio"),
+    ({"oficio": "CT-001-LT-2026", "data": "14/08/2026"}, "corrige.data"),
+    ({"oficio": "CT-001-LT-2026", "dias": 10}, "corrige"),
+    ("CT-001-LT-2026", "corrige"),
+])
+def test_corrige_em_pleito_exige_oficio(tmp_path, corrige, campo):
+    pleitos = [{"tipo": "prazo", "oficio": "CT-001-LT-2026", "data": "2026-05-06", "corrige": corrige}]
+    erros = _erros(_escrever(tmp_path, contratos=_com_pleitos(pleitos)))
+    assert any(f"pleitos_anteriores[0].{campo}" in e for e in erros), erros
+
+
+def test_pleito_corrigido_nao_pode_ficar_na_lista_nem_ser_corrigido_duas_vezes(tmp_path):
+    velho = {"tipo": "prazo", "oficio": "CT-001-LT-2026", "data": "2026-08-14"}
+    novo = {"tipo": "prazo", "oficio": "CT-005-LT-2026", "data": "2026-05-06", "corrige": {"oficio": "CT-001-LT-2026"}}
+    erros = _erros(_escrever(tmp_path, contratos=_com_pleitos([velho, novo])))
+    assert any("pleitos_anteriores[0]" in e and "corrigido por outro item" in e for e in erros), erros
+    erros = _erros(_escrever(tmp_path / "b", contratos=_com_pleitos([novo, {**novo, "oficio": "CT-006-LT-2026"}])))
+    assert any("corrigem o mesmo pleito" in e for e in erros), erros
+
+
+def test_corrige_de_um_oficio_com_duas_datas_base_corrige_so_a_dele(tmp_path):
+    bases = [{"mes": "2023-01", "indice": "INCC-DI"}, {"mes": "2023-03", "indice": "FGV/DNIT"}]
+    jan = {"tipo": "reajuste", "oficio": "CT-234-LT-2026", "data": "2026-04-23", "data_base": "2023-01", "ciclo": 2026,
+           "corrige": {"oficio": "CT-234-LT-2026"}}
+    mar = {**jan, "data_base": "2023-03"}
+    del mar["corrige"]
+    for pleitos in ([jan, mar], [jan, {**mar, "corrige": {"oficio": "CT-234-LT-2026"}}]):
+        cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases,
+                                                          "pleitos_anteriores": pleitos}]))
+        assert len(cad["contratos"][0]["pleitos_anteriores"]) == 2
+
+
+
+
+# --- issue #390 (revisor, PR #407): `ciclo`/`data_base` no aditivo de reajuste nao ficam engolidos ---
+
+TA_REAJ = {"chave": "ta-08", "tipo": "aditivo_valor", "data": "2026-10-20", "delta_valor": "1.000,01",
+           "natureza": "reajuste"}
+
+
+def test_ciclo_do_aditivo_de_reajuste_e_aceito_e_vai_para_os_dados(tmp_path):
+    c = {**CONTRATO, "instrumentos": [{**TA_REAJ, "ciclo": 2025, "data_base": "2023-04"}]}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[c]))
+    assert cad["contratos"][0]["instrumentos"][0]["dados"] == {"ciclo": 2025, "data_base": "2023-04"}
+    assert cad["avisos"] == []
+
+
+@pytest.mark.parametrize("extra, campo", [
+    ({"ciclo": "2025/26"}, "ciclo"),
+    ({"natureza": "execucao", "ciclo": 2025}, "ciclo"),
+    ({"natureza": "execucao", "data_base": "2023-04"}, "data_base"),
+    ({"data_base": "2021-10"}, "data_base"),
+])
+def test_ciclo_ou_data_base_invalido_no_aditivo_e_erro(tmp_path, extra, campo):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [{**TA_REAJ, **extra}]}]))
+    assert any(f"instrumentos[ta-08].{campo}" in e for e in erros), erros
+
+
+@pytest.mark.parametrize("ciclo, trecho", [
+    ("2025-99", "quatro dígitos"),             # formato: so' o ano
+    (2023, "de 2024 a 2026"),                  # no ano da data-base (2023-04) ou antes
+    (2027, "de 2024 a 2026"),                  # depois do ciclo da assinatura (20/10/2026)
+])
+def test_ciclo_do_aditivo_fora_do_intervalo_ou_do_formato_e_erro(tmp_path, ciclo, trecho):
+    # gate Sol (rodada extra, PR #407): de ano_base + 1 ao ciclo do ultimo aniversario ate' a assinatura
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [{**TA_REAJ, "ciclo": ciclo}]}]))
+    assert any("instrumentos[ta-08].ciclo" in e and trecho in e for e in erros), erros
+
+
+@pytest.mark.parametrize("base, data, ciclo, trecho", [
+    ("2021-10", "2026-10-20", 2021, "de 2022 a 2026"),        # o ano da propria data-base
+    ("2021-10", "2026-10-20", "2025-99", "quatro dígitos"),   # truncado
+    ("2023-04", "2026-03-15", 2026, "de 2024 a 2025"),        # termo de marco, aniversario em abril: o 2026 nao chegou
+    ("2023-04", "2026-03-15", 2027, "de 2024 a 2025"),        # ciclo futuro
+])
+def test_ciclo_impossivel_do_aditivo_e_recusado_com_o_intervalo(tmp_path, base, data, ciclo, trecho):
+    # issue #410: criterios de aceite, com a data-base e a data do termo de cada caso
+    c = {**CONTRATO, "datas_base": [{"mes": base, "indice": "setorial FGV/DNIT"}],
+         "instrumentos": [{**TA_REAJ, "data": data, "ciclo": ciclo}]}
+    erros = _erros(_escrever(tmp_path, contratos=[c]))
+    assert any("instrumentos[ta-08].ciclo" in e and trecho in e for e in erros), erros
+
+
+def test_duas_correcoes_de_reajuste_do_mesmo_aditivo_sao_erro(tmp_path):
+    # issue #410 (gate Sol, rodada 1, PR #452): cada termo tem no maximo uma correcao de valor; a outra corrige a
+    # correcao (cadeia)
+    ta2 = {**TA_REAJ, "chave": "ta-09", "data": "2026-10-25", "corrige": "ta-08"}
+    ta3 = {**TA_REAJ, "chave": "ta-10", "data": "2026-10-30", "corrige": "ta-08"}
+    erros = _erros(_escrever(tmp_path / "par", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, ta3]}]))
+    assert any("ta-10 e ta-09 corrigem ta-08" in e for e in erros), erros
+    cadeia = {**ta3, "corrige": "ta-09"}
+    ca.preparar(_escrever(tmp_path / "cadeia", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, cadeia]}]))
+    # o aditivo de prazo que tambem corrige o ta-08 nao conta (o motor nao o le)
+    prazo = {"chave": "ta-11", "tipo": "aditivo_prazo", "data": "2026-10-31", "nova_execucao_fim": "2027-06-30",
+             "corrige": "ta-08"}
+    ca.preparar(_escrever(tmp_path / "prazo", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, prazo]}]))
+
+
+def test_ciclo_do_aditivo_nas_pontas_do_intervalo_e_aceito(tmp_path):
+    for ciclo in (2024, 2026):
+        c = {**CONTRATO, "instrumentos": [{**TA_REAJ, "ciclo": ciclo}]}
+        assert ca.preparar(_escrever(tmp_path / str(ciclo), contratos=[c]))["contratos"][0]["instrumentos"][0][
+            "dados"]["ciclo"] == ciclo
+
+
+def test_ciclo_do_aditivo_assinado_antes_do_primeiro_aniversario_e_erro(tmp_path):
+    cedo = {**TA_REAJ, "data": "2024-03-31", "ciclo": 2024}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [cedo]}]))
+    assert any("instrumentos[ta-08].ciclo" in e and "antes do primeiro aniversário" in e for e in erros), erros
+
+
+def test_aditivo_de_reajuste_em_contrato_de_duas_bases_e_aviso(tmp_path):
+    bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+             {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
+    cad = ca.preparar(_escrever(tmp_path / "sem", contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [TA_REAJ]}]))
+    assert any("instrumentos[ta-08]" in a and "não fecha ciclo" in a for a in cad["avisos"]), cad["avisos"]
+    # rodada 2 (PR #407): com a `data_base` declarada, a base e' a dela; sem aviso
+    com = {**TA_REAJ, "data_base": "2023-06"}
+    cad = ca.preparar(_escrever(tmp_path / "com", contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [com]}]))
+    assert cad["avisos"] == []
+
+# --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
+
+PEDIDO_VALOR = {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "valor": "1.000.000,00",
+                "objeto": "1ª RPFO"}
+
+
+def test_pleito_anterior_de_valor_valida_com_o_valor_em_centavos(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [PEDIDO_VALOR]}]))
+    assert cad["contratos"][0]["pleitos_anteriores"] == [
+        {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "data_base": None, "ciclo": None,
+         "dias": None, "valor_centavos": 100000000, "objeto": "1ª RPFO", "corrige": None}]
+
+
+def test_pleito_anterior_de_valor_sem_objeto_e_com_centavo_impar(tmp_path):
+    p = {k: v for k, v in PEDIDO_VALOR.items() if k != "objeto"} | {"valor": "0,01"}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
+    item = cad["contratos"][0]["pleitos_anteriores"][0]
+    assert item["valor_centavos"] == 1 and item["objeto"] is None
+
+
+@pytest.mark.parametrize("troca, campo", [
+    ({"valor": None}, ".valor"),
+    ({"valor": "1000.00"}, ".valor"),
+    ({"valor": "0,00"}, ".valor"),
+    ({"valor": "-1,00"}, ".valor"),
+    ({"dias": 120}, ".dias"),
+    ({"data_base": "2023-04"}, ".data_base"),
+    ({"ciclo": 2026}, ".ciclo"),
+])
+def test_pleito_anterior_de_valor_exige_valor_e_recusa_dias_e_data_base(tmp_path, troca, campo):
+    p = {**PEDIDO_VALOR, **troca}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
+    assert any(f"pleitos_anteriores[0]{campo}" in e for e in erros), erros
+
+
+@pytest.mark.parametrize("campo, valor", [("valor", "1,00"), ("objeto", "1ª RPFO")])
+def test_valor_e_objeto_so_valem_no_pleito_anterior_de_valor(tmp_path, campo, valor):
+    p = {"tipo": "prazo", "oficio": "331", "data": "2025-11-10", "dias": 120, campo: valor}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
+    assert any(f"pleitos_anteriores[0].{campo}" in e for e in erros), erros
+
+
+# --- issue #391: apostilamento de reajuste sem ciclo avisa o ano que vai valer -------------------------------
+
+def _avisos_ciclo(tmp_path, ap):
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    return [a for a in cad["avisos"] if "sem ciclo" in a]
+
+
+def test_apostilamento_sem_ciclo_avisa_o_ano_da_eficacia(tmp_path):
+    ap = {k: v for k, v in _apostilamento(eficacia="2025-12-20").items() if k != "ciclo"}
+    avisos = _avisos_ciclo(tmp_path, ap)
+    assert len(avisos) == 1 and "instrumentos[ap-reaj-1]" in avisos[0]
+    assert "ciclo 2025 (pelo campo eficacia)" in avisos[0] and "Diga ciclo: AAAA" in avisos[0]
+
+
+def test_apostilamento_sem_ciclo_nem_eficacia_avisa_o_ano_da_data(tmp_path):
+    ap = {k: v for k, v in _apostilamento().items() if k != "ciclo"}
+    avisos = _avisos_ciclo(tmp_path, ap)
+    assert len(avisos) == 1 and "ciclo 2026 (pelo campo data)" in avisos[0]
+
+
+def test_apostilamento_com_ciclo_nao_avisa(tmp_path):
+    assert _avisos_ciclo(tmp_path, _apostilamento()) == []

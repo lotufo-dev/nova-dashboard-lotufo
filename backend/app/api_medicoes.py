@@ -270,7 +270,7 @@ TETO_PLANILHA = 25 * 1024 * 1024
 
 def _pdf_validado(arquivo: UploadFile, teto_bytes: int = arquivos.TETO_BYTES) -> bytes:
     dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=teto_bytes))   # tipo, %PDF- e teto (415/413)
-    arquivos.conferir_bytes_parseaveis(dados)                # abre num leitor de verdade (415)
+    arquivos.conferir_bytes_parseaveis(dados, pacote=True)   # abre num leitor de verdade (415), tetos do pacote
     return dados
 
 
@@ -309,6 +309,23 @@ def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "projeto"] = Qu
                       conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)
     return medicao_planilhas.sugestao(conn, contrato_id, tipo)
+
+
+@router.get("/api/contratos/{contrato_id}/planilhas/avisos")
+def avisos_planilha(contrato_id: ID, numero: int = Query(..., ge=1, le=999),
+                    competencia: str = Query(..., pattern=COMPETENCIA),
+                    periodo_inicio: datetime.date = Query(...),
+                    tipo: Literal["execucao", "projeto"] = Query("execucao"),
+                    usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                    conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #289: os avisos de periodo (sobreposto, pulando dias, competencia anterior) enquanto a pessoa preenche a
+    planilha/carta, pela mesma regra que o registro devolve, e o acumulado anterior e o saldo DESTE nº (a sugestao
+    so' os da do nº que ela sugere). So' le."""
+    _contrato_existe(conn, contrato_id)
+    acumulado = medicao_planilhas.acumulado_anterior(conn, contrato_id, tipo, numero)
+    return {"avisos": medicao_planilhas.avisos(conn, contrato_id, tipo, numero, competencia,
+                                               periodo_inicio.isoformat()),
+            **medicao_planilhas._saldo(conn, contrato_id, tipo, acumulado, None)}
 
 
 @router.post("/api/contratos/{contrato_id}/planilhas", status_code=201)
@@ -430,3 +447,44 @@ def baixar_boletim(medicao_id: ID, atesto_id: ID,
         raise HTTPException(404, "Arquivo não encontrado")
     return FileResponse(caminho, media_type=arquivos.MIME, filename=f"boletim-medicao-{a['numero']}-{atesto_id}.pdf",
                         headers={"X-Content-Type-Options": "nosniff"})
+
+
+# --- issue #283: planilha/carta enviada por fora e nº do SIGA (spec 2026-10-20 §2.1, passo 2; E3) ---------------
+
+@router.post("/api/medicoes/{medicao_id}/planilhas/envio-externo", status_code=201)
+def envio_externo_planilha(medicao_id: ID,
+                           enviado_em: str = Form(..., max_length=10),
+                           meio: str = Form(..., max_length=medicao_planilhas.TETO_MEIO),
+                           numero_protocolo: str | None = Form(None, max_length=100),
+                           eml: UploadFile | None = File(None),
+                           usuario: dict = Depends(exigir("editar_cadastros")),
+                           conn: sqlite3.Connection = Depends(conexao)):
+    """"Registrar envio por fora" da planilha/carta (ou de uma revisao dela): data, meio, nº do protocolo e .eml."""
+    from app import notas_envio
+    _medicao_existe(conn, medicao_id)
+    dados = {"enviado_em": enviado_em, "meio": meio, "numero_protocolo": numero_protocolo}
+    try:
+        medicao_planilhas.conferir_envio_externo(conn, medicao_id, dados)   # recusa antes de ler o .eml
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    arquivo = (eml.filename, eml.file.read(notas_envio.TETO_EML + 1)) if eml is not None and eml.filename else None
+    try:
+        return medicao_planilhas.registrar_envio_externo(conn, usuario["id"], medicao_id, dados, arquivo)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+
+
+class NumeroSigaIn(BaseModel):
+    numero: str = Field(max_length=100)
+
+
+@router.post("/api/medicoes/{medicao_id}/planilhas/numero-siga")
+def numero_siga_planilha(medicao_id: ID, dados: NumeroSigaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                         conn: sqlite3.Connection = Depends(conexao)):
+    """O nº do SIGA que o orgao devolve depois do envio da planilha/carta (pelo sistema ou por fora)."""
+    _medicao_existe(conn, medicao_id)
+    try:
+        medicao_planilhas.registrar_numero_siga(conn, usuario["id"], medicao_id, dados.numero)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    return {"ok": True}

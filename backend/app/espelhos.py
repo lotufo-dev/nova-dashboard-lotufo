@@ -84,8 +84,9 @@ MIN_JUSTIFICATIVA_SEM_BOLETIM = 10
 def _existentes(conn, contrato_id, numero) -> dict[str, dict]:
     """As medicoes deste numero (uma por tipo), com o que decide o valor travado e a trava do boletim (#284)."""
     return {m["tipo"]: dict(m) for m in conn.execute(
-        "SELECT id, tipo, estado, valor_protocolado_centavos, valor_protocolado_origem, valor_atestado_centavos "
-        "FROM medicoes WHERE contrato_id=? AND numero=?", (contrato_id, numero))}
+        "SELECT id, tipo, estado, competencia, valor_protocolado_centavos, valor_protocolado_origem, "
+        "valor_atestado_centavos, planilha_enviada_em FROM medicoes WHERE contrato_id=? AND numero=?",
+        (contrato_id, numero))}
 
 
 def _travados(conn, existentes: dict[str, dict]) -> dict[str, tuple[int, str]]:
@@ -160,10 +161,29 @@ def _recusar_planilha_sendo_enviada(conn, numero: int, existentes: dict[str, dic
                              f"{em.reservado_por_nome}): aguarde o envio terminar para gerar o espelho")
 
 
-def _calcular(conn, contrato_id, numero, competencia, entradas):
+def _regra_capturada(crua: tuple | None) -> dict:
+    """A regra de `_regra_crua` (situacao, regra, modelos, sha256) como `regra_do_contrato` a devolve, ativa."""
+    if crua is None or crua[0] != "ativa":
+        raise ValueError("Esta obra ainda não gera espelho pelo sistema (fluxo antigo): regra ausente ou em prova")
+    return {"situacao": crua[0], "regra": json.loads(crua[1]), "modelos": json.loads(crua[2])}
+
+
+def _conferir_planilhas(conn, numero: int, existentes: dict[str, dict], tipos, competencia: str) -> None:
+    """Issue #289, para cada medicao gerada agora: a planilha/carta so' recebe espelho enviada, sem revisao pendente
+    e na competencia dela (medicoes.conferir_espelho_da_planilha). Vem antes da trava do boletim: sem o envio ao
+    orgao, o boletim nem existe."""
+    for t in sorted(tipos):
+        m = existentes.get(t)
+        if m is not None and m["estado"] in (*medicoes.ESTADOS_ANTES_DO_ESPELHO, *medicoes.ESTADOS_ESPELHO):
+            medicoes.conferir_espelho_da_planilha(conn, m, numero, t, competencia)
+
+
+def _calcular(conn, contrato_id, numero, competencia, entradas, regra_crua: tuple | None = None):
     """Devolve (regra, contrato, saidas, valor por tipo, entradas usadas, medicoes existentes,
-    (travados, opcionais))."""
-    r = _exigir_ativa(conn, contrato_id)
+    (travados, opcionais)). Com `regra_crua` (a captura de `gerar`), a conta usa ESSA regra e nao a relida do banco
+    (gate Sol, #284: duas aplicacoes do cadastro no meio voltariam a regra a' captura e o espelho sairia com o sha
+    de uma e o calculo de outra)."""
+    r = _exigir_ativa(conn, contrato_id) if regra_crua is None else _regra_capturada(regra_crua)
     regra = r["regra"]
     chaves = {e["chave"] for e in regra["entradas"]}
     estranhas = set(entradas) - chaves
@@ -258,6 +278,10 @@ def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict
         if ex and ex["estado"] not in (*medicoes.ESTADOS_ANTES_DO_ESPELHO, *medicoes.ESTADOS_ESPELHO):
             raise ValueError(f"{medicoes.nome_medicao(numero, tipo)} já está {medicoes.rotulo_estado(ex['estado'])}: "
                              "não pode gerar espelho de novo")
+        # Issue #289: a planilha/carta so' recebe espelho enviada, sem revisao pendente e na competencia dela; o valor e'
+        # o travado (aprovado, senao pedido) desde a #284
+        if ex and ex["estado"] in (*medicoes.ESTADOS_ANTES_DO_ESPELHO, *medicoes.ESTADOS_ESPELHO):
+            medicoes.conferir_espelho_da_planilha(conn, ex, numero, tipo, competencia)
         if ex and ex["estado"] in medicoes.ESTADOS_ESPELHO:
             avisos.append(f"{medicoes.nome_medicao(numero, tipo)} já tem espelho: será gerada uma versão nova")
         # A-20: so' aviso -- pode ser medicao atrasada de verdade. A propria medicao (gerar de novo) nao conta.
@@ -300,8 +324,10 @@ def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
     # gerados e a regra sao conferidos de novo, e o sha gravado e' o desta captura (nao o relido depois do .docx)
     regra0, vigentes0 = _regra_crua(conn, contrato_id), _vigentes(conn, contrato_id, numero)
     r, c, saidas, por_tipo, entradas, existentes, (travados, _) = _calcular(conn, contrato_id, numero, competencia,
-                                                                           entradas)
+                                                                           entradas, regra0)
     retrato = _retrato(existentes, vigentes0, por_tipo, travados)
+    _recusar_planilha_sendo_enviada(conn, numero, existentes, por_tipo)   # o e-mail ao orgao saindo explica mais
+    _conferir_planilhas(conn, numero, existentes, por_tipo, competencia)               # #289: antes do boletim
     _conferir_boletim(conn, numero, existentes, por_tipo, justificativa_sem_boletim)   # recusa antes de montar
     modelos = {k: arquivos.caminho_seguro(m["arquivo"]).read_bytes() for k, m in r["modelos"].items()}
     # so' calculo antes da transacao: preencher os modelos nao toca banco nem disco
@@ -322,6 +348,7 @@ def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
         if _retrato(agora, _vigentes(conn, contrato_id, numero), por_tipo, _travados(conn, agora)) != retrato:
             raise ValueError("A medição mudou enquanto o espelho era gerado: confira os valores e gere de novo")
         _recusar_planilha_sendo_enviada(conn, numero, agora, por_tipo)
+        _conferir_planilhas(conn, numero, agora, por_tipo, competencia)
         sem_boletim = _conferir_boletim(conn, numero, agora, por_tipo, justificativa_sem_boletim)
         ids = {tipo: medicoes.criar_para_espelho(conn, usuario["id"], contrato_id, numero, tipo, competencia, valor)
                for tipo, valor in por_tipo.items()}

@@ -697,6 +697,30 @@ def test_periodo_sobreposto_ou_pulando_devolve_aviso_e_grava(client_admin):
     assert [m["estado"] for m in client_admin.get(f"/api/contratos/{cid}/medicoes").json()] == ["planilha_gerada"] * 3
 
 
+# issue #289: a tela avisa o periodo sobreposto enquanto a pessoa digita, antes de gravar (mesma regra do registro)
+def test_avisos_do_periodo_na_hora_sem_gravar(client_admin):
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid, 1, "2026-07", "2026-06-26", "2026-07-25").status_code == 201
+    url = f"/api/contratos/{cid}/planilhas/avisos"
+    r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-20"})
+    assert r.status_code == 200 and len(r.json()["avisos"]) == 1 and "sobrepõe" in r.json()["avisos"][0]
+    r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-26"})
+    assert r.json()["avisos"] == []
+    r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-08-03"})
+    assert len(r.json()["avisos"]) == 1 and "pula" in r.json()["avisos"][0]
+    # o acumulado e o saldo sao os do nº consultado, nao os do nº sugerido
+    assert r.json()["acumulado_anterior_centavos"] == 12_345_67
+    r1 = client_admin.get(url, params={"numero": 1, "competencia": "2026-07", "periodo_inicio": "2026-06-26"})
+    assert r1.json()["acumulado_anterior_centavos"] == 0
+    assert r1.json()["saldo_centavos"] - r.json()["saldo_centavos"] == 12_345_67
+    # so' le: nada foi gravado
+    assert len(client_admin.get(f"/api/contratos/{cid}/medicoes").json()) == 1
+    assert client_admin.get(url, params={"numero": 2, "competencia": "2026-8",
+                                         "periodo_inicio": "2026-07-26"}).status_code == 422
+    assert client_admin.get("/api/contratos/999999/planilhas/avisos", params={
+        "numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-26"}).status_code == 404
+
+
 def test_planilha_diretoria_recebe_403(client_admin):
     from app import auth, db
     cid = _contrato(client_admin)
@@ -818,6 +842,42 @@ def _atestos(mid):
     conn = db.get_conn()
     try:
         return [dict(r) for r in conn.execute("SELECT * FROM medicao_atestos WHERE medicao_id=? ORDER BY id", (mid,))]
+    finally:
+        conn.close()
+
+
+# --- issue #283: planilha/carta enviada por fora e numero do SIGA ------------------------------------------
+
+EML_PLANILHA = (b"From: Engenharia <engenharia@exemplo.com.br>\r\nTo: protocolo@orgao-a.exemplo.com.br\r\n"
+                b"Date: Mon, 03 Aug 2026 10:00:00 -0400\r\nSubject: CT-001-LT-2026 - 1a Medicao\r\n\r\nSegue.")
+
+
+def _enviar_por_fora(cl, mid, enviado_em="2026-08-03", meio="E-mail ao protocolo", eml=None, **extra):
+    files = {"eml": ("envio.eml", eml, "message/rfc822")} if eml is not None else None
+    return cl.post(f"/api/medicoes/{mid}/planilhas/envio-externo", files=files,
+                   data={"enviado_em": enviado_em, "meio": meio, **extra})
+
+
+def _numero_siga(cl, mid, numero):
+    return cl.post(f"/api/medicoes/{mid}/planilhas/numero-siga", json={"numero": numero})
+
+
+def _evidencias():
+    from app import db
+    pasta = db.db_path().parent / "evidencias"
+    return sorted(p.name for p in pasta.iterdir()) if pasta.exists() else []
+
+
+def _eventos(cl, mid):
+    return [e["texto"] for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]]
+
+
+def _auditoria(acao):
+    from app import db
+    conn = db.get_conn()
+    try:
+        return [(r["antes"], r["depois"]) for r in conn.execute(
+            "SELECT antes, depois FROM audit_log WHERE acao=? ORDER BY id", (acao,))]
     finally:
         conn.close()
 
@@ -977,3 +1037,320 @@ def test_boletim_diretoria_recebe_403_e_engenharia_registra(client_admin):
     assert client_admin.get(f"/api/medicoes/{mid}").json()["boletins"] == []      # diretoria le
     _entrar(client_admin, "eng@lotufo.com")
     assert _registrar_boletim(client_admin, mid).status_code == 201
+
+
+def test_envio_por_fora_poe_em_planilha_enviada_com_origem_externo_e_data(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    r = _enviar_por_fora(client_admin, mid, enviado_em="20260803", numero_protocolo="")
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["planilha_enviada_em"], d["planilha_envio_origem"]) == (
+        "planilha_enviada", "2026-08-03", "externo")
+    # o pedido congela no envio (centavo impar: 12.345,67) pelo estado, como no envio pelo sistema; `congelada` fica 0
+    # porque ele tambem congela o valor original do contrato, e isso e' do protocolo da nota (gate Sol, PR #382)
+    assert d["congelada"] == 0 and d["valor_protocolado_centavos"] == 12_345_67
+    assert d["protocolos"] == []      # sem nº do protocolo, nada em medicao_protocolos ainda
+    assert _eventos(client_admin, mid) == ["Planilha/carta enviada por fora em 03/08/2026 (E-mail ao protocolo) por Admin"]
+    r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1,01"})
+    assert r.status_code == 422
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 12_345_67
+
+
+def test_envio_por_fora_nao_congela_o_valor_original_do_contrato(client_admin):
+    """Gate Sol (PR #382): depois do envio por fora o contrato ainda aceita a correcao do valor original."""
+    from app import contratos, db
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    conn = db.get_conn()
+    try:
+        assert conn.execute("SELECT 1 FROM medicoes WHERE contrato_id=? AND congelada=1", (cid,)).fetchone() is None
+        contratos.atualizar(conn, 1, cid, {"valor_original_centavos": 100_000_01})
+        assert contratos.vigente(conn, cid)["valor_original_centavos"] == 100_000_01
+    finally:
+        conn.close()
+
+
+def test_envio_por_fora_recusa_a_versao_reservada_pelo_sistema(client_admin):
+    """Gate Sol (PR #382): com o e-mail da versao saindo pelo sistema (reserva ativa), o registro por fora recusa."""
+    from app import db
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    pid = client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"][0]["id"]
+    conn = db.get_conn()
+    conn.execute("INSERT INTO medicao_planilha_envios (medicao_id, planilha_id, envio_reservado_em, envio_reservado_por) "
+                 "VALUES (?,?,datetime('now'),1)", (mid, pid))
+    conn.commit()
+    conn.close()
+    r = _enviar_por_fora(client_admin, mid)
+    assert r.status_code == 422 and "está sendo enviada pelo sistema" in r.json()["detail"]
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["planilha_enviada_em"]) == ("planilha_gerada", None)
+
+
+def test_saldo_da_planilha_fica_fora_do_aditivo_de_reajuste(client_admin):
+    """Revisor (PR #382): o saldo da planilha/carta e' o da execucao, como o do painel (#262)."""
+    from app import db, paineis
+    cid = _contrato(client_admin)
+    conn = db.get_conn()
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
+                 "VALUES (?, 'valor', 10_000_01, 'assinado', '2026-03-01', 'reajuste')", (cid,))
+    conn.commit()
+    painel = paineis.saldo(conn, cid)
+    conn.close()
+    s = client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao").json()
+    assert s["vigente_centavos"] == 110_000_01 == painel["vigente_centavos"]
+    assert s["saldo_centavos"] == 100_000_00 == painel["saldo_centavos"]
+
+
+def test_envio_por_fora_com_eml_guarda_a_evidencia(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    r = _enviar_por_fora(client_admin, mid, eml=EML_PLANILHA)
+    assert r.status_code == 201, r.text
+    docs = client_admin.get(f"/api/medicoes/{mid}").json()["documentos"]
+    assert [(x["tipo_doc"], x["nome"]) for x in docs] == [("evidencia_orgao", "envio.eml")]
+    assert len(_evidencias()) == 1
+
+
+@pytest.mark.parametrize("eml", [
+    EML_PLANILHA.replace(b"From: Engenharia <engenharia@exemplo.com.br>\r\n", b""),   # sem From
+    EML_PLANILHA.replace(b"Date: Mon, 03 Aug 2026 10:00:00 -0400\r\n", b""),         # sem Date
+    EML_PLANILHA.replace(b"Date: Mon, 03 Aug 2026 10:00:00 -0400", b"Date: ontem"),   # Date invalida
+    b"From: x\nDate: y\n\nqualquer coisa",
+])
+def test_eml_sem_from_ou_date_e_recusado_em_portugues(client_admin, eml):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    r = _enviar_por_fora(client_admin, mid, eml=eml)
+    assert r.status_code == 422
+    assert r.json()["detail"].startswith("O arquivo não é um e-mail salvo (.eml)")
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["planilha_enviada_em"], d["congelada"]) == ("planilha_gerada", None, 0)
+    assert _evidencias() == [] and _eventos(client_admin, mid) == []
+
+
+def test_envio_por_fora_repetido_e_recusado_e_nao_duplica(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    r = _enviar_por_fora(client_admin, mid, enviado_em="2026-08-04")
+    assert r.status_code == 422 and "já foi enviada" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["planilha_enviada_em"] == "2026-08-03"
+    assert len(_auditoria("medicao.planilha_envio")) == 1
+
+
+def test_dois_envios_por_fora_simultaneos_um_passa(client_admin, monkeypatch):
+    """Regra da casa para envio: dois POST simultaneos = um registro so'. Os dois passam da 1a conferencia (a
+    barreira os segura na conferencia do .eml, antes da transacao); a 2a conferencia, sob o lock, recusa o outro."""
+    import threading
+    from app import notas_envio
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    conferir, largada = notas_envio._e_email, threading.Barrier(2)
+
+    def conferir_junto(dados):
+        largada.wait(timeout=10)
+        return conferir(dados)
+    monkeypatch.setattr(notas_envio, "_e_email", conferir_junto)
+    respostas = []
+    ts = [threading.Thread(target=lambda: respostas.append(_enviar_por_fora(client_admin, mid, eml=EML_PLANILHA)))
+          for _ in range(2)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert sorted(r.status_code for r in respostas) == [201, 422], [r.text for r in respostas]
+    assert len(_auditoria("medicao.planilha_envio")) == 1
+    assert len(client_admin.get(f"/api/medicoes/{mid}").json()["documentos"]) == 1
+
+
+def test_revisao_tambem_e_enviada_por_fora_e_o_pedido_fica_o_da_primeira(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev01"),
+                          data={"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "11.111,11",
+                                "motivo": "Rev01 pedida pela supervisora"})
+    assert r.status_code == 201, r.text
+    r = _enviar_por_fora(client_admin, mid, enviado_em="2026-08-10", meio="Entregue no protocolo do órgão")
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["planilha_enviada_em"], d["valor_protocolado_centavos"]) == (
+        "planilha_enviada", "2026-08-03", 12_345_67)
+    assert _eventos(client_admin, mid)[-1] == (
+        "Versão 2 da planilha/carta enviada por fora em 10/08/2026 (Entregue no protocolo do órgão) por Admin")
+    # a mesma versao de novo, nao
+    assert _enviar_por_fora(client_admin, mid, enviado_em="2026-08-11").status_code == 422
+
+
+def test_revisao_enviada_antes_do_primeiro_envio_e_recusada(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid, enviado_em="2026-08-10").status_code == 201
+    client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev01"),
+                      data={"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "11.111,11",
+                            "motivo": "Rev01"})
+    r = _enviar_por_fora(client_admin, mid, enviado_em="2026-08-09")
+    assert r.status_code == 422 and "anterior ao primeiro envio (10/08/2026)" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("estado", ["cancelada", "desistida"])
+def test_planilha_enviada_ainda_se_cancela_ou_desiste(client_admin, estado):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": estado, "motivo": "enviada na obra errada"})
+    assert r.status_code == 200, r.text
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == estado
+
+
+def test_envio_por_fora_recusas(client_admin):
+    import datetime
+    cid = _contrato(client_admin)
+    sem_planilha = _medicao(client_admin, cid, numero=5)
+    r = _enviar_por_fora(client_admin, sem_planilha)
+    assert r.status_code == 422 and "planilha/carta" in r.json()["detail"]
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    futura = (datetime.date.today() + datetime.timedelta(days=2)).isoformat()
+    assert _enviar_por_fora(client_admin, mid, enviado_em=futura).status_code == 422
+    assert _enviar_por_fora(client_admin, mid, meio="   ").status_code == 422
+    assert _enviar_por_fora(client_admin, mid, enviado_em="03/08/2026").status_code == 422
+    assert client_admin.post("/api/medicoes/999999/planilhas/envio-externo",
+                             data={"enviado_em": "2026-08-03", "meio": "x"}).status_code == 404
+    _no_estado(mid, "boletim_recebido")
+    assert _enviar_por_fora(client_admin, mid).status_code == 422
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["planilha_enviada_em"] is None
+
+
+def _linhas_protocolo(mid):
+    from app import db
+    conn = db.get_conn()
+    try:
+        return [tuple(r) for r in conn.execute("SELECT etapa, data, numero_processo, origem FROM medicao_protocolos "
+                                               "WHERE medicao_id=? ORDER BY id", (mid,))]
+    finally:
+        conn.close()
+
+
+def test_numero_do_siga_vai_para_medicao_protocolos_como_da_planilha(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _numero_siga(client_admin, mid, "123.456/2026").status_code == 422      # antes do envio, nao
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    assert _numero_siga(client_admin, mid, "  ").status_code == 422
+    r = _numero_siga(client_admin, mid, " 123.456/2026 ")
+    assert r.status_code == 200, r.text
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert d["estado"] == "planilha_enviada"       # o nº do SIGA nao protocola a nota
+    assert _linhas_protocolo(mid) == [("planilha", "2026-08-03", "123.456/2026", "manual")]
+    # a linha do tempo da tela (medicao.ts) le `planilha_siga`; `protocolos` e' so' o da nota
+    assert d["planilha_siga"] == {"data": "2026-08-03", "numero": "123.456/2026"} and d["protocolos"] == []
+    # correcao: a mesma linha, com o antes e o depois na auditoria
+    assert _numero_siga(client_admin, mid, "123.457/2026").status_code == 200
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["planilha_siga"]["numero"] == "123.457/2026"
+    assert len(_linhas_protocolo(mid)) == 1
+    import json
+    assert [(json.loads(a or "null"), json.loads(b)) for a, b in _auditoria("medicao.numero_siga")] == [
+        (None, {"numero_processo": "123.456/2026", "data": "2026-08-03"}),
+        ({"numero_processo": "123.456/2026"}, {"numero_processo": "123.457/2026"})]
+    assert _numero_siga(client_admin, mid, "123.457/2026").status_code == 422      # o mesmo de novo
+
+
+def test_numero_do_siga_da_planilha_nao_conta_como_protocolo_nos_paineis(client_admin):
+    """Revisor e gate Sol (rodada 1, C1): o nº do SIGA da planilha nao vira a data do protocolo da nota no Inicio,
+    na diretoria nem na lista em andamento; depois do protocolo da nota, a data usada e' a da nota."""
+    import datetime
+    from app import avisos, db, diretoria, inicio, medicoes
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    conn = db.get_conn()
+    try:
+        agosto = datetime.date(2026, 8, 20)
+        antes = avisos.resumo_mes(conn, agosto)
+        assert _numero_siga(client_admin, mid, "123.456/2026").status_code == 200
+        assert avisos.resumo_mes(conn, agosto) == antes and antes["valor_mes_centavos"] == 0
+        assert inicio.painel(conn, agosto)["protocoladas"]["ultima"] is None
+        assert next(m for m in diretoria._medicoes(conn) if m["id"] == mid)["protocolo_em"] is None
+        assert next(m for m in medicoes.em_andamento(conn, contrato_id=cid) if m["id"] == mid)["protocolado_em"] is None
+    finally:
+        conn.close()
+    _no_estado(mid, "nota_emitida")
+    r = client_admin.post(f"/api/medicoes/{mid}/protocolo", json={"data": "2026-09-15", "numero_processo": "777/2026"})
+    assert r.status_code == 201, r.text
+    conn = db.get_conn()
+    try:
+        setembro = avisos.resumo_mes(conn, datetime.date(2026, 9, 20))
+        assert setembro["valor_mes_centavos"] == 12_345_67 and setembro["valor_mes_anterior_centavos"] == 0
+        assert inicio.painel(conn, datetime.date(2026, 9, 20))["protocoladas"]["ultima"] == "2026-09-15"
+        assert next(m for m in diretoria._medicoes(conn) if m["id"] == mid)["protocolo_em"] == "2026-09-15"
+    finally:
+        conn.close()
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert [(p["data"], p["numero_processo"]) for p in d["protocolos"]] == [("2026-09-15", "777/2026")]
+    assert d["planilha_siga"] == {"data": "2026-08-03", "numero": "123.456/2026"}
+
+
+def test_numero_do_siga_vale_tambem_no_boletim_e_no_envio_pelo_sistema(client_admin):
+    from app import db
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    # o envio pelo sistema (issue #282) grava as mesmas colunas com origem `sistema`
+    conn = db.get_conn()
+    try:
+        conn.execute("UPDATE medicoes SET estado='boletim_recebido', planilha_enviada_em='2026-08-05', "
+                     "planilha_envio_origem='sistema' WHERE id=?", (mid,))
+        conn.commit()
+    finally:
+        conn.close()
+    r = _numero_siga(client_admin, mid, "999/2026")
+    assert r.status_code == 200, r.text
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert d["estado"] == "boletim_recebido"
+    assert d["planilha_siga"] == {"data": "2026-08-05", "numero": "999/2026"}
+
+
+def test_numero_do_siga_recusado_depois_do_protocolo_da_nota(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    _no_estado(mid, "protocolada")
+    assert _numero_siga(client_admin, mid, "999/2026").status_code == 422
+    assert _linhas_protocolo(mid) == []
+
+
+def test_numero_do_protocolo_no_envio_por_fora_e_o_numero_do_siga(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid, numero_protocolo="555/2026").status_code == 201
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert d["planilha_siga"] == {"data": "2026-08-03", "numero": "555/2026"}
+    assert _eventos(client_admin, mid) == [
+        "Planilha/carta enviada por fora em 03/08/2026 (E-mail ao protocolo, protocolo 555/2026) por Admin"]
+
+
+def test_protocolo_da_revisao_nao_troca_o_numero_do_siga_ja_gravado(client_admin):
+    """Revisor (rodada 1, A2): o nº do protocolo da Rev01 fica no evento do envio; o nº do SIGA gravado so' muda pela
+    rota do nº do SIGA."""
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert _enviar_por_fora(client_admin, mid, numero_protocolo="555/2026").status_code == 201
+    client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev01"),
+                      data={"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "11.111,11",
+                            "motivo": "Rev01"})
+    assert _enviar_por_fora(client_admin, mid, enviado_em="2026-08-10", numero_protocolo="777/2026").status_code == 201
+    assert _linhas_protocolo(mid) == [("planilha", "2026-08-03", "555/2026", "manual")]
+    assert _eventos(client_admin, mid)[-1] == (
+        "Versão 2 da planilha/carta enviada por fora em 10/08/2026 (E-mail ao protocolo, protocolo 777/2026) por Admin")
+    assert len(_auditoria("medicao.numero_siga")) == 1
+
+
+def test_envio_por_fora_e_numero_do_siga_diretoria_recebe_403(client_admin):
+    from app import auth, db
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@lotufo.com", "senha-forte-123", "diretoria")
+    conn.close()
+    _entrar(client_admin, "dir@lotufo.com")
+    assert _enviar_por_fora(client_admin, mid).status_code == 403
+    assert _numero_siga(client_admin, mid, "1").status_code == 403
