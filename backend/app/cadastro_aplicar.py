@@ -923,6 +923,14 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
             raise ValueError(f"{rotulo}: aditivo de valor novo precisa de `natureza` "
                              f"({' ou '.join(NATUREZAS)}): o reajuste fica fora do saldo")
         anterior = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
+        if reaj and novo["corrige_chave"] and novo["delta_valor_centavos"] and novo["tipo"] in ("valor", "misto"):
+            # issue #410 (comentario da PR #433): a correcao de reajuste substitui o corrigido no vigente
+            # (`contratos.vigente`), entao o retrato dela parte do vigente sem ele, se ele ainda contava
+            alvo = conn.execute(f"SELECT delta_valor_centavos FROM aditivos a WHERE a.contrato_id=? "
+                                f"AND a.chave_cadastro=? AND {reajuste.aditivo_de_reajuste('a')}",
+                                (contrato_id, novo["corrige_chave"])).fetchone()
+            if alvo is not None:
+                anterior -= alvo[0]
         cur = conn.execute(
             """INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim,
                    nova_execucao_fim, status, data_assinatura, numero, objeto, forma, chave_cadastro,
@@ -934,13 +942,6 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
              novo["forma"], inst["chave"], anterior, anterior + novo["delta_valor_centavos"], usuario_id,
              f"Corrige {inst['corrige']}" if inst["corrige"] else None, novo["ordinal"], novo["natureza"],
              novo["data_base_mes"], novo["ciclo_reajuste"], novo["corrige_chave"], novo["data_base_origem"]))
-        if reaj and novo["corrige_chave"]:
-            # issue #410 (comentario da PR #433): a correcao de reajuste substitui o corrigido no vigente, entao o
-            # retrato dela parte do vigente sem ele (o vigente de agora, que ja' o tira, menos o delta dela)
-            agora = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
-            if agora != anterior + novo["delta_valor_centavos"]:
-                conn.execute("UPDATE aditivos SET valor_anterior_centavos=?, valor_novo_centavos=? WHERE id=?",
-                             (agora - novo["delta_valor_centavos"], agora, cur.lastrowid))
         rel["criados"].append(rotulo)
         auditoria.registrar(conn, usuario_id, "cadastro.instrumento", "aditivo", cur.lastrowid, None,
                             {"chave": inst["chave"], **novo})

@@ -94,18 +94,15 @@ def vigente(conn: sqlite3.Connection, contrato_id: int) -> dict:
     from app.reajuste import aditivo_de_reajuste   # import local: reajuste -> avisos -> documentos -> contratos
     # issue #410 (comentario da PR #433): o aditivo de reajuste corrigido por outro aditivo de reajuste (`corrige_chave`,
     # migracao 059) e' substituido pela correcao, como no motor do reajuste: o valor dele sai do vigente; as datas ficam
-    for a in conn.execute(f"""SELECT a.*, (a.natureza = 'reajuste' AND EXISTS (SELECT 1 FROM aditivos x
-                                  WHERE x.contrato_id = a.contrato_id AND x.corrige_chave = a.chave_cadastro
-                                  AND {aditivo_de_reajuste('x', com_corrigido=True)})) AS corrigido
+    # o criterio e' o do motor: o corrigido e' aditivo de reajuste que deixou de valer (`aditivo_de_reajuste`)
+    for a in conn.execute(f"""SELECT a.*, ({aditivo_de_reajuste('a', com_corrigido=True)}
+                                  AND NOT ({aditivo_de_reajuste('a')})) AS corrigido
                               FROM aditivos a WHERE a.contrato_id=? AND a.status='assinado'
                               ORDER BY a.data_assinatura, a.id""", (contrato_id,)):
-        if a["corrigido"]:
-            vig_fim = a["nova_vigencia_fim"] or vig_fim
-            exe_fim = a["nova_execucao_fim"] or exe_fim
-            continue
-        valor += a["delta_valor_centavos"]
-        if a["natureza"] == "reajuste":
-            reajuste += a["delta_valor_centavos"]
+        if not a["corrigido"]:
+            valor += a["delta_valor_centavos"]
+            if a["natureza"] == "reajuste":
+                reajuste += a["delta_valor_centavos"]
         vig_fim = a["nova_vigencia_fim"] or vig_fim
         exe_fim = a["nova_execucao_fim"] or exe_fim
     return {**c, "entidade_id": entidade_de(c), "valor_vigente_centavos": valor,
