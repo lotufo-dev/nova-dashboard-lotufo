@@ -26,6 +26,8 @@ type Det = {
   bloqueio: string | null; pendencias: (string | { mensagem: string })[];
   /** issue #278: reajuste sem apostilamento que cubra a competencia: o envio pede justificativa escrita */
   exige_justificativa?: boolean;
+  /** issue #278: o termo de apostilamento mudou depois da montagem; o pacote tem de ser montado de novo */
+  remontar?: boolean;
   extras: Extra[];
 };
 type Extra = { id: number; nome: string; tamanho: number };
@@ -246,7 +248,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   const travado = !!det.bloqueio || (comCarta && !assinado);
   const paginas = det.carta?.paginas ?? [];
   // so' o desenho dos passos (com carta): montar -> assinar -> enviar
-  const passoOficio: Passo = montado ? "feito" : "atual";
+  const passoOficio: Passo = montado && !det.remontar ? "feito" : "atual";
   const passoAssinar: Passo = assinado ? "feito" : montado ? "atual" : "futuro";
   const passoEnviar: Passo = assinado ? "atual" : "futuro";
 
@@ -417,13 +419,14 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
               <ItensEnvio itens={e.itens} aoMudar={itemMudou} />
               {complementares}
               {faltamBloco}
-              {det.situacao_protocolo === "rascunho" && (
+              {/* issue #278: o termo de apostilamento mudou depois da montagem; o bloqueio diz o motivo e o Montar volta */}
+              {(det.situacao_protocolo === "rascunho" || det.remontar) && (
                 <div className="form-inline">
-                  <button type="button" className="btn btn--primario" disabled={ocupado || !!det.bloqueio}
+                  <button type="button" className="btn btn--primario" disabled={ocupado || (!!det.bloqueio && !det.remontar)}
                     onClick={() => void agir(async () => {
                       await api(`/api/protocolos/${protocoloId}/montar`, { method: "POST", body: JSON.stringify({}) });
                       await carregar();
-                    })}>{ocupado ? "Montando…" : "Montar"}</button>
+                    })}>{ocupado ? "Montando…" : det.remontar ? "Montar de novo" : "Montar"}</button>
                 </div>
               )}
             </Secao>

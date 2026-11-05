@@ -187,6 +187,19 @@ describe("Enviar a nota", () => {
       expect(corpo.confirmadas).toEqual([AVISO]);
     });
 
+    // revisor e gate Sol (rodada 1 da PR #435): o termo mudou depois da montagem; o envio fica bloqueado e o Montar volta
+    it("termo mudou depois da montagem: o envio fica bloqueado e o ofício se monta de novo", async () => {
+      const MUDOU = "O apostilamento do reajuste mudou depois da montagem: monte o pacote de novo (e assine de novo, se já tinha assinado)";
+      abrir({ ...mtpar("assinado", false), bloqueio: MUDOU, remontar: true });
+      expect(await screen.findByText(`Envio bloqueado: ${MUDOU}`)).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Enviar o e-mail" }) as HTMLButtonElement).disabled).toBe(true);
+      const montar = screen.getByRole("button", { name: "Montar de novo" }) as HTMLButtonElement;
+      expect(montar.disabled).toBe(false);
+      fireEvent.click(montar);
+      await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/protocolos/3/montar")).toBe(true));
+      expect(JSON.parse(api.mock.calls.find(c => c[0] === "/api/protocolos/3/montar")![1].body)).toEqual({});
+    });
+
     it("com o apostilamento cobrindo a competência, não há campo de justificativa", async () => {
       abrir(mtpar("assinado", false));
       fireEvent.click(await screen.findByRole("button", { name: "Enviar o e-mail" }));
