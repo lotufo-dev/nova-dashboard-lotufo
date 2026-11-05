@@ -407,3 +407,13 @@ def test_sem_repactuacao_a_semeadura_antiga_continua_valendo(conn, cid):
     _carga(conn, cid, [("2026-01", 10_00), ("2026-10", 50_00)])
     ef = cronograma.previsto_efetivo(conn, cid)
     assert ef["2026-01"] == 10_00
+
+
+def test_versao_manual_posterior_a_repactuacao_nao_semeia_passado_nunca_visto(conn, cid):
+    # issue #413: a versao manual (nao e' a carga) acrescenta 2026-02, passado que a carta nao trouxe
+    cronograma.nova_versao(conn, 1, cid, [("2026-01", 40_00), ("2026-03", 30_00), ("2026-10", 30_00)], "manual",
+                           data_documento="2026-02-10")
+    _cadastro(conn, cid, 1, "carta1", "carta", "2026-02-10")
+    cronograma.nova_versao(conn, 1, cid, [("2026-02", 8_00), ("2026-12", 5_00)], "manual")
+    ef = cronograma.previsto_efetivo(conn, cid)
+    assert "2026-02" not in ef
