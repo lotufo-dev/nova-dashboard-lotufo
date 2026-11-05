@@ -982,7 +982,7 @@ def _ta(conn):
 
 
 def test_ciclo_declarado_fica_guardado_e_vale_sem_pleito(conn):
-    # revisor e gate Sol (rodada 2, PR #407; migracao 057): base 2023-04, termo de 2025 assinado em 30/07/2026 com
+    # revisor e gate Sol (rodada 2, PR #407; migracao 058): base 2023-04, termo de 2025 assinado em 30/07/2026 com
     # `ciclo: 2025`, sem pleito: o 2025 fica apostilado pelo aditivo e o 2026 continua pendente
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[{**TA_REAJ, "dados": {"ciclo": 2025}}])]))
     assert _ta(conn) == ("2023-04", 2025)
@@ -1027,7 +1027,7 @@ def test_reaplicar_com_ciclo_sem_pleito_tira_a_ligacao_com_aviso(conn):
     assert any("MT-402/ta-08" in a and "ciclo 2025" in a and "CT-122-LT-2026 saiu" in a for a in r["avisos"]), r["avisos"]
 
 
-def test_aditivo_aplicado_antes_da_057_recebe_a_base_unica_no_proximo_aplicar(conn):
+def test_aditivo_aplicado_antes_da_058_recebe_a_base_unica_no_proximo_aplicar(conn):
     cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ])])
     cadastro_aplicar.aplicar(conn, 1, cad)
     conn.execute("UPDATE aditivos SET data_base_mes=NULL WHERE chave_cadastro='ta-08'"); conn.commit()

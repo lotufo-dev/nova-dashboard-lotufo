@@ -504,7 +504,7 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
 def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Issue #390: na SES o reajuste sai por termo aditivo de valor (`natureza: reajuste`). Como o apostilamento, o
     aditivo atende o ultimo pleito de reajuste enviado ate' a data dele, na data-base e no ciclo que ele guarda
-    (`reajuste.base_e_ciclo_do_aditivo`, migracao 057: o declarado, senao o do ultimo aniversario antes da
+    (`reajuste.base_e_ciclo_do_aditivo`, migracao 058: o declarado, senao o do ultimo aniversario antes da
     assinatura), e o pleito recebe `instrumento_chave`.
 
     A ligacao se confere a cada aplicar (gate Sol, rodada 2, PR #407): se o destino mudou (o `ciclo` declarado depois
@@ -520,7 +520,7 @@ def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -> None
                             {"instrumento_chave": antes}, {"instrumento_chave": depois})
 
     for inst in sorted((i for i in c["instrumentos"] if i["tipo"] in TIPOS_COM_NATUREZA), key=lambda i: i["data"]):
-        # o que vale e' o gravado (aditivo assinado, nao cancelado, de reajuste, com a base e o ciclo da 057)
+        # o que vale e' o gravado (aditivo assinado, nao cancelado, de reajuste, com a base e o ciclo da 058)
         r = conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=? "
                          f"AND {reajuste.ADITIVO_DE_REAJUSTE}", (contrato_id, inst["chave"])).fetchone()
         if r is None:
@@ -595,7 +595,7 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
             "ordinal": inst.get("ordinal"),
             # None = nao classificado (conta como execucao); so' o que o YAML declara e' gravado
             "natureza": inst.get("natureza")}
-    # Issue #390 (rodada 2, PR #407; migracao 057): o aditivo de reajuste guarda a base (a declarada, senao a unica de
+    # Issue #390 (rodada 2, PR #407; migracao 058): o aditivo de reajuste guarda a base (a declarada, senao a unica de
     # agora) e o ciclo declarado; o motor do reajuste le daqui, nao do YAML
     reaj, d = inst.get("natureza") == "reajuste", inst["dados"]
     bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=?", (contrato_id,))]
@@ -639,7 +639,7 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
                          f"(natureza: {ja['natureza']!r} → {novo['natureza']!r}); registre um instrumento novo "
                          "com `corrige`")
     campos = {k: novo[k] for k in ("numero", "objeto", "forma", "ordinal", "natureza")}
-    # base e ciclo do aditivo de reajuste (migracao 057): como a natureza, o NULL (aplicado antes da 057, ou sem
+    # base e ciclo do aditivo de reajuste (migracao 058): como a natureza, o NULL (aplicado antes da 058, ou sem
     # declaracao) aceita o primeiro valor, auditado, e trava depois. A base guardada so' muda por declaracao diferente
     # (erro); sem declaracao, segue a guardada mesmo que o contrato ganhe outra base (como a 055 no apostilamento).
     for campo, declarado in (("data_base_mes", declarada), ("ciclo_reajuste", novo["ciclo_reajuste"])):

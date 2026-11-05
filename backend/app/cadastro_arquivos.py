@@ -305,7 +305,7 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
                     falha(f"{onde}.data_base", "só vale no aditivo de natureza reajuste")
                 elif str(d["data_base"]) not in meses:
                     falha(f"{onde}.data_base", "use AAAA-MM de uma das datas_base do contrato")
-            # a base guardada no aditivo (migracao 057) vale com qualquer numero de bases; sem ela, com mais de uma, o
+            # a base guardada no aditivo (migracao 058) vale com qualquer numero de bases; sem ela, com mais de uma, o
             # aditivo novo nao tem base (o ja' aplicado segue na que guardou quando a base era unica)
             if inst.get("natureza") == "reajuste" and len(meses) != 1 and d.get("data_base") is None:
                 avisos.append(f"{c['nome_curto']}: {onde}: o contrato não tem uma data-base só e o aditivo de "

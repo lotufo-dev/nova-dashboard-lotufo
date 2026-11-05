@@ -106,7 +106,7 @@ def ciclo_do_aditivo(mes_base: str, data_assinatura: str) -> int | None:
 
 def base_e_ciclo_do_aditivo(r, unica: str | None) -> tuple[str | None, int | None]:
     """A data-base e o ciclo que o aditivo de reajuste atende, resolvidos num lugar so' (rodada 2, PR #407): a base
-    guardada no aditivo (migracao 057: a declarada, senao a unica de quando foi aplicado), senao a base unica de agora
+    guardada no aditivo (migracao 058: a declarada, senao a unica de quando foi aplicado), senao a base unica de agora
     (`unica`); o ciclo guardado (o `ciclo` declarado), senao o da data (`ciclo_do_aditivo`). Sem base, nenhum dos dois:
     com mais de uma data-base e nada guardado, nao se adivinha."""
     base = r["data_base_mes"] or unica

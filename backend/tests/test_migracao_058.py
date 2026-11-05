@@ -1,4 +1,4 @@
-"""Migracao 057 (issue #390, rodada 2 da PR #407): `aditivos.data_base_mes` e `aditivos.ciclo_reajuste` guardam a
+"""Migracao 058 (issue #390, rodada 2 da PR #407): `aditivos.data_base_mes` e `aditivos.ciclo_reajuste` guardam a
 data-base e o ciclo do aditivo de reajuste. So' acrescenta: os existentes ficam NULL e o aplicar preenche."""
 import pytest
 
@@ -6,7 +6,7 @@ from app import db
 
 pytestmark = pytest.mark.migracao_real
 
-MIGRACAO = "057_aditivo_reajuste_ciclo.sql"
+MIGRACAO = "058_aditivo_reajuste_ciclo.sql"
 
 
 @pytest.fixture

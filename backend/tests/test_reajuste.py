@@ -892,7 +892,7 @@ def test_aditivo_misto_de_reajuste_com_prazo_novo_depois_do_pedido_pede_reemissa
 
 
 def test_ciclo_guardado_no_aditivo_vale_sem_pleito_e_nao_fecha_o_ciclo_da_data(obra_ses):
-    # revisor e gate Sol (rodada 2, PR #407; migracao 057): o termo do reajuste de 2025 assinado em 20/10/2026, com
+    # revisor e gate Sol (rodada 2, PR #407; migracao 058): o termo do reajuste de 2025 assinado em 20/10/2026, com
     # `ciclo: 2025` no cadastro, sem pleito de 2025 nem de 2026: o 2025 fica apostilado e o 2026 continua pendente
     c, cid = obra_ses
     _aditivo_reajuste(c, cid, "ta-03", "2026-10-20", data_base="2021-10", ciclo=2025)
