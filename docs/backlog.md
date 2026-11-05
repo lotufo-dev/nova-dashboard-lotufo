@@ -7,7 +7,7 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 ## Código
 
-- 2026-10-13 Backup (#55): ficam fora do backup os arquivos de `dados\certidoes`, `regularidades`, `protocolos`, `pleitos`, `frc` e `assinaturas` (todos pelo sha256, como os quatro já cobertos). Acrescentá-los a `PASTAS_ARQUIVOS` em `backup.py`.
+- 2026-10-13 Backup (#55): ficam fora do backup os arquivos de `dados\certidoes`, `regularidades`, `protocolos`, `pleitos`, `curvas`, `planilhas`, `frc` e `assinaturas` (todos pelo sha256, como os quatro já cobertos). Acrescentá-los a `PASTAS_ARQUIVOS` em `backup.py`.
 - 2026-10-13 Backup (#55, gate Sol S1): a cópia externa diária do BANCO (`_copiou_hoje` e `copiar_externo`, `backup.py` › `rodada`) continua na thread do snapshot, como antes da #55; compartilhamento pendurado nela ainda para os snapshots. Levá-la para o worker dos arquivos (depois da passada externa, o que também deixa o banco lá fora citando só arquivos já copiados).
 - 2026-10-13 Formulários (resto da issue #11): ainda ficam desabilitados até o campo valer, em vez de validar no clique e mostrar o erro no campo, o `FormMotivo` (`MedicaoAtos.tsx`), o "Adicionar link" (`EnviarNota.tsx`), o "Registrar" do envio por fora (`RegistrarFora.tsx`), o "Gravar regularidade" (`DocumentosEmpresa.tsx`) e o nº do órgão (`MedicaoPagina.tsx`; em `Protocolo.tsx` deixa clicar vazio, mas sem erro no campo). Padrão: `ErroCampo` e `aria-describedby`, como em `MedicaoAtos.tsx` › `FormProtocoloManual`.
 - 2026-09-28 A natureza `projeto` dos documentos exigidos só aparece no checklist da medição, não no quadro de exigidos da obra (`ObraAbas.tsx`).
