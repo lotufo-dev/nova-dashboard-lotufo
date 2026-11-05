@@ -1,7 +1,7 @@
 import datetime
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app import auditoria, backup, copia_dono, correio, siga, tempo
+from app import auditoria, backup, copia_dono, correio, seguranca, siga, tempo
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -52,8 +52,11 @@ def gerar_copia_dono(usuario: dict = Depends(exigir("administrar"))):
 @router.get("/saude")
 def saude(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
           conn: sqlite3.Connection = Depends(conexao)):
-    """Administracao > Saude: a situacao do monitor do SIGA (issue #330), ao lado da do RM e do backup."""
-    return {"siga": siga.saude(conn)}
+    """Administracao > Saude: a situacao do monitor do SIGA (issue #330), ao lado da do RM e do backup, e o bloco
+    Seguranca (issue #418): `[{nivel, mensagem, data}]`, montado por `app/seguranca.py`, com no maximo
+    `seguranca.ITENS_NA_TELA` itens; `seguranca_fora` diz quantos ficaram de fora."""
+    itens, fora = seguranca.bloco(conn)
+    return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora}
 
 
 @router.get("/contas-microsoft")
