@@ -328,8 +328,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
   const avisarPendente = useRef(aoRevisaoPendente);
   useEffect(() => { avisarPendente.current = aoRevisaoPendente; });
   async function carregar() {
-    const x = await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`);
-    setD(x); avisarPendente.current?.(revisaoPendente(x));
+    setD(await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`));
   }
   useEffect(() => {
     let vivo = true;
@@ -346,7 +345,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
     try {
       await f();
       setFeito(mensagemFeito);
-      await carregar().catch(() => {});
+      await carregar().catch(() => avisarPendente.current?.(null));
       aoMudar();
       return true;
     } catch (e) {
@@ -376,7 +375,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
         anexos_previa: previa.anexos.map(a => ({ nome: a.nome, tamanho: a.tamanho, sha256: a.sha256 })) }) });
       setPrevia(null); setPainel(null);
       setFeito(`Planilha/carta enviada às ${fmtHora(new Date().toISOString())}.`);
-      await carregar().catch(() => {});
+      await carregar().catch(() => avisarPendente.current?.(null));
       aoMudar();
     } catch (e) {
       setErro(mensagemDeErro(e));
