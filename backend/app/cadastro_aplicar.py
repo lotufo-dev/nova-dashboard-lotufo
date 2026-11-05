@@ -321,7 +321,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
         else:
             rel["contratos"]["iguais"] += 1
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])
-    _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"])
+    _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"], rel["avisos"])
     _apostilamentos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"])
     _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
     return cid
@@ -382,9 +382,15 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
                           "posterior); ela só vale para os meses até a data dessa versão")
 
 
-def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
+# o que o YAML diz de um pleito anterior, a coluna em que ele foi gravado e o nome no aviso do que difere
+_CAMPOS_PLEITO = (("data", "enviado_em", "data"), ("dias", "dias", "dias"), ("ciclo", "ciclo", "ciclo"),
+                  ("valor_centavos", "valor_centavos", "valor"), ("objeto", "objeto", "objeto"))
+
+
+def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Bloco 7: pleitos enviados antes do sistema viram `pleitos` de origem 'cadastro', ja' enviados.
-    So' acrescenta (a chave e' contrato + tipo + oficio)."""
+    So' acrescenta (a chave e' contrato + tipo + oficio). Pleito ja' gravado com outro dado no YAML continua como
+    esta' e vira aviso (a correcao pelo YAML e' a issue #399)."""
     sigla = conn.execute("SELECT e.sigla_oficio FROM contratos k JOIN entidades e ON e.id=k.entidade_id "
                          "WHERE k.id=?", (contrato_id,)).fetchone()
     for p in c.get("pleitos_anteriores") or []:
@@ -402,6 +408,15 @@ def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
                                 {**p, "numero_oficio": canon})
         else:
             rel["iguais"] += 1
+            gravado = conn.execute(
+                "SELECT enviado_em, dias, ciclo, valor_centavos, objeto FROM pleitos WHERE contrato_id=? AND tipo=? "
+                "AND numero_oficio=? AND COALESCE(data_base_mes, '')=COALESCE(?, '') AND origem='cadastro'",
+                (contrato_id, p["tipo"], canon, p["data_base"])).fetchone()
+            difere = [nome for chave, coluna, nome in _CAMPOS_PLEITO
+                      if gravado is not None and p.get(chave) != gravado[coluna]]
+            if difere:
+                avisos.append(f"{rotulo}: {', '.join(difere)} no YAML difere do gravado; o gravado fica "
+                              "(correção de pleito anterior aplicado: issue #399)")
 
 
 def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:

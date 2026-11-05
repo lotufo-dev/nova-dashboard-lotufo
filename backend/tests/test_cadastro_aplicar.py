@@ -977,6 +977,26 @@ def test_pedido_de_valor_e_atendido_pelo_primeiro_aditivo_de_valor_depois_dele(c
     assert por_oficio == {"CT-001-LT-2026": "1º TA", "CT-050-LT-2026": "2º TA"}
 
 
+def test_pleito_de_valor_mudado_no_yaml_fica_como_gravado_e_vira_aviso(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])]))
+    mudado = {**PEDIDO_VALOR, "valor_centavos": 120000000, "objeto": "1ª RPFO revista"}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[mudado])]))
+    assert r["pleitos"]["iguais"] == 1
+    assert "MT-402/valor CT-001-LT-2026: valor, objeto no YAML difere do gravado; o gravado fica " \
+           "(correção de pleito anterior aplicado: issue #399)" in r["avisos"]
+    assert conn.execute("SELECT valor_centavos FROM pleitos").fetchone()[0] == 100000001
+    # igual de verdade: sem aviso
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])]))
+    assert not any("difere do gravado" in a for a in r["avisos"])
+
+
+def test_pleito_de_prazo_com_outra_data_no_yaml_vira_aviso(conn):
+    prazo = {"tipo": "prazo", "oficio": "331", "data": "2025-11-10", "data_base": None, "ciclo": None, "dias": 120}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[prazo])]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[{**prazo, "data": "2025-08-10"}])]))
+    assert any(a.startswith("MT-402/prazo CT-331-LT-2025: data no YAML difere do gravado") for a in r["avisos"])
+
+
 def test_supressao_e_aditivo_de_reajuste_nao_atendem_o_pedido_de_valor(conn):
     supressao = {**AD_VALOR, "delta_valor_centavos": -1000001}
     de_reajuste = {**AD_VALOR, "chave": "ta-02", "data": "2026-07-30", "numero": "019/2024/01/02",
