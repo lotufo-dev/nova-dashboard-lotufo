@@ -323,6 +323,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])
     _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"])
     _apostilamentos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"])
+    _aditivos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"])
     _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
     return cid
 
@@ -498,6 +499,38 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
                          (contrato_id, base, ciclo, inst["data"])).fetchone()
         if p is not None and p["instrumento_chave"] is None:
             ligar(p, inst)
+
+
+def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
+    """Issue #390: na SES o reajuste sai por termo aditivo de valor (`natureza: reajuste`). Como o apostilamento, o
+    aditivo atende o ultimo pleito de reajuste enviado ate' a data dele, no ciclo do ultimo aniversario da data-base
+    antes da assinatura (`reajuste.ciclo_do_aditivo`), e o pleito recebe `instrumento_chave`. O aditivo nao diz a
+    data-base: com mais de uma no contrato, nao se liga nada (seria adivinhar)."""
+    bases = [d["mes"] for d in c["datas_base"]]
+    if len(bases) != 1:
+        return
+    base = bases[0]
+    for inst in sorted((i for i in c["instrumentos"] if i["tipo"] in TIPOS_COM_NATUREZA), key=lambda i: i["data"]):
+        # a natureza que vale e' a gravada (aditivo assinado, nao cancelado, de reajuste)
+        if not conn.execute(f"SELECT 1 FROM aditivos WHERE contrato_id=? AND chave_cadastro=? "
+                            f"AND {reajuste.ADITIVO_DE_REAJUSTE}", (contrato_id, inst["chave"])).fetchone():
+            continue
+        if conn.execute("SELECT 1 FROM pleitos WHERE contrato_id=? AND instrumento_chave=? LIMIT 1",
+                        (contrato_id, inst["chave"])).fetchone():
+            continue
+        ciclo = reajuste.ciclo_do_aditivo(base, inst["data"])
+        if ciclo is None:
+            continue
+        p = conn.execute("SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? "
+                         "AND tipo='reajuste' AND data_base_mes=? AND ciclo=? AND situacao='enviado' "
+                         "AND date(enviado_em) <= date(?) ORDER BY enviado_em DESC, id DESC LIMIT 1",
+                         (contrato_id, base, ciclo, inst["data"])).fetchone()
+        if p is None or p["instrumento_chave"] is not None:
+            continue
+        conn.execute("UPDATE pleitos SET instrumento_chave=? WHERE id=?", (inst["chave"], p["id"]))
+        auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", p["id"],
+                            {"instrumento_chave": None}, {"instrumento_chave": inst["chave"]})
+        rel["alterados"].append(f"{c['nome_curto']}/reajuste {p['numero_oficio']}: atendido por {inst['chave']}")
 
 
 # O que torna um aditivo o que ele e': nao muda depois de aplicado (correcao e' instrumento
