@@ -205,6 +205,9 @@ def create_app() -> FastAPI:
         # que vai para outro disco ou compartilhamento, nao.
         backup_mod.agendar_backup_horario(db.db_path(), backup_mod.pasta_local(),
                                           None if copia else backup_mod.pasta_externa())
+        # Issue #422: protecao da tabela de usuarios e cadeia da auditoria, de hora em hora (local, vale na copia)
+        from app import seguranca
+        seguranca.agendar()
         if not copia:
             # Sincronizacao horaria com o RM (fase 5): so' sobe se o RM estiver configurado.
             # Bloco 9: a observacao do Outlook e do SharePoint (fase 6) saiu; o RM e' a unica fonte automatica.
