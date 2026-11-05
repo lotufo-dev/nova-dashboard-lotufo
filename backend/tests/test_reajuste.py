@@ -1129,6 +1129,27 @@ def test_medicao_de_data_base_incerta_que_nenhuma_base_cobre_e_marcada(cenario):
         ("faturada", True, ["sem_apostilamento", "nota_antes_do_apostilamento"])
 
 
+def test_medicao_sem_base_em_mes_sem_reajuste_em_nenhuma_data_base_nao_esta_coberta(cenario):
+    # revisor (PR #431, pedido na rodada 2 da PR #438): datas-base 2025-01 e 2025-03 e medicoes de reajuste de 06 e
+    # 07/2025 sem previsao. Caem no grupo sem data-base e nenhuma base tem reajuste no mes (o 1o aniversario e' em 2026):
+    # nenhum termo as cobre. A aba marca a aprovada; a so' pedida nao leva marca (spec 2026-10-20 §2.2: "aprovada ou
+    # faturada"), mas espera apostilamento na diretoria (test_diretoria)
+    c, ids = cenario
+    cid = ids["contrato"]
+    c.execute("UPDATE contrato_datas_base SET mes='2025-01' WHERE contrato_id=?", (cid,))
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2025-03', 'SICRO')", (cid,))
+    c.commit()
+    _medicao(c, cid, 1, "2025-06", "planilha_enviada", pedido=100_01)
+    _medicao(c, cid, 2, "2025-07", "boletim_recebido", pedido=200_03, aprovado=200_03)
+    grupos = reajuste.competencias_por_ciclo(c, cid)
+    assert [(g["data_base_mes"], g["ciclo"]) for g in grupos] == [(None, None)]
+    coberta = reajuste.cobertura_das_competencias(c, cid, grupos)
+    x = {r["competencia"]: r for r in grupos[0]["competencias"]}
+    assert [coberta(None, None, x[k]) for k in ("2025-06", "2025-07")] == [False, False]
+    assert (x["2025-06"]["estado"], x["2025-06"]["avisos"]) == ("pedida", [])
+    assert (x["2025-07"]["estado"], x["2025-07"]["avisos"]) == ("aprovada", ["sem_apostilamento"])
+
+
 def test_medicao_de_data_base_incerta_so_e_coberta_quando_toda_base_do_mes_a_cobre(cenario):
     c, ids = cenario
     cid = ids["contrato"]

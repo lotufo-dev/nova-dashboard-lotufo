@@ -517,6 +517,21 @@ def test_complemento_ainda_nao_recebido_espera_mesmo_com_a_principal_recebida(ce
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 50_001)]
 
 
+def test_medicao_sem_base_em_mes_sem_reajuste_em_nenhuma_data_base_espera(cenario):
+    # revisor (PR #431, pedido na rodada 2 da PR #438): datas-base 2025-01 e 2025-03, medicao de reajuste pedida de
+    # 06/2025 sem previsao. Cai no grupo sem data-base; nenhuma base tem reajuste no mes (o 1o aniversario e' em 2026),
+    # entao nenhum termo a cobre e ela espera, pelo criterio unico da aba (`reajuste.cobertura_das_competencias`)
+    c, ids = cenario
+    p = ids["propria"]
+    _data_base(c, p, "2025-01")
+    _data_base(c, p, "2025-03")
+    _reajuste(c, p, 31, "2025-06", "planilha_enviada", pedido=100_001)
+    [grupo] = reajuste.competencias_por_ciclo(c, p)
+    assert (grupo["data_base_mes"], grupo["ciclo"], grupo["competencias"][0]["data_base_incerta"]) == (None, None, True)
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 100_001)]
+
+
 def test_a_receber_total_por_obra_e_lista_na_cota(cenario):
     c, ids = cenario
     c.execute("UPDATE medicoes SET valor_protocolado_centavos=800001 WHERE contrato_id=? AND numero=14", (ids["propria"],))
