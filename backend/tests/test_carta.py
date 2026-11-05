@@ -231,3 +231,35 @@ def test_curva_s_sem_repactuacao_deixa_o_previsto_anterior_vazio():
                                         "previsto_anterior_centavos": None, "medido_centavos": 50}]))
     assert [x.value for x in ws[1]] == ["Competência", "Previsto vigente", "Previsto anterior", "Medido"]
     assert [x.value for x in ws[2]] == [datetime.datetime(2026, 3, 1), 1, None, 0.5]
+
+
+def test_curva_s_lida_de_volta_da_o_conteudo_em_centavos_mesmo_salva_pelo_openpyxl_comum():
+    """Issue #447: a conferencia compara o conteudo (competencia e centavos inteiros), nao os bytes; o mesmo xlsx
+    salvo pelo `wb.save` comum (outra data no zip e nas propriedades) le o mesmo conteudo."""
+    import openpyxl
+    linhas = [{"competencia": "2025-12", "previsto_vigente_centavos": 100_000_00,
+               "previsto_anterior_centavos": 120_000_00, "medido_centavos": 90_123_45},
+              {"competencia": "2026-01", "previsto_vigente_centavos": 250_000_01,
+               "previsto_anterior_centavos": None, "medido_centavos": None}]
+    gerado = carta.curva_s_xlsx(linhas)
+    assert carta.ler_curva_s(gerado) == carta.conteudo_curva_s(linhas) == [
+        ("2025-12", 100_000_00, 120_000_00, 90_123_45), ("2026-01", 250_000_01, None, None)]
+    wb = openpyxl.load_workbook(io.BytesIO(gerado))
+    outro = io.BytesIO()
+    wb.save(outro)
+    assert outro.getvalue() != gerado
+    assert carta.ler_curva_s(outro.getvalue()) == carta.conteudo_curva_s(linhas)
+    assert carta.ler_curva_s(carta.curva_s_xlsx([{**linhas[0], "medido_centavos": 90_123_46}])) != \
+        carta.conteudo_curva_s(linhas[:1])
+
+
+def test_curva_s_ilegivel_ou_de_outro_formato_recusa():
+    import openpyxl
+    with pytest.raises(ValueError):
+        carta.ler_curva_s(b"PK\x03\x04truncado")
+    wb = openpyxl.Workbook()
+    wb.active.append(["Outra", "planilha"])
+    saida = io.BytesIO()
+    wb.save(saida)
+    with pytest.raises(ValueError, match="cabeçalho"):
+        carta.ler_curva_s(saida.getvalue())
