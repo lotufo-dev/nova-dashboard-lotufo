@@ -7,6 +7,7 @@ import { api, apiForm, ApiErro } from "./api";
 import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import { IconeCheck, iniciarEnvio, ItensEnvio, mensagem, notasDe, type Envio, type ListaEnvios } from "./NotasAEnviar";
+import JustificativaEnvio, { conferirJustificativa, erroDaJustificativa } from "./JustificativaEnvio";
 import "./notas.css";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import { fmtHora } from "./tempo";
@@ -23,6 +24,8 @@ type Det = {
   previa: { para: string[]; copia: string[]; assunto: string; corpo: string; anexos: { nome: string; origem?: string; tamanho: number }[];
     links?: Link[] };
   bloqueio: string | null; pendencias: (string | { mensagem: string })[];
+  /** issue #278: reajuste sem apostilamento que cubra a competencia: o envio pede justificativa escrita */
+  exige_justificativa?: boolean;
   extras: Extra[];
 };
 type Extra = { id: number; nome: string; tamanho: number };
@@ -184,6 +187,9 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   const [juntar, setJuntar] = useState<string[]>([]);
   const [conferencia, setConferencia] = useState<Conferencia>(null);
   const [emailMexido, setEmailMexido] = useState(false);
+  // issue #278: a justificativa do reajuste sem apostilamento; o erro so' aparece depois do clique em Enviar
+  const [justificativa, setJustificativa] = useState("");
+  const [tentouJustificativa, setTentouJustificativa] = useState(false);
 
   // issue #100 (revisor na PR #141): os anexos mudaram depois da primeira leitura, entao o e-mail foi refeito e o
   // texto editado voltou ao padrao; a tela diz isso em vez de trocar o e-mail calada
@@ -225,6 +231,15 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   const montado = det.situacao_protocolo === "montado" || assinado;
   // issue #213: o que falta nao trava o envio; o Enviar abre o aviso "ATENÇÃO" com esta lista
   const faltam = det.pendencias.map(p => typeof p === "string" ? p : p.mensagem);
+  // issue #278: sem apostilamento que cubra a competencia do reajuste, o Enviar confere a justificativa antes do aviso
+  const exige = !!det.exige_justificativa;
+  const idJustificativa = `justificativa-envio-${protocoloId}`;
+  const erroJustificativa = exige && tentouJustificativa ? erroDaJustificativa(justificativa) : undefined;
+  function validarJustificativa(): boolean {
+    if (!exige) return true;
+    setTentouJustificativa(true);
+    return conferirJustificativa(idJustificativa, justificativa);
+  }
   // so' o que trava o envio vira frase; o que falta ja' esta' na lista "O que falta"
   const motivo = det.bloqueio ? det.bloqueio : comCarta && !assinado ? "Libera depois de anexar o assinado." : "";
   // so' o que trava o envio de fato (bloqueio do servidor, carta sem o assinado) apaga o botao
@@ -253,6 +268,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
       try {
         await api(`/api/notas/envio/${protocoloId}/enviar`, { method: "POST", body: JSON.stringify({
           para: m.para, copia: m.copia, cco: m.cco, assunto: m.assunto, corpo: m.corpo,
+          ...(exige ? { justificativa: justificativa.trim() } : {}),
           confirmadas: confirmadas.length > 0 ? confirmadas : null, anexos: anexosVistos }) });
       } catch (erro) {
         // o que falta mudou depois do aviso (ou da leitura da tela): o servidor manda a lista de agora e o aviso
@@ -260,7 +276,10 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
         // remontar o e-mail e perder o texto editado que o aviso ainda vai mandar
         if (erro instanceof ApiErro && erro.status === 422 && erro.corpo?.codigo === "CONFIRMAR_PENDENCIAS") {
           const itens: string[] = erro.corpo.pendencias ?? [];
-          setDet(d => d && { ...d, pendencias: itens });
+          // issue #278: a lista nova pode trazer o reajuste sem apostilamento; sem a justificativa, o campo pede antes
+          const exigeAgora = (erro.corpo.itens ?? []).some((i: { codigo: string }) => i.codigo === "sem_apostilamento");
+          setDet(d => d && { ...d, pendencias: itens, exige_justificativa: exigeAgora });
+          if (exigeAgora && erroDaJustificativa(justificativa)) { setTentouJustificativa(true); return; }
           setConfirmar({ m, itens, mudou: confirmadas.length > 0 });
           return;
         }
@@ -322,6 +341,8 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
       <ComporEmail key={`${protocoloId}-${det.situacao_protocolo}-${(det.extras ?? []).map(x => x.id).join(".")}-${(det.previa.links ?? []).map(x => x.id).join(".")}-${assinaturaAnexos(anexosVistos)}`} ocupado={ocupado} rotuloEnviar="Enviar o e-mail"
         bloqueado={travado} anexos={det.previa.anexos}
         inicial={{ para: det.previa.para, copia: det.previa.copia, cco: [], assunto: det.previa.assunto, corpo: det.previa.corpo }}
+        antes={exige && <JustificativaEnvio id={idJustificativa} valor={justificativa} aoMudar={setJustificativa} erro={erroJustificativa} />}
+        validarAntes={validarJustificativa}
         aoMexer={setEmailMexido} aoEnviar={enviar} aoDescartar={() => embutido.aoDescartar?.()} />
       {refeita && <CaixaAviso nivel="atencao" role="status">A prévia foi refeita com os anexos de agora e o texto voltou ao padrão; confira antes de enviar.</CaixaAviso>}
     </>

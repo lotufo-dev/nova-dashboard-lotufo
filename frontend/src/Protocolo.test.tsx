@@ -103,6 +103,34 @@ describe("Protocolo", () => {
     expect(JSON.parse(api.mock.calls.find(c => c[0] === "/api/protocolos/envio")![1].body).confirmadas).toBeNull();
   });
 
+  // issue #278: reajuste sem apostilamento que cubra a competência: o aviso fica nas pendências do protocolo e o Enviar
+  // pede a justificativa antes do aviso do que falta
+  it("reajuste sem apostilamento: o Enviar pede a justificativa e o envio a leva", async () => {
+    const AVISO = "Nenhum apostilamento cobre 09/2026; a nota de reajuste não pode sair antes dele";
+    const reaj = { ...PROT, natureza: "reajuste", pendencias: [{ codigo: "sem_apostilamento", mensagem: AVISO }],
+      medicoes: [{ ...MEDICAO, tipo: "reajuste", titulo: "Reajuste da 23ª Medição" }] };
+    render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [reaj] }}
+      carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText(AVISO)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/Incluir neste e-mail/));
+    api.mockResolvedValueOnce({ para: ["protocolo@exemplo.com.br"], copia: [], assunto: "A", corpo: "Bom dia.", anexos: [],
+      total: 0, limite: 26214400, pendencias: [{ codigo: "sem_apostilamento", mensagem: AVISO }], exige_justificativa: true });
+    fireEvent.click(screen.getByRole("button", { name: /Prévia do e-mail/ }));
+    const enviar = await screen.findByRole("button", { name: "Enviar" });
+    const campo = screen.getByLabelText(/Justificativa/);
+    fireEvent.click(enviar);
+    expect(screen.getByText(/Escreva a justificativa/)).toBeTruthy();
+    expect(campo.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    fireEvent.change(campo, { target: { value: "o órgão pediu a nota antes do termo" } });
+    api.mockResolvedValue({});
+    fireEvent.click(enviar);
+    fireEvent.click(within(screen.getByRole("alertdialog", { name: "ATENÇÃO" })).getByRole("button", { name: "Continuar com o envio" }));
+    await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/protocolos/envio")).toBe(true));
+    const corpo = JSON.parse(api.mock.calls.find(c => c[0] === "/api/protocolos/envio")![1].body);
+    expect(corpo).toMatchObject({ justificativa: "o órgão pediu a nota antes do termo", confirmadas: [AVISO] });
+  });
+
   // issue #10: o e-mail leva exatamente os protocolos vistos na prévia
   const PREVIA = { para: ["protocolo@exemplo.com.br"], copia: [], assunto: "CT-301-LT-2026 - 23ª Medição - Obra",
     corpo: "Bom dia.", anexos: [{ nome: "CT.pdf", tamanho: 2048 }], total: 2048, limite: 26214400, pendencias: [] };

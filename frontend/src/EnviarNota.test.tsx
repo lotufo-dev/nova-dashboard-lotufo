@@ -139,6 +139,63 @@ describe("Enviar a nota", () => {
     });
   });
 
+  // issue #278: reajuste da MT-PAR sem apostilamento que cubra a competência: o aviso aparece no passo do ofício,
+  // desde a montagem, e o envio pede a justificativa antes do aviso do que falta
+  describe("reajuste sem apostilamento", () => {
+    const AVISO = "Nenhum apostilamento cobre 09/2026; a nota de reajuste não pode sair antes dele";
+    const enviados = () => api.mock.calls.filter(c => c[0] === "/api/notas/envio/3/enviar");
+    const mtpar = (situacao: string, exige = true) => ({ ...det, familia: "mtpar", etapa: "unico", situacao_protocolo: situacao,
+      envio: { ...det.envio, orgao: "MT-PAR", orgao_sub: null, familia: "mtpar", grupo: "MT-PAR", medicao_ids: [632],
+        descricao: "Reajuste da 23ª medição" },
+      carta: { oficio: "CT/302/LT/2026", paginas: ["Ofício CT/302/LT/2026"] },
+      pendencias: exige ? [AVISO] : [], exige_justificativa: exige });
+    const abrir = (d: object) => {
+      api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? d : {}));
+      render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
+    };
+
+    it("o aviso aparece no passo do ofício, junto do Montar", async () => {
+      abrir(mtpar("rascunho"));
+      const oficio = (await screen.findByRole("heading", { name: "Ofício" })).closest("section") as HTMLElement;
+      expect(within(oficio).getByText(AVISO)).toBeTruthy();
+      expect(within(oficio).getByRole("button", { name: "Montar" })).toBeTruthy();
+    });
+
+    it("o Enviar sem justificativa mostra o erro no campo; com ela, abre o aviso e o envio leva a justificativa", async () => {
+      abrir(mtpar("assinado"));
+      const botao = await screen.findByRole("button", { name: "Enviar o e-mail" });
+      const campo = screen.getByLabelText(/Justificativa/);
+      fireEvent.click(botao);
+      const erro = screen.getByText(/Escreva a justificativa/);
+      expect(erro.getAttribute("role")).toBe("alert");
+      expect(campo.getAttribute("aria-invalid")).toBe("true");
+      expect(document.getElementById(campo.getAttribute("aria-describedby") ?? "")?.contains(erro)).toBe(true);
+      expect(document.activeElement).toBe(campo);
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      fireEvent.change(campo, { target: { value: "curta" } });
+      fireEvent.click(botao);
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      fireEvent.change(campo, { target: { value: "o órgão pediu a nota antes do termo" } });
+      expect(screen.queryByText(/Escreva a justificativa/)).toBeNull();
+      fireEvent.click(botao);
+      const aviso = screen.getByRole("alertdialog", { name: "ATENÇÃO" });
+      expect(within(aviso).getByText(AVISO)).toBeTruthy();
+      fireEvent.click(within(aviso).getByRole("button", { name: "Continuar com o envio" }));
+      await waitFor(() => expect(enviados()).toHaveLength(1));
+      const corpo = JSON.parse(enviados()[0][1].body);
+      expect(corpo.justificativa).toBe("o órgão pediu a nota antes do termo");
+      expect(corpo.confirmadas).toEqual([AVISO]);
+    });
+
+    it("com o apostilamento cobrindo a competência, não há campo de justificativa", async () => {
+      abrir(mtpar("assinado", false));
+      fireEvent.click(await screen.findByRole("button", { name: "Enviar o e-mail" }));
+      expect(screen.queryByLabelText(/Justificativa/)).toBeNull();
+      await waitFor(() => expect(enviados()).toHaveLength(1));
+      expect(JSON.parse(enviados()[0][1].body).justificativa).toBeUndefined();
+    });
+  });
+
   it("o link do OneDrive não tem frase de ajuda: o servidor recusa o endereço errado (testes de quebra 10/10, A-13)", async () => {
     api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
     render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
