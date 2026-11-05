@@ -152,6 +152,8 @@ A pasta vem de `DASH_CADASTRO_DIR` (produção: `C:\DashboardLotufo\cadastro`, c
    repetir sem `--ensaio`. O snapshot horário do backup cobre o antes.
 4. Instrumento assinado já aplicado não se altera: correção é instrumento novo com `corrige: <chave>`.
 
+O esquema de cada tipo de instrumento (apostilamento de reajuste SINFRA e MT-PAR, retificação, paralisação e reinício, endosso de garantia, aditivo de reajuste, `datas_base` com `aplica_a`, `pleitos_anteriores`) está comentado em `cadastro-exemplo/contratos/obra-propria.yaml`.
+
 ## Espelho de NF (bloco 2)
 
 **Como a operação usa.** Na página da obra, aba Medições, o cartão "Espelho de NF" aparece quando a obra

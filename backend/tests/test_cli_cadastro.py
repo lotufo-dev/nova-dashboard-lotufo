@@ -124,6 +124,19 @@ def test_cadastro_exemplo_valida_e_aplica_em_banco_vazio(tmp_path, monkeypatch, 
     assert [tuple(r) for r in conn.execute("SELECT chave, data_documento FROM cronograma_versoes_cadastro "
                                            "ORDER BY data_documento")] == [("contratual", "2025-03-10"),
                                                                            ("ta-01", "2026-02-02")]
+    # issue #392: o exemplo traz um instrumento de cada tipo que o cadastro real usa
+    cid = conn.execute("SELECT id FROM contratos WHERE nome_curto='Obra Própria'").fetchone()[0]
+    tipos = {r[0] for r in conn.execute("SELECT tipo FROM instrumentos WHERE contrato_id=?", (cid,))}
+    assert {"apostilamento_reajuste", "paralisacao", "reinicio", "endosso_garantia"} <= tipos
+    assert conn.execute("SELECT COUNT(*) FROM instrumentos WHERE contrato_id=? AND tipo='apostilamento_reajuste' "
+                        "AND chave LIKE '%-ret'", (cid,)).fetchone()[0] == 1
+    assert {r[0] for r in conn.execute("SELECT tipo FROM aditivos WHERE contrato_id=?", (cid,))} >= {"valor", "prazo"}
+    assert conn.execute("SELECT COUNT(*) FROM aditivos WHERE contrato_id=? AND natureza='reajuste'",
+                        (cid,)).fetchone()[0] == 1
+    assert [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=? AND aplica_a<>'' "
+                                       "ORDER BY mes", (cid,))] == ["2024-06", "2025-01"]
+    from app import reajuste
+    assert any(c["situacao"] == "apostilado" for c in reajuste.ciclos(conn, cid))
     capsys.readouterr()
     assert cli.main(["cadastro", "aplicar", "--usuario", "leo@l.com"]) == 0     # de novo: nada muda
     assert "contratos: 0 criados, 0 alterados" in capsys.readouterr().out
