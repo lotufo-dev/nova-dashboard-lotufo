@@ -647,6 +647,68 @@ def test_versao_da_carga_fica_superada_so_pela_versao_do_yaml_de_data_posterior(
     assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 3     # nada apagado
 
 
+# --- issue #395: cronograma_superadas tira a carga de 04/09/2026 da linha do tempo -------------------------
+
+def _com_carga(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    cronograma_mod.nova_versao(conn, 1, 1, [("2026-08", 50_00), ("2026-09", 60_00), ("2026-10", 70_00),
+                                            ("2026-11", 80_00)], "manual")
+    conn.execute("UPDATE cronograma_versoes SET criado_em='2026-09-04 15:00:00'")
+    conn.commit()
+
+
+def test_cronograma_superadas_supera_a_carga_com_auditoria(conn):
+    _com_carga(conn)
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL],
+                                                                    cronograma_superadas=[1])]))
+    assert "MT-402: versão 1 superada" in r["cronograma"]["alterados"]
+    assert not any("não é a vigente" in a for a in r["avisos"])        # a do documento passou a mandar
+    assert cronograma_mod.vigente(conn, 1)["numero"] == 2
+    assert cronograma_mod.previsto_efetivo(conn, 1) == {"2024-04": 100_01, "2026-10": 200_00, "2026-11": 300_00}
+    sup = conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0]
+    assert sup is not None
+    aud = conn.execute("SELECT entidade, entidade_id, depois FROM audit_log "
+                       "WHERE acao='cadastro.cronograma_superada'").fetchall()
+    assert [(a[0], a[1], json.loads(a[2])) for a in aud] == [("contrato", "1", {"versao": 1, "superada_em": sup})]
+    assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 2     # nada apagado
+
+
+def test_cronograma_superadas_segunda_aplicacao_e_igual_e_tirar_da_lista_nao_dessupera(conn):
+    _com_carga(conn)
+    cad = _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL], cronograma_superadas=[1])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    sup = conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0]
+    r2 = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r2["cronograma"] == {"criados": [], "alterados": [], "iguais": 2}      # a versao 2 e a superada
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] == sup
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.cronograma_superada'").fetchone()[0] == 1
+
+
+def test_ensaio_relata_a_versao_superada_e_nao_grava(conn):
+    _com_carga(conn)
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma_superadas=[1])]), ensaio=True)
+    assert r["cronograma"]["alterados"] == ["MT-402: versão 1 superada"]
+    # sem versao de documento no YAML, a obra fica sem vigente: quem aplica fica sabendo no ensaio
+    assert any("MT-402" in a and "sem cronograma vigente" in a for a in r["avisos"])
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] is None
+
+
+def test_cronograma_superadas_com_numero_inexistente_e_recusado(conn):
+    _com_carga(conn)
+    with pytest.raises(ValueError, match="versão 7 não existe"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma_superadas=[1, 7])]))
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] is None
+
+
+def test_cronograma_superadas_com_versao_do_cadastro_e_recusado(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
+    with pytest.raises(ValueError, match="versão 1 veio do cadastro .*contratual"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL],
+                                                                    cronograma_superadas=[1])]))
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes").fetchone()[0] is None
+
+
 # --- issue #271: apostilamento com competencias vira previsao e atende o pleito (spec 2026-10-20 §2.2) ----------
 
 from app import reajuste as reajuste_mod
@@ -1004,3 +1066,27 @@ def test_supressao_e_aditivo_de_reajuste_nao_atendem_o_pedido_de_valor(conn):
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[supressao, de_reajuste],
                                                                 pleitos_anteriores=[PEDIDO_VALOR])]))
     assert prazos_mod.pedidos_de_valor(conn, 1)[0]["atendido_por"] is None
+
+
+def test_indice_reajuste_vem_da_data_base_unica_e_reaplicar_e_igual(conn):
+    # issue #397: a coluna do contrato e' derivada de contrato_datas_base, nunca a tabela de precos
+    conn.execute("INSERT INTO contratos (orgao, numero_instrumento, objeto, valor_original_centavos, indice_reajuste) "
+                 "VALUES ('SINFRA','019/2024/00/00-SINFRA','MT-402',1512720000,'SINAPI')")
+    conn.commit()
+    c = _contrato(datas_base=[{"mes": "2023-04", "indice": "INCC-DI/FGV"}])
+    ensaio = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]), ensaio=True)
+    assert ensaio["contratos"]["alterados"] == ["MT-402"]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]))
+    assert conn.execute("SELECT indice_reajuste FROM contratos").fetchone()[0] == "INCC-DI/FGV"
+    linha = conn.execute("SELECT * FROM audit_log WHERE acao='cadastro.contrato' ORDER BY id DESC LIMIT 1").fetchone()
+    assert "SINAPI" in json.dumps(dict(linha)) and "INCC-DI/FGV" in json.dumps(dict(linha))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]))
+    assert r["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+
+
+def test_indice_reajuste_com_duas_bases_traz_as_duas_com_aplica_a(conn):
+    bases = [{"mes": "2022-03", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"},
+             {"mes": "2022-01", "indice": "INCC-DI", "aplica_a": "itens SINAPI"}]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(datas_base=bases)]))
+    assert conn.execute("SELECT indice_reajuste FROM contratos").fetchone()[0] == \
+        "2022-01: INCC-DI (itens SINAPI); 2022-03: FGV/DNIT (itens SICRO)"

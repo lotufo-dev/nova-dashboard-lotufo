@@ -74,9 +74,14 @@ def nova_versao(conn: sqlite3.Connection, usuario_id: int, contrato_id: int,
 
 
 def _versoes(conn, contrato_id: int) -> list[dict]:
-    """Linha do tempo das versoes: pela data em que passam a valer (criado_em), empate pelo numero."""
+    """Linha do tempo das versoes: pela data em que passam a valer (criado_em), empate pelo numero.
+
+    Issue #395: a versao superada pelo cadastro (`superada_em`) nao entra -- ela so' aparece em `versoes()`, como
+    historico. Sem isso a carga de 04/09/2026 (curva inteira da obra, no fim da linha do tempo) somava em dobro com
+    as versoes de documento anteriores a ela."""
     return [dict(r) for r in conn.execute(
-        "SELECT * FROM cronograma_versoes WHERE contrato_id=? ORDER BY criado_em, numero", (contrato_id,))]
+        "SELECT * FROM cronograma_versoes WHERE contrato_id=? AND superada_em IS NULL ORDER BY criado_em, numero",
+        (contrato_id,))]
 
 
 def _itens(conn, versao_id: int) -> list[dict]:
@@ -96,9 +101,10 @@ def vigente(conn: sqlite3.Connection, contrato_id: int) -> dict | None:
 
 def versoes(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     """Todas as versoes, na ordem da linha do tempo, com o que o cadastro diz do documento (issue #256).
-    Versao sem linha no cadastro (manual ou da carga de 04/09/2026) vem com chave, origem, data e instrumento nulos."""
+    Versao sem linha no cadastro (manual ou da carga de 04/09/2026) vem com chave, origem, data e instrumento nulos.
+    A superada (issue #395) continua na lista, com `superada_em`, e nunca e' a vigente."""
     linhas = conn.execute(
-        """SELECT v.numero, v.criado_em, v.origem, k.chave, k.origem AS origem_documento, k.data_documento,
+        """SELECT v.numero, v.criado_em, v.origem, v.superada_em, k.chave, k.origem AS origem_documento, k.data_documento,
                   k.instrumento, COUNT(i.id) AS competencias,
                   COALESCE(SUM(i.valor_previsto_centavos), 0) AS total_centavos
              FROM cronograma_versoes v
@@ -108,8 +114,9 @@ def versoes(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
             GROUP BY v.id
             ORDER BY v.criado_em, v.numero""", (contrato_id,)).fetchall()
     out = [{**dict(r), "vigente": False} for r in linhas]
-    if out:
-        out[-1]["vigente"] = True     # a mesma que `vigente()` devolve: a ultima da linha do tempo
+    valem = [v for v in out if v["superada_em"] is None]
+    if valem:
+        valem[-1]["vigente"] = True   # a mesma que `vigente()` devolve: a ultima nao superada da linha do tempo
     return out
 
 
@@ -155,7 +162,7 @@ def curva_comparativa(conn: sqlite3.Connection, contrato_id: int) -> dict:
     se tira simplesmente a ultima. None sem repactuacao ou sem nada antes dela.
     `aditivos`: uma marca por aditivo ASSINADO e nao cancelado do contrato, no mes da assinatura, com o nome do
     termo ("3º TA", com a regra de ordinal da carta de prazo; sem ordinal, o numero; sem numero, "Termo aditivo"). Apostilamento nao e' aditivo e nao leva marca."""
-    vs = versoes(conn, contrato_id)
+    vs = [v for v in versoes(conn, contrato_id) if v["superada_em"] is None]    # issue #395: a superada nao conta
     repactuacoes = [v for v in vs if v["origem_documento"] in ORIGENS_DE_REPACTUACAO]
     anterior = None
     if repactuacoes and vs.index(repactuacoes[-1]) > 0:

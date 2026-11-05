@@ -118,6 +118,20 @@ describe("Cronograma: versões", () => {
     await screen.findByRole("table", { name: /Versões do cronograma/ });
     expect(screen.getByText(/^versão 1/).textContent).toBe("versão 1");
   });
+
+  it("a versão superada pelo cadastro continua na lista, marcada com a data (issue #395)", async () => {
+    const comSuperada = [
+      { ...VERSOES[0], vigente: true },
+      { ...VERSOES[1], superada_em: "2026-11-05 15:00:00" },
+    ];
+    api.mockImplementation((c: string) => Promise.resolve(
+      c.endsWith("/curva") ? CURVA : c.endsWith("/cronograma") ? { ...VIGENTE, numero: 2 }
+        : c.endsWith("/versoes") ? comSuperada : null));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: /Versões do cronograma/ });
+    const primeiras = within(tabela).getAllByRole("row").slice(1).map(l => (l.querySelector("td")?.textContent ?? ""));
+    expect(primeiras).toEqual(["2 Vigente", "1 Superada em 05/11/2026"]);
+  });
 });
 
 describe("Cronograma: texto na tela", () => {
