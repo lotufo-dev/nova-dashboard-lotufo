@@ -177,13 +177,29 @@ def test_oficio_da_prefeitura_com_medicao_e_reajuste_cita_o_termo_e_o_so_de_exec
     _com_termo(c, ids["vg"])
     frase = "O reajuste da competência 09/2026 está apostilado no Termo de Apostilamento nº 002/2026."
     p_vg = notas_envio.iniciar(c, ids["uid"], ids["vg"], [ids["vg_exec"], ids["vg_reaj"]], "254")    # D9: um ofício
-    assert frase in " ".join(protocolo.corpo_padrao(c, p_vg).split())
+    assert "{apostilamento}" in protocolo.corpo_padrao(c, p_vg)       # o texto guarda o marcador (rodada 2)
     texto = " ".join(" ".join(_textos(protocolo.montar(c, ids["uid"], p_vg)["arquivo"])).split())
     assert frase in texto and "{" not in texto
     assert notas_envio.detalhe_envio(c, p_vg, hoje=HOJE)["exige_justificativa"] is False
     p_exec = protocolo.criar(c, ids["uid"], ids["vg"], "unico", [ids["vg_exec"]], "255")
-    corpo = protocolo.corpo_padrao(c, p_exec)
-    assert "Apostilamento" not in corpo and "{" not in corpo and "\n\n\n" not in corpo
+    texto = " ".join(" ".join(_textos(protocolo.montar(c, ids["uid"], p_exec)["arquivo"])).split())
+    assert "Apostilamento" not in texto and "{" not in texto
+
+
+def test_montar_de_novo_so_liberado_quando_o_termo_e_o_unico_bloqueio(svc):
+    """Revisor (rodada 2 da PR #435): o termo mudou depois da montagem; com certidao vencida junto, o Montar de novo
+    espera a renovacao (e a montagem recusa), para o pacote nao sair sem a certidao."""
+    c, ids = svc
+    pid = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_reaj"]], "361")
+    protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
+    _com_termo(c, ids["mtpar"])
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert (d["remontar"], d["remontar_liberado"], d["bloqueio"]) == (True, True, protocolo.APOSTILAMENTO_MUDOU)
+    _validade(c, "federal", "2026-09-10")
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert (d["remontar"], d["remontar_liberado"]) == (True, False) and "Certidão vencida" in d["bloqueio"]
+    with pytest.raises(ValueError, match="Certidão vencida — renove antes de montar"):
+        protocolo.montar(c, ids["uid"], pid, refazer_texto=True, hoje=HOJE)
 
 
 # --- regras do envio (D1-D7) -----------------------------------------------------------------------

@@ -426,6 +426,7 @@ def detalhe_envio(conn, protocolo_id: int, remetente: str | None = None, hoje: d
     mids = {m["id"] for m in protocolo._medicoes(conn, protocolo_id)}
     ms = [m for m in medicoes.em_andamento(conn, contrato_id=c["id"]) if m["id"] in mids]
     pv = protocolo.previa_envio(conn, [protocolo_id], remetente=remetente, hoje=hoje)
+    mudou = protocolo.apostilamento_mudou(conn, p)          # issue #278
     carta = None
     if e.carta:
         try:
@@ -442,9 +443,10 @@ def detalhe_envio(conn, protocolo_id: int, remetente: str | None = None, hoje: d
             # issue #213: com pendencia, o Enviar abre o aviso "ATENÇÃO" com esta lista e manda a lista confirmada
             "bloqueio": pv["bloqueio"], "pendencias": [x["mensagem"] for x in pv["pendencias"]],
             # issue #278: reajuste sem apostilamento que cubra a competencia: o envio pede justificativa escrita;
-            # `remontar`: o termo mudou depois da montagem e o pacote tem de ser montado de novo (o bloqueio diz isso)
+            # `remontar`: o termo mudou depois da montagem e o pacote tem de ser montado de novo (o bloqueio diz isso);
+            # `remontar_liberado`: e' o unico motivo do bloqueio (rodada 2 da PR #435: com certidao vencida, nao)
             "exige_justificativa": pv["exige_justificativa"],
-            "remontar": protocolo.apostilamento_mudou(conn, p) is not None,
+            "remontar": mudou is not None, "remontar_liberado": mudou is not None and pv["bloqueio"] == mudou,
             "extras": [{"id": x["id"], "nome": x["nome"], "tamanho": x["tamanho"]}
                        for x in protocolo._pecas(conn, protocolo_id) if x["tipo"] == protocolo.ANEXO]}
 

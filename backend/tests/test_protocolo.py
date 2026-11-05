@@ -3,6 +3,7 @@ import datetime
 import io
 import json
 import pathlib
+import re
 
 import pypdf
 import pytest
@@ -266,10 +267,11 @@ def test_enviar_com_pendencia_exige_a_confirmacao_da_lista_e_nada_muda_antes(cen
 def test_bloqueio_recusa_o_protocolo_mesmo_confirmado(cenario):
     """Issue #213: certidao vencida continua bloqueio, nao aviso; a confirmacao nao a contorna."""
     c, ids = cenario
-    c.execute("UPDATE certidoes SET validade='2026-09-10' WHERE tipo_id=?", (documentos.tipo_por_chave(c, "federal")["id"],))
-    c.commit()
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
     protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    # vence depois da montagem (#278, rodada 2 da PR #435: com ela vencida, o pacote nem monta)
+    c.execute("UPDATE certidoes SET validade='2026-09-10' WHERE tipo_id=?", (documentos.tipo_por_chave(c, "federal")["id"],))
+    c.commit()
     pv = protocolo.previa_envio(c, [pid])
     assert pv["bloqueio"]
     with pytest.raises(protocolo.Bloqueio):
@@ -313,18 +315,28 @@ def _corrido(texto: str) -> str:
     return " ".join(texto.split())
 
 
+def _carta_montada(c, ids, pid, **kw) -> str:
+    """O texto corrido da 1a pagina (a carta) do pacote montado agora."""
+    return _corrido(_textos(protocolo.montar(c, ids["uid"], pid, **kw)["arquivo"])[0])
+
+
+FRASE = "O reajuste da competência 09/2026 está apostilado no Termo de Apostilamento nº 001/2025/03/02."
+
+
 def test_oficio_de_reajuste_mtpar_cita_o_apostilamento_e_a_competencia(cenario):
     c, ids = cenario
     _data_base_e_termo(c, ids["mtpar"])
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    # rodada 2 da PR #435: o texto que a tela mostra e edita guarda o marcador, nunca a frase do termo
     corpo = protocolo.corpo_padrao(c, pid)
-    assert "competência 09/2026" in corpo and "Termo de Apostilamento nº 001/2025/03/02" in corpo
-    texto = " ".join(_textos(protocolo.montar(c, ids["uid"], pid)["arquivo"])[0].split())
-    assert "Termo de Apostilamento nº 001/2025/03/02" in texto and "{apostilamento}" not in texto
+    assert "{apostilamento}" in corpo and "Termo de Apostilamento" not in corpo
+    texto = _carta_montada(c, ids, pid)
+    assert FRASE in texto and "{" not in texto
     assert "sem_apostilamento" not in [x["codigo"] for x in protocolo.detalhe(c, pid)["pendencias"]]
     assert protocolo.previa_envio(c, [pid])["exige_justificativa"] is False
     p_exec = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
-    assert "Apostilamento" not in protocolo.corpo_padrao(c, p_exec)         # o oficio da execucao nao muda
+    texto = _carta_montada(c, ids, p_exec)                                  # o oficio da execucao nao muda
+    assert "Apostilamento" not in texto and "{" not in texto
 
 
 def test_oficio_com_um_reajuste_sem_termo_cita_so_a_competencia_coberta(cenario):
@@ -333,9 +345,8 @@ def test_oficio_com_um_reajuste_sem_termo_cita_so_a_competencia_coberta(cenario)
     _data_base_e_termo(c, ids["mtpar"])
     m24 = _reajuste(c, ids["mtpar"], 24, "2027-09")
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"], m24], "303")
-    corpo = protocolo.corpo_padrao(c, pid)
-    assert ("O reajuste da competência 09/2026 está apostilado no Termo de Apostilamento nº 001/2025/03/02."
-            in _corrido(corpo)) and "09/2027" not in corpo and "{" not in corpo
+    texto = _carta_montada(c, ids, pid)
+    assert FRASE in texto and "09/2027" not in texto and "{" not in texto
     assert [x["mensagem"] for x in protocolo.detalhe(c, pid)["pendencias"] if x["codigo"] == "sem_apostilamento"] == [
         "Nenhum apostilamento cobre 09/2027; a nota de reajuste não pode sair antes dele"]
 
@@ -349,25 +360,27 @@ def test_dois_reajustes_de_competencias_diferentes_citam_cada_termo(cenario):
     m24 = _reajuste(c, ids["mtpar"], 24, "2026-10")
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"], m24], "303")
     assert ("O reajuste da competência 09/2026 está apostilado no Termo de Apostilamento nº 001/2025/03/02; o da "
-            "competência 10/2026, no Termo de Apostilamento nº 001/2025/03/05.") in _corrido(protocolo.corpo_padrao(c, pid))
+            "competência 10/2026, no Termo de Apostilamento nº 001/2025/03/05.") in _carta_montada(c, ids, pid)
     m25 = _reajuste(c, ids["mtpar"], 25, "2026-11")
     _termo(c, ids["mtpar"], "ap-c", "001/2025/03/06", "2026-10", "2026-11", data="2026-11-01")     # vale o mais novo
     p2 = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [m24, m25], "304")
     assert ("O reajuste das competências 10/2026 e 11/2026 está apostilado no Termo de Apostilamento nº 001/2025/03/06."
-            in _corrido(protocolo.corpo_padrao(c, p2)))
+            in _carta_montada(c, ids, p2))
 
 
 def test_sem_termo_o_oficio_sai_sem_a_frase_e_nunca_com_campo_sem_dado(cenario):
-    # (a) gate Sol e revisor (rodada 1 da PR #435): sem termo, a frase some; campo sem dado nao monta
+    # (a) gate Sol e revisor (rodadas 1 e 2 da PR #435): sem termo, a frase some; campo sem dado nao monta, inclusive
+    # com acento, maiuscula ou numero no nome
     c, ids = cenario
     _data_base_e_termo(c, ids["mtpar"], termo=False)
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
     corpo = protocolo.corpo_padrao(c, pid)
-    assert "Apostilamento" not in corpo and "{" not in corpo and "\n\n\n" not in corpo
     texto = _corrido(" ".join(_textos(protocolo.montar(c, ids["uid"], pid)["arquivo"])))
     assert "Apostilamento" not in texto and "{" not in texto
-    with pytest.raises(ValueError, match=r"campo sem dado: \{apostilamento\}"):
-        protocolo.montar(c, ids["uid"], pid, corpo=corpo + "\n\nConforme o Termo nº {apostilamento}.")
+    for campo in ("{período}", "{Obra}", "{municipio2}", "{data_base}"):
+        with pytest.raises(ValueError, match="campo sem dado: " + re.escape(campo)):
+            protocolo.montar(c, ids["uid"], pid, corpo=f"{corpo}\n\nVer {campo}.")
+    assert protocolo.campos_sem_dado("Sem campo: { espaço } nem {}") == []
 
 
 def test_termo_aplicado_depois_da_montagem_bloqueia_ate_montar_de_novo(cenario):
@@ -400,6 +413,109 @@ def test_termo_corrigido_depois_da_montagem_bloqueia_e_a_nova_montagem_cita_o_no
     texto = _corrido(_textos(protocolo.montar(c, ids["uid"], pid)["arquivo"])[0])
     assert "nº 001/2025/03/09" in texto and "001/2025/03/02" not in texto
     assert protocolo.previa_envio(c, [pid])["bloqueio"] is None
+
+
+def test_texto_sem_o_campo_do_termo_nao_monta(cenario):
+    """Revisor e gate Sol (rodada 2 da PR #435): o texto da carta guarda o marcador {apostilamento}, nunca a frase. O
+    que chega sem ele, quando o texto da familia o tem, nao monta: (A) o texto da tela de antes do termo, (B) o texto
+    com a frase de um termo que foi corrigido, (C) a edicao a' mao sem o campo e (F) o texto gravado antes desta
+    versao. So' a tela de envio, que nao mostra o texto, troca o gravado velho pelo padrao (`refazer_texto`)."""
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    marcado = protocolo.corpo_padrao(c, pid)
+    antes_do_termo = protocolo._sem_linhas_vazias(marcado.replace("{apostilamento}", ""))         # (A) e (F)
+    _termo(c, ids["mtpar"])
+    frase_velha = marcado.replace("{apostilamento}", FRASE)                                      # (B)
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    editado = marcado.replace("{apostilamento}", "Conforme o termo do reajuste.")                 # (C)
+    for corpo in (antes_do_termo, frase_velha, editado):
+        for refazer in (False, True):           # texto que veio da tela nunca e' trocado em silencio
+            with pytest.raises(ValueError, match="não cita o termo de apostilamento de agora"):
+                protocolo.montar(c, ids["uid"], pid, corpo=corpo, refazer_texto=refazer)
+    assert protocolo.detalhe(c, pid)["situacao"] == "rascunho"
+    c.execute("UPDATE protocolos SET corpo_carta=? WHERE id=?", (antes_do_termo, pid))            # (F)
+    c.commit()
+    with pytest.raises(ValueError, match="não cita o termo de apostilamento de agora"):
+        protocolo.montar(c, ids["uid"], pid)
+    texto = _carta_montada(c, ids, pid, refazer_texto=True)
+    assert "Termo de Apostilamento nº 001/2025/03/09" in texto and "001/2025/03/02" not in texto
+    assert protocolo.detalhe(c, pid)["corpo_carta"] is None
+    # o editado com o campo vale, e fica gravado com o marcador, nunca com a frase
+    texto = _carta_montada(c, ids, pid, corpo=marcado.replace("Ficamos à disposição.", "Ficamos à disposição, sempre."))
+    assert "Termo de Apostilamento nº 001/2025/03/09" in texto and "sempre" in texto
+    gravado = protocolo.detalhe(c, pid)["corpo_carta"]
+    assert "{apostilamento}" in gravado and "Termo de Apostilamento" not in gravado
+
+
+def _cartas(c, cfg):
+    c.execute("UPDATE cadastro_geral SET valor=? WHERE chave='cartas'", (json.dumps(cfg),))
+    c.commit()
+
+
+def test_mapa_do_pacote_so_compara_quando_o_texto_cita_o_termo(cenario):
+    """Gate Sol (S3) e revisor (rodada 2 da PR #435): com o texto da familia sem o campo (a producao de hoje), o termo
+    que chega depois nao bloqueia, porque o oficio nao muda. Com o campo, o pacote montado sem a frase (antes da 060,
+    mapa nulo, ou com o texto de antes) pede montar de novo quando o oficio leva reajuste; so' de execucao, nao."""
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    com_campo = carta.config(c)
+    sem_campo = json.loads(json.dumps(com_campo))
+    sem_campo["familias"]["mtpar"]["carta_corpo"] = com_campo["familias"]["mtpar"]["carta_corpo"].replace(
+        "{apostilamento}", "")
+    _cartas(c, sem_campo)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    assert json.loads(protocolo._linha(c, pid)["montado_apostilamentos"]) == {"cita": False, "apostilamentos": []}
+    _termo(c, ids["mtpar"])
+    assert protocolo.previa_envio(c, [pid])["bloqueio"] is None                     # (D) nada muda no oficio
+    _cartas(c, com_campo)                                                             # o Leo poe o campo no texto
+    assert protocolo.previa_envio(c, [pid])["bloqueio"] == protocolo.APOSTILAMENTO_MUDOU
+    assert FRASE in _carta_montada(c, ids, pid)
+    assert protocolo.previa_envio(c, [pid])["bloqueio"] is None
+    c.execute("UPDATE protocolos SET montado_apostilamentos=NULL WHERE id=?", (pid,))   # montado antes da 060
+    c.commit()
+    assert protocolo.previa_envio(c, [pid])["bloqueio"] == protocolo.APOSTILAMENTO_MUDOU
+    p_exec = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.montar(c, ids["uid"], p_exec)
+    c.execute("UPDATE protocolos SET montado_apostilamentos=NULL WHERE id=?", (p_exec,))
+    c.commit()
+    assert protocolo.previa_envio(c, [p_exec])["bloqueio"] is None
+
+
+def test_montar_recusa_certidao_vencida_que_iria_no_pacote(cenario):
+    # revisor (rodada 2 da PR #435): montado sem a certidao vencida, o pacote sairia sem ela depois da renovacao
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    c.execute("UPDATE certidoes SET validade='2026-09-10' WHERE tipo_id=?", (documentos.tipo_por_chave(c, "municipal")["id"],))
+    c.commit()
+    with pytest.raises(ValueError, match="Certidão vencida — renove antes de montar"):
+        protocolo.montar(c, ids["uid"], pid)
+    assert protocolo.detalhe(c, pid)["situacao"] == "rascunho"
+
+
+def test_termo_mudando_entre_a_reserva_e_o_envio_nao_sai(cenario, monkeypatch):
+    # revisor (rodada 2 da PR #435): depois da reserva, a leitura dos anexos confere de novo o termo, como a FRC
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid])
+    assert pv["pendencias"] == [] and pv["bloqueio"] is None
+    original = protocolo._anexos_rotulados
+
+    def termo_corrigido_depois_da_reserva(conn, p, hoje):
+        if p.get("envio_reservado_em") and not conn.execute(
+                "SELECT 1 FROM instrumentos WHERE chave='ap-reaj-02'").fetchone():
+            _termo(conn, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+        return original(conn, p, hoje)
+
+    monkeypatch.setattr(protocolo, "_anexos_rotulados", termo_corrigido_depois_da_reserva)
+    with pytest.raises(protocolo.Bloqueio, match="monte o pacote de novo"):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    p = protocolo._linha(c, pid)
+    assert (p["situacao"], p["envio_reservado_em"]) == ("assinado", None)
 
 
 def test_termo_sem_numero_vira_pendencia_e_pede_justificativa(cenario):

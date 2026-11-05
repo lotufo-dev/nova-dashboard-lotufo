@@ -39,7 +39,12 @@ JUSTIFICATIVA_SEM_APOSTILAMENTO = ("Sem apostilamento que cubra a competência d
                                    f"envio, com pelo menos {MIN_JUSTIFICATIVA} caracteres")
 APOSTILAMENTO_MUDOU = ("O apostilamento do reajuste mudou depois da montagem: monte o pacote de novo (e assine de novo, "
                        "se já tinha assinado)")
-_CAMPO_SEM_DADO = re.compile(r"\{[a-z_]+\}")
+# Rodada 2 da PR #435: a frase do termo nunca fica no texto editavel. O texto da carta (o padrao, o gravado e o editado)
+# guarda o marcador; a frase entra so' na montagem, do mesmo `apostilamentos` que vai gravado no pacote.
+MARCADOR_APOSTILAMENTO = "{apostilamento}"
+TEXTO_SEM_O_TERMO = ("O texto da carta não cita o termo de apostilamento de agora: recarregue a página e confira o texto "
+                     "antes de montar")
+_CAMPO_SEM_DADO = re.compile(r"\{[^{}\s]+\}")
 NUMERO_ORGAO_VAZIO = "Informe o número do protocolo no órgão"
 # A-13 (testes de quebra 10/10/2026): o link vira <a href> no e-mail oficial ao orgao; so' o OneDrive e o SharePoint
 # da Lotufo. Comparacao exata do host: "...sharepoint.com.evil.test" nao passa. Issue #118: os hosts vem de
@@ -440,10 +445,22 @@ def campos_sem_dado(*textos: str | None) -> list[str]:
     return sorted({x for t in textos for x in _CAMPO_SEM_DADO.findall(t or "")})
 
 
-def _campos(conn, p: dict, c: dict, familia: str, regras: dict, ms: list[dict]) -> dict:
+def _renderizar(texto: str, frase: str) -> str:
+    """O texto da carta com a frase do termo no lugar do marcador (o paragrafo vazio some)."""
+    return _sem_linhas_vazias(texto.replace(MARCADOR_APOSTILAMENTO, frase)).strip()
+
+
+def _familia_cita_o_termo(textos: dict, p: dict) -> bool:
+    """O texto da familia (corpo ou assunto da carta) tem o campo {apostilamento}."""
+    return any(MARCADOR_APOSTILAMENTO in (_texto(textos, k, p) or "") for k in ("carta_corpo", "carta_assunto"))
+
+
+def _campos(conn, p: dict, c: dict, familia: str, regras: dict, ms: list[dict], frase: str | None = None) -> dict:
+    """`frase`: a do termo de apostilamento, ja' lida por quem monta ou monta a previa; None mantem o marcador
+    {apostilamento} no texto (o texto padrao da carta, que a tela mostra e edita)."""
     em = carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}
     m0 = ms[0]
-    return {"apostilamento": frase_do_apostilamento(apostilamentos(conn, familia, ms)),       # issue #278
+    return {"apostilamento": MARCADOR_APOSTILAMENTO if frase is None else frase,            # issue #278
             "razao_social": em.get("razao_social", ""), "cnpj": em.get("cnpj", ""),
             "oficio": p["numero_oficio"] or "",
             "oficio_barra": oficios.na_carta(p["numero_oficio"]) if p["numero_oficio"] else "", "medicao": " e ".join(titulo(m) for m in ms),
@@ -464,19 +481,22 @@ def _texto(textos: dict, chave: str, p: dict) -> str:
 
 
 def corpo_padrao(conn, protocolo_id: int) -> str:
+    """O texto padrao da carta, com o marcador {apostilamento} no lugar da frase do termo (issue #278: a frase entra
+    so' na montagem)."""
     p = _linha(conn, protocolo_id)
     c = _contrato(conn, p["contrato_id"])
     familia, regras, _ = _orgao(conn, c)
     textos = carta.config(conn)["familias"][familia]
-    return _sem_linhas_vazias(carta.preencher(_texto(textos, "carta_corpo", p), _campos(
-        conn, p, c, familia, regras, _medicoes(conn, protocolo_id)))).strip()
+    return carta.preencher(_texto(textos, "carta_corpo", p), _campos(
+        conn, p, c, familia, regras, _medicoes(conn, protocolo_id))).strip()
 
 
-def _carta(conn, p: dict, corpo: str, hoje: datetime.date) -> carta.Carta:
+def _carta(conn, p: dict, corpo: str, hoje: datetime.date, frase: str = "") -> carta.Carta:
+    """`corpo` ja' renderizado; `frase`, a do termo, entra tambem no assunto."""
     c = _contrato(conn, p["contrato_id"])
     familia, regras, o = _orgao(conn, c)
     cfg = carta.config(conn)
-    campos = _campos(conn, p, c, familia, regras, _medicoes(conn, p["id"]))
+    campos = _campos(conn, p, c, familia, regras, _medicoes(conn, p["id"]), frase)
     f = carta.fiscal_vigente(conn, c["id"], hoje.isoformat())
     ac = []
     if f:
@@ -526,7 +546,9 @@ def _certidoes_pdf(conn, p: dict, regras: dict, hoje: datetime.date) -> list[byt
 
 
 def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
-           hoje: datetime.date | None = None) -> dict:
+           hoje: datetime.date | None = None, refazer_texto: bool = False) -> dict:
+    """`refazer_texto` (issue #278): quem monta sem mostrar o texto (a tela de envio da nota) aceita que o texto
+    gravado sem o campo {apostilamento}, quando o da familia o tem, de' lugar ao padrao; sem isso, a montagem recusa."""
     hoje = hoje or tempo.hoje_local()
     p = _linha(conn, protocolo_id)
     _editavel(p)
@@ -535,15 +557,28 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     e = _etapa(familia, p["etapa"])
     if not e.carta:
         raise ValueError("Esta etapa não tem pacote para assinar: os arquivos vão soltos no e-mail")
+    # Revisor e gate Sol (rodada 2 da PR #435): certidao vencida fica fora do pacote; montado assim, depois da
+    # renovacao nada mais o barraria. So' onde as certidoes vao dentro do PDF (no zip solto, o envio le as de agora).
+    if "certidoes" in e.partes and (vencidas := certidoes_vencidas(conn, p, hoje)):
+        raise ValueError("Certidão vencida — renove antes de montar: " + "; ".join(vencidas))
     # Corpo vazio nao e' carta: vale o texto ja' gravado ou, na falta dele, o padrao da familia.
-    # Issue #278: so' o texto editado fica gravado; o igual ao padrao nao, e a proxima montagem refaz o padrao com o
-    # cadastro de agora (o termo de apostilamento que entrou ou foi corrigido depois).
+    # Issue #278: o texto (padrao, gravado ou editado) guarda o marcador {apostilamento}, nunca a frase do termo; so' o
+    # editado fica gravado. A frase sai de `aps`, lido uma vez aqui, e vai no corpo, no assunto e no mapa do pacote.
     padrao = corpo_padrao(conn, protocolo_id)
-    corpo = (corpo or "").strip() or p["corpo_carta"] or padrao
-    editado = None if corpo.strip() == padrao.strip() else corpo
+    recebido = (corpo or "").strip()
+    base = recebido or p["corpo_carta"] or padrao
     ms = _medicoes(conn, protocolo_id)
     aps = apostilamentos(conn, familia, ms)
-    a_assinar = _carta(conn, p, corpo, hoje)
+    textos = carta.config(conn)["familias"][familia]
+    if aps and MARCADOR_APOSTILAMENTO in _texto(textos, "carta_corpo", p) and MARCADOR_APOSTILAMENTO not in base:
+        # o texto da tela de antes (com a frase de um termo velho), o editado sem o campo ou o gravado antigo
+        if recebido or not refazer_texto:
+            raise ValueError(TEXTO_SEM_O_TERMO)
+        base = padrao
+    editado = None if base.strip() == padrao.strip() else base
+    frase = frase_do_apostilamento(aps)
+    cita = MARCADOR_APOSTILAMENTO in base or MARCADOR_APOSTILAMENTO in (_texto(textos, "carta_assunto", p) or "")
+    a_assinar = _carta(conn, p, _renderizar(base, frase), hoje, frase)
     if sem_dado := campos_sem_dado(a_assinar.corpo, a_assinar.assunto):
         raise ValueError(f"A carta tem campo sem dado: {', '.join(sem_dado)}. Corrija o texto da carta (ou o do "
                          "cadastro das cartas) antes de montar")
@@ -589,7 +624,9 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
                      "montado_em=datetime('now'), assinado_arquivo=NULL, assinado_sha256=NULL, conferencia=NULL, "
                      "situacao='montado', montado_frcs=?, montado_apostilamentos=? WHERE id=?",
                      (editado, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote),
-                      json.dumps(aps) if familia in FAMILIAS_OFICIO_REAJUSTE else None, protocolo_id))
+                      # o mapa do que foi de fato renderizado: so' o texto que usa a frase compara depois
+                      json.dumps({"cita": cita, "apostilamentos": aps if cita else []})
+                      if familia in FAMILIAS_OFICIO_REAJUSTE else None, protocolo_id))
         auditoria.registrar(conn, usuario_id, "protocolo.montar", "protocolo", protocolo_id, None,
                             {"sha256": sha, "paginas": n, "tamanho": len(pdf)})
     return {"arquivo": rel, "sha256": sha, "paginas": n, "tamanho": len(pdf), "nome": nome_arquivo(conn, p)}
@@ -754,15 +791,23 @@ def frc_recusadas(conn, p: dict) -> list[str]:
 
 
 def apostilamento_mudou(conn, p: dict) -> str | None:
-    """Issue #278 (revisor e gate Sol, rodada 1 da PR #435): o pacote montado cita o termo de apostilamento de quando
-    foi montado. Se o termo que cobre o reajuste entrou, saiu ou foi corrigido depois, o pacote nao sai: monta de novo.
-    Pacote montado antes da migracao 060 (ou de orgao que nao cita o termo) nao compara."""
-    if not p.get("montado_arquivo") or p.get("montado_apostilamentos") is None \
-            or p["situacao"] in ("enviado", "descartado"):
+    """Issue #278 (revisor e gate Sol, rodadas 1 e 2 da PR #435): o pacote montado cita o termo de apostilamento de
+    quando foi montado (o mapa gravado na montagem, migracao 060). Na MT-PAR e na Prefeitura:
+    - montado com a frase do termo: o termo que cobre o reajuste entrou, saiu ou foi corrigido depois, monta de novo;
+    - montado sem a frase (antes da 060, ou com o texto da familia sem o campo): so' monta de novo se o texto da
+      familia agora tem o campo e o oficio leva reajuste. Texto da familia sem o campo nao compara nem bloqueia: o
+      oficio nao muda, e assinar de novo no DocuSign nao teria motivo."""
+    if not p.get("montado_arquivo") or p["situacao"] in ("enviado", "descartado"):
         return None
     familia = _orgao(conn, _contrato(conn, p["contrato_id"]))[0]
+    if familia not in FAMILIAS_OFICIO_REAJUSTE:
+        return None
     agora = apostilamentos(conn, familia, _medicoes(conn, p["id"]))
-    return None if json.loads(p["montado_apostilamentos"]) == agora else APOSTILAMENTO_MUDOU
+    gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
+    if gravado and gravado.get("cita"):
+        return None if gravado.get("apostilamentos") == agora else APOSTILAMENTO_MUDOU
+    cita_agora = bool(agora) and _familia_cita_o_termo(carta.config(conn)["familias"][familia], p)
+    return APOSTILAMENTO_MUDOU if cita_agora else None
 
 
 def bloqueio(conn, p: dict, hoje: datetime.date) -> str | None:
@@ -999,7 +1044,8 @@ def previa_envio(conn, protocolo_ids: list[int], remetente: str | None = None,
     if len(ps) > 1 and not junta_naturezas(regras, _orgao(conn, c)[2], e):
         raise ValueError("Nesta família cada protocolo vai no seu e-mail")
     textos = carta.config(conn)["familias"][familia]
-    campos = _campos(conn, ps[0], c, familia, regras, [m for x in ps for m in _medicoes(conn, x["id"])])
+    todas = [m for x in ps for m in _medicoes(conn, x["id"])]
+    campos = _campos(conn, ps[0], c, familia, regras, todas, frase_do_apostilamento(apostilamentos(conn, familia, todas)))
     k_assunto, k_corpo = ("nota_email_assunto", "nota_email_corpo") if e.chave == "nota" else \
         ("email_assunto", "email_corpo")
     para, copia = _destinatarios(conn, regras, e, c, hoje)
@@ -1074,7 +1120,7 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
             raise ValueError(f"Protocolo {x['id']} já {x['situacao']}")
         if e.carta and not x["montado_arquivo"]:
             raise ValueError("Monte o pacote antes de enviar")
-        if e.carta and (sem_dado := campos_sem_dado(x["corpo_carta"])):          # issue #278
+        if e.carta and (sem_dado := campos_sem_dado((x["corpo_carta"] or "").replace(MARCADOR_APOSTILAMENTO, ""))):
             raise ValueError(f"A carta montada tem campo sem dado: {', '.join(sem_dado)}. Corrija o texto e monte o "
                              "pacote de novo")
         for m in _medicoes(conn, x["id"]):
@@ -1129,6 +1175,8 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
         agora_ps = [_linha(conn, x["id"]) for x in ps]
         rotulados = [a for x in agora_ps for a in _anexos_rotulados(conn, x, hoje)]
         agora = [r for x in agora_ps for r in frc_recusadas(conn, x)]
+        # issue #278 (revisor, rodada 2 da PR #435): o termo pode ter mudado entre a reserva e a leitura dos anexos
+        agora += [m for x in agora_ps if (m := apostilamento_mudou(conn, x))]
         if agora:
             raise Bloqueio(" · ".join(dict.fromkeys(agora)))
         _conferir_anexos([{"nome": n, "tamanho": len(b)} for n, b, _ in rotulados], pv["anexos"])
