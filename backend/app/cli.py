@@ -444,6 +444,9 @@ def main(argv: list[str] | None = None) -> int:
     ins.add_argument("--arquivo", help="arquivo a conferir (só em `verificar`; padrão: o da subida do servidor)")
     ins.add_argument("--chave", help="chave privada (só em `assinar`)")
     ins.add_argument("--maquina", help="nome da máquina, o COMPUTERNAME do servidor (só em `assinar`)")
+    itg = sub.add_parser("integridade", help="registro do último deploy (o deploy.ps1 chama)")
+    itg.add_argument("acao", choices=["registrar"])
+    itg.add_argument("--raiz", required=True, help="raiz dos dados, onde fica o deploy-atual.json")
     dn = sub.add_parser("dono", help="cópia cifrada para a chave do dono")
     dn.add_argument("acao", choices=["gerar-chave"])
     dn.add_argument("--saida", required=True, help="pasta onde gravar o par de chaves")
@@ -459,6 +462,15 @@ def main(argv: list[str] | None = None) -> int:
         return _documentos(args)
     if args.cmd == "instalacao":
         return _instalacao(args)
+    if args.cmd == "integridade":
+        from app import integridade
+        try:
+            r = integridade.registrar_deploy(Path(args.raiz))
+        except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+            print(f"Registro do deploy NÃO gravado: {e}")
+            return 1
+        print(f"Registro do deploy gravado: commit {r['commit'][:7]}, {len(r['dist'])} arquivos no dist.")
+        return 0
     if args.cmd == "cadastro":
         if args.acao == "aplicar" and not args.usuario:
             p.error("`cadastro aplicar` exige --usuario <e-mail>")
