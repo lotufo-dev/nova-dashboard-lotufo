@@ -291,6 +291,28 @@ def test_pedido_enviado_nao_se_edita_a_mao_depois_do_espelho(client_admin, ambie
     assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 719_190_72
 
 
+def test_boletim_recusado_com_revisao_registrada_e_nao_enviada(client_admin, ambiente_api):
+    """Revisor (rodada 4): com a Rev01 registrada e nao enviada, o boletim e' recusado; senao a medicao iria a
+    boletim_recebido, onde a revisao nao se envia mais e o espelho a espera. Enviada a Rev01, o boletim entra e o
+    espelho sai pelo aprovado."""
+    from tests.test_api_medicoes import _arquivos_planilha, _registrar_boletim
+    cid = ambiente_api
+    mid = _planilha_enviada(client_admin, cid)
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev01"),
+                          data={"periodo_inicio": "2026-08-01", "periodo_fim": "2026-08-28", "valor": "700.000,01",
+                                "motivo": "Rev01: supervisora devolveu"})
+    assert r.status_code == 201, r.text
+    r = _registrar_boletim(client_admin, mid, valor="700.000,01", data="2026-09-10", numero="SMO 27/2026")
+    assert r.status_code == 422 and "revisão registrada e não enviada" in r.json()["detail"], r.text
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_enviada"
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas/envio-externo", data={"enviado_em": "2026-09-03", "meio": "Balcão"})
+    assert r.status_code == 201, r.text
+    _boletim_do_orgao(client_admin, mid, valor="700.000,01")
+    r = client_admin.post(f"/api/contratos/{cid}/espelho",
+                          json={"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "700.000,01"}})
+    assert r.status_code == 201, r.text
+
+
 def test_planilha_gerada_nao_vai_ao_espelho_sem_o_envio(client_admin, ambiente_api):
     """Rodada 2 (PR #382): o boletim substitui a ponte ao espelho, nao o envio ao protocolo."""
     from tests.test_api_medicoes import _arquivos_planilha

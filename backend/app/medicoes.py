@@ -285,6 +285,15 @@ def conferir_boletim(conn: sqlite3.Connection, medicao_id: int, dados: dict):
     if m["estado"] == "planilha_gerada":
         # spec §2.1: o boletim vem depois do envio da planilha/carta (pelo sistema ou registrado por fora)
         raise ValueError("Registre o envio da planilha/carta antes do boletim do órgão")
+    if m["estado"] == "planilha_enviada":
+        # revisor (rodada 4): depois do boletim a revisao nao se envia nem se registra mais, e o espelho espera a
+        # revisao registrada ser enviada (conferir_espelho_da_planilha): a medicao ficaria presa em boletim_recebido
+        from app import planilha_envio      # import local: planilha_envio importa este modulo
+        vigente = conn.execute("SELECT MAX(versao) FROM medicao_planilhas WHERE medicao_id=?",
+                               (medicao_id,)).fetchone()[0] or 0
+        if vigente > planilha_envio._ultima_enviada(conn, dict(m)):
+            raise ValueError("A planilha/carta tem revisão registrada e não enviada: envie ao protocolo (ou registre o "
+                             "envio por fora) antes do boletim do órgão")
     return m, dia
 
 
