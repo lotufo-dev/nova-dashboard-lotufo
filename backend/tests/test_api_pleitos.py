@@ -164,6 +164,10 @@ def test_reajuste_da_obra_traz_a_marca_de_aviso_e_os_aditivos_da_linha_do_tempo(
         [("2º TA", "prazo", "2026-08-01")]
     [x] = r["competencias_por_ciclo"][0]["competencias"]
     assert x["avisos"] == ["fora_da_previsao"]                 # R$ 1,01 acima do previsto
+    # rodada 1 da PR #438: a origem de cada soma e a linha do tempo de cada ciclo com pleito enviado
+    assert (x["medicoes_pedido"], x["medicoes_aprovado"], x["medicoes_nota"]) == ([1], [], [])
+    assert [(t["data_base_mes"], t["ciclo"], t["termo"], [a["numero"] for a in t["aditivos"]])
+            for t in r["linhas_do_tempo"]] == [("2024-06", 2026, None, ["2º TA"])]
 
 
 def test_pecas_do_orgao_entram_como_anexo_pela_api(api):

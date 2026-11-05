@@ -1180,3 +1180,23 @@ def test_aditivos_do_ciclo_depois_do_primeiro_pedido_ate_o_termo(cenario):
     k = reajuste.ciclos(c, cid, D(2026, 9, 10))[0]
     assert k["situacao"] == "apostilado"
     assert [a["data_assinatura"] for a in reajuste.aditivos_do_ciclo(c, cid, k)] == ["2026-08-01"]
+
+
+def test_linha_do_tempo_de_cada_ciclo_com_pleito_enviado(cenario):
+    # Gate Sol (rodada 1, PR #438): o ciclo anterior tambem tem a linha do tempo dele (termo e aditivos)
+    c, ids = cenario
+    cid = ids["contrato"]
+    _termo_e_pleito(c, ids, "2024-06", "2025-09-01", {}, enviado_em="2025-06-10", ciclo=2025)
+    _aditivo(c, cid, "prazo", "2025-08-01")                 # depois do pleito de 2025, antes do termo
+    _aditivo(c, cid, "valor", "2025-10-01")                 # depois do termo de 2025: nao e' daquele ciclo
+    _termo_e_pleito(c, ids, "2024-06", "2026-09-15", {}, enviado_em="2026-06-10", ciclo=2026)
+    # pleito de data-base que o contrato nao tem mais nao entra
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+              "enviado_em) VALUES (?, 'reajuste', 'cadastro', '2023-01', 2025, 'CT-7-LT-2025', 'enviado', '2025-02-01')",
+              (cid,))
+    c.commit()
+    linhas = reajuste.linhas_do_tempo(c, cid)
+    assert [(x["data_base_mes"], x["ciclo"], x["termo"]["chave"], [a["data_assinatura"] for a in x["aditivos"]])
+            for x in linhas] == [
+        ("2024-06", 2025, "apostilamento_reajuste-2025-09-01", ["2025-08-01"]),
+        ("2024-06", 2026, "apostilamento_reajuste-2026-09-15", [])]

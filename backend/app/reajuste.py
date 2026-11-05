@@ -249,6 +249,25 @@ def aditivos_do_ciclo(conn, contrato_id: int, k: dict) -> list[dict]:
             if not (termo and termo.get("origem") == "aditivo" and termo.get("id") == r["id"])]
 
 
+def linhas_do_tempo(conn, contrato_id: int) -> list[dict]:
+    """Issue #275 (Gate Sol, rodada 1 da PR #438): a linha do tempo de cada ciclo com pleito enviado, de cada data-base
+    do contrato, e nao so' do corrente: o termo que fecha o ciclo (`apostilamento_do_ciclo`) e os aditivos dele
+    (`aditivos_do_ciclo`). Os pleitos a aba ja' tem."""
+    bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes",
+                                        (contrato_id,))]
+    out = []
+    for base, ciclo in conn.execute("SELECT DISTINCT data_base_mes, ciclo FROM pleitos WHERE contrato_id=? "
+                                    "AND tipo='reajuste' AND situacao='enviado' AND ciclo IS NOT NULL "
+                                    "ORDER BY data_base_mes, ciclo", (contrato_id,)).fetchall():
+        if base not in bases:
+            continue
+        termo = apostilamento_do_ciclo(conn, contrato_id, base, ciclo, len(bases) == 1)
+        out.append({"data_base_mes": base, "ciclo": ciclo, "termo": termo,
+                    "aditivos": aditivos_do_ciclo(conn, contrato_id,
+                                                  {"data_base_mes": base, "ciclo": ciclo, "apostilamento": termo})})
+    return out
+
+
 # Origem mais forte primeiro (spec 2026-10-20 §2.2): o apostilamento manda, o pleito vem depois, o manual por ultimo.
 ORDEM_ORIGEM = ("apostilamento", "pleito", "manual")
 
