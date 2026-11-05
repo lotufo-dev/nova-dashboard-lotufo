@@ -77,7 +77,33 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    **Não testado.**
 
 ## Saúde
-`GET /api/health` toca o banco (503 se não responder) e devolve a última rodada de backup: `ultimo_snapshot`, `ultimo_snapshot_erro`, `ultima_copia_arquivos`, `ultima_copia_arquivos_erro`, `ultima_copia_externa`, `ultima_copia_externa_erro`, `ultima_copia_externa_arquivos`, `ultima_copia_externa_arquivos_erro`. Cópia externa com data de ontem ou erro preenchido = olhar o log.
+`GET /api/health` toca o banco (503 se não responder) e devolve a última rodada de backup: `ultimo_snapshot`, `ultimo_snapshot_erro`, `ultima_copia_arquivos`, `ultima_copia_arquivos_erro`, `ultima_copia_externa`, `ultima_copia_externa_erro`, `ultima_copia_externa_arquivos`, `ultima_copia_externa_arquivos_erro`. Cópia externa com data de ontem ou erro preenchido = olhar o log. Traz também `instalacao` (`autorizada`, `nao-autorizada` ou `dev`) e `instalacao_motivo` (seção "Instalação assinada").
+
+## Instalação assinada (issue #417)
+Copiar a pasta de produção para outra máquina não basta para ter uma dashboard funcionando. Na subida o servidor lê `C:\DashboardLotufo\segredos\instalacao.json` (`<raiz>\segredos`, a pasta ao lado de `dados`, onde está o banco; a variável `DASH_INSTALACAO_ARQUIVO` troca o caminho) e confere a assinatura do dono e o nome da máquina (`COMPUTERNAME`). A conferência é só na subida: arquivo novo vale a partir do próximo reinício.
+
+- **Autorizada**: tudo funciona; `/api/health` mostra `instalacao: autorizada`.
+- **Modo cópia** (arquivo ausente, assinatura que não confere ou outra máquina): `/api/health` continua 200 (o watchdog não reinicia em laço), com `instalacao: nao-autorizada` e `instalacao_motivo` `ausente`, `assinatura` ou `maquina`, sem caminho de arquivo. Login e leitura continuam. Todo envio de e-mail recusa com "Envio desligado: instalação não autorizada." antes da reserva (nada fica preso); "Sincronizar agora" recusa com "Sincronização desligada: instalação não autorizada."; a sincronização horária do RM e a cobrança de certidões não sobem; o backup local continua, a cópia externa (`-BackupExterno`) não. Toda tela, inclusive o login, mostra a faixa vermelha "Instalação não autorizada da Dashboard Lotufo. Envio de e-mail e sincronização com o RM estão desligados." O `logs\dashboard.log` registra `instalacao NAO autorizada (motivo: ...)` na subida.
+- **Dev** (`DASH_DEV=1`) e testes: `instalacao: dev`, nada desligado, arquivo não exigido.
+- **Deploy**: o `deploy.ps1` exige `instalacao: autorizada` no health depois do reinício; qualquer outro valor conta como falha (aviso `health 200, mas a instalacao nao esta autorizada: ...`) e dispara o rollback para o commit anterior. O rollback confere só o 200 (o commit anterior pode nem ter o campo).
+- **O arquivo assinado precisa estar na VM antes do deploy da PR desta issue**, senão o deploy volta sozinho para o commit anterior.
+
+### Chave do dono (uma vez, no Mac)
+`cd ~/dev/nova-dashboard-lotufo/backend && .venv/bin/python -m app.cli instalacao gerar-chave --saida ~/.lotufo` grava `instalacao-privada.pem` (permissão 0600) e `instalacao-publica.pem` e imprime a pública; nunca sobrescreve uma chave que já existe. A privada fica só com o dono, com uma cópia cifrada fora do Mac; nunca vai ao servidor nem ao repositório. A pública está embutida em `backend/app/instalacao.py` (`CHAVE_PUBLICA`): trocar de chave é uma PR, e todo arquivo assinado com a chave antiga passa a dar `assinatura`. A chave atual foi gerada em 05/11/2026 pelo comando do comentário da issue #417 (`~/.lotufo/instalacao-privada.pem`).
+
+### Assinar e copiar para a máquina (no Mac)
+A produção roda na VM (`<vm>`, seção "Mudar de servidor"); o SSH é o mesmo do deploy.
+1. Nome da máquina: `ssh <vm> "cmd /c echo %COMPUTERNAME%"` (maiúsculas e minúsculas não importam).
+2. Assinar: `.venv/bin/python -m app.cli instalacao assinar --chave ~/.lotufo/instalacao-privada.pem --maquina <nome> --saida ~/.lotufo/instalacao-<nome>.json`. O comando avisa se a chave não é a embutida no código.
+3. Copiar: `scp ~/.lotufo/instalacao-<nome>.json <vm>:C:/DashboardLotufo/segredos/instalacao.json` (conta administradora de deploy; a pasta `segredos` tem a ACL de SYSTEM e Administradores e o arquivo herda). Conferir: `ssh <vm> "cmd /c type C:\DashboardLotufo\segredos\instalacao.json"`.
+4. Não editar o arquivo, nem abrir e salvar no Bloco de Notas: ele vale exatamente como saiu do `assinar` (o fim de linha do Windows também serve); qualquer outro byte diferente dá `assinatura`.
+5. Reiniciar a tarefa (com o sentinela do watchdog) ou fazer o deploy e conferir `/api/health`: `instalacao: autorizada`, sem faixa na tela.
+
+### Faixa vermelha no servidor oficial
+O servidor subiu em modo cópia. O motivo está no `/api/health`: `ausente` (arquivo fora de `segredos` ou com outro nome: copiar de novo), `assinatura` (arquivo alterado ou assinado com outra chave: assinar de novo), `maquina` (assinado para outro nome; o `COMPUTERNAME` mudou: assinar com o nome atual). Depois, reiniciar a tarefa e conferir o health.
+
+### Trocar de máquina
+Assinar para o nome da máquina nova e copiar para a `segredos` dela antes da primeira subida (seção "Mudar de servidor"). O arquivo da máquina antiga não vale na nova (motivo `maquina`), e o da nova não vale na antiga.
 
 ## Restaurar o banco a partir de um snapshot
 1. Parar o servidor (tarefa agendada e qualquer uvicorn em 8080/8443).
@@ -107,7 +133,7 @@ Import-Certificate -FilePath \\<servidor>\...\certs\cert.pem -CertStoreLocation 
 - Senha esquecida: não há reset pela tela hoje; criar outro usuário e desativar o antigo. Dívida registrada.
 
 ## Variáveis de ambiente
-`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db`), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
+`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db` e sobe a instalação como `dev`), `DASH_INSTALACAO_ARQUIVO` (troca o caminho do arquivo da instalação assinada), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
 
 ## TOTVS RM (fase 5, leitura)
 A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_USUARIO` e a senha estão definidos; sem eles o sistema segue com NF e recebimento registrados à mão. Botão "Sincronizar agora" e reconciliação em Administração → TOTVS RM.
