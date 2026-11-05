@@ -2,7 +2,7 @@ import sqlite3
 
 from fastapi.testclient import TestClient
 
-from app import db, auth
+from app import auditoria, db, auth
 
 def _conn(tmp_path, monkeypatch):
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
@@ -248,6 +248,9 @@ def test_dez_falhas_em_paralelo_bloqueiam_a_conta(tmp_path, monkeypatch):
 
 # --- A-10 (testes de quebra 10/10/2026): texto do campo e-mail na auditoria ---------------
 
+# #418: a origem e o navegador vao junto; o TestClient conecta como "testclient" e se apresenta com esse nome
+TESTCLIENT = {"origem": "testclient", "navegador": "testclient"}
+
 def _ultima_falha():
     import json
     conn = db.get_conn()
@@ -264,18 +267,18 @@ def test_login_falho_com_texto_que_nao_e_email_nao_grava_o_texto(client):
     depois = _ultima_falha()
     assert "minha frase secreta 123" not in str(depois)
     # gate Sol S6: so' a faixa do tamanho, nao o numero exato de caracteres
-    assert depois == {"email": None, "motivo": "texto inválido no campo e-mail", "faixa": "17-32"}
+    assert depois == {"email": None, "motivo": "texto inválido no campo e-mail", "faixa": "17-32", **TESTCLIENT}
 
 def test_login_falho_com_senha_que_parece_email_sem_dominio_nao_grava(client):
     # gate Sol S3: "Senha@2026" passava pelo padrao (um "@" e sem espaco) e ia a' auditoria
     for texto, faixa in (("Senha@2026", "1-16"), ("x" * 40 + "@algo", ">32")):
         assert client.post("/api/auth/login", json={"email": texto, "senha": "x"}).status_code == 401
-        assert _ultima_falha() == {"email": None, "motivo": "texto inválido no campo e-mail", "faixa": faixa}
+        assert _ultima_falha() == {"email": None, "motivo": "texto inválido no campo e-mail", "faixa": faixa, **TESTCLIENT}
 
 def test_login_falho_com_email_grava_o_email(client):
     r = client.post("/api/auth/login", json={"email": "Fulano@Exemplo.com", "senha": "x"})
     assert r.status_code == 401
-    assert _ultima_falha() == {"email": "fulano@exemplo.com"}
+    assert _ultima_falha() == {"email": "fulano@exemplo.com", **TESTCLIENT}
 
 
 # --- Gate Sol S1 (10/10/2026): troca de senha nao desfaz a redefinicao concorrente do admin -----
@@ -414,7 +417,7 @@ def test_endpoint_responde_igual_em_toda_recusa(client):
         r = client.post("/api/auth/login", json={"email": email, "senha": "senha-errada-1"})
         ultimo = conn.execute("SELECT usuario_id, acao, entidade, entidade_id, depois FROM audit_log "
                               "ORDER BY id DESC LIMIT 1").fetchone()
-        respostas.append((r.status_code, r.json()["detail"], tuple(ultimo)[:4], json.loads(ultimo["depois"]) == {"email": email}))
+        respostas.append((r.status_code, r.json()["detail"], tuple(ultimo)[:4], json.loads(ultimo["depois"]) == {"email": email, **TESTCLIENT}))
     conn.close()
     assert len(set(respostas)) == 1, respostas
     assert respostas[0][0] == 401
@@ -552,3 +555,52 @@ def test_limite_por_origem_em_paralelo_nao_passa_do_teto():
     for t in ts:
         t.join()
     assert len(aceitas) == auth.LIMITE_ORIGEM
+
+
+# --- #418: o login grava de onde e com que navegador a pessoa entrou (ou tentou entrar) -----------
+
+CHROME_WINDOWS = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/130.0.0.0 Safari/537.36")
+
+def _ultimo(acao):
+    import json
+    conn = db.get_conn()
+    try:
+        row = conn.execute("SELECT usuario_id, depois FROM audit_log WHERE acao=? ORDER BY id DESC LIMIT 1", (acao,)).fetchone()
+        return row["usuario_id"], json.loads(row["depois"]), auditoria.verificar_cadeia(conn)
+    finally:
+        conn.close()
+
+def test_login_grava_origem_e_navegador_no_evento(client):
+    uid = _seed()
+    r = _de(client, "10.0.0.21").post("/api/auth/login", json={"email": "leo@lotufo.com", "senha": "senha-forte-123"},
+                                       headers={"User-Agent": CHROME_WINDOWS})
+    assert r.status_code == 200, r.text
+    # a cadeia continua integra: o evento passa pelo registrar, so' com o `depois` preenchido
+    assert _ultimo("auth.login") == (uid, {"origem": "10.0.0.21", "navegador": CHROME_WINDOWS}, True)
+
+def test_login_falho_grava_origem_e_navegador_junto_do_email(client):
+    _seed()
+    r = _de(client, "10.0.0.22").post("/api/auth/login", json={"email": "leo@lotufo.com", "senha": "errada"},
+                                       headers={"User-Agent": CHROME_WINDOWS})
+    assert r.status_code == 401
+    assert _ultimo("auth.login_falha") == (None, {"email": "leo@lotufo.com", "origem": "10.0.0.22",
+                                                  "navegador": CHROME_WINDOWS}, True)
+
+def test_user_agent_longo_e_cortado_em_200_caracteres(client):
+    _seed()
+    longo = "Mozilla/5.0 " + "x" * 500
+    c = _de(client, "10.0.0.23")
+    assert c.post("/api/auth/login", json={"email": "leo@lotufo.com", "senha": "senha-forte-123"},
+                  headers={"User-Agent": longo}).status_code == 200
+    assert _ultimo("auth.login")[1]["navegador"] == longo[:200]
+    assert c.post("/api/auth/login", json={"email": "leo@lotufo.com", "senha": "errada"},
+                  headers={"User-Agent": longo}).status_code == 401
+    assert _ultimo("auth.login_falha")[1]["navegador"] == longo[:200]
+
+def test_origem_gravada_e_a_conexao_mesmo_com_x_forwarded_for(client):
+    _seed()
+    r = _de(client, "10.0.0.24").post("/api/auth/login", json={"email": "leo@lotufo.com", "senha": "senha-forte-123"},
+                                       headers={"X-Forwarded-For": "192.0.2.77"})
+    assert r.status_code == 200
+    assert _ultimo("auth.login")[1]["origem"] == "10.0.0.24"

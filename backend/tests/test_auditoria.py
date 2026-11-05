@@ -163,7 +163,8 @@ def test_login_falho_audita_sem_vazar_senha(client):
     assert [l["acao"] for l in linhas] == ["auth.login_falha"]
     assert linhas[0]["usuario_id"] is None  # nao ha sessao: nao se sabe "quem"
     assert linhas[0]["entidade"] == "usuario" and linhas[0]["entidade_id"] is None
-    assert json.loads(linhas[0]["depois"]) == {"email": "leo@lotufo.com"}  # normalizado
+    # normalizado; #418: com a origem e o navegador de quem tentou (o TestClient se apresenta como "testclient")
+    assert json.loads(linhas[0]["depois"]) == {"email": "leo@lotufo.com", "origem": "testclient", "navegador": "testclient"}
     assert integra is True
     # nenhuma coluna do log pode conter a senha tentada
     assert all("senha-secreta-errada" not in str(dict(l)) for l in linhas)
@@ -177,7 +178,7 @@ def test_login_falho_de_email_inexistente_tambem_audita(client):
     integra = auditoria.verificar_cadeia(conn)
     conn.close()
     assert [l["acao"] for l in linhas] == ["auth.login_falha"]
-    assert json.loads(linhas[0]["depois"]) == {"email": "ninguem@lotufo.com"}
+    assert json.loads(linhas[0]["depois"]) == {"email": "ninguem@lotufo.com", "origem": "testclient", "navegador": "testclient"}
     assert integra is True
 
 def test_lockout_produz_sequencia_de_falhas_com_cadeia_integra(client):
