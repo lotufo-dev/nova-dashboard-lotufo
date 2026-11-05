@@ -214,6 +214,18 @@ def test_curva_s_em_xlsx_abre_com_as_colunas_e_os_valores():
     assert {ws[f"{col}2"].number_format for col in "BCD"} == {"#,##0.00"}
 
 
+def test_curva_s_mesmas_linhas_dao_os_mesmos_bytes(monkeypatch):
+    """Rodada 2 da PR #436: o sha256 do xlsx e' a impressao da curva; o relogio nao pode muda-lo."""
+    import time
+    linhas = [{"competencia": "2026-03", "previsto_vigente_centavos": 1_00, "previsto_anterior_centavos": None,
+               "medido_centavos": 50}]
+    monkeypatch.setattr(time, "time", lambda: 1_700_000_000.0)
+    antes = carta.curva_s_xlsx(linhas)
+    monkeypatch.setattr(time, "time", lambda: 1_800_000_000.0)
+    assert carta.curva_s_xlsx(linhas) == antes
+    assert carta.curva_s_xlsx([{**linhas[0], "medido_centavos": 51}]) != antes
+
+
 def test_curva_s_sem_repactuacao_deixa_o_previsto_anterior_vazio():
     ws = _planilha(carta.curva_s_xlsx([{"competencia": "2026-03", "previsto_vigente_centavos": 1_00,
                                         "previsto_anterior_centavos": None, "medido_centavos": 50}]))

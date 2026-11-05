@@ -18,10 +18,12 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fpdf import FPDF
 from openpyxl import Workbook
 from openpyxl.styles import Font
+from openpyxl.writer.excel import ExcelWriter
 
 from app import arquivos
 
@@ -301,6 +303,7 @@ def pagina_titulo(linhas: list[str], emitente: dict | None = None) -> bytes:
 NOME_CURVA_S = "Curva S.xlsx"
 COLUNAS_CURVA_S = ("Competência", "Previsto vigente", "Previsto anterior", "Medido")
 _CHAVES_CURVA_S = ("previsto_vigente_centavos", "previsto_anterior_centavos", "medido_centavos")
+_SEM_RELOGIO = datetime.datetime(1980, 1, 1)        # a menor data que o zip aceita
 
 
 def _reais(centavos: int | None) -> float | None:
@@ -310,8 +313,13 @@ def _reais(centavos: int | None) -> float | None:
 
 def curva_s_xlsx(linhas: list[dict]) -> bytes:
     """A planilha da curva S, uma linha por competencia, os valores acumulados como a tela da obra os desenha
-    (`paineis.curva_s`). A primeira linha e' o cabecalho; competencia como data (mes/ano) e valores em reais."""
+    (`paineis.curva_s`). A primeira linha e' o cabecalho; competencia como data (mes/ano) e valores em reais.
+
+    Deterministica (rodada 2 da PR #436): as mesmas linhas dao os mesmos bytes, sem relogio nas propriedades nem
+    nas datas do zip. Assim o sha256 do arquivo e' a impressao da curva, e a previa e o envio conferem se a curva
+    anexada ainda e' a dos dados de agora."""
     wb = Workbook()
+    wb.properties.created = wb.properties.modified = _SEM_RELOGIO
     ws = wb.active
     ws.title = "Curva S"
     ws.append(COLUNAS_CURVA_S)
@@ -328,6 +336,11 @@ def curva_s_xlsx(linhas: list[dict]) -> bytes:
     for col in "BCD":
         ws.column_dimensions[col].width = 20
     ws.freeze_panes = "A2"
+    bruto = io.BytesIO()
+    ExcelWriter(wb, ZipFile(bruto, "w", ZIP_DEFLATED)).save()    # sem o `save_workbook`, que grava a hora no arquivo
     saida = io.BytesIO()
-    wb.save(saida)
+    with ZipFile(bruto) as origem, ZipFile(saida, "w", ZIP_DEFLATED) as destino:
+        for parte in origem.infolist():          # a data de cada parte do zip tambem sai fixa
+            destino.writestr(ZipInfo(parte.filename, date_time=_SEM_RELOGIO.timetuple()[:6]),
+                             origem.read(parte.filename), compress_type=ZIP_DEFLATED)
     return saida.getvalue()
