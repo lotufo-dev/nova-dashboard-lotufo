@@ -6,13 +6,14 @@ const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
 const g = (quantidade: number, valor_centavos: number | null) => ({ quantidade, valor_centavos });
+type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
 const PAINEL = {
   hoje: "2026-09-24", total_a_receber_liberado: false,
   dinheiro: {
     medido_esperando_nota: g(2, 150_000), nota_esperando_protocolo: g(0, 0), recebido_mes: g(0, 0),
     protocolado: { ...g(2, null), faixas: { ate_30: g(1, null), de_31_a_60: g(0, null), mais_60: g(1, null) },
                    por_orgao: [{ orgao: "SINFRA", ...g(2, null), maior_dias: 85 }] },
-    reajustes_apostilamento: { quantidade: 1, maior_dias: 92 } },
+    reajustes_apostilamento: { quantidade: 1, maior_dias: 92, competencias: 0, valor_centavos: 0, obras: [] as ReajusteObra[] } },
   mes_ano: { mes: "2026-09", medido_mes_centavos: 150_000, previsto_mes_centavos: 200_000,
              mesmo_mes_ano_anterior_centavos: 80_000, acumulado_ano_centavos: 1_000_000, previsto_ano_centavos: 2_000_000,
              faturado_mes_centavos: 123_456_789, notas_faturadas_mes: 2,
@@ -183,6 +184,34 @@ describe("Carteira", () => {
     const kpis = screen.getAllByRole("listitem").filter(i => i.classList.contains("kpi"));
     expect(kpis.length).toBe(10);
     kpis.forEach(i => { expect(i.parentElement?.tagName).toBe("UL"); expect(i.hasAttribute("role")).toBe(false); });
+  });
+
+  it("Produção: os reajustes esperando apostilamento listam por obra as competências e o medido, com o total (#279)", async () => {
+    const reajustes = { quantidade: 2, maior_dias: 120, competencias: 5, valor_centavos: 750_004,
+      obras: [{ contrato_id: 7, obra: "Cavalaria", competencias: 3, valor_centavos: 650_003 },
+              { contrato_id: 8, obra: "Consórcio Sul", competencias: 2, valor_centavos: 100_001 }] };
+    const painel = { ...PAINEL, dinheiro: { ...PAINEL.dinheiro, reajustes_apostilamento: reajustes } };
+    api.mockImplementation((url: string) => Promise.resolve(url === "/api/diretoria" ? painel : RESPOSTAS[url]));
+    render(<Diretoria ir={() => {}} aba="producao" />);
+    const tabela = await screen.findByRole("table", { name: /Reajustes esperando apostilamento/ });
+    expect(within(tabela).getAllByRole("columnheader").map(h => h.textContent)).toEqual(["Obra", "Competências", "Medido"]);
+    const texto = (l: HTMLElement) => within(l).getAllByRole("cell").map(c => (c.textContent ?? "").replace(/\s/g, " "));
+    const [, primeira, segunda, total] = within(tabela).getAllByRole("row");
+    expect(texto(primeira)).toEqual(["Cavalaria", "3", "R$ 6.500,03"]);
+    expect(texto(segunda)).toEqual(["Consórcio Sul", "2", "R$ 1.000,01"]);
+    expect((total.textContent ?? "").replace(/\s/g, " ")).toBe("Total5R$ 7.500,04");
+    // a obra leva ao reajuste dela
+    expect(within(tabela).getByRole("link", { name: "Cavalaria" }).getAttribute("href")).toBe("/obras/7/reajuste");
+    // so' o rotulo e o valor: sem os dias nem a contagem de ciclos
+    expect(screen.queryByText(/120/)).toBeNull();
+  });
+
+  it("Produção: sem reajuste esperando apostilamento, uma linha no lugar da tabela", async () => {
+    api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
+    render(<Diretoria ir={() => {}} aba="producao" />);
+    expect(await screen.findByText("Reajustes esperando apostilamento (cota)")).toBeTruthy();
+    expect(screen.getByText("Nenhum reajuste esperando apostilamento.")).toBeTruthy();
+    expect(screen.queryByRole("table", { name: /Reajustes esperando apostilamento/ })).toBeNull();
   });
 
   it("QDOP: exporta a planilha e mostra os motivos da obra", async () => {
