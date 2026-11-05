@@ -558,3 +558,181 @@ def test_segunda_reiteracao_cita_o_pedido_original(cenario):
     assert pleitos.detalhe(c, r2)["anterior"]["id"] == r1                # a cadeia liga ao imediato
     corpo = pleitos.corpo_padrao(c, r2, D(2026, 10, 30))
     assert "CT/122/LT/2026, de 15/06/2026" in corpo and "137 dias" in corpo    # a carta cobra o pedido original
+
+
+# --- issue #447: curva S conferida pelo conteudo e trocada sem reassinar a carta ---------------------
+
+def _mudar_medicao(c, ids, valor=36000):
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=? WHERE id=?", (valor, ids["medicao"])); c.commit()
+
+
+def test_curva_s_que_mudou_aparece_no_que_falta_e_na_previa(cenario):
+    """Issue #447 item 1: a curva fora dos dados de agora e' pendencia do pleito ("O que falta"), nao so' da previa."""
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    assert "curva_s" not in [x["codigo"] for x in pleitos.detalhe(c, pid)["pendencias"]]
+    _mudar_medicao(c, ids)
+    assert pleitos.CURVA_S_MUDOU in [x["mensagem"] for x in pleitos.detalhe(c, pid)["pendencias"]]
+    assert [x["mensagem"] for x in pleitos.previa_envio(c, pid)["pendencias"]].count(pleitos.CURVA_S_MUDOU) == 1
+    assert pleitos.CURVA_S_MUDOU.startswith("A curva S mudou desde a carta montada")
+    assert pleitos.CURVA_S_FALTA.startswith("Curva S não anexada")
+
+
+def test_curva_s_que_falta_aparece_no_que_falta(cenario):
+    c, ids = cenario
+    pid = _prazo(c, ids)
+    pleitos.montar(c, ids["uid"], pid)
+    _com_cronograma(c, ids)
+    assert pleitos.CURVA_S_FALTA in [x["mensagem"] for x in pleitos.detalhe(c, pid)["pendencias"]]
+
+
+def test_atualizar_curva_s_troca_a_curva_sem_apagar_a_carta_assinada(cenario):
+    """Issue #447 item 2: medicao protocolada entre o montar e o envio; "Atualizar curva S" troca a curva, a carta
+    montada e a assinada ficam, e o envio libera."""
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    antes = pleitos.detalhe(c, pid)
+    velha = _curvas_s(c, pid)[0]["id"]
+    _mudar_medicao(c, ids)
+    pleitos.atualizar_curva_s(c, ids["uid"], pid)
+    depois = pleitos.detalhe(c, pid)
+    for k in ("situacao", "montado_arquivo", "montado_sha256", "assinado_arquivo", "assinado_sha256", "conferencia"):
+        assert depois[k] == antes[k], k
+    assert depois["situacao"] == "assinado"
+    curvas = _curvas_s(c, pid)
+    assert len(curvas) == 1 and curvas[0]["id"] != velha
+    assert "curva_s" not in [x["codigo"] for x in depois["pendencias"]]
+    pv = pleitos.previa_envio(c, pid)
+    eid = pleitos.enviar(c, ids["usuario"], pid, pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         justificativa="conferido, segue assim")
+    assert "Curva S.xlsx" in [x[0] for x in c.execute("SELECT nome FROM envio_anexos WHERE envio_id=?", (eid,))]
+
+
+def test_atualizar_curva_s_so_no_prazo_e_nao_depois_do_envio(cenario):
+    c, ids = cenario
+    reajuste_id = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
+    with pytest.raises(ValueError, match="pedido de prorrogação"):
+        pleitos.atualizar_curva_s(c, ids["uid"], reajuste_id)
+    pid = _pronto_para_enviar(c, ids)
+    pv = pleitos.previa_envio(c, pid)
+    pleitos.enviar(c, ids["usuario"], pid, pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                   justificativa="conferido, segue assim")
+    with pytest.raises(ValueError, match="enviado"):
+        pleitos.atualizar_curva_s(c, ids["uid"], pid)
+
+
+def test_curva_s_conferida_pelo_conteudo_nao_pelos_bytes(cenario, monkeypatch):
+    """Issue #447 item 3: outro sistema ou outra versao do openpyxl gera um zip de bytes diferentes com as mesmas
+    celulas; a conferencia nao muda e montar de novo nao troca a curva."""
+    import io
+    import zipfile
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    curva = _curvas_s(c, pid)[0]
+    original = arquivos.caminho_seguro(curva["arquivo"]).read_bytes()
+    saida = io.BytesIO()                              # o mesmo xlsx, zip refeito com outra compressao e outro sistema
+    with zipfile.ZipFile(io.BytesIO(original)) as o, zipfile.ZipFile(saida, "w", zipfile.ZIP_STORED) as d:
+        for parte in o.infolist():
+            info = zipfile.ZipInfo(parte.filename, date_time=(2030, 5, 5, 10, 0, 0))
+            info.create_system = 0
+            d.writestr(info, o.read(parte.filename))
+    outro = saida.getvalue()
+    assert outro != original
+    from app import carta
+    gerar = carta.curva_s_xlsx
+    assert carta.ler_curva_s(outro) == carta.ler_curva_s(original)
+    # o gerador de agora passa a dar estes outros bytes (deploy que trocou dependencia)
+    monkeypatch.setattr(carta, "curva_s_xlsx", lambda linhas: outro)
+    assert "curva_s" not in [x["codigo"] for x in pleitos.detalhe(c, pid)["pendencias"]]
+    pleitos.montar(c, ids["uid"], pid)
+    assert [a["id"] for a in _curvas_s(c, pid)] == [curva["id"]]
+    # e o inverso: a curva anexada com os outros bytes, o gerador com os de antes
+    monkeypatch.setattr(carta, "curva_s_xlsx", gerar)
+    rel, sha = arquivos.gravar_bytes(pleitos.PASTA_CURVA_S, outro, "xlsx")
+    c.execute("UPDATE pleito_anexos SET arquivo=?, sha256=? WHERE id=?", (rel, sha, curva["id"])); c.commit()
+    assert "curva_s" not in [x["codigo"] for x in pleitos.detalhe(c, pid)["pendencias"]]
+
+
+@pytest.mark.parametrize("estrago", ["ausente", "corrompido"])
+def test_curva_s_com_arquivo_ausente_e_regravada_ao_atualizar_ou_montar(cenario, estrago):
+    """Issue #447 item 4: o arquivo em `curvas/` sumiu (backup sem a pasta, #441) ou nao bate com o sha256; a previa
+    avisa, o envio recusa e atualizar (ou montar) regrava a curva."""
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    for acao in ("atualizar", "montar"):
+        caminho = arquivos.caminho_seguro(_curvas_s(c, pid)[0]["arquivo"])
+        if estrago == "ausente":
+            caminho.unlink()
+        else:
+            caminho.write_bytes(b"PK\x03\x04truncado")
+        assert pleitos.CURVA_S_ILEGIVEL in [x["mensagem"] for x in pleitos.detalhe(c, pid)["pendencias"]]
+        if acao == "atualizar":           # o envio recusa antes de ler os anexos do disco
+            with pytest.raises(ValueError, match="sumiu ou está corrompido"):
+                pleitos.enviar(c, ids["usuario"], pid, ["sinfra@orgao-a.exemplo.com.br"], [], "Assunto", "Corpo",
+                               justificativa="segue assim mesmo")
+        if acao == "atualizar":
+            pleitos.atualizar_curva_s(c, ids["uid"], pid)
+        else:
+            pleitos.montar(c, ids["uid"], pid)
+        assert "curva_s" not in [x["codigo"] for x in pleitos.detalhe(c, pid)["pendencias"]]
+        assert arquivos.caminho_seguro(_curvas_s(c, pid)[0]["arquivo"]).exists()
+
+
+def test_curva_s_que_some_sob_a_reserva_recusa_com_a_mensagem_e_destrava(cenario, monkeypatch):
+    """Issue #447 (/code-review): o arquivo da curva some entre a primeira conferencia e a reserva; o envio recusa
+    com a mensagem da curva (nao um erro de disco), nada sai e a reserva e' liberada."""
+    from app import envio_reserva
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    caminho = arquivos.caminho_seguro(_curvas_s(c, pid)[0]["arquivo"])
+    reservar = envio_reserva.reservar
+
+    def reserva_e_apaga(*a, **k):
+        reservar(*a, **k)
+        caminho.unlink()
+
+    monkeypatch.setattr(envio_reserva, "reservar", reserva_e_apaga)
+    pv = pleitos.previa_envio(c, pid)
+    with pytest.raises(ValueError, match="sumiu ou está corrompido"):
+        pleitos.enviar(c, ids["usuario"], pid, pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                       justificativa="conferido, segue assim")
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert pleitos.detalhe(c, pid)["envio_reservado_em"] is None
+
+
+def test_curva_s_trocada_no_disco_depois_da_conferencia_nao_sai(cenario, monkeypatch):
+    """Gate Sol na PR #455 (S1): sob a reserva, os anexos sao lidos uma vez so'; a curva e' conferida sobre esses
+    bytes e sao eles que vao ao Graph. Arquivo trocado no disco depois da leitura nao muda o que sai."""
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    caminho = arquivos.caminho_seguro(_curvas_s(c, pid)[0]["arquivo"])
+    original = caminho.read_bytes()
+    ler = pleitos._ler_anexos
+    leituras = []
+
+    def ler_e_estragar(conn, p):
+        lidos = ler(conn, p)
+        leituras.append(1)
+        if len(leituras) == 2:                 # a leitura sob a reserva: o disco muda logo depois dela
+            caminho.write_bytes(b"PK\x03\x04trocado depois da conferencia")
+        return lidos
+
+    pv = pleitos.previa_envio(c, pid)
+    monkeypatch.setattr(pleitos, "_ler_anexos", ler_e_estragar)
+    eid = pleitos.enviar(c, ids["usuario"], pid, pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         justificativa="conferido, segue assim")
+    assert len(leituras) == 2                  # a previa de antes da reserva e a leitura unica sob a reserva
+    sha = c.execute("SELECT sha256 FROM envio_anexos WHERE envio_id=? AND nome='Curva S.xlsx'", (eid,)).fetchone()
+    assert sha is not None and sha[0] == arquivos.sha_de(original)
+
+
+def test_previa_com_a_curva_sumida_lista_a_pendencia_sem_quebrar(cenario):
+    """Revisor na PR #455 (R1) e gate Sol (S2): a previa nao le a curva sumida como erro de disco; lista a pendencia
+    e o tamanho gravado."""
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    curva = _curvas_s(c, pid)[0]
+    arquivos.caminho_seguro(curva["arquivo"]).unlink()
+    pv = pleitos.previa_envio(c, pid)
+    assert pleitos.CURVA_S_ILEGIVEL in [x["mensagem"] for x in pv["pendencias"]]
+    assert {"nome": "Curva S.xlsx", "tamanho": curva["tamanho"]} in pv["anexos"]

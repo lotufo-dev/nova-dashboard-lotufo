@@ -238,6 +238,20 @@ def montar(pid: ID, dados: MontarIn, usuario: dict = Depends(exigir("editar_cada
     return _detalhe(conn, pid)
 
 
+@router.post("/api/pleitos/{pid}/curva-s")
+def atualizar_curva_s(pid: ID, usuario: dict = Depends(exigir("editar_cadastros")),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #447: troca a curva S do pedido de prazo pela de agora sem montar a carta de novo (a assinada fica)."""
+    _existe(conn, pid)
+    try:
+        pleitos.atualizar_curva_s(conn, usuario["id"], pid)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: os anexos sao os que vao nele
+        raise HTTPException(409, detail=e.detalhe()) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return _detalhe(conn, pid)
+
+
 @router.get("/api/pleitos/{pid}/documento")
 def documento(pid: ID, _=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
     _existe(conn, pid)

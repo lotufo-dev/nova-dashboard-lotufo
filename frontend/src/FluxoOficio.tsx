@@ -206,13 +206,16 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
       setPrevia(null);
     });
   }
-  const precisaJustificativa = (previa?.pendencias.length ?? 0) > 0;
+  // issue #447: a curva S fora dos dados de agora trava o envio e a justificativa nao a libera (so' "Atualizar curva S")
+  const curvaBloqueia = previa?.pendencias.find(x => x.codigo === "curva_s");
+  const precisaJustificativa = (previa?.pendencias.filter(x => x.codigo !== "curva_s").length ?? 0) > 0;
   const faltaJustificativa = precisaJustificativa && justificativa.trim().length < MIN_JUSTIFICATIVA;
   const erroJustificativa = tentou && faltaJustificativa
     ? `Escreva a justificativa, com pelo menos ${MIN_JUSTIFICATIVA} caracteres.` : undefined;
   // o clique em Enviar chega aqui antes do envio: a justificativa que falta aparece junto do campo, com o foco nele
   function validarAntes(): boolean {
     setTentou(true);
+    if (curvaBloqueia) { setErro(curvaBloqueia.mensagem); return false; }
     if (faltaJustificativa) document.getElementById(`pl-just-${p.id}`)?.focus();
     return !faltaJustificativa;
   }
@@ -288,6 +291,15 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
             <div>
               <span className="painel__titulo">O que falta</span>
               <Pendencias itens={p.pendencias} />
+              {/* issue #447: a curva S fora dos dados de agora se troca sem montar de novo (a carta assinada fica) */}
+              {editavel && p.pendencias.some(x => x.codigo === "curva_s") && (
+                <div className="form-inline">
+                  <button type="button" className="btn" disabled={ocupado}
+                    onClick={() => agir(async () => { await api(`/api/pleitos/${p.id}/curva-s`, { method: "POST" }); setPrevia(null); })}>
+                    Atualizar curva S
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -308,8 +320,11 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
               <ComporEmail key={p.id} ocupado={ocupado} anexos={previa.anexos}
                 validarAntes={validarAntes}
                 inicial={{ para: previa.para, copia: previa.copia, cco: [], assunto: previa.assunto, corpo: previa.corpo }}
-                antes={precisaJustificativa && (
+                antes={previa.pendencias.length > 0 && (
                   <div className="campo ol-pendencias">
+                    {/* issue #447: o motivo vem antes do pedido de justificativa */}
+                    <Pendencias itens={previa.pendencias} />
+                    {precisaJustificativa && <>
                     <label className="campo__rotulo" htmlFor={`pl-just-${p.id}`}>
                       Justificativa (obrigatória para enviar com pendência)
                     </label>
@@ -318,6 +333,7 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
                       onChange={e => setJustificativa(e.target.value)} />
                     {/* F-69: a condicao do Enviar aparece no erro do campo, quando o Enviar e' clicado sem ela */}
                     <ErroCampo id={`pl-just-${p.id}-erro`} erro={erroJustificativa} />
+                    </>}
                   </div>
                 )}
                 aoEnviar={enviar} aoDescartar={() => setPrevia(null)} />

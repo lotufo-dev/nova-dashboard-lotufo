@@ -231,3 +231,58 @@ def test_curva_s_sem_repactuacao_deixa_o_previsto_anterior_vazio():
                                         "previsto_anterior_centavos": None, "medido_centavos": 50}]))
     assert [x.value for x in ws[1]] == ["Competência", "Previsto vigente", "Previsto anterior", "Medido"]
     assert [x.value for x in ws[2]] == [datetime.datetime(2026, 3, 1), 1, None, 0.5]
+
+
+def test_curva_s_lida_de_volta_da_o_conteudo_em_centavos_mesmo_salva_pelo_openpyxl_comum():
+    """Issue #447: a conferencia compara o conteudo (competencia e centavos inteiros), nao os bytes; o mesmo xlsx
+    salvo pelo `wb.save` comum (outra data no zip e nas propriedades) le o mesmo conteudo."""
+    import openpyxl
+    linhas = [{"competencia": "2025-12", "previsto_vigente_centavos": 100_000_00,
+               "previsto_anterior_centavos": 120_000_00, "medido_centavos": 90_123_45},
+              {"competencia": "2026-01", "previsto_vigente_centavos": 250_000_01,
+               "previsto_anterior_centavos": None, "medido_centavos": None}]
+    gerado = carta.curva_s_xlsx(linhas)
+    assert carta.ler_curva_s(gerado) == carta.conteudo_curva_s(linhas) == [
+        ("2025-12", 100_000_00, 120_000_00, 90_123_45), ("2026-01", 250_000_01, None, None)]
+    wb = openpyxl.load_workbook(io.BytesIO(gerado))
+    outro = io.BytesIO()
+    wb.save(outro)
+    assert outro.getvalue() != gerado
+    assert carta.ler_curva_s(outro.getvalue()) == carta.conteudo_curva_s(linhas)
+    assert carta.ler_curva_s(carta.curva_s_xlsx([{**linhas[0], "medido_centavos": 90_123_46}])) != \
+        carta.conteudo_curva_s(linhas[:1])
+
+
+def test_curva_s_ilegivel_ou_de_outro_formato_recusa():
+    import openpyxl
+    with pytest.raises(ValueError):
+        carta.ler_curva_s(b"PK\x03\x04truncado")
+    wb = openpyxl.Workbook()
+    wb.active.append(["Outra", "planilha"])
+    saida = io.BytesIO()
+    wb.save(saida)
+    with pytest.raises(ValueError, match="cabeçalho"):
+        carta.ler_curva_s(saida.getvalue())
+
+
+def test_curva_s_lida_em_centavos_exatos_ate_o_teto():
+    """Gate Sol na PR #455 (S3): o centavo lido e' o gravado, sem a multiplicacao de float, ate' o teto da curva
+    (R$ 10 trilhoes); acima dele, ou com fracao de centavo, a leitura recusa (a curva vira ilegivel, nunca
+    "igual com 1 centavo de diferenca")."""
+    import random
+    sorteio = random.Random(447)
+    valores = [1, 7, 99, 101, 10_05, 123_456_789_01, 999_999_999_999_99, carta.TETO_CURVA_S_CENTAVOS - 1] + \
+        [sorteio.randrange(carta.TETO_CURVA_S_CENTAVOS) for _ in range(300)]
+    linhas = [{"competencia": f"{2000 + i // 12:04d}-{i % 12 + 1:02d}", "previsto_vigente_centavos": v,
+               "previsto_anterior_centavos": v, "medido_centavos": v} for i, v in enumerate(valores)]
+    assert carta.ler_curva_s(carta.curva_s_xlsx(linhas)) == carta.conteudo_curva_s(linhas)
+    for fora in (3585351136095505, carta.TETO_CURVA_S_CENTAVOS):
+        with pytest.raises(ValueError):
+            carta.ler_curva_s(carta.curva_s_xlsx([{**linhas[0], "medido_centavos": fora}]))
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(carta.curva_s_xlsx(linhas[:1])))
+    wb.active["D2"] = 0.001                                     # fracao de centavo nao e' a curva gerada
+    saida = io.BytesIO()
+    wb.save(saida)
+    with pytest.raises(ValueError, match="centavo exato"):
+        carta.ler_curva_s(saida.getvalue())

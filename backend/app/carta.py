@@ -18,6 +18,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from decimal import Decimal
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fpdf import FPDF
@@ -344,3 +345,50 @@ def curva_s_xlsx(linhas: list[dict]) -> bytes:
             destino.writestr(ZipInfo(parte.filename, date_time=_SEM_RELOGIO.timetuple()[:6]),
                              origem.read(parte.filename), compress_type=ZIP_DEFLATED)
     return saida.getvalue()
+
+
+# Teto dos acumulados da curva (R$ 10 trilhoes): ate' 15 algarismos, o real da celula (float) volta pelo `repr`
+# exatamente ao decimal de 2 casas (DBL_DIG = 15), entao o centavo lido e' o gravado, sem arredondar.
+TETO_CURVA_S_CENTAVOS = 10 ** 15
+
+
+def _centavos(valor) -> int | None:
+    """Real da celula -> centavo inteiro (o inverso de `_reais`), exato: pelo `repr` em Decimal, sem a multiplicacao
+    de float (gate Sol na PR #455). Celula vazia fica None; fracao de centavo ou acima do teto, ValueError."""
+    if valor is None:
+        return None
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+        raise ValueError("valor da curva S não numérico")
+    c = Decimal(repr(valor)) * 100
+    if c != c.to_integral_value() or abs(c) >= TETO_CURVA_S_CENTAVOS:
+        raise ValueError("valor da curva S fora do centavo exato")
+    return int(c)
+
+
+def conteudo_curva_s(linhas: list[dict]) -> list[tuple]:
+    """Issue #447: a curva como dado, uma tupla por competencia ("AAAA-MM" e os tres acumulados em centavos inteiros).
+    E' isto que a previa e o envio comparam, nao os bytes do xlsx: o zip muda com o sistema e as versoes do openpyxl,
+    lxml e zlib sem o dado mudar."""
+    return [(x["competencia"][:7], *(x[k] for k in _CHAVES_CURVA_S)) for x in linhas]
+
+
+def ler_curva_s(dados: bytes) -> list[tuple]:
+    """O conteudo (`conteudo_curva_s`) de um xlsx gerado por `curva_s_xlsx`. ValueError se nao for uma curva S."""
+    from openpyxl import load_workbook
+    try:
+        wb = load_workbook(io.BytesIO(dados), read_only=True, data_only=True)
+        try:
+            linhas = list(wb.active.iter_rows(values_only=True))
+        finally:
+            wb.close()                              # read_only segura o zip aberto ate' o close
+    except Exception as e:                          # zip truncado, xml quebrado: nao e' a curva gerada
+        raise ValueError("arquivo da curva S ilegível") from e
+    if not linhas or tuple(linhas[0][:4]) != COLUNAS_CURVA_S:
+        raise ValueError("arquivo da curva S sem o cabeçalho esperado")
+    out = []
+    for linha in linhas[1:]:
+        comp, *valores = (tuple(linha) + (None,) * 4)[:4]
+        if not isinstance(comp, (datetime.date, datetime.datetime)):
+            raise ValueError("competência da curva S não é data")
+        out.append((f"{comp.year:04d}-{comp.month:02d}", *(_centavos(v) for v in valores)))
+    return out

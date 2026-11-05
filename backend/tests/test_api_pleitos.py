@@ -1212,3 +1212,50 @@ def test_pedido_de_valor_nao_e_ofertado_para_envio(api):
     assert cl.post(f"/api/pleitos/{pid}/enviar", json={"para": ["a@orgao-b.exemplo.com.br"], "copia": [],
                                                        "assunto": "x", "corpo": "x"}).status_code == 422
     assert db.get_conn().execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+
+
+def test_atualizar_curva_s_pela_api_mantem_a_carta_assinada(api):
+    """Issue #447: medicao protocolada depois do montar; "O que falta" mostra a curva que mudou, POST /curva-s troca a
+    curva sem apagar o assinado e a pendencia sai."""
+    cl, cid, mid = api
+    c = db.get_conn()
+    cronograma.nova_versao(c, 1, cid, [("2026-08", 100_00), ("2026-09", 100_00)], "manual", data_documento="2026-01-10")
+    c.close()
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
+                                                      "justificativa": "interferências na via"})
+    pid = r.json()["id"]
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    doc = cl.get(f"/api/pleitos/{pid}/documento")
+    cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc.content), "application/pdf"))
+    c = db.get_conn()
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=5000 WHERE id=?", (mid,)); c.commit(); c.close()
+    p = cl.get(f"/api/pleitos/{pid}").json()
+    assert pleitos.CURVA_S_MUDOU in [x["mensagem"] for x in p["pendencias"]]
+    assert pleitos.CURVA_S_MUDOU in [x["mensagem"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+    r = cl.post(f"/api/pleitos/{pid}/curva-s")
+    assert r.status_code == 200, r.text
+    assert r.json()["situacao"] == "assinado" and r.json()["assinado_arquivo"] == p["assinado_arquivo"]
+    assert "curva_s" not in [x["codigo"] for x in r.json()["pendencias"]]
+    reajuste = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
+    recusa = cl.post(f"/api/pleitos/{reajuste}/curva-s")
+    assert recusa.status_code == 422 and "pedido de prorrogação" in recusa.json()["detail"]
+
+
+def test_previa_com_a_curva_s_sumida_lista_a_pendencia_e_nao_da_500(api):
+    """Revisor na PR #455 (R1): o arquivo da curva sumiu de `curvas/`; POST /previa responde e lista a pendencia."""
+    from app import arquivos
+    cl, cid, _ = api
+    c = db.get_conn()
+    cronograma.nova_versao(c, 1, cid, [("2026-08", 100_00), ("2026-09", 100_00)], "manual", data_documento="2026-01-10")
+    c.close()
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
+                                                      "justificativa": "interferências na via"})
+    pid = r.json()["id"]
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    curva = [a for a in cl.get(f"/api/pleitos/{pid}").json()["anexos"] if a["gerado"]][0]
+    arquivos.caminho_seguro(curva["arquivo"]).unlink()
+    pv = cl.post(f"/api/pleitos/{pid}/previa")
+    assert pv.status_code == 200, pv.text
+    assert pleitos.CURVA_S_ILEGIVEL in [x["mensagem"] for x in pv.json()["pendencias"]]
+    assert cl.post(f"/api/pleitos/{pid}/curva-s").status_code == 200
+    assert "curva_s" not in [x["codigo"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
