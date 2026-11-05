@@ -290,3 +290,30 @@ def test_falha_ao_gravar_o_alerta_nao_esconde_o_item(banco, monkeypatch):
     assert [i["mensagem"] for i in seguranca.conferir(c)] == [PROTECAO]
     assert _mensagens(c) == [("critico", PROTECAO)] and _alertas(c) == []
     assert not c.in_transaction
+
+
+def _comando_do_runbook():
+    """O `python -c "..."` do runbook (seção Contas) que tira a protecao, exatamente como esta escrito la'."""
+    import pathlib
+    import re
+    texto = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "runbook.md").read_text(encoding="utf-8")
+    achados = [m.group(1) for m in re.finditer(r'python -c "([^"]*)"', texto) if "062_protecao_usuarios.sql" in m.group(1)]
+    assert len(achados) == 1
+    return achados[0]
+
+
+def test_comando_do_runbook_tira_a_protecao_e_o_deploy_seguinte_a_recria(banco):
+    """Rodada 2 do revisor: o comando do runbook roda como esta escrito (so' o caminho do banco trocado) e deixa a 062
+    pronta para rodar de novo; com `''` dentro da string o DELETE falhava e a protecao nao voltava mais."""
+    import subprocess
+    import sys
+    c, _, caminho = banco
+    comando = _comando_do_runbook()
+    assert '"' not in comando and "$" not in comando        # o PowerShell repassa sem mexer
+    comando = comando.replace(r"C:\DashboardLotufo\dados\dashboard.db", str(caminho))
+    saida = subprocess.run([sys.executable, "-I", "-c", comando], capture_output=True, text=True, check=True).stdout
+    assert saida.strip() == "gatilhos: 0 migracao 062: 0"
+    crua = _crua(caminho)
+    crua.execute("UPDATE usuarios SET perfil='admin'"); crua.rollback(); crua.close()   # o codigo antigo volta a gravar
+    db.migrate(c)
+    assert seguranca.conferir(c) == []
