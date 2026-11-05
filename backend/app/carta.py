@@ -8,15 +8,21 @@ pasta de dados pelo `cadastro aplicar`.
 O CORPO e' texto simples com tres marcas, e e' o que a pessoa edita na previa: linha em branco separa
 paragrafos; linha comecando por "# " e' titulo de secao (negrito); linha comecando por "i. ", "ii. ",
 "1. " etc. e' item de lista (recuado).
+
+A curva S que vai com a carta de prazo (issue #293) e' uma planilha (openpyxl), desenhada aqui tambem.
 """
 import datetime
+import io
 import json
 import os
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 
 from fpdf import FPDF
+from openpyxl import Workbook
+from openpyxl.styles import Font
 
 from app import arquivos
 
@@ -289,3 +295,40 @@ def pagina_titulo(linhas: list[str], emitente: dict | None = None) -> bytes:
         pdf.set_font(pdf.fonte, "B", 20)
         pdf.multi_cell(0, 11, pdf.t(l), align="C", new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
+
+
+# --- curva S da carta de prazo (issue #293; spec 2026-10-20 §4 item 3, D9) -------------------------
+
+NOME_CURVA_S = "Curva S.xlsx"
+COLUNAS_CURVA_S = ("Competência", "Previsto vigente", "Previsto anterior", "Medido")
+_CHAVES_CURVA_S = ("previsto_vigente_centavos", "previsto_anterior_centavos", "medido_centavos")
+
+
+def _reais(centavos: int | None) -> Decimal | None:
+    """Centavo inteiro -> real exato (a unica divisao; nada se arredonda de novo). None fica celula vazia."""
+    return None if centavos is None else Decimal(centavos) / 100
+
+
+def curva_s_xlsx(linhas: list[dict]) -> bytes:
+    """A planilha da curva S, uma linha por competencia, os valores acumulados como a tela da obra os desenha
+    (`paineis.curva_s`). A primeira linha e' o cabecalho; competencia como data (mes/ano) e valores em reais."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Curva S"
+    ws.append(COLUNAS_CURVA_S)
+    for cel in ws[1]:
+        cel.font = Font(bold=True)
+    for linha in linhas:
+        comp = linha["competencia"]
+        ws.append([datetime.date(int(comp[:4]), int(comp[5:7]), 1), *(_reais(linha[k]) for k in _CHAVES_CURVA_S)])
+    for cels in ws.iter_rows(min_row=2):
+        cels[0].number_format = "mm/yyyy"
+        for cel in cels[1:]:
+            cel.number_format = "#,##0.00"
+    ws.column_dimensions["A"].width = 13
+    for col in "BCD":
+        ws.column_dimensions[col].width = 20
+    ws.freeze_panes = "A2"
+    saida = io.BytesIO()
+    wb.save(saida)
+    return saida.getvalue()

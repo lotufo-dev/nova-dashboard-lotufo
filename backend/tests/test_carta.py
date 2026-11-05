@@ -188,3 +188,34 @@ def test_corpo_da_reiteracao_familia_b_preenche_todos_os_campos():
     assert corpo != carta.preencher(cartas["pleito_reajuste"]["carta_corpo"], campos)     # nao e' a familia A
     t = _texto(carta.gerar(_carta(corpo=corpo, assunto=carta.preencher(textos["carta_assunto"], campos))))
     assert "reiteração" in t and "CT/068/LT/2026" in t
+
+
+# --- issue #293: curva S em xlsx anexa a carta de prorrogacao --------------------------------------
+
+def _planilha(dados: bytes):
+    import openpyxl
+    return openpyxl.load_workbook(io.BytesIO(dados)).active
+
+
+def test_curva_s_em_xlsx_abre_com_as_colunas_e_os_valores():
+    """Spec 2026-10-20 §4 item 3 e D9: competencia, previsto vigente, previsto anterior a ultima repactuacao e
+    medido, acumulados; o centavo inteiro vira real uma vez so', na celula (sem arredondar de novo)."""
+    linhas = [{"competencia": "2025-12", "previsto_vigente_centavos": 100_000_00,
+               "previsto_anterior_centavos": 120_000_00, "medido_centavos": 90_123_45},
+              {"competencia": "2026-01", "previsto_vigente_centavos": 250_000_01,
+               "previsto_anterior_centavos": 300_000_00, "medido_centavos": None}]
+    ws = _planilha(carta.curva_s_xlsx(linhas))
+    assert ws.title == "Curva S"
+    assert [x.value for x in ws[1]] == ["Competência", "Previsto vigente", "Previsto anterior", "Medido"]
+    assert [[x.value for x in linha] for linha in ws.iter_rows(min_row=2)] == [
+        [datetime.datetime(2025, 12, 1), 100000, 120000, 90123.45],
+        [datetime.datetime(2026, 1, 1), 250000.01, 300000, None]]          # depois do ultimo mes medido, vazio
+    assert ws["A2"].number_format == "mm/yyyy"
+    assert {ws[f"{col}2"].number_format for col in "BCD"} == {"#,##0.00"}
+
+
+def test_curva_s_sem_repactuacao_deixa_o_previsto_anterior_vazio():
+    ws = _planilha(carta.curva_s_xlsx([{"competencia": "2026-03", "previsto_vigente_centavos": 1_00,
+                                        "previsto_anterior_centavos": None, "medido_centavos": 50}]))
+    assert [x.value for x in ws[1]] == ["Competência", "Previsto vigente", "Previsto anterior", "Medido"]
+    assert [x.value for x in ws[2]] == [datetime.datetime(2026, 3, 1), 1, None, 0.5]
