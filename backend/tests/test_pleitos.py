@@ -6,7 +6,8 @@ import pathlib
 import pytest
 import yaml
 
-from app import arquivos, auth, cadastro_aplicar, correio, db, graph, leitura_pdf, medicoes, pleitos, reajuste, tempo
+from app import (arquivos, auth, cadastro_aplicar, correio, cronograma, db, graph, leitura_pdf, medicoes, paineis,
+                 pleitos, reajuste, tempo)
 from tests.test_protocolo import _assinar, _contrato
 
 # Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
@@ -80,6 +81,200 @@ def test_carta_de_prazo_traz_historico_e_novo_fim(cenario):
     texto = " ".join(" ".join(paginas).split())                 # a quebra de linha do PDF vira espaco
     assert "1. HISTÓRICO" in texto and "O 1º termo aditivo" in texto
     assert "de 20/10/2026 para 28/01/2027" in texto
+
+
+def _curvas_s(c, pid):
+    return [a for a in pleitos.detalhe(c, pid)["anexos"] if a["nome"] == "Curva S.xlsx"]
+
+
+def test_carta_de_prazo_leva_a_curva_s_na_lista_de_anexos(cenario):
+    """Issue #293 (spec 2026-10-20 §4 item 3): a curva S do pedido, em xlsx gerado do cronograma vigente e do
+    medido, entra na lista de anexos do pleito de prazo e vai na previa do e-mail; montar a carta de novo troca a
+    curva pela do dia (a anterior fica no historico, marcada como removida)."""
+    import io
+
+    import openpyxl
+    c, ids = cenario
+    cronograma.nova_versao(c, ids["uid"], ids["contrato"], [("2026-04", 300_00), ("2026-05", 400_00)], "manual",
+                           data_documento="2026-01-10")
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=35000 WHERE id=?", (ids["medicao"],)); c.commit()
+    pid = pleitos.criar(c, ids["uid"], ids["contrato"], "prazo", "310", dias=100, justificativa="Interferências na via")
+    assert [(a["tipo"], a["ext"]) for a in _curvas_s(c, pid)] == [("outro", "xlsx")]
+    do_criar = _curvas_s(c, pid)[0]["id"]
+
+    def removidas():
+        return c.execute("SELECT COUNT(*) FROM pleito_anexos WHERE pleito_id=? AND nome='Curva S.xlsx' "
+                         "AND removido_em IS NOT NULL", (pid,)).fetchone()[0]
+
+    pleitos.montar(c, ids["uid"], pid)
+    assert [a["id"] for a in _curvas_s(c, pid)] == [do_criar] and removidas() == 0     # mesmos dados, mesma curva
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=36000 WHERE id=?", (ids["medicao"],)); c.commit()
+    pleitos.montar(c, ids["uid"], pid)
+    curvas = _curvas_s(c, pid)
+    assert len(curvas) == 1 and curvas[0]["id"] != do_criar and removidas() == 1      # a do dia troca a antiga
+    ws = openpyxl.load_workbook(io.BytesIO(arquivos.caminho_seguro(curvas[0]["arquivo"]).read_bytes())).active
+    assert [[x.value for x in linha] for linha in ws.iter_rows()] == [
+        ["Competência", "Previsto vigente", "Previsto anterior", "Medido"],
+        [datetime.datetime(2026, 4, 1), 300, None, 0],
+        [datetime.datetime(2026, 5, 1), 700, None, 360]]
+    assert "Curva S.xlsx" in [a["nome"] for a in pleitos.previa_envio(c, pid)["anexos"]]
+    reajuste_id = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
+    pleitos.montar(c, ids["uid"], reajuste_id)
+    assert _curvas_s(c, reajuste_id) == []                       # so' a carta de prazo leva a curva
+
+
+def _com_cronograma(c, ids):
+    cronograma.nova_versao(c, ids["uid"], ids["contrato"], [("2026-04", 300_00), ("2026-05", 400_00)], "manual",
+                           data_documento="2026-01-10")
+
+
+def _prazo(c, ids):
+    return pleitos.criar(c, ids["uid"], ids["contrato"], "prazo", "310", dias=100, justificativa="Interferências na via")
+
+
+def test_curva_s_do_sistema_nao_se_remove(cenario):
+    """Rodada 1 da PR #436: a curva S vai com o pedido de prazo (spec §4 item 3, "anexado ao envio da carta")."""
+    c, ids = cenario
+    _com_cronograma(c, ids)
+    pid = _prazo(c, ids)
+    with pytest.raises(ValueError, match="não se remove"):
+        pleitos.remover_anexo(c, ids["uid"], pid, _curvas_s(c, pid)[0]["id"])
+    assert [a["gerado"] for a in _curvas_s(c, pid)] == [True]
+
+
+def test_nome_da_curva_s_e_reservado_e_o_envio_nao_repete_nome(cenario):
+    """Rodada 1 da PR #436: anexo arrastado com o nome da curva e' recusado (sem diferenciar maiusculas); um que ja'
+    estivesse no banco com esse nome nao e' trocado pelo montar e vai no e-mail com outro nome."""
+    c, ids = cenario
+    _com_cronograma(c, ids)
+    pid = _prazo(c, ids)
+    with pytest.raises(ValueError, match="renomeie"):
+        pleitos.adicionar_anexo(c, ids["uid"], pid, "outro", " curva s.XLSX ", b"PK\x03\x04curva do SMO", "xlsx")
+    rel, sha = arquivos.gravar_bytes("pleitos", b"PK\x03\x04curva do SMO", "xlsx")
+    antiga = c.execute("INSERT INTO pleito_anexos (pleito_id, tipo, nome, arquivo, sha256, tamanho, ext) "
+                       "VALUES (?, 'outro', 'Curva S.xlsx', ?, ?, 20, 'xlsx')", (pid, rel, sha)).lastrowid
+    c.commit()
+    pleitos.montar(c, ids["uid"], pid)
+    vigentes = {a["id"]: a["gerado"] for a in _curvas_s(c, pid)}
+    assert vigentes.pop(antiga) is False and list(vigentes.values()) == [True]
+    nomes = [a["nome"] for a in pleitos.previa_envio(c, pid)["anexos"]]
+    assert nomes.count("Curva S.xlsx") == 1 and "Curva S (2).xlsx" in nomes and len(set(nomes)) == len(nomes)
+    # rodada 2: o reajuste nunca gera curva, entao o nome fica livre nele
+    reajuste_id = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
+    pleitos.adicionar_anexo(c, ids["uid"], reajuste_id, "outro", "Curva S.xlsx", b"PK\x03\x04curva do SMO", "xlsx")
+    assert [a["nome"] for a in pleitos.detalhe(c, reajuste_id)["anexos"]] == ["Curva S.xlsx"]
+
+
+def test_curva_s_sem_previsto_vigente_nao_vai(cenario):
+    """Rodada 1 da PR #436: medicao protocolada sem cronograma vigente (ou so' com versao superada) daria a curva com
+    o previsto zerado em todas as linhas; a curva e' a do cronograma vigente, entao nao vai nem vira pendencia."""
+    c, ids = cenario
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=35000 WHERE id=?", (ids["medicao"],)); c.commit()
+    pid = _prazo(c, ids)
+    assert _curvas_s(c, pid) == []
+    _com_cronograma(c, ids)
+    c.execute("UPDATE cronograma_versoes SET superada_em=datetime('now')"); c.commit()
+    pleitos.montar(c, ids["uid"], pid)
+    assert _curvas_s(c, pid) == []
+    assert "curva_s" not in [x["codigo"] for x in pleitos.previa_envio(c, pid)["pendencias"]]
+
+
+def test_montar_tira_a_curva_velha_quando_a_do_dia_sai_vazia(cenario):
+    """Rodada 1 da PR #436 (prova do gate Sol): o cronograma e a medicao deixam de valer depois do criar; o montar
+    nao deixa a curva velha ir ao orgao (fica marcada como removida)."""
+    c, ids = cenario
+    _com_cronograma(c, ids)
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=35000 WHERE id=?", (ids["medicao"],)); c.commit()
+    pid = _prazo(c, ids)
+    assert len(_curvas_s(c, pid)) == 1
+    c.execute("UPDATE cronograma_versoes SET superada_em=datetime('now')")
+    c.execute("UPDATE medicoes SET estado='cancelada' WHERE id=?", (ids["medicao"],)); c.commit()
+    pleitos.montar(c, ids["uid"], pid)
+    assert _curvas_s(c, pid) == []
+    assert "Curva S.xlsx" not in [a["nome"] for a in pleitos.previa_envio(c, pid)["anexos"]]
+    assert c.execute("SELECT COUNT(*) FROM pleito_anexos WHERE pleito_id=? AND removido_em IS NOT NULL",
+                     (pid,)).fetchone()[0] == 1
+    # rodada 2: a retirada tem acao propria na auditoria ("Curva S do pleito retirada"), nao a da curva gerada
+    assert [r[0] for r in c.execute("SELECT acao FROM audit_log WHERE entidade='pleito' AND entidade_id=? AND acao "
+                                    "LIKE 'pleito.curva%' ORDER BY id", (pid,))] == ["pleito.curva_s",
+                                                                                   "pleito.curva_s_removida"]
+
+
+def _pronto_para_enviar(c, ids):
+    _com_cronograma(c, ids)
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=35000 WHERE id=?", (ids["medicao"],)); c.commit()
+    pid = _prazo(c, ids)
+    r = pleitos.montar(c, ids["uid"], pid)
+    pleitos.receber_assinado(c, ids["uid"], pid, _assinar(arquivos.caminho_seguro(r["arquivo"]).read_bytes()))
+    return pid
+
+
+@pytest.mark.parametrize("mudanca", ["cronograma_novo", "medicao_cancelada", "versoes_superadas"])
+def test_curva_s_que_mudou_depois_do_montar_trava_o_envio_ate_montar_de_novo(cenario, mudanca):
+    """Rodada 2 da PR #436 (gate Sol; a regra do termo no oficio, PR #435): a carta foi montada e assinada, e depois o
+    cronograma, a medicao ou as versoes mudaram. A previa avisa e o envio recusa, com justificativa ou sem; montar de
+    novo traz a curva de agora (ou tira a curva, se nao ha mais o que gerar) e libera."""
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    if mudanca == "cronograma_novo":
+        cronograma.nova_versao(c, ids["uid"], ids["contrato"], [("2026-05", 500_00), ("2026-06", 100_00)], "manual",
+                               data_documento="2026-03-01")
+    elif mudanca == "medicao_cancelada":
+        c.execute("UPDATE medicoes SET estado='cancelada' WHERE id=?", (ids["medicao"],)); c.commit()
+    else:
+        c.execute("UPDATE cronograma_versoes SET superada_em=datetime('now')"); c.commit()
+    pv = pleitos.previa_envio(c, pid)
+    assert pleitos.CURVA_S_MUDOU in [x["mensagem"] for x in pv["pendencias"]]
+    with pytest.raises(ValueError, match="A curva S mudou desde a carta montada"):
+        pleitos.enviar(c, ids["usuario"], pid, pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                       justificativa="conferido, segue assim mesmo")
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    eid = _enviar(c, ids, pid, D(2026, 6, 15))
+    nomes = [x[0] for x in c.execute("SELECT nome FROM envio_anexos WHERE envio_id=?", (eid,))]
+    assert ("Curva S.xlsx" in nomes) is (mudanca != "versoes_superadas")
+
+
+def test_envio_do_prazo_exige_a_curva_s_quando_ha_curva_a_gerar(cenario):
+    """Rodada 1 da PR #436: pedido montado antes de haver cronograma; com curva a gerar e nenhuma em vigor, a previa
+    mostra a pendencia e o envio recusa mesmo com justificativa. Montar de novo gera a curva e libera."""
+    c, ids = cenario
+    pid = _prazo(c, ids)
+    r = pleitos.montar(c, ids["uid"], pid)
+    pleitos.receber_assinado(c, ids["uid"], pid, _assinar(arquivos.caminho_seguro(r["arquivo"]).read_bytes()))
+    _com_cronograma(c, ids)
+    pv = pleitos.previa_envio(c, pid)
+    assert pleitos.CURVA_S_FALTA in [x["mensagem"] for x in pv["pendencias"]]
+    with pytest.raises(ValueError, match="Curva S não anexada"):
+        pleitos.enviar(c, ids["usuario"], pid, pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                       justificativa="cronograma físico vai depois")
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    eid = _enviar(c, ids, pid, D(2026, 6, 15))
+    assert "Curva S.xlsx" in [x[0] for x in c.execute("SELECT nome FROM envio_anexos WHERE envio_id=?", (eid,))]
+
+
+def test_curva_s_sai_da_mesma_transacao_que_a_troca(cenario, monkeypatch):
+    """Rodada 1 da PR #436 (gate Sol): criar e montar calculam a curva dentro do BEGIN IMMEDIATE que troca o anexo;
+    medicao cancelada ou versao nova do cronograma no meio nao misturam dois retratos."""
+    c, ids = cenario
+    _com_cronograma(c, ids)
+    original, dentro = paineis.curva_s, []
+
+    def espia(conn, contrato_id):
+        dentro.append(conn.in_transaction)
+        return original(conn, contrato_id)
+
+    monkeypatch.setattr(paineis, "curva_s", espia)
+    pid = _prazo(c, ids)
+    pleitos.montar(c, ids["uid"], pid)
+    assert dentro == [True, True]
+
+
+def test_carta_de_prazo_sem_cronograma_nem_medicao_nao_leva_curva_vazia(cenario):
+    c, ids = cenario
+    c.execute("UPDATE medicoes SET estado='cancelada' WHERE id=?", (ids["medicao"],)); c.commit()
+    pid = pleitos.criar(c, ids["uid"], ids["contrato"], "prazo", "310", dias=100, justificativa="Interferências na via")
+    pleitos.montar(c, ids["uid"], pid)
+    assert _curvas_s(c, pid) == []
 
 
 def _texto_da_carta_de_prazo(c, ids):

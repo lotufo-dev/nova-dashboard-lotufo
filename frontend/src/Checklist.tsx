@@ -15,6 +15,7 @@ export type ItemChecklist = {
   arquivos: ArquivoChecklist[];
   aceita?: string;                                // extensoes do seletor de arquivo
   semAnexar?: boolean;                            // grupo que so' lista arquivos (tipo que a familia nao pede)
+  semRemover?: boolean;                           // arquivo que o sistema gera e que vai sempre (a curva S do prazo)
 };
 
 function SeloSituacao({ situacao }: { situacao: ItemChecklist["situacao"] }) {
@@ -60,7 +61,7 @@ export default function Checklist({ itens, legenda, editavel, ocupado, aoAnexar,
                         onChange={ev => aoAnexar(it.chave, ev.currentTarget)} />
                     </label>
                   )}
-                  {it.arquivos.map(a => (
+                  {!it.semRemover && it.arquivos.map(a => (
                     <ConfirmarRemocao key={a.id} alvo={a.nome} ocupado={ocupado} aoConfirmar={() => aoRemover(a.id)} />
                   ))}
                 </div>

@@ -78,4 +78,15 @@ describe("Ofício", () => {
     expect(window.location.pathname).toBe("/avisos");
     vi.restoreAllMocks();
   });
+
+  // issue #293: a curva S gerada pelo servidor tem linha propria nos anexos e nao oferece Remover
+  it("a curva S do pedido de prazo aparece nos anexos sem Remover; o anexo arrastado continua removível", () => {
+    const comCurva: Pleito = { ...PLEITO, situacao: "rascunho", anexos: [
+      { id: 7, tipo: "outro", nome: "Curva S.xlsx", tamanho: 6000, gerado: true },
+      { id: 8, tipo: "outro", nome: "fotos.pdf", tamanho: 900, gerado: false }] };
+    render(<CartaoPleito p={comCurva} podeEditar aoMudar={() => {}} />);
+    expect(screen.getByRole("rowheader", { name: /Curva S\s*Curva S\.xlsx/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remover Curva S.xlsx" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remover fotos.pdf" })).toBeTruthy();
+  });
 });
