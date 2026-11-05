@@ -55,7 +55,16 @@ $atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()
 git log --oneline "$atual..origin/master"
 git diff --name-only "$atual" origin/master -- backend/migrations
 git diff --name-only "$atual" origin/master -- frontend
+Test-Path C:\DashboardLotufo\segredos\instalacao.json
+git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalacao.py
 ```
+
+- **Arquivo da instalação** (issue #417, runbook "Instalação assinada"): o `Test-Path` tem que dar `True`. Se der `False`,
+  parar e avisar o Leo, que assina e copia o arquivo; sem ele a produção sobe em modo cópia, sem e-mail e sem RM.
+- **Primeiro deploy com a #417**: o `ls-tree` volta vazio, porque o commit no ar ainda não tem `instalacao.py`. Então
+  o `deploy.ps1` do diretório pinado é o antigo, que só confere o 200. Seguir o item "Deploy da issue #417" de
+  "Subir e derrubar": rodar o `deploy.ps1` novo copiado para `C:\Temp\deploy`, pelo Mac num `.ps1` com `-File`, e
+  conferir `instalacao: autorizada` logo depois.
 
 - **Migração nova** (arquivo adicionado, alterado, removido ou renomeado em `backend/migrations/`): dizer ao Leo **explicitamente**, antes de rodar,
   o número e o que ela faz (ler o `.sql`: só acrescenta coluna/tabela/índice, ou mexe em dados). Pelo runbook,
