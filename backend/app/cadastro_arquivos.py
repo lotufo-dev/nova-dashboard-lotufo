@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from app import dinheiro, entidades, espelho, espelho_docx, tempo
+from app import dinheiro, entidades, espelho, espelho_docx, reajuste, tempo
 
 FAMILIAS = ("mtpar", "sinfra", "ses", "prefeitura")
 LEIS = ("8.666", "14.133", "13.303")
@@ -38,7 +38,7 @@ TRATAMENTOS = ("Senhor", "Senhora")
 TIPOS_CONTRATANTE = ("PÚBLICO", "PRIVADO")
 # Bloco 7: marcos do encerramento (aba Prazos) e tipos de pleito enviados antes do sistema.
 MARCOS = ("conclusao", "provisorio", "definitivo", "baixa_garantia")
-TIPOS_PLEITO = ("reajuste", "prazo", "conclusao")
+TIPOS_PLEITO = ("reajuste", "prazo", "conclusao", "valor")   # valor: pedido de aditivo de valor (#398)
 # Pecas que o orgao pode pedir no pleito de reajuste (mesma lista de `pleitos.PECAS_ORGAO`).
 PECAS_PLEITO = ("falencia", "contrato_social", "documento_representante", "balanco")
 _CICLO = re.compile(r"^([0-9]{4})(-[0-9]{2})?$")
@@ -305,6 +305,13 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
                         raise ValueError("vazia")
                 except ValueError:
                     falha(f"{onde}.eficacia", f"use a data da eficácia (AAAA-MM-DD): {d['eficacia']!r}")
+            # Issue #391: sem `ciclo` o termo cai no ano da eficacia (ou da data) e instrumento aplicado nao muda
+            if d.get("ciclo") is None:
+                ano = reajuste.ciclo_do_apostilamento(d, inst["data"])
+                if ano is not None:
+                    pelo = "eficacia" if d.get("eficacia") else "data"
+                    avisos.append(f"{c['nome_curto']}: {onde}: apostilamento sem ciclo; vai contar no ciclo {ano} "
+                                  f"(pelo campo {pelo}). Diga ciclo: AAAA")
             # Issue #271: competencias e periodo; cada competencia vira previsao da data-base dele
             for campo, msg in _periodo_e_competencias(d)[1]:
                 falha(f"{onde}.{campo}", msg)
@@ -356,8 +363,24 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
             falha(onde, "oficio e data são obrigatórios")
             continue
         item = {"tipo": p["tipo"], "oficio": str(p["oficio"]).strip(), "data": data, "data_base": None,
-                "ciclo": None, "dias": None}
-        if p["tipo"] == "reajuste":
+                "ciclo": None, "dias": None, "valor_centavos": None, "objeto": None}
+        for campo in ("valor", "objeto"):
+            if p["tipo"] != "valor" and p.get(campo) is not None:
+                falha(f"{onde}.{campo}", "só vale no pedido de valor (tipo: valor)")
+        if p["tipo"] == "valor":
+            # issue #398: pedido de aditivo de valor (RPFO, readequacao); so' o valor pedido e o objeto
+            for campo in ("dias", "data_base", "ciclo"):
+                if p.get(campo) is not None:
+                    falha(f"{onde}.{campo}", "não vale no pedido de valor")
+            try:
+                item["valor_centavos"] = dinheiro.parse_brl(str(p.get("valor") or ""))
+            except ValueError as e:
+                falha(f"{onde}.valor", f"obrigatório no pedido de valor: {e}")
+            else:
+                if item["valor_centavos"] <= 0:
+                    falha(f"{onde}.valor", "use um valor maior que zero")
+            item["objeto"] = str(p.get("objeto") or "").strip() or None
+        elif p["tipo"] == "reajuste":
             if str(p.get("data_base") or "") not in meses:
                 falha(f"{onde}.data_base", "use uma das datas_base do contrato (AAAA-MM)")
             if _inteiro(p.get("ciclo"), 2000) is None:
@@ -398,6 +421,31 @@ def _corrige_pleito(v, onde: str, falha) -> dict | None:
         falha(f"{onde}.data", str(e))
         return None
     return {"oficio": oficio, "data": data}
+
+
+# Gate Sol (PR #406): acima do int64 o `aplicar` estourava com OverflowError ao consultar o numero no SQLite.
+# 1.000.000 de versoes e' folga larga sobre qualquer contrato real.
+MAX_VERSAO_SUPERADA = 1_000_000
+
+
+def _cronograma_superadas(lista, falha) -> list[int]:
+    """Issue #395: `cronograma_superadas: [<numero da versao>]`, versoes ja gravadas sem linha no cadastro (a carga
+    de 04/09/2026, as manuais) que deixam de valer. Se o numero existe e nao veio do cadastro, quem confere e' o
+    `aplicar` (precisa do banco)."""
+    if lista is None:
+        return []
+    if not isinstance(lista, list):
+        falha("cronograma_superadas", "use uma lista de números de versão (ex.: [1])")
+        return []
+    out: list[int] = []
+    for i, n in enumerate(lista):
+        if _inteiro(n, 1) is None or n > MAX_VERSAO_SUPERADA:
+            falha(f"cronograma_superadas[{i}]", f"número de versão inválido: {n!r} (use um inteiro de 1 a {MAX_VERSAO_SUPERADA})")
+        elif n in out:
+            falha("cronograma_superadas", f"versão {n} repetida")
+        else:
+            out.append(n)
+    return sorted(out)
 
 
 def _cronograma(lista, falha) -> list[dict]:
@@ -695,6 +743,7 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
     _dados_instrumentos(c, falha, avisos)
     c["pleitos_anteriores"] = _pleitos_anteriores(bruto.get("pleitos_anteriores"), c, falha)
     c["cronograma"] = _cronograma(bruto.get("cronograma"), falha)
+    c["cronograma_superadas"] = _cronograma_superadas(bruto.get("cronograma_superadas"), falha)
     chaves_inst = {i["chave"] for i in c["instrumentos"]}
     for v in c["cronograma"]:
         if v["instrumento"] and v["instrumento"] not in chaves_inst:
