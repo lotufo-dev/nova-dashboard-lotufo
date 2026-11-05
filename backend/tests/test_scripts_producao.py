@@ -71,6 +71,23 @@ def test_deploy_le_a_porta_da_tarefa_agendada():
     assert script.index("$portaTarefa = PortaDaTarefa") < script.index("function Construir")
 
 
+def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
+    # Issue #417: health 200 com `instalacao` diferente de "autorizada" depois do deploy conta como falha e cai no
+    # rollback que ja' existe. O rollback confere so' o 200: o commit anterior pode nem ter o campo.
+    script = _ler("deploy.ps1")
+    corpo = script[script.index("function Saudavel"):script.index("function Construir")]
+    assert "ConvertFrom-Json" in corpo
+    assert re.search(r'\.instalacao -eq "autorizada"', corpo)
+    assert "[switch]$ExigirInstalacao" in corpo
+    assert script.count("SaudavelENovo -ExigirInstalacao") == 1
+    deploy = script.index("if (SaudavelENovo -ExigirInstalacao) {")
+    rollback = script.index("ROLLBACK para $anterior")
+    assert deploy < rollback
+    assert "if (SaudavelENovo) {" in script[rollback:]
+    # o Saudavel antigo (so' o status) nao pode ter sobrado em outro lugar
+    assert script.count("function Saudavel") == 2      # Saudavel e SaudavelENovo
+
+
 def test_deploy_fica_so_em_ascii_sem_bom():
     # cabecalho do deploy.ps1: o PowerShell 5.1 le sem BOM como ANSI e acento quebra o parse
     bruto = (SCRIPTS / "deploy.ps1").read_bytes()

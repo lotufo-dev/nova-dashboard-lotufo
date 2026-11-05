@@ -47,9 +47,20 @@ if ($Porta -eq 0) {
     throw "-Porta $Porta nao bate com a tarefa DashboardLotufo (porta $portaTarefa); nada foi alterado"
 }
 
-function Saudavel {
-    try { return ((Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing).StatusCode -eq 200) }
+# Instalacao assinada (issue #417): depois do deploy so' vale o health 200 com instalacao "autorizada" (arquivo
+# assinado para esta maquina em C:\DashboardLotufo\segredos\instalacao.json). Modo copia (arquivo ausente, assinatura
+# ou maquina) conta como falha e dispara o rollback. O rollback confere so' o 200: o commit anterior pode nem ter o campo.
+function Saudavel([switch]$ExigirInstalacao) {
+    try { $resposta = Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing }
     catch { return $false }
+    if ($resposta.StatusCode -ne 200) { return $false }
+    if (-not $ExigirInstalacao) { return $true }
+    $saude = $null
+    try { $saude = $resposta.Content | ConvertFrom-Json } catch { $saude = $null }
+    if ($saude -and $saude.instalacao -eq "autorizada") { return $true }
+    if ($saude) { $situacao = "$($saude.instalacao) (motivo: $($saude.instalacao_motivo))" } else { $situacao = "health ilegivel" }
+    Write-Warning "health 200, mas a instalacao nao esta autorizada: $situacao - ver docs\runbook.md (Instalacao assinada)"
+    return $false
 }
 function Construir([string]$alvo) {
     & git -C $AppDir fetch --quiet
@@ -97,8 +108,8 @@ function Reiniciar {
 }
 # Saude so' vale se quem responde NASCEU depois do reinicio: health 200 de processo antigo
 # nao prova que o commit novo esta' no ar.
-function SaudavelENovo {
-    if (-not (Saudavel)) { return $false }
+function SaudavelENovo([switch]$ExigirInstalacao) {
+    if (-not (Saudavel -ExigirInstalacao:$ExigirInstalacao)) { return $false }
     $dono = DonoDaPorta
     if (-not $dono -or $dono.CreationDate -lt $script:reinicioEm) {
         Write-Warning "health 200, mas o dono da porta $Porta e' anterior ao reinicio (PID $($dono.ProcessId), $($dono.CreationDate))"
@@ -156,7 +167,7 @@ try {
     }
     $novo = (& git -C $AppDir rev-parse HEAD).Trim()
     Reiniciar
-    if (SaudavelENovo) {
+    if (SaudavelENovo -ExigirInstalacao) {
         $fim = "DEPLOY OK: $anterior -> $novo (health 200, processo novo)"
         if ($backup) { $fim += " - backup pre-migracao: $backup" }
         Write-Host $fim -ForegroundColor Green
