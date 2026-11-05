@@ -89,6 +89,47 @@ def _termo_do_pleito(conn, contrato_id: int, pleito: dict) -> dict | None:
     return {**dict(r), "dados": json.loads(r["dados"] or "{}")} if r else None
 
 
+# Issue #390: na SES o reajuste anual sai por termo aditivo de valor (`natureza: reajuste`, migracao 046), nao por
+# apostilamento. O aditivo assinado e nao cancelado fecha o ciclo como o apostilamento fecha.
+ADITIVO_DE_REAJUSTE = ("status='assinado' AND cancelado_em IS NULL AND natureza='reajuste' "
+                        "AND tipo IN ('valor','misto') AND data_assinatura IS NOT NULL")
+
+
+def ciclo_do_aditivo(mes_base: str, data_assinatura: str) -> int | None:
+    """O ciclo que o aditivo de reajuste fecha: o do ultimo aniversario da data-base ate' a assinatura (inclusive).
+    Assinado antes do primeiro aniversario, nenhum."""
+    data = datetime.date.fromisoformat(data_assinatura[:10])
+    anos = [y for y in range(int(mes_base[:4]) + 1, data.year + 1) if aniversario(mes_base, y) <= data]
+    return max(anos) if anos else None
+
+
+def _como_termo(r) -> dict:
+    """O aditivo no formato do apostilamento que a aba e os avisos leem (chave, tipo, numero, data, dados)."""
+    return {"id": r["id"], "chave": r["chave_cadastro"], "tipo": f"aditivo_{r['tipo']}", "numero": r["numero"],
+            "data": r["data_assinatura"][:10], "dados": {}, "origem": "aditivo"}
+
+
+def _aditivo_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, unica: bool) -> dict | None:
+    """Sem pleito enviado: o aditivo de reajuste do ciclo (`ciclo_do_aditivo`). O aditivo nao diz a data-base; com
+    mais de uma, nao se adivinha qual ele atende (so' a ligacao ao pleito fecha)."""
+    if not unica:
+        return None
+    for r in conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND {ADITIVO_DE_REAJUSTE} "
+                          "ORDER BY data_assinatura DESC, id DESC", (contrato_id,)):
+        if ciclo_do_aditivo(mes_base, r["data_assinatura"]) == ciclo:
+            return _como_termo(r)
+    return None
+
+
+def _aditivo_do_pleito(conn, contrato_id: int, pleito: dict) -> dict | None:
+    """O aditivo de reajuste que o cadastro ligou ao pleito (`instrumento_chave` = chave do aditivo no cadastro)."""
+    if not pleito.get("instrumento_chave"):
+        return None
+    r = conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=? AND {ADITIVO_DE_REAJUSTE}",
+                     (contrato_id, pleito["instrumento_chave"])).fetchone()
+    return _como_termo(r) if r else None
+
+
 def _termo_do_pedido(conn, contrato_id: int, pleito: dict) -> dict | None:
     """O termo ligado ao pleito ou, subindo pelas reiteracoes (`reemite_pleito_id`), ao pedido que elas reiteram
     (revisor, PR #317): a reiteracao nao traz cronograma, entao o termo que atendeu o pedido tambem fecha a
@@ -96,7 +137,7 @@ def _termo_do_pedido(conn, contrato_id: int, pleito: dict) -> dict | None:
     p, vistos = pleito, set()
     while p is not None and p["id"] not in vistos:
         vistos.add(p["id"])
-        termo = _termo_do_pleito(conn, contrato_id, p)
+        termo = _termo_do_pleito(conn, contrato_id, p) or _aditivo_do_pleito(conn, contrato_id, p)
         if termo is not None:
             return termo
         if p.get("reemissao") != "reiteracao" or not p.get("reemite_pleito_id"):
@@ -109,11 +150,13 @@ def _termo_do_pedido(conn, contrato_id: int, pleito: dict) -> dict | None:
 def apostilamento_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, unica: bool) -> dict | None:
     """O termo que fecha o ciclo, o unico criterio da aba, dos avisos e da recusa de reiterar/reemitir (gate Sol e
     revisor, PR #317): com pleito enviado no ciclo, o termo ligado ao vigente (ou ao pedido que ele reitera); sem
-    pleito enviado registrado, o apostilamento do ciclo (`_apostilamento`)."""
+    pleito enviado registrado, o apostilamento do ciclo (`_apostilamento`). O aditivo de valor de reajuste (issue
+    #390) vale como termo nos dois caminhos."""
     pl = _pleito(conn, contrato_id, mes_base, ciclo)
     if pl:
         return _termo_do_pedido(conn, contrato_id, pl)
-    return _apostilamento(conn, contrato_id, mes_base, ciclo, unica)
+    return (_apostilamento(conn, contrato_id, mes_base, ciclo, unica)
+            or _aditivo_do_ciclo(conn, contrato_id, mes_base, ciclo, unica))
 
 
 def _pleito(conn, contrato_id: int, mes_base: str, ciclo: int, sem_reiteracao: bool = False) -> dict | None:
