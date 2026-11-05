@@ -67,6 +67,13 @@ NATUREZAS = ("execucao", "reajuste")
 TIPOS_COM_NATUREZA = ("aditivo_valor", "aditivo_misto")
 
 
+def _corretor_de_valor(inst: dict) -> bool:
+    """Issue #410: o aditivo de reajuste com valor que corrige outro termo; ele substitui o corrigido no vigente
+    (`contratos.vigente`, pelo criterio de `reajuste.aditivo_de_reajuste`), entao cada termo tem no maximo um."""
+    return bool(inst.get("corrige") and inst["tipo"] in TIPOS_COM_NATUREZA and inst.get("natureza") == "reajuste"
+                and inst.get("delta_valor_centavos"))
+
+
 class CadastroInvalido(Exception):
     def __init__(self, erros: list[str]):
         self.erros = erros
@@ -767,6 +774,15 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         if k:
             falha("instrumentos", f"{inst['chave']}: a cadeia de correção volta a {k} "
                                   f"({' → '.join([*caminho, k])}); um termo não corrige a si mesmo")
+    # Issue #410 (gate Sol, rodada 1, PR #452): duas correcoes de reajuste do mesmo termo somariam as duas no vigente
+    corretores: dict[str, str] = {}
+    for inst in c["instrumentos"]:
+        if _corretor_de_valor(inst):
+            if inst["corrige"] in corretores:
+                falha("instrumentos", f"{inst['chave']} e {corretores[inst['corrige']]} corrigem {inst['corrige']}; "
+                                      f"a correção da correção corrige a correção (corrige: "
+                                      f"{corretores[inst['corrige']]})")
+            corretores.setdefault(inst["corrige"], inst["chave"])
     # Bloco 7: folga propria do contrato (vence a do orgao; na MTPAR varia por contrato), campos dos
     # instrumentos e pleitos enviados antes do sistema.
     c["folga_vigencia_dias"] = None

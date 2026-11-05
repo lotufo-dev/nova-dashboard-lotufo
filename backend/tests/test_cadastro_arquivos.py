@@ -835,6 +835,35 @@ def test_ciclo_do_aditivo_fora_do_intervalo_ou_do_formato_e_erro(tmp_path, ciclo
     assert any("instrumentos[ta-08].ciclo" in e and trecho in e for e in erros), erros
 
 
+@pytest.mark.parametrize("base, data, ciclo, trecho", [
+    ("2021-10", "2026-10-20", 2021, "de 2022 a 2026"),        # o ano da propria data-base
+    ("2021-10", "2026-10-20", "2025-99", "quatro dígitos"),   # truncado
+    ("2023-04", "2026-03-15", 2026, "de 2024 a 2025"),        # termo de marco, aniversario em abril: o 2026 nao chegou
+    ("2023-04", "2026-03-15", 2027, "de 2024 a 2025"),        # ciclo futuro
+])
+def test_ciclo_impossivel_do_aditivo_e_recusado_com_o_intervalo(tmp_path, base, data, ciclo, trecho):
+    # issue #410: criterios de aceite, com a data-base e a data do termo de cada caso
+    c = {**CONTRATO, "datas_base": [{"mes": base, "indice": "setorial FGV/DNIT"}],
+         "instrumentos": [{**TA_REAJ, "data": data, "ciclo": ciclo}]}
+    erros = _erros(_escrever(tmp_path, contratos=[c]))
+    assert any("instrumentos[ta-08].ciclo" in e and trecho in e for e in erros), erros
+
+
+def test_duas_correcoes_de_reajuste_do_mesmo_aditivo_sao_erro(tmp_path):
+    # issue #410 (gate Sol, rodada 1, PR #452): cada termo tem no maximo uma correcao de valor; a outra corrige a
+    # correcao (cadeia)
+    ta2 = {**TA_REAJ, "chave": "ta-09", "data": "2026-10-25", "corrige": "ta-08"}
+    ta3 = {**TA_REAJ, "chave": "ta-10", "data": "2026-10-30", "corrige": "ta-08"}
+    erros = _erros(_escrever(tmp_path / "par", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, ta3]}]))
+    assert any("ta-10 e ta-09 corrigem ta-08" in e for e in erros), erros
+    cadeia = {**ta3, "corrige": "ta-09"}
+    ca.preparar(_escrever(tmp_path / "cadeia", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, cadeia]}]))
+    # o aditivo de prazo que tambem corrige o ta-08 nao conta (o motor nao o le)
+    prazo = {"chave": "ta-11", "tipo": "aditivo_prazo", "data": "2026-10-31", "nova_execucao_fim": "2027-06-30",
+             "corrige": "ta-08"}
+    ca.preparar(_escrever(tmp_path / "prazo", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, prazo]}]))
+
+
 def test_ciclo_do_aditivo_nas_pontas_do_intervalo_e_aceito(tmp_path):
     for ciclo in (2024, 2026):
         c = {**CONTRATO, "instrumentos": [{**TA_REAJ, "ciclo": ciclo}]}

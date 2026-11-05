@@ -9,7 +9,8 @@ import sqlite3
 from pathlib import Path
 
 from app import arquivos, auditoria, contratos, cronograma, db, oficios, reajuste, tempo
-from app.cadastro_arquivos import NATUREZAS, TIPOS_ADITIVO, TIPOS_COM_NATUREZA, competencias_do_apostilamento
+from app.cadastro_arquivos import (NATUREZAS, TIPOS_ADITIVO, TIPOS_COM_NATUREZA, _corretor_de_valor,
+                                   competencias_do_apostilamento)
 
 
 class _Ensaio(Exception):
@@ -886,16 +887,47 @@ def _instrumentos(conn, usuario_id, contrato_id, c, rel) -> None:
         if aplicadas.get(inst["chave"], inst["tipo"] in TIPOS_ADITIVO) != (inst["tipo"] in TIPOS_ADITIVO):
             raise ValueError(f"{nome}/{inst['chave']}: instrumento já aplicado não pode ser alterado "
                              f"(tipo → {inst['tipo']}); registre um instrumento novo com `corrige`")
+    # Issue #410 (gate Sol, rodada 1, PR #452): o aditivo de reajuste corrigido sai do vigente e a correcao entra no
+    # lugar; duas correcoes do mesmo termo somariam as duas. A correcao da correcao forma a cadeia (TA3 corrige TA2).
+    corretores: dict[str, str] = {}
+    for inst in c["instrumentos"]:
+        if _corretor_de_valor(inst):
+            if inst["corrige"] in corretores:
+                raise ValueError(f"{nome}/{inst['chave']}: {corretores[inst['corrige']]} já corrige "
+                                 f"{inst['corrige']}; corrija a correção (corrige: {corretores[inst['corrige']]})")
+            corretores[inst["corrige"]] = inst["chave"]
 
     # Ordem cronologica (empate: ordem do arquivo): o retrato valor_anterior/valor_novo de
     # cada aditivo depende dos que vieram antes.
-    ordenados = sorted(enumerate(c["instrumentos"]), key=lambda par: (par[1]["data"], par[0]))
-    for _, inst in ordenados:
+    ordenados = [inst for _, inst in sorted(enumerate(c["instrumentos"]), key=lambda par: (par[1]["data"], par[0]))]
+    # Issue #410 (gate Sol, rodada 2, PR #452): a correcao de valor de reajuste vem depois do termo que corrige, mesmo
+    # com data anterior; o retrato dela tira o corrigido do vigente, que tem de estar gravado. Entre os demais, a data.
+    chaves, feitos, fila = {i["chave"] for i in ordenados}, set(), []
+    while ordenados:
+        k = next((n for n, i in enumerate(ordenados) if not _corretor_de_valor(i) or i["corrige"] not in chaves
+                  or i["corrige"] in feitos), 0)     # ciclo de correcao: o validar recusa; aqui segue a data
+        fila.append(ordenados.pop(k))
+        feitos.add(fila[-1]["chave"])
+    for inst in fila:
         rotulo = f"{nome}/{inst['chave']}"
         if inst["tipo"] in TIPOS_ADITIVO:
             _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel)
         else:
             _outro(conn, usuario_id, contrato_id, inst, rotulo, rel)
+
+
+def _conferir_ciclo(rotulo, base, ciclo, data_assinatura) -> None:
+    """O ciclo do aditivo de reajuste vai do ano seguinte ao da base ao do ultimo aniversario ate' a assinatura (a
+    mesma regra do `cadastro validar`)."""
+    if base is None or ciclo is None or not data_assinatura:
+        return
+    primeiro, ultimo = int(base[:4]) + 1, reajuste.ciclo_do_aditivo(base, data_assinatura)
+    if ultimo is None:
+        raise ValueError(f"{rotulo}: o aditivo foi assinado antes do primeiro aniversário da data-base {base}; "
+                         f"não atende o ciclo {ciclo}")
+    if not primeiro <= ciclo <= ultimo:
+        raise ValueError(f"{rotulo}: ciclo {ciclo} fora do intervalo da data-base {base}; use um ciclo de {primeiro} "
+                         f"a {ultimo} (do ano seguinte ao da data-base ao do último aniversário até a assinatura)")
 
 
 def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
@@ -912,6 +944,8 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=?", (contrato_id,))]
     declarada = d.get("data_base") if reaj else None
     novo["data_base_mes"] = (declarada or (bases[0] if len(bases) == 1 else None)) if reaj else None
+    # issue #410 (migracao 061): de onde veio a base; so' a declarada trava, a inferida cede a primeira declaracao
+    novo["data_base_origem"] = ("declarada" if declarada else "unica") if novo["data_base_mes"] else None
     novo["ciclo_reajuste"] = int(str(d["ciclo"])[:4]) if reaj and d.get("ciclo") is not None else None
     # issue #409 (migracao 059): o instrumento que este aditivo corrige; o motor do reajuste tira o corrigido
     novo["corrige_chave"] = inst["corrige"]
@@ -922,18 +956,27 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
         if inst["tipo"] in TIPOS_COM_NATUREZA and novo["delta_valor_centavos"] and novo["natureza"] is None:
             raise ValueError(f"{rotulo}: aditivo de valor novo precisa de `natureza` "
                              f"({' ou '.join(NATUREZAS)}): o reajuste fica fora do saldo")
+        _conferir_ciclo(rotulo, novo["data_base_mes"], novo["ciclo_reajuste"], novo["data_assinatura"])
         anterior = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
+        if reaj and novo["corrige_chave"] and novo["delta_valor_centavos"] and novo["tipo"] in ("valor", "misto"):
+            # issue #410 (comentario da PR #433): a correcao de reajuste substitui o corrigido no vigente
+            # (`contratos.vigente`), entao o retrato dela parte do vigente sem ele, se ele ainda contava
+            alvo = conn.execute(f"SELECT delta_valor_centavos FROM aditivos a WHERE a.contrato_id=? "
+                                f"AND a.chave_cadastro=? AND {reajuste.aditivo_de_reajuste('a')}",
+                                (contrato_id, novo["corrige_chave"])).fetchone()
+            if alvo is not None:
+                anterior -= alvo[0]
         cur = conn.execute(
             """INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim,
                    nova_execucao_fim, status, data_assinatura, numero, objeto, forma, chave_cadastro,
                    valor_anterior_centavos, valor_novo_centavos, assinado_por, observacao, ordinal, natureza,
-                   data_base_mes, ciclo_reajuste, corrige_chave)
-               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   data_base_mes, ciclo_reajuste, corrige_chave, data_base_origem)
+               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (contrato_id, novo["tipo"], novo["delta_valor_centavos"], novo["nova_vigencia_fim"],
              novo["nova_execucao_fim"], novo["data_assinatura"], novo["numero"], novo["objeto"],
              novo["forma"], inst["chave"], anterior, anterior + novo["delta_valor_centavos"], usuario_id,
              f"Corrige {inst['corrige']}" if inst["corrige"] else None, novo["ordinal"], novo["natureza"],
-             novo["data_base_mes"], novo["ciclo_reajuste"], novo["corrige_chave"]))
+             novo["data_base_mes"], novo["ciclo_reajuste"], novo["corrige_chave"], novo["data_base_origem"]))
         rel["criados"].append(rotulo)
         auditoria.registrar(conn, usuario_id, "cadastro.instrumento", "aditivo", cur.lastrowid, None,
                             {"chave": inst["chave"], **novo})
@@ -955,23 +998,51 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     # base e ciclo do aditivo de reajuste (migracao 058): como a natureza, o NULL (aplicado antes da 058, ou sem
     # declaracao) aceita o primeiro valor, auditado, e trava depois. A base guardada so' muda por declaracao diferente
     # (erro); sem declaracao, segue a guardada mesmo que o contrato ganhe outra base (como a 055 no apostilamento).
-    for campo, declarado in (("data_base_mes", declarada), ("ciclo_reajuste", novo["ciclo_reajuste"])):
-        if ja[campo] is None:
-            if novo[campo] is not None:
-                campos[campo] = novo[campo]
-        elif (campo == "ciclo_reajuste" or declarado is not None) and declarado != ja[campo]:
-            raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
-                             f"({campo}: {ja[campo]!r} → {declarado!r}); registre um instrumento novo com `corrige`")
+    # Issue #410 (migracao 061): so' a base declarada trava. A inferida (a base unica de quando foi aplicado, a do
+    # pleito ligado, ou sem origem: gravada antes da 061) cede a primeira declaracao, auditada. O aditivo sem base
+    # (aplicado antes da 058) que ja' atende pleito fica na base desse pleito, nao na base unica de agora.
+    if reaj:
+        if declarada is not None:
+            if ja["data_base_mes"] is not None and ja["data_base_origem"] == "declarada" \
+                    and declarada != ja["data_base_mes"]:
+                raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado (data_base_mes: "
+                                 f"{ja['data_base_mes']!r} → {declarada!r}); registre um instrumento novo com `corrige`")
+            campos["data_base_mes"], campos["data_base_origem"] = declarada, "declarada"
+        elif ja["data_base_mes"] is None:
+            do_pleito = [r[0] for r in conn.execute(
+                "SELECT DISTINCT data_base_mes FROM pleitos WHERE contrato_id=? AND tipo='reajuste' "
+                "AND instrumento_chave=? AND data_base_mes IS NOT NULL", (contrato_id, inst["chave"]))]
+            if len(do_pleito) > 1:
+                raise ValueError(f"{rotulo}: o aditivo de reajuste atende pleitos de mais de uma data-base "
+                                 f"({', '.join(sorted(do_pleito))}); diga a data_base dele no termo")
+            if do_pleito:
+                campos["data_base_mes"], campos["data_base_origem"] = do_pleito[0], "pleito"
+            elif novo["data_base_mes"] is not None:
+                campos["data_base_mes"], campos["data_base_origem"] = novo["data_base_mes"], "unica"
+    if ja["ciclo_reajuste"] is None:
+        if novo["ciclo_reajuste"] is not None:
+            campos["ciclo_reajuste"] = novo["ciclo_reajuste"]
+    elif novo["ciclo_reajuste"] != ja["ciclo_reajuste"]:
+        raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
+                         f"(ciclo_reajuste: {ja['ciclo_reajuste']!r} → {novo['ciclo_reajuste']!r}); registre um "
+                         "instrumento novo com `corrige`")
+    # Issue #410 (gate Sol, rodada 1, PR #452): o validar so' confere o ciclo contra a base que o YAML determina; a base
+    # efetiva aqui pode ser a guardada (sem declaracao, com duas bases). Ciclo ou base novos se conferem contra o par.
+    if "data_base_mes" in campos or "ciclo_reajuste" in campos:
+        _conferir_ciclo(rotulo, campos.get("data_base_mes", ja["data_base_mes"]),
+                        campos.get("ciclo_reajuste", ja["ciclo_reajuste"]), ja["data_assinatura"])
     # issue #409 (migracao 059): no aditivo de reajuste o `corrige` decide qual termo vale, entao trava como a natureza:
     # o NULL (aplicado sem ele) aceita o primeiro, auditado e com a observacao "Corrige <chave>" que o INSERT escreve, e
     # trava depois -- inclusive apagar o campo. Os aplicados antes da 059 receberam o da observacao. Nos outros aditivos
     # o motor nao le o `corrige`: fica o da primeira gravacao, como antes da 059.
+    # Issue #410 (gate Sol, rodada 1, PR #452): acrescentar o `corrige` depois de aplicado tiraria o corrigido do vigente
+    # com o retrato valor_anterior/valor_novo deste gravado somando o corrigido; instrumento aplicado nao se altera.
     if (ja["natureza"] or novo["natureza"]) == "reajuste":
         if ja["corrige_chave"] is None:
             if novo["corrige_chave"] is not None:
-                campos["corrige_chave"] = novo["corrige_chave"]
-                if ja["observacao"] is None:
-                    campos["observacao"] = f"Corrige {novo['corrige_chave']}"
+                raise ValueError(f"{rotulo}: instrumento já aplicado não pode ganhar `corrige` "
+                                 f"({novo['corrige_chave']}): o valor dele já foi gravado somado ao do corrigido; "
+                                 "registre um instrumento novo com `corrige`")
         elif ja["corrige_chave"] != novo["corrige_chave"]:
             raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
                              f"(corrige: {ja['corrige_chave']!r} → {novo['corrige_chave']!r}); registre um "
