@@ -366,8 +366,11 @@ def ler_curva_s(dados: bytes) -> list[tuple]:
     """O conteudo (`conteudo_curva_s`) de um xlsx gerado por `curva_s_xlsx`. ValueError se nao for uma curva S."""
     from openpyxl import load_workbook
     try:
-        ws = load_workbook(io.BytesIO(dados), read_only=True, data_only=True).active
-        linhas = list(ws.iter_rows(values_only=True))
+        wb = load_workbook(io.BytesIO(dados), read_only=True, data_only=True)
+        try:
+            linhas = list(wb.active.iter_rows(values_only=True))
+        finally:
+            wb.close()                              # read_only segura o zip aberto ate' o close
     except Exception as e:                          # zip truncado, xml quebrado: nao e' a curva gerada
         raise ValueError("arquivo da curva S ilegível") from e
     if not linhas or tuple(linhas[0][:4]) != COLUNAS_CURVA_S:

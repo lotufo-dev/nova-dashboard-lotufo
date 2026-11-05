@@ -676,3 +676,25 @@ def test_curva_s_com_arquivo_ausente_e_regravada_ao_atualizar_ou_montar(cenario,
             pleitos.montar(c, ids["uid"], pid)
         assert "curva_s" not in [x["codigo"] for x in pleitos.detalhe(c, pid)["pendencias"]]
         assert arquivos.caminho_seguro(_curvas_s(c, pid)[0]["arquivo"]).exists()
+
+
+def test_curva_s_que_some_sob_a_reserva_recusa_com_a_mensagem_e_destrava(cenario, monkeypatch):
+    """Issue #447 (/code-review): o arquivo da curva some entre a primeira conferencia e a reserva; o envio recusa
+    com a mensagem da curva (nao um erro de disco), nada sai e a reserva e' liberada."""
+    from app import envio_reserva
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    caminho = arquivos.caminho_seguro(_curvas_s(c, pid)[0]["arquivo"])
+    reservar = envio_reserva.reservar
+
+    def reserva_e_apaga(*a, **k):
+        reservar(*a, **k)
+        caminho.unlink()
+
+    monkeypatch.setattr(envio_reserva, "reservar", reserva_e_apaga)
+    pv = pleitos.previa_envio(c, pid)
+    with pytest.raises(ValueError, match="sumiu ou está corrompido"):
+        pleitos.enviar(c, ids["usuario"], pid, pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                       justificativa="conferido, segue assim")
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert pleitos.detalhe(c, pid)["envio_reservado_em"] is None

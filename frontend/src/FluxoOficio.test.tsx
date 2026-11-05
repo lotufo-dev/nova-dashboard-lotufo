@@ -99,7 +99,22 @@ describe("Ofício", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Prévia do e-mail" }));
     const previa = await screen.findByLabelText("Prévia do e-mail");
     expect(previa.textContent).toContain("A curva S mudou desde a carta montada");
-    const item = Array.from(previa.querySelectorAll(".pendencias li")).find(li => li.textContent?.includes("curva S"))!;
+    // so' a curva: a justificativa nao a libera, entao o campo nao aparece e o Enviar nao chama o servidor
+    expect(screen.queryByLabelText(/Justificativa/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("A curva S mudou desde a carta montada");
+    expect(api.mock.calls.some(c => c[0] === "/api/pleitos/4/enviar")).toBe(false);
+  });
+
+  it("com outra pendência junto, a lista vem antes do campo de justificativa", async () => {
+    const pend = [{ codigo: "anexo", mensagem: "Falta o memorial" },
+      { codigo: "curva_s", mensagem: "Curva S não anexada: atualize a curva S" }];
+    api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/pleitos/4/previa"
+      ? { ...PREVIA, pendencias: pend } : {}));
+    render(<CartaoPleito p={PLEITO} podeEditar aoMudar={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prévia do e-mail" }));
+    const previa = await screen.findByLabelText("Prévia do e-mail");
+    const item = Array.from(previa.querySelectorAll(".pendencias li")).find(li => li.textContent?.includes("Curva S"))!;
     const campo = screen.getByLabelText(/Justificativa/);
     expect(item.compareDocumentPosition(campo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

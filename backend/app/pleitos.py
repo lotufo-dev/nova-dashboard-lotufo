@@ -278,7 +278,8 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
 PASTA_CURVA_S = "curvas"
 
 
-CURVA_S_OBRIGATORIA = "A curva S vai com o pedido de prazo e não se remove: ela é trocada a cada carta montada"
+CURVA_S_OBRIGATORIA = ("A curva S vai com o pedido de prazo e não se remove: para trocá-la pela dos dados de agora, "
+                       "use Atualizar curva S")
 CURVA_S_FALTA = "Curva S não anexada: atualize a curva S"
 CURVA_S_MUDOU = "A curva S mudou desde a carta montada: atualize a curva S"
 CURVA_S_ILEGIVEL = "O arquivo da curva S anexada sumiu ou está corrompido: atualize a curva S"
@@ -850,13 +851,13 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         # Ja' com a reserva, a carta e os anexos nao mudam ate' o e-mail (`_anexos_mudaveis` recusa): confere tudo
         # de novo sobre a linha relida e manda exatamente isso. Memoria divergente, anexos acima do limite ou
         # pendencia que a pessoa nao viu na previa (cronograma tirado na outra aba, carta remontada) param aqui
+        if (curva := _problema_curva_s(conn, atual)):     # de novo sob a reserva: medicao ou cronograma no meio,
+            raise ValueError(curva)                       # e antes da previa, que le os anexos do disco (#447)
         pv_reservado = previa_envio(conn, pleito_id, hoje=hoje)
         vistas = {x["mensagem"] for x in pv["pendencias"]}
         novas = [x["mensagem"] for x in pv_reservado["pendencias"] if x["mensagem"] not in vistas]
         if _memoria_divergente(conn, atual):
             raise ValueError(MEMORIA_DIVERGENTE)
-        if (curva := _problema_curva_s(conn, atual)):     # de novo sob a reserva: medicao ou cronograma no meio
-            raise ValueError(curva)
         if pv_reservado["total"] > correio.MAX_TOTAL:
             raise ValueError("Anexos acima do limite do e-mail")
         if novas:
