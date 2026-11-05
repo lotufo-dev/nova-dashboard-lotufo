@@ -79,3 +79,47 @@ describe("App: a tela SIGA", () => {
     expect(api).not.toHaveBeenCalledWith("/api/siga");
   });
 });
+
+// Issue #417: fora do servidor oficial a dashboard sobe em modo copia; o health diz isso e toda tela mostra a faixa.
+describe("App: instalação não autorizada", () => {
+  const FAIXA = "Instalação não autorizada da Dashboard Lotufo. Envio de e-mail e sincronização com o RM estão desligados.";
+  const subir = (instalacao: string, logado = true) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/health") {
+      return { status: "ok", banco: "ok", instalacao, instalacao_motivo: instalacao === "nao-autorizada" ? "ausente" : null };
+    }
+    if (caminho === "/api/auth/eu") {
+      if (!logado) throw new Error("sem sessão");
+      return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", csrf: "x" };
+    }
+    if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
+    return [];
+  });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  it("mostra a faixa vermelha nas telas logadas quando o health diz nao-autorizada", async () => {
+    subir("nao-autorizada");
+    window.history.replaceState(null, "", "/inicio");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });
+    expect((await screen.findByRole("alert")).textContent).toBe(FAIXA);
+  });
+
+  it("mostra a faixa também na tela de login", async () => {
+    subir("nao-autorizada", false);
+    render(<App />);
+    expect((await screen.findByRole("alert")).textContent).toBe(FAIXA);
+    expect(screen.getByRole("button", { name: "Entrar" })).toBeTruthy();
+  });
+
+  it("sem faixa quando a instalação está autorizada (e no dev)", async () => {
+    for (const instalacao of ["autorizada", "dev"]) {
+      subir(instalacao);
+      window.history.replaceState(null, "", "/inicio");
+      render(<App />);
+      await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });
+      expect(api).toHaveBeenCalledWith("/api/health");
+      expect(screen.queryByText(FAIXA)).toBeNull();
+      cleanup(); api.mockReset();
+    }
+  });
+});
