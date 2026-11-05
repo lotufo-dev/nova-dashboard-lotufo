@@ -4,13 +4,13 @@ O login (`api_auth.login`) grava no `depois` de `auth.login` e de `auth.login_fa
 mesmo do limite por origem; X-Forwarded-For e' ignorado) e o navegador (User-Agent cortado em `NAVEGADOR_MAX`).
 Aqui so' se le a auditoria: ela continua append-only e encadeada, sem coluna nova.
 
-`itens` monta o bloco Seguranca como uma lista de `{nivel, mensagem, data}`; as proximas verificacoes do plano de
-protecao (integridade, sentinela, alertas) acrescentam itens a esta mesma lista.
+`itens` monta o bloco Seguranca como uma lista de `{nivel, mensagem, data}`; `app/integridade.py` (#421) acrescenta o item do codigo
+em producao diferente do ultimo deploy; as proximas verificacoes do plano de protecao acrescentam os seus.
 """
 import datetime
 import json
 
-from app import tempo
+from app import integridade, tempo
 
 NAVEGADOR_MAX = 200
 ACESSOS_NA_TELA = 10
@@ -136,7 +136,8 @@ def itens(conn, agora: datetime.datetime | None = None) -> list[dict]:
     """Bloco Seguranca de Administracao > Saude: `[{nivel, mensagem, data}]`, do mais novo ao mais antigo (empate
     mantem a ordem de gravacao, do mais novo ao mais antigo)."""
     agora = agora or tempo.agora_utc()
-    return sorted(_origem_nova(conn, agora) + _sentinela(conn, agora), key=lambda i: i["data"], reverse=True)
+    return sorted(_origem_nova(conn, agora) + _sentinela(conn, agora) + integridade.itens(), key=lambda i: i["data"],
+                  reverse=True)
 
 
 def bloco(conn, agora: datetime.datetime | None = None) -> tuple[list[dict], int]:

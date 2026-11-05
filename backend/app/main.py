@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import backup as backup_mod
-from app import correio, db, instalacao, logs
+from app import correio, db, instalacao, integridade, logs
 
 class FrontendSpa(StaticFiles):
     """Build do React com fallback para o index em caminho de TELA (fase 3,5).
@@ -74,6 +74,7 @@ def create_app() -> FastAPI:
     # oficial ela sobe em modo copia, sem envio de e-mail e sem RM.
     copia = instalacao.conferir()["instalacao"] == instalacao.NAO_AUTORIZADA
 
+    integridade.commit_atual()  # lido na subida: o /api/health nao chama o git na requisicao
     app = FastAPI(title="Dashboard Lotufo")
     # A-04 (10/10/2026): corpo acima do teto da' 413 antes de qualquer rota (ver app/limites.py).
     from app.limites import LimiteDeCorpo
@@ -103,7 +104,8 @@ def create_app() -> FastAPI:
         # quem decide e' o deploy.ps1, que volta o commit se a instalacao nao vier autorizada. Sem caminho de arquivo.
         inst = instalacao.estado()
         return {"status": "ok", "banco": "ok", "backup": backup_mod.estado(),
-                "instalacao": inst["instalacao"], "instalacao_motivo": inst["motivo"]}
+                "instalacao": inst["instalacao"], "instalacao_motivo": inst["motivo"],
+                "commit": integridade.commit_atual()}
 
     @app.exception_handler(sqlite3.OperationalError)
     def banco_ocupado(request: Request, exc: sqlite3.OperationalError):
@@ -208,6 +210,9 @@ def create_app() -> FastAPI:
         # Issue #423: a sentinela do log de seguranca do Windows (so' roda no Windows e fora de dev)
         from app import sentinela
         sentinela.agendar()
+        # Issue #421: codigo em producao conferido contra o ultimo deploy, na subida e de hora em hora (nao em dev)
+        if os.environ.get("DASH_DEV") != "1":
+            integridade.agendar()
         if not copia:
             # Sincronizacao horaria com o RM (fase 5): so' sobe se o RM estiver configurado.
             # Bloco 9: a observacao do Outlook e do SharePoint (fase 6) saiu; o RM e' a unica fonte automatica.
