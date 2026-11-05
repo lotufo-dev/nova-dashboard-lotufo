@@ -7,6 +7,7 @@ import { focarPorId } from "./foco";
 import { desfechoDoPedido, seloDoPrazo, type InstrumentoPrazo } from "./obra";
 import { Link } from "./Link";
 import { fmtDataPura } from "./tempo";
+import { brl } from "./formato";
 import Selo from "./Selo";
 
 // Aba Prazos da obra (bloco 7; spec §7.3 e §7.4; NAVEGACAO.md › Obra): a situacao do prazo (execucao, vigencia,
@@ -26,8 +27,14 @@ type Situacao = {
   instrumentos: Instrumento[];
 };
 
+// issue #398: pedido de aditivo de valor do cadastro (RPFO, readequacao), com o aditivo de valor que o atendeu
+// (app/prazos.py `pedidos_de_valor`, ligacao por data); sem carta nem envio pela dashboard
+export type PedidoValor = { id: number; numero_oficio: string | null; enviado_em: string | null; valor_centavos: number;
+  objeto: string | null; atendido_por: { numero: string | null; data_assinatura: string; rotulo: string } | null };
+
 // issue #292: `sugestao`, os dias que a carta de prazo sugere (app/prazos.py `sugestao_dias`)
-type Dados = { situacao: Situacao; historico: string; sugestao?: SugestaoDias | null; pleitos: Pleito[] };
+type Dados = { situacao: Situacao; historico: string; sugestao?: SugestaoDias | null; pleitos: Pleito[];
+  pedidos_valor?: PedidoValor[] };
 
 const MARCOS: [string, string][] = [["conclusao", "Conclusão"], ["provisorio", "Recebimento provisório"],
   ["definitivo", "Recebimento definitivo"], ["baixa_garantia", "Baixa da garantia"]];
@@ -81,6 +88,24 @@ export function LinhaPleito({ p, desfecho, contexto }: { p: Pleito; desfecho: De
   );
 }
 
+/** Pedido de valor como linha do cartão "Pedidos e cartas": ofício, data e valor; o selo diz se um aditivo atendeu. */
+export function LinhaPedidoValor({ p }: { p: PedidoValor }) {
+  return (
+    <section className="pleito-linha" aria-labelledby={`pedido-valor-${p.id}`} id={`pedido-valor-${p.id}`}>
+      <div className="pleito-linha__cabeca">
+        <h3 className="cartao__titulo" id={`pedido-valor-${p.id}`}>
+          Pedido de valor{p.numero_oficio ? ` ${p.numero_oficio}` : ""}{p.enviado_em ? ` de ${data(p.enviado_em)}` : ""}, <span className="num">{brl(p.valor_centavos)}</span>
+        </h3>
+        {/* a virgula fica fora do selo: a linha le "..., R$ X, sem resposta" */}
+        <span className="sr-only">, </span>
+        {p.atendido_por
+          ? <Selo classe="selo--ok">atendido pelo {p.atendido_por.rotulo}</Selo>
+          : <Selo classe="selo--atencao">sem resposta</Selo>}
+      </div>
+    </section>
+  );
+}
+
 export default function Prazos({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
   const [dados, setDados] = useState<Dados | null>(null);
   // "sem instrumento ha N dias": o numero vem do servidor (a lista de obras, mudanca A9), nao de uma conta da tela
@@ -125,7 +150,8 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
     const nome = inst.numero ?? (inst.forma === "apostilamento" ? "apostilamento" : "termo aditivo");
     return { classe: "selo--ok", texto: `atendido pelo ${nome}`, partes: envio };
   };
-  const oficios = dados.pleitos.length;
+  const pedidosValor = dados.pedidos_valor ?? [];
+  const oficios = dados.pleitos.length + pedidosValor.length;
   // pedido que ainda se trabalha (feito no sistema, nem enviado nem descartado): o caminho e' continuar nele
   const aberto = dados.pleitos.find(p => p.tipo === "prazo" && p.origem === "sistema" && p.situacao !== "enviado" && p.situacao !== "descartado");
 
@@ -214,6 +240,7 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
             {dados.pleitos.map(p => pleitoEmLinha(p)
               ? <LinhaPleito key={p.id} p={p} desfecho={desfecho(p)} />
               : <CartaoPleito key={p.id} p={p} podeEditar={podeEditar} aoMudar={() => void carregar()} />)}
+            {pedidosValor.map(p => <LinhaPedidoValor key={`valor-${p.id}`} p={p} />)}
           </div>
         )}
       </section>
