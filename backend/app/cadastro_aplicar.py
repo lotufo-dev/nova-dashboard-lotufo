@@ -899,8 +899,16 @@ def _instrumentos(conn, usuario_id, contrato_id, c, rel) -> None:
 
     # Ordem cronologica (empate: ordem do arquivo): o retrato valor_anterior/valor_novo de
     # cada aditivo depende dos que vieram antes.
-    ordenados = sorted(enumerate(c["instrumentos"]), key=lambda par: (par[1]["data"], par[0]))
-    for _, inst in ordenados:
+    ordenados = [inst for _, inst in sorted(enumerate(c["instrumentos"]), key=lambda par: (par[1]["data"], par[0]))]
+    # Issue #410 (gate Sol, rodada 2, PR #452): a correcao de valor de reajuste vem depois do termo que corrige, mesmo
+    # com data anterior; o retrato dela tira o corrigido do vigente, que tem de estar gravado. Entre os demais, a data.
+    chaves, feitos, fila = {i["chave"] for i in ordenados}, set(), []
+    while ordenados:
+        k = next((n for n, i in enumerate(ordenados) if not _corretor_de_valor(i) or i["corrige"] not in chaves
+                  or i["corrige"] in feitos), 0)     # ciclo de correcao: o validar recusa; aqui segue a data
+        fila.append(ordenados.pop(k))
+        feitos.add(fila[-1]["chave"])
+    for inst in fila:
         rotulo = f"{nome}/{inst['chave']}"
         if inst["tipo"] in TIPOS_ADITIVO:
             _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel)

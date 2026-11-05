@@ -1949,6 +1949,21 @@ def test_duas_correcoes_de_reajuste_do_mesmo_aditivo_sao_recusadas(conn):
                               "WHERE chave_cadastro='ta-10'").fetchone()) == (original, original + 120_01)
 
 
+def test_correcao_com_data_anterior_a_do_corrigido_grava_o_retrato_depois_dele(conn):
+    # gate Sol (rodada 2, PR #452): a correcao (e a correcao da correcao) com data anterior a do termo corrigido e'
+    # gravada depois dele; cada retrato parte do vigente sem o corrigido
+    original = _contrato()["valor_original_centavos"]
+    ta2 = {**TA_CORR, "data": "2026-07-20", "delta_valor_centavos": 110_01}
+    ta3 = {**TA_CORR2, "data": "2026-07-10", "corrige": "ta-09"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ta3, ta2, TA_REAJ])]))
+    retratos = {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT chave_cadastro, valor_anterior_centavos, valor_novo_centavos FROM aditivos")}
+    assert retratos == {"ta-08": (original, original + 100_01), "ta-09": (original, original + 110_01),
+                        "ta-10": (original, original + 120_01)}
+    v = contratos_mod.vigente(conn, 1)
+    assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 120_01, 120_01)
+
+
 def test_primeiro_ciclo_gravado_e_conferido_contra_a_base_guardada(conn):
     # gate Sol (rodada 1, PR #452): base 2023-04 guardada (unica na aplicacao); com duas bases e sem `data_base` o
     # validar so' confere o formato, e o aplicar recusa o ciclo fora de 2024..2026 (termo de 30/07/2026)
