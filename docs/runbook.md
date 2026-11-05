@@ -609,6 +609,7 @@ pleitos_anteriores:                 # enviados antes do sistema; não duplicam a
 - {tipo: reajuste, oficio: CT-122-LT-2026, data: 2026-04-23, data_base: 2023-03, ciclo: 2026}
 - {tipo: prazo, oficio: CT-282-LT-2026, data: 2026-08-07, dias: 180}
 - {tipo: conclusao, oficio: CT-245-LT-2026, data: 2026-07-31}
+- {tipo: valor, oficio: CT-301-LT-2026, data: 2026-03-27, valor: '1.000.000,00', objeto: 1ª RPFO}  # pedido de aditivo de valor; atendido pelo aditivo de valor assinado depois
 ```
 
 **Receita de deploy do bloco 7**: `deploy.ps1` com frontend (migração 026 na subida) → `cadastro aplicar

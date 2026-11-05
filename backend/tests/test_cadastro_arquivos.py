@@ -747,6 +747,48 @@ def test_apostilamento_sem_competencias_sem_data_base_em_contrato_de_duas_bases_
     assert any("instrumentos[ap-reaj-1]" in a and "data-base" in a for a in cad["avisos"]), cad["avisos"]
 
 
+# --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
+
+PEDIDO_VALOR = {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "valor": "1.000.000,00",
+                "objeto": "1ª RPFO"}
+
+
+def test_pleito_anterior_de_valor_valida_com_o_valor_em_centavos(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [PEDIDO_VALOR]}]))
+    assert cad["contratos"][0]["pleitos_anteriores"] == [
+        {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "data_base": None, "ciclo": None,
+         "dias": None, "valor_centavos": 100000000, "objeto": "1ª RPFO"}]
+
+
+def test_pleito_anterior_de_valor_sem_objeto_e_com_centavo_impar(tmp_path):
+    p = {k: v for k, v in PEDIDO_VALOR.items() if k != "objeto"} | {"valor": "0,01"}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
+    item = cad["contratos"][0]["pleitos_anteriores"][0]
+    assert item["valor_centavos"] == 1 and item["objeto"] is None
+
+
+@pytest.mark.parametrize("troca, campo", [
+    ({"valor": None}, ".valor"),
+    ({"valor": "1000.00"}, ".valor"),
+    ({"valor": "0,00"}, ".valor"),
+    ({"valor": "-1,00"}, ".valor"),
+    ({"dias": 120}, ".dias"),
+    ({"data_base": "2023-04"}, ".data_base"),
+    ({"ciclo": 2026}, ".ciclo"),
+])
+def test_pleito_anterior_de_valor_exige_valor_e_recusa_dias_e_data_base(tmp_path, troca, campo):
+    p = {**PEDIDO_VALOR, **troca}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
+    assert any(f"pleitos_anteriores[0]{campo}" in e for e in erros), erros
+
+
+@pytest.mark.parametrize("campo, valor", [("valor", "1,00"), ("objeto", "1ª RPFO")])
+def test_valor_e_objeto_so_valem_no_pleito_anterior_de_valor(tmp_path, campo, valor):
+    p = {"tipo": "prazo", "oficio": "331", "data": "2025-11-10", "dias": 120, campo: valor}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
+    assert any(f"pleitos_anteriores[0].{campo}" in e for e in erros), erros
+
+
 # --- issue #391: apostilamento de reajuste sem ciclo avisa o ano que vai valer -------------------------------
 
 def _avisos_ciclo(tmp_path, ap):

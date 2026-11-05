@@ -95,4 +95,40 @@ describe("Prazos", () => {
     expect(screen.getByText(/^Sugestão: 1 dia \(/)).toBeTruthy();
     expect((screen.getByLabelText("Dias de prorrogação") as HTMLInputElement).max).toBe("3650");
   });
+
+  // issue #398: pedido de aditivo de valor do cadastro (RPFO), ligado ao aditivo de valor assinado depois
+  const pedidoValor = (atendido_por: Record<string, unknown> | null = null) => ({
+    id: 9, numero_oficio: "CT-001-EX-2026", enviado_em: "2026-03-27", valor_centavos: 100000000, objeto: "1ª RPFO",
+    atendido_por });
+
+  it("pedido de valor sem resposta aparece em Pedidos e cartas, sem virar opção de carta nova", async () => {
+    api.mockResolvedValue({ situacao: situacao(), historico: "", pleitos: [], pedidos_valor: [pedidoValor()] });
+    render(<Prazos contratoId={1} podeEditar={true} />);
+    const titulo = await screen.findByRole("heading", { name: /^Pedido de valor/ });
+    expect(titulo.textContent).toMatch(/^Pedido de valor CT-001-EX-2026 de 27\/03\/2026, R\$\s1\.000\.000,00$/);
+    const selo = screen.getByText("sem resposta");
+    expect(selo.closest(".selo")?.className).toContain("selo--atencao");
+    expect(titulo.closest("section")?.textContent?.replace(/\s/g, " "))
+      .toBe("Pedido de valor CT-001-EX-2026 de 27/03/2026, R$ 1.000.000,00, sem resposta");
+    // a tela so' oferece carta de prorrogacao (e de conclusao, no encerramento); pedido de valor e' sessao manual
+    expect(screen.queryAllByRole("button", { name: /valor/i })).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Pedir prorrogação" }));
+    expect(screen.queryByRole("option", { name: /valor/i })).toBeNull();
+  });
+
+  it("pedido de valor atendido pelo aditivo posterior", async () => {
+    api.mockResolvedValue({ situacao: situacao(), historico: "", pleitos: [],
+      pedidos_valor: [pedidoValor({ numero: "099/2024/01/01", data_assinatura: "2026-06-30", rotulo: "1º TA" })] });
+    render(<Prazos contratoId={1} podeEditar={false} />);
+    const selo = await screen.findByText("atendido pelo 1º TA");
+    expect(selo.closest(".selo")?.className).toContain("selo--ok");
+    expect(screen.queryByText("sem resposta")).toBeNull();
+  });
+
+  it("resposta sem pedidos de valor (servidor antigo) não quebra a aba", async () => {
+    api.mockResolvedValue({ situacao: situacao(), historico: "", pleitos: [] });
+    render(<Prazos contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("31/12/2026")).toBeTruthy();
+    expect(screen.queryByText(/Pedido de valor/)).toBeNull();
+  });
 });

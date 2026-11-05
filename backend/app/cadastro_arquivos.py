@@ -38,7 +38,7 @@ TRATAMENTOS = ("Senhor", "Senhora")
 TIPOS_CONTRATANTE = ("PÚBLICO", "PRIVADO")
 # Bloco 7: marcos do encerramento (aba Prazos) e tipos de pleito enviados antes do sistema.
 MARCOS = ("conclusao", "provisorio", "definitivo", "baixa_garantia")
-TIPOS_PLEITO = ("reajuste", "prazo", "conclusao")
+TIPOS_PLEITO = ("reajuste", "prazo", "conclusao", "valor")   # valor: pedido de aditivo de valor (#398)
 # Pecas que o orgao pode pedir no pleito de reajuste (mesma lista de `pleitos.PECAS_ORGAO`).
 PECAS_PLEITO = ("falencia", "contrato_social", "documento_representante", "balanco")
 _CICLO = re.compile(r"^([0-9]{4})(-[0-9]{2})?$")
@@ -363,8 +363,24 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
             falha(onde, "oficio e data são obrigatórios")
             continue
         item = {"tipo": p["tipo"], "oficio": str(p["oficio"]).strip(), "data": data, "data_base": None,
-                "ciclo": None, "dias": None}
-        if p["tipo"] == "reajuste":
+                "ciclo": None, "dias": None, "valor_centavos": None, "objeto": None}
+        for campo in ("valor", "objeto"):
+            if p["tipo"] != "valor" and p.get(campo) is not None:
+                falha(f"{onde}.{campo}", "só vale no pedido de valor (tipo: valor)")
+        if p["tipo"] == "valor":
+            # issue #398: pedido de aditivo de valor (RPFO, readequacao); so' o valor pedido e o objeto
+            for campo in ("dias", "data_base", "ciclo"):
+                if p.get(campo) is not None:
+                    falha(f"{onde}.{campo}", "não vale no pedido de valor")
+            try:
+                item["valor_centavos"] = dinheiro.parse_brl(str(p.get("valor") or ""))
+            except ValueError as e:
+                falha(f"{onde}.valor", f"obrigatório no pedido de valor: {e}")
+            else:
+                if item["valor_centavos"] <= 0:
+                    falha(f"{onde}.valor", "use um valor maior que zero")
+            item["objeto"] = str(p.get("objeto") or "").strip() or None
+        elif p["tipo"] == "reajuste":
             if str(p.get("data_base") or "") not in meses:
                 falha(f"{onde}.data_base", "use uma das datas_base do contrato (AAAA-MM)")
             if _inteiro(p.get("ciclo"), 2000) is None:

@@ -21,8 +21,10 @@ TIPOS = ("reajuste", "prazo", "conclusao")
 PECAS_ORGAO = ("falencia", "contrato_social", "documento_representante", "balanco")
 TIPOS_ANEXO = ("planilha_calculo", "cronograma", "outro") + PECAS_ORGAO
 # IN 001/2024 art. 21 §1º: o pleito de reajuste leva memoria de calculo e cronograma; o de prazo, o cronograma.
-EXIGIDOS = {"reajuste": ("planilha_calculo", "cronograma"), "prazo": ("cronograma",), "conclusao": ()}
-ROTULO = {"reajuste": "Pleito de reajuste", "prazo": "Pedido de prorrogação", "conclusao": "Comunicação de conclusão"}
+EXIGIDOS = {"reajuste": ("planilha_calculo", "cronograma"), "prazo": ("cronograma",), "conclusao": (), "valor": ()}
+# issue #398: 'valor' (pedido de aditivo de valor) so' entra pelo cadastro; fora de TIPOS, nao tem carta nem envio
+ROTULO = {"reajuste": "Pleito de reajuste", "prazo": "Pedido de prorrogação", "conclusao": "Comunicação de conclusão",
+          "valor": "Pedido de valor"}
 ROTULO_ANEXO = {"planilha_calculo": "Memória de cálculo do reajuste", "cronograma": "Cronograma físico-financeiro",
                 "outro": "Outro anexo", "falencia": "Certidão de falência", "contrato_social": "Contrato social",
                 "documento_representante": "Documento do representante legal", "balanco": "Balanço patrimonial"}
@@ -641,6 +643,8 @@ def _anexos_envio(conn, p: dict) -> list[tuple[str, bytes]]:
 def previa_envio(conn, pleito_id: int, remetente: str | None = None, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     p = _linha(conn, pleito_id)
+    if p["tipo"] not in TIPOS:
+        raise ValueError(f"{ROTULO.get(p['tipo'], 'Este pleito')} não se envia pela dashboard")
     c = _contrato(conn, p["contrato_id"])
     _, regras, _ = _orgao(conn, c)
     textos, campos = _textos(conn, p), _campos(conn, p, c, hoje)
