@@ -558,6 +558,8 @@ def _trabalho(pdf: bytes, modo: str, envia, opcoes=None) -> None:
             valor = texto_de_pdf(pdf)
         elif modo == "paginas":
             valor = len(leitor_de_pdf(pdf).pages)
+        elif modo == "paginas_pacote":   # oficio/planilha da medicao (dezenas de paginas, como o pacote)
+            valor = len(leitor_de_pdf(pdf, pacote=True).pages)
         elif modo == "ocr":
             valor = texto_por_ocr(pdf, *opcoes)
         elif modo == "paginas_texto":
@@ -688,9 +690,10 @@ def primeira_pagina_com_limite(pdf: bytes) -> str:
     return com_limite(pdf, "primeira_pagina")
 
 
-def paginas_com_limite(pdf: bytes) -> int:
-    """Numero de paginas, lido em subprocesso com limite de tempo (ver `com_limite`)."""
-    return com_limite(pdf, "paginas")
+def paginas_com_limite(pdf: bytes, pacote: bool = False) -> int:
+    """Numero de paginas, lido em subprocesso com limite de tempo (ver `com_limite`). `pacote`: os tetos de
+    descompressao do pacote (oficio da medicao assinado no DocuSign tem trecho de 4,9 MB a 240:1, CT-408 BRT)."""
+    return com_limite(pdf, "paginas_pacote" if pacote else "paginas")
 
 
 def textos_por_pagina_com_limite(pdf: bytes, teto_paginas: int = 400) -> list[str]:
