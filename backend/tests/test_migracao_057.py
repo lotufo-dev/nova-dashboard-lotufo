@@ -1,4 +1,4 @@
-"""Migracao 056 (issue #398): `pleitos.tipo` aceita 'valor' (pedido de aditivo de valor do cadastro), com o valor
+"""Migracao 057 (issue #398): `pleitos.tipo` aceita 'valor' (pedido de aditivo de valor do cadastro), com o valor
 pedido em `valor_centavos` e o `objeto`. So' acrescenta: a reconstrucao de `pleitos` preserva linhas, colunas,
 indices e as filhas, e pode rodar de novo."""
 import shutil
@@ -10,15 +10,15 @@ from app import db
 
 pytestmark = pytest.mark.migracao_real
 
-MIGRACAO = "056_pleitos_tipo_valor.sql"
+MIGRACAO = "057_pleitos_tipo_valor.sql"
 
 
 @pytest.fixture
-def antes_da_056(tmp_path, monkeypatch):
+def antes_da_057(tmp_path, monkeypatch):
     pasta = tmp_path / "migracoes"
     pasta.mkdir()
     for f in db.MIGRATIONS_DIR.glob("*.sql"):
-        if f.name < "056":
+        if f.name < "057":
             shutil.copy(f, pasta / f.name)
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
     original = db.MIGRATIONS_DIR
@@ -51,8 +51,8 @@ def _tudo(c):
             for t in ("pleitos", "pleito_anexos", "reajuste_previsoes")}
 
 
-def test_056_preserva_os_pleitos_e_as_filhas(antes_da_056):
-    c = antes_da_056
+def test_057_preserva_os_pleitos_e_as_filhas(antes_da_057):
+    c = antes_da_057
     _semear(c)
     antes = _tudo(c)
     db.migrate(c)
@@ -69,8 +69,8 @@ def test_056_preserva_os_pleitos_e_as_filhas(antes_da_056):
     assert c.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='pleitos_nova'").fetchone()[0] == 0
 
 
-def test_056_aceita_o_pedido_de_valor_do_cadastro_e_so_ele(antes_da_056):
-    c = antes_da_056
+def test_057_aceita_o_pedido_de_valor_do_cadastro_e_so_ele(antes_da_057):
+    c = antes_da_057
     _semear(c)
     db.migrate(c)
     c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, numero_oficio, situacao, enviado_em, valor_centavos, "
@@ -94,8 +94,8 @@ def test_056_aceita_o_pedido_de_valor_do_cadastro_e_so_ele(antes_da_056):
                   "valor_previsto_centavos, origem, pleito_id) VALUES (1, '2024-06', 2026, '2026-06', 1, 'pleito', 4)")
 
 
-def test_056_roda_de_novo_sem_mexer_no_que_existe(antes_da_056):
-    c = antes_da_056
+def test_057_roda_de_novo_sem_mexer_no_que_existe(antes_da_057):
+    c = antes_da_057
     _semear(c)
     db.migrate(c)
     c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, numero_oficio, situacao, enviado_em, valor_centavos, "

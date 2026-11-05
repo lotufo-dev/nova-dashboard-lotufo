@@ -1,4 +1,4 @@
--- 056: pedido de aditivo de valor (RPFO, readequacao) enviado antes do sistema (issue #398). So' acrescenta: o tipo
+-- 057: pedido de aditivo de valor (RPFO, readequacao) enviado antes do sistema (issue #398). So' acrescenta: o tipo
 -- 'valor' no CHECK de `pleitos.tipo` e as colunas `valor_centavos` (o valor pedido) e `objeto`. Esse tipo so' entra
 -- pelo cadastro (`pleitos_anteriores`, origem 'cadastro'): nao ha' carta de aditivo de valor no sistema.
 --
