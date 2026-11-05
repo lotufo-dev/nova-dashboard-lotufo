@@ -11,6 +11,20 @@ def test_health(client):
     assert (corpo["instalacao"], corpo["instalacao_motivo"]) == ("dev", None)
 
 
+def test_health_mostra_o_commit_de_7_caracteres(client, monkeypatch):
+    from app import integridade
+    monkeypatch.setattr(integridade, "_commit", "abc1234")
+    monkeypatch.setattr(integridade, "_commit_lido", True)
+    assert client.get("/api/health").json()["commit"] == "abc1234"
+
+
+def test_commit_atual_le_o_head_do_clone(monkeypatch):
+    from app import integridade
+    monkeypatch.setattr(integridade, "_commit_lido", False)
+    monkeypatch.setattr(integridade, "commit_do_clone", lambda clone: "0123456789abcdef")
+    assert integridade.commit_atual() == "0123456"
+
+
 def _app_de_verdade(tmp_path, monkeypatch, maquina="MAQUINA-TESTE"):
     """App fora do dev, com o banco em <raiz>/dados: a instalacao e' conferida de verdade na subida."""
     from fastapi.testclient import TestClient
