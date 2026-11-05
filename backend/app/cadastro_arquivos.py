@@ -357,8 +357,9 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
             continue
         item = {"tipo": p["tipo"], "oficio": str(p["oficio"]).strip(), "data": data, "data_base": None,
                 "ciclo": None, "dias": None, "valor_centavos": None, "objeto": None}
-        if p["tipo"] != "valor" and p.get("valor") is not None:
-            falha(f"{onde}.valor", "só vale no pedido de valor (tipo: valor)")
+        for campo in ("valor", "objeto"):
+            if p["tipo"] != "valor" and p.get(campo) is not None:
+                falha(f"{onde}.{campo}", "só vale no pedido de valor (tipo: valor)")
         if p["tipo"] == "valor":
             # issue #398: pedido de aditivo de valor (RPFO, readequacao); so' o valor pedido e o objeto
             for campo in ("dias", "data_base", "ciclo"):

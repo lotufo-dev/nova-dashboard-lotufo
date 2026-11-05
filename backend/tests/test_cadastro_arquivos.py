@@ -765,7 +765,8 @@ def test_pleito_anterior_de_valor_exige_valor_e_recusa_dias_e_data_base(tmp_path
     assert any(f"pleitos_anteriores[0]{campo}" in e for e in erros), erros
 
 
-def test_valor_so_vale_no_pleito_anterior_de_valor(tmp_path):
-    p = {"tipo": "prazo", "oficio": "331", "data": "2025-11-10", "dias": 120, "valor": "1,00"}
+@pytest.mark.parametrize("campo, valor", [("valor", "1,00"), ("objeto", "1ª RPFO")])
+def test_valor_e_objeto_so_valem_no_pleito_anterior_de_valor(tmp_path, campo, valor):
+    p = {"tipo": "prazo", "oficio": "331", "data": "2025-11-10", "dias": 120, campo: valor}
     erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
-    assert any("pleitos_anteriores[0].valor" in e for e in erros), erros
+    assert any(f"pleitos_anteriores[0].{campo}" in e for e in erros), erros

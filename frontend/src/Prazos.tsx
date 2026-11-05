@@ -91,9 +91,9 @@ export function LinhaPleito({ p, desfecho, contexto }: { p: Pleito; desfecho: De
 /** Pedido de valor como linha do cartão "Pedidos e cartas": ofício, data e valor; o selo diz se um aditivo atendeu. */
 export function LinhaPedidoValor({ p }: { p: PedidoValor }) {
   return (
-    <section className="pleito-linha" aria-labelledby={`pedido-valor-${p.id}`} id={`pedido-valor-${p.id}`}>
+    <section className="pleito-linha" aria-labelledby={`titulo-pedido-valor-${p.id}`} id={`pedido-valor-${p.id}`}>
       <div className="pleito-linha__cabeca">
-        <h3 className="cartao__titulo" id={`pedido-valor-${p.id}`}>
+        <h3 className="cartao__titulo" id={`titulo-pedido-valor-${p.id}`}>
           Pedido de valor{p.numero_oficio ? ` ${p.numero_oficio}` : ""}{p.enviado_em ? ` de ${data(p.enviado_em)}` : ""}, <span className="num">{brl(p.valor_centavos)}</span>
         </h3>
         {/* a virgula fica fora do selo: a linha le "..., R$ X, sem resposta" */}

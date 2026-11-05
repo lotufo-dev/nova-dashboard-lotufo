@@ -144,7 +144,7 @@ def _ordinal(a: dict, contado: int) -> int:
 
 def pedidos_de_valor(conn, contrato_id: int) -> list[dict]:
     """Issue #398: os pedidos de aditivo de valor (RPFO, readequacao) do cadastro, do mais recente ao mais antigo,
-    cada um com o aditivo que o atendeu: o primeiro aditivo de valor assinado no dia do envio ou depois (a mesma
+    cada um com o aditivo que o atendeu: o primeiro aditivo de valor (acrescimo de execucao) assinado no dia do envio ou depois (a mesma
     ligacao por data do pedido de prorrogacao, em `situacao`), ou None (sem resposta). O ordinal do termo e' o de
     `_ordinal`, contado entre os termos aditivos assinados do contrato na falta dele."""
     aditivos, conta = [], {}
@@ -153,7 +153,8 @@ def pedidos_de_valor(conn, contrato_id: int) -> list[dict]:
         a = dict(a)
         forma = a.get("forma") or "termo_aditivo"
         conta[forma] = conta.get(forma, 0) + 1
-        if a["tipo"] in ("valor", "misto") and a["delta_valor_centavos"]:
+        # acrescimo de execucao: supressao (delta negativo) e aditivo de reajuste (SES, #262) nao respondem a RPFO
+        if a["tipo"] in ("valor", "misto") and a["delta_valor_centavos"] > 0 and a.get("natureza") != "reajuste":
             nome = "TA" if forma == "termo_aditivo" else "apostilamento"
             aditivos.append({"numero": a["numero"], "data_assinatura": a["data_assinatura"],
                              "rotulo": f"{_ordinal(a, conta[forma])}º {nome}"})

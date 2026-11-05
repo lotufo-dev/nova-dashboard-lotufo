@@ -975,3 +975,12 @@ def test_pedido_de_valor_e_atendido_pelo_primeiro_aditivo_de_valor_depois_dele(c
                                                                 pleitos_anteriores=[PEDIDO_VALOR, segundo])]))
     por_oficio = {p["numero_oficio"]: p["atendido_por"]["rotulo"] for p in prazos_mod.pedidos_de_valor(conn, 1)}
     assert por_oficio == {"CT-001-LT-2026": "1º TA", "CT-050-LT-2026": "2º TA"}
+
+
+def test_supressao_e_aditivo_de_reajuste_nao_atendem_o_pedido_de_valor(conn):
+    supressao = {**AD_VALOR, "delta_valor_centavos": -1000001}
+    de_reajuste = {**AD_VALOR, "chave": "ta-02", "data": "2026-07-30", "numero": "019/2024/01/02",
+                   "natureza": "reajuste"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[supressao, de_reajuste],
+                                                                pleitos_anteriores=[PEDIDO_VALOR])]))
+    assert prazos_mod.pedidos_de_valor(conn, 1)[0]["atendido_por"] is None
