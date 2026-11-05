@@ -157,6 +157,34 @@ def test_tres_envios_simultaneos_saem_uma_vez(api, monkeypatch):
     assert len(falso.enviados) == 1 and _estado(pid)[1] == 1
 
 
+def test_reajuste_sem_apostilamento_sai_so_com_justificativa_e_uma_vez(api, monkeypatch):
+    """Issue #278: o reajuste da MT-PAR sem apostilamento que cubra a competencia so' sai com justificativa (422 sem
+    ela, antes da reserva); com ela, dois POST simultaneos dao um 200 e um 409."""
+    cl, cid, _ = api
+    c = db.get_conn()
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 23, 'reajuste', '2026-09', 'nota_emitida', 100001)", (cid,))
+    mid = c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
+    c.commit(); c.close()
+    pid, corpo = _pronto(cl, cid, mid)
+    assert "Nenhum apostilamento cobre 09/2026; a nota de reajuste não pode sair antes dele" in corpo["confirmadas"]
+    falso = CorreioFalso(espera=0.3)
+    monkeypatch.setattr(correio, "cliente", falso)
+    r = cl.post("/api/protocolos/envio", json={**corpo, "justificativa": None})
+    assert r.status_code == 422 and "justificativa" in r.json()["detail"], r.text
+    assert _estado(pid) == ({"situacao": "assinado", "envio_id": None, "envio_reservado_em": None}, 0)
+    largada, respostas = threading.Barrier(2), []
+
+    def dispara():
+        largada.wait()
+        respostas.append(cl.post("/api/protocolos/envio", json=corpo))
+
+    ts = [threading.Thread(target=dispara) for _ in range(2)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert sorted(r.status_code for r in respostas) == [200, 409], [r.text for r in respostas]
+    assert len(falso.enviados) == 1 and _estado(pid)[1] == 1
+
+
 def test_envio_recusa_se_os_anexos_mudaram_depois_da_previa(api, monkeypatch):
     """Issue #10, revisor R3 (PR #92): a tela manda os anexos que a pessoa viu na previa; se o servidor monta
     outros na hora do envio (NF anexada a' medicao com a previa aberta, p. ex.), recusa antes do e-mail."""

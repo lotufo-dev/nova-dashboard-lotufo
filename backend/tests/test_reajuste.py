@@ -945,3 +945,42 @@ def test_aditivo_com_ciclo_guardado_nao_fecha_pela_ligacao_o_pleito_de_outro_cic
     assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2026, True) is None
     # ligado ao 2026, nao e' reaproveitado no 2025 pela data; o proximo `aplicar` move a ligacao (test_cadastro_aplicar)
     assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True) is None
+
+
+# --- issue #278: o apostilamento que cobre a competencia da medicao de reajuste (oficio da MT-PAR e da Prefeitura) ---
+
+def test_apostilamento_da_medicao_pela_lista_ou_pelo_percentual_e_nenhum_fora_deles(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) "
+              "VALUES (?, 'ap-lista', 'apostilamento_reajuste', '001/2025/03/01', '2026-08-10', ?)",
+              (cid, json.dumps({"data_base": "2024-06", "ciclo": 2026,
+                                "competencias": [{"competencia": "2026-06", "valor": "100,01", "medicao": 30}]})))
+    ap = c.execute("SELECT MAX(id) FROM instrumentos").fetchone()[0]
+    _previsao(c, cid, "2026-06", 100_01, "apostilamento", instrumento_id=ap, criado_em="2026-08-10 10:00:00")
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) "
+              "VALUES (?, 'ap-mtpar', 'apostilamento_reajuste', '001/2025/03/02', '2026-09-15', ?)",
+              (cid, json.dumps({"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76",
+                                "periodo": {"de": "2026-07", "ate": "2026-08"}})))
+    c.commit()
+    por_lista = _medicao(c, cid, 30, "2026-06", "nota_emitida", pedido=100_01)
+    por_percentual = _medicao(c, cid, 32, "2026-08", "nota_emitida", pedido=200_03)
+    sem_termo = _medicao(c, cid, 33, "2026-09", "nota_emitida", pedido=300_05)
+    antes_do_aniversario = _medicao(c, cid, 1, "2025-03", "nota_emitida", pedido=50_01)
+
+    def termo(mid):
+        m = dict(c.execute("SELECT * FROM medicoes WHERE id=?", (mid,)).fetchone())
+        t = reajuste.apostilamento_da_medicao(c, m)
+        return t and (t["chave"], t["numero"])
+
+    assert termo(por_lista) == ("ap-lista", "001/2025/03/01")
+    assert termo(por_percentual) == ("ap-mtpar", "001/2025/03/02")
+    assert termo(sem_termo) is None and termo(antes_do_aniversario) is None
+    # termo corrigido nao cobre mais: o que o corrige e' o que vale (issue #271)
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) "
+              "VALUES (?, 'ap-mtpar-ret', 'apostilamento_reajuste', '001/2025/03/03', '2026-10-01', ?)",
+              (cid, json.dumps({"data_base": "2024-06", "ciclo": 2026, "percentual": "6,80", "corrige": "ap-mtpar",
+                                "periodo": {"de": "2026-08", "ate": "2026-09"}})))
+    c.commit()
+    assert termo(por_percentual) == ("ap-mtpar-ret", "001/2025/03/03")
+    assert termo(sem_termo) == ("ap-mtpar-ret", "001/2025/03/03")

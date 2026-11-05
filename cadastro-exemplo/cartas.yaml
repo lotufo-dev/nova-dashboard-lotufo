@@ -1,7 +1,8 @@
 # Textos de exemplo (inventados) das cartas e dos e-mails de protocolo. Placeholders: {razao_social} {cnpj}
 # {oficio} {medicao} {a_medicao} {numero} {numero_extenso} {periodo} {competencia} {obra} {instrumento}
-# {objeto} {municipio} {lista} {saudacao} {oficio_barra}. {lista} é montada pelo sistema; {lista_anexos}
-# (só no e-mail) é o que de fato vai anexado.
+# {objeto} {municipio} {lista} {saudacao} {oficio_barra} {apostilamento}. {lista} é montada pelo sistema; {lista_anexos}
+# (só no e-mail) é o que de fato vai anexado. {apostilamento} é o nº do termo que cobre a competência do reajuste
+# (issue #278); sem termo, fica à vista no texto e o envio pede justificativa.
 # Campos opcionais por família: `local` (cidade da carta), `assinatura` (linhas) e o par
 # `reajuste_carta_assunto` + `reajuste_carta_corpo`, usado no protocolo que leva só o reajuste.
 signatario: [CONSTRUTORA EXEMPLO LTDA, Responsável de Exemplo]
@@ -26,6 +27,14 @@ familias:
     carta_assunto: 'Ref.: {medicao} ({periodo})'
     carta_corpo: |
       {razao_social}, CNPJ {cnpj}, responsável pela obra {objeto}, envia os documentos relativos {a_medicao}, período {periodo}:
+
+      {lista}
+
+      Ficamos à disposição.
+
+      Cordialmente,
+    reajuste_carta_corpo: |
+      {razao_social}, CNPJ {cnpj}, responsável pela obra {objeto}, envia os documentos relativos {a_medicao}, competência {competencia}, período {periodo}, conforme o Termo de Apostilamento nº {apostilamento}:
 
       {lista}
 
@@ -94,6 +103,12 @@ familias:
     carta_assunto: 'Ref.: nota fiscal da {medicao} ({periodo})'
     carta_corpo: |
       {razao_social}, CNPJ {cnpj}, responsável pela obra {objeto}, envia a nota fiscal relativa {a_medicao}, período {periodo}:
+
+      {lista}
+
+      Cordialmente,
+    reajuste_carta_corpo: |
+      {razao_social}, CNPJ {cnpj}, responsável pela obra {objeto}, envia a nota fiscal relativa {a_medicao}, competência {competencia}, período {periodo}, conforme o Termo de Apostilamento nº {apostilamento}:
 
       {lista}
 

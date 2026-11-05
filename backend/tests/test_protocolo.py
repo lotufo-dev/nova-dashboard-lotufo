@@ -278,6 +278,67 @@ def test_bloqueio_recusa_o_protocolo_mesmo_confirmado(cenario):
     assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
 
 
+# --- issue #278: o oficio de reajuste da MT-PAR e da Prefeitura cita o apostilamento que cobre a competencia -------
+
+SEM_APOSTILAMENTO = "Nenhum apostilamento cobre 09/2026; a nota de reajuste não pode sair antes dele"
+
+
+def _data_base_e_termo(c, cid, termo=True):
+    """Data-base 09/2025 (a competencia 09/2026 abre o ciclo 2026) e, com `termo`, o percentual apostilado da MT-PAR
+    com o periodo que a cobre."""
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2025-09', 'INCC-DI')", (cid,))
+    if termo:
+        c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) "
+                  "VALUES (?, 'ap-reaj-01', 'apostilamento_reajuste', '001/2025/03/02', '2026-09-01', ?)",
+                  (cid, json.dumps({"data_base": "2025-09", "ciclo": 2026, "percentual": "4,15",
+                                    "periodo": {"de": "2026-09", "ate": "2027-08"}})))
+    c.commit()
+
+
+def test_oficio_de_reajuste_mtpar_cita_o_apostilamento_e_a_competencia(cenario):
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    corpo = protocolo.corpo_padrao(c, pid)
+    assert "competência 09/2026" in corpo and "Termo de Apostilamento nº 001/2025/03/02" in corpo
+    texto = " ".join(_textos(protocolo.montar(c, ids["uid"], pid)["arquivo"])[0].split())
+    assert "Termo de Apostilamento nº 001/2025/03/02" in texto and "{apostilamento}" not in texto
+    assert "sem_apostilamento" not in [x["codigo"] for x in protocolo.detalhe(c, pid)["pendencias"]]
+    assert protocolo.previa_envio(c, [pid])["exige_justificativa"] is False
+    p_exec = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    assert "Apostilamento" not in protocolo.corpo_padrao(c, p_exec)         # o oficio da execucao nao muda
+
+
+def test_reajuste_sem_apostilamento_avisa_na_montagem_e_o_envio_exige_justificativa(cenario):
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    avisos = [x["mensagem"] for x in protocolo.detalhe(c, pid)["pendencias"] if x["codigo"] == "sem_apostilamento"]
+    assert avisos == [SEM_APOSTILAMENTO]                                   # antes de montar
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid])
+    faltam = [x["mensagem"] for x in pv["pendencias"]]
+    assert pv["exige_justificativa"] is True and faltam == [SEM_APOSTILAMENTO]
+    args = (c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    with pytest.raises(protocolo.ConfirmarPendencias):                      # a confirmacao continua valendo
+        protocolo.enviar(*args, justificativa="o órgão pediu a nota antes do termo")
+    for curta in (None, "", "   curta  "):
+        with pytest.raises(ValueError, match="justificativa"):
+            protocolo.enviar(*args, justificativa=curta, confirmadas=faltam)
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert protocolo.detalhe(c, pid)["situacao"] == "assinado"
+    protocolo.enviar(*args, justificativa="o órgão pediu a nota antes do termo", confirmadas=faltam)
+    d = protocolo.detalhe(c, pid)
+    assert d["situacao"] == "enviado" and d["justificativa"].startswith("o órgão pediu a nota antes do termo; ")
+    assert SEM_APOSTILAMENTO in d["justificativa"]
+    # a execucao da mesma competencia e o reajuste da SINFRA (aba do caderno, feito por fora) nao ganham o aviso
+    p_exec = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    p_sinfra = protocolo.criar(c, ids["uid"], ids["sinfra"], "medicao", [ids["sinfra_reaj"]], "311")
+    for p in (p_exec, p_sinfra):
+        assert "sem_apostilamento" not in [x["codigo"] for x in protocolo.detalhe(c, p)["pendencias"]]
+        assert protocolo.previa_envio(c, [p])["exige_justificativa"] is False
+
+
 def test_sinfra_medicao_nao_protocola_e_nota_protocola_com_o_oficio_da_medicao(cenario):
     c, ids = cenario
     p1 = protocolo.criar(c, ids["uid"], ids["sinfra"], "medicao", [ids["sinfra_exec"]], "310")

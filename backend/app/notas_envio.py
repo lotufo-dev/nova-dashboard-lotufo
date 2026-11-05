@@ -441,6 +441,8 @@ def detalhe_envio(conn, protocolo_id: int, remetente: str | None = None, hoje: d
             "previa": {k: pv[k] for k in ("para", "copia", "assunto", "corpo", "anexos", "total", "limite", "links")},
             # issue #213: com pendencia, o Enviar abre o aviso "ATENÇÃO" com esta lista e manda a lista confirmada
             "bloqueio": pv["bloqueio"], "pendencias": [x["mensagem"] for x in pv["pendencias"]],
+            # issue #278: reajuste sem apostilamento que cubra a competencia: o envio pede justificativa escrita
+            "exige_justificativa": pv["exige_justificativa"],
             "extras": [{"id": x["id"], "nome": x["nome"], "tamanho": x["tamanho"]}
                        for x in protocolo._pecas(conn, protocolo_id) if x["tipo"] == protocolo.ANEXO]}
 

@@ -17,7 +17,7 @@ from html import escape
 
 from app import (arquivos, assinatura, auditoria, carta, cadastro_arquivos, certidoes, checklist, correio, db,
                  documentos, envio_reserva, espelhos, frc, leitura_pdf, medicoes, oficios, pdfs, tempo)
-from app import html_email, siga
+from app import html_email, reajuste, siga
 
 TIPOS_PECA = cadastro_arquivos.TIPOS_PECA
 ROTULO_NATUREZA = {"execucao": "Medição", "projeto": "Projeto", "reajuste": "Reajuste"}
@@ -29,6 +29,14 @@ MIN_JUSTIFICATIVA = 10           # enviar com pendencia exige uma frase, nao "."
 ANEXO = "anexo"
 CONFIRMADO_COM_FALTA = "Envio confirmado com o que faltava: "     # issue #213
 JUSTIFICATIVA_POS_ENVIO ="Pendência surgida entre a prévia e o envio; o e-mail já tinha saído"
+# Issue #278 (spec 2026-10-20 §4 item 2): na MT-PAR e na Prefeitura o oficio de reajuste da Nª medicao e' da Lotufo e
+# cita o apostilamento que cobre a competencia. Sem termo que a cubra, a nota de reajuste nao pode sair: o aviso vai
+# entre as pendencias (desde a montagem) e o envio, alem da confirmacao do que falta, exige justificativa escrita.
+# Na SINFRA o oficio de reajuste e' aba do caderno (feito por fora); na SES o reajuste sai por aditivo (#390).
+FAMILIAS_OFICIO_REAJUSTE = ("mtpar", "prefeitura")
+SEM_APOSTILAMENTO = "sem_apostilamento"
+JUSTIFICATIVA_SEM_APOSTILAMENTO = ("Sem apostilamento que cubra a competência do reajuste: escreva a justificativa do "
+                                   f"envio, com pelo menos {MIN_JUSTIFICATIVA} caracteres")
 NUMERO_ORGAO_VAZIO = "Informe o número do protocolo no órgão"
 # A-13 (testes de quebra 10/10/2026): o link vira <a href> no e-mail oficial ao orgao; so' o OneDrive e o SharePoint
 # da Lotufo. Comparacao exata do host: "...sharepoint.com.evil.test" nao passa. Issue #118: os hosts vem de
@@ -367,10 +375,31 @@ def _lista(conn, p: dict, familia: str, regras: dict, ms: list[dict]) -> str:
     return "\n".join(linhas)
 
 
+def _termos_de_reajuste(conn, ms: list[dict]) -> tuple[list[dict], list[str]]:
+    """Issue #278: das medicoes de reajuste, os apostilamentos que cobrem a competencia de cada uma (sem repetir) e
+    as competencias (MM/AAAA) que nenhum cobre."""
+    termos: dict[str, dict] = {}
+    sem: list[str] = []
+    for m in ms:
+        if m["tipo"] != "reajuste":
+            continue
+        t = reajuste.apostilamento_da_medicao(conn, m)
+        comp = f"{m['competencia'][5:7]}/{m['competencia'][:4]}"
+        if t:
+            termos.setdefault(t["chave"], t)
+        elif comp not in sem:
+            sem.append(comp)
+    return list(termos.values()), sem
+
+
 def _campos(conn, p: dict, c: dict, familia: str, regras: dict, ms: list[dict]) -> dict:
     em = carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}
     m0 = ms[0]
-    return {"razao_social": em.get("razao_social", ""), "cnpj": em.get("cnpj", ""),
+    # issue #278: {apostilamento} e' o nº do termo que cobre a competencia do reajuste; sem termo (ou sem numero no
+    # cadastro), o campo fica a' vista no texto, como todo dado que falta (`carta._Campos`), e o aviso vai nas pendencias
+    numeros = [t["numero"] for t in _termos_de_reajuste(conn, ms)[0] if t["numero"]]
+    return {**({"apostilamento": " e ".join(numeros)} if numeros else {}),
+            "razao_social": em.get("razao_social", ""), "cnpj": em.get("cnpj", ""),
             "oficio": p["numero_oficio"] or "",
             "oficio_barra": oficios.na_carta(p["numero_oficio"]) if p["numero_oficio"] else "", "medicao": " e ".join(titulo(m) for m in ms),
             # "à 23ª Medição" / "ao Reajuste da 23ª Medição" (a carta real diz "relativos a ...")
@@ -540,6 +569,11 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     e = _etapa(familia, p["etapa"])
     ms = _medicoes(conn, p["id"])
     out = []
+    # issue #278: o aviso vem primeiro e acompanha o protocolo desde a montagem; enviado, a cobranca acabou
+    if familia in FAMILIAS_OFICIO_REAJUSTE and p["situacao"] != "enviado":
+        out += [{"codigo": SEM_APOSTILAMENTO,
+                 "mensagem": f"Nenhum apostilamento cobre {comp}; a nota de reajuste não pode sair antes dele"}
+                for comp in _termos_de_reajuste(conn, ms)[1]]
     if "notas" in e.partes or "notas" in e.soltos:
         for m in ms:
             if m["estado"] in SEM_NOTA or not _docs_nota(conn, [m["id"]]):
@@ -876,6 +910,16 @@ def _conferir_confirmacao(pend: list[dict], confirmadas: list[str] | None, acao:
                               pend)
 
 
+def exige_justificativa(pend: list[dict]) -> bool:
+    """Issue #278: reajuste sem apostilamento que cubra a competencia so' sai com justificativa escrita."""
+    return any(x["codigo"] == SEM_APOSTILAMENTO for x in pend)
+
+
+def _conferir_justificativa(pend: list[dict], justificativa: str | None) -> None:
+    if exige_justificativa(pend) and len((justificativa or "").strip()) < MIN_JUSTIFICATIVA:
+        raise ValueError(JUSTIFICATIVA_SEM_APOSTILAMENTO)
+
+
 def previa_envio(conn, protocolo_ids: list[int], remetente: str | None = None,
                  hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
@@ -914,7 +958,8 @@ def previa_envio(conn, protocolo_ids: list[int], remetente: str | None = None,
     return {"para": para, "copia": copia, "assunto": carta.preencher(textos.get(k_assunto, ""), campos),
             "corpo": corpo, "links": por_link,
             "anexos": [{"nome": n, "tamanho": len(b), "origem": o} for n, b, o in anexos], "total": total,
-            "limite": correio.MAX_TOTAL, "pendencias": pend, "bloqueio": " · ".join(dict.fromkeys(bloqueios)) or None}
+            "limite": correio.MAX_TOTAL, "pendencias": pend, "exige_justificativa": exige_justificativa(pend),
+            "bloqueio": " · ".join(dict.fromkeys(bloqueios)) or None}
 
 
 _URL = re.compile(r"https://[^\s<>\"]+")
@@ -978,6 +1023,7 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
         _conferir_anexos(anexos_previa, pv["anexos"])
     justificativa = (justificativa or "").strip() or None
     _conferir_confirmacao(pv["pendencias"], confirmadas)
+    _conferir_justificativa(pv["pendencias"], justificativa)          # issue #278
     # Reserva atomica antes do e-mail (A-02, 10/10/2026): dois cliques simultaneos nao mandam dois e-mails.
     # Todos os protocolos do e-mail numa transacao so': se um ja' esta' em envio, nenhum fica reservado.
     with db.mutacao(conn):
@@ -993,6 +1039,7 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
         # A lista lida aqui e' a que vale: e' ela que vai na auditoria e na ressalva (revisor adversarial da PR #227)
         no_lock = _pendencias_envio(conn, [_linha(conn, x["id"]) for x in ps], hoje)
         _conferir_confirmacao(no_lock, confirmadas)
+        _conferir_justificativa(no_lock, justificativa)
         faltam = [q["mensagem"] for q in no_lock]
         for x in ps:
             envio_reserva.reservar(conn, "protocolos", x["id"], usuario["id"], x["envio_id"])

@@ -143,6 +143,23 @@ def test_juntar_e_separar_descarta_o_rascunho_anterior(svc):
         notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_exec"], ids["mtpar_reaj"]], "361")
 
 
+def test_reajuste_sem_apostilamento_avisa_e_pede_justificativa_na_mtpar_e_na_prefeitura(svc):
+    """Issue #278: o envio com nota de reajuste sem apostilamento que cubra a competencia mostra o aviso no ofício e
+    pede justificativa (MT-PAR e Prefeitura, onde o ofício de reajuste é da Lotufo); a execução e a SINFRA, não."""
+    c, ids = svc
+    aviso = "Nenhum apostilamento cobre 09/2026; a nota de reajuste não pode sair antes dele"
+    p_mtpar = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_reaj"]], "361")
+    p_vg = notas_envio.iniciar(c, ids["uid"], ids["vg"], [ids["vg_exec"], ids["vg_reaj"]], "254")    # D9: um ofício
+    for pid in (p_mtpar, p_vg):
+        d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+        assert aviso in d["pendencias"] and d["exige_justificativa"] is True
+    p_exec = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_exec"]], "362")
+    p_sinfra = notas_envio.iniciar(c, ids["uid"], ids["sinfra"], [ids["sinfra_exec"], ids["sinfra_reaj"]])
+    for pid in (p_exec, p_sinfra):
+        d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+        assert aviso not in d["pendencias"] and d["exige_justificativa"] is False
+
+
 # --- regras do envio (D1-D7) -----------------------------------------------------------------------
 
 def test_sinfra_corpo_pelos_anexos_regularidade_com_nome_novo_e_sem_cno(svc):
