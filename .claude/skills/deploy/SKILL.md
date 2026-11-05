@@ -86,12 +86,16 @@ git diff --name-only "$atual" origin/master -- frontend
      O rollback não volta o banco: se houve backup pré-migração, dizer ao Leo o caminho do arquivo, que é o
      que se restaura à mão (runbook, "Restaurar o banco a partir de um snapshot") se for preciso.
    - `deploy abortado no build; producao segue no commit anterior ...` → a versão nova não subiu e a produção
-     segue no commit anterior. Avisar o Leo com o motivo, não tentar de novo sozinho.
+     segue no commit anterior. Avisar o Leo com o motivo, não tentar de novo sozinho. Com o aviso
+     `instalacao nao autorizada para o commit novo` antes, o motivo é o arquivo da instalação (runbook, "Instalação
+     assinada").
    - `ROLLBACK TAMBEM FALHOU - intervir a mao` ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`
      → avisar o Leo na hora; logs em `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
      **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior.
 4. Conferir a saúde na própria máquina (runbook, "Saúde"):
-   `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok`
+   `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok` e
+   `instalacao: autorizada` (`nao-autorizada` é a produção em modo cópia, sem e-mail e sem RM: avisar o Leo com o
+   `instalacao_motivo` e seguir o runbook, "Instalação assinada")
    (a porta é a de `-Porta` do `deploy.ps1`, padrão 80 em HTTP, quando o `:80` pode ser omitido)
    (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
    `origin/master`.
