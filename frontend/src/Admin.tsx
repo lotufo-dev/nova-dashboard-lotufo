@@ -344,7 +344,8 @@ function Saude() {
     carregar();
     api<Backup>("/api/admin/backup").then(setB).catch(() => setB(null));
     api<{ siga: SaudeSiga; seguranca?: ItemSeguranca[] }>("/api/admin/saude")
-      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? []); })
+      // sem o campo nao ha' o que afirmar: "nao foi possivel ler", nunca o OK de quem conferiu e nao achou nada
+      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? null); })
       .catch(() => { setSiga(null); setSeguranca(null); });
   }, []);
 
@@ -799,7 +800,7 @@ function Usuarios({ eu }: { eu?: number }) {
                       </div></td>
                     </tr>
                     {aberto && (
-                      <tr className="linha linha--acessos">
+                      <tr className="linha">
                         <td colSpan={7} id={`acessos-${u.id}`}>
                           <UltimosAcessos url={`/api/admin/usuarios/${u.id}/acessos`} rotulo={`Últimos acessos de ${u.nome}`} />
                         </td>

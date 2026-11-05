@@ -433,8 +433,18 @@ test("Saúde: bloco Segurança mostra o administrador que entrou de origem nova;
   expect(within(vazio).queryByText(/origem nova/)).toBeNull();
 });
 
-test("Saúde: sem ler a Saúde, o bloco Segurança diz que não deu para ler", async () => {
+test("Saúde: sem ler a Saúde, o bloco Segurança diz que não deu para ler, nunca OK", async () => {
   saudeCom(BACKUP_EM_DIA);   // /api/admin/saude falha
   const bloco = await screen.findByRole("region", { name: "Segurança" });
   expect(await within(bloco).findByText(/Não foi possível ler a segurança/)).toBeTruthy();
+  cleanup();
+  // resposta sem o campo: o bloco nao finge que conferiu
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/admin/saude") return { siga: SIGA_SEM_LEITURA };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  const semCampo = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(semCampo).findByText(/Não foi possível ler a segurança/)).toBeTruthy();
+  expect(within(semCampo).queryByText("OK")).toBeNull();
 });
