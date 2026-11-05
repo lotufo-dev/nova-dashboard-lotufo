@@ -91,6 +91,34 @@ def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
     assert linha_ok.rstrip().endswith("AvisarSeCopia }")
     # o Saudavel antigo (so' o status) nao pode ter sobrado em outro lugar
     assert script.count("function Saudavel") == 2      # Saudavel e SaudavelENovo
+    # SaudavelENovo repassa a exigencia: sem o parametro o PowerShell 5.1 poria -ExigirInstalacao em $args, sem erro,
+    # e o deploy voltaria a aceitar so' o 200 (revisor-adversarial da PR #437, ao juntar com a #389)
+    novo = script[script.index("function SaudavelENovo"):script.index("function AvisarSeCopia")]
+    assert novo.startswith("function SaudavelENovo([switch]$ExigirInstalacao) {")
+    assert "Saudavel -ExigirInstalacao:$ExigirInstalacao" in novo
+
+
+def test_deploy_confere_a_instalacao_antes_de_parar_a_producao():
+    # Issue #417 (gate Sol da PR #437): as migracoes rodam na subida, entao a conferencia do codigo novo vem depois do
+    # build e ANTES de parar a tarefa; recusada, cai no catch do Construir, que volta o pinado sem reiniciar nada.
+    script = _ler("deploy.ps1")
+    assert '$instalacaoArquivo = "C:\\DashboardLotufo\\segredos\\instalacao.json"' in script
+    funcao = script[script.index("function ConferirInstalacao"):script.index("function DonoDaPorta")]
+    assert "& $py -m app.cli instalacao verificar --arquivo $instalacaoArquivo" in funcao
+    assert 'Push-Location (Join-Path $AppDir "backend")' in funcao
+    assert re.search(r"if \(\$LASTEXITCODE -ne 0\) \{ throw ", funcao)
+    chamada = script.index("try { Construir $alvo; ConferirInstalacao }")
+    assert chamada < script.index("    Reiniciar\n") and chamada < script.index("SaudavelENovo -ExigirInstalacao")
+    # o rollback (Construir $anterior) nao confere: o commit anterior pode nem ter o comando
+    assert script.count("ConferirInstalacao") == 2      # a definicao e a chamada do deploy
+
+
+def test_rodar_producao_fixa_o_arquivo_da_instalacao_na_raiz():
+    # Gate Sol da PR #437: uma DASH_INSTALACAO_ARQUIVO herdada apontaria para outro arquivo (falso modo copia e rollback)
+    script = _ler("rodar_producao.ps1")
+    linha = '$env:DASH_INSTALACAO_ARQUIVO = Join-Path $Raiz "segredos\\instalacao.json"'
+    assert script.count(linha) == 1
+    assert script.index(linha) < script.index("-m uvicorn")
 
 
 def test_deploy_fica_so_em_ascii_sem_bom():
