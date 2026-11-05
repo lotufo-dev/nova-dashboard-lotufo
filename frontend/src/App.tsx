@@ -42,9 +42,13 @@ export default function App() {
   const [copia, setCopia] = useState(false);
 
   useEffect(() => {
-    // o health e' aberto (sem login) e a conferencia da instalacao so' muda quando o servidor reinicia: uma leitura basta
-    api<{ instalacao?: string }>("/api/health")
+    // O health e' aberto (sem login). Relido a cada 5 minutos: a leitura que falhou (servidor reiniciando) e o servidor
+    // que reiniciou em modo copia com a aba aberta aparecem sem F5; a falha mantem o que ja' se sabia.
+    const ler = () => api<{ instalacao?: string }>("/api/health")
       .then(s => setCopia(s?.instalacao === "nao-autorizada")).catch(() => {});
+    ler();
+    const id = window.setInterval(ler, 5 * 60_000);
+    return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {
