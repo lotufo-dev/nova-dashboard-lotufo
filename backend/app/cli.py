@@ -303,6 +303,9 @@ def _conciliacao(args) -> int:
         return 0
     antigas = None
     if args.acao == "antiga":
+        if not instalacao.ligada():        # issue #417: a copia nao fala com o RM
+            print(instalacao.MSG_RM)
+            return 1
         from app import rm
         cliente = rm.de_ambiente()
         if cliente is None:
@@ -359,18 +362,23 @@ def _instalacao(args) -> int:
     except (ValueError, TypeError):
         print(f"Recusado, nada foi gravado: {caminho} não é uma chave privada Ed25519 (ou a senha não confere)")
         return 1
+    if not instalacao.e_a_chave_embutida(chave):
+        print("Recusado, nada foi gravado: esta chave não é a que o código confere (app/instalacao.py); o servidor "
+              "recusaria o arquivo (motivo assinatura).")
+        return 1
+    saida = Path(args.saida)
+    if saida.exists():          # nunca por cima de outro arquivo (a propria chave, por engano)
+        print(f"Recusado, nada foi gravado: já existe {saida}")
+        return 1
     try:
         conteudo = instalacao.assinar(chave, args.maquina)
     except ValueError as e:
         print(f"Recusado, nada foi gravado: {e}")
         return 1
-    saida = Path(args.saida)
     saida.parent.mkdir(parents=True, exist_ok=True)
-    saida.write_bytes(conteudo)
+    with open(saida, "xb") as f:
+        f.write(conteudo)
     print(f"Arquivo assinado para a máquina {args.maquina.strip()}: {saida}")
-    if not instalacao.e_a_chave_embutida(chave):
-        print("AVISO: esta chave não é a que o código confere (app/instalacao.py): o servidor vai recusar o arquivo "
-              "(motivo assinatura).")
     return 0
 
 
