@@ -122,9 +122,13 @@ def _como_termo(r) -> dict:
 
 
 def _aditivo_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, unica: bool) -> dict | None:
-    """Sem pleito enviado: o aditivo de reajuste cuja base e ciclo (`base_e_ciclo_do_aditivo`) sao estes."""
-    for r in conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND {ADITIVO_DE_REAJUSTE} "
-                          "ORDER BY data_assinatura DESC, id DESC", (contrato_id,)):
+    """Sem pleito enviado: o aditivo de reajuste cuja base e ciclo (`base_e_ciclo_do_aditivo`) sao estes. Um aditivo
+    so' fecha um ciclo (gate Sol, rodada extra, PR #407): o ja' ligado a pleito de outro ciclo ou base atende aquele, e
+    nao este pela data (a janela entre a migracao 058 e o primeiro `aplicar`, com base e ciclo ainda vazios)."""
+    for r in conn.execute(f"SELECT * FROM aditivos a WHERE a.contrato_id=? AND {ADITIVO_DE_REAJUSTE} "
+                          "AND NOT EXISTS (SELECT 1 FROM pleitos p WHERE p.contrato_id = a.contrato_id "
+                          "AND p.instrumento_chave = a.chave_cadastro AND NOT (p.data_base_mes = ? AND p.ciclo = ?)) "
+                          "ORDER BY data_assinatura DESC, id DESC", (contrato_id, mes_base, ciclo)):
         if base_e_ciclo_do_aditivo(r, mes_base if unica else None) == (mes_base, ciclo):
             return _como_termo(r)
     return None
@@ -133,12 +137,18 @@ def _aditivo_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, unica: 
 def _aditivo_do_pleito(conn, contrato_id: int, pleito: dict, unica: bool) -> dict | None:
     """O aditivo de reajuste que o cadastro ligou ao pleito (`instrumento_chave` = chave do aditivo no cadastro), se
     ele e' da data-base do pleito. Aditivo sem base guardada so' vale com data-base unica (gate Sol, PR #407): a ligacao
-    feita quando o contrato tinha uma so' deixa de dizer qual atende depois que entra a segunda."""
+    feita quando o contrato tinha uma so' deixa de dizer qual atende depois que entra a segunda. Com base ou ciclo
+    guardados (migracao 058), o par inteiro tem de ser o do pleito (gate Sol, rodada extra): um aditivo nao fecha dois
+    ciclos."""
     if not pleito.get("instrumento_chave"):
         return None
     r = conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=? AND {ADITIVO_DE_REAJUSTE}",
                      (contrato_id, pleito["instrumento_chave"])).fetchone()
-    if r is None or base_e_ciclo_do_aditivo(r, pleito["data_base_mes"] if unica else None)[0] != pleito["data_base_mes"]:
+    if r is None:
+        return None
+    base, ciclo = base_e_ciclo_do_aditivo(r, pleito["data_base_mes"] if unica else None)
+    guardado = r["data_base_mes"] is not None or r["ciclo_reajuste"] is not None
+    if base != pleito["data_base_mes"] or (guardado and ciclo != pleito["ciclo"]):
         return None
     return _como_termo(r)
 

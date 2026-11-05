@@ -923,3 +923,25 @@ def test_aditivo_cancelado_nao_pede_reemissao(obra_ses):
     assert reajuste.ciclos(c, cid, D(2026, 1, 10))[0]["situacao"] == "apostilamento_pendente"
     _aditivo_reajuste(c, cid, "ta-05", "2025-11-21", natureza="execucao")
     assert reajuste.ciclos(c, cid, D(2026, 1, 10))[0]["situacao"] == "reemitir"
+
+
+def test_aditivo_ligado_sem_base_nem_ciclo_guardados_fecha_so_o_ciclo_do_pleito(obra_ses):
+    # gate Sol (rodada extra, PR #407): banco migrado (058) sem `aplicar` ainda, aditivo ligado ao pleito de 2025 e
+    # assinado depois do aniversario de 2026: fecha o 2025 pela ligacao e nao fecha o 2026 pela data
+    c, cid = obra_ses
+    _pleito_2025(c, cid, chave="ta-03")
+    _aditivo_reajuste(c, cid, "ta-03", "2026-10-20")              # data_base_mes e ciclo_reajuste nulos
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-03"
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2026, True) is None
+    r = reajuste.ciclos(c, cid, D(2026, 11, 5))[0]
+    assert (r["ciclo"], r["situacao"]) == (2026, "pleito_pendente")
+
+
+def test_aditivo_com_ciclo_guardado_nao_fecha_pela_ligacao_o_pleito_de_outro_ciclo(obra_ses):
+    # o par inteiro (base, ciclo) guardado tem de ser o do pleito: ligacao residual a outro ciclo nao fecha
+    c, cid = obra_ses
+    _pleito_2025(c, cid, chave="ta-03", ciclo=2026, enviado_em="2026-10-02")
+    _aditivo_reajuste(c, cid, "ta-03", "2026-10-20", data_base="2021-10", ciclo=2025)
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2026, True) is None
+    # ligado ao 2026, nao e' reaproveitado no 2025 pela data; o proximo `aplicar` move a ligacao (test_cadastro_aplicar)
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True) is None
