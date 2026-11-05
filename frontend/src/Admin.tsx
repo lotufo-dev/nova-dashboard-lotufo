@@ -52,7 +52,10 @@ type Backup = { ultimo_backup: string | null; tamanho_bytes: number | null; guar
                 ultima_copia_arquivos?: string | null; ultima_copia_arquivos_erro?: string | null;
                 ultima_copia_arquivos_erro_em?: string | null;
                 ultima_copia_externa_arquivos?: string | null; ultima_copia_externa_arquivos_erro?: string | null;
-                ultima_copia_externa_arquivos_erro_em?: string | null };
+                ultima_copia_externa_arquivos_erro_em?: string | null;
+                // issue #419: copia cifrada semanal para a chave do dono (a data vem do disco)
+                copia_dono_configurada?: boolean; copia_dono_atrasada?: boolean;
+                ultima_copia_dono?: string | null; ultima_copia_dono_erro?: string | null; ultima_copia_dono_erro_em?: string | null };
 
 // Issue #330: /api/admin/saude. ultima_leitura = quando o monitor do SIGA mandou a leitura mais recente (nulo: nunca leu)
 type SaudeSiga = { ultima_leitura: string | null; atrasado: boolean; processos: number };
@@ -117,7 +120,8 @@ function CartaoSituacao({ titulo, valor, nota, situacao }: { titulo: string; val
 // o backup falhou: atrasado ou uma das tentativas de copia deu erro (o cartao de cima e o cartao Backup usam a mesma regra)
 function backupFalhou(b: Backup | null | undefined): boolean {
   return !!b && (b.atrasado || !!b.ultimo_snapshot_erro || !!b.ultima_copia_externa_erro
-    || !!b.ultima_copia_arquivos_erro || !!b.ultima_copia_externa_arquivos_erro);
+    || !!b.ultima_copia_arquivos_erro || !!b.ultima_copia_externa_arquivos_erro
+    || !!b.ultima_copia_dono_erro || !!b.copia_dono_atrasada);
 }
 
 function Situacoes({ status, erroCarga, rodando, b, siga }: {
@@ -264,8 +268,46 @@ function LinhaBackup({ rotulo, em, erro, erroEm }: { rotulo: string; em: string 
   );
 }
 
+/** Issue #419: a copia cifrada para a chave do dono e o botao que a gera na hora (a rota so' aceita admin). */
+function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
+  const [gerando, setGerando] = useState(false);
+  const [erro, setErro] = useState("");
+  async function gerar() {
+    setErro(""); setGerando(true);
+    try {
+      await api("/api/admin/copia-dono", { method: "POST" });
+      aoGerar();
+    } catch (e) {
+      setErro(mensagem(e));
+    } finally { setGerando(false); }
+  }
+  return (
+    <div className="cartao__corpo pilha pilha--curta">
+      <p>
+        Cópia do dono:{" "}
+        {!b.copia_dono_configurada ? "Cópia do dono não configurada"
+          : b.ultima_copia_dono ? fmtDataHora(b.ultima_copia_dono) : "—"}
+      </p>
+      {b.copia_dono_configurada && b.copia_dono_atrasada && (
+        <CaixaAviso nivel="critico">
+          {`Cópia do dono atrasada: ${b.ultima_copia_dono ? `a última foi em ${fmtDataHora(b.ultima_copia_dono)}, há mais de 8 dias.`
+            : "nenhuma cópia gerada ainda."}`}
+        </CaixaAviso>
+      )}
+      <LinhaBackup rotulo="Cópia do dono" em={b.ultima_copia_dono ?? null} erro={b.ultima_copia_dono_erro ?? null}
+        erroEm={b.ultima_copia_dono_erro_em ?? null} />
+      {erro && <Erro texto={erro} />}
+      <div>
+        <button type="button" className="btn btn--pequeno" onClick={gerar} disabled={gerando}>
+          {gerando ? "Gerando…" : "Gerar cópia do dono agora"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // b: undefined = carregando; null = nao deu para ler
-function Backup({ b }: { b: Backup | null | undefined }) {
+function Backup({ b, aoGerar }: { b: Backup | null | undefined; aoGerar: () => void }) {
   const falhou = backupFalhou(b);
   return (
     <section className="cartao" aria-labelledby="titulo-backup">
@@ -295,6 +337,7 @@ function Backup({ b }: { b: Backup | null | undefined }) {
               </>}
         </div>
       )}
+      {b && <CopiaDono b={b} aoGerar={aoGerar} />}
     </section>
   );
 }
@@ -313,9 +356,10 @@ function Saude() {
   const [versao, setVersao] = useState(0);
 
   const carregar = () => api<StatusRm>("/api/rm/status").then(s => { setStatus(s); setErroCarga(""); }).catch(e => setErroCarga(falhaDeCarga(e)));
+  const carregarBackup = () => api<Backup>("/api/admin/backup").then(setB).catch(() => setB(null));
   useEffect(() => {
     carregar();
-    api<Backup>("/api/admin/backup").then(setB).catch(() => setB(null));
+    carregarBackup();
     api<{ siga: SaudeSiga }>("/api/admin/saude").then(r => setSiga(r.siga)).catch(() => setSiga(null));
   }, []);
 
@@ -363,7 +407,7 @@ function Saude() {
 
       <div className="saude-lado">
         <ReconciliacaoResumo versao={versao} />
-        <Backup b={b} />
+        <Backup b={b} aoGerar={carregarBackup} />
       </div>
     </div>
   );

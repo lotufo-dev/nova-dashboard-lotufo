@@ -130,3 +130,39 @@ def test_saude_so_para_admin(client_admin):
     client_admin.cookies.set("sessao", r.cookies["sessao"])
     client_admin.headers["X-CSRF-Token"] = r.json()["csrf"]
     assert client_admin.get("/api/admin/saude").status_code == 403
+
+
+def test_copia_dono_botao_so_admin_e_sem_chave_nao_gera(client_admin):
+    # issue #419: sem chave publica, o botao responde "Cópia do dono não configurada" e nada e' gerado
+    from app import backup
+    r = client_admin.post("/api/admin/copia-dono")
+    assert r.status_code == 409 and r.json()["detail"] == "Cópia do dono não configurada"
+    assert not (backup.pasta_local() / "dono").exists()
+    s = client_admin.get("/api/admin/backup").json()
+    assert s["copia_dono_configurada"] is False and s["ultima_copia_dono"] is None
+
+    client_admin.post("/api/admin/usuarios", json={"nome": "Eng", "email": "eng@lotufo.com",
+                                                   "senha": "senha-eng-123", "perfil": "engenharia"})
+    r = client_admin.post("/api/auth/login", json={"email": "eng@lotufo.com", "senha": "senha-eng-123"})
+    client_admin.cookies.clear()
+    client_admin.cookies.set("sessao", r.cookies["sessao"])
+    client_admin.headers["X-CSRF-Token"] = r.json()["csrf"]
+    assert client_admin.post("/api/admin/copia-dono").status_code == 403
+
+
+def test_copia_dono_botao_gera_e_a_saude_mostra_a_data(client_admin):
+    import pytest
+    pytest.importorskip("pyrage")
+    from pyrage import x25519
+    from app import backup, db
+    raiz = backup.pasta_local().parent.parent
+    (raiz / "segredos").mkdir(parents=True, exist_ok=True)
+    (raiz / "segredos" / "chave-publica-dono.txt").write_text(str(x25519.Identity.generate().to_public()),
+                                                              encoding="utf-8")
+    backup.criar_snapshot(db.db_path(), backup.pasta_local())
+    r = client_admin.post("/api/admin/copia-dono")
+    assert r.status_code == 200, r.text
+    assert (backup.pasta_local() / "dono" / r.json()["arquivo"]).exists()
+    s = client_admin.get("/api/admin/backup").json()
+    assert s["copia_dono_configurada"] is True and s["ultima_copia_dono"] and s["copia_dono_atrasada"] is False
+    assert "ultima_copia_dono" in backup.estado()
