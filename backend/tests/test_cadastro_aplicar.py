@@ -1783,3 +1783,122 @@ def test_correcao_da_data_de_pleito_nao_perde_a_ligacao_ao_aditivo_de_reajuste(c
     cedo = {**PLEITO_2026, "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-08-15"}}
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[CT120, cedo])]))
     assert _ligacoes(conn) == {"CT-120-LT-2026": None, "CT-122-LT-2026": "ta-08"}
+
+
+# --- issue #410: base inferida cede a declaracao; legado segue a base do pleito ligado; correcao conta so' uma vez ---
+
+def _ta_origem(conn):
+    return tuple(conn.execute("SELECT data_base_mes, data_base_origem FROM aditivos "
+                              "WHERE chave_cadastro='ta-08'").fetchone())
+
+
+def _ultima_auditoria_do_aditivo(conn):
+    antes, depois = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.instrumento' "
+                                 "ORDER BY id DESC LIMIT 1").fetchone()
+    return json.loads(antes), json.loads(depois)
+
+
+def test_declaracao_de_data_base_sobrescreve_a_inferida_com_auditoria(conn):
+    # aplicado sem `data_base` com a base unica 2023-04; o contrato ganha a 2023-06 e o YAML passa a declarar que o
+    # termo e' dela: a declarada entra, auditada, e o ciclo 2026 que fecha e' o da 2023-06
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ])]))
+    assert _ta_origem(conn) == ("2023-04", "unica")
+    declarado = {**TA_REAJ, "dados": {"data_base": "2023-06"}}
+    cad = _cad(contratos=[_contrato(instrumentos=[declarado], datas_base=DUAS_BASES)])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ta_origem(conn) == ("2023-06", "declarada")
+    assert r["instrumentos"]["alterados"] == ["MT-402/ta-08"]
+    assert _ultima_auditoria_do_aditivo(conn) == ({"data_base_mes": "2023-04", "data_base_origem": "unica"},
+                                                  {"data_base_mes": "2023-06", "data_base_origem": "declarada"})
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-06", 2026, False)["chave"] == "ta-08"
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, False) is None
+    ks = {k["data_base_mes"]: k for k in reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))}
+    assert ks["2023-06"]["apostilamento"]["chave"] == "ta-08"
+    assert ks["2023-04"]["apostilamento"] is None
+    # reaplicar e' igual; a declarada trava
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["instrumentos"]["alterados"] == []
+    with pytest.raises(ValueError, match="data_base_mes: '2023-06' → '2023-04'"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+            instrumentos=[{**TA_REAJ, "dados": {"data_base": "2023-04"}}], datas_base=DUAS_BASES)]))
+    assert _ta_origem(conn) == ("2023-06", "declarada")
+
+
+def test_declaracao_diferente_da_base_declarada_e_recusada(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+        instrumentos=[{**TA_REAJ, "dados": {"data_base": "2023-04"}}], datas_base=DUAS_BASES)]))
+    assert _ta_origem(conn) == ("2023-04", "declarada")
+    with pytest.raises(ValueError, match="data_base_mes: '2023-04' → '2023-06'"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+            instrumentos=[{**TA_REAJ, "dados": {"data_base": "2023-06"}}], datas_base=DUAS_BASES)]))
+
+
+def test_base_gravada_antes_da_060_cede_a_declaracao_e_a_mesma_declaracao_trava(conn):
+    # sem origem (aplicado entre a 058 e a 060): conta como inferida; a mesma base declarada so' marca a origem
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ])]))
+    conn.execute("UPDATE aditivos SET data_base_origem=NULL WHERE chave_cadastro='ta-08'"); conn.commit()
+    igual = {**TA_REAJ, "dados": {"data_base": "2023-04"}}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[igual], datas_base=DUAS_BASES)]))
+    assert _ta_origem(conn) == ("2023-04", "declarada")
+    assert r["instrumentos"]["alterados"] == ["MT-402/ta-08"]
+    with pytest.raises(ValueError, match="data_base_mes"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+            instrumentos=[{**TA_REAJ, "dados": {"data_base": "2023-06"}}], datas_base=DUAS_BASES)]))
+
+
+def test_aditivo_legado_ligado_a_pleito_segue_na_base_do_pleito_quando_o_contrato_troca_a_base_unica(conn):
+    # aplicado antes da 058 (base vazia) e ligado ao pleito da base 2023-04; o contrato troca a base unica para a
+    # 2023-06 antes do primeiro aplicar depois da 058: o aditivo fica na 2023-04 e a ligacao ao pleito nao se perde
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08"}
+    conn.execute("UPDATE aditivos SET data_base_mes=NULL, data_base_origem=NULL WHERE chave_cadastro='ta-08'")
+    conn.commit()
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026],
+                                    datas_base=[{"mes": "2023-06", "indice": "FGV/DNIT"}])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ta_origem(conn) == ("2023-04", "pleito")
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08"}
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["instrumentos"]["alterados"] == []
+
+
+def test_aditivo_legado_ligado_a_pleitos_de_duas_bases_exige_declaracao(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    conn.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+                 "enviado_em, instrumento_chave) VALUES (1,'reajuste','cadastro','2023-06',2026,'CT-123-LT-2026',"
+                 "'enviado','2026-06-23','ta-08')")
+    conn.execute("UPDATE aditivos SET data_base_mes=NULL, data_base_origem=NULL WHERE chave_cadastro='ta-08'")
+    conn.commit()
+    with pytest.raises(ValueError, match="ta-08.*data_base"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], datas_base=DUAS_BASES,
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    assert _ta_origem(conn) == (None, None)
+
+
+def test_aditivo_de_reajuste_corrigido_sai_do_valor_vigente(conn):
+    # comentario da issue (PR #433 da #409): TA1 (+R$ 100,01) e TA2 (+R$ 100,01, corrige o TA1) -- o vigente e o
+    # reajuste contratado contam so' o TA2, e o retrato do TA2 nao carrega o delta do TA1
+    original = _contrato()["valor_original_centavos"]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ])]))
+    v = contratos_mod.vigente(conn, 1)
+    assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 100_01, 100_01)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR])]))
+    v = contratos_mod.vigente(conn, 1)
+    assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 100_01, 100_01)
+    assert v["valor_vigente_execucao_centavos"] == original
+    assert tuple(conn.execute("SELECT valor_anterior_centavos, valor_novo_centavos FROM aditivos "
+                              "WHERE chave_cadastro='ta-09'").fetchone()) == (original, original + 100_01)
+
+
+def test_aditivo_de_reajuste_corrigido_aplicado_do_zero_sai_do_valor_vigente(conn):
+    original = _contrato()["valor_original_centavos"]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR])]))
+    assert contratos_mod.vigente(conn, 1)["valor_vigente_centavos"] == original + 100_01
+    assert tuple(conn.execute("SELECT valor_anterior_centavos, valor_novo_centavos FROM aditivos "
+                              "WHERE chave_cadastro='ta-09'").fetchone()) == (original, original + 100_01)
+
+
+def test_aditivo_de_prazo_que_corrige_o_de_reajuste_nao_tira_o_valor_dele(conn):
+    original = _contrato()["valor_original_centavos"]
+    prazo = {**AD_VALOR, "chave": "ta-10", "tipo": "aditivo_prazo", "numero": "019/2024/01/10", "data": "2026-08-20",
+             "delta_valor_centavos": 0, "nova_execucao_fim": "2027-06-30", "natureza": None, "corrige": "ta-08"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, prazo])]))
+    assert contratos_mod.vigente(conn, 1)["valor_vigente_centavos"] == original + 100_01

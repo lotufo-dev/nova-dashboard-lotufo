@@ -910,6 +910,8 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=?", (contrato_id,))]
     declarada = d.get("data_base") if reaj else None
     novo["data_base_mes"] = (declarada or (bases[0] if len(bases) == 1 else None)) if reaj else None
+    # issue #410 (migracao 060): de onde veio a base; so' a declarada trava, a inferida cede a primeira declaracao
+    novo["data_base_origem"] = ("declarada" if declarada else "unica") if novo["data_base_mes"] else None
     novo["ciclo_reajuste"] = int(str(d["ciclo"])[:4]) if reaj and d.get("ciclo") is not None else None
     # issue #409 (migracao 059): o instrumento que este aditivo corrige; o motor do reajuste tira o corrigido
     novo["corrige_chave"] = inst["corrige"]
@@ -925,13 +927,20 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
             """INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim,
                    nova_execucao_fim, status, data_assinatura, numero, objeto, forma, chave_cadastro,
                    valor_anterior_centavos, valor_novo_centavos, assinado_por, observacao, ordinal, natureza,
-                   data_base_mes, ciclo_reajuste, corrige_chave)
-               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   data_base_mes, ciclo_reajuste, corrige_chave, data_base_origem)
+               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (contrato_id, novo["tipo"], novo["delta_valor_centavos"], novo["nova_vigencia_fim"],
              novo["nova_execucao_fim"], novo["data_assinatura"], novo["numero"], novo["objeto"],
              novo["forma"], inst["chave"], anterior, anterior + novo["delta_valor_centavos"], usuario_id,
              f"Corrige {inst['corrige']}" if inst["corrige"] else None, novo["ordinal"], novo["natureza"],
-             novo["data_base_mes"], novo["ciclo_reajuste"], novo["corrige_chave"]))
+             novo["data_base_mes"], novo["ciclo_reajuste"], novo["corrige_chave"], novo["data_base_origem"]))
+        if reaj and novo["corrige_chave"]:
+            # issue #410 (comentario da PR #433): a correcao de reajuste substitui o corrigido no vigente, entao o
+            # retrato dela parte do vigente sem ele (o vigente de agora, que ja' o tira, menos o delta dela)
+            agora = contratos.vigente(conn, contrato_id)["valor_vigente_centavos"]
+            if agora != anterior + novo["delta_valor_centavos"]:
+                conn.execute("UPDATE aditivos SET valor_anterior_centavos=?, valor_novo_centavos=? WHERE id=?",
+                             (agora - novo["delta_valor_centavos"], agora, cur.lastrowid))
         rel["criados"].append(rotulo)
         auditoria.registrar(conn, usuario_id, "cadastro.instrumento", "aditivo", cur.lastrowid, None,
                             {"chave": inst["chave"], **novo})
@@ -953,13 +962,34 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     # base e ciclo do aditivo de reajuste (migracao 058): como a natureza, o NULL (aplicado antes da 058, ou sem
     # declaracao) aceita o primeiro valor, auditado, e trava depois. A base guardada so' muda por declaracao diferente
     # (erro); sem declaracao, segue a guardada mesmo que o contrato ganhe outra base (como a 055 no apostilamento).
-    for campo, declarado in (("data_base_mes", declarada), ("ciclo_reajuste", novo["ciclo_reajuste"])):
-        if ja[campo] is None:
-            if novo[campo] is not None:
-                campos[campo] = novo[campo]
-        elif (campo == "ciclo_reajuste" or declarado is not None) and declarado != ja[campo]:
-            raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
-                             f"({campo}: {ja[campo]!r} → {declarado!r}); registre um instrumento novo com `corrige`")
+    # Issue #410 (migracao 060): so' a base declarada trava. A inferida (a base unica de quando foi aplicado, a do
+    # pleito ligado, ou sem origem: gravada antes da 060) cede a primeira declaracao, auditada. O aditivo sem base
+    # (aplicado antes da 058) que ja' atende pleito fica na base desse pleito, nao na base unica de agora.
+    if reaj:
+        if declarada is not None:
+            if ja["data_base_mes"] is not None and ja["data_base_origem"] == "declarada" \
+                    and declarada != ja["data_base_mes"]:
+                raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado (data_base_mes: "
+                                 f"{ja['data_base_mes']!r} → {declarada!r}); registre um instrumento novo com `corrige`")
+            campos["data_base_mes"], campos["data_base_origem"] = declarada, "declarada"
+        elif ja["data_base_mes"] is None:
+            do_pleito = [r[0] for r in conn.execute(
+                "SELECT DISTINCT data_base_mes FROM pleitos WHERE contrato_id=? AND tipo='reajuste' "
+                "AND instrumento_chave=? AND data_base_mes IS NOT NULL", (contrato_id, inst["chave"]))]
+            if len(do_pleito) > 1:
+                raise ValueError(f"{rotulo}: o aditivo de reajuste atende pleitos de mais de uma data-base "
+                                 f"({', '.join(sorted(do_pleito))}); diga a data_base dele no termo")
+            if do_pleito:
+                campos["data_base_mes"], campos["data_base_origem"] = do_pleito[0], "pleito"
+            elif novo["data_base_mes"] is not None:
+                campos["data_base_mes"], campos["data_base_origem"] = novo["data_base_mes"], "unica"
+    if ja["ciclo_reajuste"] is None:
+        if novo["ciclo_reajuste"] is not None:
+            campos["ciclo_reajuste"] = novo["ciclo_reajuste"]
+    elif novo["ciclo_reajuste"] != ja["ciclo_reajuste"]:
+        raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
+                         f"(ciclo_reajuste: {ja['ciclo_reajuste']!r} → {novo['ciclo_reajuste']!r}); registre um "
+                         "instrumento novo com `corrige`")
     # issue #409 (migracao 059): no aditivo de reajuste o `corrige` decide qual termo vale, entao trava como a natureza:
     # o NULL (aplicado sem ele) aceita o primeiro, auditado e com a observacao "Corrige <chave>" que o INSERT escreve, e
     # trava depois -- inclusive apagar o campo. Os aplicados antes da 059 receberam o da observacao. Nos outros aditivos
