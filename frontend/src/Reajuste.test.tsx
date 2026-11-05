@@ -96,6 +96,9 @@ describe("Reajuste", () => {
             comp("2026-09", { estado: "faturada", medicoes: [3], pedido_centavos: 300_05, aprovado_centavos: 300_05,
               faturado_centavos: 300_05, avisos: ["sem_apostilamento", "nota_antes_do_apostilamento"] }),
             comp("2026-10", { estado: "apostilada", apostilada: true, apostilado_percentual: "6,76",
+              apostilamento_chave: "ap-mtpar" }),
+            // o cadastro com o sinal e tres casas: a tela nao dobra o % nem arredonda o indice (/code-review)
+            comp("2026-11", { estado: "apostilada", apostilada: true, apostilado_percentual: "4,125%",
               apostilamento_chave: "ap-mtpar" })] }] }
       : { instrumentos: [] });
     render(<Reajuste contratoId={7} podeEditar={false} />);
@@ -111,6 +114,7 @@ describe("Reajuste", () => {
     expect(selos(situacao[3])).toEqual([["apostilada", "selo"]]);
     // o percentual da MT-PAR no lugar do valor apostilado
     expect(celulas(tabela.querySelectorAll("tbody tr")[3])[4].textContent).toBe("6,76%");
+    expect(celulas(tabela.querySelectorAll("tbody tr")[4])[4].textContent).toBe("4,125%");
   });
 
   it("o percentual do termo no cabeçalho do ciclo lê a vírgula do cadastro (issue #275)", async () => {
@@ -135,7 +139,9 @@ describe("Reajuste", () => {
       envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: null, ...extra });
     api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
       ? { ciclos: [{ ...cicloAberto, situacao: "apostilado", dias: null, pleito: { id: 12 }, apostilamento: termo,
-                     aditivos: [{ id: 2, numero: "2º TA", tipo: "prazo", data_assinatura: "2026-08-01" }] }],
+                     aditivos: [{ id: 2, numero: "2º TA", tipo: "prazo", data_assinatura: "2026-08-01" },
+                                // no mesmo dia da reemissao: o aditivo vem antes, a reemissao responde a ele
+                                { id: 3, numero: "3º TA", tipo: "misto", data_assinatura: "2026-09-20" }] }],
           pleitos: [
             pleito(12, "CT-245-LT-2026", "2026-10-30 09:00:00", { rotulo: "Reiteração do pleito de reajuste",
               reemissao: "reiteracao", reemite_pleito_id: 11, instrumento_chave: "ap-12" }),
@@ -149,6 +155,7 @@ describe("Reajuste", () => {
     expect([...tempo.querySelectorAll("li")].map(li => li.textContent)).toEqual([
       "10/06/2026Pleito de reajuste CT-122-LT-2026 enviado",
       "01/08/2026Aditivo de prazo 2º TA assinado",
+      "20/09/2026Aditivo de prazo e valor 3º TA assinado",
       "20/09/2026Reemissão do pleito de reajuste CT-200-LT-2026 enviada",
       "30/10/2026Reiteração do pleito de reajuste CT-245-LT-2026 enviada",
       "03/11/2026Apostilamento 019/2024/02/12"]);

@@ -60,11 +60,12 @@ function dasMedicoes(ns: number[]): string {
     : `${o[0] ?? ""} medição de reajuste`.trim();
 }
 
-/** O percentual do termo da MT-PAR como o cadastro o guarda ("6,76" ou 6.76). */
+/** O percentual do termo da MT-PAR como o cadastro o guarda ("6,76", "6,76%" ou 6.76), com as casas que ele tem (ate'
+ *  quatro: o indice de reajuste nao se arredonda na tela). */
 function percentual(p: string | number): string {
-  const s = String(p).trim();
+  const s = String(p).trim().replace(/\s*%$/, "");
   const n = typeof p === "number" ? p : Number(s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s);
-  return Number.isFinite(n) ? fmtPercentual(n / 100) : `${s}%`;
+  return Number.isFinite(n) ? fmtPercentual(n / 100, 4) : `${s}%`;
 }
 
 function somaDe(linhas: Competencia[], f: (x: Competencia) => number | null): number | null {
@@ -175,28 +176,31 @@ type AditivoDoCiclo = { id: number; numero: string | null; tipo: string; data_as
 const TIPO_ADITIVO: Record<string, string> = { prazo: "de prazo", valor: "de valor", misto: "de prazo e valor" };
 
 /** A linha do tempo do ciclo (spec 2026-10-20 §2.2): o envio de cada pleito, reiteracao e reemissao, os aditivos que
- *  pedem reemissao e o termo, em ordem de data. Na mesma data, o pleito vem antes do aditivo e o aditivo antes do
- *  termo. */
+ *  pedem reemissao e o termo, em ordem de data. Na mesma data, o aditivo vem antes do pleito (a reemissao do mesmo
+ *  dia responde a ele; o primeiro pleito nunca empata, `aditivos_do_ciclo` so' traz os assinados depois) e o termo
+ *  por ultimo. */
 function eventosDoCiclo(pleitos: Pleito[], aditivos: AditivoDoCiclo[], termos: InstrumentoCadastro[]) {
   const ev = [
-    ...pleitos.filter(p => p.situacao === "enviado" && p.enviado_em).map(p => ({ data: p.enviado_em!.slice(0, 10), ordem: 0,
+    ...aditivos.map(a => ({ chave: `aditivo-${a.id}`, data: a.data_assinatura.slice(0, 10), ordem: 0,
+      texto: ["Aditivo", TIPO_ADITIVO[a.tipo], a.numero ?? "sem número", "assinado"].filter(Boolean).join(" ") })),
+    ...pleitos.filter(p => p.situacao === "enviado" && p.enviado_em).map(p => ({ chave: `pleito-${p.id}`,
+      data: p.enviado_em!.slice(0, 10), ordem: 1,
       // "Pleito ... enviado"; reiteracao e reemissao (femininas) "enviada"
       texto: `${p.rotulo}${p.numero_oficio ? ` ${p.numero_oficio}` : ""} ${p.reemissao || p.reemite_pleito_id ? "enviada" : "enviado"}` })),
-    ...aditivos.map(a => ({ data: a.data_assinatura.slice(0, 10), ordem: 1,
-      texto: ["Aditivo", TIPO_ADITIVO[a.tipo], a.numero ?? "sem número", "assinado"].filter(Boolean).join(" ") })),
-    ...termos.map(i => ({ data: i.data.slice(0, 10), ordem: 2, texto: `${nomeDoTermo(i)} ${i.numero ?? "s/n"}` })),
+    ...termos.map(i => ({ chave: `termo-${i.tipo}-${i.id}`, data: i.data.slice(0, 10), ordem: 2,
+      texto: `${nomeDoTermo(i)} ${i.numero ?? "s/n"}` })),
   ];
   return ev.sort((a, b) => a.data.localeCompare(b.data) || a.ordem - b.ordem);
 }
 
-function LinhaDoTempoDoCiclo({ id, ciclo, eventos }: { id: string; ciclo: number;
-    eventos: { data: string; texto: string }[] }) {
+function LinhaDoTempoDoCiclo({ ciclo, eventos }: { ciclo: number;
+    eventos: { chave: string; data: string; texto: string }[] }) {
   return (
     <div className="cartao__corpo">
-      <p className="resumo__rotulo" id={id}>Linha do tempo</p>
+      <p className="resumo__rotulo">Linha do tempo</p>
       <ol className="linha-tempo" aria-label={`Linha do tempo do ciclo de ${ciclo}`}>
-        {eventos.map((e, i) => (
-          <li key={i}><time className="linha-tempo__data" dateTime={e.data}>{fmtDataPura(e.data)}</time><span>{e.texto}</span></li>
+        {eventos.map(e => (
+          <li key={e.chave}><time className="linha-tempo__data" dateTime={e.data}>{fmtDataPura(e.data)}</time><span>{e.texto}</span></li>
         ))}
       </ol>
     </div>
@@ -421,7 +425,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
                 {tabela(g)}
               </div>
             ))}
-            {eventos.length > 0 && <LinhaDoTempoDoCiclo id={`tempo-${db.data_base_mes}`} ciclo={c.ciclo} eventos={eventos} />}
+            {eventos.length > 0 && <LinhaDoTempoDoCiclo ciclo={c.ciclo} eventos={eventos} />}
             {(formAberto || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
               <div className="secoes-pleito">
                 {reemitindo && (
