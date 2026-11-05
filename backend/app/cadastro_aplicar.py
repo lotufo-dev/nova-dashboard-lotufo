@@ -723,46 +723,77 @@ def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -> None
 
     A ligacao se confere a cada aplicar (gate Sol, rodada 2, PR #407): se o destino mudou (o `ciclo` declarado depois
     da primeira aplicacao), a ligacao antiga sai, auditada, e a nova entra; sem pleito no destino, a antiga sai com
-    aviso. Aditivo sem base determinavel (duas bases, nada declarado) nao se liga nem se desliga: o validar avisa."""
+    aviso. Aditivo sem base determinavel (duas bases, nada declarado) nao se liga nem se desliga: o validar avisa.
+
+    Issue #409: o aditivo corrigido por outro (`corrige`) nao atende pleito nenhum (`reajuste.aditivo_de_reajuste`). A
+    correcao herda o pleito que qualquer elo da cadeia corrigida atendia no mesmo ciclo e data-base, e a busca pela
+    data conta a do aditivo mais antigo da cadeia nesse ciclo (como no apostilamento, PR #411); o pleito de outro ciclo
+    fica sem termo. As duas pontas sao auditadas."""
     bases = [d["mes"] for d in c["datas_base"]]
     unica = bases[0] if len(bases) == 1 else None
     nome = c["nome_curto"]
+    aditivos = {i["chave"]: i for i in c["instrumentos"] if i["tipo"] in TIPOS_ADITIVO}
+    corrigidos_por_outro = {i["corrige"] for i in aditivos.values() if i["corrige"]}
 
     def religar(p, antes, depois) -> None:
         conn.execute("UPDATE pleitos SET instrumento_chave=? WHERE id=?", (depois, p["id"]))
         auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", p["id"],
                             {"instrumento_chave": antes}, {"instrumento_chave": depois})
 
-    for inst in sorted((i for i in c["instrumentos"] if i["tipo"] in TIPOS_COM_NATUREZA), key=lambda i: i["data"]):
+    def gravado(chave, com_corrigido=False):
+        return conn.execute(f"SELECT * FROM aditivos a WHERE a.contrato_id=? AND a.chave_cadastro=? "
+                            f"AND {reajuste.aditivo_de_reajuste('a', com_corrigido)}", (contrato_id, chave)).fetchone()
+
+    def corrigidos(inst) -> list[str]:
+        """Os aditivos que este corrige, direta ou indiretamente (correcao de correcao)."""
+        out, k = [], inst["corrige"]
+        while k in aditivos and k not in out:
+            out.append(k)
+            k = aditivos[k]["corrige"]
+        return out
+
+    # o corrigido nao se liga: quem cuida da ligacao dele e' o ultimo elo da cadeia
+    for inst in sorted((i for k, i in aditivos.items() if k not in corrigidos_por_outro), key=lambda i: i["data"]):
+        cadeia = corrigidos(inst)
         # o que vale e' o gravado (aditivo assinado, nao cancelado, de reajuste, com a base e o ciclo da 058)
-        r = conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=? "
-                         f"AND {reajuste.ADITIVO_DE_REAJUSTE}", (contrato_id, inst["chave"])).fetchone()
-        if r is None:
-            continue
-        base, ciclo = reajuste.base_e_ciclo_do_aditivo(r, unica)
-        if base is None:
+        r = gravado(inst["chave"])
+        base, ciclo = reajuste.base_e_ciclo_do_aditivo(r, unica) if r is not None else (None, None)
+        if base is None and not cadeia:
             continue
         destino = None
         if ciclo is not None:
+            datas = [inst["data"], *(aditivos[k]["data"] for k in cadeia
+                                     if (x := gravado(k, com_corrigido=True)) is not None
+                                     and reajuste.base_e_ciclo_do_aditivo(x, unica) == (base, ciclo))]
             p = conn.execute("SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? "
                              "AND tipo='reajuste' AND data_base_mes=? AND ciclo=? AND situacao='enviado' "
                              "AND date(enviado_em) <= date(?) ORDER BY enviado_em DESC, id DESC LIMIT 1",
-                             (contrato_id, base, ciclo, inst["data"])).fetchone()
-            if p is not None and p["instrumento_chave"] in (None, inst["chave"]):
+                             (contrato_id, base, ciclo, min(datas))).fetchone()
+            if p is not None and p["instrumento_chave"] in (None, inst["chave"], *cadeia):
                 destino = p
-        for p in conn.execute("SELECT id, numero_oficio FROM pleitos WHERE contrato_id=? AND instrumento_chave=?",
-                              (contrato_id, inst["chave"])).fetchall():
+        # sem base determinavel, as ligacoes do proprio aditivo ficam como estao; as dos corrigidos saem
+        chaves = ([inst["chave"]] if base is not None else []) + cadeia
+        for p in conn.execute(f"SELECT id, numero_oficio, instrumento_chave FROM pleitos WHERE contrato_id=? "
+                              f"AND instrumento_chave IN ({','.join('?' * len(chaves))}) ORDER BY id",
+                              (contrato_id, *chaves)).fetchall():
             if destino is not None and p["id"] == destino["id"]:
                 continue
-            religar(p, inst["chave"], None)
+            religar(p, p["instrumento_chave"], None)
+            if p["instrumento_chave"] != inst["chave"]:
+                para = f" para o ciclo {ciclo}" if ciclo is not None else ""
+                rel["alterados"].append(f"{nome}/reajuste {p['numero_oficio']}: sem termo ({inst['chave']} corrige "
+                                        f"{p['instrumento_chave']}{para})")
+                continue
             rel["alterados"].append(f"{nome}/reajuste {p['numero_oficio']}: sem termo ({inst['chave']} atende o "
                                     f"ciclo {ciclo})")
             if destino is None:
                 avisos.append(f"{nome}/{inst['chave']}: o aditivo de reajuste atende o ciclo {ciclo} e não há pleito "
                               f"desse ciclo enviado até a assinatura; a ligação ao pleito {p['numero_oficio']} saiu")
-        if destino is not None and destino["instrumento_chave"] is None:
-            religar(destino, None, inst["chave"])
-            rel["alterados"].append(f"{nome}/reajuste {destino['numero_oficio']}: atendido por {inst['chave']}")
+        if destino is not None and destino["instrumento_chave"] != inst["chave"]:
+            herdado = destino["instrumento_chave"]
+            religar(destino, herdado, inst["chave"])
+            rel["alterados"].append(f"{nome}/reajuste {destino['numero_oficio']}: atendido por {inst['chave']}"
+                                    + (f" (corrige {herdado})" if herdado else ""))
 
 
 # O que torna um aditivo o que ele e': nao muda depois de aplicado (correcao e' instrumento
@@ -816,6 +847,8 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
     declarada = d.get("data_base") if reaj else None
     novo["data_base_mes"] = (declarada or (bases[0] if len(bases) == 1 else None)) if reaj else None
     novo["ciclo_reajuste"] = int(str(d["ciclo"])[:4]) if reaj and d.get("ciclo") is not None else None
+    # issue #409 (migracao 059): o instrumento que este aditivo corrige; o motor do reajuste tira o corrigido
+    novo["corrige_chave"] = inst["corrige"]
     ja = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=?",
                       (contrato_id, inst["chave"])).fetchone()
     if ja is None:
@@ -828,13 +861,13 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
             """INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim,
                    nova_execucao_fim, status, data_assinatura, numero, objeto, forma, chave_cadastro,
                    valor_anterior_centavos, valor_novo_centavos, assinado_por, observacao, ordinal, natureza,
-                   data_base_mes, ciclo_reajuste)
-               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   data_base_mes, ciclo_reajuste, corrige_chave)
+               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (contrato_id, novo["tipo"], novo["delta_valor_centavos"], novo["nova_vigencia_fim"],
              novo["nova_execucao_fim"], novo["data_assinatura"], novo["numero"], novo["objeto"],
              novo["forma"], inst["chave"], anterior, anterior + novo["delta_valor_centavos"], usuario_id,
              f"Corrige {inst['corrige']}" if inst["corrige"] else None, novo["ordinal"], novo["natureza"],
-             novo["data_base_mes"], novo["ciclo_reajuste"]))
+             novo["data_base_mes"], novo["ciclo_reajuste"], novo["corrige_chave"]))
         rel["criados"].append(rotulo)
         auditoria.registrar(conn, usuario_id, "cadastro.instrumento", "aditivo", cur.lastrowid, None,
                             {"chave": inst["chave"], **novo})
@@ -863,6 +896,15 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
         elif (campo == "ciclo_reajuste" or declarado is not None) and declarado != ja[campo]:
             raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
                              f"({campo}: {ja[campo]!r} → {declarado!r}); registre um instrumento novo com `corrige`")
+    # issue #409 (migracao 059): o `corrige`, como a natureza: o NULL (aplicado sem ele) aceita o primeiro, auditado, e
+    # trava depois -- inclusive apagar o campo. Os aplicados antes da 059 receberam o da observacao "Corrige <chave>".
+    if ja["corrige_chave"] is None:
+        if novo["corrige_chave"] is not None:
+            campos["corrige_chave"] = novo["corrige_chave"]
+    elif ja["corrige_chave"] != novo["corrige_chave"]:
+        raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
+                         f"(corrige: {ja['corrige_chave']!r} → {novo['corrige_chave']!r}); registre um instrumento "
+                         "novo com `corrige`")
     antes, depois = _diferencas(dict(ja), campos)
     if not depois:
         rel["iguais"] += 1

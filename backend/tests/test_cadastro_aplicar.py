@@ -1243,6 +1243,87 @@ def test_misto_de_reajuste_de_outro_ciclo_com_prazo_novo_pede_reemissao_do_pleit
     assert (k["ciclo"], k["situacao"], k["aditivo"]["chave_cadastro"]) == (2026, "reemitir", "ta-08")
     assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2025, True)["chave"] == "ta-08"
 
+
+# --- issue #409: aditivo corrigido por outro (`corrige`, migracao 059) sai do motor e a ligacao passa adiante ---
+
+TA_CORR = {**TA_REAJ, "chave": "ta-09", "numero": "019/2024/01/09", "data": "2026-08-15", "corrige": "ta-08"}
+
+
+def _trilha_pleitos(conn):
+    return [(json.loads(a), json.loads(d)) for a, d in conn.execute(
+        "SELECT antes, depois FROM audit_log WHERE acao='cadastro.pleito_atendido' ORDER BY id")]
+
+
+def test_aditivo_que_corrige_o_de_reajuste_para_outro_ciclo_move_a_ligacao_com_auditoria(conn):
+    # gate Sol (rodada 2, PR #407): o TA1 (ta-08) atendia o pleito de 2026; o TA2 (ta-09) o corrige para o ciclo
+    # 2025. So' o 2025 fica apostilado, o 2026 volta a esperar o termo, e a auditoria registra as duas pontas
+    pleitos = [PLEITO_2025, PLEITO_2026]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=pleitos)]))
+    assert _ligacoes(conn) == {"CT-090-LT-2025": None, "CT-122-LT-2026": "ta-08"}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "dados": {"ciclo": 2025}}],
+                                    pleitos_anteriores=pleitos)])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-090-LT-2025": "ta-09", "CT-122-LT-2026": None}
+    assert r["pleitos"]["alterados"] == [
+        "MT-402/reajuste CT-122-LT-2026: sem termo (ta-09 corrige ta-08 para o ciclo 2025)",
+        "MT-402/reajuste CT-090-LT-2025: atendido por ta-09"]
+    assert _trilha_pleitos(conn) == [({"instrumento_chave": None}, {"instrumento_chave": "ta-08"}),
+                                     ({"instrumento_chave": "ta-08"}, {"instrumento_chave": None}),
+                                     ({"instrumento_chave": None}, {"instrumento_chave": "ta-09"})]
+    assert conn.execute("SELECT corrige_chave FROM aditivos WHERE chave_cadastro='ta-09'").fetchone()[0] == "ta-08"
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2025, True)["chave"] == "ta-09"
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, True) is None
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-09"]
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 20))[0]
+    assert (k["ciclo"], k["situacao"], k["apostilamento"]) == (2026, "apostilamento_pendente", None)
+    # reaplicar e' igual: nada se religa nem se audita de novo
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == [] and r["instrumentos"]["alterados"] == []
+    assert len(_trilha_pleitos(conn)) == 3
+
+
+def test_correcao_do_aditivo_no_mesmo_ciclo_herda_o_pleito_do_corrigido(conn):
+    # como no apostilamento (PR #411): a correcao atende o pleito que o corrigido atendeu, e nao a reemissao enviada
+    # entre as datas dos dois (que segue esperando o termo dela)
+    reemissao = {**PLEITO_2026, "oficio": "CT-130-LT-2026", "data": "2026-08-01"}
+    pleitos = [PLEITO_2026, reemissao]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=pleitos)]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08", "CT-130-LT-2026": None}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR], pleitos_anteriores=pleitos)])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-09", "CT-130-LT-2026": None}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: atendido por ta-09 (corrige ta-08)"]
+    assert _trilha_pleitos(conn)[-1] == ({"instrumento_chave": "ta-08"}, {"instrumento_chave": "ta-09"})
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-09"]
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+
+
+def test_correcao_do_aditivo_aplicada_do_zero_atende_o_pleito_do_corrigido(conn):
+    # banco montado do zero com os dois aditivos: o resultado e' o mesmo da aplicacao em duas vezes
+    reemissao = {**PLEITO_2026, "oficio": "CT-130-LT-2026", "data": "2026-08-01"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR],
+                                                                pleitos_anteriores=[PLEITO_2026, reemissao])]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-09", "CT-130-LT-2026": None}
+
+
+def test_corrige_do_aditivo_fica_gravado_e_trava(conn):
+    # como a natureza: o aditivo aplicado sem `corrige` aceita o primeiro, auditado; depois trocar ou tirar e' erro
+    def cad(corrige):
+        return _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "corrige": corrige}])])
+    cadastro_aplicar.aplicar(conn, 1, cad(None))
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-08", "ta-09"]
+    r = cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))
+    assert r["instrumentos"]["alterados"] == ["MT-402/ta-09"]
+    antes, depois = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.instrumento' "
+                                 "ORDER BY id DESC LIMIT 1").fetchone()
+    assert (json.loads(antes), json.loads(depois)) == ({"corrige_chave": None}, {"corrige_chave": "ta-08"})
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-09"]
+    assert cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))["instrumentos"]["alterados"] == []
+    with pytest.raises(ValueError, match="corrige: 'ta-08' → None"):
+        cadastro_aplicar.aplicar(conn, 1, cad(None))
+    with pytest.raises(ValueError, match="corrige: 'ta-08' → 'ta-07'"):
+        cadastro_aplicar.aplicar(conn, 1, cad("ta-07"))
+
 # --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
 
 from app import prazos as prazos_mod
