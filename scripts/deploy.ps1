@@ -22,13 +22,15 @@ param(
     # Porta em que a producao responde. 0 = ler dos argumentos da tarefa DashboardLotufo
     # (-Porta N; sem ele, 80). Informada e diferente da tarefa, o deploy aborta antes do checkout.
     [ValidateRange(0, 65535)]
-    [int]$Porta = 0
+    [int]$Porta = 0,
+    # Raiz dos dados (banco, segredos). Vazio = ler dos argumentos da tarefa DashboardLotufo (-Raiz "..."; sem ele,
+    # o padrao do rodar_producao.ps1). Informada e diferente da tarefa, o deploy aborta antes do checkout.
+    [string]$Raiz = ""
 )
 $ErrorActionPreference = "Stop"
 $pause = "C:\DashboardLotufo\watchdog.pause"
 $py = Join-Path $AppDir "backend\.venv\Scripts\python.exe"
 $lock = Join-Path $AppDir "backend\requirements.lock"
-$instalacaoArquivo = "C:\DashboardLotufo\segredos\instalacao.json"   # issue #417, o mesmo de rodar_producao.ps1
 if (-not (Test-Path $py)) { throw "venv da producao ausente em $py (setup inicial do diretorio pinado nao feito)" }
 
 # A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
@@ -48,8 +50,30 @@ if ($Porta -eq 0) {
     throw "-Porta $Porta nao bate com a tarefa DashboardLotufo (porta $portaTarefa); nada foi alterado"
 }
 
+# A raiz tambem e' a da tarefa (issue #417, gate Sol da PR #437): dela saem o arquivo da instalacao conferido antes do
+# reinicio e o banco do backup pre-migracao. Com a producao em outro disco, conferir C:\ recusaria o arquivo valido, ou
+# aceitaria um velho enquanto o servidor confere o da raiz certa. O instalar_autostart.ps1 sempre grava -Raiz "...".
+function RaizDaTarefa {
+    $tarefa = Get-ScheduledTask -TaskName "DashboardLotufo" -ErrorAction SilentlyContinue
+    if (-not $tarefa) { return "" }
+    $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
+    if ($argumentosTarefa -match '-Raiz\s+(?:"([^"]+)"|(\S+))') {
+        if ($Matches[1]) { return $Matches[1] }
+        return $Matches[2]
+    }
+    return "C:\DashboardLotufo"
+}
+$raizTarefa = RaizDaTarefa
+if (-not $Raiz) {
+    if ($raizTarefa) { $Raiz = $raizTarefa } else { $Raiz = "C:\DashboardLotufo" }
+} elseif ($raizTarefa -and $Raiz.TrimEnd("\") -ne $raizTarefa.TrimEnd("\")) {
+    throw "-Raiz $Raiz nao bate com a tarefa DashboardLotufo (raiz $raizTarefa); nada foi alterado"
+}
+$instalacaoArquivo = Join-Path $Raiz "segredos\instalacao.json"   # o mesmo que o rodar_producao.ps1 passa ao servidor
+$banco = Join-Path $Raiz "dados\dashboard.db"
+
 # Instalacao assinada (issue #417): depois do deploy so' vale o health 200 com instalacao "autorizada" (arquivo
-# assinado para esta maquina em C:\DashboardLotufo\segredos\instalacao.json). Modo copia (arquivo ausente, assinatura
+# assinado para esta maquina em <raiz>\segredos\instalacao.json). Modo copia (arquivo ausente, ilegivel, assinatura
 # ou maquina) conta como falha e dispara o rollback. O rollback confere so' o 200: o commit anterior pode nem ter o campo.
 function Saudavel([switch]$ExigirInstalacao) {
     try { $resposta = Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing }
@@ -152,8 +176,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "git diff das migracoes falhou" }
     $backup = $null
     if ($migracoes) {
-        $backup = & (Join-Path $PSScriptRoot "backup_pre_migracao.ps1") -Banco "C:\DashboardLotufo\dados\dashboard.db" `
-            -PastaBackups "C:\DashboardLotufo\dados\backups" -Python $py -Rotulo $alvo.Substring(0, 7)
+        $backup = & (Join-Path $PSScriptRoot "backup_pre_migracao.ps1") -Banco $banco `
+            -PastaBackups (Join-Path $Raiz "dados\backups") -Python $py -Rotulo $alvo.Substring(0, 7)
         if ($LASTEXITCODE -ne 0 -or -not $backup) {
             Write-Host "deploy abortado antes do checkout; producao segue em $anterior" -ForegroundColor Red
             exit 1
