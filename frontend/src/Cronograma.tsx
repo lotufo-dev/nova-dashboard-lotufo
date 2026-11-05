@@ -417,6 +417,10 @@ export default function Cronograma({ contratoId, podeEditar }:
   // com o mes do navegador, o cadeado da tela discordaria do previsto do servidor
   // durante as 4 horas de defasagem na virada.
   const mes = mesAtualLocal();
+  // Igual ao servidor (previsto_efetivo, issue #413): depois de uma repactuacao ainda valida (aditivo, carta ou
+  // curva do SMO, nao superada), versao manual nao semeia mes nenhum, nem o passado sem previsto.
+  const houveRepactuacao = Array.isArray(versoes) && versoes.some(v => !v.superada_em
+    && ["aditivo", "carta", "smo"].includes(v.origem_documento ?? ""));
 
   async function publicar(ev: React.FormEvent) {
     ev.preventDefault();
@@ -551,7 +555,7 @@ export default function Cronograma({ contratoId, podeEditar }:
               {pontos.map((p, i) => {
                 // Uma versao nova so alcanca competencias a partir do mes em que nasce:
                 // mes ja decorrido COM previsto e' passado congelado (spec §5).
-                const congelado = p.competencia < mes && p.previsto_centavos > 0;
+                const congelado = p.competencia < mes && (p.previsto_centavos > 0 || houveRepactuacao);
                 const total = medidoTotal(p);
                 const pend = (p.atestado_pendente && p.medido_execucao_centavos > 0) || pendenteOutras(p);
                 return (

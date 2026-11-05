@@ -696,6 +696,25 @@ def test_complemento_soma_pedido_aprovado_e_faturado_das_medicoes(cenario):
             x["faturado_centavos"]) == ("recebida", 3, [3, 7], 12_000_01, 9_999_99, 9_999_99)
 
 
+def test_medido_nao_recebido_e_o_aprovado_de_cada_medicao_senao_o_pedido(cenario):
+    # issue #279: o valor ja' medido e ainda nao recebido da competencia, medicao a medicao (o aprovado quando houver,
+    # senao o pedido): o complemento so' pedido nao some atras do aprovado nem da recebida da principal
+    c, ids = cenario
+    cid = ids["contrato"]
+    _medicao(c, cid, 3, "2026-07", "boletim_recebido", pedido=10_000_00, aprovado=9_999_99)
+    _medicao(c, cid, 7, "2026-07", "planilha_gerada", pedido=2_000_01)
+    _medicao(c, cid, 8, "2026-08", "prevista")
+    _previsao(c, cid, "2026-09", 300_05, "manual")
+    _medicao(c, cid, 4, "2026-10", "recebida", pedido=400_11, aprovado=400_11)
+    _medicao(c, cid, 9, "2026-10", "planilha_enviada", pedido=50_01)
+    _medicao(c, cid, 5, "2026-11", "recebida", pedido=500_07, aprovado=500_07)
+    x = _por_competencia(c, cid)
+    assert (x["2026-07"]["estado"], x["2026-07"]["aprovado_centavos"], x["2026-07"]["medido_nao_recebido_centavos"]) == \
+        ("aprovada", 9_999_99, 12_000_00)
+    assert (x["2026-10"]["estado"], x["2026-10"]["medido_nao_recebido_centavos"]) == ("recebida", 50_01)
+    assert [x[k]["medido_nao_recebido_centavos"] for k in ("2026-08", "2026-09", "2026-11")] == [None, None, None]
+
+
 def test_medicao_sem_base_em_contrato_de_duas_bases_nao_some(cenario):
     # gate Sol (rodadas 1 e 2, PR #381): duas datas-base com previsao da mesma competencia e medicao sem base
     # gravada: entra uma vez so', no grupo sem data-base, em vez de sumir ou de contar nas duas
@@ -775,12 +794,12 @@ def test_medicao_sem_base_gravada_vai_para_o_ciclo_da_competencia(cenario):
 # --- issue #390: na SES o reajuste sai por termo aditivo de valor (`natureza: reajuste`), nao por apostilamento ---
 
 def _aditivo_reajuste(c, cid, chave, assinado_em, natureza="reajuste", tipo="valor", numero=None, cancelado=False,
-                      delta=123_45, nova_execucao_fim=None, data_base=None, ciclo=None):
+                      delta=123_45, nova_execucao_fim=None, data_base=None, ciclo=None, corrige=None):
     c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, numero, "
-              "chave_cadastro, natureza, cancelado_em, nova_execucao_fim, data_base_mes, ciclo_reajuste) "
-              "VALUES (?,?,?, 'assinado', ?,?,?,?,?,?,?,?)",
+              "chave_cadastro, natureza, cancelado_em, nova_execucao_fim, data_base_mes, ciclo_reajuste, corrige_chave) "
+              "VALUES (?,?,?, 'assinado', ?,?,?,?,?,?,?,?,?)",
               (cid, tipo, delta, assinado_em, numero or chave.upper(), chave, natureza,
-               "2025-12-01 10:00:00" if cancelado else None, nova_execucao_fim, data_base, ciclo))
+               "2025-12-01 10:00:00" if cancelado else None, nova_execucao_fim, data_base, ciclo, corrige))
     c.commit()
 
 
@@ -984,3 +1003,58 @@ def test_apostilamento_da_medicao_pela_lista_ou_pelo_percentual_e_nenhum_fora_de
     c.commit()
     assert termo(por_percentual) == ("ap-mtpar-ret", "001/2025/03/03")
     assert termo(sem_termo) == ("ap-mtpar-ret", "001/2025/03/03")
+
+
+# --- issue #409: aditivo corrigido por outro (`corrige`, migracao 059) sai do motor, como o apostilamento corrigido ---
+
+def test_aditivo_corrigido_por_outro_nao_fecha_ciclo_nenhum(obra_ses):
+    # gate Sol (rodada 2, PR #407): TA2 corrige TA1, que fechava 2026 pela data, para o ciclo 2025. So' o 2025 fica
+    # fechado (pelo TA2); o 2026 volta a pendente, com o aviso, e a aba so' conhece o TA2 como termo
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-01", "2026-10-20", data_base="2021-10")
+    _aditivo_reajuste(c, cid, "ta-02", "2026-10-25", data_base="2021-10", ciclo=2025, corrige="ta-01")
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-02"
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2026, True) is None
+    assert [a["chave"] for a in reajuste.aditivos_de_reajuste(c, cid)] == ["ta-02"]
+    r = reajuste.ciclos(c, cid, D(2026, 11, 5))[0]
+    assert (r["ciclo"], r["situacao"]) == (2026, "pleito_pendente")
+    assert [a["tipo"] for a in reajuste.avisos(c, D(2026, 11, 5))] == ["reajuste_pleito"]
+
+
+def test_ligacao_que_sobrou_no_aditivo_corrigido_nao_fecha_o_ciclo(obra_ses):
+    # ate' o proximo `aplicar` mover a ligacao, o pleito de 2026 segue ligado ao TA1 corrigido: o 2026 espera o
+    # apostilamento e o 2025, ligado ao TA2, fica fechado
+    c, cid = obra_ses
+    _pleito_2025(c, cid, chave="ta-02")
+    _pleito_2025(c, cid, chave="ta-01", ciclo=2026, enviado_em="2026-10-02")
+    _aditivo_reajuste(c, cid, "ta-01", "2026-10-20", data_base="2021-10")
+    _aditivo_reajuste(c, cid, "ta-02", "2026-10-25", data_base="2021-10", ciclo=2025, corrige="ta-01")
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-02"
+    r = reajuste.ciclos(c, cid, D(2026, 11, 5))[0]
+    assert (r["ciclo"], r["situacao"], r["apostilamento"]) == (2026, "apostilamento_pendente", None)
+
+
+def test_cadeia_de_correcao_de_aditivo_so_o_ultimo_vale(obra_ses):
+    # TA3 corrige TA2, que corrige TA1, todos do ciclo 2025: so' o TA3 fecha o ciclo e aparece como termo
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-01", "2025-11-20", data_base="2021-10")
+    _aditivo_reajuste(c, cid, "ta-02", "2025-11-25", data_base="2021-10", corrige="ta-01")
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-28", data_base="2021-10", corrige="ta-02")
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-03"
+    assert [a["chave"] for a in reajuste.aditivos_de_reajuste(c, cid)] == ["ta-03"]
+    # o pleito ligado a um elo corrigido da cadeia espera o proximo `aplicar` (que o passa ao TA3)
+    _pleito_2025(c, cid, chave="ta-01")
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True) is None
+
+
+def test_so_o_aditivo_de_reajuste_que_corrige_tira_o_corrigido(obra_ses):
+    # /code-review: o aditivo de prazo, o de execucao e o cancelado que dizem corrigir o de reajuste corrigem outra
+    # coisa nele (ou nao valem): o termo de reajuste segue fechando o ciclo
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-01", "2025-11-20", data_base="2021-10")
+    _aditivo_reajuste(c, cid, "ta-02", "2025-12-01", tipo="prazo", delta=0, natureza=None,
+                      nova_execucao_fim="2027-06-30", corrige="ta-01")
+    _aditivo_reajuste(c, cid, "ta-03", "2025-12-02", natureza="execucao", corrige="ta-01")
+    _aditivo_reajuste(c, cid, "ta-04", "2025-12-03", data_base="2021-10", cancelado=True, corrige="ta-01")
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-01"
+    assert [a["chave"] for a in reajuste.aditivos_de_reajuste(c, cid)] == ["ta-01"]

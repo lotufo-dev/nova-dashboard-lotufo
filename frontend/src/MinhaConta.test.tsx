@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import MinhaConta from "./MinhaConta";
 import { ApiErro } from "./api";
@@ -123,6 +123,43 @@ describe("MinhaConta › diretoria", () => {
     expect(screen.queryByText("Assinatura de e-mail")).toBeNull();
     // sem a explicação de que a diretoria não manda e-mail
     expect(screen.queryByText(/não manda e-mail/)).toBeNull();
+  });
+});
+
+// #418: cada pessoa vê os próprios últimos acessos em Sua conta, lidos quando ela abre
+describe("MinhaConta › Últimos acessos", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+  const ACESSOS = [
+    { data: "2026-11-05T18:35:00+00:00", sucesso: true, origem: "10.0.0.5", navegador: "Edge no Windows" },
+    { data: "2026-11-05T18:30:00+00:00", sucesso: false, origem: "10.0.0.5", navegador: "Edge no Windows" }];
+
+  it.each([["engenharia", ENG], ["diretoria", EU_DIRETORIA]])("%s abre a lista dos próprios acessos em Sua conta", async (_perfil, usuario) => {
+    api.mockImplementation(async (url: string) => {
+      if (url === "/api/correio/status") return { configurado: true, conectado: false, login: NENHUM, assinatura: false };
+      if (url === "/api/auth/acessos") return ACESSOS;
+      throw new Error(`chamada inesperada: ${url}`);
+    });
+    render(<MinhaConta usuario={usuario} />);
+    const resumo = await screen.findByText("Últimos acessos");
+    const sua = screen.getByRole("heading", { name: "Sua conta" }).closest("section") as HTMLElement;
+    expect(sua.contains(resumo)).toBe(true);
+    expect(api).not.toHaveBeenCalledWith("/api/auth/acessos");
+    fireEvent.click(resumo);
+    const tabela = await screen.findByRole("table", { name: /Seus últimos acessos/ });
+    const linhas = within(tabela).getAllByRole("row");
+    expect(linhas).toHaveLength(1 + 2);
+    expect(linhas[1].textContent).toMatch(/05\/11\/2026 às 14:35.*10\.0\.0\.5.*Edge no Windows.*Entrou/);
+    expect(linhas[2].textContent).toMatch(/05\/11\/2026 às 14:30.*recusada/);
+  });
+
+  it("sem acesso registrado, uma linha curta", async () => {
+    api.mockImplementation(async (url: string) => {
+      if (url === "/api/auth/acessos") return [];
+      throw new Error(`chamada inesperada: ${url}`);
+    });
+    render(<MinhaConta usuario={EU_DIRETORIA} />);
+    fireEvent.click(screen.getByText("Últimos acessos"));
+    expect(await screen.findByText("Nenhum acesso.")).toBeTruthy();
   });
 });
 

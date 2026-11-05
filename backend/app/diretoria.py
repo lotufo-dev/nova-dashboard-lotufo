@@ -163,6 +163,88 @@ def _maior_dias(ms: list[dict], hoje: datetime.date) -> int | None:
     return max(dias) if dias else None
 
 
+# Issue #279 (spec 2026-10-20 §2.2): a competencia de reajuste ja' medida (pedida, aprovada ou faturada) que nenhum
+# apostilamento cobre (`reajuste.competencias_por_ciclo`)
+ESPERANDO_APOSTILAMENTO = ("pedida", "aprovada", "faturada")
+
+
+def _termo_sem_meses(termo: dict) -> bool:
+    """Revisor (rodada 1, PR #431): o termo que fecha o ciclo sem dizer os meses, o aditivo de valor de reajuste (#390)
+    e o apostilamento sem a lista `competencias` nem `percentual` com `periodo` (os dois jeitos de
+    `reajuste.competencias_por_ciclo` marcar a competencia). Com meses vale a competencia; sem, o ciclo inteiro, como
+    em `reajuste.ciclos`."""
+    d = termo.get("dados") or {}
+    per = d.get("periodo")
+    com_periodo = d.get("percentual") not in (None, "") and isinstance(per, dict) and bool(per.get("de")) and bool(per.get("ate"))
+    return not (d.get("competencias") or com_periodo)
+
+
+def _esperando_apostilamento(conn, contrato_id: int) -> list[dict]:
+    """As competencias de reajuste do contrato ja' medidas e ainda nao recebidas que nenhum termo cobre: nem o
+    apostilamento que lista o mes (`apostilada`), nem o termo sem meses que fecha o ciclo (`_termo_sem_meses`, o
+    termo de `reajuste.apostilamento_do_ciclo`). A medicao sem data-base no contrato de duas (grupo sem data-base de
+    `competencias_por_ciclo`) so' fica coberta quando todas as datas-base em que o mes tem reajuste o cobrem; sem
+    nenhuma (contrato sem data-base, revisor na rodada 2 da PR #431), nenhum termo a cobre e ela espera."""
+    grupos = reajuste.competencias_por_ciclo(conn, contrato_id)
+    bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes", (contrato_id,))]
+    if not grupos:
+        return []
+    fechados: dict = {}
+
+    def fechado(base: str, ciclo: int) -> bool:
+        if (base, ciclo) not in fechados:
+            termo = reajuste.apostilamento_do_ciclo(conn, contrato_id, base, ciclo, len(bases) == 1)
+            fechados[(base, ciclo)] = termo is not None and _termo_sem_meses(termo)
+        return fechados[(base, ciclo)]
+
+    linhas: dict = {}                     # (data-base, competencia) -> [(ciclo, apostilada)]
+    for g in grupos:
+        if g["data_base_mes"] is not None:
+            for x in g["competencias"]:
+                linhas.setdefault((g["data_base_mes"], x["competencia"]), []).append((g["ciclo"], x["apostilada"]))
+
+    def coberta(base: str, comp: str) -> bool | None:
+        """None: o mes nao tem reajuste nesta data-base (antes do 1o aniversario dela)."""
+        ls = linhas.get((base, comp)) or [(reajuste._ciclo_da_competencia(base, comp), False)]
+        if all(y is None for y, _ in ls):
+            return None
+        return any(a or (y is not None and fechado(base, y)) for y, a in ls)
+
+    out = []
+    for g in grupos:
+        for x in g["competencias"]:
+            if x["estado"] not in ESPERANDO_APOSTILAMENTO and x["medido_nao_recebido_centavos"] is None:
+                continue                  # nada medido, ou tudo ja' recebido
+            if g["data_base_mes"] is not None:
+                if x["apostilada"] or fechado(g["data_base_mes"], g["ciclo"]):
+                    continue
+            else:
+                vs = [v for v in (coberta(b, x["competencia"]) for b in bases) if v is not None]
+                if vs and all(vs):        # sem data-base em que o mes tenha reajuste, nada o cobre
+                    continue
+            out.append(x)
+    return out
+
+
+def _reajustes_sem_apostilamento(conn) -> dict:
+    """Por obra (todo contrato menos o rescindido, a base do QDOP: o reajuste so' sai com o apostilamento), as
+    competencias de reajuste ja' medidas que esperam apostilamento (`_esperando_apostilamento`) e o valor ja' medido
+    e ainda nao recebido delas (o aprovado de cada medicao, senao o pedido), na cota: o cheio da obra somado e
+    convertido uma vez, como a carteira (arredondamento unico). Obra sem nenhuma nao aparece. As competencias de uma
+    obra sao os meses (a mesma competencia em duas datas-base conta uma vez)."""
+    obras = []
+    for c in conn.execute("SELECT id, COALESCE(nome_curto, numero_instrumento) obra, percentual_direito_bp pct "
+                          "FROM contratos WHERE estado<>'rescindido'"):
+        xs = _esperando_apostilamento(conn, c["id"])
+        if xs:
+            obras.append({"contrato_id": c["id"], "obra": c["obra"], "competencias": len({x["competencia"] for x in xs}),
+                          "valor_centavos": contratos.cota(sum(x["medido_nao_recebido_centavos"] or 0 for x in xs),
+                                                           c["pct"]) or 0})
+    obras.sort(key=lambda o: (-o["valor_centavos"], o["obra"]))
+    return {"competencias": sum(o["competencias"] for o in obras), "valor_centavos": sum(o["valor_centavos"] for o in obras),
+            "obras": obras}
+
+
 def _dinheiro(conn, ms: list[dict], hoje: datetime.date, liberado: bool, notas: list[dict] = ()) -> dict:
     protocoladas = [m for m in ms if m["estado"] in PROTOCOLADAS] + list(notas)
     faixas = _faixas(protocoladas, hoje, liberado)
@@ -191,7 +273,8 @@ def _dinheiro(conn, ms: list[dict], hoje: datetime.date, liberado: bool, notas: 
             "recebido_mes": _grupo([m for m in ms if m["estado"] == "recebida" and (m["recebida_em"] or "")[:7] == mes]),
             # A13 (2026-09-28): um item por ciclo, o mais antigo primeiro, para A receber listar por obra (os
             # avisos da diretoria so' trazem os de mais de 90 dias)
-            "reajustes_apostilamento": {"quantidade": len(pendentes),
+            # #279: e, por obra, o valor ja' medido das competencias sem apostilamento
+            "reajustes_apostilamento": {**_reajustes_sem_apostilamento(conn), "quantidade": len(pendentes),
                                         "maior_dias": max((k["dias"] for _, k in pendentes), default=None),
                                         "itens": sorted(({"contrato_id": c["id"], "obra": c["nome_curto"] or c["numero_instrumento"],
                                                           "data_base_mes": k["data_base_mes"], "dias": k["dias"]}

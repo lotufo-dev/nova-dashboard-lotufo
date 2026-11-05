@@ -89,11 +89,22 @@ def _termo_do_pleito(conn, contrato_id: int, pleito: dict) -> dict | None:
     return {**dict(r), "dados": json.loads(r["dados"] or "{}")} if r else None
 
 
-# Issue #390: na SES o reajuste anual sai por termo aditivo de valor (`natureza: reajuste`, migracao 046), nao por
-# apostilamento. O aditivo assinado e nao cancelado fecha o ciclo como o apostilamento fecha. Com valor: o misto so' de
-# prazo (delta zero) nao concede reajuste (gate Sol, PR #407).
-ADITIVO_DE_REAJUSTE = ("status='assinado' AND cancelado_em IS NULL AND natureza='reajuste' "
-                       "AND tipo IN ('valor','misto') AND delta_valor_centavos <> 0 AND data_assinatura IS NOT NULL")
+def aditivo_de_reajuste(a: str, com_corrigido: bool = False) -> str:
+    """Issue #390: na SES o reajuste anual sai por termo aditivo de valor (`natureza: reajuste`, migracao 046), nao por
+    apostilamento. O aditivo assinado e nao cancelado fecha o ciclo como o apostilamento fecha. Com valor: o misto so'
+    de prazo (delta zero) nao concede reajuste (gate Sol, PR #407). Condicao SQL sobre o alias `a` de `aditivos`.
+
+    Issue #409 (migracao 059): aditivo corrigido por outro aditivo de reajuste (`corrige_chave` do corretor) nao vale,
+    como o apostilamento corrigido por outro apostilamento de reajuste (`_termo_vale`); numa cadeia (TA3 corrige TA2,
+    que corrige TA1) so' o ultimo vale. O aditivo de prazo ou de execucao que corrige um de reajuste nao o tira (corrige
+    outra coisa nele). `com_corrigido`: o aditivo de reajuste mesmo que corrigido (o aplicar, para achar o pleito que
+    o corrigido atendia)."""
+    sql = (f"{a}.status='assinado' AND {a}.cancelado_em IS NULL AND {a}.natureza='reajuste' "
+           f"AND {a}.tipo IN ('valor','misto') AND {a}.delta_valor_centavos <> 0 AND {a}.data_assinatura IS NOT NULL")
+    if com_corrigido:
+        return sql
+    return (f"{sql} AND NOT EXISTS (SELECT 1 FROM aditivos x WHERE x.contrato_id = {a}.contrato_id "
+            f"AND x.corrige_chave = {a}.chave_cadastro AND {aditivo_de_reajuste('x', com_corrigido=True)})")
 
 
 def ciclo_do_aditivo(mes_base: str, data_assinatura: str) -> int | None:
@@ -125,7 +136,7 @@ def _aditivo_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, unica: 
     """Sem pleito enviado: o aditivo de reajuste cuja base e ciclo (`base_e_ciclo_do_aditivo`) sao estes. Um aditivo
     so' fecha um ciclo (gate Sol, rodada extra, PR #407): o ja' ligado a pleito de outro ciclo ou base atende aquele, e
     nao este pela data (a janela entre a migracao 058 e o primeiro `aplicar`, com base e ciclo ainda vazios)."""
-    for r in conn.execute(f"SELECT * FROM aditivos a WHERE a.contrato_id=? AND {ADITIVO_DE_REAJUSTE} "
+    for r in conn.execute(f"SELECT * FROM aditivos a WHERE a.contrato_id=? AND {aditivo_de_reajuste('a')} "
                           "AND NOT EXISTS (SELECT 1 FROM pleitos p WHERE p.contrato_id = a.contrato_id "
                           "AND p.instrumento_chave = a.chave_cadastro AND NOT (p.data_base_mes = ? AND p.ciclo = ?)) "
                           "ORDER BY data_assinatura DESC, id DESC", (contrato_id, mes_base, ciclo)):
@@ -142,8 +153,8 @@ def _aditivo_do_pleito(conn, contrato_id: int, pleito: dict, unica: bool) -> dic
     ciclos."""
     if not pleito.get("instrumento_chave"):
         return None
-    r = conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=? AND {ADITIVO_DE_REAJUSTE}",
-                     (contrato_id, pleito["instrumento_chave"])).fetchone()
+    r = conn.execute(f"SELECT * FROM aditivos a WHERE a.contrato_id=? AND a.chave_cadastro=? "
+                     f"AND {aditivo_de_reajuste('a')}", (contrato_id, pleito["instrumento_chave"])).fetchone()
     if r is None:
         return None
     base, ciclo = base_e_ciclo_do_aditivo(r, pleito["data_base_mes"] if unica else None)
@@ -159,8 +170,8 @@ def aditivos_de_reajuste(conn, contrato_id: int) -> list[dict]:
     unica = conn.execute("SELECT COUNT(*) FROM contrato_datas_base WHERE contrato_id=?",
                          (contrato_id,)).fetchone()[0] == 1
     return [_como_termo(r) for r in conn.execute(
-        f"SELECT * FROM aditivos WHERE contrato_id=? AND {ADITIVO_DE_REAJUSTE} "
-        f"AND (data_base_mes IS NOT NULL OR ?) ORDER BY data_assinatura, id", (contrato_id, unica))]
+        f"SELECT * FROM aditivos a WHERE a.contrato_id=? AND {aditivo_de_reajuste('a')} "
+        f"AND (a.data_base_mes IS NOT NULL OR ?) ORDER BY a.data_assinatura, a.id", (contrato_id, unica))]
 
 
 def _termo_do_pedido(conn, contrato_id: int, pleito: dict, unica: bool) -> dict | None:
@@ -384,7 +395,8 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
     sem data-base (`data_base_mes` e `ciclo` nulos, linhas com `data_base_incerta`): nada some em silencio e nada
     conta em dobro quando se somam as datas-base. Cancelada ou desistida nao conta.
 
-    Varias medicoes na mesma competencia (complemento): pedido, aprovado e faturado sao a soma delas, `medicoes` lista
+    Varias medicoes na mesma competencia (complemento): pedido, aprovado e faturado sao a soma delas, e o medido nao
+    recebido, a das ainda nao recebidas (o aprovado de cada uma, senao o pedido); `medicoes` lista
     os numeros, e o estado e a medicao principal sao os da mais adiantada (empate: maior numero). O faturado so' conta
     NF da coligada da entidade do contrato (em consorcio, a fatura cheia do consorcio, e nao tambem a NFS-e da
     Lotufo pela cota); sem coligada no cadastro, todas. Mes do periodo de um percentual (MT-PAR) entra mesmo sem
@@ -403,7 +415,7 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
             "medicao_id": None, "medicao_numero": None, "medicao_estado": None, "pedido_centavos": None,
             "aprovado_centavos": None, "apostilada": False, "apostilado_centavos": None, "apostilado_percentual": None,
             "apostilamento_chave": None, "medicao_orgao": None, "faturado_centavos": None, "recebida_em": None,
-            "medicoes": [], "data_base_incerta": False, "_medicoes": []})
+            "medido_nao_recebido_centavos": None, "medicoes": [], "data_base_incerta": False, "_medicoes": []})
 
     for p in previsoes_vigentes(conn, contrato_id, sem_apostilamento=True):
         x = linha(p["data_base_mes"], p["ciclo"], p["competencia"])
@@ -477,7 +489,12 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
                      recebida_em=m["recebida_em"], medicoes=sorted(v[1] for v in ms),
                      pedido_centavos=_soma(v[2]["valor_protocolado_centavos"] for v in ms),
                      aprovado_centavos=_soma(v[2]["valor_atestado_centavos"] for v in ms),
-                     faturado_centavos=_soma(faturado.get(v[2]["id"]) for v in ms))
+                     faturado_centavos=_soma(faturado.get(v[2]["id"]) for v in ms),
+                     # issue #279: o ja' medido e ainda nao recebido, medicao a medicao (o aprovado quando houver,
+                     # senao o pedido): pedida, aprovada ou faturada
+                     medido_nao_recebido_centavos=_soma(
+                         v[2]["valor_atestado_centavos"] if v[2]["valor_atestado_centavos"] is not None
+                         else v[2]["valor_protocolado_centavos"] for v in ms if _PEDIDA <= v[0] < _RECEBIDA))
         x["estado"] = ESTADOS_COMPETENCIA[max(passo, _APOSTILADA if x["apostilada"] else 0)]
         grupos.setdefault((base, ciclo), []).append(x)
     return [{"data_base_mes": b, "ciclo": y, "competencias": xs} for (b, y), xs in grupos.items()]
