@@ -525,6 +525,7 @@ def _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel, avi
                     and (not alvo["data"] or (antes.get("enviado_em") or p["data"])[:10] == alvo["data"])
                     and depois.get("numero_oficio", canon) == canon
                     and (depois.get("enviado_em") or p["data"])[:10] == p["data"]):
+                _mesmo_ciclo(novo, p, nome)        # gate Sol, rodada 2: o "igual" nao engole ciclo trocado no YAML
                 rel["iguais"] += 1
                 _avisa_diferencas(novo, p, f"{nome}/{p['tipo']} {canon}", avisos)
                 return
@@ -548,17 +549,15 @@ def _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel, avi
     if g["origem"] != "cadastro":
         raise ValueError(f"{nome}: o pleito {canon_antigo} ({p['tipo']}) foi criado pela tela e não se corrige "
                          "pelo cadastro")
-    if p["tipo"] == "reajuste" and g["ciclo"] != p["ciclo"]:
-        raise ValueError(f"{nome}: o pleito {canon_antigo} (reajuste) está gravado no ciclo {g['ciclo']}, não "
-                         f"{p['ciclo']}; corrige troca só a data e o ofício")
+    _mesmo_ciclo(g, p, nome)
     gravada = (g["enviado_em"] or "")[:10]
     if alvo["data"] and gravada != alvo["data"]:
         raise ValueError(f"{nome}: o pleito {canon_antigo} ({p['tipo']}) está gravado com a data {_br(gravada)}, "
                          f"não {_br(alvo['data'])}")
     if gravada == p["data"] and canon_antigo == canon:
-        rel["iguais"] += 1                     # sem data antiga dita e nada a trocar
-        _avisa_diferencas(g, p, f"{nome}/{p['tipo']} {canon}", avisos)
-        return
+        # gate Sol, rodada 2: sem a auditoria desta correcao, nao ha' o que corrigir; o `corrige` sobra no YAML
+        raise ValueError(f"{nome}: o pleito {canon_antigo} ({p['tipo']}) já está com a data {_br(gravada)} e esse "
+                         "ofício, sem correção registrada; tire o corrige do item")
     if canon != canon_antigo and (achar(canon) is not None or achar(canon, so_cadastro=True) is not None):
         raise ValueError(f"{nome}: já existe pleito {canon} ({p['tipo']}); a correção de {canon_antigo} "
                          "repetiria o ofício")
@@ -588,6 +587,12 @@ def _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel, avi
         mudancas.append(f"ofício {canon_antigo} → {canon}")
     rel["alterados"].append(f"{nome}/{p['tipo']}: pleito {canon_antigo}: {', '.join(mudancas)}")
     _avisa_diferencas(g, p, f"{nome}/{p['tipo']} {canon}", avisos)
+
+
+def _mesmo_ciclo(gravado, p, nome) -> None:
+    if p["tipo"] == "reajuste" and gravado["ciclo"] != p["ciclo"]:
+        raise ValueError(f"{nome}: o pleito {gravado['numero_oficio']} (reajuste) está gravado no ciclo "
+                         f"{gravado['ciclo']}, não {p['ciclo']}; corrige troca só a data e o ofício")
 
 
 def _avisa_diferencas(gravado, p, rotulo, avisos) -> None:
@@ -644,14 +649,20 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
 
     corrigidos_por_outro = {i["corrige"] for i in aps if i["corrige"]}
     bases = [d["mes"] for d in c["datas_base"]]
-    for inst in ordem:
-        dados = inst["dados"]
-        iid, guardada = conn.execute("SELECT id, data_base_mes FROM instrumentos WHERE contrato_id=? AND chave=?",
-                                     (contrato_id, inst["chave"])).fetchone()
+
+    def base_ciclo(inst) -> tuple:
+        guardada = conn.execute("SELECT data_base_mes FROM instrumentos WHERE contrato_id=? AND chave=?",
+                                (contrato_id, inst["chave"])).fetchone()[0]
         # termo ja' aplicado (gate Sol, PR #317): segue na base guardada quando foi aplicado, mesmo que o contrato
         # tenha ganhado ou trocado de data-base depois; o termo novo sem base nem chega aqui (_base_do_termo_novo)
-        base = reajuste.base_do_termo(dados, guardada, bases[0] if len(bases) == 1 else None)
-        ciclo = reajuste.ciclo_do_apostilamento(dados, inst["data"])
+        return (reajuste.base_do_termo(inst["dados"], guardada, bases[0] if len(bases) == 1 else None),
+                reajuste.ciclo_do_apostilamento(inst["dados"], inst["data"]))
+
+    for inst in ordem:
+        dados = inst["dados"]
+        iid = conn.execute("SELECT id FROM instrumentos WHERE contrato_id=? AND chave=?",
+                           (contrato_id, inst["chave"])).fetchone()[0]
+        base, ciclo = base_ciclo(inst)
         comps = competencias_do_apostilamento(dados)
         if comps and (base is None or ciclo is None):
             # nada de ignorar competencia em silencio: o validar so' avisa (nao sabe o que ja' foi aplicado)
@@ -689,11 +700,16 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
         if inst["chave"] in corrigidos_por_outro or herdados or conn.execute("SELECT 1 FROM pleitos WHERE contrato_id=? AND instrumento_chave=? LIMIT 1",
                                     (contrato_id, inst["chave"])).fetchone():
             continue
-        # o pleito que o termo atendeu foi enviado ate' a data do termo (reemissao posterior ainda espera o dela)
+        # o pleito que o termo atendeu foi enviado ate' a data do termo (reemissao posterior ainda espera o dela). A
+        # correcao atende o pleito que o termo original atendeu: conta a data do termo mais antigo da cadeia no mesmo
+        # ciclo e data-base, e nao a dela (revisor e gate Sol, PR #411: sem isso a reemissao entre as datas dos dois
+        # termos aparecia atendida quando a ligacao herdada se perdia)
+        data_termo = min([inst["data"], *(por_chave[k]["data"] for k in cadeia
+                                          if k in por_chave and base_ciclo(por_chave[k]) == (base, ciclo))])
         p = conn.execute("SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? "
                          "AND tipo='reajuste' AND data_base_mes=? AND ciclo=? AND situacao='enviado' "
                          "AND date(enviado_em) <= date(?) ORDER BY enviado_em DESC, id DESC LIMIT 1",
-                         (contrato_id, base, ciclo, inst["data"])).fetchone()
+                         (contrato_id, base, ciclo, data_termo)).fetchone()
         if p is not None and p["instrumento_chave"] is None:
             ligar(p, inst)
 
