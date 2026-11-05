@@ -308,12 +308,18 @@ def _curvas_em_vigor(conn, pleito_id: int) -> list[dict]:
                                           (pleito_id, f"{PASTA_CURVA_S}/%"))]
 
 
-def _conteudo_anexado(a: dict) -> list[tuple] | None:
-    """Issue #447: o conteudo da curva anexada, lido do arquivo; None se o arquivo sumiu (backup sem `curvas/`, #441),
-    nao bate com o sha256 gravado ou nao se le como curva S."""
+def _bytes_ou_nada(rel: str) -> bytes | None:
+    """Os bytes do arquivo, ou None se ele sumiu do disco (backup sem `curvas/`, #441)."""
     try:
-        dados = _bytes(a["arquivo"])
+        return _bytes(rel)
     except (OSError, ValueError):
+        return None
+
+
+def _conteudo_anexado(a: dict, dados: bytes | None) -> list[tuple] | None:
+    """Issue #447: o conteudo da curva anexada, sobre os bytes `dados` ja' lidos do arquivo (o mesmo buffer que vai
+    no e-mail); None se o arquivo sumiu, nao bate com o sha256 gravado ou nao se le como curva S."""
+    if dados is None:
         return None
     if arquivos.sha_de(dados) != a["sha256"]:
         return None
@@ -337,7 +343,8 @@ def _trocar_curva_s(conn, usuario_id: int, tipo: str, contrato_id: int, pleito_i
     em_vigor = _curvas_em_vigor(conn, pleito_id)
     if agora is None and not em_vigor:
         return
-    if agora is not None and len(em_vigor) == 1 and _conteudo_anexado(em_vigor[0]) == agora:
+    if agora is not None and len(em_vigor) == 1 and \
+            _conteudo_anexado(em_vigor[0], _bytes_ou_nada(em_vigor[0]["arquivo"])) == agora:
         return
     removidas = [x["id"] for x in em_vigor]
     conn.executemany("UPDATE pleito_anexos SET removido_em=datetime('now') WHERE id=?", [(x,) for x in removidas])
@@ -354,12 +361,15 @@ def _trocar_curva_s(conn, usuario_id: int, tipo: str, contrato_id: int, pleito_i
                         {"anexo_id": aid, "nome": carta.NOME_CURVA_S, "sha256": sha})
 
 
-def _problema_curva_s(conn, p: dict) -> str | None:
+def _problema_curva_s(conn, p: dict, lidas: dict[int, bytes | None] | None = None) -> str | None:
     """Rodada 2 da PR #436 (a regra do termo no oficio, PR #435): a curva anexada tem de ser a dos dados de agora.
     Com curva a gerar, exatamente uma gerada em vigor, com o arquivo integro e as mesmas celulas (issue #447: o
     conteudo, nao os bytes do zip); sem curva a gerar, nenhuma em vigor. Fora disso o envio recusa e a justificativa
     nao libera: cronograma novo, medicao mudada ou cancelada, versoes superadas, arquivo sumido ou o pedido montado
-    antes da curva existir pedem "Atualizar curva S" (`atualizar_curva_s`), que nao mexe na carta assinada."""
+    antes da curva existir pedem "Atualizar curva S" (`atualizar_curva_s`), que nao mexe na carta assinada.
+
+    `lidas` (id do anexo -> bytes, de `_ler_anexos`): confere sobre esse buffer, o mesmo que vai no e-mail, sem ler
+    o disco de novo (gate Sol na PR #455: o arquivo trocado depois da conferencia nao sai sem ser conferido)."""
     if p["tipo"] != "prazo":
         return None
     linhas = _linhas_curva_s(conn, p["tipo"], p["contrato_id"])
@@ -370,7 +380,10 @@ def _problema_curva_s(conn, p: dict) -> str | None:
         return CURVA_S_FALTA
     if len(em_vigor) != 1:
         return CURVA_S_MUDOU
-    conteudo = _conteudo_anexado(em_vigor[0])
+    a = em_vigor[0]
+    if lidas is not None and a["id"] not in lidas:
+        return CURVA_S_MUDOU
+    conteudo = _conteudo_anexado(a, lidas[a["id"]] if lidas is not None else _bytes_ou_nada(a["arquivo"]))
     if conteudo is None:
         return CURVA_S_ILEGIVEL
     return None if conteudo == carta.conteudo_curva_s(linhas) else CURVA_S_MUDOU
@@ -690,7 +703,7 @@ def receber_assinado(conn, usuario_id: int, pleito_id: int, pdf: bytes) -> dict:
 
 # --- pendencias, detalhe e lista -------------------------------------------------------------------
 
-def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
+def pendencias(conn, p: dict, hoje: datetime.date, curvas_lidas: dict[int, bytes | None] | None = None) -> list[dict]:
     if p["origem"] == "cadastro":
         return []
     out = []
@@ -708,7 +721,7 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
         out.append({"codigo": "memoria_ausente", "mensagem": MEMORIA_AUSENTE})
     # issue #447: a curva S fora dos dados de agora aparece no "O que falta" e na previa (o envio recusa e a
     # justificativa nao libera; "Atualizar curva S" resolve)
-    if p["situacao"] not in ("enviado", "descartado") and (curva := _problema_curva_s(conn, p)):
+    if p["situacao"] not in ("enviado", "descartado") and (curva := _problema_curva_s(conn, p, curvas_lidas)):
         out.append({"codigo": "curva_s", "mensagem": curva})
     if p["situacao"] == "rascunho":
         out.append({"codigo": "nao_montado", "mensagem": "Carta ainda não montada"})
@@ -773,20 +786,26 @@ def _nome_unico(nome: str, usados: set[str]) -> str:
     return final
 
 
-def _anexos_envio(conn, p: dict) -> list[tuple[str, bytes]]:
-    """A carta e os anexos, com nomes unicos no e-mail: a carta e a curva S gerada guardam os delas, e um arrastado
-    com nome repetido ganha " (2)" (o orgao nao recebe dois arquivos com o mesmo nome)."""
+def _ler_anexos(conn, p: dict) -> list[tuple[str, bytes | None, dict | None]]:
+    """A carta e os anexos, lidos do disco uma vez so', com nomes unicos no e-mail: a carta e a curva S gerada guardam
+    os delas, e um arrastado com nome repetido ganha " (2)" (o orgao nao recebe dois arquivos com o mesmo nome). A
+    curva gerada que sumiu do disco vem com bytes None (a pendencia da curva diz o que fazer; a previa nao quebra)."""
     out, usados = [], set()
     if p["assinado_arquivo"] or p["montado_arquivo"]:
         out.append((_nome_unico(nome_documento(conn, p), usados),
-                    _bytes(p["assinado_arquivo"] or p["montado_arquivo"])))
+                    _bytes(p["assinado_arquivo"] or p["montado_arquivo"]), None))
     anexos = _anexos_de(conn, p["id"])
     nomes = {a["id"]: _nome_unico(a["nome"], usados) for a in sorted(anexos, key=lambda a: not _gerada(a))}
-    out += [(nomes[a["id"]], _bytes(a["arquivo"])) for a in anexos]
+    out += [(nomes[a["id"]], _bytes_ou_nada(a["arquivo"]) if _gerada(a) else _bytes(a["arquivo"]), a) for a in anexos]
     return out
 
 
-def previa_envio(conn, pleito_id: int, remetente: str | None = None, hoje: datetime.date | None = None) -> dict:
+def _curvas_lidas(lidos: list[tuple[str, bytes | None, dict | None]]) -> dict[int, bytes | None]:
+    return {a["id"]: b for _, b, a in lidos if a is not None and _gerada(a)}
+
+
+def previa_envio(conn, pleito_id: int, remetente: str | None = None, hoje: datetime.date | None = None,
+                 lidos: list[tuple[str, bytes | None, dict | None]] | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     p = _linha(conn, pleito_id)
     if p["tipo"] not in TIPOS:
@@ -798,15 +817,16 @@ def previa_envio(conn, pleito_id: int, remetente: str | None = None, hoje: datet
     if remetente:       # o e-mail de login e a conta do Outlook (podem ser diferentes), como no protocolo
         fora = {remetente.lower()} | correio.contas_do_usuario(conn, remetente)
         copia = [x for x in copia if x.lower() not in fora]
-    anexos = _anexos_envio(conn, p)
-    total = sum(len(b) for _, b in anexos)
-    pend = pendencias(conn, p, hoje)
+    lidos = _ler_anexos(conn, p) if lidos is None else lidos
+    anexos = [(n, len(b) if b is not None else a["tamanho"]) for n, b, a in lidos]
+    total = sum(t for _, t in anexos)
+    pend = pendencias(conn, p, hoje, _curvas_lidas(lidos))
     if total > correio.MAX_TOTAL:
         pend.append({"codigo": "tamanho", "mensagem": f"Anexos somam {total // (1024 * 1024)} MB, acima do limite "
                                                       f"do e-mail ({correio.MAX_TOTAL // (1024 * 1024)} MB)"})
     return {"para": para, "copia": copia, "assunto": carta.preencher(textos.get("email_assunto", ""), campos),
             "corpo": carta.preencher(textos.get("email_corpo", ""), campos).strip(),
-            "anexos": [{"nome": n, "tamanho": len(b)} for n, b in anexos], "total": total,
+            "anexos": [{"nome": n, "tamanho": t} for n, t in anexos], "total": total,
             "limite": correio.MAX_TOTAL, "pendencias": pend}
 
 
@@ -851,9 +871,14 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         # Ja' com a reserva, a carta e os anexos nao mudam ate' o e-mail (`_anexos_mudaveis` recusa): confere tudo
         # de novo sobre a linha relida e manda exatamente isso. Memoria divergente, anexos acima do limite ou
         # pendencia que a pessoa nao viu na previa (cronograma tirado na outra aba, carta remontada) param aqui
-        if (curva := _problema_curva_s(conn, atual)):     # de novo sob a reserva: medicao ou cronograma no meio,
-            raise ValueError(curva)                       # e antes da previa, que le os anexos do disco (#447)
-        pv_reservado = previa_envio(conn, pleito_id, hoje=hoje)
+        # Os anexos sao lidos do disco uma vez so' (gate Sol na PR #455): a curva e' conferida sobre esses bytes, e
+        # sao eles que vao ao Graph e ao registro do envio (o arquivo trocado depois nao sai sem conferencia)
+        lidos = _ler_anexos(conn, atual)
+        if (curva := _problema_curva_s(conn, atual, _curvas_lidas(lidos))):    # medicao ou cronograma no meio
+            raise ValueError(curva)
+        if any(b is None for _, b, _ in lidos):
+            raise ValueError(CURVA_S_ILEGIVEL)
+        pv_reservado = previa_envio(conn, pleito_id, hoje=hoje, lidos=lidos)
         vistas = {x["mensagem"] for x in pv["pendencias"]}
         novas = [x["mensagem"] for x in pv_reservado["pendencias"] if x["mensagem"] not in vistas]
         if _memoria_divergente(conn, atual):
@@ -866,7 +891,7 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         pv = pv_reservado                       # a auditoria registra as pendencias do que de fato saiu
         envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(atual), para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),
-                                              _anexos_envio(conn, atual), cco=cco)
+                                              [(n, b) for n, b, _ in lidos], cco=cco)
     except correio.EnvioNaoRegistrado:
         raise                                       # o e-mail saiu: a reserva fica e segura a repeticao
     except Exception:

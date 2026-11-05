@@ -18,6 +18,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from decimal import Decimal
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fpdf import FPDF
@@ -346,13 +347,22 @@ def curva_s_xlsx(linhas: list[dict]) -> bytes:
     return saida.getvalue()
 
 
+# Teto dos acumulados da curva (R$ 10 trilhoes): ate' 15 algarismos, o real da celula (float) volta pelo `repr`
+# exatamente ao decimal de 2 casas (DBL_DIG = 15), entao o centavo lido e' o gravado, sem arredondar.
+TETO_CURVA_S_CENTAVOS = 10 ** 15
+
+
 def _centavos(valor) -> int | None:
-    """Real da celula -> centavo inteiro (o inverso de `_reais`). Celula vazia fica None."""
+    """Real da celula -> centavo inteiro (o inverso de `_reais`), exato: pelo `repr` em Decimal, sem a multiplicacao
+    de float (gate Sol na PR #455). Celula vazia fica None; fracao de centavo ou acima do teto, ValueError."""
     if valor is None:
         return None
     if isinstance(valor, bool) or not isinstance(valor, (int, float)):
         raise ValueError("valor da curva S não numérico")
-    return round(valor * 100)
+    c = Decimal(repr(valor)) * 100
+    if c != c.to_integral_value() or abs(c) >= TETO_CURVA_S_CENTAVOS:
+        raise ValueError("valor da curva S fora do centavo exato")
+    return int(c)
 
 
 def conteudo_curva_s(linhas: list[dict]) -> list[tuple]:

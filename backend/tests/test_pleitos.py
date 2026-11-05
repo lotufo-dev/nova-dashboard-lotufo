@@ -698,3 +698,41 @@ def test_curva_s_que_some_sob_a_reserva_recusa_com_a_mensagem_e_destrava(cenario
                        justificativa="conferido, segue assim")
     assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
     assert pleitos.detalhe(c, pid)["envio_reservado_em"] is None
+
+
+def test_curva_s_trocada_no_disco_depois_da_conferencia_nao_sai(cenario, monkeypatch):
+    """Gate Sol na PR #455 (S1): sob a reserva, os anexos sao lidos uma vez so'; a curva e' conferida sobre esses
+    bytes e sao eles que vao ao Graph. Arquivo trocado no disco depois da leitura nao muda o que sai."""
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    caminho = arquivos.caminho_seguro(_curvas_s(c, pid)[0]["arquivo"])
+    original = caminho.read_bytes()
+    ler = pleitos._ler_anexos
+    leituras = []
+
+    def ler_e_estragar(conn, p):
+        lidos = ler(conn, p)
+        leituras.append(1)
+        if len(leituras) == 2:                 # a leitura sob a reserva: o disco muda logo depois dela
+            caminho.write_bytes(b"PK\x03\x04trocado depois da conferencia")
+        return lidos
+
+    pv = pleitos.previa_envio(c, pid)
+    monkeypatch.setattr(pleitos, "_ler_anexos", ler_e_estragar)
+    eid = pleitos.enviar(c, ids["usuario"], pid, pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         justificativa="conferido, segue assim")
+    assert len(leituras) == 2                  # a previa de antes da reserva e a leitura unica sob a reserva
+    sha = c.execute("SELECT sha256 FROM envio_anexos WHERE envio_id=? AND nome='Curva S.xlsx'", (eid,)).fetchone()
+    assert sha is not None and sha[0] == arquivos.sha_de(original)
+
+
+def test_previa_com_a_curva_sumida_lista_a_pendencia_sem_quebrar(cenario):
+    """Revisor na PR #455 (R1) e gate Sol (S2): a previa nao le a curva sumida como erro de disco; lista a pendencia
+    e o tamanho gravado."""
+    c, ids = cenario
+    pid = _pronto_para_enviar(c, ids)
+    curva = _curvas_s(c, pid)[0]
+    arquivos.caminho_seguro(curva["arquivo"]).unlink()
+    pv = pleitos.previa_envio(c, pid)
+    assert pleitos.CURVA_S_ILEGIVEL in [x["mensagem"] for x in pv["pendencias"]]
+    assert {"nome": "Curva S.xlsx", "tamanho": curva["tamanho"]} in pv["anexos"]
