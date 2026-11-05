@@ -609,6 +609,9 @@ pleitos_anteriores:                 # enviados antes do sistema; não duplicam a
 - {tipo: reajuste, oficio: CT-122-LT-2026, data: 2026-04-23, data_base: 2023-03, ciclo: 2026}
 - {tipo: prazo, oficio: CT-282-LT-2026, data: 2026-08-07, dias: 180}
 - {tipo: conclusao, oficio: CT-245-LT-2026, data: 2026-07-31}
+# corrigir pleito já aplicado com data ou ofício errado (#399): o item com `corrige` substitui o antigo na lista;
+# só pleito do cadastro (o da tela não se corrige aqui); `data` dentro de `corrige` é a gravada, opcional, e confere
+- {tipo: prazo, oficio: CT-300-LT-2026, data: 2026-05-06, dias: 180, corrige: {oficio: CT-300-LT-2026, data: 2026-08-14}}
 - {tipo: valor, oficio: CT-301-LT-2026, data: 2026-03-27, valor: '1.000.000,00', objeto: 1ª RPFO}  # pedido de aditivo de valor; atendido pelo aditivo de valor assinado depois
 ```
 

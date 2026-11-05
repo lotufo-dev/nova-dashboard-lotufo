@@ -424,8 +424,37 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
             if _inteiro(p["dias"], 1) is None:
                 falha(f"{onde}.dias", "use um inteiro > 0")
             item["dias"] = p["dias"]
+        # issue #399: `corrige: {oficio, data?}` corrige a data e/ou o oficio de um pleito ja' aplicado
+        item["corrige"] = _corrige_pleito(p.get("corrige"), f"{onde}.corrige", falha)
         out.append(item)
+    # um oficio pode cobrir duas datas-base (migracao 026): a chave do pleito leva a data-base
+    alvos = [(x["tipo"], x["corrige"]["oficio"], x["data_base"]) for x in out if x["corrige"]]
+    if len(alvos) != len(set(alvos)):
+        falha("pleitos_anteriores", "dois itens corrigem o mesmo pleito")
+    for i, x in enumerate(out):
+        if not x["corrige"] and (x["tipo"], x["oficio"], x["data_base"]) in alvos:
+            falha(f"pleitos_anteriores[{i}]", f"o pleito {x['oficio']} é corrigido por outro item: tire este da "
+                  "lista (o item com corrige o substitui)")
     return out
+
+
+def _corrige_pleito(v, onde: str, falha) -> dict | None:
+    """Issue #399: identifica o pleito gravado pelo oficio (obrigatorio) e, se vier, confere a data gravada."""
+    if v is None:
+        return None
+    if not isinstance(v, dict) or set(v) - {"oficio", "data"}:
+        falha(onde, "use {oficio: <ofício gravado>, data: <data gravada, opcional>}")
+        return None
+    oficio = str(v.get("oficio") or "").strip()
+    if not oficio:
+        falha(f"{onde}.oficio", "obrigatório: o número do ofício do pleito gravado")
+        return None
+    try:
+        data = _data(v.get("data"))
+    except ValueError as e:
+        falha(f"{onde}.data", str(e))
+        return None
+    return {"oficio": oficio, "data": data}
 
 
 # Gate Sol (PR #406): acima do int64 o `aplicar` estourava com OverflowError ao consultar o numero no SQLite.
