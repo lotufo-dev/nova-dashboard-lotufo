@@ -26,8 +26,9 @@ type Det = {
   bloqueio: string | null; pendencias: (string | { mensagem: string })[];
   /** issue #278: reajuste sem apostilamento que cubra a competencia: o envio pede justificativa escrita */
   exige_justificativa?: boolean;
-  /** issue #278: o termo de apostilamento mudou depois da montagem; o pacote tem de ser montado de novo */
-  remontar?: boolean;
+  /** issue #278: o termo de apostilamento mudou depois da montagem; o pacote tem de ser montado de novo.
+   *  `remontar_liberado`: e' o unico motivo do bloqueio (com certidao vencida junto, o Montar de novo espera). */
+  remontar?: boolean; remontar_liberado?: boolean;
   extras: Extra[];
 };
 type Extra = { id: number; nome: string; tamanho: number };
@@ -422,9 +423,10 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
               {/* issue #278: o termo de apostilamento mudou depois da montagem; o bloqueio diz o motivo e o Montar volta */}
               {(det.situacao_protocolo === "rascunho" || det.remontar) && (
                 <div className="form-inline">
-                  <button type="button" className="btn btn--primario" disabled={ocupado || (!!det.bloqueio && !det.remontar)}
+                  <button type="button" className="btn btn--primario" disabled={ocupado || (!!det.bloqueio && !det.remontar_liberado)}
                     onClick={() => void agir(async () => {
-                      await api(`/api/protocolos/${protocoloId}/montar`, { method: "POST", body: JSON.stringify({}) });
+                      // esta tela nao mostra o texto da carta: o gravado sem o campo do termo da' lugar ao padrao
+                      await api(`/api/protocolos/${protocoloId}/montar`, { method: "POST", body: JSON.stringify({ refazer_texto: true }) });
                       await carregar();
                     })}>{ocupado ? "Montando…" : det.remontar ? "Montar de novo" : "Montar"}</button>
                 </div>

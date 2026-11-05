@@ -190,14 +190,26 @@ describe("Enviar a nota", () => {
     // revisor e gate Sol (rodada 1 da PR #435): o termo mudou depois da montagem; o envio fica bloqueado e o Montar volta
     it("termo mudou depois da montagem: o envio fica bloqueado e o ofício se monta de novo", async () => {
       const MUDOU = "O apostilamento do reajuste mudou depois da montagem: monte o pacote de novo (e assine de novo, se já tinha assinado)";
-      abrir({ ...mtpar("assinado", false), bloqueio: MUDOU, remontar: true });
+      abrir({ ...mtpar("assinado", false), bloqueio: MUDOU, remontar: true, remontar_liberado: true });
       expect(await screen.findByText(`Envio bloqueado: ${MUDOU}`)).toBeTruthy();
       expect((screen.getByRole("button", { name: "Enviar o e-mail" }) as HTMLButtonElement).disabled).toBe(true);
       const montar = screen.getByRole("button", { name: "Montar de novo" }) as HTMLButtonElement;
       expect(montar.disabled).toBe(false);
       fireEvent.click(montar);
       await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/protocolos/3/montar")).toBe(true));
-      expect(JSON.parse(api.mock.calls.find(c => c[0] === "/api/protocolos/3/montar")![1].body)).toEqual({});
+      // a tela nao mostra o texto da carta: o gravado sem o campo do termo da' lugar ao padrao (rodada 2)
+      expect(JSON.parse(api.mock.calls.find(c => c[0] === "/api/protocolos/3/montar")![1].body)).toEqual({ refazer_texto: true });
+    });
+
+    // revisor (rodada 2 da PR #435): com certidão vencida junto, o Montar de novo espera a renovação
+    it("termo mudou e certidão vencida: o Montar de novo fica desabilitado", async () => {
+      const MUDOU = "O apostilamento do reajuste mudou depois da montagem: monte o pacote de novo (e assine de novo, se já tinha assinado)";
+      abrir({ ...mtpar("assinado", false), bloqueio: `Certidão vencida — renove antes de enviar: Lotufo: CND municipal · ${MUDOU}`,
+        remontar: true, remontar_liberado: false });
+      const montar = await screen.findByRole("button", { name: "Montar de novo" }) as HTMLButtonElement;
+      expect(montar.disabled).toBe(true);
+      fireEvent.click(montar);
+      expect(api.mock.calls.some(c => c[0] === "/api/protocolos/3/montar")).toBe(false);
     });
 
     it("com o apostilamento cobrindo a competência, não há campo de justificativa", async () => {
