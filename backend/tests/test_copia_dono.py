@@ -149,7 +149,7 @@ def test_chave_salva_pelo_powershell_com_bom_ou_utf16_funciona(raiz, dono, codif
 
 
 def test_arquivo_da_chave_ilegivel_nao_derruba_a_situacao_do_backup(raiz):
-    (raiz / "segredos" / "chave-publica-dono.txt").write_bytes(b"\xff\x00\xc3\x28\x80")
+    (raiz / "segredos" / "chave-publica-dono.txt").write_bytes(b"\xff\xfe\x00")  # BOM UTF-16 e meio caractere
     assert backup.situacao(_pasta(raiz), False, tempo.agora_utc())["copia_dono_configurada"] is True
     with pytest.raises(copia_dono.CopiaDonoErro, match="não foi possível ler"):
         copia_dono.gerar(raiz, _pasta(raiz))
@@ -162,11 +162,58 @@ def test_rodada_semanal_refaz_a_conferencia_dentro_do_lock(raiz):
     assert copia_dono.copias(_pasta(raiz)) == antes
 
 
-def test_chave_privada_na_pasta_de_segredos_recusa_o_pacote(raiz, dono):
-    (raiz / "segredos" / "chave-privada-dono.txt").write_text(f"{dono}\n", encoding="utf-8")
+@pytest.mark.parametrize("codificacao", ["utf-8", "utf-16", "utf-16-le", "cp1252"])
+def test_chave_privada_na_pasta_de_segredos_recusa_o_pacote(raiz, dono, codificacao):
+    # `rage-keygen > segredos\\chave.txt` no PowerShell 5.1 grava UTF-16LE
+    (raiz / "segredos" / "chave-privada-dono.txt").write_bytes(f"# criada em São Paulo\n{dono}\n".encode(codificacao))
     with pytest.raises(copia_dono.CopiaDonoErro, match="chave privada"):
         copia_dono.gerar(raiz, _pasta(raiz))
     assert not (_pasta(raiz) / "dono").exists()
+
+
+def test_segredo_binario_nao_quebra_a_geracao(raiz, dono):
+    (raiz / "segredos" / "token.bin").write_bytes(bytes(range(256)))
+    assert "segredos/token.bin" in _abrir(copia_dono.gerar(raiz, _pasta(raiz)), dono).getnames()
+
+
+def test_chave_em_ansi_com_comentario_acentuado_funciona(raiz, dono):
+    (raiz / "segredos" / "chave-publica-dono.txt").write_bytes(
+        f"# chave do Leonardo, São Paulo\r\n{dono.to_public()}\r\n".encode("cp1252"))
+    assert _abrir(copia_dono.gerar(raiz, _pasta(raiz)), dono).getnames()
+
+
+def test_snapshot_apagado_no_meio_tenta_o_proximo_valido(raiz, dono, monkeypatch):
+    pasta = _pasta(raiz)
+    antigo = sorted(pasta.glob("dashboard-*.db"))[0]
+    novo = pasta / "dashboard-29991231-235959.db"
+    novo.write_bytes(antigo.read_bytes())
+    original = copia_dono.montar_tar
+    chamadas = []
+
+    def rotacionado(snapshot, segredos, cadastro):
+        chamadas.append(snapshot)
+        if len(chamadas) == 1:
+            snapshot.unlink()  # a retencao do backup apagou o escolhido entre o ensaio e o tar
+        return original(snapshot, segredos, cadastro)
+
+    monkeypatch.setattr(copia_dono, "montar_tar", rotacionado)
+    nomes = _abrir(copia_dono.gerar(raiz, pasta), dono).getnames()
+    assert chamadas[0] == novo and f"banco/{antigo.name}" in nomes and f"banco/{novo.name}" not in nomes
+
+
+def test_sha256_ja_existe_quando_o_arquivo_cifrado_aparece(raiz, monkeypatch):
+    import pathlib
+    vistos = []
+    original = pathlib.Path.replace
+
+    def replace(self, alvo):
+        if str(alvo).endswith(".tar.age"):
+            vistos.append(pathlib.Path(f"{alvo}.sha256").exists())
+        return original(self, alvo)
+
+    monkeypatch.setattr(pathlib.Path, "replace", replace)
+    copia_dono.gerar(raiz, _pasta(raiz))
+    assert vistos == [True]
 
 
 def test_erro_de_chave_privada_chega_inteiro_a_situacao(raiz, dono):

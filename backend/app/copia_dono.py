@@ -52,16 +52,30 @@ def pasta_cadastro(raiz: Path) -> Path:
     return Path(env) if env else raiz / "cadastro"
 
 
-def _texto_da_chave(arquivo: Path) -> str:
-    """Le o arquivo da chave em UTF-8 (com ou sem BOM) ou UTF-16 (o `>` e o `Out-File` do PowerShell 5.1
-    gravam UTF-16LE; o `Set-Content -Encoding UTF8` grava BOM). Texto ilegivel: UnicodeDecodeError."""
-    bruto = arquivo.read_bytes()
+def _decodificar(bruto: bytes) -> str:
+    """Unica porta de leitura de texto de chave: UTF-16 com BOM (o `>` e o `Out-File` do PowerShell 5.1),
+    UTF-8 com ou sem BOM (`Set-Content -Encoding UTF8`) e, se o UTF-8 falhar, cp1252 (`Set-Content` ANSI;
+    a linha age1... e' sempre ASCII). UTF-16 com BOM truncado: UnicodeDecodeError."""
     if bruto.startswith((b"\xff\xfe", b"\xfe\xff")):
         return bruto.decode("utf-16")
     try:
         return bruto.decode("utf-8-sig")
     except UnicodeDecodeError:
-        return bruto.decode("utf-16")
+        return bruto.decode("cp1252", errors="replace")
+
+
+def _texto_da_chave(arquivo: Path) -> str:
+    return _decodificar(arquivo.read_bytes())
+
+
+def _tem_chave_privada(arquivo: Path) -> bool:
+    """Chave privada age em qualquer codificacao (inclusive UTF-16 sem BOM: os NUL saem antes da busca).
+    Arquivo binario ou ilegivel nao quebra: so' nao tem a chave."""
+    try:
+        texto = _decodificar(arquivo.read_bytes())
+    except UnicodeError:
+        return b"AGE-SECRET-KEY" in arquivo.read_bytes().replace(b"\x00", b"").upper()
+    return "AGE-SECRET-KEY" in texto.replace("\x00", "").upper()
 
 
 def carregar_destinatario(raiz: Path):
@@ -142,7 +156,7 @@ def montar_tar(snapshot: Path, segredos: Path, cadastro: Path) -> bytes:
     """O `.tar` em memoria: banco/<snapshot>, segredos/ e cadastro/ (sem a pasta .git)."""
     if segredos.is_dir():
         for arq in segredos.rglob("*"):
-            if arq.is_file() and b"AGE-SECRET-KEY" in arq.read_bytes().upper():
+            if arq.is_file() and _tem_chave_privada(arq):
                 raise CopiaDonoErro("há uma chave privada na pasta de segredos do servidor; "
                                     "apague-a e deixe só a chave pública")
     buf = io.BytesIO()
