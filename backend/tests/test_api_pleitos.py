@@ -106,6 +106,40 @@ def test_reajuste_da_obra_traz_so_os_aditivos_que_valem_como_termo(api):
         [("ta-01", "aditivo_valor", "TA-01", "2025-07-10")]
 
 
+def test_reajuste_da_obra_nao_poe_o_aditivo_corrigido_em_ciclo_nenhum(api, monkeypatch):
+    """Issue #409: TA2 corrige TA1 (que fechava 2026 pela data) para o ciclo 2025. Na resposta, so' o TA2 e' termo, e
+    so' do 2025; o 2026, cujo pleito ainda esta' ligado ao TA1 ate' o proximo `aplicar`, espera o apostilamento."""
+    import datetime
+
+    from app import tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 9, 10))     # ciclo 2026 da base 2024-06
+    cl, cid, _ = api
+    c = db.get_conn()
+    for chave, assinado_em, ciclo, corrige in (("ta-01", "2026-07-10", None, None), ("ta-02", "2026-08-01", 2025, "ta-01")):
+        c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, numero, "
+                  "chave_cadastro, natureza, data_base_mes, ciclo_reajuste, corrige_chave) "
+                  "VALUES (?, 'valor', 100_01, 'assinado', ?, ?, ?, 'reajuste', '2024-06', ?, ?)",
+                  (cid, assinado_em, chave.upper(), chave, ciclo, corrige))
+    for ciclo, enviado_em, chave in ((2025, "2025-06-10", "ta-02"), (2026, "2026-06-10", "ta-01")):
+        c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+                  "enviado_em, instrumento_chave) VALUES (?, 'reajuste', 'cadastro', '2024-06', ?, ?, 'enviado', ?, ?)",
+                  (cid, ciclo, f"CT-1-LT-{ciclo}", enviado_em, chave))
+    c.commit(); c.close()
+    r = cl.get(f"/api/contratos/{cid}/reajuste").json()
+    termos = {t["chave"] for t in r["aditivos_de_reajuste"]}
+    assert termos == {"ta-02"}
+    ciclos_do_termo: dict[str, set[int]] = {}
+    for p in r["pleitos"]:
+        if p["instrumento_chave"] in termos:
+            ciclos_do_termo.setdefault(p["instrumento_chave"], set()).add(p["ciclo"])
+    for k in r["ciclos"]:
+        if k["apostilamento"]:
+            ciclos_do_termo.setdefault(k["apostilamento"]["chave"], set()).add(k["ciclo"])
+    assert ciclos_do_termo == {"ta-02": {2025}}
+    k = r["ciclos"][0]
+    assert (k["ciclo"], k["situacao"], k["apostilamento"]) == (2026, "apostilamento_pendente", None)
+
+
 def test_reajuste_da_obra_traz_o_estado_de_cada_competencia_e_o_ciclo_a_reemitir(api, monkeypatch):
     """Issue #273: por data-base e ciclo, as competencias com o estado e o valor de cada fonte; aditivo de prazo
     assinado depois do pleito poe o ciclo em `reemitir`."""
