@@ -215,13 +215,38 @@ def aditivo_depois(conn, contrato_id: int, desde: str | None) -> dict | None:
     seguintes, enviado depois do aditivo, ja' sai com o prazo novo."""
     if not desde:
         return None
-    r = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND status='assinado' AND cancelado_em IS NULL "
-                     "AND NOT (COALESCE(natureza, '') = 'reajuste' AND nova_execucao_fim IS NULL "
-                     "AND nova_vigencia_fim IS NULL) "
-                     "AND tipo IN ('prazo','valor','misto') AND data_assinatura IS NOT NULL "
+    r = conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND {_PEDE_REEMISSAO} "
                      "AND substr(data_assinatura, 1, 10) > ? ORDER BY data_assinatura DESC, id DESC LIMIT 1",
                      (contrato_id, desde[:10])).fetchone()
     return dict(r) if r else None
+
+
+# O aditivo que pede a reemissao do cronograma de reajuste (`aditivo_depois`), um criterio so' para o estado `reemitir`
+# e para a linha do tempo do ciclo (`aditivos_do_ciclo`).
+_PEDE_REEMISSAO = ("status='assinado' AND cancelado_em IS NULL "
+                   "AND NOT (COALESCE(natureza, '') = 'reajuste' AND nova_execucao_fim IS NULL "
+                   "AND nova_vigencia_fim IS NULL) "
+                   "AND tipo IN ('prazo','valor','misto') AND data_assinatura IS NOT NULL")
+
+
+def aditivos_do_ciclo(conn, contrato_id: int, k: dict) -> list[dict]:
+    """Issue #275 (spec 2026-10-20 §2.2, linha do tempo do ciclo): os aditivos que pedem reemissao (`_PEDE_REEMISSAO`)
+    assinados depois do primeiro pleito enviado do ciclo `k` (um item de `ciclos`) e, com o ciclo fechado, ate' a data
+    do termo. Antes do primeiro pleito o aditivo ja' entra no cronograma do pedido; depois do termo, e' de outro ciclo.
+    O termo que e' ele mesmo um aditivo (issue #390) fica de fora: na linha do tempo ele e' o termo."""
+    desde = conn.execute("SELECT MIN(enviado_em) FROM pleitos WHERE contrato_id=? AND tipo='reajuste' "
+                         "AND data_base_mes=? AND ciclo=? AND situacao='enviado'",
+                         (contrato_id, k["data_base_mes"], k["ciclo"])).fetchone()[0]
+    if not desde:
+        return []
+    termo = k.get("apostilamento")
+    ate = str(termo["data"])[:10] if termo else None
+    rows = conn.execute(f"SELECT id, numero, tipo, data_assinatura FROM aditivos WHERE contrato_id=? "
+                        f"AND {_PEDE_REEMISSAO} AND substr(data_assinatura, 1, 10) > ? "
+                        f"AND (? IS NULL OR substr(data_assinatura, 1, 10) <= ?) ORDER BY data_assinatura, id",
+                        (contrato_id, str(desde)[:10], ate, ate))
+    return [dict(r) for r in rows
+            if not (termo and termo.get("origem") == "aditivo" and termo.get("id") == r["id"])]
 
 
 # Origem mais forte primeiro (spec 2026-10-20 §2.2): o apostilamento manda, o pleito vem depois, o manual por ultimo.
@@ -327,6 +352,34 @@ def _passo_da_medicao(m, com_nf: bool, com_atesto: bool) -> int:
     if me in _MEDICAO_PEDIDA or me == "protocolada" or m["valor_protocolado_centavos"] is not None:
         return _PEDIDA
     return 0
+
+
+# Issue #275 (spec 2026-10-20 §2.2, avisos do motor de apostilamento): a marca de cada competencia na aba Reajuste.
+TOLERANCIA_PREVISAO_CENTAVOS = 100           # "Reajuste fora da previsao": diferenca de ate' R$ 1,00 nao conta
+_COM_BOLETIM = ("aprovada", "faturada", "recebida")
+_COM_NOTA = ("faturada", "recebida")
+
+
+def avisos_da_competencia(x: dict) -> list[str]:
+    """Os avisos de uma linha de `competencias_por_ciclo`, so' com o que ela ja' traz:
+
+    - `fora_da_previsao`: pedido diferente do previsto vigente por mais de R$ 1,00. O vigente e' o da origem mais
+      forte (`ORDEM_ORIGEM`): o apostilado em valor, senao o previsto do pleito ou digitado. Sem previsto, nada a
+      comparar.
+    - `sem_apostilamento`: aprovada ou faturada (ou recebida) sem termo que cubra a competencia.
+    - `nota_antes_do_apostilamento`: nota emitida em competencia nao apostilada (o critico da spec).
+
+    Linha de data-base incerta nao leva aviso de apostilamento: sem a base, nao se sabe se algum termo a cobre."""
+    out = []
+    vigente = x["apostilado_centavos"] if x["apostilado_centavos"] is not None else x["previsto_centavos"]
+    if x["pedido_centavos"] is not None and vigente is not None \
+            and abs(x["pedido_centavos"] - vigente) > TOLERANCIA_PREVISAO_CENTAVOS:
+        out.append("fora_da_previsao")
+    if not x["apostilada"] and not x["data_base_incerta"] and x["estado"] in _COM_BOLETIM:
+        out.append("sem_apostilamento")
+        if x["estado"] in _COM_NOTA:
+            out.append("nota_antes_do_apostilamento")
+    return out
 
 
 def _soma(valores) -> int | None:
@@ -479,6 +532,7 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
                      aprovado_centavos=_soma(v[2]["valor_atestado_centavos"] for v in ms),
                      faturado_centavos=_soma(faturado.get(v[2]["id"]) for v in ms))
         x["estado"] = ESTADOS_COMPETENCIA[max(passo, _APOSTILADA if x["apostilada"] else 0)]
+        x["avisos"] = avisos_da_competencia(x)
         grupos.setdefault((base, ciclo), []).append(x)
     return [{"data_base_mes": b, "ciclo": y, "competencias": xs} for (b, y), xs in grupos.items()]
 

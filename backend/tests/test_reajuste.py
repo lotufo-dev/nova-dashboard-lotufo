@@ -945,3 +945,108 @@ def test_aditivo_com_ciclo_guardado_nao_fecha_pela_ligacao_o_pleito_de_outro_cic
     assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2026, True) is None
     # ligado ao 2026, nao e' reaproveitado no 2025 pela data; o proximo `aplicar` move a ligacao (test_cadastro_aplicar)
     assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True) is None
+
+
+# --- issue #275: a marca de aviso de cada competencia e os aditivos da linha do tempo do ciclo ---
+
+def test_pedido_fora_da_previsao_vigente_com_tolerancia_de_um_real(cenario):
+    # spec 2026-10-20 §2.2, "Reajuste fora da previsao": pedido != previsto vigente da competencia, tolerancia R$ 1,00
+    c, ids = cenario
+    cid = ids["contrato"]
+    for comp in ("2026-07", "2026-08", "2026-09", "2026-10"):
+        _previsao(c, cid, comp, 100_01, "manual")
+    _medicao(c, cid, 1, "2026-07", "planilha_enviada", pedido=101_01)        # R$ 1,00 acima: dentro da tolerancia
+    _medicao(c, cid, 2, "2026-08", "planilha_enviada", pedido=101_02)        # R$ 1,01 acima
+    _medicao(c, cid, 3, "2026-09", "planilha_enviada", pedido=99_00)         # R$ 1,01 abaixo
+    _medicao(c, cid, 4, "2026-11", "planilha_enviada", pedido=777_77)        # sem previsao: nada a comparar
+    x = _por_competencia(c, cid)
+    assert {k: v["avisos"] for k, v in x.items()} == {
+        "2026-07": [], "2026-08": ["fora_da_previsao"], "2026-09": ["fora_da_previsao"], "2026-10": [],
+        "2026-11": []}
+    assert reajuste.TOLERANCIA_PREVISAO_CENTAVOS == 100
+
+
+def test_apostilado_e_o_previsto_vigente_da_competencia_apostilada(cenario):
+    # a previsao vigente e' a da origem mais forte (apostilamento > pleito > manual): com o termo, o pedido se compara
+    # com o apostilado, e nao com o previsto digitado
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["instrumento"]("apostilamento_reajuste", "2026-10-20",
+                       {"data_base": "2024-06", "ciclo": 2026,
+                        "competencias": [{"competencia": "2026-07", "valor": "400,11"},
+                                         {"competencia": "2026-08", "valor": "400,11"}]})
+    ap = c.execute("SELECT MAX(id) FROM instrumentos").fetchone()[0]
+    for comp in ("2026-07", "2026-08"):
+        _previsao(c, cid, comp, 300_00, "manual")
+        _previsao(c, cid, comp, 400_11, "apostilamento", instrumento_id=ap, criado_em="2026-10-20 10:00:00")
+    _medicao(c, cid, 1, "2026-07", "planilha_enviada", pedido=400_11)
+    _medicao(c, cid, 2, "2026-08", "planilha_enviada", pedido=300_00)
+    x = _por_competencia(c, cid)
+    assert (x["2026-07"]["previsto_centavos"], x["2026-07"]["apostilado_centavos"]) == (300_00, 400_11)
+    assert (x["2026-07"]["avisos"], x["2026-08"]["avisos"]) == ([], ["fora_da_previsao"])
+
+
+def test_aprovada_ou_faturada_sem_apostilamento_e_nota_antes_do_termo(cenario):
+    # spec 2026-10-20 §2.2: "Reajuste sem apostilamento" (aprovada ou faturada sem termo que a cubra) e "Nota de
+    # reajuste antes do apostilamento" (nota emitida em competencia nao apostilada)
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["instrumento"]("apostilamento_reajuste", "2026-10-20",
+                       {"data_base": "2024-06", "ciclo": 2026,
+                        "competencias": [{"competencia": "2026-10", "valor": "500,07"}]})
+    ap = c.execute("SELECT MAX(id) FROM instrumentos").fetchone()[0]
+    _previsao(c, cid, "2026-10", 500_07, "apostilamento", instrumento_id=ap, criado_em="2026-10-20 10:00:00")
+    _medicao(c, cid, 1, "2026-07", "planilha_enviada", pedido=100_01)                       # so' pedida
+    _medicao(c, cid, 2, "2026-08", "boletim_recebido", pedido=200_03, aprovado=200_03)      # aprovada
+    m3 = _medicao(c, cid, 3, "2026-09", "nota_emitida", pedido=300_05, aprovado=300_05)    # faturada
+    _nota(c, m3, 300_05)
+    m4 = _medicao(c, cid, 4, "2026-10", "nota_emitida", pedido=500_07, aprovado=500_07)    # faturada e apostilada
+    _nota(c, m4, 500_07)
+    m5 = _medicao(c, cid, 5, "2026-11", "recebida", pedido=600_09, aprovado=600_09)        # recebida sem termo
+    _nota(c, m5, 600_09)
+    x = _por_competencia(c, cid)
+    assert {k: (v["estado"], v["avisos"]) for k, v in x.items()} == {
+        "2026-07": ("pedida", []),
+        "2026-08": ("aprovada", ["sem_apostilamento"]),
+        "2026-09": ("faturada", ["sem_apostilamento", "nota_antes_do_apostilamento"]),
+        "2026-10": ("faturada", []),
+        "2026-11": ("recebida", ["sem_apostilamento", "nota_antes_do_apostilamento"])}
+
+
+def test_medicao_de_data_base_incerta_nao_ganha_aviso_de_apostilamento(cenario):
+    # sem saber a data-base, nao se sabe se algum termo a cobre: a incerteza ja' e' o que a tela mostra
+    c, ids = cenario
+    cid = ids["contrato"]
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2024-08', 'SICRO')", (cid,))
+    c.commit()
+    m = _medicao(c, cid, 2, "2026-09", "nota_emitida", pedido=300_05, aprovado=300_05)
+    _nota(c, m, 300_05)
+    sem_base = _por_competencia(c, cid, data_base=None, ciclo=None)["2026-09"]
+    assert (sem_base["estado"], sem_base["data_base_incerta"], sem_base["avisos"]) == ("faturada", True, [])
+
+
+def test_aditivos_do_ciclo_depois_do_primeiro_pedido_ate_o_termo(cenario):
+    # a linha do tempo do ciclo (spec 2026-10-20 §2.2): os aditivos que pedem reemissao, assinados depois do primeiro
+    # pleito enviado do ciclo e, com o ciclo apostilado, ate' a data do termo
+    c, ids = cenario
+    cid = ids["contrato"]
+    assert reajuste.aditivos_do_ciclo(c, cid, reajuste.ciclos(c, cid, D(2026, 9, 10))[0]) == []   # sem pleito
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    p1 = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    _aditivo(c, cid, "prazo", "2026-06-01")                 # antes do pleito: nao entra
+    _aditivo(c, cid, "escopo", "2026-07-01")                # escopo nao pede reemissao
+    _aditivo(c, cid, "valor", "2026-07-15", status="em_andamento")
+    _aditivo(c, cid, "prazo", "2026-08-01")
+    _reiteracao(c, cid, p1, "2026-08-20", "CT-2-LT-2026")
+    _aditivo(c, cid, "misto", "2026-09-01")                 # depois da reiteracao: continua no ciclo
+    k = reajuste.ciclos(c, cid, D(2026, 9, 10))[0]
+    assert k["situacao"] == "reemitir"
+    assert [(a["tipo"], a["data_assinatura"]) for a in reajuste.aditivos_do_ciclo(c, cid, k)] == \
+        [("prazo", "2026-08-01"), ("misto", "2026-09-01")]
+    # o termo fecha o ciclo: o aditivo assinado depois dele ja' nao e' deste ciclo
+    ids["instrumento"]("apostilamento_reajuste", "2026-08-25", {"data_base": "2024-06", "ciclo": 2026})
+    c.execute("UPDATE pleitos SET instrumento_chave='apostilamento_reajuste-2026-08-25' WHERE id=?", (p1,))
+    c.commit()
+    k = reajuste.ciclos(c, cid, D(2026, 9, 10))[0]
+    assert k["situacao"] == "apostilado"
+    assert [a["data_assinatura"] for a in reajuste.aditivos_do_ciclo(c, cid, k)] == ["2026-08-01"]

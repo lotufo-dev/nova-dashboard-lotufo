@@ -88,7 +88,9 @@ def _arquivo(rel: str | None, nome: str) -> FileResponse:
 def reajuste_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
                      conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)
-    return {"ciclos": reajuste.ciclos(conn, contrato_id),
+    # issue #275: os aditivos da linha do tempo de cada ciclo (so' a aba os le; os avisos e a diretoria nao pagam a conta)
+    return {"ciclos": [{**k, "aditivos": reajuste.aditivos_do_ciclo(conn, contrato_id, k)}
+                       for k in reajuste.ciclos(conn, contrato_id)],
             "competencias": reajuste.competencias_apostiladas(conn, contrato_id),
             "bases_dos_termos": reajuste.bases_dos_termos(conn, contrato_id),
             # issue #390: o termo aditivo de reajuste pelo mesmo criterio do ciclo, para o pleito dizer qual o atendeu
