@@ -603,9 +603,11 @@ fim da execução que prorroga é marcado "retroativo" e nunca recusado.
 protocolo (ofício gerado, anexos, montar, assinar no DocuSign, arrastar o assinado, prévia, enviar). Anexos
 exigidos: memória de cálculo e cronograma no reajuste, cronograma no prazo. No prazo, a "Curva S.xlsx" (competência,
 previsto vigente, previsto anterior à última repactuação e medido, acumulados; issue #293) entra sozinha nos anexos ao
-criar o pedido e é trocada pela do dia a cada "montar" (fica em `curvas/` na pasta de dados). Ela não se remove, o nome
-"Curva S.xlsx" não se usa em anexo arrastado, e o envio recusa o pedido sem a curva quando o cronograma vigente a
-permite (monte a carta de novo). Sem previsto vigente, não há curva. Justificativa de prazo que fala em
+criar o pedido e é trocada pela do dia a cada "montar" (fica em `curvas/` na pasta de dados). Ela não se remove, e o
+nome "Curva S.xlsx" não se usa em anexo arrastado no prazo. A prévia e o envio refazem a curva com os dados de agora
+e comparam pelo sha256 (o xlsx não leva hora): curva que falta ou que mudou desde o "montar" (cronograma novo, medição
+mudada ou cancelada, versões superadas) trava o envio até a carta ser montada de novo. Sem previsto vigente, não há
+curva. Justificativa de prazo que fala em
 chuva sem paralisação cadastrada vira pendência. Destinatários: `protocolo_para` do órgão, fiscal vigente e
 `destinatarios_extras`; cópia `protocolo_copia` do órgão mais `copia_extras` do contrato. Textos em `cartas.yaml` (`pleito_reajuste`, `prazo`,
 `conclusao`; `<campo>_<família>` vence o comum: o reajuste da SINFRA cita a IN 001/2024).
