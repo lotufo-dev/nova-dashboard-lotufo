@@ -22,6 +22,8 @@ type VersaoLista = {
   numero: number; criado_em: string; chave: string | null; origem_documento: string | null;
   data_documento: string | null; instrumento: string | null; competencias: number;
   total_centavos: number; vigente: boolean;
+  // issue #395: superada pelo cadastro (carimbo UTC); fica na lista, mas nao vale mais
+  superada_em?: string | null;
 };
 
 const ORIGEM_DOCUMENTO: Record<string, string> = {
@@ -605,7 +607,7 @@ export default function Cronograma({ contratoId, podeEditar }:
         <summary>Versões do cronograma</summary>
         <Rolagem rotulo="Versões do cronograma">
           <table className="tabela">
-            <caption className="sr-only">Versões do cronograma, da mais antiga à vigente</caption>
+            <caption className="sr-only">Versões do cronograma, na ordem em que passaram a valer</caption>
             <thead>
               <tr>
                 <th scope="col">Versão</th>
@@ -618,7 +620,8 @@ export default function Cronograma({ contratoId, podeEditar }:
             <tbody>
               {versoes.map((v, i) => (
                 <tr key={v.numero} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                  <td className="forte num">{v.numero}{v.vigente && <>{" "}<Selo classe="selo--ok">Vigente</Selo></>}</td>
+                  <td className="forte num">{v.numero}{v.vigente && <>{" "}<Selo classe="selo--ok">Vigente</Selo></>}
+                    {v.superada_em && <>{" "}<Selo>Superada em {fmtData(v.superada_em)}</Selo></>}</td>
                   <td className="num">{v.data_documento ? fmtDataPura(v.data_documento) : fmtData(v.criado_em)}</td>
                   <td>{documentoDaVersao(v)}</td>
                   <td className="col-num num">{v.competencias}</td>

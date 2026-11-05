@@ -128,6 +128,9 @@ pleitos_anteriores:
 # Cronograma físico-financeiro, uma versão por documento (issue #256). `data` é a do documento: a versão vale a
 # partir do mês dela, e os meses anteriores ficam com o previsto da versão de antes. origem: contratual, aditivo,
 # carta ou smo. Versão aplicada não muda: correção é versão nova, com outra chave.
+# Versão já gravada sem linha no cadastro (a carga de 04/09/2026, uma publicada na tela) sai da conta com
+# `cronograma_superadas: [<número da versão>]` (issue #395): continua no histórico, marcada como superada; tirar o
+# número da lista não a faz voltar.
 cronograma:
 - chave: contratual
   origem: contratual

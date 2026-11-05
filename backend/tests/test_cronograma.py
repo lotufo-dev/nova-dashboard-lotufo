@@ -297,3 +297,52 @@ def test_marcas_vem_dos_aditivos_assinados_no_mes_da_assinatura(conn, cid):
         {"competencia": "2025-11", "data": "2025-11-05", "nome": "TA 7/2025"},
         {"competencia": "2025-12", "data": "2025-12-01", "nome": "Termo aditivo"},
         {"competencia": "2025-12", "data": "2025-12-15", "nome": "14º TA"}]
+
+
+# --- issue #395: versao superada fica na lista mas sai do previsto efetivo, do vigente e da curva ----------
+
+def _superar(conn, cid, numero, quando="2026-11-05 15:00:00"):
+    conn.execute("UPDATE cronograma_versoes SET superada_em=? WHERE contrato_id=? AND numero=?", (quando, cid, numero))
+    conn.commit()
+
+
+def test_versao_superada_sai_do_previsto_efetivo_e_do_vigente(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2026-09", 10_00), ("2026-10", 10_00)], "manual",
+                           data_documento="2024-12-01")
+    _carga(conn, cid, [("2026-09", 30_00), ("2026-10", 30_00), ("2026-11", 99_00)])   # curva inteira da obra
+    assert cronograma.vigente(conn, cid)["numero"] == 2
+    assert cronograma.previsto_efetivo(conn, cid) == {"2026-09": 30_00, "2026-10": 30_00, "2026-11": 99_00}
+    _superar(conn, cid, 2)
+    assert cronograma.vigente(conn, cid)["numero"] == 1
+    assert cronograma.previsto_efetivo(conn, cid) == {"2026-09": 10_00, "2026-10": 10_00}
+
+
+def test_so_superadas_nao_tem_vigente(conn, cid):
+    _carga(conn, cid, [("2025-01", 10_00)])
+    _superar(conn, cid, 1)
+    assert cronograma.vigente(conn, cid) is None
+    assert cronograma.previsto_efetivo(conn, cid) == {}
+
+
+def test_lista_de_versoes_traz_a_superada_com_a_data(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 10_00)], "manual", data_documento="2024-12-01")
+    _carga(conn, cid, [("2025-01", 9_00)])
+    _superar(conn, cid, 2)
+    vs = cronograma.versoes(conn, cid)
+    # continua na lista (historico), mas a vigente e' a ultima NAO superada
+    assert [(v["numero"], v["superada_em"], v["vigente"]) for v in vs] == [
+        (1, None, True), (2, "2026-11-05 15:00:00", False)]
+
+
+def test_curva_comparativa_ignora_a_superada(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2026-09", 10_00), ("2026-10", 10_00)], "manual",
+                           data_documento="2024-12-01")
+    _carga(conn, cid, [("2026-09", 7_00), ("2026-10", 7_00)])             # numero 2, criada em 04/09/2026
+    cronograma.nova_versao(conn, 1, cid, [("2026-10", 5_00)], "manual", data_documento="2026-10-01")
+    _cadastro(conn, cid, 1, "contratual", "contratual", "2024-12-01")
+    _cadastro(conn, cid, 3, "ta1", "aditivo", "2026-10-01")
+    assert cronograma.curva_comparativa(conn, cid)["anterior"] == [
+        {"competencia": "2026-09", "previsto_centavos": 7_00}, {"competencia": "2026-10", "previsto_centavos": 7_00}]
+    _superar(conn, cid, 2)
+    assert cronograma.curva_comparativa(conn, cid)["anterior"] == [
+        {"competencia": "2026-09", "previsto_centavos": 10_00}, {"competencia": "2026-10", "previsto_centavos": 10_00}]
