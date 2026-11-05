@@ -127,6 +127,38 @@ describe("Reajuste", () => {
     expect(screen.queryByText(/atendido pelo apostilamento/)).toBeNull();
   });
 
+  it.each([2025, 2024])("aditivo de valor de reajuste fecha o ciclo e atende o pleito; o apostilamento de mesmo id e ciclo %i continua (issue #390)", async (cicloOutro) => {
+    const aditivo = { id: 5, chave: "ta-03", tipo: "aditivo_valor", numero: "3º TA", data: "2025-11-20", dados: {},
+      origem: "aditivo" };
+    // instrumento de outra tabela com o mesmo id do aditivo: segue na aba, no ciclo corrente ou nos anteriores
+    const outro = { id: 5, chave: "ap-01", tipo: "apostilamento_reajuste", numero: "AP-1", data: `${cicloOutro}-12-01`,
+      dados: { data_base: "2021-10", ciclo: cicloOutro } };
+    const pleito = (id: number, ciclo: number, chave: string) => ({ id, tipo: "reajuste", rotulo: "Pleito de reajuste",
+      origem: "cadastro", numero_oficio: `CT-${id}-LT-${ciclo}`, data_base_mes: "2021-10", ciclo, dias: null,
+      justificativa: null, situacao: "enviado", corpo_carta: null, montado_paginas: null, assinado_arquivo: null,
+      nome_documento: null, conferencia: null, pendencias: [], enviado_em: `${ciclo}-10-05`, envio_justificativa: null,
+      anexos: [], exigidos: [], instrumento_chave: chave });
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2021-10", indice: "INCC-DI", ciclo: 2025, aniversario: "2025-10-01",
+                     situacao: "apostilado", dias: null, pleito: { id: 3 }, apostilamento: aditivo }],
+          pleitos: [pleito(3, 2025, "ta-03"), pleito(2, 2023, "ta-02"), pleito(1, 2022, "ta-01")], competencias: [],
+          // so' os aditivos que valem como termo (gate Sol, PR #407): o ta-01 (cancelado, ou de execucao) nao vem
+          aditivos_de_reajuste: [
+            { id: 4, chave: "ta-02", tipo: "aditivo_valor", numero: "2º TA", data: "2023-11-10", dados: {} },
+            { ...aditivo }] }
+      : { instrumentos: [outro], aditivos: [
+          { id: 3, chave_cadastro: "ta-01", tipo: "valor", numero: "1º TA", data_assinatura: "2022-11-10" }] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    expect(await screen.findByText("apostilado")).toBeTruthy();
+    const corpo = screen.getByRole("region", { name: /^Data-base 10\/2021/ });
+    expect(corpo.textContent).toContain("Termo aditivo 3º TA, de 20/11/2025");
+    expect(corpo.textContent).toContain(`AP-1, de 01/12/${cicloOutro}`);
+    expect(screen.getByText("atendido pelo termo aditivo 3º TA")).toBeTruthy();
+    // pleito de ciclo anterior ligado ao aditivo dele tambem diz o termo
+    expect(screen.getByText("atendido pelo termo aditivo 2º TA")).toBeTruthy();
+    expect(screen.queryByText(/atendido pelo termo aditivo 1º TA/)).toBeNull();
+  });
+
   it("termo do ciclo corrente sem ligação fica no cartão do ciclo; o corrigido não vira ciclo anterior (PR #317)", async () => {
     const termo = (id: number, chave: string, numero: string, ciclo: number, corrige?: string) => ({ id, chave,
       tipo: "apostilamento_reajuste", numero, data: `${ciclo}-09-01`, dados: { data_base: "2024-06", ciclo, ...(corrige ? { corrige } : {}) } });
