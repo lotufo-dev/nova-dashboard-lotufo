@@ -370,11 +370,12 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
         # issue #399: `corrige: {oficio, data?}` corrige a data e/ou o oficio de um pleito ja' aplicado
         item["corrige"] = _corrige_pleito(p.get("corrige"), f"{onde}.corrige", falha)
         out.append(item)
-    alvos = [(x["tipo"], x["corrige"]["oficio"]) for x in out if x["corrige"]]
+    # um oficio pode cobrir duas datas-base (migracao 026): a chave do pleito leva a data-base
+    alvos = [(x["tipo"], x["corrige"]["oficio"], x["data_base"]) for x in out if x["corrige"]]
     if len(alvos) != len(set(alvos)):
         falha("pleitos_anteriores", "dois itens corrigem o mesmo pleito")
     for i, x in enumerate(out):
-        if not x["corrige"] and (x["tipo"], x["oficio"]) in alvos:
+        if not x["corrige"] and (x["tipo"], x["oficio"], x["data_base"]) in alvos:
             falha(f"pleitos_anteriores[{i}]", f"o pleito {x['oficio']} é corrigido por outro item: tire este da "
                   "lista (o item com corrige o substitui)")
     return out

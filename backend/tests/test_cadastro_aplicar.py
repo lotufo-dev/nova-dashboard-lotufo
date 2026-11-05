@@ -1012,3 +1012,31 @@ def test_correcao_da_data_religa_o_pleito_de_reajuste_ao_termo(conn):
     antes, depois = _pleito_auditoria(conn)[-1]
     assert antes == {"enviado_em": "2026-04-23", "instrumento_chave": "ap-11"}
     assert depois == {"enviado_em": "2026-10-20", "instrumento_chave": None}
+
+
+def test_correcao_so_do_oficio_mantem_o_termo_que_atende_o_pleito(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[PLEITO_2026])]))
+    novo = {**PLEITO_2026, "oficio": "CT-123-LT-2026", "corrige": {"oficio": "CT-122-LT-2026", "data": None}}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[novo])]))
+    assert tuple(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchone()) == ("CT-123-LT-2026", "ap-11")
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste: pleito CT-122-LT-2026: ofício CT-122-LT-2026 → CT-123-LT-2026"]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.pleito_atendido'").fetchone()[0] == 1
+
+
+def test_numero_antigo_usado_depois_pela_tela_nao_trava_a_reaplicacao(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    novo = {**PRAZO_ERRADO, "oficio": "CT-007-LT-2026", "corrige": {"oficio": "CT-001-LT-2026", "data": None}}
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[novo])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    conn.execute("INSERT INTO pleitos (contrato_id, tipo, origem, dias, numero_oficio, situacao, enviado_em) "
+                 "VALUES (1, 'prazo', 'sistema', 90, 'CT-001-LT-2026', 'enviado', '2026-10-01')")
+    conn.commit()
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["iguais"] == 1
+
+
+def test_pleito_corrigido_escrito_de_outro_jeito_na_lista_e_erro(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    velho = {**PRAZO_ERRADO, "oficio": "CT/001/LT/2026"}
+    novo = {**PRAZO_ERRADO, "oficio": "CT-007-LT-2026", "corrige": {"oficio": "CT-001-LT-2026", "data": None}}
+    with pytest.raises(ValueError, match="CT-001-LT-2026 \\(prazo\\) é corrigido por outro item"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[novo, velho])]))

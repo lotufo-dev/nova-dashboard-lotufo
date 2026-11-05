@@ -767,3 +767,15 @@ def test_pleito_corrigido_nao_pode_ficar_na_lista_nem_ser_corrigido_duas_vezes(t
     assert any("pleitos_anteriores[0]" in e and "corrigido por outro item" in e for e in erros), erros
     erros = _erros(_escrever(tmp_path / "b", contratos=_com_pleitos([novo, {**novo, "oficio": "CT-006-LT-2026"}])))
     assert any("corrigem o mesmo pleito" in e for e in erros), erros
+
+
+def test_corrige_de_um_oficio_com_duas_datas_base_corrige_so_a_dele(tmp_path):
+    bases = [{"mes": "2023-01", "indice": "INCC-DI"}, {"mes": "2023-03", "indice": "FGV/DNIT"}]
+    jan = {"tipo": "reajuste", "oficio": "CT-234-LT-2026", "data": "2026-04-23", "data_base": "2023-01", "ciclo": 2026,
+           "corrige": {"oficio": "CT-234-LT-2026"}}
+    mar = {**jan, "data_base": "2023-03"}
+    del mar["corrige"]
+    for pleitos in ([jan, mar], [jan, {**mar, "corrige": {"oficio": "CT-234-LT-2026"}}]):
+        cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases,
+                                                          "pleitos_anteriores": pleitos}]))
+        assert len(cad["contratos"][0]["pleitos_anteriores"]) == 2

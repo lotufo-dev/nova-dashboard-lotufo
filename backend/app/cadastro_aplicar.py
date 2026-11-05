@@ -387,11 +387,18 @@ def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
     So' acrescenta (a chave e' contrato + tipo + oficio)."""
     sigla = conn.execute("SELECT e.sigla_oficio FROM contratos k JOIN entidades e ON e.id=k.entidade_id "
                          "WHERE k.id=?", (contrato_id,)).fetchone()
+    sigla = sigla[0] if sigla else "LT"
+    # issue #399: o pleito corrigido sai da lista; escrito de outro jeito (CT/001, 1) a validacao do arquivo nao o ve
+    corrigidos = {(p["tipo"], _canon_alvo(p, sigla), p["data_base"] or "")
+                  for p in c.get("pleitos_anteriores") or [] if p.get("corrige")}
     for p in c.get("pleitos_anteriores") or []:
-        canon = oficios.canonico(p["oficio"], sigla[0] if sigla else "LT", int(p["data"][:4]))
+        canon = oficios.canonico(p["oficio"], sigla, int(p["data"][:4]))
         if p.get("corrige"):
-            _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla[0] if sigla else "LT", rel)
+            _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel)
             continue
+        if (p["tipo"], canon, p["data_base"] or "") in corrigidos:
+            raise ValueError(f"{c['nome_curto']}: o pleito {canon} ({p['tipo']}) é corrigido por outro item; tire-o "
+                             "da lista (o item com corrige o substitui)")
         cur = conn.execute(
             "INSERT OR IGNORE INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, dias, numero_oficio, "
             "situacao, enviado_em, usuario_id) VALUES (?,?, 'cadastro', ?,?,?,?, 'enviado', ?,?)",
@@ -409,27 +416,38 @@ def _br(iso: str) -> str:
     return "/".join(reversed(iso[:10].split("-")))
 
 
+def _canon_alvo(p: dict, sigla: str) -> str:
+    """O oficio gravado que `corrige` aponta; sem ano escrito, o ano da data gravada (ou, sem ela, da nova)."""
+    return oficios.canonico(p["corrige"]["oficio"], sigla, int((p["corrige"]["data"] or p["data"])[:4]))
+
+
 def _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel) -> None:
     """Issue #399: `corrige: {oficio, data?}` troca `enviado_em` e `numero_oficio` de um pleito do cadastro ja' gravado
-    (a carta real, nao a copia sem protocolo). Pleito da tela nao se corrige pelo YAML. A ligacao ao termo e' desfeita
-    aqui e refeita pela data nova em `_apostilamentos_de_reajuste`, que roda logo depois; o prazo se le da data."""
+    (a carta real, nao a copia sem protocolo). Pleito da tela nao se corrige pelo YAML. Com a data trocada, a ligacao ao
+    termo e' desfeita aqui e refeita pela data nova em `_apostilamentos_de_reajuste`, que roda logo depois; o prazo se
+    le' da data."""
     alvo = p["corrige"]
     nome = c["nome_curto"]
-    canon_antigo = oficios.canonico(alvo["oficio"], sigla, int((alvo["data"] or p["data"])[:4]))
+    canon_antigo = _canon_alvo(p, sigla)
 
-    def achar(numero):
+    def achar(numero, so_cadastro=False):
+        filtro = "AND origem='cadastro' " if so_cadastro else "AND situacao<>'descartado' "
         return conn.execute("SELECT * FROM pleitos WHERE contrato_id=? AND tipo=? AND numero_oficio=? "
-                            "AND COALESCE(data_base_mes, '')=COALESCE(?, '') AND situacao<>'descartado' "
+                            f"AND COALESCE(data_base_mes, '')=COALESCE(?, '') {filtro}"
                             "ORDER BY origem='cadastro' DESC, id LIMIT 1",
                             (contrato_id, p["tipo"], numero, p["data_base"])).fetchone()
 
-    g = achar(canon_antigo)
-    if g is None:
-        # segunda aplicacao com o oficio trocado: o pleito ja' esta' com o oficio e a data novos
-        novo = achar(canon)
-        if novo is not None and novo["origem"] == "cadastro" and (novo["enviado_em"] or "")[:10] == p["data"]:
+    if canon != canon_antigo:
+        # segunda aplicacao com o oficio trocado: o pleito ja' esta' com o oficio e a data novos, e foi esta correcao
+        # que o renomeou (mesmo que depois a tela tenha usado o numero antigo)
+        novo = achar(canon, so_cadastro=True)
+        if novo is not None and (novo["enviado_em"] or "")[:10] == p["data"] and conn.execute(
+                "SELECT 1 FROM audit_log WHERE acao='cadastro.pleito' AND entidade='pleito' AND entidade_id=? "
+                "AND json_extract(antes, '$.numero_oficio')=? LIMIT 1", (str(novo["id"]), canon_antigo)).fetchone():
             rel["iguais"] += 1
             return
+    g = achar(canon_antigo)
+    if g is None:
         raise ValueError(f"{nome}: pleito {canon_antigo} ({p['tipo']}) a corrigir não existe no banco")
     if g["origem"] != "cadastro":
         raise ValueError(f"{nome}: o pleito {canon_antigo} ({p['tipo']}) foi criado pela tela e não se corrige "
@@ -441,14 +459,16 @@ def _corrigir_pleito(conn, usuario_id, contrato_id, c, p, canon, sigla, rel) -> 
     if alvo["data"] and gravada != alvo["data"]:
         raise ValueError(f"{nome}: o pleito {canon_antigo} ({p['tipo']}) está gravado com a data {_br(gravada)}, "
                          f"não {_br(alvo['data'])}")
-    if canon != g["numero_oficio"] and achar(canon) is not None:
+    if canon != g["numero_oficio"] and (achar(canon) is not None or achar(canon, so_cadastro=True) is not None):
         raise ValueError(f"{nome}: já existe pleito {canon} ({p['tipo']}); a correção de {canon_antigo} "
                          "repetiria o ofício")
+    # so' a data muda a ligacao ao termo; trocar so' o oficio mantem o termo que atende o pleito
+    chave = g["instrumento_chave"] if gravada == p["data"] else None
     antes = {"enviado_em": g["enviado_em"], "numero_oficio": g["numero_oficio"],
              "instrumento_chave": g["instrumento_chave"]}
-    depois = {"enviado_em": p["data"], "numero_oficio": canon, "instrumento_chave": None}
-    conn.execute("UPDATE pleitos SET enviado_em=?, numero_oficio=?, instrumento_chave=NULL WHERE id=?",
-                 (p["data"], canon, g["id"]))
+    depois = {"enviado_em": p["data"], "numero_oficio": canon, "instrumento_chave": chave}
+    conn.execute("UPDATE pleitos SET enviado_em=?, numero_oficio=?, instrumento_chave=? WHERE id=?",
+                 (p["data"], canon, chave, g["id"]))
     a, d = _diferencas(antes, depois)
     auditoria.registrar(conn, usuario_id, "cadastro.pleito", "pleito", g["id"], a, d)
     mudancas = []
