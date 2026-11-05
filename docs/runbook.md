@@ -128,7 +128,7 @@ foreach ($p in 'dados','segredos','cadastro') {
   $acl = Get-Acl -Path "$raiz\$p"
   foreach ($sid in 'S-1-5-4','S-1-5-2') {   # INTERATIVO e REDE
     $id = New-Object System.Security.Principal.SecurityIdentifier $sid
-    $regra = New-Object System.Security.AccessControl.FileSystemAuditRule($id, 'Read,Write,ChangePermissions', 'ContainerInherit,ObjectInherit', 'None', 'Success')
+    $regra = New-Object System.Security.AccessControl.FileSystemAuditRule($id, 'Read,Write,Delete,ChangePermissions', 'ContainerInherit,ObjectInherit', 'None', 'Success')
     $acl.AddAuditRule($regra)
   }
   Set-Acl -Path "$raiz\$p" -AclObject $acl
@@ -141,7 +141,7 @@ O servidor, o antivírus e o backup rodam como SYSTEM, que não carrega INTERATI
 ```json
 {"contas": ["SERVIDOR\\operador.exemplo", "admin.exemplo"], "processos": ["explorer.exe", "robocopy.exe"]}
 ```
-Estado da sentinela (último registro lido): `<raiz>\dados\sentinela.json`. Na primeira rodada ela só marca o ponto de partida do log; não lê o histórico.
+Estado da sentinela (último registro lido): `<raiz>\dados\sentinela.json`. Na primeira rodada ela só marca o ponto de partida do log; não lê o histórico. Se esse arquivo for apagado ou ficar ilegível depois de a sentinela já ter rodado, a rodada seguinte grava o item crítico "Estado da sentinela apagado ou ilegível" e relê os últimos 10 minutos do log (a regra de auditoria inclui Delete, então apagar o arquivo também deixa evento 4663).
 
 ### O que vira item
 - **4663** nas três pastas, agrupado por conta, processo, pasta e hora: "Leitura de segredos por explorer.exe (<conta>), 12 arquivos". `segredos` e `dados` são críticos, `cadastro` é ação.
@@ -149,7 +149,7 @@ Estado da sentinela (último registro lido): `<raiz>\dados\sentinela.json`. Na p
 - **4672** (logon com privilégio especial) de conta fora da lista e fora das contas de sistema: um item por conta por dia, atenção.
 - **4698 a 4702** (tarefa criada, apagada, habilitada, desabilitada, alterada) com nome começando por `DashboardLotufo`: crítico. O próprio deploy mexe nessas tarefas; um item no horário de um deploy é esperado.
 - **1102** (log limpo) e **4719** (política de auditoria alterada): crítico.
-- A cada rodada, `auditpol /get` e a leitura da SACL conferem que a auditoria e a SACL continuam no lugar: "Auditoria de arquivos desligada", "Auditoria da alteração da política desligada" ou "SACL ausente em <pasta>" (crítico). Se a sentinela não consegue ler o log, a auditoria ou a SACL, vira item de atenção. Cada falha vira item uma vez, quando começa; volta a avisar se corrigir e falhar de novo.
+- A cada rodada, `auditpol /get` e a leitura da SACL conferem que a auditoria e a SACL continuam no lugar: "Auditoria de arquivos desligada", "Auditoria da alteração da política desligada" ou "SACL ausente em <pasta>" (crítico). Se a sentinela não consegue ler o log, a auditoria ou a SACL, vira item de atenção. Cada falha vira item quando começa e é regravada uma vez por dia enquanto durar, para não sumir da Saúde ao fim dos 7 dias com a sentinela ainda cega; corrigida e falhando de novo, avisa outra vez.
 
 ### Limites
 Quem administra a VM pode desligar a auditoria ou limpar o log, mas cada uma dessas ações gera o próprio evento (4719, 1102), que a sentinela lê antes de perder o acesso. Parar o servidor para a sentinela (e o resumo diário some: tratado na issue de alertas). Eventos entre o fim da rodada e o início de uma limpeza do log podem se perder se o log for limpo antes da próxima rodada.

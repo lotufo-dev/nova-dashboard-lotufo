@@ -35,6 +35,7 @@ ACAO = "seguranca.sentinela"
 PASTAS = ("dados", "segredos", "cadastro")
 NIVEL_PASTA = {"dados": "critico", "segredos": "critico", "cadastro": "acao"}
 MAX_EVENTOS = 5000
+JANELA_PERDIDO_MS = 600000
 TEMPO_LIMITE_SEG = 60
 
 NAO_RODA = "Sentinela não roda neste ambiente"
@@ -242,9 +243,10 @@ def achados(evs: list[dict], base: Path, lista: dict, avisados: dict[str, list[s
 
 # --- leitura do log e verificacoes -----------------------------------------------------------------------------
 
-def _consulta(maior_que: int) -> str:
+def _consulta(maior_que: int, janela_ms: int | None = None) -> str:
     ids = " or ".join(f"EventID={i}" for i in _EVENTOS)
-    return f"*[System[({ids}) and EventRecordID>{maior_que}]]"
+    tempo_xp = f" and TimeCreated[timediff(@SystemTime) <= {janela_ms}]" if janela_ms else ""
+    return f"*[System[({ids}) and EventRecordID>{maior_que}{tempo_xp}]]"
 
 
 def _ultimo_registro() -> int:
@@ -255,8 +257,8 @@ def _ultimo_registro() -> int:
     return max((e["registro"] for e in eventos(saida)), default=0)
 
 
-def _ler_eventos(maior_que: int) -> list[dict]:
-    codigo, saida = _executar(["wevtutil", "qe", "Security", f"/q:{_consulta(maior_que)}", f"/c:{MAX_EVENTOS}",
+def _ler_eventos(maior_que: int, janela_ms: int | None = None) -> list[dict]:
+    codigo, saida = _executar(["wevtutil", "qe", "Security", f"/q:{_consulta(maior_que, janela_ms)}", f"/c:{MAX_EVENTOS}",
                                "/f:xml"])
     if codigo != 0:
         raise RuntimeError(f"wevtutil terminou com código {codigo}")
@@ -297,15 +299,16 @@ def _sacl_no_lugar(pasta: Path) -> bool:
 def verificacoes(base: Path) -> dict[str, tuple[str, str]]:
     """O que esta errado agora: `{chave: (nivel, mensagem)}`. Verificacao que nao consegue rodar vira atencao."""
     falhas: dict[str, tuple[str, str]] = {}
-    for chave, guid, texto in (("auditoria-arquivos", GUID_ARQUIVOS, "Auditoria de arquivos desligada"),
-                               ("auditoria-politica", GUID_POLITICA,
-                                "Auditoria da alteração da política desligada")):
+    for chave, guid, texto, nome in (("auditoria-arquivos", GUID_ARQUIVOS, "Auditoria de arquivos desligada",
+                                "a auditoria de arquivos"),
+                               ("auditoria-politica", GUID_POLITICA, "Auditoria da alteração da política desligada",
+                                "a auditoria da alteração da política")):
         try:
             if not _auditoria_ligada(guid):
                 falhas[chave] = ("critico", texto)
         except Exception as e:
             log.warning("sentinela: nao conferiu %s: %s", chave, e)
-            falhas[chave] = ("atencao", f"Sentinela não conseguiu conferir a auditoria ({chave})")
+            falhas[chave] = ("atencao", f"Sentinela não conseguiu conferir {nome}")
     for pasta in PASTAS:
         caminho = base / pasta
         if not caminho.is_dir():
@@ -328,18 +331,30 @@ def _gravar(conn, a: dict) -> None:
 
 def rodada(conn) -> int:
     """Uma rodada. Devolve quantos achados novos gravou. Leitura do log ou verificacao que falha vira item uma vez,
-    ate' voltar ao normal."""
+    ate' voltar ao normal (regravada uma vez por dia enquanto durar)."""
     base = raiz()
     estado = _ler_json(_arquivo_estado())
     ultimo = estado.get("ultimo_registro")
-    pendencias = set(estado.get("pendencias", []))
+    # falhas em aberto: chave -> ultimo dia (local) em que virou item; regravada 1x por dia enquanto durar, para nao
+    # sumir da Saude ao fim dos 7 dias com a sentinela ainda cega
+    pendencias = estado.get("pendencias", {})
+    if not isinstance(pendencias, dict):
+        pendencias = {k: "" for k in pendencias}
+    perdido = ultimo is None and conn.execute("SELECT 1 FROM audit_log WHERE acao=? LIMIT 1", (ACAO,)).fetchone()
     avisados = {k: list(v) for k, v in estado.get("avisados_4672", {}).items()}
     lista = _ler_json(_arquivo_lista())
     novos: list[dict] = []
     atuais: dict[str, tuple[str, str]] = {}
     try:
         no_log = _ultimo_registro()
-        if ultimo is None:
+        if perdido:
+            # estado apagado ou corrompido depois de a sentinela ja ter rodado: avisa e le os ultimos 10 minutos
+            novos.append(_achado("estado-perdido", "critico", "Estado da sentinela apagado ou ilegível; "
+                                 "leitura retomada dos últimos 10 minutos", tempo.agora_utc().strftime("%Y-%m-%dT%H:%M:%SZ")))
+            evs = _ler_eventos(0, JANELA_PERDIDO_MS)
+            novos += achados(evs, base, lista, avisados)
+            ultimo = max([no_log] + [e["registro"] for e in evs])
+        elif ultimo is None:
             ultimo = no_log          # primeira rodada: marca o ponto de partida, nao le o historico
         elif no_log < ultimo:
             ultimo = 0               # log limpo ou reiniciado: le tudo o que ha
@@ -352,14 +367,14 @@ def rodada(conn) -> int:
         atuais["leitura-log"] = ("atencao", "Sentinela não conseguiu ler o log de segurança")
     atuais.update(verificacoes(base))
     agora = tempo.agora_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+    hoje = tempo.hoje_local()
     for chave, (nivel, msg) in atuais.items():
-        if chave not in pendencias:
+        if pendencias.get(chave) != hoje.isoformat():
             novos.append(_achado(chave, nivel, msg, agora))
     for a in novos:
         _gravar(conn, a)
-    hoje = tempo.hoje_local()
     recentes = {hoje.isoformat(), (hoje - datetime.timedelta(days=1)).isoformat()}
-    _gravar_estado({"ultimo_registro": ultimo, "pendencias": sorted(atuais),
+    _gravar_estado({"ultimo_registro": ultimo, "pendencias": {k: hoje.isoformat() for k in atuais},
                     "avisados_4672": {k: v for k, v in avisados.items() if k in recentes}})
     return len(novos)
 

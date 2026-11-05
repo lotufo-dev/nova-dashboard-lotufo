@@ -269,3 +269,44 @@ def test_saude_diz_que_a_sentinela_nao_roda_neste_ambiente(client_admin):
     r = client_admin.get("/api/admin/saude")
     assert r.status_code == 200
     assert r.json()["sentinela"] == {"roda": False, "mensagem": "Sentinela não roda neste ambiente"}
+
+
+def test_estado_apagado_depois_de_ja_ter_rodado_acusa_e_rele_a_janela(maquina, conn):
+    _com_ponto_de_partida(maquina, conn)
+    _rodar(maquina, conn, "4670_permissao.xml")
+    (maquina.raiz / "dados" / "sentinela.json").unlink()
+    a = _rodar(maquina, conn, "4663_segredos_externo.xml")
+    assert a[0]["mensagem"].startswith("Estado da sentinela apagado ou ilegível") and a[0]["nivel"] == "critico"
+    assert any(x["evento"] == 4663 for x in a)
+    assert "timediff(@SystemTime) <= 600000" in maquina.consultas[-1]
+    assert _rodar(maquina, conn) == []       # estado refeito: volta ao normal
+
+
+def test_estado_corrompido_conta_como_apagado(maquina, conn):
+    _com_ponto_de_partida(maquina, conn)
+    _rodar(maquina, conn, "4670_permissao.xml")
+    (maquina.raiz / "dados" / "sentinela.json").write_text("{nao e json", encoding="utf-8")
+    a = _rodar(maquina, conn)
+    assert a[0]["evento"] == "estado-perdido"
+
+
+def test_falha_que_continua_e_regravada_uma_vez_por_dia(maquina, conn, monkeypatch):
+    _com_ponto_de_partida(maquina, conn)
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False
+    dia = [datetime.date(2026, 11, 5)]
+    monkeypatch.setattr(sentinela.tempo, "hoje_local", lambda: dia[0])
+    assert len(_rodar(maquina, conn)) == 1
+    assert _rodar(maquina, conn) == []
+    dia[0] = datetime.date(2026, 11, 6)
+    assert len(_rodar(maquina, conn)) == 1
+    assert _rodar(maquina, conn) == []
+
+
+def test_verificacao_que_nao_roda_usa_nome_legivel(maquina, conn):
+    _com_ponto_de_partida(maquina, conn)
+    antigo = maquina.auditoria
+    maquina.auditoria = {}          # KeyError no auditpol simulado
+    msgs = sorted(x["mensagem"] for x in _rodar(maquina, conn))
+    maquina.auditoria = antigo
+    assert msgs == ["Sentinela não conseguiu conferir a auditoria da alteração da política",
+                    "Sentinela não conseguiu conferir a auditoria de arquivos"]
