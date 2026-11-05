@@ -114,6 +114,17 @@ function ConferirInstalacao {
     finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw "instalacao nao autorizada para o commit novo - ver docs\runbook.md (Instalacao assinada)" }
 }
+# Issue #421: registro do que foi implantado (commit e manifesto do dist) em <raiz>\deploy-atual.json, que o servidor
+# confere de hora em hora. Gravado ANTES de reiniciar, para a conferencia da subida ja' achar o registro novo; falha
+# aqui so' avisa (o item "Sem registro do ultimo deploy" aparece na Saude).
+function RegistrarDeploy {
+    Push-Location (Join-Path $AppDir "backend")
+    $codigo = 1
+    try { & $py -m app.cli integridade registrar --raiz $Raiz; $codigo = $LASTEXITCODE }
+    catch { Write-Warning "registro do deploy: $($_.Exception.Message)" }
+    finally { Pop-Location }
+    if ($codigo -ne 0) { Write-Warning "registro do deploy (deploy-atual.json) nao gravado - ver docs\runbook.md (Saude)" }
+}
 function DonoDaPorta {
     $c = Get-NetTCPConnection -LocalPort $Porta -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $c) { return $null }
@@ -201,6 +212,7 @@ try {
                 & git -C $AppDir checkout --quiet --detach $anterior
                 if ($LASTEXITCODE -ne 0) { throw "git checkout $anterior falhou" }
                 Reconstruir
+                RegistrarDeploy
             }
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
@@ -210,6 +222,7 @@ try {
         exit 1
     }
     $novo = (& git -C $AppDir rev-parse HEAD).Trim()
+    RegistrarDeploy
     Reiniciar
     if (SaudavelENovo -ExigirInstalacao) {
         $fim = "DEPLOY OK: $anterior -> $novo (health 200, processo novo)"
@@ -218,6 +231,7 @@ try {
     } else {
         Write-Warning "Saude NAO voltou -> ROLLBACK para $anterior"
         Construir $anterior
+        RegistrarDeploy
         Reiniciar
         if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
         else { Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log)" -ForegroundColor Red }

@@ -1,7 +1,7 @@
 import datetime
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app import auditoria, backup, copia_dono, correio, instalacao, seguranca, siga, tempo
+from app import auditoria, backup, copia_dono, correio, instalacao, seguranca, sentinela, siga, tempo
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -58,7 +58,7 @@ def saude(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
     Seguranca (issue #418): `[{nivel, mensagem, data}]`, montado por `app/seguranca.py`, com no maximo
     `seguranca.ITENS_NA_TELA` itens; `seguranca_fora` diz quantos ficaram de fora."""
     itens, fora = seguranca.bloco(conn)
-    return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora}
+    return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora, "sentinela": sentinela.situacao()}
 
 
 @router.get("/contas-microsoft")

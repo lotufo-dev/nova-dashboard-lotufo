@@ -4,8 +4,8 @@ O login (`api_auth.login`) grava no `depois` de `auth.login` e de `auth.login_fa
 mesmo do limite por origem; X-Forwarded-For e' ignorado) e o navegador (User-Agent cortado em `NAVEGADOR_MAX`).
 Aqui so' se le a auditoria: ela continua append-only e encadeada, sem coluna nova.
 
-`itens` monta o bloco Seguranca como uma lista de `{nivel, mensagem, data}`; as proximas verificacoes do plano de
-protecao (integridade, sentinela, alertas) acrescentam itens a esta mesma lista.
+`itens` monta o bloco Seguranca como uma lista de `{nivel, mensagem, data}`; `app/integridade.py` (#421) acrescenta o item do codigo
+em producao diferente do ultimo deploy; as proximas verificacoes do plano de protecao acrescentam os seus.
 
 Issue #422: `conferir`, de hora em hora (`agendar`), confere os gatilhos da migracao 062 em `usuarios` e `sessoes` e
 a cadeia da auditoria; o que falhar vira item `critico` do bloco.
@@ -17,7 +17,7 @@ import logging
 import threading
 import time
 
-from app import auditoria, db, tempo
+from app import auditoria, db, integridade, tempo
 
 log = logging.getLogger(__name__)
 
@@ -140,12 +140,39 @@ def _origem_nova(conn, agora: datetime.datetime) -> list[dict]:
     return out[::-1]
 
 
+def _sentinela(conn, agora: datetime.datetime) -> list[dict]:
+    """Achados da sentinela (issue #423) dos ultimos `DURACAO_ITEM`: uma linha `seguranca.sentinela` por achado. Os
+    acessos a arquivo (4663) de uma mesma conta, processo, pasta e hora, gravados em rodadas diferentes, viram um item
+    so', com as quantidades somadas."""
+    from app import sentinela
+    out = []
+    leituras: dict[tuple, dict] = {}
+    for r in conn.execute("SELECT depois, criado_em FROM audit_log WHERE acao=? AND criado_em > ? AND criado_em <= ? "
+                          "ORDER BY id", (sentinela.ACAO, _carimbo(agora - DURACAO_ITEM), _carimbo(agora))):
+        d = json.loads(r["depois"]) if r["depois"] else {}
+        item = {"nivel": d.get("nivel") or "atencao", "data": tempo.iso_utc(r["criado_em"]),
+                "mensagem": d.get("mensagem") or "Alerta da sentinela"}
+        if d.get("evento") == 4663:
+            chave = (d.get("conta"), d.get("processo"), d.get("pasta"), (d.get("hora") or "")[:13])
+            d["quantidade"] = d.get("quantidade") or 0
+            antigo = leituras.get(chave)
+            if antigo is not None:
+                d["quantidade"] += antigo["quantidade"]
+                out.remove(antigo["item"])
+            item["mensagem"] = sentinela.mensagem_leitura(d.get("pasta"), d.get("processo"), d.get("conta"),
+                                                          d.get("quantidade") or 0)
+            leituras[chave] = {"quantidade": d["quantidade"], "item": item}
+        out.append(item)
+    return out
+
+
 def itens(conn, agora: datetime.datetime | None = None) -> list[dict]:
     """Bloco Seguranca de Administracao > Saude: `[{nivel, mensagem, data}]`, os `critico` primeiro (issue #422: o
     problema que continua guarda a data em que foi visto e nao pode cair para fora do teto do bloco) e, dentro de cada
     nivel, do mais novo ao mais antigo (empate mantem a ordem de gravacao, do mais novo ao mais antigo)."""
     agora = agora or tempo.agora_utc()
-    por_data = sorted(_conferencia + _origem_nova(conn, agora), key=lambda i: i["data"], reverse=True)
+    por_data = sorted(_conferencia + _origem_nova(conn, agora) + _sentinela(conn, agora) + integridade.itens(),
+                      key=lambda i: i["data"], reverse=True)
     return sorted(por_data, key=lambda i: i["nivel"] != "critico")
 
 

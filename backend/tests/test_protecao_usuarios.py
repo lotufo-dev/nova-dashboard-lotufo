@@ -227,6 +227,8 @@ def test_item_critico_fica_no_topo_do_bloco_mesmo_mais_antigo(monkeypatch):
               "data": f"2026-11-05T10:{n:02d}:00+00:00"} for n in range(seguranca.ITENS_NA_TELA + 1)]
     monkeypatch.setattr(seguranca, "_conferencia", [antigo])
     monkeypatch.setattr(seguranca, "_origem_nova", lambda conn, agora: novos)
+    monkeypatch.setattr(seguranca, "_sentinela", lambda conn, agora: [])
+    monkeypatch.setattr(seguranca.integridade, "itens", lambda: [])
     itens, fora = seguranca.bloco(None)
     assert itens[0] == antigo and fora == 2
     assert [i["data"] for i in itens[1:]] == sorted((i["data"] for i in itens[1:]), reverse=True)
