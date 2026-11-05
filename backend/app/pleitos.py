@@ -12,7 +12,7 @@ import re
 from html import escape
 
 from app import (arquivos, assinatura, auditoria, carta, correio, db, dinheiro, envio_reserva, espelhos,
-                 leitura_planilha_reajuste, medicoes, oficios, pdfs, prazos, reajuste, tempo)
+                 leitura_planilha_reajuste, medicoes, oficios, paineis, pdfs, prazos, reajuste, tempo)
 from app import html_email
 
 TIPOS = ("reajuste", "prazo", "conclusao")
@@ -249,6 +249,7 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
         if not c.get("encerramento_iniciado_em"):
             raise ValueError("Comunicação de conclusão só para contrato em encerramento (marque a medição final)")
         data_base_mes, dias = None, None
+    curva = _curva_s(conn, tipo, contrato_id)
     with db.mutacao(conn):
         # dentro do BEGIN IMMEDIATE: dois cliques simultaneos nao abrem dois oficios do mesmo ciclo (issue #9)
         aberto = _aberto(conn, contrato_id, tipo, data_base_mes, ciclo)
@@ -268,7 +269,42 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
                             {"tipo": tipo, "numero_oficio": canon, "data_base_mes": data_base_mes, "ciclo": ciclo,
                              "dias": dias, **({"reemite_pleito_id": anterior["id"], "reemissao": reemissao}
                                               if anterior else {})})
+        if tipo == "prazo":
+            _anexar_curva_s(conn, usuario_id, pid, curva)
     return pid
+
+
+def _curva_s(conn, tipo: str, contrato_id: int) -> tuple[str, str, int] | None:
+    """Issue #293 (spec 2026-10-20 §4 item 3): a curva S do pedido de prazo, em xlsx gerado do cronograma vigente,
+    do anterior a ultima repactuacao (D9) e do medido. Gravada no disco ANTES do banco; devolve (arquivo, sha256,
+    tamanho), ou None fora do pedido de prazo e sem nada previsto nem medido (planilha vazia nao vai ao orgao)."""
+    if tipo != "prazo":
+        return None
+    linhas = paineis.curva_s(conn, contrato_id)
+    if not linhas:
+        return None
+    dados = carta.curva_s_xlsx(linhas)
+    rel, sha = arquivos.gravar_bytes("pleitos", dados, "xlsx")
+    return rel, sha, len(dados)
+
+
+def _anexar_curva_s(conn, usuario_id: int, pleito_id: int, curva: tuple[str, str, int] | None) -> None:
+    """Dentro da mutacao de `criar` e de `montar` (pedido de prazo): a curva S entra pelos anexos do pleito, como
+    os arrastados, e a carta montada de novo leva a do dia. A gerada antes nao se apaga: fica marcada como removida."""
+    antigas = [r[0] for r in conn.execute("SELECT id FROM pleito_anexos WHERE pleito_id=? AND tipo='outro' AND nome=? "
+                                          "AND removido_em IS NULL", (pleito_id, carta.NOME_CURVA_S))]
+    if not antigas and curva is None:
+        return
+    conn.executemany("UPDATE pleito_anexos SET removido_em=datetime('now') WHERE id=?", [(x,) for x in antigas])
+    depois = None
+    if curva is not None:
+        rel, sha, tamanho = curva
+        aid = conn.execute("INSERT INTO pleito_anexos (pleito_id, tipo, nome, arquivo, sha256, tamanho, ext) "
+                           "VALUES (?, 'outro', ?, ?, ?, ?, 'xlsx')",
+                           (pleito_id, carta.NOME_CURVA_S, rel, sha, tamanho)).lastrowid
+        depois = {"anexo_id": aid, "nome": carta.NOME_CURVA_S, "sha256": sha}
+    auditoria.registrar(conn, usuario_id, "pleito.curva_s", "pleito", pleito_id,
+                        {"anexos_removidos": antigas} if antigas else None, depois)
 
 
 def _anexos_mudaveis(conn, pleito_id: int) -> dict:
@@ -536,6 +572,7 @@ def montar(conn, usuario_id: int, pleito_id: int, corpo: str | None = None, hoje
     pdf = carta.gerar(_carta(conn, p, corpo, hoje))           # PDF gerado pelo sistema: um documento so'
     n = pdfs.paginas(pdf)
     rel, sha = arquivos.gravar_bytes("pleitos", pdf, "pdf")
+    curva = _curva_s(conn, p["tipo"], p["contrato_id"])
     with db.mutacao(conn):
         _anexos_mudaveis(conn, pleito_id)
         conn.execute("UPDATE pleitos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
@@ -543,6 +580,8 @@ def montar(conn, usuario_id: int, pleito_id: int, corpo: str | None = None, hoje
                      (corpo, rel, sha, n, pleito_id))
         auditoria.registrar(conn, usuario_id, "pleito.montar", "pleito", pleito_id, None,
                             {"sha256": sha, "paginas": n, "tamanho": len(pdf)})
+        if p["tipo"] == "prazo":
+            _anexar_curva_s(conn, usuario_id, pleito_id, curva)
     return {"arquivo": rel, "sha256": sha, "paginas": n, "tamanho": len(pdf), "nome": nome_documento(conn, p)}
 
 

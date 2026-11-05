@@ -6,7 +6,8 @@ import pathlib
 import pytest
 import yaml
 
-from app import arquivos, auth, cadastro_aplicar, correio, db, graph, leitura_pdf, medicoes, pleitos, reajuste, tempo
+from app import (arquivos, auth, cadastro_aplicar, correio, cronograma, db, graph, leitura_pdf, medicoes, pleitos,
+                 reajuste, tempo)
 from tests.test_protocolo import _assinar, _contrato
 
 # Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
@@ -80,6 +81,47 @@ def test_carta_de_prazo_traz_historico_e_novo_fim(cenario):
     texto = " ".join(" ".join(paginas).split())                 # a quebra de linha do PDF vira espaco
     assert "1. HISTÓRICO" in texto and "O 1º termo aditivo" in texto
     assert "de 20/10/2026 para 28/01/2027" in texto
+
+
+def _curvas_s(c, pid):
+    return [a for a in pleitos.detalhe(c, pid)["anexos"] if a["nome"] == "Curva S.xlsx"]
+
+
+def test_carta_de_prazo_leva_a_curva_s_na_lista_de_anexos(cenario):
+    """Issue #293 (spec 2026-10-20 §4 item 3): a curva S do pedido, em xlsx gerado do cronograma vigente e do
+    medido, entra na lista de anexos do pleito de prazo e vai na previa do e-mail; montar a carta de novo troca a
+    curva pela do dia (a anterior fica no historico, marcada como removida)."""
+    import io
+
+    import openpyxl
+    c, ids = cenario
+    cronograma.nova_versao(c, ids["uid"], ids["contrato"], [("2026-04", 300_00), ("2026-05", 400_00)], "manual",
+                           data_documento="2026-01-10")
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=35000 WHERE id=?", (ids["medicao"],)); c.commit()
+    pid = pleitos.criar(c, ids["uid"], ids["contrato"], "prazo", "310", dias=100, justificativa="Interferências na via")
+    assert [(a["tipo"], a["ext"]) for a in _curvas_s(c, pid)] == [("outro", "xlsx")]
+    pleitos.montar(c, ids["uid"], pid)
+    curvas = _curvas_s(c, pid)
+    assert len(curvas) == 1
+    assert c.execute("SELECT COUNT(*) FROM pleito_anexos WHERE pleito_id=? AND nome='Curva S.xlsx' "
+                     "AND removido_em IS NOT NULL", (pid,)).fetchone()[0] == 1
+    ws = openpyxl.load_workbook(io.BytesIO(arquivos.caminho_seguro(curvas[0]["arquivo"]).read_bytes())).active
+    assert [[x.value for x in linha] for linha in ws.iter_rows()] == [
+        ["Competência", "Previsto vigente", "Previsto anterior", "Medido"],
+        [datetime.datetime(2026, 4, 1), 300, None, 0],
+        [datetime.datetime(2026, 5, 1), 700, None, 350]]
+    assert "Curva S.xlsx" in [a["nome"] for a in pleitos.previa_envio(c, pid)["anexos"]]
+    reajuste_id = pleitos.criar(c, ids["uid"], ids["contrato"], "reajuste", "122")
+    pleitos.montar(c, ids["uid"], reajuste_id)
+    assert _curvas_s(c, reajuste_id) == []                       # so' a carta de prazo leva a curva
+
+
+def test_carta_de_prazo_sem_cronograma_nem_medicao_nao_leva_curva_vazia(cenario):
+    c, ids = cenario
+    c.execute("UPDATE medicoes SET estado='cancelada' WHERE id=?", (ids["medicao"],)); c.commit()
+    pid = pleitos.criar(c, ids["uid"], ids["contrato"], "prazo", "310", dias=100, justificativa="Interferências na via")
+    pleitos.montar(c, ids["uid"], pid)
+    assert _curvas_s(c, pid) == []
 
 
 def _texto_da_carta_de_prazo(c, ids):

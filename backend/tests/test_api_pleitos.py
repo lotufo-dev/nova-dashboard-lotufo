@@ -1065,6 +1065,46 @@ def test_dois_envios_simultaneos_da_reiteracao_mandam_um_so(api, monkeypatch):
     assert _estado(pid) == ({"situacao": "enviado", "envio_id": eid, "envio_reservado_em": None}, 2)
 
 
+def test_carta_de_prazo_com_a_curva_s_sai_uma_vez_so_com_dois_envios_simultaneos(api, monkeypatch):
+    """Issue #293: a curva S entra pelos anexos do pleito, entao o envio da carta de prazo continua unico (dois
+    POST simultaneos: 1x200 e 1x409) e o e-mail registrado leva a carta e a curva."""
+    cl, cid, _ = api
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
+                                                      "justificativa": "interferências na via"})
+    assert r.status_code == 201 and "Curva S.xlsx" in [a["nome"] for a in r.json()["anexos"]], r.text
+    pid = r.json()["id"]
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    doc = cl.get(f"/api/pleitos/{pid}/documento")
+    cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc.content), "application/pdf"))
+    pv = cl.post(f"/api/pleitos/{pid}/previa").json()
+    assert "Curva S.xlsx" in [a["nome"] for a in pv["anexos"]]
+    corpo = {**{k: pv[k] for k in ("para", "copia", "assunto", "corpo")}, "justificativa": "cronograma vai depois"}
+    falso = CorreioFalso(espera=0.3)
+    monkeypatch.setattr(correio, "cliente", falso)
+    respostas = []
+    largada = threading.Barrier(2, timeout=10)
+
+    def enviar():
+        largada.wait()
+        respostas.append(cl.post(f"/api/pleitos/{pid}/enviar", json=corpo))
+
+    ts = [threading.Thread(target=enviar) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert sorted(x.status_code for x in respostas) == [200, 409], [x.text for x in respostas]
+    assert len(falso.enviados) == 1
+    p, envios = _estado(pid)
+    assert p["situacao"] == "enviado" and envios == 1
+    c = db.get_conn()
+    try:
+        nomes = [r[0] for r in c.execute("SELECT nome FROM envio_anexos WHERE envio_id=?", (p["envio_id"],))]
+    finally:
+        c.close()
+    assert "Curva S.xlsx" in nomes and len(nomes) == 2
+
+
 def test_reemitir_pela_api_valida_em_portugues(api):
     cl, cid, _ = api
     rascunho = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
