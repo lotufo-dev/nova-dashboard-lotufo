@@ -360,7 +360,7 @@ _COM_BOLETIM = ("aprovada", "faturada", "recebida")
 _COM_NOTA = ("faturada", "recebida")
 
 
-def avisos_da_competencia(x: dict) -> list[str]:
+def avisos_da_competencia(x: dict, ciclo_coberto: bool = False) -> list[str]:
     """Os avisos de uma linha de `competencias_por_ciclo`, so' com o que ela ja' traz:
 
     - `fora_da_previsao`: pedido diferente do previsto vigente por mais de R$ 1,00. O vigente e' o da origem mais
@@ -369,17 +369,32 @@ def avisos_da_competencia(x: dict) -> list[str]:
     - `sem_apostilamento`: aprovada ou faturada (ou recebida) sem termo que cubra a competencia.
     - `nota_antes_do_apostilamento`: nota emitida em competencia nao apostilada (o critico da spec).
 
-    Linha de data-base incerta nao leva aviso de apostilamento: sem a base, nao se sabe se algum termo a cobre."""
+    Linha de data-base incerta nao leva aviso de apostilamento: sem a base, nao se sabe se algum termo a cobre.
+    `ciclo_coberto` (`_termo_sem_competencias`): o termo que fecha o ciclo nao diz as competencias, entao nenhuma fica
+    de fora que se saiba."""
     out = []
     vigente = x["apostilado_centavos"] if x["apostilado_centavos"] is not None else x["previsto_centavos"]
     if x["pedido_centavos"] is not None and vigente is not None \
             and abs(x["pedido_centavos"] - vigente) > TOLERANCIA_PREVISAO_CENTAVOS:
         out.append("fora_da_previsao")
-    if not x["apostilada"] and not x["data_base_incerta"] and x["estado"] in _COM_BOLETIM:
+    if not x["apostilada"] and not ciclo_coberto and not x["data_base_incerta"] and x["estado"] in _COM_BOLETIM:
         out.append("sem_apostilamento")
         if x["estado"] in _COM_NOTA:
             out.append("nota_antes_do_apostilamento")
     return out
+
+
+def _termo_sem_competencias(conn, contrato_id: int, base: str, ciclo: int, unica: bool) -> bool:
+    """O termo que fecha o ciclo (`apostilamento_do_ciclo`, o mesmo criterio do selo "apostilado") nao diz quais
+    competencias cobre: o termo aditivo de valor de reajuste (issue #390) ou o apostilamento sem `competencias` nem
+    `periodo` (o percentual sem periodo). Com a lista ou o periodo, a competencia que ficou de fora segue marcada."""
+    t = apostilamento_do_ciclo(conn, contrato_id, base, ciclo, unica)
+    if t is None:
+        return False
+    if t.get("origem") == "aditivo":
+        return True
+    d = t.get("dados") or {}
+    return not d.get("competencias") and not isinstance(d.get("periodo"), dict)
 
 
 def _soma(valores) -> int | None:
@@ -514,6 +529,7 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
         linha(base, ciclo, comp)["_medicoes"].append((passo, m["numero"], m))
 
     grupos: dict[tuple[str | None, int | None], list[dict]] = {}
+    cobertos: dict[tuple[str, int], bool] = {}         # issue #275: ciclo fechado por termo sem lista de competencias
     # o grupo sem data-base (medicoes de base ambigua) vai por ultimo
     for (base, ciclo, comp), x in sorted(linhas.items(), key=lambda kv: (kv[0][0] is None, kv[0][0] or "",
                                                                         kv[0][1] or 0, kv[0][2])):
@@ -532,7 +548,9 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
                      aprovado_centavos=_soma(v[2]["valor_atestado_centavos"] for v in ms),
                      faturado_centavos=_soma(faturado.get(v[2]["id"]) for v in ms))
         x["estado"] = ESTADOS_COMPETENCIA[max(passo, _APOSTILADA if x["apostilada"] else 0)]
-        x["avisos"] = avisos_da_competencia(x)
+        if base is not None and (base, ciclo) not in cobertos:
+            cobertos[(base, ciclo)] = _termo_sem_competencias(conn, contrato_id, base, ciclo, unica is not None)
+        x["avisos"] = avisos_da_competencia(x, cobertos.get((base, ciclo), False))
         grupos.setdefault((base, ciclo), []).append(x)
     return [{"data_base_mes": b, "ciclo": y, "competencias": xs} for (b, y), xs in grupos.items()]
 

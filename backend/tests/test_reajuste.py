@@ -1013,6 +1013,31 @@ def test_aprovada_ou_faturada_sem_apostilamento_e_nota_antes_do_termo(cenario):
         "2026-11": ("recebida", ["sem_apostilamento", "nota_antes_do_apostilamento"])}
 
 
+def test_termo_do_ciclo_sem_competencias_cobre_o_ciclo_inteiro_nos_avisos(cenario):
+    # /code-review (PR da #275): o termo que fecha o ciclo sem dizer as competencias (percentual sem periodo) nao deixa
+    # nenhuma de fora que se saiba: o ciclo apostilado nao marca "nota antes do apostilamento" em toda nota dele
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15", {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76"})
+    c.execute("UPDATE pleitos SET instrumento_chave='apostilamento_reajuste-2026-09-15'"); c.commit()
+    m = _medicao(c, cid, 1, "2026-07", "nota_emitida", pedido=100_01, aprovado=100_01)
+    _nota(c, m, 100_01)
+    assert reajuste.ciclos(c, cid, D(2026, 10, 1))[0]["situacao"] == "apostilado"
+    x = _por_competencia(c, cid)["2026-07"]
+    assert (x["estado"], x["apostilada"], x["avisos"]) == ("faturada", False, [])
+
+
+def test_aditivo_de_reajuste_que_fecha_o_ciclo_cobre_as_competencias_nos_avisos(obra_ses):
+    # o termo aditivo de valor de reajuste da SES (issue #390) fecha o ciclo sem lista de competencias
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-20", numero="3º Termo Aditivo")
+    m = _medicao(c, cid, 1, "2025-11", "nota_emitida", pedido=100_01, aprovado=100_01)
+    _nota(c, m, 100_01)
+    x = _por_competencia(c, cid, data_base="2021-10", ciclo=2025)["2025-11"]
+    assert (x["estado"], x["avisos"]) == ("faturada", [])
+
+
 def test_medicao_de_data_base_incerta_nao_ganha_aviso_de_apostilamento(cenario):
     # sem saber a data-base, nao se sabe se algum termo a cobre: a incerteza ja' e' o que a tela mostra
     c, ids = cenario
