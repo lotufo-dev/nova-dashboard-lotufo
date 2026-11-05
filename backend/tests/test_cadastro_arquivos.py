@@ -592,7 +592,7 @@ def test_contrato_sem_cronograma_superadas_tem_lista_vazia(tmp_path):
     assert ca.preparar(_escrever(tmp_path))["contratos"][0]["cronograma_superadas"] == []
 
 
-@pytest.mark.parametrize("valor", [1, "1", [0], [-1], ["1"], [1.5], [True], [None], [1, 1]])
+@pytest.mark.parametrize("valor", [1, "1", [0], [-1], ["1"], [1.5], [True], [None], [1, 1], [9223372036854775808], [1_000_001]])
 def test_cronograma_superadas_invalido_e_erro(tmp_path, valor):
     erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma_superadas": valor}]))
     assert any("cronograma_superadas" in e for e in erros)

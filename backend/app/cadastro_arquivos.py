@@ -371,6 +371,11 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
     return out
 
 
+# Gate Sol (PR #406): acima do int64 o `aplicar` estourava com OverflowError ao consultar o numero no SQLite.
+# 1.000.000 de versoes e' folga larga sobre qualquer contrato real.
+MAX_VERSAO_SUPERADA = 1_000_000
+
+
 def _cronograma_superadas(lista, falha) -> list[int]:
     """Issue #395: `cronograma_superadas: [<numero da versao>]`, versoes ja gravadas sem linha no cadastro (a carga
     de 04/09/2026, as manuais) que deixam de valer. Se o numero existe e nao veio do cadastro, quem confere e' o
@@ -382,8 +387,8 @@ def _cronograma_superadas(lista, falha) -> list[int]:
         return []
     out: list[int] = []
     for i, n in enumerate(lista):
-        if _inteiro(n, 1) is None:
-            falha(f"cronograma_superadas[{i}]", f"número de versão inválido: {n!r} (use um inteiro ≥ 1)")
+        if _inteiro(n, 1) is None or n > MAX_VERSAO_SUPERADA:
+            falha(f"cronograma_superadas[{i}]", f"número de versão inválido: {n!r} (use um inteiro de 1 a {MAX_VERSAO_SUPERADA})")
         elif n in out:
             falha("cronograma_superadas", f"versão {n} repetida")
         else:
