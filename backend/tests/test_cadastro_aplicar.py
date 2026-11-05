@@ -1597,6 +1597,24 @@ def test_termo_de_correcao_sem_pleito_ate_a_data_do_original_perde_a_ligacao_ant
     assert _atendidos(conn) == antes
 
 
+def test_pleito_esperado_atendido_por_outro_termo_nao_tira_a_heranca_e_avisa(conn):
+    # code-review (#414): ap-11 atendeu o CT-100; o CT-120, que entrou depois, foi pego pelo aditivo ta-08. Pela data de
+    # ap-11 a correcao atenderia o CT-120, que e' do aditivo: nada de adivinhar, a heranca fica e o aplicar avisa
+    ct100 = {**PLEITO_2026, "oficio": "CT-100-LT-2026", "data": "2026-03-01"}
+    ta = {**TA_REAJ, "data": "2026-04-15", "dados": {"ciclo": 2026}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[T1], pleitos_anteriores=[ct100])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[T1, ta], pleitos_anteriores=[ct100, CT120])]))
+    assert _ligacoes(conn) == {"CT-100-LT-2026": "ap-11", "CT-120-LT-2026": "ta-08"}
+    cad = _cad(contratos=[_contrato(instrumentos=[T1, ta, T2], pleitos_anteriores=[ct100, CT120])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-100-LT-2026": "ap-12", "CT-120-LT-2026": "ta-08"}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-100-LT-2026: atendido por ap-12"]
+    assert any(a.startswith("MT-402/ap-12: ") and "CT-120-LT-2026" in a and "ta-08" in a for a in r["avisos"]), r["avisos"]
+    antes = _atendidos(conn)
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+    assert _atendidos(conn) == antes
+
+
 def test_correcao_da_data_de_pleito_nao_perde_a_ligacao_ao_aditivo_de_reajuste(conn):
     # comentario da #414: a correcao de data desliga os pleitos do ciclo, inclusive o ligado ao aditivo de reajuste
     # (#390); o aplicar o religa como numa aplicacao do zero

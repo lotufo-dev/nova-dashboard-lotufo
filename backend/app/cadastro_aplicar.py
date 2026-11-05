@@ -619,8 +619,8 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -
 
     Issue #414: a correcao que fecha a cadeia se reconfere a cada aplicar, ja' ligada ou nao: o pleito que ela atende e'
     o ultimo enviado ate' a data do termo mais antigo da cadeia no mesmo ciclo (o herdado, quando nada mudou). A ligada
-    pela regra antiga (a data dela) ou herdada de um elo ligado assim muda para esse pleito, auditada dos dois lados. O
-    termo original ja' ligado fica como esta'."""
+    pela regra antiga (a data dela) ou herdada de um elo ligado assim muda para esse pleito, auditada dos dois lados;
+    se esse pleito e' de outro termo, nada muda e o aplicar avisa. O termo original ja' ligado fica como esta'."""
     aps = [i for i in c["instrumentos"] if i["tipo"] == "apostilamento_reajuste"]
     if not aps:
         return
@@ -709,7 +709,8 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -
         if inst["chave"] in corrigidos_por_outro:
             continue
         atuais = conn.execute("SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? "
-                              "AND instrumento_chave=? ORDER BY id", (contrato_id, inst["chave"])).fetchall()
+                              "AND tipo='reajuste' AND instrumento_chave=? ORDER BY id",
+                              (contrato_id, inst["chave"])).fetchall()
         # o termo original ja' ligado fica como esta' (issue #414: so' a correcao se reconfere)
         if not reconfere and atuais:
             continue
@@ -727,27 +728,30 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -
             if p is not None and p["instrumento_chave"] is None:
                 ligar(p, inst)
             continue
+        nome = c["nome_curto"]
+        if p is not None and p["instrumento_chave"] not in (None, inst["chave"], *cadeia):
+            # code-review (#414): o pleito esperado e' de outro termo. Nada de adivinhar: a correcao fica com o que tem
+            # (herda como antes desta reconferencia) e o aplicar avisa
+            for h in herdados:
+                ligar(h, inst)
+            avisos.append(f"{nome}/{inst['chave']}: o último pleito do ciclo {ciclo} enviado até {_br(data_termo)} "
+                          f"({p['numero_oficio']}) é atendido por {p['instrumento_chave']}; a ligação do termo de "
+                          "correção fica como está (confira o cadastro)")
+            continue
         # issue #414: o pleito livre, herdado da cadeia ou ja' desta correcao e' o destino; o que ela tinha e nao e' o
         # destino (ligado pela regra antiga, a data dela, ou herdado de um elo ligado assim) sai, auditado
-        destino = p if p is not None and p["instrumento_chave"] in (None, inst["chave"], *cadeia) else None
+        destino = p
         saem = [a for a in (*atuais, *herdados) if destino is None or a["id"] != destino["id"]]
-        nome = c["nome_curto"]
         for a in saem:
             conn.execute("UPDATE pleitos SET instrumento_chave=NULL WHERE id=?", (a["id"],))
             auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", a["id"],
                                 {"instrumento_chave": a["instrumento_chave"]}, {"instrumento_chave": None})
-            if destino is not None:
-                motivo = f"religado ao {destino['numero_oficio']}, o último enviado até {_br(data_termo)}"
-            elif p is not None:
-                motivo = (f"religado: o {p['numero_oficio']}, o último enviado até {_br(data_termo)}, é atendido "
-                          f"por {p['instrumento_chave']}")
-            else:
-                motivo = f"religado: nenhum pleito do ciclo enviado até {_br(data_termo)}"
+            motivo = (f"religado ao {destino['numero_oficio']}, o último enviado até {_br(data_termo)}" if destino
+                      else f"religado: nenhum pleito do ciclo enviado até {_br(data_termo)}")
             rel["alterados"].append(f"{nome}/reajuste {a['numero_oficio']}: sem termo ({inst['chave']} {motivo})")
             if destino is None:
                 avisos.append(f"{nome}/{inst['chave']}: o termo de correção atende o último pleito do ciclo {ciclo} "
-                              f"enviado até {_br(data_termo)}, e não há um livre; a ligação ao pleito "
-                              f"{a['numero_oficio']} saiu")
+                              f"enviado até {_br(data_termo)}, e não há; a ligação ao pleito {a['numero_oficio']} saiu")
         if destino is not None and destino["instrumento_chave"] != inst["chave"]:
             ligar(destino, inst, " (religado)" if saem else "")
 
