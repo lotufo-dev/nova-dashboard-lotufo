@@ -28,7 +28,8 @@ export type Pleito = {
   situacao: string; corpo_carta: string | null; corpo_padrao?: string | null; erro_carta?: string;
   montado_paginas: number | null; assinado_arquivo: string | null; nome_documento: string | null;
   conferencia: Conferencia | null; pendencias: Pendencia[]; enviado_em: string | null; envio_justificativa: string | null;
-  anexos: { id: number; tipo: string; nome: string; tamanho: number }[];
+  /** `gerado`: a curva S que o servidor gera no pedido de prazo (issue #293); vai sempre e nao se remove. */
+  anexos: { id: number; tipo: string; nome: string; tamanho: number; gerado?: boolean }[];
   exigidos: { tipo: string; rotulo: string }[];
   /** Reajuste: a chave do apostilamento que atendeu o pleito (o cadastro preenche, issue #271). */
   instrumento_chave?: string | null;
@@ -60,7 +61,8 @@ function mensagem(e: unknown): string {
 
 // Os anexos do oficio como checklist (F-67). Tudo o que o servidor lista em `exigidos` e' exigido, entao sem
 // arquivo e' "Falta" (Atencao: se envia com justificativa, como no protocolo); a situacao basta, sem nota "Exigida". Anexo de um tipo que nao esta'
-// entre os exigidos aparece em "Outros anexos", so' para remover.
+// entre os exigidos aparece em "Outros anexos", so' para remover. A curva S que o servidor gera no prazo (#293) tem
+// linha propria e nao se remove (o servidor recusa).
 function itensDoPleito(p: Pleito): ItemChecklist[] {
   const arquivosDe = (tipo: string) => p.anexos.filter(a => a.tipo === tipo).map(a => ({ id: a.id, nome: a.nome, tamanho: a.tamanho }));
   const itens: ItemChecklist[] = p.exigidos.map((x): ItemChecklist => {
@@ -69,7 +71,11 @@ function itensDoPleito(p: Pleito): ItemChecklist[] {
       aceita: ".xlsx,application/pdf" };
   });
   const conhecidos = new Set(p.exigidos.map(x => x.tipo));
-  const outros = p.anexos.filter(a => !conhecidos.has(a.tipo)).map(a => ({ id: a.id, nome: a.nome, tamanho: a.tamanho }));
+  const so = (lista: Pleito["anexos"]) => lista.map(a => ({ id: a.id, nome: a.nome, tamanho: a.tamanho }));
+  const curva = p.anexos.filter(a => a.gerado);
+  if (curva.length > 0) itens.push({ chave: "curva_s", rotulo: "Curva S", situacao: "anexada", arquivos: so(curva),
+    semAnexar: true, semRemover: true });
+  const outros = so(p.anexos.filter(a => !a.gerado && !conhecidos.has(a.tipo)));
   if (outros.length > 0) itens.push({ chave: "outros", rotulo: "Outros anexos", situacao: "anexada", arquivos: outros, semAnexar: true });
   return itens;
 }
