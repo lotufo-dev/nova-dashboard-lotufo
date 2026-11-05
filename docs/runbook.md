@@ -146,6 +146,14 @@ Import-Certificate -FilePath \\<servidor>\...\certs\cert.pem -CertStoreLocation 
 - Primeiro administrador: `cd backend; $env:DASH_DB_PATH='C:\DashboardLotufo\dados\dashboard.db'; .venv\Scripts\python -m app.cli criar-admin --nome ... --email ...`.
 - Demais usuários (inclusive o segundo administrador): tela Administração → Usuários.
 - Senha esquecida: não há reset pela tela hoje; criar outro usuário e desativar o antigo. Dívida registrada.
+- Mexer em usuário direto no banco não funciona, por desenho (issue #422): criar, apagar ou mudar e-mail, senha, perfil
+  ou situação de uma conta pelo `sqlite3`, DB Browser ou script avulso falha com "no such function: dash_conexao_app"
+  e nada muda (os gatilhos da migração 060 só deixam passar a conexão da aplicação). Use a tela Administração →
+  Usuários ou `python -m app.cli` (`criar-admin`, `desbloquear`, `redefinir-senha`). Apagar ou trocar esses gatilhos,
+  ou quebrar a cadeia da auditoria, aparece em Administração → Saúde › Segurança na conferência seguinte (de hora em
+  hora e no boot), como "Proteção da tabela de usuários removida" ou "Cadeia da auditoria quebrada". Para repor os
+  gatilhos: `DROP TRIGGER IF EXISTS` do que foi trocado, apagar a linha `060_protecao_usuarios.sql` de
+  `schema_migrations` e reiniciar o serviço (a migração recria os três).
 
 ## Variáveis de ambiente
 `DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db` e sobe a instalação como `dev`), `DASH_INSTALACAO_ARQUIVO` (troca o caminho do arquivo da instalação assinada), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_CHAVE_PUBLICA_DONO` (cópia do dono), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
