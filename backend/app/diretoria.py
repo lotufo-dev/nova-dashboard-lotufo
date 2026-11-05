@@ -163,6 +163,29 @@ def _maior_dias(ms: list[dict], hoje: datetime.date) -> int | None:
     return max(dias) if dias else None
 
 
+# Issue #279 (spec 2026-10-20 §2.2): a competencia de reajuste ja' medida (pedida, aprovada ou faturada) que nenhum
+# apostilamento cobre (`reajuste.competencias_por_ciclo`)
+ESPERANDO_APOSTILAMENTO = ("pedida", "aprovada", "faturada")
+
+
+def _reajustes_sem_apostilamento(conn) -> dict:
+    """Por obra (contratos ativos ou suspensos, o recorte de `reajuste.avisos`), as competencias de reajuste ja' medidas
+    sem apostilamento e o valor ja' medido delas (o aprovado de cada medicao, senao o pedido), na cota: o cheio da
+    obra somado e convertido uma vez, como a carteira (arredondamento unico). Obra sem nenhuma nao aparece. As
+    competencias de uma obra sao os meses (a mesma competencia em duas datas-base conta uma vez)."""
+    obras = []
+    for c in conn.execute("SELECT id, COALESCE(nome_curto, numero_instrumento) obra, percentual_direito_bp pct "
+                          "FROM contratos WHERE estado IN ('ativo','suspenso')"):
+        xs = [x for g in reajuste.competencias_por_ciclo(conn, c["id"]) for x in g["competencias"]
+              if not x["apostilada"] and x["estado"] in ESPERANDO_APOSTILAMENTO]
+        if xs:
+            obras.append({"contrato_id": c["id"], "obra": c["obra"], "competencias": len({x["competencia"] for x in xs}),
+                          "valor_centavos": contratos.cota(sum(x["medido_centavos"] or 0 for x in xs), c["pct"]) or 0})
+    obras.sort(key=lambda o: (-o["valor_centavos"], o["obra"]))
+    return {"competencias": sum(o["competencias"] for o in obras), "valor_centavos": sum(o["valor_centavos"] for o in obras),
+            "obras": obras}
+
+
 def _dinheiro(conn, ms: list[dict], hoje: datetime.date, liberado: bool, notas: list[dict] = ()) -> dict:
     protocoladas = [m for m in ms if m["estado"] in PROTOCOLADAS] + list(notas)
     faixas = _faixas(protocoladas, hoje, liberado)
@@ -191,7 +214,8 @@ def _dinheiro(conn, ms: list[dict], hoje: datetime.date, liberado: bool, notas: 
             "recebido_mes": _grupo([m for m in ms if m["estado"] == "recebida" and (m["recebida_em"] or "")[:7] == mes]),
             # A13 (2026-09-28): um item por ciclo, o mais antigo primeiro, para A receber listar por obra (os
             # avisos da diretoria so' trazem os de mais de 90 dias)
-            "reajustes_apostilamento": {"quantidade": len(pendentes),
+            # #279: e, por obra, o valor ja' medido das competencias sem apostilamento
+            "reajustes_apostilamento": {**_reajustes_sem_apostilamento(conn), "quantidade": len(pendentes),
                                         "maior_dias": max((k["dias"] for _, k in pendentes), default=None),
                                         "itens": sorted(({"contrato_id": c["id"], "obra": c["nome_curto"] or c["numero_instrumento"],
                                                           "data_base_mes": k["data_base_mes"], "dias": k["dias"]}

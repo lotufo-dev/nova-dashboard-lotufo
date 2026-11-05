@@ -696,6 +696,21 @@ def test_complemento_soma_pedido_aprovado_e_faturado_das_medicoes(cenario):
             x["faturado_centavos"]) == ("recebida", 3, [3, 7], 12_000_01, 9_999_99, 9_999_99)
 
 
+def test_medido_da_competencia_e_o_aprovado_de_cada_medicao_senao_o_pedido(cenario):
+    # issue #279: o valor ja' medido da competencia, medicao a medicao (o aprovado quando houver, senao o pedido): o
+    # complemento so' pedido nao some atras do aprovado da principal
+    c, ids = cenario
+    cid = ids["contrato"]
+    _medicao(c, cid, 3, "2026-07", "boletim_recebido", pedido=10_000_00, aprovado=9_999_99)
+    _medicao(c, cid, 7, "2026-07", "planilha_gerada", pedido=2_000_01)
+    _medicao(c, cid, 8, "2026-08", "prevista")
+    _previsao(c, cid, "2026-09", 300_05, "manual")
+    x = _por_competencia(c, cid)
+    assert (x["2026-07"]["estado"], x["2026-07"]["aprovado_centavos"], x["2026-07"]["medido_centavos"]) == \
+        ("aprovada", 9_999_99, 12_000_00)
+    assert (x["2026-08"]["medido_centavos"], x["2026-09"]["medido_centavos"]) == (None, None)
+
+
 def test_medicao_sem_base_em_contrato_de_duas_bases_nao_some(cenario):
     # gate Sol (rodadas 1 e 2, PR #381): duas datas-base com previsao da mesma competencia e medicao sem base
     # gravada: entra uma vez so', no grupo sem data-base, em vez de sumir ou de contar nas duas
