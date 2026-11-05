@@ -3,7 +3,8 @@
 Operacionalizacao do congelamento: cada versao vale a partir do MES em que foi
 criada (criado_em). O previsto efetivo de uma competencia e o valor da versao
 mais recente criada ate aquela competencia -- revisar o cronograma nunca
-reescreve meses ja decorridos.
+reescreve meses ja decorridos. Excecao (issue #396): a versao de aditivo, carta ou curva do SMO
+substitui a curva inteira, passado incluido (o bloco do realizado).
 
 Versao vinda do cadastro (issue #256): criado_em e' a DATA DO DOCUMENTO (aditivo, carta,
 curva do SMO), nao a da carga. Por isso a linha do tempo e' ordenada por criado_em (empate
@@ -120,10 +121,14 @@ def versoes(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     return out
 
 
+ORIGENS_DE_REPACTUACAO = ("aditivo", "carta", "smo")
+
+
 def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int, antes_da_versao: int | None = None) -> dict[str, int]:
     """`antes_da_versao` (numero): so' as versoes que vem ESTRITAMENTE antes dela na linha do tempo -- o previsto
     como estava antes dessa versao (issue #295)."""
     efetivo: dict[str, int] = {}
+    piso_da_repactuacao = ""     # mes da ultima repactuacao ja aplicada: antes dele so' ela decide (issue #396)
     versoes_do_contrato = _versoes(conn, contrato_id)
     if antes_da_versao is not None:
         versoes_do_contrato = versoes_do_contrato[:[x["numero"] for x in versoes_do_contrato].index(antes_da_versao)]
@@ -139,18 +144,28 @@ def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int, antes_da_versao
         # nao e' tocado -- e' justamente o que fica congelado.
         for comp in [c for c in efetivo if c >= mes_criacao]:
             del efetivo[comp]
+        # Issue #396 (decisao do Leo, 05/11/2026): a versao de repactuacao (aditivo, carta, curva do SMO) vale para
+        # TODOS os meses que traz, inclusive os passados (o bloco do realizado); sem isso o previsto dos meses
+        # passados continuava somando e o saldo era previsto de novo, e a curva passava do contrato.
+        repactua = conn.execute("SELECT 1 FROM cronograma_versoes_cadastro WHERE versao_id=? AND origem IN (?,?,?)",
+                                (v["id"],) + ORIGENS_DE_REPACTUACAO).fetchone() is not None
+        if repactua:
+            efetivo.clear()      # substitui a curva INTEIRA: mes que a carta nao traz nao fica com o previsto antigo
+            piso_da_repactuacao = mes_criacao
         for item in _itens(conn, v["id"]):
             comp = item["competencia"]
+            if repactua:
+                efetivo[comp] = item["valor_previsto_centavos"]
+                continue
             # a versao so pode reescrever competencias >= mes em que nasceu;
             # excecao: se a competencia nunca teve valor, qualquer versao semeia
             # (cronograma cadastrado com a obra ja em andamento precisa dos meses
             # ja decorridos -- sem a excecao eles ficariam previstos zero).
-            if comp >= mes_criacao or comp not in efetivo:
+            # Depois de uma repactuacao, a semeadura nao entra antes do mes dela: o realizado ja esta no bloco da
+            # carta, e a carga de 04/09/2026 (vigente ate ser superada) o somaria em dobro.
+            if comp >= mes_criacao or (comp not in efetivo and comp >= piso_da_repactuacao):
                 efetivo[comp] = item["valor_previsto_centavos"]
     return efetivo
-
-
-ORIGENS_DE_REPACTUACAO = ("aditivo", "carta", "smo")
 
 
 def curva_comparativa(conn: sqlite3.Connection, contrato_id: int) -> dict:

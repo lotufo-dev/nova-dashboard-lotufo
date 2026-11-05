@@ -90,6 +90,22 @@ def test_reajuste_da_obra_traz_as_competencias_apostiladas_e_o_termo_do_pleito(a
         [{"instrumento_id": iid, "data_base_mes": "2024-06"}]
 
 
+def test_reajuste_da_obra_traz_so_os_aditivos_que_valem_como_termo(api):
+    """Issue #390 (gate Sol, PR #407): a aba diz o termo aditivo que atendeu o pleito pelo mesmo criterio do ciclo;
+    aditivo cancelado ou de execucao nao vem."""
+    cl, cid, _ = api
+    c = db.get_conn()
+    for chave, natureza, cancelado in (("ta-01", "reajuste", None), ("ta-02", "execucao", None),
+                                       ("ta-03", "reajuste", "2025-12-01 10:00:00")):
+        c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, numero, "
+                  "chave_cadastro, natureza, cancelado_em) VALUES (?, 'valor', 100_01, 'assinado', '2025-07-10', ?, ?, ?, ?)",
+                  (cid, chave.upper(), chave, natureza, cancelado))
+    c.commit(); c.close()
+    termos = cl.get(f"/api/contratos/{cid}/reajuste").json()["aditivos_de_reajuste"]
+    assert [(t["chave"], t["tipo"], t["numero"], t["data"]) for t in termos] == \
+        [("ta-01", "aditivo_valor", "TA-01", "2025-07-10")]
+
+
 def test_reajuste_da_obra_traz_o_estado_de_cada_competencia_e_o_ciclo_a_reemitir(api, monkeypatch):
     """Issue #273: por data-base e ciclo, as competencias com o estado e o valor de cada fonte; aditivo de prazo
     assinado depois do pleito poe o ciclo em `reemitir`."""

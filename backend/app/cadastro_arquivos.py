@@ -42,6 +42,7 @@ TIPOS_PLEITO = ("reajuste", "prazo", "conclusao", "valor")   # valor: pedido de 
 # Pecas que o orgao pode pedir no pleito de reajuste (mesma lista de `pleitos.PECAS_ORGAO`).
 PECAS_PLEITO = ("falencia", "contrato_social", "documento_representante", "balanco")
 _CICLO = re.compile(r"^([0-9]{4})(-[0-9]{2})?$")
+_CICLO_ADITIVO = re.compile(r"^[0-9]{4}$")       # o aditivo de reajuste (issue #390) diz so' o ano: 2025-99 e' erro
 # Issue #256 (spec 2026-10-20 §2.4): de que documento veio cada versao do cronograma.
 ORIGENS_CRONOGRAMA = ("contratual", "aditivo", "carta", "smo")
 # Mesmo teto de itens por versao da rota do cronograma (api_cronograma.MAX_ITENS): 50 anos de competencias.
@@ -292,6 +293,39 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
                 if i["tipo"] in ("aditivo_prazo", "apostilamento_prazo", "aditivo_misto")}
     for inst in c["instrumentos"]:
         d, onde = inst["dados"], f"instrumentos[{inst['chave']}]"
+        if inst["tipo"] in TIPOS_COM_NATUREZA:
+            # issue #390 (revisor, PR #407): no aditivo de reajuste, `ciclo` diz o ciclo que ele atende (o termo
+            # assinado depois do aniversario seguinte) e o aplicar liga o pleito desse ciclo; nada fica engolido
+            base_ok = None
+            if d.get("data_base") is not None:
+                if inst.get("natureza") != "reajuste":
+                    falha(f"{onde}.data_base", "só vale no aditivo de natureza reajuste")
+                elif str(d["data_base"]) not in meses:
+                    falha(f"{onde}.data_base", "use AAAA-MM de uma das datas_base do contrato")
+                else:
+                    base_ok = str(d["data_base"])
+            elif len(meses) == 1:
+                base_ok = next(iter(meses))
+            if d.get("ciclo") is not None:
+                if inst.get("natureza") != "reajuste":
+                    falha(f"{onde}.ciclo", "só vale no aditivo de natureza reajuste")
+                elif not _CICLO_ADITIVO.match(str(d["ciclo"])):
+                    falha(f"{onde}.ciclo", f"use o ano do ciclo, com quatro dígitos (ex.: 2026): {d['ciclo']!r}")
+                elif base_ok is not None:
+                    # gate Sol (rodada extra, PR #407): o ciclo vai do ano seguinte ao da base ao ciclo da assinatura
+                    primeiro, ultimo = int(base_ok[:4]) + 1, reajuste.ciclo_do_aditivo(base_ok, str(inst["data"]))
+                    if ultimo is None:
+                        falha(f"{onde}.ciclo", f"o aditivo foi assinado antes do primeiro aniversário da data-base "
+                                               f"{base_ok}; não atende ciclo nenhum")
+                    elif not primeiro <= int(d["ciclo"]) <= ultimo:
+                        falha(f"{onde}.ciclo", f"use um ciclo de {primeiro} a {ultimo} (do ano seguinte ao da "
+                                               f"data-base {base_ok} ao do último aniversário até a assinatura)")
+            # a base guardada no aditivo (migracao 058) vale com qualquer numero de bases; sem ela, com mais de uma, o
+            # aditivo novo nao tem base (o ja' aplicado segue na que guardou quando a base era unica)
+            if inst.get("natureza") == "reajuste" and len(meses) != 1 and d.get("data_base") is None:
+                avisos.append(f"{c['nome_curto']}: {onde}: o contrato não tem uma data-base só e o aditivo de "
+                              "reajuste não diz a dele (data_base, AAAA-MM); se ainda não foi aplicado, ele não fecha "
+                              "ciclo nem atende pleito")
         if inst["tipo"] == "apostilamento_reajuste":
             if d.get("data_base") is not None and str(d["data_base"]) not in meses:
                 falha(f"{onde}.data_base", "use AAAA-MM de uma das datas_base do contrato")

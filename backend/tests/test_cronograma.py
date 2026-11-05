@@ -346,3 +346,46 @@ def test_curva_comparativa_ignora_a_superada(conn, cid):
     _superar(conn, cid, 2)
     assert cronograma.curva_comparativa(conn, cid)["anterior"] == [
         {"competencia": "2026-09", "previsto_centavos": 10_00}, {"competencia": "2026-10", "previsto_centavos": 10_00}]
+
+
+# --- issue #396: versao de repactuacao substitui a curva inteira, passado incluido --------------------------------
+
+def test_carta_com_bloco_do_realizado_no_passado_fecha_a_curva_no_contrato(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 25_00), ("2025-02", 25_00), ("2025-03", 25_00),
+                                          ("2025-04", 25_00)], "manual", data_documento="2025-01-01")
+    # carta de 2026-02: realizado em bloco nos meses passados + saldo nos futuros; a curva inteira soma o contrato
+    cronograma.nova_versao(conn, 1, cid, [("2025-01", 20_00), ("2025-02", 20_00), ("2025-03", 0),
+                                          ("2025-04", 20_00), ("2026-03", 20_00), ("2026-04", 20_00)], "manual",
+                           data_documento="2026-02-10")
+    _cadastro(conn, cid, 1, "contratual", "contratual", "2025-01-01")
+    _cadastro(conn, cid, 2, "carta1", "carta", "2026-02-10")
+    ef = cronograma.previsto_efetivo(conn, cid)
+    assert ef["2025-03"] == 0 and ef["2025-04"] == 20_00      # o previsto dos meses passados e' o da carta
+    assert sum(ef.values()) == 100_00                         # termina no contrato
+    assert cronograma.curva_comparativa(conn, cid)["anterior"] == [
+        {"competencia": c, "previsto_centavos": 25_00} for c in ("2025-01", "2025-02", "2025-03", "2025-04")]
+
+
+def test_carta_com_bloco_em_mes_que_a_antiga_nao_tinha_nao_deixa_resto_do_previsto_antigo(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [(f"2025-{m:02d}", 10_00) for m in range(1, 11)], "manual",
+                           data_documento="2025-01-01")
+    cronograma.nova_versao(conn, 1, cid, [("2026-01", 40_00), ("2026-03", 30_00), ("2026-04", 30_00)], "manual",
+                           data_documento="2026-02-10")
+    _cadastro(conn, cid, 1, "contratual", "contratual", "2025-01-01")
+    _cadastro(conn, cid, 2, "carta1", "carta", "2026-02-10")
+    ef = cronograma.previsto_efetivo(conn, cid)
+    assert ef == {"2026-01": 40_00, "2026-03": 30_00, "2026-04": 30_00}
+    assert sum(ef.values()) == 100_00
+    assert cronograma.curva_comparativa(conn, cid)["anterior"] == [
+        {"competencia": f"2025-{m:02d}", "previsto_centavos": 10_00} for m in range(1, 11)]
+
+
+def test_carga_posterior_nao_superada_nao_semeia_meses_anteriores_a_carta(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2026-01", 40_00), ("2026-10", 60_00)], "manual",
+                           data_documento="2026-02-10")
+    _cadastro(conn, cid, 1, "carta1", "carta", "2026-02-10")
+    _carga(conn, cid, [("2025-12", 5_00), ("2026-01", 7_00), ("2026-10", 60_00)])      # carga de 04/09/2026
+    # o realizado esta no bloco da carta: 2025-12 nao e' semeado de novo; a carga so' reescreve de 2026-09 em diante
+    ef = cronograma.previsto_efetivo(conn, cid)
+    assert ef == {"2026-01": 40_00, "2026-10": 60_00}
+    assert sum(ef.values()) == 100_00

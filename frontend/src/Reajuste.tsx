@@ -100,6 +100,11 @@ function textoApostilamento(i: InstrumentoCadastro): string {
           pct !== undefined && pct !== null ? fmtPercentual(Number(pct) / 100) : ""].filter(Boolean).join(" · ");
 }
 
+/** O termo que fecha o ciclo: apostilamento ou, na SES, termo aditivo de valor de reajuste (issue #390). */
+function nomeDoTermo(i: InstrumentoCadastro): string {
+  return i.tipo.startsWith("aditivo") ? "Termo aditivo" : "Apostilamento";
+}
+
 /** O desfecho de um pleito enviado (F-71): com o ciclo corrente, o selo diz se o apostilamento veio (Em dia) ou
  *  se falta (Atencao, com os dias que o servidor conta); embaixo, so' a data do envio. Sem o ciclo (ciclo
  *  anterior, data-base que saiu do cadastro), o dado nao diz o desfecho: selo neutro. */
@@ -107,9 +112,10 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
   const envio = partesDoEnvio(p);
   const neutro = { classe: "", texto: p.situacao, partes: envio };
   // o cadastro ligou o pleito ao termo que o atendeu (issue #271): vale em qualquer ciclo, corrente ou passado
+  // (na SES, o termo aditivo de valor de reajuste, issue #390: `apostilamentos` traz tambem os aditivos)
   const termo = p.situacao === "enviado" && p.instrumento_chave
     ? apostilamentos.find(i => i.chave === p.instrumento_chave) : undefined;
-  if (termo) return { classe: "selo--ok", texto: `atendido pelo apostilamento ${termo.numero ?? "s/n"}`, partes: envio };
+  if (termo) return { classe: "selo--ok", texto: `atendido pelo ${nomeDoTermo(termo).toLowerCase()} ${termo.numero ?? "s/n"}`, partes: envio };
   // so' o pleito vigente do ciclo (o enviado mais recente) leva o desfecho; os anteriores (reiterados ou
   // reemitidos) ficam com o envio e a cadeia, sem repetir a espera do ciclo (issue #277)
   if (!c || p.situacao !== "enviado" || (c.pleito && c.pleito.id !== p.id)) return neutro;
@@ -153,7 +159,7 @@ const emAberto = (p: Pleito) => p.origem === "sistema" && p.situacao !== "enviad
 
 export default function Reajuste({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
   const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[]; competencias?: CompetenciaApostilada[];
-    bases_dos_termos?: BaseDoTermo[]; previsoes?: Previsao[] } | null>(null);
+    bases_dos_termos?: BaseDoTermo[]; previsoes?: Previsao[]; aditivos_de_reajuste?: InstrumentoCadastro[] } | null>(null);
   const [apostilamentos, setApostilamentos] = useState<InstrumentoCadastro[]>([]);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
@@ -186,12 +192,15 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   const vale = (i: InstrumentoCadastro) => !i.chave || !corrigidos.has(i.chave);
   const semBase = semDataBase.filter(vale);
   const aqui = { tela: "obra" as const, id: contratoId, aba: "reajuste" as const };
+  // o pleito ligado ao termo aditivo de reajuste (issue #390) diz o termo em qualquer ciclo; a API ja' manda so' os
+  // aditivos que valem como termo (o mesmo criterio do ciclo)
+  const termos = [...apostilamentos, ...(dados.aditivos_de_reajuste ?? [])];
   // cada pleito e' uma secao do cartao pai (F-74): o enviado vira linha com o desfecho no selo; o que ainda se
   // trabalha segue no CartaoPleito, que traz o formulario
   const cartoes = (ps: Pleito[], ciclo?: Ciclo) => ps.map(p => {
     const contexto = p.ciclo ? `ciclo de ${p.ciclo}` : undefined;
     return pleitoEmLinha(p)
-      ? <LinhaPleito key={p.id} p={p} desfecho={desfechoDoPleito(p, apostilamentos, ciclo)} contexto={contexto} />
+      ? <LinhaPleito key={p.id} p={p} desfecho={desfechoDoPleito(p, termos, ciclo)} contexto={contexto} />
       : <CartaoPleito key={p.id} p={p} podeEditar={podeEditar} aoMudar={() => void carregar()} contexto={contexto} />;
   });
 
@@ -225,8 +234,10 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         // pleito ligado
         const validos = db.apostilamentos.filter(vale);
         const doCiclo = [...(c.apostilamento ? [c.apostilamento] : []),
-          ...validos.filter(i => i.id !== c.apostilamento?.id && cicloDoApostilamento(i) === c.ciclo)];
-        const outrosAp = validos.filter(i => !doCiclo.some(d => d.id === i.id));
+          // o aditivo (issue #390) vem de outra tabela: o id so' identifica junto com o tipo
+          ...validos.filter(i => !(i.id === c.apostilamento?.id && i.tipo === c.apostilamento.tipo)
+            && cicloDoApostilamento(i) === c.ciclo)];
+        const outrosAp = validos.filter(i => !doCiclo.some(d => d.id === i.id && d.tipo === i.tipo));
         const anteriores = db.pleitosAnteriores.length + outrosAp.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
         const apostiladas = (dados.competencias ?? []).filter(x => x.data_base_mes === db.data_base_mes);
@@ -278,7 +289,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
             <div className="cartao__corpo linhas">
               <p className="num">{linhaDoCiclo(c)}</p>
               {doCiclo.map(i => (
-                <p key={i.id}><span className="resumo__rotulo">Apostilamento</span>{" "}{textoApostilamento(i)}</p>
+                <p key={`${i.tipo}-${i.id}`}><span className="resumo__rotulo">{nomeDoTermo(i)}</span>{" "}{textoApostilamento(i)}</p>
               ))}
               {apostiladas.length > 0 && <TabelaApostilada dataBase={db.data_base_mes} linhas={apostiladas} />}
             </div>

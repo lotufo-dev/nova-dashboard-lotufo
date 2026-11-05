@@ -770,3 +770,178 @@ def test_medicao_sem_base_gravada_vai_para_o_ciclo_da_competencia(cenario):
     assert list(_por_competencia(c, cid, ciclo=2026)) == ["2026-06"]
     assert list(_por_competencia(c, cid, ciclo=2027)) == ["2026-07"]
     assert _por_competencia(c, cid, ciclo=2026)["2026-06"]["estado"] == "pedida"
+
+
+# --- issue #390: na SES o reajuste sai por termo aditivo de valor (`natureza: reajuste`), nao por apostilamento ---
+
+def _aditivo_reajuste(c, cid, chave, assinado_em, natureza="reajuste", tipo="valor", numero=None, cancelado=False,
+                      delta=123_45, nova_execucao_fim=None, data_base=None, ciclo=None):
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, numero, "
+              "chave_cadastro, natureza, cancelado_em, nova_execucao_fim, data_base_mes, ciclo_reajuste) "
+              "VALUES (?,?,?, 'assinado', ?,?,?,?,?,?,?,?)",
+              (cid, tipo, delta, assinado_em, numero or chave.upper(), chave, natureza,
+               "2025-12-01 10:00:00" if cancelado else None, nova_execucao_fim, data_base, ciclo))
+    c.commit()
+
+
+@pytest.fixture
+def obra_ses(cenario):
+    """A obra do criterio de aceite: data-base 2021-10, uma so'."""
+    c, ids = cenario
+    c.execute("UPDATE contrato_datas_base SET mes='2021-10' WHERE contrato_id=?", (ids["contrato"],)); c.commit()
+    return c, ids["contrato"]
+
+
+def test_aditivo_de_valor_de_reajuste_fecha_o_ciclo_da_data_base(obra_ses):
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-20", numero="3º Termo Aditivo")
+    r = reajuste.ciclos(c, cid, D(2026, 1, 10))[0]
+    assert (r["ciclo"], r["situacao"], r["dias"]) == (2025, "apostilado", None)
+    assert (r["apostilamento"]["chave"], r["apostilamento"]["numero"], r["apostilamento"]["data"]) == \
+        ("ta-03", "3º Termo Aditivo", "2025-11-20")
+    assert r["apostilamento"]["tipo"] == "aditivo_valor"
+    assert reajuste.avisos(c, D(2026, 1, 10)) == []
+    # o ciclo seguinte nao tem aditivo: segue pendente, com o aviso
+    r = reajuste.ciclos(c, cid, D(2026, 11, 5))[0]
+    assert (r["ciclo"], r["situacao"], r["apostilamento"]) == (2026, "pleito_pendente", None)
+    assert [a["tipo"] for a in reajuste.avisos(c, D(2026, 11, 5))] == ["reajuste_pleito"]
+
+
+def test_aditivo_de_execucao_cancelado_ou_sem_natureza_nao_fecha_o_ciclo(obra_ses):
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-01", "2025-11-20", natureza="execucao")
+    _aditivo_reajuste(c, cid, "ta-02", "2025-11-21", natureza=None)
+    _aditivo_reajuste(c, cid, "ta-04", "2025-11-22", cancelado=True)
+    _aditivo_reajuste(c, cid, "ta-05", "2025-11-23", tipo="prazo")
+    r = reajuste.ciclos(c, cid, D(2026, 1, 10))[0]
+    assert (r["ciclo"], r["situacao"]) == (2025, "pleito_pendente")
+
+
+def test_aditivo_de_reajuste_fecha_so_o_ciclo_do_ultimo_aniversario_antes_da_assinatura(obra_ses):
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-20")
+    _aditivo_reajuste(c, cid, "ta-06", "2026-10-01", tipo="misto")   # no dia do aniversario: ciclo 2026
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2024, True) is None
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-03"
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2026, True)["chave"] == "ta-06"
+    # assinado antes do primeiro aniversario: nao ha ciclo que ele feche
+    assert reajuste.ciclo_do_aditivo("2021-10", "2022-09-30") is None
+    assert reajuste.ciclo_do_aditivo("2021-10", "2022-10-01") == 2022
+
+
+def test_aditivo_de_reajuste_ligado_ao_pleito_fecha_o_ciclo_e_sem_ligacao_nao(obra_ses):
+    c, cid = obra_ses
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+              "enviado_em) VALUES (?, 'reajuste', 'cadastro', '2021-10', 2025, 'CT-1-LT-2025', 'enviado', '2025-10-05')",
+              (cid,))
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-20")
+    r = reajuste.ciclos(c, cid, D(2026, 1, 10))[0]
+    # pleito sem termo ligado: espera; o aditivo de reajuste depois dele nao pede reemissao do cronograma
+    assert (r["situacao"], r["aditivo"]) == ("apostilamento_pendente", None)
+    _aditivo(c, cid, "prazo", "2025-12-01")             # o de prazo pede
+    assert reajuste.ciclos(c, cid, D(2026, 1, 10))[0]["situacao"] == "reemitir"
+    c.execute("UPDATE pleitos SET instrumento_chave='ta-03'"); c.commit()
+    r = reajuste.ciclos(c, cid, D(2026, 1, 10))[0]
+    assert (r["situacao"], r["apostilamento"]["chave"]) == ("apostilado", "ta-03")
+    assert reajuste.avisos(c, D(2026, 1, 10)) == []
+
+
+def test_aditivo_de_reajuste_sem_pleito_em_contrato_de_duas_bases_nao_adivinha_a_base(obra_ses):
+    c, cid = obra_ses
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2022-03', 'INCC-DI')", (cid,))
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-20")
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, False) is None
+
+
+def _pleito_2025(c, cid, chave=None, ciclo=2025, enviado_em="2025-10-05"):
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+              "enviado_em, instrumento_chave) VALUES (?, 'reajuste', 'cadastro', '2021-10', ?, ?, 'enviado', ?, ?)",
+              (cid, ciclo, f"CT-{ciclo}-LT", enviado_em, chave))
+    c.commit()
+
+
+def test_ligacao_ao_aditivo_deixa_de_fechar_o_ciclo_quando_entra_a_segunda_data_base(obra_ses):
+    # gate Sol (PR #407): o aditivo nao guarda a base; com duas, a ligacao feita com uma so' nao diz qual atende
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-20")
+    _pleito_2025(c, cid, chave="ta-03")
+    assert reajuste.ciclos(c, cid, D(2026, 1, 10))[0]["situacao"] == "apostilado"
+    assert [a["chave"] for a in reajuste.aditivos_de_reajuste(c, cid)] == ["ta-03"]
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2022-03', 'INCC-DI')", (cid,))
+    c.commit()
+    r = reajuste.ciclos(c, cid, D(2026, 1, 10))[0]
+    assert (r["data_base_mes"], r["situacao"], r["apostilamento"]) == ("2021-10", "apostilamento_pendente", None)
+    assert reajuste.aditivos_de_reajuste(c, cid) == []
+
+
+def test_aditivo_misto_de_reajuste_sem_valor_nao_fecha_o_ciclo(obra_ses):
+    # gate Sol (PR #407): misto so' de prazo (delta zero) nao concede reajuste
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-20", tipo="misto", delta=0, nova_execucao_fim="2026-12-31")
+    assert reajuste.ciclos(c, cid, D(2026, 1, 10))[0]["situacao"] == "pleito_pendente"
+    assert reajuste.aditivos_de_reajuste(c, cid) == []
+
+
+def test_aditivo_misto_de_reajuste_com_prazo_novo_depois_do_pedido_pede_reemissao(obra_ses):
+    # revisor e gate Sol (PR #407): o prazo mudou, o cronograma de reajuste precisa ser reenviado
+    c, cid = obra_ses
+    _pleito_2025(c, cid)
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-20", tipo="misto", nova_execucao_fim="2026-12-31")
+    r = reajuste.ciclos(c, cid, D(2026, 1, 10))[0]
+    assert (r["situacao"], r["aditivo"]["chave_cadastro"]) == ("reemitir", "ta-03")
+
+
+def test_ciclo_guardado_no_aditivo_vale_sem_pleito_e_nao_fecha_o_ciclo_da_data(obra_ses):
+    # revisor e gate Sol (rodada 2, PR #407; migracao 058): o termo do reajuste de 2025 assinado em 20/10/2026, com
+    # `ciclo: 2025` no cadastro, sem pleito de 2025 nem de 2026: o 2025 fica apostilado e o 2026 continua pendente
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-03", "2026-10-20", data_base="2021-10", ciclo=2025)
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-03"
+    r = reajuste.ciclos(c, cid, D(2026, 11, 5))[0]
+    assert (r["ciclo"], r["situacao"]) == (2026, "pleito_pendente")
+    assert [a["tipo"] for a in reajuste.avisos(c, D(2026, 11, 5))] == ["reajuste_pleito"]
+
+
+def test_base_guardada_no_aditivo_vale_com_duas_datas_base(obra_ses):
+    # rodada 2: a `data_base` declarada (guardada) escolhe a base tambem com mais de uma; a outra base nao e' fechada
+    c, cid = obra_ses
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2022-03', 'INCC-DI')", (cid,))
+    _aditivo_reajuste(c, cid, "ta-03", "2025-11-20", data_base="2021-10")
+    _pleito_2025(c, cid, chave="ta-03")
+    por_base = {k["data_base_mes"]: k for k in reajuste.ciclos(c, cid, D(2026, 1, 10))}
+    assert (por_base["2021-10"]["ciclo"], por_base["2021-10"]["situacao"]) == (2025, "apostilado")
+    assert por_base["2022-03"]["situacao"] == "pleito_pendente"
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2022-03", 2025, False) is None
+    assert [a["chave"] for a in reajuste.aditivos_de_reajuste(c, cid)] == ["ta-03"]
+
+
+def test_aditivo_cancelado_nao_pede_reemissao(obra_ses):
+    # gate Sol (rodada 2): `aditivo_depois` ignora o aditivo cancelado
+    c, cid = obra_ses
+    _pleito_2025(c, cid)
+    _aditivo_reajuste(c, cid, "ta-04", "2025-11-20", natureza="execucao", cancelado=True)
+    assert reajuste.ciclos(c, cid, D(2026, 1, 10))[0]["situacao"] == "apostilamento_pendente"
+    _aditivo_reajuste(c, cid, "ta-05", "2025-11-21", natureza="execucao")
+    assert reajuste.ciclos(c, cid, D(2026, 1, 10))[0]["situacao"] == "reemitir"
+
+
+def test_aditivo_ligado_sem_base_nem_ciclo_guardados_fecha_so_o_ciclo_do_pleito(obra_ses):
+    # gate Sol (rodada extra, PR #407): banco migrado (058) sem `aplicar` ainda, aditivo ligado ao pleito de 2025 e
+    # assinado depois do aniversario de 2026: fecha o 2025 pela ligacao e nao fecha o 2026 pela data
+    c, cid = obra_ses
+    _pleito_2025(c, cid, chave="ta-03")
+    _aditivo_reajuste(c, cid, "ta-03", "2026-10-20")              # data_base_mes e ciclo_reajuste nulos
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-03"
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2026, True) is None
+    r = reajuste.ciclos(c, cid, D(2026, 11, 5))[0]
+    assert (r["ciclo"], r["situacao"]) == (2026, "pleito_pendente")
+
+
+def test_aditivo_com_ciclo_guardado_nao_fecha_pela_ligacao_o_pleito_de_outro_ciclo(obra_ses):
+    # o par inteiro (base, ciclo) guardado tem de ser o do pleito: ligacao residual a outro ciclo nao fecha
+    c, cid = obra_ses
+    _pleito_2025(c, cid, chave="ta-03", ciclo=2026, enviado_em="2026-10-02")
+    _aditivo_reajuste(c, cid, "ta-03", "2026-10-20", data_base="2021-10", ciclo=2025)
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2026, True) is None
+    # ligado ao 2026, nao e' reaproveitado no 2025 pela data; o proximo `aplicar` move a ligacao (test_cadastro_aplicar)
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True) is None
