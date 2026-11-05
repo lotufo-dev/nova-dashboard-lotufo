@@ -331,8 +331,9 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Issue #256: uma `cronograma_versoes` por entrada do YAML, com criado_em = data do documento.
 
     So' acrescenta. Versao aplicada nao muda nem some (correcao e' versao nova, com outra chave); as
-    versoes sem linha no cadastro (manuais e a carga de 04/09/2026) nao sao tocadas: ficam na linha do
-    tempo e sao superadas pela primeira versao de documento posterior (cronograma.previsto_efetivo)."""
+    versoes sem linha no cadastro (manuais e a carga de 04/09/2026) ficam na linha do tempo e sao superadas
+    pela primeira versao de documento posterior (cronograma.previsto_efetivo); a unica mudanca nelas e' o
+    `superada_em` que `cronograma_superadas` grava (issue #395)."""
     nome = c["nome_curto"]
     do_cadastro = {v["chave"] for v in c.get("cronograma") or []}
     for r in conn.execute("SELECT chave FROM cronograma_versoes_cadastro WHERE contrato_id=?", (contrato_id,)):
@@ -372,7 +373,11 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
             raise ValueError(f"{rotulo}: versão de cronograma já aplicada não pode ser alterada "
                              f"({', '.join(mudou)}); registre uma versão nova, com outra chave")
         rel["iguais"] += 1
-    _cronograma_superadas(conn, usuario_id, contrato_id, c, rel)
+    superou = _cronograma_superadas(conn, usuario_id, contrato_id, c, rel)
+    # code-review (#395): superar sem versao nova pode deixar a obra sem cronograma vigente (curva S vazia)
+    if superou and cronograma.vigente(conn, contrato_id) is None:
+        avisos.append(f"{nome}: com a versão superada, a obra ficou sem cronograma vigente (sem previsto na "
+                      "curva S); inclua a versão do documento em `cronograma`")
     # A versao de documento anterior a uma ja gravada (a carga de 04/09/2026, uma publicada na tela) entra
     # ANTES dela na linha do tempo e nao muda o futuro: quem aplica precisa saber.
     if criadas:
@@ -383,13 +388,14 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
                           "posterior); ela só vale para os meses até a data dessa versão")
 
 
-def _cronograma_superadas(conn, usuario_id, contrato_id, c, rel) -> None:
+def _cronograma_superadas(conn, usuario_id, contrato_id, c, rel) -> bool:
     """Issue #395: `cronograma_superadas` marca `superada_em` nas versoes ja gravadas sem linha no cadastro.
 
     Irreversivel pelo YAML: tirar o numero da lista nao "dessupera" (nada aqui volta a NULL). Versao do cadastro nao
     se supera assim: correcao e' versao nova. Roda depois das versoes do YAML, para o aviso de vigente ja' ver a
-    linha do tempo sem a superada."""
+    linha do tempo sem a superada. Devolve se superou alguma nesta aplicacao."""
     nome = c["nome_curto"]
+    superou = False
     for numero in c.get("cronograma_superadas") or []:
         v = conn.execute("SELECT v.id, v.superada_em, k.chave FROM cronograma_versoes v "
                          "LEFT JOIN cronograma_versoes_cadastro k ON k.versao_id = v.id "
@@ -407,6 +413,8 @@ def _cronograma_superadas(conn, usuario_id, contrato_id, c, rel) -> None:
         auditoria.registrar(conn, usuario_id, "cadastro.cronograma_superada", "contrato", contrato_id, None,
                             {"versao": numero, "superada_em": quando})
         rel["alterados"].append(f"{nome}: versão {numero} superada")
+        superou = True
+    return superou
 
 
 def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:

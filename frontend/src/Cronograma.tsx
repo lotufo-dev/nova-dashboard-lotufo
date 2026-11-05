@@ -607,7 +607,7 @@ export default function Cronograma({ contratoId, podeEditar }:
         <summary>Versões do cronograma</summary>
         <Rolagem rotulo="Versões do cronograma">
           <table className="tabela">
-            <caption className="sr-only">Versões do cronograma, da mais antiga à vigente</caption>
+            <caption className="sr-only">Versões do cronograma, na ordem em que passaram a valer</caption>
             <thead>
               <tr>
                 <th scope="col">Versão</th>

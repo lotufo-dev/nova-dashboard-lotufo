@@ -689,6 +689,8 @@ def test_ensaio_relata_a_versao_superada_e_nao_grava(conn):
     _com_carga(conn)
     r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma_superadas=[1])]), ensaio=True)
     assert r["cronograma"]["alterados"] == ["MT-402: versão 1 superada"]
+    # sem versao de documento no YAML, a obra fica sem vigente: quem aplica fica sabendo no ensaio
+    assert any("MT-402" in a and "sem cronograma vigente" in a for a in r["avisos"])
     assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] is None
 
 
