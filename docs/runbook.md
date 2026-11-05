@@ -141,7 +141,7 @@ O servidor, o antivírus e o backup rodam como SYSTEM, que não carrega INTERATI
 ```json
 {"contas": ["SERVIDOR\\operador.exemplo", "admin.exemplo"], "processos": ["explorer.exe", "robocopy.exe"]}
 ```
-Estado da sentinela (último registro lido): `<raiz>\dados\sentinela.json`. Na primeira rodada ela só marca o ponto de partida do log; não lê o histórico. Se esse arquivo for apagado ou ficar ilegível depois de a sentinela já ter rodado, a rodada seguinte grava o item crítico "Estado da sentinela apagado ou ilegível" e relê os últimos 10 minutos do log (a regra de auditoria inclui Delete, então apagar o arquivo também deixa evento 4663).
+O ponto de leitura do log (último registro lido) fica no banco, na auditoria (`seguranca.sentinela.ponto`), na mesma transação dos achados; `<raiz>\dados\sentinela.json` é só uma cópia, com as falhas em aberto e os avisos do dia. Na primeira leitura com sucesso a sentinela só marca o ponto de partida do log; não lê o histórico. Se a cópia for apagada, ficar ilegível ou apontar além do ponto gravado no banco, a rodada seguinte grava o item crítico "Estado da sentinela apagado, ilegível ou alterado" e segue do ponto do banco, sem pular nenhum evento. A SACL precisa auditar Delete (regra acima); a sentinela confere esse direito e acusa "SACL ausente" se faltar.
 
 ### O que vira item
 - **4663** nas três pastas, agrupado por conta, processo, pasta e hora: "Leitura de segredos por explorer.exe (<conta>), 12 arquivos". `segredos` e `dados` são críticos, `cadastro` é ação.

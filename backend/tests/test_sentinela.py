@@ -14,7 +14,7 @@ CONTA = "SRVFICT\\visitante.teste"
 AUDITPOL_LIGADO = ("Máquina,Alvo da Política,Subcategoria,GUID da Subcategoria,Inclusão de Configuração,"
                    "Exclusão de Configuração\nSRVFICT,Sistema,Sistema de Arquivos,{guid},Êxito,\n")
 AUDITPOL_DESLIGADO = AUDITPOL_LIGADO.replace("Êxito", "Sem auditoria")
-SACL_OK = "S-1-5-4|Success\nS-1-5-2|Success\n"
+SACL_OK = "S-1-5-4|Success|2032127\nS-1-5-2|Success|2032127\n"
 
 
 class Windows:
@@ -207,7 +207,7 @@ def test_desligar_a_auditoria_gera_o_4719_e_na_rodada_seguinte_o_item_de_auditor
 
 def test_sacl_ausente_vira_item_critico(maquina, conn):
     _com_ponto_de_partida(maquina, conn)
-    maquina.sacl["segredos"] = "S-1-5-4|Success\n"          # falta REDE
+    maquina.sacl["segredos"] = "S-1-5-4|Success|2032127\n"          # falta REDE
     maquina.sacl["dados"] = ""
     a = _rodar(maquina, conn)
     assert sorted(x["mensagem"] for x in a) == ["SACL ausente em dados", "SACL ausente em segredos"]
@@ -271,15 +271,48 @@ def test_saude_diz_que_a_sentinela_nao_roda_neste_ambiente(client_admin):
     assert r.json()["sentinela"] == {"roda": False, "mensagem": "Sentinela não roda neste ambiente"}
 
 
-def test_estado_apagado_depois_de_ja_ter_rodado_acusa_e_rele_a_janela(maquina, conn):
+def test_estado_apagado_depois_de_ja_ter_rodado_acusa_e_segue_do_ponto_gravado_no_banco(maquina, conn):
     _com_ponto_de_partida(maquina, conn)
     _rodar(maquina, conn, "4670_permissao.xml")
     (maquina.raiz / "dados" / "sentinela.json").unlink()
+    a = _rodar(maquina, conn, "tarefas.xml")
+    assert a[0]["mensagem"].startswith("Estado da sentinela apagado, ilegível ou alterado")
+    assert a[0]["nivel"] == "critico"
+    assert any(x["evento"] == 4698 for x in a)       # nada foi pulado
+    assert "EventRecordID>1030" in maquina.consultas[-1]
+    assert _rodar(maquina, conn) == []               # copia refeita: volta ao normal
+
+
+def test_estado_editado_para_frente_nao_esconde_a_leitura(maquina, conn):
+    _com_ponto_de_partida(maquina, conn)
+    arquivo = maquina.raiz / "dados" / "sentinela.json"
+    estado = json.loads(arquivo.read_text(encoding="utf-8"))
+    estado["ultimo_registro"] = 999999
+    arquivo.write_text(json.dumps(estado), encoding="utf-8")
     a = _rodar(maquina, conn, "4663_segredos_externo.xml")
-    assert a[0]["mensagem"].startswith("Estado da sentinela apagado ou ilegível") and a[0]["nivel"] == "critico"
-    assert any(x["evento"] == 4663 for x in a)
-    assert "timediff(@SystemTime) <= 600000" in maquina.consultas[-1]
-    assert _rodar(maquina, conn) == []       # estado refeito: volta ao normal
+    assert a[0]["evento"] == "estado-perdido" and any(x["evento"] == 4663 for x in a)
+
+
+def test_primeira_instalacao_sem_conseguir_ler_o_log_nao_acusa_estado_perdido(maquina, conn):
+    maquina.wevtutil_falha = True
+    assert [x["evento"] for x in _rodar(maquina, conn)] == ["leitura-log"]
+    maquina.wevtutil_falha = False
+    assert _rodar(maquina, conn) == []
+
+
+def test_estado_perdido_com_leitura_falhando_acusa_uma_vez_so(maquina, conn, monkeypatch):
+    _com_ponto_de_partida(maquina, conn)
+    _rodar(maquina, conn, "4670_permissao.xml")
+    (maquina.raiz / "dados" / "sentinela.json").unlink()
+    maquina.wevtutil_falha = True
+    n = [sum(1 for x in _rodar(maquina, conn) if x["evento"] == "estado-perdido") for _ in range(3)]
+    assert n == [1, 0, 0]
+
+
+def test_sacl_sem_o_direito_de_apagar_conta_como_ausente(maquina, conn):
+    _com_ponto_de_partida(maquina, conn)
+    maquina.sacl["dados"] = "S-1-5-4|Success|131209\nS-1-5-2|Success|131209\n"      # leitura e gravacao, sem Delete
+    assert [x["mensagem"] for x in _rodar(maquina, conn)] == ["SACL ausente em dados"]
 
 
 def test_estado_corrompido_conta_como_apagado(maquina, conn):
