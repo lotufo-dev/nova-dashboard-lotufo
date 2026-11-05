@@ -207,6 +207,9 @@ def create_app() -> FastAPI:
         # que vai para outro disco ou compartilhamento, nao.
         backup_mod.agendar_backup_horario(db.db_path(), backup_mod.pasta_local(),
                                           None if copia else backup_mod.pasta_externa())
+        # Issue #423: a sentinela do log de seguranca do Windows (so' roda no Windows e fora de dev)
+        from app import sentinela
+        sentinela.agendar()
         # Issue #421: codigo em producao conferido contra o ultimo deploy, na subida e de hora em hora (nao em dev)
         if os.environ.get("DASH_DEV") != "1":
             integridade.agendar()

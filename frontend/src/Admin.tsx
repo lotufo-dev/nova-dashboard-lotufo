@@ -347,13 +347,14 @@ function Backup({ b, aoGerar }: { b: Backup | null | undefined; aoGerar: () => v
 // itens: undefined = carregando; null = nao deu para ler. Sem item, so' o selo na cabeca, como o Backup em dia; o selo
 // diz "nenhum alerta" e nao "OK" (gate Sol S1): o bloco confere os alertas que conhece, nao a seguranca inteira.
 // `fora`: quantos itens mais antigos a API deixou fora da lista (ela devolve no maximo 20, gate Sol S3).
-function Seguranca({ itens, fora }: { itens: ItemSeguranca[] | null | undefined; fora: number }) {
+function Seguranca({ itens, fora, aviso }: { itens: ItemSeguranca[] | null | undefined; fora: number; aviso?: string | null }) {
   return (
     <section className="cartao" aria-labelledby="titulo-seguranca">
       <div className="cartao__cabeca cartao__cabeca--quebra">
         <h2 className="cartao__titulo" id="titulo-seguranca">Segurança</h2>
         {itens?.length === 0 && <Selo classe="selo--ok">nenhum alerta</Selo>}
       </div>
+      {aviso && <p className="campo__nota">{aviso}</p>}
       {(itens === undefined || itens === null || itens.length > 0) && (
         <div className="cartao__corpo pilha pilha--curta">
           {itens === undefined ? <p>Carregando…</p>
@@ -384,6 +385,7 @@ function Saude() {
   const [siga, setSiga] = useState<SaudeSiga | null | undefined>(undefined);
   const [seguranca, setSeguranca] = useState<ItemSeguranca[] | null | undefined>(undefined);
   const [segurancaFora, setSegurancaFora] = useState(0);
+  const [avisoSentinela, setAvisoSentinela] = useState<string | null>(null);
   // depois de "Sincronizar agora", as contagens da reconciliacao sao lidas de novo
   const [versao, setVersao] = useState(0);
 
@@ -392,9 +394,9 @@ function Saude() {
   useEffect(() => {
     carregar();
     carregarBackup();
-    api<{ siga: SaudeSiga; seguranca?: ItemSeguranca[]; seguranca_fora?: number }>("/api/admin/saude")
+    api<{ siga: SaudeSiga; seguranca?: ItemSeguranca[]; seguranca_fora?: number; sentinela?: { roda: boolean; mensagem: string | null } }>("/api/admin/saude")
       // sem o campo nao ha' o que afirmar: "nao foi possivel ler", nunca o selo de quem conferiu e nao achou nada
-      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? null); setSegurancaFora(r.seguranca_fora ?? 0); })
+      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? null); setSegurancaFora(r.seguranca_fora ?? 0); setAvisoSentinela(r.sentinela?.mensagem ?? null); })
       .catch(() => { setSiga(null); setSeguranca(null); });
   }, []);
 
@@ -443,7 +445,7 @@ function Saude() {
       <div className="saude-lado">
         <ReconciliacaoResumo versao={versao} />
         <Backup b={b} aoGerar={carregarBackup} />
-        <Seguranca itens={seguranca} fora={segurancaFora} />
+        <Seguranca itens={seguranca} fora={segurancaFora} aviso={avisoSentinela} />
       </div>
     </div>
   );
