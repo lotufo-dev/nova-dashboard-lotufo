@@ -640,11 +640,13 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -
         poe(inst)
 
     def corrigidos(inst) -> set[str]:
-        """Os termos que este corrige, direta ou indiretamente (correcao de correcao)."""
+        """Os termos que este corrige, direta ou indiretamente (correcao de correcao). Issue #442, espelho da PR #433:
+        so' outro apostilamento de reajuste entra na cadeia; o `corrige` que aponta para um aditivo nao tem efeito,
+        senao este passo tiraria o pleito do aditivo e `_aditivos_de_reajuste` o devolveria a cada aplicar."""
         out, k = set(), inst["corrige"]
-        while k and k not in out:
+        while k in por_chave and k not in out:
             out.add(k)
-            k = (por_chave.get(k) or {}).get("corrige")
+            k = por_chave[k]["corrige"]
         return out
 
     def ligar(p, inst, motivo="") -> None:
@@ -653,7 +655,7 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -
                             {"instrumento_chave": p["instrumento_chave"]}, {"instrumento_chave": inst["chave"]})
         rel["alterados"].append(f"{c['nome_curto']}/reajuste {p['numero_oficio']}: atendido por {inst['chave']}{motivo}")
 
-    corrigidos_por_outro = {i["corrige"] for i in aps if i["corrige"]}
+    corrigidos_por_outro = {i["corrige"] for i in aps if i["corrige"] in por_chave}
     bases = [d["mes"] for d in c["datas_base"]]
 
     def base_ciclo(inst) -> tuple:

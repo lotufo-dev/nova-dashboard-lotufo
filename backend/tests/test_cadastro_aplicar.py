@@ -1392,6 +1392,25 @@ def test_aditivo_que_corrige_um_apostilamento_nao_mexe_no_pleito_dele(conn, cicl
     assert r["pleitos"]["alterados"] == [] and _ligacoes(conn)["CT-090-LT-2025"] == "ap-09"
     assert len(_trilha_pleitos(conn)) == auditorias
 
+
+@pytest.mark.parametrize("ciclo_do_termo", [2026, 2025])
+def test_apostilamento_que_corrige_um_aditivo_nao_mexe_no_pleito_dele(conn, ciclo_do_termo):
+    # issue #442, espelho da PR #433: `corrige` so' tem efeito entre instrumentos da mesma tabela. O ta-08 segue com o
+    # pleito de 2026, com o apostilamento no mesmo ciclo ou em outro, e o segundo aplicar sai "igual", sem auditoria nova
+    ap = {**AP_REAJ, "chave": "ap-12", "numero": "019/2024/02/12", "data": "2026-08-15", "corrige": "ta-08",
+          "dados": {"data_base": "2023-04", "ciclo": ciclo_do_termo}}
+    pleitos = [PLEITO_2025, PLEITO_2026]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=pleitos)]))
+    assert _ligacoes(conn) == {"CT-090-LT-2025": None, "CT-122-LT-2026": "ta-08"}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, ap], pleitos_anteriores=pleitos)])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    esperado = {"CT-090-LT-2025": "ap-12" if ciclo_do_termo == 2025 else None, "CT-122-LT-2026": "ta-08"}
+    assert _ligacoes(conn) == esperado
+    auditorias = len(_trilha_pleitos(conn))
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == [] and _ligacoes(conn) == esperado
+    assert len(_trilha_pleitos(conn)) == auditorias
+
 # --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
 
 from app import prazos as prazos_mod
