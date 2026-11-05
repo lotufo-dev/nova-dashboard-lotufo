@@ -116,7 +116,7 @@ def test_sem_registro_e_atencao(producao, client):
     conn = db.get_conn()
     assert integridade.rodar(conn, raiz, clone)["estado"] == "sem_registro"
     [item] = integridade.itens()
-    assert item["nivel"] == "atencao" and item["mensagem"].startswith("Sem registro do último deploy")
+    assert item["nivel"] == "atencao" and item["mensagem"] == "Sem registro do último deploy"
     conn.close()
 
 
@@ -193,7 +193,7 @@ def test_git_que_nao_responde_vira_atencao(producao, client, tmp_path):
     conn = db.get_conn()
     integridade.rodar(conn, raiz, tmp_path / "nao-e-repositorio")
     [item] = integridade.itens()
-    assert item["nivel"] == "atencao" and item["mensagem"].startswith("Não foi possível conferir")
+    assert item["nivel"] == "atencao" and item["mensagem"] == "Não foi possível conferir o código em produção"
     conn.close()
 
 
@@ -217,3 +217,32 @@ def test_cli_registrar_grava_o_arquivo(producao, tmp_path, monkeypatch, capsys):
     assert cli.main(["integridade", "registrar", "--raiz", str(destino)]) == 0
     assert (destino / "deploy-atual.json").is_file()
     assert "Registro do deploy gravado" in capsys.readouterr().out
+
+
+def test_safe_directory_vai_com_barra_normal(monkeypatch):
+    """O Git para Windows compara com `C:/pasta`; barra invertida faria o rev-parse sair 128 como SYSTEM."""
+    from pathlib import PureWindowsPath
+    chamadas = []
+
+    class R:
+        returncode, stdout = 0, "abc\n"
+
+    monkeypatch.setattr(integridade.subprocess, "run", lambda cmd, **kw: chamadas.append(cmd) or R())
+    assert integridade._git(PureWindowsPath(r"C:\DashboardLotufo\app"), "rev-parse", "HEAD") == "abc\n"
+    assert "safe.directory=C:/DashboardLotufo/app" in chamadas[0]
+
+
+def test_item_de_atencao_so_com_o_titulo(producao, client):
+    clone, raiz = producao
+    conn = db.get_conn()
+    (raiz / "deploy-atual.json").unlink()
+    integridade.rodar(conn, raiz, clone)
+    assert _itens() == ["Sem registro do último deploy"]
+    conn.close()
+
+
+def test_com_a_pausa_a_proxima_conferencia_vem_logo(tmp_path):
+    assert integridade.proxima_espera(tmp_path, 3600) == 3600
+    (tmp_path / "watchdog.pause").write_text("")
+    assert integridade.proxima_espera(tmp_path, 3600) == 60
+    assert integridade.proxima_espera(None, 3600) == 3600

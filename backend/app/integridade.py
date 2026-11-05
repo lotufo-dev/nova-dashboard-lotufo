@@ -32,6 +32,7 @@ ARQUIVO_REGISTRO = "deploy-atual.json"
 ARQUIVO_PAUSA = "watchdog.pause"
 INTERVALO_SEG = 3600
 PRAZO_GIT_SEG = 60
+ESPERA_PAUSA_SEG = 60
 
 OK, DIFERENTE, SEM_REGISTRO, ERRO = "ok", "diferente", "sem_registro", "erro"
 TITULO_DIFERENTE = "Código em produção diferente do último deploy"
@@ -57,7 +58,7 @@ def raiz_padrao() -> Path | None:
 
 
 def _git(clone: Path, *args: str) -> str:
-    r = subprocess.run(["git", "-c", f"safe.directory={clone}", "--no-optional-locks", "-C", str(clone), *args],
+    r = subprocess.run(["git", "-c", f"safe.directory={clone.as_posix()}", "--no-optional-locks", "-C", str(clone), *args],
                        capture_output=True, text=True, timeout=PRAZO_GIT_SEG, check=False)
     if r.returncode != 0:
         raise RuntimeError(f"git {args[0]} falhou (codigo {r.returncode})")
@@ -208,11 +209,17 @@ def itens() -> list[dict]:
         return [{"nivel": "critico", "data": ESTADO["data"], "mensagem": f"{TITULO_DIFERENTE}: {ESTADO['detalhe']}"}]
     if est == SEM_REGISTRO:
         return [{"nivel": "atencao", "data": ESTADO["data"],
-                 "mensagem": f"{TITULO_SEM_REGISTRO}: o próximo deploy grava o registro"}]
+                 "mensagem": TITULO_SEM_REGISTRO}]
     if est == ERRO:
         return [{"nivel": "atencao", "data": ESTADO["data"],
-                 "mensagem": f"{TITULO_ERRO}: o git não respondeu (ver o log do servidor)"}]
+                 "mensagem": TITULO_ERRO}]
     return []
+
+
+def proxima_espera(raiz: Path | None, intervalo_seg: int) -> int:
+    """O deploy reinicia o servidor com a pausa ainda de pe': a conferencia da subida nao rodou, entao a proxima vem
+    logo (`ESPERA_PAUSA_SEG`) e nao so' daqui a uma hora."""
+    return min(intervalo_seg, ESPERA_PAUSA_SEG) if raiz is not None and (raiz / ARQUIVO_PAUSA).exists() else intervalo_seg
 
 
 def agendar(intervalo_seg: int = INTERVALO_SEG) -> threading.Thread:
@@ -227,8 +234,8 @@ def agendar(intervalo_seg: int = INTERVALO_SEG) -> threading.Thread:
                     conn.close()
             except Exception:
                 log.exception("conferencia de integridade falhou")
-            time.sleep(intervalo_seg)
+            time.sleep(proxima_espera(raiz_padrao(), intervalo_seg))
 
-    t = threading.Thread(target=loop, name="integridade", daemon=True)
+    t =threading.Thread(target=loop, name="integridade", daemon=True)
     t.start()
     return t
