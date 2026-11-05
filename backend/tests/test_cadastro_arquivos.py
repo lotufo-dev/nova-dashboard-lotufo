@@ -581,6 +581,23 @@ def test_cronograma_que_nao_e_lista_e_erro(tmp_path):
     assert any("cronograma" in e and "lista" in e for e in erros)
 
 
+# --- issue #395: cronograma_superadas (numeros de versao ja gravados sem linha no cadastro) --------------
+
+def test_cronograma_superadas_aceita_lista_de_inteiros(tmp_path):
+    c = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma_superadas": [3, 1]}]))["contratos"][0]
+    assert c["cronograma_superadas"] == [1, 3]
+
+
+def test_contrato_sem_cronograma_superadas_tem_lista_vazia(tmp_path):
+    assert ca.preparar(_escrever(tmp_path))["contratos"][0]["cronograma_superadas"] == []
+
+
+@pytest.mark.parametrize("valor", [1, "1", [0], [-1], ["1"], [1.5], [True], [None], [1, 1]])
+def test_cronograma_superadas_invalido_e_erro(tmp_path, valor):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma_superadas": valor}]))
+    assert any("cronograma_superadas" in e for e in erros)
+
+
 # --- issue #257: data-base com indice obrigatorio e aplica_a (spec 2026-10-20 §2.4, D7) ----------
 
 @pytest.mark.parametrize("db_", [{"mes": "2023-04"}, {"mes": "2023-04", "indice": ""},

@@ -119,4 +119,23 @@ def test_lista_de_versoes(client_admin):
                                   "competencias", "total_centavos", "vigente")} == {
         "numero": 1, "chave": "ta-01", "origem_documento": "aditivo", "data_documento": "2024-04-10",
         "instrumento": "ta-01", "competencias": 1, "total_centavos": 5_00, "vigente": True}
+    assert vs[0]["superada_em"] is None
     assert client_admin.get("/api/contratos/9999/cronograma/versoes").status_code == 404
+
+
+def test_lista_de_versoes_traz_superada_em(client_admin):
+    """Issue #395: a versao superada pelo cadastro continua listada, com a data em que foi superada."""
+    from app import cronograma, db
+    cid = _contrato(client_admin)
+    conn = db.get_conn()
+    try:
+        cronograma.nova_versao(conn, 1, cid, [("2024-05", 5_00)], "manual", data_documento="2024-04-10")
+        cronograma.nova_versao(conn, 1, cid, [("2024-05", 7_00)], "manual")
+        conn.execute("UPDATE cronograma_versoes SET superada_em='2026-11-05 15:00:00' WHERE numero=2")
+        conn.commit()
+    finally:
+        conn.close()
+    vs = client_admin.get(f"/api/contratos/{cid}/cronograma/versoes").json()
+    assert [(v["numero"], v["superada_em"], v["vigente"]) for v in vs] == [
+        (1, None, True), (2, "2026-11-05 15:00:00", False)]
+    assert client_admin.get(f"/api/contratos/{cid}/cronograma").json()["numero"] == 1

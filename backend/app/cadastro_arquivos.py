@@ -371,6 +371,26 @@ def _pleitos_anteriores(lista, c: dict, falha) -> list[dict]:
     return out
 
 
+def _cronograma_superadas(lista, falha) -> list[int]:
+    """Issue #395: `cronograma_superadas: [<numero da versao>]`, versoes ja gravadas sem linha no cadastro (a carga
+    de 04/09/2026, as manuais) que deixam de valer. Se o numero existe e nao veio do cadastro, quem confere e' o
+    `aplicar` (precisa do banco)."""
+    if lista is None:
+        return []
+    if not isinstance(lista, list):
+        falha("cronograma_superadas", "use uma lista de números de versão (ex.: [1])")
+        return []
+    out: list[int] = []
+    for i, n in enumerate(lista):
+        if _inteiro(n, 1) is None:
+            falha(f"cronograma_superadas[{i}]", f"número de versão inválido: {n!r} (use um inteiro ≥ 1)")
+        elif n in out:
+            falha("cronograma_superadas", f"versão {n} repetida")
+        else:
+            out.append(n)
+    return sorted(out)
+
+
 def _cronograma(lista, falha) -> list[dict]:
     """Issue #256: `cronograma: [{chave, origem, data, instrumento, itens: [{competencia, valor}]}]`.
 
@@ -666,6 +686,7 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
     _dados_instrumentos(c, falha, avisos)
     c["pleitos_anteriores"] = _pleitos_anteriores(bruto.get("pleitos_anteriores"), c, falha)
     c["cronograma"] = _cronograma(bruto.get("cronograma"), falha)
+    c["cronograma_superadas"] = _cronograma_superadas(bruto.get("cronograma_superadas"), falha)
     chaves_inst = {i["chave"] for i in c["instrumentos"]}
     for v in c["cronograma"]:
         if v["instrumento"] and v["instrumento"] not in chaves_inst:

@@ -372,6 +372,7 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
             raise ValueError(f"{rotulo}: versão de cronograma já aplicada não pode ser alterada "
                              f"({', '.join(mudou)}); registre uma versão nova, com outra chave")
         rel["iguais"] += 1
+    _cronograma_superadas(conn, usuario_id, contrato_id, c, rel)
     # A versao de documento anterior a uma ja gravada (a carga de 04/09/2026, uma publicada na tela) entra
     # ANTES dela na linha do tempo e nao muda o futuro: quem aplica precisa saber.
     if criadas:
@@ -380,6 +381,32 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
         if numero != vig:
             avisos.append(f"{rotulo}: versão aplicada, mas não é a vigente (há versão {vig} com data "
                           "posterior); ela só vale para os meses até a data dessa versão")
+
+
+def _cronograma_superadas(conn, usuario_id, contrato_id, c, rel) -> None:
+    """Issue #395: `cronograma_superadas` marca `superada_em` nas versoes ja gravadas sem linha no cadastro.
+
+    Irreversivel pelo YAML: tirar o numero da lista nao "dessupera" (nada aqui volta a NULL). Versao do cadastro nao
+    se supera assim: correcao e' versao nova. Roda depois das versoes do YAML, para o aviso de vigente ja' ver a
+    linha do tempo sem a superada."""
+    nome = c["nome_curto"]
+    for numero in c.get("cronograma_superadas") or []:
+        v = conn.execute("SELECT v.id, v.superada_em, k.chave FROM cronograma_versoes v "
+                         "LEFT JOIN cronograma_versoes_cadastro k ON k.versao_id = v.id "
+                         "WHERE v.contrato_id=? AND v.numero=?", (contrato_id, numero)).fetchone()
+        if v is None:
+            raise ValueError(f"{nome}: cronograma_superadas: a versão {numero} não existe neste contrato")
+        if v["chave"] is not None:
+            raise ValueError(f"{nome}: cronograma_superadas: a versão {numero} veio do cadastro (chave "
+                             f"{v['chave']}) e não se supera; correção é versão nova, com outra chave")
+        if v["superada_em"] is not None:
+            rel["iguais"] += 1
+            continue
+        quando = conn.execute("SELECT datetime('now')").fetchone()[0]
+        conn.execute("UPDATE cronograma_versoes SET superada_em=? WHERE id=?", (quando, v["id"]))
+        auditoria.registrar(conn, usuario_id, "cadastro.cronograma_superada", "contrato", contrato_id, None,
+                            {"versao": numero, "superada_em": quando})
+        rel["alterados"].append(f"{nome}: versão {numero} superada")
 
 
 def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
