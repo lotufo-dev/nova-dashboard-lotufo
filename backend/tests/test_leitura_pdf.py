@@ -152,6 +152,16 @@ def test_bomba_de_descompressao_cai_antes_do_pypdf():
     assert "comprimido" in str(e.value)
 
 
+def test_paginas_com_tetos_do_pacote_aceita_trecho_acima_do_teto_da_certidao():
+    """Oficio da medicao assinado no DocuSign (CT-408 BRT, 8a medicao): trecho de 4,9 MB a 240:1 recusado pelo
+    teto da certidao no anexo da planilha/carta. Com `pacote` vale o teto do pacote; sem, a recusa continua."""
+    from tests.conftest import _pdf_com_texto
+    pdf = _pdf_com_texto("0" * (leitura_pdf.TETO_STREAM_BYTES + 1_000_000), comprimir=True)
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.paginas_com_limite(pdf)
+    assert leitura_pdf.paginas_com_limite(pdf, pacote=True) == 1
+
+
 def _zlib_com_marcador(carga: bytes, marcador: bytes) -> bytes:
     """Stream zlib que CONTEM `marcador` literalmente nos bytes comprimidos.
 

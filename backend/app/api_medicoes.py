@@ -269,7 +269,7 @@ TETO_PLANILHA = 25 * 1024 * 1024
 
 def _pdf_validado(arquivo: UploadFile, teto_bytes: int = arquivos.TETO_BYTES) -> bytes:
     dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=teto_bytes))   # tipo, %PDF- e teto (415/413)
-    arquivos.conferir_bytes_parseaveis(dados)                # abre num leitor de verdade (415)
+    arquivos.conferir_bytes_parseaveis(dados, pacote=True)   # abre num leitor de verdade (415), tetos do pacote
     return dados
 
 
