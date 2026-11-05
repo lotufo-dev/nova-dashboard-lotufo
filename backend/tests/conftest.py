@@ -25,6 +25,20 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "migracao_real: o teste exercita o proprio db.migrate e parte de um banco vazio, sem o banco-modelo")
+    config.addinivalue_line(
+        "markers",
+        "instalacao_real: o teste confere o arquivo de instalacao de verdade, em vez de rodar como dev")
+
+
+@pytest.fixture(autouse=True)
+def instalacao_dev(request, monkeypatch):
+    """Os testes rodam como `dev` (issue #417): nada desligado e nenhum arquivo de instalacao exigido. Quem testa a
+    conferencia de verdade marca `instalacao_real` e assina o arquivo com um par de chaves gerado no proprio teste."""
+    from app import instalacao
+    monkeypatch.setattr(instalacao, "_estado", None)
+    if request.node.get_closest_marker("instalacao_real"):
+        return
+    monkeypatch.setattr(instalacao, "verificar", lambda: {"instalacao": instalacao.DEV, "motivo": None})
 
 
 @pytest.fixture(autouse=True)

@@ -83,6 +83,9 @@ $env:DASH_LOG_DIR = $logs
 # a skill deploy o atualiza com `git pull --ff-only` antes do `cadastro aplicar`). Sem esta variavel o
 # `app.cli cadastro` leria o cadastro-exemplo/ ficticio.
 $env:DASH_CADASTRO_DIR = Join-Path $Raiz "cadastro"
+# Instalacao assinada (issue #417): o arquivo que o servidor confere na subida, sempre o desta raiz. Definir aqui
+# sobrescreve uma DASH_INSTALACAO_ARQUIVO herdada do ambiente, que apontaria para outro arquivo e subiria em modo copia.
+$env:DASH_INSTALACAO_ARQUIVO = Join-Path $Raiz "segredos\instalacao.json"
 foreach ($chave in "DASH_RM_URL", "DASH_RM_USUARIO", "DASH_RM_SENHA", "DASH_RM_SENHA_ARQUIVO", "DASH_RM_SIMULADOR", "DASH_RM_HTTP_INSEGURO") {
     Remove-Item -Path "Env:$chave" -ErrorAction SilentlyContinue
 }

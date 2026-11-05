@@ -7,7 +7,7 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app import rm, sincronizacao_rm
+from app import instalacao, rm, sincronizacao_rm
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -30,6 +30,8 @@ def status(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
 @router.post("/sincronizar")
 def sincronizar(usuario: dict = Depends(exigir("administrar")),
                 conn: sqlite3.Connection = Depends(conexao)):
+    if not instalacao.ligada():          # issue #417: a copia nao fala com o RM
+        raise HTTPException(422, instalacao.MSG_RM)
     cliente = rm.de_ambiente()
     if cliente is None:
         raise HTTPException(422, "RM não configurado neste servidor (DASH_RM_URL / DASH_RM_USUARIO / "

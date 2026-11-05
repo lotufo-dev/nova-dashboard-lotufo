@@ -22,7 +22,7 @@ import zlib
 from contextlib import contextmanager
 from pathlib import Path
 
-from app import arquivos, auditoria, db, graph
+from app import arquivos, auditoria, db, graph, instalacao
 
 log = logging.getLogger("app.correio")
 
@@ -256,7 +256,9 @@ def cliente(usuario_id: int, email_usuario: str = ""):
 def enviar_e_registrar(conn, usuario: dict, tipo: str, para: list[str], copia: list[str], assunto: str,
                        corpo_html: str, anexos: list[tuple[str, bytes]], cco: list[str] | None = None) -> int:
     """Envia e SO' ENTAO registra: falha de envio nao deixa rastro de envio. Com assinatura cadastrada, ela vai
-    no fim do corpo como imagem (anexo embutido, como o Outlook faz)."""
+    no fim do corpo como imagem (anexo embutido, como o Outlook faz). Instalacao nao autorizada (issue #417): recusa
+    antes de tudo, inclusive no envio que nao passa pela reserva (teste de envio, cobranca de certidoes)."""
+    instalacao.exigir_envio()
     cco = list(cco or [])
     c = cliente(usuario["id"], usuario.get("email", ""))
     remetente = c.remetente()

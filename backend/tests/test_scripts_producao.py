@@ -71,6 +71,94 @@ def test_deploy_le_a_porta_da_tarefa_agendada():
     assert script.index("$portaTarefa = PortaDaTarefa") < script.index("function Construir")
 
 
+def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
+    # Issue #417: health 200 com `instalacao` diferente de "autorizada" depois do deploy conta como falha e cai no
+    # rollback que ja' existe. O rollback confere so' o 200: o commit anterior pode nem ter o campo.
+    script = _ler("deploy.ps1")
+    corpo = script[script.index("function Saudavel"):script.index("function Construir")]
+    assert "ConvertFrom-Json" in corpo
+    assert re.search(r'\.instalacao -eq "autorizada"', corpo)
+    assert "[switch]$ExigirInstalacao" in corpo
+    assert script.count("SaudavelENovo -ExigirInstalacao") == 1
+    deploy = script.index("if (SaudavelENovo -ExigirInstalacao) {")
+    rollback = script.index("ROLLBACK para $anterior")
+    assert deploy < rollback
+    assert "if (SaudavelENovo) {" in script[rollback:]
+    # rollback para um commit que ja' confere a instalacao e voltou em modo copia: ROLLBACK OK, mas com aviso
+    aviso = script[script.index("function AvisarSeCopia"):script.index("$anterior = (")]
+    assert '$saude.instalacao -and $saude.instalacao -ne "autorizada"' in aviso and "Write-Warning" in aviso
+    linha_ok = next(linha for linha in script[rollback:].splitlines() if "ROLLBACK OK" in linha)
+    assert linha_ok.rstrip().endswith("AvisarSeCopia }")
+    # o Saudavel antigo (so' o status) nao pode ter sobrado em outro lugar
+    assert script.count("function Saudavel") == 2      # Saudavel e SaudavelENovo
+    # SaudavelENovo repassa a exigencia: sem o parametro o PowerShell 5.1 poria -ExigirInstalacao em $args, sem erro,
+    # e o deploy voltaria a aceitar so' o 200 (revisor-adversarial da PR #437, ao juntar com a #389)
+    novo = script[script.index("function SaudavelENovo"):script.index("function AvisarSeCopia")]
+    assert novo.startswith("function SaudavelENovo([switch]$ExigirInstalacao) {")
+    assert "Saudavel -ExigirInstalacao:$ExigirInstalacao" in novo
+
+
+def test_deploy_confere_a_instalacao_antes_de_parar_a_producao():
+    # Issue #417 (gate Sol da PR #437): as migracoes rodam na subida, entao a conferencia do codigo novo vem depois do
+    # build e ANTES de parar a tarefa; recusada, cai no catch do Construir, que volta o pinado sem reiniciar nada.
+    script = _ler("deploy.ps1")
+    assert '$instalacaoArquivo = Join-Path $Raiz "segredos\\instalacao.json"' in script
+    funcao = script[script.index("function ConferirInstalacao"):script.index("function DonoDaPorta")]
+    assert "& $py -m app.cli instalacao verificar --arquivo $instalacaoArquivo" in funcao
+    assert 'Push-Location (Join-Path $AppDir "backend")' in funcao
+    assert re.search(r"if \(\$LASTEXITCODE -ne 0\) \{ throw ", funcao)
+    chamada = script.index("try { Construir $alvo; ConferirInstalacao }")
+    assert chamada < script.index("    Reiniciar\n") and chamada < script.index("SaudavelENovo -ExigirInstalacao")
+    # o rollback (Construir $anterior) nao confere: o commit anterior pode nem ter o comando
+    assert script.count("ConferirInstalacao") == 2      # a definicao e a chamada do deploy
+
+
+def _regex_da_raiz(script):
+    """O padrao do `-match` de RaizDaTarefa, para rodar aqui contra o formato que o instalar_autostart.ps1 grava."""
+    funcao = script[script.index("function RaizDaTarefa"):script.index("$raizTarefa = RaizDaTarefa")]
+    return re.search(r"-match '([^']+)'", funcao).group(1)
+
+
+def _raiz(regex, argumentos):
+    m = re.search(regex, argumentos)
+    return (m.group(1) or m.group(2)) if m else "C:\\DashboardLotufo"
+
+
+def test_deploy_le_a_raiz_da_tarefa_e_dela_tira_instalacao_e_banco():
+    # Gate Sol da PR #437: a tarefa aceita -Raiz; com a producao em outro disco, conferir C:\ recusaria o arquivo valido
+    # ou aceitaria um velho enquanto o servidor confere o da raiz certa. A raiz vem da tarefa, como a porta.
+    script = _ler("deploy.ps1")
+    assert '[string]$Raiz = ""' in script
+    funcao = script[script.index("function RaizDaTarefa"):script.index("$raizTarefa = RaizDaTarefa")]
+    assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in funcao
+    assert 'return "C:\\DashboardLotufo"' in funcao        # tarefa sem -Raiz = padrao do rodar_producao.ps1
+    assert "nao bate com a tarefa DashboardLotufo (raiz $raizTarefa)" in script
+    assert script.index("$raizTarefa = RaizDaTarefa") < script.index("function Construir")   # antes do checkout
+    # o formato que o instalar_autostart.ps1 grava (e o que alguem escreva a mao, sem aspas) da' a raiz certa
+    autostart = _ler("instalar_autostart.ps1")
+    assert '-Raiz `"$Raiz`"' in autostart
+    regex = _regex_da_raiz(script)
+    assert _raiz(regex, '-NoProfile -File "C:\\x\\rodar_producao.ps1" -Raiz "D:\\Dados Lotufo" -SemTls') == \
+        "D:\\Dados Lotufo"
+    assert _raiz(regex, '-File rodar_producao.ps1 -Raiz D:\\Lotufo -Porta 8080') == "D:\\Lotufo"
+    assert _raiz(regex, '-File rodar_producao.ps1 -SemTls -Porta 8080') == "C:\\DashboardLotufo"
+    # dela saem o arquivo da instalacao e o banco do backup pre-migracao; nada fixo em C:\ sobrou para eles
+    assert '$instalacaoArquivo = Join-Path $Raiz "segredos\\instalacao.json"' in script
+    assert '$banco = Join-Path $Raiz "dados\\dashboard.db"' in script
+    assert "-Banco $banco" in script and '-PastaBackups (Join-Path $Raiz "dados\\backups")' in script
+    codigo ="\n".join(linha.split("#")[0] for linha in script.splitlines())
+    assert "C:\\DashboardLotufo\\segredos" not in codigo and "C:\\DashboardLotufo\\dados" not in codigo
+    assert script.index("$instalacaoArquivo = Join-Path") < script.index("function Construir")
+
+
+def test_rodar_producao_fixa_o_arquivo_da_instalacao_na_raiz():
+    # Gate Sol da PR #437: uma DASH_INSTALACAO_ARQUIVO herdada apontaria para outro arquivo (falso modo copia e rollback)
+    script = _ler("rodar_producao.ps1")
+    linha = '$env:DASH_INSTALACAO_ARQUIVO = Join-Path $Raiz "segredos\\instalacao.json"'
+    assert script.count(linha) == 1
+    assert script.index(linha) < script.index("-m uvicorn")
+
+
 def test_deploy_fica_so_em_ascii_sem_bom():
     # cabecalho do deploy.ps1: o PowerShell 5.1 le sem BOM como ANSI e acento quebra o parse
     bruto = (SCRIPTS / "deploy.ps1").read_bytes()

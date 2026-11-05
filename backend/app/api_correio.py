@@ -6,7 +6,7 @@ import time
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
-from app import correio, graph
+from app import correio, graph, instalacao
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -105,6 +105,7 @@ def conectar(usuario: dict = Depends(exigir("editar_cadastros"))):
 def teste(usuario: dict = Depends(exigir("editar_cadastros")),
           conn: sqlite3.Connection = Depends(conexao)):
     c_usuario = {"id": usuario["id"], "email": usuario["email"]}
+    instalacao.exigir_envio()          # issue #417: a copia recusa antes de falar com o Microsoft 365
     try:
         destino = correio.cliente(usuario["id"], usuario["email"]).remetente()
         eid = correio.enviar_e_registrar(

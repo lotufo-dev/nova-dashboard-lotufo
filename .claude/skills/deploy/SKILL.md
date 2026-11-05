@@ -55,7 +55,16 @@ $atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()
 git log --oneline "$atual..origin/master"
 git diff --name-only "$atual" origin/master -- backend/migrations
 git diff --name-only "$atual" origin/master -- frontend
+Test-Path C:\DashboardLotufo\segredos\instalacao.json
+git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalacao.py
 ```
+
+- **Arquivo da instalação** (issue #417, runbook "Instalação assinada"): o `Test-Path` tem que dar `True`. Se der `False`,
+  parar e avisar o Leo, que assina e copia o arquivo; sem ele a produção sobe em modo cópia, sem e-mail e sem RM.
+- **Primeiro deploy com a #417**: o `ls-tree` volta vazio, porque o commit no ar ainda não tem `instalacao.py`. Então
+  o `deploy.ps1` do diretório pinado é o antigo, que só confere o 200. Seguir o item "Deploy da issue #417" de
+  "Subir e derrubar": rodar o `deploy.ps1` novo copiado para `C:\Temp\deploy`, pelo Mac num `.ps1` com `-File`, e
+  conferir `instalacao: autorizada` logo depois.
 
 - **Migração nova** (arquivo adicionado, alterado, removido ou renomeado em `backend/migrations/`): dizer ao Leo **explicitamente**, antes de rodar,
   o número e o que ela faz (ler o `.sql`: só acrescenta coluna/tabela/índice, ou mexe em dados). Pelo runbook,
@@ -86,12 +95,16 @@ git diff --name-only "$atual" origin/master -- frontend
      O rollback não volta o banco: se houve backup pré-migração, dizer ao Leo o caminho do arquivo, que é o
      que se restaura à mão (runbook, "Restaurar o banco a partir de um snapshot") se for preciso.
    - `deploy abortado no build; producao segue no commit anterior ...` → a versão nova não subiu e a produção
-     segue no commit anterior. Avisar o Leo com o motivo, não tentar de novo sozinho.
+     segue no commit anterior. Avisar o Leo com o motivo, não tentar de novo sozinho. Com o aviso
+     `instalacao nao autorizada para o commit novo` antes, o motivo é o arquivo da instalação (runbook, "Instalação
+     assinada").
    - `ROLLBACK TAMBEM FALHOU - intervir a mao` ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`
      → avisar o Leo na hora; logs em `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
      **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior.
 4. Conferir a saúde na própria máquina (runbook, "Saúde"):
-   `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok`
+   `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok` e
+   `instalacao: autorizada` (`nao-autorizada` é a produção em modo cópia, sem e-mail e sem RM: avisar o Leo com o
+   `instalacao_motivo` e seguir o runbook, "Instalação assinada")
    (a porta é a de `-Porta` do `deploy.ps1`, padrão 80 em HTTP, quando o `:80` pode ser omitido)
    (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
    `origin/master`.
