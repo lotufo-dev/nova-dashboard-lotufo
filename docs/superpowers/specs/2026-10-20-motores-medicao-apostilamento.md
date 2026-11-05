@@ -306,6 +306,9 @@ reais já extraídos no vault (copiados para fixture com nomes e números trocad
   `[{chave, origem: contratual|aditivo|carta|smo, data, instrumento, itens: [{competencia, valor}]}]`; o
   carregador cria uma `cronograma_versoes` por entrada, com `criado_em` = data do documento (o congelamento de
   `previsto_efetivo` passa a respeitar a data do documento, não a da carga; migração só de leitura).
+  Exceção (#396, D12): a versão de origem `aditivo`, `carta` ou `smo` substitui a curva inteira, inclusive os
+  meses passados (o bloco do realizado), e o previsto acumulado termina no contrato; `contratual` e a carga
+  continuam congelando o passado.
 - `datas_base[]` ganha `aplica_a` (texto livre: "itens SICRO", "itens SINAPI") e `indice` passa a ser obrigatório.
 - `cadastro carregar-medicoes <obra>.csv [--ensaio]`: colunas nº, nº do órgão, tipo, competência, período, valor
   pedido, valor aprovado, data da aprovação, meio, nº do órgão, data do protocolo da nota, NF, fonte. Regras: não
@@ -355,7 +358,7 @@ Evidência do levantamento (cruzamento de 20/10/2026; detalhe por obra na sínte
 | Versão por aditivo | 22 versões, todas de 04/09/2026 (carga), nenhuma por aditivo; Atalaia com 2 competências, Coxipó 2ª com 1 | `cronograma` no YAML com data do documento (§2.4) |
 | Tela ou carga | não existe tela de versão de cronograma (backlog de 28/09/2026) e o cadastro não carrega | carga pelo YAML; tela fica fora |
 | Linha de base honesta | a curva do SMO é refeita com o medido a cada aditivo (desvio ≈ 0 por construção); contra a versão anterior o atraso é de 16 a 48 p.p. em 7 obras | curva S com duas linhas: vigente e a anterior à última repactuação (§4.3, D9) |
-| Previsto que ninguém mantém | `previsto_efetivo` congela pelo mês de criação da versão; como todas nasceram em 09/2026, o passado foi semeado e o futuro depende de versão que não vem | `criado_em` = data do documento na carga |
+| Previsto que ninguém mantém | `previsto_efetivo` congela pelo mês de criação da versão; como todas nasceram em 09/2026, o passado foi semeado e o futuro depende de versão que não vem | `criado_em` = data do documento na carga; exceção (#396): versão de aditivo, carta ou SMO substitui a curva inteira, passado incluído (D12) |
 
 ## 4. Automações que agilizam
 

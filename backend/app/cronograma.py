@@ -3,7 +3,8 @@
 Operacionalizacao do congelamento: cada versao vale a partir do MES em que foi
 criada (criado_em). O previsto efetivo de uma competencia e o valor da versao
 mais recente criada ate aquela competencia -- revisar o cronograma nunca
-reescreve meses ja decorridos.
+reescreve meses ja decorridos. Excecao (issue #396): a versao de aditivo, carta ou curva do SMO
+substitui a curva inteira, passado incluido (o bloco do realizado).
 
 Versao vinda do cadastro (issue #256): criado_em e' a DATA DO DOCUMENTO (aditivo, carta,
 curva do SMO), nao a da carga. Por isso a linha do tempo e' ordenada por criado_em (empate
@@ -147,6 +148,8 @@ def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int, antes_da_versao
         # passados continuava somando e o saldo era previsto de novo, e a curva passava do contrato.
         repactua = conn.execute("SELECT 1 FROM cronograma_versoes_cadastro WHERE versao_id=? AND origem IN (?,?,?)",
                                 (v["id"],) + ORIGENS_DE_REPACTUACAO).fetchone() is not None
+        if repactua:
+            efetivo.clear()      # substitui a curva INTEIRA: mes que a carta nao traz nao fica com o previsto antigo
         for item in _itens(conn, v["id"]):
             comp = item["competencia"]
             if repactua:
