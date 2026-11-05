@@ -696,19 +696,23 @@ def test_complemento_soma_pedido_aprovado_e_faturado_das_medicoes(cenario):
             x["faturado_centavos"]) == ("recebida", 3, [3, 7], 12_000_01, 9_999_99, 9_999_99)
 
 
-def test_medido_da_competencia_e_o_aprovado_de_cada_medicao_senao_o_pedido(cenario):
-    # issue #279: o valor ja' medido da competencia, medicao a medicao (o aprovado quando houver, senao o pedido): o
-    # complemento so' pedido nao some atras do aprovado da principal
+def test_medido_nao_recebido_e_o_aprovado_de_cada_medicao_senao_o_pedido(cenario):
+    # issue #279: o valor ja' medido e ainda nao recebido da competencia, medicao a medicao (o aprovado quando houver,
+    # senao o pedido): o complemento so' pedido nao some atras do aprovado nem da recebida da principal
     c, ids = cenario
     cid = ids["contrato"]
     _medicao(c, cid, 3, "2026-07", "boletim_recebido", pedido=10_000_00, aprovado=9_999_99)
     _medicao(c, cid, 7, "2026-07", "planilha_gerada", pedido=2_000_01)
     _medicao(c, cid, 8, "2026-08", "prevista")
     _previsao(c, cid, "2026-09", 300_05, "manual")
+    _medicao(c, cid, 4, "2026-10", "recebida", pedido=400_11, aprovado=400_11)
+    _medicao(c, cid, 9, "2026-10", "planilha_enviada", pedido=50_01)
+    _medicao(c, cid, 5, "2026-11", "recebida", pedido=500_07, aprovado=500_07)
     x = _por_competencia(c, cid)
-    assert (x["2026-07"]["estado"], x["2026-07"]["aprovado_centavos"], x["2026-07"]["medido_centavos"]) == \
+    assert (x["2026-07"]["estado"], x["2026-07"]["aprovado_centavos"], x["2026-07"]["medido_nao_recebido_centavos"]) == \
         ("aprovada", 9_999_99, 12_000_00)
-    assert (x["2026-08"]["medido_centavos"], x["2026-09"]["medido_centavos"]) == (None, None)
+    assert (x["2026-10"]["estado"], x["2026-10"]["medido_nao_recebido_centavos"]) == ("recebida", 50_01)
+    assert [x[k]["medido_nao_recebido_centavos"] for k in ("2026-08", "2026-09", "2026-11")] == [None, None, None]
 
 
 def test_medicao_sem_base_em_contrato_de_duas_bases_nao_some(cenario):

@@ -384,8 +384,8 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
     sem data-base (`data_base_mes` e `ciclo` nulos, linhas com `data_base_incerta`): nada some em silencio e nada
     conta em dobro quando se somam as datas-base. Cancelada ou desistida nao conta.
 
-    Varias medicoes na mesma competencia (complemento): pedido, aprovado, faturado e medido (o aprovado de cada uma,
-    senao o pedido) sao a soma delas, `medicoes` lista
+    Varias medicoes na mesma competencia (complemento): pedido, aprovado e faturado sao a soma delas, e o medido nao
+    recebido, a das ainda nao recebidas (o aprovado de cada uma, senao o pedido); `medicoes` lista
     os numeros, e o estado e a medicao principal sao os da mais adiantada (empate: maior numero). O faturado so' conta
     NF da coligada da entidade do contrato (em consorcio, a fatura cheia do consorcio, e nao tambem a NFS-e da
     Lotufo pela cota); sem coligada no cadastro, todas. Mes do periodo de um percentual (MT-PAR) entra mesmo sem
@@ -404,7 +404,7 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
             "medicao_id": None, "medicao_numero": None, "medicao_estado": None, "pedido_centavos": None,
             "aprovado_centavos": None, "apostilada": False, "apostilado_centavos": None, "apostilado_percentual": None,
             "apostilamento_chave": None, "medicao_orgao": None, "faturado_centavos": None, "recebida_em": None,
-            "medido_centavos": None, "medicoes": [], "data_base_incerta": False, "_medicoes": []})
+            "medido_nao_recebido_centavos": None, "medicoes": [], "data_base_incerta": False, "_medicoes": []})
 
     for p in previsoes_vigentes(conn, contrato_id, sem_apostilamento=True):
         x = linha(p["data_base_mes"], p["ciclo"], p["competencia"])
@@ -479,9 +479,11 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
                      pedido_centavos=_soma(v[2]["valor_protocolado_centavos"] for v in ms),
                      aprovado_centavos=_soma(v[2]["valor_atestado_centavos"] for v in ms),
                      faturado_centavos=_soma(faturado.get(v[2]["id"]) for v in ms),
-                     # issue #279: o ja' medido, medicao a medicao (o aprovado quando houver, senao o pedido)
-                     medido_centavos=_soma(v[2]["valor_atestado_centavos"] if v[2]["valor_atestado_centavos"] is not None
-                                           else v[2]["valor_protocolado_centavos"] for v in ms))
+                     # issue #279: o ja' medido e ainda nao recebido, medicao a medicao (o aprovado quando houver,
+                     # senao o pedido): pedida, aprovada ou faturada
+                     medido_nao_recebido_centavos=_soma(
+                         v[2]["valor_atestado_centavos"] if v[2]["valor_atestado_centavos"] is not None
+                         else v[2]["valor_protocolado_centavos"] for v in ms if _PEDIDA <= v[0] < _RECEBIDA))
         x["estado"] = ESTADOS_COMPETENCIA[max(passo, _APOSTILADA if x["apostilada"] else 0)]
         grupos.setdefault((base, ciclo), []).append(x)
     return [{"data_base_mes": b, "ciclo": y, "competencias": xs} for (b, y), xs in grupos.items()]
