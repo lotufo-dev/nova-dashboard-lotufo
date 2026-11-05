@@ -157,7 +157,7 @@ _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", 
                     "copia_extras",
                     "estado", "documentos", "objeto_completo", "cno_arquivo", "folga_vigencia_dias",
                     "centros_custo_anteriores_rm", "objeto_carta", "garantia_apolice", "garantia_vigencia_fim",
-                    "garantia_arquivo")
+                    "garantia_arquivo", "indice_reajuste")
 _CAMPOS_FISCAL = ("cargo", "tratamento", "portaria")
 
 
@@ -212,6 +212,17 @@ def _frcs(conn, usuario_id, lista, rel, ensaio) -> None:
         auditoria.registrar(conn, usuario_id, "cadastro.frc", "frc_consorcio", f["consorcio"], antes, depois)
 
 
+def _indice_das_bases(bases: list[dict]) -> str | None:
+    """Texto de contratos.indice_reajuste, derivado das datas-base (issue #397): o indice da base unica; com mais
+    de uma, `AAAA-MM: indice (aplica_a)` separadas por "; ". Sem base, nulo."""
+    if not bases:
+        return None
+    if len(bases) == 1:
+        return bases[0]["indice"]
+    return "; ".join(f"{d['mes']}: {d['indice']}" + (f" ({d['aplica_a']})" if d.get("aplica_a") else "")
+                     for d in sorted(bases, key=lambda d: d["mes"]))
+
+
 def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     nome_orgao = conn.execute("SELECT nome FROM orgaos WHERE id=?", (ids_orgao[c["orgao"]],)).fetchone()[0]
     ja = conn.execute("SELECT * FROM contratos WHERE numero_instrumento=?",
@@ -251,7 +262,8 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             # issue #65: garantia (apolice, fim da vigencia, PDF)
             "garantia_apolice": c.get("garantia_apolice"), "garantia_vigencia_fim": c.get("garantia_vigencia_fim"),
             "garantia_arquivo": _no_disco("anexos", c["garantia_caminho"], "pdf", rel["ensaio"])
-            if c.get("garantia_caminho") else None}
+            if c.get("garantia_caminho") else None,
+            "indice_reajuste": _indice_das_bases(c["datas_base"])}
     mudou = False
     if ja is None:
         colunas = ["numero_instrumento", *_CAMPOS_CONTRATO]

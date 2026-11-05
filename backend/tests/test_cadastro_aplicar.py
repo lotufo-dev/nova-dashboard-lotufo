@@ -926,3 +926,27 @@ def test_ensaio_do_apostilamento_nao_grava_previsao(conn):
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
                                                                 pleitos_anteriores=[PLEITO_2026])]), ensaio=True)
     assert conn.execute("SELECT COUNT(*) FROM reajuste_previsoes").fetchone()[0] == 0
+
+
+def test_indice_reajuste_vem_da_data_base_unica_e_reaplicar_e_igual(conn):
+    # issue #397: a coluna do contrato e' derivada de contrato_datas_base, nunca a tabela de precos
+    conn.execute("INSERT INTO contratos (orgao, numero_instrumento, objeto, valor_original_centavos, indice_reajuste) "
+                 "VALUES ('SINFRA','019/2024/00/00-SINFRA','MT-402',1512720000,'SINAPI')")
+    conn.commit()
+    c = _contrato(datas_base=[{"mes": "2023-04", "indice": "INCC-DI/FGV"}])
+    ensaio = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]), ensaio=True)
+    assert ensaio["contratos"]["alterados"] == ["MT-402"]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]))
+    assert conn.execute("SELECT indice_reajuste FROM contratos").fetchone()[0] == "INCC-DI/FGV"
+    linha = conn.execute("SELECT * FROM audit_log WHERE acao='cadastro.contrato' ORDER BY id DESC LIMIT 1").fetchone()
+    assert "SINAPI" in json.dumps(dict(linha)) and "INCC-DI/FGV" in json.dumps(dict(linha))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]))
+    assert r["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+
+
+def test_indice_reajuste_com_duas_bases_traz_as_duas_com_aplica_a(conn):
+    bases = [{"mes": "2022-03", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"},
+             {"mes": "2022-01", "indice": "INCC-DI", "aplica_a": "itens SINAPI"}]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(datas_base=bases)]))
+    assert conn.execute("SELECT indice_reajuste FROM contratos").fetchone()[0] == \
+        "2022-01: INCC-DI (itens SINAPI); 2022-03: FGV/DNIT (itens SICRO)"
