@@ -100,6 +100,11 @@ function textoApostilamento(i: InstrumentoCadastro): string {
           pct !== undefined && pct !== null ? fmtPercentual(Number(pct) / 100) : ""].filter(Boolean).join(" · ");
 }
 
+/** O termo que fecha o ciclo: apostilamento ou, na SES, termo aditivo de valor de reajuste (issue #390). */
+function nomeDoTermo(i: InstrumentoCadastro): string {
+  return i.tipo.startsWith("aditivo") ? "Termo aditivo" : "Apostilamento";
+}
+
 /** O desfecho de um pleito enviado (F-71): com o ciclo corrente, o selo diz se o apostilamento veio (Em dia) ou
  *  se falta (Atencao, com os dias que o servidor conta); embaixo, so' a data do envio. Sem o ciclo (ciclo
  *  anterior, data-base que saiu do cadastro), o dado nao diz o desfecho: selo neutro. */
@@ -107,9 +112,11 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
   const envio = partesDoEnvio(p);
   const neutro = { classe: "", texto: p.situacao, partes: envio };
   // o cadastro ligou o pleito ao termo que o atendeu (issue #271): vale em qualquer ciclo, corrente ou passado
+  // na SES o termo e' aditivo de valor de reajuste (issue #390): vem so' no ciclo da API, nao nos apostilamentos
   const termo = p.situacao === "enviado" && p.instrumento_chave
-    ? apostilamentos.find(i => i.chave === p.instrumento_chave) : undefined;
-  if (termo) return { classe: "selo--ok", texto: `atendido pelo apostilamento ${termo.numero ?? "s/n"}`, partes: envio };
+    ? apostilamentos.find(i => i.chave === p.instrumento_chave)
+      ?? (c?.apostilamento?.chave === p.instrumento_chave ? c.apostilamento : undefined) : undefined;
+  if (termo) return { classe: "selo--ok", texto: `atendido pelo ${nomeDoTermo(termo).toLowerCase()} ${termo.numero ?? "s/n"}`, partes: envio };
   // so' o pleito vigente do ciclo (o enviado mais recente) leva o desfecho; os anteriores (reiterados ou
   // reemitidos) ficam com o envio e a cadeia, sem repetir a espera do ciclo (issue #277)
   if (!c || p.situacao !== "enviado" || (c.pleito && c.pleito.id !== p.id)) return neutro;
@@ -225,7 +232,9 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         // pleito ligado
         const validos = db.apostilamentos.filter(vale);
         const doCiclo = [...(c.apostilamento ? [c.apostilamento] : []),
-          ...validos.filter(i => i.id !== c.apostilamento?.id && cicloDoApostilamento(i) === c.ciclo)];
+          // o aditivo (issue #390) vem de outra tabela: o id so' identifica junto com o tipo
+          ...validos.filter(i => !(i.id === c.apostilamento?.id && i.tipo === c.apostilamento.tipo)
+            && cicloDoApostilamento(i) === c.ciclo)];
         const outrosAp = validos.filter(i => !doCiclo.some(d => d.id === i.id));
         const anteriores = db.pleitosAnteriores.length + outrosAp.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
@@ -278,7 +287,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
             <div className="cartao__corpo linhas">
               <p className="num">{linhaDoCiclo(c)}</p>
               {doCiclo.map(i => (
-                <p key={i.id}><span className="resumo__rotulo">Apostilamento</span>{" "}{textoApostilamento(i)}</p>
+                <p key={`${i.tipo}-${i.id}`}><span className="resumo__rotulo">{nomeDoTermo(i)}</span>{" "}{textoApostilamento(i)}</p>
               ))}
               {apostiladas.length > 0 && <TabelaApostilada dataBase={db.data_base_mes} linhas={apostiladas} />}
             </div>

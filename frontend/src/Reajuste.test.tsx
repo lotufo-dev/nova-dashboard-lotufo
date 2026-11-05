@@ -127,6 +127,29 @@ describe("Reajuste", () => {
     expect(screen.queryByText(/atendido pelo apostilamento/)).toBeNull();
   });
 
+  it("aditivo de valor de reajuste fecha o ciclo e atende o pleito, sem esconder o apostilamento de mesmo id (issue #390)", async () => {
+    const aditivo = { id: 5, chave: "ta-03", tipo: "aditivo_valor", numero: "3º TA", data: "2025-11-20", dados: {},
+      origem: "aditivo" };
+    // instrumento de outra tabela com o mesmo id: continua no cartao
+    const outro = { id: 5, chave: "ap-01", tipo: "apostilamento_reajuste", numero: "AP-1", data: "2025-12-01",
+      dados: { data_base: "2021-10", ciclo: 2025 } };
+    const pleito = { id: 3, tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: "CT-1-LT-2025",
+      data_base_mes: "2021-10", ciclo: 2025, dias: null, justificativa: null, situacao: "enviado", corpo_carta: null,
+      montado_paginas: null, assinado_arquivo: null, nome_documento: null, conferencia: null, pendencias: [],
+      enviado_em: "2025-10-05", envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: "ta-03" };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ data_base_mes: "2021-10", indice: "INCC-DI", ciclo: 2025, aniversario: "2025-10-01",
+                     situacao: "apostilado", dias: null, pleito: { id: 3 }, apostilamento: aditivo }],
+          pleitos: [pleito], competencias: [] }
+      : { instrumentos: [outro] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    expect(await screen.findByText("apostilado")).toBeTruthy();
+    const corpo = screen.getByRole("region", { name: /^Data-base 10\/2021/ });
+    expect(corpo.textContent).toContain("Termo aditivo 3º TA, de 20/11/2025");
+    expect(corpo.textContent).toContain("Apostilamento AP-1, de 01/12/2025");
+    expect(screen.getByText("atendido pelo termo aditivo 3º TA")).toBeTruthy();
+  });
+
   it("termo do ciclo corrente sem ligação fica no cartão do ciclo; o corrigido não vira ciclo anterior (PR #317)", async () => {
     const termo = (id: number, chave: string, numero: string, ciclo: number, corrige?: string) => ({ id, chave,
       tipo: "apostilamento_reajuste", numero, data: `${ciclo}-09-01`, dados: { data_base: "2024-06", ciclo, ...(corrige ? { corrige } : {}) } });
