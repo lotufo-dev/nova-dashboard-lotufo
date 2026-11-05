@@ -38,13 +38,15 @@ const ACAO_REEMISSAO: Record<Reemissao, { botao: string; titulo: string }> = {
 type CompetenciaApostilada = { instrumento_chave: string; instrumento_numero: string | null; instrumento_data: string };
 
 // Issue #275 (spec 2026-10-20 §2.2): uma linha de `reajuste.competencias_por_ciclo`. O estado, o valor de cada fonte e
-// os avisos vem do servidor; a tela so' desenha, com a origem de cada celula no titulo.
+// os avisos vem do servidor; a tela so' desenha, com a origem de cada celula no titulo (e para o leitor de tela).
 type EstadoCompetencia = "prevista" | "pedida" | "aprovada" | "apostilada" | "faturada" | "recebida";
 type AvisoCompetencia = "fora_da_previsao" | "sem_apostilamento" | "nota_antes_do_apostilamento";
 type Competencia = { competencia: string; estado: EstadoCompetencia; previsto_centavos: number | null;
-  previsto_origem: "pleito" | "manual" | null; medicoes: number[]; pedido_centavos: number | null;
-  aprovado_centavos: number | null; apostilada: boolean; apostilado_centavos: number | null;
-  apostilado_percentual: string | number | null; apostilamento_chave: string | null;
+  previsto_origem: "pleito" | "manual" | null; medicao_numero: number | null; medicoes: number[];
+  /** As medicoes que entraram em cada soma (rodada 1 da PR #438): o complemento so' pedido nao e' origem do aprovado. */
+  medicoes_pedido?: number[]; medicoes_aprovado?: number[]; medicoes_nota?: number[];
+  pedido_centavos: number | null; aprovado_centavos: number | null; apostilada: boolean;
+  apostilado_centavos: number | null; apostilado_percentual: string | number | null; apostilamento_chave: string | null;
   medicao_orgao: string | number | null; faturado_centavos: number | null; recebida_em: string | null;
   avisos?: AvisoCompetencia[] };
 /** Data-base e ciclo; os dois nulos no grupo da medicao cuja data-base nao se decide (duas bases, nada gravado). */
@@ -53,7 +55,7 @@ type NomeDoTermo = { numero: string | null; data: string };
 
 const ORIGEM_PREVISTO: Record<string, string> = { pleito: "planilha do pleito", manual: "digitada" };
 
-/** As medicoes de reajuste da competencia: "3ª medição de reajuste", "4ª e 7ª medições de reajuste". */
+/** As medicoes de reajuste: "3ª medição de reajuste", "4ª e 7ª medições de reajuste". */
 function dasMedicoes(ns: number[]): string {
   const o = ns.map(n => `${n}ª`);
   return o.length > 1 ? `${o.slice(0, -1).join(", ")} e ${o[o.length - 1]} medições de reajuste`
@@ -71,6 +73,17 @@ function percentual(p: string | number): string {
 function somaDe(linhas: Competencia[], f: (x: Competencia) => number | null): number | null {
   const v = linhas.map(f).filter((n): n is number => n !== null);
   return v.length > 0 ? v.reduce((a, b) => a + b, 0) : null;
+}
+
+/** Celula de valor com a origem: no titulo (mouse) e, para o leitor de tela, em texto escondido logo depois do valor
+ *  (o `title` nao abre no celular, no teclado nem no leitor de tela). */
+function Celula({ origem, className = "col-num dinheiro num", children }: { origem?: string; className?: string;
+    children: React.ReactNode }) {
+  return (
+    <td className={className} title={origem}>
+      {children}{origem && <span className="sr-only">{`, ${origem}`}</span>}
+    </td>
+  );
 }
 
 /** O estado da competencia e, quando ha', a marca do aviso. A nota antes do termo e' o critico e cobre o "sem
@@ -96,12 +109,14 @@ function SituacaoDaCompetencia({ x }: { x: Competencia }) {
 function TabelaCompetencias({ rotulo, linhas, termos }: { rotulo: string; linhas: Competencia[];
     termos: Map<string, NomeDoTermo> }) {
   const origem = (texto: string | null) => (texto ? `Origem: ${texto}` : undefined);
-  const daMedicao = (x: Competencia, prefixo: string, valor: unknown) =>
-    valor !== null && x.medicoes.length > 0 ? origem(`${prefixo}${dasMedicoes(x.medicoes)}`) : undefined;
+  // cada soma cita so' as medicoes que entraram nela; o recebido e' da medicao principal, dona do `recebida_em`
+  const daMedicao = (prefixo: string, valor: unknown, ns: number[] | undefined) =>
+    valor !== null && ns && ns.length > 0 ? origem(`${prefixo}${dasMedicoes(ns)}`) : undefined;
+  const citada = (x: Competencia) => (x.medicao_orgao !== null && x.medicao_orgao !== "" ? `${x.medicao_orgao}ª` : null);
   const doTermo = (x: Competencia) => {
     if (!x.apostilada || (x.apostilado_centavos === null && x.apostilado_percentual === null)) return undefined;
     const t = x.apostilamento_chave ? termos.get(x.apostilamento_chave) : undefined;
-    const med = x.medicao_orgao !== null && x.medicao_orgao !== "" ? ` (${x.medicao_orgao}ª medição)` : "";
+    const med = citada(x) ? ` (${citada(x)} medição)` : "";
     return origem(`apostilamento${t ? ` ${t.numero ?? "s/n"}, de ${fmtDataPura(t.data)}` : ""}${med}`);
   };
   return (
@@ -125,25 +140,27 @@ function TabelaCompetencias({ rotulo, linhas, termos }: { rotulo: string; linhas
           {linhas.map((x, i) => (
             <tr key={x.competencia} className={`linha${i % 2 === 1 ? " par" : ""}`}>
               <th scope="row" className="forte num">{mesAno(x.competencia)}</th>
-              <td className="col-num dinheiro num"
-                title={x.previsto_centavos !== null && x.previsto_origem
-                  ? origem(ORIGEM_PREVISTO[x.previsto_origem] ?? x.previsto_origem) : undefined}>
+              <Celula origem={x.previsto_centavos !== null && x.previsto_origem
+                ? origem(ORIGEM_PREVISTO[x.previsto_origem] ?? x.previsto_origem) : undefined}>
                 {brl(x.previsto_centavos)}
-              </td>
-              <td className="col-num dinheiro num" title={daMedicao(x, "", x.pedido_centavos)}>{brl(x.pedido_centavos)}</td>
-              <td className="col-num dinheiro num" title={daMedicao(x, "boletim da ", x.aprovado_centavos)}>
+              </Celula>
+              <Celula origem={daMedicao("", x.pedido_centavos, x.medicoes_pedido)}>{brl(x.pedido_centavos)}</Celula>
+              <Celula origem={daMedicao("boletim da ", x.aprovado_centavos, x.medicoes_aprovado)}>
                 {brl(x.aprovado_centavos)}
-              </td>
-              <td className="col-num dinheiro num" title={doTermo(x)}>
+              </Celula>
+              <Celula origem={doTermo(x)}>
                 {x.apostilado_centavos !== null ? brl(x.apostilado_centavos)
                   : x.apostilada && x.apostilado_percentual !== null ? percentual(x.apostilado_percentual) : "—"}
-              </td>
-              <td className="col-num dinheiro num" title={daMedicao(x, "notas fiscais da ", x.faturado_centavos)}>
+                {/* o nº da medicao que o termo cita, a' vista (era coluna da tabela das apostiladas) */}
+                {x.apostilada && citada(x) && <span className="reajuste-competencias__citada"> ({citada(x)})</span>}
+              </Celula>
+              <Celula origem={daMedicao("notas fiscais da ", x.faturado_centavos, x.medicoes_nota)}>
                 {brl(x.faturado_centavos)}
-              </td>
-              <td className="col-num num" title={daMedicao(x, "baixa no RM da ", x.recebida_em)}>
+              </Celula>
+              <Celula className="col-num num"
+                origem={daMedicao("baixa no RM da ", x.recebida_em, x.medicao_numero !== null ? [x.medicao_numero] : [])}>
                 {x.recebida_em ? fmtDataPura(x.recebida_em.slice(0, 10)) : "—"}
-              </td>
+              </Celula>
               <td className="col-fixa"><SituacaoDaCompetencia x={x} /></td>
             </tr>
           ))}
@@ -165,10 +182,15 @@ function TabelaCompetencias({ rotulo, linhas, termos }: { rotulo: string; linhas
   );
 }
 
-/** O nome da tabela de um grupo: a data-base e o ciclo, ou o grupo sem data-base. */
+/** O nome da tabela de um grupo (para o leitor de tela): a data-base e o ciclo, ou o grupo sem data-base. */
 function rotuloDoGrupo(g: GrupoDoCiclo): string {
   return g.data_base_mes === null ? "Reajuste por competência sem data-base definida"
     : `Reajuste por competência da data-base ${mesAno(g.data_base_mes)}, ciclo de ${g.ciclo}`;
+}
+
+/** O rotulo a' vista de um grupo fora das datas-base do cadastro (rodada 1 da PR #438). */
+function rotuloVisivelDoGrupo(g: GrupoDoCiclo): string {
+  return g.data_base_mes === null ? "Data-base não definida" : `Data-base ${mesAno(g.data_base_mes)}, ciclo de ${g.ciclo}`;
 }
 
 // Issue #275: um aditivo assinado no ciclo depois do primeiro pleito enviado (`reajuste.aditivos_do_ciclo`)
@@ -193,19 +215,24 @@ function eventosDoCiclo(pleitos: Pleito[], aditivos: AditivoDoCiclo[], termos: I
   return ev.sort((a, b) => a.data.localeCompare(b.data) || a.ordem - b.ordem);
 }
 
+/** O rotulo e a lista; quem chama poe na secao (o ciclo corrente no cartao, os anteriores em "Ciclos anteriores"). */
 function LinhaDoTempoDoCiclo({ ciclo, eventos }: { ciclo: number;
     eventos: { chave: string; data: string; texto: string }[] }) {
   return (
-    <div className="cartao__corpo">
+    <>
       <p className="resumo__rotulo">Linha do tempo</p>
       <ol className="linha-tempo" aria-label={`Linha do tempo do ciclo de ${ciclo}`}>
         {eventos.map(e => (
           <li key={e.chave}><time className="linha-tempo__data" dateTime={e.data}>{fmtDataPura(e.data)}</time><span>{e.texto}</span></li>
         ))}
       </ol>
-    </div>
+    </>
   );
 }
+
+// Rodada 1 da PR #438: termo e aditivos de cada ciclo com pleito enviado (`reajuste.linhas_do_tempo`)
+type LinhaDoTempoApi = { data_base_mes: string; ciclo: number; termo: InstrumentoCadastro | null;
+  aditivos: AditivoDoCiclo[] };
 
 // Pleito nao enviado e' a vez da engenharia: nivel "Acao" do D2 (ambar com contorno cheio), o
 // mesmo com que o fato aparece nos avisos. Vermelho fica para o critico.
@@ -270,7 +297,7 @@ const emAberto = (p: Pleito) => p.origem === "sistema" && p.situacao !== "enviad
 export default function Reajuste({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
   const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[]; competencias?: CompetenciaApostilada[];
     bases_dos_termos?: BaseDoTermo[]; aditivos_de_reajuste?: InstrumentoCadastro[];
-    competencias_por_ciclo?: GrupoDoCiclo[] } | null>(null);
+    competencias_por_ciclo?: GrupoDoCiclo[]; linhas_do_tempo?: LinhaDoTempoApi[] } | null>(null);
   const [apostilamentos, setApostilamentos] = useState<InstrumentoCadastro[]>([]);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
@@ -370,7 +397,19 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const gruposAnteriores = daBase.filter(g => g.ciclo !== null && g.ciclo < c.ciclo);
         const gruposSeguintes = daBase.filter(g => g.ciclo !== null && g.ciclo > c.ciclo);
         const eventos = eventosDoCiclo(db.pleitosDoCiclo, c.aditivos ?? [], doCiclo);
-        const anteriores = db.pleitosAnteriores.length + outrosAp.length + gruposAnteriores.length;
+        // cada ciclo anterior com a tabela e a linha do tempo dele (rodada 1 da PR #438): o termo e os aditivos vem
+        // de `linhas_do_tempo`, os pleitos sao os da aba
+        const tempos = (dados.linhas_do_tempo ?? []).filter(t => t.data_base_mes === db.data_base_mes && t.ciclo < c.ciclo);
+        const ciclosAnteriores = [...new Set([...gruposAnteriores.map(g => g.ciclo as number), ...tempos.map(t => t.ciclo)])]
+          .sort((a, b) => b - a)
+          .map(y => {
+            const t = tempos.find(x => x.ciclo === y);
+            return { ciclo: y, grupo: gruposAnteriores.find(g => g.ciclo === y),
+              eventos: eventosDoCiclo(db.pleitosAnteriores.filter(p => p.ciclo === y), t?.aditivos ?? [],
+                t?.termo ? [t.termo] : []) };
+          })
+          .filter(x => x.grupo || x.eventos.length > 0);
+        const anteriores = db.pleitosAnteriores.length + outrosAp.length + ciclosAnteriores.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
         // o pleito vigente do ciclo e o que o servidor deixa fazer com ele (reiterar, reemitir o cronograma)
         const vigente = c.pleito ? dados.pleitos.find(p => p.id === c.pleito!.id) : undefined;
@@ -425,7 +464,9 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
                 {tabela(g)}
               </div>
             ))}
-            {eventos.length > 0 && <LinhaDoTempoDoCiclo ciclo={c.ciclo} eventos={eventos} />}
+            {eventos.length > 0 && (
+              <div className="cartao__corpo"><LinhaDoTempoDoCiclo ciclo={c.ciclo} eventos={eventos} /></div>
+            )}
             {(formAberto || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
               <div className="secoes-pleito">
                 {reemitindo && (
@@ -461,10 +502,11 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
                           <ul className="lista-simples">{outrosAp.map(i => <li key={i.id} className="num">{textoApostilamento(i)}</li>)}</ul>
                         </section>
                       )}
-                      {gruposAnteriores.map(g => (
-                        <div className="cartao__corpo" key={`${g.data_base_mes}-${g.ciclo}`}>
-                          <p className="resumo__rotulo">Ciclo de {g.ciclo}</p>
-                          {tabela(g)}
+                      {ciclosAnteriores.map(x => (
+                        <div className="cartao__corpo linhas" key={x.ciclo}>
+                          <p className="resumo__rotulo">Ciclo de {x.ciclo}</p>
+                          {x.grupo && tabela(x.grupo)}
+                          {x.eventos.length > 0 && <LinhaDoTempoDoCiclo ciclo={x.ciclo} eventos={x.eventos} />}
                         </div>
                       ))}
                       {cartoes(db.pleitosAnteriores)}
@@ -495,13 +537,19 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         </section>
       )}
 
-      {/* issue #275: nada some em silencio; medicao de data-base incerta entra uma vez so', aqui */}
+      {/* issue #275: nada some em silencio; medicao de data-base incerta entra uma vez so', aqui, com a data-base e o
+          ciclo de cada tabela a' vista (rodada 1 da PR #438) */}
       {gruposFora.length > 0 && (
         <section className="cartao" aria-labelledby="titulo-competencias-fora">
           <div className="cartao__cabeca">
-            <h2 className="cartao__titulo" id="titulo-competencias-fora">Reajuste fora das datas-base do cadastro</h2>
+            <h2 className="cartao__titulo" id="titulo-competencias-fora">Reajuste sem data-base definida ou fora do cadastro</h2>
           </div>
-          {gruposFora.map(tabela)}
+          {gruposFora.map(g => (
+            <div className="cartao__corpo" key={`${g.data_base_mes}-${g.ciclo}`}>
+              <p className="resumo__rotulo">{rotuloVisivelDoGrupo(g)}</p>
+              {tabela(g)}
+            </div>
+          ))}
         </section>
       )}
     </div>

@@ -1755,6 +1755,8 @@ a.contagem:hover .dado__valor { color: var(--acento-forte); text-decoration: und
 /* issue #275: na tabela por competencia do reajuste, o estado e a marca do aviso na Situacao (ancorada a' direita,
    `.col-fixa`): lado a lado quando cabem, um embaixo do outro quando a tabela aperta */
 .reajuste-competencias .selos { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+/* o nº da medicao que o termo cita, ao lado do valor apostilado */
+.reajuste-competencias__citada { color: var(--texto-2); }
 /* selo logo abaixo do valor ou da nota na grade do resumo (Situacao do prazo) */
 .resumo-grade .dado > .selo { margin-top: 4px; }
 

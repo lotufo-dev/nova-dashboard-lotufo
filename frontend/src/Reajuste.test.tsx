@@ -29,12 +29,19 @@ describe("Reajuste", () => {
   // issue #275: uma linha de `competencias_por_ciclo` (reajuste.competencias_por_ciclo), so' prevista por padrao
   const comp = (competencia: string, extra: Record<string, unknown> = {}) => ({ competencia, estado: "prevista",
     previsto_centavos: null, previsto_origem: null, medicao_id: null, medicao_numero: null, medicao_estado: null,
-    medicoes: [], pedido_centavos: null, aprovado_centavos: null, apostilada: false, apostilado_centavos: null,
-    apostilado_percentual: null, apostilamento_chave: null, medicao_orgao: null, faturado_centavos: null,
-    recebida_em: null, data_base_incerta: false, avisos: [], ...extra });
+    medicoes: [], medicoes_pedido: [], medicoes_aprovado: [], medicoes_nota: [], pedido_centavos: null,
+    aprovado_centavos: null, apostilada: false, apostilado_centavos: null, apostilado_percentual: null,
+    apostilamento_chave: null, medicao_orgao: null, faturado_centavos: null, recebida_em: null,
+    data_base_incerta: false, avisos: [], ...extra });
   const cicloAberto = { data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
     situacao: "apostilamento_pendente", dias: 40, pleito: null, apostilamento: null, aditivos: [] };
   const celulas = (tr: Element) => [...tr.querySelectorAll("td,th")];
+  // o texto a' vista da celula, sem a origem que vai so' para o leitor de tela
+  const visivel = (el: Element) => {
+    const c = el.cloneNode(true) as Element;
+    c.querySelectorAll(".sr-only").forEach(s => s.remove());
+    return c.textContent;
+  };
 
   it("mostra a tabela do ciclo, competência × previsto × pedido × aprovado × apostilado × nota × recebido, com a origem no título (issue #275)", async () => {
     const termo = { id: 5, chave: "ap-12", tipo: "apostilamento_reajuste", numero: "019/2024/02/12", data: "2026-10-01",
@@ -44,12 +51,15 @@ describe("Reajuste", () => {
           competencias_por_ciclo: [
             { data_base_mes: "2024-06", ciclo: 2025, competencias: [comp("2025-07", { previsto_centavos: 5, previsto_origem: "manual" })] },
             { data_base_mes: "2024-06", ciclo: 2026, competencias: [
+              // a 3ª recebida e a 8ª (complemento) so' pedida: aprovado, nota e recebido sao so' da 3ª
               comp("2026-07", { estado: "recebida", previsto_centavos: 100_01, previsto_origem: "pleito", medicao_numero: 3,
-                medicoes: [3], pedido_centavos: 100_01, aprovado_centavos: 99_99, apostilada: true,
+                medicoes: [3, 8], medicoes_pedido: [3, 8], medicoes_aprovado: [3], medicoes_nota: [3],
+                pedido_centavos: 100_01, aprovado_centavos: 99_99, apostilada: true,
                 apostilado_centavos: 100_01, apostilamento_chave: "ap-12", medicao_orgao: 30, faturado_centavos: 99_99,
                 recebida_em: "2026-10-15" }),
               comp("2026-08", { previsto_centavos: 200_03, previsto_origem: "manual" }),
-              comp("2026-09", { estado: "pedida", medicao_numero: 7, medicoes: [4, 7], pedido_centavos: 301_01 })] },
+              comp("2026-09", { estado: "pedida", medicao_numero: 7, medicoes: [4, 7], medicoes_pedido: [4, 7],
+                pedido_centavos: 301_01 })] },
             { data_base_mes: "2024-06", ciclo: 2027, competencias: [comp("2027-06", { previsto_centavos: 9, previsto_origem: "manual" })] }] }
       : { instrumentos: [termo] });
     render(<Reajuste contratoId={7} podeEditar={false} />);
@@ -57,17 +67,20 @@ describe("Reajuste", () => {
     expect(within(tabela).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
       ["Competência", "Previsto", "Pedido", "Aprovado", "Apostilado", "Nota", "Recebido", "Situação"]);
     const [jul, ago, set] = [...tabela.querySelectorAll("tbody tr")];
-    expect(celulas(jul).map(c => c.textContent)).toEqual(
-      ["07/2026", brl(100_01), brl(100_01), brl(99_99), brl(100_01), brl(99_99), "15/10/2026", "recebida"]);
-    // a origem de cada celula ao passar o mouse
-    expect(celulas(jul).slice(1, 7).map(c => c.getAttribute("title"))).toEqual([
-      "Origem: planilha do pleito", "Origem: 3ª medição de reajuste", "Origem: boletim da 3ª medição de reajuste",
-      "Origem: apostilamento 019/2024/02/12, de 01/10/2026 (30ª medição)",
-      "Origem: notas fiscais da 3ª medição de reajuste", "Origem: baixa no RM da 3ª medição de reajuste"]);
+    // o nº da medicao que o termo cita fica a' vista ao lado do apostilado
+    expect(celulas(jul).map(visivel)).toEqual(
+      ["07/2026", brl(100_01), brl(100_01), brl(99_99), `${brl(100_01)} (30ª)`, brl(99_99), "15/10/2026", "recebida"]);
+    // a origem de cada celula ao passar o mouse; cada soma cita so' as medicoes que entraram nela
+    const origens = ["Origem: planilha do pleito", "Origem: 3ª e 8ª medições de reajuste",
+      "Origem: boletim da 3ª medição de reajuste", "Origem: apostilamento 019/2024/02/12, de 01/10/2026 (30ª medição)",
+      "Origem: notas fiscais da 3ª medição de reajuste", "Origem: baixa no RM da 3ª medição de reajuste"];
+    expect(celulas(jul).slice(1, 7).map(c => c.getAttribute("title"))).toEqual(origens);
+    // e para o leitor de tela, que nao abre o titulo
+    expect(celulas(jul).slice(1, 7).map(c => c.querySelector(".sr-only")?.textContent)).toEqual(origens.map(o => `, ${o}`));
     // celula vazia: traco e sem titulo
-    expect(celulas(ago).map(c => c.textContent)).toEqual(["08/2026", brl(200_03), "—", "—", "—", "—", "—", "prevista"]);
+    expect(celulas(ago).map(visivel)).toEqual(["08/2026", brl(200_03), "—", "—", "—", "—", "—", "prevista"]);
     expect(celulas(ago)[1].getAttribute("title")).toBe("Origem: digitada");
-    expect(celulas(ago).slice(2, 7).every(c => !c.hasAttribute("title"))).toBe(true);
+    expect(celulas(ago).slice(2, 7).every(c => !c.hasAttribute("title") && !c.querySelector(".sr-only"))).toBe(true);
     // complemento: o pedido soma as medicoes da competencia
     expect(celulas(set)[2].getAttribute("title")).toBe("Origem: 4ª e 7ª medições de reajuste");
     // o rodape soma cada coluna de dinheiro com o centavo impar
@@ -113,8 +126,8 @@ describe("Reajuste", () => {
     expect(selos(situacao[2])).toEqual([["faturada", "selo"], ["nota antes do apostilamento", "selo selo--acao"]]);
     expect(selos(situacao[3])).toEqual([["apostilada", "selo"]]);
     // o percentual da MT-PAR no lugar do valor apostilado
-    expect(celulas(tabela.querySelectorAll("tbody tr")[3])[4].textContent).toBe("6,76%");
-    expect(celulas(tabela.querySelectorAll("tbody tr")[4])[4].textContent).toBe("4,125%");
+    expect(visivel(celulas(tabela.querySelectorAll("tbody tr")[3])[4])).toBe("6,76%");
+    expect(visivel(celulas(tabela.querySelectorAll("tbody tr")[4])[4])).toBe("4,125%");
   });
 
   it("o percentual do termo no cabeçalho do ciclo lê a vírgula do cadastro (issue #275)", async () => {
@@ -204,10 +217,43 @@ describe("Reajuste", () => {
               pedido_centavos: 300_04, data_base_incerta: true })] }] }
       : { instrumentos: [] });
     render(<Reajuste contratoId={7} podeEditar={false} />);
-    const cartao = await screen.findByRole("region", { name: "Reajuste fora das datas-base do cadastro" });
+    const cartao = await screen.findByRole("region", { name: "Reajuste sem data-base definida ou fora do cadastro" });
     expect(within(cartao).getByRole("table", { name: "Reajuste por competência da data-base 03/2023, ciclo de 2025" })).toBeTruthy();
     const semBase = within(cartao).getByRole("table", { name: "Reajuste por competência sem data-base definida" });
     expect(semBase.querySelector("tbody tr")?.textContent).toContain(brl(300_04));
+    // a data-base e o ciclo de cada tabela a' vista (rodada 1 da PR #438), nao so' no nome para o leitor de tela
+    expect([...cartao.querySelectorAll(".resumo__rotulo")].map(p => p.textContent)).toEqual(
+      ["Data-base 03/2023, ciclo de 2025", "Data-base não definida"]);
+  });
+
+  it("cada ciclo anterior tem a linha do tempo dele em Ciclos anteriores (rodada 1 da PR #438)", async () => {
+    const termo25 = { id: 4, chave: "ap-09", tipo: "apostilamento_reajuste", numero: "AP-9", data: "2025-09-01",
+      dados: { data_base: "2024-06", ciclo: 2025 } };
+    const pleito = (id: number, numero: string, enviado_em: string, ciclo: number) => ({ id, tipo: "reajuste",
+      rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: numero, data_base_mes: "2024-06", ciclo, dias: null,
+      justificativa: null, situacao: "enviado", corpo_carta: null, montado_paginas: null, assinado_arquivo: null,
+      nome_documento: null, conferencia: null, pendencias: [], enviado_em, envio_justificativa: null, anexos: [],
+      exigidos: [], instrumento_chave: null });
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloAberto, pleito: { id: 10 } }],
+          pleitos: [pleito(10, "CT-122-LT-2026", "2026-06-10", 2026), pleito(9, "CT-90-LT-2025", "2025-06-10", 2025)],
+          linhas_do_tempo: [
+            { data_base_mes: "2024-06", ciclo: 2025, termo: termo25,
+              aditivos: [{ id: 2, numero: "2º TA", tipo: "prazo", data_assinatura: "2025-08-01" }] },
+            { data_base_mes: "2024-06", ciclo: 2026, termo: null, aditivos: [] }] }
+      : { instrumentos: [termo25] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const tempo25 = await screen.findByRole("list", { name: "Linha do tempo do ciclo de 2025" });
+    expect(tempo25.closest("details")?.querySelector("summary")?.textContent).toBe("Ciclos anteriores");
+    expect([...tempo25.querySelectorAll("li")].map(li => li.textContent)).toEqual([
+      "10/06/2025Pleito de reajuste CT-90-LT-2025 enviado",
+      "01/08/2025Aditivo de prazo 2º TA assinado",
+      "01/09/2025Apostilamento AP-9"]);
+    // o corrente segue no cartao, so' com o que e' dele
+    const tempo26 = screen.getByRole("list", { name: "Linha do tempo do ciclo de 2026" });
+    expect(tempo26.closest("details")).toBeNull();
+    expect([...tempo26.querySelectorAll("li")].map(li => li.textContent)).toEqual(
+      ["10/06/2026Pleito de reajuste CT-122-LT-2026 enviado"]);
   });
 
   it("mostra a parte do contrato de cada data-base ao lado do mês (issue #257)", async () => {
@@ -249,8 +295,8 @@ describe("Reajuste", () => {
     render(<Reajuste contratoId={7} podeEditar={false} />);
     const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
     const apostilado = [...tabela.querySelectorAll("tbody tr")].map(tr => celulas(tr)[4]);
-    expect(apostilado.map(c => [c.textContent, c.getAttribute("title")])).toEqual([
-      [brl(130003), "Origem: apostilamento 019/2024/02/12, de 01/10/2026 (30ª medição)"],
+    expect(apostilado.map(c => [visivel(c), c.getAttribute("title")])).toEqual([
+      [`${brl(130003)} (30ª)`, "Origem: apostilamento 019/2024/02/12, de 01/10/2026 (30ª medição)"],
       [brl(-1001), "Origem: apostilamento 019/2024/02/11, de 15/09/2026"]]);
     expect(brl(-1001).startsWith("−")).toBe(true);           // o reajuste negativo leva o sinal
     expect(screen.getByText("atendido pelo apostilamento 019/2024/02/12")).toBeTruthy();
