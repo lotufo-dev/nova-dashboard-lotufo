@@ -1,7 +1,7 @@
 import datetime
 import sqlite3
-from fastapi import APIRouter, Depends, Query
-from app import auditoria, backup, correio, instalacao, siga, tempo
+from fastapi import APIRouter, Depends, HTTPException, Query
+from app import auditoria, backup, copia_dono, correio, instalacao, siga, tempo
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -36,6 +36,19 @@ def saude_do_backup(usuario: dict = Depends(exigir("administrar", com_csrf=False
     autorizada a copia externa nao roda (issue #417, main.py): a tela mostra o estado efetivo, nao o configurado."""
     externa = backup.pasta_externa() is not None and instalacao.ligada()
     return backup.situacao(backup.pasta_local(), externa, tempo.agora_utc())
+
+
+@router.post("/copia-dono")
+def gerar_copia_dono(usuario: dict = Depends(exigir("administrar"))):
+    """Botao "Gerar cópia do dono agora" (Administracao > Saude, issue #419). So' admin.
+    Sem chave publica configurada nada e' gerado."""
+    try:
+        destino = copia_dono.gerar_e_registrar(backup.pasta_local().parent.parent, backup.pasta_local())
+    except copia_dono.NaoConfigurada:
+        raise HTTPException(409, copia_dono.NAO_CONFIGURADA)
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível gerar a cópia do dono: {copia_dono._motivo(e)}")
+    return {"arquivo": destino.name}
 
 
 @router.get("/saude")
