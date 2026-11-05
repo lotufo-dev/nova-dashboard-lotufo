@@ -389,3 +389,21 @@ def test_carga_posterior_nao_superada_nao_semeia_meses_anteriores_a_carta(conn, 
     ef = cronograma.previsto_efetivo(conn, cid)
     assert ef == {"2026-01": 40_00, "2026-10": 60_00}
     assert sum(ef.values()) == 100_00
+
+
+def test_carga_posterior_nao_semeia_mes_vazio_entre_a_carta_e_a_carga(conn, cid):
+    # issue #413: fevereiro/2026 fica sem previsto na carta; a carga de 04/09/2026 nao o semeia de volta
+    cronograma.nova_versao(conn, 1, cid, [("2026-01", 40_00), ("2026-03", 30_00), ("2026-10", 30_00)], "manual",
+                           data_documento="2026-02-10")
+    _cadastro(conn, cid, 1, "carta1", "carta", "2026-02-10")
+    _carga(conn, cid, [("2026-02", 8_00), ("2026-10", 30_00)])      # carga de 04/09/2026
+    ef = cronograma.previsto_efetivo(conn, cid)
+    assert "2026-02" not in ef
+    assert sum(ef.values()) == 100_00
+
+
+def test_sem_repactuacao_a_semeadura_antiga_continua_valendo(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2026-10", 50_00)], "manual", data_documento="2026-09-04")
+    _carga(conn, cid, [("2026-01", 10_00), ("2026-10", 50_00)])
+    ef = cronograma.previsto_efetivo(conn, cid)
+    assert ef["2026-01"] == 10_00
