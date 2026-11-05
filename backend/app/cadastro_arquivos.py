@@ -292,6 +292,22 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
                 if i["tipo"] in ("aditivo_prazo", "apostilamento_prazo", "aditivo_misto")}
     for inst in c["instrumentos"]:
         d, onde = inst["dados"], f"instrumentos[{inst['chave']}]"
+        if inst["tipo"] in TIPOS_COM_NATUREZA:
+            # issue #390 (revisor, PR #407): no aditivo de reajuste, `ciclo` diz o ciclo que ele atende (o termo
+            # assinado depois do aniversario seguinte) e o aplicar liga o pleito desse ciclo; nada fica engolido
+            if d.get("ciclo") is not None:
+                if inst.get("natureza") != "reajuste":
+                    falha(f"{onde}.ciclo", "só vale no aditivo de natureza reajuste")
+                elif not _CICLO.match(str(d["ciclo"])):
+                    falha(f"{onde}.ciclo", "use o ano do ciclo (ex.: 2026)")
+            if d.get("data_base") is not None:
+                if inst.get("natureza") != "reajuste":
+                    falha(f"{onde}.data_base", "só vale no aditivo de natureza reajuste")
+                elif str(d["data_base"]) not in meses:
+                    falha(f"{onde}.data_base", "use AAAA-MM de uma das datas_base do contrato")
+            if inst.get("natureza") == "reajuste" and len(meses) != 1:
+                avisos.append(f"{c['nome_curto']}: {onde}: o contrato não tem uma data-base só; o aditivo de "
+                              "reajuste não fecha ciclo nem atende pleito")
         if inst["tipo"] == "apostilamento_reajuste":
             if d.get("data_base") is not None and str(d["data_base"]) not in meses:
                 falha(f"{onde}.data_base", "use AAAA-MM de uma das datas_base do contrato")

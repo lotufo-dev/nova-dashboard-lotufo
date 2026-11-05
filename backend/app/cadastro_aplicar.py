@@ -323,7 +323,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])
     _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"])
     _apostilamentos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"])
-    _aditivos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"])
+    _aditivos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"], rel["avisos"])
     _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
     return cid
 
@@ -501,11 +501,12 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
             ligar(p, inst)
 
 
-def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
+def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Issue #390: na SES o reajuste sai por termo aditivo de valor (`natureza: reajuste`). Como o apostilamento, o
-    aditivo atende o ultimo pleito de reajuste enviado ate' a data dele, no ciclo do ultimo aniversario da data-base
-    antes da assinatura (`reajuste.ciclo_do_aditivo`), e o pleito recebe `instrumento_chave`. O aditivo nao diz a
-    data-base: com mais de uma no contrato, nao se liga nada (seria adivinhar)."""
+    aditivo atende o ultimo pleito de reajuste enviado ate' a data dele, no ciclo que o cadastro declara (`ciclo` no
+    aditivo: o termo assinado depois do aniversario seguinte, revisor PR #407) ou, sem ele, no do ultimo aniversario
+    da data-base antes da assinatura (`reajuste.ciclo_do_aditivo`), e o pleito recebe `instrumento_chave`. O aditivo
+    nao guarda a data-base: com mais de uma no contrato, nao se liga nada (seria adivinhar; o validar avisa)."""
     bases = [d["mes"] for d in c["datas_base"]]
     if len(bases) != 1:
         return
@@ -518,7 +519,8 @@ def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
         if conn.execute("SELECT 1 FROM pleitos WHERE contrato_id=? AND instrumento_chave=? LIMIT 1",
                         (contrato_id, inst["chave"])).fetchone():
             continue
-        ciclo = reajuste.ciclo_do_aditivo(base, inst["data"])
+        declarado = inst["dados"].get("ciclo")
+        ciclo = int(str(declarado)[:4]) if declarado is not None else reajuste.ciclo_do_aditivo(base, inst["data"])
         if ciclo is None:
             continue
         p = conn.execute("SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? "
@@ -526,6 +528,13 @@ def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
                          "AND date(enviado_em) <= date(?) ORDER BY enviado_em DESC, id DESC LIMIT 1",
                          (contrato_id, base, ciclo, inst["data"])).fetchone()
         if p is None or p["instrumento_chave"] is not None:
+            # sem pleito do ciclo declarado para ligar, a aba le o ciclo pela data da assinatura: quem aplica precisa
+            # saber quando os dois diferem
+            pela_data = reajuste.ciclo_do_aditivo(base, inst["data"])
+            if declarado is not None and ciclo != pela_data:
+                onde = f"no ciclo {pela_data} (pela data)" if pela_data else "em ciclo nenhum"
+                avisos.append(f"{c['nome_curto']}/{inst['chave']}: aditivo de reajuste do ciclo {ciclo} sem pleito "
+                              f"enviado desse ciclo até a assinatura; sem a ligação, a aba Reajuste o lê {onde}")
             continue
         conn.execute("UPDATE pleitos SET instrumento_chave=? WHERE id=?", (inst["chave"], p["id"]))
         auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", p["id"],

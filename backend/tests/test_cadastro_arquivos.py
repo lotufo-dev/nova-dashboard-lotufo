@@ -728,3 +728,34 @@ def test_apostilamento_sem_competencias_sem_data_base_em_contrato_de_duas_bases_
     ap = {k: v for k, v in _apostilamento(percentual="6,76").items() if k != "data_base"}
     cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
     assert any("instrumentos[ap-reaj-1]" in a and "data-base" in a for a in cad["avisos"]), cad["avisos"]
+
+
+# --- issue #390 (revisor, PR #407): `ciclo`/`data_base` no aditivo de reajuste nao ficam engolidos ---
+
+TA_REAJ = {"chave": "ta-08", "tipo": "aditivo_valor", "data": "2026-10-20", "delta_valor": "1.000,01",
+           "natureza": "reajuste"}
+
+
+def test_ciclo_do_aditivo_de_reajuste_e_aceito_e_vai_para_os_dados(tmp_path):
+    c = {**CONTRATO, "instrumentos": [{**TA_REAJ, "ciclo": 2025, "data_base": "2023-04"}]}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[c]))
+    assert cad["contratos"][0]["instrumentos"][0]["dados"] == {"ciclo": 2025, "data_base": "2023-04"}
+    assert cad["avisos"] == []
+
+
+@pytest.mark.parametrize("extra, campo", [
+    ({"ciclo": "2025/26"}, "ciclo"),
+    ({"natureza": "execucao", "ciclo": 2025}, "ciclo"),
+    ({"natureza": "execucao", "data_base": "2023-04"}, "data_base"),
+    ({"data_base": "2021-10"}, "data_base"),
+])
+def test_ciclo_ou_data_base_invalido_no_aditivo_e_erro(tmp_path, extra, campo):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [{**TA_REAJ, **extra}]}]))
+    assert any(f"instrumentos[ta-08].{campo}" in e for e in erros), erros
+
+
+def test_aditivo_de_reajuste_em_contrato_de_duas_bases_e_aviso(tmp_path):
+    bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
+             {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [TA_REAJ]}]))
+    assert any("instrumentos[ta-08]" in a and "não fecha ciclo" in a for a in cad["avisos"]), cad["avisos"]

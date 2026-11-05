@@ -958,3 +958,26 @@ def test_aditivo_de_execucao_nao_atende_pleito_e_o_de_reajuste_nao_pega_o_enviad
                                                                 pleitos_anteriores=[PLEITO_2026, depois])]))
     ligados = dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall())
     assert ligados == {"CT-122-LT-2026": "ta-08", "CT-200-LT-2026": None}
+
+
+def test_ciclo_declarado_no_aditivo_liga_o_pleito_desse_ciclo_e_nao_o_do_ciclo_da_data(conn):
+    # revisor (PR #407): o termo do reajuste de 2025 assinado depois do aniversario de 2026, com o pleito de 2026 ja'
+    # enviado: o `ciclo` do cadastro liga o pleito de 2025; o de 2026 segue esperando (o aviso dele nao some)
+    pleito_2025 = {**PLEITO_2026, "oficio": "CT-90-LT-2025", "data": "2025-04-20", "ciclo": 2025}
+    tardio = {**TA_REAJ, "dados": {"ciclo": 2025}}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[tardio],
+                                                                    pleitos_anteriores=[pleito_2025, PLEITO_2026])]))
+    ligados = dict(conn.execute("SELECT numero_oficio, instrumento_chave FROM pleitos").fetchall())
+    assert ligados == {"CT-090-LT-2025": "ta-08", "CT-122-LT-2026": None}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-090-LT-2025: atendido por ta-08"]
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))[0]
+    assert (k["ciclo"], k["situacao"]) == (2026, "apostilamento_pendente")
+
+
+def test_ciclo_declarado_sem_pleito_desse_ciclo_avisa_que_a_aba_le_pela_data(conn):
+    tardio = {**TA_REAJ, "dados": {"ciclo": 2025}}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[tardio],
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+    assert any("MT-402/ta-08" in a and "ciclo 2025" in a and "ciclo 2026 (pela data)" in a for a in r["avisos"]), \
+        r["avisos"]
