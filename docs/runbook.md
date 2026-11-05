@@ -211,7 +211,7 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
    **Script 1, pull e ensaio** (não grava nada):
 
    ```powershell
-   Set-Location C:\DashboardLotufo\app\backend
+   Set-Location C:\DashboardLotufo\app\backend -ErrorAction Stop
    git -C C:\DashboardLotufo\cadastro pull --ff-only
    if ($LASTEXITCODE -ne 0) { exit 1 }
    $env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"
@@ -221,12 +221,12 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
    if ($LASTEXITCODE -ne 0) { exit 1 }
    ```
 
-   **Entre os dois**: ler o relatório do ensaio de produção (o que mudou desde o ensaio do Mac, categorias do passo 2) e, em cada linha `correção`, conferir o `planilha_enviada_em` (seção "Regra: competência de medição com planilha ou carta enviada"). Qualquer `erro`, `conflito` ou linha inesperada: parar, corrigir o CSV no repositório privado e repetir o script 1.
+   **Entre os dois**: ler o relatório do ensaio de produção (o que mudou desde o ensaio do Mac, categorias do passo 2) e, em cada linha `correção`, conferir o `planilha_enviada_em` (seção "Regra: competência de medição com planilha ou carta enviada"). Qualquer `erro`, `conflito` ou linha inesperada: parar, corrigir o CSV no repositório privado e repetir o script 1. O `-ErrorAction Stop` no `Set-Location` é necessário: no PowerShell 5.1 um `Set-Location` que falha só mostra o erro e o script segue na pasta errada. "Arquivo não encontrado" no script 1 significa que o CSV ainda não chegou ao repositório privado; "Banco ilegível" indica que a conta de deploy não tem leitura no banco de produção.
 
    **Script 2, gravação** (só depois do OK sobre o relatório de produção):
 
    ```powershell
-   Set-Location C:\DashboardLotufo\app\backend
+   Set-Location C:\DashboardLotufo\app\backend -ErrorAction Stop
    $env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"
    $env:DASH_DB_PATH = "C:\DashboardLotufo\dados\dashboard.db"
    $csv = "C:\DashboardLotufo\cadastro\medicoes\<slug>.csv"
