@@ -207,6 +207,9 @@ def create_app() -> FastAPI:
         # que vai para outro disco ou compartilhamento, nao.
         backup_mod.agendar_backup_horario(db.db_path(), backup_mod.pasta_local(),
                                           None if copia else backup_mod.pasta_externa())
+        # Issue #422: protecao da tabela de usuarios e cadeia da auditoria, de hora em hora (local, vale na copia)
+        from app import seguranca
+        seguranca.agendar()
         # Issue #423: a sentinela do log de seguranca do Windows (so' roda no Windows e fora de dev)
         from app import sentinela
         sentinela.agendar()

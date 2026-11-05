@@ -31,6 +31,18 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def conferencias_zeradas(monkeypatch):
+    """Issue #457: a ultima conferencia do codigo em producao (#421) mora no modulo `app.integridade`. Sem zerar, o
+    "Sem registro do ultimo deploy" de um teste aparecia no bloco Seguranca do teste seguinte do mesmo worker do xdist.
+    Cada teste comeca como o processo recem-subido: sem conferencia. As threads que preenchiam isso no meio de outro
+    teste (subida com jobs em test_instalacao) nao sobem mais nos testes."""
+    from app import integridade, seguranca
+    monkeypatch.setattr(integridade, "ESTADO", None)
+    monkeypatch.setattr(integridade, "_anterior", None)
+    monkeypatch.setattr(seguranca, "_conferencia", [])      # a conferencia da protecao de usuarios (#422), idem
+
+
+@pytest.fixture(autouse=True)
 def instalacao_dev(request, monkeypatch):
     """Os testes rodam como `dev` (issue #417): nada desligado e nenhum arquivo de instalacao exigido. Quem testa a
     conferencia de verdade marca `instalacao_real` e assina o arquivo com um par de chaves gerado no proprio teste."""

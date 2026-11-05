@@ -241,6 +241,11 @@ def _subir(monkeypatch, tmp_path, jobs=True):
                         lambda banco, local, externa: chamadas.append(("backup", externa)))
     monkeypatch.setattr(sincronizacao_rm, "agendar", lambda: chamadas.append(("rm",)))
     monkeypatch.setattr(cobranca_certidoes, "agendar", lambda: chamadas.append(("cobranca",)))
+    # Issue #457: as conferencias locais (#421, #422, #423) subiam threads de verdade que seguiam vivas no worker e
+    # gravavam o estado delas no meio dos testes seguintes
+    from app import integridade, seguranca, sentinela
+    for modulo in (integridade, seguranca, sentinela):
+        monkeypatch.setattr(modulo, "agendar", lambda *a, **k: None)
     monkeypatch.setenv("DASH_BACKUP_EXTERNO", str(tmp_path / "externo"))
     monkeypatch.setenv("DASH_SEM_FRONTEND", "1")
     if jobs:

@@ -145,6 +145,7 @@ export type FiltroAuditoria = { acao?: string | null; pessoa?: string | null; de
 const ROTULO_ACAO: Record<string, string> = {
   "auth.login": "Entrada no sistema", "usuario.login": "Entrada no sistema",
   "auth.login_falha": "Tentativa de entrada recusada", "auth.logout": "Saída do sistema",
+  "seguranca.alerta": "Alerta de segurança", "seguranca.alerta_resolvido": "Alerta de segurança resolvido",
   "usuario.criar": "Usuário criado", "usuario.atualizar": "Usuário alterado", "usuario.desbloquear": "Usuário desbloqueado",
   "usuario.senha_redefinida": "Senha redefinida pelo admin", "usuario.senha_trocada": "Senha trocada",
   "medicao.criar": "Medição criada", "medicao.estado": "Mudança de estado da medição",
