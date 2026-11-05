@@ -1316,13 +1316,41 @@ def test_corrige_do_aditivo_fica_gravado_e_trava(conn):
     assert r["instrumentos"]["alterados"] == ["MT-402/ta-09"]
     antes, depois = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.instrumento' "
                                  "ORDER BY id DESC LIMIT 1").fetchone()
-    assert (json.loads(antes), json.loads(depois)) == ({"corrige_chave": None}, {"corrige_chave": "ta-08"})
+    assert (json.loads(antes), json.loads(depois)) == ({"corrige_chave": None, "observacao": None},
+                                                       {"corrige_chave": "ta-08", "observacao": "Corrige ta-08"})
     assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-09"]
     assert cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))["instrumentos"]["alterados"] == []
     with pytest.raises(ValueError, match="corrige: 'ta-08' → None"):
         cadastro_aplicar.aplicar(conn, 1, cad(None))
     with pytest.raises(ValueError, match="corrige: 'ta-08' → 'ta-07'"):
         cadastro_aplicar.aplicar(conn, 1, cad("ta-07"))
+
+
+def test_aditivo_de_prazo_que_corrige_o_de_reajuste_nao_o_tira_nem_trava(conn):
+    # /code-review: o aditivo de prazo corrige outra coisa no de reajuste (o prazo); o reajuste segue valendo, a
+    # ligacao fica, e o `corrige` dele nao trava o aplicar (o motor nao o le)
+    prazo = {**AD_VALOR, "chave": "ta-10", "tipo": "aditivo_prazo", "numero": "019/2024/01/10", "data": "2026-08-20",
+             "delta_valor_centavos": 0, "nova_execucao_fim": "2027-06-30", "natureza": None, "corrige": "ta-08"}
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, prazo], pleitos_anteriores=[PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08"}
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-08"]
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**prazo, "corrige": None}],
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    assert r["instrumentos"]["alterados"] == [] and r["pleitos"]["alterados"] == []
+
+
+def test_correcao_sem_base_determinavel_tira_a_ligacao_do_corrigido_com_aviso(conn):
+    # /code-review: o contrato ganhou a segunda data-base e a correcao nao declara a dela; o corrigido deixa de valer
+    # e o pleito dele volta a esperar o termo, com aviso (nada some em silencio)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    duas = [{"mes": "2023-04", "indice": "setorial"}, {"mes": "2023-06", "indice": "SICRO"}]
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR], datas_base=duas,
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": None}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: sem termo (ta-09 corrige ta-08)"]
+    assert any("MT-402/ta-09" in a and "CT-122-LT-2026" in a and "ligação saiu" in a for a in r["avisos"]), r["avisos"]
+    assert _trilha_pleitos(conn)[-1] == ({"instrumento_chave": "ta-08"}, {"instrumento_chave": None})
 
 # --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
 

@@ -94,15 +94,17 @@ def aditivo_de_reajuste(a: str, com_corrigido: bool = False) -> str:
     apostilamento. O aditivo assinado e nao cancelado fecha o ciclo como o apostilamento fecha. Com valor: o misto so'
     de prazo (delta zero) nao concede reajuste (gate Sol, PR #407). Condicao SQL sobre o alias `a` de `aditivos`.
 
-    Issue #409 (migracao 059): aditivo corrigido por outro (`corrige_chave` do corretor) nao vale, como o apostilamento
-    corrigido (`_termo_vale`); numa cadeia (TA3 corrige TA2, que corrige TA1) so' o ultimo vale. `com_corrigido`: o
-    aditivo de reajuste mesmo que corrigido (o aplicar, para achar o pleito que o corrigido atendia)."""
+    Issue #409 (migracao 059): aditivo corrigido por outro aditivo de reajuste (`corrige_chave` do corretor) nao vale,
+    como o apostilamento corrigido por outro apostilamento de reajuste (`_termo_vale`); numa cadeia (TA3 corrige TA2,
+    que corrige TA1) so' o ultimo vale. O aditivo de prazo ou de execucao que corrige um de reajuste nao o tira (corrige
+    outra coisa nele). `com_corrigido`: o aditivo de reajuste mesmo que corrigido (o aplicar, para achar o pleito que
+    o corrigido atendia)."""
     sql = (f"{a}.status='assinado' AND {a}.cancelado_em IS NULL AND {a}.natureza='reajuste' "
            f"AND {a}.tipo IN ('valor','misto') AND {a}.delta_valor_centavos <> 0 AND {a}.data_assinatura IS NOT NULL")
     if com_corrigido:
         return sql
     return (f"{sql} AND NOT EXISTS (SELECT 1 FROM aditivos x WHERE x.contrato_id = {a}.contrato_id "
-            f"AND x.corrige_chave = {a}.chave_cadastro)")
+            f"AND x.corrige_chave = {a}.chave_cadastro AND {aditivo_de_reajuste('x', com_corrigido=True)})")
 
 
 def ciclo_do_aditivo(mes_base: str, data_assinatura: str) -> int | None:

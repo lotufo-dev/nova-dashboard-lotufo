@@ -987,3 +987,16 @@ def test_cadeia_de_correcao_de_aditivo_so_o_ultimo_vale(obra_ses):
     # o pleito ligado a um elo corrigido da cadeia espera o proximo `aplicar` (que o passa ao TA3)
     _pleito_2025(c, cid, chave="ta-01")
     assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True) is None
+
+
+def test_so_o_aditivo_de_reajuste_que_corrige_tira_o_corrigido(obra_ses):
+    # /code-review: o aditivo de prazo, o de execucao e o cancelado que dizem corrigir o de reajuste corrigem outra
+    # coisa nele (ou nao valem): o termo de reajuste segue fechando o ciclo
+    c, cid = obra_ses
+    _aditivo_reajuste(c, cid, "ta-01", "2025-11-20", data_base="2021-10")
+    _aditivo_reajuste(c, cid, "ta-02", "2025-12-01", tipo="prazo", delta=0, natureza=None,
+                      nova_execucao_fim="2027-06-30", corrige="ta-01")
+    _aditivo_reajuste(c, cid, "ta-03", "2025-12-02", natureza="execucao", corrige="ta-01")
+    _aditivo_reajuste(c, cid, "ta-04", "2025-12-03", data_base="2021-10", cancelado=True, corrige="ta-01")
+    assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-01"
+    assert [a["chave"] for a in reajuste.aditivos_de_reajuste(c, cid)] == ["ta-01"]
