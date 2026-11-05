@@ -114,6 +114,46 @@ O servidor subiu em modo cópia. O motivo está no `/api/health`: `ausente` (arq
 ### Trocar de máquina
 Assinar para o nome da máquina nova e copiar para a `segredos` dela antes da primeira subida (seção "Mudar de servidor"). O arquivo da máquina antiga não vale na nova (motivo `maquina`), e o da nova não vale na antiga.
 
+## Sentinela (issue #423)
+Uma thread do servidor lê o log de Segurança do Windows a cada 5 minutos (`wevtutil`, sem dependência nova) e põe no bloco Segurança de Administração > Saúde, por 7 dias, o que indica cópia ou leitura de dados e segredos de dentro da VM ou pela rede. Só roda no Windows e fora de `DASH_DEV=1`; no resto, a Saúde mostra "Sentinela não roda neste ambiente". Cada achado também vira linha `seguranca.sentinela` na auditoria (evento, conta, processo, pasta, quantidade, hora).
+
+### Pré-requisitos (uma vez, na VM, como administrador)
+`<raiz>` é a pasta de produção (a que tem `dados`, `segredos` e `cadastro`). Subcategorias pelo GUID, porque o Windows está em português.
+```powershell
+auditpol /set /subcategory:"{0CCE921D-69AE-11D9-BED3-505054503030}" /success:enable   # Sistema de Arquivos
+auditpol /set /subcategory:"{0CCE922F-69AE-11D9-BED3-505054503030}" /success:enable   # Alteração da política de auditoria
+wevtutil sl Security /ms:268435456                                                    # log de 256 MB
+$raiz = '<raiz>'
+foreach ($p in 'dados','segredos','cadastro') {
+  $acl = Get-Acl -Path "$raiz\$p"
+  foreach ($sid in 'S-1-5-4','S-1-5-2') {   # INTERATIVO e REDE
+    $id = New-Object System.Security.Principal.SecurityIdentifier $sid
+    $regra = New-Object System.Security.AccessControl.FileSystemAuditRule($id, 'Read,Write,ChangePermissions', 'ContainerInherit,ObjectInherit', 'None', 'Success')
+    $acl.AddAuditRule($regra)
+  }
+  Set-Acl -Path "$raiz\$p" -AclObject $acl
+}
+```
+O servidor, o antivírus e o backup rodam como SYSTEM, que não carrega INTERATIVO nem REDE: o volume fica baixo e só aparece quem entrou na VM ou leu pela rede (`\\<servidor>\C$`).
+
+### Lista de contas e processos conhecidos
+`<raiz>\segredos\sentinela.json` (fora do repositório). Acesso a arquivo (4663) só deixa de gerar item quando a conta **e** o processo estão na lista; a conta pode vir com ou sem domínio. Contas listadas também não geram o aviso de logon com privilégio (4672). Exemplo com nomes fictícios:
+```json
+{"contas": ["SERVIDOR\\operador.exemplo", "admin.exemplo"], "processos": ["explorer.exe", "robocopy.exe"]}
+```
+Estado da sentinela (último registro lido): `<raiz>\dados\sentinela.json`. Na primeira rodada ela só marca o ponto de partida do log; não lê o histórico.
+
+### O que vira item
+- **4663** nas três pastas, agrupado por conta, processo, pasta e hora: "Leitura de segredos por explorer.exe (<conta>), 12 arquivos". `segredos` e `dados` são críticos, `cadastro` é ação.
+- **4670** (permissão trocada nas três pastas): crítico.
+- **4672** (logon com privilégio especial) de conta fora da lista e fora das contas de sistema: um item por conta por dia, atenção.
+- **4698 a 4702** (tarefa criada, apagada, habilitada, desabilitada, alterada) com nome começando por `DashboardLotufo`: crítico. O próprio deploy mexe nessas tarefas; um item no horário de um deploy é esperado.
+- **1102** (log limpo) e **4719** (política de auditoria alterada): crítico.
+- A cada rodada, `auditpol /get` e a leitura da SACL conferem que a auditoria e a SACL continuam no lugar: "Auditoria de arquivos desligada", "Auditoria da alteração da política desligada" ou "SACL ausente em <pasta>" (crítico). Se a sentinela não consegue ler o log, a auditoria ou a SACL, vira item de atenção. Cada falha vira item uma vez, quando começa; volta a avisar se corrigir e falhar de novo.
+
+### Limites
+Quem administra a VM pode desligar a auditoria ou limpar o log, mas cada uma dessas ações gera o próprio evento (4719, 1102), que a sentinela lê antes de perder o acesso. Parar o servidor para a sentinela (e o resumo diário some: tratado na issue de alertas). Eventos entre o fim da rodada e o início de uma limpeza do log podem se perder se o log for limpo antes da próxima rodada.
+
 ## Restaurar o banco a partir de um snapshot
 1. Parar o servidor (tarefa agendada e qualquer uvicorn em 8080/8443).
 2. Mover `dashboard.db`, `-wal` e `-shm` atuais para uma pasta de quarentena.
