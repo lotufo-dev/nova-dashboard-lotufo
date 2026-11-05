@@ -84,6 +84,11 @@ def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
     rollback = script.index("ROLLBACK para $anterior")
     assert deploy < rollback
     assert "if (SaudavelENovo) {" in script[rollback:]
+    # rollback para um commit que ja' confere a instalacao e voltou em modo copia: ROLLBACK OK, mas com aviso
+    aviso = script[script.index("function AvisarSeCopia"):script.index("$anterior = (")]
+    assert '$saude.instalacao -and $saude.instalacao -ne "autorizada"' in aviso and "Write-Warning" in aviso
+    linha_ok = next(linha for linha in script[rollback:].splitlines() if "ROLLBACK OK" in linha)
+    assert linha_ok.rstrip().endswith("AvisarSeCopia }")
     # o Saudavel antigo (so' o status) nao pode ter sobrado em outro lugar
     assert script.count("function Saudavel") == 2      # Saudavel e SaudavelENovo
 

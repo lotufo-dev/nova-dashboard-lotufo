@@ -117,6 +117,15 @@ function SaudavelENovo([switch]$ExigirInstalacao) {
     }
     return $true
 }
+# Depois do ROLLBACK OK: o commit anterior pode ja' conferir a instalacao (issue #417) e ter voltado em modo copia, sem
+# envio de e-mail e sem RM. Commit anterior ao #417 nao tem o campo e nao avisa.
+function AvisarSeCopia {
+    try { $saude = (Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing).Content | ConvertFrom-Json }
+    catch { return }
+    if ($saude.instalacao -and $saude.instalacao -ne "autorizada") {
+        Write-Warning "producao de volta, mas em modo copia: instalacao $($saude.instalacao) (motivo: $($saude.instalacao_motivo)), sem envio de e-mail e sem RM - ver docs\runbook.md (Instalacao assinada)"
+    }
+}
 
 $anterior = (& git -C $AppDir rev-parse HEAD).Trim()
 New-Item -ItemType File -Path $pause -Force | Out-Null   # segura o watchdog durante o deploy
@@ -175,7 +184,7 @@ try {
         Write-Warning "Saude NAO voltou -> ROLLBACK para $anterior"
         Construir $anterior
         Reiniciar
-        if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow }
+        if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
         else { Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log)" -ForegroundColor Red }
         exit 1
     }
