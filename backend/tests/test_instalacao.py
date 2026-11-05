@@ -3,6 +3,8 @@
 Os testes geram o proprio par de chaves e trocam a chave publica embutida por ela; a do dono so' aparece no teste
 que confere que ela carrega e recusa o que outra chave assinou. O conftest faz todo teste rodar como `dev`; quem
 confere o arquivo de verdade marca `instalacao_real`."""
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -106,6 +108,27 @@ def test_no_windows_sem_resposta_da_api_cai_no_nome_de_rede(monkeypatch):
 @pytest.mark.instalacao_real
 def test_sem_arquivo_e_copia_por_ausencia(chave, ambiente):
     assert instalacao.verificar() == {"instalacao": "nao-autorizada", "motivo": "ausente"}
+
+
+@pytest.mark.instalacao_real
+def test_arquivo_que_existe_e_nao_se_le_tem_motivo_proprio(chave, ambiente, caplog):
+    """Pasta no lugar do arquivo (ou ACL que barra a leitura): `ilegivel`, nao `ausente`, para ninguem copiar de novo
+    um arquivo que ja' esta' la'; o log leva so' o tipo do erro, sem o caminho."""
+    ambiente.mkdir(parents=True)
+    assert instalacao.verificar() == {"instalacao": "nao-autorizada", "motivo": "ilegivel"}
+    assert "segredos" not in caplog.text and str(ambiente) not in caplog.text
+    assert "nao se le" in caplog.text
+
+
+@pytest.mark.instalacao_real
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="chmod 000 nao barra o Windows nem o root")
+def test_arquivo_sem_permissao_de_leitura_e_ilegivel(chave, ambiente):
+    _gravar(ambiente, instalacao.assinar(chave, MAQUINA))
+    ambiente.chmod(0)
+    try:
+        assert instalacao.verificar() == {"instalacao": "nao-autorizada", "motivo": "ilegivel"}
+    finally:
+        ambiente.chmod(0o600)
 
 
 @pytest.mark.instalacao_real

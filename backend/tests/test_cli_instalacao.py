@@ -144,6 +144,19 @@ def test_verificar_nao_autorizada_sai_com_um_e_o_motivo(tmp_path, capsys, monkey
     assert capsys.readouterr().out.strip() == f"Instalação NÃO autorizada (motivo: {motivo})."
 
 
+def test_verificar_arquivo_que_nao_se_le_diz_ilegivel_sem_o_caminho(tmp_path, capsys, caplog, monkeypatch):
+    """Revisor da PR #437: com o arquivo la' e sem leitura, `ausente` mandaria copiar de novo; e a mensagem do sistema
+    trazia o caminho para a saida do deploy."""
+    arquivo = _assinado(tmp_path, capsys, monkeypatch)
+    arquivo.unlink()
+    arquivo.mkdir()                             # uma pasta no lugar do arquivo: existe e nao se le
+    assert cli.main(["instalacao", "verificar", "--arquivo", str(arquivo)]) == 1
+    saida = capsys.readouterr()
+    assert saida.out.strip() == "Instalação NÃO autorizada (motivo: ilegivel)."
+    for texto in (saida.out, saida.err, caplog.text):
+        assert str(tmp_path) not in texto and "instalacao.json" not in texto
+
+
 def test_verificar_nao_tem_o_atalho_do_dev(tmp_path, capsys, monkeypatch):
     """Sessao de deploy com DASH_DEV=1 herdado nao passa sem o arquivo."""
     monkeypatch.setenv("DASH_DEV", "1")

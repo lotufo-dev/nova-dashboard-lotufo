@@ -37,7 +37,7 @@ MCowBQYDK2VwAyEABKEKf2uSKWVw3pPwMkSnd+viIu/NNudBFSdexV95tjk=
 """
 
 AUTORIZADA, NAO_AUTORIZADA, DEV = "autorizada", "nao-autorizada", "dev"
-AUSENTE, ASSINATURA, MAQUINA = "ausente", "assinatura", "maquina"
+AUSENTE, ILEGIVEL, ASSINATURA, MAQUINA = "ausente", "ilegivel", "assinatura", "maquina"
 MSG_ENVIO = "Envio desligado: instalação não autorizada."
 MSG_RM = "Sincronização desligada: instalação não autorizada."
 # O que a assinatura cobre (o documento sem a propria assinatura) e o teto do arquivo: o real tem ~200 bytes.
@@ -140,10 +140,13 @@ def conferir_caminho(caminho: Path | None) -> dict:
     try:
         with open(caminho, "rb") as f:
             bruto = f.read(TAMANHO_MAX + 1)
-    except OSError as e:
-        if not isinstance(e, FileNotFoundError):
-            log.warning("arquivo da instalacao ilegivel: %s", e)
+    except FileNotFoundError:
         return {"instalacao": NAO_AUTORIZADA, "motivo": AUSENTE}
+    except OSError as e:
+        # O arquivo esta' la' e nao se le (ACL, pasta no lugar dele): motivo proprio, para ninguem copiar de novo um
+        # arquivo que ja' existe. So' o tipo do erro no log: a mensagem do sistema traz o caminho (revisor da PR #437).
+        log.warning("arquivo da instalacao existe e nao se le (%s)", type(e).__name__)
+        return {"instalacao": NAO_AUTORIZADA, "motivo": ILEGIVEL}
     motivo = ASSINATURA if len(bruto) > TAMANHO_MAX else conferir_arquivo(bruto, maquina_atual())
     return {"instalacao": AUTORIZADA if motivo is None else NAO_AUTORIZADA, "motivo": motivo}
 
