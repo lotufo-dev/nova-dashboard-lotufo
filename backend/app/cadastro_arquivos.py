@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from app import dinheiro, entidades, espelho, espelho_docx, tempo
+from app import dinheiro, entidades, espelho, espelho_docx, reajuste, tempo
 
 FAMILIAS = ("mtpar", "sinfra", "ses", "prefeitura")
 LEIS = ("8.666", "14.133", "13.303")
@@ -305,6 +305,13 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
                         raise ValueError("vazia")
                 except ValueError:
                     falha(f"{onde}.eficacia", f"use a data da eficácia (AAAA-MM-DD): {d['eficacia']!r}")
+            # Issue #391: sem `ciclo` o termo cai no ano da eficacia (ou da data) e instrumento aplicado nao muda
+            if d.get("ciclo") is None:
+                ano = reajuste.ciclo_do_apostilamento(d, inst["data"])
+                if ano is not None:
+                    pelo = "eficacia" if d.get("eficacia") else "data"
+                    avisos.append(f"{c['nome_curto']}: {onde}: apostilamento sem ciclo; vai contar no ciclo {ano} "
+                                  f"(pelo campo {pelo}). Diga ciclo: AAAA")
             # Issue #271: competencias e periodo; cada competencia vira previsao da data-base dele
             for campo, msg in _periodo_e_competencias(d)[1]:
                 falha(f"{onde}.{campo}", msg)
