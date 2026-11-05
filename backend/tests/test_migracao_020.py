@@ -1,3 +1,5 @@
+import shutil
+
 import pytest
 from app import db
 
@@ -86,14 +88,19 @@ def test_reexecucao_preserva_documentos_locais_e_residuo_nao_atrapalha(conn):
 
 
 def test_migrate_religa_foreign_keys_mesmo_se_o_script_falhar(tmp_path, monkeypatch):
+    # Pasta temporaria com copia das migracoes: nunca escrever na pasta versionada (issue #416),
+    # senao outro worker do xdist lista a pasta enquanto o arquivo existe.
+    pasta = tmp_path / "migracoes"
+    pasta.mkdir()
+    for f in db.MIGRATIONS_DIR.glob("*.sql"):
+        shutil.copy(f, pasta / f.name)
+    monkeypatch.setattr(db, "MIGRATIONS_DIR", pasta)
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "f.db"))
     c = db.get_conn(); db.migrate(c)
-    (db.MIGRATIONS_DIR / "999_teste_falha.sql").write_text("PRAGMA foreign_keys=OFF;\nSELECT * FROM nao_existe;\n",
-                                                          "utf-8")
+    (pasta / "999_teste_falha.sql").write_text("PRAGMA foreign_keys=OFF;\nSELECT * FROM nao_existe;\n", "utf-8")
     try:
         with pytest.raises(Exception):
             db.migrate(c)
         assert c.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     finally:
-        (db.MIGRATIONS_DIR / "999_teste_falha.sql").unlink()
         c.close()
