@@ -110,3 +110,55 @@ def test_assinar_recusa_maquina_em_branco(tmp_path, capsys, monkeypatch):
                      "--saida", str(arquivo)]) == 1
     assert "nome da máquina" in capsys.readouterr().out
     assert not arquivo.exists()
+
+
+# --- `instalacao verificar`: o deploy confere o arquivo com o codigo novo antes de trocar o processo --------------
+
+def _assinado(tmp_path, capsys, monkeypatch, maquina="MAQUINA-TESTE"):
+    privada, publica, _ = _gerar(tmp_path, capsys)
+    monkeypatch.setattr(instalacao, "CHAVE_PUBLICA", publica.read_text(encoding="ascii"))
+    monkeypatch.setattr(instalacao, "maquina_atual", lambda: "MAQUINA-TESTE")
+    arquivo = tmp_path / "segredos" / "instalacao.json"
+    assert cli.main(["instalacao", "assinar", "--chave", str(privada), "--maquina", maquina,
+                     "--saida", str(arquivo)]) == 0
+    capsys.readouterr()
+    return arquivo
+
+
+def test_verificar_autorizada_sai_com_zero_sem_caminho_nem_maquina(tmp_path, capsys, monkeypatch):
+    arquivo = _assinado(tmp_path, capsys, monkeypatch)
+    assert cli.main(["instalacao", "verificar", "--arquivo", str(arquivo)]) == 0
+    saida = capsys.readouterr().out
+    assert saida.strip() == "Instalação autorizada para esta máquina."
+    assert str(tmp_path) not in saida and "MAQUINA-TESTE" not in saida
+
+
+@pytest.mark.parametrize("caso, motivo", [("ausente", "ausente"), ("outra", "maquina"), ("alterado", "assinatura")])
+def test_verificar_nao_autorizada_sai_com_um_e_o_motivo(tmp_path, capsys, monkeypatch, caso, motivo):
+    arquivo = _assinado(tmp_path, capsys, monkeypatch, maquina="OUTRA" if caso == "outra" else "MAQUINA-TESTE")
+    if caso == "ausente":
+        arquivo.unlink()
+    elif caso == "alterado":
+        arquivo.write_bytes(arquivo.read_bytes().replace(b"MAQUINA-TESTE", b"MAQUINA-TESTF"))
+    assert cli.main(["instalacao", "verificar", "--arquivo", str(arquivo)]) == 1
+    assert capsys.readouterr().out.strip() == f"Instalação NÃO autorizada (motivo: {motivo})."
+
+
+def test_verificar_nao_tem_o_atalho_do_dev(tmp_path, capsys, monkeypatch):
+    """Sessao de deploy com DASH_DEV=1 herdado nao passa sem o arquivo."""
+    monkeypatch.setenv("DASH_DEV", "1")
+    assert cli.main(["instalacao", "verificar", "--arquivo", str(tmp_path / "nao-existe.json")]) == 1
+    assert "motivo: ausente" in capsys.readouterr().out
+
+
+def test_verificar_sem_arquivo_usa_o_caminho_da_subida(tmp_path, capsys, monkeypatch):
+    arquivo = _assinado(tmp_path, capsys, monkeypatch)
+    monkeypatch.delenv("DASH_INSTALACAO_ARQUIVO", raising=False)
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "dados" / "dashboard.db"))
+    assert arquivo == tmp_path / "segredos" / "instalacao.json"
+    assert cli.main(["instalacao", "verificar"]) == 0
+
+
+def test_gerar_chave_exige_saida(capsys):
+    assert cli.main(["instalacao", "gerar-chave"]) == 1
+    assert "exige --saida" in capsys.readouterr().out

@@ -335,7 +335,20 @@ def _conciliacao(args) -> int:
 def _instalacao(args) -> int:
     """`instalacao gerar-chave --saida <pasta>` e `instalacao assinar --chave <privada> --maquina <nome> --saida
     <arquivo>` (issue #417): rodam no Mac do dono. A chave privada nunca vai ao servidor nem ao repositório; o servidor
-    recebe só o arquivo assinado (runbook, "Instalação assinada")."""
+    recebe só o arquivo assinado (runbook, "Instalação assinada"). `instalacao verificar [--arquivo <arquivo>]` roda no
+    servidor (o deploy chama)."""
+    if args.acao == "verificar":
+        # Issue #417: o deploy roda isto com o codigo NOVO, depois do build e antes de parar a producao; sem
+        # "autorizada" ele para ali, antes de migrar o banco. Sem o atalho do dev e sem caminho nem maquina na saida.
+        r = instalacao.conferir_caminho(Path(args.arquivo) if args.arquivo else instalacao.caminho_arquivo())
+        if r["instalacao"] == instalacao.AUTORIZADA:
+            print("Instalação autorizada para esta máquina.")
+            return 0
+        print(f"Instalação NÃO autorizada (motivo: {r['motivo']}).")
+        return 1
+    if not args.saida:
+        print(f"`instalacao {args.acao}` exige --saida")
+        return 1
     if args.acao == "gerar-chave":
         try:
             privada, publica = instalacao.gerar_chave(Path(args.saida))
@@ -409,8 +422,9 @@ def main(argv: list[str] | None = None) -> int:
     con.add_argument("--usuario", required=True, help="e-mail de quem aplica")
     con.add_argument("--ensaio", action="store_true", help="mostra o relatório e desfaz")
     ins = sub.add_parser("instalacao", help="chave do dono e arquivo assinado da instalação (no Mac do dono)")
-    ins.add_argument("acao", choices=["gerar-chave", "assinar"])
-    ins.add_argument("--saida", required=True, help="pasta das chaves (gerar-chave) ou arquivo assinado (assinar)")
+    ins.add_argument("acao", choices=["gerar-chave", "assinar", "verificar"])
+    ins.add_argument("--saida", help="pasta das chaves (gerar-chave) ou arquivo assinado (assinar)")
+    ins.add_argument("--arquivo", help="arquivo a conferir (só em `verificar`; padrão: o da subida do servidor)")
     ins.add_argument("--chave", help="chave privada (só em `assinar`)")
     ins.add_argument("--maquina", help="nome da máquina, o COMPUTERNAME do servidor (só em `assinar`)")
     for nome, ajuda in (("desbloquear", "destrava a conta bloqueada por senhas erradas"),

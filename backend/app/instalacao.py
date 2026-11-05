@@ -129,7 +129,12 @@ def verificar() -> dict:
     """Le e confere o arquivo agora. {"instalacao": autorizada|nao-autorizada|dev, "motivo": None|ausente|...}."""
     if os.environ.get("DASH_DEV") == "1":
         return {"instalacao": DEV, "motivo": None}
-    caminho = caminho_arquivo()
+    return conferir_caminho(caminho_arquivo())
+
+
+def conferir_caminho(caminho: Path | None) -> dict:
+    """Confere o arquivo em `caminho` para esta maquina, sem o atalho do dev (o deploy usa, antes de trocar o
+    processo: `python -m app.cli instalacao verificar`)."""
     if caminho is None:
         return {"instalacao": NAO_AUTORIZADA, "motivo": AUSENTE}
     try:
