@@ -926,3 +926,52 @@ def test_ensaio_do_apostilamento_nao_grava_previsao(conn):
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
                                                                 pleitos_anteriores=[PLEITO_2026])]), ensaio=True)
     assert conn.execute("SELECT COUNT(*) FROM reajuste_previsoes").fetchone()[0] == 0
+
+
+# --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
+
+from app import prazos as prazos_mod
+
+PEDIDO_VALOR = {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "data_base": None, "ciclo": None,
+                "dias": None, "valor_centavos": 100000001, "objeto": "1ª RPFO"}
+
+
+def test_pleito_de_valor_e_gravado_com_o_valor_e_o_objeto_e_nao_duplica(conn):
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["criados"] == ["MT-402/valor CT-001-LT-2026"]
+    linha = conn.execute("SELECT tipo, origem, situacao, enviado_em, numero_oficio, valor_centavos, objeto "
+                         "FROM pleitos").fetchone()
+    assert tuple(linha) == ("valor", "cadastro", "enviado", "2026-03-27", "CT-001-LT-2026", 100000001, "1ª RPFO")
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"] == {"criados": [], "alterados": [], "iguais": 1}
+
+
+def test_pedido_de_valor_sem_aditivo_depois_fica_sem_resposta(conn):
+    # o aditivo de valor assinado ANTES do pedido nao o atende; o de prazo depois dele tambem nao
+    antes = {**AD_VALOR, "data": "2026-01-15"}
+    prazo = {**AP_PRAZO, "data": "2026-04-10"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[antes, prazo],
+                                                                pleitos_anteriores=[PEDIDO_VALOR])]))
+    [p] = prazos_mod.pedidos_de_valor(conn, 1)
+    assert (p["numero_oficio"], p["enviado_em"], p["valor_centavos"], p["objeto"]) == (
+        "CT-001-LT-2026", "2026-03-27", 100000001, "1ª RPFO")
+    assert p["atendido_por"] is None
+
+
+def test_pedido_de_valor_e_ligado_ao_aditivo_de_valor_assinado_depois(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])]))
+    assert prazos_mod.pedidos_de_valor(conn, 1)[0]["atendido_por"] is None
+    # o aditivo entra numa carga posterior do cadastro: a ligacao e' pela data, na leitura
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR],
+                                                                pleitos_anteriores=[PEDIDO_VALOR])]))
+    [p] = prazos_mod.pedidos_de_valor(conn, 1)
+    assert p["atendido_por"] == {"numero": "019/2024/01/01", "data_assinatura": "2026-06-30", "rotulo": "1º TA"}
+
+
+def test_pedido_de_valor_e_atendido_pelo_primeiro_aditivo_de_valor_depois_dele(conn):
+    ta2 = {**AD_VALOR, "chave": "ta-02", "data": "2026-09-30", "numero": "019/2024/01/02"}
+    segundo = {**PEDIDO_VALOR, "oficio": "CT-050-LT-2026", "data": "2026-07-10", "objeto": "2ª RPFO"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR, ta2],
+                                                                pleitos_anteriores=[PEDIDO_VALOR, segundo])]))
+    por_oficio = {p["numero_oficio"]: p["atendido_por"]["rotulo"] for p in prazos_mod.pedidos_de_valor(conn, 1)}
+    assert por_oficio == {"CT-001-LT-2026": "1º TA", "CT-050-LT-2026": "2º TA"}

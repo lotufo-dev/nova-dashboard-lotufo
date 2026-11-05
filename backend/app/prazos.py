@@ -142,6 +142,31 @@ def _ordinal(a: dict, contado: int) -> int:
     return a.get("ordinal") or contado
 
 
+def pedidos_de_valor(conn, contrato_id: int) -> list[dict]:
+    """Issue #398: os pedidos de aditivo de valor (RPFO, readequacao) do cadastro, do mais recente ao mais antigo,
+    cada um com o aditivo que o atendeu: o primeiro aditivo de valor assinado no dia do envio ou depois (a mesma
+    ligacao por data do pedido de prorrogacao, em `situacao`), ou None (sem resposta). O ordinal do termo e' o de
+    `_ordinal`, contado entre os termos aditivos assinados do contrato na falta dele."""
+    aditivos, conta = [], {}
+    for a in conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND status='assinado' "
+                          "AND data_assinatura IS NOT NULL ORDER BY data_assinatura, id", (contrato_id,)):
+        a = dict(a)
+        forma = a.get("forma") or "termo_aditivo"
+        conta[forma] = conta.get(forma, 0) + 1
+        if a["tipo"] in ("valor", "misto") and a["delta_valor_centavos"]:
+            nome = "TA" if forma == "termo_aditivo" else "apostilamento"
+            aditivos.append({"numero": a["numero"], "data_assinatura": a["data_assinatura"],
+                             "rotulo": f"{_ordinal(a, conta[forma])}º {nome}"})
+    out = []
+    for p in conn.execute("SELECT id, numero_oficio, enviado_em, valor_centavos, objeto FROM pleitos "
+                          "WHERE contrato_id=? AND tipo='valor' AND situacao='enviado' "
+                          "ORDER BY enviado_em DESC, id DESC", (contrato_id,)):
+        p = dict(p)
+        p["atendido_por"] = next((a for a in aditivos if a["data_assinatura"] >= (p["enviado_em"] or "")[:10]), None)
+        out.append(p)
+    return out
+
+
 def historico_texto(conn, contrato_id: int) -> str:
     """Secao "1. HISTORICO DO CONTRATO" da carta de prazo: um paragrafo por instrumento de prazo, com o
     ordinal do termo (`_ordinal`), contado por forma (termo aditivo x termo de apostilamento) na falta dele."""

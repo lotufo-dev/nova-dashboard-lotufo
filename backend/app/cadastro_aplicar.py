@@ -391,8 +391,10 @@ def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
         canon = oficios.canonico(p["oficio"], sigla[0] if sigla else "LT", int(p["data"][:4]))
         cur = conn.execute(
             "INSERT OR IGNORE INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, dias, numero_oficio, "
-            "situacao, enviado_em, usuario_id) VALUES (?,?, 'cadastro', ?,?,?,?, 'enviado', ?,?)",
-            (contrato_id, p["tipo"], p["data_base"], p["ciclo"], p["dias"], canon, p["data"], usuario_id))
+            "situacao, enviado_em, usuario_id, valor_centavos, objeto) "
+            "VALUES (?,?, 'cadastro', ?,?,?,?, 'enviado', ?,?,?,?)",
+            (contrato_id, p["tipo"], p["data_base"], p["ciclo"], p["dias"], canon, p["data"], usuario_id,
+             p.get("valor_centavos"), p.get("objeto")))   # issue #398: o pedido de valor
         rotulo = f"{c['nome_curto']}/{p['tipo']} {canon}"
         if cur.rowcount:
             rel["criados"].append(rotulo)

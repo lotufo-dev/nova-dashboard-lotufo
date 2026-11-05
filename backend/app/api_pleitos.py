@@ -104,7 +104,9 @@ def prazos_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=Fal
     # issue #292: os dias que a carta de prazo sugere pelo ritmo dos ultimos 6 meses (a pessoa confirma ou muda)
     return {"situacao": prazos.situacao(conn, contrato_id), "historico": prazos.historico_texto(conn, contrato_id),
             "sugestao": prazos.sugestao_dias(conn, contrato_id),
-            "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("prazo", "conclusao"))]}
+            "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("prazo", "conclusao"))],
+            # issue #398: pedidos de aditivo de valor do cadastro, com o aditivo que os atendeu (sem carta nem envio)
+            "pedidos_valor": prazos.pedidos_de_valor(conn, contrato_id)}
 
 
 @router.post("/api/contratos/{contrato_id}/pleitos", status_code=201)
