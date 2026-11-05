@@ -347,10 +347,11 @@ def _avisar_nfs(conn, contrato_id: int, linhas: list[dict]) -> None:
     """Linha `nova` cuja NF nao esta' no banco ganha `aviso_nf`: `janela` se a competencia e' anterior a' janela
     do RM (a nota so' existe la' fora: `conciliacao antiga` liga depois), `nao_encontrada` se esta' dentro dela
     (possivel erro de digitacao). So' aviso: a gravacao nao muda. Sem coligada no RM nao ha' como saber."""
-    coligada = conn.execute("SELECT e.coligada_rm FROM contratos c JOIN entidades e "
-                            "ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?", (contrato_id,)).fetchone()[0]
-    if coligada is None:
+    achado = conn.execute("SELECT e.coligada_rm FROM contratos c JOIN entidades e "
+                          "ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?", (contrato_id,)).fetchone()
+    if not achado or achado[0] is None:
         return
+    coligada = achado[0]
     inicio = _inicio_janela_rm()
     for li in linhas:
         if li["categoria"] != "nova":
