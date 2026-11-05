@@ -187,7 +187,7 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
 1. **Ensaio no Mac**, numa cópia do snapshot horário (nunca no banco padrão nem em produção):
 
    ```bash
-   cp <snapshot horário copiado da produção>.db "$TMPDIR/ensaio.db"
+   scp <servidor>:C:/DashboardLotufo/dados/backups/dashboard-AAAAMMDD-HHMMSS.db "$TMPDIR/ensaio.db"
    cd backend
    DASH_DEV=1 DASH_SEM_JOBS=1 DASH_DB_PATH="$TMPDIR/ensaio.db" \
      .venv/bin/python -m app.cli cadastro carregar-medicoes <pasta do cadastro>/medicoes/<slug>.csv --ensaio
@@ -199,7 +199,7 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
    - `valor diferente`: pedido ou aprovado diferem do banco; o pedido existente nunca muda, o aprovado novo entra como evento novo de atesto com a fonte.
    - `incompleta`: o CSV deixa vazio um valor que o banco tem; não altera.
    - `cancelamento` e `correção`: efeito das colunas `cancelar` e `corrige competência`.
-   - `conflito`: mesmo nº e tipo com outra competência, medição cancelada/desistida no banco, ou competência já presente em NF, espelho ou planilha/carta. **Conflito nunca se força**: o CSV se corrige e o ensaio se repete.
+   - `conflito`: mesmo nº e tipo com outra competência, medição cancelada/desistida no banco, ou competência já presente em NF, espelho ou planilha/carta em andamento (estado da planilha: planilha gerada, planilha enviada ou boletim recebido). **Conflito nunca se força**: o CSV se corrige e o ensaio se repete.
    - `erro`: a linha não se lê (valor, data, meio, competência); o relatório traz o número da linha do arquivo.
 
    Qualquer `erro` ou `conflito` faz a gravação recusar o arquivo inteiro, sem gravar nada.
@@ -215,12 +215,12 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
    .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --usuario <e-mail do admin>
    ```
 
-   Pelo Mac, o mesmo vai por `ssh servidor-lotufo "powershell -NoProfile -File <script>.ps1"`, com os comandos acima num `.ps1` (o shell remoto é PowerShell 5.1: sem `&&`, usar `;`). A gravação é uma transação por obra e termina em `GRAVADO: <obra> (<arquivo>), N medição(ões) criada(s)`. O snapshot horário do backup cobre o antes.
+   Pelo Mac, o mesmo vai por `ssh <servidor> 'powershell -NoProfile -ExecutionPolicy Bypass -Command -' < script.ps1` (padrão por stdin da seção "Deploy a partir do Mac"), com os comandos acima num `script.ps1` temporário no Mac, fora do repositório (o shell remoto é PowerShell 5.1: sem `&&`, usar `;`). A gravação é uma transação por obra e termina em `GRAVADO: <obra> (<arquivo>), N medição(ões) criada(s)`. O snapshot horário do backup cobre o antes.
 5. **Conferir**: `GET /api/health` com `banco: ok`; a aba Medições da obra mostra as medições novas; e o `audit_log` tem a ação `medicao.carga_historico` no contrato, com arquivo, criadas, corrigidas e as linhas. Rodar de novo sem nada novo não deixa rastro.
 
 ### Regra: competência de medição com planilha ou carta enviada
 
-Não corrigir a competência (`corrige competência = sim`) de medição cuja planilha/carta já foi enviada até a issue #383 estar feita: a carga recusa a linha como `conflito` e a correção é pela tela. Quando a #383 entrar, atualizar esta regra.
+A carga **não** recusa a correção de competência (`corrige competência = sim`) de uma medição `protocolada` que já teve a planilha/carta enviada (`planilha_enviada_em` preenchido) e não tem NF vinculada: só recusa, como `conflito`, quando a medição está num estado da planilha, num estado de espelho ou tem NF. Até a issue #383 entrar, o operador confere o `planilha_enviada_em` de cada linha `correção` do ensaio antes de gravar, e a correção de competência dessa medição vai pela tela, não pelo CSV (tirar a linha ou a marca `sim`). Quando a #383 entrar, atualizar esta regra.
 
 ## Espelho de NF (bloco 2)
 
