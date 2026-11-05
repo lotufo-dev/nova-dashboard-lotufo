@@ -926,3 +926,89 @@ def test_ensaio_do_apostilamento_nao_grava_previsao(conn):
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP],
                                                                 pleitos_anteriores=[PLEITO_2026])]), ensaio=True)
     assert conn.execute("SELECT COUNT(*) FROM reajuste_previsoes").fetchone()[0] == 0
+
+
+# --- issue #399: correcao de pleito anterior aplicado pelo YAML ---------------------------------------
+
+from app import pleitos as pleitos_mod
+
+PRAZO_ERRADO = {"tipo": "prazo", "oficio": "CT-001-LT-2026", "data": "2026-08-14", "data_base": None,
+                "ciclo": None, "dias": 180}
+PRAZO_CERTO = {**PRAZO_ERRADO, "data": "2026-05-06", "corrige": {"oficio": "CT-001-LT-2026", "data": "2026-08-14"}}
+
+
+def _pleito_auditoria(conn):
+    return [(json.loads(r[0] or "null"), json.loads(r[1])) for r in conn.execute(
+        "SELECT antes, depois FROM audit_log WHERE acao='cadastro.pleito' ORDER BY id")]
+
+
+def test_correcao_da_data_do_pleito_grava_audita_e_e_igual_depois(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == ["MT-402/prazo: pleito CT-001-LT-2026: data 14/08/2026 → 06/05/2026"]
+    # a aba Prazos lista o pleito com a data nova; nao nasceu outro
+    lista = pleitos_mod.listar(conn, 1, ("prazo", "conclusao"))
+    assert [(p["numero_oficio"], p["enviado_em"]) for p in lista] == [("CT-001-LT-2026", "2026-05-06")]
+    antes, depois = _pleito_auditoria(conn)[-1]
+    assert antes == {"enviado_em": "2026-08-14"} and depois == {"enviado_em": "2026-05-06"}
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"] == {"criados": [], "alterados": [], "iguais": 1}
+    assert len(_pleito_auditoria(conn)) == 2          # a criacao e a correcao, nada mais
+
+
+def test_ensaio_da_correcao_relata_e_nao_grava(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO])]), ensaio=True)
+    assert any("pleito CT-001-LT-2026: data 14/08/2026 → 06/05/2026" in x for x in r["pleitos"]["alterados"])
+    assert conn.execute("SELECT enviado_em FROM pleitos").fetchone()[0] == "2026-08-14"
+    assert len(_pleito_auditoria(conn)) == 1
+
+
+def test_correcao_troca_o_oficio_e_reaplicar_e_igual(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    novo = {**PRAZO_ERRADO, "oficio": "CT-007-LT-2026", "corrige": {"oficio": "CT-001-LT-2026", "data": None}}
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[novo])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == ["MT-402/prazo: pleito CT-001-LT-2026: ofício CT-001-LT-2026 → CT-007-LT-2026"]
+    assert [tuple(x) for x in conn.execute("SELECT numero_oficio, enviado_em FROM pleitos")] == [
+        ("CT-007-LT-2026", "2026-08-14")]
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["iguais"] == 1
+
+
+def test_corrigir_pleito_que_nao_existe_ou_com_data_gravada_diferente_e_erro(conn):
+    with pytest.raises(ValueError, match="pleito CT-001-LT-2026 \\(prazo\\) a corrigir não existe"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_ERRADO])]))
+    errada = {**PRAZO_CERTO, "corrige": {"oficio": "CT-001-LT-2026", "data": "2026-08-15"}}
+    with pytest.raises(ValueError, match="gravado com a data 14/08/2026, não 15/08/2026"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[errada])]))
+    assert conn.execute("SELECT enviado_em FROM pleitos").fetchone()[0] == "2026-08-14"
+
+
+def test_pleito_criado_pela_tela_nao_se_corrige_pelo_cadastro(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    conn.execute("INSERT INTO pleitos (contrato_id, tipo, origem, dias, numero_oficio, situacao, enviado_em) "
+                 "VALUES (1, 'prazo', 'sistema', 180, 'CT-001-LT-2026', 'enviado', '2026-08-14')")
+    conn.commit()
+    with pytest.raises(ValueError, match="pleito CT-001-LT-2026 \\(prazo\\) foi criado pela tela"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PRAZO_CERTO])]))
+    assert conn.execute("SELECT enviado_em FROM pleitos").fetchone()[0] == "2026-08-14"
+
+
+def test_correcao_da_data_religa_o_pleito_de_reajuste_ao_termo(conn):
+    # aplicado com a data da copia (depois do termo de 15/09): o termo nao o atende
+    errado = {**PLEITO_2026, "data": "2026-10-20"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[errado])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+    certo = {**PLEITO_2026, "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-10-20"}}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[certo])]))
+    assert tuple(conn.execute("SELECT enviado_em, instrumento_chave FROM pleitos").fetchone()) == ("2026-04-23", "ap-11")
+    assert "MT-402/reajuste CT-122-LT-2026: atendido por ap-11" in r["pleitos"]["alterados"]
+    # e o contrario: corrigida para depois do termo, a ligacao se desfaz
+    tarde = {**PLEITO_2026, "data": "2026-10-20", "corrige": {"oficio": "CT-122-LT-2026", "data": "2026-04-23"}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AP_COMP], pleitos_anteriores=[tarde])]))
+    assert conn.execute("SELECT instrumento_chave FROM pleitos").fetchone()[0] is None
+    antes, depois = _pleito_auditoria(conn)[-1]
+    assert antes == {"enviado_em": "2026-04-23", "instrumento_chave": "ap-11"}
+    assert depois == {"enviado_em": "2026-10-20", "instrumento_chave": None}

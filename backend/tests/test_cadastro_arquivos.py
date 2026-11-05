@@ -728,3 +728,42 @@ def test_apostilamento_sem_competencias_sem_data_base_em_contrato_de_duas_bases_
     ap = {k: v for k, v in _apostilamento(percentual="6,76").items() if k != "data_base"}
     cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
     assert any("instrumentos[ap-reaj-1]" in a and "data-base" in a for a in cad["avisos"]), cad["avisos"]
+
+
+# --- issue #399: correcao de pleito anterior aplicado com dado errado ---------------------------------
+
+def _com_pleitos(pleitos):
+    return [{**CONTRATO, "pleitos_anteriores": pleitos}]
+
+
+def test_corrige_em_pleito_normaliza_com_data_opcional(tmp_path):
+    pleitos = [{"tipo": "prazo", "oficio": "CT-001-LT-2026", "data": "2026-05-06", "dias": 180,
+                "corrige": {"oficio": "CT-001-LT-2026", "data": "2026-08-14"}},
+               {"tipo": "conclusao", "oficio": "CT-002-LT-2026", "data": "2026-05-07",
+                "corrige": {"oficio": "CT-009-LT-2026"}},
+               {"tipo": "conclusao", "oficio": "CT-003-LT-2026", "data": "2026-05-08"}]
+    ps = ca.preparar(_escrever(tmp_path, contratos=_com_pleitos(pleitos)))["contratos"][0]["pleitos_anteriores"]
+    assert [p["corrige"] for p in ps] == [{"oficio": "CT-001-LT-2026", "data": "2026-08-14"},
+                                          {"oficio": "CT-009-LT-2026", "data": None}, None]
+
+
+@pytest.mark.parametrize("corrige, campo", [
+    ({"data": "2026-08-14"}, "corrige.oficio"),
+    ({"oficio": " "}, "corrige.oficio"),
+    ({"oficio": "CT-001-LT-2026", "data": "14/08/2026"}, "corrige.data"),
+    ({"oficio": "CT-001-LT-2026", "dias": 10}, "corrige"),
+    ("CT-001-LT-2026", "corrige"),
+])
+def test_corrige_em_pleito_exige_oficio(tmp_path, corrige, campo):
+    pleitos = [{"tipo": "prazo", "oficio": "CT-001-LT-2026", "data": "2026-05-06", "corrige": corrige}]
+    erros = _erros(_escrever(tmp_path, contratos=_com_pleitos(pleitos)))
+    assert any(f"pleitos_anteriores[0].{campo}" in e for e in erros), erros
+
+
+def test_pleito_corrigido_nao_pode_ficar_na_lista_nem_ser_corrigido_duas_vezes(tmp_path):
+    velho = {"tipo": "prazo", "oficio": "CT-001-LT-2026", "data": "2026-08-14"}
+    novo = {"tipo": "prazo", "oficio": "CT-005-LT-2026", "data": "2026-05-06", "corrige": {"oficio": "CT-001-LT-2026"}}
+    erros = _erros(_escrever(tmp_path, contratos=_com_pleitos([velho, novo])))
+    assert any("pleitos_anteriores[0]" in e and "corrigido por outro item" in e for e in erros), erros
+    erros = _erros(_escrever(tmp_path / "b", contratos=_com_pleitos([novo, {**novo, "oficio": "CT-006-LT-2026"}])))
+    assert any("corrigem o mesmo pleito" in e for e in erros), erros
