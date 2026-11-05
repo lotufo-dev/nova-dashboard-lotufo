@@ -17,14 +17,18 @@ import { Abas } from "./Topo";
 // abas na URL: Resumo (a padrao, so' o essencial), QDOP e Producao; o "Exportar QDOP" fica visivel nas tres. Tudo na COTA da Lotufo, com o vocabulario fixo: medido, faturado, protocolado,
 // recebido. As regras moram em `app/diretoria.py`; o total a receber so' mostra valor depois de conciliado
 // (geral.yaml: diretoria.total_a_receber_liberado). O a receber (por obra, previsto e recebido) mora
-// em A receber; os reajustes esperando apostilamento, na aba Reajuste da obra; a lista de avisos, na tela de Avisos; o que termina, em Obras.
+// em A receber; os reajustes esperando apostilamento, por obra na Producao (#279) e por competencia na aba Reajuste da
+// obra; a lista de avisos, na tela de Avisos; o que termina, em Obras.
 
 type Grupo = { quantidade: number; valor_centavos: number | null };
 type PorOrgao = Grupo & { orgao: string; maior_dias: number | null };
+/** #279: por obra, as competências de reajuste já medidas sem apostilamento e o medido delas, na cota. */
+type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
 type Dinheiro = {
   medido_esperando_nota: Grupo; nota_esperando_protocolo: Grupo; recebido_mes: Grupo;
   protocolado: Grupo & { faixas: Record<"ate_30" | "de_31_a_60" | "mais_60", Grupo>; por_orgao: PorOrgao[] };
-  reajustes_apostilamento: { quantidade: number; maior_dias: number | null };
+  reajustes_apostilamento: { quantidade: number; maior_dias: number | null; competencias: number; valor_centavos: number;
+    obras: ReajusteObra[] };
 };
 type MesAno = {
   mes: string; medido_mes_centavos: number; previsto_mes_centavos: number; mesmo_mes_ano_anterior_centavos: number;
@@ -456,9 +460,10 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
   );
 }
 
-/** Producao: o mês, onde está o dinheiro, o mês a mês (barras e tabela), os próximos meses e o saldo a executar. */
-function Producao({ p }: { p: Painel }) {
-  const d = p.dinheiro, m = p.mes_ano, k = p.carteira;
+/** Producao: o mês, onde está o dinheiro, os reajustes esperando apostilamento, o mês a mês (barras e tabela), os
+ *  próximos meses e o saldo a executar. */
+function Producao({ p, ir }: { p: Painel; ir: Ir }) {
+  const d = p.dinheiro, m = p.mes_ano, k = p.carteira, r = d.reajustes_apostilamento;
   // "N de M obras protocolaram" vem do /api/inicio. undefined = carregando; null = nao carregou.
   const [mes, setMes] = useState<ResumoMes | null | undefined>(undefined);
   useEffect(() => {
@@ -489,6 +494,34 @@ function Producao({ p }: { p: Painel }) {
           <Kpi valorTexto={valor(d.protocolado.valor_centavos)} rotulo="protocolado esperando pagamento" />
           <Kpi valorTexto={brl(d.recebido_mes.valor_centavos)} rotulo="recebido no mês" />
         </ul>
+      </Secao>
+
+      {/* #279 (spec 2026-10-20 §2.2): o reajuste já medido (pedido ou aprovado) das competências sem apostilamento,
+          por obra; a obra leva à aba Reajuste dela, com cada competência */}
+      <Secao id="dir-reajustes" titulo="Reajustes esperando apostilamento (cota)">
+        {r.obras.length === 0 ? (
+          <div className="vazio vazio--curto"><p>Nenhum reajuste esperando apostilamento.</p></div>
+        ) : (
+          <Rolagem rotulo="Reajustes esperando apostilamento por obra">
+            <table className="tabela tabela--estreita">
+              <caption className="sr-only">Reajustes esperando apostilamento por obra, na cota da Lotufo</caption>
+              <thead><tr><th scope="col">Obra</th><th scope="col" className="col-num">Competências</th>
+                <th scope="col" className="col-num">Medido</th></tr></thead>
+              <tbody>
+                {r.obras.map(o => (
+                  <tr key={o.contrato_id}>
+                    <td><Link className="nome-link truncar truncar--nome" title={o.obra}
+                      para={{ tela: "obra", id: o.contrato_id, aba: "reajuste" }} ir={ir}>{o.obra}</Link></td>
+                    <td className="col-num num">{o.competencias}</td>
+                    <td className="col-num dinheiro num">{brl(o.valor_centavos)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr><th scope="row">Total</th><td className="col-num num">{r.competencias}</td>
+                <td className="col-num dinheiro num">{brl(r.valor_centavos)}</td></tr></tfoot>
+            </table>
+          </Rolagem>
+        )}
       </Secao>
 
       <Secao id="dir-grafico" titulo="Mês a mês">
@@ -602,7 +635,7 @@ export default function Diretoria({ ir, aba = "resumo" }: { ir: Ir; aba?: AbaCar
       {abas}
       {aba === "resumo" && <Resumo p={p} ir={ir} />}
       {aba === "qdop" && <Qdop p={p} ir={ir} />}
-      {aba === "producao" && <Producao p={p} />}
+      {aba === "producao" && <Producao p={p} ir={ir} />}
     </div>
   );
 }

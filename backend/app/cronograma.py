@@ -128,7 +128,7 @@ def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int, antes_da_versao
     """`antes_da_versao` (numero): so' as versoes que vem ESTRITAMENTE antes dela na linha do tempo -- o previsto
     como estava antes dessa versao (issue #295)."""
     efetivo: dict[str, int] = {}
-    piso_da_repactuacao = ""     # mes da ultima repactuacao ja aplicada: antes dele so' ela decide (issue #396)
+    houve_repactuacao = False  # ja houve repactuacao: depois dela versao sem origem de repactuacao nao semeia (issues #396, #413)
     versoes_do_contrato = _versoes(conn, contrato_id)
     if antes_da_versao is not None:
         versoes_do_contrato = versoes_do_contrato[:[x["numero"] for x in versoes_do_contrato].index(antes_da_versao)]
@@ -151,7 +151,7 @@ def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int, antes_da_versao
                                 (v["id"],) + ORIGENS_DE_REPACTUACAO).fetchone() is not None
         if repactua:
             efetivo.clear()      # substitui a curva INTEIRA: mes que a carta nao traz nao fica com o previsto antigo
-            piso_da_repactuacao = mes_criacao
+            houve_repactuacao = True
         for item in _itens(conn, v["id"]):
             comp = item["competencia"]
             if repactua:
@@ -161,9 +161,9 @@ def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int, antes_da_versao
             # excecao: se a competencia nunca teve valor, qualquer versao semeia
             # (cronograma cadastrado com a obra ja em andamento precisa dos meses
             # ja decorridos -- sem a excecao eles ficariam previstos zero).
-            # Depois de uma repactuacao, a semeadura nao entra antes do mes dela: o realizado ja esta no bloco da
-            # carta, e a carga de 04/09/2026 (vigente ate ser superada) o somaria em dobro.
-            if comp >= mes_criacao or (comp not in efetivo and comp >= piso_da_repactuacao):
+            # Depois de uma repactuacao, a semeadura nao entra em mes nenhum: o que a carta nao traz fica sem
+            # previsto, e a carga de 04/09/2026 (vigente ate ser superada) o somaria em dobro (issue #413).
+            if comp >= mes_criacao or (comp not in efetivo and not houve_repactuacao):
                 efetivo[comp] = item["valor_previsto_centavos"]
     return efetivo
 

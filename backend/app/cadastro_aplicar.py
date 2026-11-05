@@ -334,7 +334,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             rel["contratos"]["iguais"] += 1
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])
     _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"], rel["avisos"])
-    _apostilamentos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"])
+    _apostilamentos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"], rel["avisos"])
     _aditivos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"], rel["avisos"])
     _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
     return cid
@@ -606,7 +606,7 @@ def _avisa_diferencas(gravado, p, rotulo, avisos) -> None:
                       "(corrige troca só a data e o ofício)")
 
 
-def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
+def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Issue #271 (spec 2026-10-20 §2.2): cada competencia do apostilamento vira uma `reajuste_previsoes` de origem
     'apostilamento' (uma vez por instrumento: reaplicar nao duplica), e o ultimo pleito enviado do mesmo ciclo
     recebe `instrumento_chave`. Roda depois dos instrumentos e dos pleitos anteriores, entao o pleito que entra no
@@ -615,7 +615,12 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
     Qual termo vale nao depende desta ordem: e' a leitura (reajuste._termo_vale) que tira o termo corrigido e da'
     precedencia pela data do documento; as previsoes do termo corrigido ficam no historico. A ordem (corrigido antes
     da correcao) serve ao pleito: a correcao herda o pleito ligado a qualquer termo da cadeia que ela corrige; so' o
-    termo sem pleito herdado procura, pela data, o ultimo pleito enviado do ciclo ainda sem termo."""
+    termo sem pleito herdado procura, pela data, o ultimo pleito enviado do ciclo ainda sem termo.
+
+    Issue #414: a correcao que fecha a cadeia se reconfere a cada aplicar, ja' ligada ou nao: o pleito que ela atende e'
+    o ultimo enviado ate' a data do termo mais antigo da cadeia no mesmo ciclo (o herdado, quando nada mudou). A ligada
+    pela regra antiga (a data dela) ou herdada de um elo ligado assim muda para esse pleito, auditada dos dois lados;
+    se esse pleito e' de outro termo, nada muda e o aplicar avisa. O termo original ja' ligado fica como esta'."""
     aps = [i for i in c["instrumentos"] if i["tipo"] == "apostilamento_reajuste"]
     if not aps:
         return
@@ -642,11 +647,11 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
             k = (por_chave.get(k) or {}).get("corrige")
         return out
 
-    def ligar(p, inst) -> None:
+    def ligar(p, inst, motivo="") -> None:
         conn.execute("UPDATE pleitos SET instrumento_chave=? WHERE id=?", (inst["chave"], p["id"]))
         auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", p["id"],
                             {"instrumento_chave": p["instrumento_chave"]}, {"instrumento_chave": inst["chave"]})
-        rel["alterados"].append(f"{c['nome_curto']}/reajuste {p['numero_oficio']}: atendido por {inst['chave']}")
+        rel["alterados"].append(f"{c['nome_curto']}/reajuste {p['numero_oficio']}: atendido por {inst['chave']}{motivo}")
 
     corrigidos_por_outro = {i["corrige"] for i in aps if i["corrige"]}
     bases = [d["mes"] for d in c["datas_base"]]
@@ -678,9 +683,12 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
         # so' herda o pleito do mesmo ciclo e data-base; o de outro ciclo fica sem termo (o termo dele foi corrigido)
         herdados = [p for p in da_cadeia if (p["data_base_mes"], p["ciclo"]) == (base, ciclo)]
         mesmos = {p["id"] for p in herdados}
+        # issue #414: a correcao que fecha a cadeia decide o herdado junto com a reconferencia, no fim
+        reconfere = bool(cadeia) and inst["chave"] not in corrigidos_por_outro and base is not None and ciclo is not None
         for p in da_cadeia:
             if p["id"] in mesmos:
-                ligar(p, inst)
+                if not reconfere:
+                    ligar(p, inst)
             else:
                 conn.execute("UPDATE pleitos SET instrumento_chave=NULL WHERE id=?", (p["id"],))
                 auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", p["id"],
@@ -698,8 +706,13 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
             auditoria.registrar(conn, usuario_id, "cadastro.reajuste_previsoes", "instrumento", iid, None,
                                 {"chave": inst["chave"], "data_base_mes": base, "ciclo": ciclo, "competencias": comps})
         # termo corrigido nao atende pleito nenhum (senao cada aplicar o religaria e a correcao o desligaria)
-        if inst["chave"] in corrigidos_por_outro or herdados or conn.execute("SELECT 1 FROM pleitos WHERE contrato_id=? AND instrumento_chave=? LIMIT 1",
-                                    (contrato_id, inst["chave"])).fetchone():
+        if inst["chave"] in corrigidos_por_outro:
+            continue
+        atuais = conn.execute("SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? "
+                              "AND tipo='reajuste' AND instrumento_chave=? ORDER BY id",
+                              (contrato_id, inst["chave"])).fetchall()
+        # o termo original ja' ligado fica como esta' (issue #414: so' a correcao se reconfere)
+        if not reconfere and atuais:
             continue
         # o pleito que o termo atendeu foi enviado ate' a data do termo (reemissao posterior ainda espera o dela). A
         # correcao atende o pleito que o termo original atendeu: conta a data do termo mais antigo da cadeia no mesmo
@@ -711,8 +724,36 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
                          "AND tipo='reajuste' AND data_base_mes=? AND ciclo=? AND situacao='enviado' "
                          "AND date(enviado_em) <= date(?) ORDER BY enviado_em DESC, id DESC LIMIT 1",
                          (contrato_id, base, ciclo, data_termo)).fetchone()
-        if p is not None and p["instrumento_chave"] is None:
-            ligar(p, inst)
+        if not reconfere:
+            if p is not None and p["instrumento_chave"] is None:
+                ligar(p, inst)
+            continue
+        nome = c["nome_curto"]
+        if p is not None and p["instrumento_chave"] not in (None, inst["chave"], *cadeia):
+            # code-review (#414): o pleito esperado e' de outro termo. Nada de adivinhar: a correcao fica com o que tem
+            # (herda como antes desta reconferencia) e o aplicar avisa
+            for h in herdados:
+                ligar(h, inst)
+            avisos.append(f"{nome}/{inst['chave']}: o último pleito do ciclo {ciclo} enviado até {_br(data_termo)} "
+                          f"({p['numero_oficio']}) é atendido por {p['instrumento_chave']}; a ligação do termo de "
+                          "correção fica como está (confira o cadastro)")
+            continue
+        # issue #414: o pleito livre, herdado da cadeia ou ja' desta correcao e' o destino; o que ela tinha e nao e' o
+        # destino (ligado pela regra antiga, a data dela, ou herdado de um elo ligado assim) sai, auditado
+        destino = p
+        saem = [a for a in (*atuais, *herdados) if destino is None or a["id"] != destino["id"]]
+        for a in saem:
+            conn.execute("UPDATE pleitos SET instrumento_chave=NULL WHERE id=?", (a["id"],))
+            auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", a["id"],
+                                {"instrumento_chave": a["instrumento_chave"]}, {"instrumento_chave": None})
+            motivo = (f"religado ao {destino['numero_oficio']}, o último enviado até {_br(data_termo)}" if destino
+                      else f"religado: nenhum pleito do ciclo enviado até {_br(data_termo)}")
+            rel["alterados"].append(f"{nome}/reajuste {a['numero_oficio']}: sem termo ({inst['chave']} {motivo})")
+            if destino is None:
+                avisos.append(f"{nome}/{inst['chave']}: o termo de correção atende o último pleito do ciclo {ciclo} "
+                              f"enviado até {_br(data_termo)}, e não há; a ligação ao pleito {a['numero_oficio']} saiu")
+        if destino is not None and destino["instrumento_chave"] != inst["chave"]:
+            ligar(destino, inst, " (religado)" if saem else "")
 
 
 def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -> None:

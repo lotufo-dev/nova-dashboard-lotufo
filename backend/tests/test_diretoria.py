@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from app import auth, avisos, cadastro_aplicar, db, diretoria, medicoes, qdop
+from app import auth, avisos, cadastro_aplicar, db, diretoria, medicoes, qdop, reajuste
 from tests.test_protocolo import _contrato
 
 D = datetime.date
@@ -367,6 +367,154 @@ def test_ciclo_a_reemitir_continua_esperando_apostilamento(cenario, monkeypatch)
     monkeypatch.setattr(diretoria.reajuste, "ciclos", lambda conn, cid, hoje=None: ciclos.get(cid, []))
     r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
     assert (r["quantidade"], r["maior_dias"]) == (1, 40)
+
+
+# --- issue #279 (spec 2026-10-20 §2.2): o reajuste ja' medido sem apostilamento, por competencia e na cota ---
+
+def _reajuste(c, cid, numero, comp, estado, pedido=None, aprovado=None):
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+              "valor_atestado_centavos) VALUES (?, ?, 'reajuste', ?, ?, ?, ?)", (cid, numero, comp, estado, pedido, aprovado))
+    c.commit()
+
+
+def _data_base(c, cid, mes):
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, ?, 'INCC-DI')", (cid, mes))
+    c.commit()
+
+
+def _apostilar(c, cid, chave, dados, competencias=()):
+    """Apostilamento de reajuste como o cadastro aplica: o termo e, para cada competencia que ele lista, a previsao de
+    origem apostilamento."""
+    iid = c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) "
+                    "VALUES (?, ?, 'apostilamento_reajuste', '2026-09-01', ?)", (cid, chave, json.dumps(dados))).lastrowid
+    for comp, valor in competencias:
+        c.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, valor_previsto_centavos, "
+                  "origem, instrumento_id, criado_em) VALUES (?, ?, ?, ?, ?, 'apostilamento', ?, '2026-09-01 10:00:00')",
+                  (cid, dados["data_base"], dados["ciclo"], comp, valor, iid))
+    c.commit()
+
+
+def test_reajustes_esperando_apostilamento_somam_o_medido_por_competencia_na_cota(cenario):
+    c, ids = cenario
+    p, k = ids["propria"], ids["consorcio"]
+    _data_base(c, p, "2025-01")
+    _reajuste(c, p, 31, "2026-02", "planilha_enviada", pedido=100_001)            # pedida
+    _reajuste(c, p, 32, "2026-02", "planilha_gerada", pedido=50_000)              # complemento da mesma competencia
+    _reajuste(c, p, 33, "2026-03", "boletim_recebido", pedido=200_000, aprovado=199_999)   # aprovada: o aprovado vale
+    _reajuste(c, p, 34, "2026-04", "nota_emitida", pedido=300_003, aprovado=300_003)       # faturada sem apostilamento
+    _reajuste(c, p, 35, "2026-05", "boletim_recebido", aprovado=400_000)          # apostilada: fora
+    _apostilar(c, p, "ap-1", {"data_base": "2025-01", "ciclo": 2026,
+                              "competencias": [{"competencia": "2026-05", "valor": "4.000,00"}]}, [("2026-05", 400_000)])
+    _reajuste(c, p, 36, "2026-06", "recebida", pedido=500_000)                    # recebida: fora
+    _reajuste(c, p, 37, "2026-07", "cancelada", pedido=1)                         # cancelada: fora
+    _reajuste(c, p, 38, "2026-08", "prevista")                                    # so' prevista: fora
+    _data_base(c, k, "2024-01")
+    # consorcio a 50%: 100.001 + 100.001 no cheio = 200.002, na cota 100.001 (arredondamento unico; por competencia
+    # seriam 50.001 + 50.001)
+    _reajuste(c, k, 31, "2026-03", "planilha_enviada", pedido=100_001)
+    _reajuste(c, k, 32, "2026-04", "boletim_recebido", pedido=100_001, aprovado=100_001)
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [(o["contrato_id"], o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [
+        (p, "Própria", 3, 100_001 + 50_000 + 199_999 + 300_003), (k, "Consórcio", 2, 100_001)]
+    assert (r["competencias"], r["valor_centavos"]) == (5, 650_003 + 100_001)
+
+
+def test_obra_com_tudo_apostilado_nao_aparece_nos_reajustes_esperando_apostilamento(cenario):
+    c, ids = cenario
+    p, k = ids["propria"], ids["consorcio"]
+    _data_base(c, p, "2025-01")
+    _reajuste(c, p, 31, "2026-02", "planilha_enviada", pedido=100_001)
+    _reajuste(c, p, 32, "2026-03", "nota_emitida", pedido=200_000, aprovado=200_000)
+    # percentual da MT-PAR com periodo: cobre as duas competencias
+    _apostilar(c, p, "ap-1", {"data_base": "2025-01", "ciclo": 2026, "percentual": "6,76",
+                              "periodo": {"de": "2026-01", "ate": "2026-12"}})
+    _data_base(c, k, "2024-01")
+    _reajuste(c, k, 31, "2026-03", "planilha_enviada", pedido=100_001)
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Consórcio", 1, 50_001)]
+    assert (r["competencias"], r["valor_centavos"]) == (1, 50_001)
+
+
+def test_reajustes_esperando_apostilamento_contam_obra_encerrada_e_nao_a_rescindida(cenario):
+    # revisor (rodada 1, PR #431): o reajuste so' sai do bloco com o apostilamento (spec 2026-10-20 §2.2); fora fica
+    # so' o rescindido, como no QDOP
+    c, ids = cenario
+    p, k = ids["propria"], ids["consorcio"]
+    for cid, base in ((p, "2025-01"), (k, "2024-01")):
+        _data_base(c, cid, base)
+        _reajuste(c, cid, 31, "2026-03", "planilha_enviada", pedido=100_000)
+    c.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (p,))
+    c.execute("UPDATE contratos SET estado='rescindido' WHERE id=?", (k,))
+    c.commit()
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [o["obra"] for o in r["obras"]] == ["Própria"]
+    c.execute("UPDATE contratos SET estado='suspenso' WHERE id=?", (k,)); c.commit()
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert sorted(o["obra"] for o in r["obras"]) == ["Consórcio", "Própria"]
+
+
+def test_termo_que_fecha_o_ciclo_sem_dizer_os_meses_tira_a_obra_do_bloco(cenario):
+    # revisor (rodada 1, PR #431): o apostilamento so' com percentual (sem periodo) e o aditivo de valor de reajuste da
+    # SES (#390) fecham o ciclo inteiro em `reajuste.ciclos`; a competencia do ciclo fechado nao espera apostilamento
+    c, ids = cenario
+    p, k = ids["propria"], ids["consorcio"]
+    _data_base(c, p, "2025-01")
+    _reajuste(c, p, 31, "2026-03", "boletim_recebido", pedido=200_000, aprovado=200_000)
+    _apostilar(c, p, "ap-g", {"data_base": "2025-01", "ciclo": 2026, "percentual": "5,00"})
+    _data_base(c, k, "2024-01")
+    _reajuste(c, k, 31, "2026-03", "nota_emitida", pedido=300_000, aprovado=300_000)
+    _reajuste(c, k, 32, "2025-03", "nota_emitida", pedido=100_001, aprovado=100_001)     # ciclo 2025: nao fechado
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, numero, "
+              "chave_cadastro, natureza) VALUES (?, 'valor', 300000, 'assinado', '2026-04-10', '3º TA', 'ta-3', "
+              "'reajuste')", (k,))
+    c.commit()
+    assert [(x["ciclo"], x["situacao"]) for x in reajuste.ciclos(c, p, HOJE)] == [(2026, "apostilado")]
+    assert [(x["ciclo"], x["situacao"]) for x in reajuste.ciclos(c, k, HOJE)] == [(2026, "apostilado")]
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Consórcio", 1, 50_001)]
+
+
+def test_medicao_sem_data_base_em_contrato_de_duas_bases_so_sai_com_as_duas_apostiladas(cenario):
+    # revisor (rodada 1, PR #431): medicao sem `data_base_mes` em contrato de duas datas-base cai no grupo sem
+    # data-base (`reajuste.competencias_por_ciclo`); ela so' deixa de esperar quando todas as bases apostilaram o mes
+    c, ids = cenario
+    p = ids["propria"]
+    _data_base(c, p, "2025-01")
+    _data_base(c, p, "2025-03")
+    _reajuste(c, p, 31, "2026-04", "boletim_recebido", pedido=100_000, aprovado=100_000)
+    _apostilar(c, p, "ap-a", {"data_base": "2025-01", "ciclo": 2026,
+                              "competencias": [{"competencia": "2026-04", "valor": "1.000,00"}]}, [("2026-04", 100_000)])
+    # as duas bases com previsao do mes: a medicao nao tem como escolher e vai para o grupo sem data-base
+    c.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, valor_previsto_centavos, "
+              "origem, criado_em) VALUES (?, '2025-03', 2026, '2026-04', 100000, 'manual', '2026-08-01 10:00:00')", (p,))
+    c.commit()
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 100_000)]
+    _apostilar(c, p, "ap-b", {"data_base": "2025-03", "ciclo": 2026,
+                              "competencias": [{"competencia": "2026-04", "valor": "1.000,00"}]}, [("2026-04", 100_000)])
+    assert diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]["obras"] == []
+
+
+def test_contrato_sem_data_base_tem_o_reajuste_medido_esperando_apostilamento(cenario):
+    # revisor (rodada 2, PR #431): sem data-base nenhum termo cobre a competencia, entao ela espera; a pedida e a
+    # aprovada nao estao em "Onde esta' o dinheiro". Consorcio a 50%: 100.001 + 200.001 = 300.002, na cota 150.001
+    c, ids = cenario
+    k = ids["consorcio"]
+    _reajuste(c, k, 31, "2026-03", "planilha_enviada", pedido=100_001)
+    _reajuste(c, k, 32, "2026-04", "boletim_recebido", pedido=200_000, aprovado=200_001)
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Consórcio", 2, 150_001)]
+
+
+def test_complemento_ainda_nao_recebido_espera_mesmo_com_a_principal_recebida(cenario):
+    # revisor (rodada 1, PR #431): a principal recebida nao esconde o complemento pedido da competencia sem apostilamento
+    c, ids = cenario
+    p = ids["propria"]
+    _data_base(c, p, "2025-01")
+    _reajuste(c, p, 31, "2026-03", "recebida", pedido=100_000, aprovado=100_000)
+    _reajuste(c, p, 32, "2026-03", "planilha_enviada", pedido=50_001)
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 50_001)]
 
 
 def test_a_receber_total_por_obra_e_lista_na_cota(cenario):

@@ -311,7 +311,7 @@ function itensDasPecas(s: SituacaoEnvio): ItemChecklist[] {
 // `aoRevisaoPendente`: avisa a pagina se ha' revisao registrada e nao enviada (o espelho espera por ela, PR #382)
 export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevisaoPendente }: {
   medicaoId: number; estado?: string; podeEditar: boolean; aoMudar: () => void;
-  aoRevisaoPendente?: (pendente: boolean) => void;
+  aoRevisaoPendente?: (pendente: boolean | null) => void;
 }) {
   const base = useId();
   const [d, setD] = useState<DetalhePlanilha | null>(null);
@@ -325,17 +325,17 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
   const [justificativa, setJustificativa] = useState("");
   const [tentouJust, setTentouJust] = useState(false);
 
+  const avisarPendente = useRef(aoRevisaoPendente);
+  useEffect(() => { avisarPendente.current = aoRevisaoPendente; });
   async function carregar() {
     setD(await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`));
   }
   useEffect(() => {
     let vivo = true;
-    api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`).then(x => { if (vivo) setD(x); })
-      .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
+    api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`).then(x => { if (vivo) { setD(x); avisarPendente.current?.(revisaoPendente(x)); } })
+      .catch(e => { if (vivo) { setErro(mensagemDeErro(e)); avisarPendente.current?.(null); } });
     return () => { vivo = false; };
   }, [medicaoId, estado]);
-  const avisarPendente = useRef(aoRevisaoPendente);
-  useEffect(() => { avisarPendente.current = aoRevisaoPendente; });
   const pendente = d ? revisaoPendente(d) : null;
   useEffect(() => { if (pendente !== null) avisarPendente.current?.(pendente); }, [pendente]);
 
@@ -345,7 +345,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
     try {
       await f();
       setFeito(mensagemFeito);
-      await carregar().catch(() => {});
+      await carregar().catch(() => avisarPendente.current?.(null));
       aoMudar();
       return true;
     } catch (e) {
@@ -375,7 +375,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
         anexos_previa: previa.anexos.map(a => ({ nome: a.nome, tamanho: a.tamanho, sha256: a.sha256 })) }) });
       setPrevia(null); setPainel(null);
       setFeito(`Planilha/carta enviada às ${fmtHora(new Date().toISOString())}.`);
-      await carregar().catch(() => {});
+      await carregar().catch(() => avisarPendente.current?.(null));
       aoMudar();
     } catch (e) {
       setErro(mensagemDeErro(e));
