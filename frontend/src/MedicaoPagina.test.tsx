@@ -559,6 +559,13 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     expect(container.querySelector("[data-espelho]")).toBeNull();
   });
 
+  it("reajuste em planilha_enviada não tem cartão: o espelho não espera conferência (issue #384)", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, tipo: "reajuste", estado: "planilha_enviada" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+    expect(container.querySelector("[data-cartao-planilha]")).toBeNull();
+  });
+
   it("depois do boletim: o cartão da planilha/carta e o espelho", async () => {
     responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "boletim_recebido" }] });
     const { container } = pagina();

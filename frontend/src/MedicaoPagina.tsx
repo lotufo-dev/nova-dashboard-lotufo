@@ -64,9 +64,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const [regraAtiva, setRegraAtiva] = useState(false);
   // revisao da planilha/carta registrada e nao enviada: o espelho espera o envio dela (PR #382, rodada extra)
   // so' libera o espelho depois de o cartao confirmar que nao ha' revisao pendente (issue #384)
-  const [revisao, setRevisao] = useState<"conferindo" | "pendente" | "livre" | "falhou">("conferindo");
-  const avisarRevisao = useCallback((p: boolean | null) => setRevisao(p === null ? "falhou" : p ? "pendente" : "livre"), []);
-  useEffect(() => { setRevisao("conferindo"); }, [medicaoId]);
+  // a conferencia vale so' para a medicao e o estado em que o cartao a fez: trocar um dos dois a reinicia
+  const [revisaoDe, setRevisaoDe] = useState<{ chave: string; valor: "pendente" | "livre" | "falhou" } | null>(null);
   // issue #188: a execucao e o reajuste da mesma competencia (as notas dos dois, a espera e a liberacao)
   const [par, setPar] = useState<ParDaMedicao | null>(null);
   const [erro, setErro] = useState("");
@@ -239,6 +238,10 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
   // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
   const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;
+  const chaveRevisao = `${m.id}:${m.estado}`;
+  const revisao = revisaoDe?.chave === chaveRevisao ? revisaoDe.valor : "conferindo";
+  // so' as medicoes com cartao esperam a conferencia dele; as outras (reajuste) seguem direto pelo espelho
+  const espelhoEspera = comPlanilha && m.estado === "planilha_enviada" && revisao !== "livre";
   const corpoEtapa1 = (
     <div className="med-etapa__corpo">
       {novaPlanilha && (
@@ -246,11 +249,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
       )}
       {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
-        aoRevisaoPendente={avisarRevisao} />}
-      {m.estado === "planilha_enviada" && revisao === "falhou" && (
+        aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })} />}
+      {comPlanilha && m.estado === "planilha_enviada" && revisao === "falhou" && (
         <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta; o espelho fica oculto até a conferência.</p>
       )}
-      {!novaPlanilha && m.estado !== "planilha_gerada" && !(m.estado === "planilha_enviada" && revisao !== "livre") && (
+      {!novaPlanilha && m.estado !== "planilha_gerada" && !espelhoEspera && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
           abrirForm={["prevista", "planilha_enviada"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
       )}
