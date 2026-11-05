@@ -39,8 +39,15 @@ def db_path() -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
+# Issue #422: os gatilhos da migracao 060 chamam esta funcao ao criar, apagar ou mudar e-mail, senha, perfil ou
+# situacao de um usuario. So' a conexao aberta aqui a tem; fora da aplicacao o SQLite recusa com "no such function".
+FUNCAO_CONEXAO_APP = "dash_conexao_app"
+
+
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(db_path(), check_same_thread=False)
+    # Antes de qualquer outro comando: as migracoes e o primeiro INSERT em usuarios ja' precisam dela
+    conn.create_function(FUNCAO_CONEXAO_APP, 0, lambda: 1)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
