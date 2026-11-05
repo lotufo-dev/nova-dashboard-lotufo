@@ -50,14 +50,20 @@ def acessos(conn, usuario_id: int, limite: int = ACESSOS_NA_TELA) -> list[dict]:
     """Os `limite` acessos mais recentes da pessoa, do mais novo ao mais antigo: os logins certos dela e as tentativas
     recusadas com o e-mail dela. A tentativa recusada nao tem usuario no evento (o login nao revela se a conta existe),
     entao entra pelo e-mail gravado; so' as de depois de a conta existir, para a conta nova nao herdar tentativas
-    feitas antes com o mesmo e-mail. Evento de antes do #418 vem sem origem e sem navegador."""
+    feitas antes com o mesmo e-mail. A fronteira e' o evento `usuario.criar` da conta (id, exclusivo: o carimbo tem
+    precisao de segundo); conta criada fora da API, sem esse evento, usa o `criado_em` dela. Evento de antes do #418
+    vem sem origem e sem navegador."""
     u = conn.execute("SELECT email, criado_em FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
     if u is None:
         return []
+    criacao = conn.execute("SELECT MAX(id) FROM audit_log WHERE entidade='usuario' AND entidade_id=? "
+                           "AND acao='usuario.criar'", (str(usuario_id),)).fetchone()[0]
+    # `depois_da_conta` e' uma das duas frases fixas abaixo: a f-string nao ve entrada do cliente
+    depois_da_conta, fronteira = ("id > ?", criacao) if criacao is not None else ("criado_em >= ?", u["criado_em"])
     linhas = conn.execute(
         "SELECT acao, depois, criado_em FROM audit_log WHERE (acao='auth.login' AND usuario_id=?) OR "
-        "(acao='auth.login_falha' AND json_extract(depois, '$.email')=? AND criado_em >= ?) ORDER BY id DESC LIMIT ?",
-        (usuario_id, u["email"], u["criado_em"], limite)).fetchall()
+        f"(acao='auth.login_falha' AND json_extract(depois, '$.email')=? AND {depois_da_conta}) ORDER BY id DESC LIMIT ?",
+        (usuario_id, u["email"], fronteira, limite)).fetchall()
     out = []
     for r in linhas:
         d = json.loads(r["depois"]) if r["depois"] else {}

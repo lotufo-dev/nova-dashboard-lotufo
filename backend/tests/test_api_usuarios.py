@@ -335,6 +335,34 @@ def test_login_antigo_sem_origem_aparece_com_traco_e_conta_nova_nao_herda_falha_
     acessos = client_admin.get(f"/api/admin/usuarios/{uid}/acessos").json()
     assert [(a["sucesso"], a["origem"], a["navegador"]) for a in acessos] == [(True, None, None)]
 
+def _falha(email):
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        auditoria.registrar(conn, None, "auth.login_falha", "usuario", None, depois={"email": email, "origem": "10.0.2.1"})
+    conn.close()
+
+def test_falha_anterior_a_conta_fica_de_fora_mesmo_no_mesmo_segundo(client_admin):
+    # Gate Sol S4: a fronteira e' o evento usuario.criar (id), nao o carimbo de segundo da conta
+    _falha(NOVO["email"])
+    uid = client_admin.post("/api/admin/usuarios", json=NOVO).json()["id"]
+    conn = db.get_conn()
+    with db.mutacao(conn):   # a conta "nasceu" antes da falha pelo relogio: so' o id do evento separa as duas
+        conn.execute("UPDATE usuarios SET criado_em=datetime(criado_em, '-1 day') WHERE id=?", (uid,))
+    conn.close()
+    _falha(NOVO["email"])
+    assert [a["sucesso"] for a in client_admin.get(f"/api/admin/usuarios/{uid}/acessos").json()] == [False]
+
+def test_conta_sem_evento_de_criacao_usa_a_data_da_conta(client_admin):
+    # conta criada fora da API (CLI, primeira carga) nao tem usuario.criar: vale o criado_em dela
+    _falha(NOVO["email"])
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        conn.execute("UPDATE audit_log SET criado_em=datetime(criado_em, '-1 day') WHERE acao='auth.login_falha'")
+    uid = auth.criar_usuario(conn, NOVO["nome"], NOVO["email"], NOVO["senha"], NOVO["perfil"])
+    conn.close()
+    _falha(NOVO["email"])
+    assert [a["sucesso"] for a in client_admin.get(f"/api/admin/usuarios/{uid}/acessos").json()] == [False]
+
 def test_acessos_de_usuario_inexistente_404(client_admin):
     r = client_admin.get("/api/admin/usuarios/99999/acessos")
     assert r.status_code == 404
