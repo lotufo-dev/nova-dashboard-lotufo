@@ -100,9 +100,6 @@ function textoApostilamento(i: InstrumentoCadastro): string {
           pct !== undefined && pct !== null ? fmtPercentual(Number(pct) / 100) : ""].filter(Boolean).join(" · ");
 }
 
-type AditivoCadastro = { id: number; chave_cadastro: string | null; tipo: string; numero: string | null;
-  data_assinatura: string | null };
-
 /** O termo que fecha o ciclo: apostilamento ou, na SES, termo aditivo de valor de reajuste (issue #390). */
 function nomeDoTermo(i: InstrumentoCadastro): string {
   return i.tipo.startsWith("aditivo") ? "Termo aditivo" : "Apostilamento";
@@ -162,9 +159,8 @@ const emAberto = (p: Pleito) => p.origem === "sistema" && p.situacao !== "enviad
 
 export default function Reajuste({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
   const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[]; competencias?: CompetenciaApostilada[];
-    bases_dos_termos?: BaseDoTermo[]; previsoes?: Previsao[] } | null>(null);
+    bases_dos_termos?: BaseDoTermo[]; previsoes?: Previsao[]; aditivos_de_reajuste?: InstrumentoCadastro[] } | null>(null);
   const [apostilamentos, setApostilamentos] = useState<InstrumentoCadastro[]>([]);
-  const [aditivos, setAditivos] = useState<InstrumentoCadastro[]>([]);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
   // reiteracao ou reemissao sendo criada: a data-base, o pleito anterior e o que se faz com ele
@@ -175,12 +171,8 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   const carregar = useCallback(async () => {
     try {
       setDados(await api(`/api/contratos/${contratoId}/reajuste`));
-      const cad = await api<{ instrumentos: InstrumentoCadastro[]; aditivos?: AditivoCadastro[] }>(
-        `/api/contratos/${contratoId}/cadastro`);
+      const cad = await api<{ instrumentos: InstrumentoCadastro[] }>(`/api/contratos/${contratoId}/cadastro`);
       setApostilamentos(cad.instrumentos.filter(i => i.tipo === "apostilamento_reajuste"));
-      // o pleito ligado a um aditivo (so' o de reajuste se liga, issue #390) diz o termo em qualquer ciclo
-      setAditivos((cad.aditivos ?? []).filter(a => a.chave_cadastro).map(a => ({ id: a.id, chave: a.chave_cadastro!,
-        tipo: `aditivo_${a.tipo}`, numero: a.numero, data: a.data_assinatura ?? "", dados: {} })));
     } catch (e) { setErro(mensagemDeErro(e)); }
   }, [contratoId]);
   useEffect(() => { void carregar(); }, [carregar]);
@@ -200,12 +192,15 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   const vale = (i: InstrumentoCadastro) => !i.chave || !corrigidos.has(i.chave);
   const semBase = semDataBase.filter(vale);
   const aqui = { tela: "obra" as const, id: contratoId, aba: "reajuste" as const };
+  // o pleito ligado ao termo aditivo de reajuste (issue #390) diz o termo em qualquer ciclo; a API ja' manda so' os
+  // aditivos que valem como termo (o mesmo criterio do ciclo)
+  const termos = [...apostilamentos, ...(dados.aditivos_de_reajuste ?? [])];
   // cada pleito e' uma secao do cartao pai (F-74): o enviado vira linha com o desfecho no selo; o que ainda se
   // trabalha segue no CartaoPleito, que traz o formulario
   const cartoes = (ps: Pleito[], ciclo?: Ciclo) => ps.map(p => {
     const contexto = p.ciclo ? `ciclo de ${p.ciclo}` : undefined;
     return pleitoEmLinha(p)
-      ? <LinhaPleito key={p.id} p={p} desfecho={desfechoDoPleito(p, [...apostilamentos, ...aditivos], ciclo)} contexto={contexto} />
+      ? <LinhaPleito key={p.id} p={p} desfecho={desfechoDoPleito(p, termos, ciclo)} contexto={contexto} />
       : <CartaoPleito key={p.id} p={p} podeEditar={podeEditar} aoMudar={() => void carregar()} contexto={contexto} />;
   });
 

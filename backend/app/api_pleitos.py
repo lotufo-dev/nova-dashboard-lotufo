@@ -91,6 +91,8 @@ def reajuste_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=F
     return {"ciclos": reajuste.ciclos(conn, contrato_id),
             "competencias": reajuste.competencias_apostiladas(conn, contrato_id),
             "bases_dos_termos": reajuste.bases_dos_termos(conn, contrato_id),
+            # issue #390: o termo aditivo de reajuste pelo mesmo criterio do ciclo, para o pleito dizer qual o atendeu
+            "aditivos_de_reajuste": reajuste.aditivos_de_reajuste(conn, contrato_id),
             "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("reajuste",))],
             "previsoes": reajuste.previsoes_vigentes(conn, contrato_id),
             # issue #273: estado e valor de cada fonte por competencia, por data-base e ciclo
