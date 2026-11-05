@@ -174,3 +174,14 @@ def test_login_errado_continua_contando_e_bloqueando(banco):
         assert auth.autenticar(c, "eng@lotufo.com", "errada") is None
     assert auth.autenticar(c, "eng@lotufo.com", "senha-forte-123") is None
     assert c.execute("SELECT bloqueado_ate FROM usuarios WHERE id=?", (uid,)).fetchone()[0] is not None
+
+
+def test_item_critico_fica_no_topo_do_bloco_mesmo_mais_antigo(monkeypatch):
+    antigo = {"nivel": "critico", "mensagem": PROTECAO, "data": "2026-11-01T10:00:00+00:00"}
+    novos = [{"nivel": "atencao", "mensagem": f"Administrador {n} entrou de uma origem nova (10.0.0.{n})",
+              "data": f"2026-11-05T10:{n:02d}:00+00:00"} for n in range(seguranca.ITENS_NA_TELA + 1)]
+    monkeypatch.setattr(seguranca, "_conferencia", [antigo])
+    monkeypatch.setattr(seguranca, "_origem_nova", lambda conn, agora: novos)
+    itens, fora = seguranca.bloco(None)
+    assert itens[0] == antigo and fora == 2
+    assert [i["data"] for i in itens[1:]] == sorted((i["data"] for i in itens[1:]), reverse=True)

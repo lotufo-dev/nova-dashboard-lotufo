@@ -129,10 +129,12 @@ def _origem_nova(conn, agora: datetime.datetime) -> list[dict]:
 
 
 def itens(conn, agora: datetime.datetime | None = None) -> list[dict]:
-    """Bloco Seguranca de Administracao > Saude: `[{nivel, mensagem, data}]`, do mais novo ao mais antigo (empate
-    mantem a ordem de gravacao, do mais novo ao mais antigo)."""
+    """Bloco Seguranca de Administracao > Saude: `[{nivel, mensagem, data}]`, os `critico` primeiro (issue #422: o
+    problema que continua guarda a data em que foi visto e nao pode cair para fora do teto do bloco) e, dentro de cada
+    nivel, do mais novo ao mais antigo (empate mantem a ordem de gravacao, do mais novo ao mais antigo)."""
     agora = agora or tempo.agora_utc()
-    return sorted(_conferencia + _origem_nova(conn, agora), key=lambda i: i["data"], reverse=True)
+    por_data = sorted(_conferencia + _origem_nova(conn, agora), key=lambda i: i["data"], reverse=True)
+    return sorted(por_data, key=lambda i: i["nivel"] != "critico")
 
 
 def bloco(conn, agora: datetime.datetime | None = None) -> tuple[list[dict], int]:
