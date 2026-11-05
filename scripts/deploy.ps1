@@ -28,6 +28,7 @@ $ErrorActionPreference = "Stop"
 $pause = "C:\DashboardLotufo\watchdog.pause"
 $py = Join-Path $AppDir "backend\.venv\Scripts\python.exe"
 $lock = Join-Path $AppDir "backend\requirements.lock"
+$instalacaoArquivo = "C:\DashboardLotufo\segredos\instalacao.json"   # issue #417, o mesmo de rodar_producao.ps1
 if (-not (Test-Path $py)) { throw "venv da producao ausente em $py (setup inicial do diretorio pinado nao feito)" }
 
 # A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
@@ -79,6 +80,15 @@ function Reconstruir {
             & npm run build;   if ($LASTEXITCODE -ne 0) { throw "npm run build falhou" }
         } finally { Pop-Location }
     }
+}
+# Issue #417: antes de parar a producao, o codigo NOVO (ja' no pinado, depois do build) confere o arquivo da
+# instalacao. Sem "autorizada" o deploy para aqui: as migracoes so' rodam na subida, entao o banco nao e' migrado e o
+# processo no ar nao e' trocado; o catch do Construir volta o pinado para o commit anterior.
+function ConferirInstalacao {
+    Push-Location (Join-Path $AppDir "backend")
+    try { & $py -m app.cli instalacao verificar --arquivo $instalacaoArquivo }
+    finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { throw "instalacao nao autorizada para o commit novo - ver docs\runbook.md (Instalacao assinada)" }
 }
 function DonoDaPorta {
     $c = Get-NetTCPConnection -LocalPort $Porta -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -154,9 +164,10 @@ try {
     }
     # Construir pode lancar depois do checkout (pip/npm/build): o diretorio pinado nao pode ficar
     # num commit que nao subiu (issue #78). Volta para $anterior (checkout + reconstrucao) e sai com 1.
-    try { Construir $alvo }
+    # A conferencia da instalacao (issue #417) entra no mesmo try: recusada, a producao nem para.
+    try { Construir $alvo; ConferirInstalacao }
     catch {
-        Write-Warning "Construir $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
+        Write-Warning "Construir ou conferir a instalacao de $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
         # Sem fetch (a rede pode ser a causa) e so reconstroi se o HEAD saiu de $anterior:
         # se a falha foi no fetch/checkout do alvo, o HEAD nunca saiu e o build nao e refeito
         # (npm/vite esvaziariam o dist servido com a producao no ar).
