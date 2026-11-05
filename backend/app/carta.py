@@ -17,7 +17,6 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from decimal import Decimal
 from pathlib import Path
 
 from fpdf import FPDF
@@ -304,9 +303,9 @@ COLUNAS_CURVA_S = ("Competência", "Previsto vigente", "Previsto anterior", "Med
 _CHAVES_CURVA_S = ("previsto_vigente_centavos", "previsto_anterior_centavos", "medido_centavos")
 
 
-def _reais(centavos: int | None) -> Decimal | None:
-    """Centavo inteiro -> real exato (a unica divisao; nada se arredonda de novo). None fica celula vazia."""
-    return None if centavos is None else Decimal(centavos) / 100
+def _reais(centavos: int | None) -> float | None:
+    """Centavo inteiro -> real na celula, como a planilha do QDOP (`qdop.gerar_xlsx`). None fica celula vazia."""
+    return None if centavos is None else centavos / 100
 
 
 def curva_s_xlsx(linhas: list[dict]) -> bytes:

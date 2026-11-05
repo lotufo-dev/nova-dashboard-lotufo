@@ -586,7 +586,10 @@ fim da execução que prorroga é marcado "retroativo" e nunca recusado.
 
 **Pleitos** (`app/pleitos.py`): reajuste, prorrogação de prazo e comunicação de conclusão, com o mesmo caminho do
 protocolo (ofício gerado, anexos, montar, assinar no DocuSign, arrastar o assinado, prévia, enviar). Anexos
-exigidos: memória de cálculo e cronograma no reajuste, cronograma no prazo. Justificativa de prazo que fala em
+exigidos: memória de cálculo e cronograma no reajuste, cronograma no prazo. No prazo, a "Curva S.xlsx" (competência,
+previsto vigente, previsto anterior à última repactuação e medido, acumulados; issue #293) entra sozinha nos anexos ao
+criar o pedido e é trocada pela do dia a cada "montar" (fica em `curvas/` na pasta de dados); tirada pela pessoa, não
+volta. Justificativa de prazo que fala em
 chuva sem paralisação cadastrada vira pendência. Destinatários: `protocolo_para` do órgão, fiscal vigente e
 `destinatarios_extras`; cópia `protocolo_copia` do órgão mais `copia_extras` do contrato. Textos em `cartas.yaml` (`pleito_reajuste`, `prazo`,
 `conclusao`; `<campo>_<família>` vence o comum: o reajuste da SINFRA cita a IN 001/2024).

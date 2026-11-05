@@ -269,9 +269,14 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
                             {"tipo": tipo, "numero_oficio": canon, "data_base_mes": data_base_mes, "ciclo": ciclo,
                              "dias": dias, **({"reemite_pleito_id": anterior["id"], "reemissao": reemissao}
                                               if anterior else {})})
-        if tipo == "prazo":
-            _anexar_curva_s(conn, usuario_id, pid, curva)
+        _anexar_curva_s(conn, usuario_id, pid, curva)
     return pid
+
+
+# A curva S gerada mora numa pasta so' dela: o `arquivo` "curvas/<sha>.xlsx" e' o que a distingue de um anexo
+# arrastado (sempre "pleitos/<sha>.<ext>", mesmo com o nome "Curva S.xlsx"), sem coluna nova na tabela -- a
+# migracao 037 reconstroi `pleito_anexos` com as colunas dela e perderia qualquer coluna acrescentada depois.
+PASTA_CURVA_S = "curvas"
 
 
 def _curva_s(conn, tipo: str, contrato_id: int) -> tuple[str, str, int] | None:
@@ -284,27 +289,30 @@ def _curva_s(conn, tipo: str, contrato_id: int) -> tuple[str, str, int] | None:
     if not linhas:
         return None
     dados = carta.curva_s_xlsx(linhas)
-    rel, sha = arquivos.gravar_bytes("pleitos", dados, "xlsx")
+    rel, sha = arquivos.gravar_bytes(PASTA_CURVA_S, dados, "xlsx")
     return rel, sha, len(dados)
 
 
 def _anexar_curva_s(conn, usuario_id: int, pleito_id: int, curva: tuple[str, str, int] | None) -> None:
-    """Dentro da mutacao de `criar` e de `montar` (pedido de prazo): a curva S entra pelos anexos do pleito, como
-    os arrastados, e a carta montada de novo leva a do dia. A gerada antes nao se apaga: fica marcada como removida."""
-    antigas = [r[0] for r in conn.execute("SELECT id FROM pleito_anexos WHERE pleito_id=? AND tipo='outro' AND nome=? "
-                                          "AND removido_em IS NULL", (pleito_id, carta.NOME_CURVA_S))]
-    if not antigas and curva is None:
+    """Dentro da mutacao de `criar` e de `montar`: a curva S entra pelos anexos do pleito, ao lado dos arrastados, e
+    a carta montada de novo troca a gerada antes pela do dia; a antiga nao se apaga, fica marcada como removida. Se a
+    pessoa tirou a curva (nenhuma gerada em vigor, alguma removida), montar de novo nao a devolve. Sem curva (`None`),
+    nada muda."""
+    if curva is None:
         return
-    conn.executemany("UPDATE pleito_anexos SET removido_em=datetime('now') WHERE id=?", [(x,) for x in antigas])
-    depois = None
-    if curva is not None:
-        rel, sha, tamanho = curva
-        aid = conn.execute("INSERT INTO pleito_anexos (pleito_id, tipo, nome, arquivo, sha256, tamanho, ext) "
-                           "VALUES (?, 'outro', ?, ?, ?, ?, 'xlsx')",
-                           (pleito_id, carta.NOME_CURVA_S, rel, sha, tamanho)).lastrowid
-        depois = {"anexo_id": aid, "nome": carta.NOME_CURVA_S, "sha256": sha}
+    geradas = conn.execute("SELECT id, removido_em FROM pleito_anexos WHERE pleito_id=? AND arquivo LIKE ?",
+                           (pleito_id, f"{PASTA_CURVA_S}/%")).fetchall()
+    em_vigor = [r["id"] for r in geradas if r["removido_em"] is None]
+    if geradas and not em_vigor:
+        return
+    conn.executemany("UPDATE pleito_anexos SET removido_em=datetime('now') WHERE id=?", [(x,) for x in em_vigor])
+    rel, sha, tamanho = curva
+    aid = conn.execute("INSERT INTO pleito_anexos (pleito_id, tipo, nome, arquivo, sha256, tamanho, ext) "
+                       "VALUES (?, 'outro', ?, ?, ?, ?, 'xlsx')",
+                       (pleito_id, carta.NOME_CURVA_S, rel, sha, tamanho)).lastrowid
     auditoria.registrar(conn, usuario_id, "pleito.curva_s", "pleito", pleito_id,
-                        {"anexos_removidos": antigas} if antigas else None, depois)
+                        {"anexos_removidos": em_vigor} if em_vigor else None,
+                        {"anexo_id": aid, "nome": carta.NOME_CURVA_S, "sha256": sha})
 
 
 def _anexos_mudaveis(conn, pleito_id: int) -> dict:
@@ -580,8 +588,7 @@ def montar(conn, usuario_id: int, pleito_id: int, corpo: str | None = None, hoje
                      (corpo, rel, sha, n, pleito_id))
         auditoria.registrar(conn, usuario_id, "pleito.montar", "pleito", pleito_id, None,
                             {"sha256": sha, "paginas": n, "tamanho": len(pdf)})
-        if p["tipo"] == "prazo":
-            _anexar_curva_s(conn, usuario_id, pleito_id, curva)
+        _anexar_curva_s(conn, usuario_id, pleito_id, curva)
     return {"arquivo": rel, "sha256": sha, "paginas": n, "tamanho": len(pdf), "nome": nome_documento(conn, p)}
 
 

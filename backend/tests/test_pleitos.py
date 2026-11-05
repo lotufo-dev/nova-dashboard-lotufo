@@ -116,6 +116,27 @@ def test_carta_de_prazo_leva_a_curva_s_na_lista_de_anexos(cenario):
     assert _curvas_s(c, reajuste_id) == []                       # so' a carta de prazo leva a curva
 
 
+def test_curva_s_tirada_pela_pessoa_nao_volta_ao_montar(cenario):
+    c, ids = cenario
+    pid = pleitos.criar(c, ids["uid"], ids["contrato"], "prazo", "310", dias=100, justificativa="Interferências na via")
+    pleitos.remover_anexo(c, ids["uid"], pid, _curvas_s(c, pid)[0]["id"])
+    pleitos.montar(c, ids["uid"], pid)
+    assert _curvas_s(c, pid) == []
+    assert "Curva S.xlsx" not in [a["nome"] for a in pleitos.previa_envio(c, pid)["anexos"]]
+
+
+def test_montar_troca_so_a_curva_gerada_nunca_o_arquivo_da_pessoa(cenario):
+    """Revisao da PR (#293): a curva gerada e' a da pasta do sistema, nao qualquer anexo com o mesmo nome."""
+    c, ids = cenario
+    pid = pleitos.criar(c, ids["uid"], ids["contrato"], "prazo", "310", dias=100, justificativa="Interferências na via")
+    da_pessoa = pleitos.adicionar_anexo(c, ids["uid"], pid, "outro", "Curva S.xlsx", b"PK\x03\x04curva do SMO", "xlsx")
+    gerada = [a["id"] for a in _curvas_s(c, pid) if a["id"] != da_pessoa]
+    pleitos.montar(c, ids["uid"], pid)
+    vigentes = {a["id"]: a["arquivo"].split("/")[0] for a in _curvas_s(c, pid)}
+    assert vigentes.pop(da_pessoa) == "pleitos" and list(vigentes.values()) == ["curvas"]
+    assert gerada[0] not in vigentes                              # a gerada no criar foi trocada pela do montar
+
+
 def test_carta_de_prazo_sem_cronograma_nem_medicao_nao_leva_curva_vazia(cenario):
     c, ids = cenario
     c.execute("UPDATE medicoes SET estado='cancelada' WHERE id=?", (ids["medicao"],)); c.commit()
