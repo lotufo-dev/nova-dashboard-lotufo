@@ -647,6 +647,68 @@ def test_versao_da_carga_fica_superada_so_pela_versao_do_yaml_de_data_posterior(
     assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 3     # nada apagado
 
 
+# --- issue #395: cronograma_superadas tira a carga de 04/09/2026 da linha do tempo -------------------------
+
+def _com_carga(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    cronograma_mod.nova_versao(conn, 1, 1, [("2026-08", 50_00), ("2026-09", 60_00), ("2026-10", 70_00),
+                                            ("2026-11", 80_00)], "manual")
+    conn.execute("UPDATE cronograma_versoes SET criado_em='2026-09-04 15:00:00'")
+    conn.commit()
+
+
+def test_cronograma_superadas_supera_a_carga_com_auditoria(conn):
+    _com_carga(conn)
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL],
+                                                                    cronograma_superadas=[1])]))
+    assert "MT-402: versão 1 superada" in r["cronograma"]["alterados"]
+    assert not any("não é a vigente" in a for a in r["avisos"])        # a do documento passou a mandar
+    assert cronograma_mod.vigente(conn, 1)["numero"] == 2
+    assert cronograma_mod.previsto_efetivo(conn, 1) == {"2024-04": 100_01, "2026-10": 200_00, "2026-11": 300_00}
+    sup = conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0]
+    assert sup is not None
+    aud = conn.execute("SELECT entidade, entidade_id, depois FROM audit_log "
+                       "WHERE acao='cadastro.cronograma_superada'").fetchall()
+    assert [(a[0], a[1], json.loads(a[2])) for a in aud] == [("contrato", "1", {"versao": 1, "superada_em": sup})]
+    assert conn.execute("SELECT COUNT(*) FROM cronograma_versoes").fetchone()[0] == 2     # nada apagado
+
+
+def test_cronograma_superadas_segunda_aplicacao_e_igual_e_tirar_da_lista_nao_dessupera(conn):
+    _com_carga(conn)
+    cad = _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL], cronograma_superadas=[1])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    sup = conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0]
+    r2 = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r2["cronograma"] == {"criados": [], "alterados": [], "iguais": 2}      # a versao 2 e a superada
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] == sup
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.cronograma_superada'").fetchone()[0] == 1
+
+
+def test_ensaio_relata_a_versao_superada_e_nao_grava(conn):
+    _com_carga(conn)
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma_superadas=[1])]), ensaio=True)
+    assert r["cronograma"]["alterados"] == ["MT-402: versão 1 superada"]
+    # sem versao de documento no YAML, a obra fica sem vigente: quem aplica fica sabendo no ensaio
+    assert any("MT-402" in a and "sem cronograma vigente" in a for a in r["avisos"])
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] is None
+
+
+def test_cronograma_superadas_com_numero_inexistente_e_recusado(conn):
+    _com_carga(conn)
+    with pytest.raises(ValueError, match="versão 7 não existe"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma_superadas=[1, 7])]))
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes WHERE numero=1").fetchone()[0] is None
+
+
+def test_cronograma_superadas_com_versao_do_cadastro_e_recusado(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL])]))
+    with pytest.raises(ValueError, match="versão 1 veio do cadastro .*contratual"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(cronograma=[V_CONTRATUAL],
+                                                                    cronograma_superadas=[1])]))
+    assert conn.execute("SELECT superada_em FROM cronograma_versoes").fetchone()[0] is None
+
+
 # --- issue #271: apostilamento com competencias vira previsao e atende o pleito (spec 2026-10-20 §2.2) ----------
 
 from app import reajuste as reajuste_mod
@@ -1063,3 +1125,104 @@ def test_misto_de_reajuste_de_outro_ciclo_com_prazo_novo_pede_reemissao_do_pleit
     k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 10))[0]
     assert (k["ciclo"], k["situacao"], k["aditivo"]["chave_cadastro"]) == (2026, "reemitir", "ta-08")
     assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2025, True)["chave"] == "ta-08"
+
+# --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
+
+from app import prazos as prazos_mod
+
+PEDIDO_VALOR = {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "data_base": None, "ciclo": None,
+                "dias": None, "valor_centavos": 100000001, "objeto": "1ª RPFO"}
+
+
+def test_pleito_de_valor_e_gravado_com_o_valor_e_o_objeto_e_nao_duplica(conn):
+    cad = _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["criados"] == ["MT-402/valor CT-001-LT-2026"]
+    linha = conn.execute("SELECT tipo, origem, situacao, enviado_em, numero_oficio, valor_centavos, objeto "
+                         "FROM pleitos").fetchone()
+    assert tuple(linha) == ("valor", "cadastro", "enviado", "2026-03-27", "CT-001-LT-2026", 100000001, "1ª RPFO")
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"] == {"criados": [], "alterados": [], "iguais": 1}
+
+
+def test_pedido_de_valor_sem_aditivo_depois_fica_sem_resposta(conn):
+    # o aditivo de valor assinado ANTES do pedido nao o atende; o de prazo depois dele tambem nao
+    antes = {**AD_VALOR, "data": "2026-01-15"}
+    prazo = {**AP_PRAZO, "data": "2026-04-10"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[antes, prazo],
+                                                                pleitos_anteriores=[PEDIDO_VALOR])]))
+    [p] = prazos_mod.pedidos_de_valor(conn, 1)
+    assert (p["numero_oficio"], p["enviado_em"], p["valor_centavos"], p["objeto"]) == (
+        "CT-001-LT-2026", "2026-03-27", 100000001, "1ª RPFO")
+    assert p["atendido_por"] is None
+
+
+def test_pedido_de_valor_e_ligado_ao_aditivo_de_valor_assinado_depois(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])]))
+    assert prazos_mod.pedidos_de_valor(conn, 1)[0]["atendido_por"] is None
+    # o aditivo entra numa carga posterior do cadastro: a ligacao e' pela data, na leitura
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR],
+                                                                pleitos_anteriores=[PEDIDO_VALOR])]))
+    [p] = prazos_mod.pedidos_de_valor(conn, 1)
+    assert p["atendido_por"] == {"numero": "019/2024/01/01", "data_assinatura": "2026-06-30", "rotulo": "1º TA"}
+
+
+def test_pedido_de_valor_e_atendido_pelo_primeiro_aditivo_de_valor_depois_dele(conn):
+    ta2 = {**AD_VALOR, "chave": "ta-02", "data": "2026-09-30", "numero": "019/2024/01/02"}
+    segundo = {**PEDIDO_VALOR, "oficio": "CT-050-LT-2026", "data": "2026-07-10", "objeto": "2ª RPFO"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[AD_VALOR, ta2],
+                                                                pleitos_anteriores=[PEDIDO_VALOR, segundo])]))
+    por_oficio = {p["numero_oficio"]: p["atendido_por"]["rotulo"] for p in prazos_mod.pedidos_de_valor(conn, 1)}
+    assert por_oficio == {"CT-001-LT-2026": "1º TA", "CT-050-LT-2026": "2º TA"}
+
+
+def test_pleito_de_valor_mudado_no_yaml_fica_como_gravado_e_vira_aviso(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])]))
+    mudado = {**PEDIDO_VALOR, "valor_centavos": 120000000, "objeto": "1ª RPFO revista"}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[mudado])]))
+    assert r["pleitos"]["iguais"] == 1
+    assert "MT-402/valor CT-001-LT-2026: valor, objeto no YAML difere do gravado; o gravado fica " \
+           "(correção de pleito anterior aplicado: issue #399)" in r["avisos"]
+    assert conn.execute("SELECT valor_centavos FROM pleitos").fetchone()[0] == 100000001
+    # igual de verdade: sem aviso
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[PEDIDO_VALOR])]))
+    assert not any("difere do gravado" in a for a in r["avisos"])
+
+
+def test_pleito_de_prazo_com_outra_data_no_yaml_vira_aviso(conn):
+    prazo = {"tipo": "prazo", "oficio": "331", "data": "2025-11-10", "data_base": None, "ciclo": None, "dias": 120}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[prazo])]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(pleitos_anteriores=[{**prazo, "data": "2025-08-10"}])]))
+    assert any(a.startswith("MT-402/prazo CT-331-LT-2025: data no YAML difere do gravado") for a in r["avisos"])
+
+
+def test_supressao_e_aditivo_de_reajuste_nao_atendem_o_pedido_de_valor(conn):
+    supressao = {**AD_VALOR, "delta_valor_centavos": -1000001}
+    de_reajuste = {**AD_VALOR, "chave": "ta-02", "data": "2026-07-30", "numero": "019/2024/01/02",
+                   "natureza": "reajuste"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[supressao, de_reajuste],
+                                                                pleitos_anteriores=[PEDIDO_VALOR])]))
+    assert prazos_mod.pedidos_de_valor(conn, 1)[0]["atendido_por"] is None
+
+
+def test_indice_reajuste_vem_da_data_base_unica_e_reaplicar_e_igual(conn):
+    # issue #397: a coluna do contrato e' derivada de contrato_datas_base, nunca a tabela de precos
+    conn.execute("INSERT INTO contratos (orgao, numero_instrumento, objeto, valor_original_centavos, indice_reajuste) "
+                 "VALUES ('SINFRA','019/2024/00/00-SINFRA','MT-402',1512720000,'SINAPI')")
+    conn.commit()
+    c = _contrato(datas_base=[{"mes": "2023-04", "indice": "INCC-DI/FGV"}])
+    ensaio = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]), ensaio=True)
+    assert ensaio["contratos"]["alterados"] == ["MT-402"]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]))
+    assert conn.execute("SELECT indice_reajuste FROM contratos").fetchone()[0] == "INCC-DI/FGV"
+    linha = conn.execute("SELECT * FROM audit_log WHERE acao='cadastro.contrato' ORDER BY id DESC LIMIT 1").fetchone()
+    assert "SINAPI" in json.dumps(dict(linha)) and "INCC-DI/FGV" in json.dumps(dict(linha))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[c]))
+    assert r["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+
+
+def test_indice_reajuste_com_duas_bases_traz_as_duas_com_aplica_a(conn):
+    bases = [{"mes": "2022-03", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"},
+             {"mes": "2022-01", "indice": "INCC-DI", "aplica_a": "itens SINAPI"}]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(datas_base=bases)]))
+    assert conn.execute("SELECT indice_reajuste FROM contratos").fetchone()[0] == \
+        "2022-01: INCC-DI (itens SINAPI); 2022-03: FGV/DNIT (itens SICRO)"

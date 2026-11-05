@@ -1072,3 +1072,63 @@ def test_reemitir_pela_api_valida_em_portugues(api):
     assert r.status_code == 422 and "enviado" in r.json()["detail"], r.text
     assert cl.post("/api/pleitos/999999/reemitir", json={"reemissao": "reiteracao", "numero_oficio": "1"}
                    ).status_code == 404
+
+
+# --- issue #398: pedido de aditivo de valor do cadastro ------------------------------------------------------
+
+PEDIDO_VALOR = {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "data_base": None, "ciclo": None,
+                "dias": None, "valor_centavos": 100000000, "objeto": "1ª RPFO"}
+TA_VALOR = {"chave": "ta-01", "tipo": "aditivo_valor", "data": "2026-06-30", "numero": "099/2024/01/01",
+            "objeto": "1ª RPFO", "corrige": None, "pdf": None, "delta_valor_centavos": 100000000,
+            "nova_execucao_fim": None, "nova_vigencia_fim": None, "dados": {}, "natureza": "execucao"}
+
+
+def _com_pedido_de_valor(instrumentos=()):
+    c = db.get_conn()
+    obra = {**_contrato("Obra MTPAR", "mtpar", "099/2024/MTPAR"), "datas_base": [{"mes": "2024-06", "indice": "INCC-DI"}],
+            "pleitos_anteriores": [PEDIDO_VALOR], "instrumentos": list(instrumentos)}
+    cadastro_aplicar.aplicar(c, 1, {
+        "orgaos": [{"chave": "mtpar", "nome": "MTPAR", "familia": "mtpar", "cnpj": None,
+                    "regras": {"protocolo_para": ["protocolo@orgao-b.exemplo.com.br"], "documentos_medicao": [],
+                               "documentos_reajuste": []}}],
+        "entidades": [{"chave": "lotufo", "nome": "Lotufo Engenharia e Construções Ltda", "cnpj": "31200101000130",
+                       "papel": "lotufo", "coligada_rm": 1, "sigla_oficio": "LT", "nome_curto": "Lotufo"}],
+        "contratos": [obra], "avisos": [], "geral": {"cartas": CARTAS}})
+    pid = c.execute("SELECT id FROM pleitos WHERE tipo='valor'").fetchone()[0]
+    c.commit(); c.close()
+    return pid
+
+
+def test_prazos_da_obra_traz_o_pedido_de_valor_sem_resposta(api):
+    cl, cid, _ = api
+    pid = _com_pedido_de_valor()
+    d = cl.get(f"/api/contratos/{cid}/prazos").json()
+    assert d["pedidos_valor"] == [{"id": pid, "numero_oficio": "CT-001-LT-2026", "enviado_em": "2026-03-27",
+                                   "valor_centavos": 100000000, "objeto": "1ª RPFO", "atendido_por": None}]
+    # nao entra nos oficios de prazo e conclusao (os que tem carta e envio)
+    assert all(p["tipo"] != "valor" for p in d["pleitos"])
+
+
+def test_prazos_da_obra_liga_o_pedido_de_valor_ao_aditivo_posterior(api):
+    cl, cid, _ = api
+    _com_pedido_de_valor([TA_VALOR])
+    [p] = cl.get(f"/api/contratos/{cid}/prazos").json()["pedidos_valor"]
+    assert p["atendido_por"] == {"numero": "099/2024/01/01", "data_assinatura": "2026-06-30", "rotulo": "1º TA"}
+
+
+def test_pedido_de_valor_nao_e_ofertado_para_envio(api):
+    cl, cid, _ = api
+    pid = _com_pedido_de_valor()
+    # nao se cria pela tela: nao ha' carta de aditivo de valor
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "valor", "numero_oficio": "301"})
+    assert r.status_code == 422
+    # o do cadastro se le, mas nao monta, nao tem previa e nao se envia
+    d = cl.get(f"/api/pleitos/{pid}")
+    assert d.status_code == 200 and d.json()["rotulo"] == "Pedido de valor"
+    assert d.json()["reemissoes_possiveis"] == [] and d.json()["pendencias"] == []
+    assert cl.post(f"/api/pleitos/{pid}/montar", json={}).status_code == 422
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422 and "não se envia pela dashboard" in r.json()["detail"]
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json={"para": ["a@orgao-b.exemplo.com.br"], "copia": [],
+                                                       "assunto": "x", "corpo": "x"}).status_code == 422
+    assert db.get_conn().execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0

@@ -581,6 +581,23 @@ def test_cronograma_que_nao_e_lista_e_erro(tmp_path):
     assert any("cronograma" in e and "lista" in e for e in erros)
 
 
+# --- issue #395: cronograma_superadas (numeros de versao ja gravados sem linha no cadastro) --------------
+
+def test_cronograma_superadas_aceita_lista_de_inteiros(tmp_path):
+    c = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma_superadas": [3, 1]}]))["contratos"][0]
+    assert c["cronograma_superadas"] == [1, 3]
+
+
+def test_contrato_sem_cronograma_superadas_tem_lista_vazia(tmp_path):
+    assert ca.preparar(_escrever(tmp_path))["contratos"][0]["cronograma_superadas"] == []
+
+
+@pytest.mark.parametrize("valor", [1, "1", [0], [-1], ["1"], [1.5], [True], [None], [1, 1], [9223372036854775808], [1_000_001]])
+def test_cronograma_superadas_invalido_e_erro(tmp_path, valor):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "cronograma_superadas": valor}]))
+    assert any("cronograma_superadas" in e for e in erros)
+
+
 # --- issue #257: data-base com indice obrigatorio e aplica_a (spec 2026-10-20 §2.4, D7) ----------
 
 @pytest.mark.parametrize("db_", [{"mes": "2023-04"}, {"mes": "2023-04", "indice": ""},
@@ -763,3 +780,68 @@ def test_aditivo_de_reajuste_em_contrato_de_duas_bases_e_aviso(tmp_path):
     com = {**TA_REAJ, "data_base": "2023-06"}
     cad = ca.preparar(_escrever(tmp_path / "com", contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [com]}]))
     assert cad["avisos"] == []
+
+# --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
+
+PEDIDO_VALOR = {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "valor": "1.000.000,00",
+                "objeto": "1ª RPFO"}
+
+
+def test_pleito_anterior_de_valor_valida_com_o_valor_em_centavos(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [PEDIDO_VALOR]}]))
+    assert cad["contratos"][0]["pleitos_anteriores"] == [
+        {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "data_base": None, "ciclo": None,
+         "dias": None, "valor_centavos": 100000000, "objeto": "1ª RPFO"}]
+
+
+def test_pleito_anterior_de_valor_sem_objeto_e_com_centavo_impar(tmp_path):
+    p = {k: v for k, v in PEDIDO_VALOR.items() if k != "objeto"} | {"valor": "0,01"}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
+    item = cad["contratos"][0]["pleitos_anteriores"][0]
+    assert item["valor_centavos"] == 1 and item["objeto"] is None
+
+
+@pytest.mark.parametrize("troca, campo", [
+    ({"valor": None}, ".valor"),
+    ({"valor": "1000.00"}, ".valor"),
+    ({"valor": "0,00"}, ".valor"),
+    ({"valor": "-1,00"}, ".valor"),
+    ({"dias": 120}, ".dias"),
+    ({"data_base": "2023-04"}, ".data_base"),
+    ({"ciclo": 2026}, ".ciclo"),
+])
+def test_pleito_anterior_de_valor_exige_valor_e_recusa_dias_e_data_base(tmp_path, troca, campo):
+    p = {**PEDIDO_VALOR, **troca}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
+    assert any(f"pleitos_anteriores[0]{campo}" in e for e in erros), erros
+
+
+@pytest.mark.parametrize("campo, valor", [("valor", "1,00"), ("objeto", "1ª RPFO")])
+def test_valor_e_objeto_so_valem_no_pleito_anterior_de_valor(tmp_path, campo, valor):
+    p = {"tipo": "prazo", "oficio": "331", "data": "2025-11-10", "dias": 120, campo: valor}
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "pleitos_anteriores": [p]}]))
+    assert any(f"pleitos_anteriores[0].{campo}" in e for e in erros), erros
+
+
+# --- issue #391: apostilamento de reajuste sem ciclo avisa o ano que vai valer -------------------------------
+
+def _avisos_ciclo(tmp_path, ap):
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    return [a for a in cad["avisos"] if "sem ciclo" in a]
+
+
+def test_apostilamento_sem_ciclo_avisa_o_ano_da_eficacia(tmp_path):
+    ap = {k: v for k, v in _apostilamento(eficacia="2025-12-20").items() if k != "ciclo"}
+    avisos = _avisos_ciclo(tmp_path, ap)
+    assert len(avisos) == 1 and "instrumentos[ap-reaj-1]" in avisos[0]
+    assert "ciclo 2025 (pelo campo eficacia)" in avisos[0] and "Diga ciclo: AAAA" in avisos[0]
+
+
+def test_apostilamento_sem_ciclo_nem_eficacia_avisa_o_ano_da_data(tmp_path):
+    ap = {k: v for k, v in _apostilamento().items() if k != "ciclo"}
+    avisos = _avisos_ciclo(tmp_path, ap)
+    assert len(avisos) == 1 and "ciclo 2026 (pelo campo data)" in avisos[0]
+
+
+def test_apostilamento_com_ciclo_nao_avisa(tmp_path):
+    assert _avisos_ciclo(tmp_path, _apostilamento()) == []

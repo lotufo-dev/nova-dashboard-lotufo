@@ -157,7 +157,7 @@ _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", 
                     "copia_extras",
                     "estado", "documentos", "objeto_completo", "cno_arquivo", "folga_vigencia_dias",
                     "centros_custo_anteriores_rm", "objeto_carta", "garantia_apolice", "garantia_vigencia_fim",
-                    "garantia_arquivo")
+                    "garantia_arquivo", "indice_reajuste")
 _CAMPOS_FISCAL = ("cargo", "tratamento", "portaria")
 
 
@@ -212,6 +212,17 @@ def _frcs(conn, usuario_id, lista, rel, ensaio) -> None:
         auditoria.registrar(conn, usuario_id, "cadastro.frc", "frc_consorcio", f["consorcio"], antes, depois)
 
 
+def _indice_das_bases(bases: list[dict]) -> str | None:
+    """Texto de contratos.indice_reajuste, derivado das datas-base (issue #397): o indice da base unica; com mais
+    de uma, `AAAA-MM: indice (aplica_a)` separadas por "; ". Sem base, nulo."""
+    if not bases:
+        return None
+    if len(bases) == 1:
+        return bases[0]["indice"]
+    return "; ".join(f"{d['mes']}: {d['indice']}" + (f" ({d['aplica_a']})" if d.get("aplica_a") else "")
+                     for d in sorted(bases, key=lambda d: d["mes"]))
+
+
 def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     nome_orgao = conn.execute("SELECT nome FROM orgaos WHERE id=?", (ids_orgao[c["orgao"]],)).fetchone()[0]
     ja = conn.execute("SELECT * FROM contratos WHERE numero_instrumento=?",
@@ -251,7 +262,8 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             # issue #65: garantia (apolice, fim da vigencia, PDF)
             "garantia_apolice": c.get("garantia_apolice"), "garantia_vigencia_fim": c.get("garantia_vigencia_fim"),
             "garantia_arquivo": _no_disco("anexos", c["garantia_caminho"], "pdf", rel["ensaio"])
-            if c.get("garantia_caminho") else None}
+            if c.get("garantia_caminho") else None,
+            "indice_reajuste": _indice_das_bases(c["datas_base"])}
     mudou = False
     if ja is None:
         colunas = ["numero_instrumento", *_CAMPOS_CONTRATO]
@@ -321,7 +333,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
         else:
             rel["contratos"]["iguais"] += 1
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])
-    _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"])
+    _pleitos_anteriores(conn, usuario_id, cid, c, rel["pleitos"], rel["avisos"])
     _apostilamentos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"])
     _aditivos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"], rel["avisos"])
     _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
@@ -332,8 +344,9 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Issue #256: uma `cronograma_versoes` por entrada do YAML, com criado_em = data do documento.
 
     So' acrescenta. Versao aplicada nao muda nem some (correcao e' versao nova, com outra chave); as
-    versoes sem linha no cadastro (manuais e a carga de 04/09/2026) nao sao tocadas: ficam na linha do
-    tempo e sao superadas pela primeira versao de documento posterior (cronograma.previsto_efetivo)."""
+    versoes sem linha no cadastro (manuais e a carga de 04/09/2026) ficam na linha do tempo e sao superadas
+    pela primeira versao de documento posterior (cronograma.previsto_efetivo); a unica mudanca nelas e' o
+    `superada_em` que `cronograma_superadas` grava (issue #395)."""
     nome = c["nome_curto"]
     do_cadastro = {v["chave"] for v in c.get("cronograma") or []}
     for r in conn.execute("SELECT chave FROM cronograma_versoes_cadastro WHERE contrato_id=?", (contrato_id,)):
@@ -373,6 +386,11 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
             raise ValueError(f"{rotulo}: versão de cronograma já aplicada não pode ser alterada "
                              f"({', '.join(mudou)}); registre uma versão nova, com outra chave")
         rel["iguais"] += 1
+    superou = _cronograma_superadas(conn, usuario_id, contrato_id, c, rel)
+    # code-review (#395): superar sem versao nova pode deixar a obra sem cronograma vigente (curva S vazia)
+    if superou and cronograma.vigente(conn, contrato_id) is None:
+        avisos.append(f"{nome}: com a versão superada, a obra ficou sem cronograma vigente (sem previsto na "
+                      "curva S); inclua a versão do documento em `cronograma`")
     # A versao de documento anterior a uma ja gravada (a carga de 04/09/2026, uma publicada na tela) entra
     # ANTES dela na linha do tempo e nao muda o futuro: quem aplica precisa saber.
     if criadas:
@@ -383,17 +401,54 @@ def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
                           "posterior); ela só vale para os meses até a data dessa versão")
 
 
-def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
+def _cronograma_superadas(conn, usuario_id, contrato_id, c, rel) -> bool:
+    """Issue #395: `cronograma_superadas` marca `superada_em` nas versoes ja gravadas sem linha no cadastro.
+
+    Irreversivel pelo YAML: tirar o numero da lista nao "dessupera" (nada aqui volta a NULL). Versao do cadastro nao
+    se supera assim: correcao e' versao nova. Roda depois das versoes do YAML, para o aviso de vigente ja' ver a
+    linha do tempo sem a superada. Devolve se superou alguma nesta aplicacao."""
+    nome = c["nome_curto"]
+    superou = False
+    for numero in c.get("cronograma_superadas") or []:
+        v = conn.execute("SELECT v.id, v.superada_em, k.chave FROM cronograma_versoes v "
+                         "LEFT JOIN cronograma_versoes_cadastro k ON k.versao_id = v.id "
+                         "WHERE v.contrato_id=? AND v.numero=?", (contrato_id, numero)).fetchone()
+        if v is None:
+            raise ValueError(f"{nome}: cronograma_superadas: a versão {numero} não existe neste contrato")
+        if v["chave"] is not None:
+            raise ValueError(f"{nome}: cronograma_superadas: a versão {numero} veio do cadastro (chave "
+                             f"{v['chave']}) e não se supera; correção é versão nova, com outra chave")
+        if v["superada_em"] is not None:
+            rel["iguais"] += 1
+            continue
+        quando = conn.execute("SELECT datetime('now')").fetchone()[0]
+        conn.execute("UPDATE cronograma_versoes SET superada_em=? WHERE id=?", (quando, v["id"]))
+        auditoria.registrar(conn, usuario_id, "cadastro.cronograma_superada", "contrato", contrato_id, None,
+                            {"versao": numero, "superada_em": quando})
+        rel["alterados"].append(f"{nome}: versão {numero} superada")
+        superou = True
+    return superou
+
+
+# o que o YAML diz de um pleito anterior, a coluna em que ele foi gravado e o nome no aviso do que difere
+_CAMPOS_PLEITO = (("data", "enviado_em", "data"), ("dias", "dias", "dias"), ("ciclo", "ciclo", "ciclo"),
+                  ("valor_centavos", "valor_centavos", "valor"), ("objeto", "objeto", "objeto"))
+
+
+def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Bloco 7: pleitos enviados antes do sistema viram `pleitos` de origem 'cadastro', ja' enviados.
-    So' acrescenta (a chave e' contrato + tipo + oficio)."""
+    So' acrescenta (a chave e' contrato + tipo + oficio). Pleito ja' gravado com outro dado no YAML continua como
+    esta' e vira aviso (a correcao pelo YAML e' a issue #399)."""
     sigla = conn.execute("SELECT e.sigla_oficio FROM contratos k JOIN entidades e ON e.id=k.entidade_id "
                          "WHERE k.id=?", (contrato_id,)).fetchone()
     for p in c.get("pleitos_anteriores") or []:
         canon = oficios.canonico(p["oficio"], sigla[0] if sigla else "LT", int(p["data"][:4]))
         cur = conn.execute(
             "INSERT OR IGNORE INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, dias, numero_oficio, "
-            "situacao, enviado_em, usuario_id) VALUES (?,?, 'cadastro', ?,?,?,?, 'enviado', ?,?)",
-            (contrato_id, p["tipo"], p["data_base"], p["ciclo"], p["dias"], canon, p["data"], usuario_id))
+            "situacao, enviado_em, usuario_id, valor_centavos, objeto) "
+            "VALUES (?,?, 'cadastro', ?,?,?,?, 'enviado', ?,?,?,?)",
+            (contrato_id, p["tipo"], p["data_base"], p["ciclo"], p["dias"], canon, p["data"], usuario_id,
+             p.get("valor_centavos"), p.get("objeto")))   # issue #398: o pedido de valor
         rotulo = f"{c['nome_curto']}/{p['tipo']} {canon}"
         if cur.rowcount:
             rel["criados"].append(rotulo)
@@ -401,6 +456,15 @@ def _pleitos_anteriores(conn, usuario_id, contrato_id, c, rel) -> None:
                                 {**p, "numero_oficio": canon})
         else:
             rel["iguais"] += 1
+            gravado = conn.execute(
+                "SELECT enviado_em, dias, ciclo, valor_centavos, objeto FROM pleitos WHERE contrato_id=? AND tipo=? "
+                "AND numero_oficio=? AND COALESCE(data_base_mes, '')=COALESCE(?, '') AND origem='cadastro'",
+                (contrato_id, p["tipo"], canon, p["data_base"])).fetchone()
+            difere = [nome for chave, coluna, nome in _CAMPOS_PLEITO
+                      if gravado is not None and p.get(chave) != gravado[coluna]]
+            if difere:
+                avisos.append(f"{rotulo}: {', '.join(difere)} no YAML difere do gravado; o gravado fica "
+                              "(correção de pleito anterior aplicado: issue #399)")
 
 
 def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
