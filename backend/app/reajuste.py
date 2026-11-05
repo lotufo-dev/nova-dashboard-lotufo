@@ -90,9 +90,10 @@ def _termo_do_pleito(conn, contrato_id: int, pleito: dict) -> dict | None:
 
 
 # Issue #390: na SES o reajuste anual sai por termo aditivo de valor (`natureza: reajuste`, migracao 046), nao por
-# apostilamento. O aditivo assinado e nao cancelado fecha o ciclo como o apostilamento fecha.
+# apostilamento. O aditivo assinado e nao cancelado fecha o ciclo como o apostilamento fecha. Com valor: o misto so' de
+# prazo (delta zero) nao concede reajuste (gate Sol, PR #407).
 ADITIVO_DE_REAJUSTE = ("status='assinado' AND cancelado_em IS NULL AND natureza='reajuste' "
-                        "AND tipo IN ('valor','misto') AND data_assinatura IS NOT NULL")
+                       "AND tipo IN ('valor','misto') AND delta_valor_centavos <> 0 AND data_assinatura IS NOT NULL")
 
 
 def ciclo_do_aditivo(mes_base: str, data_assinatura: str) -> int | None:
@@ -110,34 +111,49 @@ def _como_termo(r) -> dict:
 
 
 def _aditivo_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, unica: bool) -> dict | None:
-    """Sem pleito enviado: o aditivo de reajuste do ciclo (`ciclo_do_aditivo`). O aditivo nao diz a data-base; com
-    mais de uma, nao se adivinha qual ele atende (so' a ligacao ao pleito fecha)."""
+    """Sem pleito enviado: o aditivo de reajuste do ciclo (`ciclo_do_aditivo`). O aditivo nao guarda a data-base; com
+    mais de uma, nao se adivinha qual ele atende. O aditivo ja' ligado a um pleito atende o ciclo daquele pleito (o
+    `ciclo` declarado no cadastro, revisor PR #407), nao o da data."""
     if not unica:
         return None
-    for r in conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND {ADITIVO_DE_REAJUSTE} "
+    for r in conn.execute(f"SELECT * FROM aditivos a WHERE a.contrato_id=? AND {ADITIVO_DE_REAJUSTE} "
+                          "AND NOT EXISTS (SELECT 1 FROM pleitos p WHERE p.contrato_id = a.contrato_id "
+                          "AND p.instrumento_chave = a.chave_cadastro) "
                           "ORDER BY data_assinatura DESC, id DESC", (contrato_id,)):
         if ciclo_do_aditivo(mes_base, r["data_assinatura"]) == ciclo:
             return _como_termo(r)
     return None
 
 
-def _aditivo_do_pleito(conn, contrato_id: int, pleito: dict) -> dict | None:
-    """O aditivo de reajuste que o cadastro ligou ao pleito (`instrumento_chave` = chave do aditivo no cadastro)."""
-    if not pleito.get("instrumento_chave"):
+def _aditivo_do_pleito(conn, contrato_id: int, pleito: dict, unica: bool) -> dict | None:
+    """O aditivo de reajuste que o cadastro ligou ao pleito (`instrumento_chave` = chave do aditivo no cadastro). So'
+    com data-base unica (gate Sol, PR #407): o aditivo nao guarda a base, e a ligacao feita quando o contrato tinha uma
+    so' deixa de dizer qual atende depois que entra a segunda."""
+    if not unica or not pleito.get("instrumento_chave"):
         return None
     r = conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=? AND {ADITIVO_DE_REAJUSTE}",
                      (contrato_id, pleito["instrumento_chave"])).fetchone()
     return _como_termo(r) if r else None
 
 
-def _termo_do_pedido(conn, contrato_id: int, pleito: dict) -> dict | None:
+def aditivos_de_reajuste(conn, contrato_id: int) -> list[dict]:
+    """Os aditivos que valem como termo de reajuste (o mesmo criterio do ciclo), para a aba dizer qual atendeu cada
+    pleito (gate Sol, PR #407). Com mais de uma data-base, nenhum (`_aditivo_do_pleito`)."""
+    if conn.execute("SELECT COUNT(*) FROM contrato_datas_base WHERE contrato_id=?", (contrato_id,)).fetchone()[0] != 1:
+        return []
+    return [_como_termo(r) for r in conn.execute(
+        f"SELECT * FROM aditivos WHERE contrato_id=? AND {ADITIVO_DE_REAJUSTE} ORDER BY data_assinatura, id",
+        (contrato_id,))]
+
+
+def _termo_do_pedido(conn, contrato_id: int, pleito: dict, unica: bool) -> dict | None:
     """O termo ligado ao pleito ou, subindo pelas reiteracoes (`reemite_pleito_id`), ao pedido que elas reiteram
     (revisor, PR #317): a reiteracao nao traz cronograma, entao o termo que atendeu o pedido tambem fecha a
     reiteracao enviada depois dele. A reemissao do cronograma e' pedido novo e para a subida: espera o termo dela."""
     p, vistos = pleito, set()
     while p is not None and p["id"] not in vistos:
         vistos.add(p["id"])
-        termo = _termo_do_pleito(conn, contrato_id, p) or _aditivo_do_pleito(conn, contrato_id, p)
+        termo = _termo_do_pleito(conn, contrato_id, p) or _aditivo_do_pleito(conn, contrato_id, p, unica)
         if termo is not None:
             return termo
         if p.get("reemissao") != "reiteracao" or not p.get("reemite_pleito_id"):
@@ -154,7 +170,7 @@ def apostilamento_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, un
     #390) vale como termo nos dois caminhos."""
     pl = _pleito(conn, contrato_id, mes_base, ciclo)
     if pl:
-        return _termo_do_pedido(conn, contrato_id, pl)
+        return _termo_do_pedido(conn, contrato_id, pl, unica)
     return (_apostilamento(conn, contrato_id, mes_base, ciclo, unica)
             or _aditivo_do_ciclo(conn, contrato_id, mes_base, ciclo, unica))
 
@@ -173,11 +189,13 @@ def _pleito(conn, contrato_id: int, mes_base: str, ciclo: int, sem_reiteracao: b
 def aditivo_depois(conn, contrato_id: int, desde: str | None) -> dict | None:
     """Aditivo de prazo ou valor assinado depois de `desde` (spec 2026-10-20 §2.2, estado `reemitir`): o que
     pede a reemissao do cronograma de reajuste. Sem `desde`, nenhum. O aditivo de natureza reajuste (issue #390) e'
-    o termo que concede o reajuste, nao mudanca do contrato: nao pede reemissao."""
+    o termo que concede o reajuste e nao pede reemissao, salvo se tambem muda o prazo (misto com data nova, revisor
+    e gate Sol, PR #407)."""
     if not desde:
         return None
     r = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND status='assinado' "
-                     "AND COALESCE(natureza, '') <> 'reajuste' "
+                     "AND NOT (COALESCE(natureza, '') = 'reajuste' AND nova_execucao_fim IS NULL "
+                     "AND nova_vigencia_fim IS NULL) "
                      "AND tipo IN ('prazo','valor','misto') AND data_assinatura IS NOT NULL "
                      "AND substr(data_assinatura, 1, 10) > ? ORDER BY data_assinatura DESC, id DESC LIMIT 1",
                      (contrato_id, desde[:10])).fetchone()
