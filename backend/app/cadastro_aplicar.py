@@ -503,43 +503,52 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel) -> None:
 
 def _aditivos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -> None:
     """Issue #390: na SES o reajuste sai por termo aditivo de valor (`natureza: reajuste`). Como o apostilamento, o
-    aditivo atende o ultimo pleito de reajuste enviado ate' a data dele, no ciclo que o cadastro declara (`ciclo` no
-    aditivo: o termo assinado depois do aniversario seguinte, revisor PR #407) ou, sem ele, no do ultimo aniversario
-    da data-base antes da assinatura (`reajuste.ciclo_do_aditivo`), e o pleito recebe `instrumento_chave`. O aditivo
-    nao guarda a data-base: com mais de uma no contrato, nao se liga nada (seria adivinhar; o validar avisa)."""
+    aditivo atende o ultimo pleito de reajuste enviado ate' a data dele, na data-base e no ciclo que ele guarda
+    (`reajuste.base_e_ciclo_do_aditivo`, migracao 057: o declarado, senao o do ultimo aniversario antes da
+    assinatura), e o pleito recebe `instrumento_chave`.
+
+    A ligacao se confere a cada aplicar (gate Sol, rodada 2, PR #407): se o destino mudou (o `ciclo` declarado depois
+    da primeira aplicacao), a ligacao antiga sai, auditada, e a nova entra; sem pleito no destino, a antiga sai com
+    aviso. Aditivo sem base determinavel (duas bases, nada declarado) nao se liga nem se desliga: o validar avisa."""
     bases = [d["mes"] for d in c["datas_base"]]
-    if len(bases) != 1:
-        return
-    base = bases[0]
-    for inst in sorted((i for i in c["instrumentos"] if i["tipo"] in TIPOS_COM_NATUREZA), key=lambda i: i["data"]):
-        # a natureza que vale e' a gravada (aditivo assinado, nao cancelado, de reajuste)
-        if not conn.execute(f"SELECT 1 FROM aditivos WHERE contrato_id=? AND chave_cadastro=? "
-                            f"AND {reajuste.ADITIVO_DE_REAJUSTE}", (contrato_id, inst["chave"])).fetchone():
-            continue
-        if conn.execute("SELECT 1 FROM pleitos WHERE contrato_id=? AND instrumento_chave=? LIMIT 1",
-                        (contrato_id, inst["chave"])).fetchone():
-            continue
-        declarado = inst["dados"].get("ciclo")
-        ciclo = int(str(declarado)[:4]) if declarado is not None else reajuste.ciclo_do_aditivo(base, inst["data"])
-        if ciclo is None:
-            continue
-        p = conn.execute("SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? "
-                         "AND tipo='reajuste' AND data_base_mes=? AND ciclo=? AND situacao='enviado' "
-                         "AND date(enviado_em) <= date(?) ORDER BY enviado_em DESC, id DESC LIMIT 1",
-                         (contrato_id, base, ciclo, inst["data"])).fetchone()
-        if p is None or p["instrumento_chave"] is not None:
-            # sem pleito do ciclo declarado para ligar, a aba le o ciclo pela data da assinatura: quem aplica precisa
-            # saber quando os dois diferem
-            pela_data = reajuste.ciclo_do_aditivo(base, inst["data"])
-            if declarado is not None and ciclo != pela_data:
-                onde = f"no ciclo {pela_data} (pela data)" if pela_data else "em ciclo nenhum"
-                avisos.append(f"{c['nome_curto']}/{inst['chave']}: aditivo de reajuste do ciclo {ciclo} sem pleito "
-                              f"enviado desse ciclo até a assinatura; sem a ligação, a aba Reajuste o lê {onde}")
-            continue
-        conn.execute("UPDATE pleitos SET instrumento_chave=? WHERE id=?", (inst["chave"], p["id"]))
+    unica = bases[0] if len(bases) == 1 else None
+    nome = c["nome_curto"]
+
+    def religar(p, antes, depois) -> None:
+        conn.execute("UPDATE pleitos SET instrumento_chave=? WHERE id=?", (depois, p["id"]))
         auditoria.registrar(conn, usuario_id, "cadastro.pleito_atendido", "pleito", p["id"],
-                            {"instrumento_chave": None}, {"instrumento_chave": inst["chave"]})
-        rel["alterados"].append(f"{c['nome_curto']}/reajuste {p['numero_oficio']}: atendido por {inst['chave']}")
+                            {"instrumento_chave": antes}, {"instrumento_chave": depois})
+
+    for inst in sorted((i for i in c["instrumentos"] if i["tipo"] in TIPOS_COM_NATUREZA), key=lambda i: i["data"]):
+        # o que vale e' o gravado (aditivo assinado, nao cancelado, de reajuste, com a base e o ciclo da 057)
+        r = conn.execute(f"SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=? "
+                         f"AND {reajuste.ADITIVO_DE_REAJUSTE}", (contrato_id, inst["chave"])).fetchone()
+        if r is None:
+            continue
+        base, ciclo = reajuste.base_e_ciclo_do_aditivo(r, unica)
+        if base is None:
+            continue
+        destino = None
+        if ciclo is not None:
+            p = conn.execute("SELECT id, instrumento_chave, numero_oficio FROM pleitos WHERE contrato_id=? "
+                             "AND tipo='reajuste' AND data_base_mes=? AND ciclo=? AND situacao='enviado' "
+                             "AND date(enviado_em) <= date(?) ORDER BY enviado_em DESC, id DESC LIMIT 1",
+                             (contrato_id, base, ciclo, inst["data"])).fetchone()
+            if p is not None and p["instrumento_chave"] in (None, inst["chave"]):
+                destino = p
+        for p in conn.execute("SELECT id, numero_oficio FROM pleitos WHERE contrato_id=? AND instrumento_chave=?",
+                              (contrato_id, inst["chave"])).fetchall():
+            if destino is not None and p["id"] == destino["id"]:
+                continue
+            religar(p, inst["chave"], None)
+            rel["alterados"].append(f"{nome}/reajuste {p['numero_oficio']}: sem termo ({inst['chave']} atende o "
+                                    f"ciclo {ciclo})")
+            if destino is None:
+                avisos.append(f"{nome}/{inst['chave']}: o aditivo de reajuste atende o ciclo {ciclo} e não há pleito "
+                              f"desse ciclo enviado até a assinatura; a ligação ao pleito {p['numero_oficio']} saiu")
+        if destino is not None and destino["instrumento_chave"] is None:
+            religar(destino, None, inst["chave"])
+            rel["alterados"].append(f"{nome}/reajuste {destino['numero_oficio']}: atendido por {inst['chave']}")
 
 
 # O que torna um aditivo o que ele e': nao muda depois de aplicado (correcao e' instrumento
@@ -586,6 +595,13 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
             "ordinal": inst.get("ordinal"),
             # None = nao classificado (conta como execucao); so' o que o YAML declara e' gravado
             "natureza": inst.get("natureza")}
+    # Issue #390 (rodada 2, PR #407; migracao 057): o aditivo de reajuste guarda a base (a declarada, senao a unica de
+    # agora) e o ciclo declarado; o motor do reajuste le daqui, nao do YAML
+    reaj, d = inst.get("natureza") == "reajuste", inst["dados"]
+    bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=?", (contrato_id,))]
+    declarada = d.get("data_base") if reaj else None
+    novo["data_base_mes"] = (declarada or (bases[0] if len(bases) == 1 else None)) if reaj else None
+    novo["ciclo_reajuste"] = int(str(d["ciclo"])[:4]) if reaj and d.get("ciclo") is not None else None
     ja = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND chave_cadastro=?",
                       (contrato_id, inst["chave"])).fetchone()
     if ja is None:
@@ -597,12 +613,14 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
         cur = conn.execute(
             """INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim,
                    nova_execucao_fim, status, data_assinatura, numero, objeto, forma, chave_cadastro,
-                   valor_anterior_centavos, valor_novo_centavos, assinado_por, observacao, ordinal, natureza)
-               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?,?)""",
+                   valor_anterior_centavos, valor_novo_centavos, assinado_por, observacao, ordinal, natureza,
+                   data_base_mes, ciclo_reajuste)
+               VALUES (?,?,?,?,?,'assinado',?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (contrato_id, novo["tipo"], novo["delta_valor_centavos"], novo["nova_vigencia_fim"],
              novo["nova_execucao_fim"], novo["data_assinatura"], novo["numero"], novo["objeto"],
              novo["forma"], inst["chave"], anterior, anterior + novo["delta_valor_centavos"], usuario_id,
-             f"Corrige {inst['corrige']}" if inst["corrige"] else None, novo["ordinal"], novo["natureza"]))
+             f"Corrige {inst['corrige']}" if inst["corrige"] else None, novo["ordinal"], novo["natureza"],
+             novo["data_base_mes"], novo["ciclo_reajuste"]))
         rel["criados"].append(rotulo)
         auditoria.registrar(conn, usuario_id, "cadastro.instrumento", "aditivo", cur.lastrowid, None,
                             {"chave": inst["chave"], **novo})
@@ -620,7 +638,18 @@ def _aditivo(conn, usuario_id, contrato_id, inst, rotulo, rel) -> None:
         raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
                          f"(natureza: {ja['natureza']!r} → {novo['natureza']!r}); registre um instrumento novo "
                          "com `corrige`")
-    antes, depois = _diferencas(dict(ja), {k: novo[k] for k in ("numero", "objeto", "forma", "ordinal", "natureza")})
+    campos = {k: novo[k] for k in ("numero", "objeto", "forma", "ordinal", "natureza")}
+    # base e ciclo do aditivo de reajuste (migracao 057): como a natureza, o NULL (aplicado antes da 057, ou sem
+    # declaracao) aceita o primeiro valor, auditado, e trava depois. A base guardada so' muda por declaracao diferente
+    # (erro); sem declaracao, segue a guardada mesmo que o contrato ganhe outra base (como a 055 no apostilamento).
+    for campo, declarado in (("data_base_mes", declarada), ("ciclo_reajuste", novo["ciclo_reajuste"])):
+        if ja[campo] is None:
+            if novo[campo] is not None:
+                campos[campo] = novo[campo]
+        elif (campo == "ciclo_reajuste" or declarado is not None) and declarado != ja[campo]:
+            raise ValueError(f"{rotulo}: instrumento já aplicado não pode ser alterado "
+                             f"({campo}: {ja[campo]!r} → {declarado!r}); registre um instrumento novo com `corrige`")
+    antes, depois = _diferencas(dict(ja), campos)
     if not depois:
         rel["iguais"] += 1
         return

@@ -757,5 +757,9 @@ def test_ciclo_ou_data_base_invalido_no_aditivo_e_erro(tmp_path, extra, campo):
 def test_aditivo_de_reajuste_em_contrato_de_duas_bases_e_aviso(tmp_path):
     bases = [{"mes": "2023-04", "indice": "INCC-DI", "aplica_a": "itens SINAPI"},
              {"mes": "2023-06", "indice": "FGV/DNIT", "aplica_a": "itens SICRO"}]
-    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [TA_REAJ]}]))
+    cad = ca.preparar(_escrever(tmp_path / "sem", contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [TA_REAJ]}]))
     assert any("instrumentos[ta-08]" in a and "não fecha ciclo" in a for a in cad["avisos"]), cad["avisos"]
+    # rodada 2 (PR #407): com a `data_base` declarada, a base e' a dela; sem aviso
+    com = {**TA_REAJ, "data_base": "2023-06"}
+    cad = ca.preparar(_escrever(tmp_path / "com", contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [com]}]))
+    assert cad["avisos"] == []
