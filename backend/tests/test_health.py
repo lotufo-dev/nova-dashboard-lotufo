@@ -17,7 +17,8 @@ def _app_de_verdade(tmp_path, monkeypatch, maquina="MAQUINA-TESTE"):
     from app.main import create_app
     monkeypatch.delenv("DASH_DEV", raising=False)
     monkeypatch.delenv("DASH_INSTALACAO_ARQUIVO", raising=False)
-    monkeypatch.setenv("COMPUTERNAME", maquina)
+    from app import instalacao
+    monkeypatch.setattr(instalacao, "maquina_atual", lambda: maquina)
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "dados" / "dashboard.db"))
     monkeypatch.setenv("DASH_SEM_JOBS", "1")
     monkeypatch.setenv("DASH_SEM_FRONTEND", "1")

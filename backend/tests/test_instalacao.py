@@ -34,7 +34,7 @@ def ambiente(tmp_path, monkeypatch):
     """Fora do dev, nesta maquina, com o banco em <raiz>/dados: o arquivo e' procurado em <raiz>/segredos."""
     monkeypatch.delenv("DASH_DEV", raising=False)
     monkeypatch.delenv("DASH_INSTALACAO_ARQUIVO", raising=False)
-    monkeypatch.setenv("COMPUTERNAME", MAQUINA)
+    monkeypatch.setattr(instalacao, "maquina_atual", lambda: MAQUINA)
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "dados" / "dashboard.db"))
     return tmp_path / "segredos" / "instalacao.json"
 
@@ -58,6 +58,12 @@ def test_nome_da_maquina_sem_diferenca_de_maiusculas(chave, ambiente):
     # o Windows guarda o COMPUTERNAME em maiusculas; quem assina pode digitar em minusculas
     _gravar(ambiente, instalacao.assinar(chave, "maquina-teste"))
     assert instalacao.verificar()["instalacao"] == "autorizada"
+
+
+def test_nome_da_maquina_vem_do_sistema_e_nao_da_variavel(monkeypatch):
+    """Quem sobe a copia troca o COMPUTERNAME com um comando; o nome da maquina vem do sistema."""
+    monkeypatch.setenv("COMPUTERNAME", "NOME-FALSO-DA-COPIA")
+    assert instalacao.maquina_atual() not in ("", "NOME-FALSO-DA-COPIA")
 
 
 @pytest.mark.instalacao_real
@@ -252,12 +258,20 @@ def test_sincronizar_agora_funciona_com_a_instalacao_autorizada(client_admin, mo
 
 
 def test_teste_de_envio_recusa_no_modo_copia_e_nada_sai(client_admin, monkeypatch, tmp_path):
-    """A rota do teste de envio so' captura o erro do Graph: a recusa chega pelo tratador geral, em portugues."""
-    from app import db
+    """A rota do teste de envio so' captura o erro do Graph: a recusa chega pelo tratador geral, em portugues, antes
+    de qualquer conversa com o Microsoft 365 (nem o "De:" e' lido)."""
+    from app import correio, db
     monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
     monkeypatch.setattr(instalacao, "_estado", COPIA)
+    cliente_real = correio.cliente
+
+    def sem_graph(*a, **k):
+        raise AssertionError("a copia falou com o Microsoft 365")
+
+    monkeypatch.setattr(correio, "cliente", sem_graph)
     r = client_admin.post("/api/correio/teste")
     assert r.status_code == 422 and r.json()["detail"] == "Envio desligado: instalação não autorizada."
+    monkeypatch.setattr(correio, "cliente", cliente_real)
     assert not (tmp_path / "sim" / "enviados").exists()
     conn = db.get_conn()
     try:

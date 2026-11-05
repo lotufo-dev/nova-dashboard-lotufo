@@ -51,18 +51,43 @@ def test_assinar_produz_arquivo_que_a_verificacao_aceita(tmp_path, capsys, monke
     assert instalacao.conferir_arquivo(arquivo.read_bytes(), "OUTRA") == "maquina"
     # o caminho completo: com o arquivo no lugar padrao e o nome da maquina, o servidor sobe autorizado
     monkeypatch.delenv("DASH_DEV", raising=False)
-    monkeypatch.setenv("COMPUTERNAME", "MAQUINA-TESTE")
+    monkeypatch.setattr(instalacao, "maquina_atual", lambda: "MAQUINA-TESTE")
     monkeypatch.setenv("DASH_INSTALACAO_ARQUIVO", str(arquivo))
     assert instalacao.verificar() == {"instalacao": "autorizada", "motivo": None}
 
 
-def test_assinar_com_chave_que_nao_e_a_embutida_avisa(tmp_path, capsys):
+def test_assinar_recusa_chave_que_nao_e_a_embutida(tmp_path, capsys):
+    """O servidor recusaria o arquivo: nada e' gravado, para ninguem copiar para a VM um arquivo que derruba o deploy."""
     privada, _, _ = _gerar(tmp_path, capsys)
     arquivo = tmp_path / "instalacao.json"
     assert cli.main(["instalacao", "assinar", "--chave", str(privada), "--maquina", "MAQUINA-TESTE",
-                     "--saida", str(arquivo)]) == 0
-    assert "AVISO" in capsys.readouterr().out
-    assert instalacao.conferir_arquivo(arquivo.read_bytes(), "MAQUINA-TESTE") == "assinatura"
+                     "--saida", str(arquivo)]) == 1
+    assert "não é a que o código confere" in capsys.readouterr().out
+    assert not arquivo.exists()
+
+
+def test_assinar_nunca_grava_por_cima(tmp_path, capsys, monkeypatch):
+    """--saida apontando, por engano, para a propria chave privada: a chave fica intacta."""
+    privada, publica, _ = _gerar(tmp_path, capsys)
+    monkeypatch.setattr(instalacao, "CHAVE_PUBLICA", publica.read_text(encoding="ascii"))
+    antes = privada.read_bytes()
+    for alvo in (privada, publica):
+        assert cli.main(["instalacao", "assinar", "--chave", str(privada), "--maquina", "MAQUINA-TESTE",
+                         "--saida", str(alvo)]) == 1
+        assert "já existe" in capsys.readouterr().out
+    assert privada.read_bytes() == antes
+
+
+def test_conciliacao_antiga_nao_fala_com_o_rm_numa_copia(monkeypatch, capsys):
+    from app import rm
+
+    def nao_chamar():
+        raise AssertionError("a copia chamou o RM")
+
+    monkeypatch.setattr(rm, "de_ambiente", nao_chamar)
+    monkeypatch.setattr(instalacao, "_estado", {"instalacao": "nao-autorizada", "motivo": "maquina"})
+    assert cli.main(["conciliacao", "antiga", "--usuario", "admin@lotufo.com", "--ensaio"]) == 1
+    assert "Sincronização desligada: instalação não autorizada." in capsys.readouterr().out
 
 
 def test_assinar_recusa_chave_ausente_ou_que_nao_e_ed25519(tmp_path, capsys):
@@ -77,8 +102,9 @@ def test_assinar_recusa_chave_ausente_ou_que_nao_e_ed25519(tmp_path, capsys):
     assert not arquivo.exists()
 
 
-def test_assinar_recusa_maquina_em_branco(tmp_path, capsys):
-    privada, _, _ = _gerar(tmp_path, capsys)
+def test_assinar_recusa_maquina_em_branco(tmp_path, capsys, monkeypatch):
+    privada, publica, _ = _gerar(tmp_path, capsys)
+    monkeypatch.setattr(instalacao, "CHAVE_PUBLICA", publica.read_text(encoding="ascii"))
     arquivo = tmp_path / "instalacao.json"
     assert cli.main(["instalacao", "assinar", "--chave", str(privada), "--maquina", "  ",
                      "--saida", str(arquivo)]) == 1

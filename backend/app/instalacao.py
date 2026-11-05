@@ -6,7 +6,7 @@ vai ao servidor nem ao repositorio; a publica fica embutida abaixo, e trocar de 
 
 Na subida (`create_app`) o servidor le `<raiz>/segredos/instalacao.json` -- a raiz e' a pasta acima de `dados`, onde
 mora o banco (`DASH_DB_PATH`); `DASH_INSTALACAO_ARQUIVO` troca o caminho -- e confere a assinatura e o nome da
-maquina (`COMPUTERNAME`). Arquivo ausente, assinatura que nao confere ou outra maquina: modo copia. Login e leitura
+maquina (o `COMPUTERNAME`, lido do Windows). Arquivo ausente, assinatura que nao confere ou outra maquina: modo copia. Login e leitura
 continuam; o envio de e-mail e a sincronizacao com o RM ficam desligados e toda tela mostra a faixa vermelha. O
 objetivo e' marcar a copia, nao derruba-la: o /api/health continua 200 (o watchdog nao reinicia em laco).
 
@@ -21,6 +21,7 @@ import logging
 import os
 import platform
 import secrets
+import sys
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
@@ -56,8 +57,15 @@ class EnvioDesligado(ValueError):
 
 
 def maquina_atual() -> str:
-    """Nome desta maquina: o COMPUTERNAME do Windows (a producao); fora dele, o nome de rede."""
-    return os.environ.get("COMPUTERNAME") or platform.node()
+    """Nome desta maquina, lido do sistema e nao da variavel de ambiente (quem sobe a copia troca a variavel com um
+    comando): no Windows (a producao) e' o mesmo nome do COMPUTERNAME, pela API; fora dele, o nome de rede."""
+    if sys.platform == "win32":
+        import ctypes
+        tamanho = ctypes.c_ulong(256)
+        nome = ctypes.create_unicode_buffer(256)
+        if ctypes.windll.kernel32.GetComputerNameW(nome, ctypes.byref(tamanho)):
+            return nome.value
+    return platform.node()
 
 
 def caminho_arquivo() -> Path | None:
