@@ -187,7 +187,7 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
 1. **Ensaio no Mac**, numa cópia do snapshot horário (nunca no banco padrão nem em produção):
 
    ```bash
-   scp <servidor>:C:/DashboardLotufo/dados/backups/dashboard-AAAAMMDD-HHMMSS.db "$TMPDIR/ensaio.db"
+   scp <vm>:C:/DashboardLotufo/dados/backups/dashboard-AAAAMMDD-HHMMSS.db "$TMPDIR/ensaio.db"
    cd backend
    DASH_DEV=1 DASH_SEM_JOBS=1 DASH_DB_PATH="$TMPDIR/ensaio.db" \
      .venv/bin/python -m app.cli cadastro carregar-medicoes <pasta do cadastro>/medicoes/<slug>.csv --ensaio
@@ -208,19 +208,21 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
 
    ```powershell
    git -C C:\DashboardLotufo\cadastro pull --ff-only
+   if ($LASTEXITCODE -ne 0) { exit 1 }
    $env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"
    $env:DASH_DB_PATH = "C:\DashboardLotufo\dados\dashboard.db"
    $csv = "C:\DashboardLotufo\cadastro\medicoes\<slug>.csv"
    .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --ensaio
+   if ($LASTEXITCODE -ne 0) { exit 1 }
    .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --usuario <e-mail do admin>
    ```
 
-   Pelo Mac, o mesmo vai por `ssh <servidor> 'powershell -NoProfile -ExecutionPolicy Bypass -Command -' < script.ps1` (padrão por stdin da seção "Deploy a partir do Mac"), com os comandos acima num `script.ps1` temporário no Mac, fora do repositório (o shell remoto é PowerShell 5.1: sem `&&`, usar `;`). A gravação é uma transação por obra e termina em `GRAVADO: <obra> (<arquivo>), N medição(ões) criada(s)`. O snapshot horário do backup cobre o antes.
+   Pelo Mac, os comandos acima vão num `script.ps1` temporário no Mac, fora do repositório, e rodam na VM (`<vm>`, não `<servidor>`) com `-File`: no `-Command -` o comando nativo (`git`, `python`) consome o resto do script pelo stdin e ele para no meio (ver "Mudar de servidor"). Copiar o script com `scp script.ps1 <vm>:C:/Temp/x.ps1` ou, se o `scp` falhar, por stdin: `ssh <vm> 'powershell -NoProfile -Command "[Console]::In.ReadToEnd() | Set-Content -Path C:\Temp\x.ps1 -Encoding ASCII"' < script.ps1`; rodar com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\x.ps1'` e apagar o `x.ps1` depois. O shell remoto é PowerShell 5.1: sem `&&`, usar `;`. O `git pull` do cadastro privado precisa de credencial do GitHub na VM; se falhar, o script sai com 1 antes da carga, que não deve rodar com o CSV velho. A gravação é uma transação por obra e termina em `GRAVADO: <obra> (<arquivo>), N medição(ões) criada(s)`. O snapshot horário do backup cobre o antes.
 5. **Conferir**: `GET /api/health` com `banco: ok`; a aba Medições da obra mostra as medições novas; e o `audit_log` tem a ação `medicao.carga_historico` no contrato, com arquivo, criadas, corrigidas e as linhas. Rodar de novo sem nada novo não deixa rastro.
 
 ### Regra: competência de medição com planilha ou carta enviada
 
-A carga **não** recusa a correção de competência (`corrige competência = sim`) de uma medição `protocolada` que já teve a planilha/carta enviada (`planilha_enviada_em` preenchido) e não tem NF vinculada: só recusa, como `conflito`, quando a medição está num estado da planilha, num estado de espelho ou tem NF. Até a issue #383 entrar, o operador confere o `planilha_enviada_em` de cada linha `correção` do ensaio antes de gravar, e a correção de competência dessa medição vai pela tela, não pelo CSV (tirar a linha ou a marca `sim`). Quando a #383 entrar, atualizar esta regra.
+A carga **não** recusa a correção de competência (`corrige competência = sim`) de uma medição `protocolada` que já teve a planilha/carta enviada (`planilha_enviada_em` preenchido) e não tem NF vinculada: só recusa, como `conflito`, quando a medição está num estado da planilha, num estado de espelho, com a nota emitida, ou tem NF. Até a issue #383 entrar, o operador confere o `planilha_enviada_em` de cada linha `correção` do ensaio antes de gravar (na página da medição, ou numa consulta à tabela `medicoes` da cópia do banco usada no ensaio), e a correção de competência dessa medição vai pela tela, não pelo CSV (tirar a linha ou a marca `sim`). Quando a #383 entrar, atualizar esta regra.
 
 ## Espelho de NF (bloco 2)
 
