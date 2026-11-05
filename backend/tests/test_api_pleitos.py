@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from app import auditoria, cadastro_aplicar, correio, db, envio_reserva, pleitos
+from app import auditoria, cadastro_aplicar, correio, cronograma, db, envio_reserva, pleitos
 from tests.test_envio_reserva import CorreioFalso
 from tests.test_protocolo import CARTAS, _assinar, _contrato
 
@@ -1069,10 +1069,16 @@ def test_carta_de_prazo_com_a_curva_s_sai_uma_vez_so_com_dois_envios_simultaneos
     """Issue #293: a curva S entra pelos anexos do pleito, entao o envio da carta de prazo continua unico (dois
     POST simultaneos: 1x200 e 1x409) e o e-mail registrado leva a carta e a curva."""
     cl, cid, _ = api
+    c = db.get_conn()
+    cronograma.nova_versao(c, 1, cid, [("2026-08", 100_00), ("2026-09", 100_00)], "manual", data_documento="2026-01-10")
+    c.close()
     r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
                                                       "justificativa": "interferências na via"})
     assert r.status_code == 201 and "Curva S.xlsx" in [a["nome"] for a in r.json()["anexos"]], r.text
     pid = r.json()["id"]
+    curva = [a for a in r.json()["anexos"] if a["gerado"]][0]["id"]
+    recusa = cl.post(f"/api/pleitos/{pid}/anexos/{curva}/remover")     # rodada 1 da PR #436: a curva nao sai
+    assert recusa.status_code == 422 and "não se remove" in recusa.json()["detail"], recusa.text
     cl.post(f"/api/pleitos/{pid}/montar", json={})
     doc = cl.get(f"/api/pleitos/{pid}/documento")
     cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc.content), "application/pdf"))

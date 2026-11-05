@@ -249,7 +249,6 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
         if not c.get("encerramento_iniciado_em"):
             raise ValueError("Comunicação de conclusão só para contrato em encerramento (marque a medição final)")
         data_base_mes, dias = None, None
-    curva = _curva_s(conn, tipo, contrato_id)
     with db.mutacao(conn):
         # dentro do BEGIN IMMEDIATE: dois cliques simultaneos nao abrem dois oficios do mesmo ciclo (issue #9)
         aberto = _aberto(conn, contrato_id, tipo, data_base_mes, ciclo)
@@ -269,7 +268,7 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
                             {"tipo": tipo, "numero_oficio": canon, "data_base_mes": data_base_mes, "ciclo": ciclo,
                              "dias": dias, **({"reemite_pleito_id": anterior["id"], "reemissao": reemissao}
                                               if anterior else {})})
-        _anexar_curva_s(conn, usuario_id, pid, curva)
+        _trocar_curva_s(conn, usuario_id, tipo, contrato_id, pid)
     return pid
 
 
@@ -279,40 +278,60 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
 PASTA_CURVA_S = "curvas"
 
 
-def _curva_s(conn, tipo: str, contrato_id: int) -> tuple[str, str, int] | None:
-    """Issue #293 (spec 2026-10-20 §4 item 3): a curva S do pedido de prazo, em xlsx gerado do cronograma vigente,
-    do anterior a ultima repactuacao (D9) e do medido. Gravada no disco ANTES do banco; devolve (arquivo, sha256,
-    tamanho), ou None fora do pedido de prazo e sem nada previsto nem medido (planilha vazia nao vai ao orgao)."""
+CURVA_S_OBRIGATORIA = "A curva S vai com o pedido de prazo e não se remove: ela é trocada a cada carta montada"
+CURVA_S_FALTA = "Curva S não anexada: monte a carta para gerá-la"
+NOME_RESERVADO = f"O nome {carta.NOME_CURVA_S} é o da curva S gerada pelo sistema: renomeie o arquivo para anexá-lo"
+
+
+def _gerada(a: dict) -> bool:
+    """O anexo e' a curva S que o sistema gerou (pasta `curvas/`), nao um arrastado."""
+    return (a.get("arquivo") or "").startswith(f"{PASTA_CURVA_S}/")
+
+
+def _linhas_curva_s(conn, tipo: str, contrato_id: int) -> list[dict]:
+    """Issue #293 (spec 2026-10-20 §4 item 3): as linhas da curva S do pedido de prazo, gerada do cronograma vigente,
+    do anterior a ultima repactuacao (D9) e do medido. Vazia fora do pedido de prazo e sem previsto vigente: so' o
+    medido, com o previsto zerado em todas as linhas, nao e' a curva do cronograma e nao vai ao orgao."""
     if tipo != "prazo":
-        return None
+        return []
     linhas = paineis.curva_s(conn, contrato_id)
-    if not linhas:
-        return None
-    dados = carta.curva_s_xlsx(linhas)
-    rel, sha = arquivos.gravar_bytes(PASTA_CURVA_S, dados, "xlsx")
-    return rel, sha, len(dados)
+    return linhas if any(x["previsto_vigente_centavos"] > 0 for x in linhas) else []
 
 
-def _anexar_curva_s(conn, usuario_id: int, pleito_id: int, curva: tuple[str, str, int] | None) -> None:
-    """Dentro da mutacao de `criar` e de `montar`: a curva S entra pelos anexos do pleito, ao lado dos arrastados, e
-    a carta montada de novo troca a gerada antes pela do dia; a antiga nao se apaga, fica marcada como removida. Se a
-    pessoa tirou a curva (nenhuma gerada em vigor, alguma removida), montar de novo nao a devolve. Sem curva (`None`),
-    nada muda."""
-    if curva is None:
+def _curvas_em_vigor(conn, pleito_id: int) -> list[int]:
+    return [r[0] for r in conn.execute("SELECT id FROM pleito_anexos WHERE pleito_id=? AND arquivo LIKE ? "
+                                       "AND removido_em IS NULL", (pleito_id, f"{PASTA_CURVA_S}/%"))]
+
+
+def _trocar_curva_s(conn, usuario_id: int, tipo: str, contrato_id: int, pleito_id: int) -> None:
+    """Dentro do BEGIN IMMEDIATE de `criar` e de `montar`: a curva sai da mesma leitura que decide a troca (medicao
+    cancelada ou versao nova do cronograma no meio nao misturam dois retratos). O xlsx e' gravado pelo sha256 antes
+    da linha do banco; a gerada antes fica marcada como removida (nunca apagada) e a do dia entra nos anexos. Sem
+    curva a gerar, a que estava em vigor sai e nenhuma entra."""
+    if tipo != "prazo":
         return
-    geradas = conn.execute("SELECT id, removido_em FROM pleito_anexos WHERE pleito_id=? AND arquivo LIKE ?",
-                           (pleito_id, f"{PASTA_CURVA_S}/%")).fetchall()
-    em_vigor = [r["id"] for r in geradas if r["removido_em"] is None]
-    if geradas and not em_vigor:
+    linhas = _linhas_curva_s(conn, tipo, contrato_id)
+    em_vigor = _curvas_em_vigor(conn, pleito_id)
+    if not linhas and not em_vigor:
         return
     conn.executemany("UPDATE pleito_anexos SET removido_em=datetime('now') WHERE id=?", [(x,) for x in em_vigor])
-    rel, sha, tamanho = curva
-    aid = conn.execute("INSERT INTO pleito_anexos (pleito_id, tipo, nome, arquivo, sha256, tamanho, ext) "
-                       "VALUES (?, 'outro', ?, ?, ?, ?, 'xlsx')",
-                       (pleito_id, carta.NOME_CURVA_S, rel, sha, tamanho)).lastrowid
+    depois = None
+    if linhas:
+        dados = carta.curva_s_xlsx(linhas)
+        rel, sha = arquivos.gravar_bytes(PASTA_CURVA_S, dados, "xlsx")
+        aid = conn.execute("INSERT INTO pleito_anexos (pleito_id, tipo, nome, arquivo, sha256, tamanho, ext) "
+                           "VALUES (?, 'outro', ?, ?, ?, ?, 'xlsx')",
+                           (pleito_id, carta.NOME_CURVA_S, rel, sha, len(dados))).lastrowid
+        depois = {"anexo_id": aid, "nome": carta.NOME_CURVA_S, "sha256": sha}
     auditoria.registrar(conn, usuario_id, "pleito.curva_s", "pleito", pleito_id,
-                        {"anexos_removidos": em_vigor} if em_vigor else None,
-                        {"anexo_id": aid, "nome": carta.NOME_CURVA_S, "sha256": sha})
+                        {"anexos_removidos": em_vigor} if em_vigor else None, depois)
+
+
+def _curva_s_falta(conn, p: dict) -> bool:
+    """Pedido de prazo com curva a gerar e nenhuma gerada em vigor (montado antes da curva existir, ou com o
+    cronograma carregado depois do montar): o envio recusa, a justificativa nao libera."""
+    return (p["tipo"] == "prazo" and not _curvas_em_vigor(conn, p["id"])
+            and bool(_linhas_curva_s(conn, p["tipo"], p["contrato_id"])))
 
 
 def _anexos_mudaveis(conn, pleito_id: int) -> dict:
@@ -331,6 +350,8 @@ def adicionar_anexo(conn, usuario_id: int, pleito_id: int, tipo: str, nome: str,
         raise ValueError(f"Tipo de anexo inválido: {tipo!r}")
     if ext not in ("pdf", "xlsx"):
         raise ValueError("O anexo é um PDF ou uma planilha .xlsx")
+    if (nome or "").strip().casefold() == carta.NOME_CURVA_S.casefold():     # o orgao receberia duas "Curva S"
+        raise ValueError(NOME_RESERVADO)
     p = _linha(conn, pleito_id)
     _editavel(p)
     rel, sha = arquivos.gravar_bytes("pleitos", dados, ext)
@@ -348,6 +369,9 @@ def remover_anexo(conn, usuario_id: int, pleito_id: int, anexo_id: int) -> None:
     _editavel(p)
     with db.mutacao(conn):
         _anexos_mudaveis(conn, pleito_id)
+        a = conn.execute("SELECT arquivo FROM pleito_anexos WHERE id=? AND pleito_id=?", (anexo_id, pleito_id)).fetchone()
+        if a is not None and _gerada(dict(a)):        # decisao da rodada 1 da PR #436: a curva S do prazo e' obrigatoria
+            raise ValueError(CURVA_S_OBRIGATORIA)
         n = conn.execute("UPDATE pleito_anexos SET removido_em=datetime('now') "
                          "WHERE id=? AND pleito_id=? AND removido_em IS NULL", (anexo_id, pleito_id)).rowcount
         if n != 1:
@@ -580,7 +604,6 @@ def montar(conn, usuario_id: int, pleito_id: int, corpo: str | None = None, hoje
     pdf = carta.gerar(_carta(conn, p, corpo, hoje))           # PDF gerado pelo sistema: um documento so'
     n = pdfs.paginas(pdf)
     rel, sha = arquivos.gravar_bytes("pleitos", pdf, "pdf")
-    curva = _curva_s(conn, p["tipo"], p["contrato_id"])
     with db.mutacao(conn):
         _anexos_mudaveis(conn, pleito_id)
         conn.execute("UPDATE pleitos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
@@ -588,7 +611,7 @@ def montar(conn, usuario_id: int, pleito_id: int, corpo: str | None = None, hoje
                      (corpo, rel, sha, n, pleito_id))
         auditoria.registrar(conn, usuario_id, "pleito.montar", "pleito", pleito_id, None,
                             {"sha256": sha, "paginas": n, "tamanho": len(pdf)})
-        _anexar_curva_s(conn, usuario_id, pleito_id, curva)
+        _trocar_curva_s(conn, usuario_id, p["tipo"], p["contrato_id"], pleito_id)
     return {"arquivo": rel, "sha256": sha, "paginas": n, "tamanho": len(pdf), "nome": nome_documento(conn, p)}
 
 
@@ -627,6 +650,8 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
         out.append({"codigo": "memoria_divergente", "mensagem": MEMORIA_DIVERGENTE})
     elif memoria == "ausente":
         out.append({"codigo": "memoria_ausente", "mensagem": MEMORIA_AUSENTE})
+    if p["situacao"] not in ("enviado", "descartado") and _curva_s_falta(conn, p):
+        out.append({"codigo": "curva_s", "mensagem": CURVA_S_FALTA})
     if p["situacao"] == "rascunho":
         out.append({"codigo": "nao_montado", "mensagem": "Carta ainda não montada"})
     elif not p["assinado_arquivo"]:
@@ -650,7 +675,8 @@ def detalhe(conn, pleito_id: int, hoje: datetime.date | None = None) -> dict:
         "SELECT id, numero_oficio, situacao, enviado_em, COALESCE(reemissao, 'cronograma') AS reemissao FROM pleitos "
         "WHERE reemite_pleito_id=? AND situacao<>'descartado' ORDER BY id", (pleito_id,))]
     return {**p, "rotulo": _rotulo(p), "anterior": dict(a) if a else None, "reemissoes": seguintes,
-            "reemissoes_possiveis": reemissoes_possiveis(conn, p), "anexos": _anexos_de(conn, pleito_id),
+            "reemissoes_possiveis": reemissoes_possiveis(conn, p),
+            "anexos": [{**x, "gerado": _gerada(x)} for x in _anexos_de(conn, pleito_id)],
             "exigidos": [{"tipo": t, "rotulo": ROTULO_ANEXO[t]} for t in _exigidos(conn, p)],
             "conferencia": json.loads(p["conferencia"] or "null"), "pendencias": pendencias(conn, p, hoje),
             "nome_documento": nome_documento(conn, p) if p["montado_arquivo"] else None}
@@ -678,11 +704,27 @@ def _destinatarios(conn, regras: dict, c: dict, hoje: datetime.date) -> tuple[li
     return para, [x for x in copia if x not in para]
 
 
+def _nome_unico(nome: str, usados: set[str]) -> str:
+    """`nome`, ou "base (2).ext", "base (3).ext"... se ja' vai outro anexo com ele (sem diferenciar maiusculas)."""
+    i = nome.rfind(".")
+    base, ext = (nome[:i], nome[i:]) if i > 0 else (nome, "")
+    final, k = nome, 2
+    while final.casefold() in usados:
+        final, k = f"{base} ({k}){ext}", k + 1
+    usados.add(final.casefold())
+    return final
+
+
 def _anexos_envio(conn, p: dict) -> list[tuple[str, bytes]]:
-    out = []
+    """A carta e os anexos, com nomes unicos no e-mail: a carta e a curva S gerada guardam os delas, e um arrastado
+    com nome repetido ganha " (2)" (o orgao nao recebe dois arquivos com o mesmo nome)."""
+    out, usados = [], set()
     if p["assinado_arquivo"] or p["montado_arquivo"]:
-        out.append((nome_documento(conn, p), _bytes(p["assinado_arquivo"] or p["montado_arquivo"])))
-    out += [(a["nome"], _bytes(a["arquivo"])) for a in _anexos_de(conn, p["id"])]
+        out.append((_nome_unico(nome_documento(conn, p), usados),
+                    _bytes(p["assinado_arquivo"] or p["montado_arquivo"])))
+    anexos = _anexos_de(conn, p["id"])
+    nomes = {a["id"]: _nome_unico(a["nome"], usados) for a in sorted(anexos, key=lambda a: not _gerada(a))}
+    out += [(nomes[a["id"]], _bytes(a["arquivo"])) for a in anexos]
     return out
 
 
@@ -733,6 +775,8 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         raise ValueError("Anexos acima do limite do e-mail")
     if _memoria_divergente(conn, p):            # a justificativa nao libera: o orgao receberia outra planilha
         raise ValueError(MEMORIA_DIVERGENTE)
+    if _curva_s_falta(conn, p):                 # idem: o pedido de prazo vai com a curva S (rodada 1 da PR #436)
+        raise ValueError(CURVA_S_FALTA)
     justificativa = (justificativa or "").strip() or None
     if pv["pendencias"] and len(justificativa or "") < MIN_JUSTIFICATIVA:
         raise ValueError(f"{len(pv['pendencias'])} pendência(s) na prévia: informe a justificativa "
@@ -754,6 +798,8 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         novas = [x["mensagem"] for x in pv_reservado["pendencias"] if x["mensagem"] not in vistas]
         if _memoria_divergente(conn, atual):
             raise ValueError(MEMORIA_DIVERGENTE)
+        if _curva_s_falta(conn, atual):
+            raise ValueError(CURVA_S_FALTA)
         if pv_reservado["total"] > correio.MAX_TOTAL:
             raise ValueError("Anexos acima do limite do e-mail")
         if novas:
