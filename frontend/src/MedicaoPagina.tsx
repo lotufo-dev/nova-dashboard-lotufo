@@ -63,7 +63,10 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // issue #289: a planilha/carta e' o 1o passo so' na obra que gera a medicao pelo espelho (regra ativa)
   const [regraAtiva, setRegraAtiva] = useState(false);
   // revisao da planilha/carta registrada e nao enviada: o espelho espera o envio dela (PR #382, rodada extra)
-  const [revisaoPendente, setRevisaoPendente] = useState(false);
+  // so' libera o espelho depois de o cartao confirmar que nao ha' revisao pendente (issue #384)
+  const [revisao, setRevisao] = useState<"conferindo" | "pendente" | "livre" | "falhou">("conferindo");
+  const avisarRevisao = useCallback((p: boolean | null) => setRevisao(p === null ? "falhou" : p ? "pendente" : "livre"), []);
+  useEffect(() => { setRevisao("conferindo"); }, [medicaoId]);
   // issue #188: a execucao e o reajuste da mesma competencia (as notas dos dois, a espera e a liberacao)
   const [par, setPar] = useState<ParDaMedicao | null>(null);
   const [erro, setErro] = useState("");
@@ -243,8 +246,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
       )}
       {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
-        aoRevisaoPendente={setRevisaoPendente} />}
-      {!novaPlanilha && m.estado !== "planilha_gerada" && !(m.estado === "planilha_enviada" && revisaoPendente) && (
+        aoRevisaoPendente={avisarRevisao} />}
+      {m.estado === "planilha_enviada" && revisao === "falhou" && (
+        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta; o espelho fica oculto até a conferência.</p>
+      )}
+      {!novaPlanilha && m.estado !== "planilha_gerada" && !(m.estado === "planilha_enviada" && revisao !== "livre") && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
           abrirForm={["prevista", "planilha_enviada"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
       )}

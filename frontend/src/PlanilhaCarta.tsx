@@ -311,7 +311,7 @@ function itensDasPecas(s: SituacaoEnvio): ItemChecklist[] {
 // `aoRevisaoPendente`: avisa a pagina se ha' revisao registrada e nao enviada (o espelho espera por ela, PR #382)
 export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevisaoPendente }: {
   medicaoId: number; estado?: string; podeEditar: boolean; aoMudar: () => void;
-  aoRevisaoPendente?: (pendente: boolean) => void;
+  aoRevisaoPendente?: (pendente: boolean | null) => void;
 }) {
   const base = useId();
   const [d, setD] = useState<DetalhePlanilha | null>(null);
@@ -328,14 +328,14 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
   async function carregar() {
     setD(await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`));
   }
-  useEffect(() => {
-    let vivo = true;
-    api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`).then(x => { if (vivo) setD(x); })
-      .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
-    return () => { vivo = false; };
-  }, [medicaoId, estado]);
   const avisarPendente = useRef(aoRevisaoPendente);
   useEffect(() => { avisarPendente.current = aoRevisaoPendente; });
+  useEffect(() => {
+    let vivo = true;
+    api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`).then(x => { if (vivo) { setD(x); avisarPendente.current?.(revisaoPendente(x)); } })
+      .catch(e => { if (vivo) { setErro(mensagemDeErro(e)); avisarPendente.current?.(null); } });
+    return () => { vivo = false; };
+  }, [medicaoId, estado]);
   const pendente = d ? revisaoPendente(d) : null;
   useEffect(() => { if (pendente !== null) avisarPendente.current?.(pendente); }, [pendente]);
 

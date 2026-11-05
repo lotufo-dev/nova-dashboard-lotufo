@@ -264,6 +264,13 @@ describe("Cartão da planilha/carta", () => {
     await waitFor(() => expect(aoRevisaoPendente).toHaveBeenCalledWith(true));
   });
 
+  it("consulta do cartão falha: avisa a página com null (issue #384)", async () => {
+    api.mockRejectedValue(new Error("falhou"));
+    const aoRevisaoPendente = vi.fn();
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} aoRevisaoPendente={aoRevisaoPendente} />);
+    await waitFor(() => expect(aoRevisaoPendente).toHaveBeenCalledWith(null));
+  });
+
   it("medição sem planilha/carta registrada: o cartão não aparece", async () => {
     api.mockResolvedValue(detalhe({ planilhas: [] }));
     const { container } = render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
