@@ -120,9 +120,10 @@ def _sentinela(conn, agora: datetime.datetime) -> list[dict]:
                 "mensagem": d.get("mensagem") or "Alerta da sentinela"}
         if d.get("evento") == 4663:
             chave = (d.get("conta"), d.get("processo"), d.get("pasta"), (d.get("hora") or "")[:13])
+            d["quantidade"] = d.get("quantidade") or 0
             antigo = leituras.get(chave)
             if antigo is not None:
-                d["quantidade"] = (d.get("quantidade") or 0) + antigo["quantidade"]
+                d["quantidade"] += antigo["quantidade"]
                 out.remove(antigo["item"])
             item["mensagem"] = sentinela.mensagem_leitura(d.get("pasta"), d.get("processo"), d.get("conta"),
                                                           d.get("quantidade") or 0)
