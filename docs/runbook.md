@@ -154,6 +154,78 @@ A pasta vem de `DASH_CADASTRO_DIR` (produção: `C:\DashboardLotufo\cadastro`, c
 
 O esquema de cada tipo de instrumento (apostilamento de reajuste SINFRA e MT-PAR, retificação, paralisação e reinício, endosso de garantia, aditivo de reajuste, `datas_base` com `aplica_a`, `pleitos_anteriores`) está comentado em `cadastro-exemplo/contratos/obra-propria.yaml`.
 
+## Carga do histórico de medições
+
+Caminho de uma carga de medições por CSV, do Mac à produção (`cadastro carregar-medicoes`, issue #262). Uma obra por arquivo; o nome do arquivo é o slug da obra, como em `contratos/`. O exemplo fictício é `cadastro-exemplo/medicoes/obra-propria.csv`.
+
+### O CSV
+
+Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho. Dinheiro como texto brasileiro (`412.345,67`), datas `DD/MM/AAAA`, competência `AAAA-MM` ou `MM/AAAA`. A chave de cada medição é (obra, nº, tipo). Colunas:
+
+| Coluna | O que é |
+|---|---|
+| `nº` | número da medição na obra (obrigatória) |
+| `nº do órgão` | número da medição no órgão, se diferente |
+| `tipo` | `execucao`, `projeto` ou `reajuste` (obrigatória) |
+| `competência` | mês da medição (obrigatória) |
+| `período` | período medido, texto livre (`10/03/2025 a 30/04/2025`) |
+| `valor pedido` | valor cheio protocolado (obrigatória); vira o valor congelado da medição |
+| `valor aprovado` | valor aprovado pelo órgão (obrigatória; pode ficar vazio na linha, e então não há atesto) |
+| `data da aprovação` | data do atesto |
+| `meio` | como veio a aprovação: `e-mail`, `smo`, `ofício`, `carimbo`, `protocolo físico`, `ci` ou `outro`; meio desconhecido é erro da linha |
+| `nº do processo no órgão` | processo do órgão |
+| `data do protocolo da nota` | data em que a nota foi protocolada no órgão |
+| `NF` | número da NF, procurada no RM da empresa do contrato e vinculada se achada |
+| `fonte` | de onde veio o dado (boletim, planilha, ofício); fica no atesto e na auditoria |
+| `cancelar` | opcional: nº da medição que substitui esta; a linha é duplicata dela e será cancelada com motivo |
+| `corrige competência` | opcional: `sim` corrige a competência de uma medição que já existe com outra |
+
+### Onde o CSV mora
+
+`medicoes/<slug>.csv` no repositório privado `lotufo-cadastro` (clone em `C:\DashboardLotufo\cadastro` na produção). **Nunca** no repositório público: só o exemplo fictício fica aqui.
+
+### Passo a passo
+
+1. **Ensaio no Mac**, numa cópia do snapshot horário (nunca no banco padrão nem em produção):
+
+   ```bash
+   scp <vm>:C:/DashboardLotufo/dados/backups/dashboard-AAAAMMDD-HHMMSS.db "$TMPDIR/ensaio.db"
+   cd backend
+   DASH_DEV=1 DASH_SEM_JOBS=1 DASH_DB_PATH="$TMPDIR/ensaio.db" \
+     .venv/bin/python -m app.cli cadastro carregar-medicoes <pasta do cadastro>/medicoes/<slug>.csv --ensaio
+   ```
+
+2. **Ler o relatório**: uma linha por linha do CSV (`linha N: nº X tipo competência: categoria`) e o `Total:` no fim. Categorias:
+   - `nova`: não existe medição com a chave; será criada (protocolada, congelada, com atesto, protocolo da nota e NF).
+   - `igual`: competência, pedido e aprovado já batem; não faz nada (rodar duas vezes não duplica).
+   - `valor diferente`: pedido ou aprovado diferem do banco; o pedido existente nunca muda, o aprovado novo entra como evento novo de atesto com a fonte.
+   - `incompleta`: o CSV deixa vazio um valor que o banco tem; não altera.
+   - `cancelamento` e `correção`: efeito das colunas `cancelar` e `corrige competência`.
+   - `conflito`: mesmo nº e tipo com outra competência, medição cancelada/desistida no banco, ou competência já presente em NF, espelho ou planilha/carta em andamento (estado da planilha: planilha gerada, planilha enviada ou boletim recebido). **Conflito nunca se força**: o CSV se corrige e o ensaio se repete.
+   - `erro`: a linha não se lê (valor, data, meio, competência); o relatório traz o número da linha do arquivo.
+
+   Qualquer `erro` ou `conflito` faz a gravação recusar o arquivo inteiro, sem gravar nada.
+3. **OK do Leo** sobre o relatório do ensaio, antes de qualquer gravação.
+4. **Produção, pela VM**: atualizar o clone do cadastro, repetir o `--ensaio` contra o banco real (o relatório pode mudar desde o ensaio do Mac) e só então gravar. Em PowerShell, de `C:\DashboardLotufo\app\backend`:
+
+   ```powershell
+   git -C C:\DashboardLotufo\cadastro pull --ff-only
+   if ($LASTEXITCODE -ne 0) { exit 1 }
+   $env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"
+   $env:DASH_DB_PATH = "C:\DashboardLotufo\dados\dashboard.db"
+   $csv = "C:\DashboardLotufo\cadastro\medicoes\<slug>.csv"
+   .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --ensaio
+   if ($LASTEXITCODE -ne 0) { exit 1 }
+   .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --usuario <e-mail do admin>
+   ```
+
+   Pelo Mac, os comandos acima vão num `script.ps1` temporário no Mac, fora do repositório, e rodam na VM (`<vm>`, não `<servidor>`) com `-File`: no `-Command -` o comando nativo (`git`, `python`) consome o resto do script pelo stdin e ele para no meio (ver "Mudar de servidor"). Copiar o script com `scp script.ps1 <vm>:C:/Temp/x.ps1` ou, se o `scp` falhar, por stdin: `ssh <vm> 'powershell -NoProfile -Command "[Console]::In.ReadToEnd() | Set-Content -Path C:\Temp\x.ps1 -Encoding ASCII"' < script.ps1`; rodar com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\x.ps1'` e apagar o `x.ps1` depois. O shell remoto é PowerShell 5.1: sem `&&`, usar `;`. O `git pull` do cadastro privado precisa de credencial do GitHub na VM; se falhar, o script sai com 1 antes da carga, que não deve rodar com o CSV velho. A gravação é uma transação por obra e termina em `GRAVADO: <obra> (<arquivo>), N medição(ões) criada(s)`. O snapshot horário do backup cobre o antes.
+5. **Conferir**: `GET /api/health` com `banco: ok`; a aba Medições da obra mostra as medições novas; e o `audit_log` tem a ação `medicao.carga_historico` no contrato, com arquivo, criadas, corrigidas e as linhas. Rodar de novo sem nada novo não deixa rastro.
+
+### Regra: competência de medição com planilha ou carta enviada
+
+A carga **não** recusa a correção de competência (`corrige competência = sim`) de uma medição `protocolada` que já teve a planilha/carta enviada (`planilha_enviada_em` preenchido) e não tem NF vinculada: só recusa, como `conflito`, quando a medição está num estado da planilha, num estado de espelho, com a nota emitida, ou tem NF. Até a issue #383 entrar, o operador confere o `planilha_enviada_em` de cada linha `correção` do ensaio antes de gravar (na página da medição, ou numa consulta à tabela `medicoes` da cópia do banco usada no ensaio), e a correção de competência dessa medição vai pela tela, não pelo CSV (tirar a linha ou a marca `sim`). Quando a #383 entrar, atualizar esta regra.
+
 ## Espelho de NF (bloco 2)
 
 **Como a operação usa.** Na página da obra, aba Medições, o cartão "Espelho de NF" aparece quando a obra
