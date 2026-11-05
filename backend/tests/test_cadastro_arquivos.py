@@ -849,6 +849,21 @@ def test_ciclo_impossivel_do_aditivo_e_recusado_com_o_intervalo(tmp_path, base, 
     assert any("instrumentos[ta-08].ciclo" in e and trecho in e for e in erros), erros
 
 
+def test_duas_correcoes_de_reajuste_do_mesmo_aditivo_sao_erro(tmp_path):
+    # issue #410 (gate Sol, rodada 1, PR #452): cada termo tem no maximo uma correcao de valor; a outra corrige a
+    # correcao (cadeia)
+    ta2 = {**TA_REAJ, "chave": "ta-09", "data": "2026-10-25", "corrige": "ta-08"}
+    ta3 = {**TA_REAJ, "chave": "ta-10", "data": "2026-10-30", "corrige": "ta-08"}
+    erros = _erros(_escrever(tmp_path / "par", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, ta3]}]))
+    assert any("ta-10 e ta-09 corrigem ta-08" in e for e in erros), erros
+    cadeia = {**ta3, "corrige": "ta-09"}
+    ca.preparar(_escrever(tmp_path / "cadeia", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, cadeia]}]))
+    # o aditivo de prazo que tambem corrige o ta-08 nao conta (o motor nao o le)
+    prazo = {"chave": "ta-11", "tipo": "aditivo_prazo", "data": "2026-10-31", "nova_execucao_fim": "2027-06-30",
+             "corrige": "ta-08"}
+    ca.preparar(_escrever(tmp_path / "prazo", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, prazo]}]))
+
+
 def test_ciclo_do_aditivo_nas_pontas_do_intervalo_e_aceito(tmp_path):
     for ciclo in (2024, 2026):
         c = {**CONTRATO, "instrumentos": [{**TA_REAJ, "ciclo": ciclo}]}

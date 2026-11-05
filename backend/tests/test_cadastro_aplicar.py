@@ -1307,17 +1307,22 @@ def test_correcao_do_aditivo_aplicada_do_zero_atende_o_pleito_do_corrigido(conn)
 
 
 def test_corrige_do_aditivo_fica_gravado_e_trava(conn):
-    # como a natureza: o aditivo aplicado sem `corrige` aceita o primeiro, auditado; depois trocar ou tirar e' erro
+    # issue #410 (gate Sol, rodada 1, PR #452): o aditivo aplicado sem `corrige` nao o ganha depois (o retrato dele
+    # foi gravado somando o corrigido); o gravado com `corrige` trava -- trocar ou tirar e' erro
     def cad(corrige):
         return _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "corrige": corrige}])])
     cadastro_aplicar.aplicar(conn, 1, cad(None))
     assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-08", "ta-09"]
-    r = cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))
-    assert r["instrumentos"]["alterados"] == ["MT-402/ta-09"]
-    antes, depois = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.instrumento' "
-                                 "ORDER BY id DESC LIMIT 1").fetchone()
-    assert (json.loads(antes), json.loads(depois)) == ({"corrige_chave": None, "observacao": None},
-                                                       {"corrige_chave": "ta-08", "observacao": "Corrige ta-08"})
+    with pytest.raises(ValueError, match="não pode ganhar `corrige`"):
+        cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))
+    assert conn.execute("SELECT corrige_chave FROM aditivos WHERE chave_cadastro='ta-09'").fetchone()[0] is None
+    assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-08", "ta-09"]
+
+
+def test_corrige_gravado_do_aditivo_trava(conn):
+    def cad(corrige):
+        return _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "corrige": corrige}])])
+    cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))
     assert [a["chave"] for a in reajuste_mod.aditivos_de_reajuste(conn, 1)] == ["ta-09"]
     assert cadastro_aplicar.aplicar(conn, 1, cad("ta-08"))["instrumentos"]["alterados"] == []
     with pytest.raises(ValueError, match="corrige: 'ta-08' → None"):
@@ -1851,8 +1856,8 @@ def test_declaracao_diferente_da_base_declarada_e_recusada(conn):
             instrumentos=[{**TA_REAJ, "dados": {"data_base": "2023-06"}}], datas_base=DUAS_BASES)]))
 
 
-def test_base_gravada_antes_da_060_cede_a_declaracao_e_a_mesma_declaracao_trava(conn):
-    # sem origem (aplicado entre a 058 e a 060): conta como inferida; a mesma base declarada so' marca a origem
+def test_base_gravada_antes_da_061_cede_a_declaracao_e_a_mesma_declaracao_trava(conn):
+    # sem origem (aplicado entre a 058 e a 061): conta como inferida; a mesma base declarada so' marca a origem
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ])]))
     conn.execute("UPDATE aditivos SET data_base_origem=NULL WHERE chave_cadastro='ta-08'"); conn.commit()
     igual = {**TA_REAJ, "dados": {"data_base": "2023-04"}}
@@ -1921,3 +1926,48 @@ def test_aditivo_de_prazo_que_corrige_o_de_reajuste_nao_tira_o_valor_dele(conn):
              "delta_valor_centavos": 0, "nova_execucao_fim": "2027-06-30", "natureza": None, "corrige": "ta-08"}
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, prazo])]))
     assert contratos_mod.vigente(conn, 1)["valor_vigente_centavos"] == original + 100_01
+
+
+TA_CORR2 = {**TA_REAJ, "chave": "ta-10", "numero": "019/2024/01/10", "data": "2026-09-01", "corrige": "ta-08",
+            "delta_valor_centavos": 120_01}
+
+
+def test_duas_correcoes_de_reajuste_do_mesmo_aditivo_sao_recusadas(conn):
+    # gate Sol (rodada 1, PR #452): TA2 e TA3 corrigindo o TA1 somariam as duas no vigente; nada e' gravado
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "delta_valor_centavos": 110_01}, TA_CORR2])])
+    with pytest.raises(ValueError, match="ta-09 já corrige ta-08"):
+        cadastro_aplicar.aplicar(conn, 1, cad)
+    assert conn.execute("SELECT COUNT(*) FROM aditivos").fetchone()[0] == 0
+    # a cadeia (TA3 corrige TA2) e' o caminho: so' o ultimo conta
+    original = _contrato()["valor_original_centavos"]
+    cadeia = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, {**TA_CORR, "delta_valor_centavos": 110_01},
+                                                     {**TA_CORR2, "corrige": "ta-09"}])])
+    cadastro_aplicar.aplicar(conn, 1, cadeia)
+    v = contratos_mod.vigente(conn, 1)
+    assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 120_01, 120_01)
+    assert tuple(conn.execute("SELECT valor_anterior_centavos, valor_novo_centavos FROM aditivos "
+                              "WHERE chave_cadastro='ta-10'").fetchone()) == (original, original + 120_01)
+
+
+def test_primeiro_ciclo_gravado_e_conferido_contra_a_base_guardada(conn):
+    # gate Sol (rodada 1, PR #452): base 2023-04 guardada (unica na aplicacao); com duas bases e sem `data_base` o
+    # validar so' confere o formato, e o aplicar recusa o ciclo fora de 2024..2026 (termo de 30/07/2026)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ])]))
+    for ciclo in (2099, 2023):
+        with pytest.raises(ValueError, match="use um ciclo de 2024 a 2026"):
+            cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+                instrumentos=[{**TA_REAJ, "dados": {"ciclo": ciclo}}], datas_base=DUAS_BASES)]))
+    assert _ta(conn) == ("2023-04", None)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+        instrumentos=[{**TA_REAJ, "dados": {"ciclo": 2025}}], datas_base=DUAS_BASES)]))
+    assert _ta(conn) == ("2023-04", 2025)
+
+
+def test_base_declarada_nova_e_conferida_contra_o_ciclo_guardado(conn):
+    # o ciclo 2024 guardado com a base 2023-04; declarar a base 2023-06 com ele seguiria valendo (2024..2026); um
+    # termo de 2026-05 com ciclo 2026 na base 2023-04 nao pode passar para a 2023-06 (aniversario em junho)
+    maio = {**TA_REAJ, "data": "2026-05-20", "dados": {"ciclo": 2026}}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[maio])]))
+    with pytest.raises(ValueError, match="use um ciclo de 2024 a 2025"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
+            instrumentos=[{**maio, "dados": {"ciclo": 2026, "data_base": "2023-06"}}], datas_base=DUAS_BASES)]))
