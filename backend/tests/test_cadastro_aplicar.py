@@ -1352,6 +1352,46 @@ def test_correcao_sem_base_determinavel_tira_a_ligacao_do_corrigido_com_aviso(co
     assert any("MT-402/ta-09" in a and "CT-122-LT-2026" in a and "ligação saiu" in a for a in r["avisos"]), r["avisos"]
     assert _trilha_pleitos(conn)[-1] == ({"instrumento_chave": "ta-08"}, {"instrumento_chave": None})
 
+
+@pytest.mark.parametrize("com_correcao", [False, True])
+def test_pleito_do_ciclo_cadastrado_tarde_e_o_atendido_com_ou_sem_correcao(conn, com_correcao):
+    # gate Sol (rodada 1, PR #433), refutado com este teste: o CT-125, enviado depois do CT-122 e antes da assinatura
+    # do TA1, entra no cadastro depois. Sem correcao, o TA1 passa a atende-lo (a ligacao se reconfere pela data a cada
+    # aplicar, rodada 2 da PR #407); com o TA2 corrigindo o TA1 no mesmo ciclo, o TA2 atende o mesmo pleito, como o
+    # termo de correcao do apostilamento (#414). Herdar o CT-122 daria resultados diferentes nos dois casos
+    tarde = {**PLEITO_2026, "oficio": "CT-125-LT-2026", "data": "2026-06-10"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ta-08"}
+    instrumentos = [TA_REAJ, TA_CORR] if com_correcao else [TA_REAJ]
+    cad = _cad(contratos=[_contrato(instrumentos=instrumentos, pleitos_anteriores=[PLEITO_2026, tarde])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    termo = "ta-09" if com_correcao else "ta-08"
+    assert _ligacoes(conn) == {"CT-122-LT-2026": None, "CT-125-LT-2026": termo}
+    saiu = ("sem termo (ta-09 corrige ta-08 e atende o CT-125-LT-2026, o último enviado até 30/07/2026)"
+            if com_correcao else "sem termo (ta-08 atende o ciclo 2026)")
+    assert r["pleitos"]["alterados"] == [f"MT-402/reajuste CT-122-LT-2026: {saiu}",
+                                         f"MT-402/reajuste CT-125-LT-2026: atendido por {termo}"]
+    assert not any("ligação saiu" in a for a in r["avisos"]), r["avisos"]
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 8, 20))[0]
+    assert (k["ciclo"], k["situacao"], k["apostilamento"]["chave"]) == (2026, "apostilado", termo)
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+
+
+@pytest.mark.parametrize("ciclo_do_aditivo", [None, 2025])
+def test_aditivo_que_corrige_um_apostilamento_nao_mexe_no_pleito_dele(conn, ciclo_do_aditivo):
+    # revisor (rodada 1, PR #433): `corrige` entre tabelas nao tem efeito. O ap-09 (ciclo 2025) segue com o pleito de
+    # 2025, de outro ciclo (o ta-08 cai em 2026 pela data) ou do mesmo (`ciclo: 2025`), e reaplicar e' "igual"
+    ap = {**AP_REAJ, "dados": {"data_base": "2023-04", "ciclo": 2025}}
+    ta = {**TA_REAJ, "corrige": "ap-09", "dados": {"ciclo": ciclo_do_aditivo} if ciclo_do_aditivo else {}}
+    cad = _cad(contratos=[_contrato(instrumentos=[ap, ta], pleitos_anteriores=[PLEITO_2025, PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn)["CT-090-LT-2025"] == "ap-09"
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2025, True)["chave"] == "ap-09"
+    auditorias = len(_trilha_pleitos(conn))
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == [] and _ligacoes(conn)["CT-090-LT-2025"] == "ap-09"
+    assert len(_trilha_pleitos(conn)) == auditorias
+
 # --- issue #398: pedido de aditivo de valor (RPFO) enviado antes do sistema ----------------------------------
 
 from app import prazos as prazos_mod
