@@ -109,7 +109,7 @@ describe("administração", () => {
       "medicao.remover_teste", "medicao.planilha_envio", "medicao.planilha_peca",
       "medicao.valor_atestado", "medicao.valor_protocolado", "nf.alocar", "nf.desalocar", "nota.conferencia", "nota.confirmacao",
       "nota.justificar", "nota.manual", "notas.envio_externo", "pleito.anexo", "pleito.anexo_removido", "pleito.assinado",
-      "pleito.criar", "pleito.curva_s", "pleito.descartar", "pleito.enviar", "pleito.montar", "protocolo.assinado", "protocolo.criar",
+      "pleito.criar", "pleito.curva_s", "pleito.curva_s_removida", "pleito.descartar", "pleito.enviar", "pleito.montar", "protocolo.assinado", "protocolo.criar",
       "protocolo.descartar", "protocolo.enviar", "protocolo.link", "protocolo.link_removido", "protocolo.montar",
       "protocolo.numero_orgao", "protocolo.peca", "protocolo.peca_removida", "protocolo.siga", "regularidade.competencia_corrigida",
       "regularidade.registrar", "rm.sincronizacao", "siga.vinculo", "usuario.atualizar", "usuario.criar", "usuario.desbloquear",
@@ -117,6 +117,7 @@ describe("administração", () => {
     expect(acoes.filter(a => /[._]/.test(rotuloAcao(a)) || rotuloAcao(a) === a)).toEqual([]);
     expect(rotuloAcao("frc.gerar")).toBe("FRC gerada");
     expect(rotuloAcao("pleito.curva_s")).toBe("Curva S do pleito gerada");          // issue #293
+    expect(rotuloAcao("pleito.curva_s_removida")).toBe("Curva S do pleito retirada");
     expect(rotuloAcao("medicao.valor_atestado")).toBe("Atestado alterado");
     expect(rotuloAcao("envio.liberar")).toBe("Envio liberado à mão");
     expect(rotuloAcao("siga.vinculo")).toBe("Processo do SIGA ligado ao protocolo ou à medição");   // #327, #328

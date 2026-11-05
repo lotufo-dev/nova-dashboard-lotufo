@@ -164,6 +164,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "pleito.criar": "Pleito criado", "pleito.anexo": "Anexo do pleito", "pleito.anexo_removido": "Anexo do pleito removido",
   "pleito.montar": "Pleito montado", "pleito.assinado": "Pleito assinado", "pleito.enviar": "Pleito enviado",
   "pleito.descartar": "Pleito descartado", "pleito.curva_s": "Curva S do pleito gerada",
+  "pleito.curva_s_removida": "Curva S do pleito retirada",
   "nf.alocar": "NF alocada à medição", "nf.desalocar": "Alocação de NF desfeita",
   "nota.confirmacao": "Nota confirmada pelo RM", "nota.conferencia": "Nota conferida", "nota.justificar": "Nota justificada",
   "nota.manual": "Nota lançada à mão", "rm.sincronizacao": "Sincronização com o RM",
