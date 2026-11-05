@@ -145,7 +145,8 @@ def conferir(raiz: Path, clone: Path | None = None) -> dict:
         return {"estado": ERRO, "detalhe": "", "assinatura": ""}
     dist = arquivos_do_dist(clone / "frontend" / "dist")
     gravado = registro.get("dist") if isinstance(registro.get("dist"), dict) else {}
-    dist_alterado = manifesto(dist) != registro["manifesto"]
+    manifesto_dist = manifesto(dist)
+    dist_alterado = manifesto_dist != registro["manifesto"]
     n_dist = len({c for c in dist.keys() | gravado.keys() if dist.get(c) != gravado.get(c)})
     partes = []
     if commit != registro["commit"]:
@@ -157,7 +158,7 @@ def conferir(raiz: Path, clone: Path | None = None) -> dict:
                       else "dist alterado")
     if not partes:
         return {"estado": OK, "detalhe": "", "assinatura": ""}
-    assinatura = hashlib.sha256(json.dumps([commit, sorted(alterados), dist_alterado, manifesto(dist)]).encode()
+    assinatura = hashlib.sha256(json.dumps([commit, sorted(alterados), dist_alterado, manifesto_dist]).encode()
                                 ).hexdigest()
     return {"estado": DIFERENTE, "detalhe": "; ".join(partes), "assinatura": assinatura,
             "alterados": len(alterados), "dist": n_dist, "commit_diferente": commit != registro["commit"]}
@@ -177,7 +178,9 @@ def rodar(conn, raiz: Path | None = None, clone: Path | None = None) -> dict | N
     if os.environ.get("DASH_DEV") == "1" or raiz is None or (raiz / ARQUIVO_PAUSA).exists():
         return ESTADO
     r = conferir(raiz, clone)
-    agora = tempo.iso_utc(tempo.agora_utc().strftime("%Y-%m-%d %H:%M:%S"))
+    if (raiz / ARQUIVO_PAUSA).exists():     # o deploy comecou no meio da conferencia: o que ela leu nao vale
+        return ESTADO
+    agora =tempo.iso_utc(tempo.agora_utc().strftime("%Y-%m-%d %H:%M:%S"))
     if r["estado"] == DIFERENTE:
         # a data do item e' a da primeira vez que se viu esta mesma diferenca
         mesma = ESTADO is not None and ESTADO.get("assinatura") == r["assinatura"]

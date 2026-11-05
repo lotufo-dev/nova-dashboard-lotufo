@@ -74,6 +74,7 @@ def create_app() -> FastAPI:
     # oficial ela sobe em modo copia, sem envio de e-mail e sem RM.
     copia = instalacao.conferir()["instalacao"] == instalacao.NAO_AUTORIZADA
 
+    integridade.commit_atual()  # lido na subida: o /api/health nao chama o git na requisicao
     app = FastAPI(title="Dashboard Lotufo")
     # A-04 (10/10/2026): corpo acima do teto da' 413 antes de qualquer rota (ver app/limites.py).
     from app.limites import LimiteDeCorpo

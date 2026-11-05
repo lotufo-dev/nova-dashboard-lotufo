@@ -119,7 +119,9 @@ function ConferirInstalacao {
 # aqui so' avisa (o item "Sem registro do ultimo deploy" aparece na Saude).
 function RegistrarDeploy {
     Push-Location (Join-Path $AppDir "backend")
+    $LASTEXITCODE = 0
     try { & $py -m app.cli integridade registrar --raiz $Raiz }
+    catch { Write-Warning "registro do deploy: $($_.Exception.Message)"; $LASTEXITCODE = 1 }
     finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { Write-Warning "registro do deploy (deploy-atual.json) nao gravado - ver docs\runbook.md (Saude)" }
 }
