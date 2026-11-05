@@ -441,8 +441,10 @@ def detalhe_envio(conn, protocolo_id: int, remetente: str | None = None, hoje: d
             "previa": {k: pv[k] for k in ("para", "copia", "assunto", "corpo", "anexos", "total", "limite", "links")},
             # issue #213: com pendencia, o Enviar abre o aviso "ATENÇÃO" com esta lista e manda a lista confirmada
             "bloqueio": pv["bloqueio"], "pendencias": [x["mensagem"] for x in pv["pendencias"]],
-            # issue #278: reajuste sem apostilamento que cubra a competencia: o envio pede justificativa escrita
+            # issue #278: reajuste sem apostilamento que cubra a competencia: o envio pede justificativa escrita;
+            # `remontar`: o termo mudou depois da montagem e o pacote tem de ser montado de novo (o bloqueio diz isso)
             "exige_justificativa": pv["exige_justificativa"],
+            "remontar": protocolo.apostilamento_mudou(conn, p) is not None,
             "extras": [{"id": x["id"], "nome": x["nome"], "tamanho": x["tamanho"]}
                        for x in protocolo._pecas(conn, protocolo_id) if x["tipo"] == protocolo.ANEXO]}
 
@@ -535,8 +537,20 @@ def faltas_externo(conn, ms: list[dict], hoje: datetime.date | None = None) -> l
         return []
     familia, _, _ = protocolo._orgao(conn, c)
     itens = _itens(conn, c, familia, ms, hoje or tempo.hoje_local())[0]
-    return [{"codigo": i["chave"].split(":")[0], "mensagem": f"{i['rotulo']}: {i['detalhe']}"} for i in itens
-            if i["estado"] in ("falta", "vencida") or i.get("bloqueia")]
+    # issue #278 (revisor, rodada 1 da PR #435): o reajuste sem termo que cubra a competencia, como no envio pelo
+    # sistema (MT-PAR e Prefeitura); com ele, a observacao faz as vezes da justificativa (`_conferir_observacao`)
+    return protocolo.faltas_de_apostilamento(protocolo.apostilamentos(conn, familia, ms)) + [
+        {"codigo": i["chave"].split(":")[0], "mensagem": f"{i['rotulo']}: {i['detalhe']}"} for i in itens
+        if i["estado"] in ("falta", "vencida") or i.get("bloqueia")]
+
+
+OBSERVACAO_SEM_APOSTILAMENTO = ("Sem apostilamento que cubra a competência do reajuste: a observação faz as vezes da "
+                                f"justificativa e precisa de pelo menos {protocolo.MIN_JUSTIFICATIVA} caracteres")
+
+
+def _conferir_observacao(faltas: list[dict], obs: str) -> None:
+    if protocolo.exige_justificativa(faltas) and len(obs) < protocolo.MIN_JUSTIFICATIVA:
+        raise ValueError(OBSERVACAO_SEM_APOSTILAMENTO)
 
 
 def envio_externo(conn, usuario_id: int, medicao_ids: list[int], enviado_em: str, observacao: str,
@@ -568,7 +582,9 @@ def envio_externo(conn, usuario_id: int, medicao_ids: list[int], enviado_em: str
             raise ValueError("Arquivo .eml acima de 25 MB")
         if not _e_email(eml[1]):
             raise ValueError(NAO_E_EML)
-    protocolo._conferir_confirmacao(faltas_externo(conn, ms), confirmadas, REGISTRO_EXTERNO)
+    faltas = faltas_externo(conn, ms)
+    protocolo._conferir_confirmacao(faltas, confirmadas, REGISTRO_EXTERNO)
+    _conferir_observacao(faltas, obs)                    # issue #278
     gravado: dict = {}
     try:
         _registrar_externo(conn, usuario_id, ids, irmas, data, obs, eml, gravado, confirmadas, oficio)
@@ -622,6 +638,7 @@ def _registrar_externo(conn, usuario_id: int, ids: list[int], irmas: set[int], d
             # ressalva, que junta a observacao e a lista
             no_lock = faltas_externo(conn, ms)
             protocolo._conferir_confirmacao(no_lock, confirmadas, REGISTRO_EXTERNO)
+            _conferir_observacao(no_lock, obs)
             faltam = [x["mensagem"] for x in no_lock]
             ressalva = f"Envio feito por fora: {obs}" + \
                 (f"; {protocolo.CONFIRMADO_COM_FALTA}{'; '.join(faltam)}" if faltam else "")

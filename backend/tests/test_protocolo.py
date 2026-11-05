@@ -283,16 +283,34 @@ def test_bloqueio_recusa_o_protocolo_mesmo_confirmado(cenario):
 SEM_APOSTILAMENTO = "Nenhum apostilamento cobre 09/2026; a nota de reajuste não pode sair antes dele"
 
 
+def _termo(c, cid, chave="ap-reaj-01", numero="001/2025/03/02", de="2026-09", ate="2027-08", data="2026-09-01",
+           corrige=None):
+    """Percentual apostilado da MT-PAR (data-base 09/2025, ciclo 2026) com o periodo de `de` a `ate`."""
+    dados = {"data_base": "2025-09", "ciclo": 2026, "percentual": "4,15", "periodo": {"de": de, "ate": ate},
+             **({"corrige": corrige} if corrige else {})}
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) "
+              "VALUES (?, ?, 'apostilamento_reajuste', ?, ?, ?)", (cid, chave, numero, data, json.dumps(dados)))
+    c.commit()
+
+
 def _data_base_e_termo(c, cid, termo=True):
     """Data-base 09/2025 (a competencia 09/2026 abre o ciclo 2026) e, com `termo`, o percentual apostilado da MT-PAR
     com o periodo que a cobre."""
     c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2025-09', 'INCC-DI')", (cid,))
-    if termo:
-        c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) "
-                  "VALUES (?, 'ap-reaj-01', 'apostilamento_reajuste', '001/2025/03/02', '2026-09-01', ?)",
-                  (cid, json.dumps({"data_base": "2025-09", "ciclo": 2026, "percentual": "4,15",
-                                    "periodo": {"de": "2026-09", "ate": "2027-08"}})))
     c.commit()
+    if termo:
+        _termo(c, cid)
+
+
+def _reajuste(c, cid, numero, competencia):
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, ?, 'reajuste', ?, 'nota_emitida', 1000001)", (cid, numero, competencia))
+    c.commit()
+    return c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
+
+
+def _corrido(texto: str) -> str:
+    return " ".join(texto.split())
 
 
 def test_oficio_de_reajuste_mtpar_cita_o_apostilamento_e_a_competencia(cenario):
@@ -309,19 +327,122 @@ def test_oficio_de_reajuste_mtpar_cita_o_apostilamento_e_a_competencia(cenario):
     assert "Apostilamento" not in protocolo.corpo_padrao(c, p_exec)         # o oficio da execucao nao muda
 
 
-def test_oficio_com_um_reajuste_sem_termo_nao_cita_o_termo_do_outro(cenario):
+def test_oficio_com_um_reajuste_sem_termo_cita_so_a_competencia_coberta(cenario):
     # code-review da PR: com dois reajustes no mesmo oficio e so' um coberto, a carta nao diz que os dois sao do termo
     c, ids = cenario
     _data_base_e_termo(c, ids["mtpar"])
-    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
-              "VALUES (?, 24, 'reajuste', '2027-09', 'nota_emitida', 1000001)", (ids["mtpar"],))
-    m24 = c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
-    c.commit()
+    m24 = _reajuste(c, ids["mtpar"], 24, "2027-09")
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"], m24], "303")
     corpo = protocolo.corpo_padrao(c, pid)
-    assert "001/2025/03/02" not in corpo and "Termo de Apostilamento nº {apostilamento}" in corpo
+    assert ("O reajuste da competência 09/2026 está apostilado no Termo de Apostilamento nº 001/2025/03/02."
+            in _corrido(corpo)) and "09/2027" not in corpo and "{" not in corpo
     assert [x["mensagem"] for x in protocolo.detalhe(c, pid)["pendencias"] if x["codigo"] == "sem_apostilamento"] == [
         "Nenhum apostilamento cobre 09/2027; a nota de reajuste não pode sair antes dele"]
+
+
+def test_dois_reajustes_de_competencias_diferentes_citam_cada_termo(cenario):
+    # gate Sol e revisor (rodada 1 da PR #435): a competencia e o termo vao em par, nao so' os da primeira medicao
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    _termo(c, ids["mtpar"], "ap-a", "001/2025/03/02", "2026-09", "2026-09")
+    _termo(c, ids["mtpar"], "ap-b", "001/2025/03/05", "2026-10", "2026-10", data="2026-10-01")
+    m24 = _reajuste(c, ids["mtpar"], 24, "2026-10")
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"], m24], "303")
+    assert ("O reajuste da competência 09/2026 está apostilado no Termo de Apostilamento nº 001/2025/03/02; o da "
+            "competência 10/2026, no Termo de Apostilamento nº 001/2025/03/05.") in _corrido(protocolo.corpo_padrao(c, pid))
+    m25 = _reajuste(c, ids["mtpar"], 25, "2026-11")
+    _termo(c, ids["mtpar"], "ap-c", "001/2025/03/06", "2026-10", "2026-11", data="2026-11-01")     # vale o mais novo
+    p2 = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [m24, m25], "304")
+    assert ("O reajuste das competências 10/2026 e 11/2026 está apostilado no Termo de Apostilamento nº 001/2025/03/06."
+            in _corrido(protocolo.corpo_padrao(c, p2)))
+
+
+def test_sem_termo_o_oficio_sai_sem_a_frase_e_nunca_com_campo_sem_dado(cenario):
+    # (a) gate Sol e revisor (rodada 1 da PR #435): sem termo, a frase some; campo sem dado nao monta
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    corpo = protocolo.corpo_padrao(c, pid)
+    assert "Apostilamento" not in corpo and "{" not in corpo and "\n\n\n" not in corpo
+    texto = _corrido(" ".join(_textos(protocolo.montar(c, ids["uid"], pid)["arquivo"])))
+    assert "Apostilamento" not in texto and "{" not in texto
+    with pytest.raises(ValueError, match=r"campo sem dado: \{apostilamento\}"):
+        protocolo.montar(c, ids["uid"], pid, corpo=corpo + "\n\nConforme o Termo nº {apostilamento}.")
+
+
+def test_termo_aplicado_depois_da_montagem_bloqueia_ate_montar_de_novo(cenario):
+    # (b) o pacote montado sem o termo nao sai depois que o termo chega; montar de novo refaz o texto padrao
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    _termo(c, ids["mtpar"])
+    pv = protocolo.previa_envio(c, [pid])
+    assert pv["bloqueio"] == protocolo.APOSTILAMENTO_MUDOU and pv["exige_justificativa"] is False
+    with pytest.raises(protocolo.Bloqueio, match="monte o pacote de novo"):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    r = protocolo.montar(c, ids["uid"], pid)                               # como a tela de envio: corpo vazio
+    assert "Termo de Apostilamento nº 001/2025/03/02" in _corrido(_textos(r["arquivo"])[0])
+    d = protocolo.detalhe(c, pid)
+    assert d["corpo_carta"] is None and protocolo.previa_envio(c, [pid])["bloqueio"] is None
+
+
+def test_termo_corrigido_depois_da_montagem_bloqueia_e_a_nova_montagem_cita_o_novo(cenario):
+    # (c) o termo que o pacote cita foi corrigido por outro: o pacote nao sai com o termo velho
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    assert protocolo.previa_envio(c, [pid])["bloqueio"] == protocolo.APOSTILAMENTO_MUDOU
+    texto = _corrido(_textos(protocolo.montar(c, ids["uid"], pid)["arquivo"])[0])
+    assert "nº 001/2025/03/09" in texto and "001/2025/03/02" not in texto
+    assert protocolo.previa_envio(c, [pid])["bloqueio"] is None
+
+
+def test_termo_sem_numero_vira_pendencia_e_pede_justificativa(cenario):
+    # gate Sol (rodada 1 da PR #435): o termo sem numero nao se cita; o envio avisa e pede justificativa
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    _termo(c, ids["mtpar"], numero=None)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    assert "Apostilamento" not in protocolo.corpo_padrao(c, pid)
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid])
+    assert [x["mensagem"] for x in pv["pendencias"]] == [
+        "O apostilamento que cobre 09/2026 está sem número no cadastro; o ofício sai sem citá-lo"]
+    assert pv["exige_justificativa"] is True
+    with pytest.raises(ValueError, match="justificativa"):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+
+
+def test_justificativa_e_conferida_de_novo_sob_o_lock(cenario, monkeypatch):
+    # revisor (rodada 1 da PR #435): o termo some entre a previa e a reserva; a confirmacao do aviso nao basta
+    from app import notas_envio
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid])
+    assert pv["pendencias"] == [] and pv["bloqueio"] is None
+    original = notas_envio.recusar_se_espera
+
+    def termo_corrigido_no_meio(conn, m, *a, **k):        # ja' sob o lock: o termo novo nao cobre 09/2026
+        conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) VALUES (?, 'ap-ret', "
+                     "'apostilamento_reajuste', '001/2025/03/09', '2026-09-10', ?)",
+                     (ids["mtpar"], json.dumps({"data_base": "2025-09", "ciclo": 2026, "percentual": "4,15",
+                                                "corrige": "ap-reaj-01", "periodo": {"de": "2027-01", "ate": "2027-08"}})))
+        return original(conn, m, *a, **k)
+
+    monkeypatch.setattr(notas_envio, "recusar_se_espera", termo_corrigido_no_meio)
+    with pytest.raises(ValueError, match="justificativa"):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[SEM_APOSTILAMENTO])
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert c.execute("SELECT COUNT(*) FROM instrumentos WHERE chave='ap-ret'").fetchone()[0] == 0     # desfeito
 
 
 def test_reajuste_sem_apostilamento_avisa_na_montagem_e_o_envio_exige_justificativa(cenario):

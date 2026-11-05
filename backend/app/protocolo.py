@@ -37,6 +37,9 @@ FAMILIAS_OFICIO_REAJUSTE = ("mtpar", "prefeitura")
 SEM_APOSTILAMENTO = "sem_apostilamento"
 JUSTIFICATIVA_SEM_APOSTILAMENTO = ("Sem apostilamento que cubra a competência do reajuste: escreva a justificativa do "
                                    f"envio, com pelo menos {MIN_JUSTIFICATIVA} caracteres")
+APOSTILAMENTO_MUDOU = ("O apostilamento do reajuste mudou depois da montagem: monte o pacote de novo (e assine de novo, "
+                       "se já tinha assinado)")
+_CAMPO_SEM_DADO = re.compile(r"\{[a-z_]+\}")
 NUMERO_ORGAO_VAZIO = "Informe o número do protocolo no órgão"
 # A-13 (testes de quebra 10/10/2026): o link vira <a href> no e-mail oficial ao orgao; so' o OneDrive e o SharePoint
 # da Lotufo. Comparacao exata do host: "...sharepoint.com.evil.test" nao passa. Issue #118: os hosts vem de
@@ -375,35 +378,72 @@ def _lista(conn, p: dict, familia: str, regras: dict, ms: list[dict]) -> str:
     return "\n".join(linhas)
 
 
-def _termos_de_reajuste(conn, ms: list[dict]) -> tuple[list[dict], list[str]]:
-    """Issue #278: das medicoes de reajuste, os apostilamentos que cobrem a competencia de cada uma (sem repetir) e
-    as competencias (MM/AAAA) que nenhum cobre."""
-    termos: dict[str, dict] = {}
-    sem: list[str] = []
-    grupos: dict[int, list[dict]] = {}          # a leitura do ciclo por competencia, uma vez por contrato
-    for m in ms:
-        if m["tipo"] != "reajuste":
-            continue
+def apostilamentos(conn, familia: str, ms: list[dict]) -> list[dict]:
+    """Issue #278: cada medicao de reajuste do oficio da MT-PAR e da Prefeitura, na ordem da competencia, com o
+    apostilamento que a cobre agora: {medicao_id, competencia (MM/AAAA), chave, numero}, chave e numero nulos quando
+    nenhum cobre. E' o que a montagem grava (`montado_apostilamentos`, migracao 060) e o envio confere de novo. Nas
+    outras familias o oficio nao cita o termo: lista vazia."""
+    if familia not in FAMILIAS_OFICIO_REAJUSTE:
+        return []
+    out, grupos = [], {}            # a leitura do ciclo por competencia, uma vez por contrato
+    for m in sorted((m for m in ms if m["tipo"] == "reajuste"), key=lambda m: (m["competencia"], m["id"])):
         if m["contrato_id"] not in grupos:
             grupos[m["contrato_id"]] = reajuste.competencias_por_ciclo(conn, m["contrato_id"])
-        t = reajuste.apostilamento_da_medicao(conn, m, grupos[m["contrato_id"]])
-        comp = f"{m['competencia'][5:7]}/{m['competencia'][:4]}"
-        if t:
-            termos.setdefault(t["chave"], t)
-        elif comp not in sem:
-            sem.append(comp)
-    return list(termos.values()), sem
+        t = reajuste.apostilamento_da_medicao(conn, m, grupos[m["contrato_id"]]) or {}
+        out.append({"medicao_id": m["id"], "competencia": f"{m['competencia'][5:7]}/{m['competencia'][:4]}",
+                    "chave": t.get("chave"), "numero": (str(t.get("numero") or "").strip() or None)})
+    return out
+
+
+def frase_do_apostilamento(aps: list[dict]) -> str:
+    """O campo {apostilamento} das cartas e e-mails: uma frase que cita, em par, cada competencia do reajuste e o termo
+    que a cobre ("O reajuste da competência 09/2026 está apostilado no Termo de Apostilamento nº X; o da competência
+    10/2026, no Termo de Apostilamento nº Y."). So' cita competencia com termo e numero; sem nenhuma (oficio so' de
+    execucao, ou reajuste sem termo) fica vazia e o paragrafo some do texto (`_sem_linhas_vazias`)."""
+    por_termo: dict[str, list[str]] = {}
+    for a in aps:
+        if a["numero"] and a["competencia"] not in por_termo.setdefault(a["numero"], []):
+            por_termo[a["numero"]].append(a["competencia"])
+    if not por_termo:
+        return ""
+
+    def das(cs: list[str]) -> str:
+        return ("da competência " if len(cs) == 1 else "das competências ") + _e_lista(cs)
+
+    (n0, c0), *resto = por_termo.items()
+    return (f"O reajuste {das(c0)} está apostilado no Termo de Apostilamento nº {n0}"
+            + "".join(f"; o {das(cs)}, no Termo de Apostilamento nº {n}" for n, cs in resto) + ".")
+
+
+def faltas_de_apostilamento(aps: list[dict]) -> list[dict]:
+    """As pendencias `sem_apostilamento` (uma por competencia): sem termo que a cubra, ou com termo sem numero no
+    cadastro (o oficio nao tem o que citar). Com qualquer uma, o envio exige justificativa (`exige_justificativa`)."""
+    out, vistas = [], set()
+    for a in aps:
+        if a["numero"] or a["competencia"] in vistas:
+            continue
+        vistas.add(a["competencia"])
+        msg = (f"Nenhum apostilamento cobre {a['competencia']}; a nota de reajuste não pode sair antes dele"
+               if not a["chave"] else
+               f"O apostilamento que cobre {a['competencia']} está sem número no cadastro; o ofício sai sem citá-lo")
+        out.append({"codigo": SEM_APOSTILAMENTO, "mensagem": msg})
+    return out
+
+
+def _sem_linhas_vazias(texto: str) -> str:
+    """O paragrafo de um campo vazio ({apostilamento} no oficio so' de execucao) nao deixa linha em branco a mais."""
+    return re.sub(r"\n[ \t]*(\n[ \t]*)+\n", "\n\n", texto)
+
+
+def campos_sem_dado(*textos: str | None) -> list[str]:
+    """Os campos {x} que sobraram no texto (`carta._Campos` os deixa a' vista): documento com eles nao sai."""
+    return sorted({x for t in textos for x in _CAMPO_SEM_DADO.findall(t or "")})
 
 
 def _campos(conn, p: dict, c: dict, familia: str, regras: dict, ms: list[dict]) -> dict:
     em = carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}
     m0 = ms[0]
-    # issue #278: {apostilamento} e' o nº do termo que cobre a competencia do reajuste. So' entra quando todo reajuste do
-    # oficio tem termo com numero: senao o campo fica a' vista no texto, como todo dado que falta (`carta._Campos`), em
-    # vez de a carta citar como de todos o termo de um so'; a competencia sem termo vai nas pendencias
-    termos, sem = _termos_de_reajuste(conn, ms)
-    numeros = [t["numero"] for t in termos]
-    return {**({"apostilamento": " e ".join(numeros)} if numeros and all(numeros) and not sem else {}),
+    return {"apostilamento": frase_do_apostilamento(apostilamentos(conn, familia, ms)),       # issue #278
             "razao_social": em.get("razao_social", ""), "cnpj": em.get("cnpj", ""),
             "oficio": p["numero_oficio"] or "",
             "oficio_barra": oficios.na_carta(p["numero_oficio"]) if p["numero_oficio"] else "", "medicao": " e ".join(titulo(m) for m in ms),
@@ -428,8 +468,8 @@ def corpo_padrao(conn, protocolo_id: int) -> str:
     c = _contrato(conn, p["contrato_id"])
     familia, regras, _ = _orgao(conn, c)
     textos = carta.config(conn)["familias"][familia]
-    return carta.preencher(_texto(textos, "carta_corpo", p), _campos(conn, p, c, familia, regras,
-                                                                     _medicoes(conn, protocolo_id))).strip()
+    return _sem_linhas_vazias(carta.preencher(_texto(textos, "carta_corpo", p), _campos(
+        conn, p, c, familia, regras, _medicoes(conn, protocolo_id)))).strip()
 
 
 def _carta(conn, p: dict, corpo: str, hoje: datetime.date) -> carta.Carta:
@@ -496,8 +536,17 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     if not e.carta:
         raise ValueError("Esta etapa não tem pacote para assinar: os arquivos vão soltos no e-mail")
     # Corpo vazio nao e' carta: vale o texto ja' gravado ou, na falta dele, o padrao da familia.
-    corpo = (corpo or "").strip() or p["corpo_carta"] or corpo_padrao(conn, protocolo_id)
+    # Issue #278: so' o texto editado fica gravado; o igual ao padrao nao, e a proxima montagem refaz o padrao com o
+    # cadastro de agora (o termo de apostilamento que entrou ou foi corrigido depois).
+    padrao = corpo_padrao(conn, protocolo_id)
+    corpo = (corpo or "").strip() or p["corpo_carta"] or padrao
+    editado = None if corpo.strip() == padrao.strip() else corpo
     ms = _medicoes(conn, protocolo_id)
+    aps = apostilamentos(conn, familia, ms)
+    a_assinar = _carta(conn, p, corpo, hoje)
+    if sem_dado := campos_sem_dado(a_assinar.corpo, a_assinar.assunto):
+        raise ValueError(f"A carta tem campo sem dado: {', '.join(sem_dado)}. Corrija o texto da carta (ou o do "
+                         "cadastro das cartas) antes de montar")
     em = carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}
     partes: list[bytes] = []
     if e.capa:
@@ -508,7 +557,7 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     frcs_no_pacote: list[int] | None = None
     for parte in e.partes:
         if parte == "carta":
-            partes.append(carta.gerar(_carta(conn, p, corpo, hoje)))
+            partes.append(carta.gerar(a_assinar))
         elif parte == "notas":
             docs = _docs_nota(conn, [m["id"] for m in ms])
             frcs_no_pacote = sorted(d["id"] for d in docs if d["tipo_doc"] == "fatura")   # issue #169 (041)
@@ -538,8 +587,9 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     with db.mutacao(conn):
         conn.execute("UPDATE protocolos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
                      "montado_em=datetime('now'), assinado_arquivo=NULL, assinado_sha256=NULL, conferencia=NULL, "
-                     "situacao='montado', montado_frcs=? WHERE id=?",
-                     (corpo, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote), protocolo_id))
+                     "situacao='montado', montado_frcs=?, montado_apostilamentos=? WHERE id=?",
+                     (editado, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote),
+                      json.dumps(aps) if familia in FAMILIAS_OFICIO_REAJUSTE else None, protocolo_id))
         auditoria.registrar(conn, usuario_id, "protocolo.montar", "protocolo", protocolo_id, None,
                             {"sha256": sha, "paginas": n, "tamanho": len(pdf)})
     return {"arquivo": rel, "sha256": sha, "paginas": n, "tamanho": len(pdf), "nome": nome_arquivo(conn, p)}
@@ -575,10 +625,8 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     ms = _medicoes(conn, p["id"])
     out = []
     # issue #278: o aviso vem primeiro e acompanha o protocolo desde a montagem; enviado, a cobranca acabou
-    if familia in FAMILIAS_OFICIO_REAJUSTE and p["situacao"] != "enviado":
-        out += [{"codigo": SEM_APOSTILAMENTO,
-                 "mensagem": f"Nenhum apostilamento cobre {comp}; a nota de reajuste não pode sair antes dele"}
-                for comp in _termos_de_reajuste(conn, ms)[1]]
+    if p["situacao"] != "enviado":
+        out += faltas_de_apostilamento(apostilamentos(conn, familia, ms))
     if "notas" in e.partes or "notas" in e.soltos:
         for m in ms:
             if m["estado"] in SEM_NOTA or not _docs_nota(conn, [m["id"]]):
@@ -705,10 +753,24 @@ def frc_recusadas(conn, p: dict) -> list[str]:
     return out
 
 
+def apostilamento_mudou(conn, p: dict) -> str | None:
+    """Issue #278 (revisor e gate Sol, rodada 1 da PR #435): o pacote montado cita o termo de apostilamento de quando
+    foi montado. Se o termo que cobre o reajuste entrou, saiu ou foi corrigido depois, o pacote nao sai: monta de novo.
+    Pacote montado antes da migracao 060 (ou de orgao que nao cita o termo) nao compara."""
+    if not p.get("montado_arquivo") or p.get("montado_apostilamentos") is None \
+            or p["situacao"] in ("enviado", "descartado"):
+        return None
+    familia = _orgao(conn, _contrato(conn, p["contrato_id"]))[0]
+    agora = apostilamentos(conn, familia, _medicoes(conn, p["id"]))
+    return None if json.loads(p["montado_apostilamentos"]) == agora else APOSTILAMENTO_MUDOU
+
+
 def bloqueio(conn, p: dict, hoje: datetime.date) -> str | None:
     vencidas = certidoes_vencidas(conn, p, hoje)
     motivos = (["Certidão vencida — renove antes de enviar: " + "; ".join(vencidas)] if vencidas else []) + \
         frc_recusadas(conn, p)
+    if mudou := apostilamento_mudou(conn, p):
+        motivos.append(mudou)
     return " · ".join(motivos) or None
 
 
@@ -1012,9 +1074,14 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
             raise ValueError(f"Protocolo {x['id']} já {x['situacao']}")
         if e.carta and not x["montado_arquivo"]:
             raise ValueError("Monte o pacote antes de enviar")
+        if e.carta and (sem_dado := campos_sem_dado(x["corpo_carta"])):          # issue #278
+            raise ValueError(f"A carta montada tem campo sem dado: {', '.join(sem_dado)}. Corrija o texto e monte o "
+                             "pacote de novo")
         for m in _medicoes(conn, x["id"]):
             if m["estado"] in ENCERRADAS:
                 raise ValueError(f"{titulo(m)} está {m['estado']}")
+    if sem_dado := campos_sem_dado(assunto, corpo):
+        raise ValueError(f"O e-mail tem campo sem dado: {', '.join(sem_dado)}. Corrija o texto antes de enviar")
     para = [x.strip() for x in para if x.strip()]
     if not para:
         raise ValueError("Informe ao menos um destinatário")
@@ -1045,6 +1112,9 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
         no_lock = _pendencias_envio(conn, [_linha(conn, x["id"]) for x in ps], hoje)
         _conferir_confirmacao(no_lock, confirmadas)
         _conferir_justificativa(no_lock, justificativa)
+        for x in ps:            # issue #278: o pacote cita o termo de apostilamento de agora (de novo, sob o lock)
+            if mudou := apostilamento_mudou(conn, _linha(conn, x["id"])):
+                raise Bloqueio(mudou)
         faltam = [q["mensagem"] for q in no_lock]
         for x in ps:
             envio_reserva.reservar(conn, "protocolos", x["id"], usuario["id"], x["envio_id"])
