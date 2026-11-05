@@ -100,6 +100,9 @@ function textoApostilamento(i: InstrumentoCadastro): string {
           pct !== undefined && pct !== null ? fmtPercentual(Number(pct) / 100) : ""].filter(Boolean).join(" · ");
 }
 
+type AditivoCadastro = { id: number; chave_cadastro: string | null; tipo: string; numero: string | null;
+  data_assinatura: string | null };
+
 /** O termo que fecha o ciclo: apostilamento ou, na SES, termo aditivo de valor de reajuste (issue #390). */
 function nomeDoTermo(i: InstrumentoCadastro): string {
   return i.tipo.startsWith("aditivo") ? "Termo aditivo" : "Apostilamento";
@@ -112,10 +115,9 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
   const envio = partesDoEnvio(p);
   const neutro = { classe: "", texto: p.situacao, partes: envio };
   // o cadastro ligou o pleito ao termo que o atendeu (issue #271): vale em qualquer ciclo, corrente ou passado
-  // na SES o termo e' aditivo de valor de reajuste (issue #390): vem so' no ciclo da API, nao nos apostilamentos
+  // (na SES, o termo aditivo de valor de reajuste, issue #390: `apostilamentos` traz tambem os aditivos)
   const termo = p.situacao === "enviado" && p.instrumento_chave
-    ? apostilamentos.find(i => i.chave === p.instrumento_chave)
-      ?? (c?.apostilamento?.chave === p.instrumento_chave ? c.apostilamento : undefined) : undefined;
+    ? apostilamentos.find(i => i.chave === p.instrumento_chave) : undefined;
   if (termo) return { classe: "selo--ok", texto: `atendido pelo ${nomeDoTermo(termo).toLowerCase()} ${termo.numero ?? "s/n"}`, partes: envio };
   // so' o pleito vigente do ciclo (o enviado mais recente) leva o desfecho; os anteriores (reiterados ou
   // reemitidos) ficam com o envio e a cadeia, sem repetir a espera do ciclo (issue #277)
@@ -162,6 +164,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[]; competencias?: CompetenciaApostilada[];
     bases_dos_termos?: BaseDoTermo[]; previsoes?: Previsao[] } | null>(null);
   const [apostilamentos, setApostilamentos] = useState<InstrumentoCadastro[]>([]);
+  const [aditivos, setAditivos] = useState<InstrumentoCadastro[]>([]);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
   // reiteracao ou reemissao sendo criada: a data-base, o pleito anterior e o que se faz com ele
@@ -172,8 +175,12 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   const carregar = useCallback(async () => {
     try {
       setDados(await api(`/api/contratos/${contratoId}/reajuste`));
-      const cad = await api<{ instrumentos: InstrumentoCadastro[] }>(`/api/contratos/${contratoId}/cadastro`);
+      const cad = await api<{ instrumentos: InstrumentoCadastro[]; aditivos?: AditivoCadastro[] }>(
+        `/api/contratos/${contratoId}/cadastro`);
       setApostilamentos(cad.instrumentos.filter(i => i.tipo === "apostilamento_reajuste"));
+      // o pleito ligado a um aditivo (so' o de reajuste se liga, issue #390) diz o termo em qualquer ciclo
+      setAditivos((cad.aditivos ?? []).filter(a => a.chave_cadastro).map(a => ({ id: a.id, chave: a.chave_cadastro!,
+        tipo: `aditivo_${a.tipo}`, numero: a.numero, data: a.data_assinatura ?? "", dados: {} })));
     } catch (e) { setErro(mensagemDeErro(e)); }
   }, [contratoId]);
   useEffect(() => { void carregar(); }, [carregar]);
@@ -198,7 +205,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   const cartoes = (ps: Pleito[], ciclo?: Ciclo) => ps.map(p => {
     const contexto = p.ciclo ? `ciclo de ${p.ciclo}` : undefined;
     return pleitoEmLinha(p)
-      ? <LinhaPleito key={p.id} p={p} desfecho={desfechoDoPleito(p, apostilamentos, ciclo)} contexto={contexto} />
+      ? <LinhaPleito key={p.id} p={p} desfecho={desfechoDoPleito(p, [...apostilamentos, ...aditivos], ciclo)} contexto={contexto} />
       : <CartaoPleito key={p.id} p={p} podeEditar={podeEditar} aoMudar={() => void carregar()} contexto={contexto} />;
   });
 
@@ -235,7 +242,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
           // o aditivo (issue #390) vem de outra tabela: o id so' identifica junto com o tipo
           ...validos.filter(i => !(i.id === c.apostilamento?.id && i.tipo === c.apostilamento.tipo)
             && cicloDoApostilamento(i) === c.ciclo)];
-        const outrosAp = validos.filter(i => !doCiclo.some(d => d.id === i.id));
+        const outrosAp = validos.filter(i => !doCiclo.some(d => d.id === i.id && d.tipo === i.tipo));
         const anteriores = db.pleitosAnteriores.length + outrosAp.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
         const apostiladas = (dados.competencias ?? []).filter(x => x.data_base_mes === db.data_base_mes);
