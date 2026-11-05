@@ -748,6 +748,32 @@ def test_regra_trocada_durante_a_montagem_recusa_e_o_sha_e_o_capturado(ambiente,
     assert espelhos.detalhe(conn, eid)["regra_sha256"] == sha0
 
 
+def test_regra_trocada_e_desfeita_durante_a_geracao_usa_a_capturada(ambiente, monkeypatch):
+    # gate Sol, rodada 3 (A->B->A): a regra muda logo depois da captura e volta antes do lock. O calculo tem de usar
+    # a regra capturada (A), a mesma do sha gravado; relida do banco, ele sairia com B (aqui, em prova: recusa)
+    conn, u, cid = ambiente
+    sha0 = conn.execute("SELECT sha256 FROM espelho_regras WHERE contrato_id=?", (cid,)).fetchone()[0]
+    outra, vigentes, feito = db.get_conn(), espelhos._vigentes, []
+
+    def vigentes_trocando_a_regra(*a, **k):
+        if not feito:           # 1a chamada: logo depois de `gerar` capturar a regra
+            feito.append(1)
+            outra.execute("UPDATE espelho_regras SET situacao='prova', sha256='b' WHERE contrato_id=?", (cid,))
+            outra.commit()
+        return vigentes(*a, **k)
+
+    def desfazer():
+        outra.execute("UPDATE espelho_regras SET situacao='ativa', sha256=? WHERE contrato_id=?", (sha0, cid))
+        outra.commit()
+    try:
+        monkeypatch.setattr(espelhos, "_vigentes", vigentes_trocando_a_regra)
+        _durante_a_montagem(monkeypatch, desfazer)
+        eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    finally:
+        outra.close()
+    assert feito and espelhos.detalhe(conn, eid)["regra_sha256"] == sha0
+
+
 def test_reenvio_da_v1_durante_a_geracao_da_v2_recusa(ambiente, tmp_path, monkeypatch):
     # so' o envio_id muda (a medicao ja' estava em espelho_enviado): a v2 nao substitui o reenvio sem ninguem ver
     monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
