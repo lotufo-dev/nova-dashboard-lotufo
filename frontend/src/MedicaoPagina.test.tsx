@@ -519,8 +519,8 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     expect(container.querySelector("[data-espelho]")).toBeNull();
   });
 
-  it("com a planilha/carta enviada: o cartão dela e o espelho logo abaixo (ponte até a #284)", async () => {
-    for (const estado of ["planilha_enviada"]) {
+  it("com a planilha/carta enviada, com ou sem o boletim: o cartão dela e o formulário do espelho abaixo", async () => {
+    for (const estado of ["planilha_enviada", "boletim_recebido"]) {
       responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado }] });
       const { container } = pagina();
       await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
@@ -592,6 +592,9 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "boletim_recebido" }] });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    // como na planilha enviada, o espelho espera o cartao conferir que nao ha' revisao pendente
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
     expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull();
   });
 

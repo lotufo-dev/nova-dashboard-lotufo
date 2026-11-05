@@ -23,6 +23,8 @@ class EspelhoIn(BaseModel):
     # periodo do texto do espelho quando nao e' o mes civil da competencia (ISO); vazio = mes inteiro
     periodo_inicio: str | None = Field(default=None, max_length=10)
     periodo_fim: str | None = Field(default=None, max_length=10)
+    # issue #284: "seguir sem boletim" na medicao que ja' existia antes do espelho (vai para a auditoria)
+    justificativa_sem_boletim: str | None = Field(default=None, max_length=500)
 
 
 class EnvioIn(BaseModel):
@@ -88,7 +90,8 @@ def gerar(contrato_id: ID, dados: EspelhoIn, usuario: dict = Depends(exigir("edi
     try:
         eid = espelhos.gerar(conn, usuario, contrato_id, dados.numero, dados.competencia,
                              _centavos(dados.entradas), dados.motivo,
-                             espelhos.validar_periodo(dados.competencia, dados.periodo_inicio, dados.periodo_fim))
+                             espelhos.validar_periodo(dados.competencia, dados.periodo_inicio, dados.periodo_fim),
+                             justificativa_sem_boletim=dados.justificativa_sem_boletim)
     except ValueError as e:
         conn.rollback()
         raise HTTPException(422, str(e)) from None

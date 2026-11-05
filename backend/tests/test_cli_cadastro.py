@@ -1023,8 +1023,17 @@ def test_carregar_medicoes_nao_cancela_medicao_no_passo_da_planilha(tmp_path, mo
     _existente(conn, cid, 4, "2025-07", 100001, None)
     _existente(conn, cid, 5, "2025-07", 100001, None, estado="planilha_enviada")
     codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;x;4;"], capsys)
-    # #283: a planilha enviada agora se cancela pela tela (TRANSICOES); pela carga continua conflito
+    # #284: planilha enviada passou a se cancelar pela tela (TRANSICOES); a carga continua sem cancela-la
     assert "conflito (no banco a medição está planilha_enviada: a planilha/carta é dela; cancele pela tela)" in saida
+
+
+def test_carregar_medicoes_nao_cancela_prevista_que_recebeu_o_boletim(tmp_path, monkeypatch, capsys):
+    # #284: a prevista vai a boletim_recebido sem planilha/carta: o documento dela e' o boletim
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, None)
+    _existente(conn, cid, 5, "2025-07", 100001, None, estado="boletim_recebido")
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;x;4;"], capsys)
+    assert "conflito (no banco a medição está boletim_recebido: o boletim é dela; cancele pela tela)" in saida
 
 
 def test_carregar_medicoes_nao_cancela_medicao_com_planilha_gerada(tmp_path, monkeypatch, capsys):

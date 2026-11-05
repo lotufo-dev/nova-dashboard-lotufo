@@ -234,15 +234,16 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // ---------------------------------------------------------------- etapas
   // issue #289: o primeiro passo e' a planilha/carta (execucao e projeto, na obra com regra de espelho ativa; o
   // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela fica no alto da
-  // etapa. Enviada, o espelho aparece logo abaixo (ponte ate' o boletim da #284: o espelho repete o pedido da
-  // planilha/carta); so' gerada, ainda nao (a ponte substitui o boletim, nao o envio ao protocolo).
+  // etapa. Enviada (com ou sem o boletim da #284), o espelho aparece logo abaixo; so' gerada, ainda nao (o boletim
+  // substitui a ponte ao espelho, nao o envio ao protocolo).
   const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
   // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
   const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;
   const chaveRevisao = `${m.id}:${m.estado}`;
   const revisao = revisaoDe?.chave === chaveRevisao ? revisaoDe.valor : "conferindo";
   // so' as medicoes com cartao esperam a conferencia dele; as outras (reajuste) seguem direto pelo espelho
-  const espelhoEspera = comPlanilha && m.estado === "planilha_enviada" && revisao !== "livre";
+  const enviada = m.estado === "planilha_enviada" || m.estado === "boletim_recebido";
+  const espelhoEspera = comPlanilha && enviada && revisao !== "livre";
   const corpoEtapa1 = (
     <div className="med-etapa__corpo">
       {novaPlanilha && (
@@ -251,13 +252,13 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       )}
       {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha key={tentativa} medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
         aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })} />}
-      {comPlanilha && m.estado === "planilha_enviada" && revisao === "falhou" && (
+      {comPlanilha && enviada && revisao === "falhou" && (
         <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
           <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
       )}
       {!novaPlanilha && m.estado !== "planilha_gerada" && !espelhoEspera && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
-          abrirForm={["prevista", "planilha_enviada"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+          abrirForm={["prevista", "planilha_enviada", "boletim_recebido"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
       )}
     </div>
   );

@@ -313,3 +313,53 @@ def test_corpo_em_texto_puro_continua_como_antes(client_admin, ambiente_api, tmp
     r = client_admin.post(f"/api/espelhos/{eid}/enviar", json={**corpo, "corpo": "Bom dia,\n\nSegue a <nota>."})
     assert r.status_code == 200, r.text
     assert corpo_enviado(tmp_path / "sim") == "<p>Bom dia,</p><p>&nbsp;</p><p>Segue a &lt;nota&gt;.</p>"
+
+
+# --- issue #284: seguir sem boletim, com justificativa, e o valor do aprovado ---------------------------------
+
+def _planilha_enviada(cid, numero=23, pedido=12_345_67):
+    c = db.get_conn()
+    try:
+        mid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+                        "valor_protocolado_origem) VALUES (?,?,'execucao','2026-01','planilha_enviada',?,'manual')",
+                        (cid, numero, pedido)).lastrowid
+        c.commit()
+    finally:
+        c.close()
+    return mid
+
+
+def test_api_seguir_sem_boletim_exige_justificativa(client_admin, ambiente_api):
+    cid = ambiente_api
+    mid = _planilha_enviada(cid)
+    corpo = {"numero": 23, "competencia": "2026-01", "entradas": {"medicao": "12.345,67"}}
+    p = client_admin.post(f"/api/contratos/{cid}/espelho/previa", json=corpo)
+    assert p.status_code == 200, p.text
+    assert p.json()["medicoes"][0]["sem_boletim"] is True and p.json()["entradas"] == {"medicao": 12_345_67}
+    r = client_admin.post(f"/api/contratos/{cid}/espelho", json=corpo)
+    assert r.status_code == 422 and "seguir sem boletim" in r.json()["detail"]
+    r = client_admin.post(f"/api/contratos/{cid}/espelho",
+                          json={**corpo, "justificativa_sem_boletim": "NF vai junto com o ofício ao órgão"})
+    assert r.status_code == 201, r.text
+    m = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (m["estado"], m["valor_protocolado_centavos"]) == ("espelho_gerado", 12_345_67)
+    assert any(e["texto"].startswith("Espelho gerado sem boletim: NF vai junto") for e in m["edicoes_valor"])
+
+
+def test_api_espelho_usa_o_aprovado_do_boletim(client_admin, ambiente_api):
+    cid = ambiente_api
+    mid = _planilha_enviada(cid)
+    b = client_admin.post(f"/api/medicoes/{mid}/boletim", files={"arquivo": ("b.pdf", _pdf_com_texto("SMO 23"),
+                                                                             "application/pdf")},
+                          data={"valor": "12.000,01", "data": "2026-02-10", "numero_orgao": "SMO 23"})
+    assert b.status_code == 201, b.text
+    corpo = {"numero": 23, "competencia": "2026-01", "entradas": {"medicao": "12.345,67"}}   # o pedido: recusa
+    r = client_admin.post(f"/api/contratos/{cid}/espelho", json=corpo)
+    assert r.status_code == 422 and "R$ 12.000,01" in r.json()["detail"]
+    r = client_admin.post(f"/api/contratos/{cid}/espelho", json={**corpo, "entradas": {}})
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/espelhos/{r.json()['espelho_id']}").json()
+    assert d["entradas"] == {"medicao": 12_000_01} and d["saidas"][0]["valor"] == 12_000_01
+    m = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (m["valor_protocolado_centavos"], m["valor_atestado_centavos"], m["diferenca_centavos"]) == (
+        12_345_67, 12_000_01, -345_66)

@@ -126,6 +126,7 @@ describe("administração", () => {
     expect(rotuloAcao("medicao.recebida_com_diferenca")).toBe("Recebida com diferença dentro da tolerância");   // #35
     expect(rotuloAcao("medicao.planilha_envio")).toBe("Planilha/carta enviada ao protocolo");   // #282
     expect(rotuloAcao("medicao.planilha_peca")).toBe("Peça da planilha/carta");
+    expect(rotuloAcao("medicao.sem_boletim")).toBe("Espelho gerado sem boletim");   // #284
     expect(rotuloAcao("algo.novo_aqui")).toBe("Algo novo aqui");
   });
 

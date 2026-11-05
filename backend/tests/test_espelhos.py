@@ -29,7 +29,8 @@ def test_previa_uma_linha_por_nota_e_medicoes_a_criar(ambiente):
     p = espelhos.previa(conn, cid, 23, "2026-01", {"medicao": 27850992})
     assert [s["chave"] for s in p["saidas"]] == ["medicao"]
     assert p["saidas"][0]["nome_arquivo"] == "ESPELHO - MT-402 - 23ª Medição (01.2026).docx"
-    assert p["medicoes"] == [{"tipo": "execucao", "valor_centavos": 27850992, "existente": None}]
+    assert p["medicoes"] == [{"tipo": "execucao", "valor_centavos": 27850992, "existente": None, "sem_boletim": False}]
+    assert p["travados"] == [] and p["entradas"] == {"medicao": 27850992}      # #284: nada vem da medicao
 
 
 def test_gerar_cria_medicao_espelho_arquivo_e_documento(ambiente):
@@ -262,7 +263,7 @@ def test_projeto_com_mesmo_numero_nao_substitui_espelho_da_execucao_protocolada(
     antes = _estado_espelho(conn, e_exec), medicoes.detalhe(conn, mid)["estado"]
     assert antes[0][0] == "vigente"
     p = espelhos.previa(conn, cid, 3, "2026-03", {"projeto": 500})
-    assert p["medicoes"] == [{"tipo": "projeto", "valor_centavos": 500, "existente": None}]
+    assert p["medicoes"] == [{"tipo": "projeto", "valor_centavos": 500, "existente": None, "sem_boletim": False}]
     assert not any("já tem espelho" in a for a in p["avisos"])
     e_proj = espelhos.gerar(conn, u, cid, 3, "2026-03", {"projeto": 500})
     assert (_estado_espelho(conn, e_exec), medicoes.detalhe(conn, mid)["estado"]) == antes
@@ -543,3 +544,296 @@ def test_gerar_com_misto_reservado_recusa_mesmo_sem_substituir(ambiente_projeto)
     assert conn.execute("SELECT COUNT(*) FROM espelhos").fetchone()[0] == 1
     # outra medicao do mesmo numero, fora do espelho reservado, nao e' barrada
     espelhos.gerar(conn, u, cid, 3, "2026-01", {"reajuste": 7})
+
+
+# --- issue #284: o espelho usa o aprovado do boletim, senao o pedido; trava antes do boletim -------------------
+
+JUSTIFICATIVA = "órgão manda a NF junto com o ofício"
+
+
+def _antes_do_espelho(conn, cid, numero, estado, pedido=None):
+    """Medicao que ja' existe antes do espelho (prevista, planilha/carta gerada ou enviada), com o pedido."""
+    cur = conn.execute(
+        "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+        "valor_protocolado_origem) VALUES (?,?,'execucao','2026-01',?,?,?)",
+        (cid, numero, estado, pedido, None if pedido is None else "manual"))
+    conn.commit()
+    return cur.lastrowid
+
+
+def _boletim(conn, u, mid, valor, data="2026-02-10", sha="a"):
+    return medicoes.registrar_boletim(conn, u["id"], mid, {"valor_centavos": valor, "data": data,
+                                                           "numero_orgao": f"SMO {sha}"},
+                                      {"arquivo": f"boletins/{sha}.pdf", "sha256": sha * 64})
+
+
+def _texto_docx(conn, eid):
+    doc = conn.execute("SELECT arquivo FROM medicao_documentos WHERE espelho_id=?", (eid,)).fetchone()
+    with zipfile.ZipFile(arquivos.caminho_seguro(doc["arquivo"])) as z:
+        return z.read("word/document.xml").decode("utf-8")
+
+
+def test_espelho_da_medicao_com_boletim_usa_o_aprovado_e_nao_sobrescreve_o_pedido(ambiente):
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
+    _boletim(conn, u, mid, 12_000_01)
+    p = espelhos.previa(conn, cid, 23, "2026-01", {})
+    assert p["medicoes"] == [{"tipo": "execucao", "valor_centavos": 12_000_01, "existente": "boletim_recebido",
+                              "sem_boletim": False}]
+    assert p["travados"] == [{"tipo": "execucao", "valor_centavos": 12_000_01, "fonte": "boletim",
+                              "opcional": False, "sem_boletim": False}]
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {})
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_protocolado_origem"], m["valor_atestado_centavos"]) == (
+        "espelho_gerado", 12_345_67, "manual", 12_000_01)
+    assert espelhos.detalhe(conn, eid)["entradas"] == {"medicao": 12_000_01}
+    assert "12.000,01" in _texto_docx(conn, eid)
+
+
+def test_atestado_digitado_sem_boletim_trava_o_valor_com_a_fonte_atestado(ambiente):
+    # decisao do Leo de 03/11/2026: vale como aprovado; a trava do boletim continua (nao ha' PDF)
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
+    medicoes.definir_valor(conn, u["id"], mid, "atestado", 12_000_01, "manual", "2026-02-10")
+    p = espelhos.previa(conn, cid, 23, "2026-01", {"medicao": 12_000_01})
+    assert p["travados"] == [{"tipo": "execucao", "valor_centavos": 12_000_01, "fonte": "atestado", "opcional": True,
+                              "sem_boletim": True}]
+    assert p["medicoes"][0]["sem_boletim"] is True
+
+
+def test_digitado_diferente_do_aprovado_recusa_com_os_dois_valores(ambiente):
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
+    _boletim(conn, u, mid, 12_000_01)
+    with pytest.raises(ValueError, match=r"R\$ 12\.000,01.*R\$ 12\.345,67"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67})
+    assert medicoes.detalhe(conn, mid)["estado"] == "boletim_recebido"
+
+
+def test_glosa_vira_evento_novo_e_o_espelho_usa_o_ultimo(ambiente):
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
+    _boletim(conn, u, mid, 12_000_01)
+    _boletim(conn, u, mid, 11_999_99, "2026-02-12", sha="b")
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {})
+    assert espelhos.detalhe(conn, e1)["entradas"] == {"medicao": 11_999_99}
+    # glosa depois do espelho: gerar de novo (sem justificativa nenhuma) usa o aprovado novo; o pedido fica. A
+    # medicao que ja' tem espelho so' entra digitada (nada digitado = fora), e digitada tem de ser o aprovado
+    _boletim(conn, u, mid, 11_500_03, "2026-02-15", sha="c")
+    with pytest.raises(ValueError, match="nenhuma nota"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", {}, motivo="glosa do órgão")
+    with pytest.raises(ValueError, match=r"R\$ 11\.500,03"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 11_999_99}, motivo="glosa do órgão")
+    e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 11_500_03}, motivo="glosa do órgão")
+    assert espelhos.detalhe(conn, e2)["entradas"] == {"medicao": 11_500_03}
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == (
+        "espelho_gerado", 12_345_67, 11_500_03)
+    assert conn.execute("SELECT COUNT(*) FROM medicao_atestos WHERE medicao_id=?", (mid,)).fetchone()[0] == 3
+
+
+def test_planilha_enviada_sem_boletim_exige_justificativa_e_usa_o_pedido(ambiente):
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
+    # sem boletim a medicao nao entra sozinha: nada digitado = fora deste espelho
+    with pytest.raises(ValueError, match="nenhuma nota"):
+        espelhos.previa(conn, cid, 23, "2026-01", {})
+    pedido = {"medicao": 12_345_67}
+    p = espelhos.previa(conn, cid, 23, "2026-01", pedido)      # a previa mostra, nao recusa
+    assert p["medicoes"][0]["sem_boletim"] is True
+    assert p["travados"] == [{"tipo": "execucao", "valor_centavos": 12_345_67, "fonte": "pedido", "opcional": True,
+                              "sem_boletim": True}]
+    with pytest.raises(ValueError, match="seguir sem boletim"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", pedido)
+    with pytest.raises(ValueError, match="justificativa"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", pedido, justificativa_sem_boletim="curta")
+    with pytest.raises(ValueError, match="R\\$ 12.345,67"):     # digitado, tem de ser o pedido
+        espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 1}, justificativa_sem_boletim=JUSTIFICATIVA)
+    assert medicoes.detalhe(conn, mid)["estado"] == "planilha_enviada"
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", pedido, justificativa_sem_boletim=JUSTIFICATIVA)
+    assert espelhos.detalhe(conn, eid)["entradas"] == {"medicao": 12_345_67}
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == (
+        "espelho_gerado", 12_345_67, None)
+    a = conn.execute("SELECT depois FROM audit_log WHERE acao='medicao.sem_boletim' AND entidade_id=?",
+                     (str(mid),)).fetchone()
+    assert json.loads(a["depois"])["justificativa"] == JUSTIFICATIVA
+    textos = [e["texto"] for e in medicoes.edicoes_valor(conn, [mid])[mid]]
+    assert f"Espelho gerado sem boletim: {JUSTIFICATIVA} por Maria" in textos
+    # gerar de novo um espelho ja' gerado nao pede nada
+    espelhos.gerar(conn, u, cid, 23, "2026-01", pedido)
+
+
+def test_prevista_sem_valor_exige_justificativa_e_o_valor_e_digitado(ambiente):
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "prevista")
+    assert espelhos.previa(conn, cid, 23, "2026-01", {"medicao": 500_01})["travados"] == []
+    with pytest.raises(ValueError, match="seguir sem boletim"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 500_01})
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 500_01}, justificativa_sem_boletim=JUSTIFICATIVA)
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_protocolado_origem"]) == (
+        "espelho_gerado", 500_01, "espelho")
+    textos = [e["texto"] for e in medicoes.edicoes_valor(conn, [mid])[mid]]
+    assert "Valor protocolado definido em R$ 500,01 por Maria" in textos
+
+
+def test_prevista_com_boletim_nao_pede_justificativa(ambiente):
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "prevista")
+    _boletim(conn, u, mid, 700_01)
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {})
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == (
+        "espelho_gerado", 700_01, 700_01)
+
+
+def test_envio_da_v1_terminado_durante_a_geracao_da_v2_recusa_a_v2(ambiente, tmp_path, monkeypatch):
+    # gate Sol (#284): A comeca a v2, B termina o envio da v1 enquanto o .docx e' montado; A nao grava por cima
+    from app import espelho_docx
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, e1)
+    preencher, outra = espelho_docx.preencher, db.get_conn()
+
+    def preencher_com_envio(*a, **k):
+        if not conn.execute("SELECT envio_id FROM espelhos WHERE id=?", (e1,)).fetchone()[0]:
+            espelhos.enviar(outra, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+        return preencher(*a, **k)
+    monkeypatch.setattr(espelho_docx, "preencher", preencher_com_envio)
+    try:
+        with pytest.raises(ValueError, match="mudou enquanto o espelho era gerado"):
+            espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+    finally:
+        outra.close()
+    d1 = espelhos.detalhe(conn, e1)
+    assert d1["situacao"] == "vigente" and d1["envio_id"] is not None
+    assert conn.execute("SELECT COUNT(*) FROM espelhos").fetchone()[0] == 1
+
+
+def _durante_a_montagem(monkeypatch, acao):
+    """Roda `acao` uma vez, no meio da montagem do .docx (entre a conta e a gravacao)."""
+    from app import espelho_docx
+    preencher, feito = espelho_docx.preencher, []
+
+    def preencher_com_acao(*a, **k):
+        if not feito:
+            feito.append(1)
+            acao()
+        return preencher(*a, **k)
+    monkeypatch.setattr(espelho_docx, "preencher", preencher_com_acao)
+
+
+def test_regra_trocada_durante_a_montagem_recusa_e_o_sha_e_o_capturado(ambiente, monkeypatch):
+    from app import espelho_docx
+    conn, u, cid = ambiente
+    sha0 = conn.execute("SELECT sha256 FROM espelho_regras WHERE contrato_id=?", (cid,)).fetchone()[0]
+    preencher, outra = espelho_docx.preencher, db.get_conn()
+
+    def trocar_regra():
+        outra.execute("UPDATE espelho_regras SET situacao='prova', sha256='outro' WHERE contrato_id=?", (cid,))
+        outra.commit()
+    try:
+        _durante_a_montagem(monkeypatch, trocar_regra)
+        with pytest.raises(ValueError, match="regra do espelho desta obra mudou"):
+            espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    finally:
+        outra.close()
+    assert conn.execute("SELECT COUNT(*) FROM espelhos").fetchone()[0] == 0
+    # sem troca, o sha gravado e' o da regra lida no inicio
+    conn.execute("UPDATE espelho_regras SET situacao='ativa', sha256=? WHERE contrato_id=?", (sha0, cid)); conn.commit()
+    monkeypatch.setattr(espelho_docx, "preencher", preencher)
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    assert espelhos.detalhe(conn, eid)["regra_sha256"] == sha0
+
+
+def test_regra_trocada_e_desfeita_durante_a_geracao_usa_a_capturada(ambiente, monkeypatch):
+    # gate Sol, rodada 3 (A->B->A): a regra muda logo depois da captura e volta antes do lock. O calculo tem de usar
+    # a regra capturada (A), a mesma do sha gravado; relida do banco, ele sairia com B (aqui, em prova: recusa)
+    conn, u, cid = ambiente
+    sha0 = conn.execute("SELECT sha256 FROM espelho_regras WHERE contrato_id=?", (cid,)).fetchone()[0]
+    outra, vigentes, feito = db.get_conn(), espelhos._vigentes, []
+
+    def vigentes_trocando_a_regra(*a, **k):
+        if not feito:           # 1a chamada: logo depois de `gerar` capturar a regra
+            feito.append(1)
+            outra.execute("UPDATE espelho_regras SET situacao='prova', sha256='b' WHERE contrato_id=?", (cid,))
+            outra.commit()
+        return vigentes(*a, **k)
+
+    def desfazer():
+        outra.execute("UPDATE espelho_regras SET situacao='ativa', sha256=? WHERE contrato_id=?", (sha0, cid))
+        outra.commit()
+    try:
+        monkeypatch.setattr(espelhos, "_vigentes", vigentes_trocando_a_regra)
+        _durante_a_montagem(monkeypatch, desfazer)
+        eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    finally:
+        outra.close()
+    assert feito and espelhos.detalhe(conn, eid)["regra_sha256"] == sha0
+
+
+def test_reenvio_da_v1_durante_a_geracao_da_v2_recusa(ambiente, tmp_path, monkeypatch):
+    # so' o envio_id muda (a medicao ja' estava em espelho_enviado): a v2 nao substitui o reenvio sem ninguem ver
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, e1)
+    espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    envio1 = espelhos.detalhe(conn, e1)["envio_id"]
+    outra = db.get_conn()
+    try:
+        _durante_a_montagem(monkeypatch, lambda: espelhos.enviar(outra, u, e1, p["para"], p["copia"], p["assunto"],
+                                                                 p["corpo"], reenviar=True))
+        with pytest.raises(ValueError, match="mudou enquanto o espelho era gerado"):
+            espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+    finally:
+        outra.close()
+    d1 = espelhos.detalhe(conn, e1)
+    assert d1["situacao"] == "vigente" and d1["envio_id"] != envio1
+
+
+def test_reenvio_da_execucao_durante_a_geracao_so_do_projeto_nao_recusa(ambiente_projeto, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente_projeto
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, e1)
+    espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    outra = db.get_conn()
+    try:
+        _durante_a_montagem(monkeypatch, lambda: espelhos.enviar(outra, u, e1, p["para"], p["copia"], p["assunto"],
+                                                                 p["corpo"], reenviar=True))
+        e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"projeto": 500})
+    finally:
+        outra.close()
+    assert [m["tipo"] for m in espelhos.detalhe(conn, e2)["medicoes"]] == ["projeto"]
+    assert espelhos.detalhe(conn, e1)["situacao"] == "vigente"
+
+
+def test_espelho_so_de_projeto_nao_puxa_a_execucao_ja_enviada(ambiente_projeto):
+    # revisor (#284): a execucao com glosa depois do espelho enviado nao entra sozinha no espelho do projeto
+    conn, u, cid = ambiente_projeto
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100_00})
+    mid = espelhos.detalhe(conn, e1)["medicoes"][0]["id"]
+    medicoes.marcar_espelho_enviado(conn, u["id"], mid)
+    _boletim(conn, u, mid, 99_99)
+    p = espelhos.previa(conn, cid, 23, "2026-01", {"projeto": 7_00})
+    assert [m["tipo"] for m in p["medicoes"]] == ["projeto"]
+    e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"projeto": 7_00})
+    assert [m["tipo"] for m in espelhos.detalhe(conn, e2)["medicoes"]] == ["projeto"]
+    assert espelhos.detalhe(conn, e1)["situacao"] == "vigente"
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+
+
+def test_planilha_sendo_enviada_ao_orgao_nao_ganha_espelho(ambiente):
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_gerada", pedido=12_345_67)
+    pid = conn.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, "
+                       "acumulado_anterior_centavos, origem) VALUES (?,1,1234567,0,'manual')", (mid,)).lastrowid
+    conn.execute("INSERT INTO medicao_planilha_envios (medicao_id, planilha_id, envio_reservado_em, "
+                 "envio_reservado_por) VALUES (?,?,datetime('now'),?)", (mid, pid, u["id"]))
+    conn.commit()
+    with pytest.raises(ValueError, match="sendo enviada ao órgão"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67}, justificativa_sem_boletim=JUSTIFICATIVA)
+    assert medicoes.detalhe(conn, mid)["estado"] == "planilha_gerada"

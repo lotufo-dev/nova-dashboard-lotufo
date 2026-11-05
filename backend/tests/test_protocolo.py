@@ -378,3 +378,20 @@ def test_peca_art_do_protocolo_continua_aceita_no_orgao():
     from app import api_protocolos, cadastro_arquivos
     assert "art" in cadastro_arquivos.TIPOS_PECA
     assert "art" in api_protocolos.TipoPeca.__args__
+
+
+def test_carta_da_ses_le_o_aprovado_senao_o_pedido(tmp_path, monkeypatch):
+    """#284 (decisao do Leo de 03/11/2026): o pedido fica congelado; a nota sai pelo aprovado do boletim, e a carta
+    da SES ("Nota Fiscal – R$" e as linhas "Sendo") mostra o valor da nota: aprovado, senao pedido."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    c = db.get_conn()
+    db.migrate(c)
+    ms = [{"id": 999_001, "numero": 41, "tipo": "execucao", "valor_protocolado_centavos": 12_345_67,
+           "valor_atestado_centavos": 12_000_01},
+          {"id": 999_002, "numero": 41, "tipo": "reajuste", "valor_protocolado_centavos": 1_000_00,
+           "valor_atestado_centavos": None}]
+    texto = protocolo._lista(c, {"id": 999_999, "etapa": "unico", "natureza": "execucao"}, "ses", {}, ms)
+    c.close()
+    linhas = texto.splitlines()
+    assert linhas[0] == "1. Nota Fiscal – R$ 13.000,01"
+    assert linhas[1:3] == ["   Sendo: 41ª Medição – R$ 12.000,01", "   Sendo: Reajuste da 41ª Medição – R$ 1.000,00"]
