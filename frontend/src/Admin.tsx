@@ -302,23 +302,28 @@ function Backup({ b }: { b: Backup | null | undefined }) {
   );
 }
 
-// itens: undefined = carregando; null = nao deu para ler. Sem item, so' o selo OK na cabeca, como o Backup em dia.
-function Seguranca({ itens }: { itens: ItemSeguranca[] | null | undefined }) {
+// itens: undefined = carregando; null = nao deu para ler. Sem item, so' o selo na cabeca, como o Backup em dia; o selo
+// diz "nenhum alerta" e nao "OK" (gate Sol S1): o bloco confere os alertas que conhece, nao a seguranca inteira.
+// `fora`: quantos itens mais antigos a API deixou fora da lista (ela devolve no maximo 20, gate Sol S3).
+function Seguranca({ itens, fora }: { itens: ItemSeguranca[] | null | undefined; fora: number }) {
   return (
     <section className="cartao" aria-labelledby="titulo-seguranca">
       <div className="cartao__cabeca cartao__cabeca--quebra">
         <h2 className="cartao__titulo" id="titulo-seguranca">Segurança</h2>
-        {itens?.length === 0 && <SeloRodada estado="success" />}
+        {itens?.length === 0 && <Selo classe="selo--ok">nenhum alerta</Selo>}
       </div>
       {(itens === undefined || itens === null || itens.length > 0) && (
         <div className="cartao__corpo pilha pilha--curta">
           {itens === undefined ? <p>Carregando…</p>
             : itens === null ? <p className="campo__nota">Não foi possível ler a segurança; recarregue a página para tentar de novo.</p>
-            : itens.map(i => (
-              <CaixaAviso key={`${i.data}-${i.mensagem}`} nivel={i.nivel === "atencao" ? "atencao" : "critico"}>
-                {i.mensagem}, em {fmtDataHora(i.data)}.
-              </CaixaAviso>
-            ))}
+            : <>
+                {itens.map(i => (
+                  <CaixaAviso key={`${i.data}-${i.mensagem}`} nivel={i.nivel === "atencao" ? "atencao" : "critico"}>
+                    {i.mensagem}, em {fmtDataHora(i.data)}.
+                  </CaixaAviso>
+                ))}
+                {fora > 0 && <p>Mais {contar(fora, "alerta anterior", "alertas anteriores")}.</p>}
+              </>}
         </div>
       )}
     </section>
@@ -336,6 +341,7 @@ function Saude() {
   const [b, setB] = useState<Backup | null | undefined>(undefined);
   const [siga, setSiga] = useState<SaudeSiga | null | undefined>(undefined);
   const [seguranca, setSeguranca] = useState<ItemSeguranca[] | null | undefined>(undefined);
+  const [segurancaFora, setSegurancaFora] = useState(0);
   // depois de "Sincronizar agora", as contagens da reconciliacao sao lidas de novo
   const [versao, setVersao] = useState(0);
 
@@ -343,9 +349,9 @@ function Saude() {
   useEffect(() => {
     carregar();
     api<Backup>("/api/admin/backup").then(setB).catch(() => setB(null));
-    api<{ siga: SaudeSiga; seguranca?: ItemSeguranca[] }>("/api/admin/saude")
-      // sem o campo nao ha' o que afirmar: "nao foi possivel ler", nunca o OK de quem conferiu e nao achou nada
-      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? null); })
+    api<{ siga: SaudeSiga; seguranca?: ItemSeguranca[]; seguranca_fora?: number }>("/api/admin/saude")
+      // sem o campo nao ha' o que afirmar: "nao foi possivel ler", nunca o selo de quem conferiu e nao achou nada
+      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? null); setSegurancaFora(r.seguranca_fora ?? 0); })
       .catch(() => { setSiga(null); setSeguranca(null); });
   }, []);
 
@@ -394,7 +400,7 @@ function Saude() {
       <div className="saude-lado">
         <ReconciliacaoResumo versao={versao} />
         <Backup b={b} />
-        <Seguranca itens={seguranca} />
+        <Seguranca itens={seguranca} fora={segurancaFora} />
       </div>
     </div>
   );

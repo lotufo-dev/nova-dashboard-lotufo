@@ -417,7 +417,7 @@ test("Usuários: Últimos acessos abre os da pessoa embaixo da linha dela, inclu
 });
 
 // #418: o bloco Segurança da Saúde (só o admin chega aqui; a API recusa os outros perfis)
-test("Saúde: bloco Segurança mostra o administrador que entrou de origem nova; sem item, só o selo OK", async () => {
+test("Saúde: bloco Segurança mostra o administrador que entrou de origem nova; sem item, só o selo Nenhum alerta", async () => {
   const status = { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
   saudeComRm(status, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [
     { nivel: "atencao", mensagem: "Administrador Leonardo entrou de uma origem nova (10.0.0.5)", data: "2026-11-05T18:35:00+00:00" }]);
@@ -425,12 +425,33 @@ test("Saúde: bloco Segurança mostra o administrador que entrou de origem nova;
   expect(await within(bloco).findByText(/^Administrador Leonardo entrou de uma origem nova \(10\.0\.0\.5\), em 05\/11\/2026 às 14:35\.$/))
     .toBeTruthy();
   expect(within(bloco).getByText("Atenção:")).toBeTruthy();
-  expect(within(bloco).queryByText("OK")).toBeNull();
+  expect(within(bloco).queryByText("nenhum alerta")).toBeNull();
+  expect(within(bloco).queryByText(/^Mais /)).toBeNull();
   cleanup();
   saudeComRm(status);
   const vazio = await screen.findByRole("region", { name: "Segurança" });
-  expect(await within(vazio).findByText("OK")).toBeTruthy();
+  // Gate Sol S1: o selo diz so' o que o bloco confere (nao ha' alerta), nao "OK" para a seguranca inteira
+  expect(await within(vazio).findByText("nenhum alerta")).toBeTruthy();
+  expect(within(vazio).queryByText("OK")).toBeNull();
   expect(within(vazio).queryByText(/origem nova/)).toBeNull();
+});
+
+// Gate Sol S3: a API devolve no máximo 20 itens e diz quantos ficaram de fora
+test("Saúde: bloco Segurança diz quantos alertas anteriores ficaram de fora da lista", async () => {
+  const status = { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
+  const item = { nivel: "atencao", mensagem: "Administrador Leonardo entrou de uma origem nova (10.0.0.5)", data: "2026-11-05T18:35:00+00:00" };
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/rm/status") return status;
+    if (url === "/api/admin/backup") return BACKUP_EM_DIA;
+    if (url === "/api/admin/saude") return { siga: SIGA_SEM_LEITURA, seguranca: [item], seguranca_fora: 3 };
+    if (url === "/api/rm/reconciliacao") return {
+      nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
+      totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  const bloco = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(bloco).findByText("Mais 3 alertas anteriores.")).toBeTruthy();
 });
 
 test("Saúde: sem ler a Saúde, o bloco Segurança diz que não deu para ler, nunca OK", async () => {
@@ -446,5 +467,5 @@ test("Saúde: sem ler a Saúde, o bloco Segurança diz que não deu para ler, nu
   render(<Admin aba="saude" />);
   const semCampo = await screen.findByRole("region", { name: "Segurança" });
   expect(await within(semCampo).findByText(/Não foi possível ler a segurança/)).toBeTruthy();
-  expect(within(semCampo).queryByText("OK")).toBeNull();
+  expect(within(semCampo).queryByText("nenhum alerta")).toBeNull();
 });
