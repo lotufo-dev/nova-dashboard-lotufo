@@ -834,7 +834,10 @@ def test_aditivo_de_reajuste_ligado_ao_pleito_fecha_o_ciclo_e_sem_ligacao_nao(ob
               (cid,))
     _aditivo_reajuste(c, cid, "ta-03", "2025-11-20")
     r = reajuste.ciclos(c, cid, D(2026, 1, 10))[0]
-    assert r["situacao"] == "reemitir"                  # pleito sem termo ligado; o aditivo veio depois dele
+    # pleito sem termo ligado: espera; o aditivo de reajuste depois dele nao pede reemissao do cronograma
+    assert (r["situacao"], r["aditivo"]) == ("apostilamento_pendente", None)
+    _aditivo(c, cid, "prazo", "2025-12-01")             # o de prazo pede
+    assert reajuste.ciclos(c, cid, D(2026, 1, 10))[0]["situacao"] == "reemitir"
     c.execute("UPDATE pleitos SET instrumento_chave='ta-03'"); c.commit()
     r = reajuste.ciclos(c, cid, D(2026, 1, 10))[0]
     assert (r["situacao"], r["apostilamento"]["chave"]) == ("apostilado", "ta-03")

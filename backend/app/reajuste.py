@@ -172,10 +172,12 @@ def _pleito(conn, contrato_id: int, mes_base: str, ciclo: int, sem_reiteracao: b
 
 def aditivo_depois(conn, contrato_id: int, desde: str | None) -> dict | None:
     """Aditivo de prazo ou valor assinado depois de `desde` (spec 2026-10-20 §2.2, estado `reemitir`): o que
-    pede a reemissao do cronograma de reajuste. Sem `desde`, nenhum."""
+    pede a reemissao do cronograma de reajuste. Sem `desde`, nenhum. O aditivo de natureza reajuste (issue #390) e'
+    o termo que concede o reajuste, nao mudanca do contrato: nao pede reemissao."""
     if not desde:
         return None
     r = conn.execute("SELECT * FROM aditivos WHERE contrato_id=? AND status='assinado' "
+                     "AND COALESCE(natureza, '') <> 'reajuste' "
                      "AND tipo IN ('prazo','valor','misto') AND data_assinatura IS NOT NULL "
                      "AND substr(data_assinatura, 1, 10) > ? ORDER BY data_assinatura DESC, id DESC LIMIT 1",
                      (contrato_id, desde[:10])).fetchone()
