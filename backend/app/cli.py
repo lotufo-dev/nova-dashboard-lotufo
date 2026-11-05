@@ -6,7 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from app import auth, cadastro_aplicar, cadastro_arquivos, carga_medicoes, conciliacao, db, documentos, legado
+from app import (auth, cadastro_aplicar, cadastro_arquivos, carga_medicoes, conciliacao, db, documentos,
+                 instalacao, legado)
 
 REPOSITORIO = Path(__file__).resolve().parent.parent.parent
 EXEMPLO = REPOSITORIO / "cadastro-exemplo"
@@ -328,6 +329,51 @@ def _conciliacao(args) -> int:
     return 0
 
 
+def _instalacao(args) -> int:
+    """`instalacao gerar-chave --saida <pasta>` e `instalacao assinar --chave <privada> --maquina <nome> --saida
+    <arquivo>` (issue #417): rodam no Mac do dono. A chave privada nunca vai ao servidor nem ao repositório; o servidor
+    recebe só o arquivo assinado (runbook, "Instalação assinada")."""
+    if args.acao == "gerar-chave":
+        try:
+            privada, publica = instalacao.gerar_chave(Path(args.saida))
+        except FileExistsError as e:
+            print(f"Recusado, nada foi gravado: já existe {e.args[0]}")
+            return 1
+        print(f"Chave privada: {privada} (só sua: guarde uma cópia cifrada fora desta máquina; nunca no servidor "
+              "nem no repositório)")
+        print(f"Chave pública: {publica}")
+        print(publica.read_text(encoding="ascii"), end="")
+        return 0
+    if not args.chave or not args.maquina:
+        print("`instalacao assinar` exige --chave <chave privada> e --maquina <nome da máquina>")
+        return 1
+    caminho = Path(args.chave)
+    if not caminho.is_file():
+        print(f"Chave não encontrada: {caminho}")
+        return 1
+    try:
+        try:
+            chave = instalacao.ler_chave_privada(caminho)
+        except TypeError:           # chave cifrada: pede a senha sem eco
+            chave = instalacao.ler_chave_privada(caminho, getpass.getpass("Senha da chave: ").encode("utf-8"))
+    except (ValueError, TypeError):
+        print(f"Recusado, nada foi gravado: {caminho} não é uma chave privada Ed25519 (ou a senha não confere)")
+        return 1
+    try:
+        conteudo = instalacao.assinar(chave, args.maquina)
+    except ValueError as e:
+        print(f"Recusado, nada foi gravado: {e}")
+        return 1
+    saida = Path(args.saida)
+    saida.parent.mkdir(parents=True, exist_ok=True)
+    saida.write_bytes(conteudo)
+    print(f"Arquivo assinado para a máquina {args.maquina.strip()}: {saida}")
+    if not instalacao.e_a_chave_embutida(chave):
+        print("AVISO: esta chave não é a que o código confere (app/instalacao.py): o servidor vai recusar o arquivo "
+              "(motivo assinatura).")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -354,6 +400,11 @@ def main(argv: list[str] | None = None) -> int:
     con.add_argument("--data", help="data do corte (AAAA-MM-DD), só em `corte`")
     con.add_argument("--usuario", required=True, help="e-mail de quem aplica")
     con.add_argument("--ensaio", action="store_true", help="mostra o relatório e desfaz")
+    ins = sub.add_parser("instalacao", help="chave do dono e arquivo assinado da instalação (no Mac do dono)")
+    ins.add_argument("acao", choices=["gerar-chave", "assinar"])
+    ins.add_argument("--saida", required=True, help="pasta das chaves (gerar-chave) ou arquivo assinado (assinar)")
+    ins.add_argument("--chave", help="chave privada (só em `assinar`)")
+    ins.add_argument("--maquina", help="nome da máquina, o COMPUTERNAME do servidor (só em `assinar`)")
     for nome, ajuda in (("desbloquear", "destrava a conta bloqueada por senhas erradas"),
                         ("redefinir-senha", "grava senha nova (pedida sem eco) e derruba as sessões")):
         sub.add_parser(nome, help=ajuda).add_argument("email")
@@ -362,6 +413,8 @@ def main(argv: list[str] | None = None) -> int:
         return _conta(args)
     if args.cmd == "documentos":
         return _documentos(args)
+    if args.cmd == "instalacao":
+        return _instalacao(args)
     if args.cmd == "cadastro":
         if args.acao == "aplicar" and not args.usuario:
             p.error("`cadastro aplicar` exige --usuario <e-mail>")
