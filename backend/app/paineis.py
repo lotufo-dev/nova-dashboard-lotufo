@@ -82,6 +82,35 @@ def curva(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     return saida
 
 
+def curva_s(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
+    """Issue #293 (spec 2026-10-20 §4 item 3, D9): a curva S que vai com a carta de prazo, a mesma conta de
+    `curvaS` (frontend/src/obra.ts) sobre os numeros de `curva` e de `cronograma.curva_comparativa`. O eixo e' a
+    uniao das competencias, com os meses vazios do meio; tudo acumulado em centavos. `previsto_anterior_centavos`
+    e' None sem repactuacao; `medido_centavos` (execucao) e' None depois do ultimo mes medido. Sem nada previsto nem
+    medido, lista vazia."""
+    pontos = {p["competencia"]: p for p in curva(conn, contrato_id)}
+    anterior = cronograma.curva_comparativa(conn, contrato_id)["anterior"] if pontos else None
+    previsto_anterior = {a["competencia"]: a["previsto_centavos"] for a in anterior or []}
+    comps = sorted(set(pontos) | set(previsto_anterior))
+    if not comps:
+        return []
+    def indice(comp: str) -> int:           # meses desde o ano zero: o eixo anda por conta, nunca por texto
+        return int(comp[:4]) * 12 + int(comp[5:7]) - 1
+    eixo = [f"{i // 12:04d}-{i % 12 + 1:02d}" for i in range(indice(comps[0]), indice(comps[-1]) + 1)]
+    medidos = [i for i, c in enumerate(eixo) if c in pontos and pontos[c]["medido_execucao_centavos"] > 0]
+    ultimo_medido = medidos[-1] if medidos else -1
+    saida, vigente, ant, medido = [], 0, 0, 0
+    for i, c in enumerate(eixo):
+        p = pontos.get(c)
+        vigente += p["previsto_centavos"] if p else 0
+        medido += p["medido_execucao_centavos"] if p else 0
+        ant += previsto_anterior.get(c, 0)
+        saida.append({"competencia": c, "previsto_vigente_centavos": vigente,
+                      "previsto_anterior_centavos": ant if anterior else None,
+                      "medido_centavos": medido if i <= ultimo_medido else None})
+    return saida
+
+
 def mede_execucao(m) -> bool:
     """A medicao entra no medido de execucao de `saldo` (a regra das consultas daqui, para quem ja' tem a linha:
     a carteira da Diretoria, #262): execucao, num dos estados que medem."""
