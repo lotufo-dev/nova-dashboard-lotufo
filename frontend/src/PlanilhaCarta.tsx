@@ -325,11 +325,12 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
   const [justificativa, setJustificativa] = useState("");
   const [tentouJust, setTentouJust] = useState(false);
 
-  async function carregar() {
-    setD(await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`));
-  }
   const avisarPendente = useRef(aoRevisaoPendente);
   useEffect(() => { avisarPendente.current = aoRevisaoPendente; });
+  async function carregar() {
+    const x = await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`);
+    setD(x); avisarPendente.current?.(revisaoPendente(x));
+  }
   useEffect(() => {
     let vivo = true;
     api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`).then(x => { if (vivo) { setD(x); avisarPendente.current?.(revisaoPendente(x)); } })

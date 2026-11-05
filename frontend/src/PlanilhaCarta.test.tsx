@@ -264,6 +264,18 @@ describe("Cartão da planilha/carta", () => {
     await waitFor(() => expect(aoRevisaoPendente).toHaveBeenCalledWith(true));
   });
 
+  it("estado muda de gerada para enviada: o cartão relê e avisa a página de novo, mesmo sem mudar o valor (issue #384)", async () => {
+    const gerada = detalhe({ estado: "planilha_gerada", planilhas: [V1] }, { envios: [] });
+    api.mockResolvedValue(gerada);
+    const primeiro = vi.fn();
+    const { rerender } = render(<CartaoPlanilha medicaoId={5} estado="planilha_gerada" podeEditar aoMudar={() => {}} aoRevisaoPendente={primeiro} />);
+    await waitFor(() => expect(primeiro).toHaveBeenCalledWith(false));
+    api.mockResolvedValue(detalhe({ estado: "planilha_enviada", planilha_enviada_em: "2026-09-02", planilhas: [V1] }, { envios: [] }));
+    const segundo = vi.fn();
+    rerender(<CartaoPlanilha medicaoId={5} estado="planilha_enviada" podeEditar aoMudar={() => {}} aoRevisaoPendente={segundo} />);
+    await waitFor(() => expect(segundo).toHaveBeenCalledWith(false));
+  });
+
   it("consulta do cartão falha: avisa a página com null (issue #384)", async () => {
     api.mockRejectedValue(new Error("falhou"));
     const aoRevisaoPendente = vi.fn();

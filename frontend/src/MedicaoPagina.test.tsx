@@ -566,6 +566,28 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     expect(container.querySelector("[data-cartao-planilha]")).toBeNull();
   });
 
+  it("trocar de medição reinicia a conferência: o espelho some até o novo cartão responder (issue #384)", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } },
+      "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }, { ...MEDICAO, id: 6, numero: 24, estado: "planilha_enviada" }] });
+    const { container, rerender } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
+    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+    rerender(<MedicaoPagina contratoId={1} medicaoId={6} usuario={usuario} origem={null} />);
+    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='6']")).not.toBeNull());
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+  });
+
+  it("falha na conferência: Tentar de novo recomeça a conferência (issue #384)", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Falha ao conferir (teste)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Tentar de novo" }));
+    await waitFor(() => expect(screen.queryByText(/Não foi possível conferir a planilha/)).toBeNull());
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+  });
+
   it("depois do boletim: o cartão da planilha/carta e o espelho", async () => {
     responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "boletim_recebido" }] });
     const { container } = pagina();

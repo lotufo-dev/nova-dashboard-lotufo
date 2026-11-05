@@ -65,6 +65,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // revisao da planilha/carta registrada e nao enviada: o espelho espera o envio dela (PR #382, rodada extra)
   // so' libera o espelho depois de o cartao confirmar que nao ha' revisao pendente (issue #384)
   // a conferencia vale so' para a medicao e o estado em que o cartao a fez: trocar um dos dois a reinicia
+  const [tentativa, setTentativa] = useState(0);
   const [revisaoDe, setRevisaoDe] = useState<{ chave: string; valor: "pendente" | "livre" | "falhou" } | null>(null);
   // issue #188: a execucao e o reajuste da mesma competencia (as notas dos dois, a espera e a liberacao)
   const [par, setPar] = useState<ParDaMedicao | null>(null);
@@ -248,10 +249,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         <NovaPlanilhaCarta contratoId={contratoId} tipo={m.tipo as TipoPlanilha} inicial={{ numero: m.numero, competencia: m.competencia }}
           aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
       )}
-      {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
+      {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha key={tentativa} medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
         aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })} />}
       {comPlanilha && m.estado === "planilha_enviada" && revisao === "falhou" && (
-        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta; o espelho fica oculto até a conferência.</p>
+        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
+          <button type="button" className="btn btn--sec" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
       )}
       {!novaPlanilha && m.estado !== "planilha_gerada" && !espelhoEspera && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
