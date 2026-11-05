@@ -7,8 +7,8 @@ Aqui so' se le a auditoria: ela continua append-only e encadeada, sem coluna nov
 `itens` monta o bloco Seguranca como uma lista de `{nivel, mensagem, data}`; as proximas verificacoes do plano de
 protecao (integridade, sentinela, alertas) acrescentam itens a esta mesma lista.
 
-Issue #422: `conferir`, de hora em hora (`agendar`), confere os gatilhos da migracao 060 em `usuarios` e a cadeia da
-auditoria; o que falhar vira item `critico` do bloco.
+Issue #422: `conferir`, de hora em hora (`agendar`), confere os gatilhos da migracao 062 em `usuarios` e `sessoes` e
+a cadeia da auditoria; o que falhar vira item `critico` do bloco.
 """
 import datetime
 import hashlib
@@ -39,18 +39,30 @@ _SISTEMAS = (("iPhone", "iOS"), ("iPad", "iOS"), ("Android", "Android"), ("CrOS"
              ("Macintosh", "macOS"), ("Mac OS X", "macOS"), ("Linux", "Linux"))
 _OUTRO_MAX = 40
 
-# Issue #422: os gatilhos da migracao 060 e o sha256 do SQL deles em sqlite_master, com os espacos em branco reduzidos a
-# um (o checkout no Windows pode trocar o fim de linha da migracao). Mudar um gatilho na migracao exige mudar aqui.
-GATILHOS_USUARIOS = {
-    "usuarios_protecao_insert": "00414b3b71696849914503d5894af5bd4b23629a94348823cd10e7a81d37a324",
-    "usuarios_protecao_delete": "22bfe86500c5740e20926b446bd4c118a60c4542808b478347682dd471e4b2ed",
-    "usuarios_protecao_update": "0ecddc54559a60476428dbbe0d882cba5f69e6dccc800adc8fe9d1fae8b87d9d",
+# Issue #422: os gatilhos da migracao 062, por tabela, e o sha256 do SQL deles em sqlite_master, com os espacos em
+# branco reduzidos a um (o checkout no Windows pode trocar o fim de linha da migracao). Mudar um gatilho na migracao
+# exige mudar aqui.
+GATILHOS = {
+    "usuarios": {
+        "usuarios_protecao_insert": "00414b3b71696849914503d5894af5bd4b23629a94348823cd10e7a81d37a324",
+        "usuarios_protecao_delete": "22bfe86500c5740e20926b446bd4c118a60c4542808b478347682dd471e4b2ed",
+        "usuarios_protecao_update": "9004d8af32f3f6cd104da062e00f7695ac82c7baa0b690fba0ccfcd6cc25bf91",
+    },
+    "sessoes": {
+        "sessoes_protecao_insert": "1fb59b90962caba5d0cb2e92dca17afb51357eb412f8dccd6aa285ac59b3ed50",
+        "sessoes_protecao_delete": "3053dbf83ca811dade2c9d999f6f3c30a4144dd78a490d5619b3b646aaf25200",
+        "sessoes_protecao_update": "76985d0862ba96542e03d0212a5d8ee2e5052c449885bcc4dd7ae80b75fadbfe",
+    },
 }
 PROTECAO_REMOVIDA = "Proteção da tabela de usuários removida"
+PROTECAO_SESSOES_REMOVIDA = "Proteção da tabela de sessões removida"
 CADEIA_QUEBRADA = "Cadeia da auditoria quebrada"
+_MENSAGENS = {"usuarios": PROTECAO_REMOVIDA, "sessoes": PROTECAO_SESSOES_REMOVIDA}
 INTERVALO_CONFERENCIA_SEG = 3600
 # O resultado da ultima conferencia (`conferir`), do processo: o bloco le daqui; reinicio refaz no boot (`agendar`)
 _conferencia: list[dict] = []
+# Uma conferencia por vez no processo (a do boot e uma chamada direta nao se cruzam)
+_TRAVA = threading.Lock()
 
 
 def navegador(user_agent: str | None) -> str | None:
@@ -143,32 +155,69 @@ def bloco(conn, agora: datetime.datetime | None = None) -> tuple[list[dict], int
     return todos[:ITENS_NA_TELA], max(0, len(todos) - ITENS_NA_TELA)
 
 
-def _protecao_intacta(conn) -> bool:
-    """Os tres gatilhos da migracao 060 existem em `usuarios` e o SQL deles e' o da migracao."""
+def _protecao_intacta(conn, tabela: str) -> bool:
+    """Os gatilhos da migracao 062 em `tabela` existem e o SQL deles e' o da migracao."""
     achados = {r[0]: r[1] for r in conn.execute(
-        "SELECT name, sql FROM sqlite_master WHERE type='trigger' AND tbl_name='usuarios'")}
-    return all(nome in achados and achados[nome] is not None
+        "SELECT name, sql FROM sqlite_master WHERE type='trigger' AND tbl_name=?", (tabela,))}
+    return all(achados.get(nome) is not None
                and hashlib.sha256(" ".join(achados[nome].split()).encode()).hexdigest() == sha
-               for nome, sha in GATILHOS_USUARIOS.items())
+               for nome, sha in GATILHOS[tabela].items())
+
+
+def _alerta_aberto(conn, mensagem: str) -> str | None:
+    """O `criado_em` do `seguranca.alerta` da mensagem que nenhum `seguranca.alerta_resolvido` fechou depois."""
+    r = conn.execute(
+        "SELECT acao, criado_em FROM audit_log WHERE acao IN ('seguranca.alerta', 'seguranca.alerta_resolvido') "
+        "AND json_extract(depois, '$.mensagem')=? ORDER BY id DESC LIMIT 1", (mensagem,)).fetchone()
+    return r[1] if r is not None and r[0] == "seguranca.alerta" else None
+
+
+def _registrar_na_auditoria(conn, problemas: list[str]) -> None:
+    """Abre o alerta do problema de protecao novo e fecha o do que sumiu. O incidente aberto mora na auditoria, entao
+    reiniciar o servico com o problema presente nao grava outro; a releitura dentro do BEGIN IMMEDIATE e' o que impede
+    duas conferencias ao mesmo tempo (outro processo) de abrirem o mesmo alerta duas vezes."""
+    def mudancas():
+        out = []
+        for m in _MENSAGENS.values():
+            aberto = _alerta_aberto(conn, m) is not None
+            if (m in problemas) != aberto:
+                out.append(("seguranca.alerta" if m in problemas else "seguranca.alerta_resolvido", m))
+        return out
+
+    if not mudancas():
+        return
+    with db.mutacao(conn):
+        for acao, m in mudancas():
+            auditoria.registrar(conn, None, acao, depois={"mensagem": m})
 
 
 def conferir(conn, agora: datetime.datetime | None = None) -> list[dict]:
-    """Issue #422: confere a protecao da tabela de usuarios e a cadeia da auditoria, guarda o resultado para o bloco
-    e o devolve. Problema que continua mantem a data em que foi visto primeiro. Problema novo grava `seguranca.alerta`
-    na auditoria quando a cadeia esta integra (numa cadeia quebrada a linha nova so' encadearia sobre o adulterado)."""
+    """Issue #422: confere a protecao das tabelas de usuarios e de sessoes e a cadeia da auditoria, publica o
+    resultado para o bloco e o devolve. Problema que continua mantem a data em que foi visto primeiro (a do alerta
+    aberto na auditoria; a cadeia quebrada, que nao grava, a da primeira conferencia do processo que a viu).
+
+    O resultado e' publicado ANTES de gravar: falha ao gravar na auditoria (banco travado, por exemplo) nao deixa a tela
+    em "nenhum alerta". Com a cadeia quebrada nada se grava (a linha nova so' encadearia sobre o adulterado)."""
     global _conferencia
-    agora = agora or tempo.agora_utc()
-    cadeia_ok = auditoria.verificar_cadeia(conn)
-    mensagens = ([] if _protecao_intacta(conn) else [PROTECAO_REMOVIDA]) + ([] if cadeia_ok else [CADEIA_QUEBRADA])
-    anteriores = {i["mensagem"]: i for i in _conferencia}
-    novos = [m for m in mensagens if m not in anteriores]
-    if novos and cadeia_ok:
-        with db.mutacao(conn):
-            for m in novos:
-                auditoria.registrar(conn, None, "seguranca.alerta", depois={"mensagem": m})
-    _conferencia = [anteriores.get(m) or {"nivel": "critico", "mensagem": m, "data": tempo.iso_utc(_carimbo(agora))}
-                    for m in mensagens]
-    return list(_conferencia)
+    with _TRAVA:
+        agora = agora or tempo.agora_utc()
+        cadeia_ok = auditoria.verificar_cadeia(conn)
+        problemas = [m for tabela, m in _MENSAGENS.items() if not _protecao_intacta(conn, tabela)]
+        if not cadeia_ok:
+            problemas.append(CADEIA_QUEBRADA)
+        anteriores = {i["mensagem"]: i["data"] for i in _conferencia}
+        publicado = []
+        for m in problemas:
+            aberto = _alerta_aberto(conn, m) if m != CADEIA_QUEBRADA else None
+            data = tempo.iso_utc(aberto) if aberto else anteriores.get(m) or tempo.iso_utc(_carimbo(agora))
+            publicado.append({"nivel": "critico", "mensagem": m, "data": data})
+        _conferencia = publicado
+        if cadeia_ok:
+            try:
+                _registrar_na_auditoria(conn, problemas)
+            except Exception:
+                log.exception("conferencia de seguranca: o alerta nao foi gravado na auditoria")
+        return list(_conferencia)
 
 
 def agendar(intervalo_seg: int = INTERVALO_CONFERENCIA_SEG) -> threading.Thread:

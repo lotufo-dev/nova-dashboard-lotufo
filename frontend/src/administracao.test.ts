@@ -112,7 +112,7 @@ describe("administração", () => {
       "pleito.criar", "pleito.curva_s", "pleito.curva_s_removida", "pleito.descartar", "pleito.enviar", "pleito.montar", "protocolo.assinado", "protocolo.criar",
       "protocolo.descartar", "protocolo.enviar", "protocolo.link", "protocolo.link_removido", "protocolo.montar",
       "protocolo.numero_orgao", "protocolo.peca", "protocolo.peca_removida", "protocolo.siga", "regularidade.competencia_corrigida",
-      "regularidade.registrar", "rm.sincronizacao", "seguranca.alerta", "siga.vinculo", "usuario.atualizar", "usuario.criar", "usuario.desbloquear",
+      "regularidade.registrar", "rm.sincronizacao", "seguranca.alerta", "seguranca.alerta_resolvido", "siga.vinculo", "usuario.atualizar", "usuario.criar", "usuario.desbloquear",
       "usuario.senha_redefinida", "usuario.senha_trocada"];
     expect(acoes.filter(a => /[._]/.test(rotuloAcao(a)) || rotuloAcao(a) === a)).toEqual([]);
     expect(rotuloAcao("frc.gerar")).toBe("FRC gerada");

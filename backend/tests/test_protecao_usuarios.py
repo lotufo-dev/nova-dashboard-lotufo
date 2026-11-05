@@ -1,6 +1,6 @@
-"""Protecao da tabela de usuarios (issue #422): fora da aplicacao o banco recusa criar, apagar ou mudar e-mail, senha,
-perfil e situacao de uma conta; a conferencia de hora em hora acusa no bloco Seguranca a protecao removida e a cadeia
-da auditoria quebrada."""
+"""Protecao das tabelas de usuarios e de sessoes (issue #422): fora da aplicacao o banco recusa criar, apagar ou mudar
+uma conta (fora o contador de senha errada) e criar, mudar ou apagar uma sessao; a conferencia de hora em hora acusa no
+bloco Seguranca a protecao removida e a cadeia da auditoria quebrada."""
 import sqlite3
 
 import pytest
@@ -8,6 +8,8 @@ import pytest
 from app import auditoria, auth, db, seguranca
 
 PROTECAO = "Proteção da tabela de usuários removida"
+SESSOES = "Proteção da tabela de sessões removida"
+MIGRACAO = "062_protecao_usuarios.sql"
 CADEIA = "Cadeia da auditoria quebrada"
 
 
@@ -35,7 +37,8 @@ def _crua(caminho):
 
 
 def _usuario(conn, uid):
-    return tuple(conn.execute("SELECT email, senha_hash, perfil, ativo FROM usuarios WHERE id=?", (uid,)).fetchone())
+    return tuple(conn.execute("SELECT id, nome, email, senha_hash, perfil, ativo, criado_em FROM usuarios WHERE id=?",
+                              (uid,)).fetchone())
 
 
 @pytest.mark.parametrize("sql", [
@@ -43,6 +46,10 @@ def _usuario(conn, uid):
     "UPDATE usuarios SET email='outro@lotufo.com' WHERE id=?",
     "UPDATE usuarios SET senha_hash='trocada' WHERE id=?",
     "UPDATE usuarios SET ativo=0 WHERE id=?",
+    "UPDATE usuarios SET nome='Outra pessoa' WHERE id=?",
+    "UPDATE usuarios SET criado_em='2000-01-01 00:00:00' WHERE id=?",
+    # gate Sol S2: trocar os ids de duas contas faria as sessoes de uma resolverem para o perfil da outra
+    "UPDATE usuarios SET id=id+1000 WHERE id=?",
     "DELETE FROM usuarios WHERE id=?",
 ])
 def test_conexao_crua_nao_muda_nem_apaga_usuario(banco, sql):
@@ -78,8 +85,9 @@ def test_conexao_crua_le_e_mexe_nas_tentativas_e_no_bloqueio(banco):
 
 def test_conexao_da_aplicacao_muda_e_apaga_usuario(banco):
     c, uid, _ = banco
-    c.execute("UPDATE usuarios SET perfil='admin', email='nova@lotufo.com', senha_hash='h', ativo=0 WHERE id=?", (uid,))
-    assert _usuario(c, uid) == ("nova@lotufo.com", "h", "admin", 0)
+    c.execute("UPDATE usuarios SET perfil='admin', email='nova@lotufo.com', senha_hash='h', ativo=0, nome='N' WHERE id=?",
+              (uid,))
+    assert _usuario(c, uid)[1:6] == ("N", "nova@lotufo.com", "h", "admin", 0)
     c.execute("DELETE FROM usuarios WHERE id=?", (uid,))
     assert c.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0
     c.rollback()
@@ -87,11 +95,48 @@ def test_conexao_da_aplicacao_muda_e_apaga_usuario(banco):
 
 def test_migracao_rodada_duas_vezes_nao_falha(banco):
     c, _, _ = banco
-    c.execute("DELETE FROM schema_migrations WHERE nome='060_protecao_usuarios.sql'"); c.commit()
+    c.execute("DELETE FROM schema_migrations WHERE nome=?", (MIGRACAO,)); c.commit()
     db.migrate(c)
-    nomes = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='usuarios'")}
-    assert set(seguranca.GATILHOS_USUARIOS) <= nomes
+    for tabela, gatilhos in seguranca.GATILHOS.items():
+        nomes = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?", (tabela,))}
+        assert set(gatilhos) <= nomes
     assert seguranca.conferir(c) == []
+
+
+@pytest.mark.parametrize("sql", [
+    "INSERT INTO sessoes (token_hash, usuario_id, csrf_token, expira_em) VALUES ('conhecido', ?, 'c', '2099-01-01')",
+    "UPDATE sessoes SET expira_em='2099-01-01T00:00:00+00:00' WHERE usuario_id=?",
+    "UPDATE sessoes SET usuario_id=usuario_id WHERE usuario_id=?",
+    "DELETE FROM sessoes WHERE usuario_id=?",
+])
+def test_conexao_crua_nao_cria_muda_nem_apaga_sessao(banco, sql):
+    """Gate Sol S3: inserir uma sessao com um token conhecido seria entrar como a pessoa sem senha."""
+    c, uid, caminho = banco
+    token, _ = auth.criar_sessao(c, uid)
+    antes = [tuple(r) for r in c.execute("SELECT * FROM sessoes")]
+    crua = _crua(caminho)
+    with pytest.raises(sqlite3.OperationalError, match="dash_conexao_app"):
+        crua.execute(sql, (uid,))
+    crua.close()
+    assert [tuple(r) for r in c.execute("SELECT * FROM sessoes")] == antes
+    assert auth.sessao_valida(c, token) is not None
+
+
+def test_conexao_da_aplicacao_cria_e_encerra_sessao(banco):
+    c, uid, _ = banco
+    token, _ = auth.criar_sessao(c, uid)
+    assert auth.sessao_valida(c, token) is not None
+    auth.encerrar_sessao(c, token)
+    assert auth.sessao_valida(c, token) is None
+
+
+def test_conexao_da_aplicacao_liga_trusted_schema(banco):
+    """A funcao do Python nao e' SQLITE_INNOCUOUS: com trusted_schema desligado o gatilho a recusaria na aplicacao."""
+    c, uid, _ = banco
+    assert c.execute("PRAGMA trusted_schema").fetchone()[0] == 1
+    c.execute("PRAGMA trusted_schema=OFF")
+    with pytest.raises(sqlite3.OperationalError, match="unsafe use"):
+        c.execute("UPDATE usuarios SET perfil='admin' WHERE id=?", (uid,))
 
 
 def _mensagens(conn):
@@ -152,7 +197,7 @@ def test_problema_resolvido_some_na_conferencia_seguinte(banco):
     crua.execute("DROP TRIGGER usuarios_protecao_delete"); crua.commit(); crua.close()
     seguranca.conferir(c)
     assert _mensagens(c) == [("critico", PROTECAO)]
-    c.execute("DELETE FROM schema_migrations WHERE nome='060_protecao_usuarios.sql'"); c.commit()
+    c.execute("DELETE FROM schema_migrations WHERE nome=?", (MIGRACAO,)); c.commit()
     db.migrate(c)
     seguranca.conferir(c)
     assert _mensagens(c) == []
@@ -185,3 +230,63 @@ def test_item_critico_fica_no_topo_do_bloco_mesmo_mais_antigo(monkeypatch):
     itens, fora = seguranca.bloco(None)
     assert itens[0] == antigo and fora == 2
     assert [i["data"] for i in itens[1:]] == sorted((i["data"] for i in itens[1:]), reverse=True)
+
+
+def _alertas_e_resolvidos(conn):
+    return [tuple(r) for r in conn.execute(
+        "SELECT acao, json_extract(depois, '$.mensagem') FROM audit_log WHERE acao LIKE 'seguranca.%' ORDER BY id")]
+
+
+def test_gatilho_de_sessoes_apagado_vira_item(banco):
+    c, _, caminho = banco
+    crua = _crua(caminho)
+    crua.execute("DROP TRIGGER sessoes_protecao_insert"); crua.commit(); crua.close()
+    seguranca.conferir(c)
+    assert _mensagens(c) == [("critico", SESSOES)]
+    assert _alertas(c) == [SESSOES]
+
+
+def test_reinicio_com_o_problema_presente_nao_repete_o_alerta_e_guarda_a_data(banco, monkeypatch):
+    """Gate Sol S5: o incidente aberto mora na auditoria, nao so' no processo."""
+    c, _, caminho = banco
+    crua = _crua(caminho)
+    crua.execute("DROP TRIGGER usuarios_protecao_update"); crua.commit(); crua.close()
+    seguranca.conferir(c)
+    data = seguranca.itens(c)[0]["data"]
+    # o alerta passa a ser de dias atras; recuar a data quebra o hash, entao a cadeia fica dada como integra
+    c.execute("UPDATE audit_log SET criado_em='2026-11-01 08:00:00' WHERE acao='seguranca.alerta'"); c.commit()
+    monkeypatch.setattr(auditoria, "verificar_cadeia", lambda conn: True)
+    monkeypatch.setattr(seguranca, "_conferencia", [])           # o processo novo nao lembra de nada
+    seguranca.conferir(c)
+    assert _alertas(c) == [PROTECAO]
+    assert seguranca.itens(c)[0]["data"] == "2026-11-01T08:00:00+00:00" != data
+
+
+def test_problema_resolvido_fecha_o_alerta_e_reaparecer_abre_outro(banco):
+    c, _, caminho = banco
+    crua = _crua(caminho)
+    crua.execute("DROP TRIGGER usuarios_protecao_delete"); crua.commit(); crua.close()
+    seguranca.conferir(c)
+    c.execute("DELETE FROM schema_migrations WHERE nome=?", (MIGRACAO,)); c.commit()
+    db.migrate(c)
+    seguranca.conferir(c)
+    seguranca.conferir(c)
+    crua = _crua(caminho)
+    crua.execute("DROP TRIGGER usuarios_protecao_delete"); crua.commit(); crua.close()
+    seguranca.conferir(c)
+    assert _alertas_e_resolvidos(c) == [("seguranca.alerta", PROTECAO), ("seguranca.alerta_resolvido", PROTECAO),
+                                        ("seguranca.alerta", PROTECAO)]
+
+
+def test_falha_ao_gravar_o_alerta_nao_esconde_o_item(banco, monkeypatch):
+    """Gate Sol S6: o resultado e' publicado antes de gravar na auditoria."""
+    c, _, caminho = banco
+    crua = _crua(caminho)
+    crua.execute("DROP TRIGGER usuarios_protecao_insert"); crua.commit(); crua.close()
+
+    def falha(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(auditoria, "registrar", falha)
+    assert [i["mensagem"] for i in seguranca.conferir(c)] == [PROTECAO]
+    assert _mensagens(c) == [("critico", PROTECAO)] and _alertas(c) == []
+    assert not c.in_transaction

@@ -39,8 +39,9 @@ def db_path() -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
-# Issue #422: os gatilhos da migracao 060 chamam esta funcao ao criar, apagar ou mudar e-mail, senha, perfil ou
-# situacao de um usuario. So' a conexao aberta aqui a tem; fora da aplicacao o SQLite recusa com "no such function".
+# Issue #422: os gatilhos da migracao 062 chamam esta funcao ao criar, apagar ou mudar um usuario (fora o contador de
+# senha errada) e ao criar, mudar ou apagar uma sessao. So' a conexao aberta aqui a tem; fora da aplicacao o SQLite
+# recusa com "no such function". Limite do desenho: um script Python que registre ele mesmo a funcao passa.
 FUNCAO_CONEXAO_APP = "dash_conexao_app"
 
 
@@ -48,6 +49,9 @@ def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(db_path(), check_same_thread=False)
     # Antes de qualquer outro comando: as migracoes e o primeiro INSERT em usuarios ja' precisam dela
     conn.create_function(FUNCAO_CONEXAO_APP, 0, lambda: 1)
+    # A funcao do Python nao sai marcada como inofensiva (SQLITE_INNOCUOUS): com trusted_schema desligado (build do
+    # SQLite que o desliga por padrao) o gatilho a recusaria tambem aqui, e ninguem mais entraria. Ligado explicito.
+    conn.execute("PRAGMA trusted_schema=ON")
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
