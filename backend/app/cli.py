@@ -328,6 +328,23 @@ def _conciliacao(args) -> int:
     return 0
 
 
+def _dono(args) -> int:
+    """`dono gerar-chave --saida <pasta>`: roda no Mac do dono (a privada nunca vai ao servidor)."""
+    from pyrage import x25519
+    saida = Path(args.saida)
+    saida.mkdir(parents=True, exist_ok=True)
+    privada, publica = saida / "chave-privada-dono.txt", saida / "chave-publica-dono.txt"
+    if privada.exists() or publica.exists():
+        print("Já existe um par de chaves nessa pasta; escolha outra pasta.", file=sys.stderr)
+        return 1
+    identidade = x25519.Identity.generate()
+    privada.write_text(f"{identidade}\n", encoding="utf-8")
+    os.chmod(privada, 0o600)
+    publica.write_text(f"{identidade.to_public()}\n", encoding="utf-8")
+    print(f"Chave pública (leve só esta ao servidor): {publica}\nChave privada (guarde no cofre, nunca no servidor): {privada}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -354,12 +371,17 @@ def main(argv: list[str] | None = None) -> int:
     con.add_argument("--data", help="data do corte (AAAA-MM-DD), só em `corte`")
     con.add_argument("--usuario", required=True, help="e-mail de quem aplica")
     con.add_argument("--ensaio", action="store_true", help="mostra o relatório e desfaz")
+    dn = sub.add_parser("dono", help="cópia cifrada para a chave do dono")
+    dn.add_argument("acao", choices=["gerar-chave"])
+    dn.add_argument("--saida", required=True, help="pasta onde gravar o par de chaves")
     for nome, ajuda in (("desbloquear", "destrava a conta bloqueada por senhas erradas"),
                         ("redefinir-senha", "grava senha nova (pedida sem eco) e derruba as sessões")):
         sub.add_parser(nome, help=ajuda).add_argument("email")
     args = p.parse_args(argv)
     if args.cmd in ("desbloquear", "redefinir-senha"):
         return _conta(args)
+    if args.cmd == "dono":
+        return _dono(args)
     if args.cmd == "documentos":
         return _documentos(args)
     if args.cmd == "cadastro":
