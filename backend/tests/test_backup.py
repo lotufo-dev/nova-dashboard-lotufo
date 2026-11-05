@@ -8,8 +8,7 @@ import pytest
 
 from app import backup
 
-# Backup e ACL sao do Windows (a producao): a CI roda este arquivo no job backend-windows.
-pytestmark = pytest.mark.windows
+# Roda no Linux da CI (issue #385); o que so' vale no Windows (trava de arquivo aberto) se pula com skipif.
 
 def test_snapshot_e_rotacao(tmp_path):
     origem = tmp_path / "app.db"

@@ -2,6 +2,7 @@
 import base64
 import datetime
 import io
+import os
 
 import pypdf
 
@@ -9,7 +10,7 @@ import pytest
 
 from app import carta
 
-# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
+# Gera PDF com a fonte da lista de candidatas (Arial no Windows e no Mac, Liberation Sans no Linux da CI).
 pytestmark = pytest.mark.pdf
 
 
@@ -39,10 +40,61 @@ def test_carta_leva_os_dados_e_as_marcas_do_corpo():
     assert "# 2." not in t                        # a marca de titulo nao vai para o papel
 
 
-def test_sem_arial_cai_na_helvetica_sem_quebrar(monkeypatch, tmp_path):
-    monkeypatch.setattr(carta, "_ARIAL", tmp_path / "nao-existe.ttf")
+def _sem_candidatas(monkeypatch, tmp_path):
+    monkeypatch.setattr(carta, "_FONTES", ((tmp_path / "nao-existe.ttf", tmp_path / "nao-existe-negrito.ttf"),))
+    monkeypatch.delenv("DASH_FONTE_CARTA", raising=False)
+    monkeypatch.delenv("DASH_FONTE_CARTA_NEGRITO", raising=False)
+
+
+def _fonte_real():
+    """O par de TTF que esta maquina tem; na CI (variavel CI) a falta dele e' erro, nao pulo (issue #385)."""
+    par = carta.fonte_carta()
+    if par is None:
+        if os.environ.get("CI"):
+            pytest.fail("CI sem fonte Unicode para a carta: o job precisa da Liberation Sans (fonts-liberation)")
+        pytest.skip("maquina sem Arial nem Liberation Sans")
+    return par
+
+
+def test_sem_candidata_cai_na_helvetica_sem_quebrar(monkeypatch, tmp_path):
+    _sem_candidatas(monkeypatch, tmp_path)
+    assert carta.fonte_carta() is None
     t = _texto(carta.gerar(_carta()))
     assert "MT-PAR" in t and "CT/301/LT/2026" in t
+    assert "099/2024/MTPAR - Complexo Cultural" in t               # plano B latin-1: travessao vira hifen
+
+
+def test_travessao_sai_no_pdf_com_a_fonte_da_lista():
+    _fonte_real()
+    t = _texto(carta.gerar(_carta()))
+    assert "099/2024/MTPAR – Complexo Cultural" in t
+    assert "NF nº 2311" in t and "Nota fiscal – NF" in t
+
+
+def test_variavel_de_ambiente_aponta_outro_ttf(monkeypatch, tmp_path):
+    regular, negrito = _fonte_real()
+    _sem_candidatas(monkeypatch, tmp_path)
+    (tmp_path / "outra.ttf").write_bytes(regular.read_bytes())
+    (tmp_path / "outra-negrito.ttf").write_bytes(negrito.read_bytes())
+    monkeypatch.setenv("DASH_FONTE_CARTA", str(tmp_path / "outra.ttf"))
+    monkeypatch.setenv("DASH_FONTE_CARTA_NEGRITO", str(tmp_path / "outra-negrito.ttf"))
+    assert carta.fonte_carta() == (tmp_path / "outra.ttf", tmp_path / "outra-negrito.ttf")
+    assert "MTPAR – Complexo Cultural" in _texto(carta.gerar(_carta()))
+
+
+def test_variavel_so_com_o_regular_nao_vale(monkeypatch, tmp_path):
+    regular, _ = _fonte_real()
+    _sem_candidatas(monkeypatch, tmp_path)
+    monkeypatch.setenv("DASH_FONTE_CARTA", str(regular))
+    assert carta.fonte_carta() is None
+
+
+def test_primeira_candidata_com_os_dois_arquivos_vence(monkeypatch, tmp_path):
+    regular, negrito = _fonte_real()
+    _sem_candidatas(monkeypatch, tmp_path)
+    so_regular = (regular, tmp_path / "falta.ttf")
+    monkeypatch.setattr(carta, "_FONTES", (so_regular, (regular, negrito), (negrito, regular)))
+    assert carta.fonte_carta() == (regular, negrito)
 
 
 def test_pagina_titulo_e_data_extenso_e_preencher():

@@ -11,6 +11,7 @@ paragrafos; linha comecando por "# " e' titulo de secao (negrito); linha comecan
 """
 import datetime
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,11 +22,31 @@ from app import arquivos
 
 MESES = ("janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro",
          "outubro", "novembro", "dezembro")
-_ARIAL = Path(r"C:\Windows\Fonts\arial.ttf")
-_ARIAL_NEGRITO = Path(r"C:\Windows\Fonts\arialbd.ttf")
+# Fonte Unicode das cartas, oficios e FRC (issue #385), em ordem: a primeira com o regular e o negrito vale.
+# A producao (Windows) acha a Arial primeiro e o PDF dela nao muda; o Mac tem a Arial do sistema; o Linux da
+# CI usa a Liberation Sans (pacote fonts-liberation, mesmas metricas da Arial). DASH_FONTE_CARTA e
+# DASH_FONTE_CARTA_NEGRITO, juntas, apontam outro par de TTF e vem antes da lista. Sem nenhuma, Helvetica.
+_FONTES = (
+    (Path(r"C:\Windows\Fonts\arial.ttf"), Path(r"C:\Windows\Fonts\arialbd.ttf")),
+    (Path("/System/Library/Fonts/Supplemental/Arial.ttf"), Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf")),
+    (Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+     Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf")),
+)
 _ITEM = re.compile(r"^((?:[ivxlc]+|\d{1,2}))\.\s+(.*)$", re.IGNORECASE)
 _TROCAS_LATIN1 = {"–": "-", "—": "-", "“": '"', "”": '"', "‘": "'", "’": "'", "…": "..."}
 ALTURA = 5.5
+
+
+def fonte_carta() -> tuple[Path, Path] | None:
+    """O par (regular, negrito) da fonte Unicode, ou None para o plano B Helvetica/latin-1."""
+    candidatas = list(_FONTES)
+    regular, negrito = os.environ.get("DASH_FONTE_CARTA"), os.environ.get("DASH_FONTE_CARTA_NEGRITO")
+    if regular and negrito:
+        candidatas.insert(0, (Path(regular), Path(negrito)))
+    for par in candidatas:
+        if par[0].is_file() and par[1].is_file():
+            return par
+    return None
 
 
 def data_extenso(d: datetime.date) -> str:
@@ -112,9 +133,10 @@ class _Doc(FPDF):
         else:
             self.set_margins(25, 20, 20)
             self.set_auto_page_break(True, margin=22)
-        if _ARIAL.is_file() and _ARIAL_NEGRITO.is_file():
-            self.add_font("Carta", "", str(_ARIAL))
-            self.add_font("Carta", "B", str(_ARIAL_NEGRITO))
+        fonte = fonte_carta()
+        if fonte:
+            self.add_font("Carta", "", str(fonte[0]))
+            self.add_font("Carta", "B", str(fonte[1]))
             self.fonte, self.unicode = "Carta", True
         else:
             self.fonte, self.unicode = "Helvetica", False
