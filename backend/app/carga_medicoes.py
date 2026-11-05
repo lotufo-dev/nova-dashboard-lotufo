@@ -326,8 +326,47 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
                            "dados": d, "medicao_id": m["id"]})
     _conferir_correcoes(conn, linhas, existentes)
     totais = {c: sum(1 for li in linhas if li["categoria"] == c) for c in CATEGORIAS}
+    _avisar_nfs(conn, contrato["id"], linhas)
+    avisos_nf = {"janela": sum(1 for li in linhas if li.get("aviso_nf") == "janela"),
+                 "nao_encontrada": sum(1 for li in linhas if li.get("aviso_nf") == "nao_encontrada")}
     return {"obra": obra, "contrato": contrato["nome_curto"], "contrato_id": contrato["id"], "linhas": linhas,
-            "totais": totais}
+            "totais": totais, "avisos_nf": avisos_nf}
+
+
+JANELA_RM_MESES = 24    # o casador do RM (DASH12/13) so' traz as notas dos ultimos 24 meses
+
+
+def _inicio_janela_rm() -> str:
+    """Mes (AAAA-MM) em que comeca a janela do RM: hoje menos 24 meses."""
+    hoje = datetime.date.today()
+    meses = hoje.year * 12 + hoje.month - 1 - JANELA_RM_MESES
+    return f"{meses // 12:04d}-{meses % 12 + 1:02d}"
+
+
+def _avisar_nfs(conn, contrato_id: int, linhas: list[dict]) -> None:
+    """Linha `nova` cuja NF nao esta' no banco ganha `aviso_nf`: `janela` se a competencia e' anterior a' janela
+    do RM (a nota so' existe la' fora: `conciliacao antiga` liga depois), `nao_encontrada` se esta' dentro dela
+    (possivel erro de digitacao). So' aviso: a gravacao nao muda. Sem coligada no RM nao ha' como saber."""
+    achado = conn.execute("SELECT e.coligada_rm FROM contratos c JOIN entidades e "
+                          "ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?", (contrato_id,)).fetchone()
+    if not achado or achado[0] is None:
+        return
+    coligada = achado[0]
+    inicio = _inicio_janela_rm()
+    for li in linhas:
+        if li["categoria"] != "nova":
+            continue
+        for nf in li["dados"]["nfs"]:
+            numero = int(nf) if nf.isdigit() and len(nf) <= 18 else None
+            if conn.execute("SELECT 1 FROM notas_fiscais WHERE coligada=? AND situacao='ativa' AND "
+                            "(numero=? OR numero_int=?)", (coligada, nf, numero)).fetchone():
+                continue
+            if li["competencia"] < inicio:
+                li["aviso_nf"] = "janela"
+                li.setdefault("avisos", []).append(f"NF {nf} anterior à janela do RM; entra sem vínculo")
+            else:
+                li.setdefault("avisos", []).append(f"NF {nf} não encontrada no RM")
+                li.setdefault("aviso_nf", "nao_encontrada")
 
 
 def _classificar_cancelamento(item: dict, d: dict, m, existentes: dict, grupos: dict) -> dict:

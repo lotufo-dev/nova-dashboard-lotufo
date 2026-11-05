@@ -728,3 +728,27 @@ def test_apostilamento_sem_competencias_sem_data_base_em_contrato_de_duas_bases_
     ap = {k: v for k, v in _apostilamento(percentual="6,76").items() if k != "data_base"}
     cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "datas_base": bases, "instrumentos": [ap]}]))
     assert any("instrumentos[ap-reaj-1]" in a and "data-base" in a for a in cad["avisos"]), cad["avisos"]
+
+
+# --- issue #391: apostilamento de reajuste sem ciclo avisa o ano que vai valer -------------------------------
+
+def _avisos_ciclo(tmp_path, ap):
+    cad = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+    return [a for a in cad["avisos"] if "sem ciclo" in a]
+
+
+def test_apostilamento_sem_ciclo_avisa_o_ano_da_eficacia(tmp_path):
+    ap = {k: v for k, v in _apostilamento(eficacia="2025-12-20").items() if k != "ciclo"}
+    avisos = _avisos_ciclo(tmp_path, ap)
+    assert len(avisos) == 1 and "instrumentos[ap-reaj-1]" in avisos[0]
+    assert "ciclo 2025 (pelo campo eficacia)" in avisos[0] and "Diga ciclo: AAAA" in avisos[0]
+
+
+def test_apostilamento_sem_ciclo_nem_eficacia_avisa_o_ano_da_data(tmp_path):
+    ap = {k: v for k, v in _apostilamento().items() if k != "ciclo"}
+    avisos = _avisos_ciclo(tmp_path, ap)
+    assert len(avisos) == 1 and "ciclo 2026 (pelo campo data)" in avisos[0]
+
+
+def test_apostilamento_com_ciclo_nao_avisa(tmp_path):
+    assert _avisos_ciclo(tmp_path, _apostilamento()) == []

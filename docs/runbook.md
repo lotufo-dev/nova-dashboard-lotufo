@@ -152,6 +152,8 @@ A pasta vem de `DASH_CADASTRO_DIR` (produção: `C:\DashboardLotufo\cadastro`, c
    repetir sem `--ensaio`. O snapshot horário do backup cobre o antes.
 4. Instrumento assinado já aplicado não se altera: correção é instrumento novo com `corrige: <chave>`.
 
+O esquema de cada tipo de instrumento (apostilamento de reajuste SINFRA e MT-PAR, retificação, paralisação e reinício, endosso de garantia, aditivo de reajuste, `datas_base` com `aplica_a`, `pleitos_anteriores`) está comentado em `cadastro-exemplo/contratos/obra-propria.yaml`.
+
 ## Carga do histórico de medições
 
 Caminho de uma carga de medições por CSV, do Mac à produção (`cadastro carregar-medicoes`, issue #262). Uma obra por arquivo; o nome do arquivo é o slug da obra, como em `contratos/`. O exemplo fictício é `cadastro-exemplo/medicoes/obra-propria.csv`.
