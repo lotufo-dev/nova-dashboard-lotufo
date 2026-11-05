@@ -183,11 +183,11 @@ def _esperando_apostilamento(conn, contrato_id: int) -> list[dict]:
     """As competencias de reajuste do contrato ja' medidas e ainda nao recebidas que nenhum termo cobre: nem o
     apostilamento que lista o mes (`apostilada`), nem o termo sem meses que fecha o ciclo (`_termo_sem_meses`, o
     termo de `reajuste.apostilamento_do_ciclo`). A medicao sem data-base no contrato de duas (grupo sem data-base de
-    `competencias_por_ciclo`) so' fica coberta quando todas as datas-base em que o mes tem reajuste o cobrem. Sem
-    data-base o motor de reajuste nao acompanha o contrato (`reajuste.ciclos` vazio): nada espera."""
+    `competencias_por_ciclo`) so' fica coberta quando todas as datas-base em que o mes tem reajuste o cobrem; sem
+    nenhuma (contrato sem data-base, revisor na rodada 2 da PR #431), nenhum termo a cobre e ela espera."""
     grupos = reajuste.competencias_por_ciclo(conn, contrato_id)
     bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes", (contrato_id,))]
-    if not grupos or not bases:
+    if not grupos:
         return []
     fechados: dict = {}
 
@@ -218,8 +218,10 @@ def _esperando_apostilamento(conn, contrato_id: int) -> list[dict]:
             if g["data_base_mes"] is not None:
                 if x["apostilada"] or fechado(g["data_base_mes"], g["ciclo"]):
                     continue
-            elif all(v is not False for v in (coberta(b, x["competencia"]) for b in bases)):
-                continue
+            else:
+                vs = [v for v in (coberta(b, x["competencia"]) for b in bases) if v is not None]
+                if vs and all(vs):        # sem data-base em que o mes tenha reajuste, nada o cobre
+                    continue
             out.append(x)
     return out
 

@@ -495,11 +495,15 @@ def test_medicao_sem_data_base_em_contrato_de_duas_bases_so_sai_com_as_duas_apos
     assert diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]["obras"] == []
 
 
-def test_contrato_sem_data_base_fica_fora_dos_reajustes_esperando_apostilamento(cenario):
-    # sem data-base o motor de reajuste nao acompanha o contrato (`reajuste.ciclos` vazio)
+def test_contrato_sem_data_base_tem_o_reajuste_medido_esperando_apostilamento(cenario):
+    # revisor (rodada 2, PR #431): sem data-base nenhum termo cobre a competencia, entao ela espera; a pedida e a
+    # aprovada nao estao em "Onde esta' o dinheiro". Consorcio a 50%: 100.001 + 200.001 = 300.002, na cota 150.001
     c, ids = cenario
-    _reajuste(c, ids["propria"], 31, "2026-03", "planilha_enviada", pedido=100_000)
-    assert diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]["obras"] == []
+    k = ids["consorcio"]
+    _reajuste(c, k, 31, "2026-03", "planilha_enviada", pedido=100_001)
+    _reajuste(c, k, 32, "2026-04", "boletim_recebido", pedido=200_000, aprovado=200_001)
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Consórcio", 2, 150_001)]
 
 
 def test_complemento_ainda_nao_recebido_espera_mesmo_com_a_principal_recebida(cenario):
