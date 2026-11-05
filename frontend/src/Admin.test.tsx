@@ -170,6 +170,35 @@ test("Saúde: backup em dia mostra só o selo OK e a hora no cartão de situaç�
   expect(api).not.toHaveBeenCalledWith("/api/health");
 });
 
+// Issue #419: copia cifrada semanal para a chave do dono
+test("Saúde: sem chave pública mostra 'Cópia do dono não configurada'", async () => {
+  saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: false, ultima_copia_dono: null });
+  const regiao = await screen.findByRole("region", { name: "Backup" });
+  expect(within(regiao).getByText(/Cópia do dono não configurada/)).toBeTruthy();
+});
+
+test("Saúde: 'Gerar cópia do dono agora' pede a cópia, relê a Saúde e mostra a data", async () => {
+  let gerada = false;
+  api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
+    if (url === "/api/admin/copia-dono" && opcoes?.method === "POST") { gerada = true; return { arquivo: "x.tar.age" }; }
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false,
+      ultima_copia_dono: gerada ? "2026-10-13T08:00:00-04:00" : null };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Gerar cópia do dono agora" }));
+  const regiao = await screen.findByRole("region", { name: "Backup" });
+  await waitFor(() => expect(regiao.textContent).toMatch(/13\/10\/2026 às 08:00/));
+});
+
+test("Saúde: mais de 8 dias sem cópia do dono aparece em destaque", async () => {
+  saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: true,
+             ultima_copia_dono: "2026-10-01T08:00:00-04:00" });
+  const alerta = await screen.findByText(/Cópia do dono atrasada/);
+  expect(alerta.closest(".aviso--critico")).toBeTruthy();
+});
+
 test("Saúde: backup atrasado acima de 2 h aparece em destaque, e o último erro aparece", async () => {
   saudeCom({ ...BACKUP_EM_DIA, atrasado: true, ultimo_snapshot_erro_em: "2026-10-13T10:30:00-04:00",
              ultimo_snapshot_erro: "não foi possível gravar o snapshot; o detalhe está no log do servidor" });

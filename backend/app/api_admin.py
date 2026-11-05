@@ -1,7 +1,7 @@
 import datetime
 import sqlite3
-from fastapi import APIRouter, Depends, Query
-from app import auditoria, backup, correio, seguranca, siga, tempo
+from fastapi import APIRouter, Depends, HTTPException, Query
+from app import auditoria, backup, copia_dono, correio, seguranca, siga, tempo
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -34,6 +34,19 @@ def saude_do_backup(usuario: dict = Depends(exigir("administrar", com_csrf=False
     """Administracao > Saude (issue #31): ultimo backup, quantos estao guardados, ultimo erro
     e se esta atrasado (mais de 2 h sem snapshot). So' admin: traz caminhos e erros do servidor."""
     return backup.situacao(backup.pasta_local(), backup.pasta_externa() is not None, tempo.agora_utc())
+
+
+@router.post("/copia-dono")
+def gerar_copia_dono(usuario: dict = Depends(exigir("administrar"))):
+    """Botao "Gerar cópia do dono agora" (Administracao > Saude, issue #419). So' admin.
+    Sem chave publica configurada nada e' gerado."""
+    try:
+        destino = copia_dono.gerar_e_registrar(backup.pasta_local().parent.parent, backup.pasta_local())
+    except copia_dono.NaoConfigurada:
+        raise HTTPException(409, copia_dono.NAO_CONFIGURADA)
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível gerar a cópia do dono: {copia_dono._motivo(e)}")
+    return {"arquivo": destino.name}
 
 
 @router.get("/saude")

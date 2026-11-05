@@ -54,6 +54,9 @@ dependencies = [
     # app/espelho_docx.py). python-docx nao le w:sdt; lxml preserva os prefixos de namespace
     # que o Word exige (mc:Ignorable).
     "lxml>=5.0,<7.0",
+    # Copia cifrada semanal para a chave do dono (app/copia_dono.py, issue #419): formato age,
+    # X25519. PINADO EXATO: o formato do pacote e' o que o dono decifra no Mac com age/rage.
+    "pyrage==1.4.0",
 ]
 
 [tool.pytest.ini_options]

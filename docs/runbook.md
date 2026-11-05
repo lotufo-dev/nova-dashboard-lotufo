@@ -87,6 +87,12 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
 5. Devolver os arquivos que o banco cita (notas, espelhos, modelos, evidências), da cópia local ou da externa (`<pasta externa>\arquivos`), sem apagar o que já está em `dados`: `cd backend; .venv\Scripts\python -c "from pathlib import Path; from app import backup; print(backup.copiar_arquivos(Path(r'C:\DashboardLotufo\dados\backups\arquivos'), Path(r'C:\DashboardLotufo\dados'), conferir=True), 'arquivos copiados')"`. Copia o que falta, relê pelo sha256 o que já está em `dados` e troca o estragado, e confere cada cópia. Se terminar com "arquivo(s) sem cópia", os listados estão estragados também no backup: tentar a outra cópia (local ou externa).
 6. Subir o servidor; as migrações pendentes rodam sozinhas em `create_app()`.
 
+## Cópia do dono
+Uma vez por semana (primeira rodada do backup depois de 7 dias da cópia anterior) e a qualquer hora pelo botão "Gerar cópia do dono agora" em Administração › Saúde (só admin), o servidor gera `dados\backups\dono\dashboard-dono-AAAAMMDD-HHMMSS.tar.age` (+ `.sha256`; ficam as 4 mais recentes). É um `.tar` cifrado no formato age (X25519) para a chave pública do dono, com o último snapshot válido, a pasta `segredos` e o clone do cadastro (sem `.git`). O `.tar` é montado em memória: nada em claro vai ao disco. A chave privada nunca está no servidor; o código recusa chave privada como configuração e não decifra nada.
+- **Configurar (uma vez).** No Mac: `cd backend; python -m app.cli dono gerar-chave --saida <pasta>` (ou `rage-keygen`). Guarde `chave-privada-dono.txt` no cofre do dono e leve **só** a pública para a VM, em `<raiz>\segredos\chave-publica-dono.txt` (a variável `DASH_CHAVE_PUBLICA_DONO` aponta outro arquivo). Sem a chave pública nada é gerado e a Saúde mostra "Cópia do dono não configurada".
+- **Saúde.** `/api/health` e a tela mostram `ultima_copia_dono` e `ultima_copia_dono_erro`; mais de 8 dias sem cópia aparece em destaque na Saúde.
+- **Abrir no Mac.** Copiar o `.tar.age` (conferir o `.sha256`) e `rage -d -i <chave privada> <arquivo>.tar.age > pacote.tar`; `tar -xf pacote.tar` traz `banco/`, `segredos/` e `cadastro/`. Siga "Restaurar o banco a partir de um snapshot" com o `.db` de `banco/`.
+
 ## HTTP ou HTTPS
 Decisão de 2026-09-02: produção em **HTTP na porta 80** (`http://<servidor>`), com `-SemTls` em `rodar_producao.ps1` e `instalar_autostart.ps1`. Ninguém precisa instalar certificado; a senha trafega em claro só dentro da rede interna. `DASH_SEM_TLS=1` tira a flag `secure` do cookie de sessão (o resto continua igual). Voltar a HTTPS = reinstalar a tarefa sem `-SemTls` e seguir a seção abaixo. Outra porta (VM em que a 80 é do IIS): `-Porta 8080` nos scripts de autostart, watchdog e deploy, e a regra de firewall abaixo com essa porta. Liberar a porta no firewall do servidor (uma vez, como administrador):
 ```
@@ -107,7 +113,7 @@ Import-Certificate -FilePath \\<servidor>\...\certs\cert.pem -CertStoreLocation 
 - Senha esquecida: não há reset pela tela hoje; criar outro usuário e desativar o antigo. Dívida registrada.
 
 ## Variáveis de ambiente
-`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db`), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
+`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db`), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_CHAVE_PUBLICA_DONO` (cópia do dono), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
 
 ## TOTVS RM (fase 5, leitura)
 A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_USUARIO` e a senha estão definidos; sem eles o sistema segue com NF e recebimento registrados à mão. Botão "Sincronizar agora" e reconciliação em Administração → TOTVS RM.
@@ -206,9 +212,12 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
 
    Qualquer `erro` ou `conflito` faz a gravação recusar o arquivo inteiro, sem gravar nada.
 3. **OK do Leo** sobre o relatório do ensaio, antes de qualquer gravação.
-4. **Produção, pela VM**: atualizar o clone do cadastro, repetir o `--ensaio` contra o banco real (o relatório pode mudar desde o ensaio do Mac) e só então gravar. Em PowerShell, de `C:\DashboardLotufo\app\backend`:
+4. **Produção, pela VM, em dois scripts**: o `--ensaio` sai com 0 mesmo com linhas `correção` ou `valor diferente`, então o código de saída não substitui a leitura do relatório. Por isso o ensaio de produção e a gravação nunca ficam no mesmo script: primeiro o script 1 (atualizar o clone e ensaiar), depois a leitura do relatório e a conferência do `planilha_enviada_em`, e só com o OK o script 2 (gravar). A sessão `ssh` abre na pasta do perfil da conta, não em `C:\DashboardLotufo\app\backend`; por isso os dois começam com `Set-Location`. Comando nativo não encontrado não altera `$LASTEXITCODE`, então o `Set-Location` vem antes e cada comando nativo é seguido da checagem.
+
+   **Script 1, pull e ensaio** (não grava nada):
 
    ```powershell
+   Set-Location C:\DashboardLotufo\app\backend -ErrorAction Stop
    git -C C:\DashboardLotufo\cadastro pull --ff-only
    if ($LASTEXITCODE -ne 0) { exit 1 }
    $env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"
@@ -216,10 +225,22 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
    $csv = "C:\DashboardLotufo\cadastro\medicoes\<slug>.csv"
    .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --ensaio
    if ($LASTEXITCODE -ne 0) { exit 1 }
-   .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --usuario <e-mail do admin>
    ```
 
-   Pelo Mac, os comandos acima vão num `script.ps1` temporário no Mac, fora do repositório, e rodam na VM (`<vm>`, não `<servidor>`) com `-File`: no `-Command -` o comando nativo (`git`, `python`) consome o resto do script pelo stdin e ele para no meio (ver "Mudar de servidor"). Copiar o script com `scp script.ps1 <vm>:C:/Temp/x.ps1` ou, se o `scp` falhar, por stdin: `ssh <vm> 'powershell -NoProfile -Command "[Console]::In.ReadToEnd() | Set-Content -Path C:\Temp\x.ps1 -Encoding ASCII"' < script.ps1`; rodar com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\x.ps1'` e apagar o `x.ps1` depois. O shell remoto é PowerShell 5.1: sem `&&`, usar `;`. O `git pull` do cadastro privado precisa de credencial do GitHub na VM; se falhar, o script sai com 1 antes da carga, que não deve rodar com o CSV velho. A gravação é uma transação por obra e termina em `GRAVADO: <obra> (<arquivo>), N medição(ões) criada(s)`. O snapshot horário do backup cobre o antes.
+   **Entre os dois**: ler o relatório do ensaio de produção (o que mudou desde o ensaio do Mac, categorias do passo 2) e, em cada linha `correção`, conferir o `planilha_enviada_em` (seção "Regra: competência de medição com planilha ou carta enviada"). Qualquer `erro`, `conflito` ou linha inesperada: parar, corrigir o CSV no repositório privado e repetir o script 1. O `-ErrorAction Stop` no `Set-Location` é necessário: no PowerShell 5.1 um `Set-Location` que falha só mostra o erro e o script segue na pasta errada. "Arquivo não encontrado" no script 1 significa que o CSV não está nesse caminho (ainda não chegou ao repositório privado, ou o `<slug>` está errado). "Banco não encontrado" com o caminho certo indica que a conta de deploy não tem leitura no arquivo do banco; "Banco ilegível" fica para banco corrompido ou `-wal`/`-shm` sem leitura.
+
+   **Script 2, gravação** (só depois do OK sobre o relatório de produção):
+
+   ```powershell
+   Set-Location C:\DashboardLotufo\app\backend -ErrorAction Stop
+   $env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"
+   $env:DASH_DB_PATH = "C:\DashboardLotufo\dados\dashboard.db"
+   $csv = "C:\DashboardLotufo\cadastro\medicoes\<slug>.csv"
+   .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --usuario <e-mail do admin>
+   if ($LASTEXITCODE -ne 0) { exit 1 }
+   ```
+
+   Pelo Mac, cada script vai num `.ps1` temporário no Mac, fora do repositório, e roda na VM (`<vm>`, não `<servidor>`) com `-File`: no `-Command -` o comando nativo (`git`, `python`) consome o resto do script pelo stdin e ele para no meio (ver "Mudar de servidor"). Copiar com `scp script.ps1 <vm>:C:/Temp/x.ps1` ou, se o `scp` falhar, por stdin: `ssh <vm> 'powershell -NoProfile -Command "[Console]::In.ReadToEnd() | Set-Content -Path C:\Temp\x.ps1 -Encoding ASCII"' < script.ps1`; rodar com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\x.ps1'` e apagar o `x.ps1` depois. O shell remoto é PowerShell 5.1: sem `&&`, usar `;`. O `git pull` do cadastro privado precisa de credencial do GitHub na VM; se falhar, o script 1 sai com 1 antes do ensaio, que não deve rodar com o CSV velho. A gravação é uma transação por obra e termina em `GRAVADO: <obra> (<arquivo>), N medição(ões) criada(s)`. O snapshot horário do backup cobre o antes.
 5. **Conferir**: `GET /api/health` com `banco: ok`; a aba Medições da obra mostra as medições novas; e o `audit_log` tem a ação `medicao.carga_historico` no contrato, com arquivo, criadas, corrigidas e as linhas. Rodar de novo sem nada novo não deixa rastro.
 
 ### Regra: competência de medição com planilha ou carta enviada

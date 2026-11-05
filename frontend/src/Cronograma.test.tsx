@@ -164,3 +164,35 @@ describe("Cronograma: texto na tela", () => {
     expect(screen.queryByText(/Medido acima/)).toBeNull();
   });
 });
+
+// issue #413: o cadeado bate com o servidor (depois de repactuacao, mes passado sem previsto tambem e' congelado)
+describe("Cronograma: cadeado depois da repactuação", () => {
+  const ponto = (competencia: string, previsto: number) => ({ competencia, previsto_centavos: previsto,
+    medido_execucao_centavos: 0, medido_reajuste_centavos: 0, medido_projeto_centavos: 0, atestado_pendente: false });
+  const curva = { curva: [ponto("2020-02", 0), ponto("2020-03", 5000)], saldo: CURVA.saldo };
+  const lista = (origem: string | null, superada: string | null = null) => [{
+    numero: 1, criado_em: "2020-02-10 12:00:00", chave: "c", origem_documento: origem, data_documento: null,
+    instrumento: null, competencias: 2, total_centavos: 5000, vigente: true, superada_em: superada }];
+  const servir = (versoes: unknown) => api.mockImplementation((c: string) => Promise.resolve(
+    c.endsWith("/curva") ? curva : c.endsWith("/cronograma") ? VERSAO : c.endsWith("/versoes") ? versoes : null));
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("com repactuação, o mês passado sem previsto também leva o cadeado", async () => {
+    servir(lista("carta"));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    expect(document.querySelectorAll(".cadeado").length).toBe(2);
+  });
+
+  it("sem repactuação (ou com ela superada), só o mês passado com previsto leva o cadeado", async () => {
+    servir(lista("contratual"));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    expect(document.querySelectorAll(".cadeado").length).toBe(1);
+    cleanup();
+    servir(lista("carta", "2026-11-05 15:00:00"));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByRole("table", { name: /Versões do cronograma/ });
+    expect(document.querySelectorAll(".cadeado").length).toBe(1);
+  });
+});

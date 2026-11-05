@@ -48,7 +48,8 @@ CONFERIR_DESTINO_SEG = 24 * 3600  # releitura completa do destino pelo sha256: u
 ESTADO: dict = {"ultimo_snapshot": None, "ultimo_snapshot_erro": None,
                 "ultima_copia_arquivos": None, "ultima_copia_arquivos_erro": None,
                 "ultima_copia_externa": None, "ultima_copia_externa_erro": None,
-                "ultima_copia_externa_arquivos": None, "ultima_copia_externa_arquivos_erro": None}
+                "ultima_copia_externa_arquivos": None, "ultima_copia_externa_arquivos_erro": None,
+                "ultima_copia_dono": None, "ultima_copia_dono_erro": None}
 
 # Worker dos arquivos (um por processo). Fase ("local"/"externa") e inicio (time.monotonic) da
 # passada em andamento, None = parado; `estado()` le isto na hora do /api/health para acusar a
@@ -531,6 +532,10 @@ def situacao(local: Path, externa_configurada: bool, agora: datetime.datetime) -
                                                 "não foi possível fazer a cópia externa")
     arq_erro_em, arq_erro = _erro_dos_arquivos(e["ultima_copia_arquivos_erro"])
     arq_ext_erro_em, arq_ext_erro = _erro_dos_arquivos(e["ultima_copia_externa_arquivos_erro"])
+    from app import copia_dono  # import tardio: copia_dono importa este modulo
+    dono_em, dono_erro = _erro_dos_arquivos(e["ultima_copia_dono_erro"])  # frase nossa (_motivo), sem caminho
+    dono_ultima = copia_dono.ultima_copia(local)
+    dono_ok = copia_dono.configurada(local.parent.parent)  # backups -> dados -> <raiz>
     return {
         "ultimo_snapshot": e["ultimo_snapshot"],
         "ultimo_snapshot_erro": snap_erro,
@@ -545,6 +550,12 @@ def situacao(local: Path, externa_configurada: bool, agora: datetime.datetime) -
         "ultima_copia_externa_arquivos": e["ultima_copia_externa_arquivos"],
         "ultima_copia_externa_arquivos_erro": arq_ext_erro,
         "ultima_copia_externa_arquivos_erro_em": arq_ext_erro_em,
+        # issue #419: copia cifrada semanal para a chave do dono (a data vem do DISCO)
+        "ultima_copia_dono": tempo.para_local(dono_ultima).isoformat(timespec="seconds") if dono_ultima else None,
+        "ultima_copia_dono_erro": dono_erro,
+        "ultima_copia_dono_erro_em": dono_em,
+        "copia_dono_configurada": dono_ok,
+        "copia_dono_atrasada": dono_ok and copia_dono.atrasada(local, agora),
         "ultimo_backup": tempo.para_local(ultimo_em).isoformat(timespec="seconds") if ultimo_em else None,
         "tamanho_bytes": ultimo.st_size if ultimo else None,
         "guardados": len(stats),
@@ -562,6 +573,11 @@ def agendar_backup_horario(origem_db: Path, pasta_destino: Path,
             except Exception:  # rede de seguranca: a thread de backup nunca morre
                 log.exception("rodada de backup falhou fora do previsto")
             _acordar_arquivos.set()  # passada dos arquivos logo depois do snapshot
+            try:  # issue #419: copia do dono, uma por semana (sem chave publica, nao faz nada)
+                from app import copia_dono
+                copia_dono.rodada_semanal(pasta_destino.parent.parent, pasta_destino)
+            except Exception:
+                log.exception("rodada da copia do dono falhou fora do previsto")
             try:
                 _supervisionar_arquivos(origem_db, pasta_destino, pasta_externa)
             except Exception:
