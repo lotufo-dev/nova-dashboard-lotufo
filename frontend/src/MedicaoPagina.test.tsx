@@ -197,6 +197,19 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(screen.queryByText(/O aprovado mudou/)).toBeNull();
   });
 
+  it("#359: no par, uma linha por medição: a nota emitida da execução não esconde o “gere de novo” do reajuste", async () => {
+    const EXE = { ...MEDICAO, estado: "nota_emitida", espelho_desatualizado: "nota_emitida" };
+    const REAJ = { ...MEDICAO, id: 6, tipo: "reajuste", estado: "espelho_enviado", espelho_desatualizado: "aprovado_mudou" };
+    responder({ "/api/contratos/1/medicoes": [EXE, REAJ] });
+    pagina();
+    await screen.findByRole("heading", { name: "23ª Medição + Reajuste", level: 1 });
+    const gerar = screen.getByRole("link", { name: "gere o espelho de novo" });
+    expect(gerar.closest(".aviso")!.textContent).toContain("Reajuste da 23ª Medição: o aprovado mudou depois do espelho, ");
+    const notas = screen.getByRole("link", { name: "ver as notas" });
+    expect(notas.closest(".aviso")!.textContent).toContain("23ª Medição: o aprovado mudou depois do espelho e a nota já foi emitida, ");
+    expect(document.querySelectorAll(".aviso")).toHaveLength(2);
+  });
+
   it("#359: sem o aprovado mudado, nada de aviso do espelho", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: null }] });
     pagina();

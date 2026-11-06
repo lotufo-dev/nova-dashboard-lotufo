@@ -29,8 +29,9 @@ export type PainelInicio = {
   prazos: Prazo[];
   espelhos: EspelhoAConferir[];
 };
-// #359: o aprovado mudou depois do espelho (ou o espelho antigo nao se confere): a mesma fonte do aviso
-type EspelhoAConferir = { contrato_id: number; medicao_id: number; obra: string | null; titulo: string;
+// #359: o aprovado mudou depois do espelho (ou o espelho antigo nao se confere): a mesma fonte do aviso, um por
+// espelho vigente, com a medicao dele que pede o ato
+type EspelhoAConferir = { espelho_id: number; contrato_id: number; medicao_id: number; obra: string | null; titulo: string;
   situacao: "aprovado_mudou" | "nota_emitida" | "nao_conferido" };
 
 const PRAZOS_VISIVEIS = 6;

@@ -69,7 +69,7 @@ describe("Início", () => {
 
   it("#359: espelho com o aprovado mudado vira cartão que leva à medição; mais de um leva aos avisos", async () => {
     const esp = (medicao_id: number, situacao: PainelInicio["espelhos"][number]["situacao"]) =>
-      ({ contrato_id: 7, medicao_id, obra: "Obra A", titulo: "23ª Medição", situacao });
+      ({ espelho_id: medicao_id + 100, contrato_id: 7, medicao_id, obra: "Obra A", titulo: "23ª Medição", situacao });
     api.mockResolvedValue(painel({ espelhos: [esp(723, "aprovado_mudou")] }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     let cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
