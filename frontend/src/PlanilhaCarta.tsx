@@ -267,7 +267,7 @@ type SituacaoEnvio = {
   disponivel: boolean; motivo: string | null;
   envios: EnvioPlanilha[];
   reserva: { id: number; envio_reservado_em: string | null; reservado_por: string | null } | null;
-  pecas: Peca[]; pecas_do_orgao: { tipo: string; rotulo: string; exigida: boolean }[];
+  pecas: Peca[]; pecas_do_orgao: { tipo: string; rotulo: string; exigida: boolean; no_oficio: boolean }[];
 };
 export type DetalhePlanilha = {
   id: number; contrato_id: number; numero: number; tipo: string; competencia: string; estado: string; planilha_enviada_em: string | null;
@@ -301,8 +301,10 @@ export function revisaoPendente(d: DetalhePlanilha): boolean {
 function itensDasPecas(s: SituacaoEnvio): ItemChecklist[] {
   return s.pecas_do_orgao.map(p => {
     const arquivos = s.pecas.filter(x => x.tipo === p.tipo).map(x => ({ id: x.id, nome: x.nome, tamanho: x.tamanho }));
-    return { chave: p.tipo, rotulo: p.rotulo, arquivos, aceita: ".xlsx,application/pdf",
-      situacao: arquivos.length > 0 ? "anexada" : p.exigida ? "falta" : "opcional" };
+    // a peca que vai no oficio assinado nao se anexa (o servidor recusa); a anexada antes da marca nao vai no e-mail,
+    // mas ainda se remove
+    return { chave: p.tipo, rotulo: p.rotulo, arquivos, aceita: ".xlsx,application/pdf", semAnexar: p.no_oficio,
+      situacao: p.no_oficio ? "no_oficio" : arquivos.length > 0 ? "anexada" : p.exigida ? "falta" : "opcional" };
   });
 }
 
@@ -328,7 +330,10 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
   const avisarPendente = useRef(aoRevisaoPendente);
   useEffect(() => { avisarPendente.current = aoRevisaoPendente; });
   async function carregar() {
-    setD(await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`));
+    const x = await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`);
+    setD(x);
+    // toda releitura certa avisa a pagina, para ela sair de uma falha anterior mesmo sem o pendente mudar
+    avisarPendente.current?.(revisaoPendente(x));
   }
   useEffect(() => {
     let vivo = true;

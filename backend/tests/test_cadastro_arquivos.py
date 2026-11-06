@@ -242,6 +242,76 @@ def test_excecao_de_documentos_no_contrato(tmp_path):
     assert ca.preparar(_escrever(tmp_path))["contratos"][0]["documentos"] is None
 
 
+# --- issue #462: peca que vai no oficio assinado --------------------------------------------------
+
+ORGAO_PECAS = {**ORGAO, "pecas": [{"tipo": "boletim", "rotulo": "Memória de cálculo", "exigida": True, "no_oficio": True},
+                                  {"tipo": "cronograma", "rotulo": "Cronograma físico-financeiro"}]}
+
+
+def test_no_oficio_da_peca_do_orgao_e_booleano(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path / "a", orgaos=[ORGAO_PECAS]))
+    assert [p.get("no_oficio") for p in cad["orgaos"][0]["regras"]["pecas"]] == [True, None]
+    ruim = {**ORGAO, "pecas": [{"tipo": "boletim", "rotulo": "Memória de cálculo", "no_oficio": "sim"}]}
+    erros = _erros(_escrever(tmp_path / "b", orgaos=[ruim]))
+    assert "orgaos.yaml[0]: pecas[0].no_oficio: use true ou false" in erros
+    planilha = {**ORGAO, "pecas": [{"tipo": "planilha", "rotulo": "Planilha editável", "solto": True, "no_oficio": True}]}
+    erros = _erros(_escrever(tmp_path / "c", orgaos=[planilha]))
+    assert any(e.startswith("orgaos.yaml[0]: pecas[0].no_oficio: a planilha editável") for e in erros)
+
+
+def test_pecas_no_oficio_do_contrato(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path / "a", orgaos=[ORGAO_PECAS],
+                                contratos=[{**CONTRATO, "pecas_no_oficio": ["cronograma"]}]))
+    assert cad["contratos"][0]["pecas_no_oficio"] == ["cronograma"]
+    cad = ca.preparar(_escrever(tmp_path / "b", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": []}]))
+    assert cad["contratos"][0]["pecas_no_oficio"] == []
+    # sem a chave: segue o orgao (None, nao lista vazia)
+    assert ca.preparar(_escrever(tmp_path / "c", orgaos=[ORGAO_PECAS]))["contratos"][0]["pecas_no_oficio"] is None
+    erros = _erros(_escrever(tmp_path / "d", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": ["fotos"]}]))
+    assert "contratos/mt-402.yaml: pecas_no_oficio: o órgão sinfra-suef1 não pede fotos" in erros
+    for ruim in ("cronograma", ["cronograma", "cronograma"], ["video"], ["planilha"]):
+        erros = _erros(_escrever(tmp_path / "e", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": ruim}]))
+        assert any(e.startswith("contratos/mt-402.yaml: pecas_no_oficio:") for e in erros), ruim
+
+
+def test_no_oficio_recusa_peca_solta_familia_fora_da_sinfra_e_tipo_repetido(tmp_path):
+    """Gate Sol (PR #473): a marca e' por tipo e so' da SINFRA; solta e no oficio ao mesmo tempo nao fazem sentido."""
+    def erros_de(pecas, familia="sinfra", pasta="x"):
+        return _erros(_escrever(tmp_path / pasta, orgaos=[{**ORGAO, "familia": familia, "pecas": pecas}]))
+
+    marcada = {"tipo": "boletim", "rotulo": "Memória de cálculo", "exigida": True, "no_oficio": True}
+    assert any("pecas[0].no_oficio: a peça marcada solto: true" in e
+               for e in erros_de([{**marcada, "solto": True}], pasta="a"))
+    assert any("pecas[0].no_oficio: só vale na família sinfra" in e for e in erros_de([marcada], "ses", "b"))
+    reajuste = {"tipo": "outro", "rotulo": "Planilha de reajuste", "exigida": True, "naturezas": ["reajuste"]}
+    execucao = {"tipo": "outro", "rotulo": "Relatório", "no_oficio": True, "naturezas": ["execucao"]}
+    assert any("pecas[1].no_oficio: o tipo outro aparece mais de uma vez" in e
+               for e in erros_de([reajuste, execucao], pasta="c"))
+    # tipo repetido sem a marca continua valendo, como antes
+    ca.preparar(_escrever(tmp_path / "d", orgaos=[{**ORGAO, "pecas": [reajuste, {**execucao, "no_oficio": False}]}]))
+
+
+def test_pecas_no_oficio_do_contrato_segue_as_mesmas_restricoes(tmp_path):
+    def erros_de(orgao, pasta):
+        return _erros(_escrever(tmp_path / pasta, orgaos=[orgao], contratos=[{**CONTRATO, "pecas_no_oficio": ["fotos"]}]))
+
+    fotos = {"tipo": "fotos", "rotulo": "Registro fotográfico"}
+    onde = "contratos/mt-402.yaml: pecas_no_oficio: "
+    assert any(e.startswith(onde + "a peça marcada solto: true")
+               for e in erros_de({**ORGAO, "pecas": [{**fotos, "solto": True}]}, "a"))
+    assert any(e.startswith(onde + "só vale na família sinfra")
+               for e in erros_de({**ORGAO, "familia": "prefeitura", "pecas": [fotos]}, "b"))
+    assert any(e.startswith(onde + "o tipo fotos aparece mais de uma vez")
+               for e in erros_de({**ORGAO, "pecas": [fotos, {**fotos, "rotulo": "Fotos do canteiro"}]}, "c"))
+
+
+def test_cadastro_de_exemplo_poe_a_memoria_no_oficio(tmp_path):
+    from tests.conftest import CADASTRO_EXEMPLO
+    pecas = {p["tipo"]: p for p in ca.preparar(CADASTRO_EXEMPLO)["orgaos"][0]["regras"]["pecas"]}
+    assert pecas["boletim"]["no_oficio"] is True and pecas["boletim"]["exigida"] is True
+    assert not pecas["fotos"].get("no_oficio")
+
+
 # --- bloco 5: cartas, pecas do orgao, CNO e dados do fiscal ---------------------------------------
 
 def test_cartas_ausente_passa_e_familia_ou_timbre_invalidos_sao_erro(tmp_path):

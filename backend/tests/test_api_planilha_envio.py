@@ -6,7 +6,8 @@ import zipfile
 
 import pytest
 
-from app import cadastro_aplicar, contratos, correio, db, envio_reserva, medicao_planilhas, planilha_envio, tempo
+from app import (cadastro_aplicar, contratos, correio, db, envio_reserva, medicao_planilhas, planilha_envio, protocolo,
+                 tempo)
 from tests.test_api_medicoes import XLSX, _arquivos_planilha
 from tests.test_envio_reserva import CorreioFalso
 from tests.test_protocolo import CARTAS, _contrato
@@ -17,22 +18,27 @@ PECAS = [{"tipo": "boletim", "rotulo": "Memória de cálculo da medição", "exi
          {"tipo": "planilha", "rotulo": "Planilha editável", "exigida": True, "solto": True}]
 
 
-@pytest.fixture
-def api(client_admin, tmp_path, monkeypatch):
-    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
-    c = db.get_conn()
-    cadastro_aplicar.aplicar(c, 1, {
+def _cadastro(pecas=PECAS, **contrato_sinfra) -> dict:
+    return {
         "orgaos": [{"chave": "sinfra", "nome": "SINFRA - SUEF II", "familia": "sinfra", "cnpj": None,
                     "regras": {"protocolo_para": ["protocolo@orgao-a.exemplo.com.br"],
-                               "protocolo_copia": ["engenharia@lotufo.com"], "pecas": PECAS,
+                               "protocolo_copia": ["engenharia@lotufo.com"], "pecas": pecas,
                                "documentos_medicao": [], "documentos_reajuste": []}},
                    {"chave": "mtpar", "nome": "MTPAR", "familia": "mtpar", "cnpj": None,
                     "regras": {"protocolo_para": ["protocolo@orgao-b.exemplo.com.br"], "documentos_medicao": [],
                                "documentos_reajuste": []}}],
         "entidades": [{"chave": "lotufo", "nome": "Construtora Exemplo Ltda", "cnpj": "31200101000130",
                        "papel": "lotufo", "coligada_rm": 1, "sigla_oficio": "LT", "nome_curto": "Exemplo"}],
-        "contratos": [_contrato("Obra SINFRA", "sinfra", "IC 082/2025"), _contrato("Obra MTPAR", "mtpar", "099/2024")],
-        "avisos": [], "geral": {"cartas": CARTAS}})
+        "contratos": [{**_contrato("Obra SINFRA", "sinfra", "IC 082/2025"), **contrato_sinfra},
+                      _contrato("Obra MTPAR", "mtpar", "099/2024")],
+        "avisos": [], "geral": {"cartas": CARTAS}}
+
+
+@pytest.fixture
+def api(client_admin, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    c = db.get_conn()
+    cadastro_aplicar.aplicar(c, 1, _cadastro())
     ids = {r["nome_curto"]: r["id"] for r in c.execute("SELECT id, nome_curto FROM contratos")}
     c.commit(); c.close()
     return client_admin, ids["Obra SINFRA"], ids["Obra MTPAR"]
@@ -427,3 +433,113 @@ def test_revisao_enviada_por_fora_nao_sai_de_novo_pelo_sistema(api):
         (1, "externo", "2026-08-03"), (2, "externo", "2026-08-05")]
     r = cl.post(f"/api/medicoes/{mid}/envio-planilha/previa", json={"numero_oficio": "337"})
     assert r.status_code == 422 and "versão 2" in r.json()["detail"]
+
+
+# --- issue #462: peca que vai no oficio assinado ---------------------------------------------------
+
+# a memoria (exigida) vai dentro do PDF assinado do oficio, como nas cartas da SINFRA ("conforme abaixo elencado")
+PECAS_NO_OFICIO = [{**PECAS[0], "no_oficio": True}, *PECAS[1:]]
+
+
+def _reaplicar(**kw):
+    c = db.get_conn()
+    try:
+        cadastro_aplicar.aplicar(c, 1, _cadastro(**kw))
+        c.commit()
+    finally:
+        c.close()
+
+
+def _no_oficio(cl, mid) -> dict:
+    s = cl.get(f"/api/medicoes/{mid}").json()["envio_planilha"]
+    return {p["tipo"]: p["no_oficio"] for p in s["pecas_do_orgao"]}
+
+
+def _pendencias(cl, mid) -> tuple[dict, list[str]]:
+    pv = cl.post(f"/api/medicoes/{mid}/envio-planilha/previa", json={"numero_oficio": "337"})
+    assert pv.status_code == 200, pv.text
+    return pv.json(), [p["mensagem"] for p in pv.json()["pendencias"]]
+
+
+def test_peca_no_oficio_exigida_nao_e_pendencia_e_o_envio_sai_sem_justificativa(api):
+    cl, cid, _ = api
+    _reaplicar(pecas=PECAS_NO_OFICIO)
+    mid = _planilha(cl, cid)
+    assert _no_oficio(cl, mid) == {"boletim": True, "fotos": False}
+    pv, pend = _pendencias(cl, mid)
+    assert pend == []
+    # a lista de anexos continua dizendo so' o que vai: o oficio e a planilha
+    assert [a["origem"] for a in pv["anexos"]] == ["oficio", "planilha"]
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
+    assert r.status_code == 200, r.text
+    assert _linha("SELECT justificativa FROM medicao_planilha_envios WHERE medicao_id=?", mid) == {"justificativa": None}
+
+
+def test_peca_no_oficio_nao_aceita_anexo_e_a_sem_marca_continua_anexavel(api):
+    cl, cid, _ = api
+    _reaplicar(pecas=PECAS_NO_OFICIO)
+    mid = _planilha(cl, cid)
+    r = _peca(cl, mid, "boletim")
+    assert r.status_code == 422 and r.json()["detail"] == "Esta peça vai no ofício assinado"
+    assert _linha("SELECT COUNT(*) AS n FROM medicao_planilha_pecas WHERE medicao_id=?", mid) == {"n": 0}
+    assert _peca(cl, mid, "fotos").status_code == 200
+
+
+def test_peca_anexada_antes_da_marca_nao_vai_no_email(api):
+    """Gate Sol (PR #473): o oficio assinado ja' leva a peca; o anexo antigo nao vai de novo nem pesa no total."""
+    cl, cid, _ = api
+    mid = _planilha(cl, cid)
+    assert _peca(cl, mid, "boletim").status_code == 200
+    assert _peca(cl, mid, "fotos").status_code == 200
+    _reaplicar(pecas=PECAS_NO_OFICIO)
+    pv, pend = _pendencias(cl, mid)
+    assert pend == []
+    assert [(a["nome"], a["origem"]) for a in pv["anexos"]][2:] == [("fotos.pdf", "pecas")]
+    assert pv["total"] == sum(a["tamanho"] for a in pv["anexos"])
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
+    assert r.status_code == 200, r.text
+    c = db.get_conn()
+    nomes = [x[0] for x in c.execute("SELECT nome FROM envio_anexos WHERE envio_id=? ORDER BY id", (r.json()["envio_id"],))]
+    c.close()
+    assert "boletim.pdf" not in nomes and "fotos.pdf" in nomes
+
+
+def test_marca_posta_entre_a_previa_e_o_envio_recusa_pelos_anexos(api):
+    """A previa e' refeita no envio (planilha_envio.enviar) e a conferencia dos anexos recusa o que mudou."""
+    cl, cid, _ = api
+    mid, pv = _pronta(cl, cid)          # boletim anexado, sem a marca
+    _reaplicar(pecas=PECAS_NO_OFICIO)
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
+    assert r.status_code == 422 and r.json()["detail"]["codigo"] == "ANEXOS_MUDARAM"
+
+
+def test_marca_fora_da_sinfra_e_ignorada():
+    pecas = {"pecas": [{"tipo": "boletim", "no_oficio": True}]}
+    assert protocolo.tipos_no_oficio("sinfra", pecas, {}) == {"boletim"}
+    for familia in ("ses", "prefeitura", "mtpar"):
+        assert protocolo.tipos_no_oficio(familia, pecas, {"pecas_no_oficio": '["boletim"]'}) == set()
+
+
+def test_sem_a_marca_a_peca_exigida_continua_cobrando(api):
+    cl, cid, _ = api
+    mid = _planilha(cl, cid)
+    assert _no_oficio(cl, mid) == {"boletim": False, "fotos": False}
+    assert _pendencias(cl, mid)[1] == ["Falta a peça que o órgão exige: Memória de cálculo da medição"]
+
+
+def test_excecao_do_contrato_substitui_as_pecas_no_oficio_do_orgao(api):
+    cl, cid, _ = api
+    _reaplicar(pecas=PECAS_NO_OFICIO, pecas_no_oficio=["fotos"])
+    mid = _planilha(cl, cid)
+    # so' o que o contrato diz vai no oficio: a memoria exigida volta a cobrar, como no orgao sem a marca
+    assert _no_oficio(cl, mid) == {"boletim": False, "fotos": True}
+    assert _pendencias(cl, mid)[1] == ["Falta a peça que o órgão exige: Memória de cálculo da medição"]
+    assert _peca(cl, mid, "fotos").json()["detail"] == "Esta peça vai no ofício assinado"
+    assert _peca(cl, mid, "boletim").status_code == 200
+    # lista vazia desliga todas
+    _reaplicar(pecas=PECAS_NO_OFICIO, pecas_no_oficio=[])
+    assert _linha("SELECT pecas_no_oficio FROM contratos WHERE id=?", cid) == {"pecas_no_oficio": "[]"}
+    assert _no_oficio(cl, mid) == {"boletim": False, "fotos": False}
+    # sem a chave no contrato, vale o orgao de novo
+    _reaplicar(pecas=PECAS_NO_OFICIO)
+    assert _no_oficio(cl, mid) == {"boletim": True, "fotos": False}

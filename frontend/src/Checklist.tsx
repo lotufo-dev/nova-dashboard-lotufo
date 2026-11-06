@@ -11,7 +11,7 @@ import Selo from "./Selo";
 export type ArquivoChecklist = { id: number; nome: string; tamanho: number };
 export type ItemChecklist = {
   chave: string; rotulo: string;
-  situacao: "anexada" | "falta" | "opcional";
+  situacao: "anexada" | "falta" | "opcional" | "no_oficio";      // no_oficio: vai dentro do ofício assinado (#462)
   arquivos: ArquivoChecklist[];
   aceita?: string;                                // extensoes do seletor de arquivo
   semAnexar?: boolean;                            // grupo que so' lista arquivos (tipo que a familia nao pede)
@@ -21,6 +21,7 @@ export type ItemChecklist = {
 function SeloSituacao({ situacao }: { situacao: ItemChecklist["situacao"] }) {
   return situacao === "anexada" ? <Selo classe="selo--ok">Anexada</Selo>
     : situacao === "falta" ? <Selo classe="selo--atencao">Falta</Selo>
+    : situacao === "no_oficio" ? <Selo>No ofício assinado</Selo>
     : <Selo>Opcional</Selo>;
 }
 

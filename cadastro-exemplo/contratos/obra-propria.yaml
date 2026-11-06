@@ -37,6 +37,8 @@ fiscais:
   desde: '2025-03-10'
 destinatarios_extras: []
 copia_extras: []
+# Opcional (issue #462): substitui, só neste contrato, as peças que o órgão marca `no_oficio`; [] desliga todas.
+# pecas_no_oficio: [cronograma]
 instrumentos:
 - chave: ta-01
   tipo: aditivo_valor

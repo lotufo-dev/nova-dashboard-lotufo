@@ -53,11 +53,19 @@ GATILHOS = {
         "sessoes_protecao_delete": "3053dbf83ca811dade2c9d999f6f3c30a4144dd78a490d5619b3b646aaf25200",
         "sessoes_protecao_update": "76985d0862ba96542e03d0212a5d8ee2e5052c449885bcc4dd7ae80b75fadbfe",
     },
+    # issue #456: o ponto de leitura da sentinela, migracao 063
+    "sentinela_ponto": {
+        "sentinela_ponto_protecao_insert": "687a8330073856c2e73eddb3a187d12a078b54b50728ae28b2904d71de962ed6",
+        "sentinela_ponto_protecao_delete": "0531b56b4d7091a4cc18376bef16219a57a720b922f05c0980378db66ce8781f",
+        "sentinela_ponto_protecao_update": "0aa65d7003588d025d24dc390b1b07dc0ea3c3725961e78dc825feb5966057b6",
+    },
 }
 PROTECAO_REMOVIDA = "Proteção da tabela de usuários removida"
 PROTECAO_SESSOES_REMOVIDA = "Proteção da tabela de sessões removida"
+PROTECAO_PONTO_REMOVIDA = "Proteção do ponto da sentinela removida"
 CADEIA_QUEBRADA = "Cadeia da auditoria quebrada"
-_MENSAGENS = {"usuarios": PROTECAO_REMOVIDA, "sessoes": PROTECAO_SESSOES_REMOVIDA}
+_MENSAGENS = {"usuarios": PROTECAO_REMOVIDA, "sessoes": PROTECAO_SESSOES_REMOVIDA,
+              "sentinela_ponto": PROTECAO_PONTO_REMOVIDA}
 INTERVALO_CONFERENCIA_SEG = 3600
 # O resultado da ultima conferencia (`conferir`), do processo: o bloco le daqui; reinicio refaz no boot (`agendar`)
 _conferencia: list[dict] = []

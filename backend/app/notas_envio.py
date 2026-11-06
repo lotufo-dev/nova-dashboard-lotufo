@@ -698,7 +698,9 @@ def aguardando_pagamento(conn) -> list[dict]:
                     "orgao": _grupo(r["familia"], {"chave": r["orgao_chave"], "nome": r["orgao_nome"]})
                     if r["familia"] else None,
                     "descricao": medicoes.titulo(r).replace("Medição", "medição"),
-                    "valor_centavos": r["valor_protocolado_centavos"], "enviada_em": enviada, "numero_orgao": numero,
+                    # issue #360: o mesmo valor da linha das Medicoes (aprovado, senao pedido), nao o pedido
+                    "valor_centavos": (medicoes.valor_travado(r) or (r["valor_protocolado_centavos"],))[0],
+                    "enviada_em": enviada, "numero_orgao": numero,
                     "familia": r["familia"], "origem": r["envio_origem"] or ("sistema" if p else None),
                     "protocolo_id": p["id"] if p else None,
                     "sem_numero_orgao": r["familia"] == "mtpar" and not numero})

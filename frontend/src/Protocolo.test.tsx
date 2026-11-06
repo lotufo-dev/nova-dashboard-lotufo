@@ -176,6 +176,28 @@ describe("Protocolo", () => {
     expect(screen.queryByText(/Obrigatório; informe o número/)).toBeNull();
   });
 
+  it("na etapa da medição, a peça que vai no ofício assinado mostra o selo e não tem Anexar (issue #462)", async () => {
+    const pecas = [{ tipo: "boletim", rotulo: "Memória de cálculo", exigida: true, solto: false, no_oficio: true },
+      { tipo: "croqui", rotulo: "Croqui de localização", exigida: true, solto: false, no_oficio: false }];
+    const medicao = { ...PROT, etapa: "medicao", etapa_rotulo: "Medição assinada", situacao: "rascunho", assinado_arquivo: null };
+    render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, familia: "sinfra", pecas, protocolos: [medicao] }}
+      carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+    const tabela = await screen.findByRole("table", { name: "Peças técnicas de Medição assinada" });
+    const memoria = within(tabela).getByRole("rowheader", { name: "Memória de cálculo" }).closest("tr")!;
+    expect(within(memoria).getByText("No ofício assinado")).toBeTruthy();
+    expect(within(memoria).queryByLabelText("Anexar Memória de cálculo")).toBeNull();
+    const croqui = within(tabela).getByRole("rowheader", { name: "Croqui de localização" }).closest("tr")!;
+    expect(within(croqui).getByText("Falta")).toBeTruthy();
+    expect(within(croqui).getByLabelText("Anexar Croqui de localização")).toBeTruthy();
+    cleanup();
+    // fora da etapa da medicao (pacote unico), a marca nao vale: a peca exigida continua cobrando
+    render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, pecas, protocolos: [{ ...medicao, etapa: "unico", etapa_rotulo: "Protocolo" }] }}
+      carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+    const unico = await screen.findByRole("table", { name: "Peças técnicas de Protocolo" });
+    expect(within(unico).queryByText("No ofício assinado")).toBeNull();
+    expect(within(unico).getByLabelText("Anexar Memória de cálculo")).toBeTruthy();
+  });
+
   it("prévia: o tamanho dos anexos só aparece quando passa do limite", async () => {
     const base = { para: ["a@x"], copia: [], assunto: "A", corpo: "C", anexos: [{ nome: "a.pdf", tamanho: 10 }], pendencias: [] };
     const abrir = async (total: number) => {
