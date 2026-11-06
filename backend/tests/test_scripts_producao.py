@@ -344,9 +344,51 @@ def test_watchdog_nao_reinicia_por_problema_no_conferidor():
     script = _ler("watchdog.ps1")
     conferidor = script.index("Initialize-DashSaudeLocal\n")
     bloco = script[conferidor:script.index("if (Saudavel) { exit 0 }")]
-    assert "Get-ThumbprintDoCertificado -Caminho $Certificado" in bloco
+    assert "$script:thumbprint = Get-ThumbprintDoCertificado -Caminho $Certificado" in bloco
     assert "producao NAO reiniciada" in bloco and "exit 1" in bloco
-    assert script.index("if (Test-Path $Pausa) { exit 0 }") < conferidor < script.index("Stop-ScheduledTask")
+    assert script.index('SairSePausado ""') < conferidor < script.index("Stop-ScheduledTask -TaskName")
+
+
+def test_watchdog_le_o_thumbprint_uma_vez_e_usa_em_todas_as_consultas():
+    # Gate Sol (rodada 2): cada Saudavel relia o cert.pem; ilegivel no meio da execucao, virava "producao fora"
+    script = _ler("watchdog.ps1")
+    saudavel = script[script.index("function Saudavel"):script.index("function SairSePausado")]
+    assert "Invoke-SaudeLocal -Url $Url -Certificado $Certificado -Thumbprint $script:thumbprint" in saudavel
+    assert _codigo(script).count("Get-ThumbprintDoCertificado") == 1
+    comum = _ler("comum_tls.ps1")
+    invoke = comum[comum.index("function Invoke-SaudeLocal"):]
+    assert '[string]$Thumbprint = ""' in invoke
+    # com o thumbprint dado, o arquivo nao e' relido
+    assert "if (-not $Thumbprint) {" in invoke
+    assert invoke.index("if (-not $Thumbprint) {") < invoke.index("Get-ThumbprintDoCertificado -Caminho $Certificado")
+
+
+def test_watchdog_confere_o_sentinela_antes_de_cada_passo_na_tarefa():
+    # Gate Sol (rodada 2): a manutencao pode comecar durante a segunda consulta (ate' 10 s)
+    script = _ler("watchdog.ps1")
+    funcao = script[script.index("function SairSePausado"):script.index('SairSePausado ""')]
+    assert "if (Test-Path $Pausa) {" in funcao and "exit 0" in funcao
+    parar = script.index("Stop-ScheduledTask -TaskName")
+    iniciar = script.index("Start-ScheduledTask -TaskName")
+    antes = script.rindex('SairSePausado "antes de parar a tarefa"', 0, parar)
+    entre = script.index('SairSePausado "entre a parada e o inicio"')
+    assert antes < parar < entre < iniciar
+    # e a segunda consulta vem depois de conferir o sentinela de novo
+    assert script.index("Start-Sleep -Seconds 15") < script.rindex('SairSePausado ""') < script.rindex("if (Saudavel) { exit 0 }")
+
+
+def test_watchdog_so_inicia_a_tarefa_que_de_fato_parou():
+    # Gate Sol (rodada 2): Stop com SilentlyContinue + catch vazio anulava a parada; instancia ainda "Running" fazia o
+    # Start ser ignorado (IgnoreNew) com o log dizendo "disparado"
+    script = _ler("watchdog.ps1")
+    codigo = _codigo(script)
+    assert "Stop-ScheduledTask -TaskName $Tarefa -ErrorAction Stop" in codigo
+    assert "SilentlyContinue" not in codigo
+    assert 'if ("$estado" -eq "Running") { Stop-ScheduledTask' in codigo   # Ready com o processo morto vai direto ao Start
+    assert "FALHA ao parar a tarefa, nada iniciado" in codigo
+    espera = codigo[codigo.index("$parada = $false"):codigo.index("Start-ScheduledTask -TaskName")]
+    assert '"$estado" -ne "Running"' in espera and "continua '$estado' depois da parada -> nada iniciado" in espera
+    assert "exit 1" in espera
 
 
 def test_watchdog_acusa_tarefa_que_nao_iniciou_e_saude_que_nao_voltou():
@@ -355,11 +397,15 @@ def test_watchdog_acusa_tarefa_que_nao_iniciou_e_saude_que_nao_voltou():
     assert '$ErrorActionPreference = "Stop"' in script
     assert "Start-ScheduledTask -TaskName $Tarefa -ErrorAction Stop" in script
     fim = script[script.index("Start-Sleep -Seconds 25"):]
-    assert 'pos-restart saudavel=False ($script:ultimoErro)' in fim and "exit 1" in fim
+    assert '"apos-reinicio saudavel=sim"' in fim
+    assert 'apos-reinicio saudavel=nao ($script:ultimoErro)' in fim and "exit 1" in fim
+    assert "pos-restart" not in script and "=True" not in script and "=False" not in script
 
 
-def test_rodar_producao_devolve_o_codigo_de_saida_do_uvicorn():
-    # Gate Sol: PEM ruim ou porta ocupada saiam com 0 e o RestartCount da tarefa nao agia
+def test_rodar_producao_nao_repassa_o_codigo_de_saida_do_uvicorn():
+    # Revisor (rodada 2): saida diferente de 0 ligaria o RestartCount da tarefa, que nao respeita o watchdog.pause e
+    # subiria no meio do rollback do deploy. O reinicio da producao caida e' so' do watchdog.
     script = _ler("rodar_producao.ps1")
-    fim = script[script.rindex("-m uvicorn"):]
-    assert "$codigo = $LASTEXITCODE" in fim and fim.rstrip().endswith("exit $codigo")
+    fim = _codigo(script[script.rindex("-m uvicorn"):])
+    assert "exit" not in fim and "$LASTEXITCODE" not in fim
+    assert "NÃO é repassado" in script and "watchdog.pause" in script

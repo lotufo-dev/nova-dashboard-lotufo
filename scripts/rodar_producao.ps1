@@ -246,7 +246,7 @@ if ($SemTls) {
         --host 0.0.0.0 --port $Porta `
         --ssl-keyfile (Join-Path $certs "chave.pem") --ssl-certfile (Join-Path $certs "cert.pem")
 }
-# O código de saída do uvicorn volta para a tarefa (gate Sol da PR #476): PEM ruim ou porta ocupada saíam com 0 pelo
-# `powershell -File`, e o reinício automático da tarefa (RestartCount) só age em falha.
-$codigo = $LASTEXITCODE
-exit $codigo
+# O código de saída do uvicorn NÃO é repassado à tarefa, de propósito (revisor da PR #476): com saída diferente de 0
+# o reinício automático da tarefa (RestartCount, 3× a cada 1 min) poderia passar a valer, e ele não respeita o
+# watchdog.pause: no rollback do deploy subiria no meio do checkout e do build. O reinício da produção caída é do
+# watchdog, que respeita o sentinela. A queda do uvicorn fica no dashboard.log.

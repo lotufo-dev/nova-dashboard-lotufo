@@ -27,23 +27,33 @@ function Escrever($m) {
 }
 . (Join-Path $PSScriptRoot "comum_tls.ps1")
 $script:ultimoErro = ""
+$script:thumbprint = ""
 function Saudavel {
     try {
-        $resposta = Invoke-SaudeLocal -Url $Url -Certificado $Certificado -TimeoutSec 10
+        $resposta = Invoke-SaudeLocal -Url $Url -Certificado $Certificado -Thumbprint $script:thumbprint -TimeoutSec 10
         $script:ultimoErro = "HTTP $($resposta.StatusCode)"
         return ($resposta.StatusCode -eq 200)
     }
     catch { $script:ultimoErro = $_.Exception.Message; return $false }
 }
+# Manutencao em curso (sentinela do deploy ou do runbook): nao tocar. Conferido de novo antes de cada passo que mexe
+# na tarefa, porque a manutencao pode comecar no meio desta execucao (gate Sol da PR #476).
+function SairSePausado([string]$Momento) {
+    if (Test-Path $Pausa) {
+        if ($Momento) { Escrever "sentinela de manutencao apareceu $Momento -> nada reiniciado" }
+        exit 0
+    }
+}
 
-if (Test-Path $Pausa) { exit 0 }              # manutencao em curso: nao tocar
+SairSePausado ""
 # Problema no CONFERIDOR nao e' problema da producao (revisor da PR #476): cert.pem ilegivel ou ausente, ou o C# da
 # saude bloqueado (antivirus no Add-Type), fariam o watchdog reiniciar uma producao saudavel a cada 3 minutos, para
-# sempre. Nesses casos registra no log e sai sem tocar na tarefa.
+# sempre. O thumbprint e' lido UMA vez por execucao e usado em todas as consultas: o arquivo que ficar ilegivel no
+# meio da execucao nao vira "producao fora". Falhou aqui, registra no log e sai sem tocar na tarefa.
 if ($Url -like "https://*") {
     try {
         Initialize-DashSaudeLocal
-        $null = Get-ThumbprintDoCertificado -Caminho $Certificado
+        $script:thumbprint = Get-ThumbprintDoCertificado -Caminho $Certificado
     }
     catch {
         Escrever ("CONFERIDOR com problema, producao NAO reiniciada: " + $_.Exception.Message)
@@ -52,12 +62,33 @@ if ($Url -like "https://*") {
 }
 if (Saudavel) { exit 0 }
 Start-Sleep -Seconds 15
-if (Test-Path $Pausa) { exit 0 }
+SairSePausado ""
 if (Saudavel) { exit 0 }                       # foi so um blip transitorio
 
+# Daqui em diante a producao esta comprovadamente fora (duas consultas, 15 s de intervalo). So' reinicia se a tarefa
+# de fato puder ser reiniciada: parada que falha, ou instancia que continua "Running", fariam o Start ser ignorado
+# (MultipleInstances IgnoreNew) com o log dizendo "disparado" (gate Sol da PR #476).
+SairSePausado "antes de parar a tarefa"
 Escrever "SEM RESPOSTA em $Url ($script:ultimoErro) -> reiniciando a tarefa $Tarefa"
-try { Stop-ScheduledTask -TaskName $Tarefa -ErrorAction SilentlyContinue } catch {}
-Start-Sleep -Seconds 3
+try {
+    $estado = (Get-ScheduledTask -TaskName $Tarefa -ErrorAction Stop).State
+    # Parar so' o que esta rodando: a tarefa "Ready" com o processo morto (incidente de 2026-09-10) vai direto ao Start.
+    if ("$estado" -eq "Running") { Stop-ScheduledTask -TaskName $Tarefa -ErrorAction Stop }
+} catch {
+    Escrever ("FALHA ao parar a tarefa, nada iniciado: " + $_.Exception.Message)
+    exit 1
+}
+$parada = $false
+foreach ($tentativa in 1..10) {
+    Start-Sleep -Seconds 1
+    try { $estado = (Get-ScheduledTask -TaskName $Tarefa -ErrorAction Stop).State } catch { $estado = "desconhecido" }
+    if ("$estado" -ne "Running" -and "$estado" -ne "desconhecido") { $parada = $true; break }
+}
+if (-not $parada) {
+    Escrever "tarefa $Tarefa continua '$estado' depois da parada -> nada iniciado"
+    exit 1
+}
+SairSePausado "entre a parada e o inicio"
 try {
     # -ErrorAction Stop: tarefa desabilitada da' erro nao fatal, que sem isto passaria por "disparado" (gate Sol da PR #476)
     Start-ScheduledTask -TaskName $Tarefa -ErrorAction Stop
@@ -67,8 +98,8 @@ try {
     exit 1
 }
 Start-Sleep -Seconds 25
-if (Saudavel) { Escrever "pos-restart saudavel=True" }
+if (Saudavel) { Escrever "apos-reinicio saudavel=sim" }
 else {
-    Escrever "pos-restart saudavel=False ($script:ultimoErro)"
+    Escrever "apos-reinicio saudavel=nao ($script:ultimoErro)"
     exit 1
 }

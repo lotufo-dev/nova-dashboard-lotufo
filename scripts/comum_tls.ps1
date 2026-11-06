@@ -88,6 +88,9 @@ function Invoke-SaudeLocal {
     param(
         [Parameter(Mandatory = $true)][string]$Url,
         [string]$Certificado = "",
+        # Ja' lido do -Certificado por quem chama (o watchdog le uma vez por execucao: arquivo que fique ilegivel no meio
+        # nao vira "producao fora"). Vazio = ler do -Certificado aqui.
+        [string]$Thumbprint = "",
         [int]$TimeoutSec = 12
     )
     if ($Url -like "http://*") {
@@ -104,9 +107,11 @@ function Invoke-SaudeLocal {
             return [pscustomobject]@{ StatusCode = [int]$resposta.StatusCode; Content = $corpo }
         }
     }
-    if (-not $Certificado) { throw "saude por https sem o caminho do certificado da instalacao" }
     Initialize-DashSaudeLocal
-    $thumbprint = Get-ThumbprintDoCertificado -Caminho $Certificado
-    $r = [DashSaudeLocal]::Pedir($Url, $thumbprint, $TimeoutSec * 1000)
+    if (-not $Thumbprint) {
+        if (-not $Certificado) { throw "saude por https sem o caminho do certificado da instalacao" }
+        $Thumbprint = Get-ThumbprintDoCertificado -Caminho $Certificado
+    }
+    $r = [DashSaudeLocal]::Pedir($Url, $Thumbprint, $TimeoutSec * 1000)
     return [pscustomobject]@{ StatusCode = $r.StatusCode; Content = $r.Content }
 }
