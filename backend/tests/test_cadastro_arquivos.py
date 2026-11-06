@@ -274,6 +274,37 @@ def test_pecas_no_oficio_do_contrato(tmp_path):
         assert any(e.startswith("contratos/mt-402.yaml: pecas_no_oficio:") for e in erros), ruim
 
 
+def test_no_oficio_recusa_peca_solta_familia_fora_da_sinfra_e_tipo_repetido(tmp_path):
+    """Gate Sol (PR #473): a marca e' por tipo e so' da SINFRA; solta e no oficio ao mesmo tempo nao fazem sentido."""
+    def erros_de(pecas, familia="sinfra", pasta="x"):
+        return _erros(_escrever(tmp_path / pasta, orgaos=[{**ORGAO, "familia": familia, "pecas": pecas}]))
+
+    marcada = {"tipo": "boletim", "rotulo": "Memória de cálculo", "exigida": True, "no_oficio": True}
+    assert any("pecas[0].no_oficio: a peça marcada solto: true" in e
+               for e in erros_de([{**marcada, "solto": True}], pasta="a"))
+    assert any("pecas[0].no_oficio: só vale na família sinfra" in e for e in erros_de([marcada], "ses", "b"))
+    reajuste = {"tipo": "outro", "rotulo": "Planilha de reajuste", "exigida": True, "naturezas": ["reajuste"]}
+    execucao = {"tipo": "outro", "rotulo": "Relatório", "no_oficio": True, "naturezas": ["execucao"]}
+    assert any("pecas[1].no_oficio: o tipo outro aparece mais de uma vez" in e
+               for e in erros_de([reajuste, execucao], pasta="c"))
+    # tipo repetido sem a marca continua valendo, como antes
+    ca.preparar(_escrever(tmp_path / "d", orgaos=[{**ORGAO, "pecas": [reajuste, {**execucao, "no_oficio": False}]}]))
+
+
+def test_pecas_no_oficio_do_contrato_segue_as_mesmas_restricoes(tmp_path):
+    def erros_de(orgao, pasta):
+        return _erros(_escrever(tmp_path / pasta, orgaos=[orgao], contratos=[{**CONTRATO, "pecas_no_oficio": ["fotos"]}]))
+
+    fotos = {"tipo": "fotos", "rotulo": "Registro fotográfico"}
+    onde = "contratos/mt-402.yaml: pecas_no_oficio: "
+    assert any(e.startswith(onde + "a peça marcada solto: true")
+               for e in erros_de({**ORGAO, "pecas": [{**fotos, "solto": True}]}, "a"))
+    assert any(e.startswith(onde + "só vale na família sinfra")
+               for e in erros_de({**ORGAO, "familia": "prefeitura", "pecas": [fotos]}, "b"))
+    assert any(e.startswith(onde + "o tipo fotos aparece mais de uma vez")
+               for e in erros_de({**ORGAO, "pecas": [fotos, {**fotos, "rotulo": "Fotos do canteiro"}]}, "c"))
+
+
 def test_cadastro_de_exemplo_poe_a_memoria_no_oficio(tmp_path):
     from tests.conftest import CADASTRO_EXEMPLO
     pecas = {p["tipo"]: p for p in ca.preparar(CADASTRO_EXEMPLO)["orgaos"][0]["regras"]["pecas"]}
