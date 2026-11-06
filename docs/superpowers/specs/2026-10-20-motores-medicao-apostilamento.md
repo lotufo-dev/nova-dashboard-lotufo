@@ -189,6 +189,10 @@ glosa posterior é outro evento, e o vigente é o último.
 **planilha/carta** (tipo `planilha`): assunto no padrão de hoje ("CT-nnn-LT-aaaa - Nª Medição (MM_AAAA) - IC nnn/aaaa -
 Obra"), corpo da família do órgão, anexos: ofício assinado e zip da planilha, peças exigidas pelo órgão na etapa
 `medicao` (`orgaos.pecas` já distingue naturezas). Na MT-PAR não há esse passo: o ofício vai com a nota.
+Correção de 05/11/2026 (issue #462, `docs/mapeamento-pecas-planilha-carta-2026-11-05.md`): a peça marcada
+`no_oficio: true` em `orgaos.pecas` vai dentro do PDF assinado do ofício; é atendida por ele, não vira pendência e
+não se anexa. `pecas_no_oficio: [tipo, …]` no contrato substitui o conjunto do órgão só naquele contrato (`[]`
+desliga todas). A lista de anexos do corpo continua dizendo só o que vai.
 
 **Avisos gerados** (acrescentam ao catálogo §11):
 
