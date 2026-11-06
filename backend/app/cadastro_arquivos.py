@@ -90,6 +90,31 @@ def _textos(v) -> bool:
     return isinstance(v, list) and all(isinstance(x, str) and x.strip() for x in v)
 
 
+def _por_que_nao_vai_no_oficio(o: dict, p: dict) -> list[str]:
+    """Issue #462 (gate Sol): por que a peca `p` do orgao `o` nao pode ir dentro do oficio assinado. A marca e' por
+    tipo, entao o tipo repetido (dois `outro`, um de execucao e outro de reajuste) dispensaria os dois."""
+    out = []
+    if o.get("familia") != "sinfra":
+        out.append("só vale na família sinfra, que manda as peças dentro do ofício da planilha/carta")
+    if p.get("tipo") == "planilha":
+        out.append("a planilha editável vai sempre solta, fora do ofício")
+    elif p.get("solto") is True:
+        out.append("a peça marcada solto: true vai fora do ofício; use uma das duas marcas")
+    if [x.get("tipo") for x in o.get("pecas") or [] if isinstance(x, dict)].count(p.get("tipo")) > 1:
+        out.append(f"o tipo {p.get('tipo')} aparece mais de uma vez nas peças do órgão; a marca vale por tipo")
+    return out
+
+
+def _pecas_no_oficio_do_contrato(tipos: list[str], chave: str, o: dict, onde: str, erros: list[str]) -> None:
+    """Issue #462: cada tipo da excecao do contrato e' uma peca que o orgao pede e que pode ir no oficio."""
+    pecas = {p.get("tipo"): p for p in o["pecas"] if isinstance(p, dict)}
+    fora = [t for t in tipos if t not in pecas]
+    if fora:
+        erros.append(f"{onde}: o órgão {chave} não pede {', '.join(fora)}")
+    motivos = {m: None for t in tipos if t in pecas for m in _por_que_nao_vai_no_oficio(o, pecas[t])}
+    erros += [f"{onde}: {m}" for m in motivos]
+
+
 def _protocolo_do_orgao(o: dict, onde: str, erros: list[str]) -> None:
     """Bloco 5: chaves do protocolo no orgao (ficam em `orgaos.regras`)."""
     if o.get("carta_destinatario") is not None and not _textos(o["carta_destinatario"]):
@@ -100,9 +125,13 @@ def _protocolo_do_orgao(o: dict, onde: str, erros: list[str]) -> None:
             continue
         if not str(p.get("rotulo") or "").strip():
             erros.append(f"{onde}: pecas[{i}].rotulo: obrigatório")
-        for campo in ("exigida", "solto"):
+        # no_oficio (issue #462): a peca vai dentro do PDF assinado do oficio da planilha/carta, nao cobra nem se anexa
+        for campo in ("exigida", "solto", "no_oficio"):
             if campo in p and not isinstance(p[campo], bool):
                 erros.append(f"{onde}: pecas[{i}].{campo}: use true ou false")
+        if p.get("no_oficio") is True:
+            for motivo in _por_que_nao_vai_no_oficio(o, p):
+                erros.append(f"{onde}: pecas[{i}].no_oficio: {motivo}")
         nat = p.get("naturezas")
         if nat is not None and (not isinstance(nat, list) or not nat
                                 or any(x not in ("execucao", "reajuste", "projeto") for x in nat)):
@@ -812,6 +841,16 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         if lista is not None:
             docs[chave] = lista
     c["documentos"] = docs or None
+    # Issue #462: excecao por contrato as pecas que vao no oficio assinado (substitui a marca do orgao; [] desliga).
+    # Que o orgao pede cada tipo, `preparar` confere (aqui so' se conhece a chave do orgao).
+    c["pecas_no_oficio"] = None
+    pno = bruto.get("pecas_no_oficio")
+    if pno is not None:
+        tipos = [t for t in TIPOS_PECA if t != "planilha"]      # a planilha editavel vai sempre solta
+        if not isinstance(pno, list) or any(x not in tipos for x in pno) or len(set(pno)) != len(pno):
+            falha("pecas_no_oficio", f"use uma lista, sem repetição, de {', '.join(tipos)}")
+        else:
+            c["pecas_no_oficio"] = list(pno)
     return c
 
 
@@ -896,11 +935,16 @@ def preparar(raiz: Path) -> dict:
 
     chaves_orgao = {o["chave"] for o in orgaos}
     chaves_ent = {e["chave"] for e in ents}
+    por_chave_orgao = {o["chave"]: {"familia": o["familia"], "pecas": o["regras"].get("pecas") or []} for o in orgaos}
     contratos = []
     for arquivo in sorted((raiz / "contratos").glob("*.yaml")):
         c = _contrato(_ler(arquivo), arquivo, raiz, chaves_orgao, chaves_ent, erros, avisos)
         if c is not None:
             contratos.append(c)
+            o = por_chave_orgao.get(c["orgao"])
+            if c["pecas_no_oficio"] and o is not None:
+                _pecas_no_oficio_do_contrato(c["pecas_no_oficio"], c["orgao"], o,
+                                             f"contratos/{arquivo.name}: pecas_no_oficio", erros)
     for campo in ("nome_curto", "numero_instrumento"):
         valores = [c[campo] for c in contratos if c[campo]]
         if len(set(valores)) != len(valores):
