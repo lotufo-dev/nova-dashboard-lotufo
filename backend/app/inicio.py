@@ -142,4 +142,13 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
         "recebido_ano": _recebido_ano(conn, hoje),
         "a_receber": _a_receber(conn, hoje),
         "prazos": _prazos(conn, hoje),
+        "espelhos": _espelhos(conn),
     }
+
+
+def _espelhos(conn) -> list[dict]:
+    """Issue #359: as medicoes com o aprovado mudado depois do espelho (`espelhos.desatualizadas`, a mesma fonte do
+    aviso), para o cartao do Inicio levar a elas."""
+    from app import espelhos, medicoes      # import local: espelhos importa medicoes e correio
+    return [{"contrato_id": m["contrato_id"], "medicao_id": m["id"], "obra": avisos.obra(conn, m["contrato_id"]),
+             "titulo": medicoes.titulo(m), "situacao": m["situacao"]} for m in espelhos.desatualizadas(conn)]

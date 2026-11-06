@@ -134,9 +134,11 @@ def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     d["documentos"] = [dict(x) for x in conn.execute(
         "SELECT id, tipo_doc, nome, numero_nf, consorciada, municipio, weblink, fonte, arquivo, tamanho, "
         "espelho_id FROM medicao_documentos WHERE medicao_id=? ORDER BY tipo_doc, id", (medicao_id,))]
-    # Issue #359: o aprovado mudou depois do espelho vigente (import local: espelhos importa este modulo)
+    # Issue #359: o aprovado mudou depois do espelho vigente: a situacao (espelhos.TEXTO_AVISO) ou None (import
+    # local: espelhos importa este modulo)
     from app import espelhos
-    d["espelho_desatualizado"] = bool(espelhos.desatualizadas(conn, medicao_id=medicao_id))
+    d["espelho_desatualizado"] = next((x["situacao"] for x in espelhos.desatualizadas(conn, medicao_id=medicao_id)),
+                                      None)
     return d
 
 def _json_dict(texto) -> dict | None:

@@ -435,24 +435,37 @@ def listar(conn, contrato_id: int) -> list[dict]:
 # --- issue #359: o aprovado mudou depois do espelho ----------------------------------------------------------
 
 # Decisao do Leo de 03/11/2026: o boletim novo com outro valor pode ser glosa, correcao ou reemissao do orgao; o aviso
-# so' diz que o aprovado mudou, nunca que e' glosa
-AVISO_DESATUALIZADO = "o aprovado mudou depois do espelho: gere o espelho de novo"
+# so' diz que o aprovado mudou, nunca que e' glosa. Situacoes de `desatualizadas`, com o texto do aviso:
+APROVADO_MUDOU = "aprovado_mudou"           # espelho gerado ou enviado: gerar de novo
+NOTA_EMITIDA = "nota_emitida"               # nota emitida: o espelho nao se gera mais (revisor, PR #474)
+NAO_CONFERIDO = "nao_conferido"             # espelho de antes da 065 com a regra trocada (gate Sol, PR #474)
+TEXTO_AVISO = {APROVADO_MUDOU: "o aprovado mudou depois do espelho, gere o espelho de novo",
+               NOTA_EMITIDA: "o aprovado mudou depois do espelho e a nota já foi emitida",
+               NAO_CONFERIDO: "não foi possível conferir o valor do espelho antigo, gere o espelho de novo"}
+# a nota emitida segue avisando (a nota da v1 lancada pelo RM leva a medicao a `nota_emitida` com o aviso na tela);
+# do protocolo em diante o aviso sai
+ESTADOS_DO_AVISO = (*medicoes.ESTADOS_ESPELHO, "nota_emitida")
 
 
 def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
-    """Medicoes com espelho gerado ou enviado (os estados em que o espelho ainda se gera de novo) cujo aprovado vigente
-    difere do valor delas no espelho vigente mais novo. O valor vem de `espelho_medicoes.valor_centavos` (065); no
-    espelho de antes da coluna, das entradas gravadas pela regra da obra, so' se ela ainda e' a do espelho (mesmo
-    sha256): com a regra trocada, ou sem a natureza da medicao, nao ha' como comparar e nao avisa. Devolve {id,
-    contrato_id, numero, tipo, aprovado_centavos, espelho_centavos}."""
+    """Medicoes com espelho gerado, enviado ou nota emitida cujo aprovado vigente difere do valor delas no espelho
+    vigente mais novo (`situacao` APROVADO_MUDOU, ou NOTA_EMITIDA na nota emitida, onde o espelho nao se gera
+    mais). O valor vem de `espelho_medicoes.valor_centavos` (065); no espelho de antes da coluna, das entradas gravadas
+    pela regra da obra, se ela ainda e' a do espelho (mesmo sha256). Com a regra trocada (ou sem a natureza da medicao)
+    nao ha' como comparar: NAO_CONFERIDO, so' com atesto (boletim ou digitado) registrado depois do espelho e so' onde
+    o espelho ainda se gera. Devolve {id, contrato_id, numero, tipo, estado, situacao, aprovado_centavos,
+    espelho_centavos}."""
+    marcas = ",".join("?" * len(ESTADOS_DO_AVISO))
     linhas = conn.execute(
-        "SELECT m.id, m.contrato_id, m.numero, m.tipo, m.valor_atestado_centavos AS aprovado, "
-        "em.valor_centavos, e.entradas, e.regra_sha256 FROM medicoes m JOIN espelho_medicoes em ON em.medicao_id=m.id "
-        "JOIN espelhos e ON e.id=em.espelho_id "
-        "WHERE m.estado IN ('espelho_gerado','espelho_enviado') AND m.valor_atestado_centavos IS NOT NULL "
+        "SELECT m.id, m.contrato_id, m.numero, m.tipo, m.estado, m.valor_atestado_centavos AS aprovado, "
+        "em.valor_centavos, e.entradas, e.regra_sha256, "
+        "EXISTS (SELECT 1 FROM medicao_atestos a WHERE a.medicao_id=m.id AND a.criado_em > e.criado_em) AS atesto_depois "
+        "FROM medicoes m JOIN espelho_medicoes em ON em.medicao_id=m.id JOIN espelhos e ON e.id=em.espelho_id "
+        f"WHERE m.estado IN ({marcas}) AND m.valor_atestado_centavos IS NOT NULL "
         "AND (? IS NULL OR m.id=?) AND e.situacao='vigente' AND e.versao=("
         " SELECT MAX(e2.versao) FROM espelho_medicoes em2 JOIN espelhos e2 ON e2.id=em2.espelho_id "
-        " WHERE em2.medicao_id=m.id AND e2.situacao='vigente') ORDER BY m.id", (medicao_id, medicao_id)).fetchall()
+        " WHERE em2.medicao_id=m.id AND e2.situacao='vigente') ORDER BY m.id",
+        (*ESTADOS_DO_AVISO, medicao_id, medicao_id)).fetchall()
     regras: dict[int, tuple | None] = {}
     out = []
     for r in linhas:
@@ -461,14 +474,18 @@ def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
             if r["contrato_id"] not in regras:
                 regras[r["contrato_id"]] = _regra_crua(conn, r["contrato_id"])
             crua = regras[r["contrato_id"]]
-            if crua is None or crua[3] != r["regra_sha256"]:
-                continue
-            valor = espelho.valor_por_natureza(json.loads(crua[1]), json.loads(r["entradas"])).get(r["tipo"])
-            if valor is None:
-                continue
-        if r["aprovado"] != valor:
+            if crua is not None and crua[3] == r["regra_sha256"]:
+                valor = espelho.valor_por_natureza(json.loads(crua[1]), json.loads(r["entradas"])).get(r["tipo"])
+        if valor is None:
+            situacao = NAO_CONFERIDO if r["atesto_depois"] and r["estado"] in medicoes.ESTADOS_ESPELHO else None
+        elif r["aprovado"] != valor:
+            situacao = NOTA_EMITIDA if r["estado"] == "nota_emitida" else APROVADO_MUDOU
+        else:
+            situacao = None
+        if situacao:
             out.append({"id": r["id"], "contrato_id": r["contrato_id"], "numero": r["numero"], "tipo": r["tipo"],
-                        "aprovado_centavos": r["aprovado"], "espelho_centavos": valor})
+                        "estado": r["estado"], "situacao": situacao, "aprovado_centavos": r["aprovado"],
+                        "espelho_centavos": valor})
     return out
 
 
