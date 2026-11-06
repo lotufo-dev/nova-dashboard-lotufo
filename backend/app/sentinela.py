@@ -336,6 +336,14 @@ def _ponto_gravado(conn) -> int | None:
     return None if r is None else int(r["ultimo_registro"])
 
 
+def _marca(conn) -> tuple[int | None, int | None]:
+    """O que toda rodada aceita muda: o ponto ou o id do ultimo achado (rodada que nao muda nenhum dos dois nao gravou
+    nada no banco). Lido no comeco e de novo sob o BEGIN IMMEDIATE, separa a rodada que perdeu a corrida."""
+    ultimo_achado = conn.execute("SELECT MAX(id) FROM audit_log WHERE entidade = 'sentinela' AND entidade_id IS NULL "
+                                 "AND acao = ?", (ACAO,)).fetchone()[0]
+    return _ponto_gravado(conn), ultimo_achado
+
+
 def _gravar_ponto(conn, ultimo: int) -> None:
     conn.execute("INSERT INTO sentinela_ponto (id, ultimo_registro) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET "
                  "ultimo_registro = excluded.ultimo_registro, atualizado_em = datetime('now')", (ultimo,))
@@ -346,8 +354,9 @@ def rodada(conn) -> int:
     ate' voltar ao normal (regravada uma vez por dia enquanto durar). Achados e ponto de leitura entram na mesma
     transacao, entao nenhum evento e' lido sem ser gravado nem gravado sem avancar o ponto."""
     base = raiz()
+    marca = _marca(conn)             # antes do arquivo: quem grava, grava o banco e depois o arquivo
+    ponto = marca[0]
     estado = _ler_json(_arquivo_estado())
-    ponto = _ponto_gravado(conn)
     ultimo = ponto
     agora = tempo.agora_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
     # falhas em aberto: chave -> ultimo dia (local) em que virou item; regravada 1x por dia enquanto durar, para nao
@@ -367,8 +376,8 @@ def rodada(conn) -> int:
             # banco restaurado de um backup: vira item de atencao, nao o critico, porque nada se perde (a releitura
             # parte do ponto do banco); e os avisos do dia e as falhas em aberto da copia descrevem itens que o banco
             # restaurado nao tem: sem eles, a releitura e as verificacoes regravam esses itens
-            novos.append(_achado("banco-restaurado", "atencao", "Banco restaurado de um snapshot; log de segurança "
-                                 f"relido desde o registro {ponto}", agora))
+            novos.append(_achado("banco-restaurado", "atencao", "Banco restaurado de uma cópia de segurança; log de "
+                                 f"segurança relido desde o registro {ponto}", agora))
             pendencias, avisados = {}, {}
         if ultimo is None:
             ultimo = no_log          # primeira leitura com sucesso: marca o ponto de partida, nao le o historico
@@ -395,17 +404,18 @@ def rodada(conn) -> int:
         if pendencias.get(chave) != hoje.isoformat():
             novos.append(_achado(chave, nivel, msg, agora))
     with db.mutacao(conn):
-        # o ponto foi lido fora do BEGIN IMMEDIATE: se outra rodada (outro processo no mesmo banco, como dois servidores
-        # durante um reinicio) gravou no meio, esta descarta tudo e a proxima parte do ponto novo, sem regredir nem
-        # duplicar achado
-        perdeu_a_corrida = _ponto_gravado(conn) != ponto
+        # ponto e achados foram lidos fora do BEGIN IMMEDIATE: se outra rodada (outro processo no mesmo banco, como dois
+        # servidores durante um reinicio) gravou ponto ou achado no meio, esta descarta tudo e a proxima parte do que
+        # a outra gravou, sem regredir o ponto nem repetir achado. Resta a janela entre o commit da outra e a gravacao
+        # do `sentinela.json` dela: quem le a marca nova nessa janela ainda le o arquivo velho
+        perdeu_a_corrida = _marca(conn) != marca
         if not perdeu_a_corrida:
             for a in novos:
                 auditoria.registrar(conn, None, ACAO, "sentinela", None, None, a)
             if ultimo is not None and ultimo != ponto:
                 _gravar_ponto(conn, ultimo)
     if perdeu_a_corrida:
-        log.info("sentinela: outra rodada gravou o ponto no meio desta; descartada")
+        log.info("sentinela: outra rodada gravou no meio desta; descartada")
         return 0
     recentes = {hoje.isoformat(), (hoje - datetime.timedelta(days=1)).isoformat()}
     _gravar_estado({"ultimo_registro": ultimo, "pendencias": {k: hoje.isoformat() for k in atuais},

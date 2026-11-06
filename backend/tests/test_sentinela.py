@@ -404,7 +404,7 @@ def test_backup_restaurado_com_ponto_mais_velho_nao_acusa_estado_alterado(maquin
     a = _rodar(maquina, conn)
     assert "estado-perdido" not in [x["evento"] for x in a]
     assert (a[0]["evento"], a[0]["nivel"], a[0]["mensagem"]) == (
-        "banco-restaurado", "atencao", "Banco restaurado de um snapshot; log de segurança relido desde o registro 1030")
+        "banco-restaurado", "atencao", "Banco restaurado de uma cópia de segurança; log de segurança relido desde o registro 1030")
     assert [x["evento"] for x in a[1:]] == [4698, 4699, 4700, 4701, 4702]   # relidos: o banco restaurado nao os tinha
     assert "EventRecordID>1030" in maquina.consultas[-1]
     assert _rodar(maquina, conn) == []                              # uma vez so'
@@ -460,6 +460,27 @@ def test_rodada_que_perde_a_corrida_para_outra_nao_regride_o_ponto_nem_duplica(m
     assert json.loads((maquina.raiz / "dados" / "sentinela.json").read_text(encoding="utf-8"))["ultimo_registro"] == 1071
 
 
+def test_rodada_que_perde_a_corrida_sem_o_log_andar_nao_duplica_falha(maquina, conn, monkeypatch):
+    # revisor, rodada 2: com o log parado o ponto nao muda, e a falha nova saia duas vezes
+    _com_ponto_de_partida(maquina, conn)
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False      # falha nova, sem evento novo no log
+    outra = db.get_conn()
+    original = sentinela.verificacoes
+    vez = [0]
+
+    def no_meio(base):
+        vez[0] += 1
+        if vez[0] == 1:
+            sentinela.rodada(outra)
+        return original(base)
+
+    monkeypatch.setattr(sentinela, "verificacoes", no_meio)
+    a = _rodar(maquina, conn)
+    outra.close()
+    assert [x["evento"] for x in a] == ["auditoria-arquivos"]
+    assert _rodar(maquina, conn) == []                     # a copia que ficou e' a da rodada que gravou
+
+
 def test_ponto_da_sentinela_nao_muda_fora_da_aplicacao(maquina, conn):
     import sqlite3
     _com_ponto_de_partida(maquina, conn)
@@ -478,6 +499,34 @@ def test_gatilho_do_ponto_apagado_vira_alerta_de_seguranca(maquina, conn, monkey
     crua = sqlite3.connect(db.db_path())
     crua.execute("DROP TRIGGER sentinela_ponto_protecao_update"); crua.commit(); crua.close()
     assert [i["mensagem"] for i in seguranca.conferir(conn)] == ["Proteção do ponto da sentinela removida"]
+
+
+def _comando_do_rollback_456():
+    texto = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "runbook.md").read_text(encoding="utf-8")
+    achados = [m.group(1) for m in re.finditer(r'python -c "([^"]*)"', texto) if "063_sentinela_ponto.sql" in m.group(1)]
+    assert len(achados) == 1
+    return achados[0]
+
+
+def test_comando_do_runbook_para_rollback_antes_da_456_e_o_deploy_seguinte_parte_do_ponto_da_auditoria(maquina, conn,
+                                                                                                         monkeypatch):
+    """Gate Sol, rodada 2: no rollback o codigo antigo grava o ponto so' na auditoria; o comando do runbook tira a
+    tabela, os gatilhos e a linha da 063, e o deploy seguinte reimporta o ultimo ponto da auditoria."""
+    import subprocess
+    import sys
+    from app import auditoria
+    _com_ponto_de_partida(maquina, conn)
+    comando = _comando_do_rollback_456()
+    assert '"' not in comando and "$" not in comando        # o PowerShell repassa sem mexer
+    comando = comando.replace(r"C:\DashboardLotufo\dados\dashboard.db", str(db.db_path()))
+    saida = subprocess.run([sys.executable, "-I", "-c", comando], capture_output=True, text=True, check=True).stdout
+    assert saida.strip() == "sentinela_ponto: 0 migracao 063: 0"
+    with db.mutacao(conn):                                  # o codigo antigo, durante o rollback
+        auditoria.registrar(conn, None, sentinela.ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": 1071})
+    db.migrate(conn)                                        # o deploy seguinte
+    assert _ponto(conn) == 1071
+    monkeypatch.setattr(seguranca, "_conferencia", [])
+    assert seguranca.conferir(conn) == []                   # gatilhos de volta
 
 
 def test_copia_a_frente_do_banco_sem_conseguir_ler_o_log_acusa(maquina, conn):
