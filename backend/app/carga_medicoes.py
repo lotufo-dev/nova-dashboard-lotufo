@@ -434,11 +434,12 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                 doc = "o boletim" if estado == "boletim_recebido" and not tem_planilha else "a planilha/carta"
                 _virar(li, "conflito", f"{no_estado}: {doc} é dela; cancele pela tela")
                 continue
-            if dup["planilha_enviada_em"] or tem_planilha:
+            saiu = _planilha_saiu(conn, dup)
+            if saiu or tem_planilha:
                 # #387: protocolada (ou adiante) sem NF, fora dos estados da planilha, com o oficio ja' enviado ao
                 # orgao (#282) ou so' gerado e protocolado por fora (revisor da PR #468: `registrar protocolo
                 # feito fora` aceita planilha_gerada sem gravar o envio): o documento e' dela
-                doc = "a planilha/carta enviada ao órgão" if dup["planilha_enviada_em"] else "a planilha/carta"
+                doc = "a planilha/carta enviada ao órgão" if saiu else "a planilha/carta"
                 _virar(li, "conflito", f"{doc} é dela; cancele pela tela")
                 continue
         if li["categoria"] == "correção":
@@ -468,7 +469,7 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
         if li["categoria"] in ("valor diferente", "correção") and d["valor_pedido"] is not None:
             atual = existentes[(d["numero"], d["tipo"])]
             gravado = atual["valor_protocolado_centavos"]
-            if atual["planilha_enviada_em"] and d["valor_pedido"] != gravado:
+            if d["valor_pedido"] != gravado and _planilha_saiu(conn, atual):
                 # #387: o primeiro preenchimento do pedido nao passa depois do envio (`medicoes.definir_valor`
                 # recusa com PEDIDO_ENVIADO); recusar aqui da' o motivo no ensaio em vez do erro na gravacao. Gate
                 # Sol da PR #468: o pedido ja' gravado e diferente tambem recusa a linha (o aprovado dela nao entra)
@@ -483,6 +484,14 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
             or (d["valor_pedido"] is not None and m["valor_protocolado_centavos"] is None)))   # 1o preenchimento
         if escreve and not d["fonte"]:
             _virar(li, "erro", "correção sem fonte: diga na coluna fonte o documento que corrige")
+
+
+def _planilha_saiu(conn, m) -> bool:
+    """A planilha/carta ja' foi ao orgao. O marcador `planilha_enviada_em` nao basta (gate Sol da PR #468): a medicao
+    protocolada enquanto o e-mail saia fica sem ele (`planilha_envio.enviar` so' marca a partir de planilha_gerada),
+    mas o envio fica registrado; vale a mesma conta de versao enviada que o envio usa (sistema e por fora)."""
+    from app import planilha_envio   # import local: planilha_envio importa medicoes, que importa sincronizacao_rm
+    return bool(m["planilha_enviada_em"]) or planilha_envio._ultima_enviada(conn, m) > 0
 
 
 def _nfs_vinculadas(conn, medicao_id: int) -> list[str]:

@@ -1111,6 +1111,40 @@ def test_carregar_medicoes_nao_troca_pedido_gravado_com_planilha_enviada(tmp_pat
     assert tuple(m) == (10000000, 9500000)
 
 
+def test_carregar_medicoes_envio_concluido_sem_marcador_tambem_congela_pedido_e_cancelamento(tmp_path, monkeypatch,
+                                                                                            capsys):
+    # gate Sol da PR #468 (rodada 2): protocolada enquanto o e-mail da planilha/carta saia, a medicao fica sem
+    # `planilha_enviada_em`, mas o envio esta' registrado: a linha com pedido diferente vira conflito e nenhum atesto
+    # novo entra; o cancelamento tambem e' recusado
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, None)
+    mid = _existente(conn, cid, 3, "2025-07", 10000000, None)
+    uid = conn.execute("SELECT id FROM usuarios LIMIT 1").fetchone()[0]
+    pid = conn.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, "
+                       "acumulado_anterior_centavos, origem) VALUES (?,1,10000000,0,'manual')", (mid,)).lastrowid
+    eid = conn.execute("INSERT INTO envios (tipo, usuario_id, remetente, para, copia, assunto) "
+                       "VALUES ('planilha_medicao',?,'eng@lotufo.com','fiscal@exemplo.com.br','','Planilha')",
+                       (uid,)).lastrowid
+    conn.execute("INSERT INTO medicao_planilha_envios (medicao_id, planilha_id, envio_id) VALUES (?,?,?)",
+                 (mid, pid, eid))
+    conn.commit()
+    assert conn.execute("SELECT estado, planilha_enviada_em FROM medicoes WHERE id=?",
+                        (mid,)).fetchone()[:] == ("protocolada", None)
+    linha = "3;3;execucao;2025-07;;120.000,00;95.000,00;;;;;;boletim 3;;"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert ("linha 2: nº 3 execução 2025-07: conflito (o pedido congelou no envio da planilha/carta ao órgão em "
+            "R$ 100.000,00" in saida), saida
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [linha]))
+    assert codigo == 1 and "1 linha(s) com erro ou conflito" in saida, saida
+    assert _foto(conn) == antes
+    assert conn.execute("SELECT COUNT(*) FROM medicao_atestos WHERE medicao_id=?", (mid,)).fetchone()[0] == 0
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência",
+                                       "3;;execucao;2025-07;;;;;;;;;CI;4;"], capsys)
+    assert ("linha 2: nº 3 execução 2025-07: conflito (a planilha/carta enviada ao órgão é dela; cancele pela tela)"
+            in saida), saida
+
+
 def test_carregar_medicoes_nao_cancela_protocolada_com_planilha_gerada_sem_envio(tmp_path, monkeypatch, capsys):
     # revisor da PR #468: a planilha/carta gerada e protocolada por fora (`registrar protocolo feito fora` aceita
     # planilha_gerada) leva a medicao a protocolada sem `planilha_enviada_em`; o oficio continua sendo dela
