@@ -196,6 +196,28 @@ def test_falha_no_meio_das_partes_solta_as_reservas_que_nao_sairam(ambiente, mon
     assert copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))["emails"] == 3
 
 
+def test_trava_que_nao_sai_no_meio_das_partes_vai_junto_do_motivo(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    monkeypatch.setattr(copia_dono_envio, "TAMANHO_PARTE", 1000)
+    monkeypatch.setattr(correio, "cliente", FalhaNaSegunda())
+
+    def ocupado(*a, **k):
+        raise ValueError("banco ocupado")
+    monkeypatch.setattr(envio_reserva, "liberar_com_retentativa", ocupado)
+    assert copia_dono_envio.enviar_nova(conn, _copia(tmp)) == 1     # a 1a parte saiu e continua contada
+    erro = backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    assert "parte 2 de 3" in erro and "trava do envio não pôde ser removida" in erro
+
+
+def test_copia_ja_enviada_nem_le_o_arquivo_de_novo(ambiente):
+    conn, tmp = ambiente
+    arq = _copia(tmp)
+    assert copia_dono_envio.enviar_nova(conn, arq) == 1
+    arq.unlink()                                    # sumiu (rotacao das 4 copias): o automatico nao acusa nada
+    assert copia_dono_envio.enviar_nova(conn, arq) == 0
+    assert backup.ESTADO["ultimo_envio_copia_dono_erro"] is None
+
+
 def test_e_mail_que_saiu_sem_registro_segura_a_reserva(ambiente, monkeypatch):
     conn, tmp = ambiente
     arq = _copia(tmp)
@@ -298,6 +320,13 @@ def test_dois_reenvios_simultaneos_saem_uma_vez(api, monkeypatch):
     assert len(falso.enviados) == 1
 
 
+def _entrar(api, email, senha):
+    r = api.post("/api/auth/login", json={"email": email, "senha": senha})
+    api.cookies.clear()
+    api.cookies.set("sessao", r.cookies["sessao"])
+    api.headers["X-CSRF-Token"] = r.json()["csrf"]
+
+
 def test_reserva_presa_da_copia_do_dono_se_libera_pela_rota_de_envios(api):
     arq = _copia_na_pasta()
     conn = db.get_conn()
@@ -307,12 +336,41 @@ def test_reserva_presa_da_copia_do_dono_se_libera_pela_rota_de_envios(api):
                        (arq.name, "x" * 64, 500, uid)).lastrowid
     conn.commit()
     conn.close()
-    assert api.post("/api/admin/copia-dono/reenviar").status_code == 409
-    r = api.post("/api/envios/liberar", json={"tabela": "copia_dono_envios", "id": rid,
-                                              "justificativa": "conferi os Enviados e não saiu",
-                                              "conferi_enviados": True})
+    r = api.post("/api/admin/copia-dono/reenviar")
+    assert r.status_code == 409
+    d = r.json()["detail"]
+    assert (d["codigo"], d["tabela"], d["id"]) == ("ENVIO_RESERVADO", "copia_dono_envios", rid)
+    # a reserva da copia do dono so' se libera como admin, como o envio dela
+    api.post("/api/admin/usuarios", json={"nome": "Eng", "email": "eng@lotufo.com", "senha": "senha-eng-123",
+                                          "perfil": "engenharia"})
+    corpo = {"tabela": "copia_dono_envios", "id": rid, "justificativa": "conferi os Enviados e não saiu",
+             "conferi_enviados": True}
+    _entrar(api, "eng@lotufo.com", "senha-eng-123")
+    assert api.post("/api/envios/liberar", json=corpo).status_code == 403
+    _entrar(api, "admin@lotufo.com", "senha-forte-123")
+    r = api.post("/api/envios/liberar", json=corpo)
     assert r.status_code == 200, r.text
     assert api.post("/api/admin/copia-dono/reenviar").status_code == 200
+
+
+def test_saude_acusa_a_copia_que_nao_saiu_mesmo_depois_de_reiniciar(api, tmp_path, monkeypatch):
+    # o erro da memoria some quando o servidor reinicia; a copia mais recente sem envio completo continua acusada
+    arq = _copia_na_pasta()
+    assert api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"] == \
+        "a cópia de 05/11/2026 não saiu por e-mail"
+    assert api.post("/api/admin/copia-dono/reenviar").status_code == 200
+    assert api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"] is None
+    # parte que falhou depois de outra ter saido: a rodada nao esta' completa
+    monkeypatch.setattr(copia_dono_envio, "TAMANHO_PARTE", 200)
+    monkeypatch.setattr(correio, "cliente", FalhaNaSegunda())
+    conn = db.get_conn()
+    nova = _copia_na_pasta("dashboard-dono-20261112-080000.tar.age")
+    assert copia_dono_envio.enviar_nova(conn, nova) == 1
+    conn.close()
+    monkeypatch.setattr(backup, "ESTADO", {**backup.ESTADO, "ultimo_envio_copia_dono_erro": None})  # reiniciou
+    assert api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"] == \
+        "a cópia de 12/11/2026 não saiu por e-mail"
+    assert arq.exists()
 
 
 def test_botao_gerar_tambem_envia_a_copia_nova(api, tmp_path, monkeypatch):

@@ -55,12 +55,13 @@ def _remetente(conn, config: dict) -> dict:
     u = cobranca_certidoes._usuario(conn, config["enviada_por"])
     if u is None:
         raise EnvioNaoConfigurado("nenhum usuário ativo com um login de copia_dono.enviada_por (geral.yaml)")
-    cfg = correio.configuracao()
-    if not cfg["simulador"]:
-        if not cfg["client_id"]:
-            raise EnvioNaoConfigurado("Microsoft 365 não configurado neste servidor (DASH_GRAPH_CLIENT_ID)")
-        if not correio.conectado(u["id"]):
-            raise EnvioNaoConfigurado(f"a conta Microsoft de {u['email']} não está conectada: conecte em Minha conta")
+    try:
+        correio.cliente(u["id"], u["email"])       # a mesma conferencia do envio, antes de reservar
+    except graph.ErroGraph as e:
+        if correio.configuracao()["client_id"] and not correio.conectado(u["id"]):
+            raise EnvioNaoConfigurado(
+                f"a conta Microsoft de {u['email']} não está conectada: conecte em Minha conta") from None
+        raise EnvioNaoConfigurado(str(e)) from None
     return u
 
 
@@ -102,10 +103,35 @@ def corpo(nome: str, gerada: datetime.datetime, tamanho: int, sha: str, parte: i
     return "".join(f"<p>{html.escape(l)}</p>" for l in linhas)
 
 
-def _soltar(conn, ids: list[int]) -> None:
-    """Reservas das partes que nao sairam; chamada de dentro do `except` da falha."""
-    for rid in ids:
-        envio_reserva.liberar_com_retentativa(conn, TABELA, rid)
+def _soltar(conn, ids: list[int]) -> str:
+    """Reservas das partes que nao sairam; chamada de dentro do `except` da falha. Banco ocupado alem das
+    retentativas: devolve o aviso (a trava ficou) em vez de esconder a falha original."""
+    try:
+        for rid in ids:
+            envio_reserva.liberar_com_retentativa(conn, TABELA, rid)
+    except ValueError:
+        return "; a trava do envio não pôde ser removida: aguarde 15 minutos e libere o envio"
+    return ""
+
+
+def _ja_teve_rodada(conn, nome: str) -> bool:
+    return conn.execute(f"SELECT 1 FROM {TABELA} WHERE arquivo=? LIMIT 1", (nome,)).fetchone() is not None
+
+
+def pendente(conn, pasta_backups: Path) -> str | None:
+    """A copia mais recente que nao saiu inteira por e-mail em nenhuma rodada, e sem envio em andamento (a Saude
+    acusa mesmo depois de o servidor reiniciar, quando o erro da memoria ja' sumiu). None: nada pendente."""
+    copias = copia_dono.copias(pasta_backups)
+    if not copias:
+        return None
+    nome = copias[-1].name
+    r = conn.execute(
+        f"SELECT SUM(envio_reservado_em IS NOT NULL) AS reservadas, "
+        f"(SELECT COUNT(*) FROM (SELECT rodada FROM {TABELA} WHERE arquivo=:a GROUP BY rodada "
+        f"HAVING COUNT(envio_id) = MAX(partes))) AS completas FROM {TABELA} WHERE arquivo=:a", {"a": nome}).fetchone()
+    if r["reservadas"] or r["completas"]:
+        return None
+    return f"a cópia de {_gerada_em(copias[-1]):%d/%m/%Y} não saiu por e-mail"
 
 
 def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
@@ -113,16 +139,20 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
     nao sai se o arquivo ja' teve rodada. Tudo o que recusa vem antes da reserva; a reserva, antes do e-mail."""
     config = _config(conn)
     usuario = _remetente(conn, config)
+    if reenvio_por is None and _ja_teve_rodada(conn, arquivo.name):
+        return 0                                    # antes de ler o arquivo; conferido de novo na reserva
     dados = arquivo.read_bytes()
     sha = hashlib.sha256(dados).hexdigest()
     partes = _partes(dados, arquivo.name)
     total = len(partes)
     reservado_por = reenvio_por["id"] if reenvio_por else usuario["id"]
     with db.mutacao(conn):
-        presa = conn.execute(f"SELECT envio_reservado_em, envio_reservado_por FROM {TABELA} WHERE arquivo=? "
+        presa = conn.execute(f"SELECT id, envio_reservado_em, envio_reservado_por FROM {TABELA} WHERE arquivo=? "
                              "AND envio_reservado_em IS NOT NULL ORDER BY id LIMIT 1", (arquivo.name,)).fetchone()
         if presa is not None:
-            raise envio_reserva.reservado(conn, presa["envio_reservado_em"], presa["envio_reservado_por"])
+            recusa = envio_reserva.reservado(conn, presa["envio_reservado_em"], presa["envio_reservado_por"])
+            recusa.reserva_id = presa["id"]         # a rota devolve, para a liberacao (/api/envios/liberar)
+            raise recusa
         ultima = conn.execute(f"SELECT MAX(rodada) FROM {TABELA} WHERE arquivo=?", (arquivo.name,)).fetchone()[0]
         if ultima is not None and reenvio_por is None:
             return 0                                # a mesma copia nao sai duas vezes sozinha
@@ -149,11 +179,13 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
             _soltar(conn, ids[i + 1:])              # esta parte pode ter saido: a reserva dela fica
             raise
         except Exception as e:
-            _soltar(conn, ids[i:])                  # nada desta parte saiu
-            if total == 1:
+            trava = _soltar(conn, ids[i:])          # nada desta parte saiu
+            if total == 1 and not trava:
                 raise
+            if total == 1:
+                raise ParteNaoEnviada(f"{_motivo(e)}{trava}", 0) from e
             anteriores = "; as anteriores saíram" if n > 1 else ""
-            raise ParteNaoEnviada(f"parte {n} de {total} não enviada ({_motivo(e)}){anteriores}", i) from e
+            raise ParteNaoEnviada(f"parte {n} de {total} não enviada ({_motivo(e)}){anteriores}{trava}", i) from e
         with correio.depois_do_envio(titulo, config["para"], envio_id), db.mutacao(conn):
             envio_reserva.liberar(conn, TABELA, rid)
             conn.execute(f"UPDATE {TABELA} SET envio_id=? WHERE id=?", (envio_id, rid))
