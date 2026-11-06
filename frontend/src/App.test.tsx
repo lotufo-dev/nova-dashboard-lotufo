@@ -148,3 +148,34 @@ describe("App: instalação não autorizada", () => {
     }
   });
 });
+
+// Teste em produção (06/11/2026): com o redirecionamento de e-mail ligado no servidor, toda tela avisa.
+describe("App: e-mails em teste", () => {
+  const FAIXA = "E-mails em teste: todo envio desta dashboard vai para a caixa de teste, não para o destinatário.";
+  const subir = (email_redirecionado: boolean | undefined) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/health") return { status: "ok", banco: "ok", instalacao: "autorizada", email_redirecionado };
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", csrf: "x" };
+    if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
+    return [];
+  });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  it("mostra a faixa quando o health diz que os e-mails estão redirecionados", async () => {
+    subir(true);
+    window.history.replaceState(null, "", "/inicio");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });
+    expect((await screen.findByRole("alert")).textContent).toBe(FAIXA);
+  });
+
+  it("sem redirecionamento (ou com servidor antigo) não há faixa", async () => {
+    for (const valor of [false, undefined]) {
+      subir(valor);
+      window.history.replaceState(null, "", "/inicio");
+      render(<App />);
+      await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });
+      expect(screen.queryByRole("alert")).toBeNull();
+      cleanup();
+    }
+  });
+});

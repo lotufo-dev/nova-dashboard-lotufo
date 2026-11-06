@@ -8,6 +8,7 @@ rascunho e subir anexo acima de 3 MB; nenhuma funcao deste modulo lista ou le me
 import base64
 import datetime
 import hashlib
+import html
 import json
 import logging
 import os
@@ -65,9 +66,51 @@ def conectado(usuario_id: int) -> bool:
         return False
 
 
+ARQUIVO_REDIRECIONAR = "email-redirecionar.txt"
+
+
+class RedirecionamentoInvalido(graph.ErroGraph):
+    """O redirecionamento de teste esta' ligado e o endereco nao se le: nada sai, para o e-mail nao ir ao destinatario
+    de verdade por engano."""
+
+
+def _fonte_do_redirecionamento() -> str | None:
+    """O texto cru do redirecionamento: a variavel `DASH_EMAIL_REDIRECIONAR` ou a primeira linha de
+    `<raiz>/segredos/email-redirecionar.txt` (a raiz e' a pasta acima de `dados`, como na instalacao). None = desligado."""
+    bruto = os.environ.get("DASH_EMAIL_REDIRECIONAR")
+    if bruto is not None and bruto.strip():
+        return bruto.strip()
+    try:
+        arquivo = db.db_path().parent.parent / "segredos" / ARQUIVO_REDIRECIONAR
+        if not arquivo.is_file():
+            return None
+        linhas = arquivo.read_text(encoding="utf-8-sig").strip().splitlines()
+    except (OSError, UnicodeDecodeError, RuntimeError):
+        return ""          # o arquivo existe e nao se le: ligado e invalido
+    return linhas[0].strip() if linhas else ""
+
+
+def redirecionamento_ativo() -> bool:
+    """Ha' redirecionamento de teste configurado (valido ou nao)? E' o que a faixa da tela mostra."""
+    return _fonte_do_redirecionamento() is not None
+
+
+def redirecionamento() -> str | None:
+    """Teste em producao (pedido do dono, 06/11/2026): com o redirecionamento ligado, TODO e-mail do sistema vai so'
+    para este endereco, com "[TESTE]" no assunto e os destinatarios de verdade escritos no alto do corpo. Lido a cada
+    envio: apagar o arquivo desliga, sem reiniciar. Ligado com endereco que nao se le, o envio e' recusado."""
+    fonte = _fonte_do_redirecionamento()
+    if fonte is None:
+        return None
+    if not _EMAIL.fullmatch(fonte):
+        raise RedirecionamentoInvalido("Redirecionamento de e-mail de teste mal configurado: nada foi enviado")
+    return fonte
+
+
 def registrar_envio(conn, usuario_id: int, tipo: str, remetente: str, para: list[str],
                     copia: list[str], assunto: str, mensagem_id: str | None,
-                    anexos: list[tuple[str, bytes]], cco: list[str] | None = None) -> int:
+                    anexos: list[tuple[str, bytes]], cco: list[str] | None = None,
+                    redirecionado_para: str | None = None) -> int:
     cco = list(cco or [])
     with db.mutacao(conn):
         cur = conn.execute(
@@ -84,7 +127,9 @@ def registrar_envio(conn, usuario_id: int, tipo: str, remetente: str, para: list
             resumo.append({"nome": nome, "tamanho": len(dados), "sha256": h})
         auditoria.registrar(conn, usuario_id, "correio.envio", "envio", eid, None,
                             {"tipo": tipo, "remetente": remetente, "para": para, "copia": copia, "cco": cco,
-                             "assunto": assunto, "mensagem_id": mensagem_id, "anexos": resumo})
+                             "assunto": assunto, "mensagem_id": mensagem_id, "anexos": resumo,
+                             # teste em producao: o e-mail NAO foi aos destinatarios acima, foi so' para este endereco
+                             **({"redirecionado_para": redirecionado_para} if redirecionado_para else {})})
     return eid
 
 
@@ -260,6 +305,7 @@ def enviar_e_registrar(conn, usuario: dict, tipo: str, para: list[str], copia: l
     antes de tudo, inclusive no envio que nao passa pela reserva (teste de envio, cobranca de certidoes)."""
     instalacao.exigir_envio()
     cco = list(cco or [])
+    destino_teste = redirecionamento()      # antes de tudo: mal configurado, nada sai
     c = cliente(usuario["id"], usuario.get("email", ""))
     remetente = c.remetente()
     # Quem envia nao vai em copia de si mesmo: compara com a conta do Outlook, nao com o login (09/10/2026).
@@ -272,7 +318,16 @@ def enviar_e_registrar(conn, usuario: dict, tipo: str, para: list[str], copia: l
         corpo_html += (f'<p>&nbsp;</p><p><img src="cid:{ASSINATURA_CID}" alt="Assinatura" '
                        f'style="max-width:600px"></p>')
         inline.append((f"assinatura.{'png' if tipo_img == 'image/png' else 'jpg'}", dados, ASSINATURA_CID))
-    mensagem_id = c.enviar(para, copia, assunto, corpo_html, anexos, cco=cco, inline=inline)
+    if destino_teste:
+        # Redirecionamento de teste: vai SO' para o endereco de teste. O registro guarda os destinatarios de verdade
+        # (sao eles que o proximo envio propoe) e a auditoria diz para onde o e-mail foi de fato.
+        lista = lambda nome, xs: f"{nome}: {html.escape(', '.join(xs))}" if xs else None
+        quem = "; ".join(filter(None, (lista("para", para), lista("cópia", copia), lista("cco", cco))))
+        aviso = ('<p style="border:1px solid #B45309;background:#FFFBEB;padding:8px 12px">'
+                 f"<strong>TESTE da Dashboard Lotufo: este e-mail foi redirecionado.</strong> Iria {quem or 'sem destinatário'}.</p>")
+        mensagem_id = c.enviar([destino_teste], [], f"[TESTE] {assunto}", aviso + corpo_html, anexos, cco=[], inline=inline)
+    else:
+        mensagem_id = c.enviar(para, copia, assunto, corpo_html, anexos, cco=cco, inline=inline)
     # O e-mail SAIU: daqui para baixo nenhuma falha pode virar "tente de novo" (A-03, 10/10/2026). Banco travado
     # alem do busy_timeout ganha mais duas chances; o que ainda falhar vira EnvioNaoRegistrado.
     for tentativa in range(3):
@@ -280,7 +335,7 @@ def enviar_e_registrar(conn, usuario: dict, tipo: str, para: list[str], copia: l
             time.sleep(1)
         try:
             return registrar_envio(conn, usuario["id"], tipo, remetente, para, copia, assunto, mensagem_id, anexos,
-                                   cco=cco)
+                                   cco=cco, redirecionado_para=destino_teste)
         except Exception as e:
             erro = e
             if not db.eh_lock(e):

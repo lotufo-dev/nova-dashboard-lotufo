@@ -105,6 +105,8 @@ def create_app() -> FastAPI:
         inst = instalacao.estado()
         return {"status": "ok", "banco": "ok", "backup": backup_mod.estado(),
                 "instalacao": inst["instalacao"], "instalacao_motivo": inst["motivo"],
+                # teste em producao (06/11/2026): com o redirecionamento ligado, toda tela mostra a faixa de aviso
+                "email_redirecionado": correio.redirecionamento_ativo(),
                 "commit": integridade.commit_atual(),
                 # Issue #425: `tls` e' como o pedido chegou (o uvicorn com o certificado poe "https"), nao a variavel
                 # DASH_SEM_TLS: producao que subiu sem o certificado aparece aqui, mesmo com a tarefa certa.

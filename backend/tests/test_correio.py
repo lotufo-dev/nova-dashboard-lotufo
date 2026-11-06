@@ -318,3 +318,76 @@ def test_png_que_promete_imagem_enorme_e_recusado_sem_descomprimir(conn):
     with pytest.raises(ValueError, match="grande demais: reduza as dimensões"):
         correio.gravar_assinatura(conn, 1, _png(5000, 5000, cor=6, idat=zlib.compress(b"\x00" * 1000)))
     assert correio.assinatura(1) is None
+
+
+def _simulado(tmp_path):
+    arquivos = sorted((tmp_path / "sim" / "enviados").glob("*.json"))
+    return [json.loads(a.read_text(encoding="utf-8")) for a in arquivos]
+
+
+def test_redirecionamento_de_teste_manda_so_para_o_endereco_de_teste_e_audita(conn, tmp_path, monkeypatch):
+    """Teste em producao (06/11/2026): com o redirecionamento ligado, o e-mail vai SO' para o endereco de teste, com
+    [TESTE] no assunto e os destinatarios de verdade no alto do corpo; o registro guarda os destinatarios de verdade
+    e a auditoria diz para onde foi."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    monkeypatch.setenv("DASH_EMAIL_REDIRECIONAR", "teste@exemplo.com.br")
+    eid = correio.enviar_e_registrar(conn, {"id": 1, "email": "quem.envia@l.com"}, "teste", ["orgao@exemplo.com.br"],
+                                     ["fiscal@exemplo.com.br"], "Assunto", "<p>corpo</p>", [("a.txt", b"oi")],
+                                     cco=["oculto@exemplo.com.br"])
+    (enviado,) = _simulado(tmp_path)
+    assert (enviado["para"], enviado["copia"], enviado["cco"]) == (["teste@exemplo.com.br"], [], [])
+    assert enviado["assunto"] == "[TESTE] Assunto"
+    for trecho in ("redirecionado", "orgao@exemplo.com.br", "fiscal@exemplo.com.br", "oculto@exemplo.com.br", "<p>corpo</p>"):
+        assert trecho in enviado["corpo"]
+    assert [a["nome"] for a in enviado["anexos"]] == ["a.txt"]
+    e = conn.execute("SELECT para, copia, cco, assunto FROM envios WHERE id=?", (eid,)).fetchone()
+    assert (json.loads(e["para"]), json.loads(e["copia"]), json.loads(e["cco"]), e["assunto"]) == (
+        ["orgao@exemplo.com.br"], ["fiscal@exemplo.com.br"], ["oculto@exemplo.com.br"], "Assunto")
+    depois = json.loads(conn.execute("SELECT depois FROM audit_log WHERE acao='correio.envio' AND entidade_id=?",
+                                     (eid,)).fetchone()[0])
+    assert depois["redirecionado_para"] == "teste@exemplo.com.br"
+
+
+def test_sem_redirecionamento_o_envio_segue_como_antes(conn, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    monkeypatch.delenv("DASH_EMAIL_REDIRECIONAR", raising=False)
+    assert correio.redirecionamento() is None and correio.redirecionamento_ativo() is False
+    eid = correio.enviar_e_registrar(conn, {"id": 1, "email": "quem.envia@l.com"}, "teste", ["orgao@exemplo.com.br"], [],
+                                     "Assunto", "<p>corpo</p>", [])
+    (enviado,) = _simulado(tmp_path)
+    assert enviado["para"] == ["orgao@exemplo.com.br"] and enviado["assunto"] == "Assunto"
+    assert "redirecionado" not in enviado["corpo"]
+    depois = json.loads(conn.execute("SELECT depois FROM audit_log WHERE acao='correio.envio' AND entidade_id=?",
+                                     (eid,)).fetchone()[0])
+    assert "redirecionado_para" not in depois
+
+
+def test_redirecionamento_pelo_arquivo_de_segredos_e_lido_a_cada_envio(conn, tmp_path, monkeypatch):
+    monkeypatch.delenv("DASH_EMAIL_REDIRECIONAR", raising=False)
+    # a pasta de segredos fica ao lado de `dados`: uma raiz so' deste teste, para o arquivo nao vazar para os outros
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "raiz" / "dados" / "t.db"))
+    segredos = db.db_path().parent.parent / "segredos"
+    segredos.mkdir(parents=True, exist_ok=True)
+    arquivo = segredos / correio.ARQUIVO_REDIRECIONAR
+    assert correio.redirecionamento() is None
+    arquivo.write_text("teste@exemplo.com.br\n", encoding="utf-8")
+    assert correio.redirecionamento() == "teste@exemplo.com.br" and correio.redirecionamento_ativo() is True
+    arquivo.unlink()
+    assert correio.redirecionamento() is None and correio.redirecionamento_ativo() is False
+
+
+@pytest.mark.parametrize("conteudo", ["", "nao-e-um-endereco", "a@b", "dois@exemplo.com.br outro@exemplo.com.br"])
+def test_redirecionamento_ligado_e_ilegivel_recusa_o_envio(conn, tmp_path, monkeypatch, conteudo):
+    """Ligado com endereco que nao se le, NADA sai: o e-mail nao pode ir ao destinatario de verdade por engano."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    monkeypatch.delenv("DASH_EMAIL_REDIRECIONAR", raising=False)
+    # a pasta de segredos fica ao lado de `dados`: uma raiz so' deste teste, para o arquivo nao vazar para os outros
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "raiz" / "dados" / "t.db"))
+    segredos = db.db_path().parent.parent / "segredos"
+    segredos.mkdir(parents=True, exist_ok=True)
+    (segredos / correio.ARQUIVO_REDIRECIONAR).write_text(conteudo, encoding="utf-8")
+    assert correio.redirecionamento_ativo() is True
+    with pytest.raises(graph.ErroGraph, match="mal configurado"):
+        correio.enviar_e_registrar(conn, {"id": 1, "email": "quem.envia@l.com"}, "teste", ["orgao@exemplo.com.br"], [],
+                                   "Assunto", "<p/>", [])
+    assert _simulado(tmp_path) == [] and conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
