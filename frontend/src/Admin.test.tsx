@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import Admin from "./Admin";
+import { ApiErro } from "./api";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
@@ -215,6 +216,28 @@ test("Saúde: 'Reenviar cópia do dono' pede o reenvio, relê a Saúde e confirm
   expect(await screen.findByText("Cópia do dono enviada por e-mail (2 e-mails).")).toBeTruthy();
   expect(api).toHaveBeenCalledWith("/api/admin/copia-dono/reenviar", expect.objectContaining({ method: "POST" }));
   await waitFor(() => expect(screen.queryByText(/Envio da cópia do dono: a última tentativa/)).toBeNull());
+});
+
+test("Saúde: 'Reenviar cópia do dono' com reserva presa mostra a liberação da linha do 409", async () => {
+  const reserva = { mensagem: "Este envio está em andamento ou foi interrompido (iniciado às 08:00 por Admin).",
+    codigo: "ENVIO_RESERVADO", reservado_em: "2026-10-13T08:00:00-04:00", reservado_por_nome: "Admin",
+    liberavel_a_partir_de: "2026-10-13T08:15:00-04:00", tabela: "copia_dono_envios", id: 7 };
+  api.mockImplementation(async (url: string, opcoes?: { method?: string; body?: string }) => {
+    if (url === "/api/admin/copia-dono/reenviar") throw new ApiErro(409, reserva.mensagem, reserva);
+    if (url === "/api/envios/liberar") return { ok: true };
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false, ultima_copia_dono: "2026-10-13T08:00:00-04:00" };
+    throw new Error(`fora do recorte: ${url} ${opcoes?.method}`);
+  });
+  render(<Admin aba="saude" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Reenviar cópia do dono" }));
+  expect(await screen.findByText(/Este envio está em andamento ou foi interrompido/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Por que liberar/), { target: { value: "conferi os Enviados e não saiu" } });
+  fireEvent.click(screen.getByLabelText(/Conferi a caixa de Enviados/));
+  fireEvent.click(screen.getByRole("button", { name: "Liberar envio" }));
+  await waitFor(() => expect(api).toHaveBeenCalledWith("/api/envios/liberar", { method: "POST", body: JSON.stringify({
+    tabela: "copia_dono_envios", id: 7, justificativa: "conferi os Enviados e não saiu", conferi_enviados: true }) }));
+  expect(await screen.findByText(/Trava removida/)).toBeTruthy();
 });
 
 test("Saúde: 'Gerar cópia do dono agora' com envio parcial mostra a falha, não a confirmação", async () => {

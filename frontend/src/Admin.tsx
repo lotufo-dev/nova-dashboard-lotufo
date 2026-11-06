@@ -3,6 +3,7 @@ import UltimosAcessos from "./Acessos";
 import { contar } from "./formato";
 import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
+import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import {
   ABAS_ADMIN, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, pessoaDoEvento, quantidadeRec,
   reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, rotuloObjeto, rotuloRec, urlPaginaRec,
@@ -280,8 +281,9 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
   const [reenviando, setReenviando] = useState(false);
   const [erro, setErro] = useState("");
   const [enviada, setEnviada] = useState("");
+  const [presa, setPresa] = useState<{ id: number; reserva: Reserva } | null>(null);
   async function gerar() {
-    setErro(""); setEnviada(""); setGerando(true);
+    setErro(""); setEnviada(""); setPresa(null); setGerando(true);
     try {
       const r = await api<{ arquivo: string; emails?: number; partes?: number | null; completo?: boolean }>(
         "/api/admin/copia-dono", { method: "POST" });
@@ -297,13 +299,15 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
   }
   // Issue #420: a copia mais recente sai de novo por e-mail
   async function reenviar() {
-    setErro(""); setEnviada(""); setReenviando(true);
+    setErro(""); setEnviada(""); setPresa(null); setReenviando(true);
     try {
       const r = await api<{ arquivo: string; emails: number }>("/api/admin/copia-dono/reenviar", { method: "POST" });
       setEnviada(`Cópia do dono enviada por e-mail (${contar(r.emails, "e-mail", "e-mails")}).`);
       aoGerar();
     } catch (e) {
       setErro(mensagem(e));
+      // reserva presa: o 409 traz a linha a liberar, e a liberacao aparece ao lado do aviso
+      if (envioReservado(e) && typeof e.corpo.id === "number") setPresa({ id: e.corpo.id, reserva: e.corpo });
     } finally { setReenviando(false); }
   }
   return (
@@ -323,6 +327,10 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
       <LinhaBackup rotulo="Envio da cópia do dono" em={b.ultimo_envio_copia_dono ?? null}
         erro={b.ultimo_envio_copia_dono_erro ?? null} erroEm={b.ultimo_envio_copia_dono_erro_em ?? null} />
       {erro && <Erro texto={erro} />}
+      {presa && (
+        <LiberarEnvio tabela="copia_dono_envios" id={presa.id} reserva={presa.reserva}
+          aoLiberar={() => { setErro(""); aoGerar(); }} />
+      )}
       <div role="status">{enviada && !erro && <p className="campo__nota">{enviada}</p>}</div>
       <div className="acoes-saude">
         <button type="button" className="btn btn--pequeno" onClick={gerar} disabled={gerando || reenviando}>
