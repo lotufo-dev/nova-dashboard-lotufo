@@ -328,7 +328,10 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
   const avisarPendente = useRef(aoRevisaoPendente);
   useEffect(() => { avisarPendente.current = aoRevisaoPendente; });
   async function carregar() {
-    setD(await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`));
+    const x = await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`);
+    setD(x);
+    // toda releitura certa avisa a pagina, para ela sair de uma falha anterior mesmo sem o pendente mudar
+    avisarPendente.current?.(revisaoPendente(x));
   }
   useEffect(() => {
     let vivo = true;
