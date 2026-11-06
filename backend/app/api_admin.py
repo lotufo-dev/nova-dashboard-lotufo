@@ -49,14 +49,15 @@ def saude_do_backup(usuario: dict = Depends(exigir("administrar", com_csrf=False
 def gerar_copia_dono(usuario: dict = Depends(exigir("administrar")), conn: sqlite3.Connection = Depends(conexao)):
     """Botao "Gerar cópia do dono agora" (Administracao > Saude, issue #419). So' admin.
     Sem chave publica configurada nada e' gerado. A copia gerada sai por e-mail (issue #420); falha no envio nao
-    desfaz a copia: fica no log e na Saude, e `emails` diz quantos sairam."""
+    desfaz a copia: fica no log e na Saude. `emails` = quantos sairam, de `partes` (nulo quando nada foi tentado);
+    `completo` so' com todas as partes enviadas."""
     try:
         destino = copia_dono.gerar_e_registrar(backup.pasta_local().parent.parent, backup.pasta_local())
     except copia_dono.NaoConfigurada:
         raise HTTPException(409, copia_dono.NAO_CONFIGURADA)
     except Exception as e:
         raise HTTPException(500, f"Não foi possível gerar a cópia do dono: {copia_dono._motivo(e)}")
-    return {"arquivo": destino.name, "emails": copia_dono_envio.enviar_nova(conn, destino)}
+    return {"arquivo": destino.name, **copia_dono_envio.enviar_nova(conn, destino)}
 
 
 @router.post("/copia-dono/reenviar")

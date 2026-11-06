@@ -5,7 +5,7 @@ Depois de cada copia gerada (`copia_dono`, issue #419), o `.tar.age` vai como an
 `enviada_por` (`correio.enviar_e_registrar`, como a cobranca de certidoes). Acima do teto do anexo, o arquivo vai em
 partes numeradas (`.part01`, `.part02`...), um e-mail por parte, com o sha256 do arquivo inteiro em cada corpo.
 
-Cada e-mail e' uma linha de `copia_dono_envios` (migracao 064), reservada antes de sair (`envio_reserva`). A mesma
+Cada e-mail e' uma linha de `copia_dono_envios` (migracao 066), reservada antes de sair (`envio_reserva`). A mesma
 copia sai uma vez so' sozinha (rodada 1); de novo, so' pelo "Reenviar cópia do dono" (rodadas 2, 3...). Sem
 cadastro, sem usuario ou sem conta conectada nada sai: fica no log e em `backup.ESTADO` (a Saude mostra).
 """
@@ -29,18 +29,37 @@ INSTRUCAO = "Abre só com a chave do dono; instruções no runbook, seção Cóp
 SEM_CADASTRO = "destinatário da cópia do dono não configurado no cadastro (geral.yaml, copia_dono)"
 SEM_COPIA = "Nenhuma cópia do dono gerada ainda"
 _CARIMBO = re.compile(r"dashboard-dono-(\d{8}-\d{6})\.tar\.age$")
+CABECALHO_AGE = b"age-encryption.org/v1\n"     # o que `pyrage.encrypt` grava no inicio de todo arquivo cifrado
 
 
 class EnvioNaoConfigurado(ValueError):
     """Nada saiu porque falta cadastro, usuario, conta conectada ou a copia."""
 
 
-class ParteNaoEnviada(ValueError):
-    """Uma parte nao saiu (falha antes do /send); `enviados` e' quantos e-mails desta rodada sairam antes dela."""
+class CopiaInvalida(ValueError):
+    """O arquivo com o nome da copia nao e' a copia cifrada que a geracao gravou: nada sai."""
 
-    def __init__(self, mensagem: str, enviados: int):
+
+class ParteNaoEnviada(ValueError):
+    """Uma parte nao saiu (falha antes do /send); `enviados` e' quantos e-mails desta rodada sairam antes dela,
+    de `partes`."""
+
+    def __init__(self, mensagem: str, enviados: int, partes: int):
         super().__init__(mensagem)
-        self.enviados = enviados
+        self.enviados, self.partes = enviados, partes
+
+
+def _conferir_copia(arquivo: Path, dados: bytes, sha: str) -> None:
+    """So' sai o que a geracao gravou: arquivo age (nunca um `.tar` em claro com o mesmo nome) e com o sha256 que a
+    geracao grava ao lado (`<arquivo>.sha256`). Antes da reserva: a recusa nao deixa rastro."""
+    if not dados.startswith(CABECALHO_AGE):
+        raise CopiaInvalida("o arquivo da cópia do dono não é um arquivo cifrado (age): nada foi enviado")
+    try:
+        gravado = (arquivo.parent / f"{arquivo.name}.sha256").read_text(encoding="utf-8").split()
+    except (OSError, UnicodeError):
+        raise CopiaInvalida("falta o sha256 da cópia do dono gravado ao lado dela: nada foi enviado") from None
+    if not gravado or gravado[0].lower() != sha:
+        raise CopiaInvalida("a cópia do dono não confere com o sha256 gravado ao lado dela: nada foi enviado")
 
 
 def _config(conn) -> dict:
@@ -119,19 +138,26 @@ def _ja_teve_rodada(conn, nome: str) -> bool:
 
 
 def pendente(conn, pasta_backups: Path) -> str | None:
-    """A copia mais recente que nao saiu inteira por e-mail em nenhuma rodada, e sem envio em andamento (a Saude
-    acusa mesmo depois de o servidor reiniciar, quando o erro da memoria ja' sumiu). None: nada pendente."""
+    """O que a Saude acusa da copia mais recente, lido do banco (vale depois de o servidor reiniciar, quando o erro
+    da memoria ja' sumiu). Reserva mais velha que `envio_reserva.IDADE_MINIMA_LIBERACAO` e' envio interrompido
+    (queda no meio da rodada, envio incerto, e-mail sem registro): acusa mesmo que outra rodada tenha saido, porque
+    trava o "Reenviar". Sem rodada completa e sem envio em andamento: nao saiu. None: nada pendente."""
     copias = copia_dono.copias(pasta_backups)
     if not copias:
         return None
     nome = copias[-1].name
     r = conn.execute(
         f"SELECT SUM(envio_reservado_em IS NOT NULL) AS reservadas, "
+        f"SUM(envio_reservado_em <= datetime('now', :idade)) AS presas, "
         f"(SELECT COUNT(*) FROM (SELECT rodada FROM {TABELA} WHERE arquivo=:a GROUP BY rodada "
-        f"HAVING COUNT(envio_id) = MAX(partes))) AS completas FROM {TABELA} WHERE arquivo=:a", {"a": nome}).fetchone()
+        f"HAVING COUNT(envio_id) = MAX(partes))) AS completas FROM {TABELA} WHERE arquivo=:a",
+        {"a": nome, "idade": f"-{envio_reserva.IDADE_MINIMA_LIBERACAO} minutes"}).fetchone()
+    data = f"{_gerada_em(copias[-1]):%d/%m/%Y}"
+    if r["presas"]:
+        return f"envio da cópia de {data} interrompido: confira os Enviados e libere"
     if r["reservadas"] or r["completas"]:
         return None
-    return f"a cópia de {_gerada_em(copias[-1]):%d/%m/%Y} não saiu por e-mail"
+    return f"a cópia de {data} não saiu por e-mail"
 
 
 def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
@@ -143,6 +169,7 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
         return 0                                    # antes de ler o arquivo; conferido de novo na reserva
     dados = arquivo.read_bytes()
     sha = hashlib.sha256(dados).hexdigest()
+    _conferir_copia(arquivo, dados, sha)
     partes = _partes(dados, arquivo.name)
     total = len(partes)
     reservado_por = reenvio_por["id"] if reenvio_por else usuario["id"]
@@ -183,12 +210,17 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
             if total == 1 and not trava:
                 raise
             if total == 1:
-                raise ParteNaoEnviada(f"{_motivo(e)}{trava}", 0) from e
+                raise ParteNaoEnviada(f"{_motivo(e)}{trava}", 0, total) from e
             anteriores = "; as anteriores saíram" if n > 1 else ""
-            raise ParteNaoEnviada(f"parte {n} de {total} não enviada ({_motivo(e)}){anteriores}{trava}", i) from e
-        with correio.depois_do_envio(titulo, config["para"], envio_id), db.mutacao(conn):
-            envio_reserva.liberar(conn, TABELA, rid)
-            conn.execute(f"UPDATE {TABELA} SET envio_id=? WHERE id=?", (envio_id, rid))
+            raise ParteNaoEnviada(f"parte {n} de {total} não enviada ({_motivo(e)}){anteriores}{trava}", i,
+                                  total) from e
+        try:
+            with correio.depois_do_envio(titulo, config["para"], envio_id), db.mutacao(conn):
+                envio_reserva.liberar(conn, TABELA, rid)
+                conn.execute(f"UPDATE {TABELA} SET envio_id=? WHERE id=?", (envio_id, rid))
+        except correio.EnvioNaoRegistrado:
+            _soltar(conn, ids[i + 1:])              # esta parte saiu e nao foi marcada: so' a reserva dela fica
+            raise
     return total
 
 
@@ -205,6 +237,11 @@ def _registrado(conn, arquivo: Path, reenvio_por: dict | None) -> int:
         enviados = _enviar(conn, arquivo, reenvio_por)
     except envio_reserva.EnvioEmAndamento:
         raise                                       # outro envio da mesma copia esta' saindo: nao e' falha
+    except correio.EnvioIncerto as e:               # a conexao caiu no /send: pode ter saido ou nao
+        backup.ESTADO["ultimo_envio_copia_dono_erro"] = (
+            f"{agora}: envio incerto: confira os Enviados de quem envia antes de reenviar")
+        log.critical("copia do dono %s: envio incerto (%s)", arquivo.name, e)
+        raise
     except correio.EnvioNaoRegistrado as e:
         backup.ESTADO["ultimo_envio_copia_dono_erro"] = (
             f"{agora}: o e-mail saiu e o registro falhou; confira os Enviados de quem envia antes de reenviar")
@@ -221,26 +258,30 @@ def _registrado(conn, arquivo: Path, reenvio_por: dict | None) -> int:
     return enviados
 
 
-def enviar_nova(conn, arquivo: Path) -> int:
-    """Envio automatico, logo depois de gerar a copia. Falha fica no log e na Saude e nao sobe, menos o e-mail que
-    saiu sem registro (EnvioNaoRegistrado): esse sobe, para a rota dizer "NAO envie de novo"."""
+def enviar_nova(conn, arquivo: Path) -> dict:
+    """Envio automatico, logo depois de gerar a copia: `{emails, partes, completo}` (`partes` None quando nada foi
+    tentado; `completo` so' com todas as partes enviadas). Falha fica no log e na Saude e nao sobe, menos o e-mail
+    que saiu sem registro (EnvioNaoRegistrado): esse sobe, para a rota dizer "NAO envie de novo"."""
     try:
-        return _registrado(conn, arquivo, None)
+        total = _registrado(conn, arquivo, None)
     except correio.EnvioNaoRegistrado:
         raise
     except ParteNaoEnviada as e:
-        return e.enviados
+        return {"emails": e.enviados, "partes": e.partes, "completo": False}
     except Exception:
-        return 0
+        return {"emails": 0, "partes": None, "completo": False}
+    return {"emails": total, "partes": total or None, "completo": total > 0}
 
 
 def reenviar(conn, pasta_backups: Path, usuario: dict) -> dict:
-    """Botao "Reenviar cópia do dono": a copia mais recente, de novo, inteira."""
+    """Botao "Reenviar cópia do dono": a copia mais recente, de novo, inteira. Parte que nao sai levanta
+    (ParteNaoEnviada): a rota mostra o motivo, e o que volta aqui e' sempre o envio completo."""
     copias = copia_dono.copias(pasta_backups)
     if not copias:
         raise EnvioNaoConfigurado(SEM_COPIA)
     arquivo = copias[-1]
-    return {"arquivo": arquivo.name, "emails": _registrado(conn, arquivo, usuario)}
+    total = _registrado(conn, arquivo, usuario)
+    return {"arquivo": arquivo.name, "emails": total, "partes": total, "completo": True}
 
 
 def rodada_semanal(raiz: Path, pasta_backups: Path) -> None:
