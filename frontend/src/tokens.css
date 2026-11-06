@@ -301,7 +301,6 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
   font-size: 14px; line-height: 20px; font-weight: 600; text-align: center;
 }
 /* redirecionamento de e-mail de teste ligado: aviso em ambar, como os de atencao */
-.faixa-instalacao--teste { background: var(--atencao); }
 
 /* UM elemento so': a <nav> anima a propria largura e o bloco de dentro (largura fixa, rotulos sem quebra) vai sendo
    DESCOBERTO pelo corte. `overflow-x: hidden` e' o mecanismo: nenhum pixel do conteudo se move durante a animacao.
