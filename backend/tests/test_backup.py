@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import sqlite3
 import time
@@ -239,22 +240,61 @@ def _worker_limpo(monkeypatch):
         monkeypatch.setitem(backup.ESTADO, chave, None)
 
 
+# Toda pasta de `dados` que o sistema grava pelo sha256 (issue #441), com a extensao de um arquivo tipico. A lista
+# e' do teste, nao `backup.PASTAS_ARQUIVOS`: pasta que sair de la' faz a restauracao abaixo falhar.
+PASTAS_DOS_DADOS = (("notas", "pdf"), ("espelhos", "docx"), ("modelos", "docx"), ("evidencias", "eml"),
+                    ("certidoes", "pdf"), ("regularidades", "pdf"), ("protocolos", "pdf"), ("pleitos", "pdf"),
+                    ("curvas", "xlsx"), ("planilhas", "xlsx"), ("frc", "pdf"), ("boletins", "pdf"),
+                    ("anexos", "pdf"))
+ASSINATURA = b"\x89PNG\r\n\x1a\n assinatura"
+
+
 def _dados_com_arquivos(tmp_path):
-    """Pasta de dados como a da producao: banco + as quatro pastas, nomes pelo sha256."""
+    """Pasta de dados como a da producao: banco + as pastas pelo sha256 e a assinatura de quem envia
+    (`assinaturas/usuario-<id>`, o unico nome que nao e' o sha256)."""
     dados = tmp_path / "dados"; dados.mkdir()
     origem = dados / "dashboard.db"
     conn = sqlite3.connect(origem)
     conn.execute("CREATE TABLE docs (caminho TEXT)")
     gravados = {}
-    for pasta, ext in (("notas", "pdf"), ("espelhos", "docx"), ("modelos", "docx"), ("evidencias", "eml")):
+    for pasta, ext in PASTAS_DOS_DADOS:
         conteudo = f"%PDF- conteudo de {pasta}".encode()
         rel = f"{pasta}/{hashlib.sha256(conteudo).hexdigest()}.{ext}"
         (dados / pasta).mkdir()
         (dados / rel).write_bytes(conteudo)
         conn.execute("INSERT INTO docs VALUES (?)", (rel,))
         gravados[rel] = conteudo
+    (dados / "assinaturas").mkdir()
+    (dados / "assinaturas" / "usuario-1").write_bytes(ASSINATURA)
+    conn.execute("INSERT INTO docs VALUES ('assinaturas/usuario-1')")
+    gravados["assinaturas/usuario-1"] = ASSINATURA
+    # a auditoria que `correio.gravar_assinatura` grava: e' por ela que a restauracao sabe a assinatura vigente
+    conn.execute("CREATE TABLE audit_log (id INTEGER PRIMARY KEY, acao TEXT, entidade TEXT, entidade_id TEXT, "
+                 "depois TEXT)")
+    _evento_assinatura(conn, 1, {"tamanho": len(ASSINATURA), "sha256": hashlib.sha256(ASSINATURA).hexdigest()})
     conn.commit(); conn.close()
     return origem, gravados
+
+
+def _evento_assinatura(conn, uid, depois):
+    conn.execute("INSERT INTO audit_log (acao, entidade, entidade_id, depois) VALUES ('correio.assinatura', "
+                 "'usuario', ?, ?)", (str(uid), json.dumps(depois)))
+
+
+def test_pastas_arquivos_cobre_toda_pasta_que_o_sistema_grava():
+    """Issue #441: o backup levava so' notas, espelhos, modelos e evidencias; protocolos, pleitos, curvas e as outras
+    sumiam numa restauracao. Confere no codigo: toda pasta de `dados` gravada pelo sistema esta' no backup."""
+    import re
+    gravadas = set()
+    for arq in Path(backup.__file__).parent.glob("*.py"):
+        texto = arq.read_text(encoding="utf-8")
+        gravadas |= set(re.findall(r'(?:gravar_bytes|arquivos\.pasta|_no_disco)\(\s*"(\w+)"', texto))
+        gravadas |= set(re.findall(r'^PASTA_\w+ = "(\w+)"', texto, re.M))   # curvas (pleitos.PASTA_CURVA_S)
+    # a busca acha o que a issue lista (senao o teste nao prova nada)
+    assert {"certidoes", "regularidades", "protocolos", "pleitos", "frc", "assinaturas", "curvas",
+            "planilhas"} <= gravadas
+    assert gravadas <= set(backup.PASTAS_ARQUIVOS), sorted(gravadas - set(backup.PASTAS_ARQUIVOS))
+    assert {p for p, _ in PASTAS_DOS_DADOS} | {"assinaturas"} == set(backup.PASTAS_ARQUIVOS)
 
 
 def _arquivos_no(pasta):
@@ -267,13 +307,26 @@ def _rodar(origem, destino, fora=None):
     backup.rodada_arquivos(origem, destino, fora)
 
 
-def test_passada_copia_as_quatro_pastas_para_o_backup(tmp_path):
+def test_passada_copia_todas_as_pastas_para_o_backup(tmp_path):
     origem, gravados = _dados_com_arquivos(tmp_path)
     destino = tmp_path / "dados" / "backups"
     _rodar(origem, destino)
     for rel, conteudo in gravados.items():
         assert (destino / "arquivos" / rel).read_bytes() == conteudo, rel
     assert backup.ESTADO["ultima_copia_arquivos"] and backup.ESTADO["ultima_copia_arquivos_erro"] is None
+
+
+def test_assinatura_trocada_por_outra_do_mesmo_tamanho_vai_ao_backup_na_passada_seguinte(tmp_path):
+    """Issue #441 (/code-review): `assinaturas/usuario-<id>` nao e' o sha256; mesmo nome e tamanho nao provam o mesmo
+    arquivo, e a passada de hora em hora (sem a releitura diaria) tem que levar a assinatura nova."""
+    origem, _ = _dados_com_arquivos(tmp_path)
+    destino = tmp_path / "dados" / "backups"
+    _rodar(origem, destino)                                   # primeira passada: relê tudo
+    nova = ASSINATURA.replace(b"assinatura", b"ASSINATURA")
+    assert len(nova) == len(ASSINATURA)
+    (tmp_path / "dados" / "assinaturas" / "usuario-1").write_bytes(nova)
+    backup.rodada_arquivos(origem, destino, None)             # de hora em hora: sem releitura
+    assert (destino / "arquivos" / "assinaturas" / "usuario-1").read_bytes() == nova
 
 
 def test_copia_ignora_temporario_em_andamento(tmp_path):
@@ -294,7 +347,7 @@ def test_restaurar_snapshot_devolve_banco_e_arquivos_coerentes(tmp_path):
 
     # o pior dia: banco perdido, pastas vazias e um PDF estragado no lugar (mesmo tamanho)
     origem.unlink()
-    for pasta in backup.PASTAS_ARQUIVOS:
+    for pasta in [p for p, _ in PASTAS_DOS_DADOS] + ["assinaturas"]:   # todas, nao so' as que o backup leva
         for a in (dados / pasta).iterdir():
             a.unlink()
     rel_estragado = next(iter(gravados))
@@ -302,7 +355,7 @@ def test_restaurar_snapshot_devolve_banco_e_arquivos_coerentes(tmp_path):
 
     # restauracao como o runbook manda: snapshot volta a ser o banco, arquivos conferidos voltam
     origem.write_bytes(snap.read_bytes())
-    backup.copiar_arquivos(destino / "arquivos", dados, conferir=True)
+    assert backup.restaurar_arquivos(destino / "arquivos", dados) == len(gravados)
 
     conn = sqlite3.connect(origem)
     citados = [r[0] for r in conn.execute("SELECT caminho FROM docs")]
@@ -310,6 +363,141 @@ def test_restaurar_snapshot_devolve_banco_e_arquivos_coerentes(tmp_path):
     assert sorted(citados) == sorted(gravados)
     for rel in citados:  # todo arquivo que o banco cita existe e e' o que foi gravado
         assert (dados / rel).read_bytes() == gravados[rel]
+
+
+def _sha(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def _restaurar_com_eventos(tmp_path, eventos, ativos=None):
+    """Backup feito com a assinatura A da pessoa 1; o banco restaurado ganha `eventos`; `dados/assinaturas` fica com
+    `ativos` ({uid: bytes}; None = a pasta como estava). Devolve (dados, backup dos arquivos, erro ou None)."""
+    origem, _ = _dados_com_arquivos(tmp_path)
+    dados = tmp_path / "dados"
+    destino = dados / "backups"
+    _rodar(origem, destino)
+    conn = sqlite3.connect(origem)
+    for uid, depois in eventos:
+        _evento_assinatura(conn, uid, depois)
+    conn.commit(); conn.close()
+    if ativos is not None:
+        for a in (dados / "assinaturas").iterdir():
+            a.unlink()
+        for uid, b in ativos.items():
+            (dados / "assinaturas" / f"usuario-{uid}").write_bytes(b)
+    try:
+        backup.restaurar_arquivos(destino / "arquivos", dados)
+        return dados, destino / "arquivos", None
+    except backup.ErroArquivo as e:
+        return dados, destino / "arquivos", str(e)
+
+
+def _quarentena(dados):
+    return sorted(b.read_bytes() for q in (dados / "assinaturas").glob("quarentena-*") for b in q.iterdir())
+
+
+def test_restauracao_troca_a_assinatura_ativa_pela_vigente_no_banco(tmp_path):
+    """Gate Sol na PR #472 (#441): `dados` nao se perdeu e tem B; o banco restaurado diz que a vigente e' A (a do
+    backup). B vai para a quarentena e A volta: nao basta deixar de copiar, B sairia nos e-mails."""
+    dados, _, erro = _restaurar_com_eventos(tmp_path, [], ativos={1: b"B outra png"})
+    assert erro is None
+    assert (dados / "assinaturas" / "usuario-1").read_bytes() == ASSINATURA
+    assert _quarentena(dados) == [b"B outra png"]
+
+
+def test_restauracao_tira_a_assinatura_que_o_banco_diz_removida(tmp_path):
+    """O ultimo evento e' a remocao: a ativa (que ainda estava em `dados`) vai para a quarentena e a do backup nao volta."""
+    dados, arquivos_bkp, erro = _restaurar_com_eventos(tmp_path, [(1, {"removida": True})])
+    assert erro is None
+    assert not (dados / "assinaturas" / "usuario-1").exists()
+    assert _quarentena(dados) == [ASSINATURA]
+    assert (arquivos_bkp / "assinaturas" / "usuario-1").read_bytes() == ASSINATURA   # o backup nao perde
+
+
+def test_restauracao_acusa_quem_ficou_sem_a_assinatura_vigente_e_segue_com_os_outros(tmp_path):
+    """Parte do banco, nao dos arquivos: a pessoa 7 tem assinatura no banco e nenhuma copia dela existe, e a 1 trocou
+    para C (o banco diz C) mas so' ha' A. As duas sao acusadas sem nome de arquivo; a 3, que o banco nao conhece, sai
+    do nome ativo; e a 2, em ordem, volta do backup mesmo com as outras falhando."""
+    dois = b"\x89PNG\r\n\x1a\n pessoa 2"
+    origem, _ = _dados_com_arquivos(tmp_path)
+    dados = tmp_path / "dados"
+    destino = dados / "backups"
+    (dados / "assinaturas" / "usuario-2").write_bytes(dois)
+    _rodar(origem, destino)
+    conn = sqlite3.connect(origem)
+    for uid, depois in ((2, {"sha256": _sha(dois)}), (7, {"sha256": _sha(b"sete")}), (1, {"sha256": _sha(b"C")})):
+        _evento_assinatura(conn, uid, depois)
+    conn.commit(); conn.close()
+    for a in (dados / "assinaturas").iterdir():
+        a.unlink()
+    (dados / "assinaturas" / "usuario-3").write_bytes(b"sem evento")
+    with pytest.raises(backup.ErroArquivo) as e:
+        backup.restaurar_arquivos(destino / "arquivos", dados)
+    assert str(e.value) == ("2 assinatura(s) sem a vigente: usuário 1: nenhuma cópia tem a assinatura vigente no "
+                            "banco; usuário 7: nenhuma cópia tem a assinatura vigente no banco")
+    assert (dados / "assinaturas" / "usuario-2").read_bytes() == dois
+    assert not (dados / "assinaturas" / "usuario-1").exists() and not (dados / "assinaturas" / "usuario-3").exists()
+    assert _quarentena(dados) == [b"sem evento"]
+
+
+def test_erro_de_disco_numa_assinatura_nao_para_as_outras(tmp_path, monkeypatch):
+    """Revisor na PR #472 (#441): um try por pessoa; o motivo vai junto, em portugues."""
+    dois = b"\x89PNG\r\n\x1a\n pessoa 2"
+    origem, _ = _dados_com_arquivos(tmp_path)
+    dados = tmp_path / "dados"
+    destino = dados / "backups"
+    (dados / "assinaturas" / "usuario-2").write_bytes(dois)
+    _rodar(origem, destino)
+    conn = sqlite3.connect(origem)
+    _evento_assinatura(conn, 2, {"sha256": _sha(dois)})
+    conn.commit(); conn.close()
+    for a in (dados / "assinaturas").iterdir():
+        a.unlink()
+    real = backup._copiar_um
+
+    def negado_na_1(arquivo, alvo, conferir=False):
+        if alvo.name == "usuario-1":
+            raise PermissionError("negado")
+        return real(arquivo, alvo, conferir)
+
+    monkeypatch.setattr(backup, "_copiar_um", negado_na_1)
+    with pytest.raises(backup.ErroArquivo, match=r"^1 assinatura\(s\) sem a vigente: usuário 1: acesso negado$"):
+        backup.restaurar_arquivos(destino / "arquivos", dados)
+    assert (dados / "assinaturas" / "usuario-2").read_bytes() == dois
+
+
+SUMIU_PLEITOS = "1 arquivo(s) de pleitos estão no backup e sumiram dos dados"
+
+
+def test_passada_acusa_pasta_que_sumiu_dos_dados_e_nao_a_que_nunca_existiu(tmp_path):
+    """Gate Sol e revisor na PR #472 (#441): `dados/pleitos` sumiu e o backup dela esta' cheio: a passada nao pode
+    dizer que terminou bem (o snapshot cita arquivos que ela nao viu). O erro fica com a pasta recriada vazia (a proxima
+    carta montada recria, `arquivos.pasta` faz mkdir) e na copia externa. Pasta em que nada foi gravado nao e' erro."""
+    import shutil
+    origem, _ = _dados_com_arquivos(tmp_path)
+    destino, fora = tmp_path / "dados" / "backups", tmp_path / "fora"
+    shutil.rmtree(tmp_path / "dados" / "boletins")     # nunca existiu: nem nos dados nem no backup
+    _rodar(origem, destino, fora)
+    assert backup.ESTADO["ultima_copia_arquivos_erro"] is None
+    assert backup.ESTADO["ultima_copia_externa_arquivos_erro"] is None
+    shutil.rmtree(tmp_path / "dados" / "pleitos")
+    for _ in range(2):
+        backup.rodada_arquivos(origem, destino, fora)
+        assert backup.ESTADO["ultima_copia_arquivos_erro"].endswith(f": {SUMIU_PLEITOS}")
+        assert backup.ESTADO["ultima_copia_externa_arquivos_erro"].endswith(f": {SUMIU_PLEITOS}")
+        (tmp_path / "dados" / "pleitos").mkdir(exist_ok=True)       # recriada vazia: o acervo continua fora
+
+
+def test_temporario_e_nome_alheio_no_backup_nao_contam_como_sumidos(tmp_path):
+    """Gate Sol na PR #472 (#441): `.tmp`, `desktop.ini` e nome fora do padrao no backup nao sao arquivos dos dados."""
+    origem, _ = _dados_com_arquivos(tmp_path)
+    destino = tmp_path / "dados" / "backups"
+    _rodar(origem, destino)
+    pleitos = destino / "arquivos" / "pleitos"
+    for nome in ("desktop.ini", f"{'a' * 64}.pdf.123-456-abcdef01.tmp", "Thumbs.db", f"{'b' * 63}.pdf"):
+        (pleitos / nome).write_bytes(b"x")
+    backup.rodada_arquivos(origem, destino, None)
+    assert backup.ESTADO["ultima_copia_arquivos_erro"] is None
 
 
 def test_arquivos_nao_se_multiplicam_por_snapshot(tmp_path):
@@ -328,7 +516,7 @@ def test_arquivos_nao_se_multiplicam_por_snapshot(tmp_path):
 
 
 def test_arquivo_que_saiu_dos_dados_continua_no_backup(tmp_path):
-    # um snapshot antigo pode citar o arquivo; o backup nunca apaga o que guardou
+    # um snapshot antigo pode citar o arquivo; o backup nunca apaga o que guardou, e acusa o que sumiu (#441)
     origem, gravados = _dados_com_arquivos(tmp_path)
     destino = tmp_path / "dados" / "backups"
     _rodar(origem, destino)
@@ -337,6 +525,8 @@ def test_arquivo_que_saiu_dos_dados_continua_no_backup(tmp_path):
     time.sleep(1.1)
     _rodar(origem, destino)
     assert (destino / "arquivos" / rel).exists()
+    assert backup.ESTADO["ultima_copia_arquivos_erro"].endswith(": 1 arquivo(s) de notas estão no backup e sumiram "
+                                                                 "dos dados")
 
 
 def test_passada_leva_os_arquivos_para_fora(tmp_path):
@@ -370,8 +560,9 @@ def test_arquivo_com_defeito_nao_impede_os_outros(tmp_path):
     destino = tmp_path / "dados" / "backups"
     _rodar(origem, destino)
     erro = backup.ESTADO["ultima_copia_arquivos_erro"]
-    assert erro and estragado.name in erro
-    assert "1 arquivo(s) sem cópia" in erro and "conteúdo não confere com o nome" in erro
+    # #441: o health e a tela mostram a pasta, a quantidade e o motivo; o nome (hash) fica no log
+    assert erro and erro.endswith("1 arquivo(s) sem cópia: notas 1 (conteúdo não confere com o nome)"), erro
+    assert estragado.stem not in erro
     assert not (destino / "arquivos" / "notas" / estragado.name).exists()
     for rel in gravados:
         assert (destino / "arquivos" / rel).exists(), rel

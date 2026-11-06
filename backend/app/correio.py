@@ -445,7 +445,48 @@ def gravar_assinatura(conn, usuario_id: int, dados: bytes) -> None:
     with db.mutacao(conn):
         auditoria.registrar(conn, usuario_id, "correio.assinatura", "usuario", usuario_id, None,
                             {"tamanho": len(dados), "sha256": hashlib.sha256(dados).hexdigest()})
-        _arquivo_assinatura(usuario_id).write_bytes(dados)
+        # temporario + rename (#441): o backup le a pasta sem trava, e o nome nao e' o sha256 (nada confere o conteudo);
+        # `write_bytes` direto truncaria a assinatura antes de escrever, e o backup poderia guardar a metade
+        destino = _arquivo_assinatura(usuario_id)
+        _limpar_temporarios_de_assinatura(destino.parent)
+        tmp = destino.with_name(f"{destino.name}.{os.getpid()}-{secrets.token_hex(4)}.tmp")
+        try:
+            tmp.write_bytes(dados)
+            _trocar_assinatura(tmp, destino)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+
+
+# `usuario-<id>.<pid>-<aleatorio>.tmp`: so' o temporario que `gravar_assinatura` cria
+_TMP_ASSINATURA = re.compile(r"usuario-\d+\.\d+-[0-9a-f]{8}\.tmp")
+_TMP_ASSINATURA_VELHO_SEG = 3600
+GRAVAR_ASSINATURA_OCUPADA = "Não foi possível gravar a assinatura agora; tente de novo"
+_TENTATIVAS_TROCA = (0.1, 0.2, 0.4, 0.8)    # ~1,5 s no total, so' com o arquivo ocupado
+
+
+def _limpar_temporarios_de_assinatura(pasta: Path) -> None:
+    """Sobra de gravacao interrompida (processo morto entre escrever e renomear): ninguem mais a renomeia."""
+    agora = time.time()
+    for sobra in pasta.glob("usuario-*.tmp"):
+        try:
+            if _TMP_ASSINATURA.fullmatch(sobra.name) and agora - sobra.stat().st_mtime > _TMP_ASSINATURA_VELHO_SEG:
+                sobra.unlink(missing_ok=True)
+        except OSError:
+            pass                # aberto por outra gravacao (ou ja' saiu): nao e' sobra
+
+
+def _trocar_assinatura(tmp: Path, destino: Path) -> None:
+    """`os.replace` sobre a assinatura que o backup esta' lendo falha com PermissionError no Windows (arquivo aberto):
+    tenta de novo por pouco tempo e, se continuar ocupado, recusa em portugues (422, a pessoa tenta de novo)."""
+    for espera in (*_TENTATIVAS_TROCA, None):
+        try:
+            os.replace(tmp, destino)
+            return
+        except PermissionError:
+            if espera is None:
+                raise ValueError(GRAVAR_ASSINATURA_OCUPADA) from None
+            time.sleep(espera)
 
 
 def remover_assinatura(conn, usuario_id: int) -> None:
