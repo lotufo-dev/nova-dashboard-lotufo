@@ -283,9 +283,13 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
   async function gerar() {
     setErro(""); setEnviada(""); setGerando(true);
     try {
-      const r = await api<{ arquivo: string; emails?: number }>("/api/admin/copia-dono", { method: "POST" });
-      // issue #420: sem e-mail (falhou ou sem cadastro), o motivo aparece no erro do envio, relido da Saude
-      if (r.emails) setEnviada(`Cópia do dono gerada e enviada por e-mail (${contar(r.emails, "e-mail", "e-mails")}).`);
+      const r = await api<{ arquivo: string; emails?: number; partes?: number | null; completo?: boolean }>(
+        "/api/admin/copia-dono", { method: "POST" });
+      // issue #420: so' confirma o envio com todas as partes enviadas; o motivo da falha vem no erro do envio, relido
+      // da Saude
+      if (r.completo) setEnviada(`Cópia do dono gerada e enviada por e-mail (${contar(r.emails ?? 0, "e-mail", "e-mails")}).`);
+      else if (r.emails && r.partes) setErro(`Cópia do dono gerada, mas não saiu inteira por e-mail: ${r.emails} de ${r.partes} e-mails enviados.`);
+      else if (r.completo === false) setErro("Cópia do dono gerada, mas não saiu por e-mail.");
       aoGerar();
     } catch (e) {
       setErro(mensagem(e));
