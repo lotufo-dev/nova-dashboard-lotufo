@@ -57,6 +57,7 @@ git diff --name-only "$atual" origin/master -- backend/migrations
 git diff --name-only "$atual" origin/master -- frontend
 Test-Path C:\DashboardLotufo\segredos\instalacao.json
 git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalacao.py
+git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.ps1
 ```
 
 - **Arquivo da instalação** (issue #417, runbook "Instalação assinada"): o `Test-Path` tem que dar `True`. Se der `False`,
@@ -65,6 +66,10 @@ git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalaca
   o `deploy.ps1` do diretório pinado é o antigo, que só confere o 200. Seguir o item "Deploy da issue #417" de
   "Subir e derrubar": rodar o `deploy.ps1` novo copiado para `C:\Temp\deploy`, pelo Mac num `.ps1` com `-File`, e
   conferir `instalacao: autorizada` logo depois.
+- **Primeiro deploy com a #443** (rollback sem fetch; sentinela só sai com a produção conferida): o `git grep` de
+  `soltarWatchdog` volta vazio, porque o `deploy.ps1` do pinado ainda é o antigo, cujo rollback faz `fetch` e cujo
+  `finally` sempre apaga o sentinela. Seguir o item "Deploy da issue #443" de "Subir e derrubar": rodar o `deploy.ps1`
+  novo copiado para `C:\Temp\deploy`, como na #417 (pelo Mac num `.ps1` com `-File`).
 
 - **Migração nova** (arquivo adicionado, alterado, removido ou renomeado em `backend/migrations/`): dizer ao Leo **explicitamente**, antes de rodar,
   o número e o que ela faz (ler o `.sql`: só acrescenta coluna/tabela/índice, ou mexe em dados). Pelo runbook,
@@ -110,10 +115,14 @@ git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalaca
    `instalacao: autorizada` (`nao-autorizada` é a produção em modo cópia, sem e-mail e sem RM: avisar o Leo com o
    `instalacao_motivo` e seguir o runbook, "Instalação assinada")
    (a porta é a de `-Porta` do `deploy.ps1`, padrão 80 em HTTP, quando o `:80` pode ser omitido)
-   (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
-   `origin/master`.
-5. Só fora dos casos de "intervir a mao" e de `sentinela ... MANTIDO`, apagar o sentinela: `Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`
-   e confirmar com `Test-Path C:\DashboardLotufo\watchdog.pause` → `False`.
+   (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse HEAD` igual ao commit
+   esperado pela linha final: o `<novo>` (o `origin/master`) em `DEPLOY OK`; o `<anterior>` (HEAD do pinado lido antes
+   de rodar) em `ROLLBACK OK`, `deploy abortado no build; producao segue ...` e aborto antes do checkout.
+5. Só fora dos casos de "intervir a mao" e de `sentinela ... MANTIDO`, e com o commit do item 4 batendo: o script já
+   apagou o sentinela; confirmar com `Test-Path C:\DashboardLotufo\watchdog.pause` → `False` (se `True`,
+   `Remove-Item C:\DashboardLotufo\watchdog.pause -Force` e conferir de novo). Nos casos de "intervir a mao" e
+   `sentinela ... MANTIDO`, o sentinela só sai depois da recuperação descrita no runbook ("Subir e derrubar", item 5:
+   reconstruir `<anterior>`, reiniciar, árvore limpa e health 200 do processo novo), com o OK do Leo.
 
 ## Cadastro (só se o Leo pedir `cadastro aplicar` junto)
 
