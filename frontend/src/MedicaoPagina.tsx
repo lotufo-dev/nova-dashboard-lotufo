@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import CaixaAviso from "./CaixaAviso";
 import { baseDosValores } from "./formato";
 import { api, mensagemDeErro } from "./api";
 import Espelho from "./Espelho";
@@ -374,6 +375,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         {erro && painel === null && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
         {/* regiao viva sempre montada: o leitor de tela so' anuncia o texto que CHEGA numa regiao ja' existente */}
         <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
+        {/* #359: boletim novo com outro aprovado depois do espelho (o servidor compara com o espelho vigente) */}
+        {grupo.some(x => x.espelho_desatualizado) && (
+          <CaixaAviso nivel="atencao">
+            O aprovado mudou depois do espelho: <Link className="link" para={aqui} secao="espelho">gere o espelho de novo</Link>
+          </CaixaAviso>
+        )}
 
         <div className="med-grade">
           <div className="med-principal">

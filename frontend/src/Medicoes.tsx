@@ -49,6 +49,7 @@ export type Medicao = {
   documentos?: Documento[];
   final?: number; final_em?: string | null;       // bloco 7: medicao final poe o contrato em encerramento
   boletins?: { id: number; tem_arquivo: boolean }[];   // #284: boletins do orgao (so' no detalhe da medicao)
+  espelho_desatualizado?: boolean;                     // #359: o aprovado mudou depois do espelho vigente
 };
 
 // dinheiro mora em formato.ts (F-86: sinal de menos U+2212); continua exportado daqui para quem ja importa

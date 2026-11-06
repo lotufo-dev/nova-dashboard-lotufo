@@ -158,6 +158,23 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     fireEvent.click(screen.getByRole("menuitem", { name: "Liberar envio preso" }));
     expect(screen.getByRole("button", { name: "Liberar envio" })).toBeTruthy();
   });
+
+  it("#359: o aprovado mudou depois do espelho avisa, sem dizer glosa, e leva ao espelho", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: true }] });
+    const { container } = pagina();
+    const link = await screen.findByRole("link", { name: "gere o espelho de novo" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#espelho");
+    const caixa = link.closest(".aviso")!;
+    expect(caixa.textContent).toContain("O aprovado mudou depois do espelho");
+    expect(container.textContent).not.toMatch(/glosa/i);
+  });
+
+  it("#359: sem o aprovado mudado, nada de aviso do espelho", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: false }] });
+    pagina();
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByText(/O aprovado mudou depois do espelho/)).toBeNull();
+  });
 });
 
 describe("Página da medição: as etapas se atualizam entre si", () => {
