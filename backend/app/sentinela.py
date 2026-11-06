@@ -363,6 +363,10 @@ def rodada(conn) -> int:
     no_log = None
     try:
         no_log = _ultimo_registro()
+        if ponto is not None and isinstance(copia, int) and ponto < copia <= no_log:
+            # banco restaurado de um backup: os avisos do dia e as falhas em aberto da copia descrevem itens que o
+            # banco restaurado nao tem; sem eles, a releitura e as verificacoes regravam esses itens
+            pendencias, avisados = {}, {}
         if ultimo is None:
             ultimo = no_log          # primeira leitura com sucesso: marca o ponto de partida, nao le o historico
         elif no_log < ultimo:

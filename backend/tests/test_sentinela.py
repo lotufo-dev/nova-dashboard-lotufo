@@ -408,6 +408,23 @@ def test_backup_restaurado_com_ponto_mais_velho_nao_acusa_estado_alterado(maquin
     assert _rodar(maquina, conn) == []
 
 
+def test_backup_restaurado_regrava_logon_e_falha_que_o_snapshot_nao_tinha(maquina, conn, tmp_path, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(sentinela.tempo, "hoje_local", lambda: datetime.date(2026, 11, 5))
+    _lista(maquina, contas=["operador.fict"])
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    _com_ponto_de_partida(maquina, conn)
+    copia_do_banco = sqlite3.connect(tmp_path / "snapshot.db")
+    conn.backup(copia_do_banco)
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False
+    depois = {x["evento"] for x in _rodar(maquina, conn, "4672_logon.xml")}
+    assert depois == {4672, "auditoria-arquivos"}        # sentinela.json: conta avisada hoje e falha em aberto
+    copia_do_banco.backup(conn)
+    copia_do_banco.close()
+    assert {x["evento"] for x in _rodar(maquina, conn)} == depois
+    assert _rodar(maquina, conn) == []
+
+
 def test_copia_alem_do_ultimo_evento_do_log_continua_acusada(maquina, conn):
     _com_ponto_de_partida(maquina, conn)
     arquivo = maquina.raiz / "dados" / "sentinela.json"
