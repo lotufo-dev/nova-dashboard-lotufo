@@ -352,7 +352,7 @@ def test_espelho_misto_compara_o_valor_de_cada_medicao(ambiente_projeto):
 
 
 def test_espelho_de_antes_da_migracao_usa_as_entradas_gravadas(ambiente):
-    # o espelho gerado antes da coluna do valor por medicao (063) nao tem o valor: vem das entradas pela regra
+    # o espelho gerado antes da coluna do valor por medicao (065) nao tem o valor: vem das entradas pela regra
     conn, u, cid = ambiente
     mid = _espelho_enviado(conn, u, cid, 100_01)
     conn.execute("UPDATE espelho_medicoes SET valor_centavos=NULL"); conn.commit()

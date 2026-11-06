@@ -1,4 +1,4 @@
-"""Migracao 063 (issue #359): `espelho_medicoes.valor_centavos`, o valor de cada medicao no espelho. So' acrescenta:
+"""Migracao 065 (issue #359): `espelho_medicoes.valor_centavos`, o valor de cada medicao no espelho. So' acrescenta:
 as ligacoes dos espelhos ja' gerados ficam com NULL (o valor sai das entradas gravadas pela regra da obra)."""
 import sqlite3
 
@@ -8,14 +8,14 @@ from app import auth, db
 
 pytestmark = pytest.mark.migracao_real
 
-MIGRACAO = "063_espelho_medicoes_valor.sql"
+MIGRACAO = "065_espelho_medicoes_valor.sql"
 
 
 @pytest.fixture
 def conn(tmp_path, monkeypatch):
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
     c = db.get_conn()
-    # banco ate' a 062: a 063 fica de fora
+    # banco ate' a anterior: a 065 fica de fora
     original = db.MIGRATIONS_DIR
     monkeypatch.setattr(db, "MIGRATIONS_DIR", tmp_path / "migracoes")
     db.MIGRATIONS_DIR.mkdir()

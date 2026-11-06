@@ -441,7 +441,7 @@ AVISO_DESATUALIZADO = "o aprovado mudou depois do espelho: gere o espelho de nov
 
 def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
     """Medicoes com espelho gerado ou enviado (os estados em que o espelho ainda se gera de novo) cujo aprovado vigente
-    difere do valor delas no espelho vigente mais novo. O valor vem de `espelho_medicoes.valor_centavos` (063); no
+    difere do valor delas no espelho vigente mais novo. O valor vem de `espelho_medicoes.valor_centavos` (065); no
     espelho de antes da coluna, das entradas gravadas pela regra da obra, so' se ela ainda e' a do espelho (mesmo
     sha256): com a regra trocada, ou sem a natureza da medicao, nao ha' como comparar e nao avisa. Devolve {id,
     contrato_id, numero, tipo, aprovado_centavos, espelho_centavos}."""
