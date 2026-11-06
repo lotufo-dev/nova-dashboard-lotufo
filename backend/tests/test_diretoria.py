@@ -895,3 +895,51 @@ def test_ritmo_aplica_a_cota_uma_vez_por_contrato(cenario):
         _medir(c, ids["consorcio"], 60 + i, "protocolada", 1)
     c.commit()
     assert diretoria.painel(c, HOJE)["carteira"]["ritmo_mensal_centavos"] == 33_583_334
+
+
+def test_faturado_e_recebido_reais_saem_do_rm_por_mes_na_cota(cenario):
+    """06/11/2026: a serie mensal da diretoria vem das notas e das baixas do RM, nao das medicoes (o cadastro de medicoes
+    pode estar atrasado). Nota da coligada do consorcio entra na cota (50%); a NFS-e da Lotufo em obra de consorcio,
+    a cancelada e a de fora dos contratos, nao."""
+    c, ids = cenario
+    def nota(idmov, emissao, valor, situacao="ativa", coligada=1, medicao=None):
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
+                        "VALUES (?, ?, ?, ?, ?, ?)", (coligada, idmov, str(idmov), emissao, valor, situacao)).lastrowid
+        if medicao:
+            c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+                      "VALUES (?, ?, ?, 'detectado', 't')", (medicao, nid, valor))
+        return nid
+    def baixa(nid, idlan, original, baixado, status, data):
+        c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+                  "status_lan, data_baixa) VALUES (1, ?, ?, ?, ?, ?, ?, ?)", (idlan, nid, idlan, original, baixado, status, data))
+    m_propria = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1", (ids["propria"],)).fetchone()[0]
+    a = nota(901, "2026-08-10", 1_000_001, medicao=m_propria)
+    b = nota(902, "2025-08-20", 400_000, medicao=m_propria)              # mesmo mes do ano anterior
+    nota(903, "2026-08-15", 9_999_999, situacao="cancelada", medicao=m_propria)
+    nota(904, "2026-08-15", 7_777_777, coligada=99)                      # fora dos contratos: sem medicao e sem centro
+    baixa(a, 9011, 900_000, 900_000, 1, "2026-09-05")                    # liquido pago em setembro
+    baixa(a, 9012, 50_000, 0, 0, None)                                   # titulo aberto: nao e' recebido
+    baixa(b, 9021, 380_000, 380_000, 1, "2025-09-10")
+    baixa(b, 9022, 10_000, 10_000, 2, "2025-09-11")                      # titulo cancelado: fora
+    # o consorcio tem coligada propria no RM: a nota dela entra pela metade; a da Lotufo na mesma obra fica fora
+    c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
+    m_cons = c.execute("SELECT id FROM medicoes WHERE contrato_id=? ORDER BY id LIMIT 1", (ids["consorcio"],)).fetchone()[0]
+    k = nota(905, "2026-08-25", 1_000_001, coligada=12, medicao=m_cons)
+    baixa(k, 9051, 1_000_001, 1_000_001, 1, "2026-09-20")
+    nota(906, "2026-08-26", 3_333_333, coligada=1, medicao=m_cons)
+    c.commit()
+    faturado, recebido = diretoria.rm_por_mes(c)
+    cota_cons = 500_001                                                  # 1.000.001 x 50%, arredondamento unico
+    assert faturado == {"2026-08": 1_000_001 + cota_cons, "2025-08": 400_000}
+    assert recebido == {"2026-09": 900_000 + cota_cons, "2025-09": 380_000}
+    # A receber: o recebido real do mes (setembro, o corrente do cenario) e o do ano
+    r = diretoria.a_receber(c, HOJE)
+    assert r["mes"]["recebido_real_centavos"] == 900_000 + cota_cons
+    assert r["recebido_ano_centavos"] == 900_000 + cota_cons
+    assert [m["recebido_real_centavos"] for m in r["meses"] if m["futuro"]] == [None, None, None]
+    # Carteira: 12 meses fechados (ate' agosto), cada um com o mesmo mes do ano anterior, e o ano ate' o ultimo fechado
+    f = diretoria.painel(c, HOJE)["faturado_rm"]
+    assert [s["competencia"] for s in f["serie"]][0] == "2025-09" and f["serie"][-1] == {
+        "competencia": "2026-08", "faturado_centavos": 1_000_001 + cota_cons, "ano_anterior_centavos": 400_000}
+    assert len(f["serie"]) == 12 and f["ate"] == "2026-08"
+    assert (f["ano_centavos"], f["ano_anterior_centavos"]) == (1_000_001 + cota_cons, 400_000)

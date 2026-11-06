@@ -163,27 +163,40 @@ describe("Carteira", () => {
     expect(screen.queryByText(/A execução ou a vigência/)).toBeNull();
   });
 
-  it("Produção: só o medido (último mês fechado e ano), o faturado do mês, o mês a mês e os reajustes", async () => {
-    api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
+  it("Produção: o faturado real (notas do RM) do último mês fechado e do ano, ao lado do ano anterior", async () => {
+    const faturado_rm = {
+      serie: [{ competencia: "2026-07", faturado_centavos: 300_000, ano_anterior_centavos: 250_000 },
+              { competencia: "2026-08", faturado_centavos: 400_004, ano_anterior_centavos: 350_003 }],
+      ate: "2026-08", ano_centavos: 2_000_002, ano_anterior_centavos: 1_500_001 };
+    api.mockImplementation((url: string) => Promise.resolve(url === "/api/diretoria" ? { ...PAINEL, faturado_rm } : RESPOSTAS[url]));
     render(<Diretoria ir={() => {}} aba="producao" />);
-    const kpis = await screen.findByRole("list", { name: "Produção" });
+    const kpis = await screen.findByRole("list", { name: "Faturado" });
     expect(kpis.tagName).toBe("UL");
-    // o último mês fechado é o penúltimo da série (08/2026); o ano e o mês vêm do servidor
-    expect(within(kpis).getByText("medido em agosto").previousElementSibling?.textContent).toMatch(/R\$\s*1\.000,00/);
-    expect(within(kpis).getByText("medido em 2026").previousElementSibling?.textContent).toMatch(/R\$\s*10\.000,00/);
-    expect(within(kpis).getByText("faturado em setembro").previousElementSibling?.textContent).toMatch(/R\$\s*1\.234\.567,89/);
-    expect(within(kpis).getAllByRole("listitem")).toHaveLength(3);
-    expect(screen.getByText("Mês a mês")).toBeTruthy();
+    const numero = (rotulo: string) => (within(kpis).getByText(rotulo).previousElementSibling?.textContent ?? "").replace(/\s/g, " ");
+    expect(numero("faturado em agosto de 2026")).toBe("R$ 4.000,04");
+    expect(numero("agosto de 2025")).toBe("R$ 3.500,03");
+    expect(numero("faturado em 2026, até agosto")).toBe("R$ 20.000,02");
+    expect(numero("2025, até agosto")).toBe("R$ 15.000,01");
+    // o mês a mês contra o mesmo mês do ano anterior, com a tabela para teclado e leitor de tela
+    expect(screen.getByRole("img", { name: /Faturado nos últimos 12 meses fechados e no mesmo mês do ano anterior/ })).toBeTruthy();
+    const tabela = screen.getByRole("table", { name: /Faturado por mês e no mesmo mês do ano anterior/, hidden: true });
+    expect(within(tabela).getAllByRole("columnheader", { hidden: true }).map(h => h.textContent)).toEqual(
+      ["Mês", "Faturado", "Mesmo mês do ano anterior"]);
     expect(screen.getByText("Reajustes esperando apostilamento (cota)")).toBeTruthy();
-    // 06/11/2026: o caminho do dinheiro foi para A receber; o saldo por órgão já está no Resumo; a projeção dos
-    // próximos meses e os "meses de produção" saíram (cronograma incompleto)
+    // 06/11/2026: o medido por competência, o caminho do dinheiro, o saldo por órgão e as projeções saíram da Produção
     for (const fora of [/Onde está o dinheiro/, /Próximos meses/, /Faturamento previsto/, /obras ativas protocolaram/,
-      /ritmo mensal/, /de produção/, /medido esperando nota/, /mesmo mês do ano anterior/]) {
+      /ritmo mensal/, /de produção/, /medido esperando nota/, /medido em/, /^previsto$/]) {
       expect(screen.queryByText(fora)).toBeNull();
     }
     expect(screen.queryByRole("table", { name: /Saldo a executar por órgão/ })).toBeNull();
-    // a Produção não busca mais o /api/inicio
     expect(api.mock.calls.map(c => c[0])).toEqual(["/api/diretoria"]);
+  });
+
+  it("Produção: servidor antigo, sem o faturado do RM, mostra só os reajustes", async () => {
+    api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
+    render(<Diretoria ir={() => {}} aba="producao" />);
+    expect(await screen.findByText("Reajustes esperando apostilamento (cota)")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Faturado" })).toBeNull();
   });
 
   it("Produção: os reajustes esperando apostilamento listam por obra as competências e o medido, com o total (#279)", async () => {
@@ -221,14 +234,14 @@ describe("Carteira", () => {
     expect(screen.getByText("execução vencida")).toBeTruthy();
   });
 
-  it("Produção: o gráfico de 12 meses tem a tabela com mês, previsto e medido, e o gráfico aponta para ela", async () => {
+  it("Produção: o gráfico de 12 meses tem a tabela com mês, faturado e ano anterior, e o gráfico aponta para ela", async () => {
     const serie = Array.from({ length: 12 }, (_, i) => ({
-      competencia: `2025-${String(i + 1).padStart(2, "0")}`, previsto_centavos: (i + 1) * 100_000, medido_centavos: (i + 1) * 50_000,
+      competencia: `2025-${String(i + 1).padStart(2, "0")}`, faturado_centavos: (i + 1) * 100_000, ano_anterior_centavos: (i + 1) * 50_000,
     }));
-    const painel = { ...PAINEL, mes_ano: { ...PAINEL.mes_ano, serie } };
+    const painel = { ...PAINEL, faturado_rm: { serie, ate: "2025-12", ano_centavos: 7_800_000, ano_anterior_centavos: 3_900_000 } };
     api.mockImplementation((url: string) => Promise.resolve(url === "/api/diretoria" ? painel : RESPOSTAS[url]));
     render(<Diretoria ir={() => {}} aba="producao" />);
-    const tabela = (await screen.findByRole("table", { name: /Previsto e medido nos últimos 12 meses/, hidden: true }));
+    const tabela = (await screen.findByRole("table", { name: /Faturado por mês e no mesmo mês do ano anterior/, hidden: true }));
     const linhas = within(tabela).getAllByRole("row", { hidden: true }).slice(1, -1);          // sem o cabeçalho e sem a linha de total
     expect(linhas).toHaveLength(12);
     const texto = (l: HTMLElement) => within(l).getAllByRole("cell", { hidden: true }).map(c => (c.textContent ?? "").replace(/\s/g, " "));
@@ -236,11 +249,9 @@ describe("Carteira", () => {
       const reais = (c: number) => `R$ ${(c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
       expect(texto(l)).toEqual([`${String(i + 1).padStart(2, "0")}/2025`, reais((i + 1) * 100_000), reais((i + 1) * 50_000)]);
     });
-    // a tabela mora no "Tabela por competência", recolhido, que o aviso do gráfico cita
-    expect(tabela.closest("details")?.querySelector("summary")?.textContent).toBe("Tabela por competência");
-    // o gráfico (role="img") manda o leitor de tela para a tabela, que fica logo abaixo
-    const grafico = screen.getByRole("img", { name: /Tabela por competência/ });
-    expect(grafico.getAttribute("aria-label")).toContain("nos últimos 12 meses");
-    expect(screen.getByText("Tabela por competência").tagName).toBe("SUMMARY");
+    // a tabela mora no "Tabela por mês", recolhido, logo abaixo do gráfico, que manda o leitor de tela para ela
+    expect(tabela.closest("details")?.querySelector("summary")?.textContent).toBe("Tabela por mês");
+    const grafico = screen.getByRole("img", { name: /tabela recolhida logo abaixo/ });
+    expect(grafico.getAttribute("aria-label")).toContain("12 meses");
   });
 });

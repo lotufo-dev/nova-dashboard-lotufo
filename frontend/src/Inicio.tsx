@@ -24,7 +24,7 @@ export type PainelInicio = {
   medido: { competencia: string; anterior_competencia: string; valor_centavos: number;
             anterior_centavos: number; quantidade: number; ultimo_lancamento: string | null };
   por_contratante: Contratante[];
-  recebido_ano: { valor_centavos: number | null; mes_centavos: number; sem_data: number };
+  recebido_ano: { valor_centavos: number | null; mes_centavos: number; sem_data: number; real_centavos?: number };
   a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null };
   prazos: Prazo[];
   espelhos: EspelhoAConferir[];
@@ -140,7 +140,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
           <span className="ini-barra" role="presentation">
             <span style={{ width: `${pr.obras_ativas ? Math.round(100 * pr.obras_protocoladas / pr.obras_ativas) : 0}%` }} /></span>
         </Numero>
-        <Numero rotulo={`Recebido em ${p.hoje.slice(0, 4)}`} valor={brl(p.recebido_ano.valor_centavos)} />
+        <Numero rotulo={`Recebido em ${p.hoje.slice(0, 4)}`} valor={brl(p.recebido_ano.real_centavos ?? p.recebido_ano.valor_centavos)} />
         <Numero rotulo="A receber" valor={brl(p.a_receber.valor_centavos)}>
           {p.a_receber.liberado && (p.a_receber.mais_60_centavos ?? 0) > 0 && (
             <span><Selo classe="selo--acao" title={brl(p.a_receber.mais_60_centavos)}>mais de 60 dias</Selo></span>)}

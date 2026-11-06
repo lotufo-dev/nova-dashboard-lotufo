@@ -76,9 +76,13 @@ def _recebido_ano(conn, hoje: datetime.date) -> dict:
     sem_data = sum(1 for m in ms if not m["recebida_em"] and (m["competencia"] or "")[:4] >= f"{hoje.year - 1:04d}")
     mes = hoje.strftime("%Y-%m")
     no_ano = [m for m in ms if (m["recebida_em"] or "")[:4] == ano]
+    # 06/11/2026: o recebido de verdade do ano sao as baixas do RM (`diretoria.rm_por_mes`), que nao dependem da data
+    # gravada na medicao; e' o que o cartao do Inicio mostra. Os campos das medicoes seguem para quem os usa.
+    _, real = diretoria.rm_por_mes(conn)
     return {"valor_centavos": None if sem_data else sum(diretoria._cota(m) for m in no_ano),
             "mes_centavos": sum(diretoria._cota(m) for m in no_ano if m["recebida_em"][:7] == mes),
-            "sem_data": sem_data}
+            "sem_data": sem_data,
+            "real_centavos": sum(v for m, v in real.items() if m[:4] == ano and m <= mes)}
 
 
 def _a_receber(conn, hoje: datetime.date) -> dict:

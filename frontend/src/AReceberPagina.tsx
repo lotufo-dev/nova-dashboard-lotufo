@@ -2,38 +2,32 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { api, mensagemDeErro } from "./api";
 import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
-import { Link } from "./Link";
-import { fmtCompetencia, fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
-import Rolagem from "./Rolagem";
+import { fmtCompetencia, fmtMesCurto, fmtMesExtenso } from "./tempo";
 import "./aReceber.css";
 
-// A receber (redesenho #162; enxugada em 06/11/2026 para a diretoria; tudo na cota da Lotufo): onde esta' o dinheiro
-// (medido sem nota, nota sem protocolo, protocolado a receber, recebido no mes), o recebido dos ultimos 6 meses, o a
-// receber por contratante ou por obra (clicar filtra a tabela) e a lista das cobrancas, da maior para a menor. O
-// "previsto" por vencimento estimado saiu da tela: era palpite (prazo do orgao) e somava medicao ja' paga. As regras
-// moram em `diretoria.a_receber`; o valor so' aparece com o total liberado (conciliado com a controladoria).
+// A receber (redesenho #162; enxugada em 06/11/2026 para a diretoria; tudo na cota da Lotufo): o total a receber, o
+// recebido do mes e do ano, o recebido dos ultimos 6 meses e o a receber por contratante ou por obra. O recebido e' o
+// REAL: as baixas do RM (`diretoria.rm_por_mes`), nao as medicoes marcadas como recebidas (o cadastro de medicoes pode
+// estar atrasado). Sairam da tela o "previsto" por vencimento estimado, o medido sem nota, a nota sem protocolo e a
+// lista de cobrancas. O valor a receber so' aparece com o total liberado (conciliado com a controladoria).
 
-type Mes = { competencia: string; atual: boolean; futuro: boolean; previsto_centavos: number | null; recebido_centavos: number | null };
-type Grupo = { quantidade: number; valor_centavos: number | null };
+type Mes = { competencia: string; atual: boolean; futuro: boolean; previsto_centavos: number | null; recebido_centavos: number | null;
+  recebido_real_centavos?: number | null };
 type Obra = { contrato_id: number; obra: string; quantidade: number; valor_centavos: number | null };
 type Orgao = { orgao_id: number | null; orgao: string; quantidade: number; valor_centavos: number | null };
-type Item = {
-  contrato_id: number; orgao_id?: number | null; obra: string; medicao_id: number | null; numero: number | null; tipo: string; nota_numero: string | null;
-  competencia: string | null; protocolada_em: string | null; valor_centavos: number | null;
-};
 type Resposta = {
   hoje: string; total_a_receber_liberado: boolean;
   total: { quantidade: number; obras: number; valor_centavos: number | null };
-  antes_do_protocolo?: { medido_esperando_nota: Grupo; nota_esperando_protocolo: Grupo };
-  mes: Mes; meses: Mes[]; por_obra: Obra[]; por_orgao?: Orgao[]; itens: Item[];
+  recebido_ano_centavos?: number;
+  mes: Mes; meses: Mes[]; por_obra: Obra[]; por_orgao?: Orgao[];
 };
-/** Uma linha do "a receber por": contratante ou obra, com a chave que filtra a tabela. */
+/** Uma linha do "a receber por": contratante ou obra. */
 type Fatia = { chave: string; nome: string; quantidade: number; valor_centavos: number | null };
 type Corte = "orgao" | "obra";
 
-const TIPOS: Record<string, string> = { reajuste: "reajuste", projeto: "projeto" };
-
-function valor(v: number | null): string { return v === null ? "—" : brl(v); }
+function valor(v: number | null | undefined): string { return v === null || v === undefined ? "—" : brl(v); }
+/** O recebido de verdade do mes (baixas do RM); servidor antigo so' manda o das medicoes. */
+function recebido(m: Mes): number | null { return m.recebido_real_centavos !== undefined ? m.recebido_real_centavos : m.recebido_centavos; }
 function maiuscula(s: string): string { return s.charAt(0).toUpperCase() + s.slice(1); }
 /** Valor curto do eixo e das barras: "4,2 mi" ou "850 mil". So' apresentacao; a conta e' em centavos inteiros. */
 function curto(c: number): string {
@@ -48,12 +42,6 @@ function eixo(maior: number): { topo: number; passo: number } {
   const passo = ([1, 2, 5, 10].find(f => f * pot >= bruto) ?? 10) * pot;
   return { topo: Math.ceil(Math.max(maior, 1) / passo) * passo, passo };
 }
-function tituloMedicao(i: Item): string {
-  if (i.tipo === "nota") return `Nota do RM ${i.nota_numero ?? ""}`.trim();
-  const extra = TIPOS[i.tipo];
-  return `${i.numero}ª${extra ? ` (${extra})` : ""}`;
-}
-
 /** Largura do contentor, para o SVG ter texto de 11px de verdade em tela estreita (sem ResizeObserver, 720). */
 function useLargura() {
   const ref = useRef<HTMLDivElement>(null);
@@ -78,7 +66,7 @@ function Grafico({ meses, escolhido, escolher }:
   const estreito = W < 420;
   const H = estreito ? 200 : 240, mt = 26, mb = 28, ml = 52, mr = 4;
   const ph = H - mt - mb, pw = W - ml - mr;
-  const maior = Math.max(0, ...meses.map(m => m.recebido_centavos ?? 0));
+  const maior = Math.max(0, ...meses.map(m => recebido(m) ?? 0));
   const { topo, passo } = eixo(maior);
   const y = (c: number) => mt + ph - (c / topo) * ph;
   const gw = pw / meses.length;
@@ -105,7 +93,7 @@ function Grafico({ meses, escolhido, escolher }:
         ))}
         {meses.map((m, i) => {
           const cx = ml + gw * i + gw / 2;
-          const rec = m.recebido_centavos;
+          const rec = recebido(m);
           const rotulo = `${fmtMesExtenso(m.competencia)} de ${m.competencia.slice(0, 4)}: recebido ${valor(rec)}`;
           return (
             <g key={m.competencia} className={`g-grupo${i === escolhido ? " selecionado" : ""}`} tabIndex={0} role="button"
@@ -115,7 +103,8 @@ function Grafico({ meses, escolhido, escolher }:
               {m.atual && <rect className="g-atual" x={ml + gw * i + 2} y={mt - 22} width={gw - 4} height={ph + 22 + mb} rx={8} />}
               <rect className="g-alvo" x={ml + gw * i + 2} y={mt - 22} width={gw - 4} height={ph + 22 + mb} rx={8} />
               {rec !== null && rec > 0 && <rect className="b-recebido" x={cx - bw / 2} y={y(rec)} width={bw} height={y(0) - y(rec)} rx={3} />}
-              {rec !== null && <text className="g-valor" x={cx} y={y(rec) - 6} textAnchor="middle">{curto(rec)}</text>}
+              {/* em tela estreita o rotulo nao cabe no vao do mes: fica so' o do mes escolhido (o detalhe abaixo diz o valor) */}
+              {rec !== null && (gw >= 56 || i === escolhido) && <text className="g-valor" x={cx} y={y(rec) - 6} textAnchor="middle">{curto(rec)}</text>}
               <text className={`g-mes${m.atual ? " g-mes--atual" : ""}`} x={cx} y={H - 8} textAnchor="middle">
                 {estreito ? fmtMesCurto(m.competencia).split("/")[0] : fmtMesCurto(m.competencia)}
               </text>
@@ -129,7 +118,7 @@ function Grafico({ meses, escolhido, escolher }:
 
 function Detalhe({ m }: { m: Mes }) {
   const nome = `${maiuscula(fmtMesExtenso(m.competencia))} de ${m.competencia.slice(0, 4)}`;
-  return <><strong>{nome}</strong>: recebido <span className="dinheiro">{valor(m.recebido_centavos)}</span></>;
+  return <><strong>{nome}</strong>: recebido <span className="dinheiro">{valor(recebido(m))}</span></>;
 }
 
 export default function AReceberPagina() {
@@ -137,7 +126,6 @@ export default function AReceberPagina() {
   const [erro, setErro] = useState("");
   const [escolhido, setEscolhido] = useState<number | null>(null);
   const [corte, setCorte] = useState<Corte>("orgao");
-  const [filtro, setFiltro] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -149,7 +137,6 @@ export default function AReceberPagina() {
   if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro} Recarregue a página para tentar de novo.</p>;
   if (!p) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
 
-  const liberado = p.total_a_receber_liberado;
   const mes = p.mes;
   const nomeMes = fmtMesExtenso(mes.competencia);
   // o grafico e' so' do que ja' aconteceu: os meses ate' o atual
@@ -161,42 +148,27 @@ export default function AReceberPagina() {
   const fatias: Fatia[] = corteAtual === "orgao"
     ? (p.por_orgao ?? []).map(o => ({ chave: String(o.orgao_id), nome: o.orgao, quantidade: o.quantidade, valor_centavos: o.valor_centavos }))
     : p.por_obra.map(o => ({ chave: String(o.contrato_id), nome: o.obra, quantidade: o.quantidade, valor_centavos: o.valor_centavos }));
-  const chaveDe = (i: Item) => String(corteAtual === "orgao" ? i.orgao_id : i.contrato_id);
-  const escolhida = fatias.find(f => f.chave === filtro) ?? null;
-  // a maior cobranca primeiro: o residuo de centavos de nota antiga nao abre a lista
-  const itens = p.itens.filter(i => escolhida === null || chaveDe(i) === escolhida.chave)
-    .map((i, k) => ({ i, k })).sort((a, b) => (b.i.valor_centavos ?? 0) - (a.i.valor_centavos ?? 0) || a.k - b.k).map(x => x.i);
   const maior = Math.max(1, ...fatias.map(o => o.valor_centavos ?? o.quantidade));
-  const totalItens = liberado ? itens.reduce((s, i) => s + (i.valor_centavos ?? 0), 0) : null;
-  const antes = p.antes_do_protocolo;
-  const trocarCorte = (c: Corte) => { setCorte(c); setFiltro(null); };
 
   return (
     <div className="pilha">
-      <section aria-labelledby="t-caminho">
-        <h2 className="cart-titulo-secao ar-titulo" id="t-caminho">Onde está o dinheiro, na cota</h2>
-        <ol className="ar-numeros">
-          {antes && (
-            <li className="cartao ar-numero">
-              <span className="ar-numero__rotulo">Medido, sem nota</span>
-              <span className="ar-numero__valor num">{valor(antes.medido_esperando_nota.valor_centavos)}</span>
-            </li>
-          )}
-          {antes && (
-            <li className="cartao ar-numero">
-              <span className="ar-numero__rotulo">Nota emitida, sem protocolo</span>
-              <span className="ar-numero__valor num">{valor(antes.nota_esperando_protocolo.valor_centavos)}</span>
-            </li>
-          )}
+      <section aria-label="Resumo">
+        <ul className="ar-numeros">
           <li className="cartao ar-numero ar-numero--destaque">
-            <span className="ar-numero__rotulo">Protocolado, a receber</span>
+            <span className="ar-numero__rotulo">A receber, na cota</span>
             <span className="ar-numero__valor num">{valor(p.total.valor_centavos)}</span>
           </li>
           <li className="cartao ar-numero">
             <span className="ar-numero__rotulo">Recebido em {nomeMes}</span>
-            <span className="ar-numero__valor num">{valor(mes.recebido_centavos)}</span>
+            <span className="ar-numero__valor num">{valor(recebido(mes))}</span>
           </li>
-        </ol>
+          {p.recebido_ano_centavos !== undefined && (
+            <li className="cartao ar-numero">
+              <span className="ar-numero__rotulo">Recebido em {mes.competencia.slice(0, 4)}</span>
+              <span className="ar-numero__valor num">{valor(p.recebido_ano_centavos)}</span>
+            </li>
+          )}
+        </ul>
       </section>
 
       <section className="cartao" aria-labelledby="t-grafico">
@@ -210,101 +182,39 @@ export default function AReceberPagina() {
           <thead><tr><th scope="col">Mês</th><th scope="col">Recebido</th></tr></thead>
           <tbody>
             {passados.map(m => (
-              <tr key={m.competencia}><th scope="row">{fmtCompetencia(m.competencia)}</th><td>{valor(m.recebido_centavos)}</td></tr>
+              <tr key={m.competencia}><th scope="row">{fmtCompetencia(m.competencia)}</th><td>{valor(recebido(m))}</td></tr>
             ))}
           </tbody>
         </table>
       </section>
 
-      <div className="ar-duas">
-        <section className="cartao" aria-labelledby="t-obras">
-          <div className="cartao__cabeca cartao__cabeca--quebra">
-            <h2 className="cartao__titulo" id="t-obras">A receber por</h2>
-            {temOrgao && (
-              <div className="cart-farois" role="group" aria-label="Agrupar o a receber">
-                <button type="button" className="cart-farol-btn" aria-pressed={corteAtual === "orgao"} onClick={() => trocarCorte("orgao")}>Contratante</button>
-                <button type="button" className="cart-farol-btn" aria-pressed={corteAtual === "obra"} onClick={() => trocarCorte("obra")}>Obra</button>
-              </div>
-            )}
-          </div>
-          {fatias.length === 0 ? (
-            <div className="vazio vazio--curto"><p>Nenhuma cobrança esperando pagamento.</p></div>
-          ) : (
-            <ul className="ar-obras">
-              {fatias.map(o => (
-                <li key={o.chave}>
-                  <button type="button" className="ar-obra" aria-pressed={filtro === o.chave}
-                    onClick={() => setFiltro(filtro === o.chave ? null : o.chave)}>
-                    <span className="ar-obra__nome">{o.nome}</span>
-                    <span className="ar-obra__trilho" aria-hidden="true">
-                      <span className="ar-obra__barra" style={{ width: `${(((o.valor_centavos ?? o.quantidade) / maior) * 100).toFixed(1)}%` }} />
-                    </span>
-                    <span className="ar-obra__valor">{valor(o.valor_centavos)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+      <section className="cartao" aria-labelledby="t-obras">
+        <div className="cartao__cabeca cartao__cabeca--quebra">
+          <h2 className="cartao__titulo" id="t-obras">A receber por</h2>
+          {temOrgao && (
+            <div className="cart-farois" role="group" aria-label="Agrupar o a receber">
+              <button type="button" className="cart-farol-btn" aria-pressed={corteAtual === "orgao"} onClick={() => setCorte("orgao")}>Contratante</button>
+              <button type="button" className="cart-farol-btn" aria-pressed={corteAtual === "obra"} onClick={() => setCorte("obra")}>Obra</button>
+            </div>
           )}
-          <div className="ar-obras__total"><span>Total</span><span className="dinheiro">{valor(p.total.valor_centavos)}</span></div>
-        </section>
-
-        <section className="cartao" aria-labelledby="t-medicoes">
-          <div className="cartao__cabeca cartao__cabeca--quebra">
-            <h2 className="cartao__titulo" id="t-medicoes">Cobranças esperando pagamento</h2>
-            {escolhida && (
-              <div className="ar-filtro">
-                <span className="selo"><span className="selo__texto">Só {escolhida.nome}</span></span>
-                <button type="button" className="btn btn--pequeno" onClick={() => setFiltro(null)}>Mostrar todas</button>
-              </div>
-            )}
-          </div>
-          {itens.length === 0 ? (
-            <div className="vazio vazio--curto"><p className="vazio__titulo">Nenhuma medição protocolada esperando pagamento.</p></div>
-          ) : (
-            <Rolagem rotulo="Cobranças esperando pagamento">
-              <table className="tabela ar-tabela">
-                <caption className="sr-only">Cobranças esperando pagamento, na cota</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">Protocolada em</th>
-                    <th scope="col" className="col-num">Valor na cota</th><th scope="col"><span className="sr-only">Abrir</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {itens.map((i, k) => (
-                    <tr key={`${k}-${i.medicao_id ?? "nota"}-${i.contrato_id}-${i.nota_numero ?? i.numero}`}>
-                      <td className="ar-forte col-largo" data-rotulo="Obra">{i.obra}</td>
-                      <td data-rotulo="Medição">
-                        {tituloMedicao(i)}{i.competencia && <> <span className="campo__nota">({fmtCompetencia(i.competencia)})</span></>}
-                      </td>
-                      <td className="ar-data" data-rotulo="Protocolada em">{i.protocolada_em ? fmtDataPura(i.protocolada_em) : "—"}</td>
-                      <td className="col-num dinheiro" data-rotulo="Valor na cota">{valor(i.valor_centavos)}</td>
-                      <td>
-                        {i.medicao_id !== null ? (
-                          <Link para={{ tela: "medicao", obra: i.contrato_id, id: i.medicao_id }} secao="etapa-5"
-                            aria-label={`Abrir ${tituloMedicao(i)} de ${i.obra}`}>Abrir</Link>
-                        ) : (
-                          <Link para={{ tela: "obra", id: i.contrato_id, aba: "medicoes" }}
-                            aria-label={`Abrir a obra ${i.obra}`}>Abrir</Link>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <th scope="row" className="col-largo">
-                      {escolhida ? `Total de ${escolhida.nome}` : "Total"}
-                    </th>
-                    <td /><td />
-                    <td className="col-num" data-rotulo="Valor na cota">{valor(totalItens)}</td><td />
-                  </tr>
-                </tfoot>
-              </table>
-            </Rolagem>
-          )}
-        </section>
-      </div>
+        </div>
+        {fatias.length === 0 ? (
+          <div className="vazio vazio--curto"><p>Nenhuma cobrança esperando pagamento.</p></div>
+        ) : (
+          <ul className="ar-obras">
+            {fatias.map(o => (
+              <li key={o.chave} className="ar-obra">
+                <span className="ar-obra__nome">{o.nome}</span>
+                <span className="ar-obra__trilho" aria-hidden="true">
+                  <span className="ar-obra__barra" style={{ width: `${(((o.valor_centavos ?? o.quantidade) / maior) * 100).toFixed(1)}%` }} />
+                </span>
+                <span className="ar-obra__valor">{valor(o.valor_centavos)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="ar-obras__total"><span>Total</span><span className="dinheiro">{valor(p.total.valor_centavos)}</span></div>
+      </section>
     </div>
   );
 }

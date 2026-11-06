@@ -120,6 +120,58 @@ def _notas_em_aberto(conn) -> list[dict]:
     return out
 
 
+def rm_por_mes(conn) -> tuple[dict[str, int], dict[str, int]]:
+    """(faturado, recebido) por mes, na cota, direto do RM (06/11/2026, telas da diretoria). O cadastro de medicoes pode
+    estar atrasado; a nota e a baixa chegam sozinhas do RM, entao a serie mensal da diretoria sai delas.
+
+    Faturado: o bruto das notas ativas do RM, pelo mes da emissao. Recebido: o que foi baixado nos titulos da nota
+    (`sincronizacao_rm.STATUS_RECEBIDO`), pelo mes da baixa; e' o liquido que entrou (o titulo nasce sem as retencoes).
+    A obra da nota e' a de `_notas_em_aberto`: a medicao ligada, senao o centro de custo (atual ou anterior), senao a
+    coligada do consorcio sem centro; so' notas da coligada da entidade do contrato (a NFS-e da Lotufo em obra de
+    consorcio e' repassada pelo consorcio). Nota que nao cai em nenhum contrato cadastrado fica fora."""
+    contr, por_centro, por_coligada = _mapa_contratos(conn)
+    ligada: dict[int, int] = {}
+    for r in conn.execute("SELECT a.nota_id, m.contrato_id FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id "
+                          "WHERE a.desfeita_em IS NULL ORDER BY a.id"):
+        ligada.setdefault(r["nota_id"], r["contrato_id"])
+    pct_da_nota: dict[int, int] = {}
+    faturado: dict[str, int] = {}
+    recebido: dict[str, int] = {}
+    for n in conn.execute("SELECT id, coligada, centro_custo, emissao, valor_centavos, situacao FROM notas_fiscais "
+                          "WHERE idmov IS NOT NULL"):
+        cid = ligada.get(n["id"])
+        if cid is None:
+            ids = por_centro.get((n["coligada"], (n["centro_custo"] or "").strip())) or por_coligada.get(n["coligada"]) or []
+            cid = ids[0] if len(ids) == 1 else None
+        c = contr.get(cid)
+        if c is None or c["col"] != n["coligada"]:
+            continue
+        pct_da_nota[n["id"]] = c["pct"]
+        if n["situacao"] == "ativa" and n["emissao"]:
+            mes = n["emissao"][:7]
+            faturado[mes] = faturado.get(mes, 0) + (contratos.cota(n["valor_centavos"], c["pct"]) or 0)
+    for b in conn.execute("SELECT nota_id, valor_baixado_centavos, status_lan, data_baixa FROM baixas "
+                          "WHERE data_baixa IS NOT NULL AND nota_id IS NOT NULL"):
+        if b["status_lan"] not in sincronizacao_rm.STATUS_RECEBIDO or b["nota_id"] not in pct_da_nota:
+            continue
+        mes = b["data_baixa"][:7]
+        recebido[mes] = recebido.get(mes, 0) + (contratos.cota(b["valor_baixado_centavos"] or 0, pct_da_nota[b["nota_id"]]) or 0)
+    return faturado, recebido
+
+
+def _faturado_rm(conn, hoje: datetime.date) -> dict:
+    """Faturado no RM, na cota, nos 12 meses fechados ate' o mes anterior a hoje, cada um ao lado do mesmo mes do ano
+    anterior, e o acumulado do ano ate' o ultimo mes fechado contra o mesmo periodo do ano anterior. O mes corrente
+    fica fora: ainda esta' aberto e a comparacao com um mes inteiro enganaria."""
+    faturado, _ = rm_por_mes(conn)
+    serie = [{"competencia": _mes(hoje, k), "faturado_centavos": faturado.get(_mes(hoje, k), 0),
+              "ano_anterior_centavos": faturado.get(_mes(hoje, k - 12), 0)} for k in range(-12, 0)]
+    fechados = [f"{hoje.year:04d}-{k:02d}" for k in range(1, hoje.month)]
+    return {"serie": serie, "ate": fechados[-1] if fechados else None,
+            "ano_centavos": sum(faturado.get(m, 0) for m in fechados),
+            "ano_anterior_centavos": sum(faturado.get(f"{hoje.year - 1:04d}{m[4:]}", 0) for m in fechados)}
+
+
 def _numero_nf(numero) -> str:
     s = str(numero or "").strip()
     return str(int(s)) if s.isdigit() else s
@@ -528,6 +580,7 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
         avisos = _av.listar(conn, hoje, publico="diretoria")
         return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
                 "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas), "mes_ano": _mes_ano(conn, ms, hoje, cache),
+                "faturado_rm": _faturado_rm(conn, hoje),
                 "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje, cache),
                 "curva_carteira": _curva_carteira(conn, hoje, cache),
                 "obras": _obras(conn, ms, hoje, avisos, cache), "obras_base": _obras_base(conn), "avisos": avisos}
@@ -587,11 +640,16 @@ def a_receber(conn, hoje: datetime.date | None = None) -> dict:
         if m["estado"] == "recebida" and (m["recebida_em"] or "")[:7] in recebido:
             recebido[m["recebida_em"][:7]] += _cota(m)
     atual = _mes(hoje)
+    # o recebido de verdade: as baixas do RM (`rm_por_mes`). O `recebido_centavos` de cada mes segue sendo o das medicoes
+    # com `recebida_em` (o par do "previsto"); a tela mostra o `recebido_real_centavos`.
+    _, real = rm_por_mes(conn)
     meses = [{"competencia": x, "atual": x == atual, "futuro": x > atual,
               "previsto_centavos": previsto[x] if liberado else None,
-              "recebido_centavos": None if x > atual else recebido[x]} for x in previsto]
+              "recebido_centavos": None if x > atual else recebido[x],
+              "recebido_real_centavos": None if x > atual else real.get(x, 0)} for x in previsto]
     return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
             "total": {"quantidade": len(abertas), "obras": len(obras), "valor_centavos": valor(abertas)},
+            "recebido_ano_centavos": sum(v for m, v in real.items() if m[:4] == f"{hoje.year:04d}" and m <= atual),
             # o caminho do dinheiro antes do protocolo, como no painel (`_dinheiro`): medido sem nota e nota sem protocolo
             "antes_do_protocolo": {"medido_esperando_nota": _grupo([m for m in ms if m["estado"] in ESPERANDO_NOTA]),
                                    "nota_esperando_protocolo": _grupo([m for m in ms if m["estado"] in ESPERANDO_PROTOCOLO])},

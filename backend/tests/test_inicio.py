@@ -82,9 +82,21 @@ def test_recebido_no_ano_nulo_com_recebida_sem_data(cenario):
     c, cid = cenario
     _medicao(c, cid, 1, "2026-08-01 12:00:00", 300_000, estado="recebida", competencia="2026-07", recebida_em="2026-10-02")
     _medicao(c, cid, 2, "2026-06-01 12:00:00", 100_000, estado="recebida", competencia="2026-05", recebida_em="2026-06-20")
-    assert inicio.painel(c, HOJE)["recebido_ano"] == {"valor_centavos": 400_000, "mes_centavos": 300_000, "sem_data": 0}
+    assert inicio.painel(c, HOJE)["recebido_ano"] == {"valor_centavos": 400_000, "mes_centavos": 300_000, "sem_data": 0,
+                                                      "real_centavos": 0}
     _medicao(c, cid, 3, "2026-09-25 12:00:00", 50, estado="recebida", competencia="2026-04")
-    assert inicio.painel(c, HOJE)["recebido_ano"] == {"valor_centavos": None, "mes_centavos": 300_000, "sem_data": 1}
+    assert inicio.painel(c, HOJE)["recebido_ano"] == {"valor_centavos": None, "mes_centavos": 300_000, "sem_data": 1,
+                                                      "real_centavos": 0}
+    # o recebido de verdade vem das baixas do RM e nao depende da data gravada na medicao (06/11/2026)
+    mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1", (cid,)).fetchone()[0]
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
+                    "VALUES (1, 77, '77', '2026-08-05', 300000, 'ativa')").lastrowid
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+              "VALUES (?, ?, 300000, 'detectado', 't')", (mid, nid))
+    c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, status_lan, "
+              "data_baixa) VALUES (1, 77, ?, 77, 280000, 280000, 1, '2026-10-02')", (nid,))
+    c.commit()
+    assert inicio.painel(c, HOJE)["recebido_ano"]["real_centavos"] == 280_000
 
 
 def test_a_receber_so_com_total_liberado_e_na_cota(cenario):
