@@ -5,6 +5,7 @@ import json
 import pytest
 
 from app import db, inicio, tempo
+from tests.test_espelhos import ambiente_projeto  # noqa: F401  (fixture: obra com espelho de execucao e projeto)
 
 D = datetime.date
 HOJE = D(2026, 10, 9)
@@ -106,3 +107,21 @@ def test_cartoes_vazios(cenario):
     p = inicio.painel(c, HOJE)
     assert p["notas_a_enviar"] == 0
     assert p["certidoes"] == {"vencidas": 0, "vencendo": 0, "itens": []}
+    assert p["espelhos"] == []
+
+
+def test_espelho_a_conferir_conta_uma_vez_o_espelho_com_duas_medicoes(ambiente_projeto, monkeypatch):
+    # rodada 2 da PR #474 (gate Sol): execucao e projeto do mesmo espelho sao um espelho a conferir; leva a' medicao
+    # cuja situacao pede o ato (a execucao com nota emitida nao esconde o "gere de novo" do projeto)
+    from app import espelhos, medicoes, notas
+    from tests.test_espelhos import _boletim
+    conn, u, cid = ambiente_projeto
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100_01, "projeto": 7_01})
+    ids = {m["tipo"]: m["id"] for m in espelhos.detalhe(conn, eid)["medicoes"]}
+    _boletim(conn, u, ids["execucao"], 99_99)
+    _boletim(conn, u, ids["projeto"], 7_03, sha="b")
+    monkeypatch.setattr(notas, "faltam", lambda c, m: 0)
+    assert notas.fechar_se_completa(conn, u["id"], ids["execucao"])
+    assert medicoes.detalhe(conn, ids["execucao"])["estado"] == "nota_emitida"
+    [e] = inicio.painel(conn)["espelhos"]
+    assert (e["espelho_id"], e["medicao_id"], e["situacao"]) == (eid, ids["projeto"], "aprovado_mudou")

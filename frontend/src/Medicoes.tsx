@@ -49,6 +49,9 @@ export type Medicao = {
   documentos?: Documento[];
   final?: number; final_em?: string | null;       // bloco 7: medicao final poe o contrato em encerramento
   boletins?: { id: number; tem_arquivo: boolean }[];   // #284: boletins do orgao (so' no detalhe da medicao)
+  // #359: o aprovado mudou depois do espelho vigente (na nota emitida, o espelho nao se gera mais), ou o espelho
+  // antigo nao se confere
+  espelho_desatualizado?: "aprovado_mudou" | "nota_emitida" | "nao_conferido" | null;
 };
 
 // dinheiro mora em formato.ts (F-86: sinal de menos U+2212); continua exportado daqui para quem ja importa
