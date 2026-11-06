@@ -9,14 +9,14 @@
   - Cópia externa (`-BackupExterno`, outro volume ou compartilhamento): uma por dia, com `.sha256` ao lado conferido relendo o destino. Retenção em camadas: 7 diárias, 5 semanais, 12 mensais. **A tarefa roda como SYSTEM**, que chega à rede como a conta de computador (`<servidor>$`): o compartilhamento precisa dar gravação a essa conta (no servidor de arquivos, permissão de compartilhamento e NTFS para `<servidor>$`). Enquanto não tiver, o health mostra `ultima_copia_externa_erro` com "Acesso negado" e os snapshots ficam só no disco local.
   - Logs: `C:\DashboardLotufo\logs\dashboard.log` (app + uvicorn), rotação à meia-noite, 30 dias.
   - PDFs de certidão: `dados\certidoes\<sha256>.pdf`.
-- TLS: `certs\cert.pem` e `certs\chave.pem` no repositório (gerados por `scripts\gerar_certificado.ps1`, 5 anos).
+- TLS (issue #425): `C:\DashboardLotufo\segredos\tls\cert.pem` e `chave.pem`, fora do clone e com a ACL de `segredos` (gerados por `scripts\gerar_certificado.ps1`, 5 anos; seção "HTTP ou HTTPS").
 
 ## Primeira subida (migrar o banco de dev para a árvore de produção)
 Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parados:
 1. `New-Item -ItemType Directory -Force C:\DashboardLotufo\dados`
 2. Copiar `backend\dados\dashboard.db` (e `-wal`/`-shm`, se existirem) para `C:\DashboardLotufo\dados\`.
 3. `scripts\rodar_producao.ps1 -BackupExterno <pasta externa>` — o script recusa subir se o banco de produção não existir e o de dev existir.
-4. Conferir `https://<servidor>:8443/api/health`: `banco: ok` e `backup.ultimo_snapshot` preenchido em até um minuto.
+4. Conferir `scripts\saude_local.ps1 -Porta <porta>` (seção "HTTP ou HTTPS"): `banco: ok` e `backup.ultimo_snapshot` preenchido em até um minuto.
 
 ## Subir e derrubar
 - **Valores locais ficam fora do repositório**, que é público: o nome do servidor, o endereço e a porta da API do RM, o nome das
@@ -36,10 +36,10 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
   3. Pelo Mac, esses comandos vão num `.ps1` temporário copiado para a VM com `scp` e rodado com `powershell -NoProfile -ExecutionPolicy Bypass -File`. No `-Command -` o `git fetch` consome o resto do script pelo stdin, e o script para no meio.
   4. Logo depois, `/api/health` com `instalacao: autorizada`. Se não vier, voltar à mão como diz o "Primeiro deploy".
 - Dev: ver README ("Rodar em desenvolvimento").
-- Produção (manual, avançado): `scripts\rodar_producao.ps1 [-SemTls] [-Porta 8080] [-Raiz C:\DashboardLotufo] [-BackupExterno \\servidor\backups\dashboard]` (elevado, a partir do diretório pinado). Hoje: `-SemTls`, sem cópia externa.
-- **Porta** (issue #361): os quatro scripts (`rodar_producao.ps1`, `instalar_autostart.ps1`, `instalar_watchdog.ps1`, `deploy.ps1`) aceitam `-Porta`; sem ela vale o padrão de hoje (80 em HTTP com `-SemTls`, 8443 em HTTPS), e a produção atual não precisa reinstalar nada. Numa máquina em que a 80 é de outro serviço (IIS na VM nova), passar a mesma porta nos quatro (ex.: `-Porta 8080`) e liberar essa porta no firewall (seção "HTTP ou HTTPS"). Neste documento `http://localhost:<porta>/api/health` é a saúde nessa porta.
-- Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Porta 8080] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Parar: `Stop-ScheduledTask -TaskName <tarefa>`; iniciar: `Start-ScheduledTask -TaskName <tarefa>`.
-- Watchdog: `scripts\instalar_watchdog.ps1 [-Porta 8080]` registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1 -Url http://localhost:<porta>/api/health` — confere `/api/health` na porta de `-Porta` (padrão 80 em HTTP) e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
+- Produção (manual, avançado): `scripts\rodar_producao.ps1 [-SemTls] [-Porta 8080] [-Raiz C:\DashboardLotufo] [-BackupExterno \\servidor\backups\dashboard]` (elevado, a partir do diretório pinado). Hoje: HTTPS na 8080 (sem `-SemTls`, decisão de 05/11/2026, issue #425; até o corte da seção "HTTP ou HTTPS", `-SemTls`), sem cópia externa.
+- **Porta** (issue #361): os quatro scripts (`rodar_producao.ps1`, `instalar_autostart.ps1`, `instalar_watchdog.ps1`, `deploy.ps1`) aceitam `-Porta`; sem ela vale o padrão do modo (80 em HTTP com `-SemTls`, 8443 em HTTPS). Numa máquina em que a 80 é de outro serviço (IIS na VM nova), passar a mesma porta nos quatro (ex.: `-Porta 8080`) e liberar essa porta no firewall (seção "HTTP ou HTTPS"). Neste documento a saúde nessa porta é `scripts\saude_local.ps1 -Porta <porta>` (com `-SemTls` na produção em HTTP), rodado na própria máquina: imprime o `/api/health` e sai com 1 se não vier 200.
+- Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Porta 8080] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Sem `-SemTls`, recusa instalar se `<raiz>\segredos\tls\cert.pem` ou `chave.pem` não existir. Parar: `Stop-ScheduledTask -TaskName <tarefa>`; iniciar: `Start-ScheduledTask -TaskName <tarefa>`.
+- Watchdog: `scripts\instalar_watchdog.ps1 [-SemTls] [-Porta 8080] [-Raiz ...]` (modo e porta iguais aos da tarefa principal) registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1 -Url https://localhost:<porta>/api/health -Certificado <raiz>\segredos\tls\cert.pem` (com `-SemTls`, `-Url http://localhost:<porta>/api/health` sem certificado) — confere `/api/health` na porta de `-Porta` (padrão 8443 em HTTPS, 80 com `-SemTls`), aceitando só o certificado da instalação (seção "HTTP ou HTTPS"), e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
 
 ### Deploy a partir do Mac (SSH)
 
@@ -66,8 +66,8 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    commit anterior) ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`. Nos dois casos de
    "intervir a mao" (`ROLLBACK TAMBEM FALHOU` e este último), **não apagar o sentinela** antes de o diretório pinado voltar ao
    commit anterior.
-5. **Terceira chamada, conferência**: `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` (200 com `banco: ok` e `instalacao: autorizada`, seção "Instalação assinada";
-   a porta é a de `-Porta`, padrão 80 em HTTP, quando dá para omitir o `:80`),
+5. **Terceira chamada, conferência**: `& .\scripts\saude_local.ps1 -Porta <porta>` (200 com `banco: ok`, `tls: true` e `instalacao: autorizada`, seção "Instalação assinada";
+   a porta é a da tarefa agendada; com a tarefa ainda em `-SemTls`, antes do corte da seção "HTTP ou HTTPS", acrescentar `-SemTls` e o `tls` vem `false`),
    `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao `origin/master`, e apagar o sentinela
    (`Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`; `Test-Path` deve dar `False`).
    Apagar o sentinela também quando o deploy der `ROLLBACK` ou `BACKUP PRE-MIGRACAO FALHOU`.
@@ -172,18 +172,82 @@ Uma vez por semana (primeira rodada do backup depois de 7 dias da cópia anterio
 - **Abrir no Mac.** Copiar o `.tar.age` (conferir o `.sha256`) e `rage -d -i <chave privada> <arquivo>.tar.age > pacote.tar`; `tar -xf pacote.tar` traz `banco/`, `segredos/` e `cadastro/`. Siga "Restaurar o banco a partir de um snapshot" com o `.db` de `banco/`.
 
 ## HTTP ou HTTPS
-Decisão de 2026-09-02: produção em **HTTP na porta 80** (`http://<servidor>`), com `-SemTls` em `rodar_producao.ps1` e `instalar_autostart.ps1`. Ninguém precisa instalar certificado; a senha trafega em claro só dentro da rede interna. `DASH_SEM_TLS=1` tira a flag `secure` do cookie de sessão (o resto continua igual). Voltar a HTTPS = reinstalar a tarefa sem `-SemTls` e seguir a seção abaixo. Outra porta (VM em que a 80 é do IIS): `-Porta 8080` nos scripts de autostart, watchdog e deploy, e a regra de firewall abaixo com essa porta. Liberar a porta no firewall do servidor (uma vez, como administrador):
-```
-New-NetFirewallRule -DisplayName "Dashboard Lotufo HTTP 80" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow -Profile Domain,Private
-```
-Em outra porta, trocar o `80` do `-LocalPort` e do `-DisplayName` pela porta de `-Porta` (ex.: `"Dashboard Lotufo HTTP 8080"` e `-LocalPort 8080`).
+Decisão de 05/11/2026 (issue #425), que reabre a de 02/09/2026 (HTTP na rede interna): produção em **HTTPS na porta 8080**
+(`https://<vm>:8080`), para a senha de quem usa a dashboard não passar em claro pela rede da empresa. A tarefa roda **sem**
+`-SemTls`; o uvicorn serve com o par de `<raiz>\segredos\tls` e `http://<vm>:8080` deixa de servir a aplicação (a porta só fala
+TLS). Sem `DASH_SEM_TLS` o cookie de sessão sai com `Secure`; o `/api/health` mostra `tls: true` quando o pedido chegou por
+HTTPS. `-SemTls` continua nos scripts para voltar atrás (HTTP, cookie sem `Secure`, `tls: false`).
 
-## Certificado nos navegadores (só no modo HTTPS)
-O certificado é autoassinado: cada máquina da rede precisa confiar nele uma vez, como administrador:
+**Certificado.** Autoassinado, de `scripts\gerar_certificado.ps1`, 5 anos, emitido para o nome curto da VM, o nome DNS completo,
+`localhost` e o IP (SAN). Fica em `<raiz>\segredos\tls\cert.pem` e `chave.pem`, fora do clone (o deploy não o toca) e com a
+ACL de `segredos` (só SYSTEM e Administradores; o script trava as pastas antes de gravar a chave). O `cert.pem` é público e é o
+que vai para os navegadores; a `chave.pem` nunca sai da VM. Gerar de novo troca o par inteiro (o anterior só sai depois que o
+novo está no lugar) e pede reimportar o `cert.pem` nos PCs.
+
+**Saúde na própria máquina.** Watchdog, deploy e `scripts\saude_local.ps1` falam com `https://localhost:<porta>` aceitando
+**só** o certificado da instalação: comparam o thumbprint do certificado apresentado com o de `<raiz>\segredos\tls\cert.pem`
+(`scripts\comum_tls.ps1`). A verificação não é desligada em lugar nenhum, e o pedido só sai para `localhost`. O `deploy.ps1` lê o
+modo da tarefa (com `-SemTls` nos argumentos, HTTP; sem, HTTPS) e, no HTTPS, não começa sem o `cert.pem` ("certificado do HTTPS
+nao encontrado", nada alterado). O watchdog relê o `cert.pem` a cada rodada: certificado trocado não pede reinstalar o watchdog.
+
+**Firewall.** A regra da porta continua a mesma (TCP 8080 só de faixas privadas, seção "Mudar de servidor"); o nome dela diz
+"HTTP", mas o que ela libera é a porta. Numa instalação nova, como administrador:
 ```
-Import-Certificate -FilePath \\<servidor>\...\certs\cert.pem -CertStoreLocation Cert:\LocalMachine\Root
+New-NetFirewallRule -DisplayName "Dashboard Lotufo 8080" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow -Profile Domain,Private -RemoteAddress 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 ```
-(ou por GPO, "Autoridades de Certificação Raiz Confiáveis"). Chrome e Edge usam o repositório do Windows; Firefox precisa de `security.enterprise_roots.enabled = true` ou importação manual.
+
+### Corte para HTTPS (uma vez, pelo Leo, depois do merge da #425)
+Feito pela skill `deploy`, avisando a operação do endereço novo. Parada de um a dois minutos.
+1. **Deploy normal** do commit com a #425 (skill `deploy`). A tarefa ainda tem `-SemTls`: o deploy confere a saúde por HTTP,
+   como antes, e o diretório pinado passa a ter os scripts novos. Nada muda para a operação.
+2. **Gerar o certificado** na VM, como administrador, de `C:\DashboardLotufo\app`:
+   `scripts\gerar_certificado.ps1 -Raiz C:\DashboardLotufo -NomeCurto <vm> -NomeDns <vm>.<domínio> -Ip <ip da vm>`. Conferir no fim
+   as linhas "Nomes no certificado" (os três nomes e o IP) e "Valido ate" (5 anos), e guardar o thumbprint impresso.
+3. **Ensaio da leitura do certificado**, antes de parar nada: `scripts\saude_local.ps1 -Porta 8080 -SemTls` dá 200 (a produção
+   segue em HTTP). Num PowerShell de administrador, em `C:\DashboardLotufo\app`:
+   `. .\scripts\comum_tls.ps1; Get-ThumbprintDoCertificado -Caminho C:\DashboardLotufo\segredos\tls\cert.pem` imprime o mesmo
+   thumbprint do passo 2, e `[DashSaudeLocal]::Pedir("https://<vm>:8080/api/health", "<thumbprint>", 5000)` **recusa** ("so' fala
+   com localhost").
+4. **Certificado nos PCs da operação** (seção abaixo), antes do corte, para ninguém ver aviso.
+5. **Trocar a tarefa**: sentinela (`New-Item -ItemType File -Path C:\DashboardLotufo\watchdog.pause -Force | Out-Null`); anotar os
+   argumentos de hoje (`(Get-ScheduledTask DashboardLotufo).Actions.Arguments`); `Stop-ScheduledTask DashboardLotufo`;
+   `Get-NetTCPConnection -LocalPort 8080 -State Listen` vazio (se sobrar o uvicorn órfão, `Stop-Process` nele, como o deploy faz);
+   `scripts\instalar_autostart.ps1 -AppDir C:\DashboardLotufo\app` com **os mesmos** parâmetros anotados (`-Raiz`, `-Porta 8080`,
+   `-BackupExterno`, `-RmUsuario`, `-RmSenhaArquivo`, `-RmHttpInseguro`, `-GraphClientId`, ...) **menos `-SemTls`**;
+   `scripts\instalar_watchdog.ps1 -Porta 8080` (sem `-SemTls`; `-Raiz` se não for a padrão); `Start-ScheduledTask DashboardLotufo`.
+6. **Conferir na VM**: `scripts\saude_local.ps1 -Porta 8080` → 200 com `banco: ok`, `tls: true` e `instalacao: autorizada`;
+   ensaio da recusa, no mesmo PowerShell do passo 3: `[DashSaudeLocal]::Pedir("https://localhost:8080/api/health",
+   "0000000000000000000000000000000000000000", 5000)` **falha** (thumbprint que não é o da instalação) e com o thumbprint do passo
+   2 devolve `StatusCode 200`; `(Get-ScheduledTask DashboardLotufoWatchdog).Actions.Arguments` com `https://localhost:8080` e
+   `-Certificado`. Apagar o sentinela; três minutos depois, `C:\DashboardLotufo\logs\watchdog.log` sem "SEM RESPOSTA" novo.
+   Se a saúde não vier, "Voltar atrás" abaixo.
+7. **Conferir num PC da operação** com o certificado importado: `https://<vm>:8080` abre sem aviso; login funciona; nas
+   ferramentas do navegador (F12 › Aplicativo › Cookies) o cookie `sessao` está com `Secure`; `http://<vm>:8080` não abre a dashboard.
+8. Avisar a operação do endereço novo (`https://<vm>:8080`) e trocar o endereço do robô do SIGA (seção "Monitor do SIGA").
+
+**Voltar atrás**: sentinela, `Stop-ScheduledTask DashboardLotufo`, `instalar_autostart.ps1` com os mesmos parâmetros **mais
+`-SemTls`**, `instalar_watchdog.ps1 -SemTls -Porta 8080`, `Start-ScheduledTask DashboardLotufo`, `saude_local.ps1 -Porta 8080
+-SemTls` 200, apagar o sentinela e avisar a operação de que o endereço volta a `http://<vm>:8080`.
+
+**Rollback do deploy para um commit anterior à #425** (automático do `deploy.ps1` ou à mão), com a tarefa já em HTTPS: o
+`rodar_producao.ps1` antigo procura o certificado em `C:\DashboardLotufo\app\certs`, que não existe, e o servidor não sobe
+(`ROLLBACK TAMBEM FALHOU`). Nesse caso, voltar a tarefa e o watchdog para `-SemTls` (parágrafo acima) e subir de novo.
+
+## Certificado nos navegadores
+O certificado é autoassinado: cada PC da operação precisa confiar nele uma vez. Instalação à mão pelo Leo, sem GPO
+(decisão de 05/11/2026):
+1. Copiar `C:\DashboardLotufo\segredos\tls\cert.pem` da VM (só o `cert.pem`, que é público; nunca a `chave.pem`) para o PC,
+   pelo Mac (`scp`) ou por RDP.
+2. No PC, num PowerShell de administrador:
+   `Import-Certificate -FilePath <pasta>\cert.pem -CertStoreLocation Cert:\LocalMachine\Root` (o Windows pede confirmação
+   por ser raiz autoassinada). Conferir com `Get-ChildItem Cert:\LocalMachine\Root | Where-Object Thumbprint -eq <thumbprint>`.
+3. Fechar e abrir o navegador e abrir `https://<vm>:8080`: sem aviso. Chrome e Edge usam o repositório do Windows; Firefox
+   precisa de `security.enterprise_roots.enabled = true` em `about:config` ou da importação em Configurações › Certificados.
+4. No Mac (fora do domínio, pelo IP ou por linha no `hosts`): abrir o `cert.pem` no Acesso às Chaves, chaves "Sistema", e marcar
+   "Confiar sempre".
+
+Certificado gerado de novo (troca de VM, nome ou IP, ou fim dos 5 anos): repetir em cada PC; o antigo pode ser apagado do
+repositório "Autoridades de Certificação Raiz Confiáveis" pelo thumbprint.
 
 ## Contas
 - Primeiro administrador: `cd backend; $env:DASH_DB_PATH='C:\DashboardLotufo\dados\dashboard.db'; .venv\Scripts\python -m app.cli criar-admin --nome ... --email ...`.
@@ -210,7 +274,7 @@ Import-Certificate -FilePath \\<servidor>\...\certs\cert.pem -CertStoreLocation 
   de um commit com a #422 recria os gatilhos.
 
 ## Variáveis de ambiente
-`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db` e sobe a instalação como `dev`), `DASH_INSTALACAO_ARQUIVO` (troca o caminho do arquivo da instalação assinada), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_CHAVE_PUBLICA_DONO` (cópia do dono), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
+`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db` e sobe a instalação como `dev`), `DASH_INSTALACAO_ARQUIVO` (troca o caminho do arquivo da instalação assinada), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`; só com `-SemTls`, fora da produção desde o corte da issue #425), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_CHAVE_PUBLICA_DONO` (cópia do dono), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
 
 ## TOTVS RM (fase 5, leitura)
 A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_USUARIO` e a senha estão definidos; sem eles o sistema segue com NF e recebimento registrados à mão. Botão "Sincronizar agora" e reconciliação em Administração → TOTVS RM.
@@ -586,12 +650,21 @@ rodada maior vai em mais de um POST com o mesmo `lido_em` (cada um grava só o q
    reiniciar a tarefa de `<servidor>` pela skill `deploy`. O arquivo é lido a cada pedido: trocar o token não pede
    reinício. Sem a variável (ou com o arquivo vazio ou ilegível), as duas rotas do robô respondem 503 "Monitor do
    SIGA não configurado"; token errado ou ausente, 401.
-3. Conferir: `Invoke-RestMethod http://<servidor>/api/siga/processos -Headers @{Authorization = "Bearer <token>"}`
+3. Conferir, de uma máquina com o certificado importado (seção "Certificado nos navegadores"):
+   `Invoke-RestMethod https://<vm>:8080/api/siga/processos -Headers @{Authorization = "Bearer <token>"}`
    devolve a lista (vazia antes da primeira rodada).
 4. **Lado do robô** (issue #331): o robô guarda o token no cofre de credenciais do Windows da conta em que a tarefa
    dele roda, pelo `salvar-token-dashboard.bat` da pasta do robô (cola o token uma vez; rodar de novo substitui),
-   como já faz com a senha do MT Login e a conta Microsoft. Ele fala com a dashboard em `http://localhost`, porque
-   roda no mesmo servidor. No início de cada rodada pede a lista (`GET /api/siga/processos`) e a junta com a lista
+   como já faz com a senha do MT Login e a conta Microsoft. Ele fala com a dashboard pelo endereço configurado no
+   repositório dele (hoje em `<servidor>`, apontando para a VM). **Desde o corte para HTTPS (issue #425)** o endereço é
+   `https://<vm>:8080` e o robô precisa confiar no certificado da dashboard; a mudança no robô é do Leo:
+   - trocar o endereço da dashboard de `http://<vm>:8080` para `https://<vm>:8080` (o nome tem que ser um dos do
+     certificado: nome curto, nome DNS completo ou IP);
+   - na máquina em que o robô roda, importar o `cert.pem` em `Cert:\LocalMachine\Root` (seção "Certificado nos
+     navegadores"); se o cliente HTTP do robô não usar o repositório do Windows (ex.: `requests` do Python, que usa a
+     lista do `certifi`), apontar a verificação dele para uma cópia do `cert.pem`, nunca desligá-la;
+   - conferir com o item 3 e, na rodada seguinte, sem "dashboard: ..." novo no `dados\monitor.log` dele.
+   Sem essas mudanças o robô registra "dashboard: ..." e a leitura para de chegar até ele ser trocado. No início de cada rodada pede a lista (`GET /api/siga/processos`) e a junta com a lista
    local dele (o mesmo código conta uma vez; processo da dashboard só com número fica fora, porque abrir pelo número
    exige captcha); no fim, logo depois de gravar o estado local, manda a leitura (`POST /api/siga/leituras`). Dashboard
    parada, sem token ou token recusado: o robô registra "dashboard: ..." no `dados\monitor.log` dele e a rodada e o
@@ -843,7 +916,8 @@ Até o item 2, os dois argumentos seguem na tarefa sem efeito: `rodar_producao.p
 
 Decisão de 03/11/2026: a dashboard sai da máquina de hoje (`<servidor>`, que é a estação de trabalho e o servidor do RM) para
 uma VM do TI (`<vm>`). A VM é compartilhada (servidor de sessões do RM, IIS na 80, antivírus corporativo), então a dashboard
-responde em **`http://<vm>:8080`** (`-Porta 8080` nos scripts, issue #361). De fora da rede o acesso é pela VPN da empresa
+responde em **`http://<vm>:8080`** (`-Porta 8080` nos scripts, issue #361); desde o corte da issue #425, em **`https://<vm>:8080`**
+(seção "HTTP ou HTTPS", certificado em `segredos\tls`, que numa VM nova se gera de novo com o nome e o IP dela). De fora da rede o acesso é pela VPN da empresa
 (OpenVPN Connect, decisão do TI); a porta 8080 só aceita rede interna e faixas privadas (regra de firewall abaixo). Sem Tailscale
 nem túnel na VM.
 
@@ -894,6 +968,9 @@ endereço que a produção usa (`-RmUrl` da tarefa); o RM local da VM devolve HT
 5. Endereço novo para a operação: `http://<vm>:8080` (o nome da VM está no DNS do domínio e resolve em qualquer PC da empresa;
    o apelido antigo precisava de linha no `hosts`). Máquina fora do domínio (o Mac de desenvolvimento, em outra VLAN) usa o IP
    ou uma linha no `hosts`. Robô do SIGA: trocar o endereço da dashboard para `http://<vm>:8080` (repositório do robô).
+   Depois do corte da issue #425 o endereço é `https://<vm>:8080`, e numa troca de VM o certificado é gerado de novo na VM
+   nova (nome e IP dela) e reimportado nos PCs e na máquina do robô (seções "HTTP ou HTTPS", "Certificado nos navegadores"
+   e "Monitor do SIGA", item 4).
 6. **Rollback** em uma linha: em `<servidor>`, `Enable-ScheduledTask DashboardLotufo; Enable-ScheduledTask DashboardLotufoWatchdog;
    Start-ScheduledTask DashboardLotufo; Start-ScheduledTask DashboardLotufoWatchdog; Remove-Item C:\DashboardLotufo\watchdog.pause`,
    e a operação volta ao endereço antigo. Na VM, sentinela primeiro e depois

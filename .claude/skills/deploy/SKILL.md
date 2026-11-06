@@ -66,6 +66,12 @@ git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalaca
   "Subir e derrubar": rodar o `deploy.ps1` novo copiado para `C:\Temp\deploy`, pelo Mac num `.ps1` com `-File`, e
   conferir `instalacao: autorizada` logo depois.
 
+- **Corte para HTTPS** (issue #425): é um passo à parte, depois de um deploy normal do commit com a #425, e só quando o
+  Leo pedir. Seguir o runbook, "HTTP ou HTTPS", subseção "Corte para HTTPS", na ordem (certificado, PCs da operação,
+  troca da tarefa e do watchdog, conferência). O `deploy.ps1` lê o modo da tarefa: com `-SemTls` confere por HTTP, sem
+  ele por HTTPS, e no HTTPS não começa sem `<raiz>\segredos\tls\cert.pem` ("certificado do HTTPS nao encontrado",
+  nada alterado: avisar o Leo).
+
 - **Migração nova** (arquivo adicionado, alterado, removido ou renomeado em `backend/migrations/`): dizer ao Leo **explicitamente**, antes de rodar,
   o número e o que ela faz (ler o `.sql`: só acrescenta coluna/tabela/índice, ou mexe em dados). Pelo runbook,
   as migrações pendentes rodam sozinhas quando o servidor sobe (`create_app()`, seção "Restaurar o banco").
@@ -101,12 +107,14 @@ git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalaca
    - `ROLLBACK TAMBEM FALHOU - intervir a mao` ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`
      → avisar o Leo na hora; logs em `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
      **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior.
-4. Conferir a saúde na própria máquina (runbook, "Saúde"):
-   `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok` e
+4. Conferir a saúde na própria máquina (runbook, "Saúde" e "HTTP ou HTTPS"):
+   `& .\scripts\saude_local.ps1 -Porta <porta>` → 200 com `banco: ok`, `tls: true` e
    `instalacao: autorizada` (`nao-autorizada` é a produção em modo cópia, sem e-mail e sem RM: avisar o Leo com o
    `instalacao_motivo` e seguir o runbook, "Instalação assinada")
-   (a porta é a de `-Porta` do `deploy.ps1`, padrão 80 em HTTP, quando o `:80` pode ser omitido)
-   (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
+   (a porta é a da tarefa agendada; o script fala HTTPS com `localhost` aceitando só o certificado da instalação, pelo
+   thumbprint; nunca trocar por `Invoke-WebRequest` com a verificação desligada. Com a tarefa ainda em `-SemTls`, antes
+   do corte da issue #425, acrescentar `-SemTls`, e o `tls` vem `false`)
+   (503 = banco não respondeu; "SEM RESPOSTA" = servidor parado ou certificado diferente do da instalação). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
    `origin/master`.
 5. Apagar o sentinela: `Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`
    e confirmar com `Test-Path C:\DashboardLotufo\watchdog.pause` → `False`.
