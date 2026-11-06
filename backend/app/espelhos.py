@@ -438,10 +438,12 @@ def listar(conn, contrato_id: int) -> list[dict]:
 # so' diz que o aprovado mudou, nunca que e' glosa. Situacoes de `desatualizadas`, com o texto do aviso:
 APROVADO_MUDOU = "aprovado_mudou"           # espelho gerado ou enviado: gerar de novo
 NOTA_EMITIDA = "nota_emitida"               # nota emitida: o espelho nao se gera mais (revisor, PR #474)
-NAO_CONFERIDO = "nao_conferido"             # espelho de antes da 065 com a regra trocada (gate Sol, PR #474)
+NAO_CONFERIDO = "nao_conferido"             # espelho antigo sem valor de referencia nenhum (gate Sol, PR #474)
 TEXTO_AVISO = {APROVADO_MUDOU: "o aprovado mudou depois do espelho, gere o espelho de novo",
                NOTA_EMITIDA: "o aprovado mudou depois do espelho e a nota já foi emitida",
                NAO_CONFERIDO: "não foi possível conferir o valor do espelho antigo, gere o espelho de novo"}
+# uma situacao por medicao; no par (ou no espelho com mais de uma), a que pede o ato vem primeiro
+PRIORIDADE = {APROVADO_MUDOU: 0, NAO_CONFERIDO: 1, NOTA_EMITIDA: 2}
 # a nota emitida segue avisando (a nota da v1 lancada pelo RM leva a medicao a `nota_emitida` com o aviso na tela);
 # do protocolo em diante o aviso sai
 ESTADOS_DO_AVISO = (*medicoes.ESTADOS_ESPELHO, "nota_emitida")
@@ -449,22 +451,31 @@ ESTADOS_DO_AVISO = (*medicoes.ESTADOS_ESPELHO, "nota_emitida")
 
 def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
     """Medicoes com espelho gerado, enviado ou nota emitida cujo aprovado vigente difere do valor delas no espelho
-    vigente mais novo (`situacao` APROVADO_MUDOU, ou NOTA_EMITIDA na nota emitida, onde o espelho nao se gera
-    mais). O valor vem de `espelho_medicoes.valor_centavos` (065); no espelho de antes da coluna, das entradas gravadas
-    pela regra da obra, se ela ainda e' a do espelho (mesmo sha256). Com a regra trocada (ou sem a natureza da medicao)
-    nao ha' como comparar: NAO_CONFERIDO, so' com atesto (boletim ou digitado) registrado depois do espelho e so' onde
-    o espelho ainda se gera. Devolve {id, contrato_id, numero, tipo, estado, situacao, aprovado_centavos,
-    espelho_centavos}."""
+    vigente mais novo (`situacao` APROVADO_MUDOU, ou NOTA_EMITIDA na nota emitida, onde o espelho nao se gera mais).
+
+    O valor do espelho vem de `espelho_medicoes.valor_centavos` (065). No espelho de antes da coluna: das entradas
+    gravadas pela regra da obra, se ela ainda e' a do espelho (mesmo sha256); senao, do que o espelho travou ao ser
+    gerado (#284): o aprovado que valia entao (ultimo atesto ate' o espelho), senao o pedido. Sem nenhum dos dois nao
+    ha' como comparar: NAO_CONFERIDO (na nota emitida, o texto da nota emitida, que nao pede o espelho).
+
+    Uma consulta so' (rodada 2 da PR #474): as versoes vigentes por medicao numa CTE, pelo indice de
+    `espelho_medicoes (medicao_id, espelho_id)` da 065, e o nome da obra junto. Devolve {id, contrato_id, obra, numero,
+    tipo, estado, espelho_id, situacao, aprovado_centavos, espelho_centavos}."""
     marcas = ",".join("?" * len(ESTADOS_DO_AVISO))
     linhas = conn.execute(
-        "SELECT m.id, m.contrato_id, m.numero, m.tipo, m.estado, m.valor_atestado_centavos AS aprovado, "
+        "WITH alvo AS (SELECT id FROM medicoes "
+        f"  WHERE estado IN ({marcas}) AND valor_atestado_centavos IS NOT NULL AND (? IS NULL OR id=?)), "
+        "vig AS (SELECT em.medicao_id, MAX(e.versao) AS versao FROM alvo JOIN espelho_medicoes em ON em.medicao_id=alvo.id "
+        "  JOIN espelhos e ON e.id=em.espelho_id WHERE e.situacao='vigente' GROUP BY em.medicao_id) "
+        "SELECT m.id, m.contrato_id, COALESCE(c.nome_curto, c.numero_instrumento) AS obra, m.numero, m.tipo, m.estado, "
+        "m.valor_atestado_centavos AS aprovado, m.valor_protocolado_centavos AS pedido, e.id AS espelho_id, "
         "em.valor_centavos, e.entradas, e.regra_sha256, "
-        "EXISTS (SELECT 1 FROM medicao_atestos a WHERE a.medicao_id=m.id AND a.criado_em > e.criado_em) AS atesto_depois "
-        "FROM medicoes m JOIN espelho_medicoes em ON em.medicao_id=m.id JOIN espelhos e ON e.id=em.espelho_id "
-        f"WHERE m.estado IN ({marcas}) AND m.valor_atestado_centavos IS NOT NULL "
-        "AND (? IS NULL OR m.id=?) AND e.situacao='vigente' AND e.versao=("
-        " SELECT MAX(e2.versao) FROM espelho_medicoes em2 JOIN espelhos e2 ON e2.id=em2.espelho_id "
-        " WHERE em2.medicao_id=m.id AND e2.situacao='vigente') ORDER BY m.id",
+        "CASE WHEN em.valor_centavos IS NULL THEN (SELECT a.valor_centavos FROM medicao_atestos a "
+        "  WHERE a.medicao_id=m.id AND a.criado_em <= e.criado_em ORDER BY a.id DESC LIMIT 1) END AS aprovado_no_espelho "
+        "FROM vig JOIN medicoes m ON m.id=vig.medicao_id JOIN contratos c ON c.id=m.contrato_id "
+        # a versao e' unica por (contrato, numero) (UNIQUE da 020) e a medicao, por (contrato, numero, tipo)
+        "JOIN espelhos e ON e.contrato_id=m.contrato_id AND e.numero=m.numero AND e.versao=vig.versao "
+        "JOIN espelho_medicoes em ON em.espelho_id=e.id AND em.medicao_id=m.id ORDER BY m.id",
         (*ESTADOS_DO_AVISO, medicao_id, medicao_id)).fetchall()
     regras: dict[int, tuple | None] = {}
     out = []
@@ -476,16 +487,18 @@ def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
             crua = regras[r["contrato_id"]]
             if crua is not None and crua[3] == r["regra_sha256"]:
                 valor = espelho.valor_por_natureza(json.loads(crua[1]), json.loads(r["entradas"])).get(r["tipo"])
+            if valor is None:
+                # o que o espelho travou ao ser gerado (#284): o aprovado de entao, senao o pedido
+                valor = r["aprovado_no_espelho"] if r["aprovado_no_espelho"] is not None else r["pedido"]
         if valor is None:
-            situacao = NAO_CONFERIDO if r["atesto_depois"] and r["estado"] in medicoes.ESTADOS_ESPELHO else None
+            situacao = NOTA_EMITIDA if r["estado"] == "nota_emitida" else NAO_CONFERIDO
         elif r["aprovado"] != valor:
             situacao = NOTA_EMITIDA if r["estado"] == "nota_emitida" else APROVADO_MUDOU
         else:
-            situacao = None
-        if situacao:
-            out.append({"id": r["id"], "contrato_id": r["contrato_id"], "numero": r["numero"], "tipo": r["tipo"],
-                        "estado": r["estado"], "situacao": situacao, "aprovado_centavos": r["aprovado"],
-                        "espelho_centavos": valor})
+            continue
+        out.append({"id": r["id"], "contrato_id": r["contrato_id"], "obra": r["obra"], "numero": r["numero"],
+                    "tipo": r["tipo"], "estado": r["estado"], "espelho_id": r["espelho_id"], "situacao": situacao,
+                    "aprovado_centavos": r["aprovado"], "espelho_centavos": valor})
     return out
 
 

@@ -44,6 +44,8 @@ def test_coluna_nova_e_a_ligacao_antiga_fica_sem_valor(conn):
     assert "valor_centavos" in {r[1] for r in conn.execute("PRAGMA table_info(espelho_medicoes)")}
     assert [tuple(r) for r in conn.execute("SELECT espelho_id, medicao_id, valor_centavos FROM espelho_medicoes")] == [
         (1, 1, None)]
+    # o indice pela medicao (rodada 2 da PR #474): o aviso le os espelhos de cada medicao
+    assert [r[2] for r in conn.execute("PRAGMA index_info(ix_espelho_medicoes_medicao)")] == ["medicao_id", "espelho_id"]
 
 
 def test_reaplicar_nao_falha_nem_muda_nada(conn):

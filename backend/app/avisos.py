@@ -114,7 +114,7 @@ def _de_espelhos(conn, hoje: datetime.date) -> list[dict]:
         tipo = "espelho_nao_conferido" if m["situacao"] == espelhos.NAO_CONFERIDO else "espelho_desatualizado"
         aba = "notas" if m["situacao"] == espelhos.NOTA_EMITIDA else "espelho"
         out.append({**aviso(tipo, "acao", f"{medicoes.titulo(m)}: {espelhos.TEXTO_AVISO[m['situacao']]}",
-                            cid, obra(conn, cid), valor_centavos=m["aprovado_centavos"],
+                            cid, m["obra"], valor_centavos=m["aprovado_centavos"],
                             destino={"tela": "contrato", "id": cid, "aba": aba}),
                     "medicao_id": m["id"]})
     return out

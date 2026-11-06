@@ -5,7 +5,7 @@ import json
 import pytest
 
 from app import auth, avisos, db, espelhos, medicoes, paineis, tempo
-from tests.test_espelhos import _boletim, ambiente, ambiente_projeto  # noqa: F401  (fixtures da obra com espelho)
+from tests.test_espelhos import _antes_do_espelho, _boletim, ambiente, ambiente_projeto  # noqa: F401  (fixtures da obra com espelho)
 
 D = datetime.date
 
@@ -370,26 +370,87 @@ def _nao_conferidos(conn):
     return [a for a in avisos.listar(conn) if a["tipo"] == "espelho_nao_conferido"]
 
 
-def test_espelho_antigo_com_a_regra_trocada_avisa_que_nao_confere_so_com_atesto_depois(ambiente):
-    # gate Sol (PR #474): sem o valor (antes da 065) e com a regra trocada, o aviso nao diz que o aprovado mudou
-    conn, u, cid = ambiente
-    mid = _espelho_enviado(conn, u, cid, 100_01)
+def _espelho_antigo(conn, cid, criado_em="2026-01-05 10:00:00"):
+    """O espelho de antes da 065 (sem o valor por medicao), com a regra da obra trocada depois dele."""
     conn.execute("UPDATE espelho_medicoes SET valor_centavos=NULL")
     conn.execute("UPDATE espelho_regras SET sha256='outra' WHERE contrato_id=?", (cid,))
+    conn.execute("UPDATE espelhos SET criado_em=?", (criado_em,))
     conn.commit()
-    _boletim(conn, u, mid, 99_99)
-    # o atesto e' evento imutavel: a data do espelho e' que vai para depois dele, e depois para antes
-    conn.execute("UPDATE espelhos SET criado_em='2999-01-01 10:00:00'"); conn.commit()          # atesto antes
+
+
+def _atesto_depois(conn, u, mid, valor, origem="manual"):
+    """Atesto registrado depois do espelho antigo (o evento e' imutavel: entra com a data, como a carga faria)."""
+    conn.execute("INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, criado_em) "
+                 "VALUES (?,?,?,'2026-02-20',?,'2026-03-01 10:00:00')", (mid, valor, origem, u["id"]))
+    conn.execute("UPDATE medicoes SET valor_atestado_centavos=? WHERE id=?", (valor, mid))
+    conn.commit()
+
+
+def test_espelho_antigo_com_a_regra_trocada_compara_com_o_pedido_que_travou(ambiente):
+    # rodada 2 da PR #474: sem o valor e com a regra trocada, a referencia e' o que o espelho travou ao ser gerado
+    # (sem atesto ate' ele, o pedido): o mesmo valor nao avisa, de boletim, de carga ou de correcao digitada
+    conn, u, cid = ambiente
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+    _espelho_antigo(conn, cid)
+    medicoes.definir_valor(conn, u["id"], mid, "atestado", 100_01, "manual", "2026-02-21")    # digitado (sem boletim)
+    _atesto_depois(conn, u, mid, 100_01, origem="detectado")                                    # carga
+    _boletim(conn, u, mid, 100_01)
     assert _nao_conferidos(conn) == [] and _desatualizados(conn) == []
-    conn.execute("UPDATE espelhos SET criado_em='2026-01-05 10:00:00'"); conn.commit()          # atesto depois
+    assert medicoes.detalhe(conn, mid)["espelho_desatualizado"] is None
+    _boletim(conn, u, mid, 99_99, sha="b")
+    [a] = _desatualizados(conn)
+    assert (a["medicao_id"], a["mensagem"]) == (mid, "23ª Medição: o aprovado mudou depois do espelho, gere o espelho "
+                                                     "de novo")
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 99_99}, motivo="boletim novo do órgão")
+    assert _desatualizados(conn) == [] and _nao_conferidos(conn) == []
+
+
+def test_espelho_antigo_com_a_regra_trocada_compara_com_o_aprovado_de_quando_foi_gerado(ambiente):
+    # a medicao com boletim antes do espelho: o espelho travou aquele aprovado, nao o pedido
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
+    _boletim(conn, u, mid, 12_000_01)
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {})
+    _espelho_antigo(conn, cid, criado_em="2999-01-01 10:00:00")     # o boletim acima fica antes do espelho
+    assert _desatualizados(conn) == [] and _nao_conferidos(conn) == []
+    conn.execute("UPDATE espelhos SET criado_em='2026-02-28 10:00:00'"); conn.commit()
+    _atesto_depois(conn, u, mid, 11_999_99)
+    assert [a["medicao_id"] for a in _desatualizados(conn)] == [mid]
+
+
+def test_espelho_antigo_sem_referencia_nenhuma_avisa_que_nao_confere(ambiente):
+    # gate Sol (PR #474): sem valor, sem a regra do espelho, sem atesto ate' ele e sem pedido, nao ha' como comparar
+    conn, u, cid = ambiente
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+    _espelho_antigo(conn, cid)
+    conn.execute("UPDATE medicoes SET valor_protocolado_centavos=NULL, valor_protocolado_origem=NULL"); conn.commit()
+    _atesto_depois(conn, u, mid, 100_01)
     [a] = _nao_conferidos(conn)
     assert a["mensagem"] == "23ª Medição: não foi possível conferir o valor do espelho antigo, gere o espelho de novo"
     assert "aprovado mudou" not in a["mensagem"] and "glosa" not in a["mensagem"].lower()
     assert (a["medicao_id"], a["destino"]) == (mid, {"tela": "contrato", "id": cid, "aba": "espelho"})
-    assert _desatualizados(conn) == []
     assert medicoes.detalhe(conn, mid)["espelho_desatualizado"] == "nao_conferido"
-    espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 99_99}, motivo="boletim novo do órgão")
+    # na nota emitida o espelho nao se gera mais: o texto da nota emitida, que leva as notas (gate Sol, rodada 2)
+    conn.execute("UPDATE medicoes SET estado='nota_emitida' WHERE id=?", (mid,)); conn.commit()
     assert _nao_conferidos(conn) == []
+    [a] = _desatualizados(conn)
+    assert (a["mensagem"], a["destino"]["aba"]) == (
+        "23ª Medição: o aprovado mudou depois do espelho e a nota já foi emitida", "notas")
+
+
+def test_espelho_antigo_regra_trocada_atesto_novo_e_nota_emitida_continua_avisando(ambiente, monkeypatch):
+    # gate Sol (rodada 2 da PR #474): os quatro juntos nao podem fazer o aviso sumir
+    from app import notas
+    conn, u, cid = ambiente
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+    _espelho_antigo(conn, cid)
+    _atesto_depois(conn, u, mid, 99_99)
+    monkeypatch.setattr(notas, "faltam", lambda c, m: 0)        # a nota da v1 alocada pela sincronizacao do RM
+    assert notas.fechar_se_completa(conn, u["id"], mid)
+    [a] = _desatualizados(conn)
+    assert (a["medicao_id"], a["mensagem"], a["destino"]["aba"]) == (
+        mid, "23ª Medição: o aprovado mudou depois do espelho e a nota já foi emitida", "notas")
+    assert medicoes.detalhe(conn, mid)["espelho_desatualizado"] == "nota_emitida"
 
 
 def test_nota_da_v1_lancada_depois_do_boletim_novo_mantem_o_aviso(ambiente, monkeypatch):

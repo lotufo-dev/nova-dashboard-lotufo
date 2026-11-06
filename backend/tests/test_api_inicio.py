@@ -63,7 +63,7 @@ def test_painel_do_inicio_leva_a_medicao_com_o_aprovado_mudado_depois_do_espelho
     [e] = client_admin.get("/api/inicio/painel").json()["espelhos"]
     assert {k: e[k] for k in ("contrato_id", "medicao_id", "titulo", "situacao")} == {
         "contrato_id": cid, "medicao_id": mid, "titulo": "23ª Medição", "situacao": "aprovado_mudou"}
-    assert e["obra"]
+    assert e["obra"] and e["espelho_id"] == g.json()["espelho_id"]
 
 
 def test_painel_do_inicio_exige_login(client):

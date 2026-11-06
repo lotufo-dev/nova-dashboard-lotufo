@@ -147,8 +147,15 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
 
 
 def _espelhos(conn) -> list[dict]:
-    """Issue #359: as medicoes com o aprovado mudado depois do espelho (`espelhos.desatualizadas`, a mesma fonte do
-    aviso), para o cartao do Inicio levar a elas."""
+    """Issue #359: os espelhos vigentes com medicao de aprovado mudado depois deles (`espelhos.desatualizadas`, a
+    mesma fonte do aviso), um por espelho (execucao e reajuste do mesmo espelho contam uma vez, rodada 2 da PR #474),
+    para o cartao do Inicio levar a eles. De cada espelho, a medicao da situacao que pede o ato (espelhos.PRIORIDADE)."""
     from app import espelhos, medicoes      # import local: espelhos importa medicoes e correio
-    return [{"contrato_id": m["contrato_id"], "medicao_id": m["id"], "obra": avisos.obra(conn, m["contrato_id"]),
-             "titulo": medicoes.titulo(m), "situacao": m["situacao"]} for m in espelhos.desatualizadas(conn)]
+    por_espelho: dict[int, dict] = {}
+    for m in espelhos.desatualizadas(conn):
+        atual = por_espelho.get(m["espelho_id"])
+        if atual is None or espelhos.PRIORIDADE[m["situacao"]] < espelhos.PRIORIDADE[atual["situacao"]]:
+            por_espelho[m["espelho_id"]] = {"espelho_id": m["espelho_id"], "contrato_id": m["contrato_id"],
+                                            "medicao_id": m["id"], "obra": m["obra"], "titulo": medicoes.titulo(m),
+                                            "situacao": m["situacao"]}
+    return [por_espelho[k] for k in sorted(por_espelho)]
