@@ -31,6 +31,8 @@ TRANSICOES = {
     "boletim_recebido": {"cancelada", "desistida"},
     # Estados do espelho (spec 2026-09-21 §2). espelho_gerado -> espelho_enviado e' do SISTEMA
     # (marcar_espelho_enviado, no ato do envio); -> protocolada e' registrar_protocolo.
+    # Issue #359: espelho_enviado -> espelho_gerado tambem e' do SISTEMA, na versao nova do espelho
+    # (criar_para_espelho); nao se faz a mao.
     # Bloco 3: a nota (PDF lido ou RM) fecha `nota_emitida` (notas.fechar_se_completa, ou a
     # declaracao com justificativa); o protocolo continua sendo registrar_protocolo.
     "espelho_gerado": {"nota_emitida", "cancelada"},
@@ -727,7 +729,7 @@ def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tip
             raise ValueError(f"{nome_medicao(numero, tipo)} já está {rotulo_estado(ja['estado'])}: o espelho não pode ser "
                              "gerado de novo depois de protocolada")
         # Issue #359 (decisao do Leo de 03/11/2026): a versao nova volta a medicao a `espelho_gerado` ate' o envio
-        # dela ao faturamento (marcar_espelho_enviado); antes, a nota podia sair pela versao antiga ja' enviada
+        # dela ao faturamento (marcar_espelho_enviado): a tela volta a pedir o envio, em vez de esperar a nota
         if valor_travado(ja) is not None:
             # o valor do espelho e' o travado (conferido em espelhos._calcular); o pedido nao muda
             cur = conn.execute("UPDATE medicoes SET competencia=?, estado='espelho_gerado' WHERE id=? AND estado=?",

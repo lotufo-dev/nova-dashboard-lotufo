@@ -360,6 +360,9 @@ def test_espelho_de_antes_da_migracao_usa_as_entradas_gravadas(ambiente):
     assert _desatualizados(conn) == []
     _boletim(conn, u, mid, 99_99, sha="b")
     assert [a["medicao_id"] for a in _desatualizados(conn)] == [mid]
+    # a regra trocada depois do espelho pode ter outras chaves: sem a do espelho, nao ha' como comparar
+    conn.execute("UPDATE espelho_regras SET sha256='outra' WHERE contrato_id=?", (cid,)); conn.commit()
+    assert _desatualizados(conn) == []
 
 
 def test_medicao_protocolada_nao_avisa_espelho_desatualizado(ambiente):

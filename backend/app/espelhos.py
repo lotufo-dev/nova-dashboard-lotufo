@@ -442,28 +442,28 @@ AVISO_DESATUALIZADO = "o aprovado mudou depois do espelho: gere o espelho de nov
 def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
     """Medicoes com espelho gerado ou enviado (os estados em que o espelho ainda se gera de novo) cujo aprovado vigente
     difere do valor delas no espelho vigente mais novo. O valor vem de `espelho_medicoes.valor_centavos` (063); no
-    espelho de antes da coluna, das entradas gravadas pela regra da obra (sem a regra, ou com a regra sem a natureza
-    da medicao, nao ha' como comparar e nao avisa). Devolve {id, contrato_id, numero, tipo, aprovado_centavos,
-    espelho_centavos}."""
+    espelho de antes da coluna, das entradas gravadas pela regra da obra, so' se ela ainda e' a do espelho (mesmo
+    sha256): com a regra trocada, ou sem a natureza da medicao, nao ha' como comparar e nao avisa. Devolve {id,
+    contrato_id, numero, tipo, aprovado_centavos, espelho_centavos}."""
     linhas = conn.execute(
         "SELECT m.id, m.contrato_id, m.numero, m.tipo, m.valor_atestado_centavos AS aprovado, "
-        "em.valor_centavos, e.entradas FROM medicoes m JOIN espelho_medicoes em ON em.medicao_id=m.id "
+        "em.valor_centavos, e.entradas, e.regra_sha256 FROM medicoes m JOIN espelho_medicoes em ON em.medicao_id=m.id "
         "JOIN espelhos e ON e.id=em.espelho_id "
         "WHERE m.estado IN ('espelho_gerado','espelho_enviado') AND m.valor_atestado_centavos IS NOT NULL "
         "AND (? IS NULL OR m.id=?) AND e.situacao='vigente' AND e.versao=("
         " SELECT MAX(e2.versao) FROM espelho_medicoes em2 JOIN espelhos e2 ON e2.id=em2.espelho_id "
         " WHERE em2.medicao_id=m.id AND e2.situacao='vigente') ORDER BY m.id", (medicao_id, medicao_id)).fetchall()
-    regras: dict[int, dict | None] = {}
+    regras: dict[int, tuple | None] = {}
     out = []
     for r in linhas:
         valor = r["valor_centavos"]
         if valor is None:
             if r["contrato_id"] not in regras:
-                regras[r["contrato_id"]] = regra_do_contrato(conn, r["contrato_id"])
-            regra = regras[r["contrato_id"]]
-            if regra is None:
+                regras[r["contrato_id"]] = _regra_crua(conn, r["contrato_id"])
+            crua = regras[r["contrato_id"]]
+            if crua is None or crua[3] != r["regra_sha256"]:
                 continue
-            valor = espelho.valor_por_natureza(regra["regra"], json.loads(r["entradas"])).get(r["tipo"])
+            valor = espelho.valor_por_natureza(json.loads(crua[1]), json.loads(r["entradas"])).get(r["tipo"])
             if valor is None:
                 continue
         if r["aprovado"] != valor:
