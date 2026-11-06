@@ -80,10 +80,10 @@ def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
     assert re.search(r'\.instalacao -eq "autorizada"', corpo)
     assert "[switch]$ExigirInstalacao" in corpo
     assert script.count("SaudavelENovo -ExigirInstalacao") == 1
-    deploy = script.index("if (SaudavelENovo -ExigirInstalacao) {")
+    deploy = script.index("if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {")
     rollback = script.index("ROLLBACK para $anterior")
     assert deploy < rollback
-    assert "$voltou = SaudavelENovo\n" in script[rollback:]
+    assert "$voltou = (SaudavelENovo) -and (NoArEm $anterior)\n" in script[rollback:]
     # rollback para um commit que ja' confere a instalacao e voltou em modo copia: ROLLBACK OK, mas com aviso
     aviso = script[script.index("function AvisarSeCopia"):script.index("$anterior = (")]
     assert '$saude.instalacao -and $saude.instalacao -ne "autorizada"' in aviso and "Write-Warning" in aviso
@@ -213,28 +213,31 @@ def test_deploy_so_apaga_o_sentinela_com_a_producao_conferida():
     codigo = _codigo(script)
     assert codigo.count("Remove-Item $pause") == 1
     final = codigo[codigo.index("\n} finally {"):]
-    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    else {")]
+    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    elseif (")]
     assert "Remove-Item $pause" in soltar
     assert "MANTIDO" in final
     # comeca falso, antes de criar o sentinela
     assert codigo.index("$script:soltarWatchdog = $false") < codigo.index("New-Item -ItemType File -Path $pause")
-    # os unicos pontos que soltam: antes do checkout do alvo, a volta do build que deu certo, DEPLOY OK e ROLLBACK OK
+    # os unicos pontos que soltam: antes do checkout do alvo (so' com a producao provada no inicio, rodada 2), a volta
+    # do build que deu certo, DEPLOY OK e ROLLBACK OK
     soltas = [m.start() for m in re.finditer(r"\$script:soltarWatchdog = \$true", codigo)]
-    assert len(soltas) == 4
+    assert len(soltas) == 3
+    inicio = codigo.index("$script:soltarWatchdog = $script:producaoProvada")
+    assert codigo.count("$script:soltarWatchdog = $script:producaoProvada") == 1
     checkout = codigo.index("try { Construir $alvo; ConferirInstalacao }")
-    assert soltas[0] < codigo.index("& git -C $AppDir fetch --quiet")
+    assert inicio < codigo.index("& git -C $AppDir fetch --quiet")
     # antes do checkout do alvo a variavel volta a falso: dali em diante o pinado muda
     trava = codigo.rindex("$script:soltarWatchdog = $false", 0, checkout)
-    assert soltas[0] < trava < checkout
+    assert inicio < trava < checkout < soltas[0]
     volta = codigo[checkout:codigo.index("$novo = (")]
     assert volta.count("$script:soltarWatchdog = $true") == 1
     assert volta.index("$script:soltarWatchdog = $true") < volta.index("deploy abortado no build; producao segue")
     falha_volta = volta[volta.index("deploy abortado no build E a volta"):]
     assert "soltarWatchdog" not in falha_volta
-    ok = codigo[codigo.index("if (SaudavelENovo -ExigirInstalacao) {"):codigo.index("ROLLBACK para $anterior")]
+    ok = codigo[codigo.index("if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {"):codigo.index("ROLLBACK para $anterior")]
     assert ok.count("$script:soltarWatchdog = $true") == 1
     # o reinicio e o health do commit novo ficam depois da trava: excecao ali nao solta o watchdog
-    principal = codigo[codigo.index("$novo = ("):codigo.index("if (SaudavelENovo -ExigirInstalacao) {")]
+    principal = codigo[codigo.index("$novo = ("):codigo.index("if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {")]
     assert trava < codigo.index("$novo = (") and "Reiniciar" in principal and "soltarWatchdog" not in principal
     # as linhas finais de "intervir a mao" saem mesmo com o rev-parse vazio (nada de .Trim() em $null)
     for marca in ("deploy abortado no build E a volta", "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message))"):
@@ -261,7 +264,7 @@ def test_deploy_volta_do_build_reconstroi_confere_a_arvore_e_o_health_antes_de_s
     # arvore limpa e health do processo no ar antes de soltar
     status = volta.index("& git -C $AppDir status --porcelain --untracked-files=no")
     assert "if ($alterados) { throw " in volta
-    health = volta.index("if (-not (Saudavel)) { throw ")
+    health = volta.index("if (-not (NoArEm $anterior)) { throw ")
     solta = volta.index("$script:soltarWatchdog = $true")
     assert condicao < status < health < solta
 
@@ -271,7 +274,7 @@ def test_deploy_confere_que_o_sentinela_saiu_e_falha_se_ficou():
     # terminava em DEPLOY OK com o sentinela la', e o watchdog pausado para sempre.
     codigo = _codigo(_ler("deploy.ps1"))
     final = codigo[codigo.index("\n} finally {"):]
-    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    else {")]
+    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    elseif (")]
     assert "Remove-Item $pause -Force -ErrorAction Stop" in soltar
     assert "SilentlyContinue" not in soltar
     conferencia = soltar.rindex("if (Test-Path $pause) {")
@@ -282,3 +285,62 @@ def test_deploy_confere_que_o_sentinela_saiu_e_falha_se_ficou():
     fim = final[final.index("\n}\n"):]
     assert "if ($script:sentinelaPreso) { exit 1 }" in fim
     assert codigo.index("$script:sentinelaPreso = $false") < codigo.index("New-Item -ItemType File -Path $pause")
+
+
+def test_deploy_confere_a_producao_no_inicio_e_so_solta_o_aborto_antes_do_checkout_se_ela_estava_provada():
+    # Rodada 2 da PR #475 (issue #443): o aborto antes do checkout soltava o watchdog sempre. Numa nova tentativa depois
+    # de ROLLBACK TAMBEM FALHOU com a rede caida, o fetch falhava e o finally apagava o sentinela com a venv pela metade.
+    codigo = _codigo(_ler("deploy.ps1"))
+    # o commit no ar vem do campo `commit` do health (issue #421), comparado nos 7 primeiros caracteres
+    health = codigo[codigo.index("function CommitDoHealth"):codigo.index("function NoArEm")]
+    assert "ConvertFrom-Json" in health and "$saude.commit" in health and "StatusCode -ne 200" in health
+    no_ar = codigo[codigo.index("function NoArEm"):codigo.index("function PinadoLimpo")]
+    assert "Substring(0, 7)" in no_ar and "$visto -eq $curto" in no_ar
+    limpo = codigo[codigo.index("function PinadoLimpo"):codigo.index("$anterior = (")]
+    assert "status --porcelain --untracked-files=no" in limpo
+    # a conferencia do inicio: pinado limpo e health no commit do pinado, antes de criar o sentinela
+    sentinela = codigo.index("New-Item -ItemType File -Path $pause")
+    conferencia = codigo.index("if (PinadoLimpo) { $script:producaoProvada = NoArEm $anterior }")
+    assert codigo.index("$anterior = (") < codigo.index("$script:producaoProvada = $false") < conferencia < sentinela
+    # o aborto antes do checkout herda a conferencia; o pinado sujo aborta antes do fetch, com mensagem propria
+    inicio = codigo.index("$script:soltarWatchdog = $script:producaoProvada")
+    sujo = codigo.index("if (-not (PinadoLimpo)) {", sentinela)
+    assert sentinela < inicio < sujo < codigo.index("& git -C $AppDir fetch --quiet")
+    bloco_sujo = codigo[sujo:codigo.index("& git -C $AppDir fetch --quiet")]
+    assert "deploy abortado antes do checkout: diretorio pinado com arquivos alterados" in bloco_sujo
+    assert "exit 1" in bloco_sujo and "soltarWatchdog" not in bloco_sujo
+    # o finally diz por que manteve
+    final = codigo[codigo.index("\n} finally {"):]
+    nao_conferida = final[final.index("\n    elseif ("):final.index("\n    else {")]
+    assert "-not $script:pinadoMudou -and -not $script:producaoProvada" in nao_conferida
+    assert "MANTIDO: a producao nao estava conferida no inicio" in nao_conferida
+    assert codigo.index("$script:pinadoMudou = $true") > codigo.rindex(
+        "$script:soltarWatchdog = $false", 0, codigo.index("try { Construir $alvo; ConferirInstalacao }"))
+
+
+def test_deploy_so_solta_com_o_health_no_commit_esperado():
+    # Rodada 2 da PR #475 (issue #443): o Saudavel aceitava qualquer processo que respondesse 200. Com o anterior sem a
+    # #417, a nova tentativa falhava na conferencia da instalacao, caia na volta do build, e o 200 do processo NOVO no
+    # ar fazia o script dizer "producao segue no commit anterior" e soltar o watchdog.
+    codigo = _codigo(_ler("deploy.ps1"))
+    checkout = codigo.index("try { Construir $alvo; ConferirInstalacao }")
+    volta = codigo[checkout:codigo.index("deploy abortado no build E a volta")]
+    assert "Saudavel" not in volta.replace("NoArEm", "")
+    assert volta.index("if (-not (NoArEm $anterior)) { throw ") < volta.index("$script:soltarWatchdog = $true")
+    # DEPLOY OK exige o commit novo no health; ROLLBACK OK, o anterior
+    assert "if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {" in codigo
+    rollback = codigo[codigo.index("ROLLBACK para $anterior"):codigo.index("\n} finally {")]
+    assert "$voltou = (SaudavelENovo) -and (NoArEm $anterior)" in rollback
+    assert rollback.index("$voltou = (SaudavelENovo) -and (NoArEm $anterior)") < rollback.index("if ($voltou) {")
+
+
+def test_deploy_distingue_o_sentinela_que_nao_saiu_com_a_producao_provada():
+    # Rodada 2 da PR #475 (issue #443): o MANTIDO da remocao que falhou (producao provada) e' outro caso: nao se desfaz
+    # o deploy, so' se tira o arquivo.
+    codigo = _codigo(_ler("deploy.ps1"))
+    final = codigo[codigo.index("\n} finally {"):]
+    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    elseif (")]
+    assert "MANTIDO POR FALHA NA REMOCAO" in soltar and "nao reconstruir nem desfazer o deploy" in soltar
+    resto = final[final.index("\n    elseif ("):]
+    assert "MANTIDO POR FALHA NA REMOCAO" not in resto
+    assert "MANTIDO: a producao nao foi provada depois do deploy" in resto[resto.index("\n    else {"):]
