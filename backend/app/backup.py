@@ -6,7 +6,7 @@
 - Copia externa (outro volume ou compartilhamento, `DASH_BACKUP_EXTERNO`): uma vez
   por dia, com `.sha256` ao lado, conferida relendo o destino. Retencao em camadas:
   7 diarios, 5 semanais, 12 mensais.
-- Arquivos ao lado do banco (issue #55): `notas`, `espelhos`, `modelos` e `evidencias` vao
+- Arquivos ao lado do banco (issue #55; todas as pastas desde a #441, ver PASTAS_ARQUIVOS) vao
   para `<backups>/arquivos/<pasta>/` e, havendo pasta externa, para
   `<externo>/arquivos/<pasta>/`, num worker proprio (thread "backup-arquivos"), acordado
   logo depois de cada snapshot: a thread do banco so' faz snapshot (e a copia externa
@@ -39,7 +39,10 @@ PADRAO = "dashboard-*.db"  # o que a rotacao enxerga (nao casa com *.db.tmp)
 IDADE_TMP_SEG = 3600  # so e' "sobra" o .tmp que ja passou de 1 hora
 _NOME = re.compile(r"dashboard-(\d{4})(\d{2})(\d{2})-\d{6}\.db$")
 CAMADAS = {"diarios": 7, "semanais": 5, "mensais": 12}
-PASTAS_ARQUIVOS = ("notas", "espelhos", "modelos", "evidencias")
+# Toda pasta de `dados` que o sistema grava (issue #441; o teste confere no codigo). So' `assinaturas` nao e' pelo
+# sha256 (`usuario-<id>`, trocada pela pessoa): o backup guarda a ultima de cada um (ver `_copiar_um`).
+PASTAS_ARQUIVOS = ("notas", "espelhos", "modelos", "evidencias", "certidoes", "regularidades", "protocolos",
+                   "pleitos", "curvas", "planilhas", "frc", "boletins", "anexos", "assinaturas")
 SUBPASTA_ARQUIVOS = "arquivos"  # dentro da pasta de backups e da pasta externa
 PRAZO_ARQUIVOS_SEG = 2 * 3600  # passada dos arquivos rodando ha mais que isso = acusada no health
 CONFERIR_DESTINO_SEG = 24 * 3600  # releitura completa do destino pelo sha256: uma vez por dia
@@ -543,7 +546,7 @@ def situacao(local: Path, externa_configurada: bool, agora: datetime.datetime) -
         "ultima_copia_externa": e["ultima_copia_externa"],
         "ultima_copia_externa_erro": copia_erro,
         "ultima_copia_externa_erro_em": copia_erro_em,
-        # issue #55: notas, espelhos, modelos e evidencias (local e, havendo, externa)
+        # issue #55: as pastas de PASTAS_ARQUIVOS (local e, havendo, externa)
         "ultima_copia_arquivos": e["ultima_copia_arquivos"],
         "ultima_copia_arquivos_erro": arq_erro,
         "ultima_copia_arquivos_erro_em": arq_erro_em,

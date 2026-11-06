@@ -239,22 +239,52 @@ def _worker_limpo(monkeypatch):
         monkeypatch.setitem(backup.ESTADO, chave, None)
 
 
+# Toda pasta de `dados` que o sistema grava pelo sha256 (issue #441), com a extensao de um arquivo tipico. A lista
+# e' do teste, nao `backup.PASTAS_ARQUIVOS`: pasta que sair de la' faz a restauracao abaixo falhar.
+PASTAS_DOS_DADOS = (("notas", "pdf"), ("espelhos", "docx"), ("modelos", "docx"), ("evidencias", "eml"),
+                    ("certidoes", "pdf"), ("regularidades", "pdf"), ("protocolos", "pdf"), ("pleitos", "pdf"),
+                    ("curvas", "xlsx"), ("planilhas", "xlsx"), ("frc", "pdf"), ("boletins", "pdf"),
+                    ("anexos", "pdf"))
+ASSINATURA = b"\x89PNG\r\n\x1a\n assinatura"
+
+
 def _dados_com_arquivos(tmp_path):
-    """Pasta de dados como a da producao: banco + as quatro pastas, nomes pelo sha256."""
+    """Pasta de dados como a da producao: banco + as pastas pelo sha256 e a assinatura de quem envia
+    (`assinaturas/usuario-<id>`, o unico nome que nao e' o sha256)."""
     dados = tmp_path / "dados"; dados.mkdir()
     origem = dados / "dashboard.db"
     conn = sqlite3.connect(origem)
     conn.execute("CREATE TABLE docs (caminho TEXT)")
     gravados = {}
-    for pasta, ext in (("notas", "pdf"), ("espelhos", "docx"), ("modelos", "docx"), ("evidencias", "eml")):
+    for pasta, ext in PASTAS_DOS_DADOS:
         conteudo = f"%PDF- conteudo de {pasta}".encode()
         rel = f"{pasta}/{hashlib.sha256(conteudo).hexdigest()}.{ext}"
         (dados / pasta).mkdir()
         (dados / rel).write_bytes(conteudo)
         conn.execute("INSERT INTO docs VALUES (?)", (rel,))
         gravados[rel] = conteudo
+    (dados / "assinaturas").mkdir()
+    (dados / "assinaturas" / "usuario-1").write_bytes(ASSINATURA)
+    conn.execute("INSERT INTO docs VALUES ('assinaturas/usuario-1')")
+    gravados["assinaturas/usuario-1"] = ASSINATURA
     conn.commit(); conn.close()
     return origem, gravados
+
+
+def test_pastas_arquivos_cobre_toda_pasta_que_o_sistema_grava():
+    """Issue #441: o backup levava so' notas, espelhos, modelos e evidencias; protocolos, pleitos, curvas e as outras
+    sumiam numa restauracao. Confere no codigo: toda pasta de `dados` gravada pelo sistema esta' no backup."""
+    import re
+    gravadas = set()
+    for arq in Path(backup.__file__).parent.glob("*.py"):
+        texto = arq.read_text(encoding="utf-8")
+        gravadas |= set(re.findall(r'(?:gravar_bytes|arquivos\.pasta|_no_disco)\(\s*"(\w+)"', texto))
+        gravadas |= set(re.findall(r'^PASTA_\w+ = "(\w+)"', texto, re.M))   # curvas (pleitos.PASTA_CURVA_S)
+    # a busca acha o que a issue lista (senao o teste nao prova nada)
+    assert {"certidoes", "regularidades", "protocolos", "pleitos", "frc", "assinaturas", "curvas",
+            "planilhas"} <= gravadas
+    assert gravadas <= set(backup.PASTAS_ARQUIVOS), sorted(gravadas - set(backup.PASTAS_ARQUIVOS))
+    assert {p for p, _ in PASTAS_DOS_DADOS} | {"assinaturas"} == set(backup.PASTAS_ARQUIVOS)
 
 
 def _arquivos_no(pasta):
@@ -267,7 +297,7 @@ def _rodar(origem, destino, fora=None):
     backup.rodada_arquivos(origem, destino, fora)
 
 
-def test_passada_copia_as_quatro_pastas_para_o_backup(tmp_path):
+def test_passada_copia_todas_as_pastas_para_o_backup(tmp_path):
     origem, gravados = _dados_com_arquivos(tmp_path)
     destino = tmp_path / "dados" / "backups"
     _rodar(origem, destino)
@@ -294,7 +324,7 @@ def test_restaurar_snapshot_devolve_banco_e_arquivos_coerentes(tmp_path):
 
     # o pior dia: banco perdido, pastas vazias e um PDF estragado no lugar (mesmo tamanho)
     origem.unlink()
-    for pasta in backup.PASTAS_ARQUIVOS:
+    for pasta in [p for p, _ in PASTAS_DOS_DADOS] + ["assinaturas"]:   # todas, nao so' as que o backup leva
         for a in (dados / pasta).iterdir():
             a.unlink()
     rel_estragado = next(iter(gravados))
