@@ -192,6 +192,45 @@ test("Saúde: 'Gerar cópia do dono agora' pede a cópia, relê a Saúde e mostr
   await waitFor(() => expect(regiao.textContent).toMatch(/13\/10\/2026 às 08:00/));
 });
 
+// Issue #420: a cópia sai por e-mail; o botão manda de novo e a falha do envio aparece com o motivo
+test("Saúde: 'Reenviar cópia do dono' pede o reenvio, relê a Saúde e confirma", async () => {
+  let reenviada = false;
+  api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
+    if (url === "/api/admin/copia-dono/reenviar" && opcoes?.method === "POST") {
+      reenviada = true; return { arquivo: "x.tar.age", emails: 2 };
+    }
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false,
+      ultima_copia_dono: "2026-10-13T08:00:00-04:00",
+      ultimo_envio_copia_dono_erro: reenviada ? null : "a conta Microsoft de quem envia não está conectada",
+      ultimo_envio_copia_dono_erro_em: reenviada ? null : "2026-10-13T08:01:00-04:00" };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  expect(await screen.findByText(/Envio da cópia do dono: a última tentativa, em 13\/10\/2026 às 08:01, falhou \(a conta Microsoft/))
+    .toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Reenviar cópia do dono" }));
+  expect(await screen.findByText("Cópia do dono enviada por e-mail (2 e-mails).")).toBeTruthy();
+  expect(api).toHaveBeenCalledWith("/api/admin/copia-dono/reenviar", expect.objectContaining({ method: "POST" }));
+  await waitFor(() => expect(screen.queryByText(/Envio da cópia do dono: a última tentativa/)).toBeNull());
+});
+
+test("Saúde: falha no envio da cópia do dono marca o backup como Falhou", async () => {
+  saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false,
+             ultima_copia_dono: "2026-10-13T08:00:00-04:00",
+             ultimo_envio_copia_dono_erro: "destinatário da cópia do dono não configurado no cadastro (geral.yaml, copia_dono)",
+             ultimo_envio_copia_dono_erro_em: "2026-10-13T08:01:00-04:00" });
+  const regiao = await screen.findByRole("region", { name: "Backup" });
+  expect(await within(regiao).findByText("Falhou")).toBeTruthy();
+  expect(within(regiao).getByText(/Envio da cópia do dono: .*geral\.yaml/).closest(".aviso--critico")).toBeTruthy();
+});
+
+test("Saúde: sem cópia do dono gerada não há 'Reenviar cópia do dono'", async () => {
+  saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: true, ultima_copia_dono: null });
+  expect(await screen.findByRole("button", { name: "Gerar cópia do dono agora" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Reenviar cópia do dono" })).toBeNull();
+});
+
 test("Saúde: mais de 8 dias sem cópia do dono aparece em destaque", async () => {
   saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: true,
              ultima_copia_dono: "2026-10-01T08:00:00-04:00" });
