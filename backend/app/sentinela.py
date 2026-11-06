@@ -35,6 +35,8 @@ ACAO = "seguranca.sentinela"
 PASTAS = ("dados", "segredos", "cadastro")
 NIVEL_PASTA = {"dados": "critico", "segredos": "critico", "cadastro": "acao"}
 MAX_EVENTOS = 5000
+# ate' a issue #456 o ponto de leitura era uma linha desta acao na auditoria; as antigas continuam la' (append-only) e
+# a migracao 063 parte da ultima delas
 ACAO_PONTO = "seguranca.sentinela.ponto"
 TEMPO_LIMITE_SEG = 60
 
@@ -327,15 +329,16 @@ def verificacoes(base: Path) -> dict[str, tuple[str, str]]:
 # --- a rodada --------------------------------------------------------------------------------------------------
 
 def _ponto_gravado(conn) -> int | None:
-    """Onde a leitura do log parou, gravado no banco (fonte da verdade); None = nunca leu o log com sucesso.
-    O `sentinela.json` e' so' uma copia: apaga-lo ou edita-lo nao faz a sentinela pular eventos."""
-    r = conn.execute("SELECT depois FROM audit_log WHERE acao=? ORDER BY id DESC LIMIT 1", (ACAO_PONTO,)).fetchone()
-    if r is None:
-        return None
-    try:
-        return int(json.loads(r["depois"])["ultimo_registro"])
-    except (ValueError, KeyError, TypeError):
-        return None
+    """Onde a leitura do log parou, gravado no banco (fonte da verdade), na tabela de uma linha `sentinela_ponto`
+    (issue #456: fora da auditoria, para rodada sem achado nao acrescentar linha la'); None = nunca leu o log com
+    sucesso. O `sentinela.json` e' so' uma copia: apaga-lo ou edita-lo nao faz a sentinela pular eventos."""
+    r = conn.execute("SELECT ultimo_registro FROM sentinela_ponto WHERE id = 1").fetchone()
+    return None if r is None else int(r["ultimo_registro"])
+
+
+def _gravar_ponto(conn, ultimo: int) -> None:
+    conn.execute("INSERT INTO sentinela_ponto (id, ultimo_registro) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET "
+                 "ultimo_registro = excluded.ultimo_registro, atualizado_em = datetime('now')", (ultimo,))
 
 
 def rodada(conn) -> int:
@@ -357,11 +360,7 @@ def rodada(conn) -> int:
     novos: list[dict] = []
     atuais: dict[str, tuple[str, str]] = {}
     copia = estado.get("ultimo_registro")
-    if ponto is not None and (not isinstance(copia, int) or copia > ponto):
-        # a copia no arquivo sumiu, ficou ilegivel ou aponta alem do que a sentinela gravou: a leitura segue do ponto
-        # gravado no banco (nada se perde) e o fato vira item, uma vez (a copia e' refeita no fim da rodada)
-        novos.append(_achado("estado-perdido", "critico", "Estado da sentinela apagado, ilegível ou alterado; "
-                             "leitura retomada do ponto gravado no banco", agora))
+    no_log = None
     try:
         no_log = _ultimo_registro()
         if ultimo is None:
@@ -375,6 +374,14 @@ def rodada(conn) -> int:
     except Exception as e:
         log.warning("sentinela: nao leu o log de seguranca: %s", e)
         atuais["leitura-log"] = ("atencao", "Sentinela não conseguiu ler o log de segurança")
+    # a copia no arquivo sumiu, ficou ilegivel ou aponta alem do que existe no log: a leitura segue do ponto gravado
+    # no banco (nada se perde) e o fato vira item, uma vez (a copia e' refeita no fim da rodada). Copia a frente do
+    # banco mas dentro do log e' o que fica depois de restaurar um backup (o banco volta, o arquivo nao): nao acusa e
+    # rele do ponto do banco. Sem conseguir ler o log nao da' para separar os dois casos, e acusa.
+    if ponto is not None and (not isinstance(copia, int)
+                              or (copia > ponto and (no_log is None or copia > no_log))):
+        novos.insert(0, _achado("estado-perdido", "critico", "Estado da sentinela apagado, ilegível ou alterado; "
+                                "leitura retomada do ponto gravado no banco", agora))
     atuais.update(verificacoes(base))
     hoje = tempo.hoje_local()
     for chave, (nivel, msg) in atuais.items():
@@ -384,7 +391,7 @@ def rodada(conn) -> int:
         for a in novos:
             auditoria.registrar(conn, None, ACAO, "sentinela", None, None, a)
         if ultimo is not None and ultimo != ponto:
-            auditoria.registrar(conn, None, ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": ultimo})
+            _gravar_ponto(conn, ultimo)
     recentes = {hoje.isoformat(), (hoje - datetime.timedelta(days=1)).isoformat()}
     _gravar_estado({"ultimo_registro": ultimo, "pendencias": {k: hoje.isoformat() for k in atuais},
                     "avisados_4672": {k: v for k, v in avisados.items() if k in recentes}})

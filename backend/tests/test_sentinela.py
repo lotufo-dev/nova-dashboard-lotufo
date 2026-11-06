@@ -343,3 +343,87 @@ def test_verificacao_que_nao_roda_usa_nome_legivel(maquina, conn):
     maquina.auditoria = antigo
     assert msgs == ["Sentinela não conseguiu conferir a auditoria da alteração da política",
                     "Sentinela não conseguiu conferir a auditoria de arquivos"]
+
+
+# --- issue #456: ponto de leitura fora da auditoria e restauracao de backup ---------------------------------------
+
+def _ponto(conn):
+    r = conn.execute("SELECT ultimo_registro FROM sentinela_ponto WHERE id = 1").fetchone()
+    return None if r is None else r[0]
+
+
+def test_rodadas_sem_achado_nao_gravam_na_auditoria(maquina, conn):
+    _lista(maquina, contas=["SRVFICT\\operador.fict"], processos=["explorer.exe"])
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    _com_ponto_de_partida(maquina, conn)
+    for _ in range(3):
+        assert _rodar(maquina, conn) == []
+    assert _rodar(maquina, conn, "4663_conta_e_processo_da_lista.xml") == []     # o log andou, sem achado
+    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == antes
+    assert _ponto(conn) == 1010
+
+
+def test_ponto_de_leitura_fica_na_tabela_propria_e_e_lido_dela(maquina, conn):
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    _com_ponto_de_partida(maquina, conn)
+    assert _ponto(conn) == 1030
+    with db.mutacao(conn):
+        conn.execute("UPDATE sentinela_ponto SET ultimo_registro = 1000 WHERE id = 1")
+    maquina.adicionar("tarefas.xml", maquina.raiz)
+    sentinela.rodada(conn)
+    assert "EventRecordID>1000" in maquina.consultas[-1]
+    assert _ponto(conn) == 1060
+
+
+def test_migracao_parte_do_ultimo_ponto_gravado_na_auditoria(maquina, conn):
+    from app import auditoria
+    with db.mutacao(conn):
+        conn.execute("DELETE FROM sentinela_ponto")
+        for n in (1010, 1030):
+            auditoria.registrar(conn, None, "seguranca.sentinela.ponto", "sentinela", None, None,
+                                {"ultimo_registro": n})
+    migracao = (db.MIGRATIONS_DIR / "063_sentinela_ponto.sql").read_text(encoding="utf-8")
+    conn.executescript(migracao)
+    assert _ponto(conn) == 1030
+    conn.executescript(migracao)                                   # idempotente
+    assert conn.execute("SELECT COUNT(*) FROM sentinela_ponto").fetchone()[0] == 1
+    maquina.adicionar("tarefas.xml", maquina.raiz)
+    sentinela.rodada(conn)
+    assert "EventRecordID>1030" in maquina.consultas[-1]
+
+
+def test_backup_restaurado_com_ponto_mais_velho_nao_acusa_estado_alterado(maquina, conn, tmp_path):
+    import sqlite3
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    _com_ponto_de_partida(maquina, conn)
+    copia_do_banco = sqlite3.connect(tmp_path / "snapshot.db")
+    conn.backup(copia_do_banco)                                    # snapshot horario, com o ponto em 1030
+    assert len(_rodar(maquina, conn, "tarefas.xml")) == 5          # sentinela.json passa a dizer 1060
+    copia_do_banco.backup(conn)                                    # restauracao: o banco volta a 1030
+    copia_do_banco.close()
+    a = _rodar(maquina, conn)
+    assert "estado-perdido" not in [x["evento"] for x in a]
+    assert [x["evento"] for x in a] == [4698, 4699, 4700, 4701, 4702]   # relidos: o banco restaurado nao os tinha
+    assert "EventRecordID>1030" in maquina.consultas[-1]
+    assert _rodar(maquina, conn) == []
+
+
+def test_copia_alem_do_ultimo_evento_do_log_continua_acusada(maquina, conn):
+    _com_ponto_de_partida(maquina, conn)
+    arquivo = maquina.raiz / "dados" / "sentinela.json"
+    estado = json.loads(arquivo.read_text(encoding="utf-8"))
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    estado["ultimo_registro"] = 1031                               # um alem do maior registro do log
+    arquivo.write_text(json.dumps(estado), encoding="utf-8")
+    a = _rodar(maquina, conn)
+    assert a[0]["evento"] == "estado-perdido"
+    assert any(x["evento"] == 4670 for x in a)                      # nada pulado
+
+
+def test_copia_a_frente_do_banco_sem_conseguir_ler_o_log_acusa(maquina, conn):
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    _com_ponto_de_partida(maquina, conn)
+    with db.mutacao(conn):
+        conn.execute("UPDATE sentinela_ponto SET ultimo_registro = 1000 WHERE id = 1")
+    maquina.wevtutil_falha = True
+    assert [x["evento"] for x in _rodar(maquina, conn)] == ["estado-perdido", "leitura-log"]
