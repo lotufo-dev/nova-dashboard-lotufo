@@ -306,6 +306,19 @@ def test_passada_copia_todas_as_pastas_para_o_backup(tmp_path):
     assert backup.ESTADO["ultima_copia_arquivos"] and backup.ESTADO["ultima_copia_arquivos_erro"] is None
 
 
+def test_assinatura_trocada_por_outra_do_mesmo_tamanho_vai_ao_backup_na_passada_seguinte(tmp_path):
+    """Issue #441 (/code-review): `assinaturas/usuario-<id>` nao e' o sha256; mesmo nome e tamanho nao provam o mesmo
+    arquivo, e a passada de hora em hora (sem a releitura diaria) tem que levar a assinatura nova."""
+    origem, _ = _dados_com_arquivos(tmp_path)
+    destino = tmp_path / "dados" / "backups"
+    _rodar(origem, destino)                                   # primeira passada: relê tudo
+    nova = ASSINATURA.replace(b"assinatura", b"ASSINATURA")
+    assert len(nova) == len(ASSINATURA)
+    (tmp_path / "dados" / "assinaturas" / "usuario-1").write_bytes(nova)
+    backup.rodada_arquivos(origem, destino, None)             # de hora em hora: sem releitura
+    assert (destino / "arquivos" / "assinaturas" / "usuario-1").read_bytes() == nova
+
+
 def test_copia_ignora_temporario_em_andamento(tmp_path):
     origem, _ = _dados_com_arquivos(tmp_path)
     (tmp_path / "dados" / "notas" / "upload-123-abc.tmp").write_bytes(b"parcial")

@@ -311,8 +311,9 @@ def _copiar_um(arquivo: Path, alvo: Path, conferir: bool = False) -> bool:
     """Copia um arquivo conferido; False se ja estava la (e, com `conferir`, integro)."""
     com_sha = bool(_NOME_SHA.fullmatch(arquivo.stem))
     if alvo.exists():
-        if not conferir:
-            # o nome e' o sha256 do conteudo: mesmo nome e mesmo tamanho = mesmo arquivo
+        if not conferir and com_sha:
+            # o nome e' o sha256 do conteudo: mesmo nome e mesmo tamanho = mesmo arquivo. Nome que nao e' o sha256
+            # (a assinatura, trocada pela pessoa; #441) e' sempre comparado pelo conteudo
             if alvo.stat().st_size == arquivo.stat().st_size:
                 return False
         elif _sha256(alvo) == (arquivo.stem if com_sha else _sha256(arquivo)):
