@@ -5,23 +5,26 @@
 # ("Nova Dashboard Lotufo") e o schtasks /TR quebra o argumento nos espacos.
 # Para remover: Unregister-ScheduledTask -TaskName DashboardLotufoWatchdog -Confirm:$false
 #
-# Modo e porta iguais aos da tarefa DashboardLotufo (instalar_autostart.ps1). Padrao (issue #425): HTTPS, o watchdog
-# confere https://localhost:<porta>/api/health aceitando so' o certificado <Raiz>\segredos\tls\cert.pem (pelo
-# thumbprint). -SemTls: http://localhost:<porta>/api/health. -Porta: 0 = padrao do modo (80 com -SemTls, 8443 com
-# TLS). Ex.: -Porta 8080 na VM em que a 80 e' do IIS.
+# Modo, porta e raiz iguais aos da tarefa DashboardLotufo (instalar_autostart.ps1): -Porta e -Raiz omitidos vem dos
+# argumentos dela, e valor diferente aborta. Padrao (issue #425): HTTPS, o watchdog confere
+# https://localhost:<porta>/api/health aceitando so' o certificado <Raiz>\segredos\tls\cert.pem (pelo thumbprint).
+# -SemTls: http://localhost:<porta>/api/health. Sem a tarefa, -Porta 0 = padrao do modo (80 com -SemTls, 8443 com TLS).
 [CmdletBinding()]
 param(
     [switch]$SemTls,
     [ValidateRange(0, 65535)]
     [int]$Porta = 0,
-    [string]$Raiz = "C:\DashboardLotufo"
+    # Vazio = a raiz da tarefa DashboardLotufo (sem ela, C:\DashboardLotufo).
+    [string]$Raiz = ""
 )
 $ErrorActionPreference = "Stop"
 $script = Join-Path $PSScriptRoot "watchdog.ps1"
 if (-not (Test-Path $script)) { throw "watchdog.ps1 nao encontrado em $script" }
 if (-not (Test-Path (Join-Path $PSScriptRoot "comum_tls.ps1"))) { throw "comum_tls.ps1 nao encontrado ao lado de $script" }
-# O modo tem que ser o da tarefa principal: watchdog em HTTPS com a producao em HTTP (ou o contrario) nunca a veria
-# saudavel e a reiniciaria a cada 3 minutos. Com a tarefa instalada, o -SemTls dos argumentos dela manda.
+# Modo, porta e raiz tem que ser os da tarefa principal: watchdog em HTTPS com a producao em HTTP (ou o contrario), ou
+# conferindo outra porta, nunca a veria saudavel e a reiniciaria a cada 3 minutos (gate Sol da PR #476). Com a tarefa
+# instalada, os argumentos dela mandam: -Porta e -Raiz omitidos vem dela, e um valor explicito diferente aborta aqui,
+# antes de registrar (como no deploy.ps1). Sem a tarefa, valem os padroes do modo.
 $tarefa = Get-ScheduledTask -TaskName "DashboardLotufo" -ErrorAction SilentlyContinue
 if ($tarefa) {
     $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
@@ -30,10 +33,25 @@ if ($tarefa) {
         if ($tarefaSemTls) { $modo = "HTTP (-SemTls)" } else { $modo = "HTTPS (sem -SemTls)" }
         throw "a tarefa DashboardLotufo esta em $modo; instale o watchdog no mesmo modo. Nada foi alterado."
     }
+    if ($argumentosTarefa -match "-Porta (\d+)") { $portaTarefa = [int]$Matches[1] }
+    elseif ($tarefaSemTls) { $portaTarefa = 80 }
+    else { $portaTarefa = 8443 }
+    if ($argumentosTarefa -match '-Raiz\s+(?:"([^"]+)"|(\S+))') {
+        if ($Matches[1]) { $raizTarefa = $Matches[1] } else { $raizTarefa = $Matches[2] }
+    } else { $raizTarefa = "C:\DashboardLotufo" }
+    if ($Porta -eq 0) { $Porta = $portaTarefa }
+    elseif ($Porta -ne $portaTarefa) {
+        throw "-Porta $Porta nao bate com a tarefa DashboardLotufo (porta $portaTarefa). Nada foi alterado."
+    }
+    if (-not $Raiz) { $Raiz = $raizTarefa }
+    elseif ($Raiz.TrimEnd("\") -ne $raizTarefa.TrimEnd("\")) {
+        throw "-Raiz $Raiz nao bate com a tarefa DashboardLotufo (raiz $raizTarefa). Nada foi alterado."
+    }
 }
 if ($Porta -eq 0) {
     if ($SemTls) { $Porta = 80 } else { $Porta = 8443 }
 }
+if (-not $Raiz) { $Raiz = "C:\DashboardLotufo" }
 $certificado = Join-Path $Raiz "segredos\tls\cert.pem"
 if ($SemTls) {
     $url = "http://localhost:$Porta/api/health"

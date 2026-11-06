@@ -246,3 +246,7 @@ if ($SemTls) {
         --host 0.0.0.0 --port $Porta `
         --ssl-keyfile (Join-Path $certs "chave.pem") --ssl-certfile (Join-Path $certs "cert.pem")
 }
+# O código de saída do uvicorn volta para a tarefa (gate Sol da PR #476): PEM ruim ou porta ocupada saíam com 0 pelo
+# `powershell -File`, e o reinício automático da tarefa (RestartCount) só age em falha.
+$codigo = $LASTEXITCODE
+exit $codigo

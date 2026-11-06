@@ -269,7 +269,7 @@ def test_scripts_novos_da_saude_ficam_em_ascii_sem_bom(nome):
 
 def test_watchdog_confere_por_https_com_o_certificado_da_instalacao():
     instalador = _ler("instalar_watchdog.ps1")
-    assert "[switch]$SemTls" in instalador and '[string]$Raiz = "C:\\DashboardLotufo"' in instalador
+    assert "[switch]$SemTls" in instalador and '[string]$Raiz = ""' in instalador
     assert '$certificado = Join-Path $Raiz "segredos\\tls\\cert.pem"' in instalador
     assert '-Certificado `"$certificado`"' in instalador
     # /code-review: o modo vem conferido contra o da tarefa principal, antes de registrar
@@ -303,3 +303,63 @@ def test_saude_local_existe_para_a_conferencia_manual():
     assert '. (Join-Path $PSScriptRoot "comum_tls.ps1")' in script
     assert "[switch]$SemTls" in script and "Mandatory" in script
     assert "Invoke-SaudeLocal" in script and "exit 1" in script
+
+
+# --- Achados do revisor-adversarial e do gate Sol na PR #476 ------------------------------------------------------
+
+def test_instalar_watchdog_le_porta_e_raiz_da_tarefa_e_aborta_se_divergir():
+    # Gate Sol: com a producao em HTTPS na 8080, o instalador sem -Porta conferiria a 8443 e o watchdog reiniciaria uma
+    # producao saudavel a cada 3 minutos. Omitidos vem da tarefa; explicito diferente aborta antes de registrar.
+    script = _ler("instalar_watchdog.ps1")
+    registro = script.index("Register-ScheduledTask -TaskName")
+    bloco = script[script.index('$tarefa = Get-ScheduledTask -TaskName "DashboardLotufo"'):registro]
+    assert 'if ($argumentosTarefa -match "-Porta (\\d+)") { $portaTarefa = [int]$Matches[1] }' in bloco
+    assert "elseif ($tarefaSemTls) { $portaTarefa = 80 }" in bloco and "else { $portaTarefa = 8443 }" in bloco
+    assert "if ($Porta -eq 0) { $Porta = $portaTarefa }" in bloco
+    assert "nao bate com a tarefa DashboardLotufo (porta $portaTarefa)" in bloco
+    assert "if (-not $Raiz) { $Raiz = $raizTarefa }" in bloco
+    assert "nao bate com a tarefa DashboardLotufo (raiz $raizTarefa)" in bloco
+    # o padrao da raiz e' o mesmo do deploy.ps1, e da' a raiz certa no formato que o instalar_autostart.ps1 grava
+    regex = re.search(r"-match '([^']+)'", bloco).group(1)
+    assert regex == _regex_da_raiz(_ler("deploy.ps1"))
+    assert _raiz(regex, '-File "C:\\x\\rodar_producao.ps1" -Raiz "D:\\Dados Lotufo" -Porta 8080') == "D:\\Dados Lotufo"
+    # o certificado sai da raiz ja' resolvida
+    assert bloco.index("$Raiz = $raizTarefa") < script.index('$certificado = Join-Path $Raiz "segredos\\tls\\cert.pem"')
+
+
+def test_deploy_em_https_recusa_alvo_anterior_a_425_antes_do_checkout():
+    # Gate Sol: o rodar_producao.ps1 de antes da #425 procura a chave em app\certs e o watchdog.ps1 de antes nao
+    # conhece -Certificado; com a tarefa em HTTPS, um alvo desses derrubaria os dois.
+    script = _ler("deploy.ps1")
+    trava = script.index("if ($comTls) {\n        $marcador = & git -C $AppDir ls-tree --name-only $alvo -- scripts/comum_tls.ps1")
+    assert script.index("$alvo = $alvo.Trim()") < trava
+    assert trava < script.index("backup_pre_migracao.ps1") and trava < script.index("try { Construir $alvo")
+    bloco = script[trava:script.index("$migracoes =")]
+    assert "volte para HTTP antes (runbook, Voltar atras)" in bloco and "exit 1" in bloco
+    assert "2>" not in bloco      # stderr redirecionado vira erro fatal no 5.1 com Stop
+
+
+def test_watchdog_nao_reinicia_por_problema_no_conferidor():
+    # Revisor: cert.pem ilegivel ou Add-Type bloqueado nao podem reiniciar a producao a cada 3 minutos
+    script = _ler("watchdog.ps1")
+    conferidor = script.index("Initialize-DashSaudeLocal\n")
+    bloco = script[conferidor:script.index("if (Saudavel) { exit 0 }")]
+    assert "Get-ThumbprintDoCertificado -Caminho $Certificado" in bloco
+    assert "producao NAO reiniciada" in bloco and "exit 1" in bloco
+    assert script.index("if (Test-Path $Pausa) { exit 0 }") < conferidor < script.index("Stop-ScheduledTask")
+
+
+def test_watchdog_acusa_tarefa_que_nao_iniciou_e_saude_que_nao_voltou():
+    # Gate Sol: tarefa desabilitada da' erro nao fatal e o log dizia "disparado"; sem saude depois, sai com 1
+    script = _ler("watchdog.ps1")
+    assert '$ErrorActionPreference = "Stop"' in script
+    assert "Start-ScheduledTask -TaskName $Tarefa -ErrorAction Stop" in script
+    fim = script[script.index("Start-Sleep -Seconds 25"):]
+    assert 'pos-restart saudavel=False ($script:ultimoErro)' in fim and "exit 1" in fim
+
+
+def test_rodar_producao_devolve_o_codigo_de_saida_do_uvicorn():
+    # Gate Sol: PEM ruim ou porta ocupada saiam com 0 e o RestartCount da tarefa nao agia
+    script = _ler("rodar_producao.ps1")
+    fim = script[script.rindex("-m uvicorn"):]
+    assert "$codigo = $LASTEXITCODE" in fim and fim.rstrip().endswith("exit $codigo")

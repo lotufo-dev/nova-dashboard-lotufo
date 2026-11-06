@@ -206,6 +206,18 @@ try {
     $alvo = (& git -C $AppDir rev-parse $Ref)
     if ($LASTEXITCODE -ne 0) { throw "git rev-parse $Ref falhou" }
     $alvo = $alvo.Trim()
+    # Gate Sol da PR #476: com a tarefa em HTTPS, um alvo de antes da #425 nao sobe (o rodar_producao.ps1 dele procura a
+    # chave em app\certs) e derruba o watchdog (o watchdog.ps1 dele nao conhece -Certificado). Recusar antes do backup e
+    # do checkout; o marcador e' o scripts/comum_tls.ps1, que nasceu na #425. O finally solta o watchdog.
+    # ls-tree (e nao cat-file -e): sem o arquivo ele so' nao imprime nada, sem stderr, que o 5.1 com Stop tornaria fatal.
+    if ($comTls) {
+        $marcador = & git -C $AppDir ls-tree --name-only $alvo -- scripts/comum_tls.ps1
+        if ($LASTEXITCODE -ne 0) { throw "git ls-tree $alvo falhou" }
+        if (-not $marcador) {
+            Write-Host "deploy abortado antes do checkout: $alvo e' anterior ao HTTPS (issue #425) e a tarefa esta em HTTPS; volte para HTTP antes (runbook, Voltar atras). Producao segue em $anterior" -ForegroundColor Red
+            exit 1
+        }
+    }
     $migracoes = & git -C $AppDir diff --name-only $anterior $alvo -- backend/migrations
     if ($LASTEXITCODE -ne 0) { throw "git diff das migracoes falhou" }
     $backup = $null

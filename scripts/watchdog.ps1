@@ -19,6 +19,8 @@ param(
     [string]$Log = "C:\DashboardLotufo\logs\watchdog.log",
     [string]$Pausa = "C:\DashboardLotufo\watchdog.pause"
 )
+# Erro sem tratamento para o script (e sai com 1); cada passo que pode falhar tem o seu try/catch e registra no log.
+$ErrorActionPreference = "Stop"
 
 function Escrever($m) {
     try { Add-Content -Path $Log -Value ("{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m) -Encoding utf8 } catch {}
@@ -35,6 +37,19 @@ function Saudavel {
 }
 
 if (Test-Path $Pausa) { exit 0 }              # manutencao em curso: nao tocar
+# Problema no CONFERIDOR nao e' problema da producao (revisor da PR #476): cert.pem ilegivel ou ausente, ou o C# da
+# saude bloqueado (antivirus no Add-Type), fariam o watchdog reiniciar uma producao saudavel a cada 3 minutos, para
+# sempre. Nesses casos registra no log e sai sem tocar na tarefa.
+if ($Url -like "https://*") {
+    try {
+        Initialize-DashSaudeLocal
+        $null = Get-ThumbprintDoCertificado -Caminho $Certificado
+    }
+    catch {
+        Escrever ("CONFERIDOR com problema, producao NAO reiniciada: " + $_.Exception.Message)
+        exit 1
+    }
+}
 if (Saudavel) { exit 0 }
 Start-Sleep -Seconds 15
 if (Test-Path $Pausa) { exit 0 }
@@ -44,11 +59,16 @@ Escrever "SEM RESPOSTA em $Url ($script:ultimoErro) -> reiniciando a tarefa $Tar
 try { Stop-ScheduledTask -TaskName $Tarefa -ErrorAction SilentlyContinue } catch {}
 Start-Sleep -Seconds 3
 try {
-    Start-ScheduledTask -TaskName $Tarefa
+    # -ErrorAction Stop: tarefa desabilitada da' erro nao fatal, que sem isto passaria por "disparado" (gate Sol da PR #476)
+    Start-ScheduledTask -TaskName $Tarefa -ErrorAction Stop
     Escrever "Start-ScheduledTask disparado"
 } catch {
     Escrever ("FALHA ao iniciar: " + $_.Exception.Message)
     exit 1
 }
 Start-Sleep -Seconds 25
-Escrever ("pos-restart saudavel=" + (Saudavel))
+if (Saudavel) { Escrever "pos-restart saudavel=True" }
+else {
+    Escrever "pos-restart saudavel=False ($script:ultimoErro)"
+    exit 1
+}
