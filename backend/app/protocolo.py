@@ -325,6 +325,16 @@ def _config_pecas(regras: dict, natureza: str | None = None) -> list[dict]:
     return [x for x in out if not natureza or not x.get("naturezas") or natureza in x["naturezas"]]
 
 
+def tipos_no_oficio(regras: dict, c: dict) -> set[str]:
+    """Issue #462: tipos de peca que vao dentro do PDF assinado do oficio (nao cobram e nao se anexam). A lista do
+    contrato (`contratos.pecas_no_oficio`, migracao 063; vazia desliga todas) substitui a marca `no_oficio` das
+    pecas do orgao."""
+    do_contrato = c.get("pecas_no_oficio")
+    if do_contrato is not None:
+        return set(json.loads(do_contrato))
+    return {x["tipo"] for x in (regras.get("pecas") or []) if x.get("no_oficio") is True}
+
+
 def _brl(centavos: int) -> str:
     inteiro, cent = divmod(int(centavos), 100)
     return f"{inteiro:,}".replace(",", ".") + f",{cent:02d}"
@@ -572,8 +582,9 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     presentes = {x["tipo"] for x in _pecas(conn, p["id"])}
     # Na nota (sem carta) as pecas soltas sao opcionais (relatorios assinados): nao cobram as do orgao.
     usa_pecas = "pecas" in e.partes or "planilha" in e.soltos or ("pecas_soltas" in e.soltos and e.carta)
+    no_oficio = tipos_no_oficio(regras, c)          # issue #462: vai dentro do oficio assinado, nao cobra
     for cfg in _config_pecas(regras, p["natureza"]):
-        if usa_pecas and cfg["exigida"] and cfg["tipo"] not in presentes:
+        if usa_pecas and cfg["exigida"] and cfg["tipo"] not in presentes and cfg["tipo"] not in no_oficio:
             out.append({"codigo": "peca", "mensagem": f"{cfg['rotulo']}: não anexada"})
     if ("notas" in e.partes or "notas" in e.soltos) and c.get("entidade_id"):
         for falta in faltas_consorcio(conn, c, ms):

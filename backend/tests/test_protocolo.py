@@ -180,6 +180,25 @@ def test_sinfra_lista_em_romanos_e_reajuste_com_carta_e_pecas_proprias(cenario):
     assert faltam == ["Planilha de reajustamento: não anexada"]           # diagrama e croqui nao valem no reajuste
 
 
+def test_peca_exigida_no_oficio_nao_e_pendencia_na_etapa_da_medicao(cenario):
+    """Issue #462: a peca que vai dentro do oficio assinado nao cobra; a sem a marca continua cobrando."""
+    c, ids = cenario
+    regras = {"pecas": [{"tipo": "boletim", "rotulo": "Boletim de medição", "exigida": True, "no_oficio": True},
+                        {"tipo": "planilha", "rotulo": "Planilha editável", "exigida": True, "solto": True}]}
+    c.execute("UPDATE orgaos SET regras=json_patch(regras, ?) WHERE chave='sinfra-x'", (json.dumps(regras),))
+    c.commit()
+    pid = protocolo.criar(c, ids["uid"], ids["sinfra"], "medicao", [ids["sinfra_exec"]], "310")
+
+    def faltam():
+        return [x["mensagem"] for x in protocolo.detalhe(c, pid)["pendencias"] if x["codigo"] == "peca"]
+
+    assert faltam() == ["Planilha editável: não anexada"]
+    # a lista do contrato (vazia aqui) substitui a marca do orgao: o boletim volta a cobrar
+    c.execute("UPDATE contratos SET pecas_no_oficio='[]' WHERE id=?", (ids["sinfra"],))
+    c.commit()
+    assert faltam() == ["Boletim de medição: não anexada", "Planilha editável: não anexada"]
+
+
 def test_pendencias_de_certidao_e_nota(cenario):
     c, ids = cenario
     c.execute("DELETE FROM medicao_documentos WHERE medicao_id=?", (ids["mtpar_exec"],))
