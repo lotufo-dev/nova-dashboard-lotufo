@@ -6,8 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from app import (auth, cadastro_aplicar, cadastro_arquivos, carga_medicoes, conciliacao, db, documentos,
-                 instalacao, legado)
+from app import (auth, cadastro_aplicar, cadastro_arquivos, carga_medicoes, conciliacao, correcao_medicoes, db,
+                 documentos, instalacao, legado)
 
 REPOSITORIO = Path(__file__).resolve().parent.parent.parent
 EXEMPLO = REPOSITORIO / "cadastro-exemplo"
@@ -223,9 +223,71 @@ def _gravar_medicoes(args, caminho: Path) -> int:
     return 0
 
 
+def _corrigir_medicoes(args) -> int:
+    """`cadastro corrigir-medicoes <arquivo.yaml> [--ensaio] --usuario <e-mail>`: corrige medições existentes
+    (cancelar, reabrir, trocar tipo, ligar/desligar NF, protocolar, estado), numa transação só. O ensaio executa
+    tudo e desfaz no fim."""
+    if not args.arquivo:
+        print("`cadastro corrigir-medicoes` exige o arquivo .yaml com as operações")
+        return 1
+    caminho = Path(args.arquivo)
+    if not caminho.is_file():
+        print(f"Arquivo não encontrado: {caminho}")
+        return 1
+    if not args.usuario:
+        print("`cadastro corrigir-medicoes` exige --usuario (e-mail de quem aplica)")
+        return 1
+    try:
+        operacoes = correcao_medicoes.ler(caminho)
+    except correcao_medicoes.ArquivoInvalido as e:
+        print(f"Arquivo recusado, nada foi lido: {e}")
+        return 1
+    conn = db.get_conn()
+    try:
+        if not args.ensaio:
+            db.migrate(conn)
+        u = conn.execute("SELECT id FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+        if u is None:
+            print(f"Usuário não encontrado ou inativo: {args.usuario}")
+            return 1
+        try:
+            rel = correcao_medicoes.executar(conn, u["id"], operacoes, ensaio=args.ensaio)
+        except correcao_medicoes.CorrecaoRecusada as e:
+            print(f"Recusado, nada foi gravado: {e}")
+            _relatorio_correcao(e.relatorio)
+            return 1
+        except sqlite3.OperationalError as e:
+            print("Recusado, nada foi gravado: o banco está ocupado por outra gravação; rode de novo em instantes"
+                  if "locked" in str(e) or "busy" in str(e) else f"Banco ilegível, nada foi gravado: {db.db_path()}")
+            return 1
+        except sqlite3.DatabaseError:
+            print(f"Banco ilegível, nada foi gravado: {db.db_path()}")
+            return 1
+    finally:
+        conn.close()
+    print(f"ENSAIO (nada foi gravado): {caminho.name}" if rel["ensaio"] else f"GRAVADO: {caminho.name}")
+    _relatorio_correcao(rel)
+    return 1 if rel["erros"] else 0
+
+
+def _relatorio_correcao(rel: dict) -> None:
+    for i in rel["itens"]:
+        rotulo = f"  {i['n']}. {i['operacao'] or '?'}" + (f" {i['alvo']}" if i["alvo"] else "")
+        if i["situacao"] == "erro":
+            print(f"{rotulo}: ERRO: {i['erro']}")
+            continue
+        estado = f" [{i['antes']} → {i['depois']}]" if i["antes"] and i["antes"] != i["depois"] else ""
+        print(f"{rotulo}: {i['situacao']}{estado}")
+        for d in i["detalhes"]:
+            print(f"     {d}")
+    print(f"Total: feito {rel['feitos']}, já feito {rel['ja_feitos']}, erro {rel['erros']}")
+
+
 def _cadastro(args) -> int:
     if args.acao == "carregar-medicoes":
         return _carregar_medicoes(args)
+    if args.acao == "corrigir-medicoes":
+        return _corrigir_medicoes(args)
     if args.arquivo:
         print(f"`cadastro {args.acao}` não recebe arquivo (use `cadastro carregar-medicoes {args.arquivo} --ensaio`)")
         return 1
@@ -419,8 +481,9 @@ def main(argv: list[str] | None = None) -> int:
     ca.add_argument("--nome", required=True)
     ca.add_argument("--email", required=True)
     cad = sub.add_parser("cadastro")
-    cad.add_argument("acao", choices=["validar", "aplicar", "carregar-medicoes"])
-    cad.add_argument("arquivo", nargs="?", help="CSV da obra (<obra>.csv), só em `carregar-medicoes`")
+    cad.add_argument("acao", choices=["validar", "aplicar", "carregar-medicoes", "corrigir-medicoes"])
+    cad.add_argument("arquivo", nargs="?", help="CSV da obra (<obra>.csv) em `carregar-medicoes`; YAML das "
+                                                "operações em `corrigir-medicoes`")
     cad.add_argument("--raiz", help="pasta do cadastro (padrão: DASH_CADASTRO_DIR, ou cadastro-exemplo/)")
     cad.add_argument("--usuario", help="e-mail de quem aplica (obrigatório em `aplicar`)")
     cad.add_argument("--ensaio", action="store_true", help="mostra o que mudaria e não grava")
