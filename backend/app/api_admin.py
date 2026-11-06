@@ -1,7 +1,8 @@
 import datetime
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app import auditoria, backup, copia_dono, correio, instalacao, seguranca, sentinela, siga, tempo
+from app import (auditoria, backup, copia_dono, copia_dono_envio, correio, envio_reserva, graph, instalacao, seguranca,
+                 sentinela, siga, tempo)
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -39,16 +40,34 @@ def saude_do_backup(usuario: dict = Depends(exigir("administrar", com_csrf=False
 
 
 @router.post("/copia-dono")
-def gerar_copia_dono(usuario: dict = Depends(exigir("administrar"))):
+def gerar_copia_dono(usuario: dict = Depends(exigir("administrar")), conn: sqlite3.Connection = Depends(conexao)):
     """Botao "Gerar cópia do dono agora" (Administracao > Saude, issue #419). So' admin.
-    Sem chave publica configurada nada e' gerado."""
+    Sem chave publica configurada nada e' gerado. A copia gerada sai por e-mail (issue #420); falha no envio nao
+    desfaz a copia: fica no log e na Saude, e `emails` diz quantos sairam."""
     try:
         destino = copia_dono.gerar_e_registrar(backup.pasta_local().parent.parent, backup.pasta_local())
     except copia_dono.NaoConfigurada:
         raise HTTPException(409, copia_dono.NAO_CONFIGURADA)
     except Exception as e:
         raise HTTPException(500, f"Não foi possível gerar a cópia do dono: {copia_dono._motivo(e)}")
-    return {"arquivo": destino.name}
+    return {"arquivo": destino.name, "emails": copia_dono_envio.enviar_nova(conn, destino)}
+
+
+@router.post("/copia-dono/reenviar")
+def reenviar_copia_dono(usuario: dict = Depends(exigir("administrar")),
+                        conn: sqlite3.Connection = Depends(conexao)):
+    """Botao "Reenviar cópia do dono" (issue #420): a copia mais recente sai de novo por e-mail. So' admin; o e-mail
+    sai da conta de `copia_dono.enviada_por` do cadastro, e quem clicou fica na auditoria."""
+    try:
+        return copia_dono_envio.reenviar(conn, backup.pasta_local(), {"id": usuario["id"], "email": usuario["email"]})
+    except envio_reserva.EnvioEmAndamento as e:
+        conn.rollback()
+        raise HTTPException(409, detail=e.detalhe()) from None
+    except copia_dono_envio.EnvioNaoConfigurado as e:
+        raise HTTPException(409, str(e)) from None
+    except (ValueError, graph.ErroGraph) as e:
+        conn.rollback()
+        raise HTTPException(422, str(e)) from None
 
 
 @router.get("/saude")

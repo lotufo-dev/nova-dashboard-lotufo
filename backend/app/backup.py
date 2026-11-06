@@ -49,7 +49,8 @@ ESTADO: dict = {"ultimo_snapshot": None, "ultimo_snapshot_erro": None,
                 "ultima_copia_arquivos": None, "ultima_copia_arquivos_erro": None,
                 "ultima_copia_externa": None, "ultima_copia_externa_erro": None,
                 "ultima_copia_externa_arquivos": None, "ultima_copia_externa_arquivos_erro": None,
-                "ultima_copia_dono": None, "ultima_copia_dono_erro": None}
+                "ultima_copia_dono": None, "ultima_copia_dono_erro": None,
+                "ultimo_envio_copia_dono": None, "ultimo_envio_copia_dono_erro": None}
 
 # Worker dos arquivos (um por processo). Fase ("local"/"externa") e inicio (time.monotonic) da
 # passada em andamento, None = parado; `estado()` le isto na hora do /api/health para acusar a
@@ -536,6 +537,7 @@ def situacao(local: Path, externa_configurada: bool, agora: datetime.datetime) -
     dono_em, dono_erro = _erro_dos_arquivos(e["ultima_copia_dono_erro"])  # frase nossa (_motivo), sem caminho
     dono_ultima = copia_dono.ultima_copia(local)
     dono_ok = copia_dono.configurada(local.parent.parent)  # backups -> dados -> <raiz>
+    envio_em, envio_erro = _erro_dos_arquivos(e.get("ultimo_envio_copia_dono_erro"))  # frase nossa, sem caminho
     return {
         "ultimo_snapshot": e["ultimo_snapshot"],
         "ultimo_snapshot_erro": snap_erro,
@@ -556,6 +558,10 @@ def situacao(local: Path, externa_configurada: bool, agora: datetime.datetime) -
         "ultima_copia_dono_erro_em": dono_em,
         "copia_dono_configurada": dono_ok,
         "copia_dono_atrasada": dono_ok and copia_dono.atrasada(local, agora),
+        # issue #420: o envio dessa copia por e-mail (so' desta execucao do servidor)
+        "ultimo_envio_copia_dono": e.get("ultimo_envio_copia_dono"),
+        "ultimo_envio_copia_dono_erro": envio_erro,
+        "ultimo_envio_copia_dono_erro_em": envio_em,
         "ultimo_backup": tempo.para_local(ultimo_em).isoformat(timespec="seconds") if ultimo_em else None,
         "tamanho_bytes": ultimo.st_size if ultimo else None,
         "guardados": len(stats),
@@ -573,9 +579,9 @@ def agendar_backup_horario(origem_db: Path, pasta_destino: Path,
             except Exception:  # rede de seguranca: a thread de backup nunca morre
                 log.exception("rodada de backup falhou fora do previsto")
             _acordar_arquivos.set()  # passada dos arquivos logo depois do snapshot
-            try:  # issue #419: copia do dono, uma por semana (sem chave publica, nao faz nada)
-                from app import copia_dono
-                copia_dono.rodada_semanal(pasta_destino.parent.parent, pasta_destino)
+            try:  # issue #419: copia do dono, uma por semana (sem chave publica, nao faz nada); #420: e o e-mail
+                from app import copia_dono_envio
+                copia_dono_envio.rodada_semanal(pasta_destino.parent.parent, pasta_destino)
             except Exception:
                 log.exception("rodada da copia do dono falhou fora do previsto")
             try:

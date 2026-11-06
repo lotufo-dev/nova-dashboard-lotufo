@@ -243,16 +243,17 @@ def _motivo(e: BaseException) -> str:
     return str(e) if isinstance(e, CopiaDonoErro) else backup._motivo(e)
 
 
-def rodada_semanal(raiz: Path, pasta_backups: Path) -> None:
-    """Chamada a cada rodada do backup: gera se a anterior tem mais de 7 dias. Sem chave, nada."""
+def rodada_semanal(raiz: Path, pasta_backups: Path) -> Path | None:
+    """Chamada a cada rodada do backup: gera se a anterior tem mais de 7 dias. Sem chave, nada.
+    Devolve a copia gerada (issue #420: `copia_dono_envio` a envia por e-mail), ou None."""
     ultima = ultima_copia(pasta_backups)
     if ultima is not None and not backup.ESTADO.get("ultima_copia_dono"):
         backup.ESTADO["ultima_copia_dono"] = tempo.para_local(ultima).isoformat(timespec="seconds")
     if ultima is not None and tempo.agora_utc() - ultima < INTERVALO:
-        return
+        return None
     try:
-        gerar_e_registrar(raiz, pasta_backups, so_se_vencida=True)
+        return gerar_e_registrar(raiz, pasta_backups, so_se_vencida=True)
     except NaoConfigurada:
-        return
+        return None
     except Exception:
-        pass  # ja' registrado em ESTADO e no log
+        return None  # ja' registrado em ESTADO e no log
