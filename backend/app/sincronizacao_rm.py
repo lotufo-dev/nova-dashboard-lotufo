@@ -183,7 +183,7 @@ def _upsert_baixa(conn, linha: dict) -> None:
 # --------------------------------------------------------------- alocacoes
 
 def alocar(conn, usuario_id, nota_id: int, medicao_id: int, origem: str, confianca: float | None,
-           regra: str) -> int:
+           regra: str, aceita_recebida: bool = False) -> int:
     """Liga a NF a' medicao. Bloco 3: nao move mais `protocolada -> nf_emitida`; em medicao nascida
     do espelho fecha `nota_emitida` quando nao falta nota (notas.fechar_se_completa).
 
@@ -199,7 +199,8 @@ def alocar(conn, usuario_id, nota_id: int, medicao_id: int, origem: str, confian
         m = medicoes.detalhe(conn, medicao_id)
         if m is None:
             raise ValueError("Medição não encontrada")
-        if m["estado"] in ("cancelada", "desistida", "recebida"):
+        # `aceita_recebida`: so' a correcao de cadastro, para a medicao paga cujo vinculo com a nota faltou
+        if m["estado"] in ("cancelada", "desistida") or (m["estado"] == "recebida" and not aceita_recebida):
             raise ValueError(f"Medição em estado {m['estado']} não recebe NF")
         if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
                         (nota_id,)).fetchone():
