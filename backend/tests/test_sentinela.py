@@ -343,3 +343,196 @@ def test_verificacao_que_nao_roda_usa_nome_legivel(maquina, conn):
     maquina.auditoria = antigo
     assert msgs == ["Sentinela não conseguiu conferir a auditoria da alteração da política",
                     "Sentinela não conseguiu conferir a auditoria de arquivos"]
+
+
+# --- issue #456: ponto de leitura fora da auditoria e restauracao de backup ---------------------------------------
+
+def _ponto(conn):
+    r = conn.execute("SELECT ultimo_registro FROM sentinela_ponto WHERE id = 1").fetchone()
+    return None if r is None else r[0]
+
+
+def test_rodadas_sem_achado_nao_gravam_na_auditoria(maquina, conn):
+    _lista(maquina, contas=["SRVFICT\\operador.fict"], processos=["explorer.exe"])
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    _com_ponto_de_partida(maquina, conn)
+    for _ in range(3):
+        assert _rodar(maquina, conn) == []
+    assert _rodar(maquina, conn, "4663_conta_e_processo_da_lista.xml") == []     # o log andou, sem achado
+    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == antes
+    assert _ponto(conn) == 1010
+
+
+def test_ponto_de_leitura_fica_na_tabela_propria_e_e_lido_dela(maquina, conn):
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    _com_ponto_de_partida(maquina, conn)
+    assert _ponto(conn) == 1030
+    with db.mutacao(conn):
+        conn.execute("UPDATE sentinela_ponto SET ultimo_registro = 1000 WHERE id = 1")
+    maquina.adicionar("tarefas.xml", maquina.raiz)
+    sentinela.rodada(conn)
+    assert "EventRecordID>1000" in maquina.consultas[-1]
+    assert _ponto(conn) == 1060
+
+
+def test_migracao_parte_do_ultimo_ponto_gravado_na_auditoria(maquina, conn):
+    from app import auditoria
+    with db.mutacao(conn):
+        conn.execute("DELETE FROM sentinela_ponto")
+        for n in (1010, 1030):
+            auditoria.registrar(conn, None, "seguranca.sentinela.ponto", "sentinela", None, None,
+                                {"ultimo_registro": n})
+    migracao = (db.MIGRATIONS_DIR / "063_sentinela_ponto.sql").read_text(encoding="utf-8")
+    conn.executescript(migracao)
+    assert _ponto(conn) == 1030
+    conn.executescript(migracao)                                   # idempotente
+    assert conn.execute("SELECT COUNT(*) FROM sentinela_ponto").fetchone()[0] == 1
+    maquina.adicionar("tarefas.xml", maquina.raiz)
+    sentinela.rodada(conn)
+    assert "EventRecordID>1030" in maquina.consultas[-1]
+
+
+def test_backup_restaurado_com_ponto_mais_velho_nao_acusa_estado_alterado(maquina, conn, tmp_path):
+    import sqlite3
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    _com_ponto_de_partida(maquina, conn)
+    copia_do_banco = sqlite3.connect(tmp_path / "snapshot.db")
+    conn.backup(copia_do_banco)                                    # snapshot horario, com o ponto em 1030
+    assert len(_rodar(maquina, conn, "tarefas.xml")) == 5          # sentinela.json passa a dizer 1060
+    copia_do_banco.backup(conn)                                    # restauracao: o banco volta a 1030
+    copia_do_banco.close()
+    a = _rodar(maquina, conn)
+    assert "estado-perdido" not in [x["evento"] for x in a]
+    assert (a[0]["evento"], a[0]["nivel"], a[0]["mensagem"]) == (
+        "banco-restaurado", "atencao", "Banco restaurado de uma cópia de segurança; log de segurança relido desde o registro 1030")
+    assert [x["evento"] for x in a[1:]] == [4698, 4699, 4700, 4701, 4702]   # relidos: o banco restaurado nao os tinha
+    assert "EventRecordID>1030" in maquina.consultas[-1]
+    assert _rodar(maquina, conn) == []                              # uma vez so'
+
+
+def test_backup_restaurado_regrava_logon_e_falha_que_o_snapshot_nao_tinha(maquina, conn, tmp_path, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(sentinela.tempo, "hoje_local", lambda: datetime.date(2026, 11, 5))
+    _lista(maquina, contas=["operador.fict"])
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    _com_ponto_de_partida(maquina, conn)
+    copia_do_banco = sqlite3.connect(tmp_path / "snapshot.db")
+    conn.backup(copia_do_banco)
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False
+    depois = {x["evento"] for x in _rodar(maquina, conn, "4672_logon.xml")}
+    assert depois == {4672, "auditoria-arquivos"}        # sentinela.json: conta avisada hoje e falha em aberto
+    copia_do_banco.backup(conn)
+    copia_do_banco.close()
+    assert {x["evento"] for x in _rodar(maquina, conn)} == depois | {"banco-restaurado"}
+    assert _rodar(maquina, conn) == []
+
+
+def test_copia_alem_do_ultimo_evento_do_log_continua_acusada(maquina, conn):
+    _com_ponto_de_partida(maquina, conn)
+    arquivo = maquina.raiz / "dados" / "sentinela.json"
+    estado = json.loads(arquivo.read_text(encoding="utf-8"))
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    estado["ultimo_registro"] = 1031                               # um alem do maior registro do log
+    arquivo.write_text(json.dumps(estado), encoding="utf-8")
+    a = _rodar(maquina, conn)
+    assert a[0]["evento"] == "estado-perdido"
+    assert any(x["evento"] == 4670 for x in a)                      # nada pulado
+
+
+def test_rodada_que_perde_a_corrida_para_outra_nao_regride_o_ponto_nem_duplica(maquina, conn, monkeypatch):
+    _com_ponto_de_partida(maquina, conn)
+    outra = db.get_conn()                                          # outro processo, mesmo banco
+    original = sentinela.verificacoes
+    vez = [0]
+
+    def no_meio(base):
+        vez[0] += 1
+        if vez[0] == 1:
+            maquina.adicionar("auditoria.xml", maquina.raiz)       # 1070-1071: so' a outra rodada enxerga
+            sentinela.rodada(outra)
+        return original(base)
+
+    monkeypatch.setattr(sentinela, "verificacoes", no_meio)
+    a = _rodar(maquina, conn, "4670_permissao.xml")                # esta leu ate' 1030 e chegou depois
+    outra.close()
+    assert sorted(x["evento"] for x in a) == [1102, 4670, 4719]   # cada evento uma vez, gravado pela outra
+    assert _ponto(conn) == 1071
+    assert json.loads((maquina.raiz / "dados" / "sentinela.json").read_text(encoding="utf-8"))["ultimo_registro"] == 1071
+
+
+def test_rodada_que_perde_a_corrida_sem_o_log_andar_nao_duplica_falha(maquina, conn, monkeypatch):
+    # revisor, rodada 2: com o log parado o ponto nao muda, e a falha nova saia duas vezes
+    _com_ponto_de_partida(maquina, conn)
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False      # falha nova, sem evento novo no log
+    outra = db.get_conn()
+    original = sentinela.verificacoes
+    vez = [0]
+
+    def no_meio(base):
+        vez[0] += 1
+        if vez[0] == 1:
+            sentinela.rodada(outra)
+        return original(base)
+
+    monkeypatch.setattr(sentinela, "verificacoes", no_meio)
+    a = _rodar(maquina, conn)
+    outra.close()
+    assert [x["evento"] for x in a] == ["auditoria-arquivos"]
+    assert _rodar(maquina, conn) == []                     # a copia que ficou e' a da rodada que gravou
+
+
+def test_ponto_da_sentinela_nao_muda_fora_da_aplicacao(maquina, conn):
+    import sqlite3
+    _com_ponto_de_partida(maquina, conn)
+    crua = sqlite3.connect(db.db_path())                           # como o sqlite3.exe ou o DB Browser
+    for sql in ("UPDATE sentinela_ponto SET ultimo_registro = 999999", "DELETE FROM sentinela_ponto",
+                "INSERT OR REPLACE INTO sentinela_ponto (id, ultimo_registro) VALUES (1, 999999)"):
+        with pytest.raises(sqlite3.OperationalError, match="dash_conexao_app"):
+            crua.execute(sql)
+    crua.close()
+
+
+def test_gatilho_do_ponto_apagado_vira_alerta_de_seguranca(maquina, conn, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(seguranca, "_conferencia", [])
+    assert seguranca.conferir(conn) == []
+    crua = sqlite3.connect(db.db_path())
+    crua.execute("DROP TRIGGER sentinela_ponto_protecao_update"); crua.commit(); crua.close()
+    assert [i["mensagem"] for i in seguranca.conferir(conn)] == ["Proteção do ponto da sentinela removida"]
+
+
+def _comando_do_rollback_456():
+    texto = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "runbook.md").read_text(encoding="utf-8")
+    achados = [m.group(1) for m in re.finditer(r'python -c "([^"]*)"', texto) if "063_sentinela_ponto.sql" in m.group(1)]
+    assert len(achados) == 1
+    return achados[0]
+
+
+def test_comando_do_runbook_para_rollback_antes_da_456_e_o_deploy_seguinte_parte_do_ponto_da_auditoria(maquina, conn,
+                                                                                                         monkeypatch):
+    """Gate Sol, rodada 2: no rollback o codigo antigo grava o ponto so' na auditoria; o comando do runbook tira a
+    tabela, os gatilhos e a linha da 063, e o deploy seguinte reimporta o ultimo ponto da auditoria."""
+    import subprocess
+    import sys
+    from app import auditoria
+    _com_ponto_de_partida(maquina, conn)
+    comando = _comando_do_rollback_456()
+    assert '"' not in comando and "$" not in comando        # o PowerShell repassa sem mexer
+    comando = comando.replace(r"C:\DashboardLotufo\dados\dashboard.db", str(db.db_path()))
+    saida = subprocess.run([sys.executable, "-I", "-c", comando], capture_output=True, text=True, check=True).stdout
+    assert saida.strip() == "sentinela_ponto: 0 migracao 063: 0"
+    with db.mutacao(conn):                                  # o codigo antigo, durante o rollback
+        auditoria.registrar(conn, None, sentinela.ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": 1071})
+    db.migrate(conn)                                        # o deploy seguinte
+    assert _ponto(conn) == 1071
+    monkeypatch.setattr(seguranca, "_conferencia", [])
+    assert seguranca.conferir(conn) == []                   # gatilhos de volta
+
+
+def test_copia_a_frente_do_banco_sem_conseguir_ler_o_log_acusa(maquina, conn):
+    maquina.adicionar("4670_permissao.xml", maquina.raiz)
+    _com_ponto_de_partida(maquina, conn)
+    with db.mutacao(conn):
+        conn.execute("UPDATE sentinela_ponto SET ultimo_registro = 1000 WHERE id = 1")
+    maquina.wevtutil_falha = True
+    assert [x["evento"] for x in _rodar(maquina, conn)] == ["estado-perdido", "leitura-log"]

@@ -35,6 +35,8 @@ ACAO = "seguranca.sentinela"
 PASTAS = ("dados", "segredos", "cadastro")
 NIVEL_PASTA = {"dados": "critico", "segredos": "critico", "cadastro": "acao"}
 MAX_EVENTOS = 5000
+# ate' a issue #456 o ponto de leitura era uma linha desta acao na auditoria; as antigas continuam la' (append-only) e
+# a migracao 063 parte da ultima delas
 ACAO_PONTO = "seguranca.sentinela.ponto"
 TEMPO_LIMITE_SEG = 60
 
@@ -327,15 +329,24 @@ def verificacoes(base: Path) -> dict[str, tuple[str, str]]:
 # --- a rodada --------------------------------------------------------------------------------------------------
 
 def _ponto_gravado(conn) -> int | None:
-    """Onde a leitura do log parou, gravado no banco (fonte da verdade); None = nunca leu o log com sucesso.
-    O `sentinela.json` e' so' uma copia: apaga-lo ou edita-lo nao faz a sentinela pular eventos."""
-    r = conn.execute("SELECT depois FROM audit_log WHERE acao=? ORDER BY id DESC LIMIT 1", (ACAO_PONTO,)).fetchone()
-    if r is None:
-        return None
-    try:
-        return int(json.loads(r["depois"])["ultimo_registro"])
-    except (ValueError, KeyError, TypeError):
-        return None
+    """Onde a leitura do log parou, gravado no banco (fonte da verdade), na tabela de uma linha `sentinela_ponto`
+    (issue #456: fora da auditoria, para rodada sem achado nao acrescentar linha la'); None = nunca leu o log com
+    sucesso. O `sentinela.json` e' so' uma copia: apaga-lo ou edita-lo nao faz a sentinela pular eventos."""
+    r = conn.execute("SELECT ultimo_registro FROM sentinela_ponto WHERE id = 1").fetchone()
+    return None if r is None else int(r["ultimo_registro"])
+
+
+def _marca(conn) -> tuple[int | None, int | None]:
+    """O que toda rodada aceita muda: o ponto ou o id do ultimo achado (rodada que nao muda nenhum dos dois nao gravou
+    nada no banco). Lido no comeco e de novo sob o BEGIN IMMEDIATE, separa a rodada que perdeu a corrida."""
+    ultimo_achado = conn.execute("SELECT MAX(id) FROM audit_log WHERE entidade = 'sentinela' AND entidade_id IS NULL "
+                                 "AND acao = ?", (ACAO,)).fetchone()[0]
+    return _ponto_gravado(conn), ultimo_achado
+
+
+def _gravar_ponto(conn, ultimo: int) -> None:
+    conn.execute("INSERT INTO sentinela_ponto (id, ultimo_registro) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET "
+                 "ultimo_registro = excluded.ultimo_registro, atualizado_em = datetime('now')", (ultimo,))
 
 
 def rodada(conn) -> int:
@@ -343,8 +354,9 @@ def rodada(conn) -> int:
     ate' voltar ao normal (regravada uma vez por dia enquanto durar). Achados e ponto de leitura entram na mesma
     transacao, entao nenhum evento e' lido sem ser gravado nem gravado sem avancar o ponto."""
     base = raiz()
+    marca = _marca(conn)             # antes do arquivo: quem grava, grava o banco e depois o arquivo
+    ponto = marca[0]
     estado = _ler_json(_arquivo_estado())
-    ponto = _ponto_gravado(conn)
     ultimo = ponto
     agora = tempo.agora_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
     # falhas em aberto: chave -> ultimo dia (local) em que virou item; regravada 1x por dia enquanto durar, para nao
@@ -357,13 +369,16 @@ def rodada(conn) -> int:
     novos: list[dict] = []
     atuais: dict[str, tuple[str, str]] = {}
     copia = estado.get("ultimo_registro")
-    if ponto is not None and (not isinstance(copia, int) or copia > ponto):
-        # a copia no arquivo sumiu, ficou ilegivel ou aponta alem do que a sentinela gravou: a leitura segue do ponto
-        # gravado no banco (nada se perde) e o fato vira item, uma vez (a copia e' refeita no fim da rodada)
-        novos.append(_achado("estado-perdido", "critico", "Estado da sentinela apagado, ilegível ou alterado; "
-                             "leitura retomada do ponto gravado no banco", agora))
+    no_log = None
     try:
         no_log = _ultimo_registro()
+        if ponto is not None and isinstance(copia, int) and ponto < copia <= no_log:
+            # banco restaurado de um backup: vira item de atencao, nao o critico, porque nada se perde (a releitura
+            # parte do ponto do banco); e os avisos do dia e as falhas em aberto da copia descrevem itens que o banco
+            # restaurado nao tem: sem eles, a releitura e as verificacoes regravam esses itens
+            novos.append(_achado("banco-restaurado", "atencao", "Banco restaurado de uma cópia de segurança; log de "
+                                 f"segurança relido desde o registro {ponto}", agora))
+            pendencias, avisados = {}, {}
         if ultimo is None:
             ultimo = no_log          # primeira leitura com sucesso: marca o ponto de partida, nao le o historico
         elif no_log < ultimo:
@@ -375,16 +390,33 @@ def rodada(conn) -> int:
     except Exception as e:
         log.warning("sentinela: nao leu o log de seguranca: %s", e)
         atuais["leitura-log"] = ("atencao", "Sentinela não conseguiu ler o log de segurança")
+    # a copia no arquivo sumiu, ficou ilegivel ou aponta alem do que existe no log: a leitura segue do ponto gravado
+    # no banco (nada se perde) e o fato vira item, uma vez (a copia e' refeita no fim da rodada). Copia a frente do
+    # banco mas dentro do log e' o que fica depois de restaurar um backup (o banco volta, o arquivo nao): nao acusa e
+    # rele do ponto do banco. Sem conseguir ler o log nao da' para separar os dois casos, e acusa.
+    if ponto is not None and (not isinstance(copia, int)
+                              or (copia > ponto and (no_log is None or copia > no_log))):
+        novos.insert(0, _achado("estado-perdido", "critico", "Estado da sentinela apagado, ilegível ou alterado; "
+                                "leitura retomada do ponto gravado no banco", agora))
     atuais.update(verificacoes(base))
     hoje = tempo.hoje_local()
     for chave, (nivel, msg) in atuais.items():
         if pendencias.get(chave) != hoje.isoformat():
             novos.append(_achado(chave, nivel, msg, agora))
     with db.mutacao(conn):
-        for a in novos:
-            auditoria.registrar(conn, None, ACAO, "sentinela", None, None, a)
-        if ultimo is not None and ultimo != ponto:
-            auditoria.registrar(conn, None, ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": ultimo})
+        # ponto e achados foram lidos fora do BEGIN IMMEDIATE: se outra rodada (outro processo no mesmo banco, como dois
+        # servidores durante um reinicio) gravou ponto ou achado no meio, esta descarta tudo e a proxima parte do que
+        # a outra gravou, sem regredir o ponto nem repetir achado. Resta a janela entre o commit da outra e a gravacao
+        # do `sentinela.json` dela: quem le a marca nova nessa janela ainda le o arquivo velho
+        perdeu_a_corrida = _marca(conn) != marca
+        if not perdeu_a_corrida:
+            for a in novos:
+                auditoria.registrar(conn, None, ACAO, "sentinela", None, None, a)
+            if ultimo is not None and ultimo != ponto:
+                _gravar_ponto(conn, ultimo)
+    if perdeu_a_corrida:
+        log.info("sentinela: outra rodada gravou no meio desta; descartada")
+        return 0
     recentes = {hoje.isoformat(), (hoje - datetime.timedelta(days=1)).isoformat()}
     _gravar_estado({"ultimo_registro": ultimo, "pendencias": {k: hoje.isoformat() for k in atuais},
                     "avisados_4672": {k: v for k, v in avisados.items() if k in recentes}})
