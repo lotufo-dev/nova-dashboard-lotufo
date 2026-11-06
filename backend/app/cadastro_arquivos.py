@@ -67,11 +67,17 @@ NATUREZAS = ("execucao", "reajuste")
 TIPOS_COM_NATUREZA = ("aditivo_valor", "aditivo_misto")
 
 
+def _reajuste_com_valor(inst: dict) -> bool:
+    """O instrumento do cadastro que `reajuste.aditivo_de_reajuste` conta: aditivo de valor ou misto, natureza
+    reajuste, delta diferente de zero."""
+    return bool(inst["tipo"] in TIPOS_COM_NATUREZA and inst.get("natureza") == "reajuste"
+                and inst.get("delta_valor_centavos"))
+
+
 def _corretor_de_valor(inst: dict) -> bool:
     """Issue #410: o aditivo de reajuste com valor que corrige outro termo; ele substitui o corrigido no vigente
     (`contratos.vigente`, pelo criterio de `reajuste.aditivo_de_reajuste`), entao cada termo tem no maximo um."""
-    return bool(inst.get("corrige") and inst["tipo"] in TIPOS_COM_NATUREZA and inst.get("natureza") == "reajuste"
-                and inst.get("delta_valor_centavos"))
+    return bool(inst.get("corrige") and _reajuste_com_valor(inst))
 
 
 class CadastroInvalido(Exception):
