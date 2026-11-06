@@ -554,7 +554,14 @@ def a_receber(conn, hoje: datetime.date | None = None) -> dict:
     obras = [{"contrato_id": o["contrato_id"], "obra": o["obra"], "quantidade": len(o["ms"]), "valor_centavos": valor(o["ms"])}
              for o in por_obra.values()]
     obras.sort(key=lambda o: (-(o["valor_centavos"] or 0), -o["quantidade"], o["obra"]))
-    itens = [{"contrato_id": m["contrato_id"], "obra": m["obra"], "medicao_id": None if m.get("tipo") == "nota" else m["id"],
+    # Por contratante (06/11/2026, tela da diretoria): o mesmo total, agrupado pelo orgao do contrato
+    por_orgao: dict = {}
+    for m in abertas:
+        por_orgao.setdefault(m["orgao_id"], {"orgao_id": m["orgao_id"], "orgao": m["orgao_nome"] or "sem órgão", "ms": []})["ms"].append(m)
+    orgaos = [{"orgao_id": o["orgao_id"], "orgao": o["orgao"], "quantidade": len(o["ms"]), "valor_centavos": valor(o["ms"])}
+              for o in por_orgao.values()]
+    orgaos.sort(key=lambda o: (-(o["valor_centavos"] or 0), -o["quantidade"], o["orgao"]))
+    itens = [{"contrato_id": m["contrato_id"], "orgao_id": m["orgao_id"], "obra": m["obra"], "medicao_id": None if m.get("tipo") == "nota" else m["id"],
               "numero": None if m.get("tipo") == "nota" else m["numero"], "tipo": m.get("tipo") or "execucao",
               "nota_numero": m.get("nf") if m.get("tipo") == "nota" else None, "competencia": m["competencia"],
               "protocolada_em": (m["protocolo_em"] or "")[:10] or None, "valor_centavos": _cota(m) if liberado else None}
@@ -585,4 +592,7 @@ def a_receber(conn, hoje: datetime.date | None = None) -> dict:
               "recebido_centavos": None if x > atual else recebido[x]} for x in previsto]
     return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
             "total": {"quantidade": len(abertas), "obras": len(obras), "valor_centavos": valor(abertas)},
-            "mes": next(x for x in meses if x["atual"]), "meses": meses, "por_obra": obras, "itens": itens}
+            # o caminho do dinheiro antes do protocolo, como no painel (`_dinheiro`): medido sem nota e nota sem protocolo
+            "antes_do_protocolo": {"medido_esperando_nota": _grupo([m for m in ms if m["estado"] in ESPERANDO_NOTA]),
+                                   "nota_esperando_protocolo": _grupo([m for m in ms if m["estado"] in ESPERANDO_PROTOCOLO])},
+            "mes": next(x for x in meses if x["atual"]), "meses": meses, "por_obra": obras, "por_orgao": orgaos, "itens": itens}

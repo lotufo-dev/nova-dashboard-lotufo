@@ -11,6 +11,7 @@
 .ap__tabela td { padding: 12px 16px; height: 44px; border-bottom: 1px solid var(--linha-suave); vertical-align: middle; overflow-wrap: anywhere; }
 .ap__tabela tbody:last-child tr:last-child td { border-bottom: 0; }
 .ap__tabela .col-num { text-align: right; }
+.ap__tabela .selo, .ap__tabela .selo__texto { white-space: normal; overflow: visible; }
 .ap__c-obra { width: 33%; } .ap__c-org { width: 17%; } .ap__c-val { width: 19%; } .ap__c-env { width: 16%; } .ap__c-par { width: 15%; }
 
 .ap__faixa td { background: var(--superficie-2); font-weight: 600; height: 40px; padding-top: 8px; padding-bottom: 8px; border-top: 1px solid var(--linha); }

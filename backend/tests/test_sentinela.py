@@ -234,7 +234,9 @@ def test_achados_entram_no_bloco_seguranca_com_leituras_da_mesma_hora_somadas(ma
     maquina.log.append(maquina.log[0].replace("<EventRecordID>1001<", "<EventRecordID>1005<")
                        .replace("instalacao.json", "terceiro.json"))
     sentinela.rodada(conn)
-    agora = datetime.datetime(2026, 11, 6, 12, 0, tzinfo=datetime.timezone.utc)
+    # a hora de verdade: o achado e' gravado com o relogio do sistema, e uma hora fixa (06/11/2026 12:00 UTC) passou a
+    # deixar o achado "no futuro", fora do bloco, depois desse instante
+    agora = datetime.datetime.now(datetime.timezone.utc)
     its = [i for i in seguranca.itens(conn, agora) if i["mensagem"].startswith("Leitura")]
     assert [i["mensagem"] for i in its] == [f"Leitura de segredos por explorer.exe ({CONTA}), 3 arquivos"]
     assert its[0]["nivel"] == "critico"
