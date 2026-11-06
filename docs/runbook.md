@@ -65,7 +65,10 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    checkout` (nada mudou na produção), `deploy abortado no build; producao segue no commit anterior ...` (a produção segue no
    commit anterior) ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`. Nos dois casos de
    "intervir a mao" (`ROLLBACK TAMBEM FALHOU` e este último), **não apagar o sentinela** antes de o diretório pinado voltar ao
-   commit anterior.
+   commit anterior. O próprio `deploy.ps1` só apaga o sentinela com `DEPLOY OK`, `ROLLBACK OK`, `deploy abortado no build;
+   producao segue ...` ou aborto antes do checkout; em qualquer outra saída, inclusive erro inesperado depois do checkout (no
+   reinício, por exemplo), ele mantém o sentinela e imprime `sentinela ... MANTIDO`. O rollback não faz `git fetch` (volta
+   para o commit anterior, que já está no clone), então rede caída não o impede de voltar.
 5. **Terceira chamada, conferência**: `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` (200 com `banco: ok` e `instalacao: autorizada`, seção "Instalação assinada";
    a porta é a de `-Porta`, padrão 80 em HTTP, quando dá para omitir o `:80`),
    `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao `origin/master`, e apagar o sentinela

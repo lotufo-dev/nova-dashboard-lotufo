@@ -83,7 +83,7 @@ def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
     deploy = script.index("if (SaudavelENovo -ExigirInstalacao) {")
     rollback = script.index("ROLLBACK para $anterior")
     assert deploy < rollback
-    assert "if (SaudavelENovo) {" in script[rollback:]
+    assert "$voltou = SaudavelENovo\n" in script[rollback:]
     # rollback para um commit que ja' confere a instalacao e voltou em modo copia: ROLLBACK OK, mas com aviso
     aviso = script[script.index("function AvisarSeCopia"):script.index("$anterior = (")]
     assert '$saude.instalacao -and $saude.instalacao -ne "autorizada"' in aviso and "Write-Warning" in aviso
@@ -164,3 +164,73 @@ def test_deploy_fica_so_em_ascii_sem_bom():
     bruto = (SCRIPTS / "deploy.ps1").read_bytes()
     assert not bruto.startswith(b"\xef\xbb\xbf")
     assert bruto.isascii()
+
+
+def _codigo(script):
+    """O script sem os comentarios de linha inteira (o texto deles cita fetch, sentinela etc.)."""
+    return "\n".join(linha for linha in script.splitlines() if not linha.lstrip().startswith("#"))
+
+
+def test_deploy_rollback_usa_o_commit_anterior_sem_fetch():
+    # Issue #443 (Critico do gate Sol na PR #437): o rollback chamava Construir $anterior, que comecava com git fetch;
+    # com a rede caida o rollback abortava no fetch e a pasta ficava no commit novo. O unico fetch e' o do fluxo
+    # principal, antes do checkout do alvo; Construir so' faz checkout de um commit que ja' esta' no clone.
+    codigo = _codigo(_ler("deploy.ps1"))
+    construir = codigo[codigo.index("function Construir"):codigo.index("function Reconstruir")]
+    assert "fetch" not in construir
+    assert "checkout --quiet --detach $alvo" in construir
+    assert codigo.count("fetch --quiet") == 1 and codigo.count("git fetch falhou") == 1
+    assert codigo.index("& git -C $AppDir fetch --quiet") < codigo.index("try { Construir $alvo; ConferirInstalacao }")
+    # o rollback ainda volta para o commit anterior (lido do HEAD antes do deploy, nao de origin)
+    rollback = codigo[codigo.index("ROLLBACK para $anterior"):codigo.index("\n} finally {")]
+    assert "Construir $anterior" in rollback
+
+
+def test_deploy_rollback_tem_try_proprio_e_mantem_o_sentinela():
+    # Issue #443: checkout, rebuild, reinicio e health do rollback ficam num try proprio; qualquer excecao imprime
+    # ROLLBACK TAMBEM FALHOU e sai sem soltar o watchdog (antes ela ia direto ao finally, que apagava o sentinela).
+    codigo = _codigo(_ler("deploy.ps1"))
+    rollback = codigo[codigo.index("ROLLBACK para $anterior"):codigo.index("\n} finally {")]
+    tentativa = rollback[rollback.index("try {"):rollback.index("} catch {")]
+    for passo in ("Construir $anterior", "RegistrarDeploy", "Reiniciar", "SaudavelENovo"):
+        assert passo in tentativa, f"{passo} fora do try do rollback"
+    captura = rollback[rollback.index("} catch {"):]
+    captura = captura[:captura.index("exit 1")]
+    assert "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message))" in captura
+    assert "soltarWatchdog" not in captura
+    # o rollback que nao volta saudavel tambem mantem o sentinela; so' o ROLLBACK OK solta
+    falhou = rollback[rollback.rindex("ROLLBACK TAMBEM FALHOU"):]
+    assert "soltarWatchdog" not in falhou[:falhou.index("exit 1")]
+    linha_ok = next(linha for linha in rollback.splitlines() if "ROLLBACK OK" in linha)
+    assert "$script:soltarWatchdog = $true" in linha_ok
+
+
+def test_deploy_so_apaga_o_sentinela_com_a_producao_conferida():
+    # Issue #443 / runbook "Subir e derrubar": o sentinela so' sai com o commit novo saudavel, o anterior restaurado e
+    # verificado, ou o deploy abortado antes de o pinado mudar. Qualquer outra saida (excecao no reinicio, rollback que
+    # falhou, volta do build que falhou) deixa o watchdog pausado.
+    script = _ler("deploy.ps1")
+    codigo = _codigo(script)
+    assert codigo.count("Remove-Item $pause") == 1
+    final = codigo[codigo.index("\n} finally {"):]
+    assert re.search(r"if \(\$script:soltarWatchdog\) \{ Remove-Item \$pause ", final)
+    assert "MANTIDO" in final
+    # comeca falso, antes de criar o sentinela
+    assert codigo.index("$script:soltarWatchdog = $false") < codigo.index("New-Item -ItemType File -Path $pause")
+    # os unicos pontos que soltam: antes do checkout do alvo, a volta do build que deu certo, DEPLOY OK e ROLLBACK OK
+    soltas = [m.start() for m in re.finditer(r"\$script:soltarWatchdog = \$true", codigo)]
+    assert len(soltas) == 4
+    checkout = codigo.index("try { Construir $alvo; ConferirInstalacao }")
+    assert soltas[0] < codigo.index("& git -C $AppDir fetch --quiet")
+    # antes do checkout do alvo a variavel volta a falso: dali em diante o pinado muda
+    trava = codigo.rindex("$script:soltarWatchdog = $false", 0, checkout)
+    assert soltas[0] < trava < checkout
+    volta = codigo[checkout:codigo.index("$novo = (")]
+    assert volta.count("$script:soltarWatchdog = $true") == 1
+    assert volta.index("$script:soltarWatchdog = $true") < volta.index("deploy abortado no build; producao segue")
+    falha_volta = volta[volta.index("deploy abortado no build E a volta"):]
+    assert "soltarWatchdog" not in falha_volta
+    ok = codigo[codigo.index("if (SaudavelENovo -ExigirInstalacao) {"):codigo.index("ROLLBACK para $anterior")]
+    assert ok.count("$script:soltarWatchdog = $true") == 1
+    # o reinicio e o health do commit novo ficam depois da trava: excecao ali nao solta o watchdog
+    assert trava < codigo.index("    Reiniciar\n") < codigo.index("if (SaudavelENovo -ExigirInstalacao) {")

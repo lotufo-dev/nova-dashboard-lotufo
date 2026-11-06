@@ -87,9 +87,9 @@ function Saudavel([switch]$ExigirInstalacao) {
     Write-Warning "health 200, mas a instalacao nao esta autorizada: $situacao - ver docs\runbook.md (Instalacao assinada)"
     return $false
 }
+# Sem fetch aqui (issue #443): o fluxo principal ja' buscou o alvo, e o rollback volta para o commit anterior, que ja'
+# esta' no clone. Com a rede caida, um fetch no rollback abortava a volta e deixava o pinado no commit novo.
 function Construir([string]$alvo) {
-    & git -C $AppDir fetch --quiet
-    if ($LASTEXITCODE -ne 0) { throw "git fetch falhou" }
     & git -C $AppDir checkout --quiet --detach $alvo
     if ($LASTEXITCODE -ne 0) { throw "git checkout $alvo falhou (diretorio pinado sujo?)" }
     Reconstruir
@@ -173,8 +173,13 @@ function AvisarSeCopia {
 }
 
 $anterior = (& git -C $AppDir rev-parse HEAD).Trim()
+# Sentinela do watchdog (issue #443, runbook "Subir e derrubar"): o finally so' o apaga com $soltarWatchdog, que vale
+# $true so' com a producao conferida: antes de o pinado mudar (nada mudou), na volta do build que deu certo (o processo
+# no ar nunca parou), no DEPLOY OK e no ROLLBACK OK. Qualquer outra saida, inclusive excecao, deixa o watchdog pausado.
+$script:soltarWatchdog = $false
 New-Item -ItemType File -Path $pause -Force | Out-Null   # segura o watchdog durante o deploy
 try {
+    $script:soltarWatchdog = $true   # ate' o checkout do alvo o pinado e a producao seguem como estavam
     # Backup pre-migracao (issue #75): se o commit novo mexe em backend/migrations, snapshot
     # do banco de producao ANTES do checkout; se falhar, o deploy nao acontece. O rollback
     # do codigo mais abaixo NAO restaura o banco (restauracao manual pelo runbook).
@@ -200,6 +205,7 @@ try {
     # Construir pode lancar depois do checkout (pip/npm/build): o diretorio pinado nao pode ficar
     # num commit que nao subiu (issue #78). Volta para $anterior (checkout + reconstrucao) e sai com 1.
     # A conferencia da instalacao (issue #417) entra no mesmo try: recusada, a producao nem para.
+    $script:soltarWatchdog = $false  # daqui em diante o pinado muda: so' solta com a producao conferida
     try { Construir $alvo; ConferirInstalacao }
     catch {
         Write-Warning "Construir ou conferir a instalacao de $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
@@ -214,10 +220,11 @@ try {
                 Reconstruir
                 RegistrarDeploy
             }
+            $script:soltarWatchdog = $true
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
             $onde = (& git -C $AppDir rev-parse HEAD).Trim()
-            Write-Host "deploy abortado no build E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior)" -ForegroundColor Red
+            Write-Host "deploy abortado no build E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior); sentinela do watchdog mantido" -ForegroundColor Red
         }
         exit 1
     }
@@ -227,16 +234,30 @@ try {
     if (SaudavelENovo -ExigirInstalacao) {
         $fim = "DEPLOY OK: $anterior -> $novo (health 200, processo novo)"
         if ($backup) { $fim += " - backup pre-migracao: $backup" }
+        $script:soltarWatchdog = $true
         Write-Host $fim -ForegroundColor Green
     } else {
         Write-Warning "Saude NAO voltou -> ROLLBACK para $anterior"
-        Construir $anterior
-        RegistrarDeploy
-        Reiniciar
-        if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
-        else { Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log)" -ForegroundColor Red }
+        # Issue #443: checkout, rebuild, reinicio e health do rollback num try proprio. Excecao em qualquer um deles
+        # (checkout, pip, npm, agendador, porta) e' ROLLBACK TAMBEM FALHOU, com o sentinela mantido.
+        $voltou = $false
+        try {
+            Construir $anterior
+            RegistrarDeploy
+            Reiniciar
+            $voltou = SaudavelENovo
+        } catch {
+            $onde = "$(& git -C $AppDir rev-parse HEAD)".Trim()   # sem .Trim() em $null: a linha final tem de sair
+            Write-Host "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message)) - intervir a mao (ver watchdog.log e dashboard.log): HEAD do diretorio pinado agora em $onde (esperado $anterior); sentinela do watchdog mantido" -ForegroundColor Red
+            exit 1
+        }
+        if ($voltou) { $script:soltarWatchdog = $true; Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
+        else { Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log); sentinela do watchdog mantido" -ForegroundColor Red }
         exit 1
     }
 } finally {
-    Remove-Item $pause -Force -ErrorAction SilentlyContinue   # solta o watchdog
+    # Solta o watchdog so' com a producao conferida (ver $soltarWatchdog acima). Nos caminhos de "intervir a mao" o
+    # pinado esta' num commit ou build que nao se provou: o watchdog nao pode reerguer sozinho; o operador apaga depois.
+    if ($script:soltarWatchdog) { Remove-Item $pause -Force -ErrorAction SilentlyContinue }
+    else { Write-Host "sentinela $pause MANTIDO: watchdog pausado ate' o operador conferir o pinado e apaga-lo (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow }
 }
