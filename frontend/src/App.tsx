@@ -35,28 +35,17 @@ function FaixaInstalacao() {
   );
 }
 
-// Teste em producao (06/11/2026): com o redirecionamento de e-mail ligado no servidor, nenhum e-mail chega ao
-// destinatario de verdade. Quem abrir qualquer tela precisa saber antes de clicar em enviar.
-function FaixaEmailTeste() {
-  return (
-    <p className="faixa-instalacao faixa-instalacao--teste" role="alert">
-      E-mails em teste: todo envio desta dashboard vai para a caixa de teste, não para o destinatário.
-    </p>
-  );
-}
-
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const { rota, busca, secao, origem, ir, substituir } = useRota();
   const [carregando, setCarregando] = useState(true);
   const [copia, setCopia] = useState(false);
-  const [emailTeste, setEmailTeste] = useState(false);
 
   useEffect(() => {
     // O health e' aberto (sem login). Relido a cada 5 minutos: a leitura que falhou (servidor reiniciando) e o servidor
     // que reiniciou em modo copia com a aba aberta aparecem sem F5; a falha mantem o que ja' se sabia.
-    const ler = () => api<{ instalacao?: string; email_redirecionado?: boolean }>("/api/health")
-      .then(s => { setCopia(s?.instalacao === "nao-autorizada"); setEmailTeste(s?.email_redirecionado === true); }).catch(() => {});
+    const ler = () => api<{ instalacao?: string }>("/api/health")
+      .then(s => setCopia(s?.instalacao === "nao-autorizada")).catch(() => {});
     ler();
     const id = window.setInterval(ler, 5 * 60_000);
     return () => window.clearInterval(id);
@@ -104,7 +93,7 @@ export default function App() {
   // A ancora (#emp-3) leva a secao quando a tela terminar de montar.
   useRolarAteSecao(usuario ? secao : "", caminhoDe(rota));
 
-  const faixa = copia || emailTeste ? <>{copia && <FaixaInstalacao />}{emailTeste && <FaixaEmailTeste />}</> : null;
+  const faixa = copia ? <FaixaInstalacao /> : null;
   if (carregando) return faixa;
   // Depois do login a URL que a pessoa abriu continua valendo (o efeito acima so'
   // troca "/" e o que ela nao pode ver): o link do e-mail leva a obra, nao a entrada.
