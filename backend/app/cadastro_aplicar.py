@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app import arquivos, auditoria, contratos, cronograma, db, oficios, reajuste, tempo
 from app.cadastro_arquivos import (NATUREZAS, TIPOS_ADITIVO, TIPOS_COM_NATUREZA, _corretor_de_valor,
-                                   competencias_do_apostilamento)
+                                   _reajuste_com_valor, competencias_do_apostilamento)
 
 
 class _Ensaio(Exception):
@@ -908,8 +908,7 @@ def _instrumentos(conn, usuario_id, contrato_id, c, rel) -> None:
 
     def espera(i) -> bool:
         alvo = por_chave.get(i["corrige"]) if _corretor_de_valor(i) else None
-        return bool(alvo is not None and alvo["tipo"] in TIPOS_COM_NATUREZA and alvo.get("natureza") == "reajuste"
-                    and alvo.get("delta_valor_centavos") and i["corrige"] not in feitos)
+        return bool(alvo is not None and _reajuste_com_valor(alvo) and i["corrige"] not in feitos)
     while ordenados:
         k = next((n for n, i in enumerate(ordenados) if not espera(i)), 0)     # ciclo: o validar recusa; segue a data
         fila.append(ordenados.pop(k))

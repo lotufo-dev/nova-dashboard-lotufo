@@ -1979,6 +1979,17 @@ def test_correcao_de_reajuste_com_alvo_de_execucao_e_data_anterior_segue_a_data(
     assert contratos_mod.vigente(conn, 1)["valor_vigente_centavos"] == original + 150_01
 
 
+def test_correcao_de_reajuste_com_alvo_misto_sem_valor_segue_a_data(conn):
+    # issue #458 (code-review): o misto de reajuste so' de prazo (delta zero) tambem nao sai do vigente
+    original = _contrato()["valor_original_centavos"]
+    prazo = {**MISTO, "chave": "tm-1", "numero": "019/2024/01/11", "data": "2026-07-20", "delta_valor_centavos": 0}
+    c1 = {**TA_REAJ, "chave": "c-1", "numero": "019/2024/01/12", "data": "2026-07-10", "corrige": "tm-1"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[prazo, c1])]))
+    retratos = {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT chave_cadastro, valor_anterior_centavos, valor_novo_centavos FROM aditivos")}
+    assert retratos == {"c-1": (original, original + 100_01), "tm-1": (original + 100_01, original + 100_01)}
+
+
 def test_cadeia_de_reajuste_com_data_invertida_e_execucao_no_meio(conn):
     # issue #458: ex-1 (20/07), ta-08 (30/07), ta-09 (15/07, corrige ta-08), ta-10 (10/07, corrige ta-09), ex-2
     # (01/08); a cadeia espera o alvo de reajuste e os de execucao seguem a data: ex-1, ta-08, ta-09, ta-10, ex-2
