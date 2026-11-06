@@ -38,7 +38,10 @@ def _contratante(familia: str | None, chave: str | None, nome: str | None, orgao
 
 
 def _medido(conn, hoje: datetime.date) -> tuple[dict, list[dict]]:
-    mes, ant = diretoria._mes(hoje), diretoria._mes(hoje, -1)
+    """06/11/2026: o mes do cartao e' a ULTIMA COMPETENCIA FECHADA (o mes anterior a hoje), contra a anterior a ela: a
+    medicao de um mes so' e' lancada no seguinte, entao o mes corrente ficava sempre zerado. Entra tambem o que o RM
+    mostra e ainda nao tem medicao lancada (`diretoria.complemento_rm`), em valor cheio, como as medicoes daqui."""
+    mes, ant = diretoria._mes(hoje, -1), diretoria._mes(hoje, -2)
     linhas = conn.execute(
         "SELECT m.criado_em, m.competencia, COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos, 0) AS valor, "
         "c.orgao_id, c.orgao AS orgao_texto, o.familia, o.chave, o.nome "
@@ -61,6 +64,23 @@ def _medido(conn, hoje: datetime.date) -> tuple[dict, list[dict]]:
         else:
             anterior += r["valor"]
             g["anterior_centavos"] += r["valor"]
+    compl = diretoria.complemento_rm(conn)
+    if compl:
+        orgaos = {r["id"]: r for r in conn.execute(
+            "SELECT c.id, c.orgao AS orgao_texto, o.familia, o.chave, o.nome FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id")}
+        for cid, por_comp in compl.items():
+            o = orgaos.get(cid)
+            nome = _contratante(o["familia"], o["chave"], o["nome"], o["orgao_texto"]) if o else "sem contratante"
+            for comp, campo in ((mes, "atual_centavos"), (ant, "anterior_centavos")):
+                v = por_comp.get(comp, 0)
+                if not v:
+                    continue
+                g = grupos.setdefault(nome, {"contratante": nome, "atual_centavos": 0, "anterior_centavos": 0})
+                g[campo] += v
+                if comp == mes:
+                    atual += v
+                else:
+                    anterior += v
     medido = {"competencia": mes, "anterior_competencia": ant, "valor_centavos": atual, "anterior_centavos": anterior,
               "quantidade": quantidade, "ultimo_lancamento": ultimo.isoformat() if ultimo else None}
     por = sorted(grupos.values(), key=lambda g: (-max(g["atual_centavos"], g["anterior_centavos"]), g["contratante"]))
@@ -76,9 +96,13 @@ def _recebido_ano(conn, hoje: datetime.date) -> dict:
     sem_data = sum(1 for m in ms if not m["recebida_em"] and (m["competencia"] or "")[:4] >= f"{hoje.year - 1:04d}")
     mes = hoje.strftime("%Y-%m")
     no_ano = [m for m in ms if (m["recebida_em"] or "")[:4] == ano]
+    # 06/11/2026: o recebido de verdade do ano sao as baixas do RM (`diretoria.rm_por_mes`), que nao dependem da data
+    # gravada na medicao; e' o que o cartao do Inicio mostra. Os campos das medicoes seguem para quem os usa.
+    _, real = diretoria.rm_por_mes(conn)
     return {"valor_centavos": None if sem_data else sum(diretoria._cota(m) for m in no_ano),
             "mes_centavos": sum(diretoria._cota(m) for m in no_ano if m["recebida_em"][:7] == mes),
-            "sem_data": sem_data}
+            "sem_data": sem_data,
+            "real_centavos": sum(v for m, v in real.items() if m[:4] == ano and m <= mes)}
 
 
 def _a_receber(conn, hoje: datetime.date) -> dict:

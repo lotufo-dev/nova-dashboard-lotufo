@@ -516,6 +516,14 @@ Só o envio usa o Microsoft Graph. O sistema não lê caixa de e-mail nem ShareP
    da empresa não está no repositório: `rodar_producao.ps1` usa a variável no nível da máquina ou, sem ela, a
    primeira linha de `C:\DashboardLotufo\segredos\sharepoint-hosts.txt`. Sem nenhuma das duas, o log avisa na
    subida e a tela recusa todo link ("não estão liberados neste servidor"); nada sai com link errado.
+10. **Teste com os e-mails redirecionados** (06/11/2026): com o arquivo `C:\DashboardLotufo\segredos\email-redirecionar.txt`
+    (primeira linha = um endereço) ou a variável `DASH_EMAIL_REDIRECIONAR`, **todo** e-mail do sistema vai só para
+    esse endereço, com `[TESTE]` no assunto e os destinatários de verdade escritos no alto do corpo. O registro do
+    envio guarda os destinatários de verdade (são eles que o próximo envio propõe) e a auditoria (`correio.envio`)
+    traz `redirecionado_para`. O arquivo é lido a cada envio: criar liga e apagar desliga, sem reiniciar. Ligado com
+    endereço que não se lê, o envio é recusado ("mal configurado"), para nada ir ao destinatário por engano. Enquanto
+    estiver ligado, toda tela mostra a faixa "E-mails em teste" (`/api/health` → `email_redirecionado`). A medição
+    avança como num envio de verdade: desligar o teste não desfaz o que foi registrado.
 
 ## Nota fiscal (bloco 3)
 

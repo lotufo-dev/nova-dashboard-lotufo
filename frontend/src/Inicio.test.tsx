@@ -67,6 +67,13 @@ describe("Início", () => {
     expect(prazos.getByRole("link", { name: /Complexo Leblon/ }).getAttribute("href")).toBe("/obras/7/reajuste");
   });
 
+  it("o Recebido do ano mostra o recebido real do RM quando o servidor manda (06/11/2026)", async () => {
+    api.mockResolvedValue(painel({ recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 12, real_centavos: 123_456_789 } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const rotulo = await screen.findByText("Recebido em 2026");
+    expect((rotulo.parentElement?.textContent ?? "").replace(/\s/g, " ")).toContain("R$ 1.234.567,89");
+  });
+
   it("#359: espelho com o aprovado mudado vira cartão que leva à medição; mais de um leva aos avisos", async () => {
     const esp = (medicao_id: number, situacao: PainelInicio["espelhos"][number]["situacao"]) =>
       ({ espelho_id: medicao_id + 100, contrato_id: 7, medicao_id, obra: "Obra A", titulo: "23ª Medição", situacao });
