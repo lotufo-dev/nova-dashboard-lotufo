@@ -73,11 +73,6 @@ const FAROL: Record<Obra["farol"], { rotulo: string; classe: string; forte?: boo
 function pct(f: number): string {
   return fmtPercentual(f, 1);
 }
-/** Desvio em pontos percentuais, com sinal e uma casa: "+2,9", "−16,7" (menos U+2212, como o `brl`), "0,0". */
-function pp(v: number): string {
-  const t = Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  return v > 0 ? `+${t}` : v < 0 ? `−${t}` : t;
-}
 /** "R$ 12,3 mi": o numero grande do Resumo; o valor exato vai no title. */
 function mi(centavos: number): string {
   if (centavos === 0) return "R$ 0";
@@ -422,13 +417,12 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
               <tr>
                 <th scope="col">Obra</th><th scope="col">Empreita</th><th scope="col" className="col-num">Contratual de execução (PI+VA)</th>
                 <th scope="col" className="col-num">Faturado</th><th scope="col" className="col-num">Saldo (contratual de execução − medido)</th>
-                <th scope="col" className="col-num">Desvio (p.p.)</th>
                 <th scope="col">Término e vigência</th><th scope="col">Status</th>
                 <th scope="col">Farol</th><th scope="col">Motivos</th>
               </tr>
             </thead>
             <tbody>
-              {obras.length === 0 && <tr><td colSpan={10}>Nenhuma obra neste farol.</td></tr>}
+              {obras.length === 0 && <tr><td colSpan={9}>Nenhuma obra neste farol.</td></tr>}
               {obras.map(o => {
                 const { visiveis, mais } = motivosDaLinha(o.motivos);
                 return (
@@ -437,13 +431,8 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                     <td>{o.empreita}{o.direito < 1 ? ` (${pct(o.direito)})` : ""}</td>
                     <td className="col-num dinheiro num">{brl(o.pi_va)}</td><td className="col-num dinheiro num">{brl(o.faturados)}</td>
                     <td className={`col-num dinheiro num${o.saldo < 0 ? " negativo" : ""}`}>{brl(o.saldo)}</td>
-                    {/* #296: medido − previsto acumulados ate' o mes fechado, sobre o contratual; embaixo, a linha de base
-                        (a anterior a ultima repactuacao quando a obra tem uma) */}
-                    {o.desvio_pp == null ? <td className="col-num num">—</td> : (
-                      <td className={`col-num num${o.desvio_pp < 0 ? " negativo" : ""}`}>
-                        {pp(o.desvio_pp)}<div className="campo__nota">{o.desvio_base}</div>
-                      </td>
-                    )}
+                    {/* 06/11/2026: a coluna "Desvio (p.p.)" (#296) saiu da tela: dependia de cronograma e de medicao em dia
+                        em toda obra; o servidor continua mandando `desvio_pp` */}
                     {/* as duas datas numa coluna so' (as colunas do QDOP cabem a 1366): o termino da execucao e,
                         embaixo, a vigencia */}
                     <td className="num">{data(o.termino)}<div className="campo__nota">vig. {data(o.vigencia)}</div></td>
@@ -469,7 +458,7 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                 <td className="col-num dinheiro num">{brl(soma(o => o.pi_va))}</td>
                 <td className="col-num dinheiro num">{brl(soma(o => o.faturados))}</td>
                 <td className={`col-num dinheiro num${soma(o => o.saldo) < 0 ? " negativo" : ""}`}>{brl(soma(o => o.saldo))}</td>
-                <td colSpan={5} />
+                <td colSpan={4} />
               </tr>
             </tfoot>
           </table>

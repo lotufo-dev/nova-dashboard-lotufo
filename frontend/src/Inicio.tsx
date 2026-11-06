@@ -135,7 +135,8 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
 
       <section aria-label="Números do mês" className="ini-numeros">
         <Numero rotulo={`Medido em ${nomeMes}`} valor={brl(m.valor_centavos)} />
-        <Numero rotulo={`Obras protocoladas em ${nomeMes}`}
+        {/* o protocolo e' contado no mes de hoje; o medido, na ultima competencia fechada */}
+        <Numero rotulo={`Obras protocoladas em ${fmtMesExtenso(p.hoje.slice(0, 7))}`}
           valor={<>{pr.obras_protocoladas.toLocaleString("pt-BR")} <span className="ini-numero__de">de {contar(pr.obras_ativas, "obra ativa", "obras ativas")}</span></>}>
           <span className="ini-barra" role="presentation">
             <span style={{ width: `${pr.obras_ativas ? Math.round(100 * pr.obras_protocoladas / pr.obras_ativas) : 0}%` }} /></span>

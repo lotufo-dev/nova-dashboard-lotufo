@@ -146,7 +146,7 @@ export default function AReceberPagina() {
   const temOrgao = (p.por_orgao?.length ?? 0) > 0;
   const corteAtual: Corte = temOrgao ? corte : "obra";
   const fatias: Fatia[] = corteAtual === "orgao"
-    ? (p.por_orgao ?? []).map(o => ({ chave: String(o.orgao_id), nome: o.orgao, quantidade: o.quantidade, valor_centavos: o.valor_centavos }))
+    ? (p.por_orgao ?? []).map(o => ({ chave: o.orgao, nome: o.orgao, quantidade: o.quantidade, valor_centavos: o.valor_centavos }))
     : p.por_obra.map(o => ({ chave: String(o.contrato_id), nome: o.obra, quantidade: o.quantidade, valor_centavos: o.valor_centavos }));
   const maior = Math.max(1, ...fatias.map(o => o.valor_centavos ?? o.quantidade));
 

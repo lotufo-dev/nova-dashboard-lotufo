@@ -37,29 +37,46 @@ def _medicao(c, cid, numero, criado_em, valor, estado="espelho_gerado", competen
     return c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
 
 
-def test_medido_no_mes_pela_competencia_contra_o_mes_anterior_inteiro(cenario):
-    # B-01 (10/10/2026): a mesma regra da Carteira -- competencia do mes, valor cheio, mes anterior inteiro
+def test_medido_da_ultima_competencia_fechada_contra_a_anterior(cenario):
+    # B-01 (10/10/2026): a regra da Carteira -- competencia, valor cheio, mes inteiro. 06/11/2026: o mes do cartao e' a
+    # ULTIMA COMPETENCIA FECHADA (em outubro, setembro), porque a medicao de um mes so' e' lancada no seguinte
     c, cid = cenario
-    _medicao(c, cid, 1, "2026-10-05 12:00:00", 1_000_000, competencia="2026-10")
-    _medicao(c, cid, 2, "2026-10-08 12:00:00", 5, competencia="2026-10")
-    _medicao(c, cid, 3, "2026-09-03 12:00:00", 400_000, competencia="2026-09")
-    _medicao(c, cid, 4, "2026-09-28 12:00:00", 999, competencia="2026-09")     # depois do dia 9: conta (mes inteiro)
-    _medicao(c, cid, 5, "2026-10-02 12:00:00", 777, estado="cancelada", competencia="2026-10")
-    _medicao(c, cid, 6, "2026-10-09 12:00:00", 50_000, competencia="2026-09")  # lancada hoje, competencia passada
-    _medicao(c, cid, 7, "2026-10-09 13:00:00", 3, competencia="2025-10")       # carga do legado lancada hoje: fora
+    _medicao(c, cid, 1, "2026-10-05 12:00:00", 1_000_000, competencia="2026-09")
+    _medicao(c, cid, 2, "2026-10-08 12:00:00", 5, competencia="2026-09")
+    _medicao(c, cid, 3, "2026-09-03 12:00:00", 400_000, competencia="2026-08")
+    _medicao(c, cid, 4, "2026-09-28 12:00:00", 999, competencia="2026-08")
+    _medicao(c, cid, 5, "2026-10-02 12:00:00", 777, estado="cancelada", competencia="2026-09")
+    _medicao(c, cid, 6, "2026-10-09 12:00:00", 50_000, competencia="2026-08")  # lancada hoje, competencia passada
+    _medicao(c, cid, 7, "2026-10-09 13:00:00", 3, competencia="2025-09")       # carga do legado lancada hoje: fora
+    _medicao(c, cid, 8, "2026-10-09 14:00:00", 9, competencia="2026-10")       # o mes corrente nao entra no cartao
     p = inicio.painel(c, HOJE)
     m = p["medido"]
     assert (m["valor_centavos"], m["anterior_centavos"], m["quantidade"]) == (1_000_005, 450_999, 2)
-    assert (m["competencia"], m["anterior_competencia"]) == ("2026-10", "2026-09")
+    assert (m["competencia"], m["anterior_competencia"]) == ("2026-09", "2026-08")
     assert m["ultimo_lancamento"] == "2026-10-09"
     assert p["por_contratante"] == [{"contratante": "MTPAR", "atual_centavos": 1_000_005, "anterior_centavos": 450_999}]
 
 
 def test_mes_sem_medicao_da_competencia(cenario):
     c, cid = cenario
-    _medicao(c, cid, 1, "2026-09-30 12:00:00", 10, competencia="2026-09")
+    _medicao(c, cid, 1, "2026-08-30 12:00:00", 10, competencia="2026-08")
     m = inicio.painel(c, HOJE)["medido"]
-    assert (m["quantidade"], m["valor_centavos"], m["anterior_centavos"], m["ultimo_lancamento"]) == (0, 0, 10, "2026-09-30")
+    assert (m["quantidade"], m["valor_centavos"], m["anterior_centavos"], m["ultimo_lancamento"]) == (0, 0, 10, "2026-08-30")
+
+
+def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_do_inicio(cenario):
+    # 06/11/2026: a competencia sem medicao lancada vale pela nota do RM emitida no mes seguinte (valor cheio)
+    c, cid = cenario
+    _medicao(c, cid, 1, "2026-09-03 12:00:00", 400_000, competencia="2026-08")
+    col = c.execute("SELECT e.coligada_rm FROM contratos k JOIN entidades e ON e.id=COALESCE(k.entidade_id, 1) WHERE k.id=?",
+                    (cid,)).fetchone()[0]
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.002' WHERE id=?", (cid,))
+    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo) "
+              "VALUES (?, 501, '501', '2026-10-06', 700001, 'ativa', '9.001.002')", (col,))
+    c.commit()
+    p = inicio.painel(c, HOJE)
+    assert (p["medido"]["valor_centavos"], p["medido"]["anterior_centavos"]) == (700_001, 400_000)
+    assert p["por_contratante"] == [{"contratante": "MTPAR", "atual_centavos": 700_001, "anterior_centavos": 400_000}]
 
 
 def test_prazos_e_reajuste_a_pedir(cenario):

@@ -92,31 +92,22 @@ describe("Carteira", () => {
     expect(leitura).toContain("medido de execução R$ 2.500,00");
   });
 
-  it("QDOP: a coluna Desvio (p.p.) mostra o número com sinal e a linha de base, e — sem cronograma (#296)", async () => {
-    const semCronograma = { ...PAINEL.obras[0], contrato_id: 8, seq: 2, obra: "Sem cronograma", desvio_pp: null, desvio_base: null };
-    const adiantada = { ...PAINEL.obras[0], contrato_id: 9, seq: 3, obra: "Adiantada", desvio_pp: 2.9, desvio_base: "vigente" };
-    const respostas: Record<string, unknown> = { ...RESPOSTAS, "/api/diretoria": { ...PAINEL, obras: [PAINEL.obras[0], semCronograma, adiantada] } };
-    api.mockImplementation((url: string) => Promise.resolve(respostas[url]));
+  it("QDOP: a coluna Desvio (p.p.) saiu da tela, mesmo com o servidor mandando o desvio (06/11/2026)", async () => {
+    const obras = [{ ...PAINEL.obras[0], desvio_pp: -16.7, desvio_base: "anterior" as const }];
+    api.mockImplementation((url: string) => Promise.resolve(url === "/api/diretoria" ? { ...PAINEL, obras } : RESPOSTAS[url]));
     render(<Diretoria ir={() => {}} aba="qdop" />);
     const tabela = await screen.findByRole("table", { name: /QDOP, na cota da Lotufo/ });
-    const cabecalho = within(tabela).getAllByRole("columnheader").map(h => h.textContent);
-    expect(cabecalho).toContain("Desvio (p.p.)");
-    // #262: a tabela soma o contratual sem o aditivo de reajuste (a base do saldo); o rotulo diz a base
-    expect(cabecalho).toContain("Contratual de execução (PI+VA)");
-    // #262 (revisao, rodada 3): o saldo e' o contratual de execucao menos o medido de execucao, nao menos o faturado
-    expect(cabecalho).toContain("Saldo (contratual de execução − medido)");
-    expect(cabecalho).not.toContain("Saldo (contratual − faturado)");
-    const coluna = cabecalho.indexOf("Desvio (p.p.)");
-    const celula = (obra: string) => {
-      const linha = within(tabela).getByText(obra).closest("tr") as HTMLElement;
-      return within(linha).getAllByRole("cell")[coluna];
-    };
-    expect(celula("Cavalaria").textContent).toBe("−16,7anterior");
-    expect(celula("Cavalaria").className).toContain("negativo");
-    // só a palavra da base, sem frase de apoio no ponteiro (texto-na-tela)
-    expect(celula("Cavalaria").querySelector("[title]")).toBeNull();
-    expect(celula("Adiantada").textContent).toBe("+2,9vigente");
-    expect(celula("Sem cronograma").textContent).toBe("—");
+    const cabecas = within(tabela).getAllByRole("columnheader").map(h => h.textContent);
+    expect(cabecas).not.toContain("Desvio (p.p.)");
+    expect(cabecas).toHaveLength(9);
+    // #262: a tabela soma o contratual sem o aditivo de reajuste (a base do saldo); o saldo e' o contratual de
+    // execucao menos o medido de execucao, nao menos o faturado
+    expect(cabecas).toContain("Contratual de execução (PI+VA)");
+    expect(cabecas).toContain("Saldo (contratual de execução − medido)");
+    expect(cabecas).not.toContain("Saldo (contratual − faturado)");
+    expect(tabela.textContent).not.toMatch(/−16,7|anterior/);
+    // cada linha tem uma célula por coluna
+    within(tabela).getAllByRole("row").slice(1, -1).forEach(l => expect(l.children).toHaveLength(9));
   });
 
   it("o Exportar QDOP aparece nas três abas", async () => {
