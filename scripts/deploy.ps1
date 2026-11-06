@@ -92,6 +92,7 @@ function Saudavel([switch]$ExigirInstalacao) {
 function Construir([string]$alvo) {
     & git -C $AppDir checkout --quiet --detach $alvo
     if ($LASTEXITCODE -ne 0) { throw "git checkout $alvo falhou (diretorio pinado sujo?)" }
+    $script:buildComecou = $true   # daqui em diante pip/npm mexem na venv e no dist (issue #443)
     Reconstruir
 }
 function Reconstruir {
@@ -174,9 +175,12 @@ function AvisarSeCopia {
 
 $anterior = (& git -C $AppDir rev-parse HEAD).Trim()
 # Sentinela do watchdog (issue #443, runbook "Subir e derrubar"): o finally so' o apaga com $soltarWatchdog, que vale
-# $true so' com a producao conferida: antes de o pinado mudar (nada mudou), na volta do build que deu certo (o processo
-# no ar nunca parou), no DEPLOY OK e no ROLLBACK OK. Qualquer outra saida, inclusive excecao, deixa o watchdog pausado.
+# $true so' com a producao conferida: antes de o pinado mudar (nada mudou no disco), na volta do build com a arvore
+# limpa e health 200 do processo no ar, no DEPLOY OK e no ROLLBACK OK. Qualquer outra saida, inclusive excecao, deixa o
+# watchdog pausado.
 $script:soltarWatchdog = $false
+$script:buildComecou = $false
+$script:sentinelaPreso = $false
 New-Item -ItemType File -Path $pause -Force | Out-Null   # segura o watchdog durante o deploy
 try {
     $script:soltarWatchdog = $true   # ate' o checkout do alvo o pinado e a producao seguem como estavam
@@ -209,17 +213,25 @@ try {
     try { Construir $alvo; ConferirInstalacao }
     catch {
         Write-Warning "Construir ou conferir a instalacao de $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
-        # Sem fetch (a rede pode ser a causa) e so reconstroi se o HEAD saiu de $anterior:
-        # se a falha foi no fetch/checkout do alvo, o HEAD nunca saiu e o build nao e refeito
-        # (npm/vite esvaziariam o dist servido com a producao no ar).
+        # Sem fetch (a rede pode ser a causa). Issue #443 (gate Sol da PR #475): se o checkout do alvo terminou, o build
+        # comecou e pip/npm podem ter mexido na venv e no dist, mesmo num deploy do mesmo commit: o anterior e' sempre
+        # reconstruido. Se nem o checkout terminou, o build nao e' refeito (npm/vite esvaziariam o dist servido com a
+        # producao no ar); um checkout pela metade aparece no git status. O watchdog so' sai com a arvore limpa em
+        # $anterior e o health 200 do processo no ar.
         try {
-            $atual = (& git -C $AppDir rev-parse HEAD).Trim()
+            $atual = "$(& git -C $AppDir rev-parse HEAD)".Trim()
             if ($atual -ne $anterior) {
                 & git -C $AppDir checkout --quiet --detach $anterior
                 if ($LASTEXITCODE -ne 0) { throw "git checkout $anterior falhou" }
+            }
+            if ($atual -ne $anterior -or $script:buildComecou) {
                 Reconstruir
                 RegistrarDeploy
             }
+            $alterados = & git -C $AppDir status --porcelain --untracked-files=no
+            if ($LASTEXITCODE -ne 0) { throw "git status do diretorio pinado falhou" }
+            if ($alterados) { throw "diretorio pinado com arquivos alterados em relacao a $anterior (checkout pela metade?)" }
+            if (-not (Saudavel)) { throw "a producao no ar nao respondeu 200 em /api/health depois da volta" }
             $script:soltarWatchdog = $true
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
@@ -258,6 +270,18 @@ try {
 } finally {
     # Solta o watchdog so' com a producao conferida (ver $soltarWatchdog acima). Nos caminhos de "intervir a mao" o
     # pinado esta' num commit ou build que nao se provou: o watchdog nao pode reerguer sozinho; o operador apaga depois.
-    if ($script:soltarWatchdog) { Remove-Item $pause -Force -ErrorAction SilentlyContinue }
+    # Issue #443 (gate Sol da PR #475): a remocao falha visivel (ACL, arquivo travado) e e' conferida; se o sentinela
+    # continuar la', a linha final diz MANTIDO e o script sai com 1, mesmo depois do DEPLOY OK.
+    if ($script:soltarWatchdog) {
+        if (Test-Path $pause) {
+            try { Remove-Item $pause -Force -ErrorAction Stop }
+            catch { Write-Warning "nao foi possivel apagar o sentinela $pause ($($_.Exception.Message))" }
+        }
+        if (Test-Path $pause) {
+            $script:sentinelaPreso = $true
+            Write-Host "sentinela $pause MANTIDO: a remocao falhou; watchdog pausado ate' o operador conferir a producao e apaga-lo a mao (docs\runbook.md, Subir e derrubar)" -ForegroundColor Red
+        }
+    }
     else { Write-Host "sentinela $pause MANTIDO: watchdog pausado ate' o operador conferir o pinado e apaga-lo (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow }
 }
+if ($script:sentinelaPreso) { exit 1 }

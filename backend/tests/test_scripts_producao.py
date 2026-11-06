@@ -213,7 +213,8 @@ def test_deploy_so_apaga_o_sentinela_com_a_producao_conferida():
     codigo = _codigo(script)
     assert codigo.count("Remove-Item $pause") == 1
     final = codigo[codigo.index("\n} finally {"):]
-    assert re.search(r"if \(\$script:soltarWatchdog\) \{ Remove-Item \$pause ", final)
+    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    else {")]
+    assert "Remove-Item $pause" in soltar
     assert "MANTIDO" in final
     # comeca falso, antes de criar o sentinela
     assert codigo.index("$script:soltarWatchdog = $false") < codigo.index("New-Item -ItemType File -Path $pause")
@@ -239,3 +240,45 @@ def test_deploy_so_apaga_o_sentinela_com_a_producao_conferida():
     for marca in ("deploy abortado no build E a volta", "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message))"):
         antes = codigo[:codigo.index(marca)].splitlines()[-2]   # a linha anterior ao Write-Host
         assert '$onde = "$(& git -C $AppDir rev-parse HEAD)".Trim()' in antes
+
+
+def test_deploy_volta_do_build_reconstroi_confere_a_arvore_e_o_health_antes_de_soltar():
+    # Gate Sol da PR #475 (issue #443): a volta do build decidia so' por HEAD != $anterior e soltava o watchdog sem
+    # conferir nada. Deploy do mesmo commit com pip/npm quebrando a venv ou o dist, checkout pela metade (HEAD parado,
+    # arvore misturada) ou reconstrucao sem health soltavam o sentinela com a producao quebrada no disco.
+    codigo = _codigo(_ler("deploy.ps1"))
+    construir = codigo[codigo.index("function Construir"):codigo.index("function Reconstruir")]
+    # o build comeca so' depois do checkout que deu certo
+    assert construir.index("throw \"git checkout $alvo falhou") < construir.index("$script:buildComecou = $true") \
+        < construir.index("Reconstruir")
+    assert codigo.index("$script:buildComecou = $false") < codigo.index("New-Item -ItemType File -Path $pause")
+    checkout = codigo.index("try { Construir $alvo; ConferirInstalacao }")
+    volta = codigo[checkout:codigo.index("$novo = (")]
+    volta = volta[:volta.index("deploy abortado no build E a volta")]
+    # o anterior e' reconstruido sempre que o build comecou, mesmo com o HEAD igual (deploy do mesmo commit)
+    condicao = volta.index("if ($atual -ne $anterior -or $script:buildComecou) {")
+    assert condicao < volta.index("Reconstruir", condicao)
+    # arvore limpa e health do processo no ar antes de soltar
+    status = volta.index("& git -C $AppDir status --porcelain --untracked-files=no")
+    assert "if ($alterados) { throw " in volta
+    health = volta.index("if (-not (Saudavel)) { throw ")
+    solta = volta.index("$script:soltarWatchdog = $true")
+    assert condicao < status < health < solta
+
+
+def test_deploy_confere_que_o_sentinela_saiu_e_falha_se_ficou():
+    # Gate Sol da PR #475 (issue #443): Remove-Item com SilentlyContinue podia falhar (ACL, bloqueio) e o script
+    # terminava em DEPLOY OK com o sentinela la', e o watchdog pausado para sempre.
+    codigo = _codigo(_ler("deploy.ps1"))
+    final = codigo[codigo.index("\n} finally {"):]
+    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    else {")]
+    assert "Remove-Item $pause -Force -ErrorAction Stop" in soltar
+    assert "SilentlyContinue" not in soltar
+    conferencia = soltar.rindex("if (Test-Path $pause) {")
+    assert soltar.index("Remove-Item $pause") < conferencia
+    depois = soltar[conferencia:]
+    assert "$script:sentinelaPreso = $true" in depois and "MANTIDO" in depois
+    # depois do finally (DEPLOY OK nao sai com exit), o script sai com 1 se o sentinela ficou
+    fim = final[final.index("\n}\n"):]
+    assert "if ($script:sentinelaPreso) { exit 1 }" in fim
+    assert codigo.index("$script:sentinelaPreso = $false") < codigo.index("New-Item -ItemType File -Path $pause")
