@@ -55,7 +55,8 @@ def pasta_cadastro(raiz: Path) -> Path:
 def _decodificar(bruto: bytes) -> str:
     """Unica porta de leitura de texto de chave: UTF-16 com BOM (o `>` e o `Out-File` do PowerShell 5.1),
     UTF-8 com ou sem BOM (`Set-Content -Encoding UTF8`) e, se o UTF-8 falhar, cp1252 (`Set-Content` ANSI;
-    a linha age1... e' sempre ASCII). UTF-16 sem BOM: os NUL saem antes de decodificar. O texto volta sem NUL.
+    a linha age1... e' sempre ASCII). UTF-16 sem BOM: os NUL saem antes de decodificar. O texto volta sem NUL (comentario alem de U+00FF
+    em UTF-16 sem BOM vira lixo; so' a linha age1..., ASCII, importa).
     UTF-16 com BOM truncado: UnicodeDecodeError."""
     if bruto.startswith((b"\xff\xfe", b"\xfe\xff")):
         return bruto.decode("utf-16").replace("\x00", "")

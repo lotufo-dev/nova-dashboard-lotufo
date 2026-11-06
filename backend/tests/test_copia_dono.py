@@ -172,7 +172,7 @@ def test_chave_privada_na_pasta_de_segredos_recusa_o_pacote(raiz, dono, codifica
 
 
 def test_arquivo_misto_bom_utf16_com_chave_privada_ascii_no_fim_recusa_o_pacote(raiz, dono):
-    conteudo = "# notas\r\n".encode("utf-16") + f"{dono}\n".encode("ascii")
+    conteudo = "# notas\r\n".encode("utf-16") + f"{dono}\r\n".encode("ascii")
     assert len(conteudo) % 2 == 0
     (raiz / "segredos" / "notas.txt").write_bytes(conteudo)
     with pytest.raises(copia_dono.CopiaDonoErro, match="chave privada"):
@@ -181,7 +181,7 @@ def test_arquivo_misto_bom_utf16_com_chave_privada_ascii_no_fim_recusa_o_pacote(
 
 def test_chave_publica_utf16_sem_bom_com_comentario_acentuado_gera_a_copia(raiz, dono):
     (raiz / "segredos" / "chave-publica-dono.txt").write_bytes(
-        f"# chave do Leonardo, São Paulo\r\n{dono.to_public()}\r\n".encode("utf-16-le"))
+        f"# chave do dono, São Paulo\r\n{dono.to_public()}\r\n".encode("utf-16-le"))
     assert _abrir(copia_dono.gerar(raiz, _pasta(raiz)), dono).getnames()
 
 
