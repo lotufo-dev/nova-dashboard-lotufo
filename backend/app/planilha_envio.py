@@ -19,7 +19,8 @@ import zipfile
 
 from app import arquivos, auditoria, carta, correio, db, envio_reserva, espelhos, medicoes, oficios, pleitos, tempo
 from app.protocolo import AnexosMudaram     # a mesma recusa (com `codigo`) do envio da nota e do protocolo
-from app.protocolo import tipos_no_oficio   # issue #462: a mesma regra cobra (ou nao) a peca na etapa `medicao`
+# issue #462: a mesma regra cobra (ou nao) a peca na etapa `medicao` do protocolo
+from app.protocolo import PECA_NO_OFICIO, tipos_no_oficio
 
 TABELA = "medicao_planilha_envios"
 TIPO_ENVIO = "planilha"
@@ -28,7 +29,6 @@ FAMILIAS_SEM_ENVIO = ("mtpar",)
 SEM_ENVIO_MTPAR = "Na MT-PAR não há envio da planilha/carta: o ofício vai com a nota"
 MIN_JUSTIFICATIVA = 10
 EXTENSOES_PECA = ("pdf", "xlsx")
-PECA_NO_OFICIO = "Esta peça vai no ofício assinado"
 ROTULO_NATUREZA = {"execucao": "Medição", "projeto": "Projeto", "reajuste": "Reajuste"}
 # data fixa dentro do zip: o mesmo arquivo da o mesmo zip (e o mesmo tamanho) na previa e no envio
 _DATA_ZIP = (1980, 1, 1, 0, 0, 0)
@@ -124,8 +124,8 @@ def situacao(conn, medicao_id: int) -> dict:
     m = _medicao(conn, medicao_id)
     motivo = _recusa(conn, m)
     try:
-        c, _, regras = _contexto(conn, m)
-        pedidas = _config_pecas(regras, m["tipo"], tipos_no_oficio(regras, c))
+        c, familia, regras = _contexto(conn, m)
+        pedidas = _config_pecas(regras, m["tipo"], tipos_no_oficio(familia, regras, c))
     except ValueError:
         pedidas = []
     return {"disponivel": motivo is None, "motivo": motivo, "envios": envios(conn, medicao_id),
@@ -148,14 +148,17 @@ def pecas(conn, medicao_id: int) -> list[dict]:
         "WHERE medicao_id=? AND removida_em IS NULL ORDER BY id", (medicao_id,))]
 
 
-def _pecas_com_arquivo(conn, medicao_id: int) -> list[dict]:
+def _pecas_com_arquivo(conn, medicao_id: int, no_oficio: set[str]) -> list[dict]:
+    """As pecas anexadas que vao no e-mail. A de um tipo que vai no oficio assinado (anexada antes de receber a
+    marca) nao vai: o oficio ja' a leva (issue #462, gate Sol)."""
     return [dict(r) for r in conn.execute(
-        "SELECT * FROM medicao_planilha_pecas WHERE medicao_id=? AND removida_em IS NULL ORDER BY id", (medicao_id,))]
+        "SELECT * FROM medicao_planilha_pecas WHERE medicao_id=? AND removida_em IS NULL ORDER BY id", (medicao_id,))
+        if r["tipo"] not in no_oficio]
 
 
-def _editavel(conn, m: dict) -> tuple[dict, dict]:
-    """(contrato, regras do orgao). As pecas so' mudam enquanto a planilha/carta pode ser enviada (fora da MT-PAR,
-    antes do boletim)."""
+def _editavel(conn, m: dict) -> tuple[dict, str, dict]:
+    """(contrato, familia, regras do orgao). As pecas so' mudam enquanto a planilha/carta pode ser enviada (fora da
+    MT-PAR, antes do boletim)."""
     c, familia, regras = _contexto(conn, m)
     if familia in FAMILIAS_SEM_ENVIO:
         raise ValueError(SEM_ENVIO_MTPAR)
@@ -167,15 +170,15 @@ def _editavel(conn, m: dict) -> tuple[dict, dict]:
                      "AND envio_id IS NULL AND envio_reservado_em IS NOT NULL LIMIT 1", (m["id"],)).fetchone()
     if r is not None:
         raise envio_reserva.reservado(conn, r["envio_reservado_em"], r["envio_reservado_por"])
-    return c, regras
+    return c, familia, regras
 
 
 def adicionar_peca(conn, usuario_id: int, medicao_id: int, tipo: str, nome: str, dados: bytes, ext: str) -> int:
     if ext not in EXTENSOES_PECA:
         raise ValueError("A peça é um PDF ou uma planilha .xlsx")
     m = _medicao(conn, medicao_id)
-    c, regras = _editavel(conn, m)
-    no_oficio = tipos_no_oficio(regras, c)
+    c, familia, regras = _editavel(conn, m)
+    no_oficio = tipos_no_oficio(familia, regras, c)
     pedidas = {x["tipo"]: x["rotulo"] for x in _config_pecas(regras, m["tipo"], no_oficio)}
     if tipo not in pedidas:
         anexaveis = [r for t, r in pedidas.items() if t not in no_oficio]
@@ -236,15 +239,16 @@ def _zip(nome: str, dados: bytes) -> bytes:
     return buf.getvalue()
 
 
-def _anexos(conn, c: dict, m: dict, v: dict, oficio: str) -> list[tuple[str, bytes, str]]:
-    """(nome, bytes, origem): o oficio assinado, a planilha zipada e as pecas anexadas, nessa ordem."""
+def _anexos(conn, c: dict, m: dict, v: dict, oficio: str, no_oficio: set[str]) -> list[tuple[str, bytes, str]]:
+    """(nome, bytes, origem): o oficio assinado, a planilha zipada e as pecas anexadas, nessa ordem (sem as que vao
+    no oficio assinado, `no_oficio`)."""
     base = _base(c, m, v["versao"])
     ext = v["arquivo_planilha"].rsplit(".", 1)[-1]
     out = [(f"{oficio} - {base}.pdf", arquivos.caminho_seguro(v["arquivo"]).read_bytes(), "oficio"),
            (f"Planilha - {base}.zip",
             _zip(f"Planilha - {base}.{ext}", arquivos.caminho_seguro(v["arquivo_planilha"]).read_bytes()), "planilha")]
     out += [(p["nome"], arquivos.caminho_seguro(p["arquivo"]).read_bytes(), "pecas")
-            for p in _pecas_com_arquivo(conn, m["id"])]
+            for p in _pecas_com_arquivo(conn, m["id"], no_oficio)]
     return out
 
 
@@ -285,8 +289,9 @@ def previa(conn, medicao_id: int, numero_oficio: str, remetente: str | None = No
     textos = _textos(conn, familia)
     v = _vigente(conn, medicao_id)
     oficio = _oficio(conn, c, numero_oficio, hoje)
-    anexos = _anexos(conn, c, m, v, oficio)
-    presentes = {p["tipo"] for p in pecas(conn, medicao_id)}
+    no_oficio = tipos_no_oficio(familia, regras, c)
+    anexos = _anexos(conn, c, m, v, oficio, no_oficio)
+    presentes = {p["tipo"] for p in pecas(conn, medicao_id)} - no_oficio     # so' o que vai (lista do corpo)
     campos = _campos(c, m, v, oficio, _lista_anexos(regras, m, anexos, presentes))
     para, copia = pleitos._destinatarios(conn, regras, c, hoje)     # protocolo do orgao, fiscal e as copias
     if remetente:       # o e-mail de login e a conta do Outlook (podem ser diferentes), como no protocolo
@@ -294,7 +299,7 @@ def previa(conn, medicao_id: int, numero_oficio: str, remetente: str | None = No
         copia = [x for x in copia if x.lower() not in fora]
     total = sum(len(b) for _, b, _ in anexos)
     pend = [{"codigo": "peca", "mensagem": f"Falta a peça que o órgão exige: {x['rotulo']}"}
-            for x in _config_pecas(regras, m["tipo"], tipos_no_oficio(regras, c))
+            for x in _config_pecas(regras, m["tipo"], no_oficio)
             if x["exigida"] and not x["no_oficio"] and x["tipo"] not in presentes]
     if total > correio.MAX_TOTAL:
         pend.append({"codigo": "tamanho", "mensagem": f"Anexos somam {total // (1024 * 1024)} MB, acima do limite "
@@ -347,9 +352,10 @@ def enviar(conn, usuario: dict, medicao_id: int, numero_oficio: str, para: list[
     try:
         # o que vai e' lido de novo depois da reserva: peca anexada ou removida desde a previa recusa aqui
         m = _medicao(conn, medicao_id)
-        c, _, _ = _contexto(conn, m)
+        c, familia, regras = _contexto(conn, m)
         v = conn.execute("SELECT * FROM medicao_planilhas WHERE id=?", (pv["planilha_id"],)).fetchone()
-        rotulados = _anexos(conn, c, m, dict(v), pv["numero_oficio"])
+        # a marca do cadastro e' lida de novo: mudou desde a previa, os anexos mudam e a conferencia recusa
+        rotulados = _anexos(conn, c, m, dict(v), pv["numero_oficio"], tipos_no_oficio(familia, regras, c))
         _conferir_anexos([{"nome": n, "tamanho": len(b), "sha256": hashlib.sha256(b).hexdigest()}
                           for n, b, _ in rotulados], pv["anexos"])
         envio_id = correio.enviar_e_registrar(conn, usuario, TIPO_ENVIO, para, [x.strip() for x in copia if x.strip()],

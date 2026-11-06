@@ -193,10 +193,18 @@ def test_peca_exigida_no_oficio_nao_e_pendencia_na_etapa_da_medicao(cenario):
         return [x["mensagem"] for x in protocolo.detalhe(c, pid)["pendencias"] if x["codigo"] == "peca"]
 
     assert faltam() == ["Planilha editável: não anexada"]
+    # a tela recebe a marca efetiva; o anexo da peca marcada e' recusado (gate Sol, PR #473)
+    assert {x["tipo"]: x["no_oficio"] for x in protocolo.listar(c, ids["sinfra"])["pecas"]} == \
+        {"boletim": True, "planilha": False}
+    with pytest.raises(ValueError, match="^Esta peça vai no ofício assinado$"):
+        protocolo.adicionar_peca(c, ids["uid"], pid, "boletim", "boletim.pdf", _pdf("BOLETIM 23"), "pdf")
+    assert protocolo.detalhe(c, pid)["pecas"] == []
     # a lista do contrato (vazia aqui) substitui a marca do orgao: o boletim volta a cobrar
     c.execute("UPDATE contratos SET pecas_no_oficio='[]' WHERE id=?", (ids["sinfra"],))
     c.commit()
     assert faltam() == ["Boletim de medição: não anexada", "Planilha editável: não anexada"]
+    assert {x["tipo"]: x["no_oficio"] for x in protocolo.listar(c, ids["sinfra"])["pecas"]}["boletim"] is False
+    protocolo.adicionar_peca(c, ids["uid"], pid, "boletim", "boletim.pdf", _pdf("BOLETIM 23"), "pdf")
 
 
 def test_peca_no_oficio_continua_cobrando_fora_da_etapa_da_medicao(cenario):

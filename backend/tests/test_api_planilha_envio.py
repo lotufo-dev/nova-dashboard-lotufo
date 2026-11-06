@@ -6,7 +6,8 @@ import zipfile
 
 import pytest
 
-from app import cadastro_aplicar, contratos, correio, db, envio_reserva, medicao_planilhas, planilha_envio, tempo
+from app import (cadastro_aplicar, contratos, correio, db, envio_reserva, medicao_planilhas, planilha_envio, protocolo,
+                 tempo)
 from tests.test_api_medicoes import XLSX, _arquivos_planilha
 from tests.test_envio_reserva import CorreioFalso
 from tests.test_protocolo import CARTAS, _contrato
@@ -482,6 +483,41 @@ def test_peca_no_oficio_nao_aceita_anexo_e_a_sem_marca_continua_anexavel(api):
     assert r.status_code == 422 and r.json()["detail"] == "Esta peça vai no ofício assinado"
     assert _linha("SELECT COUNT(*) AS n FROM medicao_planilha_pecas WHERE medicao_id=?", mid) == {"n": 0}
     assert _peca(cl, mid, "fotos").status_code == 200
+
+
+def test_peca_anexada_antes_da_marca_nao_vai_no_email(api):
+    """Gate Sol (PR #473): o oficio assinado ja' leva a peca; o anexo antigo nao vai de novo nem pesa no total."""
+    cl, cid, _ = api
+    mid = _planilha(cl, cid)
+    assert _peca(cl, mid, "boletim").status_code == 200
+    assert _peca(cl, mid, "fotos").status_code == 200
+    _reaplicar(pecas=PECAS_NO_OFICIO)
+    pv, pend = _pendencias(cl, mid)
+    assert pend == []
+    assert [(a["nome"], a["origem"]) for a in pv["anexos"]][2:] == [("fotos.pdf", "pecas")]
+    assert pv["total"] == sum(a["tamanho"] for a in pv["anexos"])
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
+    assert r.status_code == 200, r.text
+    c = db.get_conn()
+    nomes = [x[0] for x in c.execute("SELECT nome FROM envio_anexos WHERE envio_id=? ORDER BY id", (r.json()["envio_id"],))]
+    c.close()
+    assert "boletim.pdf" not in nomes and "fotos.pdf" in nomes
+
+
+def test_marca_posta_entre_a_previa_e_o_envio_recusa_pelos_anexos(api):
+    """A previa e' refeita no envio (planilha_envio.enviar) e a conferencia dos anexos recusa o que mudou."""
+    cl, cid, _ = api
+    mid, pv = _pronta(cl, cid)          # boletim anexado, sem a marca
+    _reaplicar(pecas=PECAS_NO_OFICIO)
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
+    assert r.status_code == 422 and r.json()["detail"]["codigo"] == "ANEXOS_MUDARAM"
+
+
+def test_marca_fora_da_sinfra_e_ignorada():
+    pecas = {"pecas": [{"tipo": "boletim", "no_oficio": True}]}
+    assert protocolo.tipos_no_oficio("sinfra", pecas, {}) == {"boletim"}
+    for familia in ("ses", "prefeitura", "mtpar"):
+        assert protocolo.tipos_no_oficio(familia, pecas, {"pecas_no_oficio": '["boletim"]'}) == set()
 
 
 def test_sem_a_marca_a_peca_exigida_continua_cobrando(api):
