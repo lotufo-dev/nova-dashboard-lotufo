@@ -582,7 +582,9 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     presentes = {x["tipo"] for x in _pecas(conn, p["id"])}
     # Na nota (sem carta) as pecas soltas sao opcionais (relatorios assinados): nao cobram as do orgao.
     usa_pecas = "pecas" in e.partes or "planilha" in e.soltos or ("pecas_soltas" in e.soltos and e.carta)
-    no_oficio = tipos_no_oficio(regras, c)          # issue #462: vai dentro do oficio assinado, nao cobra
+    # issue #462: na etapa `medicao` (o oficio da planilha/carta) a peca que vai dentro do oficio assinado nao cobra;
+    # nas outras etapas (SES, prefeitura) o pacote e' outro documento e a peca exigida continua cobrando
+    no_oficio = tipos_no_oficio(regras, c) if e.chave == "medicao" else set()
     for cfg in _config_pecas(regras, p["natureza"]):
         if usa_pecas and cfg["exigida"] and cfg["tipo"] not in presentes and cfg["tipo"] not in no_oficio:
             out.append({"codigo": "peca", "mensagem": f"{cfg['rotulo']}: não anexada"})

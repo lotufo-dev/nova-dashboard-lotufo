@@ -199,6 +199,18 @@ def test_peca_exigida_no_oficio_nao_e_pendencia_na_etapa_da_medicao(cenario):
     assert faltam() == ["Boletim de medição: não anexada", "Planilha editável: não anexada"]
 
 
+def test_peca_no_oficio_continua_cobrando_fora_da_etapa_da_medicao(cenario):
+    """Issue #462 (/code-review): o pacote da prefeitura (e da SES) e' outro documento, sem o oficio da planilha/carta."""
+    c, ids = cenario
+    regras = {"pecas": [{"tipo": "boletim", "rotulo": "Boletim de medição", "exigida": True, "no_oficio": True}]}
+    c.execute("UPDATE orgaos SET familia='prefeitura', regras=json_patch(regras, ?) WHERE chave='mtpar'",
+              (json.dumps(regras),))
+    c.commit()
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    assert [x["mensagem"] for x in protocolo.detalhe(c, pid)["pendencias"] if x["codigo"] == "peca"] == \
+        ["Boletim de medição: não anexada"]
+
+
 def test_pendencias_de_certidao_e_nota(cenario):
     c, ids = cenario
     c.execute("DELETE FROM medicao_documentos WHERE medicao_id=?", (ids["mtpar_exec"],))
