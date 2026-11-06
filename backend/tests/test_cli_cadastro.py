@@ -1046,6 +1046,64 @@ def test_carregar_medicoes_nao_cancela_medicao_com_planilha_gerada(tmp_path, mon
     assert "conflito (no banco a medição está planilha_gerada: a planilha/carta é dela; cancele pela tela)" in saida
 
 
+def _planilha_enviada(conn, mid):
+    conn.execute("UPDATE medicoes SET planilha_enviada_em='2025-08-01T10:00:00' WHERE id=?", (mid,))
+    conn.commit()
+
+
+def test_carregar_medicoes_nao_cancela_duplicata_com_planilha_enviada(tmp_path, monkeypatch, capsys):
+    # #387: protocolada sem NF, fora dos estados da planilha, mas com o oficio enviado ao orgao (#282): o ensaio
+    # recusa e a gravacao nao cancela
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, None)
+    dup = _existente(conn, cid, 5, "2025-07", 100001, None)
+    _planilha_enviada(conn, dup)
+    linha = "5;;execucao;2025-07;;;;;;;;;CI da prefeitura;4;"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert ("linha 2: nº 5 execução 2025-07: conflito (a planilha/carta enviada ao órgão é dela; cancele pela tela)"
+            in saida), saida
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [linha]))
+    assert codigo == 1 and "1 linha(s) com erro ou conflito" in saida, saida
+    assert _foto(conn) == antes
+    assert conn.execute("SELECT estado FROM medicoes WHERE id=?", (dup,)).fetchone()[0] == "protocolada"
+
+
+def test_carregar_medicoes_nao_preenche_pedido_com_planilha_enviada(tmp_path, monkeypatch, capsys):
+    # #387: protocolada sem pedido com a planilha/carta enviada: o ensaio recusa a linha com motivo, em vez de a
+    # gravacao estourar em `definir_valor` (PEDIDO_ENVIADO) e desfazer a carga com erro generico
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 3, "2025-06", None, None)
+    _planilha_enviada(conn, mid)
+    linha = "3;3;execucao;2025-06;;601.250,00;;;;;;;boletim 3;;"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert ("linha 2: nº 3 execução 2025-06: conflito (o pedido congelou no envio da planilha/carta ao órgão: "
+            "deixe o valor pedido vazio no CSV)" in saida), saida
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [linha]))
+    assert codigo == 1 and "1 linha(s) com erro ou conflito" in saida, saida
+    assert _foto(conn) == antes
+    # sem o pedido no CSV a linha passa (nada a preencher)
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência",
+                                       "3;3;execucao;2025-06;;;;;;;;;boletim 3;;"], capsys)
+    assert "linha 2: nº 3 execução 2025-06: igual" in saida, saida
+
+
+def test_carregar_medicoes_sem_planilha_enviada_cancela_e_preenche_o_pedido(tmp_path, monkeypatch, capsys):
+    # #387: sem planilha/carta enviada, cancelamento e primeiro preenchimento do pedido seguem como antes
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, None)
+    dup = _existente(conn, cid, 5, "2025-07", 100001, None)
+    mid = _existente(conn, cid, 3, "2025-06", None, None)
+    assert conn.execute("SELECT COUNT(*) FROM medicoes WHERE planilha_enviada_em IS NOT NULL").fetchone()[0] == 0
+    codigo, saida = _gravar(capsys, _csv(tmp_path, ["5;;execucao;2025-07;;;;;;;;;CI da prefeitura;4;",
+                                                     "3;3;execucao;2025-06;;601.250,00;;;;;;;boletim 3;;"]))
+    assert codigo == 0, saida
+    assert "cancelamento (duplicata da 4ª execução)" in saida and "pedido preenchido" in saida
+    assert conn.execute("SELECT estado FROM medicoes WHERE id=?", (dup,)).fetchone()[0] == "cancelada"
+    assert conn.execute("SELECT valor_protocolado_centavos FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == 60125000
+
+
 def test_carregar_medicoes_nao_corrige_competencia_com_planilha_gerada(tmp_path, monkeypatch, capsys):
     conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
     _existente(conn, cid, 4, "2025-07", 100001, None, estado="planilha_gerada")

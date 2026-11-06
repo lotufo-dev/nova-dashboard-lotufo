@@ -258,8 +258,8 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
     contrato = contrato_da_obra(conn, obra)
     janela = _janela(conn, contrato)
     existentes = {(m["numero"], m["tipo"]): m for m in conn.execute(
-        "SELECT id, numero, tipo, competencia, estado, valor_protocolado_centavos, valor_atestado_centavos "
-        "FROM medicoes WHERE contrato_id=?", (contrato["id"],))}
+        "SELECT id, numero, tipo, competencia, estado, valor_protocolado_centavos, valor_atestado_centavos, "
+        "planilha_enviada_em FROM medicoes WHERE contrato_id=?", (contrato["id"],))}
     lidas = []
     for n_linha, bruto in ler_csv(caminho):
         tipo_csv = bruto.get("tipo", "")
@@ -431,6 +431,11 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                     (existentes[(d["numero"], d["tipo"])]["id"],)).fetchone() else "a planilha/carta"
                 _virar(li, "conflito", f"no banco a medição está {estado}: {doc} é dela; cancele pela tela")
                 continue
+            if existentes[(d["numero"], d["tipo"])]["planilha_enviada_em"]:
+                # #387: protocolada (ou adiante) sem NF, fora dos estados da planilha, com o oficio ja' enviado ao
+                # orgao (#282): o documento e' dela; o mesmo caminho da planilha
+                _virar(li, "conflito", "a planilha/carta enviada ao órgão é dela; cancele pela tela")
+                continue
         if li["categoria"] == "correção":
             atual = existentes[(d["numero"], d["tipo"])]
             nfs = _nfs_vinculadas(conn, li["medicao_id"])
@@ -455,6 +460,14 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                     _virar(li, "conflito", f"a {d['numero']}ª de {ROTULOS[tipo]} continua em {outra['competencia']}: "
                                            "corrija as duas no mesmo CSV")
                     break
+        if li["categoria"] in ("valor diferente", "correção") and d["valor_pedido"] is not None:
+            atual = existentes[(d["numero"], d["tipo"])]
+            if atual["valor_protocolado_centavos"] is None and atual["planilha_enviada_em"]:
+                # #387: o primeiro preenchimento do pedido nao passa depois do envio (`medicoes.definir_valor`
+                # recusa com PEDIDO_ENVIADO); recusar aqui da' o motivo no ensaio em vez do erro na gravacao
+                _virar(li, "conflito", "o pedido congelou no envio da planilha/carta ao órgão: deixe o valor pedido "
+                                       "vazio no CSV")
+                continue
         m = existentes.get((d["numero"], d["tipo"])) if d else None
         escreve = li["categoria"] in ("cancelamento", "correção") or (li["categoria"] == "valor diferente" and (
             (d["valor_aprovado"] is not None and d["valor_aprovado"] != m["valor_atestado_centavos"])
