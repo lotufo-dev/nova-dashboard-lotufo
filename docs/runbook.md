@@ -187,8 +187,10 @@ novo está no lugar) e pede reimportar o `cert.pem` nos PCs.
 **Gerar de novo com a produção em HTTPS**: o uvicorn no ar segue com o par antigo até reiniciar, e o watchdog, que relê o
 `cert.pem`, passa a recusar o certificado antigo e reinicia a produção sem aviso. Por isso: sentinela
 (`New-Item -ItemType File -Path C:\DashboardLotufo\watchdog.pause -Force | Out-Null`), `gerar_certificado.ps1`, logo depois
-`Stop-ScheduledTask DashboardLotufo; Start-ScheduledTask DashboardLotufo`, `saude_local.ps1 -Porta <porta>` 200, apagar o
-sentinela e reimportar o `cert.pem` nos PCs (a operação vê aviso até reimportar).
+`Stop-ScheduledTask DashboardLotufo`; `Get-NetTCPConnection -LocalPort <porta> -State Listen` vazio (se sobrar o uvicorn órfão,
+`Stop-Process -Id <OwningProcess> -Force` nele, como o deploy faz; incidente de 21/09/2026: o antigo seguiria na porta com o
+certificado velho e o novo morreria com WinError 10048); `Start-ScheduledTask DashboardLotufo`; `saude_local.ps1 -Porta <porta>`
+200; apagar o sentinela e reimportar o `cert.pem` nos PCs (a operação vê aviso até reimportar).
 
 **Watchdog com problema no conferidor**: `cert.pem` ausente ou ilegível, ou o C# da saúde bloqueado (antivírus no `Add-Type`),
 não reinicia a produção: o `watchdog.log` registra "CONFERIDOR com problema, producao NAO reiniciada: <motivo>" a cada rodada,
@@ -241,7 +243,8 @@ entram de novo por HTTPS. Não há comando para derrubar todas as sessões de um
    ferramentas do navegador (F12 › Aplicativo › Cookies) o cookie `sessao` está com `Secure`; `http://<vm>:8080` não abre a dashboard.
 8. Avisar a operação do endereço novo (`https://<vm>:8080`) e trocar o endereço do robô do SIGA (seção "Monitor do SIGA").
 
-**Voltar atrás**: sentinela, `Stop-ScheduledTask DashboardLotufo`, `instalar_autostart.ps1` com os mesmos parâmetros **mais
+**Voltar atrás**: sentinela, `Stop-ScheduledTask DashboardLotufo`, `Get-NetTCPConnection -LocalPort 8080 -State Listen` vazio
+(se sobrar o uvicorn órfão, `Stop-Process` nele, como no passo 5), `instalar_autostart.ps1` com os mesmos parâmetros **mais
 `-SemTls`**, `instalar_watchdog.ps1 -SemTls`, `Start-ScheduledTask DashboardLotufo`, `saude_local.ps1 -Porta 8080
 -SemTls` 200, apagar o sentinela e avisar a operação de que o endereço volta a `http://<vm>:8080`.
 
