@@ -181,14 +181,18 @@ describe("Cartão da planilha/carta", () => {
   });
 
   it("peça que vai no ofício assinado mostra o selo e não tem Anexar; a sem a marca continua com Anexar (issue #462)", async () => {
-    api.mockResolvedValue(detalhe({}, { pecas_do_orgao: [
+    // a memoria foi anexada antes de receber a marca: nao vai no e-mail, entao nao aparece como Anexada
+    const antiga = { id: 7, tipo: "boletim", nome: "memoria.pdf", tamanho: 10, ext: "pdf", sha256: "c".repeat(64), criado_em: "2026-11-01" };
+    api.mockResolvedValue(detalhe({}, { pecas: [antiga], pecas_do_orgao: [
       { tipo: "boletim", rotulo: "Memória de cálculo", exigida: true, no_oficio: true },
       { tipo: "fotos", rotulo: "Registro fotográfico", exigida: false, no_oficio: false }] }));
     render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
     const tabela = await screen.findByRole("table", { name: "Peças da planilha/carta" });
-    const memoria = within(tabela).getByRole("rowheader", { name: "Memória de cálculo" }).closest("tr")!;
+    const memoria = within(tabela).getByRole("rowheader", { name: /^Memória de cálculo/ }).closest("tr")!;
+    expect(within(memoria).getByText("memoria.pdf")).toBeTruthy();        // ainda se remove
     expect(within(memoria).getByText("No ofício assinado")).toBeTruthy();
     expect(within(memoria).queryByText("Falta")).toBeNull();
+    expect(within(memoria).queryByText("Anexada")).toBeNull();
     expect(within(memoria).queryByLabelText("Anexar Memória de cálculo")).toBeNull();
     const fotos = within(tabela).getByRole("rowheader", { name: "Registro fotográfico" }).closest("tr")!;
     expect(within(fotos).getByText("Opcional")).toBeTruthy();
