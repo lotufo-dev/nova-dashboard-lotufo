@@ -180,6 +180,21 @@ describe("Cartão da planilha/carta", () => {
     expect(api.mock.calls.some(c => c[0] === "/api/medicoes/5/envio-planilha")).toBe(false);
   });
 
+  it("peça que vai no ofício assinado mostra o selo e não tem Anexar; a sem a marca continua com Anexar (issue #462)", async () => {
+    api.mockResolvedValue(detalhe({}, { pecas_do_orgao: [
+      { tipo: "boletim", rotulo: "Memória de cálculo", exigida: true, no_oficio: true },
+      { tipo: "fotos", rotulo: "Registro fotográfico", exigida: false, no_oficio: false }] }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    const tabela = await screen.findByRole("table", { name: "Peças da planilha/carta" });
+    const memoria = within(tabela).getByRole("rowheader", { name: "Memória de cálculo" }).closest("tr")!;
+    expect(within(memoria).getByText("No ofício assinado")).toBeTruthy();
+    expect(within(memoria).queryByText("Falta")).toBeNull();
+    expect(within(memoria).queryByLabelText("Anexar Memória de cálculo")).toBeNull();
+    const fotos = within(tabela).getByRole("rowheader", { name: "Registro fotográfico" }).closest("tr")!;
+    expect(within(fotos).getByText("Opcional")).toBeTruthy();
+    expect(within(fotos).getByLabelText("Anexar Registro fotográfico")).toBeTruthy();
+  });
+
   it("onde o sistema não envia (MT-PAR), o motivo aparece e fica o registro por fora", async () => {
     const motivo = "Na MT-PAR não há envio da planilha/carta: o ofício vai com a nota";
     api.mockResolvedValue(detalhe({}, { disponivel: false, motivo }));
