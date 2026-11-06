@@ -1,4 +1,4 @@
-"""Migracao 063 (issue #462): `contratos.pecas_no_oficio`, NULL por padrao (segue o orgao), e reaplicar nao perde
+"""Migracao 064 (issue #462): `contratos.pecas_no_oficio`, NULL por padrao (segue o orgao), e reaplicar nao perde
 o que ja' estava gravado."""
 import pytest
 
@@ -15,13 +15,13 @@ def conn(tmp_path, monkeypatch):
     c.close()
 
 
-def test_063_acrescenta_a_coluna_nula_e_reaplicar_preserva(conn):
+def test_064_acrescenta_a_coluna_nula_e_reaplicar_preserva(conn):
     sql = ("INSERT INTO contratos (orgao, numero_instrumento, objeto, valor_original_centavos, nome_curto, "
            "pecas_no_oficio) VALUES ('Órgão', ?, 'Obra', 100, ?, ?)")
     conn.execute(sql, ("001/2026", "Obra A", None))
     conn.execute(sql, ("002/2026", "Obra B", "[]"))
     conn.commit()
-    conn.execute("DELETE FROM schema_migrations WHERE nome='063_pecas_no_oficio.sql'"); conn.commit()
+    conn.execute("DELETE FROM schema_migrations WHERE nome='064_pecas_no_oficio.sql'"); conn.commit()
     db.migrate(conn)
     assert [tuple(r) for r in conn.execute("SELECT nome_curto, pecas_no_oficio FROM contratos ORDER BY id")] == \
         [("Obra A", None), ("Obra B", "[]")]

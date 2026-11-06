@@ -327,7 +327,7 @@ def _config_pecas(regras: dict, natureza: str | None = None) -> list[dict]:
 
 def tipos_no_oficio(regras: dict, c: dict) -> set[str]:
     """Issue #462: tipos de peca que vao dentro do PDF assinado do oficio (nao cobram e nao se anexam). A lista do
-    contrato (`contratos.pecas_no_oficio`, migracao 063; vazia desliga todas) substitui a marca `no_oficio` das
+    contrato (`contratos.pecas_no_oficio`, migracao 064; vazia desliga todas) substitui a marca `no_oficio` das
     pecas do orgao."""
     do_contrato = c.get("pecas_no_oficio")
     if do_contrato is not None:
