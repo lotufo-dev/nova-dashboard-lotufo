@@ -4,8 +4,8 @@
 # de segredos (o .pfx intermediário é apagado no fim). Validade de 5 anos.
 # Nomes no certificado (SAN): o nome curto da máquina (-NomeCurto, padrão DASH_SERVIDOR ou
 # o nome do computador), o nome DNS completo (-NomeDns, padrão <nome>.<domínio> quando a
-# máquina está no domínio), "localhost" e os IPs (-Ip, padrão os IPv4 da máquina fora de
-# 127.* e 169.254.*). Conferir a lista impressa no fim antes de distribuir o cert.pem.
+# máquina está no domínio), "localhost" e os IPs (-Ip, padrão o IPv4 da placa da rota
+# padrão). Conferir a lista impressa no fim antes de distribuir o cert.pem.
 [CmdletBinding()]
 param(
     [string]$Raiz = "C:\DashboardLotufo",
@@ -31,10 +31,16 @@ if (-not $NomeDns) {
     else { Write-Warning "Maquina fora do dominio: sem nome DNS completo no certificado (passe -NomeDns se houver)." }
 }
 if ($Ip.Count -eq 0) {
-    $Ip = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
-        ForEach-Object { $_.IPAddress })
-    if ($Ip.Count -eq 0) { Write-Warning "Nenhum IPv4 encontrado: certificado sem IP (passe -Ip)." }
+    # So' o IPv4 da placa da rota padrao (a da rede da empresa): VPN, Tailscale e placas avulsas ficam de fora de um
+    # certificado de 5 anos. O runbook passa -Ip explicito.
+    $rota = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
+        Sort-Object -Property RouteMetric | Select-Object -First 1
+    if ($rota) {
+        $Ip = @(Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $rota.InterfaceIndex -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+            ForEach-Object { $_.IPAddress })
+    }
+    if ($Ip.Count -eq 0) { Write-Warning "Nenhum IPv4 na placa da rota padrao: certificado sem IP (passe -Ip)." }
 }
 # Nome e IP entram no texto da extensao SAN ("DNS=a&IPAddress=b"): um "&" ou "=" num valor abriria outra entrada.
 # So' passa nome DNS (letras, digitos, ponto e hifen) e IP que o .NET le como IP.

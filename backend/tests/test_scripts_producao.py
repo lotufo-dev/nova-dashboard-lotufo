@@ -69,7 +69,10 @@ def test_deploy_le_a_porta_da_tarefa_agendada():
     assert "[int]$Porta = 0" in script
     assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in script
     assert re.search(r'-match "-Porta \(\\d\+\)"', script)
-    assert "return 80" in script  # tarefa sem -Porta = producao de hoje
+    # tarefa sem -Porta = padrao do modo do rodar_producao.ps1 (issue #425, /code-review): 80 com -SemTls, 8443 com TLS
+    funcao = script[script.index("function PortaDaTarefa"):script.index("$portaTarefa = PortaDaTarefa")]
+    assert 'if ($argumentosTarefa -match "-SemTls\\b") { return 80 }' in funcao
+    assert funcao.rstrip().endswith("return 8443\n}")
     assert "nao bate com a tarefa DashboardLotufo" in script
     # a conferencia vem antes de qualquer git checkout
     assert script.index("$portaTarefa = PortaDaTarefa") < script.index("function Construir")
@@ -223,7 +226,7 @@ def test_rodar_producao_le_o_certificado_de_segredos_tls():
 def test_autostart_com_tls_confere_o_certificado_antes_de_registrar():
     script = _ler("instalar_autostart.ps1")
     conferencia = script.index('Join-Path $Raiz "segredos\\tls\\cert.pem"')
-    assert conferencia < script.index("Register-ScheduledTask")
+    assert conferencia < script.index("Register-ScheduledTask -TaskName")
     assert "if (-not $SemTls)" in script
 
 
@@ -239,6 +242,12 @@ def test_saude_local_confere_o_thumbprint_so_em_localhost():
     # o PowerShell 5.1 nasce sem TLS 1.2 e o uvicorn nao aceita menos
     assert "SecurityProtocolType.Tls12" in codigo
     assert "function Get-ThumbprintDoCertificado" in codigo and "function Invoke-SaudeLocal" in codigo
+    # /code-review: o C# so' compila no primeiro pedido https (nada de Add-Type solto no dot-source)
+    corpo = codigo[codigo.index("function Initialize-DashSaudeLocal"):]
+    assert codigo.index("Add-Type") > codigo.index("function Initialize-DashSaudeLocal")
+    assert "Initialize-DashSaudeLocal\n" in corpo[corpo.index("function Invoke-SaudeLocal"):]
+    # 4xx/5xx em http devolvem o status como em https (503 = banco fora), em vez de virar "sem resposta"
+    assert "catch [System.Net.WebException]" in codigo and "$_.Exception.Response" in codigo
 
 
 @pytest.mark.parametrize("nome", ["comum_tls.ps1", "watchdog.ps1", "instalar_watchdog.ps1", "deploy.ps1",
@@ -263,6 +272,10 @@ def test_watchdog_confere_por_https_com_o_certificado_da_instalacao():
     assert "[switch]$SemTls" in instalador and '[string]$Raiz = "C:\\DashboardLotufo"' in instalador
     assert '$certificado = Join-Path $Raiz "segredos\\tls\\cert.pem"' in instalador
     assert '-Certificado `"$certificado`"' in instalador
+    # /code-review: o modo vem conferido contra o da tarefa principal, antes de registrar
+    assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in instalador
+    assert '$tarefaSemTls -ne [bool]$SemTls' in instalador
+    assert instalador.index("$tarefaSemTls -ne [bool]$SemTls") < instalador.index('Register-ScheduledTask -TaskName')
     watchdog = _ler("watchdog.ps1")
     assert '[string]$Certificado = ""' in watchdog
     assert '. (Join-Path $PSScriptRoot "comum_tls.ps1")' in watchdog

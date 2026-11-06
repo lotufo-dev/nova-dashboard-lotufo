@@ -97,7 +97,7 @@ Copiar a pasta de produção para outra máquina não basta para ter uma dashboa
 - **Deploy**: depois do build e **antes de parar a produção**, o `deploy.ps1` roda com o código novo `python -m app.cli instalacao verificar --arquivo <raiz>\segredos\instalacao.json` (sai 0 só com `Instalação autorizada para esta máquina.`, sem o atalho do dev). A `<raiz>` é a do `-Raiz` gravado na tarefa agendada, a mesma que o `rodar_producao.ps1` usa; dela sai também o banco do backup pré-migração. `-Raiz` informado e diferente da tarefa aborta antes do checkout, como a porta. Recusado, o deploy para ali, sem migrar o banco (as migrações só rodam na subida) e sem trocar o processo: aviso `instalacao nao autorizada para o commit novo` e linha final `deploy abortado no build; producao segue no commit anterior ...`. Depois do reinício ele ainda exige `instalacao: autorizada` no health; outro valor conta como falha (aviso `health 200, mas a instalacao nao esta autorizada: ...`) e dispara o rollback. O rollback confere só o 200 (o commit anterior pode nem ter o campo); se ele voltar em modo cópia, o `ROLLBACK OK` vem seguido do aviso `producao de volta, mas em modo copia: ...`. Por essa conferência, o `deploy.ps1` só sobe commit que já tem a instalação assinada.
 - **Primeiro deploy com a instalação assinada (PR #437 da #417), uma vez só.** O PowerShell lê o `deploy.ps1` inteiro antes do checkout, e o do diretório pinado ainda é o antigo, que só confere o 200: rodado dali, sem o arquivo ele terminaria em `DEPLOY OK` com a produção em modo cópia (sem e-mail e sem RM). Nesta vez:
   1. Copiar o arquivo assinado para a VM (subseção abaixo) e conferir `Test-Path C:\DashboardLotufo\segredos\instalacao.json` → `True`.
-  2. Rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, com os scripts que ele chama pelo `$PSScriptRoot` ao lado (hoje `backup_pre_migracao.ps1`; depois da #386, também `comum_agendador.ps1`): `New-Item -ItemType Directory -Force C:\Temp\deploy | Out-Null`, `git -C C:\DashboardLotufo\app fetch`, `git -C C:\DashboardLotufo\app show origin/master:scripts/deploy.ps1 | Set-Content -Encoding ascii C:\Temp\deploy\deploy.ps1` (idem os outros) e `& C:\Temp\deploy\deploy.ps1`, com o sentinela e o resto como em "Subir e derrubar". **Pelo Mac**, esses comandos vão num `.ps1` temporário no Mac (fora do repositório), copiado para a VM com `scp script.ps1 <vm>:C:/Temp/deploy-417.ps1` e rodado com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\deploy-417.ps1'`, nunca pelo stdin (`-Command -`): ali o `git fetch` consome o resto do script e ele para no meio. Conferir `$LASTEXITCODE` depois de cada `git` e apagar o `.ps1` no fim.
+  2. Rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, com os scripts que ele chama pelo `$PSScriptRoot` ao lado (hoje `backup_pre_migracao.ps1` e, desde a #425, `comum_tls.ps1`; depois da #386, também `comum_agendador.ps1`): `New-Item -ItemType Directory -Force C:\Temp\deploy | Out-Null`, `git -C C:\DashboardLotufo\app fetch`, `git -C C:\DashboardLotufo\app show origin/master:scripts/deploy.ps1 | Set-Content -Encoding ascii C:\Temp\deploy\deploy.ps1` (idem os outros) e `& C:\Temp\deploy\deploy.ps1`, com o sentinela e o resto como em "Subir e derrubar". **Pelo Mac**, esses comandos vão num `.ps1` temporário no Mac (fora do repositório), copiado para a VM com `scp script.ps1 <vm>:C:/Temp/deploy-417.ps1` e rodado com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\deploy-417.ps1'`, nunca pelo stdin (`-Command -`): ali o `git fetch` consome o resto do script e ele para no meio. Conferir `$LASTEXITCODE` depois de cada `git` e apagar o `.ps1` no fim.
   3. Logo depois, conferir no `/api/health` a `instalacao: autorizada`. Se não vier (o script antigo rodou por engano, por exemplo), voltar à mão para o commit anterior com o script **dele**: os mesmos comandos do passo 2 com `git show <anterior>:scripts/...` para `C:\Temp\deploy-anterior` e `& C:\Temp\deploy-anterior\deploy.ps1 -Ref <anterior>`; depois resolver o arquivo e repetir o passo 2.
 
 ### Chave do dono (uma vez, no Mac)
@@ -188,7 +188,8 @@ novo está no lugar) e pede reimportar o `cert.pem` nos PCs.
 **só** o certificado da instalação: comparam o thumbprint do certificado apresentado com o de `<raiz>\segredos\tls\cert.pem`
 (`scripts\comum_tls.ps1`). A verificação não é desligada em lugar nenhum, e o pedido só sai para `localhost`. O `deploy.ps1` lê o
 modo da tarefa (com `-SemTls` nos argumentos, HTTP; sem, HTTPS) e, no HTTPS, não começa sem o `cert.pem` ("certificado do HTTPS
-nao encontrado", nada alterado). O watchdog relê o `cert.pem` a cada rodada: certificado trocado não pede reinstalar o watchdog.
+nao encontrado", nada alterado). O `instalar_watchdog.ps1` recusa instalar num modo diferente do da tarefa principal. O watchdog
+relê o `cert.pem` a cada rodada: certificado trocado não pede reinstalar o watchdog.
 
 **Firewall.** A regra da porta continua a mesma (TCP 8080 só de faixas privadas, seção "Mudar de servidor"); o nome dela diz
 "HTTP", mas o que ela libera é a porta. Numa instalação nova, como administrador:
@@ -205,7 +206,7 @@ Feito pela skill `deploy`, avisando a operação do endereço novo. Parada de um
    as linhas "Nomes no certificado" (os três nomes e o IP) e "Valido ate" (5 anos), e guardar o thumbprint impresso.
 3. **Ensaio da leitura do certificado**, antes de parar nada: `scripts\saude_local.ps1 -Porta 8080 -SemTls` dá 200 (a produção
    segue em HTTP). Num PowerShell de administrador, em `C:\DashboardLotufo\app`:
-   `. .\scripts\comum_tls.ps1; Get-ThumbprintDoCertificado -Caminho C:\DashboardLotufo\segredos\tls\cert.pem` imprime o mesmo
+   `. .\scripts\comum_tls.ps1; Initialize-DashSaudeLocal; Get-ThumbprintDoCertificado -Caminho C:\DashboardLotufo\segredos\tls\cert.pem` imprime o mesmo
    thumbprint do passo 2, e `[DashSaudeLocal]::Pedir("https://<vm>:8080/api/health", "<thumbprint>", 5000)` **recusa** ("so' fala
    com localhost").
 4. **Certificado nos PCs da operação** (seção abaixo), antes do corte, para ninguém ver aviso.
@@ -231,7 +232,8 @@ Feito pela skill `deploy`, avisando a operação do endereço novo. Parada de um
 
 **Rollback do deploy para um commit anterior à #425** (automático do `deploy.ps1` ou à mão), com a tarefa já em HTTPS: o
 `rodar_producao.ps1` antigo procura o certificado em `C:\DashboardLotufo\app\certs`, que não existe, e o servidor não sobe
-(`ROLLBACK TAMBEM FALHOU`). Nesse caso, voltar a tarefa e o watchdog para `-SemTls` (parágrafo acima) e subir de novo.
+(`ROLLBACK TAMBEM FALHOU`). O watchdog para junto, sem nada no `watchdog.log`: o `watchdog.ps1` antigo não conhece o
+`-Certificado` que a tarefa dele passa. Nesse caso, voltar a tarefa e o watchdog para `-SemTls` (parágrafo acima) e subir de novo.
 
 ## Certificado nos navegadores
 O certificado é autoassinado: cada PC da operação precisa confiar nele uma vez. Instalação à mão pelo Leo, sem GPO

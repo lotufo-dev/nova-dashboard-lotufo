@@ -20,6 +20,17 @@ $ErrorActionPreference = "Stop"
 $script = Join-Path $PSScriptRoot "watchdog.ps1"
 if (-not (Test-Path $script)) { throw "watchdog.ps1 nao encontrado em $script" }
 if (-not (Test-Path (Join-Path $PSScriptRoot "comum_tls.ps1"))) { throw "comum_tls.ps1 nao encontrado ao lado de $script" }
+# O modo tem que ser o da tarefa principal: watchdog em HTTPS com a producao em HTTP (ou o contrario) nunca a veria
+# saudavel e a reiniciaria a cada 3 minutos. Com a tarefa instalada, o -SemTls dos argumentos dela manda.
+$tarefa = Get-ScheduledTask -TaskName "DashboardLotufo" -ErrorAction SilentlyContinue
+if ($tarefa) {
+    $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
+    $tarefaSemTls = [bool]($argumentosTarefa -match "-SemTls\b")
+    if ($tarefaSemTls -ne [bool]$SemTls) {
+        if ($tarefaSemTls) { $modo = "HTTP (-SemTls)" } else { $modo = "HTTPS (sem -SemTls)" }
+        throw "a tarefa DashboardLotufo esta em $modo; instale o watchdog no mesmo modo. Nada foi alterado."
+    }
+}
 if ($Porta -eq 0) {
     if ($SemTls) { $Porta = 80 } else { $Porta = 8443 }
 }

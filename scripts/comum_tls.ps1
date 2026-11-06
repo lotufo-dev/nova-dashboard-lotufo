@@ -4,13 +4,18 @@
 # O certificado da producao e' autoassinado e emitido para o nome da maquina, nao para "localhost" de forma
 # confiavel na cadeia do Windows: o Invoke-WebRequest do PowerShell 5.1 recusaria https://localhost:<porta>. Em vez
 # de desligar a verificacao (o que aceitaria qualquer certificado), o pedido aceita SO' o certificado da propria
-# instalacao, comparando o thumbprint com o do <raiz>\segredos\tls\cert.pem. A validacao e' do PEDIDO
-# (HttpWebRequest.ServerCertificateValidationCallback), nunca a global do processo (ServicePointManager), e so' vale
-# para localhost/127.0.0.1: qualquer outro endereco e' recusado antes de sair.
+# instalacao, comparando o thumbprint com o do <raiz>\segredos\tls\cert.pem. A validacao do certificado e' do PEDIDO
+# (HttpWebRequest.ServerCertificateValidationCallback), nunca a callback global do processo (ServicePointManager), e so'
+# vale para localhost/127.0.0.1: qualquer outro endereco e' recusado antes de sair. A unica coisa global que o pedido
+# toca e' acrescentar TLS 1.2 aos protocolos do processo (o .NET Framework nao tem isso por pedido); nada e' tirado.
+#
+# A classe em C# so' e' compilada no primeiro pedido https (Add-Type chama o compilador): a producao em HTTP (-SemTls)
+# continua so' com o Invoke-WebRequest de antes.
 #
 # Este arquivo fica so' com ASCII (sem BOM, o 5.1 le como ANSI e acento quebra o parse).
 
-if (-not ("DashSaudeLocal" -as [type])) {
+function Initialize-DashSaudeLocal {
+    if ("DashSaudeLocal" -as [type]) { return }
     Add-Type -TypeDefinition @'
 using System;
 using System.IO;
@@ -86,10 +91,21 @@ function Invoke-SaudeLocal {
         [int]$TimeoutSec = 12
     )
     if ($Url -like "http://*") {
-        $r = Invoke-WebRequest -Uri $Url -TimeoutSec $TimeoutSec -UseBasicParsing
-        return [pscustomobject]@{ StatusCode = [int]$r.StatusCode; Content = [string]$r.Content }
+        try {
+            $r = Invoke-WebRequest -Uri $Url -TimeoutSec $TimeoutSec -UseBasicParsing
+            return [pscustomobject]@{ StatusCode = [int]$r.StatusCode; Content = [string]$r.Content }
+        }
+        catch [System.Net.WebException] {
+            # 4xx/5xx (ex.: 503 com o banco fora) vem como excecao com a resposta dentro: devolver como no https.
+            $resposta = $_.Exception.Response
+            if ($null -eq $resposta) { throw }
+            $leitor = New-Object System.IO.StreamReader -ArgumentList $resposta.GetResponseStream()
+            try { $corpo = $leitor.ReadToEnd() } finally { $leitor.Dispose(); $resposta.Close() }
+            return [pscustomobject]@{ StatusCode = [int]$resposta.StatusCode; Content = $corpo }
+        }
     }
     if (-not $Certificado) { throw "saude por https sem o caminho do certificado da instalacao" }
+    Initialize-DashSaudeLocal
     $thumbprint = Get-ThumbprintDoCertificado -Caminho $Certificado
     $r = [DashSaudeLocal]::Pedir($Url, $thumbprint, $TimeoutSec * 1000)
     return [pscustomobject]@{ StatusCode = $r.StatusCode; Content = $r.Content }

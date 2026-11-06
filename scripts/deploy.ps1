@@ -40,7 +40,9 @@ function PortaDaTarefa {
     if (-not $tarefa) { return 0 }
     $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
     if ($argumentosTarefa -match "-Porta (\d+)") { return [int]$Matches[1] }
-    return 80
+    # Sem -Porta vale o padrao do modo do rodar_producao.ps1 (issue #425): 80 com -SemTls, 8443 com TLS.
+    if ($argumentosTarefa -match "-SemTls\b") { return 80 }
+    return 8443
 }
 $portaTarefa = PortaDaTarefa
 if ($Porta -eq 0) {
