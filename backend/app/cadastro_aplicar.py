@@ -158,7 +158,7 @@ _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", 
                     "copia_extras",
                     "estado", "documentos", "objeto_completo", "cno_arquivo", "folga_vigencia_dias",
                     "centros_custo_anteriores_rm", "objeto_carta", "garantia_apolice", "garantia_vigencia_fim",
-                    "garantia_arquivo", "indice_reajuste")
+                    "garantia_arquivo", "indice_reajuste", "pecas_no_oficio")
 _CAMPOS_FISCAL = ("cargo", "tratamento", "portaria")
 
 
@@ -264,7 +264,9 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             "garantia_apolice": c.get("garantia_apolice"), "garantia_vigencia_fim": c.get("garantia_vigencia_fim"),
             "garantia_arquivo": _no_disco("anexos", c["garantia_caminho"], "pdf", rel["ensaio"])
             if c.get("garantia_caminho") else None,
-            "indice_reajuste": _indice_das_bases(c["datas_base"])}
+            "indice_reajuste": _indice_das_bases(c["datas_base"]),
+            # issue #462: a lista vazia e' gravada ('[]': nenhuma vai no oficio); ausente, NULL (segue o orgao)
+            "pecas_no_oficio": None if c.get("pecas_no_oficio") is None else _json(c["pecas_no_oficio"])}
     mudou = False
     if ja is None:
         colunas = ["numero_instrumento", *_CAMPOS_CONTRATO]

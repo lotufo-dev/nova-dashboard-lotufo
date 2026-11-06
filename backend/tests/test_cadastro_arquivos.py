@@ -242,6 +242,42 @@ def test_excecao_de_documentos_no_contrato(tmp_path):
     assert ca.preparar(_escrever(tmp_path))["contratos"][0]["documentos"] is None
 
 
+# --- issue #462: peca que vai no oficio assinado --------------------------------------------------
+
+ORGAO_PECAS = {**ORGAO, "pecas": [{"tipo": "boletim", "rotulo": "Memória de cálculo", "exigida": True, "no_oficio": True},
+                                  {"tipo": "cronograma", "rotulo": "Cronograma físico-financeiro"}]}
+
+
+def test_no_oficio_da_peca_do_orgao_e_booleano(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path / "a", orgaos=[ORGAO_PECAS]))
+    assert [p.get("no_oficio") for p in cad["orgaos"][0]["regras"]["pecas"]] == [True, None]
+    ruim = {**ORGAO, "pecas": [{"tipo": "boletim", "rotulo": "Memória de cálculo", "no_oficio": "sim"}]}
+    erros = _erros(_escrever(tmp_path / "b", orgaos=[ruim]))
+    assert "orgaos.yaml[0]: pecas[0].no_oficio: use true ou false" in erros
+
+
+def test_pecas_no_oficio_do_contrato(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path / "a", orgaos=[ORGAO_PECAS],
+                                contratos=[{**CONTRATO, "pecas_no_oficio": ["cronograma"]}]))
+    assert cad["contratos"][0]["pecas_no_oficio"] == ["cronograma"]
+    cad = ca.preparar(_escrever(tmp_path / "b", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": []}]))
+    assert cad["contratos"][0]["pecas_no_oficio"] == []
+    # sem a chave: segue o orgao (None, nao lista vazia)
+    assert ca.preparar(_escrever(tmp_path / "c", orgaos=[ORGAO_PECAS]))["contratos"][0]["pecas_no_oficio"] is None
+    erros = _erros(_escrever(tmp_path / "d", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": ["fotos"]}]))
+    assert "contratos/mt-402.yaml: pecas_no_oficio: o órgão sinfra-suef1 não pede fotos" in erros
+    for ruim in ("cronograma", ["cronograma", "cronograma"], ["video"]):
+        erros = _erros(_escrever(tmp_path / "e", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": ruim}]))
+        assert any(e.startswith("contratos/mt-402.yaml: pecas_no_oficio:") for e in erros), ruim
+
+
+def test_cadastro_de_exemplo_poe_a_memoria_no_oficio(tmp_path):
+    from tests.conftest import CADASTRO_EXEMPLO
+    pecas = {p["tipo"]: p for p in ca.preparar(CADASTRO_EXEMPLO)["orgaos"][0]["regras"]["pecas"]}
+    assert pecas["boletim"]["no_oficio"] is True and pecas["boletim"]["exigida"] is True
+    assert not pecas["fotos"].get("no_oficio")
+
+
 # --- bloco 5: cartas, pecas do orgao, CNO e dados do fiscal ---------------------------------------
 
 def test_cartas_ausente_passa_e_familia_ou_timbre_invalidos_sao_erro(tmp_path):

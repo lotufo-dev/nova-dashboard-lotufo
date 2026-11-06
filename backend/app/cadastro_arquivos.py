@@ -94,7 +94,8 @@ def _protocolo_do_orgao(o: dict, onde: str, erros: list[str]) -> None:
             continue
         if not str(p.get("rotulo") or "").strip():
             erros.append(f"{onde}: pecas[{i}].rotulo: obrigatório")
-        for campo in ("exigida", "solto"):
+        # no_oficio (issue #462): a peca vai dentro do PDF assinado do oficio da planilha/carta, nao cobra nem se anexa
+        for campo in ("exigida", "solto", "no_oficio"):
             if campo in p and not isinstance(p[campo], bool):
                 erros.append(f"{onde}: pecas[{i}].{campo}: use true ou false")
         nat = p.get("naturezas")
@@ -806,6 +807,15 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         if lista is not None:
             docs[chave] = lista
     c["documentos"] = docs or None
+    # Issue #462: excecao por contrato as pecas que vao no oficio assinado (substitui a marca do orgao; [] desliga).
+    # Que o orgao pede cada tipo, `preparar` confere (aqui so' se conhece a chave do orgao).
+    c["pecas_no_oficio"] = None
+    pno = bruto.get("pecas_no_oficio")
+    if pno is not None:
+        if not isinstance(pno, list) or any(x not in TIPOS_PECA for x in pno) or len(set(pno)) != len(pno):
+            falha("pecas_no_oficio", f"use uma lista, sem repetição, de {', '.join(TIPOS_PECA)}")
+        else:
+            c["pecas_no_oficio"] = list(pno)
     return c
 
 
@@ -890,11 +900,17 @@ def preparar(raiz: Path) -> dict:
 
     chaves_orgao = {o["chave"] for o in orgaos}
     chaves_ent = {e["chave"] for e in ents}
+    pecas_do_orgao = {o["chave"]: {p.get("tipo") for p in (o["regras"].get("pecas") or []) if isinstance(p, dict)}
+                      for o in orgaos}
     contratos = []
     for arquivo in sorted((raiz / "contratos").glob("*.yaml")):
         c = _contrato(_ler(arquivo), arquivo, raiz, chaves_orgao, chaves_ent, erros, avisos)
         if c is not None:
             contratos.append(c)
+            fora = [t for t in c["pecas_no_oficio"] or [] if t not in pecas_do_orgao.get(c["orgao"], set())]
+            if fora and c["orgao"] in chaves_orgao:
+                erros.append(f"contratos/{arquivo.name}: pecas_no_oficio: o órgão {c['orgao']} não pede "
+                             f"{', '.join(fora)}")
     for campo in ("nome_curto", "numero_instrumento"):
         valores = [c[campo] for c in contratos if c[campo]]
         if len(set(valores)) != len(valores):
