@@ -5,20 +5,38 @@
 # ("Nova Dashboard Lotufo") e o schtasks /TR quebra o argumento nos espacos.
 # Para remover: Unregister-ScheduledTask -TaskName DashboardLotufoWatchdog -Confirm:$false
 #
-# -Porta: porta em que a producao responde (padrao 80, HTTP); o watchdog confere
-# http://localhost:<porta>/api/health. Ex.: -Porta 8080 na VM em que a 80 e' do IIS.
+# Modo e porta iguais aos da tarefa DashboardLotufo (instalar_autostart.ps1). Padrao (issue #425): HTTPS, o watchdog
+# confere https://localhost:<porta>/api/health aceitando so' o certificado <Raiz>\segredos\tls\cert.pem (pelo
+# thumbprint). -SemTls: http://localhost:<porta>/api/health. -Porta: 0 = padrao do modo (80 com -SemTls, 8443 com
+# TLS). Ex.: -Porta 8080 na VM em que a 80 e' do IIS.
 [CmdletBinding()]
 param(
-    [ValidateRange(1, 65535)]
-    [int]$Porta = 80
+    [switch]$SemTls,
+    [ValidateRange(0, 65535)]
+    [int]$Porta = 0,
+    [string]$Raiz = "C:\DashboardLotufo"
 )
 $ErrorActionPreference = "Stop"
 $script = Join-Path $PSScriptRoot "watchdog.ps1"
 if (-not (Test-Path $script)) { throw "watchdog.ps1 nao encontrado em $script" }
-$url = "http://localhost:$Porta/api/health"
+if (-not (Test-Path (Join-Path $PSScriptRoot "comum_tls.ps1"))) { throw "comum_tls.ps1 nao encontrado ao lado de $script" }
+if ($Porta -eq 0) {
+    if ($SemTls) { $Porta = 80 } else { $Porta = 8443 }
+}
+$certificado = Join-Path $Raiz "segredos\tls\cert.pem"
+if ($SemTls) {
+    $url = "http://localhost:$Porta/api/health"
+    $argumentos = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Url "{1}"' -f $script, $url
+} else {
+    $url = "https://localhost:$Porta/api/health"
+    # Sem o certificado o watchdog nunca veria a producao saudavel e a reiniciaria a cada 3 minutos.
+    if (-not (Test-Path -LiteralPath $certificado)) {
+        throw "certificado do HTTPS nao encontrado em $certificado (rodar scripts\gerar_certificado.ps1 -Raiz $Raiz, ou -SemTls)"
+    }
+    $argumentos = ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -Url "{1}"' -f $script, $url) + " -Certificado `"$certificado`""
+}
 
-$acao = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -Url "{1}"' -f $script, $url)
+$acao = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argumentos
 # Repeticao "indefinida": MaxValue estoura o XML; 10 anos (P3650D) e' valido. O padrao
 # "empresta a Repetition" contorna quirks do PS 5.1 em aplicar intervalo+duracao.
 $gatilho = New-ScheduledTaskTrigger -Once -At (Get-Date)

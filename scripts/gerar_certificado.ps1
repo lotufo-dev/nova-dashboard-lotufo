@@ -1,28 +1,72 @@
-﻿# Gera o certificado autoassinado usado pelo HTTPS interno (rodar 1x, como administrador).
-# Saída: certs\chave.pem e certs\cert.pem (o .pfx intermediário é apagado no fim).
+﻿# Gera o certificado autoassinado usado pelo HTTPS interno (rodar 1x, como administrador,
+# a partir do diretório pinado: o Python do venv dele converte o .pfx em PEM).
+# Saída (issue #425): <Raiz>\segredos\tls\chave.pem e cert.pem, FORA do clone e com a ACL
+# de segredos (o .pfx intermediário é apagado no fim). Validade de 5 anos.
+# Nomes no certificado (SAN): o nome curto da máquina (-NomeCurto, padrão DASH_SERVIDOR ou
+# o nome do computador), o nome DNS completo (-NomeDns, padrão <nome>.<domínio> quando a
+# máquina está no domínio), "localhost" e os IPs (-Ip, padrão os IPv4 da máquina fora de
+# 127.* e 169.254.*). Conferir a lista impressa no fim antes de distribuir o cert.pem.
+[CmdletBinding()]
+param(
+    [string]$Raiz = "C:\DashboardLotufo",
+    [string]$NomeCurto = "",
+    [string]$NomeDns = "",
+    [string[]]$Ip = @()
+)
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot "comum_acl.ps1")
 
-$raiz = Split-Path -Parent $PSScriptRoot
-$pasta = Join-Path $raiz "certs"
+# $repo, nao $raiz: no PowerShell $raiz e $Raiz sao a mesma variavel.
+$repo = Split-Path -Parent $PSScriptRoot
+$segredos = Join-Path $Raiz "segredos"
+$pasta = Join-Path $segredos "tls"
+
+if (-not $NomeCurto) {
+    if ($env:DASH_SERVIDOR) { $NomeCurto = $env:DASH_SERVIDOR } else { $NomeCurto = $env:COMPUTERNAME }
+}
+if (-not $NomeDns) {
+    $sistema = Get-CimInstance Win32_ComputerSystem
+    if ($sistema.PartOfDomain -and $sistema.Domain) { $NomeDns = "$($sistema.DNSHostName).$($sistema.Domain)" }
+    else { Write-Warning "Maquina fora do dominio: sem nome DNS completo no certificado (passe -NomeDns se houver)." }
+}
+if ($Ip.Count -eq 0) {
+    $Ip = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+        ForEach-Object { $_.IPAddress })
+    if ($Ip.Count -eq 0) { Write-Warning "Nenhum IPv4 encontrado: certificado sem IP (passe -Ip)." }
+}
+# Nome e IP entram no texto da extensao SAN ("DNS=a&IPAddress=b"): um "&" ou "=" num valor abriria outra entrada.
+# So' passa nome DNS (letras, digitos, ponto e hifen) e IP que o .NET le como IP.
+$nomes = @(@($NomeCurto, $NomeDns, "localhost") | Where-Object { $_ } | Select-Object -Unique)
+foreach ($nome in $nomes) {
+    if ($nome -notmatch '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$') { throw "Nome invalido para o certificado: '$nome'" }
+}
+foreach ($endereco in $Ip) {
+    $lido = $null
+    if (-not [System.Net.IPAddress]::TryParse($endereco, [ref]$lido)) { throw "IP invalido para o certificado: '$endereco'" }
+}
+$san = (@($nomes | ForEach-Object { "DNS=$_" }) + @($Ip | ForEach-Object { "IPAddress=$_" })) -join "&"
 
 # ORDEM IMPORTA: a pasta nasce e e' TRAVADA antes de existir qualquer segredo.
 # Na versao anterior o .pfx e a chave.pem eram escritos com a ACL herdada (ou seja,
 # legiveis por "Usuarios" da maquina) e so depois o icacls fechava a pasta. Nessa
 # janela a chave privada do TLS ficava ao alcance de qualquer conta -- e quem
 # copiasse ali fica com ela para sempre, endurecer depois nao desfaz nada.
-New-Item -ItemType Directory -Force -Path $pasta | Out-Null
-
 # ACL NTFS restrita (spec §5): chave.pem é a chave privada do TLS, em texto claro
 # e sem senha (uvicorn precisa lê-la sozinho). Herança removida e acesso apenas
-# para SYSTEM (S-1-5-18, conta do serviço) e Administradores (S-1-5-32-544).
-# SIDs em vez de nomes: o Windows aqui é pt-BR e "Administrators" não existe.
-& icacls $pasta /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Falha ao restringir a ACL de $pasta (rodar como administrador)." }
-# Dono tambem: quem e' dono reescreve a DACL quando quiser (WRITE_DAC implicito).
-Set-DonoAdministradores -Caminho $pasta
+# para SYSTEM (S-1-5-18, conta do serviço) e Administradores (S-1-5-32-544), como
+# o rodar_producao.ps1 faz com segredos. SIDs em vez de nomes: o Windows aqui é
+# pt-BR e "Administrators" não existe. Primeiro segredos, depois segredos\tls.
+foreach ($trancar in $segredos, $pasta) {
+    New-Item -ItemType Directory -Force -Path $trancar | Out-Null
+    & icacls $trancar /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao restringir a ACL de $trancar (rodar como administrador)." }
+    # Dono tambem: quem e' dono reescreve a DACL quando quiser (WRITE_DAC implicito).
+    Set-DonoAdministradores -Caminho $trancar
+}
 # icacls devolve 0 mesmo deixando ACE explicita de terceiro de pe -- conferir de fato.
+Assert-AclSomenteSistemaEAdmins -Caminho $segredos
 Assert-AclSomenteSistemaEAdmins -Caminho $pasta
 
 $pfx     = Join-Path $pasta "dashboard.pfx"
@@ -68,7 +112,8 @@ $swapEtapa = 0
 $guardouChave = $false
 $guardouPublico = $false
 try {
-    $cert = New-SelfSignedCertificate -DnsName $(if ($env:DASH_SERVIDOR) { $env:DASH_SERVIDOR } else { $env:COMPUTERNAME }), "localhost" `
+    # SAN pela extensao de texto (2.5.29.17): o -DnsName nao aceita IP.
+    $cert = New-SelfSignedCertificate -Subject "CN=$NomeCurto" -TextExtension @("2.5.29.17={text}$san") `
         -CertStoreLocation "Cert:\LocalMachine\My" -NotAfter (Get-Date).AddYears(5)
 
     $senha = ConvertTo-SecureString $senhaTexto -AsPlainText -Force
@@ -78,7 +123,7 @@ try {
     # (dependência só deste script: .venv\Scripts\python -m pip install cryptography).
     # A senha viaja por VARIAVEL DE AMBIENTE, nunca em argv: a linha de comando de um
     # processo e' legivel por qualquer um que liste a tabela de processos da maquina.
-    $python = Join-Path $raiz "backend\.venv\Scripts\python.exe"
+    $python = Join-Path $repo "backend\.venv\Scripts\python.exe"
     $env:DASH_PFX_SENHA = $senhaTexto
     & $python -c @"
 import os
@@ -199,3 +244,7 @@ if ($null -ne $falhou) {
 }
 
 Write-Host "Certificado gerado em $pasta (cert.pem e chave.pem), com ACL restrita a SYSTEM e Administradores."
+# O que conferir antes de distribuir o cert.pem: os nomes com que a operacao abre a dashboard e a validade.
+Write-Host "Nomes no certificado: $($san -replace '&', ', ')"
+Write-Host "Thumbprint: $($cert.Thumbprint)  (o watchdog, o deploy e o saude_local.ps1 aceitam so' este)"
+Write-Host "Valido ate: $($cert.NotAfter.ToString('dd/MM/yyyy'))"

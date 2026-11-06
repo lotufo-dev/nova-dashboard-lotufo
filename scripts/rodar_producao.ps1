@@ -1,9 +1,11 @@
 ﻿# Sobe o Dashboard em produção, servindo também o build React.
-# Padrão: HTTPS na porta 8443 (pré-requisito: scripts\gerar_certificado.ps1).
-# -SemTls: HTTP na porta 80 (http://<servidor>), sem certificado a instalar nas
-# máquinas da rede — decisão do Leonardo em 2026-09-02; a senha trafega em claro
-# dentro da rede interna. -Porta troca a porta (ex.: 8080 na VM em que a 80 é do IIS);
-# sem ela vale a padrão de cada modo (80 em HTTP, 8443 em HTTPS).
+# Padrão: HTTPS na porta 8443, com o certificado em <Raiz>\segredos\tls (cert.pem e
+# chave.pem, fora do clone; pré-requisito: scripts\gerar_certificado.ps1 -Raiz <Raiz>).
+# Produção em HTTPS desde a decisão de 2026-11-05 (issue #425): a senha não passa em
+# claro pela rede e o cookie de sessão sai com "Secure".
+# -SemTls: HTTP na porta 80 (http://<servidor>), sem certificado (a decisão anterior,
+# de 2026-09-02); fica para voltar atrás no corte. -Porta troca a porta (ex.: 8080 na VM
+# em que a 80 é do IIS); sem ela vale a padrão de cada modo (80 em HTTP, 8443 em HTTPS).
 # Pré-requisito comum: `npm run build` em frontend\.
 #
 # Árvore de produção SEPARADA do repositório (parecer de 2026-09-01): banco, snapshots
@@ -46,7 +48,8 @@ $ErrorActionPreference = "Stop"
 
 $repo = Split-Path -Parent $PSScriptRoot
 $backend = Join-Path $repo "backend"
-$certs = Join-Path $repo "certs"
+# Certificado do HTTPS fora do clone (issue #425): o deploy troca o clone, o certificado fica com os segredos.
+$certs = Join-Path $Raiz "segredos\tls"
 
 # Chaves de desenvolvimento NUNCA valem em produção: DASH_DEV tira a flag "secure"
 # do cookie de sessão, DASH_SEM_JOBS desliga o backup horário, DASH_SEM_FRONTEND
@@ -213,7 +216,18 @@ foreach ($pasta in $dados, $backups, $logs) {
 # A chave privada do TLS entra na mesma conferência: quem a lê passa a poder se fazer
 # passar pelo servidor. O cert.pem é público, mas vai junto — trocá-lo é fraude igual.
 $arquivos = @($env:DASH_DB_PATH, ($env:DASH_DB_PATH + "-wal"), ($env:DASH_DB_PATH + "-shm"))
-if (-not $SemTls) { $arquivos += (Join-Path $certs "chave.pem"), (Join-Path $certs "cert.pem") }
+if (-not $SemTls) {
+    # Sem o par o uvicorn morre na subida e a tarefa reinicia em laço: parar alto, dizendo o que falta.
+    foreach ($pem in (Join-Path $certs "chave.pem"), (Join-Path $certs "cert.pem")) {
+        if (-not (Test-Path -LiteralPath $pem)) {
+            Write-Host "ERRO: certificado do HTTPS nao encontrado: $pem" -ForegroundColor Red
+            Write-Host "Rode scripts\gerar_certificado.ps1 -Raiz $Raiz (ou suba com -SemTls). Ver docs\runbook.md (HTTP ou HTTPS)." -ForegroundColor Red
+            exit 1
+        }
+    }
+    Assert-AclSomenteSistemaEAdmins -Caminho $certs
+    $arquivos += (Join-Path $certs "chave.pem"), (Join-Path $certs "cert.pem")
+}
 foreach ($arquivo in $arquivos) {
     if (Test-Path -LiteralPath $arquivo) {
         Assert-AclSomenteSistemaEAdmins -Caminho $arquivo

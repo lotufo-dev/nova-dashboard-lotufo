@@ -8,8 +8,13 @@
 # NAO restaura durante manutencao: se existir o arquivo-sentinela $Pausa, sai sem mexer
 # (o deploy cria o sentinela antes de parar a producao e apaga depois). Faz dupla checagem
 # com 15s de intervalo para nao reiniciar por um blip de rede transitorio.
+#
+# HTTPS (issue #425): com -Url https://localhost:<porta>/... o -Certificado e' o cert.pem da instalacao
+# (<raiz>\segredos\tls\cert.pem) e so' esse certificado e' aceito, pelo thumbprint (comum_tls.ps1). O arquivo e'
+# lido a cada rodada: certificado trocado nao pede reinstalar o watchdog.
 param(
     [string]$Url = "http://localhost/api/health",
+    [string]$Certificado = "",
     [string]$Tarefa = "DashboardLotufo",
     [string]$Log = "C:\DashboardLotufo\logs\watchdog.log",
     [string]$Pausa = "C:\DashboardLotufo\watchdog.pause"
@@ -18,9 +23,15 @@ param(
 function Escrever($m) {
     try { Add-Content -Path $Log -Value ("{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $m) -Encoding utf8 } catch {}
 }
+. (Join-Path $PSScriptRoot "comum_tls.ps1")
+$script:ultimoErro = ""
 function Saudavel {
-    try { return ((Invoke-WebRequest -Uri $Url -TimeoutSec 10 -UseBasicParsing).StatusCode -eq 200) }
-    catch { return $false }
+    try {
+        $resposta = Invoke-SaudeLocal -Url $Url -Certificado $Certificado -TimeoutSec 10
+        $script:ultimoErro = "HTTP $($resposta.StatusCode)"
+        return ($resposta.StatusCode -eq 200)
+    }
+    catch { $script:ultimoErro = $_.Exception.Message; return $false }
 }
 
 if (Test-Path $Pausa) { exit 0 }              # manutencao em curso: nao tocar
@@ -29,7 +40,7 @@ Start-Sleep -Seconds 15
 if (Test-Path $Pausa) { exit 0 }
 if (Saudavel) { exit 0 }                       # foi so um blip transitorio
 
-Escrever "SEM RESPOSTA em $Url -> reiniciando a tarefa $Tarefa"
+Escrever "SEM RESPOSTA em $Url ($script:ultimoErro) -> reiniciando a tarefa $Tarefa"
 try { Stop-ScheduledTask -TaskName $Tarefa -ErrorAction SilentlyContinue } catch {}
 Start-Sleep -Seconds 3
 try {

@@ -41,10 +41,14 @@ def test_autostart_repassa_a_porta_so_quando_informada():
 
 def test_watchdog_e_instalado_com_a_url_da_porta():
     script = _ler("instalar_watchdog.ps1")
-    assert "[int]$Porta = 80" in script
+    # issue #425: padrao do modo, como nos outros scripts (80 com -SemTls, 8443 com TLS)
+    assert "[int]$Porta = 0" in script
+    assert "$Porta = 80" in script and "$Porta = 8443" in script
     assert '$url = "http://localhost:$Porta/api/health"' in script
-    linha_acao = next(linha for linha in script.splitlines() if "-Argument" in linha)
-    assert '-Url "{1}"' in linha_acao and "$url" in linha_acao
+    assert '$url = "https://localhost:$Porta/api/health"' in script
+    montagens = [linha for linha in script.splitlines() if "$argumentos =" in linha]
+    assert len(montagens) == 2 and all('-Url "{1}"' in linha and "$script, $url" in linha for linha in montagens)
+    assert "New-ScheduledTaskAction -Execute \"powershell.exe\" -Argument $argumentos" in script
     # o watchdog.ps1 precisa aceitar -Url, senao o argumento cai no chao
     assert re.search(r"\[string\]\$Url\s*=", _ler("watchdog.ps1"))
 
@@ -52,7 +56,7 @@ def test_watchdog_e_instalado_com_a_url_da_porta():
 def test_deploy_usa_a_porta_na_saude_no_dono_da_porta_e_nas_mensagens():
     script = _ler("deploy.ps1")
     assert "localhost/api/health" not in script
-    assert 'http://localhost:$Porta/api/health' in script
+    assert '"http://localhost:$Porta/api/health"' in script and '"https://localhost:$Porta/api/health"' in script
     assert "LocalPort 80" not in script
     assert "-LocalPort $Porta" in script
     assert not re.search(r"porta 80\b", script), "mensagem ainda cita a porta 80 fixa"
@@ -164,3 +168,125 @@ def test_deploy_fica_so_em_ascii_sem_bom():
     bruto = (SCRIPTS / "deploy.ps1").read_bytes()
     assert not bruto.startswith(b"\xef\xbb\xbf")
     assert bruto.isascii()
+
+
+# --- Issue #425: producao em HTTPS --------------------------------------------------------------------------------
+# Certificado em <raiz>\segredos\tls (fora do clone), emitido para o nome curto, o nome DNS completo e o IP; quem confere
+# a saude na propria maquina (watchdog, deploy, saude_local) fala HTTPS com localhost e aceita so' o certificado da
+# propria instalacao, pelo thumbprint.
+
+def _codigo(script):
+    """O script sem os comentarios de linha: o que importa e' o que roda, nao o que o comentario conta."""
+    return "\n".join(linha.split("#")[0] for linha in script.splitlines())
+
+
+def test_certificado_sai_em_segredos_tls_fora_do_clone():
+    script = _ler("gerar_certificado.ps1")
+    assert '[string]$Raiz = "C:\\DashboardLotufo"' in script
+    assert '$segredos = Join-Path $Raiz "segredos"' in script
+    assert '$pasta = Join-Path $segredos "tls"' in script
+    assert '"certs"' not in _codigo(script)
+    # $raiz e $Raiz sao a MESMA variavel no PowerShell: o clone nao pode mais se chamar $raiz
+    assert "$raiz =" not in script
+    # a pasta (e a de segredos) e' travada e conferida ANTES de existir qualquer segredo
+    gerar = script.index("New-SelfSignedCertificate")
+    assert script.index("Assert-AclSomenteSistemaEAdmins -Caminho $segredos") < gerar
+    assert script.index("Assert-AclSomenteSistemaEAdmins -Caminho $pasta") < gerar
+
+
+def test_certificado_tem_nome_curto_nome_dns_e_ip_por_5_anos():
+    script = _ler("gerar_certificado.ps1")
+    for parametro in ("[string]$NomeCurto", "[string]$NomeDns", "[string[]]$Ip"):
+        assert parametro in script
+    assert '"2.5.29.17={text}' in script                     # SAN pela extensao, para caber o IP
+    assert '"DNS=$_"' in script and '"IPAddress=$_"' in script
+    assert "AddYears(5)" in script
+    # nome e IP entram no texto da extensao: so' o que e' nome DNS ou IP valido passa (um "&" abriria outra entrada)
+    assert "[System.Net.IPAddress]::TryParse" in script
+    assert re.search(r"-notmatch '\^\[A-Za-z0-9", script)
+    # o fim mostra o que foi emitido, para conferir antes de distribuir
+    assert "Thumbprint" in script and "Nomes no certificado" in script
+
+
+def test_rodar_producao_le_o_certificado_de_segredos_tls():
+    script = _ler("rodar_producao.ps1")
+    assert '$certs = Join-Path $Raiz "segredos\\tls"' in script
+    assert 'Join-Path $repo "certs"' not in script
+    # sem o par no lugar, para alto antes de subir (senao o uvicorn morre e a tarefa reinicia em laco)
+    falta = script.index("certificado do HTTPS nao encontrado")
+    assert falta < script.index("-m uvicorn")
+    assert "Assert-AclSomenteSistemaEAdmins -Caminho $certs" in script
+    # o cookie volta a Secure porque DASH_SEM_TLS so' existe com -SemTls
+    assert 'if ($SemTls) { $env:DASH_SEM_TLS = "1" }' in script
+
+
+def test_autostart_com_tls_confere_o_certificado_antes_de_registrar():
+    script = _ler("instalar_autostart.ps1")
+    conferencia = script.index('Join-Path $Raiz "segredos\\tls\\cert.pem"')
+    assert conferencia < script.index("Register-ScheduledTask")
+    assert "if (-not $SemTls)" in script
+
+
+def test_saude_local_confere_o_thumbprint_so_em_localhost():
+    script = _ler("comum_tls.ps1")
+    codigo = _codigo(script)
+    # validacao por pedido, nunca a global do processo (o ServicePointManager valeria para qualquer HTTPS do script)
+    assert "pedido.ServerCertificateValidationCallback" in codigo
+    assert "ServicePointManager.ServerCertificateValidationCallback" not in codigo
+    assert "c2.Thumbprint" in codigo and "StringComparison.OrdinalIgnoreCase" in codigo
+    assert "uri.IsLoopback" in codigo
+    assert "pedido.Proxy = null" in codigo
+    # o PowerShell 5.1 nasce sem TLS 1.2 e o uvicorn nao aceita menos
+    assert "SecurityProtocolType.Tls12" in codigo
+    assert "function Get-ThumbprintDoCertificado" in codigo and "function Invoke-SaudeLocal" in codigo
+
+
+@pytest.mark.parametrize("nome", ["comum_tls.ps1", "watchdog.ps1", "instalar_watchdog.ps1", "deploy.ps1",
+                                  "saude_local.ps1", "rodar_producao.ps1", "instalar_autostart.ps1",
+                                  "gerar_certificado.ps1"])
+def test_nenhum_script_desliga_a_verificacao_do_certificado(nome):
+    codigo = _codigo(_ler(nome))
+    assert "SkipCertificateCheck" not in codigo
+    assert not re.search(r"ServerCertificateValidationCallback\s*=\s*\{\s*\$true\s*\}", codigo)
+    assert "return true;" not in codigo
+
+
+@pytest.mark.parametrize("nome", ["comum_tls.ps1", "watchdog.ps1", "instalar_watchdog.ps1", "saude_local.ps1"])
+def test_scripts_novos_da_saude_ficam_em_ascii_sem_bom(nome):
+    bruto = (SCRIPTS / nome).read_bytes()
+    assert not bruto.startswith(b"\xef\xbb\xbf")
+    assert bruto.isascii()
+
+
+def test_watchdog_confere_por_https_com_o_certificado_da_instalacao():
+    instalador = _ler("instalar_watchdog.ps1")
+    assert "[switch]$SemTls" in instalador and '[string]$Raiz = "C:\\DashboardLotufo"' in instalador
+    assert '$certificado = Join-Path $Raiz "segredos\\tls\\cert.pem"' in instalador
+    assert '-Certificado `"$certificado`"' in instalador
+    watchdog = _ler("watchdog.ps1")
+    assert '[string]$Certificado = ""' in watchdog
+    assert '. (Join-Path $PSScriptRoot "comum_tls.ps1")' in watchdog
+    assert "Invoke-SaudeLocal -Url $Url -Certificado $Certificado" in watchdog
+    assert "Invoke-WebRequest" not in _codigo(watchdog)
+
+
+def test_deploy_confere_a_saude_no_modo_da_tarefa():
+    # a tarefa diz o modo: com -SemTls (a producao de antes do corte) a saude e' HTTP; sem ele, HTTPS pelo thumbprint
+    script = _ler("deploy.ps1")
+    funcao = script[script.index("function TlsDaTarefa"):script.index("$comTls = TlsDaTarefa")]
+    assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in funcao
+    assert '-match "-SemTls\\b"' in funcao
+    assert '. (Join-Path $PSScriptRoot "comum_tls.ps1")' in script
+    assert '$certificado = Join-Path $Raiz "segredos\\tls\\cert.pem"' in script
+    assert script.count("Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado") == 2   # Saudavel e AvisarSeCopia
+    assert "Invoke-WebRequest" not in _codigo(script)
+    # sem o certificado no modo HTTPS, aborta antes de pausar o watchdog e de qualquer checkout
+    aborta = script.index("certificado do HTTPS nao encontrado")
+    assert aborta < script.index("New-Item -ItemType File -Path $pause")
+
+
+def test_saude_local_existe_para_a_conferencia_manual():
+    script = _ler("saude_local.ps1")
+    assert '. (Join-Path $PSScriptRoot "comum_tls.ps1")' in script
+    assert "[switch]$SemTls" in script and "Mandatory" in script
+    assert "Invoke-SaudeLocal" in script and "exit 1" in script
