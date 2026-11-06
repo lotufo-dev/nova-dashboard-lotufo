@@ -1024,7 +1024,7 @@ def test_carregar_medicoes_nao_cancela_medicao_no_passo_da_planilha(tmp_path, mo
     _existente(conn, cid, 5, "2025-07", 100001, None, estado="planilha_enviada")
     codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;x;4;"], capsys)
     # #284: planilha enviada passou a se cancelar pela tela (TRANSICOES); a carga continua sem cancela-la
-    assert "conflito (no banco a medição está planilha_enviada: a planilha/carta é dela; cancele pela tela)" in saida
+    assert "conflito (no banco a medição está com planilha/carta enviada: a planilha/carta é dela; cancele pela tela)" in saida
 
 
 def test_carregar_medicoes_nao_cancela_prevista_que_recebeu_o_boletim(tmp_path, monkeypatch, capsys):
@@ -1033,7 +1033,7 @@ def test_carregar_medicoes_nao_cancela_prevista_que_recebeu_o_boletim(tmp_path, 
     _existente(conn, cid, 4, "2025-07", 100001, None)
     _existente(conn, cid, 5, "2025-07", 100001, None, estado="boletim_recebido")
     codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;x;4;"], capsys)
-    assert "conflito (no banco a medição está boletim_recebido: o boletim é dela; cancele pela tela)" in saida
+    assert "conflito (no banco a medição está com boletim recebido: o boletim é dela; cancele pela tela)" in saida
 
 
 def test_carregar_medicoes_nao_cancela_medicao_com_planilha_gerada(tmp_path, monkeypatch, capsys):
@@ -1043,7 +1043,7 @@ def test_carregar_medicoes_nao_cancela_medicao_com_planilha_gerada(tmp_path, mon
     _existente(conn, cid, 4, "2025-07", 100001, None)
     _existente(conn, cid, 5, "2025-07", 100001, None, estado="planilha_gerada")
     codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", "5;;execucao;2025-07;;;;;;;;;x;4;"], capsys)
-    assert "conflito (no banco a medição está planilha_gerada: a planilha/carta é dela; cancele pela tela)" in saida
+    assert "conflito (no banco a medição está com planilha/carta gerada: a planilha/carta é dela; cancele pela tela)" in saida
 
 
 def _planilha_enviada(conn, mid):
@@ -1087,6 +1087,47 @@ def test_carregar_medicoes_nao_preenche_pedido_com_planilha_enviada(tmp_path, mo
     codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência",
                                        "3;3;execucao;2025-06;;;;;;;;;boletim 3;;"], capsys)
     assert "linha 2: nº 3 execução 2025-06: igual" in saida, saida
+
+
+def test_carregar_medicoes_nao_troca_pedido_gravado_com_planilha_enviada(tmp_path, monkeypatch, capsys):
+    # gate Sol da PR #468: com a planilha/carta enviada, o pedido diferente do gravado recusa a linha inteira (o
+    # aprovado novo dela tambem nao entra); o pedido igual ao gravado segue e o aprovado novo e' registrado
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 3, "2025-06", 10000000, None)
+    _planilha_enviada(conn, mid)
+    linha = "3;3;execucao;2025-06;;120.000,00;95.000,00;;;;;;boletim 3;;"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert ("linha 2: nº 3 execução 2025-06: conflito (o pedido congelou no envio da planilha/carta ao órgão em "
+            "R$ 100.000,00: ponha esse valor ou deixe o valor pedido vazio no CSV)" in saida), saida
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [linha]))
+    assert codigo == 1 and "1 linha(s) com erro ou conflito" in saida, saida
+    assert _foto(conn) == antes
+    codigo, saida = _gravar(capsys, _csv(tmp_path, ["3;3;execucao;2025-06;;100.000,00;95.000,00;;;;;;boletim 3;;"]))
+    assert codigo == 0 and "linha 2: nº 3 execução 2025-06: valor diferente" in saida, saida
+    assert "aprovado registrado" in saida
+    m = conn.execute("SELECT valor_protocolado_centavos, valor_atestado_centavos FROM medicoes WHERE id=?",
+                     (mid,)).fetchone()
+    assert tuple(m) == (10000000, 9500000)
+
+
+def test_carregar_medicoes_nao_cancela_protocolada_com_planilha_gerada_sem_envio(tmp_path, monkeypatch, capsys):
+    # revisor da PR #468: a planilha/carta gerada e protocolada por fora (`registrar protocolo feito fora` aceita
+    # planilha_gerada) leva a medicao a protocolada sem `planilha_enviada_em`; o oficio continua sendo dela
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    _existente(conn, cid, 4, "2025-07", 100001, None)
+    dup = _existente(conn, cid, 5, "2025-07", 100001, None)
+    conn.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, "
+                 "acumulado_anterior_centavos, origem) VALUES (?,1,100001,0,'manual')", (dup,))
+    conn.commit()
+    linha = "5;;execucao;2025-07;;;;;;;;;CI da prefeitura;4;"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert ("linha 2: nº 5 execução 2025-07: conflito (a planilha/carta é dela; cancele pela tela)" in saida), saida
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [linha]))
+    assert codigo == 1 and "1 linha(s) com erro ou conflito" in saida, saida
+    assert _foto(conn) == antes
+    assert conn.execute("SELECT estado FROM medicoes WHERE id=?", (dup,)).fetchone()[0] == "protocolada"
 
 
 def test_carregar_medicoes_sem_planilha_enviada_cancela_e_preenche_o_pedido(tmp_path, monkeypatch, capsys):
@@ -1177,5 +1218,5 @@ def test_carregar_medicoes_nao_corrige_competencia_com_nf_ou_espelho_nem_cancela
                                        "6;;execucao;2025-04;;1.000,01;;;;;;;doc;;sim"], capsys)
     assert "linha 2: nº 3 execução 2025-06: conflito (a competência 2025-07 já está na NF 777 vinculada" in saida
     assert "linha 3: nº 4 execução 2025-06: conflito (a competência 2025-07 já está no espelho" in saida
-    assert "linha 4: nº 5 execução 2025-07: conflito (no banco a medição está espelho_gerado" in saida
+    assert "linha 4: nº 5 execução 2025-07: conflito (no banco a medição está com espelho gerado: o espelho é dela" in saida
     assert "linha 5: nº 6 execução 2025-04: correção (competência: banco 2025-07, CSV 2025-04; aviso: fica antes" in saida

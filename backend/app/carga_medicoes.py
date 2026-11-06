@@ -418,23 +418,28 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                 _virar(li, "conflito", f"tem a NF {', '.join(nfs)} vinculada: vincule-a à {d['cancelar']}ª antes de "
                                        "cancelar a duplicata")
                 continue
-            estado = existentes[(d["numero"], d["tipo"])]["estado"]
+            dup = existentes[(d["numero"], d["tipo"])]
+            estado = dup["estado"]
+            # gate Sol da PR #468: o estado sai em portugues no relatorio, nao o codigo interno
+            no_estado = f"no banco a medição está {medicoes.rotulo_estado(estado)}"
             if estado in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
                 # o espelho (e a nota que sai dele) ficaria de uma medicao cancelada: isso se resolve na tela
-                _virar(li, "conflito", f"no banco a medição está {estado}: o espelho é dela; cancele pela tela")
+                _virar(li, "conflito", f"{no_estado}: o espelho é dela; cancele pela tela")
                 continue
+            tem_planilha = conn.execute("SELECT 1 FROM medicao_planilhas WHERE medicao_id=? LIMIT 1",
+                                        (dup["id"],)).fetchone() is not None
             if estado in medicoes.ESTADOS_PLANILHA:
                 # revisor da #281: a planilha/carta (oficio anexado) e' dela; o mesmo caminho do espelho. #284: a
                 # prevista pode ir a boletim_recebido sem planilha; ai' o documento dela e' o boletim
-                doc = "o boletim" if estado == "boletim_recebido" and not conn.execute(
-                    "SELECT 1 FROM medicao_planilhas WHERE medicao_id=? LIMIT 1",
-                    (existentes[(d["numero"], d["tipo"])]["id"],)).fetchone() else "a planilha/carta"
-                _virar(li, "conflito", f"no banco a medição está {estado}: {doc} é dela; cancele pela tela")
+                doc = "o boletim" if estado == "boletim_recebido" and not tem_planilha else "a planilha/carta"
+                _virar(li, "conflito", f"{no_estado}: {doc} é dela; cancele pela tela")
                 continue
-            if existentes[(d["numero"], d["tipo"])]["planilha_enviada_em"]:
+            if dup["planilha_enviada_em"] or tem_planilha:
                 # #387: protocolada (ou adiante) sem NF, fora dos estados da planilha, com o oficio ja' enviado ao
-                # orgao (#282): o documento e' dela; o mesmo caminho da planilha
-                _virar(li, "conflito", "a planilha/carta enviada ao órgão é dela; cancele pela tela")
+                # orgao (#282) ou so' gerado e protocolado por fora (revisor da PR #468: `registrar protocolo
+                # feito fora` aceita planilha_gerada sem gravar o envio): o documento e' dela
+                doc = "a planilha/carta enviada ao órgão" if dup["planilha_enviada_em"] else "a planilha/carta"
+                _virar(li, "conflito", f"{doc} é dela; cancele pela tela")
                 continue
         if li["categoria"] == "correção":
             atual = existentes[(d["numero"], d["tipo"])]
@@ -462,11 +467,15 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                     break
         if li["categoria"] in ("valor diferente", "correção") and d["valor_pedido"] is not None:
             atual = existentes[(d["numero"], d["tipo"])]
-            if atual["valor_protocolado_centavos"] is None and atual["planilha_enviada_em"]:
+            gravado = atual["valor_protocolado_centavos"]
+            if atual["planilha_enviada_em"] and d["valor_pedido"] != gravado:
                 # #387: o primeiro preenchimento do pedido nao passa depois do envio (`medicoes.definir_valor`
-                # recusa com PEDIDO_ENVIADO); recusar aqui da' o motivo no ensaio em vez do erro na gravacao
-                _virar(li, "conflito", "o pedido congelou no envio da planilha/carta ao órgão: deixe o valor pedido "
-                                       "vazio no CSV")
+                # recusa com PEDIDO_ENVIADO); recusar aqui da' o motivo no ensaio em vez do erro na gravacao. Gate
+                # Sol da PR #468: o pedido ja' gravado e diferente tambem recusa a linha (o aprovado dela nao entra)
+                _virar(li, "conflito", "o pedido congelou no envio da planilha/carta ao órgão"
+                                       + (": deixe o valor pedido vazio no CSV" if gravado is None
+                                          else f" em {_fmt(gravado)}: ponha esse valor ou deixe o valor pedido "
+                                               "vazio no CSV"))
                 continue
         m = existentes.get((d["numero"], d["tipo"])) if d else None
         escreve = li["categoria"] in ("cancelamento", "correção") or (li["categoria"] == "valor diferente" and (
