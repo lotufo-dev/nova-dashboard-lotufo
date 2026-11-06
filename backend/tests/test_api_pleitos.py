@@ -950,7 +950,7 @@ def test_anexo_que_falha_na_leitura_depois_da_reserva_destrava(api, monkeypatch)
     monkeypatch.setattr(pleitos, "_bytes", falha_com_a_reserva)
     c = db.get_conn()
     try:
-        with pytest.raises(OSError):
+        with pytest.raises(ValueError, match="Não foi possível ler a carta assinada"):   # #441: 422, nao 500
             pleitos.enviar(c, {"id": _uid(), "email": "admin@lotufo.com"}, pid, corpo["para"], corpo["copia"],
                            corpo["assunto"], corpo["corpo"], corpo["justificativa"])
     finally:
@@ -1259,3 +1259,32 @@ def test_previa_com_a_curva_s_sumida_lista_a_pendencia_e_nao_da_500(api):
     assert pleitos.CURVA_S_ILEGIVEL in [x["mensagem"] for x in pv.json()["pendencias"]]
     assert cl.post(f"/api/pleitos/{pid}/curva-s").status_code == 200
     assert "curva_s" not in [x["codigo"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+
+
+def test_previa_com_anexo_ou_carta_sumidos_do_disco_responde_em_portugues_e_nao_da_500(api):
+    """Issue #441: restaurado um backup sem `pleitos/`, o anexo arrastado e a carta montada nao estao no disco.
+    A previa e o envio respondem 422 com o que falta, nao 500, e o envio nao fica reservado."""
+    from app import arquivos
+    cl, cid, _ = api
+    pid = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
+    cl.post(f"/api/pleitos/{pid}/anexos", data={"tipo": "cronograma"},
+            files=_arquivo("cronograma.pdf", b"%PDF-1.4 cronograma", "application/pdf"))
+    assert cl.post(f"/api/pleitos/{pid}/montar", json={}).status_code == 200
+    d = cl.get(f"/api/pleitos/{pid}").json()
+    pv = cl.post(f"/api/pleitos/{pid}/previa").json()
+    corpo = {**{k: pv[k] for k in ("para", "copia", "assunto", "corpo")}, "justificativa": "teste do anexo sumido"}
+
+    arquivos.caminho_seguro([a for a in d["anexos"] if a["nome"] == "cronograma.pdf"][0]["arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que='o anexo "cronograma.pdf"', acao="remova o anexo e anexe o arquivo de novo"), r.text
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=corpo)
+    assert r.status_code == 422 and "cronograma.pdf" in r.json()["detail"], r.text
+
+    arquivos.caminho_seguro(d["montado_arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(o_que="a carta montada",
+                                                               acao="monte a carta de novo"), r.text
+    assert _estado(pid) == ({"situacao": "montado", "envio_id": None, "envio_reservado_em": None}, 0)
