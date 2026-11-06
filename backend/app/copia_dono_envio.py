@@ -123,41 +123,59 @@ def corpo(nome: str, gerada: datetime.datetime, tamanho: int, sha: str, parte: i
 
 
 def _soltar(conn, ids: list[int]) -> str:
-    """Reservas das partes que nao sairam; chamada de dentro do `except` da falha. Banco ocupado alem das
-    retentativas: devolve o aviso (a trava ficou) em vez de esconder a falha original."""
-    try:
-        for rid in ids:
+    """Reservas das partes que nao sairam; chamada de dentro do `except` da falha. Tenta soltar todas, mesmo que
+    uma falhe (banco ocupado alem das retentativas), e devolve o aviso das que ficaram presas, para a Saude."""
+    presas = 0
+    for rid in ids:
+        try:
             envio_reserva.liberar_com_retentativa(conn, TABELA, rid)
-    except ValueError:
-        return "; a trava do envio não pôde ser removida: aguarde 15 minutos e libere o envio"
-    return ""
+        except ValueError:
+            presas += 1
+    if not presas:
+        return ""
+    quantas = "1 reserva ficou presa" if presas == 1 else f"{presas} reservas ficaram presas"
+    return f"; {quantas}: aguarde 15 minutos e libere o envio"
 
 
 def _ja_teve_rodada(conn, nome: str) -> bool:
     return conn.execute(f"SELECT 1 FROM {TABELA} WHERE arquivo=? LIMIT 1", (nome,)).fetchone() is not None
 
 
+def _data(nome: str) -> str:
+    m = _CARIMBO.search(nome)
+    return f"{datetime.datetime.strptime(m[1], '%Y%m%d-%H%M%S'):%d/%m/%Y}" if m else nome
+
+
 def pendente(conn, pasta_backups: Path) -> str | None:
-    """O que a Saude acusa da copia mais recente, lido do banco (vale depois de o servidor reiniciar, quando o erro
-    da memoria ja' sumiu). Reserva mais velha que `envio_reserva.IDADE_MINIMA_LIBERACAO` e' envio interrompido
-    (queda no meio da rodada, envio incerto, e-mail sem registro): acusa mesmo que outra rodada tenha saido, porque
-    trava o "Reenviar". Sem rodada completa e sem envio em andamento: nao saiu. None: nada pendente."""
+    """O que a Saude acusa do envio da copia do dono, lido do banco (vale depois de o servidor reiniciar, quando o
+    erro da memoria ja' sumiu). Primeiro, qualquer reserva mais velha que `envio_reserva.IDADE_MINIMA_LIBERACAO`, de
+    qualquer copia: envio interrompido (queda no meio da rodada, envio incerto, e-mail sem registro). A rodada em
+    curso renova a reserva das partes que faltam a cada parte enviada, entao reserva velha e' rodada parada. Depois,
+    a copia mais recente sem rodada completa e sem envio em andamento: nao saiu. None: nada pendente."""
+    presa = conn.execute(f"SELECT arquivo FROM {TABELA} WHERE envio_reservado_em <= datetime('now', ?) "
+                         "ORDER BY id LIMIT 1", (f"-{envio_reserva.IDADE_MINIMA_LIBERACAO} minutes",)).fetchone()
+    if presa is not None:
+        return f"envio da cópia de {_data(presa['arquivo'])} interrompido: confira os Enviados e libere"
     copias = copia_dono.copias(pasta_backups)
     if not copias:
         return None
     nome = copias[-1].name
     r = conn.execute(
         f"SELECT SUM(envio_reservado_em IS NOT NULL) AS reservadas, "
-        f"SUM(envio_reservado_em <= datetime('now', :idade)) AS presas, "
         f"(SELECT COUNT(*) FROM (SELECT rodada FROM {TABELA} WHERE arquivo=:a GROUP BY rodada "
-        f"HAVING COUNT(envio_id) = MAX(partes))) AS completas FROM {TABELA} WHERE arquivo=:a",
-        {"a": nome, "idade": f"-{envio_reserva.IDADE_MINIMA_LIBERACAO} minutes"}).fetchone()
-    data = f"{_gerada_em(copias[-1]):%d/%m/%Y}"
-    if r["presas"]:
-        return f"envio da cópia de {data} interrompido: confira os Enviados e libere"
+        f"HAVING COUNT(envio_id) = MAX(partes))) AS completas FROM {TABELA} WHERE arquivo=:a", {"a": nome}).fetchone()
     if r["reservadas"] or r["completas"]:
         return None
-    return f"a cópia de {data} não saiu por e-mail"
+    return f"a cópia de {_data(nome)} não saiu por e-mail"
+
+
+def _auditar_reenvio(conn, quem: dict, arquivo: Path, depois: dict) -> None:
+    """O "Reenviar" fica na auditoria DEPOIS da rodada, com o resultado: a falha dela nao esconde a do envio."""
+    try:
+        with db.mutacao(conn):
+            auditoria.registrar(conn, quem["id"], "copia_dono.reenviar", "copia_dono", arquivo.name, None, depois)
+    except Exception:
+        log.exception("auditoria do reenvio da copia do dono %s nao gravada: %s", arquivo.name, depois)
 
 
 def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
@@ -190,37 +208,57 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
                 f"INSERT INTO {TABELA} (arquivo, sha256, tamanho, rodada, parte, partes) VALUES (?,?,?,?,?,?)",
                 (arquivo.name, sha, len(dados), rodada, n, total)).lastrowid)
             envio_reserva.reservar(conn, TABELA, ids[-1], reservado_por, None)
-        if reenvio_por is not None:
-            auditoria.registrar(conn, reenvio_por["id"], "copia_dono.reenviar", "copia_dono", arquivo.name, None,
-                                {"rodada": rodada, "partes": total, "sha256": sha, "para": config["para"],
-                                 "enviada_por": usuario["email"]})
     gerada = _gerada_em(arquivo)
-    for i, (rid, (nome, pedaco)) in enumerate(zip(ids, partes)):
-        n = i + 1
-        titulo = assunto(gerada, n, total)
-        try:
-            envio_id = correio.enviar_e_registrar(conn, usuario, TIPO_ENVIO, config["para"], [], titulo,
-                                                  corpo(arquivo.name, gerada, len(dados), sha, n, total),
-                                                  [(nome, pedaco)])
-        except correio.EnvioNaoRegistrado:
-            _soltar(conn, ids[i + 1:])              # esta parte pode ter saido: a reserva dela fica
-            raise
-        except Exception as e:
-            trava = _soltar(conn, ids[i:])          # nada desta parte saiu
-            if total == 1 and not trava:
+    enviados, resultado = 0, "nada"
+    try:
+        for i, (rid, (nome, pedaco)) in enumerate(zip(ids, partes)):
+            n = i + 1
+            titulo = assunto(gerada, n, total)
+            try:
+                envio_id = correio.enviar_e_registrar(conn, usuario, TIPO_ENVIO, config["para"], [], titulo,
+                                                      corpo(arquivo.name, gerada, len(dados), sha, n, total),
+                                                      [(nome, pedaco)])
+            except correio.EnvioNaoRegistrado as e:
+                e.trava = _soltar(conn, ids[i + 1:])  # esta parte pode ter saido: a reserva dela fica
                 raise
-            if total == 1:
-                raise ParteNaoEnviada(f"{_motivo(e)}{trava}", 0, total) from e
-            anteriores = "; as anteriores saíram" if n > 1 else ""
-            raise ParteNaoEnviada(f"parte {n} de {total} não enviada ({_motivo(e)}){anteriores}{trava}", i,
-                                  total) from e
-        try:
-            with correio.depois_do_envio(titulo, config["para"], envio_id), db.mutacao(conn):
-                envio_reserva.liberar(conn, TABELA, rid)
-                conn.execute(f"UPDATE {TABELA} SET envio_id=? WHERE id=?", (envio_id, rid))
-        except correio.EnvioNaoRegistrado:
-            _soltar(conn, ids[i + 1:])              # esta parte saiu e nao foi marcada: so' a reserva dela fica
-            raise
+            except Exception as e:
+                trava = _soltar(conn, ids[i:])      # nada desta parte saiu
+                if total == 1 and not trava:
+                    raise
+                if total == 1:
+                    raise ParteNaoEnviada(f"{_motivo(e)}{trava}", 0, total) from e
+                anteriores = "; as anteriores saíram" if n > 1 else ""
+                raise ParteNaoEnviada(f"parte {n} de {total} não enviada ({_motivo(e)}){anteriores}{trava}", i,
+                                      total) from e
+            try:
+                with correio.depois_do_envio(titulo, config["para"], envio_id), db.mutacao(conn):
+                    envio_reserva.liberar(conn, TABELA, rid)
+                    conn.execute(f"UPDATE {TABELA} SET envio_id=? WHERE id=?", (envio_id, rid))
+                    # a rodada continua viva: as partes que faltam renovam a reserva, para a Saude e a liberacao
+                    # manual nao a tomarem por interrompida (rodada de muitas partes passa dos 15 minutos)
+                    if ids[i + 1:]:
+                        marcas = ",".join("?" * len(ids[i + 1:]))
+                        conn.execute(f"UPDATE {TABELA} SET envio_reservado_em=datetime('now') WHERE id IN "
+                                     f"({marcas}) AND envio_reservado_em IS NOT NULL", ids[i + 1:])
+            except correio.EnvioNaoRegistrado as e:
+                e.trava = _soltar(conn, ids[i + 1:])  # esta parte saiu e nao foi marcada: so' a reserva dela fica
+                raise
+            enviados += 1
+        resultado = "completo"
+    except correio.EnvioIncerto:
+        resultado = "incerto"
+        raise
+    except correio.EnvioNaoRegistrado:
+        resultado = "enviado_sem_registro"
+        raise
+    except BaseException:
+        resultado = "parcial" if enviados else "nada"
+        raise
+    finally:
+        if reenvio_por is not None:
+            _auditar_reenvio(conn, reenvio_por, arquivo, {
+                "rodada": rodada, "partes": total, "enviados": enviados, "resultado": resultado, "sha256": sha,
+                "para": config["para"], "enviada_por": usuario["email"]})
     return total
 
 
@@ -239,12 +277,13 @@ def _registrado(conn, arquivo: Path, reenvio_por: dict | None) -> int:
         raise                                       # outro envio da mesma copia esta' saindo: nao e' falha
     except correio.EnvioIncerto as e:               # a conexao caiu no /send: pode ter saido ou nao
         backup.ESTADO["ultimo_envio_copia_dono_erro"] = (
-            f"{agora}: envio incerto: confira os Enviados de quem envia antes de reenviar")
+            f"{agora}: envio incerto: confira os Enviados de quem envia antes de reenviar{getattr(e, 'trava', '')}")
         log.critical("copia do dono %s: envio incerto (%s)", arquivo.name, e)
         raise
     except correio.EnvioNaoRegistrado as e:
         backup.ESTADO["ultimo_envio_copia_dono_erro"] = (
-            f"{agora}: o e-mail saiu e o registro falhou; confira os Enviados de quem envia antes de reenviar")
+            f"{agora}: o e-mail saiu e o registro falhou; confira os Enviados de quem envia antes de reenviar"
+            f"{getattr(e, 'trava', '')}")
         log.critical("copia do dono %s: e-mail enviado e nao registrado (%s)", arquivo.name, e)
         raise
     except Exception as e:

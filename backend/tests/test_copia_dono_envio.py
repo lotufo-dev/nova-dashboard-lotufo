@@ -129,8 +129,10 @@ def test_reenviar_manda_de_novo_a_copia_mais_recente_e_fica_na_auditoria(ambient
     msgs = _enviados(tmp)
     assert len(msgs) == 2 and msgs[1]["anexos"] == msgs[0]["anexos"]
     assert [x[0] for x in conn.execute("SELECT rodada FROM copia_dono_envios ORDER BY id")] == [1, 2]
-    a = conn.execute("SELECT entidade, entidade_id FROM audit_log WHERE acao='copia_dono.reenviar'").fetchone()
+    a = conn.execute("SELECT entidade, entidade_id, depois FROM audit_log WHERE acao='copia_dono.reenviar'").fetchone()
     assert (a["entidade"], a["entidade_id"]) == ("copia_dono", arq.name)
+    depois = json.loads(a["depois"])
+    assert (depois["resultado"], depois["enviados"], depois["partes"], depois["rodada"]) == ("completo", 1, 1, 2)
 
 
 def test_reenviar_sem_copia_gerada_recusa(ambiente):
@@ -210,6 +212,25 @@ def test_falha_no_meio_das_partes_solta_as_reservas_que_nao_sairam(ambiente, mon
     assert copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))["emails"] == 3
 
 
+class FalhaSempre(FalhaNaSegunda):
+    def enviar(self, *a, **k):
+        raise graph.ErroGraph("Graph inacessível (TimeoutError)")
+
+
+@pytest.mark.parametrize("falso, resultado, enviados", [(FalhaNaSegunda, "parcial", 1), (FalhaSempre, "nada", 0)])
+def test_reenvio_que_falha_fica_na_auditoria_com_o_resultado(ambiente, monkeypatch, falso, resultado, enviados):
+    # a auditoria e' gravada depois da rodada: "reenviou" so' com o que o Graph aceitou
+    conn, tmp = ambiente
+    monkeypatch.setattr(copia_dono_envio, "TAMANHO_PARTE", 1000)
+    _copia(tmp)
+    monkeypatch.setattr(correio, "cliente", falso())
+    with pytest.raises(ValueError):
+        copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))
+    [a] = conn.execute("SELECT depois FROM audit_log WHERE acao='copia_dono.reenviar'").fetchall()
+    depois = json.loads(a["depois"])
+    assert (depois["resultado"], depois["enviados"], depois["partes"]) == (resultado, enviados, 3)
+
+
 def test_trava_que_nao_sai_no_meio_das_partes_vai_junto_do_motivo(ambiente, monkeypatch):
     conn, tmp = ambiente
     monkeypatch.setattr(copia_dono_envio, "TAMANHO_PARTE", 1000)
@@ -220,7 +241,43 @@ def test_trava_que_nao_sai_no_meio_das_partes_vai_junto_do_motivo(ambiente, monk
     monkeypatch.setattr(envio_reserva, "liberar_com_retentativa", ocupado)
     assert copia_dono_envio.enviar_nova(conn, _copia(tmp))["emails"] == 1     # a 1a parte saiu e continua contada
     erro = backup.ESTADO["ultimo_envio_copia_dono_erro"]
-    assert "parte 2 de 3" in erro and "trava do envio não pôde ser removida" in erro
+    assert "parte 2 de 3" in erro and "2 reservas ficaram presas" in erro
+
+
+def test_soltar_tenta_todas_as_reservas_mesmo_com_uma_que_falha(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    monkeypatch.setattr(copia_dono_envio, "TAMANHO_PARTE", 1000)
+    monkeypatch.setattr(correio, "cliente", FalhaNaSegunda())
+    real, tentadas = envio_reserva.liberar_com_retentativa, []
+
+    def uma_falha(conn_, tabela, id_):
+        tentadas.append(id_)
+        if len(tentadas) == 1:
+            raise ValueError("banco ocupado")
+        return real(conn_, tabela, id_)
+    monkeypatch.setattr(envio_reserva, "liberar_com_retentativa", uma_falha)
+    copia_dono_envio.enviar_nova(conn, _copia(tmp))
+    assert len(tentadas) == 2                       # partes 2 e 3, mesmo com a 2 falhando
+    linhas = conn.execute("SELECT parte, envio_reservado_em IS NOT NULL FROM copia_dono_envios ORDER BY parte")
+    assert [tuple(l) for l in linhas] == [(1, 0), (2, 1), (3, 0)]
+    assert "1 reserva ficou presa" in backup.ESTADO["ultimo_envio_copia_dono_erro"]
+
+
+def test_e_mail_sem_registro_com_trava_que_nao_sai_conta_as_presas_na_saude(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    monkeypatch.setattr(copia_dono_envio, "TAMANHO_PARTE", 1000)
+
+    def quebra(*a, **k):
+        raise correio.EnvioNaoRegistrado(None, "x", [PARA])
+
+    def ocupado(*a, **k):
+        raise ValueError("banco ocupado")
+    monkeypatch.setattr(correio, "enviar_e_registrar", quebra)
+    monkeypatch.setattr(envio_reserva, "liberar_com_retentativa", ocupado)
+    with pytest.raises(correio.EnvioNaoRegistrado):
+        copia_dono_envio.enviar_nova(conn, _copia(tmp))
+    erro = backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    assert "o e-mail saiu e o registro falhou" in erro and "2 reservas ficaram presas" in erro
 
 
 def test_copia_ja_enviada_nem_le_o_arquivo_de_novo(ambiente):
@@ -443,9 +500,12 @@ def test_saude_acusa_o_envio_interrompido_no_meio_da_rodada(api):
     arq = _copia_na_pasta()
     conn = db.get_conn()
     uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    eid = correio.registrar_envio(conn, uid, "copia_dono", "admin@lotufo.com", [PARA], [], "x", None, [])
+    conn.execute("INSERT INTO copia_dono_envios (arquivo, sha256, tamanho, rodada, parte, partes, envio_id) "
+                 "VALUES (?,?,?,1,1,1,?)", (arq.name, "x" * 64, 500, eid))      # rodada 1 completa
     rid = conn.execute("INSERT INTO copia_dono_envios (arquivo, sha256, tamanho, rodada, parte, partes, "
-                       "envio_reservado_em, envio_reservado_por) VALUES (?,?,?,1,1,2,datetime('now','-2 minutes'),?)",
-                       (arq.name, "x" * 64, 500, uid)).lastrowid
+                       "envio_reservado_em, envio_reservado_por) VALUES (?,?,?,2,1,1,datetime('now','-2 minutes'),?)",
+                       (arq.name, "x" * 64, 500, uid)).lastrowid                 # rodada 2 reservada
     conn.commit()
     assert api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"] is None   # ainda pode estar saindo
     conn.execute("UPDATE copia_dono_envios SET envio_reservado_em=datetime('now', ?) WHERE id=?",
@@ -454,6 +514,64 @@ def test_saude_acusa_o_envio_interrompido_no_meio_da_rodada(api):
     conn.close()
     assert api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"] == \
         "envio da cópia de 05/11/2026 interrompido: confira os Enviados e libere"
+
+
+def test_reserva_vencida_de_copia_anterior_continua_acusada_depois_da_nova_sair(api):
+    # a copia A ficou com envio incerto; a B saiu inteira: a Saude continua acusando a A
+    velha = _copia_na_pasta("dashboard-dono-20261029-080000.tar.age")
+    conn = db.get_conn()
+    uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    conn.execute("INSERT INTO copia_dono_envios (arquivo, sha256, tamanho, rodada, parte, partes, envio_reservado_em, "
+                 "envio_reservado_por) VALUES (?,?,?,1,1,1,datetime('now','-1 hour'),?)", (velha.name, "x" * 64, 500, uid))
+    conn.commit()
+    assert copia_dono_envio.enviar_nova(conn, _copia_na_pasta()) == _ok(1)
+    conn.close()
+    assert api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"] == \
+        "envio da cópia de 29/10/2026 interrompido: confira os Enviados e libere"
+
+
+class CorreioQueDemora:
+    """Cada parte leva 10 minutos (o relogio do banco e' adiantado envelhecendo as reservas). No meio da 3a parte,
+    a rodada ja' passa de 20 minutos: nem a Saude acusa interrupcao nem a liberacao manual aceita."""
+
+    def __init__(self, pasta):
+        self.pasta, self.enviados, self.vistos = pasta, [], []
+
+    def __call__(self, usuario_id, email_usuario=""):
+        return self
+
+    def remetente(self):
+        return DONO
+
+    def enviar(self, para, copia, assunto, corpo_html, anexos, cco=(), inline=()):
+        c = db.get_conn()
+        try:
+            c.execute("UPDATE copia_dono_envios SET envio_reservado_em=datetime(envio_reservado_em, '-10 minutes') "
+                      "WHERE envio_reservado_em IS NOT NULL")
+            c.commit()
+            if len(self.enviados) == 2:
+                self.vistos.append(copia_dono_envio.pendente(c, self.pasta))
+                rid = c.execute("SELECT id FROM copia_dono_envios WHERE parte=3").fetchone()[0]
+                uid = c.execute("SELECT id FROM usuarios").fetchone()[0]
+                try:
+                    envio_reserva.liberar_manual(c, uid, "copia_dono_envios", rid, "conferi e nao saiu", True)
+                    self.vistos.append("liberou")
+                except ValueError as e:
+                    self.vistos.append(str(e))
+        finally:
+            c.close()
+        self.enviados.append(assunto)
+        return f"<falso-{len(self.enviados)}@teste>"
+
+
+def test_rodada_longa_renova_a_reserva_das_partes_que_faltam(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    monkeypatch.setattr(copia_dono_envio, "TAMANHO_PARTE", 1000)
+    falso = CorreioQueDemora(tmp / "dados" / "backups")
+    monkeypatch.setattr(correio, "cliente", falso)
+    assert copia_dono_envio.enviar_nova(conn, _copia(tmp)) == _ok(3)
+    assert falso.vistos[0] is None                  # sem "interrompido" enquanto as partes saem
+    assert falso.vistos[1].startswith("Envio iniciado há")   # a liberacao recusa: a rodada esta' viva
 
 
 def test_botao_gerar_com_envio_parcial_nao_diz_completo(api, monkeypatch):
