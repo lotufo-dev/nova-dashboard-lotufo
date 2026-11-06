@@ -244,8 +244,9 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
 
     Serve aos dois sentidos: backup (dados -> backups/arquivos) e restauracao
     (backups/arquivos -> dados, por `restaurar_arquivos`). So' copia o que falta no destino; nunca apaga nada.
-    No backup, pasta que sumiu dos dados com o backup dela cheio e' erro da passada (#441): o snapshot cita
-    arquivos que esta passada nao viu. Pasta que nunca existiu (nada gravado nela ainda) nao e'.
+    No backup, arquivo pelo sha256 que o backup tem e os dados nao tem mais e' erro da passada (#441), mesmo com a
+    pasta recriada vazia: o sistema nao apaga esses arquivos, e o snapshot cita o que sumiu. Pasta que nunca existiu
+    (nada gravado nela ainda) nao e' erro.
     Temporarios (`*.tmp`, upload em andamento) ficam de fora. Cada copia vai para um
     `.tmp`, e' conferida pelo sha256 contra a origem e so' entao renomeada: ou o
     arquivo aparece inteiro, ou nao aparece. Origem cujo conteudo nao bate com o
@@ -265,21 +266,19 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
     conferir_estes = conferir_estes or set()
     copiados = 0
     falhas: dict[str, list[str]] = {}  # pasta -> motivo de cada arquivo sem copia
-    sumidas: list[str] = []
+    faltando: dict[str, int] = {}      # pasta -> arquivos pelo sha256 do backup que nao estao mais nos dados
     agora = time.time()
     for nome in pastas:
         origem = raiz_origem / nome
         destino = raiz_destino / nome
-        if not origem.is_dir():
-            if not restauracao and _tem_arquivo(destino):
-                log.error("pasta dos dados sumiu com o backup dela cheio: %s", origem)
-                sumidas.append(nome)
-            continue
-        destino.mkdir(parents=True, exist_ok=True)
-        _limpar_parciais_abandonados(destino, agora)
-        for arquivo in origem.iterdir():  # sem ordenar: a ordem nao importa e o acervo so' cresce
+        nos_dados: set[str] = set()
+        if origem.is_dir():
+            destino.mkdir(parents=True, exist_ok=True)
+            _limpar_parciais_abandonados(destino, agora)
+        for arquivo in origem.iterdir() if origem.is_dir() else ():  # sem ordenar: a ordem nao importa
             if not arquivo.is_file() or arquivo.name.endswith(".tmp"):
                 continue
+            nos_dados.add(arquivo.name)
             rel = f"{nome}/{arquivo.name}"
             try:
                 if _copiar_um(arquivo, destino / arquivo.name, conferir or rel in conferir_estes):
@@ -289,7 +288,10 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
                 falhas.setdefault(nome, []).append(_motivo(e))
                 if falhos is not None:
                     falhos.add(rel)
-    partes = [f"pasta {nome} sumiu dos dados" for nome in sumidas]
+        if not restauracao and (sumidos := _sumidos_dos_dados(destino, nos_dados)):
+            log.error("%d arquivo(s) de %s estao no backup e nao nos dados: %s", len(sumidos), nome, sorted(sumidos)[:20])
+            faltando[nome] = len(sumidos)
+    partes = [f"{n} arquivo(s) de {nome} estão no backup e sumiram dos dados" for nome, n in sorted(faltando.items())]
     if falhas:
         total = sum(len(m) for m in falhas.values())
         por_pasta = ", ".join(f"{nome} {len(m)} ({'; '.join(sorted(set(m)))})" for nome, m in sorted(falhas.items()))
@@ -299,11 +301,18 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
     return copiados
 
 
-def _tem_arquivo(pasta: Path) -> bool:
+def _sumidos_dos_dados(backup_da_pasta: Path, nos_dados: set[str]) -> set[str]:
+    """Nomes pelo sha256 (`<sha256>.<ext>`) que o backup guardou e que nao estao nos dados. O sistema nao apaga esses
+    arquivos (#441): faltar um e' disco perdido, pasta apagada ou recriada vazia, e o snapshot cita o que sumiu.
+    Temporario, `desktop.ini` e qualquer nome fora do padrao nao contam. Pasta do backup ilegivel: nada a dizer aqui
+    (a copia para ela ja' acusa)."""
     try:
-        return pasta.is_dir() and any(a.is_file() for a in pasta.iterdir())
+        if not backup_da_pasta.is_dir():
+            return set()
+        return {a.name for a in backup_da_pasta.iterdir()
+                if a.name not in nos_dados and _NOME_SHA_COM_EXT.fullmatch(a.name) and a.is_file()}
     except OSError:
-        return False
+        return set()
 
 
 # Assinatura de quem envia (`assinaturas/usuario-<id>`): o nome nao e' o sha256 e a pessoa troca ou tira a dela.
@@ -373,6 +382,7 @@ def restaurar_arquivos(raiz_backup: Path, dados: Path, banco: Path | None = None
 # aleatorio no nome: duas copias (outro processo, outra thread) nunca escrevem no mesmo parcial.
 _PARCIAL_NOSSO = re.compile(r"\.\d+-\d+-[0-9a-f]{8}\.tmp$")
 _NOME_SHA = re.compile(r"[0-9a-f]{64}")
+_NOME_SHA_COM_EXT = re.compile(r"[0-9a-f]{64}\.[a-z0-9]{1,5}")  # como `arquivos.gravar_bytes` nomeia
 
 
 def _limpar_parciais_abandonados(destino: Path, agora: float) -> None:

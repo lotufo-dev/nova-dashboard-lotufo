@@ -384,19 +384,38 @@ def test_restauracao_nao_devolve_assinatura_que_nao_e_a_vigente_no_banco(tmp_pat
     assert (destino / "arquivos" / "assinaturas" / "usuario-1").read_bytes() == ASSINATURA   # o backup nao perde
 
 
+SUMIU_PLEITOS = "1 arquivo(s) de pleitos estão no backup e sumiram dos dados"
+
+
 def test_passada_acusa_pasta_que_sumiu_dos_dados_e_nao_a_que_nunca_existiu(tmp_path):
-    """Gate Sol na PR #472 (#441): `dados/pleitos` sumiu e o backup dela esta' cheio: a passada nao pode dizer que
-    terminou bem (o snapshot cita arquivos que ela nao viu). Pasta em que nada foi gravado ainda nao e' erro."""
+    """Gate Sol e revisor na PR #472 (#441): `dados/pleitos` sumiu e o backup dela esta' cheio: a passada nao pode
+    dizer que terminou bem (o snapshot cita arquivos que ela nao viu). O erro fica com a pasta recriada vazia (a proxima
+    carta montada recria, `arquivos.pasta` faz mkdir) e na copia externa. Pasta em que nada foi gravado nao e' erro."""
     import shutil
     origem, _ = _dados_com_arquivos(tmp_path)
-    destino = tmp_path / "dados" / "backups"
+    destino, fora = tmp_path / "dados" / "backups", tmp_path / "fora"
     shutil.rmtree(tmp_path / "dados" / "boletins")     # nunca existiu: nem nos dados nem no backup
-    _rodar(origem, destino)
+    _rodar(origem, destino, fora)
     assert backup.ESTADO["ultima_copia_arquivos_erro"] is None
+    assert backup.ESTADO["ultima_copia_externa_arquivos_erro"] is None
     shutil.rmtree(tmp_path / "dados" / "pleitos")
+    for _ in range(2):
+        backup.rodada_arquivos(origem, destino, fora)
+        assert backup.ESTADO["ultima_copia_arquivos_erro"].endswith(f": {SUMIU_PLEITOS}")
+        assert backup.ESTADO["ultima_copia_externa_arquivos_erro"].endswith(f": {SUMIU_PLEITOS}")
+        (tmp_path / "dados" / "pleitos").mkdir(exist_ok=True)       # recriada vazia: o acervo continua fora
+
+
+def test_temporario_e_nome_alheio_no_backup_nao_contam_como_sumidos(tmp_path):
+    """Gate Sol na PR #472 (#441): `.tmp`, `desktop.ini` e nome fora do padrao no backup nao sao arquivos dos dados."""
+    origem, _ = _dados_com_arquivos(tmp_path)
+    destino = tmp_path / "dados" / "backups"
+    _rodar(origem, destino)
+    pleitos = destino / "arquivos" / "pleitos"
+    for nome in ("desktop.ini", f"{'a' * 64}.pdf.123-456-abcdef01.tmp", "Thumbs.db", f"{'b' * 63}.pdf"):
+        (pleitos / nome).write_bytes(b"x")
     backup.rodada_arquivos(origem, destino, None)
-    erro = backup.ESTADO["ultima_copia_arquivos_erro"]
-    assert erro and erro.endswith(": pasta pleitos sumiu dos dados"), erro
+    assert backup.ESTADO["ultima_copia_arquivos_erro"] is None
 
 
 def test_arquivos_nao_se_multiplicam_por_snapshot(tmp_path):
@@ -415,7 +434,7 @@ def test_arquivos_nao_se_multiplicam_por_snapshot(tmp_path):
 
 
 def test_arquivo_que_saiu_dos_dados_continua_no_backup(tmp_path):
-    # um snapshot antigo pode citar o arquivo; o backup nunca apaga o que guardou
+    # um snapshot antigo pode citar o arquivo; o backup nunca apaga o que guardou, e acusa o que sumiu (#441)
     origem, gravados = _dados_com_arquivos(tmp_path)
     destino = tmp_path / "dados" / "backups"
     _rodar(origem, destino)
@@ -424,6 +443,8 @@ def test_arquivo_que_saiu_dos_dados_continua_no_backup(tmp_path):
     time.sleep(1.1)
     _rodar(origem, destino)
     assert (destino / "arquivos" / rel).exists()
+    assert backup.ESTADO["ultima_copia_arquivos_erro"].endswith(": 1 arquivo(s) de notas estão no backup e sumiram "
+                                                                 "dos dados")
 
 
 def test_passada_leva_os_arquivos_para_fora(tmp_path):
