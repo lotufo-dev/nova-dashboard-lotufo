@@ -132,6 +132,9 @@ def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     d["documentos"] = [dict(x) for x in conn.execute(
         "SELECT id, tipo_doc, nome, numero_nf, consorciada, municipio, weblink, fonte, arquivo, tamanho, "
         "espelho_id FROM medicao_documentos WHERE medicao_id=? ORDER BY tipo_doc, id", (medicao_id,))]
+    # Issue #359: o aprovado mudou depois do espelho vigente (import local: espelhos importa este modulo)
+    from app import espelhos
+    d["espelho_desatualizado"] = bool(espelhos.desatualizadas(conn, medicao_id=medicao_id))
     return d
 
 def _json_dict(texto) -> dict | None:
@@ -723,20 +726,31 @@ def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tip
         if ja["estado"] not in ESTADOS_ESPELHO:
             raise ValueError(f"{nome_medicao(numero, tipo)} já está {rotulo_estado(ja['estado'])}: o espelho não pode ser "
                              "gerado de novo depois de protocolada")
+        # Issue #359 (decisao do Leo de 03/11/2026): a versao nova volta a medicao a `espelho_gerado` ate' o envio
+        # dela ao faturamento (marcar_espelho_enviado); antes, a nota podia sair pela versao antiga ja' enviada
         if valor_travado(ja) is not None:
             # o valor do espelho e' o travado (conferido em espelhos._calcular); o pedido nao muda
-            cur = conn.execute("UPDATE medicoes SET competencia=? WHERE id=? AND estado IN ('espelho_gerado','espelho_enviado')",
-                               (competencia, ja["id"]))
+            cur = conn.execute("UPDATE medicoes SET competencia=?, estado='espelho_gerado' WHERE id=? AND estado=?",
+                               (competencia, ja["id"], ja["estado"]))
             db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+            _registrar_volta_a_gerado(conn, usuario_id, ja)
             return ja["id"]
         cur = conn.execute("UPDATE medicoes SET valor_protocolado_centavos=?, valor_protocolado_origem='espelho', "
-                           "competencia=? WHERE id=? AND estado IN ('espelho_gerado','espelho_enviado')",
-                           (valor_centavos, competencia, ja["id"]))
+                           "competencia=?, estado='espelho_gerado' WHERE id=? AND estado=?",
+                           (valor_centavos, competencia, ja["id"], ja["estado"]))
         db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+        _registrar_volta_a_gerado(conn, usuario_id, ja)
         auditoria.registrar(conn, usuario_id, "medicao.valor_protocolado", "medicao", ja["id"],
                             {"valor_protocolado_centavos": ja["valor_protocolado_centavos"]},
                             {"valor_protocolado_centavos": valor_centavos, "valor_protocolado_origem": "espelho"})
         return ja["id"]
+
+
+def _registrar_volta_a_gerado(conn, usuario_id: int, ja) -> None:
+    """A auditoria da volta de `espelho_enviado` a `espelho_gerado` pela versao nova do espelho (issue #359)."""
+    if ja["estado"] == "espelho_enviado":
+        auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", ja["id"], {"estado": "espelho_enviado"},
+                            {"estado": "espelho_gerado", "motivo": "versão nova do espelho"})
 
 
 def marcar_espelho_enviado(conn, usuario_id: int, medicao_id: int) -> None:

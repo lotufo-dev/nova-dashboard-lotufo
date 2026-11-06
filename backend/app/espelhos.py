@@ -364,8 +364,10 @@ def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
             (contrato_id, numero, competencia, versao, json.dumps(entradas),
              json.dumps(saidas, ensure_ascii=False), regra_sha, usuario["id"], *(periodo or (None, None))))
         eid = cur.lastrowid
-        for mid in sorted(set(ids.values())):
-            conn.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id) VALUES (?,?)", (eid, mid))
+        # issue #359: o valor de cada medicao neste espelho, para o aviso de aprovado mudado depois dele
+        for tipo, mid in sorted(ids.items(), key=lambda x: x[1]):
+            conn.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id, valor_centavos) VALUES (?,?,?)",
+                         (eid, mid, por_tipo[tipo]))
         resumo = []
         for s, docx in gerados:
             caminho, sha = arquivos.gravar_bytes("espelhos", docx, "docx")
@@ -428,6 +430,46 @@ def listar(conn, contrato_id: int) -> list[dict]:
     ids = [r[0] for r in conn.execute("SELECT id FROM espelhos WHERE contrato_id=? "
                                       "ORDER BY numero DESC, versao DESC", (contrato_id,))]
     return [detalhe(conn, i) for i in ids]
+
+
+# --- issue #359: o aprovado mudou depois do espelho ----------------------------------------------------------
+
+# Decisao do Leo de 03/11/2026: o boletim novo com outro valor pode ser glosa, correcao ou reemissao do orgao; o aviso
+# so' diz que o aprovado mudou, nunca que e' glosa
+AVISO_DESATUALIZADO = "o aprovado mudou depois do espelho: gere o espelho de novo"
+
+
+def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
+    """Medicoes com espelho gerado ou enviado (os estados em que o espelho ainda se gera de novo) cujo aprovado vigente
+    difere do valor delas no espelho vigente mais novo. O valor vem de `espelho_medicoes.valor_centavos` (063); no
+    espelho de antes da coluna, das entradas gravadas pela regra da obra (sem a regra, ou com a regra sem a natureza
+    da medicao, nao ha' como comparar e nao avisa). Devolve {id, contrato_id, numero, tipo, aprovado_centavos,
+    espelho_centavos}."""
+    linhas = conn.execute(
+        "SELECT m.id, m.contrato_id, m.numero, m.tipo, m.valor_atestado_centavos AS aprovado, "
+        "em.valor_centavos, e.entradas FROM medicoes m JOIN espelho_medicoes em ON em.medicao_id=m.id "
+        "JOIN espelhos e ON e.id=em.espelho_id "
+        "WHERE m.estado IN ('espelho_gerado','espelho_enviado') AND m.valor_atestado_centavos IS NOT NULL "
+        "AND (? IS NULL OR m.id=?) AND e.situacao='vigente' AND e.versao=("
+        " SELECT MAX(e2.versao) FROM espelho_medicoes em2 JOIN espelhos e2 ON e2.id=em2.espelho_id "
+        " WHERE em2.medicao_id=m.id AND e2.situacao='vigente') ORDER BY m.id", (medicao_id, medicao_id)).fetchall()
+    regras: dict[int, dict | None] = {}
+    out = []
+    for r in linhas:
+        valor = r["valor_centavos"]
+        if valor is None:
+            if r["contrato_id"] not in regras:
+                regras[r["contrato_id"]] = regra_do_contrato(conn, r["contrato_id"])
+            regra = regras[r["contrato_id"]]
+            if regra is None:
+                continue
+            valor = espelho.valor_por_natureza(regra["regra"], json.loads(r["entradas"])).get(r["tipo"])
+            if valor is None:
+                continue
+        if r["aprovado"] != valor:
+            out.append({"id": r["id"], "contrato_id": r["contrato_id"], "numero": r["numero"], "tipo": r["tipo"],
+                        "aprovado_centavos": r["aprovado"], "espelho_centavos": valor})
+    return out
 
 
 # --- envio ao faturamento (spec §5.2) --------------------------------------------------------

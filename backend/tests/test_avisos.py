@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from app import auth, avisos, db, paineis, tempo
+from app import auth, avisos, db, espelhos, medicoes, paineis, tempo
+from tests.test_espelhos import _boletim, ambiente, ambiente_projeto  # noqa: F401  (fixtures da obra com espelho)
 
 D = datetime.date
 
@@ -290,3 +291,81 @@ def test_monitor_sem_leitura_um_so_aviso_mesmo_com_varios_processos(cenario, mon
     _processo_siga(c, ids, "2026-10-26 10:00:00", lido_em=lido, medicao=None, numero="SINFRA-PRO-2026/00003")
     monkeypatch.setattr(tempo, "agora_utc", lambda: _cuiaba(2026, 10, 27, 11))
     assert len(_de_siga(c, D(2026, 10, 27), "siga_sem_leitura")) == 1
+
+
+# --- issue #359: o aprovado mudou depois do espelho ---------------------------------------------------------------
+
+def _desatualizados(conn):
+    return [a for a in avisos.listar(conn) if a["tipo"] == "espelho_desatualizado"]
+
+
+def _espelho_enviado(conn, u, cid, valor, numero=23):
+    """Espelho gerado com `valor` (sem boletim, a medicao nasce nele) e enviado ao faturamento. Devolve a medicao."""
+    eid = espelhos.gerar(conn, u, cid, numero, "2026-01", {"medicao": valor})
+    mid = espelhos.detalhe(conn, eid)["medicoes"][0]["id"]
+    medicoes.marcar_espelho_enviado(conn, u["id"], mid)
+    return mid
+
+
+def test_boletim_com_aprovado_diferente_do_espelho_avisa_sem_dizer_glosa(ambiente):
+    conn, u, cid = ambiente
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+    assert _desatualizados(conn) == []
+    _boletim(conn, u, mid, 99_99)
+    [a] = _desatualizados(conn)
+    assert (a["medicao_id"], a["contrato_id"], a["nivel"], a["valor_centavos"]) == (mid, cid, "acao", 99_99)
+    assert "o aprovado mudou depois do espelho: gere o espelho de novo" in a["mensagem"]
+    assert "glosa" not in a["mensagem"].lower()
+    assert a["destino"] == {"tela": "contrato", "id": cid, "aba": "espelho"}
+    assert medicoes.detalhe(conn, mid)["espelho_desatualizado"] is True
+    assert [m["espelho_desatualizado"] for m in medicoes.listar(conn, cid)] == [True]
+
+
+def test_boletim_com_o_mesmo_valor_do_espelho_nao_avisa(ambiente):
+    conn, u, cid = ambiente
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+    _boletim(conn, u, mid, 100_01)
+    assert _desatualizados(conn) == []
+    assert medicoes.detalhe(conn, mid)["espelho_desatualizado"] is False
+
+
+def test_aviso_some_quando_a_versao_nova_e_gerada(ambiente):
+    conn, u, cid = ambiente
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+    _boletim(conn, u, mid, 99_99)
+    assert len(_desatualizados(conn)) == 1
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 99_99}, motivo="boletim novo do órgão")
+    assert _desatualizados(conn) == []
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["espelho_desatualizado"]) == ("espelho_gerado", False)
+
+
+def test_espelho_misto_compara_o_valor_de_cada_medicao(ambiente_projeto):
+    # o espelho com execucao e projeto: o aprovado da execucao se compara com o valor DELA, nao com o total
+    conn, u, cid = ambiente_projeto
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100_01, "projeto": 7_01})
+    exe = next(m["id"] for m in espelhos.detalhe(conn, eid)["medicoes"] if m["tipo"] == "execucao")
+    _boletim(conn, u, exe, 100_01)
+    assert _desatualizados(conn) == []
+    _boletim(conn, u, exe, 100_03, sha="b")
+    assert [a["medicao_id"] for a in _desatualizados(conn)] == [exe]
+
+
+def test_espelho_de_antes_da_migracao_usa_as_entradas_gravadas(ambiente):
+    # o espelho gerado antes da coluna do valor por medicao (063) nao tem o valor: vem das entradas pela regra
+    conn, u, cid = ambiente
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+    conn.execute("UPDATE espelho_medicoes SET valor_centavos=NULL"); conn.commit()
+    _boletim(conn, u, mid, 100_01)
+    assert _desatualizados(conn) == []
+    _boletim(conn, u, mid, 99_99, sha="b")
+    assert [a["medicao_id"] for a in _desatualizados(conn)] == [mid]
+
+
+def test_medicao_protocolada_nao_avisa_espelho_desatualizado(ambiente):
+    # depois do protocolo o espelho nao se gera mais: o aviso pediria o que nao da' para fazer
+    conn, u, cid = ambiente
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+    _boletim(conn, u, mid, 99_99)
+    conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=?", (mid,)); conn.commit()
+    assert _desatualizados(conn) == []
