@@ -365,23 +365,105 @@ def test_restaurar_snapshot_devolve_banco_e_arquivos_coerentes(tmp_path):
         assert (dados / rel).read_bytes() == gravados[rel]
 
 
-@pytest.mark.parametrize("ultimo", ["removida", "trocada"])
-def test_restauracao_nao_devolve_assinatura_que_nao_e_a_vigente_no_banco(tmp_path, ultimo):
-    """Gate Sol na PR #472 (#441): o backup nao apaga, e a assinatura muda de conteudo. Se o banco restaurado diz que a
-    pessoa tirou a assinatura, ou que a vigente e' outra, a do backup nao volta (o e-mail sairia com ela)."""
-    origem, gravados = _dados_com_arquivos(tmp_path)
+def _sha(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def _restaurar_com_eventos(tmp_path, eventos, ativos=None):
+    """Backup feito com a assinatura A da pessoa 1; o banco restaurado ganha `eventos`; `dados/assinaturas` fica com
+    `ativos` ({uid: bytes}; None = a pasta como estava). Devolve (dados, backup dos arquivos, erro ou None)."""
+    origem, _ = _dados_com_arquivos(tmp_path)
     dados = tmp_path / "dados"
     destino = dados / "backups"
     _rodar(origem, destino)
     conn = sqlite3.connect(origem)
-    _evento_assinatura(conn, 1, {"removida": True} if ultimo == "removida" else
-                       {"tamanho": 9, "sha256": hashlib.sha256(b"outra png").hexdigest()})
+    for uid, depois in eventos:
+        _evento_assinatura(conn, uid, depois)
     conn.commit(); conn.close()
-    (dados / "assinaturas" / "usuario-1").unlink()      # disco perdido; o banco e' o do snapshot com o evento novo
+    if ativos is not None:
+        for a in (dados / "assinaturas").iterdir():
+            a.unlink()
+        for uid, b in ativos.items():
+            (dados / "assinaturas" / f"usuario-{uid}").write_bytes(b)
+    try:
+        backup.restaurar_arquivos(destino / "arquivos", dados)
+        return dados, destino / "arquivos", None
+    except backup.ErroArquivo as e:
+        return dados, destino / "arquivos", str(e)
 
-    assert backup.restaurar_arquivos(destino / "arquivos", dados) == 0   # o resto ja' estava em dados
+
+def _quarentena(dados):
+    return sorted(b.read_bytes() for q in (dados / "assinaturas").glob("quarentena-*") for b in q.iterdir())
+
+
+def test_restauracao_troca_a_assinatura_ativa_pela_vigente_no_banco(tmp_path):
+    """Gate Sol na PR #472 (#441): `dados` nao se perdeu e tem B; o banco restaurado diz que a vigente e' A (a do
+    backup). B vai para a quarentena e A volta: nao basta deixar de copiar, B sairia nos e-mails."""
+    dados, _, erro = _restaurar_com_eventos(tmp_path, [], ativos={1: b"B outra png"})
+    assert erro is None
+    assert (dados / "assinaturas" / "usuario-1").read_bytes() == ASSINATURA
+    assert _quarentena(dados) == [b"B outra png"]
+
+
+def test_restauracao_tira_a_assinatura_que_o_banco_diz_removida(tmp_path):
+    """O ultimo evento e' a remocao: a ativa (que ainda estava em `dados`) vai para a quarentena e a do backup nao volta."""
+    dados, arquivos_bkp, erro = _restaurar_com_eventos(tmp_path, [(1, {"removida": True})])
+    assert erro is None
     assert not (dados / "assinaturas" / "usuario-1").exists()
-    assert (destino / "arquivos" / "assinaturas" / "usuario-1").read_bytes() == ASSINATURA   # o backup nao perde
+    assert _quarentena(dados) == [ASSINATURA]
+    assert (arquivos_bkp / "assinaturas" / "usuario-1").read_bytes() == ASSINATURA   # o backup nao perde
+
+
+def test_restauracao_acusa_quem_ficou_sem_a_assinatura_vigente_e_segue_com_os_outros(tmp_path):
+    """Parte do banco, nao dos arquivos: a pessoa 7 tem assinatura no banco e nenhuma copia dela existe, e a 1 trocou
+    para C (o banco diz C) mas so' ha' A. As duas sao acusadas sem nome de arquivo; a 3, que o banco nao conhece, sai
+    do nome ativo; e a 2, em ordem, volta do backup mesmo com as outras falhando."""
+    dois = b"\x89PNG\r\n\x1a\n pessoa 2"
+    origem, _ = _dados_com_arquivos(tmp_path)
+    dados = tmp_path / "dados"
+    destino = dados / "backups"
+    (dados / "assinaturas" / "usuario-2").write_bytes(dois)
+    _rodar(origem, destino)
+    conn = sqlite3.connect(origem)
+    for uid, depois in ((2, {"sha256": _sha(dois)}), (7, {"sha256": _sha(b"sete")}), (1, {"sha256": _sha(b"C")})):
+        _evento_assinatura(conn, uid, depois)
+    conn.commit(); conn.close()
+    for a in (dados / "assinaturas").iterdir():
+        a.unlink()
+    (dados / "assinaturas" / "usuario-3").write_bytes(b"sem evento")
+    with pytest.raises(backup.ErroArquivo) as e:
+        backup.restaurar_arquivos(destino / "arquivos", dados)
+    assert str(e.value) == ("2 assinatura(s) sem a vigente: usuário 1: nenhuma cópia tem a assinatura vigente no "
+                            "banco; usuário 7: nenhuma cópia tem a assinatura vigente no banco")
+    assert (dados / "assinaturas" / "usuario-2").read_bytes() == dois
+    assert not (dados / "assinaturas" / "usuario-1").exists() and not (dados / "assinaturas" / "usuario-3").exists()
+    assert _quarentena(dados) == [b"sem evento"]
+
+
+def test_erro_de_disco_numa_assinatura_nao_para_as_outras(tmp_path, monkeypatch):
+    """Revisor na PR #472 (#441): um try por pessoa; o motivo vai junto, em portugues."""
+    dois = b"\x89PNG\r\n\x1a\n pessoa 2"
+    origem, _ = _dados_com_arquivos(tmp_path)
+    dados = tmp_path / "dados"
+    destino = dados / "backups"
+    (dados / "assinaturas" / "usuario-2").write_bytes(dois)
+    _rodar(origem, destino)
+    conn = sqlite3.connect(origem)
+    _evento_assinatura(conn, 2, {"sha256": _sha(dois)})
+    conn.commit(); conn.close()
+    for a in (dados / "assinaturas").iterdir():
+        a.unlink()
+    real = backup._copiar_um
+
+    def negado_na_1(arquivo, alvo, conferir=False):
+        if alvo.name == "usuario-1":
+            raise PermissionError("negado")
+        return real(arquivo, alvo, conferir)
+
+    monkeypatch.setattr(backup, "_copiar_um", negado_na_1)
+    with pytest.raises(backup.ErroArquivo, match=r"^1 assinatura\(s\) sem a vigente: usuário 1: acesso negado$"):
+        backup.restaurar_arquivos(destino / "arquivos", dados)
+    assert (dados / "assinaturas" / "usuario-2").read_bytes() == dois
 
 
 SUMIU_PLEITOS = "1 arquivo(s) de pleitos estão no backup e sumiram dos dados"

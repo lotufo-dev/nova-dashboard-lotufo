@@ -327,36 +327,62 @@ def _assinaturas_do_banco(banco: Path) -> dict[str, dict]:
                               "AND entidade='usuario' ORDER BY id").fetchall()
     finally:
         conn.close()
-    return {str(uid): json.loads(depois or "{}") for uid, depois in linhas}
+    return {str(uid): json.loads(depois or "{}") for uid, depois in linhas if str(uid).isdigit()}
 
 
-def _restaurar_assinaturas(origem: Path, destino: Path, banco: Path) -> tuple[int, int]:
-    """Devolve so' a assinatura que o banco restaurado diz ser a vigente (#441): o sha256 do arquivo do backup e' o do
-    ultimo evento daquele usuario. Assinatura que a pessoa tirou, ou trocou depois da copia, fica de fora: o e-mail
-    nao sai com uma imagem que ela nao usa mais. Devolve (copiadas, deixadas de fora)."""
-    if not origem.is_dir():
-        return 0, 0
+def _sha_ou_nada(arquivo: Path) -> str | None:
+    return _sha256(arquivo) if arquivo.is_file() else None
+
+
+def _restaurar_assinaturas(origem: Path, destino: Path, banco: Path) -> tuple[int, int, list[str]]:
+    """Reconcilia `dados/assinaturas` com o banco restaurado (#441). Parte dos eventos `correio.assinatura` do banco,
+    nao dos arquivos: para cada pessoa, no nome ativo (`usuario-<id>`) fica so' a imagem com o sha256 do ultimo evento
+    dela, a que ja' esta' em `dados` ou a do backup. A que diverge, a de quem tirou a assinatura e a de quem o banco
+    nao conhece vao para `assinaturas/quarentena-<data>/` (nada se apaga); o e-mail nao sai com uma imagem que nao e' a
+    vigente. Um problema numa pessoa nao para as outras. Devolve (copiadas do backup, postas em quarentena, motivos de
+    quem ficou sem a assinatura vigente)."""
     vigentes = _assinaturas_do_banco(banco)
-    copiadas = fora = 0
-    destino.mkdir(parents=True, exist_ok=True)
-    for arquivo in origem.iterdir():
-        m = _NOME_ASSINATURA.fullmatch(arquivo.name)
-        if not m or not arquivo.is_file():
-            continue
-        if vigentes.get(m[1], {}).get("sha256") != _sha256(arquivo):
-            log.warning("assinatura do backup nao e' a vigente no banco restaurado; fica de fora: %s", arquivo)
-            fora += 1
-            continue
-        copiadas += _copiar_um(arquivo, destino / arquivo.name, conferir=True)
-    return copiadas, fora
+    quarentena = destino / f"quarentena-{tempo.para_local(tempo.agora_utc()):%Y%m%d}"
+    copiadas = isoladas = 0
+    motivos: list[str] = []
+
+    def isolar(arquivo: Path) -> None:
+        nonlocal isoladas
+        quarentena.mkdir(parents=True, exist_ok=True)
+        os.replace(arquivo, quarentena / f"{arquivo.name}.{secrets.token_hex(4)}")
+        log.warning("assinatura que nao e' a vigente no banco restaurado foi para a quarentena: %s", arquivo.name)
+        isoladas += 1
+
+    ativas = {m[1] for a in (destino.iterdir() if destino.is_dir() else ())
+              if (m := _NOME_ASSINATURA.fullmatch(a.name)) and a.is_file()}
+    for uid in sorted(set(vigentes) | ativas, key=int):
+        ativo, do_backup = destino / f"usuario-{uid}", origem / f"usuario-{uid}"
+        evento = vigentes.get(uid) or {}
+        esperado = None if evento.get("removida") else evento.get("sha256")
+        try:
+            atual = _sha_ou_nada(ativo)
+            if atual is not None and atual != esperado:
+                isolar(ativo)
+                atual = None
+            if esperado is None or atual == esperado:
+                continue
+            if _sha_ou_nada(do_backup) != esperado:
+                motivos.append(f"usuário {uid}: nenhuma cópia tem a assinatura vigente no banco")
+                continue
+            destino.mkdir(parents=True, exist_ok=True)
+            copiadas += _copiar_um(do_backup, ativo, conferir=True)
+        except OSError as e:
+            log.warning("assinatura do usuario %s nao reconciliada", uid, exc_info=True)
+            motivos.append(f"usuário {uid}: {_motivo(e)}")
+    return copiadas, isoladas, motivos
 
 
 def restaurar_arquivos(raiz_backup: Path, dados: Path, banco: Path | None = None) -> int:
     """Passo 5 do runbook: devolve a `dados` os arquivos do backup, conferidos pelo sha256, sem apagar nada.
 
-    As pastas pelo sha256 voltam inteiras (`copiar_arquivos` com conferir). As assinaturas, so' as que o banco
-    restaurado (`banco`, padrao `dados/dashboard.db`, que o passo anterior ja' devolveu) diz serem as vigentes.
-    Devolve quantos arquivos copiou; arquivo que nao se copiou sobe ErroArquivo no fim, como na copia."""
+    As pastas pelo sha256 voltam inteiras (`copiar_arquivos` com conferir). As assinaturas sao reconciliadas com o
+    banco restaurado (`banco`, padrao `dados/dashboard.db`, que o passo anterior ja' devolveu; ver
+    `_restaurar_assinaturas`). Devolve quantos arquivos copiou; o que nao se resolveu sobe ErroArquivo no fim."""
     banco = banco or dados / "dashboard.db"
     erros: list[str] = []
     copiados = 0
@@ -366,10 +392,12 @@ def restaurar_arquivos(raiz_backup: Path, dados: Path, banco: Path | None = None
     except ErroArquivo as e:
         erros.append(str(e))
     try:
-        n, fora = _restaurar_assinaturas(raiz_backup / "assinaturas", dados / "assinaturas", banco)
+        n, isoladas, motivos = _restaurar_assinaturas(raiz_backup / "assinaturas", dados / "assinaturas", banco)
         copiados += n
-        if fora:
-            log.warning("%d assinatura(s) do backup ficaram de fora (tirada ou trocada depois da copia)", fora)
+        if isoladas:
+            log.warning("%d assinatura(s) foram para a quarentena (nao sao as vigentes no banco restaurado)", isoladas)
+        if motivos:
+            erros.append(f"{len(motivos)} assinatura(s) sem a vigente: {'; '.join(motivos)}")
     except (OSError, sqlite3.Error, ValueError) as e:  # ValueError: `depois` que nao e' JSON
         log.exception("assinaturas nao restauradas")
         erros.append(f"assinaturas não devolvidas ({_motivo(e)})")
