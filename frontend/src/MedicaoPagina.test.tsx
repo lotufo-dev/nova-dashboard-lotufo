@@ -169,6 +169,17 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(container.textContent).not.toMatch(/glosa/i);
   });
 
+  it("#359: o link do aviso abre o espelho mesmo com a âncora #espelho já na página", async () => {
+    window.history.replaceState(null, "", "/obras/1/medicoes/5#espelho");
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: true }] });
+    pagina();
+    await screen.findByRole("heading", { name: "Espelho", level: 2 });
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Etapas da medição" })).getByRole("button", { name: /Etapa 3: Nota fiscal/ }));
+    await screen.findByRole("heading", { name: "Nota fiscal", level: 2 });
+    fireEvent.click(screen.getByRole("link", { name: "gere o espelho de novo" }));
+    expect(await screen.findByRole("heading", { name: "Espelho", level: 2 })).toBeTruthy();
+  });
+
   it("#359: sem o aprovado mudado, nada de aviso do espelho", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: false }] });
     pagina();

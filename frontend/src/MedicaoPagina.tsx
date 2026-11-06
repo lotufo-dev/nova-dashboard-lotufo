@@ -19,7 +19,7 @@ import { brl, type Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
 import { ProtocolosDaMedicao, useProtocolos } from "./Protocolo";
 import { LinhaDoTempo, ResumoMedicao } from "./ResumoLateral";
-import { type AbaMedicoes, type Origem, type Rota, useRota } from "./rota";
+import { type AbaMedicoes, ir, type Origem, type Rota, useRota } from "./rota";
 import { Link } from "./Link";
 import Selo from "./Selo";
 import { fmtCompetencia, fmtDataHora, fmtDataPura } from "./tempo";
@@ -378,7 +378,9 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         {/* #359: boletim novo com outro aprovado depois do espelho (o servidor compara com o espelho vigente) */}
         {grupo.some(x => x.espelho_desatualizado) && (
           <CaixaAviso nivel="atencao">
-            O aprovado mudou depois do espelho: <Link className="link" para={aqui} secao="espelho">gere o espelho de novo</Link>
+            {/* abre a etapa 1 tambem quando a ancora ja' e' #espelho (o efeito da secao so' roda quando ela muda) */}
+            O aprovado mudou depois do espelho: <Link className="link" para={aqui} secao="espelho"
+              ir={(p, o) => { setVendo(1); ir(p, o); }}>gere o espelho de novo</Link>
           </CaixaAviso>
         )}
 
