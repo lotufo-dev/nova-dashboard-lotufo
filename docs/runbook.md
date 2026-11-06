@@ -39,7 +39,7 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
 - Produção (manual, avançado): `scripts\rodar_producao.ps1 [-SemTls] [-Porta 8080] [-Raiz C:\DashboardLotufo] [-BackupExterno \\servidor\backups\dashboard]` (elevado, a partir do diretório pinado). Hoje: HTTPS na 8080 (sem `-SemTls`, decisão de 05/11/2026, issue #425; até o corte da seção "HTTP ou HTTPS", `-SemTls`), sem cópia externa.
 - **Porta** (issue #361): os quatro scripts (`rodar_producao.ps1`, `instalar_autostart.ps1`, `instalar_watchdog.ps1`, `deploy.ps1`) aceitam `-Porta`; sem ela vale o padrão do modo (80 em HTTP com `-SemTls`, 8443 em HTTPS). Numa máquina em que a 80 é de outro serviço (IIS na VM nova), passar a mesma porta nos quatro (ex.: `-Porta 8080`) e liberar essa porta no firewall (seção "HTTP ou HTTPS"). Neste documento a saúde nessa porta é `scripts\saude_local.ps1 -Porta <porta>` (com `-SemTls` na produção em HTTP), rodado na própria máquina: imprime o `/api/health` e sai com 1 se não vier 200.
 - Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Porta 8080] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Sem `-SemTls`, recusa instalar se `<raiz>\segredos\tls\cert.pem` ou `chave.pem` não existir. Parar: `Stop-ScheduledTask -TaskName <tarefa>`; iniciar: `Start-ScheduledTask -TaskName <tarefa>`.
-- Watchdog: `scripts\instalar_watchdog.ps1 [-SemTls] [-Porta 8080] [-Raiz ...]` (modo e porta iguais aos da tarefa principal) registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1 -Url https://localhost:<porta>/api/health -Certificado <raiz>\segredos\tls\cert.pem` (com `-SemTls`, `-Url http://localhost:<porta>/api/health` sem certificado) — confere `/api/health` na porta de `-Porta` (padrão 8443 em HTTPS, 80 com `-SemTls`), aceitando só o certificado da instalação (seção "HTTP ou HTTPS"), e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
+- Watchdog: `scripts\instalar_watchdog.ps1 [-SemTls] [-Porta 8080] [-Raiz ...]` (modo, porta e raiz iguais aos da tarefa principal; `-Porta` e `-Raiz` omitidos vêm dela, e valor diferente aborta) registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1 -Url https://localhost:<porta>/api/health -Certificado <raiz>\segredos\tls\cert.pem` (com `-SemTls`, `-Url http://localhost:<porta>/api/health` sem certificado) — confere `/api/health` na porta de `-Porta` (padrão 8443 em HTTPS, 80 com `-SemTls`), aceitando só o certificado da instalação (seção "HTTP ou HTTPS"), e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
 
 ### Deploy a partir do Mac (SSH)
 
@@ -184,12 +184,24 @@ ACL de `segredos` (só SYSTEM e Administradores; o script trava as pastas antes 
 que vai para os navegadores; a `chave.pem` nunca sai da VM. Gerar de novo troca o par inteiro (o anterior só sai depois que o
 novo está no lugar) e pede reimportar o `cert.pem` nos PCs.
 
+**Gerar de novo com a produção em HTTPS**: o uvicorn no ar segue com o par antigo até reiniciar, e o watchdog, que relê o
+`cert.pem`, passa a recusar o certificado antigo e reinicia a produção sem aviso. Por isso: sentinela
+(`New-Item -ItemType File -Path C:\DashboardLotufo\watchdog.pause -Force | Out-Null`), `gerar_certificado.ps1`, logo depois
+`Stop-ScheduledTask DashboardLotufo; Start-ScheduledTask DashboardLotufo`, `saude_local.ps1 -Porta <porta>` 200, apagar o
+sentinela e reimportar o `cert.pem` nos PCs (a operação vê aviso até reimportar).
+
+**Watchdog com problema no conferidor**: `cert.pem` ausente ou ilegível, ou o C# da saúde bloqueado (antivírus no `Add-Type`),
+não reinicia a produção: o `watchdog.log` registra "CONFERIDOR com problema, producao NAO reiniciada: <motivo>" a cada rodada,
+até ser resolvido.
+
 **Saúde na própria máquina.** Watchdog, deploy e `scripts\saude_local.ps1` falam com `https://localhost:<porta>` aceitando
 **só** o certificado da instalação: comparam o thumbprint do certificado apresentado com o de `<raiz>\segredos\tls\cert.pem`
 (`scripts\comum_tls.ps1`). A verificação não é desligada em lugar nenhum, e o pedido só sai para `localhost`. O `deploy.ps1` lê o
 modo da tarefa (com `-SemTls` nos argumentos, HTTP; sem, HTTPS) e, no HTTPS, não começa sem o `cert.pem` ("certificado do HTTPS
-nao encontrado", nada alterado). O `instalar_watchdog.ps1` recusa instalar num modo diferente do da tarefa principal. O watchdog
-relê o `cert.pem` a cada rodada: certificado trocado não pede reinstalar o watchdog.
+nao encontrado", nada alterado) e recusa, antes do checkout, um alvo anterior à #425 ("anterior ao HTTPS ... volte para HTTP
+antes"). O `instalar_watchdog.ps1` lê modo, porta e raiz da tarefa principal: `-Porta` e `-Raiz` omitidos vêm dela, e modo,
+porta ou raiz diferentes abortam antes de registrar. O watchdog relê o `cert.pem` a cada rodada: certificado trocado não pede
+reinstalar o watchdog.
 
 **Firewall.** A regra da porta continua a mesma (TCP 8080 só de faixas privadas, seção "Mudar de servidor"); o nome dela diz
 "HTTP", mas o que ela libera é a porta. Numa instalação nova, como administrador:
@@ -198,7 +210,10 @@ New-NetFirewallRule -DisplayName "Dashboard Lotufo 8080" -Direction Inbound -Pro
 ```
 
 ### Corte para HTTPS (uma vez, pelo Leo, depois do merge da #425)
-Feito pela skill `deploy`, avisando a operação do endereço novo. Parada de um a dois minutos.
+Feito pela skill `deploy`, avisando a operação do endereço novo. Parada de um a dois minutos. **Fazer os passos 5 a 7 antes do
+expediente, com 12 horas sem ninguém entrar por HTTP**: a sessão dura 12 horas no servidor (`SESSAO_HORAS`) e o cookie de quem
+entrou por HTTP passou em claro pela rede; com o corte depois desse intervalo, nenhuma sessão aberta em HTTP sobrevive e todos
+entram de novo por HTTPS. Não há comando para derrubar todas as sessões de uma vez (`redefinir-senha` derruba as de uma pessoa).
 1. **Deploy normal** do commit com a #425 (skill `deploy`). A tarefa ainda tem `-SemTls`: o deploy confere a saúde por HTTP,
    como antes, e o diretório pinado passa a ter os scripts novos. Nada muda para a operação.
 2. **Gerar o certificado** na VM, como administrador, de `C:\DashboardLotufo\app`:
@@ -215,7 +230,7 @@ Feito pela skill `deploy`, avisando a operação do endereço novo. Parada de um
    `Get-NetTCPConnection -LocalPort 8080 -State Listen` vazio (se sobrar o uvicorn órfão, `Stop-Process` nele, como o deploy faz);
    `scripts\instalar_autostart.ps1 -AppDir C:\DashboardLotufo\app` com **os mesmos** parâmetros anotados (`-Raiz`, `-Porta 8080`,
    `-BackupExterno`, `-RmUsuario`, `-RmSenhaArquivo`, `-RmHttpInseguro`, `-GraphClientId`, ...) **menos `-SemTls`**;
-   `scripts\instalar_watchdog.ps1 -Porta 8080` (sem `-SemTls`; `-Raiz` se não for a padrão); `Start-ScheduledTask DashboardLotufo`.
+   `scripts\instalar_watchdog.ps1` (sem `-SemTls`; porta e raiz vêm da tarefa recém-instalada); `Start-ScheduledTask DashboardLotufo`.
 6. **Conferir na VM**: `scripts\saude_local.ps1 -Porta 8080` → 200 com `banco: ok`, `tls: true` e `instalacao: autorizada`;
    ensaio da recusa, no mesmo PowerShell do passo 3: `[DashSaudeLocal]::Pedir("https://localhost:8080/api/health",
    "0000000000000000000000000000000000000000", 5000)` **falha** (thumbprint que não é o da instalação) e com o thumbprint do passo
@@ -227,13 +242,15 @@ Feito pela skill `deploy`, avisando a operação do endereço novo. Parada de um
 8. Avisar a operação do endereço novo (`https://<vm>:8080`) e trocar o endereço do robô do SIGA (seção "Monitor do SIGA").
 
 **Voltar atrás**: sentinela, `Stop-ScheduledTask DashboardLotufo`, `instalar_autostart.ps1` com os mesmos parâmetros **mais
-`-SemTls`**, `instalar_watchdog.ps1 -SemTls -Porta 8080`, `Start-ScheduledTask DashboardLotufo`, `saude_local.ps1 -Porta 8080
+`-SemTls`**, `instalar_watchdog.ps1 -SemTls`, `Start-ScheduledTask DashboardLotufo`, `saude_local.ps1 -Porta 8080
 -SemTls` 200, apagar o sentinela e avisar a operação de que o endereço volta a `http://<vm>:8080`.
 
-**Rollback do deploy para um commit anterior à #425** (automático do `deploy.ps1` ou à mão), com a tarefa já em HTTPS: o
-`rodar_producao.ps1` antigo procura o certificado em `C:\DashboardLotufo\app\certs`, que não existe, e o servidor não sobe
-(`ROLLBACK TAMBEM FALHOU`). O watchdog para junto, sem nada no `watchdog.log`: o `watchdog.ps1` antigo não conhece o
-`-Certificado` que a tarefa dele passa. Nesse caso, voltar a tarefa e o watchdog para `-SemTls` (parágrafo acima) e subir de novo.
+**Deploy para um commit anterior à #425** com a tarefa já em HTTPS: o `rodar_producao.ps1` antigo procura o certificado em
+`C:\DashboardLotufo\app\certs`, que não existe, e o servidor não sobe; o `watchdog.ps1` antigo não conhece o `-Certificado` que
+a tarefa dele passa e para sem nada no `watchdog.log`. Por isso o `deploy.ps1` em HTTPS recusa esse alvo antes do backup e do
+checkout ("deploy abortado antes do checkout: ... anterior ao HTTPS ... volte para HTTP antes"), e a produção segue no commit
+de antes. Para ir a um commit desses: "Voltar atrás" primeiro, depois o deploy. O rollback automático volta para o commit que
+estava no ar, que já tem a #425. À mão (`git checkout` no pinado sem o `deploy.ps1`), vale o mesmo cuidado.
 
 ## Certificado nos navegadores
 O certificado é autoassinado: cada PC da operação precisa confiar nele uma vez. Instalação à mão pelo Leo, sem GPO
@@ -245,8 +262,11 @@ O certificado é autoassinado: cada PC da operação precisa confiar nele uma ve
    por ser raiz autoassinada). Conferir com `Get-ChildItem Cert:\LocalMachine\Root | Where-Object Thumbprint -eq <thumbprint>`.
 3. Fechar e abrir o navegador e abrir `https://<vm>:8080`: sem aviso. Chrome e Edge usam o repositório do Windows; Firefox
    precisa de `security.enterprise_roots.enabled = true` em `about:config` ou da importação em Configurações › Certificados.
-4. No Mac (fora do domínio, pelo IP ou por linha no `hosts`): abrir o `cert.pem` no Acesso às Chaves, chaves "Sistema", e marcar
-   "Confiar sempre".
+4. No Mac (fora do domínio, pelo IP ou por linha no `hosts`): **o Safari não abre**. O macOS recusa certificado TLS com validade
+   acima de 825 dias mesmo confiado à mão, e o da dashboard tem 5 anos (decisão do Leo). Conferido em 05/11/2026 com
+   `security verify-cert -c cert.pem -r cert.pem -p ssl -s <nome>`, que deu `CSSMERR_TP_CERT_SUSPENDED` para 5 anos e passou
+   para 800 dias. No Mac, usar o Firefox, com o `cert.pem` importado em Configurações › Privacidade e Segurança › Certificados ›
+   Autoridades, marcando "Confiar nesta CA para identificar sites". O Chrome do Mac não foi conferido.
 
 Certificado gerado de novo (troca de VM, nome ou IP, ou fim dos 5 anos): repetir em cada PC; o antigo pode ser apagado do
 repositório "Autoridades de Certificação Raiz Confiáveis" pelo thumbprint.
