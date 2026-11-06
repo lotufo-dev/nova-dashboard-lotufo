@@ -40,7 +40,9 @@ function PortaDaTarefa {
     if (-not $tarefa) { return 0 }
     $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
     if ($argumentosTarefa -match "-Porta (\d+)") { return [int]$Matches[1] }
-    return 80
+    # Sem -Porta vale o padrao do modo do rodar_producao.ps1 (issue #425): 80 com -SemTls, 8443 com TLS.
+    if ($argumentosTarefa -match "-SemTls\b") { return 80 }
+    return 8443
 }
 $portaTarefa = PortaDaTarefa
 if ($Porta -eq 0) {
@@ -72,11 +74,32 @@ if (-not $Raiz) {
 $instalacaoArquivo = Join-Path $Raiz "segredos\instalacao.json"   # o mesmo que o rodar_producao.ps1 passa ao servidor
 $banco = Join-Path $Raiz "dados\dashboard.db"
 
+# HTTPS (issue #425): o modo tambem e' o da tarefa. Com -SemTls nos argumentos (producao de antes do corte) a saude e'
+# HTTP; sem ele, https://localhost aceitando so' o certificado da instalacao, pelo thumbprint (comum_tls.ps1).
+# Com o certificado ausente no modo HTTPS o deploy nao comeca: o watchdog nem e' pausado e nada muda.
+function TlsDaTarefa {
+    $tarefa = Get-ScheduledTask -TaskName "DashboardLotufo" -ErrorAction SilentlyContinue
+    if (-not $tarefa) { return $true }
+    $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
+    return (-not ($argumentosTarefa -match "-SemTls\b"))
+}
+$comTls = TlsDaTarefa
+. (Join-Path $PSScriptRoot "comum_tls.ps1")
+$certificado = Join-Path $Raiz "segredos\tls\cert.pem"
+if ($comTls) {
+    $urlSaude = "https://localhost:$Porta/api/health"
+    if (-not (Test-Path -LiteralPath $certificado)) {
+        throw "certificado do HTTPS nao encontrado em $certificado (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)"
+    }
+} else {
+    $urlSaude = "http://localhost:$Porta/api/health"
+}
+
 # Instalacao assinada (issue #417): depois do deploy so' vale o health 200 com instalacao "autorizada" (arquivo
 # assinado para esta maquina em <raiz>\segredos\instalacao.json). Modo copia (arquivo ausente, ilegivel, assinatura
 # ou maquina) conta como falha e dispara o rollback. O rollback confere so' o 200: o commit anterior pode nem ter o campo.
 function Saudavel([switch]$ExigirInstalacao) {
-    try { $resposta = Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing }
+    try { $resposta = Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12 }
     catch { return $false }
     if ($resposta.StatusCode -ne 200) { return $false }
     if (-not $ExigirInstalacao) { return $true }
@@ -165,7 +188,7 @@ function SaudavelENovo([switch]$ExigirInstalacao) {
 # Depois do ROLLBACK OK: o commit anterior pode ja' conferir a instalacao (issue #417) e ter voltado em modo copia, sem
 # envio de e-mail e sem RM. Commit anterior ao #417 nao tem o campo e nao avisa.
 function AvisarSeCopia {
-    try { $saude = (Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing).Content | ConvertFrom-Json }
+    try { $saude = (Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12).Content | ConvertFrom-Json }
     catch { return }
     if ($saude.instalacao -and $saude.instalacao -ne "autorizada") {
         Write-Warning "producao de volta, mas em modo copia: instalacao $($saude.instalacao) (motivo: $($saude.instalacao_motivo)), sem envio de e-mail e sem RM - ver docs\runbook.md (Instalacao assinada)"
@@ -183,6 +206,18 @@ try {
     $alvo = (& git -C $AppDir rev-parse $Ref)
     if ($LASTEXITCODE -ne 0) { throw "git rev-parse $Ref falhou" }
     $alvo = $alvo.Trim()
+    # Gate Sol da PR #476: com a tarefa em HTTPS, um alvo de antes da #425 nao sobe (o rodar_producao.ps1 dele procura a
+    # chave em app\certs) e derruba o watchdog (o watchdog.ps1 dele nao conhece -Certificado). Recusar antes do backup e
+    # do checkout; o marcador e' o scripts/comum_tls.ps1, que nasceu na #425. O finally solta o watchdog.
+    # ls-tree (e nao cat-file -e): sem o arquivo ele so' nao imprime nada, sem stderr, que o 5.1 com Stop tornaria fatal.
+    if ($comTls) {
+        $marcador = & git -C $AppDir ls-tree --name-only $alvo -- scripts/comum_tls.ps1
+        if ($LASTEXITCODE -ne 0) { throw "git ls-tree $alvo falhou" }
+        if (-not $marcador) {
+            Write-Host "deploy abortado antes do checkout: $alvo e' anterior ao HTTPS (issue #425) e a tarefa esta em HTTPS; volte para HTTP antes (runbook, Voltar atras). Producao segue em $anterior" -ForegroundColor Red
+            exit 1
+        }
+    }
     $migracoes = & git -C $AppDir diff --name-only $anterior $alvo -- backend/migrations
     if ($LASTEXITCODE -ne 0) { throw "git diff das migracoes falhou" }
     $backup = $null
