@@ -23,7 +23,7 @@ log = logging.getLogger("app.envio_reserva")
 TABELAS = {"protocolos": "protocolo", "espelhos": "espelho", "pleitos": "pleito",
            # issue #282: uma linha por versao da planilha/carta enviada (migracao 053)
            "medicao_planilha_envios": "medicao_planilha_envio",
-           # issue #420: uma linha por e-mail da copia cifrada do dono (migracao 064)
+           # issue #420: uma linha por e-mail da copia cifrada do dono (migracao 066)
            "copia_dono_envios": "copia_dono_envio"}
 # Liberar antes disto pode soltar um envio que AINDA esta' saindo (gate Sol S1, 10/10/2026): quem recebe o 409
 # confere os Enviados enquanto o e-mail do outro ainda esta' no Graph, nao ve nada e libera. 15 minutos passa

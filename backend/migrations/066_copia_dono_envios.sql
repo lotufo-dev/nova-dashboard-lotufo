@@ -1,4 +1,4 @@
--- 064: envio por e-mail da copia cifrada do dono (issue #420). So' acrescenta: uma tabela nova.
+-- 066: envio por e-mail da copia cifrada do dono (issue #420). So' acrescenta: uma tabela nova.
 --
 -- Cada e-mail da copia e' uma linha: a reserva atomica do envio (app/envio_reserva.py, 035) e o envio que saiu.
 -- Arquivo acima do teto do anexo vai em partes, um e-mail por parte, uma linha por parte. `rodada` 1 e' o envio
