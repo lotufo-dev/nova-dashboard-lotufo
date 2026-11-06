@@ -32,8 +32,10 @@ paths:
 - Nenhum registro financeiro é apagado fisicamente. Auditoria é append-only e grava quem fez; sem usuário,
   "pelo sistema".
 - Hierarquia das fontes de valor: documento assinado manda; nota fiscal desempata; planilha é insumo.
-- Estados da medição: prevista → espelho gerado → espelho enviado → nota emitida → protocolada → recebida.
-  Transição fora dessa ordem é 422 com a mensagem por extenso ("Transição inválida: estado → estado"); o
+- Estados da medição: prevista → planilha/carta gerada → planilha/carta enviada → boletim recebido → espelho
+  gerado → espelho enviado → nota emitida → protocolada → recebida (tabela em `medicoes.TRANSICOES`). O reajuste
+  não tem planilha/carta: vai da prevista ao espelho. O pedido congela no envio da planilha/carta; o aprovado vem
+  do boletim (corrigir é boletim novo). Cancelada/desistida são saídas por exceção. Transição fora dessa ordem é 422 com a mensagem por extenso ("Transição inválida: estado → estado"); o
   servidor valida, não só a tela. O 409 com `codigo` é o da reserva de envio (envio duplicado).
 - Competência anterior ao início do contrato → 422; anterior à última medição do mesmo tipo → aviso.
 - Reajuste e execução tramitam separados na MTPAR e SES; juntos na SINFRA e Pref. VG (pendência `irma_fora`).
