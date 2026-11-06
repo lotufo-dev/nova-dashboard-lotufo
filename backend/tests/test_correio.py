@@ -245,6 +245,50 @@ def test_troca_de_assinatura_que_falha_no_meio_deixa_a_anterior_inteira(conn, mo
     assert [a.name for a in correio._arquivo_assinatura(1).parent.iterdir()] == ["usuario-1"]
 
 
+def test_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em_portugues(conn, monkeypatch):
+    """Gate Sol na PR #472 (#441): no Windows, `os.replace` sobre a assinatura aberta pelo backup da' PermissionError.
+    Um bloqueio curto passa na tentativa seguinte; o que persiste vira ValueError (422 na rota), nao 500."""
+    antiga, nova, outra = _png(2, 2), _png(3, 3), _png(4, 4)
+    correio.gravar_assinatura(conn, 1, antiga)
+    real, chamadas = correio.os.replace, []
+    monkeypatch.setattr(correio.time, "sleep", lambda s: None)
+
+    def ocupado_uma_vez(a, b):
+        chamadas.append(a)
+        if len(chamadas) == 1:
+            raise PermissionError("arquivo aberto por outro processo")
+        real(a, b)
+
+    monkeypatch.setattr(correio.os, "replace", ocupado_uma_vez)
+    correio.gravar_assinatura(conn, 1, nova)
+    assert correio.assinatura(1)[0] == nova and len(chamadas) == 2
+
+    def sempre_ocupado(a, b):
+        raise PermissionError("arquivo aberto por outro processo")
+
+    monkeypatch.setattr(correio.os, "replace", sempre_ocupado)
+    with pytest.raises(ValueError, match=correio.GRAVAR_ASSINATURA_OCUPADA):
+        correio.gravar_assinatura(conn, 1, outra)
+    assert correio.assinatura(1)[0] == nova
+    assert [a.name for a in correio._arquivo_assinatura(1).parent.iterdir()] == ["usuario-1"]
+
+
+def test_gravar_assinatura_limpa_temporario_velho_de_gravacao_interrompida(conn):
+    """Gate Sol na PR #472 (#441): queda entre escrever e renomear deixa o `.tmp`; a gravacao seguinte tira o que
+    passou de 1 hora e segue o padrao exato do temporario. O recente (outra gravacao em curso) e o alheio ficam."""
+    import os
+    import time
+    pasta = correio._arquivo_assinatura(1).parent
+    velho, recente, alheio = (pasta / "usuario-1.123-abcdef01.tmp", pasta / "usuario-2.456-0123abcd.tmp",
+                              pasta / "usuario-1.tmp")
+    for a in (velho, recente, alheio):
+        a.write_bytes(b"parcial")
+    os.utime(velho, (time.time() - 7200, time.time() - 7200))
+    os.utime(alheio, (time.time() - 7200, time.time() - 7200))
+    correio.gravar_assinatura(conn, 1, _png(2, 2))
+    assert not velho.exists() and recente.exists() and alheio.exists()
+
+
 @pytest.mark.parametrize("imagem", [
     PNG[: len(PNG) // 2],                             # PNG cortado ao meio
     PNG[:-12],                                        # PNG sem o IEND
