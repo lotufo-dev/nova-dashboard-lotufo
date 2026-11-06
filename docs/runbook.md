@@ -438,6 +438,29 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
    Pelo Mac, cada script vai num `.ps1` temporário no Mac, fora do repositório, e roda na VM (`<vm>`, não `<servidor>`) com `-File`: no `-Command -` o comando nativo (`git`, `python`) consome o resto do script pelo stdin e ele para no meio (ver "Mudar de servidor"). Copiar com `scp script.ps1 <vm>:C:/Temp/x.ps1` ou, se o `scp` falhar, por stdin: `ssh <vm> 'powershell -NoProfile -Command "[Console]::In.ReadToEnd() | Set-Content -Path C:\Temp\x.ps1 -Encoding ASCII"' < script.ps1`; rodar com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\x.ps1'` e apagar o `x.ps1` depois. O shell remoto é PowerShell 5.1: sem `&&`, usar `;`. O `git pull` do cadastro privado precisa de credencial do GitHub na VM; se falhar, o script 1 sai com 1 antes do ensaio, que não deve rodar com o CSV velho. A gravação é uma transação por obra e termina em `GRAVADO: <obra> (<arquivo>), N medição(ões) criada(s)`. O snapshot horário do backup cobre o antes.
 5. **Conferir**: `GET /api/health` com `banco: ok`; a aba Medições da obra mostra as medições novas; e o `audit_log` tem a ação `medicao.carga_historico` no contrato, com arquivo, criadas, corrigidas e as linhas. Rodar de novo sem nada novo não deixa rastro.
 
+### Correção de medições existentes (`cadastro corrigir-medicoes`)
+
+O que a carga por CSV não alcança (medição cancelada por engano, tipo trocado, NF ligada na medição errada, protocolo que faltou) se corrige por um YAML no repositório privado (`<pasta do cadastro>/correcoes/<data>.yaml`), com o mesmo caminho da carga: ensaio no Mac, ensaio em produção, OK, gravação.
+
+```
+.venv\Scripts\python -m app.cli cadastro corrigir-medicoes <arquivo.yaml> --ensaio --usuario <e-mail do admin>
+.venv\Scripts\python -m app.cli cadastro corrigir-medicoes <arquivo.yaml> --usuario <e-mail do admin>
+```
+
+O arquivo é uma lista de operações; cada uma diz a medição (`medicao_id`, ou `obra` + `numero` + `tipo`) e a `fonte` (o documento que a justifica, obrigatória):
+
+```yaml
+- {operacao: cancelar, obra: Obra Própria, numero: 3, tipo: execucao, fonte: ofício de cancelamento}
+- {operacao: reabrir, medicao_id: 12, fonte: extrato do RM (nota paga)}           # cancelada/desistida → protocolada
+- {operacao: trocar_tipo, medicao_id: 12, novo_tipo: reajuste, novo_numero: 2, fonte: boletim}
+- {operacao: desligar_nf, medicao_id: 12, nf: 501, fonte: NF de outra medição}   # coligada opcional
+- {operacao: ligar_nf, medicao_id: 13, nfs: [501, 502], fonte: NFs no RM}        # forcar_centro / parcial: true
+- {operacao: protocolar, medicao_id: 13, data: 2025-07-10, processo: PROC-0001, fonte: recibo do protocolo}
+- {operacao: estado, medicao_id: 14, novo: recebida, data: 2025-09-01, motivo: baixa no extrato, fonte: extrato}
+```
+
+Tudo numa transação: uma operação inválida recusa o arquivo inteiro e o relatório diz qual e por quê. Nada se apaga (vínculo de NF vira `desfeita_em`); cada operação grava `medicao.correcao_cadastro` no `audit_log` com antes, depois, fonte e origem "correção de cadastro". O ensaio executa e desfaz no fim (relatório do que seria gravado). Rodar de novo o mesmo arquivo sai como "já feito". `ligar_nf` confere coligada, nota ativa e livre e o centro de custo da obra (`forcar_centro: true` registra a exceção) e a cobertura do valor (`parcial: true` dispensa); `reabrir` e `ligar_nf` passam a medição a recebida se o RM já tem a baixa.
+
 ### Regra: competência de medição com planilha ou carta enviada
 
 A carga **não** recusa a correção de competência (`corrige competência = sim`) de uma medição `protocolada` que já teve a planilha/carta enviada (`planilha_enviada_em` preenchido) e não tem NF vinculada: só recusa, como `conflito`, quando a medição está num estado da planilha, num estado de espelho, com a nota emitida, ou tem NF. Até a issue #383 entrar, o operador confere o `planilha_enviada_em` de cada linha `correção` do ensaio antes de gravar (na página da medição, ou numa consulta à tabela `medicoes` da cópia do banco usada no ensaio), e a correção de competência dessa medição vai pela tela, não pelo CSV (tirar a linha ou a marca `sim`). Quando a #383 entrar, atualizar esta regra.
