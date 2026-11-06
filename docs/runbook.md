@@ -35,7 +35,7 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
   2. Rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, não o do diretório pinado. O PowerShell lê o script inteiro antes do checkout, e o antigo só confere o 200: sem o arquivo, ele terminaria em `DEPLOY OK` com a produção em modo cópia, sem e-mail e sem RM. Os comandos estão na seção "Instalação assinada", item "Primeiro deploy".
   3. Pelo Mac, esses comandos vão num `.ps1` temporário copiado para a VM com `scp` e rodado com `powershell -NoProfile -ExecutionPolicy Bypass -File`. No `-Command -` o `git fetch` consome o resto do script pelo stdin, e o script para no meio.
   4. Logo depois, `/api/health` com `instalacao: autorizada`. Se não vier, voltar à mão como diz o "Primeiro deploy".
-- **Deploy da issue #443 (rollback sem `git fetch`; sentinela só sai com a produção conferida): `deploy.ps1` novo, uma vez só.** O PowerShell lê o script inteiro antes do checkout, então o deploy que leva esta mudança à produção roda o `deploy.ps1` antigo do diretório pinado, com o rollback que faz `fetch` e o `finally` que sempre apaga o sentinela. Nesta vez, rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, com os mesmos comandos do item "Primeiro deploy" da seção "Instalação assinada" (pelo Mac, o `.ps1` temporário com `scp` e `-File`, nunca `-Command -`). Os deploys seguintes rodam do pinado, como sempre.
+- **Deploy da issue #443 (rollback sem `git fetch`; sentinela só sai com a produção conferida): `deploy.ps1` novo, uma vez só.** O PowerShell lê o script inteiro antes do checkout, então o deploy que leva esta mudança à produção roda o `deploy.ps1` antigo do diretório pinado, com o rollback que faz `fetch` e o `finally` que sempre apaga o sentinela. Nesta vez, rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, com os mesmos comandos do item "Primeiro deploy" da seção "Instalação assinada" (pelo Mac, o `.ps1` temporário com `scp` e `-File`, nunca `-Command -`). Os deploys seguintes rodam do pinado, como sempre. Neste primeiro, o commit no ar (anterior à #421) não tem o campo `commit` no health: o script avisa `producao NAO conferida no inicio`, um aborto antes do checkout mantém o sentinela e um rollback termina em `ROLLBACK TAMBEM FALHOU` (recuperação manual, item 5 de "Deploy a partir do Mac").
 - Dev: ver README ("Rodar em desenvolvimento").
 - Produção (manual, avançado): `scripts\rodar_producao.ps1 [-SemTls] [-Porta 8080] [-Raiz C:\DashboardLotufo] [-BackupExterno \\servidor\backups\dashboard]` (elevado, a partir do diretório pinado). Hoje: `-SemTls`, sem cópia externa.
 - **Porta** (issue #361): os quatro scripts (`rodar_producao.ps1`, `instalar_autostart.ps1`, `instalar_watchdog.ps1`, `deploy.ps1`) aceitam `-Porta`; sem ela vale o padrão de hoje (80 em HTTP com `-SemTls`, 8443 em HTTPS), e a produção atual não precisa reinstalar nada. Numa máquina em que a 80 é de outro serviço (IIS na VM nova), passar a mesma porta nos quatro (ex.: `-Porta 8080`) e liberar essa porta no firewall (seção "HTTP ou HTTPS"). Neste documento `http://localhost:<porta>/api/health` é a saúde nessa porta.
@@ -69,24 +69,41 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    checkout` (nada mudou na produção), `deploy abortado no build; producao segue no commit anterior ...` (a produção segue no
    commit anterior) ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`. Nos dois casos de
    "intervir a mao" (`ROLLBACK TAMBEM FALHOU` e este último), **não apagar o sentinela** antes de o diretório pinado voltar ao
-   commit anterior. O próprio `deploy.ps1` só apaga o sentinela com `DEPLOY OK`, `ROLLBACK OK`, `deploy abortado no build;
-   producao segue ...` ou aborto antes do checkout; em qualquer outra saída, inclusive erro inesperado depois do checkout (no
-   reinício, por exemplo), ele mantém o sentinela e imprime `sentinela ... MANTIDO`. O rollback não faz `git fetch` (volta
-   para o commit anterior, que já está no clone), então rede caída não o impede de voltar.
+   commit anterior. O próprio `deploy.ps1` só apaga o sentinela com a produção **provada**: health 200 cujo campo `commit`
+   (issue #421) é o commit esperado, nunca só o 200 (qualquer processo responde 200). Isso vale em `DEPLOY OK` (commit
+   novo), `ROLLBACK OK` e `deploy abortado no build; producao segue ...` (commit anterior, árvore limpa), e no aborto antes
+   do checkout só se a produção estava provada no início (linha `producao conferida no inicio: ...`; pinado limpo e health
+   no commit dele). Commit sem o campo `commit` (anterior à #421) nunca fica provado: o rollback para ele termina em
+   `ROLLBACK TAMBEM FALHOU` mesmo que tenha voltado, e a conferência é a manual do item 5. Pinado sujo antes do deploy
+   aborta antes do checkout (`deploy abortado antes do checkout: diretorio pinado com arquivos alterados ...`). Em qualquer
+   outra saída, inclusive erro inesperado depois do checkout (no reinício, por exemplo), ele mantém o sentinela e diz por
+   quê: `sentinela ... MANTIDO: a producao nao estava conferida no inicio`, `sentinela ... MANTIDO: a producao nao foi
+   provada depois do deploy` ou, com a produção provada e o arquivo que não saiu, `sentinela ... MANTIDO POR FALHA NA
+   REMOCAO` (este sai com código 1 mesmo depois de `DEPLOY OK`). O rollback não faz `git fetch` (volta para o commit
+   anterior, que já está no clone), então rede caída não o impede de voltar.
 5. **Terceira chamada, conferência**: `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` (200 com `banco: ok` e `instalacao: autorizada`, seção "Instalação assinada";
    a porta é a de `-Porta`, padrão 80 em HTTP, quando dá para omitir o `:80`),
    e `git -C C:\DashboardLotufo\app rev-parse HEAD` igual ao commit esperado pela linha final:
    - `DEPLOY OK: <anterior> -> <novo>`: o `<novo>` (o `origin/master` lido na primeira chamada);
    - `ROLLBACK OK`, `deploy abortado no build; producao segue no commit anterior ...` e aborto antes do checkout
-     (`BACKUP PRE-MIGRACAO FALHOU`, `git fetch falhou`): o `<anterior>` (o HEAD do pinado lido na primeira chamada).
+     (`BACKUP PRE-MIGRACAO FALHOU`, `git fetch falhou`, pinado sujo): o `<anterior>` (o HEAD do pinado lido na primeira chamada).
 
-   Batendo, o sentinela já saiu (o script o apaga nesses casos; `Test-Path C:\DashboardLotufo\watchdog.pause` deve dar
-   `False`; se der `True`, apagar com `Remove-Item C:\DashboardLotufo\watchdog.pause -Force` e conferir de novo).
-   Nunca apagar com `ROLLBACK TAMBEM FALHOU`, a volta do build que falhou ou `sentinela ... MANTIDO` (item 4) sem antes
-   recuperar: rodar de novo o `deploy.ps1 -Ref <anterior>` (reconstrói, reinicia e confere sozinho; se vier `DEPLOY OK`,
-   ele mesmo solta o watchdog) ou, à mão, checkout de `<anterior>`, `pip install -r backend\requirements.lock`,
-   `npm ci` e `npm run build`, reiniciar a tarefa, `git status --porcelain --untracked-files=no` vazio e health 200 do
-   processo novo. Só então remover o sentinela.
+   E o `commit` do health igual aos 7 primeiros caracteres desse mesmo commit. Batendo, o sentinela já saiu (o script o
+   apaga nesses casos; `Test-Path C:\DashboardLotufo\watchdog.pause` deve dar `False`).
+   - **`sentinela ... MANTIDO POR FALHA NA REMOCAO`** (depois de `DEPLOY OK`, `ROLLBACK OK` ou `producao segue no commit
+     anterior`): a produção está provada, **não reconstruir nem desfazer nada**. Conferir health e `commit` como acima,
+     corrigir o bloqueio (permissão do arquivo, processo que o segura) e apagar com
+     `Remove-Item C:\DashboardLotufo\watchdog.pause -Force`; `Test-Path` deve dar `False`.
+   - **`ROLLBACK TAMBEM FALHOU`, a volta do build que falhou, `sentinela ... MANTIDO: a producao nao foi provada depois do
+     deploy` ou `... nao estava conferida no inicio`** (item 4): nunca apagar sem antes recuperar. Se o `<anterior>` tem
+     `backend/app/instalacao.py` e o campo `commit` no health (`git -C C:\DashboardLotufo\app ls-tree --name-only <anterior>
+     backend/app/instalacao.py` não vazio e `git -C C:\DashboardLotufo\app grep -c commit_atual <anterior> -- backend/app/main.py`
+     maior que zero), rodar de novo o `deploy.ps1 -Ref <anterior>`: reconstrói, reinicia e confere sozinho, e com
+     `DEPLOY OK` ele mesmo solta o watchdog. **Sem um dos dois, o `-Ref <anterior>` nunca chega a `DEPLOY OK`** (a
+     conferência da instalação ou do `commit` recusa), e a recuperação é só a manual: checkout de `<anterior>`,
+     `pip install -r backend\requirements.lock`, `npm ci` e `npm run build`, reiniciar a tarefa,
+     `git status --porcelain --untracked-files=no` vazio, health 200 e o processo da porta nascido depois do reinício
+     (com o campo `commit`, igual ao `<anterior>`). Só então remover o sentinela.
 6. **Se a chamada do deploy cair** (conexão SSH perdida, timeout da ferramenta) **ou não trouxer a linha final**: o PowerShell
    remoto pode ter morrido sem rodar o `finally` do `deploy.ps1`, deixando o sentinela e o watchdog pausado. **`/api/health` 200 e
    `rev-parse` igual ao `origin/master` não provam deploy concluído**: se a queda foi no `npm run build`, o pinado já está no

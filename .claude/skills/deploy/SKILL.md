@@ -69,7 +69,8 @@ git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.
 - **Primeiro deploy com a #443** (rollback sem fetch; sentinela só sai com a produção conferida): o `git grep` de
   `soltarWatchdog` volta vazio, porque o `deploy.ps1` do pinado ainda é o antigo, cujo rollback faz `fetch` e cujo
   `finally` sempre apaga o sentinela. Seguir o item "Deploy da issue #443" de "Subir e derrubar": rodar o `deploy.ps1`
-  novo copiado para `C:\Temp\deploy`, como na #417 (pelo Mac num `.ps1` com `-File`).
+  novo copiado para `C:\Temp\deploy`, como na #417 (pelo Mac num `.ps1` com `-File`). O commit no ar ainda não tem o
+  campo `commit` no health: o script avisa `producao NAO conferida no inicio` e só solta o watchdog com `DEPLOY OK`.
 
 - **Migração nova** (arquivo adicionado, alterado, removido ou renomeado em `backend/migrations/`): dizer ao Leo **explicitamente**, antes de rodar,
   o número e o que ela faz (ler o `.sql`: só acrescenta coluna/tabela/índice, ou mexe em dados). Pelo runbook,
@@ -93,7 +94,7 @@ git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.
      backup para o registro.
    - `BACKUP PRE-MIGRACAO FALHOU: <motivo>` seguido de `deploy abortado antes do checkout` (sai com código 1)
      → nada mudou na produção. Avisar o Leo com o motivo, não tentar de novo sozinho.
-   - `DEPLOY OK: <anterior> -> <novo> (health 200, processo novo)` (com `- backup pre-migracao: <caminho>` no
+   - `DEPLOY OK: <anterior> -> <novo> (health 200 no commit novo, processo novo)` (com `- backup pre-migracao: <caminho>` no
      fim quando houve backup) → seguir.
    - `ROLLBACK OK: producao de volta em <anterior>` (sai com código 1) → a versão nova não subiu e o código
      anterior voltou. Avisar o Leo, não tentar de novo sozinho, olhar `C:\DashboardLotufo\logs\dashboard.log`.
@@ -106,10 +107,16 @@ git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.
    - `ROLLBACK TAMBEM FALHOU - intervir a mao` ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`
      → avisar o Leo na hora; logs em `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
      **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior.
-   - `sentinela ... MANTIDO` sem nenhuma das linhas acima (erro inesperado depois do checkout, no reinício por
-     exemplo) → mesmo caso de "intervir a mao": avisar o Leo com o erro e **não apagar o sentinela** (o script só o
-     apaga sozinho com `DEPLOY OK`, `ROLLBACK OK`, `deploy abortado no build; producao segue ...` ou aborto antes do
-     checkout).
+   - `deploy abortado antes do checkout: diretorio pinado com arquivos alterados ...` → nada mudou; avisar o Leo
+     (alguém mexeu no pinado), não tentar de novo sozinho.
+   - `sentinela ... MANTIDO: a producao nao foi provada depois do deploy` ou `... nao estava conferida no inicio`
+     → mesmo caso de "intervir a mao": avisar o Leo com o erro e **não apagar o sentinela**. O script só o apaga
+     sozinho com a produção provada (health 200 com o campo `commit` igual ao commit esperado): `DEPLOY OK`,
+     `ROLLBACK OK`, `deploy abortado no build; producao segue ...`, ou aborto antes do checkout com a linha
+     `producao conferida no inicio` antes.
+   - `sentinela ... MANTIDO POR FALHA NA REMOCAO` (depois de `DEPLOY OK`, `ROLLBACK OK` ou `producao segue ...`) →
+     a produção está provada: **não reconstruir nem desfazer o deploy**. Conferir health e `commit` (item 4), corrigir
+     o bloqueio (permissão, processo que segura o arquivo) e apagar o arquivo (item 5).
 4. Conferir a saúde na própria máquina (runbook, "Saúde"):
    `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok` e
    `instalacao: autorizada` (`nao-autorizada` é a produção em modo cópia, sem e-mail e sem RM: avisar o Leo com o
@@ -117,12 +124,16 @@ git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.
    (a porta é a de `-Porta` do `deploy.ps1`, padrão 80 em HTTP, quando o `:80` pode ser omitido)
    (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse HEAD` igual ao commit
    esperado pela linha final: o `<novo>` (o `origin/master`) em `DEPLOY OK`; o `<anterior>` (HEAD do pinado lido antes
-   de rodar) em `ROLLBACK OK`, `deploy abortado no build; producao segue ...` e aborto antes do checkout.
-5. Só fora dos casos de "intervir a mao" e de `sentinela ... MANTIDO`, e com o commit do item 4 batendo: o script já
-   apagou o sentinela; confirmar com `Test-Path C:\DashboardLotufo\watchdog.pause` → `False` (se `True`,
-   `Remove-Item C:\DashboardLotufo\watchdog.pause -Force` e conferir de novo). Nos casos de "intervir a mao" e
-   `sentinela ... MANTIDO`, o sentinela só sai depois da recuperação descrita no runbook ("Subir e derrubar", item 5:
-   reconstruir `<anterior>`, reiniciar, árvore limpa e health 200 do processo novo), com o OK do Leo.
+   de rodar) em `ROLLBACK OK`, `deploy abortado no build; producao segue ...` e aborto antes do checkout; e o campo
+   `commit` do health igual aos 7 primeiros caracteres desse mesmo commit.
+5. Com o commit do item 4 batendo e fora dos casos de "intervir a mao" e de `MANTIDO`: o script já apagou o
+   sentinela; confirmar com `Test-Path C:\DashboardLotufo\watchdog.pause` → `False`. Com `MANTIDO POR FALHA NA
+   REMOCAO`: corrigir o bloqueio, `Remove-Item C:\DashboardLotufo\watchdog.pause -Force` e `Test-Path` → `False`, sem
+   reconstruir nada. Nos casos de "intervir a mao" e dos outros `MANTIDO`, o sentinela só sai depois da recuperação
+   descrita no runbook ("Deploy a partir do Mac", item 5), com o OK do Leo: `deploy.ps1 -Ref <anterior>` só se o
+   `<anterior>` tem `backend/app/instalacao.py` e o `commit_atual` no `backend/app/main.py` (antes disso ele nunca chega
+   a `DEPLOY OK`); sem eles, só a recuperação manual (reconstruir `<anterior>`, reiniciar, árvore limpa, health 200 e
+   processo nascido depois do reinício).
 
 ## Cadastro (só se o Leo pedir `cadastro aplicar` junto)
 
