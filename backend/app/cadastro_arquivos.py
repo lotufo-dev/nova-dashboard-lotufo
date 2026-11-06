@@ -98,6 +98,8 @@ def _protocolo_do_orgao(o: dict, onde: str, erros: list[str]) -> None:
         for campo in ("exigida", "solto", "no_oficio"):
             if campo in p and not isinstance(p[campo], bool):
                 erros.append(f"{onde}: pecas[{i}].{campo}: use true ou false")
+        if p["tipo"] == "planilha" and p.get("no_oficio") is True:
+            erros.append(f"{onde}: pecas[{i}].no_oficio: a planilha editável vai sempre solta, fora do ofício")
         nat = p.get("naturezas")
         if nat is not None and (not isinstance(nat, list) or not nat
                                 or any(x not in ("execucao", "reajuste", "projeto") for x in nat)):
@@ -812,8 +814,9 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
     c["pecas_no_oficio"] = None
     pno = bruto.get("pecas_no_oficio")
     if pno is not None:
-        if not isinstance(pno, list) or any(x not in TIPOS_PECA for x in pno) or len(set(pno)) != len(pno):
-            falha("pecas_no_oficio", f"use uma lista, sem repetição, de {', '.join(TIPOS_PECA)}")
+        tipos = [t for t in TIPOS_PECA if t != "planilha"]      # a planilha editavel vai sempre solta
+        if not isinstance(pno, list) or any(x not in tipos for x in pno) or len(set(pno)) != len(pno):
+            falha("pecas_no_oficio", f"use uma lista, sem repetição, de {', '.join(tipos)}")
         else:
             c["pecas_no_oficio"] = list(pno)
     return c

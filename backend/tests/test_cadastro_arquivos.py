@@ -254,6 +254,9 @@ def test_no_oficio_da_peca_do_orgao_e_booleano(tmp_path):
     ruim = {**ORGAO, "pecas": [{"tipo": "boletim", "rotulo": "Memória de cálculo", "no_oficio": "sim"}]}
     erros = _erros(_escrever(tmp_path / "b", orgaos=[ruim]))
     assert "orgaos.yaml[0]: pecas[0].no_oficio: use true ou false" in erros
+    planilha = {**ORGAO, "pecas": [{"tipo": "planilha", "rotulo": "Planilha editável", "solto": True, "no_oficio": True}]}
+    erros = _erros(_escrever(tmp_path / "c", orgaos=[planilha]))
+    assert any(e.startswith("orgaos.yaml[0]: pecas[0].no_oficio: a planilha editável") for e in erros)
 
 
 def test_pecas_no_oficio_do_contrato(tmp_path):
@@ -266,7 +269,7 @@ def test_pecas_no_oficio_do_contrato(tmp_path):
     assert ca.preparar(_escrever(tmp_path / "c", orgaos=[ORGAO_PECAS]))["contratos"][0]["pecas_no_oficio"] is None
     erros = _erros(_escrever(tmp_path / "d", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": ["fotos"]}]))
     assert "contratos/mt-402.yaml: pecas_no_oficio: o órgão sinfra-suef1 não pede fotos" in erros
-    for ruim in ("cronograma", ["cronograma", "cronograma"], ["video"]):
+    for ruim in ("cronograma", ["cronograma", "cronograma"], ["video"], ["planilha"]):
         erros = _erros(_escrever(tmp_path / "e", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": ruim}]))
         assert any(e.startswith("contratos/mt-402.yaml: pecas_no_oficio:") for e in erros), ruim
 
