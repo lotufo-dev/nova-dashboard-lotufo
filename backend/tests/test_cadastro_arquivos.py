@@ -402,6 +402,20 @@ def test_cobranca_de_certidoes_no_geral(tmp_path):
     assert "cobranca_certidoes.para" in erros and "cobranca_certidoes.enviada_por" in erros
 
 
+def test_copia_dono_no_geral(tmp_path):
+    # issue #420: quem recebe a copia cifrada do dono e o login de quem a envia, como a cobranca de certidoes
+    raiz = _escrever(tmp_path)
+    base = {"faturamento": {"para": ["f@exemplo.com.br"], "assunto": "{medicao} {obra}", "corpo": "x"}}
+    (raiz / "geral.yaml").write_text(yaml.safe_dump({**base, "copia_dono": {
+        "para": [" Dono@Exemplo.com.br "], "enviada_por": ["dono@exemplo.com.br", "dono.login@exemplo.com.br"]}}), "utf-8")
+    assert ca.preparar(raiz)["geral"]["copia_dono"] == {
+        "para": ["dono@exemplo.com.br"], "enviada_por": ["dono@exemplo.com.br", "dono.login@exemplo.com.br"]}
+    for invalido in ({"para": [], "enviada_por": ["nao-e-email"]}, "dono@exemplo.com.br"):
+        (raiz / "geral.yaml").write_text(yaml.safe_dump({**base, "copia_dono": invalido}), "utf-8")
+        erros = "\n".join(_erros(raiz))
+        assert "copia_dono.para" in erros and "copia_dono.enviada_por" in erros
+
+
 # --- issue #65: garantia com vigencia, endosso que traz a nova vigencia ----------
 
 def test_garantia_do_contrato_normalizada(tmp_path):
