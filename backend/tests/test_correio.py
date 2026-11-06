@@ -229,6 +229,22 @@ def test_assinatura_integra_continua_aceita(conn, imagem):
     assert correio.assinatura(1)[0] == imagem
 
 
+def test_troca_de_assinatura_que_falha_no_meio_deixa_a_anterior_inteira(conn, monkeypatch):
+    """Gate Sol na PR #472 (#441): o backup le `assinaturas/` sem trava e o nome nao e' o sha256. A gravacao vai a um
+    temporario e so' entao troca de nome: nunca existe assinatura pela metade, nem sobra temporario."""
+    antiga, nova = _png(2, 2), _png(3, 3)
+    correio.gravar_assinatura(conn, 1, antiga)
+
+    def falha(*_a):
+        raise OSError("disco cheio")
+
+    monkeypatch.setattr(correio.os, "replace", falha)
+    with pytest.raises(OSError):
+        correio.gravar_assinatura(conn, 1, nova)
+    assert correio.assinatura(1)[0] == antiga
+    assert [a.name for a in correio._arquivo_assinatura(1).parent.iterdir()] == ["usuario-1"]
+
+
 @pytest.mark.parametrize("imagem", [
     PNG[: len(PNG) // 2],                             # PNG cortado ao meio
     PNG[:-12],                                        # PNG sem o IEND

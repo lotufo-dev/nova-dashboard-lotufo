@@ -445,7 +445,16 @@ def gravar_assinatura(conn, usuario_id: int, dados: bytes) -> None:
     with db.mutacao(conn):
         auditoria.registrar(conn, usuario_id, "correio.assinatura", "usuario", usuario_id, None,
                             {"tamanho": len(dados), "sha256": hashlib.sha256(dados).hexdigest()})
-        _arquivo_assinatura(usuario_id).write_bytes(dados)
+        # temporario + rename (#441): o backup le a pasta sem trava, e o nome nao e' o sha256 (nada confere o conteudo);
+        # `write_bytes` direto truncaria a assinatura antes de escrever, e o backup poderia guardar a metade
+        destino = _arquivo_assinatura(usuario_id)
+        tmp = destino.with_name(f"{destino.name}.{os.getpid()}-{secrets.token_hex(4)}.tmp")
+        try:
+            tmp.write_bytes(dados)
+            os.replace(tmp, destino)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
 
 def remover_assinatura(conn, usuario_id: int) -> None:
