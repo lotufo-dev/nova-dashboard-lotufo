@@ -364,7 +364,8 @@ def _ligar_nf(conn, uid, m, op, fonte):
         novas.append((nota, _conferir_centro(conn, m, nota, forcar, mapa)))
     if not novas:
         raise _JaFeito("NF " + ", ".join(n["numero"] for n in ja) + " já ligada")
-    if m["estado"] in (*ENCERRADAS, "recebida"):
+    # Recebida sem a nota ligada (paga, mas o vinculo faltou) recebe a NF: o estado fica, so' o elo com o RM entra
+    if m["estado"] in ENCERRADAS:
         raise ValueError(f"medição {medicoes.rotulo_estado(m['estado'])} não recebe NF")
     valor = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
     soma = sum(n["valor_centavos"] for n in _nfs_ativas(conn, m["id"]) if n["coligada"] == coligada) + sum(
@@ -375,12 +376,14 @@ def _ligar_nf(conn, uid, m, op, fonte):
                          "(se a medição foi faturada em mais notas e só estas vêm agora, use parcial: true)")
     detalhes = []
     for nota, problema in novas:
-        sincronizacao_rm.alocar(conn, uid, nota["id"], m["id"], "manual", None, REGRA_NF)
+        sincronizacao_rm.alocar(conn, uid, nota["id"], m["id"], "manual", None, REGRA_NF, aceita_recebida=True)
         texto = f"{_fmt_nf(nota)} ligada"
         if problema:
             texto += f" (centro de custo forçado: {problema})"
         detalhes.append(texto)
-    if cobre:
+    if m["estado"] == "recebida":
+        detalhes[-1] += "; a medição já estava recebida"
+    elif cobre:
         detalhes[-1] += _recebimentos(conn, m["id"])
     else:
         # Cobertura parcial nao fecha a medicao como recebida: a nota que falta ainda nao entrou (revisor da #259)

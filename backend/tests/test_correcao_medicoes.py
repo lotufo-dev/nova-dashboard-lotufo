@@ -173,6 +173,19 @@ def test_ligar_nf_forcar_centro_e_parcial(cenario):
     assert depois["centro_forcado"][0]["nf"] == "507"
 
 
+def test_ligar_nf_em_medicao_recebida_sem_nota(cenario):
+    # Paga, mas o vinculo com a nota faltou: a NF entra e o estado continua recebida
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1, estado="recebida", valor=100_001)
+    _nota(c, 509, valor=100_001, paga=True)
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [509], "fonte": "NF paga no RM"}])
+    assert rel["feitos"] == 1 and len(_ativas(c, mid)) == 1 and _estado(c, mid) == "recebida"
+    cancelada = _medicao(c, cid, 2, estado="cancelada")
+    _nota(c, 510, valor=100_001)
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": cancelada, "nfs": [510], "fonte": "NF"}])
+    assert "não recebe NF" in rel["itens"][0]["erro"]
+
+
 def test_ligar_nf_recusa_nota_ja_ligada_a_outra_medicao(cenario):
     c, cid, uid = cenario
     m1, m2 = _medicao(c, cid, 1), _medicao(c, cid, 2)
