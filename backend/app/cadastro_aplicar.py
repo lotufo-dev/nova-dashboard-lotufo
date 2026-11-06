@@ -902,10 +902,16 @@ def _instrumentos(conn, usuario_id, contrato_id, c, rel) -> None:
     ordenados = [inst for _, inst in sorted(enumerate(c["instrumentos"]), key=lambda par: (par[1]["data"], par[0]))]
     # Issue #410 (gate Sol, rodada 2, PR #452): a correcao de valor de reajuste vem depois do termo que corrige, mesmo
     # com data anterior; o retrato dela tira o corrigido do vigente, que tem de estar gravado. Entre os demais, a data.
-    chaves, feitos, fila = {i["chave"] for i in ordenados}, set(), []
+    # Issue #458: so' espera o alvo que `_aditivo` desconta (o criterio de `reajuste.aditivo_de_reajuste`: valor ou
+    # misto, natureza reajuste, delta diferente de zero); o de execucao nao sai do vigente, e a correcao segue a data.
+    por_chave, feitos, fila = {i["chave"]: i for i in ordenados}, set(), []
+
+    def espera(i) -> bool:
+        alvo = por_chave.get(i["corrige"]) if _corretor_de_valor(i) else None
+        return bool(alvo is not None and alvo["tipo"] in TIPOS_COM_NATUREZA and alvo.get("natureza") == "reajuste"
+                    and alvo.get("delta_valor_centavos") and i["corrige"] not in feitos)
     while ordenados:
-        k = next((n for n, i in enumerate(ordenados) if not _corretor_de_valor(i) or i["corrige"] not in chaves
-                  or i["corrige"] in feitos), 0)     # ciclo de correcao: o validar recusa; aqui segue a data
+        k = next((n for n, i in enumerate(ordenados) if not espera(i)), 0)     # ciclo: o validar recusa; segue a data
         fila.append(ordenados.pop(k))
         feitos.add(fila[-1]["chave"])
     for inst in fila:
