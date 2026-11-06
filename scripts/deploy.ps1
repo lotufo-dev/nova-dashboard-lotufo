@@ -223,7 +223,7 @@ try {
             $script:soltarWatchdog = $true
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
-            $onde = (& git -C $AppDir rev-parse HEAD).Trim()
+            $onde = "$(& git -C $AppDir rev-parse HEAD)".Trim()   # sem .Trim() em $null: a linha final tem de sair
             Write-Host "deploy abortado no build E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior); sentinela do watchdog mantido" -ForegroundColor Red
         }
         exit 1

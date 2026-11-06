@@ -73,7 +73,8 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    a porta é a de `-Porta`, padrão 80 em HTTP, quando dá para omitir o `:80`),
    `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao `origin/master`, e apagar o sentinela
    (`Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`; `Test-Path` deve dar `False`).
-   Apagar o sentinela também quando o deploy der `ROLLBACK` ou `BACKUP PRE-MIGRACAO FALHOU`.
+   Apagar o sentinela também quando o deploy der `ROLLBACK OK` ou `BACKUP PRE-MIGRACAO FALHOU`; nunca com
+   `ROLLBACK TAMBEM FALHOU`, a volta do build que falhou ou `sentinela ... MANTIDO` (item 4).
 6. **Se a chamada do deploy cair** (conexão SSH perdida, timeout da ferramenta) **ou não trouxer a linha final**: o PowerShell
    remoto pode ter morrido sem rodar o `finally` do `deploy.ps1`, deixando o sentinela e o watchdog pausado. **`/api/health` 200 e
    `rev-parse` igual ao `origin/master` não provam deploy concluído**: se a queda foi no `npm run build`, o pinado já está no

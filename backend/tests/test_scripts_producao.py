@@ -233,4 +233,9 @@ def test_deploy_so_apaga_o_sentinela_com_a_producao_conferida():
     ok = codigo[codigo.index("if (SaudavelENovo -ExigirInstalacao) {"):codigo.index("ROLLBACK para $anterior")]
     assert ok.count("$script:soltarWatchdog = $true") == 1
     # o reinicio e o health do commit novo ficam depois da trava: excecao ali nao solta o watchdog
-    assert trava < codigo.index("    Reiniciar\n") < codigo.index("if (SaudavelENovo -ExigirInstalacao) {")
+    principal = codigo[codigo.index("$novo = ("):codigo.index("if (SaudavelENovo -ExigirInstalacao) {")]
+    assert trava < codigo.index("$novo = (") and "Reiniciar" in principal and "soltarWatchdog" not in principal
+    # as linhas finais de "intervir a mao" saem mesmo com o rev-parse vazio (nada de .Trim() em $null)
+    for marca in ("deploy abortado no build E a volta", "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message))"):
+        antes = codigo[:codigo.index(marca)].splitlines()[-2]   # a linha anterior ao Write-Host
+        assert '$onde = "$(& git -C $AppDir rev-parse HEAD)".Trim()' in antes

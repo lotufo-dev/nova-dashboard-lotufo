@@ -101,6 +101,10 @@ git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalaca
    - `ROLLBACK TAMBEM FALHOU - intervir a mao` ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`
      → avisar o Leo na hora; logs em `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
      **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior.
+   - `sentinela ... MANTIDO` sem nenhuma das linhas acima (erro inesperado depois do checkout, no reinício por
+     exemplo) → mesmo caso de "intervir a mao": avisar o Leo com o erro e **não apagar o sentinela** (o script só o
+     apaga sozinho com `DEPLOY OK`, `ROLLBACK OK`, `deploy abortado no build; producao segue ...` ou aborto antes do
+     checkout).
 4. Conferir a saúde na própria máquina (runbook, "Saúde"):
    `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok` e
    `instalacao: autorizada` (`nao-autorizada` é a produção em modo cópia, sem e-mail e sem RM: avisar o Leo com o
@@ -108,7 +112,7 @@ git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalaca
    (a porta é a de `-Porta` do `deploy.ps1`, padrão 80 em HTTP, quando o `:80` pode ser omitido)
    (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
    `origin/master`.
-5. Apagar o sentinela: `Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`
+5. Só fora dos casos de "intervir a mao" e de `sentinela ... MANTIDO`, apagar o sentinela: `Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`
    e confirmar com `Test-Path C:\DashboardLotufo\watchdog.pause` → `False`.
 
 ## Cadastro (só se o Leo pedir `cadastro aplicar` junto)
