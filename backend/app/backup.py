@@ -20,6 +20,7 @@
 import datetime
 import errno
 import hashlib
+import json
 import logging
 import os
 import re
@@ -237,11 +238,14 @@ def _motivo(e: BaseException) -> str:
 
 
 def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = False,
-                    conferir_estes: set[str] | None = None, falhos: set[str] | None = None) -> int:
-    """Copia `raiz_origem/<pasta>/*` para `raiz_destino/<pasta>/` nas PASTAS_ARQUIVOS.
+                    conferir_estes: set[str] | None = None, falhos: set[str] | None = None,
+                    pastas: tuple[str, ...] = PASTAS_ARQUIVOS, restauracao: bool = False) -> int:
+    """Copia `raiz_origem/<pasta>/*` para `raiz_destino/<pasta>/` nas `pastas` (PASTAS_ARQUIVOS).
 
     Serve aos dois sentidos: backup (dados -> backups/arquivos) e restauracao
-    (backups/arquivos -> dados). So' copia o que falta no destino; nunca apaga nada.
+    (backups/arquivos -> dados, por `restaurar_arquivos`). So' copia o que falta no destino; nunca apaga nada.
+    No backup, pasta que sumiu dos dados com o backup dela cheio e' erro da passada (#441): o snapshot cita
+    arquivos que esta passada nao viu. Pasta que nunca existiu (nada gravado nela ainda) nao e'.
     Temporarios (`*.tmp`, upload em andamento) ficam de fora. Cada copia vai para um
     `.tmp`, e' conferida pelo sha256 contra a origem e so' entao renomeada: ou o
     arquivo aparece inteiro, ou nao aparece. Origem cujo conteudo nao bate com o
@@ -255,20 +259,25 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
     anterior); `falhos`, se dado, recebe os que falharam nesta.
 
     Um arquivo com problema nao impede os outros: todos sao tentados e, no fim, sobe
-    ErroArquivo com os que ficaram sem copia. Devolve quantos arquivos copiou.
+    ErroArquivo com os que ficaram sem copia, por pasta e motivo (o nome de cada um vai so' ao log:
+    o health e a tela nao mostram caminho nem hash). Devolve quantos arquivos copiou.
     """
     conferir_estes = conferir_estes or set()
     copiados = 0
-    falhas: list[str] = []
+    falhas: dict[str, list[str]] = {}  # pasta -> motivo de cada arquivo sem copia
+    sumidas: list[str] = []
     agora = time.time()
-    for nome in PASTAS_ARQUIVOS:
+    for nome in pastas:
         origem = raiz_origem / nome
-        if not origem.is_dir():
-            continue
         destino = raiz_destino / nome
+        if not origem.is_dir():
+            if not restauracao and _tem_arquivo(destino):
+                log.error("pasta dos dados sumiu com o backup dela cheio: %s", origem)
+                sumidas.append(nome)
+            continue
         destino.mkdir(parents=True, exist_ok=True)
         _limpar_parciais_abandonados(destino, agora)
-        for arquivo in sorted(origem.iterdir()):
+        for arquivo in origem.iterdir():  # sem ordenar: a ordem nao importa e o acervo so' cresce
             if not arquivo.is_file() or arquivo.name.endswith(".tmp"):
                 continue
             rel = f"{nome}/{arquivo.name}"
@@ -277,12 +286,86 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
                     copiados += 1
             except OSError as e:
                 log.warning("arquivo sem copia: %s -> %s", arquivo, destino, exc_info=True)
-                falhas.append(f"{rel} ({_motivo(e)})")
+                falhas.setdefault(nome, []).append(_motivo(e))
                 if falhos is not None:
                     falhos.add(rel)
+    partes = [f"pasta {nome} sumiu dos dados" for nome in sumidas]
     if falhas:
-        mais = f" e mais {len(falhas) - 3}" if len(falhas) > 3 else ""
-        raise ErroArquivo(f"{len(falhas)} arquivo(s) sem cópia: {'; '.join(falhas[:3])}{mais}")
+        total = sum(len(m) for m in falhas.values())
+        por_pasta = ", ".join(f"{nome} {len(m)} ({'; '.join(sorted(set(m)))})" for nome, m in sorted(falhas.items()))
+        partes.append(f"{total} arquivo(s) sem cópia: {por_pasta}")
+    if partes:
+        raise ErroArquivo("; ".join(partes))
+    return copiados
+
+
+def _tem_arquivo(pasta: Path) -> bool:
+    try:
+        return pasta.is_dir() and any(a.is_file() for a in pasta.iterdir())
+    except OSError:
+        return False
+
+
+# Assinatura de quem envia (`assinaturas/usuario-<id>`): o nome nao e' o sha256 e a pessoa troca ou tira a dela.
+_NOME_ASSINATURA = re.compile(r"usuario-(\d+)")
+
+
+def _assinaturas_do_banco(banco: Path) -> dict[str, dict]:
+    """usuario_id -> `depois` do ultimo evento `correio.assinatura` do banco (sha256 da gravada, ou removida)."""
+    conn = sqlite3.connect(f"file:{banco}?mode=ro", uri=True)
+    try:
+        linhas = conn.execute("SELECT entidade_id, depois FROM audit_log WHERE acao='correio.assinatura' "
+                              "AND entidade='usuario' ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    return {str(uid): json.loads(depois or "{}") for uid, depois in linhas}
+
+
+def _restaurar_assinaturas(origem: Path, destino: Path, banco: Path) -> tuple[int, int]:
+    """Devolve so' a assinatura que o banco restaurado diz ser a vigente (#441): o sha256 do arquivo do backup e' o do
+    ultimo evento daquele usuario. Assinatura que a pessoa tirou, ou trocou depois da copia, fica de fora: o e-mail
+    nao sai com uma imagem que ela nao usa mais. Devolve (copiadas, deixadas de fora)."""
+    if not origem.is_dir():
+        return 0, 0
+    vigentes = _assinaturas_do_banco(banco)
+    copiadas = fora = 0
+    destino.mkdir(parents=True, exist_ok=True)
+    for arquivo in origem.iterdir():
+        m = _NOME_ASSINATURA.fullmatch(arquivo.name)
+        if not m or not arquivo.is_file():
+            continue
+        if vigentes.get(m[1], {}).get("sha256") != _sha256(arquivo):
+            log.warning("assinatura do backup nao e' a vigente no banco restaurado; fica de fora: %s", arquivo)
+            fora += 1
+            continue
+        copiadas += _copiar_um(arquivo, destino / arquivo.name, conferir=True)
+    return copiadas, fora
+
+
+def restaurar_arquivos(raiz_backup: Path, dados: Path, banco: Path | None = None) -> int:
+    """Passo 5 do runbook: devolve a `dados` os arquivos do backup, conferidos pelo sha256, sem apagar nada.
+
+    As pastas pelo sha256 voltam inteiras (`copiar_arquivos` com conferir). As assinaturas, so' as que o banco
+    restaurado (`banco`, padrao `dados/dashboard.db`, que o passo anterior ja' devolveu) diz serem as vigentes.
+    Devolve quantos arquivos copiou; arquivo que nao se copiou sobe ErroArquivo no fim, como na copia."""
+    banco = banco or dados / "dashboard.db"
+    erros: list[str] = []
+    copiados = 0
+    try:
+        copiados = copiar_arquivos(raiz_backup, dados, conferir=True, restauracao=True,
+                                   pastas=tuple(p for p in PASTAS_ARQUIVOS if p != "assinaturas"))
+    except ErroArquivo as e:
+        erros.append(str(e))
+    try:
+        n, fora = _restaurar_assinaturas(raiz_backup / "assinaturas", dados / "assinaturas", banco)
+        copiados += n
+        if fora:
+            log.warning("%d assinatura(s) do backup ficaram de fora (tirada ou trocada depois da copia)", fora)
+    except (OSError, sqlite3.Error, ValueError) as e:  # ValueError: `depois` que nao e' JSON
+        log.exception("assinaturas nao restauradas")
+        erros.append(f"assinaturas não devolvidas ({_motivo(e)})")
+    if erros:
+        raise ErroArquivo("; ".join(erros))
     return copiados
 
 
