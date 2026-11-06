@@ -160,7 +160,7 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
   });
 
   it("#359: o aprovado mudou depois do espelho avisa, sem dizer glosa, e leva ao espelho", async () => {
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: true }] });
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: "aprovado_mudou" }] });
     const { container } = pagina();
     const link = await screen.findByRole("link", { name: "gere o espelho de novo" });
     expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#espelho");
@@ -171,7 +171,7 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
 
   it("#359: o link do aviso abre o espelho mesmo com a âncora #espelho já na página", async () => {
     window.history.replaceState(null, "", "/obras/1/medicoes/5#espelho");
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: true }] });
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: "aprovado_mudou" }] });
     pagina();
     await screen.findByRole("heading", { name: "Espelho", level: 2 });
     fireEvent.click(within(screen.getByRole("navigation", { name: "Etapas da medição" })).getByRole("button", { name: /Etapa 3: Nota fiscal/ }));
@@ -180,8 +180,25 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(await screen.findByRole("heading", { name: "Espelho", level: 2 })).toBeTruthy();
   });
 
+  it("#359: na nota emitida o aviso fica e leva às notas, sem pedir o espelho", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida", espelho_desatualizado: "nota_emitida" }] });
+    pagina();
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#notas");
+    expect(link.closest(".aviso")!.textContent).toContain("O aprovado mudou depois do espelho e a nota já foi emitida");
+    expect(screen.queryByRole("link", { name: "gere o espelho de novo" })).toBeNull();
+  });
+
+  it("#359: o espelho antigo que não se confere não diz que o aprovado mudou", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: "nao_conferido" }] });
+    pagina();
+    const link = await screen.findByRole("link", { name: "gere o espelho de novo" });
+    expect(link.closest(".aviso")!.textContent).toContain("Não foi possível conferir o valor do espelho antigo");
+    expect(screen.queryByText(/O aprovado mudou/)).toBeNull();
+  });
+
   it("#359: sem o aprovado mudado, nada de aviso do espelho", async () => {
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: false }] });
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: null }] });
     pagina();
     await screen.findByRole("heading", { level: 1 });
     expect(screen.queryByText(/O aprovado mudou depois do espelho/)).toBeNull();

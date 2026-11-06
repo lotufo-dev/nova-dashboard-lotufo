@@ -27,7 +27,11 @@ export type PainelInicio = {
   recebido_ano: { valor_centavos: number | null; mes_centavos: number; sem_data: number };
   a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null };
   prazos: Prazo[];
+  espelhos: EspelhoAConferir[];
 };
+// #359: o aprovado mudou depois do espelho (ou o espelho antigo nao se confere): a mesma fonte do aviso
+type EspelhoAConferir = { contrato_id: number; medicao_id: number; obra: string | null; titulo: string;
+  situacao: "aprovado_mudou" | "nota_emitida" | "nao_conferido" };
 
 const PRAZOS_VISIVEIS = 6;
 const ROTULO_PRAZO = { execucao: "Execução", vigencia: "Vigência", data_base: "Data-base" };
@@ -43,10 +47,10 @@ function faixa(dias: number): "acao" | "atencao" | "neutro" {
   return dias <= 15 ? "acao" : dias <= 45 ? "atencao" : "neutro";
 }
 
-function Cartao({ para, ir, numero, rotulo, tom }:
-    { para: Rota; ir: Ir; numero: number; rotulo: string; tom: "primario" | "acao" | "atencao" | "neutro" }) {
+function Cartao({ para, secao, ir, numero, rotulo, tom }:
+    { para: Rota; secao?: string; ir: Ir; numero: number; rotulo: string; tom: "primario" | "acao" | "atencao" | "neutro" }) {
   return (
-    <Link para={para} ir={ir} className={`ini-cartao ini-cartao--${tom}`}>
+    <Link para={para} secao={secao} ir={ir} className={`ini-cartao ini-cartao--${tom}`}>
       <span className="ini-cartao__numero">{numero.toLocaleString("pt-BR")}</span>
       <span className="ini-cartao__texto"><span className="ini-cartao__rotulo">{rotulo}</span></span>
       <span className="ini-cartao__seta" aria-hidden="true">→</span>
@@ -103,6 +107,11 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
   const r = p.reajustes;
   const paraReaj: Rota = r.length === 1 ? { tela: "obra", id: r[0].contrato_id, aba: "reajuste" } : { tela: "avisos" };
 
+  // cartao 4, so' quando existe (#359): uma medicao leva a ela (as notas, se a nota ja' saiu); mais, aos avisos
+  const esp = p.espelhos ?? [];
+  const paraEsp: Rota = esp.length === 1 ? { tela: "medicao", obra: esp[0].contrato_id, id: esp[0].medicao_id } : { tela: "avisos" };
+  const secaoEsp = esp.length === 1 ? (esp[0].situacao === "nota_emitida" ? "notas" : "espelho") : undefined;
+
   const maior = Math.max(1, ...p.por_contratante.map(x => Math.max(x.atual_centavos, x.anterior_centavos)));
   const pr = p.protocoladas;
 
@@ -117,6 +126,10 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
           tom={c.vencidas ? "acao" : c.vencendo ? "atencao" : "neutro"} />
         <Cartao para={paraReaj} ir={ir} numero={r.length} rotulo={r.length === 1 ? "reajuste a pedir" : "reajustes a pedir"}
           tom={r.some(x => x.dias < 0) ? "acao" : r.length ? "atencao" : "neutro"} />
+        {esp.length > 0 && (
+          <Cartao para={paraEsp} secao={secaoEsp} ir={ir} tom="acao" numero={esp.length}
+            rotulo={esp.length === 1 ? "espelho a conferir" : "espelhos a conferir"} />
+        )}
       </section>
 
       <section aria-label="Números do mês" className="ini-numeros">

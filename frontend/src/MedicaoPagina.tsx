@@ -158,6 +158,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const passo = esperaAqui ? { rotulo: esperaAqui.texto.charAt(0).toUpperCase() + esperaAqui.texto.slice(1), secao: "etapa-4" }
     : passoDe(linha?.proximo_passo);
   const aqui: Rota = { tela: "medicao", obra: contratoId, id: medicaoId };
+  // #359: o aprovado mudou depois do espelho (o servidor compara com o espelho vigente), de qualquer medicao da pagina
+  const desatualizado = grupo.map(x => x.espelho_desatualizado).find(Boolean) ?? null;
 
   // quando a etapa da vez muda (enviou, a nota chegou), a pagina acompanha: o clique numa seta so' vale ate' la'
   const atual = m ? etapaDe(m.estado) : 0;
@@ -375,12 +377,14 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         {erro && painel === null && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
         {/* regiao viva sempre montada: o leitor de tela so' anuncia o texto que CHEGA numa regiao ja' existente */}
         <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
-        {/* #359: boletim novo com outro aprovado depois do espelho (o servidor compara com o espelho vigente) */}
-        {grupo.some(x => x.espelho_desatualizado) && (
+        {desatualizado && (
           <CaixaAviso nivel="atencao">
-            {/* abre a etapa 1 tambem quando a ancora ja' e' #espelho (o efeito da secao so' roda quando ela muda) */}
-            O aprovado mudou depois do espelho: <Link className="link" para={aqui} secao="espelho"
-              ir={(p, o) => { setVendo(1); ir(p, o); }}>gere o espelho de novo</Link>
+            {/* abre a etapa tambem quando a ancora ja' e' a dela (o efeito da secao so' roda quando ela muda) */}
+            {desatualizado === "nota_emitida"
+              ? <>O aprovado mudou depois do espelho e a nota já foi emitida: <Link className="link" para={aqui} secao="notas"
+                  ir={(p, o) => { setVendo(3); ir(p, o); }}>ver as notas</Link></>
+              : <>{desatualizado === "nao_conferido" ? "Não foi possível conferir o valor do espelho antigo: " : "O aprovado mudou depois do espelho: "}
+                <Link className="link" para={aqui} secao="espelho" ir={(p, o) => { setVendo(1); ir(p, o); }}>gere o espelho de novo</Link></>}
           </CaixaAviso>
         )}
 
