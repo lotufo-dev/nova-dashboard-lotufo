@@ -42,16 +42,18 @@ const RESPOSTAS: Record<string, unknown> = {
 describe("Carteira", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("Resumo: três números, curva S e um cartão por contratante, sem o que foi para as outras abas", async () => {
+  it("Resumo: quatro números (contratado, executado, saldo, medido no ano), curva S e um cartão por contratante", async () => {
     api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
     render(<Diretoria ir={() => {}} />);
     const numeros = await screen.findByRole("list", { name: "Os números da carteira" });
-    expect(within(numeros).getAllByRole("listitem")).toHaveLength(3);
-    expect(within(numeros).getByText("Saldo a executar")).toBeTruthy();
-    expect(within(numeros).getByText("Medido no ano")).toBeTruthy();
-    expect(within(numeros).getByText("Faturado no mês")).toBeTruthy();
-    // o faturado do mês vem do servidor, em milhões, com o valor exato no title e sem linha de apoio
-    expect(within(numeros).getByText("R$ 1,2 mi")).toBeTruthy();
+    expect(within(numeros).getAllByRole("listitem")).toHaveLength(4);
+    // contratado e executado são a soma dos cartões por contratante (20 e 15 milhões de centavos: 75% executado)
+    expect(within(numeros).getByText("Contratado").nextSibling?.textContent).toBe("R$ 200,0 mil");
+    expect(within(numeros).getByText("Executado (75%)").nextSibling?.textContent).toBe("R$ 150,0 mil");
+    expect(within(numeros).getByText("Saldo a executar").nextSibling?.textContent).toBe("R$ 50,0 mil");
+    expect(within(numeros).getByText("Medido em 2026").nextSibling?.textContent).toBe("R$ 10,0 mil");
+    // o faturado do mês (zerado no começo de todo mês) saiu do Resumo: mora na Produção
+    expect(within(numeros).queryByText(/Faturado/)).toBeNull();
     expect(within(numeros).queryByText(/medições faturadas/)).toBeNull();
     expect(numeros.querySelector(".cart-numero__apoio")).toBeNull();
     // curva S acumulada: previsto 150.000 + 200.000 e medido 100.000 + 150.000 até 09/2026
@@ -161,29 +163,27 @@ describe("Carteira", () => {
     expect(screen.queryByText(/A execução ou a vigência/)).toBeNull();
   });
 
-  it("Produção: o mês, quantas obras protocolaram, onde está o dinheiro (a conciliar) e o saldo por órgão", async () => {
+  it("Produção: só o medido (último mês fechado e ano), o faturado do mês, o mês a mês e os reajustes", async () => {
     api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
     render(<Diretoria ir={() => {}} aba="producao" />);
-    expect(await screen.findByText("Onde está o dinheiro (cota)")).toBeTruthy();
-    // protocolado sem conciliar: "—", sem frase
-    expect(screen.getByText("protocolado esperando pagamento").previousElementSibling?.textContent).toBe("—");
-    expect(screen.queryByText("a conciliar")).toBeNull();
-    expect(screen.queryByText(/a conciliar com a controladoria/)).toBeNull();
-    expect(await screen.findByText("1 de 3")).toBeTruthy();
-    expect(screen.getByText("obras ativas protocolaram")).toBeTruthy();
-    expect(screen.queryByText(/mesmo mês do ano anterior/)).toBeNull();
-    expect(screen.getByText("medido esperando nota")).toBeTruthy();
-    expect(screen.getByText("Próximos meses")).toBeTruthy();
-    // #255: os próximos meses só trazem o faturamento previsto; o recebimento previsto saiu
-    expect(screen.getByText("Faturamento previsto")).toBeTruthy();
-    expect(screen.queryByText("Recebimento previsto")).toBeNull();
-    const saldo = screen.getByRole("table", { name: /Saldo a executar por órgão/ });
-    expect(within(saldo).getByText("SINFRA")).toBeTruthy();
-    expect(within(saldo).getByText("Total")).toBeTruthy();
-    ["Onde está o dinheiro", "O mês"].forEach(n => expect(screen.getByRole("list", { name: n }).tagName).toBe("UL"));
-    const kpis = screen.getAllByRole("listitem").filter(i => i.classList.contains("kpi"));
-    expect(kpis.length).toBe(10);
-    kpis.forEach(i => { expect(i.parentElement?.tagName).toBe("UL"); expect(i.hasAttribute("role")).toBe(false); });
+    const kpis = await screen.findByRole("list", { name: "Produção" });
+    expect(kpis.tagName).toBe("UL");
+    // o último mês fechado é o penúltimo da série (08/2026); o ano e o mês vêm do servidor
+    expect(within(kpis).getByText("medido em agosto").previousElementSibling?.textContent).toMatch(/R\$\s*1\.000,00/);
+    expect(within(kpis).getByText("medido em 2026").previousElementSibling?.textContent).toMatch(/R\$\s*10\.000,00/);
+    expect(within(kpis).getByText("faturado em setembro").previousElementSibling?.textContent).toMatch(/R\$\s*1\.234\.567,89/);
+    expect(within(kpis).getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByText("Mês a mês")).toBeTruthy();
+    expect(screen.getByText("Reajustes esperando apostilamento (cota)")).toBeTruthy();
+    // 06/11/2026: o caminho do dinheiro foi para A receber; o saldo por órgão já está no Resumo; a projeção dos
+    // próximos meses e os "meses de produção" saíram (cronograma incompleto)
+    for (const fora of [/Onde está o dinheiro/, /Próximos meses/, /Faturamento previsto/, /obras ativas protocolaram/,
+      /ritmo mensal/, /de produção/, /medido esperando nota/, /mesmo mês do ano anterior/]) {
+      expect(screen.queryByText(fora)).toBeNull();
+    }
+    expect(screen.queryByRole("table", { name: /Saldo a executar por órgão/ })).toBeNull();
+    // a Produção não busca mais o /api/inicio
+    expect(api.mock.calls.map(c => c[0])).toEqual(["/api/diretoria"]);
   });
 
   it("Produção: os reajustes esperando apostilamento listam por obra as competências e o medido, com o total (#279)", async () => {

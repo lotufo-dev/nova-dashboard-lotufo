@@ -167,3 +167,8 @@ export function seloDoPrazo(restantes: number | null): { classe: string; texto: 
   return { classe: restantes <= 30 ? "selo--acao" : "selo--atencao", texto };
 }
 
+/** Rótulo curto da marca do aditivo na curva: "2º TA" para "TA 2º Termo Aditivo ao Contrato …"; sem número, "TA". */
+export function rotuloAditivo(nome: string): string {
+  const m = /(\d+)\s*[ºo°]/.exec(nome);
+  return m ? `${m[1]}º TA` : "TA";
+}

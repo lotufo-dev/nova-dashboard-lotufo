@@ -538,6 +538,15 @@ def test_a_receber_total_por_obra_e_lista_na_cota(cenario):
     assert [(i["obra"], i["numero"], i["protocolada_em"], i["valor_centavos"]) for i in r["itens"]] == [
         ("Própria", 15, "2026-07-01", 300_000), ("Consórcio", 3, "2026-09-01", 500_001), ("Própria", 14, "2026-09-10", 800_001)]
     assert sum(i["valor_centavos"] for i in r["itens"]) == sum(o["valor_centavos"] for o in r["por_obra"])
+    # por contratante: o mesmo total, agrupado pelo orgao do contrato, do maior para o menor
+    assert sum(o["valor_centavos"] for o in r["por_orgao"]) == r["total"]["valor_centavos"]
+    assert sum(o["quantidade"] for o in r["por_orgao"]) == 3
+    assert [o["valor_centavos"] for o in r["por_orgao"]] == sorted((o["valor_centavos"] for o in r["por_orgao"]), reverse=True)
+    assert {i["orgao_id"] for i in r["itens"]} == {o["orgao_id"] for o in r["por_orgao"]}
+    # o dinheiro antes do protocolo e' o do painel da diretoria (medido sem nota, nota sem protocolo)
+    d = diretoria.painel(c, HOJE)["dinheiro"]
+    assert r["antes_do_protocolo"] == {"medido_esperando_nota": d["medido_esperando_nota"],
+                                       "nota_esperando_protocolo": d["nota_esperando_protocolo"]}
 
 
 def test_a_receber_previsto_pelo_vencimento_e_recebido_pelo_mes_do_recebimento(cenario):
