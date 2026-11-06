@@ -403,9 +403,11 @@ def test_backup_restaurado_com_ponto_mais_velho_nao_acusa_estado_alterado(maquin
     copia_do_banco.close()
     a = _rodar(maquina, conn)
     assert "estado-perdido" not in [x["evento"] for x in a]
-    assert [x["evento"] for x in a] == [4698, 4699, 4700, 4701, 4702]   # relidos: o banco restaurado nao os tinha
+    assert (a[0]["evento"], a[0]["nivel"], a[0]["mensagem"]) == (
+        "banco-restaurado", "atencao", "Banco restaurado de um snapshot; log de segurança relido desde o registro 1030")
+    assert [x["evento"] for x in a[1:]] == [4698, 4699, 4700, 4701, 4702]   # relidos: o banco restaurado nao os tinha
     assert "EventRecordID>1030" in maquina.consultas[-1]
-    assert _rodar(maquina, conn) == []
+    assert _rodar(maquina, conn) == []                              # uma vez so'
 
 
 def test_backup_restaurado_regrava_logon_e_falha_que_o_snapshot_nao_tinha(maquina, conn, tmp_path, monkeypatch):
@@ -421,7 +423,7 @@ def test_backup_restaurado_regrava_logon_e_falha_que_o_snapshot_nao_tinha(maquin
     assert depois == {4672, "auditoria-arquivos"}        # sentinela.json: conta avisada hoje e falha em aberto
     copia_do_banco.backup(conn)
     copia_do_banco.close()
-    assert {x["evento"] for x in _rodar(maquina, conn)} == depois
+    assert {x["evento"] for x in _rodar(maquina, conn)} == depois | {"banco-restaurado"}
     assert _rodar(maquina, conn) == []
 
 
@@ -435,6 +437,47 @@ def test_copia_alem_do_ultimo_evento_do_log_continua_acusada(maquina, conn):
     a = _rodar(maquina, conn)
     assert a[0]["evento"] == "estado-perdido"
     assert any(x["evento"] == 4670 for x in a)                      # nada pulado
+
+
+def test_rodada_que_perde_a_corrida_para_outra_nao_regride_o_ponto_nem_duplica(maquina, conn, monkeypatch):
+    _com_ponto_de_partida(maquina, conn)
+    outra = db.get_conn()                                          # outro processo, mesmo banco
+    original = sentinela.verificacoes
+    vez = [0]
+
+    def no_meio(base):
+        vez[0] += 1
+        if vez[0] == 1:
+            maquina.adicionar("auditoria.xml", maquina.raiz)       # 1070-1071: so' a outra rodada enxerga
+            sentinela.rodada(outra)
+        return original(base)
+
+    monkeypatch.setattr(sentinela, "verificacoes", no_meio)
+    a = _rodar(maquina, conn, "4670_permissao.xml")                # esta leu ate' 1030 e chegou depois
+    outra.close()
+    assert sorted(x["evento"] for x in a) == [1102, 4670, 4719]   # cada evento uma vez, gravado pela outra
+    assert _ponto(conn) == 1071
+    assert json.loads((maquina.raiz / "dados" / "sentinela.json").read_text(encoding="utf-8"))["ultimo_registro"] == 1071
+
+
+def test_ponto_da_sentinela_nao_muda_fora_da_aplicacao(maquina, conn):
+    import sqlite3
+    _com_ponto_de_partida(maquina, conn)
+    crua = sqlite3.connect(db.db_path())                           # como o sqlite3.exe ou o DB Browser
+    for sql in ("UPDATE sentinela_ponto SET ultimo_registro = 999999", "DELETE FROM sentinela_ponto",
+                "INSERT OR REPLACE INTO sentinela_ponto (id, ultimo_registro) VALUES (1, 999999)"):
+        with pytest.raises(sqlite3.OperationalError, match="dash_conexao_app"):
+            crua.execute(sql)
+    crua.close()
+
+
+def test_gatilho_do_ponto_apagado_vira_alerta_de_seguranca(maquina, conn, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(seguranca, "_conferencia", [])
+    assert seguranca.conferir(conn) == []
+    crua = sqlite3.connect(db.db_path())
+    crua.execute("DROP TRIGGER sentinela_ponto_protecao_update"); crua.commit(); crua.close()
+    assert [i["mensagem"] for i in seguranca.conferir(conn)] == ["Proteção do ponto da sentinela removida"]
 
 
 def test_copia_a_frente_do_banco_sem_conseguir_ler_o_log_acusa(maquina, conn):

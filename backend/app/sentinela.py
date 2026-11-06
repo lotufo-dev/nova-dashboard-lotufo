@@ -364,8 +364,11 @@ def rodada(conn) -> int:
     try:
         no_log = _ultimo_registro()
         if ponto is not None and isinstance(copia, int) and ponto < copia <= no_log:
-            # banco restaurado de um backup: os avisos do dia e as falhas em aberto da copia descrevem itens que o
-            # banco restaurado nao tem; sem eles, a releitura e as verificacoes regravam esses itens
+            # banco restaurado de um backup: vira item de atencao, nao o critico, porque nada se perde (a releitura
+            # parte do ponto do banco); e os avisos do dia e as falhas em aberto da copia descrevem itens que o banco
+            # restaurado nao tem: sem eles, a releitura e as verificacoes regravam esses itens
+            novos.append(_achado("banco-restaurado", "atencao", "Banco restaurado de um snapshot; log de segurança "
+                                 f"relido desde o registro {ponto}", agora))
             pendencias, avisados = {}, {}
         if ultimo is None:
             ultimo = no_log          # primeira leitura com sucesso: marca o ponto de partida, nao le o historico
@@ -392,10 +395,18 @@ def rodada(conn) -> int:
         if pendencias.get(chave) != hoje.isoformat():
             novos.append(_achado(chave, nivel, msg, agora))
     with db.mutacao(conn):
-        for a in novos:
-            auditoria.registrar(conn, None, ACAO, "sentinela", None, None, a)
-        if ultimo is not None and ultimo != ponto:
-            _gravar_ponto(conn, ultimo)
+        # o ponto foi lido fora do BEGIN IMMEDIATE: se outra rodada (outro processo no mesmo banco, como dois servidores
+        # durante um reinicio) gravou no meio, esta descarta tudo e a proxima parte do ponto novo, sem regredir nem
+        # duplicar achado
+        perdeu_a_corrida = _ponto_gravado(conn) != ponto
+        if not perdeu_a_corrida:
+            for a in novos:
+                auditoria.registrar(conn, None, ACAO, "sentinela", None, None, a)
+            if ultimo is not None and ultimo != ponto:
+                _gravar_ponto(conn, ultimo)
+    if perdeu_a_corrida:
+        log.info("sentinela: outra rodada gravou o ponto no meio desta; descartada")
+        return 0
     recentes = {hoje.isoformat(), (hoje - datetime.timedelta(days=1)).isoformat()}
     _gravar_estado({"ultimo_registro": ultimo, "pendencias": {k: hoje.isoformat() for k in atuais},
                     "avisados_4672": {k: v for k, v in avisados.items() if k in recentes}})
