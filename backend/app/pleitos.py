@@ -284,6 +284,9 @@ CURVA_S_FALTA = "Curva S não anexada: atualize a curva S"
 CURVA_S_MUDOU = "A curva S mudou desde a carta montada: atualize a curva S"
 CURVA_S_ILEGIVEL = "O arquivo da curva S anexada sumiu ou está corrompido: atualize a curva S"
 ARQUIVO_SUMIDO = "Não foi possível ler {o_que} no disco do servidor: {acao}"     # issue #441
+# remontar regrava a carta (o assinado sai junto, e a carta assinada sobe de novo sobre a montada que existe)
+_CARTA_SUMIDA = {"montado": ("a carta montada", "monte a carta de novo"),
+                 "assinado": ("a carta assinada", "monte a carta de novo e suba a assinada")}
 NOME_RESERVADO = f"O nome {carta.NOME_CURVA_S} é o da curva S gerada pelo sistema: renomeie o arquivo para anexá-lo"
 
 
@@ -690,7 +693,7 @@ def receber_assinado(conn, usuario_id: int, pleito_id: int, pdf: bytes) -> dict:
     _editavel(p)
     if not p["montado_arquivo"]:
         raise ValueError("Monte a carta antes de anexar o assinado")
-    conf = assinatura.conferir_pdfs(_bytes(p["montado_arquivo"]), pdf)
+    conf = assinatura.conferir_pdfs(_bytes_do_disco(p["montado_arquivo"], *_CARTA_SUMIDA["montado"]), pdf)
     rel, sha = arquivos.gravar_bytes("pleitos", pdf, "pdf")
     with db.mutacao(conn):
         if _anexos_mudaveis(conn, pleito_id)["montado_sha256"] != p["montado_sha256"]:
@@ -792,12 +795,9 @@ def _ler_anexos(conn, p: dict) -> list[tuple[str, bytes | None, dict | None]]:
     os delas, e um arrastado com nome repetido ganha " (2)" (o orgao nao recebe dois arquivos com o mesmo nome). A
     curva gerada que sumiu do disco vem com bytes None (a pendencia da curva diz o que fazer; a previa nao quebra)."""
     out, usados = [], set()
-    if p["assinado_arquivo"]:
+    if (qual := "assinado" if p["assinado_arquivo"] else "montado" if p["montado_arquivo"] else None):
         out.append((_nome_unico(nome_documento(conn, p), usados),
-                    _bytes_do_disco(p["assinado_arquivo"], "a carta assinada", "suba a carta assinada de novo"), None))
-    elif p["montado_arquivo"]:
-        out.append((_nome_unico(nome_documento(conn, p), usados),
-                    _bytes_do_disco(p["montado_arquivo"], "a carta montada", "monte a carta de novo"), None))
+                    _bytes_do_disco(p[f"{qual}_arquivo"], *_CARTA_SUMIDA[qual]), None))
     anexos = _anexos_de(conn, p["id"])
     nomes = {a["id"]: _nome_unico(a["nome"], usados) for a in sorted(anexos, key=lambda a: not _gerada(a))}
     out += [(nomes[a["id"]], _bytes_ou_nada(a["arquivo"]) if _gerada(a) else

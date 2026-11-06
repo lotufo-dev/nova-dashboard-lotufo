@@ -1288,3 +1288,23 @@ def test_previa_com_anexo_ou_carta_sumidos_do_disco_responde_em_portugues_e_nao_
     assert r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(o_que="a carta montada",
                                                                acao="monte a carta de novo"), r.text
     assert _estado(pid) == ({"situacao": "montado", "envio_id": None, "envio_reservado_em": None}, 0)
+
+
+def test_carta_assinada_sumida_do_disco_se_resolve_pelo_que_a_mensagem_manda(api):
+    """Issue #441 (/code-review): sem `pleitos/` somem a assinada e a montada. A previa diz o que fazer; subir a
+    assinada responde 422 (nao 500) e remontar a carta, como a mensagem manda, devolve a previa."""
+    from app import arquivos
+    cl, cid, _ = api
+    pid, _ = _pronto(cl, cid)
+    d = cl.get(f"/api/pleitos/{pid}").json()
+    assinado = arquivos.caminho_seguro(d["assinado_arquivo"]).read_bytes()
+    arquivos.caminho_seguro(d["assinado_arquivo"]).unlink()
+    arquivos.caminho_seguro(d["montado_arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422 and r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que="a carta assinada", acao="monte a carta de novo e suba a assinada"), r.text
+    r = cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", assinado, "application/pdf"))
+    assert r.status_code == 422 and r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que="a carta montada", acao="monte a carta de novo"), r.text
+    assert cl.post(f"/api/pleitos/{pid}/montar", json={}).status_code == 200
+    assert cl.post(f"/api/pleitos/{pid}/previa").status_code == 200
