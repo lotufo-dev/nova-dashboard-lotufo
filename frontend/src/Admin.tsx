@@ -283,7 +283,9 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
   async function gerar() {
     setErro(""); setEnviada(""); setGerando(true);
     try {
-      await api("/api/admin/copia-dono", { method: "POST" });
+      const r = await api<{ arquivo: string; emails?: number }>("/api/admin/copia-dono", { method: "POST" });
+      // issue #420: sem e-mail (falhou ou sem cadastro), o motivo aparece no erro do envio, relido da Saude
+      if (r.emails) setEnviada(`Cópia do dono gerada e enviada por e-mail (${contar(r.emails, "e-mail", "e-mails")}).`);
       aoGerar();
     } catch (e) {
       setErro(mensagem(e));

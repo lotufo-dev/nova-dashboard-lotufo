@@ -180,7 +180,7 @@ test("Saúde: sem chave pública mostra 'Cópia do dono não configurada'", asyn
 test("Saúde: 'Gerar cópia do dono agora' pede a cópia, relê a Saúde e mostra a data", async () => {
   let gerada = false;
   api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
-    if (url === "/api/admin/copia-dono" && opcoes?.method === "POST") { gerada = true; return { arquivo: "x.tar.age" }; }
+    if (url === "/api/admin/copia-dono" && opcoes?.method === "POST") { gerada = true; return { arquivo: "x.tar.age", emails: 1 }; }
     if (url === "/api/admin/backup") return {
       ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false,
       ultima_copia_dono: gerada ? "2026-10-13T08:00:00-04:00" : null };
@@ -190,6 +190,8 @@ test("Saúde: 'Gerar cópia do dono agora' pede a cópia, relê a Saúde e mostr
   fireEvent.click(await screen.findByRole("button", { name: "Gerar cópia do dono agora" }));
   const regiao = await screen.findByRole("region", { name: "Backup" });
   await waitFor(() => expect(regiao.textContent).toMatch(/13\/10\/2026 às 08:00/));
+  // issue #420: a cópia gerada saiu por e-mail
+  expect(within(regiao).getByText("Cópia do dono gerada e enviada por e-mail (1 e-mail).")).toBeTruthy();
 });
 
 // Issue #420: a cópia sai por e-mail; o botão manda de novo e a falha do envio aparece com o motivo
