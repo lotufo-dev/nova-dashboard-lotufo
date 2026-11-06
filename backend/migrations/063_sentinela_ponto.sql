@@ -14,3 +14,21 @@ SELECT 1, CAST(json_extract(depois, '$.ultimo_registro') AS INTEGER) FROM audit_
 WHERE acao = 'seguranca.sentinela.ponto' AND json_valid(depois)
   AND json_type(depois, '$.ultimo_registro') = 'integer'
 ORDER BY id DESC LIMIT 1;
+
+-- Como as tabelas de usuarios e de sessoes (062): a linha so' muda pela aplicacao. Numa conexao sem `dash_conexao_app()`
+-- (sqlite3 de linha de comando, DB Browser) o SQLite recusa criar, mudar ou apagar o ponto, que senao poderia ser
+-- adiantado para a sentinela pular eventos sem deixar rastro. O sha256 destes gatilhos esta' em `seguranca.GATILHOS`.
+CREATE TRIGGER IF NOT EXISTS sentinela_ponto_protecao_insert BEFORE INSERT ON sentinela_ponto
+BEGIN
+    SELECT dash_conexao_app();
+END;
+
+CREATE TRIGGER IF NOT EXISTS sentinela_ponto_protecao_delete BEFORE DELETE ON sentinela_ponto
+BEGIN
+    SELECT dash_conexao_app();
+END;
+
+CREATE TRIGGER IF NOT EXISTS sentinela_ponto_protecao_update BEFORE UPDATE ON sentinela_ponto
+BEGIN
+    SELECT dash_conexao_app();
+END;
