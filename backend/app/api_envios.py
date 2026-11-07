@@ -10,13 +10,13 @@ from pydantic import BaseModel, Field
 from app import envio_reserva
 from app.api_auth import conexao
 from app.api_medicoes import MAX_INT64
-from app.permissoes import exigir
+from app.permissoes import exigir, tem
 
 router = APIRouter()
 
 
 class LiberarIn(BaseModel):
-    tabela: Literal["protocolos", "espelhos", "pleitos", "medicao_planilha_envios"]
+    tabela: Literal["protocolos", "espelhos", "pleitos", "medicao_planilha_envios", "copia_dono_envios"]
     id: int = Field(ge=1, le=MAX_INT64)
     justificativa: str = Field(max_length=2000)
     conferi_enviados: bool          # declaracao explicita (gate Sol S5)
@@ -25,6 +25,9 @@ class LiberarIn(BaseModel):
 @router.post("/api/envios/liberar")
 def liberar(dados: LiberarIn, usuario: dict = Depends(exigir("editar_cadastros")),
             conn: sqlite3.Connection = Depends(conexao)):
+    # issue #420: a copia do dono so' se envia como admin; a reserva dela, idem
+    if dados.tabela == "copia_dono_envios" and not tem(usuario["perfil"], "administrar"):
+        raise HTTPException(403, "Permissão necessária: administrar")
     try:
         envio_reserva.liberar_manual(conn, usuario["id"], dados.tabela, dados.id, dados.justificativa,
                                      dados.conferi_enviados)

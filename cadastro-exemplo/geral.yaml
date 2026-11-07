@@ -20,6 +20,11 @@ diretoria:
 cobranca_certidoes:
   para: [responsavel@exemplo.com.br]
   enviada_por: [responsavel@exemplo.com.br]
+# Cópia cifrada do dono por e-mail, depois de cada cópia gerada: quem recebe e o login de quem envia (o e-mail sai
+# da conta Microsoft do primeiro usuário ativo com um desses logins).
+copia_dono:
+  para: [responsavel@exemplo.com.br]
+  enviada_por: [responsavel@exemplo.com.br]
 # Planilha do quadro de obras (QDOP): modelo neutro com cabeçalho nas linhas 1-13, estilo na linha 14 e
 # rodapé nas linhas 16-17.
 qdop:
