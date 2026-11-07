@@ -27,7 +27,15 @@ TIPO_ENVIO = "copia_dono"
 # A parte e a assinatura de quem envia (ate' 1 MB, embutida no corpo) cabem juntas no teto do e-mail.
 TAMANHO_PARTE = correio.MAX_TOTAL - correio.ASSINATURA_MAX
 INSTRUCAO = "Abre só com a chave do dono; instruções no runbook, seção Cópia do dono."
-SEM_CADASTRO = "destinatário da cópia do dono não configurado no cadastro (geral.yaml, copia_dono)"
+SEM_CADASTRO = "Configure o destinatário da cópia do dono no cadastro"
+SEM_REMETENTE = "Configure quem envia a cópia do dono no cadastro"
+SEM_USUARIO = "Nenhum usuário ativo é quem envia a cópia do dono: corrija o cadastro"
+SERVICO_FORA = "o serviço de e-mail não respondeu; tente de novo mais tarde"
+SERVICO_RECUSOU = "o serviço de e-mail recusou o envio; tente de novo mais tarde"
+RECONECTAR = "a conta Microsoft de quem envia não foi aceita pelo serviço de e-mail: reconecte em Minha conta"
+SERVICO_FALHOU = "o envio pelo serviço de e-mail falhou; detalhes no log do servidor"
+COPIA_DANIFICADA = "o arquivo da cópia do dono está danificado: gere outra cópia; nada foi enviado"
+SERVICO_NAO_CONFIGURADO = "o envio de e-mail não está configurado neste servidor"
 SEM_COPIA = "Nenhuma cópia do dono gerada ainda"
 _CARIMBO = re.compile(r"dashboard-dono-(\d{8}-\d{6})\.tar\.age$")
 CABECALHO_AGE = b"age-encryption.org/v1\n"     # o que `pyrage.encrypt` grava no inicio de todo arquivo cifrado
@@ -56,34 +64,46 @@ def _conferir_copia(arquivo: Path, dados: bytes, sha: str) -> None:
     """So' sai o que a geracao gravou: arquivo age (nunca um `.tar` em claro com o mesmo nome) e com o sha256 que a
     geracao grava ao lado (`<arquivo>.sha256`). Antes da reserva: a recusa nao deixa rastro."""
     if not dados.startswith(CABECALHO_AGE):
-        raise CopiaInvalida("o arquivo da cópia do dono não é um arquivo cifrado (age): nada foi enviado")
+        raise CopiaInvalida(COPIA_DANIFICADA)
     try:
         gravado = (arquivo.parent / f"{arquivo.name}.sha256").read_text(encoding="utf-8").split()
     except (OSError, UnicodeError):
-        raise CopiaInvalida("falta o sha256 da cópia do dono gravado ao lado dela: nada foi enviado") from None
+        raise CopiaInvalida(COPIA_DANIFICADA) from None
     if not gravado or gravado[0].lower() != sha:
-        raise CopiaInvalida("a cópia do dono não confere com o sha256 gravado ao lado dela: nada foi enviado")
+        raise CopiaInvalida(COPIA_DANIFICADA)
 
 
 def _config(conn) -> dict:
     r = conn.execute("SELECT valor FROM cadastro_geral WHERE chave='copia_dono'").fetchone()
     if r is None:
         raise EnvioNaoConfigurado(SEM_CADASTRO)
-    return json.loads(r["valor"])
+    try:
+        config = json.loads(r["valor"])
+    except ValueError:
+        raise EnvioNaoConfigurado(SEM_CADASTRO) from None
+    if not isinstance(config, dict) or not config.get("para"):
+        raise EnvioNaoConfigurado(SEM_CADASTRO)
+    if not config.get("enviada_por"):
+        raise EnvioNaoConfigurado(SEM_REMETENTE)
+    return config
 
 
 def _remetente(conn, config: dict) -> dict:
     """O usuario de `enviada_por` e a conta dele pronta para enviar; senao, nada sai."""
     u = cobranca_certidoes._usuario(conn, config["enviada_por"])
     if u is None:
-        raise EnvioNaoConfigurado("nenhum usuário ativo com um login de copia_dono.enviada_por (geral.yaml)")
+        raise EnvioNaoConfigurado(SEM_USUARIO)
     try:
         correio.cliente(u["id"], u["email"])       # a mesma conferencia do envio, antes de reservar
     except graph.ErroGraph as e:
         if correio.configuracao()["client_id"] and not correio.conectado(u["id"]):
             raise EnvioNaoConfigurado(
                 f"a conta Microsoft de {u['email']} não está conectada: conecte em Minha conta") from None
-        raise EnvioNaoConfigurado(str(e)) from None
+        log.warning("copia do dono: remetente sem cliente de e-mail: %s", e)
+        if correio.configuracao()["client_id"]:
+            raise EnvioNaoConfigurado(
+                f"a conta Microsoft de {u['email']} não pôde ser usada: reconecte em Minha conta") from None
+        raise EnvioNaoConfigurado(SERVICO_NAO_CONFIGURADO) from None
     return u
 
 
@@ -270,9 +290,9 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
                 if total == 1 and not trava:
                     raise
                 if total == 1:
-                    raise ParteNaoEnviada(f"{_motivo(e)}{trava}", 0, total) from e
+                    raise ParteNaoEnviada(f"{motivo(e)}{trava}", 0, total) from e
                 anteriores = "; as anteriores saíram" if n > 1 else ""
-                raise ParteNaoEnviada(f"parte {n} de {total} não enviada ({_motivo(e)}){anteriores}{trava}", i,
+                raise ParteNaoEnviada(f"parte {n} de {total} não enviada ({motivo(e)}){anteriores}{trava}", i,
                                       total) from e
             try:
                 with correio.depois_do_envio(titulo, config["para"], envio_id), db.mutacao(conn):
@@ -307,8 +327,22 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
     return total
 
 
-def _motivo(e: BaseException) -> str:
-    if isinstance(e, (ValueError, graph.ErroGraph, correio.EnvioNaoRegistrado)):
+def motivo(e: BaseException) -> str:
+    """O que vai para a Saude: frase operacional. O detalhe tecnico (a excecao) fica so' no log."""
+    if isinstance(e, graph.ErroGraph):
+        texto = str(e)
+        http = re.search(r"HTTP (\d{3})", texto) if e.status is None else None    # o login (graph.py) so' diz no texto
+        if http and int(http[1]) >= 500:
+            return SERVICO_FORA
+        if e.status is None and "inacessível" in texto:     # so' falha de rede e' "nao respondeu"
+            return SERVICO_FORA
+        if e.status in (401, 403) or (e.status is None and any(
+                t in texto for t in ("Minha conta", "refaça o login", "Token Microsoft", "Login Microsoft"))):
+            return RECONECTAR
+        if e.status is None:
+            return SERVICO_FALHOU
+        return SERVICO_RECUSOU if e.status < 500 else SERVICO_FORA
+    if isinstance(e, (ValueError, correio.EnvioNaoRegistrado)):
         return str(e)
     return backup._motivo(e)
 
@@ -332,9 +366,9 @@ def _registrado(conn, arquivo: Path, reenvio_por: dict | None) -> int:
         log.critical("copia do dono %s: e-mail enviado e nao registrado (%s)", arquivo.name, e)
         raise
     except Exception as e:
-        backup.ESTADO["ultimo_envio_copia_dono_erro"] = f"{agora}: {_motivo(e)}"
-        log.warning("copia do dono %s nao enviada: %s", arquivo.name, _motivo(e), exc_info=not isinstance(
-            e, (EnvioNaoConfigurado, ParteNaoEnviada)))
+        backup.ESTADO["ultimo_envio_copia_dono_erro"] = f"{agora}: {motivo(e)}"
+        log.warning("copia do dono %s nao enviada: %s", arquivo.name, e, exc_info=not isinstance(
+            e, EnvioNaoConfigurado))
         raise
     if enviados:
         backup.ESTADO["ultimo_envio_copia_dono"] = agora

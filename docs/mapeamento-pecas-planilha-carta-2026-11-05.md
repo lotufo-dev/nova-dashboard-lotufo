@@ -49,8 +49,8 @@ Sinfralog dentro.
    casos; peça que às vezes vai solta continua opcional e anexável.
 3. **Peças que nunca vão** (cronograma, fotos e diário na SINFRA) não deveriam aparecer como linha a anexar.
 4. **SES e prefeituras não têm esse envio** como a SINFRA: a SES manda tudo com a nota; nas prefeituras de Cuiabá
-   a medição vai direto ao fiscal, sem carta. Hoje a dashboard só tira a MT-PAR do passo
-   (`planilha_envio.FAMILIAS_SEM_ENVIO`); se SES e prefeituras devem sair também é decisão à parte.
+   a medição vai direto ao fiscal, sem carta. Decidido em 05/11/2026 (#463): SES e prefeituras saem do passo
+   como a MT-PAR (`planilha_envio.FAMILIAS_SEM_ENVIO`).
 
 ## O que não foi visto
 

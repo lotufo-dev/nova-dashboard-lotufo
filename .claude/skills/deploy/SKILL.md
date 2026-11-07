@@ -39,8 +39,14 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
   nunca inline (aspas e `&` quebram no PowerShell 5.1); conferências numa linha só, e `$LASTEXITCODE` depois de cada
   `git`, com `exit 1`, porque no `-Command -` falha nativa não para o script. Em **três chamadas em sequência**:
   1. só leitura: `Set-Location` na pasta principal, `git switch master`, `git pull --ff-only`, `git rev-parse master origin/master`
-     iguais, `IsInRole(...Administrator)` acima dando `True` e o bloco "Antes de rodar" (log, migrações, frontend). Daqui
-     a sessão avisa o Leo da migração e escolhe `-SemFrontend`. As pré-condições 1 e 2 (`gh`) rodam no Mac;
+     iguais, `IsInRole(...Administrator)` acima dando `True` e o bloco "Antes de rodar" (arquivo da instalação na raiz da tarefa agendada, log,
+     migrações, frontend). Daqui a sessão avisa o Leo da migração e escolhe `-SemFrontend`. As pré-condições 1 e 2 (`gh`)
+     rodam no Mac. Esta chamada vai num `.ps1` temporário no Mac (fora do repositório), copiado com
+     `scp script.ps1 <servidor>:deploy-leitura-<aleatorio>.ps1` (caminho relativo = pasta do perfil da conta de deploy,
+     que só ela e os administradores escrevem; nome novo a cada execução), rodado com
+     `ssh <servidor> 'powershell -NoProfile -ExecutionPolicy Bypass -File deploy-leitura-<aleatorio>.ps1'` e apagado no fim,
+     nunca pelo stdin: no `-Command -` o primeiro comando nativo consome o resto do script e o `Test-Path` do arquivo da
+     instalação não imprime nada (runbook, "Mudar de servidor"; issue #446);
   2. o deploy: sentinela e "Rodar" itens 1 a 3;
   3. conferência de saúde e commit, e apagar o sentinela (itens 4 e 5).
 
@@ -64,11 +70,16 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
 ## Antes de rodar: o que vai subir
 
 ```powershell
+$agendador = "C:\DashboardLotufo\app\scripts\comum_agendador.ps1"
+if (Test-Path $agendador) { . $agendador; $tarefa = Agendador @("/Query", "/TN", "DashboardLotufo", "/XML") 30 } else { $saida = schtasks.exe /Query /TN DashboardLotufo /XML | Out-String; $tarefa = @{ Estourou = $false; Codigo = $LASTEXITCODE; Saida = $saida } }
+if ($tarefa.Estourou -or $tarefa.Codigo -ne 0) { Write-Host "tarefa DashboardLotufo nao lida; raiz desconhecida"; exit 1 }
+$argumentos = [System.Net.WebUtility]::HtmlDecode((([regex]::Matches($tarefa.Saida, "<Arguments>([^<]*)</Arguments>") | ForEach-Object { $_.Groups[1].Value }) -join " "))
+$raiz = if ($argumentos -match '-Raiz\s+(?:"([^"]+)"|(\S+))') { if ($Matches[1]) { $Matches[1] } else { $Matches[2] } } else { "C:\DashboardLotufo" }
+Test-Path (Join-Path $raiz "segredos\instalacao.json")
 $atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()
 git log --oneline "$atual..origin/master"
 git diff --name-only "$atual" origin/master -- backend/migrations
 git diff --name-only "$atual" origin/master -- frontend
-Test-Path C:\DashboardLotufo\segredos\instalacao.json
 git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalacao.py
 git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.ps1
 ```
@@ -82,11 +93,21 @@ Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -
   o `deploy.ps1` do diretório pinado é o antigo, que só confere o 200. Seguir o item "Deploy da issue #417" de
   "Subir e derrubar": rodar o `deploy.ps1` novo copiado para `C:\Temp\deploy`, pelo Mac num `.ps1` com `-File`, e
   conferir `instalacao: autorizada` logo depois.
+- **Pinado sem `scripts\comum_agendador.ps1`** (commit no ar anterior à #386): o bloco acima lê a tarefa direto por
+  `schtasks.exe /Query /XML`, sem tempo limite. Se a chamada não imprimir nada em 2 minutos, o agendador está sem
+  responder: abortar e avisar o Leo (issue #446).
 - **Primeiro deploy com a #443** (rollback sem fetch; sentinela só sai com a produção conferida): o `git grep` de
   `soltarWatchdog` volta vazio, porque o `deploy.ps1` do pinado ainda é o antigo, cujo rollback faz `fetch` e cujo
   `finally` sempre apaga o sentinela. Seguir o item "Deploy da issue #443" de "Subir e derrubar": rodar o `deploy.ps1`
   novo copiado para `C:\Temp\deploy`, como na #417 (pelo Mac num `.ps1` com `-File`). O commit no ar ainda não tem o
   campo `commit` no health: o script avisa `producao NAO conferida no inicio` e só solta o watchdog com `DEPLOY OK`.
+  Antes, conferir o `git` no PATH da máquina, como diz o mesmo item do runbook (issue #481): sem ele o servidor, que
+  roda como SYSTEM, sobe com `commit: null` e o script avisa `o servidor nao conseguiu ler o proprio commit: confira
+  o git no PATH da maquina` (não é servidor fora do ar: corrigir o PATH antes de tentar de novo). Na volta do build
+  deste primeiro deploy o commit anterior não tem o campo e o script pede para intervir à mão: o sentinela fica, e a
+  recuperação é a manual completa do item 5 do runbook (parada comprovada e porta livre, reconstrução do
+  `<anterior>`, `git status` limpo, reinício controlado, processo da porta nascido depois do reinício e health 200).
+  `rev-parse HEAD` e health 200 sozinhos não bastam (um processo órfão antigo também responde 200).
 
 - **Corte para HTTPS** (issue #425): é um passo à parte, depois de um deploy normal do commit com a #425, e só quando o
   Leo pedir. Seguir o runbook, "HTTP ou HTTPS", subseção "Corte para HTTPS", na ordem (certificado, PCs da operação,

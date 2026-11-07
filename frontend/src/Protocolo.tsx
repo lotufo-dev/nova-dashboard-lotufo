@@ -14,6 +14,7 @@ import { Link } from "./Link";
 import { fmtCompetencia, fmtDataHora } from "./tempo";
 import Selo from "./Selo";
 import Pendencias from "./Pendencias";
+import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 
 // Protocolo de medicao feito pelo sistema (bloco 5; spec §3 passos 4 a 7). A tela desenha o que o
 // servidor responde (etapas da familia, pecas do orgao, pendencias, conferencia do assinado): as
@@ -79,13 +80,15 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
   const [erro, setErro] = useState(p.erro_carta ?? "");
   const [ocupado, setOcupado] = useState(false);
   const [descartando, setDescartando] = useState(false);
+  const [reserva, setReserva] = useState<Reserva | null>(null);   // issue #536: envio preso (409) oferece a liberacao
   useEffect(() => { setCorpo(p.corpo_carta || p.corpo_padrao || ""); }, [p.id, p.corpo_carta, p.corpo_padrao]);
   useRascunho(podeEditar && !["enviado", "descartado"].includes(p.situacao)
     && corpo.trim() !== (p.corpo_carta || p.corpo_padrao || "").trim());   // carta editada e ainda nao montada
 
   async function agir(f: () => Promise<ProtocoloDet | void>) {
     setOcupado(true); setErro("");
-    try { aoMudar((await f()) || undefined); } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); }
+    try { aoMudar((await f()) || undefined); setReserva(null); }
+    catch (e) { setErro(mensagem(e)); setReserva(envioReservado(e) ? e.corpo : null); } finally { setOcupado(false); }
   }
   function arquivo(caminho: string, extras: Record<string, string>, input: HTMLInputElement) {
     const f = input.files?.[0];
@@ -114,6 +117,8 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
       </div>
       <div className="cartao__corpo pilha">
         {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {reserva && <LiberarEnvio tabela="protocolos" id={p.id} reserva={reserva}
+          aoLiberar={() => { setErro(""); setReserva(null); aoMudar(); }} />}
 
         {itens.length > 0 && (
           <div>

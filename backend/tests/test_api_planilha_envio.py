@@ -250,6 +250,45 @@ def test_mtpar_nao_oferece_o_envio_da_planilha(api, monkeypatch):
     assert _linha("SELECT estado FROM medicoes WHERE id=?", mid) == {"estado": "planilha_gerada"}
 
 
+def _api_familia(familia: str):
+    """Um contrato de outra familia (SES ou prefeitura), com as pecas no cadastro do orgao, como a SINFRA (#463)."""
+    cad = _cadastro()
+    cad["orgaos"].append({"chave": familia, "nome": familia.upper(), "familia": familia, "cnpj": None,
+                          "regras": {"protocolo_para": ["protocolo@orgao-c.exemplo.com.br"], "pecas": PECAS,
+                                     "documentos_medicao": [], "documentos_reajuste": []}})
+    cad["contratos"].append(_contrato(f"Obra {familia}", familia, "123/2025"))
+    c = db.get_conn()
+    cadastro_aplicar.aplicar(c, 1, cad)
+    cid = c.execute("SELECT id FROM contratos WHERE nome_curto=?", (f"Obra {familia}",)).fetchone()["id"]
+    c.commit(); c.close()
+    return cid
+
+
+@pytest.mark.parametrize("familia, motivo", [
+    ("ses", "Na SES-MT não há envio da planilha/carta: a medição vai com a nota"),
+    ("prefeitura", "Nas prefeituras não há envio da planilha/carta: a medição vai ao fiscal da obra")])
+def test_ses_e_prefeitura_nao_oferecem_o_envio_da_planilha(api, monkeypatch, familia, motivo):
+    cl, cid_sinfra, _ = api
+    mid = _planilha(cl, _api_familia(familia))
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    situacao = cl.get(f"/api/medicoes/{mid}").json()["envio_planilha"]
+    assert situacao["disponivel"] is False and situacao["motivo"] == motivo
+    assert situacao["pecas_do_orgao"] == []          # sem envio, sem pecas a anexar (o painel nao aparece)
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha/previa", json={"numero_oficio": "337"})
+    assert r.status_code == 422 and r.json()["detail"] == motivo
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json={
+        "numero_oficio": "337", "para": ["protocolo@orgao-c.exemplo.com.br"], "copia": [], "assunto": "x",
+        "corpo": "x", "anexos_previa": []})
+    assert r.status_code == 422 and r.json()["detail"] == motivo and falso.enviados == []
+    r = _peca(cl, mid)
+    assert r.status_code == 422 and r.json()["detail"] == motivo
+    assert _linha("SELECT estado FROM medicoes WHERE id=?", mid) == {"estado": "planilha_gerada"}
+    # a SINFRA continua com o envio, e a MT-PAR com a mensagem dela
+    assert cl.get(f"/api/medicoes/{_planilha(cl, cid_sinfra)}").json()["envio_planilha"]["disponivel"] is True
+    assert planilha_envio.SEM_ENVIO["mtpar"] == "Na MT-PAR não há envio da planilha/carta: o ofício vai com a nota"
+
+
 def test_peca_exigida_faltando_e_pendencia_que_pede_justificativa(api):
     cl, cid, _ = api
     mid = _planilha(cl, cid)
@@ -543,3 +582,23 @@ def test_excecao_do_contrato_substitui_as_pecas_no_oficio_do_orgao(api):
     # sem a chave no contrato, vale o orgao de novo
     _reaplicar(pecas=PECAS_NO_OFICIO)
     assert _no_oficio(cl, mid) == {"boletim": True, "fotos": False}
+
+
+def test_orgao_que_vira_ses_entre_a_previa_e_a_reserva_nao_manda_o_email(api, monkeypatch):
+    """Gate Sol (#463): a familia e' relida depois da reserva; cadastro aplicado no intervalo recusa e destrava."""
+    cl, cid, _ = api
+    mid, pv = _pronta(cl, cid)
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    original = envio_reserva.reservar
+
+    def reservar_depois_do_cadastro(conn, *a, **kw):
+        conn.execute("UPDATE orgaos SET familia='ses' WHERE id=(SELECT orgao_id FROM contratos WHERE id=?)", (cid,))
+        return original(conn, *a, **kw)
+    monkeypatch.setattr(envio_reserva, "reservar", reservar_depois_do_cadastro)
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
+    assert r.status_code == 422 and r.json()["detail"] == planilha_envio.SEM_ENVIO["ses"]
+    assert falso.enviados == []
+    assert _linha("SELECT estado FROM medicoes WHERE id=?", mid) == {"estado": "planilha_gerada"}
+    assert _linha(f"SELECT COUNT(*) n FROM {planilha_envio.TABELA} WHERE medicao_id=? "
+                  "AND envio_reservado_em IS NOT NULL", mid) == {"n": 0}

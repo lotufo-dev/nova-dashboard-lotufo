@@ -362,11 +362,11 @@ test("Saúde: 'Gerar cópia do dono agora' sem envio diz que não saiu por e-mai
 test("Saúde: falha no envio da cópia do dono marca o backup como Falhou", async () => {
   saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false,
              ultima_copia_dono: "2026-10-13T08:00:00-04:00",
-             ultimo_envio_copia_dono_erro: "destinatário da cópia do dono não configurado no cadastro (geral.yaml, copia_dono)",
+             ultimo_envio_copia_dono_erro: "Configure o destinatário da cópia do dono no cadastro",
              ultimo_envio_copia_dono_erro_em: "2026-10-13T08:01:00-04:00" });
   const regiao = await screen.findByRole("region", { name: "Backup" });
   expect(await within(regiao).findByText("Falhou")).toBeTruthy();
-  expect(within(regiao).getByText(/Envio da cópia do dono: .*geral\.yaml/).closest(".aviso--critico")).toBeTruthy();
+  expect(within(regiao).getByText(/Envio da cópia do dono: .*Configure o destinatário/).closest(".aviso--critico")).toBeTruthy();
 });
 
 test("Saúde: sem cópia do dono gerada não há 'Reenviar cópia do dono'", async () => {

@@ -69,3 +69,45 @@ export function quandoDoAviso(a: Aviso): string {
 
 /** O "R$" nao fica orfao no fim da linha: o espaco depois dele nao separa (N04-09). A mensagem vem pronta do servidor. */
 export const semRSOrfao = (t: string) => t.replace(/R\$ /g, "R$\u00a0");
+
+// ---- Avisos pelo tempo (#511): Vencido \u00b7 Esta semana \u00b7 Este m\u00eas \u00b7 Depois, e "Sem data" ----
+
+export type Secao = "vencido" | "semana" | "mes" | "depois" | "sem-data";
+
+export const SECOES: { id: Secao; rotulo: string }[] = [
+  { id: "vencido", rotulo: "Vencido" }, { id: "semana", rotulo: "Esta semana" }, { id: "mes", rotulo: "Este m\u00eas" },
+  { id: "depois", rotulo: "Depois" }, { id: "sem-data", rotulo: "Sem data" },
+];
+
+/** Dias ate' o fato, com sinal: negativo = ja' passou. O fato parado "desde" N dias (sentido do servidor) e' passado;
+ *  o prazo ("prazo") vem com o sinal certo; sem sentido, o sinal dos dias manda. `null` = sem data. */
+export function diasAteOAviso(a: Aviso): number | null {
+  if (a.dias === null || a.dias === undefined) return null;
+  return a.sentido === "desde" ? -Math.abs(a.dias) : a.dias;
+}
+
+/** A secao do aviso pelos dias e pelo sentido: passado = Vencido; 0 a 7 dias = Esta semana; 8 a 30 = Este mes;
+ *  depois disso, Depois; sem dias, Sem data. Cada aviso cai em uma secao so'. */
+export function secaoDoAviso(a: Aviso): Secao {
+  const d = diasAteOAviso(a);
+  if (d === null) return "sem-data";
+  if (d < 0) return "vencido";
+  if (d <= 7) return "semana";
+  if (d <= 30) return "mes";
+  return "depois";
+}
+
+/** As secoes na ordem da tela: vencido = o mais antigo primeiro; a vencer = o mais proximo primeiro. */
+export function porSecao(avisos: Aviso[]): { id: Secao; rotulo: string; itens: Aviso[] }[] {
+  const ordem = (x: Aviso, y: Aviso) => (diasAteOAviso(x) ?? 0) - (diasAteOAviso(y) ?? 0)
+    || (x.data ?? "").localeCompare(y.data ?? "");
+  return SECOES.map(s => ({ ...s, itens: avisos.filter(a => secaoDoAviso(a) === s.id).sort(ordem) }));
+}
+
+/** O filtro por categoria da rota (?familia=reajustes|prazos|certidoes, do "Ver todos" do Inicio); os ids das
+ *  familias (?familia=prazo) continuam valendo. */
+export function familiaDaBusca(v: string | undefined): Familia | null {
+  const alias: Record<string, Familia> = { reajustes: "reajuste", prazos: "prazo", certidoes: "documentos" };
+  const id = alias[v ?? ""] ?? v;
+  return FAMILIAS.find(f => f.id === id)?.id ?? null;
+}
