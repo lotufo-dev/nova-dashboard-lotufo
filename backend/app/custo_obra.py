@@ -22,7 +22,7 @@ import json
 from decimal import Decimal
 
 from app import contratos, cronograma, db, dinheiro, medicao_grupos, tempo
-from app.cadastro_arquivos import _dentro_do_prefixo
+from app.cadastro_arquivos import _dentro_do_prefixo, _segmentos
 from app.diretoria import FORA as ESTADOS_FORA   # fora do medido: o mesmo recorte da Carteira
 
 DESATUALIZADO_HORAS = 24
@@ -139,7 +139,7 @@ def _medido_por_mes(conn, contrato_id: int) -> dict[str, dict]:
             mes["nao_lido"] += m["valor"]
             continue
         mes["lida"] = True
-        mes["leituras"].append((f"{m['numero']}ª medição", lido))     # na ordem: a ultima e' a mais recente
+        mes["leituras"].append((mes["medicoes"][-1]["nome"], lido))     # na ordem: a ultima e' a mais recente
         soma = 0
         for g in lido["grupos"]:
             mes["grupos"][g["nome"]] = mes["grupos"].get(g["nome"], 0) + g["valor_medido_centavos"]
@@ -162,11 +162,11 @@ def _linha_grupo(nome: str, tipo: str, medido, apontado: int = 0, rateado: int =
 def _itens_chave(grupos: list[dict], linhas: list[dict], medido: dict[str, dict]) -> list[dict]:
     """Issue #492: o custo por unidade medida do item-chave de cada grupo que o cadastro tem (um por grupo).
     Custo do grupo = o acumulado da tela (apontado + rateado, todas as competencias); quantidade acumulada e preco
-    unitario = os do item na planilha lida mais recente (o preco de um aditivo vale dali em diante). Quantidade
-    ausente ou nao positiva: "sem_medicao"; custo zero: "sem_custo"; nos dois, sem custo unitario nem diferenca.
+    unitario = os do item, no grupo dele, na planilha lida mais recente que o tem (o preco de um aditivo vale dali em
+    diante). Quantidade ausente ou nao positiva: "sem_medicao"; custo zero ou negativo (estorno maior que o lancado):
+    "sem_custo"; nos dois, sem custo unitario nem diferenca.
     Diferenca = preco do contrato - custo por unidade, em centavos por unidade (o mesmo sentido da tela)."""
     leituras = [lt for mes in sorted(medido) for lt in medido[mes]["leituras"]]
-    medicao, ultima = leituras[-1] if leituras else (None, None)
     saida = []
     for g in grupos:
         chave = g.get("item_chave")
@@ -174,19 +174,22 @@ def _itens_chave(grupos: list[dict], linhas: list[dict], medido: dict[str, dict]
             continue
         custo = sum(i["custo_centavos"] for x in linhas for i in x["grupos"]
                     if i["tipo"] == "grupo" and i["nome"] == g["nome"])
-        item = next((it for gr in (ultima["grupos"] if ultima else []) for it in gr["itens"]
-                     if str(it["item"] or "").strip() == chave["codigo"]), None)
+        # "1.2." e "1.2" sao o mesmo item (a mesma comparacao por segmento do cadastro)
+        medicao, item = next(((nome, it) for nome, lido in reversed(leituras) for gr in lido["grupos"]
+                              if gr["nome"] == g["nome"] for it in gr["itens"]
+                              if _segmentos(str(it["item"] or "").strip()) == _segmentos(chave["codigo"])),
+                             (None, None))
         qtd = item["quantidade_acumulada"] if item else None
         preco = item["preco_unitario_centavos"] if item else None
         if qtd is None or Decimal(qtd) <= 0:
             situacao, unitario = "sem_medicao", None
-        elif custo == 0:
+        elif custo <= 0:
             situacao, unitario = "sem_custo", None
         else:
             situacao, unitario = "ok", dinheiro.por_unidade(custo, Decimal(qtd))
         saida.append({"grupo": g["nome"], "item": chave["codigo"], "descricao": item["descricao"] if item else None,
                       "unidade": chave["unidade"], "quantidade_acumulada": qtd,
-                      "medicao": medicao if item else None, "custo_centavos": custo,
+                      "medicao": medicao, "custo_centavos": custo,
                       "custo_unitario_centavos": unitario, "preco_unitario_centavos": preco,
                       "diferenca_centavos": None if unitario is None or preco is None else preco - unitario,
                       "situacao": situacao})

@@ -390,6 +390,36 @@ def test_item_chave_sem_medicao_e_sem_custo(conn):
     assert p["quantidade_acumulada"] == "4" and p["preco_unitario_centavos"] == 7_00
 
 
+def test_item_chave_so_no_grupo_dele_pela_planilha_mais_recente_que_o_tem(conn):
+    """/code-review: o mesmo nº em outro grupo nao vale; planilha mais nova sem a linha do item nao apaga a anterior;
+    "1.2." e "1.2" sao o mesmo item."""
+    cid = _obra(conn)
+    _chave(conn, cid, "Terraplenagem", "1.2", "m³")
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura_itens(conn, cid, m1, {"Terraplenagem": [
+        {"item": "1.2.", "quantidade_acumulada": "4", "preco_unitario_centavos": 8_00, "valor": 100_00}]})
+    m2 = _medicao(conn, cid, 2, "2026-04", 50_00)
+    _leitura_itens(conn, cid, m2, {"Terraplenagem": [
+        {"item": "1.1", "quantidade_acumulada": "7", "preco_unitario_centavos": 1_00, "valor": 40_00}],
+        "Pavimentação": [{"item": "1.2", "quantidade_acumulada": "999", "preco_unitario_centavos": 1, "valor": 10_00}]})
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", 10_00)])
+    k = custo_obra.custo_da_obra(conn, cid)["itens_chave"][0]
+    assert (k["quantidade_acumulada"], k["preco_unitario_centavos"], k["medicao"]) == ("4", 8_00, "1ª medição")
+    assert k["custo_unitario_centavos"] == 2_50 and k["situacao"] == "ok"
+
+
+def test_custo_acumulado_negativo_do_grupo_nao_vira_custo_unitario(conn):
+    cid = _obra(conn)
+    _chave(conn, cid, "Terraplenagem", "1.2", "m³")
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura_itens(conn, cid, m1, {"Terraplenagem": [
+        {"item": "1.2", "quantidade_acumulada": "4", "preco_unitario_centavos": 8_00, "valor": 100_00}]})
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", -10_01)])     # estorno
+    k = custo_obra.custo_da_obra(conn, cid)["itens_chave"][0]
+    assert k["situacao"] == "sem_custo" and k["custo_centavos"] == -10_01
+    assert k["custo_unitario_centavos"] is None and k["diferenca_centavos"] is None
+
+
 def test_grupo_sem_item_chave_fica_fora_do_bloco(conn):
     cid = _obra(conn)
     assert custo_obra.custo_da_obra(conn, cid)["itens_chave"] == []

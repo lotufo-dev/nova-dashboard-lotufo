@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
-import { brl } from "./formato";
+import { brl, fmtQuantidade } from "./formato";
 import { IconeAlerta } from "./icones";
 import Rolagem from "./Rolagem";
 import { fmtCompetencia, fmtData, fmtHora } from "./tempo";
@@ -36,15 +36,6 @@ type Custo = {
   itens_chave?: ItemChave[];
   rm: { sincronizado_em: string | null; desatualizado: boolean };
 };
-
-/** "12345.5" -> "12.345,5", direto do texto (a quantidade nao passa por float). */
-function fmtQuantidade(q: string | null): string {
-  if (q === null) return "—";
-  const negativo = q.startsWith("-");
-  const [inteiro, decimal] = (negativo ? q.slice(1) : q).split(".");
-  const milhar = inteiro.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${negativo ? "−" : ""}${milhar}${decimal ? `,${decimal}` : ""}`;
-}
 
 const SITUACAO_CHAVE = { sem_medicao: "sem medição", sem_custo: "sem custo lançado" } as const;
 
