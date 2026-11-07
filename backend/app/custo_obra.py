@@ -15,12 +15,12 @@ Por competencia (o mes de emissao do lancamento igual a' competencia da medicao)
   (`medicao_grupos`, issue #490). Medicao sem leitura entra com o total numa linha "medido por grupo nao lido"; a
   diferenca entre o medido e a soma da planilha lida (glosa no atestado, centavos) numa linha "ajuste ao medido".
 - previsto: o do cronograma vigente na competencia (total, sem grupo).
-O acumulado soma as linhas (o previsto, todos os meses do cronograma ate' a ultima linha): material comprado num mes pode ser medido no seguinte.
+O acumulado soma as linhas (os meses do cronograma ate' a ultima medicao ou custo tambem viram linha): material comprado num mes pode ser medido no seguinte.
 """
 import datetime
 import json
 
-from app import contratos, cronograma, dinheiro, medicao_grupos, tempo
+from app import contratos, cronograma, db, dinheiro, medicao_grupos, tempo
 from app.cadastro_arquivos import _dentro_do_prefixo
 from app.diretoria import FORA as ESTADOS_FORA   # fora do medido: o mesmo recorte da Carteira
 
@@ -39,6 +39,11 @@ class SemCadastro(Exception):
 
 class RegraDesconhecida(ValueError):
     """Regra `sem_tarefa` do cadastro que esta tela nao sabe aplicar (hoje so' existe `proporcional`)."""
+
+
+class CentroDisputado(ValueError):
+    """Um centro de custo da obra (atual ou anterior) tambem esta' em outra obra com cadastro de custo: o mesmo
+    lancamento do RM entraria inteiro nas duas. O cadastro nao proibe; a tela recusa em vez de duplicar calada."""
 
 
 _OBRA = """FROM contratos c JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
@@ -63,13 +68,35 @@ def _grupo_da_tarefa(tarefa: str, grupos: list[dict]) -> str | None:
     return None
 
 
+def _centros(c) -> list[str]:
+    """O centro de custo atual e os anteriores do contrato, sem repeticao."""
+    centros = [c["centro_custo_rm"], *json.loads(c["centros_custo_anteriores_rm"] or "[]")]
+    return sorted({x.strip() for x in centros if x and x.strip()})
+
+
+def _conferir_centros(conn, c) -> None:
+    """CentroDisputado quando outra obra com cadastro de custo, na mesma coligada, tem um dos centros desta."""
+    meus = set(_centros(c))
+    if c["coligada_rm"] is None or not meus:
+        return
+    choques = []
+    for o in conn.execute(f"SELECT c.id, c.nome_curto, c.numero_instrumento, c.centro_custo_rm, "
+                          f"c.centros_custo_anteriores_rm {_OBRA} AND c.id<>? AND e.coligada_rm=? ORDER BY c.id",
+                          (c["id"], c["coligada_rm"])):
+        comuns = meus & set(_centros(o))
+        if comuns:
+            choques.append(f"{', '.join(sorted(comuns))} na obra {o['nome_curto'] or o['numero_instrumento']}")
+    if choques:
+        raise CentroDisputado("O centro de custo desta obra também está em outra obra com cadastro de custo ("
+                              + "; ".join(choques) + "). Corrija o cadastro para cada centro ficar numa obra só.")
+
+
 def _custo_por_mes(conn, c, grupos: list[dict]) -> tuple[dict, dict, dict]:
     """({mes: {grupo: apontado}}, {mes: fora dos grupos}, {mes: sem tarefa + estoque}) da coligada e dos centros."""
     apontado: dict[str, dict[str, int]] = {}
     fora: dict[str, int] = {}
     rateado: dict[str, int] = {}
-    centros = [c["centro_custo_rm"], *json.loads(c["centros_custo_anteriores_rm"] or "[]")]
-    centros = sorted({x.strip() for x in centros if x and x.strip()})
+    centros = _centros(c)
     if c["coligada_rm"] is None or not centros:
         return apontado, fora, rateado
     nao_e_custo = json.loads(c["custo_nao_e_custo"] or "[]")
@@ -122,7 +149,9 @@ def _medido_por_mes(conn, contrato_id: int) -> dict[str, dict]:
 def _linha_grupo(nome: str, tipo: str, medido, apontado: int = 0, rateado: int = 0) -> dict:
     custo = apontado + rateado
     return {"nome": nome, "tipo": tipo, "medido_centavos": medido, "apontado_centavos": apontado,
-            "rateado_centavos": rateado, "custo_centavos": custo, "diferenca_centavos": (medido or 0) - custo}
+            "rateado_centavos": rateado, "custo_centavos": custo,
+            # medido desconhecido (mes sem leitura da planilha, linha so' de custo): sem diferenca, nao "-custo"
+            "diferenca_centavos": None if medido is None else medido - custo}
 
 
 def _sincronizacao(conn) -> dict:
@@ -138,20 +167,31 @@ def _sincronizacao(conn) -> dict:
 
 def custo_da_obra(conn, contrato_id: int) -> dict:
     """A tabela da aba Custo: uma linha por competencia (com medicao ou com custo), as linhas de grupo de cada uma e
-    o acumulado. SemCadastro na obra fora do seletor."""
+    o acumulado. SemCadastro na obra fora do seletor; CentroDisputado quando outra obra tem o mesmo centro. Tudo
+    de um retrato so' do banco (a carga do RM troca o custo e o estoque numa transacao)."""
+    with db.leitura(conn):
+        return _custo_da_obra(conn, contrato_id)
+
+
+def _custo_da_obra(conn, contrato_id: int) -> dict:
     c = conn.execute(f"SELECT c.*, e.coligada_rm {_OBRA} AND c.id=?", (contrato_id,)).fetchone()
     if c is None:
         raise SemCadastro(MENSAGEM_SEM_CADASTRO)
     regra = c["custo_sem_tarefa"] or REGRA_PROPORCIONAL
     if regra != REGRA_PROPORCIONAL:
         raise RegraDesconhecida(f"Regra do custo sem tarefa desconhecida no cadastro: {regra}")
+    _conferir_centros(conn, c)
     grupos = contratos.custo_grupos(conn, contrato_id)
     nomes = [g["nome"] for g in grupos]
     apontado, fora, rateado = _custo_por_mes(conn, c, grupos)
     medido = _medido_por_mes(conn, contrato_id)
     previsto = cronograma.previsto_efetivo(conn, contrato_id)
+    # meses com medicao ou custo e, como referencia, os do cronograma ate' o ultimo deles (sem nenhum: ate' o mes
+    # atual), para a obra so' com cronograma mostrar o previsto e o acumulado ser a soma das linhas
+    com_dado = {*apontado, *fora, *rateado, *medido}
+    corte = max(com_dado) if com_dado else tempo.hoje_local().strftime("%Y-%m")
     linhas = []
-    for mes in sorted({*apontado, *fora, *rateado, *medido}):
+    for mes in sorted(com_dado | {comp for comp in previsto if comp <= corte}):
         md = medido.get(mes)
         ap = apontado.get(mes, {})
         r_total = rateado.get(mes, 0)
@@ -183,8 +223,6 @@ def custo_da_obra(conn, contrato_id: int) -> dict:
                        "previsto_centavos": previsto.get(mes), "grupos": itens})
     acumulado = {k: sum(x[k] for x in linhas) for k in ("medido_centavos", "apontado_centavos", "rateado_centavos",
                                                          "custo_centavos", "diferenca_centavos")}
-    # o previsto acumulado ate' a ultima competencia da tabela, com os meses do cronograma que nao tem linha
-    ate = linhas[-1]["competencia"] if linhas else None
-    acumulado["previsto_centavos"] = sum(v for comp, v in previsto.items() if ate is not None and comp <= ate)
+    acumulado["previsto_centavos"] = sum(x["previsto_centavos"] or 0 for x in linhas)
     return {"contrato_id": contrato_id, "obra": c["nome_curto"] or c["numero_instrumento"], "grupos": nomes,
             "linhas": linhas, "acumulado": acumulado, "rm": _sincronizacao(conn)}

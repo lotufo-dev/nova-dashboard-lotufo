@@ -65,6 +65,16 @@ def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatc
     r = client.get(f"/api/diretoria/custo/{sem}")
     assert r.status_code == 404 and r.json()["detail"] == "Esta obra não tem cadastro de custo."
     assert client.get("/api/diretoria/custo/9999").status_code == 404
+    # outra obra com cadastro de custo no mesmo centro: 409 com as obras que disputam, sem valores
+    c = db.get_conn()
+    outra = contratos.criar(c, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 3", "objeto": "Obra Gama",
+                                   "valor_original_centavos": 1_000_00, "centro_custo_rm": "2.001.012"})
+    c.execute("UPDATE contratos SET projeto_rm='PRJ', custo_sem_tarefa='proporcional' WHERE id=?", (outra,))
+    c.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha) VALUES (?,1,'G',?,?)",
+              (outra, json.dumps(["002"]), json.dumps(["2."])))
+    c.commit(); c.close()
+    r = client.get(f"/api/diretoria/custo/{com}")
+    assert r.status_code == 409 and "2.001.012 na obra IC 3" in r.json()["detail"]
     monkeypatch.setitem(permissoes.PERFIS, "diretoria", frozenset())
     assert client.get(f"/api/diretoria/custo/{com}").status_code == 403
     assert client.get("/api/diretoria/custo").status_code == 403

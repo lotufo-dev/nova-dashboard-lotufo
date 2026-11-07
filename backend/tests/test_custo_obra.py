@@ -166,6 +166,9 @@ def test_medido_por_grupo_lido_e_medicao_sem_leitura_vira_nao_lido(conn):
     assert nao["tipo"] == "nao_lido" and nao["medido_centavos"] == 450_01
     assert abr["medido_centavos"] == 450_01
     assert all(g["medido_centavos"] is None for g in abr["grupos"] if g["tipo"] == "grupo")
+    # medido do grupo desconhecido (esta' no "nao lido"): sem diferenca, nunca o custo negativo
+    assert all(g["diferenca_centavos"] is None for g in abr["grupos"] if g["tipo"] == "grupo")
+    assert nao["diferenca_centavos"] == 450_01
 
 
 def test_atestado_diferente_da_planilha_vira_ajuste_e_a_linha_fecha(conn):
@@ -190,13 +193,14 @@ def test_previsto_do_cronograma_e_acumulado_bate_com_a_soma_das_linhas(conn):
                   (1, "2.001.012", None, None, "1.02.001", "2026-04", 25_01),
                   (1, "2.001.012", None, None, "1.02.001", "2026-06", 7_00)])
     r = custo_obra.custo_da_obra(conn, cid)
-    assert [x["competencia"] for x in r["linhas"]] == ["2026-03", "2026-04", "2026-06"]
+    # os meses so' de cronograma ate' a ultima linha com dado (06/2026) viram linha; 07 fica fora
+    assert [x["competencia"] for x in r["linhas"]] == ["2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]
+    assert _linha(r, "2026-02")["previsto_centavos"] == 50_00 and _linha(r, "2026-02")["grupos"][0]["custo_centavos"] == 0
     assert _linha(r, "2026-03")["previsto_centavos"] == 1_000_00
     assert _linha(r, "2026-06")["previsto_centavos"] is None
     a = r["acumulado"]
-    for k in ("medido_centavos", "custo_centavos", "diferenca_centavos"):
-        assert a[k] == sum(x[k] for x in r["linhas"]), k
-    # previsto acumulado ate' a ultima linha (06/2026), com os meses do cronograma sem linha (02 e 05); 07 fica fora
+    for k in ("medido_centavos", "custo_centavos", "diferenca_centavos", "previsto_centavos"):
+        assert a[k] == sum(x[k] or 0 for x in r["linhas"]), k
     assert a["previsto_centavos"] == 50_00 + 1_000_00 + 2_000_01 + 3_00
     assert a["custo_centavos"] == 182_02 and a["medido_centavos"] == 444_44
     assert a["diferenca_centavos"] == 444_44 - 182_02
@@ -228,3 +232,47 @@ def test_regra_sem_tarefa_desconhecida_nao_vira_proporcional_calado(conn):
     conn.execute("UPDATE contratos SET custo_sem_tarefa='fixo' WHERE id=?", (cid,)); conn.commit()
     with pytest.raises(custo_obra.RegraDesconhecida, match="fixo"):
         custo_obra.custo_da_obra(conn, cid)
+
+
+def test_obra_so_com_cronograma_mostra_o_previsto_ate_o_mes_atual(conn, monkeypatch):
+    import datetime
+    from app import tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 4, 15))
+    cid = _obra(conn)
+    cronograma.nova_versao(conn, 1, cid, [("2026-03", 10_00), ("2026-04", 20_00), ("2026-05", 30_00)], "manual")
+    r = custo_obra.custo_da_obra(conn, cid)
+    assert [x["competencia"] for x in r["linhas"]] == ["2026-03", "2026-04"]
+    assert r["acumulado"]["previsto_centavos"] == 30_00
+
+
+def test_centro_em_duas_obras_com_cadastro_recusa_em_vez_de_duplicar(conn):
+    alfa = _obra(conn, anteriores=["1.050.003"])
+    beta = _obra(conn, centro="2.001.099", nome="Obra Beta", anteriores=["1.050.003"])
+    _obra(conn, centro="2.001.012", grupos=None, nome="Sem Cadastro")      # sem cadastro de custo: nao disputa
+    _custo(conn, [(1, "1.050.003", P, "001.01", "1.01.003", "2026-03", 100_00)])
+    for cid, outra in ((alfa, "Obra Beta"), (beta, "Obra Alfa")):
+        with pytest.raises(custo_obra.CentroDisputado, match=f"1.050.003 na obra {outra}"):
+            custo_obra.custo_da_obra(conn, cid)
+    # em outra coligada o mesmo codigo e' outro centro
+    eid = entidades.criar(conn, 1, {"nome": "Construtora Alfa Ltda", "cnpj": "11444777000161", "papel": "lotufo",
+                                    "coligada_rm": 5})
+    gama = _obra(conn, centro="2.001.012", nome="Obra Gama", entidade_id=eid)
+    assert custo_obra.custo_da_obra(conn, gama)["linhas"] == []
+
+
+def test_le_de_um_retrato_so(conn, monkeypatch):
+    """A carga do RM troca custo e estoque numa transacao: a tela le tudo dentro de `db.leitura`."""
+    import contextlib
+    entradas = []
+    original = db.leitura
+
+    @contextlib.contextmanager
+    def espiao(c):
+        with original(c):
+            entradas.append(c.in_transaction)
+            yield c
+
+    monkeypatch.setattr(db, "leitura", espiao)
+    cid = _obra(conn)
+    custo_obra.custo_da_obra(conn, cid)
+    assert entradas == [True]

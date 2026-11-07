@@ -39,6 +39,8 @@ def custo_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=Fals
         raise HTTPException(404, str(e)) from None
     except custo_obra.RegraDesconhecida as e:
         raise HTTPException(422, str(e)) from None
+    except custo_obra.CentroDisputado as e:
+        raise HTTPException(409, str(e)) from None
 
 
 @router.get("/api/diretoria/qdop.xlsx")
