@@ -20,6 +20,7 @@
 import datetime
 import errno
 import hashlib
+import io
 import json
 import logging
 import os
@@ -41,7 +42,8 @@ IDADE_TMP_SEG = 3600  # so e' "sobra" o .tmp que ja passou de 1 hora
 _NOME = re.compile(r"dashboard-(\d{4})(\d{2})(\d{2})-\d{6}\.db$")
 CAMADAS = {"diarios": 7, "semanais": 5, "mensais": 12}
 # Toda pasta de `dados` que o sistema grava (issue #441; o teste confere no codigo). So' `assinaturas` nao e' pelo
-# sha256 (`usuario-<id>`, trocada pela pessoa): o backup guarda a ultima de cada um (ver `_copiar_um`).
+# sha256 (`usuario-<id>`, trocada pela pessoa): o backup guarda a ultima de cada um no nome ativo (ver `_copiar_um`)
+# e cada versao pelo sha256 (`usuario-<id>.<sha256>`, ver `_guardar_versao_assinatura`; #479).
 PASTAS_ARQUIVOS = ("notas", "espelhos", "modelos", "evidencias", "certidoes", "regularidades", "protocolos",
                    "pleitos", "curvas", "planilhas", "frc", "boletins", "anexos", "assinaturas")
 SUBPASTA_ARQUIVOS = "arquivos"  # dentro da pasta de backups e da pasta externa
@@ -267,6 +269,7 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
     copiados = 0
     falhas: dict[str, list[str]] = {}  # pasta -> motivo de cada arquivo sem copia
     faltando: dict[str, int] = {}      # pasta -> arquivos pelo sha256 do backup que nao estao mais nos dados
+    ilegiveis: dict[str, str] = {}     # pasta -> motivo de nao conseguir listar o backup dela (#479)
     agora = time.time()
     for nome in pastas:
         origem = raiz_origem / nome
@@ -288,10 +291,28 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
                 falhas.setdefault(nome, []).append(_motivo(e))
                 if falhos is not None:
                     falhos.add(rel)
-        if not restauracao and (sumidos := _sumidos_dos_dados(destino, nos_dados)):
+        if restauracao:
+            continue
+        if nome == "assinaturas":
+            for arquivo in origem.iterdir() if origem.is_dir() else ():
+                if not (_NOME_ASSINATURA.fullmatch(arquivo.name) and arquivo.is_file()):
+                    continue
+                try:
+                    copiados += _guardar_versao_assinatura(arquivo, destino)
+                except OSError as e:
+                    log.warning("versao da assinatura sem copia: %s -> %s", arquivo, destino, exc_info=True)
+                    falhas.setdefault(nome, []).append(_motivo(e))
+        try:
+            sumidos = _sumidos_dos_dados(destino, nos_dados)
+        except OSError as e:
+            log.error("backup de %s ilegivel: nao da' para saber se algo sumiu dos dados", nome, exc_info=True)
+            ilegiveis[nome] = _motivo(e)
+            continue
+        if sumidos:
             log.error("%d arquivo(s) de %s estao no backup e nao nos dados: %s", len(sumidos), nome, sorted(sumidos)[:20])
             faltando[nome] = len(sumidos)
     partes = [f"{n} arquivo(s) de {nome} estão no backup e sumiram dos dados" for nome, n in sorted(faltando.items())]
+    partes += [f"não foi possível ler o backup de {nome} ({motivo})" for nome, motivo in sorted(ilegiveis.items())]
     if falhas:
         total = sum(len(m) for m in falhas.values())
         por_pasta = ", ".join(f"{nome} {len(m)} ({'; '.join(sorted(set(m)))})" for nome, m in sorted(falhas.items()))
@@ -304,19 +325,44 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
 def _sumidos_dos_dados(backup_da_pasta: Path, nos_dados: set[str]) -> set[str]:
     """Nomes pelo sha256 (`<sha256>.<ext>`) que o backup guardou e que nao estao nos dados. O sistema nao apaga esses
     arquivos (#441): faltar um e' disco perdido, pasta apagada ou recriada vazia, e o snapshot cita o que sumiu.
-    Temporario, `desktop.ini` e qualquer nome fora do padrao nao contam. Pasta do backup ilegivel: nada a dizer aqui
-    (a copia para ela ja' acusa)."""
+    Temporario, `desktop.ini` e qualquer nome fora do padrao nao contam. So' a pasta do backup que nao existe vale
+    como vazia; erro de leitura (acesso negado no compartilhamento) sobe e vira erro da passada (#479): "nada sumiu"
+    dito sem ler apagaria o alarme anterior."""
     try:
-        if not backup_da_pasta.is_dir():
-            return set()
-        return {a.name for a in backup_da_pasta.iterdir()
-                if a.name not in nos_dados and _NOME_SHA_COM_EXT.fullmatch(a.name) and a.is_file()}
-    except OSError:
+        backup_da_pasta.stat()
+    except FileNotFoundError:
         return set()
+    return {a.name for a in backup_da_pasta.iterdir()
+            if a.name not in nos_dados and _NOME_SHA_COM_EXT.fullmatch(a.name) and a.is_file()}
 
 
 # Assinatura de quem envia (`assinaturas/usuario-<id>`): o nome nao e' o sha256 e a pessoa troca ou tira a dela.
 _NOME_ASSINATURA = re.compile(r"usuario-(\d+)")
+
+
+def _guardar_versao_assinatura(arquivo: Path, destino: Path) -> bool:
+    """Guarda no backup a versao da assinatura pelo sha256 (`usuario-<id>.<sha256>`, imutavel; #479), ao lado da copia
+    do nome ativo: a restauracao acha a que valia no snapshot escolhido mesmo depois de a pessoa trocar. Le o arquivo
+    uma vez so' (a assinatura tem ate' 1 MB): o nome e o conteudo saem da mesma leitura, mesmo que a pessoa troque a
+    assinatura no meio. False se a versao ja' estava la', integra."""
+    conteudo = arquivo.read_bytes()
+    sha = hashlib.sha256(conteudo).hexdigest()
+    alvo = destino / f"{arquivo.name}.{sha}"
+    if alvo.is_file() and _sha256(alvo) == sha:
+        return False
+    parcial = alvo.parent / f"{alvo.name}.{os.getpid()}-{threading.get_ident()}-{secrets.token_hex(4)}.tmp"
+    try:
+        with open(parcial, "xb") as saida:
+            shutil.copyfileobj(io.BytesIO(conteudo), saida)
+            saida.flush()
+            os.fsync(saida.fileno())
+            if _sha256(parcial) != sha:
+                raise ErroArquivo("cópia conferida diferente da original")
+        parcial.replace(alvo)
+    except BaseException:
+        parcial.unlink(missing_ok=True)
+        raise
+    return True
 
 
 def _assinaturas_do_banco(banco: Path) -> dict[str, dict]:
@@ -366,11 +412,15 @@ def _restaurar_assinaturas(origem: Path, destino: Path, banco: Path) -> tuple[in
                 atual = None
             if esperado is None or atual == esperado:
                 continue
-            if _sha_ou_nada(do_backup) != esperado:
+            # a versao pelo sha256 primeiro (#479: a que valia no snapshot, mesmo que a pessoa tenha trocado depois);
+            # o nome ativo do backup serve aos backups de antes das versoes
+            versao = origem / f"usuario-{uid}.{esperado}" if _NOME_SHA.fullmatch(str(esperado)) else None
+            fonte = next((f for f in (versao, do_backup) if f is not None and _sha_ou_nada(f) == esperado), None)
+            if fonte is None:
                 motivos.append(f"usuário {uid}: nenhuma cópia tem a assinatura vigente no banco")
                 continue
             destino.mkdir(parents=True, exist_ok=True)
-            copiadas += _copiar_um(do_backup, ativo, conferir=True)
+            copiadas += _copiar_um(fonte, ativo, conferir=True)
         except OSError as e:
             log.warning("assinatura do usuario %s nao reconciliada", uid, exc_info=True)
             motivos.append(f"usuário {uid}: {_motivo(e)}")

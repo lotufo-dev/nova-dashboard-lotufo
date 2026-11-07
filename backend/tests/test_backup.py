@@ -466,7 +466,61 @@ def test_erro_de_disco_numa_assinatura_nao_para_as_outras(tmp_path, monkeypatch)
     assert (dados / "assinaturas" / "usuario-2").read_bytes() == dois
 
 
+def test_restauracao_devolve_a_versao_da_assinatura_que_valia_no_snapshot(tmp_path):
+    """Issue #479 (gate Sol na PR #472): o snapshot escolhido tem a assinatura A; depois a pessoa trocou para B e o
+    backup ja' levou B. Cada versao fica no backup pelo sha256 (`usuario-<id>.<sha256>`): A volta ao nome ativo e B vai
+    para a quarentena, sem erro."""
+    origem, _ = _dados_com_arquivos(tmp_path)
+    dados = tmp_path / "dados"
+    destino = dados / "backups"
+    _rodar(origem, destino)
+    banco_com_a = origem.read_bytes()                     # o "snapshot escolhido": a vigente e' A
+    b = b"\x89PNG\r\n\x1a\n assinatura B"
+    (dados / "assinaturas" / "usuario-1").write_bytes(b)
+    conn = sqlite3.connect(origem)
+    _evento_assinatura(conn, 1, {"tamanho": len(b), "sha256": _sha(b)})
+    conn.commit(); conn.close()
+    backup.rodada_arquivos(origem, destino, None)
+    arquivos_bkp = destino / "arquivos" / "assinaturas"
+    assert (arquivos_bkp / "usuario-1").read_bytes() == b                  # o nome ativo continua sendo uma copia
+    assert (arquivos_bkp / f"usuario-1.{_sha(ASSINATURA)}").read_bytes() == ASSINATURA
+    assert (arquivos_bkp / f"usuario-1.{_sha(b)}").read_bytes() == b
+    assert backup.ESTADO["ultima_copia_arquivos_erro"] is None
+
+    origem.write_bytes(banco_com_a)
+    backup.restaurar_arquivos(destino / "arquivos", dados)
+    assert (dados / "assinaturas" / "usuario-1").read_bytes() == ASSINATURA
+    assert _quarentena(dados) == [b]
+    assert sorted(a.name for a in (dados / "assinaturas").iterdir() if a.is_file()) == ["usuario-1"]
+
+
 SUMIU_PLEITOS = "1 arquivo(s) de pleitos estão no backup e sumiram dos dados"
+
+
+def test_erro_ao_listar_o_backup_e_falha_da_passada_e_nao_apaga_o_alarme(tmp_path, monkeypatch):
+    """Issue #479 (gate Sol na PR #472): acesso negado ao listar a pasta do backup nao vale como "nada sumiu". A
+    passada falha com o motivo em portugues e o alarme de antes (pleitos sumiu) continua aceso. So' a pasta do backup
+    que nao existe vale como vazia."""
+    import shutil
+    origem, _ = _dados_com_arquivos(tmp_path)
+    destino = tmp_path / "dados" / "backups"
+    _rodar(origem, destino)
+    shutil.rmtree(tmp_path / "dados" / "pleitos")
+    backup.rodada_arquivos(origem, destino, None)
+    assert backup.ESTADO["ultima_copia_arquivos_erro"].endswith(f": {SUMIU_PLEITOS}")
+    pleitos_bkp = destino / "arquivos" / "pleitos"
+    real = Path.iterdir
+
+    def negado(self):
+        if self == pleitos_bkp:
+            raise PermissionError(13, "Acesso negado", str(self))
+        return real(self)
+
+    monkeypatch.setattr(Path, "iterdir", negado)
+    backup.rodada_arquivos(origem, destino, None)
+    erro = backup.ESTADO["ultima_copia_arquivos_erro"]
+    assert erro is not None and erro.endswith(": não foi possível ler o backup de pleitos (acesso negado)"), erro
+    assert str(tmp_path) not in erro
 
 
 def test_passada_acusa_pasta_que_sumiu_dos_dados_e_nao_a_que_nunca_existiu(tmp_path):
@@ -511,7 +565,9 @@ def test_arquivos_nao_se_multiplicam_por_snapshot(tmp_path):
     time.sleep(1.1)
     _rodar(origem, destino)
     assert len(list(destino.glob("dashboard-*.db"))) == 2
-    assert len(_arquivos_no(destino / "arquivos")) == len(gravados)
+    # cada arquivo uma vez, mais a versao da assinatura pelo sha256 (#479), tambem uma so'
+    versao = destino / "arquivos" / "assinaturas" / f"usuario-1.{hashlib.sha256(ASSINATURA).hexdigest()}"
+    assert _arquivos_no(destino / "arquivos") == sorted([destino / "arquivos" / rel for rel in gravados] + [versao])
     assert copia.stat().st_mtime == antes  # ja' estava la': nao foi copiado de novo
 
 
