@@ -764,3 +764,43 @@ def test_texto_da_carta_legivel_na_tela_e_guardado_depois_do_envio(api):
     # enviado, a tela mostra o texto que foi ao orgao: no oficio so' de execucao, sem o paragrafo do termo
     assert d["situacao"] == "enviado" and "sempre" in d["corpo_carta"]
     assert "{apostilamento}" not in d["corpo_carta"] and protocolo.MARCADOR_NA_TELA not in d["corpo_carta"]
+
+
+def test_reserva_presa_responde_409_nas_rotas_de_edicao_do_protocolo(api, monkeypatch):
+    """Issue #536: com a reserva presa, anexar e remover peca, montar de novo e descartar respondem 409 com o
+    detalhe da reserva (a tela mostra "Liberar envio" pelo `codigo`), e nada muda."""
+    cl, cid, mid = api
+    pid = cl.post(f"/api/contratos/{cid}/protocolos",
+                  json={"etapa": "unico", "medicao_ids": [mid], "numero_oficio": "301"}).json()["id"]
+    r = cl.post(f"/api/protocolos/{pid}/pecas", data={"tipo": "outro"}, files=_pdf_upload(_pdf("Outro"), "outro.pdf"))
+    assert r.status_code == 200, r.text
+    peca_id = r.json()["pecas"][0]["id"]
+    monkeypatch.setenv(protocolo.VARIAVEL_HOSTS_LINK, "lotufoengmt.sharepoint.com")
+    link = {"nome": "Fotos", "url": "https://lotufoengmt.sharepoint.com/fotos"}
+    r = cl.post(f"/api/protocolos/{pid}/links", json=link)
+    assert r.status_code == 200, r.text
+    c = db.get_conn()
+    link_id = c.execute("SELECT id FROM protocolo_links WHERE protocolo_id=?", (pid,)).fetchone()[0]
+    c.close()
+    assert cl.post(f"/api/protocolos/{pid}/montar", json={}).status_code == 200
+    assinado = _assinar(cl.get(f"/api/protocolos/{pid}/pacote").content)
+    c = db.get_conn()
+    with db.mutacao(c):
+        c.execute("UPDATE protocolos SET envio_reservado_em=datetime('now','-1 hours'), envio_reservado_por=? "
+                  "WHERE id=?", (_admin(c)["id"], pid))
+    c.close()
+    respostas = [
+        cl.post(f"/api/protocolos/{pid}/pecas", data={"tipo": "outro"}, files=_pdf_upload(_pdf("Mais"), "mais.pdf")),
+        cl.post(f"/api/protocolos/{pid}/pecas/{peca_id}/remover"),
+        cl.post(f"/api/protocolos/{pid}/montar", json={}),
+        cl.post(f"/api/protocolos/{pid}/links", json={**link, "nome": "Outro"}),
+        cl.post(f"/api/protocolos/{pid}/links/{link_id}/remover"),
+        cl.post(f"/api/protocolos/{pid}/assinado", files=_pdf_upload(assinado)),
+        cl.post(f"/api/protocolos/{pid}/descartar", json={"motivo": "teste"}),
+    ]
+    for r in respostas:
+        assert r.status_code == 409, r.text
+        d = r.json()["detail"]
+        assert d["codigo"] == "ENVIO_RESERVADO" and d["reservado_por_nome"] == "Admin" and d["liberavel_a_partir_de"]
+    d = cl.get(f"/api/protocolos/{pid}").json()
+    assert d["situacao"] == "montado" and len(d["pecas"]) == 1

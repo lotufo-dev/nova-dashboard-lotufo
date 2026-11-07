@@ -48,10 +48,10 @@ function faixa(dias: number): "acao" | "atencao" | "neutro" {
   return dias <= 15 ? "acao" : dias <= 45 ? "atencao" : "neutro";
 }
 
-function Cartao({ para, secao, ir, numero, rotulo, tom }:
-    { para: Rota; secao?: string; ir: Ir; numero: number; rotulo: string; tom: "primario" | "acao" | "atencao" | "neutro" }) {
+function Cartao({ para, secao, busca, ir, numero, rotulo, tom }:
+    { para: Rota; secao?: string; busca?: Record<string, string>; ir: Ir; numero: number; rotulo: string; tom: "primario" | "acao" | "atencao" | "neutro" }) {
   return (
-    <Link para={para} secao={secao} ir={ir} className={`ini-cartao ini-cartao--${tom}`}>
+    <Link para={para} secao={secao} busca={busca} ir={ir} className={`ini-cartao ini-cartao--${tom}`}>
       <span className="ini-cartao__numero">{numero.toLocaleString("pt-BR")}</span>
       <span className="ini-cartao__texto"><span className="ini-cartao__rotulo">{rotulo}</span></span>
       <span className="ini-cartao__seta" aria-hidden="true">→</span>
@@ -125,7 +125,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
           rotulo={p.notas_a_enviar === 1 ? "nota a enviar" : "notas a enviar"} />
         <Cartao para={{ tela: "documentos" }} ir={ir} numero={totalCert} rotulo={rotuloCert}
           tom={c.vencidas ? "acao" : c.vencendo ? "atencao" : "neutro"} />
-        <Cartao para={paraReaj} ir={ir} numero={r.length} rotulo={r.length === 1 ? "reajuste a pedir" : "reajustes a pedir"}
+        <Cartao para={paraReaj} busca={r.length > 1 ? { familia: "reajustes" } : undefined} ir={ir} numero={r.length} rotulo={r.length === 1 ? "reajuste a pedir" : "reajustes a pedir"}
           tom={r.some(x => x.dias < 0) ? "acao" : r.length ? "atencao" : "neutro"} />
         {esp.length > 0 && (
           <Cartao para={paraEsp} secao={secaoEsp} ir={ir} tom="acao" numero={esp.length}
@@ -183,7 +183,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <section aria-labelledby="ini-prazos" className="ini-painel ini-painel--prazos">
           <div className="ini-painel__topo">
             <h2 id="ini-prazos">Prazos chegando</h2>
-            <Link para={{ tela: "avisos" }} ir={ir} className="ini-ver-todos">Ver todos</Link>
+            <Link para={{ tela: "avisos" }} busca={{ familia: "prazos" }} ir={ir} className="ini-ver-todos">Ver todos</Link>
           </div>
           {p.prazos.length === 0 ? <p className="ini-vazio">Nenhum prazo chegando.</p> : (
             <>

@@ -453,6 +453,53 @@ def test_deploy_confere_a_producao_no_inicio_e_so_solta_o_aborto_antes_do_checko
         "$script:soltarWatchdog = $false", 0, codigo.index("try { Construir $alvo; ConferirInstalacao }"))
 
 
+def test_deploy_separa_health_sem_commit_de_servidor_fora_do_ar():
+    # Issue #481 (Aviso do revisor na rodada 2 da PR #475): o servidor roda como SYSTEM; sem o git no PATH da maquina o
+    # commit novo sobe saudavel com `commit: null` e o deploy desfazia um deploy bom com a mesma mensagem do servidor
+    # fora do ar. O CommitDoHealth diz qual dos casos viu e o NoArEm da a mensagem de cada um.
+    codigo = _codigo(_ler("deploy.ps1"))
+    health = codigo[codigo.index("function CommitDoHealth"):codigo.index("function NoArEm")]
+    # tres desfechos alem do commit lido: sem 200, 200 sem o campo (commit anterior a 421) e 200 com o campo vazio
+    for situacao in ("sem-200", "sem-campo", "vazio", "ok"):
+        assert f'Situacao = "{situacao}"' in health
+    assert "PSObject.Properties.Name -contains 'commit'" in health
+    no_ar = codigo[codigo.index("function NoArEm"):codigo.index("function PinadoLimpo")]
+
+    def ramo(situacao):
+        trecho = no_ar[no_ar.index(f'"{situacao}" {{'):]
+        return trecho[:trecho.index("}")]
+
+    assert "o servidor nao conseguiu ler o proprio commit: confira o git no PATH da maquina" in ramo("vazio")
+    assert "servidor fora do ar" in ramo("sem-200")
+    assert "sem o campo commit" in ramo("sem-campo")
+    # a mensagem que juntava os casos saiu; o vazio continua sem provar o commit (so' o "ok" no commit certo prova)
+    assert "health sem 200 ou sem o campo commit" not in codigo
+    assert no_ar.count("return $true") == 1
+    assert '$lido.Situacao -eq "ok"' in no_ar
+
+
+def test_runbook_e_skill_dizem_como_conferir_o_commit_do_health_antes_do_primeiro_deploy():
+    # Issue #481: antes do primeiro deploy com a 443, conferir que o servidor le o proprio commit e o que fazer se vier
+    # vazio; a nota cita tambem a volta do build, que exige a recuperacao manual completa.
+    raiz = SCRIPTS.parent
+    runbook = (raiz / "docs" / "runbook.md").read_text(encoding="utf-8")
+    item = runbook[runbook.index("- **Deploy da issue #443"):]
+    item = item[:item.index("\n- ")]
+    assert "o servidor nao conseguiu ler o proprio commit" in item
+    assert "PATH" in item and "SYSTEM" in item
+    assert "rev-parse" in item and "volta do build" in item
+    # Gate Sol da PR #539: na volta do build sem o campo, nada de atalho; recuperacao manual completa com o sentinela
+    provas = ("porta livre", "reconstrução do `<anterior>`", "`git status` limpo", "processo da porta nascido depois do reinício",
+              "não bastam")
+    assert "basta conferir" not in item and all(p in item for p in provas)
+    skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
+    nota = skill[skill.index("- **Primeiro deploy com a #443**"):]
+    nota = " ".join(nota[:nota.index("\n- ")].split())
+    assert "o servidor nao conseguiu ler o proprio commit" in nota
+    assert "volta do build" in nota and "rev-parse" in nota
+    assert "basta conferir" not in nota and all(p in nota for p in provas)
+
+
 def test_deploy_so_solta_com_o_health_no_commit_esperado():
     # Rodada 2 da PR #475 (issue #443): o Saudavel aceitava qualquer processo que respondesse 200. Com o anterior sem a
     # #417, a nova tentativa falhava na conferencia da instalacao, caia na volta do build, e o 200 do processo NOVO no
@@ -949,6 +996,42 @@ def test_deploy_https_confere_o_par_certificado_e_chave_antes_do_sentinela():
     assert python in script, "o Python da conferencia nao pode ter cerquilha (o _codigo cortaria a linha)"
 
 
+def test_deploy_https_confere_a_acl_do_par_antes_do_sentinela():
+    # Issue #534: par reposto com permissao a mais (copia pelo Explorer, backup) abre e casa para o administrador que
+    # roda o deploy, mas o rodar_producao.ps1 recusa subir (Assert-AclSomenteSistemaEAdmins) no commit novo e no
+    # rollback. O deploy confere com a MESMA funcao, sobre a pasta e os dois .pem, antes de parar qualquer coisa.
+    codigo = _codigo(_ler("deploy.ps1"))
+    fonte = '. (Join-Path $PSScriptRoot "comum_acl.ps1")'
+    assert fonte in codigo
+    tls = codigo.index("if ($comTls) {")
+    fim = codigo.index("} else {", tls)
+    assert codigo.index(fonte) < tls
+    laco = codigo.index('foreach ($caminhoTls in (Join-Path $Raiz "segredos\\tls"), $certificado, $chaveTls) {')
+    confere = codigo.index("Assert-AclSomenteSistemaEAdmins -Caminho $caminhoTls", laco)
+    assert tls < laco < confere < fim
+    mensagem = codigo[confere:confere + 600]
+    assert "throw " in mensagem and "nada foi alterado" in mensagem and "Permissao do par do HTTPS recusada" in mensagem
+    assert "recusa preventiva" in mensagem
+    for depois in ("New-Item -ItemType File -Path $pause", "& git -C $AppDir fetch --quiet", "try { Construir $alvo"):
+        assert confere < codigo.index(depois)
+    # a mesma funcao que o rodar_producao.ps1 usa na subida, sobre a pasta e os dois arquivos do par
+    rodar = _codigo(_ler("rodar_producao.ps1"))
+    assert fonte in rodar
+    assert "Assert-AclSomenteSistemaEAdmins -Caminho $certs" in rodar
+    assert '$arquivos += (Join-Path $certs "chave.pem"), (Join-Path $certs "cert.pem")' in rodar
+    assert "function Assert-AclSomenteSistemaEAdmins" in _ler("comum_acl.ps1")
+    assert "function Assert-AclSomenteSistemaEAdmins" not in _ler("deploy.ps1")
+
+
+def test_runbook_diz_o_que_fazer_quando_o_deploy_recusa_a_permissao_do_par():
+    runbook = (SCRIPTS.parent / "docs" / "runbook.md").read_text(encoding="utf-8")
+    inicio = runbook.index("**Permissao do par do HTTPS recusada** (issue #534)")
+    trecho = " ".join(runbook[inicio:inicio + 1800].split())
+    assert "icacls" in trecho and "nada foi alterado" in trecho and "Corrigir a permissão antes de qualquer reinício" in trecho
+    # revisor da PR #538: com o RM ligado a subida reaplica a ACL de segredos; a recusa do deploy e' preventiva
+    assert "preventiva" in trecho and "segredos\\rm.txt" in trecho
+
+
 def _par_autoassinado(pasta, nome):
     import datetime
 
@@ -1187,3 +1270,35 @@ def test_deploy_erro_na_consulta_da_porta_nao_e_porta_livre():
     # a falha sobe pelo PararComprovado (sem catch), que nao toca no pinado e mantem o sentinela
     parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
     assert "catch" not in parar and "LiberarPorta" in parar
+
+
+def test_skill_deploy_confere_o_arquivo_da_instalacao_antes_de_qualquer_git_e_a_chamada_1_vai_por_file():
+    # Issue #446 (Sugestao do revisor na PR #437): pelo SSH no `-Command -`, o primeiro comando nativo (git) consome o
+    # resto do script pelo stdin; o Test-Path do instalacao.json no fim do bloco nunca imprimia nada (falso "ausente").
+    raiz = pathlib.Path(__file__).resolve().parents[2]
+    skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
+    secao = skill[skill.index("## Antes de rodar: o que vai subir"):skill.index("## Rodar")]
+    bloco = secao[secao.index("```powershell") + len("```powershell"):]
+    linhas = [linha.strip() for linha in bloco[:bloco.index("```")].splitlines() if linha.strip()]
+    # gate Sol da PR #537: o arquivo e' o da raiz da tarefa (-Raiz), lida como no deploy.ps1, nunca C:\ fixo
+    teste = next(i for i, linha in enumerate(linhas) if linha.startswith("Test-Path"))
+    assert linhas[teste] == 'Test-Path (Join-Path $raiz "segredos\\instalacao.json")'
+    assert not any("git " in linha for linha in linhas[:teste])
+    antes = "\n".join(linhas[:teste])
+    assert 'Agendador @("/Query", "/TN", "DashboardLotufo", "/XML") 30' in antes and "exit 1" in antes
+    assert _regex_da_raiz(_ler("deploy.ps1")) in antes
+    assert "C:\\DashboardLotufo\\segredos" not in antes
+    # revisor da rodada 2 da PR #537: o pinado anterior a #386 nao tem comum_agendador.ps1; sem ele, schtasks direto
+    assert "if (Test-Path $agendador) { . $agendador;" in antes
+    assert "schtasks.exe /Query /TN DashboardLotufo /XML" in antes
+    # e a raiz sai so' de <Arguments>, como no ArgumentosDaTarefa do deploy.ps1
+    assert '[regex]::Matches($tarefa.Saida, "<Arguments>([^<]*)</Arguments>")' in antes
+    assert "$raiz = if ($argumentos -match " in antes
+    assert "Pinado sem `scripts\\comum_agendador.ps1`" in skill
+    # a chamada 1 pelo Mac vai num .ps1 com -File, nunca pelo stdin (runbook, "Mudar de servidor")
+    caminhos = skill[skill.index("## Dois caminhos: local elevado ou SSH"):skill.index("## Antes de rodar")]
+    chamada1 = caminhos[caminhos.index("  1. só leitura"):caminhos.index("  2. o deploy")]
+    assert "-File" in chamada1 and "scp" in chamada1
+    assert "nunca pelo stdin" in chamada1
+    # gate Sol da PR #537: nada de nome fixo em C:\Temp para o script elevado
+    assert "C:/Temp" not in chamada1 and "C:\\Temp" not in chamada1 and "<aleatorio>" in chamada1

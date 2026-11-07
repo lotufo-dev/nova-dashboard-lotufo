@@ -135,6 +135,8 @@ def peca(pid: ID, tipo: TipoPeca = Form(...), arquivo: UploadFile = File(...),
         dados, ext = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=pdfs.TETO_BYTES_PACOTE)), "pdf"
     try:
         protocolo.adicionar_peca(conn, usuario["id"], pid, tipo, nome, dados, ext)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536: a tela oferece "Liberar envio" pelo `codigo`
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -152,6 +154,8 @@ def link(pid: ID, dados: LinkIn, usuario: dict = Depends(exigir("editar_cadastro
     _existe(conn, pid)
     try:
         protocolo.adicionar_link(conn, usuario["id"], pid, dados.nome, dados.url)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -163,6 +167,8 @@ def remover_link(pid: ID, link_id: ID, usuario: dict = Depends(exigir("editar_ca
     _existe(conn, pid)
     try:
         protocolo.remover_link(conn, usuario["id"], pid, link_id)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -174,6 +180,8 @@ def remover_peca(pid: ID, peca_id: ID, usuario: dict = Depends(exigir("editar_ca
     _existe(conn, pid)
     try:
         protocolo.remover_peca(conn, usuario["id"], pid, peca_id)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -185,6 +193,8 @@ def montar(pid: ID, dados: MontarIn, usuario: dict = Depends(exigir("editar_cada
     _existe(conn, pid)
     try:
         protocolo.montar(conn, usuario["id"], pid, protocolo.da_tela(dados.corpo), refazer_texto=dados.refazer_texto)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -212,6 +222,8 @@ def assinado(pid: ID, arquivo: UploadFile = File(...), usuario: dict = Depends(e
     pdf = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=pdfs.TETO_BYTES_PACOTE))
     try:
         protocolo.receber_assinado(conn, usuario["id"], pid, pdf)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -278,6 +290,8 @@ def descartar(pid: ID, dados: DescartarIn, usuario: dict = Depends(exigir("edita
     _existe(conn, pid)
     try:
         protocolo.descartar(conn, usuario["id"], pid, dados.motivo)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return {"ok": True}

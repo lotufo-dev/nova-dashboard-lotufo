@@ -113,7 +113,8 @@ export default function App() {
 
   // A barra superior diz a SECAO; quem tem titulo proprio (o objeto, ou o "Bom dia" do Inicio) fica com o h1 da
   // pagina, e a barra nao repete um segundo h1.
-  const tituloProprio = ehDetalhe(rota) || rota.tela === "inicio" || rota.tela === "obras";
+  const tituloProprio = ehDetalhe(rota) || rota.tela === "inicio" || rota.tela === "obras"
+    || (rota.tela === "siga" && /^\d+$/.test(busca.processo ?? ""));   // o historico do processo tem o h1 dele
 
   return (
     <div className="shell">

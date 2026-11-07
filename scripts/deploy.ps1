@@ -144,6 +144,7 @@ function TlsDaTarefa {
 }
 $comTls = TlsDaTarefa
 . (Join-Path $PSScriptRoot "comum_tls.ps1")
+. (Join-Path $PSScriptRoot "comum_acl.ps1")   # Assert-AclSomenteSistemaEAdmins, a mesma do rodar_producao.ps1 (issue #534)
 $certificado = Join-Path $Raiz "segredos\tls\cert.pem"
 if ($comTls) {
     $urlSaude = "https://localhost:$Porta/api/health"
@@ -174,6 +175,13 @@ if ($comTls) {
         $motivoPar = ($rPar.Saida -replace "\s+", " ").Trim()
         if ($motivoPar -match "password callback") { $motivoPar = "chave cifrada nao e' aceita (o uvicorn sobe sem senha)" }
         throw "certificado e chave do HTTPS nao formam par ($certificado e $chaveTls; motivo: $motivoPar); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Chave do HTTPS recusada)"
+    }
+    # Issue #534: par reposto por copia (Explorer, backup) pode trazer permissao a mais; abre e casa para o administrador
+    # que roda o deploy, mas o rodar_producao.ps1 recusa subir (Assert-AclSomenteSistemaEAdmins na pasta e nos dois .pem)
+    # no commit novo e no rollback. A mesma funcao (comum_acl.ps1) confere aqui, antes do sentinela e de parar a producao.
+    foreach ($caminhoTls in (Join-Path $Raiz "segredos\tls"), $certificado, $chaveTls) {
+        try { Assert-AclSomenteSistemaEAdmins -Caminho $caminhoTls }
+        catch { throw "permissao do par do HTTPS alem de SYSTEM e Administradores em $caminhoTls (recusa preventiva: sem o RM ligado o rodar_producao.ps1 recusaria subir o commit novo e o rollback; com o RM em segredos\rm.txt a subida reaplica a ACL); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Permissao do par do HTTPS recusada). Detalhe da conferencia (o 'rode este script de novo' abaixo vale para o deploy.ps1): $($_.Exception.Message)" }
     }
 } else {
     $urlSaude = "http://localhost:$Porta/api/health"
@@ -412,21 +420,33 @@ function AvisarSeCopia {
 # Issue #443 (rodada 2 da PR #475): a producao so' esta' PROVADA com o health 200 cujo `commit` (7 caracteres, lido pelo
 # servidor na subida, issue #421) e' o commit esperado. Qualquer processo responde 200; sem o campo (commit anterior a
 # #421) nada esta' provado.
+# Issue #481: o CommitDoHealth diz o que viu. "sem-200" (sem resposta ou outro status: servidor fora do ar), "sem-campo"
+# (200 sem o campo, commit anterior a #421, ou corpo que nao e' JSON), "vazio" (200 com `commit: null`: o servidor, que
+# roda como SYSTEM, nao conseguiu rodar o git rev-parse, em geral git fora do PATH da maquina) e "ok" (commit lido).
+# Nenhum caso alem do "ok" no commit esperado prova a producao; a mensagem e' que muda.
 function CommitDoHealth {
     try { $resposta = Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12 }
-    catch { return $null }
-    if ($resposta.StatusCode -ne 200) { return $null }
+    catch { return [pscustomobject]@{ Situacao = "sem-200"; Commit = $null } }
+    if ($resposta.StatusCode -ne 200) { return [pscustomobject]@{ Situacao = "sem-200"; Commit = $null } }
     $saude = $null
     try { $saude = $resposta.Content | ConvertFrom-Json } catch { $saude = $null }
-    if ($saude -and $saude.commit) { return [string]$saude.commit }
-    return $null
+    if (-not $saude -or -not ($saude.PSObject.Properties.Name -contains 'commit')) {
+        return [pscustomobject]@{ Situacao = "sem-campo"; Commit = $null }
+    }
+    if (-not $saude.commit) { return [pscustomobject]@{ Situacao = "vazio"; Commit = $null } }
+    return [pscustomobject]@{ Situacao = "ok"; Commit = [string]$saude.commit }
 }
 function NoArEm([string]$commit) {
     $curto = "$commit"
     if ($curto.Length -gt 7) { $curto = $curto.Substring(0, 7) }
-    $visto = CommitDoHealth
-    if ($visto -and $curto.Length -eq 7 -and $visto -eq $curto) { return $true }
-    if (-not $visto) { $visto = "health sem 200 ou sem o campo commit" }
+    $lido = CommitDoHealth
+    $visto = $lido.Commit
+    if ($lido.Situacao -eq "ok" -and $curto.Length -eq 7 -and $visto -eq $curto) { return $true }
+    switch ($lido.Situacao) {
+        "vazio" { $visto = "health 200 com o campo commit vazio; o servidor nao conseguiu ler o proprio commit: confira o git no PATH da maquina (o servidor roda como SYSTEM)" }
+        "sem-campo" { $visto = "health 200 sem o campo commit (commit anterior ao registro do commit no health)" }
+        "sem-200" { $visto = "health sem 200: servidor fora do ar ou sem resposta" }
+    }
     Write-Warning "o health nao prova o commit $curto no ar (visto: $visto)"
     return $false
 }

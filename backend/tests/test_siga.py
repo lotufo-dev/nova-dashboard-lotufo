@@ -415,7 +415,7 @@ def test_painel_traz_situacao_da_ultima_leitura_e_as_movimentacoes_mais_recentes
     assert painel["lido_em"] == "2026-10-28T13:00:00+00:00" and painel["atrasado"] is False
     p = next(x for x in painel["processos"] if x["codigo"] == "ABC123")
     assert p["situacao"].startswith("2º Volume - Caixa de Entrada") and p["setor"] == "GABIN"
-    assert len(p["movimentacoes"]) == 30
+    assert len(p["movimentacoes"]) == 35      # todas as gravadas (#512), nao so' as 30 ultimas
     assert p["movimentacoes"][0]["evento"] == "Recebimento Cancelado"      # gravada, aparece; so' nao deriva
     assert p["movimentacoes"][0]["data"] == "2026-10-28T10:00:00-04:00"         # hora de Cuiaba, com o fuso
     assert p["desde"] == "2026-10-02T09:00:00-04:00" and p["protocolado_em"] == "2026-09-01T08:00:00-04:00"
@@ -424,6 +424,22 @@ def test_painel_traz_situacao_da_ultima_leitura_e_as_movimentacoes_mais_recentes
     assert set(p) >= {"id", "codigo", "numero", "nome", "contrato_id", "obra", "medicao_id", "medicao_titulo",
                       "protocolo_id", "situacao", "setor", "com_quem", "caixa_entrada", "desde", "dias_uteis",
                       "hoje", "ultima", "protocolado_em", "movimentacoes"}
+
+
+def test_tipo_da_movimentacao_classifica_o_evento_para_os_filtros_do_historico():
+    # issue #512: Transferencias, Recebimentos, Juntadas, Marcacoes e o resto em Outras
+    casos = {"Transferência": "transferencia", "Transferencia | texto": "transferencia", "Recebimento": "recebimento",
+             "Recebimento Cancelado": "recebimento", "Juntada": "juntada", "Juntada de documento": "juntada",
+             "Marcação": "marcacao", "Marcacao": "marcacao", "Anotação": "outras", "Encerramento de volume": "outras",
+             "Arquivamento": "outras", "Processo transferido": "transferencia", None: "outras", "": "outras"}
+    for evento, tipo in casos.items():
+        assert siga.tipo_da_movimentacao(evento) == tipo, evento
+
+
+def test_painel_marca_o_tipo_de_cada_movimentacao(conn):
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 8), _leitura())
+    p = siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"][0]
+    assert p["movimentacoes"] and all(m["tipo"] == siga.tipo_da_movimentacao(m["evento"]) for m in p["movimentacoes"])
 
 
 def test_acompanhar_avulso_normaliza_o_numero_e_le_o_codigo_do_link(conn, monkeypatch):

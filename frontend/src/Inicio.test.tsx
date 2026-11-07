@@ -74,6 +74,15 @@ describe("Início", () => {
     expect((rotulo.parentElement?.textContent ?? "").replace(/\s/g, " ")).toContain("R$ 1.234.567,89");
   });
 
+  it("#511: o 'Ver todos' dos prazos e o cartão de vários reajustes abrem os Avisos já filtrados pela categoria", async () => {
+    const reaj = (contrato_id: number) => ({ contrato_id, obra: `Obra ${contrato_id}`, data_base_mes: "2025-11", aniversario: "2026-11-01", dias: 23 });
+    api.mockResolvedValue(painel({ reajustes: [reaj(7), reaj(8)] }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    expect((await screen.findByRole("link", { name: "Ver todos" })).getAttribute("href")).toBe("/avisos?familia=prazos");
+    const cartoes = within(screen.getByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
+    expect(cartoes[2].getAttribute("href")).toBe("/avisos?familia=reajustes");
+  });
+
   it("#359: espelho com o aprovado mudado vira cartão que leva à medição; mais de um leva aos avisos", async () => {
     const esp = (medicao_id: number, situacao: PainelInicio["espelhos"][number]["situacao"]) =>
       ({ espelho_id: medicao_id + 100, contrato_id: 7, medicao_id, obra: "Obra A", titulo: "23ª Medição", situacao });
