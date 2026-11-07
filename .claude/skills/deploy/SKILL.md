@@ -49,8 +49,10 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
   `Test-Path C:\DashboardLotufo\watchdog.pause` (item 1) e deixar o script criá-lo; a chamada 1 usa
   `git -C C:\DashboardLotufo\app fetch` e `log`/`diff` contra `origin/master`, sem `switch`/`pull` (runbook, variante).
   **Se o script não imprimir nada em 2 minutos** (ele imprime `[HH:mm:ss] etapa` a cada passo desde a issue #386), abrir
-  outra sessão SSH e conferir se `git`, `python` (pip) ou `node` (npm) estão rodando (`tasklist /FI "IMAGENAME eq git.exe"`
-  etc.): rodando, esperar; parados e sem linha nova, abortar a chamada e seguir o item "Se a chamada 2 cair".
+  outra sessão SSH e conferir se `git`, `python` (pip), `node` (npm), `schtasks.exe` ou `powershell.exe` (o leitor de estado
+  da tarefa) estão rodando (`tasklist /FI "IMAGENAME eq git.exe"` etc.): rodando, esperar; parados e sem linha nova, abortar a
+  chamada e seguir o item "Se a chamada 2 cair". Desde a issue #518 cada leitura do estado da tarefa imprime uma linha e a
+  parada tem prazo total de 90 s; o estado é lido uma vez antes do sentinela, e leitor quebrado aborta com "nada foi alterado".
 
   Se a chamada 2 cair ou vier sem a linha final, o `finally` do `deploy.ps1` pode não ter rodado. Health 200 e `rev-parse`
   igual **não provam** deploy concluído (queda no build deixa o `dist` pela metade com o processo antigo no ar) e
