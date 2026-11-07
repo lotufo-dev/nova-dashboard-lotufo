@@ -85,7 +85,7 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
       // depois de um registro parcial (o aviso "ATENÇÃO" no meio), o que sobrou e' um so', mas foram varios envios
       const aviso = escolhidos.length === 1 && !parcial ? avisoPorFora(todasJuntas, escolhidos[0].medicao_ids.length)
         : "Envios registrados: as notas foram para Aguardando pagamento.";
-      aoFeito(semNumero.length > 0 ? `${aviso} O nº do processo não foi gravado (${semNumero[0]}): registre-o na etapa 4, depois do envio.` : aviso);
+      aoFeito(semNumero.length > 0 ? `${aviso} O nº do processo não foi gravado (${semNumero[0]}): registre-o no envio da nota da medição.` : aviso);
     } catch (x) {
       const pendente = escolhidos[feitos.length];
       if (x instanceof ApiErro && x.status === 422 && x.corpo?.codigo === "CONFIRMAR_PENDENCIAS" && pendente) {

@@ -23,7 +23,7 @@ export default function AbrirEnvio({ protocoloId }: { protocoloId: number }) {
           <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir o envio: {erro}</p>
           <p><Link className="link" para={{ tela: "medicoes", aba: "enviar-nota" }}>Ver as notas a enviar</Link></p>
         </div>
-      ) : <p className="campo__nota" role="status">Abrindo a etapa 4 da medição…</p>}
+      ) : <p className="campo__nota" role="status">Abrindo o envio da nota da medição…</p>}
     </div>
   );
 }

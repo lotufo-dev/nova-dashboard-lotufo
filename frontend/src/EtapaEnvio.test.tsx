@@ -213,6 +213,8 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
     fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
     await waitFor(() => expect(p.aoMudar).toHaveBeenCalled());
     expect((p.aoMudar as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("O nº do processo não foi gravado");
+    // #508: a pagina agora tem passos com outra numeracao; o aviso nomeia o passo, sem numero
+    expect((p.aoMudar as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain("registre-o no envio da nota da medição");
   });
 
   it("MTPAR, dois envios: só o da medição da página começa marcado; o processo só vale com um envio marcado", async () => {
