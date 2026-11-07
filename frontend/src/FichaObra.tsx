@@ -73,8 +73,10 @@ function CurvaFicha({ pontos, anterior }: { pontos: PontoDaCurva[]; anterior: Pr
   const serie = curvaS(pontos, anterior);
   const N = serie.length;
   const total = N ? serie[N - 1].acumuladoPrevisto : 0;
-  const W = Math.max(280, largura), H = W < 560 ? 170 : 190;
-  const ML = 40, MR = 10, MT = 8, MB = 22;
+  // sem medida (jsdom, primeiro quadro) vale 280; medido, acompanha o cartao (no celular cabe em ~240 px) sem estourar
+  const W = largura > 0 ? Math.max(160, largura) : 280, H = W < 560 ? 170 : 190;
+  // MR deixa espaco para a metade do ultimo rotulo do mes (centralizado no ultimo ponto)
+  const ML = 40, MR = 22, MT = 8, MB = 22;
   const iw = W - ML - MR, ih = H - MT - MB;
   const x = (i: number) => ML + (N > 1 ? (iw * i) / (N - 1) : iw / 2);
   const y = (frac: number) => MT + ih - Math.min(1, Math.max(0, frac)) * ih;
