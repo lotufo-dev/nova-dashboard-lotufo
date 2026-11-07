@@ -1057,7 +1057,8 @@ def _ler_capa(cl, mid):
 
 def test_leitura_da_capa_devolve_numero_data_e_valor_lidos(client_admin, monkeypatch):
     _capa_lida(monkeypatch)
-    mid = _planilha_enviada(client_admin)
+    mid = _nova_planilha(client_admin, _contrato(client_admin), numero=7).json()["medicao_id"]   # a capa e' da 7a
+    _no_estado(mid, "planilha_enviada")
     r = _ler_capa(client_admin, mid)
     assert r.status_code == 200, r.text
     corpo = r.json()
@@ -1083,6 +1084,29 @@ def test_pdf_sem_leitura_devolve_campos_vazios(client_admin, monkeypatch):
     mid = _planilha_enviada(client_admin)
     corpo = _ler_capa(client_admin, mid).json()
     assert (corpo["lido"], corpo["campos"], corpo["fonte"]) == (False, {}, None)
+    assert corpo["avisos"] == ["Não foi possível ler a capa do boletim neste PDF; digite os valores"]
+
+
+def test_capa_de_outra_medicao_avisa(client_admin, monkeypatch):
+    _capa_lida(monkeypatch)                                       # a capa e' da 7a medicao
+    cid = _contrato(client_admin)
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 6, "tipo": "execucao", "competencia": "2026-07"}).json()["id"]
+    corpo = _ler_capa(client_admin, mid).json()
+    assert corpo["lido"] and corpo["campos"]["numero_orgao"] == "7"
+    assert corpo["avisos"] == ["A capa é da 7ª medição e esta é a 6ª: confira se o PDF é o certo"]
+
+
+def test_leitura_recusada_na_medicao_que_nao_recebe_boletim(client_admin, monkeypatch):
+    _capa_lida(monkeypatch)
+    cid = _contrato(client_admin)
+    gerada = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    r = _ler_capa(client_admin, gerada)
+    assert r.status_code == 422 and "envio da planilha/carta" in r.json()["detail"]
+    cancelada = _medicao(client_admin, cid, 3)
+    _no_estado(cancelada, "cancelada")
+    r = _ler_capa(client_admin, cancelada)
+    assert r.status_code == 422 and "cancelada" in r.json()["detail"]
 
 
 def test_capa_nao_aprovada_nao_propoe_valores(client_admin, monkeypatch):

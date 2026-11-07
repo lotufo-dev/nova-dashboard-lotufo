@@ -67,6 +67,16 @@ describe("FormBoletim (issue #290)", () => {
     expect([enviado()!.get("numero_orgao"), enviado()!.get("lido")]).toEqual(["8", "false"]);
   });
 
+  it("trocar o PDF tira o que veio da leitura anterior e mantém o que a pessoa digitou", async () => {
+    abrir({ lido: true, fonte: "texto", avisos: [], campos: { numero_orgao: "7", data: "2026-08-10", valor_centavos: 1200001 } });
+    await waitFor(() => expect(campo(/Nº no órgão/).value).toBe("7"));
+    fireEvent.change(campo(/Nº no órgão/), { target: { value: "SMO 7/2026" } });
+    apiForm.mockImplementation(async () => ({ lido: false, fonte: null, avisos: [], campos: {} }));
+    fireEvent.drop(screen.getByTestId("soltar-boletim"), { dataTransfer: { files: [PDF] } });
+    await waitFor(() => expect(campo(/Valor aprovado/).value).toBe(""));
+    expect([campo(/Nº no órgão/).value, campo(/Data do boletim/).value]).toEqual(["SMO 7/2026", ""]);
+  });
+
   it("a capa não aprovada mostra o aviso do servidor e não preenche nada", async () => {
     abrir({ lido: false, fonte: "texto", campos: {},
       avisos: ["A capa não está aprovada (situação: EM ANÁLISE); digite os valores do boletim"] });

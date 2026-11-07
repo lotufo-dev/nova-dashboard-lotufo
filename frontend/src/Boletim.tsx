@@ -49,8 +49,11 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
   async function escolher(f: File | null) {
     if (!f) return;
     const n = ++leitura.current;
+    // o que veio da leitura do PDF anterior sai; o que a pessoa digitou fica (code-review)
+    if (lidos.has("numero")) setNumero("");
+    if (lidos.has("data")) setData("");
+    if (lidos.has("valor")) setValor("");
     setArquivo(f); setErroLeitura(""); setAvisos([]); setLidos(new Set());
-    setNumero(""); setData(""); setValor("");
     setLendo(true);
     const fd = new FormData();
     fd.append("arquivo", f);

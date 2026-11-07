@@ -478,9 +478,16 @@ def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
     valor propostos para a pessoa conferir. Nao grava nada: o boletim so' se registra no "Registrar boletim".
     Na execucao o valor e' o dos precos iniciais (o da NF da medicao); no reajuste, o do reajustamento."""
     from app import leitura_smo
-    m = conn.execute("SELECT tipo FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    m = conn.execute("SELECT numero, numero_orgao, tipo, estado FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
     if m is None:
         raise HTTPException(404, "Medição não encontrada")
+    # code-review: a medicao que nao recebe boletim nao gasta leitura (nem OCR) no servidor; as mesmas recusas do
+    # registro (`conferir_boletim`)
+    if m["estado"] in ("cancelada", "desistida"):
+        raise HTTPException(422, f"{medicoes.nome_medicao(m['numero'], m['tipo'])} está "
+                                 f"{medicoes.rotulo_estado(m['estado'])}: não recebe boletim")
+    if m["estado"] == "planilha_gerada":
+        raise HTTPException(422, "Registre o envio da planilha/carta antes do boletim do órgão")
     pdf = _pdf_validado(arquivo, TETO_PLANILHA)
     r = leitura_smo.ler_pdf(pdf)
     avisos = list(r["avisos"])
@@ -492,11 +499,17 @@ def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
     campos = {}
     if "numero" in c:
         campos["numero_orgao"] = str(c["numero"])
+        # code-review: o PDF de outra medicao nao passa calado (o nº do orgao manda onde difere do da Lotufo, D6)
+        esperado = m["numero_orgao"] or m["numero"]
+        if c["numero"] != esperado:
+            avisos.insert(0, f"A capa é da {c['numero']}ª medição e esta é a {esperado}ª: confira se o PDF é o certo")
     if "data_realizacao" in c:
         campos["data"] = c["data_realizacao"]
     valor = c.get("reajuste_centavos" if m["tipo"] == "reajuste" else "valor_centavos")
     if valor is not None:
         campos["valor_centavos"] = valor
+    if not campos and not avisos:
+        avisos.append("Não foi possível ler a capa do boletim neste PDF; digite os valores")
     return {"lido": bool(campos), "fonte": r["fonte"] if campos else None, "campos": campos, "avisos": avisos}
 
 
