@@ -1548,3 +1548,65 @@ def test_falha_depois_de_leitura_valida_nao_a_desfaz(client_admin):
     assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
     g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
     assert g["situacao"] == "lida" and len(g["grupos"]) == 3
+
+
+def test_grupos_sai_de_um_retrato_so(client_admin, monkeypatch):
+    """Issue #501: a revisao V2 gravada no meio da consulta nao mistura a situacao de V2 com os grupos de V1. A
+    resposta sai inteira de um retrato: o de antes da V2 (a lida de V1) ou o de depois (sem leitura, sem grupos)."""
+    from app import db, medicao_grupos
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.693,10").json()["medicao_id"]
+    antes = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert antes["situacao"] == "lida" and len(antes["grupos"]) == 3
+    sem_leitura = {"situacao": "sem_leitura", "aviso": None, "leitura": None, "grupos": []}
+
+    original = medicao_grupos._filtro_vigente
+    gravou = []
+
+    def filtro_e_revisao_no_meio(conn, medicao_id):
+        filtro = original(conn, medicao_id)
+        if not gravou:                      # outra requisicao grava a revisao V2 (PDF, sem leitura) logo depois
+            outra = db.get_conn()
+            try:
+                outra.execute(
+                    "INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, "
+                    "acumulado_anterior_centavos, origem, motivo) VALUES (?, 2, 2069310, 0, 'manual', 'Rev01')",
+                    (medicao_id,))
+                outra.commit()
+            finally:
+                outra.close()
+            gravou.append(True)
+        return filtro
+
+    monkeypatch.setattr(medicao_grupos, "_filtro_vigente", filtro_e_revisao_no_meio)
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert gravou
+    assert g == antes                       # o retrato e' o da primeira consulta: a V2 entrou depois dele
+    assert client_admin.get(f"/api/medicoes/{mid}/grupos").json() == sem_leitura     # a seguinte ja' ve a V2
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"] == {"situacao": "sem_leitura",
+                                                                                   "aviso": None}
+
+
+def test_retrato_de_leitura_nao_deixa_transacao_aberta():
+    """Issue #501: `db.leitura` fecha a transacao que abriu (a mutacao seguinte na mesma conexao entra) e, dentro de
+    uma transacao ja' aberta, nao abre nem fecha outra."""
+    import sqlite3
+
+    from app import db
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE t (x INTEGER)")
+    conn.commit()
+    with db.leitura(conn):
+        assert conn.in_transaction
+        conn.execute("SELECT * FROM t").fetchall()
+    assert not conn.in_transaction
+    with db.mutacao(conn):
+        conn.execute("INSERT INTO t VALUES (1)")
+        with db.leitura(conn):
+            assert conn.execute("SELECT count(*) FROM t").fetchone()[0] == 1
+        assert conn.in_transaction
+    assert conn.execute("SELECT count(*) FROM t").fetchone()[0] == 1
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        with db.leitura(conn):
+            conn.execute("SELECT * FROM nao_existe")
+    assert not conn.in_transaction
