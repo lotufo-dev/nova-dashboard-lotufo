@@ -186,3 +186,74 @@ def test_indice_do_zip_grande_demais_recusa_antes_de_abrir():
     dados[fim + 12:fim + 16] = (leitura.MAX_BYTES_INDICE + 1).to_bytes(4, "little")
     with pytest.raises(leitura.PlanilhaRecusada, match="grande demais"):
         leitura.ler(bytes(dados))
+
+
+def _planilha_cabecalho(linhas_cab: list[list], dados: list[list]) -> bytes:
+    """Planilha com o cabecalho dado linha a linha (None = celula vazia, como embaixo de uma mesclada)."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Resumo"
+    r = 5
+    for linha in linhas_cab + dados:
+        for c, v in enumerate(linha, 1):
+            if v is not None:
+                ws.cell(r, c, v)
+        r += 1
+    ws.cell(r, 1, "TOTAL GERAL")
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# item, codigo, descricao, unidade, qtd contratada, qtd nesta, qtd acumulada, preco, valor nesta, valor acumulado
+DADOS_2_LINHAS = [["1", None, "DRENAGEM", None, None, None, None, None, None, None],
+                  ["1.1", "2003", "Bueiro", "m", 50, 10, 20, 850.51, 8505.1, 17010.2],
+                  ["1.2", "2004", "Sarjeta", "m", 20, 3, 3, 45.11, 135.33, 135.33]]
+
+
+def test_cabecalho_em_duas_linhas_com_pais_mesclados():
+    """Sol S4: QUANTIDADES e VALORES (R$) mesclados em cima, as sub-colunas embaixo."""
+    cab = [["ITEM", "CÓDIGO", "DISCRIMINAÇÃO", "UNID.", "QUANTIDADES", None, None, "PREÇO UNITÁRIO R$",
+            "VALORES (R$)", None],
+           [None, None, None, None, "CONTRATADA", "NESTA MEDIÇÃO", "ACUMULADA", None, "NESTA MEDIÇÃO", "ACUMULADO"]]
+    lido = leitura.ler(_planilha_cabecalho(cab, DADOS_2_LINHAS))
+    assert lido["total_centavos"] == 8505_10 + 135_33            # centavo impar
+    it = lido["grupos"][0]["itens"][0]
+    assert (it["quantidade_contratada"], it["quantidade_medida"], it["quantidade_acumulada"]) == ("50", "10", "20")
+    assert (it["preco_unitario_centavos"], it["valor_acumulado_centavos"]) == (850_51, 17010_20)
+
+
+def test_cabecalho_em_duas_linhas_com_quant_e_rs_embaixo():
+    """Sol S4: NESTA MEDIÇÃO e ACUMULADO em cima, QUANT. e R$ embaixo de cada um."""
+    cab = [["ITEM", "CÓDIGO", "DISCRIMINAÇÃO", "UNID.", "CONTRATO", "NESTA MEDIÇÃO", None, "PREÇO UNITÁRIO R$",
+            "ACUMULADO", None],
+           [None, None, None, None, "QUANT.", "QUANT.", "R$", None, "QUANT.", "R$"]]
+    dados = [[r[0], r[1], r[2], r[3], r[4], r[5], r[8], r[7], r[6], r[9]] for r in DADOS_2_LINHAS]
+    lido = leitura.ler(_planilha_cabecalho(cab, dados))
+    assert lido["total_centavos"] == 8505_10 + 135_33
+    it = lido["grupos"][0]["itens"][1]
+    assert (it["quantidade_contratada"], it["quantidade_medida"], it["quantidade_acumulada"]) == ("20", "3", "3")
+    assert it["valor_medido_centavos"] == 135_33
+
+
+def test_cabecalho_em_duas_linhas_ainda_incompleto_recusa_dizendo_o_que_falta():
+    cab = [["ITEM", "CÓDIGO", "DISCRIMINAÇÃO", "UNID.", "QUANTIDADES", None, None, "PREÇO UNITÁRIO R$"],
+           [None, None, None, None, "CONTRATADA", "NESTA MEDIÇÃO", "ACUMULADA", None]]
+    with pytest.raises(leitura.PlanilhaRecusada, match="NESTA MEDIÇÃO R\\$"):
+        leitura.ler(_planilha_cabecalho(cab, DADOS_2_LINHAS))
+
+
+def test_subtotal_errado_da_planilha_nao_conta():
+    """Revisor R2: na planilha real a diferenca para o TOTAL GERAL vem de SUBTOTAIS com intervalo errado (um item
+    fora da soma, outro bloco somado duas vezes); a leitura soma os itens e ignora o SUBTOTAL da propria planilha."""
+    linhas = [("1", None, "CONTENÇÃO", GRUPO), ("1.1", "1", "Armação", "kg", 1, 1, 1, 81.89, 81.89, 81.89),
+              ("1.2", "2", "Concreto", "m³", 1, 1, 1, 10.0, 10.0, 10.0), "SUBTOTAL",
+              ("2", None, "GABIÃO", GRUPO), ("2.1", "3", "Gabião", "m³", 1, 1, 1, 5.0, 5.0, 5.0), "SUBTOTAL"]
+    lido = leitura.ler(planilha(linhas))
+    assert [(g["nome"], g["valor_medido_centavos"]) for g in lido["grupos"]] == [("CONTENÇÃO", 91_89), ("GABIÃO", 5_00)]
+
+
+def test_arquivo_acima_do_teto_recusa_antes_de_abrir(monkeypatch):
+    monkeypatch.setattr(leitura, "MAX_BYTES_ARQUIVO", 100)
+    with pytest.raises(leitura.PlanilhaRecusada, match="grande demais"):
+        leitura.ler(planilha())
