@@ -351,12 +351,25 @@ describe("Espelho: o passo Espelhos (#514)", () => {
     expect(within(linhas[5]).getByText("igual ao aprovado")).toBeTruthy();
   });
 
-  it("total diferente do aprovado diz o valor de referência; sem aprovado confere com o pedido", async () => {
+  it("total diferente diz o valor de referência; no misto (execução aprovada, reajuste pedido) a referência diz as duas", async () => {
     api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
       referencias={{ 1: { valor: 63452957, fonte: "aprovado" }, 2: { valor: 3865583, fonte: "pedido" } }} />);
-    expect(await screen.findByText("diferente do pedido (R$ 673.185,40)")).toBeTruthy();
-    expect(screen.queryByText(/igual ao/)).toBeNull();
+    expect(await screen.findByText("diferente da referência (aprovado + pedido) (R$ 673.185,40)")).toBeTruthy();
+    expect(screen.queryByText(/igual/)).toBeNull();
+  });
+
+  it("os três casos da referência: tudo pedido, misto e tudo aprovado (gate Sol, PR #555)", async () => {
+    api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });
+    const ver = async (r1: "aprovado" | "pedido", r2: "aprovado" | "pedido", texto: string) => {
+      const { unmount } = render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
+        referencias={{ 1: { valor: 63452958, fonte: r1 }, 2: { valor: 3865583, fonte: r2 } }} />);
+      expect(await screen.findByText(texto)).toBeTruthy();
+      unmount();
+    };
+    await ver("pedido", "pedido", "igual ao pedido");
+    await ver("aprovado", "pedido", "igual à referência (aprovado + pedido)");
+    await ver("aprovado", "aprovado", "igual ao aprovado");
   });
 
   it("sem referência de uma das medições, o total aparece sem conferência", async () => {

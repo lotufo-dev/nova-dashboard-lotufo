@@ -327,7 +327,10 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     const refs = esp.medicoes.map(x => referencias?.[x.id] ?? null);
     const conferivel = refs.length > 0 && refs.every((r): r is Referencia => r !== null);
     const referencia = conferivel ? refs.reduce((t, r) => t + (r?.valor ?? 0), 0) : null;
-    const fonte = conferivel && refs.every(r => r?.fonte === "aprovado") ? "aprovado" : "pedido";
+    // tres casos (gate Sol, PR #555): tudo aprovado, tudo pedido, ou o misto (execucao aprovada + reajuste pedido)
+    const fontes = new Set(refs.map(r => r?.fonte));
+    const fonte = fontes.size > 1 ? "à referência (aprovado + pedido)" : fontes.has("aprovado") ? "ao aprovado" : "ao pedido";
+    const fonteDif = fontes.size > 1 ? "da referência (aprovado + pedido)" : fontes.has("aprovado") ? "do aprovado" : "do pedido";
     const variasNaturezas = new Set(esp.saidas.map(x => x.natureza)).size > 1;
     return (
       <Rolagem rotulo="Espelhos">
@@ -357,8 +360,8 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
               <th scope="row" colSpan={2}>Total</th>
               <td className="col-num dinheiro num">{brl(total)}</td>
               <td>{referencia === null ? null : referencia === doEspelho
-                ? <span className="espelho__confere espelho__confere--ok">igual ao {fonte}</span>
-                : <span className="espelho__confere espelho__confere--diverge"><IconeAlerta className="icone icone--p" />diferente do {fonte} ({brl(referencia)})</span>}</td>
+                ? <span className="espelho__confere espelho__confere--ok">igual {fonte}</span>
+                : <span className="espelho__confere espelho__confere--diverge"><IconeAlerta className="icone icone--p" />diferente {fonteDif} ({brl(referencia)})</span>}</td>
             </tr>
           </tfoot>
         </table>
