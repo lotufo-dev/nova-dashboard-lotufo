@@ -150,11 +150,17 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
            conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)
     lista = medicoes.listar(conn, contrato_id)
-    edicoes = medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
+    # issue #508: a barra de passos da pagina da obra so' tem "Planilha e carta" e "Análise do órgão" onde a
+    # planilha/carta vai ao orgao (nunca na MT-PAR, planilha_envio.FAMILIAS_SEM_ENVIO)
+    familia = conn.execute("SELECT o.familia FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
+                           (contrato_id,)).fetchone()["familia"]
+    com_envio = familia not in planilha_envio.FAMILIAS_SEM_ENVIO
+    edicoes =medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
     sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
     # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
     return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
-             "boletins": medicoes.boletins(conn, m["id"]), "dias_uteis_no_orgao": _dias_uteis_no_orgao(m)} for m in lista]
+             "boletins": medicoes.boletins(conn, m["id"]), "dias_uteis_no_orgao": _dias_uteis_no_orgao(m),
+             "com_envio_planilha": com_envio} for m in lista]
 
 
 @router.post("/api/contratos/{contrato_id}/medicoes", status_code=201)

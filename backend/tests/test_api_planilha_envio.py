@@ -543,3 +543,13 @@ def test_excecao_do_contrato_substitui_as_pecas_no_oficio_do_orgao(api):
     # sem a chave no contrato, vale o orgao de novo
     _reaplicar(pecas=PECAS_NO_OFICIO)
     assert _no_oficio(cl, mid) == {"boletim": True, "fotos": False}
+
+
+def test_pagina_da_obra_sabe_se_a_obra_tem_os_passos_da_planilha(api):
+    """Issue #508: a pagina da obra em medicao so' mostra "Planilha e carta" e "Análise do órgão" onde a planilha/carta
+    vai ao orgao; na MT-PAR (o oficio vai com a nota) a barra comeca em Espelhos."""
+    cl, cid_sinfra, cid_mtpar = api
+    _planilha(cl, cid_sinfra)
+    _planilha(cl, cid_mtpar)
+    assert [m["com_envio_planilha"] for m in cl.get(f"/api/contratos/{cid_sinfra}/medicoes").json()] == [True]
+    assert [m["com_envio_planilha"] for m in cl.get(f"/api/contratos/{cid_mtpar}/medicoes").json()] == [False]
