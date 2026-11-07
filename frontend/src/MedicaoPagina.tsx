@@ -276,9 +276,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const preso = (envios.envios ?? []).filter(e => e.protocolo_id !== null && !!e.envio_reservado_em);
   // #290: o boletim do orgao (spec §2.1 passo 3) vem depois do envio da planilha/carta; na planilha enviada ele mora
   // no passo 2 ("Aprovou a medição", #508), nos outros estados (prevista do fluxo antigo, glosa depois do espelho, a
-  // MT-PAR sem o passo 2) em Mais acoes. A assinatura do DocuSign e' a do boletim: so' aparece depois dele.
+  // MT-PAR sem o passo 2) em Mais acoes. Com revisao registrada e nao enviada a vez volta ao passo 1 e o passo 2 nao
+  // abre: o boletim (o orgao pode aprovar a versao que recebeu) volta a Mais acoes (revisor, PR #553). A assinatura
+  // do DocuSign e' a do boletim: so' aparece depois dele.
   const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
-  const boletimNaEtapa = podeEditar && m.estado === "planilha_enviada" && temPassosPlanilha;
+  const boletimNaEtapa = podeEditar && m.estado === "planilha_enviada" && temPassosPlanilha && atual === 2;
   const podeBoletim = podeEditar && !EXCECOES.includes(m.estado) && m.estado !== "planilha_gerada";
   const acoes: ItemAcao[] = !podeEditar ? [] : [
     ...(valorEditavel(m, "atestado", podeEditar) ? [{ id: "atestado", rotulo: m.valor_atestado_centavos === null ? "Definir o atestado" : "Editar o atestado" }] : []),

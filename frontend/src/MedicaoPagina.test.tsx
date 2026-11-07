@@ -651,6 +651,19 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     expect(barra.querySelector("[aria-current='step']")!.textContent).toContain("Planilha e carta");
     expect(container.querySelector("[data-espelho]")).toBeNull();
     expect(screen.queryByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeNull();
+    // o orgao pode aprovar a versao que recebeu: sem o passo 2 aberto, o boletim volta a Mais acoes (revisor, PR #553)
+    fireEvent.click(screen.getByRole("button", { name: /Mais ações/ }));
+    expect(screen.getByRole("menuitem", { name: "Registrar boletim" })).toBeTruthy();
+  });
+
+  it("no passo 2 (sem revisão pendente) o boletim mora em “Aprovou a medição”, não em Mais ações", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("planilha_enviada"),
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada") });
+    pagina();
+    await screen.findByRole("button", { name: "Gerar o espelho sem o boletim" });
+    expect(screen.getByRole("button", { name: "Aprovou a medição" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Mais ações/ }));
+    expect(screen.queryByRole("menuitem", { name: "Registrar boletim" })).toBeNull();
   });
 
   it("planilha/carta enviada: o espelho não aparece antes de a página conferir a revisão (issue #384)", async () => {
