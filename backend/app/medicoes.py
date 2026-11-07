@@ -660,7 +660,10 @@ def conferir_espelho_da_planilha(conn, ja: dict, numero: int, tipo: str, compete
     so' GERADA, nunca enviada, tambem recebe, em toda obra, pelo "seguir sem boletim" com justificativa (a operacao
     ainda envia ao orgao por fora). O VALOR nao e' conferido aqui: desde a #284 o espelho usa o aprovado do boletim,
     senao o pedido (espelhos._calcular, valor travado). `ja` traz id, estado, competencia e planilha_enviada_em."""
-    if ja["estado"] != "planilha_gerada" and not ja.get("planilha_enviada_em"):
+    # a que veio da planilha/carta so' gerada (#460) nao tem `planilha_enviada_em`: a versao registrada a mantem presa
+    # a' competencia dela tambem na versao nova do espelho (revisor da PR #528)
+    if (ja["estado"] != "planilha_gerada" and not ja.get("planilha_enviada_em")
+            and conn.execute("SELECT 1 FROM medicao_planilhas WHERE medicao_id=? LIMIT 1", (ja["id"],)).fetchone() is None):
         return
     # uma versao saindo pelo sistema (reserva ativa) segura o espelho: o e-mail ainda vai registrar o envio dela
     if conn.execute("SELECT 1 FROM medicao_planilha_envios WHERE medicao_id=? AND envio_id IS NULL "

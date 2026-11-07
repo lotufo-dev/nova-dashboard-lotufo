@@ -926,7 +926,20 @@ def test_planilha_gerada_so_ganha_espelho_na_competencia_dela(ambiente):
     assert medicoes.detalhe(conn, mid)["estado"] == "planilha_gerada"
 
 
-# --- issue #359: a versao nova do espelho enviado volta a medicao a `espelho_gerado` ---------------------------
+def test_gerada_com_espelho_nao_regera_em_outra_competencia(ambiente):
+    # revisor da PR #528: a medicao que veio da planilha/carta gerada nao tem `planilha_enviada_em`; a versao nova do
+    # espelho continua presa a' competencia da planilha/carta
+    conn, u, cid = ambiente
+    mid = _planilha_gerada(conn, cid)
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67}, justificativa_sem_boletim=JUSTIFICATIVA)
+    with pytest.raises(ValueError, match="competência 01/2026"):
+        espelhos.gerar(conn, u, cid, 23, "2026-02", {"medicao": 12_345_67}, motivo="corrigido")
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["competencia"]) == ("espelho_gerado", "2026-01")
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67}, motivo="corrigido")    # a mesma, sim
+
+
+# --- issue #359: a versao nova do espelho enviado volta a medicao a `espelho_gerado`---------------------------
 
 def test_boletim_novo_depois_do_envio_e_v2_voltam_a_espelho_gerado_ate_o_novo_envio(ambiente, tmp_path, monkeypatch):
     monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
