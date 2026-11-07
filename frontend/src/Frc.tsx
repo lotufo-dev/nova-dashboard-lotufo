@@ -98,10 +98,36 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
   }
 
   const numeroOk = /^\d{1,5}$/.test(numero) && Number(numero) > 0;
+  // #514: o cartao "Fatura do consórcio" do passo Notas: a FRC (numero e valor), o que falta para ela (as notas das
+  // consorciadas, gerada, assinada) e, embaixo, as notas esperadas, a area de soltar e o bloco de gerar
+  const anexadas = itens.filter(i => i.situacao === "anexada" && !i.problema).length;
+  const empresas = new Set(itens.map(i => i.empresa)).size;
+  const marcos: { rotulo: string; ok: boolean; conta?: string }[] = [
+    ...(itens.length > 0 ? [{ rotulo: empresas === 1 ? "Notas da consorciada" : `Notas das ${empresas} consorciadas`,
+      ok: anexadas === itens.length, conta: `${anexadas} de ${itens.length}` }] : []),
+    { rotulo: "Fatura gerada", ok: !!s.frc && !s.frc.desatualizada },
+    { rotulo: "Fatura assinada", ok: !!s.assinada },
+  ];
   return (
-    <div className="notas-v3 frc">
+    <section className="cartao med-painel notas-v3 frc" aria-labelledby={`frc-titulo-${medicaoId}`}>
+      <h3 className="med-painel__titulo" id={`frc-titulo-${medicaoId}`}>Fatura do consórcio <span className="med-contagem">só em consórcio</span></h3>
+      {s.frc && (
+        <div className="frc__resumo">
+          <p className="frc__numero">FRC nº {s.frc.numero}</p>
+          <p className="frc__valor num">{brl(s.frc.bruto_centavos)}</p>
+        </div>
+      )}
+      <ul className="frc__marcos" aria-label="Situação da fatura">
+        {marcos.map(x => (
+          <li key={x.rotulo} className={x.ok ? "frc__marco--ok" : undefined}>
+            <span className="frc__marca" aria-hidden="true">{x.ok ? <IconeCheck /> : null}</span>
+            <span className="frc__marco-nome">{x.rotulo}<span className="sr-only">{x.ok ? ": feito" : ": falta"}</span></span>
+            {x.conta && <span className="num">{x.conta}</span>}
+          </li>
+        ))}
+      </ul>
       <div className="frc__cabeca">
-        <h3 className="frc__titulo">Notas das consorciadas</h3>
+        <h4 className="frc__titulo">Notas das consorciadas</h4>
         <span className="campo__nota">{s.consorcio}</span>
       </div>
       {itens.length > 0 && (
@@ -167,7 +193,7 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
 
       <div className="frc__bloco">
         <div className="frc__cabeca">
-          <h3 className="frc__titulo">FRC</h3>
+          <h4 className="frc__titulo">FRC</h4>
           {s.assinada && <Selo classe="selo--ok">Assinada</Selo>}
           {s.frc && (
             <span className="campo__nota">
@@ -201,6 +227,6 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
       </div>
       <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
-    </div>
+    </section>
   );
 }

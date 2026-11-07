@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiErro } from "./api";
 import Espelho from "./Espelho";
@@ -326,5 +326,61 @@ describe("Espelho", () => {
       expect(linha).toContain(rotulo);
       if (sem) expect(linha).not.toContain("do boletim");
     }
+  });
+});
+
+// #514: passo Espelhos da pagina da obra
+describe("Espelho: o passo Espelhos (#514)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
+  // total das saidas: 52.843.623 + 10.609.335 + 3.219.258 + 646.325 = 67.318.541 (centavo impar)
+  const comDuas = { ...ESPELHO, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_gerado" }, { id: 2, tipo: "reajuste", estado: "espelho_gerado" }] };
+
+  it("uma linha por nota (empresa, município, valor, espelho) e o total igual ao aprovado das medições do espelho", async () => {
+    api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
+      referencias={{ 1: { valor: 63452958, fonte: "aprovado" }, 2: { valor: 3865583, fonte: "aprovado" } }} />);
+    const tabela = await screen.findByRole("table", { name: "Espelhos da medição 10" });
+    const linhas = within(tabela).getAllByRole("row");
+    expect(linhas).toHaveLength(6);                        // cabecalho, 4 notas, total
+    expect(within(linhas[1]).getByText("Medição · Lotufo")).toBeTruthy();
+    expect(within(linhas[1]).getByText("Cáceres")).toBeTruthy();
+    // so' a saida com arquivo tem o "gerado", que baixa o espelho dela
+    expect(within(linhas[1]).getByRole("link", { name: /Baixar o espelho/ }).getAttribute("href")).toBe("/api/espelhos/7/arquivos/3");
+    expect(within(linhas[2]).queryByRole("link")).toBeNull();
+    expect(within(linhas[5]).getByText("R$ 673.185,41")).toBeTruthy();
+    expect(within(linhas[5]).getByText("igual ao aprovado")).toBeTruthy();
+  });
+
+  it("total diferente do aprovado diz o valor de referência; sem aprovado confere com o pedido", async () => {
+    api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
+      referencias={{ 1: { valor: 63452957, fonte: "aprovado" }, 2: { valor: 3865583, fonte: "pedido" } }} />);
+    expect(await screen.findByText("diferente do pedido (R$ 673.185,40)")).toBeTruthy();
+    expect(screen.queryByText(/igual ao/)).toBeNull();
+  });
+
+  it("sem referência de uma das medições, o total aparece sem conferência", async () => {
+    api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
+      referencias={{ 1: { valor: 63452958, fonte: "aprovado" } }} />);
+    await screen.findByRole("table", { name: "Espelhos da medição 10" });
+    expect(screen.queryByText(/igual ao|diferente do/)).toBeNull();
+  });
+
+  it("a parte do faturamento diz se o espelho já foi enviado", async () => {
+    api.mockResolvedValue({ regra: REGRA, espelhos: [ESPELHO] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="faturamento" />);
+    expect(await screen.findByText("Não enviado ao faturamento")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Enviar ao faturamento" })).toBeTruthy();
+  });
+
+  it("consórcio que emite só a cota: as notas somam a cota e o espelho confere pelo valor cheio da medição (code-review)", async () => {
+    const cota = { ...ESPELHO, entradas: { medicao: 1000001 }, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_gerado" }],
+      saidas: [saida("cuiaba-medicao", "medicao", "Cuiabá", 180000)] };
+    api.mockResolvedValue({ regra: REGRA, espelhos: [cota] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
+      referencias={{ 1: { valor: 1000001, fonte: "aprovado" } }} />);
+    expect(await screen.findByText("igual ao aprovado")).toBeTruthy();
+    expect(screen.getByText("R$ 1.800,00", { selector: "tfoot td" })).toBeTruthy();
   });
 });

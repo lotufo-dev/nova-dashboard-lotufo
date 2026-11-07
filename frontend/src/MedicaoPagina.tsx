@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import { baseDosValores } from "./formato";
 import { api, mensagemDeErro } from "./api";
-import Espelho from "./Espelho";
+import Espelho, { type Referencia } from "./Espelho";
 import { CartaoPlanilha, type DetalhePlanilha, NovaPlanilhaCarta, revisaoPendente, type TipoPlanilha } from "./PlanilhaCarta";
 import { EtapaEnvio, useEnvios } from "./EtapaEnvio";
 import { diaMes, FaixaPasso, PassoCartao, passoDe as passoDoEstado, passoInicial, Passos, passosDa, situacaoDoPasso } from "./Passos";
 import PassoAnalise from "./PassoAnalise";
+import PassoPagamento from "./PassoPagamento";
 import { FrcConsorcio } from "./Frc";
 import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
@@ -291,8 +292,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const geradaLivre = reservaDe?.chave === chaveRevisao && !reservaDe.reservado && revisao !== "falhou";
   // so' as medicoes com cartao esperam a conferencia dele; as outras (reajuste) seguem direto pelo espelho
   const espelhoEspera = comPlanilha && ((enviada && revisao !== "livre") || (gerada && !geradaLivre));
+  // #514: o total do espelho se confere com o aprovado (o boletim) de cada medicao dele; sem aprovado, com o pedido
+  const referencias: Record<number, Referencia | null> = Object.fromEntries(medicoes.map(x => [x.id,
+    x.valor_atestado_centavos !== null ? { valor: x.valor_atestado_centavos, fonte: "aprovado" as const }
+      : x.valor_protocolado_centavos !== null ? { valor: x.valor_protocolado_centavos, fonte: "pedido" as const } : null]));
   const formEspelho = (
-    <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
+    <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho" referencias={referencias}
       abrirForm={podeEditar && ["prevista", "planilha_gerada", "planilha_enviada", "boletim_recebido"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
   );
   const blocoPlanilha = (
@@ -338,22 +343,50 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   );
   // passo 3: o espelho e o envio dele ao faturamento (as etapas 1 e 2 do trilho antigo, numa so')
   const antesDoEspelho = ["prevista", ...DA_PLANILHA].includes(m.estado);
+  // #514: a tabela dos espelhos com o total conferido a' esquerda; "Enviar ao faturamento" a' direita
   const corpoPasso3 = (
-    <div className="med-etapa__corpo">
+    <section className="med-passo" id="passo-3" aria-labelledby="passo-3-titulo">
+      <h2 className="sr-only" id="passo-3-titulo">Espelhos</h2>
       {!temPassosPlanilha && blocoPlanilha}
       {/* depois do boletim o cartao mora no passo 1: a falha da conferencia avisa aqui, onde o espelho esperaria */}
       {temPassosPlanilha && comPlanilha && enviada && revisao === "falhou" && (
         <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
           <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
       )}
-      {!novaPlanilha && !espelhoEspera && formEspelho}
-      {!antesDoEspelho && (
-        <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="faturamento" />
+      {!novaPlanilha && !espelhoEspera && (
+        <div className={antesDoEspelho ? undefined : "med-duas"}>
+          <section className="cartao med-painel" aria-labelledby="espelhos-titulo">
+            <h3 className="med-painel__titulo" id="espelhos-titulo">Espelhos
+              {/* a data do espelho vigente (a versao mais nova desta medicao) */}
+              {(espVigente || m.espelho_em) && <Selo classe="selo--ok">Gerado em {fmtDataHora(espVigente?.criado_em ?? m.espelho_em!)}</Selo>}</h3>
+            {formEspelho}
+          </section>
+          {!antesDoEspelho && (
+            <section className="cartao med-painel" aria-labelledby="faturamento-titulo">
+              <h3 className="med-painel__titulo" id="faturamento-titulo">Enviar ao faturamento</h3>
+              <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="faturamento" />
+            </section>
+          )}
+        </div>
       )}
+    </section>
+  );
+  // #514: a nota de cada espelho a' esquerda (soltar os PDFs) e, em consorcio, a "Fatura do consórcio" a' direita
+  const notasDe = (mx: Medicao, rotulo?: string) => (
+    <div className="med-duas">
+      <section className="cartao med-painel" aria-label={rotulo ? `Notas fiscais: ${rotulo}` : "Notas fiscais"}>
+        <h3 className="med-painel__titulo">Notas fiscais</h3>
+        <Notas medicao={mx} rotulo={rotulo} podeEditar={podeEditar && !FINAIS.includes(mx.estado)}
+          podeDesfazer={usuario.perfil === "admin" && !FINAIS.includes(mx.estado)}
+          aoMudar={() => { recarregar(); setVersaoFrc(v => v + 1); }} />
+      </section>
+      <FrcConsorcio medicaoId={mx.id} podeEditar={podeEditar && !FINAIS.includes(mx.estado)} versao={versaoFrc}
+        aoMudar={() => { recarregar(); setVersaoNotas(v => v + 1); }} />
     </div>
   );
   const corpoPasso4 = (
-    <div className="med-etapa__corpo">
+    <section className="med-passo" id="passo-4" aria-labelledby="passo-4-titulo">
+      <h2 className="sr-only" id="passo-4-titulo">Notas</h2>
       <div id="notas">
         {/* issue #188: a execucao e o reajuste da mesma competencia, um bloco para cada; a nota anexada num bloco vai
             para a medicao daquele bloco, e a FRC e' da medicao do bloco */}
@@ -363,29 +396,21 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
               const mx = medicaoDa(x.medicao_id);
               return mx ? (
                 <section key={`${x.medicao_id}-${versaoNotas}`} className="notas-bloco" aria-label={rotuloDoBloco(mx)}>
-                  <Notas medicao={mx} rotulo={rotuloDoBloco(mx)} podeEditar={podeEditar && !FINAIS.includes(mx.estado)}
-                    podeDesfazer={usuario.perfil === "admin" && !FINAIS.includes(mx.estado)}
-                    aoMudar={() => { recarregar(); setVersaoFrc(v => v + 1); }} />
-                  <FrcConsorcio medicaoId={mx.id} podeEditar={podeEditar && !FINAIS.includes(mx.estado)} versao={versaoFrc}
-                    aoMudar={() => { recarregar(); setVersaoNotas(v => v + 1); }} />
+                  {notasDe(mx, rotuloDoBloco(mx))}
                 </section>
               ) : null;
             })}
           </div>
         ) : (
-          <>
-            <Notas key={versaoNotas} medicao={m} podeEditar={podeEditar && !FINAIS.includes(m.estado)}
-              podeDesfazer={usuario.perfil === "admin" && !FINAIS.includes(m.estado)}
-              aoMudar={() => { recarregar(); setVersaoFrc(v => v + 1); }} />
-            <FrcConsorcio medicaoId={m.id} podeEditar={podeEditar && !FINAIS.includes(m.estado)} versao={versaoFrc}
-              aoMudar={() => { recarregar(); setVersaoNotas(v => v + 1); }} />
-          </>
+          <div key={versaoNotas}>{notasDe(m)}</div>
         )}
       </div>
-    </div>
+    </section>
   );
   const corpoPasso5 = sit(5) === "feito" ? (
-    <div className="med-etapa__corpo">
+    <section className="med-passo" id="passo-5" aria-labelledby="passo-5-titulo">
+      <h2 className="sr-only" id="passo-5-titulo">Envio da nota</h2>
+      <div className="cartao med-painel">
       {/* o historico dos envios so' depois de enviada: o nº do protocolo no orgao se registra aqui, com o comprovante */}
       <ProtocolosDaMedicao semCartao contratoId={contratoId} medicaoId={m.id} dados={protocolos.dados} erro={protocolos.erro}
         carregar={protocolos.carregar} podeEditar={podeEditar} aoMudar={() => void carregar().catch(() => {})}
@@ -404,33 +429,23 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           <div><button type="button" id="ato-fora" className="btn btn--pequeno" disabled={salvando} onClick={() => abrir("fora")}>Registrar protocolo feito fora</button></div>
         )}
       </ProtocolosDaMedicao>
-    </div>
+      </div>
+    </section>
   ) : (
-    <div className="med-etapa__corpo">
+    <section className="med-passo" id="passo-5" aria-labelledby="passo-5-titulo">
+      <h2 className="sr-only" id="passo-5-titulo">Envio da nota</h2>
       <EtapaEnvio medicaoId={m.id} envios={envios.envios} erro={envios.erro} recarregarEnvios={envios.carregar} podeEditar={podeEditar}
         versaoDocs={versaoNotas + versaoFrc} aoAnexarItem={() => setVersaoFrc(v => v + 1)}
         aoMudar={aviso => { setErro(""); setFeito(aviso ?? ""); recarregar(); }}
         pronta={pronta} aoSemAOutra={() => abrir("sozinha")} />
-    </div>
+    </section>
   );
   const corpoPasso6 = (
-    <div className="med-etapa__corpo">
-      <EtapaPagamento grupo={grupo} junta={!!par?.junta} usuario={usuario}
-        protocolos={protocolos.dados?.protocolos ?? []} aqui={aqui}
-        aoReceber={x => { setAlvoRecebimento(x); abrir("recebimento"); }} />
-    </div>
+    <PassoPagamento grupo={grupo} junta={!!par?.junta} usuario={usuario}
+      protocolos={protocolos.dados?.protocolos ?? []} aqui={aqui} percentualBp={cab?.percentual_lotufo_bp ?? null}
+      aoReceber={x => { setAlvoRecebimento(x); abrir("recebimento"); }} />
   );
 
-  const selo = (nivel: string, texto: string) => (
-    <span className={`selo selo--${nivel}`}><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">{texto}</span></span>
-  );
-  // o selo do passo 3 leva a data do espelho (gerado, depois enviado ao faturamento); o futuro so' tem o selo
-  // "Libera depois do passo N" (o corpo fica vazio)
-  const seloPasso: Record<number, React.ReactNode> = {
-    3: espVigente?.envio ? selo("ok", `Enviado ao faturamento em ${fmtDataHora(espVigente.envio.enviado_em)}`)
-      : espVigente ? selo("ok", `Gerado em ${fmtDataHora(espVigente.criado_em)}`)
-      : m.espelho_em ? selo("ok", `Gerado em ${fmtDataHora(m.espelho_em)}`) : undefined,
-  };
   const corpo = (n: number) => {
     if (n === 5 && sit(5) === "futuro" && pronta) return corpoPasso5;   // a saida de emergencia mora na linha do envio
     if (sit(n) === "futuro") return null;
@@ -446,7 +461,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // o valor grande do cabecalho: o da pagina (medicao + reajuste somados no par), cheio
   const valores = grupo.map(x => x.valor_protocolado_centavos).filter((v): v is number => v !== null);
   const valor = valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
-  const proprio = (aberta === 1 || aberta === 2) && sit(aberta) !== "futuro";
+  // #514: todo passo aberto tem estrutura propria; so' o futuro (sem corpo) fica no cartao "Libera depois do passo N"
+  const proprio = sit(aberta) !== "futuro" || (aberta === 5 && !!pronta);
 
   return (
     <>
@@ -491,7 +507,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           aoIr={n => setVendo(n === atual && atual !== 0 ? null : n)} />
         <FaixaPasso vendo={aberta} atual={atual} passos={passos} aoVoltar={() => setVendo(null)} />
         {proprio ? <div key={aberta}>{corpo(aberta)}</div> : (
-          <PassoCartao key={aberta} n={aberta} atual={atual} passos={passos} selo={seloPasso[aberta]}>
+          <PassoCartao key={aberta} n={aberta} atual={atual} passos={passos}>
             {corpo(aberta)}
           </PassoCartao>
         )}
@@ -610,76 +626,3 @@ function CampoNumeroOrgao({ ms, rotulo, podeEditar, aoMudar }: { ms: Medicao[]; 
     </form>
   );
 }
-
-/** Etapa 5: uma linha por pagamento -- uma so' onde o orgao junta medicao e reajuste, duas onde separa --, com as notas,
- *  o valor, quando foi ao orgao (e o nº do protocolo, que se registra na etapa 4) e o que ja' foi pago. */
-function EtapaPagamento({ grupo, junta, usuario, protocolos, aqui, aoReceber }: {
-  grupo: Medicao[]; junta: boolean; usuario: Usuario;
-  protocolos: { numero_orgao: string | null; situacao: string; medicoes: { id: number }[] }[]; aqui: Rota; aoReceber: (m: Medicao) => void;
-}) {
-  const linhas = junta && grupo.length > 1 ? [grupo] : grupo.map(x => [x]);
-  return (
-    <div className="pilha">
-      <div className="med-caixa">
-        <table className="tabela envios">
-          <thead>
-            <tr><th>Envio</th><th>Nota fiscal</th><th className="col-num">Valor</th><th>Enviado ao órgão</th><th>Pagamento</th></tr>
-          </thead>
-          <tbody>
-            {linhas.map(g => {
-              const rotulo = g.length > 1 ? "Medição + Reajuste" : g[0].tipo === "reajuste" ? "Reajuste" : g[0].tipo === "projeto" ? "Medição de projeto" : "Medição";
-              const notas = g.flatMap(x => x.notas ?? []);
-              const nfsDocs = g.flatMap(x => (x.documentos ?? []).filter(d => d.tipo_doc === "nfs" && d.numero_nf));
-              const valor = g.reduce((s, x) => s + (x.valor_protocolado_centavos ?? 0), 0);
-              const enviada = g.flatMap(x => x.protocolos.map(p => p.data)).sort().at(-1);
-              const numero = g.flatMap(x => [
-                ...protocolos.filter(p => p.situacao === "enviado" && p.medicoes.some(y => y.id === x.id)).map(p => p.numero_orgao),
-                ...x.protocolos.map(p => p.numero_processo)]).find(Boolean) ?? null;
-              const protocolada = g.some(x => ["protocolada", "nf_emitida"].includes(x.estado));
-              const recebida = g.every(x => x.estado === "recebida");
-              const encerrada = g.every(x => ["cancelada", "desistida"].includes(x.estado));
-              const recebidoParcial = notas.some(n => n.recebido_centavos > 0);
-              return (
-                <tr key={g.map(x => x.id).join("-")}>
-                  <td data-rotulo="Envio"><strong>{rotulo}</strong></td>
-                  <td data-rotulo="Nota fiscal">
-                    <div className="envios__nfs">
-                      {notas.length === 0 && nfsDocs.length > 0 && nfsDocs.map(d => <span key={d.id}>NF {d.numero_nf}</span>)}
-                      {notas.length === 0 && nfsDocs.length === 0 ? <span>—</span> : notas.map(n => (
-                        <span key={n.nota_id}>NF {Number(n.numero) || n.numero}</span>
-                      ))}
-                    </div>
-                  </td>
-                  <td data-rotulo="Valor" className="col-num">{brl(valor)}</td>
-                  <td data-rotulo="Enviado ao órgão">
-                    {enviada ? (
-                      <>
-                        <span className="num">{fmtDataPura(enviada)}</span>
-                        <span className="res-nota">
-                          {numero ? `protocolo ${numero}` : <Link className="link" para={aqui} secao="etapa-4">Registrar o protocolo</Link>}
-                        </span>
-                      </>
-                    ) : <span>—</span>}
-                  </td>
-                  <td data-rotulo="Pagamento">
-                    {recebida ? <><Selo classe="selo--ok">Recebido</Selo>{g[0].recebida_em && <span className="res-nota">em {fmtDataPura(g[0].recebida_em)}</span>}</>
-                      : protocolada && !encerrada
-                        ? <Selo classe={recebidoParcial ? "selo--ok" : "selo--atencao"}>{recebidoParcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo>
-                        : <span>—</span>}
-                    {/* issue #53: o recebimento a mao e' so' do admin (o servidor recusa outro perfil) */}
-                    {usuario.perfil === "admin" && g.filter(x => (PROXIMOS[x.estado] ?? []).includes("recebida")).map(x => (
-                      <div key={x.id} className="envios__receber">
-                        <button type="button" className="btn btn--pequeno" title={tituloMedicao(x)} onClick={() => aoReceber(x)}>Registrar recebimento</button>
-                      </div>
-                    ))}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
