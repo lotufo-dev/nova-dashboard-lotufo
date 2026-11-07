@@ -921,14 +921,14 @@ ASSINADO_SEM_O_TERMO = ("O assinado não traz o termo de apostilamento do pacote
 
 def _trechos_do_termo(paginas: list[str]) -> list[str]:
     """Cada citacao do termo de apostilamento no texto do pacote, com o entorno (a competencia antes, o numero e o
-    comeco da frase seguinte depois), no texto plano da conferencia (sem acento, espaco, pontuacao e carimbo)."""
+    comeco da frase seguinte depois), no texto plano da conferencia (sem acento, espaco, pontuacao e carimbo). As
+    paginas vao juntas (cada uma ja' sem o carimbo): o paragrafo quebrado no pe' da pagina continua sendo conferido."""
     out = []
-    for t in paginas:
-        plano = assinatura._plano(t)
-        i = plano.find(_TERMO_NO_TEXTO)
-        while i >= 0:
-            out.append(plano[max(0, i - 60):i + len(_TERMO_NO_TEXTO) + 40])
-            i = plano.find(_TERMO_NO_TEXTO, i + 1)
+    plano = "".join(assinatura._plano(t) for t in paginas)
+    i = plano.find(_TERMO_NO_TEXTO)
+    while i >= 0:
+        out.append(plano[max(0, i - 60):i + len(_TERMO_NO_TEXTO) + 40])
+        i = plano.find(_TERMO_NO_TEXTO, i + 1)
     return out
 
 

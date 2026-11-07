@@ -494,6 +494,26 @@ def test_assinado_com_o_termo_nao_entra_no_pacote_que_ja_nao_o_cita(cenario):
         protocolo.receber_assinado(c, ids["uid"], pid, com_termo)
 
 
+def test_citacao_do_termo_quebrada_entre_paginas_tambem_e_conferida(cenario):
+    # Rodada de correcao da orquestradora (07/11/2026): com lista longa, o fpdf quebra o paragrafo do termo no pe' da
+    # pagina; a citacao dividida entre duas paginas continua conferida (o assinado de outro termo e' recusado)
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    p = protocolo._linha(c, pid)
+    carimbo = "Docusign Envelope ID: 7E965481-0A1B-4C2D-8E9F-0123456789AB\n"
+
+    def pacote(numero, assinar=False):
+        pre = carimbo if assinar else ""
+        return [pre + "Ofício.\nO reajuste da competência 09/2026 está apostilado no Termo de",
+                pre + f"Apostilamento nº {numero}.\nAtenciosamente."]
+
+    montado = pacote("001/2025/03/09")
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo._recusar_termo_fora_do_assinado(c, p, montado, pacote("001/2025/03/02", assinar=True))
+    protocolo._recusar_termo_fora_do_assinado(c, p, montado, pacote("001/2025/03/09", assinar=True))
+
+
 def test_texto_sem_o_campo_do_termo_nao_monta(cenario):
     """Revisor e gate Sol (rodada 2 da PR #435): o texto da carta guarda o marcador {apostilamento}, nunca a frase. O
     que chega sem ele, quando o texto da familia o tem, nao monta: (A) o texto da tela de antes do termo, (B) o texto
