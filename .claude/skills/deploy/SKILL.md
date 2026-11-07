@@ -113,6 +113,9 @@ Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -
      commit anterior e só diz "religada" com health 200 de processo novo; senão imprime "NAO esta' comprovadamente no ar",
      mantém o sentinela e pede `schtasks /End` e `/Run` à mão. Nos dois casos a linha traz quem está na porta (PID e hora de
      criação): conferir `/api/health` à mão e avisar o Leo.
+   - `deploy abortado no reinicio (...); a tarefa ... nao foi comprovadamente parada (...), entao o diretorio pinado NAO foi
+     voltado` ou `deploy abortado antes do checkout (...)` com "NAO esta' comprovadamente no ar" → a parada não se provou (estado
+     da tarefa e porta) e o script não mexeu no pinado nem soltou o watchdog. **Não apagar o sentinela**; avisar o Leo na hora.
    - `sem migracao nova; sem backup pre-migracao` ou `BACKUP PRE-MIGRACAO: <caminho>` → guardar o caminho do
      backup para o registro.
    - `BACKUP PRE-MIGRACAO FALHOU: <motivo>` seguido de `deploy abortado antes do checkout` (sai com código 1)

@@ -41,23 +41,30 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
 - Autostart: `scripts\instalar_autostart.ps1 [-AppDir C:\DashboardLotufo\app] [-SemTls] [-Porta 8080] [-Raiz ...] [-BackupExterno ...] [-RmUrl ... -RmUsuario ... -RmSenhaArquivo ... -RmHttpInseguro]` (sem os parâmetros do RM a tarefa sobe com o RM desligado; ver "TOTVS RM") registra a tarefa agendada apontando para o `rodar_producao.ps1` do diretório PINADO `-AppDir` (SYSTEM, no boot, reinício automático 3× a 1 min). Sem `-SemTls`, recusa instalar se `<raiz>\segredos\tls\cert.pem` ou `chave.pem` não existir. Parar: `schtasks /End /TN <tarefa>`; iniciar: `schtasks /Run /TN <tarefa>`.
 - **Agendador sem CIM** (issue #386, 04/11/2026): um deploy por SSH ficou mais de 10 minutos parado em `Get-ScheduledTask` porque o
   provedor CIM do Agendador de Tarefas (`root/Microsoft/Windows/TaskScheduler`) não respondia, enquanto `schtasks /Query` e a API COM
-  `Schedule.Service` respondiam em segundos. Desde então `deploy.ps1` e `watchdog.ps1` falam com o agendador só por `schtasks.exe` (função comum em `scripts\comum_agendador.ps1`)
-  (`/Query /XML` para ler porta, raiz e modo da tarefa, `/End` e `/Run` para parar e iniciar, inclusive na parada do ponto da
-  sentinela da #478), cada chamada num processo filho com **30 s de
-  limite** (`-LimiteAgendador`). Estouro na leitura da porta imprime `deploy abortado: agendador de tarefas nao respondeu` e sai com
-  código 1 **antes do checkout**, sem tocar no pinado nem criar o sentinela (o sentinela criado à mão antes é apagado pelo operador);
-  estouro no reinício (depois do build) volta o pinado ao commit anterior (antes, se a parada tinha começado, para a tarefa de
-  novo, porque um `/Run` que estourou no cliente pode ter subido o commit novo, e na volta para antes da #456 passa o ponto da
-  sentinela para a auditoria, como no rollback por saúde) e, se a parada tinha começado, refaz parar → liberar
+  `Schedule.Service` respondiam em segundos. Desde então `deploy.ps1` e `watchdog.ps1` nunca usam os cmdlets `*-ScheduledTask`:
+  falam com o agendador por `schtasks.exe` (`/Query /XML` para ler porta, raiz e modo da tarefa, `/End` e `/Run` para parar e
+  iniciar, inclusive na parada do ponto da sentinela da #478) e leem o **estado** da tarefa pela API COM `Schedule.Service`
+  (`scripts\estado_tarefa.ps1`, número, sem depender do idioma), tudo pela função comum de `scripts\comum_agendador.ps1`, cada
+  chamada num processo filho com **30 s de limite** (`-LimiteAgendador`); o filho que estoura é morto e, se nem assim morrer, o
+  sentinela fica. Qualquer falha do `/Query` (tarefa inexistente, acesso negado) aborta antes de tudo; estouro na leitura imprime
+  `deploy abortado: agendador de tarefas nao respondeu` e sai com
+  código 1 **antes do checkout**, sem tocar no pinado nem criar o sentinela (o sentinela criado à mão antes é apagado pelo operador).
+  Toda parada é **comprovada**: depois do `/End`, estado "Ready" ou "Disabled" ("Running" e "Queued" são ativas, ilegível não prova)
+  e porta livre da dashboard; sem isso o script não faz checkout nem build. Estouro no reinício (depois do build) para a tarefa de
+  novo, comprovadamente (um `/Run` que estourou no cliente pode ter subido o commit novo; na volta para antes da #456 passa também
+  o ponto da sentinela para a auditoria, como no rollback por saúde), e só então volta o pinado ao commit anterior; se a parada não
+  se prova, o pinado **não** é voltado, o sentinela fica e a linha diz para intervir à mão. O sentinela só é apagado quando nada foi
+  parado ou quando a produção (nova ou anterior) respondeu 200 com processo novo; a consulta da porta que falha conta como "não
+  saudável". Depois de voltar o pinado, se a parada tinha começado, refaz parar → liberar
   porta → iniciar com ele, afirmando "religada" só com health 200 de processo novo; senão imprime que a tarefa não está
   comprovadamente no ar, com quem está na porta (PID e criação), e **mantém o sentinela** (como em `ROLLBACK TAMBEM FALHOU` e nas
   voltas que falham: o script imprime `sentinela ... MANTIDO` e o operador o apaga depois de conferir o pinado). O script imprime uma linha
   `[HH:mm:ss] etapa` em cada passo (porta lida, fetch, checkout, pip, npm, reinício, saúde). Nos comandos à mão, preferir
   `schtasks /Query|/End|/Run /TN <tarefa>` aos cmdlets; `instalar_autostart.ps1` e `instalar_watchdog.ps1` ainda registram a tarefa por
   `Register-ScheduledTask` (instalação única, interativa, com o operador olhando). O `schtasks` dá o estado da tarefa em texto no
-  idioma do Windows, então o watchdog o lê pela API COM `Schedule.Service` (número; `EstadoDaTarefa` em `comum_agendador.ps1`),
-  num `powershell` filho com o mesmo tempo limite: só para a tarefa "Running", espera até 10 s ela sair desse estado e, com o
-  estado ilegível, `/End` que falha ou a tarefa ainda "Running", não inicia nada (sai com 1 e repete em 3 min).
+  idioma do Windows, então o watchdog o lê pela mesma COM (`EstadoDaTarefa`): só para a tarefa ativa ("Running" ou "Queued"),
+  espera até 10 s ela chegar a "Ready" ou "Disabled" e, com o estado ilegível, `/End` que falha ou a tarefa ainda ativa, não
+  inicia nada (sai com 1 e repete em 3 min).
 - Watchdog: `scripts\instalar_watchdog.ps1 [-SemTls] [-Porta 8080] [-Raiz ...]` (modo, porta e raiz iguais aos da tarefa principal; `-Porta` e `-Raiz` omitidos vêm dela, e valor diferente aborta) registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1 -Url https://localhost:<porta>/api/health -Certificado <raiz>\segredos\tls\cert.pem` (com `-SemTls`, `-Url http://localhost:<porta>/api/health` sem certificado) — confere `/api/health` na porta de `-Porta` (padrão 8443 em HTTPS, 80 com `-SemTls`), aceitando só o certificado da instalação (seção "HTTP ou HTTPS"), e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
 
 ### Deploy a partir do Mac (SSH)
@@ -124,7 +131,7 @@ três trocas:
    `origin/master` para uma pasta fora do pinado e rodar de lá (`New-Item -ItemType Directory -Force C:\Temp\deploy | Out-Null`,
    `git -C C:\DashboardLotufo\app fetch`, depois
    `git -C C:\DashboardLotufo\app show origin/master:scripts/deploy.ps1 | Set-Content -Encoding ascii C:\Temp\deploy\deploy.ps1`,
-   idem para `comum_agendador.ps1`, `comum_tls.ps1` e `backup_pre_migracao.ps1`; o script acha os três pelo próprio diretório).
+   idem para `comum_agendador.ps1`, `estado_tarefa.ps1`, `comum_tls.ps1` e `backup_pre_migracao.ps1`; o script acha os quatro pelo próprio diretório).
 2. **"O que vai subir" lê o pinado**, não uma pasta de dev: `git -C C:\DashboardLotufo\app fetch`, `$atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()`,
    `git -C C:\DashboardLotufo\app log --oneline "$atual..origin/master"` e os dois `git -C C:\DashboardLotufo\app diff --name-only "$atual" origin/master -- backend/migrations` / `-- frontend`.
    Não há `git switch`/`git pull` (o checkout é o próprio deploy).
@@ -147,7 +154,7 @@ Copiar a pasta de produção para outra máquina não basta para ter uma dashboa
 - **Deploy**: depois do build e **antes de parar a produção**, o `deploy.ps1` roda com o código novo `python -m app.cli instalacao verificar --arquivo <raiz>\segredos\instalacao.json` (sai 0 só com `Instalação autorizada para esta máquina.`, sem o atalho do dev). A `<raiz>` é a do `-Raiz` gravado na tarefa agendada, a mesma que o `rodar_producao.ps1` usa; dela sai também o banco do backup pré-migração. `-Raiz` informado e diferente da tarefa aborta antes do checkout, como a porta. Recusado, o deploy para ali, sem migrar o banco (as migrações só rodam na subida) e sem trocar o processo: aviso `instalacao nao autorizada para o commit novo` e linha final `deploy abortado no build; producao segue no commit anterior ...`. Depois do reinício ele ainda exige `instalacao: autorizada` no health; outro valor conta como falha (aviso `health 200, mas a instalacao nao esta autorizada: ...`) e dispara o rollback. O rollback confere só o 200 (o commit anterior pode nem ter o campo); se ele voltar em modo cópia, o `ROLLBACK OK` vem seguido do aviso `producao de volta, mas em modo copia: ...`. Por essa conferência, o `deploy.ps1` só sobe commit que já tem a instalação assinada.
 - **Primeiro deploy com a instalação assinada (PR #437 da #417), uma vez só.** O PowerShell lê o `deploy.ps1` inteiro antes do checkout, e o do diretório pinado ainda é o antigo, que só confere o 200: rodado dali, sem o arquivo ele terminaria em `DEPLOY OK` com a produção em modo cópia (sem e-mail e sem RM). Nesta vez:
   1. Copiar o arquivo assinado para a VM (subseção abaixo) e conferir `Test-Path C:\DashboardLotufo\segredos\instalacao.json` → `True`.
-  2. Rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, com os scripts que ele chama pelo `$PSScriptRoot` ao lado (hoje `backup_pre_migracao.ps1` e, desde a #425, `comum_tls.ps1`; depois da #386, também `comum_agendador.ps1`): `New-Item -ItemType Directory -Force C:\Temp\deploy | Out-Null`, `git -C C:\DashboardLotufo\app fetch`, `git -C C:\DashboardLotufo\app show origin/master:scripts/deploy.ps1 | Set-Content -Encoding ascii C:\Temp\deploy\deploy.ps1` (idem os outros) e `& C:\Temp\deploy\deploy.ps1`, com o sentinela e o resto como em "Subir e derrubar". **Pelo Mac**, esses comandos vão num `.ps1` temporário no Mac (fora do repositório), copiado para a VM com `scp script.ps1 <vm>:C:/Temp/deploy-417.ps1` e rodado com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\deploy-417.ps1'`, nunca pelo stdin (`-Command -`): ali o `git fetch` consome o resto do script e ele para no meio. Conferir `$LASTEXITCODE` depois de cada `git` e apagar o `.ps1` no fim.
+  2. Rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, com os scripts que ele chama pelo `$PSScriptRoot` ao lado (hoje `backup_pre_migracao.ps1` e, desde a #425, `comum_tls.ps1`; depois da #386, também `comum_agendador.ps1` e `estado_tarefa.ps1`): `New-Item -ItemType Directory -Force C:\Temp\deploy | Out-Null`, `git -C C:\DashboardLotufo\app fetch`, `git -C C:\DashboardLotufo\app show origin/master:scripts/deploy.ps1 | Set-Content -Encoding ascii C:\Temp\deploy\deploy.ps1` (idem os outros) e `& C:\Temp\deploy\deploy.ps1`, com o sentinela e o resto como em "Subir e derrubar". **Pelo Mac**, esses comandos vão num `.ps1` temporário no Mac (fora do repositório), copiado para a VM com `scp script.ps1 <vm>:C:/Temp/deploy-417.ps1` e rodado com `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\deploy-417.ps1'`, nunca pelo stdin (`-Command -`): ali o `git fetch` consome o resto do script e ele para no meio. Conferir `$LASTEXITCODE` depois de cada `git` e apagar o `.ps1` no fim.
   3. Logo depois, conferir no `/api/health` a `instalacao: autorizada`. Se não vier (o script antigo rodou por engano, por exemplo), voltar à mão para o commit anterior com o script **dele**: os mesmos comandos do passo 2 com `git show <anterior>:scripts/...` para `C:\Temp\deploy-anterior` e `& C:\Temp\deploy-anterior\deploy.ps1 -Ref <anterior>`; depois resolver o arquivo e repetir o passo 2.
 
 ### Chave do dono (uma vez, no Mac)

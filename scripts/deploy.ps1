@@ -60,15 +60,18 @@ $msgAgendador = "deploy abortado: agendador de tarefas nao respondeu"
 # A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
 # um deploy na 80 acharia o IIS como dono da porta e abortaria DEPOIS do checkout, sem rollback.
 # Le o XML da tarefa (schtasks /Query /XML) UMA vez: os argumentos saem em <Arguments>, sem depender
-# do idioma dos cabecalhos do /FO LIST. Porta, raiz e modo (TLS) saem todos dele. $null = tarefa
-# nao encontrada (ou schtasks falhou: saida guardada em $script:saidaQuery).
+# do idioma dos cabecalhos do /FO LIST. Porta, raiz e modo (TLS) saem todos dele. Qualquer falha do /Query
+# (tarefa inexistente, acesso negado, XML ilegivel) aborta antes de tudo: -Porta informada nao substitui raiz e modo
+# desconhecidos, que decidem o arquivo da instalacao e o banco do backup (gate Sol da PR #389).
 function ArgumentosDaTarefa {
     $r = Agendar @("/Query", "/TN", $tarefaNome, "/XML")
     if ($r.Estourou) {
         Write-Host "$msgAgendador (schtasks /Query levou mais de $LimiteAgendador s); nada foi alterado" -ForegroundColor Red
         exit 1
     }
-    if ($r.Codigo -ne 0) { $script:saidaQuery = $r.Saida; return $null }
+    if ($r.Codigo -ne 0) {
+        throw "nao consegui ler a tarefa $tarefaNome (schtasks /Query devolveu $($r.Codigo): $($r.Saida)); instale a tarefa (instalar_autostart.ps1) ou confira o agendador; nada foi alterado"
+    }
     $acoes = [regex]::Matches($r.Saida, "<Arguments>([^<]*)</Arguments>")
     if ($acoes.Count -eq 0) {
         throw "nao consegui ler os argumentos da tarefa $tarefaNome no XML do schtasks; nada foi alterado"
@@ -78,7 +81,6 @@ function ArgumentosDaTarefa {
 }
 $argumentosDaTarefa = ArgumentosDaTarefa
 function PortaDaTarefa {
-    if ($null -eq $argumentosDaTarefa) { return 0 }
     $argumentosTarefa = $argumentosDaTarefa
     if ($argumentosTarefa -match "-Porta (\d+)") { return [int]$Matches[1] }
     # Sem -Porta vale o padrao do modo do rodar_producao.ps1 (issue #425): 80 com -SemTls, 8443 com TLS.
@@ -87,9 +89,8 @@ function PortaDaTarefa {
 }
 $portaTarefa = PortaDaTarefa
 if ($Porta -eq 0) {
-    if ($portaTarefa -eq 0) { throw "tarefa $tarefaNome nao encontrada (schtasks: $script:saidaQuery); informe -Porta ou instale a tarefa (instalar_autostart.ps1)" }
     $Porta = $portaTarefa
-} elseif ($portaTarefa -ne 0 -and $Porta -ne $portaTarefa) {
+} elseif ($Porta -ne $portaTarefa) {
     throw "-Porta $Porta nao bate com a tarefa $tarefaNome (porta $portaTarefa); nada foi alterado"
 }
 Etapa "porta lida: $Porta (tarefa $tarefaNome, agendador respondeu)"
@@ -98,7 +99,6 @@ Etapa "porta lida: $Porta (tarefa $tarefaNome, agendador respondeu)"
 # reinicio e o banco do backup pre-migracao. Com a producao em outro disco, conferir C:\ recusaria o arquivo valido, ou
 # aceitaria um velho enquanto o servidor confere o da raiz certa. O instalar_autostart.ps1 sempre grava -Raiz "...".
 function RaizDaTarefa {
-    if ($null -eq $argumentosDaTarefa) { return "" }
     $argumentosTarefa = $argumentosDaTarefa
     if ($argumentosTarefa -match '-Raiz\s+(?:"([^"]+)"|(\S+))') {
         if ($Matches[1]) { return $Matches[1] }
@@ -108,8 +108,8 @@ function RaizDaTarefa {
 }
 $raizTarefa = RaizDaTarefa
 if (-not $Raiz) {
-    if ($raizTarefa) { $Raiz = $raizTarefa } else { $Raiz = "C:\DashboardLotufo" }
-} elseif ($raizTarefa -and $Raiz.TrimEnd("\") -ne $raizTarefa.TrimEnd("\")) {
+    $Raiz = $raizTarefa
+} elseif ($Raiz.TrimEnd("\") -ne $raizTarefa.TrimEnd("\")) {
     throw "-Raiz $Raiz nao bate com a tarefa DashboardLotufo (raiz $raizTarefa); nada foi alterado"
 }
 $instalacaoArquivo = Join-Path $Raiz "segredos\instalacao.json"   # o mesmo que o rodar_producao.ps1 passa ao servidor
@@ -119,7 +119,6 @@ $banco = Join-Path $Raiz "dados\dashboard.db"
 # HTTP; sem ele, https://localhost aceitando so' o certificado da instalacao, pelo thumbprint (comum_tls.ps1).
 # Com o certificado ausente no modo HTTPS o deploy nao comeca: o watchdog nem e' pausado e nada muda.
 function TlsDaTarefa {
-    if ($null -eq $argumentosDaTarefa) { return $true }
     $argumentosTarefa = $argumentosDaTarefa
     return (-not ($argumentosTarefa -match "-SemTls\b"))
 }
@@ -215,22 +214,43 @@ function LiberarPorta {
 }
 # Para e inicia a tarefa por schtasks /End e /Run. Estouro de tempo lanca uma excecao com a
 # mensagem propria, que o fluxo principal trata voltando o pinado. /End que falha (tarefa
-# ja' parada, instancia orfa) so' avisa: LiberarPorta cuida do que sobrou na porta. /Run que falha e' fatal.
+# ja' parada, instancia orfa) so' avisa: quem decide e' o estado conferido em PararComprovado e o LiberarPorta.
+# /Run que falha e' fatal.
 function ComandoTarefa([string]$verbo, [bool]$fatal) {
     $r = Agendar @("/$verbo", "/TN", $tarefaNome)
     # Texto proprio, sem o "$msgAgendador" de antes do checkout: aqui a producao pode ter mudado.
-    if ($r.Estourou) { throw "agendador de tarefas nao respondeu ao schtasks /$verbo (mais de $LimiteAgendador s)" }
+    if ($r.Estourou) {
+        # schtasks que nem morto morreu ainda pode concluir o /End ou /Run depois: o watchdog fica pausado
+        if ($r.FilhoVivo) { $script:manterSentinela = $true; throw "agendador de tarefas nao respondeu ao schtasks /$verbo (mais de $LimiteAgendador s) e o processo do schtasks nao morreu" }
+        throw "agendador de tarefas nao respondeu ao schtasks /$verbo (mais de $LimiteAgendador s)"
+    }
     if ($r.Codigo -ne 0) {
         $texto = "schtasks /$verbo $tarefaNome falhou (codigo $($r.Codigo)): $($r.Saida)"
         if ($fatal) { throw $texto }
         Write-Warning $texto
     }
 }
-function Reiniciar {
-    Etapa "reinicio: parando a tarefa $tarefaNome"
-    $script:tarefaParada = $true   # ANTES do /End: um /End cujo cliente estourou pode ter parado a tarefa
-    ComandoTarefa "End" $false; Start-Sleep -Seconds 3
+# Parada COMPROVADA (gate Sol da PR #389): "parada solicitada" ($script:tarefaParada, marcada ANTES do /End, porque um
+# /End cujo cliente estourou pode ter parado a tarefa) nao basta. Depois do /End o estado e' lido pela COM
+# (EstadoDaTarefa) ate' "Ready" ou "Disabled" (Running e Queued sao ativas; ilegivel nao prova nada) e a porta e'
+# liberada (LiberarPorta lanca se a dashboard continua nela). Qualquer falha lanca: quem chama nao mexe no pinado.
+function PararComprovado([string]$momento) {
+    Etapa "${momento}: parando a tarefa $tarefaNome"
+    $script:tarefaParada = $true
+    $script:producaoMexida = $true
+    ComandoTarefa "End" $false
+    $estado = "desconhecido"
+    foreach ($tentativa in 1..10) {
+        Start-Sleep -Seconds 1
+        $estado = EstadoDaTarefa $tarefaNome $LimiteAgendador
+        if ((TarefaParada $estado) -or $estado -eq "desconhecido") { break }
+    }
+    if (-not (TarefaParada $estado)) { throw "tarefa $tarefaNome nao comprovadamente parada (estado: $estado)" }
+    Start-Sleep -Seconds 2
     LiberarPorta
+}
+function Reiniciar {
+    PararComprovado "reinicio"
     $script:reinicioEm = Get-Date
     Etapa "reinicio: iniciando a tarefa $tarefaNome"
     ComandoTarefa "Run" $true
@@ -242,7 +262,13 @@ function Reiniciar {
 function SaudavelENovo([switch]$ExigirInstalacao) {
     Etapa "saude: conferindo $urlSaude"
     if (-not (Saudavel -ExigirInstalacao:$ExigirInstalacao)) { return $false }
-    $dono = DonoDaPorta
+    # Consulta da porta que lanca (WMI/CIM travado, o modo de falha da issue #386) nao prova o processo novo: conta
+    # como "nao saudavel" e cai no rollback, em vez de escapar e soltar o watchdog sem nada provado (gate Sol da PR #389)
+    try { $dono = DonoDaPorta }
+    catch {
+        Write-Warning "health 200, mas a consulta do dono da porta $Porta falhou: $($_.Exception.Message)"
+        return $false
+    }
     if (-not $dono -or $dono.CreationDate -lt $script:reinicioEm) {
         Write-Warning "health 200, mas o dono da porta $Porta e' anterior ao reinicio (PID $($dono.ProcessId), $($dono.CreationDate))"
         return $false
@@ -275,7 +301,8 @@ function VoltarPinado([string]$anterior) {
 # anterior a ela, que le e grava o ponto so' na auditoria: no rollback por saude e no deploy com -Ref de um commit
 # antigo. Com o servico parado e o codigo com a #456 ainda no pinado (antes do checkout do antigo), o app.cli grava o
 # ponto na auditoria e tira a tabela, os gatilhos e a linha da 063; sem isso o codigo antigo acusaria "Estado da
-# sentinela apagado" e repetiria os achados desde o deploy da #456. Falha aqui so' avisa: a troca segue.
+# sentinela apagado" e repetiria os achados desde o deploy da #456. Falha do app.cli so' avisa: a troca segue. Parada
+# nao comprovada lanca (PararComprovado).
 # $script:sentinelaParou diz se o servico foi parado aqui (o catch do build religa o commit anterior).
 $script:sentinelaParou = $false
 function SentinelaAntesDa456([string]$de, [string]$para) {
@@ -284,16 +311,14 @@ function SentinelaAntesDa456([string]$de, [string]$para) {
     $temAnterior = & git -C $AppDir ls-tree --name-only $para -- backend/migrations/063_sentinela_ponto.sql
     if ($LASTEXITCODE -ne 0) { Write-Warning "git ls-tree $para falhou; ponto da sentinela nao conferido"; return }
     if (-not $temNovo -or $temAnterior) { return }
+    # A parada tem de ser comprovada (gate Sol da PR #389): se nao for, PararComprovado lanca e a excecao SOBE, para
+    # quem chama nao fazer checkout nem build com a instancia viva. So' a falha do app.cli e' que so' avisa.
+    PararComprovado "ponto da sentinela"
+    $script:sentinelaParou = $true
     $codigo = 1
     Push-Location (Join-Path $AppDir "backend")
-    try {
-        $script:sentinelaParou = $true
-        $script:tarefaParada = $true   # ANTES do /End, como no Reiniciar
-        Etapa "ponto da sentinela: parando a tarefa $tarefaNome"
-        ComandoTarefa "End" $false; Start-Sleep -Seconds 3
-        LiberarPorta
-        & $py -m app.cli sentinela antes-da-456 --banco $banco; $codigo = $LASTEXITCODE
-    } catch { Write-Warning "ponto da sentinela: $($_.Exception.Message)" }
+    try { & $py -m app.cli sentinela antes-da-456 --banco $banco; $codigo = $LASTEXITCODE }
+    catch { Write-Warning "ponto da sentinela: $($_.Exception.Message)" }
     finally { Pop-Location }
     if ($codigo -ne 0) {
         Write-Warning "ponto da sentinela NAO passado para a auditoria antes do rollback - ver docs\runbook.md (Rollback para um commit anterior a issue #456)"
@@ -310,6 +335,12 @@ function AvisarSeCopia {
 }
 
 $anterior = (& git -C $AppDir rev-parse HEAD).Trim()
+# O sentinela so' sai quando nada foi parado ($producaoMexida falso) ou quando a producao, nova ou anterior, foi
+# comprovada (health 200 de processo novo: $producaoProvada). Excecao que escape depois de uma parada mantem o
+# watchdog pausado (gate Sol da PR #389). $manterSentinela marca os caminhos de "intervir a mao".
+$script:manterSentinela = $false
+$script:producaoMexida = $false
+$script:producaoProvada = $false
 New-Item -ItemType File -Path $pause -Force | Out-Null   # segura o watchdog durante o deploy
 try {
     # Backup pre-migracao (issue #75): se o commit novo mexe em backend/migrations, snapshot
@@ -352,7 +383,21 @@ try {
     # A conferencia da instalacao (issue #417) entra no mesmo try: recusada, a producao nem para.
     # Issue #478: alvo de antes da #456 vindo de um commit com ela (-Ref): o ponto da sentinela passa para a auditoria
     # antes do checkout, com o comando do codigo atual e o servico parado (fica parado durante o build).
-    SentinelaAntesDa456 $anterior $alvo
+    try { SentinelaAntesDa456 $anterior $alvo }
+    catch {
+        # parada nao comprovada: nada de checkout. O pinado segue intocado em $anterior; tenta religar a tarefa com ele.
+        $motivo = $_.Exception.Message
+        $religou = $false
+        try { Reiniciar; $religou = SaudavelENovo } catch { Write-Warning "religar falhou: $($_.Exception.Message)" }
+        if ($religou) {
+            $script:producaoProvada = $true
+            Write-Host "deploy abortado antes do checkout ($motivo); diretorio pinado intocado em $anterior e tarefa $tarefaNome religada com ele (health 200, processo novo)" -ForegroundColor Red
+        } else {
+            $script:manterSentinela = $true
+            Write-Host "deploy abortado antes do checkout ($motivo); diretorio pinado intocado em $anterior, mas a tarefa $tarefaNome NAO esta' comprovadamente no ar ($(DiagnosticoPorta)) - intervir a mao: schtasks /End e /Run /TN $tarefaNome quando o agendador responder, conferir /api/health; sentinela do watchdog mantido" -ForegroundColor Red
+        }
+        exit 1
+    }
     try { Construir $alvo; ConferirInstalacao }
     catch {
         Write-Warning "Construir ou conferir a instalacao de $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
@@ -362,6 +407,7 @@ try {
                 # o servico foi parado para o ponto da sentinela: religa o anterior, cuja 063 reimporta o ponto
                 Reiniciar
                 if (-not (SaudavelENovo)) { throw "a producao parada para o ponto da sentinela nao voltou em $anterior" }
+                $script:producaoProvada = $true
             }
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
@@ -385,14 +431,18 @@ try {
         try {
             if ($script:tarefaParada) {
                 # O /Run que estoura no cliente pode ter iniciado a tarefa: o commit novo pode estar no ar (e ter
-                # aplicado a 063). Antes de voltar o pinado, para de novo e, na troca para antes da #456, passa o ponto
-                # da sentinela para a auditoria com o codigo novo, como no rollback por saude (issue #478). Sem a
-                # troca, so' para e libera a porta, para o build do anterior nao correr com o novo no ar.
+                # aplicado a 063). Antes de voltar o pinado, para de novo, COMPROVADAMENTE (estado Ready/Disabled e
+                # porta livre), e, na troca para antes da #456, passa o ponto da sentinela para a auditoria com o codigo
+                # novo, como no rollback por saude (issue #478). Sem a parada provada o pinado NAO e' tocado: checkout,
+                # pip e build embaixo da instancia viva corromperiam venv e dist em uso (gate Sol da PR #389).
                 $script:sentinelaParou = $false
-                SentinelaAntesDa456 $novo $anterior
-                if (-not $script:sentinelaParou) {
-                    try { ComandoTarefa "End" $false; Start-Sleep -Seconds 3; LiberarPorta }
-                    catch { Write-Warning "parar antes de voltar o pinado falhou: $($_.Exception.Message)" }
+                try {
+                    SentinelaAntesDa456 $novo $anterior
+                    if (-not $script:sentinelaParou) { PararComprovado "antes de voltar o pinado" }
+                } catch {
+                    $script:manterSentinela = $true
+                    Write-Host "deploy abortado no reinicio ($motivo); a tarefa $tarefaNome nao foi comprovadamente parada ($($_.Exception.Message); $(DiagnosticoPorta)), entao o diretorio pinado NAO foi voltado e segue em $novo - intervir a mao: parar a tarefa (schtasks /End /TN $tarefaNome), conferir a porta e so' entao voltar o pinado ou rodar o deploy de novo; sentinela do watchdog mantido" -ForegroundColor Red
+                    exit 1
                 }
             }
             VoltarPinado $anterior
@@ -402,6 +452,7 @@ try {
                 try { Reiniciar; $religou = SaudavelENovo } catch { Write-Warning "religar falhou: $($_.Exception.Message)" }
                 $naPorta = DiagnosticoPorta
                 if ($religou) {
+                    $script:producaoProvada = $true
                     Write-Host "deploy abortado no reinicio ($motivo); diretorio pinado de volta em $anterior e tarefa $tarefaNome religada com ele (health 200, processo novo; $naPorta)" -ForegroundColor Red
                 } else {
                     $script:manterSentinela = $true
@@ -418,7 +469,8 @@ try {
         exit 1
     }
     if (SaudavelENovo -ExigirInstalacao) {
-        $fim = "DEPLOY OK: $anterior -> $novo (health 200, processo novo)"
+        $script:producaoProvada = $true
+        $fim ="DEPLOY OK: $anterior -> $novo (health 200, processo novo)"
         if ($backup) { $fim += " - backup pre-migracao: $backup" }
         Write-Host $fim -ForegroundColor Green
     } else {
@@ -433,7 +485,7 @@ try {
             Write-Host "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message)) - intervir a mao (ver watchdog.log e dashboard.log); sentinela do watchdog mantido" -ForegroundColor Red
             exit 1
         }
-        if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
+        if (SaudavelENovo) { $script:producaoProvada = $true; Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
         else {
             $script:manterSentinela = $true
             Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log); sentinela do watchdog mantido" -ForegroundColor Red
@@ -443,7 +495,8 @@ try {
 } finally {
     # Solta o watchdog, salvo nos caminhos de "intervir a mao": com o pinado num commit ou build que
     # nao se provou, o watchdog nao pode reerguer sozinho (runbook). O operador apaga o sentinela
-    # depois de conferir.
+    # depois de conferir. Parada sem producao comprovada depois (excecao que escapou) tambem mantem.
+    if ($script:producaoMexida -and -not $script:producaoProvada) { $script:manterSentinela = $true }
     if ($script:manterSentinela) { Write-Host "sentinela $pause MANTIDO: watchdog pausado ate' o operador conferir o pinado e apaga-lo" -ForegroundColor Yellow }
     else { Remove-Item $pause -Force -ErrorAction SilentlyContinue }
 }

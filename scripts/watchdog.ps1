@@ -101,11 +101,13 @@ if ($estado -eq "desconhecido") {
     Escrever "FALHA ao parar a tarefa, nada iniciado: estado da tarefa $Tarefa ilegivel (Schedule.Service sem resposta em $LimiteAgendador s ou com erro)"
     exit 1
 }
-# Parar so' o que esta rodando: a tarefa "Ready" com o processo morto (incidente de 2026-09-10) vai direto ao /Run.
-if ($estado -eq "Running") {
+# Parar so' o que esta ativo ("Running", ou "Queued", que ignoraria o /Run): a tarefa "Ready" com o processo morto
+# (incidente de 2026-09-10) vai direto ao /Run.
+if (-not (TarefaParada $estado)) {
     $fim = Agendador @("/End", "/TN", $Tarefa) $LimiteAgendador
     if ($fim.Estourou) {
-        Escrever "agendador de tarefas nao respondeu (schtasks /End levou mais de $LimiteAgendador s) -> nada iniciado"
+        $vivo = ""; if ($fim.FilhoVivo) { $vivo = "; o processo do schtasks /End nao morreu" }
+        Escrever "agendador de tarefas nao respondeu (schtasks /End levou mais de $LimiteAgendador s) -> nada iniciado$vivo"
         exit 1
     }
     if ($fim.Codigo -ne 0) {
@@ -118,7 +120,7 @@ foreach ($tentativa in 1..10) {
     Start-Sleep -Seconds 1
     $estado = EstadoDaTarefa $Tarefa $LimiteAgendador
     if ($estado -eq "desconhecido") { break }
-    if ($estado -ne "Running") { $parada = $true; break }
+    if (TarefaParada $estado) { $parada = $true; break }   # so' "Ready" ou "Disabled"; "Queued" segue ativa
 }
 if (-not $parada) {
     Escrever "tarefa $Tarefa continua '$estado' depois da parada -> nada iniciado"
