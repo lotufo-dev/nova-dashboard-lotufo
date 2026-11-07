@@ -310,17 +310,22 @@ def _gravar_e_registrar(conn: sqlite3.Connection, validados: list[tuple[bytes, s
 
 def _ler_grupos(conn: sqlite3.Connection, usuario_id: int, r: dict, validados: list[tuple[bytes, str]]) -> dict:
     """Issue #490: o xlsx da planilha, ja' gravado com a versao, e' lido por grupo. A leitura vem depois do registro
-    e nunca o desfaz: a recusa (soma que nao bate, aba que falta) volta como aviso em `leitura_planilha`."""
+    e nunca o desfaz: a recusa da planilha (soma que nao bate, aba que falta) fica gravada e volta como aviso em
+    `leitura_planilha`. Erro inesperado (banco ocupado, defeito) fica gravado como falha, que a carga
+    `medicoes planilhas` le de novo; se nem a falha grava, o erro sobe."""
     dados, ext = validados[1]
     r["leitura_planilha"] = None
     if ext != "xlsx":
         return r
     try:
         r["leitura_planilha"] = medicao_grupos.ler_anexo(conn, usuario_id, r["medicao_id"], r["versao"], dados)
-    except Exception:       # a medicao ja' esta' registrada: falha inesperada da leitura vira aviso, nao erro 500
+    except Exception as erro:
         log.exception("leitura por grupo da planilha da medicao %s", r["medicao_id"])
-        r["leitura_planilha"] = {"situacao": "recusada",
-                                 "aviso": medicao_grupos.PREFIXO_AVISO + "erro inesperado na leitura"}
+        try:
+            r["leitura_planilha"] = medicao_grupos.registrar_falha(conn, usuario_id, r["medicao_id"], r["versao"],
+                                                                   dados)
+        except Exception:
+            raise erro from None
     return r
 
 

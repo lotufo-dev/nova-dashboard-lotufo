@@ -68,9 +68,11 @@ def _campo(h: str) -> str | None:
         return "unidade"
     if "PRECO UNITARIO" in h:
         return "preco"
-    if "ANTERIOR" in h or "PERCENTUAL" in h or "%" in h or "CONTRATO" in h:
+    if "ANTERIOR" in h or "PERCENTUAL" in h or "%" in h:
         return None
     if "R$" in h or h.startswith("VALOR"):
+        if "CONTRAT" in h:              # o valor contratado nao entra
+            return None
         if "NESTA" in h:
             return "valor_medido"
         if "ACUMULAD" in h:
@@ -80,26 +82,77 @@ def _campo(h: str) -> str | None:
         return "quantidade_medida"
     if "ACUMULAD" in h:
         return "quantidade_acumulada"
-    if h.startswith("QUANT") or "CONTRATAD" in h:
+    if h.startswith("QUANT") or "CONTRAT" in h:
         return "quantidade_contratada"
     return None
 
 
-def _cabecalho(valores: list) -> dict[str, int] | None:
-    """campo -> coluna, se a linha e' o cabecalho (tem ITEM e DISCRIMINAÇÃO/DESCRIÇÃO); senao None. Cabecalho sem
-    alguma das colunas recusa dizendo quais faltam."""
+def _e_cabecalho(valores: list) -> bool:
+    """A linha do cabecalho tem ITEM e DISCRIMINAÇÃO (ou DESCRIÇÃO)."""
     textos = [_texto(v) for v in valores]
-    if "ITEM" not in textos or not any(t.startswith(("DISCRIMINACAO", "DESCRICAO")) for t in textos):
-        return None
+    return "ITEM" in textos and any(t.startswith(("DISCRIMINACAO", "DESCRICAO")) for t in textos)
+
+
+def _colunas(textos: list[str]) -> tuple[dict[str, int], list[str]]:
+    """(campo -> coluna, rotulos das colunas que faltam)."""
     colunas: dict[str, int] = {}
     for c, t in enumerate(textos):
         campo = _campo(t)
         if campo and campo not in colunas:
             colunas[campo] = c
-    faltam = [CAMPOS[k] for k in CAMPOS if k not in colunas]
-    if faltam:
+    return colunas, [CAMPOS[k] for k in CAMPOS if k not in colunas]
+
+
+def _combinar(pai: list, filho: list) -> list[str]:
+    """Cabecalho em duas linhas (celula mesclada em cima, sub-colunas embaixo): o texto de cada coluna e' o do pai
+    que a cobre mais o do filho ("NESTA MEDIÇÃO" sobre "QUANT." e "R$"). O pai mesclado na horizontal vale para as
+    colunas seguintes que tem filho; o pai sem filho embaixo (mesclado na vertical, como ITEM) vale so' para si."""
+    saida, cobre = [], ""
+    for c in range(max(len(pai), len(filho))):
+        p = _texto(pai[c]) if c < len(pai) else ""
+        f = _texto(filho[c]) if c < len(filho) else ""
+        if p:
+            cobre = p if f else ""
+            saida.append(f"{p} {f}".strip())
+        elif f:
+            saida.append(f"{cobre} {f}".strip())
+        else:
+            cobre = ""
+            saida.append("")
+    return saida
+
+
+def _so_texto(valores: list) -> bool:
+    """Linha que pode continuar o cabecalho: tem texto e nenhum numero."""
+    return any(_texto(v) for v in valores) and not any(
+        isinstance(v, int | float | Decimal) and not isinstance(v, bool) for v in valores)
+
+
+def _achar_cabecalho(linhas) -> tuple[dict[str, int], object]:
+    """(campo -> coluna, as linhas que sobram). O cabecalho e' a linha com ITEM e DISCRIMINAÇÃO; se nela faltam
+    colunas, junta a linha de cima ou a de baixo (cabecalho em duas linhas)."""
+    anterior = None
+    for numero, valores in linhas:
+        if numero > LINHAS_CABECALHO:
+            break
+        if not _e_cabecalho(valores):
+            anterior = valores
+            continue
+        col, faltam = _colunas([_texto(v) for v in valores])
+        if not faltam:
+            return col, linhas
+        if anterior is not None and _so_texto(anterior):
+            col2, faltam2 = _colunas(_combinar(anterior, valores))
+            if not faltam2:
+                return col2, linhas
+        seguinte = next(linhas, None)
+        if seguinte is not None and _so_texto(seguinte[1]):
+            col2, faltam2 = _colunas(_combinar(valores, seguinte[1]))
+            if not faltam2:
+                return col2, linhas
+            faltam = faltam2 if len(faltam2) < len(faltam) else faltam
         raise PlanilhaRecusada(f"o cabeçalho da aba Resumo não tem a coluna {', '.join(faltam)}")
-    return colunas
+    raise PlanilhaRecusada("a aba Resumo não tem o cabeçalho com ITEM e DISCRIMINAÇÃO")
 
 
 def _nome_item(v) -> str:
@@ -201,6 +254,7 @@ _NS_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}
 _NS_PKG = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 MAX_ENTRADAS = 10_000
 MAX_BYTES_INDICE = 2_000_000           # o indice (diretorio central) do zip, lido inteiro ao abrir
+MAX_BYTES_ARQUIVO = 60_000_000         # o .xlsx inteiro (o real da SINFRA, com as memorias de calculo, tem ~30 MB)
 MAX_BYTES_ABA = 30_000_000              # a aba do resumo real tem ~1,6 MB
 MAX_BYTES_TEXTOS = 30_000_000           # os textos compartilhados reais, ~0,2 MB
 MAX_BYTES_RELS = 5_000_000
@@ -344,15 +398,7 @@ def _linhas(z: zipfile.ZipFile, caminho: str, textos: list[str]):
 
 
 def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
-    col = None
-    for numero, valores in linhas:
-        if numero > LINHAS_CABECALHO:
-            break
-        col = _cabecalho(valores)
-        if col is not None:
-            break
-    if col is None:
-        raise PlanilhaRecusada("a aba Resumo não tem o cabeçalho com ITEM e DISCRIMINAÇÃO")
+    col, linhas = _achar_cabecalho(iter(linhas))
     titulos: dict[str, str] = {}
     itens: list[tuple[str, dict]] = []
     lidas = 0
@@ -428,6 +474,8 @@ def ler(dados: bytes, cadastro: list[dict] | None = None) -> dict:
     valor_acumulado_centavos, itens: [...]}], "total_centavos", "grupo_por": "cadastro" | "planilha"}.
     `cadastro`: [{"nome", "itens_planilha": [prefixos]}] do cadastro de custo da obra, na ordem do yaml."""
     try:
+        if len(dados) > MAX_BYTES_ARQUIVO:
+            raise PlanilhaRecusada(GRANDE_DEMAIS)
         _recusar_indice_grande(dados)
         with zipfile.ZipFile(io.BytesIO(dados)) as z:
             if len(z.infolist()) > MAX_ENTRADAS:

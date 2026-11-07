@@ -14,18 +14,24 @@ CREATE TABLE IF NOT EXISTS medicao_grupos (
     sha256 TEXT NOT NULL,
     arquivo TEXT,
     origem TEXT NOT NULL CHECK (origem IN ('anexo','carga')),
-    situacao TEXT NOT NULL CHECK (situacao IN ('lida','recusada')),
+    -- 'falhou': erro inesperado na leitura do anexo (nao e' recusa da planilha); a carga le o anexo de novo
+    situacao TEXT NOT NULL CHECK (situacao IN ('lida','recusada','falhou')),
     motivo TEXT,
     grupo_por TEXT CHECK (grupo_por IS NULL OR grupo_por IN ('cadastro','planilha')),
+    -- sha256 dos grupos do cadastro de custo usados na leitura (NULL: pelos titulos da planilha)
+    cadastro_sha256 TEXT,
     total_centavos INTEGER CHECK (total_centavos IS NULL OR typeof(total_centavos) = 'integer'),
+    -- o valor de referencia conferido: o pedido da versao da planilha/carta (anexo) ou o da medicao (carga)
     pedido_centavos INTEGER CHECK (pedido_centavos IS NULL OR typeof(pedido_centavos) = 'integer'),
     usuario_id INTEGER REFERENCES usuarios(id),
     criado_em TEXT NOT NULL DEFAULT (datetime('now')),
     CHECK (situacao = 'lida' OR (motivo IS NOT NULL AND trim(motivo) <> ''))
 );
--- a mesma planilha (mesmo sha256) na mesma versao so' se le uma vez: a carga repetida nao duplica
+-- a mesma planilha (mesmo sha256) na mesma versao, contra o mesmo pedido e o mesmo cadastro, so' se le uma vez: a
+-- carga repetida nao duplica; pedido ou cadastro novo pedem leitura nova
 CREATE UNIQUE INDEX IF NOT EXISTS ux_medicao_grupos_lida
-    ON medicao_grupos (medicao_id, sha256, COALESCE(planilha_id, 0)) WHERE situacao = 'lida';
+    ON medicao_grupos (medicao_id, sha256, COALESCE(planilha_id, 0), pedido_centavos, COALESCE(cadastro_sha256, ''))
+    WHERE situacao = 'lida';
 CREATE INDEX IF NOT EXISTS ix_medicao_grupos_medicao ON medicao_grupos (medicao_id, id);
 
 CREATE TABLE IF NOT EXISTS medicao_grupo_itens (
