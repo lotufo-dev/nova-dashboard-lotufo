@@ -2,6 +2,7 @@
 # de test_producao_nao_aceita_x_forwarded_for em test_auth.py (que segue cobrindo o --no-proxy-headers).
 # Issue #361 (porta configuravel nos scripts de producao): a VM nova tem a 80 ocupada pelo IIS, entao a porta
 # vem do parametro -Porta, e o padrao continua 80.
+import math
 import pathlib
 import re
 
@@ -115,7 +116,7 @@ def test_deploy_para_a_tarefa_por_schtasks_tambem_no_ponto_da_sentinela_e_mantem
     # Disabled) e pela porta livre; qualquer falha lanca
     parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
     ordem = ["$script:tarefaParada = $true", "$script:producaoMexida = $true", 'ComandoTarefa "End" $false',
-             "$estado = EstadoDaTarefa $tarefaNome $limite", "if (-not (TarefaParada $estado)) { throw ",
+             "$estado = EsperarParada $momento", "if (-not (TarefaParada $estado)) { throw ",
              "LiberarPorta"]
     assert [parar.index(passo) for passo in ordem] == sorted(parar.index(passo) for passo in ordem)
     assert "catch" not in parar
@@ -991,22 +992,58 @@ def test_deploy_le_o_estado_da_tarefa_antes_do_sentinela_e_aborta_se_desconhecid
     assert leitura < codigo.index("New-Item -ItemType File -Path $pause")
     assert leitura < codigo.index("backup_pre_migracao.ps1")
     assert leitura < codigo.index("function PararComprovado")
+    # revisor da PR #527: tarefa desabilitada tambem aborta antes do sentinela (o /Run falharia depois do checkout)
+    desabilitada = _bloco_do_if(codigo, 'if ($estadoInicial -eq "Disabled") {')
+    assert "nada foi alterado" in desabilitada and "exit 1" in desabilitada
+    assert leitura < codigo.index('if ($estadoInicial -eq "Disabled") {') < codigo.index("New-Item -ItemType File -Path $pause")
+
+
+def _limite_da_leitura(restante, prazo_ps):
+    """Traducao literal de LimiteDaLeitura, com as constantes lidas do deploy.ps1."""
+    def constante(nome):
+        return int(re.search(r"\$" + nome + r" = (\d+)", prazo_ps).group(1))
+    piso, morte = constante("PisoLeituraSegundos"), constante("EsperaMorteFilhoSegundos")
+    cabe = math.floor(restante - 1 - morte)
+    return 0 if cabe < piso else min(30, cabe)
+
+
+def test_deploy_espera_da_parada_nunca_passa_do_prazo_total():
+    # Gate Sol da PR #527: com o piso por leitura (Max) e os 5 s da morte do filho, a espera chegava perto de 105 s.
+    # Pior caso: toda leitura estoura no limite dela e o filho leva os 5 s inteiros para morrer.
+    script = _ler("deploy.ps1")
+    funcao = _codigo(script)[_codigo(script).index("function LimiteDaLeitura"):_codigo(script).index("function EsperarParada")]
+    assert "$cabe = [Math]::Floor($restante - 1 - $EsperaMorteFilhoSegundos)" in funcao
+    assert "if ($cabe -lt $PisoLeituraSegundos) { return 0 }" in funcao
+    assert "return [int][Math]::Min($LimiteAgendador, $cabe)" in funcao
+    prazo = int(re.search(r"\$PrazoParadaSegundos = (\d+)", script).group(1))
+    morte = int(re.search(r"\$EsperaMorteFilhoSegundos = (\d+)", script).group(1))
+    decorrido, leituras = 0.0, 0
+    while True:
+        limite = _limite_da_leitura(prazo - decorrido, script)
+        if limite <= 0:
+            break
+        decorrido += 1 + limite + morte   # pausa, leitura que estoura, espera da morte do filho
+        leituras += 1
+    assert leituras >= 2 and decorrido <= prazo
 
 
 def test_deploy_imprime_cada_leitura_do_estado_e_a_parada_tem_prazo_total():
     # Issue #518: 10 leituras de ate' 30 s sem linha nenhuma passavam da regra dos 2 minutos da skill deploy.
     codigo = _codigo(_ler("deploy.ps1"))
     parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
-    laco = parar[parar.index("do {"):parar.index("} while (")]
+    assert parar.index('ComandoTarefa "End" $false') < parar.index("$estado = EsperarParada $momento")
+    esperar = codigo[codigo.index("function EsperarParada"):codigo.index("function PararComprovado")]
+    laco = esperar[esperar.index("while ($true) {"):]
     assert "Etapa " in laco and "$estado = EstadoDaTarefa $tarefaNome $limite" in laco
-    assert "$prazo = (Get-Date).AddSeconds($PrazoParadaSegundos)" in parar
-    assert "(Get-Date) -lt $prazo" in parar[parar.index("} while ("):]
-    # cada leitura so' usa o que sobra do prazo, com piso; o laco so' termina no prazo ou na parada provada
-    assert "($prazo - (Get-Date)).TotalSeconds" in laco
-    assert "[Math]::Max($PisoLeituraSegundos, $restante)" in laco
-    assert "$PrazoParadaSegundos = 90" in codigo and "$PisoLeituraSegundos = 10" in codigo
+    # prazo por Stopwatch (monotonico), nao por Get-Date; leitura que nao cabe nao e' iniciada
+    assert "[System.Diagnostics.Stopwatch]::StartNew()" in esperar and "Get-Date" not in esperar
+    assert "$limite = LimiteDaLeitura ($PrazoParadaSegundos - $relogio.Elapsed.TotalSeconds)" in laco
+    assert laco.index("if ($limite -le 0) { break }") < laco.index("Start-Sleep") < laco.index("EstadoDaTarefa")
     assert "if (TarefaParada $estado) { break }" in laco and '"desconhecido") { break }' not in laco
-    assert "} while ((Get-Date) -lt $prazo)" in parar
+    assert "$PrazoParadaSegundos = 90" in codigo
+    # a espera da morte do filho declarada e' a do Agendador
+    assert "$EsperaMorteFilhoSegundos = 5" in codigo
+    assert "WaitForExit(5000)" in _ler("comum_agendador.ps1")
     raiz = pathlib.Path(__file__).resolve().parents[2]
     skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
     runbook = (raiz / "docs" / "runbook.md").read_text(encoding="utf-8")

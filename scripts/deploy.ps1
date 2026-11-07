@@ -56,7 +56,8 @@ function Etapa([string]$texto) { Write-Host ("[{0}] {1}" -f (Get-Date -Format "H
 . (Join-Path $PSScriptRoot "comum_agendador.ps1")   # Agendador: schtasks.exe com tempo limite
 function Agendar([string[]]$argumentos) { return Agendador $argumentos $LimiteAgendador $Schtasks }
 $PrazoParadaSegundos = 90   # prazo total das leituras de estado depois de cada /End (issue #518)
-$PisoLeituraSegundos = 10   # tempo minimo de cada leitura de estado dentro desse prazo
+$PisoLeituraSegundos = 5    # leitura com menos tempo que isso nem e' iniciada (o powershell filho nao sobe)
+$EsperaMorteFilhoSegundos = 5   # o Agendador espera ate' isso pela morte do filho que estourou (WaitForExit(5000))
 $msgAgendador = "deploy abortado: agendador de tarefas nao respondeu"
 
 # A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
@@ -104,6 +105,12 @@ Etapa "lendo o estado da tarefa $tarefaNome"
 $estadoInicial = EstadoDaTarefa $tarefaNome $LimiteAgendador
 if ($estadoInicial -eq "desconhecido") {
     Write-Host "deploy abortado: o estado da tarefa $tarefaNome nao pode ser lido (scripts\estado_tarefa.ps1 pela COM Schedule.Service: erro, mais de $LimiteAgendador s ou arquivo ausente), entao nenhuma parada seria comprovada; nada foi alterado" -ForegroundColor Red
+    exit 1
+}
+# Revisor da PR #527: desabilitada, a parada seria dada por provada (Disabled conta como parada) e o /Run falharia depois do
+# checkout, inclusive no rollback, deixando a producao fora.
+if ($estadoInicial -eq "Disabled") {
+    Write-Host "deploy abortado: a tarefa $tarefaNome esta' desabilitada no agendador e o reinicio (schtasks /Run) falharia depois do checkout; habilitar a tarefa antes; nada foi alterado" -ForegroundColor Red
     exit 1
 }
 Etapa "estado da tarefa: $estadoInicial"
@@ -259,6 +266,31 @@ function ComandoTarefa([string]$verbo, [bool]$fatal) {
         Write-Warning $texto
     }
 }
+# Issue #518 (gate Sol da PR #527): o tempo da leitura que cabe no que sobra do prazo, contando a pausa de 1 s antes dela
+# e a espera da morte do filho que estoura ($EsperaMorteFilhoSegundos). 0 = nao cabe uma leitura de $PisoLeituraSegundos s.
+function LimiteDaLeitura([double]$restante) {
+    $cabe = [Math]::Floor($restante - 1 - $EsperaMorteFilhoSegundos)
+    if ($cabe -lt $PisoLeituraSegundos) { return 0 }
+    return [int][Math]::Min($LimiteAgendador, $cabe)
+}
+# Depois do /End: le o estado ate' "Ready"/"Disabled" ou ate' o prazo total, medido por Stopwatch (monotonico, ajuste do
+# relogio nao mexe). Uma linha por leitura; leitura que nao cabe no restante nao e' iniciada, entao a espera inteira fica
+# dentro de $PrazoParadaSegundos. "desconhecido" no meio (o leitor ja' respondeu no inicio do deploy) e' lido de novo.
+function EsperarParada([string]$momento) {
+    $estado = "desconhecido"
+    $relogio = [System.Diagnostics.Stopwatch]::StartNew()
+    $tentativa = 0
+    while ($true) {
+        $limite = LimiteDaLeitura ($PrazoParadaSegundos - $relogio.Elapsed.TotalSeconds)
+        if ($limite -le 0) { break }
+        Start-Sleep -Seconds 1
+        $tentativa++
+        Etapa "${momento}: lendo o estado da tarefa (leitura $tentativa, ate' $limite s)"
+        $estado = EstadoDaTarefa $tarefaNome $limite
+        if (TarefaParada $estado) { break }
+    }
+    return $estado
+}
 # Parada COMPROVADA (gate Sol da PR #389): "parada solicitada" ($script:tarefaParada, marcada ANTES do /End, porque um
 # /End cujo cliente estourou pode ter parado a tarefa) nao basta. Depois do /End o estado e' lido pela COM
 # (EstadoDaTarefa) ate' "Ready" ou "Disabled" (Running e Queued sao ativas; ilegivel nao prova nada) e a porta e'
@@ -268,21 +300,7 @@ function PararComprovado([string]$momento) {
     $script:tarefaParada = $true
     $script:producaoMexida = $true
     ComandoTarefa "End" $false
-    # Issue #518: uma linha por leitura e um prazo total so' no laco. Cada leitura usa o que sobra do prazo, com piso de
-    # $PisoLeituraSegundos s (menos que isso nem o powershell filho sobe), entao a parada fica em ~$PrazoParadaSegundos s
-    # mais uma leitura. "desconhecido" no meio (o leitor ja' respondeu no inicio do deploy) e' lido de novo ate' o prazo.
-    $estado = "desconhecido"
-    $prazo = (Get-Date).AddSeconds($PrazoParadaSegundos)
-    $tentativa = 0
-    do {
-        Start-Sleep -Seconds 1
-        $tentativa++
-        $restante = [Math]::Ceiling(($prazo - (Get-Date)).TotalSeconds)
-        $limite = [int][Math]::Min($LimiteAgendador, [Math]::Max($PisoLeituraSegundos, $restante))
-        Etapa "${momento}: lendo o estado da tarefa (leitura $tentativa, ate' $limite s)"
-        $estado = EstadoDaTarefa $tarefaNome $limite
-        if (TarefaParada $estado) { break }
-    } while ((Get-Date) -lt $prazo)
+    $estado = EsperarParada $momento
     if (-not (TarefaParada $estado)) { throw "tarefa $tarefaNome nao comprovadamente parada (estado: $estado)" }
     Start-Sleep -Seconds 2
     LiberarPorta
