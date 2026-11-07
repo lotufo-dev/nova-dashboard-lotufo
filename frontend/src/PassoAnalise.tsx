@@ -34,9 +34,11 @@ export function processoDa(processos: ProcessoSiga[], medicaoId: number, numero:
 
 type Resposta = "aprovou" | "revisao" | null;
 
-export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, aoMudarSiga }: {
+/** `aoRevisar`: a revisao foi gravada; a pagina descarta a conferencia antiga e espera o detalhe novo (gate Sol, PR
+ *  #553): ate' la' nem outra revisao nem o espelho sem o boletim se oferecem. */
+export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, aoMudarSiga, aoRevisar }: {
   m: Medicao; planilha: DetalhePlanilha | null; podeEditar: boolean; salvando: boolean; agir: Agir;
-  aoMudarSiga: () => void;
+  aoMudarSiga: () => void; aoRevisar?: () => void;
 }) {
   const [siga, setSiga] = useState<PainelSiga | null>(null);
   const [aberta, setAberta] = useState<Resposta>(null);
@@ -134,7 +136,10 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
                   <div className="resposta__corpo">
                     <Revisao medicao={planilha} vigente={vigente} ocupado={salvando} aoFechar={() => setAberta(null)}
                       aoRegistrar={async fd => {
-                        const ok = await agir(() => apiForm(`/api/medicoes/${m.id}/planilhas`, fd), "Revisão registrada.");
+                        const ok = await agir(async () => {
+                          await apiForm(`/api/medicoes/${m.id}/planilhas`, fd);
+                          aoRevisar?.();
+                        }, "Revisão registrada.");
                         if (ok) setAberta(null);
                       }} />
                   </div>

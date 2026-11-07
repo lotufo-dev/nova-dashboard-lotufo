@@ -338,7 +338,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     <section className="med-passo" id="passo-2" aria-labelledby="passo-2-titulo">
       <h2 className="sr-only" id="passo-2-titulo">Análise do órgão</h2>
       <PassoAnalise m={m} planilha={planilha} podeEditar={podeEditar} salvando={salvando} agir={agir}
-        aoMudarSiga={() => { setFeito("Número gravado."); recarregar(); }} />
+        aoMudarSiga={() => { setFeito("Número gravado."); recarregar(); }}
+        aoRevisar={() => { setRevisaoDe(null); setPlanilhaDe(null); }} />
       {comPlanilha && enviada && revisao === "falhou" && (
         <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
           <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>

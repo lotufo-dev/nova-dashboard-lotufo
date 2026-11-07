@@ -996,4 +996,28 @@ describe("Página da obra em medição: passo 2, análise do órgão (issue #508
     expect(fd.get("motivo")).toBe("Fiscal pediu ajuste");
     expect(await screen.findByText("Revisão registrada.")).toBeTruthy();
   });
+
+  it("depois de gravar a revisão, nada se oferece até o detalhe novo chegar (gate Sol, PR #553)", async () => {
+    let leituras = 0;
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [ENVIADA],
+      "/api/siga": SIGA });
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, opts?: RequestInit) => {
+      if (url === "/api/medicoes/5") return ++leituras === 1 ? detalhePlanilha("planilha_enviada") : new Promise(() => {});
+      return base(url, opts);
+    });
+    apiForm.mockResolvedValue({ ok: true });
+    pagina();
+    await screen.findByRole("button", { name: "Gerar o espelho sem o boletim" });
+    fireEvent.click(screen.getByRole("button", { name: /^Pediu revisão/ }));
+    const form = screen.getByRole("form", { name: "Registrar revisão Rev01" });
+    fireEvent.change(within(form).getByLabelText("Motivo (obrigatório)"), { target: { value: "Fiscal pediu ajuste" } });
+    fireEvent.change(within(form).getByLabelText("Ofício assinado (PDF)"), { target: { files: [new File(["%PDF-1.4"], "o.pdf", { type: "application/pdf" })] } });
+    fireEvent.change(within(form).getByLabelText("Planilha (.xlsx ou PDF)"), { target: { files: [new File(["PK"], "p.xlsx")] } });
+    fireEvent.click(within(form).getByRole("button", { name: "Registrar revisão" }));
+    expect(await screen.findByText("Revisão registrada.")).toBeTruthy();
+    await waitFor(() => expect(leituras).toBeGreaterThanOrEqual(2));
+    expect(screen.queryByRole("button", { name: /^Pediu revisão/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeNull();
+  });
 });

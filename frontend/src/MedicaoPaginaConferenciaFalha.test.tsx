@@ -134,7 +134,7 @@ describe("Página da medição: falhas na conferência da revisão (cartão real
     expect(semBoletim()).toBeNull();
   });
 
-  it("com a falha na tela, outra revisão que relê com sucesso limpa a falha", async () => {
+  it("com a falha na tela, a revisão não se oferece sobre a leitura velha; Tentar de novo relê e limpa a falha", async () => {
     window.history.replaceState(null, "", "/obras/1/medicoes/5");
     responder(n => n === 2);
     apiForm.mockImplementation(async () => ({ ok: true })); // a releitura devolve o mesmo (sem revisão pendente)
@@ -144,10 +144,11 @@ describe("Página da medição: falhas na conferência da revisão (cartão real
     preencherRevisao();
     expect(await screen.findByText(/Não foi possível conferir a planilha\/carta\./)).toBeTruthy();
     expect(semBoletim()).toBeNull();
-    await waitFor(() => expect(screen.queryByRole("form", { name: /^Registrar revisão Rev/ })).toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: /^Pediu revisão/ }));
-    preencherRevisao();
+    // a conferencia antiga foi descartada ao gravar (gate Sol, PR #553): sem leitura certa, nada de outra revisao
+    expect(screen.queryByRole("button", { name: /^Pediu revisão/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
     await waitFor(() => expect(screen.queryByText(/Não foi possível conferir/)).toBeNull());
     expect(await screen.findByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Pediu revisão/ })).toBeTruthy();
   });
 });
