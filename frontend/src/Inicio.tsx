@@ -282,7 +282,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <aside aria-labelledby="ini-avisos" className="ini-painel ini-avisos">
           <h2 id="ini-avisos">Avisos importantes</h2>
           <SecaoAviso id="ini-av-reajustes" titulo="Reajustes" icone={<IconeReajuste />} total={av.reajustes.total} tom="neutro"
-            familia="reajuste" ir={ir} vazio="Nenhum reajuste a pedir.">
+            familia="reajustes" ir={ir} vazio="Nenhum reajuste a pedir.">
             {av.reajustes.itens.map((x, i) => (
               <li key={`${x.contrato_id}-${i}`}>
                 <Link para={{ tela: "obra", id: x.contrato_id, aba: "reajuste" }} ir={ir} className="ini-aviso__linha">
@@ -291,7 +291,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
               </li>))}
           </SecaoAviso>
           <SecaoAviso id="ini-av-prazos" titulo="Prazos" icone={<IconePrazo />} total={av.prazos.total} tom="acao"
-            familia="prazo" ir={ir} vazio="Nenhum prazo vencido ou chegando.">
+            familia="prazos" ir={ir} vazio="Nenhum prazo vencido ou chegando.">
             {av.prazos.itens.map(x => (
               <li key={`${x.contrato_id}-${x.tipo}`}>
                 <Link para={{ tela: "obra", id: x.contrato_id, aba: "prazos" }} ir={ir} className="ini-aviso__linha">
@@ -303,7 +303,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
               </li>))}
           </SecaoAviso>
           <SecaoAviso id="ini-av-certidoes" titulo="Certidões" icone={<IconeCertidao />} total={av.certidoes.total} tom="atencao"
-            familia="documentos" ir={ir} vazio="Nenhuma certidão vencendo.">
+            familia="certidoes" ir={ir} vazio="Nenhuma certidão vencendo.">
             {av.certidoes.itens.map((x, i) => (
               <li key={`${x.tipo}-${x.entidade}-${i}`}>
                 <Link para={{ tela: "documentos" }} ir={ir} className="ini-aviso__linha">

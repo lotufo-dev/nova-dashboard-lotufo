@@ -602,6 +602,21 @@ def da_obra(conn, contrato_id: int) -> dict:
     return {"faturado_centavos": faturado, "a_receber_centavos": a_receber}
 
 
+def a_receber_por_obra(conn) -> dict[int, int] | None:
+    """O a receber de TODAS as obras de uma vez, em valor CHEIO, pela mesma conta de `da_obra` (lista de Obras, #509).
+    Sem o total liberado, nulo: a lista mostra "—" em vez de um numero nao conciliado. Obra sem nada a receber fica de fora."""
+    if not _liberado(conn):
+        return None
+    cheio = lambda m: m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"] or 0
+    por_obra: dict[int, int] = {}
+    for m in _medicoes(conn):
+        if m["estado"] in PROTOCOLADAS:
+            por_obra[m["contrato_id"]] = por_obra.get(m["contrato_id"], 0) + cheio(m)
+    for n in _notas_em_aberto(conn):
+        por_obra[n["contrato_id"]] = por_obra.get(n["contrato_id"], 0) + cheio(n)
+    return por_obra
+
+
 def _obras_base(conn) -> dict:
     """A-21 (10/10/2026): de que sao feitas as obras do farol (o QDOP conta tudo que nao e' rescindido), para a
     tela dizer a base; "ativas" e' a definicao unica de `avisos.ativos` (ativo sem encerramento iniciado)."""

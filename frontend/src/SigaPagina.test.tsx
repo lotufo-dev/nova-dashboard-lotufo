@@ -1,15 +1,20 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SigaPagina from "./SigaPagina";
-import type { Movimentacao, PainelSiga, ProcessoSiga, Robo } from "./siga";
+import type { Movimentacao, PainelSiga, ProcessoSiga, Robo, TipoMovimentacao } from "./siga";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
 // 28/10/2026, 11h30 em Cuiaba. Pessoas, obras e processos fictícios.
+const tipoDe = (evento: string): TipoMovimentacao => {
+  const e = evento.toLowerCase();
+  return e.startsWith("transfer") ? "transferencia" : e.startsWith("recebimento") ? "recebimento"
+    : e.startsWith("juntada") ? "juntada" : e.startsWith("marca") ? "marcacao" : "outras";
+};
 const AGORA = new Date("2026-10-28T15:30:00Z");
 const mov = (data: string, evento: string, extra: Partial<Movimentacao> = {}): Movimentacao => ({
-  data, evento, cad_lotacao: "PROTOC/ORGAO", cad_pessoa: "Beltrano", at_lotacao: "COFIN/ORGAO", at_pessoa: "Fulano", ...extra });
+  data, evento, tipo: tipoDe(evento), cad_lotacao: "PROTOC/ORGAO", cad_pessoa: "Beltrano", at_lotacao: "COFIN/ORGAO", at_pessoa: "Fulano", ...extra });
 const processo = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
   id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
   medicao_titulo: null, protocolo_id: null, situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", setor: "COFIN",
@@ -24,8 +29,10 @@ const ALFA = processo({
   ultima: mov("2026-10-28T09:30:00-04:00", "Recebimento | texto do órgão"),
   movimentacoes: [
     mov("2026-10-20T10:00:00-04:00", "Cadastro", { at_pessoa: "Beltrano", at_lotacao: "PROTOC/ORGAO" }),
-    mov("2026-10-28T09:30:00-04:00", "Recebimento | texto do órgão"),
+    mov("2026-10-28T08:00:00-04:00", "Recebimento", { cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Fulano" }),
     mov("2026-10-25T08:00:00-04:00", "Transferência", { cad_pessoa: "Sicrana", cad_lotacao: "PROTOC/ORGAO", at_lotacao: "GABIN/ORGAO", at_pessoa: "" }),
+    mov("2026-10-26T14:10:00-04:00", "Juntada | documento ORGAO-DIC-2026/96012-A", { cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Bruna", at_lotacao: "", at_pessoa: "" }),
+    mov("2026-10-27T09:00:00-04:00", "Marcação", { cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Camila", at_lotacao: "GSAGPM/ORGAO", at_pessoa: "Helia" }),
   ] });
 const EPSILON = processo({
   id: 2, nome: "Processo Epsilon", contrato_id: 8, obra: "Obra Épsilon", medicao_id: 32, medicao_titulo: "2ª Medição",
@@ -36,6 +43,17 @@ const BETA = processo({
   id: 4, nome: "Processo Beta", numero: "ORGAO-PRO-2026/00011", situacao: "2º Volume - Caixa de Entrada [GABIN, [X]]",
   setor: "GABIN", caixa_entrada: true, com_quem: "", dias_uteis: 6 });
 const GAMA = processo({ id: 5, nome: "Processo Gama", dias_uteis: 12, setor: "COFIN" });
+// 40 movimentações: 20 transferências, 10 recebimentos, 6 juntadas, 3 marcações e 1 anotação; o último recebimento é o do setor atual
+const MUITOS = processo({
+  id: 6, nome: "Processo Mu", numero: "ORGAO-PRO-2026/00020", setor: "CCONT", desde: "2026-10-23T17:05:00-04:00", dias_uteis: 3,
+  movimentacoes: [
+    ...Array.from({ length: 20 }, (_, i) => mov(`2026-10-${String(1 + (i % 20)).padStart(2, "0")}T09:00:00-04:00`, "Transferência")),
+    ...Array.from({ length: 9 }, (_, i) => mov(`2026-10-${String(2 + i).padStart(2, "0")}T10:00:00-04:00`, "Recebimento")),
+    mov("2026-10-23T17:05:00-04:00", "Recebimento", { cad_lotacao: "CCONT/ORGAO", cad_pessoa: "Athayde", at_lotacao: "CCONT/ORGAO", at_pessoa: "Athayde" }),
+    ...Array.from({ length: 6 }, (_, i) => mov(`2026-10-${String(5 + i).padStart(2, "0")}T11:00:00-04:00`, "Juntada | documento DOC-0" + i)),
+    ...Array.from({ length: 3 }, (_, i) => mov(`2026-10-${String(12 + i).padStart(2, "0")}T12:00:00-04:00`, "Marcação")),
+    mov("2026-10-22T08:00:00-04:00", "Anotação"),
+  ] });
 
 const PARADO: Robo = { estado: "parado", rodada: null, pedidos: [], avisos: [] };
 const painel = (processos: ProcessoSiga[], extra: Partial<PainelSiga> = {}): PainelSiga =>
@@ -44,154 +62,212 @@ const mostrar = (dados: PainelSiga, busca: Record<string, string> = {}) => {
   api.mockResolvedValue(dados);
   return render(<SigaPagina busca={busca} agora={AGORA} />);
 };
-const grupo = (nome: string) => screen.getByText(nome).closest("tbody") as HTMLElement;
-const nomesNoGrupo = (nome: string) => within(grupo(nome)).getAllByRole("row").slice(1).map(l => l.getAttribute("aria-label"));
+const nomesNaTabela = () => screen.getAllByRole("row").slice(1).map(l => l.getAttribute("aria-label"));
 
 describe("SigaPagina", () => {
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
-  it("separa os processos de medições dos outros; o ligado mostra a obra e a medição com link para a etapa 4, o outro o nome do robô", async () => {
-    mostrar(painel([ALFA, BETA]));
-    await screen.findByText("Processos de medições");
-    expect(nomesNoGrupo("Processos de medições")).toEqual(["Obra Alfa · 7ª Medição"]);
-    expect(nomesNoGrupo("Outros processos")).toEqual(["Processo Beta"]);
-    const link = screen.getByRole("link", { name: "7ª Medição" });
-    expect(link.getAttribute("href")).toBe("/obras/7/medicoes/31#etapa-4");
-    expect(within(grupo("Processos de medições")).getByText("Obra Alfa")).toBeTruthy();
-  });
-
-  it("?processo= (o 'Abrir' do aviso) abre o painel desse processo; id que não existe cai no primeiro", async () => {
-    const { unmount } = mostrar(painel([ALFA, DELTA]), { processo: String(DELTA.id) });
-    expect((await screen.findByRole("complementary", { name: "Detalhe do processo" })).textContent).toMatch(/Obra Delta/);
-    expect(screen.getByRole("row", { name: /Obra Delta/ }).getAttribute("aria-selected")).toBe("true");
-    unmount();
-    mostrar(painel([ALFA, DELTA]), { processo: "999" });
-    expect((await screen.findByRole("complementary", { name: "Detalhe do processo" })).textContent).toMatch(/Obra Alfa/);
-  });
-
-  it("grupo vazio não aparece", async () => {
-    mostrar(painel([BETA]));
-    await screen.findByText("Outros processos");
+  it("uma tabela só, do mais parado ao menos (dias úteis), sem grupos nem coluna Hoje nem painel lateral", async () => {
+    mostrar(painel([ALFA, DELTA, EPSILON, BETA, GAMA]));
+    await screen.findByRole("grid");
+    expect(nomesNaTabela()).toEqual(["Processo Gama", "Processo Beta", "Obra Delta · 4ª Medição", "Obra Alfa · 7ª Medição", "Obra Épsilon · 2ª Medição"]);
+    expect(screen.getAllByRole("columnheader").map(c => c.textContent)).toEqual(
+      ["Processo", "Onde está", "Com quem", "No setor há", "Última movimentação", "Protocolado em", "Abrir"]);
     expect(screen.queryByText("Processos de medições")).toBeNull();
+    expect(screen.queryByText("Outros processos")).toBeNull();
+    expect(screen.queryByRole("complementary")).toBeNull();
   });
 
-  it("quem andou hoje vem primeiro (o mais recente no topo), depois os parados há mais tempo", async () => {
-    mostrar(painel([DELTA, ALFA, EPSILON, BETA, GAMA]));
-    await screen.findByText("Outros processos");
-    expect(nomesNoGrupo("Processos de medições")).toEqual(["Obra Épsilon · 2ª Medição", "Obra Alfa · 7ª Medição", "Obra Delta · 4ª Medição"]);
-    expect(nomesNoGrupo("Outros processos")).toEqual(["Processo Gama", "Processo Beta"]);
+  it("subtítulo com o número de processos e a hora da última leitura; legenda da cor", async () => {
+    mostrar(painel([ALFA, BETA]));
+    await screen.findByRole("grid");
+    expect(screen.getByText("2 processos · última leitura 11:00")).toBeTruthy();
+    const legenda = screen.getByRole("list", { name: "Cor do tempo no setor" });
+    expect(within(legenda).getAllByRole("listitem").map(li => li.textContent)).toEqual(
+      ["andou hoje", "parado há 5 dias úteis ou mais", "10 dias úteis ou mais"]);
   });
 
-  it("movimentação hoje: ponto verde e a contagem em Hoje; sem movimentação, sem ponto", async () => {
-    mostrar(painel([ALFA, DELTA]));
-    const linha = await screen.findByRole("row", { name: /Obra Alfa/ });
-    expect(linha.querySelector(".sg__ponto--hoje")).toBeTruthy();
-    expect(within(linha).getByText("1")).toBeTruthy();
-    expect(screen.getByRole("row", { name: /Obra Delta/ }).querySelector(".sg__ponto--hoje")).toBeNull();
+  it("Processo: obra em negrito e a medição embaixo; sem medição, o nome do robô e a obra embaixo", async () => {
+    mostrar(painel([ALFA, BETA]));
+    const alfa = await screen.findByRole("row", { name: /Obra Alfa/ });
+    expect(within(alfa).getByText("Obra Alfa").className).toContain("sg__nome");
+    expect(within(alfa).getByText("7ª Medição").className).toContain("sg__fraco");
+    expect(within(alfa).queryByRole("link")).toBeNull();
+    const beta = screen.getByRole("row", { name: "Processo Beta" });
+    expect(within(beta).getByText("Processo Beta").className).toContain("sg__nome");
   });
 
-  it("selo âmbar a partir de 5 dias úteis no setor, vermelho a partir de 10, nenhum antes", async () => {
-    mostrar(painel([DELTA, BETA, GAMA]));
-    await screen.findByText("Outros processos");
-    expect(screen.getByText("12 dias úteis").closest(".selo")?.className).toContain("selo--acao");
-    expect(screen.getByText("6 dias úteis").closest(".selo")?.className).toContain("selo--atencao");
-    expect(screen.getByText("3 dias úteis").closest(".selo")).toBeNull();
+  it("cor do tempo no setor: âmbar a partir de 5 dias úteis, vermelho a partir de 10, nenhuma antes; verde 'hoje' quando andou hoje", async () => {
+    mostrar(painel([ALFA, DELTA, BETA, GAMA]));
+    await screen.findByRole("grid");
+    expect(screen.getByText("12 dias úteis").className).toContain("sg__dias--acao");
+    expect(screen.getByText("6 dias úteis").className).toContain("sg__dias--atencao");
+    expect(screen.getByText("3 dias úteis").className).not.toMatch(/sg__dias--(atencao|acao)/);
+    const hoje = screen.getByText("hoje");
+    expect(hoje.className).toContain("sg__dias--hoje");
+    expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).getByText("hoje")).toBe(hoje);
   });
 
-  it("No setor há: minutos e horas antes de um dia útil", async () => {
-    mostrar(painel([ALFA, EPSILON]));
-    await screen.findByText("Processos de medições");
+  it("No setor há: minutos e horas antes de um dia útil, para quem não andou hoje", async () => {
+    mostrar(painel([processo({ id: 7, nome: "Mi", dias_uteis: 0, hoje: 0, desde: "2026-10-28T11:00:00-04:00" }),
+      processo({ id: 8, nome: "Ho", dias_uteis: 0, hoje: 0, desde: "2026-10-28T08:00:00-04:00" })]));
+    await screen.findByRole("grid");
     expect(screen.getByText("3 h")).toBeTruthy();       // desde 08h00, agora 11h30
     expect(screen.getByText("30 min")).toBeTruthy();    // desde 11h00
   });
 
-  it("Onde está: setor, caixa de entrada e volume; Última ação sem o texto depois de ' |'", async () => {
+  it("Onde está: setor, caixa de entrada e volume; Última movimentação com dia/mês e o evento sem o texto depois de ' |'; Protocolado em", async () => {
     mostrar(painel([ALFA, BETA]));
     const beta = await screen.findByRole("row", { name: /Processo Beta/ });
     expect(within(beta).getByText("GABIN")).toBeTruthy();
     expect(within(beta).getByText("caixa de entrada")).toBeTruthy();
     expect(within(beta).getByText("(2º Volume)")).toBeTruthy();
     const alfa = screen.getByRole("row", { name: /Obra Alfa/ });
+    expect(within(alfa).getByText("28/10")).toBeTruthy();
     expect(within(alfa).getByText("Recebimento")).toBeTruthy();
     expect(within(alfa).queryByText(/texto do órgão/)).toBeNull();
     expect(within(alfa).getByText("Fulano")).toBeTruthy();                // Com quem
-    expect(within(alfa).getByText("01/10/2026")).toBeTruthy();            // Protocolado
+    expect(within(alfa).getByText("01/10/2026")).toBeTruthy();            // Protocolado em
   });
 
-  it("a primeira linha abre no painel; clicar em outra troca o painel (número, situação, Abrir no SIGA, movimentações da mais recente para a mais antiga)", async () => {
+  it("clicar na linha, ou Enter nela, abre o histórico do processo (?processo=)", async () => {
     mostrar(painel([ALFA, BETA]));
-    const painelAlfa = await screen.findByRole("complementary", { name: "Detalhe do processo" });
-    expect(within(painelAlfa).getByRole("heading", { name: /Obra Alfa · 7ª Medição/ })).toBeTruthy();
-    expect(within(painelAlfa).getByText("ORGAO-PRO-2026/00001")).toBeTruthy();
-    expect(within(painelAlfa).getByText("1º Volume - Aguardando Andamento [COFIN, [X]]")).toBeTruthy();
-    const abrir = within(painelAlfa).getByRole("link", { name: /Abrir no SIGA/ });
-    expect(abrir.getAttribute("href")).toBe("https://siga.exemplo.com.br/acompanhar?n=ABC123");
-    const itens = within(painelAlfa).getAllByRole("listitem").map(li => li.textContent ?? "");
-    expect(itens).toHaveLength(3);
-    expect(itens[0]).toContain("Recebimento");          // 28/10, a mais recente
-    expect(itens[1]).toContain("Transferência");        // 25/10
-    expect(itens[1]).toContain("→ GABIN");
-    expect(itens[1]).toContain("Sicrana");
-    expect(itens[2]).toContain("Cadastro");             // 20/10, a mais antiga
-    expect(itens[0]).toContain("28/10/2026 às 09:30");
+    fireEvent.click(await screen.findByRole("row", { name: /Processo Beta/ }));
+    expect(window.location.pathname + window.location.search).toBe("/siga?processo=4");
+    window.history.replaceState(null, "", "/");
+    fireEvent.keyDown(screen.getByRole("row", { name: /Obra Alfa/ }), { key: "Enter" });
+    expect(window.location.search).toBe("?processo=1");
+  });
 
-    fireEvent.click(screen.getByRole("row", { name: /Processo Beta/ }));
-    const painelBeta = screen.getByRole("complementary", { name: "Detalhe do processo" });
-    expect(within(painelBeta).getByRole("heading", { name: "Processo Beta" })).toBeTruthy();
-    expect(within(painelBeta).queryByRole("link", { name: /Abrir no SIGA/ })).toBeNull();   // sem código, sem link
+  it("?processo= abre o histórico desse processo; id que não existe cai na tabela", async () => {
+    const { unmount } = mostrar(painel([ALFA, DELTA]), { processo: String(DELTA.id) });
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Histórico · Obra Delta · 4ª Medição");
+    expect(screen.queryByRole("table", { name: /Processos/ })).toBeNull();
+    unmount();
+    window.history.replaceState(null, "", "/siga?processo=999");
+    mostrar(painel([ALFA, DELTA]), { processo: "999" });
+    expect(await screen.findByRole("grid")).toBeTruthy();
+    expect(window.location.search).toBe("");   // sai o ?processo= que nao existe
   });
 
   it("sem nenhum processo: só a linha 'Nenhum processo acompanhado.'", async () => {
     mostrar(painel([], { lido_em: null }));
     expect(await screen.findByText("Nenhum processo acompanhado.")).toBeTruthy();
-    expect(screen.queryByText(/Lido às/)).toBeNull();
-    expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(screen.getByText("0 processos")).toBeTruthy();
+    expect(screen.queryByRole("grid")).toBeNull();
   });
 
-  it("mostra a hora local da última leitura; atrasado avisa desde quando, em dia não avisa", async () => {
+  it("atrasado avisa desde quando; em dia não avisa", async () => {
     const { unmount } = mostrar(painel([ALFA], { atrasado: true, lido_em: "2026-10-28T12:00:00+00:00" }));
-    const lido = await screen.findByText((_, el) => el?.tagName === "P" && el.textContent === "Lido às 08:00");
-    expect(lido).toBeTruthy();
+    expect(await screen.findByText("1 processo · última leitura 08:00")).toBeTruthy();
     expect(screen.getByText("O monitor do SIGA não lê desde 28/10 08:00.")).toBeTruthy();
     unmount();
     mostrar(painel([ALFA]));
-    await screen.findByText("Processos de medições");
-    expect(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === "Lido às 11:00")).toBeTruthy();
+    await screen.findByRole("grid");
     expect(screen.queryByText(/O monitor do SIGA não lê/)).toBeNull();
   });
 
-  it("filtra por obra, nome do robô ou número, sem diferenciar maiúscula e acento", async () => {
-    mostrar(painel([ALFA, EPSILON, BETA]), { q: "EPSILON" });
-    await screen.findByText("Processos de medições");
-    expect(nomesNoGrupo("Processos de medições")).toEqual(["Obra Épsilon · 2ª Medição"]);
-    expect(screen.queryByText("Outros processos")).toBeNull();
-  });
-
-  it("digitar na busca troca o filtro na URL", async () => {
-    mostrar(painel([ALFA, BETA]));
-    const campo = await screen.findByRole("searchbox", { name: "Buscar obra" });
-    fireEvent.change(campo, { target: { value: "alfa" } });
-    expect(window.location.search).toBe("?q=alfa");
-  });
-
-  it("rele a cada 15 minutos sem perder a linha aberta; o aviso de atraso aparece quando a resposta nova o traz; ao sair, para", async () => {
+  it("rele a cada 15 minutos; o aviso de atraso aparece quando a resposta nova o traz; ao sair, para", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mostrar(painel([ALFA, BETA]));
-      await screen.findByText("Processos de medições");
-      fireEvent.click(screen.getByRole("row", { name: /Processo Beta/ }));
+      await screen.findByRole("grid");
       expect(api).toHaveBeenCalledTimes(1);
       expect(screen.queryByText(/O monitor do SIGA não lê/)).toBeNull();
       api.mockResolvedValue(painel([ALFA, BETA], { atrasado: true, lido_em: "2026-10-28T12:00:00+00:00" }));
       await vi.advanceTimersByTimeAsync(15 * 60_000);
       expect(api).toHaveBeenCalledTimes(2);
       expect(await screen.findByText("O monitor do SIGA não lê desde 28/10 08:00.")).toBeTruthy();
-      expect(screen.getByRole("complementary", { name: "Detalhe do processo" }).querySelector("h2")?.textContent).toBe("Processo Beta");
       cleanup();
       await vi.advanceTimersByTimeAsync(30 * 60_000);
       expect(api).toHaveBeenCalledTimes(2);
     } finally { vi.useRealTimers(); }
+  });
+
+  // issue #512: histórico do processo
+  const chipsDe = () => within(screen.getByRole("group", { name: "Tipo de movimentação" })).getAllByRole("button").map(b => b.textContent);
+  const linhasDoHistorico = () => within(screen.getByRole("table")).getAllByRole("row").slice(1);
+
+  it("histórico: trilha, título, número, total e período, Abrir no SIGA e a medição", async () => {
+    mostrar(painel([ALFA]), { processo: "1" });
+    const h1 = await screen.findByRole("heading", { level: 1 });
+    expect(h1.textContent).toBe("Histórico · Obra Alfa · 7ª Medição");
+    const trilha = screen.getByRole("navigation", { name: "Você está em" });
+    expect(within(trilha).getByRole("link", { name: "SIGA" }).getAttribute("href")).toBe("/siga");
+    expect(trilha.textContent).toContain("Obra Alfa · 7ª Medição");
+    expect(within(trilha).getByText("Histórico").getAttribute("aria-current")).toBe("page");
+    expect(screen.getByText("ORGAO-PRO-2026/00001 · 5 movimentações · 20/10/2026 a 28/10/2026")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Abrir no SIGA/ }).getAttribute("href")).toBe("https://siga.exemplo.com.br/acompanhar?n=ABC123");
+    expect(screen.getByRole("link", { name: "Ver a medição" }).getAttribute("href")).toBe("/obras/7/medicoes/31#etapa-4");
+  });
+
+  it("histórico: tabela De/Para, a mais recente primeiro, documento na juntada", async () => {
+    mostrar(painel([ALFA]), { processo: "1" });
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.getAllByRole("columnheader").map(c => c.textContent)).toEqual(["Data e hora", "Evento", "De (setor · pessoa)", "Para (setor · pessoa)"]);
+    const linhas = linhasDoHistorico();
+    expect(linhas.map(l => within(l).getAllByRole("cell")[1].textContent)).toEqual([
+      "Recebimento", "Marcação", "Juntadadocumento ORGAO-DIC-2026/96012-A", "Transferência", "Cadastro"]);
+    const transf = linhas[3];
+    expect(within(transf).getAllByRole("cell")[2].textContent).toBe("PROTOC · Sicrana");
+    expect(within(transf).getAllByRole("cell")[3].textContent).toBe("GABIN");
+    expect(within(linhas[1]).getAllByRole("cell")[3].textContent).toBe("GSAGPM · Helia");
+    expect(within(linhas[0]).getAllByRole("cell")[0].textContent).toBe("28/10/2026 às 08:00");
+  });
+
+  it("histórico: traz TODAS as movimentações (não só 30), 15 por vez com 'Ver mais', e a linha do recebimento no setor atual destacada", async () => {
+    mostrar(painel([MUITOS]), { processo: "6" });
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.getByText("40 movimentações", { exact: false })).toBeTruthy();
+    expect(linhasDoHistorico()).toHaveLength(15);
+    expect(screen.getByText(/Mostrando 15 de 40/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ver mais" }));
+    expect(linhasDoHistorico()).toHaveLength(40);
+    expect(screen.getByText(/Mostrando 40 de 40/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ver mais" })).toBeNull();
+    const destacadas = linhasDoHistorico().filter(l => l.getAttribute("aria-current") === "true");
+    expect(destacadas).toHaveLength(1);
+    expect(destacadas[0].className).toContain("sg__mov--atual");
+    expect(within(destacadas[0]).getAllByRole("cell")[0].textContent).toBe("23/10/2026 às 17:05");
+  });
+
+  it("histórico: chips por tipo contam certo e filtram; Todas volta", async () => {
+    mostrar(painel([MUITOS]), { processo: "6" });
+    await screen.findByRole("heading", { level: 1 });
+    expect(chipsDe()).toEqual(["Todas 40", "Transferências 20", "Recebimentos 10", "Juntadas 6", "Marcações 3", "Outras 1"]);
+    fireEvent.click(screen.getByRole("button", { name: /Juntadas/ }));
+    expect(screen.getByRole("button", { name: /Juntadas/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(linhasDoHistorico()).toHaveLength(6);
+    expect(screen.getByText(/Mostrando 6 de 6/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Outras/ }));
+    expect(linhasDoHistorico().map(l => within(l).getAllByRole("cell")[1].textContent)).toEqual(["Anotação"]);
+    fireEvent.click(screen.getByRole("button", { name: /Todas/ }));
+    expect(linhasDoHistorico()).toHaveLength(15);
+  });
+
+  it("histórico: busca por setor, pessoa ou documento, sem maiúscula nem acento, junto com o tipo", async () => {
+    mostrar(painel([MUITOS]), { processo: "6" });
+    await screen.findByRole("heading", { level: 1 });
+    const busca = screen.getByRole("searchbox", { name: "Buscar setor, pessoa ou documento" });
+    fireEvent.change(busca, { target: { value: "ATHAYDE" } });
+    expect(linhasDoHistorico()).toHaveLength(1);
+    fireEvent.change(busca, { target: { value: "doc-03" } });
+    expect(linhasDoHistorico()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /Marcações/ }));
+    expect(screen.getByText("Nenhuma movimentação encontrada.")).toBeTruthy();
+    expect(chipsDe()[0]).toBe("Todas 40");   // a contagem dos chips é do processo, não da busca
+  });
+
+  it("histórico: Pedir leitura do processo pede com processo_id", async () => {
+    const chamadas: { caminho: string; opts?: RequestInit }[] = [];
+    api.mockImplementation(async (caminho: string, opts?: RequestInit) => {
+      chamadas.push({ caminho, opts });
+      return caminho === "/api/siga" ? painel([ALFA], { pode_atualizar: true }) : { id: 9 };
+    });
+    render(<SigaPagina busca={{ processo: "1" }} agora={AGORA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Pedir leitura" }));
+    await vi.waitFor(() => expect(chamadas.filter(c => c.caminho === "/api/siga")).toHaveLength(2));
+    expect(JSON.parse(chamadas.find(c => c.caminho === "/api/siga/atualizar")?.opts?.body as string)).toEqual({ processo_id: ALFA.id });
   });
 
   // issue #339: link colado na tela SIGA
@@ -223,12 +299,11 @@ describe("SigaPagina", () => {
     return form;
   };
 
-  it("Acompanhar processo: abre o formulário com link, nome, obra (em ordem alfabética, 'Sem obra' primeiro) e número; envia, a lista recarrega e o novo abre no painel", async () => {
+  it("Acompanhar processo: abre o formulário com link, nome, obra (em ordem alfabética, 'Sem obra' primeiro) e número; envia, a lista recarrega e o novo aparece na tabela", async () => {
     const chamadas = comFormulario([BETA], [BETA, NOVO], async () => ({ id: 8 }));
     await preencher();
     const linha = await screen.findByRole("row", { name: "Aditivo de prazo" });
     expect(within(linha).getByText("Obra Alfa")).toBeTruthy();
-    expect(screen.getByRole("complementary", { name: "Detalhe do processo" }).querySelector("h2")?.textContent).toBe("Aditivo de prazo");
     expect(screen.queryByRole("form", { name: "Acompanhar processo" })).toBeNull();
     const envio = chamadas.find(c => c.caminho === "/api/siga/processos-avulsos");
     expect(envio?.opts?.method).toBe("POST");
@@ -251,7 +326,7 @@ describe("SigaPagina", () => {
     const form = await preencher();
     const alerta = await within(form).findByRole("alert");
     expect(alerta.textContent).toContain("Este processo do SIGA já está sendo acompanhado: Processo Beta");
-    expect(nomesNoGrupo("Outros processos")).toEqual(["Processo Beta"]);
+    expect(nomesNaTabela()).toEqual(["Processo Beta"]);
     expect((within(form).getByLabelText("Nome") as HTMLInputElement).value).toBe("Aditivo de prazo");
   });
 
@@ -269,7 +344,7 @@ describe("SigaPagina", () => {
     expect(alerta.textContent).not.toContain("Failed to fetch");
     api.mockResolvedValue(painel([ALFA]));
     fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
-    expect(await screen.findByText("Processos de medições")).toBeTruthy();
+    expect(await screen.findByRole("grid")).toBeTruthy();
   });
 
   // issue #343: botoes de atualizar e robo em andamento
@@ -279,70 +354,77 @@ describe("SigaPagina", () => {
     estado: "na_fila", rodada: null, avisos: [],
     pedidos: [{ id: 9, processo_id, usuario: "Fulano", pedido_em: "2026-10-28T15:25:00+00:00", travado }] });
   const botao = (nome: RegExp | string) => screen.getByRole("button", { name: nome }) as HTMLButtonElement;
-  const painelDireita = () => screen.getByRole("complementary", { name: "Detalhe do processo" });
-
-  it("sem o servidor configurado, nenhum botão de atualizar; configurado, 'Atualizar todos' no topo e 'Atualizar processo' no painel", async () => {
+  
+  it("sem o servidor configurado, nenhum botão de atualizar; configurado, 'Pedir leitura' no topo e no histórico do processo", async () => {
     const { unmount } = mostrar(painel([ALFA]));
-    await screen.findByText("Processos de medições");
+    await screen.findByRole("grid");
     expect(screen.queryByRole("button", { name: /Atualizar/ })).toBeNull();
     unmount();
     mostrar(painel([ALFA], { pode_atualizar: true }));
-    await screen.findByText("Processos de medições");
-    expect(botao("Atualizar todos").disabled).toBe(false);
-    expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" })).toBeTruthy();
+    await screen.findByRole("grid");
+    expect(botao("Pedir leitura").disabled).toBe(false);
+    cleanup();
+    mostrar(painel([ALFA], { pode_atualizar: true }), { processo: "1" });
+    expect((await screen.findByRole("button", { name: "Pedir leitura" })).hasAttribute("disabled")).toBe(false);
   });
 
-  it("os botões pedem a leitura com e sem processo_id e a tela relê", async () => {
+  it("o botão do topo pede a leitura de todos (sem processo_id) e a tela relê", async () => {
     const chamadas: { caminho: string; opts?: RequestInit }[] = [];
     api.mockImplementation(async (caminho: string, opts?: RequestInit) => {
       chamadas.push({ caminho, opts });
       return caminho === "/api/siga" ? painel([ALFA], { pode_atualizar: true }) : { id: 9 };
     });
     render(<SigaPagina busca={{}} agora={AGORA} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Atualizar processo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Pedir leitura" }));
     await vi.waitFor(() => expect(chamadas.filter(c => c.caminho === "/api/siga")).toHaveLength(2));
-    fireEvent.click(botao("Atualizar todos"));
-    await vi.waitFor(() => expect(chamadas.filter(c => c.caminho === "/api/siga")).toHaveLength(3));
     const pedidos = chamadas.filter(c => c.caminho === "/api/siga/atualizar");
-    expect(pedidos.map(c => c.opts?.method)).toEqual(["POST", "POST"]);
-    expect(pedidos.map(c => JSON.parse(c.opts?.body as string))).toEqual([{ processo_id: ALFA.id }, {}]);
+    expect(pedidos.map(c => c.opts?.method)).toEqual(["POST"]);
+    expect(pedidos.map(c => JSON.parse(c.opts?.body as string))).toEqual([{}]);
   });
 
-  it("pedido na fila: o botão vira 'Na fila' desabilitado e o topo mostra a hora do pedido no lugar de 'Lido às'", async () => {
+  it("pedido na fila: o botão vira 'Na fila' desabilitado e o topo mostra a hora do pedido", async () => {
     mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: NA_FILA(ALFA.id) }));
-    await screen.findByText("Processos de medições");
-    expect(within(painelDireita()).getByRole("button", { name: "Na fila" }).hasAttribute("disabled")).toBe(true);
-    expect(botao("Atualizar todos").disabled).toBe(false);           // pedido de um processo nao cobre todos
+    await screen.findByRole("grid");
+    expect(botao("Pedir leitura").disabled).toBe(false);           // pedido de um processo nao cobre todos
     expect(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === "Pedido de atualização às 11:25, aguardando o robô")).toBeTruthy();
-    expect(screen.queryByText(/Lido às/)).toBeNull();
-    fireEvent.click(screen.getByRole("row", { name: /Obra Delta/ }));
-    expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" })).toBeTruthy();
+    cleanup();
+    mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: NA_FILA(ALFA.id) }), { processo: "1" });
+    expect((await screen.findByRole("button", { name: "Na fila" })).hasAttribute("disabled")).toBe(true);
+    cleanup();
+    mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: NA_FILA(ALFA.id) }), { processo: "3" });
+    expect(await screen.findByRole("button", { name: "Pedir leitura" })).toBeTruthy();   // o pedido e' de outro processo
   });
 
   it("pedido de todos na fila: os dois botões ficam 'Na fila'", async () => {
     mostrar(painel([ALFA], { pode_atualizar: true, robo: NA_FILA(null) }));
-    await screen.findByText("Processos de medições");
-    expect(screen.getAllByRole("button", { name: "Na fila" })).toHaveLength(2);
+    await screen.findByRole("grid");
+    expect(screen.getByRole("button", { name: "Na fila" })).toBeTruthy();
+    cleanup();
+    mostrar(painel([ALFA], { pode_atualizar: true, robo: NA_FILA(null) }), { processo: "1" });
+    expect((await screen.findByRole("button", { name: "Na fila" })).hasAttribute("disabled")).toBe(true);
   });
 
   it("rodada pedida na tela: indicador no topo, 'lendo...' só nas linhas da rodada e 'Lendo...' nos botões que ela cobre", async () => {
     mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: RODADA("pedido", [ALFA.id]) }));
-    await screen.findByText("Processos de medições");
+    await screen.findByRole("grid");
     expect(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === "Robô lendo agora · começou às 11:20 · pedido feito na tela")).toBeTruthy();
     expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).getByText("lendo...")).toBeTruthy();
     expect(within(screen.getByRole("row", { name: /Obra Delta/ })).queryByText("lendo...")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Lendo..." }).every(b => b.hasAttribute("disabled"))).toBe(true);
-    expect(screen.queryByRole("button", { name: "Atualizar todos" })).toBeNull();
-    expect(within(painelDireita()).getByRole("button", { name: "Lendo..." })).toBeTruthy();
-    fireEvent.click(screen.getByRole("row", { name: /Obra Delta/ }));
-    expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Pedir leitura" })).toBeNull();
+    cleanup();
+    mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: RODADA("pedido", [ALFA.id]) }), { processo: "1" });
+    expect((await screen.findByRole("button", { name: "Lendo..." })).hasAttribute("disabled")).toBe(true);
+    cleanup();
+    mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: RODADA("pedido", [ALFA.id]) }), { processo: "3" });
+    expect(await screen.findByRole("button", { name: "Pedir leitura" })).toBeTruthy();
   });
 
-  it("rodada automática: o topo diz 'rodada automática' e 'Atualizar todos' fica 'Lendo...'", async () => {
+  it("rodada automática: o topo diz 'rodada automática' e 'Pedir leitura' fica 'Lendo...'", async () => {
     mostrar(painel([ALFA], { pode_atualizar: true, robo: RODADA("automatica", [ALFA.id]) }));
-    await screen.findByText("Processos de medições");
+    await screen.findByRole("grid");
     expect(screen.getByText(/rodada automática/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Atualizar todos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pedir leitura" })).toBeNull();
     expect(screen.getAllByRole("button", { name: "Lendo..." }).every(b => b.hasAttribute("disabled"))).toBe(true);
   });
 
@@ -356,7 +438,7 @@ describe("SigaPagina", () => {
       { tipo: "nao_terminou", processo_id: null, texto: "A rodada das 10:40 não terminou." },
     ];
     mostrar(painel([ALFA, DELTA], { robo: { ...PARADO, avisos } }));
-    await screen.findByText("Processos de medições");
+    await screen.findByRole("grid");
     const topo = screen.getAllByRole("alert").map(a => a.textContent ?? "");
     expect(topo.every(t => t.startsWith("Crítico: "))).toBe(true);
     expect(topo.map(t => t.replace("Crítico: ", ""))).toEqual([
@@ -373,24 +455,23 @@ describe("SigaPagina", () => {
       return painel([ALFA], { pode_atualizar: true });
     });
     render(<SigaPagina busca={{}} agora={AGORA} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Atualizar todos" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Pedir leitura" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Atualizar pelo SIGA não está disponível neste servidor");
-    expect(botao("Atualizar todos").disabled).toBe(false);
+    expect(botao("Pedir leitura").disabled).toBe(false);
   });
 
   it("Windows recusou: o botão volta a valer para tentar de novo e a tela não relê a cada 5 segundos", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const robo = { ...NA_FILA(ALFA.id, true), avisos: [{ tipo: "disparo", processo_id: null, texto: "O Windows não iniciou o robô: acesso negado" }] };
-      mostrar(painel([ALFA], { pode_atualizar: true, robo }));
-      await screen.findByText("Processos de medições");
-      expect(within(painelDireita()).getByRole("button", { name: "Atualizar processo" }).hasAttribute("disabled")).toBe(false);
+      mostrar(painel([ALFA], { pode_atualizar: true, robo }), { processo: "1" });
+      expect((await screen.findByRole("button", { name: "Pedir leitura" })).hasAttribute("disabled")).toBe(false);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(api).toHaveBeenCalledTimes(1);
     } finally { vi.useRealTimers(); }
   });
 
-  it("com o robô ativo relê a cada 5 segundos; ao terminar mostra 'Lido às' novo e volta aos 15 minutos", async () => {
+  it("com o robô ativo relê a cada 5 segundos; ao terminar mostra a leitura nova e volta aos 15 minutos", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mostrar(painel([ALFA], { robo: RODADA("pedido", [ALFA.id]) }));
@@ -400,7 +481,7 @@ describe("SigaPagina", () => {
       expect(api).toHaveBeenCalledTimes(2);
       api.mockResolvedValue(painel([ALFA], { lido_em: "2026-10-28T15:28:00+00:00" }));
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(await screen.findByText((_, el) => el?.tagName === "P" && el.textContent === "Lido às 11:28")).toBeTruthy();
+      expect(await screen.findByText("1 processo · última leitura 11:28")).toBeTruthy();
       const depois = api.mock.calls.length;
       await vi.advanceTimersByTimeAsync(60_000);
       expect(api).toHaveBeenCalledTimes(depois);

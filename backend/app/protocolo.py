@@ -1443,4 +1443,5 @@ def descartar(conn, usuario_id: int, protocolo_id: int, motivo: str) -> None:
         _editavel(agora, conn)
         conn.execute("UPDATE protocolos SET situacao='descartado' WHERE id=?", (protocolo_id,))
         auditoria.registrar(conn, usuario_id, "protocolo.descartar", "protocolo", protocolo_id,
-                            {"situacao": p["situacao"]}, {"situacao": "descartado", "motivo": motivo.strip()})
+                            # issue #536: a situacao anterior e' a relida sob o lock (outra aba pode ter montado)
+                            {"situacao": agora["situacao"]}, {"situacao": "descartado", "motivo": motivo.strip()})

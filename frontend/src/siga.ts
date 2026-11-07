@@ -1,8 +1,10 @@
 // Tela SIGA (issue #329): o que o servidor devolve em GET /api/siga e as contas da tela (ordem, tempo no setor,
 // nivel de atraso, textos da linha). Funcoes puras; o SigaPagina so' desenha o que sai daqui.
 
+export type TipoMovimentacao = "transferencia" | "recebimento" | "juntada" | "marcacao" | "outras";
+
 export type Movimentacao = {
-  data: string; evento: string | null; cad_lotacao: string; cad_pessoa: string; at_lotacao: string; at_pessoa: string;
+  data: string; evento: string | null; tipo: TipoMovimentacao; cad_lotacao: string; cad_pessoa: string; at_lotacao: string; at_pessoa: string;
 };
 
 export type ProcessoSiga = {
@@ -56,14 +58,9 @@ const instante = (iso: string | null, vazio: number): number => {
   return Number.isNaN(t) ? vazio : t;
 };
 
-/** Quem andou hoje primeiro (a movimentacao mais recente no topo), depois os parados ha mais tempo. */
+/** Do mais parado ao menos (dias uteis no setor, empate pelo mais antigo no setor); sem data de entrada vai para o fim. */
 export function ordenar(processos: ProcessoSiga[]): ProcessoSiga[] {
   return [...processos].sort((a, b) => {
-    const aHoje = a.hoje > 0, bHoje = b.hoje > 0;
-    if (aHoje !== bHoje) return aHoje ? -1 : 1;
-    if (aHoje) {
-      return instante(b.ultima?.data ?? null, -Infinity) - instante(a.ultima?.data ?? null, -Infinity) || a.id - b.id;
-    }
     return (b.dias_uteis ?? -1) - (a.dias_uteis ?? -1)
       || instante(a.desde, Infinity) - instante(b.desde, Infinity) || a.id - b.id;
   });
@@ -127,4 +124,51 @@ export function casaComBusca(p: ProcessoSiga, texto: string): boolean {
   const q = semAcento(texto.trim());
   if (!q) return true;
   return [p.obra, p.nome, p.numero, p.medicao_titulo].some(c => c && semAcento(c).includes(q));
+}
+
+/* ------------------------------------------------------------ historico do processo (#512) */
+
+export const TIPOS: { tipo: TipoMovimentacao; rotulo: string }[] = [
+  { tipo: "transferencia", rotulo: "Transferências" }, { tipo: "recebimento", rotulo: "Recebimentos" },
+  { tipo: "juntada", rotulo: "Juntadas" }, { tipo: "marcacao", rotulo: "Marcações" }, { tipo: "outras", rotulo: "Outras" },
+];
+
+/** Quantas movimentacoes ha' de cada tipo (os chips do historico). */
+export function contagemPorTipo(movs: Movimentacao[]): Record<TipoMovimentacao, number> {
+  const c: Record<TipoMovimentacao, number> = { transferencia: 0, recebimento: 0, juntada: 0, marcacao: 0, outras: 0 };
+  for (const m of movs) c[m.tipo] += 1;
+  return c;
+}
+
+/** A mais recente primeiro; por tipo (null = todas) e por texto em setor, pessoa ou documento, sem maiuscula nem acento. */
+export function filtrarMovimentacoes(movs: Movimentacao[], tipo: TipoMovimentacao | null, texto: string): Movimentacao[] {
+  const q = semAcento(texto.trim());
+  return [...movs]
+    .sort((a, b) => Date.parse(b.data) - Date.parse(a.data))
+    .filter(m => (tipo === null || m.tipo === tipo)
+      && (!q || [m.evento, m.cad_lotacao, m.cad_pessoa, m.at_lotacao, m.at_pessoa].some(c => c && semAcento(c).includes(q))));
+}
+
+/** O que o SIGA poe depois de " |" no evento (na juntada, o documento). */
+export function detalheDoEvento(evento: string | null): string {
+  const i = (evento ?? "").indexOf("|");
+  return i < 0 ? "" : (evento as string).slice(i + 1).trim();
+}
+
+/** "COFIN · Ana": setor (sigla) e pessoa; so' o que houver. */
+export function setorPessoa(lotacao: string | null, pessoa: string | null): string {
+  return [sigla(lotacao), (pessoa ?? "").trim()].filter(Boolean).join(" · ");
+}
+
+/** O recebimento que colocou o processo no setor atual (o que a linha destaca): o da data de entrada no setor. */
+export function ehRecebimentoNoSetorAtual(p: ProcessoSiga, m: Movimentacao): boolean {
+  return !p.caixa_entrada && m.tipo === "recebimento" && p.desde !== null && Date.parse(m.data) === Date.parse(p.desde);
+}
+
+/** "02/10/2026 a 23/10/2026" (primeira e ultima movimentacao); vazio sem movimentacao. */
+export function periodoDe(movs: Movimentacao[], fmt: (iso: string) => string): string {
+  if (movs.length === 0) return "";
+  const tempos = movs.map(m => Date.parse(m.data));
+  const menor = movs[tempos.indexOf(Math.min(...tempos))], maior = movs[tempos.indexOf(Math.max(...tempos))];
+  return fmt(menor.data) === fmt(maior.data) ? fmt(menor.data) : `${fmt(menor.data)} a ${fmt(maior.data)}`;
 }

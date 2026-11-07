@@ -76,7 +76,10 @@ def reenviar_copia_dono(usuario: dict = Depends(exigir("administrar")),
         raise HTTPException(409, detail=detalhe) from None
     except copia_dono_envio.EnvioNaoConfigurado as e:
         raise HTTPException(409, str(e)) from None
-    except (ValueError, graph.ErroGraph) as e:
+    except graph.ErroGraph as e:
+        conn.rollback()
+        raise HTTPException(422, copia_dono_envio.motivo(e)) from None     # o detalhe tecnico ja' esta' no log
+    except ValueError as e:
         conn.rollback()
         raise HTTPException(422, str(e)) from None
 

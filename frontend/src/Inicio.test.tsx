@@ -111,7 +111,7 @@ describe("Início", () => {
     expect(cert.getByText("FGTS · Integra BRT")).toBeTruthy();
     const hrefs = ["Reajustes", "Prazos", "Certidões"].map(
       t => caixa.getByRole("link", { name: `Ver todos: ${t}` }).getAttribute("href"));
-    expect(hrefs).toEqual(["/avisos?familia=reajuste", "/avisos?familia=prazo", "/avisos?familia=documentos"]);
+    expect(hrefs).toEqual(["/avisos?familia=reajustes", "/avisos?familia=prazos", "/avisos?familia=certidoes"]);
   });
 
   it("seção de avisos sem item mostra uma linha curta no lugar da lista", async () => {

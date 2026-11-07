@@ -16,6 +16,8 @@ export type ObraLista = {
   medido_execucao_centavos?: number | null; saldo_centavos?: number | null;
   // o contratante, como em Medicoes ("SINFRA" para toda a familia, com a superintendencia em `orgao_sub`)
   contratante?: string | null; orgao_sub?: string | null;
+  // a cota da Lotufo (10000 = 100%) e o a receber CHEIO da obra (nulo ate' o total ser liberado), da lista de Obras (#509)
+  percentual_direito_bp?: number | null; a_receber_centavos?: number | null;
 };
 
 /** `paralisadas`: os ids das obras paralisadas (`prazoDaObra`); a execucao delas nao vence (D16). */
@@ -123,8 +125,19 @@ export function filtrarObras(lista: ObraLista[], f: FiltroObras): ObraLista[] {
 
 /** O valor vigente e o medido de execucao da obra, em valor cheio; o que a API nao deu conta como zero. O vigente e'
  *  o de execucao (#262): o medido e' a precos iniciais, entao o aditivo de reajuste fica fora do % e do saldo. */
-const vigenteDe = (o: ObraLista) => o.valor_vigente_execucao_centavos ?? o.valor_vigente_centavos ?? 0;
-const medidoDe = (o: ObraLista) => o.medido_execucao_centavos ?? 0;
+export const vigenteDe = (o: ObraLista) => o.valor_vigente_execucao_centavos ?? o.valor_vigente_centavos ?? 0;
+export const medidoDe = (o: ObraLista) => o.medido_execucao_centavos ?? 0;
+
+/** Os totais do topo, somados sobre as linhas que a tabela mostra. O a receber so' tem valor com o total liberado
+ *  (todas as obras com nulo): nulo vira "—", nunca zero. */
+export function totaisDe(obras: ObraLista[]) {
+  const t = { contratado: 0, medido: 0, saldo: 0, aReceber: 0, temReceber: false };
+  for (const o of obras) {
+    t.contratado += vigenteDe(o); t.medido += medidoDe(o); t.saldo += vigenteDe(o) - medidoDe(o);
+    if (o.a_receber_centavos != null) { t.aReceber += o.a_receber_centavos; t.temReceber = true; }
+  }
+  return t;
+}
 
 /** Quanto da obra ja' foi executado, em %, inteiro: medido de execucao ÷ valor vigente. Sem valor vigente, nulo. */
 export function pctExecutado(o: ObraLista): number | null {

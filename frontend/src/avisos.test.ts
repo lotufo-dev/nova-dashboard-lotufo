@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { FAMILIAS, familiaDoAviso, filtrarAvisos, porFamilia, porObra, quandoDoAviso } from "./avisos";
+import { FAMILIAS, familiaDaBusca, familiaDoAviso, filtrarAvisos, porFamilia, porObra, porSecao, quandoDoAviso, secaoDoAviso } from "./avisos";
 
 const av = (tipo: string, nivel: Aviso["nivel"], contrato_id: number | null, aba: string | null, data: string | null = null): Aviso => ({
   tipo, nivel, publico: ["operacao"], contrato_id, obra: contrato_id ? `Obra ${contrato_id}` : null, dias: null,
@@ -56,5 +56,33 @@ describe("avisos", () => {
   it("filtra por família, nível e obra, como a URL pede", () => {
     expect(filtrarAvisos(lista, { familia: "prazo", nivel: "critico" }).map(a => a.tipo)).toEqual(["execucao_vencendo"]);
     expect(filtrarAvisos(lista, { obra: 7 }).map(a => a.tipo)).toEqual(["reajuste_apostilamento", "nota_divergente"]);
+  });
+});
+
+describe("avisos pelo tempo (#511)", () => {
+  const com = (dias: number | null, sentido: Aviso["sentido"] = "prazo"): Aviso => ({ ...av("x", "atencao", 1, "prazos"), dias, sentido });
+
+  it("classifica a seção pelos dias e pelo sentido", () => {
+    expect(secaoDoAviso(com(-3))).toBe("vencido");
+    expect(secaoDoAviso(com(130, "desde"))).toBe("vencido");
+    expect(secaoDoAviso(com(0))).toBe("semana");
+    expect(secaoDoAviso(com(5))).toBe("semana");
+    expect(secaoDoAviso(com(20))).toBe("mes");
+    expect(secaoDoAviso(com(60))).toBe("depois");
+    expect(secaoDoAviso(com(null))).toBe("sem-data");
+  });
+
+  it("ordena: vencido do mais antigo, a vencer do mais próximo; sem data por último", () => {
+    const g = porSecao([com(-3), com(-40), com(30), com(10), com(null)]);
+    expect(g.map(s => s.id)).toEqual(["vencido", "semana", "mes", "depois", "sem-data"]);
+    expect(g[0].itens.map(a => a.dias)).toEqual([-40, -3]);
+    expect(g[2].itens.map(a => a.dias)).toEqual([10, 30]);
+  });
+
+  it("a categoria da rota aceita o plural do Início e o id da família", () => {
+    expect(familiaDaBusca("reajustes")).toBe("reajuste");
+    expect(familiaDaBusca("certidoes")).toBe("documentos");
+    expect(familiaDaBusca("prazo")).toBe("prazo");
+    expect(familiaDaBusca("x")).toBeNull();
   });
 });
