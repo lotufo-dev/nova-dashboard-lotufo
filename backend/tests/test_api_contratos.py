@@ -123,7 +123,7 @@ def test_custo_rm_da_obra_pelo_centro_atual_e_pelos_anteriores(client_admin):
 
 
 def test_custo_rm_de_consorcio_sem_centro_vem_pela_coligada(client_admin):
-    """#488: obra de consorcio sem centro de custo e' achada so' pela coligada (como em diretoria._mapa_contratos)."""
+    """#488: obra de consorcio sem centro de custo e' achada so' pela coligada, quando e' a unica obra dela."""
     from app import db, entidades
     conn = db.get_conn()
     eid = entidades.criar(conn, 1, {"nome": "Consórcio X", "cnpj": "11444777000161",
@@ -141,6 +141,10 @@ def test_custo_rm_de_consorcio_sem_centro_vem_pela_coligada(client_admin):
     assert [x["valor_centavos"] for x in d["custo"]] == [501] and d["estoque"] == []
     # a Lotufo (coligada 1) sem centro nao recebe a coligada inteira
     assert client_admin.get(f"/api/contratos/{lotufo_sem_centro}/custo-rm").json() == {"custo": [], "estoque": []}
+    # segunda obra na mesma coligada: a coligada deixa de identificar a obra, e nenhuma recebe o custo da outra
+    outra = novo_contrato({**NOVO, "numero_instrumento": "IC 092/2025", "entidade_id": eid})
+    for c in (cons, outra):
+        assert client_admin.get(f"/api/contratos/{c}/custo-rm").json() == {"custo": [], "estoque": []}
 
 
 def test_custo_rm_exige_ver_paineis(client, monkeypatch):

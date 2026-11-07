@@ -69,8 +69,8 @@ def cadastro(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
 def custo_rm(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
              conn: sqlite3.Connection = Depends(conexao)):
     """#488: o custo por tarefa e a baixa de estoque do RM da obra, pelo centro de custo atual e pelos anteriores,
-    na coligada da entidade do contrato; consorcio sem centro, pela coligada inteira (a mesma regra de
-    `diretoria._mapa_contratos`). Linhas como vieram do RM (o que nao e' custo a tela separa)."""
+    na coligada da entidade do contrato; consorcio sem centro, pela coligada inteira so' se for a unica obra dela.
+    Linhas como vieram do RM (o que nao e' custo a tela separa)."""
     _existe(conn, contrato_id)
     c = conn.execute("""SELECT c.centro_custo_rm, c.centros_custo_anteriores_rm, e.coligada_rm
                         FROM contratos c JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?""",
@@ -81,7 +81,10 @@ def custo_rm(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
     centros = sorted({x.strip() for x in centros if x and x.strip()})
     if centros:
         filtro = f"coligada=? AND centro_custo IN ({','.join('?' * len(centros))})"
-    elif c["coligada_rm"] != 1:
+    elif c["coligada_rm"] != 1 and conn.execute(
+            """SELECT COUNT(*) FROM contratos c JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
+               WHERE e.coligada_rm=?""", (c["coligada_rm"],)).fetchone()[0] == 1:
+        # so' quando e' a unica obra da coligada: com duas, a coligada nao diz de qual obra e' o custo
         filtro = "coligada=?"
     else:
         return {"custo": [], "estoque": []}
