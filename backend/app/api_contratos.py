@@ -4,7 +4,7 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app import contratos, diretoria, medicoes, notas, paineis, prazos, tempo
+from app import contratos, diretoria, ficha_obra, medicoes, notas, paineis, prazos, tempo
 from app.api_auth import conexao
 from app.api_medicoes import ID
 from app.permissoes import exigir
@@ -59,6 +59,14 @@ def cabecalho(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
     _existe(conn, contrato_id)
     # A3: faturado e a receber da obra, em valor cheio, ao lado do valor vigente.
     return {**contratos.cabecalho(conn, contrato_id), **diretoria.da_obra(conn, contrato_id)}
+
+
+@router.get("/{contrato_id}/ficha")
+def ficha(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
+          conn: sqlite3.Connection = Depends(conexao)):
+    """#510: contrato, ultima medicao, medicao em andamento e proximos vencimentos da ficha executiva da obra."""
+    _existe(conn, contrato_id)
+    return ficha_obra.da_obra(conn, contrato_id)
 
 
 @router.get("/{contrato_id}/cadastro")

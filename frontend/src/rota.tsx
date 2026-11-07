@@ -18,7 +18,7 @@ import { confirmarSaida, haRascunho } from "./rascunho";
 // - Caminho novo entra AQUI, nas duas funcoes e no teste; nada mais no app monta string de URL a mao.
 
 // Abas da obra (NAVEGACAO.md › Obra). As notas moram na pagina de cada medicao.
-export type AbaObra = "medicoes" | "prazos" | "reajuste" | "documentos" | "contrato";
+export type AbaObra = "ficha" | "medicoes" | "prazos" | "reajuste" | "documentos" | "contrato";
 // Abas da Carteira (NAVEGACAO.md › Carteira). O Resumo e' a padrao e nao entra na URL.
 export type AbaCarteira = "resumo" | "qdop" | "producao" | "custo";
 // Abas da Administracao (NAVEGACAO.md › Administracao). A Saude e' a padrao e nao entra na URL.
@@ -65,7 +65,7 @@ const ABAS_MEDICOES_ANTIGAS: readonly string[] = ["resumo", "sem-medicao", "plan
   "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento"];
 // Links antigos (e-mails, favoritos) continuam abrindo a secao que absorveu a aba.
 // A aba Notas saiu (mapa de 2026-09-28): as notas estao na medicao e na coluna Notas das medicoes da obra.
-const ABA_ANTIGA: Record<string, AbaObra> = { protocolo: "medicoes", notas: "medicoes", cronograma: "contrato", aditivos: "contrato" };
+const ABA_ANTIGA: Record<string, AbaObra> = { ficha: "ficha", protocolo: "medicoes", notas: "medicoes", cronograma: "contrato", aditivos: "contrato" };
 
 // Telas de um segmento so' ("/medicoes"), sem parametro, e os nomes antigos de cada uma.
 // Bloco 9: "/engenharia" e "/sugestoes" sairam; por nao estarem aqui, caem na raiz (entrada do perfil).
@@ -115,7 +115,7 @@ export function parseRota(pathname: string): Rota {
     // JS (2^53), entao o id nunca e' arredondado para OUTRA obra ao virar number.
     if (!ehId(b)) return { tela: "raiz" };
     const id = Number(b);
-    if (c === undefined) return { tela: "obra", id, aba: "medicoes" };
+    if (c === undefined) return { tela: "obra", id, aba: "ficha" };
     // A medicao tem pagina propria, dentro da obra (NAVEGACAO.md › Arvore de telas).
     if (c === "medicoes" && partes.length === 4 && ehId(partes[3])) return { tela: "medicao", obra: id, id: Number(partes[3]) };
     // Nova medicao (2026-10-09): a etapa 1 (espelho) antes de a medicao existir.
@@ -151,9 +151,9 @@ export function caminhoDe(r: Rota): string {
   switch (r.tela) {
     case "raiz": return "/";
     case "obra":
-      // A aba padrao NAO entra na URL: "/obras/7" e "/obras/7/medicoes" sao a mesma pagina, e uma so'
+      // A ficha (padrao) NAO entra na URL: "/obras/7" e "/obras/7/ficha" sao a mesma pagina, e uma so
       // forma canonica evita dois historicos para um lugar.
-      return r.aba === "medicoes" ? `/obras/${r.id}` : `/obras/${r.id}/${r.aba}`;
+      return r.aba === "ficha" ? `/obras/${r.id}` : `/obras/${r.id}/${r.aba}`;
     case "medicao": return `/obras/${r.obra}/medicoes/${r.id}`;
     case "nova-medicao": return `/obras/${r.obra}/medicoes/nova`;
     case "documentos-empresa": return r.aba && r.aba !== "certidoes" ? `/documentos/${r.id}/${r.aba}` : `/documentos/${r.id}`;

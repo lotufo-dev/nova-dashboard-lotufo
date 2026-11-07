@@ -39,7 +39,7 @@ describe("Medição que ainda não existe", () => {
   it("obra fora do fluxo do espelho: sem o formulário, com o lançamento à mão (gate Sol, PR #382)", async () => {
     responder(null);
     const { container } = render(<MedicaoNova contratoId={7} usuario={usuario} origem={null} />);
-    expect((await screen.findByRole("link", { name: "Lançar a medição à mão" })).getAttribute("href")).toBe("/obras/7");
+    expect((await screen.findByRole("link", { name: "Lançar a medição à mão" })).getAttribute("href")).toBe("/obras/7/medicoes");
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
   });
 
