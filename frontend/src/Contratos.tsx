@@ -139,9 +139,9 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
                       const cota = baseDosValores(o.percentual_direito_bp ?? 10000);
                       const vigente = vigenteDe(o);
                       return (
-                        <tr key={o.id} className="linha linha--obra" onClick={e => { if (!(e.target as HTMLElement).closest("a")) ir({ tela: "obra", id: o.id, aba: "medicoes" }); }}>
+                        <tr key={o.id} className="linha linha--obra" onClick={e => { if (!(e.target as HTMLElement).closest("a")) ir({ tela: "obra", id: o.id, aba: "ficha" }); }}>
                           <td data-rotulo="Obra">
-                            <Link className="nome-link obras-posicao__nome" para={{ tela: "obra", id: o.id, aba: "medicoes" }} ir={ir}
+                            <Link className="nome-link obras-posicao__nome" para={{ tela: "obra", id: o.id, aba: "ficha" }} ir={ir}
                               >{nomeDaObra(o)}</Link>
                             <div className="obras-posicao__sub">
                               <span>{contratanteDaObra(o)}</span>

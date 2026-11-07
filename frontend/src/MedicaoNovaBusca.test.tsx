@@ -49,7 +49,7 @@ describe("Medição nova: número e competência vindos da janela Iniciar proces
       ? { obra: "Obra Teste", orgao: "SINFRA", instrumento: "CT 1/2026", percentual_lotufo_bp: 10000 } : { regra: null, espelhos: [] });
     render(<MedicaoNova contratoId={4} usuario={usuario} origem={null} busca={{ numero: "3", competencia: "2026-09", tipo: "projeto" }} />);
     const link = await screen.findByRole("link", { name: "Lançar a medição à mão" });
-    expect(link.getAttribute("href")).toBe("/obras/4?numero=3&competencia=2026-09&tipo=projeto");
+    expect(link.getAttribute("href")).toBe("/obras/4/medicoes?numero=3&competencia=2026-09&tipo=projeto");
   });
 
   it("tipo=projeto: título de Projeto e a planilha/carta na série de Projeto", async () => {

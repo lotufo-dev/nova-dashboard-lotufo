@@ -75,7 +75,7 @@ describe("Página da obra: o desenho novo", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Hospital" })).toBeTruthy();
     const abas = screen.getByRole("navigation", { name: "Seções da obra" });
     expect(within(abas).getAllByRole("link").map(a => a.getAttribute("href"))).toEqual(
-      ["/obras/1", "/obras/1/prazos", "/obras/1/reajuste", "/obras/1/documentos", "/obras/1/contrato"]);
+      ["/obras/1/medicoes", "/obras/1/prazos", "/obras/1/reajuste", "/obras/1/documentos", "/obras/1/contrato"]);
     expect(within(abas).getByRole("link", { name: "Documentos" })).toBeTruthy();
     expect(within(abas).getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBe("page");
   });
