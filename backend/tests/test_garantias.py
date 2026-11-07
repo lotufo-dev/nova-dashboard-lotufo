@@ -110,7 +110,7 @@ def test_painel_de_documentos_traz_garantia_por_contrato(cenario):
     (o,) = documentos.painel(c, HOJE)["contratos"]
     assert o["contrato_id"] == ids["contrato"] and o["obra"] == "Obra A"
     assert (o["garantia"]["situacao"], o["garantia"]["dias"], o["garantia"]["apolice"]) == ("vencendo", 17, "AP-1")
-    assert "art" not in o
+    assert (o["art"], o["cno"]) == (None, None)       # #513: o painel traz ART e CNO por obra; o cenario nao os cadastra
 
 
 def test_correcao_de_endosso_vale_mesmo_com_data_anterior(cenario):
