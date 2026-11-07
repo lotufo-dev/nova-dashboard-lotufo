@@ -16,7 +16,7 @@ const MEDICAO = { id: 5, numero: 16, tipo: "execucao", competencia: "2026-10", e
   valor_protocolado_centavos: 990529648, valor_protocolado_origem: null, valor_atestado_centavos: 990529648,
   valor_atestado_origem: null, atestado_em: null, nf_emitida_em: null, recebida_em: null, congelada: 1,
   protocolos: [{ id: 9, data: "2026-11-14", numero_oficio: null, numero_processo: "PROC-0001", origem: "manual", protocolo_id: null }],
-  notas: [nota(1, "2351", 418330386, 384863955), nota(2, "2352", 67032113, 61669545)], documentos: [] } as unknown as Medicao;
+  notas: [nota(1, "2351", 418330386, 384863955), nota(2, "2352", 67032113, 61669545)], notas_faltam: 0, documentos: [] } as unknown as Medicao;
 const admin = { id: 1, nome: "Operação", email: "o@x", perfil: "admin" } as Usuario;
 const aqui = { tela: "medicao" as const, obra: 1, id: 5 };
 const com = (notas: unknown[], extra: Record<string, unknown> = {}) => ({ ...MEDICAO, notas, ...extra }) as unknown as Medicao;
@@ -51,6 +51,36 @@ describe("Passo Pagamento (#514)", () => {
     expect(screen.getByText("paga")).toBeTruthy();
     expect(screen.queryByText("paga em parte")).toBeNull();
     expect(screen.getByText("100%")).toBeTruthy();
+  });
+
+  it("juros num título não cobrem o outro aberto: a barra usa o recebido título a título (Sol, rodada 2)", () => {
+    // dois titulos de R$ 100,00: um recebeu R$ 110,00 (juros), o outro R$ 90,00 -> falta R$ 10,00
+    const n = nota(1, "2351", 21739, 20000, 20000, { falta_centavos: 1000 });
+    montar({ grupo: [com([n], { valor_atestado_centavos: 21739 })], percentualBp: 10000 });
+    expect(screen.getByLabelText("A receber: R$ 10,00")).toBeTruthy();
+    expect(screen.getByText("R$ 190,00 recebido de R$ 200,00")).toBeTruthy();
+    expect(screen.getByText("95%")).toBeTruthy();
+    expect(screen.getByText("paga em parte")).toBeTruthy();
+  });
+
+  it("consórcio com uma das notas municipais da Lotufo ainda sem casar: a cota fica “—” (Sol, rodada 2)", () => {
+    montar({ grupo: [com([nota(1, "2351", 418330386, 384863955)], { notas_faltam: 1 })] });
+    expect(screen.getByText("A receber · cota da Lotufo")).toBeTruthy();
+    expect(screen.getByLabelText("A receber: —")).toBeTruthy();
+    expect(screen.queryByText(/recebido de/)).toBeNull();
+    expect(screen.queryByText(/%$/)).toBeNull();
+  });
+
+  it("cabeçalho ainda não lido, com as notas completas: “—” (sem saber se é consórcio, nada se confere) (revisor e Sol, rodada 2)", () => {
+    montar({ percentualBp: null });
+    expect(screen.getByLabelText("A receber: —")).toBeTruthy();
+  });
+
+  it("nota sem título ao lado de outra já paga: a receber “—”, mas o selo diz que já houve recebimento (Sol, rodada 2)", () => {
+    montar({ grupo: [com([nota(1, "2351", 418330386, 384863955, 384863955), nota(2, "2352", 67032113, 0)])] });
+    expect(screen.getByLabelText("A receber: —")).toBeTruthy();
+    expect(screen.getByText("Recebido em parte")).toBeTruthy();
+    expect(screen.queryByText("Aguardando o órgão")).toBeNull();
   });
 
   it("consórcio com a fatura integral do consórcio e a nota da Lotufo: só a da Lotufo entra na cota (Sol, PR #555)", () => {
@@ -125,6 +155,12 @@ describe("contas do pagamento", () => {
     const metade = com([nota(1, "2351", 418330386, 384863955)]);       // medicao de 9.905.296,48
     expect(aReceber([metade], false).falta).toBeNull();
     const inteira = com([nota(1, "2351", 990529647, 911287276), nota(2, "2352", 1, 1)]);
-    expect(aReceber([inteira], false)).toEqual({ falta: 911287277, recebido: 0, total: 911287277 });
+    expect(aReceber([inteira], false)).toEqual({ falta: 911287277, recebido: 0, total: 911287277, algumRecebido: false });
+  });
+
+  it("detalhe sem a contagem das notas que faltam (servidor antigo) não soma: “—”", () => {
+    expect(aReceber([com(MEDICAO.notas!, { notas_faltam: undefined })], true).falta).toBeNull();
+    expect(aReceber([MEDICAO], null).falta).toBeNull();
+    expect(aReceber([MEDICAO], true).falta).toBe(446533500);
   });
 });

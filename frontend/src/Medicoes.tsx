@@ -48,6 +48,7 @@ export type Medicao = {
   nota_emitida_em?: string | null;
   espelho_em?: string | null; espelho_origem?: string | null;
   congelada: number; protocolos: Protocolo[]; notas?: Nota[];
+  notas_faltam?: number;      // #514: notas da Lotufo esperadas (saidas do espelho) ainda sem nota casada
   documentos?: Documento[];
   final?: number; final_em?: string | null;       // bloco 7: medicao final poe o contrato em encerramento
   // #284: boletins do orgao, do 1o ao vigente (#290: tambem na lista da obra, que a pagina da medicao le)

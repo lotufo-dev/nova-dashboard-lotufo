@@ -42,25 +42,34 @@ export function faltaDaNota(n: NotaDaMedicao): number | null {
   return n.falta_centavos ?? Math.max(0, devido - n.recebido_centavos);
 }
 
-/** A receber (#514): o que falta dos titulos das notas da Lotufo. "—" (null) quando ainda nao da' para saber: medicao
- *  sem nota da Lotufo, nota sem titulo, ou, fora do consorcio, notas que nao fecham com o valor da medicao (uma das
- *  notas ainda nao casou). `total` e' o devido (os titulos), base da barra do recebido. */
-export function aReceber(grupo: Medicao[], consorcio: boolean): { falta: number | null; recebido: number; total: number | null } {
-  const nulo = { falta: null, recebido: 0, total: null };
-  if (grupo.length === 0) return nulo;
+/** O resumo do pagamento (#514). So' ha' numero (falta, recebido, total) quando TODOS os insumos estao completos e
+ *  consistentes; qualquer insumo faltando vira null ("—"):
+ *  - o cabecalho lido (`consorcio` null = ainda nao se sabe se a obra e' de consorcio);
+ *  - cada medicao com todas as notas da Lotufo esperadas casadas (`notas_faltam` zero, do servidor) e alguma nota;
+ *  - fora do consorcio, as notas da Lotufo fechando com o valor da medicao;
+ *  - cada nota com titulo no RM.
+ *  `recebido` e' o efetivo, titulo a titulo (devido - falta): juros num titulo nao cobrem outro aberto. `total` e' o
+ *  devido (os titulos liquidos). `algumRecebido` vale mesmo sem numero: alguma nota da Lotufo ja' teve baixa. */
+export function aReceber(grupo: Medicao[], consorcio: boolean | null):
+    { falta: number | null; recebido: number | null; total: number | null; algumRecebido: boolean } {
+  const todas = grupo.flatMap(x => (x.notas ?? []).filter(daLotufo));
+  const algumRecebido = todas.some(n => n.recebido_centavos > 0);
+  const nulo = { falta: null, recebido: null, total: null, algumRecebido };
+  if (grupo.length === 0 || consorcio === null) return nulo;
   let falta = 0, recebido = 0, total = 0;
   for (const x of grupo) {
     const notas = (x.notas ?? []).filter(daLotufo);
-    if (notas.length === 0) return nulo;
+    if (notas.length === 0 || x.notas_faltam === undefined || x.notas_faltam > 0) return nulo;
     const valor = x.valor_atestado_centavos ?? x.valor_protocolado_centavos;
     if (!consorcio && (valor === null || notas.reduce((t, n) => t + n.valor_centavos, 0) !== valor)) return nulo;
     for (const n of notas) {
       const f = faltaDaNota(n);
       if (f === null) return nulo;
-      falta += f; recebido += n.recebido_centavos; total += n.devido_centavos ?? 0;
+      const devido = n.devido_centavos ?? 0;
+      falta += f; recebido += devido - f; total += devido;
     }
   }
-  return { falta, recebido, total };
+  return { falta, recebido, total, algumRecebido };
 }
 
 export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui, percentualBp, aoReceber }: {
@@ -78,8 +87,8 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
   }, [chave]);
 
   // sem o cabecalho ainda (null), a cota nao se sabe: nada de mostrar o cheio como se fosse da Lotufo
-  const consorcio = percentualBp !== 10000;
-  const rotuloCota = percentualBp !== null && percentualBp !== 10000;
+  const consorcio = percentualBp === null ? null : percentualBp !== 10000;
+  const rotuloCota = consorcio === true;
   const receber = aReceber(grupo, consorcio);
   const valores = grupo.map(x => x.valor_protocolado_centavos).filter((v): v is number => v !== null);
   const total = valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
@@ -88,7 +97,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
   const dias = enviada && !recebida ? diasEntre(enviada, hojeLocal()) : null;
   const notas = grupo.flatMap(x => (x.notas ?? []).map(n => ({ n, m: x })));
   const nfsDocs = notas.length === 0 ? grupo.flatMap(x => (x.documentos ?? []).filter(d => d.tipo_doc === "nfs" && d.numero_nf)) : [];
-  const pct = receber.total ? Math.min(100, Math.floor((receber.recebido * 100) / receber.total)) : 0;
+  const pct = receber.total && receber.recebido !== null ? Math.min(100, Math.floor((receber.recebido * 100) / receber.total)) : 0;
   // onde o orgao junta medicao e reajuste, um processo so'; onde separa, um por medicao
   const linhas = junta && grupo.length > 1 ? [grupo] : grupo.map(x => [x]);
   const recebiveis = usuario.perfil === "admin" ? grupo.filter(x => (PROXIMOS[x.estado] ?? []).includes("recebida")) : [];
@@ -150,17 +159,17 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
               </tbody>
             </table>
           </div>
-          {receber.total !== null && receber.total > 0 && (
+          {receber.falta !== null && receber.total !== null && receber.total > 0 && (
             <div className="medidor" aria-label="Recebido">
               <div className="medidor__barra"><div className="medidor__cheio" style={{ width: `${pct}%` }} /></div>
               <span className="medidor__texto">{pct}%</span>
             </div>
           )}
-          {receber.total !== null && receber.total > 0 && (
+          {receber.falta !== null && receber.total !== null && receber.total > 0 && (
             <p className="num">{brl(receber.recebido)} recebido de {brl(receber.total)}</p>
           )}
           <p>{recebida ? <Selo classe="selo--ok">Recebida</Selo>
-            : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado)) ? <Selo classe={receber.recebido > 0 ? "selo--ok" : "selo--atencao"}>{receber.recebido > 0 ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
+            : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado)) ? <Selo classe={receber.algumRecebido ? "selo--ok" : "selo--atencao"}>{receber.algumRecebido ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
           {/* issue #53: o recebimento a mao e' so' do admin (o servidor recusa outro perfil) */}
           {recebiveis.map(x => (
             <div key={x.id}>

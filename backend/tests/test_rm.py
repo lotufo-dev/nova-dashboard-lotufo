@@ -874,6 +874,10 @@ def test_nota_lotufo_em_obra_de_consorcio_casa_pela_saida_e_nao_segura_recebimen
                        "WHERE em.espelho_id=? AND m.tipo='execucao'", (eid,)).fetchone()[0]
     medicoes.marcar_espelho_enviado(conn, 1, mid)
     medicoes.registrar_protocolo(conn, 1, mid, "2026-07-20", "CT-1", None, "manual")     # protocolada sem nota
+    from app import notas
+    esperadas_lotufo = len(notas.esperadas(conn, mid))
+    # issue #514: o detalhe diz quantas notas da Lotufo esperadas ainda nao casaram (a cota so' soma com todas)
+    assert esperadas_lotufo >= 1 and medicoes.detalhe(conn, mid)["notas_faltam"] == esperadas_lotufo
     nfs = [_nf(940, 2000000.02, coligada=1, centro_custo="5.001.011", numero="000003102"),   # propria, VG (saida)
            _nf(941, 10000000.07, coligada=90, numero="000000021")]                           # fatura do consorcio
     cli = _simulador(tmp_path, nfs, [_baixa(1, 941, 9000000.00, 9000000.00, 1, "2026-09-01T00:00:00-04:00", coligada=90)])
@@ -885,6 +889,7 @@ def test_nota_lotufo_em_obra_de_consorcio_casa_pela_saida_e_nao_segura_recebimen
     assert m["estado"] == "recebida"          # a nota da Lotufo (sem titulo quitado) nao segurou
     # issue #514: so' a NFS-e da Lotufo e' da cota dela; a fatura do consorcio (coligada 90) nao
     assert {n["numero"]: n["da_lotufo"] for n in m["notas"]} == {"000003102": True, "000000021": False}
+    assert m["notas_faltam"] == esperadas_lotufo - 1       # a nota da Lotufo de VG casou; a fatura nao conta
 
 
 # --- desalocacao manual (issue #71) ---
