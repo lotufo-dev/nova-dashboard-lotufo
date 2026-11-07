@@ -1178,6 +1178,50 @@ def test_campo_diferente_do_lido_ou_outro_pdf_grava_manual(client_admin, monkeyp
     assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_atestado_origem"] == "manual"
 
 
+def test_capa_de_outro_numero_lida_nesta_medicao_nao_da_aceito(client_admin, monkeypatch):
+    # gate Sol, rodada 2: a capa da 7a lida na 6a so' avisa, e o registro com os campos lidos fica `manual`
+    _capa_lida(monkeypatch)
+    mid = _nova_planilha(client_admin, _contrato(client_admin), numero=6).json()["medicao_id"]
+    _no_estado(mid, "planilha_enviada")
+    corpo = _ler_capa(client_admin, mid).json()
+    assert corpo["lido"] and corpo["avisos"][0].startswith("A capa é da 7ª medição")
+    r = _registrar_boletim(client_admin, mid, valor="1.234.567,89", data="2026-04-14", numero="7")
+    assert r.status_code == 201, r.text
+    assert _atestos(mid)[0]["origem"] == "manual"
+
+
+def test_mesma_leitura_repetida_guarda_uma_linha_e_so_as_mais_recentes(client_admin, monkeypatch):
+    # gate Sol, rodada 2: a tabela de apoio nao cresce sem limite
+    from app import api_medicoes, db
+    mid = _lida_e_enviada(client_admin, monkeypatch)
+    _ler_capa(client_admin, mid)
+    conn = db.get_conn()
+    try:
+        contar = lambda: conn.execute("SELECT COUNT(*) FROM medicao_boletim_leituras WHERE medicao_id=?",
+                                      (mid,)).fetchone()[0]
+        assert contar() == 1
+        monkeypatch.setattr(api_medicoes, "LEITURAS_GUARDADAS", 2)
+        for texto in ("PDF A", "PDF B", "PDF C"):
+            client_admin.post(f"/api/medicoes/{mid}/boletim/leitura", files=_boletim(texto))
+        assert contar() == 2
+    finally:
+        conn.close()
+
+
+def test_leitura_parcial_nao_e_guardada(client_admin, monkeypatch):
+    from app import db, leitura_smo
+    monkeypatch.setattr(leitura_smo, "ler_pdf", lambda pdf: {
+        "ok": False, "motivo": "campos-ausentes:valor_centavos", "faltando": [], "avisos": [], "fonte": "texto",
+        "campos": {"numero": 1, "situacao": "APROVADA", "data_realizacao": "2026-04-14"}})
+    mid = _planilha_enviada(client_admin)
+    assert _ler_capa(client_admin, mid).json()["campos"] == {"numero_orgao": "1", "data": "2026-04-14"}
+    conn = db.get_conn()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM medicao_boletim_leituras").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
 def test_leitura_de_outra_medicao_nao_da_aceito(client_admin, monkeypatch):
     lida = _lida_e_enviada(client_admin, monkeypatch)
     outra = _nova_planilha(client_admin, _contrato(client_admin), numero=7).json()["medicao_id"]

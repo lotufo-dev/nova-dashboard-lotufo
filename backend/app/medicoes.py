@@ -222,7 +222,7 @@ _MEIO_BOLETIM = {"smo": "SMO", "oficio": "ofício", "email": "e-mail", "carimbo"
 
 def _texto_boletim(r, dia: str | None) -> str:
     """"Boletim nº X (SMO) de 10/08/2026: aprovado R$ A, pedido R$ P, diferença R$ D". O pedido e' o congelado no
-    evento (069); sem ele (boletim sem pedido, ou anterior a 069) nao ha' pedido nem diferenca (gate Sol, rodada 1)."""
+    evento (070); sem ele (boletim sem pedido, ou anterior a 070) nao ha' pedido nem diferenca (gate Sol, rodada 1)."""
     from app.dinheiro import format_brl
     texto = "Boletim" + (f" nº {r['numero_orgao']}" if r["numero_orgao"] else "")
     texto += f" ({_MEIO_BOLETIM.get(r['meio'], r['meio'])})" if r["meio"] else ""

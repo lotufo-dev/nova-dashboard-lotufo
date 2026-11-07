@@ -469,6 +469,9 @@ def registrar_boletim(medicao_id: ID,
         raise _erro_do_cliente(conn, e)
 
 
+LEITURAS_GUARDADAS = 20     # issue #290: leituras da capa guardadas por medicao para a origem `aceito`
+
+
 @router.post("/api/medicoes/{medicao_id}/boletim/leitura")
 def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
                         usuario: dict = Depends(exigir("editar_cadastros")),
@@ -497,11 +500,14 @@ def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
         return {"lido": False, "fonte": r["fonte"], "campos": {},
                 "avisos": [f"A capa não está aprovada (situação: {c.get('situacao') or '—'}); digite os valores do boletim"]}
     campos = {}
+    da_medicao = True
     if "numero" in c:
         campos["numero_orgao"] = str(c["numero"])
-        # code-review: o PDF de outra medicao nao passa calado (o nº do orgao manda onde difere do da Lotufo, D6)
+        # code-review: o PDF de outra medicao nao passa calado (o nº do orgao manda onde difere do da Lotufo, D6);
+        # gate Sol, rodada 2: e a leitura dele nao vale para `aceito` nesta medicao
         esperado = m["numero_orgao"] or m["numero"]
         if c["numero"] != esperado:
+            da_medicao = False
             avisos.insert(0, f"A capa é da {c['numero']}ª medição e esta é a {esperado}ª: confira se o PDF é o certo")
     if "data_realizacao" in c:
         campos["data"] = c["data_realizacao"]
@@ -514,12 +520,17 @@ def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
         campos["valor_centavos"] = valor
     if not campos and not avisos:
         avisos.append("Não foi possível ler a capa do boletim neste PDF; digite os valores")
-    if campos:
+    if da_medicao and len(campos) == 3:
+        # gate Sol, rodada 2: so' a leitura completa e da capa desta medicao pode dar `aceito`; a mesma leitura
+        # repetida nao duplica, e ficam so' as LEITURAS_GUARDADAS mais recentes da medicao (tabela de apoio)
         with db.mutacao(conn):
-            conn.execute("INSERT INTO medicao_boletim_leituras (medicao_id, sha256, numero_orgao, data, valor_centavos, "
-                         "fonte, usuario_id) VALUES (?,?,?,?,?,?,?)",
-                         (medicao_id, arquivos.sha_de(pdf), campos.get("numero_orgao"), campos.get("data"),
-                          campos.get("valor_centavos"), r["fonte"], usuario["id"]))
+            conn.execute("INSERT OR IGNORE INTO medicao_boletim_leituras (medicao_id, sha256, numero_orgao, data, "
+                         "valor_centavos, fonte, usuario_id) VALUES (?,?,?,?,?,?,?)",
+                         (medicao_id, arquivos.sha_de(pdf), campos["numero_orgao"], campos["data"],
+                          campos["valor_centavos"], r["fonte"], usuario["id"]))
+            conn.execute("DELETE FROM medicao_boletim_leituras WHERE medicao_id=? AND id NOT IN (SELECT id FROM "
+                         "medicao_boletim_leituras WHERE medicao_id=? ORDER BY id DESC LIMIT ?)",
+                         (medicao_id, medicao_id, LEITURAS_GUARDADAS))
     return {"lido": bool(campos), "fonte": r["fonte"] if campos else None, "campos": campos, "avisos": avisos}
 
 

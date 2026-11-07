@@ -1,4 +1,4 @@
-"""Migracao 069 (issue #290): o pedido congelado no evento do boletim e as leituras da capa. So' acrescenta: os
+"""Migracao 070 (issue #290): o pedido congelado no evento do boletim e as leituras da capa. So' acrescenta: os
 eventos de atesto ja' gravados ficam com o pedido NULL (a linha do tempo nao inventa pedido nem diferenca)."""
 import pytest
 
@@ -6,7 +6,7 @@ from app import db
 
 pytestmark = pytest.mark.migracao_real
 
-MIGRACAO = "069_boletim_pedido_e_leituras.sql"
+MIGRACAO = "070_boletim_pedido_e_leituras.sql"
 
 
 @pytest.fixture
@@ -33,13 +33,22 @@ def conn(tmp_path, monkeypatch):
     c.close()
 
 
-def test_069_acrescenta_o_pedido_nulo_nos_eventos_antigos_e_a_tabela_de_leituras(conn):
+def test_070_acrescenta_o_pedido_nulo_nos_eventos_antigos_e_a_tabela_de_leituras(conn):
     assert [tuple(r) for r in conn.execute("SELECT valor_centavos, pedido_centavos FROM medicao_atestos")] == [
         (99_99, None)]
     assert conn.execute("SELECT COUNT(*) FROM medicao_boletim_leituras").fetchone()[0] == 0
 
 
-def test_069_reaplicada_nao_quebra(conn):
+def test_070_vem_depois_da_069_do_master_e_a_leitura_nao_duplica(conn):
+    nomes = [r[0] for r in conn.execute("SELECT nome FROM schema_migrations ORDER BY rowid")]
+    assert nomes.index("069_medicao_grupos_selada.sql") < nomes.index(MIGRACAO)
+    for _ in range(2):
+        conn.execute("INSERT OR IGNORE INTO medicao_boletim_leituras (medicao_id, sha256, numero_orgao, data, "
+                     "valor_centavos) VALUES (1, 'a', '1', '2026-02-10', 99_99)")
+    assert conn.execute("SELECT COUNT(*) FROM medicao_boletim_leituras").fetchone()[0] == 1
+
+
+def test_070_reaplicada_nao_quebra(conn):
     conn.execute("DELETE FROM schema_migrations WHERE nome=?", (MIGRACAO,))
     conn.commit()
     db.migrate(conn)
