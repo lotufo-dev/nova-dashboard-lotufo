@@ -7,131 +7,145 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 
 const USUARIO = { id: 1, nome: "Leonardo Praeiro", email: "leonardo@lotufo.com", perfil: "admin" };
 
+const dias = (n: number, f: (i: number) => number) => Array.from({ length: n }, (_, i) => f(i));
+
 const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   hoje: "2026-10-09",
   notas_a_enviar: 3,
-  certidoes: { vencidas: 1, vencendo: 1, itens: [
-    { tipo: "FGTS", entidade: "Encomind", validade: "2026-10-01", dias: null, vencida: true },
-    { tipo: "Estadual", entidade: "Guaxe", validade: "2026-10-15", dias: 6, vencida: false }] },
-  reajustes: [{ contrato_id: 7, obra: "Complexo Leblon", data_base_mes: "2025-11", aniversario: "2026-11-01", dias: 23 }],
+  certidoes: { vencidas: 1, vencendo: 1, itens: [] },
+  reajustes: [],
   protocoladas: { obras_protocoladas: 2, obras_ativas: 18, ultima: "2026-09-30" },
-  medido: { competencia: "2026-10", anterior_competencia: "2026-09",
-            valor_centavos: 124_000_000, anterior_centavos: 100_000_000, quantidade: 2, ultimo_lancamento: "2026-10-08" },
+  medido: { competencia: "2026-09", anterior_competencia: "2026-08", valor_centavos: 1_827_715_696,
+            anterior_centavos: 2_140_000_000, quantidade: 2, ultimo_lancamento: "2026-10-08", variacao_pct: -14.6 },
   por_contratante: [{ contratante: "SINFRA", atual_centavos: 124_000_000, anterior_centavos: 100_000_000 }],
-  recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 12 },
+  recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 12, real_centavos: 18_785_640_866 },
   a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 210_000_000 },
-  prazos: [
-    { contrato_id: 3, obra: "MT-388 Sinop", contratante: "SINFRA", tipo: "vigencia", data: "2026-10-20", dias: 11 },
-    { contrato_id: 7, obra: "Complexo Leblon", contratante: "Pref. Cuiabá", tipo: "data_base", data: "2026-11-01", dias: 23 }],
-  espelhos: [],
+  prazos: [],
+  espelhos: [{ espelho_id: 1, contrato_id: 7, medicao_id: 9, obra: "Obra A", titulo: "1ª Medição", situacao: "aprovado_mudou" }],
+  protocolado_mes: {
+    dia: 9,
+    atual: { mes: "2026-10", ate_dia: 9, valor_centavos: 1_586_677_904, quantidade: 6,
+             acumulado_centavos: dias(9, i => (i + 1) * 176_297_545) },
+    anterior: { mes: "2026-09", ate_dia: 9, valor_centavos: 1_148_230_577, quantidade: 5,
+                acumulado_centavos: dias(9, i => (i + 1) * 127_581_175) },
+    variacao_pct: 38.2,
+  },
+  notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2, acumulado_centavos: dias(9, i => i * 100) },
+  avisos_importantes: {
+    reajustes: { total: 9, itens: [{ contrato_id: 7, obra: "MT-388", dias: -3 }, { contrato_id: 8, obra: "Leblon", dias: 4 }] },
+    prazos: { total: 6, itens: [{ contrato_id: 3, obra: "Coxipó 3ª Etapa", tipo: "execucao", dias: -450 },
+                                { contrato_id: 4, obra: "Deciolândia", tipo: "vigencia", dias: 20 }] },
+    certidoes: { total: 11, itens: [
+      { tipo: "FGTS", entidade: "Integra BRT", validade: "2026-10-14", dias: 5, vencida: false },
+      { tipo: "Estadual", entidade: "Montante", validade: "2026-10-09", dias: 0, vencida: false },
+      { tipo: "FGTS", entidade: "Encomind", validade: "2026-10-01", dias: -8, vencida: true }] },
+  },
   ...extra,
 });
 
 describe("Início", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("cartões na ordem fixa, números sem frase de apoio e prazos levando à obra", async () => {
+  it("destaque de medições protocoladas: mês atual contra o anterior no mesmo período, com variação e gráfico", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     expect(api).toHaveBeenCalledWith("/api/inicio/painel");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/, Leonardo$/);
-    const cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
-    expect(cartoes.map(a => a.getAttribute("href"))).toEqual(["/medicoes/enviar-nota", "/documentos", "/obras/7/reajuste"]);
-    expect(cartoes[0].textContent).toContain("notas a enviar");
-    expect(cartoes[1].textContent).toContain("certidões vencidas ou vencendo");
-    expect(cartoes[1].textContent).not.toContain("FGTS Encomind");
-    expect(cartoes[2].textContent).not.toContain("data-base");
-    expect(cartoes[0].textContent).not.toContain("emitidas e ainda não enviadas");
-
-    const numeros = { textContent: (screen.getByRole("region", { name: "Números do mês" }).textContent ?? "").replace(/ /g, " ") };
-    expect(numeros.textContent).toContain("R$ 1.240.000,00");
-    // B-01 (10/10/2026): competencia do mes contra o mes anterior inteiro, sem "ate' dia N"
-    expect(numeros.textContent).toContain("Medido em outubro");
-    expect(numeros.textContent).not.toContain("até dia");
-    expect(numeros.textContent).not.toContain("sobre setembro");
-    expect(numeros.textContent).not.toContain("valor cheio");
-    expect(numeros.textContent).toContain("2 de 18 obras ativas");
-    expect(numeros.textContent).not.toContain("Última protocolada");
-    expect(numeros.textContent).not.toContain("sem data da baixa");
-    expect(numeros.textContent).not.toContain("cota da Lotufo");
-    // valor nulo do recebido vira "—"
-    expect(numeros.textContent).toContain("Recebido em 2026—");
-    // atraso que pede acao vira selo, com o valor no title
-    const selo = screen.getByText("mais de 60 dias").closest(".selo");
-    expect(selo?.className).toContain("selo--acao");
-    expect(selo?.getAttribute("title")?.replace(/ /g, " ")).toBe("R$ 2.100.000,00");
-
-    expect(screen.queryByText(/Nenhuma medição da competência/)).toBeNull();
-    const prazos = within(screen.getByRole("region", { name: "Prazos chegando" }));
-    expect(prazos.getByRole("link", { name: /MT-388 Sinop/ }).getAttribute("href")).toBe("/obras/3/prazos");
-    expect(prazos.getByRole("link", { name: /Complexo Leblon/ }).getAttribute("href")).toBe("/obras/7/reajuste");
+    const regiao = await screen.findByRole("region", { name: "Medições protocoladas" });
+    const d = within(regiao);
+    const texto = (regiao.textContent ?? "").replace(/\u00a0/g, " ");
+    expect(texto).toContain("outubro × setembro, mesmo período (dias 1 a 9)");
+    expect(texto).toContain("R$ 15.866.779,04");
+    expect(texto).toContain("R$ 11.482.305,77");
+    expect(texto).toContain("6 medições");
+    expect(texto).toContain("5 medições");
+    expect(texto).toContain("+38,2%");
+    expect(d.getByRole("img", { name: /Protocolado acumulado por dia/ })).toBeTruthy();
+    expect(d.getByText("outubro")).toBeTruthy();
+    expect(d.getByText("setembro")).toBeTruthy();
   });
 
-  it("o Recebido do ano mostra o recebido real do RM quando o servidor manda (06/11/2026)", async () => {
-    api.mockResolvedValue(painel({ recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 12, real_centavos: 123_456_789 } }));
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const rotulo = await screen.findByText("Recebido em 2026");
-    expect((rotulo.parentElement?.textContent ?? "").replace(/\s/g, " ")).toContain("R$ 1.234.567,89");
-  });
-
-  it("#359: espelho com o aprovado mudado vira cartão que leva à medição; mais de um leva aos avisos", async () => {
-    const esp = (medicao_id: number, situacao: PainelInicio["espelhos"][number]["situacao"]) =>
-      ({ espelho_id: medicao_id + 100, contrato_id: 7, medicao_id, obra: "Obra A", titulo: "23ª Medição", situacao });
-    api.mockResolvedValue(painel({ espelhos: [esp(723, "aprovado_mudou")] }));
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    let cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
-    expect(cartoes).toHaveLength(4);
-    expect(cartoes[3].getAttribute("href")).toBe("/obras/7/medicoes/723#espelho");
-    expect(cartoes[3].textContent).toContain("1espelho a conferir");
-    expect(cartoes[3].className).toContain("ini-cartao--acao");
-    cleanup();
-    api.mockResolvedValue(painel({ espelhos: [esp(723, "nota_emitida")] }));
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
-    expect(cartoes[3].getAttribute("href")).toBe("/obras/7/medicoes/723#notas");
-    cleanup();
-    api.mockResolvedValue(painel({ espelhos: [esp(723, "aprovado_mudou"), esp(724, "nao_conferido")] }));
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
-    expect(cartoes[3].getAttribute("href")).toBe("/avisos");
-    expect(cartoes[3].textContent).toContain("2espelhos a conferir");
-  });
-
-  it("#359: sem espelho a conferir, os três cartões de sempre", async () => {
+  it("três cartões: notas protocoladas, medido do mês fechado com variação e recebido no ano", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
-    expect(cartoes).toHaveLength(3);
+    const regiao = await screen.findByRole("region", { name: "Números do mês" });
+    const n = within(regiao);
+    const t = (regiao.textContent ?? "").replace(/\u00a0/g, " ");
+    expect(t).toContain("Notas fiscais protocoladas em outubro");
+    expect(t).toContain("R$ 15.222.956,18");
+    expect(t).toContain("5 notas · 2 obras");
+    expect(t).toContain("Medido em setembro");
+    expect(t).toContain("R$ 18.277.156,96");
+    expect(t).toContain("mês fechado");
+    expect(t).toContain("-14,6% vs. agosto");
+    expect(t).toContain("Recebido em 2026");
+    expect(t).toContain("R$ 187.856.408,66");
+    expect(n.getByText("-14,6% vs. agosto").className).toContain("ini-variacao--atencao");
   });
 
-  it("mês sem medição: aviso e botão para lançar", async () => {
+  it("os cartões e a tabela antigos não existem mais", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    await screen.findByRole("region", { name: "Números do mês" });
+    expect(screen.queryByRole("region", { name: "O que fazer agora" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Prazos chegando" })).toBeNull();
+    const tudo = document.body.textContent ?? "";
+    for (const velho of ["notas a enviar", "espelho a conferir", "espelhos a conferir", "A receber", "Obras protocoladas em", "Prazos chegando"])
+      expect(tudo).not.toContain(velho);
+  });
+
+  it("avisos importantes: três seções com contagem, itens e Ver todos levando à tela Avisos com a categoria", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
+    const reaj = within(caixa.getByRole("region", { name: "Reajustes" }));
+    expect(reaj.getByText("9")).toBeTruthy();
+    expect(reaj.getByText("MT-388 · reajuste a pedir")).toBeTruthy();
+    const prazos = within(caixa.getByRole("region", { name: "Prazos" }));
+    expect(prazos.getByText("vencido há 450 dias").className).toContain("ini-pilula--acao");
+    expect(prazos.getByText("faltam 20 dias").className).toContain("ini-pilula--atencao");
+    const cert = within(caixa.getByRole("region", { name: "Certidões" }));
+    expect(cert.getByText("vence em 5 dias").className).toContain("ini-pilula--atencao");
+    expect(cert.getByText("vence hoje")).toBeTruthy();
+    expect(cert.getByText("vencido há 8 dias").className).toContain("ini-pilula--acao");
+    expect(cert.getByText("FGTS · Integra BRT")).toBeTruthy();
+    const hrefs = ["Reajustes", "Prazos", "Certidões"].map(
+      t => caixa.getByRole("link", { name: `Ver todos: ${t}` }).getAttribute("href"));
+    expect(hrefs).toEqual(["/avisos?familia=reajuste", "/avisos?familia=prazo", "/avisos?familia=documentos"]);
+  });
+
+  it("seção de avisos sem item mostra uma linha curta no lugar da lista", async () => {
+    api.mockResolvedValue(painel({ avisos_importantes: {
+      reajustes: { total: 0, itens: [] }, prazos: { total: 0, itens: [] }, certidoes: { total: 0, itens: [] } } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    await screen.findByRole("complementary", { name: "Avisos importantes" });
+    expect(screen.getByText("Nenhum reajuste a pedir.")).toBeTruthy();
+    expect(screen.getByText("Nenhuma certidão vencendo.")).toBeTruthy();
+  });
+
+  it("sem base de comparação não há selo de variação", async () => {
+    api.mockResolvedValue(painel({ medido: { ...painel().medido, variacao_pct: null } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const n = await screen.findByRole("region", { name: "Números do mês" });
+    expect(n.textContent).not.toContain("vs. agosto");
+  });
+
+  it("medido por contratante com os dois meses fechados; mês sem medição mostra o aviso e o botão", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const sec = within(await screen.findByRole("region", { name: "Medido por contratante" }));
+    expect(sec.getByText("SINFRA")).toBeTruthy();
+    expect(sec.queryByRole("status")).toBeNull();
+    cleanup();
     api.mockResolvedValue(painel({
-      medido: { competencia: "2026-10", anterior_competencia: "2026-09",
-                valor_centavos: 0, anterior_centavos: 0, quantidade: 0, ultimo_lancamento: "2026-09-30" },
-      por_contratante: [], reajustes: [],
+      medido: { competencia: "2026-09", anterior_competencia: "2026-08",
+                valor_centavos: 0, anterior_centavos: 0, quantidade: 0, ultimo_lancamento: null, variacao_pct: null },
+      por_contratante: [],
     }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const aviso = await screen.findByRole("status");
-    expect(aviso.textContent).toContain("Nenhuma medição da competência de outubro.");
-    expect(aviso.textContent).not.toContain("Último lançamento");
+    expect(aviso.textContent).toContain("Nenhuma medição da competência de setembro.");
     expect(within(aviso).getByRole("link", { name: /Lançar medição/ }).getAttribute("href")).toBe("/medicoes");
-    const cartoes = within(screen.getByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
-    expect(cartoes[2].getAttribute("href")).toBe("/avisos");
-  });
-
-  it("a receber sem nada há mais de 60 dias, ou ainda não liberado, fica sem selo", async () => {
-    api.mockResolvedValue(painel({ a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 0 } }));
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const numeros = await screen.findByRole("region", { name: "Números do mês" });
-    expect(within(numeros).queryByText("mais de 60 dias")).toBeNull();
-    expect(numeros.textContent).not.toContain("nada há mais de 60 dias");
-    cleanup();
-    api.mockResolvedValue(painel({ a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null } }));
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const n2 = await screen.findByRole("region", { name: "Números do mês" });
-    expect(within(n2).queryByText("mais de 60 dias")).toBeNull();
-    expect(n2.textContent).not.toContain("aguardando a conciliação");
-    expect(n2.textContent).toContain("A receber—");
   });
 
   it("saudação pela hora de Cuiabá", () => {

@@ -45,7 +45,8 @@ def test_painel_do_inicio(client_admin):
     r = client_admin.get("/api/inicio/painel")
     assert r.status_code == 200
     assert set(r.json()) == {"hoje", "notas_a_enviar", "certidoes", "reajustes", "protocoladas", "medido",
-                             "por_contratante", "recebido_ano", "a_receber", "prazos", "espelhos"}
+                             "por_contratante", "recebido_ano", "a_receber", "prazos", "espelhos",
+                             "protocolado_mes", "notas_mes", "avisos_importantes"}
     assert r.json()["protocoladas"]["obras_ativas"] == 1
     assert r.json()["espelhos"] == []
 

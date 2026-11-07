@@ -154,3 +154,87 @@ def test_espelho_a_conferir_conta_uma_vez_o_espelho_com_duas_medicoes(ambiente_p
     assert medicoes.detalhe(conn, ids["execucao"])["estado"] == "nota_emitida"
     [e] = inicio.painel(conn)["espelhos"]
     assert (e["espelho_id"], e["medicao_id"], e["situacao"]) == (eid, ids["projeto"], "aprovado_mudou")
+
+
+def _protocolar(c, mid, data, etapa="nota"):
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem, etapa) VALUES (?, ?, 'manual', ?)",
+              (mid, data, etapa))
+    c.commit()
+
+
+def test_protocolado_por_dia_soma_so_a_primeira_data_de_protocolo_da_nota(cenario):
+    c, cid = cenario
+    a = _medicao(c, cid, 1, "2026-10-01 10:00:00", 1_000, estado="protocolada")
+    b = _medicao(c, cid, 2, "2026-10-01 10:00:00", 500, estado="protocolada")
+    _protocolar(c, a, "2026-10-02"); _protocolar(c, a, "2026-10-08")       # reprotocolo: nao conta de novo
+    _protocolar(c, b, "2026-10-04"); _protocolar(c, b, "2026-10-01", etapa="planilha")   # planilha nao e' da nota
+    atual = inicio.painel(c, HOJE)["protocolado_mes"]["atual"]
+    assert atual["valor_centavos"] == 1_500 and atual["quantidade"] == 2 and atual["ate_dia"] == 9
+    assert atual["acumulado_centavos"] == [0, 1_000, 1_000, 1_500, 1_500, 1_500, 1_500, 1_500, 1_500]
+
+
+def test_mesmo_periodo_do_mes_anterior_corta_no_mesmo_dia(cenario):
+    c, cid = cenario
+    a = _medicao(c, cid, 1, "2026-09-01 10:00:00", 2_000, estado="protocolada")
+    b = _medicao(c, cid, 2, "2026-09-01 10:00:00", 700, estado="protocolada")
+    _protocolar(c, a, "2026-09-05"); _protocolar(c, b, "2026-09-10")     # 10/09 esta' depois do dia 9: fora
+    p = inicio.painel(c, HOJE)["protocolado_mes"]
+    assert p["anterior"]["mes"] == "2026-09" and p["anterior"]["ate_dia"] == 9
+    assert p["anterior"]["valor_centavos"] == 2_000 and p["anterior"]["quantidade"] == 1
+    assert len(p["anterior"]["acumulado_centavos"]) == 9
+    assert p["atual"]["valor_centavos"] == 0 and p["variacao_pct"] == -100.0
+    # mes anterior mais curto: 31/03 compara com ate' 28/02
+    assert inicio._protocolado_mes(c, D(2026, 3, 31))["anterior"]["ate_dia"] == 28
+
+
+def test_notas_protocoladas_no_mes_contam_notas_e_obras_distintas(cenario):
+    c, cid = cenario
+    c.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos) "
+              "VALUES ('MTPAR', 'CT 2/2025', 'Obra B', 'obra', 100)")
+    cid2 = c.execute("SELECT MAX(id) FROM contratos").fetchone()[0]
+    m1 = _medicao(c, cid, 1, "2026-10-01 10:00:00", 100, estado="protocolada")
+    m2 = _medicao(c, cid, 2, "2026-10-01 10:00:00", 100, estado="protocolada")
+    m3 = _medicao(c, cid2, 1, "2026-10-01 10:00:00", 100, estado="protocolada")
+    m4 = _medicao(c, cid2, 2, "2026-10-01 10:00:00", 100, estado="protocolada")   # protocolada em setembro
+    for m, d in ((m1, "2026-10-03"), (m2, "2026-10-05"), (m3, "2026-10-06"), (m4, "2026-09-20")):
+        _protocolar(c, m, d)
+    nota = {}
+    for n, valor, situacao in ((1, 3_000, "ativa"), (2, 4_000, "ativa"), (3, 9_000, "cancelada"), (4, 8_000, "ativa")):
+        nota[n] = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
+                            "VALUES (1, ?, ?, '2026-10-01', ?, ?)", (n, str(n), valor, situacao)).lastrowid
+    for m, n in ((m1, 1), (m2, 1),      # a mesma nota nas duas medicoes da obra A: conta uma vez
+                 (m3, 2), (m3, 3),      # cancelada nao entra
+                 (m4, 4)):              # medicao protocolada em setembro nao entra
+        c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) "
+                  "VALUES (?, ?, 1, 'manual')", (m, nota[n]))
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, desfeita_em) "
+              "VALUES (?, ?, 1, 'manual', '2026-10-07')", (m1, nota[4]))   # alocacao desfeita nao conta
+    c.commit()
+    n = inicio.painel(c, HOJE)["notas_mes"]
+    assert (n["valor_centavos"], n["notas"], n["obras"]) == (7_000, 2, 2)
+    assert n["acumulado_centavos"][-1] == 7_000 and len(n["acumulado_centavos"]) == 9
+
+
+def test_variacao_do_medido_do_mes_fechado(cenario):
+    c, cid = cenario
+    _medicao(c, cid, 1, "2026-10-01 10:00:00", 1_000, competencia="2026-09")
+    _medicao(c, cid, 2, "2026-10-01 10:00:00", 1_250, competencia="2026-08")
+    assert inicio.painel(c, HOJE)["medido"]["variacao_pct"] == -20.0
+    assert inicio._variacao_pct(10, 0) is None
+
+
+def test_avisos_importantes_tem_contagem_e_tres_itens_por_secao(cenario):
+    c, cid = cenario
+    a = inicio.painel(c, HOJE)["avisos_importantes"]
+    assert set(a) == {"reajustes", "prazos", "certidoes"}
+    assert a["reajustes"]["total"] == 1 and a["reajustes"]["itens"][0]["obra"] == "Obra A"
+    # execucao em 20/10 (11 dias); a vigencia 30/12 e' alem do horizonte e a data-base nao e' "prazo"
+    assert a["prazos"]["total"] == 2 and a["prazos"]["itens"][0]["tipo"] == "execucao"
+    assert a["certidoes"] == {"total": 0, "itens": []}
+    for i in range(5):
+        c.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos, "
+                  "execucao_fim) VALUES ('X', ?, ?, 'o', 100, ?)", (f"N{i}", f"Obra {i}", f"2026-09-0{i + 1}"))
+    c.commit()
+    p = inicio.painel(c, HOJE)["avisos_importantes"]["prazos"]
+    assert p["total"] == 7 and len(p["itens"]) == 3
+    assert [x["dias"] for x in p["itens"]] == sorted(x["dias"] for x in p["itens"]) and p["itens"][0]["dias"] < 0
