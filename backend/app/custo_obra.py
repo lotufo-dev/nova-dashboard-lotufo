@@ -135,11 +135,12 @@ def _medido_por_mes(conn, contrato_id: int) -> dict[str, dict]:
         mes["medicoes"].append({"id": m["id"], "numero": m["numero"], "nome": f"{m['numero']}ª medição"})
         mes["medido"] += m["valor"]
         lido = medicao_grupos.grupos(conn, m["id"])
+        # na ordem: a ultima e' a da medicao mais recente (None: sem leitura valida)
+        mes["leituras"].append((mes["medicoes"][-1]["nome"], lido if lido["leitura"] is not None else None))
         if lido["leitura"] is None:
             mes["nao_lido"] += m["valor"]
             continue
         mes["lida"] = True
-        mes["leituras"].append((mes["medicoes"][-1]["nome"], lido))     # na ordem: a ultima e' a mais recente
         soma = 0
         for g in lido["grupos"]:
             mes["grupos"][g["nome"]] = mes["grupos"].get(g["nome"], 0) + g["valor_medido_centavos"]
@@ -175,7 +176,10 @@ def _itens_chave(grupos: list[dict], linhas: list[dict], medido: dict[str, dict]
         custo = sum(i["custo_centavos"] for x in linhas for i in x["grupos"]
                     if i["tipo"] == "grupo" and i["nome"] == g["nome"])
         # "1.2." e "1.2" sao o mesmo item (a mesma comparacao por segmento do cadastro)
-        medicao, item = next(((nome, it) for nome, lido in reversed(leituras) for gr in lido["grupos"]
+        # so' a planilha da medicao mais recente: sem leitura valida ou sem o item no grupo, "sem_medicao" (uma
+        # quantidade antiga contra o custo acumulado de agora daria custo por unidade errado; gate Sol, #492)
+        nome_ult, lido_ult = leituras[-1] if leituras else (None, None)
+        medicao, item = next(((nome_ult, it) for gr in (lido_ult["grupos"] if lido_ult else [])
                               if gr["nome"] == g["nome"] for it in gr["itens"]
                               if _segmentos(str(it["item"] or "").strip()) == _segmentos(chave["codigo"])),
                              (None, None))
