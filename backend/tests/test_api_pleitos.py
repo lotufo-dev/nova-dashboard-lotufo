@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from app import auditoria, cadastro_aplicar, correio, db, envio_reserva, pleitos
+from app import auditoria, cadastro_aplicar, correio, cronograma, db, envio_reserva, pleitos
 from tests.test_envio_reserva import CorreioFalso
 from tests.test_protocolo import CARTAS, _assinar, _contrato
 
@@ -88,6 +88,56 @@ def test_reajuste_da_obra_traz_as_competencias_apostiladas_e_o_termo_do_pleito(a
     c.commit(); c.close()
     assert cl.get(f"/api/contratos/{cid}/reajuste").json()["bases_dos_termos"] == \
         [{"instrumento_id": iid, "data_base_mes": "2024-06"}]
+
+
+def test_reajuste_da_obra_traz_so_os_aditivos_que_valem_como_termo(api):
+    """Issue #390 (gate Sol, PR #407): a aba diz o termo aditivo que atendeu o pleito pelo mesmo criterio do ciclo;
+    aditivo cancelado ou de execucao nao vem."""
+    cl, cid, _ = api
+    c = db.get_conn()
+    for chave, natureza, cancelado in (("ta-01", "reajuste", None), ("ta-02", "execucao", None),
+                                       ("ta-03", "reajuste", "2025-12-01 10:00:00")):
+        c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, numero, "
+                  "chave_cadastro, natureza, cancelado_em) VALUES (?, 'valor', 100_01, 'assinado', '2025-07-10', ?, ?, ?, ?)",
+                  (cid, chave.upper(), chave, natureza, cancelado))
+    c.commit(); c.close()
+    termos = cl.get(f"/api/contratos/{cid}/reajuste").json()["aditivos_de_reajuste"]
+    assert [(t["chave"], t["tipo"], t["numero"], t["data"]) for t in termos] == \
+        [("ta-01", "aditivo_valor", "TA-01", "2025-07-10")]
+
+
+def test_reajuste_da_obra_nao_poe_o_aditivo_corrigido_em_ciclo_nenhum(api, monkeypatch):
+    """Issue #409: TA2 corrige TA1 (que fechava 2026 pela data) para o ciclo 2025. Na resposta, so' o TA2 e' termo, e
+    so' do 2025; o 2026, cujo pleito ainda esta' ligado ao TA1 ate' o proximo `aplicar`, espera o apostilamento."""
+    import datetime
+
+    from app import tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 9, 10))     # ciclo 2026 da base 2024-06
+    cl, cid, _ = api
+    c = db.get_conn()
+    for chave, assinado_em, ciclo, corrige in (("ta-01", "2026-07-10", None, None), ("ta-02", "2026-08-01", 2025, "ta-01")):
+        c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, numero, "
+                  "chave_cadastro, natureza, data_base_mes, ciclo_reajuste, corrige_chave) "
+                  "VALUES (?, 'valor', 100_01, 'assinado', ?, ?, ?, 'reajuste', '2024-06', ?, ?)",
+                  (cid, assinado_em, chave.upper(), chave, ciclo, corrige))
+    for ciclo, enviado_em, chave in ((2025, "2025-06-10", "ta-02"), (2026, "2026-06-10", "ta-01")):
+        c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+                  "enviado_em, instrumento_chave) VALUES (?, 'reajuste', 'cadastro', '2024-06', ?, ?, 'enviado', ?, ?)",
+                  (cid, ciclo, f"CT-1-LT-{ciclo}", enviado_em, chave))
+    c.commit(); c.close()
+    r = cl.get(f"/api/contratos/{cid}/reajuste").json()
+    termos = {t["chave"] for t in r["aditivos_de_reajuste"]}
+    assert termos == {"ta-02"}
+    ciclos_do_termo: dict[str, set[int]] = {}
+    for p in r["pleitos"]:
+        if p["instrumento_chave"] in termos:
+            ciclos_do_termo.setdefault(p["instrumento_chave"], set()).add(p["ciclo"])
+    for k in r["ciclos"]:
+        if k["apostilamento"]:
+            ciclos_do_termo.setdefault(k["apostilamento"]["chave"], set()).add(k["ciclo"])
+    assert ciclos_do_termo == {"ta-02": {2025}}
+    k = r["ciclos"][0]
+    assert (k["ciclo"], k["situacao"], k["apostilamento"]) == (2026, "apostilamento_pendente", None)
 
 
 def test_reajuste_da_obra_traz_o_estado_de_cada_competencia_e_o_ciclo_a_reemitir(api, monkeypatch):
@@ -900,7 +950,7 @@ def test_anexo_que_falha_na_leitura_depois_da_reserva_destrava(api, monkeypatch)
     monkeypatch.setattr(pleitos, "_bytes", falha_com_a_reserva)
     c = db.get_conn()
     try:
-        with pytest.raises(OSError):
+        with pytest.raises(ValueError, match="Não foi possível ler a carta assinada"):   # #441: 422, nao 500
             pleitos.enviar(c, {"id": _uid(), "email": "admin@lotufo.com"}, pid, corpo["para"], corpo["copia"],
                            corpo["assunto"], corpo["corpo"], corpo["justificativa"])
     finally:
@@ -1049,6 +1099,52 @@ def test_dois_envios_simultaneos_da_reiteracao_mandam_um_so(api, monkeypatch):
     assert _estado(pid) == ({"situacao": "enviado", "envio_id": eid, "envio_reservado_em": None}, 2)
 
 
+def test_carta_de_prazo_com_a_curva_s_sai_uma_vez_so_com_dois_envios_simultaneos(api, monkeypatch):
+    """Issue #293: a curva S entra pelos anexos do pleito, entao o envio da carta de prazo continua unico (dois
+    POST simultaneos: 1x200 e 1x409) e o e-mail registrado leva a carta e a curva."""
+    cl, cid, _ = api
+    c = db.get_conn()
+    cronograma.nova_versao(c, 1, cid, [("2026-08", 100_00), ("2026-09", 100_00)], "manual", data_documento="2026-01-10")
+    c.close()
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
+                                                      "justificativa": "interferências na via"})
+    assert r.status_code == 201 and "Curva S.xlsx" in [a["nome"] for a in r.json()["anexos"]], r.text
+    pid = r.json()["id"]
+    curva = [a for a in r.json()["anexos"] if a["gerado"]][0]["id"]
+    recusa = cl.post(f"/api/pleitos/{pid}/anexos/{curva}/remover")     # rodada 1 da PR #436: a curva nao sai
+    assert recusa.status_code == 422 and "não se remove" in recusa.json()["detail"], recusa.text
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    doc = cl.get(f"/api/pleitos/{pid}/documento")
+    cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc.content), "application/pdf"))
+    pv = cl.post(f"/api/pleitos/{pid}/previa").json()
+    assert "Curva S.xlsx" in [a["nome"] for a in pv["anexos"]]
+    corpo = {**{k: pv[k] for k in ("para", "copia", "assunto", "corpo")}, "justificativa": "cronograma vai depois"}
+    falso = CorreioFalso(espera=0.3)
+    monkeypatch.setattr(correio, "cliente", falso)
+    respostas = []
+    largada = threading.Barrier(2, timeout=10)
+
+    def enviar():
+        largada.wait()
+        respostas.append(cl.post(f"/api/pleitos/{pid}/enviar", json=corpo))
+
+    ts = [threading.Thread(target=enviar) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert sorted(x.status_code for x in respostas) == [200, 409], [x.text for x in respostas]
+    assert len(falso.enviados) == 1
+    p, envios = _estado(pid)
+    assert p["situacao"] == "enviado" and envios == 1
+    c = db.get_conn()
+    try:
+        nomes = [r[0] for r in c.execute("SELECT nome FROM envio_anexos WHERE envio_id=?", (p["envio_id"],))]
+    finally:
+        c.close()
+    assert "Curva S.xlsx" in nomes and len(nomes) == 2
+
+
 def test_reemitir_pela_api_valida_em_portugues(api):
     cl, cid, _ = api
     rascunho = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
@@ -1056,3 +1152,166 @@ def test_reemitir_pela_api_valida_em_portugues(api):
     assert r.status_code == 422 and "enviado" in r.json()["detail"], r.text
     assert cl.post("/api/pleitos/999999/reemitir", json={"reemissao": "reiteracao", "numero_oficio": "1"}
                    ).status_code == 404
+
+
+# --- issue #398: pedido de aditivo de valor do cadastro ------------------------------------------------------
+
+PEDIDO_VALOR = {"tipo": "valor", "oficio": "CT-001-LT-2026", "data": "2026-03-27", "data_base": None, "ciclo": None,
+                "dias": None, "valor_centavos": 100000000, "objeto": "1ª RPFO"}
+TA_VALOR = {"chave": "ta-01", "tipo": "aditivo_valor", "data": "2026-06-30", "numero": "099/2024/01/01",
+            "objeto": "1ª RPFO", "corrige": None, "pdf": None, "delta_valor_centavos": 100000000,
+            "nova_execucao_fim": None, "nova_vigencia_fim": None, "dados": {}, "natureza": "execucao"}
+
+
+def _com_pedido_de_valor(instrumentos=()):
+    c = db.get_conn()
+    obra = {**_contrato("Obra MTPAR", "mtpar", "099/2024/MTPAR"), "datas_base": [{"mes": "2024-06", "indice": "INCC-DI"}],
+            "pleitos_anteriores": [PEDIDO_VALOR], "instrumentos": list(instrumentos)}
+    cadastro_aplicar.aplicar(c, 1, {
+        "orgaos": [{"chave": "mtpar", "nome": "MTPAR", "familia": "mtpar", "cnpj": None,
+                    "regras": {"protocolo_para": ["protocolo@orgao-b.exemplo.com.br"], "documentos_medicao": [],
+                               "documentos_reajuste": []}}],
+        "entidades": [{"chave": "lotufo", "nome": "Lotufo Engenharia e Construções Ltda", "cnpj": "31200101000130",
+                       "papel": "lotufo", "coligada_rm": 1, "sigla_oficio": "LT", "nome_curto": "Lotufo"}],
+        "contratos": [obra], "avisos": [], "geral": {"cartas": CARTAS}})
+    pid = c.execute("SELECT id FROM pleitos WHERE tipo='valor'").fetchone()[0]
+    c.commit(); c.close()
+    return pid
+
+
+def test_prazos_da_obra_traz_o_pedido_de_valor_sem_resposta(api):
+    cl, cid, _ = api
+    pid = _com_pedido_de_valor()
+    d = cl.get(f"/api/contratos/{cid}/prazos").json()
+    assert d["pedidos_valor"] == [{"id": pid, "numero_oficio": "CT-001-LT-2026", "enviado_em": "2026-03-27",
+                                   "valor_centavos": 100000000, "objeto": "1ª RPFO", "atendido_por": None}]
+    # nao entra nos oficios de prazo e conclusao (os que tem carta e envio)
+    assert all(p["tipo"] != "valor" for p in d["pleitos"])
+
+
+def test_prazos_da_obra_liga_o_pedido_de_valor_ao_aditivo_posterior(api):
+    cl, cid, _ = api
+    _com_pedido_de_valor([TA_VALOR])
+    [p] = cl.get(f"/api/contratos/{cid}/prazos").json()["pedidos_valor"]
+    assert p["atendido_por"] == {"numero": "099/2024/01/01", "data_assinatura": "2026-06-30", "rotulo": "1º TA"}
+
+
+def test_pedido_de_valor_nao_e_ofertado_para_envio(api):
+    cl, cid, _ = api
+    pid = _com_pedido_de_valor()
+    # nao se cria pela tela: nao ha' carta de aditivo de valor
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "valor", "numero_oficio": "301"})
+    assert r.status_code == 422
+    # o do cadastro se le, mas nao monta, nao tem previa e nao se envia
+    d = cl.get(f"/api/pleitos/{pid}")
+    assert d.status_code == 200 and d.json()["rotulo"] == "Pedido de valor"
+    assert d.json()["reemissoes_possiveis"] == [] and d.json()["pendencias"] == []
+    assert cl.post(f"/api/pleitos/{pid}/montar", json={}).status_code == 422
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422 and "não se envia pela dashboard" in r.json()["detail"]
+    assert cl.post(f"/api/pleitos/{pid}/enviar", json={"para": ["a@orgao-b.exemplo.com.br"], "copia": [],
+                                                       "assunto": "x", "corpo": "x"}).status_code == 422
+    assert db.get_conn().execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+
+
+def test_atualizar_curva_s_pela_api_mantem_a_carta_assinada(api):
+    """Issue #447: medicao protocolada depois do montar; "O que falta" mostra a curva que mudou, POST /curva-s troca a
+    curva sem apagar o assinado e a pendencia sai."""
+    cl, cid, mid = api
+    c = db.get_conn()
+    cronograma.nova_versao(c, 1, cid, [("2026-08", 100_00), ("2026-09", 100_00)], "manual", data_documento="2026-01-10")
+    c.close()
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
+                                                      "justificativa": "interferências na via"})
+    pid = r.json()["id"]
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    doc = cl.get(f"/api/pleitos/{pid}/documento")
+    cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc.content), "application/pdf"))
+    c = db.get_conn()
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=5000 WHERE id=?", (mid,)); c.commit(); c.close()
+    p = cl.get(f"/api/pleitos/{pid}").json()
+    assert pleitos.CURVA_S_MUDOU in [x["mensagem"] for x in p["pendencias"]]
+    assert pleitos.CURVA_S_MUDOU in [x["mensagem"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+    r = cl.post(f"/api/pleitos/{pid}/curva-s")
+    assert r.status_code == 200, r.text
+    assert r.json()["situacao"] == "assinado" and r.json()["assinado_arquivo"] == p["assinado_arquivo"]
+    assert "curva_s" not in [x["codigo"] for x in r.json()["pendencias"]]
+    reajuste = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
+    recusa = cl.post(f"/api/pleitos/{reajuste}/curva-s")
+    assert recusa.status_code == 422 and "pedido de prorrogação" in recusa.json()["detail"]
+
+
+def test_previa_com_a_curva_s_sumida_lista_a_pendencia_e_nao_da_500(api):
+    """Revisor na PR #455 (R1): o arquivo da curva sumiu de `curvas/`; POST /previa responde e lista a pendencia."""
+    from app import arquivos
+    cl, cid, _ = api
+    c = db.get_conn()
+    cronograma.nova_versao(c, 1, cid, [("2026-08", 100_00), ("2026-09", 100_00)], "manual", data_documento="2026-01-10")
+    c.close()
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
+                                                      "justificativa": "interferências na via"})
+    pid = r.json()["id"]
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    curva = [a for a in cl.get(f"/api/pleitos/{pid}").json()["anexos"] if a["gerado"]][0]
+    arquivos.caminho_seguro(curva["arquivo"]).unlink()
+    pv = cl.post(f"/api/pleitos/{pid}/previa")
+    assert pv.status_code == 200, pv.text
+    assert pleitos.CURVA_S_ILEGIVEL in [x["mensagem"] for x in pv.json()["pendencias"]]
+    assert cl.post(f"/api/pleitos/{pid}/curva-s").status_code == 200
+    assert "curva_s" not in [x["codigo"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+
+
+def test_previa_com_anexo_ou_carta_sumidos_do_disco_responde_em_portugues_e_nao_da_500(api):
+    """Issue #441: restaurado um backup sem `pleitos/`, o anexo arrastado e a carta montada nao estao no disco.
+    A previa e o envio respondem 422 com o que falta, nao 500, e o envio nao fica reservado."""
+    from app import arquivos
+    cl, cid, _ = api
+    pid = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
+    cl.post(f"/api/pleitos/{pid}/anexos", data={"tipo": "cronograma"},
+            files=_arquivo("cronograma.pdf", b"%PDF-1.4 cronograma", "application/pdf"))
+    assert cl.post(f"/api/pleitos/{pid}/montar", json={}).status_code == 200
+    d = cl.get(f"/api/pleitos/{pid}").json()
+    pv = cl.post(f"/api/pleitos/{pid}/previa").json()
+    corpo = {**{k: pv[k] for k in ("para", "copia", "assunto", "corpo")}, "justificativa": "teste do anexo sumido"}
+
+    arquivos.caminho_seguro([a for a in d["anexos"] if a["nome"] == "cronograma.pdf"][0]["arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que='o anexo "cronograma.pdf"', acao="remova o anexo e anexe o arquivo de novo"), r.text
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=corpo)
+    assert r.status_code == 422 and "cronograma.pdf" in r.json()["detail"], r.text
+
+    arquivos.caminho_seguro(d["montado_arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(o_que="a carta montada",
+                                                               acao="monte a carta de novo"), r.text
+    assert _estado(pid) == ({"situacao": "montado", "envio_id": None, "envio_reservado_em": None}, 0)
+
+
+def test_carta_assinada_sumida_do_disco_se_resolve_pelo_que_a_mensagem_manda(api):
+    """Issue #441: so' a assinada sumiu -> subir a assinada de novo (remontar mudaria a carta e invalidaria a
+    assinatura); sumiram as duas -> remontar, assinar e subir. Subir a assinada sem a montada responde 422, nao 500."""
+    from app import arquivos
+    cl, cid, _ = api
+    pid, _ = _pronto(cl, cid)
+    d = cl.get(f"/api/pleitos/{pid}").json()
+    assinado = arquivos.caminho_seguro(d["assinado_arquivo"]).read_bytes()
+    arquivos.caminho_seguro(d["assinado_arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422 and r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que="a carta assinada", acao=pleitos.SUBA_A_ASSINADA), r.text
+    assert cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", assinado, "application/pdf")).status_code == 200
+    assert cl.post(f"/api/pleitos/{pid}/previa").status_code == 200        # a mesma assinada resolve
+
+    arquivos.caminho_seguro(d["assinado_arquivo"]).unlink()
+    arquivos.caminho_seguro(d["montado_arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422 and r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que="a carta assinada", acao=pleitos.REMONTE_E_ASSINE), r.text
+    r = cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", assinado, "application/pdf"))
+    assert r.status_code == 422 and r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que="a carta montada", acao=pleitos.REMONTE_E_ASSINE), r.text
+    assert cl.post(f"/api/pleitos/{pid}/montar", json={}).status_code == 200
+    assert cl.post(f"/api/pleitos/{pid}/previa").status_code == 200

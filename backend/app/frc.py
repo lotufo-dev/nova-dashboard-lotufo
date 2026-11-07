@@ -483,9 +483,10 @@ class _Pdf(FPDF):
         super().__init__(unit="mm", format="A4")
         self.set_auto_page_break(False)
         self.set_margins(0, 0, 0)
-        if carta._ARIAL.is_file() and carta._ARIAL_NEGRITO.is_file():
-            self.add_font("Frc", "", str(carta._ARIAL))
-            self.add_font("Frc", "B", str(carta._ARIAL_NEGRITO))
+        fonte = carta.fonte_carta()
+        if fonte:
+            self.add_font("Frc", "", str(fonte[0]))
+            self.add_font("Frc", "B", str(fonte[1]))
             self.fonte, self.unicode = "Frc", True
         else:
             self.fonte, self.unicode = "Helvetica", False

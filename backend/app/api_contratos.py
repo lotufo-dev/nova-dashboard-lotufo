@@ -1,4 +1,5 @@
 """Leitura de contratos. Bloco 9: a escrita saiu; contrato entra pelo cadastro versionado."""
+import json
 import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -64,8 +65,49 @@ def cadastro(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
     return contratos.cadastro_da_obra(conn, contrato_id)
 
 
+@router.get("/{contrato_id}/custo-rm")
+def custo_rm(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
+             conn: sqlite3.Connection = Depends(conexao)):
+    """#488: o custo por tarefa e a baixa de estoque do RM da obra, pelo centro de custo atual e pelos anteriores,
+    na coligada da entidade do contrato; consorcio sem centro, pela coligada inteira so' se for a unica obra dela.
+    Linhas como vieram do RM (o que nao e' custo a tela separa)."""
+    _existe(conn, contrato_id)
+    c = conn.execute("""SELECT c.centro_custo_rm, c.centros_custo_anteriores_rm, e.coligada_rm
+                        FROM contratos c JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?""",
+                     (contrato_id,)).fetchone()
+    if c is None or c["coligada_rm"] is None:
+        return {"custo": [], "estoque": []}
+    centros = [c["centro_custo_rm"], *json.loads(c["centros_custo_anteriores_rm"] or "[]")]
+    centros = sorted({x.strip() for x in centros if x and x.strip()})
+    if centros:
+        filtro = f"coligada=? AND centro_custo IN ({','.join('?' * len(centros))})"
+    elif c["coligada_rm"] != 1 and conn.execute(
+            """SELECT COUNT(*) FROM contratos c JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
+               WHERE e.coligada_rm=?""", (c["coligada_rm"],)).fetchone()[0] == 1:
+        # so' quando e' a unica obra da coligada: com duas, a coligada nao diz de qual obra e' o custo
+        filtro = "coligada=?"
+    else:
+        return {"custo": [], "estoque": []}
+    args = (c["coligada_rm"], *centros)
+    custo = conn.execute(f"""SELECT centro_custo, projeto, tarefa, natureza, mes, qtd, valor_centavos
+                             FROM rm_custo_tarefas WHERE {filtro}
+                             ORDER BY mes, centro_custo, tarefa, natureza, id""", args)
+    estoque = conn.execute(f"""SELECT centro_custo, tipo_movimento, mes, qtd, valor_centavos
+                               FROM rm_estoque_baixas WHERE {filtro}
+                               ORDER BY mes, centro_custo, tipo_movimento, id""", args)
+    return {"custo": [dict(r) for r in custo], "estoque": [dict(r) for r in estoque]}
+
+
 @router.get("/{contrato_id}/notas")
 def notas_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
                   conn: sqlite3.Connection = Depends(conexao)):
     _existe(conn, contrato_id)
     return notas.do_contrato(conn, contrato_id)
+
+
+@router.get("/{contrato_id}/custo-grupos")
+def custo_grupos(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
+                 conn: sqlite3.Connection = Depends(conexao)):
+    # Issue #489: grupos da planilha do orgao com as tarefas do RM; obra sem secao `custo:` devolve lista vazia.
+    _existe(conn, contrato_id)
+    return contratos.custo_grupos(conn, contrato_id)

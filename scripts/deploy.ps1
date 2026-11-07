@@ -29,6 +29,9 @@ param(
     # (-Porta N; sem ele, 80). Informada e diferente da tarefa, o deploy aborta antes do checkout.
     [ValidateRange(0, 65535)]
     [int]$Porta = 0,
+    # Raiz dos dados (banco, segredos). Vazio = ler dos argumentos da tarefa DashboardLotufo (-Raiz "..."; sem ele,
+    # o padrao do rodar_producao.ps1). Informada e diferente da tarefa, o deploy aborta antes do checkout.
+    [string]$Raiz = "",
     # Tempo limite, em segundos, de cada chamada ao agendador de tarefas (schtasks.exe).
     # Estouro = "agendador de tarefas nao respondeu". So' para prova em servidor de revisao.
     [ValidateRange(1, 600)]
@@ -56,20 +59,31 @@ $msgAgendador = "deploy abortado: agendador de tarefas nao respondeu"
 
 # A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
 # um deploy na 80 acharia o IIS como dono da porta e abortaria DEPOIS do checkout, sem rollback.
-# Le o XML da tarefa (schtasks /Query /XML): os argumentos saem em <Arguments>, sem depender do
-# idioma dos cabecalhos do /FO LIST.
-function PortaDaTarefa {
+# Le o XML da tarefa (schtasks /Query /XML) UMA vez: os argumentos saem em <Arguments>, sem depender
+# do idioma dos cabecalhos do /FO LIST. Porta, raiz e modo (TLS) saem todos dele. $null = tarefa
+# nao encontrada (ou schtasks falhou: saida guardada em $script:saidaQuery).
+function ArgumentosDaTarefa {
     $r = Agendar @("/Query", "/TN", $tarefaNome, "/XML")
     if ($r.Estourou) {
         Write-Host "$msgAgendador (schtasks /Query levou mais de $LimiteAgendador s); nada foi alterado" -ForegroundColor Red
         exit 1
     }
-    if ($r.Codigo -ne 0) { $script:saidaQuery = $r.Saida; return 0 }   # tarefa nao existe (ou schtasks falhou: saida guardada)
-    if ($r.Saida -notmatch "<Arguments>([^<]*)</Arguments>") {
+    if ($r.Codigo -ne 0) { $script:saidaQuery = $r.Saida; return $null }
+    $acoes = [regex]::Matches($r.Saida, "<Arguments>([^<]*)</Arguments>")
+    if ($acoes.Count -eq 0) {
         throw "nao consegui ler os argumentos da tarefa $tarefaNome no XML do schtasks; nada foi alterado"
     }
-    if ($Matches[1] -match "-Porta (\d+)") { return [int]$Matches[1] }
-    return 80
+    # todas as acoes, como o Actions.Arguments do cmdlet; o XML escapa aspas e '&' (&quot; &amp;)
+    return [System.Net.WebUtility]::HtmlDecode((($acoes | ForEach-Object { $_.Groups[1].Value }) -join " "))
+}
+$argumentosDaTarefa = ArgumentosDaTarefa
+function PortaDaTarefa {
+    if ($null -eq $argumentosDaTarefa) { return 0 }
+    $argumentosTarefa = $argumentosDaTarefa
+    if ($argumentosTarefa -match "-Porta (\d+)") { return [int]$Matches[1] }
+    # Sem -Porta vale o padrao do modo do rodar_producao.ps1 (issue #425): 80 com -SemTls, 8443 com TLS.
+    if ($argumentosTarefa -match "-SemTls\b") { return 80 }
+    return 8443
 }
 $portaTarefa = PortaDaTarefa
 if ($Porta -eq 0) {
@@ -80,9 +94,61 @@ if ($Porta -eq 0) {
 }
 Etapa "porta lida: $Porta (tarefa $tarefaNome, agendador respondeu)"
 
-function Saudavel {
-    try { return ((Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing).StatusCode -eq 200) }
+# A raiz tambem e' a da tarefa (issue #417, gate Sol da PR #437): dela saem o arquivo da instalacao conferido antes do
+# reinicio e o banco do backup pre-migracao. Com a producao em outro disco, conferir C:\ recusaria o arquivo valido, ou
+# aceitaria um velho enquanto o servidor confere o da raiz certa. O instalar_autostart.ps1 sempre grava -Raiz "...".
+function RaizDaTarefa {
+    if ($null -eq $argumentosDaTarefa) { return "" }
+    $argumentosTarefa = $argumentosDaTarefa
+    if ($argumentosTarefa -match '-Raiz\s+(?:"([^"]+)"|(\S+))') {
+        if ($Matches[1]) { return $Matches[1] }
+        return $Matches[2]
+    }
+    return "C:\DashboardLotufo"
+}
+$raizTarefa = RaizDaTarefa
+if (-not $Raiz) {
+    if ($raizTarefa) { $Raiz = $raizTarefa } else { $Raiz = "C:\DashboardLotufo" }
+} elseif ($raizTarefa -and $Raiz.TrimEnd("\") -ne $raizTarefa.TrimEnd("\")) {
+    throw "-Raiz $Raiz nao bate com a tarefa DashboardLotufo (raiz $raizTarefa); nada foi alterado"
+}
+$instalacaoArquivo = Join-Path $Raiz "segredos\instalacao.json"   # o mesmo que o rodar_producao.ps1 passa ao servidor
+$banco = Join-Path $Raiz "dados\dashboard.db"
+
+# HTTPS (issue #425): o modo tambem e' o da tarefa. Com -SemTls nos argumentos (producao de antes do corte) a saude e'
+# HTTP; sem ele, https://localhost aceitando so' o certificado da instalacao, pelo thumbprint (comum_tls.ps1).
+# Com o certificado ausente no modo HTTPS o deploy nao comeca: o watchdog nem e' pausado e nada muda.
+function TlsDaTarefa {
+    if ($null -eq $argumentosDaTarefa) { return $true }
+    $argumentosTarefa = $argumentosDaTarefa
+    return (-not ($argumentosTarefa -match "-SemTls\b"))
+}
+$comTls = TlsDaTarefa
+. (Join-Path $PSScriptRoot "comum_tls.ps1")
+$certificado = Join-Path $Raiz "segredos\tls\cert.pem"
+if ($comTls) {
+    $urlSaude = "https://localhost:$Porta/api/health"
+    if (-not (Test-Path -LiteralPath $certificado)) {
+        throw "certificado do HTTPS nao encontrado em $certificado (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)"
+    }
+} else {
+    $urlSaude = "http://localhost:$Porta/api/health"
+}
+
+# Instalacao assinada (issue #417): depois do deploy so' vale o health 200 com instalacao "autorizada" (arquivo
+# assinado para esta maquina em <raiz>\segredos\instalacao.json). Modo copia (arquivo ausente, ilegivel, assinatura
+# ou maquina) conta como falha e dispara o rollback. O rollback confere so' o 200: o commit anterior pode nem ter o campo.
+function Saudavel([switch]$ExigirInstalacao) {
+    try { $resposta = Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12 }
     catch { return $false }
+    if ($resposta.StatusCode -ne 200) { return $false }
+    if (-not $ExigirInstalacao) { return $true }
+    $saude = $null
+    try { $saude = $resposta.Content | ConvertFrom-Json } catch { $saude = $null }
+    if ($saude -and $saude.instalacao -eq "autorizada") { return $true }
+    if ($saude) { $situacao = "$($saude.instalacao) (motivo: $($saude.instalacao_motivo))" } else { $situacao = "health ilegivel" }
+    Write-Warning "health 200, mas a instalacao nao esta autorizada: $situacao - ver docs\runbook.md (Instalacao assinada)"
+    return $false
 }
 # Sem fetch aqui: o fluxo principal ja' buscou o alvo (e o rollback usa um commit local).
 function Construir([string]$alvo) {
@@ -106,6 +172,26 @@ function Reconstruir {
     } else {
         Etapa "npm: pulado (-SemFrontend)"
     }
+}
+# Issue #417: antes de parar a producao, o codigo NOVO (ja' no pinado, depois do build) confere o arquivo da
+# instalacao. Sem "autorizada" o deploy para aqui: as migracoes so' rodam na subida, entao o banco nao e' migrado e o
+# processo no ar nao e' trocado; o catch do Construir volta o pinado para o commit anterior.
+function ConferirInstalacao {
+    Push-Location (Join-Path $AppDir "backend")
+    try { & $py -m app.cli instalacao verificar --arquivo $instalacaoArquivo }
+    finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { throw "instalacao nao autorizada para o commit novo - ver docs\runbook.md (Instalacao assinada)" }
+}
+# Issue #421: registro do que foi implantado (commit e manifesto do dist) em <raiz>\deploy-atual.json, que o servidor
+# confere de hora em hora. Gravado ANTES de reiniciar, para a conferencia da subida ja' achar o registro novo; falha
+# aqui so' avisa (o item "Sem registro do ultimo deploy" aparece na Saude).
+function RegistrarDeploy {
+    Push-Location (Join-Path $AppDir "backend")
+    $codigo = 1
+    try { & $py -m app.cli integridade registrar --raiz $Raiz; $codigo = $LASTEXITCODE }
+    catch { Write-Warning "registro do deploy: $($_.Exception.Message)" }
+    finally { Pop-Location }
+    if ($codigo -ne 0) { Write-Warning "registro do deploy (deploy-atual.json) nao gravado - ver docs\runbook.md (Saude)" }
 }
 function DonoDaPorta {
     $c = Get-NetTCPConnection -LocalPort $Porta -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -153,9 +239,9 @@ function Reiniciar {
 }
 # Saude so' vale se quem responde NASCEU depois do reinicio: health 200 de processo antigo
 # nao prova que o commit novo esta' no ar.
-function SaudavelENovo {
-    Etapa "saude: conferindo http://localhost:$Porta/api/health"
-    if (-not (Saudavel)) { return $false }
+function SaudavelENovo([switch]$ExigirInstalacao) {
+    Etapa "saude: conferindo $urlSaude"
+    if (-not (Saudavel -ExigirInstalacao:$ExigirInstalacao)) { return $false }
     $dono = DonoDaPorta
     if (-not $dono -or $dono.CreationDate -lt $script:reinicioEm) {
         Write-Warning "health 200, mas o dono da porta $Porta e' anterior ao reinicio (PID $($dono.ProcessId), $($dono.CreationDate))"
@@ -182,6 +268,44 @@ function VoltarPinado([string]$anterior) {
         & git -C $AppDir checkout --quiet --detach $anterior
         if ($LASTEXITCODE -ne 0) { throw "git checkout $anterior falhou" }
         Reconstruir
+        RegistrarDeploy
+    }
+}
+# Issue #478: troca de um commit com a #456 (ponto da sentinela na tabela sentinela_ponto, migracao 063) por um
+# anterior a ela, que le e grava o ponto so' na auditoria: no rollback por saude e no deploy com -Ref de um commit
+# antigo. Com o servico parado e o codigo com a #456 ainda no pinado (antes do checkout do antigo), o app.cli grava o
+# ponto na auditoria e tira a tabela, os gatilhos e a linha da 063; sem isso o codigo antigo acusaria "Estado da
+# sentinela apagado" e repetiria os achados desde o deploy da #456. Falha aqui so' avisa: a troca segue.
+# $script:sentinelaParou diz se o servico foi parado aqui (o catch do build religa o commit anterior).
+$script:sentinelaParou = $false
+function SentinelaAntesDa456([string]$de, [string]$para) {
+    $temNovo = & git -C $AppDir ls-tree --name-only $de -- backend/migrations/063_sentinela_ponto.sql
+    if ($LASTEXITCODE -ne 0) { Write-Warning "git ls-tree $de falhou; ponto da sentinela nao conferido"; return }
+    $temAnterior = & git -C $AppDir ls-tree --name-only $para -- backend/migrations/063_sentinela_ponto.sql
+    if ($LASTEXITCODE -ne 0) { Write-Warning "git ls-tree $para falhou; ponto da sentinela nao conferido"; return }
+    if (-not $temNovo -or $temAnterior) { return }
+    $codigo = 1
+    Push-Location (Join-Path $AppDir "backend")
+    try {
+        $script:sentinelaParou = $true
+        $script:tarefaParada = $true   # ANTES do /End, como no Reiniciar
+        Etapa "ponto da sentinela: parando a tarefa $tarefaNome"
+        ComandoTarefa "End" $false; Start-Sleep -Seconds 3
+        LiberarPorta
+        & $py -m app.cli sentinela antes-da-456 --banco $banco; $codigo = $LASTEXITCODE
+    } catch { Write-Warning "ponto da sentinela: $($_.Exception.Message)" }
+    finally { Pop-Location }
+    if ($codigo -ne 0) {
+        Write-Warning "ponto da sentinela NAO passado para a auditoria antes do rollback - ver docs\runbook.md (Rollback para um commit anterior a issue #456)"
+    }
+}
+# Depois do ROLLBACK OK: o commit anterior pode ja' conferir a instalacao (issue #417) e ter voltado em modo copia, sem
+# envio de e-mail e sem RM. Commit anterior ao #417 nao tem o campo e nao avisa.
+function AvisarSeCopia {
+    try { $saude = (Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12).Content | ConvertFrom-Json }
+    catch { return }
+    if ($saude.instalacao -and $saude.instalacao -ne "autorizada") {
+        Write-Warning "producao de volta, mas em modo copia: instalacao $($saude.instalacao) (motivo: $($saude.instalacao_motivo)), sem envio de e-mail e sem RM - ver docs\runbook.md (Instalacao assinada)"
     }
 }
 
@@ -197,12 +321,24 @@ try {
     $alvo = (& git -C $AppDir rev-parse $Ref)
     if ($LASTEXITCODE -ne 0) { throw "git rev-parse $Ref falhou" }
     $alvo = $alvo.Trim()
+    # Gate Sol da PR #476: com a tarefa em HTTPS, um alvo de antes da #425 nao sobe (o rodar_producao.ps1 dele procura a
+    # chave em app\certs) e derruba o watchdog (o watchdog.ps1 dele nao conhece -Certificado). Recusar antes do backup e
+    # do checkout; o marcador e' o scripts/comum_tls.ps1, que nasceu na #425. O finally solta o watchdog.
+    # ls-tree (e nao cat-file -e): sem o arquivo ele so' nao imprime nada, sem stderr, que o 5.1 com Stop tornaria fatal.
+    if ($comTls) {
+        $marcador = & git -C $AppDir ls-tree --name-only $alvo -- scripts/comum_tls.ps1
+        if ($LASTEXITCODE -ne 0) { throw "git ls-tree $alvo falhou" }
+        if (-not $marcador) {
+            Write-Host "deploy abortado antes do checkout: $alvo e' anterior ao HTTPS (issue #425) e a tarefa esta em HTTPS; volte para HTTP antes (runbook, Voltar atras). Producao segue em $anterior" -ForegroundColor Red
+            exit 1
+        }
+    }
     $migracoes = & git -C $AppDir diff --name-only $anterior $alvo -- backend/migrations
     if ($LASTEXITCODE -ne 0) { throw "git diff das migracoes falhou" }
     $backup = $null
     if ($migracoes) {
-        $backup = & (Join-Path $PSScriptRoot "backup_pre_migracao.ps1") -Banco "C:\DashboardLotufo\dados\dashboard.db" `
-            -PastaBackups "C:\DashboardLotufo\dados\backups" -Python $py -Rotulo $alvo.Substring(0, 7)
+        $backup = & (Join-Path $PSScriptRoot "backup_pre_migracao.ps1") -Banco $banco `
+            -PastaBackups (Join-Path $Raiz "dados\backups") -Python $py -Rotulo $alvo.Substring(0, 7)
         if ($LASTEXITCODE -ne 0 -or -not $backup) {
             Write-Host "deploy abortado antes do checkout; producao segue em $anterior" -ForegroundColor Red
             exit 1
@@ -213,11 +349,20 @@ try {
     }
     # Construir pode lancar depois do checkout (pip/npm/build): o diretorio pinado nao pode ficar
     # num commit que nao subiu (issue #78). Volta para $anterior (checkout + reconstrucao) e sai com 1.
-    try { Construir $alvo }
+    # A conferencia da instalacao (issue #417) entra no mesmo try: recusada, a producao nem para.
+    # Issue #478: alvo de antes da #456 vindo de um commit com ela (-Ref): o ponto da sentinela passa para a auditoria
+    # antes do checkout, com o comando do codigo atual e o servico parado (fica parado durante o build).
+    SentinelaAntesDa456 $anterior $alvo
+    try { Construir $alvo; ConferirInstalacao }
     catch {
-        Write-Warning "Construir $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
+        Write-Warning "Construir ou conferir a instalacao de $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
         try {
-            VoltarPinado $anterior
+            VoltarPinado $anterior   # inclui o RegistrarDeploy do commit anterior
+            if ($script:sentinelaParou) {
+                # o servico foi parado para o ponto da sentinela: religa o anterior, cuja 063 reimporta o ponto
+                Reiniciar
+                if (-not (SaudavelENovo)) { throw "a producao parada para o ponto da sentinela nao voltou em $anterior" }
+            }
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
             $script:manterSentinela = $true
@@ -227,6 +372,7 @@ try {
         exit 1
     }
     $novo = (& git -C $AppDir rev-parse HEAD).Trim()
+    RegistrarDeploy
     # Agendador sem resposta no reinicio (depois do checkout): o pinado volta ao commit anterior e,
     # se a fase de parada comecou (a tarefa pode estar parada, ou no ar com o commit novo), refaz o
     # ciclo parar -> liberar porta -> iniciar com o commit anterior e so' afirma o que conferiu
@@ -259,21 +405,23 @@ try {
         }
         exit 1
     }
-    if (SaudavelENovo) {
+    if (SaudavelENovo -ExigirInstalacao) {
         $fim = "DEPLOY OK: $anterior -> $novo (health 200, processo novo)"
         if ($backup) { $fim += " - backup pre-migracao: $backup" }
         Write-Host $fim -ForegroundColor Green
     } else {
         Write-Warning "Saude NAO voltou -> ROLLBACK para $anterior"
         try {
+            SentinelaAntesDa456 $novo $anterior
             Construir $anterior
+            RegistrarDeploy
             Reiniciar
         } catch {
             $script:manterSentinela = $true
             Write-Host "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message)) - intervir a mao (ver watchdog.log e dashboard.log); sentinela do watchdog mantido" -ForegroundColor Red
             exit 1
         }
-        if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow }
+        if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
         else {
             $script:manterSentinela = $true
             Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log); sentinela do watchdog mantido" -ForegroundColor Red

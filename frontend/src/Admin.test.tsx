@@ -170,6 +170,35 @@ test("Saúde: backup em dia mostra só o selo OK e a hora no cartão de situaç�
   expect(api).not.toHaveBeenCalledWith("/api/health");
 });
 
+// Issue #419: copia cifrada semanal para a chave do dono
+test("Saúde: sem chave pública mostra 'Cópia do dono não configurada'", async () => {
+  saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: false, ultima_copia_dono: null });
+  const regiao = await screen.findByRole("region", { name: "Backup" });
+  expect(within(regiao).getByText(/Cópia do dono não configurada/)).toBeTruthy();
+});
+
+test("Saúde: 'Gerar cópia do dono agora' pede a cópia, relê a Saúde e mostra a data", async () => {
+  let gerada = false;
+  api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
+    if (url === "/api/admin/copia-dono" && opcoes?.method === "POST") { gerada = true; return { arquivo: "x.tar.age" }; }
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false,
+      ultima_copia_dono: gerada ? "2026-10-13T08:00:00-04:00" : null };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Gerar cópia do dono agora" }));
+  const regiao = await screen.findByRole("region", { name: "Backup" });
+  await waitFor(() => expect(regiao.textContent).toMatch(/13\/10\/2026 às 08:00/));
+});
+
+test("Saúde: mais de 8 dias sem cópia do dono aparece em destaque", async () => {
+  saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: true,
+             ultima_copia_dono: "2026-10-01T08:00:00-04:00" });
+  const alerta = await screen.findByText(/Cópia do dono atrasada/);
+  expect(alerta.closest(".aviso--critico")).toBeTruthy();
+});
+
 test("Saúde: backup atrasado acima de 2 h aparece em destaque, e o último erro aparece", async () => {
   saudeCom({ ...BACKUP_EM_DIA, atrasado: true, ultimo_snapshot_erro_em: "2026-10-13T10:30:00-04:00",
              ultimo_snapshot_erro: "não foi possível gravar o snapshot; o detalhe está no log do servidor" });
@@ -237,11 +266,11 @@ const RODADA_RUIM = { id: 3, disparo: "manual", estado: "failed", iniciado_em: "
 
 const SIGA_SEM_LEITURA = { ultima_leitura: null, atrasado: false, processos: 0 };
 
-function saudeComRm(status: object, backup: object = BACKUP_EM_DIA, siga: object = SIGA_SEM_LEITURA) {
+function saudeComRm(status: object, backup: object = BACKUP_EM_DIA, siga: object = SIGA_SEM_LEITURA, seguranca: object[] = []) {
   api.mockImplementation(async (url: string) => {
     if (url === "/api/rm/status") return status;
     if (url === "/api/admin/backup") return backup;
-    if (url === "/api/admin/saude") return { siga };
+    if (url === "/api/admin/saude") return { siga, seguranca };
     if (url === "/api/rm/reconciliacao") return {
       nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
       totais: { nfs_sem_medicao: 15, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
@@ -268,6 +297,25 @@ test("Saúde: três cartões de situação com a hora, nota só na falha, e a ta
   // sem as contagens repetidas da última rodada, sem dica no cabeçalho e sem "última rodada deu certo" ao lado do botão
   expect(screen.queryByLabelText("Contagens da última rodada")).toBeNull();
   expect(document.body.textContent).not.toMatch(/as NFs e as baixas do RM|deu certo|o que está de um lado só/);
+});
+
+test("Saúde: a rodada mostra as linhas de custo por tarefa e de baixa de estoque, e a falha do custo (#488)", async () => {
+  const comCusto = { ...RODADA_BOA, id: 5, custo_tarefas: 57012, estoque_baixas: 301, custo_erro: null };
+  const semCusto = { ...RODADA_BOA, id: 4, custo_tarefas: null, estoque_baixas: null,
+    custo_erro: "Simulador do RM sem o arquivo da consulta DASH25" };
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null,
+    rodadas: [comCusto, semCusto] });
+  const tabela = await screen.findByRole("table", { name: "Últimas rodadas de sincronização com o RM" });
+  expect(within(tabela).getByRole("columnheader", { name: "Custo por tarefa" })).toBeTruthy();
+  expect(within(tabela).getByRole("columnheader", { name: "Baixa de estoque" })).toBeTruthy();
+  const [, primeira, segunda] = within(tabela).getAllByRole("row");
+  expect(within(primeira).getByText("57.012")).toBeTruthy();
+  expect(within(primeira).getByText("301")).toBeTruthy();
+  expect(within(segunda).getAllByText("—").length).toBe(2);
+  // a falha aparece em português de operação; o detalhe técnico (código da consulta) fica no log do servidor
+  expect(within(segunda).getByText("Custos e estoque não atualizados.")).toBeTruthy();
+  expect(tabela.textContent).not.toMatch(/DASH25|Simulador/);
+  expect(within(primeira).queryByText(/Custos e estoque não atualizados/)).toBeNull();
 });
 
 // Issue #330: o monitor do SIGA ao lado da saúde do RM
@@ -376,4 +424,112 @@ test("Usuários: sem a dica do cabeçalho, sem 'você' na própria linha e sem a
   render(<Admin aba="usuarios" eu={1} />);
   expect(await screen.findByText("conectada")).toBeTruthy();
   expect(document.body.textContent).not.toMatch(/conecta a própria conta|você|10\/10\/2026/);
+});
+
+// #418: cada pessoa ganha "Últimos acessos": os 10 mais recentes (hora de Cuiabá, origem, navegador, resultado) ao abrir
+test("Usuários: Últimos acessos abre os da pessoa embaixo da linha dela, inclusive na própria linha", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/admin/usuarios") return [
+      { id: 1, nome: "Leonardo", email: "l@x.com", perfil: "admin", ativo: 1, bloqueado_ate: null },
+      { id: 2, nome: "Maria", email: "m@x.com", perfil: "engenharia", ativo: 1, bloqueado_ate: null }];
+    if (url === "/api/admin/contas-microsoft") return [];
+    if (url === "/api/admin/usuarios/1/acessos") return [
+      { data: "2026-11-05T18:35:00+00:00", sucesso: true, origem: "10.0.0.5", navegador: "Chrome no Windows" }];
+    if (url === "/api/admin/usuarios/2/acessos") return [
+      { data: "2026-11-05T13:10:00+00:00", sucesso: false, origem: "10.0.0.9", navegador: "Firefox no Linux" },
+      { data: "2026-11-04T12:00:00+00:00", sucesso: true, origem: null, navegador: null }];
+    throw new Error(`chamada inesperada: ${url}`);
+  });
+  render(<Admin aba="usuarios" eu={1} />);
+  const eu = (await screen.findByText("l@x.com")).closest("tr") as HTMLElement;
+  const maria = screen.getByText("m@x.com").closest("tr") as HTMLElement;
+  // a lista da pessoa so' e' lida quando se abre
+  expect(api).not.toHaveBeenCalledWith("/api/admin/usuarios/2/acessos");
+  const botao = within(maria).getByRole("button", { name: /Últimos acessos\s*de Maria/ });
+  expect(botao.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(botao);
+  const tabela = await screen.findByRole("table", { name: /Últimos acessos de Maria/ });
+  // embaixo da linha da Maria
+  expect(maria.nextElementSibling?.contains(tabela)).toBe(true);
+  const linhas = within(tabela).getAllByRole("row");
+  expect(linhas).toHaveLength(1 + 2);
+  expect(linhas[1].textContent).toMatch(/05\/11\/2026 às 09:10.*10\.0\.0\.9.*Firefox no Linux.*recusada/);
+  expect(linhas[2].textContent).toMatch(/04\/11\/2026 às 08:00——Entrou/);
+  expect(botao.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(botao);
+  expect(screen.queryByRole("table", { name: /Últimos acessos de Maria/ })).toBeNull();
+  // a propria linha tambem tem os ultimos acessos
+  fireEvent.click(within(eu).getByRole("button", { name: /Últimos acessos\s*de Leonardo/ }));
+  const meus = await screen.findByRole("table", { name: /Últimos acessos de Leonardo/ });
+  expect(meus.textContent).toMatch(/05\/11\/2026 às 14:35.*10\.0\.0\.5.*Chrome no Windows.*Entrou/);
+});
+
+// #418: o bloco Segurança da Saúde (só o admin chega aqui; a API recusa os outros perfis)
+test("Saúde: bloco Segurança mostra o administrador que entrou de origem nova; sem item, só o selo Nenhum alerta", async () => {
+  const status = { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
+  saudeComRm(status, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [
+    { nivel: "atencao", mensagem: "Administrador Leonardo entrou de uma origem nova (10.0.0.5)", data: "2026-11-05T18:35:00+00:00" }]);
+  const bloco = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(bloco).findByText(/^Administrador Leonardo entrou de uma origem nova \(10\.0\.0\.5\), em 05\/11\/2026 às 14:35\.$/))
+    .toBeTruthy();
+  expect(within(bloco).getByText("Atenção:")).toBeTruthy();
+  expect(within(bloco).queryByText("nenhum alerta")).toBeNull();
+  expect(within(bloco).queryByText(/^Mais /)).toBeNull();
+  cleanup();
+  saudeComRm(status);
+  const vazio = await screen.findByRole("region", { name: "Segurança" });
+  // Gate Sol S1: o selo diz so' o que o bloco confere (nao ha' alerta), nao "OK" para a seguranca inteira
+  expect(await within(vazio).findByText("nenhum alerta")).toBeTruthy();
+  expect(within(vazio).queryByText("OK")).toBeNull();
+  expect(within(vazio).queryByText(/origem nova/)).toBeNull();
+});
+
+// Gate Sol S3: a API devolve no máximo 20 itens e diz quantos ficaram de fora
+test("Saúde: bloco Segurança diz quantos alertas anteriores ficaram de fora da lista", async () => {
+  const status = { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
+  const item = { nivel: "atencao", mensagem: "Administrador Leonardo entrou de uma origem nova (10.0.0.5)", data: "2026-11-05T18:35:00+00:00" };
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/rm/status") return status;
+    if (url === "/api/admin/backup") return BACKUP_EM_DIA;
+    if (url === "/api/admin/saude") return { siga: SIGA_SEM_LEITURA, seguranca: [item], seguranca_fora: 3 };
+    if (url === "/api/rm/reconciliacao") return {
+      nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
+      totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  const bloco = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(bloco).findByText("Mais 3 alertas anteriores.")).toBeTruthy();
+});
+
+// Issue #423: fora do Windows ou em dev a sentinela nao roda, e o bloco diz isso
+test("Saúde: bloco Segurança avisa que a sentinela não roda neste ambiente", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/rm/status") return { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
+    if (url === "/api/admin/backup") return BACKUP_EM_DIA;
+    if (url === "/api/admin/saude") return { siga: SIGA_SEM_LEITURA, seguranca: [], sentinela: { roda: false, mensagem: "Sentinela não roda neste ambiente" } };
+    if (url === "/api/rm/reconciliacao") return {
+      nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
+      totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  const bloco = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(bloco).findByText("Sentinela não roda neste ambiente")).toBeTruthy();
+});
+
+test("Saúde: sem ler a Saúde, o bloco Segurança diz que não deu para ler, nunca OK", async () => {
+  saudeCom(BACKUP_EM_DIA);   // /api/admin/saude falha
+  const bloco = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(bloco).findByText(/Não foi possível ler a segurança/)).toBeTruthy();
+  cleanup();
+  // resposta sem o campo: o bloco nao finge que conferiu
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/admin/saude") return { siga: SIGA_SEM_LEITURA };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  const semCampo = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(semCampo).findByText(/Não foi possível ler a segurança/)).toBeTruthy();
+  expect(within(semCampo).queryByText("nenhum alerta")).toBeNull();
 });

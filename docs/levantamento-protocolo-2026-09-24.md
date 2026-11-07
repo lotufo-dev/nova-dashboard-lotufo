@@ -83,6 +83,9 @@ do fiscal e da supervisora, fora do pacote da contratada.
   pluviometria, croqui, ensaios). Na SAGPM e na SACID (obras urbanas e edificação), só a memória e a planilha:
   as outras aparecem na carta quando anexadas.
 - Tipos novos de peça: `diagrama`, `pluviometria`, `croqui`. A memória de cálculo usa o tipo `boletim`.
+- 05/11/2026 (issue #462): `no_oficio: true` na peça diz que ela vai dentro do PDF assinado do ofício (não cobra
+  nem se anexa no envio da planilha/carta nem na etapa `medicao` do protocolo); `pecas_no_oficio` no contrato
+  substitui essa marca só nele. Mapeamento por obra em `docs/mapeamento-pecas-planilha-carta-2026-11-05.md`.
 
 ## Prefeituras
 

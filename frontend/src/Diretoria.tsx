@@ -8,7 +8,7 @@ import { filtrarObras, type ObraLista } from "./listaObras";
 import { brl } from "./Medicoes";
 import { type AbaCarteira, type Ir } from "./rota";
 import { Link } from "./Link";
-import { fmtCompetencia, fmtDataPura, fmtMesCurto as mesCurto } from "./tempo";
+import { fmtCompetencia, fmtDataPura, fmtMesCurto as mesCurto, fmtMesExtenso } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { Abas } from "./Topo";
@@ -17,20 +17,29 @@ import { Abas } from "./Topo";
 // abas na URL: Resumo (a padrao, so' o essencial), QDOP e Producao; o "Exportar QDOP" fica visivel nas tres. Tudo na COTA da Lotufo, com o vocabulario fixo: medido, faturado, protocolado,
 // recebido. As regras moram em `app/diretoria.py`; o total a receber so' mostra valor depois de conciliado
 // (geral.yaml: diretoria.total_a_receber_liberado). O a receber (por obra, previsto e recebido) mora
-// em A receber; os reajustes esperando apostilamento, na aba Reajuste da obra; a lista de avisos, na tela de Avisos; o que termina, em Obras.
+// em A receber; os reajustes esperando apostilamento, por obra na Producao (#279) e por competencia na aba Reajuste da
+// obra; a lista de avisos, na tela de Avisos; o que termina, em Obras.
 
 type Grupo = { quantidade: number; valor_centavos: number | null };
 type PorOrgao = Grupo & { orgao: string; maior_dias: number | null };
+/** #279: por obra, as competências de reajuste já medidas sem apostilamento e o medido delas, na cota. */
+type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
 type Dinheiro = {
   medido_esperando_nota: Grupo; nota_esperando_protocolo: Grupo; recebido_mes: Grupo;
   protocolado: Grupo & { faixas: Record<"ate_30" | "de_31_a_60" | "mais_60", Grupo>; por_orgao: PorOrgao[] };
-  reajustes_apostilamento: { quantidade: number; maior_dias: number | null };
+  reajustes_apostilamento: { quantidade: number; maior_dias: number | null; competencias: number; valor_centavos: number;
+    obras: ReajusteObra[] };
 };
 type MesAno = {
   mes: string; medido_mes_centavos: number; previsto_mes_centavos: number; mesmo_mes_ano_anterior_centavos: number;
   acumulado_ano_centavos: number; previsto_ano_centavos: number;
   faturado_mes_centavos: number; notas_faturadas_mes: number;
   serie: { competencia: string; medido_centavos: number; previsto_centavos: number }[];
+};
+/** 06/11/2026: o faturado de verdade (notas do RM, na cota) dos 12 meses fechados, com o mesmo mês do ano anterior. */
+type FaturadoRm = {
+  serie: { competencia: string; faturado_centavos: number; ano_anterior_centavos: number }[];
+  ate: string | null; ano_centavos: number; ano_anterior_centavos: number;
 };
 type Proximo = { competencia: string; faturamento_previsto_centavos: number };
 /** Issue #296: a curva S da carteira (obras ativas, cada uma na cota), com o previsto anterior a ultima repactuacao. */
@@ -45,10 +54,9 @@ type Obra = {
   vigencia?: string | null; farol: "verde" | "atencao" | "acao" | "vermelho"; motivo: string; motivos?: Motivo[];
   desvio_pp?: number | null; desvio_base?: "anterior" | "vigente" | null;
 };
-type ResumoMes = { mes: string; obras_protocoladas: number; obras_ativas: number };
 type Painel = {
   hoje: string; total_a_receber_liberado: boolean; dinheiro: Dinheiro; mes_ano: MesAno; curva_carteira: PontoCarteira[]; proximos: Proximo[];
-  carteira: Carteira; obras: Obra[]; obras_base: ObrasBase; avisos: Aviso[];
+  carteira: Carteira; obras: Obra[]; obras_base: ObrasBase; avisos: Aviso[]; faturado_rm?: FaturadoRm;
 };
 type ObrasBase = { ativas: number; encerramento: number; suspensas: number; encerradas: number };
 
@@ -62,16 +70,8 @@ const FAROL: Record<Obra["farol"], { rotulo: string; classe: string; forte?: boo
   vermelho: { rotulo: "Crítico", classe: "selo--acao" },
 };
 
-function valor(v: number | null): string {
-  return v === null ? "—" : brl(v);
-}
 function pct(f: number): string {
   return fmtPercentual(f, 1);
-}
-/** Desvio em pontos percentuais, com sinal e uma casa: "+2,9", "−16,7" (menos U+2212, como o `brl`), "0,0". */
-function pp(v: number): string {
-  const t = Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  return v > 0 ? `+${t}` : v < 0 ? `−${t}` : t;
 }
 /** "R$ 12,3 mi": o numero grande do Resumo; o valor exato vai no title. */
 function mi(centavos: number): string {
@@ -102,7 +102,8 @@ function unidade(topo: number): { divisor: number; rotulo: string } {
 // F-83: o passo de cada mes vem da largura do conteiner (minimo de 64px; abaixo disso o grafico rola). O texto do
 // eixo nao escala: so' o vao entre os meses e a largura das barras crescem.
 const PASSO_MIN = 64;
-function GraficoAno({ serie }: { serie: MesAno["serie"] }) {
+function GraficoAno({ serie, nomes = ["previsto", "medido"], descricao }:
+    { serie: MesAno["serie"]; nomes?: [string, string]; descricao?: string }) {
   const medida = useRef<HTMLDivElement>(null);
   const [larg, setLarg] = useState(0);
   useEffect(() => {
@@ -129,8 +130,8 @@ function GraficoAno({ serie }: { serie: MesAno["serie"] }) {
   return (
     <div ref={medida} className="grafico__medida">
     <svg className="grafico__svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
-      aria-label={`Medido e previsto nos últimos 12 meses, na cota da Lotufo, em ${rotulo}. `
-        + "Os mesmos números estão na “Tabela por competência”, recolhida logo abaixo."}>
+      aria-label={`${descricao ?? "Medido e previsto nos últimos 12 meses"}, na cota da Lotufo, em ${rotulo}. `
+        + "Os mesmos números estão na tabela recolhida logo abaixo."}>
       <text className="g-eixo num" x={MARGEM_E - 8} y={TOPO - 9} textAnchor="end">{rotulo}</text>
       {grade.map(v => (
         <g key={v}>
@@ -145,7 +146,7 @@ function GraficoAno({ serie }: { serie: MesAno["serie"] }) {
         const hp = alt(m.previsto_centavos), hm = alt(m.medido_centavos);
         return (
           <g key={m.competencia}>
-            <title>{`${fmtCompetencia(m.competencia)} — previsto ${brl(m.previsto_centavos)} · medido ${brl(m.medido_centavos)}`}</title>
+            <title>{`${fmtCompetencia(m.competencia)} — ${nomes[0]} ${brl(m.previsto_centavos)} · ${nomes[1]} ${brl(m.medido_centavos)}`}</title>
             {hp > 0 ? <rect className="g-previsto" x={cx - VAO / 2 - LARG} y={BASE - hp} width={LARG} height={hp} rx={2.5} />
               : <rect className="g-talo" x={cx - VAO / 2 - LARG} y={BASE - 4} width={LARG} height={4} rx={2} />}
             {hm > 0 ? <rect className="g-execucao" x={cx + VAO / 2} y={BASE - hm} width={LARG} height={hm} rx={2.5} />
@@ -202,6 +203,11 @@ function useLargura() {
   return { ref, larg };
 }
 
+/** O previsto anterior à última repactuação só é uma terceira linha quando difere do vigente em algum mês. */
+function temAnterior(serie: PontoCarteira[]): boolean {
+  return serie.some(s => s.previsto_anterior_centavos !== s.previsto_centavos);
+}
+
 /** Curva S da carteira (#296): o previsto vigente, o previsto anterior à última repactuação e o medido de execução
  *  ACUMULADOS na janela de 12 meses (`curva_carteira`, a soma das curvas das obras ativas), com a leitura de cada mês
  *  embaixo (passar o ponteiro troca o mês; sem ponteiro, o último). */
@@ -218,6 +224,7 @@ function CurvaS({ serie }: { serie: PontoCarteira[] }) {
     return out;
   }, [serie]);
   if (acc.length === 0) return null;
+  const comAnterior = temAnterior(serie);
   const ultimo = acc.length - 1;
   const i = Math.min(sel ?? ultimo, ultimo);
   const a = acc[i];
@@ -242,8 +249,9 @@ function CurvaS({ serie }: { serie: PontoCarteira[] }) {
       <div ref={ref} className="cart-curva">
         <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
           aria-label={`Previsto e medido de execução acumulados de ${fmtCompetencia(acc[0].competencia)} a ${fmtCompetencia(acc[ultimo].competencia)}, `
-            + `nas obras ativas, na cota da Lotufo. Ao fim, previsto ${brl(acc[ultimo].previsto)}, `
-            + `previsto anterior à última repactuação ${brl(acc[ultimo].anterior)} e medido de execução ${brl(acc[ultimo].medido)}.`}>
+            + `nas obras ativas, na cota da Lotufo. Ao fim, previsto ${brl(acc[ultimo].previsto)}`
+            + (comAnterior ? `, previsto anterior à última repactuação ${brl(acc[ultimo].anterior)}` : "")
+            + ` e medido de execução ${brl(acc[ultimo].medido)}.`}>
           <text className="g-eixo num" x={mE - 8} y={T - 10} textAnchor="end">{rotulo}</text>
           {grade.map(v => (
             <g key={v}>
@@ -256,7 +264,7 @@ function CurvaS({ serie }: { serie: PontoCarteira[] }) {
           {acc.map((p, n) => (ultimo - n) % pular === 0
             && <text key={p.competencia} className="g-eixo-x" x={x(n)} y={H - 10} textAnchor="middle">{mesCurto(p.competencia)}</text>)}
           <path className="cart-c-area" d={`${linha("medido")} L${x(ultimo)} ${y(0)} L${x(0)} ${y(0)} Z`} />
-          <path className="cart-c-ant" d={linha("anterior")} />
+          {comAnterior && <path className="cart-c-ant" d={linha("anterior")} />}
           <path className="cart-c-prev" d={linha("previsto")} />
           <path className="cart-c-med" d={linha("medido")} />
           <line className="cart-c-guia" x1={x(i)} x2={x(i)} y1={T} y2={y(0)} />
@@ -271,8 +279,8 @@ function CurvaS({ serie }: { serie: PontoCarteira[] }) {
         </svg>
       </div>
       <p className="cartao__corpo cart-leitura" role="status">
-        Até {fmtCompetencia(a.competencia)}: previsto <span className="num">{brl(a.previsto)}</span> · previsto anterior{" "}
-        <span className="num">{brl(a.anterior)}</span> · medido de execução{" "}
+        Até {fmtCompetencia(a.competencia)}: previsto <span className="num">{brl(a.previsto)}</span>
+        {comAnterior && <> · previsto anterior <span className="num">{brl(a.anterior)}</span></>} · medido de execução{" "}
         <span className="num">{brl(a.medido)}</span>
       </p>
     </>
@@ -282,20 +290,28 @@ function CurvaS({ serie }: { serie: PontoCarteira[] }) {
 /** Resumo (a aba padrao): os três números, a curva S e um cartão por contratante. O resto mora em QDOP e Produção. */
 function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
   const m = p.mes_ano, k = p.carteira;
+  // 06/11/2026 (tela da diretoria): o contratado e o executado saem da mesma soma dos cartoes por contratante
+  const contratado = k.por_orgao.reduce((t, o) => t + o.vigente_centavos, 0);
+  const executado = k.por_orgao.reduce((t, o) => t + o.medido_centavos, 0);
+  const pctExecutado = contratado > 0 ? Math.floor(Math.max(0, Math.min(1, executado / contratado)) * 100) : 0;
   return (
     <>
       <ul className="cart-numeros" aria-label="Os números da carteira">
+        <li className="cartao cart-numero">
+          <span className="cart-numero__rotulo">Contratado</span>
+          <span className="cart-numero__valor num" title={brl(contratado)}>{mi(contratado)}</span>
+        </li>
+        <li className="cartao cart-numero">
+          <span className="cart-numero__rotulo">Executado ({pctExecutado}%)</span>
+          <span className="cart-numero__valor num" title={brl(executado)}>{mi(executado)}</span>
+        </li>
         <li className="cartao cart-numero">
           <span className="cart-numero__rotulo">Saldo a executar</span>
           <span className="cart-numero__valor num" title={brl(k.saldo_centavos)}>{mi(k.saldo_centavos)}</span>
         </li>
         <li className="cartao cart-numero">
-          <span className="cart-numero__rotulo">Medido no ano</span>
+          <span className="cart-numero__rotulo">Medido em {m.mes.slice(0, 4)}</span>
           <span className="cart-numero__valor num" title={brl(m.acumulado_ano_centavos)}>{mi(m.acumulado_ano_centavos)}</span>
-        </li>
-        <li className="cartao cart-numero">
-          <span className="cart-numero__rotulo">Faturado no mês</span>
-          <span className="cart-numero__valor num" title={brl(m.faturado_mes_centavos)}>{mi(m.faturado_mes_centavos)}</span>
         </li>
       </ul>
 
@@ -303,7 +319,9 @@ function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
         <CurvaS serie={p.curva_carteira} />
         <div className="legenda">
           <span className="legenda__item"><span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />previsto</span>
-          <span className="legenda__item"><span className="legenda__chave legenda__chave--anterior" aria-hidden="true" />previsto anterior à última repactuação</span>
+          {temAnterior(p.curva_carteira) && (
+            <span className="legenda__item"><span className="legenda__chave legenda__chave--anterior" aria-hidden="true" />previsto anterior à última repactuação</span>
+          )}
           <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />medido de execução</span>
         </div>
       </Secao>
@@ -399,13 +417,12 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
               <tr>
                 <th scope="col">Obra</th><th scope="col">Empreita</th><th scope="col" className="col-num">Contratual de execução (PI+VA)</th>
                 <th scope="col" className="col-num">Faturado</th><th scope="col" className="col-num">Saldo (contratual de execução − medido)</th>
-                <th scope="col" className="col-num">Desvio (p.p.)</th>
                 <th scope="col">Término e vigência</th><th scope="col">Status</th>
                 <th scope="col">Farol</th><th scope="col">Motivos</th>
               </tr>
             </thead>
             <tbody>
-              {obras.length === 0 && <tr><td colSpan={10}>Nenhuma obra neste farol.</td></tr>}
+              {obras.length === 0 && <tr><td colSpan={9}>Nenhuma obra neste farol.</td></tr>}
               {obras.map(o => {
                 const { visiveis, mais } = motivosDaLinha(o.motivos);
                 return (
@@ -414,13 +431,8 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                     <td>{o.empreita}{o.direito < 1 ? ` (${pct(o.direito)})` : ""}</td>
                     <td className="col-num dinheiro num">{brl(o.pi_va)}</td><td className="col-num dinheiro num">{brl(o.faturados)}</td>
                     <td className={`col-num dinheiro num${o.saldo < 0 ? " negativo" : ""}`}>{brl(o.saldo)}</td>
-                    {/* #296: medido − previsto acumulados ate' o mes fechado, sobre o contratual; embaixo, a linha de base
-                        (a anterior a ultima repactuacao quando a obra tem uma) */}
-                    {o.desvio_pp == null ? <td className="col-num num">—</td> : (
-                      <td className={`col-num num${o.desvio_pp < 0 ? " negativo" : ""}`}>
-                        {pp(o.desvio_pp)}<div className="campo__nota">{o.desvio_base}</div>
-                      </td>
-                    )}
+                    {/* 06/11/2026: a coluna "Desvio (p.p.)" (#296) saiu da tela: dependia de cronograma e de medicao em dia
+                        em toda obra; o servidor continua mandando `desvio_pp` */}
                     {/* as duas datas numa coluna so' (as colunas do QDOP cabem a 1366): o termino da execucao e,
                         embaixo, a vigencia */}
                     <td className="num">{data(o.termino)}<div className="campo__nota">vig. {data(o.vigencia)}</div></td>
@@ -446,7 +458,7 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                 <td className="col-num dinheiro num">{brl(soma(o => o.pi_va))}</td>
                 <td className="col-num dinheiro num">{brl(soma(o => o.faturados))}</td>
                 <td className={`col-num dinheiro num${soma(o => o.saldo) < 0 ? " negativo" : ""}`}>{brl(soma(o => o.saldo))}</td>
-                <td colSpan={5} />
+                <td colSpan={4} />
               </tr>
             </tfoot>
           </table>
@@ -456,121 +468,101 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
   );
 }
 
-/** Producao: o mês, onde está o dinheiro, o mês a mês (barras e tabela), os próximos meses e o saldo a executar. */
-function Producao({ p }: { p: Painel }) {
-  const d = p.dinheiro, m = p.mes_ano, k = p.carteira;
-  // "N de M obras protocolaram" vem do /api/inicio. undefined = carregando; null = nao carregou.
-  const [mes, setMes] = useState<ResumoMes | null | undefined>(undefined);
-  useEffect(() => {
-    let vivo = true;
-    api<{ resumo: ResumoMes }>("/api/inicio").then(r => { if (vivo) setMes(r.resumo); }).catch(() => { if (vivo) setMes(null); });
-    return () => { vivo = false; };
-  }, []);
-  // "N de M obras ativas protocolaram" e' um KPI do mes (F-64): carregando "…", sem dado "—" com o aviso no rotulo
-  const protocolos = mes === undefined ? { v: "…", r: "obras ativas protocolaram" }
-    : mes === null ? { v: "—", r: "não foi possível contar os protocolos do mês" }
-    : { v: `${mes.obras_protocoladas} de ${mes.obras_ativas}`, r: "obras ativas protocolaram" };
-  const totalPrevisto = m.serie.reduce((t, s) => t + s.previsto_centavos, 0);
-  const totalMedido = m.serie.reduce((t, s) => t + s.medido_centavos, 0);
+/** Producao (refeita em 06/11/2026 para a diretoria): o faturado de verdade (notas do RM, na cota) do ultimo mes fechado
+ *  e do ano, cada um ao lado do mesmo periodo do ano anterior; o mes a mes dos 12 meses fechados contra o ano anterior
+ *  (barras e tabela); e os reajustes esperando apostilamento. O medido por competencia saiu daqui: depende do cadastro
+ *  de medicoes, que pode estar atrasado, e a nota chega sozinha do RM. */
+function Producao({ p, ir }: { p: Painel; ir: Ir }) {
+  const f = p.faturado_rm, r = p.dinheiro.reajustes_apostilamento;
+  const ultimo = f && f.serie.length > 0 ? f.serie[f.serie.length - 1] : null;
+  const anoAtual = p.mes_ano.mes.slice(0, 4), anoAnterior = String(Number(anoAtual) - 1);
+  const mesFechado = ultimo ? fmtMesExtenso(ultimo.competencia) : "";
+  const ate = f?.ate ? fmtMesExtenso(f.ate) : null;
   return (
     <>
-      <Secao id="dir-mes" titulo={`O mês: ${fmtCompetencia(m.mes)}`}>
-        <ul className="kpis cart-kpis--quebra" aria-label="O mês">
-          <Kpi valorTexto={brl(m.medido_mes_centavos)} rotulo="medido no mês" />
-          <Kpi valorTexto={brl(m.acumulado_ano_centavos)} rotulo="acumulado do ano" />
-          <Kpi valorTexto={protocolos.v} rotulo={protocolos.r} dinheiro={false} />
-        </ul>
-      </Secao>
-
-      <Secao id="dir-dinheiro" titulo="Onde está o dinheiro (cota)">
-        <ul className="kpis cart-kpis--quebra" aria-label="Onde está o dinheiro">
-          <Kpi valorTexto={brl(d.medido_esperando_nota.valor_centavos)} rotulo="medido esperando nota" />
-          <Kpi valorTexto={brl(d.nota_esperando_protocolo.valor_centavos)} rotulo="nota emitida esperando protocolo" />
-          <Kpi valorTexto={valor(d.protocolado.valor_centavos)} rotulo="protocolado esperando pagamento" />
-          <Kpi valorTexto={brl(d.recebido_mes.valor_centavos)} rotulo="recebido no mês" />
-        </ul>
-      </Secao>
-
-      <Secao id="dir-grafico" titulo="Mês a mês">
-        <div className="cartao__corpo pilha">
-          <Rolagem rotulo="Gráfico de medido e previsto nos últimos 12 meses" className="grafico"><GraficoAno serie={m.serie} /></Rolagem>
-          <div className="legenda">
-            <span className="legenda__item"><span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />previsto</span>
-            <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />medido</span>
-          </div>
-          {/* os valores do grafico em texto, para teclado e leitor de tela (o SVG e' role="img") */}
-          <details className="detalhes">
-            <summary>Tabela por competência</summary>
-            <Rolagem rotulo="Previsto e medido nos últimos 12 meses">
-              <table className="tabela">
-                <caption className="sr-only">Previsto e medido nos últimos 12 meses, na cota da Lotufo</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Competência</th>
-                    <th scope="col" className="col-num">Previsto</th>
-                    <th scope="col" className="col-num">Medido</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {m.serie.map((s, i) => (
-                    <tr key={s.competencia} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                      <td className="num">{fmtCompetencia(s.competencia)}</td>
-                      <td className="col-num dinheiro num">{brl(s.previsto_centavos)}</td>
-                      <td className="col-num dinheiro num">{brl(s.medido_centavos)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr><th scope="row">Total</th><td className="col-num dinheiro num">{brl(totalPrevisto)}</td>
-                    <td className="col-num dinheiro num">{brl(totalMedido)}</td></tr>
-                </tfoot>
-              </table>
-            </Rolagem>
-          </details>
-        </div>
-      </Secao>
-
-      <div className="cartoes-lado">
-        <Secao id="dir-proximos" titulo="Próximos meses">
-          <Rolagem rotulo="Próximos meses">
-            <table className="tabela tabela--estreita">
-              <thead><tr><th scope="col">Mês</th><th scope="col" className="col-num">Faturamento previsto</th></tr></thead>
-              <tbody>
-                {p.proximos.map(x => (
-                  <tr key={x.competencia}><td className="num">{fmtCompetencia(x.competencia)}</td>
-                    <td className="col-num dinheiro num">{brl(x.faturamento_previsto_centavos)}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          </Rolagem>
-        </Secao>
-
-        <Secao id="dir-saldo" titulo="Saldo a executar">
-          <ul className="kpis cart-kpis--quebra" aria-label="Saldo a executar">
-            <Kpi valorTexto={brl(k.saldo_centavos)} rotulo="saldo a executar" />
-            <Kpi valorTexto={brl(k.ritmo_mensal_centavos)} rotulo="ritmo mensal" />
-            <Kpi valorTexto={k.meses_de_producao === null ? "—" : `${k.meses_de_producao.toLocaleString("pt-BR")} meses`}
-              rotulo="de produção" dinheiro={false} />
+      {f && ultimo && (
+        <Secao id="dir-mes" titulo="Faturado, na cota">
+          <ul className="kpis cart-kpis--quebra" aria-label="Faturado">
+            <Kpi valorTexto={brl(ultimo.faturado_centavos)} rotulo={`faturado em ${mesFechado} de ${ultimo.competencia.slice(0, 4)}`} />
+            <Kpi valorTexto={brl(ultimo.ano_anterior_centavos)} rotulo={`${mesFechado} de ${Number(ultimo.competencia.slice(0, 4)) - 1}`} />
+            {ate && <Kpi valorTexto={brl(f.ano_centavos)} rotulo={`faturado em ${anoAtual}, até ${ate}`} />}
+            {ate && <Kpi valorTexto={brl(f.ano_anterior_centavos)} rotulo={`${anoAnterior}, até ${ate}`} />}
           </ul>
-          <Rolagem rotulo="Saldo a executar por órgão">
+        </Secao>
+      )}
+
+      {f && f.serie.length > 0 && (
+        <Secao id="dir-grafico" titulo="Faturado por mês e o mesmo mês do ano anterior">
+          <div className="cartao__corpo pilha">
+            <Rolagem rotulo="Gráfico do faturado nos últimos 12 meses e no mesmo mês do ano anterior" className="grafico">
+              <GraficoAno nomes={["ano anterior", "faturado"]} descricao="Faturado nos últimos 12 meses fechados e no mesmo mês do ano anterior"
+                serie={f.serie.map(x => ({ competencia: x.competencia, medido_centavos: x.faturado_centavos, previsto_centavos: x.ano_anterior_centavos }))} />
+            </Rolagem>
+            <div className="legenda">
+              <span className="legenda__item"><span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />mesmo mês do ano anterior</span>
+              <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />faturado</span>
+            </div>
+            {/* os valores do grafico em texto, para teclado e leitor de tela (o SVG e' role="img") */}
+            <details className="detalhes">
+              <summary>Tabela por mês</summary>
+              <Rolagem rotulo="Faturado por mês e no mesmo mês do ano anterior">
+                <table className="tabela">
+                  <caption className="sr-only">Faturado por mês e no mesmo mês do ano anterior, na cota da Lotufo</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Mês</th>
+                      <th scope="col" className="col-num">Faturado</th>
+                      <th scope="col" className="col-num">Mesmo mês do ano anterior</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {f.serie.map((x, i) => (
+                      <tr key={x.competencia} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                        <td className="num">{fmtCompetencia(x.competencia)}</td>
+                        <td className="col-num dinheiro num">{brl(x.faturado_centavos)}</td>
+                        <td className="col-num dinheiro num">{brl(x.ano_anterior_centavos)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr><th scope="row">Total</th>
+                      <td className="col-num dinheiro num">{brl(f.serie.reduce((t, x) => t + x.faturado_centavos, 0))}</td>
+                      <td className="col-num dinheiro num">{brl(f.serie.reduce((t, x) => t + x.ano_anterior_centavos, 0))}</td></tr>
+                  </tfoot>
+                </table>
+              </Rolagem>
+            </details>
+          </div>
+        </Secao>
+      )}
+
+      {/* #279 (spec 2026-10-20 §2.2): o reajuste já medido (pedido ou aprovado) das competências sem apostilamento,
+          por obra; a obra leva à aba Reajuste dela, com cada competência */}
+      <Secao id="dir-reajustes" titulo="Reajustes esperando apostilamento (cota)">
+        {r.obras.length === 0 ? (
+          <div className="vazio vazio--curto"><p>Nenhum reajuste esperando apostilamento.</p></div>
+        ) : (
+          <Rolagem rotulo="Reajustes esperando apostilamento por obra">
             <table className="tabela tabela--estreita">
-              <caption className="sr-only">Saldo a executar por órgão, na cota da Lotufo</caption>
-              <thead><tr><th scope="col">Órgão</th><th scope="col" className="col-num">Saldo a executar</th>
-                <th scope="col" className="col-num">Participação</th></tr></thead>
+              <caption className="sr-only">Reajustes esperando apostilamento por obra, na cota da Lotufo</caption>
+              <thead><tr><th scope="col">Obra</th><th scope="col" className="col-num">Competências</th>
+                <th scope="col" className="col-num">Medido</th></tr></thead>
               <tbody>
-                {k.por_orgao.map(o => (
-                  <tr key={o.orgao}><td>{o.orgao}</td><td className="col-num dinheiro num">{brl(o.saldo_centavos)}</td>
-                    <td className="col-num num">{fmtPercentual(o.fracao, 1, true)}</td></tr>
+                {r.obras.map(o => (
+                  <tr key={o.contrato_id}>
+                    <td><Link className="nome-link truncar truncar--nome" title={o.obra}
+                      para={{ tela: "obra", id: o.contrato_id, aba: "reajuste" }} ir={ir}>{o.obra}</Link></td>
+                    <td className="col-num num">{o.competencias}</td>
+                    <td className="col-num dinheiro num">{brl(o.valor_centavos)}</td>
+                  </tr>
                 ))}
               </tbody>
-              {k.por_orgao.length > 0 && (
-                <tfoot><tr><th scope="row">Total</th><td className="col-num dinheiro num">{brl(k.saldo_centavos)}</td>
-                  <td className="col-num num">{fmtPercentual(1, 1, true)}</td></tr></tfoot>
-              )}
+              <tfoot><tr><th scope="row">Total</th><td className="col-num num">{r.competencias}</td>
+                <td className="col-num dinheiro num">{brl(r.valor_centavos)}</td></tr></tfoot>
             </table>
           </Rolagem>
-        </Secao>
-      </div>
+        )}
+      </Secao>
     </>
   );
 }
@@ -602,7 +594,7 @@ export default function Diretoria({ ir, aba = "resumo" }: { ir: Ir; aba?: AbaCar
       {abas}
       {aba === "resumo" && <Resumo p={p} ir={ir} />}
       {aba === "qdop" && <Qdop p={p} ir={ir} />}
-      {aba === "producao" && <Producao p={p} />}
+      {aba === "producao" && <Producao p={p} ir={ir} />}
     </div>
   );
 }

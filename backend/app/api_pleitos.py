@@ -91,6 +91,8 @@ def reajuste_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=F
     return {"ciclos": reajuste.ciclos(conn, contrato_id),
             "competencias": reajuste.competencias_apostiladas(conn, contrato_id),
             "bases_dos_termos": reajuste.bases_dos_termos(conn, contrato_id),
+            # issue #390: o termo aditivo de reajuste pelo mesmo criterio do ciclo, para o pleito dizer qual o atendeu
+            "aditivos_de_reajuste": reajuste.aditivos_de_reajuste(conn, contrato_id),
             "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("reajuste",))],
             "previsoes": reajuste.previsoes_vigentes(conn, contrato_id),
             # issue #273: estado e valor de cada fonte por competencia, por data-base e ciclo
@@ -104,7 +106,9 @@ def prazos_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=Fal
     # issue #292: os dias que a carta de prazo sugere pelo ritmo dos ultimos 6 meses (a pessoa confirma ou muda)
     return {"situacao": prazos.situacao(conn, contrato_id), "historico": prazos.historico_texto(conn, contrato_id),
             "sugestao": prazos.sugestao_dias(conn, contrato_id),
-            "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("prazo", "conclusao"))]}
+            "pleitos": [_detalhe(conn, p["id"]) for p in pleitos.listar(conn, contrato_id, ("prazo", "conclusao"))],
+            # issue #398: pedidos de aditivo de valor do cadastro, com o aditivo que os atendeu (sem carta nem envio)
+            "pedidos_valor": prazos.pedidos_de_valor(conn, contrato_id)}
 
 
 @router.post("/api/contratos/{contrato_id}/pleitos", status_code=201)
@@ -228,6 +232,20 @@ def montar(pid: ID, dados: MontarIn, usuario: dict = Depends(exigir("editar_cada
     try:
         pleitos.montar(conn, usuario["id"], pid, dados.corpo)
     except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: a carta e' a que vai nele
+        raise HTTPException(409, detail=e.detalhe()) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return _detalhe(conn, pid)
+
+
+@router.post("/api/pleitos/{pid}/curva-s")
+def atualizar_curva_s(pid: ID, usuario: dict = Depends(exigir("editar_cadastros")),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #447: troca a curva S do pedido de prazo pela de agora sem montar a carta de novo (a assinada fica)."""
+    _existe(conn, pid)
+    try:
+        pleitos.atualizar_curva_s(conn, usuario["id"], pid)
+    except envio_reserva.EnvioEmAndamento as e:         # e-mail saindo: os anexos sao os que vao nele
         raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None

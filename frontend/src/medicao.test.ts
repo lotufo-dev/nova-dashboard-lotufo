@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { eventosDaMedicao, itensOQueFalta, larDoEspelho, metadeQueEspera, protocolosDa, resumoNotas,
+import { eventosDaMedicao, itensOQueFalta, larDoEspelho, metadeQueEspera, PROXIMOS, protocolosDa, resumoNotas,
          rotuloDoBloco, separarMedicoes, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type Metade, type ProtocoloResumo } from "./medicao";
+
+// issue #284: os estados do motor de medicao se encerram a mao, como no servidor (medicoes.TRANSICOES)
+describe("PROXIMOS", () => {
+  it("planilha gerada, planilha enviada e boletim recebido podem ser canceladas ou desistidas", () => {
+    for (const estado of ["planilha_gerada", "planilha_enviada", "boletim_recebido"]) {
+      expect(PROXIMOS[estado]).toEqual(["cancelada", "desistida"]);
+    }
+  });
+});
 
 // issue #188: medicao e reajuste na mesma pagina
 describe("medição e reajuste na mesma página", () => {

@@ -55,10 +55,12 @@ cd backend && .venv\Scripts\python -m pytest -q
 cd frontend && npm test && npm run typecheck && npm run lint
 ```
 
-A CI roda o backend em dois jobs: `backend` (Ubuntu, `pytest -n 4 -m "not windows"`, com pytest-xdist) e
-`backend-windows` (`pytest -m "windows or pdf"`). Marcador `windows`: só vale no Windows (`tests/test_backup.py`); roda só
-no `backend-windows`. Marcador `pdf`: gera PDF com a Arial da produção (`test_carta`, `test_frc`, `test_protocolo`, `test_pdfs`, `test_notas_envio`, `test_pleitos`, `test_api_protocolos`, `test_api_pleitos`, `test_envio_reserva`, `test_api_siga`; para achar os módulos, `grep -lE "carta\.gerar|frc\.gerar|protocolo\.montar|pleitos\.montar|conferir_pdfs|textos_por_pagina_com_limite|_texto_da_frc|protocolo\.criar|/montar" backend/tests/*.py` acha os candidatos, e o que decide é a medição: `cd backend && PYTHONPATH=tests .venv/bin/python -m pytest -q -p contar_pdfs tests` (plugin `tests/contar_pdfs.py`, só carrega com `-p`, roda em série) imprime os PDFs gerados por módulo; `test_api_admin` casa com o grep e gera 0 PDFs, e `test_notas` não gera nenhum, por isso os dois ficam sem o marcador);
-roda nos dois jobs (Helvetica no Ubuntu, Arial no Windows).
+A CI roda o backend num job só, `backend` (Ubuntu, `pytest -q -n 4`, com pytest-xdist), com a Liberation Sans
+instalada pelo apt (`fonts-liberation`). Teste que só vale no Windows se pula com `skipif` no próprio teste.
+A carta, os ofícios e a FRC procuram a fonte Unicode numa lista (`app/carta.py`, `fonte_carta`): Arial no Windows
+(a produção) e no Mac, Liberation Sans no Linux, ou o par apontado por `DASH_FONTE_CARTA` e `DASH_FONTE_CARTA_NEGRITO`;
+sem nenhuma, Helvetica com o texto trocado para latin-1 (o travessão vira hífen). Na CI a falta da fonte é erro.
+Marcador `pdf`: gera PDF com essa fonte (`test_carta`, `test_frc`, `test_protocolo`, `test_pdfs`, `test_notas_envio`, `test_pleitos`, `test_api_protocolos`, `test_api_pleitos`, `test_envio_reserva`, `test_api_siga`; para achar os módulos, `grep -lE "carta\.gerar|frc\.gerar|protocolo\.montar|pleitos\.montar|conferir_pdfs|textos_por_pagina_com_limite|_texto_da_frc|protocolo\.criar|/montar" backend/tests/*.py` acha os candidatos, e o que decide é a medição: `cd backend && PYTHONPATH=tests .venv/bin/python -m pytest -q -p contar_pdfs tests` (plugin `tests/contar_pdfs.py`, só carrega com `-p`, roda em série) imprime os PDFs gerados por módulo; `test_api_admin` casa com o grep e gera 0 PDFs, e `test_notas` não gera nenhum, por isso os dois ficam sem o marcador).
 
 Recriar o ambiente igual ao testado: `.venv\Scripts\python -m pip install -r requirements.lock`
 (faixas suportadas em `backend/pyproject.toml`) e `npm ci` em `frontend`.
@@ -95,7 +97,7 @@ E no `~/.zshrc`: `export DASH_SERVIDOR=` seguido do nome do servidor de produç�
 - Backend: `cd backend && DASH_DEV=1 DASH_SEM_JOBS=1 .venv/bin/python -m uvicorn --factory app.main:create_app --reload --port 8080`.
   Frontend igual ao Windows (`cd frontend && npm run dev`). No app do Claude: `backend-dev-mac`, `frontend-dev-mac`
   e `prototipo-login-mac` em `.claude/launch.json`.
-- Testes: `cd backend && .venv/bin/python -m pytest -q` e os de frontend acima. A suíte oficial é a CI (Ubuntu, mais o job `backend-windows`);
+- Testes: `cd backend && .venv/bin/python -m pytest -q` e os de frontend acima. A suíte oficial é a CI (Ubuntu);
   teste que só vale no Windows é pulado ou pode falhar no Mac.
 - Os hooks do Claude passam por `.claude/hooks/rodar.sh`, que roda o `.ps1` no Windows e o `.sh` de mesmo nome
   no Mac; num worktree, `node_modules` e `.venv` viram links simbólicos para os do clone principal.

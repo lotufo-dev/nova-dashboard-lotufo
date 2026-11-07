@@ -1029,3 +1029,210 @@ def test_rota_desalocar_so_admin(client_admin, tmp_path, monkeypatch):
     client_admin.cookies.set("sessao", r.cookies.get("sessao") or client_admin.cookies.get("sessao"))
     client_admin.headers["X-CSRF-Token"] = r.json()["csrf"]
     assert client_admin.post(url, json={"motivo": "x"}).status_code == 403
+
+
+# --- issue #488: custo por tarefa (DASH25) e baixa de estoque (DASH26) ---
+
+def _custo(cc="2.001.012", prj="PRJ01", trf="1.02", nat="1.01.003", mes=202603, qtd=3, valor=1234.5655, coligada=1):
+    d = {"CODCOLIGADA": coligada, "CODCCUSTO": cc, "NATUREZA": nat, "MES": mes, "QTD": qtd, "VALOR": valor}
+    if prj:
+        d["CODPRJ"] = prj
+    if trf:
+        d["CODTRF"] = trf
+    return d
+
+
+def _estoque(cc="2.001.012", tmv="1.1.21", mes=202603, qtd=2, valor=500.005, coligada=1):
+    return {"CODCOLIGADA": coligada, "CODCCUSTO": cc, "CODTMV": tmv, "MES": mes, "QTD": qtd, "VALOR": valor}
+
+
+def _simulador_custo(tmp_path, custo, estoque, nfs=()):
+    cli = _simulador(tmp_path, list(nfs), [])
+    (cli.pasta / f"{rm.CONSULTA_CUSTO}.json").write_text(json.dumps(custo), encoding="utf-8")
+    (cli.pasta / f"{rm.CONSULTA_ESTOQUE}.json").write_text(json.dumps(estoque), encoding="utf-8")
+    return cli
+
+
+def test_custo_e_estoque_viram_linhas_em_centavos_e_contam_na_rodada(conn, tmp_path):
+    assert (rm.CONSULTA_CUSTO, rm.CONSULTA_ESTOQUE) == ("DASH25", "DASH26")
+    # sem projeto e tarefa (chave omitida pelo RM), centavo impar, estorno negativo
+    cli = _simulador_custo(tmp_path, [_custo(), _custo(prj=None, trf=None, nat="2.02.001", valor=-10.015)],
+                           [_estoque(), _estoque(tmv="1.1.23", mes=202512, valor=0.0049)])
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["estado"] == "success" and r["custo_tarefas"] == 2 and r["estoque_baixas"] == 2
+    custo = [dict(x) for x in conn.execute(
+        "SELECT coligada, centro_custo, projeto, tarefa, natureza, mes, qtd, valor_centavos FROM rm_custo_tarefas ORDER BY id")]
+    assert custo == [
+        {"coligada": 1, "centro_custo": "2.001.012", "projeto": "PRJ01", "tarefa": "1.02", "natureza": "1.01.003",
+         "mes": "2026-03", "qtd": 3, "valor_centavos": 123457},
+        {"coligada": 1, "centro_custo": "2.001.012", "projeto": None, "tarefa": None, "natureza": "2.02.001",
+         "mes": "2026-03", "qtd": 3, "valor_centavos": -1002}]
+    estoque = [dict(x) for x in conn.execute(
+        "SELECT coligada, centro_custo, tipo_movimento, mes, qtd, valor_centavos FROM rm_estoque_baixas ORDER BY id")]
+    assert estoque == [
+        {"coligada": 1, "centro_custo": "2.001.012", "tipo_movimento": "1.1.21", "mes": "2026-03", "qtd": 2,
+         "valor_centavos": 50001},
+        {"coligada": 1, "centro_custo": "2.001.012", "tipo_movimento": "1.1.23", "mes": "2025-12", "qtd": 2,
+         "valor_centavos": 0}]
+    rodada = conn.execute("SELECT custo_tarefas, estoque_baixas, custo_erro FROM rm_sincronizacoes WHERE id=?",
+                          (r["id"],)).fetchone()
+    assert tuple(rodada) == (2, 2, None)
+    # a troca do retrato fica na auditoria da rodada
+    depois = json.loads(conn.execute("SELECT depois FROM audit_log WHERE acao='rm.sincronizacao' AND entidade_id=?",
+                                     (str(r["id"]),)).fetchone()[0])
+    assert (depois["custo_tarefas"], depois["estoque_baixas"], depois["custo_erro"]) == (2, 2, None)
+
+
+def test_custo_sincronizado_duas_vezes_nao_duplica_e_substitui(conn, tmp_path):
+    cli = _simulador_custo(tmp_path, [_custo(), _custo(trf="1.03")], [_estoque()])
+    sincronizacao_rm.sincronizar(conn, cli)
+    sincronizacao_rm.sincronizar(conn, cli)
+    assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM rm_estoque_baixas").fetchone()[0] == 1
+    # a rodada seguinte traz o retrato novo do RM: o que sumiu de la' some daqui
+    cli = _simulador_custo(tmp_path, [_custo(valor=1.0)], [])
+    sincronizacao_rm.sincronizar(conn, cli)
+    assert [tuple(x) for x in conn.execute("SELECT tarefa, valor_centavos FROM rm_custo_tarefas")] == [("1.02", 100)]
+    assert conn.execute("SELECT COUNT(*) FROM rm_estoque_baixas").fetchone()[0] == 0
+
+
+def test_sem_consulta_de_custo_as_notas_sincronizam_e_o_erro_fica_na_rodada(conn, cid, tmp_path):
+    mid = _medicao(conn, cid, 12, 461900_00)
+    cli = _simulador(tmp_path, [_nf(100, 461900.0, campo="IC 082/2025 - 12")], [])   # sem DASH25/DASH26
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["estado"] == "success" and r["nfs"] == 1 and _tem_nf(conn, mid)
+    rodada = conn.execute("SELECT estado, erro, custo_tarefas, estoque_baixas, custo_erro FROM rm_sincronizacoes "
+                          "WHERE id=?", (r["id"],)).fetchone()
+    assert rodada["estado"] == "success" and rodada["erro"] is None
+    assert rodada["custo_tarefas"] is None and rodada["estoque_baixas"] is None
+    assert "DASH25" in rodada["custo_erro"]
+    assert r["custo_erro"] == rodada["custo_erro"]
+
+
+def test_falha_no_estoque_nao_troca_o_retrato_anterior(conn, tmp_path):
+    cli = _simulador_custo(tmp_path, [_custo()], [_estoque()])
+    sincronizacao_rm.sincronizar(conn, cli)
+    (cli.pasta / f"{rm.CONSULTA_CUSTO}.json").write_text(json.dumps([_custo(), _custo(trf="2.01")]), encoding="utf-8")
+    (cli.pasta / f"{rm.CONSULTA_ESTOQUE}.json").unlink()      # custo le, estoque falha: nada troca
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["estado"] == "success" and "DASH26" in r["custo_erro"]
+    assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM rm_estoque_baixas").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("linha, trecho", [({"MES": 202613}, "mês ilegível"), ({"MES": "lixo"}, "MES ilegível"),
+                                           ({"QTD": float("inf")}, "QTD ilegível")])
+def test_linha_ilegivel_no_custo_vira_erro_da_rodada(conn, tmp_path, linha, trecho):
+    cli = _simulador_custo(tmp_path, [{**_custo(), **linha}], [])
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["estado"] == "success" and trecho in r["custo_erro"] and "DASH25" in r["custo_erro"]
+    assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 0
+
+
+def test_rodada_agendada_traz_o_custo_uma_vez_por_dia(conn, tmp_path):
+    cli = _simulador_custo(tmp_path, [_custo()], [_estoque()])
+    assert sincronizacao_rm.sincronizar(conn, cli, "agendado")["custo_tarefas"] == 1
+    (cli.pasta / f"{rm.CONSULTA_CUSTO}.json").write_text(json.dumps([_custo(), _custo(trf="9.9")]), encoding="utf-8")
+    segunda = sincronizacao_rm.sincronizar(conn, cli, "agendado")
+    assert segunda["custo_tarefas"] is None and segunda["custo_erro"] is None
+    assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 1
+    # o disparo manual sempre traz
+    assert sincronizacao_rm.sincronizar(conn, cli)["custo_tarefas"] == 2
+
+
+def test_rodada_agendada_volta_a_trazer_o_custo_depois_de_um_dia(conn, tmp_path):
+    cli = _simulador_custo(tmp_path, [_custo()], [_estoque()])
+    assert sincronizacao_rm.sincronizar(conn, cli, "agendado")["custo_tarefas"] == 1
+    conn.execute("UPDATE rm_sincronizacoes SET iniciado_em=datetime(iniciado_em, '-24 hours')"); conn.commit()
+    (cli.pasta / f"{rm.CONSULTA_CUSTO}.json").write_text(json.dumps([_custo(), _custo(trf="9.9")]), encoding="utf-8")
+    assert sincronizacao_rm.sincronizar(conn, cli, "agendado")["custo_tarefas"] == 2
+    assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 2
+
+
+def test_falha_na_insercao_do_custo_nao_apaga_o_retrato_anterior(conn, tmp_path):
+    cli = _simulador_custo(tmp_path, [_custo()], [_estoque()])
+    sincronizacao_rm.sincronizar(conn, cli)
+    conn.execute("CREATE TEMP TRIGGER t_falha BEFORE INSERT ON rm_estoque_baixas "
+                 "BEGIN SELECT RAISE(ABORT, 'falha simulada'); END"); conn.commit()
+    (cli.pasta / f"{rm.CONSULTA_CUSTO}.json").write_text(json.dumps([_custo(), _custo(trf="2.01")]), encoding="utf-8")
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["estado"] == "success" and r["custo_erro"]
+    assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 1   # o DELETE voltou atras
+    assert conn.execute("SELECT COUNT(*) FROM rm_estoque_baixas").fetchone()[0] == 1
+
+
+def test_erro_que_nao_e_do_rm_vira_mensagem_fixa_em_portugues(conn, tmp_path):
+    cli = _simulador_custo(tmp_path, [_custo(valor=float("inf"))], [])
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["estado"] == "success"
+    assert r["custo_erro"] == sincronizacao_rm.ERRO_CUSTO_INESPERADO
+    assert "class" not in r["custo_erro"] and "Decimal" not in r["custo_erro"]
+
+
+class _PerdeATrava:
+    """Simula outra execucao que expirou esta rodada (prazo) enquanto ela consultava o RM."""
+
+    def __init__(self, cli, codigo):
+        self.cli, self.codigo = cli, codigo
+
+    def consultar(self, codigo, parametros=None):
+        if codigo == self.codigo:
+            outra = db.get_conn()
+            outra.execute("UPDATE rm_sincronizacoes SET estado='failed', terminado_em=datetime('now'), "
+                          "erro='rodada expirada sem terminar (processo caiu?)' WHERE estado='running'")
+            outra.commit(); outra.close()
+        return self.cli.consultar(codigo, parametros)
+
+
+@pytest.mark.parametrize("onde", ["DASH26", "DASH10"])
+def test_rodada_que_perdeu_a_trava_nao_troca_nada_nem_vira_sucesso(conn, cid, tmp_path, onde):
+    cli = _simulador_custo(tmp_path, [_custo()], [_estoque()])
+    sincronizacao_rm.sincronizar(conn, cli)
+    (cli.pasta / f"{rm.CONSULTA_CUSTO}.json").write_text(json.dumps([_custo(), _custo(trf="2.01")]), encoding="utf-8")
+    (cli.pasta / f"{rm.CONSULTA_NF}.json").write_text(json.dumps([_nf(100, 999.0)]), encoding="utf-8")
+    codigo = {"DASH26": rm.CONSULTA_ESTOQUE, "DASH10": rm.CONSULTA_NF}[onde]
+    r = sincronizacao_rm.sincronizar(conn, _PerdeATrava(cli, codigo))
+    assert r["estado"] == "failed"
+    rodada = conn.execute("SELECT estado, erro FROM rm_sincronizacoes WHERE id=?", (r["id"],)).fetchone()
+    assert rodada["estado"] == "failed" and "expirada" in rodada["erro"]     # nao volta a `success`
+    assert conn.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0] == 0
+    if onde == "DASH26":
+        assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 1
+
+
+def test_falha_do_custo_nao_abre_outra_escrita_antes_das_notas(conn, cid, tmp_path, monkeypatch):
+    """O erro do custo vai junto da transacao das notas: banco ocupado nessa hora nao derruba a rodada."""
+    import contextlib
+    import sqlite3
+    original = db.mutacao
+    estado = {"chamadas": 0, "nf": False}
+
+    @contextlib.contextmanager
+    def mutacao(c):
+        estado["chamadas"] += 1
+        if estado["chamadas"] > 1 and not estado["nf"]:
+            raise sqlite3.OperationalError("database is locked")
+        with original(c):
+            yield
+
+    class Cli:
+        def __init__(self, cli):
+            self.cli = cli
+
+        def consultar(self, codigo, parametros=None):
+            if codigo == rm.CONSULTA_NF:
+                estado["nf"] = True
+            return self.cli.consultar(codigo, parametros)
+
+    monkeypatch.setattr(db, "mutacao", mutacao)
+    r = sincronizacao_rm.sincronizar(conn, Cli(_simulador(tmp_path, [_nf(100, 999.0)], [])))   # sem DASH25
+    assert r["estado"] == "success" and r["nfs"] == 1 and "DASH25" in r["custo_erro"]
+    assert conn.execute("SELECT custo_erro FROM rm_sincronizacoes WHERE id=?", (r["id"],)).fetchone()[0] == r["custo_erro"]
+
+
+def test_custo_e_notas_falhando_os_dois_erros_ficam_na_rodada(conn, tmp_path):
+    pasta = tmp_path / "vazia"
+    pasta.mkdir()
+    r = sincronizacao_rm.sincronizar(conn, rm.SimuladorRM(pasta))
+    rodada = conn.execute("SELECT estado, erro, custo_erro FROM rm_sincronizacoes WHERE id=?", (r["id"],)).fetchone()
+    assert rodada["estado"] == "failed" and "DASH10" in rodada["erro"] and "DASH25" in rodada["custo_erro"]

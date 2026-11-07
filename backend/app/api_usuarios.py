@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app import auditoria, auth, db, tempo
+from app import auditoria, auth, db, seguranca, tempo
 from app.api_auth import conexao
 from app.api_medicoes import ID
 from app.permissoes import exigir
@@ -47,6 +47,15 @@ def listar(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
     # colunas explicitas: senha_hash nunca sai daqui.
     return [{**dict(r), "bloqueado_ate": _bloqueio_local(r["bloqueado_ate"])} for r in conn.execute(
         "SELECT id, nome, email, perfil, ativo, criado_em, bloqueado_ate, tentativas_falhas FROM usuarios ORDER BY nome")]
+
+
+@router.get("/{alvo_id}/acessos")
+def acessos(alvo_id: ID, usuario: dict = Depends(exigir("administrar", com_csrf=False)),
+            conn: sqlite3.Connection = Depends(conexao)):
+    """#418: os ultimos acessos de uma pessoa. So' o admin ve os de outra; cada um ve os proprios em Minha conta."""
+    if conn.execute("SELECT 1 FROM usuarios WHERE id=?", (alvo_id,)).fetchone() is None:
+        raise HTTPException(404, "Usuário não encontrado")
+    return seguranca.acessos(conn, alvo_id)
 
 
 @router.post("", status_code=201)

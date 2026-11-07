@@ -4,6 +4,7 @@ Toda escrita desta fase grava origem "manual" -- a deteccao automatica
 (origem "detectado"/"aceito") entra nas fases 5-6.
 """
 import datetime
+import logging
 import sqlite3
 from typing import Annotated, Literal
 
@@ -11,12 +12,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import arquivos, db, espelhos, medicao_planilhas, medicoes, permissoes, planilha_envio, siga, tempo
+from app import (arquivos, db, espelhos, medicao_grupos, medicao_planilhas, medicoes, permissoes, planilha_envio, siga,
+                 tempo)
 from app.api_auth import conexao
 from app.dinheiro import parse_brl
 from app.permissoes import exigir
 
 router = APIRouter()
+log = logging.getLogger("app.medicoes")
 
 # Competencia e' o mes de referencia "AAAA-MM": o mesmo formato que o CHECK
 # (GLOB) da tabela medicoes exige. Validar aqui devolve 422 em vez de deixar
@@ -144,7 +147,17 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     # issue #282: se a tela oferece "Enviar para protocolo" (nunca na MT-PAR), as versoes enviadas e as pecas
     d["envio_planilha"] = planilha_envio.situacao(conn, medicao_id)
     d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
+    d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
+    d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"
     return d
+
+
+@router.get("/api/medicoes/{medicao_id}/grupos")
+def grupos_da_medicao(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #490: o medido por grupo da planilha (leitura mais nova), com os itens de cada grupo."""
+    _medicao_existe(conn, medicao_id)
+    return medicao_grupos.grupos(conn, medicao_id)
 
 
 @router.put("/api/medicoes/{medicao_id}/valor")
@@ -269,7 +282,7 @@ TETO_PLANILHA = 25 * 1024 * 1024
 
 def _pdf_validado(arquivo: UploadFile, teto_bytes: int = arquivos.TETO_BYTES) -> bytes:
     dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=teto_bytes))   # tipo, %PDF- e teto (415/413)
-    arquivos.conferir_bytes_parseaveis(dados)                # abre num leitor de verdade (415)
+    arquivos.conferir_bytes_parseaveis(dados, pacote=True)   # abre num leitor de verdade (415), tetos do pacote
     return dados
 
 
@@ -293,6 +306,27 @@ def _gravar_e_registrar(conn: sqlite3.Connection, validados: list[tuple[bytes, s
     envio do mesmo conteudo."""
     (arq, sha), (arq_p, sha_p) = (arquivos.gravar_bytes("planilhas", dados, ext) for dados, ext in validados)
     return registrar({"arquivo": arq, "sha256": sha, "arquivo_planilha": arq_p, "sha256_planilha": sha_p})
+
+
+def _ler_grupos(conn: sqlite3.Connection, usuario_id: int, r: dict, validados: list[tuple[bytes, str]]) -> dict:
+    """Issue #490: o xlsx da planilha, ja' gravado com a versao, e' lido por grupo. A leitura vem depois do registro
+    e nunca o desfaz: a recusa da planilha (soma que nao bate, aba que falta) fica gravada e volta como aviso em
+    `leitura_planilha`. Erro inesperado (banco ocupado, defeito) fica gravado como falha, que a carga
+    `medicoes planilhas` le de novo; se nem a falha grava, o erro sobe."""
+    dados, ext = validados[1]
+    r["leitura_planilha"] = None
+    if ext != "xlsx":
+        return r
+    try:
+        r["leitura_planilha"] = medicao_grupos.ler_anexo(conn, usuario_id, r["medicao_id"], r["versao"], dados)
+    except Exception as erro:
+        log.exception("leitura por grupo da planilha da medicao %s", r["medicao_id"])
+        try:
+            r["leitura_planilha"] = medicao_grupos.registrar_falha(conn, usuario_id, r["medicao_id"], r["versao"],
+                                                                   dados)
+        except Exception:
+            raise erro from None
+    return r
 
 
 def _centavos(valor: str) -> int:
@@ -351,10 +385,11 @@ def registrar_planilha(contrato_id: ID,
         raise _erro_do_cliente(conn, e)
     validados = _anexos_validados(oficio, planilha)
     try:
-        return _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.registrar(
+        r = _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.registrar(
             conn, usuario["id"], contrato_id, dados, anexos))
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
+    return _ler_grupos(conn, usuario["id"], r, validados)
 
 
 @router.post("/api/medicoes/{medicao_id}/planilhas", status_code=201)
@@ -376,10 +411,11 @@ def revisar_planilha(medicao_id: ID,
         raise _erro_do_cliente(conn, e)
     validados = _anexos_validados(oficio, planilha)
     try:
-        return _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.revisar(
+        r = _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.revisar(
             conn, usuario["id"], medicao_id, dados, anexos))
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
+    return _ler_grupos(conn, usuario["id"], r, validados)
 
 
 @router.get("/api/medicoes/{medicao_id}/planilhas/{planilha_id}/{peca}")
@@ -400,6 +436,52 @@ def baixar_anexo_planilha(medicao_id: ID, planilha_id: ID, peca: Literal["oficio
     tipo = arquivos.MIME_XLSX if ext == "xlsx" else arquivos.MIME
     nome = f"{'oficio' if peca == 'oficio' else 'planilha'}-medicao-{a['numero']}-versao-{a['versao']}.{ext}"
     return FileResponse(caminho, media_type=tipo, filename=nome, headers={"X-Content-Type-Options": "nosniff"})
+
+
+# --- issue #284: boletim do orgao (spec 2026-10-20 §2.1, passo 3; D4) -----------------------------------------
+
+@router.post("/api/medicoes/{medicao_id}/boletim", status_code=201)
+def registrar_boletim(medicao_id: ID,
+                      valor: str = Form(..., max_length=40),
+                      data: datetime.date = Form(...),
+                      numero_orgao: str | None = Form(None, max_length=100),
+                      meio: Literal["smo", "oficio", "email", "carimbo", "ci", "outro"] | None = Form(None),
+                      observacao: str | None = Form(None, max_length=500),
+                      arquivo: UploadFile = File(...),
+                      usuario: dict = Depends(exigir("editar_cadastros")),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """"Registrar boletim": valor aprovado, data e nº digitados, com o PDF do orgao. Devolve pedido, aprovado e a
+    diferenca."""
+    _medicao_existe(conn, medicao_id)
+    try:
+        dados = {"valor_centavos": _centavos(valor), "data": data.isoformat(), "numero_orgao": numero_orgao,
+                 "meio": meio, "observacao": observacao}
+        medicoes.conferir_boletim(conn, medicao_id, dados)      # recusa antes de gravar o PDF
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    pdf = _pdf_validado(arquivo, TETO_PLANILHA)   # o pacote do SMO (capa, resumo, calculo, cronograma) passa de 10 MB
+    caminho, sha = arquivos.gravar_bytes("boletins", pdf, "pdf")
+    try:
+        return medicoes.registrar_boletim(conn, usuario["id"], medicao_id, dados, {"arquivo": caminho, "sha256": sha})
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+
+
+@router.get("/api/medicoes/{medicao_id}/boletins/{atesto_id}")
+def baixar_boletim(medicao_id: ID, atesto_id: ID,
+                   usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                   conn: sqlite3.Connection = Depends(conexao)):
+    a = medicoes.arquivo_boletim(conn, medicao_id, atesto_id)
+    if a is None or not a["arquivo"]:
+        raise HTTPException(404, "Arquivo não encontrado")
+    try:
+        caminho = arquivos.caminho_seguro(a["arquivo"])
+    except ValueError:
+        raise HTTPException(404, "Arquivo não encontrado") from None
+    if not caminho.is_file():
+        raise HTTPException(404, "Arquivo não encontrado")
+    return FileResponse(caminho, media_type=arquivos.MIME, filename=f"boletim-medicao-{a['numero']}-{atesto_id}.pdf",
+                        headers={"X-Content-Type-Options": "nosniff"})
 
 
 # --- issue #283: planilha/carta enviada por fora e nº do SIGA (spec 2026-10-20 §2.1, passo 2; E3) ---------------

@@ -189,6 +189,10 @@ glosa posterior é outro evento, e o vigente é o último.
 **planilha/carta** (tipo `planilha`): assunto no padrão de hoje ("CT-nnn-LT-aaaa - Nª Medição (MM_AAAA) - IC nnn/aaaa -
 Obra"), corpo da família do órgão, anexos: ofício assinado e zip da planilha, peças exigidas pelo órgão na etapa
 `medicao` (`orgaos.pecas` já distingue naturezas). Na MT-PAR não há esse passo: o ofício vai com a nota.
+Correção de 05/11/2026 (issue #462, `docs/mapeamento-pecas-planilha-carta-2026-11-05.md`): a peça marcada
+`no_oficio: true` em `orgaos.pecas` vai dentro do PDF assinado do ofício; é atendida por ele, não vira pendência e
+não se anexa. `pecas_no_oficio: [tipo, …]` no contrato substitui o conjunto do órgão só naquele contrato (`[]`
+desliga todas). A lista de anexos do corpo continua dizendo só o que vai.
 
 **Avisos gerados** (acrescentam ao catálogo §11):
 
@@ -306,6 +310,9 @@ reais já extraídos no vault (copiados para fixture com nomes e números trocad
   `[{chave, origem: contratual|aditivo|carta|smo, data, instrumento, itens: [{competencia, valor}]}]`; o
   carregador cria uma `cronograma_versoes` por entrada, com `criado_em` = data do documento (o congelamento de
   `previsto_efetivo` passa a respeitar a data do documento, não a da carga; migração só de leitura).
+  Exceção (#396, D12): a versão de origem `aditivo`, `carta` ou `smo` substitui a curva inteira, inclusive os
+  meses passados (o bloco do realizado), e o previsto acumulado termina no contrato; `contratual` e a carga
+  continuam congelando o passado.
 - `datas_base[]` ganha `aplica_a` (texto livre: "itens SICRO", "itens SINAPI") e `indice` passa a ser obrigatório.
 - `cadastro carregar-medicoes <obra>.csv [--ensaio]`: colunas nº, nº do órgão, tipo, competência, período, valor
   pedido, valor aprovado, data da aprovação, meio, nº do órgão, data do protocolo da nota, NF, fonte. Regras: não
@@ -355,7 +362,7 @@ Evidência do levantamento (cruzamento de 20/10/2026; detalhe por obra na sínte
 | Versão por aditivo | 22 versões, todas de 04/09/2026 (carga), nenhuma por aditivo; Atalaia com 2 competências, Coxipó 2ª com 1 | `cronograma` no YAML com data do documento (§2.4) |
 | Tela ou carga | não existe tela de versão de cronograma (backlog de 28/09/2026) e o cadastro não carrega | carga pelo YAML; tela fica fora |
 | Linha de base honesta | a curva do SMO é refeita com o medido a cada aditivo (desvio ≈ 0 por construção); contra a versão anterior o atraso é de 16 a 48 p.p. em 7 obras | curva S com duas linhas: vigente e a anterior à última repactuação (§4.3, D9) |
-| Previsto que ninguém mantém | `previsto_efetivo` congela pelo mês de criação da versão; como todas nasceram em 09/2026, o passado foi semeado e o futuro depende de versão que não vem | `criado_em` = data do documento na carga |
+| Previsto que ninguém mantém | `previsto_efetivo` congela pelo mês de criação da versão; como todas nasceram em 09/2026, o passado foi semeado e o futuro depende de versão que não vem | `criado_em` = data do documento na carga; exceção (#396): versão de aditivo, carta ou SMO substitui a curva inteira, passado incluído (D12) |
 
 ## 4. Automações que agilizam
 
@@ -397,6 +404,7 @@ Decididas em 20/10/2026 (detalhe e provas em `docs/decisoes-motores-2026-10-20.m
 | D9 | Linha de base da curva S | **vigente e anterior à última repactuação**, as duas na tela |
 | D10 | Aviso de garantia | **contra o fim de execução vigente + folga do órgão** |
 | D11 | Planilha/carta na SINFRA | **obrigatória** (as sete obras SINFRA com e-mail a mostram antes do boletim) |
+| D12 | Versão de repactuação no previsto efetivo (#396, 05/11/2026) | **a versão de aditivo, carta ou SMO substitui a curva em todos os meses que traz, passados inclusive**; o previsto acumulado termina no contrato e o atraso fica na comparação com a versão anterior (D9). Versão manual ou da carga continua congelando o passado |
 | E3 | Quem envia a planilha/carta | **a dashboard**, com reenvio de revisão (Rev01, Rev02…) e "enviado por fora" com data e protocolo |
 | E4 | Aviso de pedido sem boletim | **sim**, X por órgão em `orgaos.yaml` (§2.1.1) |
 | — | Aviso "aprovado abaixo do pedido" | operação em qualquer diferença; diretoria acima de 10% |
