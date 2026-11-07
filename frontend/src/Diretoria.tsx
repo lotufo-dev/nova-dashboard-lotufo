@@ -6,6 +6,7 @@ import { fmtDias, fmtPercentual } from "./formato";
 import { IconeAlerta, IconeBaixar } from "./icones";
 import { filtrarObras, type ObraLista } from "./listaObras";
 import { brl } from "./Medicoes";
+import CustoObra from "./CustoObra";
 import { type AbaCarteira, type Ir } from "./rota";
 import { Link } from "./Link";
 import { fmtCompetencia, fmtDataPura, fmtMesCurto as mesCurto, fmtMesExtenso } from "./tempo";
@@ -587,6 +588,8 @@ export default function Diretoria({ ir, aba = "resumo" }: { ir: Ir; aba?: AbaCar
       <a className="btn" href="/api/diretoria/qdop.xlsx"><IconeBaixar className="icone icone--p" /> Exportar QDOP (.xlsx)</a>
     </div>
   );
+  // #491: a aba Custo tem a propria busca; nao espera o painel nem cai com o erro dele
+  if (aba === "custo") return <div className="pilha">{abas}<CustoObra /></div>;
   if (erro) return <div className="pilha">{abas}<p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro} Recarregue a página para tentar de novo.</p></div>;
   if (!p) return <div className="pilha">{abas}<section className="cartao"><div className="vazio"><p>Carregando…</p></div></section></div>;
   return (

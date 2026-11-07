@@ -20,7 +20,7 @@ import { confirmarSaida, haRascunho } from "./rascunho";
 // Abas da obra (NAVEGACAO.md › Obra). As notas moram na pagina de cada medicao.
 export type AbaObra = "medicoes" | "prazos" | "reajuste" | "documentos" | "contrato";
 // Abas da Carteira (NAVEGACAO.md › Carteira). O Resumo e' a padrao e nao entra na URL.
-export type AbaCarteira = "resumo" | "qdop" | "producao";
+export type AbaCarteira = "resumo" | "qdop" | "producao" | "custo";
 // Abas da Administracao (NAVEGACAO.md › Administracao). A Saude e' a padrao e nao entra na URL.
 export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria";
 // Abas de Medicoes (09/10/2026, prototipo aprovado): o Resumo e' a padrao e nao entra na URL; as outras sao as
@@ -57,7 +57,7 @@ type EstadoHistorico = { origem?: Origem };
 
 const ABAS: readonly AbaObra[] = ["medicoes", "prazos", "reajuste", "documentos", "contrato"];
 const ABAS_DOCUMENTOS: readonly AbaDocumentos[] = ["certidoes", "regularidade", "garantia"];
-const ABAS_CARTEIRA: readonly AbaCarteira[] = ["resumo", "qdop", "producao"];
+const ABAS_CARTEIRA: readonly AbaCarteira[] = ["resumo", "qdop", "producao", "custo"];
 const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria"];
 const ABAS_MEDICOES: readonly AbaMedicoes[] = ["resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota", "enviar-nota",
   "aguardando-pagamento"];

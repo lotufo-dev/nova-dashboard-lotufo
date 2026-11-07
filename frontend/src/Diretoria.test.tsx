@@ -245,4 +245,11 @@ describe("Carteira", () => {
     const grafico = screen.getByRole("img", { name: /tabela recolhida logo abaixo/ });
     expect(grafico.getAttribute("aria-label")).toContain("12 meses");
   });
+
+  it("#491: a aba Custo aparece entre as da Carteira e abre sem esperar o painel", async () => {
+    api.mockImplementation((url: string) => url === "/api/diretoria/custo" ? Promise.resolve([]) : new Promise(() => {}));
+    render(<Diretoria ir={() => {}} aba="custo" />);
+    expect(screen.getByRole("link", { name: "Custo" }).getAttribute("href")).toBe("/carteira/custo");
+    expect(await screen.findByText("Nenhuma obra com cadastro de custo.")).toBeTruthy();
+  });
 });

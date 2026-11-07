@@ -1865,6 +1865,9 @@ td.col-num .campo__nota { font-family: var(--fonte); }
 .cart-topo { display: flex; align-items: flex-end; gap: 12px 16px; flex-wrap: wrap; border-bottom: 1px solid var(--linha); }
 .cart-topo .abas { border-bottom: 0; flex: 1 1 auto; min-width: 0; }
 .cart-topo .btn { margin-bottom: 8px; }
+/* #491: aba Custo da Carteira -- as medicoes ao lado da competencia, o grupo recuado sob ela */
+.custo__medicao { font-weight: 400; color: var(--texto-2); }
+.custo__grupo { padding-left: 24px; font-weight: 400; }
 .cart-numeros { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
 .cart-numero { position: relative; padding: 18px 20px 16px 28px; display: grid; gap: 4px; }
 .cart-numero::before { content: ""; position: absolute; left: 14px; top: 18px; bottom: 18px; width: 4px; border-radius: var(--raio-pilula); background: var(--marca); }
