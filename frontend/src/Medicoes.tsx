@@ -24,6 +24,8 @@ type Protocolo = {
 type Nota = {
   nota_id: number; coligada: number; numero: string; serie: string | null; emissao: string | null;
   valor_centavos: number; recebido_centavos: number; recebido_em: string | null;
+  // #514: os titulos do RM (liquidos) da nota, o que falta deles e se a nota e' da coligada da Lotufo
+  devido_centavos?: number; falta_centavos?: number; da_lotufo?: boolean;
   origem: string; regra: string | null;
   origem_nota?: string; confirmacao?: string; documento_id?: number | null; valor_pdf_centavos?: number | null;
   conferencia?: { campo: string; espelho: number | string | null; nota: number | string | null; grau: string }[];

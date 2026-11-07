@@ -1061,11 +1061,12 @@ describe("Página da obra em medição: passos 3 a 6 (issue #514)", () => {
 
   it("passo Pagamento: a cota da Lotufo no consórcio, sem botão para a engenharia", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, notas: [{ nota_id: 1, coligada: 1, numero: "2351", serie: null, emissao: null,
-        valor_centavos: 400001, recebido_centavos: 0, recebido_em: null, origem: "rm", regra: null }] }],
+        valor_centavos: 400001, recebido_centavos: 0, devido_centavos: 368001, falta_centavos: 368001, da_lotufo: true,
+        recebido_em: null, origem: "rm", regra: null }] }],
       "/api/contratos/1/cabecalho": { obra: "Integra", orgao: "SINFRA", instrumento: "CT 1", percentual_lotufo_bp: 4000 } });
     pagina("engenharia");
     expect(await screen.findByText("A receber · cota da Lotufo")).toBeTruthy();
-    expect(screen.getByLabelText("A receber: R$ 4.000,01")).toBeTruthy();
+    expect(screen.getByLabelText("A receber: R$ 3.680,01")).toBeTruthy();       // o titulo (liquido), nao o bruto
     expect(screen.queryByRole("button", { name: "Registrar recebimento" })).toBeNull();
   });
 });

@@ -247,6 +247,27 @@ def test_recebida_pelo_titulo_liquido_mesmo_com_retencao(conn, cid, tmp_path):
     assert (m["notas"][0]["recebido_centavos"], m["notas"][0]["devido_centavos"]) == (924_00, 924_00)
 
 
+def test_nota_da_medicao_traz_a_falta_pelo_titulo_liquido_e_se_e_da_lotufo(conn, cid, tmp_path):
+    """Issue #514 (passo Pagamento): NF de R$ 1.000,01 com retencao, titulo de R$ 924,01 baixado inteiro: falta zero
+    (nunca os R$ 76,00 da retencao); a nota da coligada da Lotufo vem marcada."""
+    mid = _medicao(conn, cid, 12, 1000_01)
+    nfs = [_nf(100, 1000.01, campo="IC 082/2025 - 12")]
+    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")])
+    sincronizacao_rm.sincronizar(conn, cli)
+    n = medicoes.detalhe(conn, mid)["notas"][0]
+    assert (n["valor_centavos"], n["devido_centavos"], n["falta_centavos"], n["da_lotufo"]) == (1000_01, 924_01, 0, True)
+
+
+def test_nota_da_medicao_falta_conta_o_titulo_aberto_inteiro_e_o_parcial(conn, cid, tmp_path):
+    """Titulo aberto entra pelo original inteiro; o parcial, pelo que falta dele (titulo a titulo)."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12")]
+    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 500.0, 0.0, 0), _baixa(2, 100, 424.0, 100.01, 1, "2026-09-01T00:00:00-04:00")])
+    sincronizacao_rm.sincronizar(conn, cli)
+    n = medicoes.detalhe(conn, mid)["notas"][0]
+    assert (n["devido_centavos"], n["recebido_centavos"], n["falta_centavos"]) == (924_00, 100_01, 500_00 + 323_99)
+
+
 def test_titulo_aberto_nao_recebe(conn, cid, tmp_path):
     """Titulo a receber ainda aberto (status 0, nada baixado) segura a medicao em protocolada."""
     mid = _medicao(conn, cid, 12, 1000_00)
@@ -862,6 +883,8 @@ def test_nota_lotufo_em_obra_de_consorcio_casa_pela_saida_e_nao_segura_recebimen
     assert regras == {"saida_espelho", "valor_exato"}
     m = medicoes.detalhe(conn, mid)
     assert m["estado"] == "recebida"          # a nota da Lotufo (sem titulo quitado) nao segurou
+    # issue #514: so' a NFS-e da Lotufo e' da cota dela; a fatura do consorcio (coligada 90) nao
+    assert {n["numero"]: n["da_lotufo"] for n in m["notas"]} == {"000003102": True, "000000021": False}
 
 
 # --- desalocacao manual (issue #71) ---

@@ -282,7 +282,13 @@ def desalocar(conn, usuario_id, medicao_id: int, alocacao_id: int, motivo: str) 
 
 
 def notas_da_medicao(conn, medicao_id: int) -> list[dict]:
-    """NFs alocadas (vigentes) com o recebido de cada uma -- para o detalhe da medicao."""
+    """NFs alocadas (vigentes) com o recebido de cada uma -- para o detalhe da medicao.
+
+    Issue #514 (passo Pagamento): `falta_centavos` e' o que falta receber, titulo a titulo, contra os TITULOS
+    (liquidos), nunca contra o bruto da NF; `da_lotufo` diz se a nota e' da coligada da Lotufo (em consorcio a
+    medicao tambem tem a fatura do consorcio, valor cheio, de outra coligada: ela nao entra na cota)."""
+    from app import notas as _notas   # import local: notas importa medicoes, que importa este modulo
+    lotufo = _notas._coligada_lotufo(conn)
     out = []
     for r in conn.execute("""
             SELECT a.id AS alocacao_id, a.valor_alocado_centavos, a.origem, a.confianca, a.regra,
@@ -294,6 +300,8 @@ def notas_da_medicao(conn, medicao_id: int) -> list[dict]:
         d = dict(r)
         d["conferencia"] = json.loads(d["conferencia"] or "[]")
         d["recebido_centavos"], d["devido_centavos"], d["recebido_em"] = _recebido_da_nota(conn, r["nota_id"])
+        d["falta_centavos"] = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True) or 0
+        d["da_lotufo"] = lotufo is not None and r["coligada"] == lotufo
         out.append(d)
     return out
 

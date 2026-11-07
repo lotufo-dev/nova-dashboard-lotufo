@@ -29,25 +29,38 @@ export function diasEntre(de: string, ate: string): number | null {
   return Math.max(0, Math.round(ms / 86400000));
 }
 
-/** A receber: o que falta das notas da Lotufo (no consorcio, so' a cota dela tem nota da Lotufo); sem nota ainda,
- *  o valor cheio fora do consorcio e "—" no consorcio (a cota so' se sabe pela nota). */
+type NotaDaMedicao = NonNullable<Medicao["notas"]>[number];
+
+/** As notas da Lotufo (a cota dela no consorcio): a fatura do consorcio, de outra coligada, fica fora. */
+export const daLotufo = (n: NotaDaMedicao) => n.da_lotufo !== false;
+
+/** O que falta receber de uma nota, contra os TITULOS do RM (liquidos, sem as retencoes), nunca contra o bruto;
+ *  null quando a nota ainda nao tem titulo (devido zero: nao ha' o que comparar). */
+export function faltaDaNota(n: NotaDaMedicao): number | null {
+  const devido = n.devido_centavos ?? 0;
+  if (devido <= 0) return null;
+  return n.falta_centavos ?? Math.max(0, devido - n.recebido_centavos);
+}
+
+/** A receber (#514): o que falta dos titulos das notas da Lotufo. "—" (null) quando ainda nao da' para saber: medicao
+ *  sem nota da Lotufo, nota sem titulo, ou, fora do consorcio, notas que nao fecham com o valor da medicao (uma das
+ *  notas ainda nao casou). `total` e' o devido (os titulos), base da barra do recebido. */
 export function aReceber(grupo: Medicao[], consorcio: boolean): { falta: number | null; recebido: number; total: number | null } {
-  // medicao a medicao: a que ja' tem nota conta pelas notas; a que ainda nao tem, pelo valor cheio fora do consorcio
-  // (no consorcio a cota dela nao se sabe sem a nota, e o total fica "—")
-  let total = 0, recebido = 0;
+  const nulo = { falta: null, recebido: 0, total: null };
+  if (grupo.length === 0) return nulo;
+  let falta = 0, recebido = 0, total = 0;
   for (const x of grupo) {
-    const notas = x.notas ?? [];
-    if (notas.length > 0) {
-      total += notas.reduce((t, n) => t + n.valor_centavos, 0);
-      recebido += notas.reduce((t, n) => t + n.recebido_centavos, 0);
-    } else if (consorcio || x.valor_protocolado_centavos === null) {
-      return { falta: null, recebido, total: null };
-    } else {
-      total += x.valor_protocolado_centavos;
+    const notas = (x.notas ?? []).filter(daLotufo);
+    if (notas.length === 0) return nulo;
+    const valor = x.valor_atestado_centavos ?? x.valor_protocolado_centavos;
+    if (!consorcio && (valor === null || notas.reduce((t, n) => t + n.valor_centavos, 0) !== valor)) return nulo;
+    for (const n of notas) {
+      const f = faltaDaNota(n);
+      if (f === null) return nulo;
+      falta += f; recebido += n.recebido_centavos; total += n.devido_centavos ?? 0;
     }
   }
-  if (grupo.length === 0) return { falta: null, recebido: 0, total: null };
-  return { falta: Math.max(0, total - recebido), recebido, total };
+  return { falta, recebido, total };
 }
 
 export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui, percentualBp, aoReceber }: {
@@ -120,12 +133,15 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
                   <tr key={`d${d.id}`}><td>NF {d.numero_nf}{d.municipio ? ` · ${d.municipio}` : ""}</td><td className="col-num">—</td><td>—</td></tr>
                 ))}
                 {notas.map(({ n, m }) => {
-                  const paga = n.recebido_centavos >= n.valor_centavos && n.valor_centavos > 0;
+                  // o valor e' o nominal da NF (bruto); a situacao no financeiro e' a dos titulos (liquidos)
+                  const falta = faltaDaNota(n);
                   return (
                     <tr key={n.nota_id}>
-                      <td>NF {Number(n.numero) || n.numero}{grupo.length > 1 ? ` · ${m.tipo === "reajuste" ? "reajuste" : "medição"}` : ""}</td>
+                      <td>NF {Number(n.numero) || n.numero}{grupo.length > 1 ? ` · ${m.tipo === "reajuste" ? "reajuste" : "medição"}` : ""}
+                        {!daLotufo(n) ? " · fatura do consórcio" : ""}</td>
                       <td className="col-num num">{brl(n.valor_centavos)}</td>
-                      <td>{paga ? <Selo classe="selo--ok">paga{n.recebido_em ? ` em ${fmtDataPura(n.recebido_em.slice(0, 10))}` : ""}</Selo>
+                      <td>{falta === null ? "—"
+                        : falta === 0 ? <Selo classe="selo--ok">paga{n.recebido_em ? ` em ${fmtDataPura(n.recebido_em.slice(0, 10))}` : ""}</Selo>
                         : n.recebido_centavos > 0 ? <Selo classe="selo--atencao">paga em parte</Selo>
                         : <Selo classe="selo--atencao">em aberto</Selo>}</td>
                     </tr>
