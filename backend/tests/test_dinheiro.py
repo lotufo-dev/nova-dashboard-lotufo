@@ -1,6 +1,6 @@
 import pytest
 
-from app.dinheiro import TETO_CENTAVOS, format_brl, parse_brl, ratear
+from app.dinheiro import TETO_CENTAVOS, format_brl, parse_brl, ratear, ratear_proporcional
 
 
 def test_parse_brl():
@@ -91,3 +91,15 @@ def test_parse_brl_recusa_digito_nao_ascii():
     r"""A-14 (10/10/2026): `\d` do Python casa digito arabe-indico; o formato pt-BR e' so' 0-9."""
     with pytest.raises(ValueError):
         parse_brl("١٢٣,٤٥")
+
+
+def test_ratear_proporcional_maiores_restos_e_sinal():
+    """Issue #491: custo sem tarefa rateado na proporcao do apontado; a soma fecha no total, centavo a centavo."""
+    assert ratear_proporcional(1001, [100, 200]) == [334, 667]
+    assert ratear_proporcional(1, [1, 1, 1]) == [1, 0, 0]          # empate: o primeiro
+    assert ratear_proporcional(-1001, [100, 200]) == [-334, -667]   # estorno: o mesmo rateio com sinal
+    assert ratear_proporcional(0, [5, 7]) == [0, 0]
+    assert ratear_proporcional(10, [0, 3]) == [0, 10]
+    for ruim in ([], [0, 0], [-1, 2]):
+        with pytest.raises(ValueError):
+            ratear_proporcional(10, ruim)

@@ -40,3 +40,31 @@ def test_a_receber_so_leitura_e_401_sem_sessao(client):
     r = client.get("/api/a-receber")
     assert r.status_code == 200 and set(r.json()) == {"hoje", "total_a_receber_liberado", "total", "recebido_ano_centavos", "antes_do_protocolo", "mes", "meses", "por_obra",
                                                       "por_orgao", "itens"}
+
+
+def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatch):
+    """Issue #491: a aba Custo da Carteira; so' obra com cadastro de custo, so' quem tem `ver_paineis`."""
+    import json
+    from app import contratos, permissoes
+    c = db.get_conn()
+    auth.criar_usuario(c, "Dir", "dir3@l.com", "senha-forte-123", "diretoria")
+    com = contratos.criar(c, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 1", "objeto": "Obra Alfa",
+                                 "valor_original_centavos": 1_000_00, "centro_custo_rm": "2.001.012"})
+    sem = contratos.criar(c, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 2", "objeto": "Obra Beta",
+                                 "valor_original_centavos": 1_000_00})
+    c.execute("UPDATE contratos SET projeto_rm='PRJ', custo_nao_e_custo='[]', custo_sem_tarefa='proporcional' WHERE id=?",
+              (com,))
+    c.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha) VALUES (?,1,'G',?,?)",
+              (com, json.dumps(["001"]), json.dumps(["1."])))
+    c.commit(); c.close()
+    assert client.get(f"/api/diretoria/custo/{com}").status_code == 401
+    _login(client, "dir3@l.com")
+    assert client.get("/api/diretoria/custo").json() == [{"contrato_id": com, "obra": "IC 1"}]
+    r = client.get(f"/api/diretoria/custo/{com}")
+    assert r.status_code == 200 and set(r.json()) >= {"obra", "grupos", "linhas", "acumulado", "rm"}
+    r = client.get(f"/api/diretoria/custo/{sem}")
+    assert r.status_code == 404 and r.json()["detail"] == "Esta obra não tem cadastro de custo."
+    assert client.get("/api/diretoria/custo/9999").status_code == 404
+    monkeypatch.setitem(permissoes.PERFIS, "diretoria", frozenset())
+    assert client.get(f"/api/diretoria/custo/{com}").status_code == 403
+    assert client.get("/api/diretoria/custo").status_code == 403
