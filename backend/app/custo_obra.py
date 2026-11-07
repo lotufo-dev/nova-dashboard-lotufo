@@ -15,17 +15,17 @@ Por competencia (o mes de emissao do lancamento igual a' competencia da medicao)
   (`medicao_grupos`, issue #490). Medicao sem leitura entra com o total numa linha "medido por grupo nao lido"; a
   diferenca entre o medido e a soma da planilha lida (glosa no atestado, centavos) numa linha "ajuste ao medido".
 - previsto: o do cronograma vigente na competencia (total, sem grupo).
-O acumulado soma as linhas: material comprado num mes pode ser medido no seguinte.
+O acumulado soma as linhas (o previsto, todos os meses do cronograma ate' a ultima linha): material comprado num mes pode ser medido no seguinte.
 """
 import datetime
 import json
 
 from app import contratos, cronograma, dinheiro, medicao_grupos, tempo
 from app.cadastro_arquivos import _dentro_do_prefixo
+from app.diretoria import FORA as ESTADOS_FORA   # fora do medido: o mesmo recorte da Carteira
 
 DESATUALIZADO_HORAS = 24
-# fora do medido: o que nao foi medido de fato (como na Carteira, `diretoria.FORA`)
-ESTADOS_FORA = ("cancelada", "desistida", "prevista")
+REGRA_PROPORCIONAL = "proporcional"
 NAO_LIDO = "Medido por grupo não lido"
 AJUSTE = "Ajuste ao medido"
 SEM_GRUPO = "Sem grupo"
@@ -35,6 +35,10 @@ MENSAGEM_SEM_CADASTRO = "Esta obra não tem cadastro de custo."
 
 class SemCadastro(Exception):
     """Obra inexistente, sem cadastro de custo ou de consorcio (fora do piloto)."""
+
+
+class RegraDesconhecida(ValueError):
+    """Regra `sem_tarefa` do cadastro que esta tela nao sabe aplicar (hoje so' existe `proporcional`)."""
 
 
 _OBRA = """FROM contratos c JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
@@ -138,6 +142,9 @@ def custo_da_obra(conn, contrato_id: int) -> dict:
     c = conn.execute(f"SELECT c.*, e.coligada_rm {_OBRA} AND c.id=?", (contrato_id,)).fetchone()
     if c is None:
         raise SemCadastro(MENSAGEM_SEM_CADASTRO)
+    regra = c["custo_sem_tarefa"] or REGRA_PROPORCIONAL
+    if regra != REGRA_PROPORCIONAL:
+        raise RegraDesconhecida(f"Regra do custo sem tarefa desconhecida no cadastro: {regra}")
     grupos = contratos.custo_grupos(conn, contrato_id)
     nomes = [g["nome"] for g in grupos]
     apontado, fora, rateado = _custo_por_mes(conn, c, grupos)
@@ -176,6 +183,8 @@ def custo_da_obra(conn, contrato_id: int) -> dict:
                        "previsto_centavos": previsto.get(mes), "grupos": itens})
     acumulado = {k: sum(x[k] for x in linhas) for k in ("medido_centavos", "apontado_centavos", "rateado_centavos",
                                                          "custo_centavos", "diferenca_centavos")}
-    acumulado["previsto_centavos"] = sum(x["previsto_centavos"] or 0 for x in linhas)
+    # o previsto acumulado ate' a ultima competencia da tabela, com os meses do cronograma que nao tem linha
+    ate = linhas[-1]["competencia"] if linhas else None
+    acumulado["previsto_centavos"] = sum(v for comp, v in previsto.items() if ate is not None and comp <= ate)
     return {"contrato_id": contrato_id, "obra": c["nome_curto"] or c["numero_instrumento"], "grupos": nomes,
             "linhas": linhas, "acumulado": acumulado, "rm": _sincronizacao(conn)}

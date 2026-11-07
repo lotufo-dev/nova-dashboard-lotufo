@@ -571,13 +571,16 @@ function Producao({ p, ir }: { p: Painel; ir: Ir }) {
 export default function Diretoria({ ir, aba = "resumo" }: { ir: Ir; aba?: AbaCarteira }) {
   const [p, setP] = useState<Painel | null>(null);
   const [erro, setErro] = useState("");
+  // #491: a aba Custo tem a propria busca; o painel so' e' pedido quando outra aba o mostra (uma vez)
+  const precisaPainel = aba !== "custo";
   useEffect(() => {
+    if (!precisaPainel || p !== null) return;
     let vivo = true;
     api<Painel>("/api/diretoria")
       .then(d => { if (vivo) setP(d); })
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
     return () => { vivo = false; };
-  }, []);
+  }, [precisaPainel, p]);
 
   // as abas sao links (NAVEGACAO.md › Subnavegacao): a aba fica na URL, e trocar de aba nao busca o painel de novo.
   // O "Exportar QDOP" fica ao lado delas, visivel nas tres (e tambem enquanto carrega).

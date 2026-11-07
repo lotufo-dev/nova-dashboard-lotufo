@@ -94,7 +94,8 @@ export default function CustoObra() {
   const [obras, setObras] = useState<ObraCusto[] | null>(null);
   const [obra, setObra] = useState<number | null>(null);
   const [custo, setCusto] = useState<Custo | null>(null);
-  const [erro, setErro] = useState("");
+  const [erro, setErro] = useState("");            // a lista de obras nao veio: sem seletor
+  const [erroObra, setErroObra] = useState<{ obra: number; texto: string } | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -109,7 +110,7 @@ export default function CustoObra() {
     let vivo = true;
     api<Custo>(`/api/diretoria/custo/${obra}`)
       .then(d => { if (vivo) setCusto(d); })
-      .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
+      .catch(e => { if (vivo) setErroObra({ obra, texto: mensagemDeErro(e) }); });
     return () => { vivo = false; };
   }, [obra]);
 
@@ -139,7 +140,9 @@ export default function CustoObra() {
             : "RM ainda não sincronizado"}
         </CaixaAviso>
       )}
-      {atual === null ? <div className="vazio"><p>Carregando…</p></div> : <Tabela c={atual} />}
+      {erroObra !== null && erroObra.obra === obra
+        ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroObra.texto}</p>
+        : atual === null ? <div className="vazio"><p>Carregando…</p></div> : <Tabela c={atual} />}
     </section>
   );
 }

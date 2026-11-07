@@ -85,4 +85,17 @@ describe("CustoObra (#491)", () => {
     expect(await screen.findByText("Nenhuma obra com cadastro de custo.")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
   });
+
+  it("erro de uma obra fica nela: o seletor continua e outra obra abre", async () => {
+    api.mockImplementation((url: string) => {
+      if (url === "/api/diretoria/custo") return Promise.resolve([{ contrato_id: 7, obra: "Obra Alfa" }, { contrato_id: 9, obra: "Obra Beta" }]);
+      if (url === "/api/diretoria/custo/7") return Promise.reject(new Error("falhou"));
+      return Promise.resolve({ ...CUSTO, contrato_id: 9 });
+    });
+    render(<CustoObra />);
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Obra"), { target: { value: "9" } });
+    expect(await screen.findByRole("table")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

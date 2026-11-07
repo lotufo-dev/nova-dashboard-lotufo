@@ -180,7 +180,8 @@ def test_atestado_diferente_da_planilha_vira_ajuste_e_a_linha_fecha(conn):
 
 def test_previsto_do_cronograma_e_acumulado_bate_com_a_soma_das_linhas(conn):
     cid = _obra(conn)
-    cronograma.nova_versao(conn, 1, cid, [("2026-03", 1_000_00), ("2026-04", 2_000_01)], "manual")
+    cronograma.nova_versao(conn, 1, cid, [("2026-02", 50_00), ("2026-03", 1_000_00), ("2026-04", 2_000_01),
+                                          ("2026-05", 3_00), ("2026-07", 9_000_00)], "manual")
     m1 = _medicao(conn, cid, 1, "2026-03", 333_33)
     _leitura(conn, cid, m1, {"Terraplenagem": 333_33})
     _medicao(conn, cid, 2, "2026-04", 111_11)
@@ -195,7 +196,8 @@ def test_previsto_do_cronograma_e_acumulado_bate_com_a_soma_das_linhas(conn):
     a = r["acumulado"]
     for k in ("medido_centavos", "custo_centavos", "diferenca_centavos"):
         assert a[k] == sum(x[k] for x in r["linhas"]), k
-    assert a["previsto_centavos"] == 3_000_01
+    # previsto acumulado ate' a ultima linha (06/2026), com os meses do cronograma sem linha (02 e 05); 07 fica fora
+    assert a["previsto_centavos"] == 50_00 + 1_000_00 + 2_000_01 + 3_00
     assert a["custo_centavos"] == 182_02 and a["medido_centavos"] == 444_44
     assert a["diferenca_centavos"] == 444_44 - 182_02
     for x in r["linhas"]:
@@ -219,3 +221,10 @@ def test_sincronizacao_do_rm_desatualizada(conn):
                  "VALUES ('manual','success', datetime('now','-2 hours'), 3)")
     conn.commit()
     assert custo_obra.custo_da_obra(conn, cid)["rm"]["desatualizado"] is False
+
+
+def test_regra_sem_tarefa_desconhecida_nao_vira_proporcional_calado(conn):
+    cid = _obra(conn)
+    conn.execute("UPDATE contratos SET custo_sem_tarefa='fixo' WHERE id=?", (cid,)); conn.commit()
+    with pytest.raises(custo_obra.RegraDesconhecida, match="fixo"):
+        custo_obra.custo_da_obra(conn, cid)

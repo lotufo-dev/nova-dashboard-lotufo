@@ -251,5 +251,6 @@ describe("Carteira", () => {
     render(<Diretoria ir={() => {}} aba="custo" />);
     expect(screen.getByRole("link", { name: "Custo" }).getAttribute("href")).toBe("/carteira/custo");
     expect(await screen.findByText("Nenhuma obra com cadastro de custo.")).toBeTruthy();
+    expect(api).not.toHaveBeenCalledWith("/api/diretoria");
   });
 });
