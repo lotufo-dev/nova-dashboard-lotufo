@@ -93,9 +93,9 @@ describe("Etapa 4: o envio ao órgão", () => {
   it("quem só consulta vê a tabela, sem botão de enviar nem de registrar fora", async () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio()], { podeEditar: false });
-    expect(screen.getByText("NF 2322")).toBeTruthy();
+    expect(within(screen.getAllByRole("row")[1]).getByText("NF 2322")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Enviar a nota" })).toBeNull();
-    expect(screen.queryByText("Registrar envio feito fora do sistema")).toBeNull();
+    expect(screen.queryByText("Já enviei por fora")).toBeNull();
   });
 
   it("envio esperando a outra metade: a linha tem a saída de emergência em vez de “Enviar a nota”", async () => {
@@ -107,7 +107,7 @@ describe("Etapa 4: o envio ao órgão", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar a medição sem o reajuste…" }));
     expect(p.aoSemAOutra).toHaveBeenCalled();
     // esperando a outra metade, o registro por fora também espera
-    expect(screen.queryByText("Registrar envio feito fora do sistema")).toBeNull();
+    expect(screen.queryByText("Já enviei por fora")).toBeNull();
   });
 
   it("as certidões só mostram a data da que vence", async () => {
@@ -139,7 +139,7 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
     api.mockResolvedValue({ itens: [] });
     apiForm.mockResolvedValue({ ok: true });
     const p = montar(envios);
-    fireEvent.click(screen.getByText("Registrar envio feito fora do sistema"));
+    fireEvent.click(screen.getByText("Já enviei por fora"));
     return p;
   }
   const dois = () => [envio({ chave: "a" }), envio({ chave: "b", medicao_ids: [632], descricao: "Reajuste da 7ª medição" })];
@@ -383,6 +383,60 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
   it("envio bloqueado não oferece o registro", async () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio({ situacao: "bloqueado", aviso: "Federal vencida" })]);
-    expect(screen.queryByText("Registrar envio feito fora do sistema")).toBeNull();
+    expect(screen.queryByText("Já enviei por fora")).toBeNull();
+  });
+});
+
+// #514: passo Envio da nota da pagina da obra
+describe("Envio da nota: faixa e cartões (#514)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
+
+  it("certidão vencida: faixa vermelha com o motivo e “Enviar a nota” desligado", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ situacao: "bloqueado", aviso: "Guaxe: FGTS vencida em 01/11",
+      itens: [{ chave: "notas", rotulo: "Nota fiscal (1)", estado: "ok" },
+        { chave: "certidoes:lotufo", rotulo: "Certidões Lotufo (5)", detalhe: "todas válidas", estado: "ok", entidade_id: 1 },
+        { chave: "certidoes:guaxe", rotulo: "Certidões Guaxe (5)", detalhe: "FGTS vencida em 01/11", estado: "vencida", entidade_id: 2 }] })]);
+    const faixa = document.querySelector(".envio-faixa")!;
+    expect(faixa.className).toContain("envio-faixa--falta");
+    expect(faixa.textContent).toBe("Falta 1 item para enviar: Guaxe: FGTS vencida em 01/11");
+    expect((screen.getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(true);
+    const certidoes = screen.getByRole("region", { name: "Certidões por empresa" });
+    expect(within(certidoes).getByText("1 de 2")).toBeTruthy();
+    expect(within(certidoes).getByText("FGTS vencida em 01/11")).toBeTruthy();
+  });
+
+  it("tudo pronto: faixa verde e os cartões Notas fiscais e Documentos completos", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ notas: [{ numero: "2351", natureza: "execucao", municipio: "Cuiabá", valor_centavos: 418330386 }],
+      itens: [{ chave: "notas", rotulo: "Nota fiscal (1)", estado: "ok" },
+        { chave: "frc:631", rotulo: "FRC assinada", estado: "ok" },
+        { chave: "regularidade:lotufo", rotulo: "Regularidade mensal", detalhe: "09/2026", estado: "ok", entidade_id: 1 }] })]);
+    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Tudo pronto para enviar");
+    const notas = screen.getByRole("region", { name: "Notas fiscais" });
+    expect(within(notas).getByText("2 de 2")).toBeTruthy();
+    expect(within(notas).getByText("NF 2351 · Cuiabá")).toBeTruthy();
+    expect(within(notas).getByText("R$ 4.183.303,86")).toBeTruthy();
+    expect(within(notas).getByText("FRC assinada")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Documentos" })).getByText("Regularidade mensal de 09/2026")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("documento faltando: faixa vermelha diz o que falta, mas o botão segue ligado (só o bloqueio desliga)", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ situacao: "pendente", aviso: "Falta a regularidade",
+      itens: [{ chave: "regularidade:lotufo", rotulo: "Regularidade mensal", detalhe: "O DP ainda não enviou o arquivo de 10/2026", estado: "falta" }] })]);
+    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Falta 1 item para enviar: a regularidade");
+    expect(within(screen.getByRole("region", { name: "Documentos" })).getByText("0 de 1")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("MTPAR: medição e reajuste em dois envios lado a lado; a faixa diz de qual envio é a falta", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ chave: "a", familia: "mtpar", descricao: "25ª medição" }),
+      envio({ chave: "b", familia: "mtpar", descricao: "Reajuste da 25ª medição", medicao_ids: [632], situacao: "bloqueado",
+        aviso: "Trabalhista vencida em 02/11", notas: [{ numero: "2361", natureza: "reajuste", valor_centavos: 1 }] })]);
+    expect(screen.getAllByRole("row").slice(1)).toHaveLength(2);
+    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Falta 1 item para enviar: Reajuste da 25ª medição: Trabalhista vencida em 02/11");
   });
 });

@@ -8,7 +8,8 @@ const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm }));
 // Cada cartao tem fluxo proprio; aqui so' importa que, ao avisar a pagina, ela releia o que os outros mostram.
 vi.mock("./Espelho", () => ({
-  default: ({ parte, abrirForm }: { parte?: string; abrirForm?: boolean }) => <div data-espelho={parte} data-abre-form={String(!!abrirForm)} />,
+  default: ({ parte, abrirForm, referencias }: { parte?: string; abrirForm?: boolean; referencias?: Record<number, unknown> }) =>
+    <div data-espelho={parte} data-abre-form={String(!!abrirForm)} data-referencias={referencias ? JSON.stringify(referencias) : undefined} />,
 }));
 // issue #289: a planilha/carta tem teste proprio (PlanilhaCarta.test.tsx); aqui so' importa onde ela aparece
 vi.mock("./PlanilhaCarta", async () => ({
@@ -81,7 +82,7 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }] });
     const { container } = pagina();
     await screen.findByRole("heading", { name: "Envio da nota", level: 2 });
-    expect(container.querySelectorAll(".med-etapa")).toHaveLength(1);
+    expect(container.querySelectorAll(".med-passo")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Voltar ao passo atual" })).toBeNull();
     // 100% da Lotufo: o cabecalho nao fala de cota nem de "valores cheios"
     expect(container.querySelector(".med-meta")!.textContent).not.toMatch(/cota|valores cheios/);
@@ -89,7 +90,7 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(trilho.querySelector("[aria-current='step']")!.textContent).toContain("Envio da nota");
     fireEvent.click(within(trilho).getByRole("button", { name: /Passo 2: Notas/ }));
     expect(screen.getByRole("heading", { name: "Notas", level: 2 })).toBeTruthy();
-    expect(container.querySelectorAll(".med-etapa")).toHaveLength(1);
+    expect(container.querySelectorAll(".med-passo")).toHaveLength(1);
     expect(screen.getByText(/Você está vendo o passo 2, já feito/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Voltar ao passo atual" }));
     expect(screen.getByRole("heading", { name: "Envio da nota", level: 2 })).toBeTruthy();
@@ -434,7 +435,7 @@ describe("Página da medição: registrar fora com falha parcial (MTPAR)", () =>
     apiForm.mockImplementationOnce(async () => { protocolada = true; return { ok: true }; })
       .mockRejectedValueOnce(new ApiErro(422, "Medição 6 não está com a nota emitida"));
     pagina();
-    fireEvent.click(await screen.findByText("Registrar envio feito fora do sistema"));
+    fireEvent.click(await screen.findByText("Já enviei por fora"));
     fireEvent.click(screen.getAllByRole("checkbox")[1]);
     fireEvent.change(screen.getByLabelText("Como e para quem a nota foi enviada"), { target: { value: "Pelo Outlook" } });
     fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
@@ -479,7 +480,7 @@ describe("Página da medição: medição e reajuste", () => {
     expect(screen.getByRole("region", { name: "Reajuste da 23ª Medição" })).toBeTruthy();
     expect(container.querySelector("[data-medicao='6']")).toBeTruthy();       // a nota do reajuste vai para o reajuste
     // a espera ja' esta' no trilho e no proximo passo: a etapa 3 nao explica a regra do orgao nem resume o par
-    expect(container.querySelector(".med-etapa__cabeca")!.textContent).not.toContain("faltam 2 notas");
+    expect(container.textContent).not.toContain("faltam 2 notas");
     expect(container.textContent).not.toContain("vão no mesmo e-mail");
   });
 
@@ -1030,5 +1031,41 @@ describe("Página da obra em medição: passo 2, análise do órgão (issue #508
     await waitFor(() => expect(leituras).toBeGreaterThanOrEqual(2));
     expect(screen.queryByRole("button", { name: /^Pediu revisão/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeNull();
+  });
+});
+
+describe("Página da obra em medição: passos 3 a 6 (issue #514)", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/obras/1/medicoes/5"));
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("passo Espelhos: a tabela num cartão e “Enviar ao faturamento” no outro; o total se confere com o aprovado (senão o pedido)", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_gerado", valor_atestado_centavos: 999999 },
+      { ...MEDICAO, id: 6, tipo: "reajuste", estado: "espelho_gerado", valor_protocolado_centavos: 50001 }] });
+    const { container } = pagina();
+    await screen.findByRole("region", { name: "Enviar ao faturamento" });
+    const espelhos = container.querySelector("#espelhos-titulo")!.closest("section")!;
+    const refs = JSON.parse(espelhos.querySelector("[data-espelho='espelho']")!.getAttribute("data-referencias")!);
+    expect(refs).toEqual({ 5: { valor: 999999, fonte: "aprovado" }, 6: { valor: 50001, fonte: "pedido" } });
+    const fat = screen.getByRole("region", { name: "Enviar ao faturamento" });
+    expect(fat.querySelector("[data-espelho='faturamento']")).not.toBeNull();
+    expect(container.querySelector(".med-etapa")).toBeNull();          // sem o cartao "Passo N" de antes
+  });
+
+  it("passo Notas: a nota de cada espelho num cartão e a fatura do consórcio ao lado", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado" }] });
+    const { container } = pagina();
+    const notas = await screen.findByRole("region", { name: "Notas fiscais" });
+    expect(notas.querySelector("[data-medicao='5']")).not.toBeNull();
+    expect(container.querySelector("[data-frc='5']")).not.toBeNull();
+  });
+
+  it("passo Pagamento: a cota da Lotufo no consórcio, sem botão para a engenharia", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, notas: [{ nota_id: 1, coligada: 1, numero: "2351", serie: null, emissao: null,
+        valor_centavos: 400001, recebido_centavos: 0, recebido_em: null, origem: "rm", regra: null }] }],
+      "/api/contratos/1/cabecalho": { obra: "Integra", orgao: "SINFRA", instrumento: "CT 1", percentual_lotufo_bp: 4000 } });
+    pagina("engenharia");
+    expect(await screen.findByText("A receber · cota da Lotufo")).toBeTruthy();
+    expect(screen.getByLabelText("A receber: R$ 4.000,01")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Registrar recebimento" })).toBeNull();
   });
 });

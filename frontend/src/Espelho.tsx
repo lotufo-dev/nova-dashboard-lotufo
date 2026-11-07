@@ -73,7 +73,10 @@ type Passo = { tipo: "lista" } | { tipo: "form" } | { tipo: "previa"; previa: Pr
 // medicao que nasceu dele (na obra do fluxo antigo, mostra `semRegra`, o formulario a mao); com `medicao`,
 // a secao Espelho da pagina da medicao, com os espelhos dela e o envio ao faturamento. O espelho que atende
 // execucao e reajuste mora na medicao de execucao; a de reajuste mostra um resumo com o link.
-export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra, medicao, semRegra, aoGerar, abrirForm: abrirLogo, parte, inicial }: {
+/** O valor de referencia de cada medicao para o total do espelho (#514): o aprovado do boletim, senao o pedido. */
+export type Referencia = { valor: number; fonte: "aprovado" | "pedido" };
+
+export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra, medicao, semRegra, aoGerar, abrirForm: abrirLogo, parte, inicial, referencias }: {
   contratoId: number; podeEditar: boolean; aoMudar: () => void; aoSaberRegra?: (ativa: boolean) => void;
   medicao?: { id: number; tipo: string }; semRegra?: React.ReactNode;
   /** Nova medicao (2026-10-09): recebe a medicao que nasceu do espelho, para abrir a pagina dela. */
@@ -85,6 +88,8 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
   parte?: "espelho" | "faturamento";
   /** Numero e competencia da medicao prevista, para o formulario abrir preenchido. */
   inicial?: { numero: number; competencia: string };
+  /** #514: por medicao, o valor com que o total do espelho se confere ("igual ao aprovado") na parte `espelho`. */
+  referencias?: Record<number, Referencia | null>;
 }) {
   const [regra, setRegra] = useState<Regra | null | undefined>(undefined);
   const [espelhos, setEspelhos] = useState<EspelhoDetalhe[]>([]);
@@ -311,6 +316,53 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     </Rolagem>
   );
 
+  // #514, passo Espelhos: uma linha por nota (natureza e empresa, municipio, valor, o arquivo do espelho) e o total
+  // conferido com o aprovado das medicoes do espelho (o pedido, quando ainda nao ha' aprovado)
+  const soltos = (esp: EspelhoDetalhe) => esp.arquivos.filter(a => !esp.saidas.some(x => x.chave === a.saida));
+  const tabelaResumo = (esp: EspelhoDetalhe) => {
+    const total = esp.saidas.reduce((t, x) => t + x.valor, 0);
+    const refs = esp.medicoes.map(x => referencias?.[x.id] ?? null);
+    const conferivel = refs.length > 0 && refs.every((r): r is Referencia => r !== null);
+    const referencia = conferivel ? refs.reduce((t, r) => t + (r?.valor ?? 0), 0) : null;
+    const fonte = conferivel && refs.every(r => r?.fonte === "aprovado") ? "aprovado" : "pedido";
+    const variasNaturezas = new Set(esp.saidas.map(x => x.natureza)).size > 1;
+    return (
+      <Rolagem rotulo="Espelhos">
+        <table className="tabela espelho__resumo" aria-label={`Espelhos da medição ${esp.numero}`}>
+          <thead>
+            <tr><th scope="col">Empresa</th><th scope="col">Município</th><th scope="col" className="col-num num">Valor</th><th scope="col">Espelho</th></tr>
+          </thead>
+          <tbody>
+            {esp.saidas.map(x => {
+              const arq = esp.arquivos.find(a => a.saida === x.chave);
+              const empresa = x.emissor.charAt(0).toUpperCase() + x.emissor.slice(1);
+              return (
+                <tr key={x.chave}>
+                  <td>{variasNaturezas ? `${x.rotulo} · ${empresa}` : empresa}</td>
+                  <td>{x.municipio}</td>
+                  <td className="col-num dinheiro num">{brl(x.valor)}</td>
+                  <td>{arq
+                    ? <a className="selo selo--ok espelho__gerado" href={`/api/espelhos/${esp.id}/arquivos/${arq.documento_id}`}
+                        aria-label={`Baixar o espelho ${arq.nome}`}><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">gerado</span></a>
+                    : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="espelho__total">
+              <th scope="row" colSpan={2}>Total</th>
+              <td className="col-num dinheiro num">{brl(total)}</td>
+              <td>{referencia === null ? null : referencia === total
+                ? <span className="espelho__confere espelho__confere--ok">igual ao {fonte}</span>
+                : <span className="espelho__confere espelho__confere--diverge"><IconeAlerta className="icone icone--p" />diferente do {fonte} ({brl(referencia)})</span>}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </Rolagem>
+    );
+  };
+
   // a etapa da pagina da medicao (`parte`) vai sem moldura propria: a moldura e' a da etapa
   const Raiz = parte ? "div" : "section";
   const so = (p: "espelho" | "faturamento") => !parte || parte === p;   // este pedaco aparece nesta parte?
@@ -491,9 +543,19 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
               : <Selo classe="selo--atencao" forte>Não enviado ao faturamento</Selo>}
           </div>
           )}
-          {so("espelho") && (
-            <div className={parte ? "med-caixa" : undefined}>{tabelaNotas(esp.saidas)}</div>
+          {parte === "faturamento" && (
+            <p>{esp.envio
+              ? <Selo classe="selo--ok">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
+              : <Selo classe="selo--atencao" forte>Não enviado ao faturamento</Selo>}</p>
           )}
+          {parte === "espelho" && tabelaResumo(esp)}
+          {parte === "espelho" && (
+            <details className="detalhes">
+              <summary>Impostos e líquido de cada nota</summary>
+              <div className="med-caixa">{tabelaNotas(esp.saidas)}</div>
+            </details>
+          )}
+          {!parte && tabelaNotas(esp.saidas)}
           {parte === "espelho" && (
             <ul className="med-linhas med-linhas--caixa">
               {regra.entradas.filter(en => esp.entradas?.[en.chave] !== undefined).map(en => (
@@ -504,16 +566,17 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
               )}
             </ul>
           )}
-          <div>
+          {/* #514: na parte do espelho, o arquivo de cada nota ja' baixa pela linha dela; aqui so' o que nao e' de nota */}
+          {(parte !== "espelho" || soltos(esp).length > 0) && <div>
             {parte && <p className="med-sub">Arquivos</p>}
             <ul className="lista-simples lista-simples--arquivos">
-              {esp.arquivos.map(a => (
+              {(parte === "espelho" ? soltos(esp) : esp.arquivos).map(a => (
                 <li key={a.documento_id}>
                   <a href={`/api/espelhos/${esp.id}/arquivos/${a.documento_id}`}><IconeBaixar className="icone icone--p" /> {a.nome}</a>
                 </li>
               ))}
             </ul>
-          </div>
+          </div>}
           {superadas.map(m => (
             <p className="campo__nota" key={m.id}>
               {/* sem artigo antes do titulo: "Reajuste da 10ª Medicao" e' masculino, as outras femininas */}

@@ -25,9 +25,10 @@ describe("Notas", () => {
     render(<Notas medicao={medicao} podeEditar aoMudar={() => {}} />);
     await waitFor(() => expect(screen.getByText(/Cuiabá/)).toBeTruthy());
     expect(screen.getAllByText(/719\.190,72/).length).toBeGreaterThan(0);
-    expect(screen.getByText("Falta 1 nota")).toBeTruthy();
-    // sem nota ainda: a celula fica com o tracinho, sem "aguardando"
-    expect(screen.queryByText("aguardando")).toBeNull();
+    expect(screen.getByText("0 de 1")).toBeTruthy();
+    // #514: sem nota ainda, a celula diz "aguardando" e oferece anexar a nota daquela linha
+    expect(screen.getByText("aguardando")).toBeTruthy();
+    expect(screen.getByLabelText("Anexar a nota de Lotufo · Cuiabá")).toBeTruthy();
     expect(screen.queryByText(/Vincular nota do RM/)).toBeNull();
     // sem nota vinculada, declarar completas nao aparece
     expect(screen.queryByRole("button", { name: /Declarar completas/ })).toBeNull();
@@ -219,8 +220,8 @@ describe("Notas: só o botão da ação em curso troca o rótulo", () => {
       <Notas medicao={medicao} rotulo="Execução · 27ª Medição" podeEditar aoMudar={() => {}} />
       <Notas medicao={reajuste} rotulo="Reajuste da 27ª Medição" podeEditar aoMudar={() => {}} />
     </>);
-    expect(await screen.findByText("Falta 1 nota")).toBeTruthy();
-    expect(await screen.findByText("Faltam 2 notas")).toBeTruthy();
+    expect(await screen.findByText("0 de 1")).toBeTruthy();
+    expect(await screen.findByText("0 de 2")).toBeTruthy();
     const arquivo = new File(["x"], "nota.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText("Anexar notas: Reajuste da 27ª Medição"), { target: { files: [arquivo] } });
     await waitFor(() => expect(apiForm).toHaveBeenCalledWith("/api/medicoes/2/notas", expect.any(FormData)));
@@ -290,5 +291,64 @@ describe("Notas: valor da nota manual (CampoValor)", () => {
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/medicoes/1/notas/alocacoes/77/desfazer", expect.objectContaining({
       method: "POST", body: JSON.stringify({ motivo: "NF de outra obra" }) })));
     await waitFor(() => expect(aoMudar).toHaveBeenCalled());
+  });
+});
+
+// #514: passo Notas da pagina da obra
+describe("Notas: o passo Notas (#514)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
+  const LIDA = { documento_id: 9, repetido: false, nota_id: 4, conferencia: [], faltam: 0, estado: "nota_emitida",
+    leitura: { ok: true, motivo: null, leiaute: "cuiaba", numero: 2301 } };
+
+  it("a tabela tem empresa, município, valor e a nota; os impostos só aparecem com divergência", async () => {
+    api.mockResolvedValueOnce(DADOS);
+    render(<Notas medicao={medicao} podeEditar aoMudar={() => {}} />);
+    await waitFor(() => expect(screen.getByText("Cuiabá")).toBeTruthy());
+    const cab = screen.getAllByRole("columnheader").map(c => c.textContent);
+    expect(cab).toEqual(["Empresa", "Município", "Valor", "Nota fiscal"]);
+    expect(screen.getByText("Lotufo")).toBeTruthy();
+  });
+
+  it("nota com ISS divergente traz as colunas dos impostos, com a célula do ISS destacada", async () => {
+    api.mockResolvedValueOnce({ ...DADOS, faltam: 0, esperadas: [{ ...DADOS.esperadas[0], nota_id: 5 }],
+      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 71919072,
+                valor_pdf_centavos: 71919072, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
+                conferencia: [{ campo: "iss", espelho: 1438381, nota: 1438581, grau: "divergente" }],
+                justificativa: null, leitura: "cuiaba", municipio: "Cuiabá", regra: "pdf", recebido_centavos: 0 }],
+      pode_declarar: false });
+    render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);
+    await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
+    expect(screen.getByRole("columnheader", { name: "ISS" })).toBeTruthy();
+    expect(screen.getByText("1 de 1")).toBeTruthy();
+    expect(screen.getByRole("table").querySelectorAll("td.notas__celula--diverge")).toHaveLength(1);
+  });
+
+  it("o PDF solto na área de soltar é anexado e lido contra o espelho", async () => {
+    api.mockResolvedValue(DADOS);
+    apiForm.mockResolvedValue(LIDA);
+    const aoMudar = vi.fn();
+    render(<Notas medicao={medicao} podeEditar aoMudar={aoMudar} />);
+    const area = (await screen.findByText("Solte aqui os PDFs das notas")).closest("label")!;
+    const pdf = new File(["x"], "nota.pdf", { type: "application/pdf" });
+    const txt = new File(["x"], "leia.txt", { type: "text/plain" });
+    fireEvent.drop(area, { dataTransfer: { files: [pdf, txt] } });
+    await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));   // o que nao e' PDF nao vai
+    expect(apiForm.mock.lastCall![0]).toBe("/api/medicoes/1/notas");
+    expect(await screen.findByText(/nota.pdf: nota 2301 lida e vinculada — confere com o espelho/)).toBeTruthy();
+    expect(aoMudar).toHaveBeenCalled();
+  });
+
+  it("a linha sem nota oferece anexar a nota dela; quem só consulta vê só o “aguardando”", async () => {
+    api.mockResolvedValue(DADOS);
+    apiForm.mockResolvedValue(LIDA);
+    const { unmount } = render(<Notas medicao={medicao} podeEditar aoMudar={() => {}} />);
+    const campo = await screen.findByLabelText("Anexar a nota de Lotufo · Cuiabá");
+    fireEvent.change(campo, { target: { files: [new File(["x"], "nota.pdf", { type: "application/pdf" })] } });
+    await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+    unmount();
+    render(<Notas medicao={medicao} podeEditar={false} aoMudar={() => {}} />);
+    expect(await screen.findByText("aguardando")).toBeTruthy();
+    expect(screen.queryByLabelText(/Anexar a nota de/)).toBeNull();
+    expect(screen.queryByText("Solte aqui os PDFs das notas")).toBeNull();
   });
 });

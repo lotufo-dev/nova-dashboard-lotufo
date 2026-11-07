@@ -216,12 +216,12 @@ function textoCertidao(i: ItemCertidao): string | null {
 
 /** Uma linha por certidao: o ponto (verde, ambar, vermelho) e a validade so' da que vence, por empresa quando ha mais de uma. O
  *  caminho para emitir a nova so' aparece com certidao vencida. */
-export function ListaCertidoes({ itens }: { itens: ItemCertidao[] }) {
+export function ListaCertidoes({ itens, semTitulo = false }: { itens: ItemCertidao[]; semTitulo?: boolean }) {
   const empresas = [...new Map(itens.map(i => [i.entidade_id, i.entidade] as const)).entries()];
   const vencida = itens.some(i => i.situacao === "pendente");
   return (
     <div className="certidoes-bloco">
-      <p className="med-sub">Certidões</p>
+      {!semTitulo && <p className="med-sub">Certidões</p>}
       {empresas.map(([eid, nome]) => (
         <div key={eid}>
           {empresas.length > 1 && <p className="campo__nota certidoes__empresa">{nome ?? "—"}</p>}
