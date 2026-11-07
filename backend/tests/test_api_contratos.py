@@ -234,3 +234,20 @@ def test_ficha_obra_sem_medicao_e_inexistente_404(client_admin):
 def test_ficha_nivel_do_prazo_e_o_semaforo():
     from app.ficha_obra import nivel_do_prazo
     assert [nivel_do_prazo(d) for d in (None, -3, 30, 31, 90, 91)] == ["normal", "critico", "critico", "atencao", "atencao", "normal"]
+
+
+def test_ficha_conta_so_os_tas_que_valem(client_admin):
+    """Reajuste e aditivo corrigido por outro nao entram em "N TAs"; cancelado tambem nao."""
+    from app import db
+    cid = novo_contrato(NOVO)
+    conn = db.get_conn()
+    ins = ("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza, chave_cadastro, "
+           "corrige_chave, cancelado_em) VALUES (?, ?, ?, 'assinado', '2026-03-01', ?, ?, ?, ?)")
+    conn.execute(ins, (cid, "prazo", 0, None, "ta1", None, None))
+    conn.execute(ins, (cid, "valor", 100, None, "ta2", None, None))
+    conn.execute(ins, (cid, "valor", 100, None, "ta2b", "ta2", None))      # corrige o ta2: so' o corretor vale
+    conn.execute(ins, (cid, "valor", 500, "reajuste", "rj", None, None))
+    conn.execute(ins, (cid, "prazo", 0, None, "ta4", None, "2026-04-01"))  # cancelado
+    conn.commit()
+    conn.close()
+    assert client_admin.get(f"/api/contratos/{cid}/ficha").json()["contrato"]["tas"] == 2

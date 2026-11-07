@@ -11,7 +11,7 @@ const CURVA = { curva: [
   { competencia: "2026-08", previsto_centavos: 50, medido_execucao_centavos: 40, atestado_pendente: false },
   { competencia: "2026-09", previsto_centavos: 50, medido_execucao_centavos: 40, atestado_pendente: false },
   { competencia: "2026-10", previsto_centavos: 100, medido_execucao_centavos: 0, atestado_pendente: false }],
-saldo: { vigente_centavos: 15516880000, atestado_execucao_centavos: 12624791119, saldo_centavos: 2892088881 } };
+saldo: { vigente_centavos: 15516880000, vigente_execucao_centavos: 15516880000, atestado_execucao_centavos: 12624791119, saldo_centavos: 2892088881 } };
 const FICHA: Ficha = {
   contrato: { original_centavos: 15516880000, original_igual: true, tas: 2, data_base: "2025-01" },
   ultima_medicao: { id: 15, titulo: "15ª Medição", rotulo: "15ª", competencia: "2026-09", valor_centavos: 787288979,
@@ -104,4 +104,16 @@ describe("regras puras da ficha", () => {
     expect(desvioDaCurva([p("2026-01", 50, 0)], null)).toBeNull();
   });
   it("mês e ano", () => expect(mesAno("2026-09")).toBe("set/2026"));
+});
+
+describe("execução com aditivo de reajuste", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+  it("o percentual divide pelo vigente a preços iniciais, não pelo vigente com reajuste", async () => {
+    api.mockImplementation(async (url: string) => url.endsWith("/cabecalho") ? CABECALHO : url.endsWith("/ficha") ? FICHA
+      : { ...CURVA, saldo: { vigente_centavos: 110_000_000_00, vigente_execucao_centavos: 100_000_000_00,
+        atestado_execucao_centavos: 90_000_000_00, saldo_centavos: 10_000_000_00 } });
+    render(<FichaObra contratoId={3} origem={null} />);
+    await screen.findByRole("heading", { level: 1, name: "Integra BRT" });
+    expect((await within(await screen.findByRole("region", { name: "Execução" })).findByText("90%")).className).toContain("info--feito");
+  });
 });

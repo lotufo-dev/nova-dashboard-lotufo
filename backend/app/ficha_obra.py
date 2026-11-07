@@ -24,10 +24,8 @@ def nivel_do_prazo(dias: int | None) -> str:
 
 
 def _d(iso: str | None) -> datetime.date | None:
-    try:
-        return datetime.date.fromisoformat(iso[:10]) if iso else None
-    except ValueError:
-        return None
+    """Dia do negocio (Cuiaba): carimbo com hora vira o dia local (`medicoes._dia`)."""
+    return medicoes._dia(iso)
 
 
 def _rotulo(m) -> str:
@@ -81,7 +79,13 @@ def _certidao_mais_proxima(conn, contrato_id: int, hoje: datetime.date) -> dict 
 def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     v = contratos.vigente(conn, contrato_id)
-    tas = conn.execute("SELECT COUNT(*) FROM aditivos WHERE contrato_id=? AND status='assinado'", (contrato_id,)).fetchone()[0]
+    # TAs: assinados e nao cancelados, sem o de reajuste (valor corrigido por indice, nao termo do contrato) e sem o
+    # que outro aditivo corrige (`corrige_chave`), como `contratos.vigente` os descarta.
+    tas = conn.execute(
+        "SELECT COUNT(*) FROM aditivos a WHERE a.contrato_id=? AND a.status='assinado' AND a.cancelado_em IS NULL "
+        "AND COALESCE(a.natureza, '') <> 'reajuste' AND NOT EXISTS (SELECT 1 FROM aditivos x WHERE x.contrato_id=a.contrato_id "
+        "AND x.status='assinado' AND x.cancelado_em IS NULL AND x.corrige_chave = a.chave_cadastro)",
+        (contrato_id,)).fetchone()[0]
     base = (v.get("data_base") or "")[:7]
     cab = contratos.cabecalho(conn, contrato_id, hoje)
     venc = []

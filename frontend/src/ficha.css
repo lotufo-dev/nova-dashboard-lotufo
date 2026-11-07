@@ -8,6 +8,7 @@
 .ficha__grande { margin: 0; font-family: var(--fonte-num); font-weight: 600; text-align: right; }
 .ficha__valor { font-size: 24px; line-height: 30px; }
 .ficha__dias { font-size: 32px; line-height: 38px; }
+.ficha__cabeca { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .ficha__pct { margin: 0; font-family: var(--fonte-num); font-size: 24px; line-height: 28px; font-weight: 600; text-align: right; }
 .ficha__barra { height: 10px; border-radius: var(--raio-pilula); background: var(--neutro-fundo); overflow: hidden; }
 .ficha__barra span { display: block; height: 100%; border-radius: var(--raio-pilula); background: var(--ok-ponto); }

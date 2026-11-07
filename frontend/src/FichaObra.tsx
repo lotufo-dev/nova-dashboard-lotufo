@@ -21,7 +21,7 @@ type Cabecalho = {
   percentual_lotufo_bp: number; execucao_fim: string | null; dias_execucao: number | null;
   vigencia_fim: string | null; dias_vigencia: number | null; status: keyof typeof STATUS;
 };
-type Saldo = { vigente_centavos: number; atestado_execucao_centavos: number; saldo_centavos: number };
+type Saldo = { vigente_centavos: number; vigente_execucao_centavos: number; atestado_execucao_centavos: number; saldo_centavos: number };
 type Curva = { pontos: PontoDaCurva[]; saldo: Saldo; anterior: PrevistoAnterior | null };
 type Vencimento = { chave: "certidao" | "execucao" | "vigencia"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
 type Medicao = { id: number; titulo: string; rotulo: string; competencia: string; valor_centavos: number | null };
@@ -52,10 +52,10 @@ export function desvioDaCurva(pontos: PontoDaCurva[], anterior: PrevistoAnterior
   return { pp: ((ultimo.acumuladoMedido ?? 0) - ultimo.acumuladoPrevisto) / total * 100 };
 }
 
-function Cartao({ titulo, children, classe = "" }: { titulo: string; children: React.ReactNode; classe?: string }) {
+function Cartao({ titulo, children, classe = "", lado }: { titulo: string; children: React.ReactNode; classe?: string; lado?: React.ReactNode }) {
   return (
     <section className={`cartao ficha__cartao ${classe}`.trim()} aria-label={titulo}>
-      <h2 className="ficha__titulo">{titulo}</h2>
+      <div className="ficha__cabeca"><h2 className="ficha__titulo">{titulo}</h2>{lado}</div>
       {children}
     </section>
   );
@@ -131,7 +131,7 @@ export default function FichaObra({ contratoId, origem }: { contratoId: number; 
   const venc = (chave: Vencimento["chave"]) => ficha?.vencimentos.find(v => v.chave === chave) ?? null;
   const prazo = venc("execucao");
   const cota = c && baseDosValores(c.percentual_lotufo_bp) ? `Consórcio, ${baseDosValores(c.percentual_lotufo_bp)!.replace("cota ", "cota Lotufo ")}` : null;
-  const pctExec = curva && curva.saldo.vigente_centavos > 0 ? curva.saldo.atestado_execucao_centavos / curva.saldo.vigente_centavos : null;
+  const pctExec = curva && curva.saldo.vigente_execucao_centavos > 0 ? curva.saldo.atestado_execucao_centavos / curva.saldo.vigente_execucao_centavos : null;
   const desvio = curva ? desvioDaCurva(curva.pontos, curva.anterior) : null;
   const indisponivel = <p className="erro" role="alert">indisponível agora</p>;
   const carregando = <p className="ficha__nota">Carregando…</p>;
@@ -172,10 +172,9 @@ export default function FichaObra({ contratoId, origem }: { contratoId: number; 
                 )}
               </Cartao>
 
-              <Cartao titulo="Execução">
+              <Cartao titulo="Execução" lado={curva ? <span className="ficha__pct info--feito">{pctExec === null ? "—" : fmtPercentual(pctExec, 0)}</span> : undefined}>
                 {curva === undefined ? carregando : curva === null ? indisponivel : (
                   <>
-                    <p className="ficha__pct info--feito">{pctExec === null ? "—" : fmtPercentual(pctExec, 0)}</p>
                     <div className="ficha__barra" role="progressbar" aria-label="Execução do contrato" aria-valuemin={0} aria-valuemax={100}
                       aria-valuenow={pctExec === null ? undefined : Math.round(Math.min(1, pctExec) * 100)}>
                       <span style={{ width: `${Math.min(100, Math.max(0, (pctExec ?? 0) * 100))}%` }} />
