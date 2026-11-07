@@ -1270,3 +1270,35 @@ def test_deploy_erro_na_consulta_da_porta_nao_e_porta_livre():
     # a falha sobe pelo PararComprovado (sem catch), que nao toca no pinado e mantem o sentinela
     parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
     assert "catch" not in parar and "LiberarPorta" in parar
+
+
+def test_skill_deploy_confere_o_arquivo_da_instalacao_antes_de_qualquer_git_e_a_chamada_1_vai_por_file():
+    # Issue #446 (Sugestao do revisor na PR #437): pelo SSH no `-Command -`, o primeiro comando nativo (git) consome o
+    # resto do script pelo stdin; o Test-Path do instalacao.json no fim do bloco nunca imprimia nada (falso "ausente").
+    raiz = pathlib.Path(__file__).resolve().parents[2]
+    skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
+    secao = skill[skill.index("## Antes de rodar: o que vai subir"):skill.index("## Rodar")]
+    bloco = secao[secao.index("```powershell") + len("```powershell"):]
+    linhas = [linha.strip() for linha in bloco[:bloco.index("```")].splitlines() if linha.strip()]
+    # gate Sol da PR #537: o arquivo e' o da raiz da tarefa (-Raiz), lida como no deploy.ps1, nunca C:\ fixo
+    teste = next(i for i, linha in enumerate(linhas) if linha.startswith("Test-Path"))
+    assert linhas[teste] == 'Test-Path (Join-Path $raiz "segredos\\instalacao.json")'
+    assert not any("git " in linha for linha in linhas[:teste])
+    antes = "\n".join(linhas[:teste])
+    assert 'Agendador @("/Query", "/TN", "DashboardLotufo", "/XML") 30' in antes and "exit 1" in antes
+    assert _regex_da_raiz(_ler("deploy.ps1")) in antes
+    assert "C:\\DashboardLotufo\\segredos" not in antes
+    # revisor da rodada 2 da PR #537: o pinado anterior a #386 nao tem comum_agendador.ps1; sem ele, schtasks direto
+    assert "if (Test-Path $agendador) { . $agendador;" in antes
+    assert "schtasks.exe /Query /TN DashboardLotufo /XML" in antes
+    # e a raiz sai so' de <Arguments>, como no ArgumentosDaTarefa do deploy.ps1
+    assert '[regex]::Matches($tarefa.Saida, "<Arguments>([^<]*)</Arguments>")' in antes
+    assert "$raiz = if ($argumentos -match " in antes
+    assert "Pinado sem `scripts\\comum_agendador.ps1`" in skill
+    # a chamada 1 pelo Mac vai num .ps1 com -File, nunca pelo stdin (runbook, "Mudar de servidor")
+    caminhos = skill[skill.index("## Dois caminhos: local elevado ou SSH"):skill.index("## Antes de rodar")]
+    chamada1 = caminhos[caminhos.index("  1. só leitura"):caminhos.index("  2. o deploy")]
+    assert "-File" in chamada1 and "scp" in chamada1
+    assert "nunca pelo stdin" in chamada1
+    # gate Sol da PR #537: nada de nome fixo em C:\Temp para o script elevado
+    assert "C:/Temp" not in chamada1 and "C:\\Temp" not in chamada1 and "<aleatorio>" in chamada1
