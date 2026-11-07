@@ -56,3 +56,19 @@ def test_envelopes_diferentes_e_paginas_a_menos():
     misturado = _carimbar(MONTADO[:2]) + _carimbar(MONTADO[2:], G2)
     assert "envelopes_diferentes" in [a["codigo"] for a in assinatura.conferir(MONTADO, misturado)["avisos"]]
     assert "paginas_a_menos" in [a["codigo"] for a in assinatura.conferir(MONTADO, _carimbar(MONTADO[:2]))["avisos"]]
+
+
+def test_bloco_da_assinatura_sai_e_o_texto_dos_assinados_reais_fica():
+    """Issue #519: o rotulo, o nome e o codigo que a assinatura do DocuSign poe na pagina saem; nos assinados reais das
+    fixtures (carimbo no fim, sem esse bloco no texto) nada muda."""
+    import json
+    import pathlib
+    for rotulo in ("DocuSigned by:", "Assinado por:"):
+        t = f"{rotulo}\nFernando Exemplo Neto\n4C6B1A2D3E4F4A5B...\nApostilamento nº 001/2025"
+        assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "APOSTILAMENTONO0012025"
+        assert assinatura._plano(assinatura.sem_bloco_de_assinatura(f"Termo de\n{rotulo} Fernando Exemplo Neto")) == \
+            "TERMODE"
+    fix = pathlib.Path(__file__).parent / "fixtures" / "assinatura"
+    for nome in ("cavalaria-ct291.json", "mt388-ct073.json", "orla-ct286.json"):
+        for t in json.loads((fix / nome).read_text(encoding="utf-8"))["assinado"]:
+            assert assinatura.sem_bloco_de_assinatura(t) == t

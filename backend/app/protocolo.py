@@ -699,7 +699,9 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
                      "situacao='montado', montado_frcs=?, montado_apostilamentos=? WHERE id=?",
                      (editado, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote),
                       # o mapa do que foi de fato renderizado: so' o texto que usa a frase compara depois
-                      json.dumps({"cita": cita, "apostilamentos": aps if cita else []})
+                      # issue #519: com o timbre desta montagem, que a conferencia do assinado tira das paginas
+                      json.dumps({"cita": cita, "apostilamentos": aps if cita else [],
+                                  "timbre": carta.textos_do_timbre(em)})
                       if familia in FAMILIAS_OFICIO_REAJUSTE else None, protocolo_id))
         auditoria.registrar(conn, usuario_id, "protocolo.montar", "protocolo", protocolo_id, None,
                             {"sha256": sha, "paginas": n, "tamanho": len(pdf), "corpo": base})   # issue #448
@@ -1007,13 +1009,17 @@ ASSINADO_SEM_O_TERMO = ("O assinado não traz o termo de apostilamento do pacote
 def _plano_sem_timbre(conn, p: dict, paginas: list[str]) -> str:
     """O texto plano da conferencia (sem acento, espaco, pontuacao e carimbo do DocuSign) de todas as paginas juntas,
     sem o cabecalho e o rodape do papel timbrado que o fpdf repete em toda pagina da carta: a frase partida na quebra
-    de pagina volta a ficar inteira (gate Sol, rodada extra de 07/11/2026)."""
+    de pagina volta a ficar inteira (gate Sol, rodada extra de 07/11/2026). Issue #519: sem o texto da assinatura do
+    DocuSign ("DocuSigned by:", nome e codigo) e com o timbre da montagem (gravado com o mapa do termo) alem do de
+    agora: o emitente trocado no cadastro depois de montar nao deixa o timbre velho no meio da frase."""
     c = _contrato(conn, p["contrato_id"])
     em = carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}
-    fixos = sorted({f for x in carta.textos_do_timbre(em) if (f := assinatura._plano(x))}, key=len, reverse=True)
+    gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
+    timbre = carta.textos_do_timbre(em) + list((gravado or {}).get("timbre") or [])
+    fixos = sorted({f for x in timbre if (f := assinatura._plano(x))}, key=len, reverse=True)
     out = []
     for t in paginas:
-        plano = assinatura._plano(t)
+        plano = assinatura._plano(assinatura.sem_bloco_de_assinatura(t))
         for f in fixos:
             plano = plano.replace(f, "")
         out.append(plano)

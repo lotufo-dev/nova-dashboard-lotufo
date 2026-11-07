@@ -232,14 +232,33 @@ def test_pendencias_de_certidao_e_nota(cenario):
 
 # --- parte 2: assinado, previa, envio --------------------------------------------------------------
 
-def _assinar(pdf_montado: bytes, guid="7E965481-0A1B-4C2D-8E9F-0123456789AB") -> bytes:
-    """Assinado de mentira: as mesmas paginas, cada uma com o carimbo do DocuSign como texto a mais."""
+ASSINATURAS = {"DocuSigned by:": "4C6B1A2D3E4F4A5B...", "Assinado por:": "E1F2A3B4C5D64E7F..."}
+
+
+def _assinar(pdf_montado: bytes, guid="7E965481-0A1B-4C2D-8E9F-0123456789AB", assinatura: str | None = None,
+             no_comeco: bool = True) -> bytes:
+    """Assinado de mentira: as mesmas paginas, cada uma com o carimbo do DocuSign como texto a mais. Com `assinatura`
+    (um rotulo de `ASSINATURAS`), a pagina 2 traz tambem o bloco de texto que a assinatura do DocuSign poe ("DocuSigned
+    by:", o nome e o codigo), no comeco do conteudo da pagina (`no_comeco`) ou no fim (issue #519)."""
     r, w = pypdf.PdfReader(io.BytesIO(pdf_montado)), pypdf.PdfWriter()
-    for pagina in r.pages:
+    for i, pagina in enumerate(r.pages):
         f = FPDF(format="A4"); f.add_page(); f.set_font("Helvetica", size=6)
         f.text(5, 5, f"Docusign Envelope ID: {guid}")
-        w.add_page(pagina)
-        w.pages[-1].merge_page(pypdf.PdfReader(io.BytesIO(bytes(f.output()))).pages[0])
+        carimbo = pypdf.PdfReader(io.BytesIO(bytes(f.output()))).pages[0]
+        if assinatura and i == 1:
+            b = FPDF(format="A4"); b.add_page(); b.set_font("Helvetica", size=8)
+            for k, linha in enumerate((assinatura, "Fernando Exemplo Neto", ASSINATURAS[assinatura])):
+                b.text(120, 250 + 4 * k, linha)
+            bloco = pypdf.PdfReader(io.BytesIO(bytes(b.output()))).pages[0]
+            if no_comeco:                      # o bloco antes do texto da pagina na extracao
+                w.add_page(bloco)
+                w.pages[-1].merge_page(pagina)
+            else:
+                w.add_page(pagina)
+                w.pages[-1].merge_page(bloco)
+        else:
+            w.add_page(pagina)
+        w.pages[-1].merge_page(carimbo)
     buf = io.BytesIO(); w.write(buf)
     return buf.getvalue()
 
@@ -535,6 +554,48 @@ def test_termo_quebrado_na_pagina_com_cabecalho_tambem_e_conferido(cenario):
     assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
 
 
+@pytest.mark.parametrize("rotulo", list(ASSINATURAS))
+@pytest.mark.parametrize("no_comeco", [True, False])
+def test_assinatura_do_docusign_na_pagina_2_com_o_termo_partido_nao_recusa(cenario, rotulo, no_comeco):
+    # Issue #519, Aviso 1: o texto da assinatura do DocuSign ("DocuSigned by:"/"Assinado por:", nome e codigo) na
+    # pagina 2, com a frase do termo partida entre as paginas 1 e 2: o assinado certo entra, o do termo velho nao
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    corpo = _corpo_com_o_termo_na_quebra(c, ids, pid)
+    velho = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes(),
+                     assinatura=rotulo, no_comeco=no_comeco)
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    montado = arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes()
+    novo = _assinar(montado, assinatura=rotulo, no_comeco=no_comeco)
+    pagina2 = leitura_pdf.textos_por_pagina_com_limite(novo, 50)[1]
+    assert rotulo in pagina2 and (pagina2.find(rotulo) < pagina2.find("Apostilamento")) == no_comeco
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+    assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
+
+
+def test_emitente_mudando_entre_a_montagem_e_o_anexo_nao_recusa_o_assinado(cenario, monkeypatch):
+    # Issue #519, Sugestao 2: o timbre tirado das paginas e' o da montagem (gravado com o mapa do termo), nao o do
+    # cadastro de agora; o assinado do pacote montado entra mesmo com o emitente trocado no meio
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    corpo = _corpo_com_o_termo_na_quebra(c, ids, pid)
+    velho = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    novo = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
+    gravado = json.loads(protocolo._linha(c, pid)["montado_apostilamentos"])
+    original = carta.emitente
+    monkeypatch.setattr(carta, "emitente", lambda conn, eid: {**original(conn, eid), "razao_social": "CONSTRUTORA "
+                        "BETA LTDA", "endereco": "Rua Nova, 1 - Cuiabá/MT", "contato": "Tel.: (65) 3999-0000"})
+    eid = protocolo._contrato(c, protocolo._linha(c, pid)["contrato_id"])["entidade_id"]
+    assert carta.textos_do_timbre(carta.emitente(c, eid)) != gravado.get("timbre")
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+    assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
+
+
 def test_competencia_acrescentada_ao_mesmo_termo_tambem_e_conferida(cenario):
     # Critico 2: a correcao acrescenta uma competencia no comeco da lista do mesmo termo (numero igual)
     c, ids = cenario
@@ -625,7 +686,8 @@ def test_mapa_do_pacote_so_compara_quando_o_texto_cita_o_termo(cenario):
     _cartas(c, sem_campo)
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
     protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
-    assert json.loads(protocolo._linha(c, pid)["montado_apostilamentos"]) == {"cita": False, "apostilamentos": []}
+    mapa = json.loads(protocolo._linha(c, pid)["montado_apostilamentos"])
+    assert {k: mapa[k] for k in ("cita", "apostilamentos")} == {"cita": False, "apostilamentos": []} and mapa["timbre"]
     _termo(c, ids["mtpar"])
     assert protocolo.previa_envio(c, [pid])["bloqueio"] is None                     # (D) nada muda no oficio
     _cartas(c, com_campo)                                                             # o Leo poe o campo no texto

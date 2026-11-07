@@ -20,6 +20,16 @@ _ENVELOPE = re.compile(r"DOCUSIGN\s+ENVELOPE\s+ID\s*:?\s*([0-9A-F]{8}-[0-9A-F]{4
 _CERTIFICADO = re.compile(r"CERTIFICADO\s+DE\s+CONCLUS|CERTIFICATE\s+OF\s+COMPLETION", re.IGNORECASE)
 
 
+# O texto que a assinatura do DocuSign poe na pagina: o rotulo, o nome de quem assinou e o codigo (16 hex e "..."). A
+# conferencia do termo (`protocolo._plano_sem_timbre`) o tira antes de juntar as paginas (issue #519).
+_BLOCO_ASSINATURA = re.compile(r"(?i:DOCUSIGNED\s+BY|ASSINADO\s+POR)\s*:[ \t]*\n?[^\n]*"
+                               r"(?:\n[ \t]*(?=[0-9A-F]*[0-9])[0-9A-F]{8,}(?:\.{3}|…)?[ \t]*(?=\n|$))?")
+
+
+def sem_bloco_de_assinatura(texto: str) -> str:
+    return _BLOCO_ASSINATURA.sub(" ", texto or "")
+
+
 def _plano(texto: str) -> str:
     t = _ENVELOPE.sub(" ", texto or "")
     t = "".join(unicodedata.normalize("NFKD", c)[:1] for c in t)
