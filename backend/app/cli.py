@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 from app import (auth, cadastro_aplicar, cadastro_arquivos, carga_medicoes, conciliacao, correcao_medicoes, db,
-                 documentos, instalacao, legado)
+                 documentos, instalacao, legado, medicao_grupos)
+from app.dinheiro import format_brl
 
 REPOSITORIO = Path(__file__).resolve().parent.parent.parent
 EXEMPLO = REPOSITORIO / "cadastro-exemplo"
@@ -64,6 +65,46 @@ def _documentos(args) -> int:
         print(f"  {chave}: {len(rel[chave])}")
         for item in rel[chave]:
             print(f"    - {item}")
+    return 0
+
+
+def _medicoes_planilhas(args) -> int:
+    """`medicoes planilhas <instrumento> <pasta> [--usuario] [--ensaio]`: o medido por grupo das medicoes anteriores
+    ao fluxo da planilha/carta (issue #490), um xlsx por medicao numa pasta LOCAL, o nº da medicao no nome do
+    arquivo ("15ª"). O sistema nao le SharePoint: quem roda copia os arquivos para a pasta antes."""
+    pasta = Path(args.pasta)
+    if not pasta.is_dir():
+        print(f"Pasta não encontrada: {pasta}")
+        return 1
+    conn = db.get_conn()
+    try:
+        db.migrate(conn)
+        uid = None
+        if args.usuario:
+            u = conn.execute("SELECT id FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+            if u is None:
+                print(f"Usuário não encontrado ou inativo: {args.usuario}")
+                return 1
+            uid = u["id"]
+        c = conn.execute("SELECT id FROM contratos WHERE numero_instrumento=?", (args.instrumento,)).fetchone()
+        if c is None:
+            print(f"Contrato não encontrado: {args.instrumento}")
+            return 1
+        linhas = medicao_grupos.carregar_pasta(conn, uid, c["id"], pasta, ensaio=args.ensaio)
+    finally:
+        conn.close()
+    print("ENSAIO (nada foi gravado)" if args.ensaio else "APLICADO")
+    rotulos = {"lida": "gravada", "repetida": "já lida antes", "recusada": "recusada", "pulado": "pulado"}
+    for x in linhas:
+        partes = [x["medicao"] or "sem medição"]
+        if x["total_centavos"] is not None:
+            partes.append(f"lido {format_brl(x['total_centavos'])}")
+        if x["diferenca_centavos"] is not None:
+            partes.append(f"pedido {format_brl(x['pedido_centavos'])}, diferença {format_brl(x['diferenca_centavos'])}")
+        situacao = rotulos[x["situacao"]] + (f": {x['motivo']}" if x["motivo"] else "")
+        print(f"  {x['arquivo']}: {'; '.join(partes)} -> {situacao}")
+    contagem = {k: sum(1 for x in linhas if x["situacao"] == k) for k in rotulos}
+    print("  " + ", ".join(f"{rotulos[k]}: {v}" for k, v in contagem.items()))
     return 0
 
 
@@ -496,6 +537,12 @@ def main(argv: list[str] | None = None) -> int:
     doc.add_argument("pasta", help="pasta local com os PDFs (lida recursivamente)")
     doc.add_argument("--usuario", required=True, help="e-mail de quem aplica")
     doc.add_argument("--ensaio", action="store_true", help="mostra o relatório e desfaz")
+    med = sub.add_parser("medicoes", help="medido por grupo das planilhas de medição de uma pasta local")
+    med.add_argument("acao", choices=["planilhas"])
+    med.add_argument("instrumento", help="número do instrumento do contrato (como no cadastro)")
+    med.add_argument("pasta", help="pasta local com um .xlsx por medição, o nº no nome do arquivo (ex.: 15ª)")
+    med.add_argument("--usuario", help="e-mail de quem roda a carga (sem ele, a auditoria registra 'pelo sistema')")
+    med.add_argument("--ensaio", action="store_true", help="mostra o que leria e não grava")
     con = sub.add_parser("conciliacao", help="liga notas do RM as medicoes antigas sem nota")
     con.add_argument("acao", choices=["historica", "antiga", "corte"])
     con.add_argument("--data", help="data do corte (AAAA-MM-DD), só em `corte`")
@@ -523,6 +570,8 @@ def main(argv: list[str] | None = None) -> int:
         return _dono(args)
     if args.cmd == "documentos":
         return _documentos(args)
+    if args.cmd == "medicoes":
+        return _medicoes_planilhas(args)
     if args.cmd == "instalacao":
         return _instalacao(args)
     if args.cmd == "integridade":
