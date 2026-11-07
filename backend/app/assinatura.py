@@ -20,14 +20,19 @@ _ENVELOPE = re.compile(r"DOCUSIGN\s+ENVELOPE\s+ID\s*:?\s*([0-9A-F]{8}-[0-9A-F]{4
 _CERTIFICADO = re.compile(r"CERTIFICADO\s+DE\s+CONCLUS|CERTIFICATE\s+OF\s+COMPLETION", re.IGNORECASE)
 
 
-# O texto que a assinatura do DocuSign poe na pagina: o rotulo, o nome de quem assinou e o codigo (16 hex e "..."). A
-# conferencia do termo (`protocolo._plano_sem_timbre`) o tira antes de juntar as paginas (issue #519).
-_BLOCO_ASSINATURA = re.compile(r"(?i:DOCUSIGNED\s+BY|ASSINADO\s+POR)\s*:[ \t]*\n?[^\n]*"
-                               r"(?:\n[ \t]*(?=[0-9A-F]*[0-9])[0-9A-F]{8,}(?:\.{3}|…)?[ \t]*(?=\n|$))?")
+# O texto que a assinatura do DocuSign poe na pagina: o rotulo, o nome de quem assinou e o codigo (hex e "..."). A
+# conferencia do termo (`protocolo._plano_sem_timbre`) o tira antes de juntar as paginas (issue #519). O nome so' sai
+# entre o rotulo e o codigo: sem o codigo logo abaixo, a linha seguinte pode ser texto da carta, e fica.
+_ROTULO = r"(?:(?:DOCU)?SIGNED\s+BY|ASSINADO\s+POR)\s*:"
+_CODIGO = r"(?=[0-9A-F]*[0-9])[0-9A-F]{12,}(?:\.{3}|…)?"
+_BLOCO_COM_CODIGO = re.compile(rf"{_ROTULO}\s*(?:[^\n]*\S[^\n]*\n\s*)?{_CODIGO}(?=\s|$)", re.IGNORECASE)
+_SO_ROTULO = re.compile(_ROTULO, re.IGNORECASE)
+_SO_CODIGO = re.compile(rf"^[ \t]*{_CODIGO}[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
 
 def sem_bloco_de_assinatura(texto: str) -> str:
-    return _BLOCO_ASSINATURA.sub(" ", texto or "")
+    t = _BLOCO_COM_CODIGO.sub(" ", texto or "")
+    return _SO_CODIGO.sub(" ", _SO_ROTULO.sub(" ", t))
 
 
 def _plano(texto: str) -> str:

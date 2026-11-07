@@ -64,10 +64,15 @@ def test_bloco_da_assinatura_sai_e_o_texto_dos_assinados_reais_fica():
     import json
     import pathlib
     for rotulo in ("DocuSigned by:", "Assinado por:"):
-        t = f"{rotulo}\nFernando Exemplo Neto\n4C6B1A2D3E4F4A5B...\nApostilamento nº 001/2025"
+        t = f"{rotulo}\nAssinante Exemplo\n4C6B1A2D3E4F4A5B...\nApostilamento nº 001/2025"
         assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "APOSTILAMENTONO0012025"
-        assert assinatura._plano(assinatura.sem_bloco_de_assinatura(f"Termo de\n{rotulo} Fernando Exemplo Neto")) == \
-            "TERMODE"
+    for t in ("Signed by:\n\nAssinante Exemplo\n\n4c6b1a2d3e4f4a5b...\nApostilamento",   # linha em branco, minuscula
+              "4C6B1A2D3E4F4A5B...\nDocuSigned by:\nApostilamento",                   # codigo antes, sem nome
+              "DocuSigned by: Assinante Exemplo\n4C6B1A2D3E4F4A5B…\nApostilamento"):
+        assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "APOSTILAMENTO"
+    # sem o codigo logo abaixo, a linha seguinte e' texto da carta e fica
+    assert assinatura._plano(assinatura.sem_bloco_de_assinatura("Termo de\nAssinado por:\nApostilamento nº 1")) == \
+        "TERMODEAPOSTILAMENTONO1"
     fix = pathlib.Path(__file__).parent / "fixtures" / "assinatura"
     for nome in ("cavalaria-ct291.json", "mt388-ct073.json", "orla-ct286.json"):
         for t in json.loads((fix / nome).read_text(encoding="utf-8"))["assinado"]:

@@ -247,7 +247,7 @@ def _assinar(pdf_montado: bytes, guid="7E965481-0A1B-4C2D-8E9F-0123456789AB", as
         carimbo = pypdf.PdfReader(io.BytesIO(bytes(f.output()))).pages[0]
         if assinatura and i == 1:
             b = FPDF(format="A4"); b.add_page(); b.set_font("Helvetica", size=8)
-            for k, linha in enumerate((assinatura, "Fernando Exemplo Neto", ASSINATURAS[assinatura])):
+            for k, linha in enumerate((assinatura, "Assinante Exemplo", ASSINATURAS[assinatura])):
                 b.text(120, 250 + 4 * k, linha)
             bloco = pypdf.PdfReader(io.BytesIO(bytes(b.output()))).pages[0]
             if no_comeco:                      # o bloco antes do texto da pagina na extracao
