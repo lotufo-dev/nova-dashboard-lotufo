@@ -55,11 +55,11 @@
 .medidor--acima .medidor__texto { color: var(--acao); font-weight: 600; }
 
 /* e-mail ao orgao: o botao grande e as acoes em lista */
-.email-orgao .btn--envio-orgao { width: 100%; height: 52px; font-size: 17px; font-weight: 600; }
+.email-orgao .btn--envio-orgao { width: 100%; height: 52px; justify-content: center; font-size: 17px; font-weight: 600; }
 .acoes-lista { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--linha); }
 .acoes-lista li { border-bottom: 1px solid var(--linha); }
 .acoes-lista button { width: 100%; height: auto; min-height: 52px; padding: 12px 4px; justify-content: space-between; border: 0; border-radius: 0;
-  background: none; color: var(--texto); font-size: 16px; font-weight: 500; }
+  background: none; color: var(--texto); font-size: 16px; font-weight: 500; text-align: left; white-space: normal; }
 .acoes-lista button:hover:not(:disabled) { background: var(--hover); color: var(--texto); }
 .acoes-lista svg { width: 16px; height: 16px; color: var(--texto-2); }
 
@@ -100,13 +100,13 @@
 .resposta__sub { color: var(--texto-2); font-size: 14px; }
 .resposta__corpo { padding: 0 16px 16px; }
 
-.med-lateral--baixo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.med-lateral.med-lateral--baixo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 
 @media (max-width: 1180px) {
   .med-duas, .med-duas--iguais { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 1023px) {
-  .med-lateral--baixo { grid-template-columns: minmax(0, 1fr); }
+  .med-lateral.med-lateral--baixo { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 767px) {
   .med-topo h1 { font-size: 26px; line-height: 32px; }
@@ -120,6 +120,8 @@
   .passo--aberto { flex: 2.4 1 0; }
   .passo button { font-size: 13px; }
   .med-painel { padding: 16px; }
+  /* a tabela das pecas nunca vaza do cartao: rola dentro dele */
+  .pacote .checklist-pecas { display: block; max-width: 100%; overflow-x: auto; }
   .med-painel__titulo { font-size: 19px; line-height: 26px; }
   .orgao-faixa { padding: 16px; }
   .orgao-faixa h2 { font-size: 22px; line-height: 28px; }
