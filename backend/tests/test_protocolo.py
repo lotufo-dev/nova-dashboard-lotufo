@@ -948,3 +948,86 @@ def test_guid_entre_chaves_do_link_do_sharepoint_nao_e_campo_sem_dado(cenario):
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
     protocolo.montar(c, ids["uid"], pid, corpo=f"{protocolo.corpo_padrao(c, pid)}\n\nPlanilha: {link}")
     assert protocolo._linha(c, pid)["situacao"] == "montado"
+
+
+def test_com_a_reserva_de_envio_o_protocolo_nao_muda_e_o_texto_gravado_e_o_do_pdf(cenario, monkeypatch):
+    """Issue #448 (gate Sol e revisor, rodada 1): com a reserva do envio, o PDF ja' foi lido; montar de novo (outra
+    aba) com outro texto, anexar peca ou descartar recusam, e o texto gravado no envio e' o da montagem do PDF."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    padrao = protocolo.corpo_padrao(c, pid)
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid])
+    original = protocolo._anexos_rotulados
+    recusas = []
+
+    def outra_aba_no_meio(conn, p, hoje):
+        if p.get("envio_reservado_em") and not recusas:
+            for mudar in (lambda: protocolo.montar(conn, ids["uid"], pid, corpo=padrao + "\n\nTexto da outra aba."),
+                          lambda: protocolo.adicionar_peca(conn, ids["uid"], pid, "anexo", "x.pdf", _pdf("X"), "pdf"),
+                          lambda: protocolo.descartar(conn, ids["uid"], pid, "outra aba")):
+                with pytest.raises(ValueError, match="está saindo agora") as erro:
+                    mudar()
+                recusas.append(str(erro.value))
+        return original(conn, p, hoje)
+
+    monkeypatch.setattr(protocolo, "_anexos_rotulados", outra_aba_no_meio)
+    protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                     confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+    assert len(recusas) == 3
+    p = protocolo._linha(c, pid)
+    assert (p["situacao"], p["corpo_carta"]) == ("enviado", padrao)
+
+
+def test_texto_do_envio_e_o_da_montagem_do_pacote_nao_o_da_mais_recente(cenario):
+    """Issue #448 (gate Sol, rodada 1): o texto sai da auditoria da montagem cujo sha256 e' o do pacote lido."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    padrao = protocolo.corpo_padrao(c, pid)
+    sha1 = protocolo.montar(c, ids["uid"], pid)["sha256"]
+    protocolo.montar(c, ids["uid"], pid, corpo=padrao + "\n\nSegunda montagem.")
+    assert protocolo._texto_montado(c, {"id": pid, "montado_sha256": sha1}) == padrao
+    assert "Segunda montagem." in protocolo._texto_montado(c, protocolo._linha(c, pid))
+
+
+def test_pacote_montado_sem_o_texto_guardado_pede_montar_de_novo(cenario):
+    """Issue #448 (revisor e gate Sol, rodada 1): o pacote montado antes desta versao (auditoria sem o texto) nao sai,
+    porque o "Texto da carta" ficaria vazio depois do envio; montar de novo guarda o texto e destrava."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    c.execute("UPDATE audit_log SET depois=json_remove(depois, '$.corpo') WHERE acao='protocolo.montar'")
+    c.commit()
+    pv = protocolo.previa_envio(c, [pid])
+    assert pv["bloqueio"] == protocolo.TEXTO_NAO_GUARDADO
+    with pytest.raises(protocolo.Bloqueio, match="não ficou guardado"):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    protocolo.montar(c, ids["uid"], pid)
+    assert protocolo.previa_envio(c, [pid])["bloqueio"] is None
+
+
+def test_termo_sem_numero_entrando_depois_nao_pede_nova_assinatura(cenario):
+    """Issue #448 (gate Sol, rodada 1): montado com o campo e o mapa (cita), um termo sem numero que passa a cobrir a
+    competencia muda a chave mas nao a frase do oficio: nao pede montar e assinar de novo."""
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    assert json.loads(protocolo._linha(c, pid)["montado_apostilamentos"])["cita"] is True
+    _termo(c, ids["mtpar"], numero=None)
+    assert protocolo.apostilamento_mudou(c, protocolo._linha(c, pid)) is None
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    assert protocolo.apostilamento_mudou(c, protocolo._linha(c, pid)) == protocolo.APOSTILAMENTO_MUDOU
+
+
+def test_qualquer_citacao_torta_entre_colchetes_nao_monta(cenario):
+    """Issue #448 (gate Sol, rodada 1): marcador com erro de digitacao ou abreviado nao sai literal no oficio."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    padrao = protocolo.corpo_padrao(c, pid)
+    for torto in ("[citação do termo de apostilamnto]", "[citação do apostil.]", "[Citacao]", "[termo do reajuste]"):
+        with pytest.raises(ValueError, match=re.escape(protocolo.MARCADOR_NA_TELA)):
+            protocolo.montar(c, ids["uid"], pid, corpo=padrao.replace("{apostilamento}", torto))
+    protocolo.montar(c, ids["uid"], pid, corpo=padrao + "\n\nVer [anexo 1].")

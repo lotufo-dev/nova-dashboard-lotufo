@@ -427,6 +427,7 @@ def detalhe_envio(conn, protocolo_id: int, remetente: str | None = None, hoje: d
     ms = [m for m in medicoes.em_andamento(conn, contrato_id=c["id"]) if m["id"] in mids]
     pv = protocolo.previa_envio(conn, [protocolo_id], remetente=remetente, hoje=hoje)
     mudou = protocolo.apostilamento_mudou(conn, p)          # issue #278
+    remontar = mudou is not None or protocolo.texto_nao_guardado(conn, p) is not None
     carta = None
     if e.carta:
         try:
@@ -448,7 +449,8 @@ def detalhe_envio(conn, protocolo_id: int, remetente: str | None = None, hoje: d
             # `remontar_liberado`: todo motivo do bloqueio e' de montar de novo (rodada 2 da PR #435: com certidao
             # vencida, nao; issue #448: a FRC velha no pacote junto com o termo mudado, sim)
             "exige_justificativa": pv["exige_justificativa"],
-            "remontar": mudou is not None, "remontar_liberado": mudou is not None and all(
+            # issue #448: o pacote de antes sem o texto guardado tambem pede montar de novo
+            "remontar": remontar, "remontar_liberado": remontar and all(
                 x in protocolo.MOTIVOS_DE_MONTAR_DE_NOVO for x in protocolo.motivos_bloqueio(conn, p, hoje)),
             "extras": [{"id": x["id"], "nome": x["nome"], "tamanho": x["tamanho"]}
                        for x in protocolo._pecas(conn, protocolo_id) if x["tipo"] == protocolo.ANEXO]}

@@ -50,7 +50,7 @@ TEXTO_SEM_O_TERMO = ("O texto da carta não cita o termo de apostilamento de ago
 _GUID = r"[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{12}"
 _CAMPO_SEM_DADO = re.compile(r"\{(?!" + _GUID + r"\})[^{}\s]+\}")
 # Issue #448: o marcador legivel escrito diferente (sem acento, com erro) nao e' convertido: sairia cru no oficio
-_MARCADOR_TORTO = re.compile(r"\[[^\]\n]*apostilamento[^\]\n]*\]", re.IGNORECASE)
+_MARCADOR_TORTO = re.compile(r"\[\s*(?:cita[cç][aã]o|[^\]\n]*(?:termo|apostil))[^\]\n]*\]", re.IGNORECASE)
 MARCADOR_TORTO = (f"O texto da carta tem a citação do termo escrita diferente: use exatamente {MARCADOR_NA_TELA} "
                   "(ou apague-a)")
 NUMERO_ORGAO_VAZIO = "Informe o número do protocolo no órgão"
@@ -246,9 +246,15 @@ def criar(conn, usuario_id: int, contrato_id: int, etapa: str, medicao_ids: list
     return pid
 
 
+EM_ENVIO = ("O e-mail deste protocolo está saindo agora: espere o envio terminar (ou a reserva ser liberada) antes "
+            "de alterar o protocolo")
+
+
 def _editavel(p: dict) -> None:
     if p["situacao"] in ("enviado", "descartado"):
         raise ValueError(f"Protocolo {p['situacao']}: não pode ser alterado")
+    if p.get("envio_reservado_em"):         # issue #448 (gate Sol, rodada 1): com a reserva, o pacote ja' foi lido
+        raise ValueError(EM_ENVIO)
 
 
 def _voltar_a_rascunho(conn, p: dict) -> None:
@@ -274,6 +280,7 @@ def adicionar_peca(conn, usuario_id: int, protocolo_id: int, tipo: str, nome: st
             raise ValueError(PECA_NO_OFICIO)
     rel, sha = arquivos.gravar_bytes("protocolos", dados, ext)
     with db.mutacao(conn):
+        _editavel(_linha(conn, protocolo_id))           # issue #448: de novo sob o lock (reserva de envio)
         peca_id = conn.execute(
             "INSERT INTO protocolo_pecas (protocolo_id, tipo, nome, arquivo, sha256, tamanho, ext) "
             "VALUES (?,?,?,?,?,?,?)", (protocolo_id, tipo, nome, rel, sha, len(dados), ext)).lastrowid
@@ -312,6 +319,7 @@ def adicionar_link(conn, usuario_id: int, protocolo_id: int, nome: str, url: str
     p = _linha(conn, protocolo_id)
     _editavel(p)
     with db.mutacao(conn):
+        _editavel(_linha(conn, protocolo_id))           # issue #448: de novo sob o lock (reserva de envio)
         link_id = conn.execute("INSERT INTO protocolo_links (protocolo_id, nome, url) VALUES (?,?,?)",
                                (protocolo_id, nome, url)).lastrowid
         auditoria.registrar(conn, usuario_id, "protocolo.link", "protocolo", protocolo_id, None,
@@ -323,6 +331,7 @@ def remover_link(conn, usuario_id: int, protocolo_id: int, link_id: int) -> None
     p = _linha(conn, protocolo_id)
     _editavel(p)
     with db.mutacao(conn):
+        _editavel(_linha(conn, protocolo_id))           # issue #448: de novo sob o lock (reserva de envio)
         n = conn.execute("UPDATE protocolo_links SET removido_em=datetime('now') "
                          "WHERE id=? AND protocolo_id=? AND removido_em IS NULL", (link_id, protocolo_id)).rowcount
         if n != 1:
@@ -336,6 +345,7 @@ def remover_peca(conn, usuario_id: int, protocolo_id: int, peca_id: int) -> None
     _editavel(p)
     tipo = conn.execute("SELECT tipo FROM protocolo_pecas WHERE id=? AND protocolo_id=?", (peca_id, protocolo_id)).fetchone()
     with db.mutacao(conn):
+        _editavel(_linha(conn, protocolo_id))           # issue #448: de novo sob o lock (reserva de envio)
         n = conn.execute("UPDATE protocolo_pecas SET removida_em=datetime('now') "
                          "WHERE id=? AND protocolo_id=? AND removida_em IS NULL", (peca_id, protocolo_id)).rowcount
         if n != 1:
@@ -681,6 +691,8 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
                          f"{pdfs.TETO_BYTES_PACOTE // (1024 * 1024)} MB: separe as peças")
     rel, sha = arquivos.gravar_bytes("protocolos", pdf, "pdf")
     with db.mutacao(conn):
+        # issue #448 (gate Sol, rodada 1): de novo sob o lock; com a reserva de envio, o PDF ja' foi lido pelo envio
+        _editavel(_linha(conn, protocolo_id))
         conn.execute("UPDATE protocolos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
                      "montado_em=datetime('now'), assinado_arquivo=NULL, assinado_sha256=NULL, conferencia=NULL, "
                      "situacao='montado', montado_frcs=?, montado_apostilamentos=? WHERE id=?",
@@ -869,7 +881,10 @@ def apostilamento_mudou(conn, p: dict) -> str | None:
     agora = apostilamentos(conn, familia, _medicoes(conn, p["id"]))
     gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
     if gravado and gravado.get("cita"):
-        return None if gravado.get("apostilamentos") == agora else APOSTILAMENTO_MUDOU
+        # issue #448 (gate Sol, rodada 1): o que vale e' a frase do oficio; termo sem numero entrando ou trocando nao
+        # muda o texto e nao pede nova assinatura
+        mesma = frase_do_apostilamento(gravado.get("apostilamentos") or []) == frase_do_apostilamento(agora)
+        return None if mesma else APOSTILAMENTO_MUDOU
     # issue #448: reajuste sem termo (frase vazia antes e depois) nao muda o oficio; nao pede nova assinatura
     cita_agora = bool(frase_do_apostilamento(agora)) and _familia_cita_o_termo(carta.config(conn)["familias"][familia], p)
     return APOSTILAMENTO_MUDOU if cita_agora else None
@@ -881,18 +896,38 @@ def motivos_bloqueio(conn, p: dict, hoje: datetime.date) -> list[str]:
         frc_recusadas(conn, p)
     if mudou := apostilamento_mudou(conn, p):
         motivos.append(mudou)
+    if sem_texto := texto_nao_guardado(conn, p):
+        motivos.append(sem_texto)
     return motivos
 
 
-# Issue #448: os motivos que montar o pacote de novo resolve (a FRC vigente e o termo de agora entram na montagem)
-MOTIVOS_DE_MONTAR_DE_NOVO = (*PACOTE_SEM_A_FRC_VIGENTE, APOSTILAMENTO_MUDOU)
-
-
-def _texto_montado(conn, protocolo_id: int) -> str | None:
-    """Issue #448: o texto da carta da ultima montagem (com o marcador), da auditoria."""
+def _texto_montado(conn, p: dict) -> str | None:
+    """Issue #448: o texto da carta (com o marcador) da montagem do pacote `montado_sha256` da linha, da auditoria;
+    nunca o da montagem mais recente, que pode nao ser a do PDF lido pelo envio (gate Sol, rodada 1)."""
+    if not p.get("montado_sha256"):
+        return None
     r = conn.execute("SELECT depois FROM audit_log WHERE acao='protocolo.montar' AND entidade='protocolo' "
-                     "AND entidade_id=? ORDER BY id DESC LIMIT 1", (str(protocolo_id),)).fetchone()
+                     "AND entidade_id=? AND json_extract(depois, '$.sha256')=? ORDER BY id DESC LIMIT 1",
+                     (str(p["id"]), p["montado_sha256"])).fetchone()
     return json.loads(r["depois"]).get("corpo") if r and r["depois"] else None
+
+
+# Issue #448 (revisor e gate Sol, rodada 1): o pacote montado antes desta versao nao guardou o texto da carta; enviado
+# assim, o "Texto da carta" ficaria vazio para sempre. Montar de novo guarda o texto.
+TEXTO_NAO_GUARDADO = ("O texto da carta deste pacote não ficou guardado (montado antes da versão de 07/11/2026): "
+                      "monte o pacote de novo (e assine de novo, se já tinha assinado)")
+
+
+def texto_nao_guardado(conn, p: dict) -> str | None:
+    if not p.get("montado_arquivo") or p["situacao"] in ("enviado", "descartado") or p.get("corpo_carta"):
+        return None
+    if not _contexto(conn, p)[2].carta or _texto_montado(conn, p) is not None:
+        return None
+    return TEXTO_NAO_GUARDADO
+
+
+# Issue #448: os motivos que montar o pacote de novo resolve (a FRC vigente, o termo de agora e o texto guardado)
+MOTIVOS_DE_MONTAR_DE_NOVO = (*PACOTE_SEM_A_FRC_VIGENTE, APOSTILAMENTO_MUDOU, TEXTO_NAO_GUARDADO)
 
 
 def bloqueio(conn, p: dict, hoje: datetime.date) -> str | None:
@@ -1311,7 +1346,8 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
             raise Bloqueio(" · ".join(dict.fromkeys(agora)))
         _conferir_anexos([{"nome": n, "tamanho": len(b)} for n, b, _ in rotulados], pv["anexos"])
         anexos = [(n, b) for n, b, _ in rotulados]
-        texto_enviado = {x["id"]: _texto_montado(conn, x["id"]) for x in ps}      # issue #448: lido antes do e-mail
+        # issue #448: lido antes do e-mail, do retrato de onde saiu o PDF (o mesmo montado_sha256)
+        texto_enviado = {x["id"]: _texto_montado(conn, x) for x in agora_ps}
         envio_id = correio.enviar_e_registrar(conn, usuario, "protocolo", para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),
                                               anexos, cco=cco)
@@ -1396,6 +1432,8 @@ def descartar(conn, usuario_id: int, protocolo_id: int, motivo: str) -> None:
     if not (motivo or "").strip():
         raise ValueError("Informe o motivo")
     with db.mutacao(conn):
+        if _linha(conn, protocolo_id)["envio_reservado_em"]:          # issue #448: sob o lock da reserva
+            raise ValueError(EM_ENVIO)
         conn.execute("UPDATE protocolos SET situacao='descartado' WHERE id=?", (protocolo_id,))
         auditoria.registrar(conn, usuario_id, "protocolo.descartar", "protocolo", protocolo_id,
                             {"situacao": p["situacao"]}, {"situacao": "descartado", "motivo": motivo.strip()})

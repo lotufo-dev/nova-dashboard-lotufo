@@ -2037,3 +2037,18 @@ def test_tela_de_envio_recebe_o_texto_da_carta_legivel(svc):
     pid = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_exec"]], "362")
     corpo = notas_envio.detalhe_envio(c, pid, hoje=HOJE)["carta"]["corpo"]
     assert "{apostilamento}" not in corpo and protocolo.MARCADOR_NA_TELA in corpo
+
+
+def test_pacote_sem_o_texto_guardado_mostra_montar_de_novo(svc):
+    """Issue #448 (revisor e gate Sol, rodada 1): no "Enviar a nota", o pacote montado antes desta versao (sem o
+    texto guardado) mostra o motivo e libera o "Montar de novo", que guarda o texto."""
+    c, ids = svc
+    pid = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_exec"]], "362")
+    protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
+    c.execute("UPDATE audit_log SET depois=json_remove(depois, '$.corpo') WHERE acao='protocolo.montar'")
+    c.commit()
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert (d["bloqueio"], d["remontar"], d["remontar_liberado"]) == (protocolo.TEXTO_NAO_GUARDADO, True, True)
+    protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert (d["bloqueio"], d["remontar"]) == (None, False)
