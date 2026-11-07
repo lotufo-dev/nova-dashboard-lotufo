@@ -190,7 +190,7 @@ def test_deploy_so_solta_o_watchdog_com_a_producao_comprovada():
     assert fim.index("-not $script:producaoProvada) {") < fim.index("if ($script:soltarWatchdog -and $script:producaoProvada -and -not $script:manterSentinela) {")
     # schtasks que estoura e nem morto morre: o /End ou /Run orfao ainda pode concluir, o watchdog fica pausado
     comando = codigo[codigo.index("function ComandoTarefa"):codigo.index("function PararComprovado")]
-    assert "if ($r.FilhoVivo) { $script:manterSentinela = $true; throw " in comando
+    assert "if ($r.FilhoVivo) { $script:manterSentinela = $true; $script:schtasksPreso = $true; throw " in comando
 
 
 def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
@@ -950,3 +950,31 @@ def test_deploy_remescla_386_443_uma_prova_so_da_producao():
     # o inicio so' prova sem sentinela anterior, e o sentinela e' lido antes de ser criado
     assert codigo.index("$script:sentinelaJaExistia = Test-Path $pause") < codigo.index("New-Item -ItemType File -Path $pause")
     assert codigo.count("$script:producaoProvada = NoArEm $anterior") == 1
+
+
+
+def test_deploy_schtasks_preso_com_producao_religada_diz_o_motivo_certo():
+    # Revisor da remescla da PR #389 com a #475: com o schtasks preso o catch do reinicio pode religar e provar o
+    # anterior, mas o finally dizia "a producao nao foi provada". O sentinela fica, com o motivo certo.
+    codigo = _codigo(_ler("deploy.ps1"))
+    assert codigo.index("$script:schtasksPreso = $false") < codigo.index("New-Item -ItemType File -Path $pause")
+    final = codigo[codigo.index("\n} finally {"):]
+    preso = final.index("elseif ($script:schtasksPreso -and $script:soltarWatchdog -and $script:producaoProvada) {")
+    assert preso < final.index("MANTIDO: a producao nao foi provada depois do deploy")
+    trecho = final[preso:final.index("MANTIDO: a producao nao foi provada depois do deploy")]
+    assert "um schtasks preso ainda pode concluir o /End ou /Run" in trecho and "Remove-Item" not in trecho
+
+
+def test_docs_do_deploy_nao_mandam_criar_nem_apagar_o_sentinela_da_sessao():
+    # Revisor da remescla da PR #389 com a #475: o deploy.ps1 cria o proprio sentinela; criado antes pela sessao, a
+    # producao nao conta como provada no inicio. Nem a variante da VM nem a skill mandam cria-lo, e a skill nao manda
+    # apagar um sentinela "que a sessao criou".
+    raiz = pathlib.Path(__file__).resolve().parents[2]
+    runbook = (raiz / "docs" / "runbook.md").read_text(encoding="utf-8")
+    skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
+    for texto in (runbook, skill):
+        assert "chamada curta antes" not in texto
+        assert "sentinela numa chamada curta" not in texto
+    assert "que a sessão criou" not in skill
+    assert "O mesmo vale para `BACKUP PRE-MIGRACAO FALHOU`" not in skill
+    assert "Não há sentinela\n     a apagar" in skill

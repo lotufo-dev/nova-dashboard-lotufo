@@ -45,7 +45,8 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
   3. conferência de saúde e commit, e apagar o sentinela (itens 4 e 5).
 
   Na VM (sem pasta de dev): a chamada 2 é `ssh <vm> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\DashboardLotufo\app\scripts\deploy.ps1 [-SemFrontend]'`
-  (um `-File` direto, sem script pelo stdin), com o sentinela numa chamada curta antes; a chamada 1 usa
+  (um `-File` direto, sem script pelo stdin), **sem criar o sentinela antes**: numa chamada curta, só conferir
+  `Test-Path C:\DashboardLotufo\watchdog.pause` (item 1) e deixar o script criá-lo; a chamada 1 usa
   `git -C C:\DashboardLotufo\app fetch` e `log`/`diff` contra `origin/master`, sem `switch`/`pull` (runbook, variante).
   **Se o script não imprimir nada em 2 minutos** (ele imprime `[HH:mm:ss] etapa` a cada passo desde a issue #386), abrir
   outra sessão SSH e conferir se `git`, `python` (pip) ou `node` (npm) estão rodando (`tasklist /FI "IMAGENAME eq git.exe"`
@@ -113,9 +114,8 @@ Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -
    Na VM: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\DashboardLotufo\app\scripts\deploy.ps1 [-SemFrontend]`.
 3. Ler a saída (uma linha `[HH:mm:ss] etapa` por passo: porta lida, fetch, checkout, pip, npm, reinício, saúde):
    - `deploy abortado: agendador de tarefas nao respondeu` (sai com código 1, antes do checkout; o script não criou nem apagou
-     sentinela) → nada mudou na produção; o Agendador de Tarefas do servidor está sem responder (issue #386). **Apagar o sentinela
-     que a sessão criou** (item 5; o watchdog não pode ficar pausado sem prazo) e avisar o Leo, sem tentar de novo sozinho.
-     O mesmo vale para `BACKUP PRE-MIGRACAO FALHOU`.
+     sentinela) → nada mudou na produção; o Agendador de Tarefas do servidor está sem responder (issue #386). Não há sentinela
+     a apagar (a sessão não cria e o script aborta antes de criá-lo); avisar o Leo, sem tentar de novo sozinho.
    - `deploy abortado no reinicio (...)` (sai com código 1) → o pinado voltou ao commit anterior, mas o agendador não respondeu
      na hora de parar ou iniciar a tarefa. Se a parada tinha começado, o script refaz parar → liberar porta → iniciar com o
      commit anterior e só diz "religada" com health 200 de processo novo; senão imprime "NAO esta' comprovadamente no ar",
@@ -127,7 +127,8 @@ Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -
    - `sem migracao nova; sem backup pre-migracao` ou `BACKUP PRE-MIGRACAO: <caminho>` → guardar o caminho do
      backup para o registro.
    - `BACKUP PRE-MIGRACAO FALHOU: <motivo>` seguido de `deploy abortado antes do checkout` (sai com código 1)
-     → nada mudou na produção. Avisar o Leo com o motivo, não tentar de novo sozinho.
+     → nada mudou na produção. Avisar o Leo com o motivo, não tentar de novo sozinho. O sentinela é do script: ler a
+     linha final do `finally` (sem linha `MANTIDO`, ele já foi apagado; com `sentinela ... MANTIDO`, **não apagar**).
    - `DEPLOY OK: <anterior> -> <novo> (health 200 no commit novo, processo novo)` (com `- backup pre-migracao: <caminho>` no
      fim quando houve backup) → seguir.
    - `ROLLBACK OK: producao de volta em <anterior>` (sai com código 1) → a versão nova não subiu e o código
@@ -149,6 +150,9 @@ Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -
      sozinho com a produção provada (health 200 com o campo `commit` igual ao commit esperado): `DEPLOY OK`,
      `ROLLBACK OK`, `deploy abortado no build; producao segue ...`, `... religada com ele (health 200 no commit anterior,
      processo novo)` no aborto do reinício, ou aborto antes do checkout com a linha `producao conferida no inicio` antes.
+     O `religada` não basta se o schtasks ficou preso: aí a linha final é `sentinela ... MANTIDO: a producao esta' provada,
+     mas um schtasks preso ...` → conferir que nenhum `schtasks.exe` segue rodando e o health no commit anterior (item 4),
+     e só então apagar o sentinela (item 5).
    - `sentinela ... MANTIDO POR FALHA NA REMOCAO` (depois de `DEPLOY OK`, `ROLLBACK OK` ou `producao segue ...`) →
      a produção está provada: **não reconstruir nem desfazer o deploy**. Conferir health e `commit` (item 4), corrigir
      o bloqueio (permissão, processo que segura o arquivo) e apagar o arquivo (item 5).
