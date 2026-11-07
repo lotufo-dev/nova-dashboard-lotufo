@@ -109,6 +109,7 @@
   .med-lateral.med-lateral--baixo { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 767px) {
+  .med-topo { flex-direction: column; }
   .med-topo h1 { font-size: 26px; line-height: 32px; }
   .med-valor { font-size: 28px; line-height: 36px; }
   .passos { padding: 14px 4px 10px; }
