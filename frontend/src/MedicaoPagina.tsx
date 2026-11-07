@@ -443,9 +443,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         pronta={pronta} aoSemAOutra={() => abrir("sozinha")} />
     </section>
   );
+  // o valor grande do cabecalho: o da pagina (medicao + reajuste somados no par), cheio; o passo 6 mostra o mesmo
+  const valores = grupo.map(x => x.valor_protocolado_centavos).filter((v): v is number => v !== null);
+  const valor = valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
   const corpoPasso6 = (
     <PassoPagamento grupo={grupo} junta={!!par?.junta} usuario={usuario}
-      protocolos={protocolos.dados?.protocolos ?? []} aqui={aqui} percentualBp={cab?.percentual_lotufo_bp ?? null}
+      protocolos={protocolos.dados?.protocolos ?? []} aqui={aqui} percentualBp={cab?.percentual_lotufo_bp ?? null} total={valor}
       aoReceber={x => { setAlvoRecebimento(x); abrir("recebimento"); }} />
   );
 
@@ -461,9 +464,6 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     3: diaMes(espVigente?.envio?.enviado_em), 4: diaMes(m.nota_emitida_em),
     5: diaMes(m.protocolos.map(p => p.data).sort().at(-1)), 6: diaMes(m.recebida_em),
   };
-  // o valor grande do cabecalho: o da pagina (medicao + reajuste somados no par), cheio
-  const valores = grupo.map(x => x.valor_protocolado_centavos).filter((v): v is number => v !== null);
-  const valor = valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
   // #514: todo passo aberto tem estrutura propria; so' o futuro (sem corpo) fica no cartao "Libera depois do passo N"
   const proprio = sit(aberta) !== "futuro" || (aberta === 5 && !!pronta);
 

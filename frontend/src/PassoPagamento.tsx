@@ -42,39 +42,20 @@ export function faltaDaNota(n: NotaDaMedicao): number | null {
   return n.falta_centavos ?? Math.max(0, devido - n.recebido_centavos);
 }
 
-/** O resumo do pagamento (#514). So' ha' numero (falta, recebido, total) quando TODOS os insumos estao completos e
- *  consistentes; qualquer insumo faltando vira null ("—"):
- *  - o cabecalho lido (`consorcio` null = ainda nao se sabe se a obra e' de consorcio);
- *  - cada medicao com todas as notas da Lotufo esperadas casadas (`notas_faltam` zero, do servidor) e alguma nota;
- *  - fora do consorcio, as notas da Lotufo fechando com o valor da medicao;
- *  - cada nota com titulo no RM.
- *  `recebido` e' o efetivo, titulo a titulo (devido - falta): juros num titulo nao cobrem outro aberto. `total` e' o
- *  devido (os titulos liquidos). `algumRecebido` vale mesmo sem numero: alguma nota da Lotufo ja' teve baixa. */
-export function aReceber(grupo: Medicao[], consorcio: boolean | null):
-    { falta: number | null; recebido: number | null; total: number | null; algumRecebido: boolean } {
-  const todas = grupo.flatMap(x => (x.notas ?? []).filter(daLotufo));
-  const algumRecebido = todas.some(n => n.recebido_centavos > 0);
-  const nulo = { falta: null, recebido: null, total: null, algumRecebido };
-  if (grupo.length === 0 || consorcio === null) return nulo;
-  let falta = 0, recebido = 0, total = 0;
-  for (const x of grupo) {
-    // so' as notas que atendem as saidas da Lotufo (#556): a extra, sem saida, nao entra na cota
-    const notas = (x.notas ?? []).filter(n => n.da_cota === true);
-    if (notas.length === 0 || x.notas_faltam === undefined || x.notas_faltam > 0) return nulo;
-    const valor = x.valor_atestado_centavos ?? x.valor_protocolado_centavos;
-    if (!consorcio && (valor === null || notas.reduce((t, n) => t + n.valor_centavos, 0) !== valor)) return nulo;
-    for (const n of notas) {
-      const f = faltaDaNota(n);
-      if (f === null) return nulo;
-      const devido = n.devido_centavos ?? 0;
-      falta += f; recebido += devido - f; total += devido;
-    }
-  }
-  return { falta, recebido, total, algumRecebido };
+/** O resumo do pagamento (#514): o servidor calcula, num lugar so', a cota da Lotufo da medicao e da irma valida do
+ *  par (`pagamento_cota`, sincronizacao_rm.pagamento_cota); a tela so' exibe, sem somar nem escolher notas. Valores
+ *  null ("—") quando o servidor diz que ainda nao fecham (sem espelho, nota faltando, nota sem titulo). */
+export function aReceber(grupo: Medicao[]):
+    { falta: number | null; recebido: number | null; total: number | null; parcial: boolean } {
+  const b = grupo[0]?.pagamento_cota ?? null;
+  if (!b || !b.completo) return { falta: null, recebido: null, total: null, parcial: !!b?.parcial };
+  return { falta: b.falta_centavos, recebido: b.recebido_centavos, total: b.total_centavos, parcial: b.parcial };
 }
 
-export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui, percentualBp, aoReceber }: {
+export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui, percentualBp, total, aoReceber }: {
   grupo: Medicao[]; junta: boolean; usuario: Usuario; protocolos: ProtocoloLido[]; aqui: Rota;
+  /** o valor cheio da pagina (o mesmo do cabecalho) */
+  total: number | null;
   /** a cota da Lotufo no contrato, em pontos-base (10000 = obra so' da Lotufo; null = cabecalho ainda nao lido) */
   percentualBp: number | null;
   aoReceber: (m: Medicao) => void;
@@ -87,12 +68,10 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
     return () => { vivo = false; };
   }, [chave]);
 
-  // sem o cabecalho ainda (null), a cota nao se sabe: nada de mostrar o cheio como se fosse da Lotufo
-  const consorcio = percentualBp === null ? null : percentualBp !== 10000;
-  const rotuloCota = consorcio === true;
-  const receber = aReceber(grupo, consorcio);
-  const valores = grupo.map(x => x.valor_protocolado_centavos).filter((v): v is number => v !== null);
-  const total = valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
+  // o rotulo so' fala de cota com o cabecalho lido e a obra em consorcio
+  const rotuloCota = percentualBp !== null && percentualBp !== 10000;
+  const receber = aReceber(grupo);
+  const quitado = receber.falta === 0 && (receber.total ?? 0) > 0;
   const recebida = grupo.length > 0 && grupo.every(x => x.estado === "recebida");
   const enviada = grupo.flatMap(x => x.protocolos.map(p => p.data)).sort().at(-1) ?? null;
   const dias = enviada && !recebida ? diasEntre(enviada, hojeLocal()) : null;
@@ -170,7 +149,8 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
             <p className="num">{brl(receber.recebido)} recebido de {brl(receber.total)}</p>
           )}
           <p>{recebida ? <Selo classe="selo--ok">Recebida</Selo>
-            : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado)) ? <Selo classe={receber.algumRecebido ? "selo--ok" : "selo--atencao"}>{receber.algumRecebido ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
+            : quitado ? <Selo classe="selo--ok">Recebido</Selo>
+            : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado)) ? <Selo classe={receber.parcial ? "selo--ok" : "selo--atencao"}>{receber.parcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
           {/* issue #53: o recebimento a mao e' so' do admin (o servidor recusa outro perfil) */}
           {recebiveis.map(x => (
             <div key={x.id}>

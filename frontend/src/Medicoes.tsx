@@ -50,6 +50,10 @@ export type Medicao = {
   espelho_em?: string | null; espelho_origem?: string | null;
   congelada: number; protocolos: Protocolo[]; notas?: Nota[];
   notas_faltam?: number;      // #514: notas da Lotufo esperadas (saidas do espelho) ainda sem nota casada
+  // #514: o resumo do passo Pagamento, pronto do servidor (a cota da Lotufo nesta medicao + a irma valida do par);
+  // null sem espelho vigente. Os valores vem null enquanto `completo` for falso.
+  pagamento_cota?: { notas_faltam: number; completo: boolean; total_centavos: number | null;
+    recebido_centavos: number | null; falta_centavos: number | null; parcial: boolean } | null;
   documentos?: Documento[];
   final?: number; final_em?: string | null;       // bloco 7: medicao final poe o contrato em encerramento
   // #284: boletins do orgao, do 1o ao vigente (#290: tambem na lista da obra, que a pagina da medicao le)
