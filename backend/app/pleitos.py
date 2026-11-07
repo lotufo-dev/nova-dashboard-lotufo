@@ -11,8 +11,8 @@ import json
 import re
 from html import escape
 
-from app import (arquivos, assinatura, auditoria, carta, correio, db, envio_reserva, espelhos, medicoes, oficios, pdfs,
-                 prazos, reajuste, tempo)
+from app import (arquivos, assinatura, auditoria, carta, correio, db, dinheiro, envio_reserva, espelhos,
+                 leitura_planilha_reajuste, medicoes, oficios, paineis, pdfs, prazos, reajuste, tempo)
 from app import html_email
 
 TIPOS = ("reajuste", "prazo", "conclusao")
@@ -21,8 +21,10 @@ TIPOS = ("reajuste", "prazo", "conclusao")
 PECAS_ORGAO = ("falencia", "contrato_social", "documento_representante", "balanco")
 TIPOS_ANEXO = ("planilha_calculo", "cronograma", "outro") + PECAS_ORGAO
 # IN 001/2024 art. 21 §1º: o pleito de reajuste leva memoria de calculo e cronograma; o de prazo, o cronograma.
-EXIGIDOS = {"reajuste": ("planilha_calculo", "cronograma"), "prazo": ("cronograma",), "conclusao": ()}
-ROTULO = {"reajuste": "Pleito de reajuste", "prazo": "Pedido de prorrogação", "conclusao": "Comunicação de conclusão"}
+EXIGIDOS = {"reajuste": ("planilha_calculo", "cronograma"), "prazo": ("cronograma",), "conclusao": (), "valor": ()}
+# issue #398: 'valor' (pedido de aditivo de valor) so' entra pelo cadastro; fora de TIPOS, nao tem carta nem envio
+ROTULO = {"reajuste": "Pleito de reajuste", "prazo": "Pedido de prorrogação", "conclusao": "Comunicação de conclusão",
+          "valor": "Pedido de valor"}
 ROTULO_ANEXO = {"planilha_calculo": "Memória de cálculo do reajuste", "cronograma": "Cronograma físico-financeiro",
                 "outro": "Outro anexo", "falencia": "Certidão de falência", "contrato_social": "Contrato social",
                 "documento_representante": "Documento do representante legal", "balanco": "Balanço patrimonial"}
@@ -153,7 +155,9 @@ def _vigente(conn, p: dict) -> dict | None:
 def _apostilado(conn, p: dict) -> bool:
     unica = conn.execute("SELECT COUNT(*) FROM contrato_datas_base WHERE contrato_id=?",
                          (p["contrato_id"],)).fetchone()[0] == 1
-    return reajuste._apostilamento(conn, p["contrato_id"], p["data_base_mes"], p["ciclo"], unica) is not None
+    # o mesmo criterio da aba e dos avisos (reajuste.apostilamento_do_ciclo): termo do ciclo que nao atendeu o
+    # pleito vigente nao fecha o ciclo (revisor R2 e gate Sol S1, PR #317)
+    return reajuste.apostilamento_do_ciclo(conn, p["contrato_id"], p["data_base_mes"], p["ciclo"], unica) is not None
 
 
 def _recusa_reemissao(conn, anterior: dict, reemissao: str, familia: str | None) -> str | None:
@@ -264,7 +268,154 @@ def criar(conn, usuario_id: int, contrato_id: int, tipo: str, numero_oficio: str
                             {"tipo": tipo, "numero_oficio": canon, "data_base_mes": data_base_mes, "ciclo": ciclo,
                              "dias": dias, **({"reemite_pleito_id": anterior["id"], "reemissao": reemissao}
                                               if anterior else {})})
+        _trocar_curva_s(conn, usuario_id, tipo, contrato_id, pid)
     return pid
+
+
+# A curva S gerada mora numa pasta so' dela: o `arquivo` "curvas/<sha>.xlsx" e' o que a distingue de um anexo
+# arrastado (sempre "pleitos/<sha>.<ext>", mesmo com o nome "Curva S.xlsx"), sem coluna nova na tabela -- a
+# migracao 037 reconstroi `pleito_anexos` com as colunas dela e perderia qualquer coluna acrescentada depois.
+PASTA_CURVA_S = "curvas"
+
+
+CURVA_S_OBRIGATORIA = ("A curva S vai com o pedido de prazo e não se remove: para trocá-la pela dos dados de agora, "
+                       "use Atualizar curva S")
+CURVA_S_FALTA = "Curva S não anexada: atualize a curva S"
+CURVA_S_MUDOU = "A curva S mudou desde a carta montada: atualize a curva S"
+CURVA_S_ILEGIVEL = "O arquivo da curva S anexada sumiu ou está corrompido: atualize a curva S"
+ARQUIVO_SUMIDO = "Não foi possível ler {o_que} no disco do servidor: {acao}"     # issue #441
+# O que fazer quando a carta nao se le do disco. Remontar muda a carta (a data, por exemplo) e invalida a assinada:
+# so' se manda remontar quando a montada tambem sumiu; com a montada no disco, basta subir a assinada de novo.
+SUBA_A_ASSINADA = "suba a carta assinada de novo"
+REMONTE_E_ASSINE = "monte a carta de novo, baixe, assine e suba a assinada"
+NOME_RESERVADO = f"O nome {carta.NOME_CURVA_S} é o da curva S gerada pelo sistema: renomeie o arquivo para anexá-lo"
+
+
+def _gerada(a: dict) -> bool:
+    """O anexo e' a curva S que o sistema gerou (pasta `curvas/`), nao um arrastado."""
+    return (a.get("arquivo") or "").startswith(f"{PASTA_CURVA_S}/")
+
+
+def _linhas_curva_s(conn, tipo: str, contrato_id: int) -> list[dict]:
+    """Issue #293 (spec 2026-10-20 §4 item 3): as linhas da curva S do pedido de prazo, gerada do cronograma vigente,
+    do anterior a ultima repactuacao (D9) e do medido. Vazia fora do pedido de prazo e sem previsto vigente: so' o
+    medido, com o previsto zerado em todas as linhas, nao e' a curva do cronograma e nao vai ao orgao."""
+    if tipo != "prazo":
+        return []
+    linhas = paineis.curva_s(conn, contrato_id)
+    return linhas if any(x["previsto_vigente_centavos"] > 0 for x in linhas) else []
+
+
+def _curvas_em_vigor(conn, pleito_id: int) -> list[dict]:
+    """As curvas geradas em vigor do pleito (id, arquivo e sha256; o normal e' uma so', ou nenhuma)."""
+    return [dict(r) for r in conn.execute("SELECT id, arquivo, sha256 FROM pleito_anexos WHERE pleito_id=? AND "
+                                          "arquivo LIKE ? AND removido_em IS NULL ORDER BY id",
+                                          (pleito_id, f"{PASTA_CURVA_S}/%"))]
+
+
+def _bytes_ou_nada(rel: str) -> bytes | None:
+    """Os bytes do arquivo, ou None se ele sumiu do disco (backup sem `curvas/`, #441)."""
+    try:
+        return _bytes(rel)
+    except (OSError, ValueError):
+        return None
+
+
+def _conteudo_anexado(a: dict, dados: bytes | None) -> list[tuple] | None:
+    """Issue #447: o conteudo da curva anexada, sobre os bytes `dados` ja' lidos do arquivo (o mesmo buffer que vai
+    no e-mail); None se o arquivo sumiu, nao bate com o sha256 gravado ou nao se le como curva S."""
+    if dados is None:
+        return None
+    if arquivos.sha_de(dados) != a["sha256"]:
+        return None
+    try:
+        return carta.ler_curva_s(dados)
+    except ValueError:
+        return None
+
+
+def _trocar_curva_s(conn, usuario_id: int, tipo: str, contrato_id: int, pleito_id: int) -> None:
+    """Dentro do BEGIN IMMEDIATE de `criar`, `montar` e `atualizar_curva_s`: a curva sai da mesma leitura que decide a
+    troca (medicao cancelada ou versao nova do cronograma no meio nao misturam dois retratos). O xlsx e' gravado
+    pelo sha256 antes da linha do banco; a gerada antes fica marcada como removida (nunca apagada) e a do dia entra
+    nos anexos (`pleito.curva_s`). Mesmo conteudo com o arquivo integro: nada muda (issue #447: compara as celulas,
+    nao os bytes). Arquivo sumido ou corrompido: a curva e' regravada. Sem curva a gerar, a que estava em vigor sai e
+    nenhuma entra (`pleito.curva_s_removida`)."""
+    if tipo != "prazo":
+        return
+    linhas = _linhas_curva_s(conn, tipo, contrato_id)
+    agora = carta.conteudo_curva_s(linhas) if linhas else None
+    em_vigor = _curvas_em_vigor(conn, pleito_id)
+    if agora is None and not em_vigor:
+        return
+    if agora is not None and len(em_vigor) == 1 and \
+            _conteudo_anexado(em_vigor[0], _bytes_ou_nada(em_vigor[0]["arquivo"])) == agora:
+        return
+    removidas = [x["id"] for x in em_vigor]
+    conn.executemany("UPDATE pleito_anexos SET removido_em=datetime('now') WHERE id=?", [(x,) for x in removidas])
+    antes = {"anexos_removidos": removidas} if removidas else None
+    if agora is None:
+        auditoria.registrar(conn, usuario_id, "pleito.curva_s_removida", "pleito", pleito_id, antes, None)
+        return
+    dados = carta.curva_s_xlsx(linhas)
+    rel, sha = arquivos.gravar_bytes(PASTA_CURVA_S, dados, "xlsx")
+    aid = conn.execute("INSERT INTO pleito_anexos (pleito_id, tipo, nome, arquivo, sha256, tamanho, ext) "
+                       "VALUES (?, 'outro', ?, ?, ?, ?, 'xlsx')",
+                       (pleito_id, carta.NOME_CURVA_S, rel, sha, len(dados))).lastrowid
+    auditoria.registrar(conn, usuario_id, "pleito.curva_s", "pleito", pleito_id, antes,
+                        {"anexo_id": aid, "nome": carta.NOME_CURVA_S, "sha256": sha})
+
+
+def _problema_curva_s(conn, p: dict, lidas: dict[int, bytes | None] | None = None) -> str | None:
+    """Rodada 2 da PR #436 (a regra do termo no oficio, PR #435): a curva anexada tem de ser a dos dados de agora.
+    Com curva a gerar, exatamente uma gerada em vigor, com o arquivo integro e as mesmas celulas (issue #447: o
+    conteudo, nao os bytes do zip); sem curva a gerar, nenhuma em vigor. Fora disso o envio recusa e a justificativa
+    nao libera: cronograma novo, medicao mudada ou cancelada, versoes superadas, arquivo sumido ou o pedido montado
+    antes da curva existir pedem "Atualizar curva S" (`atualizar_curva_s`), que nao mexe na carta assinada.
+
+    `lidas` (id do anexo -> bytes, de `_ler_anexos`): confere sobre esse buffer, o mesmo que vai no e-mail, sem ler
+    o disco de novo (gate Sol na PR #455: o arquivo trocado depois da conferencia nao sai sem ser conferido)."""
+    if p["tipo"] != "prazo":
+        return None
+    linhas = _linhas_curva_s(conn, p["tipo"], p["contrato_id"])
+    em_vigor = _curvas_em_vigor(conn, p["id"])
+    if not linhas:
+        return CURVA_S_MUDOU if em_vigor else None
+    if not em_vigor:
+        return CURVA_S_FALTA
+    if len(em_vigor) != 1:
+        return CURVA_S_MUDOU
+    a = em_vigor[0]
+    if lidas is not None and a["id"] not in lidas:
+        return CURVA_S_MUDOU
+    conteudo = _conteudo_anexado(a, lidas[a["id"]] if lidas is not None else _bytes_ou_nada(a["arquivo"]))
+    if conteudo is None:
+        return CURVA_S_ILEGIVEL
+    return None if conteudo == carta.conteudo_curva_s(linhas) else CURVA_S_MUDOU
+
+
+def atualizar_curva_s(conn, usuario_id: int, pleito_id: int) -> None:
+    """Issue #447: troca a curva S do pedido de prazo pela dos dados de agora sem montar a carta de novo. O texto da
+    carta nao cita valor da curva, entao a carta montada e a assinada ficam (montar apagaria a assinatura do
+    DocuSign a cada medicao protocolada entre o montar e o envio)."""
+    p = _linha(conn, pleito_id)
+    _editavel(p)
+    if p["tipo"] != "prazo":
+        raise ValueError("Só o pedido de prorrogação leva a curva S")
+    with db.mutacao(conn):
+        _anexos_mudaveis(conn, pleito_id)
+        _trocar_curva_s(conn, usuario_id, p["tipo"], p["contrato_id"], pleito_id)
+
+
+def _anexos_mudaveis(conn, pleito_id: int) -> dict:
+    """Dentro do BEGIN IMMEDIATE (como em `_gravar_previsao`): com o e-mail saindo, a carta e os anexos sao os que
+    foram conferidos depois da reserva e vao no e-mail; trocar um ali mandaria ao orgao o que nao se conferiu. E
+    enviado (ou descartado) enquanto se montava ou conferia, nao volta a ser editavel. Devolve a linha relida."""
+    agora = _linha(conn, pleito_id)
+    _editavel(agora)
+    if agora["envio_reservado_em"]:
+        raise envio_reserva.reservado(conn, agora["envio_reservado_em"], agora["envio_reservado_por"])
+    return agora
 
 
 def adicionar_anexo(conn, usuario_id: int, pleito_id: int, tipo: str, nome: str, dados: bytes, ext: str) -> int:
@@ -274,8 +425,12 @@ def adicionar_anexo(conn, usuario_id: int, pleito_id: int, tipo: str, nome: str,
         raise ValueError("O anexo é um PDF ou uma planilha .xlsx")
     p = _linha(conn, pleito_id)
     _editavel(p)
+    # so' no prazo, o unico que gera a curva: o orgao receberia duas "Curva S" (nos outros, `_nome_unico` basta)
+    if p["tipo"] == "prazo" and (nome or "").strip().casefold() == carta.NOME_CURVA_S.casefold():
+        raise ValueError(NOME_RESERVADO)
     rel, sha = arquivos.gravar_bytes("pleitos", dados, ext)
     with db.mutacao(conn):
+        _anexos_mudaveis(conn, pleito_id)
         aid = conn.execute("INSERT INTO pleito_anexos (pleito_id, tipo, nome, arquivo, sha256, tamanho, ext) "
                            "VALUES (?,?,?,?,?,?,?)", (pleito_id, tipo, nome, rel, sha, len(dados), ext)).lastrowid
         auditoria.registrar(conn, usuario_id, "pleito.anexo", "pleito", pleito_id, None,
@@ -287,11 +442,145 @@ def remover_anexo(conn, usuario_id: int, pleito_id: int, anexo_id: int) -> None:
     p = _linha(conn, pleito_id)
     _editavel(p)
     with db.mutacao(conn):
+        _anexos_mudaveis(conn, pleito_id)
+        a = conn.execute("SELECT arquivo FROM pleito_anexos WHERE id=? AND pleito_id=?", (anexo_id, pleito_id)).fetchone()
+        if a is not None and _gerada(dict(a)):        # decisao da rodada 1 da PR #436: a curva S do prazo e' obrigatoria
+            raise ValueError(CURVA_S_OBRIGATORIA)
         n = conn.execute("UPDATE pleito_anexos SET removido_em=datetime('now') "
                          "WHERE id=? AND pleito_id=? AND removido_em IS NULL", (anexo_id, pleito_id)).rowcount
         if n != 1:
             raise ValueError("Anexo não encontrado")
         auditoria.registrar(conn, usuario_id, "pleito.anexo_removido", "pleito", pleito_id, None, {"anexo_id": anexo_id})
+
+
+# --- previsao de reajuste (issue #272; spec 2026-10-20 §2.2) -----------------------------------------
+
+MAX_COMPETENCIAS = leitura_planilha_reajuste.MAX_COMPETENCIAS
+PREVISAO_NA_REITERACAO = "Reiteração não traz previsão de reajuste: vale a do pleito reiterado"
+MEMORIA_DIVERGENTE = "A memória de cálculo anexada não é a planilha da previsão aceita"
+MEMORIA_AUSENTE = "A planilha da previsão aceita não está anexada"
+CARTA_REMONTADA = "A carta foi montada de novo enquanto se conferia o assinado; baixe a carta nova e assine de novo"
+_COMPETENCIA = re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])")
+
+
+def gravar_previsao_planilha(conn, usuario_id: int, pleito_id: int, dados: bytes, sha256_conferido: str) -> int:
+    """Aceite da planilha conferida: o servidor rele o arquivo e grava o que ELE leu, com origem 'pleito' (a tela
+    nao escolhe a origem nem os valores). `sha256_conferido` e' o da leitura que a pessoa viu: outro arquivo no
+    aceite e' recusado. Fora do modelo levanta `PlanilhaNaoReconhecida` (um ValueError)."""
+    sha = arquivos.sha_de(dados)
+    if sha != (sha256_conferido or "").lower():
+        raise ValueError("A planilha do aceite não é a que foi conferida; anexe e confira de novo")
+    linhas = leitura_planilha_reajuste.ler(dados)
+    return _gravar_previsao(conn, usuario_id, pleito_id, "pleito", linhas, {"planilha_sha256": sha})
+
+
+def gravar_previsao_digitada(conn, usuario_id: int, pleito_id: int, linhas: list[dict]) -> int:
+    """Previsao digitada pela pessoa (planilha fora do modelo, fila humana): sempre origem 'manual'."""
+    return _gravar_previsao(conn, usuario_id, pleito_id, "manual", linhas, {})
+
+
+def _planilha_aceita(conn, pleito_id: int) -> str | None:
+    """sha256 da ultima planilha aceita (origem 'pleito') neste pleito. Vem da auditoria da gravacao, que entra no
+    mesmo commit das previsoes e e' append-only (indice `ix_audit_log_entidade`, migracao 036)."""
+    for r in conn.execute("SELECT depois FROM audit_log WHERE entidade='pleito' AND entidade_id=? "
+                          "AND acao='pleito.previsao' ORDER BY id DESC", (str(pleito_id),)):
+        d = json.loads(r["depois"] or "{}")
+        if d.get("origem") == "pleito":
+            return d.get("planilha_sha256")
+    return None
+
+
+def _memoria_da_previsao(conn, p: dict) -> str | None:
+    """Com previsao lida da planilha, toda planilha .xlsx anexada como memoria de calculo tem de ser a aceita:
+    senao o orgao recebe uma planilha e a dashboard mostra outra ('divergente', o envio e' recusado). Sem nenhuma
+    .xlsx na memoria (so' PDF, ou nada) a aceita nao esta' la' ('ausente'): pendencia que a justificativa libera,
+    porque o PDF pode ser a mesma planilha impressa e nao ha' como casar um com o outro. None: nada a apontar."""
+    sha = _planilha_aceita(conn, p["id"]) if p["tipo"] == "reajuste" else None
+    if not sha:
+        return None
+    memorias = {a["sha256"] for a in _anexos_de(conn, p["id"]) if a["tipo"] == "planilha_calculo" and a["ext"] == "xlsx"}
+    if not memorias:
+        return "ausente"
+    return "divergente" if memorias != {sha} else None
+
+
+def _memoria_divergente(conn, p: dict) -> bool:
+    return _memoria_da_previsao(conn, p) == "divergente"
+
+
+def _fonte(conn, r) -> str:
+    if r["origem"] == "apostilamento":
+        return "a do apostilamento"
+    num = conn.execute("SELECT numero_oficio FROM pleitos WHERE id=?", (r["pleito_id"],)).fetchone()
+    lida = "lida da planilha" if r["origem"] == "pleito" else "digitada"
+    return f"a {lida} do pleito {(num and num[0]) or 'sem número'}"
+
+
+def _gravar_previsao(conn, usuario_id: int, pleito_id: int, origem: str, linhas: list[dict], extra: dict) -> int:
+    """Uma linha de `reajuste_previsoes` por competencia (evento; aceitar de novo grava outra leva e a leitura
+    escolhe a mais recente). Devolve quantas gravou.
+
+    Como nada se apaga, a leitura (`reajuste.previsoes_vigentes`) tem de dar, depois da gravacao, exatamente o que a
+    pessoa conferiu: a leva nova do mesmo pleito traz todas as competencias das anteriores (senao a que saiu
+    continuaria valendo), e nenhuma competencia gravada pode continuar perdendo para outra previsao mais forte
+    (a lida de outro pleito do ciclo, a lida deste pleito contra a digitada, o apostilamento)."""
+    p = _linha(conn, pleito_id)
+    if p["tipo"] != "reajuste":
+        raise ValueError("Previsão de reajuste só no pleito de reajuste")
+    if _reiteracao(p):               # a reiteracao nao traz cronograma (#277): a previsao e' a do pleito reiterado
+        raise ValueError(PREVISAO_NA_REITERACAO)
+    if not p["data_base_mes"] or not p["ciclo"]:
+        raise ValueError("Pleito sem data-base e ciclo: a previsão não tem a que se ligar")
+    if not linhas:
+        raise ValueError("Informe ao menos uma competência com o valor previsto")
+    if len(linhas) > MAX_COMPETENCIAS:
+        raise ValueError(f"No máximo {MAX_COMPETENCIAS} competências por previsão")
+    vistas: set[str] = set()
+    for x in linhas:
+        comp, valor = x.get("competencia"), x.get("valor_centavos")
+        if not isinstance(comp, str) or not _COMPETENCIA.fullmatch(comp):
+            raise ValueError("Competência inválida: use mês e ano")
+        if comp in vistas:
+            raise ValueError(f"A competência {comp[5:]}/{comp[:4]} aparece duas vezes")
+        vistas.add(comp)
+        # bool e' int no Python: True nao e' um centavo
+        if not isinstance(valor, int) or isinstance(valor, bool) or abs(valor) > dinheiro.TETO_CENTAVOS:
+            raise ValueError(f"Valor previsto inválido em {comp[5:]}/{comp[:4]}")
+    ordenadas = sorted(linhas, key=lambda x: x["competencia"])
+    with db.mutacao(conn):
+        # dentro do BEGIN IMMEDIATE (como em `descartar`): situacao e reserva de envio lidas aqui sao as que valem;
+        # com o e-mail saindo ou ja' enviado, a previsao do pleito e' a que foi com ele
+        agora = _linha(conn, pleito_id)
+        if agora["situacao"] in ("descartado", "enviado"):
+            raise ValueError(f"Pleito {agora['situacao']}: a previsão não pode ser gravada (correção é pleito novo)")
+        if agora["envio_reservado_em"]:
+            raise envio_reserva.reservado(conn, agora["envio_reservado_em"], agora["envio_reservado_por"])
+        anteriores = {r[0] for r in conn.execute("SELECT competencia FROM reajuste_previsoes WHERE pleito_id=?",
+                                                 (pleito_id,))}
+        faltam = sorted(anteriores - vistas)
+        if faltam:
+            lista = ", ".join(f"{c[5:]}/{c[:4]}" for c in faltam)
+            raise ValueError(f"A previsão nova não traz {lista}, que a anterior deste pleito tinha; inclua a "
+                             "competência")
+        novas = set()
+        for x in ordenadas:
+            novas.add(conn.execute(
+                "INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, "
+                "valor_previsto_centavos, origem, pleito_id, usuario_id) VALUES (?,?,?,?,?,?,?,?)",
+                (p["contrato_id"], p["data_base_mes"], p["ciclo"], x["competencia"], x["valor_centavos"],
+                 origem, pleito_id, usuario_id)).lastrowid)
+        # a gravada tem de ser a que vale; se outra previsao mais forte continua vencendo, a mutacao desfaz tudo.
+        # A conta e' a de depois do envio deste pleito (`como_enviado`): a reemissao derruba o que reemite (e a
+        # cadeia de reiteracoes acima), a reiteracao nao derruba nada; o resto do ciclo segue na conta
+        for r in reajuste.previsoes_vigentes(conn, p["contrato_id"], p["data_base_mes"], como_enviado=pleito_id):
+            if r["ciclo"] == p["ciclo"] and r["competencia"] in vistas and r["id"] not in novas:
+                c = r["competencia"]
+                raise ValueError(f"A previsão de {c[5:]}/{c[:4]} continuaria sendo {_fonte(conn, r)}, que vale "
+                                 "mais que esta; esta não seria usada")
+        auditoria.registrar(conn, usuario_id, "pleito.previsao", "pleito", pleito_id, None,
+                            {"origem": origem, "data_base_mes": p["data_base_mes"], "ciclo": p["ciclo"],
+                             "competencias": {x["competencia"]: x["valor_centavos"] for x in ordenadas}, **extra})
+    return len(ordenadas)
 
 
 # --- carta -----------------------------------------------------------------------------------------
@@ -390,11 +679,13 @@ def montar(conn, usuario_id: int, pleito_id: int, corpo: str | None = None, hoje
     n = pdfs.paginas(pdf)
     rel, sha = arquivos.gravar_bytes("pleitos", pdf, "pdf")
     with db.mutacao(conn):
+        _anexos_mudaveis(conn, pleito_id)
         conn.execute("UPDATE pleitos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
                      "assinado_arquivo=NULL, assinado_sha256=NULL, conferencia=NULL, situacao='montado' WHERE id=?",
                      (corpo, rel, sha, n, pleito_id))
         auditoria.registrar(conn, usuario_id, "pleito.montar", "pleito", pleito_id, None,
                             {"sha256": sha, "paginas": n, "tamanho": len(pdf)})
+        _trocar_curva_s(conn, usuario_id, p["tipo"], p["contrato_id"], pleito_id)
     return {"arquivo": rel, "sha256": sha, "paginas": n, "tamanho": len(pdf), "nome": nome_documento(conn, p)}
 
 
@@ -403,9 +694,11 @@ def receber_assinado(conn, usuario_id: int, pleito_id: int, pdf: bytes) -> dict:
     _editavel(p)
     if not p["montado_arquivo"]:
         raise ValueError("Monte a carta antes de anexar o assinado")
-    conf = assinatura.conferir_pdfs(_bytes(p["montado_arquivo"]), pdf)
+    conf = assinatura.conferir_pdfs(_bytes_do_disco(p["montado_arquivo"], "a carta montada", REMONTE_E_ASSINE), pdf)
     rel, sha = arquivos.gravar_bytes("pleitos", pdf, "pdf")
     with db.mutacao(conn):
+        if _anexos_mudaveis(conn, pleito_id)["montado_sha256"] != p["montado_sha256"]:
+            raise ValueError(CARTA_REMONTADA)
         conn.execute("UPDATE pleitos SET assinado_arquivo=?, assinado_sha256=?, conferencia=?, situacao='assinado' "
                      "WHERE id=?", (rel, sha, json.dumps(conf), pleito_id))
         auditoria.registrar(conn, usuario_id, "pleito.assinado", "pleito", pleito_id, None,
@@ -415,7 +708,7 @@ def receber_assinado(conn, usuario_id: int, pleito_id: int, pdf: bytes) -> dict:
 
 # --- pendencias, detalhe e lista -------------------------------------------------------------------
 
-def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
+def pendencias(conn, p: dict, hoje: datetime.date, curvas_lidas: dict[int, bytes | None] | None = None) -> list[dict]:
     if p["origem"] == "cadastro":
         return []
     out = []
@@ -426,6 +719,15 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     if p["tipo"] == "prazo" and _CHUVA.search(p["justificativa"] or "") and not conn.execute(
             "SELECT 1 FROM instrumentos WHERE contrato_id=? AND tipo='paralisacao' LIMIT 1", (p["contrato_id"],)).fetchone():
         out.append({"codigo": "chuva", "mensagem": "O contrato veda alegar só chuva; cite a ordem de paralisação do órgão"})
+    memoria = _memoria_da_previsao(conn, p)
+    if memoria == "divergente":
+        out.append({"codigo": "memoria_divergente", "mensagem": MEMORIA_DIVERGENTE})
+    elif memoria == "ausente":
+        out.append({"codigo": "memoria_ausente", "mensagem": MEMORIA_AUSENTE})
+    # issue #447: a curva S fora dos dados de agora aparece no "O que falta" e na previa (o envio recusa e a
+    # justificativa nao libera; "Atualizar curva S" resolve)
+    if p["situacao"] not in ("enviado", "descartado") and (curva := _problema_curva_s(conn, p, curvas_lidas)):
+        out.append({"codigo": "curva_s", "mensagem": curva})
     if p["situacao"] == "rascunho":
         out.append({"codigo": "nao_montado", "mensagem": "Carta ainda não montada"})
     elif not p["assinado_arquivo"]:
@@ -449,7 +751,8 @@ def detalhe(conn, pleito_id: int, hoje: datetime.date | None = None) -> dict:
         "SELECT id, numero_oficio, situacao, enviado_em, COALESCE(reemissao, 'cronograma') AS reemissao FROM pleitos "
         "WHERE reemite_pleito_id=? AND situacao<>'descartado' ORDER BY id", (pleito_id,))]
     return {**p, "rotulo": _rotulo(p), "anterior": dict(a) if a else None, "reemissoes": seguintes,
-            "reemissoes_possiveis": reemissoes_possiveis(conn, p), "anexos": _anexos_de(conn, pleito_id),
+            "reemissoes_possiveis": reemissoes_possiveis(conn, p),
+            "anexos": [{**x, "gerado": _gerada(x)} for x in _anexos_de(conn, pleito_id)],
             "exigidos": [{"tipo": t, "rotulo": ROTULO_ANEXO[t]} for t in _exigidos(conn, p)],
             "conferencia": json.loads(p["conferencia"] or "null"), "pendencias": pendencias(conn, p, hoje),
             "nome_documento": nome_documento(conn, p) if p["montado_arquivo"] else None}
@@ -477,17 +780,63 @@ def _destinatarios(conn, regras: dict, c: dict, hoje: datetime.date) -> tuple[li
     return para, [x for x in copia if x not in para]
 
 
-def _anexos_envio(conn, p: dict) -> list[tuple[str, bytes]]:
-    out = []
-    if p["assinado_arquivo"] or p["montado_arquivo"]:
-        out.append((nome_documento(conn, p), _bytes(p["assinado_arquivo"] or p["montado_arquivo"])))
-    out += [(a["nome"], _bytes(a["arquivo"])) for a in _anexos_de(conn, p["id"])]
+def _nome_unico(nome: str, usados: set[str]) -> str:
+    """`nome`, ou "base (2).ext", "base (3).ext"... se ja' vai outro anexo com ele (sem diferenciar maiusculas)."""
+    i = nome.rfind(".")
+    base, ext = (nome[:i], nome[i:]) if i > 0 else (nome, "")
+    final, k = nome, 2
+    while final.casefold() in usados:
+        final, k = f"{base} ({k}){ext}", k + 1
+    usados.add(final.casefold())
+    return final
+
+
+def _ler_anexos(conn, p: dict) -> list[tuple[str, bytes | None, dict | None]]:
+    """A carta e os anexos, lidos do disco uma vez so', com nomes unicos no e-mail: a carta e a curva S gerada guardam
+    os delas, e um arrastado com nome repetido ganha " (2)" (o orgao nao recebe dois arquivos com o mesmo nome). A
+    curva gerada que sumiu do disco vem com bytes None (a pendencia da curva diz o que fazer; a previa nao quebra)."""
+    out, usados = [], set()
+    if p["assinado_arquivo"]:
+        acao = SUBA_A_ASSINADA if _no_disco(p["montado_arquivo"]) else REMONTE_E_ASSINE
+        out.append((_nome_unico(nome_documento(conn, p), usados),
+                    _bytes_do_disco(p["assinado_arquivo"], "a carta assinada", acao), None))
+    elif p["montado_arquivo"]:
+        out.append((_nome_unico(nome_documento(conn, p), usados),
+                    _bytes_do_disco(p["montado_arquivo"], "a carta montada", "monte a carta de novo"), None))
+    anexos = _anexos_de(conn, p["id"])
+    nomes = {a["id"]: _nome_unico(a["nome"], usados) for a in sorted(anexos, key=lambda a: not _gerada(a))}
+    out += [(nomes[a["id"]], _bytes_ou_nada(a["arquivo"]) if _gerada(a) else
+             _bytes_do_disco(a["arquivo"], f'o anexo "{a["nome"]}"', "remova o anexo e anexe o arquivo de novo"), a)
+            for a in anexos]
     return out
 
 
-def previa_envio(conn, pleito_id: int, remetente: str | None = None, hoje: datetime.date | None = None) -> dict:
+def _no_disco(rel: str | None) -> bool:
+    try:
+        return bool(rel) and arquivos.caminho_seguro(rel).is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def _bytes_do_disco(rel: str, o_que: str, acao: str) -> bytes:
+    """Os bytes, ou ValueError em portugues se o arquivo nao se le (sumiu numa restauracao sem a pasta, #441): a
+    previa e o envio respondem 422 com o que falta, nao 500."""
+    try:
+        return _bytes(rel)
+    except (OSError, ValueError):
+        raise ValueError(ARQUIVO_SUMIDO.format(o_que=o_que, acao=acao)) from None
+
+
+def _curvas_lidas(lidos: list[tuple[str, bytes | None, dict | None]]) -> dict[int, bytes | None]:
+    return {a["id"]: b for _, b, a in lidos if a is not None and _gerada(a)}
+
+
+def previa_envio(conn, pleito_id: int, remetente: str | None = None, hoje: datetime.date | None = None,
+                 lidos: list[tuple[str, bytes | None, dict | None]] | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     p = _linha(conn, pleito_id)
+    if p["tipo"] not in TIPOS:
+        raise ValueError(f"{ROTULO.get(p['tipo'], 'Este pleito')} não se envia pela dashboard")
     c = _contrato(conn, p["contrato_id"])
     _, regras, _ = _orgao(conn, c)
     textos, campos = _textos(conn, p), _campos(conn, p, c, hoje)
@@ -495,15 +844,16 @@ def previa_envio(conn, pleito_id: int, remetente: str | None = None, hoje: datet
     if remetente:       # o e-mail de login e a conta do Outlook (podem ser diferentes), como no protocolo
         fora = {remetente.lower()} | correio.contas_do_usuario(conn, remetente)
         copia = [x for x in copia if x.lower() not in fora]
-    anexos = _anexos_envio(conn, p)
-    total = sum(len(b) for _, b in anexos)
-    pend = pendencias(conn, p, hoje)
+    lidos = _ler_anexos(conn, p) if lidos is None else lidos
+    anexos = [(n, len(b) if b is not None else a["tamanho"]) for n, b, a in lidos]
+    total = sum(t for _, t in anexos)
+    pend = pendencias(conn, p, hoje, _curvas_lidas(lidos))
     if total > correio.MAX_TOTAL:
         pend.append({"codigo": "tamanho", "mensagem": f"Anexos somam {total // (1024 * 1024)} MB, acima do limite "
                                                       f"do e-mail ({correio.MAX_TOTAL // (1024 * 1024)} MB)"})
     return {"para": para, "copia": copia, "assunto": carta.preencher(textos.get("email_assunto", ""), campos),
             "corpo": carta.preencher(textos.get("email_corpo", ""), campos).strip(),
-            "anexos": [{"nome": n, "tamanho": len(b)} for n, b in anexos], "total": total,
+            "anexos": [{"nome": n, "tamanho": t} for n, t in anexos], "total": total,
             "limite": correio.MAX_TOTAL, "pendencias": pend}
 
 
@@ -522,26 +872,53 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         raise ValueError(f"Pleito já {p['situacao']}")
     if not p["montado_arquivo"]:
         raise ValueError("Monte a carta antes de enviar")
+    if (curva := _problema_curva_s(conn, p)):   # a curva S do prazo e' a dos dados de agora (PR #436); antes da
+        raise ValueError(curva)                 # previa, que le os anexos do disco (curva sumida: issue #447)
     pv = previa_envio(conn, pleito_id, hoje=hoje)
     para = [x.strip() for x in para if x.strip()]
     if not para:
         raise ValueError("Informe ao menos um destinatário")
     if pv["total"] > correio.MAX_TOTAL:
         raise ValueError("Anexos acima do limite do e-mail")
+    if _memoria_divergente(conn, p):            # a justificativa nao libera: o orgao receberia outra planilha
+        raise ValueError(MEMORIA_DIVERGENTE)
     justificativa = (justificativa or "").strip() or None
     if pv["pendencias"] and len(justificativa or "") < MIN_JUSTIFICATIVA:
         raise ValueError(f"{len(pv['pendencias'])} pendência(s) na prévia: informe a justificativa "
                          f"(ao menos {MIN_JUSTIFICATIVA} caracteres) para enviar assim")
     # Reserva atomica antes do e-mail (10/10/2026): dois cliques simultaneos nao mandam duas cartas ao orgao.
     envio_reserva.reservar(conn, "pleitos", pleito_id, usuario["id"], p["envio_id"])
-    # descartado entre a leitura acima e a reserva (outra aba): nada sai (com a reserva, `descartar` ja' recusa)
-    if _linha(conn, pleito_id)["situacao"] == "descartado":
-        envio_reserva.liberar_com_retentativa(conn, "pleitos", pleito_id)
-        raise ValueError("Pleito descartado enquanto se preparava o envio: nada foi enviado")
+    # Da reserva ao e-mail, tudo dentro do mesmo `try`: qualquer recusa ou erro (anexo que nao se le do disco,
+    # orgao que saiu do contrato) destrava e sobe; so' o e-mail que saiu sem registro segura a reserva
     try:
-        envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(p), para,
+        # descartado entre a leitura acima e a reserva (outra aba): nada sai (com a reserva, `descartar` ja' recusa)
+        atual = _linha(conn, pleito_id)
+        if atual["situacao"] == "descartado":
+            raise ValueError("Pleito descartado enquanto se preparava o envio: nada foi enviado")
+        # Ja' com a reserva, a carta e os anexos nao mudam ate' o e-mail (`_anexos_mudaveis` recusa): confere tudo
+        # de novo sobre a linha relida e manda exatamente isso. Memoria divergente, anexos acima do limite ou
+        # pendencia que a pessoa nao viu na previa (cronograma tirado na outra aba, carta remontada) param aqui
+        # Os anexos sao lidos do disco uma vez so' (gate Sol na PR #455): a curva e' conferida sobre esses bytes, e
+        # sao eles que vao ao Graph e ao registro do envio (o arquivo trocado depois nao sai sem conferencia)
+        lidos = _ler_anexos(conn, atual)
+        if (curva := _problema_curva_s(conn, atual, _curvas_lidas(lidos))):    # medicao ou cronograma no meio
+            raise ValueError(curva)
+        if any(b is None for _, b, _ in lidos):
+            raise ValueError(CURVA_S_ILEGIVEL)
+        pv_reservado = previa_envio(conn, pleito_id, hoje=hoje, lidos=lidos)
+        vistas = {x["mensagem"] for x in pv["pendencias"]}
+        novas = [x["mensagem"] for x in pv_reservado["pendencias"] if x["mensagem"] not in vistas]
+        if _memoria_divergente(conn, atual):
+            raise ValueError(MEMORIA_DIVERGENTE)
+        if pv_reservado["total"] > correio.MAX_TOTAL:
+            raise ValueError("Anexos acima do limite do e-mail")
+        if novas:
+            raise ValueError(f"{novas[0]}: a prévia mudou enquanto se preparava o envio e nada foi enviado; "
+                             "confira de novo")
+        pv = pv_reservado                       # a auditoria registra as pendencias do que de fato saiu
+        envio_id = correio.enviar_e_registrar(conn, usuario, _tipo_envio(atual), para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),
-                                              _anexos_envio(conn, p), cco=cco)
+                                              [(n, b) for n, b, _ in lidos], cco=cco)
     except correio.EnvioNaoRegistrado:
         raise                                       # o e-mail saiu: a reserva fica e segura a repeticao
     except Exception:

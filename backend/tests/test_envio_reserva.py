@@ -10,6 +10,10 @@ import pytest
 from app import correio, db, protocolo
 from tests.test_protocolo import cenario  # noqa: F401  (fixture)
 
+# Gera PDF (a carta, por protocolo.criar) com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois
+# jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 
 class CorreioFalso:
     """No lugar de `correio.cliente`: conta os e-mails, demora `espera` segundos e pode rodar `no_meio` com o
@@ -245,6 +249,50 @@ def test_registro_que_nunca_grava_diz_que_o_email_saiu(cenario, monkeypatch, tmp
     assert erro.value.assunto == "Assunto X" and erro.value.para == ["x@orgao.gov.br"]
     assert erro.value.mensagem_id.startswith("<simulado-")
     assert len(list((tmp_path / "sim" / "enviados").glob("*.json"))) == 1     # o e-mail saiu de fato
+
+
+# --- instalacao nao autorizada (issue #417): o envio e' recusado antes da reserva --------------------------------
+
+COPIA = {"instalacao": "nao-autorizada", "motivo": "ausente"}
+RECUSA = r"^Envio desligado: instalação não autorizada\.$"
+
+
+def _nada_saiu(c, tmp_path):
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert not list((tmp_path / "sim" / "enviados").glob("*.json"))
+
+
+def test_modo_copia_recusa_antes_da_reserva(cenario, monkeypatch, tmp_path):
+    from app import envio_reserva, instalacao
+    c, ids = cenario
+    pid = _protocolo(c, ids)
+    monkeypatch.setattr(instalacao, "_estado", COPIA)
+    with pytest.raises(instalacao.EnvioDesligado, match=RECUSA):
+        envio_reserva.reservar(c, "protocolos", pid, ids["uid"])
+    assert _reserva(c, pid) == (None, None)
+    with pytest.raises(instalacao.EnvioDesligado, match=RECUSA):      # quem envia sem reserva (teste, cobranca)
+        correio.enviar_e_registrar(c, ids["usuario"], "teste", ["x@orgao.gov.br"], [], "Assunto", "<p>x</p>", [])
+    _nada_saiu(c, tmp_path)
+
+
+def test_modo_copia_recusa_o_protocolo_inteiro_sem_reservar(cenario, monkeypatch, tmp_path):
+    from app import instalacao
+    from tests.test_protocolo import _assinar, _montado
+    c, ids = cenario
+    pid = _protocolo(c, ids)
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid], remetente="maria@l.com")
+    monkeypatch.setattr(instalacao, "_estado", COPIA)
+    with pytest.raises(instalacao.EnvioDesligado, match=RECUSA):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert _reserva(c, pid) == (None, None)
+    assert protocolo.detalhe(c, pid)["situacao"] != "enviado"
+    assert c.execute("SELECT estado FROM medicoes WHERE id=?", (ids["mtpar_exec"],)).fetchone()[0] == "nota_emitida"
+    _nada_saiu(c, tmp_path)
+    # com a instalacao autorizada o mesmo envio sai
+    monkeypatch.setattr(instalacao, "_estado", {"instalacao": "autorizada", "motivo": None})
+    protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert protocolo.detalhe(c, pid)["situacao"] == "enviado"
 
 
 def test_simulador_nao_sobrescreve_envios_simultaneos(tmp_path, monkeypatch):

@@ -4,18 +4,22 @@ Toda escrita desta fase grava origem "manual" -- a deteccao automatica
 (origem "detectado"/"aceito") entra nas fases 5-6.
 """
 import datetime
+import logging
 import sqlite3
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import db, espelhos, medicoes, permissoes, siga, tempo
+from app import (arquivos, db, espelhos, medicao_grupos, medicao_planilhas, medicoes, permissoes, planilha_envio, siga,
+                 tempo)
 from app.api_auth import conexao
 from app.dinheiro import parse_brl
 from app.permissoes import exigir
 
 router = APIRouter()
+log = logging.getLogger("app.medicoes")
 
 # Competencia e' o mes de referencia "AAAA-MM": o mesmo formato que o CHECK
 # (GLOB) da tabela medicoes exige. Validar aqui devolve 422 em vez de deixar
@@ -139,8 +143,21 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     if d is None:
         raise HTTPException(404, "Medição não encontrada")
     d["edicoes_valor"] = medicoes.edicoes_valor(conn, [medicao_id])[medicao_id]   # B-02 (10/10/2026): linha do tempo
+    d["planilhas"] = medicao_planilhas.versoes(conn, medicao_id)   # issue #281: todas as versoes da planilha/carta
+    # issue #282: se a tela oferece "Enviar para protocolo" (nunca na MT-PAR), as versoes enviadas e as pecas
+    d["envio_planilha"] = planilha_envio.situacao(conn, medicao_id)
     d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
+    d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
+    d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"
     return d
+
+
+@router.get("/api/medicoes/{medicao_id}/grupos")
+def grupos_da_medicao(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #490: o medido por grupo da planilha (leitura mais nova), com os itens de cada grupo."""
+    _medicao_existe(conn, medicao_id)
+    return medicao_grupos.grupos(conn, medicao_id)
 
 
 @router.put("/api/medicoes/{medicao_id}/valor")
@@ -254,3 +271,255 @@ def desmarcar_final(medicao_id: ID, dados: DesmarcarFinalIn, usuario: dict = Dep
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     return medicoes.detalhe(conn, medicao_id)
+
+
+# --- issue #281: planilha/carta de medicao (spec 2026-10-20 §2.1, passo 1) -----------------------------
+
+# mesmo teto da planilha editavel do protocolo (api_protocolos.TETO_PLANILHA; importar daria ciclo: ele importa
+# este modulo)
+TETO_PLANILHA = 25 * 1024 * 1024
+
+
+def _pdf_validado(arquivo: UploadFile, teto_bytes: int = arquivos.TETO_BYTES) -> bytes:
+    dados = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=teto_bytes))   # tipo, %PDF- e teto (415/413)
+    arquivos.conferir_bytes_parseaveis(dados, pacote=True)   # abre num leitor de verdade (415), tetos do pacote
+    return dados
+
+
+def _anexos_validados(oficio: UploadFile, planilha: UploadFile) -> list[tuple[bytes, str]]:
+    """Oficio assinado (PDF, com as guardas de app/arquivos.py) e planilha (.xlsx; .pdf onde a planilha/carta e'
+    o proprio boletim da Lotufo, Prefeitura e SES). Os DOIS sao validados antes de gravar qualquer um: recusa da
+    planilha nao deixa o oficio orfao na pasta (gate Sol, rodada 1)."""
+    if (planilha.filename or "").lower().endswith(".pdf"):
+        da_planilha = (_pdf_validado(planilha, TETO_PLANILHA), "pdf")   # gate Sol S5: o teto da planilha, nao 10 MB
+    else:
+        da_planilha = (b"".join(arquivos.blocos_validados(planilha, teto_bytes=TETO_PLANILHA, tipo="xlsx")), "xlsx")
+    return [(_pdf_validado(oficio), "pdf"), da_planilha]
+
+
+def _gravar_e_registrar(conn: sqlite3.Connection, validados: list[tuple[bytes, str]], registrar):
+    """Grava os anexos (ja' validados) pelo hash e chama `registrar(anexos)`.
+
+    Nada e' apagado se o registro falhar (gate Sol, rodada 2): a decisao de apagar ficaria fora do BEGIN
+    IMMEDIATE, e no clique duplo com o mesmo PDF a requisicao que falha apagaria o arquivo de que a outra acabou
+    de depender. O arquivo sem versao e' inofensivo: tem o nome do proprio hash e e' reaproveitado no proximo
+    envio do mesmo conteudo."""
+    (arq, sha), (arq_p, sha_p) = (arquivos.gravar_bytes("planilhas", dados, ext) for dados, ext in validados)
+    return registrar({"arquivo": arq, "sha256": sha, "arquivo_planilha": arq_p, "sha256_planilha": sha_p})
+
+
+def _ler_grupos(conn: sqlite3.Connection, usuario_id: int, r: dict, validados: list[tuple[bytes, str]]) -> dict:
+    """Issue #490: o xlsx da planilha, ja' gravado com a versao, e' lido por grupo. A leitura vem depois do registro
+    e nunca o desfaz: a recusa da planilha (soma que nao bate, aba que falta) fica gravada e volta como aviso em
+    `leitura_planilha`. Erro inesperado (banco ocupado, defeito) fica gravado como falha, que a carga
+    `medicoes planilhas` le de novo; se nem a falha grava, o erro sobe."""
+    dados, ext = validados[1]
+    r["leitura_planilha"] = None
+    if ext != "xlsx":
+        return r
+    try:
+        r["leitura_planilha"] = medicao_grupos.ler_anexo(conn, usuario_id, r["medicao_id"], r["versao"], dados)
+    except Exception as erro:
+        log.exception("leitura por grupo da planilha da medicao %s", r["medicao_id"])
+        try:
+            r["leitura_planilha"] = medicao_grupos.registrar_falha(conn, usuario_id, r["medicao_id"], r["versao"],
+                                                                   dados)
+        except Exception:
+            raise erro from None
+    return r
+
+
+def _centavos(valor: str) -> int:
+    centavos = parse_brl(valor)
+    if centavos > MAX_INT64:
+        raise ValueError("Valor monetário fora do limite")
+    return centavos
+
+
+@router.get("/api/contratos/{contrato_id}/planilhas/sugestao")
+def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "projeto"] = Query("execucao"),
+                      usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    _contrato_existe(conn, contrato_id)
+    return medicao_planilhas.sugestao(conn, contrato_id, tipo)
+
+
+@router.get("/api/contratos/{contrato_id}/planilhas/avisos")
+def avisos_planilha(contrato_id: ID, numero: int = Query(..., ge=1, le=999),
+                    competencia: str = Query(..., pattern=COMPETENCIA),
+                    periodo_inicio: datetime.date = Query(...),
+                    tipo: Literal["execucao", "projeto"] = Query("execucao"),
+                    usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                    conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #289: os avisos de periodo (sobreposto, pulando dias, competencia anterior) enquanto a pessoa preenche a
+    planilha/carta, pela mesma regra que o registro devolve, e o acumulado anterior e o saldo DESTE nº (a sugestao
+    so' os da do nº que ela sugere). So' le."""
+    _contrato_existe(conn, contrato_id)
+    acumulado = medicao_planilhas.acumulado_anterior(conn, contrato_id, tipo, numero)
+    return {"avisos": medicao_planilhas.avisos(conn, contrato_id, tipo, numero, competencia,
+                                               periodo_inicio.isoformat()),
+            **medicao_planilhas._saldo(conn, contrato_id, tipo, acumulado, None)}
+
+
+@router.post("/api/contratos/{contrato_id}/planilhas", status_code=201)
+def registrar_planilha(contrato_id: ID,
+                       numero: int = Form(..., ge=1, le=999),
+                       tipo: Literal["execucao", "projeto"] = Form("execucao"),
+                       competencia: str = Form(..., pattern=COMPETENCIA),
+                       periodo_inicio: datetime.date = Form(...),
+                       periodo_fim: datetime.date = Form(...),
+                       valor: str = Form(..., max_length=40),
+                       numero_orgao: int | None = Form(None, ge=1, le=9999),
+                       oficio: UploadFile = File(...), planilha: UploadFile = File(...),
+                       usuario: dict = Depends(exigir("editar_cadastros")),
+                       conn: sqlite3.Connection = Depends(conexao)):
+    """"Nova planilha/carta" na obra: a medicao entra em `planilha_gerada` com a versao 1; os avisos de periodo
+    voltam junto com a gravacao (nao a impedem)."""
+    _contrato_existe(conn, contrato_id)
+    try:
+        dados = {"numero": numero, "tipo": tipo, "competencia": competencia, "numero_orgao": numero_orgao,
+                 "periodo_inicio": periodo_inicio.isoformat(), "periodo_fim": periodo_fim.isoformat(),
+                 "valor_centavos": _centavos(valor)}
+        medicao_planilhas.conferir_registro(conn, contrato_id, dados)   # recusa antes de gravar os anexos
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    validados = _anexos_validados(oficio, planilha)
+    try:
+        r = _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.registrar(
+            conn, usuario["id"], contrato_id, dados, anexos))
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    return _ler_grupos(conn, usuario["id"], r, validados)
+
+
+@router.post("/api/medicoes/{medicao_id}/planilhas", status_code=201)
+def revisar_planilha(medicao_id: ID,
+                     motivo: str = Form("", max_length=1000),
+                     periodo_inicio: datetime.date = Form(...),
+                     periodo_fim: datetime.date = Form(...),
+                     valor: str = Form(..., max_length=40),
+                     oficio: UploadFile = File(...), planilha: UploadFile = File(...),
+                     usuario: dict = Depends(exigir("editar_cadastros")),
+                     conn: sqlite3.Connection = Depends(conexao)):
+    """Revisao da planilha/carta (Rev01, Rev02...): versao nova, com motivo obrigatorio."""
+    _medicao_existe(conn, medicao_id)
+    try:
+        dados = {"motivo": motivo, "periodo_inicio": periodo_inicio.isoformat(),
+                 "periodo_fim": periodo_fim.isoformat(), "valor_centavos": _centavos(valor)}
+        medicao_planilhas.conferir_revisao(conn, medicao_id, dados)   # recusa antes de gravar os anexos
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    validados = _anexos_validados(oficio, planilha)
+    try:
+        r = _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.revisar(
+            conn, usuario["id"], medicao_id, dados, anexos))
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    return _ler_grupos(conn, usuario["id"], r, validados)
+
+
+@router.get("/api/medicoes/{medicao_id}/planilhas/{planilha_id}/{peca}")
+def baixar_anexo_planilha(medicao_id: ID, planilha_id: ID, peca: Literal["oficio", "planilha"],
+                          usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                          conn: sqlite3.Connection = Depends(conexao)):
+    """Gate Sol S3: o oficio e a planilha de cada versao, pela medicao dona da versao."""
+    a = medicao_planilhas.anexo(conn, medicao_id, planilha_id, peca)
+    if a is None or not a["arquivo"]:
+        raise HTTPException(404, "Arquivo não encontrado")
+    try:
+        caminho = arquivos.caminho_seguro(a["arquivo"])
+    except ValueError:
+        raise HTTPException(404, "Arquivo não encontrado") from None
+    if not caminho.is_file():
+        raise HTTPException(404, "Arquivo não encontrado")
+    ext = "xlsx" if caminho.suffix == ".xlsx" else "pdf"
+    tipo = arquivos.MIME_XLSX if ext == "xlsx" else arquivos.MIME
+    nome = f"{'oficio' if peca == 'oficio' else 'planilha'}-medicao-{a['numero']}-versao-{a['versao']}.{ext}"
+    return FileResponse(caminho, media_type=tipo, filename=nome, headers={"X-Content-Type-Options": "nosniff"})
+
+
+# --- issue #284: boletim do orgao (spec 2026-10-20 §2.1, passo 3; D4) -----------------------------------------
+
+@router.post("/api/medicoes/{medicao_id}/boletim", status_code=201)
+def registrar_boletim(medicao_id: ID,
+                      valor: str = Form(..., max_length=40),
+                      data: datetime.date = Form(...),
+                      numero_orgao: str | None = Form(None, max_length=100),
+                      meio: Literal["smo", "oficio", "email", "carimbo", "ci", "outro"] | None = Form(None),
+                      observacao: str | None = Form(None, max_length=500),
+                      arquivo: UploadFile = File(...),
+                      usuario: dict = Depends(exigir("editar_cadastros")),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """"Registrar boletim": valor aprovado, data e nº digitados, com o PDF do orgao. Devolve pedido, aprovado e a
+    diferenca."""
+    _medicao_existe(conn, medicao_id)
+    try:
+        dados = {"valor_centavos": _centavos(valor), "data": data.isoformat(), "numero_orgao": numero_orgao,
+                 "meio": meio, "observacao": observacao}
+        medicoes.conferir_boletim(conn, medicao_id, dados)      # recusa antes de gravar o PDF
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    pdf = _pdf_validado(arquivo, TETO_PLANILHA)   # o pacote do SMO (capa, resumo, calculo, cronograma) passa de 10 MB
+    caminho, sha = arquivos.gravar_bytes("boletins", pdf, "pdf")
+    try:
+        return medicoes.registrar_boletim(conn, usuario["id"], medicao_id, dados, {"arquivo": caminho, "sha256": sha})
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+
+
+@router.get("/api/medicoes/{medicao_id}/boletins/{atesto_id}")
+def baixar_boletim(medicao_id: ID, atesto_id: ID,
+                   usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                   conn: sqlite3.Connection = Depends(conexao)):
+    a = medicoes.arquivo_boletim(conn, medicao_id, atesto_id)
+    if a is None or not a["arquivo"]:
+        raise HTTPException(404, "Arquivo não encontrado")
+    try:
+        caminho = arquivos.caminho_seguro(a["arquivo"])
+    except ValueError:
+        raise HTTPException(404, "Arquivo não encontrado") from None
+    if not caminho.is_file():
+        raise HTTPException(404, "Arquivo não encontrado")
+    return FileResponse(caminho, media_type=arquivos.MIME, filename=f"boletim-medicao-{a['numero']}-{atesto_id}.pdf",
+                        headers={"X-Content-Type-Options": "nosniff"})
+
+
+# --- issue #283: planilha/carta enviada por fora e nº do SIGA (spec 2026-10-20 §2.1, passo 2; E3) ---------------
+
+@router.post("/api/medicoes/{medicao_id}/planilhas/envio-externo", status_code=201)
+def envio_externo_planilha(medicao_id: ID,
+                           enviado_em: str = Form(..., max_length=10),
+                           meio: str = Form(..., max_length=medicao_planilhas.TETO_MEIO),
+                           numero_protocolo: str | None = Form(None, max_length=100),
+                           eml: UploadFile | None = File(None),
+                           usuario: dict = Depends(exigir("editar_cadastros")),
+                           conn: sqlite3.Connection = Depends(conexao)):
+    """"Registrar envio por fora" da planilha/carta (ou de uma revisao dela): data, meio, nº do protocolo e .eml."""
+    from app import notas_envio
+    _medicao_existe(conn, medicao_id)
+    dados = {"enviado_em": enviado_em, "meio": meio, "numero_protocolo": numero_protocolo}
+    try:
+        medicao_planilhas.conferir_envio_externo(conn, medicao_id, dados)   # recusa antes de ler o .eml
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    arquivo = (eml.filename, eml.file.read(notas_envio.TETO_EML + 1)) if eml is not None and eml.filename else None
+    try:
+        return medicao_planilhas.registrar_envio_externo(conn, usuario["id"], medicao_id, dados, arquivo)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+
+
+class NumeroSigaIn(BaseModel):
+    numero: str = Field(max_length=100)
+
+
+@router.post("/api/medicoes/{medicao_id}/planilhas/numero-siga")
+def numero_siga_planilha(medicao_id: ID, dados: NumeroSigaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                         conn: sqlite3.Connection = Depends(conexao)):
+    """O nº do SIGA que o orgao devolve depois do envio da planilha/carta (pelo sistema ou por fora)."""
+    _medicao_existe(conn, medicao_id)
+    try:
+        medicao_planilhas.registrar_numero_siga(conn, usuario["id"], medicao_id, dados.numero)
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+    return {"ok": True}

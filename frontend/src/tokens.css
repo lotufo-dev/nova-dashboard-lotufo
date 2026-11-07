@@ -291,6 +291,17 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
 .shell { min-height: 100vh; padding-left: var(--trilho); }
 .coluna { min-width: 0; min-height: 100vh; display: flex; flex-direction: column; }
 
+/* Instalacao nao autorizada (issue #417, App.tsx): faixa vermelha presa ao pe da janela em toda tela. Fica no fluxo
+   DEPOIS da tela (sticky, nao fixed): no fim da rolagem ela para abaixo do conteudo em vez de cobrir a ultima linha.
+   Abaixo do trilho aberto (40) e das janelas (100). */
+.faixa-instalacao {
+  position: sticky; bottom: 0; z-index: 35;
+  margin: 0; padding: 10px 16px;
+  background: var(--acao); color: #fff;
+  font-size: 14px; line-height: 20px; font-weight: 600; text-align: center;
+}
+/* redirecionamento de e-mail de teste ligado: aviso em ambar, como os de atencao */
+
 /* UM elemento so': a <nav> anima a propria largura e o bloco de dentro (largura fixa, rotulos sem quebra) vai sendo
    DESCOBERTO pelo corte. `overflow-x: hidden` e' o mecanismo: nenhum pixel do conteudo se move durante a animacao.
    O REPOUSO descreve tambem a VOLTA, por isso e' aqui que a cortesia de 100ms aparece. */
@@ -1005,6 +1016,8 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--foco)
 .saldo__parcela--total .saldo__valor { font-size: 22px; letter-spacing: -.02em; line-height: 1.2; }
 .saldo__op { color: var(--texto-2); font-size: 15px; padding-bottom: 2px; }
 .saldo--negativo .saldo__parcela--total .saldo__valor { color: var(--acao); }
+/* #262: o aditivo de reajuste fica fora da conta; separado por um filete, nao por um operador */
+.saldo__parcela--aparte { padding-left: 14px; border-left: 1px solid var(--linha); }
 
 /* ----------------------------------------------------------------- totais */
 
@@ -1548,6 +1561,9 @@ a.alerta:hover { background: var(--hover); color: var(--texto); }
 .tabela--grade col.c-situacao { width: 220px; }
 .tabela--grade col.c-data { width: 132px; }
 .tabela--grade col.c-acao { width: 120px; }
+/* 06/11/2026: no celular as colunas fixas (220 + 132 + 120 px) passavam da tela, a coluna "Documento" ficava com largura
+   zero e o nome caia por cima da "Situação". Com largura minima, a Rolagem rola (como nos avisos, obras.css). */
+@media (max-width: 700px) { .tabela--docs { min-width: 640px; } }
 /* tabela dentro de um details que e' o corpo do cartao: sem o recuo do corpo, na grade dos outros cartoes */
 .detalhes--tabela > .tabela-wrap { margin-left: -20px; margin-right: -20px; }
 /* No notebook a fila divide a largura com a lateral: as colunas de dado apertam para a Obra nao cair abaixo

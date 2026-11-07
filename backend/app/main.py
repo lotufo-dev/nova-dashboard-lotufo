@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import backup as backup_mod
-from app import correio, db, logs
+from app import correio, db, instalacao, integridade, logs
 
 class FrontendSpa(StaticFiles):
     """Build do React com fallback para o index em caminho de TELA (fase 3,5).
@@ -70,7 +70,11 @@ def create_app() -> FastAPI:
     conn = db.get_conn()
     db.migrate(conn)
     conn.close()
+    # Issue #417: a instalacao e' conferida uma vez, na subida (arquivo assinado para esta maquina); fora do servidor
+    # oficial ela sobe em modo copia, sem envio de e-mail e sem RM.
+    copia = instalacao.conferir()["instalacao"] == instalacao.NAO_AUTORIZADA
 
+    integridade.commit_atual()  # lido na subida: o /api/health nao chama o git na requisicao
     app = FastAPI(title="Dashboard Lotufo")
     # A-04 (10/10/2026): corpo acima do teto da' 413 antes de qualquer rota (ver app/limites.py).
     from app.limites import LimiteDeCorpo
@@ -80,7 +84,7 @@ def create_app() -> FastAPI:
     app.state.limite_login = LimitePorOrigem()
 
     @app.get("/api/health")
-    def health():
+    def health(request: Request):
         """Toca o banco de verdade e expoe a ultima rodada de backup.
 
         `status` continua "ok" quando o banco responde; a copia externa atrasada ou
@@ -96,7 +100,17 @@ def create_app() -> FastAPI:
         except sqlite3.Error:
             logging.getLogger("app.health").exception("banco nao respondeu ao health")
             return JSONResponse(status_code=503, content={"status": "erro", "banco": "indisponivel"})
-        return {"status": "ok", "banco": "ok", "backup": backup_mod.estado()}
+        # Issue #417: o modo copia aparece aqui e continua 200 (o watchdog so' olha o status e reiniciaria em laco);
+        # quem decide e' o deploy.ps1, que volta o commit se a instalacao nao vier autorizada. Sem caminho de arquivo.
+        inst = instalacao.estado()
+        return {"status": "ok", "banco": "ok", "backup": backup_mod.estado(),
+                "instalacao": inst["instalacao"], "instalacao_motivo": inst["motivo"],
+                # teste em producao (06/11/2026): com o redirecionamento ligado, toda tela mostra a faixa de aviso
+                "email_redirecionado": correio.redirecionamento_ativo(),
+                "commit": integridade.commit_atual(),
+                # Issue #425: `tls` e' como o pedido chegou (o uvicorn com o certificado poe "https"), nao a variavel
+                # DASH_SEM_TLS: producao que subiu sem o certificado aparece aqui, mesmo com a tarefa certa.
+                "tls": request.url.scheme == "https"}
 
     @app.exception_handler(sqlite3.OperationalError)
     def banco_ocupado(request: Request, exc: sqlite3.OperationalError):
@@ -123,6 +137,12 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=422, content={"detail": [
             {"type": e.get("type"), "loc": ["body"] if e.get("type") == "json_invalid" else list(e.get("loc", ())),
              "msg": _msg_validacao(e)} for e in exc.errors()]})
+
+    @app.exception_handler(instalacao.EnvioDesligado)
+    def envio_desligado(request: Request, exc: instalacao.EnvioDesligado):
+        """Envio recusado na instalacao nao autorizada (issue #417), na rota que nao captura ValueError (o teste de
+        envio). As demais ja' respondem 422 com a mesma mensagem."""
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     @app.exception_handler(correio.EnvioNaoRegistrado)
     def envio_nao_registrado(request: Request, exc: correio.EnvioNaoRegistrado):
@@ -171,6 +191,8 @@ def create_app() -> FastAPI:
     app.include_router(protocolos_router)
     from app.api_pleitos import router as pleitos_router
     app.include_router(pleitos_router)
+    from app.api_planilha_envio import router as planilha_envio_router
+    app.include_router(planilha_envio_router)
     from app.api_diretoria import router as diretoria_router
     app.include_router(diretoria_router)
     app.include_router(notas_router)
@@ -186,15 +208,27 @@ def create_app() -> FastAPI:
 
     if os.environ.get("DASH_SEM_JOBS") != "1":
         # as pastas saem de backup.py, as mesmas que Administracao > Saude le (issue #31)
+        # Issue #417: no modo copia o backup local continua (protege o dado e nao sai da maquina); a copia externa,
+        # que vai para outro disco ou compartilhamento, nao.
         backup_mod.agendar_backup_horario(db.db_path(), backup_mod.pasta_local(),
-                                          backup_mod.pasta_externa())
-        # Sincronizacao horaria com o RM (fase 5): so' sobe se o RM estiver configurado.
-        # Bloco 9: a observacao do Outlook e do SharePoint (fase 6) saiu; o RM e' a unica fonte automatica.
-        from app import sincronizacao_rm
-        sincronizacao_rm.agendar()
-        # Cobranca de certidoes por e-mail ao Leonardo (plano 2026-10-09): vencidas a cada 2 h, vencendo 1x/dia.
-        from app import cobranca_certidoes
-        cobranca_certidoes.agendar()
+                                          None if copia else backup_mod.pasta_externa())
+        # Issue #422: protecao da tabela de usuarios e cadeia da auditoria, de hora em hora (local, vale na copia)
+        from app import seguranca
+        seguranca.agendar()
+        # Issue #423: a sentinela do log de seguranca do Windows (so' roda no Windows e fora de dev)
+        from app import sentinela
+        sentinela.agendar()
+        # Issue #421: codigo em producao conferido contra o ultimo deploy, na subida e de hora em hora (nao em dev)
+        if os.environ.get("DASH_DEV") != "1":
+            integridade.agendar()
+        if not copia:
+            # Sincronizacao horaria com o RM (fase 5): so' sobe se o RM estiver configurado.
+            # Bloco 9: a observacao do Outlook e do SharePoint (fase 6) saiu; o RM e' a unica fonte automatica.
+            from app import sincronizacao_rm
+            sincronizacao_rm.agendar()
+            # Cobranca de certidoes por e-mail ao dono (plano 2026-10-09): vencidas a cada 2 h, vencendo 1x/dia.
+            from app import cobranca_certidoes
+            cobranca_certidoes.agendar()
 
     # O build do React e montado por ultimo: a rota "/" so pega o que sobrou de /api/*.
     # Atencao: um mount em "/" engole qualquer rota registrada DEPOIS de create_app()

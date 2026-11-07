@@ -18,6 +18,9 @@ Estrutura (a mesma do cadastro real): `geral.yaml`, `orgaos.yaml`, `entidades.ya
 `frc.yaml`, `contratos/<slug>.yaml`, `espelho/<slug>.yaml` e `modelos/` (modelos Word do espelho, planilha do
 QDOP e logo da FRC). Os modelos `.docx` e `.xlsx` são neutros, sem logotipo; o logo da FRC é um retângulo cinza.
 
+- Secretaria de Exemplo: a memória de cálculo da medição está marcada `no_oficio: true` (vai dentro do PDF
+  assinado do ofício da planilha/carta: não vira pendência e não se anexa). `pecas_no_oficio: [tipo, …]` num
+  contrato substitui essa marca só nele (`[]` desliga todas); tipo que o órgão não pede é erro no `cadastro aplicar`.
 - Obra Própria: contrato da empresa sozinha (100%), com espelho de medição e reajuste.
 - Obra Consórcio: contrato do Consórcio Exemplo (empresa própria 50% e Engenharia Beta 50%), em dois
   municípios, com espelho de medição que rateia entre as duas empresas e os dois municípios.

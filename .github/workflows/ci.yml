@@ -17,8 +17,9 @@ on:
 # nada e' cancelado nem fica em fila: cada merge precisa da propria execucao verde (a skill
 # deploy confere o commit), e um grupo so' por branch cancelaria ate' a execucao que espera.
 # Na fila de merge cada grupo tem commit proprio, entao tambem cai no grupo pelo sha.
-# O job backend continua no Windows de proposito, mesmo custando em dobro: a suite curta
-# (issue #88) e' o que resolve a conta, nao trocar de sistema.
+# Backend num job so', no Ubuntu, com pytest-xdist (-n 4; issue #385, que tirou o job backend-windows da
+# #367). A Liberation Sans (mesmas metricas da Arial da producao) entra pelo apt para os testes de PDF
+# passarem pelo ramo Unicode da carta e da FRC (app/carta.py, fonte_carta).
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
@@ -100,10 +101,9 @@ jobs:
             exit 1
           fi
 
+  # Nome mantido: e' check obrigatorio do ruleset `master protegida`.
   backend:
-    # Windows de proposito: e' o sistema da producao (<servidor>) e os testes de
-    # backup/ACL exercitam caminhos e ferramentas do Windows.
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -111,9 +111,11 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.lock
+      - name: Fonte Liberation Sans (ramo Unicode da carta e da FRC)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends fonts-liberation
       - run: python -m pip install -r requirements.lock
         working-directory: backend
-      - run: python -m pytest -q
+      - run: python -m pytest -q -n 4
         working-directory: backend
 
   frontend:

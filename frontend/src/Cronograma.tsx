@@ -22,6 +22,8 @@ type VersaoLista = {
   numero: number; criado_em: string; chave: string | null; origem_documento: string | null;
   data_documento: string | null; instrumento: string | null; competencias: number;
   total_centavos: number; vigente: boolean;
+  // issue #395: superada pelo cadastro (carimbo UTC); fica na lista, mas nao vale mais
+  superada_em?: string | null;
 };
 
 const ORIGEM_DOCUMENTO: Record<string, string> = {
@@ -47,9 +49,10 @@ type Ponto = {
   atestado_pendente: boolean;
   pendente_por_tipo?: Record<string, boolean>;
 };
+// #262: o saldo e' a precos iniciais (vigente de execucao); o aditivo de reajuste vem a parte.
 type Saldo = {
-  vigente_centavos: number; atestado_execucao_centavos: number;
-  saldo_centavos: number; formula: string;
+  vigente_centavos: number; vigente_execucao_centavos?: number; reajuste_contratado_centavos?: number;
+  atestado_execucao_centavos: number; saldo_centavos: number; formula: string;
 };
 type Curva = { curva: Ponto[]; saldo: Saldo };
 
@@ -414,6 +417,10 @@ export default function Cronograma({ contratoId, podeEditar }:
   // com o mes do navegador, o cadeado da tela discordaria do previsto do servidor
   // durante as 4 horas de defasagem na virada.
   const mes = mesAtualLocal();
+  // Igual ao servidor (previsto_efetivo, issue #413): depois de uma repactuacao ainda valida (aditivo, carta ou
+  // curva do SMO, nao superada), versao manual nao semeia mes nenhum, nem o passado sem previsto.
+  const houveRepactuacao = Array.isArray(versoes) && versoes.some(v => !v.superada_em
+    && ["aditivo", "carta", "smo"].includes(v.origem_documento ?? ""));
 
   async function publicar(ev: React.FormEvent) {
     ev.preventDefault();
@@ -475,8 +482,8 @@ export default function Cronograma({ contratoId, podeEditar }:
       {!carregando && saldo && (
         <div className={`saldo${saldo.saldo_centavos < 0 ? " saldo--negativo" : ""}`}>
           <div className="saldo__parcela">
-            <span className="resumo__rotulo">Vigente</span>
-            <span className="saldo__valor num">{brl(saldo.vigente_centavos)}</span>
+            <span className="resumo__rotulo">Vigente de execução</span>
+            <span className="saldo__valor num">{brl(saldo.vigente_execucao_centavos ?? saldo.vigente_centavos)}</span>
           </div>
           <span className="saldo__op" aria-hidden="true">−</span>
           <div className="saldo__parcela">
@@ -488,8 +495,14 @@ export default function Cronograma({ contratoId, podeEditar }:
             <span className="resumo__rotulo">Saldo</span>
             <span className="saldo__valor num">{brl(saldo.saldo_centavos)}</span>
           </div>
+          {(saldo.reajuste_contratado_centavos ?? 0) !== 0 && (
+            <div className="saldo__parcela saldo__parcela--aparte">
+              <span className="resumo__rotulo">Reajuste contratado (fora do saldo)</span>
+              <span className="saldo__valor num">{brl(saldo.reajuste_contratado_centavos ?? 0)}</span>
+            </div>
+          )}
           {saldo.saldo_centavos < 0 && (
-            <CaixaAviso nivel="critico">Medido acima do valor vigente do contrato.</CaixaAviso>
+            <CaixaAviso nivel="critico">Medido acima do vigente de execução do contrato.</CaixaAviso>
           )}
         </div>
       )}
@@ -542,7 +555,7 @@ export default function Cronograma({ contratoId, podeEditar }:
               {pontos.map((p, i) => {
                 // Uma versao nova so alcanca competencias a partir do mes em que nasce:
                 // mes ja decorrido COM previsto e' passado congelado (spec §5).
-                const congelado = p.competencia < mes && p.previsto_centavos > 0;
+                const congelado = p.competencia < mes && (p.previsto_centavos > 0 || houveRepactuacao);
                 const total = medidoTotal(p);
                 const pend = (p.atestado_pendente && p.medido_execucao_centavos > 0) || pendenteOutras(p);
                 return (
@@ -598,7 +611,7 @@ export default function Cronograma({ contratoId, podeEditar }:
         <summary>Versões do cronograma</summary>
         <Rolagem rotulo="Versões do cronograma">
           <table className="tabela">
-            <caption className="sr-only">Versões do cronograma, da mais antiga à vigente</caption>
+            <caption className="sr-only">Versões do cronograma, na ordem em que passaram a valer</caption>
             <thead>
               <tr>
                 <th scope="col">Versão</th>
@@ -611,7 +624,8 @@ export default function Cronograma({ contratoId, podeEditar }:
             <tbody>
               {versoes.map((v, i) => (
                 <tr key={v.numero} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                  <td className="forte num">{v.numero}{v.vigente && <>{" "}<Selo classe="selo--ok">Vigente</Selo></>}</td>
+                  <td className="forte num">{v.numero}{v.vigente && <>{" "}<Selo classe="selo--ok">Vigente</Selo></>}
+                    {v.superada_em && <>{" "}<Selo>Superada em {fmtData(v.superada_em)}</Selo></>}</td>
                   <td className="num">{v.data_documento ? fmtDataPura(v.data_documento) : fmtData(v.criado_em)}</td>
                   <td>{documentoDaVersao(v)}</td>
                   <td className="col-num num">{v.competencias}</td>

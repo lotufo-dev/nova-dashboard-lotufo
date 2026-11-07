@@ -12,7 +12,13 @@ param(
     # Repassados a rodar_producao.ps1 (arvore de producao e pasta da copia externa).
     [string]$Raiz = "C:\DashboardLotufo",
     [string]$BackupExterno = "",
+    # HTTP sem certificado (decisao de 2026-09-02). Sem ele, HTTPS com o par de <Raiz>\segredos\tls
+    # (decisao de 2026-11-05, issue #425).
     [switch]$SemTls,
+    # Porta do servidor, repassada a rodar_producao.ps1 so quando informada (0 = padrao
+    # do modo: 80 com -SemTls, 8443 com TLS). Ex.: 8080 na VM em que a 80 e' do IIS.
+    [ValidateRange(0, 65535)]
+    [int]$Porta = 0,
     # Repassados a rodar_producao.ps1: RM (fase 5) e Microsoft 365 (fase 6).
     [string]$RmUrl = "",
     [string]$RmUsuario = "",
@@ -78,10 +84,24 @@ if ($aberturas.Count -gt 0) {
     Write-Warning "-IgnorarAcl informado: registrando a tarefa com a arvore gravavel por terceiros."
 }
 
+# --- certificado do HTTPS (issue #425) ------------------------------------------
+# Sem -SemTls a tarefa sobe em HTTPS com o par de <Raiz>\segredos\tls. Sem ele o servidor nao sobe e a tarefa
+# ficaria reiniciando: parar aqui, antes de trocar a tarefa que esta funcionando.
+if (-not $SemTls) {
+    foreach ($pem in (Join-Path $Raiz "segredos\tls\cert.pem"), (Join-Path $Raiz "segredos\tls\chave.pem")) {
+        if (-not (Test-Path -LiteralPath $pem)) {
+            Write-Host "Certificado do HTTPS nao encontrado: $pem" -ForegroundColor Red
+            Write-Host "Rode scripts\gerar_certificado.ps1 -Raiz `"$Raiz`" antes (ou instale com -SemTls). Instalacao abortada." -ForegroundColor Red
+            exit 1
+        }
+    }
+}
+
 # --- registro da tarefa -------------------------------------------------------
 $argumentos = "-NoProfile -ExecutionPolicy Bypass -File `"$roteiro`" -Raiz `"$Raiz`""
 if ($BackupExterno) { $argumentos += " -BackupExterno `"$BackupExterno`"" }
 if ($SemTls) { $argumentos += " -SemTls" }
+if ($Porta -ne 0) { $argumentos += " -Porta $Porta" }
 if ($RmUsuario -and $RmSenhaArquivo) {
     $argumentos += " -RmUsuario `"$RmUsuario`" -RmSenhaArquivo `"$RmSenhaArquivo`""
     if ($RmUrl) { $argumentos += " -RmUrl `"$RmUrl`"" }

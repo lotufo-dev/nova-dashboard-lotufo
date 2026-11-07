@@ -103,7 +103,24 @@ def _de_siga(conn, hoje: datetime.date) -> list[dict]:
     return siga.avisos(conn, hoje)
 
 
-FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga]
+def _de_espelhos(conn, hoje: datetime.date) -> list[dict]:
+    """Issue #359: o aprovado mudou depois do espelho (boletim novo com outro valor); some com a versao nova (ou no
+    protocolo). O clique leva ao espelho da medicao (`medicao_id`), ou as notas dela na nota ja' emitida. O espelho
+    antigo que nao se confere tem tipo proprio: nao diz que o aprovado mudou."""
+    from app import espelhos, medicoes      # import tardio, como nas outras fontes
+    out = []
+    for m in espelhos.desatualizadas(conn):
+        cid = m["contrato_id"]
+        tipo = "espelho_nao_conferido" if m["situacao"] == espelhos.NAO_CONFERIDO else "espelho_desatualizado"
+        aba = "notas" if m["situacao"] == espelhos.NOTA_EMITIDA else "espelho"
+        out.append({**aviso(tipo, "acao", f"{medicoes.titulo(m)}: {espelhos.TEXTO_AVISO[m['situacao']]}",
+                            cid, m["obra"], valor_centavos=m["aprovado_centavos"],
+                            destino={"tela": "contrato", "id": cid, "aba": aba}),
+                    "medicao_id": m["id"]})
+    return out
+
+
+FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga, _de_espelhos]
 
 
 def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao") -> list[dict]:
@@ -137,7 +154,7 @@ def resumo_mes(conn, hoje: datetime.date | None = None) -> dict:
     ids_ativos = {c["id"] for c in ativos(conn)}
     linhas = conn.execute(
         "SELECT m.id, m.contrato_id, COALESCE(m.valor_protocolado_centavos, 0) AS valor, MIN(mp.data) AS data "
-        "FROM medicoes m JOIN medicao_protocolos mp ON mp.medicao_id=m.id "
+        "FROM medicoes m JOIN medicao_protocolos mp ON mp.medicao_id=m.id AND mp.etapa='nota' "     # #283: so' o da nota
         "WHERE m.estado NOT IN ('cancelada','desistida') GROUP BY m.id").fetchall()
     no_mes = [r for r in linhas if (r["data"] or "")[:7] == mes]
     protocolaram = {r["contrato_id"] for r in no_mes} & ids_ativos

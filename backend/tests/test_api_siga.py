@@ -10,6 +10,10 @@ import pytest
 from app import auth, db, siga, tempo
 from tests.test_api_protocolos import LINK_SIGA, _enviado, api  # noqa: F401  (a fixture `api` vem de la')
 
+# Gera PDF (a carta, por protocolo.criar) com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois
+# jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 TOKEN = "token-de-teste-do-siga-0123456789"
 UTC = datetime.timezone.utc
 NOMES_FICTICIOS = {"Fulano", "Beltrano", "Sicrana", ""}

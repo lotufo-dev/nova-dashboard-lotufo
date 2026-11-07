@@ -22,15 +22,37 @@ vigencia_fim: '2026-12-28'
 status: ativo
 status_desde: null
 sem_reajuste: false
+# Uma linha por data-base de reajuste. `indice` é o do reajuste (nunca a tabela de preços). Com mais de uma base,
+# `aplica_a` diz a parte do contrato que ela corrige e todo apostilamento de reajuste diz a sua em `data_base`.
 datas_base:
 - mes: 2024-06
   indice: índice setorial de exemplo
+  aplica_a: itens de serviço
+- mes: 2025-01
+  indice: índice de materiais de exemplo
+  aplica_a: itens de material
 fiscais:
 - nome: Fiscal de Exemplo
   email: fiscal@exemplo.gov.br
   desde: '2025-03-10'
 destinatarios_extras: []
 copia_extras: []
+# Opcional (issue #462): substitui, só neste contrato, as peças que o órgão marca `no_oficio`; [] desliga todas.
+# pecas_no_oficio: [cronograma]
+# Opcional (issue #489): custo por obra. Grupos na ordem da planilha do órgão; tarefas = prefixos do código da tarefa
+# do Solum, itens_planilha = prefixos dos itens da planilha; códigos sempre entre aspas (sem aspas, 001.03 vira número).
+# nao_e_custo ausente = ['2.02', '2.01.22']; sem_tarefa só aceita proporcional (rateio pelo custo apontado no mês).
+# custo:
+#   projeto_rm: GL.C01.P001
+#   sem_tarefa: proporcional
+#   grupos:
+#   - nome: Terraplanagem
+#     tarefas: ['001.03']
+#     itens_planilha: ['2.']
+#     item_chave: {codigo: '2.1', unidade: m³}
+#   - nome: Drenagem
+#     tarefas: ['001.04', '001.05']
+#     itens_planilha: ['3.']
 instrumentos:
 - chave: ta-01
   tipo: aditivo_valor
@@ -38,6 +60,7 @@ instrumentos:
   numero: 001/2025/01/01
   objeto: 1º Termo Aditivo de valor (acréscimo de R$ 1.000.000,00)
   delta_valor: 1.000.000,00
+  natureza: execucao
 - chave: ap-01
   tipo: apostilamento_prazo
   data: '2026-06-01'
@@ -45,11 +68,85 @@ instrumentos:
   objeto: 1º Termo de Apostilamento de prazo (mais 60 dias)
   nova_execucao_fim: '2026-09-30'
   nova_vigencia_fim: '2026-12-28'
+  # --- Apostilamento de reajuste, estilo SINFRA: `periodo` + lista explícita de `competencias` (valor em reais e
+  # nº da medição do órgão). `ciclo` é o ano; sem ele vale o ano da `eficacia` ou da data do termo.
+- chave: ap-reaj-01
+  tipo: apostilamento_reajuste
+  data: '2026-03-16'
+  numero: 001/2025/03/01
+  objeto: 1º Termo de Apostilamento de reajuste (data-base 06/2024)
+  data_base: 2024-06
+  ciclo: 2025
+  eficacia: '2026-03-16'
+  periodo: {de: 2025-06, ate: 2025-08}
+  competencias:
+  - {competencia: 2025-06, valor: '20.000,00', medicao: 3}
+  - {competencia: 2025-07, valor: '30.000,00', medicao: 4}
+  - {competencia: 2025-08, valor: '25.000,00', medicao: 5}
+  # --- Apostilamento de reajuste, estilo MT-PAR: `percentual` sobre o `periodo`, sem lista de competências; `valor`
+  # é o total apostilado, só informativo.
+- chave: ap-reaj-02
+  tipo: apostilamento_reajuste
+  data: '2026-04-20'
+  numero: 001/2025/03/02
+  objeto: 2º Termo de Apostilamento de reajuste (data-base 01/2025)
+  data_base: 2025-01
+  ciclo: 2026
+  periodo: {de: 2026-01, ate: 2026-03}
+  percentual: '3,50'
+  valor: 52.500,00
+  # --- Retificação: termo novo com `corrige` apontando o anterior, que deixa de valer (o anterior não se altera).
+- chave: ap-reaj-02-ret
+  tipo: apostilamento_reajuste
+  data: '2026-05-11'
+  numero: 001/2025/03/03
+  objeto: 3º Termo de Apostilamento (retifica o 2º, percentual de 3,80%)
+  corrige: ap-reaj-02
+  data_base: 2025-01
+  ciclo: 2026
+  periodo: {de: 2026-01, ate: 2026-03}
+  percentual: '3,80'
+  valor: 57.000,00
+  # --- Aditivo de valor com natureza de reajuste (o valor não entra como execução).
+- chave: ta-02
+  tipo: aditivo_valor
+  data: '2026-05-18'
+  numero: 001/2025/01/02
+  objeto: 2º Termo Aditivo de valor (reajuste, R$ 100.000,00)
+  delta_valor: 100.000,00
+  natureza: reajuste
+  # --- Paralisação e reinício: a obra fica paralisada entre as datas; o reinício fecha a paralisação.
+- chave: par-01
+  tipo: paralisacao
+  data: '2025-08-04'
+  numero: OS-PAR-001
+  objeto: Ordem de paralisação das obras (chuvas)
+- chave: rei-01
+  tipo: reinicio
+  data: '2025-09-01'
+  numero: OS-REI-001
+  objeto: Ordem de reinício das obras
+  # --- Endosso de garantia: `apolice` (a do contrato), nova `vigencia_fim` e `referente` (instrumento de prazo que
+  # motivou o endosso).
+- chave: end-01
+  tipo: endosso_garantia
+  data: '2026-06-10'
+  numero: END-EXEMPLO-001
+  objeto: Endosso da apólice (acompanha o apostilamento de prazo)
+  apolice: AP-EXEMPLO-001
+  vigencia_fim: '2027-01-15'
+  referente: ap-01
+# Pleitos enviados antes do sistema. Prazo: `dias`. Reajuste: `data_base` (uma das datas_base) e `ciclo` (ano).
 pleitos_anteriores:
 - {tipo: prazo, oficio: CT-001-EX-2026, data: 2026-05-04, dias: 60}
+- {tipo: reajuste, oficio: CT-002-EX-2026, data: 2026-02-10, data_base: 2024-06, ciclo: 2025}
+- {tipo: reajuste, oficio: CT-003-EX-2026, data: 2026-03-02, data_base: 2025-01, ciclo: 2026}
 # Cronograma físico-financeiro, uma versão por documento (issue #256). `data` é a do documento: a versão vale a
 # partir do mês dela, e os meses anteriores ficam com o previsto da versão de antes. origem: contratual, aditivo,
 # carta ou smo. Versão aplicada não muda: correção é versão nova, com outra chave.
+# Versão já gravada sem linha no cadastro (a carga de 04/09/2026, uma publicada na tela) sai da conta com
+# `cronograma_superadas: [<número da versão>]` (issue #395): continua no histórico, marcada como superada; tirar o
+# número da lista não a faz voltar.
 cronograma:
 - chave: contratual
   origem: contratual

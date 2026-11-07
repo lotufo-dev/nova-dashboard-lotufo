@@ -4,7 +4,7 @@ import secrets
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from app import auditoria, auth, db
+from app import auditoria, auth, db, seguranca
 
 router = APIRouter(prefix="/api/auth")
 
@@ -65,6 +65,8 @@ def login(dados: LoginIn, request: Request, response: Response, conn: sqlite3.Co
     if marca is None:
         raise HTTPException(429, "Muitas tentativas de entrar a partir deste computador. Tente de novo em alguns minutos.",
                             headers={"Retry-After": str(lim.segundos_para_liberar(origem))})
+    # #418: de onde e com que navegador, no `depois` do evento (certo ou recusado); a mesma origem do limite
+    acesso = {"origem": origem, "navegador": seguranca.navegador(request.headers.get("user-agent"))}
     # So' quem entra devolve a vaga. Erro no meio (banco ocupado ao gravar o contador, /code-review) fica contado:
     # a senha pode ja' ter sido conferida.
     u = auth.autenticar(conn, dados.email, dados.senha)
@@ -83,13 +85,15 @@ def login(dados: LoginIn, request: Request, response: Response, conn: sqlite3.Co
         depois = ({"email": email} if _PARECE_EMAIL.fullmatch(email)
                   else {"email": None, "motivo": "texto inválido no campo e-mail", "faixa": _faixa(len(dados.email))})
         with db.mutacao(conn):
-            auditoria.registrar(conn, None, "auth.login_falha", "usuario", None, depois=depois)
+            auditoria.registrar(conn, None, "auth.login_falha", "usuario", None, depois={**depois, **acesso})
         raise HTTPException(401, "E-mail ou senha inválidos, ou usuário bloqueado")
     # sessao e registro de login no MESMO commit: nao existe sessao valida sem o
     # evento que a explica, nem evento de login sem sessao.
     with db.mutacao(conn):
         token, csrf = auth.criar_sessao(conn, u["id"])
-        auditoria.registrar(conn, u["id"], "auth.login")
+        # Gate Sol S2: o perfil de quem entrou, so' no login certo (no recusado diria que a conta existe); o alerta de
+        # origem nova de administrador vale por ele, e nao pelo perfil de hoje
+        auditoria.registrar(conn, u["id"], "auth.login", depois={**acesso, "perfil": u["perfil"]})
     # secure=False em dev (proxy HTTP do Vite) e em producao HTTP na rede interna
     # (DASH_SEM_TLS=1, decisao de 2026-09-02: sem certificado a instalar em cada
     # maquina). O navegador rejeita cookie "secure" fora de HTTPS.
@@ -119,6 +123,12 @@ def eu(usuario: dict = Depends(usuario_atual)):
     # e precisa recupera-lo aqui, senao toda mutacao da 403 ate o proximo login.
     return {**{k: usuario[k] for k in ("id", "nome", "email", "perfil")},
             "csrf": usuario["csrf_token"]}
+
+
+@router.get("/acessos")
+def meus_acessos(usuario: dict = Depends(usuario_atual), conn: sqlite3.Connection = Depends(conexao)):
+    """#418: Minha conta mostra os ultimos acessos da propria pessoa (qualquer perfil); os de outra so' o admin ve."""
+    return seguranca.acessos(conn, usuario["id"])
 
 
 class SenhaIn(BaseModel):

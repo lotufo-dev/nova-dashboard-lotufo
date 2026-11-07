@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Prazos from "./Prazos";
 
@@ -57,5 +57,78 @@ describe("Prazos", () => {
     render(<Prazos contratoId={1} podeEditar={false} />);
     expect(await screen.findByText(/paralisada desde/)).toBeTruthy();
     expect(screen.queryByText("vencida")).toBeNull();
+  });
+
+  // issue #292: a carta de prazo sugere os dias pelo ritmo dos ultimos 6 meses; a pessoa confirma ou muda
+  const sugestao = (extra: Record<string, unknown> = {}) => ({
+    saldo_centavos: 20000000, medido_periodo_centavos: 30000001, ritmo_centavos: 5000000, meses: 6, de: "2026-04",
+    ate: "2026-09", execucao_fim: "2026-10-20", novo_fim: "2027-02-15", dias: 123, motivo: null, ...extra });
+
+  it("pedir prorrogação mostra a sugestão com a conta e o campo de dias preenchido e editável", async () => {
+    api.mockResolvedValue({ situacao: situacao(), historico: "", sugestao: sugestao(), pleitos: [] });
+    render(<Prazos contratoId={1} podeEditar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Pedir prorrogação" }));
+    expect(screen.getByText(/^Sugestão: 123 dias \(saldo R\$\s200\.000,00, ritmo R\$\s50\.000,00\/mês de 04\/2026 a 09\/2026\)$/)).toBeTruthy();
+    // a conta cabe numa linha: sem frase de apoio explicando a regra (texto-na-tela.md)
+    expect(screen.queryByText(/Confira e mude|contado a partir/)).toBeNull();
+    const campo = screen.getByLabelText("Dias de prorrogação") as HTMLInputElement;
+    expect(campo.value).toBe("123");
+    fireEvent.change(campo, { target: { value: "150" } });
+    expect(campo.value).toBe("150");
+  });
+
+  it("obra sem medição recente não sugere, diz por quê e deixa o campo vazio", async () => {
+    const motivo = "Sem medição de execução de 04/2026 a 09/2026: sem ritmo para sugerir os dias.";
+    api.mockResolvedValue({ situacao: situacao(), historico: "",
+      sugestao: sugestao({ dias: null, ritmo_centavos: null, medido_periodo_centavos: 0, novo_fim: null, motivo }), pleitos: [] });
+    render(<Prazos contratoId={1} podeEditar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Pedir prorrogação" }));
+    expect(screen.getByText(`Sem sugestão de dias. ${motivo}`)).toBeTruthy();
+    expect(screen.queryByText(/^Sugestão:/)).toBeNull();
+    expect((screen.getByLabelText("Dias de prorrogação") as HTMLInputElement).value).toBe("");
+  });
+
+  it("sugestão de 1 dia no singular, e o campo tem o teto do pedido", async () => {
+    api.mockResolvedValue({ situacao: situacao(), historico: "", sugestao: sugestao({ dias: 1 }), pleitos: [] });
+    render(<Prazos contratoId={1} podeEditar={true} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Pedir prorrogação" }));
+    expect(screen.getByText(/^Sugestão: 1 dia \(/)).toBeTruthy();
+    expect((screen.getByLabelText("Dias de prorrogação") as HTMLInputElement).max).toBe("3650");
+  });
+
+  // issue #398: pedido de aditivo de valor do cadastro (RPFO), ligado ao aditivo de valor assinado depois
+  const pedidoValor = (atendido_por: Record<string, unknown> | null = null) => ({
+    id: 9, numero_oficio: "CT-001-EX-2026", enviado_em: "2026-03-27", valor_centavos: 100000000, objeto: "1ª RPFO",
+    atendido_por });
+
+  it("pedido de valor sem resposta aparece em Pedidos e cartas, sem virar opção de carta nova", async () => {
+    api.mockResolvedValue({ situacao: situacao(), historico: "", pleitos: [], pedidos_valor: [pedidoValor()] });
+    render(<Prazos contratoId={1} podeEditar={true} />);
+    const titulo = await screen.findByRole("heading", { name: /^Pedido de valor/ });
+    expect(titulo.textContent).toMatch(/^Pedido de valor CT-001-EX-2026 de 27\/03\/2026, R\$\s1\.000\.000,00$/);
+    const selo = screen.getByText("sem resposta");
+    expect(selo.closest(".selo")?.className).toContain("selo--atencao");
+    expect(titulo.closest("section")?.textContent?.replace(/\s/g, " "))
+      .toBe("Pedido de valor CT-001-EX-2026 de 27/03/2026, R$ 1.000.000,00, sem resposta");
+    // a tela so' oferece carta de prorrogacao (e de conclusao, no encerramento); pedido de valor e' sessao manual
+    expect(screen.queryAllByRole("button", { name: /valor/i })).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Pedir prorrogação" }));
+    expect(screen.queryByRole("option", { name: /valor/i })).toBeNull();
+  });
+
+  it("pedido de valor atendido pelo aditivo posterior", async () => {
+    api.mockResolvedValue({ situacao: situacao(), historico: "", pleitos: [],
+      pedidos_valor: [pedidoValor({ numero: "099/2024/01/01", data_assinatura: "2026-06-30", rotulo: "1º TA" })] });
+    render(<Prazos contratoId={1} podeEditar={false} />);
+    const selo = await screen.findByText("atendido pelo 1º TA");
+    expect(selo.closest(".selo")?.className).toContain("selo--ok");
+    expect(screen.queryByText("sem resposta")).toBeNull();
+  });
+
+  it("resposta sem pedidos de valor (servidor antigo) não quebra a aba", async () => {
+    api.mockResolvedValue({ situacao: situacao(), historico: "", pleitos: [] });
+    render(<Prazos contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("31/12/2026")).toBeTruthy();
+    expect(screen.queryByText(/Pedido de valor/)).toBeNull();
   });
 });

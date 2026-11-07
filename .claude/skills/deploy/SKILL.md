@@ -55,7 +55,22 @@ $atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()
 git log --oneline "$atual..origin/master"
 git diff --name-only "$atual" origin/master -- backend/migrations
 git diff --name-only "$atual" origin/master -- frontend
+Test-Path C:\DashboardLotufo\segredos\instalacao.json
+git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalacao.py
 ```
+
+- **Arquivo da instalação** (issue #417, runbook "Instalação assinada"): o `Test-Path` tem que dar `True`. Se der `False`,
+  parar e avisar o Leo, que assina e copia o arquivo; sem ele a produção sobe em modo cópia, sem e-mail e sem RM.
+- **Primeiro deploy com a #417**: o `ls-tree` volta vazio, porque o commit no ar ainda não tem `instalacao.py`. Então
+  o `deploy.ps1` do diretório pinado é o antigo, que só confere o 200. Seguir o item "Deploy da issue #417" de
+  "Subir e derrubar": rodar o `deploy.ps1` novo copiado para `C:\Temp\deploy`, pelo Mac num `.ps1` com `-File`, e
+  conferir `instalacao: autorizada` logo depois.
+
+- **Corte para HTTPS** (issue #425): é um passo à parte, depois de um deploy normal do commit com a #425, e só quando o
+  Leo pedir. Seguir o runbook, "HTTP ou HTTPS", subseção "Corte para HTTPS", na ordem (certificado, PCs da operação,
+  troca da tarefa e do watchdog, conferência). O `deploy.ps1` lê o modo da tarefa: com `-SemTls` confere por HTTP, sem
+  ele por HTTPS, e no HTTPS não começa sem `<raiz>\segredos\tls\cert.pem` ("certificado do HTTPS nao encontrado",
+  nada alterado: avisar o Leo).
 
 - **Migração nova** (arquivo adicionado, alterado, removido ou renomeado em `backend/migrations/`): dizer ao Leo **explicitamente**, antes de rodar,
   o número e o que ela faz (ler o `.sql`: só acrescenta coluna/tabela/índice, ou mexe em dados). Pelo runbook,
@@ -73,7 +88,7 @@ git diff --name-only "$atual" origin/master -- frontend
    (o `deploy.ps1` também cria e apaga o sentinela sozinho; criar antes não atrapalha.)
 2. Na pasta principal, pela ferramenta PowerShell, **sem redirecionar stderr** (nada de `2>&1` ou `*>&1`: o
    PowerShell 5.1 transforma o aviso do Vite em erro fatal, cabeçalho do script), com timeout de 600000 ms:
-   `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend`
+   `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend` (a porta vem da tarefa agendada; `-Porta <porta>` só confere e aborta se não bater)
 3. Ler a saída:
    - `sem migracao nova; sem backup pre-migracao` ou `BACKUP PRE-MIGRACAO: <caminho>` → guardar o caminho do
      backup para o registro.
@@ -86,13 +101,20 @@ git diff --name-only "$atual" origin/master -- frontend
      O rollback não volta o banco: se houve backup pré-migração, dizer ao Leo o caminho do arquivo, que é o
      que se restaura à mão (runbook, "Restaurar o banco a partir de um snapshot") se for preciso.
    - `deploy abortado no build; producao segue no commit anterior ...` → a versão nova não subiu e a produção
-     segue no commit anterior. Avisar o Leo com o motivo, não tentar de novo sozinho.
+     segue no commit anterior. Avisar o Leo com o motivo, não tentar de novo sozinho. Com o aviso
+     `instalacao nao autorizada para o commit novo` antes, o motivo é o arquivo da instalação (runbook, "Instalação
+     assinada").
    - `ROLLBACK TAMBEM FALHOU - intervir a mao` ou `deploy abortado no build E a volta para ... falhou ... - intervir a mao`
      → avisar o Leo na hora; logs em `C:\DashboardLotufo\logs\dashboard.log` e `C:\DashboardLotufo\logs\watchdog.log`.
      **Não apagar o sentinela** antes de o diretório pinado voltar ao commit anterior.
-4. Conferir a saúde na própria máquina (runbook, "Saúde"):
-   `Invoke-WebRequest http://localhost/api/health -UseBasicParsing` → 200 com `banco: ok`
-   (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
+4. Conferir a saúde na própria máquina (runbook, "Saúde" e "HTTP ou HTTPS"):
+   `& .\scripts\saude_local.ps1 -Porta <porta>` → 200 com `banco: ok`, `tls: true` e
+   `instalacao: autorizada` (`nao-autorizada` é a produção em modo cópia, sem e-mail e sem RM: avisar o Leo com o
+   `instalacao_motivo` e seguir o runbook, "Instalação assinada")
+   (a porta é a da tarefa agendada; o script fala HTTPS com `localhost` aceitando só o certificado da instalação, pelo
+   thumbprint; nunca trocar por `Invoke-WebRequest` com a verificação desligada. Com a tarefa ainda em `-SemTls`, antes
+   do corte da issue #425, acrescentar `-SemTls`, e o `tls` vem `false`)
+   (503 = banco não respondeu; "SEM RESPOSTA" = servidor parado ou certificado diferente do da instalação). Conferir também `git -C C:\DashboardLotufo\app rev-parse --short HEAD` igual ao
    `origin/master`.
 5. Apagar o sentinela: `Remove-Item C:\DashboardLotufo\watchdog.pause -Force -ErrorAction SilentlyContinue`
    e confirmar com `Test-Path C:\DashboardLotufo\watchdog.pause` → `False`.

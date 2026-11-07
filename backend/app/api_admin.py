@@ -1,7 +1,7 @@
 import datetime
 import sqlite3
-from fastapi import APIRouter, Depends, Query
-from app import auditoria, backup, correio, siga, tempo
+from fastapi import APIRouter, Depends, HTTPException, Query
+from app import auditoria, backup, copia_dono, correio, instalacao, seguranca, sentinela, siga, tempo
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -32,15 +32,33 @@ def listar_auditoria(limite: int = Query(default=100, ge=1, le=500),
 @router.get("/backup")
 def saude_do_backup(usuario: dict = Depends(exigir("administrar", com_csrf=False))):
     """Administracao > Saude (issue #31): ultimo backup, quantos estao guardados, ultimo erro
-    e se esta atrasado (mais de 2 h sem snapshot). So' admin: traz caminhos e erros do servidor."""
-    return backup.situacao(backup.pasta_local(), backup.pasta_externa() is not None, tempo.agora_utc())
+    e se esta atrasado (mais de 2 h sem snapshot). So' admin: traz caminhos e erros do servidor. Na instalacao nao
+    autorizada a copia externa nao roda (issue #417, main.py): a tela mostra o estado efetivo, nao o configurado."""
+    externa = backup.pasta_externa() is not None and instalacao.ligada()
+    return backup.situacao(backup.pasta_local(), externa, tempo.agora_utc())
+
+
+@router.post("/copia-dono")
+def gerar_copia_dono(usuario: dict = Depends(exigir("administrar"))):
+    """Botao "Gerar cópia do dono agora" (Administracao > Saude, issue #419). So' admin.
+    Sem chave publica configurada nada e' gerado."""
+    try:
+        destino = copia_dono.gerar_e_registrar(backup.pasta_local().parent.parent, backup.pasta_local())
+    except copia_dono.NaoConfigurada:
+        raise HTTPException(409, copia_dono.NAO_CONFIGURADA)
+    except Exception as e:
+        raise HTTPException(500, f"Não foi possível gerar a cópia do dono: {copia_dono._motivo(e)}")
+    return {"arquivo": destino.name}
 
 
 @router.get("/saude")
 def saude(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
           conn: sqlite3.Connection = Depends(conexao)):
-    """Administracao > Saude: a situacao do monitor do SIGA (issue #330), ao lado da do RM e do backup."""
-    return {"siga": siga.saude(conn)}
+    """Administracao > Saude: a situacao do monitor do SIGA (issue #330), ao lado da do RM e do backup, e o bloco
+    Seguranca (issue #418): `[{nivel, mensagem, data}]`, montado por `app/seguranca.py`, com no maximo
+    `seguranca.ITENS_NA_TELA` itens; `seguranca_fora` diz quantos ficaram de fora."""
+    itens, fora = seguranca.bloco(conn)
+    return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora, "sentinela": sentinela.situacao()}
 
 
 @router.get("/contas-microsoft")
