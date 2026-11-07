@@ -1254,3 +1254,27 @@ def test_carregar_medicoes_nao_corrige_competencia_com_nf_ou_espelho_nem_cancela
     assert "linha 3: nº 4 execução 2025-06: conflito (a competência 2025-07 já está no espelho" in saida
     assert "linha 4: nº 5 execução 2025-07: conflito (no banco a medição está com espelho gerado: o espelho é dela" in saida
     assert "linha 5: nº 6 execução 2025-04: correção (competência: banco 2025-07, CSV 2025-04; aviso: fica antes" in saida
+
+
+def test_aplicar_custo_com_tarefa_repetida_sai_um_e_nao_grava(tmp_path, monkeypatch, capsys):
+    """Issue #489: a validacao da secao `custo:` recusa a aplicacao inteira, com arquivo, grupo e tarefa."""
+    conn = _banco(tmp_path, monkeypatch)
+    custo = {"projeto_rm": "GL.C01.P001",
+             "grupos": [{"nome": "Terraplanagem", "tarefas": ["001.03"], "itens_planilha": ["2."]},
+                        {"nome": "Drenagem", "tarefas": ["001.03"], "itens_planilha": ["3."]}]}
+    raiz = str(_cadastro(tmp_path / "cad", {**CONTRATO, "custo": custo}))
+    assert cli.main(["cadastro", "aplicar", "--raiz", raiz, "--usuario", "leo@l.com"]) == 1
+    saida = capsys.readouterr().out
+    assert "contratos/mt-402.yaml" in saida and "Drenagem" in saida and "001.03" in saida
+    assert conn.execute("SELECT COUNT(*) FROM contratos").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM custo_grupos").fetchone()[0] == 0
+
+
+def test_aplicar_custo_grava_e_relata(tmp_path, monkeypatch, capsys):
+    conn = _banco(tmp_path, monkeypatch)
+    custo = {"projeto_rm": "GL.C01.P001",
+             "grupos": [{"nome": "Terraplanagem", "tarefas": ["001.03"], "itens_planilha": ["2."]}]}
+    raiz = str(_cadastro(tmp_path / "cad", {**CONTRATO, "custo": custo}))
+    assert cli.main(["cadastro", "aplicar", "--raiz", raiz, "--usuario", "leo@l.com"]) == 0
+    assert "custo: 1 criados" in capsys.readouterr().out
+    assert conn.execute("SELECT nome FROM custo_grupos").fetchone()[0] == "Terraplanagem"

@@ -1021,3 +1021,57 @@ def test_apostilamento_sem_ciclo_nem_eficacia_avisa_o_ano_da_data(tmp_path):
 
 def test_apostilamento_com_ciclo_nao_avisa(tmp_path):
     assert _avisos_ciclo(tmp_path, _apostilamento()) == []
+
+
+# Issue #489: custo por obra -- grupos da planilha do orgao, tarefas do RM e regra do custo sem tarefa
+CUSTO = {"projeto_rm": "GL.C01.P001",
+         "grupos": [{"nome": "Terraplanagem", "tarefas": ["001.03", "001.04"], "itens_planilha": ["2."],
+                     "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+                    {"nome": "Drenagem", "tarefas": ["001.05"], "itens_planilha": ["3.", "4.1"]}]}
+
+
+def test_custo_normaliza_na_ordem_com_os_padroes(tmp_path):
+    c = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": CUSTO}]))["contratos"][0]
+    assert c["custo"] == {
+        "projeto_rm": "GL.C01.P001", "nao_e_custo": ["2.02", "2.01.22"], "sem_tarefa": "proporcional",
+        "grupos": [{"nome": "Terraplanagem", "tarefas": ["001.03", "001.04"], "itens_planilha": ["2."],
+                    "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+                   {"nome": "Drenagem", "tarefas": ["001.05"], "itens_planilha": ["3.", "4.1"], "item_chave": None}]}
+
+
+def test_custo_ausente_fica_vazio_e_nao_e_custo_explicito_vale(tmp_path):
+    assert ca.preparar(_escrever(tmp_path / "a"))["contratos"][0]["custo"] is None
+    c = ca.preparar(_escrever(tmp_path / "b", contratos=[{**CONTRATO, "custo": {**CUSTO, "nao_e_custo": ["2.03"],
+                                                                                   "sem_tarefa": "proporcional"}}]))
+    assert c["contratos"][0]["custo"]["nao_e_custo"] == ["2.03"]
+
+
+def test_custo_tarefa_em_dois_grupos_e_recusada_com_arquivo_grupo_e_tarefa(tmp_path):
+    grupos = [CUSTO["grupos"][0], {**CUSTO["grupos"][1], "tarefas": ["001.05", "001.03"]}]
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": grupos}}]))
+    assert ("contratos/mt-402.yaml: custo.grupos[1].tarefas: a tarefa 001.03 do grupo Drenagem já está no grupo "
+            "Terraplanagem") in erros
+
+
+@pytest.mark.parametrize("troca, campo", [
+    ({"grupos": [{"tarefas": ["001.03"], "itens_planilha": ["2."]}]}, "custo.grupos[0].nome"),
+    ({"grupos": [{"nome": "A", "tarefas": ["001.03"], "itens_planilha": ["2."]},
+                 {"nome": "B", "tarefas": ["001.04"], "itens_planilha": ["2."]}]}, "custo.grupos[1].itens_planilha"),
+    ({"grupos": [{"nome": "A", "tarefas": ["1"], "itens_planilha": ["2."]},
+                 {"nome": "A", "tarefas": ["2"], "itens_planilha": ["3."]}]}, "custo.grupos[1].nome"),
+    ({"sem_tarefa": "por_area"}, "custo.sem_tarefa"),
+    ({"projeto_rm": ""}, "custo.projeto_rm"),
+    ({"grupos": []}, "custo.grupos"),
+    ({"grupos": [{"nome": "A", "tarefas": [1.03], "itens_planilha": ["2."]}]}, "custo.grupos[0].tarefas"),
+    ({"nao_e_custo": [2.02]}, "custo.nao_e_custo"),
+    ({"grupos": [{"nome": "A", "tarefas": ["1"], "itens_planilha": ["2."], "item_chave": {"codigo": "2.1"}}]},
+     "custo.grupos[0].item_chave"),
+])
+def test_custo_invalido_e_recusado_com_o_campo(tmp_path, troca, campo):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, **troca}}]))
+    assert any(e.startswith(f"contratos/mt-402.yaml: {campo}:") for e in erros), erros
+
+
+def test_custo_que_nao_e_mapa_e_recusado(tmp_path):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": ["x"]}]))
+    assert any(e.startswith("contratos/mt-402.yaml: custo:") for e in erros), erros

@@ -851,7 +851,82 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
             falha("pecas_no_oficio", f"use uma lista, sem repetição, de {', '.join(tipos)}")
         else:
             c["pecas_no_oficio"] = list(pno)
+    c["custo"] = _custo(bruto.get("custo"), falha)
     return c
+
+
+# Issue #489: custo por obra. Naturezas orcamentarias fora do custo quando o yaml nao diz: 2.02 (nao operacional) e
+# 2.01.22 (adiantamento a fornecedor). Regra do custo sem tarefa: so' `proporcional` (decisao do Leo de 06/11/2026).
+NAO_E_CUSTO_PADRAO = ("2.02", "2.01.22")
+REGRAS_SEM_TAREFA = ("proporcional",)
+_PREFIXOS = 'use uma lista de códigos entre aspas (ex.: "001.03"); sem aspas o YAML lê o código como número'
+
+
+def _prefixos(valor, campo: str, falha) -> list[str] | None:
+    """Lista de prefixos de codigo (tarefa, item, natureza). Texto obrigatorio: `001.03` sem aspas vira 1.03."""
+    if valor is None:
+        return []
+    if not isinstance(valor, list) or any(not isinstance(x, str) or not x.strip() for x in valor):
+        falha(campo, _PREFIXOS)
+        return None
+    return [x.strip() for x in valor]
+
+
+def _custo(bruto, falha) -> dict | None:
+    """Secao `custo:` do contrato: projeto do Solum, grupos da planilha do orgao (ordem do yaml), naturezas fora do
+    custo e regra do custo sem tarefa. Ausente: None (a obra fica sem cadastro de custo)."""
+    if bruto is None:
+        return None
+    if not isinstance(bruto, dict):
+        falha("custo", "use um mapa com projeto_rm, grupos, nao_e_custo e sem_tarefa")
+        return None
+    projeto = str(bruto.get("projeto_rm") or "").strip()
+    if not projeto:
+        falha("custo.projeto_rm", "obrigatório (código do projeto no Solum, ex.: GL.C01.P704)")
+    nao_e_custo = bruto.get("nao_e_custo")
+    nao_e_custo = list(NAO_E_CUSTO_PADRAO) if nao_e_custo is None else _prefixos(nao_e_custo, "custo.nao_e_custo", falha)
+    regra = bruto.get("sem_tarefa", "proporcional")
+    if regra not in REGRAS_SEM_TAREFA:
+        falha("custo.sem_tarefa", f"use {' ou '.join(REGRAS_SEM_TAREFA)}: {regra!r}")
+    lista = bruto.get("grupos")
+    if not isinstance(lista, list) or not lista:
+        falha("custo.grupos", "use uma lista com ao menos um grupo (nome, tarefas, itens_planilha)")
+        lista = []
+    grupos: list[dict] = []
+    dono_tarefa: dict[str, str] = {}
+    dono_item: dict[str, str] = {}
+    nomes: set[str] = set()
+    for i, g in enumerate(lista):
+        onde = f"custo.grupos[{i}]"
+        if not isinstance(g, dict):
+            falha(onde, "use um mapa com nome, tarefas, itens_planilha e, se houver, item_chave")
+            continue
+        nome = str(g.get("nome") or "").strip() if isinstance(g.get("nome"), (str, int)) else ""
+        if not nome:
+            falha(f"{onde}.nome", "obrigatório (o nome do grupo na planilha do órgão)")
+        elif nome in nomes:
+            falha(f"{onde}.nome", f"grupo repetido: {nome}")
+        nomes.add(nome)
+        tarefas = _prefixos(g.get("tarefas"), f"{onde}.tarefas", falha)
+        itens = _prefixos(g.get("itens_planilha"), f"{onde}.itens_planilha", falha)
+        for valores, dono, campo, rotulo in ((tarefas, dono_tarefa, "tarefas", "a tarefa"),
+                                             (itens, dono_item, "itens_planilha", "o item")):
+            for v in valores or []:
+                if v in dono:
+                    lugar = "aparece duas vezes" if dono[v] == nome else f"já está no grupo {dono[v]}"
+                    falha(f"{onde}.{campo}", f"{rotulo} {v} do grupo {nome} {lugar}")
+                else:
+                    dono[v] = nome
+        chave = g.get("item_chave")
+        if chave is not None:
+            if (not isinstance(chave, dict) or not isinstance(chave.get("codigo"), str) or not chave["codigo"].strip()
+                    or not isinstance(chave.get("unidade"), str) or not chave["unidade"].strip()):
+                falha(f"{onde}.item_chave", 'use {codigo: "2.1", unidade: "m³"}, os dois entre aspas')
+                chave = None
+            else:
+                chave = {"codigo": chave["codigo"].strip(), "unidade": chave["unidade"].strip()}
+        grupos.append({"nome": nome, "tarefas": tarefas or [], "itens_planilha": itens or [], "item_chave": chave})
+    return {"projeto_rm": projeto, "nao_e_custo": nao_e_custo or [], "sem_tarefa": regra, "grupos": grupos}
 
 
 def preparar(raiz: Path) -> dict:
