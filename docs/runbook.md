@@ -312,10 +312,13 @@ acima ("Gerar de novo com a produção em HTTPS"), que troca o par inteiro e rei
 `deploy.ps1` em HTTPS confere a ACL de `<raiz>\segredos\tls`, `cert.pem` e `chave.pem` com a mesma função que o
 `rodar_producao.ps1` usa na subida (`Assert-AclSomenteSistemaEAdmins`, de `scripts\comum_acl.ps1`): dono e permissões só de
 SYSTEM e Administradores, sem herança de outro principal. Arquivo reposto por cópia pelo Explorer ou por restauração de backup
-costuma trazer permissão a mais; abre e casa para o administrador que roda o deploy, mas o `rodar_producao.ps1` recusaria subir
-o commit novo e o rollback. O deploy para com "permissao do par do HTTPS alem de SYSTEM e Administradores em ..." e nada foi
-alterado: a produção no ar segue, e o watchdog não foi pausado. **Não reiniciar a tarefa** (a subida recusaria a mesma
-permissão). O "Detalhe" da mensagem lista o principal ou o dono indevido. Corrigir num PowerShell elevado, no caminho citado
+costuma trazer permissão a mais; abre e casa para o administrador que roda o deploy. A recusa é **preventiva**: sem o RM
+ligado, o `rodar_producao.ps1` recusaria subir o commit novo e o rollback com essa permissão; com o RM ligado
+(`-RmSenhaArquivo` em `<raiz>\segredos\rm.txt`, a configuração da produção) a subida reaplica a ACL de `segredos` inteira
+(`icacls ... /reset /T` e dono Administradores) antes de conferir, e conserta sozinha a permissão a mais. O deploy não conta
+com isso e para com "permissao do par do HTTPS alem de SYSTEM e Administradores em ..." e nada foi alterado: a produção no ar
+segue, e o watchdog não foi pausado. Corrigir a permissão antes de qualquer reinício (sem o RM ligado, a subida recusaria).
+O "Detalhe" da mensagem lista o principal ou o dono indevido. Corrigir num PowerShell elevado, no caminho citado
 (a pasta e os dois arquivos, nessa ordem):
 `icacls "<raiz>\segredos\tls" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"`,
 `icacls "<raiz>\segredos\tls\*" /reset /T /Q` (os `.pem` passam a herdar só da pasta) e

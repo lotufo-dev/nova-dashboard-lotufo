@@ -181,7 +181,7 @@ if ($comTls) {
     # no commit novo e no rollback. A mesma funcao (comum_acl.ps1) confere aqui, antes do sentinela e de parar a producao.
     foreach ($caminhoTls in (Join-Path $Raiz "segredos\tls"), $certificado, $chaveTls) {
         try { Assert-AclSomenteSistemaEAdmins -Caminho $caminhoTls }
-        catch { throw "permissao do par do HTTPS alem de SYSTEM e Administradores em $caminhoTls (o rodar_producao.ps1 recusaria subir o commit novo e o rollback); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Permissao do par do HTTPS recusada). Detalhe: $($_.Exception.Message)" }
+        catch { throw "permissao do par do HTTPS alem de SYSTEM e Administradores em $caminhoTls (recusa preventiva: sem o RM ligado o rodar_producao.ps1 recusaria subir o commit novo e o rollback; com o RM em segredos\rm.txt a subida reaplica a ACL); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Permissao do par do HTTPS recusada). Detalhe da conferencia (o 'rode este script de novo' abaixo vale para o deploy.ps1): $($_.Exception.Message)" }
     }
 } else {
     $urlSaude = "http://localhost:$Porta/api/health"

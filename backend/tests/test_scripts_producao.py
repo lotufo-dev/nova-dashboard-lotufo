@@ -964,6 +964,7 @@ def test_deploy_https_confere_a_acl_do_par_antes_do_sentinela():
     assert tls < laco < confere < fim
     mensagem = codigo[confere:confere + 600]
     assert "throw " in mensagem and "nada foi alterado" in mensagem and "Permissao do par do HTTPS recusada" in mensagem
+    assert "recusa preventiva" in mensagem
     for depois in ("New-Item -ItemType File -Path $pause", "& git -C $AppDir fetch --quiet", "try { Construir $alvo"):
         assert confere < codigo.index(depois)
     # a mesma funcao que o rodar_producao.ps1 usa na subida, sobre a pasta e os dois arquivos do par
@@ -979,7 +980,9 @@ def test_runbook_diz_o_que_fazer_quando_o_deploy_recusa_a_permissao_do_par():
     runbook = (SCRIPTS.parent / "docs" / "runbook.md").read_text(encoding="utf-8")
     inicio = runbook.index("**Permissao do par do HTTPS recusada** (issue #534)")
     trecho = " ".join(runbook[inicio:inicio + 1800].split())
-    assert "icacls" in trecho and "nada foi alterado" in trecho and "Não reiniciar a tarefa" in trecho
+    assert "icacls" in trecho and "nada foi alterado" in trecho and "Corrigir a permissão antes de qualquer reinício" in trecho
+    # revisor da PR #538: com o RM ligado a subida reaplica a ACL de segredos; a recusa do deploy e' preventiva
+    assert "preventiva" in trecho and "segredos\\rm.txt" in trecho
 
 
 def _par_autoassinado(pasta, nome):
