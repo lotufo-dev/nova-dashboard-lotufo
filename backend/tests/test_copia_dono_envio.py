@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from app import auth, backup, copia_dono_envio, correio, db, envio_reserva, graph
+from app import auditoria, auth, backup, copia_dono_envio, correio, db, envio_reserva, graph
 
 
 DONO = "dono@exemplo.com.br"
@@ -129,9 +129,11 @@ def test_reenviar_manda_de_novo_a_copia_mais_recente_e_fica_na_auditoria(ambient
     msgs = _enviados(tmp)
     assert len(msgs) == 2 and msgs[1]["anexos"] == msgs[0]["anexos"]
     assert [x[0] for x in conn.execute("SELECT rodada FROM copia_dono_envios ORDER BY id")] == [1, 2]
-    a = conn.execute("SELECT entidade, entidade_id, depois FROM audit_log WHERE acao='copia_dono.reenviar'").fetchone()
-    assert (a["entidade"], a["entidade_id"]) == ("copia_dono", arq.name)
-    depois = json.loads(a["depois"])
+    inicio, fim = conn.execute("SELECT entidade, entidade_id, depois FROM audit_log WHERE acao='copia_dono.reenviar' "
+                               "ORDER BY id").fetchall()
+    assert (fim["entidade"], fim["entidade_id"]) == ("copia_dono", arq.name)
+    assert json.loads(inicio["depois"])["resultado"] == "iniciado"
+    depois = json.loads(fim["depois"])
     assert (depois["resultado"], depois["enviados"], depois["partes"], depois["rodada"]) == ("completo", 1, 1, 2)
 
 
@@ -226,9 +228,86 @@ def test_reenvio_que_falha_fica_na_auditoria_com_o_resultado(ambiente, monkeypat
     monkeypatch.setattr(correio, "cliente", falso())
     with pytest.raises(ValueError):
         copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))
-    [a] = conn.execute("SELECT depois FROM audit_log WHERE acao='copia_dono.reenviar'").fetchall()
-    depois = json.loads(a["depois"])
+    inicio, fim = conn.execute("SELECT depois FROM audit_log WHERE acao='copia_dono.reenviar' ORDER BY id").fetchall()
+    assert json.loads(inicio["depois"])["resultado"] == "iniciado"
+    depois = json.loads(fim["depois"])
     assert (depois["resultado"], depois["enviados"], depois["partes"]) == (resultado, enviados, 3)
+
+
+def test_reenvio_interrompido_deixa_o_evento_iniciado_com_quem_clicou(ambiente, monkeypatch):
+    # issue #482: o servidor cai no meio da rodada (o evento do resultado nunca e' gravado); o "iniciado" entrou na
+    # mesma transacao da reserva, com quem clicou
+    conn, tmp = ambiente
+    monkeypatch.setattr(copia_dono_envio, "TAMANHO_PARTE", 1000)
+    _copia(tmp)
+    monkeypatch.setattr(correio, "cliente", FalhaNaSegunda())
+    monkeypatch.setattr(copia_dono_envio, "_auditar_reenvio", lambda *a, **k: None)   # caiu antes do resultado
+    with pytest.raises(ValueError):
+        copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))
+    [a] = conn.execute("SELECT usuario_id, entidade_id, depois FROM audit_log WHERE acao='copia_dono.reenviar'").fetchall()
+    assert a["usuario_id"] == _admin(conn)["id"]
+    depois = json.loads(a["depois"])
+    assert (depois["resultado"], depois["partes"], depois["rodada"]) == ("iniciado", 3, 1)
+
+
+def test_resultado_do_reenvio_tenta_de_novo_com_o_banco_ocupado(ambiente, monkeypatch):
+    # issue #482 (gate Sol): o Graph aceitou; a gravacao do resultado falha na 1a tentativa e passa na 2a
+    conn, tmp = ambiente
+    _copia(tmp)
+    monkeypatch.setattr(copia_dono_envio, "AUDITORIA_PAUSA", 0)
+    original, chamadas = auditoria.registrar, []
+
+    def ocupado_uma_vez(*a, **k):
+        if a[2] == "copia_dono.reenviar":
+            chamadas.append(1)
+        if a[2] == "copia_dono.reenviar" and len(chamadas) == 2:   # 1a = "iniciado"; 2a = 1a tentativa do resultado
+            raise RuntimeError("database is locked")
+        return original(*a, **k)
+    monkeypatch.setattr(auditoria, "registrar", ocupado_uma_vez)
+    r = copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))
+    assert r == {"arquivo": "dashboard-dono-20261105-080000.tar.age", **_ok(1)}
+    resultados = [json.loads(x["depois"])["resultado"] for x in conn.execute(
+        "SELECT depois FROM audit_log WHERE acao='copia_dono.reenviar' ORDER BY id")]
+    assert resultados == ["iniciado", "completo"]
+
+
+def test_resultado_do_reenvio_que_nao_grava_volta_na_resposta_sem_erro(ambiente, monkeypatch, caplog):
+    conn, tmp = ambiente
+    _copia(tmp)
+    monkeypatch.setattr(copia_dono_envio, "AUDITORIA_PAUSA", 0)
+    original, chamadas = auditoria.registrar, []
+
+    def ocupado_depois_do_inicio(*a, **k):
+        if a[2] == "copia_dono.reenviar":
+            chamadas.append(1)
+        if a[2] == "copia_dono.reenviar" and len(chamadas) > 1:
+            raise RuntimeError("database is locked")
+        return original(*a, **k)
+    monkeypatch.setattr(auditoria, "registrar", ocupado_depois_do_inicio)
+    r = copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))
+    assert r["completo"] is True and r["resultado_auditado"] is False
+    assert len(chamadas) == 1 + copia_dono_envio.AUDITORIA_TENTATIVAS
+    assert len(_enviados(tmp)) == 1
+    assert "nao gravada" in caplog.text
+
+
+def test_auditoria_do_inicio_que_falha_nao_reserva_nem_envia(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    _copia(tmp)
+
+    def quebra(*a, **k):
+        raise RuntimeError("banco ocupado")
+    monkeypatch.setattr(auditoria, "registrar", quebra)
+    with pytest.raises(RuntimeError):
+        copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))
+    assert conn.execute("SELECT COUNT(*) FROM copia_dono_envios").fetchone()[0] == 0
+    assert _enviados(tmp) == []
+
+
+def test_envio_automatico_nao_grava_evento_de_reenvio(ambiente):
+    conn, tmp = ambiente
+    assert copia_dono_envio.enviar_nova(conn, _copia(tmp)) == _ok(1)
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='copia_dono.reenviar'").fetchone()[0] == 0
 
 
 def test_trava_que_nao_sai_no_meio_das_partes_vai_junto_do_motivo(ambiente, monkeypatch):
@@ -528,6 +607,64 @@ def test_reserva_vencida_de_copia_anterior_continua_acusada_depois_da_nova_sair(
     conn.close()
     assert api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"] == \
         "envio da cópia de 29/10/2026 interrompido: confira os Enviados e libere"
+
+
+def test_saude_oferece_a_liberacao_da_reserva_presa_de_copia_anterior(api, tmp_path):
+    # issue #482: a copia de 29/10 ficou presa (parte 2 de 3) e a de 05/11 saiu; a Saude devolve a linha presa, a
+    # liberacao a solta e o alerta some
+    velha = _copia_na_pasta("dashboard-dono-20261029-080000.tar.age")
+    conn = db.get_conn()
+    uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    rid = conn.execute("INSERT INTO copia_dono_envios (arquivo, sha256, tamanho, rodada, parte, partes, "
+                       "envio_reservado_em, envio_reservado_por) VALUES (?,?,?,1,2,3,datetime('now','-1 hour'),?)",
+                       (velha.name, "x" * 64, 500, uid)).lastrowid
+    conn.commit()
+    assert copia_dono_envio.enviar_nova(conn, _copia_na_pasta()) == _ok(1)
+    conn.close()
+    velha.unlink()                                  # a regra das 4 mais recentes apagou o arquivo velho
+    s = api.get("/api/admin/backup").json()
+    assert s["ultimo_envio_copia_dono_erro"] == "envio da cópia de 29/10/2026 interrompido: confira os Enviados e libere"
+    d = s["copia_dono_presa"]
+    assert (d["codigo"], d["tabela"], d["id"], d["parte"], d["partes"]) == (
+        "ENVIO_RESERVADO", "copia_dono_envios", rid, 2, 3)
+    assert d["assunto"] == "Dashboard Lotufo: cópia cifrada de 29/10/2026 (parte 2 de 3)"
+    assert d["liberavel_a_partir_de"] and d["reservado_por_nome"]
+    r = api.post("/api/envios/liberar", json={"tabela": "copia_dono_envios", "id": rid,
+                                              "justificativa": "conferi os Enviados e não saiu", "conferi_enviados": True})
+    assert r.status_code == 200, r.text
+    s = api.get("/api/admin/backup").json()
+    assert (s["ultimo_envio_copia_dono_erro"], s["copia_dono_presa"]) == (None, None)
+
+
+def test_reserva_presa_de_copia_anterior_nao_trava_o_reenvio_da_nova(api, tmp_path):
+    # o e-mail da copia velha pode ter saido sem registro (nao se libera): a mais recente continua saindo
+    velha = _copia_na_pasta("dashboard-dono-20261029-080000.tar.age")
+    nova = _copia_na_pasta()
+    conn = db.get_conn()
+    uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    conn.execute("INSERT INTO copia_dono_envios (arquivo, sha256, tamanho, rodada, parte, partes, envio_reservado_em, "
+                 "envio_reservado_por) VALUES (?,?,?,1,1,1,datetime('now','-1 hour'),?)", (velha.name, "x" * 64, 500, uid))
+    conn.commit()
+    conn.close()
+    r = api.post("/api/admin/copia-dono/reenviar")
+    assert r.status_code == 200, r.text
+    assert r.json()["arquivo"] == nova.name
+
+
+def test_reenviar_com_reserva_presa_da_mesma_copia_diz_a_parte(api, monkeypatch):
+    arq = _copia_na_pasta()
+    conn = db.get_conn()
+    uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    rid = conn.execute("INSERT INTO copia_dono_envios (arquivo, sha256, tamanho, rodada, parte, partes, "
+                       "envio_reservado_em, envio_reservado_por) VALUES (?,?,?,1,3,4,datetime('now','-30 minutes'),?)",
+                       (arq.name, "x" * 64, 500, uid)).lastrowid
+    conn.commit()
+    conn.close()
+    r = api.post("/api/admin/copia-dono/reenviar")
+    assert r.status_code == 409
+    d = r.json()["detail"]
+    assert (d["codigo"], d["id"], d["parte"], d["partes"], d["assunto"]) == (
+        "ENVIO_RESERVADO", rid, 3, 4, "Dashboard Lotufo: cópia cifrada de 05/11/2026 (parte 3 de 4)")
 
 
 class CorreioQueDemora:
