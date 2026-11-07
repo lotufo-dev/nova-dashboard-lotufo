@@ -135,7 +135,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
   // #514: os PDFs soltos na area de soltar entram pelo mesmo caminho do botao (so' PDF; o resto e' dito)
   const soltar = (ev: React.DragEvent) => {
     ev.preventDefault(); setSobre(false);
-    if (ocupado) return;
+    if (ocupado) { setLinhas(l => [...l, "Espere o anexo anterior terminar."]); return; }
     const todos = Array.from(ev.dataTransfer.files ?? []);
     const pdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
     const recusados = todos.filter(f => !pdf(f)).map(f => `${f.name}: não é PDF, não foi anexado.`);

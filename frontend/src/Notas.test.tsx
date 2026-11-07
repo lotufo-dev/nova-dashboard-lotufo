@@ -367,4 +367,17 @@ describe("Notas: o passo Notas (#514)", () => {
     expect(await screen.findByText("foto.jpg: não é PDF, não foi anexado.")).toBeTruthy();
     expect(apiForm).toHaveBeenCalledTimes(1);
   });
+
+  it("PDF solto enquanto outro anexo roda não some: pede para esperar (revisor, PR #555)", async () => {
+    api.mockResolvedValue(DADOS);
+    apiForm.mockReturnValue(new Promise(() => {}));      // o primeiro anexo nunca termina
+    render(<Notas medicao={medicao} podeEditar aoMudar={() => {}} />);
+    const area = (await screen.findByText("Solte aqui os PDFs das notas")).closest("label")!;
+    const pdf = () => new File(["x"], "nota.pdf", { type: "application/pdf" });
+    fireEvent.drop(area, { dataTransfer: { files: [pdf()] } });
+    await screen.findByText("Anexando…");
+    fireEvent.drop(area, { dataTransfer: { files: [pdf()] } });
+    expect(await screen.findByText("Espere o anexo anterior terminar.")).toBeTruthy();
+    expect(apiForm).toHaveBeenCalledTimes(1);
+  });
 });
