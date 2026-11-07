@@ -387,3 +387,48 @@ def test_insert_or_replace_numa_leitura_gravada_e_recusado(banco):
         assert [tuple(r) for r in c.execute("SELECT * FROM medicao_grupo_itens ORDER BY ordem")] == antes
     finally:
         c.close()
+
+
+def test_insert_or_replace_na_leitura_gravada_e_recusado(banco):
+    """#502 (revisor e Sol, rodada 1): o REPLACE pela leitura (o pai) nao reabre a leitura para item novo."""
+    _executar(_pasta_com(banco))
+    c = db.get_conn()
+    try:
+        r = c.execute("SELECT * FROM medicao_grupos").fetchone()
+        pai = [tuple(x) for x in c.execute("SELECT * FROM medicao_grupos")]
+        itens = [tuple(x) for x in c.execute("SELECT * FROM medicao_grupo_itens ORDER BY id")]
+        for verbo in ("INSERT OR REPLACE", "REPLACE"):
+            # pelo id da leitura, com mais itens e outro total
+            with pytest.raises(sqlite3.IntegrityError, match="evento"):
+                c.execute(f"{verbo} INTO medicao_grupos (id, medicao_id, sha256, origem, situacao, total_centavos, "
+                          "pedido_centavos, itens) VALUES (?,?,?,'carga','lida',999999,?,?)",
+                          (r["id"], r["medicao_id"], r["sha256"], r["pedido_centavos"], r["itens"] + 1))
+            # pela mesma leitura (o indice unico das lidas), com id novo
+            with pytest.raises(sqlite3.IntegrityError):
+                c.execute(f"{verbo} INTO medicao_grupos (medicao_id, sha256, origem, situacao, total_centavos, "
+                          "pedido_centavos, itens) VALUES (?,?,'carga','lida',999999,?,?)",
+                          (r["medicao_id"], r["sha256"], r["pedido_centavos"], r["itens"] + 1))
+        with pytest.raises(sqlite3.IntegrityError, match="itens dela já foram gravados"):
+            c.execute("INSERT INTO medicao_grupo_itens (leitura_id, ordem, grupo, valor_medido_centavos) "
+                      "VALUES (?,?, 'outros', 999699)", (r["id"], r["itens"] + 1))
+        assert [tuple(x) for x in c.execute("SELECT * FROM medicao_grupos")] == pai
+        assert [tuple(x) for x in c.execute("SELECT * FROM medicao_grupo_itens ORDER BY id")] == itens
+    finally:
+        c.close()
+
+
+def test_id_negativo_preexistente_nao_trava_a_gravacao_normal(banco):
+    """#502 (Sol, rodada 1): o id automatico vale -1 no BEFORE INSERT; um id -1 gravado nao pode travar o resto."""
+    c = db.get_conn()
+    try:
+        mid = c.execute("SELECT id FROM medicoes WHERE numero=2").fetchone()[0]
+        c.execute("INSERT INTO medicao_grupos (id, medicao_id, sha256, origem, situacao, total_centavos, "
+                  "pedido_centavos, itens) VALUES (-1, ?, 'x', 'carga', 'lida', 100, 100, 1)", (mid,))
+        c.execute("INSERT INTO medicao_grupo_itens (id, leitura_id, ordem, grupo, valor_medido_centavos) "
+                  "VALUES (-1, -1, 1, 'g', 100)")
+        c.commit()
+    finally:
+        c.close()
+    _executar(_pasta_com(banco))
+    assert _contar("SELECT COUNT(*) FROM medicao_grupos WHERE id <> -1 AND situacao = 'lida'") == 1
+    assert _contar("SELECT COUNT(*) FROM medicao_grupo_itens WHERE id <> -1") == 5
