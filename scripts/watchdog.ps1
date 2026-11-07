@@ -9,6 +9,11 @@
 # (o deploy cria o sentinela antes de parar a producao e apaga depois). Faz dupla checagem
 # com 15s de intervalo para nao reiniciar por um blip de rede transitorio.
 #
+# Fala com o agendador por schtasks.exe, nunca por cmdlet CIM (issue #386: o provedor CIM do
+# agendador pode ficar sem responder), e le o estado pela COM Schedule.Service num processo filho,
+# com tempo limite de 30 s por chamada; estouro vai
+# para o log e o script sai com 1 (a tarefa do watchdog repete em 3 min).
+#
 # HTTPS (issue #425): com -Url https://localhost:<porta>/... o -Certificado e' o cert.pem da instalacao
 # (<raiz>\segredos\tls\cert.pem) e so' esse certificado e' aceito, pelo thumbprint (comum_tls.ps1). O arquivo e'
 # lido a cada rodada: certificado trocado nao pede reinstalar o watchdog.
@@ -17,7 +22,10 @@ param(
     [string]$Certificado = "",
     [string]$Tarefa = "DashboardLotufo",
     [string]$Log = "C:\DashboardLotufo\logs\watchdog.log",
-    [string]$Pausa = "C:\DashboardLotufo\watchdog.pause"
+    [string]$Pausa = "C:\DashboardLotufo\watchdog.pause",
+    # Tempo limite, em segundos, de cada chamada ao agendador (schtasks.exe).
+    [ValidateRange(1, 600)]
+    [int]$LimiteAgendador = 30
 )
 # Erro sem tratamento para o script (e sai com 1); cada passo que pode falhar tem o seu try/catch e registra no log.
 $ErrorActionPreference = "Stop"
@@ -78,30 +86,47 @@ Start-Sleep -Seconds 15
 SairSePausado ""
 if (Saudavel) { exit 0 }                       # foi so um blip transitorio
 
+. (Join-Path $PSScriptRoot "comum_agendador.ps1")   # Agendador: schtasks.exe com tempo limite
+
 # Daqui em diante a producao esta comprovadamente fora (duas consultas, 15 s de intervalo). So' reinicia se a tarefa
-# de fato puder ser reiniciada: parada que falha, ou instancia que continua "Running", fariam o Start ser ignorado
-# (MultipleInstances IgnoreNew) com o log dizendo "disparado" (gate Sol da PR #476).
+# de fato puder ser reiniciada: parada que falha, ou instancia que continua "Running", fariam o /Run ser ignorado
+# (MultipleInstances IgnoreNew) com o log dizendo "disparado" (gate Sol da PR #476). O estado vem da API COM
+# Schedule.Service num processo filho com tempo limite (EstadoDaTarefa, comum_agendador.ps1): numero, sem depender do
+# idioma do Windows e sem o provedor CIM (issue #386). Estado ilegivel ou agendador sem resposta: nada iniciado, sai
+# com 1 e o watchdog repete em 3 min.
 SairSePausado "antes de parar a tarefa"
 Escrever "SEM RESPOSTA em $Url ($script:ultimoErro) -> reiniciando a tarefa $Tarefa"
-try {
-    $estado = (Get-ScheduledTask -TaskName $Tarefa -ErrorAction Stop).State
-    # Parar so' o que esta rodando: a tarefa "Ready" com o processo morto (incidente de 2026-09-10) vai direto ao Start.
-    if ("$estado" -eq "Running") { Stop-ScheduledTask -TaskName $Tarefa -ErrorAction Stop }
-} catch {
-    Escrever ("FALHA ao parar a tarefa, nada iniciado: " + $_.Exception.Message)
+$estado = EstadoDaTarefa $Tarefa $LimiteAgendador
+if ($estado -eq "desconhecido") {
+    Escrever "FALHA ao parar a tarefa, nada iniciado: estado da tarefa $Tarefa ilegivel (Schedule.Service sem resposta em $LimiteAgendador s ou com erro)"
     exit 1
+}
+# Parar so' o que esta ativo ("Running", ou "Queued", que ignoraria o /Run): a tarefa "Ready" com o processo morto
+# (incidente de 2026-09-10) vai direto ao /Run.
+if (-not (TarefaParada $estado)) {
+    $fim = Agendador @("/End", "/TN", $Tarefa) $LimiteAgendador
+    if ($fim.Estourou) {
+        $vivo = ""; if ($fim.FilhoVivo) { $vivo = "; o processo do schtasks /End nao morreu" }
+        Escrever "agendador de tarefas nao respondeu (schtasks /End levou mais de $LimiteAgendador s) -> nada iniciado$vivo"
+        exit 1
+    }
+    if ($fim.Codigo -ne 0) {
+        Escrever ("FALHA ao parar a tarefa, nada iniciado: schtasks /End devolveu " + $fim.Codigo + ": " + $fim.Saida)
+        exit 1
+    }
 }
 $parada = $false
 foreach ($tentativa in 1..10) {
     Start-Sleep -Seconds 1
-    try { $estado = (Get-ScheduledTask -TaskName $Tarefa -ErrorAction Stop).State } catch { $estado = "desconhecido" }
-    if ("$estado" -ne "Running" -and "$estado" -ne "desconhecido") { $parada = $true; break }
+    $estado = EstadoDaTarefa $Tarefa $LimiteAgendador
+    if ($estado -eq "desconhecido") { break }
+    if (TarefaParada $estado) { $parada = $true; break }   # so' "Ready" ou "Disabled"; "Queued" segue ativa
 }
 if (-not $parada) {
     Escrever "tarefa $Tarefa continua '$estado' depois da parada -> nada iniciado"
     exit 1
 }
-# Servidor ORFAO (incidente de 2026-09-21, issue #480): Stop-ScheduledTask nao mata o uvicorn; ele segura a porta, a
+# Servidor ORFAO (incidente de 2026-09-21, issue #480): parar a tarefa (schtasks /End) nao mata o uvicorn; ele segura a porta, a
 # instancia nova morre com WinError 10048 e a tarefa volta a Ready. So' o uvicorn da dashboard e' morto, reconhecido
 # pelos argumentos exatos com que o rodar_producao.ps1 o sobe ("-m uvicorn --factory app.main:create_app" e "--port
 # <porta>"); o caminho do executavel nao serve, porque o python.exe do venv no Windows e' um lancador e quem escuta e' o
@@ -143,14 +168,17 @@ if ($orfao) {
     }
 }
 SairSePausado "entre a parada e o inicio"
-try {
-    # -ErrorAction Stop: tarefa desabilitada da' erro nao fatal, que sem isto passaria por "disparado" (gate Sol da PR #476)
-    Start-ScheduledTask -TaskName $Tarefa -ErrorAction Stop
-    Escrever "Start-ScheduledTask disparado"
-} catch {
-    Escrever ("FALHA ao iniciar: " + $_.Exception.Message)
+# /Run com codigo diferente de 0 (tarefa desabilitada, inexistente) e' falha, nunca "disparado" (gate Sol da PR #476)
+$inicio = Agendador @("/Run", "/TN", $Tarefa) $LimiteAgendador
+if ($inicio.Estourou) {
+    Escrever "agendador de tarefas nao respondeu (schtasks /Run levou mais de $LimiteAgendador s)"
     exit 1
 }
+if ($inicio.Codigo -ne 0) {
+    Escrever ("FALHA ao iniciar (schtasks /Run devolveu " + $inicio.Codigo + "): " + $inicio.Saida)
+    exit 1
+}
+Escrever "schtasks /Run disparado"
 Start-Sleep -Seconds 25
 if (Saudavel) { Escrever "apos-reinicio saudavel=sim" }
 else {

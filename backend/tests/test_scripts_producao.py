@@ -67,15 +67,130 @@ def test_deploy_le_a_porta_da_tarefa_agendada():
     # depois do checkout, sem rollback. A porta vem da tarefa; -Porta diferente dela aborta antes.
     script = _ler("deploy.ps1")
     assert "[int]$Porta = 0" in script
-    assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in script
+    # Issue #386: a tarefa e' lida por schtasks /Query /XML (processo filho com tempo limite), nunca pelo cmdlet CIM
+    assert "ScheduledTask" not in _codigo(script)
+    leitura = script[script.index("function ArgumentosDaTarefa"):script.index("$argumentosDaTarefa = ArgumentosDaTarefa")]
+    assert 'Agendar @("/Query", "/TN", $tarefaNome, "/XML")' in leitura
+    # estouro aborta antes de tudo, com a frase da issue
+    estouro = _bloco_do_if(leitura, "if ($r.Estourou) {")
+    assert "$msgAgendador (schtasks /Query levou mais de $LimiteAgendador s); nada foi alterado" in estouro
+    assert "exit 1" in estouro
+    assert '$msgAgendador = "deploy abortado: agendador de tarefas nao respondeu"' in script
+    # gate Sol da PR #389 (Aviso 1): QUALQUER falha do /Query aborta; -Porta informada nao inventa raiz nem modo
+    falhou = _bloco_do_if(leitura, "if ($r.Codigo -ne 0) {")
+    assert "throw " in falhou and "nada foi alterado" in falhou and "return" not in falhou
+    assert "$null" not in _codigo(script[script.index("function PortaDaTarefa"):script.index("$comTls = TlsDaTarefa")])
+    # os argumentos saem de <Arguments> (todas as acoes, como o Actions.Arguments do cmdlet), com o escape do XML desfeito
+    padrao = re.search(r'\[regex\]::Matches\(\$r\.Saida, "([^"]+)"\)', leitura).group(1)
+    xml = ('<?xml version="1.0" encoding="UTF-16"?><Task><Actions Context="Author"><Exec><Command>powershell.exe'
+           '</Command><Arguments>-NoProfile -File &quot;C:\\x\\rodar_producao.ps1&quot; -Raiz &quot;D:\\Dados&quot; '
+           '-Porta 8080</Arguments></Exec></Actions></Task>')
+    assert [m.group(1) for m in re.finditer(padrao, xml)] == [
+        '-NoProfile -File &quot;C:\\x\\rodar_producao.ps1&quot; -Raiz &quot;D:\\Dados&quot; -Porta 8080']
+    assert "[System.Net.WebUtility]::HtmlDecode(" in leitura
+    assert "nao consegui ler os argumentos da tarefa $tarefaNome no XML do schtasks; nada foi alterado" in leitura
+    # o /XML redirecionado para arquivo costuma vir nos bytes da pagina de codigo; com NUL no meio e' UTF-16 de verdade
+    # e e' relido como Unicode (## Suposicoes da PR #389)
+    comum = _ler("comum_agendador.ps1")
+    ler = comum[comum.index("function LerSaidaAgendador"):comum.index("function Agendador")]
+    assert "Get-Content $arquivo -Raw -ErrorAction SilentlyContinue" in ler
+    assert "$texto.IndexOf([char]0) -ge 0" in ler and "-Encoding Unicode" in ler
     assert re.search(r'-match "-Porta \(\\d\+\)"', script)
     # tarefa sem -Porta = padrao do modo do rodar_producao.ps1 (issue #425, /code-review): 80 com -SemTls, 8443 com TLS
     funcao = script[script.index("function PortaDaTarefa"):script.index("$portaTarefa = PortaDaTarefa")]
     assert 'if ($argumentosTarefa -match "-SemTls\\b") { return 80 }' in funcao
     assert funcao.rstrip().endswith("return 8443\n}")
-    assert "nao bate com a tarefa DashboardLotufo" in script
-    # a conferencia vem antes de qualquer git checkout
+    assert "-Porta $Porta nao bate com a tarefa $tarefaNome (porta $portaTarefa); nada foi alterado" in script
+    # a leitura e a conferencia vem antes de qualquer git checkout
+    assert script.index("$argumentosDaTarefa = ArgumentosDaTarefa") < script.index("$portaTarefa = PortaDaTarefa")
     assert script.index("$portaTarefa = PortaDaTarefa") < script.index("function Construir")
+
+
+def test_deploy_para_a_tarefa_por_schtasks_tambem_no_ponto_da_sentinela_e_mantem_o_sentinela_ao_falhar():
+    # Juncao da #386 com a #478: a parada do ponto da sentinela tambem passa pelo schtasks com tempo limite, e marca a
+    # tarefa como (talvez) parada ANTES do /End; a volta do pinado registra o deploy do commit anterior; o rollback que
+    # falha mantem o sentinela do watchdog.
+    codigo = _codigo(_ler("deploy.ps1"))
+    # parada COMPROVADA (gate Sol da PR #389, Critico 1): solicitada antes do /End, provada pelo estado (so' Ready ou
+    # Disabled) e pela porta livre; qualquer falha lanca
+    parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
+    ordem = ["$script:tarefaParada = $true", "$script:producaoMexida = $true", 'ComandoTarefa "End" $false',
+             "$estado = EstadoDaTarefa $tarefaNome $LimiteAgendador", "if (-not (TarefaParada $estado)) { throw ",
+             "LiberarPorta"]
+    assert [parar.index(passo) for passo in ordem] == sorted(parar.index(passo) for passo in ordem)
+    assert "catch" not in parar
+    reiniciar = codigo[codigo.index("function Reiniciar"):codigo.index("function SaudavelENovo")]
+    assert reiniciar.index('PararComprovado "reinicio"') < reiniciar.index('ComandoTarefa "Run" $true')
+    # no ponto da sentinela a parada nao fica num try que engole: a excecao sobe para quem chama
+    sentinela = codigo[codigo.index("function SentinelaAntesDa456"):codigo.index("function AvisarSeCopia")]
+    para = sentinela.index('PararComprovado "ponto da sentinela"')
+    assert para < sentinela.index("$script:sentinelaParou = $true") < sentinela.index("try {")
+    # antes do checkout, parada nao provada nao faz checkout: religa o anterior ou mantem o sentinela
+    principal = codigo[codigo.index("$anterior = (& git"):]
+    antes = _bloco_do_if(principal, "try { SentinelaAntesDa456 $anterior $alvo }\n    catch {")
+    assert "Construir" not in antes and "VoltarPinado" not in antes and "exit 1" in antes
+    assert "$script:soltarWatchdog = $true" in antes and "$script:manterSentinela = $true" in antes
+    # remescla com a #475: religar so' solta com processo novo no commit anterior e a producao provada no inicio
+    assert "$religou = (SaudavelENovo) -and (NoArEm $anterior)" in antes
+    assert "if ($religou -and $script:producaoProvada) {" in antes
+    assert principal.index("try { SentinelaAntesDa456 $anterior $alvo }") < principal.index("try { Construir $alvo")
+    voltar = codigo[codigo.index("function VoltarPinado"):codigo.index("function SentinelaAntesDa456")]
+    assert voltar.index("Reconstruir") < voltar.index("RegistrarDeploy")
+    rollback = codigo[codigo.index("ROLLBACK para $anterior"):]
+    tentativa = rollback[:rollback.index("} catch {")]
+    assert all(passo in tentativa for passo in ("SentinelaAntesDa456 $novo $anterior", "Construir $anterior",
+                                                 "RegistrarDeploy", "Reiniciar"))
+    assert "$script:manterSentinela = $true" in rollback[rollback.index("} catch {"):]
+    assert "-not $script:manterSentinela) {" in codigo and "Remove-Item $pause" in codigo
+
+
+def test_deploy_com_reinicio_que_falha_para_e_passa_o_ponto_da_sentinela_antes_de_voltar_o_pinado():
+    # Revisor da PR #389 (A1): o /Run que estoura no cliente pode ter subido o commit novo (e a 063); voltar o pinado sem
+    # passar o ponto para a auditoria faria o anterior acusar "Estado da sentinela apagado" (issue #478), e o build do
+    # anterior correria com o novo no ar.
+    codigo = _codigo(_ler("deploy.ps1"))
+    falha = codigo[codigo.index("try { Reiniciar }"):codigo.index("if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {")]
+    parada = _bloco_do_if(falha, "if ($script:tarefaParada) {")   # o primeiro: antes de voltar o pinado
+    assert parada.index("$script:sentinelaParou = $false") < parada.index("SentinelaAntesDa456 $novo $anterior")
+    # sem a troca da #456, a mesma parada comprovada (estado e porta), nao um /End que so' avisa
+    assert 'if (-not $script:sentinelaParou) { PararComprovado "antes de voltar o pinado" }' in parada
+    assert "ComandoTarefa" not in parada
+    # gate Sol (Critico 1) e revisor (Aviso), rodada 2 da PR #389: parada nao provada NAO toca no pinado; mantem o
+    # sentinela e sai com intervir a mao
+    nao_provada = parada[parada.index("} catch {"):]
+    assert "$script:manterSentinela = $true" in nao_provada and "exit 1" in nao_provada
+    assert "NAO foi voltado" in nao_provada and "VoltarPinado" not in nao_provada
+    assert falha.index("SentinelaAntesDa456 $novo $anterior") < falha.index("VoltarPinado $anterior")
+    assert falha.index(nao_provada) < falha.index("VoltarPinado $anterior")
+
+
+def test_deploy_so_solta_o_watchdog_com_a_producao_comprovada():
+    # Gate Sol da PR #389 (Critico 2): a consulta da porta que lanca (CIM travado) escapava da verificacao e o finally
+    # apagava o watchdog.pause sem o processo novo provado e sem rollback.
+    codigo = _codigo(_ler("deploy.ps1"))
+    novo = codigo[codigo.index("function SaudavelENovo"):codigo.index("function DiagnosticoPorta")]
+    falha = _bloco_do_if(novo, "catch {")
+    assert novo.index("try { $dono = DonoDaPorta }") < novo.index("catch {")
+    assert "return $false" in falha
+    # o sentinela so' sai sem parada, ou com a producao (nova ou anterior) comprovada
+    principal = codigo[codigo.index("$anterior = (& git"):]
+    assert principal.index("$script:producaoMexida = $false") < principal.index("New-Item -ItemType File -Path $pause")
+    assert principal.index("$script:producaoProvada = $false") < principal.index("New-Item -ItemType File -Path $pause")
+    ok = principal[principal.index("if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {"):principal.index("DEPLOY OK")]
+    assert "$script:producaoProvada = $true" in ok
+    rollback_ok = next(linha for linha in principal.splitlines() if "ROLLBACK OK" in linha)
+    assert rollback_ok.strip().startswith("if ($voltou) { $script:producaoProvada = $true; $script:soltarWatchdog = $true;")
+    # remescla com a #475: a prova do inicio deixa de valer quando o processo no ar vai ser trocado
+    assert principal.index("$script:producaoProvada = $false\n    try { Reiniciar }") < principal.index("DEPLOY OK")
+    # no catch do reinicio, religar so' prova com processo novo no commit anterior
+    reinicio = principal[principal.index("try { Reiniciar }"):principal.index("DEPLOY OK")]
+    assert "try { Reiniciar; $religou = (SaudavelENovo) -and (NoArEm $anterior) }" in reinicio
+    fim = principal[principal.rindex("} finally {"):]
+    assert "if ($script:producaoMexida -and -not $script:producaoProvada) { $script:manterSentinela = $true }" in fim
+    assert fim.index("-not $script:producaoProvada) {") < fim.index("if ($script:soltarWatchdog -and $script:producaoProvada -and -not $script:manterSentinela) {")
+    # schtasks que estoura e nem morto morre: o /End ou /Run orfao ainda pode concluir, o watchdog fica pausado
+    comando = codigo[codigo.index("function ComandoTarefa"):codigo.index("function PararComprovado")]
+    assert "if ($r.FilhoVivo) { $script:manterSentinela = $true; throw " in comando
 
 
 def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
@@ -137,7 +252,10 @@ def test_deploy_le_a_raiz_da_tarefa_e_dela_tira_instalacao_e_banco():
     script = _ler("deploy.ps1")
     assert '[string]$Raiz = ""' in script
     funcao = script[script.index("function RaizDaTarefa"):script.index("$raizTarefa = RaizDaTarefa")]
-    assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in funcao
+    # os argumentos lidos uma vez por schtasks /Query /XML (issue #386); sem a tarefa o deploy ja' abortou
+    assert "$argumentosTarefa = $argumentosDaTarefa" in funcao
+    assert "if (-not $Raiz) {\n    $Raiz = $raizTarefa\n}" in script
+    assert script.index("$argumentosDaTarefa = ArgumentosDaTarefa") < script.index("$raizTarefa = RaizDaTarefa")
     assert 'return "C:\\DashboardLotufo"' in funcao        # tarefa sem -Raiz = padrao do rodar_producao.ps1
     assert "nao bate com a tarefa DashboardLotufo (raiz $raizTarefa)" in script
     assert script.index("$raizTarefa = RaizDaTarefa") < script.index("function Construir")   # antes do checkout
@@ -220,15 +338,20 @@ def test_deploy_so_apaga_o_sentinela_com_a_producao_conferida():
     codigo = _codigo(script)
     assert codigo.count("Remove-Item $pause") == 1
     final = codigo[codigo.index("\n} finally {"):]
-    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    elseif (")]
+    soltar = final[final.index("if ($script:soltarWatchdog -and $script:producaoProvada -and -not $script:manterSentinela) {"):final.index("\n    elseif (")]
     assert "Remove-Item $pause" in soltar
     assert "MANTIDO" in final
     # comeca falso, antes de criar o sentinela
     assert codigo.index("$script:soltarWatchdog = $false") < codigo.index("New-Item -ItemType File -Path $pause")
     # os unicos pontos que soltam: antes do checkout do alvo (so' com a producao provada no inicio, rodada 2), a volta
-    # do build que deu certo, DEPLOY OK e ROLLBACK OK
+    # do build que deu certo, DEPLOY OK e ROLLBACK OK; da remescla com a #389, os dois religar (parada do ponto da
+    # sentinela nao comprovada antes do checkout e reinicio que falhou), so' com processo novo no commit anterior
     soltas = [m.start() for m in re.finditer(r"\$script:soltarWatchdog = \$true", codigo)]
-    assert len(soltas) == 3
+    assert len(soltas) == 5
+    antes_checkout = codigo[codigo.index("try { SentinelaAntesDa456 $anterior $alvo }"):codigo.index("try { Construir $alvo")]
+    assert antes_checkout.count("$script:soltarWatchdog = $true") == 1
+    assert antes_checkout.index("if ($religou -and $script:producaoProvada) {") < antes_checkout.index("$script:soltarWatchdog = $true")
+    soltas = [p for p in soltas if not (codigo.index(antes_checkout) <= p < codigo.index(antes_checkout) + len(antes_checkout))]
     inicio = codigo.index("$script:soltarWatchdog = $script:producaoProvada")
     assert codigo.count("$script:soltarWatchdog = $script:producaoProvada") == 1
     checkout = codigo.index("try { Construir $alvo; ConferirInstalacao }")
@@ -245,7 +368,11 @@ def test_deploy_so_apaga_o_sentinela_com_a_producao_conferida():
     assert ok.count("$script:soltarWatchdog = $true") == 1
     # o reinicio e o health do commit novo ficam depois da trava: excecao ali nao solta o watchdog
     principal = codigo[codigo.index("$novo = ("):codigo.index("if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {")]
-    assert trava < codigo.index("$novo = (") and "Reiniciar" in principal and "soltarWatchdog" not in principal
+    assert trava < codigo.index("$novo = (") and "Reiniciar" in principal
+    # no catch do reinicio (PR #389) so' o religar provado (processo novo no commit anterior) solta
+    assert principal.count("$script:soltarWatchdog = $true") == 1
+    religar = principal[principal.index("try { Reiniciar; $religou = (SaudavelENovo) -and (NoArEm $anterior) }"):]
+    assert religar.index("if ($religou) {") < religar.index("$script:soltarWatchdog = $true")
     # as linhas finais de "intervir a mao" saem mesmo com o rev-parse vazio (nada de .Trim() em $null)
     for marca in ("deploy abortado no build E a volta", "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message))"):
         antes = codigo[:codigo.index(marca)].splitlines()[-2]   # a linha anterior ao Write-Host
@@ -281,7 +408,7 @@ def test_deploy_confere_que_o_sentinela_saiu_e_falha_se_ficou():
     # terminava em DEPLOY OK com o sentinela la', e o watchdog pausado para sempre.
     codigo = _codigo(_ler("deploy.ps1"))
     final = codigo[codigo.index("\n} finally {"):]
-    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    elseif (")]
+    soltar = final[final.index("if ($script:soltarWatchdog -and $script:producaoProvada -and -not $script:manterSentinela) {"):final.index("\n    elseif (")]
     assert "Remove-Item $pause -Force -ErrorAction Stop" in soltar
     assert "SilentlyContinue" not in soltar
     conferencia = soltar.rindex("if (Test-Path $pause) {")
@@ -349,7 +476,7 @@ def test_deploy_distingue_o_sentinela_que_nao_saiu_com_a_producao_provada():
     # o deploy, so' se tira o arquivo.
     codigo = _codigo(_ler("deploy.ps1"))
     final = codigo[codigo.index("\n} finally {"):]
-    soltar = final[final.index("if ($script:soltarWatchdog) {"):final.index("\n    elseif (")]
+    soltar = final[final.index("if ($script:soltarWatchdog -and $script:producaoProvada -and -not $script:manterSentinela) {"):final.index("\n    elseif (")]
     assert "MANTIDO POR FALHA NA REMOCAO" in soltar and "nao reconstruir nem desfazer o deploy" in soltar
     resto = final[final.index("\n    elseif ("):]
     assert "MANTIDO POR FALHA NA REMOCAO" not in resto
@@ -495,7 +622,7 @@ def test_deploy_confere_a_saude_no_modo_da_tarefa():
     # a tarefa diz o modo: com -SemTls (a producao de antes do corte) a saude e' HTTP; sem ele, HTTPS pelo thumbprint
     script = _ler("deploy.ps1")
     funcao = script[script.index("function TlsDaTarefa"):script.index("$comTls = TlsDaTarefa")]
-    assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in funcao
+    assert "$argumentosTarefa = $argumentosDaTarefa" in funcao   # lida por schtasks /Query /XML (#386)
     assert '-match "-SemTls\\b"' in funcao
     assert '. (Join-Path $PSScriptRoot "comum_tls.ps1")' in script
     assert '$certificado = Join-Path $Raiz "segredos\\tls\\cert.pem"' in script
@@ -554,7 +681,7 @@ def test_watchdog_nao_reinicia_por_problema_no_conferidor():
     bloco = script[conferidor:script.index("if (Saudavel) { exit 0 }")]
     assert "$script:thumbprint = Get-ThumbprintDoCertificado -Caminho $Certificado" in bloco
     assert "producao NAO reiniciada" in bloco and "exit 1" in bloco
-    assert script.index('SairSePausado ""') < conferidor < script.index("Stop-ScheduledTask -TaskName")
+    assert script.index('SairSePausado ""') < conferidor < script.index('Agendador @("/End", "/TN", $Tarefa)')
 
 
 def test_watchdog_le_o_thumbprint_uma_vez_e_usa_em_todas_as_consultas():
@@ -576,8 +703,8 @@ def test_watchdog_confere_o_sentinela_antes_de_cada_passo_na_tarefa():
     script = _ler("watchdog.ps1")
     funcao = script[script.index("function SairSePausado"):script.index('SairSePausado ""')]
     assert "if (Test-Path $Pausa) {" in funcao and "exit 0" in funcao
-    parar = script.index("Stop-ScheduledTask -TaskName")
-    iniciar = script.index("Start-ScheduledTask -TaskName")
+    parar = script.index('Agendador @("/End", "/TN", $Tarefa)')
+    iniciar = script.index('Agendador @("/Run", "/TN", $Tarefa)')
     antes = script.rindex('SairSePausado "antes de parar a tarefa"', 0, parar)
     entre = script.index('SairSePausado "entre a parada e o inicio"')
     assert antes < parar < entre < iniciar
@@ -585,18 +712,77 @@ def test_watchdog_confere_o_sentinela_antes_de_cada_passo_na_tarefa():
     assert script.index("Start-Sleep -Seconds 15") < script.rindex('SairSePausado ""') < script.rindex("if (Saudavel) { exit 0 }")
 
 
-def test_watchdog_so_inicia_a_tarefa_que_de_fato_parou():
-    # Gate Sol (rodada 2): Stop com SilentlyContinue + catch vazio anulava a parada; instancia ainda "Running" fazia o
-    # Start ser ignorado (IgnoreNew) com o log dizendo "disparado"
+def test_watchdog_fala_com_o_agendador_por_schtasks_com_tempo_limite():
+    # Issue #386: o provedor CIM do agendador pode ficar sem responder (deploy de 2026-11-04 parado mais de 10 min em
+    # Get-ScheduledTask); o watchdog para e inicia a tarefa por schtasks /End e /Run, cada um com tempo limite.
     script = _ler("watchdog.ps1")
     codigo = _codigo(script)
-    assert "Stop-ScheduledTask -TaskName $Tarefa -ErrorAction Stop" in codigo
+    assert "ScheduledTask" not in codigo
     assert "SilentlyContinue" not in codigo
-    assert 'if ("$estado" -eq "Running") { Stop-ScheduledTask' in codigo   # Ready com o processo morto vai direto ao Start
-    assert "FALHA ao parar a tarefa, nada iniciado" in codigo
-    espera = codigo[codigo.index("$parada = $false"):codigo.index("Start-ScheduledTask -TaskName")]
-    assert '"$estado" -ne "Running"' in espera and "continua '$estado' depois da parada -> nada iniciado" in espera
-    assert "exit 1" in espera
+    assert '. (Join-Path $PSScriptRoot "comum_agendador.ps1")' in codigo
+    assert "[int]$LimiteAgendador = 30" in codigo
+    parar = codigo.index('$fim = Agendador @("/End", "/TN", $Tarefa) $LimiteAgendador')
+    # agendador que nao responde a tempo nao inicia nada: sai com 1 e o watchdog repete em 3 min
+    estouro = _bloco_do_if(codigo, "if ($fim.Estourou) {")
+    assert "schtasks /End levou mais de $LimiteAgendador s) -> nada iniciado" in estouro and "exit 1" in estouro
+    iniciar = codigo.index('$inicio = Agendador @("/Run", "/TN", $Tarefa) $LimiteAgendador')
+    assert parar < codigo.index("try { $orfao = DonoDaPorta }") < iniciar
+    assert "exit 1" in _bloco_do_if(codigo, "if ($inicio.Estourou) {")
+    # a funcao comum mata o schtasks que estoura o limite pelo proprio objeto, espera de novo a morte e diz se ele
+    # continuou vivo (gate Sol da PR #389, Aviso 2), sem esperar para sempre
+    comum = _codigo(_ler("comum_agendador.ps1"))
+    agendador = comum[comum.index("function Agendador"):comum.index("function EstadoDaTarefa")]
+    assert "$p.WaitForExit($LimiteSegundos * 1000)" in agendador
+    estouro = _bloco_do_if(agendador, "if (-not $p.WaitForExit($LimiteSegundos * 1000)) {")
+    assert estouro.index("$p.Kill()") < estouro.index("$morreu = $p.WaitForExit(5000)")
+    assert "return @{ Estourou = $true; FilhoVivo = (-not $morreu);" in estouro
+    assert "Stop-Process" not in agendador
+    assert "$vivo = \"; o processo do schtasks /End nao morreu\"" in codigo
+    for nome in ("comum_agendador.ps1", "estado_tarefa.ps1"):
+        bruto = (SCRIPTS / nome).read_bytes()
+        assert not bruto.startswith(b"\xef\xbb\xbf") and bruto.isascii()
+
+
+def test_watchdog_so_inicia_a_tarefa_que_de_fato_parou():
+    # Gate Sol da PR #476: parada que falha, ou instancia ainda "Running", fazia o Start ser ignorado (IgnoreNew) com o
+    # log dizendo "disparado". Sem CIM (issue #386, revisor da PR #389): o estado vem da COM Schedule.Service, numerica.
+    codigo = _codigo(_ler("watchdog.ps1"))
+    inicio = codigo.index('SairSePausado "antes de parar a tarefa"')
+    leitura = codigo.index("$estado = EstadoDaTarefa $Tarefa $LimiteAgendador", inicio)
+    ilegivel = _bloco_do_if(codigo, 'if ($estado -eq "desconhecido") {\n    Escrever')
+    assert "FALHA ao parar a tarefa, nada iniciado" in ilegivel and "exit 1" in ilegivel
+    # parar o que esta ativo ("Running" e tambem "Queued", que ignoraria o /Run); "Ready" com o processo morto vai
+    # direto ao /Run (gate Sol e revisor da PR #389: Queued nao e' parada)
+    rodando = _bloco_do_if(codigo, "if (-not (TarefaParada $estado)) {")
+    assert '$fim = Agendador @("/End", "/TN", $Tarefa) $LimiteAgendador' in rodando
+    falha = rodando[rodando.index("if ($fim.Codigo -ne 0) {"):]
+    assert "FALHA ao parar a tarefa, nada iniciado" in falha and "exit 1" in falha
+    assert "(segue para o /Run)" not in codigo
+    espera = codigo[codigo.index("$parada = $false"):codigo.index('$inicio = Agendador @("/Run"')]
+    assert "if (TarefaParada $estado) { $parada = $true; break }" in espera
+    assert '$estado -eq "desconhecido") { break }' in espera and '-ne "Running"' not in espera
+    assert "continua '$estado' depois da parada -> nada iniciado" in espera and "exit 1" in espera
+    assert inicio < leitura < codigo.index("$parada = $false") < codigo.index("try { $orfao = DonoDaPorta }")
+
+
+def test_estado_da_tarefa_vem_da_com_num_processo_filho_com_tempo_limite():
+    # O corpo da COM e' um arquivo estatico (revisor da PR #389: -EncodedCommand a cada leitura, como SYSTEM, tende a ser
+    # barrado pelo antivirus como ofuscacao, e o watchdog nunca mais reiniciaria a producao)
+    estatico = _codigo(_ler("estado_tarefa.ps1"))
+    assert "[Parameter(Mandatory = $true)][string]$Tarefa" in estatico
+    assert "New-Object -ComObject Schedule.Service" in estatico and ".GetTask($Tarefa).State" in estatico
+    assert "} catch { exit 1 }" in estatico and "exit (100 + $estado)" in estatico
+    comum = _codigo(_ler("comum_agendador.ps1"))
+    funcao = comum[comum.index("function EstadoDaTarefa"):comum.index("function TarefaParada")]
+    assert "EncodedCommand" not in comum
+    assert '$arquivo = Join-Path $PSScriptRoot "estado_tarefa.ps1"' in funcao
+    assert '"-File", "`"$arquivo`"", "-Tarefa", $Tarefa)' in funcao and '$LimiteSegundos "powershell.exe"' in funcao
+    # Unknown (100), erro (o filho sai com 1), estouro ou fora da faixa = desconhecido (gate Sol, Aviso 3); 104 = Running
+    assert 'if ($r.Estourou -or $r.Codigo -lt 101 -or $r.Codigo -gt 104) { return "desconhecido" }' in funcao
+    assert '@("Disabled", "Queued", "Ready", "Running")[$r.Codigo - 101]' in funcao
+    # parada so' e' Ready ou Disabled; Queued e' ativa
+    parada = comum[comum.index("function TarefaParada"):]
+    assert 'return ($estado -eq "Ready" -or $estado -eq "Disabled")' in parada and "Queued" not in parada
 
 
 def _bloco_do_if(codigo, cabeca):
@@ -646,18 +832,18 @@ def test_watchdog_so_encerra_o_uvicorn_da_dashboard_pelos_argumentos_exatos():
 
 
 def test_watchdog_encerra_o_uvicorn_orfao_antes_de_iniciar_a_tarefa():
-    # Issue #480: Stop-ScheduledTask nao mata o uvicorn (incidente de 2026-09-21); o orfao segura a porta, a instancia
+    # Issue #480: parar a tarefa nao mata o uvicorn (incidente de 2026-09-21); o orfao segura a porta, a instancia
     # nova morre com WinError 10048 e o watchdog repetia o Start a cada 3 minutos, para sempre
     codigo = _codigo(_ler("watchdog.ps1"))
     linhas = [linha.strip() for linha in codigo.splitlines()]
-    parar = codigo.index("$parada = $false")
+    parar = codigo.index('Agendador @("/End", "/TN", $Tarefa)')
     pausa_porta = codigo.index('SairSePausado "antes de conferir a porta"')
     consulta = codigo.index("try { $orfao = DonoDaPorta }")
     pausa_matar = codigo.index('SairSePausado "antes de encerrar o orfao"')
     reconfere = codigo.index("try { $agora = DonoDaPorta }")
     matar = codigo.index("Stop-Process -Id $orfao.ProcessId -Force")
     entre = codigo.index('SairSePausado "entre a parada e o inicio"')
-    iniciar = codigo.index("Start-ScheduledTask -TaskName")
+    iniciar = codigo.index('Agendador @("/Run", "/TN", $Tarefa)')
     # Gate Sol da PR #494 (S3): o sentinela e' conferido antes de consultar a porta e logo antes de matar
     assert parar < pausa_porta < consulta < pausa_matar < reconfere < matar < entre < iniciar
     # reuso de PID: o dono e' reconferido (PID e criacao) antes do Stop-Process
@@ -681,8 +867,11 @@ def test_watchdog_acusa_tarefa_que_nao_iniciou_e_saude_que_nao_voltou():
     # Gate Sol: tarefa desabilitada da' erro nao fatal e o log dizia "disparado"; sem saude depois, sai com 1
     script = _ler("watchdog.ps1")
     assert '$ErrorActionPreference = "Stop"' in script
-    assert "Start-ScheduledTask -TaskName $Tarefa -ErrorAction Stop" in script
-    fim = script[script.index("Start-Sleep -Seconds 25"):]
+    # schtasks /Run com codigo diferente de 0 (tarefa desabilitada, inexistente) e' falha, nunca "disparado" (#386)
+    falha = _bloco_do_if(script, "if ($inicio.Codigo -ne 0) {")
+    assert "FALHA ao iniciar (schtasks /Run devolveu" in falha and "exit 1" in falha
+    assert script.index(falha) < script.index('Escrever "schtasks /Run disparado"')
+    fim =script[script.index("Start-Sleep -Seconds 25"):]
     assert '"apos-reinicio saudavel=sim"' in fim
     assert 'apos-reinicio saudavel=nao ($script:ultimoErro)' in fim and "exit 1" in fim
     assert "pos-restart" not in script and "=True" not in script and "=False" not in script
@@ -740,3 +929,24 @@ def test_runbook_so_manda_criar_o_sentinela_antes_das_paradas_manuais():
     linha = next(linha for linha in runbook.splitlines() if linha.startswith("- Watchdog: `scripts\\instalar_watchdog.ps1"))
     assert "parada/deploy manual" not in linha
     assert "O `deploy.ps1` cria o próprio sentinela: não crie antes de rodá-lo" in linha
+
+
+
+def test_deploy_remescla_386_443_uma_prova_so_da_producao():
+    # Remescla da PR #389 (issue #386) com a #475 (issue #443): uma variavel so' de prova, com a regra mais estrita. A
+    # volta do build sem religar so' solta com a producao provada no inicio (sem sentinela anterior); religada, a prova
+    # e' o processo novo no commit anterior. O catch do reinicio sem a tarefa parada nao solta nada.
+    codigo = _codigo(_ler("deploy.ps1"))
+    volta = codigo[codigo.index("try { Construir $alvo; ConferirInstalacao }"):codigo.index("$novo = (")]
+    prova = volta.index('if (-not (NoArEm $anterior)) { throw ')
+    religada = volta.index("if ($script:sentinelaParou) { $script:producaoProvada = $true }")
+    trava = volta.index("if (-not $script:producaoProvada) { throw ")
+    assert prova < religada < trava < volta.index("$script:soltarWatchdog = $true")
+    reinicio = codigo[codigo.index("try { Reiniciar }"):codigo.index("if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {")]
+    sem_parada = reinicio[reinicio.rindex("} else {"):]
+    sem_parada = sem_parada[:sem_parada.index("} catch {")]
+    assert "soltarWatchdog" not in sem_parada and "producaoProvada" not in sem_parada
+    assert "sentinela do watchdog mantido" in sem_parada
+    # o inicio so' prova sem sentinela anterior, e o sentinela e' lido antes de ser criado
+    assert codigo.index("$script:sentinelaJaExistia = Test-Path $pause") < codigo.index("New-Item -ItemType File -Path $pause")
+    assert codigo.count("$script:producaoProvada = NoArEm $anterior") == 1
