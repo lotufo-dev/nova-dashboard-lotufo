@@ -291,6 +291,14 @@ novo está no lugar) e pede reimportar o `cert.pem` nos PCs.
 certificado velho e o novo morreria com WinError 10048); `Start-ScheduledTask DashboardLotufo`; `saude_local.ps1 -Porta <porta>`
 200; apagar o sentinela e reimportar o `cert.pem` nos PCs (a operação vê aviso até reimportar).
 
+**Chave do HTTPS recusada** (issue #517): antes do sentinela e do checkout, o `deploy.ps1` em HTTPS carrega `cert.pem` e
+`chave.pem` com o Python da venv do pinado, do mesmo jeito que o uvicorn (`ssl.SSLContext` + `load_cert_chain`). Se a chave não
+abre, não forma par com o certificado ou está cifrada (o uvicorn não recebe senha), o deploy para com "certificado e chave do
+HTTPS nao formam par ... motivo: ..." e nada foi alterado: a produção no ar segue com o par que já carregou, e o watchdog não foi
+pausado. **Não reiniciar a tarefa** (o processo novo não subiria em HTTPS). Conferir se alguém trocou um dos dois arquivos em
+`<raiz>\segredos\tls`: se existir a cópia do par certo, pôr os dois de volta; senão, gerar de novo pelo procedimento acima
+("Gerar de novo com a produção em HTTPS"), que troca o par inteiro e reinicia a produção. Depois, rodar o deploy outra vez.
+
 **Watchdog com problema no conferidor**: `cert.pem` ausente ou ilegível, ou o C# da saúde bloqueado (antivírus no `Add-Type`),
 não reinicia a produção: o `watchdog.log` registra "CONFERIDOR com problema, producao NAO reiniciada: <motivo>" a cada rodada,
 até ser resolvido.

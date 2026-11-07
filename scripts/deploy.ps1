@@ -131,10 +131,19 @@ if ($comTls) {
         throw "certificado do HTTPS nao encontrado em $certificado (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)"
     }
     # Gate Sol da PR #475: sem a chave o processo novo nao sobe em HTTPS, nem o do rollback; o atual ja' a tem carregada.
-    # Confere so' que existe e abre para leitura (o conteudo nao e' lido); o par com o cert.pem nao e' conferido aqui.
+    # Confere que existe e abre para leitura.
     $chaveTls = Join-Path $Raiz "segredos\tls\chave.pem"
     try { [System.IO.File]::OpenRead($chaveTls).Dispose() }
     catch { throw "chave do HTTPS ausente ou ilegivel em $chaveTls (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)" }
+    # Issue #517: chave trocada ou corrompida abre para leitura, mas o uvicorn novo (e o do rollback) nao sobe com ela.
+    # O Python da venv do pinado carrega o par como o uvicorn (ssl.SSLContext + load_cert_chain); chave cifrada recebe
+    # senha vazia em vez de pedir no terminal. Sem aspas duplas no codigo: o PowerShell 5.1 as estraga na linha de
+    # comando. Sem redirecionar o stderr (cabecalho): o motivo sai no stdout pelo excepthook.
+    $conferePar = 'import ssl,sys; sys.excepthook=lambda t,e,b: print(t.__name__, e); ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(sys.argv[1], sys.argv[2], password=lambda: bytes())'
+    $motivoPar = (& $py -I -c $conferePar $certificado $chaveTls) -join " "
+    if ($LASTEXITCODE -ne 0) {
+        throw "certificado e chave do HTTPS nao formam par ($certificado e $chaveTls; motivo: $motivoPar); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Chave do HTTPS recusada)"
+    }
 } else {
     $urlSaude = "http://localhost:$Porta/api/health"
 }

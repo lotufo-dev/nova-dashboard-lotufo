@@ -907,6 +907,85 @@ def test_deploy_https_confere_a_chave_antes_de_mexer_em_algo():
     assert codigo.index("if ($comTls) {") < leitura < codigo.index("New-Item -ItemType File -Path $pause")
 
 
+def _conferencia_do_par(codigo):
+    """O Python que o deploy.ps1 roda com a venv do pinado para conferir o par certificado e chave (issue #517)."""
+    m = re.search(r"\$conferePar = '([^']+)'", codigo)
+    assert m, "deploy.ps1 sem $conferePar = '<python>'"
+    return m.group(1)
+
+
+def test_deploy_https_confere_o_par_certificado_e_chave_antes_do_sentinela():
+    # Issue #517 (Critico 2 do gate Sol na rodada extra da PR #475): chave trocada ou corrompida passava na leitura; o
+    # processo atual (com a chave antiga carregada) era parado e nem a subida nova nem o rollback subiam em HTTPS.
+    codigo = _codigo(_ler("deploy.ps1"))
+    tls = codigo.index("if ($comTls) {")
+    leitura = codigo.index("[System.IO.File]::OpenRead($chaveTls).Dispose()")
+    par = codigo.index("& $py -I -c $conferePar $certificado $chaveTls")
+    recusa = codigo.index("if ($LASTEXITCODE -ne 0) {", par)
+    assert tls < leitura < par < recusa < codigo.index("} else {", tls)
+    mensagem = codigo[recusa:recusa + 400]
+    assert "certificado e chave do HTTPS nao formam par" in mensagem and "nada foi alterado" in mensagem
+    assert "Chave do HTTPS recusada" in mensagem
+    # antes de qualquer mudanca: sentinela do watchdog, fetch e checkout vem depois
+    for depois in ("New-Item -ItemType File -Path $pause", "& git -C $AppDir fetch --quiet", "try { Construir $alvo"):
+        assert par < codigo.index(depois)
+    # o mesmo carregamento do uvicorn (ssl.SSLContext + load_cert_chain), sem aspas duplas (o PowerShell 5.1 as
+    # estragaria na linha de comando) e sem cerquilha (o _codigo dos testes cortaria a linha)
+    python = _conferencia_do_par(codigo)
+    assert "ssl.PROTOCOL_TLS_SERVER" in python and "load_cert_chain(sys.argv[1], sys.argv[2]" in python
+    assert '"' not in python
+
+
+def _par_autoassinado(pasta, nome):
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    chave = ec.generate_private_key(ec.SECP256R1())
+    sujeito = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    agora = datetime.datetime.now(datetime.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(sujeito).issuer_name(sujeito).public_key(chave.public_key())
+            .serial_number(x509.random_serial_number()).not_valid_before(agora)
+            .not_valid_after(agora + datetime.timedelta(days=1)).sign(chave, hashes.SHA256()))
+    caminho_cert = pasta / f"{nome}-cert.pem"
+    caminho_chave = pasta / f"{nome}-chave.pem"
+    caminho_cert.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    caminho_chave.write_bytes(chave.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                  serialization.NoEncryption()))
+    return caminho_cert, caminho_chave, chave
+
+
+def test_conferencia_do_par_aceita_o_par_e_recusa_chave_trocada_ou_corrompida(tmp_path):
+    # Issue #517: roda o Python do deploy.ps1 de verdade. Par certo passa (nada muda no deploy); chave de outro par,
+    # chave corrompida e chave cifrada (sem pedir senha no terminal) saem com codigo diferente de zero e com o motivo.
+    import subprocess
+    import sys
+
+    from cryptography.hazmat.primitives import serialization
+
+    python = _conferencia_do_par(_codigo(_ler("deploy.ps1")))
+    cert, chave, privada = _par_autoassinado(tmp_path, "a")
+    _, outra, _ = _par_autoassinado(tmp_path, "b")
+    corrompida = tmp_path / "corrompida.pem"
+    corrompida.write_text("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n")
+    cifrada = tmp_path / "cifrada.pem"
+    cifrada.write_bytes(privada.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                              serialization.BestAvailableEncryption(b"segredo")))
+
+    def rodar(k):
+        return subprocess.run([sys.executable, "-I", "-c", python, str(cert), str(k)], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=30)
+
+    assert rodar(chave).returncode == 0
+    for ruim in (outra, corrompida, cifrada):
+        r = rodar(ruim)
+        assert r.returncode != 0, ruim.name
+        assert r.stdout.strip(), f"{ruim.name}: sem motivo na saida"
+
+
 def test_deploy_volta_do_build_religa_o_servico_parado_antes_da_trava_do_sentinela_anterior():
     # Gate Sol, rodada extra da PR #475 (Critico 3): com o servico parado para o ponto da sentinela (#478) e o checkout
     # do alvo falhando antes do build, a trava do sentinela anterior lancava antes do Reiniciar e a producao ficava
