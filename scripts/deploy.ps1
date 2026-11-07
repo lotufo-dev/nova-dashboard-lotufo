@@ -156,13 +156,23 @@ if ($comTls) {
     try { [System.IO.File]::OpenRead($chaveTls).Dispose() }
     catch { throw "chave do HTTPS ausente ou ilegivel em $chaveTls (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)" }
     # Issue #517: chave trocada ou corrompida abre para leitura, mas o uvicorn novo (e o do rollback) nao sobe com ela.
-    # O Python da venv do pinado carrega o par como o uvicorn (ssl.SSLContext + load_cert_chain); chave cifrada recebe
-    # senha vazia em vez de pedir no terminal. Sem aspas duplas no codigo: o PowerShell 5.1 as estraga na linha de
-    # comando. Sem redirecionar o stderr (cabecalho): o motivo sai no stdout pelo excepthook, so' em ASCII (ascii()),
-    # para caminho ou mensagem do Windows com acento nao quebrar o print na pagina de codigo do console.
-    $conferePar = 'import ssl,sys; sys.excepthook=lambda t,e,b: print(t.__name__, ascii(str(e))); ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(sys.argv[1], sys.argv[2], password=lambda: bytes())'
-    $motivoPar = (& $py -I -c $conferePar $certificado $chaveTls) -join " "
-    if ($LASTEXITCODE -ne 0) {
+    # O Python da venv do pinado carrega o par como o uvicorn (ssl.SSLContext + load_cert_chain). Chave cifrada: a
+    # callback de senha devolve None, que o load_cert_chain recusa (TypeError) sem pedir senha no terminal; senha vazia
+    # seria aceita para uma chave cifrada com senha vazia, que o uvicorn (sem senha) recusa (gate Sol da PR #533).
+    # Sem aspas duplas nem barra invertida no codigo: vai entre aspas na linha de comando. O motivo sai no stdout pelo
+    # excepthook, so' em ASCII (ascii()), para mensagem do Windows com acento nao quebrar o print.
+    # O Python roda como processo filho pela Agendador (comum_agendador.ps1), com tempo limite e saida em arquivo: travado
+    # (antivirus, disco), e' morto e o deploy aborta com a producao intacta. Start-Process junta os argumentos com espaco,
+    # por isso cada um vai entre aspas.
+    $conferePar = 'import ssl,sys; sys.excepthook=lambda t,e,b: print(t.__name__, ascii(str(e))); ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(sys.argv[1], sys.argv[2], password=lambda: None)'
+    $limitePar = 30
+    $rPar = Agendador @("-I", "-c", "`"$conferePar`"", "`"$certificado`"", "`"$chaveTls`"") $limitePar $py
+    if ($rPar.Estourou) {
+        throw "conferencia do par do HTTPS nao terminou em $limitePar s (Python da venv do pinado travado?); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Chave do HTTPS recusada)"
+    }
+    if ($rPar.Codigo -ne 0) {
+        $motivoPar = ($rPar.Saida -replace "\s+", " ").Trim()
+        if ($motivoPar -match "password callback") { $motivoPar = "chave cifrada nao e' aceita (o uvicorn sobe sem senha)" }
         throw "certificado e chave do HTTPS nao formam par ($certificado e $chaveTls; motivo: $motivoPar); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Chave do HTTPS recusada)"
     }
 } else {

@@ -301,8 +301,10 @@ abre, não forma par com o certificado ou está cifrada (o uvicorn não recebe s
 HTTPS nao formam par ... motivo: ..." e nada foi alterado: a produção no ar segue com o par que já carregou, e o watchdog não foi
 pausado. **Não reiniciar a tarefa** (o processo novo não subiria em HTTPS) e resolver logo: o watchdog reinicia a produção se a
 saúde falhar, e aí ela fica fora. Ler o motivo antes de mexer no par: `SSLError ... KEY_VALUES_MISMATCH` é chave de outro par;
-outro `SSLError` é arquivo corrompido ou chave cifrada; `PermissionError` ou `FileNotFoundError` é ACL ou arquivo, não o par; e
-erro antes disso (o Python da venv nem roda) é o pinado, não o certificado. Para o par: conferir se alguém trocou um dos dois
+"chave cifrada nao e' aceita" é chave com senha, mesmo vazia (gerar sem senha); outro `SSLError` é arquivo corrompido;
+`PermissionError` ou `FileNotFoundError` é ACL ou arquivo, não o par; e erro antes disso (o Python da venv nem roda) é o pinado,
+não o certificado. A conferência tem 30 s: "conferencia do par do HTTPS nao terminou" é o Python da venv travado (antivírus,
+disco), não o par; nada foi alterado, e o deploy pode ser tentado de novo. Para o par: conferir se alguém trocou um dos dois
 arquivos em `<raiz>\segredos\tls`; se existir a cópia do par certo, pôr os dois de volta; senão, gerar de novo pelo procedimento
 acima ("Gerar de novo com a produção em HTTPS"), que troca o par inteiro e reinicia a produção. Depois, rodar o deploy outra vez.
 

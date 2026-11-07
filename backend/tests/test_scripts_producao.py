@@ -921,12 +921,20 @@ def test_deploy_https_confere_o_par_certificado_e_chave_antes_do_sentinela():
     codigo = _codigo(_ler("deploy.ps1"))
     tls = codigo.index("if ($comTls) {")
     leitura = codigo.index("[System.IO.File]::OpenRead($chaveTls).Dispose()")
-    par = codigo.index("& $py -I -c $conferePar $certificado $chaveTls")
-    recusa = codigo.index("if ($LASTEXITCODE -ne 0) {", par)
-    assert tls < leitura < par < recusa < codigo.index("} else {", tls)
-    mensagem = codigo[recusa:recusa + 400]
+    # gate Sol da PR #533 (Aviso): processo filho com tempo limite (Agendador), cada argumento entre aspas
+    par = codigo.index(
+        '$rPar = Agendador @("-I", "-c", "`"$conferePar`"", "`"$certificado`"", "`"$chaveTls`"") $limitePar $py')
+    assert "$limitePar = 30" in codigo[tls:par]
+    assert "& $py -I -c" not in codigo
+    estouro = codigo.index("if ($rPar.Estourou) {", par)
+    recusa = codigo.index("if ($rPar.Codigo -ne 0) {", par)
+    assert tls < leitura < par < estouro < recusa < codigo.index("} else {", tls)
+    travou = codigo[estouro:recusa]
+    assert "throw " in travou and "nao terminou em $limitePar s" in travou and "nada foi alterado" in travou
+    mensagem = codigo[recusa:recusa + 600]
     assert "certificado e chave do HTTPS nao formam par" in mensagem and "nada foi alterado" in mensagem
     assert "Chave do HTTPS recusada" in mensagem
+    assert '-match "password callback"' in mensagem and "chave cifrada nao e' aceita" in mensagem
     # antes de qualquer mudanca: sentinela do watchdog, fetch e checkout vem depois
     for depois in ("New-Item -ItemType File -Path $pause", "& git -C $AppDir fetch --quiet", "try { Construir $alvo"):
         assert par < codigo.index(depois)
@@ -990,6 +998,31 @@ def test_conferencia_do_par_aceita_o_par_e_recusa_chave_trocada_ou_corrompida(tm
         assert r.returncode != 0, ruim.name
         assert r.stdout.strip(), f"{ruim.name}: sem motivo na saida"
         assert r.stdout.isascii(), r.stdout
+    # chave cifrada: a callback de senha recusa (o PowerShell troca este motivo por "chave cifrada nao e' aceita")
+    assert "password callback" in rodar(cifrada).stdout
+
+
+def test_conferencia_do_par_recusa_chave_cifrada_com_senha_vazia(tmp_path):
+    # Gate Sol da PR #533 (Critico): com a callback devolvendo senha vazia, um PKCS#8 cifrado com senha vazia passava no
+    # preflight, mas o uvicorn (sem senha) o recusa: a producao caia na subida e no rollback. O cryptography nao cifra com
+    # senha vazia; o openssl, sim.
+    import shutil
+    import subprocess
+    import sys
+
+    openssl = shutil.which("openssl")
+    if not openssl:
+        pytest.skip("openssl ausente: nao ha como gerar chave cifrada com senha vazia")
+    python = _conferencia_do_par(_codigo(_ler("deploy.ps1")))
+    cert, chave, _ = _par_autoassinado(tmp_path, "a")
+    vazia = tmp_path / "cifrada-senha-vazia.pem"
+    subprocess.run([openssl, "pkcs8", "-topk8", "-in", str(chave), "-out", str(vazia), "-passout", "pass:"],
+                   check=True, capture_output=True, timeout=30)
+    assert vazia.read_text().startswith("-----BEGIN ENCRYPTED PRIVATE KEY-----")
+    r = subprocess.run([sys.executable, "-I", "-c", python, str(cert), str(vazia)], capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, timeout=30)
+    assert r.returncode != 0, r.stdout
+    assert "password callback" in r.stdout
 
 
 def test_deploy_volta_do_build_religa_o_servico_parado_antes_da_trava_do_sentinela_anterior():
