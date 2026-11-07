@@ -87,6 +87,23 @@ describe("Ficha executiva da obra", () => {
     expect(screen.getByText(/medido/, { selector: ".pilula-info" }).textContent).toBe("medido 10% abaixo do previsto");
   });
 
+  it("curva S no celular: o desenho acompanha a largura do cartão e o último mês cabe dentro dele (#552)", async () => {
+    responder();
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 241 });
+    try {
+      const { container } = render(<FichaObra contratoId={3} origem={null} />);
+      const svg = await screen.findByRole("img", { name: /Curva S/ });
+      expect(svg.getAttribute("viewBox")).toBe("0 0 241 170");
+      const rotulos = [...container.querySelectorAll("text.c-eixo")].filter(t => /\/\d{2}$/.test(t.textContent ?? ""));
+      // rotulo centralizado no ultimo ponto: a metade dele (~18 px) precisa caber antes da borda direita
+      expect(Number(rotulos[rotulos.length - 1].getAttribute("x"))).toBeLessThanOrEqual(241 - 18);
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, "clientWidth", original);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+    }
+  });
+
   it("falha da ficha mostra indisponível sem derrubar a página", async () => {
     responder(new Error("falhou"));
     render(<FichaObra contratoId={3} origem={null} />);
