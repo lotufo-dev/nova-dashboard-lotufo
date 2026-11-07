@@ -10,6 +10,8 @@ import { IconeAlerta } from "./icones";
 export type Reserva = {
   mensagem: string; codigo: string; reservado_em: string | null; reservado_por_nome: string | null;
   liberavel_a_partir_de: string | null;
+  /** Issue #482: envio em partes (copia do dono): qual parte esta' presa e o assunto a procurar nos Enviados. */
+  parte?: number | null; partes?: number | null; assunto?: string | null;
 };
 
 export function envioReservado(e: unknown): e is ApiErro & { corpo: Reserva } {
@@ -18,12 +20,14 @@ export function envioReservado(e: unknown): e is ApiErro & { corpo: Reserva } {
 
 const hora = (iso: string | null) => (iso ? iso.slice(11, 16) : "—");     // ISO local: "2026-10-10T10:05:00-04:00"
 
-export default function LiberarEnvio({ tabela, id, reserva, aoLiberar }: {
+export default function LiberarEnvio({ tabela, id, reserva, aoLiberar, textoLiberado }: {
   tabela: "protocolos" | "espelhos" | "pleitos" | "medicao_planilha_envios" | "copia_dono_envios"; id: number;
   aoLiberar: () => void;
   /** Sem a reserva (a pessoa abriu a liberacao pelo menu da medicao), a tela nao sabe quem iniciou nem desde quando:
    *  o servidor decide se ha' o que liberar e se ja' passaram os 15 minutos. */
   reserva?: Reserva | null;
+  /** Issue #482: o que dizer depois de liberar, quando "envie de novo" nao cabe (copia do dono). */
+  textoLiberado?: string;
 }) {
   const campo = useId();
   const declaracao = useId();
@@ -33,7 +37,7 @@ export default function LiberarEnvio({ tabela, id, reserva, aoLiberar }: {
   const [erro, setErro] = useState("");
   const [liberado, setLiberado] = useState(false);
 
-  if (liberado) return <p className="feito" role="status">Trava removida. Confira os dados e envie de novo.</p>;
+  if (liberado) return <p className="feito" role="status">{textoLiberado ?? "Trava removida. Confira os dados e envie de novo."}</p>;
 
   async function liberar() {
     setOcupado(true); setErro("");
@@ -51,6 +55,12 @@ export default function LiberarEnvio({ tabela, id, reserva, aoLiberar }: {
         <span className="campo__nota">
           Iniciado às {hora(reserva.reservado_em)} por {reserva.reservado_por_nome ?? "outro usuário"}. Só pode ser
           liberado a partir das {hora(reserva.liberavel_a_partir_de)}.
+        </span>
+      )}
+      {reserva && (Boolean(reserva.partes && reserva.partes > 1) || Boolean(reserva.assunto)) && (
+        <span className="campo__nota">
+          {reserva.partes && reserva.partes > 1 ? `Parte ${reserva.parte} de ${reserva.partes} presa. ` : ""}
+          {reserva.assunto ? `Procure nos Enviados o assunto “${reserva.assunto}”.` : ""}
         </span>
       )}
       <label className="campo__rotulo" htmlFor={campo}>Por que liberar (confira antes a caixa de Enviados)</label>

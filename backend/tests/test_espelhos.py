@@ -849,7 +849,97 @@ def test_planilha_sendo_enviada_ao_orgao_nao_ganha_espelho(ambiente):
     assert medicoes.detalhe(conn, mid)["estado"] == "planilha_gerada"
 
 
-# --- issue #359: a versao nova do espelho enviado volta a medicao a `espelho_gerado` ---------------------------
+# --- issue #460: a planilha/carta gerada (sem envio registrado) segue ao espelho sem boletim, em toda obra ---------
+
+def _planilha_gerada(conn, cid, numero=23, pedidos=(12_345_67,)):
+    """Medicao em `planilha_gerada` com uma versao por pedido (a ultima e' a vigente, o pedido da medicao)."""
+    mid = _antes_do_espelho(conn, cid, numero, "planilha_gerada", pedido=pedidos[-1])
+    for versao, valor in enumerate(pedidos, start=1):
+        conn.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, "
+                     "acumulado_anterior_centavos, origem, motivo) VALUES (?,?,?,0,'manual',?)",
+                     (mid, versao, valor, None if versao == 1 else f"Rev0{versao - 1}: fiscal pediu ajuste"))
+    conn.commit()
+    return mid
+
+
+@pytest.mark.parametrize("familia", ["sinfra", "mtpar", "ses", "prefeitura"])
+def test_planilha_gerada_segue_sem_boletim_com_justificativa_em_toda_familia(ambiente, familia):
+    conn, u, cid = ambiente
+    conn.execute("UPDATE orgaos SET familia=? WHERE id=(SELECT orgao_id FROM contratos WHERE id=?)", (familia, cid))
+    mid = _planilha_gerada(conn, cid, pedidos=(12_345_67, 12_000_01))
+    pedido = {"medicao": 12_000_01}
+    p = espelhos.previa(conn, cid, 23, "2026-01", pedido)
+    assert p["medicoes"][0]["sem_boletim"] is True
+    assert p["travados"] == [{"tipo": "execucao", "valor_centavos": 12_000_01, "fonte": "pedido", "opcional": True,
+                              "sem_boletim": True}]
+    with pytest.raises(ValueError, match="seguir sem boletim"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", pedido)
+    with pytest.raises(ValueError, match="justificativa"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", pedido, justificativa_sem_boletim="curta")
+    with pytest.raises(ValueError, match=r"R\$ 12\.000,01"):        # a v1 nao vale mais: o pedido e' o da ultima
+        espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67}, justificativa_sem_boletim=JUSTIFICATIVA)
+    assert medicoes.detalhe(conn, mid)["estado"] == "planilha_gerada"
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", pedido, justificativa_sem_boletim=JUSTIFICATIVA)
+    assert espelhos.detalhe(conn, eid)["entradas"] == {"medicao": 12_000_01}
+    assert "12.000,01" in _texto_docx(conn, eid)
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == (
+        "espelho_gerado", 12_000_01, None)
+    a = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='medicao.sem_boletim' AND entidade_id=?",
+                     (str(mid),)).fetchone()
+    assert json.loads(a["antes"]) == {"estado": "planilha_gerada"}
+    assert json.loads(a["depois"]) == {"justificativa": JUSTIFICATIVA, "espelho_id": eid,
+                                       "envio_planilha_registrado": False}
+    textos = [e["texto"] for e in medicoes.edicoes_valor(conn, [mid])[mid]]
+    assert (f"Espelho gerado sem boletim e sem o envio da planilha/carta registrado: {JUSTIFICATIVA} por Maria"
+            in textos)
+
+
+def test_planilha_enviada_sem_boletim_nao_leva_a_marca_de_envio_nao_registrado(ambiente):
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67}, justificativa_sem_boletim=JUSTIFICATIVA)
+    a = conn.execute("SELECT depois FROM audit_log WHERE acao='medicao.sem_boletim' AND entidade_id=?",
+                     (str(mid),)).fetchone()
+    assert "envio_planilha_registrado" not in json.loads(a["depois"])
+
+
+def test_planilha_gerada_saindo_pelo_sistema_segura_tambem_a_previa(ambiente):
+    conn, u, cid = ambiente
+    mid = _planilha_gerada(conn, cid)
+    pid = conn.execute("SELECT id FROM medicao_planilhas WHERE medicao_id=?", (mid,)).fetchone()[0]
+    conn.execute("INSERT INTO medicao_planilha_envios (medicao_id, planilha_id, envio_reservado_em, "
+                 "envio_reservado_por) VALUES (?,?,datetime('now'),?)", (mid, pid, u["id"]))
+    conn.commit()
+    with pytest.raises(ValueError, match="sendo enviada ao protocolo"):
+        espelhos.previa(conn, cid, 23, "2026-01", {"medicao": 12_345_67})
+    with pytest.raises(ValueError, match="sendo enviada"):
+        espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67}, justificativa_sem_boletim=JUSTIFICATIVA)
+    assert medicoes.detalhe(conn, mid)["estado"] == "planilha_gerada"
+
+
+def test_planilha_gerada_so_ganha_espelho_na_competencia_dela(ambiente):
+    conn, u, cid = ambiente
+    mid = _planilha_gerada(conn, cid)
+    with pytest.raises(ValueError, match="competência 01/2026"):
+        espelhos.gerar(conn, u, cid, 23, "2026-02", {"medicao": 12_345_67}, justificativa_sem_boletim=JUSTIFICATIVA)
+    assert medicoes.detalhe(conn, mid)["estado"] == "planilha_gerada"
+
+
+def test_gerada_com_espelho_nao_regera_em_outra_competencia(ambiente):
+    # revisor da PR #528: a medicao que veio da planilha/carta gerada nao tem `planilha_enviada_em`; a versao nova do
+    # espelho continua presa a' competencia da planilha/carta
+    conn, u, cid = ambiente
+    mid = _planilha_gerada(conn, cid)
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67}, justificativa_sem_boletim=JUSTIFICATIVA)
+    with pytest.raises(ValueError, match="competência 01/2026"):
+        espelhos.gerar(conn, u, cid, 23, "2026-02", {"medicao": 12_345_67}, motivo="corrigido")
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["competencia"]) == ("espelho_gerado", "2026-01")
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67}, motivo="corrigido")    # a mesma, sim
+
+
+# --- issue #359: a versao nova do espelho enviado volta a medicao a `espelho_gerado`---------------------------
 
 def test_boletim_novo_depois_do_envio_e_v2_voltam_a_espelho_gerado_ate_o_novo_envio(ambiente, tmp_path, monkeypatch):
     monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
