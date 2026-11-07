@@ -542,7 +542,7 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
             "competencia": comp, "estado": "prevista", "previsto_centavos": None, "previsto_origem": None,
             "medicao_id": None, "medicao_numero": None, "medicao_estado": None, "pedido_centavos": None,
             "aprovado_centavos": None, "apostilada": False, "apostilado_centavos": None, "apostilado_percentual": None,
-            "apostilamento_chave": None, "medicao_orgao": None, "faturado_centavos": None, "recebida_em": None,
+            "apostilamento_chave": None, "medicao_orgao": None, "faturado_centavos": None, "recebida_em": None, "recebidas": [],
             "medido_nao_recebido_centavos": None, "medicoes": [], "medicoes_pedido": [], "medicoes_aprovado": [],
             "medicoes_nota": [], "data_base_incerta": False, "_medicoes": []})
 
@@ -615,7 +615,11 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
         if ms:
             passo, _, m = max(ms, key=lambda v: (v[0], v[1]))
             x.update(medicao_id=m["id"], medicao_numero=m["numero"], medicao_estado=m["estado"],
-                     recebida_em=m["recebida_em"], medicoes=sorted(v[1] for v in ms),
+                     recebida_em=max((v[2]["recebida_em"] for v in ms if v[2]["recebida_em"]), default=None),
+                     # issue #445: todas as baixas da competencia (numero e data), a celula mostra a ultima
+                     recebidas=sorted(({"numero": v[1], "recebida_em": v[2]["recebida_em"]} for v in ms
+                                       if v[2]["recebida_em"]), key=lambda r: r["numero"]),
+                     medicoes=sorted(v[1] for v in ms),
                      pedido_centavos=_soma(v[2]["valor_protocolado_centavos"] for v in ms),
                      aprovado_centavos=_soma(v[2]["valor_atestado_centavos"] for v in ms),
                      faturado_centavos=_soma(faturado.get(v[2]["id"]) for v in ms),

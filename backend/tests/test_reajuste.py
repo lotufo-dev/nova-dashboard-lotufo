@@ -1195,6 +1195,21 @@ def test_cada_soma_diz_as_medicoes_que_entraram_nela(cenario):
     assert _por_competencia(c, cid)["2026-09"]["pedido_centavos"] == 350_06
 
 
+def test_competencia_devolve_todas_as_baixas_e_a_ultima_data(cenario):
+    # issue #445: dois complementos recebidos na mesma competencia; a data e' a da ultima baixa e a lista traz os dois
+    c, ids = cenario
+    cid = ids["contrato"]
+    m3 = _medicao(c, cid, 3, "2026-09", "recebida", pedido=300_05, aprovado=300_05)
+    m8 = _medicao(c, cid, 8, "2026-09", "recebida", pedido=50_01, aprovado=50_01)
+    _medicao(c, cid, 9, "2026-09", "prevista")
+    c.execute("UPDATE medicoes SET recebida_em='2026-10-15' WHERE id=?", (m3,))
+    c.execute("UPDATE medicoes SET recebida_em='2026-11-02' WHERE id=?", (m8,))
+    c.commit()
+    x = _por_competencia(c, cid)["2026-09"]
+    assert x["recebida_em"] == "2026-11-02"
+    assert x["recebidas"] == [{"numero": 3, "recebida_em": "2026-10-15"}, {"numero": 8, "recebida_em": "2026-11-02"}]
+
+
 def test_aditivos_do_ciclo_depois_do_primeiro_pedido_ate_o_termo(cenario):
     # a linha do tempo do ciclo (spec 2026-10-20 §2.2): os aditivos que pedem reemissao, assinados depois do primeiro
     # pleito enviado do ciclo e, com o ciclo apostilado, ate' a data do termo

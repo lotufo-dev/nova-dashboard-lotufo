@@ -48,6 +48,7 @@ type Competencia = { competencia: string; estado: EstadoCompetencia; previsto_ce
   pedido_centavos: number | null; aprovado_centavos: number | null; apostilada: boolean;
   apostilado_centavos: number | null; apostilado_percentual: string | number | null; apostilamento_chave: string | null;
   medicao_orgao: string | number | null; faturado_centavos: number | null; recebida_em: string | null;
+  recebidas?: { numero: number; recebida_em: string }[];
   avisos?: AvisoCompetencia[] };
 /** Data-base e ciclo; os dois nulos no grupo da medicao cuja data-base nao se decide (duas bases, nada gravado). */
 type GrupoDoCiclo = { data_base_mes: string | null; ciclo: number | null; competencias: Competencia[] };
@@ -167,13 +168,13 @@ function TabelaCompetencias({ rotulo, linhas, termos }: { rotulo: string; linhas
                 {x.apostilado_centavos !== null ? brl(x.apostilado_centavos)
                   : x.apostilada && x.apostilado_percentual !== null ? percentual(x.apostilado_percentual) : "—"}
                 {/* o nº da medicao que o termo cita, a' vista (era coluna da tabela das apostiladas) */}
-                {x.apostilada && citada(x) && <span className="reajuste-competencias__citada"> ({citada(x)})</span>}
+                {x.apostilada && citada(x) && <span className="reajuste-competencias__citada"> ({citada(x)} med.)</span>}
               </Celula>
               <Celula origem={daMedicao("notas fiscais da ", x.faturado_centavos, x.medicoes_nota)}>
                 {brl(x.faturado_centavos)}
               </Celula>
               <Celula className="col-num num"
-                origem={daMedicao("baixa no RM da ", x.recebida_em, x.medicao_numero !== null ? [x.medicao_numero] : [])}>
+                origem={daMedicao("baixa no RM da ", x.recebida_em, (x.recebidas ?? []).map(r => r.numero))}>
                 {x.recebida_em ? fmtDataPura(x.recebida_em.slice(0, 10)) : "—"}
               </Celula>
               <td className="col-fixa"><SituacaoDaCompetencia x={x} /></td>
@@ -218,16 +219,18 @@ const TIPO_ADITIVO: Record<string, string> = { prazo: "de prazo", valor: "de val
  *  por ultimo. */
 function eventosDoCiclo(pleitos: Pleito[], aditivos: AditivoDoCiclo[], termos: InstrumentoCadastro[]) {
   const ev = [
-    ...aditivos.map(a => ({ chave: `aditivo-${a.id}`, data: a.data_assinatura.slice(0, 10), ordem: 0,
+    ...aditivos.map(a => ({ chave: `aditivo-${a.id}`, data: a.data_assinatura.slice(0, 10), ordem: 0, instante: a.data_assinatura,
       texto: ["Aditivo", TIPO_ADITIVO[a.tipo], a.numero ?? "sem número", "assinado"].filter(Boolean).join(" ") })),
     ...pleitos.filter(p => p.situacao === "enviado" && p.enviado_em).map(p => ({ chave: `pleito-${p.id}`,
-      data: p.enviado_em!.slice(0, 10), ordem: 1,
+      data: p.enviado_em!.slice(0, 10), ordem: 1, instante: p.enviado_em!,
       // "Pleito ... enviado"; reiteracao e reemissao (femininas) "enviada"
       texto: `${p.rotulo}${p.numero_oficio ? ` ${p.numero_oficio}` : ""} ${p.reemissao || p.reemite_pleito_id ? "enviada" : "enviado"}` })),
-    ...termos.map(i => ({ chave: `termo-${i.tipo}-${i.id}`, data: i.data.slice(0, 10), ordem: 2,
+    ...termos.map(i => ({ chave: `termo-${i.tipo}-${i.id}`, data: i.data.slice(0, 10), ordem: 2, instante: i.data,
       texto: `${nomeDoTermo(i)} ${i.numero ?? "s/n"}` })),
   ];
-  return ev.sort((a, b) => a.data.localeCompare(b.data) || a.ordem - b.ordem);
+  return ev.sort((a, b) => a.data.localeCompare(b.data) || a.ordem - b.ordem
+    // issue #445: dois envios no mesmo dia, pelo horario (a API manda do mais novo para o mais antigo)
+    || a.instante.localeCompare(b.instante));
 }
 
 /** O rotulo e a lista; quem chama poe na secao (o ciclo corrente no cartao, os anteriores em "Ciclos anteriores"). */
@@ -411,7 +414,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const doCicloAtual = daBase.find(g => g.ciclo === c.ciclo);
         const gruposAnteriores = daBase.filter(g => g.ciclo !== null && g.ciclo < c.ciclo);
         const gruposSeguintes = daBase.filter(g => g.ciclo !== null && g.ciclo > c.ciclo);
-        const eventos = eventosDoCiclo(db.pleitosDoCiclo, c.aditivos ?? [], doCiclo);
+        const eventos = eventosDoCiclo(db.pleitosDoCiclo, c.aditivos ?? [], c.apostilamento ? [c.apostilamento] : []);
         // cada ciclo anterior com a tabela e a linha do tempo dele (rodada 1 da PR #438): o termo e os aditivos vem
         // de `linhas_do_tempo`, os pleitos sao os da aba
         const tempos = (dados.linhas_do_tempo ?? []).filter(t => t.data_base_mes === db.data_base_mes && t.ciclo < c.ciclo);
