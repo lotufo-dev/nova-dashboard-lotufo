@@ -27,6 +27,7 @@ ROTAS_UPLOAD = tuple((metodo, re.compile(padrao)) for metodo, padrao in (
     ("POST", r"/api/correio/assinatura"),                         # imagem da assinatura
     ("POST", r"/api/documentos/certidoes(/ler)?"),                # certidao: gravar e ler o PDF
     ("POST", r"/api/documentos/regularidades"),
+    ("POST", r"/api/documentos/anexar(/ler)?"),                    # anexar PDF unico (#513): certidao ou regularidade
     ("POST", rf"/api/(contratos|medicoes)/{_ID}/planilhas"),      # issue #281: planilha/carta (oficio + planilha)
     ("POST", rf"/api/medicoes/{_ID}/planilhas/envio-externo"),    # issue #283: .eml do envio da planilha por fora
     ("POST", rf"/api/medicoes/{_ID}/(documentos|notas)"),         # evidencia do orgao e nota fiscal

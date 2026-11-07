@@ -183,3 +183,11 @@ export function IconeSiga(p: Props) {
     <path d="M8.5 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5" />
   </Svg>;
 }
+
+export function IconeCheck(p: Props) {
+  return <Svg {...p}><path d="M5 12.5l4.5 4.5L19 7.5" /></Svg>;
+}
+
+export function IconeTraco(p: Props) {
+  return <Svg {...p}><path d="M6 12h12" /></Svg>;
+}

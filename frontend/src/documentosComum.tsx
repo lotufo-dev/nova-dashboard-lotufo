@@ -6,7 +6,8 @@ import Selo from "./Selo";
 // emissao/validade sao DATAS PURAS do papel que o orgao emitiu: fmtDataPura nao passa por fuso.
 import { fmtDataPura } from "./tempo";
 import type { Nivel } from "./matriz";
-import { cnpjBR, NATUREZA, ROTULO_TIPO, TIPOS, type ItemFila, type RespostaLer } from "./documentosDados";
+import { cnpjBR, NATUREZA, ROTULO_TIPO, TIPOS, type ItemFila, type Lida, type RespostaLer } from "./documentosDados";
+import { fmtCompetencia } from "./tempo";
 import "./documentos.css";
 
 /* Pecas comuns das duas telas de Documentos (#161): a lista de empresas (Documentos.tsx) e a pagina da empresa
@@ -66,7 +67,12 @@ export type AnexarRef = { escolher: (tipo?: string) => void };
  *  a digitacao ja' nela e a leitura de outra empresa vem com aviso. */
 export const AnexarCertidoes = forwardRef<AnexarRef, {
   empresas: EmpresaDoc[]; empresaPadrao?: EmpresaDoc; aoGravar: () => Promise<void>; anunciar: (t: string) => void;
-}>(function AnexarCertidoes({ empresas, empresaPadrao, aoGravar, anunciar }, ref) {
+  /** #513: entrada unica da tela Documentos: o conteudo do PDF decide se e' certidao ou regularidade mensal. */
+  unificado?: boolean;
+  /** Sem a area tracejada: o botao "Anexar PDF" do topo abre o seletor e so' a fila aparece. */
+  semZona?: boolean;
+}>(function AnexarCertidoes({ empresas, empresaPadrao, aoGravar, anunciar, unificado, semZona }, ref) {
+  const base = unificado ? "/api/documentos/anexar" : "/api/documentos/certidoes";
   const [fila, setFila] = useState<ItemFila[]>([]);
   const [ocupado, setOcupado] = useState(false);
   const [sobre, setSobre] = useState(false);
@@ -92,8 +98,10 @@ export const AnexarCertidoes = forwardRef<AnexarRef, {
       const fd = new FormData();
       fd.append("arquivo", item.arquivo);
       try {
-        const r = await apiForm<RespostaLer>("/api/documentos/certidoes/ler", fd);
-        if (r.ok) { atualizar(item.chave, { estado: "conferir", leitura: r.leitura }); anunciar(`${item.arquivo.name}: lida, confira e grave.`); }
+        const r = await apiForm<RespostaLer>(`${base}/ler`, fd);
+        if (r.ok && "documento" in r.leitura && r.leitura.documento === "regularidade") {
+          atualizar(item.chave, { estado: "conferir", regularidade: r.leitura }); anunciar(`${item.arquivo.name}: regularidade lida, confira e grave.`);
+        } else if (r.ok) { atualizar(item.chave, { estado: "conferir", leitura: r.leitura as Lida }); anunciar(`${item.arquivo.name}: lida, confira e grave.`); }
         else if (r.digitavel) {
           atualizar(item.chave, {
             estado: "digitar", mensagem: r.mensagem,
@@ -120,8 +128,10 @@ export const AnexarCertidoes = forwardRef<AnexarRef, {
       for (const [k, v] of Object.entries(item.manual)) if (v) fd.append(k, v);
     }
     try {
-      const r = await apiForm<{ entidade: string; tipo: string; validade: string }>("/api/documentos/certidoes", fd);
-      const texto = `${r.entidade} · ${ROTULO_TIPO[r.tipo] ?? r.tipo} · válida até ${fmtDataPura(r.validade)}`;
+      const r = await apiForm<{ documento?: string; entidade: string; tipo: string; validade: string; competencia?: string }>(base, fd);
+      const texto = r.documento === "regularidade"
+        ? `${r.entidade} · regularidade de ${fmtCompetencia(r.competencia)}`
+        : `${r.entidade} · ${ROTULO_TIPO[r.tipo] ?? r.tipo} · válida até ${fmtDataPura(r.validade)}`;
       atualizar(item.chave, { estado: "gravada", mensagem: texto });
       anunciar(`Gravada: ${texto}.`);
       await aoGravar();
@@ -149,7 +159,7 @@ export const AnexarCertidoes = forwardRef<AnexarRef, {
   return (
     <>
       {erro && <p className="erro" role="alert">{erro}</p>}
-      <div className={`doc-zona${sobre ? " doc-zona--sobre" : ""}`}
+      {!semZona && <div className={`doc-zona${sobre ? " doc-zona--sobre" : ""}`}
         onDragEnter={ev => { ev.preventDefault(); setSobre(true); }}
         onDragOver={ev => { ev.preventDefault(); setSobre(true); }}
         onDragLeave={ev => { ev.preventDefault(); setSobre(false); }}
@@ -171,7 +181,14 @@ export const AnexarCertidoes = forwardRef<AnexarRef, {
             pedido.current = undefined;
             void receber(arquivos, tipo);
           }} />
-      </div>
+      </div>}
+      {semZona && <input ref={entrada} type="file" accept="application/pdf" multiple hidden aria-label="Escolher PDFs para anexar"
+        onChange={ev => {
+          const input = ev.currentTarget;
+          const arquivos = Array.from(input.files ?? []);
+          input.value = "";
+          void receber(arquivos);
+        }} />}
 
       {fila.length > 0 && (
         <ul className="documentos__fila doc-fila">
@@ -179,6 +196,16 @@ export const AnexarCertidoes = forwardRef<AnexarRef, {
             <li key={item.chave} className="documentos__item">
               <span className="documentos__arquivo">{item.arquivo.name}</span>
               {item.estado === "lendo" && <span className="campo__nota">lendo…</span>}
+              {item.estado === "conferir" && item.regularidade && (
+                <>
+                  <span>{item.regularidade.entidade} · regularidade mensal de {fmtCompetencia(item.regularidade.competencia)}</span>
+                  <span className="form-inline">
+                    <button type="button" className="btn btn--pequeno" disabled={ocupado}
+                      onClick={() => gravar(item)}>Gravar regularidade<span className="sr-only"> de {item.arquivo.name}</span></button>
+                    <button type="button" className="btn btn--pequeno" onClick={() => descartar(item.chave)}>Descartar</button>
+                  </span>
+                </>
+              )}
               {item.estado === "conferir" && item.leitura && (
                 <>
                   <span>

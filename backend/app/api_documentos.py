@@ -189,3 +189,49 @@ def checklist_protocolo(contrato_id: ID,
             "SELECT id FROM contratos WHERE id=?", (contrato_id,)).fetchone() is None:
         raise HTTPException(404, "Contrato não encontrado")
     return checklist.pronto_para_protocolar(conn, contrato_id, natureza)
+
+
+# --- "Anexar PDF" unico (issue #513): o conteudo decide se e' certidao ou regularidade mensal ---------------
+
+def _folha(conn, arquivo: UploadFile) -> dict | None:
+    """Le o PDF recebido (sem gravar) e diz se e' a folha do DP; devolve o ponteiro do arquivo ao inicio."""
+    pdf = arquivo.file.read(arquivos.TETO_BYTES + 1)
+    arquivo.file.seek(0)
+    if len(pdf) > arquivos.TETO_BYTES:
+        return None          # o teto e' recusado adiante, pelo mesmo caminho da certidao
+    return documentos.reconhecer_regularidade(conn, pdf)
+
+
+@router.post("/api/documentos/anexar/ler")
+def anexar_ler(arquivo: UploadFile = File(...), usuario: dict = Depends(exigir("editar_cadastros")),
+               conn: sqlite3.Connection = Depends(conexao)):
+    """Um ponto de entrada para qualquer PDF: folha do DP vira regularidade mensal; o resto segue a leitura da
+    certidao. NAO grava nada. Folha cuja empresa nao se reconhece cai na fila humana (recusada, com o motivo)."""
+    f = _folha(conn, arquivo)
+    if f is None:
+        r = ler(arquivo, usuario, conn)
+        return {**r, "documento": "certidao"} if r.get("ok") else r
+    if f["entidade_id"] is None:
+        return {"ok": False, "motivo": "regularidade-sem-empresa", "digitavel": False,
+                "mensagem": f"Folha do DP de {f['competencia'][5:]}/{f['competencia'][:4]}: empresa não identificada no cadastro."}
+    return {"ok": True, "documento": "regularidade", "leitura": {"documento": "regularidade", **f}}
+
+
+@router.post("/api/documentos/anexar", status_code=201)
+def anexar(arquivo: UploadFile = File(...),
+           entidade_id: int | None = Form(default=None, ge=1, le=MAX_INT64),
+           tipo: Literal["federal", "fgts", "trabalhista", "estadual", "municipal", "falencia"] | None = Form(default=None),
+           emissao: datetime.date | None = Form(default=None),
+           validade: datetime.date | None = Form(default=None),
+           natureza: Literal["negativa", "positiva_efeito_negativa"] | None = Form(default=None),
+           numero: str | None = Form(default=None, max_length=100),
+           usuario: dict = Depends(exigir("editar_cadastros")),
+           conn: sqlite3.Connection = Depends(conexao)):
+    f = _folha(conn, arquivo)
+    if f is None:
+        g = gravar(arquivo, entidade_id, tipo, emissao, validade, natureza, numero, usuario, conn)
+        return {**g, "documento": "certidao"}
+    if f["entidade_id"] is None:
+        raise HTTPException(422, "Folha do DP: empresa não identificada no cadastro")
+    r = regularidade(arquivo, f["entidade_id"], f["competencia"], usuario, conn)
+    return {**r, "documento": "regularidade", "entidade": f["entidade"], "competencia": f["competencia"]}

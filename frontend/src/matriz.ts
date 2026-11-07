@@ -11,7 +11,8 @@ export type LinhaCertidao = {
 export type RegularidadeDoc = { situacao: "ok" | "atrasada" | "faltando"; competencia: string | null; esperada: string };
 export type Garantia = { apolice: string | null; vigencia_fim: string; dias: number; origem: "contrato" | "endosso";
   situacao: "ok" | "vencendo" | "vencida" | "baixada" };
-export type ObraDoc = { contrato_id: number; obra: string; entidade_id?: number; garantia: Garantia | null };
+export type ObraDoc = { contrato_id: number; obra: string; entidade_id?: number; garantia: Garantia | null;
+  orgao?: string; cobre_execucao?: { cobre: boolean | null; ate: string | null }; art?: string | null; cno?: string | null };
 export type EmpresaDoc = {
   entidade_id: number; entidade: string; cnpj: string; papel: string; certidoes: LinhaCertidao[];
   regularidade_exigida: boolean; regularidade: RegularidadeDoc | null;
@@ -153,4 +154,76 @@ export function situacaoGarantia(g: Garantia | null, ate: string): { texto: stri
   if (g.situacao === "vencida") return { texto: "vencida", nota, nivel: "acao", forte: true };
   if (g.situacao === "vencendo") return { texto: venceEm(g.dias), nota, nivel: g.dias <= 15 ? "acao" : "atencao" };
   return { texto: "em dia", nota, nivel: "ok" };
+}
+
+/* ---------------------------------------------------------------- Documentos em tres abas (#513) */
+
+/** A cor do chip (as classes `info--*` do tokens.css): feito = em dia/anexada, andamento = aguardando, breve = vence em
+ *  ate' 7 dias ou falta, critico = vencida, sem registro ou vence hoje. */
+export type CorChip = "feito" | "andamento" | "breve" | "critico" | "neutro";
+export const LIMITE_BREVE_DIAS = 7;
+
+/** O chip de uma certidao na aba Certidoes: dias que faltam ("9 d", "hoje") e a data completa. Certidao nao exigida
+ *  fica neutra ("—"); `contaNoAviso` diz se entra no contador "N vencendo" (amarelo ou vermelho, so' as exigidas). */
+export function chipCertidao(l: LinhaCertidao | undefined, validade: string):
+    { cor: CorChip; valor: string; data: string; contaNoAviso: boolean } {
+  if (!l || l.situacao === "nao_se_aplica" || !l.exigida) return { cor: "neutro", valor: "—", data: "", contaNoAviso: false };
+  if (l.situacao === "faltando") return { cor: "critico", valor: "sem registro", data: "", contaNoAviso: true };
+  if (l.situacao === "vencida" || l.dias === null || l.dias < 0) {
+    return { cor: "critico", valor: "vencida", data: validade, contaNoAviso: true };
+  }
+  if (l.dias === 0) return { cor: "critico", valor: "hoje", data: validade, contaNoAviso: true };
+  const breve = l.dias <= LIMITE_BREVE_DIAS;
+  return { cor: breve ? "breve" : "feito", valor: `${l.dias} d`, data: validade, contaNoAviso: breve };
+}
+
+export function certidoesVencendo(empresas: EmpresaDoc[]): number {
+  return empresas.reduce((n, e) => n + e.certidoes.filter(l => chipCertidao(l, "").contaNoAviso).length, 0);
+}
+
+function mesMais(c: string, n: number): string {
+  const t = Number(c.slice(0, 4)) * 12 + (Number(c.slice(5, 7)) - 1) + n;
+  return `${String(Math.floor(t / 12)).padStart(4, "0")}-${String((t % 12) + 1).padStart(2, "0")}`;
+}
+
+/** Os seis meses da regularidade, do mais antigo ao mais novo; o ultimo e' o mes anterior ao de `hoje`. A competencia C
+ *  e' esperada a partir do dia 10 do mes seguinte: antes disso, "aguardando" o DP. */
+export function competenciasRegularidade(hoje: string): { competencia: string; aguardando: boolean }[] {
+  const atual = hoje.slice(0, 7);
+  return [5, 4, 3, 2, 1, 0].map(i => {
+    const competencia = mesMais(atual, -1 - i);
+    return { competencia, aguardando: hoje < `${mesMais(competencia, 1)}-10` };
+  });
+}
+
+export type EstadoCompetencia = { competencia: string; estado: "anexada" | "faltando" | "aguardando"; id?: number };
+
+/** Empresas com folha: as que a regularidade e' exigida ou ja' tem PDF anexado. */
+export function empresasComFolha(empresas: EmpresaDoc[]): EmpresaDoc[] {
+  return empresas.filter(e => e.regularidade !== null || (e.regularidades_anexadas ?? []).length > 0);
+}
+
+export function estadosRegularidade(e: EmpresaDoc, hoje: string): EstadoCompetencia[] {
+  const anexadas = e.regularidades_anexadas ?? [];
+  return competenciasRegularidade(hoje).map(({ competencia, aguardando }) => {
+    const a = anexadas.find(x => x.competencia === competencia);
+    return a ? { competencia, estado: "anexada" as const, id: a.id }
+      : { competencia, estado: aguardando ? "aguardando" as const : "faltando" as const };
+  });
+}
+
+export function regularidadesFaltando(empresas: EmpresaDoc[], hoje: string): number {
+  return empresasComFolha(empresas).reduce((n, e) => n + estadosRegularidade(e, hoje).filter(x => x.estado === "faltando").length, 0);
+}
+
+export function garantiasVencidas(obras: ObraDoc[]): number {
+  return obras.filter(o => o.garantia?.situacao === "vencida").length;
+}
+
+/** As obras por orgao, o maior grupo primeiro (empate: ordem alfabetica do orgao). */
+export function obrasPorOrgao(obras: ObraDoc[]): { orgao: string; obras: ObraDoc[] }[] {
+  const m = new Map<string, ObraDoc[]>();
+  for (const o of obras) m.set(o.orgao ?? "Sem órgão", [...(m.get(o.orgao ?? "Sem órgão") ?? []), o]);
+  return [...m].map(([orgao, lista]) => ({ orgao, obras: lista }))
+    .sort((a, b) => b.obras.length - a.obras.length || a.orgao.localeCompare(b.orgao, "pt-BR"));
 }

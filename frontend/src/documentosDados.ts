@@ -10,13 +10,15 @@ export type Lida = {
   emissao: string; validade: string; numero: string | null; validade_calculada: boolean; ocr?: boolean;
 };
 // `lidos` (gate Sol S6, 10/10/2026): datas lidas fora do prazo normal; a digitacao abre ja' preenchida com elas.
-export type RespostaLer = { ok: true; leitura: Lida } | { ok: false; motivo: string; mensagem: string; digitavel: boolean;
+// A folha do DP lida pelo "Anexar PDF" unico (#513): a empresa vem do cabecalho, a competencia tambem.
+export type LidaRegularidade = { documento: "regularidade"; competencia: string; entidade_id: number; entidade: string };
+export type RespostaLer = { ok: true; leitura: Lida | LidaRegularidade } | { ok: false; motivo: string; mensagem: string; digitavel: boolean;
   lidos?: { entidade_id: number; tipo: string; emissao: string; validade: string; natureza: string } };
 
 export type Manual = { entidade_id: string; tipo: string; emissao: string; validade: string; natureza: string };
 export type ItemFila = {
   chave: number; arquivo: File; estado: "lendo" | "conferir" | "digitar" | "recusada" | "gravada";
-  leitura?: Lida; mensagem?: string; manual?: Manual;
+  leitura?: Lida; regularidade?: LidaRegularidade; mensagem?: string; manual?: Manual;
   pedido?: string;      // o tipo da linha em que a pessoa clicou "Anexar" (a leitura do PDF e' quem decide o tipo)
 };
 
