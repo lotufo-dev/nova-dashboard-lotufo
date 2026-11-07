@@ -183,7 +183,7 @@ def _sem_acento_maiusculo(t: str) -> str:
 
 def reconhecer_regularidade(conn, pdf: bytes) -> dict | None:
     """O PDF e' a folha do DP? -> {"competencia", "entidade_id", "entidade"} (a empresa pelo nome impresso no
-    cabecalho; entidade None quando nenhuma empresa ativa do cadastro aparece no texto, ou quando duas empatam) ou
+    cabecalho; entidade None quando nenhuma ou mais de uma empresa ativa do cadastro aparece no texto) ou
     None se nao e' folha (nao traz a competencia no cabecalho do DP). Decide pelo CONTEUDO, nao pelo nome do
     arquivo (issue #513)."""
     competencia = competencia_do_pdf(pdf)
@@ -200,13 +200,12 @@ def reconhecer_regularidade(conn, pdf: bytes) -> dict | None:
         for nome in (e["nome"], e.get("nome_curto")):
             n = _sem_acento_maiusculo(nome or "").strip()
             if len(n) >= 4 and n in texto:
-                achadas.append((len(n), e))
+                achadas.append(e)
                 break
-    tam = max((a[0] for a in achadas), default=0)
-    topo = [e for t, e in achadas if t == tam]
-    if len(topo) != 1:
+    # Mais de uma empresa no cabecalho (folha do consorcio que cita a lider): nao adivinha, fila humana.
+    if len(achadas) != 1:
         return {"competencia": competencia, "entidade_id": None, "entidade": None}
-    return {"competencia": competencia, "entidade_id": topo[0]["id"], "entidade": _nome(topo[0])}
+    return {"competencia": competencia, "entidade_id": achadas[0]["id"], "entidade": _nome(achadas[0])}
 
 
 def conferir_regularidade(conn, entidade_id: int, competencia: str) -> None:

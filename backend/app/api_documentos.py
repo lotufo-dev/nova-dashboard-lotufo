@@ -213,8 +213,7 @@ def anexar_ler(arquivo: UploadFile = File(...), usuario: dict = Depends(exigir("
         return {**r, "documento": "certidao"} if r.get("ok") else r
     if f["entidade_id"] is None:
         return {"ok": False, "motivo": "regularidade-sem-empresa", "digitavel": False,
-                "mensagem": f"Folha do DP de {f['competencia'][5:]}/{f['competencia'][:4]}, mas a empresa não aparece "
-                            "no cadastro: anexe pela página da empresa (aba Regularidade do mês)."}
+                "mensagem": f"Folha do DP de {f['competencia'][5:]}/{f['competencia'][:4]}: empresa não identificada no cadastro."}
     return {"ok": True, "documento": "regularidade", "leitura": {"documento": "regularidade", **f}}
 
 
@@ -233,7 +232,6 @@ def anexar(arquivo: UploadFile = File(...),
         g = gravar(arquivo, entidade_id, tipo, emissao, validade, natureza, numero, usuario, conn)
         return {**g, "documento": "certidao"}
     if f["entidade_id"] is None:
-        raise HTTPException(422, "Folha do DP, mas a empresa não aparece no cadastro: anexe pela página da empresa "
-                                 "(aba Regularidade do mês)")
+        raise HTTPException(422, "Folha do DP: empresa não identificada no cadastro")
     r = regularidade(arquivo, f["entidade_id"], f["competencia"], usuario, conn)
     return {**r, "documento": "regularidade", "entidade": f["entidade"], "competencia": f["competencia"]}

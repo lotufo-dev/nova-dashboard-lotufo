@@ -191,3 +191,12 @@ a.doc-chip:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; 
   .doc-chips--5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .doc-aba { flex-basis: 100%; font-size: 15px; }
 }
+
+.doc-linha--cabeca { background: var(--hover); border-color: var(--linha); padding-top: 6px; padding-bottom: 6px; }
+.doc-linha--cabeca .doc-grupo__cabeca { border: 0; padding: 0; }
+.doc-linha--cabeca .doc-chips span { text-align: center; font-size: 13px; font-weight: 600; }
+.doc-linha--obra { padding-top: 4px; padding-bottom: 4px; }
+.doc-chip--linha { padding: 2px 8px; text-align: center; }
+.doc-chip--linha .doc-chip__valor { justify-content: center; }
+.doc-chip--linha .doc-chip__valor b { font-size: 15px; line-height: 22px; }
+@media (max-width: 720px) { .doc-linha--cabeca .doc-chips { display: none; } }

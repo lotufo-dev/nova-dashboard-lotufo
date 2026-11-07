@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconeAlerta, IconeCheck, IconeEnviarNuvem, IconeRelogio, IconeTraco } from "./icones";
-import LegendaCor from "./LegendaCor";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
@@ -8,7 +7,7 @@ import {
   obrasPorOrgao, regularidadesFaltando, situacaoGarantia, type CorChip, type EmpresaDoc, type ObraDoc,
 } from "./matriz";
 import { substituir, trocarBusca, type Busca } from "./rota";
-import { fmtCompetencia, fmtDataPura } from "./tempo";
+import { fmtCompetencia, fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
 import { AnexarCertidoes, type AnexarRef } from "./documentosComum";
 import { usePainel } from "./documentosDados";
 
@@ -109,16 +108,16 @@ const ICONE_ESTADO = { anexada: IconeCheck, faltando: IconeTraco, aguardando: Ic
 const COR_ESTADO = { anexada: "feito", faltando: "breve", aguardando: "andamento" } as const;
 const TEXTO_ESTADO = { anexada: "anexada", faltando: "faltando", aguardando: "aguardando o DP" } as const;
 
-function Chip({ cor, rotulo, valor, data, href, titulo }: {
-  cor: CorChip; rotulo: string; valor: string; data?: string; href?: string; titulo?: string;
+function Chip({ cor, rotulo, valor, data, href, titulo, semRotulo }: {
+  cor: CorChip; rotulo: string; valor: string; data?: string; href?: string; titulo?: string; semRotulo?: boolean;
 }) {
   const corpo = (
     <>
-      <span className="doc-chip__rotulo">{rotulo}</span>
+      <span className={semRotulo ? "sr-only" : "doc-chip__rotulo"}>{rotulo}</span>
       <span className="doc-chip__valor"><b>{valor}</b>{data ? <small>{data}</small> : null}</span>
     </>
   );
-  const classe = `doc-chip doc-chip--${cor}`;
+  const classe = `doc-chip doc-chip--${cor}${semRotulo ? " doc-chip--linha" : ""}`;
   return href
     ? <a className={classe} href={href} target="_blank" rel="noreferrer" title={titulo}>{corpo}</a>
     : <div className={classe} title={titulo}>{corpo}</div>;
@@ -176,8 +175,7 @@ function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: str
   const seguinte = `${ultimoMes.slice(5, 7) === "12" ? String(Number(ultimoMes.slice(0, 4)) + 1) : ultimoMes.slice(0, 4)}-${String(Number(ultimoMes.slice(5, 7)) % 12 + 1).padStart(2, "0")}`;
   return (
     <>
-      {comFolha.length === 0 && <p className="campo__nota">Nenhuma empresa com folha.</p>}
-      <ul className="doc-linhas" aria-label="Regularidade mensal por empresa">
+            <ul className="doc-linhas" aria-label="Regularidade mensal por empresa">
         {comFolha.map(e => {
           const ultima = (e.regularidades_anexadas ?? [])[0];
           return (
@@ -192,7 +190,7 @@ function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: str
                   const nome = `${fmtCompetencia(x.competencia)}: ${TEXTO_ESTADO[x.estado]}`;
                   const interior = (
                     <>
-                      <span className="doc-chip__rotulo">{fmtCompetencia(x.competencia)}</span>
+                      <span className="doc-chip__rotulo">{fmtMesCurto(x.competencia)}</span>
                       <Icone className="doc-chip__icone" titulo={nome} />
                     </>
                   );
@@ -203,26 +201,31 @@ function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: str
                 })}
               </div>
               <p className="doc-linha__ultima">
-                {ultima ? `última: ${fmtCompetencia(ultima.competencia)}, anexada em ${fmtDataPura(ultima.anexada_em)}` : "—"}
+                {ultima ? `última: ${fmtMesExtenso(ultima.competencia)}, ${ultima.anexada_em.slice(8, 10)}/${ultima.anexada_em.slice(5, 7)}` : "—"}
               </p>
             </li>
           );
         })}
       </ul>
       {semFolha.length > 0 && <p className="doc-nota">Não exigida: {semFolha.map(e => e.entidade).join(", ")}</p>}
-      <p className="doc-nota">{fmtCompetencia(ultimoMes)} esperada a partir de 10/{seguinte.slice(5, 7)}.</p>
+      <p className="doc-nota">{(() => { const m = fmtMesExtenso(ultimoMes); return m.charAt(0).toUpperCase() + m.slice(1); })()} esperada a partir de 10/{seguinte.slice(5, 7)}.</p>
     </>
   );
 }
 
-const OBRAS_POR_GRUPO = 5;
+const OBRAS_POR_GRUPO = 8;
 
 function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
   const [tudo, setTudo] = useState(false);
   const vistas = tudo ? obras : obras.slice(0, OBRAS_POR_GRUPO);
   return (
     <section className="doc-grupo" aria-label={`Garantias de ${orgao}`}>
-      <h2 className="doc-grupo__cabeca">{orgao} <span>· {obras.length} {obras.length === 1 ? "obra" : "obras"}</span></h2>
+      <div className="doc-linha doc-linha--cabeca">
+        <h2 className="doc-grupo__cabeca">{orgao} <span>· {obras.length} {obras.length === 1 ? "obra" : "obras"}</span></h2>
+        <div className="doc-chips doc-chips--5" aria-hidden="true">
+          {["Apólice", "Válida até", "Cobre a execução", "ART", "CNO"].map(r => <span key={r}>{r}</span>)}
+        </div>
+      </div>
       <ul className="doc-linhas">
         {vistas.map(o => {
           const g = o.garantia;
@@ -231,16 +234,16 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
             : sg.nivel === "ok" ? "feito" : "neutro";
           const cob = o.cobre_execucao;
           return (
-            <li key={o.contrato_id} className="doc-linha">
+            <li key={o.contrato_id} className="doc-linha doc-linha--obra">
               <div className="doc-linha__nome"><span className="doc-linha__obra">{o.obra}</span></div>
               <div className="doc-chips doc-chips--5">
-                <Chip cor={g?.apolice ? "feito" : "critico"} rotulo="Apólice" valor={g?.apolice || "sem registro"} />
-                <Chip cor={corValida} rotulo="Válida até" valor={g ? fmtDataPura(g.vigencia_fim) : "—"}
-                  data={sg && sg.nivel !== "ok" && sg.nivel !== "neutro" ? sg.texto : undefined} />
-                <Chip cor={cob?.cobre === true ? "feito" : cob?.cobre === false ? "critico" : "neutro"} rotulo="Cobre a execução"
-                  valor={cob?.cobre === true ? "sim" : cob?.cobre === false && cob.ate ? `não, até ${fmtDataPura(cob.ate)}` : "—"} />
-                <Chip cor={o.art ? "feito" : "neutro"} rotulo="ART" valor={o.art ?? "—"} />
-                <Chip cor={o.cno ? "feito" : "neutro"} rotulo="CNO" valor={o.cno ?? "—"} />
+                <Chip semRotulo cor={g?.apolice ? "feito" : "critico"} rotulo="Apólice" valor={g?.apolice || "sem registro"} />
+                <Chip semRotulo cor={corValida} rotulo="Válida até" valor={g ? fmtDataPura(g.vigencia_fim) : "sem registro"} />
+                <Chip semRotulo cor={!g ? "critico" : cob?.cobre === true ? "feito" : cob?.cobre === false ? "breve" : "critico"}
+                  rotulo="Cobre a execução"
+                  valor={!g ? "sem registro" : cob?.cobre === true ? "sim" : cob?.cobre === false && cob.ate ? `não, até ${fmtDataPura(cob.ate)}` : "—"} />
+                <Chip semRotulo cor={o.art ? "feito" : "critico"} rotulo="ART" valor={o.art ? "registrada" : "sem registro"} />
+                <Chip semRotulo cor={o.cno ? "feito" : "critico"} rotulo="CNO" valor={o.cno ? "registrado" : "sem registro"} />
               </div>
             </li>
           );
@@ -252,6 +255,20 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
         </button>
       )}
     </section>
+  );
+}
+
+const LEGENDAS: Record<IdAba, { classe: string; texto: string }[]> = {
+  certidoes: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "vence em até 7 dias" }, { classe: "critico", texto: "vencida" }],
+  regularidade: [{ classe: "feito", texto: "anexada" }, { classe: "andamento", texto: "aguardando o DP" }, { classe: "breve", texto: "faltando" }],
+  garantias: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "não cobre" }, { classe: "critico", texto: "vencida ou sem registro" }],
+};
+
+function LegendaAba({ aba }: { aba: IdAba }) {
+  return (
+    <ul className="legenda-cor" aria-label="Legenda das cores">
+      {LEGENDAS[aba].map(i => <li key={i.texto}><span className={`pilula-info__ponto ponto--${i.classe}`} />{i.texto}</li>)}
+    </ul>
   );
 }
 
@@ -283,7 +300,7 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
       <p className="sr-only" role="status">{anuncio}</p>
 
       <div className="doc-topo">
-        <LegendaCor />
+        <LegendaAba aba={aba} />
         <div className="doc-topo__acoes">
           {podeEditar && (
             <button type="button" className="btn btn--primario" disabled={!painel} onClick={() => anexar.current?.escolher()}>

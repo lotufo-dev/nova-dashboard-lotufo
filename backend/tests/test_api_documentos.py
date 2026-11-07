@@ -266,3 +266,15 @@ def test_anexar_folha_de_empresa_desconhecida_cai_na_fila_humana_sem_gravar(clie
     c = db.get_conn()
     assert c.execute("SELECT COUNT(*) FROM regularidades").fetchone()[0] == 0
     c.close()
+
+
+def test_anexar_folha_que_cita_duas_empresas_nao_adivinha(client_admin, monkeypatch):
+    # folha do consorcio com a lider no cabecalho: o nome mais longo nao decide, cai na fila humana
+    c = db.get_conn()
+    c.execute("INSERT INTO entidades (id, nome, cnpj, papel, nome_curto) VALUES "
+              "(2, 'Consórcio Integra BRT', '31200303000181', 'consorcio', 'Integra BRT')")
+    c.commit(); c.close()
+    _texto(monkeypatch, "CONSÓRCIO INTEGRA BRT LOTUFO ENGENHARIA E CONSTRUÇÕES LTDA 4.001.00108/2026 Per:0 Chapa - Nome")
+    r = client_admin.post("/api/documentos/anexar/ler", files=_arq()).json()
+    assert (r["ok"], r["motivo"]) == (False, "regularidade-sem-empresa")
+    assert client_admin.post("/api/documentos/anexar", files=_arq()).status_code == 422

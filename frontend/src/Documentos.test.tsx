@@ -67,9 +67,9 @@ test("aba Regularidade: só quem tem folha, seis meses com o estado de cada um",
   expect(l.getAllByRole("img").map(i => i.textContent)).toEqual([
     "03/2026: faltando", "04/2026: faltando", "05/2026: faltando", "06/2026: anexada", "07/2026: faltando", "08/2026: faltando",
   ]);
-  l.getByText("última: 06/2026, anexada em 08/07/2026");
+  l.getByText("última: junho, 08/07");
   screen.getByText(/Não exigida: .*Beta Ltda/);
-  screen.getByText("08/2026 esperada a partir de 10/09.");
+  screen.getByText("Agosto esperada a partir de 10/09.");
   expect(l.getAllByRole("img")[3].closest("a")!.getAttribute("href")).toBe("/api/documentos/regularidades/9/arquivo");
 });
 
@@ -88,25 +88,32 @@ test("aba Garantias: por órgão, com a contagem, e os cinco chips por obra", as
     "SINFRA · 2 obras", "MTPAR · 1 obra", "Prefeituras · 1 obra",
   ]);
   const alfa = within(screen.getByText("Obra Alfa").closest("li")!);
-  alfa.getByText("AP-9"); alfa.getByText("05/10/2026"); alfa.getByText("sim"); alfa.getByText("ART-1"); alfa.getByText("99001");
+  alfa.getByText("AP-9"); alfa.getByText("05/10/2026"); alfa.getByText("sim"); alfa.getByText("registrada"); alfa.getByText("registrado");
   const delta = within(screen.getByText("Obra Delta").closest("li")!);
-  delta.getByText("sem registro");
-  delta.getByText("não, até 31/03/2027");
-  expect(delta.getByText("não, até 31/03/2027").closest(".doc-chip")!.className).toContain("doc-chip--critico");
+  expect(delta.getAllByText("sem registro")).toHaveLength(2);     // apólice e ART
+  expect(delta.getByText("não, até 31/03/2027").closest(".doc-chip")!.className).toContain("doc-chip--breve");
   expect(delta.getByText("01/09/2026").closest(".doc-chip")!.className).toContain("doc-chip--critico");
-  expect(within(screen.getByText("Obra Beta").closest("li")!).getAllByText("—").length).toBe(4);   // sem garantia: valida, cobre, ART, CNO
+  expect(within(screen.getByText("Obra Beta").closest("li")!).getAllByText("sem registro").length).toBe(5);   // sem garantia: tudo sem registro
 });
 
 test("grupo grande mostra as primeiras obras e '+N obras'", async () => {
-  const mais = Array.from({ length: 7 }, (_, i) => ({ contrato_id: 100 + i, obra: `Obra X${i}`, entidade_id: 1, garantia: null,
+  const mais = Array.from({ length: 11 }, (_, i) => ({ contrato_id: 100 + i, obra: `Obra X${i}`, entidade_id: 1, garantia: null,
     orgao: "SES", art: null, cno: null, cobre_execucao: { cobre: null, ate: null } }));
   const { api } = await import("./api");
   vi.mocked(api).mockImplementationOnce(async () => ({ ...(await import("./documentosTeste")).PAINEL, contratos: mais }));
   render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
   await screen.findByText("Obra X0");
-  expect(screen.queryByText("Obra X5")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "+2 obras" }));
-  screen.getByText("Obra X6");
+  expect(screen.queryByText("Obra X8")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "+3 obras" }));
+  screen.getByText("Obra X10");
+});
+
+test("a legenda muda com a aba", async () => {
+  render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
+  await screen.findByText("Obra Alfa");
+  screen.getByText("não cobre");
+  screen.getByText("vencida ou sem registro");
+  expect(screen.queryByText("aguardando o DP")).toBeNull();
 });
 
 test("a aba escolhida vai para a URL", async () => {
@@ -172,11 +179,11 @@ test("Anexar PDF: a folha do DP aparece como regularidade e grava pelo endpoint 
 
 test("Anexar PDF: folha de empresa desconhecida cai na fila humana como recusada", async () => {
   vi.mocked(apiForm).mockResolvedValueOnce({ ok: false, motivo: "regularidade-sem-empresa", digitavel: false,
-    mensagem: "Folha do DP de 08/2026, mas a empresa não aparece no cadastro: anexe pela página da empresa." });
+    mensagem: "Folha do DP de 08/2026: empresa não identificada no cadastro." });
   render(<Documentos usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   fireEvent.change(screen.getByLabelText("Escolher PDFs para anexar"), { target: { files: [pdf("folha.pdf")] } });
-  expect((await screen.findAllByText(/a empresa não aparece no cadastro/)).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText(/empresa não identificada/)).length).toBeGreaterThan(0);
   screen.getByRole("button", { name: "Descartar" });
 });
 
