@@ -109,13 +109,19 @@ describe("administração", () => {
       "medicao.remover_teste", "medicao.planilha_envio", "medicao.planilha_peca",
       "medicao.valor_atestado", "medicao.valor_protocolado", "nf.alocar", "nf.desalocar", "nota.conferencia", "nota.confirmacao",
       "nota.justificar", "nota.manual", "notas.envio_externo", "pleito.anexo", "pleito.anexo_removido", "pleito.assinado",
-      "pleito.criar", "pleito.descartar", "pleito.enviar", "pleito.montar", "protocolo.assinado", "protocolo.criar",
+      "pleito.criar", "pleito.curva_s", "pleito.curva_s_removida", "pleito.descartar", "pleito.enviar", "pleito.montar", "protocolo.assinado", "protocolo.criar",
       "protocolo.descartar", "protocolo.enviar", "protocolo.link", "protocolo.link_removido", "protocolo.montar",
       "protocolo.numero_orgao", "protocolo.peca", "protocolo.peca_removida", "protocolo.siga", "regularidade.competencia_corrigida",
-      "regularidade.registrar", "rm.sincronizacao", "siga.vinculo", "usuario.atualizar", "usuario.criar", "usuario.desbloquear",
+      "regularidade.registrar", "rm.sincronizacao", "seguranca.alerta", "seguranca.alerta_resolvido", "seguranca.sentinela",
+      "seguranca.sentinela.ponto", "siga.vinculo", "usuario.atualizar", "usuario.criar", "usuario.desbloquear",
       "usuario.senha_redefinida", "usuario.senha_trocada"];
     expect(acoes.filter(a => /[._]/.test(rotuloAcao(a)) || rotuloAcao(a) === a)).toEqual([]);
     expect(rotuloAcao("frc.gerar")).toBe("FRC gerada");
+    expect(rotuloAcao("seguranca.alerta")).toBe("Alerta de segurança");          // issue #422
+    expect(rotuloAcao("seguranca.sentinela")).toBe("Alerta da sentinela");          // issue #456
+    expect(rotuloAcao("seguranca.sentinela.ponto")).toBe("Sentinela: ponto de leitura do log");
+    expect(rotuloAcao("pleito.curva_s")).toBe("Curva S do pleito gerada");          // issue #293
+    expect(rotuloAcao("pleito.curva_s_removida")).toBe("Curva S do pleito retirada");
     expect(rotuloAcao("medicao.valor_atestado")).toBe("Atestado alterado");
     expect(rotuloAcao("envio.liberar")).toBe("Envio liberado à mão");
     expect(rotuloAcao("siga.vinculo")).toBe("Processo do SIGA ligado ao protocolo ou à medição");   // #327, #328
@@ -123,6 +129,7 @@ describe("administração", () => {
     expect(rotuloAcao("medicao.recebida_com_diferenca")).toBe("Recebida com diferença dentro da tolerância");   // #35
     expect(rotuloAcao("medicao.planilha_envio")).toBe("Planilha/carta enviada ao protocolo");   // #282
     expect(rotuloAcao("medicao.planilha_peca")).toBe("Peça da planilha/carta");
+    expect(rotuloAcao("medicao.sem_boletim")).toBe("Espelho gerado sem boletim");   // #284
     expect(rotuloAcao("algo.novo_aqui")).toBe("Algo novo aqui");
   });
 

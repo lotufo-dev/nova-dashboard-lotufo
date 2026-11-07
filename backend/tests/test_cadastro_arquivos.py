@@ -242,6 +242,76 @@ def test_excecao_de_documentos_no_contrato(tmp_path):
     assert ca.preparar(_escrever(tmp_path))["contratos"][0]["documentos"] is None
 
 
+# --- issue #462: peca que vai no oficio assinado --------------------------------------------------
+
+ORGAO_PECAS = {**ORGAO, "pecas": [{"tipo": "boletim", "rotulo": "Memória de cálculo", "exigida": True, "no_oficio": True},
+                                  {"tipo": "cronograma", "rotulo": "Cronograma físico-financeiro"}]}
+
+
+def test_no_oficio_da_peca_do_orgao_e_booleano(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path / "a", orgaos=[ORGAO_PECAS]))
+    assert [p.get("no_oficio") for p in cad["orgaos"][0]["regras"]["pecas"]] == [True, None]
+    ruim = {**ORGAO, "pecas": [{"tipo": "boletim", "rotulo": "Memória de cálculo", "no_oficio": "sim"}]}
+    erros = _erros(_escrever(tmp_path / "b", orgaos=[ruim]))
+    assert "orgaos.yaml[0]: pecas[0].no_oficio: use true ou false" in erros
+    planilha = {**ORGAO, "pecas": [{"tipo": "planilha", "rotulo": "Planilha editável", "solto": True, "no_oficio": True}]}
+    erros = _erros(_escrever(tmp_path / "c", orgaos=[planilha]))
+    assert any(e.startswith("orgaos.yaml[0]: pecas[0].no_oficio: a planilha editável") for e in erros)
+
+
+def test_pecas_no_oficio_do_contrato(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path / "a", orgaos=[ORGAO_PECAS],
+                                contratos=[{**CONTRATO, "pecas_no_oficio": ["cronograma"]}]))
+    assert cad["contratos"][0]["pecas_no_oficio"] == ["cronograma"]
+    cad = ca.preparar(_escrever(tmp_path / "b", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": []}]))
+    assert cad["contratos"][0]["pecas_no_oficio"] == []
+    # sem a chave: segue o orgao (None, nao lista vazia)
+    assert ca.preparar(_escrever(tmp_path / "c", orgaos=[ORGAO_PECAS]))["contratos"][0]["pecas_no_oficio"] is None
+    erros = _erros(_escrever(tmp_path / "d", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": ["fotos"]}]))
+    assert "contratos/mt-402.yaml: pecas_no_oficio: o órgão sinfra-suef1 não pede fotos" in erros
+    for ruim in ("cronograma", ["cronograma", "cronograma"], ["video"], ["planilha"]):
+        erros = _erros(_escrever(tmp_path / "e", orgaos=[ORGAO_PECAS], contratos=[{**CONTRATO, "pecas_no_oficio": ruim}]))
+        assert any(e.startswith("contratos/mt-402.yaml: pecas_no_oficio:") for e in erros), ruim
+
+
+def test_no_oficio_recusa_peca_solta_familia_fora_da_sinfra_e_tipo_repetido(tmp_path):
+    """Gate Sol (PR #473): a marca e' por tipo e so' da SINFRA; solta e no oficio ao mesmo tempo nao fazem sentido."""
+    def erros_de(pecas, familia="sinfra", pasta="x"):
+        return _erros(_escrever(tmp_path / pasta, orgaos=[{**ORGAO, "familia": familia, "pecas": pecas}]))
+
+    marcada = {"tipo": "boletim", "rotulo": "Memória de cálculo", "exigida": True, "no_oficio": True}
+    assert any("pecas[0].no_oficio: a peça marcada solto: true" in e
+               for e in erros_de([{**marcada, "solto": True}], pasta="a"))
+    assert any("pecas[0].no_oficio: só vale na família sinfra" in e for e in erros_de([marcada], "ses", "b"))
+    reajuste = {"tipo": "outro", "rotulo": "Planilha de reajuste", "exigida": True, "naturezas": ["reajuste"]}
+    execucao = {"tipo": "outro", "rotulo": "Relatório", "no_oficio": True, "naturezas": ["execucao"]}
+    assert any("pecas[1].no_oficio: o tipo outro aparece mais de uma vez" in e
+               for e in erros_de([reajuste, execucao], pasta="c"))
+    # tipo repetido sem a marca continua valendo, como antes
+    ca.preparar(_escrever(tmp_path / "d", orgaos=[{**ORGAO, "pecas": [reajuste, {**execucao, "no_oficio": False}]}]))
+
+
+def test_pecas_no_oficio_do_contrato_segue_as_mesmas_restricoes(tmp_path):
+    def erros_de(orgao, pasta):
+        return _erros(_escrever(tmp_path / pasta, orgaos=[orgao], contratos=[{**CONTRATO, "pecas_no_oficio": ["fotos"]}]))
+
+    fotos = {"tipo": "fotos", "rotulo": "Registro fotográfico"}
+    onde = "contratos/mt-402.yaml: pecas_no_oficio: "
+    assert any(e.startswith(onde + "a peça marcada solto: true")
+               for e in erros_de({**ORGAO, "pecas": [{**fotos, "solto": True}]}, "a"))
+    assert any(e.startswith(onde + "só vale na família sinfra")
+               for e in erros_de({**ORGAO, "familia": "prefeitura", "pecas": [fotos]}, "b"))
+    assert any(e.startswith(onde + "o tipo fotos aparece mais de uma vez")
+               for e in erros_de({**ORGAO, "pecas": [fotos, {**fotos, "rotulo": "Fotos do canteiro"}]}, "c"))
+
+
+def test_cadastro_de_exemplo_poe_a_memoria_no_oficio(tmp_path):
+    from tests.conftest import CADASTRO_EXEMPLO
+    pecas = {p["tipo"]: p for p in ca.preparar(CADASTRO_EXEMPLO)["orgaos"][0]["regras"]["pecas"]}
+    assert pecas["boletim"]["no_oficio"] is True and pecas["boletim"]["exigida"] is True
+    assert not pecas["fotos"].get("no_oficio")
+
+
 # --- bloco 5: cartas, pecas do orgao, CNO e dados do fiscal ---------------------------------------
 
 def test_cartas_ausente_passa_e_familia_ou_timbre_invalidos_sao_erro(tmp_path):
@@ -835,6 +905,35 @@ def test_ciclo_do_aditivo_fora_do_intervalo_ou_do_formato_e_erro(tmp_path, ciclo
     assert any("instrumentos[ta-08].ciclo" in e and trecho in e for e in erros), erros
 
 
+@pytest.mark.parametrize("base, data, ciclo, trecho", [
+    ("2021-10", "2026-10-20", 2021, "de 2022 a 2026"),        # o ano da propria data-base
+    ("2021-10", "2026-10-20", "2025-99", "quatro dígitos"),   # truncado
+    ("2023-04", "2026-03-15", 2026, "de 2024 a 2025"),        # termo de marco, aniversario em abril: o 2026 nao chegou
+    ("2023-04", "2026-03-15", 2027, "de 2024 a 2025"),        # ciclo futuro
+])
+def test_ciclo_impossivel_do_aditivo_e_recusado_com_o_intervalo(tmp_path, base, data, ciclo, trecho):
+    # issue #410: criterios de aceite, com a data-base e a data do termo de cada caso
+    c = {**CONTRATO, "datas_base": [{"mes": base, "indice": "setorial FGV/DNIT"}],
+         "instrumentos": [{**TA_REAJ, "data": data, "ciclo": ciclo}]}
+    erros = _erros(_escrever(tmp_path, contratos=[c]))
+    assert any("instrumentos[ta-08].ciclo" in e and trecho in e for e in erros), erros
+
+
+def test_duas_correcoes_de_reajuste_do_mesmo_aditivo_sao_erro(tmp_path):
+    # issue #410 (gate Sol, rodada 1, PR #452): cada termo tem no maximo uma correcao de valor; a outra corrige a
+    # correcao (cadeia)
+    ta2 = {**TA_REAJ, "chave": "ta-09", "data": "2026-10-25", "corrige": "ta-08"}
+    ta3 = {**TA_REAJ, "chave": "ta-10", "data": "2026-10-30", "corrige": "ta-08"}
+    erros = _erros(_escrever(tmp_path / "par", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, ta3]}]))
+    assert any("ta-10 e ta-09 corrigem ta-08" in e for e in erros), erros
+    cadeia = {**ta3, "corrige": "ta-09"}
+    ca.preparar(_escrever(tmp_path / "cadeia", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, cadeia]}]))
+    # o aditivo de prazo que tambem corrige o ta-08 nao conta (o motor nao o le)
+    prazo = {"chave": "ta-11", "tipo": "aditivo_prazo", "data": "2026-10-31", "nova_execucao_fim": "2027-06-30",
+             "corrige": "ta-08"}
+    ca.preparar(_escrever(tmp_path / "prazo", contratos=[{**CONTRATO, "instrumentos": [TA_REAJ, ta2, prazo]}]))
+
+
 def test_ciclo_do_aditivo_nas_pontas_do_intervalo_e_aceito(tmp_path):
     for ciclo in (2024, 2026):
         c = {**CONTRATO, "instrumentos": [{**TA_REAJ, "ciclo": ciclo}]}
@@ -922,3 +1021,78 @@ def test_apostilamento_sem_ciclo_nem_eficacia_avisa_o_ano_da_data(tmp_path):
 
 def test_apostilamento_com_ciclo_nao_avisa(tmp_path):
     assert _avisos_ciclo(tmp_path, _apostilamento()) == []
+
+
+# Issue #489: custo por obra -- grupos da planilha do orgao, tarefas do RM e regra do custo sem tarefa
+CUSTO = {"projeto_rm": "GL.C01.P001",
+         "grupos": [{"nome": "Terraplanagem", "tarefas": ["001.03", "001.04"], "itens_planilha": ["2."],
+                     "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+                    {"nome": "Drenagem", "tarefas": ["001.05"], "itens_planilha": ["3.", "4.1"]}]}
+
+
+def test_custo_normaliza_na_ordem_com_os_padroes(tmp_path):
+    c = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": CUSTO}]))["contratos"][0]
+    assert c["custo"] == {
+        "projeto_rm": "GL.C01.P001", "nao_e_custo": ["2.02", "2.01.22"], "sem_tarefa": "proporcional",
+        "grupos": [{"nome": "Terraplanagem", "tarefas": ["001.03", "001.04"], "itens_planilha": ["2."],
+                    "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+                   {"nome": "Drenagem", "tarefas": ["001.05"], "itens_planilha": ["3.", "4.1"], "item_chave": None}]}
+
+
+def test_custo_ausente_fica_vazio_e_nao_e_custo_explicito_vale(tmp_path):
+    assert ca.preparar(_escrever(tmp_path / "a"))["contratos"][0]["custo"] is None
+    c = ca.preparar(_escrever(tmp_path / "b", contratos=[{**CONTRATO, "custo": {**CUSTO, "nao_e_custo": ["2.03"],
+                                                                                   "sem_tarefa": "proporcional"}}]))
+    assert c["contratos"][0]["custo"]["nao_e_custo"] == ["2.03"]
+
+
+def test_custo_tarefa_em_dois_grupos_e_recusada_com_arquivo_grupo_e_tarefa(tmp_path):
+    grupos = [CUSTO["grupos"][0], {**CUSTO["grupos"][1], "tarefas": ["001.05", "001.03"]}]
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": grupos}}]))
+    assert ("contratos/mt-402.yaml: custo.grupos[1].tarefas: a tarefa 001.03 do grupo Drenagem já está no grupo "
+            "Terraplanagem") in erros
+
+
+@pytest.mark.parametrize("troca, campo", [
+    ({"grupos": [{"tarefas": ["001.03"], "itens_planilha": ["2."]}]}, "custo.grupos[0].nome"),
+    ({"grupos": [{"nome": "A", "tarefas": ["001.03"], "itens_planilha": ["2."]},
+                 {"nome": "B", "tarefas": ["001.04"], "itens_planilha": ["2."]}]}, "custo.grupos[1].itens_planilha"),
+    ({"grupos": [{"nome": "A", "tarefas": ["1"], "itens_planilha": ["2."]},
+                 {"nome": "A", "tarefas": ["2"], "itens_planilha": ["3."]}]}, "custo.grupos[1].nome"),
+    ({"sem_tarefa": "por_area"}, "custo.sem_tarefa"),
+    ({"projeto_rm": ""}, "custo.projeto_rm"),
+    ({"grupos": []}, "custo.grupos"),
+    ({"grupos": [{"nome": "A", "tarefas": [1.03], "itens_planilha": ["2."]}]}, "custo.grupos[0].tarefas"),
+    ({"nao_e_custo": [2.02]}, "custo.nao_e_custo"),
+    ({"grupos": [{"nome": "A", "tarefas": ["1"], "itens_planilha": ["2."], "item_chave": {"codigo": "2.1"}}]},
+     "custo.grupos[0].item_chave"),
+    # code-review: prefixo de um grupo dentro do de outro (o codigo cairia nos dois)
+    ({"grupos": [{"nome": "A", "tarefas": ["001.03"], "itens_planilha": ["2."]},
+                 {"nome": "B", "tarefas": ["001.03.01"], "itens_planilha": ["3."]}]}, "custo.grupos[1].tarefas"),
+    ({"grupos": [{"nome": "A", "tarefas": ["1"], "itens_planilha": ["2."]},
+                 {"nome": "B", "tarefas": ["2"], "itens_planilha": ["2.1"]}]}, "custo.grupos[1].itens_planilha"),
+    # code-review: campo com erro de digitacao nao vira grupo vazio calado; nome tem que ser texto
+    ({"grupos": [{"nome": "A", "tarefa": ["1"], "itens_planilha": ["2."]}]}, "custo.grupos[0].tarefa"),
+    ({"nao_e_custos": ["2.02"]}, "custo.nao_e_custos"),
+    ({"grupos": [{"nome": True, "tarefas": ["1"], "itens_planilha": ["2."]}]}, "custo.grupos[0].nome"),
+    # code-review: o item-chave e' um item do proprio grupo
+    ({"grupos": [{"nome": "A", "tarefas": ["1"], "itens_planilha": ["3."],
+                  "item_chave": {"codigo": "2.1", "unidade": "m³"}}]}, "custo.grupos[0].item_chave"),
+])
+def test_custo_invalido_e_recusado_com_o_campo(tmp_path, troca, campo):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, **troca}}]))
+    assert any(e.startswith(f"contratos/mt-402.yaml: {campo}:") for e in erros), erros
+
+
+def test_custo_prefixos_parecidos_sem_sobreposicao_e_sem_tarefa_vazio_passam(tmp_path):
+    """`001.1` nao contem `001.10` (compara por segmento); `sem_tarefa:` vazio fica com o padrao."""
+    grupos = [{"nome": "A", "tarefas": ["001.1"], "itens_planilha": ["2."]},
+              {"nome": "B", "tarefas": ["001.10"], "itens_planilha": ["20."]}]
+    c = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": grupos,
+                                                                           "sem_tarefa": None}}]))
+    assert c["contratos"][0]["custo"]["sem_tarefa"] == "proporcional"
+
+
+def test_custo_que_nao_e_mapa_e_recusado(tmp_path):
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": ["x"]}]))
+    assert any(e.startswith("contratos/mt-402.yaml: custo:") for e in erros), erros

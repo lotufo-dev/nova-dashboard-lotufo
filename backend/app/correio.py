@@ -8,6 +8,7 @@ rascunho e subir anexo acima de 3 MB; nenhuma funcao deste modulo lista ou le me
 import base64
 import datetime
 import hashlib
+import html
 import json
 import logging
 import os
@@ -22,7 +23,7 @@ import zlib
 from contextlib import contextmanager
 from pathlib import Path
 
-from app import arquivos, auditoria, db, graph
+from app import arquivos, auditoria, db, graph, instalacao
 
 log = logging.getLogger("app.correio")
 
@@ -65,9 +66,51 @@ def conectado(usuario_id: int) -> bool:
         return False
 
 
+ARQUIVO_REDIRECIONAR = "email-redirecionar.txt"
+
+
+class RedirecionamentoInvalido(graph.ErroGraph):
+    """O redirecionamento de teste esta' ligado e o endereco nao se le: nada sai, para o e-mail nao ir ao destinatario
+    de verdade por engano."""
+
+
+def _fonte_do_redirecionamento() -> str | None:
+    """O texto cru do redirecionamento: a variavel `DASH_EMAIL_REDIRECIONAR` ou a primeira linha de
+    `<raiz>/segredos/email-redirecionar.txt` (a raiz e' a pasta acima de `dados`, como na instalacao). None = desligado."""
+    bruto = os.environ.get("DASH_EMAIL_REDIRECIONAR")
+    if bruto is not None and bruto.strip():
+        return bruto.strip()
+    try:
+        arquivo = db.db_path().parent.parent / "segredos" / ARQUIVO_REDIRECIONAR
+        if not arquivo.is_file():
+            return None
+        linhas = arquivo.read_text(encoding="utf-8-sig").strip().splitlines()
+    except (OSError, UnicodeDecodeError, RuntimeError):
+        return ""          # o arquivo existe e nao se le: ligado e invalido
+    return linhas[0].strip() if linhas else ""
+
+
+def redirecionamento_ativo() -> bool:
+    """Ha' redirecionamento de teste configurado (valido ou nao)? E' o que a faixa da tela mostra."""
+    return _fonte_do_redirecionamento() is not None
+
+
+def redirecionamento() -> str | None:
+    """Teste em producao (pedido do dono, 06/11/2026): com o redirecionamento ligado, TODO e-mail do sistema vai so'
+    para este endereco, com "[TESTE]" no assunto e os destinatarios de verdade escritos no alto do corpo. Lido a cada
+    envio: apagar o arquivo desliga, sem reiniciar. Ligado com endereco que nao se le, o envio e' recusado."""
+    fonte = _fonte_do_redirecionamento()
+    if fonte is None:
+        return None
+    if not _EMAIL.fullmatch(fonte):
+        raise RedirecionamentoInvalido("Redirecionamento de e-mail de teste mal configurado: nada foi enviado")
+    return fonte
+
+
 def registrar_envio(conn, usuario_id: int, tipo: str, remetente: str, para: list[str],
                     copia: list[str], assunto: str, mensagem_id: str | None,
-                    anexos: list[tuple[str, bytes]], cco: list[str] | None = None) -> int:
+                    anexos: list[tuple[str, bytes]], cco: list[str] | None = None,
+                    redirecionado_para: str | None = None) -> int:
     cco = list(cco or [])
     with db.mutacao(conn):
         cur = conn.execute(
@@ -84,7 +127,9 @@ def registrar_envio(conn, usuario_id: int, tipo: str, remetente: str, para: list
             resumo.append({"nome": nome, "tamanho": len(dados), "sha256": h})
         auditoria.registrar(conn, usuario_id, "correio.envio", "envio", eid, None,
                             {"tipo": tipo, "remetente": remetente, "para": para, "copia": copia, "cco": cco,
-                             "assunto": assunto, "mensagem_id": mensagem_id, "anexos": resumo})
+                             "assunto": assunto, "mensagem_id": mensagem_id, "anexos": resumo,
+                             # teste em producao: o e-mail NAO foi aos destinatarios acima, foi so' para este endereco
+                             **({"redirecionado_para": redirecionado_para} if redirecionado_para else {})})
     return eid
 
 
@@ -256,8 +301,11 @@ def cliente(usuario_id: int, email_usuario: str = ""):
 def enviar_e_registrar(conn, usuario: dict, tipo: str, para: list[str], copia: list[str], assunto: str,
                        corpo_html: str, anexos: list[tuple[str, bytes]], cco: list[str] | None = None) -> int:
     """Envia e SO' ENTAO registra: falha de envio nao deixa rastro de envio. Com assinatura cadastrada, ela vai
-    no fim do corpo como imagem (anexo embutido, como o Outlook faz)."""
+    no fim do corpo como imagem (anexo embutido, como o Outlook faz). Instalacao nao autorizada (issue #417): recusa
+    antes de tudo, inclusive no envio que nao passa pela reserva (teste de envio, cobranca de certidoes)."""
+    instalacao.exigir_envio()
     cco = list(cco or [])
+    destino_teste = redirecionamento()      # antes de tudo: mal configurado, nada sai
     c = cliente(usuario["id"], usuario.get("email", ""))
     remetente = c.remetente()
     # Quem envia nao vai em copia de si mesmo: compara com a conta do Outlook, nao com o login (09/10/2026).
@@ -270,7 +318,16 @@ def enviar_e_registrar(conn, usuario: dict, tipo: str, para: list[str], copia: l
         corpo_html += (f'<p>&nbsp;</p><p><img src="cid:{ASSINATURA_CID}" alt="Assinatura" '
                        f'style="max-width:600px"></p>')
         inline.append((f"assinatura.{'png' if tipo_img == 'image/png' else 'jpg'}", dados, ASSINATURA_CID))
-    mensagem_id = c.enviar(para, copia, assunto, corpo_html, anexos, cco=cco, inline=inline)
+    if destino_teste:
+        # Redirecionamento de teste: vai SO' para o endereco de teste. O registro guarda os destinatarios de verdade
+        # (sao eles que o proximo envio propoe) e a auditoria diz para onde o e-mail foi de fato.
+        lista = lambda nome, xs: f"{nome}: {html.escape(', '.join(xs))}" if xs else None
+        quem = "; ".join(filter(None, (lista("para", para), lista("cópia", copia), lista("cco", cco))))
+        aviso = ('<p style="border:1px solid #B45309;background:#FFFBEB;padding:8px 12px">'
+                 f"<strong>TESTE da Dashboard Lotufo: este e-mail foi redirecionado.</strong> Iria {quem or 'sem destinatário'}.</p>")
+        mensagem_id = c.enviar([destino_teste], [], f"[TESTE] {assunto}", aviso + corpo_html, anexos, cco=[], inline=inline)
+    else:
+        mensagem_id = c.enviar(para, copia, assunto, corpo_html, anexos, cco=cco, inline=inline)
     # O e-mail SAIU: daqui para baixo nenhuma falha pode virar "tente de novo" (A-03, 10/10/2026). Banco travado
     # alem do busy_timeout ganha mais duas chances; o que ainda falhar vira EnvioNaoRegistrado.
     for tentativa in range(3):
@@ -278,7 +335,7 @@ def enviar_e_registrar(conn, usuario: dict, tipo: str, para: list[str], copia: l
             time.sleep(1)
         try:
             return registrar_envio(conn, usuario["id"], tipo, remetente, para, copia, assunto, mensagem_id, anexos,
-                                   cco=cco)
+                                   cco=cco, redirecionado_para=destino_teste)
         except Exception as e:
             erro = e
             if not db.eh_lock(e):
@@ -440,19 +497,65 @@ def gravar_assinatura(conn, usuario_id: int, dados: bytes) -> None:
     if not (_png_integro(dados) if mime == "image/png" else _jpg_integro(dados)):
         raise ValueError("A imagem da assinatura está incompleta ou corrompida. Salve a imagem de novo e "
                          "suba outra vez.")
-    with db.mutacao(conn):
-        auditoria.registrar(conn, usuario_id, "correio.assinatura", "usuario", usuario_id, None,
-                            {"tamanho": len(dados), "sha256": hashlib.sha256(dados).hexdigest()})
-        _arquivo_assinatura(usuario_id).write_bytes(dados)
+    # temporario + rename (#441): o backup le a pasta sem trava, e o nome nao e' o sha256 (nada confere o conteudo);
+    # `write_bytes` direto truncaria a assinatura antes de escrever, e o backup poderia guardar a metade
+    destino = _arquivo_assinatura(usuario_id)
+    _limpar_temporarios_de_assinatura(destino.parent)
+    tmp = destino.with_name(f"{destino.name}.{os.getpid()}-{secrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_bytes(dados)
+        _evento_com_retentativa(conn, usuario_id, {"tamanho": len(dados), "sha256": hashlib.sha256(dados).hexdigest()},
+                                lambda: os.replace(tmp, destino), GRAVAR_ASSINATURA_OCUPADA)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+# `usuario-<id>.<pid>-<aleatorio>.tmp`: so' o temporario que `gravar_assinatura` cria
+_TMP_ASSINATURA = re.compile(r"usuario-\d+\.\d+-[0-9a-f]{8}\.tmp")
+_TMP_ASSINATURA_VELHO_SEG = 3600
+GRAVAR_ASSINATURA_OCUPADA = "Não foi possível gravar a assinatura agora; tente de novo"
+_TENTATIVAS_TROCA = (0.1, 0.2, 0.4, 0.8)    # ~1,5 s no total, so' com o arquivo ocupado
+
+
+def _limpar_temporarios_de_assinatura(pasta: Path) -> None:
+    """Sobra de gravacao interrompida (processo morto entre escrever e renomear): ninguem mais a renomeia."""
+    agora = time.time()
+    for sobra in pasta.glob("usuario-*.tmp"):
+        try:
+            if _TMP_ASSINATURA.fullmatch(sobra.name) and agora - sobra.stat().st_mtime > _TMP_ASSINATURA_VELHO_SEG:
+                sobra.unlink(missing_ok=True)
+        except OSError:
+            pass                # aberto por outra gravacao (ou ja' saiu): nao e' sobra
+
+
+REMOVER_ASSINATURA_OCUPADA = "Não foi possível tirar a assinatura agora; tente de novo"
+
+
+def _evento_com_retentativa(conn, usuario_id: int, depois: dict, mexer, recusa: str) -> None:
+    """Evento `correio.assinatura` e mudanca no arquivo (`mexer`) na mesma transacao. `os.replace`/`unlink` sobre a
+    assinatura que o backup esta' lendo falha com PermissionError no Windows (arquivo aberto): a transacao inteira e'
+    desfeita (o rollback solta a trava de escrita do banco) e so' entao se espera para tentar de novo (#479: dormir
+    dentro dela seguraria todas as outras gravacoes). O que persiste vira ValueError em portugues (422)."""
+    for espera in (*_TENTATIVAS_TROCA, None):
+        try:
+            with db.mutacao(conn):
+                auditoria.registrar(conn, usuario_id, "correio.assinatura", "usuario", usuario_id, None, depois)
+                mexer()
+            return
+        except PermissionError:
+            if espera is None:
+                raise ValueError(recusa) from None
+            time.sleep(espera)
 
 
 def remover_assinatura(conn, usuario_id: int) -> None:
     arquivo = _arquivo_assinatura(usuario_id)
     if not arquivo.exists():
         return
-    with db.mutacao(conn):
-        auditoria.registrar(conn, usuario_id, "correio.assinatura", "usuario", usuario_id, None, {"removida": True})
-        arquivo.unlink()
+    # missing_ok: outra remocao simultanea ja' tirou, nao e' erro
+    _evento_com_retentativa(conn, usuario_id, {"removida": True}, lambda: arquivo.unlink(missing_ok=True),
+                            REMOVER_ASSINATURA_OCUPADA)
 
 
 # --- contatos para os destinatarios --------------------------------------------------------------------------

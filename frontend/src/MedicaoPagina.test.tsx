@@ -158,6 +158,64 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     fireEvent.click(screen.getByRole("menuitem", { name: "Liberar envio preso" }));
     expect(screen.getByRole("button", { name: "Liberar envio" })).toBeTruthy();
   });
+
+  it("#359: o aprovado mudou depois do espelho avisa, sem dizer glosa, e leva ao espelho", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: "aprovado_mudou" }] });
+    const { container } = pagina();
+    const link = await screen.findByRole("link", { name: "gere o espelho de novo" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#espelho");
+    const caixa = link.closest(".aviso")!;
+    expect(caixa.textContent).toContain("O aprovado mudou depois do espelho");
+    expect(container.textContent).not.toMatch(/glosa/i);
+  });
+
+  it("#359: o link do aviso abre o espelho mesmo com a âncora #espelho já na página", async () => {
+    window.history.replaceState(null, "", "/obras/1/medicoes/5#espelho");
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: "aprovado_mudou" }] });
+    pagina();
+    await screen.findByRole("heading", { name: "Espelho", level: 2 });
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Etapas da medição" })).getByRole("button", { name: /Etapa 3: Nota fiscal/ }));
+    await screen.findByRole("heading", { name: "Nota fiscal", level: 2 });
+    fireEvent.click(screen.getByRole("link", { name: "gere o espelho de novo" }));
+    expect(await screen.findByRole("heading", { name: "Espelho", level: 2 })).toBeTruthy();
+  });
+
+  it("#359: na nota emitida o aviso fica e leva às notas, sem pedir o espelho", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida", espelho_desatualizado: "nota_emitida" }] });
+    pagina();
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#notas");
+    expect(link.closest(".aviso")!.textContent).toContain("O aprovado mudou depois do espelho e a nota já foi emitida");
+    expect(screen.queryByRole("link", { name: "gere o espelho de novo" })).toBeNull();
+  });
+
+  it("#359: o espelho antigo que não se confere não diz que o aprovado mudou", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: "nao_conferido" }] });
+    pagina();
+    const link = await screen.findByRole("link", { name: "gere o espelho de novo" });
+    expect(link.closest(".aviso")!.textContent).toContain("Não foi possível conferir o valor do espelho antigo");
+    expect(screen.queryByText(/O aprovado mudou/)).toBeNull();
+  });
+
+  it("#359: no par, uma linha por medição: a nota emitida da execução não esconde o “gere de novo” do reajuste", async () => {
+    const EXE = { ...MEDICAO, estado: "nota_emitida", espelho_desatualizado: "nota_emitida" };
+    const REAJ = { ...MEDICAO, id: 6, tipo: "reajuste", estado: "espelho_enviado", espelho_desatualizado: "aprovado_mudou" };
+    responder({ "/api/contratos/1/medicoes": [EXE, REAJ] });
+    pagina();
+    await screen.findByRole("heading", { name: "23ª Medição + Reajuste", level: 1 });
+    const gerar = screen.getByRole("link", { name: "gere o espelho de novo" });
+    expect(gerar.closest(".aviso")!.textContent).toContain("Reajuste da 23ª Medição: o aprovado mudou depois do espelho, ");
+    const notas = screen.getByRole("link", { name: "ver as notas" });
+    expect(notas.closest(".aviso")!.textContent).toContain("23ª Medição: o aprovado mudou depois do espelho e a nota já foi emitida, ");
+    expect(document.querySelectorAll(".aviso")).toHaveLength(2);
+  });
+
+  it("#359: sem o aprovado mudado, nada de aviso do espelho", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: null }] });
+    pagina();
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByText(/O aprovado mudou depois do espelho/)).toBeNull();
+  });
 });
 
 describe("Página da medição: as etapas se atualizam entre si", () => {
@@ -519,8 +577,8 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     expect(container.querySelector("[data-espelho]")).toBeNull();
   });
 
-  it("com a planilha/carta enviada: o cartão dela e o espelho logo abaixo (ponte até a #284)", async () => {
-    for (const estado of ["planilha_enviada"]) {
+  it("com a planilha/carta enviada, com ou sem o boletim: o cartão dela e o formulário do espelho abaixo", async () => {
+    for (const estado of ["planilha_enviada", "boletim_recebido"]) {
       responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado }] });
       const { container } = pagina();
       await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
@@ -592,6 +650,9 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "boletim_recebido" }] });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    // como na planilha enviada, o espelho espera o cartao conferir que nao ha' revisao pendente
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
     expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull();
   });
 

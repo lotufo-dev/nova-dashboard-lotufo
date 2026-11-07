@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import UltimosAcessos from "./Acessos";
 import { contar } from "./formato";
 import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
@@ -32,7 +33,10 @@ interface Usr { id: number; nome: string; email: string; perfil: string; ativo: 
 type Rodada = {
   id: number; disparo: string; estado: string; iniciado_em: string; terminado_em: string | null;
   nfs: number; baixas: number; alocacoes: number; sugestoes: number; recebimentos: number; erro: string | null;
+  // #488: linhas do custo por tarefa e da baixa de estoque; null quando a rodada nao trouxe (falha em custo_erro)
+  custo_tarefas?: number | null; estoque_baixas?: number | null; custo_erro?: string | null;
 };
+const contagem = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("pt-BR"));
 type StatusRm = {
   configurado: boolean; ultima_sincronizacao: string | null; ultimo_erro: string | null;
   em_andamento: boolean; rodadas: Rodada[];
@@ -59,6 +63,8 @@ type Backup = { ultimo_backup: string | null; tamanho_bytes: number | null; guar
 
 // Issue #330: /api/admin/saude. ultima_leitura = quando o monitor do SIGA mandou a leitura mais recente (nulo: nunca leu)
 type SaudeSiga = { ultima_leitura: string | null; atrasado: boolean; processos: number };
+// Issue #418: o bloco Seguranca da mesma rota, montado por app/seguranca.py; `data` e' o instante UTC do que aconteceu
+type ItemSeguranca = { nivel: string; mensagem: string; data: string };
 
 const ROTULO_ESTADO_RODADA: Record<string, string> = { success: "OK", failed: "Falhou", running: "Rodando" };
 // A auditoria chega em paginas dos mais recentes; "Carregar mais" traz as anteriores e os filtros correm sobre
@@ -194,6 +200,7 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                 <th scope="col" className="col-num">NFs</th><th scope="col" className="col-num">Baixas</th>
                 <th scope="col" className="col-num">Alocadas</th><th scope="col" className="col-num">Ambíguas</th>
                 <th scope="col" className="col-num">Recebidas</th>
+                <th scope="col" className="col-num">Custo por tarefa</th><th scope="col" className="col-num">Baixa de estoque</th>
               </tr>
             </thead>
             <tbody>
@@ -205,12 +212,15 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                   <td>
                     <SeloRodada estado={r.estado} />
                     {r.erro && <div className="campo__nota situacao__erro">{r.erro}</div>}
+                    {r.custo_erro && <div className="campo__nota situacao__erro">Custos e estoque não atualizados.</div>}
                   </td>
                   <td className="col-num num">{r.nfs.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.baixas.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.alocacoes.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.sugestoes.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.recebimentos.toLocaleString("pt-BR")}</td>
+                  <td className="col-num num">{contagem(r.custo_tarefas)}</td>
+                  <td className="col-num num">{contagem(r.estoque_baixas)}</td>
                 </tr>
               ))}
             </tbody>
@@ -341,6 +351,35 @@ function Backup({ b, aoGerar }: { b: Backup | null | undefined; aoGerar: () => v
   );
 }
 
+// itens: undefined = carregando; null = nao deu para ler. Sem item, so' o selo na cabeca, como o Backup em dia; o selo
+// diz "nenhum alerta" e nao "OK" (gate Sol S1): o bloco confere os alertas que conhece, nao a seguranca inteira.
+// `fora`: quantos itens mais antigos a API deixou fora da lista (ela devolve no maximo 20, gate Sol S3).
+function Seguranca({ itens, fora, aviso }: { itens: ItemSeguranca[] | null | undefined; fora: number; aviso?: string | null }) {
+  return (
+    <section className="cartao" aria-labelledby="titulo-seguranca">
+      <div className="cartao__cabeca cartao__cabeca--quebra">
+        <h2 className="cartao__titulo" id="titulo-seguranca">Segurança</h2>
+        {itens?.length === 0 && <Selo classe="selo--ok">nenhum alerta</Selo>}
+      </div>
+      {aviso && <p className="campo__nota">{aviso}</p>}
+      {(itens === undefined || itens === null || itens.length > 0) && (
+        <div className="cartao__corpo pilha pilha--curta">
+          {itens === undefined ? <p>Carregando…</p>
+            : itens === null ? <p className="campo__nota">Não foi possível ler a segurança; recarregue a página para tentar de novo.</p>
+            : <>
+                {itens.map(i => (
+                  <CaixaAviso key={`${i.data}-${i.mensagem}`} nivel={i.nivel === "atencao" ? "atencao" : "critico"}>
+                    {i.mensagem}, em {fmtDataHora(i.data)}.
+                  </CaixaAviso>
+                ))}
+                {fora > 0 && <p>Mais {contar(fora, "alerta anterior", "alertas anteriores")}.</p>}
+              </>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Saude() {
   const [status, setStatus] = useState<StatusRm | null>(null);
   // erroCarga: nao deu para ler o estado do RM; erro/concluida: o resultado de "Sincronizar agora"
@@ -351,6 +390,9 @@ function Saude() {
   // undefined = carregando; null = nao deu para ler
   const [b, setB] = useState<Backup | null | undefined>(undefined);
   const [siga, setSiga] = useState<SaudeSiga | null | undefined>(undefined);
+  const [seguranca, setSeguranca] = useState<ItemSeguranca[] | null | undefined>(undefined);
+  const [segurancaFora, setSegurancaFora] = useState(0);
+  const [avisoSentinela, setAvisoSentinela] = useState<string | null>(null);
   // depois de "Sincronizar agora", as contagens da reconciliacao sao lidas de novo
   const [versao, setVersao] = useState(0);
 
@@ -359,7 +401,10 @@ function Saude() {
   useEffect(() => {
     carregar();
     carregarBackup();
-    api<{ siga: SaudeSiga }>("/api/admin/saude").then(r => setSiga(r.siga)).catch(() => setSiga(null));
+    api<{ siga: SaudeSiga; seguranca?: ItemSeguranca[]; seguranca_fora?: number; sentinela?: { roda: boolean; mensagem: string | null } }>("/api/admin/saude")
+      // sem o campo nao ha' o que afirmar: "nao foi possivel ler", nunca o selo de quem conferiu e nao achou nada
+      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? null); setSegurancaFora(r.seguranca_fora ?? 0); setAvisoSentinela(r.sentinela?.mensagem ?? null); })
+      .catch(() => { setSiga(null); setSeguranca(null); });
   }, []);
 
   async function sincronizar() {
@@ -407,6 +452,7 @@ function Saude() {
       <div className="saude-lado">
         <ReconciliacaoResumo versao={versao} />
         <Backup b={b} aoGerar={carregarBackup} />
+        <Seguranca itens={seguranca} fora={segurancaFora} aviso={avisoSentinela} />
       </div>
     </div>
   );
@@ -670,6 +716,8 @@ function Usuarios({ eu }: { eu?: number }) {
   const [redefinir, setRedefinir] = useState<number | null>(null);
   const [senhaNova, setSenhaNova] = useState("");
   const [aviso, setAviso] = useState("");
+  // #418: a pessoa cujos ultimos acessos estao abertos (lidos so' ao abrir), embaixo da linha dela
+  const [acessosDe, setAcessosDe] = useState<number | null>(null);
   // o campo a que o erro da API se refere: fica com aria-invalid e aponta para a mensagem (N05-09)
   const campoErro = erroNovo ? campoDoErroDeUsuario(erroNovo) : null;
   const apontaErro = (campo: string) => campoErro === campo ? { "aria-invalid": true, "aria-describedby": "erro-novo-usuario" } : {};
@@ -735,14 +783,16 @@ function Usuarios({ eu }: { eu?: number }) {
                 <tr>
                   <th scope="col">Nome</th><th scope="col">E-mail</th><th scope="col">Perfil</th><th scope="col">Situação</th>
                   <th scope="col">Bloqueio</th>
-                  <th scope="col">Conta Microsoft</th><th scope="col"><span className="sr-only">Senha, ativar ou desativar</span></th>
+                  <th scope="col">Conta Microsoft</th><th scope="col"><span className="sr-only">Últimos acessos, senha, ativar ou desativar</span></th>
                 </tr>
               </thead>
               <tbody>
                 {usuarios.map((u, i) => {
                   const c = contas?.get(u.id);
+                  const aberto = acessosDe === u.id;
                   return (
-                    <tr key={u.id} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                    <Fragment key={u.id}>
+                    <tr className={`linha${i % 2 === 1 ? " par" : ""}`}>
                       <td>{u.nome}</td>
                       <td>{u.email}</td>
                       <td>{u.id === eu ? rotuloPerfil(u.perfil) : (
@@ -769,7 +819,12 @@ function Usuarios({ eu }: { eu?: number }) {
                       <td>{!u.ativo || contas === null ? "—" : c?.conectada ? (
                         <Selo classe="selo--ok">conectada</Selo>
                       ) : contas === undefined ? "…" : <Selo classe="">não conectada</Selo>}</td>
-                      <td>
+                      <td><div className="form-inline">
+                        <button type="button" className="btn btn--pequeno" aria-expanded={aberto}
+                                aria-controls={aberto ? `acessos-${u.id}` : undefined}
+                                onClick={() => setAcessosDe(aberto ? null : u.id)}>
+                          Últimos acessos<span className="sr-only"> de {u.nome}</span>
+                        </button>
                         {u.id === eu ? null
                           : redefinir === u.id ? (
                             <form className="form-inline" onSubmit={e => confirmarSenha(e, u)}>
@@ -800,8 +855,16 @@ function Usuarios({ eu }: { eu?: number }) {
                               </button>
                             </span>
                           )}
-                      </td>
+                      </div></td>
                     </tr>
+                    {aberto && (
+                      <tr className="linha">
+                        <td colSpan={7} id={`acessos-${u.id}`}>
+                          <UltimosAcessos url={`/api/admin/usuarios/${u.id}/acessos`} rotulo={`Últimos acessos de ${u.nome}`} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

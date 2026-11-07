@@ -817,6 +817,35 @@ def test_medicao_da_carga_do_historico_aparece_com_pedido_e_aprovado(client_admi
     assert d["atestado_em"] == "2025-05-20"
 
 
+# --- issue #284: boletim do orgao (evento de atesto com o PDF) ----------------------------------------------
+
+def _boletim(texto="Boletim SMO 14"):
+    from tests.conftest import _pdf_com_texto
+    return {"arquivo": ("boletim.pdf", _pdf_com_texto(texto), "application/pdf")}
+
+
+def _registrar_boletim(cl, mid, valor="12.000,01", data="2026-08-10", numero="SMO 14/2026", texto="Boletim SMO 14",
+                       **extra):
+    return cl.post(f"/api/medicoes/{mid}/boletim", files=_boletim(texto),
+                   data={"valor": valor, "data": data, "numero_orgao": numero, **extra})
+
+
+def _planilha_enviada(cl):
+    """Medicao com o pedido de R$ 12.345,67 (planilha/carta) e a planilha ja' enviada ao orgao."""
+    mid = _nova_planilha(cl, _contrato(cl)).json()["medicao_id"]
+    _no_estado(mid, "planilha_enviada")
+    return mid
+
+
+def _atestos(mid):
+    from app import db
+    conn = db.get_conn()
+    try:
+        return [dict(r) for r in conn.execute("SELECT * FROM medicao_atestos WHERE medicao_id=? ORDER BY id", (mid,))]
+    finally:
+        conn.close()
+
+
 # --- issue #283: planilha/carta enviada por fora e numero do SIGA ------------------------------------------
 
 EML_PLANILHA = (b"From: Engenharia <engenharia@exemplo.com.br>\r\nTo: protocolo@orgao-a.exemplo.com.br\r\n"
@@ -851,6 +880,163 @@ def _auditoria(acao):
             "SELECT antes, depois FROM audit_log WHERE acao=? ORDER BY id", (acao,))]
     finally:
         conn.close()
+
+
+def test_registrar_boletim_grava_o_evento_e_mostra_pedido_aprovado_e_diferenca(client_admin):
+    mid = _planilha_enviada(client_admin)
+    r = _registrar_boletim(client_admin, mid, meio="smo")
+    assert r.status_code == 201, r.text
+    corpo = r.json()
+    # pedido 12.345,67, aprovado 12.000,01 (centavo impar): diferenca de -345,66
+    assert (corpo["estado"], corpo["pedido_centavos"], corpo["aprovado_centavos"], corpo["diferenca_centavos"]) == (
+        "boletim_recebido", 12_345_67, 12_000_01, -345_66)
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_protocolado_centavos"], d["valor_atestado_centavos"], d["atestado_em"]) == (
+        "boletim_recebido", 12_345_67, 12_000_01, "2026-08-10")
+    assert d["diferenca_centavos"] == -345_66
+    [b] = d["boletins"]
+    assert (b["id"], b["valor_centavos"], b["atestado_em"], b["meio"], b["numero_orgao"], b["usuario"]) == (
+        corpo["id"], 12_000_01, "2026-08-10", "smo", "SMO 14/2026", "Admin")
+    [ev] = _atestos(mid)
+    assert ev["arquivo"].startswith("boletins/") and ev["sha256"] == b["sha256"] and len(ev["sha256"]) == 64
+    a = client_admin.get(f"/api/medicoes/{mid}/boletins/{b['id']}")
+    assert a.status_code == 200 and a.content.startswith(b"%PDF-")
+    assert client_admin.get(f"/api/medicoes/{mid}/boletins/999999").status_code == 404
+
+
+def test_segundo_boletim_glosa_e_evento_novo_e_o_vigente_e_o_ultimo(client_admin):
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    r = _registrar_boletim(client_admin, mid, valor="11.999,99", data="2026-08-20", texto="Boletim com glosa")
+    assert r.status_code == 201, r.text
+    assert (r.json()["aprovado_centavos"], r.json()["diferenca_centavos"]) == (11_999_99, -345_68)
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_atestado_centavos"], d["atestado_em"]) == ("boletim_recebido", 11_999_99, "2026-08-20")
+    assert d["valor_protocolado_centavos"] == 12_345_67               # o pedido nao muda com o boletim
+    assert [b["valor_centavos"] for b in d["boletins"]] == [12_000_01, 11_999_99]
+    assert [e["valor_centavos"] for e in _atestos(mid)] == [12_000_01, 11_999_99]
+
+
+def test_boletim_identico_repetido_da_422_e_nao_duplica(client_admin):
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    r = _registrar_boletim(client_admin, mid)
+    assert r.status_code == 422 and "já está registrado" in r.json()["detail"]
+    assert len(_atestos(mid)) == 1
+
+
+def test_repeticao_atrasada_do_primeiro_boletim_nao_volta_o_valor(client_admin):
+    # gate Sol: A gravado, B gravado como correcao, A repetido depois: recusa (o vigente fica o B)
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    assert _registrar_boletim(client_admin, mid, valor="11.999,99", texto="Boletim corrigido").status_code == 201
+    assert _registrar_boletim(client_admin, mid).status_code == 422
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_atestado_centavos"] == 11_999_99
+    # corrigir so' o nº (mesmo PDF, valor e dia) e' evento novo
+    r = _registrar_boletim(client_admin, mid, valor="11.999,99", texto="Boletim corrigido", numero="SMO 15/2026")
+    assert r.status_code == 201, r.text
+    assert [e["numero_orgao"] for e in _atestos(mid)] == ["SMO 14/2026", "SMO 14/2026", "SMO 15/2026"]
+
+
+def test_boletim_sem_numero_no_orgao_da_422(client_admin):
+    mid = _planilha_enviada(client_admin)
+    for numero in ("", "   "):
+        r = _registrar_boletim(client_admin, mid, numero=numero)
+        assert r.status_code == 422 and "nº do boletim" in r.json()["detail"]
+    assert _atestos(mid) == []
+
+
+def test_atestado_a_mao_recusado_depois_do_boletim(client_admin):
+    # gate Sol: com boletim, o aprovado so' muda por boletim novo (com o documento)
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "atestado", "valor": "11.000,00"})
+    assert r.status_code == 422 and "registre um boletim novo" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_atestado_centavos"] == 12_000_01
+    assert len(_atestos(mid)) == 1
+
+
+def test_boletim_na_prevista_da_obra_com_espelho_vai_a_boletim_recebido(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)          # criada antes da regra: depois dela a obra so' cria pelo espelho
+    _com_regra_de_espelho(cid, "ativa")
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_atestado_centavos"], d["valor_protocolado_centavos"]) == (
+        "boletim_recebido", 12_000_01, None)
+
+
+def test_boletim_na_planilha_ainda_nao_enviada_da_422(client_admin):
+    # spec §2.1: o boletim vem depois do envio da planilha/carta (pelo sistema ou registrado por fora)
+    mid = _nova_planilha(client_admin, _contrato(client_admin)).json()["medicao_id"]
+    r = _registrar_boletim(client_admin, mid)
+    assert r.status_code == 422 and "envio da planilha/carta" in r.json()["detail"]
+    assert _atestos(mid) == [] and client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_gerada"
+
+
+def test_boletim_na_prevista_grava_o_evento_e_a_prevista_fica(client_admin):
+    # obra do fluxo antigo (sem regra de espelho): o protocolo nao recebe `boletim_recebido`, entao a prevista fica
+    mid = _medicao(client_admin, _contrato(client_admin))
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_atestado_centavos"], len(d["boletins"])) == ("prevista", 12_000_01, 1)
+    assert d["diferenca_centavos"] is None                      # sem pedido, sem diferenca
+
+
+@pytest.mark.parametrize("estado", ["espelho_gerado", "nota_emitida", "protocolada"])
+def test_boletim_depois_do_espelho_e_glosa_e_nao_muda_o_estado(client_admin, estado):
+    mid = _planilha_enviada(client_admin)
+    _no_estado(mid, estado)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["valor_atestado_centavos"]) == (estado, 12_000_01)
+
+
+def test_pedido_da_planilha_nao_muda_a_mao_depois_do_espelho(client_admin):
+    # o espelho leva a medicao adiante sem trocar o pedido; editar o valor nao pode reabri-lo
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    _no_estado(mid, "espelho_gerado")
+    r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1,00"})
+    assert r.status_code == 422 and "planilha/carta" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 12_345_67
+
+
+def test_boletim_recusas(client_admin):
+    mid = _planilha_enviada(client_admin)
+    import datetime
+    futura = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
+    assert _registrar_boletim(client_admin, mid, data=futura).status_code == 422
+    assert _registrar_boletim(client_admin, mid, valor="abc").status_code == 422
+    assert _registrar_boletim(client_admin, mid, meio="pombo").status_code == 422
+    sem_pdf = client_admin.post(f"/api/medicoes/{mid}/boletim", data={"valor": "1,00", "data": "2026-08-10"})
+    assert sem_pdf.status_code == 422
+    falso = client_admin.post(f"/api/medicoes/{mid}/boletim",
+                              data={"valor": "1,00", "data": "2026-08-10", "numero_orgao": "SMO 1"},
+                              files={"arquivo": ("b.pdf", b"nao e pdf", "application/pdf")})
+    assert falso.status_code == 415
+    assert client_admin.post("/api/medicoes/999999/boletim", files=_boletim(),
+                             data={"valor": "1,00", "data": "2026-08-10"}).status_code == 404
+    cancelada = _medicao(client_admin, _contrato(client_admin), 3)
+    _no_estado(cancelada, "cancelada")
+    r = _registrar_boletim(client_admin, cancelada)
+    assert r.status_code == 422 and "cancelada" in r.json()["detail"]
+    assert _atestos(mid) == [] and _atestos(cancelada) == []
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_enviada"
+
+
+def test_boletim_diretoria_recebe_403_e_engenharia_registra(client_admin):
+    from app import auth, db
+    mid = _planilha_enviada(client_admin)
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@lotufo.com", "senha-forte-123", "diretoria")
+    auth.criar_usuario(conn, "Eng", "eng@lotufo.com", "senha-forte-123", "engenharia")
+    conn.close()
+    _entrar(client_admin, "dir@lotufo.com")
+    assert _registrar_boletim(client_admin, mid).status_code == 403
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["boletins"] == []      # diretoria le
+    _entrar(client_admin, "eng@lotufo.com")
+    assert _registrar_boletim(client_admin, mid).status_code == 201
 
 
 def test_envio_por_fora_poe_em_planilha_enviada_com_origem_externo_e_data(client_admin):
@@ -1168,3 +1354,197 @@ def test_envio_por_fora_e_numero_do_siga_diretoria_recebe_403(client_admin):
     _entrar(client_admin, "dir@lotufo.com")
     assert _enviar_por_fora(client_admin, mid).status_code == 403
     assert _numero_siga(client_admin, mid, "1").status_code == 403
+
+
+# --- issue #490: medido por grupo da planilha de medicao -----------------------------------------------------
+
+def _planilha_xlsx(cl, cid, valor, numero=1, competencia="2026-07"):
+    from tests.test_leitura_planilha_medicao import planilha
+    arquivos_ = {**_arquivos_planilha(f"oficio {numero}"), "planilha": ("planilha.xlsx", planilha(), XLSX)}
+    return cl.post(f"/api/contratos/{cid}/planilhas", files=arquivos_, data={
+        "numero": numero, "competencia": competencia, "periodo_inicio": f"{competencia}-01",
+        "periodo_fim": f"{competencia}-28", "valor": valor})
+
+
+def test_grupos_sem_leitura(client_admin):
+    cid = _contrato(client_admin)
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 1, "tipo": "execucao", "competencia": "2026-07"}).json()["id"]
+    r = client_admin.get(f"/api/medicoes/{mid}/grupos")
+    assert r.status_code == 200
+    assert r.json() == {"situacao": "sem_leitura", "aviso": None, "leitura": None, "grupos": []}
+    assert client_admin.get("/api/medicoes/999999/grupos").status_code == 404
+
+
+def test_anexar_xlsx_registra_a_leitura_por_grupo(client_admin):
+    from tests.test_leitura_planilha_medicao import TOTAL
+    cid = _contrato(client_admin)
+    r = _planilha_xlsx(client_admin, cid, "20.693,60")          # 50 centavos de diferenca: dentro de um real
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
+    mid = r.json()["medicao_id"]
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["situacao"] == "lida" and g["aviso"] is None
+    assert g["leitura"]["total_centavos"] == TOTAL and g["leitura"]["versao"] == 1
+    assert g["leitura"]["origem"] == "anexo" and g["leitura"]["grupo_por"] == "planilha"
+    assert [x["nome"] for x in g["grupos"]] == ["ADMINISTRAÇÃO LOCAL", "TERRAPLENAGEM", "DRENAGEM"]
+    terra = g["grupos"][1]
+    assert (terra["valor_medido_centavos"], terra["valor_acumulado_centavos"]) == (2188_09, 4414_18)
+    assert (terra["unidade"], terra["quantidade_medida"], terra["quantidade_acumulada"]) == ("m³", "220.25", "400.5")
+    item = terra["itens"][0]
+    assert {k: item[k] for k in ("item", "codigo", "unidade", "quantidade_contratada", "quantidade_medida",
+                                 "preco_unitario_centavos")} == {
+        "item": "2.1", "codigo": "4011", "unidade": "m³", "quantidade_contratada": "1000.5",
+        "quantidade_medida": "120.25", "preco_unitario_centavos": 12_35}
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"]["situacao"] == "lida"
+
+
+def test_soma_que_nao_bate_registra_a_medicao_e_avisa(client_admin):
+    cid = _contrato(client_admin)
+    r = _planilha_xlsx(client_admin, cid, "20.700,00")          # 6,90 acima da soma dos grupos
+    assert r.status_code == 201, r.text
+    aviso = r.json()["leitura_planilha"]["aviso"]
+    assert aviso.startswith("Planilha não lida: diferença de R$ 6,90")
+    mid = r.json()["medicao_id"]
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert d["estado"] == "planilha_gerada" and d["valor_protocolado_centavos"] == 20_700_00
+    assert d["leitura_planilha"] == {"situacao": "recusada", "aviso": aviso}
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["situacao"] == "recusada" and g["aviso"] == aviso and g["grupos"] == []
+
+
+def test_revisao_le_a_planilha_nova_e_a_mais_nova_vale(client_admin):
+    from tests.test_leitura_planilha_medicao import planilha
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.700,00").json()["medicao_id"]        # recusada
+    arquivos_ = {**_arquivos_planilha("oficio rev"), "planilha": ("planilha.xlsx", planilha(), XLSX)}
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=arquivos_, data={
+        "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-28", "valor": "20.693,10", "motivo": "Rev01"})
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["situacao"] == "lida" and g["leitura"]["versao"] == 2
+
+
+def test_planilha_de_projeto_nao_e_lida(client_admin):
+    from tests.test_leitura_planilha_medicao import planilha
+    cid = _contrato(client_admin)
+    arquivos_ = {**_arquivos_planilha("oficio projeto"), "planilha": ("planilha.xlsx", planilha(), XLSX)}
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=arquivos_, data={
+        "numero": 1, "tipo": "projeto", "competencia": "2026-07", "periodo_inicio": "2026-07-01",
+        "periodo_fim": "2026-07-28", "valor": "20.693,10"})
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] is None
+    g = client_admin.get(f"/api/medicoes/{r.json()['medicao_id']}/grupos").json()
+    assert g["situacao"] == "sem_leitura"
+
+
+def test_grupos_exige_permissao_de_ver(client_admin, monkeypatch):
+    from app import permissoes
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.693,10").json()["medicao_id"]
+    monkeypatch.setitem(permissoes.PERFIS, "admin", frozenset({"editar_cadastros"}))
+    r = client_admin.get(f"/api/medicoes/{mid}/grupos")
+    assert r.status_code == 403 and "ver_paineis" in r.json()["detail"]
+    client_admin.cookies.clear()
+    assert client_admin.get(f"/api/medicoes/{mid}/grupos").status_code in (401, 403)
+
+
+def test_revisao_em_pdf_deixa_a_medicao_sem_leitura(client_admin):
+    """A leitura vale para a versao vigente: a revisao com a planilha em PDF tira o aviso e os grupos da anterior."""
+    from tests.conftest import _pdf_com_texto
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.700,00").json()["medicao_id"]        # recusada na versao 1
+    arquivos_ = {**_arquivos_planilha("oficio rev pdf"),
+                 "planilha": ("planilha.pdf", _pdf_com_texto("planilha rev"), "application/pdf")}
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=arquivos_, data={
+        "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-28", "valor": "20.693,10", "motivo": "Rev01"})
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] is None
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"] == {"situacao": "sem_leitura",
+                                                                                   "aviso": None}
+    assert client_admin.get(f"/api/medicoes/{mid}/grupos").json()["grupos"] == []
+
+
+def test_revisao_depois_do_envio_confere_com_o_pedido_da_revisao(client_admin):
+    """Revisor R1: depois do envio o pedido da medicao fica congelado; a planilha da revisao confere com o pedido
+    da propria versao, nao com o congelado (senao seria recusada para sempre)."""
+    from tests.test_leitura_planilha_medicao import planilha
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.700,00").json()["medicao_id"]        # recusada na versao 1
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    arquivos_ = {**_arquivos_planilha("oficio rev envio"), "planilha": ("planilha.xlsx", planilha(), XLSX)}
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=arquivos_, data={
+        "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-28", "valor": "20.693,10", "motivo": "Rev01"})
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert d["valor_protocolado_centavos"] == 20_700_00                   # o pedido congelado no envio fica
+    assert r.json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["leitura"]["versao"] == 2 and g["leitura"]["pedido_centavos"] == 20_693_10
+
+
+def test_anexo_agrupa_pelo_cadastro_de_custo(client_admin):
+    """Sol S2: o anexo grava a leitura pelos grupos do cadastro de custo da obra (#489)."""
+    import json
+
+    from app import db
+    cid = _contrato(client_admin)
+    conn = db.get_conn()
+    conn.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha) VALUES (?,1,?,?,?)",
+                 (cid, "Drenagem", json.dumps(["001"]), json.dumps(["3."])))
+    conn.commit()
+    conn.close()
+    mid = _planilha_xlsx(client_admin, cid, "20.693,10").json()["medicao_id"]
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["leitura"]["grupo_por"] == "cadastro"
+    assert [x["nome"] for x in g["grupos"]] == ["Drenagem", "outros"]
+
+
+def test_falha_inesperada_na_leitura_fica_gravada_e_avisa(client_admin, monkeypatch):
+    """Sol S5: erro que nao e' recusa da planilha nao some: fica gravado como falha e a tela avisa."""
+    from app import medicao_grupos
+
+    def explode(*a, **k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(medicao_grupos, "ler_e_registrar", explode)
+    cid = _contrato(client_admin)
+    r = _planilha_xlsx(client_admin, cid, "20.693,10")
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] == {"situacao": "falhou", "aviso": "Planilha não lida: falha inesperada na leitura"}
+    mid = r.json()["medicao_id"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"]["situacao"] == "falhou"
+
+
+def test_falha_que_nem_grava_sobe(client_admin, monkeypatch):
+    """Sol S5: se nem a falha grava, o erro sobe (nao vira um aviso que a consulta seguinte desmente)."""
+    from app import medicao_grupos
+
+    def explode(*a, **k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(medicao_grupos, "ler_e_registrar", explode)
+    monkeypatch.setattr(medicao_grupos, "registrar_falha", explode)
+    cid = _contrato(client_admin)
+    with pytest.raises(RuntimeError, match="locked"):
+        _planilha_xlsx(client_admin, cid, "20.693,10")
+
+
+def test_falha_depois_de_leitura_valida_nao_a_desfaz(client_admin):
+    """Sol S4 (rodada 2): uma falha operacional posterior, no mesmo contexto, nao troca a leitura valida por
+    "planilha não lida"; a falha fica gravada com o pedido e o cadastro tentados."""
+    from app import db, medicao_grupos
+    from tests.test_leitura_planilha_medicao import planilha
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.693,10").json()["medicao_id"]
+    conn = db.get_conn()
+    try:
+        medicao_grupos.registrar_falha(conn, None, mid, 1, planilha())
+        falha = conn.execute("SELECT pedido_centavos FROM medicao_grupos WHERE situacao='falhou'").fetchone()
+        assert falha["pedido_centavos"] == 20_693_10
+    finally:
+        conn.close()
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["situacao"] == "lida" and len(g["grupos"]) == 3

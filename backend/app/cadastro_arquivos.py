@@ -67,6 +67,19 @@ NATUREZAS = ("execucao", "reajuste")
 TIPOS_COM_NATUREZA = ("aditivo_valor", "aditivo_misto")
 
 
+def _reajuste_com_valor(inst: dict) -> bool:
+    """O instrumento do cadastro que `reajuste.aditivo_de_reajuste` conta: aditivo de valor ou misto, natureza
+    reajuste, delta diferente de zero."""
+    return bool(inst["tipo"] in TIPOS_COM_NATUREZA and inst.get("natureza") == "reajuste"
+                and inst.get("delta_valor_centavos"))
+
+
+def _corretor_de_valor(inst: dict) -> bool:
+    """Issue #410: o aditivo de reajuste com valor que corrige outro termo; ele substitui o corrigido no vigente
+    (`contratos.vigente`, pelo criterio de `reajuste.aditivo_de_reajuste`), entao cada termo tem no maximo um."""
+    return bool(inst.get("corrige") and _reajuste_com_valor(inst))
+
+
 class CadastroInvalido(Exception):
     def __init__(self, erros: list[str]):
         self.erros = erros
@@ -75,6 +88,31 @@ class CadastroInvalido(Exception):
 
 def _textos(v) -> bool:
     return isinstance(v, list) and all(isinstance(x, str) and x.strip() for x in v)
+
+
+def _por_que_nao_vai_no_oficio(o: dict, p: dict) -> list[str]:
+    """Issue #462 (gate Sol): por que a peca `p` do orgao `o` nao pode ir dentro do oficio assinado. A marca e' por
+    tipo, entao o tipo repetido (dois `outro`, um de execucao e outro de reajuste) dispensaria os dois."""
+    out = []
+    if o.get("familia") != "sinfra":
+        out.append("só vale na família sinfra, que manda as peças dentro do ofício da planilha/carta")
+    if p.get("tipo") == "planilha":
+        out.append("a planilha editável vai sempre solta, fora do ofício")
+    elif p.get("solto") is True:
+        out.append("a peça marcada solto: true vai fora do ofício; use uma das duas marcas")
+    if [x.get("tipo") for x in o.get("pecas") or [] if isinstance(x, dict)].count(p.get("tipo")) > 1:
+        out.append(f"o tipo {p.get('tipo')} aparece mais de uma vez nas peças do órgão; a marca vale por tipo")
+    return out
+
+
+def _pecas_no_oficio_do_contrato(tipos: list[str], chave: str, o: dict, onde: str, erros: list[str]) -> None:
+    """Issue #462: cada tipo da excecao do contrato e' uma peca que o orgao pede e que pode ir no oficio."""
+    pecas = {p.get("tipo"): p for p in o["pecas"] if isinstance(p, dict)}
+    fora = [t for t in tipos if t not in pecas]
+    if fora:
+        erros.append(f"{onde}: o órgão {chave} não pede {', '.join(fora)}")
+    motivos = {m: None for t in tipos if t in pecas for m in _por_que_nao_vai_no_oficio(o, pecas[t])}
+    erros += [f"{onde}: {m}" for m in motivos]
 
 
 def _protocolo_do_orgao(o: dict, onde: str, erros: list[str]) -> None:
@@ -87,9 +125,13 @@ def _protocolo_do_orgao(o: dict, onde: str, erros: list[str]) -> None:
             continue
         if not str(p.get("rotulo") or "").strip():
             erros.append(f"{onde}: pecas[{i}].rotulo: obrigatório")
-        for campo in ("exigida", "solto"):
+        # no_oficio (issue #462): a peca vai dentro do PDF assinado do oficio da planilha/carta, nao cobra nem se anexa
+        for campo in ("exigida", "solto", "no_oficio"):
             if campo in p and not isinstance(p[campo], bool):
                 erros.append(f"{onde}: pecas[{i}].{campo}: use true ou false")
+        if p.get("no_oficio") is True:
+            for motivo in _por_que_nao_vai_no_oficio(o, p):
+                erros.append(f"{onde}: pecas[{i}].no_oficio: {motivo}")
         nat = p.get("naturezas")
         if nat is not None and (not isinstance(nat, list) or not nat
                                 or any(x not in ("execucao", "reajuste", "projeto") for x in nat)):
@@ -767,6 +809,15 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         if k:
             falha("instrumentos", f"{inst['chave']}: a cadeia de correção volta a {k} "
                                   f"({' → '.join([*caminho, k])}); um termo não corrige a si mesmo")
+    # Issue #410 (gate Sol, rodada 1, PR #452): duas correcoes de reajuste do mesmo termo somariam as duas no vigente
+    corretores: dict[str, str] = {}
+    for inst in c["instrumentos"]:
+        if _corretor_de_valor(inst):
+            if inst["corrige"] in corretores:
+                falha("instrumentos", f"{inst['chave']} e {corretores[inst['corrige']]} corrigem {inst['corrige']}; "
+                                      f"a correção da correção corrige a correção (corrige: "
+                                      f"{corretores[inst['corrige']]})")
+            corretores.setdefault(inst["corrige"], inst["chave"])
     # Bloco 7: folga propria do contrato (vence a do orgao; na MTPAR varia por contrato), campos dos
     # instrumentos e pleitos enviados antes do sistema.
     c["folga_vigencia_dias"] = None
@@ -790,7 +841,120 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         if lista is not None:
             docs[chave] = lista
     c["documentos"] = docs or None
+    # Issue #462: excecao por contrato as pecas que vao no oficio assinado (substitui a marca do orgao; [] desliga).
+    # Que o orgao pede cada tipo, `preparar` confere (aqui so' se conhece a chave do orgao).
+    c["pecas_no_oficio"] = None
+    pno = bruto.get("pecas_no_oficio")
+    if pno is not None:
+        tipos = [t for t in TIPOS_PECA if t != "planilha"]      # a planilha editavel vai sempre solta
+        if not isinstance(pno, list) or any(x not in tipos for x in pno) or len(set(pno)) != len(pno):
+            falha("pecas_no_oficio", f"use uma lista, sem repetição, de {', '.join(tipos)}")
+        else:
+            c["pecas_no_oficio"] = list(pno)
+    c["custo"] = _custo(bruto.get("custo"), falha)
     return c
+
+
+# Issue #489: custo por obra. Naturezas orcamentarias fora do custo quando o yaml nao diz: 2.02 (nao operacional) e
+# 2.01.22 (adiantamento a fornecedor). Regra do custo sem tarefa: so' `proporcional` (decisao do Leo de 06/11/2026).
+NAO_E_CUSTO_PADRAO = ("2.02", "2.01.22")
+REGRAS_SEM_TAREFA = ("proporcional",)
+_PREFIXOS = 'use uma lista de códigos entre aspas (ex.: "001.03"); sem aspas o YAML lê o código como número'
+
+
+_CHAVES_CUSTO = frozenset({"projeto_rm", "grupos", "nao_e_custo", "sem_tarefa"})
+_CHAVES_GRUPO = frozenset({"nome", "tarefas", "itens_planilha", "item_chave"})
+
+
+def _segmentos(codigo: str) -> list[str]:
+    """`2.` e `2` sao o mesmo prefixo; `001.1` nao contem `001.10` (compara por segmento, nao por letra)."""
+    return codigo.rstrip(".").split(".")
+
+
+def _dentro_do_prefixo(codigo: str, prefixo: str) -> bool:
+    s, p = _segmentos(codigo), _segmentos(prefixo)
+    return s[:len(p)] == p
+
+
+def _sobrepoe(a: str, b: str) -> bool:
+    return _dentro_do_prefixo(a, b) or _dentro_do_prefixo(b, a)
+
+
+def _prefixos(valor, campo: str, falha) -> list[str] | None:
+    """Lista de prefixos de codigo (tarefa, item, natureza). Texto obrigatorio: `001.03` sem aspas vira 1.03."""
+    if valor is None:
+        return []
+    if not isinstance(valor, list) or any(not isinstance(x, str) or not x.strip() for x in valor):
+        falha(campo, _PREFIXOS)
+        return None
+    return [x.strip() for x in valor]
+
+
+def _custo(bruto, falha) -> dict | None:
+    """Secao `custo:` do contrato: projeto do Solum, grupos da planilha do orgao (ordem do yaml), naturezas fora do
+    custo e regra do custo sem tarefa. Ausente: None (a obra fica sem cadastro de custo)."""
+    if bruto is None:
+        return None
+    if not isinstance(bruto, dict):
+        falha("custo", "use um mapa com projeto_rm, grupos, nao_e_custo e sem_tarefa")
+        return None
+    for k in sorted(set(bruto) - _CHAVES_CUSTO, key=str):
+        falha(f"custo.{k}", f"campo desconhecido; use {', '.join(sorted(_CHAVES_CUSTO))}")
+    projeto = str(bruto.get("projeto_rm") or "").strip()
+    if not projeto:
+        falha("custo.projeto_rm", "obrigatório (código do projeto no Solum, ex.: GL.C01.P704)")
+    nao_e_custo = bruto.get("nao_e_custo")
+    nao_e_custo = list(NAO_E_CUSTO_PADRAO) if nao_e_custo is None else _prefixos(nao_e_custo, "custo.nao_e_custo", falha)
+    regra = bruto.get("sem_tarefa")
+    regra = "proporcional" if regra is None else regra
+    if regra not in REGRAS_SEM_TAREFA:
+        falha("custo.sem_tarefa", f"use {' ou '.join(REGRAS_SEM_TAREFA)}: {regra!r}")
+    lista = bruto.get("grupos")
+    if not isinstance(lista, list) or not lista:
+        falha("custo.grupos", "use uma lista com ao menos um grupo (nome, tarefas, itens_planilha)")
+        lista = []
+    grupos: list[dict] = []
+    donos: dict[str, list[tuple[str, str]]] = {"tarefas": [], "itens_planilha": []}
+    nomes: set[str] = set()
+    for i, g in enumerate(lista):
+        onde = f"custo.grupos[{i}]"
+        if not isinstance(g, dict):
+            falha(onde, "use um mapa com nome, tarefas, itens_planilha e, se houver, item_chave")
+            continue
+        for k in sorted(set(g) - _CHAVES_GRUPO, key=str):
+            falha(f"{onde}.{k}", f"campo desconhecido; use {', '.join(sorted(_CHAVES_GRUPO))}")
+        nome = g["nome"].strip() if isinstance(g.get("nome"), str) else ""
+        if not nome:
+            falha(f"{onde}.nome", "obrigatório, em texto (o nome do grupo na planilha do órgão)")
+        elif nome in nomes:
+            falha(f"{onde}.nome", f"grupo repetido: {nome}")
+        nomes.add(nome)
+        tarefas = _prefixos(g.get("tarefas"), f"{onde}.tarefas", falha)
+        itens = _prefixos(g.get("itens_planilha"), f"{onde}.itens_planilha", falha)
+        for campo, valores, rotulo in (("tarefas", tarefas, "a tarefa"), ("itens_planilha", itens, "o item")):
+            for v in valores or []:
+                for outro, dono in donos[campo]:
+                    if v == outro:
+                        lugar = "aparece duas vezes" if dono == nome else f"já está no grupo {dono}"
+                        falha(f"{onde}.{campo}", f"{rotulo} {v} do grupo {nome} {lugar}")
+                        break
+                    if dono != nome and _sobrepoe(v, outro):
+                        falha(f"{onde}.{campo}", f"{rotulo} {v} do grupo {nome} se sobrepõe a {outro} do grupo "
+                                                 f"{dono}; um código só pode cair em um grupo")
+                        break
+                donos[campo].append((v, nome))
+        chave = g.get("item_chave")
+        if chave is not None:
+            if (not isinstance(chave, dict) or not isinstance(chave.get("codigo"), str) or not chave["codigo"].strip()
+                    or not isinstance(chave.get("unidade"), str) or not chave["unidade"].strip()):
+                falha(f"{onde}.item_chave", 'use {codigo: "2.1", unidade: "m³"}, os dois entre aspas')
+                chave = None
+            else:
+                chave = {"codigo": chave["codigo"].strip(), "unidade": chave["unidade"].strip()}
+                if itens is not None and not any(_dentro_do_prefixo(chave["codigo"], p) for p in itens):
+                    falha(f"{onde}.item_chave", f"o item {chave['codigo']} não está nos itens_planilha do grupo {nome}")
+        grupos.append({"nome": nome, "tarefas": tarefas or [], "itens_planilha": itens or [], "item_chave": chave})
+    return {"projeto_rm": projeto, "nao_e_custo": nao_e_custo or [], "sem_tarefa": regra, "grupos": grupos}
 
 
 def preparar(raiz: Path) -> dict:
@@ -874,11 +1038,16 @@ def preparar(raiz: Path) -> dict:
 
     chaves_orgao = {o["chave"] for o in orgaos}
     chaves_ent = {e["chave"] for e in ents}
+    por_chave_orgao = {o["chave"]: {"familia": o["familia"], "pecas": o["regras"].get("pecas") or []} for o in orgaos}
     contratos = []
     for arquivo in sorted((raiz / "contratos").glob("*.yaml")):
         c = _contrato(_ler(arquivo), arquivo, raiz, chaves_orgao, chaves_ent, erros, avisos)
         if c is not None:
             contratos.append(c)
+            o = por_chave_orgao.get(c["orgao"])
+            if c["pecas_no_oficio"] and o is not None:
+                _pecas_no_oficio_do_contrato(c["pecas_no_oficio"], c["orgao"], o,
+                                             f"contratos/{arquivo.name}: pecas_no_oficio", erros)
     for campo in ("nome_curto", "numero_instrumento"):
         valores = [c[campo] for c in contratos if c[campo]]
         if len(set(valores)) != len(valores):

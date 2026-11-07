@@ -15,7 +15,7 @@ import logging
 import sys
 import time
 
-from app import auditoria, db, tempo
+from app import auditoria, db, instalacao, tempo
 
 log = logging.getLogger("app.envio_reserva")
 
@@ -96,7 +96,10 @@ def reservar(conn, tabela: str, id_: int, usuario_id: int, envio_id_visto: int |
 
     `envio_id_visto` e' o `envio_id` que o chamador leu ao validar: se mudou ate' aqui, outro envio terminou
     nesse meio-tempo (a reserva dele ja' foi liberada) e este seria o e-mail repetido.
+
+    Instalacao nao autorizada (issue #417): recusa antes de reservar (EnvioDesligado), entao nada fica preso.
     """
+    instalacao.exigir_envio()
     t = _tabela(tabela)
     condicao = f" AND {_CONDICAO[t]}" if t in _CONDICAO else ""
     with db.mutacao(conn):

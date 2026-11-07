@@ -251,6 +251,50 @@ def test_registro_que_nunca_grava_diz_que_o_email_saiu(cenario, monkeypatch, tmp
     assert len(list((tmp_path / "sim" / "enviados").glob("*.json"))) == 1     # o e-mail saiu de fato
 
 
+# --- instalacao nao autorizada (issue #417): o envio e' recusado antes da reserva --------------------------------
+
+COPIA = {"instalacao": "nao-autorizada", "motivo": "ausente"}
+RECUSA = r"^Envio desligado: instalação não autorizada\.$"
+
+
+def _nada_saiu(c, tmp_path):
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert not list((tmp_path / "sim" / "enviados").glob("*.json"))
+
+
+def test_modo_copia_recusa_antes_da_reserva(cenario, monkeypatch, tmp_path):
+    from app import envio_reserva, instalacao
+    c, ids = cenario
+    pid = _protocolo(c, ids)
+    monkeypatch.setattr(instalacao, "_estado", COPIA)
+    with pytest.raises(instalacao.EnvioDesligado, match=RECUSA):
+        envio_reserva.reservar(c, "protocolos", pid, ids["uid"])
+    assert _reserva(c, pid) == (None, None)
+    with pytest.raises(instalacao.EnvioDesligado, match=RECUSA):      # quem envia sem reserva (teste, cobranca)
+        correio.enviar_e_registrar(c, ids["usuario"], "teste", ["x@orgao.gov.br"], [], "Assunto", "<p>x</p>", [])
+    _nada_saiu(c, tmp_path)
+
+
+def test_modo_copia_recusa_o_protocolo_inteiro_sem_reservar(cenario, monkeypatch, tmp_path):
+    from app import instalacao
+    from tests.test_protocolo import _assinar, _montado
+    c, ids = cenario
+    pid = _protocolo(c, ids)
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid], remetente="maria@l.com")
+    monkeypatch.setattr(instalacao, "_estado", COPIA)
+    with pytest.raises(instalacao.EnvioDesligado, match=RECUSA):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert _reserva(c, pid) == (None, None)
+    assert protocolo.detalhe(c, pid)["situacao"] != "enviado"
+    assert c.execute("SELECT estado FROM medicoes WHERE id=?", (ids["mtpar_exec"],)).fetchone()[0] == "nota_emitida"
+    _nada_saiu(c, tmp_path)
+    # com a instalacao autorizada o mesmo envio sai
+    monkeypatch.setattr(instalacao, "_estado", {"instalacao": "autorizada", "motivo": None})
+    protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert protocolo.detalhe(c, pid)["situacao"] == "enviado"
+
+
 def test_simulador_nao_sobrescreve_envios_simultaneos(tmp_path, monkeypatch):
     """Dois envios ao mesmo tempo contavam o mesmo numero de arquivos e gravavam no MESMO nome (N-02).
     A colisao e' forcada fazendo a pasta parecer vazia para os dois."""

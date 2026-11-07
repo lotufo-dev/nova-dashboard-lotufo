@@ -38,6 +38,10 @@ export const PROXIMOS: Record<string, string[]> = {
   protocolada: ["recebida", "cancelada", "desistida"],
   nf_emitida: ["recebida", "cancelada", "desistida"],
   prevista: ["cancelada", "desistida"],
+  // estados do motor de medicao (#281, #284): encerrados a mao
+  planilha_gerada: ["cancelada", "desistida"],
+  planilha_enviada: ["cancelada", "desistida"],
+  boletim_recebido: ["cancelada", "desistida"],
   espelho_gerado: ["cancelada"],
   espelho_enviado: ["cancelada"],
   nota_emitida: ["cancelada"],

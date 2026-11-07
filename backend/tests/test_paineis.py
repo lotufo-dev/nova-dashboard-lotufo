@@ -57,6 +57,49 @@ def test_saldo_formula_visivel(conn, cid):
     assert s["vigente_centavos"] == 1_000_00 and s["atestado_execucao_centavos"] == 240_00
     assert s["saldo_centavos"] == 760_00 and "vigente" in s["formula"]
 
+# --- issue #293: curva S da carta de prazo (a mesma conta da tela da obra) ---
+
+def _repactuacao(conn, cid, numero, data):
+    vid = conn.execute("SELECT id FROM cronograma_versoes WHERE contrato_id=? AND numero=?", (cid, numero)).fetchone()[0]
+    conn.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, data_documento) "
+                 "VALUES (?,?,?,?,?)", (vid, cid, f"ta{numero}", "aditivo", data))
+    conn.commit()
+
+def test_curva_s_acumula_vigente_anterior_e_medido_com_os_meses_do_meio(conn, cid):
+    """Como `curvaS` (frontend/src/obra.ts): o eixo e' a uniao das competencias com os meses vazios do meio; o
+    medido e' o de execucao (atestado, ou protocolado enquanto nao atesta) e para no ultimo mes medido."""
+    cronograma.nova_versao(conn, 1, cid, [("2026-01", 100_00), ("2026-02", 100_00), ("2026-03", 100_00)], "manual",
+                           data_documento="2025-12-01")
+    cronograma.nova_versao(conn, 1, cid, [("2026-01", 50_00), ("2026-03", 80_00), ("2026-05", 70_00)], "manual",
+                           data_documento="2026-01-10")
+    _repactuacao(conn, cid, 2, "2026-01-10")
+    _medir(conn, cid, 1, "execucao", "2026-01", 40_00, atestado=45_00)
+    _medir(conn, cid, 2, "execucao", "2026-03", 60_00)
+    _medir(conn, cid, 1, "reajuste", "2026-03", 5_00)                    # serie propria: fora da curva S
+    assert paineis.curva_s(conn, cid) == [
+        {"competencia": "2026-01", "previsto_vigente_centavos": 50_00, "previsto_anterior_centavos": 100_00,
+         "medido_centavos": 45_00},
+        {"competencia": "2026-02", "previsto_vigente_centavos": 50_00, "previsto_anterior_centavos": 200_00,
+         "medido_centavos": 45_00},
+        {"competencia": "2026-03", "previsto_vigente_centavos": 130_00, "previsto_anterior_centavos": 300_00,
+         "medido_centavos": 105_00},
+        {"competencia": "2026-04", "previsto_vigente_centavos": 130_00, "previsto_anterior_centavos": 300_00,
+         "medido_centavos": None},
+        {"competencia": "2026-05", "previsto_vigente_centavos": 200_00, "previsto_anterior_centavos": 300_00,
+         "medido_centavos": None}]
+
+def test_curva_s_sem_repactuacao_nem_cronograma(conn, cid):
+    assert paineis.curva_s(conn, cid) == []
+    cronograma.nova_versao(conn, 1, cid, [("2026-11", 10_00), ("2027-01", 20_00)], "manual",
+                           data_documento="2026-10-01")
+    assert paineis.curva_s(conn, cid) == [
+        {"competencia": "2026-11", "previsto_vigente_centavos": 10_00, "previsto_anterior_centavos": None,
+         "medido_centavos": None},
+        {"competencia": "2026-12", "previsto_vigente_centavos": 10_00, "previsto_anterior_centavos": None,
+         "medido_centavos": None},
+        {"competencia": "2027-01", "previsto_vigente_centavos": 30_00, "previsto_anterior_centavos": None,
+         "medido_centavos": None}]
+
 def _aditivo(conn, cid, delta, natureza, data="2026-01-10"):
     conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
                  "VALUES (?, 'valor', ?, 'assinado', ?, ?)", (cid, delta, data, natureza))

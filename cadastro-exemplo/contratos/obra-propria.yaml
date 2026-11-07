@@ -37,6 +37,22 @@ fiscais:
   desde: '2025-03-10'
 destinatarios_extras: []
 copia_extras: []
+# Opcional (issue #462): substitui, só neste contrato, as peças que o órgão marca `no_oficio`; [] desliga todas.
+# pecas_no_oficio: [cronograma]
+# Opcional (issue #489): custo por obra. Grupos na ordem da planilha do órgão; tarefas = prefixos do código da tarefa
+# do Solum, itens_planilha = prefixos dos itens da planilha; códigos sempre entre aspas (sem aspas, 001.03 vira número).
+# nao_e_custo ausente = ['2.02', '2.01.22']; sem_tarefa só aceita proporcional (rateio pelo custo apontado no mês).
+# custo:
+#   projeto_rm: GL.C01.P001
+#   sem_tarefa: proporcional
+#   grupos:
+#   - nome: Terraplanagem
+#     tarefas: ['001.03']
+#     itens_planilha: ['2.']
+#     item_chave: {codigo: '2.1', unidade: m³}
+#   - nome: Drenagem
+#     tarefas: ['001.04', '001.05']
+#     itens_planilha: ['3.']
 instrumentos:
 - chave: ta-01
   tipo: aditivo_valor
