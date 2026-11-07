@@ -1448,3 +1448,19 @@ def test_grupos_exige_permissao_de_ver(client_admin, monkeypatch):
     assert r.status_code == 403 and "ver_paineis" in r.json()["detail"]
     client_admin.cookies.clear()
     assert client_admin.get(f"/api/medicoes/{mid}/grupos").status_code in (401, 403)
+
+
+def test_revisao_em_pdf_deixa_a_medicao_sem_leitura(client_admin):
+    """A leitura vale para a versao vigente: a revisao com a planilha em PDF tira o aviso e os grupos da anterior."""
+    from tests.conftest import _pdf_com_texto
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.700,00").json()["medicao_id"]        # recusada na versao 1
+    arquivos_ = {**_arquivos_planilha("oficio rev pdf"),
+                 "planilha": ("planilha.pdf", _pdf_com_texto("planilha rev"), "application/pdf")}
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=arquivos_, data={
+        "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-28", "valor": "20.693,10", "motivo": "Rev01"})
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] is None
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"] == {"situacao": "sem_leitura",
+                                                                                   "aviso": None}
+    assert client_admin.get(f"/api/medicoes/{mid}/grupos").json()["grupos"] == []

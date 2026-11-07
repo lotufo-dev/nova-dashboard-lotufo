@@ -151,9 +151,14 @@ def _do_prefixo(numero: str, titulos: dict[str, str]) -> str | None:
 
 
 def _do_cadastro(numero: str, cadastro: list[dict]) -> str | None:
+    """O grupo do cadastro cujo prefixo cobre o nº do item, no limite do ponto: "1" e "1." cobrem "1" e "1.2", nao
+    "10.1"."""
     for g in cadastro:
-        if numero and any(numero.startswith(str(p)) for p in g.get("itens_planilha") or []):
-            return g["nome"]
+        for p in g.get("itens_planilha") or []:
+            p = str(p).strip()
+            raiz = p.rstrip(".")
+            if numero and raiz and (numero == raiz or numero.startswith(raiz + ".")):
+                return g["nome"]
     return None
 
 
@@ -195,6 +200,7 @@ _NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 _NS_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 _NS_PKG = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 MAX_ENTRADAS = 10_000
+MAX_BYTES_INDICE = 2_000_000           # o indice (diretorio central) do zip, lido inteiro ao abrir
 MAX_BYTES_ABA = 30_000_000              # a aba do resumo real tem ~1,6 MB
 MAX_BYTES_TEXTOS = 30_000_000           # os textos compartilhados reais, ~0,2 MB
 MAX_BYTES_RELS = 5_000_000
@@ -252,8 +258,13 @@ def _textos(z: zipfile.ZipFile) -> list[str]:
     if "xl/sharedStrings.xml" not in z.namelist():
         return []
     saida: list[str] = []
+    raiz = None
     for evento, el in _eventos(z, "xl/sharedStrings.xml", MAX_BYTES_TEXTOS):
-        if evento == "end" and el.tag == f"{_NS}si":
+        if evento == "start":
+            if el.tag == f"{_NS}sst":
+                raiz = el
+            continue
+        if el.tag == f"{_NS}si":
             # texto simples (<t>) ou com formatacao (<r><t>); o fonetico (<rPh>) nao faz parte do valor
             partes = []
             for filho in el:
@@ -261,7 +272,8 @@ def _textos(z: zipfile.ZipFile) -> list[str]:
                 if t is not None:
                     partes.append(t.text or "")
             saida.append("".join(partes))
-            el.clear()
+            if raiz is not None:
+                raiz.clear()            # o <si> lido sai da memoria (fica so' o texto)
             if len(saida) > MAX_TEXTOS:
                 raise PlanilhaRecusada(GRANDE_DEMAIS)
     return saida
@@ -394,11 +406,29 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
             "grupo_por": "cadastro" if cadastro else "planilha"}
 
 
+def _recusar_indice_grande(dados: bytes) -> None:
+    """Antes de o `zipfile` montar o indice inteiro na memoria: o fim do zip declara quantas entradas ha' e o
+    tamanho do indice, que o `zipfile` le de uma vez. O zip64 (localizador `PK\\x06\\x07` antes do fim) troca esses
+    campos pelos do registro zip64 e nao e' o que o Excel grava para uma planilha deste tamanho: recusa. Mesma
+    conferencia da leitura de reajuste, com o teto da planilha da SINFRA (~2.000 partes, indice de ~0,2 MB)."""
+    n = len(dados)
+    fim = n - 22 if n >= 22 and dados[n - 22:n - 18] == b"PK\x05\x06" else dados.rfind(b"PK\x05\x06", max(0, n - 65_557))
+    if fim < 0:
+        return                         # sem o fim, o `zipfile` recusa antes de montar o indice
+    if fim + 22 > n or (fim >= 20 and dados[fim - 20:fim - 16] == b"PK\x06\x07"):
+        raise PlanilhaRecusada(GRANDE_DEMAIS)
+    entradas = int.from_bytes(dados[fim + 10:fim + 12], "little")
+    indice = int.from_bytes(dados[fim + 12:fim + 16], "little")
+    if entradas > MAX_ENTRADAS or indice > MAX_BYTES_INDICE:
+        raise PlanilhaRecusada(GRANDE_DEMAIS)
+
+
 def ler(dados: bytes, cadastro: list[dict] | None = None) -> dict:
     """{"grupos": [{nome, unidade, quantidade_medida, quantidade_acumulada, valor_medido_centavos,
     valor_acumulado_centavos, itens: [...]}], "total_centavos", "grupo_por": "cadastro" | "planilha"}.
     `cadastro`: [{"nome", "itens_planilha": [prefixos]}] do cadastro de custo da obra, na ordem do yaml."""
     try:
+        _recusar_indice_grande(dados)
         with zipfile.ZipFile(io.BytesIO(dados)) as z:
             if len(z.infolist()) > MAX_ENTRADAS:
                 raise PlanilhaRecusada(GRANDE_DEMAIS)

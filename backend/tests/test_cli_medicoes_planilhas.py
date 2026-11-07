@@ -101,3 +101,22 @@ def test_leitura_e_evento_que_nao_se_altera_nem_se_apaga(banco):
                       (r["medicao_id"], r["sha256"]))
     finally:
         c.close()
+
+
+def test_dois_arquivos_da_mesma_medicao_e_medicao_com_planilha_anexada_sao_pulados(banco, capsys):
+    c = db.get_conn()
+    mid = c.execute("SELECT id FROM medicoes WHERE numero=2").fetchone()[0]
+    c.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, acumulado_anterior_centavos, "
+              "origem) VALUES (?, 1, ?, 0, 'manual')", (mid, TOTAL))
+    c.commit()
+    c.close()
+    pasta = banco / "p"
+    pasta.mkdir()
+    (pasta / "01ª Medição.xlsx").write_bytes(planilha())
+    (pasta / "01ª Medição Rev01.xlsx").write_bytes(planilha())
+    (pasta / "02ª Medição.xlsx").write_bytes(planilha())
+    assert cli.main(["medicoes", "planilhas", "IC 9/2026", str(pasta)]) == 0
+    saida = capsys.readouterr().out
+    assert saida.count("mais de um arquivo da medição nº 1") == 2
+    assert "a medição tem planilha/carta anexada" in saida
+    assert _contar("SELECT COUNT(*) FROM medicao_grupos") == 0

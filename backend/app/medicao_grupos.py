@@ -121,10 +121,22 @@ def ler_anexo(conn, usuario_id: int, medicao_id: int, versao: int, dados: bytes)
     return {"situacao": r["situacao"], "aviso": PREFIXO_AVISO + r["motivo"] if r["motivo"] else None}
 
 
+def _filtro_vigente(conn, medicao_id: int) -> tuple[str, tuple]:
+    """As leituras que valem: na medicao com planilha/carta, so' as da versao vigente (a revisao em PDF, ou ainda
+    sem leitura, fica sem leitura: a da versao anterior nao representa mais o pedido); na medicao sem
+    planilha/carta (historico), as da carga."""
+    vigente = conn.execute("SELECT id FROM medicao_planilhas WHERE medicao_id=? ORDER BY versao DESC LIMIT 1",
+                           (medicao_id,)).fetchone()
+    if vigente is None:
+        return "g.medicao_id=? AND g.planilha_id IS NULL", (medicao_id,)
+    return "g.medicao_id=? AND g.planilha_id=?", (medicao_id, vigente["id"])
+
+
 def situacao(conn, medicao_id: int) -> dict:
-    """A leitura mais nova da medicao: {"situacao": "sem_leitura" | "lida" | "recusada", "aviso"}."""
-    r = conn.execute("SELECT situacao, motivo FROM medicao_grupos WHERE medicao_id=? ORDER BY id DESC LIMIT 1",
-                     (medicao_id,)).fetchone()
+    """A leitura mais nova que vale: {"situacao": "sem_leitura" | "lida" | "recusada", "aviso"}."""
+    onde, args = _filtro_vigente(conn, medicao_id)
+    r = conn.execute(f"SELECT g.situacao, g.motivo FROM medicao_grupos g WHERE {onde} ORDER BY g.id DESC LIMIT 1",
+                     args).fetchone()
     if r is None:
         return {"situacao": "sem_leitura", "aviso": None}
     return {"situacao": r["situacao"], "aviso": PREFIXO_AVISO + r["motivo"] if r["situacao"] == "recusada" else None}
@@ -133,10 +145,11 @@ def situacao(conn, medicao_id: int) -> dict:
 def grupos(conn, medicao_id: int) -> dict:
     """O medido por grupo da leitura lida mais nova, com os itens, e a situacao da leitura mais nova (uma recusa
     depois da ultima lida volta como aviso, com os grupos da lida)."""
+    onde, args = _filtro_vigente(conn, medicao_id)
     lida = conn.execute(
         "SELECT g.id, g.origem, g.planilha_id, p.versao, g.sha256, g.grupo_por, g.total_centavos, g.pedido_centavos, "
         "g.criado_em FROM medicao_grupos g LEFT JOIN medicao_planilhas p ON p.id=g.planilha_id "
-        "WHERE g.medicao_id=? AND g.situacao='lida' ORDER BY g.id DESC LIMIT 1", (medicao_id,)).fetchone()
+        f"WHERE {onde} AND g.situacao='lida' ORDER BY g.id DESC LIMIT 1", args).fetchone()
     saida = {**situacao(conn, medicao_id), "leitura": dict(lida) if lida else None, "grupos": []}
     if lida is None:
         return saida
@@ -157,9 +170,17 @@ def numero_no_nome(nome: str) -> int | None:
 def carregar_pasta(conn, usuario_id: int | None, contrato_id: int, pasta: Path, ensaio: bool = False) -> list[dict]:
     """Um xlsx por medicao, o nº da medicao no nome do arquivo. Cada arquivo devolve {"arquivo", "medicao",
     "situacao" ("lida", "repetida", "recusada", "pulado"), "motivo", "total_centavos", "pedido_centavos",
-    "diferenca_centavos"}. Arquivo que nao casa com medicao nenhuma e' listado e pulado."""
+    "diferenca_centavos"}. Arquivo que nao casa com medicao nenhuma e' listado e pulado, e tambem os varios arquivos
+    com o mesmo nº (qual vale e' escolha de quem monta a pasta) e a medicao que ja' tem planilha/carta anexada (a
+    leitura dela vem do anexo)."""
     saida = []
-    for caminho in sorted(p for p in pasta.iterdir() if p.is_file() and not p.name.startswith("~$")):
+    caminhos = sorted(p for p in pasta.iterdir() if p.is_file() and not p.name.startswith("~$"))
+    por_numero: dict[int, int] = {}
+    for p in caminhos:
+        n = numero_no_nome(p.name) if p.suffix.lower() == ".xlsx" else None
+        if n is not None:
+            por_numero[n] = por_numero.get(n, 0) + 1
+    for caminho in caminhos:
         linha = {"arquivo": caminho.name, "medicao": None, "situacao": "pulado", "motivo": None,
                  "total_centavos": None, "pedido_centavos": None, "diferenca_centavos": None}
         saida.append(linha)
@@ -170,10 +191,17 @@ def carregar_pasta(conn, usuario_id: int | None, contrato_id: int, pasta: Path, 
         if numero is None:
             linha["motivo"] = "sem o nº da medição no nome (ex.: 15ª)"
             continue
+        if por_numero[numero] > 1:
+            linha["motivo"] = f"mais de um arquivo da medição nº {numero} na pasta: deixe só o que vale"
+            continue
         m = conn.execute("SELECT * FROM medicoes WHERE contrato_id=? AND numero=? AND tipo='execucao'",
                          (contrato_id, numero)).fetchone()
         if m is None:
             linha["motivo"] = f"nenhuma medição de execução nº {numero} neste contrato"
+            continue
+        if conn.execute("SELECT 1 FROM medicao_planilhas WHERE medicao_id=?", (m["id"],)).fetchone() is not None:
+            linha.update(medicao=nome_medicao(m["numero"], m["tipo"]),
+                         motivo="a medição tem planilha/carta anexada: a leitura vem do anexo")
             continue
         linha["medicao"] = nome_medicao(m["numero"], m["tipo"])
         dados = caminho.read_bytes()

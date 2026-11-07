@@ -171,3 +171,18 @@ def test_conferir_total_tolera_um_real_e_recusa_com_a_diferenca():
         leitura.conferir_total(TOTAL, TOTAL + 101)
     msg = str(e.value)
     assert "diferença de R$ 1,01" in msg and "R$ 20.693,10" in msg and "R$ 20.694,11" in msg
+
+
+def test_prefixo_do_cadastro_respeita_o_ponto():
+    linhas = [("1", None, "A", GRUPO), ("1.1", "1", "Item um", "m", 1, 1, 1, 1.0, 1.0, 1.0),
+              ("10", None, "B", GRUPO), ("10.1", "2", "Item dez", "m", 1, 1, 1, 2.0, 2.0, 2.0)]
+    lido = leitura.ler(planilha(linhas), [{"nome": "Grupo um", "itens_planilha": ["1"]}])
+    assert [(g["nome"], g["valor_medido_centavos"]) for g in lido["grupos"]] == [("Grupo um", 1_00), ("outros", 2_00)]
+
+
+def test_indice_do_zip_grande_demais_recusa_antes_de_abrir():
+    dados = bytearray(planilha())
+    fim = dados.rfind(b"PK\x05\x06")
+    dados[fim + 12:fim + 16] = (leitura.MAX_BYTES_INDICE + 1).to_bytes(4, "little")
+    with pytest.raises(leitura.PlanilhaRecusada, match="grande demais"):
+        leitura.ler(bytes(dados))
