@@ -174,6 +174,36 @@ def test_reajuste_da_obra_traz_o_estado_de_cada_competencia_e_o_ciclo_a_reemitir
         "faturado_centavos": None, "recebida_em": None, "medicao_numero": 1}
 
 
+def test_reajuste_da_obra_traz_a_marca_de_aviso_e_os_aditivos_da_linha_do_tempo(api, monkeypatch):
+    """Issue #275: cada competencia diz o aviso que a marca na aba; cada ciclo traz os aditivos da linha do tempo."""
+    import datetime
+
+    from app import tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 9, 10))
+    cl, cid, _ = api
+    assert cl.get(f"/api/contratos/{cid}/reajuste").json()["ciclos"][0]["aditivos"] == []
+    c = db.get_conn()
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+              "enviado_em) VALUES (?, 'reajuste', 'cadastro', '2024-06', 2026, 'CT-1-LT-2026', 'enviado', '2026-06-10')",
+              (cid,))
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero) VALUES (?, 'prazo', 'assinado', "
+              "'2026-08-01', '2º TA')", (cid,))
+    c.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, valor_previsto_centavos, "
+              "origem) VALUES (?, '2024-06', 2026, '2026-07', 10001, 'manual')", (cid,))
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 1, 'reajuste', '2026-07', 'planilha_enviada', 10102)", (cid,))
+    c.commit(); c.close()
+    r = cl.get(f"/api/contratos/{cid}/reajuste").json()
+    assert [(a["numero"], a["tipo"], a["data_assinatura"]) for a in r["ciclos"][0]["aditivos"]] == \
+        [("2º TA", "prazo", "2026-08-01")]
+    [x] = r["competencias_por_ciclo"][0]["competencias"]
+    assert x["avisos"] == ["fora_da_previsao"]                 # R$ 1,01 acima do previsto
+    # rodada 1 da PR #438: a origem de cada soma e a linha do tempo de cada ciclo com pleito enviado
+    assert (x["medicoes_pedido"], x["medicoes_aprovado"], x["medicoes_nota"]) == ([1], [], [])
+    assert [(t["data_base_mes"], t["ciclo"], t["termo"], [a["numero"] for a in t["aditivos"]])
+            for t in r["linhas_do_tempo"]] == [("2024-06", 2026, None, ["2º TA"])]
+
+
 def test_pecas_do_orgao_entram_como_anexo_pela_api(api):
     """Issue #50: a API aceita as pecas que o orgao pede no pleito de reajuste (falencia, contrato social, ...)."""
     cl, cid, _ = api
