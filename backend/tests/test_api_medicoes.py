@@ -1581,7 +1581,7 @@ def test_grupos_sai_de_um_retrato_so(client_admin, monkeypatch):
     monkeypatch.setattr(medicao_grupos, "_filtro_vigente", filtro_e_revisao_no_meio)
     g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
     assert gravou
-    assert g in (antes, sem_leitura)
+    assert g == antes                       # o retrato e' o da primeira consulta: a V2 entrou depois dele
     assert client_admin.get(f"/api/medicoes/{mid}/grupos").json() == sem_leitura     # a seguinte ja' ve a V2
     assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"] == {"situacao": "sem_leitura",
                                                                                    "aviso": None}
@@ -1606,3 +1606,7 @@ def test_retrato_de_leitura_nao_deixa_transacao_aberta():
             assert conn.execute("SELECT count(*) FROM t").fetchone()[0] == 1
         assert conn.in_transaction
     assert conn.execute("SELECT count(*) FROM t").fetchone()[0] == 1
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        with db.leitura(conn):
+            conn.execute("SELECT * FROM nao_existe")
+    assert not conn.in_transaction

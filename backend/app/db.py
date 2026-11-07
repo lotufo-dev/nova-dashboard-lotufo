@@ -155,15 +155,21 @@ def leitura(conn):
     """Varias consultas de um retrato so' (issue #501): no WAL, a transacao de leitura fixa o banco na primeira
     consulta, e o que outra conexao gravar depois nao aparece ate' ela fechar. Fecha sempre a transacao que abriu
     (so' leu: nada a gravar), para a mutacao seguinte na mesma conexao entrar. Dentro de uma transacao ja' aberta
-    (uma mutacao, por exemplo), ja' e' um retrato: nao abre nem fecha outra."""
+    (uma mutacao, por exemplo), ja' e' um retrato: nao abre nem fecha outra. So' leitura dentro dele: um
+    `mutacao` aberto aqui dentro recusa (RuntimeError), porque a transacao nao e' dele."""
     if conn.in_transaction:
         yield conn
         return
     conn.execute("BEGIN")
     try:
         yield conn
-    finally:
-        conn.rollback()
+    except BaseException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass                        # o erro de dentro do bloco e' o que importa, nao o do rollback
+        raise
+    conn.rollback()
 
 
 # `ALTER TABLE <t> ADD COLUMN <c> ...;` -- a UNICA forma de DDL deste projeto que o
