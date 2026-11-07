@@ -305,7 +305,8 @@ ESPERANDO_APOSTILAMENTO = ("pedida", "aprovada", "faturada")
 def _esperando_apostilamento(conn, contrato_id: int) -> list[dict]:
     """As competencias de reajuste do contrato ja' medidas e ainda nao recebidas que nenhum termo cobre, pelo criterio
     unico da aba Reajuste (`reajuste.cobertura_das_competencias` e `reajuste.termo_sem_meses`, issue #275): nem o
-    apostilamento que lista o mes (`apostilada`), nem o termo sem meses que fecha o ciclo. A medicao sem data-base no
+    apostilamento que lista o mes (`apostilada`), nem o termo sem meses que fecha o ciclo, nem o so' com `periodo`
+    no mes do periodo (`reajuste.termo_cobre_o_mes`, issue #444). A medicao sem data-base no
     contrato de duas (grupo sem data-base de `competencias_por_ciclo`) so' fica coberta quando todas as datas-base em
     que o mes tem reajuste o cobrem; sem nenhuma (contrato sem data-base, ou mes antes do 1o aniversario de todas,
     revisor na rodada 2 da PR #431), nenhum termo a cobre e ela espera."""

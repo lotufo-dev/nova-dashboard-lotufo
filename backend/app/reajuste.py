@@ -413,37 +413,74 @@ def avisos_da_competencia(x: dict, coberta: bool) -> list[str]:
     return out
 
 
+def _periodo_do_termo(d: dict) -> tuple[str, str] | None:
+    per = d.get("periodo")
+    if isinstance(per, dict) and per.get("de") and per.get("ate"):
+        return str(per["de"]), str(per["ate"])
+    return None
+
+
 def termo_sem_meses(termo: dict) -> bool:
     """O termo que fecha o ciclo sem dizer os meses que cobre: o termo aditivo de valor de reajuste (issue #390) e o
-    apostilamento sem a lista `competencias` nem `percentual` com `periodo`, os dois jeitos de `competencias_por_ciclo`
-    marcar a competencia `apostilada` (`competencias_apostiladas` e `_percentuais`). Sem meses, o termo cobre o ciclo
-    inteiro, como em `ciclos`."""
+    apostilamento sem a lista `competencias` e sem `periodo`. Sem meses, o termo cobre o ciclo inteiro, como em
+    `ciclos`. O `periodo` sozinho diz os meses (issue #444): o cadastro o trata como limite do termo
+    (`cadastro_arquivos._periodo_e_competencias`), e o termo cobre so' os meses dele (`termo_cobre_o_mes`)."""
     if termo.get("origem") == "aditivo":
         return True
     d = termo.get("dados") or {}
-    per = d.get("periodo")
-    com_periodo = d.get("percentual") not in (None, "") and isinstance(per, dict) \
-        and bool(per.get("de")) and bool(per.get("ate"))
-    return not (d.get("competencias") or com_periodo)
+    return not (d.get("competencias") or _periodo_do_termo(d))
+
+
+def termo_cobre_o_mes(termo: dict, competencia: str) -> bool:
+    """O termo do ciclo cobre a competencia sem ela estar `apostilada`: o termo sem meses (`termo_sem_meses`) cobre o
+    ciclo inteiro; o apostilamento so' com `periodo` (sem lista nem percentual, que ja' marcam a competencia
+    `apostilada`) cobre so' os meses do periodo (issue #444)."""
+    if termo_sem_meses(termo):
+        return True
+    d = termo.get("dados") or {}
+    per = _periodo_do_termo(d)
+    if per is None or d.get("competencias") or d.get("percentual") not in (None, ""):
+        return False
+    return per[0] <= competencia <= per[1]
+
+
+def _termos_com_periodo(conn, contrato_id: int, unica: str | None) -> dict[tuple[str, int], list[dict]]:
+    """Por (base, ciclo), todos os apostilamentos que valem (`_termo_vale`) com `periodo`, na base e no ciclo
+    resolvidos como em `_percentuais` (revisor e gate Sol, rodada 1 da PR #524): o mes no periodo de qualquer termo so'
+    com `periodo` fica coberto (`termo_cobre_o_mes`), seja qual for o termo que `apostilamento_do_ciclo` escolhe."""
+    out: dict[tuple[str, int], list[dict]] = {}
+    for r in conn.execute(f"SELECT * FROM instrumentos i WHERE i.contrato_id=? AND i.tipo='apostilamento_reajuste' "
+                          f"AND {_termo_vale('i')}", (contrato_id,)):
+        d = json.loads(r["dados"] or "{}")
+        if _periodo_do_termo(d) is None:
+            continue
+        base, ciclo = base_do_termo(d, r["data_base_mes"], unica), ciclo_do_apostilamento(d, r["data"])
+        if base is not None and ciclo is not None:
+            out.setdefault((base, ciclo), []).append({"dados": d})
+    return out
 
 
 def cobertura_das_competencias(conn, contrato_id: int, grupos: list[dict]):
     """O criterio unico de "algum termo cobre a competencia" (issue #275, o mesmo da diretoria na #279), sobre os
     `grupos` de `competencias_por_ciclo`. Devolve `coberta(base, ciclo, x)` para a linha `x` do grupo (base, ciclo):
 
-    - com data-base: a competencia `apostilada`, ou o ciclo fechado (`apostilamento_do_ciclo`) por termo sem meses
-      (`termo_sem_meses`);
+    - com data-base: a competencia `apostilada`; ou o ciclo fechado pelo termo do ciclo (`apostilamento_do_ciclo`) sem
+      meses (`termo_sem_meses`); ou o mes no periodo de qualquer apostilamento que vale so' com `periodo`, na mesma
+      base e ciclo (`termo_cobre_o_mes`, issue #444);
     - sem data-base (medicao de base incerta, contrato de duas): coberta so' quando toda data-base em que o mes tem
       reajuste a cobre; sem nenhuma, nenhum termo a cobre."""
     bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes",
                                         (contrato_id,))]
-    fechados: dict[tuple[str, int], bool] = {}
+    termos: dict[tuple[str, int], dict | None] = {}
+    com_periodo = _termos_com_periodo(conn, contrato_id, bases[0] if len(bases) == 1 else None)
 
-    def fechado(base: str, ciclo: int) -> bool:
-        if (base, ciclo) not in fechados:
-            termo = apostilamento_do_ciclo(conn, contrato_id, base, ciclo, len(bases) == 1)
-            fechados[(base, ciclo)] = termo is not None and termo_sem_meses(termo)
-        return fechados[(base, ciclo)]
+    def fechado(base: str, ciclo: int, comp: str) -> bool:
+        if (base, ciclo) not in termos:
+            termos[(base, ciclo)] = apostilamento_do_ciclo(conn, contrato_id, base, ciclo, len(bases) == 1)
+        termo = termos[(base, ciclo)]
+        if termo is not None and termo_cobre_o_mes(termo, comp):
+            return True
+        return any(termo_cobre_o_mes(t, comp) for t in com_periodo.get((base, ciclo), ()))
 
     linhas: dict[tuple[str, str], list[tuple[int | None, bool]]] = {}
     for g in grupos:
@@ -456,11 +493,11 @@ def cobertura_das_competencias(conn, contrato_id: int, grupos: list[dict]):
         ls = linhas.get((base, comp)) or [(_ciclo_da_competencia(base, comp), False)]
         if all(y is None for y, _ in ls):
             return None
-        return any(a or (y is not None and fechado(base, y)) for y, a in ls)
+        return any(a or (y is not None and fechado(base, y, comp)) for y, a in ls)
 
     def coberta(base: str | None, ciclo: int | None, x: dict) -> bool:
         if base is not None:
-            return x["apostilada"] or (ciclo is not None and fechado(base, ciclo))
+            return x["apostilada"] or (ciclo is not None and fechado(base, ciclo, x["competencia"]))
         vs = [v for v in (na_base(b, x["competencia"]) for b in bases) if v is not None]
         return bool(vs) and all(vs)
 
@@ -542,7 +579,7 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
             "competencia": comp, "estado": "prevista", "previsto_centavos": None, "previsto_origem": None,
             "medicao_id": None, "medicao_numero": None, "medicao_estado": None, "pedido_centavos": None,
             "aprovado_centavos": None, "apostilada": False, "apostilado_centavos": None, "apostilado_percentual": None,
-            "apostilamento_chave": None, "medicao_orgao": None, "faturado_centavos": None, "recebida_em": None,
+            "apostilamento_chave": None, "medicao_orgao": None, "faturado_centavos": None, "recebida_em": None, "recebidas": [],
             "medido_nao_recebido_centavos": None, "medicoes": [], "medicoes_pedido": [], "medicoes_aprovado": [],
             "medicoes_nota": [], "data_base_incerta": False, "_medicoes": []})
 
@@ -615,7 +652,11 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
         if ms:
             passo, _, m = max(ms, key=lambda v: (v[0], v[1]))
             x.update(medicao_id=m["id"], medicao_numero=m["numero"], medicao_estado=m["estado"],
-                     recebida_em=m["recebida_em"], medicoes=sorted(v[1] for v in ms),
+                     recebida_em=max((v[2]["recebida_em"] for v in ms if v[2]["recebida_em"]), default=None),
+                     # issue #445: todas as baixas da competencia (numero e data), a celula mostra a ultima
+                     recebidas=sorted(({"numero": v[1], "recebida_em": v[2]["recebida_em"]} for v in ms
+                                       if v[2]["recebida_em"]), key=lambda r: r["numero"]),
+                     medicoes=sorted(v[1] for v in ms),
                      pedido_centavos=_soma(v[2]["valor_protocolado_centavos"] for v in ms),
                      aprovado_centavos=_soma(v[2]["valor_atestado_centavos"] for v in ms),
                      faturado_centavos=_soma(faturado.get(v[2]["id"]) for v in ms),

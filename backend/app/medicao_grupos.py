@@ -225,7 +225,12 @@ def _filtro_vigente(conn, medicao_id: int) -> tuple[str, tuple] | None:
 def situacao(conn, medicao_id: int) -> dict:
     """A leitura mais nova que vale: {"situacao": "sem_leitura" | "lida" | "recusada" | "falhou", "aviso"}. A falha
     inesperada so' aparece quando nao ha' leitura (lida ou recusada) no mesmo contexto: ela nao desfaz a que existe."""
-    filtro = _filtro_vigente(conn, medicao_id)
+    with db.leitura(conn):
+        return _situacao(conn, _filtro_vigente(conn, medicao_id))
+
+
+def _situacao(conn, filtro: tuple[str, tuple] | None) -> dict:
+    """A situacao sobre um filtro ja' calculado: quem tambem le os grupos usa o mesmo (issue #501)."""
     if filtro is None:
         return {"situacao": "sem_leitura", "aviso": None}
     onde, args = filtro
@@ -238,9 +243,15 @@ def situacao(conn, medicao_id: int) -> dict:
 
 def grupos(conn, medicao_id: int) -> dict:
     """O medido por grupo da leitura lida mais nova que vale, com os itens, e a situacao (uma recusa depois da
-    ultima lida volta como aviso, com os grupos da lida)."""
-    filtro = _filtro_vigente(conn, medicao_id)
-    saida = {**situacao(conn, medicao_id), "leitura": None, "grupos": []}
+    ultima lida volta como aviso, com os grupos da lida). Tudo sai de um retrato so' (issue #501): o filtro e' calculado
+    uma vez e a situacao, a leitura e os itens sao lidos dele na mesma transacao de leitura, para uma revisao gravada
+    no meio nao misturar a situacao de uma versao com os grupos de outra."""
+    with db.leitura(conn):
+        return _grupos(conn, _filtro_vigente(conn, medicao_id))
+
+
+def _grupos(conn, filtro: tuple[str, tuple] | None) -> dict:
+    saida = {**_situacao(conn, filtro), "leitura": None, "grupos": []}
     if filtro is None:
         return saida
     onde, args = filtro
@@ -302,11 +313,15 @@ def _anexos(conn, usuario_id, contrato_id: int, ensaio: bool) -> list[dict]:
         if caminho is None or not caminho.is_file():
             linha["motivo"] = "o arquivo do anexo não foi encontrado"
             continue
+        # sem o hash registrado nao ha' como conferir o arquivo: nao se liga qualquer bytes a versao (#503)
+        if not r["sha256_planilha"]:
+            linha["motivo"] = "a versão não tem o sha256 da planilha registrado"
+            continue
         dados, linha["motivo"] = _ler_arquivo(caminho)
         if linha["motivo"]:
             continue
         # o arquivo gravado tem de ser o que a versao registrou: trocado ou corrompido, nao se liga a ela
-        if r["sha256_planilha"] and arquivos.sha_de(dados) != r["sha256_planilha"]:
+        if arquivos.sha_de(dados) != r["sha256_planilha"]:
             linha["motivo"] = "o arquivo do anexo não confere com o registrado na versão"
             continue
         try:
