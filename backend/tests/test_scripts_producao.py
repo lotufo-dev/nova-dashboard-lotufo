@@ -1197,10 +1197,18 @@ def test_skill_deploy_confere_o_arquivo_da_instalacao_antes_de_qualquer_git_e_a_
     secao = skill[skill.index("## Antes de rodar: o que vai subir"):skill.index("## Rodar")]
     bloco = secao[secao.index("```powershell") + len("```powershell"):]
     linhas = [linha.strip() for linha in bloco[:bloco.index("```")].splitlines() if linha.strip()]
-    assert linhas[0] == "Test-Path C:\\DashboardLotufo\\segredos\\instalacao.json"
-    assert sum("Test-Path" in linha for linha in linhas) == 1
+    # gate Sol da PR #537: o arquivo e' o da raiz da tarefa (-Raiz), lida como no deploy.ps1, nunca C:\ fixo
+    teste = next(i for i, linha in enumerate(linhas) if "Test-Path" in linha)
+    assert linhas[teste] == 'Test-Path (Join-Path $raiz "segredos\\instalacao.json")'
+    assert not any("git " in linha for linha in linhas[:teste])
+    antes = "\n".join(linhas[:teste])
+    assert 'Agendador @("/Query", "/TN", "DashboardLotufo", "/XML") 30' in antes and "exit 1" in antes
+    assert _regex_da_raiz(_ler("deploy.ps1")) in antes
+    assert "C:\\DashboardLotufo\\segredos" not in antes
     # a chamada 1 pelo Mac vai num .ps1 com -File, nunca pelo stdin (runbook, "Mudar de servidor")
     caminhos = skill[skill.index("## Dois caminhos: local elevado ou SSH"):skill.index("## Antes de rodar")]
     chamada1 = caminhos[caminhos.index("  1. só leitura"):caminhos.index("  2. o deploy")]
     assert "-File" in chamada1 and "scp" in chamada1
     assert "nunca pelo stdin" in chamada1
+    # gate Sol da PR #537: nada de nome fixo em C:\Temp para o script elevado
+    assert "C:/Temp" not in chamada1 and "C:\\Temp" not in chamada1 and "<aleatorio>" in chamada1

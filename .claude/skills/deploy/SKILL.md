@@ -39,11 +39,12 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
   nunca inline (aspas e `&` quebram no PowerShell 5.1); conferências numa linha só, e `$LASTEXITCODE` depois de cada
   `git`, com `exit 1`, porque no `-Command -` falha nativa não para o script. Em **três chamadas em sequência**:
   1. só leitura: `Set-Location` na pasta principal, `git switch master`, `git pull --ff-only`, `git rev-parse master origin/master`
-     iguais, `IsInRole(...Administrator)` acima dando `True` e o bloco "Antes de rodar" (arquivo da instalação, log,
+     iguais, `IsInRole(...Administrator)` acima dando `True` e o bloco "Antes de rodar" (arquivo da instalação na raiz da tarefa agendada, log,
      migrações, frontend). Daqui a sessão avisa o Leo da migração e escolhe `-SemFrontend`. As pré-condições 1 e 2 (`gh`)
      rodam no Mac. Esta chamada vai num `.ps1` temporário no Mac (fora do repositório), copiado com
-     `scp script.ps1 <servidor>:C:/Temp/deploy-leitura.ps1`, rodado com
-     `ssh <servidor> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\deploy-leitura.ps1'` e apagado no fim,
+     `scp script.ps1 <servidor>:deploy-leitura-<aleatorio>.ps1` (caminho relativo = pasta do perfil da conta de deploy,
+     que só ela e os administradores escrevem; nome novo a cada execução), rodado com
+     `ssh <servidor> 'powershell -NoProfile -ExecutionPolicy Bypass -File deploy-leitura-<aleatorio>.ps1'` e apagado no fim,
      nunca pelo stdin: no `-Command -` o primeiro comando nativo consome o resto do script e o `Test-Path` do arquivo da
      instalação não imprime nada (runbook, "Mudar de servidor"; issue #446);
   2. o deploy: sentinela e "Rodar" itens 1 a 3;
@@ -69,7 +70,11 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
 ## Antes de rodar: o que vai subir
 
 ```powershell
-Test-Path C:\DashboardLotufo\segredos\instalacao.json
+. C:\DashboardLotufo\app\scripts\comum_agendador.ps1
+$tarefa = Agendador @("/Query", "/TN", "DashboardLotufo", "/XML") 30
+if ($tarefa.Estourou -or $tarefa.Codigo -ne 0) { Write-Host "tarefa DashboardLotufo nao lida; raiz desconhecida"; exit 1 }
+$raiz = if ([System.Net.WebUtility]::HtmlDecode($tarefa.Saida) -match '-Raiz\s+(?:"([^"]+)"|(\S+))') { if ($Matches[1]) { $Matches[1] } else { $Matches[2] } } else { "C:\DashboardLotufo" }
+Test-Path (Join-Path $raiz "segredos\instalacao.json")
 $atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()
 git log --oneline "$atual..origin/master"
 git diff --name-only "$atual" origin/master -- backend/migrations

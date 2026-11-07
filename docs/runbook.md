@@ -84,10 +84,11 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    Quando o `deploy.ps1` do diretório pinado é anterior à mudança que se está subindo no próprio script (casos marcados em
    "Subir e derrubar": #417, #443), a segunda chamada roda o de `origin/master` copiado para `C:\Temp\deploy` num `.ps1`
    copiado com `scp` e rodado com `-File` (seção "Instalação assinada", "Primeiro deploy"), não pelo stdin.
-3. **Primeira chamada, só leitura** (nada muda no servidor), num `.ps1` copiado com `scp` e rodado com `-File`, não pelo
-   stdin (no `-Command -` o primeiro comando nativo consome o resto do script e a conferência do arquivo da instalação
-   nunca imprimiria nada; issue #446): `Test-Path C:\DashboardLotufo\segredos\instalacao.json` antes de tudo (`True`;
-   senão avisar o Leo, seção "Instalação assinada"); `Set-Location` na pasta principal do projeto; `git switch master`;
+3. **Primeira chamada, só leitura** (nada muda no servidor), num `.ps1` copiado com `scp` para a pasta do perfil da conta de deploy (caminho relativo,
+   nome novo a cada execução) e rodado com `-File`, não pelo stdin (no `-Command -` o primeiro comando nativo consome o resto do script e a conferência do arquivo da instalação
+   nunca imprimiria nada; issue #446): antes de tudo, `segredos\instalacao.json` na raiz que a tarefa agendada passa em `-Raiz`
+   (lida do `schtasks /Query /XML` pelo `Agendador` de `scripts\comum_agendador.ps1`, com tempo limite, como no
+   `deploy.ps1`; sem `-Raiz`, `C:\DashboardLotufo`) dando `True` (senão avisar o Leo, seção "Instalação assinada"); `Set-Location` na pasta principal do projeto; `git switch master`;
    `git pull --ff-only`; `git rev-parse master origin/master` iguais (senão `exit 1`); conferir administrador numa linha
    (`if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 1 }`);
    e imprimir o que vai subir: `git log --oneline "$atual..origin/master"` e `git diff --name-only` de `backend/migrations` e de `frontend`,
