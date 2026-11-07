@@ -796,3 +796,26 @@ def test_falha_do_servico_de_email_vai_para_a_saude_em_portugues_e_a_excecao_par
     assert frase in erro
     _sem_codigo_interno(erro)
     assert "TimeoutError" in caplog.text           # o detalhe tecnico fica so' no log
+
+
+@pytest.mark.parametrize("mensagem", [
+    "Token Microsoft recusado (invalid_grant): conecte de novo em Minha conta",
+    "Sua conta Microsoft não está conectada: conecte em Minha conta",
+    "Arquivo do token Microsoft vazio: refaça o login",
+    "Login Microsoft respondeu HTTP 400"])
+def test_token_recusado_ou_conta_desconectada_pede_para_reconectar(mensagem):
+    # sem status (nao houve HTTP do /send): nao pode virar "nao respondeu, tente mais tarde"
+    assert copia_dono_envio.motivo(graph.ErroGraph(mensagem)) == copia_dono_envio.RECONECTAR
+    assert "Minha conta" in copia_dono_envio.RECONECTAR
+
+
+def test_falha_de_rede_e_erro_sem_classificacao():
+    assert copia_dono_envio.motivo(graph.ErroGraph("Graph inacessível (TimeoutError)")) == copia_dono_envio.SERVICO_FORA
+    assert copia_dono_envio.motivo(graph.ErroGraph("Anexos somam 40 MB")) == copia_dono_envio.SERVICO_FALHOU
+
+
+def test_frases_da_copia_do_dono_nao_trazem_codigo_interno():
+    for nome in ("SEM_CADASTRO", "SEM_REMETENTE", "SEM_USUARIO", "SERVICO_FORA", "SERVICO_RECUSOU", "RECONECTAR",
+                 "SERVICO_FALHOU", "COPIA_DANIFICADA", "SERVICO_NAO_CONFIGURADO"):
+        _sem_codigo_interno(getattr(copia_dono_envio, nome))
+    assert "sha256" not in copia_dono_envio.COPIA_DANIFICADA and "age" not in copia_dono_envio.COPIA_DANIFICADA.split()

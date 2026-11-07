@@ -32,6 +32,9 @@ SEM_REMETENTE = "Configure quem envia a cópia do dono no cadastro"
 SEM_USUARIO = "Nenhum usuário ativo é quem envia a cópia do dono: corrija o cadastro"
 SERVICO_FORA = "o serviço de e-mail não respondeu; tente de novo mais tarde"
 SERVICO_RECUSOU = "o serviço de e-mail recusou o envio; tente de novo mais tarde"
+RECONECTAR = "a conta Microsoft de quem envia não foi aceita pelo serviço de e-mail: reconecte em Minha conta"
+SERVICO_FALHOU = "o envio pelo serviço de e-mail falhou; detalhes no log do servidor"
+COPIA_DANIFICADA = "o arquivo da cópia do dono está danificado: gere outra cópia; nada foi enviado"
 SERVICO_NAO_CONFIGURADO = "o envio de e-mail não está configurado neste servidor"
 SEM_COPIA = "Nenhuma cópia do dono gerada ainda"
 _CARIMBO = re.compile(r"dashboard-dono-(\d{8}-\d{6})\.tar\.age$")
@@ -61,13 +64,13 @@ def _conferir_copia(arquivo: Path, dados: bytes, sha: str) -> None:
     """So' sai o que a geracao gravou: arquivo age (nunca um `.tar` em claro com o mesmo nome) e com o sha256 que a
     geracao grava ao lado (`<arquivo>.sha256`). Antes da reserva: a recusa nao deixa rastro."""
     if not dados.startswith(CABECALHO_AGE):
-        raise CopiaInvalida("o arquivo da cópia do dono não é um arquivo cifrado (age): nada foi enviado")
+        raise CopiaInvalida(COPIA_DANIFICADA)
     try:
         gravado = (arquivo.parent / f"{arquivo.name}.sha256").read_text(encoding="utf-8").split()
     except (OSError, UnicodeError):
-        raise CopiaInvalida("falta o sha256 da cópia do dono gravado ao lado dela: nada foi enviado") from None
+        raise CopiaInvalida(COPIA_DANIFICADA) from None
     if not gravado or gravado[0].lower() != sha:
-        raise CopiaInvalida("a cópia do dono não confere com o sha256 gravado ao lado dela: nada foi enviado")
+        raise CopiaInvalida(COPIA_DANIFICADA)
 
 
 def _config(conn) -> dict:
@@ -327,9 +330,15 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
 def motivo(e: BaseException) -> str:
     """O que vai para a Saude: frase operacional. O detalhe tecnico (a excecao) fica so' no log."""
     if isinstance(e, graph.ErroGraph):
-        if e.status in (401, 403):
-            return "a conta Microsoft de quem envia não foi aceita pelo serviço de e-mail: reconecte em Minha conta"
-        return SERVICO_RECUSOU if e.status is not None and e.status < 500 else SERVICO_FORA
+        texto = str(e)
+        if e.status is None and "inacessível" in texto:     # so' falha de rede e' "nao respondeu"
+            return SERVICO_FORA
+        if e.status in (401, 403) or (e.status is None and any(
+                t in texto for t in ("Minha conta", "refaça o login", "Token Microsoft", "Login Microsoft"))):
+            return RECONECTAR
+        if e.status is None:
+            return SERVICO_FALHOU
+        return SERVICO_RECUSOU if e.status < 500 else SERVICO_FORA
     if isinstance(e, (ValueError, correio.EnvioNaoRegistrado)):
         return str(e)
     return backup._motivo(e)
