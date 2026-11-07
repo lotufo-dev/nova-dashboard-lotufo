@@ -148,7 +148,7 @@ function Formulario({ obra, mes, aoCancelar }: { obra: ObraResumo; mes: string; 
         <div className="iniciar-med__campos">
           <div className="campo">
             <label className="campo__rotulo" htmlFor="im-numero">Número</label>
-            <input id="im-numero" className="entrada--num num" inputMode="numeric" autoComplete="off" spellCheck={false} value={numero}
+            <input id="im-numero" name="numero" className="entrada--num num" inputMode="numeric" autoComplete="off" spellCheck={false} value={numero}
               aria-invalid={tentou && !numeroOk ? true : undefined} aria-describedby={tentou && !numeroOk ? "im-numero-erro" : undefined} onChange={e => setNumero(e.target.value.replace(/\D/g, "").slice(0, 3))} />
             <ErroCampo id="im-numero-erro" erro={tentou && !numeroOk ? "Informe o número da medição." : undefined} />
           </div>
@@ -164,7 +164,7 @@ function Formulario({ obra, mes, aoCancelar }: { obra: ObraResumo; mes: string; 
               </fieldset>
               <div className="campo">
                 <label className="campo__rotulo" htmlFor="im-carta">Nº da carta</label>
-                <input id="im-carta" className="entrada--num num" inputMode="numeric" autoComplete="off" spellCheck={false}
+                <input id="im-carta" name="numero_orgao" className="entrada--num num" inputMode="numeric" autoComplete="off" spellCheck={false}
                   value={numeroCarta} onChange={e => setNumeroCarta(e.target.value.replace(/\D/g, "").slice(0, 4))} />
               </div>
               <div className="campo">
