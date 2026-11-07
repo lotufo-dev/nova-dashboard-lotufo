@@ -12,12 +12,14 @@ def test_em_andamento_traz_o_passo_e_com_quem_esta(conn, cenario):
     _medicao(conn, ids["d"], 33, "execucao", "planilha_enviada", 3000, planilha_enviada_em="2026-10-07")
     conn.commit()
     por = {x["situacao"]: x for x in medicoes.resumo(conn, HOJE)["linhas"]}
-    assert (por["planilha-gerada"]["passo"], por["planilha-gerada"]["com_quem"]) == ({"numero": 1, "nome": "Planilha e carta"}, "Lotufo")
-    assert (por["planilha-enviada"]["passo"], por["planilha-enviada"]["com_quem"]) == ({"numero": 2, "nome": "Análise do órgão"}, "Órgão")
-    assert por["boletim-recebido"]["passo"] == {"numero": 3, "nome": "Espelhos"} and por["faturamento"]["passo"]["numero"] == 3
-    assert (por["enviar-nota"]["passo"], por["enviar-nota"]["com_quem"]) == ({"numero": 5, "nome": "Envio da nota"}, "Lotufo")
-    assert (por["aguardando-pagamento"]["passo"], por["aguardando-pagamento"]["com_quem"]) == ({"numero": 6, "nome": "Pagamento"}, "Órgão")
-    assert por["aguardando-nota"]["passo"]["nome"] == "Notas"
+    # os mesmos numeros e nomes das ETAPAS da pagina da medicao (Etapas.tsx): 5 etapas, nao 6
+    assert [por[s]["passo"] for s in ("planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota",
+                                      "enviar-nota", "aguardando-pagamento") if s in por] == [
+        {"numero": 1, "nome": "Espelho"}, {"numero": 1, "nome": "Espelho"}, {"numero": 1, "nome": "Espelho"},
+        {"numero": 2, "nome": "Faturamento"}, {"numero": 3, "nome": "Nota fiscal"}, {"numero": 4, "nome": "Envio ao órgão"},
+        {"numero": 5, "nome": "Pagamento"}]
+    assert (por["planilha-gerada"]["com_quem"], por["planilha-enviada"]["com_quem"]) == ("Lotufo", "Órgão")
+    assert (por["enviar-nota"]["com_quem"], por["aguardando-pagamento"]["com_quem"]) == ("Lotufo", "Órgão")
     # toda situacao do ciclo tem passo (a tela nunca fica sem selo)
     assert set(medicoes.PASSO_DA_SITUACAO) == set(medicoes.ORDEM_SITUACAO)
 
@@ -53,6 +55,15 @@ def test_reajuste_sozinho_no_mes_nao_tira_a_obra_de_iniciar_medicao(conn, cenari
     conn.execute("UPDATE medicoes SET competencia='2026-10' WHERE id=?", (r,))
     conn.commit()
     assert "Obra A" in {o["obra"] for o in medicoes.resumo(conn, HOJE)["obras"] if o["sem_no_mes"]}
+
+
+def test_obra_em_encerramento_fica_fora_de_iniciar_medicao(conn, cenario):
+    """A-21: a obra em encerramento nao e' ativa; sai da lista e da contagem de "Iniciar medicao"."""
+    ids = cenario
+    conn.execute("UPDATE contratos SET encerramento_iniciado_em='2026-10-01' WHERE id=?", (ids["a"],))
+    conn.commit()
+    r = medicoes.resumo(conn, HOJE)
+    assert "Obra A" not in {o["obra"] for o in r["obras"] if o["sem_no_mes"]} and r["contagens"]["iniciar"] == 4
 
 
 def test_ultima_medicao_traz_estado_e_valor(conn, cenario):

@@ -872,16 +872,15 @@ SITUACAO = {"planilha_gerada": "planilha-gerada", "planilha_enviada": "planilha-
             "protocolada": "aguardando-pagamento", "nf_emitida": "aguardando-pagamento"}
 ORDEM_SITUACAO = ("planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento")
 
-# Redesenho 2026-11 (#507, "Em andamento"): o passo da barra de passos da pagina da obra (1 Planilha e carta, 2 Analise do
-# orgao, 3 Espelhos, 4 Notas, 5 Envio da nota, 6 Pagamento) e com quem a medicao esta', por situacao. A numeracao e'
-# a mesma em toda obra (a MTPAR so' nao passa pelo 1 e pelo 2). Espelho gerado ainda e' do passo 3 (falta enviar ao
-# faturamento); espelho enviado espera a nota do faturamento (passo 4, dentro da Lotufo); so' a analise do orgao e o
-# pagamento estao com o orgao.
+# Redesenho 2026-11 (#507, "Em andamento"): o selo da lista usa as ETAPAS da pagina da medicao (frontend/src/Etapas.tsx:
+# 1 Espelho, 2 Faturamento, 3 Nota fiscal, 4 Envio ao orgao, 5 Pagamento; `etapaDe` la' e' esta mesma tabela), para a
+# medicao nao mostrar "6" na lista e "Etapa 5" na pagina. A #508 (fluxo unico na pagina da obra) redefine a barra de
+# passos e o selo acompanha. "Com quem": so' a analise do orgao (planilha enviada) e o pagamento estao com o orgao.
 PASSO_DA_SITUACAO = {
-    "planilha-gerada": (1, "Planilha e carta", "Lotufo"), "planilha-enviada": (2, "Análise do órgão", "Órgão"),
-    "boletim-recebido": (3, "Espelhos", "Lotufo"), "faturamento": (3, "Espelhos", "Lotufo"),
-    "aguardando-nota": (4, "Notas", "Lotufo"), "enviar-nota": (5, "Envio da nota", "Lotufo"),
-    "aguardando-pagamento": (6, "Pagamento", "Órgão"),
+    "planilha-gerada": (1, "Espelho", "Lotufo"), "planilha-enviada": (1, "Espelho", "Órgão"),
+    "boletim-recebido": (1, "Espelho", "Lotufo"), "faturamento": (2, "Faturamento", "Lotufo"),
+    "aguardando-nota": (3, "Nota fiscal", "Lotufo"), "enviar-nota": (4, "Envio ao órgão", "Lotufo"),
+    "aguardando-pagamento": (5, "Pagamento", "Órgão"),
 }
 
 # Sigla curta do contratante pela chave do orgao no cadastro (orgaos.chave). A SINFRA sai da familia, com a
@@ -1080,7 +1079,8 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
                     # conta como "obra ativa" (a definicao de `avisos.ativos`, a do Inicio)
                     "encerramento": bool(o["encerramento_iniciado_em"]),
                     "ultima": ultima_de.get(o["id"]), "ultima_medicao": ultima_info.get(o["id"]),
-                    "sem_no_mes": (o["id"], proxima(o["id"])[1]) not in com_medicao_no_mes,
+                    # A-21: a obra em encerramento nao e' ativa (o bloco `encerramento` acima): fica fora de "Iniciar medicao"
+                    "sem_no_mes": not o["encerramento_iniciado_em"] and (o["id"], proxima(o["id"])[1]) not in com_medicao_no_mes,
                     "ha_dias": ha_dias(ultima_de[o["id"]]["competencia"]) if o["id"] in ultima_de else None,
                     "prevista": prevista_dados.get(o["id"]),
                     "proxima": proxima(o["id"])[0], "proxima_tipo": proxima(o["id"])[1]}

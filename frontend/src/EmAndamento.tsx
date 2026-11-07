@@ -5,7 +5,7 @@ import { nivelParada, textoParada, type LinhaResumo } from "./resumoMedicoes";
 import Rolagem from "./Rolagem";
 
 // "Em andamento" (redesenho 2026-11, #507; tela aprovada em 06/11/2026): uma linha por medição iniciada e não recebida,
-// com o passo atual (selo com número e nome, o mesmo da barra de passos da página), com quem está (Lotufo ou órgão), há
+// com o passo atual (selo com número e nome, a etapa da página da medição, com o mesmo número e nome (a #508 redefine a barra e o selo acompanha)), com quem está (Lotufo ou órgão), há
 // quanto tempo está parada, o valor e "Abrir". Tudo vem de GET /api/medicoes/resumo; a tela só desenha.
 
 function Linha({ l }: { l: LinhaResumo }) {
