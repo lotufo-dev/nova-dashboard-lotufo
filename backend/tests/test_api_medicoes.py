@@ -1868,3 +1868,35 @@ def test_retrato_de_leitura_nao_deixa_transacao_aberta():
         with db.leitura(conn):
             conn.execute("SELECT * FROM nao_existe")
     assert not conn.in_transaction
+
+
+# --- issue #508: pagina da obra em medicao (passo 2, "com o orgao ha N dias uteis", e o medidor do pacote) ----------
+
+def test_dias_uteis_no_orgao_so_com_a_planilha_enviada(client_admin, monkeypatch):
+    import datetime
+    from app import tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 11, 9))
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["dias_uteis_no_orgao"] is None   # so' gerada
+    assert _enviar_por_fora(client_admin, mid, enviado_em="2026-11-05").status_code == 201
+    # quinta 05/11 ate' segunda 09/11: quinta e sexta (sabado e domingo nao contam)
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["dias_uteis_no_orgao"] == 2
+    assert client_admin.get(f"/api/contratos/{cid}/medicoes").json()[0]["dias_uteis_no_orgao"] == 2
+    _no_estado(mid, "boletim_recebido")     # o orgao respondeu: a contagem para
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["dias_uteis_no_orgao"] is None
+
+
+def test_pacote_da_planilha_tem_o_tamanho_da_carta_da_planilha_e_o_limite(client_admin):
+    cid = _contrato(client_admin)
+    mid = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    p = client_admin.get(f"/api/medicoes/{mid}").json()["pacote_planilha"]
+    enviados = _arquivos_planilha("oficio 1 2026-07-01")
+    assert p["carta"] == len(enviados["oficio"][1]) and p["planilha"] == len(enviados["planilha"][1])
+    assert p["total"] == p["carta"] + p["planilha"] and p["limite"] == 25 * 1024 * 1024
+
+
+def test_pacote_da_planilha_vazio_sem_planilha(client_admin):
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["pacote_planilha"] is None

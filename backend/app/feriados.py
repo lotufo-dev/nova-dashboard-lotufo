@@ -48,3 +48,13 @@ def somar_dias_uteis(inicio: datetime.date, n: int) -> datetime.date:
             if contados == n:
                 return d
         d += datetime.timedelta(days=1)
+
+
+def dias_uteis_entre(desde: datetime.date, ate: datetime.date) -> int:
+    """Dias uteis de `desde` (inclusive) ate' `ate` (exclusive): o dia do envio conta, hoje nao (issue #508,
+    "com o orgao ha N dias uteis"). Data futura da' 0."""
+    dias, d = 0, desde
+    while d < ate:
+        dias += dia_util(d)
+        d += datetime.timedelta(days=1)
+    return dias

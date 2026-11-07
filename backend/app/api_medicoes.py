@@ -12,8 +12,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import (arquivos, db, espelhos, medicao_grupos, medicao_planilhas, medicoes, permissoes, planilha_envio, siga,
-                 tempo)
+from app import (arquivos, correio, db, espelhos, feriados, medicao_grupos, medicao_planilhas, medicoes, permissoes,
+                 planilha_envio, siga, tempo)
 from app.api_auth import conexao
 from app.dinheiro import parse_brl
 from app.permissoes import exigir
@@ -108,6 +108,43 @@ def _erro_do_cliente(conn: sqlite3.Connection, e: ValueError) -> HTTPException:
     return HTTPException(422, str(e))
 
 
+def _dias_uteis_no_orgao(m: dict) -> int | None:
+    """Issue #508, passo 2 da pagina da obra: "com o orgao ha N dias uteis", do dia do envio da planilha/carta ate'
+    hoje (Cuiaba), so' enquanto a medicao espera a resposta do orgao (planilha enviada)."""
+    if m.get("estado") != "planilha_enviada" or not m.get("planilha_enviada_em"):
+        return None
+    try:
+        desde = datetime.date.fromisoformat(m["planilha_enviada_em"][:10])
+    except ValueError:
+        return None
+    return feriados.dias_uteis_entre(desde, tempo.hoje_local())
+
+
+def _tamanho(relativo: str | None) -> int | None:
+    if not relativo:
+        return None
+    try:
+        return arquivos.caminho_seguro(relativo).stat().st_size
+    except (OSError, ValueError):
+        return None
+
+
+def _pacote_planilha(conn: sqlite3.Connection, d: dict) -> dict | None:
+    """Issue #508, passo 1: o medidor do pacote do envio -- carta e planilha da versao vigente e as pecas que vao no
+    e-mail (sem as que vao no oficio assinado), contra o limite do e-mail. A conta exata (planilha zipada, oficio com
+    o nº) continua na previa, que trava o envio acima do limite."""
+    if not d["planilhas"]:
+        return None
+    v = conn.execute("SELECT arquivo, arquivo_planilha FROM medicao_planilhas WHERE id=?",
+                     (d["planilhas"][-1]["id"],)).fetchone()
+    s = d["envio_planilha"]
+    no_oficio = {p["tipo"] for p in s["pecas_do_orgao"] if p["no_oficio"]}
+    carta, planilha = _tamanho(v["arquivo"]), _tamanho(v["arquivo_planilha"])
+    pecas = sum(p["tamanho"] or 0 for p in s["pecas"] if p["tipo"] not in no_oficio)
+    return {"carta": carta, "planilha": planilha, "pecas": pecas,
+            "total": (carta or 0) + (planilha or 0) + pecas, "limite": correio.MAX_TOTAL}
+
+
 @router.get("/api/contratos/{contrato_id}/medicoes")
 def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
            conn: sqlite3.Connection = Depends(conexao)):
@@ -117,7 +154,7 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
     # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
     return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
-             "boletins": medicoes.boletins(conn, m["id"])} for m in lista]
+             "boletins": medicoes.boletins(conn, m["id"]), "dias_uteis_no_orgao": _dias_uteis_no_orgao(m)} for m in lista]
 
 
 @router.post("/api/contratos/{contrato_id}/medicoes", status_code=201)
@@ -151,6 +188,8 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
     d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
     d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"
+    d["dias_uteis_no_orgao"] = _dias_uteis_no_orgao(d)       # issue #508: passo 2 da pagina da obra
+    d["pacote_planilha"] = _pacote_planilha(conn, d)          # issue #508: medidor do pacote no passo 1
     return d
 
 
