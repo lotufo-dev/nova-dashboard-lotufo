@@ -175,7 +175,7 @@ function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: str
   const seguinte = `${ultimoMes.slice(5, 7) === "12" ? String(Number(ultimoMes.slice(0, 4)) + 1) : ultimoMes.slice(0, 4)}-${String(Number(ultimoMes.slice(5, 7)) % 12 + 1).padStart(2, "0")}`;
   return (
     <>
-            <ul className="doc-linhas" aria-label="Regularidade mensal por empresa">
+      <ul className="doc-linhas" aria-label="Regularidade mensal por empresa">
         {comFolha.map(e => {
           const ultima = (e.regularidades_anexadas ?? [])[0];
           return (
@@ -191,7 +191,7 @@ function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: str
                   const interior = (
                     <>
                       <span className="doc-chip__rotulo">{fmtMesCurto(x.competencia)}</span>
-                      <Icone className="doc-chip__icone" titulo={nome} />
+                      <Icone className="icone doc-chip__icone" titulo={nome} />
                     </>
                   );
                   return x.id !== undefined
@@ -239,7 +239,7 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
               <div className="doc-chips doc-chips--5">
                 <Chip semRotulo cor={g?.apolice ? "feito" : "critico"} rotulo="Apólice" valor={g?.apolice || "sem registro"} />
                 <Chip semRotulo cor={corValida} rotulo="Válida até" valor={g ? fmtDataPura(g.vigencia_fim) : "sem registro"} />
-                <Chip semRotulo cor={!g ? "critico" : cob?.cobre === true ? "feito" : cob?.cobre === false ? "breve" : "critico"}
+                <Chip semRotulo cor={!g ? "critico" : cob?.cobre === true ? "feito" : cob?.cobre === false && cob.ate ? "breve" : "neutro"}
                   rotulo="Cobre a execução"
                   valor={!g ? "sem registro" : cob?.cobre === true ? "sim" : cob?.cobre === false && cob.ate ? `não, até ${fmtDataPura(cob.ate)}` : "—"} />
                 <Chip semRotulo cor={o.art ? "feito" : "critico"} rotulo="ART" valor={o.art ? "registrada" : "sem registro"} />

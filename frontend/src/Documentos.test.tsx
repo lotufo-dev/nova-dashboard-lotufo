@@ -108,6 +108,18 @@ test("grupo grande mostra as primeiras obras e '+N obras'", async () => {
   screen.getByText("Obra X10");
 });
 
+test("garantia sem fim de execução cadastrado: 'Cobre a execução' fica neutro, não vermelho", async () => {
+  const { api } = await import("./api");
+  const obra = { contrato_id: 200, obra: "Obra Sem Fim", entidade_id: 1, orgao: "SES", art: "A", cno: "1",
+    garantia: { apolice: "AP-1", vigencia_fim: "2027-12-31", dias: 400, origem: "contrato" as const, situacao: "ok" as const },
+    cobre_execucao: { cobre: null, ate: null } };
+  vi.mocked(api).mockImplementationOnce(async () => ({ ...(await import("./documentosTeste")).PAINEL, contratos: [obra] }));
+  render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
+  await screen.findByText("Obra Sem Fim");
+  const chip = within(screen.getByText("Obra Sem Fim").closest("li")!).getByText("—").closest(".doc-chip")!;
+  expect(chip.className).toContain("doc-chip--neutro");
+});
+
 test("a legenda muda com a aba", async () => {
   render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
   await screen.findByText("Obra Alfa");
