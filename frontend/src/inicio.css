@@ -128,3 +128,7 @@
   .ini-barras__valor { grid-column: 2; text-align: left; }
   .ini-numero__valor { font-size: clamp(16px, 5.8vw, 22px); }
 }
+/* no celular o valor grande fica numa linha so, com a fonte acompanhando a largura (22px a 375px, 18px a 320px) */
+@media (max-width: 420px) {
+  .ini-numero__valor { white-space: nowrap; font-size: clamp(16px, 5.8vw, 22px); }
+}
