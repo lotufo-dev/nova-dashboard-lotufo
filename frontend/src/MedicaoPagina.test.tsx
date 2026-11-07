@@ -570,11 +570,22 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     expect(container.querySelector("[data-cartao-planilha]")).toBeNull();
   });
 
-  it("planilha/carta só gerada: o cartão dela, sem o espelho (a ponte não pula o envio ao protocolo)", async () => {
+  it("planilha/carta só gerada (#460): o cartão dela, o aviso do envio não registrado e o formulário do espelho", async () => {
     responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_gerada" }] });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-    expect(container.querySelector("[data-espelho]")).toBeNull();
+    // nao espera a conferencia da revisao: a planilha/carta nunca foi enviada
+    expect(container.querySelector("[data-espelho='espelho']")!.getAttribute("data-abre-form")).toBe("true");
+    expect(screen.getByText(/Envio da planilha\/carta não registrado: o espelho segue sem boletim, com justificativa/)).toBeTruthy();
+  });
+
+  it("planilha/carta enviada não mostra o aviso do envio não registrado (#460)", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
+    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+    expect(screen.queryByText(/Envio da planilha\/carta não registrado/)).toBeNull();
   });
 
   it("com a planilha/carta enviada, com ou sem o boletim: o cartão dela e o formulário do espelho abaixo", async () => {

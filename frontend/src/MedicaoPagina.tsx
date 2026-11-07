@@ -238,8 +238,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // ---------------------------------------------------------------- etapas
   // issue #289: o primeiro passo e' a planilha/carta (execucao e projeto, na obra com regra de espelho ativa; o
   // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela fica no alto da
-  // etapa. Enviada (com ou sem o boletim da #284), o espelho aparece logo abaixo; so' gerada, ainda nao (o boletim
-  // substitui a ponte ao espelho, nao o envio ao protocolo).
+  // etapa. O espelho aparece logo abaixo: enviada (com ou sem o boletim da #284) ou so' gerada, sem o envio registrado
+  // (#460, decisao do Leo de 07/11/2026: a operacao ainda envia ao orgao por fora; segue sem boletim, com justificativa).
   const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
   // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
   const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;
@@ -260,9 +260,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
           <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
       )}
-      {!novaPlanilha && m.estado !== "planilha_gerada" && !espelhoEspera && (
+      {m.estado === "planilha_gerada" && (
+        <CaixaAviso nivel="atencao">Envio da planilha/carta não registrado: o espelho segue sem boletim, com justificativa.</CaixaAviso>
+      )}
+      {!novaPlanilha && !espelhoEspera && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
-          abrirForm={["prevista", "planilha_enviada", "boletim_recebido"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+          abrirForm={["prevista", "planilha_gerada", "planilha_enviada", "boletim_recebido"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
       )}
     </div>
   );
