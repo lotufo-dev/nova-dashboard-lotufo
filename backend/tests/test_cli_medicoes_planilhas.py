@@ -248,14 +248,36 @@ def test_carga_le_o_anexo_vigente_das_medicoes_com_planilha_anexada(banco, capsy
 
 
 def test_arquivo_grande_demais_e_pulado_sem_ler(banco, capsys, monkeypatch):
-    """Sol S6: o tamanho e' conferido antes de ler o arquivo para a memoria."""
-    from pathlib import Path
+    """Sol S6 / #503: o arquivo acima do teto e' pulado lendo no maximo o teto mais um byte (nunca inteiro)."""
+    import builtins
 
     from app import leitura_planilha_medicao as leitura
+    from app import medicao_grupos
     monkeypatch.setattr(leitura, "MAX_BYTES_ARQUIVO", 1000)
-    monkeypatch.setattr(Path, "read_bytes", lambda self: pytest.fail("leu o arquivo grande"))
-    _executar(_pasta_com(banco))
+    lidos = []
+
+    class Espiao:
+        def __init__(self, f):
+            self._f = f
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._f.close()
+
+        def __getattr__(self, nome):
+            return getattr(self._f, nome)
+
+        def read(self, *args):
+            dados = self._f.read(*args)
+            lidos.append(len(dados))
+            return dados
+
+    monkeypatch.setattr(medicao_grupos, "open", lambda *a, **k: Espiao(builtins.open(*a, **k)), raising=False)
+    _executar(_pasta_com(banco))                                      # a planilha tem bem mais de 1000 bytes
     assert "pulado: arquivo grande demais" in capsys.readouterr().out
+    assert lidos and sum(lidos) <= 1001
 
 
 # --- rodada 2 de correcao -----------------------------------------------------------------------------------------
@@ -347,6 +369,23 @@ def test_anexo_que_nao_confere_com_a_versao_e_pulado(banco, capsys):
     (banco / "vazia").mkdir()
     _executar(banco / "vazia")
     assert "pulado: o arquivo do anexo não confere com o registrado na versão" in capsys.readouterr().out
+    assert _contar("SELECT COUNT(*) FROM medicao_grupos") == 0
+
+
+def test_anexo_de_versao_sem_sha_registrado_e_pulado(banco, capsys):
+    """#503: versao sem o sha256 da planilha nao aceita qualquer arquivo achado no caminho."""
+    from app import arquivos
+    c = db.get_conn()
+    mid = c.execute("SELECT id FROM medicoes WHERE numero=2 AND tipo='execucao'").fetchone()[0]
+    rel, _ = arquivos.gravar_bytes("planilhas", planilha(), "xlsx")
+    c.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, acumulado_anterior_centavos, "
+              "arquivo_planilha, sha256_planilha, origem) VALUES (?, 1, ?, 0, ?, NULL, 'manual')", (mid, TOTAL, rel))
+    c.commit()
+    c.close()
+    (banco / "vazia").mkdir()
+    _executar(banco / "vazia")
+    assert "anexo da versão 1: Medição 2 de execução -> pulado: a versão não tem o sha256 da planilha registrado" \
+        in capsys.readouterr().out
     assert _contar("SELECT COUNT(*) FROM medicao_grupos") == 0
 
 

@@ -302,11 +302,15 @@ def _anexos(conn, usuario_id, contrato_id: int, ensaio: bool) -> list[dict]:
         if caminho is None or not caminho.is_file():
             linha["motivo"] = "o arquivo do anexo não foi encontrado"
             continue
+        # sem o hash registrado nao ha' como conferir o arquivo: nao se liga qualquer bytes a versao (#503)
+        if not r["sha256_planilha"]:
+            linha["motivo"] = "a versão não tem o sha256 da planilha registrado"
+            continue
         dados, linha["motivo"] = _ler_arquivo(caminho)
         if linha["motivo"]:
             continue
         # o arquivo gravado tem de ser o que a versao registrou: trocado ou corrompido, nao se liga a ela
-        if r["sha256_planilha"] and arquivos.sha_de(dados) != r["sha256_planilha"]:
+        if arquivos.sha_de(dados) != r["sha256_planilha"]:
             linha["motivo"] = "o arquivo do anexo não confere com o registrado na versão"
             continue
         try:
