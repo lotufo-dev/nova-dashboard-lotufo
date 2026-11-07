@@ -50,7 +50,8 @@ TEXTO_SEM_O_TERMO = ("O texto da carta não cita o termo de apostilamento de ago
 _GUID = r"[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{12}"
 _CAMPO_SEM_DADO = re.compile(r"\{(?!" + _GUID + r"\})[^{}\s]+\}")
 # Issue #448: o marcador legivel escrito diferente (sem acento, com erro) nao e' convertido: sairia cru no oficio
-_MARCADOR_TORTO = re.compile(r"\[\s*(?:cita[cç][aã]o|[^\]\n]*(?:termo|apostil))[^\]\n]*\]", re.IGNORECASE)
+_MARCADOR_TORTO = re.compile(r"\[\s*(?:cita[cç][aã]o|[^\]\n]*(?:termo\s+de\s+apost|apostil))[^\]\n]*\]",
+                             re.IGNORECASE)
 MARCADOR_TORTO = (f"O texto da carta tem a citação do termo escrita diferente: use exatamente {MARCADOR_NA_TELA} "
                   "(ou apague-a)")
 NUMERO_ORGAO_VAZIO = "Informe o número do protocolo no órgão"
@@ -246,15 +247,13 @@ def criar(conn, usuario_id: int, contrato_id: int, etapa: str, medicao_ids: list
     return pid
 
 
-EM_ENVIO = ("O e-mail deste protocolo está saindo agora: espere o envio terminar (ou a reserva ser liberada) antes "
-            "de alterar o protocolo")
-
-
-def _editavel(p: dict) -> None:
+def _editavel(p: dict, conn) -> None:
     if p["situacao"] in ("enviado", "descartado"):
         raise ValueError(f"Protocolo {p['situacao']}: não pode ser alterado")
-    if p.get("envio_reservado_em"):         # issue #448 (gate Sol, rodada 1): com a reserva, o pacote ja' foi lido
-        raise ValueError(EM_ENVIO)
+    # issue #448 (gate Sol e revisor, rodadas 1 e 2): com a reserva, o pacote ja' foi lido pelo envio; a recusa diz
+    # quem iniciou e quando, e manda conferir os Enviados e liberar (a reserva pode estar presa)
+    if p.get("envio_reservado_em"):
+        raise envio_reserva.reservado(conn, p["envio_reservado_em"], p.get("envio_reservado_por"))
 
 
 def _voltar_a_rascunho(conn, p: dict) -> None:
@@ -272,7 +271,7 @@ def adicionar_peca(conn, usuario_id: int, protocolo_id: int, tipo: str, nome: st
     if ext == "zip" and tipo != ANEXO:
         raise ValueError("Arquivo .zip só entra como documento complementar do envio")
     p = _linha(conn, protocolo_id)
-    _editavel(p)
+    _editavel(p, conn)
     if p["etapa"] == "medicao":       # issue #462: a peca que vai no oficio assinado nao se anexa (nem cobra)
         c = _contrato(conn, p["contrato_id"])
         familia, regras, _ = _orgao(conn, c)
@@ -280,12 +279,13 @@ def adicionar_peca(conn, usuario_id: int, protocolo_id: int, tipo: str, nome: st
             raise ValueError(PECA_NO_OFICIO)
     rel, sha = arquivos.gravar_bytes("protocolos", dados, ext)
     with db.mutacao(conn):
-        _editavel(_linha(conn, protocolo_id))           # issue #448: de novo sob o lock (reserva de envio)
+        agora = _linha(conn, protocolo_id)             # issue #448: de novo sob o lock (reserva de envio)
+        _editavel(agora, conn)
         peca_id = conn.execute(
             "INSERT INTO protocolo_pecas (protocolo_id, tipo, nome, arquivo, sha256, tamanho, ext) "
             "VALUES (?,?,?,?,?,?,?)", (protocolo_id, tipo, nome, rel, sha, len(dados), ext)).lastrowid
         if tipo != ANEXO:
-            _voltar_a_rascunho(conn, p)
+            _voltar_a_rascunho(conn, agora)       # o retrato de agora: montado no meio tambem deixa de valer
         auditoria.registrar(conn, usuario_id, "protocolo.peca", "protocolo", protocolo_id, None,
                             {"peca_id": peca_id, "tipo": tipo, "nome": nome, "sha256": sha})
     return peca_id
@@ -317,9 +317,9 @@ def adicionar_link(conn, usuario_id: int, protocolo_id: int, nome: str, url: str
     if not m or m.group(1).lower() not in dominios:
         raise ValueError(f"Cole um link do OneDrive ou SharePoint da Lotufo ({' ou '.join(dominios)})")
     p = _linha(conn, protocolo_id)
-    _editavel(p)
+    _editavel(p, conn)
     with db.mutacao(conn):
-        _editavel(_linha(conn, protocolo_id))           # issue #448: de novo sob o lock (reserva de envio)
+        _editavel(_linha(conn, protocolo_id), conn)     # issue #448: de novo sob o lock (reserva de envio)
         link_id = conn.execute("INSERT INTO protocolo_links (protocolo_id, nome, url) VALUES (?,?,?)",
                                (protocolo_id, nome, url)).lastrowid
         auditoria.registrar(conn, usuario_id, "protocolo.link", "protocolo", protocolo_id, None,
@@ -329,9 +329,9 @@ def adicionar_link(conn, usuario_id: int, protocolo_id: int, nome: str, url: str
 
 def remover_link(conn, usuario_id: int, protocolo_id: int, link_id: int) -> None:
     p = _linha(conn, protocolo_id)
-    _editavel(p)
+    _editavel(p, conn)
     with db.mutacao(conn):
-        _editavel(_linha(conn, protocolo_id))           # issue #448: de novo sob o lock (reserva de envio)
+        _editavel(_linha(conn, protocolo_id), conn)     # issue #448: de novo sob o lock (reserva de envio)
         n = conn.execute("UPDATE protocolo_links SET removido_em=datetime('now') "
                          "WHERE id=? AND protocolo_id=? AND removido_em IS NULL", (link_id, protocolo_id)).rowcount
         if n != 1:
@@ -342,16 +342,17 @@ def remover_link(conn, usuario_id: int, protocolo_id: int, link_id: int) -> None
 
 def remover_peca(conn, usuario_id: int, protocolo_id: int, peca_id: int) -> None:
     p = _linha(conn, protocolo_id)
-    _editavel(p)
+    _editavel(p, conn)
     tipo = conn.execute("SELECT tipo FROM protocolo_pecas WHERE id=? AND protocolo_id=?", (peca_id, protocolo_id)).fetchone()
     with db.mutacao(conn):
-        _editavel(_linha(conn, protocolo_id))           # issue #448: de novo sob o lock (reserva de envio)
+        agora = _linha(conn, protocolo_id)             # issue #448: de novo sob o lock (reserva de envio)
+        _editavel(agora, conn)
         n = conn.execute("UPDATE protocolo_pecas SET removida_em=datetime('now') "
                          "WHERE id=? AND protocolo_id=? AND removida_em IS NULL", (peca_id, protocolo_id)).rowcount
         if n != 1:
             raise ValueError("Peça não encontrada")
         if tipo[0] != ANEXO:
-            _voltar_a_rascunho(conn, p)
+            _voltar_a_rascunho(conn, agora)       # o retrato de agora: montado no meio tambem deixa de valer
         auditoria.registrar(conn, usuario_id, "protocolo.peca_removida", "protocolo", protocolo_id, None,
                             {"peca_id": peca_id})
 
@@ -618,7 +619,7 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     Issue #448: so' troca o gravado que e' o padrao sem o campo; o editado a' mao nunca e' trocado sem aviso."""
     hoje = hoje or tempo.hoje_local()
     p = _linha(conn, protocolo_id)
-    _editavel(p)
+    _editavel(p, conn)
     c = _contrato(conn, p["contrato_id"])
     familia, regras, _ = _orgao(conn, c)
     e = _etapa(familia, p["etapa"])
@@ -692,7 +693,7 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     rel, sha = arquivos.gravar_bytes("protocolos", pdf, "pdf")
     with db.mutacao(conn):
         # issue #448 (gate Sol, rodada 1): de novo sob o lock; com a reserva de envio, o PDF ja' foi lido pelo envio
-        _editavel(_linha(conn, protocolo_id))
+        _editavel(_linha(conn, protocolo_id), conn)
         conn.execute("UPDATE protocolos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
                      "montado_em=datetime('now'), assinado_arquivo=NULL, assinado_sha256=NULL, conferencia=NULL, "
                      "situacao='montado', montado_frcs=?, montado_apostilamentos=? WHERE id=?",
@@ -1045,7 +1046,7 @@ def _recusar_termo_fora_do_assinado(conn, p: dict, montado: list[str], assinado:
 
 def receber_assinado(conn, usuario_id: int, protocolo_id: int, pdf: bytes) -> dict:
     p = _linha(conn, protocolo_id)
-    _editavel(p)
+    _editavel(p, conn)
     if not p["montado_arquivo"]:
         raise ValueError("Monte o pacote antes de anexar o assinado")
     assinado = assinatura.textos(pdf)
@@ -1057,7 +1058,7 @@ def receber_assinado(conn, usuario_id: int, protocolo_id: int, pdf: bytes) -> di
     with db.mutacao(conn):
         # rodada 5 da PR #179: de novo sob o lock; a FRC gerada de novo ou o pacote montado de novo no meio recusa
         agora = _linha(conn, protocolo_id)
-        _editavel(agora)
+        _editavel(agora, conn)
         if agora["montado_sha256"] != p["montado_sha256"]:
             raise ValueError("O pacote foi montado de novo enquanto o assinado era conferido: anexe o assinado do "
                              "pacote de agora")
@@ -1328,6 +1329,9 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
                 raise Bloqueio(mudou)
         faltam = [q["mensagem"] for q in no_lock]
         for x in ps:
+            # issue #448 (gate Sol, rodada 2): descartado (ou enviado) por outra aba antes do lock nao sai
+            if (sit := _linha(conn, x["id"])["situacao"]) in ("enviado", "descartado"):
+                raise ValueError(f"Protocolo {x['id']} já {sit}")
             envio_reserva.reservar(conn, "protocolos", x["id"], usuario["id"], x["envio_id"])
             if faltam:      # quem confirmou e quando: o usuario e o carimbo da propria linha da auditoria
                 auditoria.registrar(conn, usuario["id"], "protocolo.envio_confirmado", "protocolo", x["id"], None,
@@ -1432,8 +1436,11 @@ def descartar(conn, usuario_id: int, protocolo_id: int, motivo: str) -> None:
     if not (motivo or "").strip():
         raise ValueError("Informe o motivo")
     with db.mutacao(conn):
-        if _linha(conn, protocolo_id)["envio_reservado_em"]:          # issue #448: sob o lock da reserva
-            raise ValueError(EM_ENVIO)
+        # issue #448 (gate Sol, rodada 2): sob o lock, a situacao e a reserva de agora (o envio pode ter terminado)
+        agora = _linha(conn, protocolo_id)
+        if agora["situacao"] == "enviado":
+            raise ValueError("Protocolo enviado não se descarta")
+        _editavel(agora, conn)
         conn.execute("UPDATE protocolos SET situacao='descartado' WHERE id=?", (protocolo_id,))
         auditoria.registrar(conn, usuario_id, "protocolo.descartar", "protocolo", protocolo_id,
                             {"situacao": p["situacao"]}, {"situacao": "descartado", "motivo": motivo.strip()})
