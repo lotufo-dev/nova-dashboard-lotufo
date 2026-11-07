@@ -5,7 +5,7 @@ import { baseDosValores, brl, fmtDias, fmtPercentual } from "./formato";
 import LegendaCor from "./LegendaCor";
 import { Link } from "./Link";
 import { curvaS, type PontoDaCurva, type PrevistoAnterior } from "./obra";
-import type { Busca, Origem } from "./rota";
+import type { Origem } from "./rota";
 import Selo from "./Selo";
 import { fmtDataPura, fmtMesCurto } from "./tempo";
 import { Migalhas, VoltarOrigem } from "./Topo";
@@ -107,7 +107,7 @@ function CurvaFicha({ pontos, anterior }: { pontos: PontoDaCurva[]; anterior: Pr
   );
 }
 
-export default function FichaObra({ contratoId, origem }: { contratoId: number; busca?: Busca; origem: Origem | null }) {
+export default function FichaObra({ contratoId, origem }: { contratoId: number; origem: Origem | null }) {
   const [c, setC] = useState<Cabecalho | null>(null);
   const [erro, setErro] = useState("");
   const [curva, setCurva] = useState<Curva | null | undefined>(undefined);

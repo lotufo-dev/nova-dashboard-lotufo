@@ -67,7 +67,7 @@ def _certidao_mais_proxima(conn, contrato_id: int, hoje: datetime.date) -> dict 
         for t in ex["tipos"]:
             s = documentos.situacao(conn, eid, t, hoje)
             cert = s["certidao"]
-            if s["situacao"] in ("ok", "vencendo", "vencida") and cert:
+            if s["situacao"] in ("ok", "vencendo", "vencida") and cert and _d(cert["validade"]):
                 achados.append((cert["validade"][:10], eid, t, s["situacao"], e))
     if not achados:
         return None

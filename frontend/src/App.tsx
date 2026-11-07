@@ -138,7 +138,7 @@ export default function App() {
             // obra anterior sobreviviam a troca — e um cronograma digitado para a
             // obra A podia ser publicado na B. A aba vem da URL: cada aba tem link.
             rota.aba === "ficha"
-              ? <FichaObra key={rota.id} contratoId={rota.id} origem={origem} busca={busca} />
+              ? <FichaObra key={rota.id} contratoId={rota.id} origem={origem} />
               : <ContratoPagina key={rota.id} contratoId={rota.id} usuario={usuario} aba={rota.aba} origem={origem} busca={busca} />
           )}
           {rota.tela === "medicao" && (
