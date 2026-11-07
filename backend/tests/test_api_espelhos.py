@@ -346,6 +346,45 @@ def test_api_seguir_sem_boletim_exige_justificativa(client_admin, ambiente_api):
     assert any(e["texto"].startswith("Espelho gerado sem boletim: NF vai junto") for e in m["edicoes_valor"])
 
 
+# --- issue #460: a planilha/carta gerada (sem envio registrado) segue ao espelho sem boletim, em toda obra ---------
+
+@pytest.mark.parametrize("familia", ["sinfra", "mtpar", "ses", "prefeitura"])
+def test_api_planilha_gerada_segue_sem_boletim_com_o_pedido_da_ultima_versao(client_admin, ambiente_api, familia):
+    from tests.test_api_medicoes import _arquivos_planilha
+    cid = ambiente_api
+    c = db.get_conn()
+    c.execute("UPDATE orgaos SET familia=? WHERE id=(SELECT orgao_id FROM contratos WHERE id=?)", (familia, cid))
+    c.commit(); c.close()
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha("oficio 27"),
+                          data={"numero": 27, "competencia": "2026-08", "periodo_inicio": "2026-08-01",
+                                "periodo_fim": "2026-08-31", "valor": "719.190,72"})
+    assert r.status_code == 201, r.text
+    mid = r.json()["medicao_id"]
+    # a Rev01, ainda gerada (nunca enviada): o pedido do espelho e' o dela, a ultima
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=_arquivos_planilha("rev01"),
+                          data={"periodo_inicio": "2026-08-01", "periodo_fim": "2026-08-31", "valor": "700.000,01",
+                                "motivo": "Rev01: fiscal pediu ajuste"})
+    assert r.status_code == 201, r.text
+    corpo = {"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "700.000,01"}}
+    p = client_admin.post(f"/api/contratos/{cid}/espelho/previa", json=corpo)
+    assert p.status_code == 200, p.text
+    assert p.json()["medicoes"][0]["sem_boletim"] is True
+    assert p.json()["travados"] == [{"tipo": "execucao", "valor_centavos": 700_000_01, "fonte": "pedido",
+                                     "opcional": True, "sem_boletim": True}]
+    r = client_admin.post(f"/api/contratos/{cid}/espelho", json=corpo)
+    assert r.status_code == 422 and "seguir sem boletim" in r.json()["detail"], r.text
+    r = client_admin.post(f"/api/contratos/{cid}/espelho", json={**corpo, "entradas": {"medicao": "719.190,72"},
+                                                                 "justificativa_sem_boletim": "enviada ao órgão por fora"})
+    assert r.status_code == 422 and "700.000,01" in r.json()["detail"], r.text     # o pedido da v1 nao vale mais
+    r = client_admin.post(f"/api/contratos/{cid}/espelho",
+                          json={**corpo, "justificativa_sem_boletim": "enviada ao órgão por fora"})
+    assert r.status_code == 201, r.text
+    m = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (m["estado"], m["valor_protocolado_centavos"]) == ("espelho_gerado", 700_000_01)
+    assert any(e["texto"] == "Espelho gerado sem boletim e sem o envio da planilha/carta registrado: enviada ao órgão "
+               "por fora por Admin" for e in m["edicoes_valor"]), m["edicoes_valor"]
+
+
 def test_api_espelho_usa_o_aprovado_do_boletim(client_admin, ambiente_api):
     cid = ambiente_api
     mid = _planilha_enviada(cid)
