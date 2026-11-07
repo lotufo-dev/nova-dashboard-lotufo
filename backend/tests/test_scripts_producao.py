@@ -58,7 +58,7 @@ def test_deploy_usa_a_porta_na_saude_no_dono_da_porta_e_nas_mensagens():
     assert "localhost/api/health" not in script
     assert '"http://localhost:$Porta/api/health"' in script and '"https://localhost:$Porta/api/health"' in script
     assert "LocalPort 80" not in script
-    assert "-LocalPort $Porta" in script
+    assert "$_.LocalPort -eq $Porta" in script
     assert not re.search(r"porta 80\b", script), "mensagem ainda cita a porta 80 fixa"
 
 
@@ -115,7 +115,7 @@ def test_deploy_para_a_tarefa_por_schtasks_tambem_no_ponto_da_sentinela_e_mantem
     # Disabled) e pela porta livre; qualquer falha lanca
     parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
     ordem = ["$script:tarefaParada = $true", "$script:producaoMexida = $true", 'ComandoTarefa "End" $false',
-             "$estado = EstadoDaTarefa $tarefaNome $LimiteAgendador", "if (-not (TarefaParada $estado)) { throw ",
+             "$estado = EstadoDaTarefa $tarefaNome $limite", "if (-not (TarefaParada $estado)) { throw ",
              "LiberarPorta"]
     assert [parar.index(passo) for passo in ordem] == sorted(parar.index(passo) for passo in ordem)
     assert "catch" not in parar
@@ -978,3 +978,51 @@ def test_docs_do_deploy_nao_mandam_criar_nem_apagar_o_sentinela_da_sessao():
     assert "que a sessão criou" not in skill
     assert "O mesmo vale para `BACKUP PRE-MIGRACAO FALHOU`" not in skill
     assert "Não há sentinela\n     a apagar" in skill
+
+
+def test_deploy_le_o_estado_da_tarefa_antes_do_sentinela_e_aborta_se_desconhecido():
+    # Issue #518 (revisor da rodada 2 da PR #389): com o leitor de estado quebrado, o /End derrubava a producao e a
+    # parada nunca se provava. O estado e' lido uma vez antes do sentinela e do backup; "desconhecido" aborta sem mexer.
+    codigo = _codigo(_ler("deploy.ps1"))
+    leitura = codigo.index("$estadoInicial = EstadoDaTarefa $tarefaNome $LimiteAgendador")
+    aborto = _bloco_do_if(codigo, 'if ($estadoInicial -eq "desconhecido") {')
+    assert "nada foi alterado" in aborto and "exit 1" in aborto
+    assert codigo.index("$portaTarefa = PortaDaTarefa") < leitura
+    assert leitura < codigo.index("New-Item -ItemType File -Path $pause")
+    assert leitura < codigo.index("backup_pre_migracao.ps1")
+    assert leitura < codigo.index("function PararComprovado")
+
+
+def test_deploy_imprime_cada_leitura_do_estado_e_a_parada_tem_prazo_total():
+    # Issue #518: 10 leituras de ate' 30 s sem linha nenhuma passavam da regra dos 2 minutos da skill deploy.
+    codigo = _codigo(_ler("deploy.ps1"))
+    parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
+    laco = parar[parar.index("do {"):parar.index("} while (")]
+    assert "Etapa " in laco and "$estado = EstadoDaTarefa $tarefaNome $limite" in laco
+    assert "$prazo = (Get-Date).AddSeconds($PrazoParadaSegundos)" in parar
+    assert "(Get-Date) -lt $prazo" in parar[parar.index("} while ("):]
+    # cada leitura so' usa o que sobra do prazo
+    assert "($prazo - (Get-Date)).TotalSeconds" in laco
+    assert "$PrazoParadaSegundos = 90" in codigo
+    raiz = pathlib.Path(__file__).resolve().parents[2]
+    skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
+    runbook = (raiz / "docs" / "runbook.md").read_text(encoding="utf-8")
+    for texto in (skill, runbook):
+        assert "powershell.exe" in texto and "schtasks.exe" in texto
+        assert "90 s" in texto
+
+
+def test_deploy_erro_na_consulta_da_porta_nao_e_porta_livre():
+    # Issue #518: -ErrorAction SilentlyContinue fazia a consulta que falha devolver vazio e o LiberarPorta dar a porta
+    # como livre com o uvicorn orfao vivo. Como no watchdog.ps1: lista os listeners com Stop e filtra no pipeline.
+    codigo = _codigo(_ler("deploy.ps1"))
+    dono = codigo[codigo.index("function DonoDaPorta"):codigo.index("function LiberarPorta")]
+    assert "Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -eq $Porta }" in dono
+    assert "SilentlyContinue" not in dono
+    liberar = codigo[codigo.index("function LiberarPorta"):codigo.index("function ComandoTarefa")]
+    falha = _bloco_do_if(liberar, "catch {")
+    assert liberar.index("try { $dono = DonoDaPorta }") < liberar.index("catch {")
+    assert "throw " in falha and "porta livre nao comprovada" in falha
+    # a falha sobe pelo PararComprovado (sem catch), que nao toca no pinado e mantem o sentinela
+    parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
+    assert "catch" not in parar and "LiberarPorta" in parar

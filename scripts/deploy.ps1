@@ -55,6 +55,7 @@ function Etapa([string]$texto) { Write-Host ("[{0}] {1}" -f (Get-Date -Format "H
 
 . (Join-Path $PSScriptRoot "comum_agendador.ps1")   # Agendador: schtasks.exe com tempo limite
 function Agendar([string[]]$argumentos) { return Agendador $argumentos $LimiteAgendador $Schtasks }
+$PrazoParadaSegundos = 90   # prazo total das leituras de estado depois de cada /End (issue #518)
 $msgAgendador = "deploy abortado: agendador de tarefas nao respondeu"
 
 # A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
@@ -94,6 +95,17 @@ if ($Porta -eq 0) {
     throw "-Porta $Porta nao bate com a tarefa $tarefaNome (porta $portaTarefa); nada foi alterado"
 }
 Etapa "porta lida: $Porta (tarefa $tarefaNome, agendador respondeu)"
+
+# Issue #518: o leitor de estado (EstadoDaTarefa, COM num powershell filho) e' quem prova cada parada. Lido UMA vez aqui,
+# antes do sentinela e do backup: quebrado (Schedule.Service com erro ou lento, estado_tarefa.ps1 ausente na copia,
+# antivirus barrando o -File), o /End derrubaria a producao sem como provar a parada. "desconhecido" aborta sem mexer.
+Etapa "lendo o estado da tarefa $tarefaNome"
+$estadoInicial = EstadoDaTarefa $tarefaNome $LimiteAgendador
+if ($estadoInicial -eq "desconhecido") {
+    Write-Host "deploy abortado: o estado da tarefa $tarefaNome nao pode ser lido (scripts\estado_tarefa.ps1 pela COM Schedule.Service: erro, mais de $LimiteAgendador s ou arquivo ausente), entao nenhuma parada seria comprovada; nada foi alterado" -ForegroundColor Red
+    exit 1
+}
+Etapa "estado da tarefa: $estadoInicial"
 
 # A raiz tambem e' a da tarefa (issue #417, gate Sol da PR #437): dela saem o arquivo da instalacao conferido antes do
 # reinicio e o banco do backup pre-migracao. Com a producao em outro disco, conferir C:\ recusaria o arquivo valido, ou
@@ -199,8 +211,10 @@ function RegistrarDeploy {
     finally { Pop-Location }
     if ($codigo -ne 0) { Write-Warning "registro do deploy (deploy-atual.json) nao gravado - ver docs\runbook.md (Saude)" }
 }
+# Issue #518, como o watchdog.ps1 (issue #480): lista TODOS os listeners e filtra a porta no pipeline. Porta livre e' lista
+# vazia; erro do provedor NetTCPIP/CIM lanca, em vez de virar "porta livre" com o uvicorn orfao vivo.
 function DonoDaPorta {
-    $c = Get-NetTCPConnection -LocalPort $Porta -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    $c = Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -eq $Porta } | Select-Object -First 1
     if (-not $c) { return $null }
     return Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)"
 }
@@ -209,7 +223,9 @@ function DonoDaPorta {
 # do processo ANTIGO. Por isso: quem sobrar na porta depois do Stop e' morto aqui -- so' se
 # for o uvicorn da dashboard; qualquer outro dono da porta aborta o deploy.
 function LiberarPorta {
-    $dono = DonoDaPorta
+    # mensagem propria (issue #518): a falha e' da consulta da porta, nao do estado da tarefa
+    try { $dono = DonoDaPorta }
+    catch { throw "consulta da porta $Porta falhou depois da parada ($($_.Exception.Message)): porta livre nao comprovada" }
     if (-not $dono) { return }
     if ($dono.CommandLine -notmatch "uvicorn" -or $dono.CommandLine -notmatch "app\.main") {
         throw "porta $Porta ocupada por processo que nao e' a dashboard (PID $($dono.ProcessId): $($dono.Name)); nada foi morto"
@@ -246,12 +262,19 @@ function PararComprovado([string]$momento) {
     $script:tarefaParada = $true
     $script:producaoMexida = $true
     ComandoTarefa "End" $false
+    # Issue #518: uma linha por leitura e prazo total no laco; cada leitura so' usa o que sobra do prazo, para a parada
+    # nao passar de ~$PrazoParadaSegundos s (mais a espera da morte do filho) nem ficar minutos sem imprimir nada.
     $estado = "desconhecido"
-    foreach ($tentativa in 1..10) {
+    $prazo = (Get-Date).AddSeconds($PrazoParadaSegundos)
+    $tentativa = 0
+    do {
         Start-Sleep -Seconds 1
-        $estado = EstadoDaTarefa $tarefaNome $LimiteAgendador
+        $tentativa++
+        $limite = [int][Math]::Max(1, [Math]::Min($LimiteAgendador, [Math]::Ceiling(($prazo - (Get-Date)).TotalSeconds)))
+        Etapa "${momento}: lendo o estado da tarefa (leitura $tentativa, ate' $limite s)"
+        $estado = EstadoDaTarefa $tarefaNome $limite
         if ((TarefaParada $estado) -or $estado -eq "desconhecido") { break }
-    }
+    } while ($tentativa -lt 10 -and (Get-Date) -lt $prazo)
     if (-not (TarefaParada $estado)) { throw "tarefa $tarefaNome nao comprovadamente parada (estado: $estado)" }
     Start-Sleep -Seconds 2
     LiberarPorta
@@ -269,7 +292,7 @@ function Reiniciar {
 function SaudavelENovo([switch]$ExigirInstalacao) {
     Etapa "saude: conferindo $urlSaude"
     if (-not (Saudavel -ExigirInstalacao:$ExigirInstalacao)) { return $false }
-    # Consulta da porta que lanca (WMI/CIM travado, o modo de falha da issue #386) nao prova o processo novo: conta
+    # Consulta da porta que lanca (erro do WMI/CIM; travamento sem resposta nao lanca e nao e' coberto aqui) nao prova o processo novo: conta
     # como "nao saudavel" e cai no rollback, em vez de escapar e soltar o watchdog sem nada provado (gate Sol da PR #389)
     try { $dono = DonoDaPorta }
     catch {
