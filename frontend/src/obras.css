@@ -81,19 +81,39 @@
 /* ------------------------------------------------------------ os Avisos, dentro de Obras */
 .avisos-area__corpo { display: grid; gap: 16px; }
 .avisos-area__grupos { display: grid; gap: 16px; }
-.avisos-area__grupos > .cartao { box-shadow: none; }
-.avisos-area .tabela--grade col.c-quando { width: 150px; }
-.avisos-area .tabela--grade col.c-valor-aviso { width: 150px; }
-.avisos-area .tabela--grade col.c-abrir { width: 72px; }
-.aviso__fato .forte { margin-right: 2px; }
+/* #511: secoes pelo tempo, com faixa de cabecalho e uma linha por aviso */
+.avisos-area__titulos { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
+.avisos-area__sub { color: var(--texto-fraco); font-size: 16px; }
+.aviso-secao { border: 1px solid var(--linha); border-radius: 12px; overflow: hidden; }
+.aviso-secao__cabeca { margin: 0; padding: 8px 16px; font-size: 16px; font-weight: 700; letter-spacing: .02em; }
+.aviso-secao__cabeca--vencido { background: var(--acao-fundo); }
+.aviso-secao__cabeca--vencido .aviso-secao__n { color: var(--acao); }
+.aviso-secao__cabeca--semana { background: #FFEDD5; }
+.aviso-secao__cabeca--mes { background: #FEF9C3; }
+.aviso-secao__cabeca--semana .aviso-secao__n, .aviso-secao__cabeca--mes .aviso-secao__n { color: var(--atencao); }
+.aviso-secao__cabeca--depois, .aviso-secao__cabeca--sem-data { background: var(--neutro-fundo); }
+.aviso-secao__cabeca--depois .aviso-secao__n, .aviso-secao__cabeca--sem-data .aviso-secao__n { color: var(--texto-fraco); }
+.aviso-secao__lista { list-style: none; margin: 0; padding: 0 16px; }
+.aviso-linha { position: relative; display: grid; grid-template-columns: 110px minmax(120px, 220px) minmax(0, 1fr) auto; gap: 4px 16px;
+  align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--linha); }
+.aviso-linha:last-child { border-bottom: 0; }
+.aviso-linha__obra { font-weight: 600; overflow-wrap: anywhere; }
+.aviso-linha__link { color: inherit; text-decoration: none; }
+.aviso-linha__link::after { content: ""; position: absolute; inset: 0; }
+.aviso-linha__link:hover { text-decoration: underline; }
+.aviso-linha__dias { font-weight: 600; text-align: right; white-space: nowrap; }
+.aviso-linha__dias--vencido { color: var(--acao); }
+.aviso-linha__dias--semana, .aviso-linha__dias--mes { color: var(--atencao); }
+.aviso-secao__mais { margin: 0 16px 12px; padding: 4px 12px; border: 0; border-radius: 999px; background: var(--pressionado); color: var(--acento-mais); cursor: pointer; font: inherit; }
 .avisos-area__corpo > *, .avisos-area__grupos > * { min-width: 0; }
 .avisos-area .form-inline select { max-width: 100%; }
 @media (max-width: 700px) {
   /* as colunas fixas (112 + 150 + 72 px) nao cabem no celular: a tabela ganha largura minima e a Rolagem rola,
      em vez de a coluna "Aviso" ficar sem espaco e o texto se sobrepor */
-  .avisos-area .tabela--grade { min-width: 560px; }
+  .aviso-linha { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .aviso-linha__dias { grid-row: 1; grid-column: 3; }
+  .aviso-linha__fato { grid-column: 1 / -1; grid-row: 2; }
   .avisos-area .form-inline { flex-wrap: wrap; }
   .avisos-area .form-inline .campo { min-width: 0; flex: 1 1 140px; }
-  .avisos-area .detalhes > summary { width: auto; max-width: 100%; overflow-wrap: anywhere; }
   .avisos-area .cartao__cabeca { flex-wrap: wrap; }
 }
