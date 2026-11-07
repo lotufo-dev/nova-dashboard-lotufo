@@ -349,6 +349,24 @@ def _gravar_ponto(conn, ultimo: int) -> None:
                  "ultimo_registro = excluded.ultimo_registro, atualizado_em = datetime('now')", (ultimo,))
 
 
+def _falhas_gravadas_depois(conn, ultimo_achado, hoje: datetime.date) -> set[str]:
+    """As chaves de falha de verificacao gravadas hoje (dia local) em linhas da auditoria depois de `ultimo_achado`,
+    o ultimo achado que a copia em arquivo ja' conhecia. Issue #478: entre o commit de uma rodada e a gravacao do
+    `sentinela.json` dela, a outra le a marca nova com as pendencias velhas e repetiria a falha que esta gravou."""
+    if not isinstance(ultimo_achado, int) or isinstance(ultimo_achado, bool):
+        return set()
+    out = set()
+    for r in conn.execute("SELECT depois FROM audit_log WHERE entidade = 'sentinela' AND entidade_id IS NULL "
+                          "AND acao = ? AND id > ?", (ACAO, ultimo_achado)):
+        try:
+            d = json.loads(r[0])
+            if isinstance(d["evento"], str) and tempo.para_local(_instante(d["hora"])).date() == hoje:
+                out.add(d["evento"])
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return out
+
+
 def rodada(conn) -> int:
     """Uma rodada. Devolve quantos achados novos gravou. Leitura do log ou verificacao que falha vira item uma vez,
     ate' voltar ao normal (regravada uma vez por dia enquanto durar). Achados e ponto de leitura entram na mesma
@@ -410,17 +428,59 @@ def rodada(conn) -> int:
         # do `sentinela.json` dela: quem le a marca nova nessa janela ainda le o arquivo velho
         perdeu_a_corrida = _marca(conn) != marca
         if not perdeu_a_corrida:
+            # a outra rodada pode ter gravado no banco e ainda nao no arquivo (issue #478): a falha que ela gravou
+            # hoje, depois do ultimo achado que a copia conhece, nao sai de novo
+            ja = _falhas_gravadas_depois(conn, estado.get("ultimo_achado"), hoje)
+            novos = [a for a in novos if not (a["evento"] in atuais and a["evento"] in ja)]
             for a in novos:
                 auditoria.registrar(conn, None, ACAO, "sentinela", None, None, a)
             if ultimo is not None and ultimo != ponto:
                 _gravar_ponto(conn, ultimo)
+            ultimo_achado = _marca(conn)[1] or 0
     if perdeu_a_corrida:
         log.info("sentinela: outra rodada gravou no meio desta; descartada")
         return 0
     recentes = {hoje.isoformat(), (hoje - datetime.timedelta(days=1)).isoformat()}
-    _gravar_estado({"ultimo_registro": ultimo, "pendencias": {k: hoje.isoformat() for k in atuais},
+    _gravar_estado({"ultimo_registro": ultimo, "ultimo_achado": ultimo_achado,
+                    "pendencias": {k: hoje.isoformat() for k in atuais},
                     "avisados_4672": {k: v for k, v in avisados.items() if k in recentes}})
     return len(novos)
+
+
+MIGRACAO_PONTO = "063_sentinela_ponto.sql"
+_GATILHOS_PONTO = ("sentinela_ponto_protecao_insert", "sentinela_ponto_protecao_delete",
+                   "sentinela_ponto_protecao_update")
+
+
+def antes_da_456(conn) -> dict:
+    """Rollback para um commit anterior a' issue #456 (issue #478), com o servico parado e antes de voltar o codigo: o
+    codigo antigo le e grava o ponto so' na auditoria. Grava o ponto da tabela `sentinela_ponto` como linha
+    `ACAO_PONTO` da auditoria (pela aplicacao: a cadeia continua valida) e, na mesma transacao, apaga a tabela, os
+    gatilhos e a linha da 063 em `schema_migrations`, para o deploy seguinte reimportar o ponto da auditoria. Sem
+    isso o codigo antigo partiria do ponto de antes do deploy da #456, acusaria estado alterado e repetiria os
+    achados. Repetir nao faz mal. Devolve `{ponto, gravado, tabela, migracao}` (tabela e migracao, depois: 0)."""
+    with db.mutacao(conn):
+        tem_tabela = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = "
+                                  "'sentinela_ponto'").fetchone()[0] > 0
+        ponto = _ponto_gravado(conn) if tem_tabela else None
+        gravado = False
+        if ponto is not None:
+            r = conn.execute("SELECT depois FROM audit_log WHERE acao = ? ORDER BY id DESC LIMIT 1",
+                             (ACAO_PONTO,)).fetchone()
+            try:
+                na_auditoria = None if r is None else int(json.loads(r[0])["ultimo_registro"])
+            except (ValueError, KeyError, TypeError):
+                na_auditoria = None
+            if na_auditoria != ponto:
+                auditoria.registrar(conn, None, ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": ponto})
+                gravado = True
+        for g in _GATILHOS_PONTO:
+            conn.execute(f"DROP TRIGGER IF EXISTS {g}")
+        conn.execute("DROP TABLE IF EXISTS sentinela_ponto")
+        conn.execute("DELETE FROM schema_migrations WHERE nome = ?", (MIGRACAO_PONTO,))
+    tabela = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE tbl_name = 'sentinela_ponto'").fetchone()[0]
+    migracao = conn.execute("SELECT COUNT(*) FROM schema_migrations WHERE nome = ?", (MIGRACAO_PONTO,)).fetchone()[0]
+    return {"ponto": ponto, "gravado": gravado, "tabela": tabela, "migracao": migracao}
 
 
 def agendar(intervalo_seg: int = INTERVALO_SEG) -> threading.Thread | None:

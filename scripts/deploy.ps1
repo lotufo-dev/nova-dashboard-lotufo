@@ -185,6 +185,28 @@ function SaudavelENovo([switch]$ExigirInstalacao) {
     }
     return $true
 }
+# Issue #478: rollback de um commit com a #456 (ponto da sentinela na tabela sentinela_ponto, migracao 063) para um
+# anterior a ela, que le e grava o ponto so' na auditoria. Com o servico parado e o codigo NOVO ainda no pinado, o
+# app.cli grava o ponto na auditoria e tira a tabela, os gatilhos e a linha da 063; sem isso o codigo antigo acusaria
+# "Estado da sentinela apagado" e repetiria os achados desde o deploy da #456. Falha aqui so' avisa: o rollback segue.
+function SentinelaAntesDa456([string]$de, [string]$para) {
+    $temNovo = & git -C $AppDir ls-tree --name-only $de -- backend/migrations/063_sentinela_ponto.sql
+    if ($LASTEXITCODE -ne 0) { Write-Warning "git ls-tree $de falhou; ponto da sentinela nao conferido"; return }
+    $temAnterior = & git -C $AppDir ls-tree --name-only $para -- backend/migrations/063_sentinela_ponto.sql
+    if ($LASTEXITCODE -ne 0) { Write-Warning "git ls-tree $para falhou; ponto da sentinela nao conferido"; return }
+    if (-not $temNovo -or $temAnterior) { return }
+    $codigo = 1
+    Push-Location (Join-Path $AppDir "backend")
+    try {
+        Stop-ScheduledTask -TaskName "DashboardLotufo"; Start-Sleep -Seconds 3
+        LiberarPorta
+        & $py -m app.cli sentinela antes-da-456 --banco $banco; $codigo = $LASTEXITCODE
+    } catch { Write-Warning "ponto da sentinela: $($_.Exception.Message)" }
+    finally { Pop-Location }
+    if ($codigo -ne 0) {
+        Write-Warning "ponto da sentinela NAO passado para a auditoria antes do rollback - ver docs\runbook.md (Rollback para um commit anterior a issue #456)"
+    }
+}
 # Depois do ROLLBACK OK: o commit anterior pode ja' conferir a instalacao (issue #417) e ter voltado em modo copia, sem
 # envio de e-mail e sem RM. Commit anterior ao #417 nao tem o campo e nao avisa.
 function AvisarSeCopia {
@@ -265,6 +287,7 @@ try {
         Write-Host $fim -ForegroundColor Green
     } else {
         Write-Warning "Saude NAO voltou -> ROLLBACK para $anterior"
+        SentinelaAntesDa456 $novo $anterior
         Construir $anterior
         RegistrarDeploy
         Reiniciar

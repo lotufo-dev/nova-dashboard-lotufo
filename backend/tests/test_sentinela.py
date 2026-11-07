@@ -504,31 +504,109 @@ def test_gatilho_do_ponto_apagado_vira_alerta_de_seguranca(maquina, conn, monkey
 
 
 def _comando_do_rollback_456():
+    """Os argumentos do comando do runbook (secao "Rollback para um commit anterior a' issue #456") depois de `-m`."""
     texto = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "runbook.md").read_text(encoding="utf-8")
-    achados = [m.group(1) for m in re.finditer(r'python -c "([^"]*)"', texto) if "063_sentinela_ponto.sql" in m.group(1)]
+    achados = re.findall(r"`\.venv\\Scripts\\python -m (app\.cli sentinela antes-da-456 [^`]*)`", texto)
     assert len(achados) == 1
-    return achados[0]
+    return achados[0].split()
 
 
-def test_comando_do_runbook_para_rollback_antes_da_456_e_o_deploy_seguinte_parte_do_ponto_da_auditoria(maquina, conn,
-                                                                                                         monkeypatch):
-    """Gate Sol, rodada 2: no rollback o codigo antigo grava o ponto so' na auditoria; o comando do runbook tira a
-    tabela, os gatilhos e a linha da 063, e o deploy seguinte reimporta o ultimo ponto da auditoria."""
-    import subprocess
-    import sys
+def _rodar_o_comando_do_runbook(capsys) -> str:
+    from app import cli
+    args = _comando_do_rollback_456()
+    assert args[:3] == ["app.cli", "sentinela", "antes-da-456"]
+    args = [str(db.db_path()) if a == r"C:\DashboardLotufo\dados\dashboard.db" else a for a in args[1:]]
+    capsys.readouterr()
+    assert cli.main(args) == 0
+    return capsys.readouterr().out
+
+
+def _codigo_de_antes_da_456(maquina):
+    """A rodada da sentinela como ela era antes da #456 (copia em tests/fixtures/sentinela)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("sentinela_antes_456", FIXTURES / "sentinela_antes_456.py")
+    antigo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(antigo)
+    antigo._executar = maquina
+    return antigo
+
+
+def test_rollback_para_antes_da_456_com_o_comando_do_runbook_nao_acusa_nem_repete_e_o_deploy_seguinte_reimporta(
+        maquina, conn, monkeypatch, capsys):
+    """Issue #478 (revisor e gate Sol da PR #470): o comando do runbook grava o ponto da tabela na auditoria antes de
+    apaga'-la; sem isso o codigo antigo partia do ponto de antes do deploy da #456, acusava estado alterado e repetia
+    os achados."""
     from app import auditoria
     _com_ponto_de_partida(maquina, conn)
-    comando = _comando_do_rollback_456()
-    assert '"' not in comando and "$" not in comando        # o PowerShell repassa sem mexer
-    comando = comando.replace(r"C:\DashboardLotufo\dados\dashboard.db", str(db.db_path()))
-    saida = subprocess.run([sys.executable, "-I", "-c", comando], capture_output=True, text=True, check=True).stdout
-    assert saida.strip() == "sentinela_ponto: 0 migracao 063: 0"
-    with db.mutacao(conn):                                  # o codigo antigo, durante o rollback
-        auditoria.registrar(conn, None, sentinela.ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": 1071})
-    db.migrate(conn)                                        # o deploy seguinte
-    assert _ponto(conn) == 1071
+    with db.mutacao(conn):                                  # o ponto que o codigo antigo deixou antes do deploy da #456
+        auditoria.registrar(conn, None, sentinela.ACAO_PONTO, "sentinela", None, None,
+                            {"ultimo_registro": _ponto(conn)})
+    assert len(_rodar(maquina, conn, "4663_segredos_externo.xml")) == 1     # o codigo da #456 avanca o ponto
+    ponto = _ponto(conn)
+    saida = _rodar_o_comando_do_runbook(capsys)
+    assert saida.strip().splitlines()[-1] == "sentinela_ponto: 0 migracao 063: 0"
+    assert conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE tbl_name = 'sentinela_ponto'").fetchone()[0] == 0
+    assert auditoria.verificar_cadeia(conn)
+    antigo = _codigo_de_antes_da_456(maquina)
+    antes = conn.execute("SELECT MAX(id) FROM audit_log").fetchone()[0]
+    consultas = len(maquina.consultas)
+    antigo.rodada(conn)                                     # a primeira rodada do codigo antigo
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao = ? AND id > ?",
+                        (sentinela.ACAO, antes)).fetchone()[0] == 0
+    assert len(maquina.consultas) == consultas              # o log nao andou: nada relido
+    maquina.adicionar("tarefas.xml", maquina.raiz)
+    antigo.rodada(conn)                                     # o codigo antigo grava o ponto na auditoria
+    assert f"EventRecordID>{ponto}" in maquina.consultas[-1]
+    db.migrate(conn)                                        # o deploy seguinte, de volta para a #456
+    assert _ponto(conn) == 1060
     monkeypatch.setattr(seguranca, "_conferencia", [])
     assert seguranca.conferir(conn) == []                   # gatilhos de volta
+    assert _rodar(maquina, conn) == []
+
+
+def test_comando_do_rollback_456_repetido_ou_sem_a_tabela_nao_grava_de_novo(maquina, conn, capsys):
+    _com_ponto_de_partida(maquina, conn)
+    _rodar_o_comando_do_runbook(capsys)
+    linhas = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    assert _rodar_o_comando_do_runbook(capsys).strip().splitlines()[-1] == "sentinela_ponto: 0 migracao 063: 0"
+    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == linhas
+
+
+def test_comando_do_rollback_456_sem_ponto_gravado_so_apaga(maquina, conn, capsys):
+    assert _ponto(conn) is None                              # a sentinela nunca leu o log
+    _rodar_o_comando_do_runbook(capsys)
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao = ?", (sentinela.ACAO_PONTO,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM schema_migrations WHERE nome = '063_sentinela_ponto.sql'").fetchone()[0] == 0
+
+
+def test_deploy_ps1_passa_o_ponto_para_a_auditoria_antes_do_rollback_para_antes_da_456():
+    texto = (pathlib.Path(__file__).resolve().parents[2] / "scripts" / "deploy.ps1").read_text(encoding="utf-8")
+    rollback = texto[texto.index("ROLLBACK para $anterior"):]
+    assert rollback.index("SentinelaAntesDa456") < rollback.index("Construir $anterior")
+    assert "app.cli sentinela antes-da-456 --banco $banco" in texto
+    assert "backend/migrations/063_sentinela_ponto.sql" in texto
+
+
+def test_rodada_pausada_entre_o_banco_e_o_arquivo_nao_deixa_a_outra_repetir_a_falha(maquina, conn, monkeypatch):
+    """Issue #478 (gate Sol, rodada 2 da PR #470): a outra rodada le a marca nova (depois do commit desta) com as
+    pendencias velhas do `sentinela.json` (antes desta grava'-lo) e gravava a mesma falha de novo."""
+    _com_ponto_de_partida(maquina, conn)
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False      # falha nova, sem evento novo no log
+    outra = db.get_conn()
+    original = sentinela._gravar_estado
+    vez = [0]
+
+    def pausa(estado):
+        vez[0] += 1
+        if vez[0] == 1:
+            sentinela.rodada(outra)                         # B roda inteira entre o commit de A e o arquivo de A
+        original(estado)
+
+    monkeypatch.setattr(sentinela, "_gravar_estado", pausa)
+    a = _rodar(maquina, conn)
+    outra.close()
+    assert [x["evento"] for x in a] == ["auditoria-arquivos"]
+    assert _rodar(maquina, conn) == []
 
 
 def test_copia_a_frente_do_banco_sem_conseguir_ler_o_log_acusa(maquina, conn):
