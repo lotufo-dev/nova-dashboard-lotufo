@@ -11,7 +11,8 @@ export type MedicaoBase = {
   valor_protocolado_centavos: number | null; valor_atestado_centavos: number | null;
   atestado_em: string | null; recebida_em: string | null; nota_emitida_em?: string | null;
   final?: number; final_em?: string | null; protocolos: MarcoProtocolo[]; notas?: NotaDaMedicao[];
-  edicoes_valor?: { data: string; texto: string }[];   // B-02 (10/10/2026): da auditoria, texto pronto do servidor
+  // B-02 (10/10/2026): da auditoria, texto pronto do servidor; #290: a linha do boletim traz o id do PDF
+  edicoes_valor?: { data: string; texto: string; boletim_id?: number }[];
   siga_registrado_em?: string | null;                  // issue #328: quando o link do SIGA do envio por fora foi gravado
   planilha_siga?: { data: string; numero: string | null } | null;   // issue #283: nº do SIGA da planilha/carta
 };
@@ -135,7 +136,7 @@ export function protocolosDa<P extends ProtocoloResumo>(protocolos: P[], medicao
   return { daqui: dela.filter(p => p.medicoes[0]?.id === medicaoId), deOutra: dela.filter(p => p.medicoes[0]?.id !== medicaoId) };
 }
 
-export type Evento = { data: string; texto: string };
+export type Evento = { data: string; texto: string; href?: string };
 
 /** Linha do tempo da medicao, do mais antigo ao mais novo, com quem fez quando a API diz. */
 export function eventosDaMedicao(m: MedicaoBase, espelhos: EspelhoResumo[], protocolos: ProtocoloResumo[]): Evento[] {
@@ -166,7 +167,11 @@ export function eventosDaMedicao(m: MedicaoBase, espelhos: EspelhoResumo[], prot
   if (m.atestado_em) out.push({ data: m.atestado_em, texto: "Atestada pelo órgão" });
   if (m.recebida_em) out.push({ data: m.recebida_em, texto: "Recebida" });
   if (m.final === 1 && m.final_em) out.push({ data: m.final_em, texto: "Marcada como medição final" });
-  for (const e of m.edicoes_valor ?? []) out.push(e);
+  // #290: o boletim do orgao liga o PDF dele
+  for (const e of m.edicoes_valor ?? []) {
+    out.push(e.boletim_id ? { data: e.data, texto: e.texto, href: `/api/medicoes/${m.id}/boletins/${e.boletim_id}` }
+      : { data: e.data, texto: e.texto });
+  }
   return out.sort((a, b) => a.data.localeCompare(b.data));
 }
 

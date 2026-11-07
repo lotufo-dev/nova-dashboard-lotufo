@@ -14,6 +14,7 @@ import type { Usuario } from "./Login";
 import MaisAcoes, { type ItemAcao } from "./MaisAcoes";
 import { eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, rotuloDoBloco, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type ParDaMedicao } from "./medicao";
+import { FormBoletim } from "./Boletim";
 import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
 import { brl, type Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
@@ -34,7 +35,7 @@ import "./etapas.css";
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
-type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "sozinha" | "liberar" | null;
+type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "boletim" | "sozinha" | "liberar" | null;
 
 // Ancoras antigas (#notas, #espelho, #protocolo) abrem a etapa onde a coisa mora hoje.
 const SECAO_ETAPA: Record<string, number> = { espelho: 1, notas: 3, protocolo: 4 };
@@ -225,9 +226,16 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
 
   // Mais acoes: so' o que nao e' de uma etapa
   const preso = (envios.envios ?? []).filter(e => e.protocolo_id !== null && !!e.envio_reservado_em);
+  // #290: o boletim do orgao (spec §2.1 passo 3) vem depois do envio da planilha/carta; na planilha enviada o botao
+  // mora na etapa 1, nos outros estados (prevista do fluxo antigo, glosa depois do espelho) em Mais acoes. A
+  // assinatura do DocuSign (passo 4) e' a do boletim: so' aparece depois dele.
+  const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
+  const boletimNaEtapa = podeEditar && m.estado === "planilha_enviada";
+  const podeBoletim = podeEditar && !EXCECOES.includes(m.estado) && m.estado !== "planilha_gerada";
   const acoes: ItemAcao[] = !podeEditar ? [] : [
     ...(valorEditavel(m, "atestado", podeEditar) ? [{ id: "atestado", rotulo: m.valor_atestado_centavos === null ? "Definir o atestado" : "Editar o atestado" }] : []),
-    ...(!EXCECOES.includes(m.estado) ? [{ id: "assinatura", rotulo: "Registrar assinatura" }] : []),
+    ...(podeBoletim && !boletimNaEtapa ? [{ id: "boletim", rotulo: comBoletim ? "Registrar boletim novo" : "Registrar boletim" }] : []),
+    ...(!EXCECOES.includes(m.estado) && comBoletim ? [{ id: "assinatura", rotulo: "Registrar assinatura" }] : []),
     ...(m.final !== 1 && !EXCECOES.includes(m.estado) ? [{ id: "final", rotulo: "Marcar como medição final" }] : []),
     ...(m.final === 1 ? [{ id: "desfinal", rotulo: "Desmarcar a medição final" }] : []),
     ...(PROXIMOS[m.estado] ?? []).filter(e => e !== "recebida").map((e, i) =>
@@ -256,6 +264,9 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       )}
       {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha key={tentativa} medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
         aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })} />}
+      {boletimNaEtapa && (
+        <div><button type="button" className="btn btn--primario" disabled={salvando} onClick={() => abrir("boletim")}>Registrar boletim</button></div>
+      )}
       {comPlanilha && enviada && revisao === "falhou" && (
         <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
           <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
@@ -428,6 +439,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       {painel === "final" && (
         <Janela titulo="Marcar como medição final" aoFechar={fechar}>
           <FormFinal m={m} salvando={salvando} agir={agir} aoFechar={fechar} erro={erro} />
+        </Janela>
+      )}
+      {painel === "boletim" && (
+        <Janela titulo="Registrar boletim" aoFechar={fechar}>
+          <FormBoletim m={m} salvando={salvando} agir={agir} aoFechar={fechar} erro={erro} />
         </Janela>
       )}
       {painel === "assinatura" && (
