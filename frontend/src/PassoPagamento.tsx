@@ -77,6 +77,8 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
   // (gate Sol, rodada 4); zero nao ganha frase (regra texto-na-tela), so' o R$ 0,00 do "A receber"
   const nadaAReceber = receber.completo && receber.total === 0;
   const recebida = grupo.length > 0 && grupo.every(x => x.estado === "recebida");
+  // o par so' esta' recebido quando a ultima metade entra: a data e' a maior (gate Sol, rodada 5)
+  const recebidaEm = grupo.map(x => x.recebida_em).filter((d): d is string => !!d).sort().at(-1) ?? null;
   const enviada = grupo.flatMap(x => x.protocolos.map(p => p.data)).sort().at(-1) ?? null;
   const dias = enviada && !recebida ? diasEntre(enviada, hojeLocal()) : null;
   const notas = grupo.flatMap(x => (x.notas ?? []).map(n => ({ n, m: x })));
@@ -102,7 +104,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
           {recebida ? (
             <>
               <p className="pag-numeros__rotulo">Recebida</p>
-              <p className="pag-numeros__valor num">{grupo[0].recebida_em ? fmtDataPura(grupo[0].recebida_em.slice(0, 10)) : "—"}</p>
+              <p className="pag-numeros__valor num">{recebidaEm ? fmtDataPura(recebidaEm.slice(0, 10)) : "—"}</p>
             </>
           ) : (
             <>

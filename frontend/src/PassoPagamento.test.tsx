@@ -109,6 +109,14 @@ describe("Passo Pagamento (#514)", () => {
     expect(screen.getByText("paga")).toBeTruthy();                   // a situacao da nota continua na linha dela
   });
 
+  it("par recebido em dias diferentes: “Recebida” com a data da última metade", () => {
+    montar({ grupo: [com({ estado: "recebida", recebida_em: "2026-11-10T12:00:00", pagamento_cota: cota(100, 100, 0) }),
+      com({ id: 6, tipo: "reajuste", estado: "recebida", recebida_em: "2026-11-20T12:00:00", notas: [], pagamento_cota: cota(100, 100, 0) })] });
+    expect(screen.getByText("Recebida", { selector: "p" })).toBeTruthy();
+    expect(screen.getByText("20/11/2026")).toBeTruthy();
+    expect(screen.queryByText("10/11/2026")).toBeNull();
+  });
+
   it("obra só da Lotufo e cabeçalho ainda não lido: o rótulo não fala de cota", () => {
     montar({ percentualBp: 10000 });
     expect(screen.getByText("A receber")).toBeTruthy();
