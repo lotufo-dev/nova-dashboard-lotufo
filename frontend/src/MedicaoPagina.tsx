@@ -84,9 +84,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
 
   const m = medicoes?.find(x => x.id === medicaoId) ?? null;
   // a execucao e o reajuste do mesmo numero formam a pagina "Nª Medição + Reajuste"
-  const execucao = !m || m.tipo === "projeto" ? null : m.tipo === "execucao" ? m : medicoes?.find(x => x.numero === m.numero && x.tipo === "execucao") ?? null;
-  const reajuste = !m || m.tipo === "projeto" ? null : m.tipo === "reajuste" ? m : medicoes?.find(x => x.numero === m.numero && x.tipo === "reajuste") ?? null;
-  const doPar = !!execucao && !!reajuste;
+  // #557: so' a metade valida forma o par (como notas_envio.par()): a cancelada ou desistida fica de fora do grupo
+  // (total, pagamento, envio) e aparece em "Da mesma competência"
+  const valida = (x: Medicao) => !["cancelada", "desistida"].includes(x.estado);
+  const execucao = !m || m.tipo === "projeto" ? null : m.tipo === "execucao" ? m : medicoes?.find(x => x.numero === m.numero && x.tipo === "execucao" && valida(x)) ?? null;
+  const reajuste = !m || m.tipo === "projeto" ? null : m.tipo === "reajuste" ? m : medicoes?.find(x => x.numero === m.numero && x.tipo === "reajuste" && valida(x)) ?? null;
+  const doPar = !!execucao && !!reajuste && valida(execucao) && valida(reajuste);
   const grupo = doPar ? [execucao, reajuste] : m ? [m] : [];
   const envios = useEnvios(grupo.map(x => x.id));
 

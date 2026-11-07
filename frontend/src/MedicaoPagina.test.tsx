@@ -1061,12 +1061,23 @@ describe("Página da obra em medição: passos 3 a 6 (issue #514)", () => {
 
   it("passo Pagamento: a cota da Lotufo no consórcio, sem botão para a engenharia", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, notas: [{ nota_id: 1, coligada: 1, numero: "2351", serie: null, emissao: null,
-        valor_centavos: 400001, recebido_centavos: 0, devido_centavos: 368001, falta_centavos: 368001, da_lotufo: true,
+        valor_centavos: 400001, recebido_centavos: 0, devido_centavos: 368001, falta_centavos: 368001, da_lotufo: true, da_cota: true,
         recebido_em: null, origem: "rm", regra: null }], notas_faltam: 0 }],
       "/api/contratos/1/cabecalho": { obra: "Integra", orgao: "SINFRA", instrumento: "CT 1", percentual_lotufo_bp: 4000 } });
     pagina("engenharia");
     expect(await screen.findByText("A receber · cota da Lotufo")).toBeTruthy();
     expect(screen.getByLabelText("A receber: R$ 3.680,01")).toBeTruthy();       // o titulo (liquido), nao o bruto
     expect(screen.queryByRole("button", { name: "Registrar recebimento" })).toBeNull();
+  });
+
+  it("par com o reajuste cancelado: o grupo é só a medição, que mostra “Recebida” e o total dela (#557)", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "recebida", recebida_em: "2026-11-20" },
+      { ...MEDICAO, id: 6, tipo: "reajuste", estado: "cancelada", valor_protocolado_centavos: 50001 }] });
+    pagina();
+    const numeros = (await screen.findByText("Total da medição")).closest(".pag-numeros")!;
+    expect(within(numeros as HTMLElement).getByText("R$ 10.000,00")).toBeTruthy();
+    expect(within(numeros as HTMLElement).getByText("Recebida")).toBeTruthy();
+    expect(within(numeros as HTMLElement).getByText("20/11/2026")).toBeTruthy();
+    expect(screen.getByLabelText(/^Valor: R\$\s10\.000,00$/)).toBeTruthy();       // o valor grande, sem o reajuste cancelado
   });
 });
