@@ -348,6 +348,12 @@ def _custo(conn, usuario_id, contrato_id, c, rel) -> None:
     """Issue #489: secao `custo:` -> contratos.projeto_rm/custo_* e custo_grupos. Cadastro, nao historico financeiro:
     o yaml e' a verdade. O grupo casa pelo nome (o id fica estavel quando so' a ordem ou as tarefas mudam); o que saiu
     do yaml sai do banco. Uma entrada de auditoria com o antes e o depois inteiros; igual, nada e' gravado."""
+    if "projeto_rm" not in {r[1] for r in conn.execute("PRAGMA table_info(contratos)")}:
+        # banco anterior a' migracao 067 (testes de migracao antiga): sem secao `custo:`, nao ha' o que fazer
+        if c.get("custo") is not None:
+            raise ValueError(f"{c['nome_curto']}: o banco ainda não tem a migração 067 (custo por obra); "
+                             "reinicie a dashboard para aplicar as migrações e rode o cadastro de novo")
+        return
     linha = conn.execute("SELECT projeto_rm, custo_nao_e_custo, custo_sem_tarefa FROM contratos WHERE id=?",
                          (contrato_id,)).fetchone()
     gravados = [{k: g[k] for k in ("nome", "tarefas", "itens_planilha", "item_chave")}
