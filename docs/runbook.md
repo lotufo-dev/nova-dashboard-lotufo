@@ -308,6 +308,21 @@ disco), não o par; nada foi alterado, e o deploy pode ser tentado de novo. Para
 arquivos em `<raiz>\segredos\tls`; se existir a cópia do par certo, pôr os dois de volta; senão, gerar de novo pelo procedimento
 acima ("Gerar de novo com a produção em HTTPS"), que troca o par inteiro e reinicia a produção. Depois, rodar o deploy outra vez.
 
+**Permissao do par do HTTPS recusada** (issue #534): logo depois do par, ainda antes do sentinela e do checkout, o
+`deploy.ps1` em HTTPS confere a ACL de `<raiz>\segredos\tls`, `cert.pem` e `chave.pem` com a mesma função que o
+`rodar_producao.ps1` usa na subida (`Assert-AclSomenteSistemaEAdmins`, de `scripts\comum_acl.ps1`): dono e permissões só de
+SYSTEM e Administradores, sem herança de outro principal. Arquivo reposto por cópia pelo Explorer ou por restauração de backup
+costuma trazer permissão a mais; abre e casa para o administrador que roda o deploy, mas o `rodar_producao.ps1` recusaria subir
+o commit novo e o rollback. O deploy para com "permissao do par do HTTPS alem de SYSTEM e Administradores em ..." e nada foi
+alterado: a produção no ar segue, e o watchdog não foi pausado. **Não reiniciar a tarefa** (a subida recusaria a mesma
+permissão). O "Detalhe" da mensagem lista o principal ou o dono indevido. Corrigir num PowerShell elevado, no caminho citado
+(a pasta e os dois arquivos, nessa ordem):
+`icacls "<raiz>\segredos\tls" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"`,
+`icacls "<raiz>\segredos\tls\*" /reset /T /Q` (os `.pem` passam a herdar só da pasta) e
+`icacls "<raiz>\segredos\tls" /setowner "*S-1-5-32-544" /T`. Se o detalhe citar ACE explícita de terceiro na pasta, ela
+sobrevive ao primeiro comando: `icacls "<raiz>\segredos\tls" /remove:g "<principal listado>"` antes. Depois, rodar o deploy
+outra vez.
+
 **Watchdog com problema no conferidor**: `cert.pem` ausente ou ilegível, ou o C# da saúde bloqueado (antivírus no `Add-Type`),
 não reinicia a produção: o `watchdog.log` registra "CONFERIDOR com problema, producao NAO reiniciada: <motivo>" a cada rodada,
 até ser resolvido.

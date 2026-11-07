@@ -144,6 +144,7 @@ function TlsDaTarefa {
 }
 $comTls = TlsDaTarefa
 . (Join-Path $PSScriptRoot "comum_tls.ps1")
+. (Join-Path $PSScriptRoot "comum_acl.ps1")   # Assert-AclSomenteSistemaEAdmins, a mesma do rodar_producao.ps1 (issue #534)
 $certificado = Join-Path $Raiz "segredos\tls\cert.pem"
 if ($comTls) {
     $urlSaude = "https://localhost:$Porta/api/health"
@@ -174,6 +175,13 @@ if ($comTls) {
         $motivoPar = ($rPar.Saida -replace "\s+", " ").Trim()
         if ($motivoPar -match "password callback") { $motivoPar = "chave cifrada nao e' aceita (o uvicorn sobe sem senha)" }
         throw "certificado e chave do HTTPS nao formam par ($certificado e $chaveTls; motivo: $motivoPar); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Chave do HTTPS recusada)"
+    }
+    # Issue #534: par reposto por copia (Explorer, backup) pode trazer permissao a mais; abre e casa para o administrador
+    # que roda o deploy, mas o rodar_producao.ps1 recusa subir (Assert-AclSomenteSistemaEAdmins na pasta e nos dois .pem)
+    # no commit novo e no rollback. A mesma funcao (comum_acl.ps1) confere aqui, antes do sentinela e de parar a producao.
+    foreach ($caminhoTls in (Join-Path $Raiz "segredos\tls"), $certificado, $chaveTls) {
+        try { Assert-AclSomenteSistemaEAdmins -Caminho $caminhoTls }
+        catch { throw "permissao do par do HTTPS alem de SYSTEM e Administradores em $caminhoTls (o rodar_producao.ps1 recusaria subir o commit novo e o rollback); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Permissao do par do HTTPS recusada). Detalhe: $($_.Exception.Message)" }
     }
 } else {
     $urlSaude = "http://localhost:$Porta/api/health"
