@@ -74,7 +74,10 @@ def _config(conn) -> dict:
     r = conn.execute("SELECT valor FROM cadastro_geral WHERE chave='copia_dono'").fetchone()
     if r is None:
         raise EnvioNaoConfigurado(SEM_CADASTRO)
-    config = json.loads(r["valor"])
+    try:
+        config = json.loads(r["valor"])
+    except ValueError:
+        raise EnvioNaoConfigurado(SEM_CADASTRO) from None
     if not isinstance(config, dict) or not config.get("para"):
         raise EnvioNaoConfigurado(SEM_CADASTRO)
     if not config.get("enviada_por"):
@@ -94,6 +97,9 @@ def _remetente(conn, config: dict) -> dict:
             raise EnvioNaoConfigurado(
                 f"a conta Microsoft de {u['email']} não está conectada: conecte em Minha conta") from None
         log.warning("copia do dono: remetente sem cliente de e-mail: %s", e)
+        if correio.configuracao()["client_id"]:
+            raise EnvioNaoConfigurado(
+                f"a conta Microsoft de {u['email']} não pôde ser usada: reconecte em Minha conta") from None
         raise EnvioNaoConfigurado(SERVICO_NAO_CONFIGURADO) from None
     return u
 
@@ -321,6 +327,8 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
 def motivo(e: BaseException) -> str:
     """O que vai para a Saude: frase operacional. O detalhe tecnico (a excecao) fica so' no log."""
     if isinstance(e, graph.ErroGraph):
+        if e.status in (401, 403):
+            return "a conta Microsoft de quem envia não foi aceita pelo serviço de e-mail: reconecte em Minha conta"
         return SERVICO_RECUSOU if e.status is not None and e.status < 500 else SERVICO_FORA
     if isinstance(e, (ValueError, correio.EnvioNaoRegistrado)):
         return str(e)

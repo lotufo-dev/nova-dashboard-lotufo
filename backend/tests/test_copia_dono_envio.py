@@ -779,7 +779,8 @@ def test_rodada_semanal_gera_e_envia(ambiente, monkeypatch):
     assert m["anexos"][0]["nome"] == arq.name
 
 
-@pytest.mark.parametrize("status, frase", [(None, "não respondeu"), (503, "não respondeu"), (400, "recusou o envio")])
+@pytest.mark.parametrize("status, frase", [(None, "não respondeu"), (503, "não respondeu"), (400, "recusou o envio"),
+                                          (401, "reconecte em Minha conta")])
 def test_falha_do_servico_de_email_vai_para_a_saude_em_portugues_e_a_excecao_para_o_log(
         ambiente, monkeypatch, caplog, status, frase):
     conn, tmp = ambiente
