@@ -22,6 +22,22 @@ const LISTA = { familia: "mtpar", etapas: [{ chave: "unico", rotulo: "Protocolo"
 describe("Protocolo", () => {
   afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
 
+  // issue #536: com a reserva de envio presa, o Descartar recebe 409 com o `codigo` e o cartão oferece a liberação
+  it("reserva presa no Descartar: aparece o Liberar envio", async () => {
+    const PRESA = "Este envio está em andamento ou foi interrompido (iniciado às 10:05 por Admin). Confira a caixa de "
+      + "Enviados do Outlook: se o e-mail NÃO saiu, libere o envio e repita.";
+    api.mockImplementation((caminho: string) => caminho === "/api/protocolos/9/descartar"
+      ? Promise.reject(new ApiErro(409, PRESA, { codigo: "ENVIO_RESERVADO", mensagem: PRESA,
+        reservado_em: "2026-10-10T10:05:00-04:00", reservado_por_nome: "Admin", liberavel_a_partir_de: "2026-10-10T10:20:00-04:00" }))
+      : Promise.resolve({}));
+    render(<ProtocolosDaMedicao contratoId={1} medicaoId={5} dados={{ ...LISTA, protocolos: [PROT] }}
+      carregar={async () => {}} podeEditar aoMudar={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Descartar" }));
+    fireEvent.change(screen.getByLabelText(/Motivo/), { target: { value: "teste" } });
+    fireEvent.click(screen.getByRole("button", { name: "Descartar o protocolo" }));
+    expect(await screen.findByRole("button", { name: "Liberar envio" })).toBeTruthy();
+  });
+
   it("na obra que junta medições, cria o protocolo com as medições marcadas e o número do ofício", async () => {
     const SES = { ...LISTA, familia: "ses" };
     api.mockResolvedValueOnce(SES).mockResolvedValueOnce(PROT).mockResolvedValueOnce({ ...SES, protocolos: [PROT] });
