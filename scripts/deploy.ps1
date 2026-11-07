@@ -420,21 +420,33 @@ function AvisarSeCopia {
 # Issue #443 (rodada 2 da PR #475): a producao so' esta' PROVADA com o health 200 cujo `commit` (7 caracteres, lido pelo
 # servidor na subida, issue #421) e' o commit esperado. Qualquer processo responde 200; sem o campo (commit anterior a
 # #421) nada esta' provado.
+# Issue #481: o CommitDoHealth diz o que viu. "sem-200" (sem resposta ou outro status: servidor fora do ar), "sem-campo"
+# (200 sem o campo, commit anterior a #421, ou corpo que nao e' JSON), "vazio" (200 com `commit: null`: o servidor, que
+# roda como SYSTEM, nao conseguiu rodar o git rev-parse, em geral git fora do PATH da maquina) e "ok" (commit lido).
+# Nenhum caso alem do "ok" no commit esperado prova a producao; a mensagem e' que muda.
 function CommitDoHealth {
     try { $resposta = Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12 }
-    catch { return $null }
-    if ($resposta.StatusCode -ne 200) { return $null }
+    catch { return [pscustomobject]@{ Situacao = "sem-200"; Commit = $null } }
+    if ($resposta.StatusCode -ne 200) { return [pscustomobject]@{ Situacao = "sem-200"; Commit = $null } }
     $saude = $null
     try { $saude = $resposta.Content | ConvertFrom-Json } catch { $saude = $null }
-    if ($saude -and $saude.commit) { return [string]$saude.commit }
-    return $null
+    if (-not $saude -or -not ($saude.PSObject.Properties.Name -contains 'commit')) {
+        return [pscustomobject]@{ Situacao = "sem-campo"; Commit = $null }
+    }
+    if (-not $saude.commit) { return [pscustomobject]@{ Situacao = "vazio"; Commit = $null } }
+    return [pscustomobject]@{ Situacao = "ok"; Commit = [string]$saude.commit }
 }
 function NoArEm([string]$commit) {
     $curto = "$commit"
     if ($curto.Length -gt 7) { $curto = $curto.Substring(0, 7) }
-    $visto = CommitDoHealth
-    if ($visto -and $curto.Length -eq 7 -and $visto -eq $curto) { return $true }
-    if (-not $visto) { $visto = "health sem 200 ou sem o campo commit" }
+    $lido = CommitDoHealth
+    $visto = $lido.Commit
+    if ($lido.Situacao -eq "ok" -and $curto.Length -eq 7 -and $visto -eq $curto) { return $true }
+    switch ($lido.Situacao) {
+        "vazio" { $visto = "health 200 com o campo commit vazio; o servidor nao conseguiu ler o proprio commit: confira o git no PATH da maquina (o servidor roda como SYSTEM)" }
+        "sem-campo" { $visto = "health 200 sem o campo commit (commit anterior ao registro do commit no health)" }
+        "sem-200" { $visto = "health sem 200: servidor fora do ar ou sem resposta" }
+    }
     Write-Warning "o health nao prova o commit $curto no ar (visto: $visto)"
     return $false
 }
