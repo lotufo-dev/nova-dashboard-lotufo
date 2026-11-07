@@ -736,3 +736,31 @@ def test_registro_por_fora_com_codigo_de_outra_medicao_e_422_sem_falar_em_protoc
     assert r.status_code == 422 and r.json()["detail"] == "Este processo do SIGA já está ligado a outra medição"
     assert cl.get(f"/api/medicoes/{mid}").json()["estado"] == "nota_emitida"      # nem o protocolo foi registrado
     assert _siga_processos("medicao_id") == [(outra,)]
+
+
+def test_texto_da_carta_legivel_na_tela_e_guardado_depois_do_envio(api):
+    """Issue #448 (itens 2 e 3): o "Texto da carta" nao mostra o marcador {apostilamento} cru (nem no oficio so' de
+    execucao), a API converte o texto legivel de volta ao montar, e o texto fica a' vista depois do envio."""
+    cl, cid, mid = api
+    d = cl.post(f"/api/contratos/{cid}/protocolos", json={"etapa": "unico", "medicao_ids": [mid],
+                                                        "numero_oficio": "301"}).json()
+    pid = d["id"]
+    assert "{apostilamento}" not in d["corpo_padrao"] and protocolo.MARCADOR_NA_TELA in d["corpo_padrao"]
+    editado = d["corpo_padrao"].replace("Ficamos à disposição.", "Ficamos à disposição, sempre.")
+    assert editado != d["corpo_padrao"]
+    r = cl.post(f"/api/protocolos/{pid}/montar", json={"corpo": editado})
+    assert r.status_code == 200, r.text
+    c = db.get_conn()
+    gravado = c.execute("SELECT corpo_carta FROM protocolos WHERE id=?", (pid,)).fetchone()[0]
+    c.close()
+    assert "{apostilamento}" in gravado and protocolo.MARCADOR_NA_TELA not in gravado and "sempre" in gravado
+    pac = cl.get(f"/api/protocolos/{pid}/pacote").content
+    cl.post(f"/api/protocolos/{pid}/assinado", files=_pdf_upload(_assinar(pac)))
+    pv = cl.post("/api/protocolos/envio/previa", json={"protocolo_ids": [pid]}).json()
+    r = cl.post("/api/protocolos/envio", json={"protocolo_ids": [pid], **{k: pv[k] for k in ("para", "copia", "assunto", "corpo")},
+                                              "confirmadas": [x["mensagem"] for x in pv["pendencias"]]})
+    assert r.status_code == 200, r.text
+    d = cl.get(f"/api/protocolos/{pid}").json()
+    # enviado, a tela mostra o texto que foi ao orgao: no oficio so' de execucao, sem o paragrafo do termo
+    assert d["situacao"] == "enviado" and "sempre" in d["corpo_carta"]
+    assert "{apostilamento}" not in d["corpo_carta"] and protocolo.MARCADOR_NA_TELA not in d["corpo_carta"]

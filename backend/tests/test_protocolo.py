@@ -10,8 +10,8 @@ import pytest
 import yaml
 from fpdf import FPDF
 
-from app import (arquivos, auth, cadastro_aplicar, carta, certidoes, correio, db, documentos, graph, leitura_pdf,
-                 protocolo, tempo)
+from app import (arquivos, auth, cadastro_aplicar, carta, certidoes, correio, db, documentos, envio_reserva, graph,
+                 leitura_pdf, protocolo, tempo)
 
 # Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
 pytestmark = pytest.mark.pdf
@@ -867,3 +867,271 @@ def test_carta_da_ses_le_o_aprovado_senao_o_pedido(tmp_path, monkeypatch):
     linhas = texto.splitlines()
     assert linhas[0] == "1. Nota Fiscal – R$ 13.000,01"
     assert linhas[1:3] == ["   Sendo: 41ª Medição – R$ 12.000,01", "   Sendo: Reajuste da 41ª Medição – R$ 1.000,00"]
+
+
+# --- issue #448: texto da carta legivel e guardado, sem troca silenciosa da edicao -----------------------------------
+
+def test_texto_editado_a_mao_nunca_e_trocado_pelo_padrao_sem_aviso(cenario):
+    """Issue #448 (item 1): com o campo {apostilamento} posto no texto da familia depois, a tela de envio da nota
+    (`refazer_texto`) so' troca o gravado que e' o padrao sem o campo; o editado a' mao recusa e diz como por o campo."""
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    marcado = protocolo.corpo_padrao(c, pid)
+    editado = protocolo._sem_linhas_vazias(marcado.replace("{apostilamento}", "Em complemento ao Ofício 777/2026."))
+    c.execute("UPDATE protocolos SET corpo_carta=? WHERE id=?", (editado, pid))
+    c.commit()
+    with pytest.raises(ValueError, match=re.escape(protocolo.MARCADOR_NA_TELA)) as erro:
+        protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
+    assert "seção Protocolo" in str(erro.value) and "recarregue" not in str(erro.value)
+    p = protocolo._linha(c, pid)
+    assert (p["corpo_carta"], p["situacao"]) == (editado, "rascunho")
+    # a edicao com o campo (como a tela o mostra, convertido de volta) monta e guarda a frase "777/2026"
+    texto = _carta_montada(c, ids, pid, corpo=protocolo.da_tela(protocolo.para_tela(
+        editado.replace("Em complemento ao Ofício 777/2026.",
+                        f"Em complemento ao Ofício 777/2026.\n\n{protocolo.MARCADOR_NA_TELA}"))))
+    assert "777/2026" in texto and FRASE in texto
+
+
+def test_texto_enviado_com_o_padrao_fica_guardado_em_toda_familia(cenario):
+    """Issue #448 (itens 2 e 3): o protocolo enviado com o texto padrao guarda o texto que foi ao orgao (com o
+    marcador; antes do envio o padrao se refaz com os dados de agora), e a tela o mostra com a frase do termo enviada,
+    nunca vazio nem com o marcador."""
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    for mid, oficio, frase in ((ids["mtpar_reaj"], "302", FRASE), (ids["mtpar_exec"], "301", None)):
+        pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [mid], oficio)
+        padrao = protocolo.corpo_padrao(c, pid)
+        protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+        assert protocolo._linha(c, pid)["corpo_carta"] is None
+        pv = protocolo.previa_envio(c, [pid])
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+        p = protocolo._linha(c, pid)
+        assert (p["situacao"], p["corpo_carta"]) == ("enviado", padrao)
+        tela = protocolo.texto_da_tela(p)
+        assert tela and "{" not in tela and protocolo.MARCADOR_NA_TELA not in tela
+        assert (frase in _corrido(tela)) if frase else "Apostilamento" not in tela
+
+
+def test_citacao_do_termo_escrita_diferente_nao_monta(cenario):
+    """Issue #448 (code-review): o marcador legivel escrito errado nao vira campo; nao pode sair cru no oficio."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    corpo = protocolo.corpo_padrao(c, pid).replace("{apostilamento}", "[citacao do termo de apostilamento]")
+    with pytest.raises(ValueError, match="escrita diferente"):
+        protocolo.montar(c, ids["uid"], pid, corpo=corpo)
+    assert protocolo._linha(c, pid)["situacao"] == "rascunho"
+
+
+def test_reajuste_sem_termo_nao_pede_nova_assinatura(cenario):
+    """Issue #448 (item 5): montado sem o mapa (antes da 060), o reajuste sem termo antes e depois nao muda o oficio
+    (a frase fica vazia): o envio nao pede montar e assinar de novo."""
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    c.execute("UPDATE protocolos SET montado_apostilamentos=NULL WHERE id=?", (pid,))
+    c.commit()
+    assert protocolo.apostilamento_mudou(c, protocolo._linha(c, pid)) is None
+    assert protocolo.previa_envio(c, [pid])["bloqueio"] is None
+
+
+def test_guid_entre_chaves_do_link_do_sharepoint_nao_e_campo_sem_dado(cenario):
+    """Issue #448 (item 6): o link do SharePoint traz o GUID entre chaves (sourcedoc={6C5B...}); nao e' campo."""
+    c, ids = cenario
+    link = ("https://lotufo.sharepoint.com/:x:/r/sites/x/_layouts/15/Doc.aspx?sourcedoc={6C5B1A2E-0F3D-4C1B-9A8E-"
+            "1234567890AB}&file=Planilha.xlsx e {ABCDEF12-0F3D-4C1B-9A8E-1234567890AB}")
+    assert protocolo.campos_sem_dado(f"Planilha: {link}") == []
+    assert protocolo.campos_sem_dado("Ver {período}, {obra2}, {oficio-barra} e {data.base}") == [
+        "{data.base}", "{obra2}", "{oficio-barra}", "{período}"]
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.montar(c, ids["uid"], pid, corpo=f"{protocolo.corpo_padrao(c, pid)}\n\nPlanilha: {link}")
+    assert protocolo._linha(c, pid)["situacao"] == "montado"
+
+
+def test_com_a_reserva_de_envio_o_protocolo_nao_muda_e_o_texto_gravado_e_o_do_pdf(cenario, monkeypatch):
+    """Issue #448 (gate Sol e revisor, rodada 1): com a reserva do envio, o PDF ja' foi lido; montar de novo (outra
+    aba) com outro texto, anexar peca ou descartar recusam, e o texto gravado no envio e' o da montagem do PDF."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    padrao = protocolo.corpo_padrao(c, pid)
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid])
+    original = protocolo._anexos_rotulados
+    recusas = []
+
+    def outra_aba_no_meio(conn, p, hoje):
+        if p.get("envio_reservado_em") and not recusas:
+            for mudar in (lambda: protocolo.montar(conn, ids["uid"], pid, corpo=padrao + "\n\nTexto da outra aba."),
+                          lambda: protocolo.adicionar_peca(conn, ids["uid"], pid, "anexo", "x.pdf", _pdf("X"), "pdf"),
+                          lambda: protocolo.descartar(conn, ids["uid"], pid, "outra aba")):
+                with pytest.raises(envio_reserva.EnvioEmAndamento, match="Confira a caixa de Enviados") as erro:
+                    mudar()
+                recusas.append(str(erro.value))
+        return original(conn, p, hoje)
+
+    monkeypatch.setattr(protocolo, "_anexos_rotulados", outra_aba_no_meio)
+    protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                     confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+    assert len(recusas) == 3
+    p = protocolo._linha(c, pid)
+    assert (p["situacao"], p["corpo_carta"]) == ("enviado", padrao)
+
+
+def test_texto_do_envio_e_o_da_montagem_do_pacote_nao_o_da_mais_recente(cenario):
+    """Issue #448 (gate Sol, rodada 1): o texto sai da auditoria da montagem cujo sha256 e' o do pacote lido."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    padrao = protocolo.corpo_padrao(c, pid)
+    sha1 = protocolo.montar(c, ids["uid"], pid)["sha256"]
+    protocolo.montar(c, ids["uid"], pid, corpo=padrao + "\n\nSegunda montagem.")
+    assert protocolo._texto_montado(c, {"id": pid, "montado_sha256": sha1}) == padrao
+    assert "Segunda montagem." in protocolo._texto_montado(c, protocolo._linha(c, pid))
+
+
+def test_pacote_montado_sem_o_texto_guardado_pede_montar_de_novo(cenario):
+    """Issue #448 (revisor e gate Sol, rodada 1): o pacote montado antes desta versao (auditoria sem o texto) nao sai,
+    porque o "Texto da carta" ficaria vazio depois do envio; montar de novo guarda o texto e destrava."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    c.execute("UPDATE audit_log SET depois=json_remove(depois, '$.corpo') WHERE acao='protocolo.montar'")
+    c.commit()
+    pv = protocolo.previa_envio(c, [pid])
+    assert pv["bloqueio"] == protocolo.TEXTO_NAO_GUARDADO
+    with pytest.raises(protocolo.Bloqueio, match="não ficou guardado"):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    protocolo.montar(c, ids["uid"], pid)
+    assert protocolo.previa_envio(c, [pid])["bloqueio"] is None
+
+
+def test_termo_sem_numero_entrando_depois_nao_pede_nova_assinatura(cenario):
+    """Issue #448 (gate Sol, rodada 1): montado com o campo e o mapa (cita), um termo sem numero que passa a cobrir a
+    competencia muda a chave mas nao a frase do oficio: nao pede montar e assinar de novo."""
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    assert json.loads(protocolo._linha(c, pid)["montado_apostilamentos"])["cita"] is True
+    _termo(c, ids["mtpar"], numero=None)
+    assert protocolo.apostilamento_mudou(c, protocolo._linha(c, pid)) is None
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    assert protocolo.apostilamento_mudou(c, protocolo._linha(c, pid)) == protocolo.APOSTILAMENTO_MUDOU
+
+
+def test_qualquer_citacao_torta_entre_colchetes_nao_monta(cenario):
+    """Issue #448 (gate Sol, rodada 1): marcador com erro de digitacao ou abreviado nao sai literal no oficio."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    padrao = protocolo.corpo_padrao(c, pid)
+    for torto in ("[citação do termo de apostilamnto]", "[citação do apostil.]", "[Citacao]", "[termo de apostilam. 3]"):
+        with pytest.raises(ValueError, match=re.escape(protocolo.MARCADOR_NA_TELA)):
+            protocolo.montar(c, ids["uid"], pid, corpo=padrao.replace("{apostilamento}", torto))
+    # rodada 2: colchete que nao e' a citacao do termo (outro termo, anexo) nao recusa
+    protocolo.montar(c, ids["uid"], pid, corpo=padrao + "\n\nVer [anexo 1] e o [Termo de Recebimento Provisório].")
+
+
+# --- issue #448, rodada 2: reserva e situacao conferidas sob o lock ---------------------------------------------------
+
+def test_reserva_feita_no_meio_da_montagem_recusa_sob_o_lock(cenario, monkeypatch):
+    """Issue #448 (revisor, rodada 2): a reserva do envio chega enquanto o pacote e' juntado (depois da conferencia de
+    fora do lock); a montagem recusa sob o lock, dizendo quem iniciou e mandando conferir os Enviados."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    antes = protocolo._linha(c, pid)
+    original = leitura_pdf.juntar_com_limite
+
+    def reserva_no_meio(partes):
+        envio_reserva.reservar(c, "protocolos", pid, ids["uid"], None)
+        return original(partes)
+
+    monkeypatch.setattr(leitura_pdf, "juntar_com_limite", reserva_no_meio)
+    with pytest.raises(envio_reserva.EnvioEmAndamento, match="Confira a caixa de Enviados.*libere o envio"):
+        protocolo.montar(c, ids["uid"], pid, corpo=protocolo.corpo_padrao(c, pid) + "\n\nOutra aba.")
+    p = protocolo._linha(c, pid)
+    assert (p["situacao"], p["montado_sha256"], p["corpo_carta"]) == ("assinado", antes["montado_sha256"], None)
+
+
+def test_reserva_feita_no_meio_da_peca_recusa_sob_o_lock(cenario, monkeypatch):
+    """Issue #448 (revisor, rodada 2): a reserva chega enquanto o arquivo da peca e' gravado; a peca nao entra."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    original = arquivos.gravar_bytes
+
+    def reserva_no_meio(*a, **k):
+        envio_reserva.reservar(c, "protocolos", pid, ids["uid"], None)
+        return original(*a, **k)
+
+    monkeypatch.setattr(arquivos, "gravar_bytes", reserva_no_meio)
+    with pytest.raises(envio_reserva.EnvioEmAndamento, match="Confira a caixa de Enviados"):
+        protocolo.adicionar_peca(c, ids["uid"], pid, "boletim", "b.pdf", _pdf("BOLETIM"), "pdf")
+    assert protocolo._pecas(c, pid) == []
+
+
+def test_peca_anexada_enquanto_outro_montava_invalida_o_pacote(cenario, monkeypatch):
+    """Issue #448 (gate Sol, rodada 2): a peca comecou com o protocolo em rascunho; no meio, outra requisicao montou e
+    anexou o assinado. A peca entra e o pacote (e o assinado) deixam de valer, pelo retrato de agora."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    original = arquivos.gravar_bytes
+    feito = []
+
+    def outro_monta_no_meio(*a, **k):
+        if not feito:
+            feito.append(1)
+            protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+        return original(*a, **k)
+
+    monkeypatch.setattr(arquivos, "gravar_bytes", outro_monta_no_meio)
+    protocolo.adicionar_peca(c, ids["uid"], pid, "boletim", "b.pdf", _pdf("BOLETIM"), "pdf")
+    p = protocolo._linha(c, pid)
+    assert (p["situacao"], p["assinado_arquivo"]) == ("rascunho", None)
+
+
+def test_protocolo_descartado_antes_do_lock_nao_sai(cenario, monkeypatch):
+    """Issue #448 (gate Sol, rodada 2): o envio validou o protocolo ativo; outra aba o descartou antes do lock. Sob o
+    lock a situacao e' lida de novo: nada e' reservado e nenhum e-mail sai."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid])
+    original = protocolo._pendencias_envio
+
+    def descartado_por_outra_aba(conn, ps, hoje):
+        if db.em_mutacao(conn):                    # ja' sob o lock da reserva
+            conn.execute("UPDATE protocolos SET situacao='descartado' WHERE id=?", (pid,))
+        return original(conn, ps, hoje)
+
+    monkeypatch.setattr(protocolo, "_pendencias_envio", descartado_por_outra_aba)
+    with pytest.raises(ValueError, match="já descartado"):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert protocolo._linha(c, pid)["envio_reservado_em"] is None
+
+
+def test_descarte_nao_sobrescreve_o_envio_que_terminou_no_meio(cenario, monkeypatch):
+    """Issue #448 (gate Sol, rodada 2): o descarte leu o protocolo assinado; o envio terminou e gravou `enviado`
+    antes do lock do descarte. Sob o lock a situacao de agora recusa o descarte."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    original = protocolo._linha
+    chamadas = []
+
+    def envio_termina_depois_da_leitura(conn, i):
+        linha = original(conn, i)
+        if not chamadas:
+            chamadas.append(1)
+            conn.execute("UPDATE protocolos SET situacao='enviado' WHERE id=?", (i,))
+            conn.commit()
+        return linha
+
+    monkeypatch.setattr(protocolo, "_linha", envio_termina_depois_da_leitura)
+    with pytest.raises(ValueError, match="enviado não se descarta"):
+        protocolo.descartar(c, ids["uid"], pid, "outra aba")
+    assert original(c, pid)["situacao"] == "enviado"

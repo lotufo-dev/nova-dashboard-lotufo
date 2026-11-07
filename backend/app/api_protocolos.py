@@ -73,6 +73,10 @@ def _detalhe(conn, pid: int) -> dict:
             d["corpo_padrao"] = protocolo.corpo_padrao(conn, pid)
         except ValueError as e:
             d["corpo_padrao"], d["erro_carta"] = None, str(e)
+    # issue #448: a tela mostra o marcador {apostilamento} como texto legivel (e o devolve assim ao montar)
+    d["corpo_carta"] = protocolo.texto_da_tela(d)
+    if "corpo_padrao" in d:
+        d["corpo_padrao"] = protocolo.para_tela(d["corpo_padrao"])
     return d
 
 
@@ -180,7 +184,7 @@ def montar(pid: ID, dados: MontarIn, usuario: dict = Depends(exigir("editar_cada
            conn: sqlite3.Connection = Depends(conexao)):
     _existe(conn, pid)
     try:
-        protocolo.montar(conn, usuario["id"], pid, dados.corpo, refazer_texto=dados.refazer_texto)
+        protocolo.montar(conn, usuario["id"], pid, protocolo.da_tela(dados.corpo), refazer_texto=dados.refazer_texto)
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)

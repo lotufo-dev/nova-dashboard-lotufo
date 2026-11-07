@@ -2014,3 +2014,41 @@ def test_total_do_aguardando_pagamento_bate_com_o_resumo_das_medicoes(svc):
     resumo = medicoes.resumo(c, HOJE)
     assert total == sum(x["valor_centavos"] for x in resumo["linhas"] if x["situacao"] == "aguardando-pagamento")
     assert total == 1200001 + 1111111 + 33333 + 1000001
+
+
+def test_montar_de_novo_liberado_quando_todo_motivo_e_de_montar_de_novo(svc, monkeypatch):
+    """Issue #448 (item 4): a FRC velha no pacote e o termo mudado pedem, os dois, montar de novo; o botao fica
+    liberado. Motivo que montar de novo nao resolve (FRC assinada recusada) continua segurando."""
+    c, ids = svc
+    pid = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_reaj"]], "361")
+    protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
+    _com_termo(c, ids["mtpar"])
+    monkeypatch.setattr(protocolo, "frc_recusadas", lambda conn, p: [protocolo.PACOTE_FRC_VELHA])
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert protocolo.PACOTE_FRC_VELHA in d["bloqueio"] and protocolo.APOSTILAMENTO_MUDOU in d["bloqueio"]
+    assert (d["remontar"], d["remontar_liberado"]) == (True, True)
+    monkeypatch.setattr(protocolo, "frc_recusadas", lambda conn, p: ["14ª Medição: a FRC assinada não é a vigente"])
+    assert notas_envio.detalhe_envio(c, pid, hoje=HOJE)["remontar_liberado"] is False
+
+
+def test_tela_de_envio_recebe_o_texto_da_carta_legivel(svc):
+    """Issue #448 (item 2): o texto da carta que a API devolve nao traz o marcador {apostilamento} cru."""
+    c, ids = svc
+    pid = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_exec"]], "362")
+    corpo = notas_envio.detalhe_envio(c, pid, hoje=HOJE)["carta"]["corpo"]
+    assert "{apostilamento}" not in corpo and protocolo.MARCADOR_NA_TELA in corpo
+
+
+def test_pacote_sem_o_texto_guardado_mostra_montar_de_novo(svc):
+    """Issue #448 (revisor e gate Sol, rodada 1): no "Enviar a nota", o pacote montado antes desta versao (sem o
+    texto guardado) mostra o motivo e libera o "Montar de novo", que guarda o texto."""
+    c, ids = svc
+    pid = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_exec"]], "362")
+    protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
+    c.execute("UPDATE audit_log SET depois=json_remove(depois, '$.corpo') WHERE acao='protocolo.montar'")
+    c.commit()
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert (d["bloqueio"], d["remontar"], d["remontar_liberado"]) == (protocolo.TEXTO_NAO_GUARDADO, True, True)
+    protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert (d["bloqueio"], d["remontar"]) == (None, False)
