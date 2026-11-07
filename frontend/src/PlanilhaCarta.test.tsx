@@ -147,10 +147,12 @@ describe("Cartão da planilha/carta", () => {
     const aoMudar = vi.fn();
     render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={aoMudar} />);
     expect(await screen.findByText("Gerada")).toBeTruthy();
-    const versoes = screen.getByRole("table", { name: "Versões da planilha/carta" });
-    expect(within(versoes).getByText("Original")).toBeTruthy();
-    expect(versoes.textContent).toContain("R$ 12.345,67");
-    fireEvent.click(screen.getByRole("button", { name: "Enviar para protocolo" }));
+    // issue #508: o pacote do envio lista a carta e a planilha da versao vigente (a tabela de versoes so' com revisao)
+    const pacote = screen.getByRole("list", { name: "Carta e planilha" });
+    expect(within(pacote).getByRole("link", { name: "Carta assinada" }).getAttribute("href")).toBe("/api/medicoes/5/planilhas/31/oficio");
+    expect(within(pacote).getByRole("link", { name: "Planilha da 4ª medição · original" }).getAttribute("href")).toBe("/api/medicoes/5/planilhas/31/planilha");
+    expect(screen.queryByRole("table", { name: "Versões da planilha/carta" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar ao órgão" }));
     fireEvent.change(screen.getByLabelText("Nº do ofício (CT)"), { target: { value: "301" } });
     fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
     expect(((await screen.findByLabelText("Assunto")) as HTMLInputElement).value).toBe(PREVIA.assunto);
@@ -159,7 +161,7 @@ describe("Cartão da planilha/carta", () => {
     expect(within(anexos).getByText("4a Medicao.zip")).toBeTruthy();
     expect(screen.getByText("Encaminho arquivo para protocolo.")).toBeTruthy();
     expect(api.mock.calls.find(c => c[0] === "/api/medicoes/5/envio-planilha/previa")![1].body).toBe(JSON.stringify({ numero_oficio: "301" }));
-    fireEvent.click(screen.getByRole("button", { name: "Enviar para protocolo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enviar ao órgão" }));
     expect(await screen.findByText("Enviada em 03/09")).toBeTruthy();
     expect(screen.getByText(/^Planilha\/carta enviada às \d{2}:\d{2}\.$/)).toBeTruthy();
     const envio = api.mock.calls.find(c => c[0] === "/api/medicoes/5/envio-planilha")!;
@@ -170,7 +172,7 @@ describe("Cartão da planilha/carta", () => {
     expect(corpo.anexos_previa).toEqual(PREVIA.anexos);
     expect(aoMudar).toHaveBeenCalled();
     // enviada a versao vigente, o envio pelo sistema some ate' a revisao; o nº do SIGA aparece para digitar
-    expect(screen.queryByRole("button", { name: "Enviar para protocolo" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enviar ao órgão" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "Nº do SIGA" })).toBeTruthy();
   });
 
@@ -195,11 +197,11 @@ describe("Cartão da planilha/carta", () => {
       return [];
     });
     render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Enviar para protocolo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar ao órgão" }));
     fireEvent.change(screen.getByLabelText("Nº do ofício (CT)"), { target: { value: "301" } });
     fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
     expect(await screen.findByText("Falta a peça que o órgão exige: Memória de cálculo")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Enviar para protocolo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enviar ao órgão" }));
     expect(await screen.findByText("Escreva a justificativa, com pelo menos 10 caracteres.")).toBeTruthy();
     expect(api.mock.calls.some(c => c[0] === "/api/medicoes/5/envio-planilha")).toBe(false);
   });
@@ -229,8 +231,8 @@ describe("Cartão da planilha/carta", () => {
     apiForm.mockResolvedValue({ medicao_id: 5, estado: "planilha_enviada", versao: 1 });
     render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
     expect(await screen.findByText(motivo)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Enviar para protocolo" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Registrar envio por fora" }));
+    expect(screen.queryByRole("button", { name: "Enviar ao órgão" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Já enviei por fora" }));
     fireEvent.change(screen.getByLabelText("Data do envio"), { target: { value: "2026-09-02" } });
     fireEvent.change(screen.getByLabelText("Meio"), { target: { value: "Balcão do protocolo" } });
     fireEvent.change(screen.getByLabelText("Nº do protocolo"), { target: { value: "SIGA 123/2026" } });
@@ -247,7 +249,7 @@ describe("Cartão da planilha/carta", () => {
       : detalhe({ estado: "planilha_enviada", planilha_enviada_em: "2026-09-03" }, { disponivel: false, motivo: "já enviada" })));
     apiForm.mockResolvedValue({ medicao_id: 5, versao: 2, estado: "planilha_enviada", avisos: [] });
     render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Registrar revisão" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Registrar revisão da planilha" }));
     const form = screen.getByRole("form", { name: "Registrar revisão Rev01" });
     // a revisao parte do periodo e do valor da versao vigente
     expect((within(form).getByLabelText("Valor pedido") as HTMLInputElement).value).toBe("12.345,67");
@@ -342,6 +344,32 @@ describe("Cartão da planilha/carta", () => {
     const { container } = render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
     await waitFor(() => expect(api).toHaveBeenCalled());
     expect(container.innerHTML).toBe("");
+  });
+
+  // issue #508: o pacote do envio conta o que esta' pronto, mostra o tamanho de cada peca e o medidor contra o limite
+  it("pacote do envio: “N de M”, o tamanho da carta e da planilha, o que falta e o medidor", async () => {
+    api.mockResolvedValue(detalhe({ pacote_planilha: { carta: 400 * 1024, planilha: 8 * 1024 * 1024, pecas: 0,
+      total: 8 * 1024 * 1024 + 400 * 1024, limite: 25 * 1024 * 1024 } }, { pecas_do_orgao: [
+      { tipo: "boletim", rotulo: "Diário de obras", exigida: true, no_oficio: false },
+      { tipo: "fotos", rotulo: "Relatório fotográfico", exigida: false, no_oficio: false }] }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    const titulo = await screen.findByRole("heading", { name: /Pacote do envio/ });
+    expect(titulo.textContent).toContain("2 de 3");     // carta e planilha prontas; falta o diario (o opcional nao conta)
+    const pacote = screen.getByRole("list", { name: "Carta e planilha" });
+    expect(pacote.textContent).toContain("400 KB");
+    expect(pacote.textContent).toContain("8,0 MB");
+    const diario = within(screen.getByRole("table", { name: "Peças da planilha/carta" })).getByRole("rowheader", { name: "Diário de obras" }).closest("tr")!;
+    expect(within(diario).getByText("Falta")).toBeTruthy();
+    expect(screen.getByRole("meter", { name: "Tamanho dos anexos" }).getAttribute("aria-valuetext")).toBe("8,4 MB de 25,0 MB");
+  });
+
+  it("acima do limite o medidor fica vermelho; com revisão, a tabela das versões aparece", async () => {
+    api.mockResolvedValue(detalhe({ planilhas: [V1, { ...V1, id: 32, versao: 2, motivo: "Rev01" }],
+      pacote_planilha: { carta: 1, planilha: 30 * 1024 * 1024, pecas: 0, total: 30 * 1024 * 1024 + 1, limite: 25 * 1024 * 1024 } }));
+    const { container } = render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByRole("table", { name: "Versões da planilha/carta" })).toBeTruthy();
+    expect(container.querySelector(".medidor--acima")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Planilha da 4ª medição · rev01" }).getAttribute("href")).toBe("/api/medicoes/5/planilhas/32/planilha");
   });
 });
 

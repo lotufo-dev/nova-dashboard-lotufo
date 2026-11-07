@@ -43,7 +43,7 @@ function responder(travarReleitura = false) {
   return () => leituras;
 }
 async function enviarPorFora() {
-  fireEvent.click(await screen.findByRole("button", { name: "Registrar envio por fora" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Já enviei por fora" }));
   fireEvent.change(screen.getByLabelText("Meio"), { target: { value: "Outlook" } });
   fireEvent.click(screen.getByRole("button", { name: "Registrar envio" }));
 }
@@ -55,7 +55,9 @@ describe("Página da medição: conferência da revisão pendente (cartão real)
     responder();
     const { container } = render(<MedicaoPagina contratoId={1} medicaoId={5} usuario={usuario} origem={null} />);
     await enviarPorFora();
-    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull(), { timeout: 3000 });
+    // #508: enviada, a vez e' do passo 2; o espelho sem o boletim sai de la' depois da conferencia
+    fireEvent.click(await screen.findByRole("button", { name: "Gerar o espelho sem o boletim" }, { timeout: 3000 }));
+    expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull();
   });
     it("gerada -> enviada: enquanto o cartao rele, o espelho nao aparece", async () => {
     window.history.replaceState(null, "", "/obras/1/medicoes/5");
@@ -65,5 +67,6 @@ describe("Página da medição: conferência da revisão pendente (cartão real)
     await waitFor(() => expect(leituras()).toBeGreaterThanOrEqual(2));
     await new Promise(r => setTimeout(r, 50));
     expect(container.querySelector("[data-espelho]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeNull();
   });
 });

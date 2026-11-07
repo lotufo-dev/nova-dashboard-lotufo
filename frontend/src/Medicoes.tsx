@@ -54,6 +54,11 @@ export type Medicao = {
   // #359: o aprovado mudou depois do espelho vigente (na nota emitida, o espelho nao se gera mais), ou o espelho
   // antigo nao se confere
   espelho_desatualizado?: "aprovado_mudou" | "nota_emitida" | "nao_conferido" | null;
+  // #508: pagina da obra em medicao -- data do envio da planilha/carta, dias uteis com o orgao e se a obra tem os
+  // passos "Planilha e carta" e "Análise do órgão" (a MT-PAR nao tem)
+  planilha_enviada_em?: string | null;
+  dias_uteis_no_orgao?: number | null;
+  com_envio_planilha?: boolean;
 };
 
 // dinheiro mora em formato.ts (F-86: sinal de menos U+2212); continua exportado daqui para quem ja importa

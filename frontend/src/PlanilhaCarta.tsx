@@ -7,7 +7,8 @@ import Checklist, { type ItemChecklist } from "./Checklist";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import ErroCampo from "./ErroCampo";
 import { brl, digitosParaBrl, fmtTamanho } from "./formato";
-import { IconeAlerta } from "./icones";
+import { IconeAlerta, IconeSeta } from "./icones";
+import { IconeCheck } from "./NotasAEnviar";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import Pendencias from "./Pendencias";
 import Selo from "./Selo";
@@ -251,7 +252,7 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
 
 // ---------------------------------------------------------------------------------------- cartao da medicao
 
-type Versao = { id: number; versao: number; periodo_inicio: string; periodo_fim: string; valor_pedido_centavos: number;
+export type Versao = { id: number; versao: number; periodo_inicio: string; periodo_fim: string; valor_pedido_centavos: number;
   acumulado_anterior_centavos: number; motivo: string | null; criado_em: string; usuario: string | null };
 type Peca = { id: number; tipo: string; nome: string; tamanho: number };
 /** Um envio da planilha/carta: pelo sistema (`enviado_em` instante UTC) ou por fora (a data informada, sem hora). */
@@ -275,6 +276,9 @@ export type DetalhePlanilha = {
   planilha_siga: { data: string | null; numero: string | null } | null;
   /** issue #490: a leitura por grupo mais nova da planilha; `aviso` so' quando ela foi recusada */
   leitura_planilha?: { situacao: string; aviso: string | null } | null;
+  /** issue #508: o medidor do pacote do envio (bytes) e o limite do e-mail */
+  pacote_planilha?: { carta: number | null; planilha: number | null; pecas: number; total: number; limite: number } | null;
+  dias_uteis_no_orgao?: number | null;
 };
 type Previa = { numero_oficio: string; versao: number; para: string[]; copia: string[]; assunto: string; corpo: string;
   anexos: { nome: string; tamanho: number; sha256: string }[]; total: number; limite: number;
@@ -434,14 +438,88 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
     void agir(() => apiForm(`/api/medicoes/${medicaoId}/envio-planilha/pecas`, fd), "Peça anexada.");
   }
 
+  // issue #508: o pacote do envio (carta e planilha, documentos que o orgao exige, o que falta, medidor) a' esquerda
+  // e o e-mail ao orgao a' direita; as versoes anteriores e os envios ficam no pacote, para nao perder historico
+  const pacote = d.pacote_planilha ?? null;
+  const pedidas = itens.filter(i => i.situacao !== "opcional");
+  const prontas = itens.filter(i => i.situacao === "anexada" || i.situacao === "no_oficio");
+  const ultimoOficio = s.envios.filter(e => e.numero_oficio).at(-1)?.numero_oficio ?? null;
+  const acima = pacote ? pacote.total > pacote.limite : false;
+
   return (
-    <section className="cartao planilha" aria-labelledby={`${base}-titulo`} id="planilha-carta">
-      <div className="cartao__cabeca">
-        <h3 className="cartao__titulo" id={`${base}-titulo`}>Planilha/carta</h3>
-        {selo ? <Selo classe="selo--ok">{selo}</Selo> : <Selo>Gerada</Selo>}
-        {d.planilha_envio_origem === "externo" && <Selo>Fora do sistema</Selo>}
-      </div>
-      <div className="cartao__corpo pilha">
+    <div className="med-duas planilha-passo" id="planilha-carta">
+      <section className="cartao med-painel pacote" aria-labelledby={`${base}-titulo`}>
+        <h3 className="med-painel__titulo" id={`${base}-titulo`}>
+          Pacote do envio
+          {editavel && <span className="med-contagem">{2 + prontas.length} de {2 + pedidas.length}</span>}
+          {selo ? <Selo classe="selo--ok">{selo}</Selo> : <Selo>Gerada</Selo>}
+          {d.planilha_envio_origem === "externo" && <Selo>Fora do sistema</Selo>}
+        </h3>
+        {d.leitura_planilha?.aviso && <CaixaAviso nivel="atencao">{d.leitura_planilha.aviso}</CaixaAviso>}
+
+        <div>
+          <p className="med-grupo">Carta e planilha</p>
+          {vigente && (
+            <ul className="pacote-itens" aria-label="Carta e planilha">
+              <li>
+                <span className="pacote__ok" aria-hidden="true"><IconeCheck /></span>
+                <a className="link pacote__nome" href={`/api/medicoes/${medicaoId}/planilhas/${vigente.id}/oficio`}>
+                  Carta{ultimoOficio ? ` ${ultimoOficio}` : ""} assinada</a>
+                {pacote?.carta != null && <span className="pacote__tam">{fmtTamanho(pacote.carta)}</span>}
+              </li>
+              <li>
+                <span className="pacote__ok" aria-hidden="true"><IconeCheck /></span>
+                <a className="link pacote__nome" href={`/api/medicoes/${medicaoId}/planilhas/${vigente.id}/planilha`}>
+                  Planilha da {d.numero}ª medição · {rotuloVersao(vigente.versao).toLowerCase()}</a>
+                {pacote?.planilha != null && <span className="pacote__tam">{fmtTamanho(pacote.planilha)}</span>}
+              </li>
+            </ul>
+          )}
+        </div>
+
+        {itens.length > 0 && (editavel || prontas.length > 0) && (
+          <div>
+            <p className="med-grupo">Documentos que o órgão exige</p>
+            <Checklist itens={itens} legenda="Peças da planilha/carta" editavel={editavel && (podeEnviar || gerada)} ocupado={ocupado}
+              aoAnexar={anexarPeca}
+              aoRemover={id => void agir(() => api(`/api/medicoes/${medicaoId}/envio-planilha/pecas/${id}/remover`, { method: "POST", body: "{}" }), "Peça removida.")} />
+          </div>
+        )}
+
+        {editavel && pacote && (
+          <div className={`medidor${acima ? " medidor--acima" : ""}`}>
+            <div className="medidor__barra" role="meter" aria-label="Tamanho dos anexos" aria-valuemin={0} aria-valuemax={pacote.limite}
+              aria-valuenow={Math.min(pacote.total, pacote.limite)} aria-valuetext={`${fmtTamanho(pacote.total)} de ${fmtTamanho(pacote.limite)}`}>
+              <div className="medidor__cheio" style={{ width: `${Math.min(100, (pacote.total / pacote.limite) * 100)}%` }} />
+            </div>
+            <span className="medidor__texto">{fmtTamanho(pacote.total)} de {fmtTamanho(pacote.limite)}</span>
+          </div>
+        )}
+
+        {d.planilhas.length > 1 && (
+          <table className="tabela tabela--densa" aria-label="Versões da planilha/carta">
+            <thead><tr><th scope="col">Versão</th><th scope="col">Período</th><th scope="col" className="num">Pedido</th>
+              <th scope="col">Motivo</th><th scope="col">Arquivos</th></tr></thead>
+            <tbody>
+              {d.planilhas.map(v => (
+                <tr key={v.id}>
+                  <td>{rotuloVersao(v.versao)}</td>
+                  <td className="num">{fmtDataPura(v.periodo_inicio)} a {fmtDataPura(v.periodo_fim)}</td>
+                  <td className="num">{brl(v.valor_pedido_centavos)}</td>
+                  <td>{v.motivo ?? "—"}</td>
+                  <td>
+                    <a className="link" href={`/api/medicoes/${medicaoId}/planilhas/${v.id}/oficio`}>Ofício</a>{" "}
+                    <a className="link" href={`/api/medicoes/${medicaoId}/planilhas/${v.id}/planilha`}>Planilha</a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="cartao med-painel email-orgao" aria-labelledby={`${base}-email`}>
+        <h3 className="med-painel__titulo" id={`${base}-email`}>E-mail ao órgão</h3>
         {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
         {feito && <p className="feito" role="status" aria-live="polite">{feito}</p>}
         {/* envio reservado e nao concluido (em andamento ou preso): a liberacao, como no protocolo e no pleito */}
@@ -452,27 +530,6 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
               aoLiberar={() => { setErro(""); setReserva(null); void carregar().catch(() => {}); }} />
           </div>
         )}
-
-        {d.leitura_planilha?.aviso && <CaixaAviso nivel="atencao">{d.leitura_planilha.aviso}</CaixaAviso>}
-
-        <table className="tabela tabela--densa" aria-label="Versões da planilha/carta">
-          <thead><tr><th scope="col">Versão</th><th scope="col">Período</th><th scope="col" className="num">Pedido</th>
-            <th scope="col">Motivo</th><th scope="col">Arquivos</th></tr></thead>
-          <tbody>
-            {d.planilhas.map(v => (
-              <tr key={v.id}>
-                <td>{rotuloVersao(v.versao)}</td>
-                <td className="num">{fmtDataPura(v.periodo_inicio)} a {fmtDataPura(v.periodo_fim)}</td>
-                <td className="num">{brl(v.valor_pedido_centavos)}</td>
-                <td>{v.motivo ?? "—"}</td>
-                <td>
-                  <a className="link" href={`/api/medicoes/${medicaoId}/planilhas/${v.id}/oficio`}>Ofício</a>{" "}
-                  <a className="link" href={`/api/medicoes/${medicaoId}/planilhas/${v.id}/planilha`}>Planilha</a>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
 
         {s.envios.length > 0 && (
           <ul className="lista-simples">
@@ -486,27 +543,20 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
         {d.planilha_enviada_em && <NumeroSiga medicaoId={medicaoId} atual={d.planilha_siga?.numero ?? null}
           podeEditar={podeEditar} aoGravar={() => { void carregar().catch(() => {}); aoMudar(); }} />}
 
-        {editavel && itens.length > 0 && (
-          <div>
-            <span className="painel__titulo">Peças do órgão</span>
-            <Checklist itens={itens} legenda="Peças da planilha/carta" editavel={podeEnviar || gerada} ocupado={ocupado}
-              aoAnexar={anexarPeca}
-              aoRemover={id => void agir(() => api(`/api/medicoes/${medicaoId}/envio-planilha/pecas/${id}/remover`, { method: "POST", body: "{}" }), "Peça removida.")} />
-          </div>
-        )}
-
         {editavel && painel === null && (
-          <div className="form-inline">
-            {podeEnviar && <button type="button" className="btn btn--primario" disabled={ocupado} onClick={() => setPainel("oficio")}>Enviar para protocolo</button>}
-            {podeFora && <button type="button" className="btn" disabled={ocupado} onClick={() => setPainel("fora")}>Registrar envio por fora</button>}
-            <button type="button" className="btn" disabled={ocupado} onClick={() => setPainel("revisao")}>Registrar revisão</button>
-          </div>
+          <>
+            {podeEnviar && <button type="button" className="btn btn--primario btn--envio-orgao" disabled={ocupado} onClick={() => setPainel("oficio")}>Enviar ao órgão</button>}
+            {/* o porque de nao enviar pelo sistema, so' antes do 1o envio (depois dele o selo ja' diz) */}
+            {gerada && !s.disponivel && s.motivo && <p className="campo__nota">{s.motivo}</p>}
+            <ul className="acoes-lista">
+              {podeFora && <li><button type="button" disabled={ocupado} onClick={() => setPainel("fora")}>Já enviei por fora<IconeSeta className="icone" /></button></li>}
+              <li><button type="button" disabled={ocupado} onClick={() => setPainel("revisao")}>Registrar revisão da planilha<IconeSeta className="icone" /></button></li>
+            </ul>
+          </>
         )}
-        {/* o porque de nao enviar pelo sistema, so' antes do 1o envio (depois dele o selo ja' diz) */}
-        {editavel && gerada && !s.disponivel && s.motivo && painel === null && <p className="campo__nota">{s.motivo}</p>}
 
         {editavel && painel === "oficio" && !previa && (
-          <form className="painel-inline" onSubmit={abrirPrevia} aria-label="Enviar para protocolo">
+          <form className="painel-inline" onSubmit={abrirPrevia} aria-label="Enviar ao órgão">
             <div className="form-inline">
               <div className="campo">
                 <label className="campo__rotulo" htmlFor={`${base}-oficio`}>Nº do ofício (CT)</label>
@@ -522,7 +572,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
           <div aria-label="Prévia do e-mail">
             {previa.pendencias.length > 0 && <Pendencias itens={previa.pendencias} />}
             <ComporEmail key={`${previa.versao}-${previa.numero_oficio}`} ocupado={ocupado} anexos={previa.anexos}
-              rotuloEnviar="Enviar para protocolo"
+              rotuloEnviar="Enviar ao órgão"
               validarAntes={() => {
                 setTentouJust(true);
                 if (faltaJustificativa) document.getElementById(`${base}-just`)?.focus();
@@ -558,8 +608,8 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
               if (ok) setPainel(null);
             }} />
         )}
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }
 
@@ -618,7 +668,7 @@ function EnvioPorFora({ medicaoId, ocupado, aoFechar, aoRegistrar }: {
 }
 
 /** Revisao da planilha/carta (Rev01, Rev02...): versao nova, com motivo obrigatorio. */
-function Revisao({ medicao, vigente, ocupado, aoFechar, aoRegistrar }: {
+export function Revisao({ medicao, vigente, ocupado, aoFechar, aoRegistrar }: {
   medicao: DetalhePlanilha; vigente: Versao; ocupado: boolean; aoFechar: () => void; aoRegistrar: (fd: FormData) => Promise<void>;
 }) {
   const [motivo, setMotivo] = useState("");
@@ -667,7 +717,7 @@ function Revisao({ medicao, vigente, ocupado, aoFechar, aoRegistrar }: {
 }
 
 /** O nº do SIGA que o orgao devolve depois do envio (pelo sistema ou por fora). */
-function NumeroSiga({ medicaoId, atual, podeEditar, aoGravar }: {
+export function NumeroSiga({ medicaoId, atual, podeEditar, aoGravar }: {
   medicaoId: number; atual: string | null; podeEditar: boolean; aoGravar: () => void;
 }) {
   const [numero, setNumero] = useState(atual ?? "");

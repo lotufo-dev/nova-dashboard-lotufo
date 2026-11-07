@@ -11,7 +11,8 @@ vi.mock("./Espelho", () => ({
   default: ({ parte, abrirForm }: { parte?: string; abrirForm?: boolean }) => <div data-espelho={parte} data-abre-form={String(!!abrirForm)} />,
 }));
 // issue #289: a planilha/carta tem teste proprio (PlanilhaCarta.test.tsx); aqui so' importa onde ela aparece
-vi.mock("./PlanilhaCarta", () => ({
+vi.mock("./PlanilhaCarta", async () => ({
+  ...(await vi.importActual<typeof import("./PlanilhaCarta")>("./PlanilhaCarta")),
   NovaPlanilhaCarta: ({ inicial }: { inicial?: { numero: number } }) => <div data-nova-planilha={inicial?.numero} />,
   CartaoPlanilha: ({ medicaoId, podeEditar, aoRevisaoPendente, aoEnvioReservado }: { medicaoId: number; podeEditar: boolean;
     aoRevisaoPendente?: (p: boolean | null) => void; aoEnvioReservado?: (r: boolean) => void }) =>
@@ -45,6 +46,13 @@ const MEDICAO = { id: 5, numero: 23, tipo: "execucao", competencia: "2026-09", e
   valor_atestado_origem: null, atestado_em: null, nf_emitida_em: null, recebida_em: null, congelada: 0,
   protocolos: [], notas: [], documentos: [] };
 const LISTA = { familia: "ses", etapas: [], pecas: [], medicoes: [], protocolos: [] };
+// #508: o detalhe da medicao que a pagina le para conferir a revisao da planilha/carta (passos 1 e 2)
+const V1 = { id: 31, versao: 1, periodo_inicio: "2026-09-01", periodo_fim: "2026-09-30", valor_pedido_centavos: 1000000,
+  acumulado_anterior_centavos: 0, motivo: null, criado_em: "2026-10-01 12:00:00", usuario: "Operação" };
+const detalhePlanilha = (estado: string, extra: Record<string, unknown> = {}) => ({ id: 5, contrato_id: 1, numero: 23,
+  tipo: "execucao", competencia: "2026-09", estado, planilha_enviada_em: estado === "planilha_gerada" ? null : "2026-11-05",
+  planilha_envio_origem: "externo", planilhas: [V1], planilha_siga: null,
+  envio_planilha: { disponivel: false, motivo: null, envios: [], reserva: null, pecas: [], pecas_do_orgao: [] }, ...extra });
 
 const leituras = (caminho: string) => api.mock.calls.filter(c => c[0] === caminho && !c[1]);
 // a pagina abre na etapa da vez; a ancora (#etapa-N) abre outra
@@ -72,36 +80,36 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
   it("abre só a etapa da vez; as outras abrem no lugar dela, com a faixa para voltar", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }] });
     const { container } = pagina();
-    await screen.findByRole("heading", { name: "Envio ao órgão", level: 2 });
+    await screen.findByRole("heading", { name: "Envio da nota", level: 2 });
     expect(container.querySelectorAll(".med-etapa")).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Voltar à etapa atual" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Voltar ao passo atual" })).toBeNull();
     // 100% da Lotufo: o cabecalho nao fala de cota nem de "valores cheios"
     expect(container.querySelector(".med-meta")!.textContent).not.toMatch(/cota|valores cheios/);
-    const trilho = screen.getByRole("navigation", { name: "Etapas da medição" });
-    expect(trilho.querySelector("[aria-current='step']")!.textContent).toContain("Envio ao órgão");
-    fireEvent.click(within(trilho).getByRole("button", { name: /Etapa 3: Nota fiscal/ }));
-    expect(screen.getByRole("heading", { name: "Nota fiscal", level: 2 })).toBeTruthy();
+    const trilho = screen.getByRole("navigation", { name: "Passos da medição" });
+    expect(trilho.querySelector("[aria-current='step']")!.textContent).toContain("Envio da nota");
+    fireEvent.click(within(trilho).getByRole("button", { name: /Passo 2: Notas/ }));
+    expect(screen.getByRole("heading", { name: "Notas", level: 2 })).toBeTruthy();
     expect(container.querySelectorAll(".med-etapa")).toHaveLength(1);
-    expect(screen.queryByText(/Você está vendo a etapa/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Voltar à etapa atual" }));
-    expect(screen.getByRole("heading", { name: "Envio ao órgão", level: 2 })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Voltar à etapa atual" })).toBeNull();
+    expect(screen.getByText(/Você está vendo o passo 2, já feito/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Voltar ao passo atual" }));
+    expect(screen.getByRole("heading", { name: "Envio da nota", level: 2 })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Voltar ao passo atual" })).toBeNull();
     // etapa que ainda não começou: abre, so' com o selo de que libera depois (o corpo nao repete)
-    fireEvent.click(within(trilho).getByRole("button", { name: /Etapa 5: Pagamento/ }));
-    expect(screen.getByRole("button", { name: "Voltar à etapa atual" })).toBeTruthy();
-    expect(screen.getByText("Libera depois da etapa 4")).toBeTruthy();
-    expect(screen.queryByText("Libera depois da etapa 4.")).toBeNull();
+    fireEvent.click(within(trilho).getByRole("button", { name: /Passo 4: Pagamento/ }));
+    expect(screen.getByRole("button", { name: "Voltar ao passo atual" })).toBeTruthy();
+    expect(screen.getByText("Libera depois do passo 3")).toBeTruthy();
+    expect(screen.queryByText("Libera depois do passo 3.")).toBeNull();
   });
 
   it("a âncora #etapa-N abre a etapa; as âncoras antigas (#notas) abrem a etapa 3", async () => {
     responder();
     abrirEtapa(2);
     pagina();
-    expect(await screen.findByRole("heading", { name: "Faturamento", level: 2 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Espelhos", level: 2 })).toBeTruthy();
     cleanup();
     window.history.replaceState(null, "", "/obras/1/medicoes/5#notas");
     pagina();
-    expect(await screen.findByRole("heading", { name: "Nota fiscal", level: 2 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Notas", level: 2 })).toBeTruthy();
   });
 
   it("o caminho do topo: Medições volta à aba onde a medição está e a obra leva à página da obra", async () => {
@@ -117,7 +125,7 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     const REAJ = { ...MEDICAO, id: 6, tipo: "reajuste", valor_protocolado_centavos: 50000 };
     responder({ "/api/contratos/1/medicoes": [MEDICAO, REAJ] });
     pagina();
-    expect(await screen.findByRole("heading", { name: "23ª Medição + Reajuste", level: 1 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Hospital", level: 1 })).toBeTruthy();
     const lateral = screen.getByRole("complementary", { name: "Resumo e linha do tempo" });
     expect(within(lateral).getByText("Resumo da medição")).toBeTruthy();
     expect(within(lateral).getByText("Linha do tempo")).toBeTruthy();
@@ -177,11 +185,11 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     window.history.replaceState(null, "", "/obras/1/medicoes/5#espelho");
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: "aprovado_mudou" }] });
     pagina();
-    await screen.findByRole("heading", { name: "Espelho", level: 2 });
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Etapas da medição" })).getByRole("button", { name: /Etapa 3: Nota fiscal/ }));
-    await screen.findByRole("heading", { name: "Nota fiscal", level: 2 });
+    await screen.findByRole("heading", { name: "Espelhos", level: 2 });
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Passos da medição" })).getByRole("button", { name: /Passo 2: Notas/ }));
+    await screen.findByRole("heading", { name: "Notas", level: 2 });
     fireEvent.click(screen.getByRole("link", { name: "gere o espelho de novo" }));
-    expect(await screen.findByRole("heading", { name: "Espelho", level: 2 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Espelhos", level: 2 })).toBeTruthy();
   });
 
   it("#359: na nota emitida o aviso fica e leva às notas, sem pedir o espelho", async () => {
@@ -206,7 +214,7 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     const REAJ = { ...MEDICAO, id: 6, tipo: "reajuste", estado: "espelho_enviado", espelho_desatualizado: "aprovado_mudou" };
     responder({ "/api/contratos/1/medicoes": [EXE, REAJ] });
     pagina();
-    await screen.findByRole("heading", { name: "23ª Medição + Reajuste", level: 1 });
+    await screen.findByRole("heading", { name: "Hospital", level: 1 });
     const gerar = screen.getByRole("link", { name: "gere o espelho de novo" });
     expect(gerar.closest(".aviso")!.textContent).toContain("Reajuste da 23ª Medição: o aprovado mudou depois do espelho, ");
     const notas = screen.getByRole("link", { name: "ver as notas" });
@@ -357,7 +365,7 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
     abrirEtapa(4);
     responder();
     pagina("diretoria");
-    await screen.findByRole("heading", { name: "Envio ao órgão", level: 2 });
+    await screen.findByRole("heading", { name: "Envio da nota", level: 2 });
     expect(screen.queryByRole("button", { name: "Registrar protocolo feito fora" })).toBeNull();
   });
 
@@ -435,7 +443,7 @@ describe("Página da medição: registrar fora com falha parcial (MTPAR)", () =>
     // a pagina nao foi relida: o erro continua a' vista, ainda na etapa 4
     await new Promise(r => setTimeout(r, 50));
     expect(screen.getByRole("alert").textContent).toContain("Já registrados");
-    expect(screen.getByRole("heading", { name: "Envio ao órgão", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Envio da nota", level: 2 })).toBeTruthy();
     const antes = leituras("/api/contratos/1/medicoes").length;
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(leituras("/api/contratos/1/medicoes").length).toBeGreaterThan(antes));
@@ -479,8 +487,8 @@ describe("Página da medição: medição e reajuste", () => {
     comPar(SINFRA);
     pagina();
     const botao = await screen.findByRole("button", { name: "Enviar a medição sem o reajuste…" });
-    const trilho = screen.getByRole("navigation", { name: "Etapas da medição" });
-    expect(trilho.querySelector(".seta--espera")!.textContent).toContain("Envio ao órgão");
+    const trilho = screen.getByRole("navigation", { name: "Passos da medição" });
+    expect(trilho.querySelector(".passo--espera")!.textContent).toContain("Envio da nota");
     expect(screen.queryByRole("button", { name: "Enviar a nota" })).toBeNull();    // nada a iniciar: falta a outra metade
     // o próximo passo, "Esperando as notas do reajuste", leva à etapa 4 (onde a espera e a saída de emergência moram)
     expect(screen.getByRole("link", { name: "Esperando as notas do reajuste" }).getAttribute("href")).toBe("/obras/1/medicoes/5#etapa-4");
@@ -498,9 +506,9 @@ describe("Página da medição: medição e reajuste", () => {
     comPar(SINFRA, { "/api/medicoes/6/par": SINFRA });
     pagina("admin", 6);
     expect(await screen.findByRole("button", { name: "Enviar a medição sem o reajuste…" })).toBeTruthy();
-    const trilho = screen.getByRole("navigation", { name: "Etapas da medição" });
-    expect(trilho.querySelector(".seta--espera")).toBeNull();
-    expect(trilho.querySelector("[aria-current='step']")!.textContent).toContain("Nota fiscal");
+    const trilho = screen.getByRole("navigation", { name: "Passos da medição" });
+    expect(trilho.querySelector(".passo--espera")).toBeNull();
+    expect(trilho.querySelector("[aria-current='step']")!.textContent).toContain("Notas");
   });
 
   it("a justificativa da liberação aparece na linha do tempo e some a saída de emergência", async () => {
@@ -517,8 +525,8 @@ describe("Página da medição: medição e reajuste", () => {
         { ...ENVIO_ESPERANDO, chave: "m5", medicao_ids: [5], situacao: "pronto", aviso: null, descricao: "23ª medição", familia: "mtpar" }], contadores: {} } });
     const { container } = pagina();
     await screen.findByRole("button", { name: "Enviar a nota" });
-    expect(screen.getAllByRole("navigation", { name: "Etapas da medição" })).toHaveLength(1);
-    expect(container.querySelector(".seta--espera")).toBeNull();
+    expect(screen.getAllByRole("navigation", { name: "Passos da medição" })).toHaveLength(1);
+    expect(container.querySelector(".passo--espera")).toBeNull();
     expect(screen.queryByRole("button", { name: /sem o reajuste/ })).toBeNull();
   });
 
@@ -526,7 +534,7 @@ describe("Página da medição: medição e reajuste", () => {
     abrirEtapa(3);
     responder({ "/api/medicoes/5/par": { junta: true, orgao: "SINFRA", metades: [] } });
     const { container } = pagina();
-    expect(await screen.findByRole("heading", { name: "23ª Medição", level: 1 })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Hospital", level: 1 })).toBeTruthy();
     await waitFor(() => expect(container.querySelectorAll("[data-medicao]")).toHaveLength(1));
     expect(screen.queryByRole("region", { name: "Execução · 23ª Medição" })).toBeNull();
   });
@@ -600,92 +608,108 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     expect(container.querySelector("[data-espelho]")).toBeNull();
   });
 
-  it("planilha/carta enviada não mostra o aviso do envio não registrado (#460)", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
-    const { container } = pagina();
-    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
-    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+  // #508: com a planilha/carta enviada a vez e' do passo 2 (Analise do orgao); a pagina confere a revisao lendo o
+  // detalhe da medicao, como o cartao (que mora no passo 1)
+  const ATIVA = { espelhos: [], regra: { situacao: "ativa" } };
+  const enviadaEm = (estado: string) => [{ ...MEDICAO, estado, planilha_enviada_em: "2026-11-05", dias_uteis_no_orgao: 1, com_envio_planilha: true }];
+
+  it("planilha/carta enviada: o passo 2 é o da vez, sem o aviso do envio não registrado (#460)", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("planilha_enviada"),
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada") });
+    pagina();
+    expect(await screen.findByRole("heading", { name: "Com o órgão há 1 dia útil" })).toBeTruthy();
+    const barra = screen.getByRole("navigation", { name: "Passos da medição" });
+    expect(barra.querySelector("[aria-current='step']")!.textContent).toContain("Análise do órgão");
+    expect(within(barra).getByRole("button", { name: "Passo 1: Planilha e carta, feito em 05/11" })).toBeTruthy();
     expect(screen.queryByText(/Envio da planilha\/carta não registrado/)).toBeNull();
   });
 
-  it("com a planilha/carta enviada, com ou sem o boletim: o cartão dela e o formulário do espelho abaixo", async () => {
-    for (const estado of ["planilha_enviada", "boletim_recebido"]) {
-      responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado }] });
-      const { container } = pagina();
-      await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-      fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
-      // o formulario do espelho ja' abre: na pagina da medicao o Espelho nao tem o botao "Gerar espelho"
-      expect(container.querySelector("[data-espelho='espelho']")!.getAttribute("data-abre-form")).toBe("true");
-      expect(container.querySelector("[data-nova-planilha]")).toBeNull();
-      cleanup();
-    }
+  it("com a planilha/carta enviada, o espelho sem o boletim sai do passo 2; depois do boletim, o passo 3 já abre o formulário", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("planilha_enviada"),
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada") });
+    const { container } = pagina();
+    fireEvent.click(await screen.findByRole("button", { name: "Gerar o espelho sem o boletim" }));
+    expect(container.querySelector("[data-espelho='espelho']")!.getAttribute("data-abre-form")).toBe("true");
+    cleanup();
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("boletim_recebido"),
+      "/api/medicoes/5": detalhePlanilha("boletim_recebido") });
+    const segundo = pagina();
+    await waitFor(() => expect(segundo.container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+    expect(segundo.container.querySelector("[data-espelho='espelho']")!.getAttribute("data-abre-form")).toBe("true");
+    expect(screen.getByRole("heading", { name: "Espelhos", level: 2 })).toBeTruthy();
+    expect(segundo.container.querySelector("[data-nova-planilha]")).toBeNull();
   });
 
-  it("com revisão registrada e não enviada, o formulário do espelho não aparece (rodada extra, PR #382)", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
+  it("com revisão registrada e não enviada, a vez volta ao passo 1 e o espelho não aparece (rodada extra, PR #382)", async () => {
+    const pendente = detalhePlanilha("planilha_enviada", { planilhas: [V1, { ...V1, id: 32, versao: 2, motivo: "Rev01" }],
+      envio_planilha: { ...detalhePlanilha("planilha_enviada").envio_planilha,
+        envios: [{ planilha_id: 31, versao: 1, numero_oficio: null, enviado_em: "2026-11-05", usuario: "Operação", origem: "externo" }] } });
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("planilha_enviada"), "/api/medicoes/5": pendente });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
-    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "Revisão pendente (teste)" }));
+    const barra = screen.getByRole("navigation", { name: "Passos da medição" });
+    expect(barra.querySelector("[aria-current='step']")!.textContent).toContain("Planilha e carta");
     expect(container.querySelector("[data-espelho]")).toBeNull();
-    expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeNull();
   });
 
-  it("planilha/carta enviada: o espelho não aparece antes de o cartão responder (issue #384)", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
-    const { container } = pagina();
-    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-    expect(container.querySelector("[data-espelho]")).toBeNull();
+  it("planilha/carta enviada: o espelho não aparece antes de a página conferir a revisão (issue #384)", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("planilha_enviada"),
+      "/api/medicoes/5": new Promise(() => {}) });
+    pagina();
+    await screen.findByRole("heading", { name: "Com o órgão há 1 dia útil" });
+    expect(screen.queryByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeNull();
   });
 
-  it("planilha/carta enviada: se o cartão não consegue conferir, o espelho fica oculto e a tela avisa (issue #384)", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
-    const { container } = pagina();
-    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "Falha ao conferir (teste)" }));
+  it("planilha/carta enviada: se não consegue conferir, o espelho fica oculto e a tela avisa; Tentar de novo confere de novo (issue #384)", async () => {
+    let falha = true;
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("planilha_enviada") });
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, opts?: RequestInit) => {
+      if (url === "/api/medicoes/5") { if (falha) throw new Error("caiu"); return detalhePlanilha("planilha_enviada"); }
+      return base(url, opts);
+    });
+    pagina();
     expect(await screen.findByText(/Não foi possível conferir a planilha\/carta/)).toBeTruthy();
-    expect(container.querySelector("[data-espelho]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeNull();
+    falha = false;
+    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
+    expect(await screen.findByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeTruthy();
+    expect(screen.queryByText(/Não foi possível conferir a planilha/)).toBeNull();
   });
 
   it("reajuste em planilha_enviada não tem cartão: o espelho não espera conferência (issue #384)", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, tipo: "reajuste", estado: "planilha_enviada" }] });
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...MEDICAO, tipo: "reajuste", estado: "planilha_enviada" }] });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
     expect(container.querySelector("[data-cartao-planilha]")).toBeNull();
   });
 
-  it("trocar de medição reinicia a conferência: o espelho some até o novo cartão responder (issue #384)", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } },
-      "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }, { ...MEDICAO, id: 6, numero: 24, estado: "planilha_enviada" }] });
-    const { container, rerender } = pagina();
-    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
-    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+  it("trocar de medição reinicia a conferência: o espelho some até a nova responder (issue #384)", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA,
+      "/api/contratos/1/medicoes": [...enviadaEm("planilha_enviada"), { ...enviadaEm("planilha_enviada")[0], id: 6, numero: 24 }],
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada"), "/api/medicoes/6": new Promise(() => {}) });
+    const { rerender } = pagina();
+    expect(await screen.findByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeTruthy();
     rerender(<MedicaoPagina contratoId={1} medicaoId={6} usuario={usuario} origem={null} />);
-    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='6']")).not.toBeNull());
-    expect(container.querySelector("[data-espelho]")).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeNull());
   });
 
-  it("falha na conferência: Tentar de novo recomeça a conferência (issue #384)", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
+  it("depois do boletim: o espelho espera a conferência e aparece no passo 3", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("boletim_recebido"),
+      "/api/medicoes/5": new Promise(() => {}) });
     const { container } = pagina();
-    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "Falha ao conferir (teste)" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Tentar de novo" }));
-    await waitFor(() => expect(screen.queryByText(/Não foi possível conferir a planilha/)).toBeNull());
+    await screen.findByRole("heading", { name: "Espelhos", level: 2 });
     expect(container.querySelector("[data-espelho]")).toBeNull();
-  });
-
-  it("depois do boletim: o cartão da planilha/carta e o espelho", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "boletim_recebido" }] });
-    const { container } = pagina();
-    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
-    // como na planilha enviada, o espelho espera o cartao conferir que nao ha' revisao pendente
-    expect(container.querySelector("[data-espelho]")).toBeNull();
+    // o cartao da planilha/carta, quando confere, tambem libera
+    cleanup();
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("boletim_recebido") });
+    window.history.replaceState(null, "", "/obras/1/medicoes/5#passo-1");
+    const segundo = pagina();
+    await waitFor(() => expect(segundo.container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
-    expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Voltar ao passo atual" }));
+    expect(segundo.container.querySelector("[data-espelho='espelho']")).not.toBeNull();
   });
 
   it("obra fora do fluxo do espelho: a prevista continua pelo espelho, sem o formulário (gate Sol, PR #382)", async () => {
@@ -696,24 +720,29 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
   });
 
   it("reajuste previsto continua pelo espelho", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, tipo: "reajuste", estado: "prevista" }] });
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...MEDICAO, tipo: "reajuste", estado: "prevista" }] });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
   });
 
-  it("diretoria: sem o formulário (vê o espelho só para ler); o cartão abre só para ler", async () => {
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
+  it("diretoria: sem o formulário (vê o espelho só para ler); o cartão abre só para ler; o passo 2 sem resposta", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
     const { container } = pagina("diretoria");
     await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
     cleanup();
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
-    const segundo = pagina("diretoria");
-    await waitFor(() => expect(segundo.container.querySelector("[data-cartao-planilha='5']")!.getAttribute("data-pode-editar")).toBe("false"));
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": enviadaEm("planilha_enviada"),
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada") });
+    pagina("diretoria");
+    expect(await screen.findByText("Aguardando a resposta do órgão")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aprovou a medição" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gerar o espelho sem o boletim" })).toBeNull();
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Passos da medição" })).getByRole("button", { name: /Passo 1: Planilha e carta/ }));
+    expect(document.querySelector("[data-cartao-planilha='5']")!.getAttribute("data-pode-editar")).toBe("false");
     cleanup();
     // gate Sol (PR #528): na planilha/carta so' gerada a diretoria ve o espelho para ler, sem o formulario aberto
-    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_gerada" }] });
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_gerada" }] });
     const terceiro = pagina("diretoria");
     await waitFor(() => expect(terceiro.container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Sem reserva (teste)" }));
@@ -735,13 +764,14 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
       { data: "2026-08-12", texto: "Boletim assinado no DocuSign em 12/08/2026 por Admin" },
     ] };
 
-  it("a planilha enviada tem “Registrar boletim” na etapa; arrastar a capa preenche e aceitar grava", async () => {
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada", valor_protocolado_centavos: 1234567 }] });
+  it("a planilha enviada tem o boletim no passo 2 (“Aprovou a medição”); arrastar a capa preenche e aceitar grava", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada", valor_protocolado_centavos: 1234567, com_envio_planilha: true }],
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada") });
     apiForm.mockImplementation(async (url: string) => url.endsWith("/boletim/leitura")
       ? { lido: true, fonte: "texto", avisos: [], campos: { numero_orgao: "7", data: "2026-08-10", valor_centavos: 1200001 } }
       : { id: 9 });
     pagina();
-    fireEvent.click(await screen.findByRole("button", { name: "Registrar boletim" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Aprovou a medição" }));
     const janela = screen.getByRole("form", { name: "Registrar boletim" });
     const pdf = new File(["%PDF-1.4"], "boletim.pdf", { type: "application/pdf" });
     fireEvent.drop(within(janela).getByTestId("soltar-boletim"), { dataTransfer: { files: [pdf] } });
@@ -780,5 +810,152 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
     expect(itens).toContain("Registrar assinatura");
     expect(itens).toContain("Registrar boletim novo");
     expect(itens).not.toContain("Editar o atestado");
+  });
+});
+
+// issue #508: a pagina da obra em medicao -- cabecalho, barra de passos e os passos 1 e 2
+describe("Página da obra em medição: barra de passos (issue #508)", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/obras/1/medicoes/5"));
+  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
+  const ATIVA = { espelhos: [], regra: { situacao: "ativa" } };
+  const SINFRA = { ...MEDICAO, com_envio_planilha: true, planilha_enviada_em: "2026-11-05" };
+  const nomes = () => [...screen.getByRole("navigation", { name: "Passos da medição" }).querySelectorAll(".passo__nome")].map(x => x.textContent);
+  const daVez = () => screen.getByRole("navigation", { name: "Passos da medição" }).querySelector("[aria-current='step'] .passo__nome")!.textContent;
+
+  it("cabeçalho: a obra, a medição, o mês por extenso, o órgão e o valor grande", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }] });
+    const { container } = pagina();
+    expect(await screen.findByRole("heading", { name: "Hospital", level: 1 })).toBeTruthy();
+    await waitFor(() => expect([...container.querySelectorAll(".med-meta span")].map(x => x.textContent)).toEqual(["23ª Medição", "setembro de 2026", "SES"]));
+    expect(container.querySelector(".med-valor")!.textContent).toBe("R$ 10.000,00");
+  });
+
+  it("a barra marca o passo da vez pelo estado da medição, com os seis passos onde a planilha/carta vai ao órgão", async () => {
+    const casos: [string, string][] = [["planilha_gerada", "Planilha e carta"], ["planilha_enviada", "Análise do órgão"],
+      ["boletim_recebido", "Espelhos"], ["espelho_gerado", "Espelhos"], ["espelho_enviado", "Notas"],
+      ["nota_emitida", "Envio da nota"], ["protocolada", "Pagamento"]];
+    for (const [estado, passo] of casos) {
+      responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...SINFRA, estado }],
+        "/api/medicoes/5": detalhePlanilha(estado) });
+      pagina();
+      await waitFor(() => expect(daVez()).toBe(passo));
+      expect(nomes()).toEqual(["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"]);
+      cleanup();
+    }
+  });
+
+  it("o passo feito leva o check e a data; o futuro fica cinza, sem data", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [{ id: 3, numero: 1, versao: 1, situacao: "vigente", criado_em: "2026-11-10 12:00:00",
+      criado_por_nome: null, medicoes: [{ id: 5, tipo: "execucao" }], envio: { enviado_em: "2026-11-11 15:00:00", remetente: "x" } }], regra: { situacao: "ativa" } },
+      "/api/contratos/1/medicoes": [{ ...SINFRA, estado: "espelho_enviado", atestado_em: "2026-11-09",
+        boletins: [{ id: 9, tem_arquivo: true, atestado_em: "2026-11-09" }] }] });
+    pagina();
+    const barra = await screen.findByRole("navigation", { name: "Passos da medição" });
+    await waitFor(() => expect(within(barra).getByRole("button", { name: "Passo 1: Planilha e carta, feito em 05/11" })).toBeTruthy());
+    expect(within(barra).getByRole("button", { name: "Passo 2: Análise do órgão, feito em 09/11" })).toBeTruthy();
+    expect(within(barra).getByRole("button", { name: "Passo 3: Espelhos, feito em 11/11" })).toBeTruthy();
+    expect(within(barra).getByRole("button", { name: "Passo 4: Notas" }).closest("li")!.className).toContain("passo--atual");
+    expect(within(barra).getByRole("button", { name: "Passo 6: Pagamento" }).closest("li")!.className).toContain("passo--futuro");
+  });
+
+  it("na MT-PAR a barra começa em Espelhos, com 4 passos, e a planilha/carta mora no passo dos espelhos", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista", com_envio_planilha: false }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-nova-planilha='23']")).not.toBeNull());
+    expect(nomes()).toEqual(["Espelhos", "Notas", "Envio da nota", "Pagamento"]);
+    expect(daVez()).toBe("Espelhos");
+    expect(within(screen.getByRole("navigation", { name: "Passos da medição" })).getByRole("button", { name: "Passo 1: Espelhos" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Espelhos", level: 2 })).toBeTruthy();
+  });
+
+  it("clicar num passo feito mostra ele no lugar do atual, com a faixa “Você está vendo o passo N, já feito”", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...SINFRA, estado: "planilha_enviada", dias_uteis_no_orgao: 3 }],
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada") });
+    const { container } = pagina();
+    await screen.findByRole("heading", { name: "Com o órgão há 3 dias úteis" });
+    expect(screen.queryByRole("button", { name: "Voltar ao passo atual" })).toBeNull();
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Passos da medição" })).getByRole("button", { name: /Passo 1: Planilha e carta/ }));
+    expect(screen.getByText(/Você está vendo o passo 1, já feito/)).toBeTruthy();
+    expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Voltar ao passo atual" }));
+    expect(screen.getByRole("heading", { name: "Com o órgão há 3 dias úteis" })).toBeTruthy();
+    expect(screen.queryByText(/Você está vendo o passo/)).toBeNull();
+  });
+
+  it("a âncora antiga #etapa-4 abre o Envio da nota; a nova #passo-2 abre a Análise do órgão", async () => {
+    window.history.replaceState(null, "", "/obras/1/medicoes/5#etapa-4");
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "protocolada" }] });
+    pagina();
+    expect(await screen.findByRole("heading", { name: "Envio da nota", level: 2 })).toBeTruthy();
+    cleanup();
+    window.history.replaceState(null, "", "/obras/1/medicoes/5#passo-2");
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...SINFRA, estado: "espelho_gerado" }] });
+    pagina();
+    expect(await screen.findByRole("heading", { name: "Análise do órgão", level: 2 })).toBeTruthy();
+    expect(screen.getByText(/Você está vendo o passo 2, já feito/)).toBeTruthy();
+  });
+});
+
+describe("Página da obra em medição: passo 2, análise do órgão (issue #508)", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/obras/1/medicoes/5"));
+  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
+  const ENVIADA = { ...MEDICAO, estado: "planilha_enviada", com_envio_planilha: true, planilha_enviada_em: "2026-11-05",
+    dias_uteis_no_orgao: 1, valor_protocolado_centavos: 219815879 };
+  const PROC = { id: 4, codigo: "c", link: "https://siga.exemplo.com.br/p/4", numero: "PRO-2026/0001", nome: null, contrato_id: 1,
+    obra: "Hospital", medicao_id: 5, medicao_titulo: "23ª Medição", protocolo_id: null, situacao: null, setor: "Fiscalização",
+    caixa_entrada: false, com_quem: "fiscal do contrato", desde: "2026-11-06T13:20:00Z", dias_uteis: 1, hoje: 0, ultima: null, protocolado_em: null,
+    movimentacoes: [
+      { data: "2026-11-05T19:53:00Z", evento: "Protocolo recebido", cad_lotacao: "PROT/ORGAO", cad_pessoa: "", at_lotacao: "PROT/ORGAO", at_pessoa: "" },
+      { data: "2026-11-06T13:20:00Z", evento: "Em análise", cad_lotacao: "FISC/ORGAO", cad_pessoa: "", at_lotacao: "FISC/ORGAO", at_pessoa: "Fiscal do contrato" },
+      { data: "2026-11-05T21:10:00Z", evento: "Encaminhado", cad_lotacao: "PROT/ORGAO", cad_pessoa: "", at_lotacao: "FISC/ORGAO", at_pessoa: "" },
+      { data: "2026-11-05T12:00:00Z", evento: "Aberto", cad_lotacao: "PROT/ORGAO", cad_pessoa: "", at_lotacao: "PROT/ORGAO", at_pessoa: "" }] };
+  const SIGA = { lido_em: "2026-11-07T18:17:00Z", atrasado: false, processos: [{ ...PROC, id: 3, medicao_id: 99, numero: "OUTRO" }, PROC],
+    pode_atualizar: true, robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+
+  it("com o órgão há N dias úteis, a data do envio, o processo SIGA com o link e onde está o processo", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [ENVIADA],
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada", { planilha_siga: { data: "2026-11-05", numero: "PRO-2026/0001" } }), "/api/siga": SIGA });
+    pagina();
+    const faixa = (await screen.findByRole("heading", { name: "Com o órgão há 1 dia útil" })).closest("section")!;
+    expect(within(faixa).getByText("Enviada em").nextElementSibling!.textContent).toBe("05/11/2026");
+    expect(within(faixa).getByText("Processo SIGA").nextElementSibling!.textContent).toBe("PRO-2026/0001");
+    expect(within(faixa).getByText("Valor pedido").nextElementSibling!.textContent).toBe("R$ 2.198.158,79");
+    await waitFor(() => expect(within(faixa).getByRole("link", { name: /Abrir no SIGA/ }).getAttribute("href")).toBe(PROC.link));
+    const onde = screen.getByRole("heading", { name: "Onde está o processo" }).closest("section")!;
+    expect(within(onde).getByText("Fiscalização")).toBeTruthy();
+    expect(within(onde).getByText("fiscal do contrato desde 06/11")).toBeTruthy();
+    // as tres mais recentes, da mais nova para a mais velha
+    const movs = within(within(onde).getByRole("list", { name: "Últimas movimentações" })).getAllByRole("listitem").map(li => li.textContent);
+    expect(movs).toHaveLength(3);
+    expect(movs[0]).toContain("06/11 09:20");
+    expect(movs[0]).toContain("Em análise");
+    expect(movs[2]).toContain("Protocolo recebido");
+    expect(within(onde).getByText(/Lido do SIGA às/).textContent).toContain("14:17");
+  });
+
+  it("sem processo no SIGA, o passo pede o nº do SIGA no lugar de onde está o processo", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [ENVIADA],
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada"), "/api/siga": { ...SIGA, processos: [] } });
+    pagina();
+    const onde = (await screen.findByRole("heading", { name: "Onde está o processo" })).closest("section")!;
+    expect(within(onde).getByRole("textbox", { name: "Nº do SIGA" })).toBeTruthy();
+  });
+
+  it("“Pediu revisão” grava a nova versão da planilha pela mesma rota da revisão", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [ENVIADA],
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada"), "/api/siga": SIGA });
+    apiForm.mockResolvedValue({ ok: true });
+    pagina();
+    fireEvent.click(await screen.findByRole("button", { name: /^Pediu revisão/ }));
+    const form = screen.getByRole("form", { name: "Registrar revisão Rev01" });
+    fireEvent.change(within(form).getByLabelText("Motivo (obrigatório)"), { target: { value: "Fiscal pediu ajuste" } });
+    fireEvent.change(within(form).getByLabelText("Ofício assinado (PDF)"), { target: { files: [new File(["%PDF-1.4"], "o.pdf", { type: "application/pdf" })] } });
+    fireEvent.change(within(form).getByLabelText("Planilha (.xlsx ou PDF)"), { target: { files: [new File(["PK"], "p.xlsx")] } });
+    fireEvent.click(within(form).getByRole("button", { name: "Registrar revisão" }));
+    await waitFor(() => expect(apiForm).toHaveBeenCalled());
+    const [url, fd] = apiForm.mock.calls[0] as [string, FormData];
+    expect(url).toBe("/api/medicoes/5/planilhas");
+    expect(fd.get("motivo")).toBe("Fiscal pediu ajuste");
+    expect(await screen.findByText("Revisão registrada.")).toBeTruthy();
   });
 });

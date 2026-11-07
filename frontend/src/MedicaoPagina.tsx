@@ -3,16 +3,17 @@ import CaixaAviso from "./CaixaAviso";
 import { baseDosValores } from "./formato";
 import { api, mensagemDeErro } from "./api";
 import Espelho from "./Espelho";
-import { CartaoPlanilha, NovaPlanilhaCarta, type TipoPlanilha } from "./PlanilhaCarta";
+import { CartaoPlanilha, type DetalhePlanilha, NovaPlanilhaCarta, revisaoPendente, type TipoPlanilha } from "./PlanilhaCarta";
 import { EtapaEnvio, useEnvios } from "./EtapaEnvio";
-import { EtapaCartao, etapaDe, etapaInicial, FaixaVendo, Setas, situacaoDa } from "./Etapas";
+import { diaMes, FaixaPasso, PassoCartao, passoDe as passoDoEstado, passoInicial, Passos, passosDa, situacaoDoPasso } from "./Passos";
+import PassoAnalise from "./PassoAnalise";
 import { FrcConsorcio } from "./Frc";
 import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
 import LiberarEnvio from "./LiberarEnvio";
 import type { Usuario } from "./Login";
 import MaisAcoes, { type ItemAcao } from "./MaisAcoes";
-import { eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, rotuloDoBloco, tituloMedicao,
+import { DA_PLANILHA, eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, rotuloDoBloco, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type ParDaMedicao } from "./medicao";
 import { FormBoletim } from "./Boletim";
 import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
@@ -23,22 +24,26 @@ import { LinhaDoTempo, ResumoMedicao } from "./ResumoLateral";
 import { type AbaMedicoes, ir, type Origem, type Rota, useRota } from "./rota";
 import { Link } from "./Link";
 import Selo from "./Selo";
-import { fmtCompetencia, fmtDataHora, fmtDataPura } from "./tempo";
+import { fmtDataHora, fmtDataPura, fmtMesExtenso } from "./tempo";
 import { Migalhas, VoltarOrigem } from "./Topo";
 import "./etapas.css";
+import "./passos.css";
 
-// Pagina da medicao (opcao B, aprovada em 16/10/2026): "Nª Medição + Reajuste" numa pagina so', com o trilho de
-// cinco setas -- Espelho, Faturamento, Nota fiscal, Envio ao orgao e Pagamento --, so' a etapa da vez aberta (as
-// feitas abrem no lugar dela, com a faixa para voltar) e, a direita, o Resumo e a Linha do tempo. Cada acao se faz
-// num lugar so', na etapa onde acontece; as abas de Medicoes, o Inicio e a obra so' listam e levam ate' aqui
-// (#etapa-N abre a etapa).
+// Pagina da obra em medicao (issue #508, aprovada em 06/11/2026): "Nª Medição + Reajuste" numa pagina so', com o
+// cabecalho (obra, medicao, mes e o valor grande), a BARRA DE PASSOS -- Planilha e carta, Analise do orgao,
+// Espelhos, Notas, Envio da nota e Pagamento; a MT-PAR comeca em Espelhos -- e so' o passo da vez aberto (os feitos
+// abrem no lugar dele, com a faixa para voltar). Resumo e Linha do tempo ficam abaixo. Cada acao se faz num lugar
+// so', no passo onde acontece; as listas de Medicoes, o Inicio e a obra so' levam ate' aqui (#passo-N abre o passo;
+// as ancoras antigas #etapa-N continuam valendo).
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
 type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "boletim" | "sozinha" | "liberar" | null;
 
-// Ancoras antigas (#notas, #espelho, #protocolo) abrem a etapa onde a coisa mora hoje.
-const SECAO_ETAPA: Record<string, number> = { espelho: 1, notas: 3, protocolo: 4 };
+// Ancoras antigas (#notas, #espelho, #protocolo e as #etapa-N do trilho de cinco setas, que o Inicio, as listas e o
+// SIGA ainda usam) abrem o passo onde a coisa mora hoje.
+const SECAO_PASSO: Record<string, number> = { espelho: 3, notas: 4, protocolo: 5, "planilha-carta": 1,
+  "etapa-1": 3, "etapa-2": 3, "etapa-3": 4, "etapa-4": 5, "etapa-5": 6 };
 
 /** A aba de Medicoes onde esta medicao aparece (o "Medicoes" do caminho do topo volta para la'). */
 export function abaDa(estado: string): Exclude<AbaMedicoes, "resumo" | "sem-medicao"> | undefined {
@@ -80,11 +85,15 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const [alvoRecebimento, setAlvoRecebimento] = useState<Medicao | null>(null);
   // a etapa aberta no lugar da atual (clique na seta ou ancora); null = a da vez
   const [vendo, setVendo] = useState<number | null>(null);
+  // #508: no passo 2, "Gerar o espelho sem o boletim" abre o formulario do espelho embaixo da resposta do orgao
+  const [semBoletim, setSemBoletim] = useState(false);
   const protocolos = useProtocolos(contratoId);
   const geracao = useRef(0);
   // Notas e FRC leem o mesmo anexo: o que um anexa, o outro recarrega
   const [versaoNotas, setVersaoNotas] = useState(0);
   const [versaoFrc, setVersaoFrc] = useState(0);
+  // #508: cada leitura da lista da obra relê tambem a planilha/carta da medicao (a conferencia da revisao)
+  const [leituraLista, setLeituraLista] = useState(0);
 
   const m = medicoes?.find(x => x.id === medicaoId) ?? null;
   // a execucao e o reajuste do mesmo numero formam a pagina "Nª Medição + Reajuste"
@@ -106,25 +115,51 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       api<ParDaMedicao>(`/api/medicoes/${medicaoId}/par`).catch(() => null),
     ]);
     if (g !== geracao.current) return;
-    setMedicoes(lista); setAndamento(abertas); setEspelhos(esp.espelhos ?? []); setRegraAtiva(esp.regra?.situacao === "ativa");
+    setMedicoes(lista); setLeituraLista(n => n + 1); setAndamento(abertas); setEspelhos(esp.espelhos ?? []); setRegraAtiva(esp.regra?.situacao === "ativa");
     setPar(duas && Array.isArray(duas.metades) ? duas : null);
   }, [contratoId, medicaoId]);
 
   useEffect(() => {
     geracao.current += 1;
     const g = geracao.current;
-    setCab(null); setMedicoes(null); setPar(null); setErro(""); setFeito(""); setPainel(null); setVendo(null);
+    setCab(null); setMedicoes(null); setPar(null); setErro(""); setFeito(""); setPainel(null); setVendo(null); setSemBoletim(false);
     api<Cabecalho>(`/api/contratos/${contratoId}/cabecalho`).then(c => { if (g === geracao.current) setCab(c); }).catch(() => {});
     carregar().catch(e => { if (g === geracao.current) setErro(mensagemDeErro(e)); });
     return () => { geracao.current += 1; };
   }, [contratoId, medicaoId, carregar]);
 
-  // A ancora (#etapa-4, ou as antigas #notas...) abre a etapa na pagina.
+  // A ancora (#passo-5, ou as antigas #etapa-4, #notas...) abre o passo na pagina.
   useEffect(() => {
-    const n = /^etapa-([1-5])$/.exec(secao);
-    const alvo = n ? Number(n[1]) : SECAO_ETAPA[secao];
+    const n = /^passo-([1-6])$/.exec(secao);
+    const alvo = n ? Number(n[1]) : SECAO_PASSO[secao];
     if (alvo) setVendo(alvo);
   }, [secao]);
+
+  // #508: a pagina le a planilha/carta (o mesmo detalhe que o cartao le) enquanto a medicao esta' nos passos dela: o
+  // passo 2 mostra o envio e o SIGA, a revisao registrada e nao enviada devolve a vez ao passo 1, e o espelho espera a
+  // conferencia (#384) mesmo com o cartao fora da tela. O cartao, quando aberto, avisa tambem; a ultima leitura vale.
+  const comPlanilha = !!m && (m.tipo === "execucao" || m.tipo === "projeto");
+  const enviada = m?.estado === "planilha_enviada" || m?.estado === "boletim_recebido";
+  const gerada = m?.estado === "planilha_gerada";
+  const chaveRevisao = m ? `${m.id}:${m.estado}` : "";
+  const [planilhaDe, setPlanilhaDe] = useState<{ chave: string; d: DetalhePlanilha } | null>(null);
+  const lerPlanilha = comPlanilha && (enviada || gerada);
+  // relida a cada leitura da lista da obra (toda acao recarrega a pagina)
+  useEffect(() => {
+    if (!lerPlanilha) return;
+    let vivo = true;
+    const chave = chaveRevisao;
+    api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`).then(d => {
+      // detalhe sem as versoes nao confere nada: a conferencia fica com o cartao
+      if (!vivo || !Array.isArray(d?.planilhas) || !d.envio_planilha) return;
+      setPlanilhaDe({ chave, d });
+      setRevisaoDe({ chave, valor: revisaoPendente(d) ? "pendente" : "livre" });
+      setReservaDe({ chave, reservado: !!d.envio_planilha?.reserva });
+    }).catch(() => { if (vivo) setRevisaoDe({ chave, valor: "falhou" }); });
+    return () => { vivo = false; };
+  }, [lerPlanilha, chaveRevisao, medicaoId, leituraLista, tentativa]);
+  const planilha = planilhaDe?.chave === chaveRevisao ? planilhaDe.d : null;
+  const revisao = revisaoDe?.chave === chaveRevisao ? revisaoDe.valor : "conferindo";
 
   // Titulo da aba do navegador: a obra e a medicao.
   
@@ -165,8 +200,15 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // pagina, com o titulo dela no par, para a acao de uma nao esconder a da outra (rodada 2 da PR #474)
   const desatualizadas = grupo.filter(x => x.espelho_desatualizado);
 
-  // quando a etapa da vez muda (enviou, a nota chegou), a pagina acompanha: o clique numa seta so' vale ate' la'
-  const atual = m ? etapaDe(m.estado) : 0;
+  // #508: a obra tem os passos "Planilha e carta" e "Análise do órgão" quando a planilha/carta e' o 1o passo da
+  // medicao (execucao e projeto, regra de espelho ativa ou medicao que ja' nasceu dela) e vai ao orgao (nunca na MT-PAR)
+  const temPassosPlanilha = !!m && comPlanilha && m.com_envio_planilha !== false
+    && (regraAtiva || DA_PLANILHA.includes(m.estado) || !!m.planilha_enviada_em);
+  const passos = passosDa(temPassosPlanilha);
+  // quando o passo da vez muda (enviou, a nota chegou), a pagina acompanha: o clique num passo so' vale ate' la'.
+  // A revisao registrada e nao enviada devolve a vez ao passo 1 (e' la' que ela sai).
+  const atual = !m ? 0 : temPassosPlanilha && m.estado === "planilha_enviada" && revisao === "pendente" ? 1
+    : passoDoEstado(m.estado, temPassosPlanilha);
   const atualAnterior = useRef<number | null>(null);
   useEffect(() => {
     if (!m) return;
@@ -208,8 +250,9 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     );
   }
 
-  const sit = (n: number) => situacaoDa(n, atual);
-  const aberta = vendo ?? etapaInicial(atual, !!m.nota_emitida_em);
+  const sit = (n: number) => situacaoDoPasso(n, atual);
+  // passo fora da barra desta obra (ancora antiga, MT-PAR) abre o primeiro dela
+  const aberta = vendo !== null && passos.includes(vendo) ? vendo : passoInicial(atual, !!m.nota_emitida_em, passos);
   const metades = par?.metades.length === 2 ? par.metades : [];
   const medicaoDa = (id: number) => medicoes.find(x => x.id === id);
   // #208: o misto que ficou vigente para outra medicao (superado para esta) nao e' o espelho desta
@@ -228,11 +271,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
 
   // Mais acoes: so' o que nao e' de uma etapa
   const preso = (envios.envios ?? []).filter(e => e.protocolo_id !== null && !!e.envio_reservado_em);
-  // #290: o boletim do orgao (spec §2.1 passo 3) vem depois do envio da planilha/carta; na planilha enviada o botao
-  // mora na etapa 1, nos outros estados (prevista do fluxo antigo, glosa depois do espelho) em Mais acoes. A
-  // assinatura do DocuSign (passo 4) e' a do boletim: so' aparece depois dele.
+  // #290: o boletim do orgao (spec §2.1 passo 3) vem depois do envio da planilha/carta; na planilha enviada ele mora
+  // no passo 2 ("Aprovou a medição", #508), nos outros estados (prevista do fluxo antigo, glosa depois do espelho, a
+  // MT-PAR sem o passo 2) em Mais acoes. A assinatura do DocuSign e' a do boletim: so' aparece depois dele.
   const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
-  const boletimNaEtapa = podeEditar && m.estado === "planilha_enviada";
+  const boletimNaEtapa = podeEditar && m.estado === "planilha_enviada" && temPassosPlanilha;
   const podeBoletim = podeEditar && !EXCECOES.includes(m.estado) && m.estado !== "planilha_gerada";
   const acoes: ItemAcao[] = !podeEditar ? [] : [
     ...(valorEditavel(m, "atestado", podeEditar) ? [{ id: "atestado", rotulo: m.valor_atestado_centavos === null ? "Definir o atestado" : "Editar o atestado" }] : []),
@@ -245,24 +288,24 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     ...(preso.length > 0 ? [{ id: "liberar", rotulo: "Liberar envio preso", separador: true }] : []),
   ];
 
-  // ---------------------------------------------------------------- etapas
-  // issue #289: o primeiro passo e' a planilha/carta (execucao e projeto, na obra com regra de espelho ativa; o
-  // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela fica no alto da
-  // etapa. O espelho aparece logo abaixo: enviada (com ou sem o boletim da #284) ou so' gerada, sem o envio registrado
-  // (#460, decisao do Leo de 07/11/2026: a operacao ainda envia ao orgao por fora; segue sem boletim, com justificativa).
-  const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
+  // ---------------------------------------------------------------- passos
+  // issue #289: a planilha/carta vem antes do espelho (execucao e projeto, na obra com regra de espelho ativa; o
+  // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela (#508: pacote do
+  // envio e e-mail ao orgao) e' o passo 1 -- na MT-PAR, sem os passos 1 e 2, fica no alto do passo 3. O espelho segue
+  // a planilha enviada (com ou sem o boletim da #284) ou so' gerada, sem o envio registrado (#460, decisao do Leo de
+  // 07/11/2026: a operacao ainda envia ao orgao por fora; segue sem boletim, com justificativa).
   // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
   const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;
-  const chaveRevisao = `${m.id}:${m.estado}`;
-  const revisao = revisaoDe?.chave === chaveRevisao ? revisaoDe.valor : "conferindo";
-  // so' as medicoes com cartao esperam a conferencia dele; as outras (reajuste) seguem direto pelo espelho
-  const enviada = m.estado === "planilha_enviada" || m.estado === "boletim_recebido";
-  const gerada = m.estado === "planilha_gerada";
   // a so' gerada espera o cartao dizer que nao ha' envio saindo; a revisao dela nao conta (nunca foi enviada)
   const geradaLivre = reservaDe?.chave === chaveRevisao && !reservaDe.reservado && revisao !== "falhou";
+  // so' as medicoes com cartao esperam a conferencia dele; as outras (reajuste) seguem direto pelo espelho
   const espelhoEspera = comPlanilha && ((enviada && revisao !== "livre") || (gerada && !geradaLivre));
-  const corpoEtapa1 = (
-    <div className="med-etapa__corpo">
+  const formEspelho = (
+    <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
+      abrirForm={podeEditar && ["prevista", "planilha_gerada", "planilha_enviada", "boletim_recebido"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+  );
+  const blocoPlanilha = (
+    <>
       {novaPlanilha && (
         <NovaPlanilhaCarta contratoId={contratoId} tipo={m.tipo as TipoPlanilha} inicial={{ numero: m.numero, competencia: m.competencia }}
           aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
@@ -270,26 +313,49 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha key={tentativa} medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
         aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })}
         aoEnvioReservado={r => setReservaDe({ chave: chaveRevisao, reservado: r })} />}
-      {boletimNaEtapa && (
-        <div><button type="button" className="btn btn--primario" disabled={salvando} onClick={() => abrir("boletim")}>Registrar boletim</button></div>
-      )}
       {comPlanilha && (enviada || gerada) && revisao === "falhou" && (
         <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
           <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
       )}
       {gerada && !espelhoEspera && <CaixaAviso nivel="atencao">Envio da planilha/carta não registrado.</CaixaAviso>}
-      {!novaPlanilha && !espelhoEspera && (
-        <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
-          abrirForm={podeEditar && ["prevista", "planilha_gerada", "planilha_enviada", "boletim_recebido"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+    </>
+  );
+  // passo 1: a planilha/carta; a so' gerada sem o envio registrado segue para o espelho daqui mesmo (#460)
+  const corpoPasso1 = (
+    <section className="med-passo" id="passo-1" aria-labelledby="passo-1-titulo">
+      <h2 className="sr-only" id="passo-1-titulo">Planilha e carta</h2>
+      {blocoPlanilha}
+      {(gerada || (m.estado === "prevista" && !novaPlanilha)) && !espelhoEspera && formEspelho}
+    </section>
+  );
+  // passo 2: a analise do orgao; o espelho sem o boletim (#284) continua possivel, a pedido
+  const corpoPasso2 = (
+    <section className="med-passo" id="passo-2" aria-labelledby="passo-2-titulo">
+      <h2 className="sr-only" id="passo-2-titulo">Análise do órgão</h2>
+      <PassoAnalise m={m} planilha={planilha} podeEditar={podeEditar} salvando={salvando} agir={agir}
+        aoMudarSiga={() => { setFeito("Número gravado."); recarregar(); }} />
+      {comPlanilha && enviada && revisao === "falhou" && (
+        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
+          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
+      )}
+      {podeEditar && m.estado === "planilha_enviada" && !espelhoEspera && !espVigente && (
+        semBoletim ? formEspelho
+          : <div><button type="button" className="botao-link" onClick={() => setSemBoletim(true)}>Gerar o espelho sem o boletim</button></div>
+      )}
+    </section>
+  );
+  // passo 3: o espelho e o envio dele ao faturamento (as etapas 1 e 2 do trilho antigo, numa so')
+  const antesDoEspelho = ["prevista", ...DA_PLANILHA].includes(m.estado);
+  const corpoPasso3 = (
+    <div className="med-etapa__corpo">
+      {!temPassosPlanilha && blocoPlanilha}
+      {!novaPlanilha && !espelhoEspera && formEspelho}
+      {!antesDoEspelho && (
+        <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="faturamento" />
       )}
     </div>
   );
-  const corpoEtapa2 = (
-    <div className="med-etapa__corpo">
-      <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="faturamento" />
-    </div>
-  );
-  const corpoEtapa3 = (
+  const corpoPasso4 = (
     <div className="med-etapa__corpo">
       <div id="notas">
         {/* issue #188: a execucao e o reajuste da mesma competencia, um bloco para cada; a nota anexada num bloco vai
@@ -321,7 +387,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       </div>
     </div>
   );
-  const corpoEtapa4 = sit(4) === "feita" ? (
+  const corpoPasso5 = sit(5) === "feito" ? (
     <div className="med-etapa__corpo">
       {/* o historico dos envios so' depois de enviada: o nº do protocolo no orgao se registra aqui, com o comprovante */}
       <ProtocolosDaMedicao semCartao contratoId={contratoId} medicaoId={m.id} dados={protocolos.dados} erro={protocolos.erro}
@@ -350,7 +416,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         pronta={pronta} aoSemAOutra={() => abrir("sozinha")} />
     </div>
   );
-  const corpoEtapa5 = (
+  const corpoPasso6 = (
     <div className="med-etapa__corpo">
       <EtapaPagamento grupo={grupo} junta={!!par?.junta} usuario={usuario}
         protocolos={protocolos.dados?.protocolos ?? []} aqui={aqui}
@@ -361,35 +427,49 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const selo = (nivel: string, texto: string) => (
     <span className={`selo selo--${nivel}`}><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">{texto}</span></span>
   );
-  // o selo da etapa feita leva a data; a futura so' tem o selo "Libera depois da etapa N" (o corpo fica vazio)
-  const seloEtapa: Record<number, React.ReactNode> = {
-    1: espVigente ? selo("ok", `Gerado em ${fmtDataHora(espVigente.criado_em)}`)
+  // o selo do passo 3 leva a data do espelho (gerado, depois enviado ao faturamento); o futuro so' tem o selo
+  // "Libera depois do passo N" (o corpo fica vazio)
+  const seloPasso: Record<number, React.ReactNode> = {
+    3: espVigente?.envio ? selo("ok", `Enviado ao faturamento em ${fmtDataHora(espVigente.envio.enviado_em)}`)
+      : espVigente ? selo("ok", `Gerado em ${fmtDataHora(espVigente.criado_em)}`)
       : m.espelho_em ? selo("ok", `Gerado em ${fmtDataHora(m.espelho_em)}`) : undefined,
-    2: espVigente?.envio ? selo("ok", `Enviado ao faturamento em ${fmtDataHora(espVigente.envio.enviado_em)}`) : undefined,
   };
   const corpo = (n: number) => {
-    if (n === 4 && sit(4) === "futura" && pronta) return corpoEtapa4;   // a saida de emergencia mora na linha do envio
-    if (sit(n) === "futura") return null;
-    return [corpoEtapa1, corpoEtapa2, corpoEtapa3, corpoEtapa4, corpoEtapa5][n - 1];
+    if (n === 5 && sit(5) === "futuro" && pronta) return corpoPasso5;   // a saida de emergencia mora na linha do envio
+    if (sit(n) === "futuro") return null;
+    return [corpoPasso1, corpoPasso2, corpoPasso3, corpoPasso4, corpoPasso5, corpoPasso6][n - 1];
   };
+  // a data de cada passo feito, na barra
+  const ultimoBoletim = (m.boletins ?? []).filter(b => b.atestado_em).at(-1);
+  const datas: Record<number, string | null> = {
+    1: diaMes(m.planilha_enviada_em), 2: diaMes(ultimoBoletim?.atestado_em ?? m.atestado_em),
+    3: diaMes(espVigente?.envio?.enviado_em), 4: diaMes(m.nota_emitida_em),
+    5: diaMes(m.protocolos.map(p => p.data).sort().at(-1)), 6: diaMes(m.recebida_em),
+  };
+  // o valor grande do cabecalho: o da pagina (medicao + reajuste somados no par), cheio
+  const valores = grupo.map(x => x.valor_protocolado_centavos).filter((v): v is number => v !== null);
+  const valor = valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
+  const proprio = (aberta === 1 || aberta === 2) && sit(aberta) !== "futuro";
 
   return (
     <>
       {cabeca}
       <div className="pagina med">
-        <div className="med-cabeca">
-          <div>
-            <h1 title={`${obra} · ${titulo}`}>{titulo}</h1>
+        <div className="med-topo">
+          <div className="med-topo__id">
+            <h1 title={`${obra} · ${titulo}`}>{obra}</h1>
             <p className="med-meta">
-              <span>{obra}</span>
+              <span>{titulo}</span>
+              <span>{fmtMesExtenso(m.competencia)} de {m.competencia.slice(0, 4)}</span>
               {cab && <span>{cab.orgao}</span>}
-              <span className="num">{fmtCompetencia(m.competencia)}</span>
-              {cab && <span>{cab.instrumento}</span>}
               {/* a cota, so' em consorcio, como a obra (principio 7) */}
               {cab && baseDosValores(cab.percentual_lotufo_bp) && <span>{baseDosValores(cab.percentual_lotufo_bp)}</span>}
             </p>
           </div>
-          <MaisAcoes itens={acoes} desabilitado={salvando} aoEscolher={id => abrir(id as Painel)} />
+          <div className="med-topo__dir">
+            <p className="med-valor" aria-label={`Valor: ${brl(valor)}`}>{brl(valor)}</p>
+            <MaisAcoes itens={acoes} desabilitado={salvando} aoEscolher={id => abrir(id as Painel)} />
+          </div>
         </div>
 
         {/* com uma janela aberta, o erro aparece dentro dela, perto de onde se agiu */}
@@ -403,28 +483,27 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           const comeco = grupo.length > 1 ? `${tituloMedicao(x)}: ${frase}, ` : `${frase.charAt(0).toUpperCase()}${frase.slice(1)}: `;
           return (
             <CaixaAviso key={x.id} nivel="atencao">
-              {/* abre a etapa tambem quando a ancora ja' e' a dela (o efeito da secao so' roda quando ela muda) */}
+              {/* abre o passo tambem quando a ancora ja' e' a dele (o efeito da secao so' roda quando ela muda) */}
               {comeco}<Link className="link" para={aqui} secao={nota ? "notas" : "espelho"}
-                ir={(p, o) => { setVendo(nota ? 3 : 1); ir(p, o); }}>{nota ? "ver as notas" : "gere o espelho de novo"}</Link>
+                ir={(p, o) => { setVendo(nota ? 4 : 3); ir(p, o); }}>{nota ? "ver as notas" : "gere o espelho de novo"}</Link>
             </CaixaAviso>
           );
         })}
 
-        <div className="med-grade">
-          <div className="med-principal">
-            <Setas atual={atual} vendo={aberta} espera={!!esperaAqui} aoIr={n => setVendo(n === atual && atual !== 0 ? null : n)} />
-            <FaixaVendo vendo={aberta} atual={atual} aoVoltar={() => setVendo(null)} />
-            <EtapaCartao key={aberta} n={aberta} atual={atual} selo={seloEtapa[aberta]}>
-              {corpo(aberta)}
-            </EtapaCartao>
-          </div>
+        <Passos passos={passos} atual={atual} vendo={aberta} datas={datas} espera={!!esperaAqui}
+          aoIr={n => setVendo(n === atual && atual !== 0 ? null : n)} />
+        <FaixaPasso vendo={aberta} atual={atual} passos={passos} aoVoltar={() => setVendo(null)} />
+        {proprio ? <div key={aberta}>{corpo(aberta)}</div> : (
+          <PassoCartao key={aberta} n={aberta} atual={atual} passos={passos} selo={seloPasso[aberta]}>
+            {corpo(aberta)}
+          </PassoCartao>
+        )}
 
-          <aside className="med-lateral" aria-label="Resumo e linha do tempo">
-            <ResumoMedicao m={m} execucao={execucao} reajuste={reajuste} outras={outras} passo={passo} aqui={aqui}
-              contratoId={contratoId} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} />
-            <LinhaDoTempo eventos={eventos} />
-          </aside>
-        </div>
+        <aside className="med-lateral med-lateral--baixo" aria-label="Resumo e linha do tempo">
+          <ResumoMedicao m={m} execucao={execucao} reajuste={reajuste} outras={outras} passo={passo} aqui={aqui}
+            contratoId={contratoId} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} />
+          <LinhaDoTempo eventos={eventos} />
+        </aside>
       </div>
 
       {(painel === "protocolado" || painel === "atestado") && (
