@@ -40,6 +40,9 @@ log = logging.getLogger("app.rm")
 # cadastro e' feito a mao no RM.exe e o codigo pode ter que mudar por politica da TI.
 CONSULTA_NF = os.environ.get("DASH_RM_CONSULTA_NF", "DASH10")
 CONSULTA_BAIXA = os.environ.get("DASH_RM_CONSULTA_BAIXA", "DASH11")
+# Issue #488: custo a pagar pelo rateio por centro, tarefa e natureza, e baixa de estoque, por mes.
+CONSULTA_CUSTO = os.environ.get("DASH_RM_CONSULTA_CUSTO", "DASH25")
+CONSULTA_ESTOQUE = os.environ.get("DASH_RM_CONSULTA_ESTOQUE", "DASH26")
 
 # Faixa plausivel para data vinda do RM. Fora dela (o spike achou uma baixa em
 # 2036-06-16) a data vira None e o valor bruto fica guardado ao lado.
