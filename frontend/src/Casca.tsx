@@ -1,23 +1,32 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
 import { IconeAjustes, IconeAlerta, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
-  IconeSeta, IconeSino } from "./icones";
+  IconeSeta, IconeSino, IconeVoltar } from "./icones";
 import type { Usuario } from "./Login";
 import { menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
 import Simbolo from "./Simbolo";
 
-// Casca de todas as telas logadas (09/10/2026, prototipo aprovado pelo Leo; mecanismo copiado do trilho do
-// TutorBird ja' medido em outro projeto): o TRILHO indigo a' esquerda e a BARRA SUPERIOR branca com o titulo da
-// secao e a conta. O menu lateral antigo (232px, grupos Trabalho/Consulta/Sistema, conta e Sair no pe) saiu.
+// Casca de todas as telas logadas: o MENU LATERAL largo indigo a' esquerda (icone e nome em cada item, item ativo em
+// pilula branca, recolhivel para so' icones) e a BARRA SUPERIOR branca com o titulo da secao e a conta.
+// Redesenho de 11/2026 (#505): substitui o trilho de 64px que abria por cima ao passar o ponteiro.
 //
-// Trilho: UM elemento so'. A <nav> e' fixa com 64px e anima a propria largura ate' 265px quando o ponteiro passa
-// ou o teclado entra (tokens.css, `.trilho`). Dentro dela, um bloco de largura FIXA de 265px que nunca reflui: a
-// animacao so' o descobre, pelo corte (`overflow-x: hidden` e' o mecanismo, nao higiene). Cada item e' uma celula
-// de icone de 64px (por isso o icone fica parado) e o rotulo a' direita, que comeca em 64px e por isso esta'
-// escondido com o trilho fechado. Abre POR CIMA do conteudo: no fluxo da pagina so' existe o espaco de 64px.
-// Os links sao um conjunto so', sempre no DOM e focaveis, com o rotulo visivel como nome acessivel.
+// Estado: `largo` ou `recolhido`, no atributo `data-estado` da <nav>. No computador a escolha da pessoa fica
+// guardada no navegador (padrao largo); no celular (< 768px) o menu nasce recolhido, abre POR CIMA da tela e fecha
+// ao navegar. Os links ficam sempre no DOM e focaveis, com o nome visivel (largo) ou so' para leitor de tela
+// (recolhido) como nome acessivel.
+
+const CHAVE_MENU = "menu-lateral";
+
+function celular(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+}
+
+function estadoInicial(): "largo" | "recolhido" {
+  if (celular()) return "recolhido";
+  try { return localStorage.getItem(CHAVE_MENU) === "recolhido" ? "recolhido" : "largo"; } catch { return "largo"; }
+}
 
 const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement> = {
   inicio: IconeInicio, medicoes: IconeMedicoes, obras: IconeObras, avisos: IconeSino, siga: IconeSiga, documentos: IconeDocumento,
@@ -25,16 +34,24 @@ const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement
 };
 
 export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemMenu | "conta" | null; ir: Ir }) {
+  const [estado, setEstado] = useState<"largo" | "recolhido">(estadoInicial);
+  const largo = estado === "largo";
+
+  function alternar() {
+    const novo = largo ? "recolhido" : "largo";
+    setEstado(novo);
+    if (!celular()) { try { localStorage.setItem(CHAVE_MENU, novo); } catch { /* sem armazenamento: vale so' agora */ } }
+  }
+
   return (
-    <nav className="trilho" aria-label="Navegação principal">
+    <nav className="trilho" aria-label="Navegação principal" data-estado={estado}
+      // no celular o menu aberto cobre a tela: navegar o fecha
+      onClick={ev => { if (celular() && (ev.target as HTMLElement).closest("a")) setEstado("recolhido"); }}>
       <div className="trilho__bloco">
-        {/* Marca: identidade, nao destino ("Início" ja' e' o primeiro item). Simbolo na celula de 64px, o nome
-            revelado pelo corte como os rotulos. */}
+        {/* Marca: identidade, nao destino ("Início" ja' e' o primeiro item). */}
         <span className="trilho__marca" aria-hidden="true">
           <span className="trilho__celula"><Simbolo className="trilho__simbolo" /></span>
-          <span className="trilho__rotulo trilho__nome">
-            <span className="trilho__nome-1">grupolotufo</span>
-          </span>
+          <span className="trilho__rotulo trilho__nome">grupolotufo</span>
         </span>
         {/* Links de verdade (<a href>): a URL e' o endereco da tela, e o navegador ganha "abrir em nova aba",
             copiar link e historico de graca. O item fica aceso tambem abaixo dele na hierarquia (navegacao.ts). */}
@@ -48,6 +65,11 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
             </Link>
           );
         })}
+        <button type="button" className="trilho__alternar" aria-expanded={largo}
+          aria-label={largo ? "Recolher o menu" : "Expandir o menu"} onClick={alternar}>
+          <span className="trilho__celula"><IconeVoltar className="icone trilho__icone trilho__seta" /></span>
+          <span className="trilho__rotulo" aria-hidden="true">Recolher</span>
+        </button>
       </div>
     </nav>
   );

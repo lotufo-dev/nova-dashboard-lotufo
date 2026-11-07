@@ -149,3 +149,45 @@ describe("App: instalação não autorizada", () => {
   });
 });
 
+
+describe("App: o menu lateral largo", () => {
+  const entrar = () => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", csrf: "x" };
+    if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+    if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
+    return [];
+  });
+  beforeEach(() => { try { localStorage.clear(); } catch { /* sem armazenamento: o menu abre largo */ } });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  it("abre largo, com ícone e nome em cada item, e marca o item ativo", async () => {
+    entrar();
+    window.history.replaceState(null, "", "/siga");
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
+    expect(nav.getAttribute("data-estado")).toBe("largo");
+    const links = within(nav).getAllByRole("link");
+    expect(links.map(l => l.textContent)).toEqual(
+      ["Início", "Medições", "Obras", "Avisos", "SIGA", "Documentos", "A receber", "Carteira", "Administração"]);
+    for (const l of links) expect(l.querySelector("svg")).not.toBeNull();
+    expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
+    expect(links.filter(l => l.getAttribute("aria-current") === "page")).toHaveLength(1);
+  });
+
+  it("recolhe pelo botão (só ícones, nome continua acessível) e lembra a escolha", async () => {
+    entrar();
+    window.history.replaceState(null, "", "/siga");
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
+    const botao = within(nav).getByRole("button", { name: "Recolher o menu" });
+    expect(botao.getAttribute("aria-expanded")).toBe("true");
+    await act(async () => { botao.click(); });
+    expect(nav.getAttribute("data-estado")).toBe("recolhido");
+    expect(within(nav).getByRole("button", { name: "Expandir o menu" }).getAttribute("aria-expanded")).toBe("false");
+    expect(within(nav).getByRole("link", { name: "SIGA" })).toBeTruthy();
+    cleanup();
+    render(<App />);
+    expect((await screen.findByRole("navigation", { name: "Navegação principal" })).getAttribute("data-estado")).toBe("recolhido");
+  });
+});

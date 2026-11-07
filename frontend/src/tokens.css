@@ -10,14 +10,24 @@
 
 /* ------------------------------------------------------------------- fontes
 
-   IBM Plex Sans (texto) e IBM Plex Mono (numeros e valores) vem do
-   @fontsource, importados em main.tsx: o Vite empacota os .woff2 e o proprio
-   servidor os entrega. Rede interna, sem nuvem — nada de fonts.googleapis.com.
+   Lexend (redesenho de 11/2026, #505): sem serifa geometrica, larga e arredondada, titulos e valores em negrito.
+   Servida pelo proprio app em /fonts (frontend/public/fonts, licenca OFL ao lado): rede interna, sem nuvem.
+   Valores em reais usam a MESMA fonte do texto, com algarismos tabulares (font-variant-numeric) nas colunas.
    ------------------------------------------------------------------------- */
 
+@font-face { font-family: "Lexend"; font-weight: 400; font-style: normal; font-display: swap;
+  src: url("/fonts/lexend-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Lexend"; font-weight: 500; font-style: normal; font-display: swap;
+  src: url("/fonts/lexend-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Lexend"; font-weight: 600; font-style: normal; font-display: swap;
+  src: url("/fonts/lexend-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Lexend"; font-weight: 700; font-style: normal; font-display: swap;
+  src: url("/fonts/lexend-latin-700-normal.woff2") format("woff2"); }
+
 :root {
-  --fonte:         "IBM Plex Sans", system-ui, "Segoe UI", Roboto, sans-serif;
-  --fonte-num:     "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --fonte:         "Lexend", system-ui, "Segoe UI", Roboto, sans-serif;
+  /* valores e datas: a mesma fonte do texto (nao ha mais mono); o nome fica para os seletores existentes */
+  --fonte-num:     var(--fonte);
 
   /* superficies */
   --bg:            #F6F8FB;
@@ -70,6 +80,14 @@
   --ok-linha:      #A7F3D0;
   --ok-ponto:      #10B981;
 
+  /* REGRA DE COR DA INFORMACAO (redesenho de 11/2026; docs/identidade-visual.md): numero e data em preto por padrao;
+     a cor so' vai na informacao. feito = verde (--ok), em andamento = azul, vence em breve = ambar (--atencao),
+     critico = vermelho (--acao). O que nao e' urgente fica preto. */
+  --andamento:       #1D4ED8;
+  --andamento-fundo: #EFF6FF;
+  --andamento-linha: #BFDBFE;
+  --andamento-ponto: #3B82F6;
+
   /* forma: raio 8 em cartao e botao, pilula 999; pagina sem raio nem sombra; sobreposicao
      (janela, menu, lista de sugestoes) com raio 10 e sombra propria. */
   --raio-micro:    4px;       /* code, chave de legenda, alvo de clique dentro de celula */
@@ -79,19 +97,14 @@
   --raio-pilula:   999px;     /* selo, ponto, avatar */
   --sombra:        0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(15, 23, 42, .06);
   --sombra-sobreposicao: 0 12px 32px rgba(15, 23, 42, .16), 0 2px 6px rgba(15, 23, 42, .08);
-  /* Trilho (Casca.tsx, 09/10/2026): 64px fechado = a celula do icone; 265px aberto. Fundo = --marca, item ativo =
-     --acento-mais (branco por cima: 10:1), hover = um degrau mais claro que o fundo. */
+  /* Menu lateral (Casca.tsx, redesenho de 11/2026): 240px largo, 64px recolhido (so' icones). Fundo = --marca; item
+     ativo = pilula branca com texto indigo; hover = um degrau mais claro que o fundo. */
   --trilho:        64px;
-  --trilho-aberto: 265px;
+  --trilho-largo:  240px;
   --trilho-hover:  #5B54E8;
-  --trilho-duracao: 300ms;
-  /* desacelera no fim (a curva medida no TutorBird) */
+  --trilho-duracao: 200ms;
   --trilho-curva:  cubic-bezier(.65, 0, .35, 1);
-  /* cortesia antes de FECHAR: uma passada de mouse nao derruba o painel; a abertura e' imediata */
-  --trilho-cortesia: 100ms;
-  /* sombra da borda direita: discreta fechado, presente aberto (as duas medidas no TutorBird) */
-  --trilho-sombra: 2px 0 6px rgba(15, 23, 42, .08);
-  --trilho-sombra-aberto: 8px 0 24px rgba(15, 23, 42, .2);
+  --trilho-sombra-sobreposto: 8px 0 24px rgba(15, 23, 42, .2);
 
   /* situacao da medicao (pagina Medicoes, 09/10/2026, prototipo aprovado): fundo e texto da pilula; o texto e' o
      ponto do cartao. "Enviar nota" usa o indigo da marca (--pressionado / --acento-mais). */
@@ -126,7 +139,7 @@ body {
   caret-color: var(--acento);
 }
 
-h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; }
+h1, h2, h3 { font-weight: 700; letter-spacing: -.01em; }
 
 /* superficies do navegador: selecao, foco e barra de rolagem tambem sao do mundo */
 ::selection { background: var(--acento-linha); color: var(--acento-mais); }
@@ -198,7 +211,7 @@ input::placeholder, textarea::placeholder { color: var(--texto-fraco); }
 a { color: var(--acento); text-underline-offset: 3px; }
 a:hover { color: var(--acento-forte); }
 
-/* formato literal ("AAAA-MM;valor") na mesma mono dos valores */
+/* formato literal ("AAAA-MM;valor") */
 code {
   font-family: var(--fonte-num);
   font-size: .92em;
@@ -212,18 +225,46 @@ table { border-collapse: collapse; }
 
 /* --------------------------------------------------------------- utilidades */
 
-/* Todo numero e valor passa por aqui: IBM Plex Mono (identidade), algarismos de mesma
+/* Todo numero e valor passa por aqui: a mesma fonte do texto, algarismos de mesma
    largura, senao a coluna alinhada a direita "dança" a cada centavo. */
 .num, .col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor,
 .total-receber__valor, .alerta__valor {
   font-variant-numeric: tabular-nums lining-nums; font-feature-settings: "tnum" 1, "lnum" 1;
 }
 /* `.num` tambem marca frases com contagem ("19 obras · a nova medicao..."): ali fica a Sans com algarismos
-   de mesma largura. A Mono vai so' no valor: celula numerica da tabela, campo numerico e os valores de KPI. */
+   de mesma largura. A largura fixa vai so' no valor: celula numerica da tabela, campo numerico e os valores de KPI. */
 td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor,
 .total-receber__valor, .alerta__valor {
   font-family: var(--fonte-num);
 }
+
+/* Cor da informacao (redesenho de 11/2026; docs/identidade-visual.md, "Regra de cor da informacao"): texto preto por
+   padrao; a cor entra so' no dado que tem situacao. `.info--*` pinta o texto (numero, data, frase curta);
+   `.pilula-info--*` e' a pilula (fundo tingido + texto escuro); `.pilula-info__ponto` e' o ponto vivo. O que nao e'
+   urgente nao leva classe e fica preto. A legenda do topo direito e' o componente LegendaCor. */
+.info--feito { color: var(--ok); }
+.info--andamento { color: var(--andamento); }
+.info--breve { color: var(--atencao); }
+.info--critico { color: var(--acao); }
+.pilula-info {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
+  border-radius: var(--raio-pilula); font-size: 13px; line-height: 20px; font-weight: 600; white-space: nowrap;
+}
+.pilula-info--feito { background: var(--ok-fundo); color: var(--ok); }
+.pilula-info--andamento { background: var(--andamento-fundo); color: var(--andamento); }
+.pilula-info--breve { background: var(--atencao-fundo); color: var(--atencao); }
+.pilula-info--critico { background: var(--acao-fundo); color: var(--acao); }
+.pilula-info__ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-pilula); background: currentColor; }
+.ponto--feito, .pilula-info--feito .pilula-info__ponto { background: var(--ok-ponto); }
+.ponto--andamento, .pilula-info--andamento .pilula-info__ponto { background: var(--andamento-ponto); }
+.ponto--breve, .pilula-info--breve .pilula-info__ponto { background: var(--atencao-ponto); }
+.ponto--critico, .pilula-info--critico .pilula-info__ponto { background: var(--acao-ponto); }
+.legenda-cor { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; margin: 0; padding: 0; list-style: none;
+  font-size: 12px; line-height: 16px; color: var(--texto-2); }
+.legenda-cor li { display: inline-flex; align-items: center; gap: 6px; }
+
+/* colunas de valor e data: algarismos de mesma largura em toda tabela */
+td, th { font-variant-numeric: tabular-nums; }
 
 .icone {
   width: 18px; height: 18px; flex: none;
@@ -285,79 +326,68 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
 
 /* --------------------------------------------------------------------- shell */
 
-/* Casca de 09/10/2026 (Casca.tsx; prototipo aprovado pelo Leo, mecanismo do trilho do TutorBird medido frame a
-   frame em outro projeto). O trilho e' FIXO e abre POR CIMA do conteudo: no fluxo da pagina so' existe a folga de
-   64px, e a pagina nunca reflui quando ele abre. */
+/* Casca (Casca.tsx): o menu e' FIXO. Largo (padrao no computador) ocupa 240px do fluxo da pagina; recolhido, 64px.
+   No celular so' existe a folga de 64px: o menu largo abre POR CIMA da tela e a pagina nunca reflui. */
 .shell { min-height: 100vh; padding-left: var(--trilho); }
+.shell:has(.trilho[data-estado="largo"]) { padding-left: var(--trilho-largo); }
 .coluna { min-width: 0; min-height: 100vh; display: flex; flex-direction: column; }
 
 /* Instalacao nao autorizada (issue #417, App.tsx): faixa vermelha presa ao pe da janela em toda tela. Fica no fluxo
    DEPOIS da tela (sticky, nao fixed): no fim da rolagem ela para abaixo do conteudo em vez de cobrir a ultima linha.
-   Abaixo do trilho aberto (40) e das janelas (100). */
+   Abaixo do menu sobreposto (40) e das janelas (100). */
 .faixa-instalacao {
   position: sticky; bottom: 0; z-index: 35;
   margin: 0; padding: 10px 16px;
   background: var(--acao); color: #fff;
   font-size: 14px; line-height: 20px; font-weight: 600; text-align: center;
 }
-/* redirecionamento de e-mail de teste ligado: aviso em ambar, como os de atencao */
 
-/* UM elemento so': a <nav> anima a propria largura e o bloco de dentro (largura fixa, rotulos sem quebra) vai sendo
-   DESCOBERTO pelo corte. `overflow-x: hidden` e' o mecanismo: nenhum pixel do conteudo se move durante a animacao.
-   O REPOUSO descreve tambem a VOLTA, por isso e' aqui que a cortesia de 100ms aparece. */
 .trilho {
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
   width: var(--trilho);
-  overflow-x: hidden; overflow-y: hidden;
+  overflow-x: hidden; overflow-y: auto;
   background: var(--marca); color: #fff;
-  box-shadow: var(--trilho-sombra);
-  transition: width var(--trilho-duracao) var(--trilho-curva) var(--trilho-cortesia),
-              box-shadow var(--trilho-duracao) var(--trilho-curva) var(--trilho-cortesia);
+  transition: width var(--trilho-duracao) var(--trilho-curva);
 }
-/* ABERTO pelo teclado: `:has(:focus-visible)` e nao `:focus-within`, porque o CLIQUE tambem deixa foco no link e,
-   sem remontar a casca, o trilho ficava PRESO aberto depois de clicar e tirar o mouse (furo achado no TutorBird
-   clonado). O Tab abre nos dois sentidos; o clique obedece so' ao ponteiro. Entrada imediata, sem cortesia. */
-.trilho:has(:focus-visible) {
-  width: var(--trilho-aberto); overflow-y: auto; box-shadow: var(--trilho-sombra-aberto);
-  transition: width var(--trilho-duracao) var(--trilho-curva), box-shadow var(--trilho-duracao) var(--trilho-curva);
-}
-/* E pelo ponteiro, so' onde existe hover de verdade: no toque o :hover fica PRESO depois do toque e o trilho cobriria
-   a tela a cada navegacao. No celular ele fica nos 64px, e o toque no icone navega. */
-@media (hover: hover) {
-  .trilho:hover {
-    width: var(--trilho-aberto); overflow-y: auto; box-shadow: var(--trilho-sombra-aberto);
-    transition: width var(--trilho-duracao) var(--trilho-curva), box-shadow var(--trilho-duracao) var(--trilho-curva);
-  }
-  .trilho:hover .trilho__rotulo { opacity: 1; transition: opacity var(--trilho-duracao) var(--trilho-curva); }
-}
-.trilho__bloco { width: var(--trilho-aberto); min-height: 100%; display: flex; flex-direction: column; padding: 16px 0 20px; }
-/* a celula do icone tem a largura do trilho fechado: o icone fica centrado fechado E parado ao abrir, e o rotulo
-   comeca exatamente em 64px, 100% cortado em repouso */
+.trilho[data-estado="largo"] { width: var(--trilho-largo); }
+/* bloco de largura fixa: o corte da animacao descobre os rotulos sem refluxo */
+.trilho__bloco { width: var(--trilho-largo); min-height: 100%; display: flex; flex-direction: column; padding: 16px 0 20px; }
+/* a celula do icone tem a largura do menu recolhido: o icone fica centrado nos dois estados */
 .trilho__celula { width: var(--trilho); flex: none; display: flex; align-items: center; justify-content: center; }
-.trilho__marca { display: flex; align-items: center; width: var(--trilho-aberto); height: 40px; margin-bottom: 24px; flex: none; }
+.trilho__marca { display: flex; align-items: center; width: var(--trilho-largo); height: 40px; margin-bottom: 24px; flex: none; }
 .trilho__simbolo { width: 15px; height: auto; color: #fff; }
-.trilho__nome { display: flex; flex-direction: column; }
-.trilho__nome-1 { font-size: 15px; line-height: 18px; font-weight: 600; }
-/* a linha inteira tem os 265px: e' ela que veste o ativo e o hover. Fechado, o corte entrega o quadrado de 64px. */
-.trilho__item {
+.trilho__nome { font-size: 16px; line-height: 20px; font-weight: 700; }
+/* item: pilula de 12px de folga nas laterais; a pilula tem a largura do menu menos a folga */
+.trilho__item, .trilho__alternar {
   display: flex; align-items: center; flex: none;
-  width: var(--trilho-aberto); height: 44px;
-  color: #fff; text-decoration: none; font-size: 15px;
+  width: calc(var(--trilho-largo) - 24px); height: 44px; margin: 0 12px 4px; padding: 0;
+  border: 0; border-radius: 12px; background: none;
+  color: #fff; text-decoration: none; font-size: 15px; font-weight: 500; text-align: left;
   transition: background .15s ease;
 }
-.trilho__item:hover { background: var(--trilho-hover); color: #fff; }
-.trilho__item[aria-current="page"] { background: var(--acento-mais); }
-/* o anel de foco da casa e' indigo, a cor do proprio trilho: aqui ele e' branco e puxado para DENTRO (o item ocupa
-   a largura toda e a <nav> corta o que passa da borda) */
-.trilho__item:focus-visible { outline: 2px solid #fff; outline-offset: -4px; border-radius: 0; }
+.trilho__item:hover:not(:disabled), .trilho__alternar:hover:not(:disabled) { background: var(--trilho-hover); color: #fff; }
+.trilho__item[aria-current="page"] { background: #fff; color: var(--acento-mais); font-weight: 600; }
+/* o anel de foco da casa e' indigo, a cor do proprio menu: aqui ele e' branco; sobre a pilula branca fica indigo */
+.trilho__item:focus-visible, .trilho__alternar:focus-visible { outline: 2px solid #fff; outline-offset: -2px; border-radius: 12px; }
+.trilho__item[aria-current="page"]:focus-visible { outline-color: var(--acento); }
+.trilho__celula { width: calc(var(--trilho) - 24px); }
+.trilho__marca .trilho__celula { width: var(--trilho); }
 .trilho__icone { width: 20px; height: 20px; stroke-width: 1.8; }
-/* rotulos com fade na MESMA cadencia da largura (cortesia incluida): a barra anda e as palavras aparecem */
-.trilho__rotulo { white-space: nowrap; opacity: 0; transition: opacity var(--trilho-duracao) var(--trilho-curva) var(--trilho-cortesia); }
-.trilho:has(:focus-visible) .trilho__rotulo { opacity: 1; transition: opacity var(--trilho-duracao) var(--trilho-curva); }
+.trilho__alternar { margin-top: auto; }
+.trilho__seta { transition: transform var(--trilho-duracao) var(--trilho-curva); }
+.trilho[data-estado="recolhido"] .trilho__seta { transform: rotate(180deg); }
+.trilho__rotulo { white-space: nowrap; }
+/* recolhido: o nome sai da vista mas continua sendo o nome acessivel do link */
+.trilho[data-estado="recolhido"] .trilho__rotulo {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+}
+/* celular: o menu largo cobre a tela (a pagina fica com a folga de 64px) */
+@media (max-width: 767px) {
+  .shell:has(.trilho[data-estado="largo"]) { padding-left: var(--trilho); }
+  .trilho[data-estado="largo"] { box-shadow: var(--trilho-sombra-sobreposto); }
+}
 @media (prefers-reduced-motion: reduce) {
-  /* sem animacao e sem cortesia: o reset de movimento zera duracoes, nao atrasos */
-  .trilho, .trilho:hover, .trilho:has(:focus-visible),
-  .trilho__rotulo, .trilho:hover .trilho__rotulo, .trilho:has(:focus-visible) .trilho__rotulo { transition: none; }
+  .trilho, .trilho__seta { transition: none; }
 }
 
 /* Barra superior branca (56px): o titulo da secao e a conta. A linha de baixo e' sombra, nao borda: numa pagina com
