@@ -108,16 +108,38 @@ def _erro_do_cliente(conn: sqlite3.Connection, e: ValueError) -> HTTPException:
     return HTTPException(422, str(e))
 
 
-def _dias_uteis_no_orgao(m: dict) -> int | None:
-    """Issue #508, passo 2 da pagina da obra: "com o orgao ha N dias uteis", do dia do envio da planilha/carta ate'
-    hoje (Cuiaba), so' enquanto a medicao espera a resposta do orgao (planilha enviada)."""
-    if m.get("estado") != "planilha_enviada" or not m.get("planilha_enviada_em"):
+def _dia_do_envio(enviado_em: str | None) -> str | None:
+    """"AAAA-MM-DD" do envio: o por fora ja' e' o dia; o do sistema e' instante UTC, que vira o dia em Cuiaba."""
+    if not enviado_em:
         return None
     try:
-        desde = datetime.date.fromisoformat(m["planilha_enviada_em"][:10])
+        if len(enviado_em) == 10:
+            return datetime.date.fromisoformat(enviado_em).isoformat()
+        return tempo.para_local(datetime.datetime.fromisoformat(enviado_em.replace("Z", "+00:00"))).date().isoformat()
     except ValueError:
         return None
-    return feriados.dias_uteis_entre(desde, tempo.hoje_local())
+
+
+def _ultimo_envio_planilha(conn: sqlite3.Connection, m: dict) -> str | None:
+    """Gate Sol (PR #553): o dia do envio mais recente da planilha/carta (pelo sistema ou por fora). A revisao enviada
+    recomeca a conta do passo 2; sem envio listado (historico), vale o 1o envio gravado na medicao."""
+    if not m.get("planilha_enviada_em"):
+        return None
+    dias = [d for d in (_dia_do_envio(e["enviado_em"]) for e in planilha_envio.envios(conn, m["id"])) if d]
+    return max(dias) if dias else _dia_do_envio(m["planilha_enviada_em"][:10])
+
+
+def _dias_uteis_no_orgao(m: dict, ultimo_envio: str | None) -> int | None:
+    """Issue #508, passo 2 da pagina da obra: "com o orgao ha N dias uteis", do dia do envio mais recente da
+    planilha/carta ate' hoje (Cuiaba), so' enquanto a medicao espera a resposta do orgao (planilha enviada)."""
+    if m.get("estado") != "planilha_enviada" or not ultimo_envio:
+        return None
+    return feriados.dias_uteis_entre(datetime.date.fromisoformat(ultimo_envio), tempo.hoje_local())
+
+
+def _envio_ao_orgao(conn: sqlite3.Connection, m: dict) -> dict:
+    ultimo = _ultimo_envio_planilha(conn, m)
+    return {"planilha_ultimo_envio_em": ultimo, "dias_uteis_no_orgao": _dias_uteis_no_orgao(m, ultimo)}
 
 
 def _tamanho(relativo: str | None) -> int | None:
@@ -159,7 +181,7 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
     # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
     return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
-             "boletins": medicoes.boletins(conn, m["id"]), "dias_uteis_no_orgao": _dias_uteis_no_orgao(m),
+             "boletins": medicoes.boletins(conn, m["id"]), **_envio_ao_orgao(conn, m),
              "com_envio_planilha": com_envio} for m in lista]
 
 
@@ -194,7 +216,7 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
     d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
     d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"
-    d["dias_uteis_no_orgao"] = _dias_uteis_no_orgao(d)       # issue #508: passo 2 da pagina da obra
+    d.update(_envio_ao_orgao(conn, d))                         # issue #508: passo 2 da pagina da obra
     d["pacote_planilha"] = _pacote_planilha(conn, d)          # issue #508: medidor do pacote no passo 1
     return d
 

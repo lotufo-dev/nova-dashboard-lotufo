@@ -56,7 +56,8 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
   const esperando = m.estado === "planilha_enviada";
   const podeResponder = podeEditar && esperando;
   const vigente = planilha?.planilhas.at(-1) ?? null;
-  const enviadaEm = m.planilha_enviada_em ?? planilha?.planilha_enviada_em ?? null;
+  // o envio mais recente (a revisao enviada recomeca a conta, gate Sol PR #553); sem ele, o 1o envio
+  const enviadaEm = m.planilha_ultimo_envio_em ?? m.planilha_enviada_em ?? planilha?.planilha_enviada_em ?? null;
   const alternar = (r: Exclude<Resposta, null>) => setAberta(a => (a === r ? null : r));
   // o boletim vigente: a resposta que o orgao ja' deu (valor aprovado e data)
   const aprovado = (m.boletins ?? []).filter(b => b.tem_arquivo).at(-1) ?? null;

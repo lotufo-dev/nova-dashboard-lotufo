@@ -971,6 +971,17 @@ describe("Página da obra em medição: passo 2, análise do órgão (issue #508
     expect(within(onde).getByText(/Lido do SIGA às/).textContent).toContain("14:17");
   });
 
+  it("revisão enviada: “Enviada em” e a data do passo 1 são as do envio mais recente (gate Sol, PR #553)", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } },
+      "/api/contratos/1/medicoes": [{ ...ENVIADA, planilha_enviada_em: "2026-10-01", planilha_ultimo_envio_em: "2026-11-05" }],
+      "/api/medicoes/5": detalhePlanilha("planilha_enviada", { planilha_enviada_em: "2026-10-01" }), "/api/siga": SIGA });
+    pagina();
+    const faixa = (await screen.findByRole("heading", { name: "Com o órgão há 1 dia útil" })).closest("section")!;
+    expect(within(faixa).getByText("Enviada em").nextElementSibling!.textContent).toBe("05/11/2026");
+    expect(within(screen.getByRole("navigation", { name: "Passos da medição" }))
+      .getByRole("button", { name: "Passo 1: Planilha e carta, feito em 05/11" })).toBeTruthy();
+  });
+
   it("sem processo no SIGA, o passo pede o nº do SIGA no lugar de onde está o processo", async () => {
     responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [ENVIADA],
       "/api/medicoes/5": detalhePlanilha("planilha_enviada"), "/api/siga": { ...SIGA, processos: [] } });

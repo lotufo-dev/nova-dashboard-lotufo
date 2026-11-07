@@ -453,7 +453,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // a data de cada passo feito, na barra
   const ultimoBoletim = (m.boletins ?? []).filter(b => b.atestado_em).at(-1);
   const datas: Record<number, string | null> = {
-    1: diaMes(m.planilha_enviada_em), 2: diaMes(ultimoBoletim?.atestado_em ?? m.atestado_em),
+    1: diaMes(m.planilha_ultimo_envio_em ?? m.planilha_enviada_em), 2: diaMes(ultimoBoletim?.atestado_em ?? m.atestado_em),
     3: diaMes(espVigente?.envio?.enviado_em), 4: diaMes(m.nota_emitida_em),
     5: diaMes(m.protocolos.map(p => p.data).sort().at(-1)), 6: diaMes(m.recebida_em),
   };

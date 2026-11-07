@@ -57,6 +57,7 @@ export type Medicao = {
   // #508: pagina da obra em medicao -- data do envio da planilha/carta, dias uteis com o orgao e se a obra tem os
   // passos "Planilha e carta" e "Análise do órgão" (a MT-PAR nao tem)
   planilha_enviada_em?: string | null;
+  planilha_ultimo_envio_em?: string | null;     // o dia do envio mais recente (a revisao enviada recomeca a conta)
   dias_uteis_no_orgao?: number | null;
   com_envio_planilha?: boolean;
 };
