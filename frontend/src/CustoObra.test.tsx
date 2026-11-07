@@ -98,4 +98,32 @@ describe("CustoObra (#491)", () => {
     expect(await screen.findByRole("table")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("o erro antigo sai quando a obra volta e responde", async () => {
+    let falhar = true;
+    api.mockImplementation((url: string) => {
+      if (url === "/api/diretoria/custo") return Promise.resolve([{ contrato_id: 7, obra: "Obra Alfa" }, { contrato_id: 9, obra: "Obra Beta" }]);
+      if (url === "/api/diretoria/custo/7" && falhar) return Promise.reject(new Error("falhou"));
+      return Promise.resolve({ ...CUSTO, contrato_id: Number(url.split("/").pop()) });
+    });
+    render(<CustoObra />);
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    falhar = false;
+    fireEvent.change(screen.getByLabelText("Obra"), { target: { value: "9" } });
+    await screen.findByRole("table");
+    fireEvent.change(screen.getByLabelText("Obra"), { target: { value: "7" } });
+    await screen.findByRole("table");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("grupo de mês sem leitura mostra a diferença como traço, não o custo negativo", async () => {
+    const abril = CUSTO.linhas[1];
+    const comCusto = { ...abril, grupos: [{ ...abril.grupos[0], apontado_centavos: 100_000_00, custo_centavos: 100_000_00,
+      diferenca_centavos: null }] };
+    responder({ ...CUSTO, linhas: [comCusto] });
+    render(<CustoObra />);
+    const linha = (await screen.findByText("Terraplenagem")).closest("tr")!;
+    expect(within(linha).getAllByText("\u2014")).toHaveLength(2);     // medido e diferença
+    expect(within(linha).queryByText(/\u2212R\$/)).toBeNull();
+  });
 });

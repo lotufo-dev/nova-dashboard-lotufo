@@ -13,7 +13,9 @@ import { fmtCompetencia, fmtData, fmtHora } from "./tempo";
 type ObraCusto = { contrato_id: number; obra: string };
 type LinhaGrupo = {
   nome: string; tipo: "grupo" | "fora" | "sem_grupo" | "ajuste" | "nao_lido"; medido_centavos: number | null;
-  apontado_centavos: number; rateado_centavos: number; custo_centavos: number; diferenca_centavos: number;
+  apontado_centavos: number; rateado_centavos: number; custo_centavos: number;
+  /** null: medido do grupo desconhecido (mes sem leitura da planilha) ou linha so' de custo */
+  diferenca_centavos: number | null;
 };
 type Totais = { medido_centavos: number; apontado_centavos: number; rateado_centavos: number; custo_centavos: number;
   diferenca_centavos: number };
@@ -32,7 +34,10 @@ function temValor(g: LinhaGrupo): boolean {
   return (g.medido_centavos !== null && g.medido_centavos !== 0) || g.custo_centavos !== 0;
 }
 
-function Valores({ v, previsto }: { v: Omit<Totais, "medido_centavos"> & { medido_centavos: number | null }; previsto?: number | null }) {
+function Valores({ v, previsto }: {
+  v: Omit<Totais, "medido_centavos" | "diferenca_centavos"> & { medido_centavos: number | null; diferenca_centavos: number | null };
+  previsto?: number | null;
+}) {
   return (
     <>
       <td className="col-num dinheiro num">{brl(v.medido_centavos)}</td>
@@ -109,7 +114,7 @@ export default function CustoObra() {
     if (obra === null) return;
     let vivo = true;
     api<Custo>(`/api/diretoria/custo/${obra}`)
-      .then(d => { if (vivo) setCusto(d); })
+      .then(d => { if (vivo) { setCusto(d); setErroObra(null); } })
       .catch(e => { if (vivo) setErroObra({ obra, texto: mensagemDeErro(e) }); });
     return () => { vivo = false; };
   }, [obra]);
@@ -127,7 +132,7 @@ export default function CustoObra() {
         <div className="cartao__acoes">
           <div className="campo">
             <label className="campo__rotulo" htmlFor="custo-obra">Obra</label>
-            <select id="custo-obra" value={obra ?? ""} onChange={e => setObra(Number(e.target.value))}>
+            <select id="custo-obra" value={obra ?? ""} onChange={e => { setErroObra(null); setObra(Number(e.target.value)); }}>
               {obras.map(o => <option key={o.contrato_id} value={o.contrato_id}>{o.obra}</option>)}
             </select>
           </div>
