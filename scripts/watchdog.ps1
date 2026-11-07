@@ -45,6 +45,18 @@ function SairSePausado([string]$Momento) {
     }
 }
 
+# Dono da porta da URL de saude (issue #480). Sem ninguem escutando, o Get-NetTCPConnection da' erro: vira $null.
+$porta = ([uri]$Url).Port
+function DonoDaPorta {
+    try { $c = Get-NetTCPConnection -LocalPort $porta -State Listen -ErrorAction Stop | Select-Object -First 1 }
+    catch { return $null }
+    if (-not $c) { return $null }
+    # CIM que falha nao vira "porta livre": o dono sem linha de comando conhecida nao e' morto, e nada e' iniciado
+    try { $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)" -ErrorAction Stop } catch { $p = $null }
+    if (-not $p) { return [pscustomobject]@{ ProcessId = $c.OwningProcess; Name = "desconhecido"; CommandLine = ""; CreationDate = "" } }
+    return $p
+}
+
 SairSePausado ""
 # Problema no CONFERIDOR nao e' problema da producao (revisor da PR #476): cert.pem ilegivel ou ausente, ou o C# da
 # saude bloqueado (antivirus no Add-Type), fariam o watchdog reiniciar uma producao saudavel a cada 3 minutos, para
@@ -87,6 +99,25 @@ foreach ($tentativa in 1..10) {
 if (-not $parada) {
     Escrever "tarefa $Tarefa continua '$estado' depois da parada -> nada iniciado"
     exit 1
+}
+# Servidor ORFAO (incidente de 2026-09-21, issue #480): Stop-ScheduledTask nao mata o uvicorn; ele segura a porta, a
+# instancia nova morre com WinError 10048 e a tarefa volta a Ready. Como no deploy.ps1, so' o uvicorn da dashboard e'
+# morto; qualquer outro dono da porta, ou orfao que nao morre, deixa a tarefa parada e sai com 1.
+$orfao = DonoDaPorta
+if ($orfao) {
+    if ($orfao.CommandLine -notmatch "uvicorn" -or $orfao.CommandLine -notmatch "app\.main") {
+        Escrever "porta $porta ocupada pelo PID $($orfao.ProcessId) ($($orfao.Name)), que nao e' a dashboard -> nada iniciado"
+        exit 1
+    }
+    Escrever "servidor orfao na porta $porta (PID $($orfao.ProcessId), criado em $($orfao.CreationDate)) -> encerrando"
+    try { Stop-Process -Id $orfao.ProcessId -Force -ErrorAction Stop }
+    catch { Escrever ("FALHA ao encerrar o PID $($orfao.ProcessId): " + $_.Exception.Message) }
+    Start-Sleep -Seconds 3
+    $resto = DonoDaPorta
+    if ($resto) {
+        Escrever "porta $porta ocupada pelo PID $($resto.ProcessId) depois de encerrar o orfao -> nada iniciado"
+        exit 1
+    }
 }
 SairSePausado "entre a parada e o inicio"
 try {

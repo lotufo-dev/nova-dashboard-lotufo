@@ -391,6 +391,29 @@ def test_watchdog_so_inicia_a_tarefa_que_de_fato_parou():
     assert "exit 1" in espera
 
 
+def test_watchdog_encerra_o_uvicorn_orfao_antes_de_iniciar_a_tarefa():
+    # Issue #480: Stop-ScheduledTask nao mata o uvicorn (incidente de 2026-09-21); o orfao segura a porta, a instancia
+    # nova morre com WinError 10048 e o watchdog repetia o Start a cada 3 minutos, para sempre
+    script = _ler("watchdog.ps1")
+    codigo = _codigo(script)
+    assert "([uri]$Url).Port" in codigo
+    dono = codigo[codigo.index("function DonoDaPorta"):]
+    dono = dono[:dono.index("\n}") + 2]
+    assert "Get-NetTCPConnection -LocalPort $porta -State Listen" in dono
+    assert "Win32_Process" in dono and "OwningProcess" in dono
+    iniciar = codigo.index("Start-ScheduledTask -TaskName")
+    entre = codigo.index('SairSePausado "entre a parada e o inicio"')
+    liberar = codigo.index("$orfao = DonoDaPorta")
+    assert codigo.index("$parada = $false") < liberar < entre < iniciar
+    bloco = codigo[liberar:entre]
+    # so' o uvicorn da dashboard e' morto, como no deploy.ps1; o PID vai para o log antes do Stop-Process
+    assert '-notmatch "uvicorn"' in bloco and '-notmatch "app\\.main"' in bloco
+    assert bloco.index("PID $($orfao.ProcessId)") < bloco.index("Stop-Process -Id $orfao.ProcessId -Force")
+    # se nao morre (ou nao e' a dashboard), nada e' iniciado e sai com 1, com o motivo no log
+    assert "nada iniciado" in bloco and bloco.count("exit 1") >= 2
+    assert "porta $porta ocupada pelo PID" in bloco
+
+
 def test_watchdog_acusa_tarefa_que_nao_iniciou_e_saude_que_nao_voltou():
     # Gate Sol: tarefa desabilitada da' erro nao fatal e o log dizia "disparado"; sem saude depois, sai com 1
     script = _ler("watchdog.ps1")
