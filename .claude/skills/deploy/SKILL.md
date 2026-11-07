@@ -39,8 +39,13 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
   nunca inline (aspas e `&` quebram no PowerShell 5.1); conferências numa linha só, e `$LASTEXITCODE` depois de cada
   `git`, com `exit 1`, porque no `-Command -` falha nativa não para o script. Em **três chamadas em sequência**:
   1. só leitura: `Set-Location` na pasta principal, `git switch master`, `git pull --ff-only`, `git rev-parse master origin/master`
-     iguais, `IsInRole(...Administrator)` acima dando `True` e o bloco "Antes de rodar" (log, migrações, frontend). Daqui
-     a sessão avisa o Leo da migração e escolhe `-SemFrontend`. As pré-condições 1 e 2 (`gh`) rodam no Mac;
+     iguais, `IsInRole(...Administrator)` acima dando `True` e o bloco "Antes de rodar" (arquivo da instalação, log,
+     migrações, frontend). Daqui a sessão avisa o Leo da migração e escolhe `-SemFrontend`. As pré-condições 1 e 2 (`gh`)
+     rodam no Mac. Esta chamada vai num `.ps1` temporário no Mac (fora do repositório), copiado com
+     `scp script.ps1 <servidor>:C:/Temp/deploy-leitura.ps1`, rodado com
+     `ssh <servidor> 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Temp\deploy-leitura.ps1'` e apagado no fim,
+     nunca pelo stdin: no `-Command -` o primeiro comando nativo consome o resto do script e o `Test-Path` do arquivo da
+     instalação não imprime nada (runbook, "Mudar de servidor"; issue #446);
   2. o deploy: sentinela e "Rodar" itens 1 a 3;
   3. conferência de saúde e commit, e apagar o sentinela (itens 4 e 5).
 
@@ -64,11 +69,11 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
 ## Antes de rodar: o que vai subir
 
 ```powershell
+Test-Path C:\DashboardLotufo\segredos\instalacao.json
 $atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()
 git log --oneline "$atual..origin/master"
 git diff --name-only "$atual" origin/master -- backend/migrations
 git diff --name-only "$atual" origin/master -- frontend
-Test-Path C:\DashboardLotufo\segredos\instalacao.json
 git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalacao.py
 git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.ps1
 ```

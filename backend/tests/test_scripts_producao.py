@@ -1187,3 +1187,20 @@ def test_deploy_erro_na_consulta_da_porta_nao_e_porta_livre():
     # a falha sobe pelo PararComprovado (sem catch), que nao toca no pinado e mantem o sentinela
     parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
     assert "catch" not in parar and "LiberarPorta" in parar
+
+
+def test_skill_deploy_confere_o_arquivo_da_instalacao_antes_de_qualquer_git_e_a_chamada_1_vai_por_file():
+    # Issue #446 (Sugestao do revisor na PR #437): pelo SSH no `-Command -`, o primeiro comando nativo (git) consome o
+    # resto do script pelo stdin; o Test-Path do instalacao.json no fim do bloco nunca imprimia nada (falso "ausente").
+    raiz = pathlib.Path(__file__).resolve().parents[2]
+    skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
+    secao = skill[skill.index("## Antes de rodar: o que vai subir"):skill.index("## Rodar")]
+    bloco = secao[secao.index("```powershell") + len("```powershell"):]
+    linhas = [linha.strip() for linha in bloco[:bloco.index("```")].splitlines() if linha.strip()]
+    assert linhas[0] == "Test-Path C:\\DashboardLotufo\\segredos\\instalacao.json"
+    assert sum("Test-Path" in linha for linha in linhas) == 1
+    # a chamada 1 pelo Mac vai num .ps1 com -File, nunca pelo stdin (runbook, "Mudar de servidor")
+    caminhos = skill[skill.index("## Dois caminhos: local elevado ou SSH"):skill.index("## Antes de rodar")]
+    chamada1 = caminhos[caminhos.index("  1. só leitura"):caminhos.index("  2. o deploy")]
+    assert "-File" in chamada1 and "scp" in chamada1
+    assert "nunca pelo stdin" in chamada1
