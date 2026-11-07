@@ -28,3 +28,14 @@ def test_falencias_reais_do_backup():
 
 def test_emissao_no_fim_de_semana_comeca_na_segunda():
     assert feriados.somar_dias_uteis(D(2026, 8, 1), 1) == D(2026, 8, 3)
+
+
+def test_dias_uteis_entre_conta_do_dia_do_envio_ate_ontem():
+    """Issue #508: "com o órgão há N dias úteis" -- o dia do envio conta, hoje não; fim de semana e feriado não."""
+    from app.feriados import dias_uteis_entre
+    qui = datetime.date(2026, 11, 5)
+    assert dias_uteis_entre(qui, qui) == 0
+    assert dias_uteis_entre(qui, datetime.date(2026, 11, 6)) == 1
+    assert dias_uteis_entre(qui, datetime.date(2026, 11, 9)) == 2      # sabado e domingo nao contam
+    assert dias_uteis_entre(datetime.date(2026, 10, 30), datetime.date(2026, 11, 3)) == 1   # 02/11 e' feriado
+    assert dias_uteis_entre(datetime.date(2026, 11, 9), qui) == 0      # data futura nao conta negativo

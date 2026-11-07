@@ -55,7 +55,7 @@ describe("Aba Enviar nota", () => {
     expect(within(painel).getByRole("link", { name: /Enviar a nota/ }).getAttribute("href")).toBe("/obras/20/medicoes/700#etapa-4");
     expect(within(painel).getByRole("link", { name: "Abrir a medição" }).getAttribute("href")).toBe("/obras/20/medicoes/700");
     // a FRC que falta: o link leva aonde se anexa, em vez de oferecer o anexo
-    expect(within(painel).getByRole("link", { name: "Anexar na etapa 4" }).getAttribute("href")).toBe("/obras/20/medicoes/700#etapa-4");
+    expect(within(painel).getByRole("link", { name: "Anexar no envio da nota" }).getAttribute("href")).toBe("/obras/20/medicoes/700#etapa-4");
     expect(within(painel).getByRole("link", { name: /Baixar a FRC gerada \(nº 13\)/ })).toBeTruthy();
     expect(within(painel).queryByLabelText(/Anexar/)).toBeNull();
     expect(within(painel).queryByText(/Registrar envio feito por fora/)).toBeNull();
@@ -146,10 +146,10 @@ describe("Aba Enviar nota", () => {
     const painel = await screen.findByRole("complementary", { name: "Envio selecionado" });
     expect(screen.getByRole("region", { name: "SINFRA" }).textContent).toContain("Esperando o reajuste");
     // uma frase so', com o link da etapa 4 (e nao repetida no rodape)
-    expect(within(painel).getByText(/Esperando as notas do reajuste; para enviar sem ele, abra a/)).toBeTruthy();
+    expect(within(painel).getByText(/Esperando as notas do reajuste; para enviar sem ele, abra o/)).toBeTruthy();
     expect(within(painel).getAllByText(/Esperando as notas do reajuste/)).toHaveLength(1);
     expect(within(painel).queryByText(/no mesmo e-mail/)).toBeNull();
-    expect(within(painel).getAllByRole("link", { name: "etapa 4 da medição" })[0].getAttribute("href")).toContain("637#etapa-4");
+    expect(within(painel).getAllByRole("link", { name: "envio da nota da medição" })[0].getAttribute("href")).toContain("637#etapa-4");
     expect(within(painel).queryByRole("button", { name: /Enviar a nota/ })).toBeNull();
     expect(within(painel).queryByRole("link", { name: /Enviar a nota/ })).toBeNull();
   });

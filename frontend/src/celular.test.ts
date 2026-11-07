@@ -30,11 +30,12 @@ describe("celular", () => {
   });
 
   it("Medição: abaixo de 600 px a meta desce para baixo do título", () => {
-    // pagina redesenhada (#152): titulo e meta num bloco, "Mais acoes" ao lado; no celular desce tudo para uma coluna
-    expect(medicaoPagina).toContain('className="med-cabeca"');
+    // pagina da obra em medicao (#508): obra, meta e o valor grande num cabecalho, valor e "Mais acoes" ao lado; no
+    // celular desce tudo para uma coluna
+    expect(medicaoPagina).toContain('className="med-topo"');
     expect(medicaoPagina).toContain('className="med-meta"');
-    const bloco = blocoMedia(ler("etapas.css"), 767);
-    expect(bloco).toMatch(/\.med-cabeca\s*\{[^}]*flex-direction:\s*column/);
+    const bloco = blocoMedia(ler("passos.css"), 767);
+    expect(bloco).toMatch(/\.med-topo\s*\{[^}]*flex-direction:\s*column/);
   });
 
   it("Topo (issue #13): a meta cede com reticências e o topo não alarga a página em 375 px", () => {

@@ -306,7 +306,7 @@ function ItensLeitura({ e, certidoes }: { e: Envio; certidoes: ItemCertidao[] | 
                 </span>
               )}
               {it.acao === "anexar_frc" && it.estado !== "ok" && (
-                <span className="nota-item__detalhe"><Link className="link forte" para={aqui} secao="etapa-4">Anexar na etapa 4</Link></span>
+                <span className="nota-item__detalhe"><Link className="link forte" para={aqui} secao="etapa-4">Anexar no envio da nota</Link></span>
               )}
               {it.acao === "anexar_regularidade" && (
                 <span className="nota-item__detalhe"><Link className="link forte" para={{ tela: "documentos" }}>Anexar em Documentos</Link></span>
@@ -342,8 +342,8 @@ function Painel({ e, podeEditar }: { e: Envio; podeEditar: boolean }) {
       {/* issue #188: a medicao e o reajuste vao no mesmo e-mail; sem as notas da outra metade, nao ha' o que iniciar */}
       {e.situacao === "esperando" && (
         <CaixaAviso nivel="atencao">
-          {r.motivo.replace(/\.$/, "")}; para enviar sem {e.espera?.tipo === "execucao" ? "ela" : "ele"}, abra a{" "}
-          <Link para={aqui} secao="etapa-4">etapa 4 da medição</Link>.
+          {r.motivo.replace(/\.$/, "")}; para enviar sem {e.espera?.tipo === "execucao" ? "ela" : "ele"}, abra o{" "}
+          <Link para={aqui} secao="etapa-4">envio da nota da medição</Link>.
         </CaixaAviso>
       )}
       <div className="en-rodape">

@@ -1,0 +1,132 @@
+/* Issue #508: pagina da obra em medicao -- cabecalho com o valor grande, barra de passos numerados e o conteudo do
+   passo da vez (passos 1 e 2 com estrutura propria). Cores so' dos tokens (tokens.css). */
+
+.med-topo { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 24px; }
+.med-topo__id { min-width: 0; }
+.med-topo h1 { margin: 0; font-size: 32px; line-height: 40px; overflow-wrap: anywhere; }
+.med-topo .med-meta { font-size: 16px; }
+.med-topo__dir { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.med-valor { margin: 0; font-family: var(--fonte-num); font-size: 36px; line-height: 44px; font-weight: 700; color: var(--acento); white-space: nowrap; }
+
+/* barra de passos */
+.passos { padding: 20px 16px 16px; border: 1px solid var(--linha); border-radius: var(--raio); background: var(--superficie); box-shadow: var(--sombra); }
+.passos ol { display: flex; margin: 0; padding: 0; list-style: none; }
+.passo { position: relative; flex: 1 1 0; min-width: 0; }
+/* a linha entre os circulos: do centro deste ao centro do anterior */
+.passo + .passo::before { content: ""; position: absolute; top: 20px; right: 50%; width: 100%; height: 2px; background: var(--linha-forte); }
+.passo--feito + .passo::before, .passo--feito + .passo--feito::before { background: var(--acento); }
+.passo button { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%;
+  padding: 0 4px 10px; border: 0; background: none; color: var(--texto-2); font-size: 15px; font-weight: 500; white-space: normal; height: auto; }
+.passo button:hover:not(:disabled) { background: none; color: var(--texto); }
+.passo__marca { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--raio-pilula); border: 2px solid var(--linha-forte);
+  background: var(--superficie); color: var(--texto-2); font-size: 16px; font-weight: 600; font-family: var(--fonte-num); }
+.passo__marca svg { width: 18px; height: 18px; }
+.passo__nome { line-height: 20px; text-align: center; }
+.passo__data { font-size: 13px; line-height: 16px; color: var(--texto-2); }
+.passo--feito button { color: var(--texto); }
+.passo--feito .passo__marca { border-color: var(--acento); background: var(--acento); color: var(--superficie); }
+.passo--atual .passo__marca { width: 48px; height: 48px; margin-top: -4px; border-color: var(--acento); background: var(--acento); color: var(--superficie); font-size: 18px; }
+.passo--atual button { color: var(--texto); font-weight: 700; }
+.passo--espera .passo__marca { width: 48px; height: 48px; margin-top: -4px; border-color: var(--atencao-ponto); background: var(--atencao-ponto); color: var(--superficie); }
+.passo--espera button { color: var(--atencao); font-weight: 700; }
+/* o passo aberto leva o sublinhado indigo */
+.passo--aberto button::after { content: ""; position: absolute; left: 15%; right: 15%; bottom: 0; height: 3px; border-radius: 2px; background: var(--acento); }
+
+/* os passos 1 e 2: dois cartoes lado a lado */
+.med-passo { display: flex; flex-direction: column; gap: 16px; min-width: 0; scroll-margin-top: 16px; }
+.med-duas { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.med-duas--iguais { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.med-painel { padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.med-painel__titulo { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 22px; line-height: 30px; }
+.med-contagem { padding: 2px 12px; border-radius: var(--raio-pilula); background: var(--acento-fundo); color: var(--acento-mais); font-size: 15px; font-weight: 600; }
+.med-grupo { margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--linha); color: var(--texto-2); font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.pacote-itens { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.pacote-itens li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--linha-suave); }
+.pacote-itens li:last-child { border-bottom: 0; }
+.pacote-itens .pacote__ok { display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: var(--raio-micro); background: var(--ok-ponto); color: var(--superficie); }
+.pacote-itens .pacote__ok svg { width: 14px; height: 14px; }
+.pacote-itens .pacote__nome { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.pacote-itens .pacote__tam { flex: none; color: var(--texto-2); font-family: var(--fonte-num); white-space: nowrap; }
+.medidor { display: flex; align-items: center; gap: 16px; }
+.medidor__barra { flex: 1 1 auto; height: 10px; border-radius: var(--raio-pilula); background: var(--neutro-fundo); overflow: hidden; }
+.medidor__cheio { height: 100%; border-radius: var(--raio-pilula); background: var(--acento); }
+.medidor--acima .medidor__cheio { background: var(--acao-ponto); }
+.medidor__texto { flex: none; color: var(--texto-2); font-family: var(--fonte-num); white-space: nowrap; }
+.medidor--acima .medidor__texto { color: var(--acao); font-weight: 600; }
+
+/* e-mail ao orgao: o botao grande e as acoes em lista */
+.email-orgao .btn--envio-orgao { width: 100%; height: 52px; justify-content: center; font-size: 17px; font-weight: 600; }
+.acoes-lista { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--linha); }
+.acoes-lista li { border-bottom: 1px solid var(--linha); }
+.acoes-lista button { width: 100%; height: auto; min-height: 52px; padding: 12px 4px; justify-content: space-between; border: 0; border-radius: 0;
+  background: none; color: var(--texto); font-size: 16px; font-weight: 500; text-align: left; white-space: normal; }
+.acoes-lista button:hover:not(:disabled) { background: var(--hover); color: var(--texto); }
+.acoes-lista svg { width: 16px; height: 16px; color: var(--texto-2); }
+
+/* passo 2: a faixa "com o orgao ha N dias uteis" */
+.orgao-faixa { padding: 20px 24px; border-left: 4px solid var(--ok-ponto); display: flex; flex-direction: column; gap: 12px; }
+.orgao-faixa h2 { margin: 0; font-size: 28px; line-height: 36px; color: var(--ok); }
+.orgao-faixa__dados { margin: 0; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 0; }
+.orgao-faixa__dados > div { padding: 0 24px; border-left: 1px solid var(--linha); min-width: 0; }
+.orgao-faixa__dados > div:first-child { padding-left: 0; border-left: 0; }
+.orgao-faixa__dados dt { color: var(--texto-2); font-size: 14px; }
+.orgao-faixa__dados dd { margin: 0; font-size: 18px; font-weight: 600; font-family: var(--fonte-num); overflow-wrap: anywhere; }
+.orgao-faixa__link { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.orgao-setor { padding: 16px; border-radius: var(--raio); background: var(--acento-fundo); }
+.orgao-setor p { margin: 0; }
+.orgao-setor__rotulo { color: var(--texto-2); font-size: 13px; }
+.orgao-setor__nome { font-size: 20px; line-height: 28px; font-weight: 700; color: var(--texto); }
+.orgao-mov { margin: 0; padding: 0; list-style: none; }
+.orgao-mov li { position: relative; display: flex; gap: 16px; padding: 0 0 14px 24px; }
+.orgao-mov li::before { content: ""; position: absolute; left: 3px; top: 6px; width: 10px; height: 10px; border-radius: var(--raio-pilula); background: var(--acento); }
+.orgao-mov li::after { content: ""; position: absolute; left: 7px; top: 18px; bottom: 0; width: 2px; background: var(--acento-linha); }
+.orgao-mov li:last-child { padding-bottom: 0; }
+.orgao-mov li:last-child::after { display: none; }
+.orgao-mov time { flex: none; color: var(--texto-2); font-family: var(--fonte-num); white-space: nowrap; }
+.orgao-lido { margin: 0; padding-top: 12px; border-top: 1px solid var(--linha); color: var(--texto-2); font-size: 13px; }
+
+/* passo 2: a resposta do orgao, uma opcao aberta por vez */
+.resposta { border: 1px solid var(--linha); border-radius: var(--raio); }
+.resposta--aberta { border: 2px solid var(--acento); }
+.resposta > button { width: 100%; height: auto; padding: 14px 16px; justify-content: flex-start; gap: 12px; border: 0; background: none;
+  color: var(--texto); text-align: left; white-space: normal; }
+.resposta > button:hover:not(:disabled) { background: var(--hover); color: var(--texto); }
+.resposta__marca { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: var(--raio-micro); font-weight: 700; }
+.resposta__marca svg { width: 16px; height: 16px; }
+.resposta__marca--ok { background: var(--ok-ponto); color: var(--superficie); }
+.resposta__marca--rev { background: var(--atencao-fundo); color: var(--atencao); border: 1px solid var(--atencao-linha); }
+.resposta__texto { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.resposta__titulo { font-size: 18px; font-weight: 600; }
+.resposta__sub { color: var(--texto-2); font-size: 14px; }
+.resposta__corpo { padding: 0 16px 16px; }
+
+.med-lateral.med-lateral--baixo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+
+@media (max-width: 1180px) {
+  .med-duas, .med-duas--iguais { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 1023px) {
+  .med-lateral.med-lateral--baixo { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 767px) {
+  .med-topo { flex-direction: column; }
+  .med-topo h1 { font-size: 26px; line-height: 32px; }
+  .med-valor { font-size: 28px; line-height: 36px; }
+  .passos { padding: 14px 4px 10px; }
+  .passo__marca { width: 32px; height: 32px; font-size: 14px; }
+  .passo--atual .passo__marca, .passo--espera .passo__marca { width: 38px; height: 38px; margin-top: -3px; }
+  .passo + .passo::before { top: 16px; }
+  /* no celular so' o passo aberto mostra o nome; os outros ficam com o numero (e o feito, com a data) */
+  .passo:not(.passo--aberto) .passo__nome { display: none; }
+  .passo--aberto { flex: 2.4 1 0; }
+  .passo button { font-size: 13px; }
+  .med-painel { padding: 16px; }
+  /* a tabela das pecas nunca vaza do cartao: rola dentro dele */
+  .pacote .checklist-pecas { display: block; max-width: 100%; overflow-x: auto; }
+  .med-painel__titulo { font-size: 19px; line-height: 26px; }
+  .orgao-faixa { padding: 16px; }
+  .orgao-faixa h2 { font-size: 22px; line-height: 28px; }
+  .orgao-faixa__dados { flex-direction: column; align-items: stretch; }
+  .orgao-faixa__dados > div { padding: 0; border-left: 0; }
+  .orgao-faixa__link { margin-left: 0; }
+}

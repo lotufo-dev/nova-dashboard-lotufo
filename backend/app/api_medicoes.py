@@ -12,8 +12,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import (arquivos, db, espelhos, medicao_grupos, medicao_planilhas, medicoes, permissoes, planilha_envio, siga,
-                 tempo)
+from app import (arquivos, correio, db, espelhos, feriados, medicao_grupos, medicao_planilhas, medicoes, permissoes,
+                 planilha_envio, siga, tempo)
 from app.api_auth import conexao
 from app.dinheiro import parse_brl
 from app.permissoes import exigir
@@ -108,16 +108,81 @@ def _erro_do_cliente(conn: sqlite3.Connection, e: ValueError) -> HTTPException:
     return HTTPException(422, str(e))
 
 
+def _dia_do_envio(enviado_em: str | None) -> str | None:
+    """"AAAA-MM-DD" do envio: o por fora ja' e' o dia; o do sistema e' instante UTC, que vira o dia em Cuiaba."""
+    if not enviado_em:
+        return None
+    try:
+        if len(enviado_em) == 10:
+            return datetime.date.fromisoformat(enviado_em).isoformat()
+        return tempo.para_local(datetime.datetime.fromisoformat(enviado_em.replace("Z", "+00:00"))).date().isoformat()
+    except ValueError:
+        return None
+
+
+def _ultimo_envio_planilha(conn: sqlite3.Connection, m: dict) -> str | None:
+    """Gate Sol (PR #553): o dia do envio mais recente da planilha/carta (pelo sistema ou por fora). A revisao enviada
+    recomeca a conta do passo 2; sem envio listado (historico), vale o 1o envio gravado na medicao."""
+    if not m.get("planilha_enviada_em"):
+        return None
+    dias = [d for d in (_dia_do_envio(e["enviado_em"]) for e in planilha_envio.envios(conn, m["id"])) if d]
+    return max(dias) if dias else _dia_do_envio(m["planilha_enviada_em"][:10])
+
+
+def _dias_uteis_no_orgao(m: dict, ultimo_envio: str | None) -> int | None:
+    """Issue #508, passo 2 da pagina da obra: "com o orgao ha N dias uteis", do dia do envio mais recente da
+    planilha/carta ate' hoje (Cuiaba), so' enquanto a medicao espera a resposta do orgao (planilha enviada)."""
+    if m.get("estado") != "planilha_enviada" or not ultimo_envio:
+        return None
+    return feriados.dias_uteis_entre(datetime.date.fromisoformat(ultimo_envio), tempo.hoje_local())
+
+
+def _envio_ao_orgao(conn: sqlite3.Connection, m: dict) -> dict:
+    ultimo = _ultimo_envio_planilha(conn, m)
+    return {"planilha_ultimo_envio_em": ultimo, "dias_uteis_no_orgao": _dias_uteis_no_orgao(m, ultimo)}
+
+
+def _tamanho(relativo: str | None) -> int | None:
+    if not relativo:
+        return None
+    try:
+        return arquivos.caminho_seguro(relativo).stat().st_size
+    except (OSError, ValueError):
+        return None
+
+
+def _pacote_planilha(conn: sqlite3.Connection, d: dict) -> dict | None:
+    """Issue #508, passo 1: o medidor do pacote do envio -- carta e planilha da versao vigente e as pecas que vao no
+    e-mail (sem as que vao no oficio assinado), contra o limite do e-mail. A conta exata (planilha zipada, oficio com
+    o nº) continua na previa, que trava o envio acima do limite."""
+    if not d["planilhas"]:
+        return None
+    v = conn.execute("SELECT arquivo, arquivo_planilha FROM medicao_planilhas WHERE id=?",
+                     (d["planilhas"][-1]["id"],)).fetchone()
+    s = d["envio_planilha"]
+    no_oficio = {p["tipo"] for p in s["pecas_do_orgao"] if p["no_oficio"]}
+    carta, planilha = _tamanho(v["arquivo"]), _tamanho(v["arquivo_planilha"])
+    pecas = sum(p["tamanho"] or 0 for p in s["pecas"] if p["tipo"] not in no_oficio)
+    return {"carta": carta, "planilha": planilha, "pecas": pecas,
+            "total": (carta or 0) + (planilha or 0) + pecas, "limite": correio.MAX_TOTAL}
+
+
 @router.get("/api/contratos/{contrato_id}/medicoes")
 def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
            conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)
     lista = medicoes.listar(conn, contrato_id)
-    edicoes = medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
+    # issue #508: a barra de passos da pagina da obra so' tem "Planilha e carta" e "Análise do órgão" onde a
+    # planilha/carta vai ao orgao (nunca na MT-PAR, planilha_envio.FAMILIAS_SEM_ENVIO)
+    familia = conn.execute("SELECT o.familia FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
+                           (contrato_id,)).fetchone()["familia"]
+    com_envio = familia not in planilha_envio.FAMILIAS_SEM_ENVIO
+    edicoes =medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
     sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
     # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
     return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
-             "boletins": medicoes.boletins(conn, m["id"])} for m in lista]
+             "boletins": medicoes.boletins(conn, m["id"]), **_envio_ao_orgao(conn, m),
+             "com_envio_planilha": com_envio} for m in lista]
 
 
 @router.post("/api/contratos/{contrato_id}/medicoes", status_code=201)
@@ -151,6 +216,8 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
     d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
     d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"
+    d.update(_envio_ao_orgao(conn, d))                         # issue #508: passo 2 da pagina da obra
+    d["pacote_planilha"] = _pacote_planilha(conn, d)          # issue #508: medidor do pacote no passo 1
     return d
 
 
