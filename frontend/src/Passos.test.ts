@@ -51,5 +51,7 @@ describe("textos do passo 2", () => {
     expect(processoDa(lista, 5, null)!.id).toBe(1);
     expect(processoDa(lista, 9, "C")!.id).toBe(3);
     expect(processoDa(lista, 9, null)).toBeNull();
+    // o processo ligado a outra medicao nunca aparece, nem pelo mesmo nº (code-review)
+    expect(processoDa(lista, 9, "B")).toBeNull();
   });
 });

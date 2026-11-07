@@ -882,6 +882,31 @@ describe("Página da obra em medição: barra de passos (issue #508)", () => {
     expect(screen.queryByText(/Você está vendo o passo/)).toBeNull();
   });
 
+  it("depois do boletim, a falha da conferência avisa no passo 3, com Tentar de novo (code-review)", async () => {
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...SINFRA, estado: "boletim_recebido" }],
+      "/api/medicoes/5": Promise.reject(new Error("caiu")) });
+    const { container } = pagina();
+    await screen.findByRole("heading", { name: "Espelhos", level: 2 });
+    expect(await screen.findByText(/Não foi possível conferir a planilha\/carta/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeTruthy();
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+  });
+
+  it("a conferência da revisão que chega depois não descarta o passo aberto pela âncora (code-review)", async () => {
+    window.history.replaceState(null, "", "/obras/1/medicoes/5#passo-2");
+    let soltar: (v: unknown) => void = () => {};
+    const pendente = detalhePlanilha("planilha_enviada", { planilhas: [V1, { ...V1, id: 32, versao: 2, motivo: "Rev01" }] });
+    responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...SINFRA, estado: "planilha_enviada" }],
+      "/api/medicoes/5": new Promise(r => { soltar = r; }) });
+    pagina();
+    await screen.findByRole("heading", { name: /^Com o órgão/ });
+    soltar(pendente);
+    // a vez passa ao passo 1 (revisao a enviar), mas a pagina continua no passo 2 que o link pediu (agora futuro)
+    await waitFor(() => expect(daVez()).toBe("Planilha e carta"));
+    expect(screen.getByRole("heading", { name: "Análise do órgão", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Voltar ao passo atual" })).toBeTruthy();
+  });
+
   it("a âncora antiga #etapa-4 abre o Envio da nota; a nova #passo-2 abre a Análise do órgão", async () => {
     window.history.replaceState(null, "", "/obras/1/medicoes/5#etapa-4");
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "protocolada" }] });

@@ -24,11 +24,12 @@ export function frasePrazo(dias: number | null | undefined): string {
   return dias === 1 ? "Com o órgão há 1 dia útil" : `Com o órgão há ${dias} dias úteis`;
 }
 
-/** O processo do SIGA desta medicao: o ligado a ela (o do nº da planilha, se houver), senao o do nº. */
+/** O processo do SIGA desta medicao: o ligado a ela (o do nº da planilha, se houver), senao o avulso (sem medicao)
+ *  com o mesmo nº. O ligado a outra medicao nunca aparece aqui. */
 export function processoDa(processos: ProcessoSiga[], medicaoId: number, numero: string | null): ProcessoSiga | null {
   const daMedicao = processos.filter(p => p.medicao_id === medicaoId);
   return daMedicao.find(p => numero && p.numero === numero) ?? daMedicao[0]
-    ?? (numero ? processos.find(p => p.numero === numero) ?? null : null);
+    ?? (numero ? processos.find(p => p.medicao_id === null && p.numero === numero) ?? null : null);
 }
 
 type Resposta = "aprovou" | "revisao" | null;
@@ -39,14 +40,15 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
 }) {
   const [siga, setSiga] = useState<PainelSiga | null>(null);
   const [aberta, setAberta] = useState<Resposta>(null);
+  const numero = planilha?.planilha_siga?.numero ?? null;
   useEffect(() => {
     let vivo = true;
-    // a tela SIGA e' a fonte; sem ela (falha, sem processo), o passo mostra o que a medicao tem
+    // a tela SIGA e' a fonte (relida quando o nº do SIGA muda); sem ela (falha, sem processo), o passo mostra o que a
+    // medicao tem
     api<PainelSiga>("/api/siga").then(p => { if (vivo) setSiga(p); }).catch(() => {});
     return () => { vivo = false; };
-  }, [m.id]);
+  }, [m.id, numero]);
 
-  const numero = planilha?.planilha_siga?.numero ?? null;
   const proc = siga ? processoDa(siga.processos ?? [], m.id, numero) : null;
   const movs = proc ? [...proc.movimentacoes].sort((a, b) => Date.parse(b.data) - Date.parse(a.data)).slice(0, 3) : [];
   const esperando = m.estado === "planilha_enviada";
@@ -121,13 +123,14 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
                   </div>
                 )}
               </div>
-              <div className={`resposta${aberta === "revisao" ? " resposta--aberta" : ""}`}>
+              {/* a revisao parte da versao vigente: so' se oferece depois de a planilha/carta ser lida */}
+              {planilha && vigente && <div className={`resposta${aberta === "revisao" ? " resposta--aberta" : ""}`}>
                 <button type="button" aria-expanded={aberta === "revisao"} onClick={() => alternar("revisao")}>
                   <span className="resposta__marca resposta__marca--rev" aria-hidden="true">↻</span>
                   <span className="resposta__texto"><span className="resposta__titulo">Pediu revisão</span>
                     <span className="resposta__sub">registrar nova versão da planilha</span></span>
                 </button>
-                {aberta === "revisao" && planilha && vigente && (
+                {aberta === "revisao" && (
                   <div className="resposta__corpo">
                     <Revisao medicao={planilha} vigente={vigente} ocupado={salvando} aoFechar={() => setAberta(null)}
                       aoRegistrar={async fd => {
@@ -136,7 +139,7 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
                       }} />
                   </div>
                 )}
-              </div>
+              </div>}
             </>
           )}
         </section>

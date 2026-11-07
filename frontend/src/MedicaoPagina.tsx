@@ -209,12 +209,15 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // A revisao registrada e nao enviada devolve a vez ao passo 1 (e' la' que ela sai).
   const atual = !m ? 0 : temPassosPlanilha && m.estado === "planilha_enviada" && revisao === "pendente" ? 1
     : passoDoEstado(m.estado, temPassosPlanilha);
+  // enquanto a conferencia da revisao nao volta, o passo da vez ainda nao esta' firme: a chegada dela nao descarta o
+  // passo aberto pela ancora (#passo-2, #etapa-N do Inicio e do SIGA)
+  const atualFirme = !(temPassosPlanilha && m?.estado === "planilha_enviada" && revisao === "conferindo");
   const atualAnterior = useRef<number | null>(null);
   useEffect(() => {
-    if (!m) return;
+    if (!m || !atualFirme) return;
     if (atualAnterior.current !== null && atualAnterior.current !== atual) setVendo(null);
     atualAnterior.current = atual;
-  }, [m, atual]);
+  }, [m, atual, atualFirme]);
 
   const cabeca = (
     <header className="topbar topbar--detalhe">
@@ -349,6 +352,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const corpoPasso3 = (
     <div className="med-etapa__corpo">
       {!temPassosPlanilha && blocoPlanilha}
+      {/* depois do boletim o cartao mora no passo 1: a falha da conferencia avisa aqui, onde o espelho esperaria */}
+      {temPassosPlanilha && comPlanilha && enviada && revisao === "falhou" && (
+        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
+          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
+      )}
       {!novaPlanilha && !espelhoEspera && formEspelho}
       {!antesDoEspelho && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="faturamento" />

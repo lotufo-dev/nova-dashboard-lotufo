@@ -441,8 +441,10 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
   // issue #508: o pacote do envio (carta e planilha, documentos que o orgao exige, o que falta, medidor) a' esquerda
   // e o e-mail ao orgao a' direita; as versoes anteriores e os envios ficam no pacote, para nao perder historico
   const pacote = d.pacote_planilha ?? null;
-  const pedidas = itens.filter(i => i.situacao !== "opcional");
-  const prontas = itens.filter(i => i.situacao === "anexada" || i.situacao === "no_oficio");
+  // "N de M": a carta, a planilha e as pecas que o orgao EXIGE (a opcional anexada nao muda a conta)
+  const exigidas = new Set(s.pecas_do_orgao.filter(p => p.exigida).map(p => p.tipo));
+  const pedidas = itens.filter(i => exigidas.has(i.chave));
+  const prontas = pedidas.filter(i => i.situacao === "anexada" || i.situacao === "no_oficio");
   const ultimoOficio = s.envios.filter(e => e.numero_oficio).at(-1)?.numero_oficio ?? null;
   const acima = pacote ? pacote.total > pacote.limite : false;
 
@@ -477,7 +479,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
           )}
         </div>
 
-        {itens.length > 0 && (editavel || prontas.length > 0) && (
+        {itens.length > 0 && (editavel || itens.some(i => i.arquivos.length > 0)) && (
           <div>
             <p className="med-grupo">Documentos que o órgão exige</p>
             <Checklist itens={itens} legenda="Peças da planilha/carta" editavel={editavel && (podeEnviar || gerada)} ocupado={ocupado}

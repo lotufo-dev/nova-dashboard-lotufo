@@ -355,6 +355,20 @@ describe("Cartão da planilha/carta", () => {
     render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
     const titulo = await screen.findByRole("heading", { name: /Pacote do envio/ });
     expect(titulo.textContent).toContain("2 de 3");     // carta e planilha prontas; falta o diario (o opcional nao conta)
+    cleanup();
+    // a opcional anexada nao muda a conta (code-review): continua "2 de 3"
+    api.mockResolvedValue(detalhe({}, { pecas: [{ id: 8, tipo: "fotos", nome: "fotos.pdf", tamanho: 10 }], pecas_do_orgao: [
+      { tipo: "boletim", rotulo: "Diário de obras", exigida: true, no_oficio: false },
+      { tipo: "fotos", rotulo: "Relatório fotográfico", exigida: false, no_oficio: false }] }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect((await screen.findByRole("heading", { name: /Pacote do envio/ })).textContent).toContain("2 de 3");
+    cleanup();
+    api.mockResolvedValue(detalhe({ pacote_planilha: { carta: 400 * 1024, planilha: 8 * 1024 * 1024, pecas: 0,
+      total: 8 * 1024 * 1024 + 400 * 1024, limite: 25 * 1024 * 1024 } }, { pecas_do_orgao: [
+      { tipo: "boletim", rotulo: "Diário de obras", exigida: true, no_oficio: false },
+      { tipo: "fotos", rotulo: "Relatório fotográfico", exigida: false, no_oficio: false }] }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    await screen.findByRole("heading", { name: /Pacote do envio/ });
     const pacote = screen.getByRole("list", { name: "Carta e planilha" });
     expect(pacote.textContent).toContain("400 KB");
     expect(pacote.textContent).toContain("8,0 MB");
