@@ -312,7 +312,10 @@ test("Saúde: a rodada mostra as linhas de custo por tarefa e de baixa de estoqu
   expect(within(primeira).getByText("57.012")).toBeTruthy();
   expect(within(primeira).getByText("301")).toBeTruthy();
   expect(within(segunda).getAllByText("—").length).toBe(2);
-  expect(within(segunda).getByText("Simulador do RM sem o arquivo da consulta DASH25")).toBeTruthy();
+  // a falha aparece em português de operação; o detalhe técnico (código da consulta) fica no log do servidor
+  expect(within(segunda).getByText("Custos e estoque não atualizados.")).toBeTruthy();
+  expect(tabela.textContent).not.toMatch(/DASH25|Simulador/);
+  expect(within(primeira).queryByText(/Custos e estoque não atualizados/)).toBeNull();
 });
 
 // Issue #330: o monitor do SIGA ao lado da saúde do RM

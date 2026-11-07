@@ -212,7 +212,7 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                   <td>
                     <SeloRodada estado={r.estado} />
                     {r.erro && <div className="campo__nota situacao__erro">{r.erro}</div>}
-                    {r.custo_erro && <div className="campo__nota situacao__erro">{r.custo_erro}</div>}
+                    {r.custo_erro && <div className="campo__nota situacao__erro">Custos e estoque não atualizados.</div>}
                   </td>
                   <td className="col-num num">{r.nfs.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.baixas.toLocaleString("pt-BR")}</td>
