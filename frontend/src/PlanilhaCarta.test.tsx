@@ -319,6 +319,17 @@ describe("Cartão da planilha/carta", () => {
     await waitFor(() => expect(segundo).toHaveBeenCalledWith(false));
   });
 
+  it("avisa a página se o envio da planilha/carta está reservado (gate Sol, PR #528)", async () => {
+    api.mockResolvedValue(detalhe({}, { reserva: { id: 3, envio_reservado_em: "2026-09-02 10:00:00", reservado_por: "Maria" } }));
+    const aoEnvioReservado = vi.fn();
+    const { rerender } = render(<CartaoPlanilha medicaoId={5} estado="planilha_gerada" podeEditar aoMudar={() => {}} aoEnvioReservado={aoEnvioReservado} />);
+    await waitFor(() => expect(aoEnvioReservado).toHaveBeenCalledWith(true));
+    api.mockResolvedValue(detalhe({}, { reserva: null }));
+    const livre = vi.fn();
+    rerender(<CartaoPlanilha medicaoId={6} estado="planilha_gerada" podeEditar aoMudar={() => {}} aoEnvioReservado={livre} />);
+    await waitFor(() => expect(livre).toHaveBeenCalledWith(false));
+  });
+
   it("consulta do cartão falha: avisa a página com null (issue #384)", async () => {
     api.mockRejectedValue(new Error("falhou"));
     const aoRevisaoPendente = vi.fn();

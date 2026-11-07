@@ -313,9 +313,12 @@ function itensDasPecas(s: SituacaoEnvio): ItemChecklist[] {
 /** O cartao da planilha/carta na etapa 1 da medicao. `podeEditar` falso (diretoria): so' le, sem nenhum botao. */
 // `estado`: o da medicao na pagina; quando ele muda por outra etapa (a pagina recarregou), o cartao le de novo
 // `aoRevisaoPendente`: avisa a pagina se ha' revisao registrada e nao enviada (o espelho espera por ela, PR #382)
-export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevisaoPendente }: {
+// `aoEnvioReservado`: avisa a pagina se o envio da planilha/carta esta' saindo pelo sistema (ou preso): o espelho da
+// so' gerada espera por ele (gate Sol, PR #528)
+export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevisaoPendente, aoEnvioReservado }: {
   medicaoId: number; estado?: string; podeEditar: boolean; aoMudar: () => void;
   aoRevisaoPendente?: (pendente: boolean | null) => void;
+  aoEnvioReservado?: (reservado: boolean) => void;
 }) {
   const base = useId();
   const [d, setD] = useState<DetalhePlanilha | null>(null);
@@ -330,16 +333,21 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
   const [tentouJust, setTentouJust] = useState(false);
 
   const avisarPendente = useRef(aoRevisaoPendente);
-  useEffect(() => { avisarPendente.current = aoRevisaoPendente; });
+  const avisarReserva = useRef(aoEnvioReservado);
+  useEffect(() => { avisarPendente.current = aoRevisaoPendente; avisarReserva.current = aoEnvioReservado; });
+  function avisar(x: DetalhePlanilha) {
+    avisarPendente.current?.(revisaoPendente(x));
+    avisarReserva.current?.(!!x.envio_planilha?.reserva);
+  }
   async function carregar() {
     const x = await api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`);
     setD(x);
     // toda releitura certa avisa a pagina, para ela sair de uma falha anterior mesmo sem o pendente mudar
-    avisarPendente.current?.(revisaoPendente(x));
+    avisar(x);
   }
   useEffect(() => {
     let vivo = true;
-    api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`).then(x => { if (vivo) { setD(x); avisarPendente.current?.(revisaoPendente(x)); } })
+    api<DetalhePlanilha>(`/api/medicoes/${medicaoId}`).then(x => { if (vivo) { setD(x); avisar(x); } })
       .catch(e => { if (vivo) { setErro(mensagemDeErro(e)); avisarPendente.current?.(null); } });
     return () => { vivo = false; };
   }, [medicaoId, estado]);
