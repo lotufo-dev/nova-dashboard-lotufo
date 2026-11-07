@@ -4,6 +4,7 @@ Toda escrita desta fase grava origem "manual" -- a deteccao automatica
 (origem "detectado"/"aceito") entra nas fases 5-6.
 """
 import datetime
+import logging
 import sqlite3
 from typing import Annotated, Literal
 
@@ -11,12 +12,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import arquivos, db, espelhos, medicao_planilhas, medicoes, permissoes, planilha_envio, siga, tempo
+from app import (arquivos, db, espelhos, medicao_grupos, medicao_planilhas, medicoes, permissoes, planilha_envio, siga,
+                 tempo)
 from app.api_auth import conexao
 from app.dinheiro import parse_brl
 from app.permissoes import exigir
 
 router = APIRouter()
+log = logging.getLogger("app.medicoes")
 
 # Competencia e' o mes de referencia "AAAA-MM": o mesmo formato que o CHECK
 # (GLOB) da tabela medicoes exige. Validar aqui devolve 422 em vez de deixar
@@ -145,7 +148,16 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     d["envio_planilha"] = planilha_envio.situacao(conn, medicao_id)
     d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
     d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
+    d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"
     return d
+
+
+@router.get("/api/medicoes/{medicao_id}/grupos")
+def grupos_da_medicao(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #490: o medido por grupo da planilha (leitura mais nova), com os itens de cada grupo."""
+    _medicao_existe(conn, medicao_id)
+    return medicao_grupos.grupos(conn, medicao_id)
 
 
 @router.put("/api/medicoes/{medicao_id}/valor")
@@ -296,6 +308,22 @@ def _gravar_e_registrar(conn: sqlite3.Connection, validados: list[tuple[bytes, s
     return registrar({"arquivo": arq, "sha256": sha, "arquivo_planilha": arq_p, "sha256_planilha": sha_p})
 
 
+def _ler_grupos(conn: sqlite3.Connection, usuario_id: int, r: dict, validados: list[tuple[bytes, str]]) -> dict:
+    """Issue #490: o xlsx da planilha, ja' gravado com a versao, e' lido por grupo. A leitura vem depois do registro
+    e nunca o desfaz: a recusa (soma que nao bate, aba que falta) volta como aviso em `leitura_planilha`."""
+    dados, ext = validados[1]
+    r["leitura_planilha"] = None
+    if ext != "xlsx":
+        return r
+    try:
+        r["leitura_planilha"] = medicao_grupos.ler_anexo(conn, usuario_id, r["medicao_id"], r["versao"], dados)
+    except Exception:       # a medicao ja' esta' registrada: falha inesperada da leitura vira aviso, nao erro 500
+        log.exception("leitura por grupo da planilha da medicao %s", r["medicao_id"])
+        r["leitura_planilha"] = {"situacao": "recusada",
+                                 "aviso": medicao_grupos.PREFIXO_AVISO + "erro inesperado na leitura"}
+    return r
+
+
 def _centavos(valor: str) -> int:
     centavos = parse_brl(valor)
     if centavos > MAX_INT64:
@@ -352,10 +380,11 @@ def registrar_planilha(contrato_id: ID,
         raise _erro_do_cliente(conn, e)
     validados = _anexos_validados(oficio, planilha)
     try:
-        return _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.registrar(
+        r = _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.registrar(
             conn, usuario["id"], contrato_id, dados, anexos))
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
+    return _ler_grupos(conn, usuario["id"], r, validados)
 
 
 @router.post("/api/medicoes/{medicao_id}/planilhas", status_code=201)
@@ -377,10 +406,11 @@ def revisar_planilha(medicao_id: ID,
         raise _erro_do_cliente(conn, e)
     validados = _anexos_validados(oficio, planilha)
     try:
-        return _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.revisar(
+        r = _gravar_e_registrar(conn, validados, lambda anexos: medicao_planilhas.revisar(
             conn, usuario["id"], medicao_id, dados, anexos))
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
+    return _ler_grupos(conn, usuario["id"], r, validados)
 
 
 @router.get("/api/medicoes/{medicao_id}/planilhas/{planilha_id}/{peca}")

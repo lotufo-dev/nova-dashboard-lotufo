@@ -1354,3 +1354,97 @@ def test_envio_por_fora_e_numero_do_siga_diretoria_recebe_403(client_admin):
     _entrar(client_admin, "dir@lotufo.com")
     assert _enviar_por_fora(client_admin, mid).status_code == 403
     assert _numero_siga(client_admin, mid, "1").status_code == 403
+
+
+# --- issue #490: medido por grupo da planilha de medicao -----------------------------------------------------
+
+def _planilha_xlsx(cl, cid, valor, numero=1, competencia="2026-07"):
+    from tests.test_leitura_planilha_medicao import planilha
+    arquivos_ = {**_arquivos_planilha(f"oficio {numero}"), "planilha": ("planilha.xlsx", planilha(), XLSX)}
+    return cl.post(f"/api/contratos/{cid}/planilhas", files=arquivos_, data={
+        "numero": numero, "competencia": competencia, "periodo_inicio": f"{competencia}-01",
+        "periodo_fim": f"{competencia}-28", "valor": valor})
+
+
+def test_grupos_sem_leitura(client_admin):
+    cid = _contrato(client_admin)
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 1, "tipo": "execucao", "competencia": "2026-07"}).json()["id"]
+    r = client_admin.get(f"/api/medicoes/{mid}/grupos")
+    assert r.status_code == 200
+    assert r.json() == {"situacao": "sem_leitura", "aviso": None, "leitura": None, "grupos": []}
+    assert client_admin.get("/api/medicoes/999999/grupos").status_code == 404
+
+
+def test_anexar_xlsx_registra_a_leitura_por_grupo(client_admin):
+    from tests.test_leitura_planilha_medicao import TOTAL
+    cid = _contrato(client_admin)
+    r = _planilha_xlsx(client_admin, cid, "20.693,60")          # 50 centavos de diferenca: dentro de um real
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
+    mid = r.json()["medicao_id"]
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["situacao"] == "lida" and g["aviso"] is None
+    assert g["leitura"]["total_centavos"] == TOTAL and g["leitura"]["versao"] == 1
+    assert g["leitura"]["origem"] == "anexo" and g["leitura"]["grupo_por"] == "planilha"
+    assert [x["nome"] for x in g["grupos"]] == ["ADMINISTRAÇÃO LOCAL", "TERRAPLENAGEM", "DRENAGEM"]
+    terra = g["grupos"][1]
+    assert (terra["valor_medido_centavos"], terra["valor_acumulado_centavos"]) == (2188_09, 4414_18)
+    assert (terra["unidade"], terra["quantidade_medida"], terra["quantidade_acumulada"]) == ("m³", "220.25", "400.5")
+    item = terra["itens"][0]
+    assert {k: item[k] for k in ("item", "codigo", "unidade", "quantidade_contratada", "quantidade_medida",
+                                 "preco_unitario_centavos")} == {
+        "item": "2.1", "codigo": "4011", "unidade": "m³", "quantidade_contratada": "1000.5",
+        "quantidade_medida": "120.25", "preco_unitario_centavos": 12_35}
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"]["situacao"] == "lida"
+
+
+def test_soma_que_nao_bate_registra_a_medicao_e_avisa(client_admin):
+    cid = _contrato(client_admin)
+    r = _planilha_xlsx(client_admin, cid, "20.700,00")          # 6,90 acima da soma dos grupos
+    assert r.status_code == 201, r.text
+    aviso = r.json()["leitura_planilha"]["aviso"]
+    assert aviso.startswith("Planilha não lida: diferença de R$ 6,90")
+    mid = r.json()["medicao_id"]
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert d["estado"] == "planilha_gerada" and d["valor_protocolado_centavos"] == 20_700_00
+    assert d["leitura_planilha"] == {"situacao": "recusada", "aviso": aviso}
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["situacao"] == "recusada" and g["aviso"] == aviso and g["grupos"] == []
+
+
+def test_revisao_le_a_planilha_nova_e_a_mais_nova_vale(client_admin):
+    from tests.test_leitura_planilha_medicao import planilha
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.700,00").json()["medicao_id"]        # recusada
+    arquivos_ = {**_arquivos_planilha("oficio rev"), "planilha": ("planilha.xlsx", planilha(), XLSX)}
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=arquivos_, data={
+        "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-28", "valor": "20.693,10", "motivo": "Rev01"})
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["situacao"] == "lida" and g["leitura"]["versao"] == 2
+
+
+def test_planilha_de_projeto_nao_e_lida(client_admin):
+    from tests.test_leitura_planilha_medicao import planilha
+    cid = _contrato(client_admin)
+    arquivos_ = {**_arquivos_planilha("oficio projeto"), "planilha": ("planilha.xlsx", planilha(), XLSX)}
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=arquivos_, data={
+        "numero": 1, "tipo": "projeto", "competencia": "2026-07", "periodo_inicio": "2026-07-01",
+        "periodo_fim": "2026-07-28", "valor": "20.693,10"})
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] is None
+    g = client_admin.get(f"/api/medicoes/{r.json()['medicao_id']}/grupos").json()
+    assert g["situacao"] == "sem_leitura"
+
+
+def test_grupos_exige_permissao_de_ver(client_admin, monkeypatch):
+    from app import permissoes
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.693,10").json()["medicao_id"]
+    monkeypatch.setitem(permissoes.PERFIS, "admin", frozenset({"editar_cadastros"}))
+    r = client_admin.get(f"/api/medicoes/{mid}/grupos")
+    assert r.status_code == 403 and "ver_paineis" in r.json()["detail"]
+    client_admin.cookies.clear()
+    assert client_admin.get(f"/api/medicoes/{mid}/grupos").status_code in (401, 403)

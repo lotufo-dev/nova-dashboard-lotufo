@@ -164,7 +164,8 @@ def _somar_quantidade(itens: list[dict], chave: str) -> str | None:
     return _qtd(sum(valores, Decimal(0))) if valores else None
 
 
-def _grupos(itens: list[tuple[str, dict]], ordem: list[str]) -> list[dict]:
+def agrupar(itens: list[tuple[str, dict]], ordem: list[str]) -> list[dict]:
+    """Os grupos (na ordem do cadastro, senao na do primeiro item; "outros" por ultimo) com as somas e os itens."""
     por: dict[str, list[dict]] = {}
     for g, it in itens:
         por.setdefault(g, []).append(it)
@@ -388,7 +389,7 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
     if not itens:
         raise PlanilhaRecusada("nenhum item com valor na aba Resumo")
     ordem = [g["nome"] for g in cadastro] if cadastro else []
-    grupos = _grupos(itens, ordem)
+    grupos = agrupar(itens, ordem)
     return {"grupos": grupos, "total_centavos": sum(g["valor_medido_centavos"] for g in grupos),
             "grupo_por": "cadastro" if cadastro else "planilha"}
 
