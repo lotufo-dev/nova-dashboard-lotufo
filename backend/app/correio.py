@@ -497,20 +497,18 @@ def gravar_assinatura(conn, usuario_id: int, dados: bytes) -> None:
     if not (_png_integro(dados) if mime == "image/png" else _jpg_integro(dados)):
         raise ValueError("A imagem da assinatura está incompleta ou corrompida. Salve a imagem de novo e "
                          "suba outra vez.")
-    with db.mutacao(conn):
-        auditoria.registrar(conn, usuario_id, "correio.assinatura", "usuario", usuario_id, None,
-                            {"tamanho": len(dados), "sha256": hashlib.sha256(dados).hexdigest()})
-        # temporario + rename (#441): o backup le a pasta sem trava, e o nome nao e' o sha256 (nada confere o conteudo);
-        # `write_bytes` direto truncaria a assinatura antes de escrever, e o backup poderia guardar a metade
-        destino = _arquivo_assinatura(usuario_id)
-        _limpar_temporarios_de_assinatura(destino.parent)
-        tmp = destino.with_name(f"{destino.name}.{os.getpid()}-{secrets.token_hex(4)}.tmp")
-        try:
-            tmp.write_bytes(dados)
-            _trocar_assinatura(tmp, destino)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
+    # temporario + rename (#441): o backup le a pasta sem trava, e o nome nao e' o sha256 (nada confere o conteudo);
+    # `write_bytes` direto truncaria a assinatura antes de escrever, e o backup poderia guardar a metade
+    destino = _arquivo_assinatura(usuario_id)
+    _limpar_temporarios_de_assinatura(destino.parent)
+    tmp = destino.with_name(f"{destino.name}.{os.getpid()}-{secrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_bytes(dados)
+        _evento_com_retentativa(conn, usuario_id, {"tamanho": len(dados), "sha256": hashlib.sha256(dados).hexdigest()},
+                                lambda: os.replace(tmp, destino), GRAVAR_ASSINATURA_OCUPADA)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 # `usuario-<id>.<pid>-<aleatorio>.tmp`: so' o temporario que `gravar_assinatura` cria
@@ -531,16 +529,23 @@ def _limpar_temporarios_de_assinatura(pasta: Path) -> None:
             pass                # aberto por outra gravacao (ou ja' saiu): nao e' sobra
 
 
-def _trocar_assinatura(tmp: Path, destino: Path) -> None:
-    """`os.replace` sobre a assinatura que o backup esta' lendo falha com PermissionError no Windows (arquivo aberto):
-    tenta de novo por pouco tempo e, se continuar ocupado, recusa em portugues (422, a pessoa tenta de novo)."""
+REMOVER_ASSINATURA_OCUPADA = "Não foi possível tirar a assinatura agora; tente de novo"
+
+
+def _evento_com_retentativa(conn, usuario_id: int, depois: dict, mexer, recusa: str) -> None:
+    """Evento `correio.assinatura` e mudanca no arquivo (`mexer`) na mesma transacao. `os.replace`/`unlink` sobre a
+    assinatura que o backup esta' lendo falha com PermissionError no Windows (arquivo aberto): a transacao inteira e'
+    desfeita (o rollback solta a trava de escrita do banco) e so' entao se espera para tentar de novo (#479: dormir
+    dentro dela seguraria todas as outras gravacoes). O que persiste vira ValueError em portugues (422)."""
     for espera in (*_TENTATIVAS_TROCA, None):
         try:
-            os.replace(tmp, destino)
+            with db.mutacao(conn):
+                auditoria.registrar(conn, usuario_id, "correio.assinatura", "usuario", usuario_id, None, depois)
+                mexer()
             return
         except PermissionError:
             if espera is None:
-                raise ValueError(GRAVAR_ASSINATURA_OCUPADA) from None
+                raise ValueError(recusa) from None
             time.sleep(espera)
 
 
@@ -548,9 +553,9 @@ def remover_assinatura(conn, usuario_id: int) -> None:
     arquivo = _arquivo_assinatura(usuario_id)
     if not arquivo.exists():
         return
-    with db.mutacao(conn):
-        auditoria.registrar(conn, usuario_id, "correio.assinatura", "usuario", usuario_id, None, {"removida": True})
-        arquivo.unlink()
+    # missing_ok: outra remocao simultanea ja' tirou, nao e' erro
+    _evento_com_retentativa(conn, usuario_id, {"removida": True}, lambda: arquivo.unlink(missing_ok=True),
+                            REMOVER_ASSINATURA_OCUPADA)
 
 
 # --- contatos para os destinatarios --------------------------------------------------------------------------
