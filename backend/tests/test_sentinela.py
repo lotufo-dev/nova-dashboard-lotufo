@@ -138,7 +138,10 @@ def test_4672_um_item_por_conta_por_dia_ignorando_lista_e_contas_de_sistema(maqu
     assert [(x["evento"], x["nivel"], x["conta"]) for x in a] == [(4672, "atencao", CONTA)]
 
 
-def test_4672_da_mesma_conta_no_mesmo_dia_em_outra_rodada_nao_repete(maquina, conn):
+def test_4672_da_mesma_conta_no_mesmo_dia_em_outra_rodada_nao_repete(maquina, conn, monkeypatch):
+    # a fixture e' de 05/11/2026 e `avisados_4672` so' guarda hoje e ontem: sem congelar o dia, o teste passa a
+    # falhar em 07/11/2026 (fila de merge das PRs #388 e #175)
+    monkeypatch.setattr(sentinela.tempo, "hoje_local", lambda: datetime.date(2026, 11, 5))
     _lista(maquina, contas=["operador.fict"])
     _com_ponto_de_partida(maquina, conn)
     maquina.adicionar("4672_logon.xml", maquina.raiz)

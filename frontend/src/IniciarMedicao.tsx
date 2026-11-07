@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import CampoCompetencia from "./CampoCompetencia";
 import { IconeAlerta } from "./icones";
 import { filtrarObras, porContratante, type ObraResumo, type SerieObra } from "./resumoMedicoes";
-import { ir } from "./rota";
+import { ir, type Rota } from "./rota";
 import Selo from "./Selo";
 import { fmtCompetencia } from "./tempo";
 
@@ -34,7 +34,7 @@ function mesSeguinte(aaaaMm: string): string {
   return mes === 12 ? `${Number(m[1]) + 1}-01` : `${m[1]}-${String(mes + 1).padStart(2, "0")}`;
 }
 
-const lerSerie = (o: ObraResumo, tipo: Tipo): SerieObra | null => (tipo === "projeto" ? o.projeto : o);
+const lerSerie = (o: ObraResumo, tipo: Tipo): SerieObra | null => (tipo === "projeto" ? o.projeto : o.execucao);
 
 function Icone({ d, className = "icone icone--p" }: { d: string; className?: string }) {
   return <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
@@ -43,8 +43,8 @@ function Icone({ d, className = "icone icone--p" }: { d: string; className?: str
 
 /** Segunda linha da obra: o órgão e, só quando acontece, o estado como selo (texto-na-tela, 26/10/2026). */
 function SubObra({ o }: { o: ObraResumo }) {
-  const andamento = o.aberta_numero !== null;
-  const prevista = !andamento && o.prevista_id !== null;
+  const andamento = o.execucao.aberta_numero !== null;
+  const prevista = !andamento && o.execucao.prevista_id !== null;
   const projetoAndamento = o.projeto?.aberta_numero != null;
   if (!o.orgao_sub && !andamento && !prevista && !projetoAndamento) return null;
   return (
@@ -55,6 +55,11 @@ function SubObra({ o }: { o: ObraResumo }) {
       {projetoAndamento && <Selo classe="selo--atencao">Projeto em andamento</Selo>}
     </span>
   );
+}
+
+/** "Iniciar a Nª medição" da aba Sem medição aberta (#154): a prevista mais antiga da obra, de qualquer série. */
+export function destino(o: ObraResumo): Rota {
+  return o.prevista_id !== null ? { tela: "medicao", obra: o.contrato_id, id: o.prevista_id } : { tela: "nova-medicao", obra: o.contrato_id };
 }
 
 export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[]; aoFechar: () => void }) {
@@ -97,7 +102,7 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
 
   // chamada como funcao (nao como componente): um componente declarado aqui seria outro a cada digito e tiraria o foco do campo
   function rodape(o: ObraResumo) {
-    const serie = lerSerie(o, tipo) ?? o;
+    const serie = lerSerie(o, tipo) ?? o.execucao;
     const de = tipo === "projeto" ? " de Projeto" : "";
     const cancelar = <button type="button" className="btn" onClick={fechar}>Cancelar</button>;
     const escolhaTipo = o.projeto && (

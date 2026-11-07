@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Usuario } from "./Login";
 import MedicoesPagina from "./MedicoesPagina";
-import type { LinhaResumo, ObraResumo, ResumoMedicoes } from "./resumoMedicoes";
+import type { LinhaResumo, ObraResumo, ResumoMedicoes, SerieObra } from "./resumoMedicoes";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm: vi.fn() }));
@@ -15,10 +15,12 @@ const linha = (extra: Partial<LinhaResumo>): LinhaResumo => ({
   valor_centavos: 997926492, marco: "2026-10-07", dias: 2, ...extra });
 
 const SEM_PREVISTA = { prevista_id: null, prevista_numero: null, prevista_competencia: null };
-const obra = (extra: Partial<ObraResumo>): ObraResumo => ({
-  contrato_id: 1, obra: "Obra", contratante: "SINFRA", orgao_sub: null, aberta: false, aberta_id: null, aberta_numero: null,
-  aberta_passo: null, ultima: null, prevista_id: null, prevista_numero: null, prevista_competencia: null, projeto: null,
-  encerramento: false, ...extra });
+// #151: a serie de execucao da janela Iniciar processo
+const SERIE: SerieObra = { aberta_id: null, aberta_numero: null, aberta_passo: null, ultima: null, ...SEM_PREVISTA };
+const obra = (extra: Partial<ObraResumo>, execucao: Partial<SerieObra> = {}): ObraResumo => ({
+  contrato_id: 1, obra: "Obra", contratante: "SINFRA", orgao_sub: null, aberta: false, prevista_id: null, projeto: null,
+  encerramento: false, ultima: null, ha_dias: null, prevista: null, proxima: 1, proxima_tipo: "execucao",
+  ...extra, execucao: { ...SERIE, ...execucao } });
 
 const RESUMO: ResumoMedicoes = {
   hoje: "2026-10-09",
@@ -28,17 +30,24 @@ const RESUMO: ResumoMedicoes = {
     linha({ medicao_id: 72, medicao_ids: [72], numero: 1, titulo: "1ª Medição de Projeto", valor_centavos: 14811701, dias: 24 }),
   ],
   obras: [
-    obra({ contrato_id: 12, obra: "Estações BRT", orgao_sub: "SAGPM / SUOESP", aberta: true, aberta_id: 70, aberta_numero: 7,
-      aberta_passo: "enviar nota", ultima: { numero: 7, competencia: "2026-09" },
-      projeto: { ...SEM_PREVISTA, aberta_id: 72, aberta_numero: 1, aberta_passo: "anexar as notas", ultima: { numero: 1, competencia: "2026-09" } } }),
-    obra({ contrato_id: 17, obra: "MT-388", orgao_sub: "SUEF II", prevista_id: 900, prevista_numero: 24, prevista_competencia: "2026-09",
-      ultima: { numero: 23, competencia: "2026-01" } }),
-    obra({ contrato_id: 4, obra: "Cavalaria", orgao_sub: "SACID", ultima: { numero: 11, competencia: "2026-12" },
-      projeto: { ...SEM_PREVISTA, aberta_id: null, aberta_numero: null, aberta_passo: null, ultima: { numero: 2, competencia: "2026-08" } } }),
-    obra({ contrato_id: 13, obra: "Granito", contratante: "MTPAR", encerramento: true }),
-    obra({ contrato_id: 21, obra: "Terminais", contratante: "SINFRA", ultima: { numero: 8, competencia: "2026-08" },
+    // os campos de fora sao os da aba Sem medicao aberta (#154); o 2o argumento, a serie de execucao da janela (#151)
+    obra({ contrato_id: 12, obra: "Estações BRT", orgao_sub: "SAGPM / SUOESP", aberta: true,
+      ultima: { numero: 6, tipo: "execucao", competencia: "2026-08" }, proxima: 7,
+      projeto: { ...SEM_PREVISTA, aberta_id: 72, aberta_numero: 1, aberta_passo: "anexar as notas", ultima: { numero: 1, competencia: "2026-09" } } },
+      { aberta_id: 70, aberta_numero: 7, aberta_passo: "enviar nota", ultima: { numero: 7, competencia: "2026-09" } }),
+    obra({ contrato_id: 17, obra: "MT-388", orgao_sub: "SUEF II", prevista_id: 900,
+      ultima: { numero: 23, tipo: "execucao", competencia: "2026-01" }, ha_dias: 251,
+      prevista: { numero: 24, tipo: "execucao", competencia: "2026-09" }, proxima: 24 },
+      { prevista_id: 900, prevista_numero: 24, prevista_competencia: "2026-09", ultima: { numero: 23, competencia: "2026-01" } }),
+    obra({ contrato_id: 4, obra: "Cavalaria", orgao_sub: "SACID",
+      projeto: { ...SEM_PREVISTA, aberta_id: null, aberta_numero: null, aberta_passo: null, ultima: { numero: 2, competencia: "2026-08" } } },
+      { ultima: { numero: 11, competencia: "2026-12" } }),
+    obra({ contrato_id: 13, obra: "Granito", contratante: "MTPAR", encerramento: true,
+      ultima: { numero: 1, tipo: "projeto", competencia: "2026-09" }, ha_dias: 9, proxima: 2, proxima_tipo: "projeto" }),
+    obra({ contrato_id: 21, obra: "Terminais", contratante: "SINFRA",
       projeto: { aberta_id: null, aberta_numero: null, aberta_passo: null, ultima: null,
-        prevista_id: 950, prevista_numero: 4, prevista_competencia: "2026-07" } }),
+        prevista_id: 950, prevista_numero: 4, prevista_competencia: "2026-07" } },
+      { ultima: { numero: 8, competencia: "2026-08" } }),
   ],
 };
 
@@ -69,6 +78,52 @@ describe("Medições com abas", () => {
     const abas = screen.getByRole("navigation", { name: "Seções de Medições" });
     expect(within(abas).getByRole("link", { name: "Resumo" }).getAttribute("aria-current")).toBe("page");
     expect(within(abas).getByRole("link", { name: /Sem medição aberta/ }).textContent).toBe("Sem medição aberta3");
+  });
+
+  it("aba Sem medição aberta (#154): grupos por contratante, última medição, há quanto tempo, prevista e iniciar", async () => {
+    api.mockResolvedValue(RESUMO);
+    render(<MedicoesPagina aba="sem-medicao" busca={{}} usuario={usuario} />);
+    const quadro = await screen.findByRole("region", { name: "Sem medição aberta" });
+    // sem contagem ao lado do titulo nem no grupo (texto-na-tela, 26/10/2026)
+    expect(quadro.querySelector(".medicoes__legenda")).toBeNull();
+    // o maior grupo primeiro; os dois primeiros abertos
+    expect([...quadro.querySelectorAll("details")].map(d => d.querySelector("summary")?.textContent)).toEqual(
+      ["SINFRA", "MTPAR"]);
+    const mt = within(quadro).getByRole("row", { name: /MT-388/ });
+    expect(within(mt).getByText("SUEF II")).toBeTruthy();
+    expect(within(mt).getByText("23ª · 01/2026")).toBeTruthy();
+    expect(within(mt).getByText(/^251\s+dias$/).className).not.toContain("parada");   // sem cor
+    expect(within(mt).getByText("Prevista: 24ª · 09/2026")).toBeTruthy();
+    // a prevista abre a medição dela; a obra sem prevista abre a nova, com o número seguinte
+    expect(within(mt).getByRole("link", { name: "Iniciar a 24ª medição" }).getAttribute("href")).toBe("/obras/17/medicoes/900");
+    const cav = within(quadro).getByRole("row", { name: /Cavalaria/ });
+    expect(within(cav).getByRole("link", { name: "Iniciar a 1ª medição" }).getAttribute("href")).toBe("/obras/4/medicoes/nova");
+    expect(within(cav).getAllByText("—")).toHaveLength(3);   // sem última medição, sem tempo, sem prevista
+    expect(within(quadro).getByRole("link", { name: "Granito" }).getAttribute("href")).toBe("/obras/13");
+    // obra que só mede projeto: o tipo aparece na última e no link (série própria)
+    const gr = within(quadro).getByRole("row", { name: /Granito/ });
+    expect(within(gr).getByText("1ª de Projeto · 09/2026")).toBeTruthy();
+    expect(within(gr).getByRole("link", { name: "Iniciar a 2ª medição de Projeto" })).toBeTruthy();
+    // o botão de iniciar continua na aba; a diretoria não o vê
+    fireEvent.click(screen.getByRole("button", { name: /Iniciar processo de medição/ }));
+    expect(screen.getByRole("dialog", { name: "Iniciar processo de medição" })).toBeTruthy();
+  });
+
+  it("aba Sem medição aberta sem obras: estado vazio e sem botão para a diretoria", async () => {
+    api.mockResolvedValue({ ...RESUMO, obras: RESUMO.obras.map(o => ({ ...o, aberta: true })) });
+    render(<MedicoesPagina aba="sem-medicao" busca={{}} usuario={{ ...usuario, perfil: "diretoria" }} />);
+    expect(await screen.findByText("Todas as obras ativas têm medição aberta.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Iniciar processo/ })).toBeNull();
+  });
+
+  it("aba Sem medição aberta: a diretoria vê as obras mas nenhum link de iniciar medição", async () => {
+    api.mockResolvedValue(RESUMO);
+    render(<MedicoesPagina aba="sem-medicao" busca={{}} usuario={{ ...usuario, perfil: "diretoria" }} />);
+    const quadro = await screen.findByRole("region", { name: "Sem medição aberta" });
+    expect(within(quadro).getByRole("link", { name: "Granito" })).toBeTruthy();
+    expect(within(quadro).getByText("Prevista: 24ª · 09/2026")).toBeTruthy();
+    expect(screen.queryAllByRole("link", { name: /^Iniciar a/ })).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /Iniciar processo/ })).toBeNull();
   });
 
   it("estados novos do motor: abas e cartões na ordem do ciclo, antes do espelho, com o texto em português", async () => {

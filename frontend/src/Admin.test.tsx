@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import Admin from "./Admin";
+import { ApiErro } from "./api";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
@@ -180,7 +181,7 @@ test("Saúde: sem chave pública mostra 'Cópia do dono não configurada'", asyn
 test("Saúde: 'Gerar cópia do dono agora' pede a cópia, relê a Saúde e mostra a data", async () => {
   let gerada = false;
   api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
-    if (url === "/api/admin/copia-dono" && opcoes?.method === "POST") { gerada = true; return { arquivo: "x.tar.age" }; }
+    if (url === "/api/admin/copia-dono" && opcoes?.method === "POST") { gerada = true; return { arquivo: "x.tar.age", emails: 1, partes: 1, completo: true }; }
     if (url === "/api/admin/backup") return {
       ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false,
       ultima_copia_dono: gerada ? "2026-10-13T08:00:00-04:00" : null };
@@ -190,6 +191,98 @@ test("Saúde: 'Gerar cópia do dono agora' pede a cópia, relê a Saúde e mostr
   fireEvent.click(await screen.findByRole("button", { name: "Gerar cópia do dono agora" }));
   const regiao = await screen.findByRole("region", { name: "Backup" });
   await waitFor(() => expect(regiao.textContent).toMatch(/13\/10\/2026 às 08:00/));
+  // issue #420: a cópia gerada saiu por e-mail
+  expect(within(regiao).getByText("Cópia do dono gerada e enviada por e-mail (1 e-mail).")).toBeTruthy();
+});
+
+// Issue #420: a cópia sai por e-mail; o botão manda de novo e a falha do envio aparece com o motivo
+test("Saúde: 'Reenviar cópia do dono' pede o reenvio, relê a Saúde e confirma", async () => {
+  let reenviada = false;
+  api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
+    if (url === "/api/admin/copia-dono/reenviar" && opcoes?.method === "POST") {
+      reenviada = true; return { arquivo: "x.tar.age", emails: 2 };
+    }
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false,
+      ultima_copia_dono: "2026-10-13T08:00:00-04:00",
+      ultimo_envio_copia_dono_erro: reenviada ? null : "a conta Microsoft de quem envia não está conectada",
+      ultimo_envio_copia_dono_erro_em: reenviada ? null : "2026-10-13T08:01:00-04:00" };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  expect(await screen.findByText(/Envio da cópia do dono: a última tentativa, em 13\/10\/2026 às 08:01, falhou \(a conta Microsoft/))
+    .toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Reenviar cópia do dono" }));
+  expect(await screen.findByText("Cópia do dono enviada por e-mail (2 e-mails).")).toBeTruthy();
+  expect(api).toHaveBeenCalledWith("/api/admin/copia-dono/reenviar", expect.objectContaining({ method: "POST" }));
+  await waitFor(() => expect(screen.queryByText(/Envio da cópia do dono: a última tentativa/)).toBeNull());
+});
+
+test("Saúde: 'Reenviar cópia do dono' com reserva presa mostra a liberação da linha do 409", async () => {
+  const reserva = { mensagem: "Este envio está em andamento ou foi interrompido (iniciado às 08:00 por Admin).",
+    codigo: "ENVIO_RESERVADO", reservado_em: "2026-10-13T08:00:00-04:00", reservado_por_nome: "Admin",
+    liberavel_a_partir_de: "2026-10-13T08:15:00-04:00", tabela: "copia_dono_envios", id: 7 };
+  api.mockImplementation(async (url: string, opcoes?: { method?: string; body?: string }) => {
+    if (url === "/api/admin/copia-dono/reenviar") throw new ApiErro(409, reserva.mensagem, reserva);
+    if (url === "/api/envios/liberar") return { ok: true };
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false, ultima_copia_dono: "2026-10-13T08:00:00-04:00" };
+    throw new Error(`fora do recorte: ${url} ${opcoes?.method}`);
+  });
+  render(<Admin aba="saude" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Reenviar cópia do dono" }));
+  expect(await screen.findByText(/Este envio está em andamento ou foi interrompido/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Por que liberar/), { target: { value: "conferi os Enviados e não saiu" } });
+  fireEvent.click(screen.getByLabelText(/Conferi a caixa de Enviados/));
+  fireEvent.click(screen.getByRole("button", { name: "Liberar envio" }));
+  await waitFor(() => expect(api).toHaveBeenCalledWith("/api/envios/liberar", { method: "POST", body: JSON.stringify({
+    tabela: "copia_dono_envios", id: 7, justificativa: "conferi os Enviados e não saiu", conferi_enviados: true }) }));
+  expect(await screen.findByText(/Trava removida/)).toBeTruthy();
+});
+
+test("Saúde: 'Gerar cópia do dono agora' com envio parcial mostra a falha, não a confirmação", async () => {
+  api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
+    if (url === "/api/admin/copia-dono" && opcoes?.method === "POST")
+      return { arquivo: "x.tar.age", emails: 1, partes: 3, completo: false };
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false, ultima_copia_dono: "2026-10-13T08:00:00-04:00" };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Gerar cópia do dono agora" }));
+  expect((await screen.findByText("Cópia do dono gerada, mas não saiu inteira por e-mail: 1 de 3 e-mails enviados.")).closest("[role=alert]"))
+    .toBeTruthy();
+  expect(screen.queryByText(/gerada e enviada por e-mail/)).toBeNull();
+});
+
+test("Saúde: 'Gerar cópia do dono agora' sem envio diz que não saiu por e-mail", async () => {
+  api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
+    if (url === "/api/admin/copia-dono" && opcoes?.method === "POST")
+      return { arquivo: "x.tar.age", emails: 0, partes: null, completo: false };
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false, ultima_copia_dono: "2026-10-13T08:00:00-04:00" };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Gerar cópia do dono agora" }));
+  expect(await screen.findByText("Cópia do dono gerada, mas não saiu por e-mail.")).toBeTruthy();
+  expect(screen.queryByText(/gerada e enviada por e-mail/)).toBeNull();
+});
+
+test("Saúde: falha no envio da cópia do dono marca o backup como Falhou", async () => {
+  saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false,
+             ultima_copia_dono: "2026-10-13T08:00:00-04:00",
+             ultimo_envio_copia_dono_erro: "destinatário da cópia do dono não configurado no cadastro (geral.yaml, copia_dono)",
+             ultimo_envio_copia_dono_erro_em: "2026-10-13T08:01:00-04:00" });
+  const regiao = await screen.findByRole("region", { name: "Backup" });
+  expect(await within(regiao).findByText("Falhou")).toBeTruthy();
+  expect(within(regiao).getByText(/Envio da cópia do dono: .*geral\.yaml/).closest(".aviso--critico")).toBeTruthy();
+});
+
+test("Saúde: sem cópia do dono gerada não há 'Reenviar cópia do dono'", async () => {
+  saudeCom({ ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: true, ultima_copia_dono: null });
+  expect(await screen.findByRole("button", { name: "Gerar cópia do dono agora" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Reenviar cópia do dono" })).toBeNull();
 });
 
 test("Saúde: mais de 8 dias sem cópia do dono aparece em destaque", async () => {

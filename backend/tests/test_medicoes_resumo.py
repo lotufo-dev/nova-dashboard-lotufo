@@ -161,6 +161,104 @@ def test_aba_aguardando_pagamento_conta_as_notas_da_tabela(conn, cenario):
     assert r["contagens"]["aguardando-pagamento"] == len(notas_envio.aguardando_pagamento(conn)) == 3
 
 
+def test_obra_sem_medicao_traz_ultima_ha_quanto_tempo_prevista_e_proxima(conn):
+    """#154: a aba "Sem medição aberta" mostra a última medição (nº e competência), há quanto tempo (desde o FIM da
+    competência), a prevista do cronograma e o nº da próxima. Sem medição anterior: tudo nulo e próxima = 1."""
+    c = conn
+    sinfra = _orgao(c, "sinfra-suef1", "SINFRA - SUEF I", "sinfra")
+    a, b, d, e = (_obra(c, n, sinfra) for n in ("A", "B", "D", "E"))
+    for cid, numero, comp, estado in ((a, 22, "2025-12", "recebida"), (a, 23, "2026-01", "recebida"),
+                                      (a, 24, "2026-09", "prevista"), (a, 25, "2026-10", "prevista"),
+                                      (b, 5, "2026-02", "recebida"), (b, 6, "2026-03", "cancelada"),
+                                      (d, 3, "2026-10", "recebida")):
+        c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) VALUES (?,?,'execucao',?,?)",
+                  (cid, numero, comp, estado))
+    # B mista: a projeto 9 é a última (mais recente), mas projeto é série própria: a próxima de execução segue a
+    # execução (a cancelada 6 ocupa o número) e vale 7
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,9,'projeto','2026-08','recebida')", (b,))
+    # G mista sem cancelada: execução 5 e projeto 9 -> próxima de execução = 6
+    g = _obra(c, "G", sinfra)
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,5,'execucao','2026-02','recebida')", (g,))
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,9,'projeto','2026-08','recebida')", (g,))
+    # F só mede projeto (ex.: Terminais BRT): última de projeto e a próxima segue a série de projeto
+    f = _obra(c, "F", sinfra)
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,2,'projeto','2026-07','recebida')", (f,))
+    # o reajuste repete o número da execução e não conta
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,23,'reajuste','2026-02','recebida')", (a,))
+    c.commit()
+    obras = {o["obra"]: o for o in medicoes.resumo(conn, HOJE)["obras"]}
+    assert obras["A"]["ultima"] == {"numero": 23, "tipo": "execucao", "competencia": "2026-01"}
+    assert obras["A"]["ha_dias"] == (HOJE - datetime.date(2026, 1, 31)).days == 251
+    assert obras["A"]["prevista"] == {"numero": 24, "tipo": "execucao", "competencia": "2026-09"}
+    assert obras["A"]["proxima"] == 24 and obras["A"]["proxima_tipo"] == "execucao"
+    assert obras["B"]["ultima"] == {"numero": 9, "tipo": "projeto", "competencia": "2026-08"} and obras["B"]["ha_dias"] == 39
+    assert obras["B"]["prevista"] is None and obras["B"]["proxima"] == 7 and obras["B"]["proxima_tipo"] == "execucao"
+    assert obras["G"]["proxima"] == 6 and obras["G"]["proxima_tipo"] == "execucao"
+    assert obras["F"]["ultima"] == {"numero": 2, "tipo": "projeto", "competencia": "2026-07"}
+    assert obras["F"]["proxima"] == 3 and obras["F"]["proxima_tipo"] == "projeto"
+    # competência ainda em curso: "hoje" (0 dia), como no protótipo; "—" (nulo) só sem medição anterior
+    assert obras["D"]["ultima"]["numero"] == 3 and obras["D"]["ha_dias"] == 0
+    assert obras["E"]["ultima"] is None and obras["E"]["ha_dias"] is None
+    assert obras["E"]["prevista"] is None and obras["E"]["proxima"] == 1 and obras["E"]["proxima_tipo"] == "execucao"
+
+
+def test_prevista_da_aba_e_a_mesma_que_o_iniciar_abre(conn):
+    """O rótulo "Iniciar a Nª medição" e o link (prevista_id) vêm da mesma medição prevista."""
+    c = conn
+    a = _obra(c, "A", _orgao(c, "sinfra-suef1", "SINFRA - SUEF I", "sinfra"))
+    pid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+                    "VALUES (?,2,'projeto','2026-02','prevista')", (a,)).lastrowid
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,5,'execucao','2026-03','prevista')", (a,))
+    c.commit()
+    o = medicoes.resumo(conn, HOJE)["obras"][0]
+    assert o["prevista_id"] == pid and o["prevista"] == {"numero": 2, "tipo": "projeto", "competencia": "2026-02"}
+    assert o["proxima"] == 2 and o["proxima_tipo"] == "projeto"
+    # competência que termina hoje já conta: "hoje"
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,1,'execucao','2026-09','recebida')", (a,))
+    c.commit()
+    assert medicoes.resumo(conn, datetime.date(2026, 9, 30))["obras"][0]["ha_dias"] == 0
+
+
+def test_prevista_da_aba_ignora_reajuste(conn):
+    """O reajuste (mesmo numero/competencia da execucao) nunca aparece como a medicao prevista da obra."""
+    c = conn
+    a = _obra(c, "A", _orgao(c, "sinfra-suef1", "SINFRA - SUEF I", "sinfra"))
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,3,'reajuste','2026-01','prevista')", (a,))
+    c.commit()
+    o = medicoes.resumo(conn, HOJE)["obras"][0]
+    assert o["prevista_id"] is None and o["prevista"] is None
+    pid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+                    "VALUES (?,4,'execucao','2026-02','prevista')", (a,)).lastrowid
+    c.commit()
+    o = medicoes.resumo(conn, HOJE)["obras"][0]
+    assert o["prevista_id"] == pid and o["prevista"]["tipo"] == "execucao"
+
+
+def test_prevista_da_aba_desempata_por_competencia_tipo_numero_e_id(conn):
+    """Mesma competencia: execucao antes de projeto; mesmo tipo: menor numero."""
+    c = conn
+    a = _obra(c, "A", _orgao(c, "sinfra-suef1", "SINFRA - SUEF I", "sinfra"))
+    ins = lambda n, t, comp: c.execute(  # noqa: E731
+        "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) VALUES (?,?,?,?,'prevista')",
+        (a, n, t, comp)).lastrowid
+    ins(1, "projeto", "2026-03")
+    ins(9, "execucao", "2026-03")
+    esperada = ins(5, "execucao", "2026-03")
+    ins(1, "execucao", "2026-04")
+    c.commit()
+    o = medicoes.resumo(conn, HOJE)["obras"][0]
+    assert o["prevista_id"] == esperada
+    assert o["prevista"] == {"numero": 5, "tipo": "execucao", "competencia": "2026-03"}
+
+
 def test_rota_do_resumo(client_admin):
     r = client_admin.get("/api/medicoes/resumo")
     assert r.status_code == 200, r.text
@@ -180,17 +278,17 @@ def test_resumo_obras_trazem_a_medicao_aberta_a_prevista_e_a_ultima(conn, cenari
     obras = {o["obra"]: o for o in medicoes.resumo(conn, HOJE)["obras"]}
     # A: 24 (execucao + reajuste) aberta; o reajuste nao conta como serie; Projeto 1 aberto
     a = obras["Obra A"]
-    assert a["aberta_id"] == ids["a24"] and a["aberta_numero"] == 24 and a["aberta_passo"] == "protocolar"
-    assert a["ultima"] == {"numero": 24, "competencia": "2026-09"}
+    assert a["execucao"]["aberta_id"] == ids["a24"] and a["execucao"]["aberta_numero"] == 24 and a["execucao"]["aberta_passo"] == "protocolar"
+    assert a["execucao"]["ultima"] == {"numero": 24, "competencia": "2026-09"}
     assert a["projeto"] == {"aberta_id": ids["a1p"], "aberta_numero": 1, "aberta_passo": "protocolar",
                             "ultima": {"numero": 1, "competencia": "2026-09"},
                             "prevista_id": None, "prevista_numero": None, "prevista_competencia": None}
     # D: so' prevista (a mais antiga, 1); a prevista nao e' "ultima"; sem Projeto
-    d = obras["Obra D"]
-    assert d["prevista_numero"] == 1 and d["prevista_competencia"] == "2026-08"
-    assert d["aberta_id"] is None and d["aberta_numero"] is None and d["ultima"] is None and d["projeto"] is None
+    d, de = obras["Obra D"], obras["Obra D"]["execucao"]
+    assert de["prevista_numero"] == 1 and de["prevista_competencia"] == "2026-08"
+    assert de["aberta_id"] is None and de["aberta_numero"] is None and de["ultima"] is None and d["projeto"] is None
     # C: so' o espelho gerado; sem prevista
-    c = obras["Obra C"]
+    c = obras["Obra C"]["execucao"]
     assert c["prevista_numero"] is None and c["prevista_competencia"] is None and c["aberta_numero"] == 3
 
 
@@ -201,7 +299,7 @@ def test_resumo_prevista_de_projeto_nao_aparece_na_serie_de_execucao(conn, cenar
                             "VALUES (?, 3, 'projeto', '2026-07', 'prevista')", (ids["d"],)).lastrowid
     conn.commit()
     d = {o["obra"]: o for o in medicoes.resumo(conn, HOJE)["obras"]}["Obra D"]
-    assert d["prevista_id"] == ids["d1"] and d["prevista_numero"] == 1      # a de execucao, mais antiga que a de Projeto
+    assert d["execucao"]["prevista_id"] == ids["d1"] and d["execucao"]["prevista_numero"] == 1      # a de execucao, mais antiga que a de Projeto
     assert d["projeto"]["prevista_id"] == proj and d["projeto"]["prevista_numero"] == 3
     assert d["projeto"]["prevista_competencia"] == "2026-07"
     # obra so' com prevista de Projeto: execucao sem prevista
@@ -210,4 +308,4 @@ def test_resumo_prevista_de_projeto_nao_aparece_na_serie_de_execucao(conn, cenar
                  "VALUES (?, 1, 'projeto', '2026-09', 'prevista')", (outra,))
     conn.commit()
     g = {o["obra"]: o for o in medicoes.resumo(conn, HOJE)["obras"]}["Obra G"]
-    assert g["prevista_id"] is None and g["projeto"]["prevista_numero"] == 1
+    assert g["execucao"]["prevista_id"] is None and g["projeto"]["prevista_numero"] == 1
