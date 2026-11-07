@@ -494,21 +494,78 @@ def test_restauracao_devolve_a_versao_da_assinatura_que_valia_no_snapshot(tmp_pa
     assert sorted(a.name for a in (dados / "assinaturas").iterdir() if a.is_file()) == ["usuario-1"]
 
 
-def test_assinatura_tirada_no_meio_da_passada_nao_e_erro(tmp_path, monkeypatch):
-    """#479 (/code-review): a pessoa tira a assinatura entre a listagem e a leitura da versao; nao ha' o que guardar,
-    e a passada nao acusa falso alarme."""
+def test_assinatura_tirada_no_meio_da_passada_nao_e_erro_e_a_antiga_continua_restauravel(tmp_path, monkeypatch):
+    """#479 (/code-review e gate Sol S4): a pessoa tira a assinatura entre a listagem e a leitura; nao ha' o que
+    guardar, a passada nao acusa falso alarme e o backup de A fica intacto. Depois ela sobe B, a passada leva B, e o
+    banco que espera A ainda devolve A."""
     origem, _ = _dados_com_arquivos(tmp_path)
-    ativa = tmp_path / "dados" / "assinaturas" / "usuario-1"
-    real = Path.read_bytes
+    dados = tmp_path / "dados"
+    destino = dados / "backups"
+    _rodar(origem, destino)
+    banco_com_a = origem.read_bytes()
+    ativa = dados / "assinaturas" / "usuario-1"
+    real, disparou = Path.read_bytes, []
 
     def tirada(self):
         if self == ativa:
+            disparou.append(self)
             raise FileNotFoundError(2, "No such file or directory", str(self))
         return real(self)
 
     monkeypatch.setattr(Path, "read_bytes", tirada)
-    _rodar(origem, tmp_path / "dados" / "backups")
+    backup.rodada_arquivos(origem, destino, None)
+    monkeypatch.setattr(Path, "read_bytes", real)
+    assert disparou and backup.ESTADO["ultima_copia_arquivos_erro"] is None
+    assert (destino / "arquivos" / "assinaturas" / "usuario-1").read_bytes() == ASSINATURA
+
+    b = b"\x89PNG\r\n\x1a\n assinatura B"
+    ativa.write_bytes(b)
+    backup.rodada_arquivos(origem, destino, None)
     assert backup.ESTADO["ultima_copia_arquivos_erro"] is None
+    origem.write_bytes(banco_com_a)
+    backup.restaurar_arquivos(destino / "arquivos", dados)
+    assert ativa.read_bytes() == ASSINATURA and _quarentena(dados) == [b]
+
+
+def test_backup_antigo_so_com_o_nome_ativo_nao_perde_a_assinatura_na_troca(tmp_path):
+    """Gate Sol S1 na PR #496 (#479): o backup de antes das versoes so' tem `usuario-1` = A; os dados ja' estao em B.
+    Antes de trocar o nome ativo do backup por B, A vira `usuario-1.<sha de A>`: o snapshot antigo que cita A continua
+    restauravel."""
+    origem, _ = _dados_com_arquivos(tmp_path)
+    dados = tmp_path / "dados"
+    destino = dados / "backups"
+    _rodar(origem, destino)
+    banco_com_a = origem.read_bytes()
+    bkp = destino / "arquivos" / "assinaturas"
+    for versao in bkp.glob("usuario-1.*"):         # como um backup feito antes das versoes
+        versao.unlink()
+    assert [a.name for a in bkp.iterdir()] == ["usuario-1"]
+    b = b"\x89PNG\r\n\x1a\n assinatura B"
+    (dados / "assinaturas" / "usuario-1").write_bytes(b)
+    backup.rodada_arquivos(origem, destino, None)
+    assert backup.ESTADO["ultima_copia_arquivos_erro"] is None
+    assert (bkp / "usuario-1").read_bytes() == b
+    assert (bkp / f"usuario-1.{_sha(ASSINATURA)}").read_bytes() == ASSINATURA
+    origem.write_bytes(banco_com_a)
+    backup.restaurar_arquivos(destino / "arquivos", dados)
+    assert (dados / "assinaturas" / "usuario-1").read_bytes() == ASSINATURA
+
+
+def test_falha_no_destino_depois_de_ler_a_assinatura_e_erro_da_passada(tmp_path, monkeypatch):
+    """Gate Sol S2 na PR #496 (#479): so' a assinatura que sumiu dos dados antes da leitura e' pulada. Um
+    FileNotFoundError ao gravar no backup (a pasta do backup sumiu no meio) e' erro da passada, nao "a pessoa tirou"."""
+    origem, _ = _dados_com_arquivos(tmp_path)
+    destino = tmp_path / "dados" / "backups"
+    _rodar(origem, destino)
+    (tmp_path / "dados" / "assinaturas" / "usuario-1").write_bytes(b"\x89PNG\r\n\x1a\n assinatura B")
+
+    def pasta_sumiu(conteudo, sha, alvo):
+        raise FileNotFoundError(2, "No such file or directory", str(alvo))
+
+    monkeypatch.setattr(backup, "_gravar_conferido", pasta_sumiu)
+    backup.rodada_arquivos(origem, destino, None)
+    erro = backup.ESTADO["ultima_copia_arquivos_erro"]
+    assert erro is not None and erro.endswith("1 arquivo(s) sem cópia: assinaturas 1 (arquivo ou pasta não encontrado)")
 
 
 SUMIU_PLEITOS = "1 arquivo(s) de pleitos estão no backup e sumiram dos dados"
@@ -767,7 +824,8 @@ def test_conferencia_que_falha_nao_rele_o_acervo_toda_hora(tmp_path, monkeypatch
     assert "acesso negado" in backup.ESTADO["ultima_copia_arquivos_erro"]
     chamadas.clear()
     backup.rodada_arquivos(origem, destino, None)          # hora seguinte
-    assert dict(chamadas) == {rel: rel == ruim for rel in gravados}
+    # a assinatura vai ao backup por `_copiar_assinatura` (versao pelo sha256, #479), nao por `_copiar_um`
+    assert dict(chamadas) == {rel: rel == ruim for rel in gravados if not rel.startswith("assinaturas/")}
     assert backup.ESTADO["ultima_copia_arquivos_erro"] is None
     assert backup._pendentes[str(destino / "arquivos")] == set()
 

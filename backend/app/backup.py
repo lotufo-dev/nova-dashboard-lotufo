@@ -284,7 +284,9 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
             nos_dados.add(arquivo.name)
             rel = f"{nome}/{arquivo.name}"
             try:
-                if _copiar_um(arquivo, destino / arquivo.name, conferir or rel in conferir_estes):
+                if not restauracao and nome == "assinaturas" and _NOME_ASSINATURA.fullmatch(arquivo.name):
+                    copiados += _copiar_assinatura(arquivo, destino, conferir or rel in conferir_estes)
+                elif _copiar_um(arquivo, destino / arquivo.name, conferir or rel in conferir_estes):
                     copiados += 1
             except OSError as e:
                 log.warning("arquivo sem copia: %s -> %s", arquivo, destino, exc_info=True)
@@ -293,17 +295,6 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
                     falhos.add(rel)
         if restauracao:
             continue
-        if nome == "assinaturas":
-            for arquivo in origem.iterdir() if origem.is_dir() else ():
-                if not (_NOME_ASSINATURA.fullmatch(arquivo.name) and arquivo.is_file()):
-                    continue
-                try:
-                    copiados += _guardar_versao_assinatura(arquivo, destino, conferir)
-                except FileNotFoundError:
-                    continue            # a pessoa tirou a assinatura no meio da passada: nada a guardar
-                except OSError as e:
-                    log.warning("versao da assinatura sem copia: %s -> %s", arquivo, destino, exc_info=True)
-                    falhas.setdefault(nome, []).append(_motivo(e))
         try:
             sumidos = _sumidos_dos_dados(destino, nos_dados)
         except OSError as e:
@@ -342,17 +333,50 @@ def _sumidos_dos_dados(backup_da_pasta: Path, nos_dados: set[str]) -> set[str]:
 _NOME_ASSINATURA = re.compile(r"usuario-(\d+)")
 
 
-def _guardar_versao_assinatura(arquivo: Path, destino: Path, conferir: bool = False) -> bool:
-    """Guarda no backup a versao da assinatura pelo sha256 (`usuario-<id>.<sha256>`, imutavel; #479), ao lado da copia
-    do nome ativo: a restauracao acha a que valia no snapshot escolhido mesmo depois de a pessoa trocar. Le o arquivo
-    uma vez so' (a assinatura tem ate' 1 MB): o nome e o conteudo saem da mesma leitura, mesmo que a pessoa troque a
-    assinatura no meio. Como nas pastas pelo sha256, mesmo nome e tamanho contam como presente; com `conferir` (a
-    releitura diaria), a versao guardada e' relida. False se a versao ja' estava la'."""
-    conteudo = arquivo.read_bytes()
+def _copiar_assinatura(arquivo: Path, destino: Path, conferir: bool = False) -> int:
+    """Leva ao backup a assinatura `usuario-<id>` (#479): cada versao fica pelo sha256 (`usuario-<id>.<sha256>`,
+    imutavel) e o nome ativo e' a copia da atual. A restauracao acha pela versao a que valia no snapshot escolhido,
+    mesmo depois de a pessoa trocar.
+
+    Le a assinatura dos dados uma vez so' (tem ate' 1 MB): versao e nome ativo saem dos mesmos bytes, mesmo que a
+    pessoa troque no meio. Antes de trocar o nome ativo do backup, o conteudo dele vira versao (o backup de antes das
+    versoes so' tem o nome ativo: sem isso, a assinatura antiga se perderia na primeira troca). So' a assinatura que
+    sumiu dos dados antes da leitura (a pessoa tirou) e' pulada; qualquer falha depois dela sobe. Devolve quantos
+    arquivos gravou no backup."""
+    try:
+        conteudo = arquivo.read_bytes()
+    except FileNotFoundError:
+        return 0                # a pessoa tirou a assinatura no meio da passada: nada a guardar
     sha = hashlib.sha256(conteudo).hexdigest()
-    alvo = destino / f"{arquivo.name}.{sha}"
+    ativo = destino / arquivo.name
+    try:
+        anterior = ativo.read_bytes()
+    except FileNotFoundError:
+        anterior = None
+    sha_anterior = hashlib.sha256(anterior).hexdigest() if anterior is not None else None
+    gravados = 0
+    if anterior is not None and sha_anterior != sha:
+        gravados += _guardar_versao_assinatura(anterior, sha_anterior, ativo, conferir)
+    gravados += _guardar_versao_assinatura(conteudo, sha, ativo, conferir)
+    if sha_anterior != sha:
+        _gravar_conferido(conteudo, sha, ativo)
+        gravados += 1
+    return gravados
+
+
+def _guardar_versao_assinatura(conteudo: bytes, sha: str, ativo: Path, conferir: bool) -> bool:
+    """`usuario-<id>.<sha256>` ao lado do nome ativo do backup. Como nas pastas pelo sha256, mesmo nome e tamanho
+    contam como presente; com `conferir` (a releitura diaria), a versao guardada e' relida. False se ja' estava la'."""
+    alvo = ativo.with_name(f"{ativo.name}.{sha}")
     if alvo.is_file() and (_sha256(alvo) == sha if conferir else alvo.stat().st_size == len(conteudo)):
         return False
+    _gravar_conferido(conteudo, sha, alvo)
+    return True
+
+
+def _gravar_conferido(conteudo: bytes, sha: str, alvo: Path) -> None:
+    """Grava `conteudo` em `alvo` pelo mesmo protocolo de `_copiar_um`: parcial aberto, fsync, conferido pelo sha256,
+    so' entao renomeado (ou aparece inteiro, ou nao aparece)."""
     parcial = alvo.parent / f"{alvo.name}.{os.getpid()}-{threading.get_ident()}-{secrets.token_hex(4)}.tmp"
     try:
         with open(parcial, "xb") as saida:
@@ -365,7 +389,6 @@ def _guardar_versao_assinatura(arquivo: Path, destino: Path, conferir: bool = Fa
     except BaseException:
         parcial.unlink(missing_ok=True)
         raise
-    return True
 
 
 def _assinaturas_do_banco(banco: Path) -> dict[str, dict]:
