@@ -70,8 +70,9 @@ def reenviar_copia_dono(usuario: dict = Depends(exigir("administrar")),
     except envio_reserva.EnvioEmAndamento as e:
         conn.rollback()
         detalhe = e.detalhe()
-        if getattr(e, "reserva_id", None):         # reserva presa: o que a liberacao precisa
-            detalhe |= {"tabela": copia_dono_envio.TABELA, "id": e.reserva_id}
+        if getattr(e, "reserva_id", None):         # reserva presa: o que a liberacao precisa (e qual parte, #482)
+            detalhe |= {"tabela": copia_dono_envio.TABELA, "id": e.reserva_id, "parte": e.parte, "partes": e.partes,
+                        "assunto": e.assunto}
         raise HTTPException(409, detail=detalhe) from None
     except copia_dono_envio.EnvioNaoConfigurado as e:
         raise HTTPException(409, str(e)) from None

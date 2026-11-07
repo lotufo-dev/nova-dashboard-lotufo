@@ -169,8 +169,25 @@ def pendente(conn, pasta_backups: Path) -> str | None:
     return f"a cópia de {_data(nome)} não saiu por e-mail"
 
 
+def _assunto_da_linha(arquivo: str, parte: int, partes: int) -> str | None:
+    """O assunto do e-mail de uma linha, pelo nome do arquivo (que pode ja' ter sido apagado); None fora do padrao."""
+    m = _CARIMBO.search(arquivo)
+    return assunto(datetime.datetime.strptime(m[1], "%Y%m%d-%H%M%S"), parte, partes) if m else None
+
+
+def _recusa_presa(conn, presa) -> envio_reserva.EnvioEmAndamento:
+    """A recusa da reserva presa com o que a liberacao precisa: a linha, qual parte e o assunto a procurar nos
+    Enviados (issue #482)."""
+    recusa = envio_reserva.reservado(conn, presa["envio_reservado_em"], presa["envio_reservado_por"])
+    recusa.reserva_id = presa["id"]                 # a rota devolve, para a liberacao (/api/envios/liberar)
+    recusa.parte, recusa.partes = presa["parte"], presa["partes"]
+    recusa.assunto = _assunto_da_linha(presa["arquivo"], presa["parte"], presa["partes"])
+    return recusa
+
+
 def _auditar_reenvio(conn, quem: dict, arquivo: Path, depois: dict) -> None:
-    """O "Reenviar" fica na auditoria DEPOIS da rodada, com o resultado: a falha dela nao esconde a do envio."""
+    """O resultado do "Reenviar", DEPOIS da rodada, num segundo evento (o "iniciado" entrou com a reserva): a falha
+    dele nao esconde a do envio."""
     try:
         with db.mutacao(conn):
             auditoria.registrar(conn, quem["id"], "copia_dono.reenviar", "copia_dono", arquivo.name, None, depois)
@@ -192,12 +209,15 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
     total = len(partes)
     reservado_por = reenvio_por["id"] if reenvio_por else usuario["id"]
     with db.mutacao(conn):
-        presa = conn.execute(f"SELECT id, envio_reservado_em, envio_reservado_por FROM {TABELA} WHERE arquivo=? "
-                             "AND envio_reservado_em IS NOT NULL ORDER BY id LIMIT 1", (arquivo.name,)).fetchone()
+        # a reserva desta copia trava sempre; no "Reenviar", tambem a vencida de outra copia (issue #482): e' a que
+        # a Saude acusa, e so' a recusa daqui leva a tela a liberacao. O envio automatico nao espera a copia velha.
+        outra = (" OR envio_reservado_em <= datetime('now', :idade)") if reenvio_por is not None else ""
+        presa = conn.execute(f"SELECT id, arquivo, parte, partes, envio_reservado_em, envio_reservado_por FROM {TABELA} "
+                             f"WHERE envio_reservado_em IS NOT NULL AND (arquivo=:a{outra}) "
+                             "ORDER BY arquivo<>:a, id LIMIT 1",
+                             {"a": arquivo.name, "idade": f"-{envio_reserva.IDADE_MINIMA_LIBERACAO} minutes"}).fetchone()
         if presa is not None:
-            recusa = envio_reserva.reservado(conn, presa["envio_reservado_em"], presa["envio_reservado_por"])
-            recusa.reserva_id = presa["id"]         # a rota devolve, para a liberacao (/api/envios/liberar)
-            raise recusa
+            raise _recusa_presa(conn, presa)
         ultima = conn.execute(f"SELECT MAX(rodada) FROM {TABELA} WHERE arquivo=?", (arquivo.name,)).fetchone()[0]
         if ultima is not None and reenvio_por is None:
             return 0                                # a mesma copia nao sai duas vezes sozinha
@@ -208,6 +228,10 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
                 f"INSERT INTO {TABELA} (arquivo, sha256, tamanho, rodada, parte, partes) VALUES (?,?,?,?,?,?)",
                 (arquivo.name, sha, len(dados), rodada, n, total)).lastrowid)
             envio_reserva.reservar(conn, TABELA, ids[-1], reservado_por, None)
+        if reenvio_por is not None:                 # quem clicou fica antes do e-mail, mesmo que a rodada caia
+            auditoria.registrar(conn, reenvio_por["id"], "copia_dono.reenviar", "copia_dono", arquivo.name, None, {
+                "rodada": rodada, "partes": total, "resultado": "iniciado", "sha256": sha, "para": config["para"],
+                "enviada_por": usuario["email"]})
     gerada = _gerada_em(arquivo)
     enviados, resultado = 0, "nada"
     try:

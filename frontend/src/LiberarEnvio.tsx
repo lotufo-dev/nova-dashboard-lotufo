@@ -10,6 +10,8 @@ import { IconeAlerta } from "./icones";
 export type Reserva = {
   mensagem: string; codigo: string; reservado_em: string | null; reservado_por_nome: string | null;
   liberavel_a_partir_de: string | null;
+  /** Issue #482: envio em partes (copia do dono): qual parte esta' presa e o assunto a procurar nos Enviados. */
+  parte?: number | null; partes?: number | null; assunto?: string | null;
 };
 
 export function envioReservado(e: unknown): e is ApiErro & { corpo: Reserva } {
@@ -51,6 +53,12 @@ export default function LiberarEnvio({ tabela, id, reserva, aoLiberar }: {
         <span className="campo__nota">
           Iniciado às {hora(reserva.reservado_em)} por {reserva.reservado_por_nome ?? "outro usuário"}. Só pode ser
           liberado a partir das {hora(reserva.liberavel_a_partir_de)}.
+        </span>
+      )}
+      {reserva?.parte && reserva.partes && (
+        <span className="campo__nota">
+          Parte {reserva.parte} de {reserva.partes} presa
+          {reserva.assunto ? `: procure nos Enviados o assunto “${reserva.assunto}”.` : "."}
         </span>
       )}
       <label className="campo__rotulo" htmlFor={campo}>Por que liberar (confira antes a caixa de Enviados)</label>
