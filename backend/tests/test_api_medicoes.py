@@ -739,24 +739,33 @@ def test_planilha_diretoria_recebe_403(client_admin):
 
 
 # issue #287: assinatura no DocuSign (evento informativo)
+def _com_boletim(cl):
+    """Medicao do fluxo antigo com boletim de 10/08/2026 (#290: a assinatura e' a do boletim)."""
+    mid = _medicao(cl, _contrato(cl))
+    assert _registrar_boletim(cl, mid).status_code == 201
+    return mid
+
+
+def _assinaturas(cl, mid):
+    return [e for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"] if "assinado" in e["texto"]]
+
+
 def test_registrar_assinatura_aparece_na_linha_do_tempo(client_admin):
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01", "envelope": "Boletim 1 - Obra Alfa"})
     assert r.status_code == 201
-    eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+    eventos = _assinaturas(client_admin, mid)
     assert [e["texto"] for e in eventos] == [
         "Boletim assinado no DocuSign em 01/10/2026 (envelope Boletim 1 - Obra Alfa) por Admin"]
 
 
 def test_assinatura_com_data_futura_da_422(client_admin):
     import datetime
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     futura = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
     r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": futura, "envelope": "x"})
     assert r.status_code == 422
-    assert client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"] == []
+    assert _assinaturas(client_admin, mid) == []
 
 
 def test_assinatura_em_medicao_inexistente_da_404(client_admin):
@@ -765,8 +774,7 @@ def test_assinatura_em_medicao_inexistente_da_404(client_admin):
 
 def test_assinatura_nao_gera_nem_exige_aviso(client_admin):
     from app import avisos, db
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     conn = db.get_conn()
     antes = avisos.listar(conn, publico="todos")
     client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01"})
@@ -775,21 +783,20 @@ def test_assinatura_nao_gera_nem_exige_aviso(client_admin):
 
 
 def test_assinatura_identica_repetida_da_422_e_nao_duplica(client_admin):
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     corpo = {"data": "2026-10-01", "envelope": "Boletim 1"}
     assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 201
     assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 422
     assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={**corpo, "data": "2026-10-02"}).status_code == 201
-    assert len(client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]) == 2
+    assert len(_assinaturas(client_admin, mid)) == 2
 
 
 def test_assinatura_na_linha_do_tempo_usa_a_data_da_assinatura_e_nao_a_do_registro(client_admin):
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-09-15", "envelope": "Boletim 1"})
     client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1.000,00"})   # registrado antes (hoje)
-    eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+    eventos = [e for e in client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+               if not e["texto"].startswith("Boletim nº")]
     assert [e["data"] for e in eventos][0] == "2026-09-15"
     assert "Boletim assinado no DocuSign" in eventos[0]["texto"]    # vem antes do valor, que e' de hoje
 
@@ -1135,9 +1142,19 @@ def test_leitura_da_capa_recusas(client_admin, monkeypatch):
     assert _ler_capa(client_admin, mid).status_code == 403
 
 
-def test_boletim_aceito_da_leitura_grava_origem_aceito(client_admin):
-    mid = _planilha_enviada(client_admin)
-    assert _registrar_boletim(client_admin, mid, lido="true").status_code == 201
+def _lida_e_enviada(cl, monkeypatch):
+    """Planilha enviada da 7a medicao com a capa de exemplo ja' lida pelo servidor."""
+    _capa_lida(monkeypatch)
+    mid = _nova_planilha(cl, _contrato(cl), numero=7).json()["medicao_id"]
+    _no_estado(mid, "planilha_enviada")
+    assert _ler_capa(cl, mid).json()["lido"]
+    return mid
+
+
+def test_boletim_com_os_campos_lidos_do_mesmo_pdf_grava_origem_aceito(client_admin, monkeypatch):
+    mid = _lida_e_enviada(client_admin, monkeypatch)
+    r = _registrar_boletim(client_admin, mid, valor="1.234.567,89", data="2026-04-14", numero="7")
+    assert r.status_code == 201, r.text
     [ev] = _atestos(mid)
     assert ev["origem"] == "aceito"
     assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_atestado_origem"] == "aceito"
@@ -1145,6 +1162,44 @@ def test_boletim_aceito_da_leitura_grava_origem_aceito(client_admin):
     mid2 = _planilha_enviada(client_admin)
     assert _registrar_boletim(client_admin, mid2).status_code == 201
     assert _atestos(mid2)[0]["origem"] == "manual"
+
+
+def test_campo_diferente_do_lido_ou_outro_pdf_grava_manual(client_admin, monkeypatch):
+    # gate Sol, rodada 1: o servidor nao confia no cliente; `lido=true` de uma chamada direta nao vira `aceito`
+    mid = _lida_e_enviada(client_admin, monkeypatch)
+    r = _registrar_boletim(client_admin, mid, valor="1.234.567,88", data="2026-04-14", numero="7", lido="true")
+    assert r.status_code == 201, r.text
+    assert _atestos(mid)[-1]["origem"] == "manual"
+    # os mesmos tres campos com outro PDF (outro sha256) tambem
+    r = _registrar_boletim(client_admin, mid, valor="1.234.567,89", data="2026-04-14", numero="7",
+                           texto="Outro boletim", lido="true")
+    assert r.status_code == 201, r.text
+    assert _atestos(mid)[-1]["origem"] == "manual"
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_atestado_origem"] == "manual"
+
+
+def test_leitura_de_outra_medicao_nao_da_aceito(client_admin, monkeypatch):
+    lida = _lida_e_enviada(client_admin, monkeypatch)
+    outra = _nova_planilha(client_admin, _contrato(client_admin), numero=7).json()["medicao_id"]
+    _no_estado(outra, "planilha_enviada")
+    assert lida != outra
+    assert _registrar_boletim(client_admin, outra, valor="1.234.567,89", data="2026-04-14", numero="7").status_code == 201
+    assert _atestos(outra)[0]["origem"] == "manual"
+
+
+def test_capa_com_valor_negativo_nao_propoe_nada(client_admin, monkeypatch):
+    # gate Sol, rodada 1: aprovado negativo nao e' boletim (o registro recusa); a leitura nao o propoe
+    from app import leitura_smo
+    monkeypatch.setattr(leitura_smo, "ler_pdf", lambda pdf: {
+        "ok": True, "motivo": None, "faltando": [], "avisos": [], "fonte": "texto",
+        "campos": {"numero": 7, "situacao": "APROVADA", "data_realizacao": "2026-04-14", "valor_centavos": 100_01,
+                   "reajuste_centavos": -12_34}})
+    cid = _contrato(client_admin)
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 7, "tipo": "reajuste", "competencia": "2026-07"}).json()["id"]
+    corpo = _ler_capa(client_admin, mid).json()
+    assert (corpo["lido"], corpo["campos"]) == (False, {})
+    assert corpo["avisos"] == ["A capa traz valor negativo; confira o boletim e digite os valores"]
 
 
 def test_linha_do_tempo_mostra_o_boletim_com_pedido_aprovado_e_diferenca(client_admin):
@@ -1160,6 +1215,42 @@ def test_linha_do_tempo_mostra_o_boletim_com_pedido_aprovado_e_diferenca(client_
     # a lista da obra (que a pagina da medicao le) traz os boletins
     [m] = [x for x in client_admin.get(f"/api/contratos/{d['contrato_id']}/medicoes").json() if x["id"] == mid]
     assert [b["id"] for b in m["boletins"]] == [aid]
+
+
+def test_pedido_da_linha_do_boletim_e_o_do_dia_do_registro(client_admin):
+    # gate Sol, rodada 1: a prevista sem pedido recebe o boletim; o pedido posto depois nao reescreve a linha antiga
+    mid = _medicao(client_admin, _contrato(client_admin))
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    assert client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "12.000,01"}).status_code == 200
+    [ev] = [e for e in _eventos(client_admin, mid) if e.startswith("Boletim")]
+    assert ev == "Boletim nº SMO 14/2026 de 10/08/2026: aprovado R$ 12.000,01 por Admin"
+    # com pedido no registro, ele fica congelado no evento (centavo impar)
+    mid2 = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid2).status_code == 201
+    assert _atestos(mid2)[0]["pedido_centavos"] == 12_345_67
+
+
+def test_boletim_registrado_depois_da_assinatura_aparece_antes_dela(client_admin):
+    # revisor, rodada 1: boletim de 10/08 assinado em 12/08 e registrado hoje vem antes da assinatura
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-08-12"}).status_code == 201
+    textos = _eventos(client_admin, mid)
+    i_bol = next(i for i, t in enumerate(textos) if t.startswith("Boletim nº"))
+    i_ass = next(i for i, t in enumerate(textos) if t.startswith("Boletim assinado"))
+    assert i_bol < i_ass
+
+
+def test_assinatura_exige_boletim_e_nao_vem_antes_dele(client_admin):
+    # gate Sol, rodada 1: a trava nao e' so' da tela
+    mid = _medicao(client_admin, _contrato(client_admin))
+    r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01"})
+    assert r.status_code == 422 and r.json()["detail"] == "Registre o boletim do órgão antes da assinatura"
+    assert _registrar_boletim(client_admin, mid).status_code == 201          # boletim de 10/08/2026
+    r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-08-09"})
+    assert r.status_code == 422 and r.json()["detail"] == (
+        "A data da assinatura não pode ser anterior à do boletim (10/08/2026)")
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-08-10"}).status_code == 201
 
 
 def test_envio_por_fora_poe_em_planilha_enviada_com_origem_externo_e_data(client_admin):

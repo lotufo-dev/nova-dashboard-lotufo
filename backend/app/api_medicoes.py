@@ -449,16 +449,15 @@ def registrar_boletim(medicao_id: ID,
                       numero_orgao: str | None = Form(None, max_length=100),
                       meio: Literal["smo", "oficio", "email", "carimbo", "ci", "outro"] | None = Form(None),
                       observacao: str | None = Form(None, max_length=500),
-                      lido: bool = Form(False),
                       arquivo: UploadFile = File(...),
                       usuario: dict = Depends(exigir("editar_cadastros")),
                       conn: sqlite3.Connection = Depends(conexao)):
     """"Registrar boletim": valor aprovado, data e nº digitados, com o PDF do orgao. Devolve pedido, aprovado e a
-    diferenca. `lido`: os tres campos vieram da leitura da capa e a pessoa os aceitou (origem `aceito`, #290)."""
+    diferenca. A origem (`aceito` ou `manual`) o servidor decide contra as leituras da capa que ele fez (#290)."""
     _medicao_existe(conn, medicao_id)
     try:
         dados = {"valor_centavos": _centavos(valor), "data": data.isoformat(), "numero_orgao": numero_orgao,
-                 "meio": meio, "observacao": observacao, "origem": "aceito" if lido else "manual"}
+                 "meio": meio, "observacao": observacao}
         medicoes.conferir_boletim(conn, medicao_id, dados)      # recusa antes de gravar o PDF
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
@@ -475,7 +474,8 @@ def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
                         usuario: dict = Depends(exigir("editar_cadastros")),
                         conn: sqlite3.Connection = Depends(conexao)):
     """Issue #290: le a capa do SMO do PDF arrastado (leitor deterministico da #285) e devolve o nº, a data e o
-    valor propostos para a pessoa conferir. Nao grava nada: o boletim so' se registra no "Registrar boletim".
+    valor propostos para a pessoa conferir. O boletim so' se registra no "Registrar boletim"; aqui so' fica guardado o
+    que foi lido de qual PDF, para o registro saber se os campos sao os lidos (origem `aceito`, gate Sol rodada 1).
     Na execucao o valor e' o dos precos iniciais (o da NF da medicao); no reajuste, o do reajustamento."""
     from app import leitura_smo
     m = conn.execute("SELECT numero, numero_orgao, tipo, estado FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
@@ -506,10 +506,20 @@ def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
     if "data_realizacao" in c:
         campos["data"] = c["data_realizacao"]
     valor = c.get("reajuste_centavos" if m["tipo"] == "reajuste" else "valor_centavos")
+    if valor is not None and valor < 0:
+        # gate Sol, rodada 1: aprovado negativo nao e' boletim neste produto (o registro recusa): nada e' proposto
+        return {"lido": False, "fonte": None, "campos": {},
+                "avisos": ["A capa traz valor negativo; confira o boletim e digite os valores"]}
     if valor is not None:
         campos["valor_centavos"] = valor
     if not campos and not avisos:
         avisos.append("Não foi possível ler a capa do boletim neste PDF; digite os valores")
+    if campos:
+        with db.mutacao(conn):
+            conn.execute("INSERT INTO medicao_boletim_leituras (medicao_id, sha256, numero_orgao, data, valor_centavos, "
+                         "fonte, usuario_id) VALUES (?,?,?,?,?,?,?)",
+                         (medicao_id, arquivos.sha_de(pdf), campos.get("numero_orgao"), campos.get("data"),
+                          campos.get("valor_centavos"), r["fonte"], usuario["id"]))
     return {"lido": bool(campos), "fonte": r["fonte"] if campos else None, "campos": campos, "avisos": avisos}
 
 
