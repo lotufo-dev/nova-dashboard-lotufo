@@ -31,7 +31,7 @@ describe("Reajuste", () => {
     previsto_centavos: null, previsto_origem: null, medicao_id: null, medicao_numero: null, medicao_estado: null,
     medicoes: [], medicoes_pedido: [], medicoes_aprovado: [], medicoes_nota: [], pedido_centavos: null,
     aprovado_centavos: null, apostilada: false, apostilado_centavos: null, apostilado_percentual: null,
-    apostilamento_chave: null, medicao_orgao: null, faturado_centavos: null, recebida_em: null,
+    apostilamento_chave: null, medicao_orgao: null, faturado_centavos: null, recebida_em: null, recebidas: [],
     data_base_incerta: false, avisos: [], ...extra });
   const cicloAberto = { data_base_mes: "2024-06", indice: "INCC-DI", ciclo: 2026, aniversario: "2026-06-01",
     situacao: "apostilamento_pendente", dias: 40, pleito: null, apostilamento: null, aditivos: [] };
@@ -56,7 +56,7 @@ describe("Reajuste", () => {
                 medicoes: [3, 8], medicoes_pedido: [3, 8], medicoes_aprovado: [3], medicoes_nota: [3],
                 pedido_centavos: 100_01, aprovado_centavos: 99_99, apostilada: true,
                 apostilado_centavos: 100_01, apostilamento_chave: "ap-12", medicao_orgao: 30, faturado_centavos: 99_99,
-                recebida_em: "2026-10-15" }),
+                recebida_em: "2026-10-15", recebidas: [{ numero: 3, recebida_em: "2026-10-15" }] }),
               comp("2026-08", { previsto_centavos: 200_03, previsto_origem: "manual" }),
               comp("2026-09", { estado: "pedida", medicao_numero: 7, medicoes: [4, 7], medicoes_pedido: [4, 7],
                 pedido_centavos: 301_01 })] },
@@ -69,7 +69,7 @@ describe("Reajuste", () => {
     const [jul, ago, set] = [...tabela.querySelectorAll("tbody tr")];
     // o nº da medicao que o termo cita fica a' vista ao lado do apostilado
     expect(celulas(jul).map(visivel)).toEqual(
-      ["07/2026", brl(100_01), brl(100_01), brl(99_99), `${brl(100_01)} (30ª)`, brl(99_99), "15/10/2026", "recebida"]);
+      ["07/2026", brl(100_01), brl(100_01), brl(99_99), `${brl(100_01)} (30ª med.)`, brl(99_99), "15/10/2026", "recebida"]);
     // a origem de cada celula ao passar o mouse; cada soma cita so' as medicoes que entraram nela
     const origens = ["Origem: planilha do pleito", "Origem: 3ª e 8ª medições de reajuste",
       "Origem: boletim da 3ª medição de reajuste", "Origem: apostilamento 019/2024/02/12, de 01/10/2026 (30ª medição)",
@@ -205,6 +205,49 @@ describe("Reajuste", () => {
       "03/11/2026Apostilamento 019/2024/02/12"]);
   });
 
+  it("dois complementos recebidos: a célula mostra a última baixa e a origem cita os dois (issue #445)", async () => {
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [cicloAberto], pleitos: [],
+          competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026, competencias: [
+            comp("2026-07", { estado: "recebida", medicoes: [3, 8], medicao_numero: 8,
+              recebida_em: "2026-11-02", recebidas: [{ numero: 3, recebida_em: "2026-10-15" },
+                { numero: 8, recebida_em: "2026-11-02" }] })] }] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
+    const recebido = celulas(tabela.querySelector("tbody tr")!)[6];
+    expect(visivel(recebido)).toBe("02/11/2026");
+    expect(recebido.getAttribute("title")).toBe("Origem: baixa no RM da 3ª e 8ª medições de reajuste");
+  });
+
+  it("dois envios no mesmo dia aparecem na ordem do horário (issue #445)", async () => {
+    const pleito = (id: number, numero: string, enviado_em: string) => ({ id,
+      tipo: "reajuste", rotulo: "Pleito de reajuste", origem: "cadastro", numero_oficio: numero, data_base_mes: "2024-06",
+      ciclo: 2026, dias: null, justificativa: null, situacao: "enviado", corpo_carta: null, montado_paginas: null,
+      assinado_arquivo: null, nome_documento: null, conferencia: null, pendencias: [], enviado_em,
+      envio_justificativa: null, anexos: [], exigidos: [], instrumento_chave: null });
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      // a API manda do mais novo para o mais antigo
+      ? { ciclos: [{ ...cicloAberto, situacao: "apostilado", dias: null, pleito: { id: 2 } }],
+          pleitos: [pleito(2, "CT-2", "2026-06-10 16:00:00"), pleito(1, "CT-1", "2026-06-10 09:00:00")] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const tempo = await screen.findByRole("list", { name: "Linha do tempo do ciclo de 2026" });
+    expect([...tempo.querySelectorAll("li")].map(li => li.textContent)).toEqual([
+      "10/06/2026Pleito de reajuste CT-1 enviado", "10/06/2026Pleito de reajuste CT-2 enviado"]);
+  });
+
+  it("termo não ligado ao pleito não entra na linha do tempo do ciclo corrente (issue #445)", async () => {
+    const solto = { id: 6, chave: "ap-99", tipo: "apostilamento_reajuste", numero: "SOLTO-1", data: "2026-10-01",
+      dados: { data_base: "2024-06", ciclo: 2026 } };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloAberto, apostilamento: null }], pleitos: [] }
+      : { instrumentos: [solto] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    await screen.findByText("apostilamento pendente");
+    expect(screen.queryByRole("list", { name: /^Linha do tempo/ })).toBeNull();
+  });
+
   it("ciclo sem pleito enviado nem termo não tem linha do tempo (issue #275)", async () => {
     api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
       ? { ciclos: [{ ...cicloAberto, situacao: "pleito_pendente", dias: 10 }], pleitos: [] }
@@ -327,7 +370,7 @@ describe("Reajuste", () => {
     const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
     const apostilado = [...tabela.querySelectorAll("tbody tr")].map(tr => celulas(tr)[4]);
     expect(apostilado.map(c => [visivel(c), c.getAttribute("title")])).toEqual([
-      [`${brl(130003)} (30ª)`, "Origem: apostilamento 019/2024/02/12, de 01/10/2026 (30ª medição)"],
+      [`${brl(130003)} (30ª med.)`, "Origem: apostilamento 019/2024/02/12, de 01/10/2026 (30ª medição)"],
       [brl(-1001), "Origem: apostilamento 019/2024/02/11, de 15/09/2026"]]);
     expect(brl(-1001).startsWith("−")).toBe(true);           // o reajuste negativo leva o sinal
     expect(screen.getByText("atendido pelo apostilamento 019/2024/02/12")).toBeTruthy();
