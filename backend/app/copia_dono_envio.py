@@ -331,6 +331,9 @@ def motivo(e: BaseException) -> str:
     """O que vai para a Saude: frase operacional. O detalhe tecnico (a excecao) fica so' no log."""
     if isinstance(e, graph.ErroGraph):
         texto = str(e)
+        http = re.search(r"HTTP (\d{3})", texto) if e.status is None else None    # o login (graph.py) so' diz no texto
+        if http and int(http[1]) >= 500:
+            return SERVICO_FORA
         if e.status is None and "inacessível" in texto:     # so' falha de rede e' "nao respondeu"
             return SERVICO_FORA
         if e.status in (401, 403) or (e.status is None and any(

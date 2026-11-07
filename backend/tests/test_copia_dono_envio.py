@@ -819,3 +819,7 @@ def test_frases_da_copia_do_dono_nao_trazem_codigo_interno():
                  "SERVICO_FALHOU", "COPIA_DANIFICADA", "SERVICO_NAO_CONFIGURADO"):
         _sem_codigo_interno(getattr(copia_dono_envio, nome))
     assert "sha256" not in copia_dono_envio.COPIA_DANIFICADA and "age" not in copia_dono_envio.COPIA_DANIFICADA.split()
+
+
+def test_login_microsoft_5xx_diz_que_o_servico_nao_respondeu():
+    assert copia_dono_envio.motivo(graph.ErroGraph("Login Microsoft respondeu HTTP 503")) == copia_dono_envio.SERVICO_FORA

@@ -37,18 +37,4 @@ describe("texto na tela: frase de apoio removida não volta", () => {
     const proibidos = /geral\.yaml|copia_dono\.|enviada_por|DASH_[A-Z_]+|TimeoutError|\bGraph\b/;
     expect(literais.filter(l => proibidos.test(l))).toEqual([]);
   });
-
-  // as frases vêm do backend (copia_dono_envio.py); esta lista espelha as que ele devolve
-  it("as frases de erro da cópia do dono não trazem código interno", () => {
-    const frases = [
-      "Configure o destinatário da cópia do dono no cadastro", "Configure quem envia a cópia do dono no cadastro",
-      "Nenhum usuário ativo é quem envia a cópia do dono: corrija o cadastro",
-      "o serviço de e-mail não respondeu; tente de novo mais tarde",
-      "o serviço de e-mail recusou o envio; tente de novo mais tarde",
-      "a conta Microsoft de quem envia não foi aceita pelo serviço de e-mail: reconecte em Minha conta",
-      "o arquivo da cópia do dono está danificado: gere outra cópia; nada foi enviado",
-    ];
-    const proibidos = /geral\.yaml|copia_dono\.|enviada_por|DASH_[A-Z_]+|TimeoutError|\bGraph\b|sha256|\bage\b/;
-    expect(frases.filter(f => proibidos.test(f))).toEqual([]);
-  });
 });
