@@ -714,8 +714,8 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
     fireEvent.click(within(janela).getByRole("button", { name: "Aceitar e registrar o boletim" }));
     await waitFor(() => expect(apiForm.mock.calls.some(c => c[0] === "/api/medicoes/5/boletim")).toBe(true));
     const fd = apiForm.mock.calls.find(c => c[0] === "/api/medicoes/5/boletim")![1] as FormData;
-    expect([fd.get("numero_orgao"), fd.get("data"), fd.get("valor"), fd.get("lido"), fd.get("meio")]).toEqual(
-      ["7", "2026-08-10", "12.000,01", "true", "smo"]);
+    expect([fd.get("numero_orgao"), fd.get("data"), fd.get("valor"), fd.get("meio")]).toEqual(
+      ["7", "2026-08-10", "12.000,01", "smo"]);
   });
 
   it("a linha do tempo mostra Planilha/carta, Boletim (pedido, aprovado, diferença e o PDF) e Assinatura", async () => {

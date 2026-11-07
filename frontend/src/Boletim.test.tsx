@@ -53,18 +53,27 @@ describe("FormBoletim (issue #290)", () => {
     fireEvent.change(campo(/Valor aprovado/), { target: { value: "12.000,01" } });
     fireEvent.click(screen.getByRole("button", { name: "Registrar boletim" }));
     await waitFor(() => expect(enviado()).toBeTruthy());
-    expect(enviado()!.get("lido")).toBe("false");
     expect(enviado()!.get("numero_orgao")).toBe("SMO 14/2026");
   });
 
-  it("mexer num campo lido tira a marca: o boletim grava como digitado", async () => {
+  it("mexer num campo lido tira a marca; voltar ao valor lido a devolve (gate Sol, rodada 1)", async () => {
     abrir({ lido: true, fonte: "texto", avisos: [], campos: { numero_orgao: "7", data: "2026-08-10", valor_centavos: 1200001 } });
     await waitFor(() => expect(campo(/Nº no órgão/).value).toBe("7"));
     fireEvent.change(campo(/Nº no órgão/), { target: { value: "8" } });
     expect(screen.getAllByText("Lido da capa")).toHaveLength(2);
+    fireEvent.change(campo(/Nº no órgão/), { target: { value: "7" } });
+    expect(screen.getAllByText("Lido da capa")).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "Aceitar e registrar o boletim" }));
     await waitFor(() => expect(enviado()).toBeTruthy());
-    expect([enviado()!.get("numero_orgao"), enviado()!.get("lido")]).toEqual(["8", "false"]);
+    // a origem e' do servidor (confere o PDF e os campos contra a leitura dele): a tela nao manda "lido"
+    expect([enviado()!.get("numero_orgao"), enviado()!.get("lido")]).toEqual(["7", null]);
+  });
+
+  it("valor negativo vindo da leitura não é proposto", async () => {
+    abrir({ lido: true, fonte: "texto", avisos: [], campos: { numero_orgao: "7", data: "2026-08-10", valor_centavos: -1234 } });
+    await waitFor(() => expect(campo(/Nº no órgão/).value).toBe("7"));
+    expect(campo(/Valor aprovado/).value).toBe("");
+    expect(screen.getAllByText("Lido da capa")).toHaveLength(2);
   });
 
   it("trocar o PDF tira o que veio da leitura anterior e mantém o que a pessoa digitou", async () => {

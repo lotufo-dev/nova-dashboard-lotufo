@@ -40,8 +40,9 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
   const [data, setData] = useState("");
   const [valor, setValor] = useState("");
   const [meio, setMeio] = useState("");
-  // os campos que vieram da capa e ninguem mexeu: so' com os tres assim o boletim grava como aceito
-  const [lidos, setLidos] = useState<Set<Campo>>(new Set());
+  // o que a capa trouxe (gate Sol, rodada 1): o campo e' "lido" enquanto o valor atual for o lido, mesmo depois de
+  // mexer e voltar. Quem decide a origem (`aceito`) e' o servidor, contra a leitura que ele guardou.
+  const [lido, setLido] = useState<{ numero?: string; data?: string; valor?: number }>({});
   const [tentou, setTentou] = useState(false);
   const leitura = useRef(0);
   const hoje = hojeLocal();
@@ -53,7 +54,7 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
     if (lidos.has("numero")) setNumero("");
     if (lidos.has("data")) setData("");
     if (lidos.has("valor")) setValor("");
-    setArquivo(f); setErroLeitura(""); setAvisos([]); setLidos(new Set());
+    setArquivo(f); setErroLeitura(""); setAvisos([]); setLido({});
     setLendo(true);
     const fd = new FormData();
     fd.append("arquivo", f);
@@ -61,12 +62,15 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
       const r = await apiForm<Leitura>(`/api/medicoes/${m.id}/boletim/leitura`, fd);
       if (n !== leitura.current) return;     // outro PDF chegou enquanto este era lido
       const c = r.campos ?? {};
-      const novos = new Set<Campo>();
-      if (c.numero_orgao) { setNumero(c.numero_orgao); novos.add("numero"); }
-      if (c.data) { setData(c.data); novos.add("data"); }
-      if (typeof c.valor_centavos === "number") { setValor(brlCampo(c.valor_centavos)); novos.add("valor"); }
-      if (novos.size > 0 && !meio) setMeio("smo");
-      setLidos(novos);
+      const novo: typeof lido = {};
+      if (c.numero_orgao) { setNumero(c.numero_orgao); novo.numero = c.numero_orgao; }
+      if (c.data) { setData(c.data); novo.data = c.data; }
+      // aprovado negativo nao se propoe (o servidor tambem nao): o campo fica para digitar
+      if (typeof c.valor_centavos === "number" && c.valor_centavos >= 0) {
+        setValor(brlCampo(c.valor_centavos)); novo.valor = c.valor_centavos;
+      }
+      if (Object.keys(novo).length > 0 && !meio) setMeio("smo");
+      setLido(novo);
       setAvisos(r.avisos ?? []);
     } catch (e) {
       if (n === leitura.current) setErroLeitura(mensagemDeErro(e));
@@ -75,9 +79,13 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
     }
   }
 
-  const mexeu = (c: Campo) => setLidos(s => { if (!s.has(c)) return s; const t = new Set(s); t.delete(c); return t; });
   const pedido = m.valor_protocolado_centavos;
   const aprovado = centavos(valor);
+  const lidos = new Set<Campo>([
+    ...(lido.numero !== undefined && numero.trim() === lido.numero ? ["numero" as const] : []),
+    ...(lido.data !== undefined && data === lido.data ? ["data" as const] : []),
+    ...(lido.valor !== undefined && aprovado === lido.valor ? ["valor" as const] : []),
+  ]);
   const falta = !arquivo ? "Arraste ou escolha o PDF do boletim."
     : !numero.trim() ? "Informe o nº do boletim no órgão."
     : !data ? "Informe a data do boletim."
@@ -93,13 +101,12 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
     fd.append("data", data);
     fd.append("numero_orgao", numero.trim());
     if (meio) fd.append("meio", meio);
-    fd.append("lido", String(lidos.size === 3));
     fd.append("arquivo", arquivo);
     const ok = await agir(() => apiForm(`/api/medicoes/${m.id}/boletim`, fd), "Boletim registrado.");
     if (ok) aoFechar();
   }
 
-  const lido = (c: Campo) => lidos.has(c) ? <> <Selo>Lido da capa</Selo></> : null;
+  const seloLido = (c: Campo) => lidos.has(c) ? <> <Selo>Lido da capa</Selo></> : null;
 
   return (
     <form className="pilha" onSubmit={salvar} noValidate aria-label="Registrar boletim" onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
@@ -126,18 +133,18 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
       {avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
       <div className="form-inline">
         <div className="campo">
-          <label className="campo__rotulo" htmlFor="bol-numero">Nº no órgão{lido("numero")}</label>
+          <label className="campo__rotulo" htmlFor="bol-numero">Nº no órgão{seloLido("numero")}</label>
           <input id="bol-numero" name="numero_orgao" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100}
-            value={numero} onChange={ev => { setNumero(ev.target.value); mexeu("numero"); }} />
+            value={numero} onChange={ev => setNumero(ev.target.value)} />
         </div>
         <div className="campo">
-          <label className="campo__rotulo" htmlFor="bol-data">Data do boletim{lido("data")}</label>
+          <label className="campo__rotulo" htmlFor="bol-data">Data do boletim{seloLido("data")}</label>
           <input id="bol-data" name="data" type="date" autoComplete="off" className="entrada--media" max={hoje}
-            value={data} onChange={ev => { setData(ev.target.value); mexeu("data"); }} />
+            value={data} onChange={ev => setData(ev.target.value)} />
         </div>
         <div className="campo">
-          <label className="campo__rotulo" htmlFor="bol-valor">Valor aprovado{lido("valor")}</label>
-          <CampoValor id="bol-valor" name="valor" value={valor} onChange={v => { setValor(v); mexeu("valor"); }} />
+          <label className="campo__rotulo" htmlFor="bol-valor">Valor aprovado{seloLido("valor")}</label>
+          <CampoValor id="bol-valor" name="valor" value={valor} onChange={setValor} />
         </div>
         <div className="campo">
           <label className="campo__rotulo" htmlFor="bol-meio">Meio</label>
