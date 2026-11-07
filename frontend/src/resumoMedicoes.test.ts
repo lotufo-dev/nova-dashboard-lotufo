@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { filtrarObras, nivelParada, porContratante, textoParada, type ObraResumo } from "./resumoMedicoes";
 
 const obra = (contrato_id: number, nome: string, contratante: string, orgao_sub: string | null = null): ObraResumo =>
-  ({ contrato_id, obra: nome, contratante, orgao_sub, aberta: false, prevista_id: null, encerramento: false });
+  ({ contrato_id, obra: nome, contratante, orgao_sub, aberta: false, prevista_id: null, encerramento: false,
+    ultima: null, ha_dias: null, prevista: null, proxima: 1, proxima_tipo: "execucao" });
 
 describe("página Medições (regras de apresentação)", () => {
   it("“Parada há”: hoje, 1 dia, N dias; sem marco, traço", () => {
