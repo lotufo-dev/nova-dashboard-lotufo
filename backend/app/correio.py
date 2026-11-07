@@ -544,13 +544,29 @@ def _trocar_assinatura(tmp: Path, destino: Path) -> None:
             time.sleep(espera)
 
 
+REMOVER_ASSINATURA_OCUPADA = "Não foi possível tirar a assinatura agora; tente de novo"
+
+
+def _apagar_assinatura(arquivo: Path) -> None:
+    """Mesma retentativa de `_trocar_assinatura` (#479): `unlink` da assinatura que o backup esta' lendo falha com
+    PermissionError no Windows; o que persiste vira ValueError (422) e a transacao desfaz o evento de remocao."""
+    for espera in (*_TENTATIVAS_TROCA, None):
+        try:
+            arquivo.unlink()
+            return
+        except PermissionError:
+            if espera is None:
+                raise ValueError(REMOVER_ASSINATURA_OCUPADA) from None
+            time.sleep(espera)
+
+
 def remover_assinatura(conn, usuario_id: int) -> None:
     arquivo = _arquivo_assinatura(usuario_id)
     if not arquivo.exists():
         return
     with db.mutacao(conn):
         auditoria.registrar(conn, usuario_id, "correio.assinatura", "usuario", usuario_id, None, {"removida": True})
-        arquivo.unlink()
+        _apagar_assinatura(arquivo)
 
 
 # --- contatos para os destinatarios --------------------------------------------------------------------------

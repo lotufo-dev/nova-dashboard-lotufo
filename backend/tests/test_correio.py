@@ -273,6 +273,39 @@ def test_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em_portugu
     assert [a.name for a in correio._arquivo_assinatura(1).parent.iterdir()] == ["usuario-1"]
 
 
+def test_remover_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em_portugues(conn, monkeypatch):
+    """Issue #479 (revisor na PR #472): no Windows, `unlink` da assinatura aberta pelo backup da' PermissionError e a
+    rota respondia 500 em ingles. Um bloqueio curto passa na tentativa seguinte; o que persiste vira ValueError (422),
+    a assinatura fica e o evento de remocao nao fica no banco."""
+    from pathlib import Path
+    correio.gravar_assinatura(conn, 1, _png(2, 2))
+    monkeypatch.setattr(correio.time, "sleep", lambda s: None)
+    real, chamadas = Path.unlink, []
+
+    def sempre_ocupado(self, missing_ok=False):
+        if self.name == "usuario-1":
+            raise PermissionError("arquivo aberto por outro processo")
+        real(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", sempre_ocupado)
+    with pytest.raises(ValueError, match=correio.REMOVER_ASSINATURA_OCUPADA):
+        correio.remover_assinatura(conn, 1)
+    assert correio.REMOVER_ASSINATURA_OCUPADA == "Não foi possível tirar a assinatura agora; tente de novo"
+    assert correio.assinatura(1) is not None
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='correio.assinatura' "
+                        "AND depois LIKE '%removida%'").fetchone()[0] == 0
+
+    def ocupado_uma_vez(self, missing_ok=False):
+        chamadas.append(self.name)
+        if self.name == "usuario-1" and len(chamadas) == 1:
+            raise PermissionError("arquivo aberto por outro processo")
+        real(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", ocupado_uma_vez)
+    correio.remover_assinatura(conn, 1)
+    assert correio.assinatura(1) is None and chamadas == ["usuario-1", "usuario-1"]
+
+
 def test_gravar_assinatura_limpa_temporario_velho_de_gravacao_interrompida(conn):
     """Gate Sol na PR #472 (#441): queda entre escrever e renomear deixa o `.tmp`; a gravacao seguinte tira o que
     passou de 1 hora e segue o padrao exato do temporario. O recente (outra gravacao em curso) e o alheio ficam."""
