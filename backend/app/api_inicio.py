@@ -34,6 +34,8 @@ def andamento(contrato_id: int | None = Query(None, ge=1, le=MAX_INT64), estado:
 
 
 @router.get("/api/medicoes/resumo")
-def resumo(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
-    """Pagina Medicoes com abas (09/10/2026): contagens por situacao, linhas em andamento e as obras ativas."""
-    return medicoes.resumo(conn)
+def resumo(mes: str | None = Query(None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$"),
+           _=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    """Medicoes (09/10/2026; redesenho 2026-11, #507): contagens, linhas em andamento (passo e com quem) e as obras
+    ativas, com `sem_no_mes` para a competencia `mes` (AAAA-MM; padrao, o mes de hoje)."""
+    return medicoes.resumo(conn, mes=mes)

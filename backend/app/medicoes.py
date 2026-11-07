@@ -872,6 +872,18 @@ SITUACAO = {"planilha_gerada": "planilha-gerada", "planilha_enviada": "planilha-
             "protocolada": "aguardando-pagamento", "nf_emitida": "aguardando-pagamento"}
 ORDEM_SITUACAO = ("planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento")
 
+# Redesenho 2026-11 (#507, "Em andamento"): o passo da barra de passos da pagina da obra (1 Planilha e carta, 2 Analise do
+# orgao, 3 Espelhos, 4 Notas, 5 Envio da nota, 6 Pagamento) e com quem a medicao esta', por situacao. A numeracao e'
+# a mesma em toda obra (a MTPAR so' nao passa pelo 1 e pelo 2). Espelho gerado ainda e' do passo 3 (falta enviar ao
+# faturamento); espelho enviado espera a nota do faturamento (passo 4, dentro da Lotufo); so' a analise do orgao e o
+# pagamento estao com o orgao.
+PASSO_DA_SITUACAO = {
+    "planilha-gerada": (1, "Planilha e carta", "Lotufo"), "planilha-enviada": (2, "Análise do órgão", "Órgão"),
+    "boletim-recebido": (3, "Espelhos", "Lotufo"), "faturamento": (3, "Espelhos", "Lotufo"),
+    "aguardando-nota": (4, "Notas", "Lotufo"), "enviar-nota": (5, "Envio da nota", "Lotufo"),
+    "aguardando-pagamento": (6, "Pagamento", "Órgão"),
+}
+
 # Sigla curta do contratante pela chave do orgao no cadastro (orgaos.chave). A SINFRA sai da familia, com a
 # superintendencia ao lado; o que nao estiver aqui aparece com o nome do cadastro, sem sigla inventada.
 SIGLA_ORGAO = {"mtpar": "MTPAR", "ses-mt": "SES-MT", "pref-cuiaba": "Pref. Cuiabá", "pref-vg": "Pref. Várzea Grande",
@@ -903,7 +915,7 @@ def _dia(valor: str | None) -> datetime.date | None:
         return None
 
 
-def resumo(conn, hoje: datetime.date | None = None) -> dict:
+def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> dict:
     """Pagina Medicoes (abas): contagem por situacao, as medicoes em andamento e as obras ativas.
 
     "Parada ha'" conta do marco da SITUACAO ATUAL, nunca do criado_em (lancar a medicao nao e' marco de nada):
@@ -914,6 +926,7 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
     Reajuste") com o valor somado e o marco mais antigo dos dois; o resto (projeto, reajuste em outra situacao)
     fica em linha propria, com o titulo de sempre."""
     hoje = hoje or tempo.hoje_local()
+    mes = mes or hoje.strftime("%Y-%m")   # o mes de "Iniciar medicao" (#507): as obras sem medicao NESTA competencia
     obras = {r["id"]: dict(r) for r in conn.execute(
         "SELECT c.id, c.estado, COALESCE(c.nome_curto, c.numero_instrumento) AS obra, c.orgao AS orgao_texto, "
         "c.encerramento_iniciado_em, o.familia, o.chave, o.nome FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id")}
@@ -968,6 +981,8 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
                 "numero": principal["numero"], "competencia": principal["competencia"],
                 "titulo": f"{principal['titulo']} + Reajuste" if len(p) == 2 else principal["titulo"],
                 "proximo_passo": principal["proximo_passo"],
+                "passo": {"numero": PASSO_DA_SITUACAO[situacao][0], "nome": PASSO_DA_SITUACAO[situacao][1]},
+                "com_quem": PASSO_DA_SITUACAO[situacao][2],
                 "valor_centavos": sum(valores) if valores else None,
                 "marco": d.isoformat() if d else None, "dias": (hoje - d).days if d else None})
     linhas.sort(key=lambda x: (ORDEM_SITUACAO.index(x["situacao"]), _chave_nome(x["obra"]), x["contrato_id"],
@@ -1024,9 +1039,21 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
     # prevista, ou a seguinte ao maior numero da serie de execucao (a cancelada tambem ocupa o numero); so' a obra
     # que nao tem execucao segue a serie de projeto.
     ultima_de: dict[int, dict] = {}
-    for r in conn.execute("SELECT contrato_id, numero, tipo, competencia FROM medicoes WHERE tipo IN ('execucao','projeto') "
+    ultima_info: dict[int, dict] = {}   # #507: a mesma medicao, com o estado e o valor, para o "Ultima medicao" da tela
+    for r in conn.execute("SELECT contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+                          "valor_protocolado_origem, valor_atestado_centavos FROM medicoes WHERE tipo IN ('execucao','projeto') "
                           "AND estado NOT IN ('prevista','cancelada','desistida') ORDER BY competencia DESC, numero DESC"):
-        ultima_de.setdefault(r["contrato_id"], {"numero": r["numero"], "tipo": r["tipo"], "competencia": r["competencia"]})
+        if r["contrato_id"] in ultima_de:
+            continue
+        ultima_de[r["contrato_id"]] = {"numero": r["numero"], "tipo": r["tipo"], "competencia": r["competencia"]}
+        ultima_info[r["contrato_id"]] = {**ultima_de[r["contrato_id"]], "estado": r["estado"],
+                                         "valor_centavos": (valor_travado(r) or (r["valor_protocolado_centavos"],))[0]}
+    # #507: a obra ja' tem medicao NESTA competencia, na serie que a tela oferece (execucao ou projeto; o reajuste acompanha
+    # a execucao e sozinho nao conta): a prevista, a cancelada e a desistida nao contam. Leblon com a 29ª esperando
+    # pagamento e sem a 30ª do mes continua "sem medicao no mes".
+    com_medicao_no_mes = {(r[0], r[1]) for r in conn.execute(
+        "SELECT DISTINCT contrato_id, tipo FROM medicoes WHERE competencia=? AND tipo IN ('execucao','projeto') "
+        "AND estado NOT IN ('prevista','cancelada','desistida')", (mes,))}
     maior = {(r[0], r[1]): r[2] for r in conn.execute(
         "SELECT contrato_id, tipo, MAX(numero) FROM medicoes WHERE tipo IN ('execucao','projeto') GROUP BY contrato_id, tipo")}
 
@@ -1052,19 +1079,23 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
                     # A-21 (10/10/2026): a obra em encerramento segue na lista (mede a final), mas a tela nao a
                     # conta como "obra ativa" (a definicao de `avisos.ativos`, a do Inicio)
                     "encerramento": bool(o["encerramento_iniciado_em"]),
-                    "ultima": ultima_de.get(o["id"]),
+                    "ultima": ultima_de.get(o["id"]), "ultima_medicao": ultima_info.get(o["id"]),
+                    "sem_no_mes": (o["id"], proxima(o["id"])[1]) not in com_medicao_no_mes,
                     "ha_dias": ha_dias(ultima_de[o["id"]]["competencia"]) if o["id"] in ultima_de else None,
                     "prevista": prevista_dados.get(o["id"]),
                     "proxima": proxima(o["id"])[0], "proxima_tipo": proxima(o["id"])[1]}
                    for o in ativas]
-    contagens = {"sem-medicao": sum(1 for o in lista_obras if not o["aberta"])}
+    contagens = {"sem-medicao": sum(1 for o in lista_obras if not o["aberta"]),
+                 # menu do redesenho (#507): obras ativas sem medicao no mes, e as medicoes iniciadas e nao recebidas
+                 # (uma por linha da lista "Em andamento": medicao + reajuste do mesmo numero e' uma so')
+                 "iniciar": sum(1 for o in lista_obras if o["sem_no_mes"]), "em-andamento": len(linhas)}
     for s in ORDEM_SITUACAO:
         contagens[s] = sum(1 for x in linhas if x["situacao"] == s)
     # N-01 (10/10/2026): a aba abre a tabela de notas enviadas (`notas_envio.aguardando_pagamento`, uma linha por
     # medicao protocolada); contar as linhas daqui (o par medicao + reajuste vira uma) dava outro numero
     contagens["aguardando-pagamento"] = conn.execute(
         "SELECT COUNT(*) FROM medicoes WHERE estado='protocolada'").fetchone()[0]
-    return {"hoje": hoje.isoformat(), "contagens": contagens, "linhas": linhas, "obras": lista_obras}
+    return {"hoje": hoje.isoformat(), "mes": mes, "contagens": contagens, "linhas": linhas, "obras": lista_obras}
 
 
 def _chave_nome(nome: str | None) -> str:
