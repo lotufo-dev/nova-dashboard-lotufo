@@ -6,6 +6,7 @@ import type { AbaCarteira } from "./rota";
 /** As abas da Carteira, na ordem do mapa (o Resumo e' a padrao). */
 export const ABAS_CARTEIRA: { id: AbaCarteira; rotulo: string }[] = [
   { id: "resumo", rotulo: "Resumo" }, { id: "qdop", rotulo: "QDOP" }, { id: "producao", rotulo: "Produção" },
+  { id: "custo", rotulo: "Custo" },
 ];
 
 export type Farol = "verde" | "atencao" | "acao" | "vermelho";

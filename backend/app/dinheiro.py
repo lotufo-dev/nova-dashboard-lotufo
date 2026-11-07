@@ -87,3 +87,17 @@ def ratear(total_centavos: int, parcelas: list[tuple[str, float, str]], absorve:
               for nome, pct, metodo in parcelas if nome != absorve}
     partes[absorve] = total_centavos - sum(partes.values())
     return {nome: partes[nome] for nome in nomes}
+
+
+def ratear_proporcional(total_centavos: int, pesos: list[int]) -> list[int]:
+    """Issue #491: rateia `total_centavos` na proporcao de `pesos` (centavos inteiros, >= 0, soma > 0), so' com
+    inteiros: cada parte e' o piso da sua fracao e o residuo vai, um centavo por vez, aos maiores restos (empate: o
+    primeiro). Total negativo (estorno) rateia como o positivo, com o sinal. A soma das partes e' sempre o total."""
+    if not pesos or any(p < 0 for p in pesos) or sum(pesos) <= 0:
+        raise ValueError("Pesos do rateio precisam ser inteiros não negativos com soma positiva")
+    soma, sinal, total = sum(pesos), -1 if total_centavos < 0 else 1, abs(total_centavos)
+    partes = [total * p // soma for p in pesos]
+    restos = [total * p % soma for p in pesos]
+    for i in sorted(range(len(pesos)), key=lambda i: (-restos[i], i))[:total - sum(partes)]:
+        partes[i] += 1
+    return [sinal * x for x in partes]

@@ -62,6 +62,8 @@ describe("rota", () => {
     expect(parseRota("/obras/7/medicoes")).toEqual({ tela: "obra", id: 7, aba: "medicoes" });
     expect(caminhoDe({ tela: "carteira", aba: "resumo" })).toBe("/carteira");
     expect(parseRota("/carteira/resumo")).toEqual({ tela: "carteira" });
+    expect(caminhoDe({ tela: "carteira", aba: "custo" })).toBe("/carteira/custo");
+    expect(parseRota("/carteira/custo")).toEqual({ tela: "carteira", aba: "custo" });
     expect(parseRota("/admin/saude")).toEqual({ tela: "admin" });
     expect(hrefDe({ tela: "documentos" }, { pendentes: "1", vazio: "" }, "emp-3")).toBe("/documentos?pendentes=1#emp-3");
     expect(hrefDe({ tela: "avisos" }, { familia: "prazo", obra: "7" })).toBe("/avisos?familia=prazo&obra=7");

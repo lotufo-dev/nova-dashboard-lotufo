@@ -4,8 +4,9 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from app import diretoria, qdop, tempo
+from app import custo_obra, diretoria, qdop, tempo
 from app.api_auth import conexao
+from app.api_medicoes import ID
 from app.permissoes import exigir
 
 router = APIRouter()
@@ -20,6 +21,26 @@ def painel(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Conne
 @router.get("/api/a-receber")
 def a_receber(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
     return diretoria.a_receber(conn)
+
+
+@router.get("/api/diretoria/custo")
+def custo_obras(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #491: as obras do seletor da aba Custo (com cadastro de custo, fora de consorcio)."""
+    return custo_obra.obras(conn)
+
+
+@router.get("/api/diretoria/custo/{contrato_id}")
+def custo_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
+                  conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #491: custo lancado no RM por grupo, medicao a medicao, com o acumulado da obra."""
+    try:
+        return custo_obra.custo_da_obra(conn, contrato_id)
+    except custo_obra.SemCadastro as e:
+        raise HTTPException(404, str(e)) from None
+    except custo_obra.RegraDesconhecida as e:
+        raise HTTPException(422, str(e)) from None
+    except custo_obra.CentroDisputado as e:
+        raise HTTPException(409, str(e)) from None
 
 
 @router.get("/api/diretoria/qdop.xlsx")
