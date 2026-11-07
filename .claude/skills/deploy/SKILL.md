@@ -87,6 +87,10 @@ Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -
   `finally` sempre apaga o sentinela. Seguir o item "Deploy da issue #443" de "Subir e derrubar": rodar o `deploy.ps1`
   novo copiado para `C:\Temp\deploy`, como na #417 (pelo Mac num `.ps1` com `-File`). O commit no ar ainda não tem o
   campo `commit` no health: o script avisa `producao NAO conferida no inicio` e só solta o watchdog com `DEPLOY OK`.
+  Antes, conferir o `git` no PATH da máquina, como diz o mesmo item do runbook (issue #481): sem ele o servidor, que
+  roda como SYSTEM, sobe com `commit: null` e o script avisa `o servidor nao conseguiu ler o proprio commit: confira
+  o git no PATH da maquina` (não é servidor fora do ar: corrigir o PATH antes de tentar de novo). Na volta do build
+  deste primeiro deploy, basta conferir o `rev-parse HEAD` igual ao `<anterior>` e o 200 do health.
 
 - **Corte para HTTPS** (issue #425): é um passo à parte, depois de um deploy normal do commit com a #425, e só quando o
   Leo pedir. Seguir o runbook, "HTTP ou HTTPS", subseção "Corte para HTTPS", na ordem (certificado, PCs da operação,

@@ -453,6 +453,48 @@ def test_deploy_confere_a_producao_no_inicio_e_so_solta_o_aborto_antes_do_checko
         "$script:soltarWatchdog = $false", 0, codigo.index("try { Construir $alvo; ConferirInstalacao }"))
 
 
+def test_deploy_separa_health_sem_commit_de_servidor_fora_do_ar():
+    # Issue #481 (Aviso do revisor na rodada 2 da PR #475): o servidor roda como SYSTEM; sem o git no PATH da maquina o
+    # commit novo sobe saudavel com `commit: null` e o deploy desfazia um deploy bom com a mesma mensagem do servidor
+    # fora do ar. O CommitDoHealth diz qual dos casos viu e o NoArEm da a mensagem de cada um.
+    codigo = _codigo(_ler("deploy.ps1"))
+    health = codigo[codigo.index("function CommitDoHealth"):codigo.index("function NoArEm")]
+    # tres desfechos alem do commit lido: sem 200, 200 sem o campo (commit anterior a 421) e 200 com o campo vazio
+    for situacao in ("sem-200", "sem-campo", "vazio", "ok"):
+        assert f'Situacao = "{situacao}"' in health
+    assert "PSObject.Properties.Name -contains 'commit'" in health
+    no_ar = codigo[codigo.index("function NoArEm"):codigo.index("function PinadoLimpo")]
+
+    def ramo(situacao):
+        trecho = no_ar[no_ar.index(f'"{situacao}" {{'):]
+        return trecho[:trecho.index("}")]
+
+    assert "o servidor nao conseguiu ler o proprio commit: confira o git no PATH da maquina" in ramo("vazio")
+    assert "servidor fora do ar" in ramo("sem-200")
+    assert "sem o campo commit" in ramo("sem-campo")
+    # a mensagem que juntava os casos saiu; o vazio continua sem provar o commit (so' o "ok" no commit certo prova)
+    assert "health sem 200 ou sem o campo commit" not in codigo
+    assert no_ar.count("return $true") == 1
+    assert '$lido.Situacao -eq "ok"' in no_ar
+
+
+def test_runbook_e_skill_dizem_como_conferir_o_commit_do_health_antes_do_primeiro_deploy():
+    # Issue #481: antes do primeiro deploy com a 443, conferir que o servidor le o proprio commit e o que fazer se vier
+    # vazio; a nota cita tambem a volta do build, em que basta conferir o rev-parse e o 200.
+    raiz = SCRIPTS.parent
+    runbook = (raiz / "docs" / "runbook.md").read_text(encoding="utf-8")
+    item = runbook[runbook.index("- **Deploy da issue #443"):]
+    item = item[:item.index("\n- ")]
+    assert "o servidor nao conseguiu ler o proprio commit" in item
+    assert "PATH" in item and "SYSTEM" in item
+    assert "rev-parse" in item and "volta do build" in item
+    skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
+    nota = skill[skill.index("- **Primeiro deploy com a #443**"):]
+    nota = nota[:nota.index("\n- ")]
+    assert "o servidor nao conseguiu ler o proprio commit" in nota
+    assert "volta do build" in nota and "rev-parse" in nota
+
+
 def test_deploy_so_solta_com_o_health_no_commit_esperado():
     # Rodada 2 da PR #475 (issue #443): o Saudavel aceitava qualquer processo que respondesse 200. Com o anterior sem a
     # #417, a nova tentativa falhava na conferencia da instalacao, caia na volta do build, e o 200 do processo NOVO no
