@@ -228,7 +228,7 @@ function ComandoTarefa([string]$verbo, [bool]$fatal) {
     # Texto proprio, sem o "$msgAgendador" de antes do checkout: aqui a producao pode ter mudado.
     if ($r.Estourou) {
         # schtasks que nem morto morreu ainda pode concluir o /End ou /Run depois: o watchdog fica pausado
-        if ($r.FilhoVivo) { $script:manterSentinela = $true; throw "agendador de tarefas nao respondeu ao schtasks /$verbo (mais de $LimiteAgendador s) e o processo do schtasks nao morreu" }
+        if ($r.FilhoVivo) { $script:manterSentinela = $true; $script:schtasksPreso = $true; throw "agendador de tarefas nao respondeu ao schtasks /$verbo (mais de $LimiteAgendador s) e o processo do schtasks nao morreu" }
         throw "agendador de tarefas nao respondeu ao schtasks /$verbo (mais de $LimiteAgendador s)"
     }
     if ($r.Codigo -ne 0) {
@@ -379,6 +379,7 @@ $anterior = (& git -C $AppDir rev-parse HEAD).Trim()
 # schtasks que nao morreu) ou com uma parada ($producaoMexida) sem prova depois.
 $script:soltarWatchdog = $false
 $script:manterSentinela = $false
+$script:schtasksPreso = $false   # schtasks que estourou e nem morto morreu (ComandoTarefa): o /End ou /Run ainda pode concluir
 $script:producaoMexida = $false
 $script:buildComecou = $false
 $script:sentinelaPreso = $false
@@ -629,6 +630,10 @@ try {
     }
     elseif (-not $script:pinadoMudou -and -not $script:producaoProvada) {
         Write-Host "sentinela $pause MANTIDO: a producao nao estava conferida no inicio (sentinela de execucao anterior, pinado sujo ou health sem o commit $anterior); conferir e recuperar antes de apaga-lo (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow
+    }
+    elseif ($script:schtasksPreso -and $script:soltarWatchdog -and $script:producaoProvada) {
+        # revisor da remescla: religada e provada, mas o schtasks preso ainda pode concluir o /End ou /Run depois
+        Write-Host "sentinela $pause MANTIDO: a producao esta' provada, mas um schtasks preso ainda pode concluir o /End ou /Run; conferir que nenhum schtasks.exe segue rodando e o health no commit esperado, e so' entao apaga-lo (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow
     }
     else { Write-Host "sentinela $pause MANTIDO: a producao nao foi provada depois do deploy; intervir a mao e so' apaga-lo depois da recuperacao (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow }
 }
