@@ -374,8 +374,7 @@ def _custo(conn, usuario_id, contrato_id, c, rel) -> None:
         conn.execute("DELETE FROM custo_grupos WHERE contrato_id=? AND nome=?", (contrato_id, antigo))
     for ordem, g in enumerate(d["grupos"], 1):
         chave = g["item_chave"] or {}
-        valores = (ordem, json.dumps(g["tarefas"], ensure_ascii=False), json.dumps(g["itens_planilha"], ensure_ascii=False),
-                   chave.get("codigo"), chave.get("unidade"))
+        valores = (ordem, _json(g["tarefas"]), _json(g["itens_planilha"]), chave.get("codigo"), chave.get("unidade"))
         cur = conn.execute("UPDATE custo_grupos SET ordem=?, tarefas=?, itens_planilha=?, item_chave_codigo=?, "
                            "item_chave_unidade=? WHERE contrato_id=? AND nome=?", (*valores, contrato_id, g["nome"]))
         if not cur.rowcount:

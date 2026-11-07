@@ -862,6 +862,24 @@ REGRAS_SEM_TAREFA = ("proporcional",)
 _PREFIXOS = 'use uma lista de códigos entre aspas (ex.: "001.03"); sem aspas o YAML lê o código como número'
 
 
+_CHAVES_CUSTO = frozenset({"projeto_rm", "grupos", "nao_e_custo", "sem_tarefa"})
+_CHAVES_GRUPO = frozenset({"nome", "tarefas", "itens_planilha", "item_chave"})
+
+
+def _segmentos(codigo: str) -> list[str]:
+    """`2.` e `2` sao o mesmo prefixo; `001.1` nao contem `001.10` (compara por segmento, nao por letra)."""
+    return codigo.rstrip(".").split(".")
+
+
+def _dentro_do_prefixo(codigo: str, prefixo: str) -> bool:
+    s, p = _segmentos(codigo), _segmentos(prefixo)
+    return s[:len(p)] == p
+
+
+def _sobrepoe(a: str, b: str) -> bool:
+    return _dentro_do_prefixo(a, b) or _dentro_do_prefixo(b, a)
+
+
 def _prefixos(valor, campo: str, falha) -> list[str] | None:
     """Lista de prefixos de codigo (tarefa, item, natureza). Texto obrigatorio: `001.03` sem aspas vira 1.03."""
     if valor is None:
@@ -880,12 +898,15 @@ def _custo(bruto, falha) -> dict | None:
     if not isinstance(bruto, dict):
         falha("custo", "use um mapa com projeto_rm, grupos, nao_e_custo e sem_tarefa")
         return None
+    for k in sorted(set(bruto) - _CHAVES_CUSTO, key=str):
+        falha(f"custo.{k}", f"campo desconhecido; use {', '.join(sorted(_CHAVES_CUSTO))}")
     projeto = str(bruto.get("projeto_rm") or "").strip()
     if not projeto:
         falha("custo.projeto_rm", "obrigatório (código do projeto no Solum, ex.: GL.C01.P704)")
     nao_e_custo = bruto.get("nao_e_custo")
     nao_e_custo = list(NAO_E_CUSTO_PADRAO) if nao_e_custo is None else _prefixos(nao_e_custo, "custo.nao_e_custo", falha)
-    regra = bruto.get("sem_tarefa", "proporcional")
+    regra = bruto.get("sem_tarefa")
+    regra = "proporcional" if regra is None else regra
     if regra not in REGRAS_SEM_TAREFA:
         falha("custo.sem_tarefa", f"use {' ou '.join(REGRAS_SEM_TAREFA)}: {regra!r}")
     lista = bruto.get("grupos")
@@ -893,30 +914,35 @@ def _custo(bruto, falha) -> dict | None:
         falha("custo.grupos", "use uma lista com ao menos um grupo (nome, tarefas, itens_planilha)")
         lista = []
     grupos: list[dict] = []
-    dono_tarefa: dict[str, str] = {}
-    dono_item: dict[str, str] = {}
+    donos: dict[str, list[tuple[str, str]]] = {"tarefas": [], "itens_planilha": []}
     nomes: set[str] = set()
     for i, g in enumerate(lista):
         onde = f"custo.grupos[{i}]"
         if not isinstance(g, dict):
             falha(onde, "use um mapa com nome, tarefas, itens_planilha e, se houver, item_chave")
             continue
-        nome = str(g.get("nome") or "").strip() if isinstance(g.get("nome"), (str, int)) else ""
+        for k in sorted(set(g) - _CHAVES_GRUPO, key=str):
+            falha(f"{onde}.{k}", f"campo desconhecido; use {', '.join(sorted(_CHAVES_GRUPO))}")
+        nome = g["nome"].strip() if isinstance(g.get("nome"), str) else ""
         if not nome:
-            falha(f"{onde}.nome", "obrigatório (o nome do grupo na planilha do órgão)")
+            falha(f"{onde}.nome", "obrigatório, em texto (o nome do grupo na planilha do órgão)")
         elif nome in nomes:
             falha(f"{onde}.nome", f"grupo repetido: {nome}")
         nomes.add(nome)
         tarefas = _prefixos(g.get("tarefas"), f"{onde}.tarefas", falha)
         itens = _prefixos(g.get("itens_planilha"), f"{onde}.itens_planilha", falha)
-        for valores, dono, campo, rotulo in ((tarefas, dono_tarefa, "tarefas", "a tarefa"),
-                                             (itens, dono_item, "itens_planilha", "o item")):
+        for campo, valores, rotulo in (("tarefas", tarefas, "a tarefa"), ("itens_planilha", itens, "o item")):
             for v in valores or []:
-                if v in dono:
-                    lugar = "aparece duas vezes" if dono[v] == nome else f"já está no grupo {dono[v]}"
-                    falha(f"{onde}.{campo}", f"{rotulo} {v} do grupo {nome} {lugar}")
-                else:
-                    dono[v] = nome
+                for outro, dono in donos[campo]:
+                    if v == outro:
+                        lugar = "aparece duas vezes" if dono == nome else f"já está no grupo {dono}"
+                        falha(f"{onde}.{campo}", f"{rotulo} {v} do grupo {nome} {lugar}")
+                        break
+                    if dono != nome and _sobrepoe(v, outro):
+                        falha(f"{onde}.{campo}", f"{rotulo} {v} do grupo {nome} se sobrepõe a {outro} do grupo "
+                                                 f"{dono}; um código só pode cair em um grupo")
+                        break
+                donos[campo].append((v, nome))
         chave = g.get("item_chave")
         if chave is not None:
             if (not isinstance(chave, dict) or not isinstance(chave.get("codigo"), str) or not chave["codigo"].strip()
@@ -925,6 +951,8 @@ def _custo(bruto, falha) -> dict | None:
                 chave = None
             else:
                 chave = {"codigo": chave["codigo"].strip(), "unidade": chave["unidade"].strip()}
+                if itens is not None and not any(_dentro_do_prefixo(chave["codigo"], p) for p in itens):
+                    falha(f"{onde}.item_chave", f"o item {chave['codigo']} não está nos itens_planilha do grupo {nome}")
         grupos.append({"nome": nome, "tarefas": tarefas or [], "itens_planilha": itens or [], "item_chave": chave})
     return {"projeto_rm": projeto, "nao_e_custo": nao_e_custo or [], "sem_tarefa": regra, "grupos": grupos}
 

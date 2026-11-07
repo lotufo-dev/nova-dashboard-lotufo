@@ -1066,10 +1066,31 @@ def test_custo_tarefa_em_dois_grupos_e_recusada_com_arquivo_grupo_e_tarefa(tmp_p
     ({"nao_e_custo": [2.02]}, "custo.nao_e_custo"),
     ({"grupos": [{"nome": "A", "tarefas": ["1"], "itens_planilha": ["2."], "item_chave": {"codigo": "2.1"}}]},
      "custo.grupos[0].item_chave"),
+    # code-review: prefixo de um grupo dentro do de outro (o codigo cairia nos dois)
+    ({"grupos": [{"nome": "A", "tarefas": ["001.03"], "itens_planilha": ["2."]},
+                 {"nome": "B", "tarefas": ["001.03.01"], "itens_planilha": ["3."]}]}, "custo.grupos[1].tarefas"),
+    ({"grupos": [{"nome": "A", "tarefas": ["1"], "itens_planilha": ["2."]},
+                 {"nome": "B", "tarefas": ["2"], "itens_planilha": ["2.1"]}]}, "custo.grupos[1].itens_planilha"),
+    # code-review: campo com erro de digitacao nao vira grupo vazio calado; nome tem que ser texto
+    ({"grupos": [{"nome": "A", "tarefa": ["1"], "itens_planilha": ["2."]}]}, "custo.grupos[0].tarefa"),
+    ({"nao_e_custos": ["2.02"]}, "custo.nao_e_custos"),
+    ({"grupos": [{"nome": True, "tarefas": ["1"], "itens_planilha": ["2."]}]}, "custo.grupos[0].nome"),
+    # code-review: o item-chave e' um item do proprio grupo
+    ({"grupos": [{"nome": "A", "tarefas": ["1"], "itens_planilha": ["3."],
+                  "item_chave": {"codigo": "2.1", "unidade": "m³"}}]}, "custo.grupos[0].item_chave"),
 ])
 def test_custo_invalido_e_recusado_com_o_campo(tmp_path, troca, campo):
     erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, **troca}}]))
     assert any(e.startswith(f"contratos/mt-402.yaml: {campo}:") for e in erros), erros
+
+
+def test_custo_prefixos_parecidos_sem_sobreposicao_e_sem_tarefa_vazio_passam(tmp_path):
+    """`001.1` nao contem `001.10` (compara por segmento); `sem_tarefa:` vazio fica com o padrao."""
+    grupos = [{"nome": "A", "tarefas": ["001.1"], "itens_planilha": ["2."]},
+              {"nome": "B", "tarefas": ["001.10"], "itens_planilha": ["20."]}]
+    c = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": grupos,
+                                                                           "sem_tarefa": None}}]))
+    assert c["contratos"][0]["custo"]["sem_tarefa"] == "proporcional"
 
 
 def test_custo_que_nao_e_mapa_e_recusado(tmp_path):
