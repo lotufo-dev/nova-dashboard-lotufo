@@ -1529,3 +1529,22 @@ def test_falha_que_nem_grava_sobe(client_admin, monkeypatch):
     cid = _contrato(client_admin)
     with pytest.raises(RuntimeError, match="locked"):
         _planilha_xlsx(client_admin, cid, "20.693,10")
+
+
+def test_falha_depois_de_leitura_valida_nao_a_desfaz(client_admin):
+    """Sol S4 (rodada 2): uma falha operacional posterior, no mesmo contexto, nao troca a leitura valida por
+    "planilha não lida"; a falha fica gravada com o pedido e o cadastro tentados."""
+    from app import db, medicao_grupos
+    from tests.test_leitura_planilha_medicao import planilha
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.693,10").json()["medicao_id"]
+    conn = db.get_conn()
+    try:
+        medicao_grupos.registrar_falha(conn, None, mid, 1, planilha())
+        falha = conn.execute("SELECT pedido_centavos FROM medicao_grupos WHERE situacao='falhou'").fetchone()
+        assert falha["pedido_centavos"] == 20_693_10
+    finally:
+        conn.close()
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["situacao"] == "lida" and len(g["grupos"]) == 3

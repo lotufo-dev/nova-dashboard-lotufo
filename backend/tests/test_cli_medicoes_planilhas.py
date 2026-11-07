@@ -151,6 +151,8 @@ def test_pedido_novo_da_medicao_pede_leitura_nova(banco, capsys):
     _executar(pasta)
     saida = capsys.readouterr().out
     assert "recusada: diferença de R$ 500,00" in saida and "-> já lida antes" not in saida
+    # rodada 2, Sol S1: a leitura feita contra o pedido antigo nao vale mais na consulta
+    assert _grupos(1) == ("sem_leitura", None)
 
 
 def test_pedido_que_muda_durante_a_leitura_e_conferido_sob_o_lock(banco, capsys, monkeypatch):
@@ -254,3 +256,109 @@ def test_arquivo_grande_demais_e_pulado_sem_ler(banco, capsys, monkeypatch):
     monkeypatch.setattr(Path, "read_bytes", lambda self: pytest.fail("leu o arquivo grande"))
     _executar(_pasta_com(banco))
     assert "pulado: arquivo grande demais" in capsys.readouterr().out
+
+
+# --- rodada 2 de correcao -----------------------------------------------------------------------------------------
+
+def _grupos(numero, tipo="execucao"):
+    """(situacao, grupo_por da leitura que vale) da medicao, pela consulta da tela."""
+    from app import medicao_grupos
+    c = db.get_conn()
+    try:
+        mid = c.execute("SELECT id FROM medicoes WHERE numero=? AND tipo=?", (numero, tipo)).fetchone()[0]
+        g = medicao_grupos.grupos(c, mid)
+    finally:
+        c.close()
+    return g["situacao"], g["leitura"]["grupo_por"] if g["leitura"] else None
+
+
+def test_cadastro_novo_deixa_a_leitura_antiga_de_lado_ate_ler_de_novo(banco):
+    """Sol S1 (rodada 2): leitura feita com outro cadastro nao vale na consulta."""
+    _executar(_pasta_com(banco))
+    assert _grupos(1) == ("lida", "planilha")
+    _cadastro_de_custo([("Drenagem", ["3"])])
+    assert _grupos(1) == ("sem_leitura", None)
+
+
+def test_medicao_que_deixou_de_ser_execucao_fica_sem_leitura(banco):
+    """Sol S1 (rodada 2): corrigida para projeto, a medicao nao tem leitura por grupo."""
+    _executar(_pasta_com(banco))
+    c = db.get_conn()
+    c.execute("UPDATE medicoes SET tipo='projeto' WHERE numero=1 AND tipo='execucao'")
+    c.commit()
+    c.close()
+    assert _grupos(1, "projeto") == ("sem_leitura", None)
+
+
+def test_pedido_que_muda_antes_do_lock_nao_reaproveita_a_leitura_antiga(banco, capsys, monkeypatch):
+    """Sol S2 (rodada 2): achar a leitura antiga antes do lock e' so' dica; sob o lock, com o pedido novo, nao ha'
+    o que reaproveitar."""
+    from app import medicao_grupos
+    pasta = _pasta_com(banco)
+    _executar(pasta)
+    original = medicao_grupos._anterior
+    chamadas = []
+
+    def anterior_e_mudar(conn, *a):
+        r = original(conn, *a)
+        if not chamadas:                    # outra conexao muda o pedido logo depois da primeira olhada
+            c = db.get_conn()
+            c.execute("UPDATE medicoes SET valor_protocolado_centavos=? WHERE numero=1 AND tipo='execucao'",
+                      (TOTAL + 500_00,))
+            c.commit()
+            c.close()
+        chamadas.append(r)
+        return r
+
+    monkeypatch.setattr(medicao_grupos, "_anterior", anterior_e_mudar)
+    capsys.readouterr()
+    _executar(pasta)
+    saida = capsys.readouterr().out
+    assert chamadas[0] is not None                                   # a dica achou a leitura antiga
+    assert "recusada: diferença de R$ 500,00" in saida and "-> já lida antes" not in saida
+
+
+def _anexar(numero, dados, sha=None):
+    from app import arquivos
+    c = db.get_conn()
+    mid = c.execute("SELECT id FROM medicoes WHERE numero=? AND tipo='execucao'", (numero,)).fetchone()[0]
+    rel, sha_real = arquivos.gravar_bytes("planilhas", dados, "xlsx")
+    c.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, acumulado_anterior_centavos, "
+              "arquivo_planilha, sha256_planilha, origem) VALUES (?, 1, ?, 0, ?, ?, 'manual')",
+              (mid, TOTAL, rel, sha or sha_real))
+    c.commit()
+    c.close()
+
+
+def test_recusa_repetida_com_cadastro_nao_duplica(banco, capsys):
+    """Sol S3/revisor A1 (rodada 2): a recusa grava a impressao do cadastro; a carga repetida a reaproveita."""
+    _cadastro_de_custo([("Drenagem", ["3"])])
+    _anexar(2, b"PK\x03\x04 nao sou planilha")
+    (banco / "vazia").mkdir()
+    for _ in range(3):
+        _executar(banco / "vazia")
+    assert _contar("SELECT COUNT(*) FROM medicao_grupos WHERE situacao='recusada'") == 1
+    assert "já lida antes: o arquivo não abre como planilha .xlsx" in capsys.readouterr().out
+
+
+def test_anexo_que_nao_confere_com_a_versao_e_pulado(banco, capsys):
+    """Sol S3 (rodada 2): o arquivo gravado trocado por outro nao se liga a versao."""
+    _anexar(2, planilha(), sha="0" * 64)
+    (banco / "vazia").mkdir()
+    _executar(banco / "vazia")
+    assert "pulado: o arquivo do anexo não confere com o registrado na versão" in capsys.readouterr().out
+    assert _contar("SELECT COUNT(*) FROM medicao_grupos") == 0
+
+
+def test_item_a_mais_numa_leitura_gravada_e_recusado(banco):
+    """Sol S5 (rodada 2): a leitura gravada fica selada; item novo nela e' recusado."""
+    _executar(_pasta_com(banco))
+    c = db.get_conn()
+    try:
+        lid, n = c.execute("SELECT id, itens FROM medicao_grupos").fetchone()
+        assert n == 5
+        with pytest.raises(sqlite3.IntegrityError, match="itens dela já foram gravados"):
+            c.execute("INSERT INTO medicao_grupo_itens (leitura_id, ordem, grupo, valor_medido_centavos) "
+                      "VALUES (?, 6, 'outros', 100)", (lid,))
+    finally:
+        c.close()
