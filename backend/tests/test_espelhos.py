@@ -185,6 +185,30 @@ def test_versao_substituida_nao_se_envia_e_a_nova_volta_a_espelho_gerado(ambient
         ("espelho_gerado", "espelho_enviado")]
 
 
+def test_envio_fecha_nota_emitida_quando_a_nota_ja_alocada_atende_o_espelho_novo(ambiente, tmp_path, monkeypatch):
+    """Gate Sol, rodada 5 da PR #555: a versao nova do espelho pode ser atendida por nota ja' alocada (valor corrigido
+    para o da nota); como o fechamento so' rodava ao alocar, a medicao ficava em `espelho_enviado` com `faltam` zero.
+    O envio da versao nova fecha `nota_emitida` com a data da nota."""
+    from app import sincronizacao_rm
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, e1)
+    espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    mid = espelhos.detalhe(conn, e1)["medicoes"][0]["id"]
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) "
+                       "VALUES (1, 901, '901', 200, '2026-02-03')").lastrowid
+    conn.commit()
+    sincronizacao_rm.alocar(conn, u["id"], nid, mid, "manual", None, "teste")
+    assert (notas.faltam(conn, mid), medicoes.detalhe(conn, mid)["estado"]) == (1, "espelho_enviado")   # R$ 1,00 x R$ 2,00
+    e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+    assert (notas.faltam(conn, mid), medicoes.detalhe(conn, mid)["estado"]) == (0, "espelho_gerado")
+    p2 = espelhos.previa_envio(conn, e2)
+    espelhos.enviar(conn, u, e2, p2["para"], p2["copia"], p2["assunto"], p2["corpo"])
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["nota_emitida_em"]) == ("nota_emitida", "2026-02-03")
+
+
 def test_mesmo_numero_com_outra_competencia_substitui_em_vez_de_duplicar(ambiente):
     conn, u, cid = ambiente
     e1 = espelhos.gerar(conn, u, cid, 10, "2026-05", {"medicao": 100})

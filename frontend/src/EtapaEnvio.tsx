@@ -5,8 +5,8 @@ import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
 import type { Metade } from "./medicao";
-import { iniciarEnvio, ListaCertidoes, mensagem, naturezaDoEnvio, pedeOficio, resumoDe, useCertidoes,
-         type Envio, type ListaEnvios } from "./NotasAEnviar";
+import { IconeCheck, iniciarEnvio, ListaCertidoes, mensagem, naturezaDoEnvio, pedeOficio, resumoDe, useCertidoes,
+         type Envio, type ItemCertidao, type ListaEnvios } from "./NotasAEnviar";
 import RegistrarFora from "./RegistrarFora";
 import Selo from "./Selo";
 
@@ -14,7 +14,8 @@ import Selo from "./Selo";
 // SINFRA e na Pref. VG (medicao e reajuste no mesmo e-mail), dois lado a lado na MTPAR e na SES --, com o motivo ao
 // lado do botao ("Enviar a nota" fica ativo; so' bloqueio desabilita). O envio aberto (o e-mail montado, o oficio, a
 // FRC assinada) desce sob a tabela; as certidoes com a validade de cada uma e o "Registrar envio feito fora do
-// sistema" ficam no fim.
+// sistema" ficam no fim. #514 (passo 5 da pagina da obra): em cima, a faixa verde/vermelha e os cartoes Notas
+// fiscais, Certidoes e Documentos; a tabela dos envios vira o cartao "E-mail ao órgão", com o "Já enviei por fora".
 
 /** Os envios da lista de Notas a enviar que contem alguma destas medicoes, relidos a cada acao da pagina. */
 export function useEnvios(ids: number[]) {
@@ -50,6 +51,88 @@ function CelulaNotas({ e }: { e: Envio }) {
       {e.notas.map(n => (
         <span key={`${n.numero}-${n.natureza}`}>NF {n.numero}{mistura && <> <small>· {n.natureza === "reajuste" ? "reajuste" : "medição"}</small></>}</span>
       ))}
+    </div>
+  );
+}
+
+/** #514: o que trava ou falta no envio, numa frase so' por envio (vazio = pronto). */
+export function faltasDo(e: Envio): string[] {
+  if (e.situacao === "pronto" || e.situacao === "a_pedido") return [];
+  const r = resumoDe(e);
+  if (e.situacao === "esperando") return [r.motivo.replace(/\.$/, "")];
+  // a certidao que so' esta' para vencer avisa, nao falta (resumoDe a trata como pronta): fica fora da faixa
+  const itens = (e.aviso ?? "").split(" · ").map(x => x.trim()).filter(x => x && !/vence (hoje|em \d+ dias?)$/.test(x));
+  // "Falta a regularidade" vira "a regularidade" (a faixa ja' diz "Falta"); nome de empresa e sigla ficam como estao
+  const minuscula = (x: string) => /^(A|O|As|Os|Sem|Pacote|Esperando|Envio)\b/.test(x) ? x.charAt(0).toLowerCase() + x.slice(1) : x;
+  if (itens.length > 0) return itens.map(x => minuscula(x.replace(/^Falta\s+/, "")));
+  return [r.selo.charAt(0).toLowerCase() + r.selo.slice(1)];
+}
+
+/** #514: a faixa do passo Envio da nota: verde "Tudo pronto para enviar" ou vermelha com o que falta (a certidao
+ *  vencida e' o que desliga o botao; o motivo vem aqui). */
+export function FaixaEnvio({ envios }: { envios: Envio[] }) {
+  const faltas = envios.map(e => ({ e, f: faltasDo(e) })).filter(x => x.f.length > 0);
+  if (faltas.length === 0) {
+    return <div className="envio-faixa envio-faixa--ok" role="status"><span className="envio-faixa__marca" aria-hidden="true"><IconeCheck /></span>Tudo pronto para enviar</div>;
+  }
+  const total = faltas.reduce((t, x) => t + x.f.length, 0);
+  const lista = faltas.map(x => `${envios.length > 1 ? `${x.e.descricao}: ` : ""}${x.f.join(", ")}`).join("; ");
+  return (
+    <div className="envio-faixa envio-faixa--falta" role="status">
+      <IconeAlerta className="icone" />
+      <span>Falta{total === 1 ? "" : "m"} {total} {total === 1 ? "item" : "itens"} para enviar: {lista}</span>
+    </div>
+  );
+}
+
+type Linha = { chave: string; texto: React.ReactNode; ok: boolean; detalhe?: string | null; valor?: number | null };
+
+function Cartao({ titulo, linhas, children }: { titulo: string; linhas: Linha[]; children?: React.ReactNode }) {
+  const ok = linhas.filter(l => l.ok).length;
+  return (
+    <section className="cartao med-painel envio-cartao" aria-label={titulo}>
+      <h3 className="med-painel__titulo">{titulo}
+        {linhas.length > 0 && <Selo classe={ok === linhas.length ? "selo--ok" : "selo--acao"}>{`${ok} de ${linhas.length}`}</Selo>}</h3>
+      {children ?? (linhas.length === 0 ? <p>—</p> : (
+        <ul className="envio-itens">
+          {linhas.map(l => (
+            <li key={l.chave} className={l.ok ? "envio-item--ok" : "envio-item--falta"}>
+              <span className="envio-item__marca" aria-hidden="true">{l.ok ? <IconeCheck /> : "!"}</span>
+              <span className="envio-item__texto">{l.texto}{!l.ok && l.detalhe && <small>{l.detalhe}</small>}</span>
+              {l.valor !== undefined && l.valor !== null && <span className="num">{brl(l.valor)}</span>}
+            </li>
+          ))}
+        </ul>
+      ))}
+    </section>
+  );
+}
+
+/** #514: os tres cartoes do que vai junto: Notas fiscais (as NFs, a FRC assinada e as notas das consorciadas),
+ *  Certidoes (por empresa no consorcio, com a validade de cada uma) e Documentos (a regularidade e o resto). */
+export function CartoesEnvio({ envios, certidoes }: { envios: Envio[]; certidoes: ItemCertidao[] | null }) {
+  const itens = envios.flatMap(e => e.itens.map(i => ({ ...i, chave: `${e.chave}|${i.chave}` })));
+  const base = (c: string) => c.split("|")[1];
+  const mistura = new Set(envios.flatMap(e => e.notas.map(n => n.natureza === "reajuste"))).size > 1;
+  const notas: Linha[] = [
+    ...envios.flatMap(e => e.notas.map(n => ({ chave: `${e.chave}|nf-${n.numero}-${n.natureza}`, ok: true, valor: n.valor_centavos,
+      texto: <>NF {n.numero}{mistura ? ` · ${n.natureza === "reajuste" ? "reajuste" : "medição"}` : ""}{n.municipio ? ` · ${n.municipio}` : ""}</> }))),
+    // sem o detalhe do servidor: ele fala em etapa antiga e "anexe aqui", e a acao mora no e-mail aberto (revisor, PR #555)
+    ...itens.filter(i => (base(i.chave) === "notas" && i.estado !== "ok") || base(i.chave).startsWith("frc:") || base(i.chave) === "consorcio")
+      .map(i => ({ chave: i.chave, ok: i.estado === "ok", texto: base(i.chave) === "notas" ? "Falta a nota fiscal" : i.rotulo })),
+  ];
+  const certs = itens.filter(i => base(i.chave).startsWith("certidoes:"));
+  const certLinhas: Linha[] = certs.map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", texto: i.rotulo, detalhe: i.detalhe }));
+  const docs = itens.filter(i => !["notas", "consorcio"].includes(base(i.chave)) && !base(i.chave).startsWith("frc:") && !base(i.chave).startsWith("certidoes:"))
+    .map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", texto: <>{i.rotulo}{i.estado === "ok" && i.detalhe ? ` de ${i.detalhe}` : ""}</>, detalhe: i.detalhe }));
+  const varias = new Set(certs.map(i => i.entidade_id)).size > 1 || new Set((certidoes ?? []).map(i => i.entidade_id)).size > 1;
+  return (
+    <div className="envio-cartoes">
+      <Cartao titulo="Notas fiscais" linhas={notas} />
+      <Cartao titulo={varias ? "Certidões por empresa" : "Certidões"} linhas={certLinhas}>
+        {certidoes && certidoes.length > 0 ? <ListaCertidoes itens={certidoes} semTitulo /> : undefined}
+      </Cartao>
+      <Cartao titulo="Documentos" linhas={docs} />
     </div>
   );
 }
@@ -96,6 +179,10 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
 
   return (
     <div className="pilha">
+      <FaixaEnvio envios={envios} />
+      <CartoesEnvio envios={envios} certidoes={certidoes} />
+      <section className="cartao med-painel" aria-labelledby="email-orgao-titulo">
+      <h3 className="med-painel__titulo" id="email-orgao-titulo">E-mail ao órgão</h3>
       {erroAcao && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroAcao}</p>}
       <div className="med-caixa">
         <table className="tabela envios">
@@ -142,15 +229,12 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
         </div>
       )}
 
-      {certidoes && certidoes.length > 0 && <div className="med-bloco"><ListaCertidoes itens={certidoes} /></div>}
-
       {podeEditar && registraveis.length > 0 && (
-        <div className="med-bloco notas-v3">
-          <div className="nota-porfora">
-            <button type="button" className="botao-link" onClick={() => setFora(true)}>Registrar envio feito fora do sistema</button>
-          </div>
+        <div className="nota-porfora">
+          <button type="button" className="botao-link" onClick={() => setFora(true)}>Já enviei por fora</button>
         </div>
       )}
+      </section>
       {fora && <RegistrarFora envios={registraveis} medicaoId={medicaoId} aoRecarregar={() => aoMudar()} aoFechar={() => setFora(false)}
         aoFeito={aviso => { setFora(false); aoMudar(aviso); }} />}
       {oficioDe && (

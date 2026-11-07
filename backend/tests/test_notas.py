@@ -92,6 +92,202 @@ def test_esperadas_sao_as_saidas_lotufo_do_espelho(conn, integra):
     assert notas.coligada_esperada(conn, mid) == 1        # a nota esperada e' da empresa propria, nao do consorcio (90)
 
 
+def _nf_alocada(conn, mid, coligada, idmov, valor, municipio):
+    """NF do RM (coligada dada) ja' alocada a' medicao, sem passar pelo casador (o que se testa e' o casamento)."""
+    from app import sincronizacao_rm
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, municipio) VALUES (?,?,?,?,?)",
+                       (coligada, idmov, f"{idmov:09d}", valor, municipio)).lastrowid
+    conn.commit()
+    sincronizacao_rm.alocar(conn, 1, nid, mid, "manual", None, "teste")
+    return nid
+
+
+def test_nota_de_outra_coligada_nao_ocupa_a_vaga_da_saida_da_lotufo(conn, integra):
+    """Issue #556: a fatura do consorcio (coligada 90) no municipio da saida da Lotufo, ou com o valor exato dela, nao
+    atende a saida: as duas continuam faltando ate' chegar a nota da coligada da Lotufo."""
+    _, mid, saidas = integra
+    cuiaba = next(s for s in saidas if s["municipio"] == "Cuiabá")
+    _nf_alocada(conn, mid, 90, 501, 1000000007, "Várzea Grande")         # mesmo municipio da saida de VG
+    _nf_alocada(conn, mid, 90, 502, cuiaba["valor"], None)                  # mesmo valor da saida de Cuiaba
+    assert notas.faltam(conn, mid) == 2
+    assert medicoes.detalhe(conn, mid)["notas_faltam"] == 2
+    assert {n["da_cota"] for n in medicoes.detalhe(conn, mid)["notas"]} == {False}
+
+
+def test_da_cota_so_nas_notas_que_atendem_as_saidas_da_lotufo(conn, integra):
+    """Issue #556: a nota da Lotufo que atende a saida entra na cota; a extra (sem saida) fica fora."""
+    _, mid, saidas = integra
+    vg = next(s for s in saidas if s["municipio"] == "Várzea Grande")
+    certa = _nf_alocada(conn, mid, 1, 601, vg["valor"], "Várzea Grande")
+    extra = _nf_alocada(conn, mid, 1, 602, 12345, "Sinop")
+    d = medicoes.detalhe(conn, mid)
+    assert d["notas_faltam"] == 1                                           # falta a de Cuiaba
+    assert {n["nota_id"]: n["da_cota"] for n in d["notas"]} == {certa: True, extra: False}
+
+
+def _titulo(conn, nota_id, idlan, original, baixado, status=1):
+    """Titulo a receber do RM (liquido) da nota; status 1 baixado, 4 parcial, 0 aberto."""
+    conn.execute("INSERT INTO baixas (coligada, idlan, nota_id, valor_original_centavos, valor_baixado_centavos, status_lan, "
+                 "data_baixa) VALUES (1,?,?,?,?,?,?)", (idlan, nota_id, original, baixado, status, "2026-09-01" if baixado else None))
+    conn.commit()
+
+
+def _cota(conn, mid):
+    from app import sincronizacao_rm
+    return sincronizacao_rm.pagamento_cota(conn, mid)
+
+
+def test_pagamento_cota_consorcio_com_nota_extra_de_outra_coligada(conn, integra):
+    """(a) A fatura do consorcio (coligada 90), paga, nao entra: so' as duas notas da Lotufo que atendem as saidas,
+    contra os titulos (liquidos, com centavo impar)."""
+    _, mid, saidas = integra
+    cuiaba, vg = (next(s for s in saidas if s["municipio"] == m) for m in ("Cuiabá", "Várzea Grande"))
+    n1 = _nf_alocada(conn, mid, 1, 701, cuiaba["valor"], "Cuiabá")
+    n2 = _nf_alocada(conn, mid, 1, 702, vg["valor"], "Várzea Grande")
+    fatura = _nf_alocada(conn, mid, 90, 703, 1000000007, "Várzea Grande")
+    _titulo(conn, n1, 1, 276000001, 276000001)
+    _titulo(conn, n2, 2, 184000001, 0, 0)
+    conn.execute("INSERT INTO baixas (coligada, idlan, nota_id, valor_original_centavos, valor_baixado_centavos, status_lan) "
+                 "VALUES (90, 3, ?, 920000007, 920000007, 1)", (fatura,)); conn.commit()
+    assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": 460000002,
+                                "recebido_centavos": 276000001, "falta_centavos": 184000001, "parcial": True}
+    assert medicoes.detalhe(conn, mid)["pagamento_cota"]["falta_centavos"] == 184000001
+
+
+def test_pagamento_cota_espelho_sem_saida_da_lotufo_e_zero_e_nao_traco(conn, integra):
+    """(b) Espelho vigente sem saida da Lotufo nesta natureza: nada a esperar dela (zero), e nenhuma nota alocada
+    entra na cota nem conta como esperada (antes caia no caso "sem espelho")."""
+    _, mid, _ = integra
+    row = conn.execute("SELECT e.id, e.saidas FROM espelhos e JOIN espelho_medicoes em ON em.espelho_id=e.id "
+                       "WHERE em.medicao_id=? AND e.situacao='vigente'", (mid,)).fetchone()
+    saidas = [{**sd, "emissor": "beta"} for sd in json.loads(row["saidas"])]
+    conn.execute("UPDATE espelhos SET saidas=? WHERE id=?", (json.dumps(saidas), row["id"])); conn.commit()
+    extra = _nf_alocada(conn, mid, 1, 711, 12345, "Cuiabá")
+    _titulo(conn, extra, 11, 11000, 11000)
+    assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": 0, "recebido_centavos": 0,
+                                "falta_centavos": 0, "parcial": False}
+    assert notas.faltam(conn, mid) == 0
+    assert [n["da_cota"] for n in medicoes.detalhe(conn, mid)["notas"]] == [False]
+
+
+def test_pagamento_cota_sem_espelho_nao_se_sabe(conn, usuario, _texto):
+    """(c) Medicao sem espelho vigente: None (a tela mostra "—")."""
+    cid = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 1/2026", "objeto": "Obra",
+                                    "valor_original_centavos": 10_000_000_00})
+    mid = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 1, "tipo": "execucao", "competencia": "2026-07"})
+    assert _cota(conn, mid) is None
+
+
+def test_pagamento_cota_nota_sem_titulo_no_rm(conn, integra):
+    """(d) Nota da cota ainda sem titulo no RM: os valores nao fecham (None), notas_faltam zero; a baixa ja' conhecida
+    da outra nota deixa `parcial`."""
+    _, mid, saidas = integra
+    cuiaba, vg = (next(s for s in saidas if s["municipio"] == m) for m in ("Cuiabá", "Várzea Grande"))
+    n1 = _nf_alocada(conn, mid, 1, 721, cuiaba["valor"], "Cuiabá")
+    _nf_alocada(conn, mid, 1, 722, vg["valor"], "Várzea Grande")
+    _titulo(conn, n1, 21, 276000001, 276000001)
+    assert _cota(conn, mid) == {"notas_faltam": 0, "completo": False, "total_centavos": None, "recebido_centavos": None,
+                                "falta_centavos": None, "parcial": True}
+
+
+def test_pagamento_cota_nota_extra_paga_nao_faz_parcial(conn, integra):
+    """(e) Nota extra da Lotufo (sem saida) paga, com as notas da cota em aberto: nada recebido da cota, sem parcial."""
+    _, mid, saidas = integra
+    cuiaba, vg = (next(s for s in saidas if s["municipio"] == m) for m in ("Cuiabá", "Várzea Grande"))
+    n1 = _nf_alocada(conn, mid, 1, 731, cuiaba["valor"], "Cuiabá")
+    n2 = _nf_alocada(conn, mid, 1, 732, vg["valor"], "Várzea Grande")
+    extra = _nf_alocada(conn, mid, 1, 733, 12345, "Sinop")
+    _titulo(conn, n1, 31, 276000001, 0, 0)
+    _titulo(conn, n2, 32, 184000001, 0, 0)
+    _titulo(conn, extra, 33, 11000, 11000)
+    assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": 460000002, "recebido_centavos": 0,
+                                "falta_centavos": 460000002, "parcial": False}
+
+
+def test_pagamento_cota_par_com_a_metade_cancelada(conn, integra):
+    """(f) O resumo cobre a medicao e a irma valida do par: o reajuste ainda sem espelho deixa os valores em "—", mas a
+    baixa ja' recebida na execucao aparece como `parcial` (revisor, rodada 4: antes o bloco inteiro vinha nulo e a tela
+    dizia "Aguardando o órgão" com dinheiro recebido); cancelado, sai do grupo e o resumo e' so' o da execucao (o mesmo
+    pela pagina de qualquer das duas que esteja valida)."""
+    cid, mid, saidas = integra
+    for s, idmov, idlan in zip(saidas, (741, 742), (41, 42)):
+        n = _nf_alocada(conn, mid, 1, idmov, s["valor"], s["municipio"])
+        _titulo(conn, n, idlan, s["valor"] - 1001, s["valor"] - 1001)
+    reaj = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 12, "tipo": "reajuste", "competencia": "2026-06"})
+    incompleto = {"notas_faltam": 0, "completo": False, "total_centavos": None, "recebido_centavos": None,
+                  "falta_centavos": None, "parcial": True}
+    assert _cota(conn, mid) == incompleto                                 # irma valida sem espelho: valores nao fecham
+    assert _cota(conn, reaj) == incompleto                                # pela pagina do reajuste, o mesmo resumo
+    medicoes.mudar_estado(conn, 1, reaj, "cancelada", "teste")
+    total = sum(s["valor"] - 1001 for s in saidas)
+    assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": total, "recebido_centavos": total,
+                                "falta_centavos": 0, "parcial": False}
+
+
+def _espelho_sem_saida_da_lotufo(conn, mid):
+    row = conn.execute("SELECT e.id, e.saidas FROM espelhos e JOIN espelho_medicoes em ON em.espelho_id=e.id "
+                       "WHERE em.medicao_id=? AND e.situacao='vigente'", (mid,)).fetchone()
+    saidas = [{**sd, "emissor": "beta"} for sd in json.loads(row["saidas"])]
+    conn.execute("UPDATE espelhos SET saidas=? WHERE id=?", (json.dumps(saidas), row["id"])); conn.commit()
+
+
+def test_espelho_sem_saida_da_lotufo_espera_a_fatura_e_fecha_com_a_data_dela(conn, integra):
+    """Rodada 5 da PR #555 (revisor + Sol): com espelho vigente sem saida da Lotufo nesta natureza, a medicao nao fecha
+    sem nota (`faltam` dava zero, `nota_emitida_em` saia nulo e a medicao sumia do faturado do mes; e sem ninguem chamar
+    o fechamento ela ficava em `espelho_enviado`): fecha quando a fatura do consorcio e' alocada, com a emissao dela,
+    e a cota da Lotufo segue zero, sem nota `da_cota`."""
+    _, mid, _ = integra
+    _espelho_sem_saida_da_lotufo(conn, mid)
+    assert notas.faltam(conn, mid) == 1
+    assert notas.fechar_se_completa(conn, 1, mid) is False
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+    conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) VALUES (90, 761, '22', 1000000007, '2026-08-30')")
+    conn.commit()
+    from app import sincronizacao_rm
+    fatura = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=761").fetchone()[0]
+    sincronizacao_rm.alocar(conn, 1, fatura, mid, "manual", None, "teste")
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["nota_emitida_em"], m["notas_faltam"]) == ("nota_emitida", "2026-08-30", 0)
+    assert [n["da_cota"] for n in m["notas"]] == [False]
+    assert m["pagamento_cota"] == {"notas_faltam": 0, "completo": True, "total_centavos": 0, "recebido_centavos": 0,
+                                   "falta_centavos": 0, "parcial": False}
+
+
+def test_sem_coligada_da_lotufo_no_cadastro_nenhuma_nota_atende_a_saida(conn, integra):
+    """Gate Sol, rodada 4 da PR #555: sem a coligada da Lotufo no cadastro nao da' para separar a nota dela da fatura
+    do consorcio; falha fechado (saidas faltando, valores em "—", nenhuma nota na cota), em vez de aceitar qualquer
+    coligada e somar a fatura paga como recebido da Lotufo."""
+    _, mid, saidas = integra
+    cuiaba = next(s for s in saidas if s["municipio"] == "Cuiabá")
+    n = _nf_alocada(conn, mid, 1, 771, cuiaba["valor"], "Cuiabá")
+    _nf_alocada(conn, mid, 90, 772, 1000000007, "Cuiabá")
+    _titulo(conn, n, 71, cuiaba["valor"] - 1, cuiaba["valor"] - 1)
+    assert notas.faltam(conn, mid) == 1 and _cota(conn, mid)["parcial"] is True
+    conn.execute("UPDATE entidades SET coligada_rm=NULL WHERE coligada_rm=1"); conn.commit()
+    assert notas._coligada_lotufo(conn) is None
+    assert notas.faltam(conn, mid) == 2
+    assert _cota(conn, mid) == {"notas_faltam": 2, "completo": False, "total_centavos": None, "recebido_centavos": None,
+                                "falta_centavos": None, "parcial": False}
+    assert {x["da_cota"] for x in medicoes.detalhe(conn, mid)["notas"]} == {False}
+
+
+def test_nota_emitida_tem_a_data_das_notas_da_cota(conn, usuario, integra, _texto):
+    """Gate Sol, PR #555: a fatura do consorcio emitida depois nao muda a data de "nota emitida"."""
+    _, mid, saidas = integra
+    conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) VALUES (90, 751, '21', 1000000007, '2026-08-30')")
+    conn.commit()
+    from app import sincronizacao_rm
+    fatura = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=751").fetchone()[0]
+    sincronizacao_rm.alocar(conn, 1, fatura, mid, "manual", None, "teste")
+    for s, numero in zip(saidas, (3101, 3102)):
+        _texto(_nota_como(s, numero))
+        notas.anexar_pdf(conn, usuario, mid, PDF, f"NFS {numero}.pdf")
+    m = medicoes.detalhe(conn, mid)
+    assert m["estado"] == "nota_emitida"
+    emissoes = [n["emissao"] for n in m["notas"] if n["da_cota"]]
+    assert m["nota_emitida_em"] == max(emissoes) and m["nota_emitida_em"] < "2026-08-30"
+
+
 def test_esperadas_trazem_o_rotulo_da_saida(conn, integra):
     _, mid, _ = integra
     esp = notas.esperadas(conn, mid)

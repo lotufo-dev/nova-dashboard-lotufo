@@ -629,12 +629,17 @@ def enviar(conn, usuario: dict, espelho_id: int, para: list[str], copia: list[st
     except Exception:
         envio_reserva.liberar_com_retentativa(conn, "espelhos", espelho_id)    # nada saiu: destrava e sobe o erro
         raise
+    from app import notas   # import local: notas importa este modulo pela cadeia frc/medicoes
     with correio.depois_do_envio(assunto, para, envio_id), db.mutacao(conn):
         envio_reserva.liberar(conn, "espelhos", espelho_id)
         for m in d["medicoes"]:
             conn.execute("INSERT OR IGNORE INTO envio_medicoes (envio_id, medicao_id) VALUES (?,?)",
                          (envio_id, m["id"]))
             medicoes.marcar_espelho_enviado(conn, usuario["id"], m["id"])
+            # gate Sol, rodada 5 da PR #555: a versao nova do espelho pode ja' estar atendida pelas notas alocadas
+            # (valor corrigido para o da nota, ou natureza sem saida da Lotufo com a fatura ja' casada); como o
+            # fechamento so' rodava ao alocar, a medicao ficava em `espelho_enviado` sem nada a esperar
+            notas.fechar_se_completa(conn, usuario["id"], m["id"])
         conn.execute("UPDATE espelhos SET envio_id=? WHERE id=?", (envio_id, espelho_id))
         auditoria.registrar(conn, usuario["id"], "espelho.enviar", "espelho", espelho_id, None,
                             {"envio_id": envio_id, "medicoes": [m["id"] for m in d["medicoes"]]})

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { brl } from "./formato";
 import { api, apiForm, mensagemDeErro } from "./api";
 import CampoValor from "./CampoValor";
-import { IconeAlerta } from "./icones";
+import { IconeAlerta, IconeEnviarNuvem } from "./icones";
 import { tituloMedicao } from "./medicao";
 import type { Medicao } from "./Medicoes";
 import { fmtDataPura } from "./tempo";
@@ -79,6 +79,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
   const [justificar, setJustificar] = useState<{ nota_id: number; texto: string } | null>(null);
   const [declarar, setDeclarar] = useState("");
   const [desfazer, setDesfazer] = useState<{ alocacao_id: number; numero: string; motivo: string } | null>(null);
+  const [sobre, setSobre] = useState(false);   // um PDF arrastado sobre a area de soltar
   const geracao = useRef(0);
 
   const carregar = async () => {
@@ -125,8 +126,23 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
     return texto;
   };
 
-  const anexar = async (input: HTMLInputElement) => {
+  // `comoFrc`: a marca "é a fatura do consórcio" vale para o botao e a area de soltar; o "Anexar" da linha de uma nota
+  // esperada sempre manda nota fiscal (code-review)
+  const anexar = async (input: HTMLInputElement, comoFrc = frc) => {
     const arquivos = Array.from(input.files ?? []);
+    try { await anexarArquivos(arquivos, comoFrc); } finally { input.value = ""; }
+  };
+  // #514: os PDFs soltos na area de soltar entram pelo mesmo caminho do botao (so' PDF; o resto e' dito)
+  const soltar = (ev: React.DragEvent) => {
+    ev.preventDefault(); setSobre(false);
+    if (ocupado) { setLinhas(l => [...l, "Espere o anexo anterior terminar."]); return; }
+    const todos = Array.from(ev.dataTransfer.files ?? []);
+    const pdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+    const recusados = todos.filter(f => !pdf(f)).map(f => `${f.name}: não é PDF, não foi anexado.`);
+    if (recusados.length > 0) setLinhas(l => [...l, ...recusados]);
+    void anexarArquivos(todos.filter(pdf), frc);
+  };
+  const anexarArquivos = async (arquivos: File[], comoFrc: boolean) => {
     if (arquivos.length === 0) return;
     setErro(""); setOcupado(true);
     const novas: string[] = [];
@@ -136,17 +152,17 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
       for (const arquivo of arquivos) {
         const fd = new FormData();
         fd.append("arquivo", arquivo);
-        fd.append("tipo_doc", frc ? "fatura" : "nfs");
+        fd.append("tipo_doc", comoFrc ? "fatura" : "nfs");
         const r = await apiForm<Anexado>(`/api/medicoes/${medicao.id}/notas`, fd);
         novas.push(descrever(arquivo.name, r));
-        if (!r.repetido && !r.leitura.ok && r.nota_id === null && !frc && manual === null) {
+        if (!r.repetido && !r.leitura.ok && r.nota_id === null && !comoFrc && manual === null) {
           setManual({ documento_id: r.documento_id, nome: arquivo.name, numero: "", emissao: "", valor: "" });
         }
       }
       await carregar();
       aoMudar();
     } catch (e) { setErro(mensagem(e)); } finally {
-      setLinhas(l => [...l, ...novas]); setOcupado(false); input.value = "";
+      setLinhas(l => [...l, ...novas]); setOcupado(false);
     }
   };
 
@@ -205,6 +221,16 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
   const soltas = (dados?.notas ?? []).filter(n => !(dados?.esperadas ?? []).some(e => e.nota_id === n.nota_id));
   // IBS e CBS so' entram na tabela quando alguma saida os traz (como no espelho)
   const temIbsCbs = (dados?.esperadas ?? []).some(e => e.ibs !== null || e.cbs !== null);
+  // #514: a tabela mostra empresa, municipio, valor e a nota; os impostos (o espelho os mostra) so' entram quando
+  // alguma nota diverge num deles, para a celula do campo que diverge aparecer destacada (G3-11)
+  const IMPOSTOS = ["inss", "iss", "irrf", "ibs", "cbs", "liquido"];
+  const valorDoCampo = (e: Esperada, campo: string) => (e as unknown as Record<string, number | string | null>)[campo] ?? null;
+  const variasNaturezas = new Set((dados?.esperadas ?? []).map(e => e.natureza)).size > 1;
+  const mostraImpostos = (dados?.esperadas ?? []).some(e => {
+    const n = e.nota_id ? porId.get(e.nota_id) : undefined;
+    return (n?.conferencia ?? []).some(d => d.grau === "divergente" && IMPOSTOS.includes(d.campo)
+      && String(d.nota ?? "").toLowerCase() !== String(valorDoCampo(e, d.campo) ?? "").toLowerCase());
+  });
 
   // a nota se identifica pelo numero e pela data; a situacao no RM e' selo
   const situacaoNota = (n: NotaVinculada) => (
@@ -235,8 +261,10 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
       <p className="painel__titulo">
         {/* o nome inteiro da medicao: "Reajuste da 23ª Medição" nao e' a 23ª de execucao */}
         {rotulo ?? tituloMedicao(medicao)}
-        {dados && dados.esperadas.length > 0 && dados.faltam > 0 && (
-          <>{" "}<Selo classe="selo--atencao">{dados.faltam === 1 ? "Falta 1 nota" : `Faltam ${dados.faltam} notas`}</Selo></>
+        {/* #514: quantas notas esperadas ja' chegaram ("4 de 6") */}
+        {dados && dados.esperadas.length > 0 && (
+          <>{" "}<Selo classe={dados.esperadas.some(e => e.nota_id === null) ? "selo--atencao" : "selo--ok"}>
+            {`${dados.esperadas.filter(e => e.nota_id !== null).length} de ${dados.esperadas.length}`}</Selo></>
         )}
       </p>
 
@@ -248,10 +276,13 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
           <table className="tabela tabela--densa notas__tabela" aria-label={rotulo ? `Notas esperadas: ${rotulo}` : undefined}>
             <thead>
               <tr>
-                <th scope="col">Saída</th><th scope="col" className="col-num num">Valor</th><th scope="col" className="col-num num">INSS</th>
-                <th scope="col" className="col-num num">ISS</th><th scope="col" className="col-num num">IRRF</th>
-                {temIbsCbs && <><th scope="col" className="col-num num">IBS</th><th scope="col" className="col-num num">CBS</th></>}
-                <th scope="col" className="col-num num">Líquido</th><th scope="col">Nota</th>
+                <th scope="col">Empresa</th><th scope="col">Município</th><th scope="col" className="col-num num">Valor</th>
+                <th scope="col">Nota fiscal</th>
+                {mostraImpostos && <>
+                  <th scope="col" className="col-num num">INSS</th><th scope="col" className="col-num num">ISS</th><th scope="col" className="col-num num">IRRF</th>
+                  {temIbsCbs && <><th scope="col" className="col-num num">IBS</th><th scope="col" className="col-num num">CBS</th></>}
+                  <th scope="col" className="col-num num">Líquido</th>
+                </>}
               </tr>
             </thead>
             <tbody>
@@ -273,18 +304,33 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                     </td>
                   );
                 };
+                const empresa = variasNaturezas ? `${naturezaNome(e.natureza, e.rotulo)} · ${emissorNome(e.emissor)}` : emissorNome(e.emissor);
                 return (
                   <tr key={e.chave}>
-                    <td>{naturezaNome(e.natureza, e.rotulo)} · {emissorNome(e.emissor)} · {diverge("municipio", e.municipio)
+                    <td>{empresa}</td>
+                    <td>{diverge("municipio", e.municipio)
                       ? <span className="notas__celula--diverge" title={`Na nota: ${lidos.get("municipio") ?? "não lido"}`}>
                           {e.municipio}<span className="sr-only"> no espelho; na nota {lidos.get("municipio") ?? "não lido"}</span>
                         </span>
                       : e.municipio}</td>
-                    {celula("valor", e.valor)}{celula("inss", e.inss)}
-                    {celula("iss", e.iss)}{celula("irrf", e.irrf)}
-                    {temIbsCbs && <>{celula("ibs", e.ibs)}{celula("cbs", e.cbs)}</>}
-                    {celula("liquido", e.liquido)}
-                    <td>{n ? <>{situacaoNota(n)}{conferencia(n)}{botaoDesfazer(n)}</> : "—"}</td>
+                    {celula("valor", e.valor)}
+                    <td>{n ? <>{situacaoNota(n)}{conferencia(n)}{botaoDesfazer(n)}</> : (
+                      <span className="notas__falta">
+                        <Selo classe="selo--atencao">aguardando</Selo>
+                        {podeEditar && (
+                          <label className="btn btn--pequeno espelho__anexar">
+                            Anexar
+                            <input type="file" name="nota" accept="application/pdf" className="espelho__arquivo" disabled={ocupado}
+                              aria-label={`Anexar a nota de ${empresa} · ${e.municipio}`} onChange={ev => anexar(ev.currentTarget, false)} />
+                          </label>
+                        )}
+                      </span>
+                    )}</td>
+                    {mostraImpostos && <>
+                      {celula("inss", e.inss)}{celula("iss", e.iss)}{celula("irrf", e.irrf)}
+                      {temIbsCbs && <>{celula("ibs", e.ibs)}{celula("cbs", e.cbs)}</>}
+                      {celula("liquido", e.liquido)}
+                    </>}
                   </tr>
                 );
               })}
@@ -375,9 +421,13 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
       )}
 
       {podeEditar && (
-        <div className="form-inline">
-          <label className="btn btn--pequeno espelho__anexar">
-            Anexar notas (PDF)
+        <div className="pilha">
+          {/* #514: a area de soltar os PDFs das notas (clicar abre o seletor de arquivos) */}
+          <label className={`notas__soltar${sobre ? " notas__soltar--sobre" : ""}`}
+            onDragOver={ev => { ev.preventDefault(); if (!sobre) setSobre(true); }}
+            onDragLeave={() => setSobre(false)} onDrop={soltar}>
+            <IconeEnviarNuvem className="icone" />
+            <span>{ocupado ? "Anexando…" : "Solte aqui os PDFs das notas"}</span>
             <input type="file" name="notas" accept="application/pdf" multiple className="espelho__arquivo" disabled={ocupado}
               aria-label={rotulo ? `Anexar notas: ${rotulo}` : `Anexar notas à medição ${medicao.numero}`} onChange={ev => anexar(ev.currentTarget)} />
           </label>
