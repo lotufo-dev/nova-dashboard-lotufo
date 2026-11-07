@@ -929,3 +929,24 @@ def test_runbook_so_manda_criar_o_sentinela_antes_das_paradas_manuais():
     linha = next(linha for linha in runbook.splitlines() if linha.startswith("- Watchdog: `scripts\\instalar_watchdog.ps1"))
     assert "parada/deploy manual" not in linha
     assert "O `deploy.ps1` cria o próprio sentinela: não crie antes de rodá-lo" in linha
+
+
+
+def test_deploy_remescla_386_443_uma_prova_so_da_producao():
+    # Remescla da PR #389 (issue #386) com a #475 (issue #443): uma variavel so' de prova, com a regra mais estrita. A
+    # volta do build sem religar so' solta com a producao provada no inicio (sem sentinela anterior); religada, a prova
+    # e' o processo novo no commit anterior. O catch do reinicio sem a tarefa parada nao solta nada.
+    codigo = _codigo(_ler("deploy.ps1"))
+    volta = codigo[codigo.index("try { Construir $alvo; ConferirInstalacao }"):codigo.index("$novo = (")]
+    prova = volta.index('if (-not (NoArEm $anterior)) { throw ')
+    religada = volta.index("if ($script:sentinelaParou) { $script:producaoProvada = $true }")
+    trava = volta.index("if (-not $script:producaoProvada) { throw ")
+    assert prova < religada < trava < volta.index("$script:soltarWatchdog = $true")
+    reinicio = codigo[codigo.index("try { Reiniciar }"):codigo.index("if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {")]
+    sem_parada = reinicio[reinicio.rindex("} else {"):]
+    sem_parada = sem_parada[:sem_parada.index("} catch {")]
+    assert "soltarWatchdog" not in sem_parada and "producaoProvada" not in sem_parada
+    assert "sentinela do watchdog mantido" in sem_parada
+    # o inicio so' prova sem sentinela anterior, e o sentinela e' lido antes de ser criado
+    assert codigo.index("$script:sentinelaJaExistia = Test-Path $pause") < codigo.index("New-Item -ItemType File -Path $pause")
+    assert codigo.count("$script:producaoProvada = NoArEm $anterior") == 1
