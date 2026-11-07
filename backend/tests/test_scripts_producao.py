@@ -949,6 +949,42 @@ def test_deploy_https_confere_o_par_certificado_e_chave_antes_do_sentinela():
     assert python in script, "o Python da conferencia nao pode ter cerquilha (o _codigo cortaria a linha)"
 
 
+def test_deploy_https_confere_a_acl_do_par_antes_do_sentinela():
+    # Issue #534: par reposto com permissao a mais (copia pelo Explorer, backup) abre e casa para o administrador que
+    # roda o deploy, mas o rodar_producao.ps1 recusa subir (Assert-AclSomenteSistemaEAdmins) no commit novo e no
+    # rollback. O deploy confere com a MESMA funcao, sobre a pasta e os dois .pem, antes de parar qualquer coisa.
+    codigo = _codigo(_ler("deploy.ps1"))
+    fonte = '. (Join-Path $PSScriptRoot "comum_acl.ps1")'
+    assert fonte in codigo
+    tls = codigo.index("if ($comTls) {")
+    fim = codigo.index("} else {", tls)
+    assert codigo.index(fonte) < tls
+    laco = codigo.index('foreach ($caminhoTls in (Join-Path $Raiz "segredos\\tls"), $certificado, $chaveTls) {')
+    confere = codigo.index("Assert-AclSomenteSistemaEAdmins -Caminho $caminhoTls", laco)
+    assert tls < laco < confere < fim
+    mensagem = codigo[confere:confere + 600]
+    assert "throw " in mensagem and "nada foi alterado" in mensagem and "Permissao do par do HTTPS recusada" in mensagem
+    assert "recusa preventiva" in mensagem
+    for depois in ("New-Item -ItemType File -Path $pause", "& git -C $AppDir fetch --quiet", "try { Construir $alvo"):
+        assert confere < codigo.index(depois)
+    # a mesma funcao que o rodar_producao.ps1 usa na subida, sobre a pasta e os dois arquivos do par
+    rodar = _codigo(_ler("rodar_producao.ps1"))
+    assert fonte in rodar
+    assert "Assert-AclSomenteSistemaEAdmins -Caminho $certs" in rodar
+    assert '$arquivos += (Join-Path $certs "chave.pem"), (Join-Path $certs "cert.pem")' in rodar
+    assert "function Assert-AclSomenteSistemaEAdmins" in _ler("comum_acl.ps1")
+    assert "function Assert-AclSomenteSistemaEAdmins" not in _ler("deploy.ps1")
+
+
+def test_runbook_diz_o_que_fazer_quando_o_deploy_recusa_a_permissao_do_par():
+    runbook = (SCRIPTS.parent / "docs" / "runbook.md").read_text(encoding="utf-8")
+    inicio = runbook.index("**Permissao do par do HTTPS recusada** (issue #534)")
+    trecho = " ".join(runbook[inicio:inicio + 1800].split())
+    assert "icacls" in trecho and "nada foi alterado" in trecho and "Corrigir a permissão antes de qualquer reinício" in trecho
+    # revisor da PR #538: com o RM ligado a subida reaplica a ACL de segredos; a recusa do deploy e' preventiva
+    assert "preventiva" in trecho and "segredos\\rm.txt" in trecho
+
+
 def _par_autoassinado(pasta, nome):
     import datetime
 
