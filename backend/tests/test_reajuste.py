@@ -1070,8 +1070,8 @@ def _termo_e_pleito(c, ids, data_base, data, dados, enviado_em="2026-06-10", cic
 @pytest.mark.parametrize("dados", [{"periodo": {"de": "2026-06", "ate": "2027-05"}}, {}],
                          ids=["so-periodo", "sem-nada"])
 def test_termo_que_nao_marca_competencia_cobre_o_ciclo_inteiro(cenario, dados):
-    # revisor (rodada 1, PR #438): termo so' com periodo (sem percentual nem lista) nao marca competencia pelas regras
-    # da #273, entao fecha o ciclo inteiro, como na diretoria (#279)
+    # revisor (rodada 1, PR #438): termo sem percentual nem lista nao marca competencia pelas regras da #273; sem nada
+    # fecha o ciclo inteiro, como na diretoria (#279); so' com periodo cobre os meses dele (#444), aqui o ciclo todo
     c, ids = cenario
     cid = ids["contrato"]
     _termo_e_pleito(c, ids, "2024-06", "2026-09-15", dados)
@@ -1094,6 +1094,20 @@ def test_termo_com_percentual_e_periodo_parcial_marca_o_mes_de_fora(cenario):
     x = _por_competencia(c, cid)
     assert (x["2026-07"]["apostilada"], x["2026-07"]["avisos"]) == (True, [])
     assert x["2026-09"]["avisos"] == ["sem_apostilamento", "nota_antes_do_apostilamento"]
+
+
+def test_termo_so_com_periodo_parcial_cobre_so_os_meses_do_periodo(cenario):
+    # issue #444 (revisor, rodada 3 da PR #438): o cadastro trata o `periodo` sozinho como limite do termo; o mes do
+    # ciclo fora dele (12/2026, ciclo 2026 da base 06/2024) continua sem apostilamento, o de dentro fica coberto
+    c, ids = cenario
+    cid = ids["contrato"]
+    _termo_e_pleito(c, ids, "2024-06", "2026-09-15", {"periodo": {"de": "2026-06", "ate": "2026-08"}})
+    for numero, comp in ((1, "2026-07"), (2, "2026-12")):
+        m = _medicao(c, cid, numero, comp, "nota_emitida", pedido=100_01, aprovado=100_01)
+        _nota(c, m, 100_01)
+    x = _por_competencia(c, cid)
+    assert x["2026-07"]["avisos"] == []
+    assert x["2026-12"]["avisos"] == ["sem_apostilamento", "nota_antes_do_apostilamento"]
 
 
 def test_nota_antes_do_termo_some_quando_o_apostilamento_e_carregado(cenario):
@@ -1173,7 +1187,10 @@ def test_cobertura_das_competencias_e_o_criterio_unico(cenario):
     [g] = grupos
     assert coberta(g["data_base_mes"], g["ciclo"], g["competencias"][0]) is True
     termo = reajuste.apostilamento_do_ciclo(c, cid, "2024-06", 2026, True)
-    assert reajuste.termo_sem_meses(termo) is True
+    assert reajuste.termo_sem_meses(termo) is False          # issue #444: o periodo sozinho diz os meses
+    assert reajuste.termo_cobre_o_mes(termo, "2027-05") is True
+    assert reajuste.termo_cobre_o_mes(termo, "2027-06") is False
+    assert reajuste.termo_cobre_o_mes({"dados": {"percentual": "6,76"}}, "2027-06") is True
     assert reajuste.termo_sem_meses({"dados": {"percentual": "6,76", "periodo": {"de": "2026-06", "ate": "2026-08"}}}) \
         is False
     assert reajuste.termo_sem_meses({"dados": {"competencias": [{"competencia": "2026-07"}]}}) is False
