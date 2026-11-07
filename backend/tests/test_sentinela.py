@@ -579,19 +579,51 @@ def test_comando_do_rollback_456_sem_ponto_gravado_so_apaga(maquina, conn, capsy
     assert conn.execute("SELECT COUNT(*) FROM schema_migrations WHERE nome = '063_sentinela_ponto.sql'").fetchone()[0] == 0
 
 
-def test_rollback_que_ja_subiu_o_codigo_antigo_mantem_o_ponto_mais_novo_da_auditoria(maquina, conn, capsys):
-    """/code-review da #478: o codigo antigo ja' rodou (ponto 1060 na auditoria) com a tabela parada em 1004; o
-    comando nao pode gravar o ponto velho por cima."""
+def _tabela_mudou_em(conn, quando: str):
+    with db.mutacao(conn):
+        conn.execute("UPDATE sentinela_ponto SET atualizado_em = ? WHERE id = 1", (quando,))
+
+
+def _ultimo_ponto_na_auditoria(conn):
+    r = conn.execute("SELECT depois FROM audit_log WHERE acao = ? ORDER BY id DESC LIMIT 1",
+                     (sentinela.ACAO_PONTO,)).fetchone()
+    return json.loads(r[0])["ultimo_registro"]
+
+
+def test_rollback_que_ja_subiu_o_codigo_antigo_mantem_o_ponto_que_ele_gravou_depois(maquina, conn, capsys):
+    """/code-review da #478: o codigo antigo ja' rodou (ponto 1060 na auditoria, gravado depois da ultima mudanca da
+    tabela, parada em 1004); o comando nao pode gravar o ponto velho por cima."""
     from app import auditoria
     _com_ponto_de_partida(maquina, conn)
     _rodar(maquina, conn, "4663_segredos_externo.xml")
     assert _ponto(conn) == 1004
+    _tabela_mudou_em(conn, "2000-01-01 00:00:00")
     with db.mutacao(conn):
         auditoria.registrar(conn, None, sentinela.ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": 1060})
     _rodar_o_comando_do_runbook(capsys)
-    r = conn.execute("SELECT depois FROM audit_log WHERE acao = ? ORDER BY id DESC LIMIT 1",
-                     (sentinela.ACAO_PONTO,)).fetchone()
-    assert json.loads(r[0])["ultimo_registro"] == 1060
+    assert _ultimo_ponto_na_auditoria(conn) == 1060
+
+
+def test_rollback_depois_de_o_log_recomecar_grava_o_ponto_da_tabela_mesmo_menor(maquina, conn, capsys):
+    """Gate Sol e revisor, rodada 1 da PR #499: o EventRecordID recomeca quando o log e' limpo. Com a auditoria em 5000
+    (de antes do deploy da #456) e a tabela em 1004 (depois da limpeza), comparar pelo numero mantinha 5000: o codigo
+    antigo partiria de 5000 e pularia os eventos ate' la', ou, com o log abaixo disso, releria tudo."""
+    from app import auditoria
+    _com_ponto_de_partida(maquina, conn)
+    with db.mutacao(conn):                                  # o ponto que o codigo antigo deixou, antes do deploy
+        auditoria.registrar(conn, None, sentinela.ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": 5000})
+    _rodar(maquina, conn, "4663_segredos_externo.xml")     # log recomecado: a tabela vai a 1004
+    assert _ponto(conn) == 1004
+    _rodar_o_comando_do_runbook(capsys)
+    assert _ultimo_ponto_na_auditoria(conn) == 1004
+    antigo = _codigo_de_antes_da_456(maquina)
+    antes = conn.execute("SELECT MAX(id) FROM audit_log").fetchone()[0]
+    maquina.adicionar("tarefas.xml", maquina.raiz)
+    antigo.rodada(conn)
+    novos = [json.loads(r[0])["evento"] for r in conn.execute(
+        "SELECT depois FROM audit_log WHERE acao = ? AND id > ? ORDER BY id", (sentinela.ACAO, antes))]
+    assert novos == [4698, 4699, 4700, 4701, 4702]          # so' o que veio depois de 1004, sem crítico
+    assert "EventRecordID>1004" in maquina.consultas[-1]
 
 
 def test_comando_do_runbook_que_so_tira_a_tabela_depois_do_codigo_antigo_ja_ter_subido(maquina, conn, monkeypatch):
@@ -614,34 +646,112 @@ def test_comando_do_runbook_que_so_tira_a_tabela_depois_do_codigo_antigo_ja_ter_
     assert _ponto(conn) == 1071
 
 
-def test_deploy_ps1_passa_o_ponto_para_a_auditoria_antes_do_rollback_para_antes_da_456():
+def test_deploy_ps1_passa_o_ponto_para_a_auditoria_antes_de_voltar_para_antes_da_456():
     texto = (pathlib.Path(__file__).resolve().parents[2] / "scripts" / "deploy.ps1").read_text(encoding="utf-8")
-    rollback = texto[texto.index("ROLLBACK para $anterior"):]
-    assert rollback.index("SentinelaAntesDa456") < rollback.index("Construir $anterior")
+    principal = texto[texto.index("$anterior = (& git -C $AppDir rev-parse HEAD).Trim()"):]
+    # rollback por saude: com o codigo novo, antes do checkout do anterior
+    rollback = principal[principal.index("ROLLBACK para $anterior"):]
+    assert rollback.index("SentinelaAntesDa456 $novo $anterior") < rollback.index("Construir $anterior")
+    # revisor, rodada 1 da PR #499: deploy com -Ref de um commit antigo, antes do checkout do alvo; e o catch do
+    # build religa o anterior quando o servico foi parado para isso
+    assert principal.index("SentinelaAntesDa456 $anterior $alvo") < principal.index("try { Construir $alvo")
+    catch_build = principal[principal.index("try { Construir $alvo"):principal.index("$novo = (& git")]
+    assert "if ($script:sentinelaParou)" in catch_build and "Reiniciar" in catch_build
     assert "app.cli sentinela antes-da-456 --banco $banco" in texto
     assert "backend/migrations/063_sentinela_ponto.sql" in texto
 
 
-def test_rodada_pausada_entre_o_banco_e_o_arquivo_nao_deixa_a_outra_repetir_a_falha(maquina, conn, monkeypatch):
-    """Issue #478 (gate Sol, rodada 2 da PR #470): a outra rodada le a marca nova (depois do commit desta) com as
-    pendencias velhas do `sentinela.json` (antes desta grava'-lo) e gravava a mesma falha de novo."""
+def test_runbook_cria_o_sentinela_do_watchdog_antes_do_rollback_456_a_mao():
+    texto = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "runbook.md").read_text(encoding="utf-8")
+    item = texto[texto.index("- **Rollback para um commit anterior à issue #456**"):texto.index("## Variáveis de ambiente")]
+    assert item.index("watchdog.pause") < item.index("parar o serviço") < item.index("app.cli sentinela antes-da-456")
+
+
+def test_estado_da_sentinela_e_gravado_sob_o_lock_antes_do_commit(maquina, conn, monkeypatch):
+    """Gate Sol, rodada 1 da PR #499: gravado depois de soltar o lock, uma rodada atrasada sobrescrevia o arquivo de
+    uma mais nova (recolocando uma falha ja' normalizada), e quem lia a marca nova ainda lia o arquivo velho."""
     _com_ponto_de_partida(maquina, conn)
-    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False      # falha nova, sem evento novo no log
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False
     outra = db.get_conn()
     original = sentinela._gravar_estado
-    vez = [0]
+    visto = []
 
-    def pausa(estado):
-        vez[0] += 1
-        if vez[0] == 1:
-            sentinela.rodada(outra)                         # B roda inteira entre o commit de A e o arquivo de A
+    def conferir(estado):
+        visto.append((conn.in_transaction, outra.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE acao = ?", (sentinela.ACAO,)).fetchone()[0]))
         original(estado)
 
-    monkeypatch.setattr(sentinela, "_gravar_estado", pausa)
-    a = _rodar(maquina, conn)
+    monkeypatch.setattr(sentinela, "_gravar_estado", conferir)
+    assert [x["evento"] for x in _rodar(maquina, conn)] == ["auditoria-arquivos"]
     outra.close()
-    assert [x["evento"] for x in a] == ["auditoria-arquivos"]
-    assert _rodar(maquina, conn) == []
+    assert visto == [(True, 0)]                             # sob o BEGIN IMMEDIATE, antes de o achado ficar visivel
+
+
+def test_rodada_que_comeca_enquanto_a_outra_grava_nao_repete_a_falha_nem_sobrescreve_o_arquivo(maquina, conn,
+                                                                                               monkeypatch):
+    """Issue #478, 3o criterio, com o arquivo gravado sob o lock: A grava a falha e para no arquivo (antes do commit);
+    B comeca nesse meio, ja' com a maquina normal, e fica esperando o lock. B descarta o que leu: a falha sai uma vez
+    e o arquivo que fica e' o de A. Corrigida e falhando de novo, a falha avisa outra vez."""
+    import threading
+    _com_ponto_de_partida(maquina, conn)
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False
+    a_no_arquivo, b_leu = threading.Event(), threading.Event()
+    original_gravar, original_verificacoes = sentinela._gravar_estado, sentinela.verificacoes
+
+    def gravar(estado):
+        if threading.current_thread().name == "rodada-a":
+            a_no_arquivo.set()
+            assert b_leu.wait(5)
+        original_gravar(estado)
+
+    def verificacoes(base):
+        r = original_verificacoes(base)
+        if threading.current_thread().name == "rodada-b":
+            b_leu.set()                                     # B ja' leu a marca e o arquivo; vai pedir o lock
+        return r
+
+    monkeypatch.setattr(sentinela, "_gravar_estado", gravar)
+    monkeypatch.setattr(sentinela, "verificacoes", verificacoes)
+    erros = []
+
+    def rodar(nome_conn):
+        c = db.get_conn()
+        try:
+            sentinela.rodada(c)
+        except Exception as e:                              # noqa: BLE001 - o teste confere abaixo
+            erros.append(e)
+        finally:
+            c.close()
+
+    antes = conn.execute("SELECT MAX(id) FROM audit_log").fetchone()[0] or 0
+    a = threading.Thread(target=rodar, args=("a",), name="rodada-a")
+    a.start()
+    assert a_no_arquivo.wait(5)
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = True       # B enxerga a maquina ja' normal
+    b = threading.Thread(target=rodar, args=("b",), name="rodada-b")
+    b.start()
+    a.join(10)
+    b.join(10)
+    assert erros == []
+    gravados = [json.loads(r[0])["evento"] for r in conn.execute(
+        "SELECT depois FROM audit_log WHERE acao = ? AND id > ?", (sentinela.ACAO, antes))]
+    assert gravados == ["auditoria-arquivos"]
+    estado = json.loads((maquina.raiz / "dados" / "sentinela.json").read_text(encoding="utf-8"))
+    assert list(estado["pendencias"]) == ["auditoria-arquivos"]   # o arquivo de A, que gravou no banco
+    assert _rodar(maquina, conn) == []                      # normal: a pendencia sai
+    maquina.auditoria[sentinela.GUID_ARQUIVOS] = False
+    assert [x["evento"] for x in _rodar(maquina, conn)] == ["auditoria-arquivos"]   # episodio novo avisa
+
+
+def test_arquivo_de_estado_que_nao_grava_nao_impede_os_achados(maquina, conn, monkeypatch):
+    _com_ponto_de_partida(maquina, conn)
+
+    def falha(estado):
+        raise PermissionError("sem permissao")
+
+    monkeypatch.setattr(sentinela, "_gravar_estado", falha)
+    assert [x["evento"] for x in _rodar(maquina, conn, "4670_permissao.xml")] == [4670]
+    assert _ponto(conn) == 1030
 
 
 def test_copia_a_frente_do_banco_sem_conseguir_ler_o_log_acusa(maquina, conn):

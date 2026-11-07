@@ -499,7 +499,7 @@ def _sentinela(args) -> int:
     if r["gravado"]:
         print(f"Ponto da sentinela gravado na auditoria: registro {r['ponto']}.")
     elif r["ponto"] is not None:
-        print(f"Ponto da sentinela já estava na auditoria: registro {r['ponto']}.")
+        print(f"Ponto da sentinela na tabela ({r['ponto']}) mais antigo que o da auditoria: mantido o da auditoria.")
     print(f"sentinela_ponto: {r['tabela']} migracao 063: {r['migracao']}")
     return 0 if r["tabela"] == 0 and r["migracao"] == 0 else 1
 
