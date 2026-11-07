@@ -552,7 +552,7 @@ def _apagar_assinatura(arquivo: Path) -> None:
     PermissionError no Windows; o que persiste vira ValueError (422) e a transacao desfaz o evento de remocao."""
     for espera in (*_TENTATIVAS_TROCA, None):
         try:
-            arquivo.unlink()
+            arquivo.unlink(missing_ok=True)     # outra remocao simultanea ja' tirou: nao e' erro
             return
         except PermissionError:
             if espera is None:

@@ -298,7 +298,9 @@ def copiar_arquivos(raiz_origem: Path, raiz_destino: Path, conferir: bool = Fals
                 if not (_NOME_ASSINATURA.fullmatch(arquivo.name) and arquivo.is_file()):
                     continue
                 try:
-                    copiados += _guardar_versao_assinatura(arquivo, destino)
+                    copiados += _guardar_versao_assinatura(arquivo, destino, conferir)
+                except FileNotFoundError:
+                    continue            # a pessoa tirou a assinatura no meio da passada: nada a guardar
                 except OSError as e:
                     log.warning("versao da assinatura sem copia: %s -> %s", arquivo, destino, exc_info=True)
                     falhas.setdefault(nome, []).append(_motivo(e))
@@ -340,15 +342,16 @@ def _sumidos_dos_dados(backup_da_pasta: Path, nos_dados: set[str]) -> set[str]:
 _NOME_ASSINATURA = re.compile(r"usuario-(\d+)")
 
 
-def _guardar_versao_assinatura(arquivo: Path, destino: Path) -> bool:
+def _guardar_versao_assinatura(arquivo: Path, destino: Path, conferir: bool = False) -> bool:
     """Guarda no backup a versao da assinatura pelo sha256 (`usuario-<id>.<sha256>`, imutavel; #479), ao lado da copia
     do nome ativo: a restauracao acha a que valia no snapshot escolhido mesmo depois de a pessoa trocar. Le o arquivo
     uma vez so' (a assinatura tem ate' 1 MB): o nome e o conteudo saem da mesma leitura, mesmo que a pessoa troque a
-    assinatura no meio. False se a versao ja' estava la', integra."""
+    assinatura no meio. Como nas pastas pelo sha256, mesmo nome e tamanho contam como presente; com `conferir` (a
+    releitura diaria), a versao guardada e' relida. False se a versao ja' estava la'."""
     conteudo = arquivo.read_bytes()
     sha = hashlib.sha256(conteudo).hexdigest()
     alvo = destino / f"{arquivo.name}.{sha}"
-    if alvo.is_file() and _sha256(alvo) == sha:
+    if alvo.is_file() and (_sha256(alvo) == sha if conferir else alvo.stat().st_size == len(conteudo)):
         return False
     parcial = alvo.parent / f"{alvo.name}.{os.getpid()}-{threading.get_ident()}-{secrets.token_hex(4)}.tmp"
     try:

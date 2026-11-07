@@ -494,6 +494,23 @@ def test_restauracao_devolve_a_versao_da_assinatura_que_valia_no_snapshot(tmp_pa
     assert sorted(a.name for a in (dados / "assinaturas").iterdir() if a.is_file()) == ["usuario-1"]
 
 
+def test_assinatura_tirada_no_meio_da_passada_nao_e_erro(tmp_path, monkeypatch):
+    """#479 (/code-review): a pessoa tira a assinatura entre a listagem e a leitura da versao; nao ha' o que guardar,
+    e a passada nao acusa falso alarme."""
+    origem, _ = _dados_com_arquivos(tmp_path)
+    ativa = tmp_path / "dados" / "assinaturas" / "usuario-1"
+    real = Path.read_bytes
+
+    def tirada(self):
+        if self == ativa:
+            raise FileNotFoundError(2, "No such file or directory", str(self))
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", tirada)
+    _rodar(origem, tmp_path / "dados" / "backups")
+    assert backup.ESTADO["ultima_copia_arquivos_erro"] is None
+
+
 SUMIU_PLEITOS = "1 arquivo(s) de pleitos estão no backup e sumiram dos dados"
 
 
