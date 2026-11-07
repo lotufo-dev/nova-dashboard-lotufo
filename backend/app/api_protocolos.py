@@ -154,6 +154,8 @@ def link(pid: ID, dados: LinkIn, usuario: dict = Depends(exigir("editar_cadastro
     _existe(conn, pid)
     try:
         protocolo.adicionar_link(conn, usuario["id"], pid, dados.nome, dados.url)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -165,6 +167,8 @@ def remover_link(pid: ID, link_id: ID, usuario: dict = Depends(exigir("editar_ca
     _existe(conn, pid)
     try:
         protocolo.remover_link(conn, usuario["id"], pid, link_id)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
@@ -218,6 +222,8 @@ def assinado(pid: ID, arquivo: UploadFile = File(...), usuario: dict = Depends(e
     pdf = b"".join(arquivos.blocos_validados(arquivo, teto_bytes=pdfs.TETO_BYTES_PACOTE))
     try:
         protocolo.receber_assinado(conn, usuario["id"], pid, pdf)
+    except envio_reserva.EnvioEmAndamento as e:     # issue #536
+        raise HTTPException(409, detail=e.detalhe()) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)
