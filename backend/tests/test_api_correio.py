@@ -100,6 +100,29 @@ def test_assinatura_png_cortada_ao_meio_da_422_em_portugues(client_admin):
     assert r.status_code == 200 and r.json()["assinatura"] is True
 
 
+def test_tirar_assinatura_ocupada_pelo_backup_da_422_em_portugues(client_admin, monkeypatch):
+    """#479: o backup lendo a assinatura no Windows (PermissionError no unlink) nao vira 500 em ingles."""
+    from pathlib import Path
+
+    from app import correio
+    from tests.conftest import _png
+    assert client_admin.post("/api/correio/assinatura",
+                             files={"arquivo": ("a.png", _png(), "image/png")}).status_code == 200
+    monkeypatch.setattr(correio.time, "sleep", lambda s: None)
+    real = Path.unlink
+
+    def ocupado(self, missing_ok=False):
+        if self.name.startswith("usuario-"):
+            raise PermissionError("arquivo aberto por outro processo")
+        real(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", ocupado)
+    r = client_admin.delete("/api/correio/assinatura")
+    assert r.status_code == 422 and r.json()["detail"] == "Não foi possível tirar a assinatura agora; tente de novo"
+    monkeypatch.setattr(Path, "unlink", real)
+    assert client_admin.get("/api/correio/status").json()["assinatura"] is True
+
+
 def test_dois_cliques_simultaneos_pedem_um_codigo_so(client_admin, monkeypatch):
     pedidos, liberar = [], threading.Event()
 

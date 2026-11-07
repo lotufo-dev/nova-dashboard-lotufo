@@ -144,7 +144,7 @@ def _commit(raiz: Path) -> str | None:
 def _relatorio(rel: dict) -> None:
     print("ENSAIO (nada foi gravado)" if rel["ensaio"] else "APLICADO")
     for nome in ("orgaos", "entidades", "contratos", "instrumentos", "pleitos", "cronograma", "geral", "espelho",
-                 "frc"):
+                 "frc", "custo"):
         r = rel[nome]
         print(f"  {nome}: {len(r['criados'])} criados, {len(r['alterados'])} alterados, {r['iguais']} iguais")
         for rotulo in r["criados"]:
@@ -515,6 +515,36 @@ def _dono(args) -> int:
     return 0
 
 
+def _sentinela(args) -> int:
+    """`sentinela antes-da-456 --banco <db>` (issue #478): com o serviço parado e antes de voltar o código para um
+    commit anterior à #456, passa o ponto de leitura da sentinela para a auditoria e tira a tabela, os gatilhos e a
+    linha da 063 (docs/runbook.md, "Rollback para um commit anterior à issue #456"). Não roda as migrações."""
+    from app import sentinela
+    banco = Path(args.banco)
+    if not banco.is_file():
+        print(f"Banco não encontrado: {banco}")
+        return 1
+    anterior = os.environ.get("DASH_DB_PATH")
+    os.environ["DASH_DB_PATH"] = str(banco)
+    try:
+        conn = db.get_conn()
+        try:
+            r = sentinela.antes_da_456(conn)
+        finally:
+            conn.close()
+    finally:
+        if anterior is None:
+            os.environ.pop("DASH_DB_PATH", None)
+        else:
+            os.environ["DASH_DB_PATH"] = anterior
+    if r["gravado"]:
+        print(f"Ponto da sentinela gravado na auditoria: registro {r['ponto']}.")
+    elif r["ponto"] is not None:
+        print(f"Ponto da sentinela na tabela ({r['ponto']}) mais antigo que o da auditoria: mantido o da auditoria.")
+    print(f"sentinela_ponto: {r['tabela']} migracao 063: {r['migracao']}")
+    return 0 if r["tabela"] == 0 and r["migracao"] == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -557,6 +587,9 @@ def main(argv: list[str] | None = None) -> int:
     itg = sub.add_parser("integridade", help="registro do último deploy (o deploy.ps1 chama)")
     itg.add_argument("acao", choices=["registrar"])
     itg.add_argument("--raiz", required=True, help="raiz dos dados, onde fica o deploy-atual.json")
+    sen = sub.add_parser("sentinela", help="rollback para antes da issue #456 (o deploy.ps1 chama; ver o runbook)")
+    sen.add_argument("acao", choices=["antes-da-456"])
+    sen.add_argument("--banco", required=True, help="banco da produção, com o serviço parado")
     dn = sub.add_parser("dono", help="cópia cifrada para a chave do dono")
     dn.add_argument("acao", choices=["gerar-chave"])
     dn.add_argument("--saida", required=True, help="pasta onde gravar o par de chaves")
@@ -568,6 +601,8 @@ def main(argv: list[str] | None = None) -> int:
         return _conta(args)
     if args.cmd == "dono":
         return _dono(args)
+    if args.cmd == "sentinela":
+        return _sentinela(args)
     if args.cmd == "documentos":
         return _documentos(args)
     if args.cmd == "medicoes":
