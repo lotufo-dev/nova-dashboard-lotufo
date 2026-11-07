@@ -12,9 +12,19 @@ export type LinhaResumo = {
   medicao_id: number; medicao_ids: number[]; numero: number; competencia: string; titulo: string; proximo_passo: string;
   valor_centavos: number | null; marco: string | null; dias: number | null;
 };
+/** #151: o que a janela "Iniciar processo" sabe de uma serie de medicao da obra (execucao ou Projeto). */
+export type SerieObra = {
+  aberta_id: number | null; aberta_numero: number | null; aberta_passo: string | null;
+  prevista_id: number | null; prevista_numero: number | null; prevista_competencia: string | null;
+  ultima: { numero: number; competencia: string } | null;   // competencia AAAA-MM
+};
 export type ObraResumo = {
   contrato_id: number; obra: string; contratante: string; orgao_sub: string | null; aberta: boolean;
-  prevista_id: number | null;
+  prevista_id: number | null;   // a prevista mais antiga de qualquer serie (a da aba Sem medicao aberta, #154)
+  // #151: cada serie no seu bloco; o `prevista_id` e a `ultima` de fora sao os da aba Sem medicao aberta
+  execucao: SerieObra;
+  projeto: SerieObra | null;   // so' a obra que tem (ou teve) medicao de Projeto
+
   encerramento: boolean;   // A-21 (10/10/2026): em encerramento segue na lista, mas nao conta como "obra ativa"
   // #154 (aba Sem medicao aberta): ultima medicao, dias desde o fim da competencia dela, a prevista do cronograma
   // e o numero da proxima. Tudo do servidor.

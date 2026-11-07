@@ -3,7 +3,9 @@ import { filtrarObras, nivelParada, porContratante, textoParada, type ObraResumo
 
 const obra = (contrato_id: number, nome: string, contratante: string, orgao_sub: string | null = null): ObraResumo =>
   ({ contrato_id, obra: nome, contratante, orgao_sub, aberta: false, prevista_id: null, encerramento: false,
-    ultima: null, ha_dias: null, prevista: null, proxima: 1, proxima_tipo: "execucao" });
+    ultima: null, ha_dias: null, prevista: null, proxima: 1, proxima_tipo: "execucao",
+    execucao: { aberta_id: null, aberta_numero: null, aberta_passo: null, ultima: null, prevista_id: null, prevista_numero: null,
+      prevista_competencia: null }, projeto: null });
 
 describe("página Medições (regras de apresentação)", () => {
   it("“Parada há”: hoje, 1 dia, N dias; sem marco, traço", () => {

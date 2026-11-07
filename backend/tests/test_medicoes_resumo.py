@@ -269,3 +269,56 @@ def test_rota_do_resumo(client_admin):
 
 def test_rota_do_resumo_exige_login(client):
     assert client.get("/api/medicoes/resumo").status_code == 401
+
+
+def test_resumo_obras_trazem_a_medicao_aberta_a_prevista_e_a_ultima(conn, cenario):
+    """#151 (15/10/2026): a janela Iniciar processo precisa do id e do numero da aberta, do numero e da competencia
+    da prevista, da ultima medicao de cada serie (a sugestao) e de saber se a obra tem serie de Projeto."""
+    ids = cenario
+    obras = {o["obra"]: o for o in medicoes.resumo(conn, HOJE)["obras"]}
+    # A: 24 (execucao + reajuste) aberta; o reajuste nao conta como serie; Projeto 1 aberto
+    a = obras["Obra A"]
+    assert a["execucao"]["aberta_id"] == ids["a24"] and a["execucao"]["aberta_numero"] == 24 and a["execucao"]["aberta_passo"] == "protocolar"
+    assert a["execucao"]["ultima"] == {"numero": 24, "competencia": "2026-09"}
+    assert a["projeto"] == {"aberta_id": ids["a1p"], "aberta_numero": 1, "aberta_passo": "protocolar",
+                            "ultima": {"numero": 1, "competencia": "2026-09"},
+                            "prevista_id": None, "prevista_numero": None, "prevista_competencia": None}
+    # D: so' prevista (a mais antiga, 1); a prevista nao e' "ultima"; sem Projeto
+    d, de = obras["Obra D"], obras["Obra D"]["execucao"]
+    assert de["prevista_numero"] == 1 and de["prevista_competencia"] == "2026-08"
+    assert de["aberta_id"] is None and de["aberta_numero"] is None and de["ultima"] is None and d["projeto"] is None
+    # C: so' o espelho gerado; sem prevista
+    c = obras["Obra C"]["execucao"]
+    assert c["prevista_numero"] is None and c["prevista_competencia"] is None and c["aberta_numero"] == 3
+
+
+def test_resumo_prevista_de_projeto_nao_aparece_na_serie_de_execucao(conn, cenario):
+    """#151 (revisor): cada serie tem a sua prevista; a de Projeto vai no bloco `projeto`, nunca em `Execucao`."""
+    ids = cenario
+    proj = conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+                            "VALUES (?, 3, 'projeto', '2026-07', 'prevista')", (ids["d"],)).lastrowid
+    conn.commit()
+    d = {o["obra"]: o for o in medicoes.resumo(conn, HOJE)["obras"]}["Obra D"]
+    assert d["execucao"]["prevista_id"] == ids["d1"] and d["execucao"]["prevista_numero"] == 1      # a de execucao, mais antiga que a de Projeto
+    assert d["projeto"]["prevista_id"] == proj and d["projeto"]["prevista_numero"] == 3
+    assert d["projeto"]["prevista_competencia"] == "2026-07"
+    # obra so' com prevista de Projeto: execucao sem prevista
+    outra = _obra(conn, "Obra G", None)
+    conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+                 "VALUES (?, 1, 'projeto', '2026-09', 'prevista')", (outra,))
+    conn.commit()
+    g = {o["obra"]: o for o in medicoes.resumo(conn, HOJE)["obras"]}["Obra G"]
+    assert g["execucao"]["prevista_id"] is None and g["projeto"]["prevista_numero"] == 1
+
+
+def test_resumo_prevista_de_reajuste_nao_e_a_da_serie_de_execucao(conn):
+    """#151 (revisor, rodada 2): o reajuste lancado a mao nasce `prevista`, mas nao e' a prevista da serie de
+    execucao; a janela nao pode oferecer "Começar a 3ª" abrindo o reajuste."""
+    c = conn
+    a = _obra(c, "A", _orgao(c, "sinfra-suef1", "SINFRA - SUEF I", "sinfra"))
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,3,'reajuste','2026-01','prevista')", (a,))
+    c.commit()
+    o = medicoes.resumo(conn, HOJE)["obras"][0]
+    assert o["execucao"]["prevista_id"] is None and o["execucao"]["prevista_numero"] is None
+    assert o["prevista_id"] is None and o["projeto"] is None

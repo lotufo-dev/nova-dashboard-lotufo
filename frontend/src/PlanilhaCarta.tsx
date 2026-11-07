@@ -155,7 +155,7 @@ export function saldoDoNumero(numero: string, sug: { numero: number; acumulado_a
 
 /** Passo 1: "Nova planilha/carta". `inicial`: a medicao prevista que este registro promove (nº e competencia dela). */
 export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRegistrar }: {
-  contratoId: number; tipo?: TipoPlanilha; inicial?: { numero: number; competencia: string };
+  contratoId: number; tipo?: TipoPlanilha; inicial?: { numero?: number; competencia?: string };
   aoRegistrar: (r: Registrada) => void;
 }) {
   const [sug, setSug] = useState<Sugestao | null>(null);
