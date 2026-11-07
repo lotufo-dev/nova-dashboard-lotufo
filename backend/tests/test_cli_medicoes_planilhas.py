@@ -362,3 +362,28 @@ def test_item_a_mais_numa_leitura_gravada_e_recusado(banco):
                       "VALUES (?, 6, 'outros', 100)", (lid,))
     finally:
         c.close()
+
+
+def test_insert_or_replace_numa_leitura_gravada_e_recusado(banco):
+    """#502 (Sol, PR #500): o REPLACE numa ordem que ja existe nao troca o item da leitura selada."""
+    _executar(_pasta_com(banco))
+    c = db.get_conn()
+    try:
+        lid = c.execute("SELECT id FROM medicao_grupos").fetchone()[0]
+        antes = [tuple(r) for r in c.execute("SELECT * FROM medicao_grupo_itens ORDER BY ordem")]
+        id1 = antes[0][0]
+        for sql, args in (
+                ("INSERT OR REPLACE INTO medicao_grupo_itens (leitura_id, ordem, grupo, valor_medido_centavos) "
+                 "VALUES (?, 1, 'trocado', 1)", (lid,)),
+                ("REPLACE INTO medicao_grupo_itens (leitura_id, ordem, grupo, valor_medido_centavos) "
+                 "VALUES (?, 2, 'trocado', 1)", (lid,)),
+                # pelo id do item: o REPLACE apagaria o item e regravaria outro no lugar
+                ("INSERT OR REPLACE INTO medicao_grupo_itens (id, leitura_id, ordem, grupo, valor_medido_centavos) "
+                 "VALUES (?, ?, 1, 'trocado', 1)", (id1, lid)),
+                ("INSERT INTO medicao_grupo_itens (leitura_id, ordem, grupo, valor_medido_centavos) "
+                 "VALUES (?, 3, 'trocado', 1)", (lid,))):
+            with pytest.raises(sqlite3.IntegrityError, match="itens dela já foram gravados"):
+                c.execute(sql, args)
+        assert [tuple(r) for r in c.execute("SELECT * FROM medicao_grupo_itens ORDER BY ordem")] == antes
+    finally:
+        c.close()
