@@ -101,3 +101,11 @@ def ratear_proporcional(total_centavos: int, pesos: list[int]) -> list[int]:
     for i in sorted(range(len(pesos)), key=lambda i: (-restos[i], i))[:total - sum(partes)]:
         partes[i] += 1
     return [sinal * x for x in partes]
+
+
+def por_unidade(total_centavos: int, quantidade: Decimal) -> int:
+    """Issue #492: centavos por unidade (custo de um m³, de um t·km): `total_centavos` / `quantidade` em Decimal e
+    um arredondamento so', meio para cima. Quantidade precisa ser positiva."""
+    if not quantidade.is_finite() or quantidade <= 0:
+        raise ValueError("Quantidade do custo por unidade precisa ser positiva")
+    return _aplicar(Decimal(total_centavos) / quantidade, "round2")

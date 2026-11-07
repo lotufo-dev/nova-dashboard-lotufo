@@ -54,14 +54,19 @@ def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatc
                                  "valor_original_centavos": 1_000_00})
     c.execute("UPDATE contratos SET projeto_rm='PRJ', custo_nao_e_custo='[]', custo_sem_tarefa='proporcional' WHERE id=?",
               (com,))
-    c.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha) VALUES (?,1,'G',?,?)",
-              (com, json.dumps(["001"]), json.dumps(["1."])))
+    c.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha, item_chave_codigo, "
+              "item_chave_unidade) VALUES (?,1,'G',?,?,'1.1','m³')", (com, json.dumps(["001"]), json.dumps(["1."])))
     c.commit(); c.close()
     assert client.get(f"/api/diretoria/custo/{com}").status_code == 401
     _login(client, "dir3@l.com")
     assert client.get("/api/diretoria/custo").json() == [{"contrato_id": com, "obra": "IC 1"}]
     r = client.get(f"/api/diretoria/custo/{com}")
-    assert r.status_code == 200 and set(r.json()) >= {"obra", "grupos", "linhas", "acumulado", "rm"}
+    assert r.status_code == 200 and set(r.json()) >= {"obra", "grupos", "linhas", "acumulado", "itens_chave", "rm"}
+    # issue #492: o bloco do item-chave, em centavos por unidade (sem planilha lida: sem medicao)
+    assert r.json()["itens_chave"] == [{
+        "grupo": "G", "item": "1.1", "descricao": None, "unidade": "m³", "quantidade_acumulada": None,
+        "medicao": None, "custo_centavos": 0, "custo_unitario_centavos": None, "preco_unitario_centavos": None,
+        "diferenca_centavos": None, "situacao": "sem_medicao"}]
     r = client.get(f"/api/diretoria/custo/{sem}")
     assert r.status_code == 404 and r.json()["detail"] == "Esta obra não tem cadastro de custo."
     assert client.get("/api/diretoria/custo/9999").status_code == 404
