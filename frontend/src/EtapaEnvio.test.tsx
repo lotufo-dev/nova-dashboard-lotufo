@@ -445,4 +445,15 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     montar([envio({ situacao: "pendente", aviso: "Falta a nota fiscal · CND vence em 5 dias" })]);
     expect(document.querySelector(".envio-faixa")!.textContent).toBe("Falta 1 item para enviar: a nota fiscal");
   });
+
+  it("o cartão Notas fiscais não repete o texto do servidor da FRC (etapa antiga, “anexe aqui”) (revisor, PR #555)", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ situacao: "pendente", aviso: "Falta a FRC assinada",
+      itens: [{ chave: "frc:631", rotulo: "FRC assinada", estado: "falta", acao: "anexar_frc",
+        detalhe: "Falta a FRC assinada: gere na etapa 3 (Nota fiscal), assine no DocuSign e anexe aqui" }] })]);
+    const notas = screen.getByRole("region", { name: "Notas fiscais" });
+    expect(within(notas).getByText("FRC assinada")).toBeTruthy();
+    expect(within(notas).getByText("1 de 2")).toBeTruthy();
+    expect(within(notas).queryByText(/etapa 3|anexe aqui/)).toBeNull();
+  });
 });

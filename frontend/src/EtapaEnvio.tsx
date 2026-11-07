@@ -117,8 +117,9 @@ export function CartoesEnvio({ envios, certidoes }: { envios: Envio[]; certidoes
   const notas: Linha[] = [
     ...envios.flatMap(e => e.notas.map(n => ({ chave: `${e.chave}|nf-${n.numero}-${n.natureza}`, ok: true, valor: n.valor_centavos,
       texto: <>NF {n.numero}{mistura ? ` · ${n.natureza === "reajuste" ? "reajuste" : "medição"}` : ""}{n.municipio ? ` · ${n.municipio}` : ""}</> }))),
+    // sem o detalhe do servidor: ele fala em etapa antiga e "anexe aqui", e a acao mora no e-mail aberto (revisor, PR #555)
     ...itens.filter(i => (base(i.chave) === "notas" && i.estado !== "ok") || base(i.chave).startsWith("frc:") || base(i.chave) === "consorcio")
-      .map(i => ({ chave: i.chave, ok: i.estado === "ok", texto: base(i.chave) === "notas" ? "Falta a nota fiscal" : i.rotulo, detalhe: i.detalhe })),
+      .map(i => ({ chave: i.chave, ok: i.estado === "ok", texto: base(i.chave) === "notas" ? "Falta a nota fiscal" : i.rotulo })),
   ];
   const certs = itens.filter(i => base(i.chave).startsWith("certidoes:"));
   const certLinhas: Linha[] = certs.map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", texto: i.rotulo, detalhe: i.detalhe }));
