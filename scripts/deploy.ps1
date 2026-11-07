@@ -91,6 +91,11 @@ if ($comTls) {
     if (-not (Test-Path -LiteralPath $certificado)) {
         throw "certificado do HTTPS nao encontrado em $certificado (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)"
     }
+    # Gate Sol da PR #475: sem a chave o processo novo nao sobe em HTTPS, nem o do rollback; o atual ja' a tem carregada.
+    # Confere so' que existe e abre para leitura (o conteudo nao e' lido); o par com o cert.pem nao e' conferido aqui.
+    $chaveTls = Join-Path $Raiz "segredos\tls\chave.pem"
+    try { [System.IO.File]::OpenRead($chaveTls).Dispose() }
+    catch { throw "chave do HTTPS ausente ou ilegivel em $chaveTls (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)" }
 } else {
     $urlSaude = "http://localhost:$Porta/api/health"
 }
@@ -110,11 +115,12 @@ function Saudavel([switch]$ExigirInstalacao) {
     Write-Warning "health 200, mas a instalacao nao esta autorizada: $situacao - ver docs\runbook.md (Instalacao assinada)"
     return $false
 }
+# Sem fetch aqui (issue #443): o fluxo principal ja' buscou o alvo, e o rollback volta para o commit anterior, que ja'
+# esta' no clone. Com a rede caida, um fetch no rollback abortava a volta e deixava o pinado no commit novo.
 function Construir([string]$alvo) {
-    & git -C $AppDir fetch --quiet
-    if ($LASTEXITCODE -ne 0) { throw "git fetch falhou" }
     & git -C $AppDir checkout --quiet --detach $alvo
     if ($LASTEXITCODE -ne 0) { throw "git checkout $alvo falhou (diretorio pinado sujo?)" }
+    $script:buildComecou = $true   # daqui em diante pip/npm mexem na venv e no dist (issue #443)
     Reconstruir
 }
 function Reconstruir {
@@ -220,10 +226,71 @@ function AvisarSeCopia {
         Write-Warning "producao de volta, mas em modo copia: instalacao $($saude.instalacao) (motivo: $($saude.instalacao_motivo)), sem envio de e-mail e sem RM - ver docs\runbook.md (Instalacao assinada)"
     }
 }
+# Issue #443 (rodada 2 da PR #475): a producao so' esta' PROVADA com o health 200 cujo `commit` (7 caracteres, lido pelo
+# servidor na subida, issue #421) e' o commit esperado. Qualquer processo responde 200; sem o campo (commit anterior a
+# #421) nada esta' provado.
+function CommitDoHealth {
+    try { $resposta = Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12 }
+    catch { return $null }
+    if ($resposta.StatusCode -ne 200) { return $null }
+    $saude = $null
+    try { $saude = $resposta.Content | ConvertFrom-Json } catch { $saude = $null }
+    if ($saude -and $saude.commit) { return [string]$saude.commit }
+    return $null
+}
+function NoArEm([string]$commit) {
+    $curto = "$commit"
+    if ($curto.Length -gt 7) { $curto = $curto.Substring(0, 7) }
+    $visto = CommitDoHealth
+    if ($visto -and $curto.Length -eq 7 -and $visto -eq $curto) { return $true }
+    if (-not $visto) { $visto = "health sem 200 ou sem o campo commit" }
+    Write-Warning "o health nao prova o commit $curto no ar (visto: $visto)"
+    return $false
+}
+function PinadoLimpo {
+    $alterados = & git -C $AppDir status --porcelain --untracked-files=no
+    if ($LASTEXITCODE -ne 0) { return $false }
+    return (-not $alterados)
+}
 
 $anterior = (& git -C $AppDir rev-parse HEAD).Trim()
+# Sentinela do watchdog (issue #443, runbook "Subir e derrubar"): o finally so' o apaga com $soltarWatchdog, que vale
+# $true so' com a producao provada: no aborto antes do checkout se ela estava provada no inicio (nada mudou no disco),
+# na volta do build com a arvore limpa e o health no commit anterior, no DEPLOY OK (health no commit novo) e no
+# ROLLBACK OK (health no anterior). Qualquer outra saida, inclusive excecao, deixa o watchdog pausado.
+$script:soltarWatchdog = $false
+$script:buildComecou = $false
+$script:sentinelaPreso = $false
+$script:pinadoMudou = $false
+# Conferencia do inicio, antes de criar o sentinela: pinado limpo e o health no commit do pinado. Sem ela, um aborto
+# antes do checkout (rede caida no fetch, por exemplo, numa nova tentativa depois de ROLLBACK TAMBEM FALHOU) soltaria o
+# watchdog sobre uma producao que ja' estava quebrada.
+# Rodada extra da PR #475: sentinela que ja' existia ANTES desta execucao e' de uma execucao anterior que nao terminou
+# provada (MANTIDO, chamada que caiu) ou de uma recuperacao a mao. O processo antigo pode responder 200 no commit
+# anterior com a venv ou o dist pela metade no disco (volta do build que falhou), entao o health nao prova nada: a
+# producao nao conta como provada e esta execucao so' apaga o sentinela depois de reconstruir e provar.
+$script:sentinelaJaExistia = Test-Path $pause
+$script:producaoProvada = $false
+if ($script:sentinelaJaExistia) {
+    Write-Warning "sentinela $pause ja' existia antes deste deploy (execucao anterior que nao terminou provada?): a producao nao conta como conferida no inicio; o sentinela so' sai depois de reconstruir e provar"
+} elseif (PinadoLimpo) { $script:producaoProvada = NoArEm $anterior }
+# Gate Sol, rodada extra: a execucao anterior pode ter caido no Vite com o dist pela metade; -SemFrontend nao o refaria
+# e o health 200 no commit certo nao ve a tela sem JS. Com sentinela anterior, o frontend e' sempre reconstruido.
+if ($script:sentinelaJaExistia -and $SemFrontend) {
+    Write-Warning "-SemFrontend ignorado: com o sentinela de uma execucao anterior o frontend e' sempre reconstruido"
+    $SemFrontend = $false
+}
+if ($script:producaoProvada) { Write-Host "producao conferida no inicio: commit $($anterior.Substring(0, 7)) no ar, diretorio pinado limpo" }
+else { Write-Warning "producao NAO conferida no inicio (sentinela anterior, pinado sujo ou health sem o commit $($anterior.Substring(0, 7))): aborto antes do checkout mantem o sentinela" }
 New-Item -ItemType File -Path $pause -Force | Out-Null   # segura o watchdog durante o deploy
 try {
+    # ate' o checkout do alvo o pinado e a producao seguem como estavam: solta so' se ela estava provada no inicio
+    $script:soltarWatchdog = $script:producaoProvada
+    # Pinado sujo (issue #443): o checkout recusaria sem escrever nada; aborta aqui, antes de qualquer mudanca.
+    if (-not (PinadoLimpo)) {
+        Write-Host "deploy abortado antes do checkout: diretorio pinado com arquivos alterados (git status --porcelain --untracked-files=no); producao segue em $anterior" -ForegroundColor Red
+        exit 1
+    }
     # Backup pre-migracao (issue #75): se o commit novo mexe em backend/migrations, snapshot
     # do banco de producao ANTES do checkout; se falhar, o deploy nao acontece. O rollback
     # do codigo mais abaixo NAO restaura o banco (restauracao manual pelo runbook).
@@ -261,52 +328,101 @@ try {
     # Construir pode lancar depois do checkout (pip/npm/build): o diretorio pinado nao pode ficar
     # num commit que nao subiu (issue #78). Volta para $anterior (checkout + reconstrucao) e sai com 1.
     # A conferencia da instalacao (issue #417) entra no mesmo try: recusada, a producao nem para.
+    $script:soltarWatchdog = $false  # daqui em diante o pinado muda: so' solta com a producao provada
+    $script:pinadoMudou = $true
     # Issue #478: alvo de antes da #456 vindo de um commit com ela (-Ref): o ponto da sentinela passa para a auditoria
     # antes do checkout, com o comando do codigo atual e o servico parado (fica parado durante o build).
     SentinelaAntesDa456 $anterior $alvo
     try { Construir $alvo; ConferirInstalacao }
     catch {
         Write-Warning "Construir ou conferir a instalacao de $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
-        # Sem fetch (a rede pode ser a causa) e so reconstroi se o HEAD saiu de $anterior:
-        # se a falha foi no fetch/checkout do alvo, o HEAD nunca saiu e o build nao e refeito
-        # (npm/vite esvaziariam o dist servido com a producao no ar).
+        # Sem fetch (a rede pode ser a causa). Issue #443 (gate Sol da PR #475): se o checkout do alvo terminou, o build
+        # comecou e pip/npm podem ter mexido na venv e no dist, mesmo num deploy do mesmo commit: o anterior e' sempre
+        # reconstruido. Se nem o checkout terminou, o build nao e' refeito (npm/vite esvaziariam o dist servido com a
+        # producao no ar); um checkout pela metade aparece no git status. O watchdog so' sai com a arvore limpa em
+        # $anterior e o health no commit $anterior (rodada 2: um processo de outro commit tambem responde 200).
         try {
-            $atual = (& git -C $AppDir rev-parse HEAD).Trim()
+            $atual = "$(& git -C $AppDir rev-parse HEAD)".Trim()
             if ($atual -ne $anterior) {
                 & git -C $AppDir checkout --quiet --detach $anterior
                 if ($LASTEXITCODE -ne 0) { throw "git checkout $anterior falhou" }
+            }
+            $refez = $false
+            # Gate Sol, rodada extra: com o servico parado para o ponto da sentinela e a producao nao provada no inicio
+            # (sentinela anterior), o anterior e' reconstruido antes de religar (sem processo no ar, o build nao
+            # esvazia nada servido); senao o religamento subiria uma venv ou um dist pela metade.
+            if ($atual -ne $anterior -or $script:buildComecou -or ($script:sentinelaParou -and -not $script:producaoProvada)) {
                 Reconstruir
                 RegistrarDeploy
+                $refez = $true
             }
             if ($script:sentinelaParou) {
                 # o servico foi parado para o ponto da sentinela: religa o anterior, cuja 063 reimporta o ponto
                 Reiniciar
                 if (-not (SaudavelENovo)) { throw "a producao parada para o ponto da sentinela nao voltou em $anterior" }
             }
+            # Rodada extra da PR #475: sem reconstruir, so' solta se a producao estava provada no inicio (com sentinela
+            # de execucao anterior a venv e o dist podem estar pela metade no disco, com o processo antigo no ar).
+            if (-not $refez -and -not $script:producaoProvada) { throw "o anterior nao foi reconstruido e a producao nao estava conferida no inicio" }
+            $alterados = & git -C $AppDir status --porcelain --untracked-files=no
+            if ($LASTEXITCODE -ne 0) { throw "git status do diretorio pinado falhou" }
+            if ($alterados) { throw "diretorio pinado com arquivos alterados em relacao a $anterior (checkout pela metade?)" }
+            if (-not (NoArEm $anterior)) { throw "o health da producao no ar nao prova o commit $anterior depois da volta" }
+            $script:soltarWatchdog = $true
             Write-Host "deploy abortado no build; producao segue no commit anterior ($anterior), diretorio pinado de volta nele" -ForegroundColor Red
         } catch {
-            $onde = (& git -C $AppDir rev-parse HEAD).Trim()
-            Write-Host "deploy abortado no build E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior)" -ForegroundColor Red
+            $onde = "$(& git -C $AppDir rev-parse HEAD)".Trim()   # sem .Trim() em $null: a linha final tem de sair
+            Write-Host "deploy abortado no build E a volta para $anterior falhou ($($_.Exception.Message)) - intervir a mao: HEAD do diretorio pinado agora em $onde (esperado $anterior); sentinela do watchdog mantido" -ForegroundColor Red
         }
         exit 1
     }
     $novo = (& git -C $AppDir rev-parse HEAD).Trim()
     RegistrarDeploy
     Reiniciar
-    if (SaudavelENovo -ExigirInstalacao) {
-        $fim = "DEPLOY OK: $anterior -> $novo (health 200, processo novo)"
+    if ((SaudavelENovo -ExigirInstalacao) -and (NoArEm $novo)) {
+        $fim = "DEPLOY OK: $anterior -> $novo (health 200 no commit novo, processo novo)"
         if ($backup) { $fim += " - backup pre-migracao: $backup" }
+        $script:soltarWatchdog = $true
         Write-Host $fim -ForegroundColor Green
     } else {
         Write-Warning "Saude NAO voltou -> ROLLBACK para $anterior"
-        SentinelaAntesDa456 $novo $anterior
-        Construir $anterior
-        RegistrarDeploy
-        Reiniciar
-        if (SaudavelENovo) { Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
-        else { Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log)" -ForegroundColor Red }
+        # Issue #443: checkout, rebuild, reinicio e health do rollback num try proprio. Excecao em qualquer um deles
+        # (checkout, pip, npm, agendador, porta) e' ROLLBACK TAMBEM FALHOU, com o sentinela mantido.
+        $voltou = $false
+        try {
+            SentinelaAntesDa456 $novo $anterior
+            Construir $anterior
+            RegistrarDeploy
+            Reiniciar
+            $voltou = (SaudavelENovo) -and (NoArEm $anterior)
+        } catch {
+            $onde = "$(& git -C $AppDir rev-parse HEAD)".Trim()   # sem .Trim() em $null: a linha final tem de sair
+            Write-Host "ROLLBACK TAMBEM FALHOU ($($_.Exception.Message)) - intervir a mao (ver watchdog.log e dashboard.log): HEAD do diretorio pinado agora em $onde (esperado $anterior); sentinela do watchdog mantido" -ForegroundColor Red
+            exit 1
+        }
+        if ($voltou) { $script:soltarWatchdog = $true; Write-Host "ROLLBACK OK: producao de volta em $anterior" -ForegroundColor Yellow; AvisarSeCopia }
+        else { Write-Host "ROLLBACK TAMBEM FALHOU - intervir a mao (ver watchdog.log e dashboard.log); sentinela do watchdog mantido" -ForegroundColor Red }
         exit 1
     }
 } finally {
-    Remove-Item $pause -Force -ErrorAction SilentlyContinue   # solta o watchdog
+    # Solta o watchdog so' com a producao conferida (ver $soltarWatchdog acima). Nos caminhos de "intervir a mao" o
+    # pinado esta' num commit ou build que nao se provou: o watchdog nao pode reerguer sozinho; o operador apaga depois.
+    # Issue #443 (gate Sol da PR #475): a remocao falha visivel (ACL, arquivo travado) e e' conferida; se o sentinela
+    # continuar la', a linha final diz MANTIDO e o script sai com 1, mesmo depois do DEPLOY OK.
+    if ($script:soltarWatchdog) {
+        if (Test-Path $pause) {
+            try { Remove-Item $pause -Force -ErrorAction Stop }
+            catch { Write-Warning "nao foi possivel apagar o sentinela $pause ($($_.Exception.Message))" }
+        }
+        if (Test-Path $pause) {
+            # producao provada: nao e' caso de desfazer nada, so' de tirar o arquivo (runbook, Subir e derrubar)
+            $script:sentinelaPreso = $true
+            Write-Host "sentinela $pause MANTIDO POR FALHA NA REMOCAO: a producao esta' provada; nao reconstruir nem desfazer o deploy: conferir health e commit, corrigir o bloqueio (permissao, arquivo travado) e apagar o arquivo (docs\runbook.md, Subir e derrubar)" -ForegroundColor Red
+        }
+    }
+    elseif (-not $script:pinadoMudou -and -not $script:producaoProvada) {
+        Write-Host "sentinela $pause MANTIDO: a producao nao estava conferida no inicio (sentinela de execucao anterior, pinado sujo ou health sem o commit $anterior); conferir e recuperar antes de apaga-lo (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow
+    }
+    else { Write-Host "sentinela $pause MANTIDO: a producao nao foi provada depois do deploy; intervir a mao e so' apaga-lo depois da recuperacao (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow }
 }
+if ($script:sentinelaPreso) { exit 1 }
