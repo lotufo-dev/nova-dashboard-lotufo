@@ -52,8 +52,9 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
   // No celular o menu largo esta' por cima da tela: Esc e toque fora o fecham.
   useEffect(() => {
     if (!largo || !celular()) return;
-    const fora = (ev: MouseEvent) => { if (!caixa.current?.contains(ev.target as Node)) setEstado("recolhido"); };
-    const tecla = (ev: KeyboardEvent) => { if (ev.key === "Escape") setEstado("recolhido"); };
+    // celular() de novo a cada evento: com a janela alargada para o computador o menu volta ao fluxo da pagina
+    const fora = (ev: MouseEvent) => { if (celular() && !caixa.current?.contains(ev.target as Node)) setEstado("recolhido"); };
+    const tecla = (ev: KeyboardEvent) => { if (celular() && ev.key === "Escape") setEstado("recolhido"); };
     document.addEventListener("mousedown", fora);
     document.addEventListener("keydown", tecla);
     return () => { document.removeEventListener("mousedown", fora); document.removeEventListener("keydown", tecla); };

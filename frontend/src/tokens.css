@@ -383,11 +383,6 @@ td, th { font-variant-numeric: tabular-nums; }
 .trilho[data-estado="recolhido"] .trilho__rotulo {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
 }
-/* celular: o menu largo cobre a tela (a pagina fica com a folga de 64px) */
-@media (max-width: 767px) {
-  .shell:has(.trilho[data-estado="largo"]) { padding-left: var(--trilho); }
-  .trilho[data-estado="largo"] { box-shadow: var(--trilho-sombra-sobreposto); }
-}
 @media (prefers-reduced-motion: reduce) {
   .trilho, .trilho__seta { transition: none; }
 }
@@ -444,6 +439,9 @@ td, th { font-variant-numeric: tabular-nums; }
      Documentos, a medicao) tem pecas mais largas que isso. O que passar rola DENTRO da area da tela, e a pagina
      (trilho e barra) nunca rola de lado. So' aqui: no desktop um overflow no <main> prenderia os menus suspensos. */
   .principal { overflow-x: auto; }
+  /* menu largo no celular: cobre a tela (a pagina fica com a folga de 64px) */
+  .shell:has(.trilho[data-estado="largo"]) { padding-left: var(--trilho); }
+  .trilho[data-estado="largo"] { box-shadow: var(--trilho-sombra-sobreposto); }
   /* abas da obra e da Administracao: rolam na horizontal em vez de alargar a pagina */
   .abas { overflow-x: auto; scrollbar-width: none; }
   .abas > .aba { flex: none; white-space: nowrap; }
