@@ -25,6 +25,6 @@ describe("Endereço antigo /notas/envio/:id", () => {
     api.mockRejectedValue(new ApiErro(404, "Protocolo não encontrado"));
     render(<AbrirEnvio protocoloId={99} />);
     expect((await screen.findByRole("alert")).textContent).toContain("Protocolo não encontrado");
-    expect(screen.getByRole("link", { name: "Ver as notas a enviar" }).getAttribute("href")).toBe("/medicoes/enviar-nota");
+    expect(screen.getByRole("link", { name: "Ver as medições em andamento" }).getAttribute("href")).toBe("/medicoes/em-andamento");
   });
 });

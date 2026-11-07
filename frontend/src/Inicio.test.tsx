@@ -36,7 +36,7 @@ describe("Início", () => {
     expect(api).toHaveBeenCalledWith("/api/inicio/painel");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/, Leonardo$/);
     const cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
-    expect(cartoes.map(a => a.getAttribute("href"))).toEqual(["/medicoes/enviar-nota", "/documentos", "/obras/7/reajuste"]);
+    expect(cartoes.map(a => a.getAttribute("href"))).toEqual(["/medicoes/em-andamento", "/documentos", "/obras/7/reajuste"]);
     expect(cartoes[0].textContent).toContain("notas a enviar");
     expect(cartoes[1].textContent).toContain("certidões vencidas ou vencendo");
     expect(cartoes[1].textContent).not.toContain("FGTS Encomind");

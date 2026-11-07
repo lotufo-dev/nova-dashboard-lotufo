@@ -61,6 +61,17 @@ export function itemDe(r: Rota, busca: Record<string, string> = {}): ItemMenu | 
   }
 }
 
+/** Subitem de Medições que fica marcado (#507): "Iniciar medição" na própria tela e em "Nova medição"; "Em andamento" na
+ *  lista, na página da medicação e no envio da nota (a medição já foi iniciada). Fora de Medições, nenhum. */
+export function subitemMedicoesDe(r: Rota): "iniciar" | "em-andamento" | null {
+  switch (r.tela) {
+    case "medicoes": return r.aba === "em-andamento" ? "em-andamento" : "iniciar";
+    case "nova-medicao": return "iniciar";
+    case "medicao": case "notas-envio": return "em-andamento";
+    default: return null;
+  }
+}
+
 /** Nome da tela, como o menu e o titulo da aba do navegador dizem. */
 export function tituloDe(tela: Rota["tela"]): string {
   switch (tela) {

@@ -23,9 +23,10 @@ export type AbaObra = "medicoes" | "prazos" | "reajuste" | "documentos" | "contr
 export type AbaCarteira = "resumo" | "qdop" | "producao" | "custo";
 // Abas da Administracao (NAVEGACAO.md › Administracao). A Saude e' a padrao e nao entra na URL.
 export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria";
-// Abas de Medicoes (09/10/2026, prototipo aprovado): o Resumo e' a padrao e nao entra na URL; as outras sao as
-// situacoes do ciclo. "Enviar nota" e "Aguardando pagamento" eram as telas Notas › A enviar e Aguardando pagamento.
-export type AbaMedicoes = "resumo" | "sem-medicao" | "planilha-gerada" | "planilha-enviada" | "boletim-recebido" | "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento";
+// Medicoes (redesenho 2026-11, #507): so' dois itens no menu. "Iniciar medicao" e' a padrao e nao entra na URL
+// ("/medicoes"); "Em andamento" e' "/medicoes/em-andamento". As oito abas de antes (resumo, sem-medicao, planilha-gerada,
+// ..., aguardando-pagamento) e as telas Notas antigas (/notas, /notas/aguardando) abrem "Em andamento".
+export type AbaMedicoes = "iniciar" | "em-andamento";
 
 // Abas da pagina da empresa em Documentos (#161). As Certidoes sao a padrao e nao entram na URL.
 export type AbaDocumentos = "certidoes" | "regularidade" | "garantia";
@@ -59,8 +60,9 @@ const ABAS: readonly AbaObra[] = ["medicoes", "prazos", "reajuste", "documentos"
 const ABAS_DOCUMENTOS: readonly AbaDocumentos[] = ["certidoes", "regularidade", "garantia"];
 const ABAS_CARTEIRA: readonly AbaCarteira[] = ["resumo", "qdop", "producao", "custo"];
 const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria"];
-const ABAS_MEDICOES: readonly AbaMedicoes[] = ["resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota", "enviar-nota",
-  "aguardando-pagamento"];
+// As abas de Medicoes de antes do redesenho (#507): o link guardado em e-mail ou favorito abre "Em andamento".
+const ABAS_MEDICOES_ANTIGAS: readonly string[] = ["resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido",
+  "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento"];
 // Links antigos (e-mails, favoritos) continuam abrindo a secao que absorveu a aba.
 // A aba Notas saiu (mapa de 2026-09-28): as notas estao na medicao e na coluna Notas das medicoes da obra.
 const ABA_ANTIGA: Record<string, AbaObra> = { protocolo: "medicoes", notas: "medicoes", cronograma: "contrato", aditivos: "contrato" };
@@ -96,9 +98,6 @@ function ehAbaAdmin(s: string): s is AbaAdmin {
   return (ABAS_ADMIN as readonly string[]).includes(s);
 }
 
-function ehAbaMedicoes(s: string): s is AbaMedicoes {
-  return (ABAS_MEDICOES as readonly string[]).includes(s);
-}
 
 function ehId(s: string): boolean {
   return /^[1-9][0-9]{0,14}$/.test(s);
@@ -131,10 +130,13 @@ export function parseRota(pathname: string): Rota {
   // Notas (2026-10-09): a lista e as que aguardam pagamento viraram abas de Medicoes (09/10/2026); os links antigos
   // ("/notas", "/notas/aguardando", com os filtros) abrem a aba e o App troca a URL pela canonica. O envio de um
   // protocolo continua com caminho proprio.
-  if (a === "notas" && partes.length === 1) return { tela: "medicoes", aba: "enviar-nota" };
-  if (a === "notas" && partes.length === 2 && b === "aguardando") return { tela: "medicoes", aba: "aguardando-pagamento" };
+  if (a === "notas" && partes.length === 1) return { tela: "medicoes", aba: "em-andamento" };
+  if (a === "notas" && partes.length === 2 && b === "aguardando") return { tela: "medicoes", aba: "em-andamento" };
   if (a === "notas" && partes.length === 3 && b === "envio" && ehId(c)) return { tela: "notas-envio", id: Number(c) };
-  if (a === "medicoes" && partes.length === 2 && ehAbaMedicoes(b)) return b === "resumo" ? { tela: "medicoes" } : { tela: "medicoes", aba: b };
+  if (a === "medicoes" && partes.length === 2) {
+    if (b === "iniciar") return { tela: "medicoes" };
+    if (b === "em-andamento" || ABAS_MEDICOES_ANTIGAS.includes(b)) return { tela: "medicoes", aba: "em-andamento" };
+  }
   // A empresa em Documentos (#161): "/documentos/3" e as outras abas; a padrao vira a forma canonica.
   if (a === "documentos" && b !== undefined && ehId(b) && partes.length <= 3) {
     if (partes.length === 2) return { tela: "documentos-empresa", id: Number(b) };
@@ -157,7 +159,7 @@ export function caminhoDe(r: Rota): string {
     case "documentos-empresa": return r.aba && r.aba !== "certidoes" ? `/documentos/${r.id}/${r.aba}` : `/documentos/${r.id}`;
     case "carteira": return r.aba && r.aba !== "resumo" ? `/carteira/${r.aba}` : "/carteira";
     case "admin": return r.aba && r.aba !== "saude" ? `/admin/${r.aba}` : "/admin";
-    case "medicoes": return r.aba && r.aba !== "resumo" ? `/medicoes/${r.aba}` : "/medicoes";
+    case "medicoes": return r.aba && r.aba !== "iniciar" ? `/medicoes/${r.aba}` : "/medicoes";
     case "notas-envio": return `/notas/envio/${r.id}`;
     default: return `/${r.tela}`;
   }

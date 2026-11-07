@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { entradaDe, itemDe, menuDe, tituloDaSecao, tituloDe } from "./navegacao";
+import { entradaDe, itemDe, menuDe, subitemMedicoesDe, tituloDaSecao, tituloDe } from "./navegacao";
 
 describe("navegação por perfil", () => {
   it("todo perfil entra pelo Início (08/10/2026)", () => {
@@ -26,13 +26,22 @@ describe("navegação por perfil", () => {
     expect(itemDe({ tela: "nova-medicao", obra: 7 })).toBe("medicoes");
     expect(itemDe({ tela: "notas-envio", id: 55 })).toBe("medicoes");
     expect(itemDe({ tela: "documentos-empresa", id: 3, aba: "garantia" })).toBe("documentos");      // #161
-    expect(itemDe({ tela: "medicoes", aba: "enviar-nota" })).toBe("medicoes");
+    expect(itemDe({ tela: "medicoes", aba: "em-andamento" })).toBe("medicoes");
+  });
+
+  it("o subitem de Medições marcado: Iniciar na tela e na nova medição; Em andamento na lista, na medição e no envio (#507)", () => {
+    expect(subitemMedicoesDe({ tela: "medicoes" })).toBe("iniciar");
+    expect(subitemMedicoesDe({ tela: "nova-medicao", obra: 7 })).toBe("iniciar");
+    expect(subitemMedicoesDe({ tela: "medicoes", aba: "em-andamento" })).toBe("em-andamento");
+    expect(subitemMedicoesDe({ tela: "medicao", obra: 7, id: 723 })).toBe("em-andamento");
+    expect(subitemMedicoesDe({ tela: "notas-envio", id: 55 })).toBe("em-andamento");
+    expect(subitemMedicoesDe({ tela: "obras" })).toBeNull();
   });
 
   it("a barra superior diz a seção, não o objeto", () => {
     expect(tituloDaSecao({ tela: "obra", id: 7, aba: "medicoes" })).toBe("Obras");
     expect(tituloDaSecao({ tela: "medicao", obra: 7, id: 723 })).toBe("Medições");
-    expect(tituloDaSecao({ tela: "medicoes", aba: "aguardando-nota" })).toBe("Medições");
+    expect(tituloDaSecao({ tela: "medicoes", aba: "em-andamento" })).toBe("Medições");
     expect(tituloDaSecao({ tela: "conta" })).toBe("Minha conta");
     expect(tituloDaSecao({ tela: "a-receber" })).toBe("A receber");
     expect(tituloDaSecao({ tela: "siga" })).toBe("SIGA");

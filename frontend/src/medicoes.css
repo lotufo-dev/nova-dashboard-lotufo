@@ -1,59 +1,10 @@
 /* Pagina Medicoes com abas (09/10/2026, prototipo aprovado pelo Leo; MedicoesPagina.tsx e IniciarMedicao.tsx).
    Cores so' dos tokens (tokens.css): as da situacao sao --sit-*. */
 
-/* ---------------------------------------------------------------- faixa de abas */
-/* Logo abaixo da barra superior, branca, com a borda de baixo: barra e faixa viram um bloco so'. No celular a faixa
-   rola na horizontal por dentro, e a pagina nao. */
-.abas-secao {
-  display: flex; gap: 4px; flex: none;
-  padding: 0 32px;
-  background: var(--superficie);
-  border-bottom: 1px solid var(--linha);
-  overflow-x: auto; overflow-y: hidden;
-  scrollbar-width: none;
-}
-.abas-secao::-webkit-scrollbar { display: none; }
-.abas-secao__aba {
-  display: flex; align-items: center; gap: 8px; flex: none;
-  height: 48px; padding: 0 14px; margin-bottom: -1px;
-  border-bottom: 2px solid transparent;
-  color: var(--sit-sem-texto); text-decoration: none; white-space: nowrap;
-}
-.abas-secao__aba:hover { color: var(--texto); }
-.abas-secao__aba[aria-current="page"] { color: var(--acento); font-weight: 600; border-bottom-color: var(--acento); }
-/* anel por dentro: a faixa corta o que passa da borda (rola na horizontal) */
-.abas-secao__aba:focus-visible { outline-offset: -3px; border-radius: var(--raio-micro); }
-.abas-secao__n {
-  padding: 0 7px; border-radius: var(--raio-pilula);
-  background: var(--neutro-fundo); color: var(--sit-sem-texto);
-  font-size: 12px; line-height: 20px; font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
 .medicoes { gap: 20px; }
 .medicoes__acoes { display: flex; justify-content: flex-end; }
 .medicoes__iniciar { height: 44px; padding: 0 20px; gap: 8px; font-size: 15px; font-weight: 600; box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
 .medicoes__iniciar .icone { stroke-width: 2.2; }
-
-/* ------------------------------------------------------------------ cartoes */
-.medicoes__cartoes { display: flex; flex-wrap: wrap; gap: 16px; }
-.medicoes__cartao {
-  flex: 1 1 160px;
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 16px 18px;
-  background: var(--superficie);
-  border: 1px solid var(--linha); border-radius: var(--raio);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
-  text-decoration: none;
-  transition: border-color .15s ease, box-shadow .15s ease;
-}
-.medicoes__cartao:hover { border-color: var(--acento-linha); box-shadow: 0 4px 12px rgba(79, 70, 229, .10); }
-.medicoes__cartao-rotulo { display: flex; align-items: center; gap: 8px; color: var(--texto-menu); }
-.medicoes__cartao-n { font-family: var(--fonte-num); font-size: 32px; line-height: 40px; font-weight: 500; color: var(--texto); }
-.medicoes__cartao-n--zero { color: var(--texto-2); }
-/* Oito situacoes: em fluxo livre a oitava caia sozinha numa segunda linha, esticada na largura toda. Em computador,
-   quatro por linha (duas linhas cheias); abaixo disso o fluxo livre de antes. */
-@media (min-width: 1100px) { .medicoes__cartoes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 /* ponto e pilula da situacao */
 .sit-ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-pilula); }
@@ -116,35 +67,22 @@
 .medicoes__parada--atencao { color: var(--atencao); font-weight: 600; }
 .medicoes__parada--acao { color: var(--acao); font-weight: 600; }
 
-.medicoes__faixa {
-  padding: 10px 16px;
-  background: var(--superficie-2);
-  border-top: 1px solid var(--linha); border-bottom: 1px solid var(--linha);
-  color: var(--texto-2); font-size: 12px; line-height: 16px; font-weight: 600;
-}
-/* grupo por contratante: fechado, abre ao clicar; a seta gira */
-.medicoes__grupo { border-bottom: 1px solid var(--linha-suave); }
-.medicoes__grupo:last-child { border-bottom: 0; }
-.medicoes__grupo > summary {
-  list-style: none; cursor: pointer;
-  display: flex; align-items: center; gap: 10px;
-  min-height: 48px; padding: 0 16px;
-}
-.medicoes__grupo > summary::-webkit-details-marker { display: none; }
-.medicoes__grupo > summary:hover { background: var(--superficie-2); }
-.medicoes__grupo > summary:focus-visible { outline-offset: -2px; border-radius: var(--raio-micro); }
-.medicoes__grupo[open] > summary { border-bottom: 1px solid var(--linha-suave); }
-.medicoes__seta { color: var(--texto-2); transition: transform .15s ease; }
-.medicoes__grupo[open] .medicoes__seta { transform: rotate(90deg); }
-.medicoes__grupo-nome { font-weight: 600; color: var(--texto); }
-.medicoes__grupo .medicoes__tabela td:first-child { padding-left: 42px; }
-@media (prefers-reduced-motion: reduce) { .medicoes__seta { transition: none; } }
-
-@media (max-width: 767px) {
-  .abas-secao { padding: 0 16px; }
-  .medicoes__cartoes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .medicoes__cartao { padding: 12px 14px; min-width: 0; }
-  .medicoes__iniciar { width: 100%; justify-content: center; }
+/* "Em andamento" (#507) */
+.andamento__tabela { min-width: 880px; }
+.andamento__c-obra { width: 22%; }
+.andamento__c-medicao { width: 14%; }
+.andamento__c-passo { width: 19%; }
+.andamento__c-quem { width: 9%; }
+.andamento__c-parada { width: 10%; }
+.andamento__c-valor { width: 16%; }
+.andamento__c-acao { width: 10%; }
+.andamento__lotufo { color: var(--acento); font-weight: 600; }
+.andamento__orgao { color: var(--texto-2); }
+.andamento__acao { text-align: right; }
+.andamento__n {
+  display: inline-block; margin-left: 8px; padding: 0 10px; border-radius: var(--raio-pilula);
+  background: var(--acento-fundo); color: var(--acento-mais); font-size: 14px; line-height: 24px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ------------------------------------------- janela "Iniciar processo de medição" (#151, protótipo de 15/10/2026) */

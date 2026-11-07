@@ -17,9 +17,7 @@ describe("rota", () => {
       { tela: "notas-envio", id: 55 },
       { tela: "documentos-empresa", id: 3 }, { tela: "documentos-empresa", id: 3, aba: "regularidade" },
       { tela: "documentos-empresa", id: 3, aba: "garantia" },
-      { tela: "medicoes", aba: "sem-medicao" }, { tela: "medicoes", aba: "faturamento" },
-      { tela: "medicoes", aba: "aguardando-nota" }, { tela: "medicoes", aba: "enviar-nota" },
-      { tela: "medicoes", aba: "aguardando-pagamento" },
+      { tela: "medicoes", aba: "em-andamento" },
     ];
     for (const r of rotas) expect(parseRota(caminhoDe(r))).toEqual(r);
   });
@@ -69,19 +67,25 @@ describe("rota", () => {
     expect(hrefDe({ tela: "avisos" }, { familia: "prazo", obra: "7" })).toBe("/avisos?familia=prazo&obra=7");
   });
 
-  it("Medições tem abas; o Resumo é a padrão e não entra na URL", () => {
+  it("Medições tem dois itens: Iniciar medição é o padrão e não entra na URL; Em andamento tem o seu (#507)", () => {
     expect(caminhoDe({ tela: "medicoes" })).toBe("/medicoes");
-    expect(caminhoDe({ tela: "medicoes", aba: "resumo" })).toBe("/medicoes");
-    expect(parseRota("/medicoes/resumo")).toEqual({ tela: "medicoes" });
-    expect(caminhoDe({ tela: "medicoes", aba: "enviar-nota" })).toBe("/medicoes/enviar-nota");
-    expect(parseRota("/medicoes/aguardando-pagamento")).toEqual({ tela: "medicoes", aba: "aguardando-pagamento" });
-    for (const c of ["/medicoes/x", "/medicoes/enviar-nota/1"]) expect(parseRota(c)).toEqual({ tela: "raiz" });
+    expect(caminhoDe({ tela: "medicoes", aba: "iniciar" })).toBe("/medicoes");
+    expect(parseRota("/medicoes/iniciar")).toEqual({ tela: "medicoes" });
+    expect(caminhoDe({ tela: "medicoes", aba: "em-andamento" })).toBe("/medicoes/em-andamento");
+    expect(parseRota("/medicoes/em-andamento")).toEqual({ tela: "medicoes", aba: "em-andamento" });
+    for (const c of ["/medicoes/x", "/medicoes/enviar-nota/1", "/medicoes/em-andamento/1"]) expect(parseRota(c)).toEqual({ tela: "raiz" });
   });
 
-  it("as notas viraram abas de Medições: os links antigos abrem a aba; o envio de um protocolo continua", () => {
-    expect(parseRota("/notas")).toEqual({ tela: "medicoes", aba: "enviar-nota" });
-    expect(parseRota("/notas/aguardando")).toEqual({ tela: "medicoes", aba: "aguardando-pagamento" });
-    expect(hrefDe(parseRota("/notas"), { grupo: "SINFRA" })).toBe("/medicoes/enviar-nota?grupo=SINFRA");
+  it("as oito abas antigas de Medições redirecionam para Em andamento (#507)", () => {
+    for (const a of ["resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento",
+      "aguardando-nota", "enviar-nota", "aguardando-pagamento"]) {
+      expect(parseRota(`/medicoes/${a}`)).toEqual({ tela: "medicoes", aba: "em-andamento" });
+    }
+  });
+
+  it("as telas Notas antigas abrem Em andamento; o envio de um protocolo continua", () => {
+    expect(parseRota("/notas")).toEqual({ tela: "medicoes", aba: "em-andamento" });
+    expect(parseRota("/notas/aguardando")).toEqual({ tela: "medicoes", aba: "em-andamento" });
     expect(caminhoDe({ tela: "notas-envio", id: 55 })).toBe("/notas/envio/55");
     for (const c of ["/notas/envio", "/notas/envio/abc", "/notas/x", "/notas/envio/5/x"]) expect(parseRota(c)).toEqual({ tela: "raiz" });
   });

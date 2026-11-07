@@ -121,7 +121,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
       {titulo}
 
       <section aria-label="O que fazer agora" className="ini-cartoes">
-        <Cartao para={{ tela: "medicoes", aba: "enviar-nota" }} ir={ir} tom="primario" numero={p.notas_a_enviar}
+        <Cartao para={{ tela: "medicoes", aba: "em-andamento" }} ir={ir} tom="primario" numero={p.notas_a_enviar}
           rotulo={p.notas_a_enviar === 1 ? "nota a enviar" : "notas a enviar"} />
         <Cartao para={{ tela: "documentos" }} ir={ir} numero={totalCert} rotulo={rotuloCert}
           tom={c.vencidas ? "acao" : c.vencendo ? "atencao" : "neutro"} />
