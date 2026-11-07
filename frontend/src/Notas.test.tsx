@@ -351,4 +351,20 @@ describe("Notas: o passo Notas (#514)", () => {
     expect(screen.queryByLabelText(/Anexar a nota de/)).toBeNull();
     expect(screen.queryByText("Solte aqui os PDFs das notas")).toBeNull();
   });
+
+  it("o “Anexar” da linha manda nota fiscal mesmo com a marca da FRC; arquivo que não é PDF é dito (code-review)", async () => {
+    api.mockResolvedValue(DADOS);
+    apiForm.mockResolvedValue(LIDA);
+    render(<Notas medicao={medicao} podeEditar aoMudar={() => {}} />);
+    const campo = await screen.findByLabelText("Anexar a nota de Lotufo · Cuiabá");
+    fireEvent.click(screen.getByLabelText("é a fatura do consórcio (FRC)"));
+    fireEvent.change(campo, { target: { files: [new File(["x"], "nota.pdf", { type: "application/pdf" })] } });
+    await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+    expect((apiForm.mock.lastCall![1] as FormData).get("tipo_doc")).toBe("nfs");
+    const area = screen.getByText(/Solte aqui os PDFs das notas|Anexando/).closest("label")!;
+    await waitFor(() => expect(screen.getByText("Solte aqui os PDFs das notas")).toBeTruthy());
+    fireEvent.drop(area, { dataTransfer: { files: [new File(["x"], "foto.jpg", { type: "image/jpeg" })] } });
+    expect(await screen.findByText("foto.jpg: não é PDF, não foi anexado.")).toBeTruthy();
+    expect(apiForm).toHaveBeenCalledTimes(1);
+  });
 });

@@ -126,17 +126,23 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
     return texto;
   };
 
-  const anexar = async (input: HTMLInputElement) => {
+  // `comoFrc`: a marca "é a fatura do consórcio" vale para o botao e a area de soltar; o "Anexar" da linha de uma nota
+  // esperada sempre manda nota fiscal (code-review)
+  const anexar = async (input: HTMLInputElement, comoFrc = frc) => {
     const arquivos = Array.from(input.files ?? []);
-    try { await anexarArquivos(arquivos); } finally { input.value = ""; }
+    try { await anexarArquivos(arquivos, comoFrc); } finally { input.value = ""; }
   };
-  // #514: os PDFs soltos na area de soltar entram pelo mesmo caminho do botao (so' PDF)
+  // #514: os PDFs soltos na area de soltar entram pelo mesmo caminho do botao (so' PDF; o resto e' dito)
   const soltar = (ev: React.DragEvent) => {
     ev.preventDefault(); setSobre(false);
     if (ocupado) return;
-    void anexarArquivos(Array.from(ev.dataTransfer.files ?? []).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")));
+    const todos = Array.from(ev.dataTransfer.files ?? []);
+    const pdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+    const recusados = todos.filter(f => !pdf(f)).map(f => `${f.name}: não é PDF, não foi anexado.`);
+    if (recusados.length > 0) setLinhas(l => [...l, ...recusados]);
+    void anexarArquivos(todos.filter(pdf), frc);
   };
-  const anexarArquivos = async (arquivos: File[]) => {
+  const anexarArquivos = async (arquivos: File[], comoFrc: boolean) => {
     if (arquivos.length === 0) return;
     setErro(""); setOcupado(true);
     const novas: string[] = [];
@@ -146,10 +152,10 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
       for (const arquivo of arquivos) {
         const fd = new FormData();
         fd.append("arquivo", arquivo);
-        fd.append("tipo_doc", frc ? "fatura" : "nfs");
+        fd.append("tipo_doc", comoFrc ? "fatura" : "nfs");
         const r = await apiForm<Anexado>(`/api/medicoes/${medicao.id}/notas`, fd);
         novas.push(descrever(arquivo.name, r));
-        if (!r.repetido && !r.leitura.ok && r.nota_id === null && !frc && manual === null) {
+        if (!r.repetido && !r.leitura.ok && r.nota_id === null && !comoFrc && manual === null) {
           setManual({ documento_id: r.documento_id, nome: arquivo.name, numero: "", emissao: "", valor: "" });
         }
       }
@@ -257,7 +263,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
         {rotulo ?? tituloMedicao(medicao)}
         {/* #514: quantas notas esperadas ja' chegaram ("4 de 6") */}
         {dados && dados.esperadas.length > 0 && (
-          <>{" "}<Selo classe={dados.faltam > 0 ? "selo--atencao" : "selo--ok"}>
+          <>{" "}<Selo classe={dados.esperadas.some(e => e.nota_id === null) ? "selo--atencao" : "selo--ok"}>
             {`${dados.esperadas.filter(e => e.nota_id !== null).length} de ${dados.esperadas.length}`}</Selo></>
         )}
       </p>
@@ -315,7 +321,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                           <label className="btn btn--pequeno espelho__anexar">
                             Anexar
                             <input type="file" name="nota" accept="application/pdf" className="espelho__arquivo" disabled={ocupado}
-                              aria-label={`Anexar a nota de ${empresa} · ${e.municipio}`} onChange={ev => anexar(ev.currentTarget)} />
+                              aria-label={`Anexar a nota de ${empresa} · ${e.municipio}`} onChange={ev => anexar(ev.currentTarget, false)} />
                           </label>
                         )}
                       </span>

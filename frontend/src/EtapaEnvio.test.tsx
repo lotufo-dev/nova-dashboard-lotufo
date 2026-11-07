@@ -439,4 +439,10 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     expect(screen.getAllByRole("row").slice(1)).toHaveLength(2);
     expect(document.querySelector(".envio-faixa")!.textContent).toBe("Falta 1 item para enviar: Reajuste da 25ª medição: Trabalhista vencida em 02/11");
   });
+
+  it("certidão só para vencer avisa, mas não entra na faixa como falta (code-review)", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ situacao: "pendente", aviso: "Falta a nota fiscal · CND vence em 5 dias" })]);
+    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Falta 1 item para enviar: a nota fiscal");
+  });
 });

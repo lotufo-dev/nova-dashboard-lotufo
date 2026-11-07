@@ -60,7 +60,8 @@ export function faltasDo(e: Envio): string[] {
   if (e.situacao === "pronto" || e.situacao === "a_pedido") return [];
   const r = resumoDe(e);
   if (e.situacao === "esperando") return [r.motivo.replace(/\.$/, "")];
-  const itens = (e.aviso ?? "").split(" · ").map(x => x.trim()).filter(Boolean);
+  // a certidao que so' esta' para vencer avisa, nao falta (resumoDe a trata como pronta): fica fora da faixa
+  const itens = (e.aviso ?? "").split(" · ").map(x => x.trim()).filter(x => x && !/vence (hoje|em \d+ dias?)$/.test(x));
   // "Falta a regularidade" vira "a regularidade" (a faixa ja' diz "Falta"); nome de empresa e sigla ficam como estao
   const minuscula = (x: string) => /^(A|O|As|Os|Sem|Pacote|Esperando|Envio)\b/.test(x) ? x.charAt(0).toLowerCase() + x.slice(1) : x;
   if (itens.length > 0) return itens.map(x => minuscula(x.replace(/^Falta\s+/, "")));

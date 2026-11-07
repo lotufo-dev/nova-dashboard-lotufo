@@ -103,7 +103,8 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
   const anexadas = itens.filter(i => i.situacao === "anexada" && !i.problema).length;
   const empresas = new Set(itens.map(i => i.empresa)).size;
   const marcos: { rotulo: string; ok: boolean; conta?: string }[] = [
-    { rotulo: `Notas das ${empresas} empresas`, ok: itens.length > 0 && anexadas === itens.length, conta: `${anexadas} de ${itens.length}` },
+    ...(itens.length > 0 ? [{ rotulo: empresas === 1 ? "Notas da consorciada" : `Notas das ${empresas} consorciadas`,
+      ok: anexadas === itens.length, conta: `${anexadas} de ${itens.length}` }] : []),
     { rotulo: "Fatura gerada", ok: !!s.frc && !s.frc.desatualizada },
     { rotulo: "Fatura assinada", ok: !!s.assinada },
   ];

@@ -32,22 +32,28 @@ export function diasEntre(de: string, ate: string): number | null {
 /** A receber: o que falta das notas da Lotufo (no consorcio, so' a cota dela tem nota da Lotufo); sem nota ainda,
  *  o valor cheio fora do consorcio e "—" no consorcio (a cota so' se sabe pela nota). */
 export function aReceber(grupo: Medicao[], consorcio: boolean): { falta: number | null; recebido: number; total: number | null } {
-  const notas = grupo.flatMap(x => x.notas ?? []);
-  if (notas.length > 0) {
-    const total = notas.reduce((t, n) => t + n.valor_centavos, 0);
-    const recebido = notas.reduce((t, n) => t + n.recebido_centavos, 0);
-    return { falta: Math.max(0, total - recebido), recebido, total };
+  // medicao a medicao: a que ja' tem nota conta pelas notas; a que ainda nao tem, pelo valor cheio fora do consorcio
+  // (no consorcio a cota dela nao se sabe sem a nota, e o total fica "—")
+  let total = 0, recebido = 0;
+  for (const x of grupo) {
+    const notas = x.notas ?? [];
+    if (notas.length > 0) {
+      total += notas.reduce((t, n) => t + n.valor_centavos, 0);
+      recebido += notas.reduce((t, n) => t + n.recebido_centavos, 0);
+    } else if (consorcio || x.valor_protocolado_centavos === null) {
+      return { falta: null, recebido, total: null };
+    } else {
+      total += x.valor_protocolado_centavos;
+    }
   }
-  if (consorcio) return { falta: null, recebido: 0, total: null };
-  const valores = grupo.map(x => x.valor_protocolado_centavos).filter((v): v is number => v !== null);
-  const total = valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
-  return { falta: total, recebido: 0, total };
+  if (grupo.length === 0) return { falta: null, recebido: 0, total: null };
+  return { falta: Math.max(0, total - recebido), recebido, total };
 }
 
 export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui, percentualBp, aoReceber }: {
   grupo: Medicao[]; junta: boolean; usuario: Usuario; protocolos: ProtocoloLido[]; aqui: Rota;
-  /** a cota da Lotufo no contrato, em pontos-base (10000 = obra so' da Lotufo) */
-  percentualBp: number;
+  /** a cota da Lotufo no contrato, em pontos-base (10000 = obra so' da Lotufo; null = cabecalho ainda nao lido) */
+  percentualBp: number | null;
   aoReceber: (m: Medicao) => void;
 }) {
   const [siga, setSiga] = useState<PainelSiga | null>(null);
@@ -58,7 +64,9 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
     return () => { vivo = false; };
   }, [chave]);
 
+  // sem o cabecalho ainda (null), a cota nao se sabe: nada de mostrar o cheio como se fosse da Lotufo
   const consorcio = percentualBp !== 10000;
+  const rotuloCota = percentualBp !== null && percentualBp !== 10000;
   const receber = aReceber(grupo, consorcio);
   const valores = grupo.map(x => x.valor_protocolado_centavos).filter((v): v is number => v !== null);
   const total = valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
@@ -77,7 +85,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
       <h2 className="sr-only" id="passo-6-titulo">Pagamento</h2>
       <div className="cartao pag-numeros">
         <div>
-          <p className="pag-numeros__rotulo">A receber{consorcio ? " · cota da Lotufo" : ""}</p>
+          <p className="pag-numeros__rotulo">A receber{rotuloCota ? " · cota da Lotufo" : ""}</p>
           <p className="pag-numeros__valor pag-numeros__valor--acento num" aria-label={`A receber: ${brl(receber.falta)}`}>{brl(receber.falta)}</p>
         </div>
         <div>

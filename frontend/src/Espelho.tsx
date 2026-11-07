@@ -321,6 +321,9 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
   const soltos = (esp: EspelhoDetalhe) => esp.arquivos.filter(a => !esp.saidas.some(x => x.chave === a.saida));
   const tabelaResumo = (esp: EspelhoDetalhe) => {
     const total = esp.saidas.reduce((t, x) => t + x.valor, 0);
+    // o que se confere e' o valor das medicoes no espelho (as entradas, sempre cheias), nao a soma das notas: no
+    // consorcio que emite so' a cota as notas somam a cota e o aprovado e' cheio (code-review)
+    const doEspelho = Object.values(esp.entradas ?? {}).reduce((t, v) => t + (Number(v) || 0), 0);
     const refs = esp.medicoes.map(x => referencias?.[x.id] ?? null);
     const conferivel = refs.length > 0 && refs.every((r): r is Referencia => r !== null);
     const referencia = conferivel ? refs.reduce((t, r) => t + (r?.valor ?? 0), 0) : null;
@@ -353,7 +356,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
             <tr className="espelho__total">
               <th scope="row" colSpan={2}>Total</th>
               <td className="col-num dinheiro num">{brl(total)}</td>
-              <td>{referencia === null ? null : referencia === total
+              <td>{referencia === null ? null : referencia === doEspelho
                 ? <span className="espelho__confere espelho__confere--ok">igual ao {fonte}</span>
                 : <span className="espelho__confere espelho__confere--diverge"><IconeAlerta className="icone icone--p" />diferente do {fonte} ({brl(referencia)})</span>}</td>
             </tr>

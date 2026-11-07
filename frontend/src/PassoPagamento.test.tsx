@@ -63,6 +63,12 @@ describe("Passo Pagamento (#514)", () => {
     expect(props.aoReceber).toHaveBeenCalledWith(MEDICAO);
   });
 
+  it("cabeçalho ainda não lido: sem nota, nada de mostrar o cheio como da Lotufo (code-review)", () => {
+    montar({ grupo: [{ ...MEDICAO, notas: [] } as unknown as Medicao], percentualBp: null });
+    expect(screen.getByText("A receber")).toBeTruthy();
+    expect(screen.getByLabelText("A receber: —")).toBeTruthy();
+  });
+
   it("a engenharia não vê o botão de recebimento (sem botão no passo)", () => {
     montar({ usuario: { ...admin, perfil: "engenharia" } });
     expect(screen.queryByRole("button")).toBeNull();
@@ -79,5 +85,12 @@ describe("contas do pagamento", () => {
     const sem = { ...MEDICAO, notas: [] } as unknown as Medicao;
     expect(aReceber([sem], true).falta).toBeNull();
     expect(aReceber([sem], false).falta).toBe(990529648);
+  });
+
+  it("par com uma metade ainda sem nota: obra própria conta o valor dela; consórcio fica “—” (code-review)", () => {
+    const paga = { ...MEDICAO, notas: [nota(1, "2351", 10000001, 10000001)] } as Medicao;
+    const semNota = { ...MEDICAO, id: 6, tipo: "reajuste", valor_protocolado_centavos: 2000000, notas: [] } as unknown as Medicao;
+    expect(aReceber([paga, semNota], false)).toEqual({ falta: 2000000, recebido: 10000001, total: 12000001 });
+    expect(aReceber([paga, semNota], true).falta).toBeNull();
   });
 });

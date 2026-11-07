@@ -373,4 +373,14 @@ describe("Espelho: o passo Espelhos (#514)", () => {
     expect(await screen.findByText("Não enviado ao faturamento")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Enviar ao faturamento" })).toBeTruthy();
   });
+
+  it("consórcio que emite só a cota: as notas somam a cota e o espelho confere pelo valor cheio da medição (code-review)", async () => {
+    const cota = { ...ESPELHO, entradas: { medicao: 1000001 }, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_gerado" }],
+      saidas: [saida("cuiaba-medicao", "medicao", "Cuiabá", 180000)] };
+    api.mockResolvedValue({ regra: REGRA, espelhos: [cota] });
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
+      referencias={{ 1: { valor: 1000001, fonte: "aprovado" } }} />);
+    expect(await screen.findByText("igual ao aprovado")).toBeTruthy();
+    expect(screen.getByText("R$ 1.800,00", { selector: "tfoot td" })).toBeTruthy();
+  });
 });

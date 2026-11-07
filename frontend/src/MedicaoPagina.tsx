@@ -442,7 +442,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   );
   const corpoPasso6 = (
     <PassoPagamento grupo={grupo} junta={!!par?.junta} usuario={usuario}
-      protocolos={protocolos.dados?.protocolos ?? []} aqui={aqui} percentualBp={cab?.percentual_lotufo_bp ?? 10000}
+      protocolos={protocolos.dados?.protocolos ?? []} aqui={aqui} percentualBp={cab?.percentual_lotufo_bp ?? null}
       aoReceber={x => { setAlvoRecebimento(x); abrir("recebimento"); }} />
   );
 
@@ -462,7 +462,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const valores = grupo.map(x => x.valor_protocolado_centavos).filter((v): v is number => v !== null);
   const valor = valores.length > 0 ? valores.reduce((a, b) => a + b, 0) : null;
   // #514: todo passo aberto tem estrutura propria; so' o futuro (sem corpo) fica no cartao "Libera depois do passo N"
-  const proprio = corpo(aberta) !== null;
+  const proprio = sit(aberta) !== "futuro" || (aberta === 5 && !!pronta);
 
   return (
     <>
