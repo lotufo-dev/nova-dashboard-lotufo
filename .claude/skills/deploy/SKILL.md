@@ -90,7 +90,10 @@ Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -
   Antes, conferir o `git` no PATH da máquina, como diz o mesmo item do runbook (issue #481): sem ele o servidor, que
   roda como SYSTEM, sobe com `commit: null` e o script avisa `o servidor nao conseguiu ler o proprio commit: confira
   o git no PATH da maquina` (não é servidor fora do ar: corrigir o PATH antes de tentar de novo). Na volta do build
-  deste primeiro deploy, basta conferir o `rev-parse HEAD` igual ao `<anterior>` e o 200 do health.
+  deste primeiro deploy o commit anterior não tem o campo e o script pede para intervir à mão: o sentinela fica, e a
+  recuperação é a manual completa do item 5 do runbook (parada comprovada e porta livre, reconstrução do
+  `<anterior>`, `git status` limpo, reinício controlado, processo da porta nascido depois do reinício e health 200).
+  `rev-parse HEAD` e health 200 sozinhos não bastam (um processo órfão antigo também responde 200).
 
 - **Corte para HTTPS** (issue #425): é um passo à parte, depois de um deploy normal do commit com a #425, e só quando o
   Leo pedir. Seguir o runbook, "HTTP ou HTTPS", subseção "Corte para HTTPS", na ordem (certificado, PCs da operação,

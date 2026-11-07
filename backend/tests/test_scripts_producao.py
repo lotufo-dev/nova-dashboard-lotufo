@@ -480,7 +480,7 @@ def test_deploy_separa_health_sem_commit_de_servidor_fora_do_ar():
 
 def test_runbook_e_skill_dizem_como_conferir_o_commit_do_health_antes_do_primeiro_deploy():
     # Issue #481: antes do primeiro deploy com a 443, conferir que o servidor le o proprio commit e o que fazer se vier
-    # vazio; a nota cita tambem a volta do build, em que basta conferir o rev-parse e o 200.
+    # vazio; a nota cita tambem a volta do build, que exige a recuperacao manual completa.
     raiz = SCRIPTS.parent
     runbook = (raiz / "docs" / "runbook.md").read_text(encoding="utf-8")
     item = runbook[runbook.index("- **Deploy da issue #443"):]
@@ -488,11 +488,16 @@ def test_runbook_e_skill_dizem_como_conferir_o_commit_do_health_antes_do_primeir
     assert "o servidor nao conseguiu ler o proprio commit" in item
     assert "PATH" in item and "SYSTEM" in item
     assert "rev-parse" in item and "volta do build" in item
+    # Gate Sol da PR #539: na volta do build sem o campo, nada de atalho; recuperacao manual completa com o sentinela
+    provas = ("porta livre", "reconstrução do `<anterior>`", "`git status` limpo", "processo da porta nascido depois do reinício",
+              "não bastam")
+    assert "basta conferir" not in item and all(p in item for p in provas)
     skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
     nota = skill[skill.index("- **Primeiro deploy com a #443**"):]
-    nota = nota[:nota.index("\n- ")]
+    nota = " ".join(nota[:nota.index("\n- ")].split())
     assert "o servidor nao conseguiu ler o proprio commit" in nota
     assert "volta do build" in nota and "rev-parse" in nota
+    assert "basta conferir" not in nota and all(p in nota for p in provas)
 
 
 def test_deploy_so_solta_com_o_health_no_commit_esperado():
