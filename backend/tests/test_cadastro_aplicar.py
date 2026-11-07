@@ -1964,6 +1964,51 @@ def test_correcao_com_data_anterior_a_do_corrigido_grava_o_retrato_depois_dele(c
     assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 120_01, 120_01)
 
 
+EX_1 = {**AD_VALOR, "chave": "ex-1", "numero": "019/2024/01/11", "data": "2026-07-20", "delta_valor_centavos": 50_00}
+
+
+def test_correcao_de_reajuste_com_alvo_de_execucao_e_data_anterior_segue_a_data(conn):
+    # issue #458 (revisor, PR #452): o alvo de execucao nao sai do vigente (`_aditivo` nao o desconta), entao a
+    # correcao de reajuste nao espera por ele; o retrato dela nao inclui o termo assinado depois
+    original = _contrato()["valor_original_centavos"]
+    c1 = {**TA_REAJ, "chave": "c-1", "numero": "019/2024/01/12", "data": "2026-07-10", "corrige": "ex-1"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[EX_1, c1])]))
+    retratos = {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT chave_cadastro, valor_anterior_centavos, valor_novo_centavos FROM aditivos")}
+    assert retratos == {"c-1": (original, original + 100_01), "ex-1": (original + 100_01, original + 150_01)}
+    assert contratos_mod.vigente(conn, 1)["valor_vigente_centavos"] == original + 150_01
+
+
+def test_correcao_de_reajuste_com_alvo_misto_sem_valor_segue_a_data(conn):
+    # issue #458 (code-review): o misto de reajuste so' de prazo (delta zero) tambem nao sai do vigente
+    original = _contrato()["valor_original_centavos"]
+    prazo = {**MISTO, "chave": "tm-1", "numero": "019/2024/01/11", "data": "2026-07-20", "delta_valor_centavos": 0}
+    c1 = {**TA_REAJ, "chave": "c-1", "numero": "019/2024/01/12", "data": "2026-07-10", "corrige": "tm-1"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[prazo, c1])]))
+    retratos = {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT chave_cadastro, valor_anterior_centavos, valor_novo_centavos FROM aditivos")}
+    assert retratos == {"c-1": (original, original + 100_01), "tm-1": (original + 100_01, original + 100_01)}
+
+
+def test_cadeia_de_reajuste_com_data_invertida_e_execucao_no_meio(conn):
+    # issue #458: ex-1 (20/07), ta-08 (30/07), ta-09 (15/07, corrige ta-08), ta-10 (10/07, corrige ta-09), ex-2
+    # (01/08); a cadeia espera o alvo de reajuste e os de execucao seguem a data: ex-1, ta-08, ta-09, ta-10, ex-2
+    original = _contrato()["valor_original_centavos"]
+    ta9 = {**TA_CORR, "data": "2026-07-15", "delta_valor_centavos": 110_01}
+    ta10 = {**TA_CORR2, "data": "2026-07-10", "corrige": "ta-09"}
+    ex2 = {**EX_1, "chave": "ex-2", "numero": "019/2024/01/13", "data": "2026-08-01"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ta10, ex2, ta9, TA_REAJ, EX_1])]))
+    assert [r[0] for r in conn.execute("SELECT chave_cadastro FROM aditivos ORDER BY id")] == [
+        "ex-1", "ta-08", "ta-09", "ta-10", "ex-2"]
+    retratos = {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT chave_cadastro, valor_anterior_centavos, valor_novo_centavos FROM aditivos")}
+    assert retratos == {"ex-1": (original, original + 50_00), "ta-08": (original + 50_00, original + 150_01),
+                        "ta-09": (original + 50_00, original + 160_01), "ta-10": (original + 50_00, original + 170_01),
+                        "ex-2": (original + 170_01, original + 220_01)}
+    v = contratos_mod.vigente(conn, 1)
+    assert (v["valor_vigente_centavos"], v["valor_reajuste_centavos"]) == (original + 220_01, 120_01)
+
+
 def test_primeiro_ciclo_gravado_e_conferido_contra_a_base_guardada(conn):
     # gate Sol (rodada 1, PR #452): base 2023-04 guardada (unica na aplicacao); com duas bases e sem `data_base` o
     # validar so' confere o formato, e o aplicar recusa o ciclo fora de 2024..2026 (termo de 30/07/2026)
@@ -1986,3 +2031,71 @@ def test_base_declarada_nova_e_conferida_contra_o_ciclo_guardado(conn):
     with pytest.raises(ValueError, match="use um ciclo de 2024 a 2025"):
         cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
             instrumentos=[{**maio, "dados": {"ciclo": 2026, "data_base": "2023-06"}}], datas_base=DUAS_BASES)]))
+
+
+# Issue #489: custo por obra
+_CUSTO = {"projeto_rm": "GL.C01.P001", "nao_e_custo": ["2.02", "2.01.22"], "sem_tarefa": "proporcional",
+          "grupos": [{"nome": "Terraplanagem", "tarefas": ["001.03"], "itens_planilha": ["2."],
+                      "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+                     {"nome": "Drenagem", "tarefas": ["001.05", "001.06"], "itens_planilha": ["3."],
+                      "item_chave": None}]}
+
+
+def _grupos(conn):
+    from app import contratos
+    return contratos.custo_grupos(conn, conn.execute("SELECT id FROM contratos").fetchone()[0])
+
+
+def test_custo_grava_os_grupos_na_ordem_e_o_projeto(conn):
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    assert r["custo"]["criados"] == ["MT-402"]
+    assert _grupos(conn) == [
+        {"ordem": 1, "nome": "Terraplanagem", "tarefas": ["001.03"], "itens_planilha": ["2."],
+         "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+        {"ordem": 2, "nome": "Drenagem", "tarefas": ["001.05", "001.06"], "itens_planilha": ["3."], "item_chave": None}]
+    c = conn.execute("SELECT projeto_rm, custo_nao_e_custo, custo_sem_tarefa FROM contratos").fetchone()
+    assert (c["projeto_rm"], json.loads(c["custo_nao_e_custo"]), c["custo_sem_tarefa"]) == \
+        ("GL.C01.P001", ["2.02", "2.01.22"], "proporcional")
+
+
+def test_custo_reaplicado_nao_cria_linha_nem_auditoria(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    linhas = conn.execute("SELECT id, ordem, nome FROM custo_grupos ORDER BY id").fetchall()
+    trilha = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao LIKE 'cadastro.custo%'").fetchone()[0]
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    assert r["custo"] == {"criados": [], "alterados": [], "iguais": 1}
+    assert r["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+    assert [tuple(x) for x in conn.execute("SELECT id, ordem, nome FROM custo_grupos ORDER BY id")] == \
+        [tuple(x) for x in linhas]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao LIKE 'cadastro.custo%'").fetchone()[0] == trilha == 1
+
+
+def test_custo_alterado_mantem_o_grupo_de_mesmo_nome_e_audita(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    id_dren = conn.execute("SELECT id FROM custo_grupos WHERE nome='Drenagem'").fetchone()[0]
+    novo = {**_CUSTO, "grupos": [_CUSTO["grupos"][1], {"nome": "Pavimentação", "tarefas": ["001.07"],
+                                                       "itens_planilha": ["4."], "item_chave": None}]}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=novo)]))
+    assert r["custo"]["alterados"] == ["MT-402"]
+    assert [(g["ordem"], g["nome"]) for g in _grupos(conn)] == [(1, "Drenagem"), (2, "Pavimentação")]
+    assert conn.execute("SELECT id FROM custo_grupos WHERE nome='Drenagem'").fetchone()[0] == id_dren
+    antes, depois = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.custo' "
+                                 "ORDER BY id DESC").fetchone()
+    assert [g["nome"] for g in json.loads(antes)["grupos"]] == ["Terraplanagem", "Drenagem"]
+    assert [g["nome"] for g in json.loads(depois)["grupos"]] == ["Drenagem", "Pavimentação"]
+
+
+def test_obra_sem_custo_nao_grava_e_tirar_a_secao_limpa(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert _grupos(conn) == [] and conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.custo'"
+                                                ).fetchone()[0] == 0
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert r["custo"]["alterados"] == ["MT-402"] and _grupos(conn) == []
+    assert conn.execute("SELECT projeto_rm FROM contratos").fetchone()[0] is None
+
+
+def test_custo_no_ensaio_relata_e_nao_grava(conn):
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]), ensaio=True)
+    assert r["custo"]["criados"] == ["MT-402"]
+    assert conn.execute("SELECT COUNT(*) FROM custo_grupos").fetchone()[0] == 0

@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { brl } from "./Medicoes";
-import { curvaS, type MarcaAditivo, type PontoDaCurva, type PrevistoAnterior } from "./obra";
+import { curvaS, rotuloAditivo, type MarcaAditivo, type PontoDaCurva, type PrevistoAnterior } from "./obra";
 import { Link } from "./Link";
 import { useHoje } from "./ExecucaoContrato";
 import { fmtCompetencia, fmtMesCurto } from "./tempo";
@@ -76,7 +76,20 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
   const caminho = (lista: { i: number; v: number }[]) => lista.map(({ i, v }, k) => `${k ? "L" : "M"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join("");
   const linhaPrevisto = caminho(serie.map((p, i) => ({ i, v: p.acumuladoPrevisto })));
   const linhaAnterior = caminho(serie.map((p, i) => ({ i, v: p.acumuladoAnterior ?? 0 })));
-  const marcas = aditivos.map(a => ({ ...a, i: serie.findIndex(p => p.competencia === a.competencia) })).filter(a => a.i >= 0);
+  // Marcas dos aditivos (06/11/2026): rotulo curto ("2º TA"; o nome inteiro fica no <title>) e uma faixa por rotulo,
+  // para dois termos do mesmo mes ou de meses vizinhos nao ficarem um por cima do outro. Sem faixa livre, fica so' a linha.
+  const faixas: number[] = [];
+  const marcas = aditivos.map(a => ({ ...a, i: serie.findIndex(p => p.competencia === a.competencia) })).filter(a => a.i >= 0)
+    .sort((a, b) => a.i - b.i)
+    .map(a => {
+      const rotulo = rotuloAditivo(a.nome), larg = rotulo.length * 6.2 + 8;
+      const noFim = x(a.i) > W - 60;
+      const esq = noFim ? x(a.i) - 3 - larg : x(a.i) + 3;
+      let faixa = faixas.findIndex(direita => direita <= esq);
+      if (faixa < 0 && faixas.length < 4) faixa = faixas.push(0) - 1;
+      if (faixa >= 0) faixas[faixa] = esq + larg;
+      return { ...a, rotulo, noFim, faixa };
+    });
   const linhaMedido = caminho(medidos.map(({ p, i }) => ({ i, v: p.acumuladoMedido ?? 0 })));
   const bw = Math.max(2, Math.min(14, banda * 0.36));
 
@@ -156,11 +169,14 @@ export default function CurvaS({ pontos, contratoId, anterior = null, aditivos =
                 ))}
               </g>
             )}
-            {marcas.map((a, k) => (
+            {marcas.map(a => (
               <g key={`${a.data}-${a.nome}`} className="c-aditivo">
+                <title>{a.nome}</title>
                 <line className="c-aditivo-linha" x1={x(a.i)} x2={x(a.i)} y1={MT} y2={MT + ih} />
-                <text className="c-aditivo-txt" x={x(a.i) + (x(a.i) > W - 110 ? -3 : 3)} y={MT + 22 + (k % 2) * 12}
-                  textAnchor={x(a.i) > W - 110 ? "end" : "start"}>{a.nome}</text>
+                {a.faixa >= 0 && (
+                  <text className="c-aditivo-txt" x={x(a.i) + (a.noFim ? -3 : 3)} y={MT + 22 + a.faixa * 12}
+                    textAnchor={a.noFim ? "end" : "start"}>{a.rotulo}</text>
+                )}
               </g>
             ))}
             {sobre !== null && <line className="c-guia" x1={x(sobre)} x2={x(sobre)} y1={MT} y2={MT + ih} />}

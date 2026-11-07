@@ -164,6 +164,20 @@ describe("Cartão da planilha/carta", () => {
     expect(screen.getByRole("textbox", { name: "Nº do SIGA" })).toBeTruthy();
   });
 
+  it("planilha não lida por grupo: o cartão avisa a diferença; lida, não avisa nada", async () => {
+    const aviso = "Planilha não lida: diferença de R$ 6,90 entre a soma dos grupos da planilha (R$ 20.693,10) e o valor pedido da medição (R$ 20.700,00)";
+    api.mockImplementation(async (url: string) => (url === "/api/medicoes/5"
+      ? detalhe({ leitura_planilha: { situacao: "recusada", aviso } }) : []));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText(aviso)).toBeTruthy();
+    cleanup();
+    api.mockImplementation(async (url: string) => (url === "/api/medicoes/5"
+      ? detalhe({ leitura_planilha: { situacao: "lida", aviso: null } }) : []));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText("Gerada")).toBeTruthy();
+    expect(screen.queryByText(/Planilha não lida/)).toBeNull();
+  });
+
   it("envio com pendência pede a justificativa antes de sair", async () => {
     api.mockImplementation(async (url: string) => {
       if (url === "/api/medicoes/5") return detalhe();
@@ -178,6 +192,25 @@ describe("Cartão da planilha/carta", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar para protocolo" }));
     expect(await screen.findByText("Escreva a justificativa, com pelo menos 10 caracteres.")).toBeTruthy();
     expect(api.mock.calls.some(c => c[0] === "/api/medicoes/5/envio-planilha")).toBe(false);
+  });
+
+  it("peça que vai no ofício assinado mostra o selo e não tem Anexar; a sem a marca continua com Anexar (issue #462)", async () => {
+    // a memoria foi anexada antes de receber a marca: nao vai no e-mail, entao nao aparece como Anexada
+    const antiga = { id: 7, tipo: "boletim", nome: "memoria.pdf", tamanho: 10, ext: "pdf", sha256: "c".repeat(64), criado_em: "2026-11-01" };
+    api.mockResolvedValue(detalhe({}, { pecas: [antiga], pecas_do_orgao: [
+      { tipo: "boletim", rotulo: "Memória de cálculo", exigida: true, no_oficio: true },
+      { tipo: "fotos", rotulo: "Registro fotográfico", exigida: false, no_oficio: false }] }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    const tabela = await screen.findByRole("table", { name: "Peças da planilha/carta" });
+    const memoria = within(tabela).getByRole("rowheader", { name: /^Memória de cálculo/ }).closest("tr")!;
+    expect(within(memoria).getByText("memoria.pdf")).toBeTruthy();        // ainda se remove
+    expect(within(memoria).getByText("No ofício assinado")).toBeTruthy();
+    expect(within(memoria).queryByText("Falta")).toBeNull();
+    expect(within(memoria).queryByText("Anexada")).toBeNull();
+    expect(within(memoria).queryByLabelText("Anexar Memória de cálculo")).toBeNull();
+    const fotos = within(tabela).getByRole("rowheader", { name: "Registro fotográfico" }).closest("tr")!;
+    expect(within(fotos).getByText("Opcional")).toBeTruthy();
+    expect(within(fotos).getByLabelText("Anexar Registro fotográfico")).toBeTruthy();
   });
 
   it("onde o sistema não envia (MT-PAR), o motivo aparece e fica o registro por fora", async () => {

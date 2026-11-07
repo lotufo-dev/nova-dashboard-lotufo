@@ -21,9 +21,10 @@
   carta_destinatario:
     - À Secretaria de Exemplo
     - Superintendência de Obras de Exemplo
+  # no_oficio: true = a peça vai dentro do PDF assinado do ofício da planilha/carta (não cobra nem se anexa; issue #462)
   pecas:
     - {tipo: cronograma, rotulo: Cronograma físico-financeiro, naturezas: [execucao]}
-    - {tipo: boletim, rotulo: Memória de cálculo da medição, exigida: true, naturezas: [execucao]}
+    - {tipo: boletim, rotulo: Memória de cálculo da medição, exigida: true, no_oficio: true, naturezas: [execucao]}
     - {tipo: fotos, rotulo: Registro fotográfico, naturezas: [execucao]}
     - {tipo: outro, rotulo: Planilha de reajuste de exemplo, exigida: true, naturezas: [reajuste]}
     - {tipo: planilha, rotulo: Planilha de exemplo editável, exigida: true, solto: true}

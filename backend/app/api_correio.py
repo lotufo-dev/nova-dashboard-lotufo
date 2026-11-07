@@ -155,6 +155,9 @@ def gravar_assinatura(arquivo: UploadFile = File(...), usuario: dict = Depends(e
 @router.delete("/assinatura")
 def remover_assinatura(usuario: dict = Depends(exigir("editar_cadastros")),
                        conn: sqlite3.Connection = Depends(conexao)):
-    correio.remover_assinatura(conn, usuario["id"])
+    try:
+        correio.remover_assinatura(conn, usuario["id"])
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
     return _status(usuario["id"])
 

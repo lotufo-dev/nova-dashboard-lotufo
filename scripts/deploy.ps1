@@ -40,7 +40,9 @@ function PortaDaTarefa {
     if (-not $tarefa) { return 0 }
     $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
     if ($argumentosTarefa -match "-Porta (\d+)") { return [int]$Matches[1] }
-    return 80
+    # Sem -Porta vale o padrao do modo do rodar_producao.ps1 (issue #425): 80 com -SemTls, 8443 com TLS.
+    if ($argumentosTarefa -match "-SemTls\b") { return 80 }
+    return 8443
 }
 $portaTarefa = PortaDaTarefa
 if ($Porta -eq 0) {
@@ -72,11 +74,32 @@ if (-not $Raiz) {
 $instalacaoArquivo = Join-Path $Raiz "segredos\instalacao.json"   # o mesmo que o rodar_producao.ps1 passa ao servidor
 $banco = Join-Path $Raiz "dados\dashboard.db"
 
+# HTTPS (issue #425): o modo tambem e' o da tarefa. Com -SemTls nos argumentos (producao de antes do corte) a saude e'
+# HTTP; sem ele, https://localhost aceitando so' o certificado da instalacao, pelo thumbprint (comum_tls.ps1).
+# Com o certificado ausente no modo HTTPS o deploy nao comeca: o watchdog nem e' pausado e nada muda.
+function TlsDaTarefa {
+    $tarefa = Get-ScheduledTask -TaskName "DashboardLotufo" -ErrorAction SilentlyContinue
+    if (-not $tarefa) { return $true }
+    $argumentosTarefa = ($tarefa.Actions | ForEach-Object { $_.Arguments }) -join " "
+    return (-not ($argumentosTarefa -match "-SemTls\b"))
+}
+$comTls = TlsDaTarefa
+. (Join-Path $PSScriptRoot "comum_tls.ps1")
+$certificado = Join-Path $Raiz "segredos\tls\cert.pem"
+if ($comTls) {
+    $urlSaude = "https://localhost:$Porta/api/health"
+    if (-not (Test-Path -LiteralPath $certificado)) {
+        throw "certificado do HTTPS nao encontrado em $certificado (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)"
+    }
+} else {
+    $urlSaude = "http://localhost:$Porta/api/health"
+}
+
 # Instalacao assinada (issue #417): depois do deploy so' vale o health 200 com instalacao "autorizada" (arquivo
 # assinado para esta maquina em <raiz>\segredos\instalacao.json). Modo copia (arquivo ausente, ilegivel, assinatura
 # ou maquina) conta como falha e dispara o rollback. O rollback confere so' o 200: o commit anterior pode nem ter o campo.
 function Saudavel([switch]$ExigirInstalacao) {
-    try { $resposta = Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing }
+    try { $resposta = Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12 }
     catch { return $false }
     if ($resposta.StatusCode -ne 200) { return $false }
     if (-not $ExigirInstalacao) { return $true }
@@ -163,10 +186,36 @@ function SaudavelENovo([switch]$ExigirInstalacao) {
     }
     return $true
 }
+# Issue #478: troca de um commit com a #456 (ponto da sentinela na tabela sentinela_ponto, migracao 063) por um
+# anterior a ela, que le e grava o ponto so' na auditoria: no rollback por saude e no deploy com -Ref de um commit
+# antigo. Com o servico parado e o codigo com a #456 ainda no pinado (antes do checkout do antigo), o app.cli grava o
+# ponto na auditoria e tira a tabela, os gatilhos e a linha da 063; sem isso o codigo antigo acusaria "Estado da
+# sentinela apagado" e repetiria os achados desde o deploy da #456. Falha aqui so' avisa: a troca segue.
+# $script:sentinelaParou diz se o servico foi parado aqui (o catch do build religa o commit anterior).
+$script:sentinelaParou = $false
+function SentinelaAntesDa456([string]$de, [string]$para) {
+    $temNovo = & git -C $AppDir ls-tree --name-only $de -- backend/migrations/063_sentinela_ponto.sql
+    if ($LASTEXITCODE -ne 0) { Write-Warning "git ls-tree $de falhou; ponto da sentinela nao conferido"; return }
+    $temAnterior = & git -C $AppDir ls-tree --name-only $para -- backend/migrations/063_sentinela_ponto.sql
+    if ($LASTEXITCODE -ne 0) { Write-Warning "git ls-tree $para falhou; ponto da sentinela nao conferido"; return }
+    if (-not $temNovo -or $temAnterior) { return }
+    $codigo = 1
+    Push-Location (Join-Path $AppDir "backend")
+    try {
+        $script:sentinelaParou = $true
+        Stop-ScheduledTask -TaskName "DashboardLotufo"; Start-Sleep -Seconds 3
+        LiberarPorta
+        & $py -m app.cli sentinela antes-da-456 --banco $banco; $codigo = $LASTEXITCODE
+    } catch { Write-Warning "ponto da sentinela: $($_.Exception.Message)" }
+    finally { Pop-Location }
+    if ($codigo -ne 0) {
+        Write-Warning "ponto da sentinela NAO passado para a auditoria antes do rollback - ver docs\runbook.md (Rollback para um commit anterior a issue #456)"
+    }
+}
 # Depois do ROLLBACK OK: o commit anterior pode ja' conferir a instalacao (issue #417) e ter voltado em modo copia, sem
 # envio de e-mail e sem RM. Commit anterior ao #417 nao tem o campo e nao avisa.
 function AvisarSeCopia {
-    try { $saude = (Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing).Content | ConvertFrom-Json }
+    try { $saude = (Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12).Content | ConvertFrom-Json }
     catch { return }
     if ($saude.instalacao -and $saude.instalacao -ne "autorizada") {
         Write-Warning "producao de volta, mas em modo copia: instalacao $($saude.instalacao) (motivo: $($saude.instalacao_motivo)), sem envio de e-mail e sem RM - ver docs\runbook.md (Instalacao assinada)"
@@ -176,7 +225,7 @@ function AvisarSeCopia {
 # servidor na subida, issue #421) e' o commit esperado. Qualquer processo responde 200; sem o campo (commit anterior a
 # #421) nada esta' provado.
 function CommitDoHealth {
-    try { $resposta = Invoke-WebRequest "http://localhost:$Porta/api/health" -TimeoutSec 12 -UseBasicParsing }
+    try { $resposta = Invoke-SaudeLocal -Url $urlSaude -Certificado $certificado -TimeoutSec 12 }
     catch { return $null }
     if ($resposta.StatusCode -ne 200) { return $null }
     $saude = $null
@@ -211,10 +260,17 @@ $script:pinadoMudou = $false
 # Conferencia do inicio, antes de criar o sentinela: pinado limpo e o health no commit do pinado. Sem ela, um aborto
 # antes do checkout (rede caida no fetch, por exemplo, numa nova tentativa depois de ROLLBACK TAMBEM FALHOU) soltaria o
 # watchdog sobre uma producao que ja' estava quebrada.
+# Rodada extra da PR #475: sentinela que ja' existia ANTES desta execucao e' de uma execucao anterior que nao terminou
+# provada (MANTIDO, chamada que caiu) ou de uma recuperacao a mao. O processo antigo pode responder 200 no commit
+# anterior com a venv ou o dist pela metade no disco (volta do build que falhou), entao o health nao prova nada: a
+# producao nao conta como provada e esta execucao so' apaga o sentinela depois de reconstruir e provar.
+$script:sentinelaJaExistia = Test-Path $pause
 $script:producaoProvada = $false
-if (PinadoLimpo) { $script:producaoProvada = NoArEm $anterior }
+if ($script:sentinelaJaExistia) {
+    Write-Warning "sentinela $pause ja' existia antes deste deploy (execucao anterior que nao terminou provada?): a producao nao conta como conferida no inicio; o sentinela so' sai depois de reconstruir e provar"
+} elseif (PinadoLimpo) { $script:producaoProvada = NoArEm $anterior }
 if ($script:producaoProvada) { Write-Host "producao conferida no inicio: commit $($anterior.Substring(0, 7)) no ar, diretorio pinado limpo" }
-else { Write-Warning "producao NAO conferida no inicio (pinado sujo ou health sem o commit $($anterior.Substring(0, 7))): aborto antes do checkout mantem o sentinela" }
+else { Write-Warning "producao NAO conferida no inicio (sentinela anterior, pinado sujo ou health sem o commit $($anterior.Substring(0, 7))): aborto antes do checkout mantem o sentinela" }
 New-Item -ItemType File -Path $pause -Force | Out-Null   # segura o watchdog durante o deploy
 try {
     # ate' o checkout do alvo o pinado e a producao seguem como estavam: solta so' se ela estava provada no inicio
@@ -232,6 +288,18 @@ try {
     $alvo = (& git -C $AppDir rev-parse $Ref)
     if ($LASTEXITCODE -ne 0) { throw "git rev-parse $Ref falhou" }
     $alvo = $alvo.Trim()
+    # Gate Sol da PR #476: com a tarefa em HTTPS, um alvo de antes da #425 nao sobe (o rodar_producao.ps1 dele procura a
+    # chave em app\certs) e derruba o watchdog (o watchdog.ps1 dele nao conhece -Certificado). Recusar antes do backup e
+    # do checkout; o marcador e' o scripts/comum_tls.ps1, que nasceu na #425. O finally solta o watchdog.
+    # ls-tree (e nao cat-file -e): sem o arquivo ele so' nao imprime nada, sem stderr, que o 5.1 com Stop tornaria fatal.
+    if ($comTls) {
+        $marcador = & git -C $AppDir ls-tree --name-only $alvo -- scripts/comum_tls.ps1
+        if ($LASTEXITCODE -ne 0) { throw "git ls-tree $alvo falhou" }
+        if (-not $marcador) {
+            Write-Host "deploy abortado antes do checkout: $alvo e' anterior ao HTTPS (issue #425) e a tarefa esta em HTTPS; volte para HTTP antes (runbook, Voltar atras). Producao segue em $anterior" -ForegroundColor Red
+            exit 1
+        }
+    }
     $migracoes = & git -C $AppDir diff --name-only $anterior $alvo -- backend/migrations
     if ($LASTEXITCODE -ne 0) { throw "git diff das migracoes falhou" }
     $backup = $null
@@ -251,6 +319,9 @@ try {
     # A conferencia da instalacao (issue #417) entra no mesmo try: recusada, a producao nem para.
     $script:soltarWatchdog = $false  # daqui em diante o pinado muda: so' solta com a producao provada
     $script:pinadoMudou = $true
+    # Issue #478: alvo de antes da #456 vindo de um commit com ela (-Ref): o ponto da sentinela passa para a auditoria
+    # antes do checkout, com o comando do codigo atual e o servico parado (fica parado durante o build).
+    SentinelaAntesDa456 $anterior $alvo
     try { Construir $alvo; ConferirInstalacao }
     catch {
         Write-Warning "Construir ou conferir a instalacao de $alvo falhou: $($_.Exception.Message) -> voltando o diretorio pinado para $anterior"
@@ -265,9 +336,19 @@ try {
                 & git -C $AppDir checkout --quiet --detach $anterior
                 if ($LASTEXITCODE -ne 0) { throw "git checkout $anterior falhou" }
             }
+            $refez = $false
             if ($atual -ne $anterior -or $script:buildComecou) {
                 Reconstruir
                 RegistrarDeploy
+                $refez = $true
+            }
+            # Rodada extra da PR #475: sem reconstruir, so' solta se a producao estava provada no inicio (com sentinela
+            # de execucao anterior a venv e o dist podem estar pela metade no disco, com o processo antigo no ar).
+            if (-not $refez -and -not $script:producaoProvada) { throw "o anterior nao foi reconstruido e a producao nao estava conferida no inicio" }
+            if ($script:sentinelaParou) {
+                # o servico foi parado para o ponto da sentinela: religa o anterior, cuja 063 reimporta o ponto
+                Reiniciar
+                if (-not (SaudavelENovo)) { throw "a producao parada para o ponto da sentinela nao voltou em $anterior" }
             }
             $alterados = & git -C $AppDir status --porcelain --untracked-files=no
             if ($LASTEXITCODE -ne 0) { throw "git status do diretorio pinado falhou" }
@@ -295,6 +376,7 @@ try {
         # (checkout, pip, npm, agendador, porta) e' ROLLBACK TAMBEM FALHOU, com o sentinela mantido.
         $voltou = $false
         try {
+            SentinelaAntesDa456 $novo $anterior
             Construir $anterior
             RegistrarDeploy
             Reiniciar
@@ -325,7 +407,7 @@ try {
         }
     }
     elseif (-not $script:pinadoMudou -and -not $script:producaoProvada) {
-        Write-Host "sentinela $pause MANTIDO: a producao nao estava conferida no inicio (pinado sujo ou health sem o commit $anterior); conferir e recuperar antes de apaga-lo (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow
+        Write-Host "sentinela $pause MANTIDO: a producao nao estava conferida no inicio (sentinela de execucao anterior, pinado sujo ou health sem o commit $anterior); conferir e recuperar antes de apaga-lo (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow
     }
     else { Write-Host "sentinela $pause MANTIDO: a producao nao foi provada depois do deploy; intervir a mao e so' apaga-lo depois da recuperacao (docs\runbook.md, Subir e derrubar)" -ForegroundColor Yellow }
 }

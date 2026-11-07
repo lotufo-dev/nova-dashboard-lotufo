@@ -72,6 +72,12 @@ git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.
   novo copiado para `C:\Temp\deploy`, como na #417 (pelo Mac num `.ps1` com `-File`). O commit no ar ainda não tem o
   campo `commit` no health: o script avisa `producao NAO conferida no inicio` e só solta o watchdog com `DEPLOY OK`.
 
+- **Corte para HTTPS** (issue #425): é um passo à parte, depois de um deploy normal do commit com a #425, e só quando o
+  Leo pedir. Seguir o runbook, "HTTP ou HTTPS", subseção "Corte para HTTPS", na ordem (certificado, PCs da operação,
+  troca da tarefa e do watchdog, conferência). O `deploy.ps1` lê o modo da tarefa: com `-SemTls` confere por HTTP, sem
+  ele por HTTPS, e no HTTPS não começa sem `<raiz>\segredos\tls\cert.pem` ("certificado do HTTPS nao encontrado",
+  nada alterado: avisar o Leo).
+
 - **Migração nova** (arquivo adicionado, alterado, removido ou renomeado em `backend/migrations/`): dizer ao Leo **explicitamente**, antes de rodar,
   o número e o que ela faz (ler o `.sql`: só acrescenta coluna/tabela/índice, ou mexe em dados). Pelo runbook,
   as migrações pendentes rodam sozinhas quando o servidor sobe (`create_app()`, seção "Restaurar o banco").
@@ -83,9 +89,11 @@ git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.
 
 ## Rodar
 
-1. Criar o sentinela, para o watchdog não reerguer o servidor no meio (runbook, item "Watchdog"):
-   `New-Item -ItemType File -Path C:\DashboardLotufo\watchdog.pause -Force | Out-Null`
-   (o `deploy.ps1` também cria e apaga o sentinela sozinho; criar antes não atrapalha.)
+1. **Não criar o sentinela antes**: o `deploy.ps1` o cria sozinho, antes de mudar qualquer coisa. Conferir
+   `Test-Path C:\DashboardLotufo\watchdog.pause`: `True` é uma execução anterior que não terminou provada (`MANTIDO`,
+   chamada que caiu) ou uma recuperação à mão em andamento; avisar o Leo antes de seguir. Com o sentinela anterior,
+   o script não conta a produção como provada no início: aborto antes do checkout o mantém, e só `DEPLOY OK`,
+   `ROLLBACK OK` ou a volta do build que reconstruiu o anterior o apagam.
 2. Na pasta principal, pela ferramenta PowerShell, **sem redirecionar stderr** (nada de `2>&1` ou `*>&1`: o
    PowerShell 5.1 transforma o aviso do Vite em erro fatal, cabeçalho do script), com timeout de 600000 ms:
    `& .\scripts\deploy.ps1` ou `& .\scripts\deploy.ps1 -SemFrontend` (a porta vem da tarefa agendada; `-Porta <porta>` só confere e aborta se não bater)
@@ -117,12 +125,14 @@ git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.
    - `sentinela ... MANTIDO POR FALHA NA REMOCAO` (depois de `DEPLOY OK`, `ROLLBACK OK` ou `producao segue ...`) →
      a produção está provada: **não reconstruir nem desfazer o deploy**. Conferir health e `commit` (item 4), corrigir
      o bloqueio (permissão, processo que segura o arquivo) e apagar o arquivo (item 5).
-4. Conferir a saúde na própria máquina (runbook, "Saúde"):
-   `Invoke-WebRequest http://localhost:<porta>/api/health -UseBasicParsing` → 200 com `banco: ok` e
+4. Conferir a saúde na própria máquina (runbook, "Saúde" e "HTTP ou HTTPS"):
+   `& .\scripts\saude_local.ps1 -Porta <porta>` → 200 com `banco: ok`, `tls: true` e
    `instalacao: autorizada` (`nao-autorizada` é a produção em modo cópia, sem e-mail e sem RM: avisar o Leo com o
    `instalacao_motivo` e seguir o runbook, "Instalação assinada")
-   (a porta é a de `-Porta` do `deploy.ps1`, padrão 80 em HTTP, quando o `:80` pode ser omitido)
-   (503 = banco não respondeu). Conferir também `git -C C:\DashboardLotufo\app rev-parse HEAD` igual ao commit
+   (a porta é a da tarefa agendada; o script fala HTTPS com `localhost` aceitando só o certificado da instalação, pelo
+   thumbprint; nunca trocar por `Invoke-WebRequest` com a verificação desligada. Com a tarefa ainda em `-SemTls`, antes
+   do corte da issue #425, acrescentar `-SemTls`, e o `tls` vem `false`)
+   (503 = banco não respondeu; "SEM RESPOSTA" = servidor parado ou certificado diferente do da instalação). Conferir também `git -C C:\DashboardLotufo\app rev-parse HEAD` igual ao commit
    esperado pela linha final: o `<novo>` (o `origin/master`) em `DEPLOY OK`; o `<anterior>` (HEAD do pinado lido antes
    de rodar) em `ROLLBACK OK`, `deploy abortado no build; producao segue ...` e aborto antes do checkout; e o campo
    `commit` do health igual aos 7 primeiros caracteres desse mesmo commit.

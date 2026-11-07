@@ -160,19 +160,29 @@ def test_falha_no_envio_nao_muda_nada(ambiente, monkeypatch):
     assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
 
 
-def test_versao_substituida_nao_se_envia_e_reenvio_mantem_estado(ambiente, tmp_path, monkeypatch):
+def test_versao_substituida_nao_se_envia_e_a_nova_volta_a_espelho_gerado(ambiente, tmp_path, monkeypatch):
+    # issue #359 (decisao do Leo de 03/11/2026): a versao nova da medicao com espelho enviado volta a
+    # `espelho_gerado` ate' o envio dela ao faturamento (antes, desde a #208, ficava `espelho_enviado`)
     monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
     conn, u, cid = ambiente
     e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
     p = espelhos.previa_envio(conn, e1)
     espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    mid = espelhos.detalhe(conn, e1)["medicoes"][0]["id"]
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
     e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_gerado"
     with pytest.raises(ValueError, match="substitu"):
         espelhos.previa_envio(conn, e1)
     p2 = espelhos.previa_envio(conn, e2)
     assert any("versão 1" in a for a in p2["avisos"])
     espelhos.enviar(conn, u, e2, p2["para"], p2["copia"], p2["assunto"], p2["corpo"])
-    assert medicoes.detalhe(conn, espelhos.detalhe(conn, e2)["medicoes"][0]["id"])["estado"] == "espelho_enviado"
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+    volta = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='medicao.estado' AND entidade_id=? "
+                         "ORDER BY id", (mid,)).fetchall()
+    assert [(json.loads(a)["estado"], json.loads(d)["estado"]) for a, d in volta] == [
+        ("espelho_gerado", "espelho_enviado"), ("espelho_enviado", "espelho_gerado"),
+        ("espelho_gerado", "espelho_enviado")]
 
 
 def test_mesmo_numero_com_outra_competencia_substitui_em_vez_de_duplicar(ambiente):
@@ -837,3 +847,41 @@ def test_planilha_sendo_enviada_ao_orgao_nao_ganha_espelho(ambiente):
     with pytest.raises(ValueError, match="sendo enviada ao órgão"):
         espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67}, justificativa_sem_boletim=JUSTIFICATIVA)
     assert medicoes.detalhe(conn, mid)["estado"] == "planilha_gerada"
+
+
+# --- issue #359: a versao nova do espelho enviado volta a medicao a `espelho_gerado` ---------------------------
+
+def test_boletim_novo_depois_do_envio_e_v2_voltam_a_espelho_gerado_ate_o_novo_envio(ambiente, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
+    _boletim(conn, u, mid, 12_000_01)
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {})
+    p = espelhos.previa_envio(conn, e1)
+    espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    _boletim(conn, u, mid, 11_999_99, "2026-02-12", sha="b")
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"     # o boletim novo nao muda o estado
+    e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 11_999_99}, motivo="boletim novo do órgão")
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == (
+        "espelho_gerado", 12_345_67, 11_999_99)
+    p2 = espelhos.previa_envio(conn, e2)
+    espelhos.enviar(conn, u, e2, p2["para"], p2["copia"], p2["assunto"], p2["corpo"])
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+
+
+def test_v2_so_do_projeto_nao_volta_a_execucao_enviada(ambiente_projeto, tmp_path, monkeypatch):
+    # so' a medicao da versao nova volta; a do outro espelho continua enviada
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente_projeto
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100_01})
+    p = espelhos.previa_envio(conn, e1)
+    espelhos.enviar(conn, u, e1, p["para"], p["copia"], p["assunto"], p["corpo"])
+    exe = espelhos.detalhe(conn, e1)["medicoes"][0]["id"]
+    e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"projeto": 7_01})
+    p2 = espelhos.previa_envio(conn, e2)
+    espelhos.enviar(conn, u, e2, p2["para"], p2["copia"], p2["assunto"], p2["corpo"])
+    proj = espelhos.detalhe(conn, e2)["medicoes"][0]["id"]
+    espelhos.gerar(conn, u, cid, 23, "2026-01", {"projeto": 7_03}, motivo="corrigido")
+    assert medicoes.detalhe(conn, proj)["estado"] == "espelho_gerado"
+    assert medicoes.detalhe(conn, exe)["estado"] == "espelho_enviado"

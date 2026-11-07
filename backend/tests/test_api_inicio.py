@@ -1,6 +1,8 @@
 """Rotas da tela inicial, das medicoes em andamento e dos dados da obra (bloco 6)."""
 import pytest
 from tests.conftest import novo_contrato
+from tests.test_api_espelhos import ambiente_api  # noqa: F401  (fixture: MT-402 com a regra do espelho ativa)
+from tests.test_api_medicoes import _registrar_boletim
 
 
 @pytest.fixture(autouse=True)
@@ -43,8 +45,25 @@ def test_painel_do_inicio(client_admin):
     r = client_admin.get("/api/inicio/painel")
     assert r.status_code == 200
     assert set(r.json()) == {"hoje", "notas_a_enviar", "certidoes", "reajustes", "protocoladas", "medido",
-                             "por_contratante", "recebido_ano", "a_receber", "prazos"}
+                             "por_contratante", "recebido_ano", "a_receber", "prazos", "espelhos"}
     assert r.json()["protocoladas"]["obras_ativas"] == 1
+    assert r.json()["espelhos"] == []
+
+
+def test_painel_do_inicio_leva_a_medicao_com_o_aprovado_mudado_depois_do_espelho(client_admin, ambiente_api):
+    # issue #359 (gate Sol, PR #474): o Inicio le /api/inicio/painel, nao a lista de avisos
+    cid = ambiente_api
+    g = client_admin.post(f"/api/contratos/{cid}/espelho",
+                          json={"numero": 23, "competencia": "2026-01", "entradas": {"medicao": "100,01"}})
+    assert g.status_code == 201, g.text
+    mid = client_admin.get(f"/api/espelhos/{g.json()['espelho_id']}").json()["medicoes"][0]["id"]
+    assert _registrar_boletim(client_admin, mid, valor="100,01").status_code == 201
+    assert client_admin.get("/api/inicio/painel").json()["espelhos"] == []
+    assert _registrar_boletim(client_admin, mid, valor="99,99", numero="SMO 15/2026").status_code == 201
+    [e] = client_admin.get("/api/inicio/painel").json()["espelhos"]
+    assert {k: e[k] for k in ("contrato_id", "medicao_id", "titulo", "situacao")} == {
+        "contrato_id": cid, "medicao_id": mid, "titulo": "23ª Medição", "situacao": "aprovado_mudou"}
+    assert e["obra"] and e["espelho_id"] == g.json()["espelho_id"]
 
 
 def test_painel_do_inicio_exige_login(client):

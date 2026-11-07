@@ -84,7 +84,7 @@ def create_app() -> FastAPI:
     app.state.limite_login = LimitePorOrigem()
 
     @app.get("/api/health")
-    def health():
+    def health(request: Request):
         """Toca o banco de verdade e expoe a ultima rodada de backup.
 
         `status` continua "ok" quando o banco responde; a copia externa atrasada ou
@@ -105,7 +105,12 @@ def create_app() -> FastAPI:
         inst = instalacao.estado()
         return {"status": "ok", "banco": "ok", "backup": backup_mod.estado(),
                 "instalacao": inst["instalacao"], "instalacao_motivo": inst["motivo"],
-                "commit": integridade.commit_atual()}
+                # teste em producao (06/11/2026): com o redirecionamento ligado, toda tela mostra a faixa de aviso
+                "email_redirecionado": correio.redirecionamento_ativo(),
+                "commit": integridade.commit_atual(),
+                # Issue #425: `tls` e' como o pedido chegou (o uvicorn com o certificado poe "https"), nao a variavel
+                # DASH_SEM_TLS: producao que subiu sem o certificado aparece aqui, mesmo com a tarefa certa.
+                "tls": request.url.scheme == "https"}
 
     @app.exception_handler(sqlite3.OperationalError)
     def banco_ocupado(request: Request, exc: sqlite3.OperationalError):

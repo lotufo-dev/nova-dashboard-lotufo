@@ -11,6 +11,13 @@ def test_health(client):
     assert (corpo["instalacao"], corpo["instalacao_motivo"]) == ("dev", None)
 
 
+def test_health_mostra_tls_pelo_esquema_do_pedido(client):
+    # issue #425: a producao em HTTPS mostra `tls: true`; o que vale e' como o pedido chegou, nao a variavel
+    from fastapi.testclient import TestClient
+    assert client.get("/api/health").json()["tls"] is False
+    assert TestClient(client.app, base_url="https://testserver").get("/api/health").json()["tls"] is True
+
+
 def test_health_mostra_o_commit_de_7_caracteres(client, monkeypatch):
     from app import integridade
     monkeypatch.setattr(integridade, "_commit", "abc1234")

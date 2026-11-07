@@ -103,7 +103,24 @@ def _de_siga(conn, hoje: datetime.date) -> list[dict]:
     return siga.avisos(conn, hoje)
 
 
-FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga]
+def _de_espelhos(conn, hoje: datetime.date) -> list[dict]:
+    """Issue #359: o aprovado mudou depois do espelho (boletim novo com outro valor); some com a versao nova (ou no
+    protocolo). O clique leva ao espelho da medicao (`medicao_id`), ou as notas dela na nota ja' emitida. O espelho
+    antigo que nao se confere tem tipo proprio: nao diz que o aprovado mudou."""
+    from app import espelhos, medicoes      # import tardio, como nas outras fontes
+    out = []
+    for m in espelhos.desatualizadas(conn):
+        cid = m["contrato_id"]
+        tipo = "espelho_nao_conferido" if m["situacao"] == espelhos.NAO_CONFERIDO else "espelho_desatualizado"
+        aba = "notas" if m["situacao"] == espelhos.NOTA_EMITIDA else "espelho"
+        out.append({**aviso(tipo, "acao", f"{medicoes.titulo(m)}: {espelhos.TEXTO_AVISO[m['situacao']]}",
+                            cid, m["obra"], valor_centavos=m["aprovado_centavos"],
+                            destino={"tela": "contrato", "id": cid, "aba": aba}),
+                    "medicao_id": m["id"]})
+    return out
+
+
+FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga, _de_espelhos]
 
 
 def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao") -> list[dict]:

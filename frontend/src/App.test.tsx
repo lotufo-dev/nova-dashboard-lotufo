@@ -148,3 +148,4 @@ describe("App: instalação não autorizada", () => {
     }
   });
 });
+

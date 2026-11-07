@@ -46,7 +46,14 @@
 .ini-numero { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ini-numero__valor ~ * { margin-top: auto; }
 .ini-numero__rotulo { font-size: 14px; line-height: 20px; color: var(--texto-2, #64748B); }
-.ini-numero__valor { font-size: 26px; line-height: 32px; font-weight: 500; overflow-wrap: anywhere; }
+/* 06/11/2026: o valor nunca quebra no meio do numero. Quatro cartoes lado a lado so' onde um valor de centenas de milhoes cabe
+   inteiro (a fonte acompanha a largura); abaixo de 1240px, dois por linha. */
+.ini-numero__valor { font-size: clamp(20px, 1.6vw, 26px); line-height: 32px; font-weight: 500; white-space: nowrap; }
+@media (max-width: 1239px) {
+  .ini-numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ini-numero__valor { font-size: 26px; }
+}
+@media (max-width: 700px) { .ini-numeros { grid-template-columns: minmax(0, 1fr); } }
 .ini-numero__de { font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 15px; color: var(--texto-2, #64748B); }
 .ini-barra { display: block; height: 6px; border-radius: 999px; background: var(--acento-fundo, #EEF0FF); overflow: hidden; }
 .ini-barra > span { display: block; height: 6px; background: var(--acento, #4F46E5); }
@@ -96,8 +103,8 @@
 }
 .ini-prazos__linha:hover { background: var(--hover, #F8FAFC); }
 .ini-prazos__obra { display: flex; flex-direction: column; min-width: 0; }
-.ini-prazos__nome { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ini-prazos__sub { font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); }
+.ini-prazos__nome { font-weight: 500; overflow-wrap: anywhere; }
+.ini-prazos__sub { font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); overflow-wrap: anywhere; }
 .ini-pilula {
   justify-self: end; display: flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
   font-size: 13px; line-height: 20px; white-space: nowrap;
