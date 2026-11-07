@@ -596,6 +596,28 @@ def test_emitente_mudando_entre_a_montagem_e_o_anexo_nao_recusa_o_assinado(cenar
     assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
 
 
+def test_pacote_sem_timbre_gravado_usa_o_timbre_impresso_no_montado(cenario, monkeypatch):
+    # Gate Sol da PR #549, Aviso 2: pacote montado antes do timbre gravado (sem a chave) e emitente trocado depois; o
+    # timbre sai pelas linhas repetidas no topo e no pe' das paginas do montado
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    corpo = _corpo_com_o_termo_na_quebra(c, ids, pid)
+    velho = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    novo = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
+    mapa = json.loads(protocolo._linha(c, pid)["montado_apostilamentos"])
+    mapa.pop("timbre")
+    c.execute("UPDATE protocolos SET montado_apostilamentos=? WHERE id=?", (json.dumps(mapa), pid))
+    c.commit()
+    original = carta.emitente
+    monkeypatch.setattr(carta, "emitente", lambda conn, eid: {**original(conn, eid), "razao_social": "CONSTRUTORA "
+                        "BETA LTDA", "endereco": "Rua Nova, 1 - Cuiabá/MT", "contato": "Tel.: (65) 3999-0000"})
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+    assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
+
+
 def test_competencia_acrescentada_ao_mesmo_termo_tambem_e_conferida(cenario):
     # Critico 2: a correcao acrescenta uma competencia no comeco da lista do mesmo termo (numero igual)
     c, ids = cenario

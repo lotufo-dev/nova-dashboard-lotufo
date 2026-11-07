@@ -1006,7 +1006,18 @@ ASSINADO_SEM_O_TERMO = ("O assinado não traz o termo de apostilamento do pacote
                         "anterior): assine no DocuSign o pacote montado agora e anexe o assinado dele")
 
 
-def _plano_sem_timbre(conn, p: dict, paginas: list[str]) -> str:
+def _bordas_repetidas(montado: list[str]) -> list[str]:
+    """Pacote montado antes do timbre gravado (gate Sol da PR #549): as linhas do topo e do pe' que se repetem em
+    mais de uma pagina do montado sao o papel timbrado impresso na montagem, mesmo que o cadastro tenha mudado."""
+    vistas: dict[str, int] = {}
+    for t in montado:
+        ls = [x.strip() for x in (t or "").split("\n") if x.strip()]
+        for x in set(ls[:4] + ls[-4:]):
+            vistas[x] = vistas.get(x, 0) + 1
+    return [x for x, n in vistas.items() if n > 1 and len(assinatura._plano(x)) >= 8]
+
+
+def _plano_sem_timbre(conn, p: dict, paginas: list[str], montado: list[str] | None = None) -> str:
     """O texto plano da conferencia (sem acento, espaco, pontuacao e carimbo do DocuSign) de todas as paginas juntas,
     sem o cabecalho e o rodape do papel timbrado que o fpdf repete em toda pagina da carta: a frase partida na quebra
     de pagina volta a ficar inteira (gate Sol, rodada extra de 07/11/2026). Issue #519: sem o texto da assinatura do
@@ -1016,7 +1027,8 @@ def _plano_sem_timbre(conn, p: dict, paginas: list[str]) -> str:
     timbre = (gravado or {}).get("timbre")
     if timbre is None:
         c = _contrato(conn, p["contrato_id"])
-        timbre = carta.textos_do_timbre(carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {})
+        timbre = carta.textos_do_timbre(carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}) \
+            + _bordas_repetidas(montado if montado is not None else paginas)
     fixos = sorted({f for x in timbre if (f := assinatura._plano(x))}, key=len, reverse=True)
     out = []
     for t in paginas:
@@ -1038,7 +1050,7 @@ def _recusar_termo_fora_do_assinado(conn, p: dict, montado: list[str], assinado:
     if familia not in FAMILIAS_OFICIO_REAJUSTE:
         return
     m_plano = _plano_sem_timbre(conn, p, montado)
-    a_plano = _plano_sem_timbre(conn, p, assinado[:len(montado)])
+    a_plano = _plano_sem_timbre(conn, p, assinado[:len(montado)], montado)
     gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
     frase = assinatura._plano(frase_do_apostilamento(gravado["apostilamentos"])) \
         if gravado and gravado.get("cita") else ""

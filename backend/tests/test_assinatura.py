@@ -70,6 +70,12 @@ def test_bloco_da_assinatura_sai_e_o_texto_dos_assinados_reais_fica():
               "4C6B1A2D3E4F4A5B...\nDocuSigned by:\nApostilamento",                   # codigo antes, sem nome
               "DocuSigned by: Assinante Exemplo\n4C6B1A2D3E4F4A5B…\nApostilamento"):
         assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "APOSTILAMENTO"
+    for t in ("4C6B1A2D3E4F4A5B...\nDocuSigned by:\nAssinante Exemplo\nApostilamento",    # codigo, rotulo, nome
+              "DocuSigned by: Assinante Exemplo 4C6B1A2D3E4F4A5B...\nApostilamento"):     # tudo na mesma linha
+        assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "APOSTILAMENTO"
+    # gate Sol da PR #549: linha da carta intercalada entre o rotulo e o codigo nunca sai
+    t = "Assinado por:\nTermo de Apostilamento nº 001/2025/03/02\n4C6B1A2D3E4F4A5B..."
+    assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "TERMODEAPOSTILAMENTONO001202503 02".replace(" ", "")
     # sem o codigo logo abaixo, a linha seguinte e' texto da carta e fica
     assert assinatura._plano(assinatura.sem_bloco_de_assinatura("Termo de\nAssinado por:\nApostilamento nº 1")) == \
         "TERMODEAPOSTILAMENTONO1"

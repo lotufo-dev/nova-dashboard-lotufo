@@ -21,18 +21,48 @@ _CERTIFICADO = re.compile(r"CERTIFICADO\s+DE\s+CONCLUS|CERTIFICATE\s+OF\s+COMPLE
 
 
 # O texto que a assinatura do DocuSign poe na pagina: o rotulo, o nome de quem assinou e o codigo (hex e "..."). A
-# conferencia do termo (`protocolo._plano_sem_timbre`) o tira antes de juntar as paginas (issue #519). O nome so' sai
-# entre o rotulo e o codigo: sem o codigo logo abaixo, a linha seguinte pode ser texto da carta, e fica.
-_ROTULO = r"(?:(?:DOCU)?SIGNED\s+BY|ASSINADO\s+POR)\s*:"
-_CODIGO = r"(?=[0-9A-F]*[0-9])[0-9A-F]{12,}(?:\.{3}|…)?"
-_BLOCO_COM_CODIGO = re.compile(rf"{_ROTULO}\s*(?:[^\n]*\S[^\n]*\n\s*)?{_CODIGO}(?=\s|$)", re.IGNORECASE)
-_SO_ROTULO = re.compile(_ROTULO, re.IGNORECASE)
-_SO_CODIGO = re.compile(rf"^[ \t]*{_CODIGO}[ \t]*$", re.IGNORECASE | re.MULTILINE)
+# conferencia do termo (`protocolo._plano_sem_timbre`) o tira antes de juntar as paginas (issue #519). So' sai o que e'
+# do widget: o rotulo, o codigo (linha so' de hex) e, colado a eles, uma linha com cara de nome proprio (so' letras,
+# ate' 6 palavras, sem numero, "nº" ou palavra do oficio). Linha da carta intercalada fica (gate Sol da PR #549).
+_ROTULO = re.compile(r"(?:(?:DOCU)?SIGNED\s+BY|ASSINADO\s+POR)\s*:", re.IGNORECASE)
+_CODIGO_RE = r"(?=[0-9A-F]*[0-9])[0-9A-F]{12,}(?:\.{3}|…)?"
+_CODIGO = re.compile(rf"(?<![0-9A-Z]){_CODIGO_RE}(?![0-9A-Z])", re.IGNORECASE)
+_SO_CODIGO = re.compile(rf"^\s*{_CODIGO_RE}\s*$", re.IGNORECASE)
+_NOME = re.compile(r"^[^\W\d_ºª][^\d_ºª/:;()]{1,79}$")
+_DO_OFICIO = {"TERMO", "APOSTILAMENTO", "REAJUSTE", "COMPETENCIA", "MEDICAO", "CONTRATO", "OFICIO", "NOTA"}
+
+
+def _e_nome(linha: str) -> bool:
+    t = linha.strip()
+    if not _NOME.match(t) or len(t.split()) > 6:
+        return False
+    palavras = {_plano(w) for w in t.split()}
+    return not (palavras & _DO_OFICIO)
 
 
 def sem_bloco_de_assinatura(texto: str) -> str:
-    t = _BLOCO_COM_CODIGO.sub(" ", texto or "")
-    return _SO_CODIGO.sub(" ", _SO_ROTULO.sub(" ", t))
+    linhas = (texto or "").split("\n")
+    for i, linha in enumerate(linhas):
+        m = _ROTULO.search(linha)
+        if not m:
+            continue
+        resto = _CODIGO.sub(" ", linha[m.end():]).strip()       # tudo na mesma linha: rotulo, nome e codigo
+        linhas[i] = linha[:m.start()] + ("" if not resto or _e_nome(resto) else " " + resto)
+        nome = bool(resto)
+        for passo in (-1, 1):                                     # codigo antes ou depois; nome colado ao bloco
+            k = i + passo
+            while 0 <= k < len(linhas) and abs(k - i) <= 3:
+                if not linhas[k].strip():
+                    k += passo
+                    continue
+                if _SO_CODIGO.match(linhas[k]):
+                    linhas[k] = ""
+                elif passo == 1 and not nome and _e_nome(linhas[k]) and not _ROTULO.search(linhas[k]):
+                    linhas[k], nome = "", True
+                else:
+                    break
+                k += passo
+    return "\n".join("" if _SO_CODIGO.match(x) else x for x in linhas)
 
 
 def _plano(texto: str) -> str:
