@@ -83,17 +83,15 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
   /** Pagina da medicao (#152): `espelho` e' a etapa 1 (os valores, os arquivos, "Gerar de novo"; sem moldura) e
    *  `faturamento` a etapa 2 (o que foi ao faturamento e o envio). Sem `parte`, o cartao inteiro de antes. */
   parte?: "espelho" | "faturamento";
-  /** Numero e competencia (AAAA-MM) da medicao prevista ou escolhida na janela "Iniciar processo" (#151): o
-   *  formulario abre com eles. `tipo: "projeto"` mostra so' os valores de Projeto. */
-  inicial?: { numero: string | number; competencia: string; tipo?: "projeto" };
+  /** Numero e competencia da medicao prevista, para o formulario abrir preenchido. */
+  inicial?: { numero: number; competencia: string };
 }) {
   const [regra, setRegra] = useState<Regra | null | undefined>(undefined);
   const [espelhos, setEspelhos] = useState<EspelhoDetalhe[]>([]);
   const [passo, setPasso] = useState<Passo>({ tipo: "lista" });
   const [form, setForm] = useState<{ numero: string; competencia: string; entradas: Record<string, string>; motivo: string;
     periodoInicio: string; periodoFim: string }>(
-    { numero: inicial ? String(inicial.numero) : "", competencia: inicial?.competencia ?? "", entradas: {}, motivo: "",
-      periodoInicio: mesCivil(inicial?.competencia ?? "")[0], periodoFim: mesCivil(inicial?.competencia ?? "")[1] });
+    { numero: "", competencia: "", entradas: {}, motivo: "", periodoInicio: "", periodoFim: "" });
   const [erro, setErro] = useState("");
   // #284: "seguir sem boletim" da medicao que ja' existia antes do espelho
   const [justificativa, setJustificativa] = useState("");
@@ -141,8 +139,6 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contratoId]);
 
-  // #151: "Projeto" escolhido na janela Iniciar processo mostra so' os valores de Projeto (se a regra os tem)
-  const soProjeto = inicial?.tipo === "projeto" && regra?.entradas.some(en => en.natureza === "projeto") === true;
   const titulo = medicao ? "Espelho" : "Nova medição";
   // a secao da medicao tem ancora (#espelho): quem chega pela fila no passo "enviar ao faturamento" cai nela
   // e na obra (#nova-medicao), onde a fila manda quem precisa gerar o espelho de uma obra sem medicao aberta
@@ -359,7 +355,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
           <p className="painel__titulo">Gerar espelho</p>
           <div className="form-inline">
             <div className="campo">
-              <label className="campo__rotulo" htmlFor="esp-numero">Nº da medição{soProjeto ? " de Projeto" : ""}</label>
+              <label className="campo__rotulo" htmlFor="esp-numero">Nº da medição</label>
               <input id="esp-numero" name="numero" autoComplete="off" spellCheck={false} className="entrada--curta entrada--num num" required inputMode="numeric"
                 pattern="[0-9]{1,3}" value={form.numero}
                 onChange={e => setForm({ ...form, numero: e.target.value })} />
@@ -384,7 +380,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
               <input id="esp-periodo-fim" name="periodo_fim" autoComplete="off" type="date" className="entrada--media" value={form.periodoFim}
                 onChange={e => setForm({ ...form, periodoFim: e.target.value })} />
             </div>
-            {regra.entradas.filter(en => !soProjeto || en.natureza === "projeto").map(en => (
+            {regra.entradas.map(en => (
               <div className="campo" key={en.chave}>
                 <label className="campo__rotulo" htmlFor={`esp-${en.chave}`}>{en.rotulo}</label>
                 <CampoValor id={`esp-${en.chave}`} name={en.chave} className="entrada--media num"

@@ -44,6 +44,14 @@ describe("Medição nova: número e competência vindos da janela Iniciar proces
     expect(el.dataset.competencia).toBe("");
   });
 
+  it("obra sem planilha/carta: o lançamento à mão leva o número, a competência e a série da janela", async () => {
+    api.mockImplementation(async (caminho: string) => caminho.includes("/cabecalho")
+      ? { obra: "Obra Teste", orgao: "SINFRA", instrumento: "CT 1/2026", percentual_lotufo_bp: 10000 } : { regra: null, espelhos: [] });
+    render(<MedicaoNova contratoId={4} usuario={usuario} origem={null} busca={{ numero: "3", competencia: "2026-09", tipo: "projeto" }} />);
+    const link = await screen.findByRole("link", { name: "Lançar a medição à mão" });
+    expect(link.getAttribute("href")).toBe("/obras/4?numero=3&competencia=2026-09&tipo=projeto");
+  });
+
   it("tipo=projeto: título de Projeto e a planilha/carta na série de Projeto", async () => {
     const { container } = montar({ numero: "3", competencia: "2026-09", tipo: "projeto" });
     const el = await planilha(container);

@@ -138,7 +138,7 @@ describe("Medições com abas", () => {
       escolher(janela, "MT-388");
       expect((within(janela).getByLabelText("Nº da medição") as HTMLInputElement).readOnly).toBe(true);
       expect((within(janela).getByLabelText("Competência") as HTMLInputElement).value).toBe("setembro de 2026");
-      fireEvent.click(within(janela).getByRole("button", { name: "Começar a 24ª pelo espelho" }));
+      fireEvent.click(within(janela).getByRole("button", { name: "Começar a 24ª" }));
       expect(window.location.pathname).toBe("/obras/17/medicoes/900");
     });
 
@@ -151,7 +151,7 @@ describe("Medições com abas", () => {
       expect(numero.value).toBe("12");
       expect((within(janela).getByLabelText("Competência") as HTMLInputElement).value).toBe("01/2027");
       fireEvent.change(numero, { target: { value: "15" } });
-      fireEvent.click(within(janela).getByRole("button", { name: "Começar a 15ª de Cavalaria pelo espelho" }));
+      fireEvent.click(within(janela).getByRole("button", { name: "Começar a 15ª de Cavalaria" }));
       expect(window.location.pathname + window.location.search).toBe("/obras/4/medicoes/nova?numero=15&competencia=2027-01");
     });
 
@@ -176,7 +176,7 @@ describe("Medições com abas", () => {
       const janela = await abrir();
       escolher(janela, "Cavalaria");
       fireEvent.click(within(janela).getByRole("radio", { name: "Projeto" }));
-      fireEvent.click(within(janela).getByRole("button", { name: "Começar a 3ª de Projeto de Cavalaria pelo espelho" }));
+      fireEvent.click(within(janela).getByRole("button", { name: "Começar a 3ª de Projeto de Cavalaria" }));
       expect(window.location.pathname + window.location.search).toBe("/obras/4/medicoes/nova?numero=3&competencia=2026-09&tipo=projeto");
     });
 
@@ -187,21 +187,21 @@ describe("Medições com abas", () => {
       expect((within(janela).getByLabelText(/Nº da medição/) as HTMLInputElement).value).toBe("9");
       fireEvent.click(within(janela).getByRole("radio", { name: "Projeto" }));
       expect(within(janela).getByText(/tem a 4ª de Projeto prevista pelo cronograma \(07\/2026\)/)).toBeTruthy();
-      fireEvent.click(within(janela).getByRole("button", { name: "Começar a 4ª de Projeto pelo espelho" }));
+      fireEvent.click(within(janela).getByRole("button", { name: "Começar a 4ª de Projeto" }));
       expect(window.location.pathname).toBe("/obras/21/medicoes/950");
     });
 
     it("a obra escolhida que a busca esconde deixa de valer: o rodapé volta ao início e o botão de começar some", async () => {
       const janela = await abrir();
       escolher(janela, "Cavalaria");
-      expect(within(janela).getByRole("button", { name: "Começar a 12ª de Cavalaria pelo espelho" })).toBeTruthy();
+      expect(within(janela).getByRole("button", { name: "Começar a 12ª de Cavalaria" })).toBeTruthy();
       fireEvent.change(within(janela).getByRole("searchbox"), { target: { value: "terminais" } });
       expect(within(janela).queryByRole("button", { name: /Começar a/ })).toBeNull();
       expect(within(janela).queryByLabelText(/Nº da medição/)).toBeNull();
       expect((within(janela).getByRole("button", { name: "Escolha uma obra" }) as HTMLButtonElement).disabled).toBe(true);
       // a busca limpa traz a escolha de volta
       fireEvent.change(within(janela).getByRole("searchbox"), { target: { value: "" } });
-      expect(within(janela).getByRole("button", { name: "Começar a 12ª de Cavalaria pelo espelho" })).toBeTruthy();
+      expect(within(janela).getByRole("button", { name: "Começar a 12ª de Cavalaria" })).toBeTruthy();
     });
 
     it("botão desligado diz o motivo: número inválido ou competência vazia", async () => {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { EtapaCartao, FaixaVendo, Setas } from "./Etapas";
 import type { Usuario } from "./Login";
-import { ir, type Busca, type Origem } from "./rota";
+import { ir, medicaoDaBusca, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
 import { NovaPlanilhaCarta } from "./PlanilhaCarta";
 import { baseDosValores } from "./formato";
@@ -21,11 +21,11 @@ type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_
 export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }: {
   contratoId: number; usuario: Usuario; origem: Origem | null; busca?: Busca;
 }) {
-  const numero = /^[1-9][0-9]{0,2}$/.test(busca.numero ?? "") ? busca.numero : "";
-  const competencia = /^\d{4}-(0[1-9]|1[0-2])$/.test(busca.competencia ?? "") ? busca.competencia : "";
-  const tipo: "projeto" | undefined = busca.tipo === "projeto" ? "projeto" : undefined;
+  const { numero, competencia, tipo } = medicaoDaBusca(busca);
   const inicial = numero || competencia
     ? { numero: numero ? Number(numero) : undefined, competencia: competencia || undefined } : undefined;
+  // a obra sem planilha/carta lanca a mao na aba Medicoes da obra; o link leva o que veio da janela
+  const buscaManual: Busca = { ...(numero ? { numero } : {}), ...(competencia ? { competencia } : {}), ...(tipo ? { tipo } : {}) };
   const nome = tipo ? "Nova medição de Projeto" : "Nova medição";
   const podeEditar = usuario.perfil === "engenharia" || usuario.perfil === "admin";
   const [cab, setCab] = useState<Cabecalho | null>(null);
@@ -72,9 +72,10 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
                   {/* issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1); registrada, a
                       pagina da medicao abre com o cartao dela. Numero, competencia e serie vem da busca da URL (#151) */}
                   {!podeEditar || regraAtiva === null ? null : regraAtiva
-                    ? <NovaPlanilhaCarta contratoId={contratoId} tipo={tipo ?? "execucao"} inicial={inicial}
+                    ? <NovaPlanilhaCarta contratoId={contratoId} tipo={tipo || "execucao"} inicial={inicial}
                         aoRegistrar={r => ir({ tela: "medicao", obra: contratoId, id: r.medicao_id }, { forcar: true })} />
-                    : <p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}>Lançar a medição à mão</Link></p>}
+                    : <p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}
+                        busca={Object.keys(buscaManual).length ? buscaManual : undefined}>Lançar a medição à mão</Link></p>}
                 </div>
               )}
             </EtapaCartao>

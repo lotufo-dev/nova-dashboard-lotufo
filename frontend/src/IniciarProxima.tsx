@@ -11,7 +11,9 @@ import { NovaMedicaoManual, type Medicao } from "./Medicoes";
 // medicao a mao. Issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1), e o atalho diz
 // isso: "Nova planilha/carta da Nª medição".
 
-export default function IniciarProxima({ contratoId, versao, aoCriar }: { contratoId: number; versao: number; aoCriar: () => void }) {
+export default function IniciarProxima({ contratoId, versao, aoCriar, inicial }: {
+  contratoId: number; versao: number; aoCriar: () => void; inicial?: { numero: string; competencia: string; tipo: "projeto" | "" };
+}) {
   const [ativa, setAtiva] = useState<boolean | null>(null);
   const [medicoes, setMedicoes] = useState<Medicao[] | null>(null);
   const [erro, setErro] = useState("");
@@ -29,7 +31,7 @@ export default function IniciarProxima({ contratoId, versao, aoCriar }: { contra
     return (
       <section className="cartao" aria-labelledby="titulo-nova-medicao" id="nova-medicao">
         <div className="cartao__cabeca"><h2 className="cartao__titulo" id="titulo-nova-medicao">Nova medição</h2></div>
-        <NovaMedicaoManual contratoId={contratoId} aoCriar={aoCriar} />
+        <NovaMedicaoManual contratoId={contratoId} aoCriar={aoCriar} inicial={inicial} />
       </section>
     );
   }

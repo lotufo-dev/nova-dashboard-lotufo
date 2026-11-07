@@ -12,7 +12,7 @@ import type { MarcaAditivo, PontoDaCurva, PrevistoAnterior } from "./obra";
 import Prazos from "./Prazos";
 import Reajuste from "./Reajuste";
 import { NovoProtocolo } from "./Protocolo";
-import { ir, type AbaObra as Aba, type Busca, type Origem } from "./rota";
+import { ir, medicaoDaBusca, type AbaObra as Aba, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
 import { Abas, Migalhas, VoltarOrigem } from "./Topo";
 import { baseDosValores } from "./formato";
@@ -195,7 +195,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
                   {aba === "medicoes" && (
                     <div className="pilha">
                       {/* a medicao nasce do espelho, na etapa 1 da pagina dela (ou, no fluxo antigo, a mao): aqui so' o atalho */}
-                      {podeEditar && <IniciarProxima contratoId={contratoId} versao={versaoMedicoes} aoCriar={() => setVersaoMedicoes(v => v + 1)} />}
+                      {podeEditar && <IniciarProxima contratoId={contratoId} versao={versaoMedicoes} inicial={medicaoDaBusca(busca)} aoCriar={() => setVersaoMedicoes(v => v + 1)} />}
                       <Medicoes contratoId={contratoId} busca={busca} versao={versaoMedicoes} />
                       {podeEditar && <NovoProtocolo contratoId={contratoId} versao={versaoMedicoes} aoMudar={() => setVersaoMedicoes(v => v + 1)} />}
                     </div>

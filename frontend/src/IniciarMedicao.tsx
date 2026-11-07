@@ -9,7 +9,7 @@ import { fmtCompetencia } from "./tempo";
 // "Iniciar processo de medição" (redesenho #151, protótipo aprovado em 15/10/2026, prototipos/iniciar/): escolher a
 // obra e ver o que cabe a ela. Obra com medição em andamento só abre a medição; com medição `prevista` (criada pelo
 // cronograma) começa por ela, sem criar outra com o mesmo número; as outras sugerem a próxima (número e competência
-// editáveis) e vão para a etapa 1, o espelho. Tipo da medição: execução (o reajuste nasce no espelho); só a obra com
+// editáveis) e vão para a etapa 1 (a planilha/carta desde a #289; a obra sem ela lança à mão). Tipo da medição: execução (o reajuste nasce no espelho); só a obra com
 // série de Projeto escolhe "Execução / Projeto".
 //
 // <dialog> nativo com showModal(): o navegador prende o foco dentro dela (o resto da pagina fica inerte), o Esc
@@ -129,7 +129,7 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
         </div>
         <div className="iniciar__botoes">{cancelar}
           <button type="button" className="btn btn--primario" onClick={() => ir_({ tela: "medicao", obra: o.contrato_id, id: serie.prevista_id as number })}>
-            Começar a {serie.prevista_numero}ª{de} pelo espelho</button></div></>;
+            Começar a {serie.prevista_numero}ª{de}</button></div></>;
     }
     const numeroOk = /^[1-9][0-9]{0,2}$/.test(numero);
     const pronto = numeroOk && competencia !== "";
@@ -144,7 +144,7 @@ export default function IniciarMedicao({ obras, aoFechar }: { obras: ObraResumo[
       <div className="iniciar__botoes">{cancelar}
         <button type="button" className="btn btn--primario" disabled={!pronto}
           onClick={() => ir_({ tela: "nova-medicao", obra: o.contrato_id }, { numero, competencia, ...(tipo === "projeto" ? { tipo } : {}) })}>
-          {!numeroOk ? "Informe o número" : competencia === "" ? "Informe a competência" : `Começar a ${numero}ª${de} de ${o.obra} pelo espelho`}</button></div></>;
+          {!numeroOk ? "Informe o número" : competencia === "" ? "Informe a competência" : `Começar a ${numero}ª${de} de ${o.obra}`}</button></div></>;
   }
 
   return (

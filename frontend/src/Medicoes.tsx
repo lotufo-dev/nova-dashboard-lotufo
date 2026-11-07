@@ -227,8 +227,12 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
 
 /** Nova medicao a mao, na obra do fluxo antigo (sem espelho pelo sistema): numero, tipo e competencia. A medicao
  *  nasce `prevista` e a pagina dela recebe as notas e o protocolo. */
-export function NovaMedicaoManual({ contratoId, aoCriar }: { contratoId: number; aoCriar: () => void }) {
-  const [novo, setNovo] = useState({ numero: "", tipo: "execucao", competencia: "" });
+export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
+  contratoId: number; aoCriar: () => void;
+  // o que a janela "Iniciar processo" (#151) mandou pela URL, ja' validado (medicaoDaBusca)
+  inicial?: { numero: string; competencia: string; tipo: "projeto" | "" };
+}) {
+  const [novo, setNovo] = useState({ numero: inicial?.numero ?? "", tipo: inicial?.tipo || "execucao", competencia: inicial?.competencia ?? "" });
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [feito, setFeito] = useState<{ id: number; numero: number; tipo: string } | null>(null);
