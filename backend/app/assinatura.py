@@ -20,6 +20,51 @@ _ENVELOPE = re.compile(r"DOCUSIGN\s+ENVELOPE\s+ID\s*:?\s*([0-9A-F]{8}-[0-9A-F]{4
 _CERTIFICADO = re.compile(r"CERTIFICADO\s+DE\s+CONCLUS|CERTIFICATE\s+OF\s+COMPLETION", re.IGNORECASE)
 
 
+# O texto que a assinatura do DocuSign poe na pagina: o rotulo, o nome de quem assinou e o codigo (hex e "..."). A
+# conferencia do termo (`protocolo._plano_sem_timbre`) o tira antes de juntar as paginas (issue #519). So' sai o que e'
+# do widget: o rotulo, o codigo (linha so' de hex) e, colado a eles, uma linha com cara de nome proprio (so' letras,
+# ate' 6 palavras, sem numero, "nº" ou palavra do oficio). Linha da carta intercalada fica (gate Sol da PR #549).
+_ROTULO = re.compile(r"(?:(?:DOCU)?SIGNED\s+BY|ASSINADO\s+POR)\s*:", re.IGNORECASE)
+_CODIGO_RE = r"(?=[0-9A-F]*[0-9])[0-9A-F]{12,}(?:\.{3}|…)?"
+_CODIGO = re.compile(rf"(?<![0-9A-Z]){_CODIGO_RE}(?![0-9A-Z])", re.IGNORECASE)
+_SO_CODIGO = re.compile(rf"^\s*{_CODIGO_RE}\s*$", re.IGNORECASE)
+_NOME = re.compile(r"^[^\W\d_ºª][^\d_ºª/:;()]{1,79}$")
+# radicais do oficio e da frase do termo: plural e conjugacao tambem nao contam como nome (gate Sol, rodada 2)
+_DO_OFICIO = ("TERMO", "APOSTIL", "REAJUST", "COMPETENC", "MEDICA", "MEDICO", "CONTRAT", "OFICIO", "NOTA")
+
+
+def _e_nome(linha: str) -> bool:
+    t = linha.strip()
+    if not _NOME.match(t) or len(t.split()) > 6:
+        return False
+    return not any(_plano(w).startswith(r) for w in t.split() for r in _DO_OFICIO)
+
+
+def sem_bloco_de_assinatura(texto: str) -> str:
+    linhas = (texto or "").split("\n")
+    for i, linha in enumerate(linhas):
+        m = _ROTULO.search(linha)
+        if not m:
+            continue
+        resto = _CODIGO.sub(" ", linha[m.end():]).strip()       # tudo na mesma linha: rotulo, nome e codigo
+        linhas[i] = linha[:m.start()] + ("" if not resto or _e_nome(resto) else " " + resto)
+        nome = bool(resto)
+        for passo in (-1, 1):                                     # codigo antes ou depois; nome colado ao bloco
+            k = i + passo
+            while 0 <= k < len(linhas) and abs(k - i) <= 3:
+                if not linhas[k].strip():
+                    k += passo
+                    continue
+                if _SO_CODIGO.match(linhas[k]):
+                    linhas[k] = ""
+                elif passo == 1 and not nome and _e_nome(linhas[k]) and not _ROTULO.search(linhas[k]):
+                    linhas[k], nome = "", True
+                else:
+                    break
+                k += passo
+    return "\n".join("" if _SO_CODIGO.match(x) else x for x in linhas)
+
+
 def _plano(texto: str) -> str:
     t = _ENVELOPE.sub(" ", texto or "")
     t = "".join(unicodedata.normalize("NFKD", c)[:1] for c in t)

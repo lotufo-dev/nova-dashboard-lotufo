@@ -56,3 +56,34 @@ def test_envelopes_diferentes_e_paginas_a_menos():
     misturado = _carimbar(MONTADO[:2]) + _carimbar(MONTADO[2:], G2)
     assert "envelopes_diferentes" in [a["codigo"] for a in assinatura.conferir(MONTADO, misturado)["avisos"]]
     assert "paginas_a_menos" in [a["codigo"] for a in assinatura.conferir(MONTADO, _carimbar(MONTADO[:2]))["avisos"]]
+
+
+def test_bloco_da_assinatura_sai_e_o_texto_dos_assinados_reais_fica():
+    """Issue #519: o rotulo, o nome e o codigo que a assinatura do DocuSign poe na pagina saem; nos assinados reais das
+    fixtures (carimbo no fim, sem esse bloco no texto) nada muda."""
+    import json
+    import pathlib
+    for rotulo in ("DocuSigned by:", "Assinado por:"):
+        t = f"{rotulo}\nAssinante Exemplo\n4C6B1A2D3E4F4A5B...\nApostilamento nº 001/2025"
+        assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "APOSTILAMENTONO0012025"
+    for t in ("Signed by:\n\nAssinante Exemplo\n\n4c6b1a2d3e4f4a5b...\nApostilamento",   # linha em branco, minuscula
+              "4C6B1A2D3E4F4A5B...\nDocuSigned by:\nApostilamento",                   # codigo antes, sem nome
+              "DocuSigned by: Assinante Exemplo\n4C6B1A2D3E4F4A5B…\nApostilamento"):
+        assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "APOSTILAMENTO"
+    for t in ("4C6B1A2D3E4F4A5B...\nDocuSigned by:\nAssinante Exemplo\nApostilamento",    # codigo, rotulo, nome
+              "DocuSigned by: Assinante Exemplo 4C6B1A2D3E4F4A5B...\nApostilamento"):     # tudo na mesma linha
+        assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "APOSTILAMENTO"
+    # gate Sol da PR #549: linha da carta intercalada entre o rotulo e o codigo nunca sai
+    t = "Assinado por:\nTermo de Apostilamento nº 001/2025/03/02\n4C6B1A2D3E4F4A5B..."
+    assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == "TERMODEAPOSTILAMENTONO001202503 02".replace(" ", "")
+    # gate Sol, rodada 2: pedaco da frase do termo (conjugado ou no plural) entre rotulo e codigo tambem fica
+    for meio in ("está apostilado no", "das competências"):
+        t = f"Assinado por:\n{meio}\n4C6B1A2D3E4F4A5B..."
+        assert assinatura._plano(assinatura.sem_bloco_de_assinatura(t)) == assinatura._plano(meio)
+    # sem o codigo logo abaixo, a linha seguinte e' texto da carta e fica
+    assert assinatura._plano(assinatura.sem_bloco_de_assinatura("Termo de\nAssinado por:\nApostilamento nº 1")) == \
+        "TERMODEAPOSTILAMENTONO1"
+    fix = pathlib.Path(__file__).parent / "fixtures" / "assinatura"
+    for nome in ("cavalaria-ct291.json", "mt388-ct073.json", "orla-ct286.json"):
+        for t in json.loads((fix / nome).read_text(encoding="utf-8"))["assinado"]:
+            assert assinatura.sem_bloco_de_assinatura(t) == t

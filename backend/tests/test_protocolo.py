@@ -232,14 +232,33 @@ def test_pendencias_de_certidao_e_nota(cenario):
 
 # --- parte 2: assinado, previa, envio --------------------------------------------------------------
 
-def _assinar(pdf_montado: bytes, guid="7E965481-0A1B-4C2D-8E9F-0123456789AB") -> bytes:
-    """Assinado de mentira: as mesmas paginas, cada uma com o carimbo do DocuSign como texto a mais."""
+ASSINATURAS = {"DocuSigned by:": "4C6B1A2D3E4F4A5B...", "Assinado por:": "E1F2A3B4C5D64E7F..."}
+
+
+def _assinar(pdf_montado: bytes, guid="7E965481-0A1B-4C2D-8E9F-0123456789AB", assinatura: str | None = None,
+             no_comeco: bool = True) -> bytes:
+    """Assinado de mentira: as mesmas paginas, cada uma com o carimbo do DocuSign como texto a mais. Com `assinatura`
+    (um rotulo de `ASSINATURAS`), a pagina 2 traz tambem o bloco de texto que a assinatura do DocuSign poe ("DocuSigned
+    by:", o nome e o codigo), no comeco do conteudo da pagina (`no_comeco`) ou no fim (issue #519)."""
     r, w = pypdf.PdfReader(io.BytesIO(pdf_montado)), pypdf.PdfWriter()
-    for pagina in r.pages:
+    for i, pagina in enumerate(r.pages):
         f = FPDF(format="A4"); f.add_page(); f.set_font("Helvetica", size=6)
         f.text(5, 5, f"Docusign Envelope ID: {guid}")
-        w.add_page(pagina)
-        w.pages[-1].merge_page(pypdf.PdfReader(io.BytesIO(bytes(f.output()))).pages[0])
+        carimbo = pypdf.PdfReader(io.BytesIO(bytes(f.output()))).pages[0]
+        if assinatura and i == 1:
+            b = FPDF(format="A4"); b.add_page(); b.set_font("Helvetica", size=8)
+            for k, linha in enumerate((assinatura, "Assinante Exemplo", ASSINATURAS[assinatura])):
+                b.text(120, 250 + 4 * k, linha)
+            bloco = pypdf.PdfReader(io.BytesIO(bytes(b.output()))).pages[0]
+            if no_comeco:                      # o bloco antes do texto da pagina na extracao
+                w.add_page(bloco)
+                w.pages[-1].merge_page(pagina)
+            else:
+                w.add_page(pagina)
+                w.pages[-1].merge_page(bloco)
+        else:
+            w.add_page(pagina)
+        w.pages[-1].merge_page(carimbo)
     buf = io.BytesIO(); w.write(buf)
     return buf.getvalue()
 
@@ -535,6 +554,123 @@ def test_termo_quebrado_na_pagina_com_cabecalho_tambem_e_conferido(cenario):
     assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
 
 
+@pytest.mark.parametrize("rotulo", list(ASSINATURAS))
+@pytest.mark.parametrize("no_comeco", [True, False])
+def test_assinatura_do_docusign_na_pagina_2_com_o_termo_partido_nao_recusa(cenario, rotulo, no_comeco):
+    # Issue #519, Aviso 1: o texto da assinatura do DocuSign ("DocuSigned by:"/"Assinado por:", nome e codigo) na
+    # pagina 2, com a frase do termo partida entre as paginas 1 e 2: o assinado certo entra, o do termo velho nao
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    corpo = _corpo_com_o_termo_na_quebra(c, ids, pid)
+    velho = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes(),
+                     assinatura=rotulo, no_comeco=no_comeco)
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    montado = arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes()
+    novo = _assinar(montado, assinatura=rotulo, no_comeco=no_comeco)
+    pagina2 = leitura_pdf.textos_por_pagina_com_limite(novo, 50)[1]
+    assert rotulo in pagina2 and (pagina2.find(rotulo) < pagina2.find("Apostilamento")) == no_comeco
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+    assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
+
+
+def test_emitente_mudando_entre_a_montagem_e_o_anexo_nao_recusa_o_assinado(cenario, monkeypatch):
+    # Issue #519, Sugestao 2: o timbre tirado das paginas e' o da montagem (gravado com o mapa do termo), nao o do
+    # cadastro de agora; o assinado do pacote montado entra mesmo com o emitente trocado no meio
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    corpo = _corpo_com_o_termo_na_quebra(c, ids, pid)
+    velho = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    novo = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
+    gravado = json.loads(protocolo._linha(c, pid)["montado_apostilamentos"])
+    original = carta.emitente
+    monkeypatch.setattr(carta, "emitente", lambda conn, eid: {**original(conn, eid), "razao_social": "CONSTRUTORA "
+                        "BETA LTDA", "endereco": "Rua Nova, 1 - Cuiabá/MT", "contato": "Tel.: (65) 3999-0000"})
+    eid = protocolo._contrato(c, protocolo._linha(c, pid)["contrato_id"])["entidade_id"]
+    assert carta.textos_do_timbre(carta.emitente(c, eid)) != gravado.get("timbre")
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+    assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
+
+
+def test_pacote_sem_timbre_gravado_usa_o_timbre_impresso_no_montado(cenario, monkeypatch):
+    # Gate Sol da PR #549, Aviso 2: pacote montado antes do timbre gravado (sem a chave) e emitente trocado depois; o
+    # timbre sai pelas linhas repetidas no topo e no pe' das paginas do montado
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    corpo = _corpo_com_o_termo_na_quebra(c, ids, pid)
+    velho = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    novo = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
+    mapa = json.loads(protocolo._linha(c, pid)["montado_apostilamentos"])
+    mapa.pop("timbre")
+    c.execute("UPDATE protocolos SET montado_apostilamentos=? WHERE id=?", (json.dumps(mapa), pid))
+    c.commit()
+    original = carta.emitente
+    monkeypatch.setattr(carta, "emitente", lambda conn, eid: {**original(conn, eid), "razao_social": "CONSTRUTORA "
+                        "BETA LTDA", "endereco": "Rua Nova, 1 - Cuiabá/MT", "contato": "Tel.: (65) 3999-0000"})
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+    assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
+
+
+def test_cabecalho_repetido_de_anexo_nao_sai_do_meio_da_frase_do_termo(cenario):
+    # Revisor, rodada 2 da PR #549: pacote antigo (sem o timbre gravado) com anexo que repete "Competência 09/2026" no
+    # cabecalho; a borda sai so' como linha inteira no topo e no pe', nunca de dentro da frase do termo
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    p = {**protocolo._linha(c, pid), "montado_apostilamentos": json.dumps({"cita": True, "apostilamentos": []})}
+    oficio = "Ofício nº 302\nSenhor fiscal,\nO reajuste da Competência 09/2026 está apostilado no Termo nº 1.\nFim"
+    anexo = "Competência 09/2026\nPlanilha\nItem 1\nItem 2\nItem 3\nItem 4\nItem 5\nItem 6\nCompetência 09/2026"
+    plano = protocolo._plano_sem_timbre(c, p, [oficio, anexo, anexo])
+    assert "REAJUSTEDACOMPETENCIA092026ESTAAPOSTILADO" in plano
+    assert plano.count("COMPETENCIA092026") == 1
+
+
+def test_cabecalho_do_termo_repetido_no_anexo_nao_vira_timbre(cenario):
+    # Gate Sol, rodada 2 da PR #549: pacote antigo sem o timbre gravado e sem citar o termo, com anexo que repete
+    # "Termo de Apostilamento" no cabecalho; o assinado anterior que cita o termo na carta continua recusado
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    mapa = json.dumps({"cita": False, "apostilamentos": []})
+    c.execute("UPDATE protocolos SET montado_apostilamentos=? WHERE id=?", (mapa, pid))
+    c.commit()
+    p = protocolo._linha(c, pid)
+    anexo = "Termo de Apostilamento nº 7\nPlanilha\nItem 1\nItem 2\nItem 3\nItem 4\nItem 5\nItem 6\nFim do anexo"
+    montado = ["Termo de Apostilamento nº 7\nOfício nº 302\nSenhor fiscal,\nTexto.\nFim", anexo, anexo]
+    assinado = [montado[0].replace("Texto.", "Termo de Apostilamento nº 7"), anexo, anexo]
+    assert not any("Apostilamento" in x for x in protocolo._bordas_repetidas(montado))
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo._recusar_termo_fora_do_assinado(c, p, montado, assinado)
+
+
+def test_bloco_do_docusign_no_fim_da_carta_nao_empurra_o_rodape_para_fora_da_borda(cenario):
+    # Revisor, rodada 3 da PR #549: pacote antigo (sem o timbre gravado) que cita o termo, com rodape repetido logo
+    # depois da frase; o assinado e' o mesmo pacote com o bloco da assinatura no fim da pagina da carta, e entra
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    aps = [{"medicao_id": 1, "competencia": "09/2026", "chave": "ap", "numero": "1"}]
+    c.execute("UPDATE protocolos SET montado_apostilamentos=? WHERE id=?",
+              (json.dumps({"cita": True, "apostilamentos": aps}), pid))
+    c.commit()
+    p = protocolo._linha(c, pid)
+    rodape = "Rua Antiga, 123 - Cuiabá/MT\nTel.: (65) 3000-0001 contato@exemplo.com.br"
+    carta_ = ("Ofício nº 302\nAo órgão\nSenhor fiscal,\nSegue a medição.\nCom o reajuste.\n"
+              + protocolo.frase_do_apostilamento(aps)
+              + "\n" + rodape)
+    anexo = "Planilha\nItem 1\nItem 2\nItem 3\nItem 4\nItem 5\nItem 6\n" + rodape
+    montado = [carta_, anexo, anexo]
+    assinado = [carta_ + "\nDocuSigned by:\nAssinante Exemplo\n4C6B1A2D3E4F4A5B...", anexo, anexo]
+    protocolo._recusar_termo_fora_do_assinado(c, p, montado, assinado)       # nao recusa
+
+
 def test_competencia_acrescentada_ao_mesmo_termo_tambem_e_conferida(cenario):
     # Critico 2: a correcao acrescenta uma competencia no comeco da lista do mesmo termo (numero igual)
     c, ids = cenario
@@ -625,7 +761,8 @@ def test_mapa_do_pacote_so_compara_quando_o_texto_cita_o_termo(cenario):
     _cartas(c, sem_campo)
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
     protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
-    assert json.loads(protocolo._linha(c, pid)["montado_apostilamentos"]) == {"cita": False, "apostilamentos": []}
+    mapa = json.loads(protocolo._linha(c, pid)["montado_apostilamentos"])
+    assert {k: mapa[k] for k in ("cita", "apostilamentos")} == {"cita": False, "apostilamentos": []} and mapa["timbre"]
     _termo(c, ids["mtpar"])
     assert protocolo.previa_envio(c, [pid])["bloqueio"] is None                     # (D) nada muda no oficio
     _cartas(c, com_campo)                                                             # o Leo poe o campo no texto

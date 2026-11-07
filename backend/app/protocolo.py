@@ -699,7 +699,9 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
                      "situacao='montado', montado_frcs=?, montado_apostilamentos=? WHERE id=?",
                      (editado, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote),
                       # o mapa do que foi de fato renderizado: so' o texto que usa a frase compara depois
-                      json.dumps({"cita": cita, "apostilamentos": aps if cita else []})
+                      # issue #519: com o timbre desta montagem, que a conferencia do assinado tira das paginas
+                      json.dumps({"cita": cita, "apostilamentos": aps if cita else [],
+                                  "timbre": carta.textos_do_timbre(em)})
                       if familia in FAMILIAS_OFICIO_REAJUSTE else None, protocolo_id))
         auditoria.registrar(conn, usuario_id, "protocolo.montar", "protocolo", protocolo_id, None,
                             {"sha256": sha, "paginas": n, "tamanho": len(pdf), "corpo": base})   # issue #448
@@ -1004,16 +1006,50 @@ ASSINADO_SEM_O_TERMO = ("O assinado não traz o termo de apostilamento do pacote
                         "anterior): assine no DocuSign o pacote montado agora e anexe o assinado dele")
 
 
-def _plano_sem_timbre(conn, p: dict, paginas: list[str]) -> str:
+def _linhas_da_borda(t: str) -> tuple[list[str], set[int]]:
+    """As linhas da pagina e os indices das 4 primeiras e 4 ultimas com texto (sem contar o carimbo do DocuSign)."""
+    ls = (t or "").split("\n")
+    com = [i for i, x in enumerate(ls) if x.strip() and not assinatura._ENVELOPE.search(x)]
+    return ls, set(com[:4] + com[-4:])
+
+
+def _bordas_repetidas(montado: list[str]) -> set[str]:
+    """Pacote montado antes do timbre gravado (gate Sol da PR #549): as linhas do topo e do pe' que se repetem em
+    mais de uma pagina do montado sao o papel timbrado impresso na montagem, mesmo que o cadastro tenha mudado."""
+    vistas: dict[str, int] = {}
+    for t in montado:
+        ls, borda = _linhas_da_borda(t)
+        for x in {ls[i].strip() for i in borda}:
+            vistas[x] = vistas.get(x, 0) + 1
+    # linha que fala do termo nunca e' timbre: a contagem do termo e a frase ficam intactas (gate Sol, rodada 2)
+    return {x for x, n in vistas.items()
+            if n > 1 and len(assinatura._plano(x)) >= 8 and "APOSTIL" not in assinatura._plano(x)}
+
+
+def _sem_bordas(t: str, bordas: set[str]) -> str:
+    """Tira as bordas so' como linha inteira no topo e no pe' da pagina, nunca do meio do texto (revisor, rodada 2 da
+    PR #549: "Competência 09/2026" repetido no cabecalho de um anexo nao pode sair da frase do termo)."""
+    ls, borda = _linhas_da_borda(t)
+    return "\n".join("" if i in borda and x.strip() in bordas else x for i, x in enumerate(ls))
+
+
+def _plano_sem_timbre(conn, p: dict, paginas: list[str], montado: list[str] | None = None) -> str:
     """O texto plano da conferencia (sem acento, espaco, pontuacao e carimbo do DocuSign) de todas as paginas juntas,
     sem o cabecalho e o rodape do papel timbrado que o fpdf repete em toda pagina da carta: a frase partida na quebra
-    de pagina volta a ficar inteira (gate Sol, rodada extra de 07/11/2026)."""
-    c = _contrato(conn, p["contrato_id"])
-    em = carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}
-    fixos = sorted({f for x in carta.textos_do_timbre(em) if (f := assinatura._plano(x))}, key=len, reverse=True)
+    de pagina volta a ficar inteira (gate Sol, rodada extra de 07/11/2026). Issue #519: sem o texto da assinatura do
+    DocuSign ("DocuSigned by:", nome e codigo) e com o timbre da montagem (gravado com o mapa do termo): o emitente
+    trocado no cadastro depois de montar nao deixa o timbre velho no meio da frase. Montado antes disso, o de agora."""
+    gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
+    timbre, bordas = (gravado or {}).get("timbre"), set()
+    if timbre is None:
+        c = _contrato(conn, p["contrato_id"])
+        timbre = carta.textos_do_timbre(carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {})
+        bordas = _bordas_repetidas(montado if montado is not None else paginas)
+    fixos = sorted({f for x in timbre if (f := assinatura._plano(x))}, key=len, reverse=True)
     out = []
     for t in paginas:
-        plano = assinatura._plano(t)
+        # o bloco do DocuSign sai antes: a janela do topo e do pe' e' contada sem ele (revisor, rodada 3)
+        plano = assinatura._plano(_sem_bordas(assinatura.sem_bloco_de_assinatura(t), bordas))
         for f in fixos:
             plano = plano.replace(f, "")
         out.append(plano)
@@ -1031,7 +1067,7 @@ def _recusar_termo_fora_do_assinado(conn, p: dict, montado: list[str], assinado:
     if familia not in FAMILIAS_OFICIO_REAJUSTE:
         return
     m_plano = _plano_sem_timbre(conn, p, montado)
-    a_plano = _plano_sem_timbre(conn, p, assinado[:len(montado)])
+    a_plano = _plano_sem_timbre(conn, p, assinado[:len(montado)], montado)
     gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
     frase = assinatura._plano(frase_do_apostilamento(gravado["apostilamentos"])) \
         if gravado and gravado.get("cita") else ""
