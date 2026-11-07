@@ -107,7 +107,9 @@ def _situacao(texto: str, mapa: list[int], m: re.Match) -> str:
     `_plano` ignora (marca combinante solta, antes ou depois, e acento desenhado como glifo, "´", "¨", "˜"); so'
     depois normalizado (NFC, espacos reduzidos) e limpo no fim de pontuacao, separador, controle e da barra "|" do
     OCR ("APROVADA.", "APROVADA |", "APROVADA -", "APROVADA )"). Marca e simbolo ficam: "APROVADA´" nao e' aprovacao."""
-    ini = mapa[m.start(4) - 1] + 1          # logo depois do ultimo caractere do traco e dos espacos que o seguem
+    plano = m.string
+    traco = max(plano.rfind(t, m.start(0), m.start(4)) for t in "-–—")
+    ini = mapa[traco] + 1                   # logo depois do proprio traco: o que vem colado a ele (marca, "´") entra
     fim = mapa[m.end(0)]                    # o "T" do "Tipo" (o `\s*` antes dele ja' foi consumido)
     original = re.sub(r"\s+", " ", unicodedata.normalize("NFC", texto[ini:fim])).strip()
     while original and (original[-1] == "|" or unicodedata.category(original[-1])[0] in "PZC"):

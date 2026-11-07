@@ -122,6 +122,18 @@ def test_marca_solta_ou_acento_desenhado_em_volta_da_situacao_nao_some():
         assert r["ok"] is False, ascii(situacao)
 
 
+def test_marca_ou_acento_desenhado_colado_ao_traco_antes_da_situacao_nao_some():
+    """Revisor e Gate Sol, rodada extra de 03/11: o recorte comecava no ultimo espaco depois do traco, nao no traco;
+    marca combinante colada ao traco ou acento desenhado logo antes da situacao ficavam fora e a capa aprovava."""
+    capa = _txt("capa-texto-aprovada.txt")
+    capa_ocr = _ocr_bom().split("Período: 01/03/2026 a 31/03/2026.\n", 1)[1]
+    for traco in ("-\u0301 ", "-\u0327\t", "- \u00b4", "-\u00b4", "- \u00a8", "- \u02dc", "- \u00b8"):
+        r = leitura_smo.ler(capa.replace("Provisória - APROVADA", "Provisória " + traco + "APROVADA"))
+        assert (r["ok"], r["motivo"]) == (False, "nao-aprovada"), ascii(traco)
+        r = leitura_smo.ler(capa_ocr.replace("Provisória - APROVADA", "Provisória " + traco + "APROVADA"), ocr=True)
+        assert r["ok"] is False, ascii(traco)
+
+
 def test_aprovada_legitima_continua_aprovada():
     capa = _txt("capa-texto-aprovada.txt")
     assert leitura_smo.ler(unicodedata.normalize("NFD", capa))["ok"]       # pagina inteira decomposta
