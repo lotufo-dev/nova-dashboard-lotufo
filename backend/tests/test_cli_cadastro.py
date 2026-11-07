@@ -1281,6 +1281,20 @@ def test_carregar_medicoes_aprovado_diferente_com_boletim_e_conflito_e_nao_grava
     assert conn.execute("SELECT valor_atestado_centavos FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == 1200001
 
 
+def test_carregar_medicoes_correcao_de_competencia_com_aprovado_diferente_do_boletim_e_conflito(tmp_path, monkeypatch,
+                                                                                               capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 3, "2025-07", 1500000, 1200001)
+    _com_boletim(conn, mid)
+    linha = "3;3;execucao;2025-06;;15.000,00;12.500,00;;;;;;boletim 3;;sim"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert ("linha 2: nº 3 execução 2025-06: conflito (o aprovado vem do boletim do órgão: registre um boletim "
+            "novo pela tela)") in saida, saida
+    antes = _foto(conn)
+    assert _gravar(capsys, _csv(tmp_path, [linha]))[0] == 1
+    assert _foto(conn) == antes
+
+
 def test_carregar_medicoes_aprovado_igual_ao_boletim_continua_igual(tmp_path, monkeypatch, capsys):
     conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
     mid = _existente(conn, cid, 3, "2025-06", 1500000, 1200001)
