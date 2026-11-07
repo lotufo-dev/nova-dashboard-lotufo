@@ -198,9 +198,11 @@ até ser resolvido.
 
 **Watchdog e o servidor órfão** (issue #480): o `Stop-ScheduledTask` não mata o uvicorn (incidente de 21/09/2026). Depois de
 parar a tarefa e antes de iniciá-la, o watchdog confere quem escuta a porta da URL de saúde; se for o uvicorn da dashboard
-(`uvicorn` e `app.main` na linha de comando), encerra o processo e registra "servidor orfao na porta <porta> (PID <pid>, ...)
--> encerrando" no `watchdog.log`. Se a porta for de outro processo, ou continuar ocupada depois de encerrar, registra "porta
-<porta> ocupada pelo PID <pid> ... -> nada iniciado", não inicia a tarefa e sai com 1: resolver à mão quem segura a porta.
+(linha de comando com `-m uvicorn --factory app.main:create_app` e `--port <porta>`, como o `rodar_producao.ps1` sobe),
+confere de novo o sentinela e o dono da porta e só então encerra o processo, registrando "servidor orfao na porta <porta>
+(PID <pid>, ...) -> encerrando" no `watchdog.log`. Se a porta for de outro processo, continuar ocupada depois de encerrar,
+mudar de dono no meio ou a consulta da porta falhar, registra o motivo ("porta <porta> ocupada pelo PID <pid> ... -> nada
+iniciado", "FALHA ao consultar a porta ..."), não inicia a tarefa e sai com 1: resolver à mão quem segura a porta.
 
 **Saúde na própria máquina.** Watchdog, deploy e `scripts\saude_local.ps1` falam com `https://localhost:<porta>` aceitando
 **só** o certificado da instalação: comparam o thumbprint do certificado apresentado com o de `<raiz>\segredos\tls\cert.pem`
