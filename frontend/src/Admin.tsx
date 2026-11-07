@@ -33,7 +33,10 @@ interface Usr { id: number; nome: string; email: string; perfil: string; ativo: 
 type Rodada = {
   id: number; disparo: string; estado: string; iniciado_em: string; terminado_em: string | null;
   nfs: number; baixas: number; alocacoes: number; sugestoes: number; recebimentos: number; erro: string | null;
+  // #488: linhas do custo por tarefa e da baixa de estoque; null quando a rodada nao trouxe (falha em custo_erro)
+  custo_tarefas?: number | null; estoque_baixas?: number | null; custo_erro?: string | null;
 };
+const contagem = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("pt-BR"));
 type StatusRm = {
   configurado: boolean; ultima_sincronizacao: string | null; ultimo_erro: string | null;
   em_andamento: boolean; rodadas: Rodada[];
@@ -197,6 +200,7 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                 <th scope="col" className="col-num">NFs</th><th scope="col" className="col-num">Baixas</th>
                 <th scope="col" className="col-num">Alocadas</th><th scope="col" className="col-num">Ambíguas</th>
                 <th scope="col" className="col-num">Recebidas</th>
+                <th scope="col" className="col-num">Custo por tarefa</th><th scope="col" className="col-num">Baixa de estoque</th>
               </tr>
             </thead>
             <tbody>
@@ -208,12 +212,15 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                   <td>
                     <SeloRodada estado={r.estado} />
                     {r.erro && <div className="campo__nota situacao__erro">{r.erro}</div>}
+                    {r.custo_erro && <div className="campo__nota situacao__erro">Custos e estoque não atualizados.</div>}
                   </td>
                   <td className="col-num num">{r.nfs.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.baixas.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.alocacoes.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.sugestoes.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.recebimentos.toLocaleString("pt-BR")}</td>
+                  <td className="col-num num">{contagem(r.custo_tarefas)}</td>
+                  <td className="col-num num">{contagem(r.estoque_baixas)}</td>
                 </tr>
               ))}
             </tbody>
