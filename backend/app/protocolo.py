@@ -243,6 +243,11 @@ def adicionar_peca(conn, usuario_id: int, protocolo_id: int, tipo: str, nome: st
         raise ValueError("Arquivo .zip só entra como documento complementar do envio")
     p = _linha(conn, protocolo_id)
     _editavel(p)
+    if p["etapa"] == "medicao":       # issue #462: a peca que vai no oficio assinado nao se anexa (nem cobra)
+        c = _contrato(conn, p["contrato_id"])
+        familia, regras, _ = _orgao(conn, c)
+        if tipo in tipos_no_oficio(familia, regras, c):
+            raise ValueError(PECA_NO_OFICIO)
     rel, sha = arquivos.gravar_bytes("protocolos", dados, ext)
     with db.mutacao(conn):
         peca_id = conn.execute(
@@ -325,6 +330,22 @@ def _config_pecas(regras: dict, natureza: str | None = None) -> list[dict]:
     return [x for x in out if not natureza or not x.get("naturezas") or natureza in x["naturezas"]]
 
 
+FAMILIAS_NO_OFICIO = ("sinfra",)       # so' a SINFRA manda as pecas dentro do oficio da planilha/carta (#462)
+PECA_NO_OFICIO = "Esta peça vai no ofício assinado"
+
+
+def tipos_no_oficio(familia: str, regras: dict, c: dict) -> set[str]:
+    """Issue #462: tipos de peca que vao dentro do PDF assinado do oficio (nao cobram e nao se anexam). A lista do
+    contrato (`contratos.pecas_no_oficio`, migracao 064; vazia desliga todas) substitui a marca `no_oficio` das
+    pecas do orgao. Fora da SINFRA a marca nao vale (o cadastro a recusa; aqui, por garantia, e' ignorada)."""
+    if familia not in FAMILIAS_NO_OFICIO:
+        return set()
+    do_contrato = c.get("pecas_no_oficio")
+    if do_contrato is not None:
+        return set(json.loads(do_contrato))
+    return {x["tipo"] for x in (regras.get("pecas") or []) if x.get("no_oficio") is True}
+
+
 def _brl(centavos: int) -> str:
     inteiro, cent = divmod(int(centavos), 100)
     return f"{inteiro:,}".replace(",", ".") + f",{cent:02d}"
@@ -338,13 +359,20 @@ def _numeros_nf(docs: list[dict]) -> str:
     return ", ".join(dict.fromkeys(nomes)) or "NF"
 
 
+def _valor_da_nota(m: dict) -> int:
+    """Issue #284 (decisao do Leo de 03/11/2026): a nota sai pelo aprovado do boletim, senao pelo pedido (como
+    notas.py confere a nota); o pedido fica congelado na medicao."""
+    v = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
+    return v or 0
+
+
 def _lista(conn, p: dict, familia: str, regras: dict, ms: list[dict]) -> str:
     """Itens da carta: notas (numero e valor), certidoes, pecas. SES numera; as outras usam i., ii."""
     e = _etapa(familia, p["etapa"])
     itens = []
     docs = _docs_nota(conn, [m["id"] for m in ms])
     if familia == "ses":
-        total = sum(m["valor_protocolado_centavos"] or 0 for m in ms)
+        total = sum(_valor_da_nota(m) for m in ms)
         itens.append(f"Nota Fiscal – R$ {_brl(total)}")
     elif "notas" in e.partes:
         itens.append(f"Nota fiscal de prestação de serviços – {_numeros_nf(docs)}")
@@ -363,7 +391,7 @@ def _lista(conn, p: dict, familia: str, regras: dict, ms: list[dict]) -> str:
     else:                             # como no CT-301: "i. ...;" e o ultimo com ponto final
         linhas = [f"{romanos[k]}. {t}{'.' if k == len(itens) - 1 else ';'}" for k, t in enumerate(itens)]
     if familia == "ses" and len(ms) > 1:           # "Sendo: 41ª Medição – R$ ..." logo abaixo da nota
-        linhas[1:1] = [f"   Sendo: {titulo(m)} – R$ {_brl(m['valor_protocolado_centavos'] or 0)}" for m in ms]
+        linhas[1:1] = [f"   Sendo: {titulo(m)} – R$ {_brl(_valor_da_nota(m))}" for m in ms]
     return "\n".join(linhas)
 
 
@@ -565,8 +593,11 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     presentes = {x["tipo"] for x in _pecas(conn, p["id"])}
     # Na nota (sem carta) as pecas soltas sao opcionais (relatorios assinados): nao cobram as do orgao.
     usa_pecas = "pecas" in e.partes or "planilha" in e.soltos or ("pecas_soltas" in e.soltos and e.carta)
+    # issue #462: na etapa `medicao` (o oficio da planilha/carta) a peca que vai dentro do oficio assinado nao cobra;
+    # nas outras etapas (SES, prefeitura) o pacote e' outro documento e a peca exigida continua cobrando
+    no_oficio = tipos_no_oficio(familia, regras, c) if e.chave == "medicao" else set()
     for cfg in _config_pecas(regras, p["natureza"]):
-        if usa_pecas and cfg["exigida"] and cfg["tipo"] not in presentes:
+        if usa_pecas and cfg["exigida"] and cfg["tipo"] not in presentes and cfg["tipo"] not in no_oficio:
             out.append({"codigo": "peca", "mensagem": f"{cfg['rotulo']}: não anexada"})
     if ("notas" in e.partes or "notas" in e.soltos) and c.get("entidade_id"):
         for falta in faltas_consorcio(conn, c, ms):
@@ -699,9 +730,12 @@ def listar(conn, contrato_id: int) -> dict:
         "ORDER BY numero DESC, tipo", (contrato_id,))]
     ids = [r[0] for r in conn.execute("SELECT id FROM protocolos WHERE contrato_id=? AND situacao<>'descartado' "
                                       "ORDER BY id DESC", (contrato_id,))]
+    no_oficio = tipos_no_oficio(familia, regras, c)
     return {"familia": familia,
             "etapas": [{"chave": e.chave, "rotulo": e.rotulo, "carta": e.carta} for e in FAMILIAS[familia]],
-            "pecas": _config_pecas(regras), "medicoes": [{**m, "titulo": titulo(m)} for m in ms],
+            # no_oficio (issue #462): a marca efetiva (com a excecao do contrato); a tela so' a usa na etapa `medicao`
+            "pecas": [{**x, "no_oficio": x["tipo"] in no_oficio} for x in _config_pecas(regras)],
+            "medicoes": [{**m, "titulo": titulo(m)} for m in ms],
             "protocolos": [detalhe(conn, i) for i in ids]}
 
 

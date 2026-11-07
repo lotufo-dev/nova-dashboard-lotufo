@@ -22,6 +22,10 @@ describe("destino do aviso", () => {
     const nota: Aviso = { ...base, tipo: "nota_divergente", contrato_id: 7, medicao_id: 723, destino: { tela: "contrato", id: 7, aba: "notas" } };
     const d3 = destinoDoAviso(nota)!;
     expect(hrefDe(d3.para, undefined, d3.secao)).toBe("/obras/7/medicoes/723#notas");
+    // #359: o aprovado mudou depois do espelho leva ao espelho da medicao
+    const esp: Aviso = { ...base, tipo: "espelho_desatualizado", contrato_id: 7, medicao_id: 723, destino: { tela: "contrato", id: 7, aba: "espelho" } };
+    const de = destinoDoAviso(esp)!;
+    expect(hrefDe(de.para, undefined, de.secao)).toBe("/obras/7/medicoes/723#espelho");
     // A10: o aviso de reajuste leva ao ciclo da data-base
     const reaj: Aviso = { ...base, tipo: "reajuste_apostilamento", contrato_id: 7, data_base_mes: "2023-01", destino: { tela: "contrato", id: 7, aba: "reajuste" } };
     const d4 = destinoDoAviso(reaj)!;

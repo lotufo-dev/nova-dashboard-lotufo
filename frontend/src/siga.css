@@ -18,6 +18,7 @@
 .sg__tabela td { padding: 12px 12px; height: 44px; border-bottom: 1px solid var(--linha-suave); vertical-align: middle; overflow-wrap: anywhere; }
 .sg__tabela tbody:last-child tr:last-child td { border-bottom: 0; }
 .sg__tabela .col-num { text-align: right; }
+.sg__tabela .selo, .sg__tabela .selo__texto { white-space: normal; overflow: visible; }
 .sg__c-proc { width: 22%; } .sg__c-onde { width: 14%; } .sg__c-quem { width: 12%; } .sg__c-setor { width: 14%; }
 .sg__c-hoje { width: 7%; } .sg__c-ultima { width: 19%; } .sg__c-prot { width: 12%; }
 

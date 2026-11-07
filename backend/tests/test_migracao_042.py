@@ -69,7 +69,8 @@ def _foto(c, colunas):
     return ([tuple(r) for r in c.execute(f"SELECT {cols} FROM medicoes ORDER BY id")],
             [tuple(r) for r in c.execute("SELECT id, medicao_id, valor_centavos, origem, atestado_em, usuario_id, "
                                          "criado_em FROM medicao_atestos ORDER BY id")],
-            [tuple(r) for r in c.execute("SELECT * FROM medicao_protocolos ORDER BY id")],
+            [tuple(r) for r in c.execute("SELECT id, medicao_id, data, numero_oficio, numero_processo, origem, "   # a 054 acrescenta `etapa`
+                                         "criado_em, protocolo_id FROM medicao_protocolos ORDER BY id")],
             [tuple(r) for r in c.execute("SELECT * FROM envio_medicoes")])
 
 

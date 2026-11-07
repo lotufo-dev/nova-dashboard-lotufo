@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import Espelho from "./Espelho";
 import { EtapaCartao, FaixaVendo, Setas } from "./Etapas";
 import type { Usuario } from "./Login";
 import { ir, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
+import { NovaPlanilhaCarta } from "./PlanilhaCarta";
 import { baseDosValores } from "./formato";
 import { Migalhas, VoltarOrigem } from "./Topo";
 import "./etapas.css";
 
-// Medicao que ainda nao existe (#153): a antiga tela "Nova medição" virou a etapa 1 (Espelho) da pagina da medicao.
-// A pagina abre nesta etapa ja' com o formulario; gerar o espelho cria a medicao e a pagina dela abre na etapa 2.
+// Medicao que ainda nao existe (#153): a antiga tela "Nova medição" virou a etapa 1 da pagina da medicao. Desde a
+// issue #289 o formulario da etapa 1 e' a "Nova planilha/carta" (antes, o do espelho): registra-la cria a medicao e a
+// pagina dela abre com o cartao da planilha/carta.
 // As outras etapas aparecem no trilho, mas so' liberam depois.
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
@@ -23,13 +24,18 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
   const numero = /^[1-9][0-9]{0,2}$/.test(busca.numero ?? "") ? busca.numero : "";
   const competencia = /^\d{4}-(0[1-9]|1[0-2])$/.test(busca.competencia ?? "") ? busca.competencia : "";
   const tipo: "projeto" | undefined = busca.tipo === "projeto" ? "projeto" : undefined;
-  const inicial = numero || competencia || tipo ? { numero, competencia, tipo } : undefined;
+  const inicial = numero || competencia
+    ? { numero: numero ? Number(numero) : undefined, competencia: competencia || undefined } : undefined;
   const nome = tipo ? "Nova medição de Projeto" : "Nova medição";
   const podeEditar = usuario.perfil === "engenharia" || usuario.perfil === "admin";
   const [cab, setCab] = useState<Cabecalho | null>(null);
   const [vendo, setVendo] = useState(1);
+  // issue #289: a planilha/carta e' o 1o passo so' na obra que gera a medicao pelo espelho; a outra lanca a mao
+  const [regraAtiva, setRegraAtiva] = useState<boolean | null>(null);
   useEffect(() => {
     api<Cabecalho>(`/api/contratos/${contratoId}/cabecalho`).then(setCab).catch(() => setCab(null));
+    api<{ regra: { situacao: string } | null }>(`/api/contratos/${contratoId}/espelho`)
+      .then(r => setRegraAtiva(r.regra?.situacao === "ativa")).catch(() => setRegraAtiva(false));
   }, [contratoId]);
   const obra = cab?.obra ?? "Obra";
   useEffect(() => { document.title = `${obra} · ${nome} · grupolotufo`; }, [obra, nome]);
@@ -63,9 +69,12 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
               {/* as outras etapas so' tem o selo "Libera depois da etapa N" */}
               {vendo === 1 && (
                 <div className="med-etapa__corpo">
-                  <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={() => {}} abrirForm parte="espelho" inicial={inicial}
-                    aoGerar={id => ir({ tela: "medicao", obra: contratoId, id }, { forcar: true })}
-                    semRegra={<p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}>Lançar a medição à mão</Link></p>} />
+                  {/* issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1); registrada, a
+                      pagina da medicao abre com o cartao dela. Numero, competencia e serie vem da busca da URL (#151) */}
+                  {!podeEditar || regraAtiva === null ? null : regraAtiva
+                    ? <NovaPlanilhaCarta contratoId={contratoId} tipo={tipo ?? "execucao"} inicial={inicial}
+                        aoRegistrar={r => ir({ tela: "medicao", obra: contratoId, id: r.medicao_id }, { forcar: true })} />
+                    : <p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}>Lançar a medição à mão</Link></p>}
                 </div>
               )}
             </EtapaCartao>

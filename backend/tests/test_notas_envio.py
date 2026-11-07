@@ -13,6 +13,9 @@ from tests import test_frc
 from tests.test_frc import _texto, consorcio14, conn, usuario  # noqa: F401  (fixtures do consorcio com FRC)
 from tests.test_protocolo import CARTAS, CINCO, _contrato, _pdf, _textos
 
+# Gera PDF com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois jobs (marcador pdf).
+pytestmark = pytest.mark.pdf
+
 D = datetime.date
 HOJE = D(2026, 9, 16)
 
@@ -1902,3 +1905,32 @@ def test_a_enviar_mostra_se_o_envio_comecado_esta_reservado(api):
     c.execute("UPDATE protocolos SET envio_reservado_em=datetime('now') WHERE id=?", (pid,)); c.commit()
     sinfra, = _por_contrato(cl.get("/api/notas/a-enviar").json(), ids["sinfra"])
     assert sinfra["envio_reservado_em"] is not None
+
+
+# --- issue #360: aguardando pagamento mostra o aprovado, senao o pedido ------------------------------
+
+def _protocolar(c, mid, pedido, aprovado=None, origem="manual"):
+    c.execute("UPDATE medicoes SET estado='protocolada', valor_protocolado_centavos=?, valor_protocolado_origem=?, "
+              "valor_atestado_centavos=? WHERE id=?", (pedido, origem, aprovado, mid))
+    c.commit()
+
+
+def test_aguardando_pagamento_mostra_o_aprovado_senao_o_pedido(api):
+    cl, c, ids = api
+    _protocolar(c, ids["mtpar_exec"], 1234567, aprovado=1200001)       # pedido R$ 12.345,67, aprovado R$ 12.000,01
+    _protocolar(c, ids["mtpar_reaj"], 98765)                           # sem aprovado: o pedido, R$ 987,65
+    ag = {x["medicao_id"]: x["valor_centavos"] for x in cl.get("/api/notas/aguardando-pagamento").json()}
+    assert ag[ids["mtpar_exec"]] == 1200001
+    assert ag[ids["mtpar_reaj"]] == 98765
+
+
+def test_total_do_aguardando_pagamento_bate_com_o_resumo_das_medicoes(svc):
+    c, ids = svc
+    _protocolar(c, ids["mtpar_exec"], 1234567, aprovado=1200001)
+    _protocolar(c, ids["sinfra_exec"], 1234567, aprovado=1111111)
+    _protocolar(c, ids["sinfra_reaj"], 33333)                          # par medicao + reajuste: uma linha no resumo
+    _protocolar(c, ids["vg_exec"], 1000001, origem="espelho")          # pedido do espelho, sem aprovado
+    total = sum(x["valor_centavos"] for x in notas_envio.aguardando_pagamento(c))
+    resumo = medicoes.resumo(c, HOJE)
+    assert total == sum(x["valor_centavos"] for x in resumo["linhas"] if x["situacao"] == "aguardando-pagamento")
+    assert total == 1200001 + 1111111 + 33333 + 1000001

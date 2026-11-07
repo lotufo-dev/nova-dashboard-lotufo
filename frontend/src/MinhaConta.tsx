@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import UltimosAcessos from "./Acessos";
 import { api, apiForm, mensagemDeErro } from "./api";
 import ConfirmarRemocao from "./ConfirmarRemocao";
 import { IconeAlerta, IconeOlho, IconeOlhoFechado } from "./icones";
@@ -29,6 +30,7 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
   const [vendo, setVendo] = useState({ atual: false, nova: false, confirmar: false });
   const [erroSenha, setErroSenha] = useState("");  // erro que vem do servidor
   const [senhaTrocada, setSenhaTrocada] = useState("");
+  const [verAcessos, setVerAcessos] = useState(false);
 
   const carregar = () => api<Status>("/api/correio/status").then(s => { setSt(s); setErro(""); }).catch(e => setErro(mensagemDeErro(e)));
   useEffect(() => { if (podeEditar) carregar(); return () => window.clearInterval(timer.current); }, [podeEditar]);
@@ -158,6 +160,11 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
         <div className="cartao__corpo">
           {usuario.email && <p>E-mail: <strong>{usuario.email}</strong></p>}
           <p>Perfil: <strong>{rotuloPerfil(usuario.perfil)}</strong></p>
+          {/* #418: os proprios ultimos acessos, lidos so' quando a pessoa abre */}
+          <details className="detalhes" onToggle={e => setVerAcessos(e.currentTarget.open)}>
+            <summary>Últimos acessos</summary>
+            {verAcessos && <UltimosAcessos url="/api/auth/acessos" rotulo="Seus últimos acessos" />}
+          </details>
         </div>
       </section>
       <section className="cartao" aria-labelledby="t-senha">

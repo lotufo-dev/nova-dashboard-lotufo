@@ -45,6 +45,23 @@ describe("Ofício", () => {
     expect(JSON.parse(opcoes.body).justificativa).toBe("memorial segue amanhã");
   });
 
+  // issue #272: a previsão de reajuste se confere no pleito de reajuste em aberto; no de prazo e no enviado, não
+  it("só o pleito de reajuste em aberto oferece a planilha de previsão", () => {
+    const reajuste: Pleito = { ...PLEITO, tipo: "reajuste", rotulo: "Pleito de reajuste", data_base_mes: "2024-06", ciclo: 2026 };
+    const { rerender } = render(<CartaoPleito p={reajuste} podeEditar aoMudar={() => {}} />);
+    expect(screen.getByLabelText("Anexar planilha de previsão")).toBeTruthy();
+    rerender(<CartaoPleito p={PLEITO} podeEditar aoMudar={() => {}} />);
+    expect(screen.queryByLabelText("Anexar planilha de previsão")).toBeNull();
+    rerender(<CartaoPleito p={reajuste} podeEditar={false} aoMudar={() => {}} />);
+    expect(screen.queryByLabelText("Anexar planilha de previsão")).toBeNull();
+    // a reiteracao nao traz cronograma (#277): a previsao e' a do pleito reiterado; a reemissao do cronograma traz
+    const ligado = { reemite_pleito_id: 3, anterior: { id: 3, numero_oficio: "122", situacao: "enviado", enviado_em: "2026-07-01", reemissao: null } };
+    rerender(<CartaoPleito p={{ ...reajuste, ...ligado, reemissao: "reiteracao" }} podeEditar aoMudar={() => {}} />);
+    expect(screen.queryByLabelText("Anexar planilha de previsão")).toBeNull();
+    rerender(<CartaoPleito p={{ ...reajuste, ...ligado, reemissao: "cronograma" }} podeEditar aoMudar={() => {}} />);
+    expect(screen.getByLabelText("Anexar planilha de previsão")).toBeTruthy();
+  });
+
   // issue #27: carta editada pede confirmação; depois de enviada ou descartada, a guarda solta
   it("carta editada pede confirmação ao sair; ofício enviado ou descartado não prende a tela", () => {
     window.history.replaceState(null, "", "/obras/1/prazos");
@@ -60,5 +77,61 @@ describe("Ofício", () => {
     expect(confirmar).toHaveBeenCalledTimes(1);
     expect(window.location.pathname).toBe("/avisos");
     vi.restoreAllMocks();
+  });
+
+  // issue #293: a curva S gerada pelo servidor tem linha propria nos anexos e nao oferece Remover
+  it("a curva S do pedido de prazo aparece nos anexos sem Remover; o anexo arrastado continua removível", () => {
+    const comCurva: Pleito = { ...PLEITO, situacao: "rascunho", anexos: [
+      { id: 7, tipo: "outro", nome: "Curva S.xlsx", tamanho: 6000, gerado: true },
+      { id: 8, tipo: "outro", nome: "fotos.pdf", tamanho: 900, gerado: false }] };
+    render(<CartaoPleito p={comCurva} podeEditar aoMudar={() => {}} />);
+    expect(screen.getByRole("rowheader", { name: /Curva S\s*Curva S\.xlsx/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remover Curva S.xlsx" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remover fotos.pdf" })).toBeTruthy();
+  });
+
+  // issue #447: a pendencia da curva S aparece na previa antes da justificativa, e "Atualizar curva S" a troca
+  it("a prévia lista as pendências antes de pedir a justificativa", async () => {
+    const curva = { codigo: "curva_s", mensagem: "A curva S mudou desde a carta montada: atualize a curva S" };
+    api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/pleitos/4/previa"
+      ? { ...PREVIA, pendencias: [curva] } : {}));
+    render(<CartaoPleito p={PLEITO} podeEditar aoMudar={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prévia do e-mail" }));
+    const previa = await screen.findByLabelText("Prévia do e-mail");
+    expect(previa.textContent).toContain("A curva S mudou desde a carta montada");
+    // so' a curva: a justificativa nao a libera, entao o campo nao aparece e o Enviar nao chama o servidor
+    expect(screen.queryByLabelText(/Justificativa/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("A curva S mudou desde a carta montada");
+    expect(api.mock.calls.some(c => c[0] === "/api/pleitos/4/enviar")).toBe(false);
+  });
+
+  it("com outra pendência junto, a lista vem antes do campo de justificativa", async () => {
+    const pend = [{ codigo: "anexo", mensagem: "Falta o memorial" },
+      { codigo: "curva_s", mensagem: "Curva S não anexada: atualize a curva S" }];
+    api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/pleitos/4/previa"
+      ? { ...PREVIA, pendencias: pend } : {}));
+    render(<CartaoPleito p={PLEITO} podeEditar aoMudar={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prévia do e-mail" }));
+    const previa = await screen.findByLabelText("Prévia do e-mail");
+    const item = Array.from(previa.querySelectorAll(".pendencias li")).find(li => li.textContent?.includes("Curva S"))!;
+    const campo = screen.getByLabelText(/Justificativa/);
+    expect(item.compareDocumentPosition(campo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("com a curva S fora dos dados de agora, Atualizar curva S chama o servidor e só aparece nessa pendência", async () => {
+    api.mockResolvedValue({});
+    const aoMudar = vi.fn();
+    const pendente: Pleito = { ...PLEITO, pendencias: [{ codigo: "curva_s", mensagem: "Curva S não anexada: atualize a curva S" }] };
+    const { rerender } = render(<CartaoPleito p={pendente} podeEditar aoMudar={aoMudar} />);
+    expect(screen.getByText("Curva S não anexada: atualize a curva S")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Atualizar curva S" }));
+    await waitFor(() => expect(aoMudar).toHaveBeenCalled());
+    expect(api).toHaveBeenCalledWith("/api/pleitos/4/curva-s", { method: "POST" });
+    expect(api.mock.calls.some(c => String(c[0]).endsWith("/montar"))).toBe(false);
+    rerender(<CartaoPleito p={PLEITO} podeEditar aoMudar={aoMudar} />);
+    expect(screen.queryByRole("button", { name: "Atualizar curva S" })).toBeNull();
+    rerender(<CartaoPleito p={pendente} podeEditar={false} aoMudar={aoMudar} />);
+    expect(screen.queryByRole("button", { name: "Atualizar curva S" })).toBeNull();
   });
 });

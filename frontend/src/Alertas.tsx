@@ -41,6 +41,8 @@ export function destinoDoAviso(a: Aviso): { para: Rota; secao?: string; busca?: 
     ? { para: { tela: "documentos-empresa", id: a.entidade_id, aba: a.tipo === "regularidade_mes" ? "regularidade" : (a.tipo === "garantia_vencendo" || a.tipo === "garantia_aquem_execucao") ? "garantia" : undefined } }
     : { para: { tela: "documentos" } };
   if (d.aba === "notas" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "notas" };
+  // #359: o aprovado mudou depois do espelho: o espelho da medicao, para gerar de novo
+  if (d.aba === "espelho" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "espelho" };
   if (d.aba === "reajuste" && a.data_base_mes) return { para: { tela: "obra", id: d.id, aba: "reajuste" }, secao: `db-${a.data_base_mes}` };
   const aba = (ABAS_OBRA.includes(d.aba) ? d.aba : "medicoes") as AbaObra;
   // na aba Medicoes, as medicoes em andamento, nao o resumo do topo

@@ -5,7 +5,7 @@ import ErroCampo from "./ErroCampo";
 import { api } from "./api";
 import { IconeAlerta } from "./icones";
 import { Link } from "./Link";
-import { DO_ESPELHO, EXCECOES, type Metade } from "./medicao";
+import { DA_PLANILHA, DO_ESPELHO, EXCECOES, type Metade } from "./medicao";
 import type { Medicao } from "./Medicoes";
 import Selo from "./Selo";
 
@@ -30,8 +30,11 @@ export function brlCampo(centavos: number | null): string {
 export function valorEditavel(m: Medicao, campo: "protocolado" | "atestado", podeEditar: boolean): boolean {
   return podeEditar && !EXCECOES.includes(m.estado)
     && !(campo === "protocolado" && DO_ESPELHO.includes(m.estado))
+    && !(campo === "protocolado" && DA_PLANILHA.includes(m.estado))
     && !(campo === "protocolado" && m.valor_protocolado_origem === "espelho")
-    && !(campo === "protocolado" && m.congelada === 1 && m.valor_protocolado_centavos !== null);
+    && !(campo === "protocolado" && m.congelada === 1 && m.valor_protocolado_centavos !== null)
+    // #284: com boletim do orgao registrado, o aprovado so' muda por boletim novo (o servidor recusa a edicao)
+    && !(campo === "atestado" && (m.boletins ?? []).some(b => b.tem_arquivo));
 }
 
 // `erro`: a recusa do servidor aparece DENTRO do formulario, perto de onde se agiu (a pagina da medicao e'

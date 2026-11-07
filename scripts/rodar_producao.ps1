@@ -1,8 +1,12 @@
 ﻿# Sobe o Dashboard em produção, servindo também o build React.
-# Padrão: HTTPS na porta 8443 (pré-requisito: scripts\gerar_certificado.ps1).
-# -SemTls: HTTP na porta 80 (http://<servidor>), sem certificado a instalar nas
-# máquinas da rede — decisão do Leonardo em 2026-09-02; a senha trafega em claro
-# dentro da rede interna. Pré-requisito comum: `npm run build` em frontend\.
+# Padrão: HTTPS na porta 8443, com o certificado em <Raiz>\segredos\tls (cert.pem e
+# chave.pem, fora do clone; pré-requisito: scripts\gerar_certificado.ps1 -Raiz <Raiz>).
+# Produção em HTTPS desde a decisão de 2026-11-05 (issue #425): a senha não passa em
+# claro pela rede e o cookie de sessão sai com "Secure".
+# -SemTls: HTTP na porta 80 (http://<servidor>), sem certificado (a decisão anterior,
+# de 2026-09-02); fica para voltar atrás no corte. -Porta troca a porta (ex.: 8080 na VM
+# em que a 80 é do IIS); sem ela vale a padrão de cada modo (80 em HTTP, 8443 em HTTPS).
+# Pré-requisito comum: `npm run build` em frontend\.
 #
 # Árvore de produção SEPARADA do repositório (parecer de 2026-09-01): banco, snapshots
 # e logs ficam em -Raiz (padrão C:\DashboardLotufo), nunca em backend\dados\ — essa
@@ -13,6 +17,9 @@ param(
     [string]$Raiz = "C:\DashboardLotufo",
     [string]$BackupExterno = "",
     [switch]$SemTls,
+    # Porta do servidor. 0 = padrao do modo: 80 com -SemTls, 8443 com TLS.
+    [ValidateRange(0, 65535)]
+    [int]$Porta = 0,
     # TOTVS RM (fase 5, leitura). Os tres juntos ligam a sincronizacao horaria; sem eles
     # o servidor sobe com o RM desligado. A senha fica num ARQUIVO de uma linha dentro
     # de $Raiz\segredos (ACL endurecida abaixo), nunca em variavel da tarefa.
@@ -41,7 +48,8 @@ $ErrorActionPreference = "Stop"
 
 $repo = Split-Path -Parent $PSScriptRoot
 $backend = Join-Path $repo "backend"
-$certs = Join-Path $repo "certs"
+# Certificado do HTTPS fora do clone (issue #425): o deploy troca o clone, o certificado fica com os segredos.
+$certs = Join-Path $Raiz "segredos\tls"
 
 # Chaves de desenvolvimento NUNCA valem em produção: DASH_DEV tira a flag "secure"
 # do cookie de sessão, DASH_SEM_JOBS desliga o backup horário, DASH_SEM_FRONTEND
@@ -53,6 +61,9 @@ foreach ($chave in "DASH_DEV", "DASH_SEM_JOBS", "DASH_SEM_FRONTEND", "DASH_DIST_
     Remove-Item -Path ("Env:" + $chave) -ErrorAction SilentlyContinue
 }
 if ($SemTls) { $env:DASH_SEM_TLS = "1" }
+if ($Porta -eq 0) {
+    if ($SemTls) { $Porta = 80 } else { $Porta = 8443 }
+}
 
 # Falhar alto se não houver build: sem isto o servidor sobe "funcionando", só que
 # sem interface nenhuma — a "/" devolve 404 e ninguém entende por quê.
@@ -75,6 +86,9 @@ $env:DASH_LOG_DIR = $logs
 # a skill deploy o atualiza com `git pull --ff-only` antes do `cadastro aplicar`). Sem esta variavel o
 # `app.cli cadastro` leria o cadastro-exemplo/ ficticio.
 $env:DASH_CADASTRO_DIR = Join-Path $Raiz "cadastro"
+# Instalacao assinada (issue #417): o arquivo que o servidor confere na subida, sempre o desta raiz. Definir aqui
+# sobrescreve uma DASH_INSTALACAO_ARQUIVO herdada do ambiente, que apontaria para outro arquivo e subiria em modo copia.
+$env:DASH_INSTALACAO_ARQUIVO = Join-Path $Raiz "segredos\instalacao.json"
 foreach ($chave in "DASH_RM_URL", "DASH_RM_USUARIO", "DASH_RM_SENHA", "DASH_RM_SENHA_ARQUIVO", "DASH_RM_SIMULADOR", "DASH_RM_HTTP_INSEGURO") {
     Remove-Item -Path "Env:$chave" -ErrorAction SilentlyContinue
 }
@@ -202,7 +216,18 @@ foreach ($pasta in $dados, $backups, $logs) {
 # A chave privada do TLS entra na mesma conferência: quem a lê passa a poder se fazer
 # passar pelo servidor. O cert.pem é público, mas vai junto — trocá-lo é fraude igual.
 $arquivos = @($env:DASH_DB_PATH, ($env:DASH_DB_PATH + "-wal"), ($env:DASH_DB_PATH + "-shm"))
-if (-not $SemTls) { $arquivos += (Join-Path $certs "chave.pem"), (Join-Path $certs "cert.pem") }
+if (-not $SemTls) {
+    # Sem o par o uvicorn morre na subida e a tarefa reinicia em laço: parar alto, dizendo o que falta.
+    foreach ($pem in (Join-Path $certs "chave.pem"), (Join-Path $certs "cert.pem")) {
+        if (-not (Test-Path -LiteralPath $pem)) {
+            Write-Host "ERRO: certificado do HTTPS nao encontrado: $pem" -ForegroundColor Red
+            Write-Host "Rode scripts\gerar_certificado.ps1 -Raiz $Raiz (ou suba com -SemTls). Ver docs\runbook.md (HTTP ou HTTPS)." -ForegroundColor Red
+            exit 1
+        }
+    }
+    Assert-AclSomenteSistemaEAdmins -Caminho $certs
+    $arquivos += (Join-Path $certs "chave.pem"), (Join-Path $certs "cert.pem")
+}
 foreach ($arquivo in $arquivos) {
     if (Test-Path -LiteralPath $arquivo) {
         Assert-AclSomenteSistemaEAdmins -Caminho $arquivo
@@ -215,9 +240,13 @@ foreach ($arquivo in $arquivos) {
 Set-Location $backend
 $python = Join-Path $backend ".venv\Scripts\python.exe"
 if ($SemTls) {
-    & $python -m uvicorn --factory app.main:create_app --no-proxy-headers --host 0.0.0.0 --port 80
+    & $python -m uvicorn --factory app.main:create_app --no-proxy-headers --host 0.0.0.0 --port $Porta
 } else {
     & $python -m uvicorn --factory app.main:create_app --no-proxy-headers `
-        --host 0.0.0.0 --port 8443 `
+        --host 0.0.0.0 --port $Porta `
         --ssl-keyfile (Join-Path $certs "chave.pem") --ssl-certfile (Join-Path $certs "cert.pem")
 }
+# O código de saída do uvicorn NÃO é repassado à tarefa, de propósito (revisor da PR #476): com saída diferente de 0
+# o reinício automático da tarefa (RestartCount, 3× a cada 1 min) poderia passar a valer, e ele não respeita o
+# watchdog.pause: no rollback do deploy subiria no meio do checkout e do build. O reinício da produção caída é do
+# watchdog, que respeita o sentinela. A queda do uvicorn fica no dashboard.log.

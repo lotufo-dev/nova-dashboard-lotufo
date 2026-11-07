@@ -89,13 +89,25 @@ def mudar_estado(conn, usuario_id: int, contrato_id: int, novo: str, data: str, 
 def vigente(conn: sqlite3.Connection, contrato_id: int) -> dict:
     c = dict(conn.execute("SELECT * FROM contratos WHERE id=?", (contrato_id,)).fetchone())
     valor = c["valor_original_centavos"]
+    reajuste = 0      # #262: aditivo de valor de natureza reajuste (SES) -- no vigente, fora do saldo
     vig_fim, exe_fim = c["vigencia_fim"], c["execucao_fim"]
-    for a in conn.execute("""SELECT * FROM aditivos WHERE contrato_id=? AND status='assinado'
-                             ORDER BY data_assinatura, id""", (contrato_id,)):
-        valor += a["delta_valor_centavos"]
+    from app.reajuste import aditivo_de_reajuste   # import local: reajuste -> avisos -> documentos -> contratos
+    # issue #410 (comentario da PR #433): o aditivo de reajuste corrigido por outro aditivo de reajuste (`corrige_chave`,
+    # migracao 059) e' substituido pela correcao, como no motor do reajuste: o valor dele sai do vigente; as datas ficam
+    # o criterio e' o do motor: o corrigido e' aditivo de reajuste que deixou de valer (`aditivo_de_reajuste`)
+    for a in conn.execute(f"""SELECT a.*, ({aditivo_de_reajuste('a', com_corrigido=True)}
+                                  AND NOT ({aditivo_de_reajuste('a')})) AS corrigido
+                              FROM aditivos a WHERE a.contrato_id=? AND a.status='assinado'
+                              ORDER BY a.data_assinatura, a.id""", (contrato_id,)):
+        if not a["corrigido"]:
+            valor += a["delta_valor_centavos"]
+            if a["natureza"] == "reajuste":
+                reajuste += a["delta_valor_centavos"]
         vig_fim = a["nova_vigencia_fim"] or vig_fim
         exe_fim = a["nova_execucao_fim"] or exe_fim
     return {**c, "entidade_id": entidade_de(c), "valor_vigente_centavos": valor,
+            # a base do saldo: o vigente a precos iniciais (o medido de execucao e' a precos iniciais)
+            "valor_vigente_execucao_centavos": valor - reajuste, "valor_reajuste_centavos": reajuste,
             "cota_vigente_centavos": cota(valor, c["percentual_direito_bp"]),
             "vigencia_fim_vigente": vig_fim, "execucao_fim_vigente": exe_fim}
 
@@ -176,3 +188,13 @@ def cadastro_da_obra(conn: sqlite3.Connection, contrato_id: int) -> dict:
                                "nova_execucao_fim, nova_vigencia_fim, status FROM aditivos WHERE contrato_id=? "
                                "ORDER BY data_assinatura, id"),
             "instrumentos": instrumentos}
+
+
+def custo_grupos(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
+    """Issue #489: grupos de custo da obra (secao `custo:` do cadastro), na ordem do yaml. Sem cadastro, lista vazia."""
+    return [{"ordem": r["ordem"], "nome": r["nome"], "tarefas": json.loads(r["tarefas"]),
+             "itens_planilha": json.loads(r["itens_planilha"]),
+             "item_chave": {"codigo": r["item_chave_codigo"], "unidade": r["item_chave_unidade"]}
+             if r["item_chave_codigo"] else None}
+            for r in conn.execute("SELECT ordem, nome, tarefas, itens_planilha, item_chave_codigo, item_chave_unidade "
+                                  "FROM custo_grupos WHERE contrato_id=? ORDER BY ordem, id", (contrato_id,))]

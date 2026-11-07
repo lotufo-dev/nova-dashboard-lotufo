@@ -6,7 +6,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from app import auth, cadastro_aplicar, cadastro_arquivos, carga_medicoes, conciliacao, db, documentos, legado
+from app import (auth, cadastro_aplicar, cadastro_arquivos, carga_medicoes, conciliacao, correcao_medicoes, db,
+                 documentos, instalacao, legado, medicao_grupos)
+from app.dinheiro import format_brl
 
 REPOSITORIO = Path(__file__).resolve().parent.parent.parent
 EXEMPLO = REPOSITORIO / "cadastro-exemplo"
@@ -66,6 +68,46 @@ def _documentos(args) -> int:
     return 0
 
 
+def _medicoes_planilhas(args) -> int:
+    """`medicoes planilhas <instrumento> <pasta> [--usuario] [--ensaio]`: o medido por grupo das medicoes anteriores
+    ao fluxo da planilha/carta (issue #490), um xlsx por medicao numa pasta LOCAL, o nº da medicao no nome do
+    arquivo ("15ª"). O sistema nao le SharePoint: quem roda copia os arquivos para a pasta antes."""
+    pasta = Path(args.pasta)
+    if not pasta.is_dir():
+        print(f"Pasta não encontrada: {pasta}")
+        return 1
+    conn = db.get_conn()
+    try:
+        db.migrate(conn)
+        uid = None
+        if args.usuario:
+            u = conn.execute("SELECT id FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+            if u is None:
+                print(f"Usuário não encontrado ou inativo: {args.usuario}")
+                return 1
+            uid = u["id"]
+        c = conn.execute("SELECT id FROM contratos WHERE numero_instrumento=?", (args.instrumento,)).fetchone()
+        if c is None:
+            print(f"Contrato não encontrado: {args.instrumento}")
+            return 1
+        linhas = medicao_grupos.carregar_pasta(conn, uid, c["id"], pasta, ensaio=args.ensaio)
+    finally:
+        conn.close()
+    print("ENSAIO (nada foi gravado)" if args.ensaio else "APLICADO")
+    rotulos = {"lida": "gravada", "repetida": "já lida antes", "recusada": "recusada", "pulado": "pulado"}
+    for x in linhas:
+        partes = [x["medicao"] or "sem medição"]
+        if x["total_centavos"] is not None:
+            partes.append(f"lido {format_brl(x['total_centavos'])}")
+        if x["diferenca_centavos"] is not None:
+            partes.append(f"pedido {format_brl(x['pedido_centavos'])}, diferença {format_brl(x['diferenca_centavos'])}")
+        situacao = rotulos[x["situacao"]] + (f": {x['motivo']}" if x["motivo"] else "")
+        print(f"  {x['arquivo']}: {'; '.join(partes)} -> {situacao}")
+    contagem = {k: sum(1 for x in linhas if x["situacao"] == k) for k in rotulos}
+    print("  " + ", ".join(f"{rotulos[k]}: {v}" for k, v in contagem.items()))
+    return 0
+
+
 def _conta(args) -> int:
     """`desbloquear <email>` e `redefinir-senha <email>` (A-05, 10/10/2026): a saida para quando o unico
     administrador se tranca e nao ha ninguem para usar a tela. Auditoria sem autor (usuario_id nulo)."""
@@ -102,7 +144,7 @@ def _commit(raiz: Path) -> str | None:
 def _relatorio(rel: dict) -> None:
     print("ENSAIO (nada foi gravado)" if rel["ensaio"] else "APLICADO")
     for nome in ("orgaos", "entidades", "contratos", "instrumentos", "pleitos", "cronograma", "geral", "espelho",
-                 "frc"):
+                 "frc", "custo"):
         r = rel[nome]
         print(f"  {nome}: {len(r['criados'])} criados, {len(r['alterados'])} alterados, {r['iguais']} iguais")
         for rotulo in r["criados"]:
@@ -176,7 +218,12 @@ def _relatorio_carga(rel: dict) -> None:
             rotulo += f" {li['competencia']}"
         print(f"  {rotulo}: {li['categoria']}" + (f" ({li['detalhe']})" if li["detalhe"] else "")
               + (f" -> {li['acao']}" if li.get("acao") else ""))
+        for aviso in li.get("avisos", []):
+            print(f"    AVISO: {aviso}")
     print("Total: " + ", ".join(f"{c} {n}" for c, n in rel["totais"].items()))
+    a = rel["avisos_nf"]
+    if a["janela"] or a["nao_encontrada"]:
+        print(f"Avisos de NF: {a['janela']} linhas sem NF por janela, {a['nao_encontrada']} com NF não encontrada")
 
 
 def _gravar_medicoes(args, caminho: Path) -> int:
@@ -217,9 +264,71 @@ def _gravar_medicoes(args, caminho: Path) -> int:
     return 0
 
 
+def _corrigir_medicoes(args) -> int:
+    """`cadastro corrigir-medicoes <arquivo.yaml> [--ensaio] --usuario <e-mail>`: corrige medições existentes
+    (cancelar, reabrir, trocar tipo, ligar/desligar NF, protocolar, estado), numa transação só. O ensaio executa
+    tudo e desfaz no fim."""
+    if not args.arquivo:
+        print("`cadastro corrigir-medicoes` exige o arquivo .yaml com as operações")
+        return 1
+    caminho = Path(args.arquivo)
+    if not caminho.is_file():
+        print(f"Arquivo não encontrado: {caminho}")
+        return 1
+    if not args.usuario:
+        print("`cadastro corrigir-medicoes` exige --usuario (e-mail de quem aplica)")
+        return 1
+    try:
+        operacoes = correcao_medicoes.ler(caminho)
+    except correcao_medicoes.ArquivoInvalido as e:
+        print(f"Arquivo recusado, nada foi lido: {e}")
+        return 1
+    conn = db.get_conn()
+    try:
+        if not args.ensaio:
+            db.migrate(conn)
+        u = conn.execute("SELECT id FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+        if u is None:
+            print(f"Usuário não encontrado ou inativo: {args.usuario}")
+            return 1
+        try:
+            rel = correcao_medicoes.executar(conn, u["id"], operacoes, ensaio=args.ensaio)
+        except correcao_medicoes.CorrecaoRecusada as e:
+            print(f"Recusado, nada foi gravado: {e}")
+            _relatorio_correcao(e.relatorio)
+            return 1
+        except sqlite3.OperationalError as e:
+            print("Recusado, nada foi gravado: o banco está ocupado por outra gravação; rode de novo em instantes"
+                  if "locked" in str(e) or "busy" in str(e) else f"Banco ilegível, nada foi gravado: {db.db_path()}")
+            return 1
+        except sqlite3.DatabaseError:
+            print(f"Banco ilegível, nada foi gravado: {db.db_path()}")
+            return 1
+    finally:
+        conn.close()
+    print(f"ENSAIO (nada foi gravado): {caminho.name}" if rel["ensaio"] else f"GRAVADO: {caminho.name}")
+    _relatorio_correcao(rel)
+    return 1 if rel["erros"] else 0
+
+
+def _relatorio_correcao(rel: dict) -> None:
+    for i in rel["itens"]:
+        rotulo = f"  {i['n']}. {i['operacao'] or '?'}" + (f" {i['alvo']}" if i["alvo"] else "")
+        if i["situacao"] == "erro":
+            print(f"{rotulo}: ERRO: {i['erro']}")
+            continue
+        estado = f" [{i['antes']} → {i['depois']}]" if i["antes"] and i["antes"] != i["depois"] else ""
+        print(f"{rotulo}: {i['situacao']}{estado}")
+        for d in i["detalhes"]:
+            print(f"     {d}")
+    print(f"Total: feito {rel['feitos']}, já feito {rel['ja_feitos']}, erro {rel['erros']}")
+
+
 def _cadastro(args) -> int:
     if args.acao == "carregar-medicoes":
         return _carregar_medicoes(args)
+    if args.acao == "corrigir-medicoes":
+        return _corrigir_medicoes(args)
     if args.arquivo:
         print(f"`cadastro {args.acao}` não recebe arquivo (use `cadastro carregar-medicoes {args.arquivo} --ensaio`)")
         return 1
@@ -297,6 +406,9 @@ def _conciliacao(args) -> int:
         return 0
     antigas = None
     if args.acao == "antiga":
+        if not instalacao.ligada():        # issue #417: a copia nao fala com o RM
+            print(instalacao.MSG_RM)
+            return 1
         from app import rm
         cliente = rm.de_ambiente()
         if cliente is None:
@@ -323,6 +435,116 @@ def _conciliacao(args) -> int:
     return 0
 
 
+def _instalacao(args) -> int:
+    """`instalacao gerar-chave --saida <pasta>` e `instalacao assinar --chave <privada> --maquina <nome> --saida
+    <arquivo>` (issue #417): rodam no Mac do dono. A chave privada nunca vai ao servidor nem ao repositório; o servidor
+    recebe só o arquivo assinado (runbook, "Instalação assinada"). `instalacao verificar [--arquivo <arquivo>]` roda no
+    servidor (o deploy chama)."""
+    if args.acao == "verificar":
+        # Issue #417: o deploy roda isto com o codigo NOVO, depois do build e antes de parar a producao; sem
+        # "autorizada" ele para ali, antes de migrar o banco. Sem o atalho do dev e sem caminho nem maquina na saida.
+        r = instalacao.conferir_caminho(Path(args.arquivo) if args.arquivo else instalacao.caminho_arquivo())
+        if r["instalacao"] == instalacao.AUTORIZADA:
+            print("Instalação autorizada para esta máquina.")
+            return 0
+        print(f"Instalação NÃO autorizada (motivo: {r['motivo']}).")
+        return 1
+    if not args.saida:
+        print(f"`instalacao {args.acao}` exige --saida")
+        return 1
+    if args.acao == "gerar-chave":
+        try:
+            privada, publica = instalacao.gerar_chave(Path(args.saida))
+        except FileExistsError as e:
+            print(f"Recusado, nada foi gravado: já existe {e.args[0]}")
+            return 1
+        print(f"Chave privada: {privada} (só sua: guarde uma cópia cifrada fora desta máquina; nunca no servidor "
+              "nem no repositório)")
+        print(f"Chave pública: {publica}")
+        print(publica.read_text(encoding="ascii"), end="")
+        return 0
+    if not args.chave or not args.maquina:
+        print("`instalacao assinar` exige --chave <chave privada> e --maquina <nome da máquina>")
+        return 1
+    caminho = Path(args.chave)
+    if not caminho.is_file():
+        print(f"Chave não encontrada: {caminho}")
+        return 1
+    try:
+        try:
+            chave = instalacao.ler_chave_privada(caminho)
+        except TypeError:           # chave cifrada: pede a senha sem eco
+            chave = instalacao.ler_chave_privada(caminho, getpass.getpass("Senha da chave: ").encode("utf-8"))
+    except (ValueError, TypeError):
+        print(f"Recusado, nada foi gravado: {caminho} não é uma chave privada Ed25519 (ou a senha não confere)")
+        return 1
+    if not instalacao.e_a_chave_embutida(chave):
+        print("Recusado, nada foi gravado: esta chave não é a que o código confere (app/instalacao.py); o servidor "
+              "recusaria o arquivo (motivo assinatura).")
+        return 1
+    saida = Path(args.saida)
+    if saida.exists():          # nunca por cima de outro arquivo (a propria chave, por engano)
+        print(f"Recusado, nada foi gravado: já existe {saida}")
+        return 1
+    try:
+        conteudo = instalacao.assinar(chave, args.maquina)
+    except ValueError as e:
+        print(f"Recusado, nada foi gravado: {e}")
+        return 1
+    saida.parent.mkdir(parents=True, exist_ok=True)
+    with open(saida, "xb") as f:
+        f.write(conteudo)
+    print(f"Arquivo assinado para a máquina {args.maquina.strip()}: {saida}")
+    return 0
+
+
+def _dono(args) -> int:
+    """`dono gerar-chave --saida <pasta>`: roda no Mac do dono (a privada nunca vai ao servidor)."""
+    from pyrage import x25519
+    saida = Path(args.saida)
+    saida.mkdir(parents=True, exist_ok=True)
+    privada, publica = saida / "chave-privada-dono.txt", saida / "chave-publica-dono.txt"
+    if privada.exists() or publica.exists():
+        print("Já existe um par de chaves nessa pasta; escolha outra pasta.", file=sys.stderr)
+        return 1
+    identidade = x25519.Identity.generate()
+    privada.write_text(f"{identidade}\n", encoding="utf-8")
+    os.chmod(privada, 0o600)
+    publica.write_text(f"{identidade.to_public()}\n", encoding="utf-8")
+    print(f"Chave pública (leve só esta ao servidor): {publica}\nChave privada (guarde no cofre, nunca no servidor): {privada}")
+    return 0
+
+
+def _sentinela(args) -> int:
+    """`sentinela antes-da-456 --banco <db>` (issue #478): com o serviço parado e antes de voltar o código para um
+    commit anterior à #456, passa o ponto de leitura da sentinela para a auditoria e tira a tabela, os gatilhos e a
+    linha da 063 (docs/runbook.md, "Rollback para um commit anterior à issue #456"). Não roda as migrações."""
+    from app import sentinela
+    banco = Path(args.banco)
+    if not banco.is_file():
+        print(f"Banco não encontrado: {banco}")
+        return 1
+    anterior = os.environ.get("DASH_DB_PATH")
+    os.environ["DASH_DB_PATH"] = str(banco)
+    try:
+        conn = db.get_conn()
+        try:
+            r = sentinela.antes_da_456(conn)
+        finally:
+            conn.close()
+    finally:
+        if anterior is None:
+            os.environ.pop("DASH_DB_PATH", None)
+        else:
+            os.environ["DASH_DB_PATH"] = anterior
+    if r["gravado"]:
+        print(f"Ponto da sentinela gravado na auditoria: registro {r['ponto']}.")
+    elif r["ponto"] is not None:
+        print(f"Ponto da sentinela na tabela ({r['ponto']}) mais antigo que o da auditoria: mantido o da auditoria.")
+    print(f"sentinela_ponto: {r['tabela']} migracao 063: {r['migracao']}")
+    return 0 if r["tabela"] == 0 and r["migracao"] == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -330,8 +552,9 @@ def main(argv: list[str] | None = None) -> int:
     ca.add_argument("--nome", required=True)
     ca.add_argument("--email", required=True)
     cad = sub.add_parser("cadastro")
-    cad.add_argument("acao", choices=["validar", "aplicar", "carregar-medicoes"])
-    cad.add_argument("arquivo", nargs="?", help="CSV da obra (<obra>.csv), só em `carregar-medicoes`")
+    cad.add_argument("acao", choices=["validar", "aplicar", "carregar-medicoes", "corrigir-medicoes"])
+    cad.add_argument("arquivo", nargs="?", help="CSV da obra (<obra>.csv) em `carregar-medicoes`; YAML das "
+                                                "operações em `corrigir-medicoes`")
     cad.add_argument("--raiz", help="pasta do cadastro (padrão: DASH_CADASTRO_DIR, ou cadastro-exemplo/)")
     cad.add_argument("--usuario", help="e-mail de quem aplica (obrigatório em `aplicar`)")
     cad.add_argument("--ensaio", action="store_true", help="mostra o que mudaria e não grava")
@@ -344,19 +567,57 @@ def main(argv: list[str] | None = None) -> int:
     doc.add_argument("pasta", help="pasta local com os PDFs (lida recursivamente)")
     doc.add_argument("--usuario", required=True, help="e-mail de quem aplica")
     doc.add_argument("--ensaio", action="store_true", help="mostra o relatório e desfaz")
+    med = sub.add_parser("medicoes", help="medido por grupo das planilhas de medição de uma pasta local")
+    med.add_argument("acao", choices=["planilhas"])
+    med.add_argument("instrumento", help="número do instrumento do contrato (como no cadastro)")
+    med.add_argument("pasta", help="pasta local com um .xlsx por medição, o nº no nome do arquivo (ex.: 15ª)")
+    med.add_argument("--usuario", help="e-mail de quem roda a carga (sem ele, a auditoria registra 'pelo sistema')")
+    med.add_argument("--ensaio", action="store_true", help="mostra o que leria e não grava")
     con = sub.add_parser("conciliacao", help="liga notas do RM as medicoes antigas sem nota")
     con.add_argument("acao", choices=["historica", "antiga", "corte"])
     con.add_argument("--data", help="data do corte (AAAA-MM-DD), só em `corte`")
     con.add_argument("--usuario", required=True, help="e-mail de quem aplica")
     con.add_argument("--ensaio", action="store_true", help="mostra o relatório e desfaz")
+    ins = sub.add_parser("instalacao", help="chave do dono e arquivo assinado da instalação (no Mac do dono)")
+    ins.add_argument("acao", choices=["gerar-chave", "assinar", "verificar"])
+    ins.add_argument("--saida", help="pasta das chaves (gerar-chave) ou arquivo assinado (assinar)")
+    ins.add_argument("--arquivo", help="arquivo a conferir (só em `verificar`; padrão: o da subida do servidor)")
+    ins.add_argument("--chave", help="chave privada (só em `assinar`)")
+    ins.add_argument("--maquina", help="nome da máquina, o COMPUTERNAME do servidor (só em `assinar`)")
+    itg = sub.add_parser("integridade", help="registro do último deploy (o deploy.ps1 chama)")
+    itg.add_argument("acao", choices=["registrar"])
+    itg.add_argument("--raiz", required=True, help="raiz dos dados, onde fica o deploy-atual.json")
+    sen = sub.add_parser("sentinela", help="rollback para antes da issue #456 (o deploy.ps1 chama; ver o runbook)")
+    sen.add_argument("acao", choices=["antes-da-456"])
+    sen.add_argument("--banco", required=True, help="banco da produção, com o serviço parado")
+    dn = sub.add_parser("dono", help="cópia cifrada para a chave do dono")
+    dn.add_argument("acao", choices=["gerar-chave"])
+    dn.add_argument("--saida", required=True, help="pasta onde gravar o par de chaves")
     for nome, ajuda in (("desbloquear", "destrava a conta bloqueada por senhas erradas"),
                         ("redefinir-senha", "grava senha nova (pedida sem eco) e derruba as sessões")):
         sub.add_parser(nome, help=ajuda).add_argument("email")
     args = p.parse_args(argv)
     if args.cmd in ("desbloquear", "redefinir-senha"):
         return _conta(args)
+    if args.cmd == "dono":
+        return _dono(args)
+    if args.cmd == "sentinela":
+        return _sentinela(args)
     if args.cmd == "documentos":
         return _documentos(args)
+    if args.cmd == "medicoes":
+        return _medicoes_planilhas(args)
+    if args.cmd == "instalacao":
+        return _instalacao(args)
+    if args.cmd == "integridade":
+        from app import integridade
+        try:
+            r = integridade.registrar_deploy(Path(args.raiz))
+        except (RuntimeError, OSError, subprocess.SubprocessError) as e:
+            print(f"Registro do deploy NÃO gravado: {e}")
+            return 1
+        print(f"Registro do deploy gravado: commit {r['commit'][:7]}, {len(r['dist'])} arquivos no dist.")
+        return 0
     if args.cmd == "cadastro":
         if args.acao == "aplicar" and not args.usuario:
             p.error("`cadastro aplicar` exige --usuario <e-mail>")

@@ -258,8 +258,8 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
     contrato = contrato_da_obra(conn, obra)
     janela = _janela(conn, contrato)
     existentes = {(m["numero"], m["tipo"]): m for m in conn.execute(
-        "SELECT id, numero, tipo, competencia, estado, valor_protocolado_centavos, valor_atestado_centavos "
-        "FROM medicoes WHERE contrato_id=?", (contrato["id"],))}
+        "SELECT id, numero, tipo, competencia, estado, valor_protocolado_centavos, valor_atestado_centavos, "
+        "planilha_enviada_em FROM medicoes WHERE contrato_id=?", (contrato["id"],))}
     lidas = []
     for n_linha, bruto in ler_csv(caminho):
         tipo_csv = bruto.get("tipo", "")
@@ -326,8 +326,47 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
                            "dados": d, "medicao_id": m["id"]})
     _conferir_correcoes(conn, linhas, existentes)
     totais = {c: sum(1 for li in linhas if li["categoria"] == c) for c in CATEGORIAS}
+    _avisar_nfs(conn, contrato["id"], linhas)
+    avisos_nf = {"janela": sum(1 for li in linhas if li.get("aviso_nf") == "janela"),
+                 "nao_encontrada": sum(1 for li in linhas if li.get("aviso_nf") == "nao_encontrada")}
     return {"obra": obra, "contrato": contrato["nome_curto"], "contrato_id": contrato["id"], "linhas": linhas,
-            "totais": totais}
+            "totais": totais, "avisos_nf": avisos_nf}
+
+
+JANELA_RM_MESES = 24    # o casador do RM (DASH12/13) so' traz as notas dos ultimos 24 meses
+
+
+def _inicio_janela_rm() -> str:
+    """Mes (AAAA-MM) em que comeca a janela do RM: hoje menos 24 meses."""
+    hoje = datetime.date.today()
+    meses = hoje.year * 12 + hoje.month - 1 - JANELA_RM_MESES
+    return f"{meses // 12:04d}-{meses % 12 + 1:02d}"
+
+
+def _avisar_nfs(conn, contrato_id: int, linhas: list[dict]) -> None:
+    """Linha `nova` cuja NF nao esta' no banco ganha `aviso_nf`: `janela` se a competencia e' anterior a' janela
+    do RM (a nota so' existe la' fora: `conciliacao antiga` liga depois), `nao_encontrada` se esta' dentro dela
+    (possivel erro de digitacao). So' aviso: a gravacao nao muda. Sem coligada no RM nao ha' como saber."""
+    achado = conn.execute("SELECT e.coligada_rm FROM contratos c JOIN entidades e "
+                          "ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?", (contrato_id,)).fetchone()
+    if not achado or achado[0] is None:
+        return
+    coligada = achado[0]
+    inicio = _inicio_janela_rm()
+    for li in linhas:
+        if li["categoria"] != "nova":
+            continue
+        for nf in li["dados"]["nfs"]:
+            numero = int(nf) if nf.isdigit() and len(nf) <= 18 else None
+            if conn.execute("SELECT 1 FROM notas_fiscais WHERE coligada=? AND situacao='ativa' AND "
+                            "(numero=? OR numero_int=?)", (coligada, nf, numero)).fetchone():
+                continue
+            if li["competencia"] < inicio:
+                li["aviso_nf"] = "janela"
+                li.setdefault("avisos", []).append(f"NF {nf} anterior à janela do RM; entra sem vínculo")
+            else:
+                li.setdefault("avisos", []).append(f"NF {nf} não encontrada no RM")
+                li.setdefault("aviso_nf", "nao_encontrada")
 
 
 def _classificar_cancelamento(item: dict, d: dict, m, existentes: dict, grupos: dict) -> dict:
@@ -363,6 +402,7 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
     - corrigir a competencia de um nº nao pode separar a outra metade (execucao x reajuste do mesmo nº, que o
       envio ao orgao casa por nº e competencia), a menos que o CSV corrija as duas;
     - correcao (cancelamento, competencia, aprovado novo) leva a fonte: e' o que a auditoria guarda."""
+    from app import medicoes   # import local: medicoes importa sincronizacao_rm, que importa notas
     canceladas = {(li["dados"]["numero"], li["dados"]["tipo"]) for li in linhas if li["categoria"] == "cancelamento"}
     novas_comp = {(li["dados"]["numero"], li["dados"]["tipo"]): li["dados"]["competencia"]
                   for li in linhas if li["categoria"] == "correção"}
@@ -378,18 +418,39 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                 _virar(li, "conflito", f"tem a NF {', '.join(nfs)} vinculada: vincule-a à {d['cancelar']}ª antes de "
                                        "cancelar a duplicata")
                 continue
-            estado = existentes[(d["numero"], d["tipo"])]["estado"]
+            dup = existentes[(d["numero"], d["tipo"])]
+            estado = dup["estado"]
+            # gate Sol da PR #468: o estado sai em portugues no relatorio, nao o codigo interno
+            no_estado = f"no banco a medição está {medicoes.rotulo_estado(estado)}"
             if estado in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
                 # o espelho (e a nota que sai dele) ficaria de uma medicao cancelada: isso se resolve na tela
-                _virar(li, "conflito", f"no banco a medição está {estado}: o espelho é dela; cancele pela tela")
+                _virar(li, "conflito", f"{no_estado}: o espelho é dela; cancele pela tela")
+                continue
+            tem_planilha = conn.execute("SELECT 1 FROM medicao_planilhas WHERE medicao_id=? LIMIT 1",
+                                        (dup["id"],)).fetchone() is not None
+            if estado in medicoes.ESTADOS_PLANILHA:
+                # revisor da #281: a planilha/carta (oficio anexado) e' dela; o mesmo caminho do espelho. #284: a
+                # prevista pode ir a boletim_recebido sem planilha; ai' o documento dela e' o boletim
+                doc = "o boletim" if estado == "boletim_recebido" and not tem_planilha else "a planilha/carta"
+                _virar(li, "conflito", f"{no_estado}: {doc} é dela; cancele pela tela")
+                continue
+            saiu = _planilha_saiu(conn, dup)
+            if saiu or tem_planilha:
+                # #387: protocolada (ou adiante) sem NF, fora dos estados da planilha, com o oficio ja' enviado ao
+                # orgao (#282) ou so' gerado e protocolado por fora (revisor da PR #468: `registrar protocolo
+                # feito fora` aceita planilha_gerada sem gravar o envio): o documento e' dela
+                doc = "a planilha/carta enviada ao órgão" if saiu else "a planilha/carta"
+                _virar(li, "conflito", f"{doc} é dela; cancele pela tela")
                 continue
         if li["categoria"] == "correção":
             atual = existentes[(d["numero"], d["tipo"])]
             nfs = _nfs_vinculadas(conn, li["medicao_id"])
-            if nfs or atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
+            na_planilha = atual["estado"] in medicoes.ESTADOS_PLANILHA     # revisor da #281: a planilha leva o periodo
+            if nfs or na_planilha or atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
                 # espelho e nota levam a competencia antiga: mudar so' a medicao os separaria
                 _virar(li, "conflito", f"a competência {atual['competencia']} já está "
-                                       + (f"na NF {', '.join(nfs)} vinculada" if nfs else "no espelho")
+                                       + (f"na NF {', '.join(nfs)} vinculada" if nfs
+                                          else "na planilha/carta" if na_planilha else "no espelho")
                                        + ": corrija pela tela")
                 continue
             anteriores = [m["competencia"] for (n, t), m in existentes.items()
@@ -405,12 +466,39 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                     _virar(li, "conflito", f"a {d['numero']}ª de {ROTULOS[tipo]} continua em {outra['competencia']}: "
                                            "corrija as duas no mesmo CSV")
                     break
+        if li["categoria"] in ("valor diferente", "correção") and d["valor_pedido"] is not None:
+            atual = existentes[(d["numero"], d["tipo"])]
+            gravado = atual["valor_protocolado_centavos"]
+            if d["valor_pedido"] != gravado and _planilha_saiu(conn, atual):
+                # #387: o primeiro preenchimento do pedido nao passa depois do envio (`medicoes.definir_valor`
+                # recusa com PEDIDO_ENVIADO); recusar aqui da' o motivo no ensaio em vez do erro na gravacao. Gate
+                # Sol da PR #468: o pedido ja' gravado e diferente tambem recusa a linha (o aprovado dela nao entra)
+                _virar(li, "conflito", "o pedido congelou no envio da planilha/carta ao órgão"
+                                       + (": deixe o valor pedido vazio no CSV" if gravado is None
+                                          else f" em {_fmt(gravado)}: ponha esse valor ou deixe o valor pedido "
+                                               "vazio no CSV"))
+                continue
+        if (li["categoria"] in ("valor diferente", "correção") and d["valor_aprovado"] is not None
+                and d["valor_aprovado"] != existentes[(d["numero"], d["tipo"])]["valor_atestado_centavos"]
+                and medicoes.tem_boletim(conn, li["medicao_id"])):
+            # #471: com boletim registrado, o aprovado so' muda por boletim novo, com o documento (na tela,
+            # `medicoes.definir_valor` recusa com APROVADO_PELO_BOLETIM, #284); a gravacao recusa pelo mesmo ensaio
+            _virar(li, "conflito", "o aprovado vem do boletim do órgão: registre um boletim novo pela tela")
+            continue
         m = existentes.get((d["numero"], d["tipo"])) if d else None
         escreve = li["categoria"] in ("cancelamento", "correção") or (li["categoria"] == "valor diferente" and (
             (d["valor_aprovado"] is not None and d["valor_aprovado"] != m["valor_atestado_centavos"])
             or (d["valor_pedido"] is not None and m["valor_protocolado_centavos"] is None)))   # 1o preenchimento
         if escreve and not d["fonte"]:
             _virar(li, "erro", "correção sem fonte: diga na coluna fonte o documento que corrige")
+
+
+def _planilha_saiu(conn, m) -> bool:
+    """A planilha/carta ja' foi ao orgao. O marcador `planilha_enviada_em` nao basta (gate Sol da PR #468): a medicao
+    protocolada enquanto o e-mail saia fica sem ele (`planilha_envio.enviar` so' marca a partir de planilha_gerada),
+    mas o envio fica registrado; vale a mesma conta de versao enviada que o envio usa (sistema e por fora)."""
+    from app import planilha_envio   # import local: planilha_envio importa medicoes, que importa sincronizacao_rm
+    return bool(m["planilha_enviada_em"]) or planilha_envio._ultima_enviada(conn, m) > 0
 
 
 def _nfs_vinculadas(conn, medicao_id: int) -> list[str]:

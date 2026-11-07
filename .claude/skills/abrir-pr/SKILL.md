@@ -32,7 +32,8 @@ recorte volta para aprovação antes de ser feito; numa trabalhadora, vira pergu
 1. `git push -u origin HEAD:<N>-<nome-curto>`, com a branch no GitHub legível, ex.: `231-oficio-envio-por-fora`
    (número da issue, 2 a 5 palavras do título, minúsculas, sem acento, com hífen). A branch local fica com o
    nome que tem (a ferramenta do worktree o rastreia). Como os nomes diferem, todo push seguinte é
-   `git push origin HEAD:<N>-<nome-curto>` (o `git push` simples recusa).
+   `git push origin HEAD:<N>-<nome-curto>` (o `git push` simples recusa). Numa trabalhadora, é um push por
+   rodada de correção, não um por commit (regra do agente `trabalhadora`, #369).
 2. Escrever o corpo num arquivo da pasta temporária da sessão, com EXATAMENTE as seções do modelo
    `.github/pull_request_template.md`, nesta ordem:
    - `## O que mudou`: 3 a 6 linhas em português, sem jargão, do ponto de vista do Leo (o que ele passa a ver

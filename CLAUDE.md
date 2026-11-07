@@ -61,7 +61,7 @@ digita pouco e confere; regra, cadastro e instrumento são do Leo, em arquivo ve
   **trabalhadora** por issue (agente `trabalhadora`, worktree próprio, Sonnet; Opus se a issue tem `risco:*`),
   roda o `revisor-adversarial` (Opus) em toda PR e o gate Sol (codex) nas de risco, manda os achados de volta
   (2 rodadas no máximo), e liga o auto-merge em qualquer PR quando as travas passam (CI verde, sem conflito,
-  revisor-adversarial sem Crítico/Aviso em aberto, sem comentário do Leo pedindo para segurar; vale também
+  revisor-adversarial sem Crítico em aberto e sem Aviso que não tenha virado issue, sem comentário do Leo pedindo para segurar; vale também
   para redesenho, migração, `risco:*` e PR que toca `.github/`, `scripts/deploy.ps1` ou `.claude/`, decisão do
   Leo de 16/10/2026). O gate Sol roda quando o codex existe; na nuvem não é trava. A orquestradora não edita
   código e não faz deploy.
@@ -77,7 +77,7 @@ digita pouco e confere; regra, cadastro e instrumento são do Leo, em arquivo ve
 
 ## Testes
 
-- Backend: `cd backend && .venv\Scripts\python -m pytest -q` (~930 testes). Frontend: `cd frontend && npm test`,
+- Backend: `cd backend && .venv\Scripts\python -m pytest -q` (~1850 testes; a CI roda `-n 4` num job só, no Ubuntu, com a Liberation Sans no lugar da Arial, ver README). Frontend: `cd frontend && npm test`,
   `npm run typecheck`, `npm run lint`. Esses são os comandos da CI; **localmente, só o arquivo de teste do
   módulo tocado** (`pytest -q tests/test_x.py`, `npm test -- <arquivo>`), porque a suíte inteira em dois
   worktrees derruba a CPU desta máquina, que é a produção. Num worktree, `.venv` e `node_modules` são junções para os do tree

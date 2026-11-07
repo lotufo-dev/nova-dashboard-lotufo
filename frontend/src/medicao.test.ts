@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { eventosDaMedicao, itensOQueFalta, larDoEspelho, metadeQueEspera, protocolosDa, resumoNotas,
+import { eventosDaMedicao, itensOQueFalta, larDoEspelho, metadeQueEspera, PROXIMOS, protocolosDa, resumoNotas,
          rotuloDoBloco, separarMedicoes, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type Metade, type ProtocoloResumo } from "./medicao";
+
+// issue #284: os estados do motor de medicao se encerram a mao, como no servidor (medicoes.TRANSICOES)
+describe("PROXIMOS", () => {
+  it("planilha gerada, planilha enviada e boletim recebido podem ser canceladas ou desistidas", () => {
+    for (const estado of ["planilha_gerada", "planilha_enviada", "boletim_recebido"]) {
+      expect(PROXIMOS[estado]).toEqual(["cancelada", "desistida"]);
+    }
+  });
+});
 
 // issue #188: medicao e reajuste na mesma pagina
 describe("medição e reajuste na mesma página", () => {
@@ -94,6 +103,14 @@ describe("medição", () => {
     const m = { ...m23, edicoes_valor: [{ data: "2026-08-15 10:00:00", texto: "Valor protocolado alterado de R$ 1,00 para R$ 2,00 por Maria Exemplo" }] };
     expect(eventosDaMedicao(m, [], []).map(e => e.texto)).toEqual([
       "Nota emitida", "Valor protocolado alterado de R$ 1,00 para R$ 2,00 por Maria Exemplo"]);
+  });
+
+  it("linha do tempo mostra o nº do SIGA da planilha/carta, que não é protocolo da nota (issue #283)", () => {
+    const m = { ...m23, nota_emitida_em: null, estado: "planilha_enviada", protocolos: [],
+      planilha_siga: { data: "2026-08-03", numero: "123.456/2026" } };
+    const textos = eventosDaMedicao(m, [], []).map(e => e.texto);
+    expect(textos).toEqual(["Nº do SIGA da planilha/carta: 123.456/2026"]);
+    expect(textos.some(t => t.startsWith("Protocolada"))).toBe(false);
   });
 });
 

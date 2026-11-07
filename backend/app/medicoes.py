@@ -23,8 +23,16 @@ log = logging.getLogger(__name__)
 # congelamento (spec §5) contornavel por uma rota so.
 TRANSICOES = {
     "prevista": {"cancelada", "desistida"},
+    # Issue #281: entra pela planilha/carta (medicao_planilhas.registrar); a saida a mao e' o cancelamento.
+    "planilha_gerada": {"cancelada", "desistida"},
+    # Issue #283: entra pelo envio da planilha/carta (medicao_planilhas.registrar_envio_externo); sai como a gerada.
+    # Issue #284: com o boletim recebido, a medicao tambem pode ser encerrada a mao
+    "planilha_enviada": {"cancelada", "desistida"},
+    "boletim_recebido": {"cancelada", "desistida"},
     # Estados do espelho (spec 2026-09-21 §2). espelho_gerado -> espelho_enviado e' do SISTEMA
     # (marcar_espelho_enviado, no ato do envio); -> protocolada e' registrar_protocolo.
+    # Issue #359: espelho_enviado -> espelho_gerado tambem e' do SISTEMA, na versao nova do espelho
+    # (criar_para_espelho); nao se faz a mao.
     # Bloco 3: a nota (PDF lido ou RM) fecha `nota_emitida` (notas.fechar_se_completa, ou a
     # declaracao com justificativa); o protocolo continua sendo registrar_protocolo.
     "espelho_gerado": {"nota_emitida", "cancelada"},
@@ -39,6 +47,24 @@ TRANSICOES = {
     "desistida": set(),
 }
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
+# Issue #289: a planilha/carta GERADA nao recebe espelho: o boletim (#284) substitui a ponte ao espelho, nao o envio ao
+# protocolo (regra de 04/11/2026, depois das decisoes da #284 de 03/11)
+PLANILHA_SEM_ENVIO = ("está com a planilha/carta gerada: envie ao protocolo (ou registre o envio por fora) antes de "
+                      "gerar o espelho")
+PEDIDO_ENVIADO = "O pedido congelou no envio da planilha/carta: não muda à mão"
+# Issue #281: estados em que o pedido (valor protocolado) e' o da planilha/carta e so' muda por revisao
+ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
+# Issue #284: a medicao que ja' existe antes do espelho; o espelho a leva a `espelho_gerado`. Nas sem boletim, so'
+# com "seguir sem boletim" e justificativa (decisao do Leo de 03/11/2026: prevista, planilha gerada ou enviada).
+ESTADOS_ANTES_DO_ESPELHO = ("prevista", *ESTADOS_PLANILHA)
+ESTADOS_SEM_BOLETIM = ("prevista", "planilha_gerada", "planilha_enviada")
+PEDIDO_POR_REVISAO = "Para mudar o pedido, registre uma revisão da planilha/carta"
+PEDIDO_DEPOIS_DO_BOLETIM = "O pedido não pode mais ser alterado depois do boletim do órgão"
+APROVADO_PELO_BOLETIM = "O aprovado vem do boletim do órgão: para corrigir ou registrar glosa, registre um boletim novo"
+# Gate Sol S4 (#281): os estados que recebem protocolo, por extenso. Estes vao a `protocolada` no mesmo passo...
+ESTADOS_PROMOVIDOS_PELO_PROTOCOLO = ("prevista", "planilha_gerada", *ESTADOS_ESPELHO, "nota_emitida")
+# ...e estes ja' foram protocolados: o protocolo seguinte (novo oficio) so' congela. Os demais sao recusados.
+ESTADOS_DE_NOVO_PROTOCOLO = ("protocolada", "nf_emitida")
 # B-12 (10/10/2026): mensagem ao usuario com o tipo e o estado por extenso, nunca o codigo ("(execucao)")
 ROTULO_TIPO = {"execucao": "execução", "reajuste": "reajuste", "projeto": "projeto"}
 ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta gerada",
@@ -89,8 +115,14 @@ def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     if r is None:
         return None
     d = dict(r)
+    d["diferenca_centavos"] = diferenca(d)      # issue #284: aprovado do boletim menos o pedido
+    # Issue #283: `protocolos` e' so' o da nota (o que conta como protocolo nas telas e nos marcos); o nº do SIGA da
+    # planilha/carta (etapa 'planilha', migracao 054) vem a' parte
     d["protocolos"] = [dict(p) for p in conn.execute(
-        "SELECT * FROM medicao_protocolos WHERE medicao_id=? ORDER BY id", (medicao_id,))]
+        "SELECT * FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' ORDER BY id", (medicao_id,))]
+    p = conn.execute("SELECT data, numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='planilha'",
+                     (medicao_id,)).fetchone()
+    d["planilha_siga"] = {"data": p["data"], "numero": p["numero_processo"]} if p else None
     # NFs do RM alocadas a esta medicao, com o recebido de cada uma (fase 5). Import local:
     # sincronizacao_rm importa este modulo.
     from app import sincronizacao_rm
@@ -102,6 +134,11 @@ def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     d["documentos"] = [dict(x) for x in conn.execute(
         "SELECT id, tipo_doc, nome, numero_nf, consorciada, municipio, weblink, fonte, arquivo, tamanho, "
         "espelho_id FROM medicao_documentos WHERE medicao_id=? ORDER BY tipo_doc, id", (medicao_id,))]
+    # Issue #359: o aprovado mudou depois do espelho vigente: a situacao (espelhos.TEXTO_AVISO) ou None (import
+    # local: espelhos importa este modulo)
+    from app import espelhos
+    d["espelho_desatualizado"] = next((x["situacao"] for x in espelhos.desatualizadas(conn, medicao_id=medicao_id)),
+                                      None)
     return d
 
 def _json_dict(texto) -> dict | None:
@@ -125,7 +162,7 @@ def _linhas_edicoes(conn: sqlite3.Connection, medicao_ids: list[int]) -> list:
             "SELECT a.id, a.acao, a.entidade_id, a.antes, a.depois, a.criado_em, u.nome FROM audit_log a "
             "LEFT JOIN usuarios u ON u.id=a.usuario_id WHERE a.entidade='medicao' "
             f"AND a.entidade_id IN ({','.join('?' * len(lote))}) "
-            "AND a.acao IN ('medicao.valor_protocolado', 'medicao.estado')", lote).fetchall()
+            "AND a.acao IN ('medicao.valor_protocolado', 'medicao.estado', 'medicao.sem_boletim')", lote).fetchall()
     return sorted(linhas, key=lambda r: r["id"])
 
 
@@ -216,6 +253,117 @@ def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: 
         return cur.lastrowid
 
 
+# --- issue #284: boletim do orgao (spec 2026-10-20 §2.1, passo 3; D4) -----------------------------------------
+MEIOS_BOLETIM = ("smo", "oficio", "email", "carimbo", "ci", "outro")     # o CHECK de medicao_atestos.meio (042)
+
+
+def diferenca(m) -> int | None:
+    """Aprovado menos pedido; sem um dos dois, nao ha' diferenca."""
+    if m["valor_atestado_centavos"] is None or m["valor_protocolado_centavos"] is None:
+        return None
+    return m["valor_atestado_centavos"] - m["valor_protocolado_centavos"]
+
+
+def tem_boletim(conn, medicao_id: int) -> bool:
+    """O boletim do orgao registrado com o documento (o atesto digitado a mao, sem PDF, nao conta)."""
+    return conn.execute("SELECT 1 FROM medicao_atestos WHERE medicao_id=? AND arquivo IS NOT NULL LIMIT 1",
+                        (medicao_id,)).fetchone() is not None
+
+
+def conferir_boletim(conn: sqlite3.Connection, medicao_id: int, dados: dict):
+    """Recusas do boletim (ValueError), sem gravar nada: a rota chama ANTES de gravar o PDF, e `registrar_boletim`
+    de novo dentro da transacao. Devolve a medicao e o dia do boletim."""
+    try:
+        dia = datetime.date.fromisoformat(dados["data"])
+    except (TypeError, ValueError):
+        raise ValueError("Data do boletim inválida")
+    if dia > tempo.hoje_local():
+        raise ValueError("A data do boletim não pode ser futura")
+    if (dados.get("meio") or None) not in (None, *MEIOS_BOLETIM):
+        raise ValueError("Meio do boletim inválido")
+    if not (dados.get("numero_orgao") or "").strip():
+        raise ValueError("Informe o nº do boletim no órgão (processo ou SMO)")    # issue: "valor aprovado, data e nº"
+    m = conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    if m is None:
+        raise ValueError("Medição não encontrada")
+    if m["estado"] in ("cancelada", "desistida"):
+        raise ValueError(f"{nome_medicao(m['numero'], m['tipo'])} está {rotulo_estado(m['estado'])}: "
+                         "não recebe boletim")
+    if m["estado"] == "planilha_gerada":
+        # spec §2.1: o boletim vem depois do envio da planilha/carta (pelo sistema ou registrado por fora)
+        raise ValueError("Registre o envio da planilha/carta antes do boletim do órgão")
+    if m["estado"] == "planilha_enviada":
+        # revisor (rodada 4): depois do boletim a revisao nao se envia nem se registra mais, e o espelho espera a
+        # revisao registrada ser enviada (conferir_espelho_da_planilha): a medicao ficaria presa em boletim_recebido
+        from app import planilha_envio      # import local: planilha_envio importa este modulo
+        vigente = conn.execute("SELECT MAX(versao) FROM medicao_planilhas WHERE medicao_id=?",
+                               (medicao_id,)).fetchone()[0] or 0
+        if vigente > planilha_envio._ultima_enviada(conn, dict(m)):
+            raise ValueError("A planilha/carta tem revisão registrada e não enviada: envie ao protocolo (ou registre o "
+                             "envio por fora) antes do boletim do órgão")
+    return m, dia
+
+
+def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, dados: dict, anexo: dict) -> dict:
+    """O boletim do orgao e' um evento de atesto (medicao_atestos, append-only) com o meio, o nº no orgao e o PDF;
+    o aprovado vigente (`valor_atestado_centavos`) e' o do ultimo evento. Na planilha/carta enviada a medicao vai a
+    `boletim_recebido`; nos estados seguintes e' glosa (evento novo, estado igual). A prevista vai a
+    `boletim_recebido` na obra que gera espelho (o passo seguinte); na do fluxo antigo guarda o evento e fica
+    prevista, porque o protocolo nao recebe `boletim_recebido`. O pedido nao muda."""
+    meio = dados.get("meio") or None
+    numero = (dados.get("numero_orgao") or "").strip() or None
+    observacao = (dados.get("observacao") or "").strip() or None
+    valor = dados["valor_centavos"]
+    with db.mutacao(conn):
+        m, dia = conferir_boletim(conn, medicao_id, dados)
+        atual = m["estado"]
+        # Repeticao (clique duplo, pedido atrasado) e' o mesmo boletim de QUALQUER evento ja' gravado, com o mesmo
+        # documento, valor, dia, nº, meio e observacao (gate Sol): a repeticao atrasada de A depois da correcao B nao
+        # volta o valor; corrigir so' o nº, o meio ou a observacao e' um evento novo. O evento nao se apaga depois.
+        if conn.execute("SELECT 1 FROM medicao_atestos WHERE medicao_id=? AND valor_centavos=? AND atestado_em=? "
+                        "AND sha256=? AND numero_orgao IS ? AND meio IS ? AND observacao IS ? LIMIT 1",
+                        (medicao_id, valor, dia.isoformat(), anexo["sha256"], numero, meio, observacao)).fetchone():
+            raise ValueError("Este boletim já está registrado")
+        regra_ativa = conn.execute("SELECT 1 FROM espelho_regras WHERE contrato_id=? AND situacao='ativa'",
+                                   (m["contrato_id"],)).fetchone() is not None
+        novo = ("boletim_recebido" if atual == "planilha_enviada" or (atual == "prevista" and regra_ativa)
+                else atual)
+        cur = conn.execute(
+            "UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem='manual', atestado_em=?, estado=? "
+            "WHERE id=? AND estado=?", (valor, dia.isoformat(), novo, medicao_id, atual))
+        db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+        aid = conn.execute(
+            "INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, meio, "
+            "numero_orgao, arquivo, sha256, observacao) VALUES (?,?,'manual',?,?,?,?,?,?,?)",
+            (medicao_id, valor, dia.isoformat(), usuario_id, meio, numero, anexo["arquivo"], anexo["sha256"],
+             observacao)).lastrowid
+        antes = {"estado": atual, "valor_atestado_centavos": m["valor_atestado_centavos"],
+                 "valor_atestado_origem": m["valor_atestado_origem"], "atestado_em": m["atestado_em"]}
+        auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", medicao_id, antes, {
+            "estado": novo, "valor_atestado_centavos": valor, "valor_atestado_origem": "manual",
+            "atestado_em": dia.isoformat(), "boletim": {"atesto_id": aid, "meio": meio, "numero_orgao": numero,
+                                                       "sha256": anexo["sha256"], "observacao": observacao}})
+        pedido = m["valor_protocolado_centavos"]
+    return {"id": aid, "estado": novo, "pedido_centavos": pedido, "aprovado_centavos": valor,
+            "diferenca_centavos": None if pedido is None else valor - pedido}
+
+
+def boletins(conn: sqlite3.Connection, medicao_id: int) -> list[dict]:
+    """Os boletins registrados (eventos de atesto com meio ou documento), do primeiro ao vigente."""
+    return [{**dict(r), "tem_arquivo": bool(r["tem_arquivo"])} for r in conn.execute(
+        "SELECT e.id, e.valor_centavos, e.atestado_em, e.meio, e.numero_orgao, e.sha256, e.observacao, e.criado_em, "
+        "e.arquivo IS NOT NULL AS tem_arquivo, u.nome AS usuario FROM medicao_atestos e "
+        "LEFT JOIN usuarios u ON u.id=e.usuario_id "
+        "WHERE e.medicao_id=? AND (e.meio IS NOT NULL OR e.arquivo IS NOT NULL) ORDER BY e.id", (medicao_id,))]
+
+
+def arquivo_boletim(conn: sqlite3.Connection, medicao_id: int, atesto_id: int) -> dict | None:
+    """O PDF de UM boletim, so' se o evento for da medicao pedida."""
+    r = conn.execute("SELECT e.arquivo, m.numero FROM medicao_atestos e JOIN medicoes m ON m.id=e.medicao_id "
+                     "WHERE e.id=? AND e.medicao_id=?", (atesto_id, medicao_id)).fetchone()
+    return dict(r) if r else None
+
+
 def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int, list[dict]]:
     """B-02 (10/10/2026): as edicoes de valor da auditoria, por medicao, para a linha do tempo (a tela so' mostrava
     espelho, nota, protocolo e atesto). Gravar o mesmo valor nao vira evento. O atestado vem dos eventos de
@@ -227,6 +375,13 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
         if not (r["entidade_id"] or "").isdigit() or int(r["entidade_id"]) not in out:
             continue
         a_d, d_d = _json_dict(r["antes"]), _json_dict(r["depois"])
+        if r["acao"] == "medicao.sem_boletim":
+            # issue #284: o espelho gerado sem o boletim do orgao, com a justificativa de quem seguiu
+            if d_d and d_d.get("justificativa"):
+                texto = f"Espelho gerado sem boletim: {d_d['justificativa']}"
+                out[int(r["entidade_id"])].append({"data": r["criado_em"],
+                                                   "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+            continue
         if r["acao"] == "medicao.estado":
             # Issue #260: cancelamento e desistencia entram na linha do tempo com o motivo (a duplicata cancelada
             # pela carga do historico diz de qual medicao ela e' copia); as outras transicoes ja' tem marco proprio
@@ -250,6 +405,8 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
                                            "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
     _eventos_atesto(conn, list(out), out)
     _eventos_assinatura(conn, list(out), out)
+    from app import medicao_planilhas     # issue #283: o envio da planilha/carta (import local: ele importa este)
+    medicao_planilhas.eventos_envio(conn, list(out), out)
     for eventos in out.values():
         eventos.sort(key=lambda e: e["data"] or "")      # estavel: no mesmo segundo, o protocolado vem antes
     return out
@@ -289,6 +446,23 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         # (testes de quebra 10/10/2026, A-16): a 631 virou R$ 1,00 depois da nota e nada avisou.
         if campo == "protocolado" and m["valor_protocolado_origem"] == "espelho":
             raise ValueError("O valor desta medição vem do espelho: para mudar, gere o espelho de novo")
+        # Issue #281: da planilha/carta ao boletim, o pedido so' muda por versao nova (com motivo)
+        if campo == "protocolado" and m["estado"] in ESTADOS_PLANILHA:
+            # depois do boletim nem a revisao e' aceita: so' orienta a revisao onde ela existe (gate Sol, rodada 2)
+            raise ValueError(PEDIDO_DEPOIS_DO_BOLETIM if m["estado"] == "boletim_recebido" else PEDIDO_POR_REVISAO)
+        # Issue #289 (PR #382): enviada a planilha/carta, o pedido nao muda a mao em estado nenhum (o espelho leva a
+        # medicao a `espelho_gerado`, fora de ESTADOS_PLANILHA)
+        if campo == "protocolado" and m["planilha_enviada_em"]:
+            raise ValueError(PEDIDO_ENVIADO)
+        # Issue #284: o espelho leva a medicao da planilha/carta adiante sem trocar o pedido; dali em diante ele
+        # tambem nao muda a mao (congela no envio da planilha, spec §2.1)
+        if campo == "protocolado" and conn.execute("SELECT 1 FROM medicao_planilhas WHERE medicao_id=? LIMIT 1",
+                                                   (medicao_id,)).fetchone():
+            raise ValueError("O pedido vem da planilha/carta e não se altera à mão")
+        # Issue #284 (gate Sol): com boletim registrado, o aprovado so' muda por boletim novo (com o documento);
+        # o atesto digitado ficaria fora da lista de boletins e o espelho sairia por ele
+        if campo == "atestado" and tem_boletim(conn, medicao_id):
+            raise ValueError(APROVADO_PELO_BOLETIM)
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []
@@ -304,7 +478,8 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         cond = " AND estado NOT IN ('cancelada','desistida')"
         if campo == "protocolado":
             cond += (" AND (congelada=0 OR valor_protocolado_centavos IS NULL)"
-                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho'")
+                     " AND COALESCE(valor_protocolado_origem, '') <> 'espelho' AND planilha_enviada_em IS NULL"
+                     f" AND estado NOT IN ({','.join(repr(e) for e in ESTADOS_PLANILHA)})")
         cur = conn.execute(f"UPDATE medicoes SET {col_v}=?, {col_o}=?{extra_sql} WHERE id=?{cond}",
                            (centavos, origem, *extra_par, medicao_id))
         db.exigir_uma_linha(cur, "Medição congelada ou encerrada concorrentemente: o valor não pôde ser "
@@ -345,6 +520,9 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         atual = m["estado"]
         if atual in ("cancelada", "desistida", "recebida"):
             raise ValueError(f"Medição em estado final ({atual}) não recebe protocolo")
+        if atual not in (*ESTADOS_PROMOVIDOS_PELO_PROTOCOLO, *ESTADOS_DE_NOVO_PROTOCOLO):
+            # Gate Sol S4 (#281): planilha enviada e boletim recebido congelariam o pedido sem mudar o estado
+            raise ValueError(f"Medição {rotulo_estado(atual)} não recebe protocolo")
         if exige_nota and atual == "nota_emitida":
             # Issue #188: o protocolo registrado a mao tambem espera a outra metade onde o orgao junta medicao e
             # reajuste (conferido aqui, sob o mesmo lock da gravacao)
@@ -364,7 +542,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         # A-09 (testes de quebra 10/10/2026): o protocolo registrado a mao antes da nota pulava faturamento,
         # nota e envio sem pedir nada. Vira pendencia da MESMA lista: so' passa assumida e justificada.
         # Gate Sol S3: na ressalva, `pendencias` traz tudo e `certidoes_pendentes` so' as certidoes.
-        sem_nota = exige_nota and atual in ("prevista", *ESTADOS_ESPELHO)
+        sem_nota = exige_nota and atual in ("prevista", "planilha_gerada", *ESTADOS_ESPELHO)   # #281: planilha
         pendencias = [*pendentes, NOTA_NAO_EMITIDA] if sem_nota else list(pendentes)
         if sem_nota:
             motivos.append(NOTA_NAO_EMITIDA)
@@ -385,7 +563,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         # SELECT e o UPDATE outro usuario pode cancelar/mover a medicao. Sem a condicao, o
         # perdedor da corrida sobrescreveria um estado final. Vem ANTES do INSERT para nao
         # deixar protocolo orfao na transacao quando a corrida e perdida.
-        if atual in ("prevista", *ESTADOS_ESPELHO, "nota_emitida"):
+        if atual in ESTADOS_PROMOVIDOS_PELO_PROTOCOLO:
             upd = conn.execute(
                 "UPDATE medicoes SET estado='protocolada', congelada=1 WHERE id=? AND estado=?",
                 (medicao_id, atual))
@@ -466,12 +644,55 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
                             {"estado": atual, "motivo": motivo_antes}, depois)
 
 
+def valor_travado(m) -> tuple[int, str] | None:
+    """Issue #284: o valor que o espelho tem de usar, (centavos, fonte): o aprovado do boletim (vigente = ultimo
+    evento), senao o pedido (planilha/carta ou valor registrado a mao). O valor que o proprio espelho gravou nao
+    trava: ele e' o digitado e muda gerando de novo."""
+    if m["valor_atestado_centavos"] is not None:
+        return m["valor_atestado_centavos"], "aprovado"
+    if m["valor_protocolado_centavos"] is not None and m["valor_protocolado_origem"] != "espelho":
+        return m["valor_protocolado_centavos"], "pedido"
+    return None
+
+
+def conferir_espelho_da_planilha(conn, ja: dict, numero: int, tipo: str, competencia: str) -> None:
+    """Issue #289: a medicao da planilha/carta so' recebe espelho depois do envio ao orgao, sem revisao registrada
+    e ainda nao enviada e na competencia dela. O VALOR nao e' conferido aqui: desde a #284 o espelho usa o aprovado do
+    boletim, senao o pedido (espelhos._calcular, valor travado). `ja` traz id, estado, competencia e
+    planilha_enviada_em."""
+    if ja["estado"] == "planilha_gerada":
+        raise ValueError(f"{nome_medicao(numero, tipo)} {PLANILHA_SEM_ENVIO}")
+    if not ja.get("planilha_enviada_em"):
+        return
+    # uma versao saindo pelo sistema (reserva ativa) segura o espelho: o e-mail ainda vai registrar o envio dela
+    if conn.execute("SELECT 1 FROM medicao_planilha_envios WHERE medicao_id=? AND envio_id IS NULL "
+                    "AND envio_reservado_em IS NOT NULL", (ja["id"],)).fetchone() is not None:
+        raise ValueError(f"A planilha/carta da {nome_medicao(numero, tipo)} está sendo enviada ao protocolo: aguarde "
+                         "o envio terminar (ou libere o envio preso) antes de gerar o espelho")
+    # revisao registrada e ainda nao enviada (rodada extra, PR #382): o espelho a levaria a `espelho_gerado`, onde ela
+    # nao sai mais por caminho nenhum. A vigente tem de ser a ultima enviada (pelo sistema ou por fora).
+    if ja["estado"] in ("planilha_enviada", "boletim_recebido"):
+        from app import planilha_envio      # import local: planilha_envio importa este modulo
+        vigente = conn.execute("SELECT MAX(versao) FROM medicao_planilhas WHERE medicao_id=?",
+                               (ja["id"],)).fetchone()[0] or 0
+        # com o boletim recebido a planilha/carta tambem ja' foi enviada (ao menos a 1a versao)
+        if vigente > planilha_envio._ultima_enviada(conn, {"id": ja["id"], "estado": "planilha_enviada"}):
+            raise ValueError(f"A {nome_medicao(numero, tipo)} tem revisão da planilha/carta registrada e não enviada: "
+                             "envie ao protocolo (ou registre o envio por fora) antes de gerar o espelho")
+    if ja["competencia"] != competencia:
+        raise ValueError(f"{nome_medicao(numero, tipo)} tem a planilha/carta da competência "
+                         f"{ja['competencia'][5:7]}/{ja['competencia'][:4]}: gere o espelho nessa competência")
+
+
 def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tipo: str,
                        competencia: str, valor_centavos: int) -> int:
     """A medicao nasce ao gerar o espelho (spec §2). Gerar de novo atualiza o valor enquanto a
-    medicao nao foi protocolada; depois disso correcao e' fora do escopo (nao ha' glosa pos-protocolo)."""
+    medicao nao foi protocolada; depois disso correcao e' fora do escopo (nao ha' glosa pos-protocolo).
+    Issue #284: a medicao que ja' existe antes do espelho (prevista, planilha/carta, boletim) vai a `espelho_gerado`
+    sem trocar o pedido; com valor travado (aprovado ou pedido), o pedido nunca e' sobrescrito pelo espelho."""
     with db.mutacao(conn):
-        ja = conn.execute("SELECT id, estado, valor_protocolado_centavos FROM medicoes "
+        ja = conn.execute("SELECT id, estado, competencia, valor_protocolado_centavos, valor_protocolado_origem, "
+                          "valor_atestado_centavos, planilha_enviada_em FROM medicoes "
                           "WHERE contrato_id=? AND numero=? AND tipo=?", (contrato_id, numero, tipo)).fetchone()
         if ja is None:
             cur = conn.execute(
@@ -482,17 +703,58 @@ def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tip
                                 {"numero": numero, "tipo": tipo, "competencia": competencia,
                                  "estado": "espelho_gerado", "valor_protocolado_centavos": valor_centavos})
             return cur.lastrowid
+        # Issue #289: a planilha/carta so' recebe espelho enviada, sem revisao pendente e na competencia dela (a
+        # protocolada em diante cai na recusa de baixo)
+        if ja["estado"] in (*ESTADOS_ANTES_DO_ESPELHO, *ESTADOS_ESPELHO):
+            conferir_espelho_da_planilha(conn, dict(ja), numero, tipo, competencia)
+        if ja["estado"] in ESTADOS_ANTES_DO_ESPELHO:
+            # o pedido fica; sem pedido (prevista vazia), o valor do espelho entra como o de hoje
+            pedido = ja["valor_protocolado_centavos"]
+            novo = {"estado": "espelho_gerado", "competencia": competencia,
+                    "valor_protocolado_centavos": valor_centavos if pedido is None else pedido,
+                    "valor_protocolado_origem": "espelho" if pedido is None else ja["valor_protocolado_origem"]}
+            cur = conn.execute(
+                "UPDATE medicoes SET estado='espelho_gerado', competencia=?, valor_protocolado_centavos=?, "
+                "valor_protocolado_origem=? WHERE id=? AND estado=?",
+                (competencia, novo["valor_protocolado_centavos"], novo["valor_protocolado_origem"], ja["id"],
+                 ja["estado"]))
+            db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+            auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", ja["id"],
+                                {k: ja[k] for k in novo}, {**novo, "valor_do_espelho_centavos": valor_centavos})
+            if pedido is None:
+                # o valor novo tem o evento proprio, como na medicao que nasce no espelho (linha do tempo)
+                auditoria.registrar(conn, usuario_id, "medicao.valor_protocolado", "medicao", ja["id"],
+                                    {"valor_protocolado_centavos": None},
+                                    {"valor_protocolado_centavos": valor_centavos, "valor_protocolado_origem": "espelho"})
+            return ja["id"]
         if ja["estado"] not in ESTADOS_ESPELHO:
             raise ValueError(f"{nome_medicao(numero, tipo)} já está {rotulo_estado(ja['estado'])}: o espelho não pode ser "
                              "gerado de novo depois de protocolada")
+        # Issue #359 (decisao do Leo de 03/11/2026): a versao nova volta a medicao a `espelho_gerado` ate' o envio
+        # dela ao faturamento (marcar_espelho_enviado): a tela volta a pedir o envio, em vez de esperar a nota
+        if valor_travado(ja) is not None:
+            # o valor do espelho e' o travado (conferido em espelhos._calcular); o pedido nao muda
+            cur = conn.execute("UPDATE medicoes SET competencia=?, estado='espelho_gerado' WHERE id=? AND estado=?",
+                               (competencia, ja["id"], ja["estado"]))
+            db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+            _registrar_volta_a_gerado(conn, usuario_id, ja)
+            return ja["id"]
         cur = conn.execute("UPDATE medicoes SET valor_protocolado_centavos=?, valor_protocolado_origem='espelho', "
-                           "competencia=? WHERE id=? AND estado IN ('espelho_gerado','espelho_enviado')",
-                           (valor_centavos, competencia, ja["id"]))
+                           "competencia=?, estado='espelho_gerado' WHERE id=? AND estado=?",
+                           (valor_centavos, competencia, ja["id"], ja["estado"]))
         db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+        _registrar_volta_a_gerado(conn, usuario_id, ja)
         auditoria.registrar(conn, usuario_id, "medicao.valor_protocolado", "medicao", ja["id"],
                             {"valor_protocolado_centavos": ja["valor_protocolado_centavos"]},
                             {"valor_protocolado_centavos": valor_centavos, "valor_protocolado_origem": "espelho"})
         return ja["id"]
+
+
+def _registrar_volta_a_gerado(conn, usuario_id: int, ja) -> None:
+    """A auditoria da volta de `espelho_enviado` a `espelho_gerado` pela versao nova do espelho (issue #359)."""
+    if ja["estado"] == "espelho_enviado":
+        auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", ja["id"], {"estado": "espelho_enviado"},
+                            {"estado": "espelho_gerado", "motivo": "versão nova do espelho"})
 
 
 def marcar_espelho_enviado(conn, usuario_id: int, medicao_id: int) -> None:
@@ -523,7 +785,7 @@ PROXIMO_PASSO = {"planilha_gerada": "enviar a planilha/carta", "planilha_enviada
 def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None) -> list[dict]:
     """Medicoes entre o espelho e o pagamento, com o proximo passo e a data do ultimo marco."""
     sql = ("SELECT m.*, c.nome_curto, c.numero_instrumento, "
-           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id) AS protocolado_em "
+           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em "
            "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id "
            f"WHERE m.estado IN ({','.join('?' * len(PROXIMO_PASSO))})")
     args: list = list(PROXIMO_PASSO)
@@ -547,7 +809,9 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
         out.append({"id": r["id"], "contrato_id": r["contrato_id"],
                     "obra": r["nome_curto"] or r["numero_instrumento"], "numero": r["numero"], "tipo": r["tipo"],
                     "titulo": titulo(r), "competencia": r["competencia"], "estado": r["estado"],
-                    "valor_centavos": r["valor_protocolado_centavos"], "proximo_passo": PROXIMO_PASSO[r["estado"]],
+                    # #284: o valor da linha e' o que vale para a nota (aprovado, senao pedido), em todo estado
+                    "valor_centavos": (valor_travado(r) or (r["valor_protocolado_centavos"],))[0],
+                    "proximo_passo": PROXIMO_PASSO[r["estado"]],
                     "desde": max(marcos) if marcos else (criado.isoformat() if criado else ""),
                     # os marcos crus, para quem precisa do marco da SITUACAO e nao do mais recente (resumo abaixo)
                     "espelho_em": r["espelho_em"], "nota_emitida_em": r["nota_emitida_em"],

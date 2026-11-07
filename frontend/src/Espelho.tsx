@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import CampoCompetencia from "./CampoCompetencia";
 import CampoValor from "./CampoValor";
+import ErroCampo from "./ErroCampo";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import { api, apiForm, ApiErro, mensagemDeErro } from "./api";
 import { IconeAlerta, IconeBaixar, IconeMais } from "./icones";
@@ -26,8 +27,15 @@ type Saida = {
   valor: number; mo: number | null; material: number | null; inss: number | null; iss: number | null;
   irrf: number | null; ibs: number | null; cbs: number | null; liquido: number; nome_arquivo?: string;
 };
-type Previa = { saidas: Saida[]; medicoes: { tipo: string; valor_centavos: number; existente: string | null }[]; avisos: string[];
-  periodo: string };
+// #284: `sem_boletim` = a medicao ja' existia antes do espelho e nao tem o boletim do orgao (so' segue com
+// justificativa); `travados` = o valor que veio da medicao (aprovado do boletim, senao pedido)
+type Previa = { saidas: Saida[]; medicoes: { tipo: string; valor_centavos: number; existente: string | null; sem_boletim?: boolean }[];
+  avisos: string[]; periodo: string;
+  travados?: { tipo: string; valor_centavos: number; fonte: "boletim" | "atestado" | "pedido"; opcional: boolean; sem_boletim: boolean }[] };
+// de onde veio o valor travado: o aprovado do boletim, o atestado digitado (vale como aprovado) ou o pedido
+const ORIGEM_TRAVADO: Record<string, string> = { boletim: "aprovado do boletim", atestado: "aprovado", pedido: "pedido" };
+const MIN_JUSTIFICATIVA_SEM_BOLETIM = 10;    // espelhos.MIN_JUSTIFICATIVA_SEM_BOLETIM
+const ESTADOS_ESPELHO = ["espelho_gerado", "espelho_enviado"];
 type Arquivo = { documento_id: number; saida: string; nome: string; tamanho: number };
 type Envio = { id: number; remetente: string; para: string[]; copia: string[]; assunto: string; enviado_em: string };
 type EspelhoDetalhe = {
@@ -87,6 +95,9 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     { numero: inicial ? String(inicial.numero) : "", competencia: inicial?.competencia ?? "", entradas: {}, motivo: "",
       periodoInicio: mesCivil(inicial?.competencia ?? "")[0], periodoFim: mesCivil(inicial?.competencia ?? "")[1] });
   const [erro, setErro] = useState("");
+  // #284: "seguir sem boletim" da medicao que ja' existia antes do espelho
+  const [justificativa, setJustificativa] = useState("");
+  const [erroJustificativa, setErroJustificativa] = useState<string | undefined>(undefined);
   const [reservado, setReservado] = useState<{ id: number; reserva: Reserva } | null>(null);   // envio preso (409)
   // Versao ja' enviada: so' manda de novo com a confirmacao marcada (S8, 10/10/2026). `jaEnviado`: o 409
   // ESPELHO_JA_ENVIADO de quem tinha a tela aberta quando outro acabou de enviar.
@@ -193,7 +204,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
   };
 
   const conferir = async (ev: React.FormEvent) => {
-    ev.preventDefault(); setErro(""); setOcupado(true);
+    ev.preventDefault(); setErro(""); setJustificativa(""); setErroJustificativa(undefined); setOcupado(true);
     try {
       const p = await api<Previa>(`/api/contratos/${contratoId}/espelho/previa`, {
         method: "POST", body: JSON.stringify(corpoEspelho()) });
@@ -202,10 +213,17 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
   };
 
   const gerar = async () => {
-    setErro(""); setOcupado(true);
+    const semBoletim = passo.tipo === "previa" && passo.previa.medicoes.some(m => m.sem_boletim);
+    if (semBoletim && justificativa.trim().length < MIN_JUSTIFICATIVA_SEM_BOLETIM) {
+      setErroJustificativa(`Informe a justificativa (ao menos ${MIN_JUSTIFICATIVA_SEM_BOLETIM} caracteres).`);
+      document.getElementById("esp-sem-boletim")?.focus();
+      return;
+    }
+    setErro(""); setErroJustificativa(undefined); setOcupado(true);
     try {
       const r = await api<{ espelho_id: number }>(`/api/contratos/${contratoId}/espelho`, {
-        method: "POST", body: JSON.stringify(corpoEspelho()) });
+        method: "POST", body: JSON.stringify({ ...corpoEspelho(),
+          ...(semBoletim ? { justificativa_sem_boletim: justificativa.trim() } : {}) }) });
       const novos = await carregar();
       const esp = novos?.espelhos.find(e => e.id === r.espelho_id);
       const lar = esp ? larDoEspelho(esp) : undefined;
@@ -388,13 +406,32 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
           <p className="campo__nota">Período no espelho: <span className="num">{passo.previa.periodo}</span></p>
           {tabelaNotas(passo.previa.saidas)}
           <ul className="lista-simples espelho__medicoes">
-            {passo.previa.medicoes.map(m => (
-              <li key={m.tipo}>Medição {form.numero} de {TIPO[m.tipo] ?? m.tipo}: {brl(m.valor_centavos)}
-                {m.existente && <> <Selo classe="selo--atencao">Versão nova</Selo></>}</li>
-            ))}
+            {passo.previa.medicoes.map(m => {
+              // #284: o valor que veio da medicao (aprovado do boletim, senao pedido) nao se digita
+              const trav = passo.previa.travados?.find(t => t.tipo === m.tipo);
+              return (
+                <li key={m.tipo}>Medição {form.numero} de {TIPO[m.tipo] ?? m.tipo}
+                  {trav ? ` (${ORIGEM_TRAVADO[trav.fonte] ?? "pedido"})` : ""}: {brl(m.valor_centavos)}
+                  {m.existente && ESTADOS_ESPELHO.includes(m.existente) && <> <Selo classe="selo--atencao">Versão nova</Selo></>}</li>
+              );
+            })}
           </ul>
           {passo.previa.avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
-          {passo.previa.medicoes.some(m => m.existente) && (
+          {passo.previa.medicoes.some(m => m.sem_boletim) && (
+            <>
+              <CaixaAviso nivel="atencao">Sem o boletim do órgão: {passo.previa.medicoes.filter(m => m.sem_boletim)
+                .map(m => `Medição ${form.numero} de ${TIPO[m.tipo] ?? m.tipo}`).join(" e ")}.</CaixaAviso>
+              <div className="campo">
+                <label className="campo__rotulo" htmlFor="esp-sem-boletim">Justificativa para seguir sem boletim</label>
+                <input id="esp-sem-boletim" name="justificativa_sem_boletim" autoComplete="off" className="entrada--larga"
+                  maxLength={500} value={justificativa}
+                  {...(erroJustificativa ? { "aria-invalid": true as const, "aria-describedby": "esp-sem-boletim-erro" } : {})}
+                  onChange={e => { setJustificativa(e.target.value); setErroJustificativa(undefined); }} />
+                <ErroCampo id="esp-sem-boletim-erro" erro={erroJustificativa} />
+              </div>
+            </>
+          )}
+          {passo.previa.medicoes.some(m => m.existente && ESTADOS_ESPELHO.includes(m.existente)) && (
             <div className="campo">
               <label className="campo__rotulo" htmlFor="esp-motivo">Motivo da nova versão (opcional)</label>
               <input id="esp-motivo" name="motivo" autoComplete="off" className="entrada--media" maxLength={500} value={form.motivo}

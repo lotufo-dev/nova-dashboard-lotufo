@@ -7,10 +7,11 @@ import ErroCampo from "./ErroCampo";
 import { api, apiForm, mensagemDeErro } from "./api";
 import { IconeAlerta } from "./icones";
 import { FormMotivo } from "./MedicaoAtos";
-import { fmtTamanho as mb } from "./formato";
+import { brl, fmtTamanho as mb } from "./formato";
 import { fmtCompetencia, fmtDataPura } from "./tempo";
 import Selo from "./Selo";
 import Pendencias from "./Pendencias";
+import PleitoPrevisao from "./PleitoPrevisao";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 
 // Fluxo do oficio (bloco 7): pleito de reajuste, pedido de prorrogacao e comunicacao de conclusao. Mesmo caminho
@@ -27,8 +28,11 @@ export type Pleito = {
   situacao: string; corpo_carta: string | null; corpo_padrao?: string | null; erro_carta?: string;
   montado_paginas: number | null; assinado_arquivo: string | null; nome_documento: string | null;
   conferencia: Conferencia | null; pendencias: Pendencia[]; enviado_em: string | null; envio_justificativa: string | null;
-  anexos: { id: number; tipo: string; nome: string; tamanho: number }[];
+  /** `gerado`: a curva S que o servidor gera no pedido de prazo (issue #293); vai sempre e nao se remove. */
+  anexos: { id: number; tipo: string; nome: string; tamanho: number; gerado?: boolean }[];
   exigidos: { tipo: string; rotulo: string }[];
+  /** Reajuste: a chave do apostilamento que atendeu o pleito (o cadastro preenche, issue #271). */
+  instrumento_chave?: string | null;
   // issue #277: a cadeia do pleito de reajuste (original -> reiteracoes/reemissoes) e o que o servidor deixa fazer
   reemite_pleito_id?: number | null; reemissao?: Reemissao | null; anterior?: EloPleito | null;
   reemissoes?: EloPleito[]; reemissoes_possiveis?: Reemissao[];
@@ -57,7 +61,8 @@ function mensagem(e: unknown): string {
 
 // Os anexos do oficio como checklist (F-67). Tudo o que o servidor lista em `exigidos` e' exigido, entao sem
 // arquivo e' "Falta" (Atencao: se envia com justificativa, como no protocolo); a situacao basta, sem nota "Exigida". Anexo de um tipo que nao esta'
-// entre os exigidos aparece em "Outros anexos", so' para remover.
+// entre os exigidos aparece em "Outros anexos", so' para remover. A curva S que o servidor gera no prazo (#293) tem
+// linha propria e nao se remove (o servidor recusa).
 function itensDoPleito(p: Pleito): ItemChecklist[] {
   const arquivosDe = (tipo: string) => p.anexos.filter(a => a.tipo === tipo).map(a => ({ id: a.id, nome: a.nome, tamanho: a.tamanho }));
   const itens: ItemChecklist[] = p.exigidos.map((x): ItemChecklist => {
@@ -66,19 +71,33 @@ function itensDoPleito(p: Pleito): ItemChecklist[] {
       aceita: ".xlsx,application/pdf" };
   });
   const conhecidos = new Set(p.exigidos.map(x => x.tipo));
-  const outros = p.anexos.filter(a => !conhecidos.has(a.tipo)).map(a => ({ id: a.id, nome: a.nome, tamanho: a.tamanho }));
+  const so = (lista: Pleito["anexos"]) => lista.map(a => ({ id: a.id, nome: a.nome, tamanho: a.tamanho }));
+  const curva = p.anexos.filter(a => a.gerado);
+  if (curva.length > 0) itens.push({ chave: "curva_s", rotulo: "Curva S", situacao: "anexada", arquivos: so(curva),
+    semAnexar: true, semRemover: true });
+  const outros = so(p.anexos.filter(a => !a.gerado && !conhecidos.has(a.tipo)));
   if (outros.length > 0) itens.push({ chave: "outros", rotulo: "Outros anexos", situacao: "anexada", arquivos: outros, semAnexar: true });
   return itens;
 }
 
+/** Issue #292: os dias que o servidor sugere para a carta de prazo (`prazos.sugestao_dias`): saldo a executar no
+ *  ritmo das ultimas competencias fechadas. `dias` nulo: nao sugere, e `motivo` diz por que. */
+export type SugestaoDias = {
+  saldo_centavos: number; medido_periodo_centavos: number; ritmo_centavos: number | null; meses: number;
+  de: string; ate: string; execucao_fim: string | null; novo_fim: string | null; dias: number | null;
+  motivo: string | null;
+};
+
 /** Passo 1: numero do oficio e os campos do tipo. */
-export function NovoPleito({ contratoId, tipo, dataBase, reemite, aoCriar, aoCancelar }: {
+export function NovoPleito({ contratoId, tipo, dataBase, reemite, sugestao, aoCriar, aoCancelar }: {
   contratoId: number; tipo: TipoPleito; dataBase?: string; aoCriar: (p: Pleito) => void; aoCancelar: () => void;
   // reiteracao ou reemissao do cronograma: o oficio novo nasce ligado ao pleito `id` (issue #277)
   reemite?: { id: number; reemissao: Reemissao };
+  // pedido de prazo: a sugestao preenche o campo de dias, e a pessoa confirma ou muda (issue #292)
+  sugestao?: SugestaoDias | null;
 }) {
   const [oficio, setOficio] = useState("");
-  const [dias, setDias] = useState("");
+  const [dias, setDias] = useState(tipo === "prazo" && sugestao?.dias ? String(sugestao.dias) : "");
   const [justificativa, setJustificativa] = useState("");
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -112,8 +131,18 @@ export function NovoPleito({ contratoId, tipo, dataBase, reemite, aoCriar, aoCan
         <>
           <div className="campo">
             <label className="campo__rotulo" htmlFor="prazo-dias">Dias de prorrogação</label>
-            <input id="prazo-dias" name="dias" autoComplete="off" spellCheck={false} className="entrada--16ch" type="number" min={1} required
+            {/* max: o teto do pedido na API (api_pleitos.CriarIn.dias, 3.650 dias) */}
+            <input id="prazo-dias" name="dias" autoComplete="off" spellCheck={false} className="entrada--16ch" type="number" min={1} max={3650} required
+              aria-describedby={sugestao ? "prazo-dias-sugestao" : undefined}
               value={dias} onChange={e => setDias(e.target.value)} />
+            {sugestao && (
+              <p className="campo__nota" id="prazo-dias-sugestao">
+                {sugestao.dias !== null
+                  ? `Sugestão: ${sugestao.dias} ${sugestao.dias === 1 ? "dia" : "dias"} (saldo ${brl(sugestao.saldo_centavos)}, `
+                    + `ritmo ${brl(sugestao.ritmo_centavos)}/mês de ${fmtCompetencia(sugestao.de)} a ${fmtCompetencia(sugestao.ate)})`
+                  : `Sem sugestão de dias. ${sugestao.motivo ?? ""}`}
+              </p>
+            )}
           </div>
           <div className="campo">
             <label className="campo__rotulo" htmlFor="prazo-just">Justificativa (vai na seção “2. DO PEDIDO”)</label>
@@ -177,13 +206,16 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
       setPrevia(null);
     });
   }
-  const precisaJustificativa = (previa?.pendencias.length ?? 0) > 0;
+  // issue #447: a curva S fora dos dados de agora trava o envio e a justificativa nao a libera (so' "Atualizar curva S")
+  const curvaBloqueia = previa?.pendencias.find(x => x.codigo === "curva_s");
+  const precisaJustificativa = (previa?.pendencias.filter(x => x.codigo !== "curva_s").length ?? 0) > 0;
   const faltaJustificativa = precisaJustificativa && justificativa.trim().length < MIN_JUSTIFICATIVA;
   const erroJustificativa = tentou && faltaJustificativa
     ? `Escreva a justificativa, com pelo menos ${MIN_JUSTIFICATIVA} caracteres.` : undefined;
   // o clique em Enviar chega aqui antes do envio: a justificativa que falta aparece junto do campo, com o foco nele
   function validarAntes(): boolean {
     setTentou(true);
+    if (curvaBloqueia) { setErro(curvaBloqueia.mensagem); return false; }
     if (faltaJustificativa) document.getElementById(`pl-just-${p.id}`)?.focus();
     return !faltaJustificativa;
   }
@@ -215,6 +247,10 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
                 aoRemover={id => agir(() => api(`/api/pleitos/${p.id}/anexos/${id}/remover`, { method: "POST" }))} />
             </div>
           )}
+
+          {/* issue #272: a previsao por competencia se confere antes de montar a carta */}
+          {/* a reiteracao nao traz cronograma (#277): a previsao e' a do pleito reiterado */}
+          {editavel && p.tipo === "reajuste" && p.reemissao !== "reiteracao" && <PleitoPrevisao pleitoId={p.id} dataBase={p.data_base_mes} ciclo={p.ciclo} aoGravar={aoMudar} />}
 
           <div className="pilha">
             {/* montada a carta, o texto recolhe; montar e baixar ficam fora dele, sempre a' vista */}
@@ -255,6 +291,15 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
             <div>
               <span className="painel__titulo">O que falta</span>
               <Pendencias itens={p.pendencias} />
+              {/* issue #447: a curva S fora dos dados de agora se troca sem montar de novo (a carta assinada fica) */}
+              {editavel && p.pendencias.some(x => x.codigo === "curva_s") && (
+                <div className="form-inline">
+                  <button type="button" className="btn" disabled={ocupado}
+                    onClick={() => agir(async () => { await api(`/api/pleitos/${p.id}/curva-s`, { method: "POST" }); setPrevia(null); })}>
+                    Atualizar curva S
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -275,8 +320,11 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
               <ComporEmail key={p.id} ocupado={ocupado} anexos={previa.anexos}
                 validarAntes={validarAntes}
                 inicial={{ para: previa.para, copia: previa.copia, cco: [], assunto: previa.assunto, corpo: previa.corpo }}
-                antes={precisaJustificativa && (
+                antes={previa.pendencias.length > 0 && (
                   <div className="campo ol-pendencias">
+                    {/* issue #447: o motivo vem antes do pedido de justificativa */}
+                    <Pendencias itens={previa.pendencias} />
+                    {precisaJustificativa && <>
                     <label className="campo__rotulo" htmlFor={`pl-just-${p.id}`}>
                       Justificativa (obrigatória para enviar com pendência)
                     </label>
@@ -285,6 +333,7 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
                       onChange={e => setJustificativa(e.target.value)} />
                     {/* F-69: a condicao do Enviar aparece no erro do campo, quando o Enviar e' clicado sem ela */}
                     <ErroCampo id={`pl-just-${p.id}-erro`} erro={erroJustificativa} />
+                    </>}
                   </div>
                 )}
                 aoEnviar={enviar} aoDescartar={() => setPrevia(null)} />

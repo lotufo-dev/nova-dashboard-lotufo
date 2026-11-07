@@ -164,7 +164,7 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
           )}
 
           <Rolagem rotulo={`Documentos exigidos: ${n.titulo}`}>
-            <table className="tabela tabela--grade">
+            <table className="tabela tabela--grade tabela--docs">
               {/* mesma grade nas tabelas de cada nucleo (F-47) */}
               <colgroup>
                 <col /><col className="c-situacao" /><col className="c-data" />{comEmitir && <col className="c-acao" />}
