@@ -273,6 +273,8 @@ export type DetalhePlanilha = {
   id: number; contrato_id: number; numero: number; tipo: string; competencia: string; estado: string; planilha_enviada_em: string | null;
   planilha_envio_origem: string | null; planilhas: Versao[]; envio_planilha: SituacaoEnvio;
   planilha_siga: { data: string | null; numero: string | null } | null;
+  /** issue #490: a leitura por grupo mais nova da planilha; `aviso` so' quando ela foi recusada */
+  leitura_planilha?: { situacao: string; aviso: string | null } | null;
 };
 type Previa = { numero_oficio: string; versao: number; para: string[]; copia: string[]; assunto: string; corpo: string;
   anexos: { nome: string; tamanho: number; sha256: string }[]; total: number; limite: number;
@@ -442,6 +444,8 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
               aoLiberar={() => { setErro(""); setReserva(null); void carregar().catch(() => {}); }} />
           </div>
         )}
+
+        {d.leitura_planilha?.aviso && <CaixaAviso nivel="atencao">{d.leitura_planilha.aviso}</CaixaAviso>}
 
         <table className="tabela tabela--densa" aria-label="Versões da planilha/carta">
           <thead><tr><th scope="col">Versão</th><th scope="col">Período</th><th scope="col" className="num">Pedido</th>
