@@ -3,7 +3,7 @@
    depois) sem mexer nas outras telas. Cores sempre pelas variaveis do tokens.css. */
 
 .notas-v3 { --nota-campo: var(--linha-forte); --nota-cinza: var(--superficie-2); }
-.notas-v3 .nota-mono { font-family: var(--fonte-num, "IBM Plex Mono", ui-monospace, monospace);
+.notas-v3 .nota-mono { font-family: var(--fonte-num);
   font-variant-numeric: tabular-nums; font-weight: 400; }
 
 /* ---------------------------------------------------------------- lista */

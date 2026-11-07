@@ -16,10 +16,17 @@ o que está pronto, o que falta e o próximo passo.
 - **Cor da marca:** só o índigo `#4F46E5` (botão principal, link, item ativo, barra de progresso), com a tinta
   clara `#EEF0FF` para hover e selecionado.
 - **Neutros:** fundo `#F6F8FB`, superfície branca, texto `#0F172A`, secundário `#64748B`, linhas `#E2E8F0`.
-- **Situação:** verde `#10B981` (em dia), âmbar `#F59E0B` (pendente), vermelho `#EF4444` (vencido). Só para
-  situação, nunca decoração. Pílula = fundo tingido claro + ponto colorido + texto escuro.
-- **Tipo:** IBM Plex Sans (400/500/600); números e valores em IBM Plex Mono, alinhados à direita.
-  Escala 12 / 14 / 16 / 24 / 32–40.
+- **Regra de cor da informação (06/11/2026):** número e data pretos por padrão; verde `#10B981` = feito ou
+  recebido, azul `#3B82F6` = em andamento, âmbar `#F59E0B` = vence em breve ou faltando, vermelho `#EF4444` =
+  crítico, vencido ou sem registro; o que não é urgente fica preto. A cor é da informação, nunca do desenho da
+  página. Legenda pequena no topo direito: "feito · em andamento · vence em breve · crítico". Pílula = fundo
+  tingido claro + ponto colorido + texto escuro. Detalhe em `docs/identidade-visual.md`.
+- **Tipo (06/11/2026):** uma fonte geométrica arredondada e larga (Lexend), títulos e valores em negrito; valores
+  em reais na MESMA fonte do texto, alinhados à direita, algarismos tabulares. Escala 12 / 14 / 16 / 24 / 32–40.
+- **Menu lateral largo:** ícone e nome em cada item, item ativo em pílula branca, recolhível.
+- **Telas aprovadas:** as imagens têm dado real e ficam no repositório privado `lotufo-cadastro`, pasta `telas/`
+  (`~/dev/lotufo-cadastro/telas` no Mac; `C:\DashboardLotufo\cadastro\telas` no servidor); o `README.md` de lá
+  explica. Trate a imagem como a fonte.
 - **Forma:** raio 8 em cartão e botão, 10 em janela e menu, 999 em pílula; sombra suave; base de 8 px,
   16–24 px entre cartões. Página sem sombra nem raio.
 - **Tabela é o elemento principal** onde há lista de valores: cabeçalho 12 px cinza, linhas de 44 px, um ponto
@@ -48,7 +55,7 @@ campo de competência MM/AAAA · busca no topo da lista · grupos recolhíveis p
 
 - Cores da marca Lotufo Engenharia, logotipo da empresa ou de órgão público.
 - Gradiente, vidro fosco, brilho, ilustração 3D, ícone decorativo grande, emoji.
-- Fontes de "cara de IA" (Inter genérica, display arredondada, script). Só IBM Plex.
+- Fontes de "cara de IA" (Inter genérica, script). Só a fonte geométrica arredondada aprovada (Lexend).
 - Texto em inglês, lorem ipsum, código interno ou nome de campo do banco na tela.
 - Cor de situação usada como enfeite; mais de um botão primário por área.
 - Dado real (obra, órgão, pessoa, e-mail, CNPJ, valor).
@@ -58,7 +65,7 @@ campo de competência MM/AAAA · busca no topo da lista · grupos recolhíveis p
 Contratantes "Secretaria de Obras", "Agência de Parcerias", "Prefeitura Municipal", "Secretaria de Saúde".
 Obras "Ponte do Ribeirão", "Avenida das Palmeiras", "Terminal Norte", "Hospital Regional", "Parque Linear",
 "Anel Viário Sul", "Escola Modelo", "Centro Esportivo". Competência no formato "09/2026"; medição "7ª";
-valores "R$ 1.234.567,89" em mono. Nada copiado do banco ou do cadastro.
+valores "R$ 1.234.567,89" na fonte do texto, tabulares. Nada copiado do banco ou do cadastro.
 
 ## Como gerar
 
@@ -87,3 +94,18 @@ valores "R$ 1.234.567,89" em mono. Nada copiado do banco ou do cadastro.
 Regra de todas: a tela nova não perde nenhuma ação nem número que alguém usa para decidir. Frase de apoio, legenda
 sob número, explicação de regra e contador secundário não contam como dado e não passam para a tela nova
 (`.claude/rules/texto-na-tela.md`, 26/10/2026).
+
+### Leva de 06 e 07/11/2026 (telas aprovadas por imagem)
+
+| Issue | Tela | Já decidido |
+|---|---|---|
+| #505 (base) | Fonte nova, regra de cor da informação, menu lateral largo | Feita nesta leva; as telas abaixo dependem dela. |
+| #506 | Início | Imagem `telas/inicio/APROVADA-inicio-2026-11-06.png`. |
+| #507 | Medições: menu, Iniciar medição com busca, Em andamento | Os dois subitens do menu (com contagem) entram aqui. |
+| #508 | Medições: página da obra, fluxo único, passos 1 e 2 | |
+| #514 | Medições: passos 3 a 6 (Espelhos, Notas, Envio da nota, Pagamento) | |
+| #509 | Obras (lista), posição financeira | |
+| #510 | Página da obra, ficha executiva | Aplica a regra de cor da informação. |
+| #511 | Avisos, o que vence quando | |
+| #512 | SIGA, tabela e histórico do processo | |
+| #513 | Documentos, três abas com chips | |
