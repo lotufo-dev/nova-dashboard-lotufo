@@ -391,6 +391,84 @@ def test_watchdog_so_inicia_a_tarefa_que_de_fato_parou():
     assert "exit 1" in espera
 
 
+def _bloco_do_if(codigo, cabeca):
+    """O corpo do bloco que comeca em `cabeca`, ate' o '}' que o fecha na mesma indentacao."""
+    inicio = codigo.index(cabeca)
+    linha_ini = codigo.rfind("\n", 0, inicio) + 1
+    recuo = codigo[linha_ini:inicio]
+    fim = codigo.index("\n" + recuo + "}", inicio)
+    return codigo[inicio:fim]
+
+
+def test_watchdog_consulta_a_porta_sem_tratar_erro_como_porta_livre():
+    # Gate Sol da PR #494 (S2): erro do Get-NetTCPConnection virava "porta livre" e o Start corria contra o orfao
+    codigo = _codigo(_ler("watchdog.ps1"))
+    assert "([uri]$Url).Port" in codigo
+    dono = codigo[codigo.index("function DonoDaPorta"):]
+    dono = dono[:dono.index("\n}") + 2]
+    # lista todos os listeners e filtra a porta no pipeline: ausencia e' lista vazia, nao erro
+    assert "Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -eq $porta }" in dono
+    assert "-LocalPort" not in dono
+    consulta = dono[:dono.index("if (-not $c) { return $null }")]
+    assert "try" not in consulta and "catch" not in consulta
+    # quem chama registra o erro e nao inicia nada, antes e depois de encerrar o orfao
+    falha_antes = _bloco_do_if(codigo, 'catch {\n    Escrever ("FALHA ao consultar a porta ${porta}, nada iniciado')
+    assert "exit 1" in falha_antes
+    assert codigo.index("try { $orfao = DonoDaPorta }") < codigo.index(falha_antes)
+    falha_depois = _bloco_do_if(
+        codigo, 'catch {\n        Escrever ("FALHA ao consultar a porta $porta depois de encerrar o orfao')
+    assert "nada iniciado" in falha_depois and "exit 1" in falha_depois
+    assert codigo.index("try { $resto = DonoDaPorta }") < codigo.index(falha_depois)
+
+
+def test_watchdog_so_encerra_o_uvicorn_da_dashboard_pelos_argumentos_exatos():
+    # Gate Sol da PR #494 (S1): duas substrings soltas casariam outro FastAPI; os argumentos sao os do rodar_producao
+    codigo = _codigo(_ler("watchdog.ps1"))
+    funcao = codigo[codigo.index("function EDaDashboard"):]
+    funcao = funcao[:funcao.index("\n}") + 2]
+    assert '-match "-m uvicorn --factory app\\.main:create_app "' in funcao
+    assert '-match "--port $porta(\\s|$)"' in funcao and "-and" in funcao
+    rodar = _ler("rodar_producao.ps1")
+    assert rodar.count("-m uvicorn --factory app.main:create_app ") == 2 and rodar.count("--port $Porta") == 2
+    # dono que nao e' a dashboard: PID no log, nada morto, sai com 1
+    alheio = _bloco_do_if(codigo, "if (-not (EDaDashboard $orfao)) {")
+    assert ('Escrever "porta $porta ocupada pelo PID $($orfao.ProcessId) ($($orfao.Name)), '
+            'que nao e\' a dashboard -> nada iniciado"') in alheio
+    assert "exit 1" in alheio and "Stop-Process" not in alheio
+
+
+def test_watchdog_encerra_o_uvicorn_orfao_antes_de_iniciar_a_tarefa():
+    # Issue #480: Stop-ScheduledTask nao mata o uvicorn (incidente de 2026-09-21); o orfao segura a porta, a instancia
+    # nova morre com WinError 10048 e o watchdog repetia o Start a cada 3 minutos, para sempre
+    codigo = _codigo(_ler("watchdog.ps1"))
+    linhas = [linha.strip() for linha in codigo.splitlines()]
+    parar = codigo.index("$parada = $false")
+    pausa_porta = codigo.index('SairSePausado "antes de conferir a porta"')
+    consulta = codigo.index("try { $orfao = DonoDaPorta }")
+    pausa_matar = codigo.index('SairSePausado "antes de encerrar o orfao"')
+    reconfere = codigo.index("try { $agora = DonoDaPorta }")
+    matar = codigo.index("Stop-Process -Id $orfao.ProcessId -Force")
+    entre = codigo.index('SairSePausado "entre a parada e o inicio"')
+    iniciar = codigo.index("Start-ScheduledTask -TaskName")
+    # Gate Sol da PR #494 (S3): o sentinela e' conferido antes de consultar a porta e logo antes de matar
+    assert parar < pausa_porta < consulta < pausa_matar < reconfere < matar < entre < iniciar
+    # reuso de PID: o dono e' reconferido (PID e criacao) antes do Stop-Process
+    mudou = _bloco_do_if(codigo, "if (-not $agora -or $agora.ProcessId -ne $orfao.ProcessId")
+    assert '"$($agora.CreationDate)" -ne "$($orfao.CreationDate)"' in mudou
+    assert "nada iniciado" in mudou and "exit 1" in mudou
+    # a linha logo antes do Stop-Process e' o log com o PID que vai ser encerrado
+    i = next(n for n, linha in enumerate(linhas) if "Stop-Process -Id $orfao.ProcessId -Force" in linha)
+    assert linhas[i - 1] == (
+        'Escrever "servidor orfao na porta $porta (PID $($orfao.ProcessId), criado em $($orfao.CreationDate)) '
+        '-> encerrando"'
+    )
+    # se nao morre, nada e' iniciado e sai com 1, com o PID no log
+    resto = _bloco_do_if(codigo, "if ($resto) {")
+    assert ('Escrever "porta $porta ocupada pelo PID $($resto.ProcessId) depois de encerrar o orfao '
+            '-> nada iniciado"') in resto
+    assert "exit 1" in resto
+
+
 def test_watchdog_acusa_tarefa_que_nao_iniciou_e_saude_que_nao_voltou():
     # Gate Sol: tarefa desabilitada da' erro nao fatal e o log dizia "disparado"; sem saude depois, sai com 1
     script = _ler("watchdog.ps1")

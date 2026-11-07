@@ -196,6 +196,14 @@ certificado velho e o novo morreria com WinError 10048); `Start-ScheduledTask Da
 não reinicia a produção: o `watchdog.log` registra "CONFERIDOR com problema, producao NAO reiniciada: <motivo>" a cada rodada,
 até ser resolvido.
 
+**Watchdog e o servidor órfão** (issue #480): o `Stop-ScheduledTask` não mata o uvicorn (incidente de 21/09/2026). Depois de
+parar a tarefa e antes de iniciá-la, o watchdog confere quem escuta a porta da URL de saúde; se for o uvicorn da dashboard
+(linha de comando com `-m uvicorn --factory app.main:create_app` e `--port <porta>`, como o `rodar_producao.ps1` sobe),
+confere de novo o sentinela e o dono da porta e só então encerra o processo, registrando "servidor orfao na porta <porta>
+(PID <pid>, ...) -> encerrando" no `watchdog.log`. Se a porta for de outro processo, continuar ocupada depois de encerrar,
+mudar de dono no meio ou a consulta da porta falhar, registra o motivo ("porta <porta> ocupada pelo PID <pid> ... -> nada
+iniciado", "FALHA ao consultar a porta ..."), não inicia a tarefa e sai com 1: resolver à mão quem segura a porta.
+
 **Saúde na própria máquina.** Watchdog, deploy e `scripts\saude_local.ps1` falam com `https://localhost:<porta>` aceitando
 **só** o certificado da instalação: comparam o thumbprint do certificado apresentado com o de `<raiz>\segredos\tls\cert.pem`
 (`scripts\comum_tls.ps1`). A verificação não é desligada em lugar nenhum, e o pedido só sai para `localhost`. O `deploy.ps1` lê o
