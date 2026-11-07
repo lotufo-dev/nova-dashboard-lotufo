@@ -446,11 +446,16 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
             atual = existentes[(d["numero"], d["tipo"])]
             nfs = _nfs_vinculadas(conn, li["medicao_id"])
             na_planilha = atual["estado"] in medicoes.ESTADOS_PLANILHA     # revisor da #281: a planilha leva o periodo
-            if nfs or na_planilha or atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida"):
+            # #383: a planilha/carta enviada ao orgao (#282) congela a competencia em qualquer estado seguinte
+            # (protocolada sem NF inclusive); a data fica na medicao mesmo depois do protocolo
+            enviada = bool(atual["planilha_enviada_em"])
+            no_espelho = atual["estado"] in ("espelho_gerado", "espelho_enviado", "nota_emitida")
+            if nfs or na_planilha or enviada or no_espelho:
                 # espelho e nota levam a competencia antiga: mudar so' a medicao os separaria
                 _virar(li, "conflito", f"a competência {atual['competencia']} já está "
                                        + (f"na NF {', '.join(nfs)} vinculada" if nfs
-                                          else "na planilha/carta" if na_planilha else "no espelho")
+                                          else "na planilha/carta" if na_planilha
+                                          else "na planilha/carta enviada ao órgão" if enviada else "no espelho")
                                        + ": corrija pela tela")
                 continue
             anteriores = [m["competencia"] for (n, t), m in existentes.items()
@@ -626,9 +631,13 @@ def _corrigir(conn, usuario_id: int, li: dict) -> tuple[str, bool]:
     m = conn.execute("SELECT * FROM medicoes WHERE id=?", (mid,)).fetchone()
     feito, gravou = [], False
     if m["competencia"] != d["competencia"]:
-        cur = conn.execute("UPDATE medicoes SET competencia=? WHERE id=? AND competencia=?",
+        # #383: `planilha_enviada_em IS NULL` defende da corrida com o envio da planilha/carta (#282), que congela
+        # a competencia entre o ensaio e a gravacao
+        cur = conn.execute("UPDATE medicoes SET competencia=? "
+                           "WHERE id=? AND competencia=? AND planilha_enviada_em IS NULL",
                            (d["competencia"], mid, m["competencia"]))
-        db.exigir_uma_linha(cur, "Medição alterada concorrentemente: a competência não pôde ser corrigida")
+        db.exigir_uma_linha(cur, "Medição alterada concorrentemente (ou planilha/carta enviada no meio): "
+                                 "a competência não pôde ser corrigida")
         auditoria.registrar(conn, usuario_id, "medicao.competencia", "medicao", mid,
                             {"competencia": m["competencia"]},
                             {"competencia": d["competencia"], "origem": "carga do histórico", "linha": li["linha"],
