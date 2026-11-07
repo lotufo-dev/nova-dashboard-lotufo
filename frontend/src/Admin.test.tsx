@@ -299,6 +299,22 @@ test("Saúde: três cartões de situação com a hora, nota só na falha, e a ta
   expect(document.body.textContent).not.toMatch(/as NFs e as baixas do RM|deu certo|o que está de um lado só/);
 });
 
+test("Saúde: a rodada mostra as linhas de custo por tarefa e de baixa de estoque, e a falha do custo (#488)", async () => {
+  const comCusto = { ...RODADA_BOA, id: 5, custo_tarefas: 57012, estoque_baixas: 301, custo_erro: null };
+  const semCusto = { ...RODADA_BOA, id: 4, custo_tarefas: null, estoque_baixas: null,
+    custo_erro: "Simulador do RM sem o arquivo da consulta DASH25" };
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null,
+    rodadas: [comCusto, semCusto] });
+  const tabela = await screen.findByRole("table", { name: "Últimas rodadas de sincronização com o RM" });
+  expect(within(tabela).getByRole("columnheader", { name: "Custo por tarefa" })).toBeTruthy();
+  expect(within(tabela).getByRole("columnheader", { name: "Baixa de estoque" })).toBeTruthy();
+  const [, primeira, segunda] = within(tabela).getAllByRole("row");
+  expect(within(primeira).getByText("57.012")).toBeTruthy();
+  expect(within(primeira).getByText("301")).toBeTruthy();
+  expect(within(segunda).getAllByText("—").length).toBe(2);
+  expect(within(segunda).getByText("Simulador do RM sem o arquivo da consulta DASH25")).toBeTruthy();
+});
+
 // Issue #330: o monitor do SIGA ao lado da saúde do RM
 test("Saúde: cartão Monitor do SIGA com a hora da última leitura e os processos; sem leitura, traço", async () => {
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
