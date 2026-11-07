@@ -125,6 +125,17 @@ def test_faturado_e_a_receber_da_obra_em_valor_cheio(cenario):
     assert diretoria.da_obra(c, ids["consorcio"])["faturado_centavos"] == 410_000_000     # cheio, nao a cota de 50%
 
 
+def test_a_receber_por_obra_igual_ao_da_obra_e_escondido_ate_liberar(cenario):
+    """Lista de Obras (#509): o a receber de todas as obras numa passada, na mesma conta de `da_obra`."""
+    c, ids = cenario
+    assert diretoria.a_receber_por_obra(c) is None
+    ids["liberar"]()
+    todas = diretoria.a_receber_por_obra(c)
+    for chave in ("propria", "consorcio"):
+        assert todas.get(ids[chave], 0) == diretoria.da_obra(c, ids[chave])["a_receber_centavos"]
+    assert todas[ids["propria"]] == 1_000_000
+
+
 def test_total_a_receber_escondido_ate_liberar(cenario):
     c, ids = cenario
     p = diretoria.painel(c, HOJE)

@@ -9,6 +9,19 @@ def test_listar(client_admin):
     lista = client_admin.get("/api/contratos").json()
     assert any(c["id"] == cid and c["valor_vigente_centavos"] == 100_000_000 for c in lista)
 
+def test_listar_traz_o_a_receber_so_com_o_total_liberado(client_admin):
+    """Lista de Obras (#509): `a_receber_centavos` e' nulo ate' o total ser liberado; liberado, e' o cheio da obra."""
+    import json
+    from app import db
+    cid = novo_contrato(NOVO)
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    assert lista[cid]["a_receber_centavos"] is None
+    conn = db.get_conn()
+    conn.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)", (json.dumps({"total_a_receber_liberado": True}),))
+    conn.commit(); conn.close()
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    assert lista[cid]["a_receber_centavos"] == 0
+
 def test_sem_login_nega(client):
     assert client.get("/api/contratos").status_code == 401
 
