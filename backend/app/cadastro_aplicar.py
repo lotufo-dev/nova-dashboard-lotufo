@@ -122,7 +122,7 @@ def aplicar(conn: sqlite3.Connection, usuario_id: int, cad: dict, ensaio: bool =
             commit_hash: str | None = None) -> dict:
     rel = {"orgaos": _rel(), "entidades": _rel(), "contratos": _rel(), "instrumentos": _rel(),
            "pleitos": _rel(), "cronograma": _rel(), "geral": _rel(), "espelho": _rel(), "frc": _rel(),
-           "avisos": list(cad.get("avisos", [])), "ensaio": ensaio}
+           "custo": _rel(), "avisos": list(cad.get("avisos", [])), "ensaio": ensaio}
     try:
         with db.mutacao(conn):
             ids_orgao = _orgaos(conn, usuario_id, cad["orgaos"], rel["orgaos"])
@@ -340,7 +340,54 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     _apostilamentos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"], rel["avisos"])
     _aditivos_de_reajuste(conn, usuario_id, cid, c, rel["pleitos"], rel["avisos"])
     _cronograma(conn, usuario_id, cid, c, rel["cronograma"], rel["avisos"])
+    _custo(conn, usuario_id, cid, c, rel["custo"])
     return cid
+
+
+def _custo(conn, usuario_id, contrato_id, c, rel) -> None:
+    """Issue #489: secao `custo:` -> contratos.projeto_rm/custo_* e custo_grupos. Cadastro, nao historico financeiro:
+    o yaml e' a verdade. O grupo casa pelo nome (o id fica estavel quando so' a ordem ou as tarefas mudam); o que saiu
+    do yaml sai do banco. Uma entrada de auditoria com o antes e o depois inteiros; igual, nada e' gravado."""
+    if "projeto_rm" not in {r[1] for r in conn.execute("PRAGMA table_info(contratos)")}:
+        # banco anterior a' migracao 067 (testes de migracao antiga): sem secao `custo:`, nao ha' o que fazer
+        if c.get("custo") is not None:
+            raise ValueError(f"{c['nome_curto']}: o banco ainda não tem a migração 067 (custo por obra); "
+                             "reinicie a dashboard para aplicar as migrações e rode o cadastro de novo")
+        return
+    linha = conn.execute("SELECT projeto_rm, custo_nao_e_custo, custo_sem_tarefa FROM contratos WHERE id=?",
+                         (contrato_id,)).fetchone()
+    gravados = [{k: g[k] for k in ("nome", "tarefas", "itens_planilha", "item_chave")}
+                for g in contratos.custo_grupos(conn, contrato_id)]
+    antes = None
+    if linha["projeto_rm"] is not None or gravados:
+        antes = {"projeto_rm": linha["projeto_rm"], "sem_tarefa": linha["custo_sem_tarefa"],
+                 "nao_e_custo": json.loads(linha["custo_nao_e_custo"]) if linha["custo_nao_e_custo"] else [],
+                 "grupos": gravados}
+    custo = c.get("custo")
+    depois = None if custo is None else {
+        "projeto_rm": custo["projeto_rm"], "sem_tarefa": custo["sem_tarefa"], "nao_e_custo": custo["nao_e_custo"],
+        "grupos": [{k: g[k] for k in ("nome", "tarefas", "itens_planilha", "item_chave")} for g in custo["grupos"]]}
+    if antes == depois:
+        if depois is not None:
+            rel["iguais"] += 1
+        return
+    d = depois or {"projeto_rm": None, "sem_tarefa": None, "nao_e_custo": None, "grupos": []}
+    conn.execute("UPDATE contratos SET projeto_rm=?, custo_nao_e_custo=?, custo_sem_tarefa=? WHERE id=?",
+                 (d["projeto_rm"], None if d["nao_e_custo"] is None else _json(d["nao_e_custo"]), d["sem_tarefa"],
+                  contrato_id))
+    nomes = [g["nome"] for g in d["grupos"]]
+    for antigo in {g["nome"] for g in gravados} - set(nomes):
+        conn.execute("DELETE FROM custo_grupos WHERE contrato_id=? AND nome=?", (contrato_id, antigo))
+    for ordem, g in enumerate(d["grupos"], 1):
+        chave = g["item_chave"] or {}
+        valores = (ordem, _json(g["tarefas"]), _json(g["itens_planilha"]), chave.get("codigo"), chave.get("unidade"))
+        cur = conn.execute("UPDATE custo_grupos SET ordem=?, tarefas=?, itens_planilha=?, item_chave_codigo=?, "
+                           "item_chave_unidade=? WHERE contrato_id=? AND nome=?", (*valores, contrato_id, g["nome"]))
+        if not cur.rowcount:
+            conn.execute("INSERT INTO custo_grupos (ordem, tarefas, itens_planilha, item_chave_codigo, item_chave_unidade, "
+                         "contrato_id, nome) VALUES (?,?,?,?,?,?,?)", (*valores, contrato_id, g["nome"]))
+    (rel["criados"] if antes is None else rel["alterados"]).append(c["nome_curto"])
+    auditoria.registrar(conn, usuario_id, "cadastro.custo", "contrato", contrato_id, antes, depois)
 
 
 def _cronograma(conn, usuario_id, contrato_id, c, rel, avisos) -> None:

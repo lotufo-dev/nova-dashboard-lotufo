@@ -90,6 +90,39 @@ def test_listar_agrupa_o_contratante_como_medicoes(client_admin):
     assert lista[c]["contratante"] == "MTPAR" and lista[c]["orgao_sub"] is None
 
 
+def _com_grupos(cid):
+    from app import db
+    conn = db.get_conn()
+    conn.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha, item_chave_codigo, "
+                 "item_chave_unidade) VALUES (?, 2, 'Drenagem', '[\"001.05\"]', '[\"3.\"]', NULL, NULL)", (cid,))
+    conn.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha, item_chave_codigo, "
+                 "item_chave_unidade) VALUES (?, 1, 'Terraplanagem', '[\"001.03\"]', '[\"2.\"]', '2.1', 'm³')", (cid,))
+    conn.commit(); conn.close()
+
+
+def test_custo_grupos_lista_na_ordem_do_cadastro(client_admin):
+    """Issue #489: os grupos de custo da obra, na ordem do yaml, com tarefas, itens e item-chave."""
+    cid = novo_contrato(NOVO)
+    _com_grupos(cid)
+    assert client_admin.get(f"/api/contratos/{cid}/custo-grupos").json() == [
+        {"ordem": 1, "nome": "Terraplanagem", "tarefas": ["001.03"], "itens_planilha": ["2."],
+         "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+        {"ordem": 2, "nome": "Drenagem", "tarefas": ["001.05"], "itens_planilha": ["3."], "item_chave": None}]
+
+
+def test_custo_grupos_sem_cadastro_e_lista_vazia_e_inexistente_404(client_admin):
+    cid = novo_contrato(NOVO)
+    assert client_admin.get(f"/api/contratos/{cid}/custo-grupos").json() == []
+    assert client_admin.get("/api/contratos/9999/custo-grupos").status_code == 404
+
+
+def test_custo_grupos_exige_ver_paineis(client_admin, monkeypatch):
+    from app import permissoes
+    cid = novo_contrato(NOVO)
+    monkeypatch.setitem(permissoes.PERFIS, "admin", frozenset())
+    assert client_admin.get(f"/api/contratos/{cid}/custo-grupos").status_code == 403
+
+
 def test_custo_rm_da_obra_pelo_centro_atual_e_pelos_anteriores(client_admin):
     """#488: o custo do RM da obra sai pelo centro de custo atual e pelos anteriores, na coligada da entidade."""
     from app import db

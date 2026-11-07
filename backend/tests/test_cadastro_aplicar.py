@@ -2031,3 +2031,71 @@ def test_base_declarada_nova_e_conferida_contra_o_ciclo_guardado(conn):
     with pytest.raises(ValueError, match="use um ciclo de 2024 a 2025"):
         cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(
             instrumentos=[{**maio, "dados": {"ciclo": 2026, "data_base": "2023-06"}}], datas_base=DUAS_BASES)]))
+
+
+# Issue #489: custo por obra
+_CUSTO = {"projeto_rm": "GL.C01.P001", "nao_e_custo": ["2.02", "2.01.22"], "sem_tarefa": "proporcional",
+          "grupos": [{"nome": "Terraplanagem", "tarefas": ["001.03"], "itens_planilha": ["2."],
+                      "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+                     {"nome": "Drenagem", "tarefas": ["001.05", "001.06"], "itens_planilha": ["3."],
+                      "item_chave": None}]}
+
+
+def _grupos(conn):
+    from app import contratos
+    return contratos.custo_grupos(conn, conn.execute("SELECT id FROM contratos").fetchone()[0])
+
+
+def test_custo_grava_os_grupos_na_ordem_e_o_projeto(conn):
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    assert r["custo"]["criados"] == ["MT-402"]
+    assert _grupos(conn) == [
+        {"ordem": 1, "nome": "Terraplanagem", "tarefas": ["001.03"], "itens_planilha": ["2."],
+         "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+        {"ordem": 2, "nome": "Drenagem", "tarefas": ["001.05", "001.06"], "itens_planilha": ["3."], "item_chave": None}]
+    c = conn.execute("SELECT projeto_rm, custo_nao_e_custo, custo_sem_tarefa FROM contratos").fetchone()
+    assert (c["projeto_rm"], json.loads(c["custo_nao_e_custo"]), c["custo_sem_tarefa"]) == \
+        ("GL.C01.P001", ["2.02", "2.01.22"], "proporcional")
+
+
+def test_custo_reaplicado_nao_cria_linha_nem_auditoria(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    linhas = conn.execute("SELECT id, ordem, nome FROM custo_grupos ORDER BY id").fetchall()
+    trilha = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao LIKE 'cadastro.custo%'").fetchone()[0]
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    assert r["custo"] == {"criados": [], "alterados": [], "iguais": 1}
+    assert r["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+    assert [tuple(x) for x in conn.execute("SELECT id, ordem, nome FROM custo_grupos ORDER BY id")] == \
+        [tuple(x) for x in linhas]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao LIKE 'cadastro.custo%'").fetchone()[0] == trilha == 1
+
+
+def test_custo_alterado_mantem_o_grupo_de_mesmo_nome_e_audita(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    id_dren = conn.execute("SELECT id FROM custo_grupos WHERE nome='Drenagem'").fetchone()[0]
+    novo = {**_CUSTO, "grupos": [_CUSTO["grupos"][1], {"nome": "Pavimentação", "tarefas": ["001.07"],
+                                                       "itens_planilha": ["4."], "item_chave": None}]}
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=novo)]))
+    assert r["custo"]["alterados"] == ["MT-402"]
+    assert [(g["ordem"], g["nome"]) for g in _grupos(conn)] == [(1, "Drenagem"), (2, "Pavimentação")]
+    assert conn.execute("SELECT id FROM custo_grupos WHERE nome='Drenagem'").fetchone()[0] == id_dren
+    antes, depois = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.custo' "
+                                 "ORDER BY id DESC").fetchone()
+    assert [g["nome"] for g in json.loads(antes)["grupos"]] == ["Terraplanagem", "Drenagem"]
+    assert [g["nome"] for g in json.loads(depois)["grupos"]] == ["Drenagem", "Pavimentação"]
+
+
+def test_obra_sem_custo_nao_grava_e_tirar_a_secao_limpa(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert _grupos(conn) == [] and conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.custo'"
+                                                ).fetchone()[0] == 0
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert r["custo"]["alterados"] == ["MT-402"] and _grupos(conn) == []
+    assert conn.execute("SELECT projeto_rm FROM contratos").fetchone()[0] is None
+
+
+def test_custo_no_ensaio_relata_e_nao_grava(conn):
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]), ensaio=True)
+    assert r["custo"]["criados"] == ["MT-402"]
+    assert conn.execute("SELECT COUNT(*) FROM custo_grupos").fetchone()[0] == 0

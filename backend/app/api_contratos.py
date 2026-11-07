@@ -103,3 +103,11 @@ def notas_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=Fals
                   conn: sqlite3.Connection = Depends(conexao)):
     _existe(conn, contrato_id)
     return notas.do_contrato(conn, contrato_id)
+
+
+@router.get("/{contrato_id}/custo-grupos")
+def custo_grupos(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
+                 conn: sqlite3.Connection = Depends(conexao)):
+    # Issue #489: grupos da planilha do orgao com as tarefas do RM; obra sem secao `custo:` devolve lista vazia.
+    _existe(conn, contrato_id)
+    return contratos.custo_grupos(conn, contrato_id)
