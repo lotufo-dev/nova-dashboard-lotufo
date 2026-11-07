@@ -17,11 +17,12 @@ não edita issue, não comenta, não cria nada.
    gh issue list --state open --limit 200 --json number,title,labels,body \
      -q '(map(.number)) as $abertas | .[] | {n: .number, t: .title, l: [.labels[].name],
          c: (.body | test("## Critérios de aceite")),
-         d: ([.body | scan("(?i)depende d[ao] #([0-9]+)") | .[0] | tonumber]
+         d: ([.body | scan("(?i)depende[^\n]*") | scan("#([0-9]+)") | .[0] | tonumber]
              | map(select(. as $x | $abertas | index($x))) | unique)}'
    ```
 
-   `d` lista as issues citadas em "Depende da #N" que ainda estão abertas.
+   `d` lista todas as issues citadas na linha que começa em "Depende" ("Depende da #488, da #489 e da #490")
+   que ainda estão abertas; a regra antiga só pegava a primeira.
 
 2. Tirar da lista toda issue com label `decisao`, `parar`, `precisa-do-leo` ou `sessao-manual`, e toda issue
    com `d` não vazio (depende de issue ainda aberta: a trabalhadora não teria a base no `master`).

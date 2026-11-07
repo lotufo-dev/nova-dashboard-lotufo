@@ -143,6 +143,65 @@ def test_juntar_e_separar_descarta_o_rascunho_anterior(svc):
         notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_exec"], ids["mtpar_reaj"]], "361")
 
 
+def test_reajuste_sem_apostilamento_avisa_e_pede_justificativa_na_mtpar_e_na_prefeitura(svc):
+    """Issue #278: o envio com nota de reajuste sem apostilamento que cubra a competencia mostra o aviso no ofício e
+    pede justificativa (MT-PAR e Prefeitura, onde o ofício de reajuste é da Lotufo); a execução e a SINFRA, não."""
+    c, ids = svc
+    aviso = "Nenhum apostilamento cobre 09/2026; a nota de reajuste não pode sair antes dele"
+    p_mtpar = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_reaj"]], "361")
+    p_vg = notas_envio.iniciar(c, ids["uid"], ids["vg"], [ids["vg_exec"], ids["vg_reaj"]], "254")    # D9: um ofício
+    for pid in (p_mtpar, p_vg):
+        d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+        assert aviso in d["pendencias"] and d["exige_justificativa"] is True
+    p_exec = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_exec"]], "362")
+    p_sinfra = notas_envio.iniciar(c, ids["uid"], ids["sinfra"], [ids["sinfra_exec"], ids["sinfra_reaj"]])
+    for pid in (p_exec, p_sinfra):
+        d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+        assert aviso not in d["pendencias"] and d["exige_justificativa"] is False
+
+
+def _com_termo(c, cid):
+    """Issue #278: data-base 09/2025 e o termo que apostila o reajuste da competencia 09/2026 (a das medicoes daqui)."""
+    c.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice) VALUES (?, '2025-09', 'INCC-DI')", (cid,))
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) "
+              "VALUES (?, 'ap-vg', 'apostilamento_reajuste', '002/2026', '2026-09-01', ?)",
+              (cid, json.dumps({"data_base": "2025-09", "ciclo": 2026, "percentual": "4,15",
+                                "periodo": {"de": "2026-09", "ate": "2027-08"}})))
+    c.commit()
+
+
+def test_oficio_da_prefeitura_com_medicao_e_reajuste_cita_o_termo_e_o_so_de_execucao_nao(svc):
+    """Gate Sol (rodada 1 da PR #435): na Pref. VG o oficio junta medicao e reajuste (D9) e usa o texto da medicao; a
+    frase do termo entra so' quando o oficio leva reajuste, e o oficio so' de execucao sai sem ela."""
+    c, ids = svc
+    _com_termo(c, ids["vg"])
+    frase = "O reajuste da competência 09/2026 está apostilado no Termo de Apostilamento nº 002/2026."
+    p_vg = notas_envio.iniciar(c, ids["uid"], ids["vg"], [ids["vg_exec"], ids["vg_reaj"]], "254")    # D9: um ofício
+    assert "{apostilamento}" in protocolo.corpo_padrao(c, p_vg)       # o texto guarda o marcador (rodada 2)
+    texto = " ".join(" ".join(_textos(protocolo.montar(c, ids["uid"], p_vg)["arquivo"])).split())
+    assert frase in texto and "{" not in texto
+    assert notas_envio.detalhe_envio(c, p_vg, hoje=HOJE)["exige_justificativa"] is False
+    p_exec = protocolo.criar(c, ids["uid"], ids["vg"], "unico", [ids["vg_exec"]], "255")
+    texto = " ".join(" ".join(_textos(protocolo.montar(c, ids["uid"], p_exec)["arquivo"])).split())
+    assert "Apostilamento" not in texto and "{" not in texto
+
+
+def test_montar_de_novo_so_liberado_quando_o_termo_e_o_unico_bloqueio(svc):
+    """Revisor (rodada 2 da PR #435): o termo mudou depois da montagem; com certidao vencida junto, o Montar de novo
+    espera a renovacao (e a montagem recusa), para o pacote nao sair sem a certidao."""
+    c, ids = svc
+    pid = notas_envio.iniciar(c, ids["uid"], ids["mtpar"], [ids["mtpar_reaj"]], "361")
+    protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
+    _com_termo(c, ids["mtpar"])
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert (d["remontar"], d["remontar_liberado"], d["bloqueio"]) == (True, True, protocolo.APOSTILAMENTO_MUDOU)
+    _validade(c, "federal", "2026-09-10")
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert (d["remontar"], d["remontar_liberado"]) == (True, False) and "Certidão vencida" in d["bloqueio"]
+    with pytest.raises(ValueError, match="Certidão vencida — renove antes de montar"):
+        protocolo.montar(c, ids["uid"], pid, refazer_texto=True, hoje=HOJE)
+
+
 # --- regras do envio (D1-D7) -----------------------------------------------------------------------
 
 def test_sinfra_corpo_pelos_anexos_regularidade_com_nome_novo_e_sem_cno(svc):
@@ -388,6 +447,7 @@ def test_registro_por_fora_sem_oficio_segue_o_de_hoje(api):
 
 def test_registro_por_fora_usa_o_ano_do_envio_e_o_ano_digitado(api):
     cl, c, ids = api
+    _com_termo(c, ids["mtpar"])          # reajuste apostilado: sem termo, o registro pede confirmacao (#278)
     r = cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(ids["mtpar_exec"])], "enviado_em": "2025-12-30",
                                                  "observacao": "Pelo Outlook", "numero_oficio": "12"})
     assert r.status_code == 200, r.text
@@ -415,6 +475,7 @@ def test_registro_por_fora_usa_a_sigla_como_o_envio_pelo_sistema(api):
 
 def test_registro_por_fora_sem_oficio_usa_o_do_ultimo_envio_e_o_digitado_vence(api):
     cl, c, ids = api
+    _com_termo(c, ids["mtpar"])          # reajuste apostilado: sem termo, o registro pede confirmacao (#278)
     for mid, oficio in ((ids["mtpar_exec"], ""), (ids["mtpar_reaj"], "361")):
         pid = notas_envio.iniciar(c, 1, ids["mtpar"], [mid], "300")
         c.execute("UPDATE protocolos SET situacao='enviado' WHERE id=?", (pid,)); c.commit()
@@ -1030,6 +1091,25 @@ def test_registro_por_fora_sem_nada_faltando_nao_pede_nem_grava_confirmacao(api,
     assert _confirmacoes_fora(c) == [] and recebidas == ["Envio feito por fora: Pelo Outlook, ao fiscal do contrato"]
     depois = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
     assert "confirmadas" not in depois
+
+
+def test_registro_por_fora_do_reajuste_sem_apostilamento_avisa_e_pede_observacao(api):
+    """Revisor (rodada 1 da PR #435): o registro por fora segue a lista do envio pelo sistema (#230). O reajuste da
+    MT-PAR sem termo que cubra a competencia entra no ATENÇÃO e na ressalva, e a observacao, que faz as vezes da
+    justificativa, precisa de pelo menos 10 caracteres."""
+    cl, c, ids = api
+    mid = ids["mtpar_reaj"]
+    aviso = "Nenhum apostilamento cobre 09/2026; a nota de reajuste não pode sair antes dele"
+    r = _fora(cl, mid)
+    det = r.json()["detail"]
+    assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS" and det["pendencias"] == [aviso], r.text
+    r = _fora(cl, mid, confirmadas=[aviso], observacao="Outlook")
+    assert r.status_code == 422 and "observação" in r.json()["detail"] and "10 caracteres" in r.json()["detail"]
+    _sem_registro(c, mid)
+    assert _fora(cl, mid, confirmadas=[aviso]).status_code == 200
+    depois = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+    assert depois["ressalva"] == "Pelo Outlook, ao fiscal do contrato; " + protocolo.CONFIRMADO_COM_FALTA + aviso
+    assert _fora(cl, ids["mtpar_exec"], observacao="Outlook").status_code == 200       # a execucao nao pede
 
 
 def test_registro_por_fora_continua_exigindo_a_observacao_mesmo_confirmado(api):

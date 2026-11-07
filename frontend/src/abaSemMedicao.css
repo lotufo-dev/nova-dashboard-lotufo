@@ -1,0 +1,66 @@
+/* Aba "Sem medição aberta" (#154, prototipo aprovado em 14/10/2026; AbaSemMedicao.tsx). Reaproveita o quadro e o
+   botao de iniciar de medicoes.css; aqui so' o grupo por contratante e a tabela dele. */
+
+.sem-medicao__grupo { border-top: 1px solid var(--linha); }
+.sem-medicao__grupo > summary {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: center; gap: 10px;
+  min-height: 48px; padding: 0 16px;
+  background: var(--superficie-2);
+}
+.sem-medicao__grupo > summary::-webkit-details-marker { display: none; }
+.sem-medicao__grupo > summary:hover { background: var(--hover); }
+.sem-medicao__grupo > summary:focus-visible { outline-offset: -2px; border-radius: var(--raio-micro); }
+.sem-medicao__seta { color: var(--texto-2); transition: transform .15s ease; }
+.sem-medicao__grupo[open] .sem-medicao__seta { transform: rotate(90deg); }
+.sem-medicao__grupo-nome { font-weight: 600; color: var(--texto); }
+@media (prefers-reduced-motion: reduce) { .sem-medicao__seta { transition: none; } }
+
+.sem-medicao__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.sem-medicao__tabela .c-obra { width: 20%; }
+.sem-medicao__tabela .c-contratante { width: 15%; }
+.sem-medicao__tabela .c-ultima { width: 14%; }
+.sem-medicao__tabela .c-ha { width: 13%; }
+.sem-medicao__tabela .c-prevista { width: 19%; }
+.sem-medicao__tabela .c-acao { width: 19%; }
+.sem-medicao__tabela th {
+  padding: 12px 16px; text-align: left;
+  background: var(--superficie); border-bottom: 1px solid var(--linha);
+  color: var(--texto-2); font-size: 12px; line-height: 16px; font-weight: 600;
+}
+.sem-medicao__tabela td { padding: 12px 16px; height: 44px; border-bottom: 1px solid var(--linha-suave); vertical-align: middle; overflow-wrap: anywhere; }
+.sem-medicao__tabela tbody tr:last-child td { border-bottom: 0; }
+.sem-medicao__tabela tbody tr:hover td { background: var(--superficie-2); }
+.sem-medicao__tabela td:first-child { padding-left: 42px; }
+.sem-medicao__acao { text-align: right; }   /* o link mais longo ("... medição de Projeto") quebra em vez de cortar */
+.sem-medicao__obra { color: var(--texto); font-weight: 600; text-decoration: none; }
+.sem-medicao__obra:hover { color: var(--acento); text-decoration: underline; }
+.sem-medicao__iniciar-link { color: var(--acento); font-weight: 500; text-decoration: none; }
+.sem-medicao__iniciar-link:hover { color: var(--acento-forte); text-decoration: underline; }
+.sem-medicao__traco { color: var(--texto-fraco); }
+.sem-medicao__setor {
+  display: inline-block; margin-left: 8px; padding: 1px 9px;
+  border: 1px solid var(--linha); border-radius: var(--raio-pilula);
+  background: var(--neutro-fundo); color: var(--sit-sem-texto);
+  font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap;
+}
+.sem-medicao__prevista {
+  display: inline-block; padding: 1px 9px;
+  border: 1px solid var(--acento-linha); border-radius: var(--raio-pilula);
+  background: var(--acento-fundo); color: var(--acento-mais);
+  font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap;
+}
+
+/* celular: cada obra vira um bloco (sem cabecalho de colunas); campo vazio some, o rotulo vem do data-rotulo */
+@media (max-width: 767px) {
+  .sem-medicao__tabela, .sem-medicao__tabela tbody, .sem-medicao__tabela tr, .sem-medicao__tabela td { display: block; width: 100%; }
+  .sem-medicao__tabela colgroup, .sem-medicao__tabela thead { display: none; }
+  .sem-medicao__tabela tr { padding: 12px 16px; border-bottom: 1px solid var(--linha-suave); }
+  .sem-medicao__tabela tbody tr:last-child { border-bottom: 0; }
+  .sem-medicao__tabela td, .sem-medicao__tabela td:first-child { height: auto; padding: 0; border: 0; }
+  .sem-medicao__tabela td + td { margin-top: 4px; }
+  .sem-medicao__tabela td[data-rotulo]::before { content: attr(data-rotulo) " "; color: var(--texto-2); font-size: 12px; }
+  .sem-medicao__tabela .sem-medicao__so-tela { display: none; }
+  .sem-medicao__acao { text-align: left; margin-top: 8px; }
+  .sem-medicao__tabela tbody tr:hover td { background: none; }
+}

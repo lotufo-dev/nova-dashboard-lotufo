@@ -291,6 +291,16 @@ export function buscaDosAvisosEmObras(busca: Busca): Busca {
   return { c: "todas", avisos: "1", ...busca };
 }
 
+/** O número, a competência e a série que a janela "Iniciar processo" (#151) manda pela busca da URL
+ *  (?numero=25&competencia=2026-10&tipo=projeto). Valor fora do padrão vira "" (ignorado). */
+export function medicaoDaBusca(busca: Busca): { numero: string; competencia: string; tipo: "projeto" | "" } {
+  return {
+    numero: /^[1-9][0-9]{0,2}$/.test(busca.numero ?? "") ? busca.numero : "",
+    competencia: /^\d{4}-(0[1-9]|1[0-2])$/.test(busca.competencia ?? "") ? busca.competencia : "",
+    tipo: busca.tipo === "projeto" ? "projeto" : "",
+  };
+}
+
 /** Muda filtros da tela no lugar: `null` ou "" tira o filtro da URL. */
 export function trocarBusca(mudancas: Record<string, string | null>) {
   const q = new URLSearchParams(window.location.search);

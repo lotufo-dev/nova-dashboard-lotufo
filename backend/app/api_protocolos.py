@@ -27,6 +27,8 @@ class CriarIn(BaseModel):
 
 class MontarIn(BaseModel):
     corpo: str | None = Field(default=None, max_length=20000)
+    # issue #278: a tela de envio da nota nao mostra o texto; o gravado sem o campo do termo da' lugar ao padrao
+    refazer_texto: bool = False
 
 
 class PreviaIn(BaseModel):
@@ -178,7 +180,7 @@ def montar(pid: ID, dados: MontarIn, usuario: dict = Depends(exigir("editar_cada
            conn: sqlite3.Connection = Depends(conexao)):
     _existe(conn, pid)
     try:
-        protocolo.montar(conn, usuario["id"], pid, dados.corpo)
+        protocolo.montar(conn, usuario["id"], pid, dados.corpo, refazer_texto=dados.refazer_texto)
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return _detalhe(conn, pid)

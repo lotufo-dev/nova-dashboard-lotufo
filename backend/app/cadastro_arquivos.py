@@ -209,6 +209,9 @@ def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
         return None
     if not inst["data"]:
         falha("data", "obrigatória")
+    # issue #278: o oficio de reajuste da MT-PAR e da Prefeitura cita o numero do termo que cobre a competencia
+    if tipo == "apostilamento_reajuste" and not str(inst["numero"] or "").strip():
+        falha("numero", "obrigatório no apostilamento de reajuste (o ofício de reajuste cita o número do termo)")
     if bruto.get("delta_valor") not in (None, ""):
         texto = str(bruto["delta_valor"]).strip()
         sinal = -1 if texto.startswith("-") else 1
@@ -1110,14 +1113,17 @@ def _geral(raiz: Path, erros: list[str]) -> dict | None:
         else:
             out["qdop"] = {"modelo_caminho": str(modelo)}
     # Issue #110: quem recebe a cobranca de certidao e o login de quem a envia (sai da conta Microsoft dele).
-    cob = g.get("cobranca_certidoes")
-    if cob is not None:
+    # Issue #420: a copia cifrada do dono, no mesmo formato.
+    for chave in ("cobranca_certidoes", "copia_dono"):
+        cob = g.get(chave)
+        if cob is None:
+            continue
         listas = {c: [str(x).strip().lower() for x in ((cob.get(c) if isinstance(cob, dict) else None) or [])]
                   for c in ("para", "enviada_por")}
         for campo, emails in listas.items():
             if not emails or not all(_EMAIL.match(e) for e in emails):
-                erros.append(f"geral.yaml: cobranca_certidoes.{campo}: use uma lista de e-mails")
-        out["cobranca_certidoes"] = listas
+                erros.append(f"geral.yaml: {chave}.{campo}: use uma lista de e-mails")
+        out[chave] = listas
     return out
 
 

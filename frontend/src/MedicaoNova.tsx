@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { EtapaCartao, FaixaVendo, Setas } from "./Etapas";
 import type { Usuario } from "./Login";
-import { ir, type Origem } from "./rota";
+import { ir, medicaoDaBusca, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
 import { NovaPlanilhaCarta } from "./PlanilhaCarta";
 import { baseDosValores } from "./formato";
@@ -16,7 +16,17 @@ import "./etapas.css";
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
 
-export default function MedicaoNova({ contratoId, usuario, origem }: { contratoId: number; usuario: Usuario; origem: Origem | null }) {
+// A janela "Iniciar processo" (#151) manda o número, a competência e a série pela busca da URL
+// (?numero=25&competencia=2026-10&tipo=projeto); valor fora do padrão é ignorado.
+export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }: {
+  contratoId: number; usuario: Usuario; origem: Origem | null; busca?: Busca;
+}) {
+  const { numero, competencia, tipo } = medicaoDaBusca(busca);
+  const inicial = numero || competencia
+    ? { numero: numero ? Number(numero) : undefined, competencia: competencia || undefined } : undefined;
+  // a obra sem planilha/carta lanca a mao na aba Medicoes da obra; o link leva o que veio da janela
+  const buscaManual: Busca = { ...(numero ? { numero } : {}), ...(competencia ? { competencia } : {}), ...(tipo ? { tipo } : {}) };
+  const nome = tipo ? "Nova medição de Projeto" : "Nova medição";
   const podeEditar = usuario.perfil === "engenharia" || usuario.perfil === "admin";
   const [cab, setCab] = useState<Cabecalho | null>(null);
   const [vendo, setVendo] = useState(1);
@@ -28,7 +38,7 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
       .then(r => setRegraAtiva(r.regra?.situacao === "ativa")).catch(() => setRegraAtiva(false));
   }, [contratoId]);
   const obra = cab?.obra ?? "Obra";
-  useEffect(() => { document.title = `${obra} · Nova medição · grupolotufo`; }, [obra]);
+  useEffect(() => { document.title = `${obra} · ${nome} · grupolotufo`; }, [obra, nome]);
 
   return (
     <>
@@ -36,13 +46,13 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
         <div className="topbar__trilha">
           <VoltarOrigem origem={origem} alemDe={["obras", "medicoes"]} />
           <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes" } },
-            { rotulo: obra, para: { tela: "obra", id: contratoId, aba: "medicoes" } }, { rotulo: "Nova medição" }]} />
+            { rotulo: obra, para: { tela: "obra", id: contratoId, aba: "medicoes" } }, { rotulo: nome }]} />
         </div>
       </header>
       <div className="pagina med">
         <div className="med-cabeca">
           <div>
-            <h1 title={`${obra} · Nova medição`}>Nova medição</h1>
+            <h1 title={`${obra} · ${nome}`}>{nome}</h1>
             <p className="med-meta">
               <span>{obra}</span>
               {cab && <span>{cab.orgao}</span>}
@@ -60,11 +70,12 @@ export default function MedicaoNova({ contratoId, usuario, origem }: { contratoI
               {vendo === 1 && (
                 <div className="med-etapa__corpo">
                   {/* issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1); registrada, a
-                      pagina da medicao abre com o cartao dela */}
+                      pagina da medicao abre com o cartao dela. Numero, competencia e serie vem da busca da URL (#151) */}
                   {!podeEditar || regraAtiva === null ? null : regraAtiva
-                    ? <NovaPlanilhaCarta contratoId={contratoId}
+                    ? <NovaPlanilhaCarta contratoId={contratoId} tipo={tipo || "execucao"} inicial={inicial}
                         aoRegistrar={r => ir({ tela: "medicao", obra: contratoId, id: r.medicao_id }, { forcar: true })} />
-                    : <p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}>Lançar a medição à mão</Link></p>}
+                    : <p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}
+                        busca={Object.keys(buscaManual).length ? buscaManual : undefined}>Lançar a medição à mão</Link></p>}
                 </div>
               )}
             </EtapaCartao>

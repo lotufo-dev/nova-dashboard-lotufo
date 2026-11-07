@@ -13,18 +13,19 @@ import Selo from "./Selo";
 import { LinhaPleito, partesDoEnvio, pleitoEmLinha, type DesfechoPleito } from "./Prazos";
 
 // Aba Reajuste da obra (bloco 7; spec §7.2; NAVEGACAO.md › Obra): um grupo por data-base, com ancora
-// (`#db-2023-01`): o cartao do ciclo corrente (situacao, pleito e apostilamento), os oficios do ciclo e os
-// ciclos passados recolhidos. Com mais de uma data-base, um indice no topo leva a cada uma. O calendario mora
-// em `app/reajuste.py`; a tela so' desenha.
+// (`#db-2023-01`): o cartao do ciclo corrente (situacao, pleito e apostilamento, a tabela por competencia e a
+// linha do tempo do ciclo, issue #275), os oficios do ciclo e os ciclos passados recolhidos. Com mais de uma
+// data-base, um indice no topo leva a cada uma. O calendario mora em `app/reajuste.py`; a tela so' desenha.
 
 // o mes, a parte do contrato a que a base se aplica (D7: "itens SICRO", "itens SINAPI") e o indice que a corrige
 function rotuloDataBase(mes: string, c: CicloApi) {
   return `${mesAno(mes)}${c.aplica_a ? ` (${c.aplica_a})` : ""}${c.indice ? ` · ${c.indice}` : ""}`;
 }
 
-// `pleito`: o enviado mais recente do ciclo (o servidor diz quem ele e'); e' nele que se reitera ou reemite
+// `pleito`: o enviado mais recente do ciclo (o servidor diz quem ele e'); e' nele que se reitera ou reemite.
+// `aditivos`: os da linha do tempo do ciclo (issue #275, `reajuste.aditivos_do_ciclo`)
 type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilamento_pendente" | "reemitir" | "apostilado";
-  pleito?: { id: number } | null };
+  pleito?: { id: number } | null; aditivos?: AditivoDoCiclo[] };
 
 // issue #277: o que o botao faz no pleito vigente do ciclo (o servidor diz quais cabem, em `reemissoes_possiveis`)
 const ACAO_REEMISSAO: Record<Reemissao, { botao: string; titulo: string }> = {
@@ -32,45 +33,221 @@ const ACAO_REEMISSAO: Record<Reemissao, { botao: string; titulo: string }> = {
   cronograma: { botao: "Reemitir cronograma", titulo: "Reemissão do cronograma do pleito" },
 };
 
-/** Competencia com previsao vigente de apostilamento (issue #271; `reajuste.competencias_apostiladas`): o termo
- *  com `corrige` aplicado depois ja' vem no lugar do anterior. */
-type CompetenciaApostilada = { data_base_mes: string; ciclo: number; competencia: string; valor_centavos: number;
-  medicao: number | null; instrumento_chave: string; instrumento_numero: string | null; instrumento_data: string };
+/** Competencia com previsao vigente de apostilamento (issue #271; `reajuste.competencias_apostiladas`): aqui so'
+ *  para nomear o termo de uma competencia quando o cadastro nao o lista. */
+type CompetenciaApostilada = { instrumento_chave: string; instrumento_numero: string | null; instrumento_data: string };
 
-/** As competencias que o apostilamento lista, mes a mes, com o nº da medicao que ele cita e o termo. */
-function TabelaApostilada({ dataBase, linhas }: { dataBase: string; linhas: CompetenciaApostilada[] }) {
-  const rotulo = `Competências apostiladas da data-base ${mesAno(dataBase)}`;
+// Issue #275 (spec 2026-10-20 §2.2): uma linha de `reajuste.competencias_por_ciclo`. O estado, o valor de cada fonte e
+// os avisos vem do servidor; a tela so' desenha, com a origem de cada celula no titulo (e para o leitor de tela).
+type EstadoCompetencia = "prevista" | "pedida" | "aprovada" | "apostilada" | "faturada" | "recebida";
+type AvisoCompetencia = "fora_da_previsao" | "sem_apostilamento" | "nota_antes_do_apostilamento";
+type Competencia = { competencia: string; estado: EstadoCompetencia; previsto_centavos: number | null;
+  previsto_origem: "pleito" | "manual" | null; medicao_numero: number | null; medicoes: number[];
+  /** As medicoes que entraram em cada soma (rodada 1 da PR #438): o complemento so' pedido nao e' origem do aprovado. */
+  medicoes_pedido?: number[]; medicoes_aprovado?: number[]; medicoes_nota?: number[];
+  pedido_centavos: number | null; aprovado_centavos: number | null; apostilada: boolean;
+  apostilado_centavos: number | null; apostilado_percentual: string | number | null; apostilamento_chave: string | null;
+  medicao_orgao: string | number | null; faturado_centavos: number | null; recebida_em: string | null;
+  avisos?: AvisoCompetencia[] };
+/** Data-base e ciclo; os dois nulos no grupo da medicao cuja data-base nao se decide (duas bases, nada gravado). */
+type GrupoDoCiclo = { data_base_mes: string | null; ciclo: number | null; competencias: Competencia[] };
+type NomeDoTermo = { numero: string | null; data: string };
+
+const ORIGEM_PREVISTO: Record<string, string> = { pleito: "planilha do pleito", manual: "digitada" };
+
+/** As medicoes de reajuste: "3ª medição de reajuste", "4ª e 7ª medições de reajuste". */
+function dasMedicoes(ns: number[]): string {
+  const o = ns.map(n => `${n}ª`);
+  return o.length > 1 ? `${o.slice(0, -1).join(", ")} e ${o[o.length - 1]} medições de reajuste`
+    : `${o[0] ?? ""} medição de reajuste`.trim();
+}
+
+/** O percentual do termo da MT-PAR como o cadastro o guarda ("6,76", "6,76%" ou 6.76), com as casas que ele tem (ate'
+ *  quatro: o indice de reajuste nao se arredonda na tela). */
+function percentual(p: string | number): string {
+  const s = String(p).trim().replace(/\s*%$/, "");
+  const n = typeof p === "number" ? p : Number(s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s);
+  return Number.isFinite(n) ? fmtPercentual(n / 100, 4) : `${s}%`;
+}
+
+function somaDe(linhas: Competencia[], f: (x: Competencia) => number | null): number | null {
+  const v = linhas.map(f).filter((n): n is number => n !== null);
+  return v.length > 0 ? v.reduce((a, b) => a + b, 0) : null;
+}
+
+/** Celula de valor com a origem: no titulo (mouse) e, para o leitor de tela, em texto escondido logo depois do valor
+ *  (o `title` nao abre no celular, no teclado nem no leitor de tela). */
+function Celula({ origem, className = "col-num dinheiro num", children }: { origem?: string; className?: string;
+    children: React.ReactNode }) {
+  return (
+    <td className={className} title={origem}>
+      {children}{origem && <span className="sr-only">{`, ${origem}`}</span>}
+    </td>
+  );
+}
+
+/** O estado da competencia e, quando ha', a marca do aviso. A nota antes do termo e' o critico e cobre o "sem
+ *  apostilamento" da mesma competencia: um selo so', o mais grave. */
+function SituacaoDaCompetencia({ x }: { x: Competencia }) {
+  const avisos = x.avisos ?? [];
+  const comApostilado = x.apostilado_centavos !== null;
+  return (
+    <span className="selos">
+      <Selo>{x.estado}</Selo>
+      {avisos.includes("fora_da_previsao") && (
+        <Selo classe="selo--atencao" title={`Pedido ${brl(x.pedido_centavos)}; ${comApostilado ? "apostilado" : "previsto"} ${
+          brl(comApostilado ? x.apostilado_centavos : x.previsto_centavos)}`}>fora da previsão</Selo>
+      )}
+      {avisos.includes("nota_antes_do_apostilamento")
+        ? <Selo classe="selo--acao">nota antes do apostilamento</Selo>
+        : avisos.includes("sem_apostilamento") && <Selo classe="selo--atencao">sem apostilamento</Selo>}
+    </span>
+  );
+}
+
+/** O total apostilado do ciclo. A competencia apostilada so' por percentual (MT-PAR) nao tem valor em reais (spec
+ *  2026-10-20 §2.2: o sistema nao calcula indice nem valor), entao fica fora da soma e o total se diz parcial
+ *  (gate Sol, rodada 2 da PR #438: a soma so' dos valores fixos parecia o total do ciclo). */
+function TotalApostilado({ linhas }: { linhas: Competencia[] }) {
+  const soma = brl(somaDe(linhas, x => x.apostilado_centavos));
+  const n = linhas.filter(x => x.apostilada && x.apostilado_centavos === null && x.apostilado_percentual !== null).length;
+  if (n === 0) return <td className="col-num dinheiro num">{soma}</td>;
+  return (
+    <Celula origem={n === 1 ? "Parcial: 1 competência apostilada por percentual, sem valor em reais, fica fora da soma"
+      : `Parcial: ${n} competências apostiladas por percentual, sem valor em reais, ficam fora da soma`}>
+      {soma}<span className="reajuste-competencias__citada"> (parcial)</span>
+    </Celula>
+  );
+}
+
+/** A tabela de um ciclo: competencia × previsto × pedido × aprovado × apostilado × nota × recebido, com o estado. */
+function TabelaCompetencias({ rotulo, linhas, termos }: { rotulo: string; linhas: Competencia[];
+    termos: Map<string, NomeDoTermo> }) {
+  const origem = (texto: string | null) => (texto ? `Origem: ${texto}` : undefined);
+  // cada soma cita so' as medicoes que entraram nela; o recebido e' da medicao principal, dona do `recebida_em`
+  const daMedicao = (prefixo: string, valor: unknown, ns: number[] | undefined) =>
+    valor !== null && ns && ns.length > 0 ? origem(`${prefixo}${dasMedicoes(ns)}`) : undefined;
+  const citada = (x: Competencia) => (x.medicao_orgao !== null && x.medicao_orgao !== "" ? `${x.medicao_orgao}ª` : null);
+  const doTermo = (x: Competencia) => {
+    if (!x.apostilada || (x.apostilado_centavos === null && x.apostilado_percentual === null)) return undefined;
+    const t = x.apostilamento_chave ? termos.get(x.apostilamento_chave) : undefined;
+    const med = citada(x) ? ` (${citada(x)} medição)` : "";
+    return origem(`apostilamento${t ? ` ${t.numero ?? "s/n"}, de ${fmtDataPura(t.data)}` : ""}${med}`);
+  };
+  return (
+    <Rolagem rotulo={rotulo}>
+      <table className="tabela tabela--densa reajuste-competencias">
+        <caption className="sr-only">{rotulo}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Competência</th>
+            <th scope="col" className="col-num">Previsto</th>
+            <th scope="col" className="col-num">Pedido</th>
+            <th scope="col" className="col-num">Aprovado</th>
+            <th scope="col" className="col-num">Apostilado</th>
+            <th scope="col" className="col-num">Nota</th>
+            <th scope="col" className="col-num">Recebido</th>
+            {/* a 1024 px a tabela rola na horizontal: a situacao, com a marca do aviso, fica ancorada a' direita */}
+            <th scope="col" className="col-fixa">Situação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {linhas.map((x, i) => (
+            <tr key={x.competencia} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+              <th scope="row" className="forte num">{mesAno(x.competencia)}</th>
+              <Celula origem={x.previsto_centavos !== null && x.previsto_origem
+                ? origem(ORIGEM_PREVISTO[x.previsto_origem] ?? x.previsto_origem) : undefined}>
+                {brl(x.previsto_centavos)}
+              </Celula>
+              <Celula origem={daMedicao("", x.pedido_centavos, x.medicoes_pedido)}>{brl(x.pedido_centavos)}</Celula>
+              <Celula origem={daMedicao("boletim da ", x.aprovado_centavos, x.medicoes_aprovado)}>
+                {brl(x.aprovado_centavos)}
+              </Celula>
+              <Celula origem={doTermo(x)}>
+                {x.apostilado_centavos !== null ? brl(x.apostilado_centavos)
+                  : x.apostilada && x.apostilado_percentual !== null ? percentual(x.apostilado_percentual) : "—"}
+                {/* o nº da medicao que o termo cita, a' vista (era coluna da tabela das apostiladas) */}
+                {x.apostilada && citada(x) && <span className="reajuste-competencias__citada"> ({citada(x)})</span>}
+              </Celula>
+              <Celula origem={daMedicao("notas fiscais da ", x.faturado_centavos, x.medicoes_nota)}>
+                {brl(x.faturado_centavos)}
+              </Celula>
+              <Celula className="col-num num"
+                origem={daMedicao("baixa no RM da ", x.recebida_em, x.medicao_numero !== null ? [x.medicao_numero] : [])}>
+                {x.recebida_em ? fmtDataPura(x.recebida_em.slice(0, 10)) : "—"}
+              </Celula>
+              <td className="col-fixa"><SituacaoDaCompetencia x={x} /></td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th scope="row">Total</th>
+            <td className="col-num dinheiro num">{brl(somaDe(linhas, x => x.previsto_centavos))}</td>
+            <td className="col-num dinheiro num">{brl(somaDe(linhas, x => x.pedido_centavos))}</td>
+            <td className="col-num dinheiro num">{brl(somaDe(linhas, x => x.aprovado_centavos))}</td>
+            <TotalApostilado linhas={linhas} />
+            <td className="col-num dinheiro num">{brl(somaDe(linhas, x => x.faturado_centavos))}</td>
+            <td />
+            <td />
+          </tr>
+        </tfoot>
+      </table>
+    </Rolagem>
+  );
+}
+
+/** O nome da tabela de um grupo (para o leitor de tela): a data-base e o ciclo, ou o grupo sem data-base. */
+function rotuloDoGrupo(g: GrupoDoCiclo): string {
+  return g.data_base_mes === null ? "Reajuste por competência sem data-base definida"
+    : `Reajuste por competência da data-base ${mesAno(g.data_base_mes)}, ciclo de ${g.ciclo}`;
+}
+
+/** O rotulo a' vista de um grupo fora das datas-base do cadastro (rodada 1 da PR #438). */
+function rotuloVisivelDoGrupo(g: GrupoDoCiclo): string {
+  return g.data_base_mes === null ? "Data-base não definida" : `Data-base ${mesAno(g.data_base_mes)}, ciclo de ${g.ciclo}`;
+}
+
+// Issue #275: um aditivo assinado no ciclo depois do primeiro pleito enviado (`reajuste.aditivos_do_ciclo`)
+type AditivoDoCiclo = { id: number; numero: string | null; tipo: string; data_assinatura: string };
+const TIPO_ADITIVO: Record<string, string> = { prazo: "de prazo", valor: "de valor", misto: "de prazo e valor" };
+
+/** A linha do tempo do ciclo (spec 2026-10-20 §2.2): o envio de cada pleito, reiteracao e reemissao, os aditivos que
+ *  pedem reemissao e o termo, em ordem de data. Na mesma data, o aditivo vem antes do pleito (a reemissao do mesmo
+ *  dia responde a ele; o primeiro pleito nunca empata, `aditivos_do_ciclo` so' traz os assinados depois) e o termo
+ *  por ultimo. */
+function eventosDoCiclo(pleitos: Pleito[], aditivos: AditivoDoCiclo[], termos: InstrumentoCadastro[]) {
+  const ev = [
+    ...aditivos.map(a => ({ chave: `aditivo-${a.id}`, data: a.data_assinatura.slice(0, 10), ordem: 0,
+      texto: ["Aditivo", TIPO_ADITIVO[a.tipo], a.numero ?? "sem número", "assinado"].filter(Boolean).join(" ") })),
+    ...pleitos.filter(p => p.situacao === "enviado" && p.enviado_em).map(p => ({ chave: `pleito-${p.id}`,
+      data: p.enviado_em!.slice(0, 10), ordem: 1,
+      // "Pleito ... enviado"; reiteracao e reemissao (femininas) "enviada"
+      texto: `${p.rotulo}${p.numero_oficio ? ` ${p.numero_oficio}` : ""} ${p.reemissao || p.reemite_pleito_id ? "enviada" : "enviado"}` })),
+    ...termos.map(i => ({ chave: `termo-${i.tipo}-${i.id}`, data: i.data.slice(0, 10), ordem: 2,
+      texto: `${nomeDoTermo(i)} ${i.numero ?? "s/n"}` })),
+  ];
+  return ev.sort((a, b) => a.data.localeCompare(b.data) || a.ordem - b.ordem);
+}
+
+/** O rotulo e a lista; quem chama poe na secao (o ciclo corrente no cartao, os anteriores em "Ciclos anteriores"). */
+function LinhaDoTempoDoCiclo({ ciclo, eventos }: { ciclo: number;
+    eventos: { chave: string; data: string; texto: string }[] }) {
   return (
     <>
-      <p className="resumo__rotulo">Competências apostiladas</p>
-      <Rolagem rotulo={rotulo}>
-        <table className="tabela">
-          <caption className="sr-only">{rotulo}</caption>
-          <thead>
-            <tr>
-              <th scope="col">Competência</th>
-              <th scope="col">Ciclo</th>
-              <th scope="col">Medição</th>
-              <th scope="col" className="col-num">Valor</th>
-              <th scope="col">Apostilamento</th>
-            </tr>
-          </thead>
-          <tbody>
-            {linhas.map((l, i) => (
-              <tr key={`${l.ciclo}-${l.competencia}`} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                <td className="forte num">{mesAno(l.competencia)}</td>
-                <td className="num">{l.ciclo}</td>
-                <td className="num">{l.medicao ? `${l.medicao}ª` : "—"}</td>
-                <td className="col-num dinheiro num">{brl(l.valor_centavos)}</td>
-                <td className="num" title={`de ${fmtDataPura(l.instrumento_data)}`}>{l.instrumento_numero ?? "s/n"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Rolagem>
+      <p className="resumo__rotulo">Linha do tempo</p>
+      <ol className="linha-tempo" aria-label={`Linha do tempo do ciclo de ${ciclo}`}>
+        {eventos.map(e => (
+          <li key={e.chave}><time className="linha-tempo__data" dateTime={e.data}>{fmtDataPura(e.data)}</time><span>{e.texto}</span></li>
+        ))}
+      </ol>
     </>
   );
 }
+
+// Rodada 1 da PR #438: termo e aditivos de cada ciclo com pleito enviado (`reajuste.linhas_do_tempo`)
+type LinhaDoTempoApi = { data_base_mes: string; ciclo: number; termo: InstrumentoCadastro | null;
+  aditivos: AditivoDoCiclo[] };
 
 // Pleito nao enviado e' a vez da engenharia: nivel "Acao" do D2 (ambar com contorno cheio), o
 // mesmo com que o fato aparece nos avisos. Vermelho fica para o critico.
@@ -93,11 +270,12 @@ function linhaDoCiclo(c: Ciclo): string {
   return `Ciclo de ${c.ciclo} · aniversário em ${fmtDataPura(c.aniversario)}`;
 }
 
-/** O apostilamento: numero, data e o percentual concedido. */
+/** O apostilamento: numero, data e o percentual concedido (o cadastro guarda "3,80"; issue #275: era NaN%). */
 function textoApostilamento(i: InstrumentoCadastro): string {
   const pct = i.dados.percentual;
   return [`${i.numero ?? "s/n"}, de ${fmtDataPura(i.data)}`,
-          pct !== undefined && pct !== null ? fmtPercentual(Number(pct) / 100) : ""].filter(Boolean).join(" · ");
+          typeof pct === "string" || typeof pct === "number" ? (String(pct).trim() ? percentual(pct) : "") : ""]
+    .filter(Boolean).join(" · ");
 }
 
 /** O termo que fecha o ciclo: apostilamento ou, na SES, termo aditivo de valor de reajuste (issue #390). */
@@ -128,38 +306,13 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
   return neutro;
 }
 
-// Previsao vigente por competencia (issue #272; `reajuste.previsoes_vigentes` escolhe a mais recente da origem mais
-// forte). A tabela completa do ciclo (pedido, aprovado, apostilado...) e' da #275; aqui so' o previsto e a origem.
-type Previsao = { data_base_mes: string; ciclo: number; competencia: string; valor_previsto_centavos: number;
-  origem: "pleito" | "manual" | "apostilamento" };
-const ORIGEM: Record<Previsao["origem"], string> = {
-  pleito: "planilha do pleito", manual: "digitada", apostilamento: "apostilamento" };
-
-function TabelaPrevisao({ previsoes, ciclo }: { previsoes: Previsao[]; ciclo: number }) {
-  const total = previsoes.reduce((s, p) => s + p.valor_previsto_centavos, 0);
-  return (
-    <table className="tabela tabela--densa" aria-label={`Previsão de reajuste do ciclo de ${ciclo}`}>
-      <thead><tr><th scope="col">Competência</th><th scope="col" className="num">Previsto</th><th scope="col">Origem</th></tr></thead>
-      <tbody>
-        {previsoes.map(p => (
-          <tr key={p.competencia}>
-            <th scope="row" className="num">{mesAno(p.competencia)}</th>
-            <td className="num">{brl(p.valor_previsto_centavos)}</td>
-            <td>{ORIGEM[p.origem] ?? p.origem}</td>
-          </tr>
-        ))}
-      </tbody>
-      <tfoot><tr><th scope="row">Total previsto</th><td className="num">{brl(total)}</td><td /></tr></tfoot>
-    </table>
-  );
-}
-
 // pleito que ainda se trabalha: feito no sistema, nem enviado nem descartado (o mesmo corte do CartaoPleito)
 const emAberto = (p: Pleito) => p.origem === "sistema" && p.situacao !== "enviado" && p.situacao !== "descartado";
 
 export default function Reajuste({ contratoId, podeEditar }: { contratoId: number; podeEditar: boolean }) {
   const [dados, setDados] = useState<{ ciclos: Ciclo[]; pleitos: Pleito[]; competencias?: CompetenciaApostilada[];
-    bases_dos_termos?: BaseDoTermo[]; previsoes?: Previsao[]; aditivos_de_reajuste?: InstrumentoCadastro[] } | null>(null);
+    bases_dos_termos?: BaseDoTermo[]; aditivos_de_reajuste?: InstrumentoCadastro[];
+    competencias_por_ciclo?: GrupoDoCiclo[]; linhas_do_tempo?: LinhaDoTempoApi[] } | null>(null);
   const [apostilamentos, setApostilamentos] = useState<InstrumentoCadastro[]>([]);
   const [erro, setErro] = useState("");
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
@@ -181,7 +334,8 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
 
   if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
   if (!dados) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
-  if (dados.ciclos.length === 0 && dados.pleitos.length === 0 && apostilamentos.length === 0) {
+  const grupos = dados.competencias_por_ciclo ?? [];
+  if (dados.ciclos.length === 0 && dados.pleitos.length === 0 && apostilamentos.length === 0 && grupos.length === 0) {
     return <section className="cartao"><div className="vazio vazio--curto"><p>Nenhuma data-base.</p></div></section>;
   }
   const { dataBases, semDataBase, outrosPleitos } = reajustePorDataBase(dados.ciclos, dados.pleitos, apostilamentos,
@@ -195,6 +349,19 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   // o pleito ligado ao termo aditivo de reajuste (issue #390) diz o termo em qualquer ciclo; a API ja' manda so' os
   // aditivos que valem como termo (o mesmo criterio do ciclo)
   const termos = [...apostilamentos, ...(dados.aditivos_de_reajuste ?? [])];
+  // o nome do termo de cada competencia apostilada (issue #275): o cadastro, e a lista das apostiladas para o termo
+  // que o cadastro ja' nao traz
+  const nomesDosTermos = new Map<string, NomeDoTermo>([
+    ...(dados.competencias ?? []).map(x => [x.instrumento_chave, { numero: x.instrumento_numero, data: x.instrumento_data }] as const),
+    ...apostilamentos.filter(i => i.chave).map(i => [i.chave!, { numero: i.numero, data: i.data }] as const)]);
+  // a tabela de um grupo (data-base e ciclo) de `competencias_por_ciclo`
+  const tabela = (g: GrupoDoCiclo) => (
+    <TabelaCompetencias key={`${g.data_base_mes}-${g.ciclo}`} rotulo={rotuloDoGrupo(g)} linhas={g.competencias}
+      termos={nomesDosTermos} />
+  );
+  // grupo sem data-base (medicao de base incerta) ou de data-base que o cadastro nao tem mais: cartao proprio no fim
+  const conhecidas = new Set(dataBases.map(db => db.data_base_mes));
+  const gruposFora = grupos.filter(g => g.data_base_mes === null || !conhecidas.has(g.data_base_mes));
   // cada pleito e' uma secao do cartao pai (F-74): o enviado vira linha com o desfecho no selo; o que ainda se
   // trabalha segue no CartaoPleito, que traz o formulario
   const cartoes = (ps: Pleito[], ciclo?: Ciclo) => ps.map(p => {
@@ -238,14 +405,27 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
           ...validos.filter(i => !(i.id === c.apostilamento?.id && i.tipo === c.apostilamento.tipo)
             && cicloDoApostilamento(i) === c.ciclo)];
         const outrosAp = validos.filter(i => !doCiclo.some(d => d.id === i.id && d.tipo === i.tipo));
-        const anteriores = db.pleitosAnteriores.length + outrosAp.length;
+        // issue #275: a tabela por competencia do ciclo corrente fica no cartao; a dos ciclos passados, recolhida com
+        // eles; a de ciclo posterior (previsao lancada antes da janela abrir), logo abaixo da corrente
+        const daBase = grupos.filter(g => g.data_base_mes === db.data_base_mes);
+        const doCicloAtual = daBase.find(g => g.ciclo === c.ciclo);
+        const gruposAnteriores = daBase.filter(g => g.ciclo !== null && g.ciclo < c.ciclo);
+        const gruposSeguintes = daBase.filter(g => g.ciclo !== null && g.ciclo > c.ciclo);
+        const eventos = eventosDoCiclo(db.pleitosDoCiclo, c.aditivos ?? [], doCiclo);
+        // cada ciclo anterior com a tabela e a linha do tempo dele (rodada 1 da PR #438): o termo e os aditivos vem
+        // de `linhas_do_tempo`, os pleitos sao os da aba
+        const tempos = (dados.linhas_do_tempo ?? []).filter(t => t.data_base_mes === db.data_base_mes && t.ciclo < c.ciclo);
+        const ciclosAnteriores = [...new Set([...gruposAnteriores.map(g => g.ciclo as number), ...tempos.map(t => t.ciclo)])]
+          .sort((a, b) => b - a)
+          .map(y => {
+            const t = tempos.find(x => x.ciclo === y);
+            return { ciclo: y, grupo: gruposAnteriores.find(g => g.ciclo === y),
+              eventos: eventosDoCiclo(db.pleitosAnteriores.filter(p => p.ciclo === y), t?.aditivos ?? [],
+                t?.termo ? [t.termo] : []) };
+          })
+          .filter(x => x.grupo || x.eventos.length > 0);
+        const anteriores = db.pleitosAnteriores.length + outrosAp.length + ciclosAnteriores.length;
         const aberto = db.pleitosDoCiclo.find(emAberto);
-        const apostiladas = (dados.competencias ?? []).filter(x => x.data_base_mes === db.data_base_mes);
-        // a competencia apostilada fica so' na tabela do apostilamento: a da previsao traz o que ainda e' previsto
-        // (planilha do pleito e digitada), e o total dela soma so' isso
-        const previsoes = (dados.previsoes ?? []).filter(p => p.data_base_mes === db.data_base_mes && p.ciclo === c.ciclo
-          && !(p.origem === "apostilamento"
-               && apostiladas.some(x => x.ciclo === p.ciclo && x.competencia === p.competencia)));
         // o pleito vigente do ciclo e o que o servidor deixa fazer com ele (reiterar, reemitir o cronograma)
         const vigente = c.pleito ? dados.pleitos.find(p => p.id === c.pleito!.id) : undefined;
         const possiveis = vigente?.reemissoes_possiveis ?? [];
@@ -291,9 +471,17 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
               {doCiclo.map(i => (
                 <p key={`${i.tipo}-${i.id}`}><span className="resumo__rotulo">{nomeDoTermo(i)}</span>{" "}{textoApostilamento(i)}</p>
               ))}
-              {apostiladas.length > 0 && <TabelaApostilada dataBase={db.data_base_mes} linhas={apostiladas} />}
             </div>
-            {previsoes.length > 0 && <TabelaPrevisao previsoes={previsoes} ciclo={c.ciclo} />}
+            {doCicloAtual && tabela(doCicloAtual)}
+            {gruposSeguintes.map(g => (
+              <div className="cartao__corpo" key={`${g.data_base_mes}-${g.ciclo}`}>
+                <p className="resumo__rotulo">Ciclo de {g.ciclo}</p>
+                {tabela(g)}
+              </div>
+            ))}
+            {eventos.length > 0 && (
+              <div className="cartao__corpo"><LinhaDoTempoDoCiclo ciclo={c.ciclo} eventos={eventos} /></div>
+            )}
             {(formAberto || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
               <div className="secoes-pleito">
                 {reemitindo && (
@@ -329,6 +517,13 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
                           <ul className="lista-simples">{outrosAp.map(i => <li key={i.id} className="num">{textoApostilamento(i)}</li>)}</ul>
                         </section>
                       )}
+                      {ciclosAnteriores.map(x => (
+                        <div className="cartao__corpo linhas" key={x.ciclo}>
+                          <p className="resumo__rotulo">Ciclo de {x.ciclo}</p>
+                          {x.grupo && tabela(x.grupo)}
+                          {x.eventos.length > 0 && <LinhaDoTempoDoCiclo ciclo={x.ciclo} eventos={x.eventos} />}
+                        </div>
+                      ))}
                       {cartoes(db.pleitosAnteriores)}
                     </div>
                   </details>
@@ -354,6 +549,22 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
             <h2 className="cartao__titulo" id="titulo-outros-pleitos">Pleitos de data-base que o cadastro não tem mais</h2>
           </div>
           <div className="secoes-pleito">{cartoes(outrosPleitos)}</div>
+        </section>
+      )}
+
+      {/* issue #275: nada some em silencio; medicao de data-base incerta entra uma vez so', aqui, com a data-base e o
+          ciclo de cada tabela a' vista (rodada 1 da PR #438) */}
+      {gruposFora.length > 0 && (
+        <section className="cartao" aria-labelledby="titulo-competencias-fora">
+          <div className="cartao__cabeca">
+            <h2 className="cartao__titulo" id="titulo-competencias-fora">Reajuste sem data-base definida ou fora do cadastro</h2>
+          </div>
+          {gruposFora.map(g => (
+            <div className="cartao__corpo" key={`${g.data_base_mes}-${g.ciclo}`}>
+              <p className="resumo__rotulo">{rotuloVisivelDoGrupo(g)}</p>
+              {tabela(g)}
+            </div>
+          ))}
         </section>
       )}
     </div>

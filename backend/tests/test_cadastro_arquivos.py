@@ -472,6 +472,20 @@ def test_cobranca_de_certidoes_no_geral(tmp_path):
     assert "cobranca_certidoes.para" in erros and "cobranca_certidoes.enviada_por" in erros
 
 
+def test_copia_dono_no_geral(tmp_path):
+    # issue #420: quem recebe a copia cifrada do dono e o login de quem a envia, como a cobranca de certidoes
+    raiz = _escrever(tmp_path)
+    base = {"faturamento": {"para": ["f@exemplo.com.br"], "assunto": "{medicao} {obra}", "corpo": "x"}}
+    (raiz / "geral.yaml").write_text(yaml.safe_dump({**base, "copia_dono": {
+        "para": [" Dono@Exemplo.com.br "], "enviada_por": ["dono@exemplo.com.br", "dono.login@exemplo.com.br"]}}), "utf-8")
+    assert ca.preparar(raiz)["geral"]["copia_dono"] == {
+        "para": ["dono@exemplo.com.br"], "enviada_por": ["dono@exemplo.com.br", "dono.login@exemplo.com.br"]}
+    for invalido in ({"para": [], "enviada_por": ["nao-e-email"]}, "dono@exemplo.com.br"):
+        (raiz / "geral.yaml").write_text(yaml.safe_dump({**base, "copia_dono": invalido}), "utf-8")
+        erros = "\n".join(_erros(raiz))
+        assert "copia_dono.para" in erros and "copia_dono.enviada_por" in erros
+
+
 # --- issue #65: garantia com vigencia, endosso que traz a nova vigencia ----------
 
 def test_garantia_do_contrato_normalizada(tmp_path):
@@ -739,6 +753,14 @@ def test_apostilamento_so_com_percentual_e_periodo_e_aceito(tmp_path):
     inst = cad["contratos"][0]["instrumentos"][0]
     assert inst["dados"]["periodo"] == {"de": "2026-04", "ate": "2027-03"}
     assert ca.competencias_do_apostilamento(inst["dados"]) == []
+
+
+def test_apostilamento_de_reajuste_sem_numero_e_erro(tmp_path):
+    # issue #278 (gate Sol, rodada 1 da PR #435): o oficio de reajuste cita o numero do termo
+    for i, numero in enumerate((None, "", "   ")):
+        ap = {**_apostilamento(percentual="6,76", periodo={"de": "2026-04", "ate": "2027-03"}), "numero": numero}
+        erros = _erros(_escrever(tmp_path / f"caso{i}", contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+        assert any("instrumentos[0]: numero: obrigatório" in e for e in erros), erros
 
 
 def test_apostilamento_com_competencia_fora_do_periodo_e_erro(tmp_path):

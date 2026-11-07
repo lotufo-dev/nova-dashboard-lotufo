@@ -92,6 +92,16 @@ describe("Nova planilha/carta", () => {
     expect((screen.getByLabelText("Nº no órgão") as HTMLInputElement).value).toBe("");
   });
 
+  it("só a competência veio da janela Iniciar processo (#151): nº sugerido, período no mês civil dela", async () => {
+    api.mockImplementation(async (url: string) => (url.includes("/sugestao") ? { ...SUGESTAO, numero_orgao: 9 } : { avisos: [] }));
+    render(<NovaPlanilhaCarta contratoId={9} inicial={{ competencia: "2026-10" }} aoRegistrar={() => {}} />);
+    expect(((await screen.findByLabelText("Nº da medição")) as HTMLInputElement).value).toBe("4");
+    expect((screen.getByLabelText("Período: de") as HTMLInputElement).value).toBe("2026-10-01");
+    expect((screen.getByLabelText("até") as HTMLInputElement).value).toBe("2026-10-31");
+    // o nº e' o sugerido, entao o nº do orgao sugerido vale
+    expect((screen.getByLabelText("Nº no órgão") as HTMLInputElement).value).toBe("9");
+  });
+
   it("trocar o nº troca o acumulado e o saldo pelos do nº digitado", async () => {
     responder();
     render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);

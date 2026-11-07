@@ -1,0 +1,77 @@
+Capa da Medição
+Órgão
+: SINFRA - SECRETARIA DE INFRAESTRUTURA E
+LOGÍSTICA
+Setor
+: SUOESP/SAOESP - SUPERINTENDÊNCIA DE GESTÃO DE
+OBRAS ESPECIAIS
+Processo
+: SINFRA-PRO-0000/00001
+Contrato
+: 001/2023 - Restauração e pavimentação da rodovia MT-998
+Data do contrato
+: 02/02/2023
+Credor
+: CONSTRUTORA ALFA LTDA - 31.200.101/0001-30
+Período de vigência
+:  02/02/2023 a 30/06/2026
+Período de execução
+:  01/03/2023 a 05/11/2025
+Dias corridos
+980
+Licitação
+:  Concorrência Pública 1/2022
+Dias paralisados
+4
+
+Obra/Serviço
+: 1 - Restauração e pavimentação da rodovia MT-998
+Provisória
+: 29 - 32ª Medição Final - APROVADA
+Tipo
+: Parcial
+Período da medição
+: 01/10/2025 a 05/11/2025
+Data de realização
+: 26/03/2026
+Dias corridos até a presente medição : 980
+Dias paralisados até a presente medição : 4
+Observação
+:
+RESUMO FINANCEIRO
+Valor informado PI do contrato :
+3.200.000,00
+Valor Aditivo :
+0,00
+Saldo PI do contrato :
+200.000,00
+Faturamento realizado acumulado
+Preços iniciais :
+3.000.000,00
+Reajustamento :
+150.000,00
+Acréscimos :
+0,00
+Descontos :
+-1.500,00
+Total :
+3.148.500,00
+Faturamento realizado da presente medição
+Preços iniciais :
+500.000,00
+Reajustamento :
+20.000,00
+Descontos :
+250,00
+Total :
+519.750,00
+Comissão:
+Fiscal do contrato
+Eng. Fiscal
+Responsável técnico
+Resp. Executora
+SINFRA - Secretaria de Estado de Infraestrutura e Logística
+26/03/2026 - 12:50
+SMO - Sistema de Gestão de Contratos e Medições
+Relatório de Capa da Medição
+Página: 1 de 1
