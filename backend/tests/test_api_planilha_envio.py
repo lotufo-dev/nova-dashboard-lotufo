@@ -582,3 +582,23 @@ def test_excecao_do_contrato_substitui_as_pecas_no_oficio_do_orgao(api):
     # sem a chave no contrato, vale o orgao de novo
     _reaplicar(pecas=PECAS_NO_OFICIO)
     assert _no_oficio(cl, mid) == {"boletim": True, "fotos": False}
+
+
+def test_orgao_que_vira_ses_entre_a_previa_e_a_reserva_nao_manda_o_email(api, monkeypatch):
+    """Gate Sol (#463): a familia e' relida depois da reserva; cadastro aplicado no intervalo recusa e destrava."""
+    cl, cid, _ = api
+    mid, pv = _pronta(cl, cid)
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    original = envio_reserva.reservar
+
+    def reservar_depois_do_cadastro(conn, *a, **kw):
+        conn.execute("UPDATE orgaos SET familia='ses' WHERE id=(SELECT orgao_id FROM contratos WHERE id=?)", (cid,))
+        return original(conn, *a, **kw)
+    monkeypatch.setattr(envio_reserva, "reservar", reservar_depois_do_cadastro)
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
+    assert r.status_code == 422 and r.json()["detail"] == planilha_envio.SEM_ENVIO["ses"]
+    assert falso.enviados == []
+    assert _linha("SELECT estado FROM medicoes WHERE id=?", mid) == {"estado": "planilha_gerada"}
+    assert _linha(f"SELECT COUNT(*) n FROM {planilha_envio.TABELA} WHERE medicao_id=? "
+                  "AND envio_reservado_em IS NOT NULL", mid) == {"n": 0}

@@ -360,6 +360,9 @@ def enviar(conn, usuario: dict, medicao_id: int, numero_oficio: str, para: list[
         # o que vai e' lido de novo depois da reserva: peca anexada ou removida desde a previa recusa aqui
         m = _medicao(conn, medicao_id)
         c, familia, regras = _contexto(conn, m)
+        # a familia do orgao tambem e' relida (gate Sol, #463): cadastro aplicado desde a previa nao manda o e-mail
+        if familia in FAMILIAS_SEM_ENVIO:
+            raise ValueError(SEM_ENVIO[familia])
         v = conn.execute("SELECT * FROM medicao_planilhas WHERE id=?", (pv["planilha_id"],)).fetchone()
         # a marca do cadastro e' lida de novo: mudou desde a previa, os anexos mudam e a conferencia recusa
         rotulados = _anexos(conn, c, m, dict(v), pv["numero_oficio"], tipos_no_oficio(familia, regras, c))
