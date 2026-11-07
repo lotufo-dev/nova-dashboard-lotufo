@@ -115,7 +115,9 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     lista = medicoes.listar(conn, contrato_id)
     edicoes = medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
     sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
-    return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"])} for m in lista]
+    # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
+    return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
+             "boletins": medicoes.boletins(conn, m["id"])} for m in lista]
 
 
 @router.post("/api/contratos/{contrato_id}/medicoes", status_code=201)
@@ -447,15 +449,16 @@ def registrar_boletim(medicao_id: ID,
                       numero_orgao: str | None = Form(None, max_length=100),
                       meio: Literal["smo", "oficio", "email", "carimbo", "ci", "outro"] | None = Form(None),
                       observacao: str | None = Form(None, max_length=500),
+                      lido: bool = Form(False),
                       arquivo: UploadFile = File(...),
                       usuario: dict = Depends(exigir("editar_cadastros")),
                       conn: sqlite3.Connection = Depends(conexao)):
     """"Registrar boletim": valor aprovado, data e nº digitados, com o PDF do orgao. Devolve pedido, aprovado e a
-    diferenca."""
+    diferenca. `lido`: os tres campos vieram da leitura da capa e a pessoa os aceitou (origem `aceito`, #290)."""
     _medicao_existe(conn, medicao_id)
     try:
         dados = {"valor_centavos": _centavos(valor), "data": data.isoformat(), "numero_orgao": numero_orgao,
-                 "meio": meio, "observacao": observacao}
+                 "meio": meio, "observacao": observacao, "origem": "aceito" if lido else "manual"}
         medicoes.conferir_boletim(conn, medicao_id, dados)      # recusa antes de gravar o PDF
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
@@ -465,6 +468,36 @@ def registrar_boletim(medicao_id: ID,
         return medicoes.registrar_boletim(conn, usuario["id"], medicao_id, dados, {"arquivo": caminho, "sha256": sha})
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
+
+
+@router.post("/api/medicoes/{medicao_id}/boletim/leitura")
+def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
+                        usuario: dict = Depends(exigir("editar_cadastros")),
+                        conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #290: le a capa do SMO do PDF arrastado (leitor deterministico da #285) e devolve o nº, a data e o
+    valor propostos para a pessoa conferir. Nao grava nada: o boletim so' se registra no "Registrar boletim".
+    Na execucao o valor e' o dos precos iniciais (o da NF da medicao); no reajuste, o do reajustamento."""
+    from app import leitura_smo
+    m = conn.execute("SELECT tipo FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    if m is None:
+        raise HTTPException(404, "Medição não encontrada")
+    pdf = _pdf_validado(arquivo, TETO_PLANILHA)
+    r = leitura_smo.ler_pdf(pdf)
+    avisos = list(r["avisos"])
+    c = r["campos"]
+    if r["motivo"] == "nao-aprovada":
+        # capa lida, mas o orgao ainda nao aprovou: nada e' proposto (a pessoa digita, se o boletim for outro)
+        return {"lido": False, "fonte": r["fonte"], "campos": {},
+                "avisos": [f"A capa não está aprovada (situação: {c.get('situacao') or '—'}); digite os valores do boletim"]}
+    campos = {}
+    if "numero" in c:
+        campos["numero_orgao"] = str(c["numero"])
+    if "data_realizacao" in c:
+        campos["data"] = c["data_realizacao"]
+    valor = c.get("reajuste_centavos" if m["tipo"] == "reajuste" else "valor_centavos")
+    if valor is not None:
+        campos["valor_centavos"] = valor
+    return {"lido": bool(campos), "fonte": r["fonte"] if campos else None, "campos": campos, "avisos": avisos}
 
 
 @router.get("/api/medicoes/{medicao_id}/boletins/{atesto_id}")
