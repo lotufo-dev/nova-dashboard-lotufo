@@ -914,6 +914,37 @@ def _recusar_frc_fora_do_assinado(conn, p: dict, paginas: list[str]) -> None:
                          "valores não batem): assine no DocuSign o pacote montado agora e anexe o assinado dele")
 
 
+_TERMO_NO_TEXTO = "TERMODEAPOSTILAMENTO"
+ASSINADO_SEM_O_TERMO = ("O assinado não traz o termo de apostilamento do pacote montado agora (é o de uma montagem "
+                        "anterior): assine no DocuSign o pacote montado agora e anexe o assinado dele")
+
+
+def _trechos_do_termo(paginas: list[str]) -> list[str]:
+    """Cada citacao do termo de apostilamento no texto do pacote, com o entorno (a competencia antes, o numero e o
+    comeco da frase seguinte depois), no texto plano da conferencia (sem acento, espaco, pontuacao e carimbo)."""
+    out = []
+    for t in paginas:
+        plano = assinatura._plano(t)
+        i = plano.find(_TERMO_NO_TEXTO)
+        while i >= 0:
+            out.append(plano[max(0, i - 60):i + len(_TERMO_NO_TEXTO) + 40])
+            i = plano.find(_TERMO_NO_TEXTO, i + 1)
+    return out
+
+
+def _recusar_termo_fora_do_assinado(conn, p: dict, montado: list[str], assinado: list[str]) -> None:
+    """Rodada extra da PR #435 (revisor e gate Sol, rodada 3): na MT-PAR e na Prefeitura o oficio de reajuste cita o
+    termo de apostilamento; o assinado do pacote anterior (termo velho, ou sem termo) passa pela semelhanca de 90% da
+    conferencia, que so' avisa. Como na FRC (`_recusar_frc_fora_do_assinado`), o assinado tem que trazer cada citacao
+    do termo do pacote montado por ultimo, e nenhuma a mais."""
+    familia = _orgao(conn, _contrato(conn, p["contrato_id"]))[0]
+    if familia not in FAMILIAS_OFICIO_REAJUSTE:
+        return
+    esperados, achados = _trechos_do_termo(montado), _trechos_do_termo(assinado)
+    if len(esperados) != len(achados) or any(not any(x in a for a in achados) for x in esperados):
+        raise ValueError(ASSINADO_SEM_O_TERMO)
+
+
 def receber_assinado(conn, usuario_id: int, protocolo_id: int, pdf: bytes) -> dict:
     p = _linha(conn, protocolo_id)
     _editavel(p)
@@ -921,7 +952,9 @@ def receber_assinado(conn, usuario_id: int, protocolo_id: int, pdf: bytes) -> di
         raise ValueError("Monte o pacote antes de anexar o assinado")
     assinado = assinatura.textos(pdf)
     _recusar_frc_fora_do_assinado(conn, p, assinado)         # antes de ler o montado: a recusa barata primeiro
-    conf = assinatura.conferir(assinatura.textos(_bytes(p["montado_arquivo"])), assinado)
+    montado = assinatura.textos(_bytes(p["montado_arquivo"]))
+    _recusar_termo_fora_do_assinado(conn, p, montado, assinado)     # o lock confere o mesmo montado (sha256)
+    conf = assinatura.conferir(montado, assinado)
     rel, sha = arquivos.gravar_bytes("protocolos", pdf, "pdf")
     with db.mutacao(conn):
         # rodada 5 da PR #179: de novo sob o lock; a FRC gerada de novo ou o pacote montado de novo no meio recusa

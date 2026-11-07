@@ -454,6 +454,46 @@ def test_termo_corrigido_depois_da_montagem_bloqueia_e_a_nova_montagem_cita_o_no
     assert protocolo.previa_envio(c, [pid])["bloqueio"] is None
 
 
+def test_assinado_do_pacote_anterior_nao_entra_depois_de_montar_com_o_termo_novo(cenario):
+    # Rodada extra da PR #435 (revisor e gate Sol, rodada 3): o assinado do pacote anterior passa pela semelhanca de
+    # 90% da conferencia; o oficio nao pode sair com o termo velho (ou sem o termo) depois de montar de novo
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    velho = _assinar(_montado(c, ids, pid))
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    novo = _assinar(_montado(c, ids, pid))
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+    assert protocolo._linha(c, pid)["situacao"] == "montado"
+    assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
+
+
+def test_assinado_sem_o_termo_nao_entra_depois_que_o_termo_chega(cenario):
+    # o pacote montado antes do termo nao citava nada; montado de novo cita, e o assinado de antes nao serve
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    sem_termo = _assinar(_montado(c, ids, pid))
+    _termo(c, ids["mtpar"])
+    protocolo.montar(c, ids["uid"], pid)
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, sem_termo)
+
+
+def test_assinado_com_o_termo_nao_entra_no_pacote_que_ja_nao_o_cita(cenario):
+    # o termo saiu do cadastro (corrigido para outro periodo): o pacote novo nao cita termo e o assinado velho cita
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    com_termo = _assinar(_montado(c, ids, pid))
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", de="2027-09", ate="2028-08", data="2026-09-10",
+           corrige="ap-reaj-01")
+    assert "Apostilamento" not in _corrido(" ".join(_textos(protocolo.montar(c, ids["uid"], pid)["arquivo"])))
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, com_termo)
+
+
 def test_texto_sem_o_campo_do_termo_nao_monta(cenario):
     """Revisor e gate Sol (rodada 2 da PR #435): o texto da carta guarda o marcador {apostilamento}, nunca a frase. O
     que chega sem ele, quando o texto da familia o tem, nao monta: (A) o texto da tela de antes do termo, (B) o texto
