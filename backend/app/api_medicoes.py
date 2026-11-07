@@ -115,7 +115,9 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
     lista = medicoes.listar(conn, contrato_id)
     edicoes = medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
     sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
-    return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"])} for m in lista]
+    # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
+    return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
+             "boletins": medicoes.boletins(conn, m["id"])} for m in lista]
 
 
 @router.post("/api/contratos/{contrato_id}/medicoes", status_code=201)
@@ -451,7 +453,7 @@ def registrar_boletim(medicao_id: ID,
                       usuario: dict = Depends(exigir("editar_cadastros")),
                       conn: sqlite3.Connection = Depends(conexao)):
     """"Registrar boletim": valor aprovado, data e nº digitados, com o PDF do orgao. Devolve pedido, aprovado e a
-    diferenca."""
+    diferenca. A origem (`aceito` ou `manual`) o servidor decide contra as leituras da capa que ele fez (#290)."""
     _medicao_existe(conn, medicao_id)
     try:
         dados = {"valor_centavos": _centavos(valor), "data": data.isoformat(), "numero_orgao": numero_orgao,
@@ -465,6 +467,71 @@ def registrar_boletim(medicao_id: ID,
         return medicoes.registrar_boletim(conn, usuario["id"], medicao_id, dados, {"arquivo": caminho, "sha256": sha})
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
+
+
+LEITURAS_GUARDADAS = 20     # issue #290: leituras da capa guardadas por medicao para a origem `aceito`
+
+
+@router.post("/api/medicoes/{medicao_id}/boletim/leitura")
+def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
+                        usuario: dict = Depends(exigir("editar_cadastros")),
+                        conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #290: le a capa do SMO do PDF arrastado (leitor deterministico da #285) e devolve o nº, a data e o
+    valor propostos para a pessoa conferir. O boletim so' se registra no "Registrar boletim"; aqui so' fica guardado o
+    que foi lido de qual PDF, para o registro saber se os campos sao os lidos (origem `aceito`, gate Sol rodada 1).
+    Na execucao o valor e' o dos precos iniciais (o da NF da medicao); no reajuste, o do reajustamento."""
+    from app import leitura_smo
+    m = conn.execute("SELECT numero, numero_orgao, tipo, estado FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    if m is None:
+        raise HTTPException(404, "Medição não encontrada")
+    # code-review: a medicao que nao recebe boletim nao gasta leitura (nem OCR) no servidor; as mesmas recusas do
+    # registro (`conferir_boletim`)
+    if m["estado"] in ("cancelada", "desistida"):
+        raise HTTPException(422, f"{medicoes.nome_medicao(m['numero'], m['tipo'])} está "
+                                 f"{medicoes.rotulo_estado(m['estado'])}: não recebe boletim")
+    if m["estado"] == "planilha_gerada":
+        raise HTTPException(422, "Registre o envio da planilha/carta antes do boletim do órgão")
+    pdf = _pdf_validado(arquivo, TETO_PLANILHA)
+    r = leitura_smo.ler_pdf(pdf)
+    avisos = list(r["avisos"])
+    c = r["campos"]
+    if r["motivo"] == "nao-aprovada":
+        # capa lida, mas o orgao ainda nao aprovou: nada e' proposto (a pessoa digita, se o boletim for outro)
+        return {"lido": False, "fonte": r["fonte"], "campos": {},
+                "avisos": [f"A capa não está aprovada (situação: {c.get('situacao') or '—'}); digite os valores do boletim"]}
+    campos = {}
+    da_medicao = True
+    if "numero" in c:
+        campos["numero_orgao"] = str(c["numero"])
+        # code-review: o PDF de outra medicao nao passa calado (o nº do orgao manda onde difere do da Lotufo, D6);
+        # gate Sol, rodada 2: e a leitura dele nao vale para `aceito` nesta medicao
+        esperado = m["numero_orgao"] or m["numero"]
+        if c["numero"] != esperado:
+            da_medicao = False
+            avisos.insert(0, f"A capa é da {c['numero']}ª medição e esta é a {esperado}ª: confira se o PDF é o certo")
+    if "data_realizacao" in c:
+        campos["data"] = c["data_realizacao"]
+    valor = c.get("reajuste_centavos" if m["tipo"] == "reajuste" else "valor_centavos")
+    if valor is not None and valor < 0:
+        # gate Sol, rodada 1: aprovado negativo nao e' boletim neste produto (o registro recusa): nada e' proposto
+        return {"lido": False, "fonte": None, "campos": {},
+                "avisos": ["A capa traz valor negativo; confira o boletim e digite os valores"]}
+    if valor is not None:
+        campos["valor_centavos"] = valor
+    if not campos and not avisos:
+        avisos.append("Não foi possível ler a capa do boletim neste PDF; digite os valores")
+    if da_medicao and len(campos) == 3:
+        # gate Sol, rodada 2: so' a leitura completa e da capa desta medicao pode dar `aceito`; a mesma leitura
+        # repetida nao duplica, e ficam so' as LEITURAS_GUARDADAS mais recentes da medicao (tabela de apoio)
+        with db.mutacao(conn):
+            conn.execute("INSERT OR IGNORE INTO medicao_boletim_leituras (medicao_id, sha256, numero_orgao, data, "
+                         "valor_centavos, fonte, usuario_id) VALUES (?,?,?,?,?,?,?)",
+                         (medicao_id, arquivos.sha_de(pdf), campos["numero_orgao"], campos["data"],
+                          campos["valor_centavos"], r["fonte"], usuario["id"]))
+            conn.execute("DELETE FROM medicao_boletim_leituras WHERE medicao_id=? AND id NOT IN (SELECT id FROM "
+                         "medicao_boletim_leituras WHERE medicao_id=? ORDER BY id DESC LIMIT ?)",
+                         (medicao_id, medicao_id, LEITURAS_GUARDADAS))
+    return {"lido": bool(campos), "fonte": r["fonte"] if campos else None, "campos": campos, "avisos": avisos}
 
 
 @router.get("/api/medicoes/{medicao_id}/boletins/{atesto_id}")

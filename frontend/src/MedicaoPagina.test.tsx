@@ -124,12 +124,13 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(within(lateral).getByText("Total").closest("div")!.textContent).toContain("10.500,00");
   });
 
-  it("“Mais ações” só tem atestado, assinatura, medição final, cancelar, desistir e liberar envio preso", async () => {
+  it("“Mais ações” só tem atestado, boletim, assinatura, medição final, cancelar, desistir e liberar envio preso", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista" }] });
     pagina();
     fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
     const itens = within(screen.getByRole("menu")).getAllByRole("menuitem").map(x => x.textContent);
-    expect(itens).toEqual(["Definir o atestado", "Registrar assinatura", "Marcar como medição final", "Cancelar a medição", "Registrar desistência"]);
+    // #290: sem boletim ainda, a assinatura (do boletim, no DocuSign) nao aparece
+    expect(itens).toEqual(["Definir o atestado", "Registrar boletim", "Marcar como medição final", "Cancelar a medição", "Registrar desistência"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Cancelar a medição" }));
     expect(screen.getByRole("heading", { name: "Cancelar a medição", level: 2 })).toBeTruthy();
   });
@@ -717,5 +718,67 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     await waitFor(() => expect(terceiro.container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Sem reserva (teste)" }));
     expect(terceiro.container.querySelector("[data-espelho='espelho']")!.getAttribute("data-abre-form")).toBe("false");
+  });
+});
+
+describe("Boletim do órgão na página da medição (issue #290)", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/obras/1/medicoes/5"));
+  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
+
+  const COM_BOLETIM = { ...MEDICAO, estado: "boletim_recebido", valor_protocolado_centavos: 1234567,
+    valor_atestado_centavos: 1200001, atestado_em: "2026-08-10",
+    boletins: [{ id: 9, tem_arquivo: true, valor_centavos: 1200001, atestado_em: "2026-08-10", meio: "smo", numero_orgao: "7" }],
+    edicoes_valor: [
+      { data: "2026-08-03T10:00:00", texto: "Planilha/carta enviada por fora em 03/08/2026 (E-mail ao protocolo) por Admin" },
+      { data: "2026-08-11T09:00:00", boletim_id: 9,
+        texto: "Boletim nº 7 (SMO) de 10/08/2026: aprovado R$ 12.000,01, pedido R$ 12.345,67, diferença -R$ 345,66 por Admin" },
+      { data: "2026-08-12", texto: "Boletim assinado no DocuSign em 12/08/2026 por Admin" },
+    ] };
+
+  it("a planilha enviada tem “Registrar boletim” na etapa; arrastar a capa preenche e aceitar grava", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada", valor_protocolado_centavos: 1234567 }] });
+    apiForm.mockImplementation(async (url: string) => url.endsWith("/boletim/leitura")
+      ? { lido: true, fonte: "texto", avisos: [], campos: { numero_orgao: "7", data: "2026-08-10", valor_centavos: 1200001 } }
+      : { id: 9 });
+    pagina();
+    fireEvent.click(await screen.findByRole("button", { name: "Registrar boletim" }));
+    const janela = screen.getByRole("form", { name: "Registrar boletim" });
+    const pdf = new File(["%PDF-1.4"], "boletim.pdf", { type: "application/pdf" });
+    fireEvent.drop(within(janela).getByTestId("soltar-boletim"), { dataTransfer: { files: [pdf] } });
+    await waitFor(() => expect((within(janela).getByLabelText(/Nº no órgão/) as HTMLInputElement).value).toBe("7"));
+    expect((within(janela).getByLabelText(/Data do boletim/) as HTMLInputElement).value).toBe("2026-08-10");
+    expect((within(janela).getByLabelText(/Valor aprovado/) as HTMLInputElement).value).toBe("12.000,01");
+    expect(within(janela).getAllByText("Lido da capa")).toHaveLength(3);
+    fireEvent.click(within(janela).getByRole("button", { name: "Aceitar e registrar o boletim" }));
+    await waitFor(() => expect(apiForm.mock.calls.some(c => c[0] === "/api/medicoes/5/boletim")).toBe(true));
+    const fd = apiForm.mock.calls.find(c => c[0] === "/api/medicoes/5/boletim")![1] as FormData;
+    expect([fd.get("numero_orgao"), fd.get("data"), fd.get("valor"), fd.get("meio")]).toEqual(
+      ["7", "2026-08-10", "12.000,01", "smo"]);
+  });
+
+  it("a linha do tempo mostra Planilha/carta, Boletim (pedido, aprovado, diferença e o PDF) e Assinatura", async () => {
+    responder({ "/api/contratos/1/medicoes": [COM_BOLETIM] });
+    pagina();
+    const lateral = await screen.findByRole("complementary", { name: "Resumo e linha do tempo" });
+    const tempo = within(lateral).getByText("Linha do tempo").closest("section")!;
+    await waitFor(() => expect(tempo.textContent).toContain("Boletim nº 7"));
+    const itens = [...tempo.querySelectorAll("li")].map(li => li.textContent ?? "").reverse();
+    expect(itens.findIndex(t => t.includes("Planilha/carta enviada"))).toBeLessThan(itens.findIndex(t => t.includes("Boletim nº 7")));
+    expect(itens.findIndex(t => t.includes("Boletim nº 7"))).toBeLessThan(itens.findIndex(t => t.includes("assinado no DocuSign")));
+    const boletim = itens.find(t => t.includes("Boletim nº 7"))!;
+    expect(boletim).toContain("aprovado R$ 12.000,01");
+    expect(boletim).toContain("pedido R$ 12.345,67");
+    expect(boletim).toContain("diferença -R$ 345,66");
+    expect(within(tempo).getByRole("link", { name: "Ver o boletim" }).getAttribute("href")).toBe("/api/medicoes/5/boletins/9");
+  });
+
+  it("“Registrar assinatura” aparece depois do boletim; o atestado não se edita mais à mão", async () => {
+    responder({ "/api/contratos/1/medicoes": [COM_BOLETIM] });
+    pagina();
+    fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
+    const itens = within(screen.getByRole("menu")).getAllByRole("menuitem").map(x => x.textContent);
+    expect(itens).toContain("Registrar assinatura");
+    expect(itens).toContain("Registrar boletim novo");
+    expect(itens).not.toContain("Editar o atestado");
   });
 });

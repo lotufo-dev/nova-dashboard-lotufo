@@ -83,7 +83,10 @@ export function LinhaDoTempo({ eventos }: { eventos: Evento[] }) {
       <div className="cartao__corpo">
         {eventos.length === 0 ? <p className="campo__nota">Nada registrado ainda.</p> : (
           <ol className="tempo">
-            {[...eventos].reverse().map((e, i) => <li key={i}><time>{quando(e.data)}</time>{e.texto}</li>)}
+            {[...eventos].reverse().map((e, i) => (
+              <li key={i}><time>{quando(e.data)}</time>{e.texto}
+                {e.href && <> <a className="link" href={e.href} target="_blank" rel="noopener noreferrer">Ver o boletim</a></>}</li>
+            ))}
           </ol>
         )}
       </div>

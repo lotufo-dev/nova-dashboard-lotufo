@@ -179,8 +179,8 @@ def _eventos_atesto(conn: sqlite3.Connection, ids: list[int], out: dict[int, lis
     for i in range(0, len(ids), LOTE_AUDITORIA):
         lote = ids[i:i + LOTE_AUDITORIA]
         linhas += conn.execute(
-            "SELECT e.id, e.medicao_id, e.valor_centavos, e.origem, e.atestado_em, e.criado_em, u.nome FROM medicao_atestos e "
-            "LEFT JOIN usuarios u ON u.id=e.usuario_id "
+            # e.*: o meio, o nº e o arquivo do boletim (042) nao existem no banco "so' ate' a 039" dos testes da migracao
+            "SELECT e.*, u.nome FROM medicao_atestos e LEFT JOIN usuarios u ON u.id=e.usuario_id "
             f"WHERE e.medicao_id IN ({','.join('?' * len(lote))})", lote).fetchall()
     anterior: dict[int, tuple] = {}
     for r in sorted(linhas, key=lambda r: r["id"]):
@@ -189,6 +189,15 @@ def _eventos_atesto(conn: sqlite3.Connection, ids: list[int], out: dict[int, lis
         # Evento sem dia (carga da auditoria antiga) nao apaga o dia que ja' valia
         dia = r["atestado_em"] if r["atestado_em"] is not None else dia_ant
         anterior[mid] = (r["valor_centavos"], dia, r["origem"])
+        if "arquivo" in r.keys() and r["arquivo"] is not None:
+            # issue #290: o boletim do orgao registrado com o documento (o criterio de `tem_boletim`; o evento da carga
+            # do historico, sem PDF, segue como "Atestado alterado") e' uma linha so', com o aprovado, o pedido e a
+            # diferenca, e o id para a tela ligar o PDF. A data do evento e' a do boletim (como a assinatura usa a dela):
+            # registrado depois da assinatura ou do protocolo, ele nao pode aparecer depois deles (revisor, rodada 1)
+            texto = _texto_boletim(r, dia)
+            out[mid].append({"data": dia or r["criado_em"], "boletim_id": r["id"],
+                             "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+            continue
         textos = []
         if valor_ant != r["valor_centavos"]:
             textos.append(f"Atestado definido em {format_brl(r['valor_centavos'])}" if valor_ant is None
@@ -206,6 +215,23 @@ def _eventos_atesto(conn: sqlite3.Connection, ids: list[int], out: dict[int, lis
         for texto in textos:
             out[mid].append({"data": r["criado_em"],
                              "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+
+
+_MEIO_BOLETIM = {"smo": "SMO", "oficio": "ofício", "email": "e-mail", "carimbo": "carimbo", "ci": "CI", "outro": "outro"}
+
+
+def _texto_boletim(r, dia: str | None) -> str:
+    """"Boletim nº X (SMO) de 10/08/2026: aprovado R$ A, pedido R$ P, diferença R$ D". O pedido e' o congelado no
+    evento (070); sem ele (boletim sem pedido, ou anterior a 070) nao ha' pedido nem diferenca (gate Sol, rodada 1)."""
+    from app.dinheiro import format_brl
+    texto = "Boletim" + (f" nº {r['numero_orgao']}" if r["numero_orgao"] else "")
+    texto += f" ({_MEIO_BOLETIM.get(r['meio'], r['meio'])})" if r["meio"] else ""
+    texto += f" de {_data_br(dia)}" if dia else ""
+    texto += f": aprovado {format_brl(r['valor_centavos'])}"
+    pedido = r["pedido_centavos"] if "pedido_centavos" in r.keys() else None
+    if pedido is not None:
+        texto += f", pedido {format_brl(pedido)}, diferença {format_brl(r['valor_centavos'] - pedido)}"
+    return texto
 
 
 def _eventos_assinatura(conn: sqlite3.Connection, ids: list[int], out: dict[int, list[dict]]) -> None:
@@ -239,6 +265,14 @@ def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: 
     with db.mutacao(conn):
         if conn.execute("SELECT 1 FROM medicoes WHERE id=?", (medicao_id,)).fetchone() is None:
             raise ValueError("Medição não encontrada")
+        # Issue #290 (gate Sol, rodada 1): a assinatura e' a do boletim do orgao (spec §2.1, passo 4): sem boletim
+        # registrado nao ha' o que assinar, e ela nao vem antes do primeiro boletim
+        primeiro = conn.execute("SELECT MIN(atestado_em) FROM medicao_atestos WHERE medicao_id=? AND arquivo IS NOT NULL",
+                                (medicao_id,)).fetchone()[0]
+        if not tem_boletim(conn, medicao_id):
+            raise ValueError("Registre o boletim do órgão antes da assinatura")
+        if primeiro and data.isoformat() < primeiro:
+            raise ValueError(f"A data da assinatura não pode ser anterior à do boletim ({_data_br(primeiro)})")
         if conn.execute("SELECT 1 FROM medicao_assinaturas WHERE medicao_id=? AND assinado_em=? AND envelope IS ?",
                         (medicao_id, data.isoformat(), envelope)).fetchone():
             raise ValueError("Esta assinatura já está registrada")     # duplo clique: o registro não se apaga depois
@@ -314,6 +348,12 @@ def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int
     with db.mutacao(conn):
         m, dia = conferir_boletim(conn, medicao_id, dados)
         atual = m["estado"]
+        # issue #290 (gate Sol, rodada 1): `aceito` so' quando o PDF enviado e os tres campos sao exatamente os de uma
+        # leitura da capa que o proprio servidor fez para esta medicao; o resto e' `manual`. O cliente nao decide.
+        origem = "aceito" if conn.execute(
+            "SELECT 1 FROM medicao_boletim_leituras WHERE medicao_id=? AND sha256=? AND numero_orgao IS ? AND data=? "
+            "AND valor_centavos=? LIMIT 1", (medicao_id, anexo["sha256"], numero, dia.isoformat(), valor)).fetchone() \
+            else "manual"
         # Repeticao (clique duplo, pedido atrasado) e' o mesmo boletim de QUALQUER evento ja' gravado, com o mesmo
         # documento, valor, dia, nº, meio e observacao (gate Sol): a repeticao atrasada de A depois da correcao B nao
         # volta o valor; corrigir so' o nº, o meio ou a observacao e' um evento novo. O evento nao se apaga depois.
@@ -326,20 +366,21 @@ def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int
         novo = ("boletim_recebido" if atual == "planilha_enviada" or (atual == "prevista" and regra_ativa)
                 else atual)
         cur = conn.execute(
-            "UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem='manual', atestado_em=?, estado=? "
-            "WHERE id=? AND estado=?", (valor, dia.isoformat(), novo, medicao_id, atual))
+            "UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem=?, atestado_em=?, estado=? "
+            "WHERE id=? AND estado=?", (valor, origem, dia.isoformat(), novo, medicao_id, atual))
         db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
         aid = conn.execute(
             "INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, meio, "
-            "numero_orgao, arquivo, sha256, observacao) VALUES (?,?,'manual',?,?,?,?,?,?,?)",
-            (medicao_id, valor, dia.isoformat(), usuario_id, meio, numero, anexo["arquivo"], anexo["sha256"],
-             observacao)).lastrowid
+            "numero_orgao, arquivo, sha256, observacao, pedido_centavos) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (medicao_id, valor, origem, dia.isoformat(), usuario_id, meio, numero, anexo["arquivo"], anexo["sha256"],
+             observacao, m["valor_protocolado_centavos"])).lastrowid
         antes = {"estado": atual, "valor_atestado_centavos": m["valor_atestado_centavos"],
                  "valor_atestado_origem": m["valor_atestado_origem"], "atestado_em": m["atestado_em"]}
         auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", medicao_id, antes, {
-            "estado": novo, "valor_atestado_centavos": valor, "valor_atestado_origem": "manual",
+            "estado": novo, "valor_atestado_centavos": valor, "valor_atestado_origem": origem,
             "atestado_em": dia.isoformat(), "boletim": {"atesto_id": aid, "meio": meio, "numero_orgao": numero,
-                                                       "sha256": anexo["sha256"], "observacao": observacao}})
+                                                       "sha256": anexo["sha256"], "observacao": observacao,
+                                                       "pedido_centavos": m["valor_protocolado_centavos"]}})
         pedido = m["valor_protocolado_centavos"]
     return {"id": aid, "estado": novo, "pedido_centavos": pedido, "aprovado_centavos": valor,
             "diferenca_centavos": None if pedido is None else valor - pedido}

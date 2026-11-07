@@ -739,24 +739,33 @@ def test_planilha_diretoria_recebe_403(client_admin):
 
 
 # issue #287: assinatura no DocuSign (evento informativo)
+def _com_boletim(cl):
+    """Medicao do fluxo antigo com boletim de 10/08/2026 (#290: a assinatura e' a do boletim)."""
+    mid = _medicao(cl, _contrato(cl))
+    assert _registrar_boletim(cl, mid).status_code == 201
+    return mid
+
+
+def _assinaturas(cl, mid):
+    return [e for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"] if "assinado" in e["texto"]]
+
+
 def test_registrar_assinatura_aparece_na_linha_do_tempo(client_admin):
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01", "envelope": "Boletim 1 - Obra Alfa"})
     assert r.status_code == 201
-    eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+    eventos = _assinaturas(client_admin, mid)
     assert [e["texto"] for e in eventos] == [
         "Boletim assinado no DocuSign em 01/10/2026 (envelope Boletim 1 - Obra Alfa) por Admin"]
 
 
 def test_assinatura_com_data_futura_da_422(client_admin):
     import datetime
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     futura = (datetime.date.today() + datetime.timedelta(days=3)).isoformat()
     r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": futura, "envelope": "x"})
     assert r.status_code == 422
-    assert client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"] == []
+    assert _assinaturas(client_admin, mid) == []
 
 
 def test_assinatura_em_medicao_inexistente_da_404(client_admin):
@@ -765,8 +774,7 @@ def test_assinatura_em_medicao_inexistente_da_404(client_admin):
 
 def test_assinatura_nao_gera_nem_exige_aviso(client_admin):
     from app import avisos, db
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     conn = db.get_conn()
     antes = avisos.listar(conn, publico="todos")
     client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01"})
@@ -775,21 +783,20 @@ def test_assinatura_nao_gera_nem_exige_aviso(client_admin):
 
 
 def test_assinatura_identica_repetida_da_422_e_nao_duplica(client_admin):
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     corpo = {"data": "2026-10-01", "envelope": "Boletim 1"}
     assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 201
     assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json=corpo).status_code == 422
     assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={**corpo, "data": "2026-10-02"}).status_code == 201
-    assert len(client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]) == 2
+    assert len(_assinaturas(client_admin, mid)) == 2
 
 
 def test_assinatura_na_linha_do_tempo_usa_a_data_da_assinatura_e_nao_a_do_registro(client_admin):
-    cid = _contrato(client_admin)
-    mid = _medicao(client_admin, cid)
+    mid = _com_boletim(client_admin)
     client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-09-15", "envelope": "Boletim 1"})
     client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1.000,00"})   # registrado antes (hoje)
-    eventos = client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+    eventos = [e for e in client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+               if not e["texto"].startswith("Boletim nº")]
     assert [e["data"] for e in eventos][0] == "2026-09-15"
     assert "Boletim assinado no DocuSign" in eventos[0]["texto"]    # vem antes do valor, que e' de hoje
 
@@ -1037,6 +1044,257 @@ def test_boletim_diretoria_recebe_403_e_engenharia_registra(client_admin):
     assert client_admin.get(f"/api/medicoes/{mid}").json()["boletins"] == []      # diretoria le
     _entrar(client_admin, "eng@lotufo.com")
     assert _registrar_boletim(client_admin, mid).status_code == 201
+
+
+# --- issue #290: leitura da capa do SMO na tela do boletim ----------------------------------------------------
+
+def _capa_lida(monkeypatch, paginas=None):
+    """O PDF arrastado tem a capa de exemplo do SMO (7a medicao, PI R$ 1.234.567,89, reajuste R$ 98.765,43)."""
+    import pathlib
+    from app import leitura_pdf
+    if paginas is None:
+        texto = (pathlib.Path(__file__).parent / "fixtures" / "smo" / "capa-texto-aprovada.txt").read_text(encoding="utf-8")
+        paginas = texto.split("SINFRA - Secretaria de Estado de Infraestrutura e Logística\n")
+    monkeypatch.setattr(leitura_pdf, "primeiras_paginas_com_limite", lambda pdf: paginas)
+
+
+def _ler_capa(cl, mid):
+    return cl.post(f"/api/medicoes/{mid}/boletim/leitura", files=_boletim())
+
+
+def test_leitura_da_capa_devolve_numero_data_e_valor_lidos(client_admin, monkeypatch):
+    _capa_lida(monkeypatch)
+    mid = _nova_planilha(client_admin, _contrato(client_admin), numero=7).json()["medicao_id"]   # a capa e' da 7a
+    _no_estado(mid, "planilha_enviada")
+    r = _ler_capa(client_admin, mid)
+    assert r.status_code == 200, r.text
+    corpo = r.json()
+    assert (corpo["lido"], corpo["fonte"]) == (True, "texto")
+    # a execucao recebe os precos iniciais (o valor da NF da medicao), em centavos inteiros
+    assert corpo["campos"] == {"numero_orgao": "7", "data": "2026-04-14", "valor_centavos": 123456789}
+    assert corpo["avisos"] == []
+    assert _atestos(mid) == []                                  # ler nao grava nada
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_enviada"
+
+
+def test_leitura_da_capa_no_reajuste_propoe_o_reajustamento(client_admin, monkeypatch):
+    _capa_lida(monkeypatch)
+    cid = _contrato(client_admin)
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 7, "tipo": "reajuste", "competencia": "2026-07"}).json()["id"]
+    corpo = _ler_capa(client_admin, mid).json()
+    assert corpo["lido"] and corpo["campos"]["valor_centavos"] == 9876543
+
+
+def test_pdf_sem_leitura_devolve_campos_vazios(client_admin, monkeypatch):
+    _capa_lida(monkeypatch, paginas=["Oficio qualquer sem capa", ""])
+    mid = _planilha_enviada(client_admin)
+    corpo = _ler_capa(client_admin, mid).json()
+    assert (corpo["lido"], corpo["campos"], corpo["fonte"]) == (False, {}, None)
+    assert corpo["avisos"] == ["Não foi possível ler a capa do boletim neste PDF; digite os valores"]
+
+
+def test_capa_de_outra_medicao_avisa(client_admin, monkeypatch):
+    _capa_lida(monkeypatch)                                       # a capa e' da 7a medicao
+    cid = _contrato(client_admin)
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 6, "tipo": "execucao", "competencia": "2026-07"}).json()["id"]
+    corpo = _ler_capa(client_admin, mid).json()
+    assert corpo["lido"] and corpo["campos"]["numero_orgao"] == "7"
+    assert corpo["avisos"] == ["A capa é da 7ª medição e esta é a 6ª: confira se o PDF é o certo"]
+
+
+def test_leitura_recusada_na_medicao_que_nao_recebe_boletim(client_admin, monkeypatch):
+    _capa_lida(monkeypatch)
+    cid = _contrato(client_admin)
+    gerada = _nova_planilha(client_admin, cid).json()["medicao_id"]
+    r = _ler_capa(client_admin, gerada)
+    assert r.status_code == 422 and "envio da planilha/carta" in r.json()["detail"]
+    cancelada = _medicao(client_admin, cid, 3)
+    _no_estado(cancelada, "cancelada")
+    r = _ler_capa(client_admin, cancelada)
+    assert r.status_code == 422 and "cancelada" in r.json()["detail"]
+
+
+def test_capa_nao_aprovada_nao_propoe_valores(client_admin, monkeypatch):
+    import pathlib
+    texto = (pathlib.Path(__file__).parent / "fixtures" / "smo" / "capa-texto-aprovada.txt").read_text(encoding="utf-8")
+    texto = texto.replace("Provisória - APROVADA", "Provisória - EM ANÁLISE")
+    _capa_lida(monkeypatch, paginas=texto.split("SINFRA - Secretaria de Estado de Infraestrutura e Logística\n"))
+    mid = _planilha_enviada(client_admin)
+    corpo = _ler_capa(client_admin, mid).json()
+    assert (corpo["lido"], corpo["campos"]) == (False, {})
+    assert corpo["avisos"] == ["A capa não está aprovada (situação: EM ANÁLISE); digite os valores do boletim"]
+
+
+def test_leitura_da_capa_recusas(client_admin, monkeypatch):
+    from app import auth, db
+    _capa_lida(monkeypatch)
+    mid = _planilha_enviada(client_admin)
+    falso = client_admin.post(f"/api/medicoes/{mid}/boletim/leitura",
+                              files={"arquivo": ("b.pdf", b"nao e pdf", "application/pdf")})
+    assert falso.status_code == 415
+    assert _ler_capa(client_admin, 999999).status_code == 404
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@lotufo.com", "senha-forte-123", "diretoria")
+    conn.close()
+    _entrar(client_admin, "dir@lotufo.com")
+    assert _ler_capa(client_admin, mid).status_code == 403
+
+
+def _lida_e_enviada(cl, monkeypatch):
+    """Planilha enviada da 7a medicao com a capa de exemplo ja' lida pelo servidor."""
+    _capa_lida(monkeypatch)
+    mid = _nova_planilha(cl, _contrato(cl), numero=7).json()["medicao_id"]
+    _no_estado(mid, "planilha_enviada")
+    assert _ler_capa(cl, mid).json()["lido"]
+    return mid
+
+
+def test_boletim_com_os_campos_lidos_do_mesmo_pdf_grava_origem_aceito(client_admin, monkeypatch):
+    mid = _lida_e_enviada(client_admin, monkeypatch)
+    r = _registrar_boletim(client_admin, mid, valor="1.234.567,89", data="2026-04-14", numero="7")
+    assert r.status_code == 201, r.text
+    [ev] = _atestos(mid)
+    assert ev["origem"] == "aceito"
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_atestado_origem"] == "aceito"
+    # digitado (sem leitura) continua manual
+    mid2 = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid2).status_code == 201
+    assert _atestos(mid2)[0]["origem"] == "manual"
+
+
+def test_campo_diferente_do_lido_ou_outro_pdf_grava_manual(client_admin, monkeypatch):
+    # gate Sol, rodada 1: o servidor nao confia no cliente; `lido=true` de uma chamada direta nao vira `aceito`
+    mid = _lida_e_enviada(client_admin, monkeypatch)
+    r = _registrar_boletim(client_admin, mid, valor="1.234.567,88", data="2026-04-14", numero="7", lido="true")
+    assert r.status_code == 201, r.text
+    assert _atestos(mid)[-1]["origem"] == "manual"
+    # os mesmos tres campos com outro PDF (outro sha256) tambem
+    r = _registrar_boletim(client_admin, mid, valor="1.234.567,89", data="2026-04-14", numero="7",
+                           texto="Outro boletim", lido="true")
+    assert r.status_code == 201, r.text
+    assert _atestos(mid)[-1]["origem"] == "manual"
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_atestado_origem"] == "manual"
+
+
+def test_capa_de_outro_numero_lida_nesta_medicao_nao_da_aceito(client_admin, monkeypatch):
+    # gate Sol, rodada 2: a capa da 7a lida na 6a so' avisa, e o registro com os campos lidos fica `manual`
+    _capa_lida(monkeypatch)
+    mid = _nova_planilha(client_admin, _contrato(client_admin), numero=6).json()["medicao_id"]
+    _no_estado(mid, "planilha_enviada")
+    corpo = _ler_capa(client_admin, mid).json()
+    assert corpo["lido"] and corpo["avisos"][0].startswith("A capa é da 7ª medição")
+    r = _registrar_boletim(client_admin, mid, valor="1.234.567,89", data="2026-04-14", numero="7")
+    assert r.status_code == 201, r.text
+    assert _atestos(mid)[0]["origem"] == "manual"
+
+
+def test_mesma_leitura_repetida_guarda_uma_linha_e_so_as_mais_recentes(client_admin, monkeypatch):
+    # gate Sol, rodada 2: a tabela de apoio nao cresce sem limite
+    from app import api_medicoes, db
+    mid = _lida_e_enviada(client_admin, monkeypatch)
+    _ler_capa(client_admin, mid)
+    conn = db.get_conn()
+    try:
+        contar = lambda: conn.execute("SELECT COUNT(*) FROM medicao_boletim_leituras WHERE medicao_id=?",
+                                      (mid,)).fetchone()[0]
+        assert contar() == 1
+        monkeypatch.setattr(api_medicoes, "LEITURAS_GUARDADAS", 2)
+        for texto in ("PDF A", "PDF B", "PDF C"):
+            client_admin.post(f"/api/medicoes/{mid}/boletim/leitura", files=_boletim(texto))
+        assert contar() == 2
+    finally:
+        conn.close()
+
+
+def test_leitura_parcial_nao_e_guardada(client_admin, monkeypatch):
+    from app import db, leitura_smo
+    monkeypatch.setattr(leitura_smo, "ler_pdf", lambda pdf: {
+        "ok": False, "motivo": "campos-ausentes:valor_centavos", "faltando": [], "avisos": [], "fonte": "texto",
+        "campos": {"numero": 1, "situacao": "APROVADA", "data_realizacao": "2026-04-14"}})
+    mid = _planilha_enviada(client_admin)
+    assert _ler_capa(client_admin, mid).json()["campos"] == {"numero_orgao": "1", "data": "2026-04-14"}
+    conn = db.get_conn()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM medicao_boletim_leituras").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_leitura_de_outra_medicao_nao_da_aceito(client_admin, monkeypatch):
+    lida = _lida_e_enviada(client_admin, monkeypatch)
+    outra = _nova_planilha(client_admin, _contrato(client_admin), numero=7).json()["medicao_id"]
+    _no_estado(outra, "planilha_enviada")
+    assert lida != outra
+    assert _registrar_boletim(client_admin, outra, valor="1.234.567,89", data="2026-04-14", numero="7").status_code == 201
+    assert _atestos(outra)[0]["origem"] == "manual"
+
+
+def test_capa_com_valor_negativo_nao_propoe_nada(client_admin, monkeypatch):
+    # gate Sol, rodada 1: aprovado negativo nao e' boletim (o registro recusa); a leitura nao o propoe
+    from app import leitura_smo
+    monkeypatch.setattr(leitura_smo, "ler_pdf", lambda pdf: {
+        "ok": True, "motivo": None, "faltando": [], "avisos": [], "fonte": "texto",
+        "campos": {"numero": 7, "situacao": "APROVADA", "data_realizacao": "2026-04-14", "valor_centavos": 100_01,
+                   "reajuste_centavos": -12_34}})
+    cid = _contrato(client_admin)
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 7, "tipo": "reajuste", "competencia": "2026-07"}).json()["id"]
+    corpo = _ler_capa(client_admin, mid).json()
+    assert (corpo["lido"], corpo["campos"]) == (False, {})
+    assert corpo["avisos"] == ["A capa traz valor negativo; confira o boletim e digite os valores"]
+
+
+def test_linha_do_tempo_mostra_o_boletim_com_pedido_aprovado_e_diferenca(client_admin):
+    mid = _planilha_enviada(client_admin)
+    r = _registrar_boletim(client_admin, mid, meio="smo")
+    aid = r.json()["id"]
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    [ev] = [e for e in d["edicoes_valor"] if e["texto"].startswith("Boletim")]
+    assert ev["texto"] == ("Boletim nº SMO 14/2026 (SMO) de 10/08/2026: aprovado R$ 12.000,01, pedido R$ 12.345,67, "
+                           "diferença -R$ 345,66 por Admin")
+    assert ev["boletim_id"] == aid
+    assert not any(e["texto"].startswith("Atestado definido") for e in d["edicoes_valor"])
+    # a lista da obra (que a pagina da medicao le) traz os boletins
+    [m] = [x for x in client_admin.get(f"/api/contratos/{d['contrato_id']}/medicoes").json() if x["id"] == mid]
+    assert [b["id"] for b in m["boletins"]] == [aid]
+
+
+def test_pedido_da_linha_do_boletim_e_o_do_dia_do_registro(client_admin):
+    # gate Sol, rodada 1: a prevista sem pedido recebe o boletim; o pedido posto depois nao reescreve a linha antiga
+    mid = _medicao(client_admin, _contrato(client_admin))
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    assert client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "12.000,01"}).status_code == 200
+    [ev] = [e for e in _eventos(client_admin, mid) if e.startswith("Boletim")]
+    assert ev == "Boletim nº SMO 14/2026 de 10/08/2026: aprovado R$ 12.000,01 por Admin"
+    # com pedido no registro, ele fica congelado no evento (centavo impar)
+    mid2 = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid2).status_code == 201
+    assert _atestos(mid2)[0]["pedido_centavos"] == 12_345_67
+
+
+def test_boletim_registrado_depois_da_assinatura_aparece_antes_dela(client_admin):
+    # revisor, rodada 1: boletim de 10/08 assinado em 12/08 e registrado hoje vem antes da assinatura
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-08-12"}).status_code == 201
+    textos = _eventos(client_admin, mid)
+    i_bol = next(i for i, t in enumerate(textos) if t.startswith("Boletim nº"))
+    i_ass = next(i for i, t in enumerate(textos) if t.startswith("Boletim assinado"))
+    assert i_bol < i_ass
+
+
+def test_assinatura_exige_boletim_e_nao_vem_antes_dele(client_admin):
+    # gate Sol, rodada 1: a trava nao e' so' da tela
+    mid = _medicao(client_admin, _contrato(client_admin))
+    r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-10-01"})
+    assert r.status_code == 422 and r.json()["detail"] == "Registre o boletim do órgão antes da assinatura"
+    assert _registrar_boletim(client_admin, mid).status_code == 201          # boletim de 10/08/2026
+    r = client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-08-09"})
+    assert r.status_code == 422 and r.json()["detail"] == (
+        "A data da assinatura não pode ser anterior à do boletim (10/08/2026)")
+    assert client_admin.post(f"/api/medicoes/{mid}/assinatura", json={"data": "2026-08-10"}).status_code == 201
 
 
 def test_envio_por_fora_poe_em_planilha_enviada_com_origem_externo_e_data(client_admin):
