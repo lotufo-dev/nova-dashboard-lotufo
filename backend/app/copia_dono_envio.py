@@ -15,6 +15,7 @@ import html
 import json
 import logging
 import re
+import time
 from pathlib import Path
 
 from app import auditoria, backup, cobranca_certidoes, copia_dono, correio, db, envio_reserva, graph, tempo
@@ -30,6 +31,8 @@ SEM_CADASTRO = "destinatário da cópia do dono não configurado no cadastro (ge
 SEM_COPIA = "Nenhuma cópia do dono gerada ainda"
 _CARIMBO = re.compile(r"dashboard-dono-(\d{8}-\d{6})\.tar\.age$")
 CABECALHO_AGE = b"age-encryption.org/v1\n"     # o que `pyrage.encrypt` grava no inicio de todo arquivo cifrado
+# o evento do resultado do "Reenviar" (issue #482): tentativas e pausa entre elas (banco ocupado depois do envio)
+AUDITORIA_TENTATIVAS, AUDITORIA_PAUSA = 3, 0.5
 
 
 class EnvioNaoConfigurado(ValueError):
@@ -197,14 +200,21 @@ def _detalhe_presa(conn, presa) -> dict:
                                "assunto": assunto(gerada, presa["parte"], presa["partes"]) if gerada else None}
 
 
-def _auditar_reenvio(conn, quem: dict, arquivo: Path, depois: dict) -> None:
-    """O resultado do "Reenviar", DEPOIS da rodada, num segundo evento (o "iniciado" entrou com a reserva): a falha
-    dele nao esconde a do envio."""
-    try:
-        with db.mutacao(conn):
-            auditoria.registrar(conn, quem["id"], "copia_dono.reenviar", "copia_dono", arquivo.name, None, depois)
-    except Exception:
-        log.exception("auditoria do reenvio da copia do dono %s nao gravada: %s", arquivo.name, depois)
+def _auditar_reenvio(conn, quem: dict, arquivo: Path, depois: dict) -> bool:
+    """O resultado do "Reenviar", DEPOIS da rodada, num segundo evento (o "iniciado" entrou com a reserva), com
+    retentativa curta (banco ocupado). A falha dele nao esconde a do envio nem vira erro (que levaria a reenviar):
+    fica no log e volta False, para a resposta dizer que o resultado nao foi auditado."""
+    for tentativa in range(1, AUDITORIA_TENTATIVAS + 1):
+        try:
+            with db.mutacao(conn):
+                auditoria.registrar(conn, quem["id"], "copia_dono.reenviar", "copia_dono", arquivo.name, None, depois)
+            return True
+        except Exception:
+            if tentativa == AUDITORIA_TENTATIVAS:
+                log.exception("auditoria do reenvio da copia do dono %s nao gravada: %s", arquivo.name, depois)
+            else:
+                time.sleep(AUDITORIA_PAUSA)
+    return False
 
 
 def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
@@ -290,9 +300,10 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
         raise
     finally:
         if reenvio_por is not None:
-            _auditar_reenvio(conn, reenvio_por, arquivo, {
+            if not _auditar_reenvio(conn, reenvio_por, arquivo, {
                 "rodada": rodada, "partes": total, "enviados": enviados, "resultado": resultado, "sha256": sha,
-                "para": config["para"], "enviada_por": usuario["email"]})
+                "para": config["para"], "enviada_por": usuario["email"]}):
+                reenvio_por["resultado_nao_auditado"] = True    # `reenviar` devolve na resposta
     return total
 
 
@@ -353,8 +364,12 @@ def reenviar(conn, pasta_backups: Path, usuario: dict) -> dict:
     if not copias:
         raise EnvioNaoConfigurado(SEM_COPIA)
     arquivo = copias[-1]
-    total = _registrado(conn, arquivo, usuario)
-    return {"arquivo": arquivo.name, "emails": total, "partes": total, "completo": True}
+    quem = dict(usuario)
+    total = _registrado(conn, arquivo, quem)
+    r = {"arquivo": arquivo.name, "emails": total, "partes": total, "completo": True}
+    if quem.get("resultado_nao_auditado"):
+        r["resultado_auditado"] = False             # o envio saiu inteiro; so' o segundo evento falhou (#482)
+    return r
 
 
 def rodada_semanal(raiz: Path, pasta_backups: Path) -> None:

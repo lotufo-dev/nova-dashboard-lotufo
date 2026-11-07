@@ -284,6 +284,9 @@ function LinhaBackup({ rotulo, em, erro, erroEm }: { rotulo: string; em: string 
   );
 }
 
+// Issue #482: a reserva liberada pode ser de uma copia anterior, ja' apagada: nada a "enviar de novo"
+const LIBERADA = "Reserva removida. Nenhum e-mail foi enviado.";
+
 /** Issue #419: a copia cifrada para a chave do dono e o botao que a gera na hora (a rota so' aceita admin). */
 function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
   const [gerando, setGerando] = useState(false);
@@ -310,8 +313,10 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
   async function reenviar() {
     setErro(""); setEnviada(""); setPresa(null); setReenviando(true);
     try {
-      const r = await api<{ arquivo: string; emails: number }>("/api/admin/copia-dono/reenviar", { method: "POST" });
-      setEnviada(`Cópia do dono enviada por e-mail (${contar(r.emails, "e-mail", "e-mails")}).`);
+      const r = await api<{ arquivo: string; emails: number; resultado_auditado?: boolean }>(
+        "/api/admin/copia-dono/reenviar", { method: "POST" });
+      setEnviada(`Cópia do dono enviada por e-mail (${contar(r.emails, "e-mail", "e-mails")}).`
+        + (r.resultado_auditado === false ? " O resultado não ficou na auditoria (banco ocupado); não envie de novo." : ""));
       aoGerar();
     } catch (e) {
       setErro(mensagem(e));
@@ -341,7 +346,8 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
       {erro && <Erro texto={erro} />}
       {liberar && (
         <LiberarEnvio key={liberar.id} tabela="copia_dono_envios" id={liberar.id} reserva={liberar.reserva}
-          aoLiberar={() => { setErro(""); aoGerar(); }} />
+          textoLiberado={LIBERADA}
+          aoLiberar={() => { setErro(""); setPresa(null); setEnviada(LIBERADA); aoGerar(); }} />
       )}
       <div role="status">{enviada && !erro && <p className="campo__nota">{enviada}</p>}</div>
       <div className="acoes-saude">

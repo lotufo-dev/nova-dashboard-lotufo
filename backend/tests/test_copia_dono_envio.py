@@ -250,6 +250,47 @@ def test_reenvio_interrompido_deixa_o_evento_iniciado_com_quem_clicou(ambiente, 
     assert (depois["resultado"], depois["partes"], depois["rodada"]) == ("iniciado", 3, 1)
 
 
+def test_resultado_do_reenvio_tenta_de_novo_com_o_banco_ocupado(ambiente, monkeypatch):
+    # issue #482 (gate Sol): o Graph aceitou; a gravacao do resultado falha na 1a tentativa e passa na 2a
+    conn, tmp = ambiente
+    _copia(tmp)
+    monkeypatch.setattr(copia_dono_envio, "AUDITORIA_PAUSA", 0)
+    original, chamadas = auditoria.registrar, []
+
+    def ocupado_uma_vez(*a, **k):
+        if a[2] == "copia_dono.reenviar":
+            chamadas.append(1)
+        if a[2] == "copia_dono.reenviar" and len(chamadas) == 2:   # 1a = "iniciado"; 2a = 1a tentativa do resultado
+            raise RuntimeError("database is locked")
+        return original(*a, **k)
+    monkeypatch.setattr(auditoria, "registrar", ocupado_uma_vez)
+    r = copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))
+    assert r == {"arquivo": "dashboard-dono-20261105-080000.tar.age", **_ok(1)}
+    resultados = [json.loads(x["depois"])["resultado"] for x in conn.execute(
+        "SELECT depois FROM audit_log WHERE acao='copia_dono.reenviar' ORDER BY id")]
+    assert resultados == ["iniciado", "completo"]
+
+
+def test_resultado_do_reenvio_que_nao_grava_volta_na_resposta_sem_erro(ambiente, monkeypatch, caplog):
+    conn, tmp = ambiente
+    _copia(tmp)
+    monkeypatch.setattr(copia_dono_envio, "AUDITORIA_PAUSA", 0)
+    original, chamadas = auditoria.registrar, []
+
+    def ocupado_depois_do_inicio(*a, **k):
+        if a[2] == "copia_dono.reenviar":
+            chamadas.append(1)
+        if a[2] == "copia_dono.reenviar" and len(chamadas) > 1:
+            raise RuntimeError("database is locked")
+        return original(*a, **k)
+    monkeypatch.setattr(auditoria, "registrar", ocupado_depois_do_inicio)
+    r = copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))
+    assert r["completo"] is True and r["resultado_auditado"] is False
+    assert len(chamadas) == 1 + copia_dono_envio.AUDITORIA_TENTATIVAS
+    assert len(_enviados(tmp)) == 1
+    assert "nao gravada" in caplog.text
+
+
 def test_auditoria_do_inicio_que_falha_nao_reserva_nem_envia(ambiente, monkeypatch):
     conn, tmp = ambiente
     _copia(tmp)

@@ -237,7 +237,46 @@ test("Saúde: 'Reenviar cópia do dono' com reserva presa mostra a liberação d
   fireEvent.click(screen.getByRole("button", { name: "Liberar envio" }));
   await waitFor(() => expect(api).toHaveBeenCalledWith("/api/envios/liberar", { method: "POST", body: JSON.stringify({
     tabela: "copia_dono_envios", id: 7, justificativa: "conferi os Enviados e não saiu", conferi_enviados: true }) }));
-  expect(await screen.findByText(/Trava removida/)).toBeTruthy();
+  // issue #482: nada a "enviar de novo" (a reserva pode ser de uma copia ja' apagada)
+  expect(await screen.findByText("Reserva removida. Nenhum e-mail foi enviado.")).toBeTruthy();
+  expect(screen.queryByText(/envie de novo/)).toBeNull();
+});
+
+test("Saúde: 409 do 'Reenviar' → liberar → a Saúde mostra a próxima parte presa", async () => {
+  const parte = (id: number, n: number) => ({ mensagem: "Este envio está em andamento ou foi interrompido.",
+    codigo: "ENVIO_RESERVADO", reservado_em: "2026-11-05T08:00:00-04:00", reservado_por_nome: "Admin",
+    liberavel_a_partir_de: "2026-11-05T08:15:00-04:00", tabela: "copia_dono_envios", id, parte: n, partes: 3,
+    assunto: `Dashboard Lotufo: cópia cifrada de 05/11/2026 (parte ${n} de 3)` });
+  let liberadas = 0;
+  api.mockImplementation(async (url: string, opcoes?: { method?: string; body?: string }) => {
+    if (url === "/api/admin/copia-dono/reenviar") throw new ApiErro(409, "reservado", parte(5, 1));
+    if (url === "/api/envios/liberar") { liberadas += 1; return { ok: true }; }
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false, ultima_copia_dono: "2026-11-05T08:00:00-04:00",
+      copia_dono_presa: liberadas === 0 ? null : parte(6, 2) };
+    throw new Error(`fora do recorte: ${url} ${opcoes?.method}`);
+  });
+  render(<Admin aba="saude" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Reenviar cópia do dono" }));
+  expect(await screen.findByText(/Parte 1 de 3 presa/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Por que liberar/), { target: { value: "conferi os Enviados e não saiu" } });
+  fireEvent.click(screen.getByLabelText(/Conferi a caixa de Enviados/));
+  fireEvent.click(screen.getByRole("button", { name: "Liberar envio" }));
+  expect(await screen.findByText(/Parte 2 de 3 presa/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Liberar envio" })).toBeTruthy();
+});
+
+test("Saúde: reenvio que saiu sem o resultado na auditoria avisa para não enviar de novo", async () => {
+  api.mockImplementation(async (url: string, opcoes?: { method?: string; body?: string }) => {
+    if (url === "/api/admin/copia-dono/reenviar")
+      return { arquivo: "x.tar.age", emails: 1, partes: 1, completo: true, resultado_auditado: false };
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false, ultima_copia_dono: "2026-11-05T08:00:00-04:00" };
+    throw new Error(`fora do recorte: ${url} ${opcoes?.method}`);
+  });
+  render(<Admin aba="saude" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Reenviar cópia do dono" }));
+  expect(await screen.findByText(/O resultado não ficou na auditoria .*não envie de novo/)).toBeTruthy();
 });
 
 // Issue #482: a reserva presa e' de uma copia anterior (29/10) e a de 05/11 ja' saiu: a Saude traz a linha dela e
