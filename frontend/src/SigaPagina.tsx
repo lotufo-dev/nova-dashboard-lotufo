@@ -1,61 +1,49 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
-import { IconeAlerta, IconeLinkExterno, IconeSiga } from "./icones";
+import { IconeAlerta, IconeLinkExterno, IconeSeta, IconeSiga } from "./icones";
 import { Link } from "./Link";
 import type { ObraLista } from "./listaObras";
-import { trocarBusca, type Busca } from "./rota";
-import Selo from "./Selo";
+import { ir, trocarBusca, type Busca } from "./rota";
 import {
-  casaComBusca, destinoDaMovimentacao, nivelDias, nomeDoProcesso, ordenar, quemDaMovimentacao, roboAtivo, situacaoDoBotao,
-  tempoNoSetor, tituloDoEvento, volumeDe, type Movimentacao, type PainelSiga, type ProcessoSiga, type Robo,
+  contagemPorTipo, detalheDoEvento, ehRecebimentoNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe,
+  DIAS_ACAO, DIAS_ATENCAO, roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe, type Movimentacao, type PainelSiga,
+  type ProcessoSiga, type Robo, type TipoMovimentacao,
 } from "./siga";
 import { fmtData, fmtDataHora, fmtHora } from "./tempo";
 import "./siga.css";
 
-// Tela SIGA (#329, local escolhido pelo Leo em 28/10/2026): onde esta' cada processo protocolado, com quem, ha
-// quantos dias uteis e o que andou hoje, com as movimentacoes do escolhido ao lado. A tabela e' a que o Leo
-// aprovou no e-mail do monitor (13/10/2026). Tudo vem de GET /api/siga; aqui so' se desenha.
+// Tela SIGA (#329; redesenho #512, aprovado pelo Leo em 06/11/2026): duas paginas. A principal e' uma tabela com a
+// posicao atual de cada processo, do mais parado ao menos; clicar na linha abre o historico completo do processo
+// (a mesma rota, com ?processo=<id>). Tudo vem de GET /api/siga; aqui so' se desenha.
 
 const RELER_A_CADA_MS = 15 * 60_000;
 const RELER_COM_ROBO_MS = 5_000;   // pedido na fila ou rodada em andamento (#343): a tela acompanha o robo
 const dataOuTraco = (iso: string | null) => (iso ? fmtData(iso) : "—");
 
-function Hoje({ n }: { n: number }) {
-  if (n === 0) return <span className="sg__traco">—</span>;
-  return (
-    <span className="sg__hoje">
-      <i className="sg__ponto sg__ponto--hoje" aria-hidden="true" />
-      <span className="num">{n}</span>
-      <span className="sr-only">, andou hoje</span>
-    </span>
-  );
-}
-
 function NoSetor({ p, agora }: { p: ProcessoSiga; agora: Date }) {
-  const texto = tempoNoSetor(p, agora);
+  if (p.hoje > 0) return <span className="sg__dias sg__dias--hoje">hoje</span>;
   const nivel = nivelDias(p.dias_uteis);
-  if (nivel === null) return <span className="num">{texto}</span>;
-  return <Selo classe={nivel === "acao" ? "selo--acao" : "selo--atencao"}>{texto}</Selo>;
+  return <span className={`sg__dias${nivel ? ` sg__dias--${nivel}` : ""}`}>{tempoNoSetor(p, agora)}</span>;
 }
 
-function Linha({ p, agora, escolhido, aoEscolher, robo }: {
-  p: ProcessoSiga; agora: Date; escolhido: boolean; aoEscolher: () => void; robo: Robo;
-}) {
+const abrirHistorico = (id: number) => ir({ tela: "siga" }, { busca: { processo: String(id) } });
+
+function Linha({ p, agora, robo }: { p: ProcessoSiga; agora: Date; robo: Robo }) {
   const ligado = p.medicao_id !== null && p.contrato_id !== null;
   const volume = volumeDe(p.situacao);
   const ultima = p.ultima;
   const lendo = robo.rodada?.processos.includes(p.id) ?? false;
   const avisos = robo.avisos.filter(a => a.processo_id === p.id);
   return (
-    <tr className="sg__linha" tabIndex={0} aria-selected={escolhido} aria-label={nomeDoProcesso(p)}
-      onClick={ev => { if (!(ev.target as HTMLElement).closest("a")) aoEscolher(); }}
-      onKeyDown={ev => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); aoEscolher(); } }}>
+    <tr className="sg__linha" tabIndex={0} aria-label={nomeDoProcesso(p)}
+      onClick={() => abrirHistorico(p.id)}
+      onKeyDown={ev => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); abrirHistorico(p.id); } }}>
       <td>
         {ligado ? (
           <>
-            <span className="sg__nome">{p.obra}</span>{" "}
-            <Link className="sg__link" para={{ tela: "medicao", obra: p.contrato_id as number, id: p.medicao_id as number }} secao="etapa-4">{p.medicao_titulo}</Link>
+            <span className="sg__nome">{p.obra}</span>
+            {p.medicao_titulo && <span className="sg__fraco">{p.medicao_titulo}</span>}
           </>
         ) : (
           <>
@@ -67,48 +55,23 @@ function Linha({ p, agora, escolhido, aoEscolher, robo }: {
         {avisos.map((a, i) => <span key={i} className="sg__fraco sg__nao-lido">{a.texto}</span>)}
       </td>
       <td data-rotulo="Onde está">
-        <span>{p.setor || "—"}</span>
+        <span className="sg__nome">{p.setor || "—"}</span>
         {p.caixa_entrada && <span className="sg__fraco">caixa de entrada</span>}
         {volume && <span className="sg__fraco">{volume}</span>}
       </td>
       <td data-rotulo="Com quem">{p.com_quem || <span className="sg__traco">—</span>}</td>
       <td data-rotulo="No setor há"><NoSetor p={p} agora={agora} /></td>
-      <td className="col-num" data-rotulo="Hoje"><Hoje n={p.hoje} /></td>
-      <td data-rotulo="Última ação">
+      <td data-rotulo="Última movimentação">
         {ultima ? (
           <>
-            <span className="num">{fmtData(ultima.data)}</span>{" "}
+            <span className="num">{fmtData(ultima.data).slice(0, 5)}</span>{" "}
             <span>{tituloDoEvento(ultima.evento)}</span>
-            {quemDaMovimentacao(ultima) && <span className="sg__fraco">{quemDaMovimentacao(ultima)}</span>}
           </>
         ) : <span className="sg__traco">—</span>}
       </td>
-      <td className="num" data-rotulo="Protocolado">{dataOuTraco(p.protocolado_em)}</td>
+      <td className="num" data-rotulo="Protocolado em">{dataOuTraco(p.protocolado_em)}</td>
+      <td className="sg__seta" aria-hidden="true"><IconeSeta className="icone" /></td>
     </tr>
-  );
-}
-
-function Grupo({ titulo, processos, agora, atual, aoEscolher, robo }: {
-  titulo: string; processos: ProcessoSiga[]; agora: Date; atual: number; aoEscolher: (id: number) => void; robo: Robo;
-}) {
-  if (processos.length === 0) return null;
-  return (
-    <tbody>
-      <tr className="sg__faixa"><td colSpan={7}>{titulo}</td></tr>
-      {processos.map(p => <Linha key={p.id} p={p} agora={agora} escolhido={p.id === atual} aoEscolher={() => aoEscolher(p.id)} robo={robo} />)}
-    </tbody>
-  );
-}
-
-function ItemMovimentacao({ m }: { m: Movimentacao }) {
-  const destino = destinoDaMovimentacao(m);
-  const quem = quemDaMovimentacao(m);
-  return (
-    <li className="sg__mov">
-      <span className="num sg__mov-data">{fmtDataHora(m.data)}</span>
-      <span className="sg__mov-evento">{tituloDoEvento(m.evento)}</span>
-      {(quem || destino) && <span className="sg__fraco">{[quem, destino].filter(Boolean).join(" ")}</span>}
-    </li>
   );
 }
 
@@ -152,27 +115,96 @@ function RoboAgora({ robo }: { robo: Robo }) {
   return <p className="sg__lido">Pedido de atualização às <span className="num">{fmtHora(primeiro.pedido_em)}</span>, aguardando o robô</p>;
 }
 
-function Painel({ p, dados, aoPedir }: { p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void> }) {
-  const movimentacoes = [...p.movimentacoes].sort((a, b) => Date.parse(b.data) - Date.parse(a.data));
+const PASSO_HISTORICO = 30;
+const PRIMEIRAS = 15;
+
+// Pagina do historico de um processo (#512): todas as movimentacoes gravadas, com filtro por tipo e busca.
+function Historico({ p, dados, aoPedir }: { p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void> }) {
+  const [tipo, setTipo] = useState<TipoMovimentacao | null>(null);
+  const [texto, setTexto] = useState("");
+  const [mostrando, setMostrando] = useState(PRIMEIRAS);
+  const nome = nomeDoProcesso(p);
+  const contagem = useMemo(() => contagemPorTipo(p.movimentacoes), [p.movimentacoes]);
+  const lista = useMemo(() => filtrarMovimentacoes(p.movimentacoes, tipo, texto), [p.movimentacoes, tipo, texto]);
+  const periodo = periodoDe(p.movimentacoes, fmtData);
+  const total = p.movimentacoes.length;
+  const escolher = (t: TipoMovimentacao | null) => { setTipo(t); setMostrando(PRIMEIRAS); };
   return (
-    <aside className="sg__painel" id="painel-siga" aria-label="Detalhe do processo">
-      <h2>{nomeDoProcesso(p)}</h2>
-      {p.numero && <div className="num">{p.numero}</div>}
-      {p.situacao && <div className="sg__situacao">{p.situacao}</div>}
-      {(p.link || dados.pode_atualizar) && (
+    <div className="pagina siga sg-hist">
+      <nav className="sg__trilha" aria-label="Você está em">
+        <Link className="sg__link" para={{ tela: "siga" }}>SIGA</Link>
+        <IconeSeta className="icone icone--p" />
+        <span>{nome}</span>
+        <IconeSeta className="icone icone--p" />
+        <span aria-current="page">Histórico</span>
+      </nav>
+      <header className="sg__cabeca">
+        <h1>Histórico · {nome}</h1>
+        <p className="sg__sub">
+          {[p.numero, `${total} ${total === 1 ? "movimentação" : "movimentações"}`, periodo].filter(Boolean).join(" · ")}
+        </p>
         <div className="sg__acoes">
           {p.link && (
-            <a className="sg__link" href={p.link} target="_blank" rel="noopener noreferrer">
+            <a className="btn btn--pequeno sg__abrir" href={p.link} target="_blank" rel="noopener noreferrer">
               Abrir no SIGA<IconeLinkExterno className="icone icone--p" />
             </a>
           )}
-          {dados.pode_atualizar && <Atualizar rotulo="Atualizar processo" processoId={p.id} robo={dados.robo} aoPedir={aoPedir} />}
+          {p.medicao_id !== null && p.contrato_id !== null && (
+            <Link className="sg__link" para={{ tela: "medicao", obra: p.contrato_id, id: p.medicao_id }} secao="etapa-4">Ver a medição</Link>
+          )}
+          {dados.pode_atualizar && <Atualizar rotulo="Pedir leitura" processoId={p.id} robo={dados.robo} aoPedir={aoPedir} />}
         </div>
+      </header>
+      <div className="sg__filtros">
+        <div className="sg__chips" role="group" aria-label="Tipo de movimentação">
+          <button type="button" className="sg__chip" aria-pressed={tipo === null} onClick={() => escolher(null)}>
+            Todas <span className="num">{total}</span>
+          </button>
+          {TIPOS.map(t => (
+            <button key={t.tipo} type="button" className="sg__chip" aria-pressed={tipo === t.tipo} onClick={() => escolher(t.tipo)}>
+              {t.rotulo} <span className="num">{contagem[t.tipo]}</span>
+            </button>
+          ))}
+        </div>
+        <label className="sr-only" htmlFor="siga-historico-busca">Buscar setor, pessoa ou documento</label>
+        <input id="siga-historico-busca" type="search" className="sg__busca" value={texto} placeholder="Buscar setor, pessoa ou documento"
+          autoComplete="off" onChange={ev => { setTexto(ev.target.value); setMostrando(PRIMEIRAS); }} />
+      </div>
+      {lista.length === 0 ? (
+        <section className="sg__quadro"><div className="sg__vazio"><p>{total === 0 ? "Nenhuma movimentação gravada." : "Nenhuma movimentação encontrada."}</p></div></section>
+      ) : (
+        <section className="sg__quadro" aria-label="Movimentações do processo">
+          <table className="sg__tabela sg__tabela--hist">
+            <caption className="sr-only">Movimentações do processo, da mais recente para a mais antiga.</caption>
+            <thead>
+              <tr><th scope="col">Data e hora</th><th scope="col">Evento</th><th scope="col">De (setor · pessoa)</th><th scope="col">Para (setor · pessoa)</th></tr>
+            </thead>
+            <tbody>
+              {lista.slice(0, mostrando).map((m, i) => <LinhaMovimentacao key={`${m.data}-${i}`} m={m} destaque={ehRecebimentoNoSetorAtual(p, m)} />)}
+            </tbody>
+          </table>
+          <p className="sg__rodape">
+            Mostrando {Math.min(mostrando, lista.length)} de {lista.length}
+            {mostrando < lista.length && <> · <button type="button" className="sg__mais" onClick={() => setMostrando(n => n + PASSO_HISTORICO)}>Ver mais</button></>}
+          </p>
+        </section>
       )}
-      {movimentacoes.length > 0 && <ol className="sg__movs" aria-label="Movimentações">
-        {movimentacoes.map((m, i) => <ItemMovimentacao key={`${m.data}-${i}`} m={m} />)}
-      </ol>}
-    </aside>
+    </div>
+  );
+}
+
+function LinhaMovimentacao({ m, destaque }: { m: Movimentacao; destaque: boolean }) {
+  const documento = detalheDoEvento(m.evento);
+  return (
+    <tr className={destaque ? "sg__mov--atual" : undefined} aria-current={destaque ? "true" : undefined}>
+      <td className="num" data-rotulo="Data e hora">{fmtDataHora(m.data)}</td>
+      <td>
+        <span className="sg__nome">{tituloDoEvento(m.evento)}</span>
+        {documento && <span className="sg__fraco">{documento}</span>}
+      </td>
+      <td data-rotulo="De">{setorPessoa(m.cad_lotacao, m.cad_pessoa) || <span className="sg__traco">—</span>}</td>
+      <td data-rotulo="Para">{setorPessoa(m.at_lotacao, m.at_pessoa) || <span className="sg__traco">—</span>}</td>
+    </tr>
   );
 }
 
@@ -236,32 +268,29 @@ function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<vo
   );
 }
 
-// ate' 1180 px o painel fica abaixo da lista: ao escolher um processo, leva a vista ate' ele
-function irAoPainel() {
-  if (window.matchMedia?.("(max-width: 1180px)").matches) document.getElementById("painel-siga")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-}
-
 export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Date }) {
   const [dados, setDados] = useState<PainelSiga | null>(null);
   const [erro, setErro] = useState("");
-  const [escolhido, setEscolhido] = useState<number | null>(() => (/^\d+$/.test(busca.processo ?? "") ? Number(busca.processo) : null));
   const carregar = useCallback(async () => {
     try { setDados(await api<PainelSiga>("/api/siga")); setErro(""); } catch (e) { setErro(mensagemDeErro(e)); }
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
-  // O robo le a cada 15 minutos: com a aba aberta a tela rele no mesmo ritmo (a linha aberta e a busca ficam). Com
-  // pedido na fila ou rodada em andamento, a cada 5 segundos, ate' a leitura nova chegar (pedido travado nao conta).
+  // O robo le a cada 15 minutos: com a aba aberta a tela rele no mesmo ritmo. Com pedido na fila ou rodada em
+  // andamento, a cada 5 segundos, ate' a leitura nova chegar (pedido travado nao conta).
   const comRobo = dados !== null && roboAtivo(dados.robo);
   useEffect(() => {
     const relogio = window.setInterval(() => { void carregar(); }, comRobo ? RELER_COM_ROBO_MS : RELER_A_CADA_MS);
     return () => window.clearInterval(relogio);
   }, [carregar, comRobo]);
 
-  const texto = busca.q ?? "";
-  const { medicoes, outros } = useMemo(() => {
-    const lista = ordenar((dados?.processos ?? []).filter(p => casaComBusca(p, texto)));
-    return { medicoes: lista.filter(p => p.medicao_id !== null), outros: lista.filter(p => p.medicao_id === null) };
-  }, [dados, texto]);
+  const processos = useMemo(() => ordenar(dados?.processos ?? []), [dados]);
+
+  // processo que nao existe: sai o ?processo= da URL (a barra volta a ter o h1 da secao)
+  const idPedido = /^\d+$/.test(busca.processo ?? "") ? Number(busca.processo) : null;
+  const existe = dados !== null && idPedido !== null && dados.processos.some(p => p.id === idPedido);
+  useEffect(() => {
+    if (dados !== null && idPedido !== null && !existe) trocarBusca({ processo: null });
+  }, [dados, idPedido, existe]);
 
   if (!dados) {
     return (
@@ -273,18 +302,20 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
       </div>
     );
   }
-  // o processo novo nao pode sumir atras da busca: ela e' limpa ao gravar
-  const gravado = async (id: number) => { await carregar(); trocarBusca({ q: null }); setEscolhido(id); };
+  // ?processo=<id> abre o historico (o "Abrir" do aviso tambem); id que nao existe cai na tabela
+  const aberto = /^\d+$/.test(busca.processo ?? "") ? processos.find(p => p.id === Number(busca.processo)) : undefined;
+  if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} />;
+
   const robo = dados.robo;
+  const n = processos.length;
   const topo = (
     <div className="sg__topo">
       <div className="sg__vivo" aria-live="polite">{robo.estado !== "parado" && <RoboAgora robo={robo} />}</div>
-      {robo.estado === "parado" && dados.lido_em && <p className="sg__lido">Lido às <span className="num">{fmtHora(dados.lido_em)}</span></p>}
       {dados.atrasado && dados.lido_em && (
         <CaixaAviso nivel="atencao" role="status">O monitor do SIGA não lê desde {fmtData(dados.lido_em).slice(0, 5)} {fmtHora(dados.lido_em)}.</CaixaAviso>
       )}
-      {dados.pode_atualizar && <Atualizar rotulo="Atualizar todos" processoId={null} robo={robo} aoPedir={carregar} />}
-      <AcompanharProcesso aoGravar={gravado} />
+      {dados.pode_atualizar && <Atualizar rotulo="Pedir leitura" processoId={null} robo={robo} aoPedir={carregar} />}
+      <AcompanharProcesso aoGravar={carregar} />
       {robo.avisos.some(a => a.processo_id === null) && (
         <div className="sg__avisos">
           {robo.avisos.filter(a => a.processo_id === null).map((a, i) => (
@@ -294,9 +325,22 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
       )}
     </div>
   );
-  if (dados.processos.length === 0) {
+  const subtitulo = [`${n} ${n === 1 ? "processo" : "processos"}`, dados.lido_em ? `última leitura ${fmtHora(dados.lido_em)}` : null]
+    .filter(Boolean).join(" · ");
+  const cabeca = (
+    <header className="sg__cabeca sg__cabeca--principal">
+      <p className="sg__sub">{subtitulo}</p>
+      <ul className="sg__legenda" aria-label="Cor do tempo no setor">
+        <li><i className="sg__ponto sg__ponto--hoje" aria-hidden="true" />andou hoje</li>
+        <li><i className="sg__ponto sg__ponto--atencao" aria-hidden="true" />parado há {DIAS_ATENCAO} dias úteis ou mais</li>
+        <li><i className="sg__ponto sg__ponto--acao" aria-hidden="true" />{DIAS_ACAO} dias úteis ou mais</li>
+      </ul>
+    </header>
+  );
+  if (n === 0) {
     return (
       <div className="pagina siga">
+        {cabeca}
         {topo}
         <section className="sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>Nenhum processo acompanhado.</p></div></section>
       </div>
@@ -304,39 +348,25 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
   }
 
   const agoraDe = agora ?? new Date();
-  const visiveis = [...medicoes, ...outros];
-  const atual = visiveis.find(p => p.id === escolhido) ?? visiveis[0];
-  const escolher = (id: number) => { setEscolhido(id); irAoPainel(); };
-
   return (
     <div className="pagina siga">
+      {cabeca}
       {topo}
-      <div className="sg__busca-caixa">
-        <label className="sr-only" htmlFor="siga-busca">Buscar obra</label>
-        <input id="siga-busca" type="search" className="sg__busca" value={texto} placeholder="Buscar obra ou processo…" autoComplete="off"
-          onChange={ev => trocarBusca({ q: ev.target.value || null })} />
-      </div>
-      {atual === undefined ? (
-        <section className="sg__quadro"><div className="sg__vazio"><p>Nenhum processo encontrado.</p></div></section>
-      ) : (
-        <div className="sg">
-          <section className="sg__quadro" aria-label="Processos no SIGA">
-            <table className="sg__tabela" role="grid">
-              <caption className="sr-only">Processos acompanhados no SIGA. Escolha um para ver as movimentações.</caption>
-              <colgroup><col className="sg__c-proc" /><col className="sg__c-onde" /><col className="sg__c-quem" /><col className="sg__c-setor" /><col className="sg__c-hoje" /><col className="sg__c-ultima" /><col className="sg__c-prot" /></colgroup>
-              <thead>
-                <tr>
-                  <th scope="col">Processo</th><th scope="col">Onde está</th><th scope="col">Com quem</th><th scope="col">No setor há</th>
-                  <th scope="col" className="col-num">Hoje</th><th scope="col">Última ação</th><th scope="col">Protocolado</th>
-                </tr>
-              </thead>
-              <Grupo titulo="Processos de medições" processos={medicoes} agora={agoraDe} atual={atual.id} aoEscolher={escolher} robo={robo} />
-              <Grupo titulo="Outros processos" processos={outros} agora={agoraDe} atual={atual.id} aoEscolher={escolher} robo={robo} />
-            </table>
-          </section>
-          <Painel key={atual.id} p={atual} dados={dados} aoPedir={carregar} />
-        </div>
-      )}
+      <section className="sg__quadro" aria-label="Processos no SIGA">
+        <table className="sg__tabela" role="grid">
+          <caption className="sr-only">Processos acompanhados no SIGA, do mais parado ao menos. Escolha um para ver o histórico.</caption>
+          <colgroup><col className="sg__c-proc" /><col className="sg__c-onde" /><col className="sg__c-quem" /><col className="sg__c-setor" /><col className="sg__c-ultima" /><col className="sg__c-prot" /><col className="sg__c-seta" /></colgroup>
+          <thead>
+            <tr>
+              <th scope="col">Processo</th><th scope="col">Onde está</th><th scope="col">Com quem</th><th scope="col">No setor há</th>
+              <th scope="col">Última movimentação</th><th scope="col">Protocolado em</th><th scope="col"><span className="sr-only">Abrir</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {processos.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} />)}
+          </tbody>
+        </table>
+      </section>
     </div>
   );
 }

@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import subprocess
+import unicodedata
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -38,7 +39,6 @@ class JaAcompanhado(ValueError):
         super().__init__(f"{JA_ACOMPANHADO}: {nome}" if nome else JA_ACOMPANHADO)
         self.nome = nome
 _CODIGO = re.compile(r"[A-Za-z0-9]{6,20}")
-MOVIMENTACOES_NA_TELA = 30
 ATRASO = datetime.timedelta(hours=2)
 # Relogio do robo adiantado (ou leitura com data errada) nao pode desligar o aviso de atraso ate' aquela data
 FOLGA_FUTURO = datetime.timedelta(minutes=10)
@@ -103,6 +103,16 @@ def _dias_uteis(desde: datetime.date, hoje: datetime.date) -> int:
         dias += dia_util(d)
         d += datetime.timedelta(days=1)
     return dias
+
+
+def tipo_da_movimentacao(evento: str | None) -> str:
+    """Tipo para os filtros do historico (#512): transferencia, recebimento, juntada, marcacao ou outras."""
+    texto = unicodedata.normalize("NFD", evento or "").encode("ascii", "ignore").decode().lower()
+    for tipo, raiz in (("transferencia", "transfer"), ("recebimento", "recebimento"), ("juntada", "juntada"),
+                       ("marcacao", "marcacao")):
+        if raiz in texto:
+            return tipo
+    return "outras"
 
 
 def _sigla(lotacao: str | None) -> str:
@@ -489,7 +499,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             "WHERE processo_id=? ORDER BY data DESC, id DESC", (p["id"],))]
         derivado = derivar(situacao, movs, hoje)
         # Na resposta, todo instante com o fuso explicito: as datas do SIGA sao de Cuiaba, o lido_em e' UTC
-        movs = [{**m, "data": tempo.iso_local(m["data"])} for m in movs]
+        movs = [{**m, "data": tempo.iso_local(m["data"]), "tipo": tipo_da_movimentacao(m["evento"])} for m in movs]
         for campo in ("desde", "protocolado_em"):
             if derivado[campo]:
                 derivado[campo] = tempo.iso_local(derivado[campo])
@@ -504,7 +514,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             if p["medicao_id"] else None,
             "protocolo_id": p["protocolo_id"], "situacao": situacao,
             **derivado,
-            "movimentacoes": movs[:MOVIMENTACOES_NA_TELA],
+            "movimentacoes": movs,
         })
     return {"lido_em": tempo.iso_utc(lido_em) if lido_em else None, "atrasado": atrasado(lido_em, agora),
             "processos": saida, "pode_atualizar": bool(tarefa_do_robo()), "robo": situacao_robo(conn, agora)}
