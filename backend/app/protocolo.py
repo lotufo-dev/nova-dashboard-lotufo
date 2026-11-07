@@ -42,9 +42,12 @@ APOSTILAMENTO_MUDOU = ("O apostilamento do reajuste mudou depois da montagem: mo
 # Rodada 2 da PR #435: a frase do termo nunca fica no texto editavel. O texto da carta (o padrao, o gravado e o editado)
 # guarda o marcador; a frase entra so' na montagem, do mesmo `apostilamentos` que vai gravado no pacote.
 MARCADOR_APOSTILAMENTO = "{apostilamento}"
-TEXTO_SEM_O_TERMO = ("O texto da carta não cita o termo de apostilamento de agora: recarregue a página e confira o texto "
-                     "antes de montar")
-_CAMPO_SEM_DADO = re.compile(r"\{[^{}\s]+\}")
+# Issue #448: a tela nao mostra o marcador cru; mostra este texto, que a API converte de volta antes de montar.
+MARCADOR_NA_TELA = "[citação do termo de apostilamento]"
+TEXTO_SEM_O_TERMO = ("O texto da carta não cita o termo de apostilamento de agora: na seção Protocolo, escreva "
+                     f"{MARCADOR_NA_TELA} no parágrafo em que o ofício cita o termo e monte o pacote de novo")
+# Issue #448: o nome do campo comeca por letra; o GUID entre chaves do link do SharePoint ({6C5B...-...}) nao e' campo
+_CAMPO_SEM_DADO = re.compile(r"\{[^\W\d]\w*\}")
 NUMERO_ORGAO_VAZIO = "Informe o número do protocolo no órgão"
 # A-13 (testes de quebra 10/10/2026): o link vira <a href> no e-mail oficial ao orgao; so' o OneDrive e o SharePoint
 # da Lotufo. Comparacao exata do host: "...sharepoint.com.evil.test" nao passa. Issue #118: os hosts vem de
@@ -473,6 +476,16 @@ def campos_sem_dado(*textos: str | None) -> list[str]:
     return sorted({x for t in textos for x in _CAMPO_SEM_DADO.findall(t or "")})
 
 
+def para_tela(texto: str | None) -> str | None:
+    """Issue #448: o texto da carta como a tela mostra, com o marcador legivel no lugar de {apostilamento}."""
+    return texto.replace(MARCADOR_APOSTILAMENTO, MARCADOR_NA_TELA) if texto else texto
+
+
+def da_tela(texto: str | None) -> str | None:
+    """Issue #448: o texto que veio da tela, com o marcador legivel convertido de volta em {apostilamento}."""
+    return texto.replace(MARCADOR_NA_TELA, MARCADOR_APOSTILAMENTO) if texto else texto
+
+
 def _renderizar(texto: str, frase: str) -> str:
     """O texto da carta com a frase do termo no lugar do marcador (o paragrafo vazio some)."""
     return _sem_linhas_vazias(texto.replace(MARCADOR_APOSTILAMENTO, frase)).strip()
@@ -576,7 +589,8 @@ def _certidoes_pdf(conn, p: dict, regras: dict, hoje: datetime.date) -> list[byt
 def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
            hoje: datetime.date | None = None, refazer_texto: bool = False) -> dict:
     """`refazer_texto` (issue #278): quem monta sem mostrar o texto (a tela de envio da nota) aceita que o texto
-    gravado sem o campo {apostilamento}, quando o da familia o tem, de' lugar ao padrao; sem isso, a montagem recusa."""
+    gravado sem o campo {apostilamento}, quando o da familia o tem, de' lugar ao padrao; sem isso, a montagem recusa.
+    Issue #448: so' troca o gravado que e' o padrao sem o campo; o editado a' mao nunca e' trocado sem aviso."""
     hoje = hoje or tempo.hoje_local()
     p = _linha(conn, protocolo_id)
     _editavel(p)
@@ -590,8 +604,9 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     if "certidoes" in e.partes and (vencidas := certidoes_vencidas(conn, p, hoje)):
         raise ValueError("Certidão vencida — renove antes de montar: " + "; ".join(vencidas))
     # Corpo vazio nao e' carta: vale o texto ja' gravado ou, na falta dele, o padrao da familia.
-    # Issue #278: o texto (padrao, gravado ou editado) guarda o marcador {apostilamento}, nunca a frase do termo; so' o
-    # editado fica gravado. A frase sai de `aps`, lido uma vez aqui, e vai no corpo, no assunto e no mapa do pacote.
+    # Issue #278: o texto (padrao, gravado ou editado) guarda o marcador {apostilamento}, nunca a frase do termo; o texto
+    # usado fica sempre gravado (issue #448: o enviado com o padrao tambem). A frase sai de `aps`, lido uma vez aqui, e
+    # vai no corpo, no assunto e no mapa do pacote.
     padrao = corpo_padrao(conn, protocolo_id)
     recebido = (corpo or "").strip()
     base = recebido or p["corpo_carta"] or padrao
@@ -600,10 +615,10 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     textos = carta.config(conn)["familias"][familia]
     if aps and MARCADOR_APOSTILAMENTO in _texto(textos, "carta_corpo", p) and MARCADOR_APOSTILAMENTO not in base:
         # o texto da tela de antes (com a frase de um termo velho), o editado sem o campo ou o gravado antigo
-        if recebido or not refazer_texto:
+        # issue #448: so' o padrao gravado antes do campo existir da' lugar ao padrao de agora
+        if recebido or not refazer_texto or _renderizar(base, "") != _renderizar(padrao, ""):
             raise ValueError(TEXTO_SEM_O_TERMO)
         base = padrao
-    editado = None if base.strip() == padrao.strip() else base
     frase = frase_do_apostilamento(aps)
     cita = MARCADOR_APOSTILAMENTO in base or MARCADOR_APOSTILAMENTO in (_texto(textos, "carta_assunto", p) or "")
     a_assinar = _carta(conn, p, _renderizar(base, frase), hoje, frase)
@@ -651,7 +666,7 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
         conn.execute("UPDATE protocolos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
                      "montado_em=datetime('now'), assinado_arquivo=NULL, assinado_sha256=NULL, conferencia=NULL, "
                      "situacao='montado', montado_frcs=?, montado_apostilamentos=? WHERE id=?",
-                     (editado, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote),
+                     (base, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote),
                       # o mapa do que foi de fato renderizado: so' o texto que usa a frase compara depois
                       json.dumps({"cita": cita, "apostilamentos": aps if cita else []})
                       if familia in FAMILIAS_OFICIO_REAJUSTE else None, protocolo_id))
@@ -837,17 +852,26 @@ def apostilamento_mudou(conn, p: dict) -> str | None:
     gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
     if gravado and gravado.get("cita"):
         return None if gravado.get("apostilamentos") == agora else APOSTILAMENTO_MUDOU
-    cita_agora = bool(agora) and _familia_cita_o_termo(carta.config(conn)["familias"][familia], p)
+    # issue #448: reajuste sem termo (frase vazia antes e depois) nao muda o oficio; nao pede nova assinatura
+    cita_agora = bool(frase_do_apostilamento(agora)) and _familia_cita_o_termo(carta.config(conn)["familias"][familia], p)
     return APOSTILAMENTO_MUDOU if cita_agora else None
 
 
-def bloqueio(conn, p: dict, hoje: datetime.date) -> str | None:
+def motivos_bloqueio(conn, p: dict, hoje: datetime.date) -> list[str]:
     vencidas = certidoes_vencidas(conn, p, hoje)
     motivos = (["Certidão vencida — renove antes de enviar: " + "; ".join(vencidas)] if vencidas else []) + \
         frc_recusadas(conn, p)
     if mudou := apostilamento_mudou(conn, p):
         motivos.append(mudou)
-    return " · ".join(motivos) or None
+    return motivos
+
+
+# Issue #448: os motivos que montar o pacote de novo resolve (a FRC vigente e o termo de agora entram na montagem)
+MOTIVOS_DE_MONTAR_DE_NOVO = (*PACOTE_SEM_A_FRC_VIGENTE, APOSTILAMENTO_MUDOU)
+
+
+def bloqueio(conn, p: dict, hoje: datetime.date) -> str | None:
+    return " · ".join(motivos_bloqueio(conn, p, hoje)) or None
 
 
 def detalhe(conn, protocolo_id: int, hoje: datetime.date | None = None) -> dict:

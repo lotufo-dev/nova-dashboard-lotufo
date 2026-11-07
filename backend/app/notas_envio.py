@@ -433,7 +433,8 @@ def detalhe_envio(conn, protocolo_id: int, remetente: str | None = None, hoje: d
             corpo = p["corpo_carta"] or protocolo.corpo_padrao(conn, protocolo_id)
         except ValueError:
             corpo = None
-        carta = {"oficio": oficios.na_carta(p["numero_oficio"]) if p["numero_oficio"] else None, "corpo": corpo,
+        carta = {"oficio": oficios.na_carta(p["numero_oficio"]) if p["numero_oficio"] else None,
+                 "corpo": protocolo.para_tela(corpo),                                           # issue #448
                  "paginas": _paginas(conn, p, familia, regras, hoje), "montado": bool(p["montado_arquivo"]),
                  "assinado": bool(p["assinado_arquivo"]),
                  "nome_arquivo": protocolo.nome_arquivo(conn, p) if p["montado_arquivo"] else None}
@@ -444,9 +445,11 @@ def detalhe_envio(conn, protocolo_id: int, remetente: str | None = None, hoje: d
             "bloqueio": pv["bloqueio"], "pendencias": [x["mensagem"] for x in pv["pendencias"]],
             # issue #278: reajuste sem apostilamento que cubra a competencia: o envio pede justificativa escrita;
             # `remontar`: o termo mudou depois da montagem e o pacote tem de ser montado de novo (o bloqueio diz isso);
-            # `remontar_liberado`: e' o unico motivo do bloqueio (rodada 2 da PR #435: com certidao vencida, nao)
+            # `remontar_liberado`: todo motivo do bloqueio e' de montar de novo (rodada 2 da PR #435: com certidao
+            # vencida, nao; issue #448: a FRC velha no pacote junto com o termo mudado, sim)
             "exige_justificativa": pv["exige_justificativa"],
-            "remontar": mudou is not None, "remontar_liberado": mudou is not None and pv["bloqueio"] == mudou,
+            "remontar": mudou is not None, "remontar_liberado": mudou is not None and all(
+                x in protocolo.MOTIVOS_DE_MONTAR_DE_NOVO for x in protocolo.motivos_bloqueio(conn, p, hoje)),
             "extras": [{"id": x["id"], "nome": x["nome"], "tamanho": x["tamanho"]}
                        for x in protocolo._pecas(conn, protocolo_id) if x["tipo"] == protocolo.ANEXO]}
 
