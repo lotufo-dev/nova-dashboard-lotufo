@@ -164,6 +164,20 @@ describe("Cartão da planilha/carta", () => {
     expect(screen.getByRole("textbox", { name: "Nº do SIGA" })).toBeTruthy();
   });
 
+  it("planilha não lida por grupo: o cartão avisa a diferença; lida, não avisa nada", async () => {
+    const aviso = "Planilha não lida: diferença de R$ 6,90 entre a soma dos grupos da planilha (R$ 20.693,10) e o valor pedido da medição (R$ 20.700,00)";
+    api.mockImplementation(async (url: string) => (url === "/api/medicoes/5"
+      ? detalhe({ leitura_planilha: { situacao: "recusada", aviso } }) : []));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText(aviso)).toBeTruthy();
+    cleanup();
+    api.mockImplementation(async (url: string) => (url === "/api/medicoes/5"
+      ? detalhe({ leitura_planilha: { situacao: "lida", aviso: null } }) : []));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText("Gerada")).toBeTruthy();
+    expect(screen.queryByText(/Planilha não lida/)).toBeNull();
+  });
+
   it("envio com pendência pede a justificativa antes de sair", async () => {
     api.mockImplementation(async (url: string) => {
       if (url === "/api/medicoes/5") return detalhe();
