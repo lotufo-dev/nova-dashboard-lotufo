@@ -6,7 +6,7 @@ describe("rota", () => {
     const rotas: Rota[] = [
       { tela: "inicio" }, { tela: "medicoes" }, { tela: "carteira" }, { tela: "obras" },
       { tela: "documentos" }, { tela: "admin" }, { tela: "conta" }, { tela: "avisos" }, { tela: "siga" },
-      { tela: "obra", id: 7, aba: "medicoes" },
+      { tela: "obra", id: 7, aba: "ficha" },
       { tela: "medicao", obra: 7, id: 723 },
       { tela: "obra", id: 7, aba: "documentos" },
       { tela: "obra", id: 12, aba: "reajuste" },
@@ -36,7 +36,7 @@ describe("rota", () => {
 
   it("os caminhos antigos abrem a tela nova (o App troca a URL pela canônica)", () => {
     expect(parseRota("/contratos")).toEqual({ tela: "obras" });
-    expect(parseRota("/contratos/7")).toEqual({ tela: "obra", id: 7, aba: "medicoes" });
+    expect(parseRota("/contratos/7")).toEqual({ tela: "obra", id: 7, aba: "ficha" });
     expect(parseRota("/contratos/7/prazos")).toEqual({ tela: "obra", id: 7, aba: "prazos" });
     expect(parseRota("/diretoria")).toEqual({ tela: "carteira" });
     expect(parseRota("/painel")).toEqual({ tela: "carteira" });
@@ -54,11 +54,13 @@ describe("rota", () => {
     expect(parseRota("/contratos/7/cronograma")).toEqual({ tela: "obra", id: 7, aba: "contrato" });
     expect(parseRota("/obras/7/aditivos")).toEqual({ tela: "obra", id: 7, aba: "contrato" });
     // a aba Notas saiu: as notas moram na medicao e na coluna Notas das medicoes da obra
-    expect(caminhoDe(parseRota("/contratos/7/notas"))).toBe("/obras/7");
+    expect(caminhoDe(parseRota("/contratos/7/notas"))).toBe("/obras/7/medicoes");
   });
 
   it("a aba padrão (da obra, da Carteira) não entra na URL; filtros e seção entram", () => {
-    expect(caminhoDe({ tela: "obra", id: 7, aba: "medicoes" })).toBe("/obras/7");
+    expect(caminhoDe({ tela: "obra", id: 7, aba: "ficha" })).toBe("/obras/7");
+    expect(caminhoDe({ tela: "obra", id: 7, aba: "medicoes" })).toBe("/obras/7/medicoes");
+    expect(parseRota("/obras/7")).toEqual({ tela: "obra", id: 7, aba: "ficha" });
     expect(parseRota("/obras/7/medicoes")).toEqual({ tela: "obra", id: 7, aba: "medicoes" });
     expect(caminhoDe({ tela: "carteira", aba: "resumo" })).toBe("/carteira");
     expect(parseRota("/carteira/resumo")).toEqual({ tela: "carteira" });

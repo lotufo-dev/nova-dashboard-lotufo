@@ -119,7 +119,7 @@ function CartaoObra({ obra, avisos, ir }: { obra: ObraLista; avisos: Aviso[]; ir
   const termino = !fim ? "—" : obra.estado === "encerrado" ? `terminou em ${fim}` : `termina em ${fim}`;
   return (
     <li>
-      <Link className="cartao obra-cartao" para={{ tela: "obra", id: obra.id, aba: "medicoes" }} ir={ir}>
+      <Link className="cartao obra-cartao" para={{ tela: "obra", id: obra.id, aba: "ficha" }} ir={ir}>
         <div className="obra-cartao__cabeca">
           <h2 className="obra-cartao__nome">{nomeDaObra(obra)}</h2>
           {st !== "ativo" && <Selo classe={s.classe}>{s.rotulo}</Selo>}
@@ -341,7 +341,7 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
                         return (
                           <tr key={c.id} className={`linha${i % 2 === 1 ? " par" : ""}`}>
                             <td>
-                              <Link className="nome-link truncar-2l" title={nomeDaObra(c)} para={{ tela: "obra", id: c.id, aba: "medicoes" }} ir={ir}>{nomeDaObra(c)}</Link>
+                              <Link className="nome-link truncar-2l" title={nomeDaObra(c)} para={{ tela: "obra", id: c.id, aba: "ficha" }} ir={ir}>{nomeDaObra(c)}</Link>
                               {c.nome_curto && <div className="campo__nota num">{c.numero_instrumento}</div>}
                             </td>
                             <td><span className="truncar-2l" title={c.orgao}>{c.orgao}</span></td>

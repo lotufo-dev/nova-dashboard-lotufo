@@ -34,7 +34,7 @@ describe("destino do aviso", () => {
     // mesmo com a medicao, nao leva mais ao recebimento dela
     const pag: Aviso = { ...base, tipo: "pagamento_atrasado", contrato_id: 9, medicao_id: 722, destino: { tela: "contrato", id: 9, aba: "medicoes" } };
     const d5 = destinoDoAviso(pag)!;
-    expect(hrefDe(d5.para, undefined, d5.secao)).toBe("/obras/9#em-andamento");
+    expect(hrefDe(d5.para, undefined, d5.secao)).toBe("/obras/9/medicoes#em-andamento");
     // #330: o processo parado leva a tela SIGA com o processo aberto; o aviso do monitor, a tela
     const parado: Aviso = { ...base, tipo: "siga_parado", contrato_id: 7, medicao_id: 31, destino: { tela: "siga", processo: 4 } };
     const d6 = destinoDoAviso(parado)!;

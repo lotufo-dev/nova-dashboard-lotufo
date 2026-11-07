@@ -1,0 +1,39 @@
+/* Ficha executiva da obra (#510): seis cartoes e a curva S numa tela so'. Cores so' dos tokens; a cor e' da informacao. */
+
+.ficha { display: grid; gap: 12px; align-content: start; }
+.ficha__grade { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.ficha__cartao { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; min-height: 124px; }
+.ficha__titulo { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; }
+.ficha__rotulo { margin: 0; font-size: 13px; color: var(--texto-2); }
+.ficha__grande { margin: 0; font-family: var(--fonte-num); font-weight: 600; text-align: right; }
+.ficha__valor { font-size: 24px; line-height: 30px; }
+.ficha__dias { font-size: 32px; line-height: 38px; }
+.ficha__pct { margin: 0; font-family: var(--fonte-num); font-size: 24px; line-height: 28px; font-weight: 600; text-align: right; }
+.ficha__barra { height: 10px; border-radius: var(--raio-pilula); background: var(--neutro-fundo); overflow: hidden; }
+.ficha__barra span { display: block; height: 100%; border-radius: var(--raio-pilula); background: var(--ok-ponto); }
+.ficha__linhas { display: grid; gap: 2px; margin: 4px 0 0; font-size: 14px; }
+.ficha__linhas > div { display: flex; justify-content: space-between; gap: 12px; }
+.ficha__linhas dt { color: var(--texto-2); }
+.ficha__linhas dd { margin: 0; font-family: var(--fonte-num); font-variant-numeric: tabular-nums; }
+.ficha__rodape { margin: auto 0 0; padding-top: 6px; border-top: 1px solid var(--linha); font-size: 13px; color: var(--texto-2); }
+.ficha__rodape.info--feito { color: var(--ok); }
+.ficha__medicao { margin: 0; font-family: var(--fonte-num); font-size: 16px; line-height: 24px; font-weight: 600; }
+.ficha__medicao a { color: var(--texto); text-decoration: none; }
+.ficha__medicao a:hover { color: var(--acento); text-decoration: underline; }
+.ficha__nota { margin: 0; font-size: 13px; color: var(--texto-2); }
+.ficha__venc { display: grid; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 14px; }
+.ficha__venc li { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 8px; }
+.ficha__venc-rotulo { color: var(--texto-2); }
+.ficha__venc-data { font-family: var(--fonte-num); font-variant-numeric: tabular-nums; font-weight: 600; }
+.ponto--normal { background: var(--texto); }
+.ficha__curva { display: grid; gap: 4px; padding: 12px 18px; }
+.ficha__curva-cabeca { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ficha__quadro { min-width: 0; }
+.ficha__quadro svg { display: block; }
+.ficha__previsto { fill: none; stroke: var(--texto-fraco); stroke-width: 2; stroke-dasharray: 6 4; }
+.ficha__medido { fill: none; stroke: var(--acento); stroke-width: 2.5; }
+.ficha__legenda { display: flex; justify-content: center; gap: 24px; font-size: 12px; color: var(--texto-2); }
+.ficha__legenda > span { display: inline-flex; align-items: center; gap: 6px; }
+
+@media (max-width: 1100px) { .ficha__grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .ficha__grade { grid-template-columns: minmax(0, 1fr); } }
