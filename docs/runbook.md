@@ -46,16 +46,18 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
   sentinela da #478), cada chamada num processo filho com **30 s de
   limite** (`-LimiteAgendador`). Estouro na leitura da porta imprime `deploy abortado: agendador de tarefas nao respondeu` e sai com
   código 1 **antes do checkout**, sem tocar no pinado nem criar o sentinela (o sentinela criado à mão antes é apagado pelo operador);
-  estouro no reinício (depois do build) volta o pinado ao commit anterior e, se a parada tinha começado, refaz parar → liberar
+  estouro no reinício (depois do build) volta o pinado ao commit anterior (antes, se a parada tinha começado, para a tarefa de
+  novo, porque um `/Run` que estourou no cliente pode ter subido o commit novo, e na volta para antes da #456 passa o ponto da
+  sentinela para a auditoria, como no rollback por saúde) e, se a parada tinha começado, refaz parar → liberar
   porta → iniciar com ele, afirmando "religada" só com health 200 de processo novo; senão imprime que a tarefa não está
   comprovadamente no ar, com quem está na porta (PID e criação), e **mantém o sentinela** (como em `ROLLBACK TAMBEM FALHOU` e nas
   voltas que falham: o script imprime `sentinela ... MANTIDO` e o operador o apaga depois de conferir o pinado). O script imprime uma linha
   `[HH:mm:ss] etapa` em cada passo (porta lida, fetch, checkout, pip, npm, reinício, saúde). Nos comandos à mão, preferir
   `schtasks /Query|/End|/Run /TN <tarefa>` aos cmdlets; `instalar_autostart.ps1` e `instalar_watchdog.ps1` ainda registram a tarefa por
-  `Register-ScheduledTask` (instalação única, interativa, com o operador olhando). O `schtasks` não dá o estado da tarefa sem
-  depender do idioma do Windows, então o watchdog não espera mais o estado sair de "Running": `/End` que falha só vai para o log,
-  o órfão na porta é encerrado como antes (#480) e um `/Run` ignorado por instância ainda viva aparece no log como
-  `apos-reinicio saudavel=nao` (sai com 1 e repete em 3 min).
+  `Register-ScheduledTask` (instalação única, interativa, com o operador olhando). O `schtasks` dá o estado da tarefa em texto no
+  idioma do Windows, então o watchdog o lê pela API COM `Schedule.Service` (número; `EstadoDaTarefa` em `comum_agendador.ps1`),
+  num `powershell` filho com o mesmo tempo limite: só para a tarefa "Running", espera até 10 s ela sair desse estado e, com o
+  estado ilegível, `/End` que falha ou a tarefa ainda "Running", não inicia nada (sai com 1 e repete em 3 min).
 - Watchdog: `scripts\instalar_watchdog.ps1 [-SemTls] [-Porta 8080] [-Raiz ...]` (modo, porta e raiz iguais aos da tarefa principal; `-Porta` e `-Raiz` omitidos vêm dela, e valor diferente aborta) registra a tarefa do watchdog (SYSTEM, a cada 3 min) que roda `scripts\watchdog.ps1 -Url https://localhost:<porta>/api/health -Certificado <raiz>\segredos\tls\cert.pem` (com `-SemTls`, `-Url http://localhost:<porta>/api/health` sem certificado) — confere `/api/health` na porta de `-Porta` (padrão 8443 em HTTPS, 80 com `-SemTls`), aceitando só o certificado da instalação (seção "HTTP ou HTTPS"), e, se cair, reinicia a tarefa principal (o reinício automático embutido da tarefa não cobriu a queda de 2026-09-10: timeout, não "falha"). **Antes de qualquer parada/deploy manual, crie o sentinela `C:\DashboardLotufo\watchdog.pause` para o watchdog não reerguer no meio; apague ao terminar.** Log: `C:\DashboardLotufo\logs\watchdog.log`. Remover: `Unregister-ScheduledTask -TaskName <tarefa-do-watchdog> -Confirm:$false`.
 
 ### Deploy a partir do Mac (SSH)

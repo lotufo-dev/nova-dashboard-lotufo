@@ -10,7 +10,8 @@
 # com 15s de intervalo para nao reiniciar por um blip de rede transitorio.
 #
 # Fala com o agendador por schtasks.exe, nunca por cmdlet CIM (issue #386: o provedor CIM do
-# agendador pode ficar sem responder), com tempo limite de 30 s por chamada; estouro vai
+# agendador pode ficar sem responder), e le o estado pela COM Schedule.Service num processo filho,
+# com tempo limite de 30 s por chamada; estouro vai
 # para o log e o script sai com 1 (a tarefa do watchdog repete em 3 min).
 #
 # HTTPS (issue #425): com -Url https://localhost:<porta>/... o -Certificado e' o cert.pem da instalacao
@@ -87,20 +88,42 @@ if (Saudavel) { exit 0 }                       # foi so um blip transitorio
 
 . (Join-Path $PSScriptRoot "comum_agendador.ps1")   # Agendador: schtasks.exe com tempo limite
 
-# Daqui em diante a producao esta comprovadamente fora (duas consultas, 15 s de intervalo). Agendador que nao responde
-# a tempo nao inicia nada (sai com 1, o watchdog repete em 3 min). O schtasks nao da' o estado da tarefa sem depender
-# do idioma do Windows, entao /End que falha (tarefa ja' parada, "Ready" com o processo morto, como no incidente de
-# 2026-09-10) so' vai para o log e segue: quem segura a porta e' tratado abaixo, e o /Run ignorado por uma instancia
-# que continua viva (MultipleInstances IgnoreNew) aparece como "apos-reinicio saudavel=nao" e sai com 1.
+# Daqui em diante a producao esta comprovadamente fora (duas consultas, 15 s de intervalo). So' reinicia se a tarefa
+# de fato puder ser reiniciada: parada que falha, ou instancia que continua "Running", fariam o /Run ser ignorado
+# (MultipleInstances IgnoreNew) com o log dizendo "disparado" (gate Sol da PR #476). O estado vem da API COM
+# Schedule.Service num processo filho com tempo limite (EstadoDaTarefa, comum_agendador.ps1): numero, sem depender do
+# idioma do Windows e sem o provedor CIM (issue #386). Estado ilegivel ou agendador sem resposta: nada iniciado, sai
+# com 1 e o watchdog repete em 3 min.
 SairSePausado "antes de parar a tarefa"
 Escrever "SEM RESPOSTA em $Url ($script:ultimoErro) -> reiniciando a tarefa $Tarefa"
-$fim = Agendador @("/End", "/TN", $Tarefa) $LimiteAgendador
-if ($fim.Estourou) {
-    Escrever "agendador de tarefas nao respondeu (schtasks /End levou mais de $LimiteAgendador s) -> nada iniciado"
+$estado = EstadoDaTarefa $Tarefa $LimiteAgendador
+if ($estado -eq "desconhecido") {
+    Escrever "FALHA ao parar a tarefa, nada iniciado: estado da tarefa $Tarefa ilegivel (Schedule.Service sem resposta em $LimiteAgendador s ou com erro)"
     exit 1
 }
-if ($fim.Codigo -ne 0) { Escrever ("schtasks /End devolveu " + $fim.Codigo + ": " + $fim.Saida + " (segue para o /Run)") }
-Start-Sleep -Seconds 3
+# Parar so' o que esta rodando: a tarefa "Ready" com o processo morto (incidente de 2026-09-10) vai direto ao /Run.
+if ($estado -eq "Running") {
+    $fim = Agendador @("/End", "/TN", $Tarefa) $LimiteAgendador
+    if ($fim.Estourou) {
+        Escrever "agendador de tarefas nao respondeu (schtasks /End levou mais de $LimiteAgendador s) -> nada iniciado"
+        exit 1
+    }
+    if ($fim.Codigo -ne 0) {
+        Escrever ("FALHA ao parar a tarefa, nada iniciado: schtasks /End devolveu " + $fim.Codigo + ": " + $fim.Saida)
+        exit 1
+    }
+}
+$parada = $false
+foreach ($tentativa in 1..10) {
+    Start-Sleep -Seconds 1
+    $estado = EstadoDaTarefa $Tarefa $LimiteAgendador
+    if ($estado -eq "desconhecido") { break }
+    if ($estado -ne "Running") { $parada = $true; break }
+}
+if (-not $parada) {
+    Escrever "tarefa $Tarefa continua '$estado' depois da parada -> nada iniciado"
+    exit 1
+}
 # Servidor ORFAO (incidente de 2026-09-21, issue #480): parar a tarefa (schtasks /End) nao mata o uvicorn; ele segura a porta, a
 # instancia nova morre com WinError 10048 e a tarefa volta a Ready. So' o uvicorn da dashboard e' morto, reconhecido
 # pelos argumentos exatos com que o rodar_producao.ps1 o sobe ("-m uvicorn --factory app.main:create_app" e "--port

@@ -383,6 +383,18 @@ try {
         $motivo = $_.Exception.Message
         Write-Warning "reinicio falhou: $motivo -> voltando o diretorio pinado para $anterior"
         try {
+            if ($script:tarefaParada) {
+                # O /Run que estoura no cliente pode ter iniciado a tarefa: o commit novo pode estar no ar (e ter
+                # aplicado a 063). Antes de voltar o pinado, para de novo e, na troca para antes da #456, passa o ponto
+                # da sentinela para a auditoria com o codigo novo, como no rollback por saude (issue #478). Sem a
+                # troca, so' para e libera a porta, para o build do anterior nao correr com o novo no ar.
+                $script:sentinelaParou = $false
+                SentinelaAntesDa456 $novo $anterior
+                if (-not $script:sentinelaParou) {
+                    try { ComandoTarefa "End" $false; Start-Sleep -Seconds 3; LiberarPorta }
+                    catch { Write-Warning "parar antes de voltar o pinado falhou: $($_.Exception.Message)" }
+                }
+            }
             VoltarPinado $anterior
             if ($script:tarefaParada) {
                 Etapa "religando a tarefa $tarefaNome com o commit anterior"

@@ -34,3 +34,15 @@ function Agendador([string[]]$argumentos, [int]$LimiteSegundos = 30, [string]$Ex
         Remove-Item $saidaArq, $erroArq -Force -ErrorAction SilentlyContinue
     }
 }
+
+# Estado da tarefa pela API COM Schedule.Service (TASK_STATE numerico: o /FO LIST e o /FO CSV do schtasks trazem o
+# estado em texto no idioma do Windows). A COM roda num powershell filho, pela Agendador, com o mesmo tempo limite: na
+# propria sessao ela travaria sem como matar. O filho sai com 100 + estado (0 Unknown, 1 Disabled, 2 Queued, 3 Ready,
+# 4 Running); erro do filho sai com 1, e estouro ou erro vira "desconhecido".
+function EstadoDaTarefa([string]$Tarefa, [int]$LimiteSegundos = 30) {
+    $comando = "`$s = New-Object -ComObject Schedule.Service; `$s.Connect(); exit (100 + [int]`$s.GetFolder('\').GetTask('$Tarefa').State)"
+    $codificado = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($comando))
+    $r = Agendador @("-NoProfile", "-NonInteractive", "-EncodedCommand", $codificado) $LimiteSegundos "powershell.exe"
+    if ($r.Estourou -or $r.Codigo -lt 100 -or $r.Codigo -gt 104) { return "desconhecido" }
+    return @("Unknown", "Disabled", "Queued", "Ready", "Running")[$r.Codigo - 100]
+}

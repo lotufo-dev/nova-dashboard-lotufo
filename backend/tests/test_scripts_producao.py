@@ -122,6 +122,19 @@ def test_deploy_para_a_tarefa_por_schtasks_tambem_no_ponto_da_sentinela_e_mantem
     assert "if ($script:manterSentinela)" in codigo and "Remove-Item $pause" in codigo
 
 
+def test_deploy_com_reinicio_que_falha_para_e_passa_o_ponto_da_sentinela_antes_de_voltar_o_pinado():
+    # Revisor da PR #389 (A1): o /Run que estoura no cliente pode ter subido o commit novo (e a 063); voltar o pinado sem
+    # passar o ponto para a auditoria faria o anterior acusar "Estado da sentinela apagado" (issue #478), e o build do
+    # anterior correria com o novo no ar.
+    codigo = _codigo(_ler("deploy.ps1"))
+    falha = codigo[codigo.index("try { Reiniciar }"):codigo.index("if (SaudavelENovo -ExigirInstalacao) {")]
+    parada = _bloco_do_if(falha, "if ($script:tarefaParada) {")   # o primeiro: antes de voltar o pinado
+    assert parada.index("$script:sentinelaParou = $false") < parada.index("SentinelaAntesDa456 $novo $anterior")
+    sem_troca = _bloco_do_if(parada, "if (-not $script:sentinelaParou) {")
+    assert 'ComandoTarefa "End" $false' in sem_troca and "LiberarPorta" in sem_troca and "catch" in sem_troca
+    assert falha.index("SentinelaAntesDa456 $novo $anterior") < falha.index("VoltarPinado $anterior")
+
+
 def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
     # Issue #417: health 200 com `instalacao` diferente de "autorizada" depois do deploy conta como falha e cai no
     # rollback que ja' existe. O rollback confere so' o 200: o commit anterior pode nem ter o campo.
@@ -436,8 +449,6 @@ def test_watchdog_fala_com_o_agendador_por_schtasks_com_tempo_limite():
     # agendador que nao responde a tempo nao inicia nada: sai com 1 e o watchdog repete em 3 min
     estouro = _bloco_do_if(codigo, "if ($fim.Estourou) {")
     assert "schtasks /End levou mais de $LimiteAgendador s) -> nada iniciado" in estouro and "exit 1" in estouro
-    # /End que falha (tarefa "Ready" com o processo morto, incidente de 2026-09-10) so' vai para o log e segue
-    assert "(segue para o /Run)" in codigo
     iniciar = codigo.index('$inicio = Agendador @("/Run", "/TN", $Tarefa) $LimiteAgendador')
     assert parar < codigo.index("try { $orfao = DonoDaPorta }") < iniciar
     assert "exit 1" in _bloco_do_if(codigo, "if ($inicio.Estourou) {")
@@ -449,6 +460,39 @@ def test_watchdog_fala_com_o_agendador_por_schtasks_com_tempo_limite():
     for nome in ("comum_agendador.ps1",):
         bruto = (SCRIPTS / nome).read_bytes()
         assert not bruto.startswith(b"\xef\xbb\xbf") and bruto.isascii()
+
+
+def test_watchdog_so_inicia_a_tarefa_que_de_fato_parou():
+    # Gate Sol da PR #476: parada que falha, ou instancia ainda "Running", fazia o Start ser ignorado (IgnoreNew) com o
+    # log dizendo "disparado". Sem CIM (issue #386, revisor da PR #389): o estado vem da COM Schedule.Service, numerica.
+    codigo = _codigo(_ler("watchdog.ps1"))
+    inicio = codigo.index('SairSePausado "antes de parar a tarefa"')
+    leitura = codigo.index("$estado = EstadoDaTarefa $Tarefa $LimiteAgendador", inicio)
+    ilegivel = _bloco_do_if(codigo, 'if ($estado -eq "desconhecido") {\n    Escrever')
+    assert "FALHA ao parar a tarefa, nada iniciado" in ilegivel and "exit 1" in ilegivel
+    # parar so' o que esta rodando: "Ready" com o processo morto vai direto ao /Run
+    rodando = _bloco_do_if(codigo, 'if ($estado -eq "Running") {')
+    assert '$fim = Agendador @("/End", "/TN", $Tarefa) $LimiteAgendador' in rodando
+    falha = rodando[rodando.index("if ($fim.Codigo -ne 0) {"):]
+    assert "FALHA ao parar a tarefa, nada iniciado" in falha and "exit 1" in falha
+    assert "(segue para o /Run)" not in codigo
+    espera = codigo[codigo.index("$parada = $false"):codigo.index('$inicio = Agendador @("/Run"')]
+    assert '$estado -ne "Running"' in espera and '$estado -eq "desconhecido") { break }' in espera
+    assert "continua '$estado' depois da parada -> nada iniciado" in espera and "exit 1" in espera
+    assert inicio < leitura < codigo.index("$parada = $false") < codigo.index("try { $orfao = DonoDaPorta }")
+
+
+def test_estado_da_tarefa_vem_da_com_num_processo_filho_com_tempo_limite():
+    comum = _codigo(_ler("comum_agendador.ps1"))
+    funcao = comum[comum.index("function EstadoDaTarefa"):]
+    assert "New-Object -ComObject Schedule.Service" in funcao and "exit (100 + [int]" in funcao
+    assert ".GetTask('$Tarefa').State" in funcao
+    # powershell filho pela Agendador (mata no estouro); -EncodedCommand evita aspas no ArgumentList do 5.1
+    assert '"-EncodedCommand", $codificado) $LimiteSegundos "powershell.exe"' in funcao
+    assert "[Text.Encoding]::Unicode.GetBytes($comando)" in funcao
+    # estouro, erro (o filho sai com 1) ou fora da faixa = desconhecido; 100 + 4 = Running
+    assert 'if ($r.Estourou -or $r.Codigo -lt 100 -or $r.Codigo -gt 104) { return "desconhecido" }' in funcao
+    assert '@("Unknown", "Disabled", "Queued", "Ready", "Running")[$r.Codigo - 100]' in funcao
 
 
 def _bloco_do_if(codigo, cabeca):
