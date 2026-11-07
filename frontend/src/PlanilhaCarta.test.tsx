@@ -242,6 +242,17 @@ describe("Cartão da planilha/carta", () => {
     expect(await screen.findByText("Envio por fora registrado.")).toBeTruthy();
   });
 
+  it("na SES e nas prefeituras, o motivo do órgão aparece, fica o registro por fora e somem o envio e as peças (issue #463)", async () => {
+    const motivo = "Na SES-MT não há envio da planilha/carta: a medição vai com a nota";
+    api.mockResolvedValue(detalhe({}, { disponivel: false, motivo, pecas_do_orgao: [
+      { tipo: "boletim", rotulo: "Memória de cálculo", exigida: true, no_oficio: false }] }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText(motivo)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Enviar para protocolo" })).toBeNull();
+    expect(screen.queryByText("Peças do órgão")).toBeNull();
+    expect(screen.getByRole("button", { name: "Registrar envio por fora" })).toBeTruthy();
+  });
+
   it("a revisão pede o motivo; com ele, grava a versão nova (Rev01)", async () => {
     api.mockImplementation(async (url: string) => (url.startsWith("/api/contratos/9/planilhas/avisos") ? { avisos: [SOBREPOE] }
       : detalhe({ estado: "planilha_enviada", planilha_enviada_em: "2026-09-03" }, { disponivel: false, motivo: "já enviada" })));

@@ -7,7 +7,8 @@ protocolo do orgao com as copias do cadastro. Reserva atomica antes do e-mail (`
 `medicao_planilha_envios` da migracao 053: uma linha por versao enviada). A 1a versao enviada poe a medicao em
 `planilha_enviada` (data e origem `sistema`) e congela o pedido no valor DELA; revisao depois do envio e' versao
 nova (`medicao_planilhas.revisar`, com motivo), enviada de novo por aqui sem mudar o pedido congelado.
-Na MT-PAR nao ha' esse passo: o oficio vai com a nota.
+Na MT-PAR, na SES e nas prefeituras nao ha' esse passo (#463, decisao de 05/11/2026): a planilha/carta e' so'
+registrada, e o envio por fora continua.
 
 Modulo proprio, ao lado de `medicao_planilhas` (registro e revisao, #281) e de `pleitos` (de onde vem o desenho do
 envio). O texto do e-mail e' do cadastro (`cartas.yaml`, chave `planilha`).
@@ -25,8 +26,12 @@ from app.protocolo import PECA_NO_OFICIO, tipos_no_oficio
 TABELA = "medicao_planilha_envios"
 TIPO_ENVIO = "planilha"
 ESTADOS_ENVIO = ("planilha_gerada", "planilha_enviada")
-FAMILIAS_SEM_ENVIO = ("mtpar",)
-SEM_ENVIO_MTPAR = "Na MT-PAR não há envio da planilha/carta: o ofício vai com a nota"
+# a recusa diz o orgao de verdade (#463): a MT-PAR manda o oficio com a nota, a SES manda a medicao com a nota e nas
+# prefeituras a medicao vai ao fiscal da obra
+SEM_ENVIO = {"mtpar": "Na MT-PAR não há envio da planilha/carta: o ofício vai com a nota",
+             "ses": "Na SES-MT não há envio da planilha/carta: a medição vai com a nota",
+             "prefeitura": "Nas prefeituras não há envio da planilha/carta: a medição vai ao fiscal da obra"}
+FAMILIAS_SEM_ENVIO = tuple(SEM_ENVIO)
 MIN_JUSTIFICATIVA = 10
 EXTENSOES_PECA = ("pdf", "xlsx")
 ROTULO_NATUREZA = {"execucao": "Medição", "projeto": "Projeto", "reajuste": "Reajuste"}
@@ -76,7 +81,7 @@ def _recusa(conn, m: dict) -> str | None:
     except ValueError as e:
         return str(e)
     if familia in FAMILIAS_SEM_ENVIO:
-        return SEM_ENVIO_MTPAR
+        return SEM_ENVIO[familia]
     nome = medicoes.nome_medicao(m["numero"], m["tipo"])
     if m["estado"] not in ESTADOS_ENVIO:
         if m["estado"] == "prevista":
@@ -125,7 +130,9 @@ def situacao(conn, medicao_id: int) -> dict:
     motivo = _recusa(conn, m)
     try:
         c, familia, regras = _contexto(conn, m)
-        pedidas = _config_pecas(regras, m["tipo"], tipos_no_oficio(familia, regras, c))
+        # sem envio da planilha/carta, nao ha' peca a anexar (#463): o painel "Peças do órgão" nao aparece
+        pedidas = ([] if familia in FAMILIAS_SEM_ENVIO
+                   else _config_pecas(regras, m["tipo"], tipos_no_oficio(familia, regras, c)))
     except ValueError:
         pedidas = []
     return {"disponivel": motivo is None, "motivo": motivo, "envios": envios(conn, medicao_id),
@@ -158,10 +165,10 @@ def _pecas_com_arquivo(conn, medicao_id: int, no_oficio: set[str]) -> list[dict]
 
 def _editavel(conn, m: dict) -> tuple[dict, str, dict]:
     """(contrato, familia, regras do orgao). As pecas so' mudam enquanto a planilha/carta pode ser enviada (fora da
-    MT-PAR, antes do boletim)."""
+    MT-PAR, da SES e das prefeituras, antes do boletim)."""
     c, familia, regras = _contexto(conn, m)
     if familia in FAMILIAS_SEM_ENVIO:
-        raise ValueError(SEM_ENVIO_MTPAR)
+        raise ValueError(SEM_ENVIO[familia])
     if m["estado"] not in ESTADOS_ENVIO:
         raise ValueError(f"{medicoes.nome_medicao(m['numero'], m['tipo'])} está "
                          f"{medicoes.rotulo_estado(m['estado'])}: as peças da planilha/carta não mudam mais")

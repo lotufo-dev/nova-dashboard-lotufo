@@ -404,6 +404,7 @@ Decididas em 20/10/2026 (detalhe e provas em `docs/decisoes-motores-2026-10-20.m
 | D9 | Linha de base da curva S | **vigente e anterior à última repactuação**, as duas na tela |
 | D10 | Aviso de garantia | **contra o fim de execução vigente + folga do órgão** |
 | D11 | Planilha/carta na SINFRA | **obrigatória** (as sete obras SINFRA com e-mail a mostram antes do boletim) |
+| D11a | Envio da planilha/carta na SES e nas prefeituras (#463, 05/11/2026) | **não há, como na MT-PAR**: a planilha/carta é só registrada; saem "Enviar para protocolo" e as peças do órgão, fica o registro por fora; a recusa diz o órgão ("Na SES-MT…", "Nas prefeituras…") |
 | D12 | Versão de repactuação no previsto efetivo (#396, 05/11/2026) | **a versão de aditivo, carta ou SMO substitui a curva em todos os meses que traz, passados inclusive**; o previsto acumulado termina no contrato e o atraso fica na comparação com a versão anterior (D9). Versão manual ou da carga continua congelando o passado |
 | E3 | Quem envia a planilha/carta | **a dashboard**, com reenvio de revisão (Rev01, Rev02…) e "enviado por fora" com data e protocolo |
 | E4 | Aviso de pedido sem boletim | **sim**, X por órgão em `orgaos.yaml` (§2.1.1) |
