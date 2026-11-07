@@ -1077,6 +1077,10 @@ def test_custo_e_estoque_viram_linhas_em_centavos_e_contam_na_rodada(conn, tmp_p
     rodada = conn.execute("SELECT custo_tarefas, estoque_baixas, custo_erro FROM rm_sincronizacoes WHERE id=?",
                           (r["id"],)).fetchone()
     assert tuple(rodada) == (2, 2, None)
+    # a troca do retrato fica na auditoria da rodada
+    depois = json.loads(conn.execute("SELECT depois FROM audit_log WHERE acao='rm.sincronizacao' AND entidade_id=?",
+                                     (str(r["id"]),)).fetchone()[0])
+    assert (depois["custo_tarefas"], depois["estoque_baixas"], depois["custo_erro"]) == (2, 2, None)
 
 
 def test_custo_sincronizado_duas_vezes_nao_duplica_e_substitui(conn, tmp_path):
@@ -1116,10 +1120,12 @@ def test_falha_no_estoque_nao_troca_o_retrato_anterior(conn, tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM rm_estoque_baixas").fetchone()[0] == 1
 
 
-def test_mes_ilegivel_no_custo_vira_erro_da_rodada(conn, tmp_path):
-    cli = _simulador_custo(tmp_path, [_custo(mes=202613)], [])
+@pytest.mark.parametrize("linha, trecho", [({"MES": 202613}, "mês ilegível"), ({"MES": "lixo"}, "MES ilegível"),
+                                           ({"QTD": float("inf")}, "QTD ilegível")])
+def test_linha_ilegivel_no_custo_vira_erro_da_rodada(conn, tmp_path, linha, trecho):
+    cli = _simulador_custo(tmp_path, [{**_custo(), **linha}], [])
     r = sincronizacao_rm.sincronizar(conn, cli)
-    assert r["estado"] == "success" and "mês" in r["custo_erro"]
+    assert r["estado"] == "success" and trecho in r["custo_erro"] and "DASH25" in r["custo_erro"]
     assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 0
 
 

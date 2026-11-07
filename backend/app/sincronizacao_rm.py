@@ -637,7 +637,7 @@ def _inteiro(linha: dict, campo: str, codigo: str, obrigatorio: bool = True) -> 
         return 0
     try:
         return int(Decimal(str(valor)))
-    except (InvalidOperation, ValueError, TypeError):
+    except (InvalidOperation, ValueError, TypeError, OverflowError):
         raise rm.ErroRM(f"Consulta {codigo} com {campo} ilegível: {valor!r}") from None
 
 
@@ -756,7 +756,7 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
                          (resumo["nfs"], resumo["baixas"], resumo["alocacoes"], resumo["sugestoes"],
                           resumo["recebimentos"], rodada_id))
             auditoria.registrar(conn, None, "rm.sincronizacao", "rm_sincronizacao", rodada_id, None,
-                                {"disparo": disparo, **resumo})
+                                {"disparo": disparo, **resumo, **custo})
         ESTADO["ultima_sincronizacao"] = tempo.para_local(tempo.agora_utc()).isoformat(timespec="seconds")
         ESTADO["ultimo_erro"] = None
         return {"id": rodada_id, "estado": "success", **resumo, **custo}

@@ -122,6 +122,27 @@ def test_custo_rm_da_obra_pelo_centro_atual_e_pelos_anteriores(client_admin):
     assert client_admin.get("/api/contratos/9999/custo-rm").status_code == 404
 
 
+def test_custo_rm_de_consorcio_sem_centro_vem_pela_coligada(client_admin):
+    """#488: obra de consorcio sem centro de custo e' achada so' pela coligada (como em diretoria._mapa_contratos)."""
+    from app import db, entidades
+    conn = db.get_conn()
+    eid = entidades.criar(conn, 1, {"nome": "Consórcio X", "cnpj": "11444777000161",
+                                    "papel": "consorcio", "coligada_rm": 12})
+    conn.close()
+    cons = novo_contrato({**NOVO, "numero_instrumento": "IC 090/2025", "entidade_id": eid})
+    lotufo_sem_centro = novo_contrato({**NOVO, "numero_instrumento": "IC 091/2025"})
+    conn = db.get_conn()
+    conn.executemany("INSERT INTO rm_custo_tarefas (coligada, centro_custo, projeto, tarefa, natureza, mes, qtd, "
+                     "valor_centavos) VALUES (?,?,?,?,?,?,?,?)",
+                     [(12, "1.01", None, None, "1.01.003", "2026-01", 1, 501), (1, "2.001.012", None, None,
+                                                                                 "1.01.003", "2026-01", 1, 7)])
+    conn.commit(); conn.close()
+    d = client_admin.get(f"/api/contratos/{cons}/custo-rm").json()
+    assert [x["valor_centavos"] for x in d["custo"]] == [501] and d["estoque"] == []
+    # a Lotufo (coligada 1) sem centro nao recebe a coligada inteira
+    assert client_admin.get(f"/api/contratos/{lotufo_sem_centro}/custo-rm").json() == {"custo": [], "estoque": []}
+
+
 def test_custo_rm_exige_ver_paineis(client, monkeypatch):
     from app import auth, db, permissoes
     cid = novo_contrato(NOVO)

@@ -69,22 +69,28 @@ def cadastro(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
 def custo_rm(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
              conn: sqlite3.Connection = Depends(conexao)):
     """#488: o custo por tarefa e a baixa de estoque do RM da obra, pelo centro de custo atual e pelos anteriores,
-    na coligada da entidade do contrato. Linhas como vieram do RM (o que nao e' custo a tela separa)."""
+    na coligada da entidade do contrato; consorcio sem centro, pela coligada inteira (a mesma regra de
+    `diretoria._mapa_contratos`). Linhas como vieram do RM (o que nao e' custo a tela separa)."""
     _existe(conn, contrato_id)
     c = conn.execute("""SELECT c.centro_custo_rm, c.centros_custo_anteriores_rm, e.coligada_rm
                         FROM contratos c JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1) WHERE c.id=?""",
                      (contrato_id,)).fetchone()
-    centros = [c["centro_custo_rm"], *json.loads(c["centros_custo_anteriores_rm"] or "[]")] if c else []
-    centros = sorted({x.strip() for x in centros if x and x.strip()})
-    if not centros or c["coligada_rm"] is None:
+    if c is None or c["coligada_rm"] is None:
         return {"custo": [], "estoque": []}
-    marcas = ",".join("?" * len(centros))
+    centros = [c["centro_custo_rm"], *json.loads(c["centros_custo_anteriores_rm"] or "[]")]
+    centros = sorted({x.strip() for x in centros if x and x.strip()})
+    if centros:
+        filtro = f"coligada=? AND centro_custo IN ({','.join('?' * len(centros))})"
+    elif c["coligada_rm"] != 1:
+        filtro = "coligada=?"
+    else:
+        return {"custo": [], "estoque": []}
     args = (c["coligada_rm"], *centros)
     custo = conn.execute(f"""SELECT centro_custo, projeto, tarefa, natureza, mes, qtd, valor_centavos
-                             FROM rm_custo_tarefas WHERE coligada=? AND centro_custo IN ({marcas})
+                             FROM rm_custo_tarefas WHERE {filtro}
                              ORDER BY mes, centro_custo, tarefa, natureza, id""", args)
     estoque = conn.execute(f"""SELECT centro_custo, tipo_movimento, mes, qtd, valor_centavos
-                               FROM rm_estoque_baixas WHERE coligada=? AND centro_custo IN ({marcas})
+                               FROM rm_estoque_baixas WHERE {filtro}
                                ORDER BY mes, centro_custo, tipo_movimento, id""", args)
     return {"custo": [dict(r) for r in custo], "estoque": [dict(r) for r in estoque]}
 
