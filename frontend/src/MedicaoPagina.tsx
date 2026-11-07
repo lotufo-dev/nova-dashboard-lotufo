@@ -68,6 +68,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // a conferencia vale so' para a medicao e o estado em que o cartao a fez: trocar um dos dois a reinicia
   const [tentativa, setTentativa] = useState(0);
   const [revisaoDe, setRevisaoDe] = useState<{ chave: string; valor: "pendente" | "livre" | "falhou" } | null>(null);
+  // #460 (gate Sol, PR #528): a planilha/carta so' gerada com o envio saindo pelo sistema (ou preso) nao mostra o espelho
+  const [reservaDe, setReservaDe] = useState<{ chave: string; reservado: boolean } | null>(null);
   // issue #188: a execucao e o reajuste da mesma competencia (as notas dos dois, a espera e a liberacao)
   const [par, setPar] = useState<ParDaMedicao | null>(null);
   const [erro, setErro] = useState("");
@@ -238,8 +240,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // ---------------------------------------------------------------- etapas
   // issue #289: o primeiro passo e' a planilha/carta (execucao e projeto, na obra com regra de espelho ativa; o
   // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela fica no alto da
-  // etapa. Enviada (com ou sem o boletim da #284), o espelho aparece logo abaixo; so' gerada, ainda nao (o boletim
-  // substitui a ponte ao espelho, nao o envio ao protocolo).
+  // etapa. O espelho aparece logo abaixo: enviada (com ou sem o boletim da #284) ou so' gerada, sem o envio registrado
+  // (#460, decisao do Leo de 07/11/2026: a operacao ainda envia ao orgao por fora; segue sem boletim, com justificativa).
   const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
   // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
   const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;
@@ -247,7 +249,10 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const revisao = revisaoDe?.chave === chaveRevisao ? revisaoDe.valor : "conferindo";
   // so' as medicoes com cartao esperam a conferencia dele; as outras (reajuste) seguem direto pelo espelho
   const enviada = m.estado === "planilha_enviada" || m.estado === "boletim_recebido";
-  const espelhoEspera = comPlanilha && enviada && revisao !== "livre";
+  const gerada = m.estado === "planilha_gerada";
+  // a so' gerada espera o cartao dizer que nao ha' envio saindo; a revisao dela nao conta (nunca foi enviada)
+  const geradaLivre = reservaDe?.chave === chaveRevisao && !reservaDe.reservado && revisao !== "falhou";
+  const espelhoEspera = comPlanilha && ((enviada && revisao !== "livre") || (gerada && !geradaLivre));
   const corpoEtapa1 = (
     <div className="med-etapa__corpo">
       {novaPlanilha && (
@@ -255,14 +260,16 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
       )}
       {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha key={tentativa} medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
-        aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })} />}
-      {comPlanilha && enviada && revisao === "falhou" && (
+        aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })}
+        aoEnvioReservado={r => setReservaDe({ chave: chaveRevisao, reservado: r })} />}
+      {comPlanilha && (enviada || gerada) && revisao === "falhou" && (
         <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
           <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
       )}
-      {!novaPlanilha && m.estado !== "planilha_gerada" && !espelhoEspera && (
+      {gerada && !espelhoEspera && <CaixaAviso nivel="atencao">Envio da planilha/carta não registrado.</CaixaAviso>}
+      {!novaPlanilha && !espelhoEspera && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
-          abrirForm={["prevista", "planilha_enviada", "boletim_recebido"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+          abrirForm={podeEditar && ["prevista", "planilha_gerada", "planilha_enviada", "boletim_recebido"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
       )}
     </div>
   );

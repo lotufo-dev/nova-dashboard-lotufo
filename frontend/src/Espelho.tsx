@@ -124,7 +124,8 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     setRegra(undefined); setEspelhos([]); setPasso({ tipo: "lista" }); setErro(""); setFeito(""); setGerado(null);
     carregar()
       .then(r => {
-        if (!abrirLogo || r?.regra?.situacao !== "ativa" || g !== geracao.current) return;
+        // quem so' consulta nao ganha o formulario aberto: o servidor recusaria a geracao (gate Sol, PR #528)
+        if (!abrirLogo || !podeEditar || r?.regra?.situacao !== "ativa" || g !== geracao.current) return;
         // medicao prevista (do cronograma): o formulario abre com o numero e a competencia dela
         if (inicial) {
           const [pi, pf] = mesCivil(inicial.competencia);

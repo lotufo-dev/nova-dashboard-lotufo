@@ -313,8 +313,9 @@ def test_boletim_recusado_com_revisao_registrada_e_nao_enviada(client_admin, amb
     assert r.status_code == 201, r.text
 
 
-def test_planilha_gerada_nao_vai_ao_espelho_sem_o_envio(client_admin, ambiente_api):
-    """Rodada 2 (PR #382): o boletim substitui a ponte ao espelho, nao o envio ao protocolo."""
+def test_planilha_gerada_vai_ao_espelho_sem_o_envio_so_com_justificativa(client_admin, ambiente_api):
+    """Issue #460 (decisao do Leo de 07/11/2026): a planilha/carta gerada, sem envio registrado, segue ao espelho por
+    "seguir sem boletim" com justificativa, em todas as obras; a recusa de antes (PR #382, rodada 2) saiu."""
     from tests.test_api_medicoes import _arquivos_planilha
     cid = ambiente_api
     r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha("oficio 27"),
@@ -322,10 +323,15 @@ def test_planilha_gerada_nao_vai_ao_espelho_sem_o_envio(client_admin, ambiente_a
                                 "periodo_fim": "2026-08-31", "valor": "719.190,72"})
     mid = r.json()["medicao_id"]
     corpo = {"numero": 27, "competencia": "2026-08", "entradas": {"medicao": "719.190,72"}}
-    for rota in ("espelho/previa", "espelho"):
-        r = client_admin.post(f"/api/contratos/{cid}/{rota}", json=corpo)
-        assert r.status_code == 422 and "envie ao protocolo" in r.json()["detail"], r.text
+    p = client_admin.post(f"/api/contratos/{cid}/espelho/previa", json=corpo)
+    assert p.status_code == 200 and p.json()["medicoes"][0]["sem_boletim"] is True, p.text
+    r = client_admin.post(f"/api/contratos/{cid}/espelho", json=corpo)
+    assert r.status_code == 422 and "seguir sem boletim" in r.json()["detail"], r.text
     assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "planilha_gerada"
+    r = client_admin.post(f"/api/contratos/{cid}/espelho",
+                          json={**corpo, "justificativa_sem_boletim": "medição enviada ao órgão por fora"})
+    assert r.status_code == 201, r.text
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "espelho_gerado"
 
 
 def test_espelho_recusa_com_a_revisao_saindo_pelo_sistema(client_admin, ambiente_api):
