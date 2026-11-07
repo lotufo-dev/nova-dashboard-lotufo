@@ -19,6 +19,7 @@ O acumulado soma as linhas (os meses do cronograma ate' a ultima medicao ou cust
 """
 import datetime
 import json
+from decimal import Decimal
 
 from app import contratos, cronograma, db, dinheiro, medicao_grupos, tempo
 from app.cadastro_arquivos import _dentro_do_prefixo
@@ -130,7 +131,7 @@ def _medido_por_mes(conn, contrato_id: int) -> dict[str, dict]:
                   AND COALESCE(valor_atestado_centavos, valor_protocolado_centavos) IS NOT NULL
                 ORDER BY competencia, numero""", (contrato_id, *ESTADOS_FORA)):
         mes = meses.setdefault(m["competencia"], {"medicoes": [], "medido": 0, "lida": False, "grupos": {},
-                                                   "nao_lido": 0, "ajuste": 0})
+                                                   "nao_lido": 0, "ajuste": 0, "leituras": []})
         mes["medicoes"].append({"id": m["id"], "numero": m["numero"], "nome": f"{m['numero']}ª medição"})
         mes["medido"] += m["valor"]
         lido = medicao_grupos.grupos(conn, m["id"])
@@ -138,6 +139,7 @@ def _medido_por_mes(conn, contrato_id: int) -> dict[str, dict]:
             mes["nao_lido"] += m["valor"]
             continue
         mes["lida"] = True
+        mes["leituras"].append((f"{m['numero']}ª medição", lido))     # na ordem: a ultima e' a mais recente
         soma = 0
         for g in lido["grupos"]:
             mes["grupos"][g["nome"]] = mes["grupos"].get(g["nome"], 0) + g["valor_medido_centavos"]
@@ -155,6 +157,40 @@ def _linha_grupo(nome: str, tipo: str, medido, apontado: int = 0, rateado: int =
             # medido desconhecido (mes sem leitura da planilha, ou so' parte das medicoes lida; linha so' de custo):
             # sem diferenca, nunca "-custo" nem "medido parcial - custo"
             "diferenca_centavos": None if medido is None or not completo else medido - custo}
+
+
+def _itens_chave(grupos: list[dict], linhas: list[dict], medido: dict[str, dict]) -> list[dict]:
+    """Issue #492: o custo por unidade medida do item-chave de cada grupo que o cadastro tem (um por grupo).
+    Custo do grupo = o acumulado da tela (apontado + rateado, todas as competencias); quantidade acumulada e preco
+    unitario = os do item na planilha lida mais recente (o preco de um aditivo vale dali em diante). Quantidade
+    ausente ou nao positiva: "sem_medicao"; custo zero: "sem_custo"; nos dois, sem custo unitario nem diferenca.
+    Diferenca = preco do contrato - custo por unidade, em centavos por unidade (o mesmo sentido da tela)."""
+    leituras = [lt for mes in sorted(medido) for lt in medido[mes]["leituras"]]
+    medicao, ultima = leituras[-1] if leituras else (None, None)
+    saida = []
+    for g in grupos:
+        chave = g.get("item_chave")
+        if not chave:
+            continue
+        custo = sum(i["custo_centavos"] for x in linhas for i in x["grupos"]
+                    if i["tipo"] == "grupo" and i["nome"] == g["nome"])
+        item = next((it for gr in (ultima["grupos"] if ultima else []) for it in gr["itens"]
+                     if str(it["item"] or "").strip() == chave["codigo"]), None)
+        qtd = item["quantidade_acumulada"] if item else None
+        preco = item["preco_unitario_centavos"] if item else None
+        if qtd is None or Decimal(qtd) <= 0:
+            situacao, unitario = "sem_medicao", None
+        elif custo == 0:
+            situacao, unitario = "sem_custo", None
+        else:
+            situacao, unitario = "ok", dinheiro.por_unidade(custo, Decimal(qtd))
+        saida.append({"grupo": g["nome"], "item": chave["codigo"], "descricao": item["descricao"] if item else None,
+                      "unidade": chave["unidade"], "quantidade_acumulada": qtd,
+                      "medicao": medicao if item else None, "custo_centavos": custo,
+                      "custo_unitario_centavos": unitario, "preco_unitario_centavos": preco,
+                      "diferenca_centavos": None if unitario is None or preco is None else preco - unitario,
+                      "situacao": situacao})
+    return saida
 
 
 def _sincronizacao(conn) -> dict:
@@ -232,4 +268,5 @@ def _custo_da_obra(conn, contrato_id: int) -> dict:
                                                          "custo_centavos", "diferenca_centavos")}
     acumulado["previsto_centavos"] = sum(x["previsto_centavos"] or 0 for x in linhas)
     return {"contrato_id": contrato_id, "obra": c["nome_curto"] or c["numero_instrumento"], "grupos": nomes,
-            "linhas": linhas, "acumulado": acumulado, "rm": _sincronizacao(conn)}
+            "linhas": linhas, "acumulado": acumulado, "itens_chave": _itens_chave(grupos, linhas, medido),
+            "rm": _sincronizacao(conn)}
