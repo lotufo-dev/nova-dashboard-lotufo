@@ -86,9 +86,9 @@ def _remetente(conn, config: dict) -> dict:
 
 def _gerada_em(arquivo: Path) -> datetime.datetime:
     """O momento (local) do nome do arquivo; nome fora do padrao: a data do disco."""
-    m = _CARIMBO.search(arquivo.name)
-    if m:
-        return datetime.datetime.strptime(m[1], "%Y%m%d-%H%M%S")
+    gerada = _carimbo(arquivo.name)
+    if gerada:
+        return gerada
     mtime = datetime.datetime.fromtimestamp(arquivo.stat().st_mtime, datetime.timezone.utc)
     return tempo.para_local(mtime).replace(tzinfo=None)
 
@@ -141,9 +141,30 @@ def _ja_teve_rodada(conn, nome: str) -> bool:
     return conn.execute(f"SELECT 1 FROM {TABELA} WHERE arquivo=? LIMIT 1", (nome,)).fetchone() is not None
 
 
-def _data(nome: str) -> str:
+def _carimbo(nome: str) -> datetime.datetime | None:
+    """O momento (local) do nome do arquivo; None fora do padrao."""
     m = _CARIMBO.search(nome)
-    return f"{datetime.datetime.strptime(m[1], '%Y%m%d-%H%M%S'):%d/%m/%Y}" if m else nome
+    return datetime.datetime.strptime(m[1], "%Y%m%d-%H%M%S") if m else None
+
+
+def _data(nome: str) -> str:
+    gerada = _carimbo(nome)
+    return f"{gerada:%d/%m/%Y}" if gerada else nome
+
+
+def _presa(conn):
+    """A reserva mais antiga que ja' passou de `envio_reserva.IDADE_MINIMA_LIBERACAO`, de qualquer copia (o arquivo
+    pode ja' ter sido apagado): rodada parada. None se nao ha'."""
+    return conn.execute(f"SELECT id, arquivo, parte, partes, envio_reservado_em, envio_reservado_por FROM {TABELA} "
+                        "WHERE envio_reservado_em <= datetime('now', ?) ORDER BY id LIMIT 1",
+                        (f"-{envio_reserva.IDADE_MINIMA_LIBERACAO} minutes",)).fetchone()
+
+
+def reserva_presa(conn) -> dict | None:
+    """A reserva que a Saude acusa como interrompida, com o que a liberacao precisa (issue #482): a Saude oferece o
+    "Liberar envio" a partir dela, sem passar pelo "Reenviar" (que mandaria a copia mais recente de novo)."""
+    presa = _presa(conn)
+    return None if presa is None else _detalhe_presa(conn, presa)
 
 
 def pendente(conn, pasta_backups: Path) -> str | None:
@@ -152,8 +173,7 @@ def pendente(conn, pasta_backups: Path) -> str | None:
     qualquer copia: envio interrompido (queda no meio da rodada, envio incerto, e-mail sem registro). A rodada em
     curso renova a reserva das partes que faltam a cada parte enviada, entao reserva velha e' rodada parada. Depois,
     a copia mais recente sem rodada completa e sem envio em andamento: nao saiu. None: nada pendente."""
-    presa = conn.execute(f"SELECT arquivo FROM {TABELA} WHERE envio_reservado_em <= datetime('now', ?) "
-                         "ORDER BY id LIMIT 1", (f"-{envio_reserva.IDADE_MINIMA_LIBERACAO} minutes",)).fetchone()
+    presa = _presa(conn)
     if presa is not None:
         return f"envio da cópia de {_data(presa['arquivo'])} interrompido: confira os Enviados e libere"
     copias = copia_dono.copias(pasta_backups)
@@ -169,20 +189,12 @@ def pendente(conn, pasta_backups: Path) -> str | None:
     return f"a cópia de {_data(nome)} não saiu por e-mail"
 
 
-def _assunto_da_linha(arquivo: str, parte: int, partes: int) -> str | None:
-    """O assunto do e-mail de uma linha, pelo nome do arquivo (que pode ja' ter sido apagado); None fora do padrao."""
-    m = _CARIMBO.search(arquivo)
-    return assunto(datetime.datetime.strptime(m[1], "%Y%m%d-%H%M%S"), parte, partes) if m else None
-
-
-def _recusa_presa(conn, presa) -> envio_reserva.EnvioEmAndamento:
-    """A recusa da reserva presa com o que a liberacao precisa: a linha, qual parte e o assunto a procurar nos
-    Enviados (issue #482)."""
+def _detalhe_presa(conn, presa) -> dict:
+    """O `detail` do 409 de envio reservado mais a linha, qual parte e o assunto a procurar nos Enviados (#482)."""
+    gerada = _carimbo(presa["arquivo"])             # o arquivo pode ja' ter sido apagado: so' o nome
     recusa = envio_reserva.reservado(conn, presa["envio_reservado_em"], presa["envio_reservado_por"])
-    recusa.reserva_id = presa["id"]                 # a rota devolve, para a liberacao (/api/envios/liberar)
-    recusa.parte, recusa.partes = presa["parte"], presa["partes"]
-    recusa.assunto = _assunto_da_linha(presa["arquivo"], presa["parte"], presa["partes"])
-    return recusa
+    return recusa.detalhe() | {"tabela": TABELA, "id": presa["id"], "parte": presa["parte"], "partes": presa["partes"],
+                               "assunto": assunto(gerada, presa["parte"], presa["partes"]) if gerada else None}
 
 
 def _auditar_reenvio(conn, quem: dict, arquivo: Path, depois: dict) -> None:
@@ -208,16 +220,15 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
     partes = _partes(dados, arquivo.name)
     total = len(partes)
     reservado_por = reenvio_por["id"] if reenvio_por else usuario["id"]
+    gerada = _gerada_em(arquivo)                    # antes da reserva: a falha aqui nao deixa nada preso
     with db.mutacao(conn):
-        # a reserva desta copia trava sempre; no "Reenviar", tambem a vencida de outra copia (issue #482): e' a que
-        # a Saude acusa, e so' a recusa daqui leva a tela a liberacao. O envio automatico nao espera a copia velha.
-        outra = (" OR envio_reservado_em <= datetime('now', :idade)") if reenvio_por is not None else ""
         presa = conn.execute(f"SELECT id, arquivo, parte, partes, envio_reservado_em, envio_reservado_por FROM {TABELA} "
-                             f"WHERE envio_reservado_em IS NOT NULL AND (arquivo=:a{outra}) "
-                             "ORDER BY arquivo<>:a, id LIMIT 1",
-                             {"a": arquivo.name, "idade": f"-{envio_reserva.IDADE_MINIMA_LIBERACAO} minutes"}).fetchone()
+                             "WHERE arquivo=? AND envio_reservado_em IS NOT NULL ORDER BY id LIMIT 1",
+                             (arquivo.name,)).fetchone()
         if presa is not None:
-            raise _recusa_presa(conn, presa)
+            recusa = envio_reserva.reservado(conn, presa["envio_reservado_em"], presa["envio_reservado_por"])
+            recusa.presa = _detalhe_presa(conn, presa)  # a rota devolve, para a liberacao (/api/envios/liberar)
+            raise recusa
         ultima = conn.execute(f"SELECT MAX(rodada) FROM {TABELA} WHERE arquivo=?", (arquivo.name,)).fetchone()[0]
         if ultima is not None and reenvio_por is None:
             return 0                                # a mesma copia nao sai duas vezes sozinha
@@ -232,7 +243,6 @@ def _enviar(conn, arquivo: Path, reenvio_por: dict | None) -> int:
             auditoria.registrar(conn, reenvio_por["id"], "copia_dono.reenviar", "copia_dono", arquivo.name, None, {
                 "rodada": rodada, "partes": total, "resultado": "iniciado", "sha256": sha, "para": config["para"],
                 "enviada_por": usuario["email"]})
-    gerada = _gerada_em(arquivo)
     enviados, resultado = 0, "nada"
     try:
         for i, (rid, (nome, pedaco)) in enumerate(zip(ids, partes)):

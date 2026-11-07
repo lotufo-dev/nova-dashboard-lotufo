@@ -568,9 +568,9 @@ def test_reserva_vencida_de_copia_anterior_continua_acusada_depois_da_nova_sair(
         "envio da cópia de 29/10/2026 interrompido: confira os Enviados e libere"
 
 
-def test_reenviar_com_reserva_vencida_de_copia_anterior_oferece_a_liberacao(api, tmp_path):
-    # issue #482: a copia de 29/10 ficou presa (parte 2 de 3) e a de 05/11 saiu; o "Reenviar" recusa com a linha
-    # presa, a liberacao a solta e o alerta da Saude some
+def test_saude_oferece_a_liberacao_da_reserva_presa_de_copia_anterior(api, tmp_path):
+    # issue #482: a copia de 29/10 ficou presa (parte 2 de 3) e a de 05/11 saiu; a Saude devolve a linha presa, a
+    # liberacao a solta e o alerta some
     velha = _copia_na_pasta("dashboard-dono-20261029-080000.tar.age")
     conn = db.get_conn()
     uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
@@ -581,32 +581,49 @@ def test_reenviar_com_reserva_vencida_de_copia_anterior_oferece_a_liberacao(api,
     assert copia_dono_envio.enviar_nova(conn, _copia_na_pasta()) == _ok(1)
     conn.close()
     velha.unlink()                                  # a regra das 4 mais recentes apagou o arquivo velho
-    antes = len(_enviados(tmp_path))
-    r = api.post("/api/admin/copia-dono/reenviar")
-    assert r.status_code == 409, r.text
-    d = r.json()["detail"]
+    s = api.get("/api/admin/backup").json()
+    assert s["ultimo_envio_copia_dono_erro"] == "envio da cópia de 29/10/2026 interrompido: confira os Enviados e libere"
+    d = s["copia_dono_presa"]
     assert (d["codigo"], d["tabela"], d["id"], d["parte"], d["partes"]) == (
         "ENVIO_RESERVADO", "copia_dono_envios", rid, 2, 3)
     assert d["assunto"] == "Dashboard Lotufo: cópia cifrada de 29/10/2026 (parte 2 de 3)"
-    assert len(_enviados(tmp_path)) == antes
+    assert d["liberavel_a_partir_de"] and d["reservado_por_nome"]
     r = api.post("/api/envios/liberar", json={"tabela": "copia_dono_envios", "id": rid,
                                               "justificativa": "conferi os Enviados e não saiu", "conferi_enviados": True})
     assert r.status_code == 200, r.text
-    assert api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"] is None
-    assert api.post("/api/admin/copia-dono/reenviar").status_code == 200
+    s = api.get("/api/admin/backup").json()
+    assert (s["ultimo_envio_copia_dono_erro"], s["copia_dono_presa"]) == (None, None)
 
 
-def test_reserva_recente_de_copia_anterior_nao_trava_o_reenvio(api):
-    # reserva com menos de 15 minutos de outra copia ainda pode estar saindo: nao e' presa nem se libera ainda
+def test_reserva_presa_de_copia_anterior_nao_trava_o_reenvio_da_nova(api, tmp_path):
+    # o e-mail da copia velha pode ter saido sem registro (nao se libera): a mais recente continua saindo
     velha = _copia_na_pasta("dashboard-dono-20261029-080000.tar.age")
-    _copia_na_pasta()
+    nova = _copia_na_pasta()
     conn = db.get_conn()
     uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
     conn.execute("INSERT INTO copia_dono_envios (arquivo, sha256, tamanho, rodada, parte, partes, envio_reservado_em, "
-                 "envio_reservado_por) VALUES (?,?,?,1,1,1,datetime('now','-2 minutes'),?)", (velha.name, "x" * 64, 500, uid))
+                 "envio_reservado_por) VALUES (?,?,?,1,1,1,datetime('now','-1 hour'),?)", (velha.name, "x" * 64, 500, uid))
     conn.commit()
     conn.close()
-    assert api.post("/api/admin/copia-dono/reenviar").status_code == 200
+    r = api.post("/api/admin/copia-dono/reenviar")
+    assert r.status_code == 200, r.text
+    assert r.json()["arquivo"] == nova.name
+
+
+def test_reenviar_com_reserva_presa_da_mesma_copia_diz_a_parte(api, monkeypatch):
+    arq = _copia_na_pasta()
+    conn = db.get_conn()
+    uid = conn.execute("SELECT id FROM usuarios WHERE email='admin@lotufo.com'").fetchone()[0]
+    rid = conn.execute("INSERT INTO copia_dono_envios (arquivo, sha256, tamanho, rodada, parte, partes, "
+                       "envio_reservado_em, envio_reservado_por) VALUES (?,?,?,1,3,4,datetime('now','-30 minutes'),?)",
+                       (arq.name, "x" * 64, 500, uid)).lastrowid
+    conn.commit()
+    conn.close()
+    r = api.post("/api/admin/copia-dono/reenviar")
+    assert r.status_code == 409
+    d = r.json()["detail"]
+    assert (d["codigo"], d["id"], d["parte"], d["partes"], d["assunto"]) == (
+        "ENVIO_RESERVADO", rid, 3, 4, "Dashboard Lotufo: cópia cifrada de 05/11/2026 (parte 3 de 4)")
 
 
 class CorreioQueDemora:

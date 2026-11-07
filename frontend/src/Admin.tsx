@@ -63,7 +63,9 @@ type Backup = { ultimo_backup: string | null; tamanho_bytes: number | null; guar
                 ultima_copia_dono?: string | null; ultima_copia_dono_erro?: string | null; ultima_copia_dono_erro_em?: string | null;
                 // issue #420: o envio dessa copia por e-mail (so' desta execucao do servidor)
                 ultimo_envio_copia_dono?: string | null; ultimo_envio_copia_dono_erro?: string | null;
-                ultimo_envio_copia_dono_erro_em?: string | null };
+                ultimo_envio_copia_dono_erro_em?: string | null;
+                // issue #482: a reserva interrompida do envio (de qualquer copia), com a linha a liberar
+                copia_dono_presa?: (Reserva & { id: number }) | null };
 
 // Issue #330: /api/admin/saude. ultima_leitura = quando o monitor do SIGA mandou a leitura mais recente (nulo: nunca leu)
 type SaudeSiga = { ultima_leitura: string | null; atrasado: boolean; processos: number };
@@ -317,6 +319,9 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
       if (envioReservado(e) && typeof e.corpo.id === "number") setPresa({ id: e.corpo.id, reserva: e.corpo });
     } finally { setReenviando(false); }
   }
+  // a reserva presa vem do 409 do "Reenviar" ou, sem clicar, da Saude (issue #482: inclusive a de uma copia
+  // anterior); a chave remonta a liberacao quando a Saude passa a mostrar a proxima parte presa
+  const liberar = presa ?? (b.copia_dono_presa ? { id: b.copia_dono_presa.id, reserva: b.copia_dono_presa } : null);
   return (
     <div className="cartao__corpo pilha pilha--curta">
       <p>
@@ -334,8 +339,8 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
       <LinhaBackup rotulo="Envio da cópia do dono" em={b.ultimo_envio_copia_dono ?? null}
         erro={b.ultimo_envio_copia_dono_erro ?? null} erroEm={b.ultimo_envio_copia_dono_erro_em ?? null} />
       {erro && <Erro texto={erro} />}
-      {presa && (
-        <LiberarEnvio tabela="copia_dono_envios" id={presa.id} reserva={presa.reserva}
+      {liberar && (
+        <LiberarEnvio key={liberar.id} tabela="copia_dono_envios" id={liberar.id} reserva={liberar.reserva}
           aoLiberar={() => { setErro(""); aoGerar(); }} />
       )}
       <div role="status">{enviada && !erro && <p className="campo__nota">{enviada}</p>}</div>

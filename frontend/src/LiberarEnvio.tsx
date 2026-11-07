@@ -55,10 +55,10 @@ export default function LiberarEnvio({ tabela, id, reserva, aoLiberar }: {
           liberado a partir das {hora(reserva.liberavel_a_partir_de)}.
         </span>
       )}
-      {reserva?.parte && reserva.partes && (
+      {reserva && (Boolean(reserva.partes && reserva.partes > 1) || Boolean(reserva.assunto)) && (
         <span className="campo__nota">
-          Parte {reserva.parte} de {reserva.partes} presa
-          {reserva.assunto ? `: procure nos Enviados o assunto “${reserva.assunto}”.` : "."}
+          {reserva.partes && reserva.partes > 1 ? `Parte ${reserva.parte} de ${reserva.partes} presa. ` : ""}
+          {reserva.assunto ? `Procure nos Enviados o assunto “${reserva.assunto}”.` : ""}
         </span>
       )}
       <label className="campo__rotulo" htmlFor={campo}>Por que liberar (confira antes a caixa de Enviados)</label>

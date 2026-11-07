@@ -240,25 +240,24 @@ test("Saúde: 'Reenviar cópia do dono' com reserva presa mostra a liberação d
   expect(await screen.findByText(/Trava removida/)).toBeTruthy();
 });
 
-// Issue #482: a reserva presa e' de uma copia anterior (29/10) e a de 05/11 ja' saiu: o 409 do "Reenviar" traz a linha
-// dela e qual parte esta' presa; liberada, o alerta da Saude some
-test("Saúde: reserva presa de cópia anterior se libera pelo 'Reenviar', diz a parte e o alerta some", async () => {
+// Issue #482: a reserva presa e' de uma copia anterior (29/10) e a de 05/11 ja' saiu: a Saude traz a linha dela e
+// qual parte esta' presa, sem clicar em "Reenviar"; liberada, o alerta some
+test("Saúde: reserva presa de cópia anterior se libera direto da Saúde, diz a parte e o alerta some", async () => {
   const reserva = { mensagem: "Este envio está em andamento ou foi interrompido (iniciado às 08:00 por Admin).",
     codigo: "ENVIO_RESERVADO", reservado_em: "2026-10-29T08:00:00-04:00", reservado_por_nome: "Admin",
     liberavel_a_partir_de: "2026-10-29T08:15:00-04:00", tabela: "copia_dono_envios", id: 3, parte: 2, partes: 3,
     assunto: "Dashboard Lotufo: cópia cifrada de 29/10/2026 (parte 2 de 3)" };
   let liberada = false;
   api.mockImplementation(async (url: string, opcoes?: { method?: string; body?: string }) => {
-    if (url === "/api/admin/copia-dono/reenviar") throw new ApiErro(409, reserva.mensagem, reserva);
     if (url === "/api/envios/liberar") { liberada = true; return { ok: true }; }
     if (url === "/api/admin/backup") return {
       ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false, ultima_copia_dono: "2026-11-05T08:00:00-04:00",
-      ultimo_envio_copia_dono_erro: liberada ? null : "envio da cópia de 29/10/2026 interrompido: confira os Enviados e libere" };
+      ultimo_envio_copia_dono_erro: liberada ? null : "envio da cópia de 29/10/2026 interrompido: confira os Enviados e libere",
+      copia_dono_presa: liberada ? null : reserva };
     throw new Error(`fora do recorte: ${url} ${opcoes?.method}`);
   });
   render(<Admin aba="saude" />);
   expect(await screen.findByText(/envio da cópia de 29\/10\/2026 interrompido/)).toBeTruthy();
-  fireEvent.click(await screen.findByRole("button", { name: "Reenviar cópia do dono" }));
   expect(await screen.findByText(/Parte 2 de 3 presa/)).toBeTruthy();
   expect(screen.getByText(/Dashboard Lotufo: cópia cifrada de 29\/10\/2026 \(parte 2 de 3\)/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText(/Por que liberar/), { target: { value: "conferi os Enviados e não saiu" } });
@@ -267,6 +266,29 @@ test("Saúde: reserva presa de cópia anterior se libera pelo 'Reenviar', diz a 
   await waitFor(() => expect(api).toHaveBeenCalledWith("/api/envios/liberar", { method: "POST", body: JSON.stringify({
     tabela: "copia_dono_envios", id: 3, justificativa: "conferi os Enviados e não saiu", conferi_enviados: true }) }));
   await waitFor(() => expect(screen.queryByText(/envio da cópia de 29\/10\/2026 interrompido/)).toBeNull());
+  expect(screen.queryByRole("button", { name: "Liberar envio" })).toBeNull();
+});
+
+test("Saúde: com outra parte presa depois de liberar uma, a liberação passa para a próxima", async () => {
+  const parte = (id: number, n: number) => ({ mensagem: "Este envio está em andamento ou foi interrompido.",
+    codigo: "ENVIO_RESERVADO", reservado_em: "2026-10-29T08:00:00-04:00", reservado_por_nome: "Admin",
+    liberavel_a_partir_de: "2026-10-29T08:15:00-04:00", tabela: "copia_dono_envios", id, parte: n, partes: 3,
+    assunto: `Dashboard Lotufo: cópia cifrada de 29/10/2026 (parte ${n} de 3)` });
+  let liberadas = 0;
+  api.mockImplementation(async (url: string, opcoes?: { method?: string; body?: string }) => {
+    if (url === "/api/envios/liberar") { liberadas += 1; return { ok: true }; }
+    if (url === "/api/admin/backup") return {
+      ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: false, ultima_copia_dono: "2026-11-05T08:00:00-04:00",
+      copia_dono_presa: liberadas === 0 ? parte(3, 1) : parte(4, 2) };
+    throw new Error(`fora do recorte: ${url} ${opcoes?.method}`);
+  });
+  render(<Admin aba="saude" />);
+  expect(await screen.findByText(/Parte 1 de 3 presa/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Por que liberar/), { target: { value: "conferi os Enviados e não saiu" } });
+  fireEvent.click(screen.getByLabelText(/Conferi a caixa de Enviados/));
+  fireEvent.click(screen.getByRole("button", { name: "Liberar envio" }));
+  expect(await screen.findByText(/Parte 2 de 3 presa/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Liberar envio" })).toBeTruthy();
 });
 
 test("Saúde: 'Gerar cópia do dono agora' com envio parcial mostra a falha, não a confirmação", async () => {
