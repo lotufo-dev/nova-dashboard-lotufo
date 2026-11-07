@@ -20,7 +20,7 @@ import Pendencias from "./Pendencias";
 // regras moram em `app/protocolo.py`, nao aqui.
 
 type Etapa = { chave: string; rotulo: string; carta: boolean };
-type PecaCfg = { tipo: string; rotulo: string; exigida: boolean; solto: boolean; naturezas?: string[] };
+type PecaCfg = { tipo: string; rotulo: string; exigida: boolean; solto: boolean; naturezas?: string[]; no_oficio?: boolean };
 type Medicao = { id: number; numero: number; tipo: string; titulo: string; estado: string;
   competencia: string; valor_protocolado_centavos: number | null };
 type Peca = { id: number; tipo: string; nome: string; tamanho: number; ext: string };
@@ -59,8 +59,10 @@ function itensDoProtocolo(p: ProtocoloDet, pecasCfg: PecaCfg[]): ItemChecklist[]
   const arquivosDe = (tipo: string) => p.pecas.filter(x => x.tipo === tipo).map(x => ({ id: x.id, nome: x.nome, tamanho: x.tamanho }));
   const itens: ItemChecklist[] = pecasCfg.map((cfg): ItemChecklist => {
     const arquivos = arquivosDe(cfg.tipo);
-    return { chave: cfg.tipo, rotulo: cfg.rotulo, arquivos,
-      situacao: arquivos.length > 0 ? "anexada" : cfg.exigida ? "falta" : "opcional",
+    // issue #462: na etapa da medicao, a peca que vai no oficio assinado nao se anexa (o servidor recusa e nao cobra)
+    const noOficio = p.etapa === "medicao" && cfg.no_oficio === true;
+    return { chave: cfg.tipo, rotulo: cfg.rotulo, arquivos, semAnexar: noOficio,
+      situacao: noOficio ? "no_oficio" : arquivos.length > 0 ? "anexada" : cfg.exigida ? "falta" : "opcional",
       aceita: cfg.tipo === "planilha" ? ".xlsx" : "application/pdf" };
   });
   const conhecidos = new Set(pecasCfg.map(c => c.tipo));

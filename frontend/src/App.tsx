@@ -25,10 +25,31 @@ import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota 
 // Menu e entrada por perfil moram em navegacao.ts (NAVEGACAO.md › Perfis e tela de entrada); o trilho e a barra
 // superior, em Casca.tsx. O App so' escolhe a tela. Todo perfil entra pelo Inicio (decisao do Leonardo, 08/10/2026).
 
+// Issue #417: fora do servidor oficial a dashboard sobe em modo copia (sem envio de e-mail e sem RM) e o
+// /api/health diz `instalacao: nao-autorizada`. A faixa fica em toda tela, inclusive no login, presa ao pe da janela.
+function FaixaInstalacao() {
+  return (
+    <p className="faixa-instalacao" role="alert">
+      Instalação não autorizada da Dashboard Lotufo. Envio de e-mail e sincronização com o RM estão desligados.
+    </p>
+  );
+}
+
 export default function App() {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const { rota, busca, secao, origem, ir, substituir } = useRota();
   const [carregando, setCarregando] = useState(true);
+  const [copia, setCopia] = useState(false);
+
+  useEffect(() => {
+    // O health e' aberto (sem login). Relido a cada 5 minutos: a leitura que falhou (servidor reiniciando) e o servidor
+    // que reiniciou em modo copia com a aba aberta aparecem sem F5; a falha mantem o que ja' se sabia.
+    const ler = () => api<{ instalacao?: string }>("/api/health")
+      .then(s => setCopia(s?.instalacao === "nao-autorizada")).catch(() => {});
+    ler();
+    const id = window.setInterval(ler, 5 * 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     // apos F5 a sessao volta pelo cookie, mas o token CSRF vive so em memoria:
@@ -72,10 +93,11 @@ export default function App() {
   // A ancora (#emp-3) leva a secao quando a tela terminar de montar.
   useRolarAteSecao(usuario ? secao : "", caminhoDe(rota));
 
-  if (carregando) return null;
+  const faixa = copia ? <FaixaInstalacao /> : null;
+  if (carregando) return faixa;
   // Depois do login a URL que a pessoa abriu continua valendo (o efeito acima so'
   // troca "/" e o que ela nao pode ver): o link do e-mail leva a obra, nao a entrada.
-  if (!usuario) return <Login aoEntrar={setUsuario} />;
+  if (!usuario) return <><Login aoEntrar={setUsuario} />{faixa}</>;
 
   // A barra superior diz a SECAO; quem tem titulo proprio (o objeto, ou o "Bom dia" do Inicio) fica com o h1 da
   // pagina, e a barra nao repete um segundo h1.
@@ -134,6 +156,7 @@ export default function App() {
           )}
         </main>
       </div>
+      {faixa}
     </div>
   );
 }

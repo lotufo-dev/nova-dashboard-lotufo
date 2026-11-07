@@ -181,6 +181,45 @@ def test_sinfra_lista_em_romanos_e_reajuste_com_carta_e_pecas_proprias(cenario):
     assert faltam == ["Planilha de reajustamento: não anexada"]           # diagrama e croqui nao valem no reajuste
 
 
+def test_peca_exigida_no_oficio_nao_e_pendencia_na_etapa_da_medicao(cenario):
+    """Issue #462: a peca que vai dentro do oficio assinado nao cobra; a sem a marca continua cobrando."""
+    c, ids = cenario
+    regras = {"pecas": [{"tipo": "boletim", "rotulo": "Boletim de medição", "exigida": True, "no_oficio": True},
+                        {"tipo": "planilha", "rotulo": "Planilha editável", "exigida": True, "solto": True}]}
+    c.execute("UPDATE orgaos SET regras=json_patch(regras, ?) WHERE chave='sinfra-x'", (json.dumps(regras),))
+    c.commit()
+    pid = protocolo.criar(c, ids["uid"], ids["sinfra"], "medicao", [ids["sinfra_exec"]], "310")
+
+    def faltam():
+        return [x["mensagem"] for x in protocolo.detalhe(c, pid)["pendencias"] if x["codigo"] == "peca"]
+
+    assert faltam() == ["Planilha editável: não anexada"]
+    # a tela recebe a marca efetiva; o anexo da peca marcada e' recusado (gate Sol, PR #473)
+    assert {x["tipo"]: x["no_oficio"] for x in protocolo.listar(c, ids["sinfra"])["pecas"]} == \
+        {"boletim": True, "planilha": False}
+    with pytest.raises(ValueError, match="^Esta peça vai no ofício assinado$"):
+        protocolo.adicionar_peca(c, ids["uid"], pid, "boletim", "boletim.pdf", _pdf("BOLETIM 23"), "pdf")
+    assert protocolo.detalhe(c, pid)["pecas"] == []
+    # a lista do contrato (vazia aqui) substitui a marca do orgao: o boletim volta a cobrar
+    c.execute("UPDATE contratos SET pecas_no_oficio='[]' WHERE id=?", (ids["sinfra"],))
+    c.commit()
+    assert faltam() == ["Boletim de medição: não anexada", "Planilha editável: não anexada"]
+    assert {x["tipo"]: x["no_oficio"] for x in protocolo.listar(c, ids["sinfra"])["pecas"]}["boletim"] is False
+    protocolo.adicionar_peca(c, ids["uid"], pid, "boletim", "boletim.pdf", _pdf("BOLETIM 23"), "pdf")
+
+
+def test_peca_no_oficio_continua_cobrando_fora_da_etapa_da_medicao(cenario):
+    """Issue #462 (/code-review): o pacote da prefeitura (e da SES) e' outro documento, sem o oficio da planilha/carta."""
+    c, ids = cenario
+    regras = {"pecas": [{"tipo": "boletim", "rotulo": "Boletim de medição", "exigida": True, "no_oficio": True}]}
+    c.execute("UPDATE orgaos SET familia='prefeitura', regras=json_patch(regras, ?) WHERE chave='mtpar'",
+              (json.dumps(regras),))
+    c.commit()
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    assert [x["mensagem"] for x in protocolo.detalhe(c, pid)["pendencias"] if x["codigo"] == "peca"] == \
+        ["Boletim de medição: não anexada"]
+
+
 def test_pendencias_de_certidao_e_nota(cenario):
     c, ids = cenario
     c.execute("DELETE FROM medicao_documentos WHERE medicao_id=?", (ids["mtpar_exec"],))
@@ -691,3 +730,20 @@ def test_peca_art_do_protocolo_continua_aceita_no_orgao():
     from app import api_protocolos, cadastro_arquivos
     assert "art" in cadastro_arquivos.TIPOS_PECA
     assert "art" in api_protocolos.TipoPeca.__args__
+
+
+def test_carta_da_ses_le_o_aprovado_senao_o_pedido(tmp_path, monkeypatch):
+    """#284 (decisao do Leo de 03/11/2026): o pedido fica congelado; a nota sai pelo aprovado do boletim, e a carta
+    da SES ("Nota Fiscal – R$" e as linhas "Sendo") mostra o valor da nota: aprovado, senao pedido."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    c = db.get_conn()
+    db.migrate(c)
+    ms = [{"id": 999_001, "numero": 41, "tipo": "execucao", "valor_protocolado_centavos": 12_345_67,
+           "valor_atestado_centavos": 12_000_01},
+          {"id": 999_002, "numero": 41, "tipo": "reajuste", "valor_protocolado_centavos": 1_000_00,
+           "valor_atestado_centavos": None}]
+    texto = protocolo._lista(c, {"id": 999_999, "etapa": "unico", "natureza": "execucao"}, "ses", {}, ms)
+    c.close()
+    linhas = texto.splitlines()
+    assert linhas[0] == "1. Nota Fiscal – R$ 13.000,01"
+    assert linhas[1:3] == ["   Sendo: 41ª Medição – R$ 12.000,01", "   Sendo: Reajuste da 41ª Medição – R$ 1.000,00"]

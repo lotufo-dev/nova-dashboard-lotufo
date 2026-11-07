@@ -61,6 +61,41 @@ def test_transicoes_de_estado(conn, contrato_id):
         medicoes.mudar_estado(conn, 1, mid, "cancelada", None)  # recebida e final
 
 
+@pytest.mark.parametrize("estado", ["planilha_enviada", "boletim_recebido"])
+@pytest.mark.parametrize("fim", ["cancelada", "desistida"])
+def test_planilha_enviada_e_boletim_recebido_podem_ser_encerrados(conn, contrato_id, estado, fim):
+    # #284 (revisor): sem isso a medicao ficava presa na obra sem regra de espelho
+    mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "execucao", "competencia": "2026-07"})
+    conn.execute("UPDATE medicoes SET estado=? WHERE id=?", (estado, mid)); conn.commit()
+    medicoes.mudar_estado(conn, 1, mid, fim, "obra paralisada pelo órgão")
+    assert medicoes.detalhe(conn, mid)["estado"] == fim
+
+
+def test_em_andamento_com_boletim_recebido_mostra_o_aprovado(conn, contrato_id):
+    # #284: a prevista sem pedido que recebeu o boletim nao aparece com "—"; com pedido, vale o aprovado
+    sem = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "execucao", "competencia": "2026-07"})
+    com = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 2, "tipo": "execucao", "competencia": "2026-08"})
+    conn.execute("UPDATE medicoes SET estado='boletim_recebido', valor_atestado_centavos=70001 WHERE id=?", (sem,))
+    conn.execute("UPDATE medicoes SET estado='boletim_recebido', valor_atestado_centavos=99999, "
+                 "valor_protocolado_centavos=100001, valor_protocolado_origem='manual' WHERE id=?", (com,))
+    conn.commit()
+    valores = {m["id"]: m["valor_centavos"] for m in medicoes.em_andamento(conn, contrato_id)}
+    assert valores == {sem: 70001, com: 99999}
+
+
+def test_em_andamento_mostra_o_aprovado_em_todo_estado(conn, contrato_id):
+    # #284: espelho gerado com atestado diferente do pedido: a linha mostra o aprovado; sem atestado, o pedido
+    com = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 3, "tipo": "execucao", "competencia": "2026-09"})
+    sem = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 4, "tipo": "execucao", "competencia": "2026-10"})
+    conn.execute("UPDATE medicoes SET estado='espelho_gerado', valor_protocolado_centavos=100001, "
+                 "valor_protocolado_origem='espelho', valor_atestado_centavos=99999 WHERE id=?", (com,))
+    conn.execute("UPDATE medicoes SET estado='espelho_gerado', valor_protocolado_centavos=50001, "
+                 "valor_protocolado_origem='espelho' WHERE id=?", (sem,))
+    conn.commit()
+    valores = {m["id"]: m["valor_centavos"] for m in medicoes.em_andamento(conn, contrato_id)}
+    assert valores == {com: 99999, sem: 50001}
+
+
 def test_espelho_enviado_vai_a_nota_emitida_com_data(conn, contrato_id):
     mid = medicoes.criar_para_espelho(conn, 1, contrato_id, 7, "execucao", "2026-08", 100_000)
     medicoes.marcar_espelho_enviado(conn, 1, mid)

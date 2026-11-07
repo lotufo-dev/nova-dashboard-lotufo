@@ -8,15 +8,23 @@ pasta de dados pelo `cadastro aplicar`.
 O CORPO e' texto simples com tres marcas, e e' o que a pessoa edita na previa: linha em branco separa
 paragrafos; linha comecando por "# " e' titulo de secao (negrito); linha comecando por "i. ", "ii. ",
 "1. " etc. e' item de lista (recuado).
+
+A curva S que vai com a carta de prazo (issue #293) e' uma planilha (openpyxl), desenhada aqui tambem.
 """
 import datetime
+import io
 import json
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from decimal import Decimal
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fpdf import FPDF
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.writer.excel import ExcelWriter
 
 from app import arquivos
 
@@ -289,3 +297,98 @@ def pagina_titulo(linhas: list[str], emitente: dict | None = None) -> bytes:
         pdf.set_font(pdf.fonte, "B", 20)
         pdf.multi_cell(0, 11, pdf.t(l), align="C", new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
+
+
+# --- curva S da carta de prazo (issue #293; spec 2026-10-20 §4 item 3, D9) -------------------------
+
+NOME_CURVA_S = "Curva S.xlsx"
+COLUNAS_CURVA_S = ("Competência", "Previsto vigente", "Previsto anterior", "Medido")
+_CHAVES_CURVA_S = ("previsto_vigente_centavos", "previsto_anterior_centavos", "medido_centavos")
+_SEM_RELOGIO = datetime.datetime(1980, 1, 1)        # a menor data que o zip aceita
+
+
+def _reais(centavos: int | None) -> float | None:
+    """Centavo inteiro -> real na celula, como a planilha do QDOP (`qdop.gerar_xlsx`). None fica celula vazia."""
+    return None if centavos is None else centavos / 100
+
+
+def curva_s_xlsx(linhas: list[dict]) -> bytes:
+    """A planilha da curva S, uma linha por competencia, os valores acumulados como a tela da obra os desenha
+    (`paineis.curva_s`). A primeira linha e' o cabecalho; competencia como data (mes/ano) e valores em reais.
+
+    Deterministica (rodada 2 da PR #436): as mesmas linhas dao os mesmos bytes, sem relogio nas propriedades nem
+    nas datas do zip. Assim o sha256 do arquivo e' a impressao da curva, e a previa e o envio conferem se a curva
+    anexada ainda e' a dos dados de agora."""
+    wb = Workbook()
+    wb.properties.created = wb.properties.modified = _SEM_RELOGIO
+    ws = wb.active
+    ws.title = "Curva S"
+    ws.append(COLUNAS_CURVA_S)
+    for cel in ws[1]:
+        cel.font = Font(bold=True)
+    for linha in linhas:
+        comp = linha["competencia"]
+        ws.append([datetime.date(int(comp[:4]), int(comp[5:7]), 1), *(_reais(linha[k]) for k in _CHAVES_CURVA_S)])
+    for cels in ws.iter_rows(min_row=2):
+        cels[0].number_format = "mm/yyyy"
+        for cel in cels[1:]:
+            cel.number_format = "#,##0.00"
+    ws.column_dimensions["A"].width = 13
+    for col in "BCD":
+        ws.column_dimensions[col].width = 20
+    ws.freeze_panes = "A2"
+    bruto = io.BytesIO()
+    ExcelWriter(wb, ZipFile(bruto, "w", ZIP_DEFLATED)).save()    # sem o `save_workbook`, que grava a hora no arquivo
+    saida = io.BytesIO()
+    with ZipFile(bruto) as origem, ZipFile(saida, "w", ZIP_DEFLATED) as destino:
+        for parte in origem.infolist():          # a data de cada parte do zip tambem sai fixa
+            destino.writestr(ZipInfo(parte.filename, date_time=_SEM_RELOGIO.timetuple()[:6]),
+                             origem.read(parte.filename), compress_type=ZIP_DEFLATED)
+    return saida.getvalue()
+
+
+# Teto dos acumulados da curva (R$ 10 trilhoes): ate' 15 algarismos, o real da celula (float) volta pelo `repr`
+# exatamente ao decimal de 2 casas (DBL_DIG = 15), entao o centavo lido e' o gravado, sem arredondar.
+TETO_CURVA_S_CENTAVOS = 10 ** 15
+
+
+def _centavos(valor) -> int | None:
+    """Real da celula -> centavo inteiro (o inverso de `_reais`), exato: pelo `repr` em Decimal, sem a multiplicacao
+    de float (gate Sol na PR #455). Celula vazia fica None; fracao de centavo ou acima do teto, ValueError."""
+    if valor is None:
+        return None
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+        raise ValueError("valor da curva S não numérico")
+    c = Decimal(repr(valor)) * 100
+    if c != c.to_integral_value() or abs(c) >= TETO_CURVA_S_CENTAVOS:
+        raise ValueError("valor da curva S fora do centavo exato")
+    return int(c)
+
+
+def conteudo_curva_s(linhas: list[dict]) -> list[tuple]:
+    """Issue #447: a curva como dado, uma tupla por competencia ("AAAA-MM" e os tres acumulados em centavos inteiros).
+    E' isto que a previa e o envio comparam, nao os bytes do xlsx: o zip muda com o sistema e as versoes do openpyxl,
+    lxml e zlib sem o dado mudar."""
+    return [(x["competencia"][:7], *(x[k] for k in _CHAVES_CURVA_S)) for x in linhas]
+
+
+def ler_curva_s(dados: bytes) -> list[tuple]:
+    """O conteudo (`conteudo_curva_s`) de um xlsx gerado por `curva_s_xlsx`. ValueError se nao for uma curva S."""
+    from openpyxl import load_workbook
+    try:
+        wb = load_workbook(io.BytesIO(dados), read_only=True, data_only=True)
+        try:
+            linhas = list(wb.active.iter_rows(values_only=True))
+        finally:
+            wb.close()                              # read_only segura o zip aberto ate' o close
+    except Exception as e:                          # zip truncado, xml quebrado: nao e' a curva gerada
+        raise ValueError("arquivo da curva S ilegível") from e
+    if not linhas or tuple(linhas[0][:4]) != COLUNAS_CURVA_S:
+        raise ValueError("arquivo da curva S sem o cabeçalho esperado")
+    out = []
+    for linha in linhas[1:]:
+        comp, *valores = (tuple(linha) + (None,) * 4)[:4]
+        if not isinstance(comp, (datetime.date, datetime.datetime)):
+            raise ValueError("competência da curva S não é data")
+        out.append((f"{comp.year:04d}-{comp.month:02d}", *(_centavos(v) for v in valores)))
+    return out

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import CaixaAviso from "./CaixaAviso";
 import { baseDosValores } from "./formato";
 import { api, mensagemDeErro } from "./api";
 import Espelho from "./Espelho";
@@ -18,7 +19,7 @@ import { brl, type Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
 import { ProtocolosDaMedicao, useProtocolos } from "./Protocolo";
 import { LinhaDoTempo, ResumoMedicao } from "./ResumoLateral";
-import { type AbaMedicoes, type Origem, type Rota, useRota } from "./rota";
+import { type AbaMedicoes, ir, type Origem, type Rota, useRota } from "./rota";
 import { Link } from "./Link";
 import Selo from "./Selo";
 import { fmtCompetencia, fmtDataHora, fmtDataPura } from "./tempo";
@@ -157,6 +158,9 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const passo = esperaAqui ? { rotulo: esperaAqui.texto.charAt(0).toUpperCase() + esperaAqui.texto.slice(1), secao: "etapa-4" }
     : passoDe(linha?.proximo_passo);
   const aqui: Rota = { tela: "medicao", obra: contratoId, id: medicaoId };
+  // #359: o aprovado mudou depois do espelho (o servidor compara com o espelho vigente): uma linha por medicao da
+  // pagina, com o titulo dela no par, para a acao de uma nao esconder a da outra (rodada 2 da PR #474)
+  const desatualizadas = grupo.filter(x => x.espelho_desatualizado);
 
   // quando a etapa da vez muda (enviou, a nota chegou), a pagina acompanha: o clique numa seta so' vale ate' la'
   const atual = m ? etapaDe(m.estado) : 0;
@@ -234,15 +238,16 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // ---------------------------------------------------------------- etapas
   // issue #289: o primeiro passo e' a planilha/carta (execucao e projeto, na obra com regra de espelho ativa; o
   // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela fica no alto da
-  // etapa. Enviada, o espelho aparece logo abaixo (ponte ate' o boletim da #284: o espelho repete o pedido da
-  // planilha/carta); so' gerada, ainda nao (a ponte substitui o boletim, nao o envio ao protocolo).
+  // etapa. Enviada (com ou sem o boletim da #284), o espelho aparece logo abaixo; so' gerada, ainda nao (o boletim
+  // substitui a ponte ao espelho, nao o envio ao protocolo).
   const comPlanilha = m.tipo === "execucao" || m.tipo === "projeto";
   // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
   const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;
   const chaveRevisao = `${m.id}:${m.estado}`;
   const revisao = revisaoDe?.chave === chaveRevisao ? revisaoDe.valor : "conferindo";
   // so' as medicoes com cartao esperam a conferencia dele; as outras (reajuste) seguem direto pelo espelho
-  const espelhoEspera = comPlanilha && m.estado === "planilha_enviada" && revisao !== "livre";
+  const enviada = m.estado === "planilha_enviada" || m.estado === "boletim_recebido";
+  const espelhoEspera = comPlanilha && enviada && revisao !== "livre";
   const corpoEtapa1 = (
     <div className="med-etapa__corpo">
       {novaPlanilha && (
@@ -251,13 +256,13 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       )}
       {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha key={tentativa} medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}
         aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })} />}
-      {comPlanilha && m.estado === "planilha_enviada" && revisao === "falhou" && (
+      {comPlanilha && enviada && revisao === "falhou" && (
         <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
           <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
       )}
       {!novaPlanilha && m.estado !== "planilha_gerada" && !espelhoEspera && (
         <Espelho contratoId={contratoId} podeEditar={podeEditar} aoMudar={recarregar} medicao={{ id: m.id, tipo: m.tipo }} parte="espelho"
-          abrirForm={["prevista", "planilha_enviada"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
+          abrirForm={["prevista", "planilha_enviada", "boletim_recebido"].includes(m.estado) && !espVigente} inicial={{ numero: m.numero, competencia: m.competencia }} />
       )}
     </div>
   );
@@ -373,6 +378,19 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         {erro && painel === null && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
         {/* regiao viva sempre montada: o leitor de tela so' anuncia o texto que CHEGA numa regiao ja' existente */}
         <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
+        {desatualizadas.map(x => {
+          const nota = x.espelho_desatualizado === "nota_emitida";
+          const frase = x.espelho_desatualizado === "nao_conferido" ? "não foi possível conferir o valor do espelho antigo"
+            : nota ? "o aprovado mudou depois do espelho e a nota já foi emitida" : "o aprovado mudou depois do espelho";
+          const comeco = grupo.length > 1 ? `${tituloMedicao(x)}: ${frase}, ` : `${frase.charAt(0).toUpperCase()}${frase.slice(1)}: `;
+          return (
+            <CaixaAviso key={x.id} nivel="atencao">
+              {/* abre a etapa tambem quando a ancora ja' e' a dela (o efeito da secao so' roda quando ela muda) */}
+              {comeco}<Link className="link" para={aqui} secao={nota ? "notas" : "espelho"}
+                ir={(p, o) => { setVendo(nota ? 3 : 1); ir(p, o); }}>{nota ? "ver as notas" : "gere o espelho de novo"}</Link>
+            </CaixaAviso>
+          );
+        })}
 
         <div className="med-grade">
           <div className="med-principal">

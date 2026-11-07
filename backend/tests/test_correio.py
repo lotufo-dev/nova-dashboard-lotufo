@@ -229,6 +229,115 @@ def test_assinatura_integra_continua_aceita(conn, imagem):
     assert correio.assinatura(1)[0] == imagem
 
 
+def test_troca_de_assinatura_que_falha_no_meio_deixa_a_anterior_inteira(conn, monkeypatch):
+    """Gate Sol na PR #472 (#441): o backup le `assinaturas/` sem trava e o nome nao e' o sha256. A gravacao vai a um
+    temporario e so' entao troca de nome: nunca existe assinatura pela metade, nem sobra temporario."""
+    antiga, nova = _png(2, 2), _png(3, 3)
+    correio.gravar_assinatura(conn, 1, antiga)
+
+    def falha(*_a):
+        raise OSError("disco cheio")
+
+    monkeypatch.setattr(correio.os, "replace", falha)
+    with pytest.raises(OSError):
+        correio.gravar_assinatura(conn, 1, nova)
+    assert correio.assinatura(1)[0] == antiga
+    assert [a.name for a in correio._arquivo_assinatura(1).parent.iterdir()] == ["usuario-1"]
+
+
+def test_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em_portugues(conn, monkeypatch):
+    """Gate Sol na PR #472 (#441): no Windows, `os.replace` sobre a assinatura aberta pelo backup da' PermissionError.
+    Um bloqueio curto passa na tentativa seguinte; o que persiste vira ValueError (422 na rota), nao 500."""
+    antiga, nova, outra = _png(2, 2), _png(3, 3), _png(4, 4)
+    correio.gravar_assinatura(conn, 1, antiga)
+    real, chamadas, dormidas = correio.os.replace, [], []
+    monkeypatch.setattr(correio.time, "sleep", _dormir_sem_trava(conn, dormidas))
+
+    def ocupado_uma_vez(a, b):
+        chamadas.append(a)
+        if len(chamadas) == 1:
+            raise PermissionError("arquivo aberto por outro processo")
+        real(a, b)
+
+    monkeypatch.setattr(correio.os, "replace", ocupado_uma_vez)
+    correio.gravar_assinatura(conn, 1, nova)
+    assert correio.assinatura(1)[0] == nova and len(chamadas) == 2 and len(dormidas) == 1
+    assert _eventos_assinatura(conn) == 2           # a tentativa desfeita nao deixa evento
+
+    def sempre_ocupado(a, b):
+        raise PermissionError("arquivo aberto por outro processo")
+
+    monkeypatch.setattr(correio.os, "replace", sempre_ocupado)
+    with pytest.raises(ValueError, match=correio.GRAVAR_ASSINATURA_OCUPADA):
+        correio.gravar_assinatura(conn, 1, outra)
+    assert correio.assinatura(1)[0] == nova and _eventos_assinatura(conn) == 2
+    assert [a.name for a in correio._arquivo_assinatura(1).parent.iterdir()] == ["usuario-1"]
+
+
+def _dormir_sem_trava(conn, dormidas):
+    """No lugar de time.sleep: a espera entre tentativas nao pode segurar a trava de escrita do banco (#479, gate
+    Sol): a transacao da tentativa que falhou ja' foi desfeita quando se dorme."""
+    def dormir(s):
+        assert not conn.in_transaction, "dormiu com a transacao aberta (trava de escrita segura)"
+        dormidas.append(s)
+    return dormir
+
+
+def _eventos_assinatura(conn):
+    return conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='correio.assinatura'").fetchone()[0]
+
+
+def test_remover_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em_portugues(conn, monkeypatch):
+    """Issue #479 (revisor na PR #472): no Windows, `unlink` da assinatura aberta pelo backup da' PermissionError e a
+    rota respondia 500 em ingles. Um bloqueio curto passa na tentativa seguinte; o que persiste vira ValueError (422),
+    a assinatura fica e o evento de remocao nao fica no banco. A espera entre tentativas e' fora da transacao."""
+    from pathlib import Path
+    correio.gravar_assinatura(conn, 1, _png(2, 2))
+    dormidas = []
+    monkeypatch.setattr(correio.time, "sleep", _dormir_sem_trava(conn, dormidas))
+    real, chamadas = Path.unlink, []
+
+    def sempre_ocupado(self, missing_ok=False):
+        if self.name == "usuario-1":
+            raise PermissionError("arquivo aberto por outro processo")
+        real(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", sempre_ocupado)
+    with pytest.raises(ValueError, match=correio.REMOVER_ASSINATURA_OCUPADA):
+        correio.remover_assinatura(conn, 1)
+    assert correio.REMOVER_ASSINATURA_OCUPADA == "Não foi possível tirar a assinatura agora; tente de novo"
+    assert correio.assinatura(1) is not None
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='correio.assinatura' "
+                        "AND depois LIKE '%removida%'").fetchone()[0] == 0
+
+    def ocupado_uma_vez(self, missing_ok=False):
+        chamadas.append(self.name)
+        if self.name == "usuario-1" and len(chamadas) == 1:
+            raise PermissionError("arquivo aberto por outro processo")
+        real(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", ocupado_uma_vez)
+    correio.remover_assinatura(conn, 1)
+    assert correio.assinatura(1) is None and chamadas == ["usuario-1", "usuario-1"]
+    assert len(dormidas) == len(correio._TENTATIVAS_TROCA) + 1 and _eventos_assinatura(conn) == 2
+
+
+def test_gravar_assinatura_limpa_temporario_velho_de_gravacao_interrompida(conn):
+    """Gate Sol na PR #472 (#441): queda entre escrever e renomear deixa o `.tmp`; a gravacao seguinte tira o que
+    passou de 1 hora e segue o padrao exato do temporario. O recente (outra gravacao em curso) e o alheio ficam."""
+    import os
+    import time
+    pasta = correio._arquivo_assinatura(1).parent
+    velho, recente, alheio = (pasta / "usuario-1.123-abcdef01.tmp", pasta / "usuario-2.456-0123abcd.tmp",
+                              pasta / "usuario-1.tmp")
+    for a in (velho, recente, alheio):
+        a.write_bytes(b"parcial")
+    os.utime(velho, (time.time() - 7200, time.time() - 7200))
+    os.utime(alheio, (time.time() - 7200, time.time() - 7200))
+    correio.gravar_assinatura(conn, 1, _png(2, 2))
+    assert not velho.exists() and recente.exists() and alheio.exists()
+
+
 @pytest.mark.parametrize("imagem", [
     PNG[: len(PNG) // 2],                             # PNG cortado ao meio
     PNG[:-12],                                        # PNG sem o IEND
@@ -258,3 +367,76 @@ def test_png_que_promete_imagem_enorme_e_recusado_sem_descomprimir(conn):
     with pytest.raises(ValueError, match="grande demais: reduza as dimensões"):
         correio.gravar_assinatura(conn, 1, _png(5000, 5000, cor=6, idat=zlib.compress(b"\x00" * 1000)))
     assert correio.assinatura(1) is None
+
+
+def _simulado(tmp_path):
+    arquivos = sorted((tmp_path / "sim" / "enviados").glob("*.json"))
+    return [json.loads(a.read_text(encoding="utf-8")) for a in arquivos]
+
+
+def test_redirecionamento_de_teste_manda_so_para_o_endereco_de_teste_e_audita(conn, tmp_path, monkeypatch):
+    """Teste em producao (06/11/2026): com o redirecionamento ligado, o e-mail vai SO' para o endereco de teste, com
+    [TESTE] no assunto e os destinatarios de verdade no alto do corpo; o registro guarda os destinatarios de verdade
+    e a auditoria diz para onde foi."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    monkeypatch.setenv("DASH_EMAIL_REDIRECIONAR", "teste@exemplo.com.br")
+    eid = correio.enviar_e_registrar(conn, {"id": 1, "email": "quem.envia@l.com"}, "teste", ["orgao@exemplo.com.br"],
+                                     ["fiscal@exemplo.com.br"], "Assunto", "<p>corpo</p>", [("a.txt", b"oi")],
+                                     cco=["oculto@exemplo.com.br"])
+    (enviado,) = _simulado(tmp_path)
+    assert (enviado["para"], enviado["copia"], enviado["cco"]) == (["teste@exemplo.com.br"], [], [])
+    assert enviado["assunto"] == "[TESTE] Assunto"
+    for trecho in ("redirecionado", "orgao@exemplo.com.br", "fiscal@exemplo.com.br", "oculto@exemplo.com.br", "<p>corpo</p>"):
+        assert trecho in enviado["corpo"]
+    assert [a["nome"] for a in enviado["anexos"]] == ["a.txt"]
+    e = conn.execute("SELECT para, copia, cco, assunto FROM envios WHERE id=?", (eid,)).fetchone()
+    assert (json.loads(e["para"]), json.loads(e["copia"]), json.loads(e["cco"]), e["assunto"]) == (
+        ["orgao@exemplo.com.br"], ["fiscal@exemplo.com.br"], ["oculto@exemplo.com.br"], "Assunto")
+    depois = json.loads(conn.execute("SELECT depois FROM audit_log WHERE acao='correio.envio' AND entidade_id=?",
+                                     (eid,)).fetchone()[0])
+    assert depois["redirecionado_para"] == "teste@exemplo.com.br"
+
+
+def test_sem_redirecionamento_o_envio_segue_como_antes(conn, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    monkeypatch.delenv("DASH_EMAIL_REDIRECIONAR", raising=False)
+    assert correio.redirecionamento() is None and correio.redirecionamento_ativo() is False
+    eid = correio.enviar_e_registrar(conn, {"id": 1, "email": "quem.envia@l.com"}, "teste", ["orgao@exemplo.com.br"], [],
+                                     "Assunto", "<p>corpo</p>", [])
+    (enviado,) = _simulado(tmp_path)
+    assert enviado["para"] == ["orgao@exemplo.com.br"] and enviado["assunto"] == "Assunto"
+    assert "redirecionado" not in enviado["corpo"]
+    depois = json.loads(conn.execute("SELECT depois FROM audit_log WHERE acao='correio.envio' AND entidade_id=?",
+                                     (eid,)).fetchone()[0])
+    assert "redirecionado_para" not in depois
+
+
+def test_redirecionamento_pelo_arquivo_de_segredos_e_lido_a_cada_envio(conn, tmp_path, monkeypatch):
+    monkeypatch.delenv("DASH_EMAIL_REDIRECIONAR", raising=False)
+    # a pasta de segredos fica ao lado de `dados`: uma raiz so' deste teste, para o arquivo nao vazar para os outros
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "raiz" / "dados" / "t.db"))
+    segredos = db.db_path().parent.parent / "segredos"
+    segredos.mkdir(parents=True, exist_ok=True)
+    arquivo = segredos / correio.ARQUIVO_REDIRECIONAR
+    assert correio.redirecionamento() is None
+    arquivo.write_text("teste@exemplo.com.br\n", encoding="utf-8")
+    assert correio.redirecionamento() == "teste@exemplo.com.br" and correio.redirecionamento_ativo() is True
+    arquivo.unlink()
+    assert correio.redirecionamento() is None and correio.redirecionamento_ativo() is False
+
+
+@pytest.mark.parametrize("conteudo", ["", "nao-e-um-endereco", "a@b", "dois@exemplo.com.br outro@exemplo.com.br"])
+def test_redirecionamento_ligado_e_ilegivel_recusa_o_envio(conn, tmp_path, monkeypatch, conteudo):
+    """Ligado com endereco que nao se le, NADA sai: o e-mail nao pode ir ao destinatario de verdade por engano."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    monkeypatch.delenv("DASH_EMAIL_REDIRECIONAR", raising=False)
+    # a pasta de segredos fica ao lado de `dados`: uma raiz so' deste teste, para o arquivo nao vazar para os outros
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "raiz" / "dados" / "t.db"))
+    segredos = db.db_path().parent.parent / "segredos"
+    segredos.mkdir(parents=True, exist_ok=True)
+    (segredos / correio.ARQUIVO_REDIRECIONAR).write_text(conteudo, encoding="utf-8")
+    assert correio.redirecionamento_ativo() is True
+    with pytest.raises(graph.ErroGraph, match="mal configurado"):
+        correio.enviar_e_registrar(conn, {"id": 1, "email": "quem.envia@l.com"}, "teste", ["orgao@exemplo.com.br"], [],
+                                   "Assunto", "<p/>", [])
+    assert _simulado(tmp_path) == [] and conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0

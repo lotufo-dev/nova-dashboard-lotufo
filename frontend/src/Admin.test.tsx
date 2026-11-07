@@ -299,6 +299,25 @@ test("Saúde: três cartões de situação com a hora, nota só na falha, e a ta
   expect(document.body.textContent).not.toMatch(/as NFs e as baixas do RM|deu certo|o que está de um lado só/);
 });
 
+test("Saúde: a rodada mostra as linhas de custo por tarefa e de baixa de estoque, e a falha do custo (#488)", async () => {
+  const comCusto = { ...RODADA_BOA, id: 5, custo_tarefas: 57012, estoque_baixas: 301, custo_erro: null };
+  const semCusto = { ...RODADA_BOA, id: 4, custo_tarefas: null, estoque_baixas: null,
+    custo_erro: "Simulador do RM sem o arquivo da consulta DASH25" };
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null,
+    rodadas: [comCusto, semCusto] });
+  const tabela = await screen.findByRole("table", { name: "Últimas rodadas de sincronização com o RM" });
+  expect(within(tabela).getByRole("columnheader", { name: "Custo por tarefa" })).toBeTruthy();
+  expect(within(tabela).getByRole("columnheader", { name: "Baixa de estoque" })).toBeTruthy();
+  const [, primeira, segunda] = within(tabela).getAllByRole("row");
+  expect(within(primeira).getByText("57.012")).toBeTruthy();
+  expect(within(primeira).getByText("301")).toBeTruthy();
+  expect(within(segunda).getAllByText("—").length).toBe(2);
+  // a falha aparece em português de operação; o detalhe técnico (código da consulta) fica no log do servidor
+  expect(within(segunda).getByText("Custos e estoque não atualizados.")).toBeTruthy();
+  expect(tabela.textContent).not.toMatch(/DASH25|Simulador/);
+  expect(within(primeira).queryByText(/Custos e estoque não atualizados/)).toBeNull();
+});
+
 // Issue #330: o monitor do SIGA ao lado da saúde do RM
 test("Saúde: cartão Monitor do SIGA com a hora da última leitura e os processos; sem leitura, traço", async () => {
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
@@ -481,6 +500,22 @@ test("Saúde: bloco Segurança diz quantos alertas anteriores ficaram de fora da
   render(<Admin aba="saude" />);
   const bloco = await screen.findByRole("region", { name: "Segurança" });
   expect(await within(bloco).findByText("Mais 3 alertas anteriores.")).toBeTruthy();
+});
+
+// Issue #423: fora do Windows ou em dev a sentinela nao roda, e o bloco diz isso
+test("Saúde: bloco Segurança avisa que a sentinela não roda neste ambiente", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/rm/status") return { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
+    if (url === "/api/admin/backup") return BACKUP_EM_DIA;
+    if (url === "/api/admin/saude") return { siga: SIGA_SEM_LEITURA, seguranca: [], sentinela: { roda: false, mensagem: "Sentinela não roda neste ambiente" } };
+    if (url === "/api/rm/reconciliacao") return {
+      nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
+      totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  const bloco = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(bloco).findByText("Sentinela não roda neste ambiente")).toBeTruthy();
 });
 
 test("Saúde: sem ler a Saúde, o bloco Segurança diz que não deu para ler, nunca OK", async () => {

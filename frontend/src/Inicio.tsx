@@ -24,10 +24,15 @@ export type PainelInicio = {
   medido: { competencia: string; anterior_competencia: string; valor_centavos: number;
             anterior_centavos: number; quantidade: number; ultimo_lancamento: string | null };
   por_contratante: Contratante[];
-  recebido_ano: { valor_centavos: number | null; mes_centavos: number; sem_data: number };
+  recebido_ano: { valor_centavos: number | null; mes_centavos: number; sem_data: number; real_centavos?: number };
   a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null };
   prazos: Prazo[];
+  espelhos: EspelhoAConferir[];
 };
+// #359: o aprovado mudou depois do espelho (ou o espelho antigo nao se confere): a mesma fonte do aviso, um por
+// espelho vigente, com a medicao dele que pede o ato
+type EspelhoAConferir = { espelho_id: number; contrato_id: number; medicao_id: number; obra: string | null; titulo: string;
+  situacao: "aprovado_mudou" | "nota_emitida" | "nao_conferido" };
 
 const PRAZOS_VISIVEIS = 6;
 const ROTULO_PRAZO = { execucao: "Execução", vigencia: "Vigência", data_base: "Data-base" };
@@ -43,10 +48,10 @@ function faixa(dias: number): "acao" | "atencao" | "neutro" {
   return dias <= 15 ? "acao" : dias <= 45 ? "atencao" : "neutro";
 }
 
-function Cartao({ para, ir, numero, rotulo, tom }:
-    { para: Rota; ir: Ir; numero: number; rotulo: string; tom: "primario" | "acao" | "atencao" | "neutro" }) {
+function Cartao({ para, secao, ir, numero, rotulo, tom }:
+    { para: Rota; secao?: string; ir: Ir; numero: number; rotulo: string; tom: "primario" | "acao" | "atencao" | "neutro" }) {
   return (
-    <Link para={para} ir={ir} className={`ini-cartao ini-cartao--${tom}`}>
+    <Link para={para} secao={secao} ir={ir} className={`ini-cartao ini-cartao--${tom}`}>
       <span className="ini-cartao__numero">{numero.toLocaleString("pt-BR")}</span>
       <span className="ini-cartao__texto"><span className="ini-cartao__rotulo">{rotulo}</span></span>
       <span className="ini-cartao__seta" aria-hidden="true">→</span>
@@ -103,6 +108,11 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
   const r = p.reajustes;
   const paraReaj: Rota = r.length === 1 ? { tela: "obra", id: r[0].contrato_id, aba: "reajuste" } : { tela: "avisos" };
 
+  // cartao 4, so' quando existe (#359): uma medicao leva a ela (as notas, se a nota ja' saiu); mais, aos avisos
+  const esp = p.espelhos ?? [];
+  const paraEsp: Rota = esp.length === 1 ? { tela: "medicao", obra: esp[0].contrato_id, id: esp[0].medicao_id } : { tela: "avisos" };
+  const secaoEsp = esp.length === 1 ? (esp[0].situacao === "nota_emitida" ? "notas" : "espelho") : undefined;
+
   const maior = Math.max(1, ...p.por_contratante.map(x => Math.max(x.atual_centavos, x.anterior_centavos)));
   const pr = p.protocoladas;
 
@@ -117,16 +127,21 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
           tom={c.vencidas ? "acao" : c.vencendo ? "atencao" : "neutro"} />
         <Cartao para={paraReaj} ir={ir} numero={r.length} rotulo={r.length === 1 ? "reajuste a pedir" : "reajustes a pedir"}
           tom={r.some(x => x.dias < 0) ? "acao" : r.length ? "atencao" : "neutro"} />
+        {esp.length > 0 && (
+          <Cartao para={paraEsp} secao={secaoEsp} ir={ir} tom="acao" numero={esp.length}
+            rotulo={esp.length === 1 ? "espelho a conferir" : "espelhos a conferir"} />
+        )}
       </section>
 
       <section aria-label="Números do mês" className="ini-numeros">
         <Numero rotulo={`Medido em ${nomeMes}`} valor={brl(m.valor_centavos)} />
-        <Numero rotulo={`Obras protocoladas em ${nomeMes}`}
+        {/* o protocolo e' contado no mes de hoje; o medido, na ultima competencia fechada */}
+        <Numero rotulo={`Obras protocoladas em ${fmtMesExtenso(p.hoje.slice(0, 7))}`}
           valor={<>{pr.obras_protocoladas.toLocaleString("pt-BR")} <span className="ini-numero__de">de {contar(pr.obras_ativas, "obra ativa", "obras ativas")}</span></>}>
           <span className="ini-barra" role="presentation">
             <span style={{ width: `${pr.obras_ativas ? Math.round(100 * pr.obras_protocoladas / pr.obras_ativas) : 0}%` }} /></span>
         </Numero>
-        <Numero rotulo={`Recebido em ${p.hoje.slice(0, 4)}`} valor={brl(p.recebido_ano.valor_centavos)} />
+        <Numero rotulo={`Recebido em ${p.hoje.slice(0, 4)}`} valor={brl(p.recebido_ano.real_centavos ?? p.recebido_ano.valor_centavos)} />
         <Numero rotulo="A receber" valor={brl(p.a_receber.valor_centavos)}>
           {p.a_receber.liberado && (p.a_receber.mais_60_centavos ?? 0) > 0 && (
             <span><Selo classe="selo--acao" title={brl(p.a_receber.mais_60_centavos)}>mais de 60 dias</Selo></span>)}

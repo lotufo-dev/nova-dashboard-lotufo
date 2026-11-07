@@ -23,6 +23,7 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   prazos: [
     { contrato_id: 3, obra: "MT-388 Sinop", contratante: "SINFRA", tipo: "vigencia", data: "2026-10-20", dias: 11 },
     { contrato_id: 7, obra: "Complexo Leblon", contratante: "Pref. Cuiabá", tipo: "data_base", data: "2026-11-01", dias: 23 }],
+  espelhos: [],
   ...extra,
 });
 
@@ -64,6 +65,43 @@ describe("Início", () => {
     const prazos = within(screen.getByRole("region", { name: "Prazos chegando" }));
     expect(prazos.getByRole("link", { name: /MT-388 Sinop/ }).getAttribute("href")).toBe("/obras/3/prazos");
     expect(prazos.getByRole("link", { name: /Complexo Leblon/ }).getAttribute("href")).toBe("/obras/7/reajuste");
+  });
+
+  it("o Recebido do ano mostra o recebido real do RM quando o servidor manda (06/11/2026)", async () => {
+    api.mockResolvedValue(painel({ recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 12, real_centavos: 123_456_789 } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const rotulo = await screen.findByText("Recebido em 2026");
+    expect((rotulo.parentElement?.textContent ?? "").replace(/\s/g, " ")).toContain("R$ 1.234.567,89");
+  });
+
+  it("#359: espelho com o aprovado mudado vira cartão que leva à medição; mais de um leva aos avisos", async () => {
+    const esp = (medicao_id: number, situacao: PainelInicio["espelhos"][number]["situacao"]) =>
+      ({ espelho_id: medicao_id + 100, contrato_id: 7, medicao_id, obra: "Obra A", titulo: "23ª Medição", situacao });
+    api.mockResolvedValue(painel({ espelhos: [esp(723, "aprovado_mudou")] }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    let cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
+    expect(cartoes).toHaveLength(4);
+    expect(cartoes[3].getAttribute("href")).toBe("/obras/7/medicoes/723#espelho");
+    expect(cartoes[3].textContent).toContain("1espelho a conferir");
+    expect(cartoes[3].className).toContain("ini-cartao--acao");
+    cleanup();
+    api.mockResolvedValue(painel({ espelhos: [esp(723, "nota_emitida")] }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
+    expect(cartoes[3].getAttribute("href")).toBe("/obras/7/medicoes/723#notas");
+    cleanup();
+    api.mockResolvedValue(painel({ espelhos: [esp(723, "aprovado_mudou"), esp(724, "nao_conferido")] }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
+    expect(cartoes[3].getAttribute("href")).toBe("/avisos");
+    expect(cartoes[3].textContent).toContain("2espelhos a conferir");
+  });
+
+  it("#359: sem espelho a conferir, os três cartões de sempre", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const cartoes = within(await screen.findByRole("region", { name: "O que fazer agora" })).getAllByRole("link");
+    expect(cartoes).toHaveLength(3);
   });
 
   it("mês sem medição: aviso e botão para lançar", async () => {

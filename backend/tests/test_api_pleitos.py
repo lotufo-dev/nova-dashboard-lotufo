@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from app import auditoria, cadastro_aplicar, correio, db, envio_reserva, pleitos
+from app import auditoria, cadastro_aplicar, correio, cronograma, db, envio_reserva, pleitos
 from tests.test_envio_reserva import CorreioFalso
 from tests.test_protocolo import CARTAS, _assinar, _contrato
 
@@ -950,7 +950,7 @@ def test_anexo_que_falha_na_leitura_depois_da_reserva_destrava(api, monkeypatch)
     monkeypatch.setattr(pleitos, "_bytes", falha_com_a_reserva)
     c = db.get_conn()
     try:
-        with pytest.raises(OSError):
+        with pytest.raises(ValueError, match="Não foi possível ler a carta assinada"):   # #441: 422, nao 500
             pleitos.enviar(c, {"id": _uid(), "email": "admin@lotufo.com"}, pid, corpo["para"], corpo["copia"],
                            corpo["assunto"], corpo["corpo"], corpo["justificativa"])
     finally:
@@ -1099,6 +1099,52 @@ def test_dois_envios_simultaneos_da_reiteracao_mandam_um_so(api, monkeypatch):
     assert _estado(pid) == ({"situacao": "enviado", "envio_id": eid, "envio_reservado_em": None}, 2)
 
 
+def test_carta_de_prazo_com_a_curva_s_sai_uma_vez_so_com_dois_envios_simultaneos(api, monkeypatch):
+    """Issue #293: a curva S entra pelos anexos do pleito, entao o envio da carta de prazo continua unico (dois
+    POST simultaneos: 1x200 e 1x409) e o e-mail registrado leva a carta e a curva."""
+    cl, cid, _ = api
+    c = db.get_conn()
+    cronograma.nova_versao(c, 1, cid, [("2026-08", 100_00), ("2026-09", 100_00)], "manual", data_documento="2026-01-10")
+    c.close()
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
+                                                      "justificativa": "interferências na via"})
+    assert r.status_code == 201 and "Curva S.xlsx" in [a["nome"] for a in r.json()["anexos"]], r.text
+    pid = r.json()["id"]
+    curva = [a for a in r.json()["anexos"] if a["gerado"]][0]["id"]
+    recusa = cl.post(f"/api/pleitos/{pid}/anexos/{curva}/remover")     # rodada 1 da PR #436: a curva nao sai
+    assert recusa.status_code == 422 and "não se remove" in recusa.json()["detail"], recusa.text
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    doc = cl.get(f"/api/pleitos/{pid}/documento")
+    cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc.content), "application/pdf"))
+    pv = cl.post(f"/api/pleitos/{pid}/previa").json()
+    assert "Curva S.xlsx" in [a["nome"] for a in pv["anexos"]]
+    corpo = {**{k: pv[k] for k in ("para", "copia", "assunto", "corpo")}, "justificativa": "cronograma vai depois"}
+    falso = CorreioFalso(espera=0.3)
+    monkeypatch.setattr(correio, "cliente", falso)
+    respostas = []
+    largada = threading.Barrier(2, timeout=10)
+
+    def enviar():
+        largada.wait()
+        respostas.append(cl.post(f"/api/pleitos/{pid}/enviar", json=corpo))
+
+    ts = [threading.Thread(target=enviar) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert sorted(x.status_code for x in respostas) == [200, 409], [x.text for x in respostas]
+    assert len(falso.enviados) == 1
+    p, envios = _estado(pid)
+    assert p["situacao"] == "enviado" and envios == 1
+    c = db.get_conn()
+    try:
+        nomes = [r[0] for r in c.execute("SELECT nome FROM envio_anexos WHERE envio_id=?", (p["envio_id"],))]
+    finally:
+        c.close()
+    assert "Curva S.xlsx" in nomes and len(nomes) == 2
+
+
 def test_reemitir_pela_api_valida_em_portugues(api):
     cl, cid, _ = api
     rascunho = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
@@ -1166,3 +1212,106 @@ def test_pedido_de_valor_nao_e_ofertado_para_envio(api):
     assert cl.post(f"/api/pleitos/{pid}/enviar", json={"para": ["a@orgao-b.exemplo.com.br"], "copia": [],
                                                        "assunto": "x", "corpo": "x"}).status_code == 422
     assert db.get_conn().execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+
+
+def test_atualizar_curva_s_pela_api_mantem_a_carta_assinada(api):
+    """Issue #447: medicao protocolada depois do montar; "O que falta" mostra a curva que mudou, POST /curva-s troca a
+    curva sem apagar o assinado e a pendencia sai."""
+    cl, cid, mid = api
+    c = db.get_conn()
+    cronograma.nova_versao(c, 1, cid, [("2026-08", 100_00), ("2026-09", 100_00)], "manual", data_documento="2026-01-10")
+    c.close()
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
+                                                      "justificativa": "interferências na via"})
+    pid = r.json()["id"]
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    doc = cl.get(f"/api/pleitos/{pid}/documento")
+    cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", _assinar(doc.content), "application/pdf"))
+    c = db.get_conn()
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=5000 WHERE id=?", (mid,)); c.commit(); c.close()
+    p = cl.get(f"/api/pleitos/{pid}").json()
+    assert pleitos.CURVA_S_MUDOU in [x["mensagem"] for x in p["pendencias"]]
+    assert pleitos.CURVA_S_MUDOU in [x["mensagem"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+    r = cl.post(f"/api/pleitos/{pid}/curva-s")
+    assert r.status_code == 200, r.text
+    assert r.json()["situacao"] == "assinado" and r.json()["assinado_arquivo"] == p["assinado_arquivo"]
+    assert "curva_s" not in [x["codigo"] for x in r.json()["pendencias"]]
+    reajuste = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
+    recusa = cl.post(f"/api/pleitos/{reajuste}/curva-s")
+    assert recusa.status_code == 422 and "pedido de prorrogação" in recusa.json()["detail"]
+
+
+def test_previa_com_a_curva_s_sumida_lista_a_pendencia_e_nao_da_500(api):
+    """Revisor na PR #455 (R1): o arquivo da curva sumiu de `curvas/`; POST /previa responde e lista a pendencia."""
+    from app import arquivos
+    cl, cid, _ = api
+    c = db.get_conn()
+    cronograma.nova_versao(c, 1, cid, [("2026-08", 100_00), ("2026-09", 100_00)], "manual", data_documento="2026-01-10")
+    c.close()
+    r = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "prazo", "numero_oficio": "310", "dias": 60,
+                                                      "justificativa": "interferências na via"})
+    pid = r.json()["id"]
+    cl.post(f"/api/pleitos/{pid}/montar", json={})
+    curva = [a for a in cl.get(f"/api/pleitos/{pid}").json()["anexos"] if a["gerado"]][0]
+    arquivos.caminho_seguro(curva["arquivo"]).unlink()
+    pv = cl.post(f"/api/pleitos/{pid}/previa")
+    assert pv.status_code == 200, pv.text
+    assert pleitos.CURVA_S_ILEGIVEL in [x["mensagem"] for x in pv.json()["pendencias"]]
+    assert cl.post(f"/api/pleitos/{pid}/curva-s").status_code == 200
+    assert "curva_s" not in [x["codigo"] for x in cl.post(f"/api/pleitos/{pid}/previa").json()["pendencias"]]
+
+
+def test_previa_com_anexo_ou_carta_sumidos_do_disco_responde_em_portugues_e_nao_da_500(api):
+    """Issue #441: restaurado um backup sem `pleitos/`, o anexo arrastado e a carta montada nao estao no disco.
+    A previa e o envio respondem 422 com o que falta, nao 500, e o envio nao fica reservado."""
+    from app import arquivos
+    cl, cid, _ = api
+    pid = cl.post(f"/api/contratos/{cid}/pleitos", json={"tipo": "reajuste", "numero_oficio": "122"}).json()["id"]
+    cl.post(f"/api/pleitos/{pid}/anexos", data={"tipo": "cronograma"},
+            files=_arquivo("cronograma.pdf", b"%PDF-1.4 cronograma", "application/pdf"))
+    assert cl.post(f"/api/pleitos/{pid}/montar", json={}).status_code == 200
+    d = cl.get(f"/api/pleitos/{pid}").json()
+    pv = cl.post(f"/api/pleitos/{pid}/previa").json()
+    corpo = {**{k: pv[k] for k in ("para", "copia", "assunto", "corpo")}, "justificativa": "teste do anexo sumido"}
+
+    arquivos.caminho_seguro([a for a in d["anexos"] if a["nome"] == "cronograma.pdf"][0]["arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que='o anexo "cronograma.pdf"', acao="remova o anexo e anexe o arquivo de novo"), r.text
+    r = cl.post(f"/api/pleitos/{pid}/enviar", json=corpo)
+    assert r.status_code == 422 and "cronograma.pdf" in r.json()["detail"], r.text
+
+    arquivos.caminho_seguro(d["montado_arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(o_que="a carta montada",
+                                                               acao="monte a carta de novo"), r.text
+    assert _estado(pid) == ({"situacao": "montado", "envio_id": None, "envio_reservado_em": None}, 0)
+
+
+def test_carta_assinada_sumida_do_disco_se_resolve_pelo_que_a_mensagem_manda(api):
+    """Issue #441: so' a assinada sumiu -> subir a assinada de novo (remontar mudaria a carta e invalidaria a
+    assinatura); sumiram as duas -> remontar, assinar e subir. Subir a assinada sem a montada responde 422, nao 500."""
+    from app import arquivos
+    cl, cid, _ = api
+    pid, _ = _pronto(cl, cid)
+    d = cl.get(f"/api/pleitos/{pid}").json()
+    assinado = arquivos.caminho_seguro(d["assinado_arquivo"]).read_bytes()
+    arquivos.caminho_seguro(d["assinado_arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422 and r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que="a carta assinada", acao=pleitos.SUBA_A_ASSINADA), r.text
+    assert cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", assinado, "application/pdf")).status_code == 200
+    assert cl.post(f"/api/pleitos/{pid}/previa").status_code == 200        # a mesma assinada resolve
+
+    arquivos.caminho_seguro(d["assinado_arquivo"]).unlink()
+    arquivos.caminho_seguro(d["montado_arquivo"]).unlink()
+    r = cl.post(f"/api/pleitos/{pid}/previa")
+    assert r.status_code == 422 and r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que="a carta assinada", acao=pleitos.REMONTE_E_ASSINE), r.text
+    r = cl.post(f"/api/pleitos/{pid}/assinado", files=_arquivo("a.pdf", assinado, "application/pdf"))
+    assert r.status_code == 422 and r.json()["detail"] == pleitos.ARQUIVO_SUMIDO.format(
+        o_que="a carta montada", acao=pleitos.REMONTE_E_ASSINE), r.text
+    assert cl.post(f"/api/pleitos/{pid}/montar", json={}).status_code == 200
+    assert cl.post(f"/api/pleitos/{pid}/previa").status_code == 200

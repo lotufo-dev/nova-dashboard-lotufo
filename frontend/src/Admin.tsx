@@ -33,7 +33,10 @@ interface Usr { id: number; nome: string; email: string; perfil: string; ativo: 
 type Rodada = {
   id: number; disparo: string; estado: string; iniciado_em: string; terminado_em: string | null;
   nfs: number; baixas: number; alocacoes: number; sugestoes: number; recebimentos: number; erro: string | null;
+  // #488: linhas do custo por tarefa e da baixa de estoque; null quando a rodada nao trouxe (falha em custo_erro)
+  custo_tarefas?: number | null; estoque_baixas?: number | null; custo_erro?: string | null;
 };
+const contagem = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("pt-BR"));
 type StatusRm = {
   configurado: boolean; ultima_sincronizacao: string | null; ultimo_erro: string | null;
   em_andamento: boolean; rodadas: Rodada[];
@@ -197,6 +200,7 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                 <th scope="col" className="col-num">NFs</th><th scope="col" className="col-num">Baixas</th>
                 <th scope="col" className="col-num">Alocadas</th><th scope="col" className="col-num">Ambíguas</th>
                 <th scope="col" className="col-num">Recebidas</th>
+                <th scope="col" className="col-num">Custo por tarefa</th><th scope="col" className="col-num">Baixa de estoque</th>
               </tr>
             </thead>
             <tbody>
@@ -208,12 +212,15 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                   <td>
                     <SeloRodada estado={r.estado} />
                     {r.erro && <div className="campo__nota situacao__erro">{r.erro}</div>}
+                    {r.custo_erro && <div className="campo__nota situacao__erro">Custos e estoque não atualizados.</div>}
                   </td>
                   <td className="col-num num">{r.nfs.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.baixas.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.alocacoes.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.sugestoes.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.recebimentos.toLocaleString("pt-BR")}</td>
+                  <td className="col-num num">{contagem(r.custo_tarefas)}</td>
+                  <td className="col-num num">{contagem(r.estoque_baixas)}</td>
                 </tr>
               ))}
             </tbody>
@@ -347,13 +354,14 @@ function Backup({ b, aoGerar }: { b: Backup | null | undefined; aoGerar: () => v
 // itens: undefined = carregando; null = nao deu para ler. Sem item, so' o selo na cabeca, como o Backup em dia; o selo
 // diz "nenhum alerta" e nao "OK" (gate Sol S1): o bloco confere os alertas que conhece, nao a seguranca inteira.
 // `fora`: quantos itens mais antigos a API deixou fora da lista (ela devolve no maximo 20, gate Sol S3).
-function Seguranca({ itens, fora }: { itens: ItemSeguranca[] | null | undefined; fora: number }) {
+function Seguranca({ itens, fora, aviso }: { itens: ItemSeguranca[] | null | undefined; fora: number; aviso?: string | null }) {
   return (
     <section className="cartao" aria-labelledby="titulo-seguranca">
       <div className="cartao__cabeca cartao__cabeca--quebra">
         <h2 className="cartao__titulo" id="titulo-seguranca">Segurança</h2>
         {itens?.length === 0 && <Selo classe="selo--ok">nenhum alerta</Selo>}
       </div>
+      {aviso && <p className="campo__nota">{aviso}</p>}
       {(itens === undefined || itens === null || itens.length > 0) && (
         <div className="cartao__corpo pilha pilha--curta">
           {itens === undefined ? <p>Carregando…</p>
@@ -384,6 +392,7 @@ function Saude() {
   const [siga, setSiga] = useState<SaudeSiga | null | undefined>(undefined);
   const [seguranca, setSeguranca] = useState<ItemSeguranca[] | null | undefined>(undefined);
   const [segurancaFora, setSegurancaFora] = useState(0);
+  const [avisoSentinela, setAvisoSentinela] = useState<string | null>(null);
   // depois de "Sincronizar agora", as contagens da reconciliacao sao lidas de novo
   const [versao, setVersao] = useState(0);
 
@@ -392,9 +401,9 @@ function Saude() {
   useEffect(() => {
     carregar();
     carregarBackup();
-    api<{ siga: SaudeSiga; seguranca?: ItemSeguranca[]; seguranca_fora?: number }>("/api/admin/saude")
+    api<{ siga: SaudeSiga; seguranca?: ItemSeguranca[]; seguranca_fora?: number; sentinela?: { roda: boolean; mensagem: string | null } }>("/api/admin/saude")
       // sem o campo nao ha' o que afirmar: "nao foi possivel ler", nunca o selo de quem conferiu e nao achou nada
-      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? null); setSegurancaFora(r.seguranca_fora ?? 0); })
+      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? null); setSegurancaFora(r.seguranca_fora ?? 0); setAvisoSentinela(r.sentinela?.mensagem ?? null); })
       .catch(() => { setSiga(null); setSeguranca(null); });
   }, []);
 
@@ -443,7 +452,7 @@ function Saude() {
       <div className="saude-lado">
         <ReconciliacaoResumo versao={versao} />
         <Backup b={b} aoGerar={carregarBackup} />
-        <Seguranca itens={seguranca} fora={segurancaFora} />
+        <Seguranca itens={seguranca} fora={segurancaFora} aviso={avisoSentinela} />
       </div>
     </div>
   );
