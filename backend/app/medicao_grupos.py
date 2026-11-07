@@ -71,25 +71,25 @@ def _anterior(conn, medicao_id: int, sha: str, planilha_id: int | None, ref: int
 
 def _gravar(conn, usuario_id, medicao_id: int, sha: str, origem: str, planilha_id, arquivo, situacao: str, motivo,
             lido: dict | None, cad_sha, total, pedido) -> int:
+    """O evento da leitura, com o contexto em que foi feita (pedido conferido e cadastro usado, tambem na recusa e
+    na falha) e, na lida, a quantidade de itens: o gatilho da 068 recusa item alem dela (a leitura fica selada)."""
+    itens = [(g["nome"], it) for g in lido["grupos"] for it in g["itens"]] if lido and situacao == "lida" else []
     cur = conn.execute(
         "INSERT INTO medicao_grupos (medicao_id, planilha_id, sha256, arquivo, origem, situacao, motivo, grupo_por, "
-        "cadastro_sha256, total_centavos, pedido_centavos, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "cadastro_sha256, total_centavos, pedido_centavos, itens, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (medicao_id, planilha_id, sha, arquivo, origem, situacao, motivo, lido["grupo_por"] if lido else None,
-         cad_sha if lido else None, total, pedido, usuario_id))
+         cad_sha, total, pedido, len(itens), usuario_id))
     lid = cur.lastrowid
-    if lido and situacao == "lida":
-        ordem = 0
-        for g in lido["grupos"]:          # na ordem dos grupos: a consulta remonta a mesma ordem
-            for it in g["itens"]:
-                ordem += 1
-                conn.execute(
-                    f"INSERT INTO medicao_grupo_itens (leitura_id, ordem, grupo, {', '.join(COLUNAS_ITEM)}) "
-                    f"VALUES (?,?,?,{','.join('?' * len(COLUNAS_ITEM))})",
-                    (lid, ordem, g["nome"], *(it[k] for k in COLUNAS_ITEM)))
+    # na ordem dos grupos: a consulta remonta a mesma ordem
+    for ordem, (grupo, it) in enumerate(itens, 1):
+        conn.execute(
+            f"INSERT INTO medicao_grupo_itens (leitura_id, ordem, grupo, {', '.join(COLUNAS_ITEM)}) "
+            f"VALUES (?,?,?,{','.join('?' * len(COLUNAS_ITEM))})",
+            (lid, ordem, grupo, *(it[k] for k in COLUNAS_ITEM)))
     auditoria.registrar(conn, usuario_id, ACAO, "medicao", medicao_id, None, {
         "leitura_id": lid, "situacao": situacao, "origem": origem, "planilha_id": planilha_id, "sha256": sha,
         "total_centavos": total, "pedido_centavos": pedido, "grupo_por": lido["grupo_por"] if lido else None,
-        "motivo": motivo})
+        "cadastro_sha256": cad_sha, "itens": len(itens), "motivo": motivo})
     return lid
 
 
@@ -111,6 +111,15 @@ def _conferir(lido, motivo, ref: int) -> tuple[str, str | None]:
     return "lida", None
 
 
+def _contexto(conn, medicao_id: int, planilha_id: int | None) -> tuple[int, list[dict] | None, str | None]:
+    """(pedido de referencia, cadastro, impressao do cadastro) de agora; ValueError na medicao sem leitura por grupo."""
+    m = conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    ref = referencia(conn, m, planilha_id)
+    conferir_medicao(m, ref)
+    cad = cadastro_de_custo(conn, m["contrato_id"])
+    return ref, cad, _assinatura(cad)
+
+
 def ler_e_registrar(conn, usuario_id: int | None, medicao_id: int, dados: bytes, *, origem: str,
                     planilha_id: int | None = None, arquivo: str | None = None, gravar_recusa: bool = False,
                     guardar_arquivo: bool = False, ensaio: bool = False) -> dict:
@@ -119,47 +128,45 @@ def ler_e_registrar(conn, usuario_id: int | None, medicao_id: int, dados: bytes,
     "diferenca_centavos", "leitura_id"}. A mesma planilha na mesma versao, contra o mesmo pedido e o mesmo cadastro,
     nao se le duas vezes ("repetida"). A recusa so' se grava com `gravar_recusa` (o anexo: a tela avisa); na carga,
     so' se imprime. `guardar_arquivo` (a carga) grava o xlsx na pasta das planilhas so' quando a leitura vale.
-    O pedido, o cadastro e a repeticao sao conferidos de novo sob o lock da gravacao. A medicao que nao tem leitura
-    por grupo levanta ValueError (nada se grava)."""
+    Toda decisao (reaproveitar, conferir o total, gravar) e' tomada sob o lock da gravacao, com o pedido e o
+    cadastro relidos ali; o que se olha antes so' evita abrir o xlsx a toa. A medicao que nao tem leitura por grupo
+    levanta ValueError (nada se grava)."""
     sha = arquivos.sha_de(dados)
 
-    def estado():
-        m_ = conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
-        ref_ = referencia(conn, m_, planilha_id)
-        conferir_medicao(m_, ref_)
-        cad_ = cadastro_de_custo(conn, m_["contrato_id"])
-        return ref_, cad_, _assinatura(cad_)
-
-    def resposta(situacao, motivo, lido, ref_, anterior=None, leitura_id=None, total=None):
-        total = lido["total_centavos"] if lido else total
-        return {"situacao": situacao, "anterior": anterior, "motivo": motivo, "total_centavos": total,
+    def resposta(situacao_, motivo_, lido_, ref_, anterior=None, leitura_id=None, total=None):
+        total = lido_["total_centavos"] if lido_ else total
+        return {"situacao": situacao_, "anterior": anterior, "motivo": motivo_, "total_centavos": total,
                 "pedido_centavos": ref_, "diferenca_centavos": None if total is None else total - ref_,
                 "leitura_id": leitura_id}
 
     def repetida(ant, ref_):
         return resposta("repetida", ant["motivo"], None, ref_, ant["situacao"], ant["id"], ant["total_centavos"])
 
-    ref, cad, cad_sha = estado()
+    ref, cad, cad_sha = _contexto(conn, medicao_id, planilha_id)
+    lido = motivo = lido_com = None          # `lido_com`: a impressao do cadastro com que o xlsx foi lido
     ant = _anterior(conn, medicao_id, sha, planilha_id, ref, cad_sha)
-    if ant is not None:
-        return repetida(ant, ref)
-    lido, motivo = _ler(dados, cad)
-    situacao_, motivo_ = _conferir(lido, motivo, ref)
-    if ensaio or (situacao_ == "recusada" and not gravar_recusa):
-        return resposta(situacao_, motivo_, lido, ref)
-    if guardar_arquivo and situacao_ == "lida":
-        arquivo, _ = arquivos.gravar_bytes("planilhas", dados, "xlsx")     # pelo hash: repetir nao duplica
+    if ensaio:
+        if ant is not None:
+            return repetida(ant, ref)
+        lido, motivo = _ler(dados, cad)
+        return resposta(*_conferir(lido, motivo, ref), lido, ref)
+    if ant is None:                         # so' uma dica: a decisao e' sob o lock, abaixo
+        lido, motivo = _ler(dados, cad)
+        lido_com = cad_sha
+        if guardar_arquivo and _conferir(lido, motivo, ref)[0] == "lida":
+            arquivo, _ = arquivos.gravar_bytes("planilhas", dados, "xlsx")     # pelo hash: repetir nao duplica
     with db.mutacao(conn):
-        ref2, cad2, cad_sha2 = estado()                  # de novo, sob o lock: o pedido ou o cadastro podem ter mudado
-        if cad_sha2 != cad_sha:
-            lido, motivo = _ler(dados, cad2)
-        ref, cad_sha = ref2, cad_sha2
+        ref, cad, cad_sha = _contexto(conn, medicao_id, planilha_id)     # sob o lock: pedido e cadastro de agora
         ant = _anterior(conn, medicao_id, sha, planilha_id, ref, cad_sha)
         if ant is not None:
             return repetida(ant, ref)
+        if lido_com != cad_sha or (lido is None and motivo is None):
+            lido, motivo = _ler(dados, cad)
         situacao_, motivo_ = _conferir(lido, motivo, ref)
         if situacao_ == "recusada" and not gravar_recusa:
             return resposta(situacao_, motivo_, lido, ref)
+        if guardar_arquivo and situacao_ == "lida" and arquivo is None:
+            arquivo, _ = arquivos.gravar_bytes("planilhas", dados, "xlsx")
         lid = _gravar(conn, usuario_id, medicao_id, sha, origem, planilha_id, arquivo, situacao_, motivo_, lido,
                       cad_sha, lido["total_centavos"] if lido else None, ref)
     return resposta(situacao_, motivo_, lido, ref, leitura_id=lid)
@@ -185,48 +192,65 @@ def ler_anexo(conn, usuario_id: int | None, medicao_id: int, versao: int, dados:
 
 
 def registrar_falha(conn, usuario_id: int | None, medicao_id: int, versao: int, dados: bytes) -> dict:
-    """Erro inesperado na leitura do anexo (nao e' recusa da planilha): fica gravado, para a tela avisar e para a
-    carga (`medicoes planilhas`) ler o anexo de novo. Levanta se nem isso grava (quem chama devolve o erro)."""
+    """Erro inesperado na leitura do anexo (nao e' recusa da planilha): fica gravado com o contexto tentado (pedido e
+    cadastro), para a tela avisar e para a carga (`medicoes planilhas`) ler o anexo de novo. Nao apaga uma leitura
+    valida do mesmo contexto (`situacao` a prefere). Levanta se nem isso grava (quem chama devolve o erro)."""
     v = conn.execute("SELECT id, arquivo_planilha FROM medicao_planilhas WHERE medicao_id=? AND versao=?",
                      (medicao_id, versao)).fetchone()
     with db.mutacao(conn):
+        ref, _, cad_sha = _contexto(conn, medicao_id, v["id"])
         _gravar(conn, usuario_id, medicao_id, arquivos.sha_de(dados), "anexo", v["id"], v["arquivo_planilha"],
-                "falhou", FALHA, None, None, None, None)
+                "falhou", FALHA, None, cad_sha, None, ref)
     return {"situacao": "falhou", "aviso": PREFIXO_AVISO + FALHA}
 
 
-def _filtro_vigente(conn, medicao_id: int) -> tuple[str, tuple]:
-    """As leituras que valem: na medicao com planilha/carta, so' as da versao vigente (a revisao em PDF, ou ainda
-    sem leitura, fica sem leitura: a da versao anterior nao representa mais o pedido); na medicao sem
-    planilha/carta (historico), as da carga."""
+def _filtro_vigente(conn, medicao_id: int) -> tuple[str, tuple] | None:
+    """As leituras que valem agora, ou None (medicao sem leitura por grupo: reajuste, projeto, sem pedido).
+    Na medicao com planilha/carta, so' as da versao vigente (a revisao em PDF fica sem leitura: a da versao anterior
+    nao representa mais o pedido); na medicao sem planilha/carta (historico), as da carga. Nas duas, so' as feitas
+    contra o pedido de referencia e o cadastro de custo de agora: pedido ou cadastro que mudaram depois deixam a
+    leitura antiga de lado ate' a carga ler de novo."""
     vigente = conn.execute("SELECT id FROM medicao_planilhas WHERE medicao_id=? ORDER BY versao DESC LIMIT 1",
                            (medicao_id,)).fetchone()
-    if vigente is None:
-        return "g.medicao_id=? AND g.planilha_id IS NULL", (medicao_id,)
-    return "g.medicao_id=? AND g.planilha_id=?", (medicao_id, vigente["id"])
+    pid = vigente["id"] if vigente else None
+    try:
+        ref, _, cad_sha = _contexto(conn, medicao_id, pid)
+    except ValueError:
+        return None
+    versao = "g.planilha_id IS NULL" if pid is None else "g.planilha_id=?"
+    return (f"g.medicao_id=? AND {versao} AND g.pedido_centavos=? AND COALESCE(g.cadastro_sha256, '')=?",
+            (medicao_id, *(() if pid is None else (pid,)), ref, cad_sha or ""))
 
 
 def situacao(conn, medicao_id: int) -> dict:
-    """A leitura mais nova que vale: {"situacao": "sem_leitura" | "lida" | "recusada" | "falhou", "aviso"}."""
-    onde, args = _filtro_vigente(conn, medicao_id)
-    r = conn.execute(f"SELECT g.situacao, g.motivo FROM medicao_grupos g WHERE {onde} ORDER BY g.id DESC LIMIT 1",
-                     args).fetchone()
+    """A leitura mais nova que vale: {"situacao": "sem_leitura" | "lida" | "recusada" | "falhou", "aviso"}. A falha
+    inesperada so' aparece quando nao ha' leitura (lida ou recusada) no mesmo contexto: ela nao desfaz a que existe."""
+    filtro = _filtro_vigente(conn, medicao_id)
+    if filtro is None:
+        return {"situacao": "sem_leitura", "aviso": None}
+    onde, args = filtro
+    r = conn.execute(f"SELECT g.situacao, g.motivo FROM medicao_grupos g WHERE {onde} "
+                     "ORDER BY g.situacao = 'falhou', g.id DESC LIMIT 1", args).fetchone()
     if r is None:
         return {"situacao": "sem_leitura", "aviso": None}
     return {"situacao": r["situacao"], "aviso": PREFIXO_AVISO + r["motivo"] if r["situacao"] != "lida" else None}
 
 
 def grupos(conn, medicao_id: int) -> dict:
-    """O medido por grupo da leitura lida mais nova, com os itens, e a situacao da leitura mais nova (uma recusa
-    depois da ultima lida volta como aviso, com os grupos da lida)."""
-    onde, args = _filtro_vigente(conn, medicao_id)
+    """O medido por grupo da leitura lida mais nova que vale, com os itens, e a situacao (uma recusa depois da
+    ultima lida volta como aviso, com os grupos da lida)."""
+    filtro = _filtro_vigente(conn, medicao_id)
+    saida = {**situacao(conn, medicao_id), "leitura": None, "grupos": []}
+    if filtro is None:
+        return saida
+    onde, args = filtro
     lida = conn.execute(
         "SELECT g.id, g.origem, g.planilha_id, p.versao, g.sha256, g.grupo_por, g.total_centavos, g.pedido_centavos, "
         "g.criado_em FROM medicao_grupos g LEFT JOIN medicao_planilhas p ON p.id=g.planilha_id "
         f"WHERE {onde} AND g.situacao='lida' ORDER BY g.id DESC LIMIT 1", args).fetchone()
-    saida = {**situacao(conn, medicao_id), "leitura": dict(lida) if lida else None, "grupos": []}
     if lida is None:
         return saida
+    saida["leitura"] = dict(lida)
     itens = [(r["grupo"], {k: r[k] for k in COLUNAS_ITEM}) for r in conn.execute(
         f"SELECT grupo, {', '.join(COLUNAS_ITEM)} FROM medicao_grupo_itens WHERE leitura_id=? ORDER BY ordem",
         (lida["id"],))]
@@ -246,10 +270,14 @@ def _linha(arquivo: str, medicao=None, motivo=None) -> dict:
             "pedido_centavos": None, "diferenca_centavos": None}
 
 
-def _grande_demais(tamanho: int) -> str | None:
-    if tamanho > leitura.MAX_BYTES_ARQUIVO:
-        return f"arquivo grande demais (acima de {leitura.MAX_BYTES_ARQUIVO // 1_000_000} MB)"
-    return None
+def _ler_arquivo(caminho: Path) -> tuple[bytes | None, str | None]:
+    """(bytes, motivo para pular): abre uma vez e le no maximo o teto mais um byte do mesmo descritor (o arquivo
+    trocado entre conferir o tamanho e ler nao passa do teto, nem entra na memoria inteiro)."""
+    with open(caminho, "rb") as f:
+        dados = f.read(leitura.MAX_BYTES_ARQUIVO + 1)
+    if len(dados) > leitura.MAX_BYTES_ARQUIVO:
+        return None, f"arquivo grande demais (acima de {leitura.MAX_BYTES_ARQUIVO // 1_000_000} MB)"
+    return dados, None
 
 
 def _anexos(conn, usuario_id, contrato_id: int, ensaio: bool) -> list[dict]:
@@ -257,7 +285,8 @@ def _anexos(conn, usuario_id, contrato_id: int, ensaio: bool) -> list[dict]:
     anexadas antes desta leitura existir entram aqui; as ja' lidas voltam como "repetida")."""
     saida = []
     for r in conn.execute(
-            "SELECT m.id, m.numero, m.tipo, p.versao, p.arquivo_planilha FROM medicoes m "
+            "SELECT m.id, m.numero, m.tipo, p.id AS planilha_id, p.versao, p.arquivo_planilha, p.sha256_planilha "
+            "FROM medicoes m "
             "JOIN medicao_planilhas p ON p.medicao_id=m.id AND p.versao=(SELECT MAX(versao) FROM medicao_planilhas "
             "WHERE medicao_id=m.id) WHERE m.contrato_id=? AND m.tipo='execucao' ORDER BY m.numero",
             (contrato_id,)).fetchall():
@@ -273,13 +302,15 @@ def _anexos(conn, usuario_id, contrato_id: int, ensaio: bool) -> list[dict]:
         if caminho is None or not caminho.is_file():
             linha["motivo"] = "o arquivo do anexo não foi encontrado"
             continue
-        linha["motivo"] = _grande_demais(caminho.stat().st_size)
+        dados, linha["motivo"] = _ler_arquivo(caminho)
         if linha["motivo"]:
             continue
+        # o arquivo gravado tem de ser o que a versao registrou: trocado ou corrompido, nao se liga a ela
+        if r["sha256_planilha"] and arquivos.sha_de(dados) != r["sha256_planilha"]:
+            linha["motivo"] = "o arquivo do anexo não confere com o registrado na versão"
+            continue
         try:
-            res = ler_e_registrar(conn, usuario_id, r["id"], caminho.read_bytes(), origem="anexo",
-                                  planilha_id=conn.execute("SELECT id FROM medicao_planilhas WHERE medicao_id=? AND "
-                                                           "versao=?", (r["id"], r["versao"])).fetchone()[0],
+            res = ler_e_registrar(conn, usuario_id, r["id"], dados, origem="anexo", planilha_id=r["planilha_id"],
                                   arquivo=rel, gravar_recusa=True, ensaio=ensaio)
         except ValueError as e:
             linha["motivo"] = str(e)
@@ -323,11 +354,11 @@ def carregar_pasta(conn, usuario_id: int | None, contrato_id: int, pasta: Path, 
         if conn.execute("SELECT 1 FROM medicao_planilhas WHERE medicao_id=?", (m["id"],)).fetchone() is not None:
             linha["motivo"] = "a medição tem planilha/carta anexada: a leitura vem do anexo"
             continue
-        linha["motivo"] = _grande_demais(caminho.stat().st_size)     # antes de ler o arquivo para a memoria
+        dados, linha["motivo"] = _ler_arquivo(caminho)
         if linha["motivo"]:
             continue
         try:
-            r = ler_e_registrar(conn, usuario_id, m["id"], caminho.read_bytes(), origem="carga",
+            r = ler_e_registrar(conn, usuario_id, m["id"], dados, origem="carga",
                                 guardar_arquivo=True, ensaio=ensaio)
         except ValueError as e:
             linha["motivo"] = str(e)

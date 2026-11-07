@@ -23,9 +23,12 @@ CREATE TABLE IF NOT EXISTS medicao_grupos (
     total_centavos INTEGER CHECK (total_centavos IS NULL OR typeof(total_centavos) = 'integer'),
     -- o valor de referencia conferido: o pedido da versao da planilha/carta (anexo) ou o da medicao (carga)
     pedido_centavos INTEGER CHECK (pedido_centavos IS NULL OR typeof(pedido_centavos) = 'integer'),
+    -- quantos itens a leitura tem: o gatilho abaixo recusa item alem dele (a leitura gravada fica selada)
+    itens INTEGER NOT NULL DEFAULT 0 CHECK (typeof(itens) = 'integer' AND itens >= 0),
     usuario_id INTEGER REFERENCES usuarios(id),
     criado_em TEXT NOT NULL DEFAULT (datetime('now')),
     CHECK (situacao = 'lida' OR (motivo IS NOT NULL AND trim(motivo) <> '')),
+    CHECK (situacao = 'lida' OR itens = 0),
     CHECK (situacao <> 'lida' OR (total_centavos IS NOT NULL AND pedido_centavos IS NOT NULL))
 );
 -- a mesma planilha (mesmo sha256) na mesma versao, contra o mesmo pedido e o mesmo cadastro, so' se le uma vez: a
@@ -62,6 +65,12 @@ END;
 CREATE TRIGGER IF NOT EXISTS medicao_grupos_sem_delete BEFORE DELETE ON medicao_grupos
 BEGIN
     SELECT RAISE(ABORT, 'Leitura da planilha é evento: não se apaga');
+END;
+-- com UNIQUE (leitura_id, ordem), ordem de 1 a `itens` deixa entrar no maximo os itens que a leitura declarou
+CREATE TRIGGER IF NOT EXISTS medicao_grupo_itens_selada BEFORE INSERT ON medicao_grupo_itens
+WHEN NEW.ordem > COALESCE((SELECT itens FROM medicao_grupos WHERE id = NEW.leitura_id), 0)
+BEGIN
+    SELECT RAISE(ABORT, 'Leitura da planilha é evento: os itens dela já foram gravados');
 END;
 CREATE TRIGGER IF NOT EXISTS medicao_grupo_itens_sem_update BEFORE UPDATE ON medicao_grupo_itens
 BEGIN
