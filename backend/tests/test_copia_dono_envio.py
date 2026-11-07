@@ -152,7 +152,15 @@ def test_sem_copia_dono_no_cadastro_nada_sai_e_fica_no_log(ambiente, caplog):
         assert copia_dono_envio.enviar_nova(conn, _copia(tmp)) == NADA
     assert _enviados(tmp) == [] and conn.execute("SELECT COUNT(*) FROM copia_dono_envios").fetchone()[0] == 0
     assert "copia_dono" in caplog.text
-    assert "geral.yaml" in backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    erro = backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    assert "Configure o destinatário da cópia do dono no cadastro" in erro
+    _sem_codigo_interno(erro)
+
+
+def _sem_codigo_interno(texto: str) -> None:
+    """Issue #515: nada de arquivo de configuracao, chave, variavel de ambiente, classe de excecao ou 'Graph' na tela."""
+    for proibido in ("geral.yaml", "copia_dono", "enviada_por", "DASH_", "Graph", "Error", "Exception"):
+        assert proibido not in texto, (proibido, texto)
 
 
 def test_sem_conta_conectada_nada_sai_e_a_saude_mostra_o_motivo(ambiente, monkeypatch, caplog):
@@ -166,6 +174,7 @@ def test_sem_conta_conectada_nada_sai_e_a_saude_mostra_o_motivo(ambiente, monkey
     assert conn.execute("SELECT COUNT(*) FROM copia_dono_envios").fetchone()[0] == 0
     erro = backup.ESTADO["ultimo_envio_copia_dono_erro"]
     assert "conta Microsoft" in erro and DONO in erro and "não está conectada" in caplog.text
+    _sem_codigo_interno(erro)
     s = backup.situacao(tmp / "dados" / "backups", False, backup.tempo.agora_utc())
     assert "conta Microsoft" in s["ultimo_envio_copia_dono_erro"] and s["ultimo_envio_copia_dono_erro_em"]
 
@@ -177,7 +186,20 @@ def test_sem_usuario_ativo_com_o_login_configurado_nada_sai(ambiente):
     conn.commit()
     assert copia_dono_envio.enviar_nova(conn, _copia(tmp)) == NADA
     assert _enviados(tmp) == []
-    assert "enviada_por" in backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    erro = backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    assert "Nenhum usuário ativo" in erro
+    _sem_codigo_interno(erro)
+
+
+def test_sem_enviada_por_no_cadastro_a_saude_diz_o_que_configurar(ambiente):
+    conn, tmp = ambiente
+    conn.execute("UPDATE cadastro_geral SET valor=? WHERE chave='copia_dono'", (json.dumps({"para": [PARA]}),))
+    conn.commit()
+    assert copia_dono_envio.enviar_nova(conn, _copia(tmp)) == NADA
+    assert _enviados(tmp) == []
+    erro = backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    assert "Configure quem envia a cópia do dono no cadastro" in erro
+    _sem_codigo_interno(erro)
 
 
 class FalhaNaSegunda:
@@ -208,7 +230,9 @@ def test_falha_no_meio_das_partes_solta_as_reservas_que_nao_sairam(ambiente, mon
     assert copia_dono_envio.enviar_nova(conn, _copia(tmp)) == {"emails": 1, "partes": 3, "completo": False}
     linhas = conn.execute("SELECT parte, envio_id, envio_reservado_em FROM copia_dono_envios ORDER BY parte").fetchall()
     assert [(l[0], l[1] is not None, l[2]) for l in linhas] == [(1, True, None), (2, False, None), (3, False, None)]
-    assert "parte 2 de 3" in backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    erro = backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    assert "parte 2 de 3" in erro and "o serviço de e-mail não respondeu; tente de novo mais tarde" in erro
+    _sem_codigo_interno(erro)
     # reenvio depois manda as tres de novo
     monkeypatch.setattr(correio, "cliente", lambda *a, **k: correio.CorreioSimulado(tmp / "sim", DONO))
     assert copia_dono_envio.reenviar(conn, tmp / "dados" / "backups", _admin(conn))["emails"] == 3
@@ -470,9 +494,9 @@ def test_botao_reenviar_sem_copia_ou_sem_cadastro_responde_o_motivo(api, tmp_pat
     conn.commit()
     conn.close()
     r = api.post("/api/admin/copia-dono/reenviar")
-    assert r.status_code == 409 and "geral.yaml" in r.json()["detail"]
+    assert r.status_code == 409 and "Configure o destinatário" in r.json()["detail"]
     assert _enviados(tmp_path) == []
-    assert "geral.yaml" in api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"]
+    assert "Configure o destinatário" in api.get("/api/admin/backup").json()["ultimo_envio_copia_dono_erro"]
 
 
 def test_botao_reenviar_so_admin(api):
@@ -753,3 +777,21 @@ def test_rodada_semanal_gera_e_envia(ambiente, monkeypatch):
     [m] = _enviados(tmp)
     [arq] = copia_dono_envio.copia_dono.copias(pasta)
     assert m["anexos"][0]["nome"] == arq.name
+
+
+@pytest.mark.parametrize("status, frase", [(None, "não respondeu"), (503, "não respondeu"), (400, "recusou o envio")])
+def test_falha_do_servico_de_email_vai_para_a_saude_em_portugues_e_a_excecao_para_o_log(
+        ambiente, monkeypatch, caplog, status, frase):
+    conn, tmp = ambiente
+
+    class Falha(FalhaSempre):
+        def enviar(self, *a, **k):
+            raise graph.ErroGraph("Graph inacessível (TimeoutError) DASH_GRAPH_CLIENT_ID", status)
+
+    monkeypatch.setattr(correio, "cliente", Falha())
+    with caplog.at_level(logging.WARNING, logger="app.copia_dono_envio"):
+        assert copia_dono_envio.enviar_nova(conn, _copia(tmp)) == NADA
+    erro = backup.ESTADO["ultimo_envio_copia_dono_erro"]
+    assert frase in erro
+    _sem_codigo_interno(erro)
+    assert "TimeoutError" in caplog.text           # o detalhe tecnico fica so' no log
