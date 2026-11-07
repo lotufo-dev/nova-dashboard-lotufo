@@ -1110,6 +1110,30 @@ def test_termo_so_com_periodo_parcial_cobre_so_os_meses_do_periodo(cenario):
     assert x["2026-12"]["avisos"] == ["sem_apostilamento", "nota_antes_do_apostilamento"]
 
 
+@pytest.mark.parametrize("segundo", [
+    {"periodo": {"de": "2026-09", "ate": "2026-10"}},
+    {"percentual": "6,80", "periodo": {"de": "2026-09", "ate": "2026-10"}},
+    {"competencias": [{"competencia": "2026-10", "valor": "100,01"}]},
+], ids=["so-periodo", "percentual", "lista"])
+def test_dois_termos_parciais_no_mesmo_ciclo_cobrem_cada_um_os_seus_meses(cenario, segundo):
+    # revisor e gate Sol (rodada 1, PR #524): o termo que `apostilamento_do_ciclo` escolhe (o mais novo) nao apaga o
+    # periodo do termo anterior so' com periodo; 07/2026 continua coberta pelo 1o, 10/2026 pelo 2o, 12/2026 por nenhum
+    c, ids = cenario
+    cid = ids["contrato"]
+    ids["instrumento"]("apostilamento_reajuste", "2026-09-15",
+                       {"data_base": "2024-06", "ciclo": 2026, "periodo": {"de": "2026-06", "ate": "2026-08"}})
+    ids["instrumento"]("apostilamento_reajuste", "2026-12-15", {"data_base": "2024-06", "ciclo": 2026, **segundo})
+    if "competencias" in segundo:
+        ap = c.execute("SELECT MAX(id) FROM instrumentos").fetchone()[0]
+        _previsao(c, cid, "2026-10", 100_01, "apostilamento", instrumento_id=ap, criado_em="2026-12-15 10:00:00")
+    for numero, comp in ((1, "2026-07"), (2, "2026-10"), (3, "2026-12")):
+        m = _medicao(c, cid, numero, comp, "nota_emitida", pedido=100_01, aprovado=100_01)
+        _nota(c, m, 100_01)
+    x = _por_competencia(c, cid)
+    assert (x["2026-07"]["avisos"], x["2026-10"]["avisos"]) == ([], [])
+    assert x["2026-12"]["avisos"] == ["sem_apostilamento", "nota_antes_do_apostilamento"]
+
+
 def test_nota_antes_do_termo_some_quando_o_apostilamento_e_carregado(cenario):
     # Gate Sol (rodada 1, PR #438) pediu a marca pela data da nota contra a do termo; a spec 2026-10-20 §2.2 (tabela de
     # avisos) diz que "Nota de reajuste antes do apostilamento" some quando o apostilamento e' carregado

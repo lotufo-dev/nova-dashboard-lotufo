@@ -444,23 +444,43 @@ def termo_cobre_o_mes(termo: dict, competencia: str) -> bool:
     return per[0] <= competencia <= per[1]
 
 
+def _termos_com_periodo(conn, contrato_id: int, unica: str | None) -> dict[tuple[str, int], list[dict]]:
+    """Por (base, ciclo), todos os apostilamentos que valem (`_termo_vale`) com `periodo`, na base e no ciclo
+    resolvidos como em `_percentuais` (revisor e gate Sol, rodada 1 da PR #524): o mes no periodo de qualquer termo so'
+    com `periodo` fica coberto (`termo_cobre_o_mes`), seja qual for o termo que `apostilamento_do_ciclo` escolhe."""
+    out: dict[tuple[str, int], list[dict]] = {}
+    for r in conn.execute(f"SELECT * FROM instrumentos i WHERE i.contrato_id=? AND i.tipo='apostilamento_reajuste' "
+                          f"AND {_termo_vale('i')}", (contrato_id,)):
+        d = json.loads(r["dados"] or "{}")
+        if _periodo_do_termo(d) is None:
+            continue
+        base, ciclo = base_do_termo(d, r["data_base_mes"], unica), ciclo_do_apostilamento(d, r["data"])
+        if base is not None and ciclo is not None:
+            out.setdefault((base, ciclo), []).append({"dados": d})
+    return out
+
+
 def cobertura_das_competencias(conn, contrato_id: int, grupos: list[dict]):
     """O criterio unico de "algum termo cobre a competencia" (issue #275, o mesmo da diretoria na #279), sobre os
     `grupos` de `competencias_por_ciclo`. Devolve `coberta(base, ciclo, x)` para a linha `x` do grupo (base, ciclo):
 
-    - com data-base: a competencia `apostilada`, ou o termo do ciclo (`apostilamento_do_ciclo`) que cobre o mes sem
-      lista-la (`termo_cobre_o_mes`: o termo sem meses, ou o so' com `periodo` no mes do periodo, issue #444);
+    - com data-base: a competencia `apostilada`; ou o ciclo fechado pelo termo do ciclo (`apostilamento_do_ciclo`) sem
+      meses (`termo_sem_meses`); ou o mes no periodo de qualquer apostilamento que vale so' com `periodo`, na mesma
+      base e ciclo (`termo_cobre_o_mes`, issue #444);
     - sem data-base (medicao de base incerta, contrato de duas): coberta so' quando toda data-base em que o mes tem
       reajuste a cobre; sem nenhuma, nenhum termo a cobre."""
     bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes",
                                         (contrato_id,))]
     termos: dict[tuple[str, int], dict | None] = {}
+    com_periodo = _termos_com_periodo(conn, contrato_id, bases[0] if len(bases) == 1 else None)
 
     def fechado(base: str, ciclo: int, comp: str) -> bool:
         if (base, ciclo) not in termos:
             termos[(base, ciclo)] = apostilamento_do_ciclo(conn, contrato_id, base, ciclo, len(bases) == 1)
         termo = termos[(base, ciclo)]
-        return termo is not None and termo_cobre_o_mes(termo, comp)
+        if termo is not None and termo_cobre_o_mes(termo, comp):
+            return True
+        return any(termo_cobre_o_mes(t, comp) for t in com_periodo.get((base, ciclo), ()))
 
     linhas: dict[tuple[str, str], list[tuple[int | None, bool]]] = {}
     for g in grupos:

@@ -449,6 +449,26 @@ def test_termo_so_com_periodo_parcial_deixa_o_mes_de_fora_esperando_apostilament
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 200_003)]
 
 
+@pytest.mark.parametrize("segundo,previsoes", [
+    ({"periodo": {"de": "2026-04", "ate": "2026-05"}}, ()),
+    ({"percentual": "6,80", "periodo": {"de": "2026-04", "ate": "2026-05"}}, ()),
+    ({"competencias": [{"competencia": "2026-04", "valor": "1.000,00"}]}, [("2026-04", 100_000)]),
+], ids=["so-periodo", "percentual", "lista"])
+def test_dois_termos_parciais_no_mesmo_ciclo_cobrem_cada_um_os_seus_meses(cenario, segundo, previsoes):
+    # revisor e gate Sol (rodada 1, PR #524): o 2o termo do ciclo (o mais novo) nao apaga o periodo do 1o so' com
+    # periodo; 02/2026 (do 1o) e 04/2026 (do 2o) nao esperam, 06/2026 espera. Centavo impar no valor
+    c, ids = cenario
+    p = ids["propria"]
+    _data_base(c, p, "2025-01")
+    _reajuste(c, p, 31, "2026-02", "nota_emitida", pedido=100_001, aprovado=100_001)
+    _reajuste(c, p, 32, "2026-04", "nota_emitida", pedido=100_000, aprovado=100_000)
+    _reajuste(c, p, 33, "2026-06", "nota_emitida", pedido=200_003, aprovado=200_003)
+    _apostilar(c, p, "ap-1", {"data_base": "2025-01", "ciclo": 2026, "periodo": {"de": "2026-01", "ate": "2026-03"}})
+    _apostilar(c, p, "ap-2", {"data_base": "2025-01", "ciclo": 2026, **segundo}, previsoes)
+    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 200_003)]
+
+
 def test_reajustes_esperando_apostilamento_contam_obra_encerrada_e_nao_a_rescindida(cenario):
     # revisor (rodada 1, PR #431): o reajuste so' sai do bloco com o apostilamento (spec 2026-10-20 §2.2); fora fica
     # so' o rescindido, como no QDOP
