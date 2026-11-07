@@ -1254,3 +1254,65 @@ def test_carregar_medicoes_nao_corrige_competencia_com_nf_ou_espelho_nem_cancela
     assert "linha 3: nº 4 execução 2025-06: conflito (a competência 2025-07 já está no espelho" in saida
     assert "linha 4: nº 5 execução 2025-07: conflito (no banco a medição está com espelho gerado: o espelho é dela" in saida
     assert "linha 5: nº 6 execução 2025-04: correção (competência: banco 2025-07, CSV 2025-04; aviso: fica antes" in saida
+
+
+# ---- issue #471: com boletim registrado, o aprovado so' muda por boletim novo (como na tela, #284)
+
+def _com_boletim(conn, mid):
+    # o boletim com o documento, no mesmo valor do aprovado vigente (o evento e' append-only)
+    conn.execute("INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, arquivo, sha256) "
+                 "SELECT id, valor_atestado_centavos, 'manual', atestado_em, 'boletim.pdf', 'abc' FROM medicoes "
+                 "WHERE id=?", (mid,))
+    conn.commit()
+
+
+def test_carregar_medicoes_aprovado_diferente_com_boletim_e_conflito_e_nao_grava(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 3, "2025-06", 1500000, 1200001)       # aprovado R$ 12.000,01 (centavo impar)
+    _com_boletim(conn, mid)
+    linha = "3;3;execucao;2025-06;;15.000,00;12.500,00;;;;;;boletim 3;;"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert ("linha 2: nº 3 execução 2025-06: conflito (o aprovado vem do boletim do órgão: registre um boletim "
+            "novo pela tela)") in saida, saida
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [linha]))
+    assert codigo == 1 and "Recusado, nada foi gravado: 1 linha(s) com erro ou conflito" in saida, saida
+    assert _foto(conn) == antes
+    assert conn.execute("SELECT valor_atestado_centavos FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == 1200001
+
+
+def test_carregar_medicoes_correcao_de_competencia_com_aprovado_diferente_do_boletim_e_conflito(tmp_path, monkeypatch,
+                                                                                               capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 3, "2025-07", 1500000, 1200001)
+    _com_boletim(conn, mid)
+    linha = "3;3;execucao;2025-06;;15.000,00;12.500,00;;;;;;boletim 3;;sim"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert ("linha 2: nº 3 execução 2025-06: conflito (o aprovado vem do boletim do órgão: registre um boletim "
+            "novo pela tela)") in saida, saida
+    antes = _foto(conn)
+    assert _gravar(capsys, _csv(tmp_path, [linha]))[0] == 1
+    assert _foto(conn) == antes
+
+
+def test_carregar_medicoes_aprovado_igual_ao_boletim_continua_igual(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 3, "2025-06", 1500000, 1200001)
+    _com_boletim(conn, mid)
+    linha = "3;3;execucao;2025-06;;15.000,00;12.000,01;;;;;;boletim 3;;"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert "linha 2: nº 3 execução 2025-06: igual" in saida, saida
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [linha]))
+    assert codigo == 0 and _foto(conn) == antes, saida
+
+
+def test_carregar_medicoes_aprovado_diferente_sem_boletim_grava_evento_com_a_fonte(tmp_path, monkeypatch, capsys):
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 3, "2025-06", 1500000, 1200001)       # atesto digitado, sem o documento
+    codigo, saida = _gravar(capsys, _csv(tmp_path, ["3;3;execucao;2025-06;;15.000,00;12.500,00;;;;;;boletim 3;;"]))
+    assert codigo == 0 and "aprovado registrado como evento novo" in saida, saida
+    assert conn.execute("SELECT valor_atestado_centavos FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == 1250000
+    ev = conn.execute("SELECT valor_centavos, observacao FROM medicao_atestos WHERE medicao_id=? ORDER BY id",
+                      (mid,)).fetchall()
+    assert [tuple(e) for e in ev] == [(1200001, None), (1250000, "boletim 3")]
