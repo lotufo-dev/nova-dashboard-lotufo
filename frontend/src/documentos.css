@@ -138,3 +138,56 @@
 .doc-pilula .selo__ponto { margin-top: 7px; }
 .doc-abas-cartao > .abas { overflow-x: auto; }
 .doc-abas-cartao .aba { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- tres abas com chips (#513) */
+.doc-topo { justify-content: space-between; }
+.doc-abas { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; background: var(--superficie); border: 1px solid var(--linha);
+  border-radius: var(--raio); }
+.doc-aba { flex: 1 1 200px; height: auto; min-height: 48px; padding: 8px 16px; border: 0; border-bottom: 3px solid transparent;
+  border-radius: var(--raio-pequeno, 6px); background: none; color: var(--texto); font-size: 17px; font-weight: 600; text-align: center; }
+.doc-aba:hover:not(:disabled) { background: var(--hover); }
+.doc-aba[aria-selected="true"] { color: var(--acento); border-bottom-color: var(--acento); }
+.doc-painel-aba { display: grid; gap: 12px; }
+
+.doc-linhas { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.doc-linha { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); align-items: center; gap: 8px 16px;
+  padding: 10px 14px; background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); }
+.doc-linha__nome { display: grid; gap: 2px; min-width: 0; }
+.doc-linha__nome a, .doc-linha__obra { color: var(--texto); font-weight: 700; font-size: 16px; text-decoration: none; overflow-wrap: anywhere; }
+.doc-linha__nome a:hover { text-decoration: underline; }
+.doc-linha__nome > span:not(.doc-linha__obra) { font-size: 13px; color: var(--texto-2); }
+.doc-linha__zip { justify-self: start; height: auto; padding: 0; border: 0; background: none; color: var(--acento); font-size: 12.5px;
+  text-decoration: underline; text-underline-offset: 2px; }
+.doc-linha__ultima { grid-column: 2; margin: 0; font-size: 13px; color: var(--texto-2); }
+
+.doc-chips { display: grid; gap: 8px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.doc-chips--5 { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.doc-chip { display: grid; gap: 2px; align-content: center; min-width: 0; padding: 6px 10px; border-radius: var(--raio);
+  background: var(--superficie-2); color: var(--texto); text-decoration: none; border: 1px solid transparent; }
+a.doc-chip:hover { border-color: currentColor; }
+a.doc-chip:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }
+.doc-chip__rotulo { font-size: 13px; font-weight: 600; color: var(--texto); }
+.doc-chip__valor { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.doc-chip__valor b { font-size: 18px; line-height: 24px; font-weight: 700; overflow-wrap: anywhere; }
+.doc-chip__valor small { font-size: 12px; color: var(--texto-2); font-weight: 400; }
+.doc-chip--feito { background: var(--ok-fundo); } .doc-chip--feito b, .doc-chip--feito .doc-chip__icone { color: var(--ok); }
+.doc-chip--andamento { background: var(--andamento-fundo); } .doc-chip--andamento b, .doc-chip--andamento .doc-chip__icone { color: var(--andamento); }
+.doc-chip--breve { background: var(--atencao-fundo); } .doc-chip--breve b, .doc-chip--breve .doc-chip__icone { color: var(--atencao); }
+.doc-chip--critico { background: var(--acao-fundo); } .doc-chip--critico b, .doc-chip--critico .doc-chip__icone { color: var(--acao); }
+.doc-chip--neutro b { color: var(--texto-2); }
+.doc-chip--icone { justify-items: center; text-align: center; padding: 8px 6px; }
+.doc-chip__icone { width: 30px; height: 30px; stroke-width: 2.4; }
+
+.doc-grupo { display: grid; gap: 8px; }
+.doc-grupo__cabeca { margin: 0; padding-top: 4px; font-size: 15px; line-height: 22px; font-weight: 600; border-bottom: 1px solid var(--linha); }
+.doc-grupo__cabeca span { color: var(--texto-2); font-weight: 400; }
+.doc-grupo__mais { justify-self: start; height: auto; padding: 4px 0; border: 0; background: none; color: var(--acento); font-size: 14px; }
+.doc-nota { margin: 0; font-size: 13px; color: var(--texto-2); max-width: none; }
+
+@media (max-width: 720px) {
+  .doc-linha { grid-template-columns: minmax(0, 1fr); }
+  .doc-linha__ultima { grid-column: 1; }
+  .doc-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .doc-chips--5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .doc-aba { flex-basis: 100%; font-size: 15px; }
+}

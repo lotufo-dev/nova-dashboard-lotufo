@@ -13,6 +13,7 @@ import io
 import json
 import re
 import sqlite3
+import unicodedata
 import zipfile
 from pathlib import Path
 
@@ -176,6 +177,38 @@ def competencia_do_pdf(pdf: bytes) -> str | None:
     return f"{m.group(2)}-{m.group(1)}" if m else None
 
 
+def _sem_acento_maiusculo(t: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn").upper()
+
+
+def reconhecer_regularidade(conn, pdf: bytes) -> dict | None:
+    """O PDF e' a folha do DP? -> {"competencia", "entidade_id", "entidade"} (a empresa pelo nome impresso no
+    cabecalho; entidade None quando nenhuma empresa ativa do cadastro aparece no texto, ou quando duas empatam) ou
+    None se nao e' folha (nao traz a competencia no cabecalho do DP). Decide pelo CONTEUDO, nao pelo nome do
+    arquivo (issue #513)."""
+    competencia = competencia_do_pdf(pdf)
+    if competencia is None:
+        return None
+    try:
+        texto = _sem_acento_maiusculo(leitura_pdf.primeira_pagina_com_limite(pdf) or "")
+    except (leitura_pdf.TextoInadequado, ValueError):
+        texto = ""
+    achadas = []
+    for e in entidades.listar(conn):
+        if not e["ativo"]:
+            continue
+        for nome in (e["nome"], e.get("nome_curto")):
+            n = _sem_acento_maiusculo(nome or "").strip()
+            if len(n) >= 4 and n in texto:
+                achadas.append((len(n), e))
+                break
+    tam = max((a[0] for a in achadas), default=0)
+    topo = [e for t, e in achadas if t == tam]
+    if len(topo) != 1:
+        return {"competencia": competencia, "entidade_id": None, "entidade": None}
+    return {"competencia": competencia, "entidade_id": topo[0]["id"], "entidade": _nome(topo[0])}
+
+
 def conferir_regularidade(conn, entidade_id: int, competencia: str) -> None:
     """Guardas baratas da regularidade; a rota as chama ANTES de gravar o PDF (gate Sol, achado 6)."""
     if not _COMPETENCIA.match(competencia or ""):
@@ -320,11 +353,23 @@ def gravar_certidao(conn, usuario_id: int, dados: dict, arquivo: str, sha256: st
 
 # --- painel, avisos, ZIP ----------------------------------------------------------------------
 
-def _regularidades_anexadas(conn, entidade_id: int, limite: int = 12) -> list[dict]:
+def _regularidades_anexadas(conn, entidade_id: int, limite: int = 24) -> list[dict]:
     """As ultimas regularidades anexadas da entidade (a mais recente primeiro): competencia e dia do anexo."""
     return [{"id": r["id"], "competencia": r["competencia"], "anexada_em": tempo.para_local(datetime.datetime.fromisoformat(r["criado_em"])).date().isoformat()}
             for r in conn.execute("SELECT id, competencia, criado_em FROM regularidades WHERE entidade_id=? "
                                   "ORDER BY competencia DESC, id DESC LIMIT ?", (entidade_id, limite))]
+
+
+FAMILIAS = {"mtpar": "MTPAR", "sinfra": "SINFRA", "ses": "SES", "prefeitura": "Prefeituras"}
+
+
+def _cobre_execucao(conn, contrato_id: int, g: dict | None) -> dict:
+    """A garantia vale ate' o fim da execucao (mais a folga do orgao)? {"cobre": True|False|None, "ate": data exigida}.
+    None quando falta a garantia ou o fim da execucao: a tela mostra "-" (a mesma conta do aviso da #294)."""
+    exigida = garantias.cobertura_exigida(conn, contrato_id)
+    if g is None or exigida is None:
+        return {"cobre": None, "ate": exigida}
+    return {"cobre": g["vigencia_fim"][:10] >= exigida, "ate": exigida}
 
 
 def painel(conn, hoje: datetime.date | None = None) -> dict:
@@ -365,9 +410,14 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
                          "consorcios": consorcios.get(e["id"], []),
                          "regularidades_anexadas": _regularidades_anexadas(conn, e["id"])})
     # Issue #65: garantia (com validade) por contrato ativo, junto das certidoes.
-    obras = [{"contrato_id": r["id"], "obra": nomes[r["id"]], "entidade_id": contratos.entidade_de(r),
-              "garantia": garantias.garantia(conn, r["id"], hoje)}
-             for r in conn.execute("SELECT id, entidade_id FROM contratos WHERE estado='ativo' ORDER BY nome_curto, id")]
+    obras = []
+    for r in conn.execute("SELECT c.id, c.entidade_id, c.orgao, c.cno, c.art, o.familia FROM contratos c "
+                          "LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.estado='ativo' ORDER BY c.nome_curto, c.id"):
+        g = garantias.garantia(conn, r["id"], hoje)
+        obras.append({"contrato_id": r["id"], "obra": nomes[r["id"]], "entidade_id": contratos.entidade_de(r),
+                      "orgao": FAMILIAS.get(r["familia"]) or (r["orgao"] or "").strip() or "Sem órgão",
+                      "garantia": g, "cobre_execucao": _cobre_execucao(conn, r["id"], g),
+                      "art": (r["art"] or "").strip() or None, "cno": (r["cno"] or "").strip() or None})
     return {"hoje": hoje.isoformat(), "empresas": empresas, "contratos": obras}
 
 

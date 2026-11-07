@@ -255,3 +255,21 @@ def test_aviso_de_garantia_leva_a_empresa_contratada(conn):
     conn.commit()
     g = [a for a in avisos.listar(conn, D(2026, 9, 23)) if a["tipo"] == "garantia_vencendo"]
     assert g and g[0]["entidade_id"] == 2
+
+
+def test_painel_traz_orgao_cobertura_da_execucao_art_e_cno_de_cada_obra(conn):
+    # issue #513: aba Garantias agrupa por orgao e diz se a garantia cobre o fim da execucao
+    oid = _orgao(conn, ["fgts"], [])
+    a = _contrato(conn, oid)
+    b = _contrato(conn, oid, entidade_id=1, documentos_json="{}")
+    sem = _contrato(conn, None)
+    conn.execute("UPDATE contratos SET execucao_fim='2027-06-30', garantia_apolice='AP-1', "
+                 "garantia_vigencia_fim='2027-12-31', cno='123', art='ART-9' WHERE id=?", (a,))
+    conn.execute("UPDATE contratos SET execucao_fim='2027-06-30', garantia_apolice='AP-2', "
+                 "garantia_vigencia_fim='2027-03-31' WHERE id=?", (b,))
+    conn.commit()
+    por = {o["contrato_id"]: o for o in documentos.painel(conn)["contratos"]}
+    assert por[a]["orgao"] == "SINFRA" and por[a]["cobre_execucao"] == {"cobre": True, "ate": "2027-06-30"}
+    assert (por[a]["cno"], por[a]["art"]) == ("123", "ART-9")
+    assert por[b]["cobre_execucao"] == {"cobre": False, "ate": "2027-06-30"} and por[b]["cno"] is None
+    assert por[sem]["cobre_execucao"]["cobre"] is None and por[sem]["orgao"] == "SINFRA"

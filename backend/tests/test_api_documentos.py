@@ -230,3 +230,39 @@ def test_pdf_corrompido_recusa_sem_o_nome_da_excecao(client_admin):
                           files={"arquivo": ("c.pdf", b"%PDF-1.4\n" + b"x" * 4096, "application/pdf")})
     assert r.status_code == 415
     assert r.json()["detail"] == "PDF inválido ou corrompido — envie o arquivo original emitido pelo órgão"
+
+
+# --- "Anexar PDF" unico (issue #513) ----------------------------------------------------------------------
+
+_FOLHA = "LOTUFO ENGENHARIA E CONSTRUÇÕES LTDA 4.001.00108/2026 Per:0 Chapa - Nome"
+
+
+def test_anexar_distingue_certidao_de_regularidade_pelo_conteudo(client_admin, monkeypatch):
+    # certidao: o mesmo caminho da leitura de hoje, marcada como certidao
+    _texto(monkeypatch, "trabalhista-alfa")
+    r = client_admin.post("/api/documentos/anexar/ler", files=_arq("qualquer.pdf")).json()
+    assert r["ok"] is True and r["documento"] == "certidao" and r["leitura"]["tipo"] == "trabalhista"
+    g = client_admin.post("/api/documentos/anexar", files=_arq("qualquer.pdf"))
+    assert g.status_code == 201 and g.json()["documento"] == "certidao" and g.json()["tipo"] == "trabalhista"
+    # folha do DP: o nome do arquivo nao importa, a competencia e a empresa vem do cabecalho
+    _texto(monkeypatch, _FOLHA)
+    r = client_admin.post("/api/documentos/anexar/ler", files=_arq("x.pdf")).json()
+    assert r["ok"] is True and r["documento"] == "regularidade"
+    assert (r["leitura"]["competencia"], r["leitura"]["entidade_id"]) == ("2026-08", 1)
+    g = client_admin.post("/api/documentos/anexar", files=_arq("x.pdf"))
+    assert g.status_code == 201, g.text
+    assert (g.json()["documento"], g.json()["competencia"]) == ("regularidade", "2026-08")
+    c = db.get_conn()
+    assert c.execute("SELECT entidade_id, competencia FROM regularidades").fetchall()[0][:] == (1, "2026-08")
+    c.close()
+    assert client_admin.post("/api/documentos/anexar", files=_arq("x.pdf")).status_code == 422   # mesmo arquivo
+
+
+def test_anexar_folha_de_empresa_desconhecida_cai_na_fila_humana_sem_gravar(client_admin, monkeypatch):
+    _texto(monkeypatch, "EMPRESA QUE NAO EXISTE LTDA 4.001.00108/2026 Per:0 Chapa - Nome")
+    r = client_admin.post("/api/documentos/anexar/ler", files=_arq()).json()
+    assert (r["ok"], r["motivo"], r["digitavel"]) == (False, "regularidade-sem-empresa", False)
+    assert client_admin.post("/api/documentos/anexar", files=_arq()).status_code == 422
+    c = db.get_conn()
+    assert c.execute("SELECT COUNT(*) FROM regularidades").fetchone()[0] == 0
+    c.close()

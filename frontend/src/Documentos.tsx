@@ -1,33 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconeAlerta } from "./icones";
+import { IconeAlerta, IconeCheck, IconeEnviarNuvem, IconeRelogio, IconeTraco } from "./icones";
+import LegendaCor from "./LegendaCor";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
-  certidoesOrdenadas, JANELA_DIAS, matriz, NOME_CURTO, resumoEmpresa, situacaoCertidao,
-  situacaoGarantia, type EmpresaDoc, type Nivel, type ObraDoc,
+  certidoesVencendo, chipCertidao, competenciasRegularidade, empresasComFolha, estadosRegularidade, garantiasVencidas,
+  obrasPorOrgao, regularidadesFaltando, situacaoGarantia, type CorChip, type EmpresaDoc, type ObraDoc,
 } from "./matriz";
 import { substituir, trocarBusca, type Busca } from "./rota";
-import { fmtDataPura } from "./tempo";
-import { AnexarCertidoes, CnpjCopiar, Pilula, Ponto } from "./documentosComum";
-import { useCopiarCnpj, usePainel } from "./documentosDados";
-import Selo from "./Selo";
+import { fmtCompetencia, fmtDataPura } from "./tempo";
+import { AnexarCertidoes, type AnexarRef } from "./documentosComum";
+import { usePainel } from "./documentosDados";
 
-/* Documentos (#161, redesenho aprovado em 16/10/2026): UM CARTAO POR EMPRESA, com a situacao geral, um ponto por
- * certidao e a garantia que vence; o cartao inteiro leva a pagina da empresa (DocumentosEmpresa.tsx). Quem tem
- * pendencia vem primeiro. O que e' exigido vem do cadastro do orgao; a tela so' mostra o que o servidor respondeu
- * (`documentos.painel`), sem recalcular regra. Filtro na URL: ?pendentes=1.
+/* Documentos (#513, redesenho aprovado em 07/11/2026): tres abas com contador, uma linha por empresa (ou por obra)
+ * e chips coloridos. Certidoes (dias que faltam), Regularidade mensal (os seis ultimos meses do DP) e Garantias
+ * (por orgao). O "Anexar PDF" do topo recebe qualquer PDF; o servidor decide pelo conteudo se e' certidao ou
+ * regularidade (`/api/documentos/anexar`). A regra (o que e' exigido, a situacao) e' do servidor
+ * (`documentos.painel`); a tela so' mostra. Aba na URL: ?aba=regularidade|garantias.
  */
-
-// Garantia que pede algo da empresa, como selo do cartao ("Garantia de Obra X: vence em 20 dias").
-function avisosDeObras(e: EmpresaDoc, contratos: ObraDoc[]): { nivel: Nivel; texto: string }[] {
-  const out: { nivel: Nivel; texto: string }[] = [];
-  for (const k of contratos) {
-    if (k.entidade_id !== e.entidade_id) continue;
-    const g = situacaoGarantia(k.garantia, k.garantia ? fmtDataPura(k.garantia.vigencia_fim) : "");
-    if (g.nivel === "acao" || g.nivel === "atencao") out.push({ nivel: g.nivel, texto: `Garantia de ${k.obra}: ${g.texto}` });
-  }
-  return out;
-}
 
 /** A janela do ZIP: a data vale para todas e sai um ZIP por empresa marcada. */
 function JanelaZip({ empresas, hoje, aoFechar }: { empresas: EmpresaDoc[]; hoje: string; aoFechar: () => void }) {
@@ -108,122 +98,234 @@ function JanelaZip({ empresas, hoje, aoFechar }: { empresas: EmpresaDoc[]; hoje:
   );
 }
 
-function Cartao({ e, contratos, copia, aoCopiar }: {
-  e: EmpresaDoc; contratos: ObraDoc[];
-  copia: { entidade_id: number; ok: boolean } | null; aoCopiar: () => void;
+const ABAS = [
+  { id: "certidoes", rotulo: "Certidões", sufixo: (n: number) => `${n} vencendo` },
+  { id: "regularidade", rotulo: "Regularidade mensal", sufixo: (n: number) => `${n} faltando` },
+  { id: "garantias", rotulo: "Garantias", sufixo: (n: number) => `${n} ${n === 1 ? "vencida" : "vencidas"}` },
+] as const;
+type IdAba = (typeof ABAS)[number]["id"];
+
+const ICONE_ESTADO = { anexada: IconeCheck, faltando: IconeTraco, aguardando: IconeRelogio } as const;
+const COR_ESTADO = { anexada: "feito", faltando: "breve", aguardando: "andamento" } as const;
+const TEXTO_ESTADO = { anexada: "anexada", faltando: "faltando", aguardando: "aguardando o DP" } as const;
+
+function Chip({ cor, rotulo, valor, data, href, titulo }: {
+  cor: CorChip; rotulo: string; valor: string; data?: string; href?: string; titulo?: string;
 }) {
-  const r = resumoEmpresa(e, contratos);
-  const garantias = avisosDeObras(e, contratos);
+  const corpo = (
+    <>
+      <span className="doc-chip__rotulo">{rotulo}</span>
+      <span className="doc-chip__valor"><b>{valor}</b>{data ? <small>{data}</small> : null}</span>
+    </>
+  );
+  const classe = `doc-chip doc-chip--${cor}`;
+  return href
+    ? <a className={classe} href={href} target="_blank" rel="noreferrer" title={titulo}>{corpo}</a>
+    : <div className={classe} title={titulo}>{corpo}</div>;
+}
+
+const PAPEL: Record<string, string> = { lotufo: "própria", consorcio: "consórcio", consorciada: "consorciada" };
+
+function AbaCertidoes({ empresas, podeBaixar, aoZip }: {
+  empresas: EmpresaDoc[]; podeBaixar: boolean; aoZip: (e: EmpresaDoc) => void;
+}) {
   return (
-    <article className="cartao emp-cartao" id={`emp-${e.entidade_id}`}>
-      <div className="emp-cartao__cabeca">
-        <h2 className="emp-cartao__nome">
-          <Link para={{ tela: "documentos-empresa", id: e.entidade_id }}>{e.entidade}</Link>
-        </h2>
-        <CnpjCopiar e={e} copia={copia} aoCopiar={aoCopiar} />
-      </div>
-      <Pilula nivel={r.nivel} texto={r.texto} />
-      <ul className="doc-pontos" aria-label="Certidões">
-        {certidoesOrdenadas(e).map(l => {
-          const s = situacaoCertidao(l, l.certidao ? fmtDataPura(l.certidao.validade) : "");
+    <ul className="doc-linhas" aria-label="Certidões por empresa">
+      {empresas.map(e => (
+        <li key={e.entidade_id} className="doc-linha">
+          <div className="doc-linha__nome">
+            <Link para={{ tela: "documentos-empresa", id: e.entidade_id }}>{e.entidade}</Link>
+            <span>{PAPEL[e.papel] ?? e.papel}</span>
+            {podeBaixar && (
+              <button type="button" className="doc-linha__zip" onClick={() => aoZip(e)}
+                aria-label={`ZIP das certidões vigentes de ${e.entidade}`}>ZIP das vigentes</button>
+            )}
+          </div>
+          <div className="doc-chips doc-chips--5">
+            {CHIPS_CERTIDAO.map(chave => {
+              const l = e.certidoes.find(x => x.chave === chave);
+              const c = chipCertidao(l, l?.certidao ? fmtDataPura(l.certidao.validade) : "");
+              return (
+                <Chip key={chave} cor={c.cor} rotulo={NOME_CHIP[chave]} valor={c.valor} data={c.data}
+                  href={l?.certidao && c.cor !== "neutro" ? `/api/certidoes/${l.certidao.id}/arquivo` : undefined}
+                  titulo={l?.certidao ? "Abrir o PDF (o histórico está na página da empresa)" : undefined} />
+              );
+            })}
+            {/* falência: só onde exigida */}
+            {e.certidoes.some(l => l.chave === "falencia" && l.exigida) && (() => {
+              const l = e.certidoes.find(x => x.chave === "falencia")!;
+              const c = chipCertidao(l, l.certidao ? fmtDataPura(l.certidao.validade) : "");
+              return <Chip cor={c.cor} rotulo="Falência" valor={c.valor} data={c.data}
+                href={l.certidao ? `/api/certidoes/${l.certidao.id}/arquivo` : undefined} />;
+            })()}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const CHIPS_CERTIDAO = ["federal", "fgts", "trabalhista", "estadual", "municipal"] as const;
+const NOME_CHIP: Record<string, string> = { federal: "Federal", fgts: "FGTS", trabalhista: "CNDT", estadual: "Estadual", municipal: "Municipal" };
+
+function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: string }) {
+  const comFolha = empresasComFolha(empresas);
+  const semFolha = empresas.filter(e => !comFolha.includes(e));
+  const meses = competenciasRegularidade(hoje);
+  const ultimoMes = meses[meses.length - 1].competencia;
+  const seguinte = `${ultimoMes.slice(5, 7) === "12" ? String(Number(ultimoMes.slice(0, 4)) + 1) : ultimoMes.slice(0, 4)}-${String(Number(ultimoMes.slice(5, 7)) % 12 + 1).padStart(2, "0")}`;
+  return (
+    <>
+      {comFolha.length === 0 && <p className="campo__nota">Nenhuma empresa com folha.</p>}
+      <ul className="doc-linhas" aria-label="Regularidade mensal por empresa">
+        {comFolha.map(e => {
+          const ultima = (e.regularidades_anexadas ?? [])[0];
           return (
-            <li key={l.chave}>
-              <Ponto nivel={s.nivel} />{NOME_CURTO[l.chave] ?? l.tipo}<span className="sr-only">: {s.texto}</span>
+            <li key={e.entidade_id} className="doc-linha">
+              <div className="doc-linha__nome">
+                <Link para={{ tela: "documentos-empresa", id: e.entidade_id, aba: "regularidade" }}>{e.entidade}</Link>
+                <span>{PAPEL[e.papel] ?? e.papel}</span>
+              </div>
+              <div className="doc-chips doc-chips--6">
+                {estadosRegularidade(e, hoje).map(x => {
+                  const Icone = ICONE_ESTADO[x.estado];
+                  const nome = `${fmtCompetencia(x.competencia)}: ${TEXTO_ESTADO[x.estado]}`;
+                  const interior = (
+                    <>
+                      <span className="doc-chip__rotulo">{fmtCompetencia(x.competencia)}</span>
+                      <Icone className="doc-chip__icone" titulo={nome} />
+                    </>
+                  );
+                  return x.id !== undefined
+                    ? <a key={x.competencia} className={`doc-chip doc-chip--icone doc-chip--${COR_ESTADO[x.estado]}`}
+                        href={`/api/documentos/regularidades/${x.id}/arquivo`} target="_blank" rel="noreferrer">{interior}</a>
+                    : <div key={x.competencia} className={`doc-chip doc-chip--icone doc-chip--${COR_ESTADO[x.estado]}`}>{interior}</div>;
+                })}
+              </div>
+              <p className="doc-linha__ultima">
+                {ultima ? `última: ${fmtCompetencia(ultima.competencia)}, anexada em ${fmtDataPura(ultima.anexada_em)}` : "—"}
+              </p>
             </li>
           );
         })}
       </ul>
-      {garantias.length > 0 && (
-        <div className="emp-cartao__extra">
-          {garantias.map(x => (
-            <p key={x.texto}><Selo classe={x.nivel === "acao" ? "selo--acao" : "selo--atencao"}>{x.texto}</Selo></p>
-          ))}
-        </div>
+      {semFolha.length > 0 && <p className="doc-nota">Não exigida: {semFolha.map(e => e.entidade).join(", ")}</p>}
+      <p className="doc-nota">{fmtCompetencia(ultimoMes)} esperada a partir de 10/{seguinte.slice(5, 7)}.</p>
+    </>
+  );
+}
+
+const OBRAS_POR_GRUPO = 5;
+
+function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
+  const [tudo, setTudo] = useState(false);
+  const vistas = tudo ? obras : obras.slice(0, OBRAS_POR_GRUPO);
+  return (
+    <section className="doc-grupo" aria-label={`Garantias de ${orgao}`}>
+      <h2 className="doc-grupo__cabeca">{orgao} <span>· {obras.length} {obras.length === 1 ? "obra" : "obras"}</span></h2>
+      <ul className="doc-linhas">
+        {vistas.map(o => {
+          const g = o.garantia;
+          const sg = g ? situacaoGarantia(g, fmtDataPura(g.vigencia_fim)) : null;
+          const corValida: CorChip = !sg ? "critico" : sg.nivel === "acao" ? "critico" : sg.nivel === "atencao" ? "breve"
+            : sg.nivel === "ok" ? "feito" : "neutro";
+          const cob = o.cobre_execucao;
+          return (
+            <li key={o.contrato_id} className="doc-linha">
+              <div className="doc-linha__nome"><span className="doc-linha__obra">{o.obra}</span></div>
+              <div className="doc-chips doc-chips--5">
+                <Chip cor={g?.apolice ? "feito" : "critico"} rotulo="Apólice" valor={g?.apolice || "sem registro"} />
+                <Chip cor={corValida} rotulo="Válida até" valor={g ? fmtDataPura(g.vigencia_fim) : "—"}
+                  data={sg && sg.nivel !== "ok" && sg.nivel !== "neutro" ? sg.texto : undefined} />
+                <Chip cor={cob?.cobre === true ? "feito" : cob?.cobre === false ? "critico" : "neutro"} rotulo="Cobre a execução"
+                  valor={cob?.cobre === true ? "sim" : cob?.cobre === false && cob.ate ? `não, até ${fmtDataPura(cob.ate)}` : "—"} />
+                <Chip cor={o.art ? "feito" : "neutro"} rotulo="ART" valor={o.art ?? "—"} />
+                <Chip cor={o.cno ? "feito" : "neutro"} rotulo="CNO" valor={o.cno ?? "—"} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {obras.length > OBRAS_POR_GRUPO && (
+        <button type="button" className="doc-grupo__mais" onClick={() => setTudo(t => !t)}>
+          {tudo ? "mostrar menos" : `+${obras.length - OBRAS_POR_GRUPO} obras`}
+        </button>
       )}
-    </article>
+    </section>
   );
 }
 
 export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; busca?: Busca }) {
-  const soPendentes = busca.pendentes === "1";
   const podeEditar = usuario.perfil !== "diretoria";
   const { painel, erro, carregar } = usePainel();
   const [anuncio, setAnuncio] = useState("");
-  const [zip, setZip] = useState(false);
-  const { copiar, copia } = useCopiarCnpj(setAnuncio);
+  const [zip, setZip] = useState<EmpresaDoc | null>(null);
+  const anexar = useRef<AnexarRef>(null);
+  const aba: IdAba = busca.aba === "regularidade" || busca.aba === "garantias" ? busca.aba : "certidoes";
   // Link salvo da tela antiga (/documentos?empresa=N): abre a pagina da empresa, trocando o endereco no lugar.
   const empresaAntiga = /^[1-9][0-9]{0,14}$/.test(busca.empresa ?? "") ? Number(busca.empresa) : null;
   useEffect(() => {
     if (empresaAntiga !== null) substituir({ tela: "documentos-empresa", id: empresaAntiga }, { semBusca: true });
   }, [empresaAntiga]);
 
-  // A ordem (e, com ?pendentes=1, quem aparece) e' a da carga e a de cada troca de filtro; o que muda depois de
-  // gravar fica no lugar ate' a pagina recarregar, para a pessoa ver o resultado no cartao em que estava.
-  const carregado = painel !== null;
-  const ordem = useMemo(() => painel ? matriz(painel.empresas, soPendentes, painel.contratos ?? []).map(e => e.entidade_id) : [],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [carregado, soPendentes]);
-
-  const empresas = painel?.empresas ?? [];
-  const porId = new Map(empresas.map(e => [e.entidade_id, e]));
-  const lista = ordem.map(id => porId.get(id)).filter((e): e is EmpresaDoc => e !== undefined);
+  const empresas = useMemo(() => painel?.empresas ?? [], [painel]);
+  const obras = painel?.contratos ?? [];
+  const hoje = painel?.hoje ?? "";
+  const contadores: Record<IdAba, number> = painel ? {
+    certidoes: certidoesVencendo(empresas),
+    regularidade: regularidadesFaltando(empresas, hoje),
+    garantias: garantiasVencidas(obras),
+  } : { certidoes: 0, regularidade: 0, garantias: 0 };
 
   return (
     <div className="pagina">
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
-      {/* sempre montada: o Copiar aparece para todos os perfis e anuncia aqui */}
       <p className="sr-only" role="status">{anuncio}</p>
 
       <div className="doc-topo">
+        <LegendaCor />
         <div className="doc-topo__acoes">
-          <label className="doc-chave">
-            <input type="checkbox" checked={soPendentes}
-              onChange={ev => trocarBusca({ pendentes: ev.target.checked ? "1" : null })} />
-            <span className="doc-chave__trilho" aria-hidden="true" />
-            Só as com pendência
-          </label>
-          <button type="button" className="btn btn--primario" disabled={!painel || empresas.length === 0} onClick={() => setZip(true)}>
-            ZIP das certidões vigentes
-          </button>
+          {podeEditar && (
+            <button type="button" className="btn btn--primario" disabled={!painel} onClick={() => anexar.current?.escolher()}>
+              <IconeEnviarNuvem className="icone" />Anexar PDF
+            </button>
+          )}
         </div>
       </div>
 
-      <p className="doc-legenda" aria-label="Legenda dos pontos">
-        <span><Ponto nivel="ok" />em dia</span>
-        <span><Ponto nivel="atencao" />vence em até {JANELA_DIAS} dias</span>
-        <span><Ponto nivel="acao" />vencida ou falta</span>
-        <span><Ponto nivel="neutro" />não exigida ou não se aplica</span>
-      </p>
+      {painel && (
+        <div className="doc-abas" role="tablist" aria-label="Documentos">
+          {ABAS.map(a => (
+            <button key={a.id} type="button" role="tab" id={`aba-${a.id}`} aria-selected={aba === a.id}
+              aria-controls="painel-documentos" className="doc-aba"
+              onClick={() => trocarBusca({ aba: a.id === "certidoes" ? null : a.id })}>
+              {a.rotulo}{contadores[a.id] > 0 && <> · <span className="info--critico">{a.sufixo(contadores[a.id])}</span></>}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!painel && !erro && <p className="campo__nota">Carregando…</p>}
-      {painel && empresas.length === 0 && (
+      {painel && empresas.length === 0 && aba !== "garantias" && (
         <div className="vazio"><p className="vazio__titulo">Nenhuma empresa.</p></div>
       )}
-      {painel && empresas.length > 0 && (
-        <section aria-label="Empresas">
-          {lista.length === 0 ? (
-            <div className="cartao vazio">
-              <p className="vazio__titulo">Nenhuma empresa com pendência.</p>
-            </div>
-          ) : (
-            <div className="emp-grade">
-              {lista.map(e => (
-                <Cartao key={e.entidade_id} e={e} contratos={painel.contratos ?? []} copia={copia}
-                  aoCopiar={() => void copiar(e.entidade_id, e.cnpj, e.entidade)} />
-              ))}
-            </div>
+      {painel && (
+        <div id="painel-documentos" role="tabpanel" aria-labelledby={`aba-${aba}`} className="doc-painel-aba">
+          {aba === "certidoes" && <AbaCertidoes empresas={empresas} podeBaixar={true} aoZip={setZip} />}
+          {aba === "regularidade" && <AbaRegularidade empresas={empresas} hoje={hoje} />}
+          {aba === "garantias" && (
+            obras.length === 0 ? <div className="vazio"><p className="vazio__titulo">Nenhuma obra ativa.</p></div>
+              : obrasPorOrgao(obras).map(g => <GrupoGarantias key={g.orgao} orgao={g.orgao} obras={g.obras} />)
           )}
-        </section>
+        </div>
       )}
 
-      {painel && empresas.length > 0 && podeEditar && (
-        <section aria-labelledby="titulo-anexar" className="pilha">
-          <h2 className="doc-secao-titulo" id="titulo-anexar">Anexar certidões de qualquer empresa</h2>
-          <AnexarCertidoes empresas={empresas} aoGravar={carregar} anunciar={setAnuncio} />
-        </section>
+      {/* a fila de leitura do "Anexar PDF" (fica montada para o botao do topo sempre ter onde abrir) */}
+      {painel && podeEditar && (
+        <AnexarCertidoes ref={anexar} empresas={empresas} aoGravar={carregar} anunciar={setAnuncio} unificado semZona />
       )}
 
-      {zip && painel && <JanelaZip empresas={empresas} hoje={painel.hoje} aoFechar={() => setZip(false)} />}
+      {zip && painel && <JanelaZip empresas={[zip]} hoje={painel.hoje} aoFechar={() => setZip(null)} />}
     </div>
   );
 }
