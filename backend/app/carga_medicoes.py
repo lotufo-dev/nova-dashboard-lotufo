@@ -478,6 +478,13 @@ def _conferir_correcoes(conn, linhas: list[dict], existentes: dict) -> None:
                                           else f" em {_fmt(gravado)}: ponha esse valor ou deixe o valor pedido "
                                                "vazio no CSV"))
                 continue
+        if (li["categoria"] in ("valor diferente", "correção") and d["valor_aprovado"] is not None
+                and d["valor_aprovado"] != existentes[(d["numero"], d["tipo"])]["valor_atestado_centavos"]
+                and medicoes.tem_boletim(conn, li["medicao_id"])):
+            # #471: com boletim registrado, o aprovado so' muda por boletim novo, com o documento (na tela,
+            # `medicoes.definir_valor` recusa com APROVADO_PELO_BOLETIM, #284); a gravacao recusa pelo mesmo ensaio
+            _virar(li, "conflito", "o aprovado vem do boletim do órgão: registre um boletim novo pela tela")
+            continue
         m = existentes.get((d["numero"], d["tipo"])) if d else None
         escreve = li["categoria"] in ("cancelamento", "correção") or (li["categoria"] == "valor diferente" and (
             (d["valor_aprovado"] is not None and d["valor_aprovado"] != m["valor_atestado_centavos"])
