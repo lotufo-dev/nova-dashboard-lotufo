@@ -761,4 +761,6 @@ def test_texto_da_carta_legivel_na_tela_e_guardado_depois_do_envio(api):
                                               "confirmadas": [x["mensagem"] for x in pv["pendencias"]]})
     assert r.status_code == 200, r.text
     d = cl.get(f"/api/protocolos/{pid}").json()
-    assert d["situacao"] == "enviado" and d["corpo_carta"] == editado
+    # enviado, a tela mostra o texto que foi ao orgao: no oficio so' de execucao, sem o paragrafo do termo
+    assert d["situacao"] == "enviado" and "sempre" in d["corpo_carta"]
+    assert "{apostilamento}" not in d["corpo_carta"] and protocolo.MARCADOR_NA_TELA not in d["corpo_carta"]

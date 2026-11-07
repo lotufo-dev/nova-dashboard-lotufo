@@ -438,8 +438,7 @@ def test_termo_aplicado_depois_da_montagem_bloqueia_ate_montar_de_novo(cenario):
     r = protocolo.montar(c, ids["uid"], pid)                               # como a tela de envio: corpo vazio
     assert "Termo de Apostilamento nº 001/2025/03/02" in _corrido(_textos(r["arquivo"])[0])
     d = protocolo.detalhe(c, pid)
-    # issue #448: o texto padrao usado fica gravado, com o marcador (nunca a frase)
-    assert d["corpo_carta"] == protocolo.corpo_padrao(c, pid) and protocolo.previa_envio(c, [pid])["bloqueio"] is None
+    assert d["corpo_carta"] is None and protocolo.previa_envio(c, [pid])["bloqueio"] is None
 
 
 def test_termo_corrigido_depois_da_montagem_bloqueia_e_a_nova_montagem_cita_o_novo(cenario):
@@ -600,7 +599,7 @@ def test_texto_sem_o_campo_do_termo_nao_monta(cenario):
         protocolo.montar(c, ids["uid"], pid)
     texto = _carta_montada(c, ids, pid, refazer_texto=True)
     assert "Termo de Apostilamento nº 001/2025/03/09" in texto and "001/2025/03/02" not in texto
-    assert protocolo.detalhe(c, pid)["corpo_carta"] == marcado          # issue #448: o padrao usado fica gravado
+    assert protocolo.detalhe(c, pid)["corpo_carta"] is None
     # o editado com o campo vale, e fica gravado com o marcador, nunca com a frase
     texto = _carta_montada(c, ids, pid, corpo=marcado.replace("Ficamos à disposição.", "Ficamos à disposição, sempre."))
     assert "Termo de Apostilamento nº 001/2025/03/09" in texto and "sempre" in texto
@@ -631,8 +630,7 @@ def test_mapa_do_pacote_so_compara_quando_o_texto_cita_o_termo(cenario):
     assert protocolo.previa_envio(c, [pid])["bloqueio"] is None                     # (D) nada muda no oficio
     _cartas(c, com_campo)                                                             # o Leo poe o campo no texto
     assert protocolo.previa_envio(c, [pid])["bloqueio"] == protocolo.APOSTILAMENTO_MUDOU
-    # issue #448: o padrao de antes ficou gravado; a tela de envio (`refazer_texto`) o troca pelo padrao com o campo
-    assert FRASE in _carta_montada(c, ids, pid, refazer_texto=True)
+    assert FRASE in _carta_montada(c, ids, pid)
     assert protocolo.previa_envio(c, [pid])["bloqueio"] is None
     c.execute("UPDATE protocolos SET montado_apostilamentos=NULL WHERE id=?", (pid,))   # montado antes da 060
     c.commit()
@@ -896,17 +894,34 @@ def test_texto_editado_a_mao_nunca_e_trocado_pelo_padrao_sem_aviso(cenario):
 
 
 def test_texto_enviado_com_o_padrao_fica_guardado_em_toda_familia(cenario):
-    """Issue #448 (item 3): o protocolo montado com o texto padrao guarda o texto usado (com o marcador), para a tela
-    mostrar o "Texto da carta" depois do envio e o banco nao perder o que foi ao orgao."""
+    """Issue #448 (itens 2 e 3): o protocolo enviado com o texto padrao guarda o texto que foi ao orgao (com o
+    marcador; antes do envio o padrao se refaz com os dados de agora), e a tela o mostra com a frase do termo enviada,
+    nunca vazio nem com o marcador."""
     c, ids = cenario
     _data_base_e_termo(c, ids["mtpar"])
-    for obra, etapa, mid, oficio in (("mtpar", "unico", ids["mtpar_reaj"], "302"),
-                                     ("mtpar", "unico", ids["mtpar_exec"], "301"),
-                                     ("sinfra", "medicao", ids["sinfra_exec"], "310")):
-        pid = protocolo.criar(c, ids["uid"], ids[obra], etapa, [mid], oficio)
+    for mid, oficio, frase in ((ids["mtpar_reaj"], "302", FRASE), (ids["mtpar_exec"], "301", None)):
+        pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [mid], oficio)
         padrao = protocolo.corpo_padrao(c, pid)
-        protocolo.montar(c, ids["uid"], pid)
-        assert protocolo._linha(c, pid)["corpo_carta"] == padrao, obra
+        protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+        assert protocolo._linha(c, pid)["corpo_carta"] is None
+        pv = protocolo.previa_envio(c, [pid])
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"],
+                         confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+        p = protocolo._linha(c, pid)
+        assert (p["situacao"], p["corpo_carta"]) == ("enviado", padrao)
+        tela = protocolo.texto_da_tela(p)
+        assert tela and "{" not in tela and protocolo.MARCADOR_NA_TELA not in tela
+        assert (frase in _corrido(tela)) if frase else "Apostilamento" not in tela
+
+
+def test_citacao_do_termo_escrita_diferente_nao_monta(cenario):
+    """Issue #448 (code-review): o marcador legivel escrito errado nao vira campo; nao pode sair cru no oficio."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    corpo = protocolo.corpo_padrao(c, pid).replace("{apostilamento}", "[citacao do termo de apostilamento]")
+    with pytest.raises(ValueError, match="escrita diferente"):
+        protocolo.montar(c, ids["uid"], pid, corpo=corpo)
+    assert protocolo._linha(c, pid)["situacao"] == "rascunho"
 
 
 def test_reajuste_sem_termo_nao_pede_nova_assinatura(cenario):
@@ -928,7 +943,8 @@ def test_guid_entre_chaves_do_link_do_sharepoint_nao_e_campo_sem_dado(cenario):
     link = ("https://lotufo.sharepoint.com/:x:/r/sites/x/_layouts/15/Doc.aspx?sourcedoc={6C5B1A2E-0F3D-4C1B-9A8E-"
             "1234567890AB}&file=Planilha.xlsx e {ABCDEF12-0F3D-4C1B-9A8E-1234567890AB}")
     assert protocolo.campos_sem_dado(f"Planilha: {link}") == []
-    assert protocolo.campos_sem_dado("Ver {período} e {obra2}") == ["{obra2}", "{período}"]
+    assert protocolo.campos_sem_dado("Ver {período}, {obra2}, {oficio-barra} e {data.base}") == [
+        "{data.base}", "{obra2}", "{oficio-barra}", "{período}"]
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
     protocolo.montar(c, ids["uid"], pid, corpo=f"{protocolo.corpo_padrao(c, pid)}\n\nPlanilha: {link}")
     assert protocolo._linha(c, pid)["situacao"] == "montado"

@@ -74,9 +74,9 @@ def _detalhe(conn, pid: int) -> dict:
         except ValueError as e:
             d["corpo_padrao"], d["erro_carta"] = None, str(e)
     # issue #448: a tela mostra o marcador {apostilamento} como texto legivel (e o devolve assim ao montar)
-    for k in ("corpo_carta", "corpo_padrao"):
-        if k in d:
-            d[k] = protocolo.para_tela(d[k])
+    d["corpo_carta"] = protocolo.texto_da_tela(d)
+    if "corpo_padrao" in d:
+        d["corpo_padrao"] = protocolo.para_tela(d["corpo_padrao"])
     return d
 
 

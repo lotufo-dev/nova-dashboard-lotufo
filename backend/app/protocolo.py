@@ -46,8 +46,13 @@ MARCADOR_APOSTILAMENTO = "{apostilamento}"
 MARCADOR_NA_TELA = "[citação do termo de apostilamento]"
 TEXTO_SEM_O_TERMO = ("O texto da carta não cita o termo de apostilamento de agora: na seção Protocolo, escreva "
                      f"{MARCADOR_NA_TELA} no parágrafo em que o ofício cita o termo e monte o pacote de novo")
-# Issue #448: o nome do campo comeca por letra; o GUID entre chaves do link do SharePoint ({6C5B...-...}) nao e' campo
-_CAMPO_SEM_DADO = re.compile(r"\{[^\W\d]\w*\}")
+# Issue #448: o GUID entre chaves do link do SharePoint (sourcedoc={6C5B...-...}) nao e' campo; o resto continua
+_GUID = r"[0-9A-Fa-f]{8}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{4}-?[0-9A-Fa-f]{12}"
+_CAMPO_SEM_DADO = re.compile(r"\{(?!" + _GUID + r"\})[^{}\s]+\}")
+# Issue #448: o marcador legivel escrito diferente (sem acento, com erro) nao e' convertido: sairia cru no oficio
+_MARCADOR_TORTO = re.compile(r"\[[^\]\n]*apostilamento[^\]\n]*\]", re.IGNORECASE)
+MARCADOR_TORTO = (f"O texto da carta tem a citação do termo escrita diferente: use exatamente {MARCADOR_NA_TELA} "
+                  "(ou apague-a)")
 NUMERO_ORGAO_VAZIO = "Informe o número do protocolo no órgão"
 # A-13 (testes de quebra 10/10/2026): o link vira <a href> no e-mail oficial ao orgao; so' o OneDrive e o SharePoint
 # da Lotufo. Comparacao exata do host: "...sharepoint.com.evil.test" nao passa. Issue #118: os hosts vem de
@@ -481,6 +486,16 @@ def para_tela(texto: str | None) -> str | None:
     return texto.replace(MARCADOR_APOSTILAMENTO, MARCADOR_NA_TELA) if texto else texto
 
 
+def texto_da_tela(p: dict) -> str | None:
+    """Issue #448: o "Texto da carta" do protocolo como a tela mostra. Enviado, com a frase do termo que foi ao orgao
+    (a do mapa gravado na montagem); antes disso, com o marcador legivel."""
+    if p["situacao"] != "enviado" or not p.get("corpo_carta"):
+        return para_tela(p.get("corpo_carta"))
+    gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
+    frase = frase_do_apostilamento(gravado["apostilamentos"]) if gravado and gravado.get("cita") else ""
+    return _renderizar(p["corpo_carta"], frase)
+
+
 def da_tela(texto: str | None) -> str | None:
     """Issue #448: o texto que veio da tela, com o marcador legivel convertido de volta em {apostilamento}."""
     return texto.replace(MARCADOR_NA_TELA, MARCADOR_APOSTILAMENTO) if texto else texto
@@ -604,9 +619,9 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     if "certidoes" in e.partes and (vencidas := certidoes_vencidas(conn, p, hoje)):
         raise ValueError("Certidão vencida — renove antes de montar: " + "; ".join(vencidas))
     # Corpo vazio nao e' carta: vale o texto ja' gravado ou, na falta dele, o padrao da familia.
-    # Issue #278: o texto (padrao, gravado ou editado) guarda o marcador {apostilamento}, nunca a frase do termo; o texto
-    # usado fica sempre gravado (issue #448: o enviado com o padrao tambem). A frase sai de `aps`, lido uma vez aqui, e
-    # vai no corpo, no assunto e no mapa do pacote.
+    # Issue #278: o texto (padrao, gravado ou editado) guarda o marcador {apostilamento}, nunca a frase do termo; so' o
+    # editado fica gravado (o padrao se refaz com os dados de agora). O texto usado vai na auditoria da montagem, e o
+    # envio o grava (issue #448). A frase sai de `aps`, lido uma vez aqui, e vai no corpo, no assunto e no mapa.
     padrao = corpo_padrao(conn, protocolo_id)
     recebido = (corpo or "").strip()
     base = recebido or p["corpo_carta"] or padrao
@@ -619,6 +634,9 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
         if recebido or not refazer_texto or _renderizar(base, "") != _renderizar(padrao, ""):
             raise ValueError(TEXTO_SEM_O_TERMO)
         base = padrao
+    if _MARCADOR_TORTO.search(base):
+        raise ValueError(MARCADOR_TORTO)
+    editado = None if base.strip() == padrao.strip() else base
     frase = frase_do_apostilamento(aps)
     cita = MARCADOR_APOSTILAMENTO in base or MARCADOR_APOSTILAMENTO in (_texto(textos, "carta_assunto", p) or "")
     a_assinar = _carta(conn, p, _renderizar(base, frase), hoje, frase)
@@ -666,12 +684,12 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
         conn.execute("UPDATE protocolos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
                      "montado_em=datetime('now'), assinado_arquivo=NULL, assinado_sha256=NULL, conferencia=NULL, "
                      "situacao='montado', montado_frcs=?, montado_apostilamentos=? WHERE id=?",
-                     (base, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote),
+                     (editado, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote),
                       # o mapa do que foi de fato renderizado: so' o texto que usa a frase compara depois
                       json.dumps({"cita": cita, "apostilamentos": aps if cita else []})
                       if familia in FAMILIAS_OFICIO_REAJUSTE else None, protocolo_id))
         auditoria.registrar(conn, usuario_id, "protocolo.montar", "protocolo", protocolo_id, None,
-                            {"sha256": sha, "paginas": n, "tamanho": len(pdf)})
+                            {"sha256": sha, "paginas": n, "tamanho": len(pdf), "corpo": base})   # issue #448
     return {"arquivo": rel, "sha256": sha, "paginas": n, "tamanho": len(pdf), "nome": nome_arquivo(conn, p)}
 
 
@@ -868,6 +886,13 @@ def motivos_bloqueio(conn, p: dict, hoje: datetime.date) -> list[str]:
 
 # Issue #448: os motivos que montar o pacote de novo resolve (a FRC vigente e o termo de agora entram na montagem)
 MOTIVOS_DE_MONTAR_DE_NOVO = (*PACOTE_SEM_A_FRC_VIGENTE, APOSTILAMENTO_MUDOU)
+
+
+def _texto_montado(conn, protocolo_id: int) -> str | None:
+    """Issue #448: o texto da carta da ultima montagem (com o marcador), da auditoria."""
+    r = conn.execute("SELECT depois FROM audit_log WHERE acao='protocolo.montar' AND entidade='protocolo' "
+                     "AND entidade_id=? ORDER BY id DESC LIMIT 1", (str(protocolo_id),)).fetchone()
+    return json.loads(r["depois"]).get("corpo") if r and r["depois"] else None
 
 
 def bloqueio(conn, p: dict, hoje: datetime.date) -> str | None:
@@ -1286,6 +1311,7 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
             raise Bloqueio(" · ".join(dict.fromkeys(agora)))
         _conferir_anexos([{"nome": n, "tamanho": len(b)} for n, b, _ in rotulados], pv["anexos"])
         anexos = [(n, b) for n, b, _ in rotulados]
+        texto_enviado = {x["id"]: _texto_montado(conn, x["id"]) for x in ps}      # issue #448: lido antes do e-mail
         envio_id = correio.enviar_e_registrar(conn, usuario, "protocolo", para,
                                               [x.strip() for x in copia if x.strip()], assunto, _html(corpo),
                                               anexos, cco=cco)
@@ -1305,8 +1331,10 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
     with correio.depois_do_envio(assunto, para, envio_id), db.mutacao(conn):
         for x in ps:
             envio_reserva.liberar(conn, "protocolos", x["id"])
-            conn.execute("UPDATE protocolos SET envio_id=?, situacao='enviado', justificativa=? WHERE id=?",
-                         (envio_id, ressalva, x["id"]))
+            # issue #448: o texto da carta que foi ao orgao fica gravado (o padrao, da auditoria da montagem)
+            conn.execute("UPDATE protocolos SET envio_id=?, situacao='enviado', justificativa=?, "
+                         "corpo_carta=COALESCE(corpo_carta, ?) WHERE id=?",
+                         (envio_id, ressalva, texto_enviado.get(x["id"]), x["id"]))
             nao_marcadas = []
             for m in _medicoes(conn, x["id"]):
                 conn.execute("INSERT OR IGNORE INTO envio_medicoes (envio_id, medicao_id) VALUES (?,?)",
