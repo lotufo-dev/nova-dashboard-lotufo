@@ -3,6 +3,7 @@ import UltimosAcessos from "./Acessos";
 import { contar } from "./formato";
 import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
+import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import {
   ABAS_ADMIN, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, pessoaDoEvento, quantidadeRec,
   reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, rotuloObjeto, rotuloRec, urlPaginaRec,
@@ -59,7 +60,10 @@ type Backup = { ultimo_backup: string | null; tamanho_bytes: number | null; guar
                 ultima_copia_externa_arquivos_erro_em?: string | null;
                 // issue #419: copia cifrada semanal para a chave do dono (a data vem do disco)
                 copia_dono_configurada?: boolean; copia_dono_atrasada?: boolean;
-                ultima_copia_dono?: string | null; ultima_copia_dono_erro?: string | null; ultima_copia_dono_erro_em?: string | null };
+                ultima_copia_dono?: string | null; ultima_copia_dono_erro?: string | null; ultima_copia_dono_erro_em?: string | null;
+                // issue #420: o envio dessa copia por e-mail (so' desta execucao do servidor)
+                ultimo_envio_copia_dono?: string | null; ultimo_envio_copia_dono_erro?: string | null;
+                ultimo_envio_copia_dono_erro_em?: string | null };
 
 // Issue #330: /api/admin/saude. ultima_leitura = quando o monitor do SIGA mandou a leitura mais recente (nulo: nunca leu)
 type SaudeSiga = { ultima_leitura: string | null; atrasado: boolean; processos: number };
@@ -127,7 +131,7 @@ function CartaoSituacao({ titulo, valor, nota, situacao }: { titulo: string; val
 function backupFalhou(b: Backup | null | undefined): boolean {
   return !!b && (b.atrasado || !!b.ultimo_snapshot_erro || !!b.ultima_copia_externa_erro
     || !!b.ultima_copia_arquivos_erro || !!b.ultima_copia_externa_arquivos_erro
-    || !!b.ultima_copia_dono_erro || !!b.copia_dono_atrasada);
+    || !!b.ultima_copia_dono_erro || !!b.copia_dono_atrasada || !!b.ultimo_envio_copia_dono_erro);
 }
 
 function Situacoes({ status, erroCarga, rodando, b, siga }: {
@@ -281,15 +285,37 @@ function LinhaBackup({ rotulo, em, erro, erroEm }: { rotulo: string; em: string 
 /** Issue #419: a copia cifrada para a chave do dono e o botao que a gera na hora (a rota so' aceita admin). */
 function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
   const [gerando, setGerando] = useState(false);
+  const [reenviando, setReenviando] = useState(false);
   const [erro, setErro] = useState("");
+  const [enviada, setEnviada] = useState("");
+  const [presa, setPresa] = useState<{ id: number; reserva: Reserva } | null>(null);
   async function gerar() {
-    setErro(""); setGerando(true);
+    setErro(""); setEnviada(""); setPresa(null); setGerando(true);
     try {
-      await api("/api/admin/copia-dono", { method: "POST" });
+      const r = await api<{ arquivo: string; emails?: number; partes?: number | null; completo?: boolean }>(
+        "/api/admin/copia-dono", { method: "POST" });
+      // issue #420: so' confirma o envio com todas as partes enviadas; o motivo da falha vem no erro do envio, relido
+      // da Saude
+      if (r.completo) setEnviada(`Cópia do dono gerada e enviada por e-mail (${contar(r.emails ?? 0, "e-mail", "e-mails")}).`);
+      else if (r.emails && r.partes) setErro(`Cópia do dono gerada, mas não saiu inteira por e-mail: ${r.emails} de ${r.partes} e-mails enviados.`);
+      else if (r.completo === false) setErro("Cópia do dono gerada, mas não saiu por e-mail.");
       aoGerar();
     } catch (e) {
       setErro(mensagem(e));
     } finally { setGerando(false); }
+  }
+  // Issue #420: a copia mais recente sai de novo por e-mail
+  async function reenviar() {
+    setErro(""); setEnviada(""); setPresa(null); setReenviando(true);
+    try {
+      const r = await api<{ arquivo: string; emails: number }>("/api/admin/copia-dono/reenviar", { method: "POST" });
+      setEnviada(`Cópia do dono enviada por e-mail (${contar(r.emails, "e-mail", "e-mails")}).`);
+      aoGerar();
+    } catch (e) {
+      setErro(mensagem(e));
+      // reserva presa: o 409 traz a linha a liberar, e a liberacao aparece ao lado do aviso
+      if (envioReservado(e) && typeof e.corpo.id === "number") setPresa({ id: e.corpo.id, reserva: e.corpo });
+    } finally { setReenviando(false); }
   }
   return (
     <div className="cartao__corpo pilha pilha--curta">
@@ -305,11 +331,23 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
       )}
       <LinhaBackup rotulo="Cópia do dono" em={b.ultima_copia_dono ?? null} erro={b.ultima_copia_dono_erro ?? null}
         erroEm={b.ultima_copia_dono_erro_em ?? null} />
+      <LinhaBackup rotulo="Envio da cópia do dono" em={b.ultimo_envio_copia_dono ?? null}
+        erro={b.ultimo_envio_copia_dono_erro ?? null} erroEm={b.ultimo_envio_copia_dono_erro_em ?? null} />
       {erro && <Erro texto={erro} />}
-      <div>
-        <button type="button" className="btn btn--pequeno" onClick={gerar} disabled={gerando}>
+      {presa && (
+        <LiberarEnvio tabela="copia_dono_envios" id={presa.id} reserva={presa.reserva}
+          aoLiberar={() => { setErro(""); aoGerar(); }} />
+      )}
+      <div role="status">{enviada && !erro && <p className="campo__nota">{enviada}</p>}</div>
+      <div className="acoes-saude">
+        <button type="button" className="btn btn--pequeno" onClick={gerar} disabled={gerando || reenviando}>
           {gerando ? "Gerando…" : "Gerar cópia do dono agora"}
         </button>
+        {b.copia_dono_configurada && b.ultima_copia_dono && (
+          <button type="button" className="btn btn--pequeno" onClick={reenviar} disabled={gerando || reenviando}>
+            {reenviando ? "Enviando…" : "Reenviar cópia do dono"}
+          </button>
+        )}
       </div>
     </div>
   );
