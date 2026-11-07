@@ -128,6 +128,8 @@ def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     # espelho, 1 enquanto nao houver nota). A cota so' se soma com todas casadas. Import local: notas importa este modulo.
     from app import notas as _notas
     d["notas_faltam"] = _notas.faltam(conn, medicao_id)
+    # o resumo do passo Pagamento (a cota da Lotufo na medicao + a irma valida do par), pronto: a tela nao soma
+    d["pagamento_cota"] = sincronizacao_rm.pagamento_cota(conn, medicao_id)
     # Documentos de faturamento do consorcio (NF/NFS-e/FATURA do SharePoint, migracao 017):
     # evidencia por medicao dos consorcios, que faturam fora do RM. So' leitura.
     # Bloco 2: documentos LOCAIS tambem (espelho gerado, evidencia do orgao) -- `arquivo` e

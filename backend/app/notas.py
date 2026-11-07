@@ -53,10 +53,16 @@ def esperadas(conn, medicao_id: int) -> list[dict]:
 
     Leve de proposito (o casador do RM chama por medicao candidata): so' o tipo da medicao, o espelho
     vigente e as alocacoes -- nada de medicoes.detalhe (que carrega mensagens e documentos)."""
+    return esperadas_do_espelho(conn, medicao_id) or []
+
+
+def esperadas_do_espelho(conn, medicao_id: int) -> list[dict] | None:
+    """Como `esperadas`, mas distingue (gate Sol, PR #555) a medicao SEM espelho vigente (None) do espelho presente
+    sem saida da Lotufo nesta natureza (lista vazia: nada a esperar da Lotufo, e nenhuma nota alocada entra na cota)."""
     m = conn.execute("SELECT tipo FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
     esp = _espelho_vigente(conn, medicao_id)
     if m is None or esp is None:
-        return []
+        return None
     natureza = next(k for k, v in espelho.TIPO_POR_NATUREZA.items() if v == m["tipo"])
     saidas = [{"chave": s["chave"], "natureza": s["natureza"], "emissor": s["emissor"], "municipio": s["municipio"],
                "rotulo": s.get("rotulo") or espelho.ROTULO_NATUREZA.get(s["natureza"], s["natureza"]),
@@ -72,8 +78,10 @@ def esperadas(conn, medicao_id: int) -> list[dict]:
 
 
 def faltam(conn, medicao_id: int) -> int:
-    esp = esperadas(conn, medicao_id)
-    if esp:
+    """Saidas da Lotufo ainda sem nota. Com espelho vigente sem saida da Lotufo, zero (gate Sol, PR #555: antes caia
+    no caso sem espelho e qualquer nota alocada contava); so' a medicao sem espelho espera alguma nota alocada."""
+    esp = esperadas_do_espelho(conn, medicao_id)
+    if esp is not None:
         return sum(1 for e in esp if e["nota_id"] is None)
     return 0 if _alocadas(conn, medicao_id) else 1
 
@@ -278,7 +286,14 @@ def fechar_se_completa(conn, usuario_id, medicao_id: int) -> bool:
     m = conn.execute("SELECT estado FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
     if m is None or m["estado"] not in medicoes.ESTADOS_ESPELHO or faltam(conn, medicao_id) > 0:
         return False
-    datas = [n["emissao"] for n in _alocadas(conn, medicao_id) if n["emissao"]]
+    # gate Sol, PR #555: com espelho, a data e' a maior emissao das notas que atendem as saidas da Lotufo (fatura do
+    # consorcio ou nota extra, emitidas depois, nao mudam o marco); sem espelho, a de todas as notas alocadas
+    esp = esperadas_do_espelho(conn, medicao_id)
+    alocadas = _alocadas(conn, medicao_id)
+    if esp is not None:
+        casadas = {e["nota_id"] for e in esp if e["nota_id"] is not None}
+        alocadas = [n for n in alocadas if n["id"] in casadas]
+    datas = [n["emissao"] for n in alocadas if n["emissao"]]
     medicoes.mudar_estado(conn, usuario_id, medicao_id, "nota_emitida", None, max(datas) if datas else None)
     return True
 

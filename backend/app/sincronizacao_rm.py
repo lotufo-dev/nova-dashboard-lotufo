@@ -291,8 +291,9 @@ def notas_da_medicao(conn, medicao_id: int) -> list[dict]:
     lotufo = _notas._coligada_lotufo(conn)
     # issue #556: `da_cota` = a nota atende a uma saida da Lotufo do espelho vigente (o mesmo casamento de
     # notas.esperadas); sem espelho (medicao antiga), as notas da Lotufo. Nota extra, sem saida, fica fora da cota.
-    esperadas = _notas.esperadas(conn, medicao_id)
-    da_cota = {e["nota_id"] for e in esperadas if e["nota_id"] is not None}
+    # gate Sol, PR #555: espelho presente sem saida da Lotufo nao e' "sem espelho": nenhuma nota entra na cota
+    esperadas = _notas.esperadas_do_espelho(conn, medicao_id)
+    da_cota = {e["nota_id"] for e in esperadas or [] if e["nota_id"] is not None}
     out = []
     for r in conn.execute("""
             SELECT a.id AS alocacao_id, a.valor_alocado_centavos, a.origem, a.confianca, a.regra,
@@ -306,9 +307,63 @@ def notas_da_medicao(conn, medicao_id: int) -> list[dict]:
         d["recebido_centavos"], d["devido_centavos"], d["recebido_em"] = _recebido_da_nota(conn, r["nota_id"])
         d["falta_centavos"] = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True) or 0
         d["da_lotufo"] = lotufo is not None and r["coligada"] == lotufo
-        d["da_cota"] = r["nota_id"] in da_cota if esperadas else d["da_lotufo"]
+        d["da_cota"] = r["nota_id"] in da_cota if esperadas is not None else d["da_lotufo"]
         out.append(d)
     return out
+
+
+ESTADOS_ENCERRADOS = ("cancelada", "desistida")
+
+
+def _irma_valida(conn, medicao_id: int) -> int | None:
+    """A metade valida do par "Nª Medição + Reajuste" (mesmo contrato e numero, o outro tipo execucao x reajuste),
+    como a pagina da medicao forma o grupo (#557): nenhuma quando esta medicao ou a irma esta' encerrada."""
+    m = conn.execute("SELECT contrato_id, numero, tipo, estado FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    outro = {"execucao": "reajuste", "reajuste": "execucao"}
+    if m is None or m["tipo"] not in outro or m["estado"] in ESTADOS_ENCERRADOS:
+        return None
+    r = conn.execute(f"SELECT id FROM medicoes WHERE contrato_id=? AND numero=? AND tipo=? "
+                     f"AND estado NOT IN ({','.join('?' * len(ESTADOS_ENCERRADOS))}) ORDER BY id LIMIT 1",
+                     (m["contrato_id"], m["numero"], outro[m["tipo"]], *ESTADOS_ENCERRADOS)).fetchone()
+    return r["id"] if r else None
+
+
+def pagamento_cota(conn, medicao_id: int) -> dict | None:
+    """Issue #514 (passo Pagamento): o resumo do que a Lotufo tem a receber na medicao e na irma valida do par
+    (#557), calculado num lugar so' (a tela so' exibe).
+
+    So' entram as notas que atendem as saidas da Lotufo do espelho vigente (notas.esperadas_do_espelho: nota ativa
+    da coligada da Lotufo casada com uma saida); fatura do consorcio e nota extra ficam fora. Contra os TITULOS do
+    RM (liquidos): falta titulo a titulo (`_falta_por_titulo`), recebido efetivo = devido - falta (juros num titulo
+    nao cobrem outro aberto).
+
+    Devolve None quando alguma medicao do grupo nao tem espelho vigente (nao da' para saber o que esperar). Senao
+    {notas_faltam, completo, total_centavos, recebido_centavos, falta_centavos, parcial}: `completo` exige toda saida
+    com nota e toda nota com titulo; sem isso os valores vem None. Espelho sem saida da Lotufo conta zero.
+    `parcial`: alguma nota da cota ja' teve baixa e ainda falta receber (ou o resumo ainda nao fecha)."""
+    from app import notas as _notas   # import local: notas importa medicoes, que importa este modulo
+    grupo = [medicao_id] + [i for i in [_irma_valida(conn, medicao_id)] if i is not None]
+    faltam, total, recebido, falta, sem_titulo, alguma_baixa = 0, 0, 0, 0, False, False
+    for mid in grupo:
+        esp = _notas.esperadas_do_espelho(conn, mid)
+        if esp is None:
+            return None
+        for e in esp:
+            if e["nota_id"] is None:
+                faltam += 1
+                continue
+            rec, devido, _ = _recebido_da_nota(conn, e["nota_id"])
+            alguma_baixa = alguma_baixa or rec > 0
+            if devido <= 0:
+                sem_titulo = True
+                continue
+            f = _falta_por_titulo(conn, e["nota_id"], aberto_inteiro=True) or 0
+            total += devido; falta += f; recebido += devido - f
+    completo = faltam == 0 and not sem_titulo
+    return {"notas_faltam": faltam, "completo": completo,
+            "total_centavos": total if completo else None, "recebido_centavos": recebido if completo else None,
+            "falta_centavos": falta if completo else None,
+            "parcial": alguma_baixa and (not completo or falta > 0)}
 
 
 def _recebido_da_nota(conn, nota_id: int) -> tuple[int, int, str | None]:
