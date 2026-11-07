@@ -10,7 +10,7 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 // bruto = valor nominal da NF; devido = os titulos do RM (liquidos, sem as retencoes); falta = titulo a titulo (servidor)
 const nota = (nota_id: number, numero: string, bruto: number, devido: number, recebido = 0, extra: Record<string, unknown> = {}) => ({
   nota_id, coligada: 1, numero, serie: null, emissao: "2026-11-13", valor_centavos: bruto, recebido_centavos: recebido,
-  devido_centavos: devido, falta_centavos: Math.max(0, devido - recebido), da_lotufo: true, recebido_em: null, origem: "rm", regra: null, ...extra });
+  devido_centavos: devido, falta_centavos: Math.max(0, devido - recebido), da_lotufo: true, da_cota: true, recebido_em: null, origem: "rm", regra: null, ...extra });
 // dados ficticios: consorcio com tres empresas, a Lotufo emite duas notas (Cuiaba e Varzea Grande), com retencao
 const MEDICAO = { id: 5, numero: 16, tipo: "execucao", competencia: "2026-10", estado: "protocolada",
   valor_protocolado_centavos: 990529648, valor_protocolado_origem: null, valor_atestado_centavos: 990529648,
@@ -84,10 +84,23 @@ describe("Passo Pagamento (#514)", () => {
   });
 
   it("consórcio com a fatura integral do consórcio e a nota da Lotufo: só a da Lotufo entra na cota (Sol, PR #555)", () => {
-    const fatura = nota(3, "21", 990529648, 911287276, 0, { coligada: 90, da_lotufo: false });
+    const fatura = nota(3, "21", 990529648, 911287276, 0, { coligada: 90, da_lotufo: false, da_cota: false });
     montar({ grupo: [com([fatura, nota(1, "2351", 400000001, 368000001)])] });
     expect(screen.getByLabelText("A receber: R$ 3.680.000,01")).toBeTruthy();
     expect(screen.getByText(/fatura do consórcio/)).toBeTruthy();
+  });
+
+  it("nota extra da Lotufo, que não atende a nenhuma saída do espelho, fica fora da cota (#556)", () => {
+    const extra = nota(4, "2399", 50001, 46001, 0, { da_cota: false });
+    montar({ grupo: [com([nota(1, "2351", 418330386, 384863955), nota(2, "2352", 67032113, 61669545), extra])] });
+    expect(screen.getByLabelText("A receber: R$ 4.465.335,00")).toBeTruthy();
+    expect(screen.getByText("R$ 0,00 recebido de R$ 4.465.335,00")).toBeTruthy();
+  });
+
+  it("obra própria: a nota extra também não entra na conferência com o valor da medição (#556)", () => {
+    const extra = nota(4, "2399", 50001, 46001, 0, { da_cota: false });
+    const grupo = [com([nota(1, "2351", 100001, 92401), extra], { valor_atestado_centavos: 100001 })];
+    expect(aReceber(grupo, false)).toEqual({ falta: 92401, recebido: 0, total: 92401, algumRecebido: false });
   });
 
   it("nota sem título no RM: a linha mostra “—” e a receber fica “—”", () => {

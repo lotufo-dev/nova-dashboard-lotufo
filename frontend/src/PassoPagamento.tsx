@@ -58,7 +58,8 @@ export function aReceber(grupo: Medicao[], consorcio: boolean | null):
   if (grupo.length === 0 || consorcio === null) return nulo;
   let falta = 0, recebido = 0, total = 0;
   for (const x of grupo) {
-    const notas = (x.notas ?? []).filter(daLotufo);
+    // so' as notas que atendem as saidas da Lotufo (#556): a extra, sem saida, nao entra na cota
+    const notas = (x.notas ?? []).filter(n => n.da_cota === true);
     if (notas.length === 0 || x.notas_faltam === undefined || x.notas_faltam > 0) return nulo;
     const valor = x.valor_atestado_centavos ?? x.valor_protocolado_centavos;
     if (!consorcio && (valor === null || notas.reduce((t, n) => t + n.valor_centavos, 0) !== valor)) return nulo;

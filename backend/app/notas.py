@@ -62,7 +62,13 @@ def esperadas(conn, medicao_id: int) -> list[dict]:
                "rotulo": s.get("rotulo") or espelho.ROTULO_NATUREZA.get(s["natureza"], s["natureza"]),
                **{c: s[c] for c in ("valor", "iss", "inss", "irrf", "ibs", "cbs", "liquido")}}
               for s in esp["saidas"] if s["natureza"] == natureza and s["emissor"] == EMISSOR_LOTUFO]
-    return _casar_saidas(saidas, _alocadas(conn, medicao_id))
+    # issue #556: a saida da Lotufo so' e' atendida por nota ATIVA da coligada da Lotufo: a NFS-e ou a fatura do
+    # consorcio (outra coligada) no mesmo municipio ou com o mesmo valor nao ocupa a vaga dela. Sem a coligada no
+    # cadastro (base antiga), nao ha' como separar e vale qualquer coligada, como antes.
+    lotufo = _coligada_lotufo(conn)
+    candidatas = [n for n in _alocadas(conn, medicao_id)
+                  if (n.get("situacao") or "ativa") == "ativa" and (lotufo is None or n["coligada"] == lotufo)]
+    return _casar_saidas(saidas, candidatas)
 
 
 def faltam(conn, medicao_id: int) -> int:

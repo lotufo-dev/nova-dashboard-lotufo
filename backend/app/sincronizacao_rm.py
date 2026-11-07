@@ -289,6 +289,10 @@ def notas_da_medicao(conn, medicao_id: int) -> list[dict]:
     medicao tambem tem a fatura do consorcio, valor cheio, de outra coligada: ela nao entra na cota)."""
     from app import notas as _notas   # import local: notas importa medicoes, que importa este modulo
     lotufo = _notas._coligada_lotufo(conn)
+    # issue #556: `da_cota` = a nota atende a uma saida da Lotufo do espelho vigente (o mesmo casamento de
+    # notas.esperadas); sem espelho (medicao antiga), as notas da Lotufo. Nota extra, sem saida, fica fora da cota.
+    esperadas = _notas.esperadas(conn, medicao_id)
+    da_cota = {e["nota_id"] for e in esperadas if e["nota_id"] is not None}
     out = []
     for r in conn.execute("""
             SELECT a.id AS alocacao_id, a.valor_alocado_centavos, a.origem, a.confianca, a.regra,
@@ -302,6 +306,7 @@ def notas_da_medicao(conn, medicao_id: int) -> list[dict]:
         d["recebido_centavos"], d["devido_centavos"], d["recebido_em"] = _recebido_da_nota(conn, r["nota_id"])
         d["falta_centavos"] = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True) or 0
         d["da_lotufo"] = lotufo is not None and r["coligada"] == lotufo
+        d["da_cota"] = r["nota_id"] in da_cota if esperadas else d["da_lotufo"]
         out.append(d)
     return out
 

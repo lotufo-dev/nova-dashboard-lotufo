@@ -92,6 +92,39 @@ def test_esperadas_sao_as_saidas_lotufo_do_espelho(conn, integra):
     assert notas.coligada_esperada(conn, mid) == 1        # a nota esperada e' da empresa propria, nao do consorcio (90)
 
 
+def _nf_alocada(conn, mid, coligada, idmov, valor, municipio):
+    """NF do RM (coligada dada) ja' alocada a' medicao, sem passar pelo casador (o que se testa e' o casamento)."""
+    from app import sincronizacao_rm
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, municipio) VALUES (?,?,?,?,?)",
+                       (coligada, idmov, f"{idmov:09d}", valor, municipio)).lastrowid
+    conn.commit()
+    sincronizacao_rm.alocar(conn, 1, nid, mid, "manual", None, "teste")
+    return nid
+
+
+def test_nota_de_outra_coligada_nao_ocupa_a_vaga_da_saida_da_lotufo(conn, integra):
+    """Issue #556: a fatura do consorcio (coligada 90) no municipio da saida da Lotufo, ou com o valor exato dela, nao
+    atende a saida: as duas continuam faltando ate' chegar a nota da coligada da Lotufo."""
+    _, mid, saidas = integra
+    cuiaba = next(s for s in saidas if s["municipio"] == "Cuiabá")
+    _nf_alocada(conn, mid, 90, 501, 1000000007, "Várzea Grande")         # mesmo municipio da saida de VG
+    _nf_alocada(conn, mid, 90, 502, cuiaba["valor"], None)                  # mesmo valor da saida de Cuiaba
+    assert notas.faltam(conn, mid) == 2
+    assert medicoes.detalhe(conn, mid)["notas_faltam"] == 2
+    assert {n["da_cota"] for n in medicoes.detalhe(conn, mid)["notas"]} == {False}
+
+
+def test_da_cota_so_nas_notas_que_atendem_as_saidas_da_lotufo(conn, integra):
+    """Issue #556: a nota da Lotufo que atende a saida entra na cota; a extra (sem saida) fica fora."""
+    _, mid, saidas = integra
+    vg = next(s for s in saidas if s["municipio"] == "Várzea Grande")
+    certa = _nf_alocada(conn, mid, 1, 601, vg["valor"], "Várzea Grande")
+    extra = _nf_alocada(conn, mid, 1, 602, 12345, "Sinop")
+    d = medicoes.detalhe(conn, mid)
+    assert d["notas_faltam"] == 1                                           # falta a de Cuiaba
+    assert {n["nota_id"]: n["da_cota"] for n in d["notas"]} == {certa: True, extra: False}
+
+
 def test_esperadas_trazem_o_rotulo_da_saida(conn, integra):
     _, mid, _ = integra
     esp = notas.esperadas(conn, mid)
