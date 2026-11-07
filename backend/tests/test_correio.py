@@ -250,8 +250,8 @@ def test_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em_portugu
     Um bloqueio curto passa na tentativa seguinte; o que persiste vira ValueError (422 na rota), nao 500."""
     antiga, nova, outra = _png(2, 2), _png(3, 3), _png(4, 4)
     correio.gravar_assinatura(conn, 1, antiga)
-    real, chamadas = correio.os.replace, []
-    monkeypatch.setattr(correio.time, "sleep", lambda s: None)
+    real, chamadas, dormidas = correio.os.replace, [], []
+    monkeypatch.setattr(correio.time, "sleep", _dormir_sem_trava(conn, dormidas))
 
     def ocupado_uma_vez(a, b):
         chamadas.append(a)
@@ -261,7 +261,8 @@ def test_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em_portugu
 
     monkeypatch.setattr(correio.os, "replace", ocupado_uma_vez)
     correio.gravar_assinatura(conn, 1, nova)
-    assert correio.assinatura(1)[0] == nova and len(chamadas) == 2
+    assert correio.assinatura(1)[0] == nova and len(chamadas) == 2 and len(dormidas) == 1
+    assert _eventos_assinatura(conn) == 2           # a tentativa desfeita nao deixa evento
 
     def sempre_ocupado(a, b):
         raise PermissionError("arquivo aberto por outro processo")
@@ -269,17 +270,31 @@ def test_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em_portugu
     monkeypatch.setattr(correio.os, "replace", sempre_ocupado)
     with pytest.raises(ValueError, match=correio.GRAVAR_ASSINATURA_OCUPADA):
         correio.gravar_assinatura(conn, 1, outra)
-    assert correio.assinatura(1)[0] == nova
+    assert correio.assinatura(1)[0] == nova and _eventos_assinatura(conn) == 2
     assert [a.name for a in correio._arquivo_assinatura(1).parent.iterdir()] == ["usuario-1"]
+
+
+def _dormir_sem_trava(conn, dormidas):
+    """No lugar de time.sleep: a espera entre tentativas nao pode segurar a trava de escrita do banco (#479, gate
+    Sol): a transacao da tentativa que falhou ja' foi desfeita quando se dorme."""
+    def dormir(s):
+        assert not conn.in_transaction, "dormiu com a transacao aberta (trava de escrita segura)"
+        dormidas.append(s)
+    return dormir
+
+
+def _eventos_assinatura(conn):
+    return conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='correio.assinatura'").fetchone()[0]
 
 
 def test_remover_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em_portugues(conn, monkeypatch):
     """Issue #479 (revisor na PR #472): no Windows, `unlink` da assinatura aberta pelo backup da' PermissionError e a
     rota respondia 500 em ingles. Um bloqueio curto passa na tentativa seguinte; o que persiste vira ValueError (422),
-    a assinatura fica e o evento de remocao nao fica no banco."""
+    a assinatura fica e o evento de remocao nao fica no banco. A espera entre tentativas e' fora da transacao."""
     from pathlib import Path
     correio.gravar_assinatura(conn, 1, _png(2, 2))
-    monkeypatch.setattr(correio.time, "sleep", lambda s: None)
+    dormidas = []
+    monkeypatch.setattr(correio.time, "sleep", _dormir_sem_trava(conn, dormidas))
     real, chamadas = Path.unlink, []
 
     def sempre_ocupado(self, missing_ok=False):
@@ -304,6 +319,7 @@ def test_remover_assinatura_ocupada_pelo_backup_tenta_de_novo_e_depois_recusa_em
     monkeypatch.setattr(Path, "unlink", ocupado_uma_vez)
     correio.remover_assinatura(conn, 1)
     assert correio.assinatura(1) is None and chamadas == ["usuario-1", "usuario-1"]
+    assert len(dormidas) == len(correio._TENTATIVAS_TROCA) + 1 and _eventos_assinatura(conn) == 2
 
 
 def test_gravar_assinatura_limpa_temporario_velho_de_gravacao_interrompida(conn):
