@@ -632,6 +632,24 @@ def test_cabecalho_repetido_de_anexo_nao_sai_do_meio_da_frase_do_termo(cenario):
     assert plano.count("COMPETENCIA092026") == 1
 
 
+def test_cabecalho_do_termo_repetido_no_anexo_nao_vira_timbre(cenario):
+    # Gate Sol, rodada 2 da PR #549: pacote antigo sem o timbre gravado e sem citar o termo, com anexo que repete
+    # "Termo de Apostilamento" no cabecalho; o assinado anterior que cita o termo na carta continua recusado
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    mapa = json.dumps({"cita": False, "apostilamentos": []})
+    c.execute("UPDATE protocolos SET montado_apostilamentos=? WHERE id=?", (mapa, pid))
+    c.commit()
+    p = protocolo._linha(c, pid)
+    anexo = "Termo de Apostilamento nº 7\nPlanilha\nItem 1\nItem 2\nItem 3\nItem 4\nItem 5\nItem 6\nFim do anexo"
+    montado = ["Termo de Apostilamento nº 7\nOfício nº 302\nSenhor fiscal,\nTexto.\nFim", anexo, anexo]
+    assinado = [montado[0].replace("Texto.", "Termo de Apostilamento nº 7"), anexo, anexo]
+    assert not any("Apostilamento" in x for x in protocolo._bordas_repetidas(montado))
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo._recusar_termo_fora_do_assinado(c, p, montado, assinado)
+
+
 def test_competencia_acrescentada_ao_mesmo_termo_tambem_e_conferida(cenario):
     # Critico 2: a correcao acrescenta uma competencia no comeco da lista do mesmo termo (numero igual)
     c, ids = cenario

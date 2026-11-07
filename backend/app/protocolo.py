@@ -1021,7 +1021,9 @@ def _bordas_repetidas(montado: list[str]) -> set[str]:
         ls, borda = _linhas_da_borda(t)
         for x in {ls[i].strip() for i in borda}:
             vistas[x] = vistas.get(x, 0) + 1
-    return {x for x, n in vistas.items() if n > 1 and len(assinatura._plano(x)) >= 8}
+    # linha que fala do termo nunca e' timbre: a contagem do termo e a frase ficam intactas (gate Sol, rodada 2)
+    return {x for x, n in vistas.items()
+            if n > 1 and len(assinatura._plano(x)) >= 8 and "APOSTIL" not in assinatura._plano(x)}
 
 
 def _sem_bordas(t: str, bordas: set[str]) -> str:

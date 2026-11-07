@@ -29,15 +29,15 @@ _CODIGO_RE = r"(?=[0-9A-F]*[0-9])[0-9A-F]{12,}(?:\.{3}|…)?"
 _CODIGO = re.compile(rf"(?<![0-9A-Z]){_CODIGO_RE}(?![0-9A-Z])", re.IGNORECASE)
 _SO_CODIGO = re.compile(rf"^\s*{_CODIGO_RE}\s*$", re.IGNORECASE)
 _NOME = re.compile(r"^[^\W\d_ºª][^\d_ºª/:;()]{1,79}$")
-_DO_OFICIO = {"TERMO", "APOSTILAMENTO", "REAJUSTE", "COMPETENCIA", "MEDICAO", "CONTRATO", "OFICIO", "NOTA"}
+# radicais do oficio e da frase do termo: plural e conjugacao tambem nao contam como nome (gate Sol, rodada 2)
+_DO_OFICIO = ("TERMO", "APOSTIL", "REAJUST", "COMPETENC", "MEDICA", "MEDICO", "CONTRAT", "OFICIO", "NOTA")
 
 
 def _e_nome(linha: str) -> bool:
     t = linha.strip()
     if not _NOME.match(t) or len(t.split()) > 6:
         return False
-    palavras = {_plano(w) for w in t.split()}
-    return not (palavras & _DO_OFICIO)
+    return not any(_plano(w).startswith(r) for w in t.split() for r in _DO_OFICIO)
 
 
 def sem_bloco_de_assinatura(texto: str) -> str:
