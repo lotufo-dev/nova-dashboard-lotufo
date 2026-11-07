@@ -37,11 +37,13 @@ def saude_do_backup(usuario: dict = Depends(exigir("administrar", com_csrf=False
     e se esta atrasado (mais de 2 h sem snapshot). So' admin: traz caminhos e erros do servidor. Na instalacao nao
     autorizada a copia externa nao roda (issue #417, main.py): a tela mostra o estado efetivo, nao o configurado.
     Issue #420: sem erro do envio na memoria (o servidor reiniciou), a copia mais recente que nao saiu inteira por
-    e-mail aparece como erro do envio, lida do banco."""
+    e-mail aparece como erro do envio, lida do banco; a reserva interrompida vem em `copia_dono_presa` (#482)."""
     externa = backup.pasta_externa() is not None and instalacao.ligada()
     s = backup.situacao(backup.pasta_local(), externa, tempo.agora_utc())
     if not s["ultimo_envio_copia_dono_erro"]:
         s["ultimo_envio_copia_dono_erro"] = copia_dono_envio.pendente(conn, backup.pasta_local())
+    # issue #482: a reserva interrompida (de qualquer copia) vem com a linha, para a Saude oferecer "Liberar envio"
+    s["copia_dono_presa"] = copia_dono_envio.reserva_presa(conn)
     return s
 
 
@@ -69,9 +71,8 @@ def reenviar_copia_dono(usuario: dict = Depends(exigir("administrar")),
         return copia_dono_envio.reenviar(conn, backup.pasta_local(), {"id": usuario["id"], "email": usuario["email"]})
     except envio_reserva.EnvioEmAndamento as e:
         conn.rollback()
-        detalhe = e.detalhe()
-        if getattr(e, "reserva_id", None):         # reserva presa: o que a liberacao precisa
-            detalhe |= {"tabela": copia_dono_envio.TABELA, "id": e.reserva_id}
+        # reserva presa: o que a liberacao precisa (a linha, e qual parte, issue #482)
+        detalhe = getattr(e, "presa", None) or e.detalhe()
         raise HTTPException(409, detail=detalhe) from None
     except copia_dono_envio.EnvioNaoConfigurado as e:
         raise HTTPException(409, str(e)) from None

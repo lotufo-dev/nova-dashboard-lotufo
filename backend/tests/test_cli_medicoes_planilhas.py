@@ -248,14 +248,36 @@ def test_carga_le_o_anexo_vigente_das_medicoes_com_planilha_anexada(banco, capsy
 
 
 def test_arquivo_grande_demais_e_pulado_sem_ler(banco, capsys, monkeypatch):
-    """Sol S6: o tamanho e' conferido antes de ler o arquivo para a memoria."""
-    from pathlib import Path
+    """Sol S6 / #503: o arquivo acima do teto e' pulado lendo no maximo o teto mais um byte (nunca inteiro)."""
+    import builtins
 
     from app import leitura_planilha_medicao as leitura
+    from app import medicao_grupos
     monkeypatch.setattr(leitura, "MAX_BYTES_ARQUIVO", 1000)
-    monkeypatch.setattr(Path, "read_bytes", lambda self: pytest.fail("leu o arquivo grande"))
-    _executar(_pasta_com(banco))
+    lidos = []
+
+    class Espiao:
+        def __init__(self, f):
+            self._f = f
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._f.close()
+
+        def __getattr__(self, nome):
+            return getattr(self._f, nome)
+
+        def read(self, *args):
+            dados = self._f.read(*args)
+            lidos.append(len(dados))
+            return dados
+
+    monkeypatch.setattr(medicao_grupos, "open", lambda *a, **k: Espiao(builtins.open(*a, **k)), raising=False)
+    _executar(_pasta_com(banco))                                      # a planilha tem bem mais de 1000 bytes
     assert "pulado: arquivo grande demais" in capsys.readouterr().out
+    assert lidos and sum(lidos) <= 1001
 
 
 # --- rodada 2 de correcao -----------------------------------------------------------------------------------------
@@ -350,6 +372,23 @@ def test_anexo_que_nao_confere_com_a_versao_e_pulado(banco, capsys):
     assert _contar("SELECT COUNT(*) FROM medicao_grupos") == 0
 
 
+def test_anexo_de_versao_sem_sha_registrado_e_pulado(banco, capsys):
+    """#503: versao sem o sha256 da planilha nao aceita qualquer arquivo achado no caminho."""
+    from app import arquivos
+    c = db.get_conn()
+    mid = c.execute("SELECT id FROM medicoes WHERE numero=2 AND tipo='execucao'").fetchone()[0]
+    rel, _ = arquivos.gravar_bytes("planilhas", planilha(), "xlsx")
+    c.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, acumulado_anterior_centavos, "
+              "arquivo_planilha, sha256_planilha, origem) VALUES (?, 1, ?, 0, ?, NULL, 'manual')", (mid, TOTAL, rel))
+    c.commit()
+    c.close()
+    (banco / "vazia").mkdir()
+    _executar(banco / "vazia")
+    assert "anexo da versão 1: Medição 2 de execução -> pulado: a versão não tem o sha256 da planilha registrado" \
+        in capsys.readouterr().out
+    assert _contar("SELECT COUNT(*) FROM medicao_grupos") == 0
+
+
 def test_item_a_mais_numa_leitura_gravada_e_recusado(banco):
     """Sol S5 (rodada 2): a leitura gravada fica selada; item novo nela e' recusado."""
     _executar(_pasta_com(banco))
@@ -362,3 +401,86 @@ def test_item_a_mais_numa_leitura_gravada_e_recusado(banco):
                       "VALUES (?, 6, 'outros', 100)", (lid,))
     finally:
         c.close()
+
+
+def test_insert_or_replace_numa_leitura_gravada_e_recusado(banco):
+    """#502 (Sol, PR #500): o REPLACE numa ordem que ja existe nao troca o item da leitura selada."""
+    _executar(_pasta_com(banco))
+    c = db.get_conn()
+    try:
+        lid = c.execute("SELECT id FROM medicao_grupos").fetchone()[0]
+        antes = [tuple(r) for r in c.execute("SELECT * FROM medicao_grupo_itens ORDER BY ordem")]
+        id1 = antes[0][0]
+        for sql, args in (
+                ("INSERT OR REPLACE INTO medicao_grupo_itens (leitura_id, ordem, grupo, valor_medido_centavos) "
+                 "VALUES (?, 1, 'trocado', 1)", (lid,)),
+                ("REPLACE INTO medicao_grupo_itens (leitura_id, ordem, grupo, valor_medido_centavos) "
+                 "VALUES (?, 2, 'trocado', 1)", (lid,)),
+                # pelo id do item: o REPLACE apagaria o item e regravaria outro no lugar
+                ("INSERT OR REPLACE INTO medicao_grupo_itens (id, leitura_id, ordem, grupo, valor_medido_centavos) "
+                 "VALUES (?, ?, 1, 'trocado', 1)", (id1, lid)),
+                ("INSERT INTO medicao_grupo_itens (leitura_id, ordem, grupo, valor_medido_centavos) "
+                 "VALUES (?, 3, 'trocado', 1)", (lid,))):
+            with pytest.raises(sqlite3.IntegrityError, match="itens dela já foram gravados"):
+                c.execute(sql, args)
+        assert [tuple(r) for r in c.execute("SELECT * FROM medicao_grupo_itens ORDER BY ordem")] == antes
+    finally:
+        c.close()
+
+
+def test_insert_or_replace_na_leitura_gravada_e_recusado(banco):
+    """#502 (revisor e Sol, rodada 1): o REPLACE pela leitura (o pai) nao reabre a leitura para item novo."""
+    _executar(_pasta_com(banco))
+    c = db.get_conn()
+    try:
+        r = c.execute("SELECT * FROM medicao_grupos").fetchone()
+        pai = [tuple(x) for x in c.execute("SELECT * FROM medicao_grupos")]
+        itens = [tuple(x) for x in c.execute("SELECT * FROM medicao_grupo_itens ORDER BY id")]
+        for verbo in ("INSERT OR REPLACE", "REPLACE"):
+            # pelo id da leitura, com mais itens e outro total
+            with pytest.raises(sqlite3.IntegrityError, match="evento"):
+                c.execute(f"{verbo} INTO medicao_grupos (id, medicao_id, sha256, origem, situacao, total_centavos, "
+                          "pedido_centavos, itens) VALUES (?,?,?,'carga','lida',999999,?,?)",
+                          (r["id"], r["medicao_id"], r["sha256"], r["pedido_centavos"], r["itens"] + 1))
+            # pela mesma leitura (o indice unico das lidas), com id novo
+            with pytest.raises(sqlite3.IntegrityError):
+                c.execute(f"{verbo} INTO medicao_grupos (medicao_id, sha256, origem, situacao, total_centavos, "
+                          "pedido_centavos, itens) VALUES (?,?,'carga','lida',999999,?,?)",
+                          (r["medicao_id"], r["sha256"], r["pedido_centavos"], r["itens"] + 1))
+        with pytest.raises(sqlite3.IntegrityError, match="itens dela já foram gravados"):
+            c.execute("INSERT INTO medicao_grupo_itens (leitura_id, ordem, grupo, valor_medido_centavos) "
+                      "VALUES (?,?, 'outros', 999699)", (r["id"], r["itens"] + 1))
+        assert [tuple(x) for x in c.execute("SELECT * FROM medicao_grupos")] == pai
+        assert [tuple(x) for x in c.execute("SELECT * FROM medicao_grupo_itens ORDER BY id")] == itens
+    finally:
+        c.close()
+
+
+def test_id_zero_ou_negativo_e_recusado_e_a_gravacao_normal_segue(banco):
+    """#502 (Sol, rodadas 1 e 2): no BEFORE INSERT o id omitido vale -1, entao o selo por id so' confere id positivo;
+    por isso nenhuma linha nova pode ter id <= 0, nem por REPLACE, e a gravacao normal segue."""
+    c = db.get_conn()
+    try:
+        mid = c.execute("SELECT id FROM medicoes WHERE numero=2").fetchone()[0]
+        for verbo in ("INSERT", "INSERT OR REPLACE", "REPLACE"):
+            for id_ in (0, -1):
+                with pytest.raises(sqlite3.IntegrityError, match="evento"):
+                    c.execute(f"{verbo} INTO medicao_grupos (id, medicao_id, sha256, origem, situacao, "
+                              "total_centavos, pedido_centavos, itens) VALUES (?, ?, 'x', 'carga', 'lida', 100, 100, 1)",
+                              (id_, mid))
+    finally:
+        c.close()
+    _executar(_pasta_com(banco))
+    c = db.get_conn()
+    try:
+        lid = c.execute("SELECT id FROM medicao_grupos").fetchone()[0]
+        for verbo in ("INSERT", "INSERT OR REPLACE", "REPLACE"):
+            for id_ in (0, -1):
+                with pytest.raises(sqlite3.IntegrityError, match="evento"):
+                    c.execute(f"{verbo} INTO medicao_grupo_itens (id, leitura_id, ordem, grupo, "
+                              "valor_medido_centavos) VALUES (?, ?, 1, 'g', 100)", (id_, lid))
+        assert c.execute("SELECT MIN(id) FROM medicao_grupo_itens").fetchone()[0] >= 1
+    finally:
+        c.close()
+    assert _contar("SELECT COUNT(*) FROM medicao_grupos WHERE situacao = 'lida'") == 1
+    assert _contar("SELECT COUNT(*) FROM medicao_grupo_itens") == 5

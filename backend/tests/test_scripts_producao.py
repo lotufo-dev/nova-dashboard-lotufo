@@ -2,6 +2,7 @@
 # de test_producao_nao_aceita_x_forwarded_for em test_auth.py (que segue cobrindo o --no-proxy-headers).
 # Issue #361 (porta configuravel nos scripts de producao): a VM nova tem a 80 ocupada pelo IIS, entao a porta
 # vem do parametro -Porta, e o padrao continua 80.
+import math
 import pathlib
 import re
 
@@ -58,7 +59,7 @@ def test_deploy_usa_a_porta_na_saude_no_dono_da_porta_e_nas_mensagens():
     assert "localhost/api/health" not in script
     assert '"http://localhost:$Porta/api/health"' in script and '"https://localhost:$Porta/api/health"' in script
     assert "LocalPort 80" not in script
-    assert "-LocalPort $Porta" in script
+    assert "$_.LocalPort -eq $Porta" in script
     assert not re.search(r"porta 80\b", script), "mensagem ainda cita a porta 80 fixa"
 
 
@@ -115,7 +116,7 @@ def test_deploy_para_a_tarefa_por_schtasks_tambem_no_ponto_da_sentinela_e_mantem
     # Disabled) e pela porta livre; qualquer falha lanca
     parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
     ordem = ["$script:tarefaParada = $true", "$script:producaoMexida = $true", 'ComandoTarefa "End" $false',
-             "$estado = EstadoDaTarefa $tarefaNome $LimiteAgendador", "if (-not (TarefaParada $estado)) { throw ",
+             "$estado = EsperarParada $momento", "if (-not (TarefaParada $estado)) { throw ",
              "LiberarPorta"]
     assert [parar.index(passo) for passo in ordem] == sorted(parar.index(passo) for passo in ordem)
     assert "catch" not in parar
@@ -978,3 +979,94 @@ def test_docs_do_deploy_nao_mandam_criar_nem_apagar_o_sentinela_da_sessao():
     assert "que a sessão criou" not in skill
     assert "O mesmo vale para `BACKUP PRE-MIGRACAO FALHOU`" not in skill
     assert "Não há sentinela\n     a apagar" in skill
+
+
+def test_deploy_le_o_estado_da_tarefa_antes_do_sentinela_e_aborta_se_desconhecido():
+    # Issue #518 (revisor da rodada 2 da PR #389): com o leitor de estado quebrado, o /End derrubava a producao e a
+    # parada nunca se provava. O estado e' lido uma vez antes do sentinela e do backup; "desconhecido" aborta sem mexer.
+    codigo = _codigo(_ler("deploy.ps1"))
+    leitura = codigo.index("$estadoInicial = EstadoDaTarefa $tarefaNome $LimiteAgendador")
+    aborto = _bloco_do_if(codigo, 'if ($estadoInicial -eq "desconhecido") {')
+    assert "nada foi alterado" in aborto and "exit 1" in aborto
+    assert codigo.index("$portaTarefa = PortaDaTarefa") < leitura
+    assert leitura < codigo.index("New-Item -ItemType File -Path $pause")
+    assert leitura < codigo.index("backup_pre_migracao.ps1")
+    assert leitura < codigo.index("function PararComprovado")
+    # revisor da PR #527: tarefa desabilitada tambem aborta antes do sentinela (o /Run falharia depois do checkout)
+    desabilitada = _bloco_do_if(codigo, 'if ($estadoInicial -eq "Disabled") {')
+    assert "nada foi alterado" in desabilitada and "exit 1" in desabilitada
+    assert leitura < codigo.index('if ($estadoInicial -eq "Disabled") {') < codigo.index("New-Item -ItemType File -Path $pause")
+
+
+def _limite_da_leitura(restante, prazo_ps):
+    """Traducao literal de LimiteDaLeitura, com as constantes lidas do deploy.ps1."""
+    def constante(nome):
+        return int(re.search(r"\$" + nome + r" = (\d+)", prazo_ps).group(1))
+    piso, morte = constante("PisoLeituraSegundos"), constante("EsperaMorteFilhoSegundos")
+    cabe = math.floor(restante - 1 - morte)
+    return 0 if cabe < piso else min(30, cabe)
+
+
+def test_deploy_espera_da_parada_nunca_passa_do_prazo_total():
+    # Gate Sol da PR #527: com o piso por leitura (Max) e os 5 s da morte do filho, a espera chegava perto de 105 s.
+    # Pior caso: toda leitura estoura no limite dela e o filho leva os 5 s inteiros para morrer.
+    script = _ler("deploy.ps1")
+    funcao = _codigo(script)[_codigo(script).index("function LimiteDaLeitura"):_codigo(script).index("function EsperarParada")]
+    assert "$cabe = [Math]::Floor($restante - 1 - $EsperaMorteFilhoSegundos)" in funcao
+    assert "if ($cabe -lt $PisoLeituraSegundos) { return 0 }" in funcao
+    assert "return [int][Math]::Min($LimiteAgendador, $cabe)" in funcao
+    prazo = int(re.search(r"\$PrazoParadaSegundos = (\d+)", script).group(1))
+    morte = int(re.search(r"\$EsperaMorteFilhoSegundos = (\d+)", script).group(1))
+    decorrido, leituras = 0.0, 0
+    while True:
+        limite = _limite_da_leitura(prazo - decorrido, script)
+        if limite <= 0:
+            break
+        decorrido += 1 + limite + morte   # pausa, leitura que estoura, espera da morte do filho
+        leituras += 1
+    assert leituras >= 2 and decorrido <= prazo
+
+
+def test_deploy_imprime_cada_leitura_do_estado_e_a_parada_tem_prazo_total():
+    # Issue #518: 10 leituras de ate' 30 s sem linha nenhuma passavam da regra dos 2 minutos da skill deploy.
+    codigo = _codigo(_ler("deploy.ps1"))
+    parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
+    assert parar.index('ComandoTarefa "End" $false') < parar.index("$estado = EsperarParada $momento")
+    esperar = codigo[codigo.index("function EsperarParada"):codigo.index("function PararComprovado")]
+    laco = esperar[esperar.index("while ($true) {"):]
+    assert "Etapa " in laco and "$estado = EstadoDaTarefa $tarefaNome $limite" in laco
+    # prazo por Stopwatch (monotonico), nao por Get-Date; leitura que nao cabe nao e' iniciada
+    assert "[System.Diagnostics.Stopwatch]::StartNew()" in esperar and "Get-Date" not in esperar
+    assert "$limite = LimiteDaLeitura ($PrazoParadaSegundos - $relogio.Elapsed.TotalSeconds)" in laco
+    assert laco.index("if ($limite -le 0) { break }") < laco.index("Start-Sleep") < laco.index("EstadoDaTarefa")
+    assert "if (TarefaParada $estado) { break }" in laco and '"desconhecido") { break }' not in laco
+    assert "$PrazoParadaSegundos = 90" in codigo
+    # a espera da morte do filho declarada e' a do Agendador
+    assert "$EsperaMorteFilhoSegundos = 5" in codigo
+    assert "WaitForExit(5000)" in _ler("comum_agendador.ps1")
+    raiz = pathlib.Path(__file__).resolve().parents[2]
+    skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
+    runbook = (raiz / "docs" / "runbook.md").read_text(encoding="utf-8")
+    for texto in (skill, runbook):
+        assert "powershell.exe" in texto and "schtasks.exe" in texto
+        assert "90 s" in texto
+
+
+def test_deploy_erro_na_consulta_da_porta_nao_e_porta_livre():
+    # Issue #518: -ErrorAction SilentlyContinue fazia a consulta que falha devolver vazio e o LiberarPorta dar a porta
+    # como livre com o uvicorn orfao vivo. Como no watchdog.ps1: lista os listeners com Stop e filtra no pipeline.
+    codigo = _codigo(_ler("deploy.ps1"))
+    dono = codigo[codigo.index("function DonoDaPorta"):codigo.index("function LiberarPorta")]
+    assert "Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -eq $Porta }" in dono
+    assert "SilentlyContinue" not in dono
+    liberar = codigo[codigo.index("function LiberarPorta"):codigo.index("function ComandoTarefa")]
+    falha = _bloco_do_if(liberar, "catch {")
+    assert liberar.index("try { $dono = DonoDaPorta }") < liberar.index("catch {")
+    assert "throw " in falha and "porta livre nao comprovada" in falha
+    # tambem a reconferencia depois de encerrar o orfao, e o listener sem processo no WMI nao e' porta livre
+    assert "try { $resto = DonoDaPorta }" in liberar and "if (DonoDaPorta)" not in liberar
+    assert liberar.count("porta livre nao comprovada") == 2
+    assert 'if (-not $p) { throw ' in dono
+    # a falha sobe pelo PararComprovado (sem catch), que nao toca no pinado e mantem o sentinela
+    parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
+    assert "catch" not in parar and "LiberarPorta" in parar

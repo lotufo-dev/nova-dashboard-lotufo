@@ -13,8 +13,11 @@ vi.mock("./Espelho", () => ({
 // issue #289: a planilha/carta tem teste proprio (PlanilhaCarta.test.tsx); aqui so' importa onde ela aparece
 vi.mock("./PlanilhaCarta", () => ({
   NovaPlanilhaCarta: ({ inicial }: { inicial?: { numero: number } }) => <div data-nova-planilha={inicial?.numero} />,
-  CartaoPlanilha: ({ medicaoId, podeEditar, aoRevisaoPendente }: { medicaoId: number; podeEditar: boolean; aoRevisaoPendente?: (p: boolean | null) => void }) =>
+  CartaoPlanilha: ({ medicaoId, podeEditar, aoRevisaoPendente, aoEnvioReservado }: { medicaoId: number; podeEditar: boolean;
+    aoRevisaoPendente?: (p: boolean | null) => void; aoEnvioReservado?: (r: boolean) => void }) =>
     <div data-cartao-planilha={medicaoId} data-pode-editar={String(podeEditar)}>
+      <button type="button" onClick={() => aoEnvioReservado?.(false)}>Sem reserva (teste)</button>
+      <button type="button" onClick={() => aoEnvioReservado?.(true)}>Envio reservado (teste)</button>
       <button type="button" onClick={() => aoRevisaoPendente?.(false)}>Sem revisão (teste)</button>
       <button type="button" onClick={() => aoRevisaoPendente?.(null)}>Falha ao conferir (teste)</button>
       <button type="button" onClick={() => aoRevisaoPendente?.(true)}>Revisão pendente (teste)</button>
@@ -571,11 +574,39 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     expect(container.querySelector("[data-cartao-planilha]")).toBeNull();
   });
 
-  it("planilha/carta só gerada: o cartão dela, sem o espelho (a ponte não pula o envio ao protocolo)", async () => {
+  it("planilha/carta só gerada (#460): o cartão dela, o aviso do envio não registrado e o formulário do espelho", async () => {
     responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_gerada" }] });
     const { container } = pagina();
     await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    // espera o cartao dizer que nao ha' envio saindo pelo sistema (gate Sol, PR #528); a revisao nao e' conferida
     expect(container.querySelector("[data-espelho]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sem reserva (teste)" }));
+    expect(container.querySelector("[data-espelho='espelho']")!.getAttribute("data-abre-form")).toBe("true");
+    expect(screen.getByText("Envio da planilha/carta não registrado.")).toBeTruthy();
+  });
+
+  it("planilha/carta só gerada com o envio saindo pelo sistema: sem o espelho e sem o aviso (gate Sol, PR #528)", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_gerada" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Envio reservado (teste)" }));
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+    expect(screen.queryByText(/Envio da planilha\/carta não registrado/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sem reserva (teste)" }));
+    expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull();
+    // releitura que falha depois de uma certa: o espelho some e a tela avisa
+    fireEvent.click(screen.getByRole("button", { name: "Falha ao conferir (teste)" }));
+    expect(screen.getByText(/Não foi possível conferir a planilha\/carta/)).toBeTruthy();
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+  });
+
+  it("planilha/carta enviada não mostra o aviso do envio não registrado (#460)", async () => {
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
+    const { container } = pagina();
+    await waitFor(() => expect(container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Sem revisão (teste)" }));
+    await waitFor(() => expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull());
+    expect(screen.queryByText(/Envio da planilha\/carta não registrado/)).toBeNull();
   });
 
   it("com a planilha/carta enviada, com ou sem o boletim: o cartão dela e o formulário do espelho abaixo", async () => {
@@ -680,6 +711,13 @@ describe("Página da medição: a planilha/carta na etapa 1", () => {
     responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }] });
     const segundo = pagina("diretoria");
     await waitFor(() => expect(segundo.container.querySelector("[data-cartao-planilha='5']")!.getAttribute("data-pode-editar")).toBe("false"));
+    cleanup();
+    // gate Sol (PR #528): na planilha/carta so' gerada a diretoria ve o espelho para ler, sem o formulario aberto
+    responder({ "/api/contratos/1/espelho": { espelhos: [], regra: { situacao: "ativa" } }, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_gerada" }] });
+    const terceiro = pagina("diretoria");
+    await waitFor(() => expect(terceiro.container.querySelector("[data-cartao-planilha='5']")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Sem reserva (teste)" }));
+    expect(terceiro.container.querySelector("[data-espelho='espelho']")!.getAttribute("data-abre-form")).toBe("false");
   });
 });
 

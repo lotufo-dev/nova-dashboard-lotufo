@@ -44,6 +44,13 @@ describe("Espelho", () => {
     expect(screen.queryByText(/fluxo antigo/)).toBeNull();
   });
 
+  it("quem só consulta não ganha o formulário aberto, mesmo com abrirForm (gate Sol, PR #528)", async () => {
+    api.mockResolvedValueOnce({ regra: REGRA, espelhos: [] });
+    render(<Espelho contratoId={1} podeEditar={false} aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho" abrirForm />);
+    expect(await screen.findByText("Nenhum espelho.")).toBeTruthy();
+    expect(screen.queryByLabelText("Nº da medição")).toBeNull();
+  });
+
   it("o formulário só conta como rascunho depois de preenchido (guarda de saída)", async () => {
     const confirmar = vi.spyOn(window, "confirm").mockReturnValue(false);
     window.history.replaceState(null, "", "/obras/1");

@@ -169,9 +169,9 @@ def _regra_capturada(crua: tuple | None) -> dict:
 
 
 def _conferir_planilhas(conn, numero: int, existentes: dict[str, dict], tipos, competencia: str) -> None:
-    """Issue #289, para cada medicao gerada agora: a planilha/carta so' recebe espelho enviada, sem revisao pendente
-    e na competencia dela (medicoes.conferir_espelho_da_planilha). Vem antes da trava do boletim: sem o envio ao
-    orgao, o boletim nem existe."""
+    """Issue #289, para cada medicao gerada agora: a planilha/carta so' recebe espelho sem envio saindo pelo sistema,
+    sem revisao pendente e na competencia dela (medicoes.conferir_espelho_da_planilha); a so' gerada segue pela trava
+    do boletim, com justificativa (#460). Vem antes da trava do boletim."""
     for t in sorted(tipos):
         m = existentes.get(t)
         if m is not None and m["estado"] in (*medicoes.ESTADOS_ANTES_DO_ESPELHO, *medicoes.ESTADOS_ESPELHO):
@@ -278,8 +278,8 @@ def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict
         if ex and ex["estado"] not in (*medicoes.ESTADOS_ANTES_DO_ESPELHO, *medicoes.ESTADOS_ESPELHO):
             raise ValueError(f"{medicoes.nome_medicao(numero, tipo)} já está {medicoes.rotulo_estado(ex['estado'])}: "
                              "não pode gerar espelho de novo")
-        # Issue #289: a planilha/carta so' recebe espelho enviada, sem revisao pendente e na competencia dela; o valor e'
-        # o travado (aprovado, senao pedido) desde a #284
+        # Issue #289: a planilha/carta so' recebe espelho sem envio saindo, sem revisao pendente e na competencia dela; o
+        # valor e' o travado (aprovado, senao pedido) desde a #284
         if ex and ex["estado"] in (*medicoes.ESTADOS_ANTES_DO_ESPELHO, *medicoes.ESTADOS_ESPELHO):
             medicoes.conferir_espelho_da_planilha(conn, ex, numero, tipo, competencia)
         if ex and ex["estado"] in medicoes.ESTADOS_ESPELHO:
@@ -388,8 +388,10 @@ def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
                              **({"sem_boletim": {"justificativa": justificativa_sem_boletim.strip(),
                                                  "medicoes": [m["id"] for m in sem_boletim]}} if sem_boletim else {})})
         for m in sem_boletim:
+            # issue #460: a planilha/carta so' gerada segue sem o envio ao orgao registrado, e o registro diz isso
+            sem_envio = {"envio_planilha_registrado": False} if m["estado"] == "planilha_gerada" else {}
             auditoria.registrar(conn, usuario["id"], "medicao.sem_boletim", "medicao", m["id"], {"estado": m["estado"]},
-                                {"justificativa": justificativa_sem_boletim.strip(), "espelho_id": eid})
+                                {"justificativa": justificativa_sem_boletim.strip(), "espelho_id": eid, **sem_envio})
     return eid
 
 

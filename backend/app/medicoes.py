@@ -48,10 +48,6 @@ TRANSICOES = {
     "desistida": set(),
 }
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
-# Issue #289: a planilha/carta GERADA nao recebe espelho: o boletim (#284) substitui a ponte ao espelho, nao o envio ao
-# protocolo (regra de 04/11/2026, depois das decisoes da #284 de 03/11)
-PLANILHA_SEM_ENVIO = ("está com a planilha/carta gerada: envie ao protocolo (ou registre o envio por fora) antes de "
-                      "gerar o espelho")
 PEDIDO_ENVIADO = "O pedido congelou no envio da planilha/carta: não muda à mão"
 # Issue #281: estados em que o pedido (valor protocolado) e' o da planilha/carta e so' muda por revisao
 ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
@@ -420,7 +416,9 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
         if r["acao"] == "medicao.sem_boletim":
             # issue #284: o espelho gerado sem o boletim do orgao, com a justificativa de quem seguiu
             if d_d and d_d.get("justificativa"):
-                texto = f"Espelho gerado sem boletim: {d_d['justificativa']}"
+                # issue #460: a planilha/carta so' gerada seguiu sem o envio ao orgao registrado
+                sem_envio = " e sem o envio da planilha/carta registrado" if d_d.get("envio_planilha_registrado") is False else ""
+                texto = f"Espelho gerado sem boletim{sem_envio}: {d_d['justificativa']}"
                 out[int(r["entidade_id"])].append({"data": r["criado_em"],
                                                    "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
             continue
@@ -698,13 +696,15 @@ def valor_travado(m) -> tuple[int, str] | None:
 
 
 def conferir_espelho_da_planilha(conn, ja: dict, numero: int, tipo: str, competencia: str) -> None:
-    """Issue #289: a medicao da planilha/carta so' recebe espelho depois do envio ao orgao, sem revisao registrada
-    e ainda nao enviada e na competencia dela. O VALOR nao e' conferido aqui: desde a #284 o espelho usa o aprovado do
-    boletim, senao o pedido (espelhos._calcular, valor travado). `ja` traz id, estado, competencia e
-    planilha_enviada_em."""
-    if ja["estado"] == "planilha_gerada":
-        raise ValueError(f"{nome_medicao(numero, tipo)} {PLANILHA_SEM_ENVIO}")
-    if not ja.get("planilha_enviada_em"):
+    """Issue #289: a medicao da planilha/carta so' recebe espelho sem envio saindo pelo sistema, sem revisao
+    registrada e ainda nao enviada e na competencia dela. Issue #460 (decisao do Leo de 07/11/2026): a planilha/carta
+    so' GERADA, nunca enviada, tambem recebe, em toda obra, pelo "seguir sem boletim" com justificativa (a operacao
+    ainda envia ao orgao por fora). O VALOR nao e' conferido aqui: desde a #284 o espelho usa o aprovado do boletim,
+    senao o pedido (espelhos._calcular, valor travado). `ja` traz id, estado, competencia e planilha_enviada_em."""
+    # a que veio da planilha/carta so' gerada (#460) nao tem `planilha_enviada_em`: a versao registrada a mantem presa
+    # a' competencia dela tambem na versao nova do espelho (revisor da PR #528)
+    if (ja["estado"] != "planilha_gerada" and not ja.get("planilha_enviada_em")
+            and conn.execute("SELECT 1 FROM medicao_planilhas WHERE medicao_id=? LIMIT 1", (ja["id"],)).fetchone() is None):
         return
     # uma versao saindo pelo sistema (reserva ativa) segura o espelho: o e-mail ainda vai registrar o envio dela
     if conn.execute("SELECT 1 FROM medicao_planilha_envios WHERE medicao_id=? AND envio_id IS NULL "
@@ -745,8 +745,8 @@ def criar_para_espelho(conn, usuario_id: int, contrato_id: int, numero: int, tip
                                 {"numero": numero, "tipo": tipo, "competencia": competencia,
                                  "estado": "espelho_gerado", "valor_protocolado_centavos": valor_centavos})
             return cur.lastrowid
-        # Issue #289: a planilha/carta so' recebe espelho enviada, sem revisao pendente e na competencia dela (a
-        # protocolada em diante cai na recusa de baixo)
+        # Issue #289: a planilha/carta so' recebe espelho sem envio saindo, sem revisao pendente e na competencia dela
+        # (a protocolada em diante cai na recusa de baixo)
         if ja["estado"] in (*ESTADOS_ANTES_DO_ESPELHO, *ESTADOS_ESPELHO):
             conferir_espelho_da_planilha(conn, dict(ja), numero, tipo, competencia)
         if ja["estado"] in ESTADOS_ANTES_DO_ESPELHO:
