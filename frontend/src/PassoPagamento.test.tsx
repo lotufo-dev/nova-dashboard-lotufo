@@ -89,12 +89,24 @@ describe("Passo Pagamento (#514)", () => {
     expect(screen.getByText("Recebido")).toBeTruthy();
   });
 
-  it("nota sem título no RM: a linha mostra “—”; a fatura do consórcio é marcada na tabela", () => {
+  it("nota sem título no RM: a linha mostra “—”; a nota de outra coligada é marcada na tabela, sem dizer que é a fatura", () => {
     montar({ grupo: [com({ notas: [nota(1, "2351", 418330386, 0), nota(3, "21", 990529648, 911287276, 0, { coligada: 90, da_lotufo: false, da_cota: false })],
       pagamento_cota: cota(null, null, null) })] });
     expect(screen.getByLabelText("A receber: —")).toBeTruthy();
-    expect(screen.getByText(/fatura do consórcio/)).toBeTruthy();
+    expect(screen.getByText(/outra coligada/)).toBeTruthy();
+    expect(screen.queryByText(/fatura do consórcio/)).toBeNull();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("espelho sem saída da Lotufo (cota zero, completa): A receber R$ 0,00, sem barra, sem “Recebido” nem “Aguardando o órgão”", () => {
+    montar({ grupo: [com({ notas: [nota(3, "21", 990529648, 911287276, 911287276, { coligada: 90, da_lotufo: false, da_cota: false })],
+      pagamento_cota: cota(0, 0, 0) })] });
+    expect(screen.getByLabelText("A receber: R$ 0,00")).toBeTruthy();
+    expect(screen.queryByText("Recebido")).toBeNull();
+    expect(screen.queryByText("Aguardando o órgão")).toBeNull();
+    expect(screen.queryByText("Recebido em parte")).toBeNull();
+    expect(screen.queryByLabelText("Recebido")).toBeNull();          // sem barra
+    expect(screen.getByText("paga")).toBeTruthy();                   // a situacao da nota continua na linha dela
   });
 
   it("obra só da Lotufo e cabeçalho ainda não lido: o rótulo não fala de cota", () => {
@@ -129,8 +141,9 @@ describe("contas do pagamento", () => {
   });
 
   it("aReceber só repassa o bloco do servidor; incompleto ou ausente vira null", () => {
-    expect(aReceber([MEDICAO])).toEqual({ falta: 446533500, recebido: 0, total: 446533500, parcial: false });
-    expect(aReceber([com({ pagamento_cota: cota(null, null, null, true) })])).toEqual({ falta: null, recebido: null, total: null, parcial: true });
+    expect(aReceber([MEDICAO])).toEqual({ falta: 446533500, recebido: 0, total: 446533500, parcial: false, completo: true });
+    expect(aReceber([com({ pagamento_cota: cota(null, null, null, true) })])).toEqual({ falta: null, recebido: null, total: null, parcial: true, completo: false });
+    expect(aReceber([com({ pagamento_cota: cota(0, 0, 0) })])).toEqual({ falta: 0, recebido: 0, total: 0, parcial: false, completo: true });
     expect(aReceber([com({ pagamento_cota: undefined })]).falta).toBeNull();
     expect(aReceber([]).falta).toBeNull();
   });

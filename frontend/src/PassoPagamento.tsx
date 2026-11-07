@@ -31,7 +31,8 @@ export function diasEntre(de: string, ate: string): number | null {
 
 type NotaDaMedicao = NonNullable<Medicao["notas"]>[number];
 
-/** As notas da Lotufo (a cota dela no consorcio): a fatura do consorcio, de outra coligada, fica fora. */
+/** A nota e' da coligada da Lotufo; a de outra coligada (a fatura do consorcio, ou a NFS-e de outra consorciada) e'
+ *  so' marcada na linha dela: o servidor nao diz qual documento e', e a tela nao adivinha (gate Sol, rodada 4). */
 export const daLotufo = (n: NotaDaMedicao) => n.da_lotufo !== false;
 
 /** O que falta receber de uma nota, contra os TITULOS do RM (liquidos, sem as retencoes), nunca contra o bruto;
@@ -46,10 +47,10 @@ export function faltaDaNota(n: NotaDaMedicao): number | null {
  *  par (`pagamento_cota`, sincronizacao_rm.pagamento_cota); a tela so' exibe, sem somar nem escolher notas. Valores
  *  null ("—") quando o servidor diz que ainda nao fecham (sem espelho, nota faltando, nota sem titulo). */
 export function aReceber(grupo: Medicao[]):
-    { falta: number | null; recebido: number | null; total: number | null; parcial: boolean } {
+    { falta: number | null; recebido: number | null; total: number | null; parcial: boolean; completo: boolean } {
   const b = grupo[0]?.pagamento_cota ?? null;
-  if (!b || !b.completo) return { falta: null, recebido: null, total: null, parcial: !!b?.parcial };
-  return { falta: b.falta_centavos, recebido: b.recebido_centavos, total: b.total_centavos, parcial: b.parcial };
+  if (!b || !b.completo) return { falta: null, recebido: null, total: null, parcial: !!b?.parcial, completo: false };
+  return { falta: b.falta_centavos, recebido: b.recebido_centavos, total: b.total_centavos, parcial: b.parcial, completo: true };
 }
 
 export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui, percentualBp, total, aoReceber }: {
@@ -72,6 +73,9 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
   const rotuloCota = percentualBp !== null && percentualBp !== 10000;
   const receber = aReceber(grupo);
   const quitado = receber.falta === 0 && (receber.total ?? 0) > 0;
+  // espelho sem saida da Lotufo nesta natureza: a cota fecha em zero, e nao ha' orgao a esperar nem nada recebido
+  // (gate Sol, rodada 4); zero nao ganha frase (regra texto-na-tela), so' o R$ 0,00 do "A receber"
+  const nadaAReceber = receber.completo && receber.total === 0;
   const recebida = grupo.length > 0 && grupo.every(x => x.estado === "recebida");
   const enviada = grupo.flatMap(x => x.protocolos.map(p => p.data)).sort().at(-1) ?? null;
   const dias = enviada && !recebida ? diasEntre(enviada, hojeLocal()) : null;
@@ -127,7 +131,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
                   return (
                     <tr key={n.nota_id}>
                       <td>NF {Number(n.numero) || n.numero}{grupo.length > 1 ? ` · ${m.tipo === "reajuste" ? "reajuste" : "medição"}` : ""}
-                        {!daLotufo(n) ? " · fatura do consórcio" : ""}</td>
+                        {!daLotufo(n) ? " · outra coligada" : ""}</td>
                       <td className="col-num num">{brl(n.valor_centavos)}</td>
                       <td>{falta === null ? "—"
                         : falta === 0 ? <Selo classe="selo--ok">paga{n.recebido_em ? ` em ${fmtDataPura(n.recebido_em.slice(0, 10))}` : ""}</Selo>
@@ -150,6 +154,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
           )}
           <p>{recebida ? <Selo classe="selo--ok">Recebida</Selo>
             : quitado ? <Selo classe="selo--ok">Recebido</Selo>
+            : nadaAReceber ? null
             : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado)) ? <Selo classe={receber.parcial ? "selo--ok" : "selo--atencao"}>{receber.parcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
           {/* issue #53: o recebimento a mao e' so' do admin (o servidor recusa outro perfil) */}
           {recebiveis.map(x => (

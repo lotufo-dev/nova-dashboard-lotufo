@@ -337,17 +337,22 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
     RM (liquidos): falta titulo a titulo (`_falta_por_titulo`), recebido efetivo = devido - falta (juros num titulo
     nao cobrem outro aberto).
 
-    Devolve None quando alguma medicao do grupo nao tem espelho vigente (nao da' para saber o que esperar). Senao
-    {notas_faltam, completo, total_centavos, recebido_centavos, falta_centavos, parcial}: `completo` exige toda saida
-    com nota e toda nota com titulo; sem isso os valores vem None. Espelho sem saida da Lotufo conta zero.
-    `parcial`: alguma nota da cota ja' teve baixa e ainda falta receber (ou o resumo ainda nao fecha)."""
+    Devolve None quando nenhuma medicao do grupo tem espelho vigente (nao da' para saber o que esperar). Senao
+    {notas_faltam, completo, total_centavos, recebido_centavos, falta_centavos, parcial}: `completo` exige toda
+    medicao do grupo com espelho, toda saida com nota e toda nota com titulo; sem isso os valores vem None. Espelho
+    sem saida da Lotufo conta zero. `parcial`: alguma nota da cota ja' teve baixa e ainda falta receber (ou o resumo
+    ainda nao fecha); a irma valida ainda sem espelho (reajuste a' espera do indice) nao esconde a baixa da outra
+    metade (revisor, rodada 4 da PR #555)."""
     from app import notas as _notas   # import local: notas importa medicoes, que importa este modulo
     grupo = [medicao_id] + [i for i in [_irma_valida(conn, medicao_id)] if i is not None]
     faltam, total, recebido, falta, sem_titulo, alguma_baixa = 0, 0, 0, 0, False, False
+    com_espelho, sem_espelho = 0, 0
     for mid in grupo:
         esp = _notas.esperadas_do_espelho(conn, mid)
         if esp is None:
-            return None
+            sem_espelho += 1
+            continue
+        com_espelho += 1
         for e in esp:
             if e["nota_id"] is None:
                 faltam += 1
@@ -359,7 +364,9 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
                 continue
             f = _falta_por_titulo(conn, e["nota_id"], aberto_inteiro=True) or 0
             total += devido; falta += f; recebido += devido - f
-    completo = faltam == 0 and not sem_titulo
+    if com_espelho == 0:
+        return None
+    completo = faltam == 0 and not sem_titulo and sem_espelho == 0
     return {"notas_faltam": faltam, "completo": completo,
             "total_centavos": total if completo else None, "recebido_centavos": recebido if completo else None,
             "falta_centavos": falta if completo else None,

@@ -69,19 +69,22 @@ def esperadas_do_espelho(conn, medicao_id: int) -> list[dict] | None:
                **{c: s[c] for c in ("valor", "iss", "inss", "irrf", "ibs", "cbs", "liquido")}}
               for s in esp["saidas"] if s["natureza"] == natureza and s["emissor"] == EMISSOR_LOTUFO]
     # issue #556: a saida da Lotufo so' e' atendida por nota ATIVA da coligada da Lotufo: a NFS-e ou a fatura do
-    # consorcio (outra coligada) no mesmo municipio ou com o mesmo valor nao ocupa a vaga dela. Sem a coligada no
-    # cadastro (base antiga), nao ha' como separar e vale qualquer coligada, como antes.
+    # consorcio (outra coligada) no mesmo municipio ou com o mesmo valor nao ocupa a vaga dela. Sem a coligada da
+    # Lotufo no cadastro nao ha' como separar: nenhuma nota e' candidata e as saidas ficam faltando (gate Sol, rodada 4
+    # da PR #555: falhar fechado, em vez de aceitar qualquer coligada e somar a fatura do consorcio na cota).
     lotufo = _coligada_lotufo(conn)
     candidatas = [n for n in _alocadas(conn, medicao_id)
-                  if (n.get("situacao") or "ativa") == "ativa" and (lotufo is None or n["coligada"] == lotufo)]
+                  if lotufo is not None and (n.get("situacao") or "ativa") == "ativa" and n["coligada"] == lotufo]
     return _casar_saidas(saidas, candidatas)
 
 
 def faltam(conn, medicao_id: int) -> int:
-    """Saidas da Lotufo ainda sem nota. Com espelho vigente sem saida da Lotufo, zero (gate Sol, PR #555: antes caia
-    no caso sem espelho e qualquer nota alocada contava); so' a medicao sem espelho espera alguma nota alocada."""
+    """Saidas da Lotufo ainda sem nota. Espelho vigente sem saida da Lotufo nesta natureza (a nota e' da outra coligada
+    do consorcio) e medicao sem espelho esperam ALGUMA nota alocada: "nota emitida" e' uma nota que existe (rodada 5
+    da PR #555: a lista vazia fechava sem nota e com a data nula, e a medicao sumia do faturado do mes). A cota da
+    Lotufo nesses casos continua zero / sem `da_cota` (pagamento_cota e notas_da_medicao usam `esperadas_do_espelho`)."""
     esp = esperadas_do_espelho(conn, medicao_id)
-    if esp is not None:
+    if esp:
         return sum(1 for e in esp if e["nota_id"] is None)
     return 0 if _alocadas(conn, medicao_id) else 1
 
@@ -286,11 +289,12 @@ def fechar_se_completa(conn, usuario_id, medicao_id: int) -> bool:
     m = conn.execute("SELECT estado FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
     if m is None or m["estado"] not in medicoes.ESTADOS_ESPELHO or faltam(conn, medicao_id) > 0:
         return False
-    # gate Sol, PR #555: com espelho, a data e' a maior emissao das notas que atendem as saidas da Lotufo (fatura do
-    # consorcio ou nota extra, emitidas depois, nao mudam o marco); sem espelho, a de todas as notas alocadas
+    # gate Sol, PR #555: com saida da Lotufo no espelho, a data e' a maior emissao das notas que a atendem (fatura do
+    # consorcio ou nota extra, emitidas depois, nao mudam o marco); sem espelho, ou espelho sem saida da Lotufo (a nota
+    # e' a fatura do consorcio), a de todas as notas alocadas (revisor, rodada 4: a lista vazia deixava a data nula)
     esp = esperadas_do_espelho(conn, medicao_id)
     alocadas = _alocadas(conn, medicao_id)
-    if esp is not None:
+    if esp:
         casadas = {e["nota_id"] for e in esp if e["nota_id"] is not None}
         alocadas = [n for n in alocadas if n["id"] in casadas]
     datas = [n["emissao"] for n in alocadas if n["emissao"]]
