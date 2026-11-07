@@ -90,12 +90,12 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
           )}
         </div>
         {lista && (
-          <p className="obras-totais" aria-label="Totais">
+          <div className="obras-totais" role="group" aria-label="Totais">
             <span>Contratado <strong className="num">{emMilhoes(totais.contratado)}</strong></span>
             <span>Medido <strong className="num">{emMilhoes(totais.medido)}</strong></span>
             <span>Saldo <strong className="num">{emMilhoes(totais.saldo)}</strong></span>
             <span>A receber <strong className="num">{totais.temReceber ? emMilhoes(totais.aReceber) : "—"}</strong></span>
-          </p>
+          </div>
         )}
       </header>
       <div className="pagina">
