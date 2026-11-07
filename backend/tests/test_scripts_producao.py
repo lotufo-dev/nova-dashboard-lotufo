@@ -67,15 +67,59 @@ def test_deploy_le_a_porta_da_tarefa_agendada():
     # depois do checkout, sem rollback. A porta vem da tarefa; -Porta diferente dela aborta antes.
     script = _ler("deploy.ps1")
     assert "[int]$Porta = 0" in script
-    assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in script
+    # Issue #386: a tarefa e' lida por schtasks /Query /XML (processo filho com tempo limite), nunca pelo cmdlet CIM
+    assert "ScheduledTask" not in _codigo(script)
+    leitura = script[script.index("function ArgumentosDaTarefa"):script.index("$argumentosDaTarefa = ArgumentosDaTarefa")]
+    assert 'Agendar @("/Query", "/TN", $tarefaNome, "/XML")' in leitura
+    # estouro aborta antes de tudo, com a frase da issue; tarefa inexistente guarda a saida do schtasks
+    estouro = _bloco_do_if(leitura, "if ($r.Estourou) {")
+    assert "$msgAgendador (schtasks /Query levou mais de $LimiteAgendador s); nada foi alterado" in estouro
+    assert "exit 1" in estouro
+    assert '$msgAgendador = "deploy abortado: agendador de tarefas nao respondeu"' in script
+    assert "if ($r.Codigo -ne 0) { $script:saidaQuery = $r.Saida; return $null }" in leitura
+    # os argumentos saem de <Arguments> (todas as acoes, como o Actions.Arguments do cmdlet), com o escape do XML desfeito
+    padrao = re.search(r'\[regex\]::Matches\(\$r\.Saida, "([^"]+)"\)', leitura).group(1)
+    xml = ('<?xml version="1.0" encoding="UTF-16"?><Task><Actions Context="Author"><Exec><Command>powershell.exe'
+           '</Command><Arguments>-NoProfile -File &quot;C:\\x\\rodar_producao.ps1&quot; -Raiz &quot;D:\\Dados&quot; '
+           '-Porta 8080</Arguments></Exec></Actions></Task>')
+    assert [m.group(1) for m in re.finditer(padrao, xml)] == [
+        '-NoProfile -File &quot;C:\\x\\rodar_producao.ps1&quot; -Raiz &quot;D:\\Dados&quot; -Porta 8080']
+    assert "[System.Net.WebUtility]::HtmlDecode(" in leitura
+    assert "nao consegui ler os argumentos da tarefa $tarefaNome no XML do schtasks; nada foi alterado" in leitura
+    # o /XML redirecionado para arquivo costuma vir nos bytes da pagina de codigo; com NUL no meio e' UTF-16 de verdade
+    # e e' relido como Unicode (## Suposicoes da PR #389)
+    comum = _ler("comum_agendador.ps1")
+    ler = comum[comum.index("function LerSaidaAgendador"):comum.index("function Agendador")]
+    assert "Get-Content $arquivo -Raw -ErrorAction SilentlyContinue" in ler
+    assert "$texto.IndexOf([char]0) -ge 0" in ler and "-Encoding Unicode" in ler
     assert re.search(r'-match "-Porta \(\\d\+\)"', script)
     # tarefa sem -Porta = padrao do modo do rodar_producao.ps1 (issue #425, /code-review): 80 com -SemTls, 8443 com TLS
     funcao = script[script.index("function PortaDaTarefa"):script.index("$portaTarefa = PortaDaTarefa")]
+    assert "if ($null -eq $argumentosDaTarefa) { return 0 }" in funcao
     assert 'if ($argumentosTarefa -match "-SemTls\\b") { return 80 }' in funcao
     assert funcao.rstrip().endswith("return 8443\n}")
-    assert "nao bate com a tarefa DashboardLotufo" in script
-    # a conferencia vem antes de qualquer git checkout
+    assert "-Porta $Porta nao bate com a tarefa $tarefaNome (porta $portaTarefa); nada foi alterado" in script
+    # a leitura e a conferencia vem antes de qualquer git checkout
+    assert script.index("$argumentosDaTarefa = ArgumentosDaTarefa") < script.index("$portaTarefa = PortaDaTarefa")
     assert script.index("$portaTarefa = PortaDaTarefa") < script.index("function Construir")
+
+
+def test_deploy_para_a_tarefa_por_schtasks_tambem_no_ponto_da_sentinela_e_mantem_o_sentinela_ao_falhar():
+    # Juncao da #386 com a #478: a parada do ponto da sentinela tambem passa pelo schtasks com tempo limite, e marca a
+    # tarefa como (talvez) parada ANTES do /End; a volta do pinado registra o deploy do commit anterior; o rollback que
+    # falha mantem o sentinela do watchdog.
+    codigo = _codigo(_ler("deploy.ps1"))
+    sentinela = codigo[codigo.index("function SentinelaAntesDa456"):codigo.index("function AvisarSeCopia")]
+    assert sentinela.index("$script:tarefaParada = $true") < sentinela.index('ComandoTarefa "End" $false')
+    assert sentinela.index('ComandoTarefa "End" $false') < sentinela.index("LiberarPorta")
+    voltar = codigo[codigo.index("function VoltarPinado"):codigo.index("function SentinelaAntesDa456")]
+    assert voltar.index("Reconstruir") < voltar.index("RegistrarDeploy")
+    rollback = codigo[codigo.index("ROLLBACK para $anterior"):]
+    tentativa = rollback[:rollback.index("} catch {")]
+    assert all(passo in tentativa for passo in ("SentinelaAntesDa456 $novo $anterior", "Construir $anterior",
+                                                 "RegistrarDeploy", "Reiniciar"))
+    assert "$script:manterSentinela = $true" in rollback[rollback.index("} catch {"):]
+    assert "if ($script:manterSentinela)" in codigo and "Remove-Item $pause" in codigo
 
 
 def test_deploy_faz_rollback_quando_a_instalacao_nao_e_autorizada():
@@ -137,7 +181,9 @@ def test_deploy_le_a_raiz_da_tarefa_e_dela_tira_instalacao_e_banco():
     script = _ler("deploy.ps1")
     assert '[string]$Raiz = ""' in script
     funcao = script[script.index("function RaizDaTarefa"):script.index("$raizTarefa = RaizDaTarefa")]
-    assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in funcao
+    # os argumentos lidos uma vez por schtasks /Query /XML (issue #386); tarefa inexistente = sem raiz
+    assert 'if ($null -eq $argumentosDaTarefa) { return "" }' in funcao
+    assert script.index("$argumentosDaTarefa = ArgumentosDaTarefa") < script.index("$raizTarefa = RaizDaTarefa")
     assert 'return "C:\\DashboardLotufo"' in funcao        # tarefa sem -Raiz = padrao do rodar_producao.ps1
     assert "nao bate com a tarefa DashboardLotufo (raiz $raizTarefa)" in script
     assert script.index("$raizTarefa = RaizDaTarefa") < script.index("function Construir")   # antes do checkout
@@ -287,7 +333,7 @@ def test_deploy_confere_a_saude_no_modo_da_tarefa():
     # a tarefa diz o modo: com -SemTls (a producao de antes do corte) a saude e' HTTP; sem ele, HTTPS pelo thumbprint
     script = _ler("deploy.ps1")
     funcao = script[script.index("function TlsDaTarefa"):script.index("$comTls = TlsDaTarefa")]
-    assert 'Get-ScheduledTask -TaskName "DashboardLotufo"' in funcao
+    assert "if ($null -eq $argumentosDaTarefa) { return $true }" in funcao   # lida por schtasks /Query /XML (#386)
     assert '-match "-SemTls\\b"' in funcao
     assert '. (Join-Path $PSScriptRoot "comum_tls.ps1")' in script
     assert '$certificado = Join-Path $Raiz "segredos\\tls\\cert.pem"' in script
@@ -346,7 +392,7 @@ def test_watchdog_nao_reinicia_por_problema_no_conferidor():
     bloco = script[conferidor:script.index("if (Saudavel) { exit 0 }")]
     assert "$script:thumbprint = Get-ThumbprintDoCertificado -Caminho $Certificado" in bloco
     assert "producao NAO reiniciada" in bloco and "exit 1" in bloco
-    assert script.index('SairSePausado ""') < conferidor < script.index("Stop-ScheduledTask -TaskName")
+    assert script.index('SairSePausado ""') < conferidor < script.index('Agendador @("/End", "/TN", $Tarefa)')
 
 
 def test_watchdog_le_o_thumbprint_uma_vez_e_usa_em_todas_as_consultas():
@@ -368,8 +414,8 @@ def test_watchdog_confere_o_sentinela_antes_de_cada_passo_na_tarefa():
     script = _ler("watchdog.ps1")
     funcao = script[script.index("function SairSePausado"):script.index('SairSePausado ""')]
     assert "if (Test-Path $Pausa) {" in funcao and "exit 0" in funcao
-    parar = script.index("Stop-ScheduledTask -TaskName")
-    iniciar = script.index("Start-ScheduledTask -TaskName")
+    parar = script.index('Agendador @("/End", "/TN", $Tarefa)')
+    iniciar = script.index('Agendador @("/Run", "/TN", $Tarefa)')
     antes = script.rindex('SairSePausado "antes de parar a tarefa"', 0, parar)
     entre = script.index('SairSePausado "entre a parada e o inicio"')
     assert antes < parar < entre < iniciar
@@ -377,18 +423,32 @@ def test_watchdog_confere_o_sentinela_antes_de_cada_passo_na_tarefa():
     assert script.index("Start-Sleep -Seconds 15") < script.rindex('SairSePausado ""') < script.rindex("if (Saudavel) { exit 0 }")
 
 
-def test_watchdog_so_inicia_a_tarefa_que_de_fato_parou():
-    # Gate Sol (rodada 2): Stop com SilentlyContinue + catch vazio anulava a parada; instancia ainda "Running" fazia o
-    # Start ser ignorado (IgnoreNew) com o log dizendo "disparado"
+def test_watchdog_fala_com_o_agendador_por_schtasks_com_tempo_limite():
+    # Issue #386: o provedor CIM do agendador pode ficar sem responder (deploy de 2026-11-04 parado mais de 10 min em
+    # Get-ScheduledTask); o watchdog para e inicia a tarefa por schtasks /End e /Run, cada um com tempo limite.
     script = _ler("watchdog.ps1")
     codigo = _codigo(script)
-    assert "Stop-ScheduledTask -TaskName $Tarefa -ErrorAction Stop" in codigo
+    assert "ScheduledTask" not in codigo
     assert "SilentlyContinue" not in codigo
-    assert 'if ("$estado" -eq "Running") { Stop-ScheduledTask' in codigo   # Ready com o processo morto vai direto ao Start
-    assert "FALHA ao parar a tarefa, nada iniciado" in codigo
-    espera = codigo[codigo.index("$parada = $false"):codigo.index("Start-ScheduledTask -TaskName")]
-    assert '"$estado" -ne "Running"' in espera and "continua '$estado' depois da parada -> nada iniciado" in espera
-    assert "exit 1" in espera
+    assert '. (Join-Path $PSScriptRoot "comum_agendador.ps1")' in codigo
+    assert "[int]$LimiteAgendador = 30" in codigo
+    parar = codigo.index('$fim = Agendador @("/End", "/TN", $Tarefa) $LimiteAgendador')
+    # agendador que nao responde a tempo nao inicia nada: sai com 1 e o watchdog repete em 3 min
+    estouro = _bloco_do_if(codigo, "if ($fim.Estourou) {")
+    assert "schtasks /End levou mais de $LimiteAgendador s) -> nada iniciado" in estouro and "exit 1" in estouro
+    # /End que falha (tarefa "Ready" com o processo morto, incidente de 2026-09-10) so' vai para o log e segue
+    assert "(segue para o /Run)" in codigo
+    iniciar = codigo.index('$inicio = Agendador @("/Run", "/TN", $Tarefa) $LimiteAgendador')
+    assert parar < codigo.index("try { $orfao = DonoDaPorta }") < iniciar
+    assert "exit 1" in _bloco_do_if(codigo, "if ($inicio.Estourou) {")
+    # a funcao comum mata o schtasks que estoura o limite e devolve Estourou, sem esperar para sempre
+    comum = _codigo(_ler("comum_agendador.ps1"))
+    agendador = comum[comum.index("function Agendador"):]
+    assert "$p.WaitForExit($LimiteSegundos * 1000)" in agendador
+    assert "Stop-Process -Id $p.Id -Force" in agendador and "Estourou = $true" in agendador
+    for nome in ("comum_agendador.ps1",):
+        bruto = (SCRIPTS / nome).read_bytes()
+        assert not bruto.startswith(b"\xef\xbb\xbf") and bruto.isascii()
 
 
 def _bloco_do_if(codigo, cabeca):
@@ -438,18 +498,18 @@ def test_watchdog_so_encerra_o_uvicorn_da_dashboard_pelos_argumentos_exatos():
 
 
 def test_watchdog_encerra_o_uvicorn_orfao_antes_de_iniciar_a_tarefa():
-    # Issue #480: Stop-ScheduledTask nao mata o uvicorn (incidente de 2026-09-21); o orfao segura a porta, a instancia
+    # Issue #480: parar a tarefa nao mata o uvicorn (incidente de 2026-09-21); o orfao segura a porta, a instancia
     # nova morre com WinError 10048 e o watchdog repetia o Start a cada 3 minutos, para sempre
     codigo = _codigo(_ler("watchdog.ps1"))
     linhas = [linha.strip() for linha in codigo.splitlines()]
-    parar = codigo.index("$parada = $false")
+    parar = codigo.index('Agendador @("/End", "/TN", $Tarefa)')
     pausa_porta = codigo.index('SairSePausado "antes de conferir a porta"')
     consulta = codigo.index("try { $orfao = DonoDaPorta }")
     pausa_matar = codigo.index('SairSePausado "antes de encerrar o orfao"')
     reconfere = codigo.index("try { $agora = DonoDaPorta }")
     matar = codigo.index("Stop-Process -Id $orfao.ProcessId -Force")
     entre = codigo.index('SairSePausado "entre a parada e o inicio"')
-    iniciar = codigo.index("Start-ScheduledTask -TaskName")
+    iniciar = codigo.index('Agendador @("/Run", "/TN", $Tarefa)')
     # Gate Sol da PR #494 (S3): o sentinela e' conferido antes de consultar a porta e logo antes de matar
     assert parar < pausa_porta < consulta < pausa_matar < reconfere < matar < entre < iniciar
     # reuso de PID: o dono e' reconferido (PID e criacao) antes do Stop-Process
@@ -473,8 +533,11 @@ def test_watchdog_acusa_tarefa_que_nao_iniciou_e_saude_que_nao_voltou():
     # Gate Sol: tarefa desabilitada da' erro nao fatal e o log dizia "disparado"; sem saude depois, sai com 1
     script = _ler("watchdog.ps1")
     assert '$ErrorActionPreference = "Stop"' in script
-    assert "Start-ScheduledTask -TaskName $Tarefa -ErrorAction Stop" in script
-    fim = script[script.index("Start-Sleep -Seconds 25"):]
+    # schtasks /Run com codigo diferente de 0 (tarefa desabilitada, inexistente) e' falha, nunca "disparado" (#386)
+    falha = _bloco_do_if(script, "if ($inicio.Codigo -ne 0) {")
+    assert "FALHA ao iniciar (schtasks /Run devolveu" in falha and "exit 1" in falha
+    assert script.index(falha) < script.index('Escrever "schtasks /Run disparado"')
+    fim =script[script.index("Start-Sleep -Seconds 25"):]
     assert '"apos-reinicio saudavel=sim"' in fim
     assert 'apos-reinicio saudavel=nao ($script:ultimoErro)' in fim and "exit 1" in fim
     assert "pos-restart" not in script and "=True" not in script and "=False" not in script
