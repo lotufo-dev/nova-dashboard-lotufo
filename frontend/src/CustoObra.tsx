@@ -23,11 +23,71 @@ type Linha = Totais & {
   competencia: string; medicoes: { id: number; numero: number; nome: string }[]; previsto_centavos: number | null;
   grupos: LinhaGrupo[];
 };
+/** #492: custo por unidade medida do item-chave do grupo; quantidade em texto decimal ("1234.5"), sem float. */
+type ItemChave = {
+  grupo: string; item: string; descricao: string | null; unidade: string; quantidade_acumulada: string | null;
+  medicao: string | null; custo_centavos: number; custo_unitario_centavos: number | null;
+  preco_unitario_centavos: number | null; diferenca_centavos: number | null;
+  situacao: "ok" | "sem_medicao" | "sem_custo";
+};
 type Custo = {
   contrato_id: number; obra: string; grupos: string[]; linhas: Linha[];
   acumulado: Totais & { previsto_centavos: number };
+  itens_chave?: ItemChave[];
   rm: { sincronizado_em: string | null; desatualizado: boolean };
 };
+
+/** "12345.5" -> "12.345,5", direto do texto (a quantidade nao passa por float). */
+function fmtQuantidade(q: string | null): string {
+  if (q === null) return "—";
+  const negativo = q.startsWith("-");
+  const [inteiro, decimal] = (negativo ? q.slice(1) : q).split(".");
+  const milhar = inteiro.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${negativo ? "−" : ""}${milhar}${decimal ? `,${decimal}` : ""}`;
+}
+
+const SITUACAO_CHAVE = { sem_medicao: "sem medição", sem_custo: "sem custo lançado" } as const;
+
+function ItensChave({ c }: { c: Custo }) {
+  const itens = c.itens_chave ?? [];
+  if (itens.length === 0) return null;
+  return (
+    <>
+      <h3 className="cartao__titulo">Custo por unidade medida</h3>
+      <Rolagem rotulo="Custo por unidade dos itens-chave">
+        <table className="tabela">
+          <caption className="sr-only">Custo por unidade dos itens-chave, em {c.obra}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Grupo</th>
+              <th scope="col">Item</th>
+              <th scope="col">Unidade</th>
+              <th scope="col" className="col-num">Quantidade medida</th>
+              <th scope="col" className="col-num">Custo por unidade</th>
+              <th scope="col" className="col-num">Preço do contrato</th>
+              <th scope="col" className="col-num">Diferença</th>
+            </tr>
+          </thead>
+          <tbody>
+            {itens.map(k => (
+              <tr key={k.grupo}>
+                <th scope="row">{k.grupo}</th>
+                <td>{k.descricao ? `${k.item} ${k.descricao}` : k.item}</td>
+                <td>{k.unidade}</td>
+                <td className="col-num num">{fmtQuantidade(k.quantidade_acumulada)}</td>
+                <td className="col-num dinheiro num">
+                  {k.situacao === "ok" ? brl(k.custo_unitario_centavos) : SITUACAO_CHAVE[k.situacao]}
+                </td>
+                <td className="col-num dinheiro num">{brl(k.preco_unitario_centavos)}</td>
+                <td className="col-num dinheiro num">{brl(k.diferenca_centavos)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Rolagem>
+    </>
+  );
+}
 
 /** Linha de grupo sem nada no mes (sem medido e sem custo) nao entra: so' poluiria a competencia. */
 function temValor(g: LinhaGrupo): boolean {
@@ -147,7 +207,7 @@ export default function CustoObra() {
       )}
       {erroObra !== null && erroObra.obra === obra
         ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroObra.texto}</p>
-        : atual === null ? <div className="vazio"><p>Carregando…</p></div> : <Tabela c={atual} />}
+        : atual === null ? <div className="vazio"><p>Carregando…</p></div> : <><Tabela c={atual} /><ItensChave c={atual} /></>}
     </section>
   );
 }

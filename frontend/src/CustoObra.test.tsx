@@ -116,6 +116,42 @@ describe("CustoObra (#491)", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("item-chave (#492): custo por unidade, preço do contrato e a diferença; sem medição e sem custo por extenso", async () => {
+    const chave = (grupo: string, extra: object) => ({
+      grupo, item: "1.2", descricao: "Escavação", unidade: "m³", quantidade_acumulada: "12345.5", medicao: "2ª medição",
+      custo_centavos: 20_01, custo_unitario_centavos: 6_67, preco_unitario_centavos: 12_35, diferenca_centavos: 5_68,
+      situacao: "ok", ...extra });
+    responder({ ...CUSTO, itens_chave: [
+      chave("Terraplenagem", {}),
+      chave("Pavimentação", { item: "2.1", quantidade_acumulada: null, custo_unitario_centavos: null,
+        preco_unitario_centavos: null, diferenca_centavos: null, situacao: "sem_medicao", medicao: null }),
+      chave("Base", { item: "3.1", custo_centavos: 0, custo_unitario_centavos: null, diferenca_centavos: null,
+        situacao: "sem_custo" }),
+    ] });
+    render(<CustoObra />);
+    const tabela = await screen.findByRole("table", { name: /Custo por unidade dos itens-chave/ });
+    const terra = within(tabela).getByText("Terraplenagem").closest("tr")!;
+    expect(within(terra).getByText(/1\.2/)).toBeTruthy();
+    expect(within(terra).getByText("m³")).toBeTruthy();
+    expect(within(terra).getByText("12.345,5")).toBeTruthy();
+    expect(within(terra).getByText("R$ 6,67")).toBeTruthy();
+    expect(within(terra).getByText("R$ 12,35")).toBeTruthy();
+    expect(within(terra).getByText("R$ 5,68")).toBeTruthy();
+    const pav = within(tabela).getByText("Pavimentação").closest("tr")!;
+    expect(within(pav).getByText("sem medição")).toBeTruthy();
+    const base = within(tabela).getByText("Base").closest("tr")!;
+    expect(within(base).getByText("sem custo lançado")).toBeTruthy();
+    expect(within(base).getByText("R$ 12,35")).toBeTruthy();
+  });
+
+  it("sem item-chave cadastrado (#492), a tabela do custo por unidade não aparece", async () => {
+    responder({ ...CUSTO, itens_chave: [] });
+    render(<CustoObra />);
+    await screen.findByRole("table");
+    expect(screen.queryByRole("table", { name: /Custo por unidade/ })).toBeNull();
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+  });
+
   it("grupo de mês sem leitura mostra a diferença como traço, não o custo negativo", async () => {
     const abril = CUSTO.linhas[1];
     const comCusto = { ...abril, grupos: [{ ...abril.grupos[0], apontado_centavos: 100_000_00, custo_centavos: 100_000_00,
