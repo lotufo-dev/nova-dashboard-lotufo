@@ -650,6 +650,27 @@ def test_cabecalho_do_termo_repetido_no_anexo_nao_vira_timbre(cenario):
         protocolo._recusar_termo_fora_do_assinado(c, p, montado, assinado)
 
 
+def test_bloco_do_docusign_no_fim_da_carta_nao_empurra_o_rodape_para_fora_da_borda(cenario):
+    # Revisor, rodada 3 da PR #549: pacote antigo (sem o timbre gravado) que cita o termo, com rodape repetido logo
+    # depois da frase; o assinado e' o mesmo pacote com o bloco da assinatura no fim da pagina da carta, e entra
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    aps = [{"medicao_id": 1, "competencia": "09/2026", "chave": "ap", "numero": "1"}]
+    c.execute("UPDATE protocolos SET montado_apostilamentos=? WHERE id=?",
+              (json.dumps({"cita": True, "apostilamentos": aps}), pid))
+    c.commit()
+    p = protocolo._linha(c, pid)
+    rodape = "Rua Antiga, 123 - Cuiabá/MT\nTel.: (65) 3000-0001 contato@exemplo.com.br"
+    carta_ = ("Ofício nº 302\nAo órgão\nSenhor fiscal,\nSegue a medição.\nCom o reajuste.\n"
+              + protocolo.frase_do_apostilamento(aps)
+              + "\n" + rodape)
+    anexo = "Planilha\nItem 1\nItem 2\nItem 3\nItem 4\nItem 5\nItem 6\n" + rodape
+    montado = [carta_, anexo, anexo]
+    assinado = [carta_ + "\nDocuSigned by:\nAssinante Exemplo\n4C6B1A2D3E4F4A5B...", anexo, anexo]
+    protocolo._recusar_termo_fora_do_assinado(c, p, montado, assinado)       # nao recusa
+
+
 def test_competencia_acrescentada_ao_mesmo_termo_tambem_e_conferida(cenario):
     # Critico 2: a correcao acrescenta uma competencia no comeco da lista do mesmo termo (numero igual)
     c, ids = cenario

@@ -1048,7 +1048,8 @@ def _plano_sem_timbre(conn, p: dict, paginas: list[str], montado: list[str] | No
     fixos = sorted({f for x in timbre if (f := assinatura._plano(x))}, key=len, reverse=True)
     out = []
     for t in paginas:
-        plano = assinatura._plano(assinatura.sem_bloco_de_assinatura(_sem_bordas(t, bordas)))
+        # o bloco do DocuSign sai antes: a janela do topo e do pe' e' contada sem ele (revisor, rodada 3)
+        plano = assinatura._plano(_sem_bordas(assinatura.sem_bloco_de_assinatura(t), bordas))
         for f in fixos:
             plano = plano.replace(f, "")
         out.append(plano)
