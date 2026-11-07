@@ -293,3 +293,162 @@ def test_competencia_com_uma_medicao_lida_e_outra_nao_fica_sem_diferenca_por_gru
     # o total do mes continua fechando
     assert mar["medido_centavos"] == 300_01 and mar["custo_centavos"] == 150_00 and mar["diferenca_centavos"] == 150_01
     assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"]
+
+
+# --- issue #492: custo unitario realizado do item-chave ----------------------------------------------------------
+
+def _chave(conn, cid, grupo, codigo, unidade):
+    conn.execute("UPDATE custo_grupos SET item_chave_codigo=?, item_chave_unidade=? WHERE contrato_id=? AND nome=?",
+                 (codigo, unidade, cid, grupo))
+    conn.commit()
+
+
+def _leitura_itens(conn, cid, mid, itens: dict[str, list[dict]]):
+    """Leitura com itens de verdade: {grupo: [{item, quantidade_acumulada, preco_unitario_centavos, valor}]}."""
+    cad = medicao_grupos.cadastro_de_custo(conn, cid)
+    pedido = conn.execute("SELECT valor_protocolado_centavos FROM medicoes WHERE id=?", (mid,)).fetchone()[0]
+    grupos = []
+    total = 0
+    for g, its in itens.items():
+        lista = []
+        for it in its:
+            lista.append({"item": it["item"], "codigo": None, "descricao": it.get("descricao", "Serviço"),
+                          "unidade": it.get("unidade", "m³"), "quantidade_contratada": None,
+                          "quantidade_medida": None, "quantidade_acumulada": it["quantidade_acumulada"],
+                          "preco_unitario_centavos": it["preco_unitario_centavos"],
+                          "valor_medido_centavos": it["valor"], "valor_acumulado_centavos": None})
+            total += it["valor"]
+        grupos.append({"nome": g, "itens": lista})
+    with db.mutacao(conn):
+        medicao_grupos._gravar(conn, None, mid, "b" * 64, "carga", None, None, "lida", None,
+                               {"grupo_por": "cadastro", "grupos": grupos}, medicao_grupos._assinatura(cad),
+                               total, pedido)
+
+
+def test_custo_unitario_do_item_chave_e_custo_acumulado_sobre_quantidade_acumulada(conn):
+    cid = _obra(conn)
+    _chave(conn, cid, "Terraplenagem", "1.2", "m³")
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura_itens(conn, cid, m1, {"Terraplenagem": [
+        {"item": "1.1", "quantidade_acumulada": "999", "preco_unitario_centavos": 1, "valor": 40_00},
+        {"item": "1.2", "quantidade_acumulada": "1", "preco_unitario_centavos": 9_99, "valor": 60_00}]})
+    m2 = _medicao(conn, cid, 2, "2026-04", 200_00)
+    # a planilha mais recente: quantidade acumulada 3 e preco novo (aditivo) de 12,35
+    _leitura_itens(conn, cid, m2, {"Terraplenagem": [
+        {"item": "1.1", "quantidade_acumulada": "999", "preco_unitario_centavos": 1, "valor": 50_00},
+        {"item": "1.2", "quantidade_acumulada": "3", "preco_unitario_centavos": 12_35, "valor": 150_00,
+         "descricao": "Escavação"}]})
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", 10_00),
+                  (1, "2.001.012", P, "001.01", "1.01.003", "2026-04", 5_00),
+                  (1, "2.001.012", P, "001.02", "1.01.003", "2026-04", 1_00),     # Pavimentacao: peso do rateio
+                  (1, "2.001.012", None, None, "1.02.001", "2026-04", 6_01)])     # rateado: 5:1
+    r = custo_obra.custo_da_obra(conn, cid)
+    custo_terra = sum(_grupo(x, "Terraplenagem")["custo_centavos"] for x in r["linhas"])
+    assert custo_terra == 10_00 + 5_00 + 5_01           # o rateado 6,01 na proporcao 5:1 -> 5,01 e 1,00
+    assert r["itens_chave"] == [{
+        "grupo": "Terraplenagem", "item": "1.2", "descricao": "Escavação", "unidade": "m³",
+        "quantidade_acumulada": "3", "medicao": "2ª medição", "custo_centavos": 20_01,
+        # 20,01 / 3 = 6,67 (6,6700): arredondamento unico, meio para cima
+        "custo_unitario_centavos": 6_67, "preco_unitario_centavos": 12_35, "diferenca_centavos": 12_35 - 6_67,
+        "situacao": "ok"}]
+
+
+def test_custo_unitario_arredonda_uma_vez_meio_para_cima(conn):
+    cid = _obra(conn)
+    _chave(conn, cid, "Terraplenagem", "1.2", "t·km")
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura_itens(conn, cid, m1, {"Terraplenagem": [
+        {"item": "1.2", "quantidade_acumulada": "0.4", "preco_unitario_centavos": 3_00, "valor": 100_00}]})
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", 1)])    # 0,01 / 0,4 = 0,025 -> 0,03
+    k = custo_obra.custo_da_obra(conn, cid)["itens_chave"][0]
+    assert k["custo_unitario_centavos"] == 3 and k["diferenca_centavos"] == 2_97
+    assert k["unidade"] == "t·km"
+
+
+def test_item_chave_sem_medicao_e_sem_custo(conn):
+    cid = _obra(conn)
+    _chave(conn, cid, "Terraplenagem", "1.2", "m³")
+    _chave(conn, cid, "Pavimentação", "2.1", "m³")
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", 10_00)])
+    r = custo_obra.custo_da_obra(conn, cid)
+    # nenhuma planilha lida: sem medicao nos dois
+    assert [(k["grupo"], k["situacao"]) for k in r["itens_chave"]] == [("Terraplenagem", "sem_medicao"),
+                                                                       ("Pavimentação", "sem_medicao")]
+    assert all(k["custo_unitario_centavos"] is None and k["diferenca_centavos"] is None for k in r["itens_chave"])
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura_itens(conn, cid, m1, {
+        "Terraplenagem": [{"item": "1.2", "quantidade_acumulada": "0", "preco_unitario_centavos": 5_00, "valor": 0}],
+        "Pavimentação": [{"item": "2.1", "quantidade_acumulada": "4", "preco_unitario_centavos": 7_00,
+                          "valor": 100_00}]})
+    t, p = custo_obra.custo_da_obra(conn, cid)["itens_chave"]
+    # quantidade zero vira "sem medição", com o preco do contrato ainda a' mostra
+    assert t["situacao"] == "sem_medicao" and t["custo_unitario_centavos"] is None
+    assert t["preco_unitario_centavos"] == 5_00 and t["quantidade_acumulada"] == "0"
+    # medido, mas sem custo no grupo: "sem custo lançado", sem custo unitario nem diferenca
+    assert p["situacao"] == "sem_custo" and p["custo_centavos"] == 0
+    assert p["custo_unitario_centavos"] is None and p["diferenca_centavos"] is None
+    assert p["quantidade_acumulada"] == "4" and p["preco_unitario_centavos"] == 7_00
+
+
+def _sem_medicao(k):
+    assert k["situacao"] == "sem_medicao"
+    assert all(k[c] is None for c in ("quantidade_acumulada", "preco_unitario_centavos", "custo_unitario_centavos",
+                                      "diferenca_centavos", "medicao"))
+
+
+def test_item_chave_so_no_grupo_dele_e_comparado_por_segmento(conn):
+    """/code-review: o mesmo nº em outro grupo nao vale; "1.2." e "1.2" sao o mesmo item."""
+    cid = _obra(conn)
+    _chave(conn, cid, "Terraplenagem", "1.2", "m³")
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura_itens(conn, cid, m1, {"Terraplenagem": [
+        {"item": "1.2.", "quantidade_acumulada": "4", "preco_unitario_centavos": 8_00, "valor": 90_00}],
+        "Pavimentação": [{"item": "1.2", "quantidade_acumulada": "999", "preco_unitario_centavos": 1, "valor": 10_00}]})
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", 10_00)])
+    k = custo_obra.custo_da_obra(conn, cid)["itens_chave"][0]
+    assert (k["quantidade_acumulada"], k["preco_unitario_centavos"], k["medicao"]) == ("4", 8_00, "1ª medição")
+    assert k["custo_unitario_centavos"] == 2_50 and k["situacao"] == "ok"
+
+
+def test_planilha_mais_recente_sem_o_item_vira_sem_medicao(conn):
+    """Gate Sol (#492): a quantidade antiga contra o custo acumulado de agora nao vale."""
+    cid = _obra(conn)
+    _chave(conn, cid, "Terraplenagem", "1.2", "m³")
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura_itens(conn, cid, m1, {"Terraplenagem": [
+        {"item": "1.2", "quantidade_acumulada": "4", "preco_unitario_centavos": 8_00, "valor": 100_00}]})
+    m2 = _medicao(conn, cid, 2, "2026-04", 50_00)
+    _leitura_itens(conn, cid, m2, {"Terraplenagem": [
+        {"item": "1.1", "quantidade_acumulada": "7", "preco_unitario_centavos": 1_00, "valor": 50_00}]})
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-04", 10_00)])
+    _sem_medicao(custo_obra.custo_da_obra(conn, cid)["itens_chave"][0])
+
+
+def test_medicao_mais_recente_sem_leitura_vira_sem_medicao(conn):
+    cid = _obra(conn)
+    _chave(conn, cid, "Terraplenagem", "1.2", "m³")
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura_itens(conn, cid, m1, {"Terraplenagem": [
+        {"item": "1.2", "quantidade_acumulada": "4", "preco_unitario_centavos": 8_00, "valor": 100_00}]})
+    _medicao(conn, cid, 2, "2026-04", 50_00)                          # sem planilha lida
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-04", 10_00)])
+    _sem_medicao(custo_obra.custo_da_obra(conn, cid)["itens_chave"][0])
+
+
+def test_custo_acumulado_negativo_do_grupo_nao_vira_custo_unitario(conn):
+    cid = _obra(conn)
+    _chave(conn, cid, "Terraplenagem", "1.2", "m³")
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura_itens(conn, cid, m1, {"Terraplenagem": [
+        {"item": "1.2", "quantidade_acumulada": "4", "preco_unitario_centavos": 8_00, "valor": 100_00}]})
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", -10_01)])     # estorno
+    k = custo_obra.custo_da_obra(conn, cid)["itens_chave"][0]
+    assert k["situacao"] == "sem_custo" and k["custo_centavos"] == -10_01
+    assert k["custo_unitario_centavos"] is None and k["diferenca_centavos"] is None
+
+
+def test_grupo_sem_item_chave_fica_fora_do_bloco(conn):
+    cid = _obra(conn)
+    assert custo_obra.custo_da_obra(conn, cid)["itens_chave"] == []
+    _chave(conn, cid, "Pavimentação", "2.1", "m³")
+    assert [k["grupo"] for k in custo_obra.custo_da_obra(conn, cid)["itens_chave"]] == ["Pavimentação"]

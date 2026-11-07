@@ -1,77 +1,80 @@
-/* Inicio do redesenho (prototipo Inicio-v3, 08/10/2026). Cores pelas variaveis de tokens.css; o valor depois da
-   virgula e' a paleta nova (indigo), para a tela nao quebrar enquanto os tokens trocam. */
+/* Inicio do redesenho de 11/2026 (imagem aprovada em 06/11/2026). Cores pelos tokens de tokens.css. */
 
 .ini {
-  display: flex; flex-direction: column; gap: 24px; min-width: 0;
-  color: var(--texto, #0F172A);
-  font-family: var(--fonte); font-size: 14px; line-height: 20px;
-}
-.ini-mono, .ini-cartao__numero, .ini-numero__valor, .ini-barras__valor {
-  font-family: var(--fonte); font-variant-numeric: tabular-nums;
+  display: flex; flex-direction: column; gap: 20px; min-width: 0;
+  color: var(--texto); font-family: var(--fonte); font-size: 14px; line-height: 20px;
 }
 .ini-titulo { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; }
-.ini-carregando, .ini-vazio { margin: 0; color: var(--texto-2, #64748B); }
-.ini-vazio { padding: 8px 20px 12px; }
+.ini-carregando, .ini-vazio { margin: 0; color: var(--texto-2); }
+.ini-vazio { padding: 4px 4px 8px; }
+.ini-sub { margin: 2px 0 0; color: var(--texto-2); font-size: 15px; }
 
-/* cartoes do topo */
-.ini-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-.ini-cartao {
-  display: flex; align-items: center; gap: 16px; padding: 16px 24px; border-radius: var(--raio, 8px);
-  background: var(--superficie, #FFFFFF); color: var(--texto, #0F172A); text-decoration: none;
-  border: 1px solid var(--linha, #E2E8F0); box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
-}
-.ini-cartao:hover { border-color: var(--linha-hover, #CBD5E1); }
-.ini-cartao__numero { font-size: 32px; line-height: 36px; font-weight: 500; }
-.ini-cartao__texto { display: flex; flex-direction: column; min-width: 0; }
-.ini-cartao__rotulo { font-size: 16px; line-height: 24px; font-weight: 600; }
-.ini-cartao__seta { margin-left: auto; font-size: 18px; color: var(--texto-2, #64748B); }
-.ini-cartao--primario {
-  background: var(--acento, #4F46E5); border-color: var(--acento, #4F46E5); color: #FFFFFF;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(79, 70, 229, .25);
-}
-.ini-cartao--primario:hover { background: var(--acento-forte, #4338CA); border-color: var(--acento-forte, #4338CA); }
-.ini-cartao--primario .ini-cartao__seta { color: rgba(255, 255, 255, .85); }
-.ini-cartao--acao { border-color: var(--acao-linha, #FECACA); }
-.ini-cartao--acao .ini-cartao__numero { color: var(--acao, #B91C1C); }
-.ini-cartao--atencao { border-color: var(--atencao-linha, #FDE68A); }
-.ini-cartao--atencao .ini-cartao__numero { color: var(--atencao, #B45309); }
+/* duas colunas (2/3 e 1/3); a 900px ou menos, empilham */
+.ini-grade { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.ini-coluna { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+@media (max-width: 900px) { .ini-grade { grid-template-columns: minmax(0, 1fr); } }
 
-/* os 4 numeros */
-.ini-numeros { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .ini-numero, .ini-painel {
-  background: var(--superficie, #FFFFFF); border-radius: var(--raio, 8px);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(15, 23, 42, .06);
+  background: var(--superficie); border-radius: var(--raio); box-shadow: var(--sombra);
 }
-/* rotulo e valor no alto, alinhados entre os quatro; barra e selo descem para o pe' (margin-top: auto) */
+.ini-painel { min-width: 0; display: flex; flex-direction: column; padding: 20px; gap: 14px; }
+.ini-painel h2 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 700; }
+.ini-painel__topo { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+
+/* destaque */
+.ini-destaque__valores { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; }
+.ini-destaque__valor { display: flex; flex-direction: column; min-width: 0; }
+.ini-destaque__valor--anterior { margin-left: auto; padding-left: 24px; border-left: 1px solid var(--linha); }
+.ini-destaque__numero {
+  font-size: clamp(22px, 3.2vw, 38px); line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ini-destaque__numero--atual { color: var(--acento); }
+.ini-destaque__numero--anterior { color: var(--texto-2); }
+@media (max-width: 560px) {
+  .ini-destaque__valor--anterior { margin-left: 0; padding-left: 0; border-left: 0; }
+  .ini-destaque__numero { font-size: clamp(18px, 6.4vw, 26px); }
+}
+.ini-variacao { display: inline-block; padding: 2px 12px; border-radius: var(--raio-pilula); font-weight: 600; font-size: 15px; white-space: nowrap; }
+.ini-variacao--ok { background: var(--ok-fundo); color: var(--ok); border: 1px solid var(--ok-linha); }
+.ini-variacao--atencao { background: var(--atencao-fundo); color: var(--atencao); border: 1px solid var(--atencao-linha); }
+.ini-variacao--neutro { background: var(--neutro-fundo); color: var(--texto-2); }
+
+/* grafico acumulado */
+.ini-grafico { margin: 0; }
+.ini-grafico svg { display: block; width: 100%; height: auto; }
+.ini-grafico__grade { stroke: var(--linha); stroke-width: 1; }
+.ini-grafico__eixo { font-size: 14px; fill: var(--texto-2); font-family: var(--fonte); }
+.ini-grafico__area { fill: var(--acento); opacity: .12; }
+.ini-grafico__linha { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.ini-grafico__linha--atual { stroke: var(--acento); }
+.ini-grafico__linha--anterior { stroke: var(--texto-fraco); stroke-dasharray: 6 5; }
+.ini-grafico__ponto { fill: var(--superficie); stroke: var(--acento); stroke-width: 2.5; }
+.ini-grafico .ini-legenda { justify-content: center; margin-top: 6px; font-size: 14px; }
+.ini-traco { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid var(--acento); }
+.ini-traco--anterior { border-top: 2.5px dashed var(--texto-fraco); }
+
+/* tres cartoes */
+.ini-numeros { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 700px) { .ini-numeros { grid-template-columns: minmax(0, 1fr); } }
 .ini-numero { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ini-numero__valor ~ * { margin-top: auto; }
-.ini-numero__rotulo { font-size: 14px; line-height: 20px; color: var(--texto-2, #64748B); }
-/* 06/11/2026: o valor nunca quebra no meio do numero. Quatro cartoes lado a lado so' onde um valor de centenas de milhoes cabe
-   inteiro (a fonte acompanha a largura); abaixo de 1240px, dois por linha. */
-.ini-numero__valor { font-size: clamp(20px, 1.6vw, 26px); line-height: 32px; font-weight: 500; white-space: nowrap; }
-@media (max-width: 1239px) {
-  .ini-numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ini-numero__valor { font-size: 26px; }
+.ini-numero__valor ~ .ini-numero__rotulo { margin-top: 0; }
+.ini-numero__rotulo { font-size: 14px; line-height: 20px; color: var(--texto-2); }
+.ini-numero > .ini-numero__rotulo:first-child { color: var(--texto); font-weight: 600; }
+.ini-numero__valor {
+  font-size: clamp(18px, 1.7vw, 26px); line-height: 32px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-@media (max-width: 700px) { .ini-numeros { grid-template-columns: minmax(0, 1fr); } }
-.ini-numero__de { font-family: var(--fonte); font-size: 15px; color: var(--texto-2, #64748B); }
-.ini-barra { display: block; height: 6px; border-radius: 999px; background: var(--acento-fundo, #EEF0FF); overflow: hidden; }
-.ini-barra > span { display: block; height: 6px; background: var(--acento, #4F46E5); }
+.ini-numero__valor--acento { color: var(--acento); }
+.ini-mini { display: block; width: 100%; height: 40px; margin-top: 4px; }
+.ini-barra { display: block; height: 8px; border-radius: 999px; background: var(--neutro-fundo); overflow: hidden; }
+.ini-barra > span { display: block; height: 8px; background: var(--acento); }
+.ini-barra--ok > span { background: var(--ok-ponto); }
 
-/* grafico e prazos */
-/* start: cada painel tem a altura do proprio conteudo; esticar o do grafico ate' a altura dos prazos deixava um vao no pe' */
-.ini-colunas { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
-.ini-painel { min-width: 0; display: flex; flex-direction: column; }
-.ini-painel--grafico { flex: 3 1 420px; padding: 20px; gap: 16px; }
-.ini-painel--prazos { flex: 2 1 340px; }
-.ini-painel__topo { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
-.ini-painel--prazos .ini-painel__topo { padding: 20px 20px 12px; }
-.ini-painel h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
-.ini-legenda { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); }
+.ini-legenda { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; line-height: 16px; color: var(--texto-2); }
 .ini-legenda > span { display: flex; align-items: center; gap: 6px; }
-.ini-chave { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
-.ini-chave--anterior { background: var(--previsto, #CBD5E1); }
-.ini-chave--atual { background: var(--acento, #4F46E5); }
+.ini-chave { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.ini-chave--anterior { background: var(--acento-linha); }
+.ini-chave--atual { background: var(--acento); }
 
 .ini-sem-medicao {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
@@ -85,46 +88,47 @@
 .ini-barras__linha { display: grid; grid-template-columns: 140px minmax(0, 1fr) 160px; gap: 16px; align-items: center; }
 .ini-barras__nome { font-size: 16px; line-height: 24px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ini-barras__svg { display: block; width: 100%; height: 32px; }
-.ini-barras__anterior { fill: var(--previsto, #CBD5E1); }
 .ini-barras__atual { fill: var(--acento, #4F46E5); }
-.ini-barras__valor { font-size: 14px; text-align: right; }
+.ini-barras__valor { font-size: 14px; text-align: right; font-variant-numeric: tabular-nums; }
 
-.ini-ver-todos { font-size: 13px; text-decoration: none; color: var(--acento, #4F46E5); }
-.ini-prazos__cabeca, .ini-prazos__linha {
-  display: grid; grid-template-columns: minmax(0, 1.4fr) 0.8fr 0.9fr; gap: 12px; align-items: center; padding: 6px 20px;
+.ini-barras__anterior { fill: var(--acento-linha); }
+
+/* avisos importantes (coluna da direita) */
+.ini-avisos { gap: 12px; }
+.ini-aviso { border: 1px solid var(--linha); border-radius: var(--raio); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.ini-aviso__topo { display: flex; align-items: center; gap: 10px; }
+.ini-aviso__topo h3 { margin: 0; font-size: 17px; line-height: 24px; font-weight: 700; }
+.ini-aviso__icone { display: inline-flex; color: var(--acento); }
+.ini-aviso--acao .ini-aviso__icone { color: var(--acao); }
+.ini-aviso--atencao .ini-aviso__icone { color: var(--atencao-ponto); }
+.ini-aviso__conta {
+  min-width: 28px; text-align: center; padding: 0 10px; border-radius: var(--raio-pilula); font-weight: 700;
+  background: var(--acento-fundo); color: var(--acento-mais);
 }
-.ini-prazos__cabeca {
-  padding-top: 8px; padding-bottom: 8px; font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B);
-  border-bottom: 1px solid var(--linha, #E2E8F0);
+.ini-aviso--acao .ini-aviso__conta { background: var(--acao-fundo); color: var(--acao); }
+.ini-aviso--atencao .ini-aviso__conta { background: var(--atencao-fundo); color: var(--atencao); }
+.ini-ver-todos { margin-left: auto; font-size: 14px; text-decoration: none; color: var(--acento); }
+.ini-ver-todos:hover { color: var(--acento-forte); text-decoration: underline; }
+.ini-aviso__lista { list-style: none; margin: 0; padding: 0; }
+.ini-aviso__linha {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 40px; padding: 4px 4px;
+  color: var(--texto); text-decoration: none; border-top: 1px solid var(--linha-suave);
 }
-.ini-prazos__cabeca > :last-child { text-align: right; }
-.ini-prazos__linha {
-  min-height: 52px; color: var(--texto, #0F172A); text-decoration: none; border-bottom: 1px solid var(--linha, #F1F5F9);
-}
-.ini-prazos__linha:hover { background: var(--hover, #F8FAFC); }
-.ini-prazos__obra { display: flex; flex-direction: column; min-width: 0; }
-.ini-prazos__nome { font-weight: 500; overflow-wrap: anywhere; }
-.ini-prazos__sub { font-size: 12px; line-height: 16px; color: var(--texto-2, #64748B); overflow-wrap: anywhere; }
+.ini-aviso__lista li:first-child .ini-aviso__linha { border-top: 0; }
+.ini-aviso__linha:hover { background: var(--hover); }
+.ini-aviso__nome { min-width: 0; overflow-wrap: anywhere; }
 .ini-pilula {
-  justify-self: end; display: flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
-  font-size: 13px; line-height: 20px; white-space: nowrap;
+  flex: none; padding: 2px 10px; border-radius: var(--raio-pilula); font-size: 13px; line-height: 20px; white-space: nowrap; font-weight: 500;
 }
-.ini-pilula--acao { background: var(--acao-fundo, #FEE2E2); }
-.ini-pilula--atencao { background: var(--atencao-fundo, #FEF3C7); }
-.ini-pilula--neutro { background: #F1F5F9; }
-.ini-ponto { display: inline-block; width: 6px; height: 6px; border-radius: 999px; flex: none; }
-.ini-pilula--acao .ini-ponto { background: #EF4444; }
-.ini-pilula--atencao .ini-ponto { background: #F59E0B; }
-.ini-pilula--neutro .ini-ponto { background: #94A3B8; }
+.ini-pilula--acao { background: var(--acao-fundo); color: var(--acao-forte); border: 1px solid var(--acao-linha); }
+.ini-pilula--atencao { background: var(--atencao-fundo); color: var(--atencao); border: 1px solid var(--atencao-linha); }
 
 @media (max-width: 560px) {
   .ini-barras__linha { grid-template-columns: 88px minmax(0, 1fr); }
   .ini-barras__valor { grid-column: 2; text-align: left; }
+  .ini-numero__valor { font-size: clamp(16px, 5.8vw, 22px); }
 }
-/* B-13 (10/10/2026): no celular o valor quebrava no meio do numero ("R$ 21.516.276,8" / "5"); numa linha so',
-   com a fonte acompanhando a largura (22px a 375px, 18px a 320px) */
+/* no celular o valor grande fica numa linha so, com a fonte acompanhando a largura (22px a 375px, 18px a 320px) */
 @media (max-width: 420px) {
   .ini-numero__valor { white-space: nowrap; font-size: clamp(16px, 5.8vw, 22px); }
 }
-/* numero dentro da pilula de prazo: frase, nao valor (fica na Sans com algarismos alinhados) */
-.ini-pilula .ini-mono { font-family: inherit; }

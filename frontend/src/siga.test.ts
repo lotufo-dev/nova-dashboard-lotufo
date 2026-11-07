@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  casaComBusca, nivelDias, ordenar, roboAtivo, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type ProcessoSiga, type Robo,
+  casaComBusca, contagemPorTipo, detalheDoEvento, ehRecebimentoNoSetorAtual, filtrarMovimentacoes, nivelDias, ordenar, periodoDe,
+  roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type Movimentacao, type ProcessoSiga, type Robo,
 } from "./siga";
 
 const p = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
@@ -24,16 +25,60 @@ describe("siga", () => {
     expect(tempoNoSetor(p({ desde: "ilegível", dias_uteis: 0 }), agora)).toBe("—");
   });
 
-  it("ordem: hoje primeiro (o mais recente no topo), depois mais dias úteis; empate pelo mais antigo no setor", () => {
+  it("ordem: do mais parado ao menos (dias úteis), empate pelo mais antigo no setor; quem andou hoje não sobe; sem data vai para o fim", () => {
     const lista = [
       p({ id: 1, dias_uteis: 6, desde: "2026-10-20T10:00:00-04:00" }),
       p({ id: 2, dias_uteis: 6, desde: "2026-10-19T10:00:00-04:00" }),
-      p({ id: 3, hoje: 1, ultima: { data: "2026-10-28T09:00:00-04:00", evento: "", cad_lotacao: "", cad_pessoa: "", at_lotacao: "", at_pessoa: "" } }),
-      p({ id: 4, hoje: 1, ultima: { data: "2026-10-28T10:00:00-04:00", evento: "", cad_lotacao: "", cad_pessoa: "", at_lotacao: "", at_pessoa: "" } }),
+      p({ id: 3, hoje: 1, dias_uteis: 0, desde: "2026-10-28T09:00:00-04:00" }),
+      p({ id: 4, dias_uteis: null, desde: null }),
       p({ id: 5, dias_uteis: 12, desde: "2026-10-10T10:00:00-04:00" }),
     ];
-    expect(ordenar(lista).map(x => x.id)).toEqual([4, 3, 5, 2, 1]);
+    expect(ordenar(lista).map(x => x.id)).toEqual([5, 2, 1, 3, 4]);
     expect(lista.map(x => x.id)).toEqual([1, 2, 3, 4, 5]);   // não mexe na lista de entrada
+  });
+
+  // issue #512: histórico do processo
+  const mv = (data: string, evento: string, tipo: Movimentacao["tipo"], extra: Partial<Movimentacao> = {}): Movimentacao => ({
+    data, evento, tipo, cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Ana", at_lotacao: "CCONT/ORGAO", at_pessoa: "", ...extra });
+  const MOVS = [
+    mv("2026-10-02T09:00:00-04:00", "Transferência", "transferencia"),
+    mv("2026-10-23T17:05:00-04:00", "Recebimento", "recebimento", { at_pessoa: "Athayde" }),
+    mv("2026-10-21T10:37:00-04:00", "Juntada | documento ORGAO-DIC-2026/96012-A", "juntada"),
+    mv("2026-10-21T08:35:00-04:00", "Marcação", "marcacao"),
+    mv("2026-10-22T08:00:00-04:00", "Anotação", "outras", { cad_pessoa: "Beltrano" }),
+  ];
+
+  it("contagem por tipo e filtro por tipo, mais recente primeiro", () => {
+    expect(contagemPorTipo(MOVS)).toEqual({ transferencia: 1, recebimento: 1, juntada: 1, marcacao: 1, outras: 1 });
+    expect(filtrarMovimentacoes(MOVS, null, "").map(m => m.evento?.split(" ")[0])).toEqual(["Recebimento", "Anotação", "Juntada", "Marcação", "Transferência"]);
+    expect(filtrarMovimentacoes(MOVS, "juntada", "")).toHaveLength(1);
+    expect(filtrarMovimentacoes(MOVS, "outras", "")[0].evento).toBe("Anotação");
+  });
+
+  it("busca por setor, pessoa ou documento, sem maiúscula nem acento; combina com o tipo", () => {
+    expect(filtrarMovimentacoes(MOVS, null, "athayde")).toHaveLength(1);
+    expect(filtrarMovimentacoes(MOVS, null, "ccont")).toHaveLength(5);
+    expect(filtrarMovimentacoes(MOVS, null, "96012")[0].tipo).toBe("juntada");
+    expect(filtrarMovimentacoes(MOVS, "marcacao", "96012")).toHaveLength(0);
+    expect(filtrarMovimentacoes(MOVS, null, "beltrano")[0].evento).toBe("Anotação");
+  });
+
+  it("documento da juntada, setor · pessoa e período", () => {
+    expect(detalheDoEvento("Juntada | documento ORGAO-DIC-2026/96012-A")).toBe("documento ORGAO-DIC-2026/96012-A");
+    expect(detalheDoEvento("Recebimento")).toBe("");
+    expect(setorPessoa("COFIN/ORGAO", "Ana")).toBe("COFIN · Ana");
+    expect(setorPessoa("COFIN/ORGAO", "")).toBe("COFIN");
+    expect(setorPessoa("", "")).toBe("");
+    expect(periodoDe(MOVS, iso => iso.slice(8, 10))).toBe("02 a 23");
+    expect(periodoDe([], iso => iso)).toBe("");
+  });
+
+  it("destaca só o recebimento da entrada no setor atual (não na caixa de entrada)", () => {
+    const rec = MOVS[1];
+    expect(ehRecebimentoNoSetorAtual(p({ desde: rec.data }), rec)).toBe(true);
+    expect(ehRecebimentoNoSetorAtual(p({ desde: rec.data, caixa_entrada: true }), rec)).toBe(false);
+    expect(ehRecebimentoNoSetorAtual(p({ desde: MOVS[0].data }), rec)).toBe(false);
+    expect(ehRecebimentoNoSetorAtual(p({ desde: rec.data }), MOVS[0])).toBe(false);
   });
 
   it("volume só aparece depois do primeiro, e vale o último da situação", () => {

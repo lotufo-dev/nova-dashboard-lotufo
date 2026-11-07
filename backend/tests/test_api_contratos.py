@@ -9,6 +9,19 @@ def test_listar(client_admin):
     lista = client_admin.get("/api/contratos").json()
     assert any(c["id"] == cid and c["valor_vigente_centavos"] == 100_000_000 for c in lista)
 
+def test_listar_traz_o_a_receber_so_com_o_total_liberado(client_admin):
+    """Lista de Obras (#509): `a_receber_centavos` e' nulo ate' o total ser liberado; liberado, e' o cheio da obra."""
+    import json
+    from app import db
+    cid = novo_contrato(NOVO)
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    assert lista[cid]["a_receber_centavos"] is None
+    conn = db.get_conn()
+    conn.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)", (json.dumps({"total_a_receber_liberado": True}),))
+    conn.commit(); conn.close()
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    assert lista[cid]["a_receber_centavos"] == 0
+
 def test_sem_login_nega(client):
     assert client.get("/api/contratos").status_code == 401
 
@@ -192,3 +205,62 @@ def test_custo_rm_exige_ver_paineis(client, monkeypatch):
     assert client.get(f"/api/contratos/{cid}/custo-rm").status_code == 200
     monkeypatch.setitem(permissoes.PERFIS, "diretoria", frozenset())
     assert client.get(f"/api/contratos/{cid}/custo-rm").status_code == 403
+
+
+def test_ficha_traz_ultima_medicao_em_andamento_e_vencimentos(client_admin, monkeypatch):
+    """#510: a ficha executiva da obra. Ultima = a recebida mais nova; em andamento = a aberta mais nova, com a etapa
+    e o desde; vencimentos = certidao (quando ha), fim da execucao e fim da vigencia, com o nivel do semaforo."""
+    import datetime
+    from app import db, medicoes, tempo
+    hoje = datetime.date(2026, 11, 6)
+    monkeypatch.setattr(tempo, "hoje_local", lambda: hoje)
+    cid = novo_contrato({**NOVO, "execucao_fim": "2026-11-18", "vigencia_fim": "2027-02-16"})
+    conn = db.get_conn()
+    a = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 15, "tipo": "execucao", "competencia": "2026-09"})
+    medicoes.definir_valor(conn, 1, a, "protocolado", 787_288_979, "manual")
+    conn.execute("UPDATE medicoes SET estado='recebida', recebida_em='2026-10-16', nota_emitida_em='2026-10-02' WHERE id=?", (a,))
+    conn.commit()
+    b = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 16, "tipo": "execucao", "competencia": "2026-10"})
+    medicoes.definir_valor(conn, 1, b, "protocolado", 990_529_648, "manual")
+    conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=?", (b,))
+    conn.commit()
+    conn.close()
+    f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+    assert f["ultima_medicao"]["titulo"] == "15ª Medição"
+    assert f["ultima_medicao"]["valor_centavos"] == 787_288_979
+    assert f["ultima_medicao"]["recebida_em"] == "2026-10-16" and f["ultima_medicao"]["dias_apos_nota"] == 14
+    assert f["em_andamento"]["titulo"] == "16ª Medição" and f["em_andamento"]["valor_centavos"] == 990_529_648
+    assert f["em_andamento"]["etapa"] == "análise do órgão"
+    v = {x["chave"]: x for x in f["vencimentos"]}
+    assert v["execucao"]["data"] == "2026-11-18" and v["execucao"]["dias"] == 12 and v["execucao"]["nivel"] == "critico"
+    assert v["vigencia"]["data"] == "2027-02-16" and v["vigencia"]["nivel"] == "normal"
+    assert f["contrato"]["original_igual"] is True and f["contrato"]["tas"] == 0
+
+
+def test_ficha_obra_sem_medicao_e_inexistente_404(client_admin):
+    cid = novo_contrato(NOVO)
+    f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+    assert f["ultima_medicao"] is None and f["em_andamento"] is None
+    assert client_admin.get("/api/contratos/99999/ficha").status_code == 404
+
+
+def test_ficha_nivel_do_prazo_e_o_semaforo():
+    from app.ficha_obra import nivel_do_prazo
+    assert [nivel_do_prazo(d) for d in (None, -3, 30, 31, 90, 91)] == ["normal", "critico", "critico", "atencao", "atencao", "normal"]
+
+
+def test_ficha_conta_so_os_tas_que_valem(client_admin):
+    """Reajuste e aditivo corrigido por outro nao entram em "N TAs"; cancelado tambem nao."""
+    from app import db
+    cid = novo_contrato(NOVO)
+    conn = db.get_conn()
+    ins = ("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza, chave_cadastro, "
+           "corrige_chave, cancelado_em) VALUES (?, ?, ?, 'assinado', '2026-03-01', ?, ?, ?, ?)")
+    conn.execute(ins, (cid, "prazo", 0, None, "ta1", None, None))
+    conn.execute(ins, (cid, "valor", 100, None, "ta2", None, None))
+    conn.execute(ins, (cid, "valor", 100, None, "ta2b", "ta2", None))      # corrige o ta2: so' o corretor vale
+    conn.execute(ins, (cid, "valor", 500, "reajuste", "rj", None, None))
+    conn.execute(ins, (cid, "prazo", 0, None, "ta4", None, "2026-04-01"))  # cancelado
+    conn.commit()
+    conn.close()
+    assert client_admin.get(f"/api/contratos/{cid}/ficha").json()["contrato"]["tas"] == 2

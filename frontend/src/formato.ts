@@ -27,6 +27,15 @@ export function fmtTamanho(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))}${NBSP}KB`;
 }
 
+/** Quantidade em texto decimal do servidor ("12345.5") -> "12.345,5", sem passar por float (a planilha guarda ate'
+ *  muitas casas); nulo vira tracinho, negativo leva o sinal de menos (U+2212). */
+export function fmtQuantidade(q: string | null): string {
+  if (q === null) return "—";
+  const negativo = q.startsWith("-");
+  const [inteiro, decimal] = (negativo ? q.slice(1) : q).split(".");
+  return `${negativo ? "−" : ""}${BigInt(inteiro || "0").toLocaleString("pt-BR")}${decimal ? `,${decimal}` : ""}`;
+}
+
 /** Dias: "1 dia", "1.234 dias" (milhar pt-BR; o numero nao se separa da unidade). */
 export function fmtDias(n: number): string {
   return `${n.toLocaleString("pt-BR")}${NBSP}${n === 1 ? "dia" : "dias"}`;

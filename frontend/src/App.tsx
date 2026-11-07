@@ -9,6 +9,7 @@ import Documentos from "./Documentos";
 import DocumentosEmpresa from "./DocumentosEmpresa";
 import AbrirEnvio from "./AbrirEnvio";
 import ContratoPagina from "./ContratoPagina";
+import FichaObra from "./FichaObra";
 import Contratos from "./Contratos";
 import Inicio from "./Inicio";
 import Login, { type Usuario } from "./Login";
@@ -101,7 +102,8 @@ export default function App() {
 
   // A barra superior diz a SECAO; quem tem titulo proprio (o objeto, ou o "Bom dia" do Inicio) fica com o h1 da
   // pagina, e a barra nao repete um segundo h1.
-  const tituloProprio = ehDetalhe(rota) || rota.tela === "inicio" || rota.tela === "obras";
+  const tituloProprio = ehDetalhe(rota) || rota.tela === "inicio" || rota.tela === "obras"
+    || (rota.tela === "siga" && /^\d+$/.test(busca.processo ?? ""));   // o historico do processo tem o h1 dele
 
   return (
     <div className="shell">
@@ -136,7 +138,9 @@ export default function App() {
             // instancia. Sem isso, o painel aberto e os rascunhos de formulario da
             // obra anterior sobreviviam a troca — e um cronograma digitado para a
             // obra A podia ser publicado na B. A aba vem da URL: cada aba tem link.
-            <ContratoPagina key={rota.id} contratoId={rota.id} usuario={usuario} aba={rota.aba} origem={origem} busca={busca} />
+            rota.aba === "ficha"
+              ? <FichaObra key={rota.id} contratoId={rota.id} origem={origem} />
+              : <ContratoPagina key={rota.id} contratoId={rota.id} usuario={usuario} aba={rota.aba} origem={origem} busca={busca} />
           )}
           {rota.tela === "medicao" && (
             // `key` na medicao: trocar de medicao (a da mesma competencia) remonta a pagina e os formularios dela.

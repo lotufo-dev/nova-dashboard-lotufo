@@ -1135,3 +1135,26 @@ def test_descarte_nao_sobrescreve_o_envio_que_terminou_no_meio(cenario, monkeypa
     with pytest.raises(ValueError, match="enviado não se descarta"):
         protocolo.descartar(c, ids["uid"], pid, "outra aba")
     assert original(c, pid)["situacao"] == "enviado"
+
+
+def test_auditoria_do_descarte_grava_a_situacao_lida_sob_o_lock(cenario, monkeypatch):
+    """Issue #536: a aba A le o protocolo em rascunho; a aba B monta antes do lock do descarte. O valor anterior da
+    auditoria e' o `montado` relido sob o lock, nao o `rascunho` da primeira leitura."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    original = protocolo._linha
+    chamadas = []
+
+    def montado_depois_da_leitura(conn, i):
+        linha = original(conn, i)
+        if not chamadas:
+            chamadas.append(1)
+            conn.execute("UPDATE protocolos SET situacao='montado' WHERE id=?", (i,))
+            conn.commit()
+        return linha
+
+    monkeypatch.setattr(protocolo, "_linha", montado_depois_da_leitura)
+    protocolo.descartar(c, ids["uid"], pid, "outra aba montou")
+    antes = c.execute("SELECT antes FROM audit_log WHERE acao='protocolo.descartar' AND entidade_id=? "
+                      "ORDER BY id DESC LIMIT 1", (str(pid),)).fetchone()[0]
+    assert json.loads(antes) == {"situacao": "montado"}

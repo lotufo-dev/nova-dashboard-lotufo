@@ -28,4 +28,13 @@ describe("texto na tela: frase de apoio removida não volta", () => {
     const re = /\s(dica|detalhe|resumo)=[{"]/;
     expect(fontes.filter(f => re.test(f.texto)).map(f => f.nome)).toEqual([]);
   });
+
+  // Issue #515: a cópia do dono por e-mail mostra erro em português operacional, sem arquivo de configuração,
+  // chave, variável de ambiente nem classe de exceção
+  it("a tela de Saúde não traz código interno do envio da cópia do dono", () => {
+    const admin = fontes.find(f => f.nome === "Admin.tsx")!.texto;
+    const literais = admin.match(/"[^"\n]*"|`[^`\n]*`/g) ?? [];
+    const proibidos = /geral\.yaml|copia_dono\.|enviada_por|DASH_[A-Z_]+|TimeoutError|\bGraph\b/;
+    expect(literais.filter(l => proibidos.test(l))).toEqual([]);
+  });
 });

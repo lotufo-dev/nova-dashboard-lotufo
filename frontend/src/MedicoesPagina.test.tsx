@@ -102,7 +102,7 @@ describe("Medições com abas", () => {
     const cav = within(quadro).getByRole("row", { name: /Cavalaria/ });
     expect(within(cav).getByRole("link", { name: "Iniciar a 1ª medição" }).getAttribute("href")).toBe("/obras/4/medicoes/nova");
     expect(within(cav).getAllByText("—")).toHaveLength(3);   // sem última medição, sem tempo, sem prevista
-    expect(within(quadro).getByRole("link", { name: "Granito" }).getAttribute("href")).toBe("/obras/13");
+    expect(within(quadro).getByRole("link", { name: "Granito" }).getAttribute("href")).toBe("/obras/13/medicoes");
     // obra que só mede projeto: o tipo aparece na última e no link (série própria)
     const gr = within(quadro).getByRole("row", { name: /Granito/ });
     expect(within(gr).getByText("1ª de Projeto · 09/2026")).toBeTruthy();

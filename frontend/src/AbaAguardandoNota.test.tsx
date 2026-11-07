@@ -49,7 +49,7 @@ describe("Aba Aguardando nota", () => {
     expect(window.location.pathname + window.location.hash).toBe("/obras/6/medicoes/41#etapa-3");
     // o nome da obra e' um link proprio: leva a' obra, e a linha nao o atropela
     fireEvent.click(within(screen.getByRole("row", { name: /Muito Parada/ })).getByRole("link", { name: "Muito Parada" }));
-    expect(window.location.pathname + window.location.hash).toBe("/obras/8");
+    expect(window.location.pathname + window.location.hash).toBe("/obras/8/medicoes");
   });
 
   it("o título da medição é link de verdade na etapa pendente; Ctrl+clique na linha não navega", () => {

@@ -157,6 +157,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
           <VoltarOrigem origem={origem} alemDe={["obras"]} />
           {/* Obras › contratante › obra. O contratante e' o orgao do contrato; o link dele abre a lista de Obras
               daquele orgao (a lista ja' filtra por ?orgao=) e nao a origem de onde se chegou. */}
+          <Link className="btn--voltar" para={{ tela: "obra", id: contratoId, aba: "ficha" }}>Ficha da obra</Link>
           <Migalhas origem={origem} itens={[{ rotulo: "Obras", para: { tela: "obras" } },
             ...(c ? [{ rotulo: c.orgao, para: { tela: "obras" as const }, busca: { orgao: c.orgao }, fixa: true }] : []),
             { rotulo: c?.obra ?? "Obra" }]} />

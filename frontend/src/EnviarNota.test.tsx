@@ -201,6 +201,24 @@ describe("Enviar a nota", () => {
       expect(JSON.parse(api.mock.calls.find(c => c[0] === "/api/protocolos/3/montar")![1].body)).toEqual({ refazer_texto: true });
     });
 
+    // issue #536: com a reserva de envio presa, o Montar de novo recebe 409 com o `codigo` e a tela oferece a liberacao
+    it("reserva presa no Montar de novo: aparece o Liberar envio", async () => {
+      const MUDOU = "O apostilamento do reajuste mudou depois da montagem: monte o pacote de novo (e assine de novo, se já tinha assinado)";
+      const PRESA = "Este envio está em andamento ou foi interrompido (iniciado às 10:05 por Admin). Confira a caixa de "
+        + "Enviados do Outlook: se o e-mail NÃO saiu, libere o envio e repita.";
+      const d = { ...mtpar("assinado", false), bloqueio: MUDOU, remontar: true, remontar_liberado: true };
+      api.mockImplementation((caminho: string) => {
+        if (caminho === "/api/notas/envio/3") return Promise.resolve(d);
+        if (caminho === "/api/protocolos/3/montar") return Promise.reject(new ApiErro(409, PRESA,
+          { codigo: "ENVIO_RESERVADO", mensagem: PRESA, reservado_em: "2026-10-10T10:05:00-04:00",
+            reservado_por_nome: "Admin", liberavel_a_partir_de: "2026-10-10T10:20:00-04:00" }));
+        return Promise.resolve({});
+      });
+      render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Montar de novo" }));
+      expect(await screen.findByRole("button", { name: "Liberar envio" })).toBeTruthy();
+    });
+
     // revisor (rodada 2 da PR #435): com certidão vencida junto, o Montar de novo espera a renovação
     it("termo mudou e certidão vencida: o Montar de novo fica desabilitado", async () => {
       const MUDOU = "O apostilamento do reajuste mudou depois da montagem: monte o pacote de novo (e assine de novo, se já tinha assinado)";
