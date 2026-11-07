@@ -466,10 +466,12 @@ def test_com_limite_com_prazo_de_ponta_a_ponta_mata_o_filho_no_que_sobra():
     assert time.monotonic() - inicio < leitura_pdf._FOLGA_MATAR_S + 1.5 + 1.0
 
 
-def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0, erro_recv=None, eventos=None):
+def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0, erro_recv=None, eventos=None,
+                 recolhe_so_sem_teto=False):
     """`spawn` que leva `spawn_s` no relogio falso; o filho responde depois de `responde_em` s (None: nunca), nao
     sai sozinho e ignora o `terminate`, entao todo `join` gasta o que pede e so' o `kill` o derruba -- e o `kill` e'
     assincrono, como no sistema: o filho so' fica recolhido (`exitcode`) depois de um `join` com espera depois dele.
+    `recolhe_so_sem_teto`: o filho morto so' e' recolhido por um `join()` sem teto (o `kill` demorou mais que ele).
     `erro_recv`: excecao que o `recv` levanta. Devolve a lista de `get_context` chamados; `eventos` recebe "kill" e "close"."""
     contextos = []
     eventos = [] if eventos is None else eventos
@@ -503,8 +505,14 @@ def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0, erro_recv=
         morto = False
 
         def join(self, t=None):
+            if t is None:
+                eventos.append("join-sem-teto")
+                relogio[0] += 1.0
+                if self.morto:
+                    self.exitcode = -9
+                return
             relogio[0] += t
-            if self.morto and t > 0:
+            if self.morto and t > 0 and not recolhe_so_sem_teto:
                 self.exitcode = -9
 
         def is_alive(self):
@@ -614,6 +622,28 @@ def test_com_limite_erro_inesperado_depois_do_spawn_mata_o_filho_antes_de_soltar
         with pytest.raises(type(erro)):
             leitura_pdf.com_limite(b"", "paginas")
         assert eventos == ["kill", "close", "release"], erro
+
+
+def test_com_limite_filho_que_nao_morre_no_teto_e_esperado_antes_de_soltar_a_vaga(monkeypatch):
+    """Gate Sol, rodada extra de 03/11: se o `join` com teto depois do `kill` vencia com o filho vivo, o `close` era
+    pulado e a vaga solta com o filho vivo. A vaga so' sai depois de o filho morrer de fato."""
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+    eventos = []
+
+    class Vaga:
+        def acquire(self, timeout):
+            return True
+
+        def release(self):
+            eventos.append("release")
+    monkeypatch.setattr(leitura_pdf, "_VAGAS", Vaga())
+    for ate in (None, 1006.0):
+        eventos.clear()
+        _filho_falso(monkeypatch, relogio, eventos=eventos, recolhe_so_sem_teto=True)
+        with pytest.raises(leitura_pdf.TextoInadequado):
+            leitura_pdf.com_limite(b"", "paginas", limite=1.0, ate=ate if ate is None else relogio[0] + 6.0)
+        assert eventos == ["kill", "join-sem-teto", "close", "release"], ate
 
 
 # --- de quem e' o CNPJ (achado 3 do gate 3) -------------------------------------------

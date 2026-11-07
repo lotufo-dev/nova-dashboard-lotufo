@@ -619,12 +619,15 @@ _TETO_RECOLHER_S = 2.0
 def _matar(proc, ate: float | None = None) -> None:
     """Derruba o filho: `terminate`, dois segundos de folga, `kill` se ainda vive. Com `ate`, a espera depois do
     `terminate` vai so' ate' o prazo (o `spawn` lento pode ter comido a folga); a do `kill` e' sempre
-    `_TETO_RECOLHER_S`, para o filho estar recolhido antes de a vaga ser solta."""
+    `_TETO_RECOLHER_S`, para o filho estar recolhido antes de a vaga ser solta. Se nem assim ele morreu (o `kill` no
+    Windows e' assincrono), espera sem teto: a vaga nunca e' solta com o filho vivo, e o `kill` ja' foi dado."""
     proc.terminate()
     proc.join(2.0 if ate is None else max(0.0, min(2.0, ate - time.monotonic())))
     if proc.is_alive():
         proc.kill()
         proc.join(_TETO_RECOLHER_S)
+        if proc.is_alive():
+            proc.join()
 
 
 def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, ate: float | None = None):
