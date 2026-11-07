@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS medicao_grupos (
     pedido_centavos INTEGER CHECK (pedido_centavos IS NULL OR typeof(pedido_centavos) = 'integer'),
     usuario_id INTEGER REFERENCES usuarios(id),
     criado_em TEXT NOT NULL DEFAULT (datetime('now')),
-    CHECK (situacao = 'lida' OR (motivo IS NOT NULL AND trim(motivo) <> ''))
+    CHECK (situacao = 'lida' OR (motivo IS NOT NULL AND trim(motivo) <> '')),
+    CHECK (situacao <> 'lida' OR (total_centavos IS NOT NULL AND pedido_centavos IS NOT NULL))
 );
 -- a mesma planilha (mesmo sha256) na mesma versao, contra o mesmo pedido e o mesmo cadastro, so' se le uma vez: a
 -- carga repetida nao duplica; pedido ou cadastro novo pedem leitura nova

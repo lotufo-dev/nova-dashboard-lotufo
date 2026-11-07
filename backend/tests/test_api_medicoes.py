@@ -1464,3 +1464,68 @@ def test_revisao_em_pdf_deixa_a_medicao_sem_leitura(client_admin):
     assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"] == {"situacao": "sem_leitura",
                                                                                    "aviso": None}
     assert client_admin.get(f"/api/medicoes/{mid}/grupos").json()["grupos"] == []
+
+
+def test_revisao_depois_do_envio_confere_com_o_pedido_da_revisao(client_admin):
+    """Revisor R1: depois do envio o pedido da medicao fica congelado; a planilha da revisao confere com o pedido
+    da propria versao, nao com o congelado (senao seria recusada para sempre)."""
+    from tests.test_leitura_planilha_medicao import planilha
+    cid = _contrato(client_admin)
+    mid = _planilha_xlsx(client_admin, cid, "20.700,00").json()["medicao_id"]        # recusada na versao 1
+    assert _enviar_por_fora(client_admin, mid).status_code == 201
+    arquivos_ = {**_arquivos_planilha("oficio rev envio"), "planilha": ("planilha.xlsx", planilha(), XLSX)}
+    r = client_admin.post(f"/api/medicoes/{mid}/planilhas", files=arquivos_, data={
+        "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-28", "valor": "20.693,10", "motivo": "Rev01"})
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert d["valor_protocolado_centavos"] == 20_700_00                   # o pedido congelado no envio fica
+    assert r.json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["leitura"]["versao"] == 2 and g["leitura"]["pedido_centavos"] == 20_693_10
+
+
+def test_anexo_agrupa_pelo_cadastro_de_custo(client_admin):
+    """Sol S2: o anexo grava a leitura pelos grupos do cadastro de custo da obra (#489)."""
+    import json
+
+    from app import db
+    cid = _contrato(client_admin)
+    conn = db.get_conn()
+    conn.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha) VALUES (?,1,?,?,?)",
+                 (cid, "Drenagem", json.dumps(["001"]), json.dumps(["3."])))
+    conn.commit()
+    conn.close()
+    mid = _planilha_xlsx(client_admin, cid, "20.693,10").json()["medicao_id"]
+    g = client_admin.get(f"/api/medicoes/{mid}/grupos").json()
+    assert g["leitura"]["grupo_por"] == "cadastro"
+    assert [x["nome"] for x in g["grupos"]] == ["Drenagem", "outros"]
+
+
+def test_falha_inesperada_na_leitura_fica_gravada_e_avisa(client_admin, monkeypatch):
+    """Sol S5: erro que nao e' recusa da planilha nao some: fica gravado como falha e a tela avisa."""
+    from app import medicao_grupos
+
+    def explode(*a, **k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(medicao_grupos, "ler_e_registrar", explode)
+    cid = _contrato(client_admin)
+    r = _planilha_xlsx(client_admin, cid, "20.693,10")
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] == {"situacao": "falhou", "aviso": "Planilha não lida: falha inesperada na leitura"}
+    mid = r.json()["medicao_id"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["leitura_planilha"]["situacao"] == "falhou"
+
+
+def test_falha_que_nem_grava_sobe(client_admin, monkeypatch):
+    """Sol S5: se nem a falha grava, o erro sobe (nao vira um aviso que a consulta seguinte desmente)."""
+    from app import medicao_grupos
+
+    def explode(*a, **k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(medicao_grupos, "ler_e_registrar", explode)
+    monkeypatch.setattr(medicao_grupos, "registrar_falha", explode)
+    cid = _contrato(client_admin)
+    with pytest.raises(RuntimeError, match="locked"):
+        _planilha_xlsx(client_admin, cid, "20.693,10")
