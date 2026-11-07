@@ -486,8 +486,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
         {d.planilha_enviada_em && <NumeroSiga medicaoId={medicaoId} atual={d.planilha_siga?.numero ?? null}
           podeEditar={podeEditar} aoGravar={() => { void carregar().catch(() => {}); aoMudar(); }} />}
 
-        {/* gerada e sem envio pelo sistema (MT-PAR, SES, prefeituras; issue #463): nao ha' peca a anexar */}
-        {editavel && itens.length > 0 && !(gerada && !s.disponivel) && (
+        {editavel && itens.length > 0 && (
           <div>
             <span className="painel__titulo">Peças do órgão</span>
             <Checklist itens={itens} legenda="Peças da planilha/carta" editavel={podeEnviar || gerada} ocupado={ocupado}

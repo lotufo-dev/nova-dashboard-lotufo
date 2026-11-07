@@ -244,8 +244,8 @@ describe("Cartão da planilha/carta", () => {
 
   it("na SES e nas prefeituras, o motivo do órgão aparece, fica o registro por fora e somem o envio e as peças (issue #463)", async () => {
     const motivo = "Na SES-MT não há envio da planilha/carta: a medição vai com a nota";
-    api.mockResolvedValue(detalhe({}, { disponivel: false, motivo, pecas_do_orgao: [
-      { tipo: "boletim", rotulo: "Memória de cálculo", exigida: true, no_oficio: false }] }));
+    // o servidor nao manda peca do orgao onde nao ha' envio (planilha_envio.situacao)
+    api.mockResolvedValue(detalhe({}, { disponivel: false, motivo, pecas_do_orgao: [] }));
     render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
     expect(await screen.findByText(motivo)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Enviar para protocolo" })).toBeNull();
