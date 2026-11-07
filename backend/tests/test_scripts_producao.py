@@ -933,7 +933,11 @@ def test_deploy_https_confere_o_par_certificado_e_chave_antes_do_sentinela():
     # estragaria na linha de comando) e sem cerquilha (o _codigo dos testes cortaria a linha)
     python = _conferencia_do_par(codigo)
     assert "ssl.PROTOCOL_TLS_SERVER" in python and "load_cert_chain(sys.argv[1], sys.argv[2]" in python
-    assert '"' not in python
+    assert '"' not in python and "\\" not in python
+    # motivo so' em ASCII: mensagem do Windows com acento (pt-BR) nao quebra o print na pagina de codigo do console
+    assert "print(t.__name__, ascii(str(e)))" in python
+    script = _ler("deploy.ps1")
+    assert python in script, "o Python da conferencia nao pode ter cerquilha (o _codigo cortaria a linha)"
 
 
 def _par_autoassinado(pasta, nome):
@@ -984,6 +988,7 @@ def test_conferencia_do_par_aceita_o_par_e_recusa_chave_trocada_ou_corrompida(tm
         r = rodar(ruim)
         assert r.returncode != 0, ruim.name
         assert r.stdout.strip(), f"{ruim.name}: sem motivo na saida"
+        assert r.stdout.isascii(), r.stdout
 
 
 def test_deploy_volta_do_build_religa_o_servico_parado_antes_da_trava_do_sentinela_anterior():

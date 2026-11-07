@@ -138,8 +138,9 @@ if ($comTls) {
     # Issue #517: chave trocada ou corrompida abre para leitura, mas o uvicorn novo (e o do rollback) nao sobe com ela.
     # O Python da venv do pinado carrega o par como o uvicorn (ssl.SSLContext + load_cert_chain); chave cifrada recebe
     # senha vazia em vez de pedir no terminal. Sem aspas duplas no codigo: o PowerShell 5.1 as estraga na linha de
-    # comando. Sem redirecionar o stderr (cabecalho): o motivo sai no stdout pelo excepthook.
-    $conferePar = 'import ssl,sys; sys.excepthook=lambda t,e,b: print(t.__name__, e); ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(sys.argv[1], sys.argv[2], password=lambda: bytes())'
+    # comando. Sem redirecionar o stderr (cabecalho): o motivo sai no stdout pelo excepthook, so' em ASCII (ascii()),
+    # para caminho ou mensagem do Windows com acento nao quebrar o print na pagina de codigo do console.
+    $conferePar = 'import ssl,sys; sys.excepthook=lambda t,e,b: print(t.__name__, ascii(str(e))); ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(sys.argv[1], sys.argv[2], password=lambda: bytes())'
     $motivoPar = (& $py -I -c $conferePar $certificado $chaveTls) -join " "
     if ($LASTEXITCODE -ne 0) {
         throw "certificado e chave do HTTPS nao formam par ($certificado e $chaveTls; motivo: $motivoPar); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS, Chave do HTTPS recusada)"
