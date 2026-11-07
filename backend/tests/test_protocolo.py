@@ -494,24 +494,84 @@ def test_assinado_com_o_termo_nao_entra_no_pacote_que_ja_nao_o_cita(cenario):
         protocolo.receber_assinado(c, ids["uid"], pid, com_termo)
 
 
-def test_citacao_do_termo_quebrada_entre_paginas_tambem_e_conferida(cenario):
-    # Rodada de correcao da orquestradora (07/11/2026): com lista longa, o fpdf quebra o paragrafo do termo no pe' da
-    # pagina; a citacao dividida entre duas paginas continua conferida (o assinado de outro termo e' recusado)
+def _corpo_com_o_termo_na_quebra(c, ids, pid):
+    """O corpo padrao com linhas antes do campo {apostilamento}, ate' o fpdf quebrar a pagina dentro da frase do termo
+    ("... no Termo de" no pe' da pagina 1, o cabecalho do papel timbrado e "Apostilamento nº ..." na 2). Procura so'
+    com a carta (`carta.gerar`), que e' a primeira parte do pacote."""
+    p, padrao = protocolo._linha(c, pid), protocolo.corpo_padrao(c, pid)
+    frase = protocolo.frase_do_apostilamento(protocolo.apostilamentos(c, "mtpar", protocolo._medicoes(c, pid)))
+    hoje = tempo.hoje_local()
+
+    def paginas(corpo):
+        pdf = carta.gerar(protocolo._carta(c, p, protocolo._renderizar(corpo, frase), hoje, frase))
+        return [_corrido(t) for t in leitura_pdf.textos_por_pagina_com_limite(pdf, 50)]
+
+    def corpo(linhas, prefixo):
+        return padrao.replace("{apostilamento}", "\n".join(["Linha de enchimento."] * linhas)
+                              + "\n\n" + "x " * prefixo + "{apostilamento}")
+
+    # a primeira altura em que o numero do termo ja' nao cabe na pagina 1; dali, o prefixo move a quebra na frase
+    linhas = next(n for n in range(10, 80) if "nº 001/2025/03/02" not in paginas(corpo(n, 0))[0])
+    for n in (linhas, linhas - 1):
+        for prefixo in range(0, 40):
+            pags = paginas(corpo(n, prefixo))
+            if len(pags) > 1 and pags[0].endswith("Termo de") and pags[1].find("Apostilamento nº") > 0:
+                return corpo(n, prefixo)
+    raise AssertionError("a frase do termo nao caiu na quebra de pagina")
+
+
+def test_termo_quebrado_na_pagina_com_cabecalho_tambem_e_conferido(cenario):
+    # Gate Sol, rodada extra (07/11/2026), Critico 1: o papel timbrado repete o cabecalho de texto em toda pagina; com
+    # a frase do termo partida na quebra, o assinado do termo velho nao pode passar
     c, ids = cenario
     _data_base_e_termo(c, ids["mtpar"])
     pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
-    p = protocolo._linha(c, pid)
-    carimbo = "Docusign Envelope ID: 7E965481-0A1B-4C2D-8E9F-0123456789AB\n"
-
-    def pacote(numero, assinar=False):
-        pre = carimbo if assinar else ""
-        return [pre + "Ofício.\nO reajuste da competência 09/2026 está apostilado no Termo de",
-                pre + f"Apostilamento nº {numero}.\nAtenciosamente."]
-
-    montado = pacote("001/2025/03/09")
+    corpo = _corpo_com_o_termo_na_quebra(c, ids, pid)
+    velho = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
+    _termo(c, ids["mtpar"], "ap-reaj-02", "001/2025/03/09", data="2026-09-10", corrige="ap-reaj-01")
+    novo = _assinar(arquivos.caminho_seguro(protocolo.montar(c, ids["uid"], pid, corpo=corpo)["arquivo"]).read_bytes())
     with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
-        protocolo._recusar_termo_fora_do_assinado(c, p, montado, pacote("001/2025/03/02", assinar=True))
-    protocolo._recusar_termo_fora_do_assinado(c, p, montado, pacote("001/2025/03/09", assinar=True))
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+    assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
+
+
+def test_competencia_acrescentada_ao_mesmo_termo_tambem_e_conferida(cenario):
+    # Critico 2: a correcao acrescenta uma competencia no comeco da lista do mesmo termo (numero igual)
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    _termo(c, ids["mtpar"], "ap-a", "001/2025/03/05", "2026-10", "2027-08", data="2026-10-01")
+    m24 = _reajuste(c, ids["mtpar"], 24, "2026-10")
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"], m24], "303")
+    velho = _assinar(_montado(c, ids, pid))
+    _termo(c, ids["mtpar"], "ap-b", "001/2025/03/05", "2026-09", "2027-08", data="2026-10-02", corrige="ap-a")
+    assert "das competências 09/2026 e 10/2026" in _carta_montada(c, ids, pid)
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+
+
+def test_numero_longo_do_termo_e_conferido_inteiro(cenario):
+    # Critico 2: o numero do termo nao tem limite; a diferenca no fim de um numero longo tambem recusa o assinado
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"], termo=False)
+    longo = "001/2025/03 do processo administrativo 2025.00.000000000000000000000000000000000001"
+    _termo(c, ids["mtpar"], "ap-a", longo)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    velho = _assinar(_montado(c, ids, pid))
+    _termo(c, ids["mtpar"], "ap-b", longo[:-1] + "2", data="2026-09-10", corrige="ap-a")
+    _montado(c, ids, pid)
+    with pytest.raises(ValueError, match="não traz o termo de apostilamento do pacote montado agora"):
+        protocolo.receber_assinado(c, ids["uid"], pid, velho)
+
+
+def test_certificado_do_docusign_que_cita_o_termo_nao_recusa_o_assinado(cenario):
+    # Aviso: as paginas do certificado repetem o assunto do envelope, que pode citar o termo
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    assinado = pypdf.PdfWriter(clone_from=io.BytesIO(_assinar(_montado(c, ids, pid))))
+    assinado.append(io.BytesIO(_pdf("Certificado de Conclusao - Oficio - Termo de Apostilamento nº 001/2026")))
+    buf = io.BytesIO(); assinado.write(buf)
+    assert protocolo.receber_assinado(c, ids["uid"], pid, buf.getvalue())["situacao"] == "assinado"
 
 
 def test_texto_sem_o_campo_do_termo_nao_monta(cenario):

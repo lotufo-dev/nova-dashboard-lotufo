@@ -919,29 +919,43 @@ ASSINADO_SEM_O_TERMO = ("O assinado não traz o termo de apostilamento do pacote
                         "anterior): assine no DocuSign o pacote montado agora e anexe o assinado dele")
 
 
-def _trechos_do_termo(paginas: list[str]) -> list[str]:
-    """Cada citacao do termo de apostilamento no texto do pacote, com o entorno (a competencia antes, o numero e o
-    comeco da frase seguinte depois), no texto plano da conferencia (sem acento, espaco, pontuacao e carimbo). As
-    paginas vao juntas (cada uma ja' sem o carimbo): o paragrafo quebrado no pe' da pagina continua sendo conferido."""
+def _plano_sem_timbre(conn, p: dict, paginas: list[str]) -> str:
+    """O texto plano da conferencia (sem acento, espaco, pontuacao e carimbo do DocuSign) de todas as paginas juntas,
+    sem o cabecalho e o rodape do papel timbrado que o fpdf repete em toda pagina da carta: a frase partida na quebra
+    de pagina volta a ficar inteira (gate Sol, rodada extra de 07/11/2026)."""
+    c = _contrato(conn, p["contrato_id"])
+    em = carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}
+    fixos = sorted({f for x in carta.textos_do_timbre(em) if (f := assinatura._plano(x))}, key=len, reverse=True)
     out = []
-    plano = "".join(assinatura._plano(t) for t in paginas)
-    i = plano.find(_TERMO_NO_TEXTO)
-    while i >= 0:
-        out.append(plano[max(0, i - 60):i + len(_TERMO_NO_TEXTO) + 40])
-        i = plano.find(_TERMO_NO_TEXTO, i + 1)
-    return out
+    for t in paginas:
+        plano = assinatura._plano(t)
+        for f in fixos:
+            plano = plano.replace(f, "")
+        out.append(plano)
+    return "".join(out)
 
 
 def _recusar_termo_fora_do_assinado(conn, p: dict, montado: list[str], assinado: list[str]) -> None:
     """Rodada extra da PR #435 (revisor e gate Sol, rodada 3): na MT-PAR e na Prefeitura o oficio de reajuste cita o
     termo de apostilamento; o assinado do pacote anterior (termo velho, ou sem termo) passa pela semelhanca de 90% da
-    conferencia, que so' avisa. Como na FRC (`_recusar_frc_fora_do_assinado`), o assinado tem que trazer cada citacao
-    do termo do pacote montado por ultimo, e nenhuma a mais."""
+    conferencia, que so' avisa. Como na FRC (`_recusar_frc_fora_do_assinado`), o assinado tem que trazer a frase do
+    termo que o pacote montado por ultimo cita (o mapa gravado na montagem: cada competencia e cada numero), com o
+    texto em volta, e nenhuma citacao do termo a mais. So' as paginas do pacote contam: o certificado do DocuSign
+    repete o assunto do envelope."""
     familia = _orgao(conn, _contrato(conn, p["contrato_id"]))[0]
     if familia not in FAMILIAS_OFICIO_REAJUSTE:
         return
-    esperados, achados = _trechos_do_termo(montado), _trechos_do_termo(assinado)
-    if len(esperados) != len(achados) or any(not any(x in a for a in achados) for x in esperados):
+    m_plano = _plano_sem_timbre(conn, p, montado)
+    a_plano = _plano_sem_timbre(conn, p, assinado[:len(montado)])
+    gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
+    frase = assinatura._plano(frase_do_apostilamento(gravado["apostilamentos"])) \
+        if gravado and gravado.get("cita") else ""
+    if frase:
+        i = m_plano.find(frase)
+        trecho = m_plano[max(0, i - 30):i + len(frase) + 30] if i >= 0 else frase
+        if trecho not in a_plano:
+            raise ValueError(ASSINADO_SEM_O_TERMO)
+    if m_plano.count(_TERMO_NO_TEXTO) != a_plano.count(_TERMO_NO_TEXTO):
         raise ValueError(ASSINADO_SEM_O_TERMO)
 
 
