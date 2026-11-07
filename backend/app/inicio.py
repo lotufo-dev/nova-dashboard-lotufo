@@ -143,6 +143,104 @@ def _prazos(conn, hoje: datetime.date) -> list[dict]:
     return sorted(out, key=lambda x: (x["dias"], x["obra"] or ""))
 
 
+def _protocoladas_dia(conn) -> list[dict]:
+    """Medicoes (nao canceladas nem desistidas) com a PRIMEIRA data de protocolo da nota (`etapa='nota'`, como em
+    `avisos.resumo_mes`): reprotocolo nao conta de novo."""
+    return [dict(r) for r in conn.execute(
+        "SELECT m.id, m.contrato_id, COALESCE(m.valor_protocolado_centavos, 0) AS valor, MIN(mp.data) AS data "
+        "FROM medicoes m JOIN medicao_protocolos mp ON mp.medicao_id=m.id AND mp.etapa='nota' "
+        "WHERE m.estado NOT IN ('cancelada','desistida') GROUP BY m.id")]
+
+
+def _acumulado(linhas: list[dict], mes: str, ate: int) -> dict:
+    por_dia = [0] * ate
+    quantidade = 0
+    for r in linhas:
+        d = (r["data"] or "")[:10]
+        if d[:7] != mes or not d[8:10].isdigit() or not 1 <= int(d[8:10]) <= ate:
+            continue
+        por_dia[int(d[8:10]) - 1] += r["valor"]
+        quantidade += 1
+    acumulado, soma = [], 0
+    for v in por_dia:
+        soma += v
+        acumulado.append(soma)
+    return {"mes": mes, "ate_dia": ate, "valor_centavos": soma, "quantidade": quantidade, "acumulado_centavos": acumulado}
+
+
+def _variacao_pct(atual: int, anterior: int) -> float | None:
+    """Variacao percentual com uma casa (meio para cima, em inteiros); nula sem base de comparacao."""
+    if anterior <= 0:
+        return None
+    return ((atual - anterior) * 2000 // anterior + 1) // 2 / 10
+
+
+def _protocolado_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> dict:
+    """Cartao de destaque: o mes de hoje (dia 1 ate hoje) contra o mesmo recorte do mes anterior (se o anterior
+    for mais curto, ate o ultimo dia dele), em valor protocolado acumulado por dia."""
+    linhas = _protocoladas_dia(conn) if linhas is None else linhas
+    fim_ant = hoje.replace(day=1) - datetime.timedelta(days=1)
+    atual = _acumulado(linhas, hoje.strftime("%Y-%m"), hoje.day)
+    anterior = _acumulado(linhas, fim_ant.strftime("%Y-%m"), min(hoje.day, fim_ant.day))
+    return {"dia": hoje.day, "atual": atual, "anterior": anterior,
+            "variacao_pct": _variacao_pct(atual["valor_centavos"], anterior["valor_centavos"])}
+
+
+def _notas_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> dict:
+    """Notas fiscais ativas alocadas (alocacao nao desfeita) as medicoes protocoladas no mes de hoje: valor da nota
+    (cada nota uma vez), quantidade de notas e de obras distintas, e o acumulado por dia (data do protocolo)."""
+    mes = hoje.strftime("%Y-%m")
+    linhas = _protocoladas_dia(conn) if linhas is None else linhas
+    do_mes = {r["id"]: r for r in linhas if (r["data"] or "")[:7] == mes}
+    notas: dict[int, dict] = {}
+    for a in conn.execute("SELECT a.medicao_id, a.nota_id, n.valor_centavos FROM nf_alocacoes a "
+                          "JOIN notas_fiscais n ON n.id=a.nota_id "
+                          "WHERE a.desfeita_em IS NULL AND n.situacao='ativa'"):
+        m = do_mes.get(a["medicao_id"])
+        if m is None:
+            continue
+        n = notas.setdefault(a["nota_id"], {"valor": a["valor_centavos"], "obras": set(), "dia": m["data"][:10]})
+        n["obras"].add(m["contrato_id"])
+        n["dia"] = min(n["dia"], m["data"][:10])
+    por_dia = [0] * hoje.day
+    for n in notas.values():
+        if n["dia"][8:10].isdigit() and 1 <= int(n["dia"][8:10]) <= hoje.day:
+            por_dia[int(n["dia"][8:10]) - 1] += n["valor"]
+    acumulado, soma = [], 0
+    for v in por_dia:
+        soma += v
+        acumulado.append(soma)
+    return {"mes": mes, "valor_centavos": sum(n["valor"] for n in notas.values()), "notas": len(notas),
+            "obras": len({o for n in notas.values() for o in n["obras"]}), "acumulado_centavos": acumulado}
+
+
+AVISOS_VISIVEIS = 3
+
+
+def _avisos_importantes(pedir: list[dict], prazos_: list[dict], vencidas: list[dict], vencendo: list[dict],
+                        hoje: datetime.date) -> dict:
+    """Caixa "Avisos importantes": contagem e tres itens de reajustes a pedir, prazos de execucao e vigencia
+    (vencidos primeiro) e certidoes (vencidas primeiro, depois as que vencem antes). Cada secao leva a uma familia
+    da tela Avisos (`reajuste`, `prazo`, `documentos`)."""
+    certidoes = []
+    for x, vencida in [(x, True) for x in vencidas] + [(x, False) for x in vencendo]:
+        dias = x["dias"]
+        if dias is None and x["validade"]:
+            dias = (datetime.date.fromisoformat(x["validade"][:10]) - hoje).days
+        certidoes.append({"tipo": x["tipo"], "entidade": x["entidade"], "validade": x["validade"], "dias": dias,
+                          "vencida": vencida})
+    certidoes.sort(key=lambda c: (c["dias"] is None, c["dias"] if c["dias"] is not None else 0))
+    prazos_ = [p for p in prazos_ if p["tipo"] in ("execucao", "vigencia")]
+    reaj = [{"contrato_id": a["contrato_id"], "obra": a["obra"], "dias": a["dias"]}
+            for a in sorted(pedir, key=lambda a: a["dias"])]
+    return {
+        "reajustes": {"total": len(reaj), "itens": reaj[:AVISOS_VISIVEIS]},
+        "prazos": {"total": len(prazos_), "itens": [{"contrato_id": p["contrato_id"], "obra": p["obra"], "tipo": p["tipo"],
+                                                    "dias": p["dias"]} for p in prazos_[:AVISOS_VISIVEIS]]},
+        "certidoes": {"total": len(certidoes), "itens": certidoes[:AVISOS_VISIVEIS]},
+    }
+
+
 def painel(conn, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     vencidas, vencendo = cobranca_certidoes.listas(conn, hoje)
@@ -151,6 +249,9 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     ultima = conn.execute("SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
                           "WHERE mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
     medido, por_contratante = _medido(conn, hoje)
+    medido["variacao_pct"] = _variacao_pct(medido["valor_centavos"], medido["anterior_centavos"])
+    prazos_lista = _prazos(conn, hoje)
+    protocoladas_dia = _protocoladas_dia(conn)
     return {
         "hoje": hoje.isoformat(),
         "notas_a_enviar": notas_envio.a_enviar(conn, hoje)["contadores"]["Todas"],
@@ -165,8 +266,11 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
         "por_contratante": por_contratante,
         "recebido_ano": _recebido_ano(conn, hoje),
         "a_receber": _a_receber(conn, hoje),
-        "prazos": _prazos(conn, hoje),
+        "prazos": prazos_lista,
         "espelhos": _espelhos(conn),
+        "protocolado_mes": _protocolado_mes(conn, hoje, protocoladas_dia),
+        "notas_mes": _notas_mes(conn, hoje, protocoladas_dia),
+        "avisos_importantes": _avisos_importantes(pedir, prazos_lista, vencidas, vencendo, hoje),
     }
 
 
