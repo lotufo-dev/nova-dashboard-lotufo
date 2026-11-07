@@ -483,12 +483,19 @@ def _sentinela(args) -> int:
     if not banco.is_file():
         print(f"Banco não encontrado: {banco}")
         return 1
+    anterior = os.environ.get("DASH_DB_PATH")
     os.environ["DASH_DB_PATH"] = str(banco)
-    conn = db.get_conn()
     try:
-        r = sentinela.antes_da_456(conn)
+        conn = db.get_conn()
+        try:
+            r = sentinela.antes_da_456(conn)
+        finally:
+            conn.close()
     finally:
-        conn.close()
+        if anterior is None:
+            os.environ.pop("DASH_DB_PATH", None)
+        else:
+            os.environ["DASH_DB_PATH"] = anterior
     if r["gravado"]:
         print(f"Ponto da sentinela gravado na auditoria: registro {r['ponto']}.")
     elif r["ponto"] is not None:

@@ -436,7 +436,8 @@ def rodada(conn) -> int:
                 auditoria.registrar(conn, None, ACAO, "sentinela", None, None, a)
             if ultimo is not None and ultimo != ponto:
                 _gravar_ponto(conn, ultimo)
-            ultimo_achado = _marca(conn)[1] or 0
+            # a ultima linha da auditoria, nao so' o ultimo achado: a proxima rodada so' varre o que veio depois
+            ultimo_achado = conn.execute("SELECT COALESCE(MAX(id), 0) FROM audit_log").fetchone()[0]
     if perdeu_a_corrida:
         log.info("sentinela: outra rodada gravou no meio desta; descartada")
         return 0
@@ -448,8 +449,6 @@ def rodada(conn) -> int:
 
 
 MIGRACAO_PONTO = "063_sentinela_ponto.sql"
-_GATILHOS_PONTO = ("sentinela_ponto_protecao_insert", "sentinela_ponto_protecao_delete",
-                   "sentinela_ponto_protecao_update")
 
 
 def antes_da_456(conn) -> dict:
@@ -458,7 +457,10 @@ def antes_da_456(conn) -> dict:
     `ACAO_PONTO` da auditoria (pela aplicacao: a cadeia continua valida) e, na mesma transacao, apaga a tabela, os
     gatilhos e a linha da 063 em `schema_migrations`, para o deploy seguinte reimportar o ponto da auditoria. Sem
     isso o codigo antigo partiria do ponto de antes do deploy da #456, acusaria estado alterado e repetiria os
-    achados. Repetir nao faz mal. Devolve `{ponto, gravado, tabela, migracao}` (tabela e migracao, depois: 0)."""
+    achados. Repetir nao faz mal. Ponto da auditoria mais novo que o da tabela (o codigo antigo ja' rodou depois de um
+    rollback sem este passo) fica: so' a tabela sai. Devolve `{ponto, gravado, tabela, migracao}` (tabela e migracao,
+    depois: 0)."""
+    from app import seguranca     # seguranca nao importa a sentinela; aqui so' para os nomes dos gatilhos da 063
     with db.mutacao(conn):
         tem_tabela = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = "
                                   "'sentinela_ponto'").fetchone()[0] > 0
@@ -471,10 +473,10 @@ def antes_da_456(conn) -> dict:
                 na_auditoria = None if r is None else int(json.loads(r[0])["ultimo_registro"])
             except (ValueError, KeyError, TypeError):
                 na_auditoria = None
-            if na_auditoria != ponto:
+            if na_auditoria is None or na_auditoria < ponto:
                 auditoria.registrar(conn, None, ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": ponto})
                 gravado = True
-        for g in _GATILHOS_PONTO:
+        for g in seguranca.GATILHOS["sentinela_ponto"]:
             conn.execute(f"DROP TRIGGER IF EXISTS {g}")
         conn.execute("DROP TABLE IF EXISTS sentinela_ponto")
         conn.execute("DELETE FROM schema_migrations WHERE nome = ?", (MIGRACAO_PONTO,))

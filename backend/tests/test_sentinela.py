@@ -579,6 +579,41 @@ def test_comando_do_rollback_456_sem_ponto_gravado_so_apaga(maquina, conn, capsy
     assert conn.execute("SELECT COUNT(*) FROM schema_migrations WHERE nome = '063_sentinela_ponto.sql'").fetchone()[0] == 0
 
 
+def test_rollback_que_ja_subiu_o_codigo_antigo_mantem_o_ponto_mais_novo_da_auditoria(maquina, conn, capsys):
+    """/code-review da #478: o codigo antigo ja' rodou (ponto 1060 na auditoria) com a tabela parada em 1004; o
+    comando nao pode gravar o ponto velho por cima."""
+    from app import auditoria
+    _com_ponto_de_partida(maquina, conn)
+    _rodar(maquina, conn, "4663_segredos_externo.xml")
+    assert _ponto(conn) == 1004
+    with db.mutacao(conn):
+        auditoria.registrar(conn, None, sentinela.ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": 1060})
+    _rodar_o_comando_do_runbook(capsys)
+    r = conn.execute("SELECT depois FROM audit_log WHERE acao = ? ORDER BY id DESC LIMIT 1",
+                     (sentinela.ACAO_PONTO,)).fetchone()
+    assert json.loads(r[0])["ultimo_registro"] == 1060
+
+
+def test_comando_do_runbook_que_so_tira_a_tabela_depois_do_codigo_antigo_ja_ter_subido(maquina, conn, monkeypatch):
+    """O caso "o codigo antigo ja' subiu sem este passo": ele ja' grava o ponto na auditoria; o `python -c` do runbook
+    (sem a CLI nova, que o codigo antigo nao tem) so' tira a tabela, os gatilhos e a linha da 063."""
+    import subprocess
+    import sys
+    from app import auditoria
+    texto = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "runbook.md").read_text(encoding="utf-8")
+    comandos = [m.group(1) for m in re.finditer(r'python -c "([^"]*)"', texto) if "063_sentinela_ponto.sql" in m.group(1)]
+    assert len(comandos) == 1
+    assert '"' not in comandos[0] and "$" not in comandos[0]   # o PowerShell repassa sem mexer
+    _com_ponto_de_partida(maquina, conn)
+    with db.mutacao(conn):                                  # o codigo antigo, depois do rollback
+        auditoria.registrar(conn, None, sentinela.ACAO_PONTO, "sentinela", None, None, {"ultimo_registro": 1071})
+    comando = comandos[0].replace(r"C:\DashboardLotufo\dados\dashboard.db", str(db.db_path()))
+    saida = subprocess.run([sys.executable, "-I", "-c", comando], capture_output=True, text=True, check=True).stdout
+    assert saida.strip() == "sentinela_ponto: 0 migracao 063: 0"
+    db.migrate(conn)                                        # o deploy seguinte
+    assert _ponto(conn) == 1071
+
+
 def test_deploy_ps1_passa_o_ponto_para_a_auditoria_antes_do_rollback_para_antes_da_456():
     texto = (pathlib.Path(__file__).resolve().parents[2] / "scripts" / "deploy.ps1").read_text(encoding="utf-8")
     rollback = texto[texto.index("ROLLBACK para $anterior"):]
