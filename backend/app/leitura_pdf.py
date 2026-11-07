@@ -430,11 +430,16 @@ def leitor_de_pdf(pdf: bytes, pacote: bool = False) -> pypdf.PdfReader:
     upload que arquiva), sem cada uma lembrar de chama-la. E e' AQUI o unico lugar em
     que ela roda -- ou seja, sempre dentro do subprocesso de `com_limite`.
     """
+    _guarda_de_streams(pdf, pacote)
+    return pypdf.PdfReader(io.BytesIO(pdf))
+
+
+def _guarda_de_streams(pdf: bytes, pacote: bool) -> None:
+    """Os tetos da pre-checagem num lugar so' (o leitor de texto e o OCR usam os mesmos)."""
     if pacote:     # bloco 5: pacote de protocolo (paginas escaneadas em branco comprimem > 50:1)
         conferir_streams(pdf, TETO_STREAM_PACOTE, TETO_STREAMS_PACOTE)
     else:
         conferir_streams(pdf)
-    return pypdf.PdfReader(io.BytesIO(pdf))
 
 
 def texto_de_pdf(pdf: bytes) -> str:
@@ -494,12 +499,21 @@ def _pgm(bitmap) -> bytes:
 
 def texto_por_ocr(pdf: bytes, exe: str, tessdata: str) -> str:
     """Texto das primeiras `OCR_PAGINAS` paginas pelo Tesseract. Roda no filho de `com_limite`."""
+    return "\n".join(paginas_por_ocr(pdf, exe, tessdata))
+
+
+def paginas_por_ocr(pdf: bytes, exe: str, tessdata: str, pacote: bool = False) -> list[str]:
+    """Texto de cada uma das primeiras `OCR_PAGINAS` paginas pelo Tesseract. Roda no filho de `com_limite`.
+
+    `pacote=True` (capa do SMO, #285): o PDF pode ser o envelope inteiro do DocuSign (centenas de paginas, capa na
+    p. 2); vale a guarda de streams do pacote e nao o teto de paginas da certidao. Le' so' as primeiras de todo modo.
+    """
     import pypdfium2 as pdfium    # so' o filho do OCR carrega o pdfium
 
-    conferir_streams(pdf)          # a mesma guarda de bomba da leitura de texto
+    _guarda_de_streams(pdf, pacote)    # a mesma guarda de bomba da leitura de texto
     doc = pdfium.PdfDocument(pdf)
     try:
-        if len(doc) > TETO_PAGINAS:
+        if not pacote and len(doc) > TETO_PAGINAS:
             raise TextoInadequado(f"O PDF tem {len(doc)} páginas — uma certidão tem "
                                   f"poucas; confira o arquivo e {MANUAL}.")
         partes = []
@@ -516,10 +530,26 @@ def texto_por_ocr(pdf: bytes, exe: str, tessdata: str) -> str:
             partes.append(r.stdout.decode("utf-8", "replace"))
     finally:
         doc.close()
-    texto = "\n".join(partes)
-    if len(texto) > TETO_CARACTERES:
-        raise TextoInadequado(_TEXTO_DEMAIS.format(n=len(texto)))
-    return texto
+    n = len("\n".join(partes))
+    if n > TETO_CARACTERES:
+        raise TextoInadequado(_TEXTO_DEMAIS.format(n=n))
+    return partes
+
+
+def primeiras_paginas(pdf: bytes) -> list[str]:
+    """Texto das primeiras `OCR_PAGINAS` paginas, sem teto de paginas (capa do SMO, #285: o pacote do DocuSign tem
+    centenas). Guarda de streams do pacote. Roda no filho de `com_limite`."""
+    return [_texto_da_pagina(p) for p in leitor_de_pdf(pdf, pacote=True).pages[:OCR_PAGINAS]]
+
+
+def _texto_da_pagina(p) -> str:
+    # Planilha impressa sai com milhares de espacos; e o carimbo do DocuSign costuma vir no FIM do
+    # texto da pagina. Espaco repetido vira um so', e pagina longa guarda o comeco e o fim.
+    t = re.sub(r"[ \t]{2,}", " ", p.extract_text() or "")
+    if len(t) > TETO_CARACTERES_PAGINA:
+        metade = TETO_CARACTERES_PAGINA // 2
+        t = t[:metade] + "\n" + t[-metade:]
+    return t
 
 
 def textos_por_pagina(pdf: bytes, teto_paginas: int) -> list[str]:
@@ -528,16 +558,7 @@ def textos_por_pagina(pdf: bytes, teto_paginas: int) -> list[str]:
     if len(paginas) > teto_paginas:
         raise TextoInadequado(f"O PDF tem {len(paginas)} páginas, acima do limite de {teto_paginas} "
                               f"— confira o arquivo.")
-    out = []
-    for p in paginas:
-        # Planilha impressa sai com milhares de espacos; e o carimbo do DocuSign costuma vir no FIM do
-        # texto da pagina. Espaco repetido vira um so', e pagina longa guarda o comeco e o fim.
-        t = re.sub(r"[ \t]{2,}", " ", p.extract_text() or "")
-        if len(t) > TETO_CARACTERES_PAGINA:
-            metade = TETO_CARACTERES_PAGINA // 2
-            t = t[:metade] + "\n" + t[-metade:]
-        out.append(t)
-    return out
+    return [_texto_da_pagina(p) for p in paginas]
 
 
 # --- leitura em subprocesso com limite de tempo ---------------------------------------
@@ -562,6 +583,10 @@ def _trabalho(pdf: bytes, modo: str, envia, opcoes=None) -> None:
             valor = len(leitor_de_pdf(pdf, pacote=True).pages)
         elif modo == "ocr":
             valor = texto_por_ocr(pdf, *opcoes)
+        elif modo == "ocr_pacote":       # capa do SMO (#285): envelope inteiro, OCR so' das primeiras paginas
+            valor = paginas_por_ocr(pdf, *opcoes, pacote=True)
+        elif modo == "primeiras_paginas":
+            valor = primeiras_paginas(pdf)
         elif modo == "paginas_texto":
             valor = textos_por_pagina(pdf, opcoes)
         elif modo == "primeira_pagina":    # regularidade do DP (32 a 160 p.): so' o cabecalho da 1a pagina
@@ -584,16 +609,28 @@ def _trabalho(pdf: bytes, modo: str, envia, opcoes=None) -> None:
         envia.close()
 
 
-def _matar(proc) -> None:
-    """Derruba o filho: `terminate`, dois segundos de folga, `kill` se ainda vive."""
+# Pior caso de `_matar`: os dois `join(2.0)`. Com prazo de ponta a ponta (`ate`), sai do tempo do filho.
+_FOLGA_MATAR_S = 4.0
+# Espera fixa pelo filho depois do `kill`, com ou sem prazo: a vaga so' e' solta com o filho recolhido, e o prazo de
+# ponta a ponta pode passar ate' isto quando o `spawn` lento comeu a folga (rodada 3 do #285).
+_TETO_RECOLHER_S = 2.0
+
+
+def _matar(proc, ate: float | None = None) -> None:
+    """Derruba o filho: `terminate`, dois segundos de folga, `kill` se ainda vive. Com `ate`, a espera depois do
+    `terminate` vai so' ate' o prazo (o `spawn` lento pode ter comido a folga); a do `kill` e' sempre
+    `_TETO_RECOLHER_S`, para o filho estar recolhido antes de a vaga ser solta. Se nem assim ele morreu (o `kill` no
+    Windows e' assincrono), espera sem teto: a vaga nunca e' solta com o filho vivo, e o `kill` ja' foi dado."""
     proc.terminate()
-    proc.join(2.0)
+    proc.join(2.0 if ate is None else max(0.0, min(2.0, ate - time.monotonic())))
     if proc.is_alive():
         proc.kill()
-        proc.join(2.0)
+        proc.join(_TETO_RECOLHER_S)
+        if proc.is_alive():
+            proc.join()
 
 
-def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None):
+def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, ate: float | None = None):
     """Roda `_trabalho` num subprocesso e devolve o valor -- ou mata o filho no tempo.
 
     E' a garantia de que a leitura de PDF NAO derruba o servidor: o que o pypdf faz com
@@ -629,11 +666,23 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None):
     morte sem resposta viram `TextoInadequado` de falha interna; qualquer outro vira
     `ValueError("PDF inválido (<classe>): <mensagem>")`, que os chamadores ja convertem
     em 415/422.
+
+    `ate` (capa do SMO, #285): prazo de ponta a ponta, em `time.monotonic()`. A espera pela vaga e o tempo do filho
+    saem do que sobra ate' la', em vez de `TEMPO_LIMITE_S` de espera mais `limite` de filho. O que sobra e' medido
+    DEPOIS do `spawn` (que no Windows sob carga leva segundos) e ja' sem a folga de `_matar`, e o `join` do filho que
+    respondeu tambem cabe nele: o filho que nunca responde nao passa de `ate`, salvo quando o `spawn` comeu a folga
+    e o `kill` ainda precisa de ate' `_TETO_RECOLHER_S` para recolher o filho antes de soltar a vaga. Sem tempo para
+    o filho depois da vaga, nem o cria.
     """
     limite = TEMPO_LIMITE_S if limite is None else limite    # lido na chamada: o teste o troca
-    if not _VAGAS.acquire(timeout=TEMPO_LIMITE_S):
+    espera = TEMPO_LIMITE_S if ate is None else max(0.0, ate - time.monotonic())
+    if not _VAGAS.acquire(timeout=espera):
         raise TextoInadequado(_LOTADO)
+    def restante() -> float:
+        return max(0.0, ate - time.monotonic() - _FOLGA_MATAR_S)
     try:
+        if ate is not None and restante() <= 0.0:
+            raise TextoInadequado(_DEMOROU.format(s=int(max(0.0, ate - time.monotonic()))))
         ctx = multiprocessing.get_context("spawn")
         recebe, envia = ctx.Pipe(duplex=False)
         try:
@@ -646,22 +695,28 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None):
             recebe.close()
             envia.close()
             raise
-        envia.close()      # so' o filho escreve: e' o que faz o `recv` ver o fim do cano
+        # Daqui em diante, qualquer saida (estouro, `recv` com OSError/MemoryError, o que for) mata e recolhe o filho
+        # ANTES de a vaga ser solta: filho vivo fora da vaga furava o teto de duas leituras.
         try:
+            envia.close()      # so' o filho escreve: e' o que faz o `recv` ver o fim do cano
+            if ate is not None:
+                limite = restante()       # depois do `spawn`: o tempo dele sai do prazo
             if not recebe.poll(limite):
-                _matar(proc)
                 raise TextoInadequado(_DEMOROU.format(s=int(limite)))
             try:
                 resposta = recebe.recv()
             except EOFError:              # o filho morreu sem responder
                 resposta = None
-            proc.join(2.0)
-            if proc.is_alive():
-                _matar(proc)
+            proc.join(2.0 if ate is None else min(2.0, restante()))
         finally:
-            recebe.close()
-            if proc.exitcode is not None:
-                proc.close()
+            try:
+                if proc.is_alive():
+                    _matar(proc, ate)
+            finally:
+                envia.close()
+                recebe.close()
+                if proc.exitcode is not None:
+                    proc.close()
     finally:
         _VAGAS.release()
     if resposta is None:
@@ -696,6 +751,11 @@ def paginas_com_limite(pdf: bytes, pacote: bool = False) -> int:
     return com_limite(pdf, "paginas_pacote" if pacote else "paginas")
 
 
+def primeiras_paginas_com_limite(pdf: bytes) -> list[str]:
+    """`primeiras_paginas` em subprocesso, com o prazo do pacote (ver `com_limite`)."""
+    return com_limite(pdf, "primeiras_paginas", TEMPO_PACOTE_S)
+
+
 def textos_por_pagina_com_limite(pdf: bytes, teto_paginas: int = 400) -> list[str]:
     """`textos_por_pagina` em subprocesso, com o prazo do pacote (ver `com_limite`)."""
     return com_limite(pdf, "paginas_texto", TEMPO_PACOTE_S, teto_paginas)
@@ -720,11 +780,28 @@ def juntar_com_limite(partes: list[bytes]) -> tuple[bytes, int]:
 def texto_por_ocr_com_limite(pdf: bytes) -> str | None:
     """OCR em subprocesso, um por vez. None quando nao ha OCR instalado ou ele nao conseguiu
     (fila, prazo, Tesseract com erro): quem chama segue como PDF sem texto (campos digitados)."""
+    return _ocr_com_limite(pdf, "ocr", OCR_TEMPO_LIMITE_S)
+
+
+def paginas_por_ocr_com_limite(pdf: bytes) -> list[str] | None:
+    """OCR das primeiras paginas de um pacote (capa do SMO, #285), uma lista por pagina; None como no
+    `texto_por_ocr_com_limite`. O envelope inteiro passa pela guarda e pelo pdfium antes das 2 paginas: prazo do
+    pacote, se maior que o do OCR."""
+    return _ocr_com_limite(pdf, "ocr_pacote", max(OCR_TEMPO_LIMITE_S, TEMPO_PACOTE_S), ponta_a_ponta=True)
+
+
+def _ocr_com_limite(pdf: bytes, modo: str, prazo: float, ponta_a_ponta: bool = False):
+    """`ponta_a_ponta`: o `prazo` conta desde a entrada, com as esperas pela vaga do OCR e pela do PDF dentro dele.
+    Sem ele (certidao, como sempre foi): ate' `TEMPO_LIMITE_S` em cada fila, mais `prazo` para o filho."""
+    ate = time.monotonic() + prazo if ponta_a_ponta else None
     cfg = configuracao_ocr()
-    if cfg is None or not _VAGA_OCR.acquire(timeout=TEMPO_LIMITE_S):
+    espera = TEMPO_LIMITE_S if ate is None else min(TEMPO_LIMITE_S, max(0.0, ate - time.monotonic()))
+    if cfg is None or not _VAGA_OCR.acquire(timeout=espera):
         return None
     try:
-        return com_limite(pdf, "ocr", OCR_TEMPO_LIMITE_S, cfg)
+        if ate is not None:
+            return com_limite(pdf, modo, None, cfg, ate=ate)
+        return com_limite(pdf, modo, prazo, cfg)
     except (TextoInadequado, ValueError):
         return None
     finally:

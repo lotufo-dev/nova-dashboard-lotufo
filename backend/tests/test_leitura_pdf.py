@@ -388,6 +388,262 @@ def test_pdf_com_flate_legitimo_continua_sendo_lido():
     assert "29/01/2027" in leitura_pdf.texto_de_pdf(pdf)
 
 
+def test_primeiras_paginas_le_so_duas_e_nao_tem_o_teto_da_certidao():
+    """Capa do SMO (#285): o envelope do DocuSign tem centenas de paginas e a capa vem na p. 1 ou 2."""
+    pdf = _pdf_de_n_paginas(leitura_pdf.TETO_PAGINAS + 5)
+    assert leitura_pdf.primeiras_paginas_com_limite(pdf) == ["", ""]
+
+
+def test_ocr_do_pacote_nao_tem_o_teto_de_paginas_da_certidao(monkeypatch):
+    import types
+    chamadas = []
+
+    def tesseract(cmd, input, **k):
+        chamadas.append(cmd[0])
+        return types.SimpleNamespace(returncode=0, stdout="página".encode())
+    monkeypatch.setattr(leitura_pdf.subprocess, "run", tesseract)
+    pdf = _pdf_de_n_paginas(leitura_pdf.TETO_PAGINAS + 5)
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.texto_por_ocr(pdf, "tesseract", "tessdata")
+    assert leitura_pdf.paginas_por_ocr(pdf, "tesseract", "tessdata", pacote=True) == ["página", "página"]
+    assert chamadas == ["tesseract", "tesseract"]       # so' as primeiras `OCR_PAGINAS`
+
+
+def test_ocr_do_pacote_vai_ao_subprocesso_no_modo_do_pacote_e_com_o_prazo_do_pacote(monkeypatch):
+    """Se a chamada voltar ao modo "ocr" (teto de 20 paginas da certidao), o envelope do DocuSign e' recusado. O
+    prazo do pacote e' de ponta a ponta: a espera pela vaga do OCR sai dele."""
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+    monkeypatch.setattr(leitura_pdf, "configuracao_ocr", lambda: ("tesseract", "tessdata"))
+
+    class Vaga:
+        def acquire(self, timeout):
+            esperas.append(timeout)
+            relogio[0] += 8.0          # oito segundos na fila do OCR
+            return True
+
+        def release(self):
+            pass
+    esperas, pedidos = [], []
+    monkeypatch.setattr(leitura_pdf, "_VAGA_OCR", Vaga())
+
+    def com_limite(pdf, modo, limite=None, opcoes=None, ate=None):
+        pedidos.append((modo, limite, opcoes, ate))
+        return ["capa", ""]
+    monkeypatch.setattr(leitura_pdf, "com_limite", com_limite)
+    prazo = max(leitura_pdf.OCR_TEMPO_LIMITE_S, leitura_pdf.TEMPO_PACOTE_S)
+    assert leitura_pdf.paginas_por_ocr_com_limite(b"%PDF-") == ["capa", ""]
+    assert pedidos == [("ocr_pacote", None, ("tesseract", "tessdata"), 1000.0 + prazo)]
+    assert esperas == [leitura_pdf.TEMPO_LIMITE_S]
+    # e o OCR da certidao continua como era: prazo do filho, sem prazo de ponta a ponta
+    leitura_pdf.texto_por_ocr_com_limite(b"%PDF-")
+    assert pedidos[1] == ("ocr", leitura_pdf.OCR_TEMPO_LIMITE_S, ("tesseract", "tessdata"), None)
+
+
+def test_com_limite_com_prazo_de_ponta_a_ponta_desconta_a_espera_pela_vaga(monkeypatch):
+    import time
+    esperas = []
+
+    class Lotada:
+        def acquire(self, timeout):
+            esperas.append(timeout)
+            return False
+    monkeypatch.setattr(leitura_pdf, "_VAGAS", Lotada())
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.com_limite(b"", "paginas", ate=time.monotonic() + 3.0)
+    assert 2.0 < esperas[0] <= 3.0               # nao os `TEMPO_LIMITE_S` fixos de antes
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.com_limite(b"", "paginas")
+    assert esperas[1] == leitura_pdf.TEMPO_LIMITE_S
+
+
+def test_com_limite_com_prazo_de_ponta_a_ponta_mata_o_filho_no_que_sobra():
+    import time
+    inicio = time.monotonic()
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        # o `ate` manda, nao os 60 s; com a folga de `_matar` reservada, o filho ainda e' criado e morto
+        leitura_pdf.com_limite(b"", "dormir", limite=60.0, ate=inicio + leitura_pdf._FOLGA_MATAR_S + 1.5)
+    assert time.monotonic() - inicio < leitura_pdf._FOLGA_MATAR_S + 1.5 + 1.0
+
+
+def _filho_falso(monkeypatch, relogio, responde_em=None, spawn_s=5.0, erro_recv=None, eventos=None,
+                 recolhe_so_sem_teto=False):
+    """`spawn` que leva `spawn_s` no relogio falso; o filho responde depois de `responde_em` s (None: nunca), nao
+    sai sozinho e ignora o `terminate`, entao todo `join` gasta o que pede e so' o `kill` o derruba -- e o `kill` e'
+    assincrono, como no sistema: o filho so' fica recolhido (`exitcode`) depois de um `join` com espera depois dele.
+    `recolhe_so_sem_teto`: o filho morto so' e' recolhido por um `join()` sem teto (o `kill` demorou mais que ele).
+    `erro_recv`: excecao que o `recv` levanta. Devolve a lista de `get_context` chamados; `eventos` recebe "kill" e "close"."""
+    contextos = []
+    eventos = [] if eventos is None else eventos
+
+    class Recebe:
+        def poll(self, t):
+            if responde_em is None or responde_em > t:
+                relogio[0] += t
+                return False
+            relogio[0] += responde_em
+            return True
+
+        def recv(self):
+            if erro_recv is not None:
+                raise erro_recv
+            return ("ok", 3)
+
+        def close(self):
+            pass
+
+    class Envia:
+        def close(self):
+            pass
+
+    class Proc:
+        exitcode = None
+
+        def start(self):
+            relogio[0] += spawn_s
+
+        morto = False
+
+        def join(self, t=None):
+            if t is None:
+                eventos.append("join-sem-teto")
+                relogio[0] += 1.0
+                if self.morto:
+                    self.exitcode = -9
+                return
+            relogio[0] += t
+            if self.morto and t > 0 and not recolhe_so_sem_teto:
+                self.exitcode = -9
+
+        def is_alive(self):
+            return self.exitcode is None
+
+        def terminate(self):
+            pass
+
+        def kill(self):
+            eventos.append("kill")
+            self.morto = True
+
+        def close(self):
+            eventos.append("close")
+
+    class Ctx:
+        def Pipe(self, duplex):
+            return Recebe(), Envia()
+
+        def Process(self, **k):
+            return Proc()
+
+    def get_context(modo):
+        contextos.append(modo)
+        return Ctx()
+    monkeypatch.setattr(leitura_pdf.multiprocessing, "get_context", get_context)
+    return contextos
+
+
+def test_com_limite_com_prazo_conta_o_spawn_e_o_encerramento_do_filho(monkeypatch):
+    """Gate Sol, rodada 3: o tempo do filho era calculado antes do `spawn` (0,3 a 1 s no Windows, mais sob carga) e
+    o `_matar` (ate' 4 s) vinha por fora; o prazo de ponta a ponta estourava."""
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+    _filho_falso(monkeypatch, relogio)                      # filho que nunca responde
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.com_limite(b"", "paginas", ate=1060.0)
+    assert relogio[0] <= 1060.0
+
+
+def test_com_limite_com_prazo_filho_que_responde_e_nao_sai_cabe_no_prazo(monkeypatch):
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+    _filho_falso(monkeypatch, relogio, responde_em=50.0)
+    assert leitura_pdf.com_limite(b"", "paginas", ate=1060.0) == 3
+    assert relogio[0] <= 1060.0
+
+
+def test_com_limite_sem_prazo_para_o_filho_nem_o_cria(monkeypatch):
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+
+    class VagaDemorada:
+        def acquire(self, timeout):
+            relogio[0] += 58.0
+            return True
+
+        def release(self):
+            pass
+    monkeypatch.setattr(leitura_pdf, "_VAGAS", VagaDemorada())
+    contextos = _filho_falso(monkeypatch, relogio)
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.com_limite(b"", "paginas", ate=1060.0)
+    assert contextos == [] and relogio[0] <= 1060.0
+
+
+def test_com_limite_com_prazo_spawn_que_come_a_folga_de_matar_nao_passa_do_prazo(monkeypatch):
+    """Gate Sol, rodada 3 da correcao: com `ate` = inicio + 6 s, a pre-checagem passa (sobram 2 s alem da folga), o
+    `spawn` de 5 s come a folga e o `_matar` de 4 s fixos chegava a inicio + 9 s."""
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+    eventos = []
+
+    class Vaga:
+        def acquire(self, timeout):
+            return True
+
+        def release(self):
+            eventos.append("release")
+    monkeypatch.setattr(leitura_pdf, "_VAGAS", Vaga())
+    _filho_falso(monkeypatch, relogio, eventos=eventos)
+    with pytest.raises(leitura_pdf.TextoInadequado):
+        leitura_pdf.com_limite(b"", "paginas", ate=1006.0)
+    # o `terminate` espera so' o que sobra do prazo; depois do `kill`, o filho e' sempre recolhido (`close`) antes
+    # de soltar a vaga, mesmo passando do prazo ate' o teto do recolhimento (ultima passada da rodada 3)
+    assert eventos == ["kill", "close", "release"]
+    assert relogio[0] <= 1006.0 + leitura_pdf._TETO_RECOLHER_S
+
+
+def test_com_limite_erro_inesperado_depois_do_spawn_mata_o_filho_antes_de_soltar_a_vaga(monkeypatch):
+    """Gate Sol, rodada 3 da correcao: `recv` levantando OSError (ou MemoryError) soltava a vaga com o filho vivo,
+    furando o teto de duas leituras simultaneas."""
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+    eventos = []
+
+    class Vaga:
+        def acquire(self, timeout):
+            return True
+
+        def release(self):
+            eventos.append("release")
+    monkeypatch.setattr(leitura_pdf, "_VAGAS", Vaga())
+    for erro in (OSError("cano quebrado"), MemoryError()):
+        eventos.clear()
+        _filho_falso(monkeypatch, relogio, responde_em=1.0, erro_recv=erro, eventos=eventos)
+        with pytest.raises(type(erro)):
+            leitura_pdf.com_limite(b"", "paginas")
+        assert eventos == ["kill", "close", "release"], erro
+
+
+def test_com_limite_filho_que_nao_morre_no_teto_e_esperado_antes_de_soltar_a_vaga(monkeypatch):
+    """Gate Sol, rodada extra de 03/11: se o `join` com teto depois do `kill` vencia com o filho vivo, o `close` era
+    pulado e a vaga solta com o filho vivo. A vaga so' sai depois de o filho morrer de fato."""
+    relogio = [1000.0]
+    monkeypatch.setattr(leitura_pdf.time, "monotonic", lambda: relogio[0])
+    eventos = []
+
+    class Vaga:
+        def acquire(self, timeout):
+            return True
+
+        def release(self):
+            eventos.append("release")
+    monkeypatch.setattr(leitura_pdf, "_VAGAS", Vaga())
+    for ate in (None, 1006.0):
+        eventos.clear()
+        _filho_falso(monkeypatch, relogio, eventos=eventos, recolhe_so_sem_teto=True)
+        with pytest.raises(leitura_pdf.TextoInadequado):
+            leitura_pdf.com_limite(b"", "paginas", limite=1.0, ate=ate if ate is None else relogio[0] + 6.0)
+        assert eventos == ["kill", "join-sem-teto", "close", "release"], ate
 
 
 # --- de quem e' o CNPJ (achado 3 do gate 3) -------------------------------------------

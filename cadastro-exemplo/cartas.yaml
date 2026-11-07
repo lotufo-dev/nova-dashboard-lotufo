@@ -1,7 +1,10 @@
 # Textos de exemplo (inventados) das cartas e dos e-mails de protocolo. Placeholders: {razao_social} {cnpj}
 # {oficio} {medicao} {a_medicao} {numero} {numero_extenso} {periodo} {competencia} {obra} {instrumento}
-# {objeto} {municipio} {lista} {saudacao} {oficio_barra}. {lista} é montada pelo sistema; {lista_anexos}
-# (só no e-mail) é o que de fato vai anexado.
+# {objeto} {municipio} {lista} {saudacao} {oficio_barra} {apostilamento}. {lista} é montada pelo sistema; {lista_anexos}
+# (só no e-mail) é o que de fato vai anexado. {apostilamento} (MT-PAR e Prefeitura, issue #278) é a frase montada pelo
+# sistema que cita cada competência do reajuste com o termo de apostilamento que a cobre ("O reajuste da competência
+# 09/2026 está apostilado no Termo de Apostilamento nº ..."); fica vazia no ofício só de execução e quando nenhum
+# termo cobre (aí o envio pede justificativa). Num parágrafo próprio, o parágrafo vazio some.
 # Campos opcionais por família: `local` (cidade da carta), `assinatura` (linhas) e o par
 # `reajuste_carta_assunto` + `reajuste_carta_corpo`, usado no protocolo que leva só o reajuste.
 signatario: [CONSTRUTORA EXEMPLO LTDA, Responsável de Exemplo]
@@ -28,6 +31,8 @@ familias:
       {razao_social}, CNPJ {cnpj}, responsável pela obra {objeto}, envia os documentos relativos {a_medicao}, período {periodo}:
 
       {lista}
+
+      {apostilamento}
 
       Ficamos à disposição.
 
@@ -96,6 +101,8 @@ familias:
       {razao_social}, CNPJ {cnpj}, responsável pela obra {objeto}, envia a nota fiscal relativa {a_medicao}, período {periodo}:
 
       {lista}
+
+      {apostilamento}
 
       Cordialmente,
 # E-mail da planilha/carta ao protocolo do órgão (issue #282; spec 2026-10-20 §2.1). Igual para todas as famílias;
