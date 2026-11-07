@@ -191,3 +191,74 @@ describe("App: o menu lateral largo", () => {
     expect((await screen.findByRole("navigation", { name: "Navegação principal" })).getAttribute("data-estado")).toBe("recolhido");
   });
 });
+
+describe("App: o menu lateral no celular (375 px)", () => {
+  let ouvintes: Array<(ev: { matches: boolean }) => void>;
+  beforeEach(() => {
+    try { localStorage.clear(); } catch { /* sem armazenamento */ }
+    ouvintes = [];
+    // o jsdom nao tem matchMedia: simula "(max-width: 767px)" como verdadeiro (janela de 375 px)
+    Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: (q: string) => ({
+      matches: q === "(max-width: 767px)", media: q,
+      addEventListener: (_: string, f: (ev: { matches: boolean }) => void) => { ouvintes.push(f); },
+      removeEventListener: (_: string, f: (ev: { matches: boolean }) => void) => { ouvintes = ouvintes.filter(o => o !== f); },
+    }) });
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", csrf: "x" };
+      if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
+        robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+      if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
+      return [];
+    });
+    window.history.replaceState(null, "", "/siga");
+  });
+  afterEach(() => {
+    cleanup(); api.mockReset(); window.history.replaceState(null, "", "/");
+    Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it("nasce recolhido, abre pelo botão, fecha ao navegar e não grava a escolha", async () => {
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
+    expect(nav.getAttribute("data-estado")).toBe("recolhido");
+    await act(async () => { within(nav).getByRole("button", { name: "Expandir o menu" }).click(); });
+    expect(nav.getAttribute("data-estado")).toBe("largo");
+    await act(async () => { within(nav).getByRole("link", { name: "Obras" }).click(); });
+    expect(nav.getAttribute("data-estado")).toBe("recolhido");
+    expect(localStorage.getItem("menu-lateral")).toBeNull();
+  });
+
+  it("aberto por cima da tela, fecha com Esc e com toque fora", async () => {
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
+    const abrir = () => act(async () => { within(nav).getByRole("button", { name: "Expandir o menu" }).click(); });
+    await abrir();
+    await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    expect(nav.getAttribute("data-estado")).toBe("recolhido");
+    await abrir();
+    await act(async () => { document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+    expect(nav.getAttribute("data-estado")).toBe("recolhido");
+  });
+
+  it("estreitar a janela com o menu largo o recolhe", async () => {
+    Reflect.deleteProperty(window, "matchMedia");
+    Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: (q: string) => ({
+      matches: false, media: q,
+      addEventListener: (_: string, f: (ev: { matches: boolean }) => void) => { ouvintes.push(f); },
+      removeEventListener: () => {},
+    }) });
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
+    expect(nav.getAttribute("data-estado")).toBe("largo");
+    await act(async () => { ouvintes.forEach(f => f({ matches: true })); });
+    expect(nav.getAttribute("data-estado")).toBe("recolhido");
+  });
+
+  it("recolhido no computador, cada link ganha o nome como dica", async () => {
+    Reflect.deleteProperty(window, "matchMedia");
+    try { localStorage.setItem("menu-lateral", "recolhido"); } catch { /* sem armazenamento */ }
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
+    expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("title")).toBe("SIGA");
+  });
+});

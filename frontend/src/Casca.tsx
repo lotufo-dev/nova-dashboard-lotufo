@@ -19,8 +19,10 @@ import Simbolo from "./Simbolo";
 
 const CHAVE_MENU = "menu-lateral";
 
+const CELULAR = "(max-width: 767px)";
+
 function celular(): boolean {
-  return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+  return typeof window.matchMedia === "function" && window.matchMedia(CELULAR).matches;
 }
 
 function estadoInicial(): "largo" | "recolhido" {
@@ -36,6 +38,26 @@ const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement
 export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemMenu | "conta" | null; ir: Ir }) {
   const [estado, setEstado] = useState<"largo" | "recolhido">(estadoInicial);
   const largo = estado === "largo";
+  const caixa = useRef<HTMLElement>(null);
+
+  // Ao estreitar a janela para o celular o menu largo (que ali cobre a tela) recolhe sozinho.
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const m = window.matchMedia(CELULAR);
+    const mudou = (ev: MediaQueryListEvent) => { if (ev.matches) setEstado("recolhido"); };
+    m.addEventListener("change", mudou);
+    return () => m.removeEventListener("change", mudou);
+  }, []);
+
+  // No celular o menu largo esta' por cima da tela: Esc e toque fora o fecham.
+  useEffect(() => {
+    if (!largo || !celular()) return;
+    const fora = (ev: MouseEvent) => { if (!caixa.current?.contains(ev.target as Node)) setEstado("recolhido"); };
+    const tecla = (ev: KeyboardEvent) => { if (ev.key === "Escape") setEstado("recolhido"); };
+    document.addEventListener("mousedown", fora);
+    document.addEventListener("keydown", tecla);
+    return () => { document.removeEventListener("mousedown", fora); document.removeEventListener("keydown", tecla); };
+  }, [largo]);
 
   function alternar() {
     const novo = largo ? "recolhido" : "largo";
@@ -44,7 +66,7 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
   }
 
   return (
-    <nav className="trilho" aria-label="Navegação principal" data-estado={estado}
+    <nav className="trilho" ref={caixa} aria-label="Navegação principal" data-estado={estado}
       // no celular o menu aberto cobre a tela: navegar o fecha
       onClick={ev => { if (celular() && (ev.target as HTMLElement).closest("a")) setEstado("recolhido"); }}>
       <div className="trilho__bloco">
@@ -58,7 +80,7 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
         {menuDe(perfil).map(i => {
           const Icone = ICONES[i];
           return (
-            <Link key={i} className="trilho__item" para={rotaDoItem(i)} menu ir={ir}
+            <Link key={i} className="trilho__item" para={rotaDoItem(i)} menu ir={ir} title={largo ? undefined : ROTULO[i]}
               aria-current={marcado === i ? "page" : undefined}>
               <span className="trilho__celula"><Icone className="icone trilho__icone" /></span>
               <span className="trilho__rotulo">{ROTULO[i]}</span>

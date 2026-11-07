@@ -374,6 +374,8 @@ td, th { font-variant-numeric: tabular-nums; }
 .trilho__marca .trilho__celula { width: var(--trilho); }
 .trilho__icone { width: 20px; height: 20px; stroke-width: 1.8; }
 .trilho__alternar { margin-top: auto; }
+/* recolhido: a pilula e' o quadrado do icone, centrada com 12px de cada lado dentro dos 64px */
+.trilho[data-estado="recolhido"] .trilho__item, .trilho[data-estado="recolhido"] .trilho__alternar { width: calc(var(--trilho) - 24px); }
 .trilho__seta { transition: transform var(--trilho-duracao) var(--trilho-curva); }
 .trilho[data-estado="recolhido"] .trilho__seta { transform: rotate(180deg); }
 .trilho__rotulo { white-space: nowrap; }
