@@ -110,9 +110,12 @@
 @media (max-width: 700px) {
   /* as colunas fixas (112 + 150 + 72 px) nao cabem no celular: a tabela ganha largura minima e a Rolagem rola,
      em vez de a coluna "Aviso" ficar sem espaco e o texto se sobrepor */
-  .aviso-linha { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .aviso-linha__dias { grid-row: 1; grid-column: 3; }
-  .aviso-linha__fato { grid-column: 1 / -1; grid-row: 2; }
+  .aviso-linha { grid-template-columns: minmax(0, 1fr) auto; }
+  .aviso-linha__data { grid-row: 1; grid-column: 1; }
+  .aviso-linha__dias { grid-row: 1; grid-column: 2; }
+  .aviso-linha__obra { grid-row: 2; grid-column: 1 / -1; }
+  .aviso-linha__fato { grid-row: 3; grid-column: 1 / -1; }
+  .avisos-area .cartao__acoes { flex-wrap: wrap; }
   .avisos-area .form-inline { flex-wrap: wrap; }
   .avisos-area .form-inline .campo { min-width: 0; flex: 1 1 140px; }
   .avisos-area .cartao__cabeca { flex-wrap: wrap; }
