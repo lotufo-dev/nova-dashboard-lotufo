@@ -56,6 +56,7 @@ function Etapa([string]$texto) { Write-Host ("[{0}] {1}" -f (Get-Date -Format "H
 . (Join-Path $PSScriptRoot "comum_agendador.ps1")   # Agendador: schtasks.exe com tempo limite
 function Agendar([string[]]$argumentos) { return Agendador $argumentos $LimiteAgendador $Schtasks }
 $PrazoParadaSegundos = 90   # prazo total das leituras de estado depois de cada /End (issue #518)
+$PisoLeituraSegundos = 10   # tempo minimo de cada leitura de estado dentro desse prazo
 $msgAgendador = "deploy abortado: agendador de tarefas nao respondeu"
 
 # A porta e' a da tarefa agendada, nao uma segunda fonte: com a tarefa na 8080 (VM em que a 80 e' do IIS)
@@ -216,7 +217,10 @@ function RegistrarDeploy {
 function DonoDaPorta {
     $c = Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -eq $Porta } | Select-Object -First 1
     if (-not $c) { return $null }
-    return Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)"
+    # listener sem processo no WMI tambem nao e' porta livre: lanca, e quem chama trata como nao comprovado
+    $p = Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)"
+    if (-not $p) { throw "a porta $Porta tem listener (PID $($c.OwningProcess)), mas o processo nao aparece no WMI" }
+    return $p
 }
 # Servidor ORFAO do Agendador (incidente de 2026-09-21): parar a tarefa nao o mata, ele
 # segura a porta, a instancia nova morre com WinError 10048 e o health 200 que se ve e' o
@@ -233,7 +237,9 @@ function LiberarPorta {
     Write-Warning "servidor orfao na porta $Porta (PID $($dono.ProcessId), criado em $($dono.CreationDate)) -> encerrando"
     Stop-Process -Id $dono.ProcessId -Force
     Start-Sleep -Seconds 3
-    if (DonoDaPorta) { throw "porta $Porta continua ocupada depois de encerrar o PID $($dono.ProcessId)" }
+    try { $resto = DonoDaPorta }
+    catch { throw "consulta da porta $Porta falhou depois de encerrar o PID $($dono.ProcessId) ($($_.Exception.Message)): porta livre nao comprovada" }
+    if ($resto) { throw "porta $Porta continua ocupada depois de encerrar o PID $($dono.ProcessId)" }
 }
 # Para e inicia a tarefa por schtasks /End e /Run. Estouro de tempo lanca uma excecao com a
 # mensagem propria, que o fluxo principal trata voltando o pinado. /End que falha (tarefa
@@ -262,19 +268,21 @@ function PararComprovado([string]$momento) {
     $script:tarefaParada = $true
     $script:producaoMexida = $true
     ComandoTarefa "End" $false
-    # Issue #518: uma linha por leitura e prazo total no laco; cada leitura so' usa o que sobra do prazo, para a parada
-    # nao passar de ~$PrazoParadaSegundos s (mais a espera da morte do filho) nem ficar minutos sem imprimir nada.
+    # Issue #518: uma linha por leitura e um prazo total so' no laco. Cada leitura usa o que sobra do prazo, com piso de
+    # $PisoLeituraSegundos s (menos que isso nem o powershell filho sobe), entao a parada fica em ~$PrazoParadaSegundos s
+    # mais uma leitura. "desconhecido" no meio (o leitor ja' respondeu no inicio do deploy) e' lido de novo ate' o prazo.
     $estado = "desconhecido"
     $prazo = (Get-Date).AddSeconds($PrazoParadaSegundos)
     $tentativa = 0
     do {
         Start-Sleep -Seconds 1
         $tentativa++
-        $limite = [int][Math]::Max(1, [Math]::Min($LimiteAgendador, [Math]::Ceiling(($prazo - (Get-Date)).TotalSeconds)))
+        $restante = [Math]::Ceiling(($prazo - (Get-Date)).TotalSeconds)
+        $limite = [int][Math]::Min($LimiteAgendador, [Math]::Max($PisoLeituraSegundos, $restante))
         Etapa "${momento}: lendo o estado da tarefa (leitura $tentativa, ate' $limite s)"
         $estado = EstadoDaTarefa $tarefaNome $limite
-        if ((TarefaParada $estado) -or $estado -eq "desconhecido") { break }
-    } while ($tentativa -lt 10 -and (Get-Date) -lt $prazo)
+        if (TarefaParada $estado) { break }
+    } while ((Get-Date) -lt $prazo)
     if (-not (TarefaParada $estado)) { throw "tarefa $tarefaNome nao comprovadamente parada (estado: $estado)" }
     Start-Sleep -Seconds 2
     LiberarPorta

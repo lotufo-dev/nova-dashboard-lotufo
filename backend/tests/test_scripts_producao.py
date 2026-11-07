@@ -1001,9 +1001,12 @@ def test_deploy_imprime_cada_leitura_do_estado_e_a_parada_tem_prazo_total():
     assert "Etapa " in laco and "$estado = EstadoDaTarefa $tarefaNome $limite" in laco
     assert "$prazo = (Get-Date).AddSeconds($PrazoParadaSegundos)" in parar
     assert "(Get-Date) -lt $prazo" in parar[parar.index("} while ("):]
-    # cada leitura so' usa o que sobra do prazo
+    # cada leitura so' usa o que sobra do prazo, com piso; o laco so' termina no prazo ou na parada provada
     assert "($prazo - (Get-Date)).TotalSeconds" in laco
-    assert "$PrazoParadaSegundos = 90" in codigo
+    assert "[Math]::Max($PisoLeituraSegundos, $restante)" in laco
+    assert "$PrazoParadaSegundos = 90" in codigo and "$PisoLeituraSegundos = 10" in codigo
+    assert "if (TarefaParada $estado) { break }" in laco and '"desconhecido") { break }' not in laco
+    assert "} while ((Get-Date) -lt $prazo)" in parar
     raiz = pathlib.Path(__file__).resolve().parents[2]
     skill = (raiz / ".claude" / "skills" / "deploy" / "SKILL.md").read_text(encoding="utf-8")
     runbook = (raiz / "docs" / "runbook.md").read_text(encoding="utf-8")
@@ -1023,6 +1026,10 @@ def test_deploy_erro_na_consulta_da_porta_nao_e_porta_livre():
     falha = _bloco_do_if(liberar, "catch {")
     assert liberar.index("try { $dono = DonoDaPorta }") < liberar.index("catch {")
     assert "throw " in falha and "porta livre nao comprovada" in falha
+    # tambem a reconferencia depois de encerrar o orfao, e o listener sem processo no WMI nao e' porta livre
+    assert "try { $resto = DonoDaPorta }" in liberar and "if (DonoDaPorta)" not in liberar
+    assert liberar.count("porta livre nao comprovada") == 2
+    assert 'if (-not $p) { throw ' in dono
     # a falha sobe pelo PararComprovado (sem catch), que nao toca no pinado e mantem o sentinela
     parar = codigo[codigo.index("function PararComprovado"):codigo.index("function Reiniciar")]
     assert "catch" not in parar and "LiberarPorta" in parar

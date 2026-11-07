@@ -151,8 +151,8 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    única espera longa legítima é dentro de `git`, `pip` ou `npm` (fetch lento, `npm ci` na VM leva minutos). Abrir **outra** sessão
    SSH e conferir se um deles está rodando: `tasklist /FI "IMAGENAME eq git.exe"`, `tasklist /FI "IMAGENAME eq python.exe"`,
    `tasklist /FI "IMAGENAME eq node.exe"` (ou `Get-Process git,python,node -ErrorAction SilentlyContinue`); na parada da tarefa
-   também `schtasks.exe` e `powershell.exe` (o leitor de estado, `estado_tarefa.ps1`), cada chamada com tempo limite de 30 s. Desde
-   a issue #518 cada leitura do estado imprime uma linha e a parada tem prazo total de 90 s; o estado é lido uma vez antes do
+   também `schtasks.exe` e `powershell.exe` (o leitor de estado, `estado_tarefa.ps1`), cada chamada com tempo limite de até 30 s. Desde
+   a issue #518 cada leitura do estado imprime uma linha (com o limite dela) e a parada tem prazo total de 90 s; o estado é lido uma vez antes do
    sentinela, e leitor quebrado aborta o deploy com "nada foi alterado". Com um deles ativo,
    esperar. Sem nenhum deles e sem linha nova, o script está preso fora do build (agendador, rede do health): aí sim abortar a
    chamada, reconectar e seguir o item 6 (manter o sentinela, rodar de novo). Não matar `git`/`pip`/`npm` no meio. Preso depois
