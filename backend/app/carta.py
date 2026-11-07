@@ -125,6 +125,17 @@ def _arquivo_de_dados(rel: str | None) -> Path | None:
     return p if p.is_file() else None
 
 
+def textos_do_timbre(emitente: dict | None) -> list[str]:
+    """O texto que o papel timbrado (`_Doc.header` e `_Doc.footer`) repete em toda pagina: a conferencia do assinado
+    o tira antes de juntar as paginas (`protocolo._plano_sem_timbre`)."""
+    e = emitente or {}
+    cnpj = f"CNPJ {e['cnpj']}" if e.get("cnpj") else None
+    return [x for x in (e.get("razao_social"), " | ".join(x for x in (e.get("endereco"), cnpj) if x), e.get("endereco"),
+                        "     ".join(x for x in (f"CNPJ: {e['cnpj']}" if e.get("cnpj") else None,
+                                                 f"Inscrição Estadual: {e['ie']}" if e.get("ie") else None) if x),
+                        e.get("contato")) if x]
+
+
 class _Doc(FPDF):
     """Papel timbrado da carta real (CT-301, MTPAR, 16/09/2026): logo centralizado no topo, um "L" cinza
     ocupando a margem esquerda e a base, e os dados da empresa no rodape, sobre a faixa cinza. Sem logo

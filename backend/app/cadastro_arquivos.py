@@ -209,6 +209,9 @@ def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
         return None
     if not inst["data"]:
         falha("data", "obrigatória")
+    # issue #278: o oficio de reajuste da MT-PAR e da Prefeitura cita o numero do termo que cobre a competencia
+    if tipo == "apostilamento_reajuste" and not str(inst["numero"] or "").strip():
+        falha("numero", "obrigatório no apostilamento de reajuste (o ofício de reajuste cita o número do termo)")
     if bruto.get("delta_valor") not in (None, ""):
         texto = str(bruto["delta_valor"]).strip()
         sinal = -1 if texto.startswith("-") else 1

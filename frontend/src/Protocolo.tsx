@@ -7,6 +7,7 @@ import ConfirmarFaltas from "./ConfirmarFaltas";
 import { api, apiForm, ApiErro, mensagemDeErro } from "./api";
 import { IconeAlerta, IconeSeta } from "./icones";
 import { FormMotivo } from "./MedicaoAtos";
+import JustificativaEnvio, { conferirJustificativa, erroDaJustificativa } from "./JustificativaEnvio";
 import { fmtTamanho as mb } from "./formato";
 import { protocolosDa } from "./medicao";
 import { Link } from "./Link";
@@ -39,7 +40,9 @@ export type SigaDoProtocolo = { codigo: string; link: string | null; setor: stri
   dias_uteis: number | null; lido_em: string | null; registrado_em: string | null };
 export type Lista = { familia: string; etapas: Etapa[]; pecas: PecaCfg[]; medicoes: Medicao[]; protocolos: ProtocoloDet[] };
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string;
-  anexos: { nome: string; tamanho: number }[]; total: number; limite: number; pendencias: Pendencia[] };
+  anexos: { nome: string; tamanho: number }[]; total: number; limite: number; pendencias: Pendencia[];
+  /** issue #278: reajuste sem apostilamento que cubra a competencia: o envio pede justificativa escrita */
+  exige_justificativa?: boolean };
 
 const SITUACAO: Record<string, string> = {
   rascunho: "rascunho", montado: "pacote montado", assinado: "assinado", enviado: "enviado", descartado: "descartado",
@@ -318,6 +321,10 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState("");
   const [feito, setFeito] = useState("");
+  // issue #278: a justificativa do reajuste sem apostilamento; o erro so' aparece depois do clique em Enviar
+  const [justificativa, setJustificativa] = useState("");
+  const [tentouJustificativa, setTentouJustificativa] = useState(false);
+  const idJustificativa = `${idNota}-justificativa`;
 
   // issue #10: mudar a selecao com a previa aberta fecha a previa, para nao sair um conjunto diferente do conferido
   // revisor R1 (PR #92): fecha tambem quando um protocolo dela muda no recarregamento (peca, pacote, assinado)
@@ -332,7 +339,17 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
       const p = await api<Previa>("/api/protocolos/envio/previa", { method: "POST", body: JSON.stringify({ protocolo_ids: ids }) });
       setPrevia({ ...p, ids, marca });
       setConfirmar(null);
+      setJustificativa(""); setTentouJustificativa(false);
     } catch (e) { setErro(mensagem(e)); } finally { setOcupado(false); }
+  }
+
+  // issue #278: sem apostilamento que cubra a competencia do reajuste, o Enviar confere a justificativa antes do aviso
+  const exige = !!previa?.exige_justificativa;
+  const erroJustificativa = exige && tentouJustificativa ? erroDaJustificativa(justificativa) : undefined;
+  function validarJustificativa(): boolean {
+    if (!exige) return true;
+    setTentouJustificativa(true);
+    return conferirJustificativa(idJustificativa, justificativa);
   }
 
   // issue #213: com pendencia na previa, o clique em Enviar so' abre o aviso; nada sai antes do "Continuar"
@@ -348,6 +365,7 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
     try {
       await api("/api/protocolos/envio", { method: "POST", body: JSON.stringify({
         protocolo_ids: previa!.ids, ...m, confirmadas: confirmadas.length > 0 ? confirmadas : null,
+        ...(exige ? { justificativa: justificativa.trim() } : {}),
         // revisor R3 (PR #92): os anexos vistos; documento anexado depois da previa faz o servidor recusar
         anexos: previa!.anexos.map(a => ({ nome: a.nome, tamanho: a.tamanho })) }) });
       setPrevia(null);
@@ -357,7 +375,10 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
       // o que falta mudou depois do aviso: a previa passa a mostrar a lista de agora e o aviso abre de novo com ela
       if (e instanceof ApiErro && e.status === 422 && e.corpo?.codigo === "CONFIRMAR_PENDENCIAS") {
         const itens: Pendencia[] = e.corpo.itens ?? [];
-        setPrevia(p => p && { ...p, pendencias: itens });
+        // issue #278: a lista nova pode trazer o reajuste sem apostilamento; sem a justificativa, o campo pede antes
+        const exigeAgora = itens.some(x => x.codigo === "sem_apostilamento");
+        setPrevia(p => p && { ...p, pendencias: itens, exige_justificativa: exigeAgora });
+        if (exigeAgora && erroDaJustificativa(justificativa)) { setTentouJustificativa(true); return; }
         setConfirmar({ m, itens: itens.map(x => x.mensagem), mudou: confirmadas.length > 0 });
       } else setErro(mensagem(e));
     } finally { setOcupado(false); }
@@ -386,12 +407,19 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
           <div className="cartao__corpo">
             <ComporEmail ocupado={ocupado} anexos={previa.anexos}
               inicial={{ para: previa.para, copia: previa.copia, cco: [], assunto: previa.assunto, corpo: previa.corpo }}
-              antes={faltam.length > 0 && (
-                <div className="campo ol-pendencias">
-                  <span className="campo__rotulo">O que falta</span>
-                  <Pendencias itens={previa.pendencias} />
-                </div>
+              antes={(faltam.length > 0 || exige) && (
+                <>
+                  {faltam.length > 0 && (
+                    <div className="campo ol-pendencias">
+                      <span className="campo__rotulo">O que falta</span>
+                      <Pendencias itens={previa.pendencias} />
+                    </div>
+                  )}
+                  {exige && <JustificativaEnvio id={idJustificativa} valor={justificativa} aoMudar={setJustificativa}
+                    erro={erroJustificativa} />}
+                </>
               )}
+              validarAntes={validarJustificativa}
               aoEnviar={enviar} aoDescartar={() => setPrevia(null)} />
             {confirmar && <ConfirmarFaltas itens={confirmar.itens} mudou={confirmar.mudou} aoCancelar={() => setConfirmar(null)}
               aoContinuar={() => void enviarConfirmado(confirmar.m, confirmar.itens)} />}
