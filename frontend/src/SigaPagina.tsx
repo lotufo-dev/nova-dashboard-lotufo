@@ -167,7 +167,7 @@ function Historico({ p, dados, aoPedir }: { p: ProcessoSiga; dados: PainelSiga; 
           ))}
         </div>
         <label className="sr-only" htmlFor="siga-historico-busca">Buscar setor, pessoa ou documento</label>
-        <input id="siga-historico-busca" type="search" className="sg__busca" value={texto} placeholder="Buscar setor, pessoa ou documento"
+        <input id="siga-historico-busca" type="search" className="sg__busca" value={texto} placeholder="Buscar setor, pessoa ou documento…"
           autoComplete="off" onChange={ev => { setTexto(ev.target.value); setMostrando(PRIMEIRAS); }} />
       </div>
       {lista.length === 0 ? (
