@@ -1187,6 +1187,53 @@ def test_carregar_medicoes_nao_corrige_competencia_com_planilha_gerada(tmp_path,
     assert "conflito (a competência 2025-07 já está na planilha/carta: corrija pela tela)" in saida
 
 
+def test_carregar_medicoes_nao_corrige_competencia_com_planilha_enviada(tmp_path, monkeypatch, capsys):
+    # #383: a planilha/carta enviada ao orgao congela a competencia mesmo depois de protocolada (sem NF, fora dos
+    # estados da planilha): o ensaio recusa e a gravacao nao grava nada
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 4, "2025-07", 100001, None)
+    conn.execute("UPDATE medicoes SET planilha_enviada_em='2025-08-01T10:00:00' WHERE id=?", (mid,))
+    conn.commit()
+    linha = "4;;execucao;2025-06;;1.000,01;;;;;;;doc;;sim"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert "linha 2: nº 4 execução 2025-06: conflito (a competência 2025-07 já está na planilha/carta enviada " \
+           "ao órgão: corrija pela tela)" in saida
+    antes = _foto(conn)
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [linha]))
+    assert codigo == 1 and "1 linha(s) com erro ou conflito" in saida
+    assert _foto(conn) == antes
+    assert conn.execute("SELECT competencia FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "2025-07"
+
+
+def test_carregar_medicoes_corrige_competencia_sem_planilha_enviada(tmp_path, monkeypatch, capsys):
+    # #383: sem planilha/carta enviada, a correcao continua passando como antes
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 4, "2025-07", 100001, None)
+    assert conn.execute("SELECT planilha_enviada_em FROM medicoes WHERE id=?", (mid,)).fetchone()[0] is None
+    linha = "4;;execucao;2025-06;;1.000,01;;;;;;;doc;;sim"
+    codigo, saida = _ensaio(tmp_path, [CAB + ";cancelar;corrige competência", linha], capsys)
+    assert "linha 2: nº 4 execução 2025-06: correção (competência: banco 2025-07, CSV 2025-06)" in saida
+    codigo, saida = _gravar(capsys, _csv(tmp_path, [linha]))
+    assert codigo == 0, saida
+    assert "competência corrigida de 2025-07 para 2025-06" in saida
+    assert conn.execute("SELECT competencia FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "2025-06"
+
+
+def test_carregar_medicoes_corrigir_perde_a_corrida_se_a_planilha_foi_enviada_no_meio(tmp_path, monkeypatch, capsys):
+    # #383: o UPDATE leva `planilha_enviada_em IS NULL`; se o envio entrou entre o ensaio e a gravacao, nada muda
+    from app import carga_medicoes
+    conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
+    mid = _existente(conn, cid, 4, "2025-07", 100001, None)
+    conn.execute("UPDATE medicoes SET planilha_enviada_em='2025-08-01T10:00:00' WHERE id=?", (mid,))
+    conn.commit()
+    li = {"linha": 2, "medicao_id": mid, "dados": {"competencia": "2025-06", "valor_aprovado": None,
+                                                   "valor_pedido": None, "fonte": "doc"}}
+    with pytest.raises(ValueError, match="Medição alterada concorrentemente"):
+        carga_medicoes._corrigir(conn, 1, li)
+    assert conn.execute("SELECT competencia FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "2025-07"
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='medicao.competencia'").fetchone()[0] == 0
+
+
 def test_carregar_medicoes_rodar_de_novo_com_pedido_congelado_diferente_nao_deixa_rastro(tmp_path, monkeypatch, capsys):
     conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
     _existente(conn, cid, 2, "2025-05", 53890011, 53000000)       # so' o pedido difere (congelado)
