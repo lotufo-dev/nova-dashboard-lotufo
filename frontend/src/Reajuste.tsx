@@ -105,6 +105,21 @@ function SituacaoDaCompetencia({ x }: { x: Competencia }) {
   );
 }
 
+/** O total apostilado do ciclo. A competencia apostilada so' por percentual (MT-PAR) nao tem valor em reais (spec
+ *  2026-10-20 §2.2: o sistema nao calcula indice nem valor), entao fica fora da soma e o total se diz parcial
+ *  (gate Sol, rodada 2 da PR #438: a soma so' dos valores fixos parecia o total do ciclo). */
+function TotalApostilado({ linhas }: { linhas: Competencia[] }) {
+  const soma = brl(somaDe(linhas, x => x.apostilado_centavos));
+  const n = linhas.filter(x => x.apostilada && x.apostilado_centavos === null && x.apostilado_percentual !== null).length;
+  if (n === 0) return <td className="col-num dinheiro num">{soma}</td>;
+  return (
+    <Celula origem={n === 1 ? "Parcial: 1 competência apostilada por percentual, sem valor em reais, fica fora da soma"
+      : `Parcial: ${n} competências apostiladas por percentual, sem valor em reais, ficam fora da soma`}>
+      {soma}<span className="reajuste-competencias__citada"> (parcial)</span>
+    </Celula>
+  );
+}
+
 /** A tabela de um ciclo: competencia × previsto × pedido × aprovado × apostilado × nota × recebido, com o estado. */
 function TabelaCompetencias({ rotulo, linhas, termos }: { rotulo: string; linhas: Competencia[];
     termos: Map<string, NomeDoTermo> }) {
@@ -171,7 +186,7 @@ function TabelaCompetencias({ rotulo, linhas, termos }: { rotulo: string; linhas
             <td className="col-num dinheiro num">{brl(somaDe(linhas, x => x.previsto_centavos))}</td>
             <td className="col-num dinheiro num">{brl(somaDe(linhas, x => x.pedido_centavos))}</td>
             <td className="col-num dinheiro num">{brl(somaDe(linhas, x => x.aprovado_centavos))}</td>
-            <td className="col-num dinheiro num">{brl(somaDe(linhas, x => x.apostilado_centavos))}</td>
+            <TotalApostilado linhas={linhas} />
             <td className="col-num dinheiro num">{brl(somaDe(linhas, x => x.faturado_centavos))}</td>
             <td />
             <td />

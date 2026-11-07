@@ -130,6 +130,37 @@ describe("Reajuste", () => {
     expect(visivel(celulas(tabela.querySelectorAll("tbody tr")[4])[4])).toBe("4,125%");
   });
 
+  it("o total apostilado diz que é parcial quando há competência apostilada só por percentual (gate Sol, PR #438)", async () => {
+    // spec 2026-10-20 §2.2: o sistema nao calcula valor do percentual da MT-PAR, entao a soma em reais e' so' das
+    // competencias com valor; o rodape nao pode mostra-la como se fosse o total apostilado do ciclo
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [cicloAberto], pleitos: [],
+          competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026, competencias: [
+            comp("2026-07", { estado: "apostilada", apostilada: true, apostilado_centavos: 100_01,
+              apostilamento_chave: "ap-12" }),
+            comp("2026-08", { estado: "apostilada", apostilada: true, apostilado_percentual: "6,76",
+              apostilamento_chave: "ap-mtpar" }),
+            comp("2026-09", { estado: "apostilada", apostilada: true, apostilado_percentual: "6,76",
+              apostilamento_chave: "ap-mtpar" })] },
+          { data_base_mes: "2024-06", ciclo: 2027, competencias: [
+            comp("2027-07", { estado: "apostilada", apostilada: true, apostilado_percentual: "3,1",
+              apostilamento_chave: "ap-mtpar-2" })] }] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
+    const total = celulas(tabela.querySelector("tfoot tr")!)[4];
+    expect(visivel(total)).toBe(`${brl(100_01)} (parcial)`);
+    const motivo = "Parcial: 2 competências apostiladas por percentual, sem valor em reais, ficam fora da soma";
+    expect(total.getAttribute("title")).toBe(motivo);
+    expect(total.querySelector(".sr-only")?.textContent).toBe(`, ${motivo}`);
+    // so' por percentual: nada somado, e o rodape diz por que
+    const so = screen.getByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2027" });
+    const total2 = celulas(so.querySelector("tfoot tr")!)[4];
+    expect(visivel(total2)).toBe("— (parcial)");
+    expect(total2.getAttribute("title")).toBe(
+      "Parcial: 1 competência apostilada por percentual, sem valor em reais, fica fora da soma");
+  });
+
   it("o percentual do termo no cabeçalho do ciclo lê a vírgula do cadastro (issue #275)", async () => {
     const termo = { id: 6, chave: "ap-mtpar", tipo: "apostilamento_reajuste", numero: "AP-2", data: "2026-05-11",
       dados: { data_base: "2024-06", ciclo: 2026, percentual: "3,80" } };
