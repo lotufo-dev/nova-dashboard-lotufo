@@ -309,3 +309,16 @@ def test_resumo_prevista_de_projeto_nao_aparece_na_serie_de_execucao(conn, cenar
     conn.commit()
     g = {o["obra"]: o for o in medicoes.resumo(conn, HOJE)["obras"]}["Obra G"]
     assert g["execucao"]["prevista_id"] is None and g["projeto"]["prevista_numero"] == 1
+
+
+def test_resumo_prevista_de_reajuste_nao_e_a_da_serie_de_execucao(conn):
+    """#151 (revisor, rodada 2): o reajuste lancado a mao nasce `prevista`, mas nao e' a prevista da serie de
+    execucao; a janela nao pode oferecer "Começar a 3ª" abrindo o reajuste."""
+    c = conn
+    a = _obra(c, "A", _orgao(c, "sinfra-suef1", "SINFRA - SUEF I", "sinfra"))
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+              "VALUES (?,3,'reajuste','2026-01','prevista')", (a,))
+    c.commit()
+    o = medicoes.resumo(conn, HOJE)["obras"][0]
+    assert o["execucao"]["prevista_id"] is None and o["execucao"]["prevista_numero"] is None
+    assert o["prevista_id"] is None and o["projeto"] is None

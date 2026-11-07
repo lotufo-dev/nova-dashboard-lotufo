@@ -939,7 +939,8 @@ def resumo(conn, hoje: datetime.date | None = None) -> dict:
     prevista_serie: dict[tuple[int, bool], dict] = {}
     teve_projeto: set[int] = set()
     for r in conn.execute("SELECT contrato_id, id, numero, tipo, competencia FROM medicoes WHERE estado='prevista' "
-                          "ORDER BY competencia, numero, id"):
+                          "AND tipo IN ('execucao','projeto') ORDER BY competencia, numero, id"):
+        # a prevista de reajuste (lancada a mao) nao e' a da serie: abriria o reajuste no lugar da execucao
         chave = (r["contrato_id"], r["tipo"] == "projeto")
         if chave not in prevista_serie:   # a mais antiga da serie
             prevista_serie[chave] = {"id": r["id"], "numero": r["numero"], "competencia": r["competencia"]}

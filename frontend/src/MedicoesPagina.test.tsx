@@ -44,7 +44,10 @@ const RESUMO: ResumoMedicoes = {
       { ultima: { numero: 11, competencia: "2026-12" } }),
     obra({ contrato_id: 13, obra: "Granito", contratante: "MTPAR", encerramento: true,
       ultima: { numero: 1, tipo: "projeto", competencia: "2026-09" }, ha_dias: 9, proxima: 2, proxima_tipo: "projeto" }),
-    obra({ contrato_id: 21, obra: "Terminais", contratante: "SINFRA",
+    // so' a prevista de Projeto: o `prevista_id` de fora e' ela (950), o da serie de execucao fica null
+    obra({ contrato_id: 21, obra: "Terminais", contratante: "SINFRA", prevista_id: 950,
+      ultima: { numero: 8, tipo: "execucao", competencia: "2026-08" }, ha_dias: 39,
+      prevista: { numero: 4, tipo: "projeto", competencia: "2026-07" }, proxima: 4, proxima_tipo: "projeto",
       projeto: { aberta_id: null, aberta_numero: null, aberta_passo: null, ultima: null,
         prevista_id: 950, prevista_numero: 4, prevista_competencia: "2026-07" } },
       { ultima: { numero: 8, competencia: "2026-08" } }),
@@ -104,6 +107,9 @@ describe("Medições com abas", () => {
     const gr = within(quadro).getByRole("row", { name: /Granito/ });
     expect(within(gr).getByText("1ª de Projeto · 09/2026")).toBeTruthy();
     expect(within(gr).getByRole("link", { name: "Iniciar a 2ª medição de Projeto" })).toBeTruthy();
+    // a aba segue a prevista mais antiga de qualquer série (a de fora), não a da série de execução da janela (#151)
+    const ter = within(quadro).getByRole("row", { name: /Terminais/ });
+    expect(within(ter).getByRole("link", { name: "Iniciar a 4ª medição de Projeto" }).getAttribute("href")).toBe("/obras/21/medicoes/950");
     // o botão de iniciar continua na aba; a diretoria não o vê
     fireEvent.click(screen.getByRole("button", { name: /Iniciar processo de medição/ }));
     expect(screen.getByRole("dialog", { name: "Iniciar processo de medição" })).toBeTruthy();
