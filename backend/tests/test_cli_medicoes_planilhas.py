@@ -417,18 +417,31 @@ def test_insert_or_replace_na_leitura_gravada_e_recusado(banco):
         c.close()
 
 
-def test_id_negativo_preexistente_nao_trava_a_gravacao_normal(banco):
-    """#502 (Sol, rodada 1): o id automatico vale -1 no BEFORE INSERT; um id -1 gravado nao pode travar o resto."""
+def test_id_zero_ou_negativo_e_recusado_e_a_gravacao_normal_segue(banco):
+    """#502 (Sol, rodadas 1 e 2): no BEFORE INSERT o id omitido vale -1, entao o selo por id so' confere id positivo;
+    por isso nenhuma linha nova pode ter id <= 0, nem por REPLACE, e a gravacao normal segue."""
     c = db.get_conn()
     try:
         mid = c.execute("SELECT id FROM medicoes WHERE numero=2").fetchone()[0]
-        c.execute("INSERT INTO medicao_grupos (id, medicao_id, sha256, origem, situacao, total_centavos, "
-                  "pedido_centavos, itens) VALUES (-1, ?, 'x', 'carga', 'lida', 100, 100, 1)", (mid,))
-        c.execute("INSERT INTO medicao_grupo_itens (id, leitura_id, ordem, grupo, valor_medido_centavos) "
-                  "VALUES (-1, -1, 1, 'g', 100)")
-        c.commit()
+        for verbo in ("INSERT", "INSERT OR REPLACE", "REPLACE"):
+            for id_ in (0, -1):
+                with pytest.raises(sqlite3.IntegrityError, match="evento"):
+                    c.execute(f"{verbo} INTO medicao_grupos (id, medicao_id, sha256, origem, situacao, "
+                              "total_centavos, pedido_centavos, itens) VALUES (?, ?, 'x', 'carga', 'lida', 100, 100, 1)",
+                              (id_, mid))
     finally:
         c.close()
     _executar(_pasta_com(banco))
-    assert _contar("SELECT COUNT(*) FROM medicao_grupos WHERE id <> -1 AND situacao = 'lida'") == 1
-    assert _contar("SELECT COUNT(*) FROM medicao_grupo_itens WHERE id <> -1") == 5
+    c = db.get_conn()
+    try:
+        lid = c.execute("SELECT id FROM medicao_grupos").fetchone()[0]
+        for verbo in ("INSERT", "INSERT OR REPLACE", "REPLACE"):
+            for id_ in (0, -1):
+                with pytest.raises(sqlite3.IntegrityError, match="evento"):
+                    c.execute(f"{verbo} INTO medicao_grupo_itens (id, leitura_id, ordem, grupo, "
+                              "valor_medido_centavos) VALUES (?, ?, 1, 'g', 100)", (id_, lid))
+        assert c.execute("SELECT MIN(id) FROM medicao_grupo_itens").fetchone()[0] >= 1
+    finally:
+        c.close()
+    assert _contar("SELECT COUNT(*) FROM medicao_grupos WHERE situacao = 'lida'") == 1
+    assert _contar("SELECT COUNT(*) FROM medicao_grupo_itens") == 5
