@@ -266,7 +266,7 @@ def test_deploy_volta_do_build_reconstroi_confere_a_arvore_e_o_health_antes_de_s
     volta = codigo[checkout:codigo.index("$novo = (")]
     volta = volta[:volta.index("deploy abortado no build E a volta")]
     # o anterior e' reconstruido sempre que o build comecou, mesmo com o HEAD igual (deploy do mesmo commit)
-    condicao = volta.index("if ($atual -ne $anterior -or $script:buildComecou) {")
+    condicao = volta.index("if ($atual -ne $anterior -or $script:buildComecou -or ")
     assert condicao < volta.index("Reconstruir", condicao)
     # arvore limpa e health do processo no ar antes de soltar
     status = volta.index("& git -C $AppDir status --porcelain --untracked-files=no")
@@ -695,3 +695,48 @@ def test_rodar_producao_nao_repassa_o_codigo_de_saida_do_uvicorn():
     fim = _codigo(script[script.rindex("-m uvicorn"):])
     assert "exit" not in fim and "$LASTEXITCODE" not in fim
     assert "NÃO é repassado" in script and "watchdog.pause" in script
+
+
+def test_deploy_com_sentinela_anterior_ignora_sem_frontend():
+    # Gate Sol, rodada extra da PR #475 (Critico 1): a execucao anterior caiu no Vite com o dist pela metade; com
+    # -SemFrontend a nova so' refazia a venv, o health 200 no commit certo apagava o sentinela e a tela ficava sem JS.
+    codigo = _codigo(_ler("deploy.ps1"))
+    trava = codigo.index("if ($script:sentinelaJaExistia -and $SemFrontend) {")
+    bloco = codigo[trava:codigo.index("}", trava)]
+    assert "$SemFrontend = $false" in bloco
+    assert codigo.index("$script:sentinelaJaExistia = Test-Path $pause") < trava
+    assert trava < codigo.index("New-Item -ItemType File -Path $pause") < codigo.index("try { Construir $alvo")
+
+
+def test_deploy_https_confere_a_chave_antes_de_mexer_em_algo():
+    # Gate Sol, rodada extra da PR #475 (Critico 2): sem a chave.pem o processo novo e o do rollback nao sobem em HTTPS,
+    # e o atual (com a chave carregada) ja' teria sido parado.
+    codigo = _codigo(_ler("deploy.ps1"))
+    assert '$chaveTls = Join-Path $Raiz "segredos\\tls\\chave.pem"' in codigo
+    leitura = codigo.index("[System.IO.File]::OpenRead($chaveTls).Dispose()")
+    assert "chave do HTTPS ausente ou ilegivel" in codigo[leitura:leitura + 400]
+    assert codigo.index("if ($comTls) {") < leitura < codigo.index("New-Item -ItemType File -Path $pause")
+
+
+def test_deploy_volta_do_build_religa_o_servico_parado_antes_da_trava_do_sentinela_anterior():
+    # Gate Sol, rodada extra da PR #475 (Critico 3): com o servico parado para o ponto da sentinela (#478) e o checkout
+    # do alvo falhando antes do build, a trava do sentinela anterior lancava antes do Reiniciar e a producao ficava
+    # parada. Agora o anterior e' reconstruido (servico parado e producao nao provada), religado e conferido antes.
+    codigo = _codigo(_ler("deploy.ps1"))
+    checkout = codigo.index("try { Construir $alvo; ConferirInstalacao }")
+    volta = codigo[checkout:codigo.index("deploy abortado no build E a volta")]
+    condicao = volta.index(
+        "if ($atual -ne $anterior -or $script:buildComecou -or ($script:sentinelaParou -and -not $script:producaoProvada)) {")
+    religa = volta.index("if ($script:sentinelaParou) {")
+    trava = volta.index("if (-not $refez -and -not $script:producaoProvada) { throw ")
+    assert condicao < volta.index("Reconstruir", condicao) < religa < volta.index("Reiniciar", religa) < trava
+    assert trava < volta.index("$script:soltarWatchdog = $true")
+
+
+def test_runbook_so_manda_criar_o_sentinela_antes_das_paradas_manuais():
+    # Gate Sol, rodada extra da PR #475 (Aviso): o item do watchdog mandava criar o sentinela antes de qualquer deploy,
+    # contra o item 4 de "Deploy a partir do Mac"; um sentinela anterior faz a producao nao contar como provada.
+    runbook = (SCRIPTS.parent / "docs" / "runbook.md").read_text(encoding="utf-8")
+    linha = next(linha for linha in runbook.splitlines() if linha.startswith("- Watchdog: `scripts\\instalar_watchdog.ps1"))
+    assert "parada/deploy manual" not in linha
+    assert "O `deploy.ps1` cria o próprio sentinela: não crie antes de rodá-lo" in linha

@@ -85,7 +85,7 @@ git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.
   commit novo mexe em `backend/migrations`, o `deploy.ps1` grava
   `C:\DashboardLotufo\dados\backups\dashboard-PRE-<commit>-<data>.db` antes do checkout e, se esse backup
   falhar, não faz o deploy. Não perguntar ao Leo sobre backup.
-- **Nada em `frontend/`** mudou: rodar com `-SemFrontend` (pula `npm ci` e build).
+- **Nada em `frontend/`** mudou: rodar com `-SemFrontend` (pula `npm ci` e build; com o sentinela de uma execução anterior o script ignora `-SemFrontend` e reconstrói o frontend).
 
 ## Rodar
 

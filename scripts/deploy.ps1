@@ -91,6 +91,11 @@ if ($comTls) {
     if (-not (Test-Path -LiteralPath $certificado)) {
         throw "certificado do HTTPS nao encontrado em $certificado (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)"
     }
+    # Gate Sol da PR #475: sem a chave o processo novo nao sobe em HTTPS, nem o do rollback; o atual ja' a tem carregada.
+    # Confere so' que existe e abre para leitura (o conteudo nao e' lido); o par com o cert.pem nao e' conferido aqui.
+    $chaveTls = Join-Path $Raiz "segredos\tls\chave.pem"
+    try { [System.IO.File]::OpenRead($chaveTls).Dispose() }
+    catch { throw "chave do HTTPS ausente ou ilegivel em $chaveTls (tarefa sem -SemTls); nada foi alterado - ver docs\runbook.md (HTTP ou HTTPS)" }
 } else {
     $urlSaude = "http://localhost:$Porta/api/health"
 }
@@ -269,6 +274,12 @@ $script:producaoProvada = $false
 if ($script:sentinelaJaExistia) {
     Write-Warning "sentinela $pause ja' existia antes deste deploy (execucao anterior que nao terminou provada?): a producao nao conta como conferida no inicio; o sentinela so' sai depois de reconstruir e provar"
 } elseif (PinadoLimpo) { $script:producaoProvada = NoArEm $anterior }
+# Gate Sol, rodada extra: a execucao anterior pode ter caido no Vite com o dist pela metade; -SemFrontend nao o refaria
+# e o health 200 no commit certo nao ve a tela sem JS. Com sentinela anterior, o frontend e' sempre reconstruido.
+if ($script:sentinelaJaExistia -and $SemFrontend) {
+    Write-Warning "-SemFrontend ignorado: com o sentinela de uma execucao anterior o frontend e' sempre reconstruido"
+    $SemFrontend = $false
+}
 if ($script:producaoProvada) { Write-Host "producao conferida no inicio: commit $($anterior.Substring(0, 7)) no ar, diretorio pinado limpo" }
 else { Write-Warning "producao NAO conferida no inicio (sentinela anterior, pinado sujo ou health sem o commit $($anterior.Substring(0, 7))): aborto antes do checkout mantem o sentinela" }
 New-Item -ItemType File -Path $pause -Force | Out-Null   # segura o watchdog durante o deploy
@@ -337,19 +348,22 @@ try {
                 if ($LASTEXITCODE -ne 0) { throw "git checkout $anterior falhou" }
             }
             $refez = $false
-            if ($atual -ne $anterior -or $script:buildComecou) {
+            # Gate Sol, rodada extra: com o servico parado para o ponto da sentinela e a producao nao provada no inicio
+            # (sentinela anterior), o anterior e' reconstruido antes de religar (sem processo no ar, o build nao
+            # esvazia nada servido); senao o religamento subiria uma venv ou um dist pela metade.
+            if ($atual -ne $anterior -or $script:buildComecou -or ($script:sentinelaParou -and -not $script:producaoProvada)) {
                 Reconstruir
                 RegistrarDeploy
                 $refez = $true
             }
-            # Rodada extra da PR #475: sem reconstruir, so' solta se a producao estava provada no inicio (com sentinela
-            # de execucao anterior a venv e o dist podem estar pela metade no disco, com o processo antigo no ar).
-            if (-not $refez -and -not $script:producaoProvada) { throw "o anterior nao foi reconstruido e a producao nao estava conferida no inicio" }
             if ($script:sentinelaParou) {
                 # o servico foi parado para o ponto da sentinela: religa o anterior, cuja 063 reimporta o ponto
                 Reiniciar
                 if (-not (SaudavelENovo)) { throw "a producao parada para o ponto da sentinela nao voltou em $anterior" }
             }
+            # Rodada extra da PR #475: sem reconstruir, so' solta se a producao estava provada no inicio (com sentinela
+            # de execucao anterior a venv e o dist podem estar pela metade no disco, com o processo antigo no ar).
+            if (-not $refez -and -not $script:producaoProvada) { throw "o anterior nao foi reconstruido e a producao nao estava conferida no inicio" }
             $alterados = & git -C $AppDir status --porcelain --untracked-files=no
             if ($LASTEXITCODE -ne 0) { throw "git status do diretorio pinado falhou" }
             if ($alterados) { throw "diretorio pinado com arquivos alterados em relacao a $anterior (checkout pela metade?)" }
