@@ -20,7 +20,7 @@ import { brl, type Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
 import { ProtocolosDaMedicao, useProtocolos } from "./Protocolo";
 import { LinhaDoTempo, ResumoMedicao } from "./ResumoLateral";
-import { type AbaMedicoes, ir, type Origem, type Rota, useRota } from "./rota";
+import { ir, type Origem, type Rota, useRota } from "./rota";
 import { Link } from "./Link";
 import Selo from "./Selo";
 import { fmtCompetencia, fmtDataHora, fmtDataPura } from "./tempo";
@@ -39,20 +39,6 @@ type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" 
 
 // Ancoras antigas (#notas, #espelho, #protocolo) abrem a etapa onde a coisa mora hoje.
 const SECAO_ETAPA: Record<string, number> = { espelho: 1, notas: 3, protocolo: 4 };
-
-/** A aba de Medicoes onde esta medicao aparece (o "Medicoes" do caminho do topo volta para la'). */
-export function abaDa(estado: string): Exclude<AbaMedicoes, "resumo" | "sem-medicao"> | undefined {
-  switch (estado) {
-    case "planilha_gerada": return "planilha-gerada";
-    case "planilha_enviada": return "planilha-enviada";
-    case "boletim_recebido": return "boletim-recebido";
-    case "espelho_gerado": return "faturamento";
-    case "espelho_enviado": return "aguardando-nota";
-    case "nota_emitida": return "enviar-nota";
-    case "protocolada": case "nf_emitida": return "aguardando-pagamento";
-    default: return undefined;
-  }
-}
 
 export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }:
     { contratoId: number; medicaoId: number; usuario: Usuario; origem: Origem | null }) {
@@ -178,7 +164,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     <header className="topbar topbar--detalhe">
       <div className="topbar__trilha">
         <VoltarOrigem origem={origem} alemDe={["obras", "medicoes"]} />
-        <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes", aba: m ? abaDa(m.estado) : undefined } },
+        <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes", aba: "em-andamento" } },
           { rotulo: obra, para: { tela: "obra", id: contratoId, aba: "ficha" } }, { rotulo: titulo }]} />
       </div>
     </header>

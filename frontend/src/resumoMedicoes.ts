@@ -1,5 +1,3 @@
-import type { AbaMedicoes } from "./rota";
-
 // Regras de APRESENTACAO da pagina Medicoes com abas (09/10/2026, prototipo aprovado pelo Leo): funcoes puras sobre
 // GET /api/medicoes/resumo. Situacao, marco, dias parados e a linha unica de medicao + reajuste sao do servidor
 // (`medicoes.resumo`); aqui so' os rotulos, os limiares de cor do "Parada há" e o agrupamento por contratante.
@@ -11,6 +9,8 @@ export type LinhaResumo = {
   situacao: Situacao; contrato_id: number; obra: string; contratante: string; orgao_sub: string | null;
   medicao_id: number; medicao_ids: number[]; numero: number; competencia: string; titulo: string; proximo_passo: string;
   valor_centavos: number | null; marco: string | null; dias: number | null;
+  // #507: o passo da barra de passos (1 Planilha e carta ... 6 Pagamento) e com quem a medicao esta
+  passo: { numero: number; nome: string }; com_quem: "Lotufo" | "Órgão";
 };
 /** #151: o que a janela "Iniciar processo" sabe de uma serie de medicao da obra (execucao ou Projeto). */
 export type SerieObra = {
@@ -31,29 +31,13 @@ export type ObraResumo = {
   // Execucao e projeto tem numeracao propria; `proxima_tipo` diz a serie do `proxima`.
   ultima: MedicaoCurta | null; ha_dias: number | null; prevista: MedicaoCurta | null;
   proxima: number; proxima_tipo: "execucao" | "projeto";
+  // #507: sem medicao NA competencia pedida (`mes` do resumo), e a ultima medicao com estado e valor
+  sem_no_mes: boolean; ultima_medicao: (MedicaoCurta & { estado: string; valor_centavos: number | null }) | null;
 };
 export type MedicaoCurta = { numero: number; tipo: string; competencia: string };
 export type ResumoMedicoes = {
-  hoje: string; contagens: Record<SituacaoOuSem, number>; linhas: LinhaResumo[]; obras: ObraResumo[];
+  hoje: string; mes: string; contagens: Record<SituacaoOuSem | "iniciar" | "em-andamento", number>; linhas: LinhaResumo[]; obras: ObraResumo[];
 };
-
-// Na ordem do ciclo; e' a ordem das abas, dos cartoes e das linhas da tabela.
-export const SITUACOES: readonly { id: SituacaoOuSem; rotulo: string }[] = [
-  { id: "sem-medicao", rotulo: "Sem medição aberta" },
-  { id: "planilha-gerada", rotulo: "Planilha/carta gerada" },
-  { id: "planilha-enviada", rotulo: "Planilha/carta enviada" },
-  { id: "boletim-recebido", rotulo: "Boletim recebido" },
-  { id: "faturamento", rotulo: "Enviar ao faturamento" },
-  { id: "aguardando-nota", rotulo: "Aguardando nota" },
-  { id: "enviar-nota", rotulo: "Enviar nota" },
-  { id: "aguardando-pagamento", rotulo: "Aguardando pagamento" },
-];
-
-export const ABAS_MEDICOES: readonly { id: AbaMedicoes; rotulo: string }[] = [{ id: "resumo", rotulo: "Resumo" }, ...SITUACOES];
-
-export function rotuloSituacao(s: SituacaoOuSem): string {
-  return SITUACOES.find(x => x.id === s)?.rotulo ?? s;
-}
 
 /** "hoje", "1 dia", "24 dias"; sem marco (o servidor nunca usa a data de lancamento no lugar dele), "—". */
 export function textoParada(dias: number | null): string {

@@ -138,7 +138,8 @@ def test_resumo_linhas_marcos_e_contagens(conn, cenario):
     assert par["proximo_passo"] == "protocolar"
     assert {x["competencia"] for x in r["linhas"]} == {"2026-09"}   # #155: a competencia da medicao (AAAA-MM)
     assert r["contagens"] == {"sem-medicao": 1, "planilha-gerada": 0, "planilha-enviada": 0, "boletim-recebido": 0,
-                              "faturamento": 1, "aguardando-nota": 2, "enviar-nota": 2, "aguardando-pagamento": 1}
+                              "faturamento": 1, "aguardando-nota": 2, "enviar-nota": 2, "aguardando-pagamento": 1,
+                                  "iniciar": 5, "em-andamento": 6}   # #507: contagens do menu
     # obras ativas (a suspensa fica fora); a D so' tem prevista: sem medicao aberta, com a prevista mais antiga
     obras = {o["obra"]: o for o in r["obras"]}
     assert set(obras) == {"Obra A", "Obra B", "Obra C", "Obra D", "Obra F"}
@@ -262,7 +263,7 @@ def test_prevista_da_aba_desempata_por_competencia_tipo_numero_e_id(conn):
 def test_rota_do_resumo(client_admin):
     r = client_admin.get("/api/medicoes/resumo")
     assert r.status_code == 200, r.text
-    assert set(r.json()) == {"hoje", "contagens", "linhas", "obras"}
+    assert set(r.json()) == {"hoje", "mes", "contagens", "linhas", "obras"}
     # a rota fixa nao cai em /api/medicoes/{medicao_id}
     assert client_admin.get("/api/medicoes/999").status_code == 404
 

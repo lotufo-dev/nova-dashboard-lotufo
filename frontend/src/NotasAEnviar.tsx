@@ -358,6 +358,8 @@ function Painel({ e, podeEditar }: { e: Envio; podeEditar: boolean }) {
   );
 }
 
+// SEM ROTA desde a #507 (a aba "Enviar nota" saiu de Medições): fica só até a #508 (fluxo único na página da obra) mover as
+// ações para o passo da obra; então esta tela e o teste dela saem. As funções exportadas acima seguem em uso.
 export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; podeEditar: boolean }) {
   const [dados, setDados] = useState<ListaEnvios | null>(null);
   const [erro, setErro] = useState("");
@@ -419,7 +421,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
             <div className="en-filtros">
               <div className="nota-pilulas" role="group" aria-label="Situação">
                 {FILTROS.map(f => (
-                  <Link key={f.id} className="nota-pilula" para={{ tela: "medicoes", aba: "enviar-nota" }} busca={comFiltro({ situacao: f.id })}
+                  <Link key={f.id} className="nota-pilula" para={{ tela: "medicoes", aba: "em-andamento" }} busca={comFiltro({ situacao: f.id })}
                     aria-current={filtro === f.id ? "true" : undefined}>
                     {f.rotulo}
                   </Link>
@@ -433,7 +435,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
             {filtrados.length === 0 && (
               <div className="vazio vazio--curto">
                 <p className="vazio__titulo">Nenhuma nota com esses filtros.</p>
-                <p><Link para={{ tela: "medicoes", aba: "enviar-nota" }}>Limpar os filtros</Link></p>
+                <p><Link para={{ tela: "medicoes", aba: "em-andamento" }}>Limpar os filtros</Link></p>
               </div>
             )}
             {grupos.map(g => {

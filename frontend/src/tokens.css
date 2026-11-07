@@ -379,6 +379,24 @@ td, th { font-variant-numeric: tabular-nums; }
 .trilho__seta { transition: transform var(--trilho-duracao) var(--trilho-curva); }
 .trilho[data-estado="recolhido"] .trilho__seta { transform: rotate(180deg); }
 .trilho__rotulo { white-space: nowrap; }
+/* subitens de Medicoes (#507): so' com o menu largo; o texto alinha com o nome do item de cima, o numero fica a' direita */
+.trilho__item[data-secao="aberta"] { background: var(--trilho-hover); }
+.trilho__sub { display: flex; flex-direction: column; margin: 0 12px 8px; }
+.trilho__subitem {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 40px; margin-bottom: 2px;
+  padding: 0 12px 0 40px; border-radius: 12px; color: #fff; text-decoration: none; font-size: 14.5px; font-weight: 400;
+  transition: background .15s ease;
+}
+.trilho__subitem:hover { background: var(--trilho-hover); color: #fff; }
+.trilho__subitem[aria-current="page"] { background: #fff; color: var(--acento-mais); font-weight: 600; }
+.trilho__subitem:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.trilho__subitem[aria-current="page"]:focus-visible { outline-color: var(--acento); }
+.trilho__n {
+  min-width: 24px; padding: 0 8px; border-radius: var(--raio-pilula); background: rgba(255, 255, 255, .2); color: #fff;
+  font-size: 12.5px; line-height: 22px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums;
+}
+.trilho__subitem[aria-current="page"] .trilho__n { background: var(--acento-fundo, #EEF2FF); color: var(--acento-mais); }
+.trilho[data-estado="recolhido"] .trilho__sub { display: none; }
 /* recolhido: o nome sai da vista mas continua sendo o nome acessivel do link */
 .trilho[data-estado="recolhido"] .trilho__rotulo {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);

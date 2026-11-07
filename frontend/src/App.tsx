@@ -4,7 +4,7 @@ import { api, setCsrf } from "./api";
 import AReceberPagina from "./AReceberPagina";
 import { ABAS_ADMIN } from "./administracao";
 import { ABAS_CARTEIRA } from "./carteira";
-import { BarraSuperior, Trilho } from "./Casca";
+import { BarraSuperior, Trilho, type ContagensMedicoes } from "./Casca";
 import Documentos from "./Documentos";
 import DocumentosEmpresa from "./DocumentosEmpresa";
 import AbrirEnvio from "./AbrirEnvio";
@@ -18,8 +18,7 @@ import MedicoesPagina from "./MedicoesPagina";
 import MinhaConta from "./MinhaConta";
 import MedicaoNova from "./MedicaoNova";
 import Diretoria from "./Diretoria";
-import { entradaDe, itemDe, tituloDaSecao, tituloDe } from "./navegacao";
-import { ABAS_MEDICOES } from "./resumoMedicoes";
+import { entradaDe, itemDe, menuDe, subitemMedicoesDe, tituloDaSecao, tituloDe } from "./navegacao";
 import SigaPagina from "./SigaPagina";
 import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
 
@@ -87,9 +86,22 @@ export default function App() {
     // ("MT-388 · Prazos")
     const aba = rota.tela === "carteira" && rota.aba && rota.aba !== "resumo" ? ABAS_CARTEIRA.find(a => a.id === rota.aba)?.rotulo
       : rota.tela === "admin" && rota.aba && rota.aba !== "saude" ? ABAS_ADMIN.find(a => a.id === rota.aba)?.rotulo
-      : rota.tela === "medicoes" && rota.aba && rota.aba !== "resumo" ? ABAS_MEDICOES.find(a => a.id === rota.aba)?.rotulo : undefined;
+      : rota.tela === "medicoes" ? (rota.aba === "em-andamento" ? "Em andamento" : "Iniciar medição") : undefined;
     document.title = rota.tela === "raiz" ? tituloDe("raiz") : `${tituloDe(rota.tela)}${aba ? ` · ${aba}` : ""} · grupolotufo`;
   }, [rota]);
+
+  // As contagens do menu (#507): relidas a cada troca de tela (iniciar uma medicao muda as duas). So' quem tem Medicoes no menu.
+  const [contagens, setContagens] = useState<ContagensMedicoes | null>(null);
+  const temMedicoes = !!usuario && menuDe(usuario.perfil).includes("medicoes");
+  const caminhoAtual = caminhoDe(rota);
+  useEffect(() => {
+    if (!temMedicoes) return;
+    let vivo = true;
+    api<{ contagens: { iniciar: number; "em-andamento": number } }>("/api/medicoes/resumo")
+      .then(r => { if (vivo) setContagens({ iniciar: r.contagens.iniciar, andamento: r.contagens["em-andamento"] }); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [temMedicoes, caminhoAtual]);
 
   // A ancora (#emp-3) leva a secao quando a tela terminar de montar.
   useRolarAteSecao(usuario ? secao : "", caminhoDe(rota));
@@ -113,13 +125,13 @@ export default function App() {
         ev.preventDefault();
         document.getElementById("conteudo")?.focus();
       }}>Pular para o conteúdo</a>
-      <Trilho perfil={usuario.perfil} marcado={itemDe(rota, busca)} ir={ir} />
+      <Trilho perfil={usuario.perfil} marcado={itemDe(rota, busca)} ir={ir} subitem={subitemMedicoesDe(rota)} contagens={contagens} />
 
       <div className="coluna">
         <BarraSuperior titulo={tituloDaSecao(rota)} ehH1={!tituloProprio} usuario={usuario} ir={ir} />
         <main className="principal" id="conteudo" tabIndex={-1}>
           {rota.tela === "inicio" && <div className="pagina"><Inicio usuario={usuario} ir={ir} /></div>}
-          {rota.tela === "medicoes" && <MedicoesPagina aba={rota.aba ?? "resumo"} busca={busca} usuario={usuario} />}
+          {rota.tela === "medicoes" && <MedicoesPagina aba={rota.aba ?? "iniciar"} usuario={usuario} />}
           {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} />}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "a-receber" && (
