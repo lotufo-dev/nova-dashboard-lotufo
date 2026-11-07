@@ -1198,13 +1198,20 @@ def test_skill_deploy_confere_o_arquivo_da_instalacao_antes_de_qualquer_git_e_a_
     bloco = secao[secao.index("```powershell") + len("```powershell"):]
     linhas = [linha.strip() for linha in bloco[:bloco.index("```")].splitlines() if linha.strip()]
     # gate Sol da PR #537: o arquivo e' o da raiz da tarefa (-Raiz), lida como no deploy.ps1, nunca C:\ fixo
-    teste = next(i for i, linha in enumerate(linhas) if "Test-Path" in linha)
+    teste = next(i for i, linha in enumerate(linhas) if linha.startswith("Test-Path"))
     assert linhas[teste] == 'Test-Path (Join-Path $raiz "segredos\\instalacao.json")'
     assert not any("git " in linha for linha in linhas[:teste])
     antes = "\n".join(linhas[:teste])
     assert 'Agendador @("/Query", "/TN", "DashboardLotufo", "/XML") 30' in antes and "exit 1" in antes
     assert _regex_da_raiz(_ler("deploy.ps1")) in antes
     assert "C:\\DashboardLotufo\\segredos" not in antes
+    # revisor da rodada 2 da PR #537: o pinado anterior a #386 nao tem comum_agendador.ps1; sem ele, schtasks direto
+    assert "if (Test-Path $agendador) { . $agendador;" in antes
+    assert "schtasks.exe /Query /TN DashboardLotufo /XML" in antes
+    # e a raiz sai so' de <Arguments>, como no ArgumentosDaTarefa do deploy.ps1
+    assert '[regex]::Matches($tarefa.Saida, "<Arguments>([^<]*)</Arguments>")' in antes
+    assert "$raiz = if ($argumentos -match " in antes
+    assert "Pinado sem `scripts\\comum_agendador.ps1`" in skill
     # a chamada 1 pelo Mac vai num .ps1 com -File, nunca pelo stdin (runbook, "Mudar de servidor")
     caminhos = skill[skill.index("## Dois caminhos: local elevado ou SSH"):skill.index("## Antes de rodar")]
     chamada1 = caminhos[caminhos.index("  1. só leitura"):caminhos.index("  2. o deploy")]

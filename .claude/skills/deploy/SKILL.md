@@ -70,10 +70,11 @@ detached HEAD) e não do tree de desenvolvimento. `scripts\deploy.ps1` atualiza 
 ## Antes de rodar: o que vai subir
 
 ```powershell
-. C:\DashboardLotufo\app\scripts\comum_agendador.ps1
-$tarefa = Agendador @("/Query", "/TN", "DashboardLotufo", "/XML") 30
+$agendador = "C:\DashboardLotufo\app\scripts\comum_agendador.ps1"
+if (Test-Path $agendador) { . $agendador; $tarefa = Agendador @("/Query", "/TN", "DashboardLotufo", "/XML") 30 } else { $saida = schtasks.exe /Query /TN DashboardLotufo /XML | Out-String; $tarefa = @{ Estourou = $false; Codigo = $LASTEXITCODE; Saida = $saida } }
 if ($tarefa.Estourou -or $tarefa.Codigo -ne 0) { Write-Host "tarefa DashboardLotufo nao lida; raiz desconhecida"; exit 1 }
-$raiz = if ([System.Net.WebUtility]::HtmlDecode($tarefa.Saida) -match '-Raiz\s+(?:"([^"]+)"|(\S+))') { if ($Matches[1]) { $Matches[1] } else { $Matches[2] } } else { "C:\DashboardLotufo" }
+$argumentos = [System.Net.WebUtility]::HtmlDecode((([regex]::Matches($tarefa.Saida, "<Arguments>([^<]*)</Arguments>") | ForEach-Object { $_.Groups[1].Value }) -join " "))
+$raiz = if ($argumentos -match '-Raiz\s+(?:"([^"]+)"|(\S+))') { if ($Matches[1]) { $Matches[1] } else { $Matches[2] } } else { "C:\DashboardLotufo" }
 Test-Path (Join-Path $raiz "segredos\instalacao.json")
 $atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()
 git log --oneline "$atual..origin/master"
@@ -92,6 +93,9 @@ Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -
   o `deploy.ps1` do diretório pinado é o antigo, que só confere o 200. Seguir o item "Deploy da issue #417" de
   "Subir e derrubar": rodar o `deploy.ps1` novo copiado para `C:\Temp\deploy`, pelo Mac num `.ps1` com `-File`, e
   conferir `instalacao: autorizada` logo depois.
+- **Pinado sem `scripts\comum_agendador.ps1`** (commit no ar anterior à #386): o bloco acima lê a tarefa direto por
+  `schtasks.exe /Query /XML`, sem tempo limite. Se a chamada não imprimir nada em 2 minutos, o agendador está sem
+  responder: abortar e avisar o Leo (issue #446).
 - **Primeiro deploy com a #443** (rollback sem fetch; sentinela só sai com a produção conferida): o `git grep` de
   `soltarWatchdog` volta vazio, porque o `deploy.ps1` do pinado ainda é o antigo, cujo rollback faz `fetch` e cujo
   `finally` sempre apaga o sentinela. Seguir o item "Deploy da issue #443" de "Subir e derrubar": rodar o `deploy.ps1`

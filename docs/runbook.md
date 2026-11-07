@@ -88,7 +88,8 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    nome novo a cada execução) e rodado com `-File`, não pelo stdin (no `-Command -` o primeiro comando nativo consome o resto do script e a conferência do arquivo da instalação
    nunca imprimiria nada; issue #446): antes de tudo, `segredos\instalacao.json` na raiz que a tarefa agendada passa em `-Raiz`
    (lida do `schtasks /Query /XML` pelo `Agendador` de `scripts\comum_agendador.ps1`, com tempo limite, como no
-   `deploy.ps1`; sem `-Raiz`, `C:\DashboardLotufo`) dando `True` (senão avisar o Leo, seção "Instalação assinada"); `Set-Location` na pasta principal do projeto; `git switch master`;
+   `deploy.ps1`; se o pinado ainda não tem esse arquivo, anterior à #386, direto por `schtasks.exe /Query /XML`;
+   o `-Raiz` sai só de `<Arguments>`; sem ele, `C:\DashboardLotufo`) dando `True` (senão avisar o Leo, seção "Instalação assinada"); `Set-Location` na pasta principal do projeto; `git switch master`;
    `git pull --ff-only`; `git rev-parse master origin/master` iguais (senão `exit 1`); conferir administrador numa linha
    (`if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 1 }`);
    e imprimir o que vai subir: `git log --oneline "$atual..origin/master"` e `git diff --name-only` de `backend/migrations` e de `frontend`,
