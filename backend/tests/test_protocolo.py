@@ -618,6 +618,20 @@ def test_pacote_sem_timbre_gravado_usa_o_timbre_impresso_no_montado(cenario, mon
     assert protocolo.receber_assinado(c, ids["uid"], pid, novo)["situacao"] == "assinado"
 
 
+def test_cabecalho_repetido_de_anexo_nao_sai_do_meio_da_frase_do_termo(cenario):
+    # Revisor, rodada 2 da PR #549: pacote antigo (sem o timbre gravado) com anexo que repete "Competência 09/2026" no
+    # cabecalho; a borda sai so' como linha inteira no topo e no pe', nunca de dentro da frase do termo
+    c, ids = cenario
+    _data_base_e_termo(c, ids["mtpar"])
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_reaj"]], "302")
+    p = {**protocolo._linha(c, pid), "montado_apostilamentos": json.dumps({"cita": True, "apostilamentos": []})}
+    oficio = "Ofício nº 302\nSenhor fiscal,\nO reajuste da Competência 09/2026 está apostilado no Termo nº 1.\nFim"
+    anexo = "Competência 09/2026\nPlanilha\nItem 1\nItem 2\nItem 3\nItem 4\nItem 5\nItem 6\nCompetência 09/2026"
+    plano = protocolo._plano_sem_timbre(c, p, [oficio, anexo, anexo])
+    assert "REAJUSTEDACOMPETENCIA092026ESTAAPOSTILADO" in plano
+    assert plano.count("COMPETENCIA092026") == 1
+
+
 def test_competencia_acrescentada_ao_mesmo_termo_tambem_e_conferida(cenario):
     # Critico 2: a correcao acrescenta uma competencia no comeco da lista do mesmo termo (numero igual)
     c, ids = cenario

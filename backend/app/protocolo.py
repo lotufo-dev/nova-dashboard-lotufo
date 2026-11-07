@@ -1006,15 +1006,29 @@ ASSINADO_SEM_O_TERMO = ("O assinado não traz o termo de apostilamento do pacote
                         "anterior): assine no DocuSign o pacote montado agora e anexe o assinado dele")
 
 
-def _bordas_repetidas(montado: list[str]) -> list[str]:
+def _linhas_da_borda(t: str) -> tuple[list[str], set[int]]:
+    """As linhas da pagina e os indices das 4 primeiras e 4 ultimas com texto (sem contar o carimbo do DocuSign)."""
+    ls = (t or "").split("\n")
+    com = [i for i, x in enumerate(ls) if x.strip() and not assinatura._ENVELOPE.search(x)]
+    return ls, set(com[:4] + com[-4:])
+
+
+def _bordas_repetidas(montado: list[str]) -> set[str]:
     """Pacote montado antes do timbre gravado (gate Sol da PR #549): as linhas do topo e do pe' que se repetem em
     mais de uma pagina do montado sao o papel timbrado impresso na montagem, mesmo que o cadastro tenha mudado."""
     vistas: dict[str, int] = {}
     for t in montado:
-        ls = [x.strip() for x in (t or "").split("\n") if x.strip()]
-        for x in set(ls[:4] + ls[-4:]):
+        ls, borda = _linhas_da_borda(t)
+        for x in {ls[i].strip() for i in borda}:
             vistas[x] = vistas.get(x, 0) + 1
-    return [x for x, n in vistas.items() if n > 1 and len(assinatura._plano(x)) >= 8]
+    return {x for x, n in vistas.items() if n > 1 and len(assinatura._plano(x)) >= 8}
+
+
+def _sem_bordas(t: str, bordas: set[str]) -> str:
+    """Tira as bordas so' como linha inteira no topo e no pe' da pagina, nunca do meio do texto (revisor, rodada 2 da
+    PR #549: "Competência 09/2026" repetido no cabecalho de um anexo nao pode sair da frase do termo)."""
+    ls, borda = _linhas_da_borda(t)
+    return "\n".join("" if i in borda and x.strip() in bordas else x for i, x in enumerate(ls))
 
 
 def _plano_sem_timbre(conn, p: dict, paginas: list[str], montado: list[str] | None = None) -> str:
@@ -1024,15 +1038,15 @@ def _plano_sem_timbre(conn, p: dict, paginas: list[str], montado: list[str] | No
     DocuSign ("DocuSigned by:", nome e codigo) e com o timbre da montagem (gravado com o mapa do termo): o emitente
     trocado no cadastro depois de montar nao deixa o timbre velho no meio da frase. Montado antes disso, o de agora."""
     gravado = json.loads(p["montado_apostilamentos"]) if p.get("montado_apostilamentos") else None
-    timbre = (gravado or {}).get("timbre")
+    timbre, bordas = (gravado or {}).get("timbre"), set()
     if timbre is None:
         c = _contrato(conn, p["contrato_id"])
-        timbre = carta.textos_do_timbre(carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {}) \
-            + _bordas_repetidas(montado if montado is not None else paginas)
+        timbre = carta.textos_do_timbre(carta.emitente(conn, c["entidade_id"]) if c.get("entidade_id") else {})
+        bordas = _bordas_repetidas(montado if montado is not None else paginas)
     fixos = sorted({f for x in timbre if (f := assinatura._plano(x))}, key=len, reverse=True)
     out = []
     for t in paginas:
-        plano = assinatura._plano(assinatura.sem_bloco_de_assinatura(t))
+        plano = assinatura._plano(assinatura.sem_bloco_de_assinatura(_sem_bordas(t, bordas)))
         for f in fixos:
             plano = plano.replace(f, "")
         out.append(plano)
