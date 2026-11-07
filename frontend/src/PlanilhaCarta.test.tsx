@@ -250,9 +250,9 @@ describe("Cartão da planilha/carta", () => {
     api.mockResolvedValue(detalhe({}, { disponivel: false, motivo, pecas_do_orgao: [] }));
     render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
     expect(await screen.findByText(motivo)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Enviar para protocolo" })).toBeNull();
-    expect(screen.queryByText("Peças do órgão")).toBeNull();
-    expect(screen.getByRole("button", { name: "Registrar envio por fora" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Enviar ao órgão" })).toBeNull();
+    expect(screen.queryByText("Documentos que o órgão exige")).toBeNull();
+    expect(screen.getByRole("button", { name: "Já enviei por fora" })).toBeTruthy();
   });
 
   it("a revisão pede o motivo; com ele, grava a versão nova (Rev01)", async () => {
