@@ -276,3 +276,20 @@ def test_le_de_um_retrato_so(conn, monkeypatch):
     cid = _obra(conn)
     custo_obra.custo_da_obra(conn, cid)
     assert entradas == [True]
+
+
+def test_competencia_com_uma_medicao_lida_e_outra_nao_fica_sem_diferenca_por_grupo(conn):
+    """Gate Sol, rodada 2: o medido de cada grupo no mes so' e' conhecido com todas as medicoes lidas."""
+    cid = _obra(conn)
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00)
+    _leitura(conn, cid, m1, {"Terraplenagem": 100_00})
+    _medicao(conn, cid, 2, "2026-03", 200_01)
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", 150_00)])
+    mar = _linha(custo_obra.custo_da_obra(conn, cid), "2026-03")
+    t = _grupo(mar, "Terraplenagem")
+    assert t["medido_centavos"] == 100_00 and t["custo_centavos"] == 150_00 and t["diferenca_centavos"] is None
+    assert all(g["diferenca_centavos"] is None for g in mar["grupos"] if g["tipo"] == "grupo")
+    assert _grupo(mar, "Medido por grupo não lido")["medido_centavos"] == 200_01
+    # o total do mes continua fechando
+    assert mar["medido_centavos"] == 300_01 and mar["custo_centavos"] == 150_00 and mar["diferenca_centavos"] == 150_01
+    assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"]

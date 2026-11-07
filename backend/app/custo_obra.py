@@ -146,12 +146,15 @@ def _medido_por_mes(conn, contrato_id: int) -> dict[str, dict]:
     return meses
 
 
-def _linha_grupo(nome: str, tipo: str, medido, apontado: int = 0, rateado: int = 0) -> dict:
+def _linha_grupo(nome: str, tipo: str, medido, apontado: int = 0, rateado: int = 0, completo: bool = True) -> dict:
+    """`completo` = False: o medido do grupo no mes nao e' todo conhecido (alguma medicao da competencia sem leitura
+    da planilha); o medido lido aparece, mas a diferenca contra o custo do mes inteiro nao existe."""
     custo = apontado + rateado
     return {"nome": nome, "tipo": tipo, "medido_centavos": medido, "apontado_centavos": apontado,
             "rateado_centavos": rateado, "custo_centavos": custo,
-            # medido desconhecido (mes sem leitura da planilha, linha so' de custo): sem diferenca, nao "-custo"
-            "diferenca_centavos": None if medido is None else medido - custo}
+            # medido desconhecido (mes sem leitura da planilha, ou so' parte das medicoes lida; linha so' de custo):
+            # sem diferenca, nunca "-custo" nem "medido parcial - custo"
+            "diferenca_centavos": None if medido is None or not completo else medido - custo}
 
 
 def _sincronizacao(conn) -> dict:
@@ -203,9 +206,13 @@ def _custo_da_obra(conn, contrato_id: int) -> dict:
                 return None
             return md["grupos"].get(nome, 0)
 
-        itens = [_linha_grupo(n, "grupo", medido_de(n), ap.get(n, 0), partes[i]) for i, n in enumerate(nomes)]
+        # a diferenca por grupo so' existe com todas as medicoes da competencia lidas
+        completo = md is None or md["nao_lido"] == 0
+        itens = [_linha_grupo(n, "grupo", medido_de(n), ap.get(n, 0), partes[i], completo)
+                 for i, n in enumerate(nomes)]
         # grupo da planilha que o cadastro nao tem (o "outros" da leitura): so' o medido
-        itens += [_linha_grupo(n, "grupo", v) for n, v in (md["grupos"].items() if md else ()) if n not in nomes]
+        itens += [_linha_grupo(n, "grupo", v, completo=completo)
+                  for n, v in (md["grupos"].items() if md else ()) if n not in nomes]
         if fora.get(mes):
             itens.append(_linha_grupo(FORA_DOS_GRUPOS, "fora", None, fora[mes]))
         if r_total and sum(pesos) <= 0:
