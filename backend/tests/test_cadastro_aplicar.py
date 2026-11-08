@@ -2099,3 +2099,116 @@ def test_custo_no_ensaio_relata_e_nao_grava(conn):
     r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(custo=_CUSTO)]), ensaio=True)
     assert r["custo"]["criados"] == ["MT-402"]
     assert conn.execute("SELECT COUNT(*) FROM custo_grupos").fetchone()[0] == 0
+
+
+# --- issue #453: aditivo e apostilamento de reajuste do mesmo ciclo; atende o pleito o de data de termo mais antiga ---
+
+def _ap_ciclo(chave, data, corrige=None):
+    return {**AP_REAJ, "chave": chave, "numero": f"019/2024/02/{chave[-2:]}", "data": data, "corrige": corrige,
+            "dados": {"data_base": "2023-04", "ciclo": 2026}}
+
+
+def _instrumentos_453(ap_antes, com_corrige):
+    # TA_REAJ e' de 30/07/2026 e cai no ciclo 2026 pela data; o apostilamento (o primeiro da cadeia) vem antes ou depois.
+    # Na cadeia, conta a data do termo mais antigo dela no ciclo (a mesma que escolhe o pleito, #414)
+    ap1 = _ap_ciclo("ap-21", "2026-06-15" if ap_antes else "2026-09-15")
+    aps = [ap1, _ap_ciclo("ap-22", "2026-10-01", corrige="ap-21")] if com_corrige else [ap1]
+    dono = ("ap-22" if com_corrige else "ap-21") if ap_antes else "ta-08"
+    return aps, dono
+
+
+@pytest.mark.parametrize("com_corrige", [False, True])
+@pytest.mark.parametrize("ap_antes", [True, False])
+@pytest.mark.parametrize("etapas", [None, "aditivo_primeiro", "apostilamento_primeiro"])
+def test_aditivo_e_apostilamento_do_mesmo_ciclo_o_termo_mais_antigo_atende_o_pleito(conn, etapas, ap_antes,
+                                                                                      com_corrige):
+    aps, dono = _instrumentos_453(ap_antes, com_corrige)
+    if etapas == "aditivo_primeiro":
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ],
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    elif etapas == "apostilamento_primeiro":
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=aps,
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, *aps], pleitos_anteriores=[PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-122-LT-2026": dono}
+    k = reajuste_mod.ciclos(conn, 1, __import__("datetime").date(2026, 10, 10))[0]
+    assert (k["ciclo"], k["situacao"], k["apostilamento"]["chave"]) == (2026, "apostilado", dono)
+    # o aplicar seguinte nao muda nada: sem auditoria nem relato novos
+    auditorias = len(_trilha_pleitos(conn))
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["pleitos"]["alterados"] == [] and _ligacoes(conn) == {"CT-122-LT-2026": dono}
+    assert not any("ta-08" in a or "ap-2" in a for a in r["avisos"]), r["avisos"]
+    assert len(_trilha_pleitos(conn)) == auditorias
+
+
+def test_banco_vazio_com_aditivo_mais_antigo_liga_direto_ao_aditivo(conn):
+    # sem passar pelo apostilamento: uma auditoria so', a do aditivo
+    aps, _ = _instrumentos_453(ap_antes=False, com_corrige=False)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, *aps],
+                                                                pleitos_anteriores=[PLEITO_2026])]))
+    assert _trilha_pleitos(conn) == [({"instrumento_chave": None}, {"instrumento_chave": "ta-08"})]
+
+
+@pytest.mark.parametrize("ap_antes", [True, False])
+def test_ligacao_antiga_que_contraria_a_regra_e_reparada_no_aplicar(conn, ap_antes):
+    aps, dono = _instrumentos_453(ap_antes, com_corrige=False)
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, *aps], pleitos_anteriores=[PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    errado = "ta-08" if dono == "ap-21" else "ap-21"
+    conn.execute("UPDATE pleitos SET instrumento_chave=?", (errado,)); conn.commit()
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-122-LT-2026": dono}
+    assert _trilha_pleitos(conn)[-1] == ({"instrumento_chave": errado}, {"instrumento_chave": dono})
+    assert len(r["pleitos"]["alterados"]) == 1 and dono in r["pleitos"]["alterados"][0]
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+
+
+@pytest.mark.parametrize("com_corrige", [False, True])
+@pytest.mark.parametrize("ap_antes", [True, False])
+def test_ciclo_sem_pleito_com_aditivo_e_apostilamento_fecha_pelo_termo_mais_antigo(conn, ap_antes, com_corrige):
+    # sem pleito, o motor conta a data da cadeia como o aplicar (code-review: ap-22 e' de 01/10, mas a cadeia, de 15/06)
+    aps, dono = _instrumentos_453(ap_antes, com_corrige)
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, *aps])]))
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, True)["chave"] == dono
+
+
+@pytest.mark.parametrize("etapas", [None, "aditivo_primeiro", "apostilamento_primeiro"])
+def test_empate_de_data_entre_aditivo_e_apostilamento_fica_com_o_apostilamento(conn, etapas):
+    # suposicao da PR #591 (empate em decisao na #592): mesma data, o apostilamento atende o pleito, em qualquer ordem
+    ap = _ap_ciclo("ap-21", TA_REAJ["data"])
+    if etapas:
+        primeiro = [TA_REAJ] if etapas == "aditivo_primeiro" else [ap]
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=primeiro,
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, ap], pleitos_anteriores=[PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ap-21"}
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+
+
+def test_empate_de_data_sem_pleito_fecha_pelo_apostilamento(conn):
+    ap = _ap_ciclo("ap-21", TA_REAJ["data"])
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, ap])]))
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, True)["chave"] == "ap-21"
+
+
+def test_ciclo_sem_pleito_com_cadeia_de_aditivos_conta_a_data_do_mais_antigo(conn):
+    ta1 = {**TA_REAJ, "data": "2026-06-01"}
+    ta2 = {**TA_CORR, "data": "2026-10-01"}
+    ap = _ap_ciclo("ap-21", "2026-07-01")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[ta1, ta2, ap])]))
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, True)["chave"] == "ta-09"
+
+
+def test_pleito_do_aditivo_corrigido_passa_ao_apostilamento_mais_antigo_no_mesmo_aplicar(conn):
+    # code-review: o CT-122 esta' com o ta-08; entram o ap-21 (15/06) e o ta-09, que corrige o ta-08 (cadeia de 30/07).
+    # O apostilamento e' o mais antigo e fica com o pleito ja' no primeiro aplicar; o seguinte nao muda nada
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ], pleitos_anteriores=[PLEITO_2026])]))
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, TA_CORR, _ap_ciclo("ap-21", "2026-06-15")],
+                                    pleitos_anteriores=[PLEITO_2026])])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ap-21"}
+    assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: atendido por ap-21 "
+                                         "(termo de 15/06/2026, anterior ao ta-08)"]
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
