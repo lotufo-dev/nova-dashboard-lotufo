@@ -164,7 +164,7 @@ def test_pagamento_cota_e_notas_coerentes_com_titulo_baixado_sem_valor(conn, int
     _titulo(conn, n1, 41, 276000001, 0, 1)                  # baixa total sem valor
     _titulo(conn, n2, 42, 184000001, 184000001)
     assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": 460000002,
-                                "recebido_centavos": 184000001, "falta_centavos": 276000001, "parcial": True}
+                                "recebido_centavos": 184000001, "falta_centavos": 276000001, "parcial": True, "falta_divergente_centavos": 0}
     linhas = {n["nota_id"]: (n["recebido_centavos"], n["falta_centavos"]) for n in medicoes.detalhe(conn, mid)["notas"]}
     assert linhas == {n1: (0, 276000001), n2: (184000001, 0)}
     assert sum(r for r, _ in linhas.values()) == 184000001 and sum(f for _, f in linhas.values()) == 276000001
