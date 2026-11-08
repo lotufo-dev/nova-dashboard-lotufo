@@ -404,4 +404,8 @@ def enviar(conn, usuario: dict, medicao_id: int, numero_oficio: str, para: list[
         elif m["estado"] != "planilha_enviada":
             depois["nao_marcada"] = f"medição {medicoes.rotulo_estado(m['estado'])} durante o envio"
         auditoria.registrar(conn, usuario["id"], "medicao.planilha_envio", "medicao", medicao_id, antes, depois)
+        if primeira:
+            # issue #590: o pedido do reajuste que nasceu com esta planilha/carta congela junto
+            from app import medicao_planilhas
+            medicao_planilhas.congelar_reajuste_do_envio(conn, usuario["id"], m, hoje.isoformat(), "sistema")
     return envio_id

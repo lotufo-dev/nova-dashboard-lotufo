@@ -44,10 +44,10 @@ def api(client_admin, tmp_path, monkeypatch):
     return client_admin, ids["Obra SINFRA"], ids["Obra MTPAR"]
 
 
-def _planilha(cl, cid, numero=1, valor="12.345,67"):
+def _planilha(cl, cid, numero=1, valor="12.345,67", **extra):
     r = cl.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha(f"oficio {numero}"),
                 data={"numero": numero, "competencia": "2026-07", "periodo_inicio": "2026-07-01",
-                      "periodo_fim": "2026-07-31", "valor": valor})
+                      "periodo_fim": "2026-07-31", "valor": valor, **extra})
     assert r.status_code == 201, r.text
     return r.json()["medicao_id"]
 
@@ -484,6 +484,72 @@ def test_revisao_enviada_por_fora_nao_sai_de_novo_pelo_sistema(api):
         (1, "externo", "2026-08-03"), (2, "externo", "2026-08-05")]
     r = cl.post(f"/api/medicoes/{mid}/envio-planilha/previa", json={"numero_oficio": "337"})
     assert r.status_code == 422 and "versão 2" in r.json()["detail"]
+
+
+# --- issue #590: o pedido do reajuste que nasceu com a planilha/carta congela no envio dela -------------------
+
+def _valor(cl, mid, valor):
+    return cl.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": valor})
+
+
+def _medicao(cl, mid):
+    return cl.get(f"/api/medicoes/{mid}").json()
+
+
+def test_envio_pelo_sistema_congela_o_pedido_do_reajuste_de_mesmo_numero(api):
+    """Issue #590 (spec 2026-10-20 §2.2, como na execucao): o envio da planilha/carta congela o pedido da medicao de
+    reajuste de mesmo nº e competencia que nasceu com ela; a revisao da planilha/carta continua aceita e nao
+    descongela nenhum dos dois pedidos (§2.1, "Revisão não descongela")."""
+    cl, cid, _ = api
+    r = cl.post(f"/api/contratos/{cid}/planilhas", files=_arquivos_planilha("oficio 1"),
+                data={"numero": 1, "competencia": "2026-07", "periodo_inicio": "2026-07-01",
+                      "periodo_fim": "2026-07-31", "valor": "1.000,01", "reajuste_valor": "500,00"})
+    assert r.status_code == 201, r.text
+    mid, rid = r.json()["medicao_id"], r.json()["reajuste_medicao_id"]
+    # antes do envio o pedido do reajuste ainda se corrige a mao
+    assert _valor(cl, rid, "600,00").status_code == 200
+    assert _peca(cl, mid).status_code == 200
+    pv = cl.post(f"/api/medicoes/{mid}/envio-planilha/previa", json={"numero_oficio": "337"}).json()
+    assert cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv)).status_code == 200
+    d = _medicao(cl, rid)
+    assert (d["estado"], d["valor_protocolado_centavos"], d["planilha_enviada_em"], d["planilha_envio_origem"]) == \
+        ("prevista", 600_00, tempo.hoje_local().isoformat(), "sistema")
+    # congela pelo envio, como a execucao (revisor R3): `congelada` e' do protocolo da nota
+    assert _linha("SELECT congelada FROM medicoes WHERE id=?", rid) == {"congelada": 0}
+    ev = _linha("SELECT depois FROM audit_log WHERE entidade='medicao' AND entidade_id=? AND acao=?",
+                str(rid), medicao_planilhas.REAJUSTE_CONGELADO)
+    assert json.loads(ev["depois"])["valor_protocolado_centavos"] == 600_00
+    assert json.loads(ev["depois"])["medicao_execucao_id"] == mid
+    r = _valor(cl, rid, "700,00")
+    assert r.status_code == 422 and "congelou no envio da planilha/carta" in r.json()["detail"]
+    _revisar(cl, mid, "1.234,57")
+    assert _medicao(cl, rid)["valor_protocolado_centavos"] == 600_00
+    assert _valor(cl, rid, "700,00").status_code == 422
+
+
+def test_envio_por_fora_congela_o_pedido_do_reajuste_e_nao_toca_o_sem_pedido(api):
+    """Issue #590: o envio por fora (#283) congela igual; a de reajuste prevista sem pedido e a de outra competencia
+    nao sao tocadas pelo envio da planilha/carta do numero delas."""
+    from app import medicoes
+    cl, cid, _ = api
+    c = db.get_conn()
+    sem_pedido = medicoes.criar(c, _usuario()["id"], {"contrato_id": cid, "numero": 2, "tipo": "reajuste",
+                                                      "competencia": "2026-07"})
+    outra = medicoes.criar(c, _usuario()["id"], {"contrato_id": cid, "numero": 3, "tipo": "reajuste",
+                                                 "competencia": "2026-06", "valor_centavos": 10_00})
+    c.close()
+    mid = _planilha(cl, cid, reajuste_valor="500,00")
+    rid = _linha("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1 AND tipo='reajuste'", cid)["id"]
+    _por_fora(cl, mid, "2026-08-03")
+    d = _medicao(cl, rid)
+    assert (d["valor_protocolado_centavos"], d["planilha_enviada_em"], d["planilha_envio_origem"]) == \
+        (500_00, "2026-08-03", "externo")
+    assert _valor(cl, rid, "700,00").status_code == 422
+    for numero in (2, 3):
+        _por_fora(cl, _planilha(cl, cid, numero=numero), "2026-08-03")
+    for x in (sem_pedido, outra):
+        assert _medicao(cl, x)["planilha_enviada_em"] is None
+        assert _valor(cl, x, "1,00").status_code == 200
 
 
 # --- issue #462: peca que vai no oficio assinado ---------------------------------------------------
