@@ -2173,6 +2173,26 @@ def test_ciclo_sem_pleito_com_aditivo_e_apostilamento_fecha_pelo_termo_mais_anti
     assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, True)["chave"] == dono
 
 
+@pytest.mark.parametrize("etapas", [None, "aditivo_primeiro", "apostilamento_primeiro"])
+def test_empate_de_data_entre_aditivo_e_apostilamento_fica_com_o_apostilamento(conn, etapas):
+    # suposicao da PR #591 (empate em decisao na #592): mesma data, o apostilamento atende o pleito, em qualquer ordem
+    ap = _ap_ciclo("ap-21", TA_REAJ["data"])
+    if etapas:
+        primeiro = [TA_REAJ] if etapas == "aditivo_primeiro" else [ap]
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=primeiro,
+                                                                    pleitos_anteriores=[PLEITO_2026])]))
+    cad = _cad(contratos=[_contrato(instrumentos=[TA_REAJ, ap], pleitos_anteriores=[PLEITO_2026])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _ligacoes(conn) == {"CT-122-LT-2026": "ap-21"}
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+
+
+def test_empate_de_data_sem_pleito_fecha_pelo_apostilamento(conn):
+    ap = _ap_ciclo("ap-21", TA_REAJ["data"])
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(instrumentos=[TA_REAJ, ap])]))
+    assert reajuste_mod.apostilamento_do_ciclo(conn, 1, "2023-04", 2026, True)["chave"] == "ap-21"
+
+
 def test_ciclo_sem_pleito_com_cadeia_de_aditivos_conta_a_data_do_mais_antigo(conn):
     ta1 = {**TA_REAJ, "data": "2026-06-01"}
     ta2 = {**TA_CORR, "data": "2026-10-01"}
