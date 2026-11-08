@@ -3,6 +3,7 @@ import base64
 import datetime
 import io
 import os
+import re
 
 import pypdf
 
@@ -286,3 +287,133 @@ def test_curva_s_lida_em_centavos_exatos_ate_o_teto():
     wb.save(saida)
     with pytest.raises(ValueError, match="centavo exato"):
         carta.ler_curva_s(saida.getvalue())
+
+
+# --- rodape do emitente sem o "L" e largura do logo (issue #566) ------------------------------------
+
+_CINZA_DO_L = b"0.8 0.8 0.8 rg"          # set_fill_color(204, 204, 204): a cor do "L" do papel da Lotufo
+
+
+def _conteudo(pdf: bytes) -> bytes:
+    return pypdf.PdfReader(io.BytesIO(pdf)).pages[0].get_contents().get_data()
+
+
+def _largura_do_logo_mm(pdf: bytes) -> float:
+    m = re.search(rb"q ([\d.]+) 0 0 [\d.]+ [\d.]+ [\d.]+ cm /I\d+ Do Q", _conteudo(pdf))
+    assert m, "logo nao desenhado"
+    return float(m.group(1)) * 25.4 / 72
+
+
+def _logo_faixa(pasta, nome="faixa.png", largura_px=40, altura_px=10):
+    """Logo em faixa (4:1 por padrao), como o dos consorcios; o `_logo_sintetico` e' quadrado."""
+    from PIL import Image
+    Image.new("RGB", (largura_px, altura_px), (79, 70, 229)).save(pasta / nome)
+    return nome
+
+
+def _consorcio(pasta, **mudar):
+    e = {"razao_social": "CONSORCIO EXEMPLO", "cnpj": "00.000.000/0001-00", "ie": "11.111.111-1",
+         "endereco": "Rua do Consorcio, 10 - Cuiaba/MT", "contato": "Tel.: (00) 1111-1111",
+         "logo": _logo_faixa(pasta)}
+    e.update(mudar)
+    return e
+
+
+def test_emitente_sem_fundo_e_com_rodape_sai_com_o_rodape_e_sem_o_l(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    emitente = _consorcio(tmp_path, fundo=False, rodape=True)
+    pdf = carta.gerar(_carta(emitente=emitente))
+    texto = _texto(pdf)
+    for parte in ("CONSORCIO EXEMPLO", "Rua do Consorcio, 10", "11.111.111-1", "Tel.: (00) 1111-1111"):
+        assert parte in texto
+    assert _CINZA_DO_L not in _conteudo(pdf)
+    doc = carta._Doc(emitente)
+    assert doc.l_margin == 25 and 297 - doc.b_margin <= 270      # o corpo para antes do rodape (272 mm)
+
+
+def test_emitente_sem_fundo_e_sem_rodape_continua_sem_rodape(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente=_consorcio(tmp_path, fundo=False)))
+    assert "Rua do Consorcio" not in _texto(pdf)
+    assert _CINZA_DO_L not in _conteudo(pdf)
+
+
+def test_carta_da_lotufo_com_fundo_continua_com_o_l_o_rodape_e_o_logo_de_58_mm(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    emitente = _consorcio(tmp_path, fundo=True)
+    pdf = carta.gerar(_carta(emitente=emitente))
+    assert _CINZA_DO_L in _conteudo(pdf)
+    assert "Rua do Consorcio, 10" in _texto(pdf)
+    assert _largura_do_logo_mm(pdf) == pytest.approx(58, abs=0.01)
+    doc = carta._Doc(emitente)
+    assert (doc.l_margin, doc.b_margin) == (33, 42)
+    posicoes = _posicoes_mm(pdf)
+    assert min(y for _, y in posicoes) == pytest.approx(37.91, abs=0.01)   # 1a linha do corpo: a mesma de antes
+    assert [round(y, 2) for x, y in posicoes if x == pytest.approx(8 + 1, abs=0.01)] == [274.65, 278.09, 281.5, 284.89]
+
+
+def _posicoes_mm(pdf: bytes, pagina: int = 0) -> list[tuple[float, float]]:
+    """(x, y a partir do topo) em mm de cada trecho de texto da pagina."""
+    dados = pypdf.PdfReader(io.BytesIO(pdf)).pages[pagina].get_contents().get_data()
+    return [(float(x) * 25.4 / 72, (841.89 - float(y)) * 25.4 / 72)
+            for x, y in re.findall(rb"BT ([\d.]+) ([\d.]+) Td", dados)]
+
+
+def test_logo_quadrado_no_padrao_tambem_empurra_o_corpo(tmp_path, monkeypatch):
+    """Gate Sol: sem largura no cadastro, o logo quadrado (reduzido ao teto de 50 mm) vai de 6 a 56 mm."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente=_consorcio(tmp_path, logo=_logo_sintetico(tmp_path))))
+    assert min(y for _, y in _posicoes_mm(pdf)) > 56
+
+
+def test_rodape_longo_quebra_linha_e_o_corpo_para_antes_dele(tmp_path, monkeypatch):
+    """Gate Sol: endereco maior que os 165 mm do texto quebra em linhas dentro da pagina, e o rodape sobe."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    endereco = "Avenida de Exemplo Muito Comprida, " + "Bloco Exemplo, Sala 1000, " * 8 + "Cuiaba/MT"
+    longo = "\n\n".join(f"Paragrafo {i} " + "texto de enchimento " * 20 for i in range(25))
+    pdf = carta.gerar(_carta(corpo=longo, emitente=_consorcio(tmp_path, rodape=True, endereco=endereco)))
+    texto = _texto(pdf).replace("\n", " ")
+    assert "Cuiaba/MT" in texto and "Sala 1000, Bloco" in texto
+    for n in range(len(pypdf.PdfReader(io.BytesIO(pdf)).pages)):
+        ys = sorted(y for _, y in _posicoes_mm(pdf, n))
+        rodape = [y for x, y in _posicoes_mm(pdf, n) if y > 250]
+        topo_do_rodape = min(rodape)
+        assert max(ys) < 290                                          # nada passa do pe' da pagina
+        assert topo_do_rodape < 272                                   # o rodape subiu para caber
+        corpo = [y for y in ys if y < topo_do_rodape - 3.6]
+        assert corpo and max(corpo) < topo_do_rodape                  # o corpo para antes do rodape
+
+
+def test_logo_com_largura_configurada_sai_nessa_largura(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente=_consorcio(tmp_path, logo_largura_mm=120)))
+    assert _largura_do_logo_mm(pdf) == pytest.approx(120, abs=0.01)
+
+
+def test_logo_alto_empurra_o_corpo_para_baixo_dele(tmp_path, monkeypatch):
+    """O PNG sintetico e' quadrado: com 40 mm de largura vai de 6 a 46 mm, e o corpo comeca abaixo dele."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente=_consorcio(tmp_path, logo=_logo_sintetico(tmp_path), logo_largura_mm=40)))
+    primeira_y = max(float(y) for y in re.findall(rb"BT [\d.]+ ([\d.]+) Td", _conteudo(pdf)))
+    assert (841.89 - primeira_y) * 25.4 / 72 > 46
+
+
+def test_logo_alto_demais_e_reduzido_ao_teto_de_altura_e_a_carta_sai(tmp_path, monkeypatch):
+    """Quadrado com 150 mm de largura iria ate' 156 mm de altura e empurraria o corpo para fora da pagina."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    emitente = _consorcio(tmp_path, logo=_logo_sintetico(tmp_path), logo_largura_mm=150, rodape=True)
+    pdf = carta.gerar(_carta(emitente=emitente))
+    assert _largura_do_logo_mm(pdf) == pytest.approx(carta.LOGO_ALTURA_MAX_MM, abs=0.01)
+    assert "Prezada Senhora" in _texto(pdf)
+    assert _imagens(carta.pagina_titulo(["CAPA"], emitente)) == 1
+
+
+def test_rodape_sem_logo_sai_no_pe_e_sem_repetir_no_cabecalho_de_texto(tmp_path, monkeypatch):
+    """Gate Sol: `rodape: true` sem logo sai com o rodape (IE e contato inclusos), e o cabecalho de texto sai de cena."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente=_consorcio(tmp_path, logo=None, rodape=True)))
+    texto = _texto(pdf)
+    assert texto.count("CONSORCIO EXEMPLO") == 1                     # so' no rodape
+    assert "11.111.111-1" in texto and "Tel.: (00) 1111-1111" in texto
+    assert all(y > 272 for x, y in _posicoes_mm(pdf) if x == pytest.approx(25 + 1, abs=0.01) and y > 250)
+    assert _CINZA_DO_L not in _conteudo(pdf)
