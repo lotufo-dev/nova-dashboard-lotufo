@@ -738,6 +738,23 @@ def test_planilha_diretoria_recebe_403(client_admin):
     assert len(client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"]) == 1
 
 
+
+def test_sugestao_sem_tipo_segue_a_ultima_medicao_e_aceita_reajuste(client_admin):
+    """Issue #567: sem `tipo`, a sugestao vem no tipo da ultima medicao (a obra so' de projeto sugere a de projeto);
+    reajuste e' tipo aceito na sugestao, nos avisos e no registro."""
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid, tipo="projeto").status_code == 201
+    s = client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao").json()
+    assert (s["tipo"], s["numero"], s["competencia"]) == ("projeto", 2, "2026-08")
+    assert s["acumulado_anterior_centavos"] == 12_345_67
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao?tipo=execucao").json()["numero"] == 1
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao?tipo=reajuste").json()["tipo"] == "reajuste"
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/avisos?tipo=reajuste&numero=1&competencia=2026-07"
+                            "&periodo_inicio=2026-07-01").status_code == 200
+    r = _nova_planilha(client_admin, cid, tipo="reajuste")
+    assert r.status_code == 201, r.text
+    assert client_admin.get(f"/api/medicoes/{r.json()['medicao_id']}").json()["tipo"] == "reajuste"
+
 # issue #287: assinatura no DocuSign (evento informativo)
 def _com_boletim(cl):
     """Medicao do fluxo antigo com boletim de 10/08/2026 (#290: a assinatura e' a do boletim)."""

@@ -12,7 +12,7 @@ import datetime
 from app import arquivos, auditoria, contratos, db, espelho, tempo
 from app.medicoes import LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
-TIPOS = ("execucao", "projeto")
+TIPOS = ("execucao", "reajuste", "projeto")   # reajuste desde a issue #567
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
 FORA_DO_ACUMULADO = ("prevista", "cancelada", "desistida")
 
@@ -84,9 +84,23 @@ def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None
             "saldo_apos_pedido_centavos": None if pedido is None else base - acumulado - pedido}
 
 
-def sugestao(conn, contrato_id: int, tipo: str = "execucao") -> dict:
+def tipo_da_ultima(conn, contrato_id: int) -> str:
+    """Issue #567: o tipo da ultima medicao da obra (competencia mais recente; na mesma competencia a execucao vence
+    o reajuste, que repete o numero dela), fora prevista, cancelada e desistida. Obra sem medicao: execucao."""
+    r = conn.execute(
+        "SELECT tipo FROM medicoes WHERE contrato_id=? "
+        f"AND estado NOT IN ({','.join('?' * len(FORA_DO_ACUMULADO))}) "
+        "ORDER BY competencia DESC, tipo='execucao' DESC, tipo='projeto' DESC, numero DESC, id DESC LIMIT 1",
+        (contrato_id, *FORA_DO_ACUMULADO)).fetchone()
+    return r["tipo"] if r is not None else "execucao"
+
+
+def sugestao(conn, contrato_id: int, tipo: str | None = None) -> dict:
     """Nº (ultimo + 1; o do orgao tambem, onde ja' difere, D6), competencia (a da 1a prevista, senao o mes
-    seguinte ao da ultima, senao o mes corrente), periodo (o mes civil da competencia), acumulado e saldo."""
+    seguinte ao da ultima, senao o mes corrente), periodo (o mes civil da competencia), acumulado e saldo.
+    Sem tipo, o da ultima medicao da obra (issue #567: a obra so' de projeto sugere a proxima de projeto)."""
+    if tipo is None:
+        tipo = tipo_da_ultima(conn, contrato_id)
     prevista = conn.execute(
         "SELECT numero, competencia FROM medicoes WHERE contrato_id=? AND tipo=? AND estado='prevista' "
         "ORDER BY competencia, numero LIMIT 1", (contrato_id, tipo)).fetchone()
@@ -143,7 +157,7 @@ def conferir_registro(conn, contrato_id: int, dados: dict):
     existe com o mesmo nº e tipo (so' pode ser uma prevista), ou None."""
     numero, tipo, competencia = dados["numero"], dados["tipo"], dados["competencia"]
     if tipo not in TIPOS:
-        raise ValueError("A planilha/carta é de medição de execução ou de projeto")
+        raise ValueError("A planilha/carta é de medição de execução, de reajuste ou de projeto")
     _conferir_periodo(dados["periodo_inicio"], dados["periodo_fim"])
     c = contratos.vigente(conn, contrato_id)
     inicio_contrato = c.get("execucao_inicio") or c.get("vigencia_inicio")
