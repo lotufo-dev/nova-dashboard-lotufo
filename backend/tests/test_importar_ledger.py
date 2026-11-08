@@ -177,6 +177,35 @@ def test_grupo_parcialmente_invalido_nao_cria_nada(conn):
     assert r["grupo_incompleto"] == 1 and medicoes.listar(conn, cid) == []
 
 
+def test_nf_fora_da_cobranca_no_grupo_nao_cria_medicao(conn):
+    """Issue #598: uma NF do grupo e' de fornecedor (2.2.15): o grupo inteiro cai, sem medicao nascida dela."""
+    cid = _contrato(conn)
+    _nf_rm(conn, 1, 411, 300_01, "0000000411")
+    _nf_rm(conn, 1, 412, 200_00, "0000000412", codtmv="2.2.15"); conn.commit()
+    itens = [{"ObraId": 1, "TipoDocumento": "Medição", "MedicaoRotulo": "15ª", "IdMovRM": 411,
+              "ChaveIdempotencia": "RM:1:411", "ValorBruto": 300.01, "Competencia": "02/2026"},
+             {"ObraId": 1, "TipoDocumento": "Medição", "MedicaoRotulo": "15ª", "IdMovRM": 412,
+              "ChaveIdempotencia": "RM:1:412", "ValorBruto": 200.00, "Competencia": "02/2026"}]
+    r = importar_ledger.criar_medicoes_faltantes(conn, 1, itens, CAD, aplicar=True)
+    assert (r["criadas"], r["fora_da_cobranca"], r["grupo_incompleto"]) == (0, 1, 1), r
+    assert medicoes.listar(conn, cid) == []
+
+
+def test_nota_ja_ligada_conta_como_ja_alocada_mesmo_fora_da_cobranca(conn):
+    """Issue #598: rodar o importar de novo sobre um vinculo que ja' existe continua relatando `ja_alocada`; o relato
+    de puladas fica so' para vinculo que seria criado agora."""
+    from app import sincronizacao_rm
+    cid = _contrato(conn)
+    mid = _medicao_emitida(conn, cid, 1, 500_00)
+    nf = _nf_rm(conn, 1, 100, 500_00, codtmv="2.2.15"); conn.commit()
+    with db.mutacao(conn):
+        sincronizacao_rm.alocar(conn, 1, nf, mid, "detectado", 1.0, "ledger_rm")
+    itens = [{"ObraId": 1, "TipoDocumento": "Medição", "MedicaoRotulo": "1ª", "IdMovRM": 100,
+              "ChaveIdempotencia": "RM:1:100", "NumNF": "0000000001", "ValorBruto": 500.00}]
+    r = importar_ledger.importar(conn, 1, itens, CAD, aplicar=False)
+    assert (r["ja_alocada"], r["fora_da_cobranca"], r["puladas_fora_da_cobranca"]) == (1, 0, []), r
+
+
 def test_competencia_invalida_recusa_o_grupo(conn):
     cid = _contrato(conn)
     _nf_rm(conn, 1, 501, 100_00, "0000000501"); conn.commit()

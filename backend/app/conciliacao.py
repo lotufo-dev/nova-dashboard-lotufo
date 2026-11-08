@@ -90,7 +90,7 @@ def _opcoes(m, notas: list[dict]) -> list[frozenset]:
 
 
 def _livres_do_banco(conn) -> list[dict]:
-    """Issue #598: so' nota de cobranca ao orgao (`diretoria.CODTMV_COBRANCA`, como o casador desde a #584); nota de
+    """Issue #598: so' nota de cobranca ao orgao (`diretoria.CODTMV_COBRANCA`, a lista do a receber, #563); nota de
     fornecedor (2.2.15), de pessoa fisica (2.2.10) ou sem tipo nao vira opcao."""
     from app import diretoria   # import local: diretoria importa este modulo
     cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
