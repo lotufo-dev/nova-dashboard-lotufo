@@ -21,7 +21,7 @@ import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocol
 import { brl, type Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
 import { ProtocolosDaMedicao, useProtocolos } from "./Protocolo";
-import { LinhaDoTempo, ResumoMedicao } from "./ResumoLateral";
+import { LinhaDoTempo, ResumoMedicao, type PassoResumo } from "./ResumoLateral";
 import { ir, type Origem, type Rota, useRota } from "./rota";
 import { Link } from "./Link";
 import Selo from "./Selo";
@@ -183,7 +183,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // issue #188: a metade pronta que espera a outra (orgao que junta); o passo da vez e' a espera
   const pronta = metadeQueEspera(par);
   const esperaAqui = pronta?.medicao_id === medicaoId ? pronta.espera : null;
-  const passo = esperaAqui ? { rotulo: esperaAqui.texto.charAt(0).toUpperCase() + esperaAqui.texto.slice(1), secao: "etapa-4" }
+  const passoBase: PassoResumo = esperaAqui ? { rotulo: esperaAqui.texto.charAt(0).toUpperCase() + esperaAqui.texto.slice(1), secao: "etapa-4" }
     : passoDe(linha?.proximo_passo);
   const aqui: Rota = { tela: "medicao", obra: contratoId, id: medicaoId };
   // #359: o aprovado mudou depois do espelho (o servidor compara com o espelho vigente): uma linha por medicao da
@@ -272,6 +272,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
   const boletimNaEtapa = podeEditar && m.estado === "planilha_enviada" && temPassosPlanilha && atual === 2;
   const podeBoletim = podeEditar && !EXCECOES.includes(m.estado) && m.estado !== "planilha_gerada";
+  // #568: o boletim fora da etapa mora em "Mais ações"; o proximo passo abre a janela dele direto
+  const SECAO_DO_PASSO: Record<string, string> = { "enviar a planilha/carta": "passo-1", "registrar o boletim": "passo-2", "gerar o espelho": "espelho" };
+  const proximo = linha?.proximo_passo ?? "";
+  const passo: PassoResumo = !passoBase || esperaAqui || passoBase.secao ? passoBase
+    : proximo === "registrar o boletim" && podeBoletim && !boletimNaEtapa ? { ...passoBase, acao: "boletim" }
+    : { ...passoBase, secao: SECAO_DO_PASSO[proximo] ?? "" };
   const acoes: ItemAcao[] = !podeEditar ? [] : [
     ...(valorEditavel(m, "atestado", podeEditar) ? [{ id: "atestado", rotulo: m.valor_atestado_centavos === null ? "Definir o atestado" : "Editar o atestado" }] : []),
     ...(podeBoletim && !boletimNaEtapa ? [{ id: "boletim", rotulo: comBoletim ? "Registrar boletim novo" : "Registrar boletim" }] : []),
@@ -517,7 +523,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
 
         <aside className="med-lateral med-lateral--baixo" aria-label="Resumo e linha do tempo">
           <ResumoMedicao m={m} execucao={execucao} reajuste={reajuste} outras={outras} passo={passo} aqui={aqui}
-            contratoId={contratoId} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} />
+            contratoId={contratoId} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} aoAcao={a => abrir(a as Painel)} />
           <LinhaDoTempo eventos={eventos} />
         </aside>
       </div>
