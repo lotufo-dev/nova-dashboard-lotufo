@@ -68,14 +68,14 @@ describe("CustoObra (#491)", () => {
     cleanup();
     responder({ ...CUSTO, rm: { sincronizado_em: "2026-11-07T10:00:00+00:00", desatualizado: false } });
     render(<CustoObra />);
-    await screen.findByRole("heading", { name: "Custo lançado no RM" });
+    await screen.findByRole("table");
     expect(screen.queryByText(/RM sincronizado pela última vez/)).toBeNull();
   });
 
   it("nenhum texto de margem, lucro ou resultado na tela", async () => {
     responder();
     const { container } = render(<CustoObra />);
-    await screen.findByRole("heading", { name: "Custo lançado no RM" });
+    await screen.findByRole("table");
     expect(container.textContent!.toLowerCase()).not.toMatch(/margem|lucro|resultado/);
   });
 
