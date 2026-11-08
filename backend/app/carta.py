@@ -116,7 +116,8 @@ class Carta:
 
 CINZA = (204, 204, 204)
 LOGO_LARGURA_MM = 58          # largura padrao do logo no topo (papel da Lotufo)
-LOGO_ALTURA_MAX_MM = 50       # teto da altura do logo: o corpo e o titulo da capa (120 mm) ficam abaixo dele
+RODAPE_FIM_MM = 286           # base do rodape: 272 mm + razao social (3,6) + 3 linhas de 3,4 mm
+LOGO_ALTURA_MAX_MM = 50      # teto da altura do logo: o corpo e o titulo da capa (120 mm) ficam abaixo dele
 
 
 def _arquivo_de_dados(rel: str | None) -> Path | None:
@@ -153,8 +154,8 @@ class _Doc(FPDF):
         self.emitente = emitente or {}
         self.logo = _arquivo_de_dados(self.emitente.get("logo"))
         self.fundo = bool(self.emitente.get("fundo")) and self.logo is not None
-        # sem logo, o cabecalho de texto ja' traz razao social, endereco e CNPJ: o rodape so' vem com o logo
-        self.rodape = self.fundo or (bool(self.emitente.get("rodape")) and self.logo is not None)
+        self.rodape = self.fundo or bool(self.emitente.get("rodape"))
+        self.rodape_y = 272                                # topo do rodape; sem o "L", sobe se o texto quebrar
         self.logo_largura = self._largura_do_logo()
         if self.fundo:
             self.set_margins(33, 20, 20)
@@ -206,12 +207,13 @@ class _Doc(FPDF):
     def header(self):
         if self.fundo:
             self._l_cinza()
+        elif self.rodape:
+            self._reservar_rodape()
         if self.logo is not None:
             info = self.image(str(self.logo), x=(210 - self.logo_largura) / 2, y=6, w=self.logo_largura)
-            y = 34                                              # papel da Lotufo (58 mm): o corpo comeca em 34 mm
-            if self.emitente.get("logo_largura_mm"):           # largura do cadastro: o corpo comeca abaixo do logo
-                y = max(y, 6 + info.rendered_height + 4)
-            self.set_y(y)
+            self.set_y(max(34, 6 + info.rendered_height + 4))  # o corpo comeca abaixo do logo (Lotufo: em 34 mm)
+            return
+        if self.rodape:              # sem logo e com rodape: os dados da empresa ficam so' no pe da pagina
             return
         if self.emitente.get("razao_social"):
             self.set_font(self.fonte, "B", 11)
@@ -224,23 +226,36 @@ class _Doc(FPDF):
                 self.cell(0, 4, self.t(linha), new_x="LMARGIN", new_y="NEXT", align="C")
             self.ln(6)
 
+    def _linhas_do_rodape(self) -> list[tuple[str, float, float, str]]:
+        """(estilo, tamanho da fonte, altura da linha, texto) de cada linha do rodape."""
+        e = self.emitente
+        cnpj_ie = "     ".join(x for x in (f"CNPJ: {e['cnpj']}" if e.get("cnpj") else None,
+                                           f"Inscrição Estadual: {e['ie']}" if e.get("ie") else None) if x)
+        return [("B", 8, 3.6, e.get("razao_social") or "")] + [
+            ("", 7.5, 3.4, l) for l in (e.get("endereco"), cnpj_ie, e.get("contato")) if l]
+
+    def _reservar_rodape(self):
+        """Papel sem o "L": o rodape quebra linha na largura do texto (165 mm); se passar de 4 linhas, sobe a partir
+        de 272 mm, e a margem inferior acompanha para o corpo nunca o cobrir."""
+        altura = 0.0
+        for estilo, tam, alt, texto in self._linhas_do_rodape():
+            self.set_font(self.fonte, estilo, tam)
+            altura += alt * max(1, len(self.multi_cell(0, alt, self.t(texto), dry_run=True, output="LINES")))
+        self.rodape_y = min(272, RODAPE_FIM_MM - altura)
+        self.set_auto_page_break(True, margin=297 - self.rodape_y + 3)
+
     def footer(self):
         if not self.rodape:
             return
-        e = self.emitente
-        x = 8 if self.fundo else self.l_margin            # sem o "L", alinhado com o corpo
-        self.set_xy(x, 272)
-        self.set_font(self.fonte, "B", 8)
-        self.cell(0, 3.6, self.t(e.get("razao_social") or ""), new_x="LMARGIN", new_y="NEXT")
-        self.set_font(self.fonte, "", 7.5)
-        linhas = [e.get("endereco"),
-                  "     ".join(x for x in (f"CNPJ: {e['cnpj']}" if e.get("cnpj") else None,
-                                           f"Inscrição Estadual: {e['ie']}" if e.get("ie") else None) if x),
-                  e.get("contato")]
-        for l in linhas:
-            if l:
-                self.set_x(x)
-                self.cell(0, 3.4, self.t(l), new_x="LMARGIN", new_y="NEXT")
+        x0 = 8 if self.fundo else self.l_margin           # sem o "L", alinhado com o corpo
+        self.set_xy(x0, self.rodape_y)
+        for estilo, tam, alt, texto in self._linhas_do_rodape():
+            self.set_font(self.fonte, estilo, tam)
+            self.set_x(x0)
+            if self.fundo:           # papel da Lotufo: uma linha por campo, como sempre saiu
+                self.cell(0, alt, self.t(texto), new_x="LMARGIN", new_y="NEXT")
+            else:
+                self.multi_cell(0, alt, self.t(texto), new_x="LMARGIN", new_y="NEXT")
 
     def linha(self, texto: str, estilo: str = "", align: str = "L"):
         self.set_font(self.fonte, estilo, 11)
