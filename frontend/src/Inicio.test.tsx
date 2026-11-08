@@ -32,7 +32,8 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   },
   notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2, acumulado_centavos: dias(9, i => i * 100) },
   avisos_importantes: {
-    reajustes: { total: 9, itens: [{ contrato_id: 7, obra: "MT-388", dias: -3 }, { contrato_id: 8, obra: "Leblon", dias: 4 }] },
+    reajustes: { total: 9, itens: [{ contrato_id: 9, obra: "Cultural", dias: null, tipo: "reajuste_nota_antes_do_apostilamento", nivel: "critico" },
+      { contrato_id: 7, obra: "MT-388", dias: -3, tipo: "reajuste_pleito", nivel: "acao" }, { contrato_id: 8, obra: "Leblon", dias: 4 }] },
     prazos: { total: 6, itens: [{ contrato_id: 3, obra: "Coxipó 3ª Etapa", tipo: "execucao", dias: -450 },
                                 { contrato_id: 4, obra: "Deciolândia", tipo: "vigencia", dias: 20 }] },
     certidoes: { total: 11, itens: [
@@ -101,6 +102,9 @@ describe("Início", () => {
     const reaj = within(caixa.getByRole("region", { name: "Reajustes" }));
     expect(reaj.getByText("9")).toBeTruthy();
     expect(reaj.getByText("MT-388 · reajuste a pedir")).toBeTruthy();
+    // issue #274: os avisos do motor de apostilamento entram na secao, cada um com o que diz
+    expect(reaj.getByText("Cultural · nota antes do apostilamento")).toBeTruthy();
+    expect(reaj.getByText("Leblon · reajuste a pedir")).toBeTruthy();
     const prazos = within(caixa.getByRole("region", { name: "Prazos" }));
     expect(prazos.getByText("vencido há 450 dias").className).toContain("ini-pilula--acao");
     expect(prazos.getByText("faltam 20 dias").className).toContain("ini-pilula--atencao");
@@ -119,7 +123,7 @@ describe("Início", () => {
       reajustes: { total: 0, itens: [] }, prazos: { total: 0, itens: [] }, certidoes: { total: 0, itens: [] } } }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     await screen.findByRole("complementary", { name: "Avisos importantes" });
-    expect(screen.getByText("Nenhum reajuste a pedir.")).toBeTruthy();
+    expect(screen.getByText("Nenhum aviso de reajuste.")).toBeTruthy();
     expect(screen.getByText("Nenhuma certidão vencendo.")).toBeTruthy();
   });
 

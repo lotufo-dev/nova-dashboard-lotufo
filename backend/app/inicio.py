@@ -215,13 +215,17 @@ def _notas_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> d
 
 
 AVISOS_VISIVEIS = 3
+# Issue #274: o que a secao Reajustes dos avisos importantes mostra (o pleito a pedir e os avisos do motor de
+# apostilamento; o "apostilamento pendente" de antes continua so' na tela Avisos)
+AVISOS_REAJUSTE_NA_CAIXA = ("reajuste_pleito", "reajuste_fora_da_previsao", "reajuste_sem_apostilamento",
+                            "reajuste_nota_antes_do_apostilamento", "reajuste_reemitir", "reajuste_sem_resposta")
 
 
-def _avisos_importantes(pedir: list[dict], prazos_: list[dict], vencidas: list[dict], vencendo: list[dict],
+def _avisos_importantes(reajustes: list[dict], prazos_: list[dict], vencidas: list[dict], vencendo: list[dict],
                         hoje: datetime.date) -> dict:
-    """Caixa "Avisos importantes": contagem e tres itens de reajustes a pedir, prazos de execucao e vigencia
-    (vencidos primeiro) e certidoes (vencidas primeiro, depois as que vencem antes). Cada secao leva a uma familia
-    da tela Avisos (`reajuste`, `prazo`, `documentos`)."""
+    """Caixa "Avisos importantes": contagem e tres itens dos avisos de reajuste (`reajustes`, ja' na ordem do mais
+    grave), prazos de execucao e vigencia (vencidos primeiro) e certidoes (vencidas primeiro, depois as que vencem
+    antes). Cada secao leva a uma familia da tela Avisos (`reajuste`, `prazo`, `documentos`)."""
     certidoes = []
     for x, vencida in [(x, True) for x in vencidas] + [(x, False) for x in vencendo]:
         dias = x["dias"]
@@ -231,8 +235,8 @@ def _avisos_importantes(pedir: list[dict], prazos_: list[dict], vencidas: list[d
                           "vencida": vencida})
     certidoes.sort(key=lambda c: (c["dias"] is None, c["dias"] if c["dias"] is not None else 0))
     prazos_ = [p for p in prazos_ if p["tipo"] in ("execucao", "vigencia")]
-    reaj = [{"contrato_id": a["contrato_id"], "obra": a["obra"], "dias": a["dias"]}
-            for a in sorted(pedir, key=lambda a: a["dias"])]
+    reaj = [{"contrato_id": a["contrato_id"], "obra": a["obra"], "dias": a["dias"], "tipo": a["tipo"],
+             "nivel": a["nivel"], "data_base_mes": a.get("data_base_mes")} for a in reajustes]
     return {
         "reajustes": {"total": len(reaj), "itens": reaj[:AVISOS_VISIVEIS]},
         "prazos": {"total": len(prazos_), "itens": [{"contrato_id": p["contrato_id"], "obra": p["obra"], "tipo": p["tipo"],
@@ -244,7 +248,11 @@ def _avisos_importantes(pedir: list[dict], prazos_: list[dict], vencidas: list[d
 def painel(conn, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     vencidas, vencendo = cobranca_certidoes.listas(conn, hoje)
-    pedir = [a for a in reajuste.avisos(conn, hoje, com_competencias=False) if a["tipo"] == "reajuste_pleito"]
+    reaj = [a for a in reajuste.avisos(conn, hoje) if "operacao" in a["publico"]]
+    pedir = [a for a in reaj if a["tipo"] == "reajuste_pleito"]
+    # issue #274: a secao Reajustes dos avisos importantes traz o pleito a pedir e os avisos do motor de apostilamento
+    reaj_caixa = sorted((a for a in reaj if a["tipo"] in AVISOS_REAJUSTE_NA_CAIXA),
+                        key=lambda a: (avisos.NIVEIS.index(a["nivel"]), avisos._chave_atraso(a, hoje), a["obra"] or ""))
     resumo = avisos.resumo_mes(conn, hoje)
     ultima = conn.execute("SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
                           "WHERE mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
@@ -270,7 +278,7 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
         "espelhos": _espelhos(conn),
         "protocolado_mes": _protocolado_mes(conn, hoje, protocoladas_dia),
         "notas_mes": _notas_mes(conn, hoje, protocoladas_dia),
-        "avisos_importantes": _avisos_importantes(pedir, prazos_lista, vencidas, vencendo, hoje),
+        "avisos_importantes": _avisos_importantes(reaj_caixa, prazos_lista, vencidas, vencendo, hoje),
     }
 
 

@@ -655,8 +655,8 @@ def test_cronograma_de_reajuste_a_reemitir_e_some_com_o_pleito_novo(obra_reajust
     [a] = _do_tipo(c, "reajuste_reemitir")
     assert (a["nivel"], a["publico"], a["data"], a["sentido"], a["dias"], a["data_base_mes"]) == \
         ("acao", ["operacao"], "2026-08-01", "desde", 61, "2024-06")
-    assert a["mensagem"] == ("data-base 06/2024: aditivo 5º Termo Aditivo assinado em 01/08/2026, depois do pleito; "
-                             "cronograma de reajuste a reemitir")
+    assert a["mensagem"] == ("data-base 06/2024, ciclo de 2026: aditivo 5º Termo Aditivo assinado em 01/08/2026, "
+                             "depois do pleito; cronograma de reajuste a reemitir")
     # a reiteracao nao traz cronograma: o aviso segue
     _r_pleito(c, cid, "2026-09-01", reemite=p1, reemissao="reiteracao", numero="CT-2-LT-2026")
     assert len(_do_tipo(c, "reajuste_reemitir")) == 1
@@ -668,16 +668,18 @@ def test_cronograma_de_reajuste_a_reemitir_e_some_com_o_pleito_novo(obra_reajust
 def test_pedido_de_reajuste_sem_resposta_depois_de_120_dias_do_ultimo_pleito(obra_reajuste):
     c, cid, _ = obra_reajuste
     p1 = _r_pleito(c, cid, "2026-06-10")
-    assert _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 8)) == []              # 120 dias: ainda nao
-    [a] = _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 9))
-    assert (a["nivel"], a["publico"], a["dias"], a["data"], a["sentido"]) == \
-        ("acao", ["operacao", "diretoria"], 121, "2026-06-10", "desde")
-    assert a["mensagem"] == "pedido de reajuste da data-base 06/2024 enviado em 10/06/2026, há 121 dias, sem resposta"
-    assert len(_do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 9), publico="diretoria")) == 1
+    assert _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 7)) == []              # 119 dias: ainda nao
+    [a] = _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 8))                      # 120 dias: aparece
+    assert (a["nivel"], a["publico"], a["dias"], a["data"], a["sentido"], a["ciclo"]) == \
+        ("acao", ["operacao", "diretoria"], 120, "2026-06-10", "desde", 2026)
+    assert a["mensagem"] == ("pedido de reajuste da data-base 06/2024, ciclo de 2026, enviado em 10/06/2026, há 120 "
+                             "dias, sem resposta")
+    assert len(_do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 8), publico="diretoria")) == 1
     # a reiteracao enviada zera a contagem, em qualquer orgao
     _r_pleito(c, cid, "2026-10-05", reemite=p1, reemissao="reiteracao", numero="CT-2-LT-2026")
     assert _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 9)) == []
-    assert len(_do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 3))) == 1          # 121 dias da reiteracao
+    assert _do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 1)) == []              # 119 dias da reiteracao
+    assert len(_do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 2))) == 1          # 120 dias da reiteracao
     # o apostilamento ligado ao pedido: some
     _r_termo_do_ciclo(c, cid, ligar_pleito=p1)
     assert _do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 3)) == []
@@ -706,10 +708,49 @@ def test_aviso_da_competencia_diz_a_parte_do_contrato_da_data_base(obra_reajuste
     assert a["mensagem"].startswith("reajuste de 08/2026 (data-base 06/2024 (itens SINAPI)): pedido")
 
 
-def test_avisos_de_reajuste_sem_as_competencias_para_o_inicio(obra_reajuste):
-    # o "reajuste a pedir" do Inicio so' quer o pleito: nao paga a leitura das competencias de cada contrato
+def test_ciclo_anterior_sem_resposta_nem_termo_segue_avisando_depois_da_janela_do_seguinte(obra_reajuste):
+    # revisor e gate Sol (rodada 1 da PR #579): em 02/05/2027 a janela do ciclo de 2027 abre e `ciclos` passa a olhar
+    # o ciclo novo; o pedido de 2026, sem resposta e sem termo, nao pode perder os avisos por isso
     c, cid, _ = obra_reajuste
+    _r_pleito(c, cid, "2026-06-10")
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero) "
+              "VALUES (?, 'prazo', 'assinado', '2026-08-01', '5º Termo Aditivo')", (cid,)); c.commit()
+    for hoje in (D(2027, 5, 1), D(2027, 5, 2), D(2027, 7, 1)):
+        assert [(a["ciclo"], a["data_base_mes"]) for a in _do_tipo(c, "reajuste_sem_resposta", hoje)] == [(2026, "2024-06")]
+        assert [a["ciclo"] for a in _do_tipo(c, "reajuste_reemitir", hoje)] == [2026]
+    [a] = _do_tipo(c, "reajuste_sem_resposta", D(2027, 5, 2))
+    assert a["mensagem"] == "pedido de reajuste da data-base 06/2024, ciclo de 2026, enviado em 10/06/2026, há 326 dias, sem resposta"
+    # o termo do ciclo de 2026 ligado ao pedido: os dois somem
+    _r_termo_do_ciclo(c, cid, ligar_pleito=c.execute("SELECT MIN(id) FROM pleitos").fetchone()[0])
+    assert _do_tipo(c, "reajuste_sem_resposta", D(2027, 5, 2)) == _do_tipo(c, "reajuste_reemitir", D(2027, 5, 2)) == []
+
+
+def test_justificativa_nao_volta_quando_o_previsto_muda_e_volta_ao_mesmo_valor(obra_reajuste):
+    # gate Sol (rodada 1 da PR #579): "vale enquanto pedido e previsto nao mudarem"; previsao nova com o valor de antes
+    # (R$ 100,01 -> 90,00 -> 100,01) e' outro previsto, e a justificativa dada ao primeiro nao vale para ele
+    c, cid, uid = obra_reajuste
     _r_previsao(c, cid, "2026-08", 100_01)
-    _r_medicao(c, cid, 1, "2026-08", "planilha_enviada", pedido=200_00)
-    assert {a["tipo"] for a in reajuste.avisos(c, D(2026, 10, 1))} == {"reajuste_pleito", "reajuste_fora_da_previsao"}
-    assert [a["tipo"] for a in reajuste.avisos(c, D(2026, 10, 1), com_competencias=False)] == ["reajuste_pleito"]
+    _r_medicao(c, cid, 1, "2026-08", "planilha_enviada", pedido=150_03)
+    reajuste.justificar(c, uid, cid, "2024-06", 2026, "2026-08", "Índice definitivo saiu maior")
+    assert _do_tipo(c, "reajuste_fora_da_previsao") == []
+    _r_previsao(c, cid, "2026-08", 90_00, criado_em="2026-08-01 10:00:00")
+    assert len(_do_tipo(c, "reajuste_fora_da_previsao")) == 1
+    _r_previsao(c, cid, "2026-08", 100_01, criado_em="2026-09-01 10:00:00")
+    assert len(_do_tipo(c, "reajuste_fora_da_previsao")) == 1
+    # medicao a mais no pedido (complemento) com o mesmo total tambem e' outro pedido
+    reajuste.justificar(c, uid, cid, "2024-06", 2026, "2026-08", "Previsão nova, mesmo índice")
+    assert _do_tipo(c, "reajuste_fora_da_previsao") == []
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=100_00 WHERE numero=1"); c.commit()
+    _r_medicao(c, cid, 2, "2026-08", "planilha_enviada", pedido=50_03)
+    assert len(_do_tipo(c, "reajuste_fora_da_previsao")) == 1
+
+
+def test_sem_apostilamento_soma_o_medido_medicao_a_medicao_com_o_complemento(obra_reajuste):
+    # revisor (rodada 1 da PR #579): 1a medicao faturada R$ 60 mil e complemento aprovado R$ 50 mil na mesma
+    # competencia; o medido e' R$ 110 mil (o faturado de uma, o aprovado da outra), e a diretoria ve
+    c, cid, _ = obra_reajuste
+    m1 = _r_medicao(c, cid, 1, "2026-08", "nota_emitida", pedido=60_000_00, aprovado=60_000_00)
+    _r_nota(c, m1, 60_000_00)
+    _r_medicao(c, cid, 2, "2026-08", "boletim_recebido", pedido=55_000_00, aprovado=50_000_01)
+    [a] = _do_tipo(c, "reajuste_sem_apostilamento")
+    assert (a["valor_centavos"], a["publico"], a["competencias"]) == (110_000_01, ["operacao", "diretoria"], ["2026-08"])

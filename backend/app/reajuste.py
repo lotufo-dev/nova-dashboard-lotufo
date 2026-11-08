@@ -512,6 +512,14 @@ def cobertura_das_competencias(conn, contrato_id: int, grupos: list[dict]):
     return coberta
 
 
+def _medido_da_medicao(m, faturado: int | None) -> int | None:
+    """O ja' medido de uma medicao de reajuste: o faturado (NF alocada); sem ele, o aprovado; sem ele, o pedido."""
+    for v in (faturado, m["valor_atestado_centavos"], m["valor_protocolado_centavos"]):
+        if v is not None:
+            return v
+    return None
+
+
 def _soma(valores) -> int | None:
     """Soma dos centavos gravados; None quando nenhum foi gravado (zero gravado e' zero)."""
     v = [x for x in valores if x is not None]
@@ -589,11 +597,11 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
             "aprovado_centavos": None, "apostilada": False, "apostilado_centavos": None, "apostilado_percentual": None,
             "apostilamento_chave": None, "medicao_orgao": None, "faturado_centavos": None, "recebida_em": None, "recebidas": [],
             "medido_nao_recebido_centavos": None, "medicoes": [], "medicoes_pedido": [], "medicoes_aprovado": [],
-            "medicoes_nota": [], "data_base_incerta": False, "_medicoes": []})
+            "medicoes_nota": [], "data_base_incerta": False, "medido_centavos": None, "previsao_id": None, "_medicoes": []})
 
     for p in previsoes_vigentes(conn, contrato_id, sem_apostilamento=True):
         x = linha(p["data_base_mes"], p["ciclo"], p["competencia"])
-        x["previsto_centavos"], x["previsto_origem"] = p["valor_previsto_centavos"], p["origem"]
+        x.update(previsto_centavos=p["valor_previsto_centavos"], previsto_origem=p["origem"], previsao_id=p["id"])
     for a in competencias_apostiladas(conn, contrato_id):
         x = linha(a["data_base_mes"], a["ciclo"], a["competencia"])
         x.update(apostilada=True, apostilado_centavos=a["valor_centavos"], apostilamento_chave=a["instrumento_chave"],
@@ -676,7 +684,10 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
                      # issue #275: as medicoes que entraram em cada soma, para a origem de cada celula da aba
                      medicoes_pedido=sorted(v[1] for v in ms if v[2]["valor_protocolado_centavos"] is not None),
                      medicoes_aprovado=sorted(v[1] for v in ms if v[2]["valor_atestado_centavos"] is not None),
-                     medicoes_nota=sorted(v[1] for v in ms if faturado.get(v[2]["id"]) is not None))
+                     medicoes_nota=sorted(v[1] for v in ms if faturado.get(v[2]["id"]) is not None),
+                     # issue #274 (decisao do Leo de 08/11/2026): o ja' medido, medicao a medicao (o faturado; sem
+                     # ele, o aprovado; sem ele, o pedido), somado: o complemento aprovado sem nota tambem conta
+                     medido_centavos=_soma(_medido_da_medicao(v[2], faturado.get(v[2]["id"])) for v in ms))
         x["estado"] = ESTADOS_COMPETENCIA[max(passo, _APOSTILADA if x["apostilada"] else 0)]
         grupos.setdefault((base, ciclo), []).append(x)
     out = [{"data_base_mes": b, "ciclo": y, "competencias": xs} for (b, y), xs in grupos.items()]
@@ -699,7 +710,7 @@ MIN_JUSTIFICATIVA = 10
 
 def _justificativas(conn, contrato_id: int) -> dict[tuple[str, int, str], dict]:
     """A ultima justificativa de cada competencia (data-base, ciclo, competencia), com o nome de quem a deu. As
-    justificativas sao eventos (migracao 071): a leitura escolhe a mais recente."""
+    justificativas sao eventos (migracao 072): a leitura escolhe a mais recente."""
     out = {}
     for r in conn.execute("SELECT j.*, u.nome AS usuario FROM reajuste_justificativas j "
                           "LEFT JOIN usuarios u ON u.id = j.usuario_id WHERE j.contrato_id=? ORDER BY j.id",
@@ -708,10 +719,21 @@ def _justificativas(conn, contrato_id: int) -> dict[tuple[str, int, str], dict]:
     return out
 
 
+def _ref_previsto(x: dict) -> str:
+    """O evento que da' o previsto vigente da linha (`vigente_da_competencia`): o termo, quando o apostilado tem valor;
+    senao a previsao (pleito ou digitada) vigente."""
+    if x["apostilado_centavos"] is not None:
+        return f"apostilamento:{x['apostilamento_chave']}"
+    return f"previsao:{x['previsao_id']}"
+
+
 def justificativa_vigente(x: dict, j: dict | None) -> dict | None:
     """A justificativa que ainda vale para a linha `x`: a ultima, se o pedido e o previsto vigente de agora sao os
-    que ela guardou. Se um dos dois mudou, nenhuma (o aviso volta)."""
-    if j is None or j["pedido_centavos"] != x["pedido_centavos"] or j["previsto_centavos"] != vigente_da_competencia(x):
+    que ela guardou, nos centavos e na identidade (rodada 1 da PR #579, gate Sol): o mesmo evento de previsto
+    (`_ref_previsto`) e as mesmas medicoes no pedido. Previsao nova com o valor de antes (R$ 100 -> 90 -> 100) nao
+    revive a justificativa. Se algo mudou, nenhuma (o aviso volta)."""
+    if j is None or j["pedido_centavos"] != x["pedido_centavos"] or j["previsto_centavos"] != vigente_da_competencia(x) \
+            or j["previsto_ref"] != _ref_previsto(x) or json.loads(j["medicoes"]) != x["medicoes_pedido"]:
         return None
     return {"texto": j["texto"], "usuario": j["usuario"], "criado_em": j["criado_em"],
             "pedido_centavos": j["pedido_centavos"], "previsto_centavos": j["previsto_centavos"]}
@@ -732,14 +754,17 @@ def justificar(conn, usuario_id: int, contrato_id: int, data_base_mes: str, cicl
         if x is None or "fora_da_previsao" not in x["avisos"]:
             raise ValueError("O pedido desta competência não está fora da previsão")
         previsto = vigente_da_competencia(x)
+        ref, medicoes = _ref_previsto(x), json.dumps(x["medicoes_pedido"])
         jid = conn.execute("INSERT INTO reajuste_justificativas (contrato_id, data_base_mes, ciclo, competencia, "
-                           "texto, pedido_centavos, previsto_centavos, usuario_id) VALUES (?,?,?,?,?,?,?,?)",
+                           "texto, pedido_centavos, previsto_centavos, previsto_ref, medicoes, usuario_id) "
+                           "VALUES (?,?,?,?,?,?,?,?,?,?)",
                            (contrato_id, data_base_mes, ciclo, competencia, texto, x["pedido_centavos"], previsto,
-                            usuario_id)).lastrowid
+                            ref, medicoes, usuario_id)).lastrowid
         auditoria.registrar(conn, usuario_id, "reajuste.justificativa", "contrato", contrato_id, None,
                             {"justificativa_id": jid, "data_base_mes": data_base_mes, "ciclo": ciclo,
                              "competencia": competencia, "pedido_centavos": x["pedido_centavos"],
-                             "previsto_centavos": previsto, "texto": texto})
+                             "previsto_centavos": previsto, "previsto_ref": ref, "medicoes": x["medicoes_pedido"],
+                             "texto": texto})
     return jid
 
 
@@ -803,16 +828,14 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
     return out
 
 
-def avisos(conn, hoje: datetime.date | None = None, com_competencias: bool = True) -> list[dict]:
+def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
     """Pleito nao enviado (atencao antes do aniversario, acao depois) e apostilamento pendente (a diretoria
     ve depois de 90 dias). Contratos ativos ou suspensos; em encerramento o reajuste continua valendo
     (as ultimas medicoes tambem se reajustam). A10 (mapa de 2026-09-28): o aviso diz a data-base, para
     levar ao ciclo dela na aba Reajuste, e nao so' a aba.
 
     Issue #274 (spec 2026-10-20 §2.2 e §4 item 1): o pleito nao enviado diz o valor previsto do ciclo, quando ha'
-    previsao; e entram os avisos do motor de apostilamento (`_avisos_do_ciclo` e `_avisos_das_competencias`).
-    `com_competencias=False`: sem os das competencias (a leitura da aba inteira por contrato), para quem so' quer os
-    do ciclo (o "reajuste a pedir" do Inicio)."""
+    previsao; e entram os avisos do motor de apostilamento (`_avisos_dos_ciclos` e `_avisos_das_competencias`)."""
     hoje = hoje or tempo.hoje_local()
     out = []
     for c in conn.execute("SELECT id, nome_curto, numero_instrumento, percentual_direito_bp FROM contratos "
@@ -847,14 +870,15 @@ def avisos(conn, hoje: datetime.date | None = None, com_competencias: bool = Tru
                                         publico=publico, destino=destino,
                                         data=(k.get("pedido") or k["pleito"])["enviado_em"][:10], sentido="desde"),
                             "data_base_mes": k["data_base_mes"]})
-            out += _avisos_do_ciclo(k, base, hoje, c["id"], nome, destino)
-        if com_competencias:
-            aplica = {k["data_base_mes"]: k.get("aplica_a") for k in ks}
-            out += _avisos_das_competencias(conn, dict(c), nome, destino, aplica)
+        if not ks:                           # sem reajuste no contrato, ou sem data-base
+            continue
+        aplica = {k["data_base_mes"]: k.get("aplica_a") for k in ks}
+        out += _avisos_dos_ciclos(conn, c["id"], hoje, nome, destino, aplica)
+        out += _avisos_das_competencias(conn, dict(c), nome, destino, aplica)
     return out
 
 
-SEM_RESPOSTA_DIAS = 120              # "Pedido de reajuste sem resposta": mais de 120 dias do ultimo pleito enviado
+SEM_RESPOSTA_DIAS = 120              # "Pedido de reajuste sem resposta": 120 dias ou mais do ultimo pleito enviado
 DIRETORIA_SEM_APOSTILAMENTO_CENTAVOS = 100_000_00   # "Reajuste sem apostilamento": a diretoria ve acima de R$ 100 mil
 
 
@@ -874,44 +898,57 @@ def _lista_meses(comps: list[str]) -> str:
     return ms[0] if len(ms) == 1 else f"{', '.join(ms[:-1])} e {ms[-1]}"
 
 
-def _avisos_do_ciclo(k: dict, base: str, hoje: datetime.date, contrato_id: int, nome: str, destino: dict) -> list[dict]:
-    """Issue #274 (spec 2026-10-20 §2.2), os avisos do ciclo corrente de uma data-base (`ciclos`):
+def _avisos_dos_ciclos(conn, contrato_id: int, hoje: datetime.date, nome: str, destino: dict,
+                       aplica: dict) -> list[dict]:
+    """Issue #274 (spec 2026-10-20 §2.2), os avisos de cada ciclo com pleito enviado e sem o termo que o fecha
+    (`apostilamento_do_ciclo`), de cada data-base do contrato, e nao so' do corrente (revisor e gate Sol, rodada 1 da
+    PR #579): o ciclo anterior ainda sem resposta nao perde o aviso quando a janela do aniversario seguinte abre.
 
-    - `reajuste_reemitir`: o ciclo em `reemitir` (aditivo de prazo ou valor assinado depois do ultimo pedido enviado);
-      some com o pleito novo enviado (a reemissao do cronograma), que tira o ciclo do `reemitir`. Operacao.
+    - `reajuste_reemitir`: aditivo de prazo ou valor assinado depois do ultimo pedido enviado (`aditivo_depois`, o
+      criterio do estado `reemitir` de `ciclos`); some com o pleito novo enviado (a reemissao do cronograma).
+      Operacao.
     - `reajuste_sem_resposta`: o ultimo pleito enviado do ciclo (pleito, reiteracao ou reemissao do cronograma: os
-      dois zeram a contagem, decisao do Leo de 08/11/2026) ha' mais de 120 dias, sem apostilamento, em qualquer
-      orgao. Some com a reiteracao ou a reemissao enviada, ou com o apostilamento. Operacao e diretoria."""
+      dois zeram a contagem, decisao do Leo de 08/11/2026) ha' 120 dias ou mais, em qualquer orgao. Some com a
+      reiteracao ou a reemissao enviada, ou com o apostilamento. Operacao e diretoria."""
     out = []
-    marca = {"data_base_mes": k["data_base_mes"], "ciclo": k.get("ciclo")}
-    if k["situacao"] == "reemitir" and k.get("aditivo"):
-        a = k["aditivo"]
-        assinado = datetime.date.fromisoformat(a["data_assinatura"][:10])
-        numero = f" {a['numero']}" if a.get("numero") else ""
+    bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes",
+                                        (contrato_id,))]
+    for mes, ciclo in conn.execute("SELECT DISTINCT data_base_mes, ciclo FROM pleitos WHERE contrato_id=? "
+                                   "AND tipo='reajuste' AND situacao='enviado' AND ciclo IS NOT NULL "
+                                   "ORDER BY data_base_mes, ciclo", (contrato_id,)).fetchall():
+        if mes not in bases or apostilamento_do_ciclo(conn, contrato_id, mes, ciclo, len(bases) == 1):
+            continue
+        pl = _pleito(conn, contrato_id, mes, ciclo)
+        pd = _pleito(conn, contrato_id, mes, ciclo, sem_reiteracao=True) or pl
+        out += _avisos_do_ciclo(mes, ciclo, pl, aditivo_depois(conn, contrato_id, pd["enviado_em"]),
+                                _rotulo_base(mes, aplica.get(mes)), hoje, contrato_id, nome, destino)
+    return out
+
+
+def _avisos_do_ciclo(mes: str, ciclo: int, pleito: dict, aditivo: dict | None, base: str, hoje: datetime.date,
+                     contrato_id: int, nome: str, destino: dict) -> list[dict]:
+    """Os dois avisos de um ciclo sem termo (`_avisos_dos_ciclos`): o ultimo pleito enviado e o aditivo que pede a
+    reemissao, se houver."""
+    out = []
+    marca = {"data_base_mes": mes, "ciclo": ciclo}
+    if aditivo:
+        assinado = datetime.date.fromisoformat(aditivo["data_assinatura"][:10])
+        numero = f" {aditivo['numero']}" if aditivo.get("numero") else ""
         out.append({**_av.aviso("reajuste_reemitir", "acao",
-                                f"data-base {base}: aditivo{numero} assinado em {assinado:%d/%m/%Y}, depois do pleito; "
-                                f"cronograma de reajuste a reemitir", contrato_id, nome,
+                                f"data-base {base}, ciclo de {ciclo}: aditivo{numero} assinado em {assinado:%d/%m/%Y}, "
+                                f"depois do pleito; cronograma de reajuste a reemitir", contrato_id, nome,
                                 dias=(hoje - assinado).days, destino=destino, data=assinado.isoformat(),
                                 sentido="desde"), **marca})
-    if k["situacao"] in SEM_APOSTILAMENTO and k.get("pleito"):
-        enviado = datetime.date.fromisoformat(k["pleito"]["enviado_em"][:10])
+    if pleito:
+        enviado = datetime.date.fromisoformat(pleito["enviado_em"][:10])
         dias = (hoje - enviado).days
-        if dias > SEM_RESPOSTA_DIAS:
+        if dias >= SEM_RESPOSTA_DIAS:
             out.append({**_av.aviso("reajuste_sem_resposta", "acao",
-                                    f"pedido de reajuste da data-base {base} enviado em {enviado:%d/%m/%Y}, há {dias} "
+                                    f"pedido de reajuste da data-base {base}, ciclo de {ciclo}, enviado em {enviado:%d/%m/%Y}, há {dias} "
                                     f"dias, sem resposta", contrato_id, nome, dias=dias,
                                     publico=("operacao", "diretoria"), destino=destino, data=enviado.isoformat(),
                                     sentido="desde"), **marca})
     return out
-
-
-def _medido(x: dict) -> int:
-    """O valor ja' medido da competencia (decisao do Leo de 08/11/2026): o faturado; sem ele, o aprovado; sem ele, o
-    pedido."""
-    for v in (x["faturado_centavos"], x["aprovado_centavos"], x["pedido_centavos"]):
-        if v is not None:
-            return v
-    return 0
 
 
 def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict, aplica: dict | None = None) -> list[dict]:
@@ -921,7 +958,7 @@ def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict, aplica: di
     - `reajuste_fora_da_previsao`: um por competencia; some com a reapresentacao (pedido a ate' R$ 1,00 do previsto
       vigente) ou com a justificativa (`justificar`). Operacao.
     - `reajuste_sem_apostilamento`: um por data-base e ciclo (decisao do Leo de 08/11/2026), com as competencias
-      aprovadas ou faturadas que nenhum termo cobre e a soma do valor ja' medido delas (`_medido`) na cota da Lotufo
+      aprovadas ou faturadas que nenhum termo cobre e a soma do valor ja' medido delas (`medido_centavos` de `competencias_por_ciclo`, medicao a medicao) na cota da Lotufo
       (arredondamento unico, sobre a soma). Operacao; diretoria quando a soma passa de R$ 100 mil. Some com o
       apostilamento carregado.
     - `reajuste_nota_antes_do_apostilamento`: um por competencia, critico. Operacao. Some com o apostilamento."""
@@ -950,7 +987,7 @@ def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict, aplica: di
             if "sem_apostilamento" in x["avisos"]:
                 sem_termo.append(x)
         if sem_termo:
-            valor = contratos.cota(sum(_medido(x) for x in sem_termo), c["percentual_direito_bp"]) or 0
+            valor = contratos.cota(sum(x["medido_centavos"] or 0 for x in sem_termo), c["percentual_direito_bp"]) or 0
             publico = ("operacao", "diretoria") if valor > DIRETORIA_SEM_APOSTILAMENTO_CENTAVOS else ("operacao",)
             ciclo = f", ciclo de {g['ciclo']}" if g["ciclo"] is not None else ""
             out.append({**_av.aviso("reajuste_sem_apostilamento", "atencao",
