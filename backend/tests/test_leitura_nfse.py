@@ -95,6 +95,7 @@ def test_tributo_ausente_fica_none_e_nota_de_projeto_sem_inss_e_valida():
     ("7ª MEDIÇÃO DA EXECUÇÃO DE PROJETO DAS OBRAS DAS ESTAÇÕES", "medicao"),
     ("22ª MEDIÇÃO DA ELABORAÇÃO DE PROJETO DAS OBRAS", "projeto"),
     ("1ª MEDIÇÃO DA ELABORAÇÃO DE PROJETO", "projeto"),      # Terminais BRT, NF 2325/2326
+    ("22ª MEDIÇÃO DOS SERVIÇOS DE PROJETO DAS OBRAS", "projeto"),   # caso generico da regra anterior continua
 ])
 def test_natureza_pela_descricao_execucao_de_projeto_das_obras(descricao, natureza):
     texto = _txt("3105-cultural-mtpar.txt").replace("22ª MEDIÇÃO DA EXECUÇÃO DAS OBRAS", descricao)

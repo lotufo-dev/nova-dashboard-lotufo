@@ -74,7 +74,8 @@ def _descricao(n: dict, desc: str) -> None:
     if re.search(r"REAJUST", desc):            # REAJUSTE DA / REAJUSTAMENTO / REAJUSTE REFERENTE
         n["natureza"] = "reajuste"
     # "EXECUÇÃO DE PROJETO DAS OBRAS" e' execucao de obra (Estacoes BRT, com INSS), nao projeto (#564)
-    elif re.search(r"ELABORAÇÃO DE PROJETO|EXECUÇÃO DE PROJETO(?! DAS OBRAS)", desc):
+    elif re.search(r"ELABORAÇÃO DE PROJETO|EXECUÇÃO DE PROJETO(?! DAS OBRAS)|(?<!EXECUÇÃO )DE PROJETO DAS OBRAS",
+                   desc):
         n["natureza"] = "projeto"
     else:
         n["natureza"] = "medicao"
