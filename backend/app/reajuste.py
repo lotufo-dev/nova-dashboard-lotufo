@@ -6,6 +6,7 @@ desse mes; o ciclo fecha com o APOSTILAMENTO, nao com o oficio (reenviado a cada
 """
 import datetime
 import json
+import re
 
 from app import auditoria, avisos as _av, contratos, db, dinheiro, tempo
 
@@ -322,7 +323,9 @@ def linhas_do_tempo(conn, contrato_id: int) -> list[dict]:
         termo = apostilamento_do_ciclo(conn, contrato_id, base, ciclo, len(bases) == 1)
         out.append({"data_base_mes": base, "ciclo": ciclo, "termo": termo,
                     "aditivos": aditivos_do_ciclo(conn, contrato_id,
-                                                  {"data_base_mes": base, "ciclo": ciclo, "apostilamento": termo})})
+                                                  {"data_base_mes": base, "ciclo": ciclo, "apostilamento": termo}),
+                    # issue #586: as respostas do orgao aos pleitos do ciclo (indeferimento, deferimento parcial)
+                    "respostas": respostas_do_ciclo(conn, contrato_id, base, ciclo)})
     return out
 
 
@@ -987,7 +990,7 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
             aniv = aniversario(b["mes"], y)
             out.append({"data_base_mes": b["mes"], "indice": b["indice"], "aplica_a": b["aplica_a"], "ciclo": y, "aniversario": aniv.isoformat(),
                         "situacao": "futuro", "dias": (aniv - hoje).days, "pleito": None, "pedido": None,
-                        "apostilamento": None, "aditivo": None})
+                        "apostilamento": None, "aditivo": None, "resposta": None})
             continue
         aniv = aniversario(b["mes"], y)
         ap = apostilamento_do_ciclo(conn, contrato_id, b["mes"], y, len(bases) == 1)
@@ -995,8 +998,12 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
         # o pedido que espera o apostilamento: a reiteracao nao zera a espera (issue #277)
         pd = _pleito(conn, contrato_id, b["mes"], y, sem_reiteracao=True) or pl
         aditivo = None
+        # issue #586: a resposta do orgao ao pleito enviado mais recente; o indeferimento fecha o ciclo
+        resposta = resposta_vigente(conn, pl["id"]) if pl else None
         if ap:
             sit, dias = "apostilado", None
+        elif pl and resposta and resposta["resultado"] == "indeferido":
+            sit, dias = "indeferido", None
         elif pl:
             sit, dias = "apostilamento_pendente", (hoje - datetime.date.fromisoformat(pd["enviado_em"][:10])).days
             # issue #273 (spec 2026-10-20 §2.2): aditivo de prazo ou valor assinado depois do ultimo pedido enviado
@@ -1008,7 +1015,8 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
         else:
             sit, dias = "pleito_pendente", (aniv - hoje).days
         out.append({"data_base_mes": b["mes"], "indice": b["indice"], "aplica_a": b["aplica_a"], "ciclo": y, "aniversario": aniv.isoformat(),
-                    "situacao": sit, "dias": dias, "pleito": pl, "pedido": pd, "apostilamento": ap, "aditivo": aditivo})
+                    "situacao": sit, "dias": dias, "pleito": pl, "pedido": pd, "apostilamento": ap, "aditivo": aditivo,
+                    "resposta": resposta})
     return out
 
 
@@ -1093,7 +1101,9 @@ def _avisos_dos_ciclos(conn, contrato_id: int, hoje: datetime.date, nome: str, d
       Operacao.
     - `reajuste_sem_resposta`: o ultimo pleito enviado do ciclo (pleito, reiteracao ou reemissao do cronograma: os
       dois zeram a contagem, decisao do Leo de 08/11/2026) ha' 120 dias ou mais, em qualquer orgao. Some com a
-      reiteracao ou a reemissao enviada, ou com o apostilamento. Operacao e diretoria."""
+      reiteracao ou a reemissao enviada, ou com o apostilamento. Operacao e diretoria.
+
+    Issue #586: o ciclo indeferido (`indeferimento_do_ciclo`) fecha para os dois, como o termo."""
     out = []
     bases = [r[0] for r in conn.execute("SELECT mes FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes",
                                         (contrato_id,))]
@@ -1103,6 +1113,9 @@ def _avisos_dos_ciclos(conn, contrato_id: int, hoje: datetime.date, nome: str, d
         if mes not in bases or apostilamento_do_ciclo(conn, contrato_id, mes, ciclo, len(bases) == 1):
             continue
         pl = _pleito(conn, contrato_id, mes, ciclo)
+        r = resposta_vigente(conn, pl["id"])
+        if r and r["resultado"] == "indeferido":        # issue #586 (`indeferimento_do_ciclo`): o orgao disse que nao
+            continue
         pd = _pleito(conn, contrato_id, mes, ciclo, sem_reiteracao=True) or pl
         out += _avisos_do_ciclo(mes, ciclo, pl, aditivo_depois(conn, contrato_id, pd["enviado_em"]),
                                 _rotulo_base(mes, aplica.get(mes)), hoje, contrato_id, nome, destino)
@@ -1180,3 +1193,107 @@ def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict, aplica: di
                                     c["id"], nome, valor_centavos=valor, publico=publico, destino=destino),
                         **marca, "competencias": [x["competencia"] for x in sem_termo]})
     return out
+
+
+# ---- Resposta do orgao ao pleito (issue #586) ----------------------------------------------------------------------
+# 'indeferido' fecha o ciclo para os avisos de pedido sem resposta e de cronograma a reemitir (e para o "apostilamento
+# pendente" da aba e da diretoria); 'deferido_parcial' fica registrado e o ciclo continua esperando o termo. A resposta
+# e' do pleito enviado mais recente do ciclo (`_pleito`): pleito enviado depois dela (recurso, reiteracao, reemissao do
+# cronograma) reabre o ciclo, porque a resposta dele ainda nao veio. Correcao e' resposta nova no mesmo pleito (vale a
+# mais recente); 'sem_efeito' anula a resposta registrada por engano e o ciclo volta a esperar. Nada se altera nem se
+# apaga (migracao 075).
+RESULTADOS_RESPOSTA = ("indeferido", "deferido_parcial", "sem_efeito")
+_DATA_ISO = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")       # \d casaria digito arabe-indico
+
+
+def _resposta(r) -> dict:
+    return {k: r[k] for k in ("id", "pleito_id", "resultado", "data", "documento", "texto", "corrige_resposta_id",
+                              "criado_em")}
+
+
+def _ultima_resposta(conn, pleito_id: int) -> dict | None:
+    r = conn.execute("SELECT * FROM pleito_respostas WHERE pleito_id=? ORDER BY id DESC LIMIT 1",
+                     (pleito_id,)).fetchone()
+    return _resposta(r) if r else None
+
+
+def resposta_vigente(conn, pleito_id: int | None) -> dict | None:
+    """A resposta do orgao que vale para o pleito: a mais recente (a correcao e' resposta nova); anulada
+    ('sem_efeito'), nenhuma."""
+    r = _ultima_resposta(conn, pleito_id) if pleito_id is not None else None
+    return r if r and r["resultado"] != "sem_efeito" else None
+
+
+def indeferimento_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int) -> dict | None:
+    """O indeferimento que fecha o ciclo: a resposta vigente do pleito enviado mais recente, quando e' 'indeferido'."""
+    pl = _pleito(conn, contrato_id, mes_base, ciclo)
+    r = resposta_vigente(conn, pl["id"]) if pl else None
+    return r if r and r["resultado"] == "indeferido" else None
+
+
+def respostas_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int) -> list[dict]:
+    """Todas as respostas registradas nos pleitos enviados do ciclo, na ordem do registro (a linha do tempo)."""
+    return [_resposta(r) for r in conn.execute(
+        "SELECT r.* FROM pleito_respostas r JOIN pleitos p ON p.id=r.pleito_id WHERE p.contrato_id=? "
+        "AND p.tipo='reajuste' AND p.data_base_mes=? AND p.ciclo=? AND p.situacao='enviado' ORDER BY r.id",
+        (contrato_id, mes_base, ciclo))]
+
+
+def _recusa_resposta(conn, p: dict) -> str | None:
+    if p["tipo"] != "reajuste" or p["situacao"] != "enviado" or not p["data_base_mes"] or p["ciclo"] is None:
+        return "Só se registra a resposta do órgão em pleito de reajuste enviado"
+    vig = _pleito(conn, p["contrato_id"], p["data_base_mes"], p["ciclo"])
+    if vig and vig["id"] != p["id"]:
+        return (f"Registre a resposta no pleito mais recente do ciclo "
+                f"({vig['numero_oficio'] or 'ofício sem número'})")
+    unica = conn.execute("SELECT COUNT(*) FROM contrato_datas_base WHERE contrato_id=?",
+                         (p["contrato_id"],)).fetchone()[0] == 1
+    if apostilamento_do_ciclo(conn, p["contrato_id"], p["data_base_mes"], p["ciclo"], unica):
+        return "O ciclo já está apostilado: não há resposta a registrar"
+    return None
+
+
+def registrar_resposta(conn, usuario_id: int, pleito_id: int, resultado: str, data: str, documento: str,
+                       texto: str, hoje: datetime.date | None = None) -> int:
+    """Registra a resposta formal do orgao ao pleito enviado mais recente do ciclo (issue #586), com a auditoria.
+    Havendo resposta anterior no mesmo pleito, a nova a corrige (`corrige_resposta_id`)."""
+    hoje = hoje or tempo.hoje_local()
+    documento, texto = (documento or "").strip(), (texto or "").strip()
+    # o que nao depende do banco recusa antes de tomar a escrita
+    if resultado not in RESULTADOS_RESPOSTA:
+        raise ValueError("Resposta inválida: indeferido, deferido parcialmente ou registro sem efeito")
+    try:
+        dia = datetime.date.fromisoformat(data) if _DATA_ISO.match(data or "") else None
+    except ValueError:
+        dia = None
+    with db.mutacao(conn):
+        r = conn.execute("SELECT * FROM pleitos WHERE id=?", (pleito_id,)).fetchone()
+        if r is None:
+            raise ValueError("Pleito não encontrado")
+        p = dict(r)
+        if (motivo := _recusa_resposta(conn, p)):
+            raise ValueError(motivo)
+        anterior = _ultima_resposta(conn, pleito_id)
+        if resultado == "sem_efeito" and (anterior is None or anterior["resultado"] == "sem_efeito"):
+            raise ValueError("Não há resposta registrada neste pleito para deixar sem efeito")
+        if dia is None:
+            raise ValueError("Data inválida: use AAAA-MM-DD")
+        if dia.isoformat() < str(p["enviado_em"])[:10]:
+            raise ValueError(f"Data da resposta anterior ao envio do pleito ({p['enviado_em'][8:10]}/"
+                             f"{p['enviado_em'][5:7]}/{p['enviado_em'][:4]})")
+        if dia > hoje:
+            raise ValueError("Data da resposta futura")
+        if not documento:
+            raise ValueError("Informe o documento do órgão com a resposta")
+        if len(texto) < MIN_JUSTIFICATIVA:
+            raise ValueError(f"Escreva o texto da resposta com pelo menos {MIN_JUSTIFICATIVA} caracteres")
+        rid = conn.execute("INSERT INTO pleito_respostas (pleito_id, resultado, data, documento, texto, "
+                           "corrige_resposta_id, usuario_id) VALUES (?,?,?,?,?,?,?)",
+                           (pleito_id, resultado, dia.isoformat(), documento, texto,
+                            anterior["id"] if anterior else None, usuario_id)).lastrowid
+        auditoria.registrar(conn, usuario_id, "pleito.resposta", "pleito", pleito_id, anterior,
+                            {"resposta_id": rid, "resultado": resultado, "data": dia.isoformat(),
+                             "documento": documento, "texto": texto, "contrato_id": p["contrato_id"],
+                             "data_base_mes": p["data_base_mes"], "ciclo": p["ciclo"],
+                             "corrige_resposta_id": anterior["id"] if anterior else None})
+    return rid

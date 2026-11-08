@@ -24,8 +24,17 @@ function rotuloDataBase(mes: string, c: CicloApi) {
 
 // `pleito`: o enviado mais recente do ciclo (o servidor diz quem ele e'); e' nele que se reitera ou reemite.
 // `aditivos`: os da linha do tempo do ciclo (issue #275, `reajuste.aditivos_do_ciclo`)
-type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilamento_pendente" | "reemitir" | "apostilado";
-  pleito?: { id: number } | null; aditivos?: AditivoDoCiclo[] };
+// `resposta`: a resposta do orgao que vale para o pleito vigente (issue #586; o indeferimento fecha o ciclo)
+type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilamento_pendente" | "reemitir" | "apostilado"
+    | "indeferido";
+  pleito?: { id: number } | null; aditivos?: AditivoDoCiclo[]; resposta?: RespostaOrgao | null };
+
+/** Issue #586: a resposta formal do orgao a um pleito de reajuste (`reajuste.registrar_resposta`). A correcao e' resposta
+ *  nova que aponta a corrigida; nada se apaga. */
+type RespostaOrgao = { id: number; pleito_id: number; resultado: "indeferido" | "deferido_parcial" | "sem_efeito"; data: string;
+  documento: string; texto: string; corrige_resposta_id: number | null; criado_em: string };
+const RESULTADO_RESPOSTA: Record<RespostaOrgao["resultado"], string> = {
+  indeferido: "Indeferido", deferido_parcial: "Deferido parcialmente", sem_efeito: "Registro sem efeito" };
 
 // issue #277: o que o botao faz no pleito vigente do ciclo (o servidor diz quais cabem, em `reemissoes_possiveis`)
 const ACAO_REEMISSAO: Record<Reemissao, { botao: string; titulo: string }> = {
@@ -143,6 +152,54 @@ function FormJustificativa({ j, competencia, aoFechar }: { j: Justificar; compet
       <div className="acoes">
         <button type="submit" className="btn btn--pequeno btn--primario" disabled={gravando}>Gravar justificativa</button>
         <button type="button" className="btn btn--pequeno" onClick={aoFechar}>Cancelar</button>
+      </div>
+      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+    </form>
+  );
+}
+
+/** Issue #586: o formulario da resposta do orgao ao pleito vigente do ciclo. */
+function FormResposta({ pleito, anulavel, aoGravar, aoCancelar }: { pleito: Pleito; anulavel: boolean;
+    aoGravar: () => void; aoCancelar: () => void }) {
+  // sem escolha previa: o indeferimento fecha o ciclo e tem de ser escolhido
+  const [resultado, setResultado] = useState<RespostaOrgao["resultado"] | "">("");
+  const [data, setData] = useState("");
+  const [documento, setDocumento] = useState("");
+  const [texto, setTexto] = useState("");
+  const [erro, setErro] = useState("");
+  const [gravando, setGravando] = useState(false);
+  const id = `resposta-${pleito.id}`;
+  async function gravar(e: React.FormEvent) {
+    e.preventDefault();
+    setGravando(true); setErro("");
+    try {
+      await api(`/api/pleitos/${pleito.id}/respostas`, { method: "POST",
+        body: JSON.stringify({ resultado, data, documento, texto }) });
+      aoGravar();
+    } catch (er) { setErro(mensagemDeErro(er)); } finally { setGravando(false); }
+  }
+  return (
+    <form className="pilha cartao__corpo" onSubmit={gravar}
+      aria-label={`Resposta do órgão ao pleito ${pleito.numero_oficio ?? "sem número"}`}>
+      <label htmlFor={`${id}-resultado`}>Resposta</label>
+      <select id={`${id}-resultado`} value={resultado}
+        onChange={e => setResultado(e.target.value as RespostaOrgao["resultado"])} required>
+        <option value="">Escolha</option>
+        <option value="indeferido">{RESULTADO_RESPOSTA.indeferido}</option>
+        <option value="deferido_parcial">{RESULTADO_RESPOSTA.deferido_parcial}</option>
+        {anulavel && <option value="sem_efeito">{RESULTADO_RESPOSTA.sem_efeito}</option>}
+      </select>
+      <label htmlFor={`${id}-data`}>Data</label>
+      <input id={`${id}-data`} type="date" value={data} onChange={e => setData(e.target.value)} required />
+      <label htmlFor={`${id}-documento`}>Documento</label>
+      <input id={`${id}-documento`} type="text" maxLength={300} value={documento}
+        onChange={e => setDocumento(e.target.value)} required />
+      <label htmlFor={`${id}-texto`}>Texto</label>
+      <textarea id={`${id}-texto`} rows={2} maxLength={2000} value={texto} onChange={e => setTexto(e.target.value)}
+        required />
+      <div className="acoes">
+        <button type="submit" className="btn btn--pequeno btn--primario" disabled={gravando}>Registrar resposta</button>
+        <button type="button" className="btn btn--pequeno" onClick={aoCancelar}>Cancelar</button>
       </div>
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
     </form>
@@ -276,7 +333,9 @@ const TIPO_ADITIVO: Record<string, string> = { prazo: "de prazo", valor: "de val
  *  pedem reemissao e o termo, em ordem de data. Na mesma data, o aditivo vem antes do pleito (a reemissao do mesmo
  *  dia responde a ele; o primeiro pleito nunca empata, `aditivos_do_ciclo` so' traz os assinados depois) e o termo
  *  por ultimo. */
-function eventosDoCiclo(pleitos: Pleito[], aditivos: AditivoDoCiclo[], termos: InstrumentoCadastro[]) {
+function eventosDoCiclo(pleitos: Pleito[], aditivos: AditivoDoCiclo[], termos: InstrumentoCadastro[],
+    respostas: RespostaOrgao[] = []) {
+  const corrigidas = new Set(respostas.map(r => r.corrige_resposta_id).filter(id => id !== null));
   const ev = [
     ...aditivos.map(a => ({ chave: `aditivo-${a.id}`, data: a.data_assinatura.slice(0, 10), ordem: 0, instante: a.data_assinatura,
       texto: ["Aditivo", TIPO_ADITIVO[a.tipo], a.numero ?? "sem número", "assinado"].filter(Boolean).join(" ") })),
@@ -284,7 +343,10 @@ function eventosDoCiclo(pleitos: Pleito[], aditivos: AditivoDoCiclo[], termos: I
       data: p.enviado_em!.slice(0, 10), ordem: 1, instante: p.enviado_em!,
       // "Pleito ... enviado"; reiteracao e reemissao (femininas) "enviada"
       texto: `${p.rotulo}${p.numero_oficio ? ` ${p.numero_oficio}` : ""} ${p.reemissao || p.reemite_pleito_id ? "enviada" : "enviado"}` })),
-    ...termos.map(i => ({ chave: `termo-${i.tipo}-${i.id}`, data: i.data.slice(0, 10), ordem: 2, instante: i.data,
+    // issue #586: a resposta do orgao; a corrigida por outra fica, marcada
+    ...respostas.map(r => ({ chave: `resposta-${r.id}`, data: r.data, ordem: 2, instante: r.criado_em,
+      texto: `${RESULTADO_RESPOSTA[r.resultado]} · ${r.documento}${corrigidas.has(r.id) ? " (corrigida)" : ""}` })),
+    ...termos.map(i => ({ chave: `termo-${i.tipo}-${i.id}`, data: i.data.slice(0, 10), ordem: 3, instante: i.data,
       texto: `${nomeDoTermo(i)} ${i.numero ?? "s/n"}` })),
   ];
   return ev.sort((a, b) => a.data.localeCompare(b.data) || a.ordem - b.ordem
@@ -309,7 +371,7 @@ function LinhaDoTempoDoCiclo({ ciclo, eventos }: { ciclo: number;
 
 // Rodada 1 da PR #438: termo e aditivos de cada ciclo com pleito enviado (`reajuste.linhas_do_tempo`)
 type LinhaDoTempoApi = { data_base_mes: string; ciclo: number; termo: InstrumentoCadastro | null;
-  aditivos: AditivoDoCiclo[] };
+  aditivos: AditivoDoCiclo[]; respostas?: RespostaOrgao[] };
 
 // Pleito nao enviado e' a vez da engenharia: nivel "Acao" do D2 (ambar com contorno cheio), o
 // mesmo com que o fato aparece nos avisos. Vermelho fica para o critico.
@@ -320,6 +382,8 @@ const SITUACAO: Record<Ciclo["situacao"], { rotulo: string; classe: string; fort
   // issue #273: aditivo de prazo ou valor assinado depois do ultimo pleito enviado; a vez e' da engenharia
   reemitir: { rotulo: "cronograma de reajuste a reemitir", classe: "selo--atencao", forte: true },
   apostilado: { rotulo: "apostilado", classe: "selo--ok" },
+  // issue #586: o orgao indeferiu o pleito vigente; o ciclo fecha sem termo
+  indeferido: { rotulo: "indeferido", classe: "" },
 };
 
 // espaco nao separavel: "3 dias" nao quebra no meio do selo
@@ -359,6 +423,9 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
   // so' o pleito vigente do ciclo (o enviado mais recente) leva o desfecho; os anteriores (reiterados ou
   // reemitidos) ficam com o envio e a cadeia, sem repetir a espera do ciclo (issue #277)
   if (!c || p.situacao !== "enviado" || (c.pleito && c.pleito.id !== p.id)) return neutro;
+  if (c.situacao === "indeferido" && c.resposta) {
+    return { classe: "", texto: `indeferido em ${fmtDataPura(c.resposta.data)}`, partes: envio };
+  }
   if (c.situacao === "apostilamento_pendente" || c.situacao === "reemitir") {
     return { classe: "selo--atencao", partes: envio,
       texto: c.dias !== null && c.dias >= 0 ? `sem apostilamento há ${dias(c.dias)}` : "sem apostilamento ainda" };
@@ -380,6 +447,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   const [novo, setNovo] = useState<string | null>(null);            // data-base do pleito sendo criado
   // reiteracao ou reemissao sendo criada: a data-base, o pleito anterior e o que se faz com ele
   const [reemitir, setReemitir] = useState<{ dataBase: string; anterior: Pleito; reemissao: Reemissao } | null>(null);
+  const [respondendo, setRespondendo] = useState<string | null>(null);   // data-base com o formulario da resposta (#586)
   // para onde o foco vai quando o formulario fecha: o botao que o abriu (cancelar) ou o pleito criado
   const [foco, setFoco] = useState<string | null>(null);
 
@@ -475,7 +543,11 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const doCicloAtual = daBase.find(g => g.ciclo === c.ciclo);
         const gruposAnteriores = daBase.filter(g => g.ciclo !== null && g.ciclo < c.ciclo);
         const gruposSeguintes = daBase.filter(g => g.ciclo !== null && g.ciclo > c.ciclo);
-        const eventos = eventosDoCiclo(db.pleitosDoCiclo, c.aditivos ?? [], c.apostilamento ? [c.apostilamento] : []);
+        // issue #586: as respostas do orgao do ciclo corrente vem da linha do tempo dele
+        const respostasDoCiclo = (dados.linhas_do_tempo ?? [])
+          .find(t => t.data_base_mes === db.data_base_mes && t.ciclo === c.ciclo)?.respostas ?? [];
+        const eventos = eventosDoCiclo(db.pleitosDoCiclo, c.aditivos ?? [], c.apostilamento ? [c.apostilamento] : [],
+          respostasDoCiclo);
         // cada ciclo anterior com a tabela e a linha do tempo dele (rodada 1 da PR #438): o termo e os aditivos vem
         // de `linhas_do_tempo`, os pleitos sao os da aba
         const tempos = (dados.linhas_do_tempo ?? []).filter(t => t.data_base_mes === db.data_base_mes && t.ciclo < c.ciclo);
@@ -485,7 +557,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
             const t = tempos.find(x => x.ciclo === y);
             return { ciclo: y, grupo: gruposAnteriores.find(g => g.ciclo === y),
               eventos: eventosDoCiclo(db.pleitosAnteriores.filter(p => p.ciclo === y), t?.aditivos ?? [],
-                t?.termo ? [t.termo] : []) };
+                t?.termo ? [t.termo] : [], t?.respostas ?? []) };
           })
           .filter(x => x.grupo || x.eventos.length > 0);
         const anteriores = db.pleitosAnteriores.length + outrosAp.length + ciclosAnteriores.length;
@@ -494,7 +566,10 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
         const vigente = c.pleito ? dados.pleitos.find(p => p.id === c.pleito!.id) : undefined;
         const possiveis = vigente?.reemissoes_possiveis ?? [];
         const reemitindo = reemitir?.dataBase === db.data_base_mes ? reemitir : null;
-        const formAberto = novo === db.data_base_mes || reemitindo !== null;
+        const formAberto = novo === db.data_base_mes || reemitindo !== null || respondendo === db.data_base_mes;
+        // issue #586: a resposta do orgao se registra no pleito vigente, enquanto o ciclo nao tem termo
+        const podeResponder = podeEditar && !aberto && vigente !== undefined
+          && (c.situacao === "apostilamento_pendente" || c.situacao === "reemitir" || c.situacao === "indeferido");
         return (
           // o cartao e' a data-base: o ciclo, e embaixo, como secoes, os oficios dele e os ciclos anteriores; o
           // aviso de reajuste cai na ancora dele
@@ -529,12 +604,24 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
                   ))}
                 </div>
               )}
+              {podeResponder && !formAberto && (
+                <div className="cartao__acoes">
+                  <button type="button" className="btn btn--pequeno" id={`responder-${db.data_base_mes}`}
+                    onClick={() => setRespondendo(db.data_base_mes)}>
+                    Registrar resposta do órgão
+                  </button>
+                </div>
+              )}
             </div>
             <div className="cartao__corpo linhas">
               <p className="num">{linhaDoCiclo(c)}</p>
               {doCiclo.map(i => (
                 <p key={`${i.tipo}-${i.id}`}><span className="resumo__rotulo">{nomeDoTermo(i)}</span>{" "}{textoApostilamento(i)}</p>
               ))}
+              {c.resposta && (
+                <p><span className="resumo__rotulo">{RESULTADO_RESPOSTA[c.resposta.resultado]} em</span>{" "}
+                  {fmtDataPura(c.resposta.data)} · {c.resposta.documento}</p>
+              )}
             </div>
             {doCicloAtual && tabela(doCicloAtual)}
             {gruposSeguintes.map(g => (
@@ -548,6 +635,18 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
             )}
             {(formAberto || db.pleitosDoCiclo.length > 0 || anteriores > 0) && (
               <div className="secoes-pleito">
+                {respondendo === db.data_base_mes && vigente && (
+                  <section className="cartao" aria-labelledby={`titulo-resposta-${db.data_base_mes}`}>
+                    <div className="cartao__cabeca">
+                      <h3 className="cartao__titulo" id={`titulo-resposta-${db.data_base_mes}`}>
+                        Resposta do órgão ao pleito {vigente.numero_oficio ?? "sem número"}
+                      </h3>
+                    </div>
+                    <FormResposta pleito={vigente} anulavel={!!c.resposta}
+                      aoGravar={() => { setRespondendo(null); setFoco(`db-${db.data_base_mes}`); void carregar(); }}
+                      aoCancelar={() => { setRespondendo(null); setFoco(`responder-${db.data_base_mes}`); }} />
+                  </section>
+                )}
                 {reemitindo && (
                   <section className="cartao" aria-labelledby={`titulo-reemitir-${db.data_base_mes}`}>
                     <div className="cartao__cabeca">

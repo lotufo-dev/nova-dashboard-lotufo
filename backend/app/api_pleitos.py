@@ -124,6 +124,26 @@ def justificar_reajuste(contrato_id: ID, dados: JustificativaIn, usuario: dict =
     return {"id": jid}
 
 
+class RespostaIn(BaseModel):
+    resultado: Literal["indeferido", "deferido_parcial", "sem_efeito"]
+    data: str = Field(max_length=10)
+    documento: str = Field(max_length=300)
+    texto: str = Field(max_length=2000)
+
+
+@router.post("/api/pleitos/{pid}/respostas", status_code=201)
+def registrar_resposta(pid: ID, dados: RespostaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                       conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #586: a resposta formal do orgao ao pleito de reajuste enviado (o indeferimento fecha o ciclo)."""
+    _existe(conn, pid)
+    try:
+        rid = reajuste.registrar_resposta(conn, usuario["id"], pid, dados.resultado, dados.data, dados.documento,
+                                          dados.texto)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return {"id": rid}
+
+
 @router.get("/api/contratos/{contrato_id}/prazos")
 def prazos_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
                    conn: sqlite3.Connection = Depends(conexao)):
