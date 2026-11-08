@@ -102,6 +102,65 @@ describe("Nova planilha/carta", () => {
     expect((screen.getByLabelText("Nº no órgão") as HTMLInputElement).value).toBe("9");
   });
 
+  it("issue #567: sem tipo, o servidor escolhe pelo da última medição e o campo Tipo vem com ele", async () => {
+    // obra só de projeto (Terminais BRT): a sugestão vem de projeto, 3ª, competência seguinte, acumulado das duas
+    const PROJETO = { ...SUGESTAO, tipo: "projeto", numero: 3, competencia: "2026-10", periodo_inicio: "2026-10-01",
+      periodo_fim: "2026-10-31", acumulado_anterior_centavos: 35_693_13, saldo_centavos: null };
+    api.mockImplementation(async (url: string) => (url.includes("/sugestao")
+      ? (url.includes("tipo=execucao") ? SUGESTAO : PROJETO) : new Promise(() => {})));
+    apiForm.mockResolvedValue({ medicao_id: 78, versao: 1, estado: "planilha_gerada", avisos: [] });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    expect(((await screen.findByLabelText("Nº da medição")) as HTMLInputElement).value).toBe("3");
+    expect(api.mock.calls[0]![0]).toBe("/api/contratos/9/planilhas/sugestao");
+    const tipo = screen.getByLabelText("Tipo") as HTMLSelectElement;
+    expect(tipo.value).toBe("projeto");
+    expect(Array.from(tipo.options).map(o => o.textContent)).toEqual(["Execução", "Reajuste", "Projeto"]);
+    expect((screen.getByLabelText("Período: de") as HTMLInputElement).value).toBe("2026-10-01");
+    expect(screen.getByText("Acumulado anterior").closest("dl")!.textContent).toContain("R$\u00a035.693,13");
+    // registrar vai com o tipo do campo
+    fireEvent.change(screen.getByLabelText("Valor pedido"), { target: { value: "1,01" } });
+    anexar("Ofício assinado (PDF)", pdf("oficio.pdf"));
+    anexar("Planilha (.xlsx ou PDF)", new File(["PK"], "planilha.xlsx"));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar planilha/carta" }));
+    await waitFor(() => expect(apiForm).toHaveBeenCalled());
+    expect((apiForm.mock.calls[0] as [string, FormData])[1].get("tipo")).toBe("projeto");
+  });
+
+  it("issue #567: trocar o tipo pede a sugestão desse tipo e troca nº, competência e período", async () => {
+    const PROJETO = { ...SUGESTAO, tipo: "projeto", numero: 3, competencia: "2026-10", periodo_inicio: "2026-10-01",
+      periodo_fim: "2026-10-31" };
+    api.mockImplementation(async (url: string) => (url.includes("/sugestao")
+      ? (url.includes("tipo=execucao") ? SUGESTAO : PROJETO) : new Promise(() => {})));
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    expect(((await screen.findByLabelText("Nº da medição")) as HTMLInputElement).value).toBe("3");
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "execucao" } });
+    await waitFor(() => expect((screen.getByLabelText("Nº da medição") as HTMLInputElement).value).toBe("4"));
+    expect(api.mock.calls.some(c => c[0] === "/api/contratos/9/planilhas/sugestao?tipo=execucao")).toBe(true);
+    expect((screen.getByLabelText("Período: de") as HTMLInputElement).value).toBe("2026-08-01");
+    expect((screen.getByLabelText("Tipo") as HTMLSelectElement).value).toBe("execucao");
+  });
+
+  it("issue #567: logo depois de trocar o tipo, o acumulado do tipo anterior não aparece", async () => {
+    const PROJETO = { ...SUGESTAO, tipo: "projeto", numero: 3, acumulado_anterior_centavos: 35_693_13, saldo_centavos: null };
+    api.mockImplementation(async (url: string) => (url.includes("tipo=execucao") ? new Promise(() => {})
+      : url.includes("/sugestao") ? PROJETO : new Promise(() => {})));
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    const saldo = (await screen.findByText("Acumulado anterior")).closest("dl")!;
+    expect(saldo.textContent).toContain("R$\u00a035.693,13");
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "execucao" } });
+    expect(saldo.textContent).not.toContain("35.693,13");
+  });
+
+  it("issue #567: a medição prevista promovida mantém o tipo dela (campo travado)", async () => {
+    api.mockImplementation(async (url: string) => (url.includes("/sugestao") ? { ...SUGESTAO, tipo: "projeto" } : { avisos: [] }));
+    render(<NovaPlanilhaCarta contratoId={9} tipo="projeto" tipoFixo inicial={{ numero: 6, competencia: "2026-02" }} aoRegistrar={() => {}} />);
+    await screen.findByLabelText("Nº da medição");
+    expect(api.mock.calls[0]![0]).toBe("/api/contratos/9/planilhas/sugestao?tipo=projeto");
+    const tipo = screen.getByLabelText("Tipo") as HTMLSelectElement;
+    expect(tipo.value).toBe("projeto");
+    expect(tipo.disabled).toBe(true);
+  });
+
   it("trocar o nº troca o acumulado e o saldo pelos do nº digitado", async () => {
     responder();
     render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);

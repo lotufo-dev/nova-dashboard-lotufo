@@ -306,7 +306,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const blocoPlanilha = (
     <>
       {novaPlanilha && (
-        <NovaPlanilhaCarta contratoId={contratoId} tipo={m.tipo as TipoPlanilha} inicial={{ numero: m.numero, competencia: m.competencia }}
+        <NovaPlanilhaCarta contratoId={contratoId} tipo={m.tipo as TipoPlanilha} tipoFixo inicial={{ numero: m.numero, competencia: m.competencia }}
           aoRegistrar={() => { setFeito("Planilha/carta registrada."); recarregar(); }} />
       )}
       {comPlanilha && m.estado !== "prevista" && <CartaoPlanilha key={tentativa} medicaoId={m.id} estado={m.estado} podeEditar={podeEditar} aoMudar={recarregar}

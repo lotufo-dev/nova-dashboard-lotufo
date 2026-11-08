@@ -22,7 +22,8 @@ import "./planilhaCarta.css";
 // fora", o nº do SIGA e a revisao (Rev01, Rev02...) com motivo. Toda regra mora no servidor (`medicao_planilhas`,
 // `planilha_envio`); a tela so' mostra o que ele devolve.
 
-export type TipoPlanilha = "execucao" | "projeto";
+export type TipoPlanilha = "execucao" | "reajuste" | "projeto";
+const ROTULO_TIPO: [TipoPlanilha, string][] = [["execucao", "Execução"], ["reajuste", "Reajuste"], ["projeto", "Projeto"]];
 type Sugestao = {
   tipo: TipoPlanilha; numero: number; numero_orgao: number | null; competencia: string;
   periodo_inicio: string; periodo_fim: string; vigente_centavos: number;
@@ -123,7 +124,7 @@ function CamposDoPedido({ prefixo, form, setForm, comCompetencia, tentou }: {
 
 /** O que o servidor confere enquanto a pessoa digita: os avisos de periodo (sobreposto, pulando dias, competencia
  *  anterior) e o acumulado anterior e o saldo DO Nº digitado. `numero` diz de qual nº e' a leitura. */
-type Conferencia = { numero: string; avisos: string[]; acumulado_anterior_centavos: number | null; saldo_centavos: number | null };
+type Conferencia = { numero: string; tipo?: string; avisos: string[]; acumulado_anterior_centavos: number | null; saldo_centavos: number | null };
 
 function useConferencia(contratoId: number, tipo: string, numero: string, competencia: string, inicio: string): Conferencia | null {
   const [conf, setConf] = useState<Conferencia | null>(null);
@@ -136,7 +137,7 @@ function useConferencia(contratoId: number, tipo: string, numero: string, compet
     const t = setTimeout(() => {
       const q = new URLSearchParams({ tipo, numero, competencia, periodo_inicio: inicio });
       api<Omit<Conferencia, "numero">>(`/api/contratos/${contratoId}/planilhas/avisos?${q}`)
-        .then(r => { if (vivo) setConf({ numero, avisos: r.avisos ?? [], acumulado_anterior_centavos: r.acumulado_anterior_centavos ?? null,
+        .then(r => { if (vivo) setConf({ numero, tipo, avisos: r.avisos ?? [], acumulado_anterior_centavos: r.acumulado_anterior_centavos ?? null,
           saldo_centavos: r.saldo_centavos ?? null }); })
         .catch(() => { if (vivo) setConf(null); });       // aviso nao impede: sem a leitura, nada aparece
     }, 300);
@@ -154,11 +155,18 @@ export function saldoDoNumero(numero: string, sug: { numero: number; acumulado_a
   return { acumulado: null, saldo: null };
 }
 
-/** Passo 1: "Nova planilha/carta". `inicial`: a medicao prevista que este registro promove (nº e competencia dela). */
-export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRegistrar }: {
-  contratoId: number; tipo?: TipoPlanilha; inicial?: { numero?: number; competencia?: string };
+/** Passo 1: "Nova planilha/carta". `inicial`: a medicao prevista que este registro promove (nº e competencia dela).
+ *  `tipo`: o tipo pre-selecionado; sem ele, o servidor escolhe o da ultima medicao da obra (issue #567). `tipoFixo`: a
+ *  prevista promovida nao muda de tipo (outro tipo seria outra medicao). */
+export function NovaPlanilhaCarta({ contratoId, tipo: tipoInicial, tipoFixo = false, inicial, aoRegistrar }: {
+  contratoId: number; tipo?: TipoPlanilha; tipoFixo?: boolean; inicial?: { numero?: number; competencia?: string };
   aoRegistrar: (r: Registrada) => void;
 }) {
+  // `tipoPedido`: o tipo com que se pede a sugestao (null: o servidor escolhe); `tipo`: o do campo, que vai no registro
+  const [tipoPedido, setTipoPedido] = useState<TipoPlanilha | null>(tipoInicial ?? null);
+  const [tipo, setTipo] = useState<TipoPlanilha>(tipoInicial ?? "execucao");
+  // trocado o tipo, o nº e a competencia da prevista ou da janela Iniciar processo nao valem mais
+  const [trocouTipo, setTrocouTipo] = useState(false);
   const [sug, setSug] = useState<Sugestao | null>(null);
   const [erroSug, setErroSug] = useState("");
   const [numero, setNumero] = useState("");
@@ -167,14 +175,16 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
   const [tentou, setTentou] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState("");
-  const inicialNumero = inicial?.numero, inicialCompetencia = inicial?.competencia;
+  const inicialNumero = trocouTipo ? undefined : inicial?.numero;
+  const inicialCompetencia = trocouTipo ? undefined : inicial?.competencia;
 
   useEffect(() => {
     let vivo = true;
-    api<Sugestao>(`/api/contratos/${contratoId}/planilhas/sugestao?tipo=${tipo}`)
+    api<Sugestao>(`/api/contratos/${contratoId}/planilhas/sugestao${tipoPedido ? `?tipo=${tipoPedido}` : ""}`)
       .then(s => {
         if (!vivo) return;
         setSug(s);
+        setTipo(s.tipo);
         const competencia = inicialCompetencia ?? s.competencia;
         // o periodo sugerido vale para a competencia sugerida; a prevista de outra competencia abre no mes dela
         const [ini, fim] = competencia === s.competencia ? [s.periodo_inicio, s.periodo_fim] : mesCivil(competencia);
@@ -185,7 +195,7 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
       })
       .catch(e => { if (vivo) setErroSug(mensagemDeErro(e)); });
     return () => { vivo = false; };
-  }, [contratoId, tipo, inicialNumero, inicialCompetencia]);
+  }, [contratoId, tipoPedido, inicialNumero, inicialCompetencia]);
 
   const conf = useConferencia(contratoId, tipo, numero, form.competencia, form.inicio);
   const avisos = conf?.avisos ?? [];
@@ -213,13 +223,22 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
 
   if (erroSug) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir a planilha/carta: {erroSug}</p>;
   if (!sug) return <p role="status">Carregando…</p>;
-  const saldo = saldoDoNumero(numero, sug, conf);
+  // trocado o tipo, a sugestao e a conferencia do tipo anterior nao valem ate a leitura nova chegar (issue #567)
+  const saldo = sug.tipo === tipo ? saldoDoNumero(numero, sug, conf?.tipo === tipo ? conf : null)
+    : { acumulado: null, saldo: null };
 
   return (
     <form className="cartao__corpo pilha" onSubmit={registrar} aria-label="Nova planilha/carta">
       <p className="painel__titulo">Nova planilha/carta</p>
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
       <div className="form-inline">
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor="pl-tipo">Tipo</label>
+          <select id="pl-tipo" name="tipo" value={tipo} disabled={tipoFixo}
+            onChange={e => { const t = e.target.value as TipoPlanilha; setTipo(t); setTipoPedido(t); setTrocouTipo(true); }}>
+            {ROTULO_TIPO.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+          </select>
+        </div>
         <div className="campo">
           <label className="campo__rotulo" htmlFor="pl-numero">Nº da medição</label>
           <input id="pl-numero" name="numero" autoComplete="off" spellCheck={false} className="entrada--curta entrada--num num" required
