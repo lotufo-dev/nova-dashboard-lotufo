@@ -691,15 +691,50 @@ def test_tipo_da_ultima_medicao(conn, contrato_id):
     assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
 
 
-def test_planilha_de_reajuste_e_aceita(conn, contrato_id):
-    """Issue #567: o formulario oferece execucao, reajuste e projeto; a planilha/carta de reajuste grava na serie de
-    reajuste, sem saldo contra o contrato."""
+def test_planilha_de_reajuste_e_recusada(conn, contrato_id):
+    """Issue #567 (rodada 1): o reajuste nasce pelo formulario da execucao, em prevista, com data-base e ciclo (#276);
+    a planilha/carta de reajuste e' recusada e nada e' gravado."""
     from app import medicao_planilhas
-    r = medicao_planilhas.registrar(conn, 1, contrato_id, {**_planilha(1, "2026-07", "2026-07-01", "2026-07-31", 5_00),
+    with pytest.raises(ValueError, match="A planilha/carta é de medição de execução ou de projeto"):
+        medicao_planilhas.registrar(conn, 1, contrato_id, {**_planilha(1, "2026-07", "2026-07-01", "2026-07-31", 5_00),
                                                            "tipo": "reajuste"}, ANEXOS)
-    d = medicoes.detalhe(conn, r["medicao_id"])
-    assert (d["tipo"], d["estado"]) == ("reajuste", "planilha_gerada")
-    assert r["saldo_centavos"] is None
+    assert medicoes.listar(conn, contrato_id) == []
+
+
+def test_sugestao_sai_de_um_retrato_so(conn, contrato_id):
+    """Issue #567 (gate Sol, rodada 1): a medicao gravada por outra conexao no meio da sugestao nao mistura o nº de
+    depois (MAX) com a competencia de antes (ultima)."""
+    from app import medicao_planilhas
+    _de_tipo(conn, contrato_id, 1, "projeto", "2026-08", "protocolada", 1_00)
+    _de_tipo(conn, contrato_id, 2, "projeto", "2026-09", "protocolada", 1_00)
+    outro = db.get_conn()
+
+    class GravaNoMeio:
+        """Depois da consulta da ultima medicao, outra conexao grava a 3a de projeto."""
+        def __init__(self, real):
+            self._real, self._armada = real, True
+
+        def execute(self, sql, params=()):
+            cur = self._real.execute(sql, params)
+            if self._armada and "NUMERO_ORGAO FROM MEDICOES" in sql.upper():
+                self._armada = False
+                linhas = cur.fetchall()
+                outro.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+                              "VALUES (?, 3, 'projeto', '2026-10', 'planilha_gerada')", (contrato_id,))
+                outro.commit()
+                from tests.apoio_corrida import CursorMaterializado
+                return CursorMaterializado(linhas)
+            return cur
+
+        def __getattr__(self, nome):
+            return getattr(self._real, nome)
+
+    try:
+        s = medicao_planilhas.sugestao(GravaNoMeio(conn), contrato_id)
+    finally:
+        outro.close()
+    assert (s["tipo"], s["numero"], s["competencia"]) == ("projeto", 3, "2026-10")
+    assert not conn.in_transaction
 
 
 def test_numero_do_orgao_nao_e_inventado_nem_apagado_na_prevista(conn, contrato_id):

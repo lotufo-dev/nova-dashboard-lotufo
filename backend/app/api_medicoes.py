@@ -409,7 +409,7 @@ def _centavos(valor: str) -> int:
 
 
 @router.get("/api/contratos/{contrato_id}/planilhas/sugestao")
-def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "reajuste", "projeto"] | None = Query(None),
+def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "projeto"] | None = Query(None),
                       usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
                       conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)
@@ -420,7 +420,7 @@ def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "reajuste", "pr
 def avisos_planilha(contrato_id: ID, numero: int = Query(..., ge=1, le=999),
                     competencia: str = Query(..., pattern=COMPETENCIA),
                     periodo_inicio: datetime.date = Query(...),
-                    tipo: Literal["execucao", "reajuste", "projeto"] = Query("execucao"),
+                    tipo: Literal["execucao", "projeto"] = Query("execucao"),
                     usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
                     conn: sqlite3.Connection = Depends(conexao)):
     """Issue #289: os avisos de periodo (sobreposto, pulando dias, competencia anterior) enquanto a pessoa preenche a
@@ -436,7 +436,7 @@ def avisos_planilha(contrato_id: ID, numero: int = Query(..., ge=1, le=999),
 @router.post("/api/contratos/{contrato_id}/planilhas", status_code=201)
 def registrar_planilha(contrato_id: ID,
                        numero: int = Form(..., ge=1, le=999),
-                       tipo: Literal["execucao", "reajuste", "projeto"] = Form("execucao"),
+                       tipo: Literal["execucao", "projeto"] = Form("execucao"),
                        competencia: str = Form(..., pattern=COMPETENCIA),
                        periodo_inicio: datetime.date = Form(...),
                        periodo_fim: datetime.date = Form(...),

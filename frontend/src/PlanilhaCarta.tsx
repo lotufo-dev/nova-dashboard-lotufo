@@ -22,8 +22,9 @@ import "./planilhaCarta.css";
 // fora", o nº do SIGA e a revisao (Rev01, Rev02...) com motivo. Toda regra mora no servidor (`medicao_planilhas`,
 // `planilha_envio`); a tela so' mostra o que ele devolve.
 
-export type TipoPlanilha = "execucao" | "reajuste" | "projeto";
-const ROTULO_TIPO: [TipoPlanilha, string][] = [["execucao", "Execução"], ["reajuste", "Reajuste"], ["projeto", "Projeto"]];
+export type TipoPlanilha = "execucao" | "projeto";
+// o reajuste nasce pelo formulario da execucao (#276), nao por aqui
+const ROTULO_TIPO: [TipoPlanilha, string][] = [["execucao", "Execução"], ["projeto", "Projeto"]];
 type Sugestao = {
   tipo: TipoPlanilha; numero: number; numero_orgao: number | null; competencia: string;
   periodo_inicio: string; periodo_fim: string; vigente_centavos: number;

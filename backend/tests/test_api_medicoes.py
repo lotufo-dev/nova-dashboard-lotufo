@@ -738,21 +738,22 @@ def test_planilha_diretoria_recebe_403(client_admin):
     assert len(client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"]) == 1
 
 
-def test_sugestao_sem_tipo_segue_a_ultima_medicao_e_aceita_reajuste(client_admin):
-    """Issue #567: sem `tipo`, a sugestao vem no tipo da ultima medicao (a obra so' de projeto sugere a de projeto);
-    reajuste e' tipo aceito na sugestao, nos avisos e no registro."""
+def test_sugestao_sem_tipo_segue_a_ultima_medicao_e_recusa_reajuste(client_admin):
+    """Issue #567: sem `tipo`, a sugestao vem no tipo da ultima medicao (a obra so' de projeto sugere a de projeto).
+    Reajuste nao e' tipo da planilha/carta (#276: nasce pelo formulario da execucao): 422 em portugues."""
     cid = _contrato(client_admin)
     assert _nova_planilha(client_admin, cid, tipo="projeto").status_code == 201
     s = client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao").json()
     assert (s["tipo"], s["numero"], s["competencia"]) == ("projeto", 2, "2026-08")
     assert s["acumulado_anterior_centavos"] == 12_345_67
     assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao?tipo=execucao").json()["numero"] == 1
-    assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao?tipo=reajuste").json()["tipo"] == "reajuste"
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao?tipo=reajuste").status_code == 422
     assert client_admin.get(f"/api/contratos/{cid}/planilhas/avisos?tipo=reajuste&numero=1&competencia=2026-07"
-                            "&periodo_inicio=2026-07-01").status_code == 200
+                            "&periodo_inicio=2026-07-01").status_code == 422
     r = _nova_planilha(client_admin, cid, tipo="reajuste")
-    assert r.status_code == 201, r.text
-    assert client_admin.get(f"/api/medicoes/{r.json()['medicao_id']}").json()["tipo"] == "reajuste"
+    assert r.status_code == 422
+    assert [(e["loc"][-1], e["msg"]) for e in r.json()["detail"]] == [("tipo", "valor fora das opções")]
+    assert len(client_admin.get(f"/api/contratos/{cid}/medicoes").json()) == 1   # so' a de projeto
 
 
 # issue #287: assinatura no DocuSign (evento informativo)

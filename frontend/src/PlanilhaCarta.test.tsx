@@ -114,7 +114,7 @@ describe("Nova planilha/carta", () => {
     expect(api.mock.calls[0]![0]).toBe("/api/contratos/9/planilhas/sugestao");
     const tipo = screen.getByLabelText("Tipo") as HTMLSelectElement;
     expect(tipo.value).toBe("projeto");
-    expect(Array.from(tipo.options).map(o => o.textContent)).toEqual(["Execução", "Reajuste", "Projeto"]);
+    expect(Array.from(tipo.options).map(o => o.textContent)).toEqual(["Execução", "Projeto"]);
     expect((screen.getByLabelText("Período: de") as HTMLInputElement).value).toBe("2026-10-01");
     expect(screen.getByText("Acumulado anterior").closest("dl")!.textContent).toContain("R$\u00a035.693,13");
     // registrar vai com o tipo do campo

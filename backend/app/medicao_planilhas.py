@@ -12,7 +12,9 @@ import datetime
 from app import arquivos, auditoria, contratos, db, espelho, tempo
 from app.medicoes import LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
-TIPOS = ("execucao", "reajuste", "projeto")   # reajuste desde a issue #567
+# o reajuste nao entra pela planilha/carta: nasce pelo campo "Reajuste" do formulario da execucao, em prevista,
+# com data-base e ciclo (decisao do Leo na #276, 08/11/2026)
+TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
 FORA_DO_ACUMULADO = ("prevista", "cancelada", "desistida")
 
@@ -100,9 +102,13 @@ def tipo_da_ultima(conn, contrato_id: int) -> str:
 def sugestao(conn, contrato_id: int, tipo: str | None = None) -> dict:
     """Nº (ultimo + 1; o do orgao tambem, onde ja' difere, D6), competencia (a da 1a prevista, senao o mes
     seguinte ao da ultima, senao o mes corrente), periodo (o mes civil da competencia), acumulado e saldo.
-    Sem tipo, o da ultima medicao da obra (issue #567: a obra so' de projeto sugere a proxima de projeto)."""
-    if tipo is None:
-        tipo = tipo_da_ultima(conn, contrato_id)
+    Sem tipo, o da ultima medicao da obra (issue #567: a obra so' de projeto sugere a proxima de projeto). Tudo de
+    um retrato so' (db.leitura): uma medicao gravada no meio nao mistura o nº de depois com a competencia de antes."""
+    with db.leitura(conn):
+        return _sugestao(conn, contrato_id, tipo_da_ultima(conn, contrato_id) if tipo is None else tipo)
+
+
+def _sugestao(conn, contrato_id: int, tipo: str) -> dict:
     prevista = conn.execute(
         "SELECT numero, competencia FROM medicoes WHERE contrato_id=? AND tipo=? AND estado='prevista' "
         "ORDER BY competencia, numero LIMIT 1", (contrato_id, tipo)).fetchone()
@@ -159,7 +165,7 @@ def conferir_registro(conn, contrato_id: int, dados: dict):
     existe com o mesmo nº e tipo (so' pode ser uma prevista), ou None."""
     numero, tipo, competencia = dados["numero"], dados["tipo"], dados["competencia"]
     if tipo not in TIPOS:
-        raise ValueError("A planilha/carta é de medição de execução, de reajuste ou de projeto")
+        raise ValueError("A planilha/carta é de medição de execução ou de projeto")
     _conferir_periodo(dados["periodo_inicio"], dados["periodo_fim"])
     c = contratos.vigente(conn, contrato_id)
     inicio_contrato = c.get("execucao_inicio") or c.get("vigencia_inicio")
