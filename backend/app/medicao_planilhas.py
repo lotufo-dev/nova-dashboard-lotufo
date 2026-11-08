@@ -420,6 +420,30 @@ def registrar_envio_externo(conn, usuario_id: int, medicao_id: int, dados: dict,
     return {"medicao_id": medicao_id, "estado": "planilha_enviada", "versao": vigente["versao"]}
 
 
+def eventos_geracao(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> None:
+    """Linha do tempo (#568): um evento por versao da planilha/carta gerada (a 1a e as revisoes), na hora do registro."""
+    for i in range(0, len(medicao_ids), LOTE_AUDITORIA):
+        lote = [str(x) for x in medicao_ids[i:i + LOTE_AUDITORIA]]
+        for r in conn.execute(
+                "SELECT a.entidade_id, a.depois, a.criado_em, u.nome FROM audit_log a "
+                "LEFT JOIN usuarios u ON u.id=a.usuario_id "
+                f"WHERE a.entidade='medicao' AND a.acao='medicao.planilha' AND a.entidade_id IN ({','.join('?' * len(lote))}) "
+                "ORDER BY a.id", lote):
+            d = _json_dict(r["depois"]) or {}
+            versao = d.get("versao")
+            if not isinstance(versao, int):
+                versao = 1
+            texto = "Planilha/carta gerada" if versao == 1 else f"Versão {versao} da planilha/carta gerada"
+            if d.get("motivo"):
+                texto += f" (motivo: {d['motivo']})"
+            # so' o dia (de Cuiaba), como os outros marcos do envio: com hora, o "enviada por fora" do mesmo dia
+            # (so' data) ia para antes da geracao na ordenacao por texto
+            dia = tempo.para_local(datetime.datetime.fromisoformat(r["criado_em"])).date().isoformat()
+            out[int(r["entidade_id"])].append({"data": dia,
+                                               "texto": f"{texto} por {r['nome']}" if r["nome"]
+                                               else f"{texto} pelo sistema"})
+
+
 def eventos_envio(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> None:
     """Linha do tempo: um evento por envio da planilha/carta, na data do envio (como a assinatura)."""
     for i in range(0, len(medicao_ids), LOTE_AUDITORIA):
@@ -429,14 +453,24 @@ def eventos_envio(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> N
                 f"WHERE a.entidade='medicao' AND a.acao=? AND a.entidade_id IN ({','.join('?' * len(lote))}) "
                 "ORDER BY a.id", (ENVIO, *lote)):
             d = _json_dict(r["depois"]) or {}
+            envio = None
+            if d.get("enviado_em") is None and isinstance(d.get("envio_id"), int):
+                # envio pelo sistema (#282): a auditoria guarda o e-mail; data e assunto vem de `envios`
+                envio = conn.execute("SELECT enviado_em, assunto FROM envios WHERE id=?", (d["envio_id"],)).fetchone()
             try:
-                versao, data = int(d.get("versao") or 1), datetime.date.fromisoformat(d["enviado_em"]).isoformat()
+                versao = int(d.get("versao") or 1)
+                if envio:
+                    data = tempo.iso_utc(envio["enviado_em"])
+                    dia = tempo.para_local(datetime.datetime.fromisoformat(envio["enviado_em"])).date().isoformat()
+                else:
+                    data = dia = datetime.date.fromisoformat(d["enviado_em"]).isoformat()
             except (ValueError, TypeError, KeyError):
                 continue
             qual = "Planilha/carta" if versao == 1 else f"Versão {versao} da planilha/carta"
             como = "por fora" if d.get("origem") == "externo" else "pelo sistema"
             detalhe = ", ".join(x for x in (d.get("meio"), d.get("numero_protocolo") and
-                                            f"protocolo {d['numero_protocolo']}") if x)
-            texto = f"{qual} enviada {como} em {_data_br(data)}" + (f" ({detalhe})" if detalhe else "")
+                                            f"protocolo {d['numero_protocolo']}",
+                                            envio and f"assunto: {envio['assunto']}") if x)
+            texto = f"{qual} enviada {como} em {_data_br(dia)}" + (f" ({detalhe})" if detalhe else "")
             out[int(r["entidade_id"])].append({"data": data, "texto": f"{texto} por {r['nome']}" if r["nome"]
                                                else f"{texto} pelo sistema"})

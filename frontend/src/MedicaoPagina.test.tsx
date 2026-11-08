@@ -144,6 +144,21 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(screen.getByRole("heading", { name: "Cancelar a medição", level: 2 })).toBeTruthy();
   });
 
+  it("#568: o próximo passo “Registrar o boletim” é um botão que abre o registro do boletim", async () => {
+    api.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/medicoes/andamento")) return [{ id: 5, proximo_passo: "registrar o boletim", desde: "2026-11-01" }];
+      if (url.endsWith("/cabecalho")) return { obra: "Hospital", orgao: "SES", instrumento: "CT 1/2026", percentual_lotufo_bp: 10000 };
+      if (url === "/api/contratos/1/medicoes") return [{ ...MEDICAO, estado: "prevista" }];
+      if (url === "/api/contratos/1/protocolos") return LISTA;
+      if (url === "/api/contratos/1/espelho") return { espelhos: [] };
+      if (url === "/api/notas/a-enviar") return { envios: [], contadores: {} };
+      return {};
+    });
+    pagina();
+    fireEvent.click(await screen.findByRole("button", { name: "Registrar o boletim" }));
+    expect(await screen.findByText(/Registrar o boletim da 23ª medição/)).toBeTruthy();
+  });
+
   it("quem só consulta não vê “Mais ações”", async () => {
     responder();
     pagina("diretoria");

@@ -876,7 +876,9 @@ def _evidencias():
 
 
 def _eventos(cl, mid):
-    return [e["texto"] for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]]
+    """A linha do tempo sem os eventos de geracao da planilha/carta (#568), que os testes de envio nao miram."""
+    return [e["texto"] for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+            if "planilha/carta gerada" not in e["texto"].lower()]
 
 
 def _auditoria(acao):
@@ -1310,6 +1312,8 @@ def test_envio_por_fora_poe_em_planilha_enviada_com_origem_externo_e_data(client
     assert d["congelada"] == 0 and d["valor_protocolado_centavos"] == 12_345_67
     assert d["protocolos"] == []      # sem nº do protocolo, nada em medicao_protocolos ainda
     assert _eventos(client_admin, mid) == ["Planilha/carta enviada por fora em 03/08/2026 (E-mail ao protocolo) por Admin"]
+    # #568: a geracao da planilha/carta tambem conta na linha do tempo
+    assert "Planilha/carta gerada por Admin" in [e["texto"] for e in client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]]
     r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1,01"})
     assert r.status_code == 422
     assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 12_345_67
