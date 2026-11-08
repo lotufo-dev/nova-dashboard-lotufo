@@ -120,12 +120,18 @@ def _contrato(conn, capa: dict) -> list[dict]:
 
 def _somas_ate(conn, contrato_id: int, numero: int) -> tuple[int, int]:
     """(precos iniciais, reajustamento) das medicoes do contrato ate' o numero (o do orgao, senao o da Lotufo):
-    o aprovado, senao o pedido; fora as canceladas e desistidas."""
+    o aprovado, senao o pedido; fora as canceladas e desistidas. O reajuste sem nº do orgao conta pelo da execucao de
+    mesmo numero (o par): a planilha/carta grava o nº do orgao so' na execucao (revisor, rodada 1 da PR #606)."""
+    linhas = conn.execute(
+        "SELECT tipo, numero, numero_orgao, COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v "
+        f"FROM medicoes WHERE contrato_id=? AND estado NOT IN ({','.join('?' * len(_FORA))})",
+        (contrato_id, *_FORA)).fetchall()
+    do_orgao = {r["numero"]: r["numero_orgao"] for r in linhas if r["tipo"] == "execucao" and r["numero_orgao"]}
     pi = reaj = 0
-    for r in conn.execute(
-            "SELECT tipo, COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v FROM medicoes "
-            f"WHERE contrato_id=? AND estado NOT IN ({','.join('?' * len(_FORA))}) "
-            "AND COALESCE(numero_orgao, numero) <= ?", (contrato_id, *_FORA, numero)):
+    for r in linhas:
+        n = r["numero_orgao"] or (do_orgao.get(r["numero"]) if r["tipo"] == "reajuste" else None) or r["numero"]
+        if n > numero:
+            continue
         if r["tipo"] == "reajuste":
             reaj += r["v"]
         else:

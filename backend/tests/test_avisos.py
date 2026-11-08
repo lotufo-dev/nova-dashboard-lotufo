@@ -1242,3 +1242,19 @@ def test_valor_aditivo_em_consorcio_tolera_o_arredondamento_de_cada_aditivo(moto
     _bol_capa(c, u, mid, 10_000_01, "c", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=100_03))
     [a] = _capa_avisos(c, "todos")
     assert (a["tipo"], a["valor_centavos"]) == ("capa_instrumento_ausente", 1)
+
+
+def test_acumulado_com_numeracao_do_orgao_deslocada_conta_o_reajuste_pelo_par(motor):
+    # revisor (rodada 1 da PR #606): a 9a da Lotufo e' a 7a do orgao; a planilha/carta grava o nº do orgao so' na
+    # execucao, e o reajuste de mesmo numero conta pelo nº do orgao dela
+    c, u, cid = motor
+    for numero, orgao in ((8, 6), (9, 7), (10, 8)):
+        mid = _med(c, cid, numero, f"2026-{numero:02d}", "protocolada", pedido=1_000_01)
+        c.execute("UPDATE medicoes SET numero_orgao=? WHERE id=?", (orgao, mid))
+        _med(c, cid, numero, f"2026-{numero:02d}", "protocolada", pedido=100_01, tipo="reajuste")
+    c.commit()
+    m9 = c.execute("SELECT id FROM medicoes WHERE numero=9 AND tipo='execucao'").fetchone()[0]
+    # ate' a 7a do orgao: execucao 8 e 9 (R$ 2.000,02) e os reajustes 8 e 9 (R$ 200,02); a 10a (8a do orgao) fica fora
+    _bol_capa(c, u, m9, 1_000_01, "a", _capa(acumulado_pi_centavos=2_000_02, acumulado_reajuste_centavos=200_02))
+    assert _capa_avisos(c, "todos") == []
+    assert medicoes.detalhe(c, m9)["capa_divergencias"] == []
