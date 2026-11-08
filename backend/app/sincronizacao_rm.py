@@ -436,6 +436,14 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
     out = []
     for r in linhas:
         d = dict(r)
+        # issue #589: o reajuste negativo absorvido pelo espelho da execucao nao tem nota propria (a nota e' a da
+        # execucao, com o valor liquido): nao e' candidato, e a execucao casa pelo valor do par (execucao + reajuste)
+        if d["tipo"] == "reajuste" and medicoes.absorvida(conn, d["id"]):
+            continue
+        if d["tipo"] == "execucao" and d["valor"] is not None:
+            d["valor"] += sum(conn.execute(
+                "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) FROM medicoes WHERE id=?",
+                (a["id"],)).fetchone()[0] for a in medicoes.absorvidas(conn, d["id"]))
         esp = notas.esperadas(conn, r["id"])
         d["esperadas"] = [e["valor"] for e in esp if e["nota_id"] is None]
         if esp and notas.coligada_esperada(conn, r["id"]) == coligada:
