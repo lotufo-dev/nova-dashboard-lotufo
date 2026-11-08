@@ -57,6 +57,48 @@ def test_saldo_formula_visivel(conn, cid):
     assert s["vigente_centavos"] == 1_000_00 and s["atestado_execucao_centavos"] == 240_00
     assert s["saldo_centavos"] == 760_00 and "vigente" in s["formula"]
 
+
+# --- issue #561: o medido da obra conta os estados do fluxo novo, pela mesma lista do acumulado do formulario ---
+def _no_estado(conn, cid, numero, estado, pedido, aprovado=None, comp="2026-07"):
+    conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+                 "valor_atestado_centavos) VALUES (?,?,'execucao',?,?,?,?)", (cid, numero, comp, estado, pedido, aprovado))
+    conn.commit()
+
+
+def test_medido_conta_os_estados_do_fluxo_novo_e_bate_com_o_acumulado_do_formulario(conn, cid):
+    from app import medicao_planilhas
+    _no_estado(conn, cid, 1, "prevista", 1_00)                       # fora: nada foi enviado
+    _no_estado(conn, cid, 2, "planilha_gerada", 2_00)                # fora: gerada e ainda nao enviada
+    _no_estado(conn, cid, 3, "planilha_enviada", 3_01)               # conta pelo pedido
+    _no_estado(conn, cid, 4, "boletim_recebido", 4_00, 3_99)         # conta pelo aprovado
+    _no_estado(conn, cid, 5, "espelho_gerado", 5_00, 5_00)
+    _no_estado(conn, cid, 6, "espelho_enviado", 6_00, 5_97)
+    _no_estado(conn, cid, 7, "nota_emitida", 7_00, 7_03)
+    _no_estado(conn, cid, 8, "protocolada", 8_00, 8_00)
+    _no_estado(conn, cid, 9, "nf_emitida", 9_00)
+    _no_estado(conn, cid, 10, "recebida", 10_00, 10_00)
+    _no_estado(conn, cid, 11, "cancelada", 11_00, 11_00)             # fora
+    _no_estado(conn, cid, 12, "desistida", 12_00)                    # fora
+    esperado = 3_01 + 3_99 + 5_00 + 5_97 + 7_03 + 8_00 + 9_00 + 10_00
+    assert paineis.saldo(conn, cid)["atestado_execucao_centavos"] == esperado
+    assert paineis.curva(conn, cid)[0]["medido_execucao_centavos"] == esperado
+    assert paineis.medido_execucao_por_contrato(conn)[cid] == esperado
+    assert medicao_planilhas.acumulado_anterior(conn, cid, "execucao", 13) == esperado
+
+
+def test_lista_unica_de_estados_que_medem():
+    from app import medicao_planilhas
+    assert paineis.ESTADOS_VALIDOS is medicoes.ESTADOS_NO_MEDIDO
+    assert medicao_planilhas.ESTADOS_NO_ACUMULADO is medicoes.ESTADOS_NO_MEDIDO
+    assert {"nota_emitida", "espelho_enviado", "boletim_recebido"} <= set(medicoes.ESTADOS_NO_MEDIDO)
+    assert not {"prevista", "planilha_gerada", "cancelada", "desistida"} & set(medicoes.ESTADOS_NO_MEDIDO)
+
+
+def test_nota_emitida_sem_aprovado_entra_pelo_pedido_marcada_pendente(conn, cid):
+    _no_estado(conn, cid, 3, "nota_emitida", 180_170_69, comp="2026-09")
+    p = paineis.curva(conn, cid)[0]
+    assert p["medido_execucao_centavos"] == 180_170_69 and p["atestado_pendente"] is True
+
 # --- issue #293: curva S da carta de prazo (a mesma conta da tela da obra) ---
 
 def _repactuacao(conn, cid, numero, data):

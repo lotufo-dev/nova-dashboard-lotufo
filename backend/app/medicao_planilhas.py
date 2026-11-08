@@ -10,11 +10,14 @@ Modulo proprio, ao lado de `medicoes.py`: o boletim, a assinatura e a lista em a
 import datetime
 
 from app import arquivos, auditoria, contratos, db, espelho, tempo
-from app.medicoes import LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
+from app.medicoes import ESTADOS_NO_MEDIDO, LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
 TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
+# FORA_DO_ACUMULADO segue valendo para o numero e o periodo da medicao anterior; o VALOR acumulado usa a lista unica
+# do medido (#561), a mesma da pagina da obra
 FORA_DO_ACUMULADO = ("prevista", "cancelada", "desistida")
+ESTADOS_NO_ACUMULADO = ESTADOS_NO_MEDIDO
 
 
 def _mes_seguinte(competencia: str) -> str:
@@ -28,12 +31,13 @@ def _mes_br(competencia: str) -> str:
 
 def acumulado_anterior(conn, contrato_id: int, tipo: str, numero: int) -> int:
     """Soma das medicoes do mesmo tipo com numero menor: o aprovado (atestado) de cada uma, senao o pedido
-    (protocolado). Prevista, cancelada e desistida nao contam. Soma em Python: o SUM do SQLite e' int64 e
+    (protocolado). So' os estados de ESTADOS_NO_ACUMULADO (#561: a partir do envio da planilha/carta; prevista,
+    planilha gerada, cancelada e desistida nao contam). Soma em Python: o SUM do SQLite e' int64 e
     estoura com valores que cabem um a um na coluna (mesmo motivo de paineis.saldo)."""
     return sum(r["v"] for r in conn.execute(
         "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v FROM medicoes "
-        f"WHERE contrato_id=? AND tipo=? AND numero<? AND estado NOT IN ({','.join('?' * len(FORA_DO_ACUMULADO))})",
-        (contrato_id, tipo, numero, *FORA_DO_ACUMULADO)))
+        f"WHERE contrato_id=? AND tipo=? AND numero<? AND estado IN ({','.join('?' * len(ESTADOS_NO_ACUMULADO))})",
+        (contrato_id, tipo, numero, *ESTADOS_NO_ACUMULADO)))
 
 
 def _anterior(conn, contrato_id: int, tipo: str, numero: int):

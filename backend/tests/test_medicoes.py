@@ -554,10 +554,12 @@ def _com_valores(conn, contrato_id, numero, estado, protocolado, atestado):
 
 def test_acumulado_anterior_soma_aprovado_senao_pedido(conn, contrato_id):
     """Spec §2.1 passo 1: acumulado anterior = soma dos aprovados, senao pedidos, das medicoes anteriores do mesmo
-    tipo. Prevista, cancelada e desistida e as de numero igual ou maior ficam de fora. Centavo impar de proposito."""
+    tipo. Prevista, planilha gerada (#561: conta a partir do envio), cancelada e desistida e as de numero igual ou
+    maior ficam de fora. Centavo impar de proposito."""
     from app import medicao_planilhas
     _com_valores(conn, contrato_id, 1, "protocolada", 10_000_01, 9_999_99)     # aprovado manda
-    _com_valores(conn, contrato_id, 2, "planilha_gerada", 5_000_03, None)      # sem aprovado: o pedido
+    _com_valores(conn, contrato_id, 2, "planilha_enviada", 5_000_03, None)     # sem aprovado: o pedido
+    _com_valores(conn, contrato_id, 7, "planilha_gerada", 2_00, None)          # ainda nao enviada: fora
     _com_valores(conn, contrato_id, 3, "cancelada", 7_000_00, 7_000_00)        # fora
     _com_valores(conn, contrato_id, 4, "prevista", 1_00, None)                 # fora
     _com_valores(conn, contrato_id, 6, "protocolada", 3_00, 3_00)              # depois da 5: fora
@@ -565,6 +567,7 @@ def test_acumulado_anterior_soma_aprovado_senao_pedido(conn, contrato_id):
                  "VALUES (?, 1, 'reajuste', '2026-01', 'protocolada', 999)", (contrato_id,))   # outro tipo: fora
     conn.commit()
     assert medicao_planilhas.acumulado_anterior(conn, contrato_id, "execucao", 5) == 9_999_99 + 5_000_03
+    assert medicao_planilhas.acumulado_anterior(conn, contrato_id, "execucao", 8) == 9_999_99 + 5_000_03 + 3_00
 
 
 def test_planilha_cria_versao_1_em_planilha_gerada(conn, contrato_id):
@@ -631,8 +634,10 @@ def test_planilha_gerada_pode_ser_cancelada(conn, contrato_id):
 
 def test_sugestao_proximo_numero_e_mes_seguinte(conn, contrato_id):
     from app import medicao_planilhas
-    medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(4, "2026-11", "2026-11-01", "2026-11-30", 1_000_01,
-                                                                 numero_orgao=12), ANEXOS)
+    r = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(4, "2026-11", "2026-11-01", "2026-11-30",
+                                                                     1_000_01, numero_orgao=12), ANEXOS)
+    assert medicao_planilhas.sugestao(conn, contrato_id)["acumulado_anterior_centavos"] == 0   # #561: so' gerada
+    conn.execute("UPDATE medicoes SET estado='planilha_enviada' WHERE id=?", (r["medicao_id"],)); conn.commit()
     s = medicao_planilhas.sugestao(conn, contrato_id)
     assert (s["numero"], s["numero_orgao"], s["competencia"]) == (5, 13, "2026-12")
     assert (s["periodo_inicio"], s["periodo_fim"]) == ("2026-12-01", "2026-12-31")

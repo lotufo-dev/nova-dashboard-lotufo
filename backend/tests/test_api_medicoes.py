@@ -700,7 +700,9 @@ def test_periodo_sobreposto_ou_pulando_devolve_aviso_e_grava(client_admin):
 # issue #289: a tela avisa o periodo sobreposto enquanto a pessoa digita, antes de gravar (mesma regra do registro)
 def test_avisos_do_periodo_na_hora_sem_gravar(client_admin):
     cid = _contrato(client_admin)
-    assert _nova_planilha(client_admin, cid, 1, "2026-07", "2026-06-26", "2026-07-25").status_code == 201
+    r0 = _nova_planilha(client_admin, cid, 1, "2026-07", "2026-06-26", "2026-07-25")
+    assert r0.status_code == 201
+    _no_estado(r0.json()["medicao_id"], "planilha_enviada")   # #561: o acumulado conta a partir do envio
     url = f"/api/contratos/{cid}/planilhas/avisos"
     r = client_admin.get(url, params={"numero": 2, "competencia": "2026-08", "periodo_inicio": "2026-07-20"})
     assert r.status_code == 200 and len(r.json()["avisos"]) == 1 and "sobrepõe" in r.json()["avisos"][0]

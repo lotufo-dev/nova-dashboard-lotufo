@@ -48,6 +48,11 @@ TRANSICOES = {
     "desistida": set(),
 }
 ESTADOS_ESPELHO = ("espelho_gerado", "espelho_enviado")
+# Issue #561: a lista unica dos estados que contam no medido (pagina da obra, paineis.ESTADOS_VALIDOS) e no acumulado
+# anterior do formulario da planilha/carta (medicao_planilhas.acumulado_anterior). Conta a partir do envio da
+# planilha/carta ao orgao; prevista e planilha gerada (ainda nao enviada) ficam fora, cancelada e desistida tambem.
+ESTADOS_NO_MEDIDO = ("planilha_enviada", "boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida",
+                     "protocolada", "nf_emitida", "recebida")
 PEDIDO_ENVIADO = "O pedido congelou no envio da planilha/carta: não muda à mão"
 # Issue #281: estados em que o pedido (valor protocolado) e' o da planilha/carta e so' muda por revisao
 ESTADOS_PLANILHA = ("planilha_gerada", "planilha_enviada", "boletim_recebido")
