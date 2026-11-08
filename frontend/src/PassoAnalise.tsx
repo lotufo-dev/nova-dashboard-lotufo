@@ -113,8 +113,9 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
               <dl className="orgao-faixa__dados" aria-label="Aprovação">
                 <div><dt>Valor aprovado</dt><dd>{brl(aprovado.valor_centavos ?? null)}</dd></div>
                 <div><dt>Data da aprovação</dt><dd>{aprovado.atestado_em ? fmtDataPura(aprovado.atestado_em) : "—"}</dd></div>
-                {/* #288: a diferenca do aprovado vigente para o pedido, com o aceite ao lado */}
-                {m.valor_atestado_centavos !== null && m.valor_protocolado_centavos !== null && (
+                {/* #288: a diferenca do aprovado vigente abaixo do pedido, so' enquanto existe (aceita, vira o selo) */}
+                {m.valor_atestado_centavos !== null && m.valor_protocolado_centavos !== null
+                  && m.valor_atestado_centavos < m.valor_protocolado_centavos && !m.diferenca_aceita && (
                   <div><dt>Diferença</dt><dd className="num">{brl(m.valor_atestado_centavos - m.valor_protocolado_centavos)}</dd></div>
                 )}
               </dl>
