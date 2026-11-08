@@ -247,10 +247,13 @@ def _gravar_saiu_sem_registro(conn, rid: int) -> None:
 
 def _sairam(conn) -> set[int]:
     """As linhas que sairam sem registro e ainda nao foram marcadas como saidas: as do banco e as deste processo. A
-    linha deste processo que outro (a linha de comando) ja' marcou como saida sai da memoria."""
-    abertas = {r[0] for r in conn.execute(f"SELECT id FROM {TABELA} WHERE envio_id IS NULL AND envio_conferido_em IS NULL "
-                                          "AND (envio_saiu_sem_registro_em IS NOT NULL OR envio_reservado_em IS NOT NULL)")}
-    _SAIRAM.intersection_update(abertas)
+    linha deste processo que outro (a linha de comando) ja' marcou como saida sai da memoria; a que so' perdeu a
+    marca (um "nao saiu" registrado de outro processo) fica, para a rodada marca-la como saida antes de enviar."""
+    if _SAIRAM:
+        marcadas = {r[0] for r in conn.execute(
+            f"SELECT id FROM {TABELA} WHERE (envio_id IS NOT NULL OR envio_conferido_em IS NOT NULL) "
+            f"AND id IN ({','.join('?' * len(_SAIRAM))})", sorted(_SAIRAM))}
+        _SAIRAM.difference_update(marcadas)
     return _SAIRAM | {r[0] for r in conn.execute(
         f"SELECT id FROM {TABELA} WHERE envio_saiu_sem_registro_em IS NOT NULL AND envio_id IS NULL "
         "AND envio_conferido_em IS NULL")}

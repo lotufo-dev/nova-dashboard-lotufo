@@ -583,6 +583,39 @@ def test_saiu_registrado_pela_linha_de_comando_some_da_saude_do_servidor(ambient
     assert alertas_seguranca._SAIRAM == set()
 
 
+def test_nao_saiu_pela_cli_com_as_duas_gravacoes_falhando_nao_manda_segundo_email(ambiente, monkeypatch):
+    # revisor-adversarial, rodada 1: banco ocupado recusa a marca e a marcacao; a linha fica so' na memoria do
+    # servidor, a CLI (outro processo) aceita "nao saiu" e solta a reserva; a rodada seguinte do servidor marca a linha
+    # como saida antes de enviar, em vez de esquece-la e mandar o alerta de novo
+    conn, tmp = ambiente
+    _itens(monkeypatch, [_item("Proteção da tabela de usuários removida", nivel="critico")])
+    monkeypatch.setattr(correio, "enviar_e_registrar", _sem_registro)
+    gravar, marcar = alertas_seguranca._gravar_saiu_sem_registro, alertas_seguranca._marcar_saida
+    monkeypatch.setattr(alertas_seguranca, "_gravar_saiu_sem_registro", lambda conn, rid: None)
+    monkeypatch.setattr(alertas_seguranca, "_marcar_saida", lambda conn, rid, envio_id=None: False)
+    alertas_seguranca.rodada(conn, AGORA)
+    rid = conn.execute("SELECT id FROM alertas_seguranca_envios WHERE tipo='alerta'").fetchone()[0]
+    assert alertas_seguranca._SAIRAM == {rid}
+    with db.mutacao(conn):
+        conn.execute("UPDATE alertas_seguranca_envios SET envio_reservado_em=datetime('now', '-1 hour') WHERE id=?",
+                     (rid,))
+    servidor = set(alertas_seguranca._SAIRAM)
+    alertas_seguranca._SAIRAM.clear()                                    # a CLI, em outro processo
+    uid = conn.execute("SELECT id FROM usuarios").fetchone()[0]
+    alertas_seguranca.conferir_envio(conn, uid, rid, saiu=False)
+    alertas_seguranca._SAIRAM.update(servidor)                           # de volta ao servidor
+    monkeypatch.setattr(alertas_seguranca, "_gravar_saiu_sem_registro", gravar)
+    monkeypatch.setattr(alertas_seguranca, "_marcar_saida", marcar)
+    alertas_seguranca.situacao(conn)
+    chamadas = []
+    monkeypatch.setattr(correio, "enviar_e_registrar", lambda *a, **k: chamadas.append(a[5]))
+    alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(hours=1))
+    assert [x for x in chamadas if "alerta" in x] == []
+    linha = conn.execute("SELECT * FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()
+    assert linha["envio_conferido_em"] is not None and linha["envio_saiu_sem_registro_em"] is not None
+    assert alertas_seguranca._SAIRAM == set()
+
+
 def _parada(conn, chave, tipo="alerta", mensagem=None, resolvido=None):
     with db.mutacao(conn):
         return conn.execute("INSERT INTO alertas_seguranca_envios (chave, tipo, assunto, mensagem, problema_resolvido_em, "
