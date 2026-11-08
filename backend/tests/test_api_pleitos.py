@@ -1345,3 +1345,28 @@ def test_carta_assinada_sumida_do_disco_se_resolve_pelo_que_a_mensagem_manda(api
         o_que="a carta montada", acao=pleitos.REMONTE_E_ASSINE), r.text
     assert cl.post(f"/api/pleitos/{pid}/montar", json={}).status_code == 200
     assert cl.post(f"/api/pleitos/{pid}/previa").status_code == 200
+
+
+def test_justificativa_do_reajuste_fora_da_previsao_pela_api(api):
+    # issue #274: a operacao justifica na linha da competencia da aba Reajuste; o aviso sai e a linha mostra o texto
+    cl, cid, _ = api
+    c = db.get_conn()
+    c.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, valor_previsto_centavos, "
+              "origem) VALUES (?, '2024-06', 2026, '2026-08', 100_01, 'manual')", (cid,))
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 1, 'reajuste', '2026-08', 'planilha_enviada', 150_03)", (cid,))
+    c.commit(); c.close()
+    url = f"/api/contratos/{cid}/reajuste/justificativas"
+    corpo = {"data_base_mes": "2024-06", "ciclo": 2026, "competencia": "2026-08"}
+    r = cl.post(url, json={**corpo, "texto": "curto"})
+    assert r.status_code == 422 and "pelo menos 10 caracteres" in r.json()["detail"]
+    assert cl.post(url, json={**corpo, "competencia": "2026-13", "texto": "Índice definitivo maior"}).status_code == 422
+    r = cl.post(url, json={**corpo, "texto": "Índice definitivo maior"})
+    assert r.status_code == 201, r.text
+    [g] = cl.get(f"/api/contratos/{cid}/reajuste").json()["competencias_por_ciclo"]
+    [x] = g["competencias"]
+    assert (x["avisos"], x["justificativa"]["texto"]) == ([], "Índice definitivo maior")
+    r = cl.post(url, json={**corpo, "texto": "Índice definitivo maior"})       # ja' justificada: nada a justificar
+    assert r.status_code == 422 and r.json()["detail"] == "O pedido desta competência não está fora da previsão"
+    assert cl.post("/api/contratos/999999/reajuste/justificativas",
+                   json={**corpo, "texto": "Índice definitivo maior"}).status_code == 404

@@ -103,6 +103,27 @@ def reajuste_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=F
             "linhas_do_tempo": reajuste.linhas_do_tempo(conn, contrato_id)}
 
 
+class JustificativaIn(BaseModel):
+    data_base_mes: str = Field(pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
+    ciclo: StrictInt = Field(ge=1900, le=9999)
+    competencia: str = Field(pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
+    texto: str = Field(max_length=2000)
+
+
+@router.post("/api/contratos/{contrato_id}/reajuste/justificativas", status_code=201)
+def justificar_reajuste(contrato_id: ID, dados: JustificativaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                        conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #274: a justificativa do pedido de reajuste fora da previsao de uma competencia (tira o aviso enquanto
+    o pedido e o previsto nao mudarem)."""
+    _contrato_existe(conn, contrato_id)
+    try:
+        jid = reajuste.justificar(conn, usuario["id"], contrato_id, dados.data_base_mes, dados.ciclo,
+                                  dados.competencia, dados.texto)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return {"id": jid}
+
+
 @router.get("/api/contratos/{contrato_id}/prazos")
 def prazos_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
                    conn: sqlite3.Connection = Depends(conexao)):
