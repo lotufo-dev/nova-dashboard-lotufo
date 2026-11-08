@@ -684,8 +684,8 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
         # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o Leo decidir.
         if conn.execute(f"""SELECT 1 FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
                             WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND a.origem='detectado'
-                              AND n.codtmv IS NOT NULL AND n.codtmv NOT IN ({cobranca})""",
-                        (m["id"], *diretoria.CODTMV_COBRANCA)).fetchone():
+                              AND n.coligada=? AND n.codtmv IS NOT NULL AND n.codtmv NOT IN ({cobranca})""",
+                        (m["id"], m["coligada_rm"], *diretoria.CODTMV_COBRANCA)).fetchone():
             continue
         # Gate Sol S1 (PR #202): vinculo desfeito a' mao pode ter levado parte do faturamento (medicao em duas
         # notas). Ai' so' fecha sozinha se as notas que ficaram cobrem o valor da medicao.
@@ -725,8 +725,9 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
 
 
 def vinculos_fora_da_cobranca(conn) -> list[dict]:
-    """Issue #584: vinculos automaticos vigentes (origem `detectado`) cuja nota nao e' de cobranca ao orgao (tipo fora
-    de `diretoria.CODTMV_COBRANCA`, ou sem tipo). So' le: o Leo decide cada um (correcao e' evento novo)."""
+    """Issue #584: vinculos automaticos vigentes (origem `detectado`) cuja nota tem tipo de movimento do RM fora de
+    `diretoria.CODTMV_COBRANCA` (os mesmos que `_recebimentos` nao fecha sozinho; nota sem tipo nao veio do RM).
+    So' le: o Leo decide cada um (correcao e' evento novo)."""
     from app import diretoria   # import local: diretoria importa este modulo
     cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
     return [dict(r) for r in conn.execute(f"""
@@ -736,7 +737,7 @@ def vinculos_fora_da_cobranca(conn) -> list[dict]:
         FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
         JOIN medicoes m ON m.id=a.medicao_id JOIN contratos c ON c.id=m.contrato_id
         WHERE a.desfeita_em IS NULL AND a.origem='detectado'
-          AND (n.codtmv IS NULL OR n.codtmv NOT IN ({cobranca}))
+          AND n.codtmv IS NOT NULL AND n.codtmv NOT IN ({cobranca})
         ORDER BY c.numero_instrumento, m.numero, m.tipo, n.emissao, n.id""", diretoria.CODTMV_COBRANCA)]
 
 

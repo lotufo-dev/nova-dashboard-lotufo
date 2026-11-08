@@ -439,7 +439,11 @@ def _rm(args) -> int:
     """`rm vinculos-fora-da-cobranca` (issue #584): lista os vínculos automáticos de nota com medição cuja nota não é
     de cobrança ao órgão (tipo de movimento fora da lista). Só lê, com o banco aberto somente para leitura."""
     from app import sincronizacao_rm
-    banco = db.db_path().resolve()
+    try:
+        banco = db.db_path().resolve()
+    except RuntimeError:
+        print("Caminho do banco não definido: defina DASH_DB_PATH (ver docs/runbook.md)")
+        return 1
     if not banco.is_file():
         print(f"Banco não encontrado: {banco}")
         return 1
@@ -455,7 +459,7 @@ def _rm(args) -> int:
     print("ENSAIO (nada foi gravado)")
     print(f"  vínculos automáticos com nota fora da cobrança ao órgão: {len(vinculos)}")
     for v in vinculos:
-        print(f"    NF {v['numero']} (idmov {v['idmov']}, coligada {v['coligada']}, tipo {v['codtmv'] or 'sem tipo'}) "
+        print(f"    NF {v['numero']} (idmov {v['idmov']}, coligada {v['coligada']}, tipo {v['codtmv']}) "
               f"-> medição {v['medicao_id']} ({v['numero_instrumento']} nº {v['medicao_numero']} {v['medicao_tipo']}, "
               f"{v['medicao_estado']}): {format_brl(v['valor_centavos'])}, regra {v['regra'] or '-'}")
     return 0
