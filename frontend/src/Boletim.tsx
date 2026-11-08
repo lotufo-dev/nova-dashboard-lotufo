@@ -38,8 +38,10 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
   const [tentou, setTentou] = useState(false);
   const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
   const pedido = m.valor_protocolado_centavos, aprovado = m.valor_atestado_centavos;
+  // #286: a capa do SMO divergente do cadastro tambem se aceita aqui, mesmo com o aprovado igual ao pedido
+  const capaDiverge = (m.capa_divergencias ?? []).length > 0;
   if (!comBoletim || ["cancelada", "desistida"].includes(m.estado) || pedido === null || aprovado === null
-    || aprovado >= pedido) return null;
+    || (aprovado >= pedido && !capaDiverge && !m.diferenca_aceita)) return null;
   if (m.diferenca_aceita) return <Selo classe="selo--ok">Diferença aceita</Selo>;
   if (!podeEditar) return null;
   if (!aberto) {
@@ -60,6 +62,12 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
     <form className="pilha" onSubmit={salvar} noValidate aria-label="Aceitar a diferença"
       onKeyDown={ev => ev.key === "Escape" && fechar()}>
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {/* #286 (revisor, rodada 1 da PR #606): o aceite vale para o boletim inteiro; o que a capa diverge e' aceito junto */}
+      {capaDiverge && (
+        <ul aria-label="Divergências da capa do SMO aceitas junto">
+          {(m.capa_divergencias ?? []).map(frase => <li key={frase}>{frase}</li>)}
+        </ul>
+      )}
       <div className="campo">
         <label className="campo__rotulo" htmlFor="dif-justificativa">Justificativa</label>
         <textarea id="dif-justificativa" name="justificativa" className="entrada--larga" rows={2} maxLength={1000} autoFocus

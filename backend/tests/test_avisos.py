@@ -1061,3 +1061,216 @@ def test_indeferimento_registrado_por_engano_fica_sem_efeito_e_os_avisos_voltam(
                                 "Indeferimento lançado no pleito errado", hoje=hoje)
     assert len(_do_tipo(c, "reajuste_sem_resposta", hoje)) == 1
     assert reajuste.ciclos(c, cid, hoje)[0]["resposta"] is None
+
+
+# --- issue #286: capa do SMO contra o cadastro (decisao do Leo de 08/11/2026) ---------------------------------------
+
+TIPOS_CAPA = ("capa_prazo_divergente", "capa_instrumento_ausente", "capa_valor_contrato_divergente",
+              "capa_acumulado_divergente")
+
+
+def _capa(**muda):
+    """A capa igual ao cadastro da obra do `motor` (contrato de R$ 1,00 sem aditivo, fins em 31/12/2027)."""
+    return {"numero": 7, "data_realizacao": "2026-11-02", "execucao_fim": "2027-12-31", "vigencia_fim": "2027-12-31",
+            "valor_contrato_centavos": 100, "valor_aditivo_centavos": 0, "acumulado_pi_centavos": 10_000_01,
+            "acumulado_reajuste_centavos": 0, **muda}
+
+
+def _bol_capa(c, u, mid, valor, sha, capa, data="2026-11-02"):
+    return medicoes.registrar_boletim(c, u["id"], mid, {"valor_centavos": valor, "data": data, "numero_orgao": "7"},
+                                      {"arquivo": f"boletins/{sha}.pdf", "sha256": sha * 64, "capa": capa})
+
+
+def _capa_avisos(c, publico="operacao"):
+    return [a for a in avisos.listar(c, D(2026, 11, 8), publico=publico) if a["tipo"] in TIPOS_CAPA]
+
+
+def test_capa_igual_ao_cadastro_nao_avisa(motor):
+    c, u, cid = motor
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa())
+    assert _capa_avisos(c, "todos") == []
+    assert medicoes.detalhe(c, mid)["capa_divergencias"] == []
+
+
+def test_fim_de_execucao_da_capa_diferente_avisa_e_some_com_o_instrumento_aplicado(motor):
+    c, u, cid = motor
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa(execucao_fim="2028-03-31", vigencia_fim="2028-06-30"))
+    [exe, vig] = _capa_avisos(c, "todos")
+    assert (exe["tipo"], exe["nivel"], exe["publico"], exe["contrato_id"], exe["medicao_id"]) == (
+        "capa_prazo_divergente", "acao", ["operacao"], cid, mid)
+    assert exe["mensagem"] == "Fim da execução: capa do SMO diz 31/03/2028, cadastro diz 31/12/2027"
+    assert vig["mensagem"] == "Fim da vigência: capa do SMO diz 30/06/2028, cadastro diz 31/12/2027"
+    assert _capa_avisos(c, "diretoria") == []
+    # o apostilamento de prazo aplicado pelo cadastro: o vigente passa a ser o da capa e o aviso some
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, nova_execucao_fim, "
+              "nova_vigencia_fim) VALUES (?, 'prazo', 'assinado', '2026-11-01', '1', '2028-03-31', '2028-06-30')", (cid,))
+    c.commit()
+    assert _capa_avisos(c, "todos") == []
+
+
+def test_so_a_capa_mais_recente_do_contrato_avisa_prazo(motor):
+    c, u, cid = motor
+    m6 = _med(c, cid, 6, "2026-09", "planilha_enviada", pedido=5_000_00, enviada_em="2026-10-01")
+    m7 = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=5_000_01, enviada_em="2026-10-30")
+    # a 7a (mais recente) foi registrada antes da 6a: vale a data de realizacao, nao a ordem do registro
+    _bol_capa(c, u, m7, 5_000_01, "b", _capa(acumulado_pi_centavos=10_000_01, data_realizacao="2026-11-02"))
+    _bol_capa(c, u, m6, 5_000_00, "a", _capa(numero=6, acumulado_pi_centavos=5_000_00, execucao_fim="2026-12-31",
+                                             data_realizacao="2026-10-05"))
+    assert _capa_avisos(c, "todos") == []
+    assert medicoes.detalhe(c, m6)["capa_divergencias"] == []
+
+
+def test_capa_de_boletim_substituido_nao_avisa(motor):
+    # code-review: o boletim novo sem capa tira a capa antiga da conferencia (ninguem conseguiria aceita-la)
+    c, u, cid = motor
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa(execucao_fim="2028-03-31"))
+    assert len(_capa_avisos(c)) == 1
+    _bol_capa(c, u, mid, 10_000_00, "b", None)
+    assert _capa_avisos(c, "todos") == []
+
+
+def test_valor_aditivo_e_valor_do_contrato_na_cota_com_arredondamento_unico(motor):
+    c, u, cid = motor
+    # consorcio de 50%: o cadastro guarda a cota (R$ 1,00 e o aditivo de R$ 100,01); a capa imprime o cheio
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (cid,))
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, delta_valor_centavos) "
+              "VALUES (?, 'valor', 'assinado', '2026-09-01', '1', 100_01)", (cid,))
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, delta_valor_centavos, natureza) "
+              "VALUES (?, 'valor', 'assinado', '2026-10-01', '2', 50_00, 'reajuste')", (cid,))     # reajuste fica fora
+    c.commit()
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    # 199 -> 99,5 -> 100 e 200,01 -> 100,005 -> 100,01 (meio para cima): iguais ao cadastro
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa(valor_contrato_centavos=199, valor_aditivo_centavos=200_01))
+    assert _capa_avisos(c, "todos") == []
+    # 201 -> 100,5 -> 101 e 200,03 -> 100,015 -> 100,02: divergem
+    _bol_capa(c, u, mid, 10_000_01, "b", _capa(valor_contrato_centavos=201, valor_aditivo_centavos=200_03))
+    por_tipo = {a["tipo"]: a for a in _capa_avisos(c, "todos")}
+    assert set(por_tipo) == {"capa_instrumento_ausente", "capa_valor_contrato_divergente"}
+    assert por_tipo["capa_instrumento_ausente"]["mensagem"] == (
+        "Capa do SMO cita instrumento que o cadastro não tem: valor aditivo de R$ 100,02 na capa, R$ 100,01 no cadastro")
+    assert por_tipo["capa_instrumento_ausente"]["valor_centavos"] == 1
+    assert por_tipo["capa_valor_contrato_divergente"]["mensagem"] == (
+        "Valor do contrato: capa do SMO diz R$ 1,01, cadastro diz R$ 1,00")
+    # o cadastro acima da capa: o que falta e' no SMO
+    _bol_capa(c, u, mid, 10_000_01, "c", _capa(valor_contrato_centavos=199, valor_aditivo_centavos=199_99))
+    [a] = _capa_avisos(c, "todos")
+    assert a["mensagem"] == (
+        "Cadastro tem aditivo que a capa do SMO não traz: valor aditivo de R$ 100,00 na capa, R$ 100,01 no cadastro")
+
+
+def test_acumulado_divergente_aparece_no_detalhe_e_no_inicio(motor):
+    c, u, cid = motor
+    m6 = _med(c, cid, 6, "2026-09", "protocolada", pedido=5_000_00)
+    c.execute("UPDATE medicoes SET valor_atestado_centavos=4_999_99 WHERE id=?", (m6,))     # vale o aprovado
+    _med(c, cid, 5, "2026-08", "cancelada", pedido=1_000_00)                                  # cancelada fica fora
+    _med(c, cid, 1, "2026-07", "protocolada", pedido=1_00, tipo="projeto")                    # projeto entra
+    _med(c, cid, 8, "2026-11", "planilha_gerada", pedido=9_000_00)                            # depois da capa, fora
+    r7 = _med(c, cid, 7, "2026-10", "protocolada", pedido=300_01, tipo="reajuste")
+    m7 = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=5_000_01, enviada_em="2026-10-30")
+    # soma a precos iniciais: 4.999,99 + 1,00 + 5.000,01 = 10.001,00; reajuste: 300,01
+    _bol_capa(c, u, m7, 5_000_01, "a", _capa(acumulado_pi_centavos=10_001_00, acumulado_reajuste_centavos=300_01))
+    assert _capa_avisos(c, "todos") == [] and medicoes.detalhe(c, m7)["capa_divergencias"] == []
+    _bol_capa(c, u, m7, 5_000_01, "b", _capa(acumulado_pi_centavos=10_001_01, acumulado_reajuste_centavos=300_00))
+    [pi, reaj] = _capa_avisos(c)
+    assert (pi["tipo"], pi["medicao_id"], pi["valor_centavos"]) == ("capa_acumulado_divergente", m7, 1)
+    assert pi["mensagem"] == ("7ª Medição: Acumulado a preços iniciais até a 7ª medição: capa do SMO diz R$ 10.001,01, "
+                              "soma das medições diz R$ 10.001,00")
+    assert reaj["valor_centavos"] == -1
+    assert medicoes.detalhe(c, m7)["capa_divergencias"] == [
+        "Acumulado a preços iniciais até a 7ª medição: capa do SMO diz R$ 10.001,01, soma das medições diz R$ 10.001,00",
+        "Acumulado do reajustamento até a 7ª medição: capa do SMO diz R$ 300,00, soma das medições diz R$ 300,01"]
+    # a mesma capa no boletim do reajuste da 7a nao repete o aviso no Inicio
+    _bol_capa(c, u, r7, 300_01, "c", _capa(acumulado_pi_centavos=10_001_01, acumulado_reajuste_centavos=300_00))
+    assert len(_capa_avisos(c)) == 2
+
+
+def test_aceitar_a_diferenca_tira_os_avisos_da_capa_ate_o_proximo_boletim(motor):
+    c, u, cid = motor
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa(execucao_fim="2028-03-31", acumulado_pi_centavos=10_000_02))
+    assert len(_capa_avisos(c)) == 2
+    # aprovado igual ao pedido: so' a capa diverge, e o mesmo ato da #288 aceita
+    medicoes.aceitar_diferenca(c, u["id"], mid, "SMO ainda sem o apostilamento lançado")
+    assert _capa_avisos(c, "todos") == [] and medicoes.detalhe(c, mid)["capa_divergencias"] == []
+    assert medicoes.detalhe(c, mid)["diferenca_aceita"]["justificativa"] == "SMO ainda sem o apostilamento lançado"
+    textos = [e["texto"] for e in medicoes.edicoes_valor(c, [mid])[mid]]
+    assert "Diferença da capa do SMO com o cadastro aceita: SMO ainda sem o apostilamento lançado por U" in textos
+    _bol_capa(c, u, mid, 10_000_01, "b", _capa(execucao_fim="2028-03-31", acumulado_pi_centavos=10_000_02))
+    assert len(_capa_avisos(c)) == 2                       # boletim novo com a mesma diferenca: volta
+
+
+def test_sem_capa_divergente_nem_diferenca_nao_ha_o_que_aceitar(motor):
+    c, u, cid = motor
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa())
+    with pytest.raises(ValueError, match="não está abaixo do pedido"):
+        medicoes.aceitar_diferenca(c, u["id"], mid, "nada a aceitar aqui")
+
+
+def test_capa_do_boletim_e_evento_que_nao_se_altera_nem_se_apaga(motor):
+    c, u, cid = motor
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa())
+    for sql in ("UPDATE medicao_boletim_capas SET execucao_fim='2030-01-01'", "DELETE FROM medicao_boletim_capas"):
+        with pytest.raises(sqlite3.IntegrityError):
+            c.execute(sql)
+    c.rollback()
+
+
+def test_valor_aditivo_em_consorcio_tolera_o_arredondamento_de_cada_aditivo(motor):
+    # revisor (rodada 1 da PR #606): dois aditivos de R$ 100,01 cheios, 50%: o cadastro guarda R$ 50,01 + R$ 50,01 =
+    # R$ 100,02; a capa imprime R$ 200,02, que vira cota de R$ 100,01. Meio centavo por aditivo nao e' divergencia.
+    c, u, cid = motor
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (cid,))
+    for numero in ("1", "2"):
+        c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, delta_valor_centavos) "
+                  "VALUES (?, 'valor', 'assinado', '2026-09-01', ?, 50_01)", (cid, numero))
+    c.commit()
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=200_02))
+    assert _capa_avisos(c, "todos") == []
+    # dois centavos de diferenca passam da folga de dois aditivos (1 centavo)
+    _bol_capa(c, u, mid, 10_000_01, "b", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=200_08))
+    [a] = _capa_avisos(c, "todos")
+    assert (a["tipo"], a["valor_centavos"]) == ("capa_instrumento_ausente", 2)
+    # contrato proprio nao arredonda: continua exato
+    c.execute("UPDATE contratos SET percentual_direito_bp=10000, valor_original_centavos=200 WHERE id=?", (cid,))
+    c.commit()
+    _bol_capa(c, u, mid, 10_000_01, "c", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=100_03))
+    [a] = _capa_avisos(c, "todos")
+    assert (a["tipo"], a["valor_centavos"]) == ("capa_instrumento_ausente", 1)
+
+
+def test_acumulado_com_numeracao_do_orgao_deslocada_conta_o_reajuste_pelo_par(motor):
+    # revisor (rodada 1 da PR #606): a 9a da Lotufo e' a 7a do orgao; a planilha/carta grava o nº do orgao so' na
+    # execucao, e o reajuste de mesmo numero conta pelo nº do orgao dela
+    c, u, cid = motor
+    for numero, orgao in ((8, 6), (9, 7), (10, 8)):
+        mid = _med(c, cid, numero, f"2026-{numero:02d}", "protocolada", pedido=1_000_01)
+        c.execute("UPDATE medicoes SET numero_orgao=? WHERE id=?", (orgao, mid))
+        _med(c, cid, numero, f"2026-{numero:02d}", "protocolada", pedido=100_01, tipo="reajuste")
+    c.commit()
+    m9 = c.execute("SELECT id FROM medicoes WHERE numero=9 AND tipo='execucao'").fetchone()[0]
+    # ate' a 7a do orgao: execucao 8 e 9 (R$ 2.000,02) e os reajustes 8 e 9 (R$ 200,02); a 10a (8a do orgao) fica fora
+    _bol_capa(c, u, m9, 1_000_01, "a", _capa(acumulado_pi_centavos=2_000_02, acumulado_reajuste_centavos=200_02))
+    assert _capa_avisos(c, "todos") == []
+    assert medicoes.detalhe(c, m9)["capa_divergencias"] == []
+
+
+def test_valor_aditivo_com_tres_aditivos_no_consorcio_tem_folga_de_um_centavo(motor):
+    # revisor (rodada 2 da PR #606): com n aditivos a diferenca do arredondamento e' no maximo n // 2 centavos
+    c, u, cid = motor
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (cid,))
+    for numero in ("1", "2", "3"):
+        c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, delta_valor_centavos) "
+                  "VALUES (?, 'valor', 'assinado', '2026-09-01', ?, 50_01)", (cid, numero))     # cadastro: R$ 150,03
+    c.commit()
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=300_04))  # 150,02
+    assert _capa_avisos(c, "todos") == []
+    _bol_capa(c, u, mid, 10_000_01, "b", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=300_10))  # 150,05
+    [a] = _capa_avisos(c, "todos")
+    assert (a["tipo"], a["valor_centavos"]) == ("capa_instrumento_ausente", 2)

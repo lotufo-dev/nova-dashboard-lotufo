@@ -2087,3 +2087,46 @@ def test_planilha_com_reajuste_pela_rota(client_admin):
     d = client_admin.get(f"/api/medicoes/{r.json()['reajuste_medicao_id']}").json()
     assert (d["tipo"], d["numero"], d["estado"], d["valor_protocolado_centavos"], d["data_base_mes"], d["ciclo"]) == (
         "reajuste", 1, "prevista", 4_321_09, "2024-04", 2026)
+
+
+# --- issue #286: a capa do SMO lida no registro do boletim, para a conferencia contra o cadastro ------------------
+
+def _capas(mid):
+    from app import db
+    conn = db.get_conn()
+    try:
+        return [dict(r) for r in conn.execute("SELECT * FROM medicao_boletim_capas WHERE medicao_id=? ORDER BY id",
+                                              (mid,))]
+    finally:
+        conn.close()
+
+
+def test_registro_do_boletim_grava_a_capa_lida_do_pdf_e_a_tela_ve_a_divergencia(client_admin, monkeypatch):
+    from app import leitura_pdf
+    _capa_lida(monkeypatch)
+    monkeypatch.setattr(leitura_pdf, "paginas_por_ocr_com_limite", lambda pdf: pytest.fail("nao devia ir ao OCR"))
+    mid = _nova_planilha(client_admin, _contrato(client_admin), numero=7).json()["medicao_id"]
+    _no_estado(mid, "planilha_enviada")
+    r = _registrar_boletim(client_admin, mid, valor="1.234.567,89", data="2026-04-14", numero="7")
+    assert r.status_code == 201, r.text
+    [capa] = _capas(mid)
+    assert capa["atesto_id"] == r.json()["id"]
+    assert (capa["numero"], capa["data_realizacao"], capa["execucao_fim"], capa["vigencia_fim"]) == (
+        7, "2026-04-14", "2026-11-06", "2027-02-24")
+    assert (capa["valor_contrato_centavos"], capa["valor_aditivo_centavos"]) == (2000000000, 150000000)
+    assert (capa["acumulado_pi_centavos"], capa["acumulado_reajuste_centavos"]) == (876543210, 45678901)
+    # a soma das medicoes ate' a 7a (so' esta, R$ 1.234.567,89) nao bate com o acumulado da capa
+    divergencias = client_admin.get(f"/api/medicoes/{mid}").json()["capa_divergencias"]
+    assert ("Acumulado a preços iniciais até a 7ª medição: capa do SMO diz R$ 8.765.432,10, soma das medições diz "
+            "R$ 1.234.567,89") in divergencias
+
+
+def test_capa_nao_aprovada_ou_pdf_sem_capa_nao_grava_capa(client_admin, monkeypatch):
+    import pathlib
+    texto = (pathlib.Path(__file__).parent / "fixtures" / "smo" / "capa-texto-aprovada.txt").read_text(encoding="utf-8")
+    _capa_lida(monkeypatch, paginas=[texto.replace("Provisória - APROVADA", "Provisória - EM ANÁLISE")])
+    mid = _planilha_enviada(client_admin)
+    assert _registrar_boletim(client_admin, mid).status_code == 201
+    _capa_lida(monkeypatch, paginas=["Ofício qualquer sem capa", ""])
+    assert _registrar_boletim(client_admin, mid, valor="12.000,02").status_code == 201
+    assert _capas(mid) == []

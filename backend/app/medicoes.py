@@ -131,6 +131,9 @@ def _detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     d = dict(r)
     d["diferenca_centavos"] = diferenca(d)      # issue #284: aprovado do boletim menos o pedido
     d["diferenca_aceita"] = diferenca_aceita(conn, medicao_id)     # issue #288: a do boletim vigente, ou None
+    from app import capa_smo        # import local: capa_smo importa avisos, que importa documentos e notas
+    # issue #286: a capa do SMO do boletim vigente contra o cadastro (o que hoje e' aviso)
+    d["capa_divergencias"] = [x["mensagem"] for x in capa_smo.divergencias(conn, medicao_id)]
     # Issue #283: `protocolos` e' so' o da nota (o que conta como protocolo nas telas e nos marcos); o nº do SIGA da
     # planilha/carta (etapa 'planilha', migracao 054) vem a' parte
     d["protocolos"] = [dict(p) for p in conn.execute(
@@ -398,6 +401,8 @@ def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int
             "numero_orgao, arquivo, sha256, observacao, pedido_centavos) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (medicao_id, valor, origem, dia.isoformat(), usuario_id, meio, numero, anexo["arquivo"], anexo["sha256"],
              observacao, m["valor_protocolado_centavos"])).lastrowid
+        from app import capa_smo    # issue #286: a capa do SMO lida do PDF, para a conferencia contra o cadastro
+        capa_smo.gravar(conn, aid, medicao_id, anexo.get("capa"))
         antes = {"estado": atual, "valor_atestado_centavos": m["valor_atestado_centavos"],
                  "valor_atestado_origem": m["valor_atestado_origem"], "atestado_em": m["atestado_em"]}
         auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", medicao_id, antes, {
@@ -451,10 +456,13 @@ def aceitar_diferenca(conn: sqlite3.Connection, usuario_id: int, medicao_id: int
         if not tem_boletim(conn, medicao_id):
             raise ValueError("Registre o boletim do órgão antes de aceitar a diferença")
         dif = diferenca(m)
-        if dif is None or dif >= 0:
+        from app import capa_smo    # issue #286: a capa do SMO divergente do cadastro tambem se aceita aqui
+        if (dif is None or dif >= 0) and not capa_smo.divergencias(conn, medicao_id, com_aceitas=True):
             raise ValueError("O aprovado não está abaixo do pedido: não há diferença a aceitar")
         vigente = _atesto_vigente(conn, medicao_id)
         aprovado, pedido = m["valor_atestado_centavos"], m["valor_protocolado_centavos"]
+        if pedido is None or aprovado is None:
+            raise ValueError("Sem o pedido da medição não há como aceitar a diferença")
         if conn.execute("SELECT 1 FROM medicao_diferencas_aceitas WHERE atesto_id=? AND pedido_centavos=?",
                         (vigente, pedido)).fetchone():
             raise ValueError("A diferença deste boletim já foi aceita")
@@ -477,8 +485,10 @@ def _eventos_diferenca_aceita(conn: sqlite3.Connection, ids: list[int], out: dic
                 "SELECT d.medicao_id, d.aprovado_centavos, d.pedido_centavos, d.justificativa, d.criado_em, u.nome "
                 "FROM medicao_diferencas_aceitas d LEFT JOIN usuarios u ON u.id=d.usuario_id "
                 f"WHERE d.medicao_id IN ({','.join('?' * len(lote))}) ORDER BY d.id", lote):
-            texto = (f"Diferença de {format_brl(r['pedido_centavos'] - r['aprovado_centavos'])} abaixo do pedido "
-                     f"aceita: {r['justificativa']}")
+            falta = r["pedido_centavos"] - r["aprovado_centavos"]
+            # issue #286: sem o aprovado abaixo do pedido, o aceite foi da capa do SMO divergente do cadastro
+            texto = (f"Diferença de {format_brl(falta)} abaixo do pedido aceita: {r['justificativa']}" if falta > 0
+                     else f"Diferença da capa do SMO com o cadastro aceita: {r['justificativa']}")
             out[r["medicao_id"]].append({"data": r["criado_em"],
                                          "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
 

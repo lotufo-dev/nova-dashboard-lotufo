@@ -75,6 +75,8 @@ export type Medicao = {
   // #288: a diferenca do boletim VIGENTE aceita com justificativa (tira o aviso "aprovado abaixo do pedido")
   diferenca_aceita?: { atesto_id: number; justificativa: string; usuario: string | null; criado_em: string;
     diferenca_centavos: number } | null;
+  // #286: a capa do SMO do boletim vigente divergente do cadastro (prazos, valores, acumulado), uma frase por item
+  capa_divergencias?: string[];
 };
 
 // dinheiro mora em formato.ts (F-86: sinal de menos U+2212); continua exportado daqui para quem ja importa
