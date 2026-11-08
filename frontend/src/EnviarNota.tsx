@@ -193,6 +193,8 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   // issue #278: a justificativa do reajuste sem apostilamento; o erro so' aparece depois do clique em Enviar
   const [justificativa, setJustificativa] = useState("");
   const [tentouJustificativa, setTentouJustificativa] = useState(false);
+  // issue #562: a lista nova do servidor (422) diz se o motivo e' o da nota divergente; antes dela, vale a do envio lido
+  const [divergenteAgora, setDivergenteAgora] = useState<boolean | null>(null);
 
   // issue #100 (revisor na PR #141): os anexos mudaram depois da primeira leitura, entao o e-mail foi refeito e o
   // texto editado voltou ao padrao; a tela diz isso em vez de trocar o e-mail calada
@@ -281,6 +283,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
           const itens: string[] = erro.corpo.pendencias ?? [];
           // issue #278: a lista nova pode trazer o reajuste sem apostilamento; sem a justificativa, o campo pede antes
           const exigeAgora = pedeJustificativa(erro.corpo.itens ?? []);
+          setDivergenteAgora((erro.corpo.itens ?? []).some((i: { codigo: string }) => i.codigo === "nota_divergente"));
           setDet(d => d && { ...d, pendencias: itens, exige_justificativa: exigeAgora });
           if (exigeAgora && erroDaJustificativa(justificativa)) { setTentouJustificativa(true); return; }
           setConfirmar({ m, itens, mudou: confirmadas.length > 0 });
@@ -345,7 +348,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
         bloqueado={travado} anexos={det.previa.anexos}
         inicial={{ para: det.previa.para, copia: det.previa.copia, cco: [], assunto: det.previa.assunto, corpo: det.previa.corpo }}
         antes={exige && <JustificativaEnvio id={idJustificativa} valor={justificativa} aoMudar={setJustificativa} erro={erroJustificativa}
-          notaDivergente={(e?.divergencias ?? []).some(d => d.grau === "divergente")} />}
+          notaDivergente={divergenteAgora ?? (e?.divergencias ?? []).some(d => d.grau === "divergente")} />}
         validarAntes={validarJustificativa}
         aoMexer={setEmailMexido} aoEnviar={enviar} aoDescartar={() => embutido.aoDescartar?.()} />
       {refeita && <CaixaAviso nivel="atencao" role="status">A prévia foi refeita com os anexos de agora e o texto voltou ao padrão; confira antes de enviar.</CaixaAviso>}

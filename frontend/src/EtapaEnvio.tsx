@@ -60,7 +60,7 @@ const valorConferido = (v: number | string | null) => (typeof v === "number" ? b
  *  de arredondamento (1 centavo num tributo) aparece em atencao; o resto, em critico. */
 export function ConferenciaNotas({ envios }: { envios: Envio[] }) {
   const graves = envios.flatMap(notasDivergentes);
-  const leves = envios.flatMap(e => (e.divergencias ?? []).filter(d => d.grau !== "divergente"));
+  const leves = envios.flatMap(e => (e.divergencias ?? []).filter(d => d.grau === "arredondamento"));
   const acima = envios.flatMap(e => e.acima_da_medicao ?? []);
   if (graves.length === 0 && leves.length === 0 && acima.length === 0) return null;
   const numeros = [...new Set(graves.map(d => String(d.numero)))];
@@ -132,7 +132,7 @@ export function faltasDo(e: Envio): string[] {
 export function FaixaEnvio({ envios }: { envios: Envio[] }) {
   const faltas = envios.map(e => ({ e, f: faltasDo(e) })).filter(x => x.f.length > 0);
   // #562: com nota divergente nada esta' "pronto": a caixa da conferencia (logo abaixo) diz qual nota diverge
-  if (faltas.length === 0 && envios.some(e => notasDivergentes(e).length > 0 || (e.acima_da_medicao ?? []).length > 0)) return null;
+  if (faltas.length === 0 && envios.some(e => notasDivergentes(e).length > 0)) return null;
   if (faltas.length === 0) {
     return <div className="envio-faixa envio-faixa--ok" role="status"><span className="envio-faixa__marca" aria-hidden="true"><IconeCheck /></span>Tudo pronto para enviar</div>;
   }

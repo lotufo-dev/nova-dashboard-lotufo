@@ -2101,3 +2101,19 @@ def test_nota_so_com_arredondamento_nao_pede_confirmacao(svc):
     assert d["pendencias"] == [] and d["exige_justificativa"] is False
     sinfra, = _por_contrato(notas_envio.a_enviar(c, HOJE), ids["sinfra"])
     assert [(x["numero"], x["campo"], x["grau"]) for x in sinfra["divergencias"]] == [(2276, "inss", "arredondamento")]
+
+
+def test_registro_por_fora_com_nota_divergente_pede_confirmacao_e_observacao(api):
+    """Issue #562 (code-review): o registro por fora nao contorna a regra; a nota divergente entra no ATENÇÃO e a
+    observacao, que faz as vezes do motivo, precisa de pelo menos 10 caracteres."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _nota_com_conferencia(c, mid, 2275, DIVERGE)
+    aviso = "23ª Medição: NF 2275 diverge do espelho em valor, ISS"
+    r = _fora(cl, mid)
+    det = r.json()["detail"]
+    assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS" and det["pendencias"] == [aviso], r.text
+    r = _fora(cl, mid, confirmadas=[aviso], observacao="Outlook")
+    assert r.status_code == 422 and "A nota diverge do espelho" in r.json()["detail"]
+    _sem_registro(c, mid)
+    assert _fora(cl, mid, confirmadas=[aviso]).status_code == 200

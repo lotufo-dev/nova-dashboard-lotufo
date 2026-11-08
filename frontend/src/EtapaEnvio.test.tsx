@@ -483,6 +483,15 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     expect((within(linha).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("#562 (code-review): só a nota maior que a medição avisa sem tirar o “Tudo pronto”; grau desconhecido não vira arredondamento", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ divergencias: [{ medicao_id: 631, nota_id: 9, numero: 2322, campo: "valor", espelho: 100, nota: 1000100, grau: "" }],
+      acima_da_medicao: [{ medicao_id: 631, nota_id: 9, numero: 2322, alocado_centavos: 1000100, medicao_centavos: 100 }] })]);
+    expect(screen.getByText("Tudo pronto para enviar")).toBeTruthy();
+    expect(screen.getByText("NF 2322 de R$ 10.001,00 é maior que a medição (R$ 1,00)")).toBeTruthy();
+    expect(screen.queryByText(/arredondamento/)).toBeNull();
+  });
+
   it("#562: só arredondamento de centavos continua “Tudo pronto”, com o aviso leve", () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio({ divergencias: [{ medicao_id: 631, nota_id: 9, numero: 2322, campo: "iss", espelho: 296000, nota: 296001, grau: "arredondamento" }] })]);

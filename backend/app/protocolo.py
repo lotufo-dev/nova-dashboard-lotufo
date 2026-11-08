@@ -736,6 +736,22 @@ def _irmas_fora(conn, p: dict, ms: list[dict]) -> list[dict]:
     return list(achadas.values())
 
 
+def notas_divergentes(conn, ms: list[dict]) -> list[dict]:
+    """Issue #562: uma pendencia `nota_divergente` por nota das medicoes com campo de grau `divergente` na conferencia
+    contra o espelho (o arredondamento de 1 centavo nao conta). Vale no envio pelo sistema e no registro por fora."""
+    from app import notas      # import local: notas importa medicoes, que importa este modulo
+    out = []
+    for m in ms:
+        por_nota: dict = {}
+        for d in notas.divergencias_da_medicao(conn, m["id"]):
+            if d["grau"] == "divergente":
+                por_nota.setdefault(d["numero"], []).append(notas.NOME_CAMPO.get(d["campo"], d["campo"]))
+        for numero, campos in por_nota.items():
+            out.append({"codigo": NOTA_DIVERGENTE, "medicao_id": m["id"],
+                        "mensagem": f"{titulo(m)}: NF {numero} diverge do espelho em {', '.join(campos)}"})
+    return out
+
+
 def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     c = _contrato(conn, p["contrato_id"])
     familia, regras, o = _orgao(conn, c)
@@ -751,15 +767,7 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
                 out.append({"codigo": "sem_nota", "mensagem": f"{titulo(m)}: nota fiscal não anexada"})
         # issue #562: a nota divergente do espelho, campo a campo, enquanto o envio nao saiu
         if p["situacao"] != "enviado":
-            from app import notas      # import local: notas importa medicoes, que importa este modulo
-            for m in ms:
-                por_nota: dict = {}
-                for d in notas.divergencias_da_medicao(conn, m["id"]):
-                    if d["grau"] == "divergente":
-                        por_nota.setdefault(d["numero"], []).append(notas.NOME_CAMPO.get(d["campo"], d["campo"]))
-                for numero, campos in por_nota.items():
-                    out.append({"codigo": NOTA_DIVERGENTE, "medicao_id": m["id"],
-                                "mensagem": f"{titulo(m)}: NF {numero} diverge do espelho em {', '.join(campos)}"})
+            out += notas_divergentes(conn, ms)
         # A-18 (testes de quebra 10/10/2026): onde medicao e reajuste vao juntos (D9: SINFRA, Pref. VG), a irma com
         # nota emitida que ficou fora do e-mail vira pendencia (justifica para enviar). Nao junta sozinho.
         # Depois do envio (issue #6) a cobranca acabou: o detalhe do protocolo enviado nao a repete.

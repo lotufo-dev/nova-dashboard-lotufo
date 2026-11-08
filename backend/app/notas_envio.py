@@ -550,18 +550,24 @@ def faltas_externo(conn, ms: list[dict], hoje: datetime.date | None = None) -> l
     itens = _itens(conn, c, familia, ms, hoje or tempo.hoje_local())[0]
     # issue #278 (revisor, rodada 1 da PR #435): o reajuste sem termo que cubra a competencia, como no envio pelo
     # sistema (MT-PAR e Prefeitura); com ele, a observacao faz as vezes da justificativa (`_conferir_observacao`)
+    # issue #562: a nota divergente do espelho tambem (a observacao faz as vezes do motivo)
     return protocolo.faltas_de_apostilamento(protocolo.apostilamentos(conn, familia, ms)) + [
         {"codigo": i["chave"].split(":")[0], "mensagem": f"{i['rotulo']}: {i['detalhe']}"} for i in itens
-        if i["estado"] in ("falta", "vencida") or i.get("bloqueia")]
+        if i["estado"] in ("falta", "vencida") or i.get("bloqueia")] + protocolo.notas_divergentes(conn, ms)
 
 
 OBSERVACAO_SEM_APOSTILAMENTO = ("Sem apostilamento que cubra a competência do reajuste: a observação faz as vezes da "
                                 f"justificativa e precisa de pelo menos {protocolo.MIN_JUSTIFICATIVA} caracteres")
 
 
+OBSERVACAO_NOTA_DIVERGENTE = ("A nota diverge do espelho: a observação faz as vezes do motivo e precisa de pelo menos "
+                              f"{protocolo.MIN_JUSTIFICATIVA} caracteres")
+
+
 def _conferir_observacao(faltas: list[dict], obs: str) -> None:
     if protocolo.exige_justificativa(faltas) and len(obs) < protocolo.MIN_JUSTIFICATIVA:
-        raise ValueError(OBSERVACAO_SEM_APOSTILAMENTO)
+        raise ValueError(OBSERVACAO_NOTA_DIVERGENTE if any(x["codigo"] == protocolo.NOTA_DIVERGENTE for x in faltas)
+                         else OBSERVACAO_SEM_APOSTILAMENTO)
 
 
 def envio_externo(conn, usuario_id: int, medicao_ids: list[int], enviado_em: str, observacao: str,
