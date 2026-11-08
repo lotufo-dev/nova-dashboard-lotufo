@@ -120,7 +120,13 @@ def _de_espelhos(conn, hoje: datetime.date) -> list[dict]:
     return out
 
 
-FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga, _de_espelhos]
+def _de_motor_medicao(conn, hoje: datetime.date) -> list[dict]:
+    """Issue #288: planilha do mes nao enviada, pedido sem boletim, aprovado abaixo do pedido e medicao fora de ordem."""
+    from app import avisos_medicao   # import tardio: `avisos_medicao` importa este modulo (formato do aviso)
+    return avisos_medicao.avisos(conn, hoje)
+
+
+FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga, _de_espelhos, _de_motor_medicao]
 
 
 def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao") -> list[dict]:

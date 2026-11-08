@@ -621,6 +621,22 @@ def baixar_boletim(medicao_id: ID, atesto_id: ID,
                         headers={"X-Content-Type-Options": "nosniff"})
 
 
+class AceiteDiferencaIn(BaseModel):
+    justificativa: str = Field(..., max_length=1000)
+
+
+@router.post("/api/medicoes/{medicao_id}/diferenca-aceita", status_code=201)
+def aceitar_diferenca(medicao_id: ID, dados: AceiteDiferencaIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #288: "Aceitar a diferença" do boletim vigente abaixo do pedido, com justificativa (operacao e
+    engenharia; a diretoria so' le). Tira o aviso "aprovado abaixo do pedido" ate' o proximo boletim abaixo."""
+    _medicao_existe(conn, medicao_id)
+    try:
+        return {"id": medicoes.aceitar_diferenca(conn, usuario["id"], medicao_id, dados.justificativa)}
+    except ValueError as e:
+        raise _erro_do_cliente(conn, e)
+
+
 # --- issue #283: planilha/carta enviada por fora e nº do SIGA (spec 2026-10-20 §2.1, passo 2; E3) ---------------
 
 @router.post("/api/medicoes/{medicao_id}/planilhas/envio-externo", status_code=201)
