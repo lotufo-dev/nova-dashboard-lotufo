@@ -90,19 +90,28 @@ def _opcoes(m, notas: list[dict]) -> list[frozenset]:
 
 
 def _livres_do_banco(conn) -> list[dict]:
-    return [dict(r) for r in conn.execute("""
+    """Issue #598: so' nota de cobranca ao orgao (`diretoria.CODTMV_COBRANCA`, como o casador desde a #584); nota de
+    fornecedor (2.2.15), de pessoa fisica (2.2.10) ou sem tipo nao vira opcao."""
+    from app import diretoria   # import local: diretoria importa este modulo
+    cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
+    return [dict(r) for r in conn.execute(f"""
         SELECT id, coligada, centro_custo, emissao, valor_centavos FROM notas_fiscais n
-        WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=n.id AND a.desfeita_em IS NULL)""")]
+        WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL AND codtmv IN ({cobranca})
+          AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=n.id AND a.desfeita_em IS NULL)""",
+        diretoria.CODTMV_COBRANCA)]
 
 
 def _livres_do_rm(conn, linhas: list[dict]) -> list[dict]:
-    """Notas antigas do RM que ainda nao estao no banco (a DASH10 pode ter trazido a borda da janela)."""
+    """Notas antigas do RM que ainda nao estao no banco (a DASH10 pode ter trazido a borda da janela). A DASH12 traz
+    todo `2.2.%`: so' entra a nota de cobranca ao orgao (issue #598)."""
+    from app import diretoria   # import local: diretoria importa este modulo
     ja = {(r[0], r[1]) for r in conn.execute("SELECT coligada, idmov FROM notas_fiscais WHERE idmov IS NOT NULL")}
     out = []
     for l in linhas:
         col, idmov = int(l["CODCOLIGADA"]), int(l["IDMOV"])
         emissao = rm.data(l.get("DATAEMISSAO"))
+        if l.get("CODTMV") not in diretoria.CODTMV_COBRANCA:
+            continue
         if str(l.get("STATUS", "")).upper() == "C" or (col, idmov) in ja or not emissao:
             continue
         out.append({"id": f"rm:{col}:{idmov}", "coligada": col, "centro_custo": l.get("CODCCUSTO"),
