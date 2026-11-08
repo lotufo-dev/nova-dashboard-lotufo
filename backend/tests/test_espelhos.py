@@ -1136,3 +1136,25 @@ def test_cancelar_a_execucao_encerra_o_reajuste_absorvido(ambiente_projeto):
     xid, rid = _absorvido_com_nota(conn, u, cid)
     medicoes.mudar_estado(conn, u["id"], xid, "cancelada", "nota cancelada pela prefeitura")
     assert medicoes.detalhe(conn, rid)["estado"] == "cancelada"
+
+
+def test_reajuste_absorvido_nao_tem_marco_proprio(ambiente_projeto):
+    """Revisor da PR #608 (critico 1): cancelar, desistir, receber ou protocolar so' o reajuste absorvido e' recusado;
+    a execucao segue contando com ele (faturado R$ 990,00 = a nota), e a acao feita na execucao o leva junto."""
+    from app import diretoria
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    msg = "Este reajuste acompanha a execução nº 3: faça a ação na execução"
+    for estado in ("cancelada", "desistida"):
+        with pytest.raises(ValueError, match=msg):
+            medicoes.mudar_estado(conn, u["id"], rid, estado, "lançado errado")
+    with pytest.raises(ValueError, match=msg):
+        medicoes.registrar_protocolo(conn, u["id"], rid, "2026-02-05", "CT-9", None, "manual",
+                                     apesar_das_pendencias=True, justificativa=JUSTIFICATIVA)
+    assert medicoes.detalhe(conn, rid)["estado"] == "nota_emitida"
+    assert diretoria.da_obra(conn, cid)["faturado_centavos"] == 990_00
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-02-05", "CT-9", None, "manual")
+    with pytest.raises(ValueError, match=msg):
+        medicoes.mudar_estado(conn, u["id"], rid, "recebida", None, "2026-03-10")
+    medicoes.mudar_estado(conn, u["id"], xid, "recebida", None, "2026-03-10")
+    assert medicoes.detalhe(conn, rid)["estado"] == "recebida"

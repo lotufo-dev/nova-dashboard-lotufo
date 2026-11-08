@@ -668,6 +668,13 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
 # execucao de mesmo numero, que a absorve (abatida na nota da medicao, espelho._valores_das_saidas), e avanca com ela:
 # nota emitida, protocolo e recebimento da execucao valem para ela, com a mesma data. Ela nao tem nota propria.
 ACOMPANHA_A_EXECUCAO = "acompanha a execução que absorveu o reajuste negativo"
+
+
+def _recusar_marco_proprio(conn, m) -> None:
+    """Issue #589 (revisor da PR #608): o reajuste absorvido nao tem marco proprio. Cancelar, desistir, receber ou
+    protocolar so' ele deixaria a execucao contando o valor cheio contra a nota liquida."""
+    if m["tipo"] == "reajuste" and absorvida(conn, m["id"]):
+        raise ValueError(f"Este reajuste acompanha a execução nº {m['numero']}: faça a ação na execução")
 _ABSORVIDAS = ("SELECT DISTINCT r.id, r.estado FROM espelho_medicoes ex JOIN espelhos e ON e.id=ex.espelho_id "
                "JOIN medicoes x ON x.id=ex.medicao_id JOIN espelho_medicoes er ON er.espelho_id=e.id "
                "JOIN medicoes r ON r.id=er.medicao_id WHERE e.situacao='vigente' AND x.tipo='execucao' "
@@ -693,6 +700,10 @@ def _protocolar_absorvidas(conn, usuario_id: int, execucao_id: int, linha: tuple
             upd = conn.execute("UPDATE medicoes SET estado='protocolada', congelada=1 WHERE id=? AND estado=?",
                                (r["id"], r["estado"]))
         elif r["estado"] in ESTADOS_DE_NOVO_PROTOCOLO:
+            # revisor da PR #608: o que ja' tem esta linha (mesmo dia e protocolo do sistema) nao ganha outra
+            if conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND data=? "
+                            "AND protocolo_id IS ?", (r["id"], linha[0], linha[4])).fetchone():
+                continue
             upd = conn.execute("UPDATE medicoes SET congelada=1 WHERE id=? AND estado=?", (r["id"], r["estado"]))
         else:
             continue
@@ -736,6 +747,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
                               (medicao_id, data, protocolo_id, protocolo_id)).fetchone()
             if ja is not None:
                 return ja["id"], None
+        _recusar_marco_proprio(conn, m)
         if atual in ("cancelada", "desistida", "recebida"):
             raise ValueError(f"Medição em estado final ({atual}) não recebe protocolo")
         if atual not in (*ESTADOS_PROMOVIDOS_PELO_PROTOCOLO, *ESTADOS_DE_NOVO_PROTOCOLO):
@@ -829,6 +841,8 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
         m = detalhe(conn, medicao_id)
         atual = m["estado"]
         motivo_antes = m["motivo_represamento"]
+        if origem != ACOMPANHA_A_EXECUCAO:
+            _recusar_marco_proprio(conn, m)
         if novo not in TRANSICOES.get(atual, set()):
             dica = ""
             if atual == "prevista" and novo == "protocolada":

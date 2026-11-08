@@ -2191,3 +2191,61 @@ def test_irma_com_nota_divergente_traz_a_conferencia_e_o_registro_por_fora_pede_
     assert r.status_code == 200, r.text
     ext = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
     assert ext["motivo_divergencia"] == motivo
+
+
+def _par_absorvido(c, cid):
+    """Issue #589: reajuste 24 (-R$ 10,01, criado ANTES, id menor) absorvido pelo espelho da execucao 24, as duas
+    com nota emitida; so' a execucao tem a nota."""
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+              "nota_emitida_em) VALUES (?, 24, 'reajuste', '2026-09', 'nota_emitida', -1001, '2026-09-15')", (cid,))
+    rj = c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+              "nota_emitida_em) VALUES (?, 24, 'execucao', '2026-09', 'nota_emitida', 100001, '2026-09-15')", (cid,))
+    ex = c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
+    rel, sha = arquivos.gravar_bytes("notas", _pdf("NFS-e 2499"), "pdf")
+    c.execute("INSERT INTO medicao_documentos (medicao_id, fonte, tipo_doc, nome, numero_nf, item_id, arquivo, "
+              "sha256, tamanho) VALUES (?,?,?,?,?,?,?,?,?)",
+              (ex, "operacao", "nfs", "NFS 2499.pdf", "2499", f"pdf:{sha}", rel, sha, 10))
+    eid = c.execute("INSERT INTO espelhos (contrato_id, numero, competencia, versao, situacao, entradas, saidas, "
+                    "regra_sha256, criado_por) VALUES (?, 24, '2026-09', 1, 'vigente', '{}', '[]', 'x', 1)",
+                    (cid,)).lastrowid
+    c.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id, valor_centavos, valor_com_sinal_centavos) "
+              "VALUES (?,?,100001,100001), (?,?,NULL,-1001)", (eid, ex, eid, rj))
+    c.commit()
+    return ex, rj
+
+
+def test_registro_por_fora_com_o_reajuste_absorvido_antes_da_execucao_protocola_uma_vez(api):
+    """Revisor da PR #608 (aviso 3): o reajuste absorvido (id menor que a execucao) nao se protocola sozinho; o que ja'
+    tem o protocolo daquele dia (registrado antes, pelo caminho antigo) nao ganha outra linha quando a execucao e'
+    registrada por fora."""
+    cl, c, ids = api
+    ex, rj = _par_absorvido(c, ids["sinfra"])
+    with pytest.raises(ValueError, match="Este reajuste acompanha a execução nº 24: faça a ação na execução"):
+        medicoes.registrar_protocolo(c, 1, rj, "2026-09-15", "CT-1", None, "manual", apesar_das_pendencias=True,
+                                     justificativa="registrado por fora pelo Outlook")
+    with pytest.raises(ValueError, match="acompanha a execução nº 24"):
+        medicoes.mudar_estado(c, 1, rj, "cancelada", "lançado errado")
+    # o reajuste ja' protocolado no mesmo dia antes da execucao (como fazia o registro antes desta correcao)
+    c.execute("UPDATE medicoes SET estado='protocolada', congelada=1 WHERE id=?", (rj,))
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_oficio, origem) "
+              "VALUES (?, '2026-09-15', 'CT-1', 'manual')", (rj,))
+    c.commit()
+    r = cl.post("/api/notas/envio-externo",
+                data={"enviado_em": "2026-09-15", "observacao": "Enviado pelo Outlook", "medicao_ids": [str(ex)]})
+    assert r.status_code == 200, r.text
+    for mid in (ex, rj):
+        assert c.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "protocolada"
+        assert c.execute("SELECT COUNT(*) FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota'",
+                         (mid,)).fetchone()[0] == 1
+
+
+def test_reajuste_absorvido_nao_e_oferecido_como_irma(api):
+    """Revisor da PR #608 (aviso 3): na SINFRA, o reajuste negativo absorvido nao aparece como irma da execucao."""
+    from app import protocolo
+    cl, c, ids = api
+    ex, rj = _par_absorvido(c, ids["sinfra"])
+    contrato = protocolo._contrato(c, ids["sinfra"])
+    familia, _, o = protocolo._orgao(c, contrato)
+    ms = [dict(c.execute("SELECT * FROM medicoes WHERE id=?", (ex,)).fetchone())]
+    assert notas_envio._irmas(c, contrato, familia, o, ms, HOJE) == []
