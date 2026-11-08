@@ -72,9 +72,9 @@ def avisos(conn, contrato_id: int, tipo: str, numero: int, competencia: str, ini
 
 
 def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None) -> dict:
-    """saldo = vigente − acumulado anterior (e − pedido, no `saldo_apos_pedido`). Difere de paineis.saldo de
-    proposito: o acumulado da planilha/carta conta o pedido ainda nao protocolado das medicoes anteriores (spec
-    §2.1 passo 1, "soma dos aprovados, senao pedidos"), e o painel so' o que ja' foi protocolado.
+    """saldo = vigente − acumulado anterior (e − pedido, no `saldo_apos_pedido`). O acumulado conta as medicoes
+    anteriores pela mesma lista do medido de paineis.saldo (#561: a partir do envio da planilha/carta; spec §2.1
+    passo 1, "soma dos aprovados, senao pedidos").
     So' a execucao tem saldo contra o valor do contrato (como em paineis.saldo); no projeto, os saldos sao nulos."""
     c = contratos.vigente(conn, contrato_id)
     vigente = c["valor_vigente_centavos"]

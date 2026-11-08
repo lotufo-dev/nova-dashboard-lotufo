@@ -151,7 +151,7 @@ def saldo(conn: sqlite3.Connection, contrato_id: int) -> dict:
             "atestado_execucao_centavos": atestado,
             "saldo_centavos": vig["valor_vigente_execucao_centavos"] - atestado,
             "formula": "saldo = vigente de execução (sem aditivo de reajuste) − medido (execução: atestado; "
-                       "protocolado enquanto não atestado); reajustes em série própria"}
+                       "pedido enviado ao órgão ou protocolado enquanto não atestado); reajustes em série própria"}
 
 
 # ------------------------------------------------------------------ avisos

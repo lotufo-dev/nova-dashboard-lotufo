@@ -196,6 +196,7 @@ def test_saldo_declara_o_fallback_do_protocolado(conn, cid):
     s = paineis.saldo(conn, cid)
     assert s["saldo_centavos"] == 750_00
     assert "protocolado" in s["formula"]
+    assert "pedido enviado ao órgão" in s["formula"]          # #561: a planilha/carta enviada ja' mede
 
 def test_alertas_ignora_data_ilegivel_em_vez_de_quebrar(conn, cid):
     # aditivos ainda entram sem a validacao do pydantic; um cadastro torto nao pode
