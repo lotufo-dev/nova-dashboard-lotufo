@@ -601,4 +601,50 @@ describe("Reajuste", () => {
     // sem reemissao possivel no pleito vigente (servidor), nenhum botao de reiterar
     expect(screen.queryByRole("button", { name: "Reiterar" })).toBeNull();
   });
+
+  // issue #586: a resposta do orgao ao pleito (indeferimento fecha o ciclo; deferimento parcial espera o termo)
+  const indeferimento = { id: 3, pleito_id: 10, resultado: "indeferido", data: "2026-10-20",
+    documento: "Ofício 77/2026 do órgão", texto: "Índice não previsto", corrige_resposta_id: null, criado_em: "2026-10-21 10:00:00" };
+
+  it("ciclo indeferido mostra o indeferimento com data e documento no cartão, no pleito e na linha do tempo (issue #586)", async () => {
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloPendente(10), situacao: "indeferido", dias: null, resposta: indeferimento }],
+          pleitos: [enviado({ id: 10, numero_oficio: "CT-122-LT-2026", enviado_em: "2026-06-15" })],
+          linhas_do_tempo: [{ data_base_mes: "2024-06", ciclo: 2026, termo: null, aditivos: [], respostas: [indeferimento] }] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const cartao = await screen.findByRole("region", { name: /^Data-base 06\/2024/ });
+    expect(within(cartao).getAllByText("indeferido").length).toBeGreaterThan(0);
+    expect(cartao.textContent).toContain("Indeferido em 20/10/2026 · Ofício 77/2026 do órgão");
+    // o pleito vigente diz o desfecho, e nao a espera do apostilamento
+    expect(screen.getByText("indeferido em 20/10/2026")).toBeTruthy();
+    expect(screen.queryByText(/sem apostilamento/)).toBeNull();
+    const linha = screen.getByRole("list", { name: "Linha do tempo do ciclo de 2026" });
+    expect([...linha.querySelectorAll("li")].map(li => li.textContent)).toEqual(
+      ["15/06/2026Pleito de reajuste CT-122-LT-2026 enviado", "20/10/2026Indeferido · Ofício 77/2026 do órgão"]);
+    // quem so' consulta nao registra resposta
+    expect(screen.queryByRole("button", { name: "Registrar resposta do órgão" })).toBeNull();
+  });
+
+  it("no pleito enviado sem apostilamento, registra a resposta do órgão (issue #586)", async () => {
+    // o foco volta ao cartao depois de gravar; o jsdom nao tem scrollIntoView
+    Element.prototype.scrollIntoView = vi.fn();
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [cicloPendente(10)], pleitos: [enviado({ id: 10, numero_oficio: "CT-122-LT-2026", enviado_em: "2026-06-15" })] }
+      : caminho.endsWith("/respostas") ? { id: 3 } : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar />);
+    fireEvent.click(await screen.findByRole("button", { name: "Registrar resposta do órgão" }));
+    const form = screen.getByRole("form", { name: "Resposta do órgão ao pleito CT-122-LT-2026" });
+    fireEvent.change(within(form).getByLabelText("Resposta"), { target: { value: "indeferido" } });
+    fireEvent.change(within(form).getByLabelText("Data"), { target: { value: "2026-10-20" } });
+    fireEvent.change(within(form).getByLabelText("Documento"), { target: { value: "Ofício 77/2026 do órgão" } });
+    fireEvent.change(within(form).getByLabelText("Texto"), { target: { value: "Índice não previsto" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Registrar resposta" }));
+    await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/pleitos/10/respostas")).toBe(true));
+    const [, opcoes] = api.mock.calls.find(c => c[0] === "/api/pleitos/10/respostas")!;
+    expect(opcoes.method).toBe("POST");
+    expect(JSON.parse(opcoes.body)).toEqual({ resultado: "indeferido", data: "2026-10-20",
+      documento: "Ofício 77/2026 do órgão", texto: "Índice não previsto" });
+    await waitFor(() => expect(screen.queryByRole("form", { name: /^Resposta do órgão/ })).toBeNull());
+  });
 });
