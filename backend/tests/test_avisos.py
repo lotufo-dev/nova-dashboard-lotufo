@@ -1122,6 +1122,16 @@ def test_so_a_capa_mais_recente_do_contrato_avisa_prazo(motor):
     assert medicoes.detalhe(c, m6)["capa_divergencias"] == []
 
 
+def test_capa_de_boletim_substituido_nao_avisa(motor):
+    # code-review: o boletim novo sem capa tira a capa antiga da conferencia (ninguem conseguiria aceita-la)
+    c, u, cid = motor
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa(execucao_fim="2028-03-31"))
+    assert len(_capa_avisos(c)) == 1
+    _bol_capa(c, u, mid, 10_000_00, "b", None)
+    assert _capa_avisos(c, "todos") == []
+
+
 def test_valor_aditivo_e_valor_do_contrato_na_cota_com_arredondamento_unico(motor):
     c, u, cid = motor
     # consorcio de 50%: o cadastro guarda a cota (R$ 1,00 e o aditivo de R$ 100,01); a capa imprime o cheio
@@ -1144,6 +1154,11 @@ def test_valor_aditivo_e_valor_do_contrato_na_cota_com_arredondamento_unico(moto
     assert por_tipo["capa_instrumento_ausente"]["valor_centavos"] == 1
     assert por_tipo["capa_valor_contrato_divergente"]["mensagem"] == (
         "Valor do contrato: capa do SMO diz R$ 1,01, cadastro diz R$ 1,00")
+    # o cadastro acima da capa: o que falta e' no SMO
+    _bol_capa(c, u, mid, 10_000_01, "c", _capa(valor_contrato_centavos=199, valor_aditivo_centavos=199_99))
+    [a] = _capa_avisos(c, "todos")
+    assert a["mensagem"] == (
+        "Cadastro tem aditivo que a capa do SMO não traz: valor aditivo de R$ 100,00 na capa, R$ 100,01 no cadastro")
 
 
 def test_acumulado_divergente_aparece_no_detalhe_e_no_inicio(motor):
@@ -1181,6 +1196,8 @@ def test_aceitar_a_diferenca_tira_os_avisos_da_capa_ate_o_proximo_boletim(motor)
     medicoes.aceitar_diferenca(c, u["id"], mid, "SMO ainda sem o apostilamento lançado")
     assert _capa_avisos(c, "todos") == [] and medicoes.detalhe(c, mid)["capa_divergencias"] == []
     assert medicoes.detalhe(c, mid)["diferenca_aceita"]["justificativa"] == "SMO ainda sem o apostilamento lançado"
+    textos = [e["texto"] for e in medicoes.edicoes_valor(c, [mid])[mid]]
+    assert "Diferença da capa do SMO com o cadastro aceita: SMO ainda sem o apostilamento lançado por U" in textos
     _bol_capa(c, u, mid, 10_000_01, "b", _capa(execucao_fim="2028-03-31", acumulado_pi_centavos=10_000_02))
     assert len(_capa_avisos(c)) == 2                       # boletim novo com a mesma diferenca: volta
 

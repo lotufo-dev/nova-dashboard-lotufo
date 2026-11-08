@@ -485,8 +485,10 @@ def _eventos_diferenca_aceita(conn: sqlite3.Connection, ids: list[int], out: dic
                 "SELECT d.medicao_id, d.aprovado_centavos, d.pedido_centavos, d.justificativa, d.criado_em, u.nome "
                 "FROM medicao_diferencas_aceitas d LEFT JOIN usuarios u ON u.id=d.usuario_id "
                 f"WHERE d.medicao_id IN ({','.join('?' * len(lote))}) ORDER BY d.id", lote):
-            texto = (f"Diferença de {format_brl(r['pedido_centavos'] - r['aprovado_centavos'])} abaixo do pedido "
-                     f"aceita: {r['justificativa']}")
+            falta = r["pedido_centavos"] - r["aprovado_centavos"]
+            # issue #286: sem o aprovado abaixo do pedido, o aceite foi da capa do SMO divergente do cadastro
+            texto = (f"Diferença de {format_brl(falta)} abaixo do pedido aceita: {r['justificativa']}" if falta > 0
+                     else f"Diferença da capa do SMO com o cadastro aceita: {r['justificativa']}")
             out[r["medicao_id"]].append({"data": r["criado_em"],
                                          "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
 

@@ -272,7 +272,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
   const boletimNaEtapa = podeEditar && m.estado === "planilha_enviada" && temPassosPlanilha && atual === 2;
   const podeBoletim = podeEditar && !EXCECOES.includes(m.estado) && m.estado !== "planilha_gerada";
-  const abaixoDoPedido = comBoletim && !EXCECOES.includes(m.estado) && !m.diferenca_aceita
+  // #286: tambem a capa do SMO divergente do cadastro, que se aceita pelo mesmo ato
+  const diferencaAAceitar = comBoletim && !EXCECOES.includes(m.estado) && !m.diferenca_aceita
     && m.valor_atestado_centavos !== null && m.valor_protocolado_centavos !== null
     && (m.valor_atestado_centavos < m.valor_protocolado_centavos || (m.capa_divergencias ?? []).length > 0);
   // #568: o boletim fora da etapa mora em "Mais ações"; o proximo passo abre a janela dele direto
@@ -286,7 +287,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     ...(podeBoletim && !boletimNaEtapa ? [{ id: "boletim", rotulo: comBoletim ? "Registrar boletim novo" : "Registrar boletim" }] : []),
     ...(!EXCECOES.includes(m.estado) && comBoletim ? [{ id: "assinatura", rotulo: "Registrar assinatura" }] : []),
     // #288: sem o passo 2 (MT-PAR, SES, prefeituras), o aceite da diferenca do boletim mora aqui
-    ...(!temPassosPlanilha && abaixoDoPedido ? [{ id: "diferenca", rotulo: "Aceitar a diferença" }] : []),
+    ...(!temPassosPlanilha && diferencaAAceitar ? [{ id: "diferenca", rotulo: "Aceitar a diferença" }] : []),
     ...(m.final !== 1 && !EXCECOES.includes(m.estado) ? [{ id: "final", rotulo: "Marcar como medição final" }] : []),
     ...(m.final === 1 ? [{ id: "desfinal", rotulo: "Desmarcar a medição final" }] : []),
     ...(PROXIMOS[m.estado] ?? []).filter(e => e !== "recebida").map((e, i) =>

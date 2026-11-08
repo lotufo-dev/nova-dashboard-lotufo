@@ -56,10 +56,12 @@ def aceita(conn, atesto_id: int) -> bool:
 
 
 def _mais_recente(conn, contrato_id: int) -> dict | None:
-    """A capa mais recente do contrato, pela data de realizacao (sem data, por ultimo), das medicoes que valem."""
+    """A capa mais recente do contrato, pela data de realizacao (sem data, por ultimo), das medicoes que valem. So'
+    a do boletim vigente de cada medicao: a capa de um boletim substituido nao avisa (code-review)."""
     r = conn.execute(
         "SELECT cap.* FROM medicao_boletim_capas cap JOIN medicoes m ON m.id=cap.medicao_id "
         f"WHERE m.contrato_id=? AND m.estado NOT IN ({','.join('?' * len(_FORA))}) "
+        "AND cap.atesto_id=(SELECT MAX(id) FROM medicao_atestos WHERE medicao_id=cap.medicao_id) "
         "ORDER BY cap.data_realizacao IS NULL, cap.data_realizacao DESC, cap.id DESC LIMIT 1",
         (contrato_id, *_FORA)).fetchone()
     return dict(r) if r else None
@@ -88,9 +90,12 @@ def _contrato(conn, capa: dict) -> list[dict]:
         lido = contratos.cota(capa["valor_aditivo_centavos"], bp)
         cadastro = v["valor_vigente_execucao_centavos"] - v["valor_original_centavos"]
         if lido != cadastro:
+            # code-review: com o cadastro acima da capa, o que falta e' no SMO, nao no cadastro
+            frase = ("Capa do SMO cita instrumento que o cadastro não tem" if lido > cadastro
+                     else "Cadastro tem aditivo que a capa do SMO não traz")
             out.append({"tipo": "capa_instrumento_ausente", "valor_centavos": lido - cadastro,
-                        "mensagem": f"Capa do SMO cita instrumento que o cadastro não tem: valor aditivo de "
-                                    f"{format_brl(lido)} na capa, {format_brl(cadastro)} no cadastro"})
+                        "mensagem": f"{frase}: valor aditivo de {format_brl(lido)} na capa, "
+                                    f"{format_brl(cadastro)} no cadastro"})
     if capa["valor_contrato_centavos"] is not None:
         lido = contratos.cota(capa["valor_contrato_centavos"], bp)
         cadastro = v["valor_original_centavos"]
