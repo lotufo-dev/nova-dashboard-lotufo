@@ -21,7 +21,9 @@ QUARTIL, MINIMO, PADRAO_DIAS = 0.75, 10, 30   # prazo do orgao: so' o "previsto"
 ESPERANDO_NOTA = ("espelho_gerado", "espelho_enviado")
 ESPERANDO_PROTOCOLO = ("nota_emitida",)
 PROTOCOLADAS = ("protocolada", "nf_emitida")
-FORA = ("cancelada", "desistida", "prevista")
+# #561: fora do medido = o que nao esta' em `medicoes.ESTADOS_NO_MEDIDO` (conta a partir do envio da planilha/carta). A
+# planilha gerada sai junto: o `complemento_rm` nao a conta como lancada, e conta-la aqui somaria ela e a nota do RM.
+FORA = ("cancelada", "desistida", "prevista", "planilha_gerada")
 FAIXAS = (("ate_30", 0, 30), ("de_31_a_60", 31, 60), ("mais_60", 61, None))
 COMPETENCIA_NOTA_VALE = "2026-06"   # `complemento_rm`: a carga do historico trouxe as medicoes ate' 05/2026
 TOLERANCIA_CENTAVOS = 100      # titulo pago com ate R$ 1,00 de diferenca nao e' divida (arredondamento do RM)
@@ -152,7 +154,8 @@ def _notas_do_rm(conn) -> list[tuple]:
         c = contr.get(cid)
         if c is None or c["col"] != n["coligada"]:
             continue
-        out.append((n, c, any(estado not in FORA for _, estado in lig)))
+        # #561: so' a medicao que mede (`medicoes.ESTADOS_NO_MEDIDO`) representa a nota; a planilha gerada, nao
+        out.append((n, c, any(estado in medicoes.ESTADOS_NO_MEDIDO for _, estado in lig)))
     return out
 
 
@@ -202,7 +205,7 @@ def complemento_rm(conn) -> dict[int, dict[str, int]]:
     lancado: dict[tuple, int] = {}
     for m in conn.execute("SELECT contrato_id, competencia, estado, COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) v "
                           "FROM medicoes WHERE competencia>=?", (COMPETENCIA_NOTA_VALE,)):
-        if m["estado"] not in FORA:
+        if m["estado"] in medicoes.ESTADOS_NO_MEDIDO:     # #561: o lancado e' o que mede, como o medido da Carteira
             lancado[(m["contrato_id"], m["competencia"])] = lancado.get((m["contrato_id"], m["competencia"]), 0) + m["v"]
     out: dict[int, dict[str, int]] = {}
     for cid, por_comp in soltas.items():

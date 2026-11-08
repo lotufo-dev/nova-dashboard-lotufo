@@ -78,3 +78,33 @@ def test_curva_traz_a_linha_anterior_e_as_marcas_dos_aditivos(client_admin):
     assert r["aditivos"] == [{"competencia": "2026-07", "data": "2026-07-15", "nome": "1º TA"}]
     # a versao 1 e' a unica repactuacao e nao ha nada antes dela
     assert r["anterior"] is None
+
+
+def test_curva_e_saldo_de_um_retrato_so(client_admin, monkeypatch):
+    """#561 (gate Sol): outra conexao envia a planilha/carta entre a curva e o saldo; a resposta inteira le um retrato
+    so', entao a medicao fica fora dos dois (e nao dentro do saldo e fora da curva)."""
+    from app import db, paineis
+    cid = novo_contrato({"orgao": "SINFRA", "numero_instrumento": "IC 9/2026", "objeto": "Obra Y",
+                         "valor_original": "1.000,00"})
+    conn = db.get_conn()
+    try:
+        mid = conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, "
+                           "valor_protocolado_centavos) VALUES (?, 1, 'execucao', '2026-07', 'planilha_gerada', 10001)",
+                           (cid,)).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+    original = paineis.saldo
+
+    def envia_no_meio(c, contrato_id):
+        outra = db.get_conn()
+        try:
+            outra.execute("UPDATE medicoes SET estado='planilha_enviada' WHERE id=?", (mid,))
+            outra.commit()
+        finally:
+            outra.close()
+        return original(c, contrato_id)
+    monkeypatch.setattr(paineis, "saldo", envia_no_meio)
+    r = client_admin.get(f"/api/contratos/{cid}/curva").json()
+    medido_curva = sum(p["medido_execucao_centavos"] for p in r["curva"])
+    assert medido_curva == r["saldo"]["atestado_execucao_centavos"] == 0

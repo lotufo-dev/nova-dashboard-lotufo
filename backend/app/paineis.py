@@ -8,9 +8,9 @@ precisa dos padroes de corrida (UPDATE condicional) das camadas de escrita.
 import datetime
 import sqlite3
 
-from app import avisos, contratos, cronograma, tempo
+from app import avisos, contratos, cronograma, medicoes, tempo
 
-ESTADOS_VALIDOS = ("protocolada", "nf_emitida", "recebida")  # medem; excecoes ficam fora
+ESTADOS_VALIDOS = medicoes.ESTADOS_NO_MEDIDO  # medem (#561: a mesma lista do acumulado do formulario)
 TIPOS = ("execucao", "reajuste", "projeto")
 # Placeholders derivados da constante: se ESTADOS_VALIDOS mudar de tamanho, as
 # queries acompanham sozinhas em vez de quebrar num "IN (?,?,?)" fixo.
@@ -151,7 +151,7 @@ def saldo(conn: sqlite3.Connection, contrato_id: int) -> dict:
             "atestado_execucao_centavos": atestado,
             "saldo_centavos": vig["valor_vigente_execucao_centavos"] - atestado,
             "formula": "saldo = vigente de execução (sem aditivo de reajuste) − medido (execução: atestado; "
-                       "protocolado enquanto não atestado); reajustes em série própria"}
+                       "pedido enviado ao órgão ou protocolado enquanto não atestado); reajustes em série própria"}
 
 
 # ------------------------------------------------------------------ avisos
