@@ -22,6 +22,7 @@ from decimal import Decimal
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fpdf import FPDF
+from PIL import Image
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.writer.excel import ExcelWriter
@@ -115,6 +116,7 @@ class Carta:
 
 CINZA = (204, 204, 204)
 LOGO_LARGURA_MM = 58          # largura padrao do logo no topo (papel da Lotufo)
+LOGO_ALTURA_MAX_MM = 50       # teto da altura do logo: o corpo e o titulo da capa (120 mm) ficam abaixo dele
 
 
 def _arquivo_de_dados(rel: str | None) -> Path | None:
@@ -151,17 +153,15 @@ class _Doc(FPDF):
         self.emitente = emitente or {}
         self.logo = _arquivo_de_dados(self.emitente.get("logo"))
         self.fundo = bool(self.emitente.get("fundo")) and self.logo is not None
-        self.rodape = self.fundo or bool(self.emitente.get("rodape"))
-        self.logo_largura = float(self.emitente.get("logo_largura_mm") or LOGO_LARGURA_MM)
+        # sem logo, o cabecalho de texto ja' traz razao social, endereco e CNPJ: o rodape so' vem com o logo
+        self.rodape = self.fundo or (bool(self.emitente.get("rodape")) and self.logo is not None)
+        self.logo_largura = self._largura_do_logo()
         if self.fundo:
             self.set_margins(33, 20, 20)
             self.set_auto_page_break(True, margin=42)
-        elif self.rodape:
-            self.set_margins(25, 20, 20)
-            self.set_auto_page_break(True, margin=28)     # o rodape comeca em 272 mm
         else:
             self.set_margins(25, 20, 20)
-            self.set_auto_page_break(True, margin=22)
+            self.set_auto_page_break(True, margin=28 if self.rodape else 22)     # o rodape comeca em 272 mm
         fonte = fonte_carta()
         if fonte:
             self.add_font("Carta", "", str(fonte[0]))
@@ -169,6 +169,21 @@ class _Doc(FPDF):
             self.fonte, self.unicode = "Carta", True
         else:
             self.fonte, self.unicode = "Helvetica", False
+
+    def _largura_do_logo(self) -> float:
+        """A largura do cadastro (padrao 58 mm), reduzida se o logo passaria de LOGO_ALTURA_MAX_MM de altura:
+        logo alto demais empurraria o corpo para fora da pagina e cobriria o titulo da capa."""
+        largura = float(self.emitente.get("logo_largura_mm") or LOGO_LARGURA_MM)
+        if self.logo is None:
+            return largura
+        try:
+            with Image.open(self.logo) as im:
+                px_l, px_a = im.size
+        except (OSError, ValueError):
+            return largura
+        if px_l and px_a and largura * px_a / px_l > LOGO_ALTURA_MAX_MM:
+            largura = LOGO_ALTURA_MAX_MM * px_l / px_a
+        return largura
 
     def t(self, s: str) -> str:
         if self.unicode:
@@ -193,7 +208,10 @@ class _Doc(FPDF):
             self._l_cinza()
         if self.logo is not None:
             info = self.image(str(self.logo), x=(210 - self.logo_largura) / 2, y=6, w=self.logo_largura)
-            self.set_y(max(34, 6 + info.rendered_height + 4))   # logo alto empurra o corpo para baixo dele
+            y = 34                                              # papel da Lotufo (58 mm): o corpo comeca em 34 mm
+            if self.emitente.get("logo_largura_mm"):           # largura do cadastro: o corpo comeca abaixo do logo
+                y = max(y, 6 + info.rendered_height + 4)
+            self.set_y(y)
             return
         if self.emitente.get("razao_social"):
             self.set_font(self.fonte, "B", 11)

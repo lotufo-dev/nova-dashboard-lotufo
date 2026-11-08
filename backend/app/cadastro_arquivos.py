@@ -1224,8 +1224,8 @@ def _cartas(raiz: Path, ents: set[str], erros: list[str]) -> dict | None:
         if e.get("rodape") is not None and not isinstance(e["rodape"], bool):
             erros.append(f"cartas.yaml: emitentes.{chave}.rodape: use true ou false")
         larg = e.get("logo_largura_mm")
-        if larg is not None and (isinstance(larg, bool) or not isinstance(larg, (int, float)) or not 10 <= larg <= 190):
-            erros.append(f"cartas.yaml: emitentes.{chave}.logo_largura_mm: número entre 10 e 190 (mm)")
+        if larg is not None and (isinstance(larg, bool) or not isinstance(larg, (int, float)) or not 10 <= larg <= 150):
+            erros.append(f"cartas.yaml: emitentes.{chave}.logo_largura_mm: número entre 10 e 150 (mm)")
         if e.get("logo"):
             p = _dentro(raiz, e["logo"])
             if not p:

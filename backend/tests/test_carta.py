@@ -304,10 +304,17 @@ def _largura_do_logo_mm(pdf: bytes) -> float:
     return float(m.group(1)) * 25.4 / 72
 
 
+def _logo_faixa(pasta, nome="faixa.png", largura_px=40, altura_px=10):
+    """Logo em faixa (4:1 por padrao), como o dos consorcios; o `_logo_sintetico` e' quadrado."""
+    from PIL import Image
+    Image.new("RGB", (largura_px, altura_px), (79, 70, 229)).save(pasta / nome)
+    return nome
+
+
 def _consorcio(pasta, **mudar):
     e = {"razao_social": "CONSORCIO EXEMPLO", "cnpj": "00.000.000/0001-00", "ie": "11.111.111-1",
          "endereco": "Rua do Consorcio, 10 - Cuiaba/MT", "contato": "Tel.: (00) 1111-1111",
-         "logo": _logo_sintetico(pasta)}
+         "logo": _logo_faixa(pasta)}
     e.update(mudar)
     return e
 
@@ -351,6 +358,24 @@ def test_logo_com_largura_configurada_sai_nessa_largura(tmp_path, monkeypatch):
 def test_logo_alto_empurra_o_corpo_para_baixo_dele(tmp_path, monkeypatch):
     """O PNG sintetico e' quadrado: com 40 mm de largura vai de 6 a 46 mm, e o corpo comeca abaixo dele."""
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
-    pdf = carta.gerar(_carta(emitente=_consorcio(tmp_path, logo_largura_mm=40)))
+    pdf = carta.gerar(_carta(emitente=_consorcio(tmp_path, logo=_logo_sintetico(tmp_path), logo_largura_mm=40)))
     primeira_y = max(float(y) for y in re.findall(rb"BT [\d.]+ ([\d.]+) Td", _conteudo(pdf)))
     assert (841.89 - primeira_y) * 25.4 / 72 > 46
+
+
+def test_logo_alto_demais_e_reduzido_ao_teto_de_altura_e_a_carta_sai(tmp_path, monkeypatch):
+    """Quadrado com 150 mm de largura iria ate' 156 mm de altura e empurraria o corpo para fora da pagina."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    emitente = _consorcio(tmp_path, logo=_logo_sintetico(tmp_path), logo_largura_mm=150, rodape=True)
+    pdf = carta.gerar(_carta(emitente=emitente))
+    assert _largura_do_logo_mm(pdf) == pytest.approx(carta.LOGO_ALTURA_MAX_MM, abs=0.01)
+    assert "Prezada Senhora" in _texto(pdf)
+    assert _imagens(carta.pagina_titulo(["CAPA"], emitente)) == 1
+
+
+def test_rodape_sem_logo_nao_repete_os_dados_do_cabecalho_de_texto(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    pdf = carta.gerar(_carta(emitente=_consorcio(tmp_path, logo=None, rodape=True)))
+    texto = _texto(pdf)
+    assert texto.count("CONSORCIO EXEMPLO") == 1                     # so' o cabecalho de texto
+    assert "Tel.: (00) 1111-1111" not in texto
