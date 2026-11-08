@@ -754,3 +754,43 @@ def test_sem_apostilamento_soma_o_medido_medicao_a_medicao_com_o_complemento(obr
     _r_medicao(c, cid, 2, "2026-08", "boletim_recebido", pedido=55_000_00, aprovado=50_000_01)
     [a] = _do_tipo(c, "reajuste_sem_apostilamento")
     assert (a["valor_centavos"], a["publico"], a["competencias"]) == (110_000_01, ["operacao", "diretoria"], ["2026-08"])
+
+
+def test_indeferimento_do_pleito_fecha_o_ciclo_para_sem_resposta_e_reemitir(obra_reajuste):
+    # issue #586: o orgao indefere o pleito; o ciclo deixa de pedir resposta e de pedir cronograma a reemitir
+    c, cid, uid = obra_reajuste
+    p1 = _r_pleito(c, cid, "2026-06-10")
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero) "
+              "VALUES (?, 'prazo', 'assinado', '2026-08-01', '5º Termo Aditivo')", (cid,)); c.commit()
+    hoje = D(2026, 10, 20)
+    assert len(_do_tipo(c, "reajuste_sem_resposta", hoje)) == 1
+    assert len(_do_tipo(c, "reajuste_reemitir", hoje)) == 1
+    assert len(_do_tipo(c, "reajuste_apostilamento", hoje)) == 1
+    reajuste.registrar_resposta(c, uid, p1, "indeferido", "2026-10-15", "Ofício 123/2026 do órgão",
+                                "Índice não aplicável ao contrato", hoje=hoje)
+    for tipo in ("reajuste_sem_resposta", "reajuste_reemitir", "reajuste_apostilamento"):
+        assert _do_tipo(c, tipo, hoje) == [], tipo
+        assert _do_tipo(c, tipo, D(2027, 7, 1)) == [], tipo          # nem depois da janela do ciclo seguinte
+    # outro aditivo de prazo assinado depois do indeferimento nao reabre o "a reemitir"
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero) "
+              "VALUES (?, 'prazo', 'assinado', '2026-12-01', '6º Termo Aditivo')", (cid,)); c.commit()
+    assert _do_tipo(c, "reajuste_reemitir", D(2027, 1, 10)) == []
+
+
+def test_deferimento_parcial_continua_esperando_o_termo(obra_reajuste):
+    c, cid, uid = obra_reajuste
+    p1 = _r_pleito(c, cid, "2026-06-10")
+    hoje = D(2026, 10, 20)
+    reajuste.registrar_resposta(c, uid, p1, "deferido_parcial", "2026-10-15", "Ofício 124/2026 do órgão",
+                                "Deferido só o índice de 2025", hoje=hoje)
+    assert len(_do_tipo(c, "reajuste_sem_resposta", hoje)) == 1
+
+
+def test_pleito_enviado_depois_do_indeferimento_reabre_o_ciclo(obra_reajuste):
+    c, cid, uid = obra_reajuste
+    p1 = _r_pleito(c, cid, "2026-06-10")
+    reajuste.registrar_resposta(c, uid, p1, "indeferido", "2026-07-01", "Ofício 125/2026 do órgão",
+                                "Índice não aplicável ao contrato", hoje=D(2026, 7, 2))
+    assert _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 20)) == []
+    _r_pleito(c, cid, "2026-07-10", reemite=p1, reemissao="reiteracao", numero="CT-2-LT-2026")    # recurso
+    assert len(_do_tipo(c, "reajuste_sem_resposta", D(2026, 11, 20))) == 1

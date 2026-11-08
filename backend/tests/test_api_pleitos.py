@@ -1370,3 +1370,32 @@ def test_justificativa_do_reajuste_fora_da_previsao_pela_api(api):
     assert r.status_code == 422 and r.json()["detail"] == "O pedido desta competência não está fora da previsão"
     assert cl.post("/api/contratos/999999/reajuste/justificativas",
                    json={**corpo, "texto": "Índice definitivo maior"}).status_code == 404
+
+
+def test_resposta_do_orgao_ao_pleito_pela_api(api, monkeypatch):
+    """Issue #586: o indeferimento registrado pela aba fecha o ciclo e volta no ciclo e na linha do tempo."""
+    import datetime
+
+    from app import tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 9, 10))
+    cl, cid, _ = api
+    c = db.get_conn()
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+              "enviado_em) VALUES (?, 'reajuste', 'cadastro', '2024-06', 2026, 'CT-1-LT-2026', 'enviado', '2026-06-10')",
+              (cid,))
+    pid = c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+    c.commit(); c.close()
+    corpo = {"resultado": "indeferido", "data": "2026-09-01", "documento": "Ofício 77/2026 do órgão",
+             "texto": "Índice não previsto no contrato"}
+    r = cl.post(f"/api/pleitos/{pid}/respostas", json={**corpo, "data": "2026-06-01"})
+    assert r.status_code == 422 and "anterior ao envio" in r.json()["detail"]
+    r = cl.post(f"/api/pleitos/{pid}/respostas", json={**corpo, "resultado": "aceito"})
+    assert r.status_code == 422
+    assert cl.post("/api/pleitos/999999/respostas", json=corpo).status_code == 404
+    r = cl.post(f"/api/pleitos/{pid}/respostas", json=corpo)
+    assert r.status_code == 201, r.text
+    aba = cl.get(f"/api/contratos/{cid}/reajuste").json()
+    [k] = aba["ciclos"]
+    assert (k["situacao"], k["resposta"]["documento"]) == ("indeferido", "Ofício 77/2026 do órgão")
+    [t] = aba["linhas_do_tempo"]
+    assert [(x["resultado"], x["data"]) for x in t["respostas"]] == [("indeferido", "2026-09-01")]

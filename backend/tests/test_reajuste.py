@@ -1,6 +1,7 @@
 """Ciclo do reajuste por data-base (spec §7.2)."""
 import datetime
 import json
+import sqlite3
 
 import pytest
 
@@ -1390,3 +1391,91 @@ def test_so_o_aditivo_de_reajuste_que_corrige_tira_o_corrigido(obra_ses):
     _aditivo_reajuste(c, cid, "ta-04", "2025-12-03", data_base="2021-10", cancelado=True, corrige="ta-01")
     assert reajuste.apostilamento_do_ciclo(c, cid, "2021-10", 2025, True)["chave"] == "ta-01"
     assert [a["chave"] for a in reajuste.aditivos_de_reajuste(c, cid)] == ["ta-01"]
+
+
+# ---- Resposta do orgao ao pleito (issue #586): indeferimento fecha o ciclo; deferimento parcial espera o termo ----
+
+def _pid(c):
+    return c.execute("SELECT MAX(id) FROM pleitos").fetchone()[0]
+
+
+def test_indeferimento_fecha_o_ciclo_e_entra_na_linha_do_tempo(cenario):
+    c, ids = cenario
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    pid, cid = _pid(c), ids["contrato"]
+    rid = reajuste.registrar_resposta(c, 1, pid, "indeferido", "2026-09-01", "Ofício 77/2026 do órgão",
+                                      "Índice não previsto no contrato", hoje=D(2026, 9, 5))
+    [k] = reajuste.ciclos(c, cid, D(2026, 9, 10))
+    assert (k["situacao"], k["dias"]) == ("indeferido", None)
+    assert (k["resposta"]["id"], k["resposta"]["data"], k["resposta"]["documento"]) == \
+        (rid, "2026-09-01", "Ofício 77/2026 do órgão")
+    [t] = reajuste.linhas_do_tempo(c, cid)
+    assert [(r["resultado"], r["data"], r["documento"]) for r in t["respostas"]] == \
+        [("indeferido", "2026-09-01", "Ofício 77/2026 do órgão")]
+    # o evento fica na auditoria, com quem fez
+    a = c.execute("SELECT usuario_id, depois FROM audit_log WHERE acao='pleito.resposta'").fetchone()
+    assert a["usuario_id"] == 1 and json.loads(a["depois"])["resultado"] == "indeferido"
+
+
+def test_deferimento_parcial_continua_apostilamento_pendente(cenario):
+    c, ids = cenario
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    reajuste.registrar_resposta(c, 1, _pid(c), "deferido_parcial", "2026-09-01", "Ofício 78/2026 do órgão",
+                                "Deferido só parte do período", hoje=D(2026, 9, 5))
+    [k] = reajuste.ciclos(c, ids["contrato"], D(2026, 9, 10))
+    assert k["situacao"] == "apostilamento_pendente" and k["resposta"]["resultado"] == "deferido_parcial"
+
+
+def test_resposta_e_evento_que_nao_se_altera_e_a_correcao_e_resposta_nova(cenario):
+    c, ids = cenario
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    pid, cid = _pid(c), ids["contrato"]
+    r1 = reajuste.registrar_resposta(c, 1, pid, "indeferido", "2026-09-01", "Ofício 77/2026 do órgão",
+                                     "Índice não previsto no contrato", hoje=D(2026, 9, 5))
+    with pytest.raises(sqlite3.IntegrityError):
+        c.execute("UPDATE pleito_respostas SET resultado='deferido_parcial' WHERE id=?", (r1,))
+    with pytest.raises(sqlite3.IntegrityError):
+        c.execute("DELETE FROM pleito_respostas WHERE id=?", (r1,))
+    c.rollback()
+    # a correcao e' resposta nova, que aponta a corrigida; a ultima vale e as duas ficam na linha do tempo
+    r2 = reajuste.registrar_resposta(c, 1, pid, "deferido_parcial", "2026-09-01", "Ofício 77/2026 do órgão",
+                                     "Lido de novo: deferido em parte", hoje=D(2026, 9, 6))
+    assert c.execute("SELECT corrige_resposta_id FROM pleito_respostas WHERE id=?", (r2,)).fetchone()[0] == r1
+    assert reajuste.ciclos(c, cid, D(2026, 9, 10))[0]["situacao"] == "apostilamento_pendente"
+    assert [r["id"] for r in reajuste.linhas_do_tempo(c, cid)[0]["respostas"]] == [r1, r2]
+
+
+def test_resposta_recusada_fora_do_pleito_vigente_ou_com_dado_invalido(cenario):
+    c, ids = cenario
+    ids["pleito"](data_base="2024-06", ciclo=2026, enviado_em="2026-06-10")
+    p1 = _pid(c)
+    ok = dict(resultado="indeferido", data="2026-09-01", documento="Ofício 77/2026", texto="Índice não previsto")
+    casos = [
+        (dict(ok, resultado="deferido"), "Resposta inválida"),
+        (dict(ok, data="2026-06-09"), "anterior ao envio"),
+        (dict(ok, data="2026-09-06"), "futura"),
+        (dict(ok, data="01/09/2026"), "Data inválida"),
+        (dict(ok, documento="  "), "documento"),
+        (dict(ok, texto="curto"), "10 caracteres"),
+    ]
+    for dados, msg in casos:
+        with pytest.raises(ValueError, match=msg):
+            reajuste.registrar_resposta(c, 1, p1, hoje=D(2026, 9, 5), **dados)
+    # rascunho nao tem resposta
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, situacao) "
+              "VALUES (?, 'reajuste', 'sistema', '2024-06', 2027, 'rascunho')", (ids["contrato"],)); c.commit()
+    with pytest.raises(ValueError, match="enviado"):
+        reajuste.registrar_resposta(c, 1, _pid(c), hoje=D(2026, 9, 5), **ok)
+    # depois da reiteracao, a resposta e' do pleito mais recente do ciclo
+    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, "
+              "enviado_em, reemite_pleito_id, reemissao) VALUES (?, 'reajuste', 'cadastro', '2024-06', 2026, "
+              "'CT-2-LT-2026', 'enviado', '2026-08-01', ?, 'reiteracao')", (ids["contrato"], p1)); c.commit()
+    with pytest.raises(ValueError, match="mais recente"):
+        reajuste.registrar_resposta(c, 1, p1, hoje=D(2026, 9, 5), **ok)
+    # ciclo apostilado nao recebe resposta
+    p2 = c.execute("SELECT id FROM pleitos WHERE reemissao='reiteracao'").fetchone()[0]
+    ids["instrumento"]("apostilamento_reajuste", "2026-08-20", {"data_base": "2024-06", "ciclo": 2026, "percentual": "6,76"})
+    c.execute("UPDATE pleitos SET instrumento_chave='apostilamento_reajuste-2026-08-20' WHERE id=?", (p1,)); c.commit()
+    with pytest.raises(ValueError, match="apostilado"):
+        reajuste.registrar_resposta(c, 1, p2, hoje=D(2026, 9, 5), **ok)
+    assert c.execute("SELECT COUNT(*) FROM pleito_respostas").fetchone()[0] == 0
