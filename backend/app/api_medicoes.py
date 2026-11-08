@@ -409,7 +409,7 @@ def _centavos(valor: str) -> int:
 
 
 @router.get("/api/contratos/{contrato_id}/planilhas/sugestao")
-def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "projeto"] = Query("execucao"),
+def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "projeto"] | None = Query(None),
                       usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
                       conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)

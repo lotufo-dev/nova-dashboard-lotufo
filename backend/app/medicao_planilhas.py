@@ -12,6 +12,8 @@ import datetime
 from app import arquivos, auditoria, contratos, db, espelho, tempo
 from app.medicoes import LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
+# o reajuste nao entra pela planilha/carta: nasce pelo campo "Reajuste" do formulario da execucao, em prevista,
+# com data-base e ciclo (decisao do Leo na #276, 08/11/2026)
 TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
 FORA_DO_ACUMULADO = ("prevista", "cancelada", "desistida")
@@ -84,9 +86,29 @@ def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None
             "saldo_apos_pedido_centavos": None if pedido is None else base - acumulado - pedido}
 
 
-def sugestao(conn, contrato_id: int, tipo: str = "execucao") -> dict:
+def tipo_da_ultima(conn, contrato_id: int) -> str:
+    """Issue #567: o tipo da ultima medicao de execucao ou projeto da obra (competencia mais recente; na mesma, a
+    execucao), fora prevista, cancelada e desistida. O reajuste nao conta: acompanha o numero da execucao e sai
+    depois dela (como em medicoes, #154), e pre-seleciona-lo trocaria a serie da proxima medicao. Sem medicao:
+    execucao."""
+    r = conn.execute(
+        "SELECT tipo FROM medicoes WHERE contrato_id=? AND tipo IN ('execucao','projeto') "
+        f"AND estado NOT IN ({','.join('?' * len(FORA_DO_ACUMULADO))}) "
+        "ORDER BY competencia DESC, tipo='execucao' DESC, numero DESC, id DESC LIMIT 1",
+        (contrato_id, *FORA_DO_ACUMULADO)).fetchone()
+    return r["tipo"] if r is not None else "execucao"
+
+
+def sugestao(conn, contrato_id: int, tipo: str | None = None) -> dict:
     """Nº (ultimo + 1; o do orgao tambem, onde ja' difere, D6), competencia (a da 1a prevista, senao o mes
-    seguinte ao da ultima, senao o mes corrente), periodo (o mes civil da competencia), acumulado e saldo."""
+    seguinte ao da ultima, senao o mes corrente), periodo (o mes civil da competencia), acumulado e saldo.
+    Sem tipo, o da ultima medicao da obra (issue #567: a obra so' de projeto sugere a proxima de projeto). Tudo de
+    um retrato so' (db.leitura): uma medicao gravada no meio nao mistura o nº de depois com a competencia de antes."""
+    with db.leitura(conn):
+        return _sugestao(conn, contrato_id, tipo_da_ultima(conn, contrato_id) if tipo is None else tipo)
+
+
+def _sugestao(conn, contrato_id: int, tipo: str) -> dict:
     prevista = conn.execute(
         "SELECT numero, competencia FROM medicoes WHERE contrato_id=? AND tipo=? AND estado='prevista' "
         "ORDER BY competencia, numero LIMIT 1", (contrato_id, tipo)).fetchone()
