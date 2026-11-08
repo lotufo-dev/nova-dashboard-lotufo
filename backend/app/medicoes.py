@@ -411,13 +411,16 @@ def _atesto_vigente(conn, medicao_id: int) -> int | None:
 
 def diferenca_aceita(conn, medicao_id: int) -> dict | None:
     """A aceitacao da diferenca do boletim VIGENTE, ou None (sem aceitacao, ou aceitacao de um boletim anterior:
-    o boletim novo ainda abaixo do pedido traz o aviso de volta)."""
+    o boletim novo ainda abaixo do pedido traz o aviso de volta). Vale so' para o pedido de agora: pedido mudado depois
+    (a prevista do fluxo antigo que recebe o valor do espelho) e' diferenca nova (code-review)."""
     vigente = _atesto_vigente(conn, medicao_id)
     if vigente is None:
         return None
     r = conn.execute("SELECT d.atesto_id, d.aprovado_centavos, d.pedido_centavos, d.justificativa, d.criado_em, "
                      "u.nome AS usuario FROM medicao_diferencas_aceitas d LEFT JOIN usuarios u ON u.id=d.usuario_id "
-                     "WHERE d.medicao_id=? AND d.atesto_id=?", (medicao_id, vigente)).fetchone()
+                     "JOIN medicoes m ON m.id=d.medicao_id WHERE d.medicao_id=? AND d.atesto_id=? "
+                     "AND d.pedido_centavos=m.valor_protocolado_centavos AND d.aprovado_centavos=m.valor_atestado_centavos "
+                     "ORDER BY d.id DESC LIMIT 1", (medicao_id, vigente)).fetchone()
     if r is None:
         return None
     return {**dict(r), "diferenca_centavos": r["aprovado_centavos"] - r["pedido_centavos"]}
@@ -441,9 +444,10 @@ def aceitar_diferenca(conn: sqlite3.Connection, usuario_id: int, medicao_id: int
         if dif is None or dif >= 0:
             raise ValueError("O aprovado não está abaixo do pedido: não há diferença a aceitar")
         vigente = _atesto_vigente(conn, medicao_id)
-        if conn.execute("SELECT 1 FROM medicao_diferencas_aceitas WHERE atesto_id=?", (vigente,)).fetchone():
-            raise ValueError("A diferença deste boletim já foi aceita")
         aprovado, pedido = m["valor_atestado_centavos"], m["valor_protocolado_centavos"]
+        if conn.execute("SELECT 1 FROM medicao_diferencas_aceitas WHERE atesto_id=? AND pedido_centavos=?",
+                        (vigente, pedido)).fetchone():
+            raise ValueError("A diferença deste boletim já foi aceita")
         aid = conn.execute(
             "INSERT INTO medicao_diferencas_aceitas (medicao_id, atesto_id, aprovado_centavos, pedido_centavos, "
             "justificativa, usuario_id) VALUES (?,?,?,?,?,?)",

@@ -15,7 +15,8 @@
 import datetime
 import json
 
-from app import avisos as _av, tempo
+from app import avisos as _av, contratos, prazos, tempo
+from app.medicao_planilhas import _mes_br, _mes_seguinte
 from app.medicoes import _data_br, diferenca_aceita, tem_boletim, titulo
 
 # a planilha/carta ja' foi ao orgao: o envio dela ou qualquer etapa seguinte (o fluxo antigo nao tem a planilha)
@@ -26,25 +27,12 @@ FAMILIAS_SEM_PEDIDO = ("mtpar",)       # na MT-PAR o oficio vai com a nota: nao 
 ESTADOS_PERIODO = ("planilha_gerada", "planilha_enviada")
 
 
-def _mes_seguinte(mes: str) -> str:
-    ano, m = int(mes[:4]), int(mes[5:7])
-    return f"{ano + m // 12}-{m % 12 + 1:02d}"
-
-
-def _mes_br(mes: str) -> str:
-    return f"{mes[5:7]}/{mes[:4]}"
-
-
 def _destino(cid: int) -> dict:
     return {"tela": "contrato", "id": cid, "aba": "medicoes"}
 
 
-def _paralisada_e_reinicio(conn, cid: int) -> tuple[bool, str | None]:
-    """(paralisada agora, data do ultimo reinicio). Paralisada = o ultimo evento e' uma paralisacao (prazos)."""
-    eventos = conn.execute("SELECT tipo, data FROM instrumentos WHERE contrato_id=? AND tipo IN ('paralisacao','reinicio') "
-                           "ORDER BY data, id", (cid,)).fetchall()
-    reinicios = [e["data"] for e in eventos if e["tipo"] == "reinicio"]
-    return bool(eventos) and eventos[-1]["tipo"] == "paralisacao", (reinicios[-1] if reinicios else None)
+def _ultimo_reinicio(conn, cid: int) -> str | None:
+    return conn.execute("SELECT MAX(data) FROM instrumentos WHERE contrato_id=? AND tipo='reinicio'", (cid,)).fetchone()[0]
 
 
 def _planilhas_nao_enviadas(conn, hoje: datetime.date) -> list[dict]:
@@ -55,9 +43,11 @@ def _planilhas_nao_enviadas(conn, hoje: datetime.date) -> list[dict]:
             if c.get("orgao_id") else None
         if familia is not None and familia["familia"] in FAMILIAS_SEM_PEDIDO:
             continue
-        paralisada, reinicio = _paralisada_e_reinicio(conn, c["id"])
-        if paralisada:
+        if prazos._paralisacao(conn, c["id"]):      # a mesma regra da aba Prazos
             continue
+        reinicio = _ultimo_reinicio(conn, c["id"])
+        # depois do fim da execucao nao ha' competencia de execucao a medir (code-review)
+        fim = (contratos.vigente(conn, c["id"]).get("execucao_fim_vigente") or "")[:7] or None
         ultima = conn.execute(f"SELECT MAX(competencia) FROM medicoes WHERE contrato_id=? AND tipo='execucao' "
                               f"AND estado IN ({marcas})", (c["id"], *ESTADOS_ENVIADA)).fetchone()[0]
         inicios = [_mes_seguinte(ultima)] if ultima else ([c["execucao_inicio"][:7]] if c.get("execucao_inicio") else [])
@@ -66,7 +56,7 @@ def _planilhas_nao_enviadas(conn, hoje: datetime.date) -> list[dict]:
         if not inicios:
             continue        # sem medicao enviada, sem inicio da execucao e sem reinicio: nao ha' de quando contar
         mes = max(inicios)
-        while True:
+        while fim is None or mes <= fim:
             seguinte = _mes_seguinte(mes)
             dia = datetime.date(int(seguinte[:4]), int(seguinte[5:7]), DIA_DO_AVISO)
             if dia > hoje:

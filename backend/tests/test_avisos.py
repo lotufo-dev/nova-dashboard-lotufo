@@ -566,6 +566,15 @@ def test_planilha_nao_enviada_fora_da_obra_paralisada_da_mtpar_e_inativa(motor):
     assert _meses_sem_planilha(c, D(2026, 11, 8)) == []
 
 
+def test_planilha_nao_enviada_para_no_fim_da_execucao(motor):
+    # code-review: depois do fim da execucao (vigente) nao ha' competencia de execucao a medir
+    c, u, cid = motor
+    _med(c, cid, 1, "2026-06", "protocolada")
+    c.execute("UPDATE contratos SET execucao_fim='2026-08-12' WHERE id=?", (cid,)); c.commit()
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == ["planilha/carta de 07/2026 não enviada",
+                                                      "planilha/carta de 08/2026 não enviada"]
+
+
 def test_pedido_sem_boletim_x_para_a_operacao_2x_para_a_diretoria_e_some_com_o_boletim(motor):
     c, u, cid = motor
     _med(c, cid, 1, "2026-10", "protocolada")        # sem aviso de planilha do mes no caminho
@@ -643,6 +652,20 @@ def test_aceitar_a_diferenca_tira_o_aviso_ate_o_proximo_boletim_abaixo(motor):
     _bol(c, u, mid, 10_000_01, "c")
     with pytest.raises(ValueError, match="não está abaixo do pedido"):
         medicoes.aceitar_diferenca(c, u["id"], mid, "glosa de itens não executados")
+
+
+def test_aceite_vale_so_para_o_pedido_de_quando_foi_aceito(motor):
+    # code-review: o pedido que muda depois (prevista do fluxo antigo que recebe o valor do espelho) e' diferenca nova
+    c, u, cid = motor
+    mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol(c, u, mid, 9_900_00, "a")
+    medicoes.aceitar_diferenca(c, u["id"], mid, "glosa pequena de itens")
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=60_000_00 WHERE id=?", (mid,)); c.commit()
+    assert medicoes.detalhe(c, mid)["diferenca_aceita"] is None
+    [a] = _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "diretoria")
+    assert a["valor_centavos"] == 50_100_00
+    medicoes.aceitar_diferenca(c, u["id"], mid, "pedido novo também conferido")
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
 
 
 def test_diferenca_aceita_e_evento_que_nao_se_altera_nem_se_apaga(motor):

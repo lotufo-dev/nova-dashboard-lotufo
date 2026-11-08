@@ -128,5 +128,7 @@ describe("AceiteDiferenca (issue #288)", () => {
     expect(container.textContent).toBe("");
     rerender(<AceiteDiferenca m={{ ...COM_BOLETIM, boletins: [] }} podeEditar salvando={false} agir={agirReal()} />);
     expect(container.textContent).toBe("");
+    rerender(<AceiteDiferenca m={{ ...COM_BOLETIM, estado: "cancelada" }} podeEditar salvando={false} agir={agirReal()} />);
+    expect(container.textContent).toBe("");
   });
 });

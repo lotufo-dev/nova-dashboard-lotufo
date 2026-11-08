@@ -38,7 +38,8 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
   const [tentou, setTentou] = useState(false);
   const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
   const pedido = m.valor_protocolado_centavos, aprovado = m.valor_atestado_centavos;
-  if (!comBoletim || pedido === null || aprovado === null || aprovado >= pedido) return null;
+  if (!comBoletim || ["cancelada", "desistida"].includes(m.estado) || pedido === null || aprovado === null
+    || aprovado >= pedido) return null;
   if (m.diferenca_aceita) return <Selo classe="selo--ok">Diferença aceita</Selo>;
   if (!podeEditar) return null;
   if (!aberto) {
