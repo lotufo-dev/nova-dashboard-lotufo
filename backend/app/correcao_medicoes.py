@@ -293,14 +293,24 @@ def _cancelar(conn, uid, m, op, fonte):
     if duplicata and desligadas:
         # Revisor da #565: a nota desligada fica "desfeita à mão" e o casador do RM nao a liga sozinho; se a
         # verdadeira nao tem nota que cubra o valor dela (qualquer que seja o estado), a nota paga ficaria sem medicao
+        # Conta por coligada (rodada 2 do revisor): em consorcio a medicao tem a fatura do consorcio (valor cheio,
+        # coligada do consorcio) e a NF da Lotufo (a cota, coligada da Lotufo); uma nao cobre a outra
+        from app import contratos, notas   # import local: notas importa medicoes
+        lotufo = notas._coligada_lotufo(conn)
+        pct = conn.execute("SELECT percentual_direito_bp FROM contratos WHERE id=?", (v["contrato_id"],)).fetchone()[0]
         notas_v = _nfs_ativas(conn, v["id"])
         valor_v = v["valor_atestado_centavos"] if v["valor_atestado_centavos"] is not None \
             else v["valor_protocolado_centavos"]
-        if not notas_v or (valor_v is not None and sum(n["valor_centavos"] for n in notas_v) < valor_v):
-            detalhes.append("AVISO: a verdadeira " + ("não tem NF ligada" if not notas_v else
-                                                      "tem NF que não cobre o valor dela")
-                            + "; o casador do RM não religa a nota desligada: ligue "
-                            + ", ".join(_fmt_nf(a) for a in desligadas) + " à verdadeira (ligar_nf)")
+        for col in dict.fromkeys(a["coligada"] for a in desligadas):
+            da_col = [n for n in notas_v if n["coligada"] == col]
+            alvo = contratos.cota(valor_v, pct) if col == lotufo else valor_v
+            if da_col and (alvo is None or sum(n["valor_centavos"] for n in da_col) >= alvo):
+                continue
+            falta = (f"tem NF da coligada {col} que não cobre o valor dela" if da_col
+                     else f"não tem NF ligada da coligada {col}")
+            detalhes.append(f"AVISO: a verdadeira {falta}; o casador do RM não religa a nota desligada: ligue "
+                            + ", ".join(_fmt_nf(a) for a in desligadas if a["coligada"] == col)
+                            + " à verdadeira (ligar_nf)")
     if recebida_duplicata:
         cur = conn.execute("UPDATE medicoes SET estado='cancelada', motivo_represamento=? WHERE id=? AND estado=?",
                            (texto, m["id"], m["estado"]))

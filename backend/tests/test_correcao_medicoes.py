@@ -341,10 +341,46 @@ def test_cancelar_duplicata_avisa_quando_a_verdadeira_fica_sem_a_nota(cenario):
     # verdadeira com NF que nao cobre o valor dela: avisa tambem
     _ligar(c, verdadeira, _nota(c, 513, valor=100_001), valor=100_001)
     detalhes = _rodar(c, uid, [op], ensaio=True)["itens"][0]["detalhes"]
-    assert any("AVISO: a verdadeira tem NF que não cobre o valor dela" in d for d in detalhes)
+    assert any("AVISO: a verdadeira tem NF da coligada 1 que não cobre o valor dela" in d for d in detalhes)
     # cancelar e ligar a nota na verdadeira no mesmo arquivo: a nota paga nao fica sem medicao
     rel = _rodar(c, uid, [op, {"operacao": "ligar_nf", "medicao_id": verdadeira, "nfs": [512], "fonte": "NF paga"}])
     assert rel["feitos"] == 2 and nid in _ativas(c, verdadeira)
+
+
+def _nota_col(c, numero, coligada, valor):
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, situacao)"
+                    " VALUES (?,?,?,?,'2025-07-01',?,'ativa')", (coligada, 900 + numero, str(numero), numero,
+                                                                 valor)).lastrowid
+    c.commit()
+    return nid
+
+
+def test_cancelar_duplicata_em_consorcio_confere_a_cobertura_por_coligada(cenario):
+    # Consorcio: a fatura do consorcio (coligada 90) vale o cheio; a NF da Lotufo (coligada 1) vale a cota.
+    c, _, uid = cenario
+    cons, pct = c.execute("SELECT id, percentual_direito_bp FROM contratos WHERE nome_curto='Obra Consórcio'").fetchone()
+    from app import contratos
+    cheio = 1_000_001   # centavo impar: a cota arredonda uma vez so'
+    cota = contratos.cota(cheio, pct)
+    assert cota < cheio
+    op = {"operacao": "cancelar", "duplicata_de": None, "motivo": "lançada duas vezes", "fonte": "planilha"}
+    # (a) a verdadeira tem so' a fatura do consorcio (cheio); a NF da Lotufo paga esta' na duplicata: avisa
+    v1, d1 = _medicao(c, cons, 49, estado="recebida", valor=cheio), _medicao(c, cons, 45, estado="recebida", valor=cheio)
+    _ligar(c, v1, _nota_col(c, 601, 90, cheio), valor=cheio)
+    _ligar(c, d1, _nota_col(c, 602, 1, cota), valor=cota)
+    detalhes = _rodar(c, uid, [{**op, "medicao_id": d1, "duplicata_de": v1}], ensaio=True)["itens"][0]["detalhes"]
+    assert any("AVISO: a verdadeira não tem NF ligada da coligada 1" in d and "NF 602" in d for d in detalhes)
+    # (b) a verdadeira tem a NF da Lotufo pela cota; a duplicata tem outra NF da Lotufo: a cota esta' coberta, sem aviso
+    v2, d2 = _medicao(c, cons, 50, estado="recebida", valor=cheio), _medicao(c, cons, 46, estado="recebida", valor=cheio)
+    _ligar(c, v2, _nota_col(c, 603, 1, cota), valor=cota)
+    _ligar(c, d2, _nota_col(c, 604, 1, cota), valor=cota)
+    detalhes = _rodar(c, uid, [{**op, "medicao_id": d2, "duplicata_de": v2}], ensaio=True)["itens"][0]["detalhes"]
+    assert not any(d.startswith("AVISO") for d in detalhes)
+    # a duplicata tambem tinha a fatura do consorcio, que a verdadeira nao tem: avisa so' dessa coligada
+    _ligar(c, d2, _nota_col(c, 605, 90, cheio), valor=cheio)
+    detalhes = _rodar(c, uid, [{**op, "medicao_id": d2, "duplicata_de": v2}], ensaio=True)["itens"][0]["detalhes"]
+    avisos = [d for d in detalhes if d.startswith("AVISO")]
+    assert len(avisos) == 1 and "coligada 90" in avisos[0] and "NF 605" in avisos[0] and "NF 604" not in avisos[0]
 
 
 def test_cancelar_duplicata_sem_aviso_quando_a_verdadeira_ja_tem_a_nota(cenario):
