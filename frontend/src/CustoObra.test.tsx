@@ -45,7 +45,7 @@ describe("CustoObra (#491)", () => {
     const seletor = await screen.findByLabelText("Obra");
     expect(within(seletor).getAllByRole("option").map(o => o.textContent)).toEqual(["Obra Alfa", "Obra Beta"]);
     expect(await screen.findByRole("heading", { name: "Custo lançado no RM" })).toBeTruthy();
-    const tabela = screen.getByRole("table");
+    const tabela = await screen.findByRole("table");
     expect(within(tabela).getAllByText("Terraplenagem").length).toBeGreaterThan(0);
     expect(within(tabela).getByText("Sem grupo")).toBeTruthy();
     expect(within(tabela).getByText("Medido por grupo não lido")).toBeTruthy();
