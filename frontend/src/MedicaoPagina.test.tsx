@@ -238,6 +238,19 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(document.querySelectorAll(".aviso")).toHaveLength(2);
   });
 
+  it("#286: no par, a mesma frase da capa do SMO aparece uma vez só; a de uma medição leva o título dela", async () => {
+    const comum = "Fim da execução: capa do SMO diz 31/03/2028, cadastro diz 31/12/2027";
+    const so = "Acumulado do reajustamento até a 23ª medição: capa do SMO diz R$ 1,00, soma das medições diz R$ 2,00";
+    const EXE = { ...MEDICAO, capa_divergencias: [comum] };
+    const REAJ = { ...MEDICAO, id: 6, tipo: "reajuste", capa_divergencias: [comum, so] };
+    responder({ "/api/contratos/1/medicoes": [EXE, REAJ] });
+    pagina();
+    await screen.findByRole("heading", { name: "Hospital", level: 1 });
+    const textos = [...document.querySelectorAll(".aviso")].map(x => x.textContent ?? "");
+    expect(textos.filter(t => t.includes(comum))).toEqual([`Atenção: ${comum}`]);
+    expect(textos.filter(t => t.includes(so))).toEqual([`Atenção: Reajuste da 23ª Medição: ${so}`]);
+  });
+
   it("#359: sem o aprovado mudado, nada de aviso do espelho", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: null }] });
     pagina();

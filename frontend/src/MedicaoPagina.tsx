@@ -189,6 +189,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // #359: o aprovado mudou depois do espelho (o servidor compara com o espelho vigente): uma linha por medicao da
   // pagina, com o titulo dela no par, para a acao de uma nao esconder a da outra (rodada 2 da PR #474)
   const desatualizadas = grupo.filter(x => x.espelho_desatualizado);
+  // #286: a capa do SMO divergente do cadastro. A mesma capa nos boletins da execucao e do reajuste (o par) diz a mesma
+  // frase: aparece uma vez so', sem o titulo (como no Inicio); a frase de uma medicao so' leva o titulo dela no par
+  const capaFrases = grupo.flatMap(x => (x.capa_divergencias ?? []).map(frase => ({ x, frase })));
+  const capaAvisos = capaFrases.filter((c, i) => capaFrases.findIndex(o => o.frase === c.frase) === i)
+    .map(c => grupo.length > 1 && capaFrases.filter(o => o.frase === c.frase).length === 1 ? `${tituloMedicao(c.x)}: ${c.frase}` : c.frase);
 
   // #508: a obra tem os passos "Planilha e carta" e "Análise do órgão" quando a planilha/carta e' o 1o passo da
   // medicao (execucao e projeto, regra de espelho ativa ou medicao que ja' nasceu dela) e vai ao orgao (nunca na MT-PAR)
@@ -519,9 +524,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         })}
 
         {/* #286: a capa do SMO do boletim vigente diverge do cadastro; some com o cadastro corrigido ou a diferenca aceita */}
-        {grupo.flatMap(x => (x.capa_divergencias ?? []).map((frase, i) => (
-          <CaixaAviso key={`capa-${x.id}-${i}`} nivel="atencao">{grupo.length > 1 ? `${tituloMedicao(x)}: ${frase}` : frase}</CaixaAviso>
-        )))}
+        {capaAvisos.map(frase => <CaixaAviso key={`capa-${frase}`} nivel="atencao">{frase}</CaixaAviso>)}
 
         <Passos passos={passos} atual={atual} vendo={aberta} datas={datas} espera={!!esperaAqui}
           aoIr={n => setVendo(n === atual && atual !== 0 ? null : n)} />
