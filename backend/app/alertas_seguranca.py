@@ -33,7 +33,7 @@ TABELA = "alertas_seguranca_envios"
 TIPO_ENVIO = "alertas_seguranca"
 NIVEIS_IMEDIATOS = ("critico", "acao")
 HORA_RESUMO = 7
-INTERVALO_SEG = 60
+INTERVALO_SEG = 120   # o e-mail sai em ate' 5 minutos com folga
 ESPERA_FALHA_MIN = 10
 JANELA_RESUMO = datetime.timedelta(hours=24)
 # envio incerto mais velho que isto sai da Saude: o e-mail de alerta nao se repete e a tela nao fica acusando para sempre
@@ -43,6 +43,10 @@ _NIVEL = {"critico": "crítico", "acao": "ação", "atencao": "atenção"}
 # O item de leitura da sentinela soma as quantidades das rodadas da mesma hora (`seguranca._sentinela`): a mensagem
 # cresce, o item e' o mesmo
 _QUANTIDADE = re.compile(r", \d+ arquivos?$")
+_CONTROLE = re.compile(r"[\x00-\x1f\x7f]")
+# Item mais velho que isto nao vira alerta na hora (a primeira rodada depois do deploy, ou depois de configurar o
+# cadastro, nao manda a semana inteira); fica na Saude e no resumo
+JANELA_IMEDIATA = datetime.timedelta(hours=24)
 
 SEM_CADASTRO = "nada sai: falta o destinatário no cadastro"
 SEM_REMETENTE = "nada sai: falta quem envia no cadastro"
@@ -101,6 +105,7 @@ def _html(linhas: list[str]) -> str:
 
 
 def assunto_alerta(mensagem: str) -> str:
+    mensagem = " ".join(_CONTROLE.sub(" ", mensagem).split())      # assunto numa linha so'
     curta = mensagem if len(mensagem) <= ASSUNTO_CURTO_MAX else mensagem[:ASSUNTO_CURTO_MAX - 1] + "…"
     return f"Dashboard Lotufo: alerta de segurança: {curta}"
 
@@ -109,14 +114,24 @@ def assunto_resumo(dia: datetime.date) -> str:
     return f"Dashboard Lotufo: resumo de segurança de {dia:%d/%m/%Y}"
 
 
-def _grupos(itens: list[dict]) -> dict[str, list[dict]]:
-    """Itens imediatos agrupados: mesma mensagem (sem a quantidade da sentinela) na mesma hora de Cuiaba."""
-    grupos: dict[str, list[dict]] = {}
+def _chave(hora: datetime.datetime, mensagem: str) -> str:
+    return f"alerta {hora:%Y-%m-%d %H} {mensagem}"
+
+
+def _grupos(itens: list[dict], agora: datetime.datetime) -> dict[str, dict]:
+    """Itens imediatos novos (das ultimas `JANELA_IMEDIATA`) agrupados: mesma mensagem (sem a quantidade da sentinela)
+    na mesma hora de Cuiaba. `anterior`: a chave da hora de antes, para o item de leitura da sentinela, cuja data e' a
+    da ultima rodada que somou quantidade e pode passar para a hora seguinte."""
+    grupos: dict[str, dict] = {}
     for i in sorted(itens, key=lambda i: i["data"]):
-        if i["nivel"] not in NIVEIS_IMEDIATOS:
+        if i["nivel"] not in NIVEIS_IMEDIATOS or datetime.datetime.fromisoformat(i["data"]) < agora - JANELA_IMEDIATA:
             continue
-        chave = f"alerta {_local(i['data']):%Y-%m-%d %H} {_QUANTIDADE.sub('', i['mensagem'])}"
-        grupos.setdefault(chave, []).append(i)
+        hora = _local(i["data"])
+        mensagem = _QUANTIDADE.sub("", i["mensagem"])
+        g = grupos.setdefault(_chave(hora, mensagem), {"itens": [], "anterior": None})
+        g["itens"].append(i)
+        if mensagem != i["mensagem"]:
+            g["anterior"] = _chave(hora - datetime.timedelta(hours=1), mensagem)
     return grupos
 
 
@@ -191,21 +206,33 @@ def _auditoria(conn) -> tuple[int, int | None, str | None]:
     return total, (r["id"] if r else None), (r["hash"] if r else None)
 
 
+def _sentinela(conn) -> str:
+    """A situacao da sentinela: nao roda neste ambiente, ou quando ela leu o log pela ultima vez (o ponto de leitura
+    so' muda quando a rodada avanca no log, o que acontece a cada rodada numa VM com o log ativo)."""
+    s = sentinela.situacao()
+    if not s.get("roda"):
+        return s.get("mensagem") or sentinela.NAO_RODA
+    r = conn.execute("SELECT atualizado_em FROM sentinela_ponto WHERE id = 1").fetchone()
+    if r is None:
+        return "Sentinela: nenhuma leitura do log registrada"
+    return f"Sentinela: última leitura do log em {tempo.para_local(datetime.datetime.fromisoformat(r[0])):%d/%m/%Y %H:%M}"
+
+
 def corpo_resumo(conn, agora: datetime.datetime) -> str:
-    """Itens das ultimas 24 horas (e os `critico` que continuam: problema aberto nao some do resumo) ou "Nada a
-    relatar", mais o que ancora o estado da VM."""
+    """Itens das ultimas 24 horas e os problemas que continuam abertos (a conferencia de hora em hora e a do codigo em
+    producao, que guardam a data em que foram vistos primeiro) ou "Nada a relatar", mais o que ancora o estado da VM."""
     dia = tempo.para_local(agora).date()
     desde = agora - JANELA_RESUMO
-    itens = [i for i in seguranca.itens(conn, agora)
-             if i["nivel"] == "critico" or datetime.datetime.fromisoformat(i["data"]) >= desde]
+    itens = [i for i in seguranca.itens(conn, agora) if datetime.datetime.fromisoformat(i["data"]) >= desde]
+    abertos = [i for i in seguranca._conferencia + integridade.itens() if i["nivel"] == "critico" and i not in itens]
+    itens = sorted(itens + abertos, key=lambda i: i["data"], reverse=True)
     linhas = [f"Resumo de segurança da Dashboard Lotufo de {dia:%d/%m/%Y} (últimas 24 horas).", ""]
     linhas += [_linha(i) for i in itens] if itens else ["Nada a relatar."]
     linhas += ["", f"Commit em produção: {integridade.commit_atual() or 'não identificado'}"]
     ultima = copia_dono.ultima_copia(backup.pasta_local())
     if ultima is not None:
         linhas.append(f"Última cópia do dono: {tempo.para_local(ultima):%d/%m/%Y %H:%M}")
-    s = sentinela.situacao()
-    linhas.append("Sentinela: ativa" if s.get("roda") else f"Sentinela: {s.get('mensagem') or 'não roda'}")
+    linhas.append(_sentinela(conn))
     total, linha, hash_ = _auditoria(conn)
     if linha is None:
         linhas.append("Auditoria: 0 linhas")
@@ -234,9 +261,10 @@ def rodada(conn, agora: datetime.datetime | None = None) -> list[str]:
     if falhou is not None and agora - falhou < datetime.timedelta(minutes=ESPERA_FALHA_MIN):
         return []
     enviados = []
-    for chave, itens in _grupos(seguranca.itens(conn, agora)).items():
-        if _ja_saiu(conn, chave):
+    for chave, g in _grupos(seguranca.itens(conn, agora), agora).items():
+        if _ja_saiu(conn, chave) or (g["anterior"] and _ja_saiu(conn, g["anterior"])):
             continue
+        itens = g["itens"]
         assunto = assunto_alerta(itens[-1]["mensagem"])
         if not _enviar(conn, usuario, config["para"], chave, "alerta", assunto, _corpo_alerta(itens), agora):
             return enviados

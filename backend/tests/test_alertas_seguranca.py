@@ -99,6 +99,32 @@ def test_leitura_da_sentinela_que_cresce_na_mesma_hora_nao_repete(ambiente, monk
     assert len(_alertas(tmp)) == 1
 
 
+def test_leitura_da_sentinela_que_passa_para_a_hora_seguinte_nao_repete(ambiente, monkeypatch):
+    # /code-review: a data do item somado e' a da ultima rodada gravada, que pode cair na hora seguinte
+    conn, tmp = ambiente
+    _itens(monkeypatch, [_item("Leitura de cadastro por x.exe (conta), 3 arquivos", "10:58")])
+    alertas_seguranca.rodada(conn, AGORA)
+    _itens(monkeypatch, [_item("Leitura de cadastro por x.exe (conta), 5 arquivos", "11:02")])
+    alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(hours=1))
+    assert len(_alertas(tmp)) == 1
+
+
+def test_item_de_mais_de_24_horas_nao_vira_alerta_na_hora(ambiente, monkeypatch):
+    # /code-review: a primeira rodada depois do deploy nao manda os itens da semana inteira
+    conn, tmp = ambiente
+    _itens(monkeypatch, [_item("Administrador Dono entrou de uma origem nova (10.0.0.1)", "09:00", dia=3)])
+    alertas_seguranca.rodada(conn, AGORA)
+    assert _alertas(tmp) == []
+
+
+def test_assunto_sem_quebra_de_linha(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    _itens(monkeypatch, [_item("Administrador A\r\nB entrou de uma origem nova (x)")])
+    alertas_seguranca.rodada(conn, AGORA)
+    [m] = _alertas(tmp)
+    assert m["assunto"] == "Dashboard Lotufo: alerta de segurança: Administrador A B entrou de uma origem nova (x)"
+
+
 def test_mesmo_item_em_outra_hora_e_outro_email(ambiente, monkeypatch):
     conn, tmp = ambiente
     _itens(monkeypatch, [_item("Tarefa agendada criada por conta", "09:50"),
@@ -192,13 +218,17 @@ def test_resumo_cheio_traz_os_itens_das_ultimas_24_horas(ambiente, monkeypatch):
     conn, tmp = ambiente
     _itens(monkeypatch, [_item("Logon privilegiado de conta fora da lista", "08:00", "atencao", dia=4),
                          _item("Item de anteontem", "06:00", "atencao", dia=3),
-                         _item("Proteção da tabela de usuários removida", "06:00", "critico", dia=1)])
+                         _item("Log de segurança limpo", "06:00", "critico", dia=1)])
+    # problema que continua aberto (conferencia de hora em hora): entra mesmo visto ha' dias
+    aberto = _item("Proteção da tabela de usuários removida", "06:00", "critico", dia=1)
+    monkeypatch.setattr(seguranca, "_conferencia", [aberto])
     alertas_seguranca.rodada(conn, _as(7, 0))
     [m] = _resumos(tmp)
     assert "Nada a relatar" not in m["corpo"]
     assert "Logon privilegiado de conta fora da lista" in m["corpo"] and "04/11/2026 08:00" in m["corpo"]
     assert "Item de anteontem" not in m["corpo"]
-    assert "Proteção da tabela de usuários removida" in m["corpo"]  # problema critico que continua aberto
+    assert "Log de segurança limpo" not in m["corpo"]             # evento critico antigo, nao problema aberto
+    assert "Proteção da tabela de usuários removida" in m["corpo"]
 
 
 def test_resumo_traz_copia_do_dono_e_sentinela(ambiente, monkeypatch):
@@ -212,10 +242,24 @@ def test_resumo_traz_copia_do_dono_e_sentinela(ambiente, monkeypatch):
     quando = datetime.datetime(2026, 11, 4, 8, 0, tzinfo=CUIABA).timestamp()
     os.utime(arq, (quando, quando))
     monkeypatch.setattr(alertas_seguranca.sentinela, "situacao", lambda: {"roda": True, "mensagem": None})
+    with db.mutacao(conn):
+        alertas_seguranca.sentinela._gravar_ponto(conn, 42)
+        conn.execute("UPDATE sentinela_ponto SET atualizado_em='2026-11-05 10:55:00' WHERE id=1")
     alertas_seguranca.rodada(conn, _as(7, 0))
     [m] = _resumos(tmp)
     assert "Última cópia do dono: 04/11/2026 08:00" in m["corpo"]
-    assert "Sentinela: ativa" in m["corpo"]
+    assert "Sentinela: última leitura do log em 05/11/2026 06:55" in m["corpo"]
+
+
+def test_resumo_diz_quando_a_sentinela_nao_roda(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    _itens(monkeypatch, [])
+    monkeypatch.setattr(alertas_seguranca.sentinela, "situacao",
+                        lambda: {"roda": False, "mensagem": "Sentinela não roda neste ambiente"})
+    alertas_seguranca.rodada(conn, _as(7, 0))
+    [m] = _resumos(tmp)
+    assert "Sentinela: Sentinela não roda neste ambiente" not in m["corpo"]
+    assert "Sentinela não roda neste ambiente" in m["corpo"]
 
 
 # --- sem configuracao, modo copia --------------------------------------------------------------------------------
