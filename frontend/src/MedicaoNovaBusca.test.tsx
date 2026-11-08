@@ -59,4 +59,10 @@ describe("Medição nova: número e competência vindos da janela Iniciar proces
     expect(el.dataset.numero).toBe("3");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Nova medição de Projeto");
   });
+
+  it("issue #567: sem nada na busca, o tipo fica para a planilha/carta escolher pela última medição", async () => {
+    const { container } = montar({});
+    const el = await planilha(container);
+    expect(el.dataset.tipo).toBeUndefined();
+  });
 });

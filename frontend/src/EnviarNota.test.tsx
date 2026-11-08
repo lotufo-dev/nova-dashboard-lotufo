@@ -139,6 +139,29 @@ describe("Enviar a nota", () => {
     });
   });
 
+  // issue #562: a nota diverge do espelho: o Enviar pede o motivo antes do aviso, e o envio leva o motivo
+  it("nota divergente do espelho: o envio pede o motivo e o manda com a confirmação", async () => {
+    const DIVERGE = "23ª Medição: NF 2275 diverge do espelho em valor, ISS";
+    const d = { ...det, pendencias: [DIVERGE], exige_justificativa: true,
+      envio: { ...det.envio, divergencias: [{ medicao_id: 631, nota_id: 9, numero: 2275, campo: "valor", espelho: 14800000, nota: 18017069, grau: "divergente" }] } };
+    api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? d : {}));
+    render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
+    const botao = await screen.findByRole("button", { name: "Enviar o e-mail" });
+    const campo = screen.getByLabelText("Motivo do envio com a nota divergente (obrigatório)");
+    fireEvent.click(botao);
+    expect(screen.getByText(/Escreva a justificativa/)).toBeTruthy();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    fireEvent.change(campo, { target: { value: "nota corrigida pelo faturamento, valor conferido" } });
+    fireEvent.click(botao);
+    const aviso = screen.getByRole("alertdialog", { name: "ATENÇÃO" });
+    expect(within(aviso).getByText(DIVERGE)).toBeTruthy();
+    fireEvent.click(within(aviso).getByRole("button", { name: "Continuar com o envio" }));
+    await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/notas/envio/3/enviar")).toBe(true));
+    const corpo = JSON.parse(api.mock.calls.find(c => c[0] === "/api/notas/envio/3/enviar")![1].body);
+    expect(corpo.justificativa).toBe("nota corrigida pelo faturamento, valor conferido");
+    expect(corpo.confirmadas).toEqual([DIVERGE]);
+  });
+
   // issue #278: reajuste da MT-PAR sem apostilamento que cubra a competência: o aviso aparece no passo do ofício,
   // desde a montagem, e o envio pede a justificativa antes do aviso do que falta
   describe("reajuste sem apostilamento", () => {

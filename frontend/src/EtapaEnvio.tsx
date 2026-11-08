@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
+import CaixaAviso from "./CaixaAviso";
 import EnviarNota from "./EnviarNota";
 import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
@@ -40,7 +41,65 @@ export function useEnvios(ids: number[]) {
 
 function SeloDocs({ e }: { e: Envio }) {
   const r = resumoDe(e);
+  if (r.situacao === "pronto" && notasDivergentes(e).length > 0) return <Selo classe="selo--acao">Nota divergente</Selo>;
   return <Selo classe={r.nivel}>{r.situacao === "pronto" ? "Completo" : r.selo}</Selo>;
+}
+
+// Issue #562: o nome do campo conferido, o mesmo de notas.NOME_CAMPO no servidor
+const CAMPO_NOTA: Record<string, string> = {
+  valor: "Valor", iss: "ISS", inss: "INSS", irrf: "IRRF", ibs: "IBS", cbs: "CBS", liquido: "Líquido", municipio: "Município",
+  tomador: "Tomador",
+};
+
+/** #562: as divergencias de grau "divergente" (as que pedem o motivo no envio). */
+const notasDivergentes = (e: Envio) => (e.divergencias ?? []).filter(d => d.grau === "divergente");
+
+const valorConferido = (v: number | string | null) => (typeof v === "number" ? brl(v) : v ?? "—");
+
+/** #562: a nota que diverge do espelho, campo a campo (espelho x nota), e a nota maior que a medicao. A diferenca so'
+ *  de arredondamento (1 centavo num tributo) aparece em atencao; o resto, em critico. */
+export function ConferenciaNotas({ envios }: { envios: Envio[] }) {
+  const graves = envios.flatMap(notasDivergentes);
+  const leves = envios.flatMap(e => (e.divergencias ?? []).filter(d => d.grau === "arredondamento"));
+  const acima = envios.flatMap(e => e.acima_da_medicao ?? []);
+  if (graves.length === 0 && leves.length === 0 && acima.length === 0) return null;
+  const numeros = [...new Set(graves.map(d => String(d.numero)))];
+  return (
+    <div className="pilha" aria-label="Conferência das notas com o espelho">
+      {numeros.length > 0 && (
+        <CaixaAviso nivel="critico" role="status">
+          NF {numeros.join(", ")} diverge{numeros.length > 1 ? "m" : ""} do espelho
+        </CaixaAviso>
+      )}
+      {graves.length > 0 && (
+        <div className="med-caixa">
+          <table className="tabela">
+            <thead><tr><th scope="col">Nota</th><th scope="col">Campo</th><th scope="col" className="col-num">Espelho</th><th scope="col" className="col-num">Nota</th></tr></thead>
+            <tbody>
+              {graves.map(d => (
+                <tr key={`${d.nota_id}-${d.campo}`}>
+                  <td data-rotulo="Nota">NF {d.numero}</td>
+                  <td data-rotulo="Campo">{CAMPO_NOTA[d.campo] ?? d.campo}</td>
+                  <td data-rotulo="Espelho" className="col-num num">{valorConferido(d.espelho)}</td>
+                  <td data-rotulo="Nota" className="col-num num">{valorConferido(d.nota)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {acima.map(x => (
+        <CaixaAviso key={`acima-${x.nota_id}`} nivel="critico" role="status">
+          NF {x.numero} de {brl(x.alocado_centavos)} é maior que a medição ({brl(x.medicao_centavos)})
+        </CaixaAviso>
+      ))}
+      {leves.map(d => (
+        <CaixaAviso key={`leve-${d.nota_id}-${d.campo}`} nivel="atencao" role="status">
+          NF {d.numero}: {CAMPO_NOTA[d.campo] ?? d.campo} com diferença de arredondamento ({valorConferido(d.espelho)} no espelho, {valorConferido(d.nota)} na nota)
+        </CaixaAviso>
+      ))}
+    </div>
+  );
 }
 
 /** A natureza ao lado da NF so' quando o envio mistura medicao e reajuste: e' o que diz qual nota e' qual. */
@@ -72,6 +131,8 @@ export function faltasDo(e: Envio): string[] {
  *  vencida e' o que desliga o botao; o motivo vem aqui). */
 export function FaixaEnvio({ envios }: { envios: Envio[] }) {
   const faltas = envios.map(e => ({ e, f: faltasDo(e) })).filter(x => x.f.length > 0);
+  // #562: com nota divergente nada esta' "pronto": a caixa da conferencia (logo abaixo) diz qual nota diverge
+  if (faltas.length === 0 && envios.some(e => notasDivergentes(e).length > 0)) return null;
   if (faltas.length === 0) {
     return <div className="envio-faixa envio-faixa--ok" role="status"><span className="envio-faixa__marca" aria-hidden="true"><IconeCheck /></span>Tudo pronto para enviar</div>;
   }
@@ -180,6 +241,7 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
   return (
     <div className="pilha">
       <FaixaEnvio envios={envios} />
+      <ConferenciaNotas envios={envios} />
       <CartoesEnvio envios={envios} certidoes={certidoes} />
       <section className="cartao med-painel" aria-labelledby="email-orgao-titulo">
       <h3 className="med-painel__titulo" id="email-orgao-titulo">E-mail ao órgão</h3>

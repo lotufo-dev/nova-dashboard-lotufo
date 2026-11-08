@@ -27,6 +27,9 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
   // a obra sem planilha/carta lanca a mao na aba Medicoes da obra; o link leva o que veio da janela
   const buscaManual: Busca = { ...(numero ? { numero } : {}), ...(competencia ? { competencia } : {}), ...(tipo ? { tipo } : {}) };
   const nome = tipo ? "Nova medição de Projeto" : "Nova medição";
+  // issue #567: a janela Iniciar processo escolheu a serie (sem `tipo` na busca, a de execucao); sem nada na busca, a
+  // planilha/carta pre-seleciona o tipo da ultima medicao da obra
+  const tipoPlanilha = tipo || (inicial ? "execucao" : undefined);
   const podeEditar = usuario.perfil === "engenharia" || usuario.perfil === "admin";
   const [cab, setCab] = useState<Cabecalho | null>(null);
   const [vendo, setVendo] = useState(1);
@@ -72,7 +75,7 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
                   {/* issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1); registrada, a
                       pagina da medicao abre com o cartao dela. Numero, competencia e serie vem da busca da URL (#151) */}
                   {!podeEditar || regraAtiva === null ? null : regraAtiva
-                    ? <NovaPlanilhaCarta contratoId={contratoId} tipo={tipo || "execucao"} inicial={inicial}
+                    ? <NovaPlanilhaCarta contratoId={contratoId} tipo={tipoPlanilha} inicial={inicial}
                         aoRegistrar={r => ir({ tela: "medicao", obra: contratoId, id: r.medicao_id }, { forcar: true })} />
                     : <p><Link className="link" para={{ tela: "obra", id: contratoId, aba: "medicoes" }}
                         busca={Object.keys(buscaManual).length ? buscaManual : undefined}>Lançar a medição à mão</Link></p>}

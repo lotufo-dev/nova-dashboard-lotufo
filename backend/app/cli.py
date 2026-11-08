@@ -515,6 +515,47 @@ def _dono(args) -> int:
     return 0
 
 
+def _auditoria(args) -> int:
+    """`auditoria conferir --linha N --hash H` (issue #424): a linha e o hash do resumo de segurança diário ainda
+    estão na cadeia da auditoria do banco (DASH_DB_PATH)? Só lê."""
+    from app import auditoria
+    conn = db.get_conn()
+    try:
+        confere = auditoria.conferir_linha(conn, args.linha, args.hash)
+    finally:
+        conn.close()
+    print("confere" if confere else "não confere")
+    return 0 if confere else 1
+
+
+def _alertas(args) -> int:
+    """`alertas conferir-envio --id N --saiu|--nao-saiu --usuario <e-mail>` (issue #424): registra o resultado do
+    e-mail de alerta que a Saúde acusa como possivelmente não enviado, depois de conferir os Enviados."""
+    from app import alertas_seguranca
+    conn = db.get_conn()
+    try:
+        u = conn.execute("SELECT id FROM usuarios WHERE lower(email)=?", (args.usuario.strip().lower(),)).fetchone()
+        if u is None:
+            print(f"Usuário não encontrado: {args.usuario}")
+            return 1
+        try:
+            vai_sair = alertas_seguranca.conferir_envio(conn, u["id"], args.id, saiu=args.saiu)
+        except ValueError as e:
+            print(str(e))
+            return 1
+    finally:
+        conn.close()
+    if args.saiu:
+        print("Registrado: o e-mail saiu.")
+    elif vai_sair:
+        print("Registrado: o e-mail não saiu; ele sai de novo na próxima rodada.")
+    elif vai_sair is None:
+        print("Registrado: o e-mail não saiu; ele sai de novo na próxima rodada se o problema continuar aberto.")
+    else:
+        print("Registrado: o e-mail não saiu e não sai mais (resumo de outro dia ou item que já saiu do bloco Segurança).")
+    return 0
+
+
 def _sentinela(args) -> int:
     """`sentinela antes-da-456 --banco <db>` (issue #478): com o serviço parado e antes de voltar o código para um
     commit anterior à #456, passa o ponto de leitura da sentinela para a auditoria e tira a tabela, os gatilhos e a
@@ -590,6 +631,17 @@ def main(argv: list[str] | None = None) -> int:
     sen = sub.add_parser("sentinela", help="rollback para antes da issue #456 (o deploy.ps1 chama; ver o runbook)")
     sen.add_argument("acao", choices=["antes-da-456"])
     sen.add_argument("--banco", required=True, help="banco da produção, com o serviço parado")
+    aud = sub.add_parser("auditoria", help="confere a linha e o hash do resumo de segurança diário")
+    aud.add_argument("acao", choices=["conferir"])
+    aud.add_argument("--linha", required=True, type=int, help="número da linha da auditoria (o do resumo)")
+    aud.add_argument("--hash", required=True, help="hash da linha (o do resumo)")
+    ale = sub.add_parser("alertas", help="resultado do e-mail de alerta de segurança que pode não ter saído")
+    ale.add_argument("acao", choices=["conferir-envio"])
+    ale.add_argument("--id", required=True, type=int, help="nº do e-mail mostrado na Saúde")
+    resultado = ale.add_mutually_exclusive_group(required=True)
+    resultado.add_argument("--saiu", action="store_true", help="o e-mail está nos Enviados de quem envia")
+    resultado.add_argument("--nao-saiu", action="store_true", help="o e-mail não está nos Enviados: sai de novo")
+    ale.add_argument("--usuario", required=True, help="e-mail de quem conferiu")
     dn = sub.add_parser("dono", help="cópia cifrada para a chave do dono")
     dn.add_argument("acao", choices=["gerar-chave"])
     dn.add_argument("--saida", required=True, help="pasta onde gravar o par de chaves")
@@ -601,6 +653,10 @@ def main(argv: list[str] | None = None) -> int:
         return _conta(args)
     if args.cmd == "dono":
         return _dono(args)
+    if args.cmd == "auditoria":
+        return _auditoria(args)
+    if args.cmd == "alertas":
+        return _alertas(args)
     if args.cmd == "sentinela":
         return _sentinela(args)
     if args.cmd == "documentos":

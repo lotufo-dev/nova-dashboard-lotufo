@@ -37,6 +37,11 @@ FAMILIAS_OFICIO_REAJUSTE = ("mtpar", "prefeitura")
 SEM_APOSTILAMENTO = "sem_apostilamento"
 JUSTIFICATIVA_SEM_APOSTILAMENTO = ("Sem apostilamento que cubra a competência do reajuste: escreva a justificativa do "
                                    f"envio, com pelo menos {MIN_JUSTIFICATIVA} caracteres")
+# Issue #562: nota anexada que diverge do espelho (grau `divergente` na conferencia; o arredondamento de 1 centavo nao
+# conta) vira pendencia do envio e pede, alem da confirmacao, o motivo escrito, gravado na auditoria antes do e-mail.
+NOTA_DIVERGENTE = "nota_divergente"
+JUSTIFICATIVA_NOTA_DIVERGENTE = ("A nota diverge do espelho: escreva o motivo do envio, com pelo menos "
+                                 f"{MIN_JUSTIFICATIVA} caracteres")
 APOSTILAMENTO_MUDOU = ("O apostilamento do reajuste mudou depois da montagem: monte o pacote de novo (e assine de novo, "
                        "se já tinha assinado)")
 # Rodada 2 da PR #435: a frase do termo nunca fica no texto editavel. O texto da carta (o padrao, o gravado e o editado)
@@ -731,6 +736,22 @@ def _irmas_fora(conn, p: dict, ms: list[dict]) -> list[dict]:
     return list(achadas.values())
 
 
+def notas_divergentes(conn, ms: list[dict]) -> list[dict]:
+    """Issue #562: uma pendencia `nota_divergente` por nota das medicoes com campo de grau `divergente` na conferencia
+    contra o espelho (o arredondamento de 1 centavo nao conta). Vale no envio pelo sistema e no registro por fora."""
+    from app import notas      # import local: notas importa medicoes, que importa este modulo
+    out = []
+    for m in ms:
+        por_nota: dict = {}
+        for d in notas.divergencias_da_medicao(conn, m["id"]):
+            if d["grau"] == "divergente":
+                por_nota.setdefault(d["numero"], []).append(notas.NOME_CAMPO.get(d["campo"], d["campo"]))
+        for numero, campos in por_nota.items():
+            out.append({"codigo": NOTA_DIVERGENTE, "medicao_id": m["id"],
+                        "mensagem": f"{titulo(m)}: NF {numero} diverge do espelho em {', '.join(campos)}"})
+    return out
+
+
 def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
     c = _contrato(conn, p["contrato_id"])
     familia, regras, o = _orgao(conn, c)
@@ -744,6 +765,9 @@ def pendencias(conn, p: dict, hoje: datetime.date) -> list[dict]:
         for m in ms:
             if m["estado"] in SEM_NOTA or not _docs_nota(conn, [m["id"]]):
                 out.append({"codigo": "sem_nota", "mensagem": f"{titulo(m)}: nota fiscal não anexada"})
+        # issue #562: a nota divergente do espelho, campo a campo, enquanto o envio nao saiu
+        if p["situacao"] != "enviado":
+            out += notas_divergentes(conn, ms)
         # A-18 (testes de quebra 10/10/2026): onde medicao e reajuste vao juntos (D9: SINFRA, Pref. VG), a irma com
         # nota emitida que ficou fora do e-mail vira pendencia (justifica para enviar). Nao junta sozinho.
         # Depois do envio (issue #6) a cobranca acabou: o detalhe do protocolo enviado nao a repete.
@@ -1225,13 +1249,15 @@ def _conferir_confirmacao(pend: list[dict], confirmadas: list[str] | None, acao:
 
 
 def exige_justificativa(pend: list[dict]) -> bool:
-    """Issue #278: reajuste sem apostilamento que cubra a competencia so' sai com justificativa escrita."""
-    return any(x["codigo"] == SEM_APOSTILAMENTO for x in pend)
+    """Issue #278: reajuste sem apostilamento que cubra a competencia so' sai com justificativa escrita. Issue #562: a
+    nota divergente do espelho tambem (o motivo)."""
+    return any(x["codigo"] in (SEM_APOSTILAMENTO, NOTA_DIVERGENTE) for x in pend)
 
 
 def _conferir_justificativa(pend: list[dict], justificativa: str | None) -> None:
     if exige_justificativa(pend) and len((justificativa or "").strip()) < MIN_JUSTIFICATIVA:
-        raise ValueError(JUSTIFICATIVA_SEM_APOSTILAMENTO)
+        raise ValueError(JUSTIFICATIVA_NOTA_DIVERGENTE if any(x["codigo"] == NOTA_DIVERGENTE for x in pend)
+                         else JUSTIFICATIVA_SEM_APOSTILAMENTO)
 
 
 def previa_envio(conn, protocolo_ids: list[int], remetente: str | None = None,
@@ -1370,8 +1396,10 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
                 raise ValueError(f"Protocolo {x['id']} já {sit}")
             envio_reserva.reservar(conn, "protocolos", x["id"], usuario["id"], x["envio_id"])
             if faltam:      # quem confirmou e quando: o usuario e o carimbo da propria linha da auditoria
+                # issue #562: o motivo escrito (nota divergente, reajuste sem termo) entra junto, antes do e-mail
                 auditoria.registrar(conn, usuario["id"], "protocolo.envio_confirmado", "protocolo", x["id"], None,
-                                    {"pendencias": faltam})
+                                    {"pendencias": faltam, **({"justificativa": justificativa}
+                                                              if exige_justificativa(no_lock) else {})})
     try:
         # Revisor adversarial na rodada 3 da PR #179: a FRC assinada pode ter mudado entre a previa e a reserva (FRC
         # gerada de novo, outra assinada anexada). Os anexos sao lidos primeiro e a FRC conferida DEPOIS da leitura:

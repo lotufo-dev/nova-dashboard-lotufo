@@ -56,6 +56,7 @@ log = logging.getLogger("app.rm")
 # Baixas que contam como recebido (RM: 1 baixado, 3 por acordo, 4 parcial). 0 aberto e
 # 2 cancelado ficam fora.
 STATUS_RECEBIDO = (1, 3, 4)
+STATUS_BAIXA_TOTAL = 1
 # Tolerancia para propor candidato (nao para auto-aplicar): 5% do valor da NF.
 TOLERANCIA_CANDIDATO = 0.05
 INTERVALO_SEG = 3600
@@ -338,7 +339,7 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
     nao cobrem outro aberto).
 
     Devolve None quando nenhuma medicao do grupo tem espelho vigente (nao da' para saber o que esperar). Senao
-    {notas_faltam, completo, total_centavos, recebido_centavos, falta_centavos, parcial}: `completo` exige toda
+    {notas_faltam, completo, total_centavos, recebido_centavos, falta_centavos, parcial, falta_divergente_centavos}: `completo` exige toda
     medicao do grupo com espelho, toda saida com nota e toda nota com titulo; sem isso os valores vem None. Espelho
     sem saida da Lotufo conta zero. `parcial`: alguma nota da cota ja' teve baixa e ainda falta receber (ou o resumo
     ainda nao fecha); a irma valida ainda sem espelho (reajuste a' espera do indice) nao esconde a baixa da outra
@@ -347,6 +348,9 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
     grupo = [medicao_id] + [i for i in [_irma_valida(conn, medicao_id)] if i is not None]
     faltam, total, recebido, falta, sem_titulo, alguma_baixa = 0, 0, 0, 0, False, False
     com_espelho, sem_espelho = 0, 0
+    # issue #562 (gate Sol, rodada 1 da PR #581): o que falta receber das notas da cota que divergem do espelho; nota
+    # divergente ja' paga nao marca o a receber que sai so' da nota conforme
+    falta_divergente = 0
     for mid in grupo:
         esp = _notas.esperadas_do_espelho(conn, mid)
         if esp is None:
@@ -357,6 +361,8 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
             if e["nota_id"] is None:
                 faltam += 1
                 continue
+            conf = conn.execute("SELECT conferencia FROM notas_fiscais WHERE id=?", (e["nota_id"],)).fetchone()
+            diverge = _notas.divergente(json.loads((conf["conferencia"] if conf else None) or "[]"))
             rec, devido, _ = _recebido_da_nota(conn, e["nota_id"])
             alguma_baixa = alguma_baixa or rec > 0
             if devido <= 0:
@@ -364,13 +370,15 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
                 continue
             f = _falta_por_titulo(conn, e["nota_id"], aberto_inteiro=True) or 0
             total += devido; falta += f; recebido += devido - f
+            falta_divergente += f if diverge else 0
     if com_espelho == 0:
         return None
     completo = faltam == 0 and not sem_titulo and sem_espelho == 0
     return {"notas_faltam": faltam, "completo": completo,
             "total_centavos": total if completo else None, "recebido_centavos": recebido if completo else None,
             "falta_centavos": falta if completo else None,
-            "parcial": alguma_baixa and (not completo or falta > 0)}
+            "parcial": alguma_baixa and (not completo or falta > 0),
+            "falta_divergente_centavos": falta_divergente if completo else None}
 
 
 def _recebido_da_nota(conn, nota_id: int) -> tuple[int, int, str | None]:
@@ -622,16 +630,22 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
 
 # ------------------------------------------------------------ recebimentos
 
-def _falta_por_titulo(conn, nota_id: int, aberto_inteiro: bool = False) -> int | None:
+def _falta_por_titulo(conn, nota_id: int, aberto_inteiro: bool = False, baixa_total_quita: bool = False) -> int | None:
     """Issue #35: o que falta pagar na nota, titulo a titulo (max(0, original - baixado) dos titulos nao
     cancelados): pagamento a mais num titulo (juros) nao compensa a falta de outro. None quando algum titulo
     nao tem baixa nenhuma (aberto nao e' "pago com diferenca").
     Issue #253: com `aberto_inteiro`, o titulo sem baixa entra pelo valor original inteiro em vez de dar None
-    (o a receber e o aviso da Saude querem quanto falta, nao se a nota fecha com diferenca)."""
+    (o a receber e o aviso da Saude querem quanto falta, nao se a nota fecha com diferenca).
+    Issue #563: com `baixa_total_quita`, titulo com baixa total (status 1) e valor baixado zero conta como quitado
+    (falta zero): o a receber da diretoria e o aviso da Saude nao o tratam como divida. Sem ele (recebimento
+    automatico, pagina da medicao), o titulo continua sem baixa: status 1 com valor zero pode ser glosa, compensacao
+    ou encontro de contas, e nao fecha medicao sozinho."""
     falta = 0
     for b in conn.execute("SELECT status_lan, valor_original_centavos, valor_baixado_centavos FROM baixas "
                           "WHERE nota_id=? AND status_lan<>2", (nota_id,)):
         baixado = (b["valor_baixado_centavos"] or 0) if b["status_lan"] in STATUS_RECEBIDO else 0
+        if baixa_total_quita and b["status_lan"] == STATUS_BAIXA_TOTAL and baixado <= 0:
+            continue                    # #563: baixa total no RM e' titulo quitado, mesmo com valor baixado zero
         if baixado <= 0 and not aberto_inteiro:
             return None
         falta += max(0, (b["valor_original_centavos"] or 0) - baixado)
@@ -933,7 +947,7 @@ def _recebidas_sem_baixa(conn) -> list[dict]:
         if r["medicao_id"] not in a_mao or r["nota_id"] in vistas:
             continue
         vistas.add(r["nota_id"])
-        falta = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True)   # titulo a titulo (#253)
+        falta = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True, baixa_total_quita=True)   # #253, #563
         if falta > diretoria.TOLERANCIA_CENTAVOS:
             out.append({**dict(r), "falta_centavos": falta})
     return out

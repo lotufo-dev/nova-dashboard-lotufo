@@ -277,8 +277,8 @@ def test_protocolada_ha_200_dias_nao_gera_aviso_e_fica_em_mais_de_60(cenario):
 def test_nota_em_aberto_no_rm_entra_no_a_receber_sem_contar_duas_vezes(cenario):
     c, ids = cenario
     def nota(idmov, emissao, falta, medicao_numero):
-        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
-                        "VALUES (1, ?, ?, ?, ?, 'ativa')", (idmov, f"{idmov:09d}", emissao, falta)).lastrowid
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                        "VALUES (1, ?, ?, ?, ?, 'ativa', '2.2.01')", (idmov, f"{idmov:09d}", emissao, falta)).lastrowid
         c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
                   "status_lan) VALUES (1, ?, ?, ?, ?, 0, 0)", (idmov, nid, idmov, falta))
         mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=?", (ids["propria"], medicao_numero)).fetchone()[0]
@@ -304,8 +304,8 @@ def test_recebimento_manual_tira_a_nota_do_a_receber_e_o_corte_nao(cenario):
     uid = c.execute("SELECT id FROM usuarios").fetchone()[0]
 
     def nota(idmov, emissao, falta, medicao_numero):
-        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
-                        "VALUES (1, ?, ?, ?, ?, 'ativa')", (idmov, f"{idmov:09d}", emissao, falta)).lastrowid
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                        "VALUES (1, ?, ?, ?, ?, 'ativa', '2.2.01')", (idmov, f"{idmov:09d}", emissao, falta)).lastrowid
         c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
                   "status_lan) VALUES (1, ?, ?, ?, ?, 0, 0)", (idmov, nid, idmov, falta))
         mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=?", (ids["propria"], medicao_numero)).fetchone()[0]
@@ -337,8 +337,8 @@ def test_nota_partida_com_medicao_do_corte_fica_inteira_e_baixa_parcial_a_mao_sa
         return c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=?", (ids["propria"], n)).fetchone()[0]
 
     def nota(idmov, devido, baixado, numeros):
-        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
-                        "VALUES (1, ?, ?, '2026-06-01', ?, 'ativa')", (idmov, f"{idmov:09d}", devido)).lastrowid
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                        "VALUES (1, ?, ?, '2026-06-01', ?, 'ativa', '2.2.01')", (idmov, f"{idmov:09d}", devido)).lastrowid
         c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
                   "status_lan) VALUES (1, ?, ?, ?, ?, ?, ?)", (idmov, nid, idmov, devido, baixado, 1 if baixado else 0))
         for n in numeros:
@@ -637,8 +637,8 @@ def test_a_receber_recebido_aparece_antes_de_liberar_e_previsto_nao(cenario):
 
 def test_a_receber_nota_do_rm_entra_na_lista_e_no_total(cenario):
     c, ids = cenario
-    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
-                    "VALUES (1, 900, '000000900', '2026-06-01', 2500000, 'ativa')").lastrowid
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                    "VALUES (1, 900, '000000900', '2026-06-01', 2500000, 'ativa', '2.2.01')").lastrowid
     c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, status_lan) "
               "VALUES (1, 900, ?, 900, 2500000, 0, 0)", (nid,))
     mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1", (ids["propria"],)).fetchone()[0]
@@ -658,13 +658,15 @@ def test_a_receber_nota_do_rm_entra_na_lista_e_no_total(cenario):
     ([(50_000, 55_100, 1), (5_000, 3_000, 4)], 2_000),  # ... nem a falta de B com baixa parcial
     ([(50_000, 55_100, 1), (5_000, 5_000, 1)], None),   # todos pagos (um com juros): sai, como hoje
     ([(50_000, 50_000, 1), (5_000, 4_901, 1)], None),   # ate' R$ 1,00 a menos no total: sai, como hoje
+    ([(50_000, 50_000, 1), (5_000, 0, 1)], None),       # issue #563: baixa total com valor baixado zero e' quitado
+    ([(50_000, 0, 1), (5_000, 0, 0)], 5_000),           # ... e o titulo aberto ao lado continua contando
 ])
 def test_a_receber_conta_a_falta_da_nota_titulo_a_titulo(cenario, titulos, falta):
     """Issue #253: a nota em aberto do RM entra no a receber pelo que falta titulo a titulo (a conta da #35 e da
     #251): pagamento a mais num titulo nao compensa outro titulo aberto da mesma nota."""
     c, ids = cenario
-    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
-                    "VALUES (1, 930, '000000930', '2026-06-01', 60000, 'ativa')").lastrowid
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                    "VALUES (1, 930, '000000930', '2026-06-01', 60000, 'ativa', '2.2.01')").lastrowid
     for i, (orig, baixado, st) in enumerate(titulos, 1):
         c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
                   "status_lan) VALUES (1, ?, ?, 930, ?, ?, ?)", (9300 + i, nid, orig, baixado, st))
@@ -677,6 +679,36 @@ def test_a_receber_conta_a_falta_da_nota_titulo_a_titulo(cenario, titulos, falta
     nota = [i["valor_centavos"] for i in r["itens"] if i["tipo"] == "nota"]
     assert nota == ([] if falta is None else [falta])
     assert r["total"]["valor_centavos"] == 700_000 + 300_000 + (falta or 0)
+
+
+def test_so_nota_de_cobranca_ao_orgao_entra_no_a_receber_e_no_faturado(cenario):
+    """Issue #563: so' os codtmv de `CODTMV_COBRANCA` sao cobranca ao orgao. Nota 2.2.15 (nota do fornecedor) e 2.2.10
+    (pessoas fisicas) com centro de custo da obra e titulo aberto ficam fora do a receber, do faturado do RM e do
+    complemento; a 2.2.01 continua."""
+    c, ids = cenario
+    assert diretoria.CODTMV_COBRANCA == ("2.2.01", "2.2.02", "2.2.07", "2.2.16")
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (ids["propria"],))
+    def nota(idmov, codtmv, valor):
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, "
+                        "codtmv) VALUES (1, ?, ?, '2026-08-10', ?, 'ativa', '9.001.001', ?)",
+                        (idmov, str(idmov), valor, codtmv)).lastrowid
+        c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+                  "status_lan) VALUES (1, ?, ?, ?, ?, 0, 0)", (idmov, nid, idmov, valor))
+    nota(9701, "2.2.15", 2_130_000)
+    nota(9702, "2.2.10", 250_000)
+    c.commit()
+    ids["liberar"]()
+    r = diretoria.a_receber(c, HOJE)
+    assert [i for i in r["itens"] if i["tipo"] == "nota"] == []
+    assert r["total"]["valor_centavos"] == 700_000 + 300_000
+    assert diretoria.rm_por_mes(c)[0] == {} and diretoria.complemento_rm(c) == {}
+    nota(9703, "2.2.01", 1_000_000)
+    c.commit()
+    r = diretoria.a_receber(c, HOJE)
+    assert [i["valor_centavos"] for i in r["itens"] if i["tipo"] == "nota"] == [1_000_000]
+    assert r["total"]["valor_centavos"] == 700_000 + 300_000 + 1_000_000
+    assert diretoria.rm_por_mes(c)[0] == {"2026-08": 1_000_000}
+    assert diretoria.complemento_rm(c) == {ids["propria"]: {"2026-07": 900_000}}
 
 
 def test_a_receber_recebida_sem_data_do_corte_fica_fora_do_previsto(cenario):
@@ -964,8 +996,8 @@ def test_faturado_e_recebido_reais_saem_do_rm_por_mes_na_cota(cenario):
     a cancelada e a de fora dos contratos, nao."""
     c, ids = cenario
     def nota(idmov, emissao, valor, situacao="ativa", coligada=1, medicao=None):
-        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
-                        "VALUES (?, ?, ?, ?, ?, ?)", (coligada, idmov, str(idmov), emissao, valor, situacao)).lastrowid
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                        "VALUES (?, ?, ?, ?, ?, ?, '2.2.01')", (coligada, idmov, str(idmov), emissao, valor, situacao)).lastrowid
         if medicao:
             c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
                       "VALUES (?, ?, ?, 'detectado', 't')", (medicao, nid, valor))
@@ -1016,8 +1048,8 @@ def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_da_diretoria(cenario):
     c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (ids["propria"],))
     c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
     def nota(idmov, emissao, valor, coligada=1, centro="9.001.001", medicao=None):
-        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo) "
-                        "VALUES (?, ?, ?, ?, ?, 'ativa', ?)", (coligada, idmov, str(idmov), emissao, valor, centro)).lastrowid
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, codtmv) "
+                        "VALUES (?, ?, ?, ?, ?, 'ativa', ?, '2.2.01')", (coligada, idmov, str(idmov), emissao, valor, centro)).lastrowid
         if medicao:
             c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
                       "VALUES (?, ?, ?, 'detectado', 't')", (medicao, nid, valor))
@@ -1069,14 +1101,14 @@ def test_planilha_gerada_nao_esconde_a_nota_do_rm(cenario):
     c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (ids["propria"],))
     gerada = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
                        "VALUES (?, 41, 'execucao', '2026-07', 'planilha_gerada', 5000000)", (ids["propria"],)).lastrowid
-    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo) "
-              "VALUES (1, 801, '801', '2026-08-10', 1000001, 'ativa', '9.001.001')")
+    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, codtmv) "
+              "VALUES (1, 801, '801', '2026-08-10', 1000001, 'ativa', '9.001.001', '2.2.01')")
     c.commit()
     # competencia 07/2026: lancado so' a recebida de 100.000 (a gerada fica fora) -> faltam 900.001
     assert diretoria.complemento_rm(c) == {ids["propria"]: {"2026-07": 900_001}}
     # nota ligada a planilha gerada tambem nao e' "representada": entra pelo que passa do lancado
-    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo) "
-                    "VALUES (1, 802, '802', '2026-08-12', 300000, 'ativa', '9.001.001')").lastrowid
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, codtmv) "
+                    "VALUES (1, 802, '802', '2026-08-12', 300000, 'ativa', '9.001.001', '2.2.01')").lastrowid
     c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
               "VALUES (?, ?, 300000, 'detectado', 't')", (gerada, nid))
     c.commit()

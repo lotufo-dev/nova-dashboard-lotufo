@@ -338,6 +338,22 @@ def test_cartas_validas_guardam_o_caminho_do_timbre(tmp_path):
     assert cartas["familias"]["mtpar"]["carta_corpo"] == "{lista}"
 
 
+def test_rodape_e_largura_do_logo_do_emitente_sao_conferidos(tmp_path):
+    """Issue #566: `rodape` e `logo_largura_mm` passam adiante quando validos e viram erro quando nao."""
+    raiz = _escrever(tmp_path / "ok")
+    (raiz / "cartas.yaml").write_text(yaml.safe_dump({
+        "emitentes": {"lotufo": {"razao_social": "LOTUFO", "fundo": False, "rodape": True, "logo_largura_mm": 120}}},
+        allow_unicode=True), "utf-8")
+    e = ca.preparar(raiz)["geral"]["cartas"]["emitentes"]["lotufo"]
+    assert (e["rodape"], e["logo_largura_mm"]) == (True, 120)
+    raiz = _escrever(tmp_path / "ruim")
+    (raiz / "cartas.yaml").write_text(yaml.safe_dump({
+        "emitentes": {"lotufo": {"razao_social": "LOTUFO", "rodape": "sim", "logo_largura_mm": 500}}},
+        allow_unicode=True), "utf-8")
+    erros = _erros(raiz)
+    assert any("lotufo.rodape" in x for x in erros) and any("logo_largura_mm" in x for x in erros)
+
+
 def test_pecas_ordem_e_destinatario_da_carta_no_orgao(tmp_path):
     ok = {**ORGAO, "carta_destinatario": ["A SINFRA"], "ordem_certidoes": ["municipal", "fgts"],
           "pecas": [{"tipo": "boletim", "rotulo": "Boletim", "exigida": True}]}
@@ -484,6 +500,20 @@ def test_copia_dono_no_geral(tmp_path):
         (raiz / "geral.yaml").write_text(yaml.safe_dump({**base, "copia_dono": invalido}), "utf-8")
         erros = "\n".join(_erros(raiz))
         assert "copia_dono.para" in erros and "copia_dono.enviada_por" in erros
+
+
+def test_alertas_seguranca_no_geral(tmp_path):
+    # issue #424: quem recebe os alertas de seguranca e o resumo diario e o login de quem os envia
+    raiz = _escrever(tmp_path)
+    base = {"faturamento": {"para": ["f@exemplo.com.br"], "assunto": "{medicao} {obra}", "corpo": "x"}}
+    (raiz / "geral.yaml").write_text(yaml.safe_dump({**base, "alertas_seguranca": {
+        "para": [" Dono@Exemplo.com.br "], "enviada_por": ["dono@exemplo.com.br"]}}), "utf-8")
+    assert ca.preparar(raiz)["geral"]["alertas_seguranca"] == {
+        "para": ["dono@exemplo.com.br"], "enviada_por": ["dono@exemplo.com.br"]}
+    for invalido in ({"para": [], "enviada_por": ["nao-e-email"]}, "dono@exemplo.com.br"):
+        (raiz / "geral.yaml").write_text(yaml.safe_dump({**base, "alertas_seguranca": invalido}), "utf-8")
+        erros = "\n".join(_erros(raiz))
+        assert "alertas_seguranca.para" in erros and "alertas_seguranca.enviada_por" in erros
 
 
 # --- issue #65: garantia com vigencia, endosso que traz a nova vigencia ----------

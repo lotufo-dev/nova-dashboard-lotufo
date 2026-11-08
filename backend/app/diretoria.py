@@ -27,6 +27,11 @@ FORA = ("cancelada", "desistida", "prevista", "planilha_gerada")
 FAIXAS = (("ate_30", 0, 30), ("de_31_a_60", 31, 60), ("mais_60", 61, None))
 COMPETENCIA_NOTA_VALE = "2026-06"   # `complemento_rm`: a carga do historico trouxe as medicoes ate' 05/2026
 TOLERANCIA_CENTAVOS = 100      # titulo pago com ate R$ 1,00 de diferenca nao e' divida (arredondamento do RM)
+# Issue #563: tipos de movimento do RM (codtmv) que sao cobranca ao orgao. So' eles entram no a receber e no faturado
+# do RM; 2.2.15 (nota do fornecedor, saida contra fornecedor) e 2.2.10 (pessoas fisicas) ficam fora. 2.2.07 e' o do
+# consorcio do Leblon com tomador SINFRA. Tipo novo so' entra por decisao.
+CODTMV_COBRANCA = ("2.2.01", "2.2.02", "2.2.07", "2.2.16")
+_FILTRO_COBRANCA = f"codtmv IN ({','.join('?' * len(CODTMV_COBRANCA))})"
 
 
 def _quantil(valores: list[int], q: float) -> int:
@@ -90,12 +95,13 @@ def _notas_em_aberto(conn) -> list[dict]:
     coligada. So' notas da coligada da entidade do contrato: a NFS-e da Lotufo em obra de consorcio e' repassada
     pelo consorcio e nao e' cobranca ao orgao. O valor e' o que falta dos titulos (liquido), titulo a titulo, na cota.
     Nota ligada a medicao recebida a mao fica fora (issue #203): o registro manual vale, e o titulo ainda aberto
-    no RM aparece na Saude, nao de novo no a receber."""
+    no RM aparece na Saude, nao de novo no a receber. So' notas de `CODTMV_COBRANCA` (#563)."""
     em_aberto = set(ESPERANDO_NOTA + ESPERANDO_PROTOCOLO + PROTOCOLADAS)
     a_mao = conciliacao.recebidas_a_mao(conn)
     contr, por_centro, por_coligada = _mapa_contratos(conn)
     out = []
-    for n in conn.execute("SELECT * FROM notas_fiscais WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL"):
+    for n in conn.execute("SELECT * FROM notas_fiscais WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL "
+                          "AND " + _FILTRO_COBRANCA, CODTMV_COBRANCA):
         ligadas = conn.execute("""SELECT m.id, m.contrato_id, m.estado FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id
                                   WHERE a.nota_id=? AND a.desfeita_em IS NULL""", (n["id"],)).fetchall()
         if any(r["estado"] in em_aberto for r in ligadas):
@@ -114,7 +120,7 @@ def _notas_em_aberto(conn) -> list[dict]:
             continue
         # Issue #253: a falta e' contada titulo a titulo (a conta da #35 e da #251): juros num titulo nao
         # escondem outro titulo aberto da mesma nota.
-        falta = sincronizacao_rm._falta_por_titulo(conn, n["id"], aberto_inteiro=True)
+        falta = sincronizacao_rm._falta_por_titulo(conn, n["id"], aberto_inteiro=True, baixa_total_quita=True)
         if falta <= TOLERANCIA_CENTAVOS:
             continue
         out.append({"estado": "protocolada", "tipo": "nota", "numero": n["numero"], "nf": _numero_nf(n["numero"]),
@@ -130,7 +136,7 @@ def _notas_do_rm(conn) -> list[tuple]:
     """As notas do RM com o contrato de cada uma: `(nota, contrato, tem_medicao_ativa)`. A obra da nota e' a de
     `_notas_em_aberto`: a medicao ligada, senao o centro de custo (atual ou anterior), senao a coligada do consorcio sem
     centro; so' notas da coligada da entidade do contrato (a NFS-e da Lotufo em obra de consorcio e' repassada pelo
-    consorcio). Nota que nao cai em nenhum contrato cadastrado fica fora."""
+    consorcio). Nota que nao cai em nenhum contrato cadastrado fica fora, e so' as de `CODTMV_COBRANCA` (#563)."""
     contr, por_centro, por_coligada = _mapa_contratos(conn)
     ligadas: dict[int, list] = {}
     for r in conn.execute("SELECT a.nota_id, m.contrato_id, m.estado FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id "
@@ -138,7 +144,7 @@ def _notas_do_rm(conn) -> list[tuple]:
         ligadas.setdefault(r["nota_id"], []).append((r["contrato_id"], r["estado"]))
     out = []
     for n in conn.execute("SELECT id, coligada, centro_custo, emissao, valor_centavos, situacao FROM notas_fiscais "
-                          "WHERE idmov IS NOT NULL"):
+                          "WHERE idmov IS NOT NULL AND " + _FILTRO_COBRANCA, CODTMV_COBRANCA):
         lig = ligadas.get(n["id"], [])
         if lig:
             cid = lig[0][0]
