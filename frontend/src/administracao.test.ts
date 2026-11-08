@@ -130,6 +130,7 @@ describe("administração", () => {
     expect(rotuloAcao("medicao.planilha_envio")).toBe("Planilha/carta enviada ao protocolo");   // #282
     expect(rotuloAcao("medicao.planilha_peca")).toBe("Peça da planilha/carta");
     expect(rotuloAcao("medicao.sem_boletim")).toBe("Espelho gerado sem boletim");   // #284
+    expect(rotuloAcao("medicao.reajuste_congelado")).toBe("Pedido do reajuste congelado no envio da planilha/carta");   // #590
     expect(rotuloAcao("algo.novo_aqui")).toBe("Algo novo aqui");
   });
 
