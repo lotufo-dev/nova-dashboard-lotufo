@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { brl } from "./formato";
 import CampoCompetencia from "./CampoCompetencia";
+import CampoReajuste, { type ValorReajuste } from "./CampoReajuste";
 import { IconeAlerta, IconeBaixar, IconeCadeado, IconeMais } from "./icones";
 import { EXCECOES, notasDivergentes, passoDe, resumoNotas, separarMedicoes, tituloMedicao } from "./medicao";
 import { type Busca } from "./rota";
@@ -252,17 +253,22 @@ export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [feito, setFeito] = useState<{ id: number; numero: number; tipo: string } | null>(null);
+  // issue #276: na de reajuste, o pedido sugerido e a data-base (com duas no contrato)
+  const [reaj, setReaj] = useState<ValorReajuste>({ valor: "", dataBase: "" });
 
   async function criar(ev: React.FormEvent) {
     ev.preventDefault();
     setErro(""); setFeito(null); setSalvando(true);
+    const doReajuste = novo.tipo === "reajuste"
+      ? { ...(reaj.valor ? { valor: reaj.valor } : {}), ...(reaj.dataBase ? { data_base_mes: reaj.dataBase } : {}) } : {};
     try {
       const r = await api<{ id: number }>(`/api/contratos/${contratoId}/medicoes`, {
         method: "POST",
-        body: JSON.stringify({ numero: Number(novo.numero), tipo: novo.tipo, competencia: novo.competencia }),
+        body: JSON.stringify({ numero: Number(novo.numero), tipo: novo.tipo, competencia: novo.competencia, ...doReajuste }),
       });
       setFeito({ id: r.id, numero: Number(novo.numero), tipo: novo.tipo });
       setNovo({ numero: "", tipo: "execucao", competencia: "" });
+      setReaj({ valor: "", dataBase: "" });
       aoCriar();
     } catch (e) { setErro(mensagemDeErro(e)); } finally { setSalvando(false); }
   }
@@ -294,7 +300,10 @@ export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
           <IconeMais className="icone icone--p" />{salvando ? "Criando…" : "Nova medição"}
         </button>
       </div>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {novo.tipo === "reajuste" && (
+        <CampoReajuste contratoId={contratoId} competencia={novo.competencia} prefixo="nova" valor={reaj} aoMudar={setReaj} />
+      )}
+      {erro &&<p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
       <p className={feito ? "notas__ok" : "sr-only"} role="status">
         {feito && <>Medição criada:{" "}
           <Link para={{ tela: "medicao", obra: contratoId, id: feito.id }}>{tituloMedicao(feito)}</Link>.</>}

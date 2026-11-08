@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { api, apiForm, ApiErro, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import CampoCompetencia from "./CampoCompetencia";
+import CampoReajuste, { type ValorReajuste } from "./CampoReajuste";
 import CampoValor from "./CampoValor";
 import Checklist, { type ItemChecklist } from "./Checklist";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
@@ -167,6 +168,8 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
   const [tentou, setTentou] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState("");
+  // issue #276: o reajuste da mesma competencia, opcional, so' na planilha/carta de execucao
+  const [reaj, setReaj] = useState<ValorReajuste>({ valor: "", dataBase: "" });
   const inicialNumero = inicial?.numero, inicialCompetencia = inicial?.competencia;
 
   useEffect(() => {
@@ -204,6 +207,10 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
     fd.append("periodo_fim", form.fim);
     fd.append("valor", form.valor);
     if (numeroOrgao.trim()) fd.append("numero_orgao", numeroOrgao.trim());
+    if (tipo === "execucao" && reaj.valor) {
+      fd.append("reajuste_valor", reaj.valor);
+      if (reaj.dataBase) fd.append("reajuste_data_base", reaj.dataBase);
+    }
     fd.append("oficio", form.oficio);
     fd.append("planilha", form.planilha);
     try {
@@ -232,6 +239,9 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
         </div>
       </div>
       <CamposDoPedido prefixo="pl" form={form} setForm={setForm} comCompetencia tentou={tentou} />
+      {tipo === "execucao" && (
+        <CampoReajuste contratoId={contratoId} competencia={form.competencia} prefixo="pl" valor={reaj} aoMudar={setReaj} />
+      )}
       <dl className="planilha__saldo">
         <div><dt>Acumulado anterior</dt><dd className="num">{brl(saldo.acumulado)}</dd></div>
         <div><dt>Saldo</dt><dd className="num">{brl(saldo.saldo)}</dd></div>

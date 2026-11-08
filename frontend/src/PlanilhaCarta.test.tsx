@@ -79,6 +79,70 @@ describe("Nova planilha/carta", () => {
       fd.get("valor"), fd.get("numero_orgao")]).toEqual(["4", "execucao", "2026-08", "2026-08-01", "2026-08-31", "12.345,67", "12"]);
     expect((fd.get("oficio") as File).name).toBe("oficio.pdf");
     expect((fd.get("planilha") as File).name).toBe("planilha.xlsx");
+    // sem reajuste digitado, a planilha/carta nao leva o campo
+    expect(fd.get("reajuste_valor")).toBeNull();
+  });
+
+  // issue #276: o reajuste da competencia vem preenchido com a sugestao e a origem
+  const BASE = { data_base_mes: "2024-06", aplica_a: "", ciclo: 2026, valor_centavos: 1_300_01, origem: "apostilamento",
+    origem_texto: "apostilado no termo 001/2026" };
+  function responderReajuste(reajuste: object) {
+    api.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/contratos/9/reajuste/sugestao")) return reajuste;
+      if (url.startsWith("/api/contratos/9/planilhas/sugestao")) return SUGESTAO;
+      return { avisos: [], acumulado_anterior_centavos: 0, saldo_centavos: 0 };
+    });
+  }
+
+  it("o reajuste vem com o valor apostilado e a origem, e vai junto no registro", async () => {
+    responderReajuste({ competencia: "2026-08", data_base_mes: "2024-06", bases: [BASE] });
+    apiForm.mockResolvedValue({ medicao_id: 77, versao: 1, estado: "planilha_gerada", avisos: [] });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    await waitFor(() => expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("1.300,01"));
+    expect(screen.getByText("apostilado no termo 001/2026")).toBeTruthy();
+    expect(api).toHaveBeenCalledWith("/api/contratos/9/reajuste/sugestao?competencia=2026-08");
+    expect(screen.queryByLabelText("Data-base")).toBeNull();      // uma base so': nada a escolher
+    fireEvent.change(screen.getByLabelText("Valor pedido"), { target: { value: "12.345,67" } });
+    anexar("Ofício assinado (PDF)", pdf("oficio.pdf"));
+    anexar("Planilha (.xlsx ou PDF)", new File(["PK"], "planilha.xlsx"));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar planilha/carta" }));
+    await waitFor(() => expect(apiForm).toHaveBeenCalled());
+    const fd = apiForm.mock.calls[0][1] as FormData;
+    expect([fd.get("reajuste_valor"), fd.get("reajuste_data_base")]).toEqual(["1.300,01", "2024-06"]);
+  });
+
+  it("sem previsão o reajuste fica vazio; contrato sem data-base não mostra o campo", async () => {
+    responderReajuste({ competencia: "2026-08", data_base_mes: "2024-06", bases: [{ ...BASE, valor_centavos: null, origem: null, origem_texto: null }] });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    expect(((await screen.findByLabelText("Reajuste")) as HTMLInputElement).value).toBe("");
+    expect(screen.queryByText(/apostilado|previsto/)).toBeNull();
+    cleanup();
+    responderReajuste({ competencia: "2026-08", data_base_mes: null, bases: [] });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    await screen.findByLabelText("Nº da medição");
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/contratos/9/reajuste/sugestao?competencia=2026-08"));
+    expect(screen.queryByLabelText("Reajuste")).toBeNull();
+  });
+
+  it("duas datas-base: a escolha troca a sugestão pela da base escolhida", async () => {
+    responderReajuste({ competencia: "2026-08", data_base_mes: null, bases: [
+      { ...BASE, data_base_mes: "2024-04", aplica_a: "itens SICRO", valor_centavos: 500_03, origem: "pleito", origem_texto: "previsto no pleito" },
+      { ...BASE, valor_centavos: null, origem: null, origem_texto: null }] });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    const base = await screen.findByLabelText("Data-base") as HTMLSelectElement;
+    expect(base.value).toBe("");
+    expect([...base.options].map(o => o.textContent)).toEqual(["—", "04/2024 (itens SICRO)", "06/2024"]);
+    expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("");
+    fireEvent.change(base, { target: { value: "2024-04" } });
+    expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("500,03");
+    expect(screen.getByText("previsto no pleito")).toBeTruthy();
+  });
+
+  it("a planilha/carta de projeto não tem o campo de reajuste", async () => {
+    responderReajuste({ competencia: "2026-08", data_base_mes: "2024-06", bases: [BASE] });
+    render(<NovaPlanilhaCarta contratoId={9} tipo="projeto" aoRegistrar={() => {}} />);
+    await screen.findByLabelText("Nº da medição");
+    expect(screen.queryByLabelText("Reajuste")).toBeNull();
   });
 
   it("a medição prevista entra com o nº e a competência dela, sem o nº do órgão de outro nº", async () => {
