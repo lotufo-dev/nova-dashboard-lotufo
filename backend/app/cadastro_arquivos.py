@@ -993,6 +993,10 @@ def preparar(raiz: Path) -> dict:
             erros.append(f"{onde}: tipo_contratante: use {' ou '.join(TIPOS_CONTRATANTE)}")
         if o.get("nome_qdop") is not None and not str(o["nome_qdop"]).strip():
             erros.append(f"{onde}: nome_qdop: texto vazio")
+        # Issue #288 (spec 2026-10-20 §2.1.1): o prazo X do aviso "pedido sem boletim" (diretoria em 2X); sem ele, o
+        # orgao nao tem o aviso (MT-PAR, sem o passo do pedido)
+        if "prazo_boletim_dias" in o and _inteiro(o["prazo_boletim_dias"], 1) is None:
+            erros.append(f"{onde}: prazo_boletim_dias: use um inteiro maior que zero")
         orgaos.append({"chave": o["chave"], "nome": o.get("nome"), "familia": o.get("familia"), "cnpj": cnpj,
                        "regras": {k: v for k, v in o.items() if k not in ("chave", "nome", "familia", "cnpj")}})
     if len({o["chave"] for o in orgaos}) != len(orgaos):
