@@ -1,4 +1,4 @@
--- 076: a capa do SMO lida no registro do boletim (issue #286, decisao do Leo de 08/11/2026). So' acrescenta (uma
+-- 077: a capa do SMO lida no registro do boletim (issue #286, decisao do Leo de 08/11/2026). So' acrescenta (uma
 -- tabela, um indice e dois gatilhos).
 --
 -- No "Registrar boletim" o servidor le a capa do PDF anexado (so' o texto, sem OCR) e grava aqui os campos que a

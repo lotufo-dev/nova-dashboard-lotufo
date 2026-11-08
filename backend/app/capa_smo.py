@@ -2,7 +2,7 @@
 08/11/2026). O instrumento so' entra pelo YAML; a dashboard so' avisa.
 
 No "Registrar boletim" o servidor le a capa do PDF (so' o texto, `leitura_smo.ler_pdf_texto`) e grava os campos em
-`medicao_boletim_capas` (migracao 076), ligados ao evento de atesto. A conferencia sai desses campos:
+`medicao_boletim_capas` (migracao 077), ligados ao evento de atesto. A conferencia sai desses campos:
 
 - `capa_prazo_divergente`: fim de execucao ou de vigencia da capa diferente de `execucao_fim_vigente` /
   `vigencia_fim_vigente` do cadastro, sem ajuste por dias paralisados. So' a capa mais recente do contrato (pela data
