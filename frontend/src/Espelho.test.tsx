@@ -394,6 +394,14 @@ describe("Espelho: o passo Espelhos (#514)", () => {
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
       referencias={{ 1: { valor: 1000001, fonte: "aprovado" } }} />);
     expect(await screen.findByText("igual ao aprovado")).toBeTruthy();
-    expect(screen.getByText("R$ 1.800,00", { selector: "tfoot td" })).toBeTruthy();
+    // duas linhas (#558): a soma das notas e o valor da medição, com a conferência junto deste
+    const linhas = within(screen.getByRole("table", { name: "Espelhos da medição 10" })).getAllByRole("row");
+    const notas = linhas[linhas.length - 2], medicao = linhas[linhas.length - 1];
+    expect(within(notas).getByText("Total das notas")).toBeTruthy();
+    expect(within(notas).getByText("R$ 1.800,00")).toBeTruthy();
+    expect(within(notas).queryByText(/igual|diferente/)).toBeNull();
+    expect(within(medicao).getByText("Valor da medição")).toBeTruthy();
+    expect(within(medicao).getByText("R$ 10.000,01")).toBeTruthy();
+    expect(within(medicao).getByText("igual ao aprovado")).toBeTruthy();
   });
 });
