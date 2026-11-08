@@ -188,8 +188,14 @@ def baixado_sem_caixa_por_mes(conn) -> dict[str, int]:
     zero, pelo mes da baixa, na cota, pelo valor original. Ele nao entra no recebido (`rm_por_mes`: nao entrou caixa;
     pode ser glosa, compensacao ou encontro de contas) nem no a receber (`_notas_em_aberto`, #563); a Diretoria o
     mostra numa linha propria, para faturado - recebido - a receber fechar com a diferenca nomeada. A obra de cada nota
-    e' a de `_notas_do_rm`, como no recebido."""
-    pct_da_nota = {n["id"]: c["pct"] for n, c, _ in _notas_do_rm(conn)}
+    e' a de `_notas_do_rm`, como no recebido; so' nota ativa (a cancelada nao entrou no faturado). Nota ligada a medicao
+    em aberto fica fora: a medicao segue no a receber (nao fecha sem baixa com valor, #574) e contaria duas vezes."""
+    em_aberto = set(ESPERANDO_NOTA + ESPERANDO_PROTOCOLO + PROTOCOLADAS)
+    com_medicao_aberta = {r["nota_id"] for r in conn.execute(
+        "SELECT a.nota_id, m.estado FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id WHERE a.desfeita_em IS NULL")
+        if r["estado"] in em_aberto}
+    pct_da_nota = {n["id"]: c["pct"] for n, c, _ in _notas_do_rm(conn)
+                   if n["situacao"] == "ativa" and n["id"] not in com_medicao_aberta}
     out: dict[str, int] = {}
     for b in conn.execute("SELECT nota_id, valor_original_centavos, data_baixa FROM baixas WHERE data_baixa IS NOT NULL "
                           "AND nota_id IS NOT NULL AND status_lan=? AND COALESCE(valor_baixado_centavos, 0)<=0",
