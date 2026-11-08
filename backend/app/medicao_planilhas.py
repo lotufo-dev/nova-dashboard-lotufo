@@ -9,7 +9,7 @@ Modulo proprio, ao lado de `medicoes.py`: o boletim, a assinatura e a lista em a
 """
 import datetime
 
-from app import arquivos, auditoria, contratos, db, espelho, tempo
+from app import arquivos, auditoria, contratos, db, espelho, reajuste, tempo
 from app.medicoes import LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
 TIPOS = ("execucao", "projeto")
@@ -157,7 +157,64 @@ def conferir_registro(conn, contrato_id: int, dados: dict):
         dica = ": para corrigir a planilha/carta, registre uma revisão" if ja["estado"] in ESTADOS_REVISAO else ""
         raise ValueError(f"{nome_medicao(numero, tipo)} já existe neste contrato e está "
                          f"{rotulo_estado(ja['estado'])}{dica}")
+    _conferir_reajuste(conn, contrato_id, dados)
     return ja
+
+
+def _conferir_reajuste(conn, contrato_id: int, dados: dict):
+    """Issue #276 (decisao do Leo, 08/11/2026): com o campo "Reajuste" preenchido, a planilha/carta de execucao faz
+    nascer a medicao de reajuste de mesmo nº e competencia, em `prevista`, com o pedido, a data-base e o ciclo. Ja'
+    existindo a de reajuste desse nº, so' a prevista da mesma competencia, sem pedido do espelho, recebe os valores.
+    Devolve (data-base, ciclo, medicao de reajuste existente ou None); sem o campo, None."""
+    if dados.get("reajuste_centavos") is None:
+        if dados.get("reajuste_data_base"):
+            raise ValueError("Informe o valor do reajuste ou deixe a data-base em branco")
+        return None
+    numero, competencia = dados["numero"], dados["competencia"]
+    if dados["tipo"] != "execucao":
+        raise ValueError("O reajuste acompanha só a planilha/carta de execução")
+    base, ciclo = reajuste.base_e_ciclo_da_medicao(conn, contrato_id, competencia, dados.get("reajuste_data_base"))
+    r = conn.execute("SELECT * FROM medicoes WHERE contrato_id=? AND numero=? AND tipo='reajuste'",
+                     (contrato_id, numero)).fetchone()
+    if r is not None:
+        nome = nome_medicao(numero, "reajuste")
+        if r["estado"] != "prevista":
+            raise ValueError(f"{nome} já existe neste contrato e está {rotulo_estado(r['estado'])}")
+        if r["competencia"] != competencia:
+            raise ValueError(f"{nome} já existe neste contrato com a competência {_mes_br(r['competencia'])}")
+        if r["valor_protocolado_origem"] == "espelho":
+            raise ValueError(f"O pedido da {nome} vem do espelho: deixe o reajuste em branco")
+    return base, ciclo, r
+
+
+CAMPOS_REAJUSTE = ("valor_protocolado_centavos", "valor_protocolado_origem", "data_base_mes", "ciclo")
+
+
+def _gravar_reajuste(conn, usuario_id: int, contrato_id: int, dados: dict, conferido) -> int | None:
+    """Issue #276: cria (ou completa a prevista de) a medicao de reajuste que acompanha a planilha/carta, com
+    auditoria. Devolve o id dela, ou None sem o campo."""
+    if conferido is None:
+        return None
+    base, ciclo, ja = conferido
+    numero, competencia, valor = dados["numero"], dados["competencia"], dados["reajuste_centavos"]
+    if ja is None:
+        cur = conn.execute(
+            "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, valor_protocolado_centavos, "
+            "valor_protocolado_origem, data_base_mes, ciclo) VALUES (?,?,'reajuste',?,?,'manual',?,?)",
+            (contrato_id, numero, competencia, valor, base, ciclo))
+        rid, antes = cur.lastrowid, None
+    else:
+        rid, antes = ja["id"], {k: ja[k] for k in CAMPOS_REAJUSTE}
+        cur = conn.execute(
+            "UPDATE medicoes SET valor_protocolado_centavos=?, valor_protocolado_origem='manual', data_base_mes=?, "
+            "ciclo=? WHERE id=? AND estado='prevista' AND COALESCE(valor_protocolado_origem, '') <> 'espelho'",
+            (valor, base, ciclo, rid))
+        db.exigir_uma_linha(cur, "Estado da medição de reajuste mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, usuario_id, "medicao.reajuste_da_planilha" if ja else "medicao.criar", "medicao",
+                        rid, antes, {"numero": numero, "tipo": "reajuste", "competencia": competencia,
+                                     "estado": "prevista", "valor_protocolado_centavos": valor,
+                                     "valor_protocolado_origem": "manual", "data_base_mes": base, "ciclo": ciclo})
+    return rid
 
 
 def conferir_revisao(conn, medicao_id: int, dados: dict):
@@ -184,6 +241,7 @@ def registrar(conn, usuario_id: int, contrato_id: int, dados: dict, anexos: dict
     numero, tipo, competencia = dados["numero"], dados["tipo"], dados["competencia"]
     with db.mutacao(conn):
         ja = conferir_registro(conn, contrato_id, dados)
+        conferido = _conferir_reajuste(conn, contrato_id, dados)
         avisos_ = avisos(conn, contrato_id, tipo, numero, competencia, dados["periodo_inicio"])
         acumulado = acumulado_anterior(conn, contrato_id, tipo, numero)
         valores = (competencia, dados["valor_centavos"], dados["periodo_inicio"], dados["periodo_fim"],
@@ -208,7 +266,9 @@ def registrar(conn, usuario_id: int, contrato_id: int, dados: dict, anexos: dict
             "estado": "planilha_gerada", "numero": numero, "tipo": tipo, "competencia": competencia,
             "numero_orgao": numero_orgao, **_evento(dados, 1, pid, acumulado, anexos, avisos_)})
         saldo = _saldo(conn, contrato_id, tipo, acumulado, dados["valor_centavos"])
-    return {"medicao_id": mid, "versao": 1, "estado": "planilha_gerada", "avisos": avisos_, **saldo}
+        reajuste_id = _gravar_reajuste(conn, usuario_id, contrato_id, dados, conferido)
+    return {"medicao_id": mid, "versao": 1, "estado": "planilha_gerada", "avisos": avisos_,
+            "reajuste_medicao_id": reajuste_id, **saldo}
 
 
 def revisar(conn, usuario_id: int, medicao_id: int, dados: dict, anexos: dict) -> dict:

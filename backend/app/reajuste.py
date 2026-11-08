@@ -700,6 +700,66 @@ def apostilamento_da_medicao(conn, medicao: dict, grupos: list[dict] | None = No
     return None
 
 
+ORIGEM_DA_SUGESTAO = {"pleito": "previsto no pleito", "manual": "previsto"}
+ESCOLHA_A_DATA_BASE = "Escolha a data-base do reajuste"
+
+
+def sugestao_da_medicao(conn, contrato_id: int, competencia: str) -> dict:
+    """Issue #276 (spec 2026-10-20 §2.2, D7): para a medicao de reajuste da competencia, cada data-base do contrato
+    com o ciclo, o valor sugerido e a origem dita na tela. O sistema nao calcula: a sugestao e' a previsao vigente da
+    competencia (`previsoes_vigentes`: o apostilado manda, senao o previsto no pleito, senao o manual); sem previsao,
+    nula. O ciclo e' o da previsao, senao o do aniversario (`_ciclo_da_competencia`). `data_base_mes` e' a base ja'
+    escolhida: a unica do contrato ou, com duas, a unica que tem previsao na competencia; senao nula (a pessoa
+    escolhe). Contrato sem reajuste ou sem data-base: nenhuma base."""
+    c = conn.execute("SELECT sem_reajuste FROM contratos WHERE id=?", (contrato_id,)).fetchone()
+    if c is None or c["sem_reajuste"]:
+        return {"competencia": competencia, "bases": [], "data_base_mes": None}
+    termos = {r["id"]: r["numero"] or r["chave"] for r in conn.execute(
+        "SELECT id, numero, chave FROM instrumentos WHERE contrato_id=? AND tipo='apostilamento_reajuste'",
+        (contrato_id,))}
+    vigentes = [p for p in previsoes_vigentes(conn, contrato_id) if p["competencia"] == competencia]
+    bases = []
+    for b in conn.execute("SELECT mes, aplica_a FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes",
+                          (contrato_id,)):
+        ps = [p for p in vigentes if p["data_base_mes"] == b["mes"]]
+        ciclos_ = {p["ciclo"] for p in ps}
+        ciclo = next(iter(ciclos_)) if len(ciclos_) == 1 else _ciclo_da_competencia(b["mes"], competencia)
+        p = next((p for p in ps if p["ciclo"] == ciclo), None)
+        origem = texto = None
+        if p is not None:
+            origem = p["origem"]
+            texto = (f"apostilado no termo {termos.get(p['instrumento_id']) or ''}".strip()
+                     if origem == "apostilamento" else ORIGEM_DA_SUGESTAO[origem])
+        bases.append({"data_base_mes": b["mes"], "aplica_a": b["aplica_a"] or "", "ciclo": ciclo,
+                      "valor_centavos": p["valor_previsto_centavos"] if p is not None else None,
+                      "origem": origem, "origem_texto": texto})
+    com_valor = [b for b in bases if b["valor_centavos"] is not None]
+    escolhida = bases[0] if len(bases) == 1 else com_valor[0] if len(com_valor) == 1 else None
+    return {"competencia": competencia, "bases": bases,
+            "data_base_mes": escolhida["data_base_mes"] if escolhida else None}
+
+
+def base_e_ciclo_da_medicao(conn, contrato_id: int, competencia: str,
+                            escolhida: str | None) -> tuple[str | None, int | None]:
+    """Issue #276: a data-base e o ciclo que a medicao de reajuste grava na criacao. Com uma data-base, ela (a
+    escolhida, se vier, tem de ser ela); com duas, a escolhida, e sem escolha a gravacao e' recusada
+    (`ESCOLHA_A_DATA_BASE`). Contrato sem data-base (ou sem reajuste): nada a gravar. O ciclo segue a base, pela
+    mesma leitura da sugestao."""
+    bases = sugestao_da_medicao(conn, contrato_id, competencia)["bases"]
+    if not bases:
+        if escolhida:
+            raise ValueError("Este contrato não tem data-base de reajuste no cadastro")
+        return None, None
+    if escolhida is None and len(bases) == 1:
+        escolhida = bases[0]["data_base_mes"]
+    if escolhida is None:
+        raise ValueError(ESCOLHA_A_DATA_BASE)
+    b = next((b for b in bases if b["data_base_mes"] == escolhida), None)
+    if b is None:
+        raise ValueError(f"Data-base {escolhida[5:7]}/{escolhida[:4]} não é deste contrato")
+    return b["data_base_mes"], b["ciclo"]
+
+
 def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[dict]:
     """Um ciclo por data-base: o corrente (ou o proximo, `futuro`, antes da primeira janela)."""
     hoje = hoje or tempo.hoje_local()
