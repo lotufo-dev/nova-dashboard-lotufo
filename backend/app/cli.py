@@ -539,13 +539,20 @@ def _alertas(args) -> int:
             print(f"Usuário não encontrado: {args.usuario}")
             return 1
         try:
-            alertas_seguranca.conferir_envio(conn, u["id"], args.id, saiu=args.saiu)
+            vai_sair = alertas_seguranca.conferir_envio(conn, u["id"], args.id, saiu=args.saiu)
         except ValueError as e:
             print(str(e))
             return 1
     finally:
         conn.close()
-    print("Registrado: o e-mail saiu." if args.saiu else "Registrado: o e-mail não saiu; ele sai de novo na próxima rodada.")
+    if args.saiu:
+        print("Registrado: o e-mail saiu.")
+    elif vai_sair:
+        print("Registrado: o e-mail não saiu; ele sai de novo na próxima rodada.")
+    elif vai_sair is None:
+        print("Registrado: o e-mail não saiu; ele sai de novo na próxima rodada se o problema continuar aberto.")
+    else:
+        print("Registrado: o e-mail não saiu e não sai mais (resumo de outro dia ou item que já saiu do bloco Segurança).")
     return 0
 
 

@@ -67,6 +67,9 @@ SERVICO_NAO_CONFIGURADO = "nada sai: o envio de e-mail não está configurado ne
 ESTADO: dict = {"erro": None, "falhou_em": None}
 # As linhas que deram envio incerto ou sem registro neste processo: a Saude as acusa na hora, sem esperar `PRESA_MIN`
 _INCERTOS: set[int] = set()
+# As linhas cujo e-mail SAIU com certeza e cuja marcacao falhou (banco ocupado): cada rodada tenta grava-las como
+# saidas; enquanto isso a Saude as mostra como "saiu sem registro" e `conferir_envio` recusa "nao saiu"
+_SAIRAM: set[int] = set()
 
 
 class NaoConfigurado(ValueError):
@@ -183,11 +186,15 @@ def _chave_do_episodio(conn, mensagem: str, agora: datetime.datetime) -> str | N
 
 
 def _fechar_episodios(conn, persistentes: set[str]) -> None:
-    """O problema que sumiu fecha o episodio: se voltar, sai de novo."""
+    """O problema que sumiu fecha o episodio: se voltar, sai de novo. O do codigo em producao so' fecha quando a
+    conferencia diz que esta' igual ao deploy: falha passageira do git (`integridade.ERRO`, nivel atencao) tira o item
+    do bloco sem que a diferenca tenha sumido."""
     if time.monotonic() - _INICIO < CARENCIA_SEG:
         return
+    codigo_ok = integridade.ESTADO is not None and integridade.ESTADO.get("estado") == integridade.OK
     abertos = [r[0] for r in conn.execute(f"SELECT id, mensagem FROM {TABELA} WHERE tipo='alerta' AND mensagem IS NOT "
-                                          "NULL AND problema_resolvido_em IS NULL") if r[1] not in persistentes]
+                                          "NULL AND problema_resolvido_em IS NULL")
+               if r[1] not in persistentes and (codigo_ok or not r[1].startswith(integridade.TITULO_DIFERENTE))]
     if abertos:
         with db.mutacao(conn):
             conn.executemany(f"UPDATE {TABELA} SET problema_resolvido_em=datetime('now') WHERE id=?",
@@ -218,6 +225,25 @@ def _soltar(conn, rid: int) -> None:
         log.exception("alerta de seguranca nao enviado e a marca %s nao foi solta", rid)
 
 
+def _marcar_saida(conn, rid: int, envio_id: int | None = None) -> bool:
+    """O e-mail saiu: grava (o envio, quando registrado, ou a conferencia) e solta a marca. False se nao gravou: a
+    linha fica em `_SAIRAM` e a proxima rodada tenta de novo."""
+    try:
+        with db.mutacao(conn):
+            if envio_id is not None:
+                conn.execute(f"UPDATE {TABELA} SET envio_id=?, envio_reservado_em=NULL, envio_reservado_por=NULL "
+                             "WHERE id=?", (envio_id, rid))
+            else:
+                conn.execute(f"UPDATE {TABELA} SET envio_conferido_em=datetime('now'), envio_reservado_em=NULL, "
+                             "envio_reservado_por=NULL WHERE id=?", (rid,))
+    except Exception:
+        log.exception("alerta de seguranca %s ENVIADO e nao marcado", rid)
+        _SAIRAM.add(rid)
+        return False
+    _SAIRAM.discard(rid)
+    return True
+
+
 def _enviar(conn, usuario: dict, para: list[str], chave: str, tipo: str, assunto: str, corpo: str,
             agora: datetime.datetime, mensagem: str | None = None) -> bool:
     """Um e-mail registrado antes de sair. False: nao saiu (ou saiu incerto), e a rodada para aqui."""
@@ -226,10 +252,15 @@ def _enviar(conn, usuario: dict, para: list[str], chave: str, tipo: str, assunto
         return True
     try:
         envio_id = correio.enviar_e_registrar(conn, usuario, TIPO_ENVIO, para, [], assunto, corpo, [])
-    except correio.EnvioNaoRegistrado as e:          # inclui o incerto: a marca fica, nada se repete sozinho
+    except correio.EnvioIncerto as e:                # pode ter saido ou nao: a marca fica, nada se repete sozinho
         _INCERTOS.add(rid)                           # a Saude le a marca do banco (`situacao`)
         ESTADO["falhou_em"] = agora
-        log.critical("alerta de seguranca: envio incerto ou sem registro (%s): %s", assunto, e)
+        log.critical("alerta de seguranca: envio incerto (%s): %s", assunto, e)
+        return False
+    except correio.EnvioNaoRegistrado as e:          # SAIU com certeza; so' o registro do envio falhou
+        log.critical("alerta de seguranca: enviado e sem registro (%s): %s", assunto, e)
+        ESTADO["falhou_em"] = agora                  # banco ocupado: a rodada para e espera
+        _marcar_saida(conn, rid)
         return False
     except Exception as e:
         _soltar(conn, rid)
@@ -237,12 +268,7 @@ def _enviar(conn, usuario: dict, para: list[str], chave: str, tipo: str, assunto
         ESTADO["falhou_em"] = agora
         log.warning("alerta de seguranca nao enviado (%s): %s", assunto, e)
         return False
-    try:
-        with correio.depois_do_envio(assunto, para, envio_id), db.mutacao(conn):
-            conn.execute(f"UPDATE {TABELA} SET envio_id=?, envio_reservado_em=NULL, envio_reservado_por=NULL "
-                         "WHERE id=?", (envio_id, rid))
-    except correio.EnvioNaoRegistrado:
-        log.critical("alerta de seguranca enviado e nao marcado (%s): a marca fica", assunto)
+    _marcar_saida(conn, rid, envio_id)
     ESTADO["erro"] = None
     ESTADO["falhou_em"] = None
     return True
@@ -335,6 +361,9 @@ def rodada(conn, agora: datetime.datetime | None = None) -> list[str]:
     falhou = ESTADO["falhou_em"]
     if falhou is not None and agora - falhou < datetime.timedelta(minutes=ESPERA_FALHA_MIN):
         return []
+    for rid in list(_SAIRAM):                       # saiu e nao foi marcado: tenta de novo antes de tudo
+        if not _marcar_saida(conn, rid):
+            return []
     persistentes = _persistentes()
     _fechar_episodios(conn, persistentes)
     enviados = []
@@ -366,7 +395,7 @@ def _paradas(conn) -> list:
     return [r for r in conn.execute(
         f"SELECT id, assunto, envio_reservado_em <= datetime('now', ?) AS velha FROM {TABELA} WHERE envio_id IS NULL "
         "AND envio_conferido_em IS NULL AND envio_reservado_em IS NOT NULL ORDER BY id", (f"-{PRESA_MIN} minutes",))
-        if r["velha"] or r["id"] in _INCERTOS]
+        if r["id"] not in _SAIRAM and (r["velha"] or r["id"] in _INCERTOS)]
 
 
 def situacao(conn) -> dict:
@@ -384,14 +413,36 @@ def situacao(conn) -> dict:
     for r in _paradas(conn):
         partes.append(f"o e-mail nº {r['id']} pode não ter saído ({r['assunto']}); confira os Enviados de quem envia "
                       "e registre o resultado no servidor")
+    for rid in sorted(_SAIRAM):
+        partes.append(f"o e-mail nº {rid} saiu sem registro; não registre que ele não saiu")
     if not partes and ESTADO["erro"]:
         partes.append(ESTADO["erro"])
     return {"erro": "; ".join(partes) or None, "conectar": conectar}
 
 
-def conferir_envio(conn, usuario_id: int, id_: int, saiu: bool) -> None:
+def _ainda_sai(conn, id_: int) -> bool | None:
+    """Depois de "nao saiu": a linha vai sair de novo? True: o resumo de hoje, ou o alerta cujo item continua no bloco.
+    False: resumo de dia passado, episodio fechado ou item que ja' saiu do bloco. None: problema aberto, que depende
+    da conferencia do servidor (este processo, o da linha de comando, nao a ve)."""
+    r = conn.execute(f"SELECT chave, tipo, mensagem, problema_resolvido_em FROM {TABELA} WHERE id=?", (id_,)).fetchone()
+    agora = tempo.agora_utc()
+    if r["tipo"] == "resumo":
+        return r["chave"] == f"resumo {tempo.para_local(agora).date().isoformat()}"
+    if r["mensagem"] is not None:
+        return None if r["problema_resolvido_em"] is None else False
+    m = conn.execute(f"SELECT criado_em FROM {TABELA} WHERE chave='marco'").fetchone()
+    marco = (datetime.datetime.fromisoformat(m[0]).replace(tzinfo=datetime.timezone.utc) if m
+             else datetime.datetime.min.replace(tzinfo=datetime.timezone.utc))
+    return r["chave"] in _grupos(seguranca.itens(conn, agora), set(), marco)
+
+
+def conferir_envio(conn, usuario_id: int, id_: int, saiu: bool) -> bool | None:
     """Uma pessoa conferiu os Enviados de quem envia e registra o resultado do e-mail parado (`_paradas`): saiu (fica
-    como enviado, nao se repete) ou nao saiu (a marca solta e a proxima rodada manda, se o item continuar). Auditado."""
+    como enviado, nao se repete) ou nao saiu (a marca solta e a proxima rodada manda, se o item continuar). Auditado.
+    Devolve, no "nao saiu", se o e-mail vai sair de novo (`_ainda_sai`); no "saiu", None. O e-mail que saiu com
+    certeza e ficou sem registro (`_SAIRAM`) nao aceita "nao saiu"."""
+    if not saiu and id_ in _SAIRAM:
+        raise ValueError("Este e-mail saiu (sem registro): não registre que ele não saiu")
     with db.mutacao(conn):
         r = conn.execute(f"SELECT assunto, envio_id, envio_reservado_em, envio_conferido_em, "
                          f"envio_reservado_em <= datetime('now', ?) AS parada FROM {TABELA} WHERE id=?",
@@ -407,6 +458,8 @@ def conferir_envio(conn, usuario_id: int, id_: int, saiu: bool) -> None:
             conn.execute(f"UPDATE {TABELA} SET envio_reservado_em=NULL, envio_reservado_por=NULL WHERE id=?", (id_,))
         auditoria.registrar(conn, usuario_id, "seguranca.alerta_envio_conferido", "alerta_seguranca_envio", id_, None,
                             {"assunto": r["assunto"], "saiu": saiu})
+    _SAIRAM.discard(id_)
+    return None if saiu else _ainda_sai(conn, id_)
 
 
 def agendar(intervalo_seg: int = INTERVALO_SEG) -> threading.Thread:

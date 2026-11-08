@@ -17,6 +17,7 @@ AGORA = datetime.datetime(2026, 11, 5, 10, 2, tzinfo=CUIABA).astimezone(datetime
 def estado_limpo(monkeypatch):
     monkeypatch.setattr(alertas_seguranca, "ESTADO", {"erro": None, "falhou_em": None})
     monkeypatch.setattr(alertas_seguranca, "_INCERTOS", set())
+    monkeypatch.setattr(alertas_seguranca, "_SAIRAM", set())
     # o processo esta' no ar ha' mais que a carencia: o problema que some fecha o episodio
     monkeypatch.setattr(alertas_seguranca, "_INICIO", alertas_seguranca.time.monotonic() - 10 * 3600)
     monkeypatch.setattr(alertas_seguranca.integridade, "commit_atual", lambda: "abc1234")
@@ -460,3 +461,104 @@ def test_linha_de_comando_registra_o_resultado_do_email_parado(ambiente, capsys)
     assert "o e-mail saiu" in capsys.readouterr().out
     assert conn.execute("SELECT envio_conferido_em FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()[0]
     assert cli.main(["alertas", "conferir-envio", "--id", str(rid), "--nao-saiu", "--usuario", DONO]) == 1
+
+
+# --- rodada 2 da revisao ---------------------------------------------------------------------------------------
+
+def _sem_registro(*a, **k):
+    raise correio.EnvioNaoRegistrado("<id>", "x", [PARA])
+
+
+def test_enviado_sem_registro_fica_como_saido_e_nao_aceita_nao_saiu(ambiente, monkeypatch):
+    # revisor: EnvioNaoRegistrado puro = o e-mail SAIU; "nao saiu" mandaria o alerta duas vezes
+    conn, tmp = ambiente
+    _itens(monkeypatch, [_item("Proteção da tabela de usuários removida", nivel="critico")])
+    monkeypatch.setattr(correio, "enviar_e_registrar", _sem_registro)
+    alertas_seguranca.rodada(conn, AGORA)
+    linha = conn.execute("SELECT * FROM alertas_seguranca_envios WHERE tipo='alerta'").fetchone()
+    assert linha["envio_conferido_em"] is not None and linha["envio_reservado_em"] is None
+    assert alertas_seguranca.situacao(conn)["erro"] is None
+    uid = conn.execute("SELECT id FROM usuarios").fetchone()[0]
+    with pytest.raises(ValueError):
+        alertas_seguranca.conferir_envio(conn, uid, linha["id"], saiu=False)
+    chamadas = []
+    monkeypatch.setattr(correio, "enviar_e_registrar", lambda *a, **k: chamadas.append(a[5]))
+    alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(hours=1))
+    assert [x for x in chamadas if "alerta" in x] == []
+
+
+def test_enviado_sem_registro_e_marcacao_que_falha_fica_na_memoria_ate_gravar(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    _itens(monkeypatch, [_item("Proteção da tabela de usuários removida", nivel="critico")])
+    monkeypatch.setattr(correio, "enviar_e_registrar", _sem_registro)
+    original = alertas_seguranca._marcar_saida
+
+    def falha(conn, rid, envio_id=None):
+        alertas_seguranca._SAIRAM.add(rid)
+        return False
+
+    monkeypatch.setattr(alertas_seguranca, "_marcar_saida", falha)
+    alertas_seguranca.rodada(conn, AGORA)
+    rid = conn.execute("SELECT id FROM alertas_seguranca_envios WHERE tipo='alerta'").fetchone()[0]
+    with db.mutacao(conn):                          # a marca ficou e ja' passou dos 15 minutos
+        conn.execute("UPDATE alertas_seguranca_envios SET envio_reservado_em=datetime('now', '-1 hour') WHERE id=?",
+                     (rid,))
+    erro = alertas_seguranca.situacao(conn)["erro"]
+    assert f"o e-mail nº {rid} saiu sem registro" in erro and "pode não ter saído" not in erro
+    uid = conn.execute("SELECT id FROM usuarios").fetchone()[0]
+    with pytest.raises(ValueError, match="saiu"):
+        alertas_seguranca.conferir_envio(conn, uid, rid, saiu=False)
+    monkeypatch.setattr(alertas_seguranca, "_marcar_saida", original)
+    alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(hours=1))   # a rodada seguinte grava
+    assert conn.execute("SELECT envio_conferido_em FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()[0]
+    assert alertas_seguranca._SAIRAM == set()
+
+
+def _parada(conn, chave, tipo="alerta", mensagem=None, resolvido=None):
+    with db.mutacao(conn):
+        return conn.execute("INSERT INTO alertas_seguranca_envios (chave, tipo, assunto, mensagem, problema_resolvido_em, "
+                            "envio_reservado_em) VALUES (?,?,?,?,?,datetime('now', '-1 hour'))",
+                            (chave, tipo, "x", mensagem, resolvido)).lastrowid
+
+
+def test_nao_saiu_diz_se_o_email_ainda_vai_sair(ambiente, monkeypatch):
+    # revisor: resumo de dia passado, item que saiu do bloco e episodio fechado nao saem mais
+    conn, tmp = ambiente
+    uid = conn.execute("SELECT id FROM usuarios").fetchone()[0]
+    hoje = tempo.para_local(tempo.agora_utc()).date()
+    item = _item("Tarefa agendada criada por conta", "10:05")
+    _itens(monkeypatch, [item])
+    casos = {
+        _parada(conn, f"resumo {hoje.isoformat()}", "resumo"): True,
+        _parada(conn, "resumo 2026-01-01", "resumo"): False,
+        _parada(conn, "alerta 2026-11-05 10 Tarefa agendada criada por conta"): True,
+        _parada(conn, "alerta 2026-11-02 10 Item que saiu do bloco"): False,
+        _parada(conn, "aberto 1 Cadeia", mensagem="Cadeia"): None,
+        _parada(conn, "aberto 2 Cadeia", mensagem="Cadeia", resolvido="2026-11-05 00:00:00"): False,
+    }
+    for rid, esperado in casos.items():
+        assert alertas_seguranca.conferir_envio(conn, uid, rid, saiu=False) is esperado, rid
+
+
+def test_falha_passageira_do_git_nao_fecha_o_episodio_do_codigo(ambiente, monkeypatch):
+    # revisor: DIFERENTE -> ERRO (atencao, fora do bloco imediato) -> DIFERENTE nao manda um segundo e-mail
+    conn, tmp = ambiente
+    i = alertas_seguranca.integridade
+    diferente = {"estado": i.DIFERENTE, "detalhe": "2 arquivos", "data": _item("x", "10:00")["data"], "assinatura": "a"}
+
+    def estado(e):
+        monkeypatch.setattr(i, "ESTADO", e)
+        _itens(monkeypatch, i.itens())
+
+    estado(diferente)
+    alertas_seguranca.rodada(conn, _as(10, 2))
+    estado({**diferente, "estado": i.ERRO, "detalhe": None})
+    alertas_seguranca.rodada(conn, _as(11, 2))
+    estado({**diferente, "data": _item("x", "12:00")["data"]})
+    alertas_seguranca.rodada(conn, _as(12, 2))
+    assert len(_alertas(tmp)) == 1
+    estado({**diferente, "estado": i.OK, "detalhe": None})           # igual ao deploy: o episodio fecha
+    alertas_seguranca.rodada(conn, _as(13, 2))
+    estado({**diferente, "data": _item("x", "14:00")["data"]})
+    alertas_seguranca.rodada(conn, _as(14, 2))
+    assert len(_alertas(tmp)) == 2
