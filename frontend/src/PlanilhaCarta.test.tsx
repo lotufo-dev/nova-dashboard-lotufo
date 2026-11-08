@@ -149,6 +149,38 @@ describe("Nova planilha/carta", () => {
     expect(saldo.textContent).toContain("R$\u00a035.693,13");
     fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "execucao" } });
     expect(saldo.textContent).not.toContain("35.693,13");
+    // nº e competência ainda são os de projeto: não grava até a sugestão de execução chegar
+    expect((screen.getByRole("button", { name: "Registrar planilha/carta" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("issue #567: os avisos do tipo anterior somem ao trocar o tipo", async () => {
+    const PROJETO = { ...SUGESTAO, tipo: "projeto", numero: 3 };
+    api.mockImplementation(async (url: string) => {
+      if (url.includes("/sugestao")) return url.includes("tipo=execucao") ? new Promise(() => {}) : PROJETO;
+      if (url.includes("tipo=projeto")) return { avisos: [SOBREPOE], acumulado_anterior_centavos: 0, saldo_centavos: null };
+      return new Promise(() => {});
+    });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    expect(await screen.findByText(SOBREPOE)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "execucao" } });
+    expect(screen.queryByText(SOBREPOE)).toBeNull();
+  });
+
+  it("issue #567: falha na sugestão depois de trocar o tipo não apaga o formulário", async () => {
+    const PROJETO = { ...SUGESTAO, tipo: "projeto", numero: 3 };
+    api.mockImplementation(async (url: string) => {
+      if (url.includes("/sugestao")) {
+        if (url.includes("tipo=execucao")) throw new Error("Servidor fora do ar");
+        return PROJETO;
+      }
+      return new Promise(() => {});
+    });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    await screen.findByLabelText("Nº da medição");
+    fireEvent.change(screen.getByLabelText("Valor pedido"), { target: { value: "1,01" } });
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "execucao" } });
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect((screen.getByLabelText("Valor pedido") as HTMLInputElement).value).toBe("1,01");
   });
 
   it("issue #567: a medição prevista promovida mantém o tipo dela (campo travado)", async () => {

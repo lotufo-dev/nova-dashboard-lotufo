@@ -738,7 +738,6 @@ def test_planilha_diretoria_recebe_403(client_admin):
     assert len(client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"]) == 1
 
 
-
 def test_sugestao_sem_tipo_segue_a_ultima_medicao_e_aceita_reajuste(client_admin):
     """Issue #567: sem `tipo`, a sugestao vem no tipo da ultima medicao (a obra so' de projeto sugere a de projeto);
     reajuste e' tipo aceito na sugestao, nos avisos e no registro."""
@@ -754,6 +753,7 @@ def test_sugestao_sem_tipo_segue_a_ultima_medicao_e_aceita_reajuste(client_admin
     r = _nova_planilha(client_admin, cid, tipo="reajuste")
     assert r.status_code == 201, r.text
     assert client_admin.get(f"/api/medicoes/{r.json()['medicao_id']}").json()["tipo"] == "reajuste"
+
 
 # issue #287: assinatura no DocuSign (evento informativo)
 def _com_boletim(cl):

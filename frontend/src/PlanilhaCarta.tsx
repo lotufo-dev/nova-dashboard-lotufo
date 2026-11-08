@@ -193,18 +193,23 @@ export function NovaPlanilhaCarta({ contratoId, tipo: tipoInicial, tipoFixo = fa
         setNumeroOrgao(s.numero_orgao !== null && (inicialNumero ?? s.numero) === s.numero ? String(s.numero_orgao) : "");
         setForm(f => ({ ...f, competencia, inicio: ini, fim }));
       })
-      .catch(e => { if (vivo) setErroSug(mensagemDeErro(e)); });
+      // depois de trocar o tipo, a falha nao apaga o que ja' foi preenchido: vira erro no formulario
+      .catch(e => { if (vivo) (trocouTipo ? setErro : setErroSug)(mensagemDeErro(e)); });
     return () => { vivo = false; };
-  }, [contratoId, tipoPedido, inicialNumero, inicialCompetencia]);
+  }, [contratoId, tipoPedido, trocouTipo, inicialNumero, inicialCompetencia]);
 
   const conf = useConferencia(contratoId, tipo, numero, form.competencia, form.inicio);
-  const avisos = conf?.avisos ?? [];
+  // trocado o tipo, a sugestao e a conferencia do tipo anterior nao valem ate a leitura nova chegar (issue #567)
+  const confDoTipo = conf?.tipo === tipo ? conf : null;
+  const sugDoTipo = sug?.tipo === tipo;
+  const avisos = confDoTipo?.avisos ?? [];
   const pedido = centavosDoTexto(form.valor);
 
   async function registrar(ev: React.FormEvent) {
     ev.preventDefault();
     setTentou(true);
-    if (!form.oficio || !form.planilha) return;
+    // nº e competencia ainda sao os do tipo anterior: grava so' com a sugestao do tipo escolhido
+    if (!form.oficio || !form.planilha || !sugDoTipo) return;
     setOcupado(true); setErro("");
     const fd = new FormData();
     fd.append("numero", numero);
@@ -223,9 +228,7 @@ export function NovaPlanilhaCarta({ contratoId, tipo: tipoInicial, tipoFixo = fa
 
   if (erroSug) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir a planilha/carta: {erroSug}</p>;
   if (!sug) return <p role="status">Carregando…</p>;
-  // trocado o tipo, a sugestao e a conferencia do tipo anterior nao valem ate a leitura nova chegar (issue #567)
-  const saldo = sug.tipo === tipo ? saldoDoNumero(numero, sug, conf?.tipo === tipo ? conf : null)
-    : { acumulado: null, saldo: null };
+  const saldo = sugDoTipo ? saldoDoNumero(numero, sug, confDoTipo) : { acumulado: null, saldo: null };
 
   return (
     <form className="cartao__corpo pilha" onSubmit={registrar} aria-label="Nova planilha/carta">
@@ -263,7 +266,7 @@ export function NovaPlanilhaCarta({ contratoId, tipo: tipoInicial, tipoFixo = fa
         <div role="status">{avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}</div>
       )}
       <div className="painel__rodape form-inline">
-        <button type="submit" className="btn btn--primario" disabled={ocupado}>{ocupado ? "Registrando…" : "Registrar planilha/carta"}</button>
+        <button type="submit" className="btn btn--primario" disabled={ocupado || !sugDoTipo}>{ocupado ? "Registrando…" : "Registrar planilha/carta"}</button>
       </div>
     </form>
   );

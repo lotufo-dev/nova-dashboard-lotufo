@@ -670,8 +670,9 @@ def test_sugestao_na_obra_so_de_projeto_segue_a_serie_de_projeto(conn, contrato_
 
 
 def test_tipo_da_ultima_medicao(conn, contrato_id):
-    """Issue #567: o tipo pre-selecionado e' o da ultima medicao (competencia mais recente); a execucao vence o
-    reajuste da mesma competencia; prevista, cancelada e desistida nao contam; obra sem medicao: execucao."""
+    """Issue #567: o tipo pre-selecionado e' o da ultima medicao de execucao ou projeto (competencia mais recente; na
+    mesma, a execucao); prevista, cancelada e desistida nao contam; o reajuste, mesmo mais recente, nao troca a
+    serie; obra sem medicao: execucao."""
     from app import medicao_planilhas
     assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
     _de_tipo(conn, contrato_id, 1, "projeto", "2026-08", "protocolada", 1)
@@ -683,7 +684,11 @@ def test_tipo_da_ultima_medicao(conn, contrato_id):
     _de_tipo(conn, contrato_id, 3, "projeto", "2026-11", "prevista", 1)
     assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
     _de_tipo(conn, contrato_id, 2, "reajuste", "2026-12", "planilha_gerada", 1)
-    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "reajuste"
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
+    _de_tipo(conn, contrato_id, 4, "projeto", "2026-12", "protocolada", 1)
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "projeto"
+    _de_tipo(conn, contrato_id, 2, "execucao", "2026-12", "protocolada", 1)
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
 
 
 def test_planilha_de_reajuste_e_aceita(conn, contrato_id):

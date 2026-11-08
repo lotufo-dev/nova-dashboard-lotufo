@@ -85,12 +85,14 @@ def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None
 
 
 def tipo_da_ultima(conn, contrato_id: int) -> str:
-    """Issue #567: o tipo da ultima medicao da obra (competencia mais recente; na mesma competencia a execucao vence
-    o reajuste, que repete o numero dela), fora prevista, cancelada e desistida. Obra sem medicao: execucao."""
+    """Issue #567: o tipo da ultima medicao de execucao ou projeto da obra (competencia mais recente; na mesma, a
+    execucao), fora prevista, cancelada e desistida. O reajuste nao conta: acompanha o numero da execucao e sai
+    depois dela (como em medicoes, #154), e pre-seleciona-lo trocaria a serie da proxima medicao. Sem medicao:
+    execucao."""
     r = conn.execute(
-        "SELECT tipo FROM medicoes WHERE contrato_id=? "
+        "SELECT tipo FROM medicoes WHERE contrato_id=? AND tipo IN ('execucao','projeto') "
         f"AND estado NOT IN ({','.join('?' * len(FORA_DO_ACUMULADO))}) "
-        "ORDER BY competencia DESC, tipo='execucao' DESC, tipo='projeto' DESC, numero DESC, id DESC LIMIT 1",
+        "ORDER BY competencia DESC, tipo='execucao' DESC, numero DESC, id DESC LIMIT 1",
         (contrato_id, *FORA_DO_ACUMULADO)).fetchone()
     return r["tipo"] if r is not None else "execucao"
 
