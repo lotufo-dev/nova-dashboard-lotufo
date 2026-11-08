@@ -263,6 +263,13 @@ O ponto de leitura do log (último registro lido) fica no banco, na tabela de um
 ### Limites
 Quem administra a VM pode desligar a auditoria ou limpar o log, mas cada uma dessas ações gera o próprio evento (4719, 1102), que a sentinela lê antes de perder o acesso. Parar o servidor para a sentinela (e o resumo diário some: tratado na issue de alertas). Eventos entre o fim da rodada e o início de uma limpeza do log podem se perder se o log for limpo antes da próxima rodada.
 
+## Alertas de segurança por e-mail (issue #424)
+- **Alerta na hora.** A cada minuto, cada item novo de nível crítico ou ação do bloco Segurança da Saúde vai por e-mail, assunto "Dashboard Lotufo: alerta de segurança: <mensagem>". Itens iguais na mesma hora de Cuiabá vão num e-mail só; o mesmo item não sai duas vezes (cada e-mail é gravado em `alertas_seguranca_envios` antes de sair). Atenção não manda e-mail: fica na Saúde e no resumo. "Administrador ... entrou de uma origem nova" é ação (decisão de 08/11/2026).
+- **Resumo diário.** A partir das 07:00 de Cuiabá, um por dia, mesmo vazio ("Nada a relatar"), assunto "Dashboard Lotufo: resumo de segurança de DD/MM/AAAA": os itens das últimas 24 horas e os críticos ainda abertos, o commit em produção, a última cópia do dono, a sentinela, o total de linhas da auditoria e a última linha com o hash. Servidor parado às 07:00: o resumo sai quando ele volta, no mesmo dia; resumo que não chega é o sinal.
+- **Ancorar a auditoria.** Com a linha e o hash de um resumo, na VM: `cd <clone>\backend; python -m app.cli auditoria conferir --linha <N> --hash <hash>` (com `DASH_DB_PATH` do serviço) responde "confere" ou "não confere". Quem reescrever a auditoria inteira recalcula os hashes, e o hash enviado deixa de existir na cadeia.
+- **Configurar (uma vez, depois do deploy da #424).** No `geral.yaml` do cadastro privado, acrescentar `alertas_seguranca: {para: [<e-mail do dono>], enviada_por: [<login do dono na dashboard>]}` e aplicar o cadastro (`cadastro aplicar --ensaio`, depois o real). O e-mail sai da conta Microsoft do primeiro usuário ativo com um login de `enviada_por`. Sem a chave, sem o usuário ou sem a conta conectada (Minha conta), nada sai: fica no log e o bloco Segurança da Saúde mostra o motivo.
+- **Falha.** Falha antes do envio tenta de novo dez minutos depois. Envio incerto (a conexão caiu no envio) não se repete sozinho: a Saúde mostra "envio incerto (<assunto>)" por 24 horas; confira os Enviados da conta. No modo cópia (instalação não autorizada) nada sai.
+
 ## Restaurar o banco a partir de um snapshot
 1. Parar o servidor (tarefa agendada e qualquer uvicorn em 8080/8443).
 2. Mover `dashboard.db`, `-wal` e `-shm` atuais para uma pasta de quarentena.

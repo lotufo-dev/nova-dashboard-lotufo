@@ -229,6 +229,9 @@ def create_app() -> FastAPI:
             # Cobranca de certidoes por e-mail ao dono (plano 2026-10-09): vencidas a cada 2 h, vencendo 1x/dia.
             from app import cobranca_certidoes
             cobranca_certidoes.agendar()
+            # Issue #424: alertas de seguranca por e-mail ao dono, na hora, e o resumo diario das 07:00
+            from app import alertas_seguranca
+            alertas_seguranca.agendar()
 
     # O build do React e montado por ultimo: a rota "/" so pega o que sobrou de /api/*.
     # Atencao: um mount em "/" engole qualquer rota registrada DEPOIS de create_app()

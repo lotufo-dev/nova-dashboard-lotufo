@@ -1,8 +1,8 @@
 import datetime
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app import (auditoria, backup, copia_dono, copia_dono_envio, correio, envio_reserva, graph, instalacao, seguranca,
-                 sentinela, siga, tempo)
+from app import (alertas_seguranca, auditoria, backup, copia_dono, copia_dono_envio, correio, envio_reserva, graph,
+                 instalacao, seguranca, sentinela, siga, tempo)
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -89,9 +89,11 @@ def saude(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
           conn: sqlite3.Connection = Depends(conexao)):
     """Administracao > Saude: a situacao do monitor do SIGA (issue #330), ao lado da do RM e do backup, e o bloco
     Seguranca (issue #418): `[{nivel, mensagem, data}]`, montado por `app/seguranca.py`, com no maximo
-    `seguranca.ITENS_NA_TELA` itens; `seguranca_fora` diz quantos ficaram de fora."""
+    `seguranca.ITENS_NA_TELA` itens; `seguranca_fora` diz quantos ficaram de fora. Issue #424: `alertas_seguranca.erro`
+    diz por que os alertas por e-mail nao saem (None quando saem)."""
     itens, fora = seguranca.bloco(conn)
-    return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora, "sentinela": sentinela.situacao()}
+    return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora, "sentinela": sentinela.situacao(),
+            "alertas_seguranca": {"erro": alertas_seguranca.situacao(conn)}}
 
 
 @router.get("/contas-microsoft")
