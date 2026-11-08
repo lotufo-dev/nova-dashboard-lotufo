@@ -48,6 +48,18 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8778", "--bind", "127.0.0.1", "--directory", "prototipos"],
       "port": 8778
+    },
+    {
+      "name": "backend-teste-mac-email",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd backend && DASH_DEV=1 DASH_SEM_JOBS=1 DASH_DB_PATH=$HOME/dev/_rascunhos/dashboard-teste-2026-11-07.db DASH_CADASTRO_DIR=$HOME/dev/lotufo-cadastro DASH_GRAPH_CLIENT_ID=fa69fa24-7308-4d91-b020-802113a2b5a6 DASH_GRAPH_TENANT=grupolotufo.srv.br DASH_GRAPH_TOKENS_DIR=$HOME/dev/_rascunhos/graph-tokens-teste exec .venv/bin/python -m uvicorn --factory app.main:create_app --port 8081"],
+      "port": 8081
+    },
+    {
+      "name": "backend-teste-mac",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd backend && DASH_DEV=1 DASH_SEM_JOBS=1 DASH_DB_PATH=$HOME/dev/_rascunhos/dashboard-teste-2026-11-07.db DASH_GRAPH_SIMULADOR=dados/correio-simulado DASH_CADASTRO_DIR=$HOME/dev/lotufo-cadastro exec .venv/bin/python -m uvicorn --factory app.main:create_app --port 8081"],
+      "port": 8081
     }
   ]
 }
