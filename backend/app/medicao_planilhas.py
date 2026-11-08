@@ -171,6 +171,7 @@ def conferir_registro(conn, contrato_id: int, dados: dict):
     if tipo not in TIPOS:
         raise ValueError("A planilha/carta é de medição de execução ou de projeto")
     _conferir_periodo(dados["periodo_inicio"], dados["periodo_fim"])
+    medicoes.conferir_sinal(tipo, dados["valor_centavos"])      # issue #589: so' o reajuste que acompanha tem sinal
     c = contratos.vigente(conn, contrato_id)
     inicio_contrato = c.get("execucao_inicio") or c.get("vigencia_inicio")
     if inicio_contrato and competencia < inicio_contrato[:7]:

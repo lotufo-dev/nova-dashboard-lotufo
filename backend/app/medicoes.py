@@ -86,6 +86,13 @@ def rotulo_estado(estado: str) -> str:
 ESTADOS_ANTES_DO_PROTOCOLO = ("prevista", "espelho_gerado", "espelho_enviado", "nota_emitida")
 NOTA_NAO_EMITIDA = "Nota fiscal ainda não emitida: protocolar agora pula o faturamento e a nota"
 
+def conferir_sinal(tipo: str, centavos: int | None) -> None:
+    """Issue #589 (decisao do Leo de 08/11/2026): so' o pedido da medicao de reajuste aceita valor negativo
+    (apostilamento ou previsao negativos); execucao e projeto recusam aqui e no banco (CHECK da migracao 078)."""
+    if centavos is not None and centavos < 0 and tipo != "reajuste":
+        raise ValueError(f"Medição de {ROTULO_TIPO.get(tipo, tipo)} não aceita valor negativo")
+
+
 def criar(conn: sqlite3.Connection, usuario_id: int, dados: dict) -> int:
     duplicada = f"{nome_medicao(dados['numero'], dados['tipo'])} já existe neste contrato"
     with db.mutacao(conn):
@@ -101,6 +108,7 @@ def criar(conn: sqlite3.Connection, usuario_id: int, dados: dict) -> int:
         # issue #276: a medicao de reajuste grava a data-base e o ciclo (e o pedido, quando veio); quem chama resolve
         # (`reajuste.base_e_ciclo_da_medicao`). Sem eles, nulos, como na carga do legado e no ledger.
         valor = dados.get("valor_centavos")
+        conferir_sinal(dados["tipo"], valor)
         try:
             cur = conn.execute(
                 "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, data_base_mes, ciclo, "
@@ -612,6 +620,11 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         # o atesto digitado ficaria fora da lista de boletins e o espelho sairia por ele
         if campo == "atestado" and tem_boletim(conn, medicao_id):
             raise ValueError(APROVADO_PELO_BOLETIM)
+        # Issue #589: o pedido do reajuste aceita sinal; o aprovado digitado nao (o evento de atesto, migracao 039,
+        # guarda so' valor sem sinal)
+        if campo == "atestado" and centavos < 0:
+            raise ValueError("O aprovado não aceita valor negativo")
+        conferir_sinal(m["tipo"], centavos)
         if campo == "protocolado":
             # issue #276 (revisor, rodada 2 da PR #580): o pedido nao entra por aqui numa 2a medicao de reajuste da
             # mesma competencia e data-base. Import local: reajuste le' medicoes pelo banco, nao por este modulo.

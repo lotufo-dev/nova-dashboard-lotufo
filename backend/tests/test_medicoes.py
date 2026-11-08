@@ -1081,17 +1081,20 @@ def test_prevista_do_numero_com_pedido_sugere_o_proprio_pedido(conn, contrato_id
     assert b["aviso"] == "pedido já registrado na prevista; apostilado no termo 001/2026 em R$ 9.876,54"
 
 
-def test_previsao_negativa_nao_vira_sugestao_e_vai_no_aviso(conn, contrato_id):
-    """Gate Sol da PR #580: a medicao nao guarda pedido negativo (CHECK >= 0, migracao 042); a sugestao negativa
-    aparece so' como aviso, com o valor."""
-    from app import reajuste
+def test_previsao_negativa_vira_sugestao_com_o_sinal(conn, contrato_id):
+    """Issue #589 (decisao do Leo de 08/11/2026): o apostilamento negativo (indice deflacionario) pre-preenche o
+    Reajuste com o sinal, com a origem, e a medicao de reajuste nasce com o pedido negativo (centavo impar)."""
+    from app import medicao_planilhas, reajuste
     _base(conn, contrato_id)
     _prevista(conn, contrato_id, "2026-08", -10_01, "apostilamento", termo="002/2026")
     s = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-08")
     (b,) = s["bases"]
-    assert (b["valor_centavos"], b["origem_texto"]) == (None, None)
-    assert b["aviso"] == "apostilado no termo 002/2026 em -R$ 10,01; o sistema não registra reajuste negativo"
+    assert (b["valor_centavos"], b["origem_texto"], b["aviso"]) == (-10_01, "apostilado no termo 002/2026", None)
     assert s["data_base_mes"] == "2024-06"
+    r = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-08", "2026-08-01", "2026-08-31", 1_00,
+                                                                     reajuste_centavos=-10_01), ANEXOS)
+    m = medicoes.detalhe(conn, r["reajuste_medicao_id"])
+    assert (m["tipo"], m["estado"], m["valor_protocolado_centavos"]) == ("reajuste", "prevista", -10_01)
 
 
 def test_ciclo_pela_forca_da_origem_e_empate_em_dois_ciclos_recusa(conn, contrato_id):
@@ -1132,3 +1135,32 @@ def test_reajuste_so_acompanha_a_planilha_de_execucao(conn, contrato_id):
     with pytest.raises(ValueError, match="só a planilha/carta de execução"):
         medicao_planilhas.registrar(conn, 1, contrato_id, {**_planilha(1, "2026-07", "2026-07-01", "2026-07-31", 1),
                                                            "tipo": "projeto", "reajuste_centavos": 1}, ANEXOS)
+
+
+def test_execucao_e_projeto_continuam_recusando_valor_negativo(conn, contrato_id):
+    """Issue #589: so' a medicao de reajuste aceita pedido negativo; execucao e projeto recusam no servidor (antes de
+    gravar) e no banco (CHECK da migracao 078). O reajuste negativo grava, no banco tambem."""
+    import sqlite3
+    for tipo in ("execucao", "projeto"):
+        with pytest.raises(ValueError, match="não aceita valor negativo"):
+            medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": tipo,
+                                     "competencia": "2026-05", "valor_centavos": -1})
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, valor_protocolado_centavos) "
+                         "VALUES (?, 9, ?, '2026-05', -1)", (contrato_id, tipo))
+        conn.rollback()
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, valor_atestado_centavos) "
+                         "VALUES (?, 9, ?, '2026-05', -1)", (contrato_id, tipo))
+        conn.rollback()
+    mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "reajuste",
+                                   "competencia": "2026-05", "valor_centavos": -10_01})
+    assert medicoes.detalhe(conn, mid)["valor_protocolado_centavos"] == -10_01
+
+
+def test_planilha_de_execucao_nao_recebe_valor_negativo(conn, contrato_id):
+    """Issue #589: o valor da planilha/carta de execucao continua sem sinal; so' o reajuste que a acompanha aceita."""
+    from app import medicao_planilhas
+    with pytest.raises(ValueError, match="não aceita valor negativo"):
+        medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-05", "2026-05-01", "2026-05-31", -1),
+                                    ANEXOS)

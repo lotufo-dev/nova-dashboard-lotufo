@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from app import (arquivos, correio, db, espelhos, feriados, medicao_grupos, medicao_planilhas, medicoes, permissoes,
                  planilha_envio, reajuste, siga, tempo)
 from app.api_auth import conexao
-from app.dinheiro import parse_brl
+from app.dinheiro import parse_brl, parse_brl_com_sinal
 from app.permissoes import exigir
 
 router = APIRouter()
@@ -212,7 +212,7 @@ def criar(contrato_id: ID, dados: MedicaoIn,
                                                                dados.data_base_mes, dados.numero)
                 novo.update(data_base_mes=base, ciclo=ciclo)
                 if com_valor:
-                    novo["valor_centavos"] = _centavos(dados.valor)
+                    novo["valor_centavos"] = _centavos(dados.valor, com_sinal=True)
             elif (dados.valor or "").strip() or dados.data_base_mes:
                 raise ValueError("Valor e data-base só acompanham a medição de reajuste")
             mid = medicoes.criar(conn, usuario["id"], novo)
@@ -254,9 +254,8 @@ def definir_valor(medicao_id: ID, dados: ValorIn,
                   conn: sqlite3.Connection = Depends(conexao)):
     _medicao_existe(conn, medicao_id)
     try:
-        centavos = parse_brl(dados.valor)
-        if centavos > MAX_INT64:
-            raise ValueError("Valor monetário fora do limite")
+        # issue #589: o sinal passa aqui e quem recusa e' o dominio (so' o pedido do reajuste aceita negativo)
+        centavos = _centavos(dados.valor, com_sinal=True)
         medicoes.definir_valor(conn, usuario["id"], medicao_id, dados.campo, centavos, "manual",
                                dados.data.isoformat() if dados.data else None)
     except ValueError as e:  # BRL invalido, acima do int64, ou medicao congelada
@@ -417,9 +416,10 @@ def _ler_grupos(conn: sqlite3.Connection, usuario_id: int, r: dict, validados: l
     return r
 
 
-def _centavos(valor: str) -> int:
-    centavos = parse_brl(valor)
-    if centavos > MAX_INT64:
+def _centavos(valor: str, com_sinal: bool = False) -> int:
+    """`com_sinal` (issue #589): o valor da medicao de reajuste aceita "-" (apostilamento ou previsao negativos)."""
+    centavos = parse_brl_com_sinal(valor) if com_sinal else parse_brl(valor)
+    if abs(centavos) > MAX_INT64:
         raise ValueError("Valor monetário fora do limite")
     return centavos
 
@@ -493,7 +493,8 @@ def registrar_planilha(contrato_id: ID,
         dados = {"numero": numero, "tipo": tipo, "competencia": competencia, "numero_orgao": numero_orgao,
                  "periodo_inicio": periodo_inicio.isoformat(), "periodo_fim": periodo_fim.isoformat(),
                  "valor_centavos": _centavos(valor),
-                 "reajuste_centavos": _centavos(reajuste_valor) if (reajuste_valor or "").strip() else None,
+                 "reajuste_centavos": (_centavos(reajuste_valor, com_sinal=True) if (reajuste_valor or "").strip()
+                                       else None),
                  "reajuste_data_base": reajuste_data_base}
         medicao_planilhas.conferir_registro(conn, contrato_id, dados)   # recusa antes de gravar os anexos
     except ValueError as e:

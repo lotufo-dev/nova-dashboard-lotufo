@@ -38,6 +38,16 @@ def parse_brl(texto: str) -> int:
     return centavos
 
 
+def parse_brl_com_sinal(texto: str) -> int:
+    """Issue #589: o valor da medicao de reajuste aceita sinal (apostilamento ou previsao negativos, indice
+    deflacionario). "-1.234,56" (ou "−1.234,56", o sinal tipografico) -> -123456; sem sinal, como `parse_brl`. So' o
+    reajuste usa: execucao e projeto continuam em `parse_brl`, que recusa o sinal."""
+    limpo = texto.strip()
+    if limpo[:1] in ("-", "\u2212"):
+        return -parse_brl(limpo[1:])
+    return parse_brl(limpo)
+
+
 def format_brl(centavos: int) -> str:
     """Formata centavos inteiros como "R$ 4.075.275,90".
 

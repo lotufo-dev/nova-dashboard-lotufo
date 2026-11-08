@@ -859,8 +859,7 @@ def sugestao_da_medicao(conn, contrato_id: int, competencia: str, numero: int | 
     `numero`: o da medicao de reajuste que vai nascer (ou ser completada). A prevista desse nº que ja' tem pedido
     sugere o proprio pedido (nao e' trocado pelo previsto sem a pessoa ver). Outra medicao de reajuste ativa da mesma
     competencia e data-base (`ja_pedido_em`) tira a sugestao: o pedido contaria duas vezes. Previsao negativa (indice
-    deflacionario) nao vira sugestao: a medicao nao guarda pedido negativo (CHECK >= 0, migracao 042); vai no
-    `aviso`.
+    deflacionario) vira sugestao com o sinal (issue #589, migracao 078): a medicao de reajuste guarda pedido negativo.
 
     `data_base_mes` e' a base ja' escolhida: a unica do contrato ou, com duas, a unica que tem previsao na
     competencia; senao nula (a pessoa escolhe). Contrato sem reajuste ou sem data-base: nenhuma base."""
@@ -914,10 +913,6 @@ def sugestao_da_medicao(conn, contrato_id: int, competencia: str, numero: int | 
             m = next(m for m in outras if m["numero"] == x["ja_pedido_em"][0])
             x["aviso"] = (f"já pedido na medição {m['numero']} de reajuste" if m["valor_protocolado_centavos"]
                           is not None else f"já lançado na medição {m['numero']} de reajuste")
-            x.update(valor_centavos=None, origem=None, origem_texto=None)
-        elif x["valor_centavos"] is not None and x["valor_centavos"] < 0:
-            x["aviso"] = (f"{x['origem_texto']} em {dinheiro.format_brl(x['valor_centavos'])}; "
-                          "o sistema não registra reajuste negativo")
             x.update(valor_centavos=None, origem=None, origem_texto=None)
         bases.append(x)
     com_previsao = [x for x in bases if x["tem_previsao"]]
