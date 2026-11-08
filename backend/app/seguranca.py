@@ -170,6 +170,9 @@ def _sentinela(conn, agora: datetime.datetime) -> list[dict]:
                 out.remove(antigo["item"])
             item["mensagem"] = sentinela.mensagem_leitura(d.get("pasta"), d.get("processo"), d.get("conta"),
                                                           d.get("quantidade") or 0)
+            # issue #424: o agregado e' o mesmo item enquanto soma (a mensagem e a data mudam); o alerta por e-mail
+            # o reconhece por esta identidade
+            item["identidade"] = "sentinela-leitura " + json.dumps(list(chave), ensure_ascii=False)
             leituras[chave] = {"quantidade": d["quantidade"], "item": item}
         out.append(item)
     return out

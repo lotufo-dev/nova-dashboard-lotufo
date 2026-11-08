@@ -5,16 +5,27 @@ cobranca de certidoes); o e-mail sai da conta Microsoft do primeiro usuario ativ
 (`correio.enviar_e_registrar`). Sem cadastro, sem usuario ou sem conta conectada nada sai: fica no log e a Saude mostra
 o motivo (`situacao`).
 
-- Alerta imediato: cada item `critico` ou `acao` do bloco Seguranca (`seguranca.itens`) que ainda nao saiu. Itens
-  iguais na mesma hora (de Cuiaba) vao num e-mail so'. A rodada roda a cada `INTERVALO_SEG`.
+- Alerta imediato: cada item `critico` ou `acao` do bloco Seguranca (`seguranca.itens`) que ainda nao saiu. A rodada
+  roda a cada `INTERVALO_SEG`. O que e' "o mesmo item":
+  - o problema que continua aberto (protecao das tabelas, cadeia da auditoria, codigo diferente do deploy: a data
+    dele so' mora na memoria do processo e muda a cada reinicio) sai uma vez por episodio, pela mensagem; o episodio
+    fecha quando o problema some (depois de `CARENCIA_SEG` do processo no ar, para a primeira conferencia rodar);
+  - a leitura de arquivos da sentinela, que soma as rodadas, pela identidade do agregado (`identidade`);
+  - o resto, pela mensagem na hora de Cuiaba da data: itens iguais na mesma hora vao num e-mail so'.
+  Item com data anterior ao marco (a primeira rodada com o cadastro configurado) nao vira e-mail: o primeiro deploy
+  nao manda o historico. Depois do marco, o item que nao saiu (conta desconectada, por exemplo) sai quando der,
+  enquanto estiver no bloco.
 - Resumo diario a partir das 07:00 de Cuiaba, um por dia, mesmo vazio ("Nada a relatar"): os itens das ultimas 24
-  horas (e os `critico` que continuam abertos), o commit em producao, a ultima copia do dono, a sentinela e a linha e
-  o hash mais recentes da auditoria, que ancoram a cadeia fora da VM (`python -m app.cli auditoria conferir`).
+  horas e os problemas abertos, os dias sem resumo desde o ultimo, o commit em producao, a ultima copia do dono, a
+  sentinela e a linha e o hash mais recentes da auditoria, que ancoram a cadeia fora da VM
+  (`python -m app.cli auditoria conferir`).
 
 Cada e-mail e' uma linha de `alertas_seguranca_envios` (migracao 071), gravada ANTES do envio, com `chave` unica: o
 mesmo e-mail nao sai duas vezes. Falha antes do envio solta a marca e a rodada seguinte (depois de
-`ESPERA_FALHA_MIN`) tenta de novo; envio incerto ou sem registro deixa a marca e nao se repete sozinho. No modo copia
-(instalacao nao autorizada) nada roda: o envio ja' e' recusado la' (`instalacao.exigir_envio`).
+`ESPERA_FALHA_MIN`) tenta de novo. Envio incerto, sem registro ou interrompido (queda entre a marca e o envio) deixa a
+marca e nao se repete sozinho: a Saude acusa ate' uma pessoa conferir os Enviados e registrar o resultado
+(`conferir_envio`, pela linha de comando). No modo copia (instalacao nao autorizada) nada roda: o envio ja' e'
+recusado la' (`instalacao.exigir_envio`).
 """
 import datetime
 import json
@@ -24,8 +35,8 @@ import threading
 import time
 from html import escape
 
-from app import (backup, cobranca_certidoes, copia_dono, copia_dono_envio, correio, db, graph, instalacao,
-                 integridade, seguranca, sentinela, tempo)
+from app import (auditoria, backup, cobranca_certidoes, copia_dono, copia_dono_envio, correio, db, graph,
+                 instalacao, integridade, seguranca, sentinela, tempo)
 
 log = logging.getLogger("app.alertas_seguranca")
 
@@ -36,17 +47,16 @@ HORA_RESUMO = 7
 INTERVALO_SEG = 120   # o e-mail sai em ate' 5 minutos com folga
 ESPERA_FALHA_MIN = 10
 JANELA_RESUMO = datetime.timedelta(hours=24)
-# envio incerto mais velho que isto sai da Saude: o e-mail de alerta nao se repete e a tela nao fica acusando para sempre
-PRESA_NA_SAUDE = datetime.timedelta(hours=24)
+# Marca de envio mais velha que isto, sem envio registrado, e' envio parado (o e-mail leva segundos)
+PRESA_MIN = 15
+# O episodio de um problema aberto so' fecha depois disto do processo no ar: no reinicio, as conferencias (protecao,
+# cadeia, codigo) ainda nao rodaram e o bloco vem sem o problema que continua
+CARENCIA_SEG = 900
+DIAS_SEM_RESUMO_MAX = 7
 ASSUNTO_CURTO_MAX = 120
 _NIVEL = {"critico": "crítico", "acao": "ação", "atencao": "atenção"}
-# O item de leitura da sentinela soma as quantidades das rodadas da mesma hora (`seguranca._sentinela`): a mensagem
-# cresce, o item e' o mesmo
-_QUANTIDADE = re.compile(r", \d+ arquivos?$")
 _CONTROLE = re.compile(r"[\x00-\x1f\x7f]")
-# Item mais velho que isto nao vira alerta na hora (a primeira rodada depois do deploy, ou depois de configurar o
-# cadastro, nao manda a semana inteira); fica na Saude e no resumo
-JANELA_IMEDIATA = datetime.timedelta(hours=24)
+_INICIO = time.monotonic()
 
 SEM_CADASTRO = "nada sai: falta o destinatário no cadastro"
 SEM_REMETENTE = "nada sai: falta quem envia no cadastro"
@@ -55,10 +65,16 @@ SERVICO_NAO_CONFIGURADO = "nada sai: o envio de e-mail não está configurado ne
 
 # O que a Saude mostra do ultimo envio (`erro`) e quando ele falhou (`falhou_em`, UTC), da memoria do processo
 ESTADO: dict = {"erro": None, "falhou_em": None}
+# As linhas que deram envio incerto ou sem registro neste processo: a Saude as acusa na hora, sem esperar `PRESA_MIN`
+_INCERTOS: set[int] = set()
 
 
 class NaoConfigurado(ValueError):
-    """Falta cadastro, usuario ou conta conectada: nada sai."""
+    """Falta cadastro, usuario ou conta conectada: nada sai. `conectar`: a tela leva a Minha conta."""
+
+    def __init__(self, mensagem: str, conectar: bool = False):
+        super().__init__(mensagem)
+        self.conectar = conectar
 
 
 def _config(conn) -> dict:
@@ -85,10 +101,10 @@ def _remetente(conn, config: dict) -> dict:
         if not correio.configuracao()["client_id"]:
             raise NaoConfigurado(SERVICO_NAO_CONFIGURADO) from None
         if not correio.conectado(u["id"]):
-            raise NaoConfigurado(f"nada sai: a conta Microsoft de {u['email']} não está conectada; conecte em "
-                                 "Minha conta") from None
-        raise NaoConfigurado(f"nada sai: a conta Microsoft de {u['email']} não pôde ser usada; reconecte em "
-                             "Minha conta") from None
+            raise NaoConfigurado(f"nada sai: a conta Microsoft de {u['email']} não está conectada",
+                                 conectar=True) from None
+        raise NaoConfigurado(f"nada sai: a conta Microsoft de {u['email']} não pôde ser usada; reconecte",
+                             conectar=True) from None
     return u
 
 
@@ -114,42 +130,80 @@ def assunto_resumo(dia: datetime.date) -> str:
     return f"Dashboard Lotufo: resumo de segurança de {dia:%d/%m/%Y}"
 
 
-def _chave(hora: datetime.datetime, mensagem: str) -> str:
-    return f"alerta {hora:%Y-%m-%d %H} {mensagem}"
+def _marco(conn, agora: datetime.datetime) -> datetime.datetime:
+    """O momento em que os alertas comecaram a valer: gravado na primeira rodada com o cadastro configurado."""
+    with db.mutacao(conn):
+        conn.execute(f"INSERT OR IGNORE INTO {TABELA} (chave, tipo, assunto, criado_em) VALUES ('marco', 'marco', '', ?)",
+                     (seguranca._carimbo(agora),))
+    r = conn.execute(f"SELECT criado_em FROM {TABELA} WHERE chave='marco'").fetchone()
+    return datetime.datetime.fromisoformat(r[0]).replace(tzinfo=datetime.timezone.utc)
 
 
-def _grupos(itens: list[dict], agora: datetime.datetime) -> dict[str, dict]:
-    """Itens imediatos novos (das ultimas `JANELA_IMEDIATA`) agrupados: mesma mensagem (sem a quantidade da sentinela)
-    na mesma hora de Cuiaba. `anterior`: a chave da hora de antes, para o item de leitura da sentinela, cuja data e' a
-    da ultima rodada que somou quantidade e pode passar para a hora seguinte."""
+def _persistentes() -> set[str]:
+    """As mensagens dos problemas que continuam abertos: a conferencia de hora em hora e a do codigo em producao."""
+    return {i["mensagem"] for i in seguranca._conferencia + integridade.itens() if i["nivel"] in NIVEIS_IMEDIATOS}
+
+
+def _grupos(itens: list[dict], persistentes: set[str], marco: datetime.datetime) -> dict[str, dict]:
+    """`{chave do grupo: {itens, aberto}}`. `aberto`: a mensagem do problema aberto (a chave sai no envio)."""
     grupos: dict[str, dict] = {}
     for i in sorted(itens, key=lambda i: i["data"]):
-        if i["nivel"] not in NIVEIS_IMEDIATOS or datetime.datetime.fromisoformat(i["data"]) < agora - JANELA_IMEDIATA:
+        if i["nivel"] not in NIVEIS_IMEDIATOS:
             continue
-        hora = _local(i["data"])
-        mensagem = _QUANTIDADE.sub("", i["mensagem"])
-        g = grupos.setdefault(_chave(hora, mensagem), {"itens": [], "anterior": None})
-        g["itens"].append(i)
-        if mensagem != i["mensagem"]:
-            g["anterior"] = _chave(hora - datetime.timedelta(hours=1), mensagem)
+        if i["mensagem"] in persistentes:
+            grupos.setdefault(f"aberto {i['mensagem']}", {"itens": [], "aberto": i["mensagem"]})["itens"].append(i)
+            continue
+        if datetime.datetime.fromisoformat(i["data"]) < marco:
+            continue
+        chave = (f"alerta {i['identidade']}" if i.get("identidade")
+                 else f"alerta {_local(i['data']):%Y-%m-%d %H} {i['mensagem']}")
+        grupos.setdefault(chave, {"itens": [], "aberto": None})["itens"].append(i)
     return grupos
 
 
+def _saiu_ou_marcada(r) -> bool:
+    return r is not None and (r["envio_id"] is not None or r["envio_reservado_em"] is not None
+                              or r["envio_conferido_em"] is not None)
+
+
 def _ja_saiu(conn, chave: str) -> bool:
-    """A linha existe e saiu ou esta' marcada (envio em curso, incerto ou sem registro)."""
-    r = conn.execute(f"SELECT envio_id, envio_reservado_em FROM {TABELA} WHERE chave=?", (chave,)).fetchone()
-    return r is not None and (r["envio_id"] is not None or r["envio_reservado_em"] is not None)
+    """A linha existe e saiu, esta' marcada (envio em curso, incerto ou parado) ou foi conferida como saida."""
+    return _saiu_ou_marcada(conn.execute(
+        f"SELECT envio_id, envio_reservado_em, envio_conferido_em FROM {TABELA} WHERE chave=?", (chave,)).fetchone())
 
 
-def _reservar(conn, chave: str, tipo: str, assunto: str, usuario_id: int) -> int | None:
+def _chave_do_episodio(conn, mensagem: str, agora: datetime.datetime) -> str | None:
+    """A chave do e-mail do problema aberto: None se o episodio aberto ja' saiu (ou esta' marcado); a do episodio
+    aberto que ainda nao saiu (falha antes do envio); ou uma nova."""
+    r = conn.execute(f"SELECT chave, envio_id, envio_reservado_em, envio_conferido_em FROM {TABELA} WHERE tipo='alerta' "
+                     "AND mensagem=? AND problema_resolvido_em IS NULL ORDER BY id DESC LIMIT 1", (mensagem,)).fetchone()
+    if r is None:
+        return f"aberto {seguranca._carimbo(agora)} {mensagem}"
+    return None if _saiu_ou_marcada(r) else r["chave"]
+
+
+def _fechar_episodios(conn, persistentes: set[str]) -> None:
+    """O problema que sumiu fecha o episodio: se voltar, sai de novo."""
+    if time.monotonic() - _INICIO < CARENCIA_SEG:
+        return
+    abertos = [r[0] for r in conn.execute(f"SELECT id, mensagem FROM {TABELA} WHERE tipo='alerta' AND mensagem IS NOT "
+                                          "NULL AND problema_resolvido_em IS NULL") if r[1] not in persistentes]
+    if abertos:
+        with db.mutacao(conn):
+            conn.executemany(f"UPDATE {TABELA} SET problema_resolvido_em=datetime('now') WHERE id=?",
+                             [(i,) for i in abertos])
+
+
+def _reservar(conn, chave: str, tipo: str, assunto: str, usuario_id: int, mensagem: str | None = None) -> int | None:
     """Grava a linha (ou marca a que falhou antes) ANTES do e-mail; None se ja' saiu ou esta' marcada."""
     with db.mutacao(conn):
-        r = conn.execute(f"SELECT id, envio_id, envio_reservado_em FROM {TABELA} WHERE chave=?", (chave,)).fetchone()
+        r = conn.execute(f"SELECT id, envio_id, envio_reservado_em, envio_conferido_em FROM {TABELA} WHERE chave=?",
+                         (chave,)).fetchone()
         if r is None:
             return conn.execute(
-                f"INSERT INTO {TABELA} (chave, tipo, assunto, envio_reservado_em, envio_reservado_por) "
-                "VALUES (?,?,?,datetime('now'),?)", (chave, tipo, assunto, usuario_id)).lastrowid
-        if r["envio_id"] is not None or r["envio_reservado_em"] is not None:
+                f"INSERT INTO {TABELA} (chave, tipo, assunto, mensagem, envio_reservado_em, envio_reservado_por) "
+                "VALUES (?,?,?,?,datetime('now'),?)", (chave, tipo, assunto, mensagem, usuario_id)).lastrowid
+        if _saiu_ou_marcada(r):
             return None
         conn.execute(f"UPDATE {TABELA} SET envio_reservado_em=datetime('now'), envio_reservado_por=?, assunto=? "
                      "WHERE id=?", (usuario_id, assunto, r["id"]))
@@ -165,16 +219,15 @@ def _soltar(conn, rid: int) -> None:
 
 
 def _enviar(conn, usuario: dict, para: list[str], chave: str, tipo: str, assunto: str, corpo: str,
-            agora: datetime.datetime) -> bool:
+            agora: datetime.datetime, mensagem: str | None = None) -> bool:
     """Um e-mail registrado antes de sair. False: nao saiu (ou saiu incerto), e a rodada para aqui."""
-    rid = _reservar(conn, chave, tipo, assunto, usuario["id"])
+    rid = _reservar(conn, chave, tipo, assunto, usuario["id"], mensagem)
     if rid is None:
         return True
     try:
         envio_id = correio.enviar_e_registrar(conn, usuario, TIPO_ENVIO, para, [], assunto, corpo, [])
     except correio.EnvioNaoRegistrado as e:          # inclui o incerto: a marca fica, nada se repete sozinho
-        ESTADO["erro"] = (f"envio incerto às {tempo.para_local(agora):%H:%M} ({assunto}); confira os Enviados de "
-                          "quem envia")
+        _INCERTOS.add(rid)                           # a Saude le a marca do banco (`situacao`)
         ESTADO["falhou_em"] = agora
         log.critical("alerta de seguranca: envio incerto ou sem registro (%s): %s", assunto, e)
         return False
@@ -201,9 +254,11 @@ def _corpo_alerta(itens: list[dict]) -> str:
 
 
 def _auditoria(conn) -> tuple[int, int | None, str | None]:
-    total = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
-    r = conn.execute("SELECT id, hash FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
-    return total, (r["id"] if r else None), (r["hash"] if r else None)
+    """Total de linhas e a ultima (id e hash), numa leitura so'."""
+    r = conn.execute("SELECT (SELECT COUNT(*) FROM audit_log) AS total, "
+                     "(SELECT id FROM audit_log ORDER BY id DESC LIMIT 1) AS id, "
+                     "(SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1) AS hash").fetchone()
+    return r["total"], r["id"], r["hash"]
 
 
 def _sentinela(conn) -> str:
@@ -218,6 +273,21 @@ def _sentinela(conn) -> str:
     return f"Sentinela: última leitura do log em {tempo.para_local(datetime.datetime.fromisoformat(r[0])):%d/%m/%Y %H:%M}"
 
 
+def _dias_sem_resumo(conn, dia: datetime.date) -> str | None:
+    """Os dias entre o ultimo resumo que saiu e hoje sem resumo (servidor parado, envio que falhou)."""
+    ultimo = conn.execute(f"SELECT MAX(chave) FROM {TABELA} WHERE tipo='resumo' AND chave < ? AND "
+                          "(envio_id IS NOT NULL OR envio_conferido_em IS NOT NULL)", (f"resumo {dia}",)).fetchone()[0]
+    if ultimo is None:
+        return None
+    primeiro = datetime.date.fromisoformat(ultimo.split()[1]) + datetime.timedelta(days=1)
+    faltam = [primeiro + datetime.timedelta(days=n) for n in range((dia - primeiro).days)]
+    if not faltam:
+        return None
+    if len(faltam) > DIAS_SEM_RESUMO_MAX:
+        return f"Sem resumo desde {faltam[0]:%d/%m/%Y} ({len(faltam)} dias)"
+    return "Sem resumo em: " + ", ".join(f"{d:%d/%m/%Y}" for d in faltam)
+
+
 def corpo_resumo(conn, agora: datetime.datetime) -> str:
     """Itens das ultimas 24 horas e os problemas que continuam abertos (a conferencia de hora em hora e a do codigo em
     producao, que guardam a data em que foram vistos primeiro) ou "Nada a relatar", mais o que ancora o estado da VM."""
@@ -228,10 +298,14 @@ def corpo_resumo(conn, agora: datetime.datetime) -> str:
     itens = sorted(itens + abertos, key=lambda i: i["data"], reverse=True)
     linhas = [f"Resumo de segurança da Dashboard Lotufo de {dia:%d/%m/%Y} (últimas 24 horas).", ""]
     linhas += [_linha(i) for i in itens] if itens else ["Nada a relatar."]
-    linhas += ["", f"Commit em produção: {integridade.commit_atual() or 'não identificado'}"]
+    linhas.append("")
+    faltam = _dias_sem_resumo(conn, dia)
+    if faltam:
+        linhas.append(faltam)
+    linhas.append(f"Commit em produção: {integridade.commit_atual() or 'não identificado'}")
     ultima = copia_dono.ultima_copia(backup.pasta_local())
-    if ultima is not None:
-        linhas.append(f"Última cópia do dono: {tempo.para_local(ultima):%d/%m/%Y %H:%M}")
+    linhas.append(f"Última cópia do dono: {tempo.para_local(ultima):%d/%m/%Y %H:%M}" if ultima is not None
+                  else "Última cópia do dono: nenhuma encontrada")
     linhas.append(_sentinela(conn))
     total, linha, hash_ = _auditoria(conn)
     if linha is None:
@@ -249,6 +323,7 @@ def rodada(conn, agora: datetime.datetime | None = None) -> list[str]:
         return []
     try:
         config = _config(conn)
+        marco = _marco(conn, agora)
         usuario = _remetente(conn, config)
     except NaoConfigurado as e:
         if ESTADO["erro"] != str(e):
@@ -260,13 +335,20 @@ def rodada(conn, agora: datetime.datetime | None = None) -> list[str]:
     falhou = ESTADO["falhou_em"]
     if falhou is not None and agora - falhou < datetime.timedelta(minutes=ESPERA_FALHA_MIN):
         return []
+    persistentes = _persistentes()
+    _fechar_episodios(conn, persistentes)
     enviados = []
-    for chave, g in _grupos(seguranca.itens(conn, agora), agora).items():
-        if _ja_saiu(conn, chave) or (g["anterior"] and _ja_saiu(conn, g["anterior"])):
+    for chave, g in _grupos(seguranca.itens(conn, agora), persistentes, marco).items():
+        if g["aberto"] is not None:
+            chave = _chave_do_episodio(conn, g["aberto"], agora)
+            if chave is None:
+                continue
+        elif _ja_saiu(conn, chave):
             continue
         itens = g["itens"]
         assunto = assunto_alerta(itens[-1]["mensagem"])
-        if not _enviar(conn, usuario, config["para"], chave, "alerta", assunto, _corpo_alerta(itens), agora):
+        if not _enviar(conn, usuario, config["para"], chave, "alerta", assunto, _corpo_alerta(itens), agora,
+                       g["aberto"]):
             return enviados
         enviados.append(assunto)
     local = tempo.para_local(agora)
@@ -278,22 +360,53 @@ def rodada(conn, agora: datetime.datetime | None = None) -> list[str]:
     return enviados
 
 
-def situacao(conn) -> str | None:
-    """O que a Saude mostra: por que nada sai (lido agora do cadastro e da conta), o envio incerto das ultimas 24
-    horas ou a falha do ultimo envio. None: tudo certo (ou modo copia, em que o envio ja' e' recusado)."""
+def _paradas(conn) -> list:
+    """Marcas de envio paradas (mais de `PRESA_MIN`, ou incertas neste processo; sem envio registrado e sem
+    conferencia), sem prazo: ficam na Saude ate' uma pessoa registrar o resultado."""
+    return [r for r in conn.execute(
+        f"SELECT id, assunto, envio_reservado_em <= datetime('now', ?) AS velha FROM {TABELA} WHERE envio_id IS NULL "
+        "AND envio_conferido_em IS NULL AND envio_reservado_em IS NOT NULL ORDER BY id", (f"-{PRESA_MIN} minutes",))
+        if r["velha"] or r["id"] in _INCERTOS]
+
+
+def situacao(conn) -> dict:
+    """O que a Saude mostra: `{erro, conectar}`. `erro`: por que nada sai (lido agora do cadastro e da conta), os
+    e-mails que podem nao ter saido e a falha do ultimo envio; None quando esta' tudo certo (ou no modo copia, em que
+    o envio ja' e' recusado). `conectar`: a conta Microsoft de quem envia precisa ser conectada (Minha conta)."""
     if not instalacao.ligada():
-        return None
+        return {"erro": None, "conectar": False}
+    partes, conectar = [], False
     try:
         _remetente(conn, _config(conn))
     except NaoConfigurado as e:
-        return str(e)
-    presa = conn.execute(f"SELECT assunto, envio_reservado_em FROM {TABELA} WHERE envio_id IS NULL "
-                         "AND envio_reservado_em <= datetime('now', '-15 minutes') AND envio_reservado_em >= "
-                         "datetime('now', ?) ORDER BY id LIMIT 1",
-                         (f"-{int(PRESA_NA_SAUDE.total_seconds())} seconds",)).fetchone()
-    if presa is not None:
-        return f"envio incerto ({presa['assunto']}); confira os Enviados de quem envia"
-    return ESTADO["erro"]
+        partes.append(str(e))
+        conectar = e.conectar
+    for r in _paradas(conn):
+        partes.append(f"o e-mail nº {r['id']} pode não ter saído ({r['assunto']}); confira os Enviados de quem envia "
+                      "e registre o resultado no servidor")
+    if not partes and ESTADO["erro"]:
+        partes.append(ESTADO["erro"])
+    return {"erro": "; ".join(partes) or None, "conectar": conectar}
+
+
+def conferir_envio(conn, usuario_id: int, id_: int, saiu: bool) -> None:
+    """Uma pessoa conferiu os Enviados de quem envia e registra o resultado do e-mail parado (`_paradas`): saiu (fica
+    como enviado, nao se repete) ou nao saiu (a marca solta e a proxima rodada manda, se o item continuar). Auditado."""
+    with db.mutacao(conn):
+        r = conn.execute(f"SELECT assunto, envio_id, envio_reservado_em, envio_conferido_em, "
+                         f"envio_reservado_em <= datetime('now', ?) AS parada FROM {TABELA} WHERE id=?",
+                         (f"-{PRESA_MIN} minutes", id_)).fetchone()
+        if r is None or r["envio_id"] is not None or r["envio_conferido_em"] is not None or r["envio_reservado_em"] is None:
+            raise ValueError("Este e-mail não está parado")
+        if not r["parada"]:
+            raise ValueError(f"Envio iniciado há menos de {PRESA_MIN} minutos: pode ainda estar saindo")
+        if saiu:
+            conn.execute(f"UPDATE {TABELA} SET envio_conferido_em=datetime('now'), envio_conferido_por=?, "
+                         "envio_reservado_em=NULL, envio_reservado_por=NULL WHERE id=?", (usuario_id, id_))
+        else:
+            conn.execute(f"UPDATE {TABELA} SET envio_reservado_em=NULL, envio_reservado_por=NULL WHERE id=?", (id_,))
+        auditoria.registrar(conn, usuario_id, "seguranca.alerta_envio_conferido", "alerta_seguranca_envio", id_, None,
+                            {"assunto": r["assunto"], "saiu": saiu})
 
 
 def agendar(intervalo_seg: int = INTERVALO_SEG) -> threading.Thread:

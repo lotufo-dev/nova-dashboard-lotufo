@@ -89,11 +89,11 @@ def saude(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
           conn: sqlite3.Connection = Depends(conexao)):
     """Administracao > Saude: a situacao do monitor do SIGA (issue #330), ao lado da do RM e do backup, e o bloco
     Seguranca (issue #418): `[{nivel, mensagem, data}]`, montado por `app/seguranca.py`, com no maximo
-    `seguranca.ITENS_NA_TELA` itens; `seguranca_fora` diz quantos ficaram de fora. Issue #424: `alertas_seguranca.erro`
-    diz por que os alertas por e-mail nao saem (None quando saem)."""
+    `seguranca.ITENS_NA_TELA` itens; `seguranca_fora` diz quantos ficaram de fora. Issue #424: `alertas_seguranca`
+    traz `erro` (por que os alertas por e-mail nao saem; None quando saem) e `conectar` (falta conectar a conta)."""
     itens, fora = seguranca.bloco(conn)
     return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora, "sentinela": sentinela.situacao(),
-            "alertas_seguranca": {"erro": alertas_seguranca.situacao(conn)}}
+            "alertas_seguranca": alertas_seguranca.situacao(conn)}
 
 
 @router.get("/contas-microsoft")

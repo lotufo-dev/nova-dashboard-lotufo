@@ -528,6 +528,27 @@ def _auditoria(args) -> int:
     return 0 if confere else 1
 
 
+def _alertas(args) -> int:
+    """`alertas conferir-envio --id N --saiu|--nao-saiu --usuario <e-mail>` (issue #424): registra o resultado do
+    e-mail de alerta que a Saúde acusa como possivelmente não enviado, depois de conferir os Enviados."""
+    from app import alertas_seguranca
+    conn = db.get_conn()
+    try:
+        u = conn.execute("SELECT id FROM usuarios WHERE lower(email)=?", (args.usuario.strip().lower(),)).fetchone()
+        if u is None:
+            print(f"Usuário não encontrado: {args.usuario}")
+            return 1
+        try:
+            alertas_seguranca.conferir_envio(conn, u["id"], args.id, saiu=args.saiu)
+        except ValueError as e:
+            print(str(e))
+            return 1
+    finally:
+        conn.close()
+    print("Registrado: o e-mail saiu." if args.saiu else "Registrado: o e-mail não saiu; ele sai de novo na próxima rodada.")
+    return 0
+
+
 def _sentinela(args) -> int:
     """`sentinela antes-da-456 --banco <db>` (issue #478): com o serviço parado e antes de voltar o código para um
     commit anterior à #456, passa o ponto de leitura da sentinela para a auditoria e tira a tabela, os gatilhos e a
@@ -607,6 +628,13 @@ def main(argv: list[str] | None = None) -> int:
     aud.add_argument("acao", choices=["conferir"])
     aud.add_argument("--linha", required=True, type=int, help="número da linha da auditoria (o do resumo)")
     aud.add_argument("--hash", required=True, help="hash da linha (o do resumo)")
+    ale = sub.add_parser("alertas", help="resultado do e-mail de alerta de segurança que pode não ter saído")
+    ale.add_argument("acao", choices=["conferir-envio"])
+    ale.add_argument("--id", required=True, type=int, help="nº do e-mail mostrado na Saúde")
+    resultado = ale.add_mutually_exclusive_group(required=True)
+    resultado.add_argument("--saiu", action="store_true", help="o e-mail está nos Enviados de quem envia")
+    resultado.add_argument("--nao-saiu", action="store_true", help="o e-mail não está nos Enviados: sai de novo")
+    ale.add_argument("--usuario", required=True, help="e-mail de quem conferiu")
     dn = sub.add_parser("dono", help="cópia cifrada para a chave do dono")
     dn.add_argument("acao", choices=["gerar-chave"])
     dn.add_argument("--saida", required=True, help="pasta onde gravar o par de chaves")
@@ -620,6 +648,8 @@ def main(argv: list[str] | None = None) -> int:
         return _dono(args)
     if args.cmd == "auditoria":
         return _auditoria(args)
+    if args.cmd == "alertas":
+        return _alertas(args)
     if args.cmd == "sentinela":
         return _sentinela(args)
     if args.cmd == "documentos":

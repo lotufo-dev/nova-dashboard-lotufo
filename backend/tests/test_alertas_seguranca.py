@@ -16,6 +16,9 @@ AGORA = datetime.datetime(2026, 11, 5, 10, 2, tzinfo=CUIABA).astimezone(datetime
 @pytest.fixture(autouse=True)
 def estado_limpo(monkeypatch):
     monkeypatch.setattr(alertas_seguranca, "ESTADO", {"erro": None, "falhou_em": None})
+    monkeypatch.setattr(alertas_seguranca, "_INCERTOS", set())
+    # o processo esta' no ar ha' mais que a carencia: o problema que some fecha o episodio
+    monkeypatch.setattr(alertas_seguranca, "_INICIO", alertas_seguranca.time.monotonic() - 10 * 3600)
     monkeypatch.setattr(alertas_seguranca.integridade, "commit_atual", lambda: "abc1234")
 
 
@@ -29,6 +32,9 @@ def ambiente(tmp_path, monkeypatch):
     auth.criar_usuario(conn, "Dono", DONO, "senha-forte-123", "admin")
     conn.execute("INSERT INTO cadastro_geral (chave, valor) VALUES ('alertas_seguranca', ?)",
                  (json.dumps({"para": [PARA], "enviada_por": [DONO]}),))
+    # os alertas valem desde 01/11 (o marco que a primeira rodada com o cadastro grava)
+    conn.execute("INSERT INTO alertas_seguranca_envios (chave, tipo, assunto, criado_em) "
+                 "VALUES ('marco', 'marco', '', '2026-11-01 00:00:00')")
     conn.commit()
     yield conn, tmp_path
     conn.close()
@@ -43,10 +49,13 @@ def _itens(monkeypatch, itens):
     monkeypatch.setattr(seguranca, "itens", lambda conn, agora=None: list(itens))
 
 
-def _item(mensagem, hora_local="10:00", nivel="acao", dia=5):
+def _item(mensagem, hora_local="10:00", nivel="acao", dia=5, identidade=None):
     h, m = map(int, hora_local.split(":"))
     data = datetime.datetime(2026, 11, dia, h, m, tzinfo=CUIABA).astimezone(datetime.timezone.utc)
-    return {"nivel": nivel, "mensagem": mensagem, "data": data.isoformat()}
+    item = {"nivel": nivel, "mensagem": mensagem, "data": data.isoformat()}
+    if identidade:
+        item["identidade"] = identidade
+    return item
 
 
 def _alertas(tmp_path):
@@ -89,30 +98,109 @@ def test_itens_iguais_na_mesma_hora_vao_num_email_so(ambiente, monkeypatch):
     assert m["corpo"].count("Tarefa agendada criada por conta") == 2
 
 
-def test_leitura_da_sentinela_que_cresce_na_mesma_hora_nao_repete(ambiente, monkeypatch):
-    # o item da sentinela soma as quantidades das rodadas: a mensagem muda, o item e' o mesmo
+LEITURA = "Leitura de cadastro por x.exe (conta), {} arquivos"
+
+
+def test_leitura_da_sentinela_e_o_mesmo_item_enquanto_soma(ambiente, monkeypatch):
+    # revisor/Sol C2: rodadas 10:12, 11:32 (o mesmo agregado da hora 10, com mais arquivos e data nova) e 13:22 (outro
+    # agregado, da hora 13): dois e-mails
     conn, tmp = ambiente
-    _itens(monkeypatch, [_item("Leitura de cadastro por x.exe (conta), 3 arquivos", "10:05")])
-    alertas_seguranca.rodada(conn, AGORA)
-    _itens(monkeypatch, [_item("Leitura de cadastro por x.exe (conta), 9 arquivos", "10:10")])
-    alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(minutes=10))
+    a, b = 'sentinela-leitura ["conta", "x.exe", "cadastro", "2026-11-05T10"]', \
+        'sentinela-leitura ["conta", "x.exe", "cadastro", "2026-11-05T13"]'
+    _itens(monkeypatch, [_item(LEITURA.format(3), "10:12", identidade=a)])
+    alertas_seguranca.rodada(conn, _as(10, 12))
+    _itens(monkeypatch, [_item(LEITURA.format(9), "11:32", identidade=a)])
+    alertas_seguranca.rodada(conn, _as(11, 32))
+    _itens(monkeypatch, [_item(LEITURA.format(9), "11:32", identidade=a), _item(LEITURA.format(2), "13:22", identidade=b)])
+    alertas_seguranca.rodada(conn, _as(13, 22))
+    _itens(monkeypatch, [_item(LEITURA.format(12), "15:40", identidade=a), _item(LEITURA.format(2), "13:22", identidade=b)])
+    alertas_seguranca.rodada(conn, _as(15, 40))                 # leitura atrasada do agregado da hora 10
+    assert [m["assunto"] for m in _alertas(tmp)] == [
+        "Dashboard Lotufo: alerta de segurança: " + LEITURA.format(3),
+        "Dashboard Lotufo: alerta de segurança: " + LEITURA.format(2)]
+
+
+def test_leitura_da_sentinela_gravada_em_duas_rodadas_tem_uma_identidade(ambiente):
+    from app import sentinela
+    conn, tmp = ambiente
+    achado = {"evento": 4663, "nivel": "acao", "conta": "conta", "processo": "x.exe", "pasta": "cadastro",
+              "hora": "2026-11-05T10:05:00", "quantidade": 3}
+    with db.mutacao(conn):
+        auditoria.registrar(conn, None, sentinela.ACAO, "sentinela", None, None, achado)
+    agora = tempo.agora_utc()
+    alertas_seguranca.rodada(conn, agora)
+    with db.mutacao(conn):
+        auditoria.registrar(conn, None, sentinela.ACAO, "sentinela", None, None, {**achado, "quantidade": 4})
+    [item] = seguranca.itens(conn, agora)
+    assert item["mensagem"].endswith("7 arquivos") and item["identidade"]
+    alertas_seguranca.rodada(conn, agora + datetime.timedelta(hours=2))
     assert len(_alertas(tmp)) == 1
 
 
-def test_leitura_da_sentinela_que_passa_para_a_hora_seguinte_nao_repete(ambiente, monkeypatch):
-    # /code-review: a data do item somado e' a da ultima rodada gravada, que pode cair na hora seguinte
+def test_item_anterior_ao_marco_nao_vira_alerta(ambiente, monkeypatch):
+    # Sol C5: o primeiro deploy nao manda o historico; o que vem depois do marco sai quando der, mesmo dias depois
     conn, tmp = ambiente
-    _itens(monkeypatch, [_item("Leitura de cadastro por x.exe (conta), 3 arquivos", "10:58")])
+    with db.mutacao(conn):
+        conn.execute("UPDATE alertas_seguranca_envios SET criado_em='2026-11-04 12:00:00' WHERE chave='marco'")
+    _itens(monkeypatch, [_item("Administrador Dono entrou de uma origem nova (10.0.0.1)", "07:00", dia=4),
+                         _item("Administrador Dono entrou de uma origem nova (10.0.0.2)", "09:00", dia=4)])
+    alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(days=2))
+    assert [m["assunto"][-10:] for m in _alertas(tmp)] == ["(10.0.0.2)"]
+
+
+def test_primeira_rodada_com_cadastro_grava_o_marco(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    conn.execute("UPDATE alertas_seguranca_envios SET chave='marco-antigo' WHERE chave='marco'")
+    conn.commit()
+    _itens(monkeypatch, [_item("Administrador Dono entrou de uma origem nova (10.0.0.1)", "09:00")])
     alertas_seguranca.rodada(conn, AGORA)
-    _itens(monkeypatch, [_item("Leitura de cadastro por x.exe (conta), 5 arquivos", "11:02")])
+    assert _alertas(tmp) == []
+    marco = conn.execute("SELECT criado_em FROM alertas_seguranca_envios WHERE chave='marco'").fetchone()[0]
+    assert marco == "2026-11-05 14:02:00"
+    _itens(monkeypatch, [_item("Administrador Dono entrou de uma origem nova (10.0.0.3)", "10:30")])
     alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(hours=1))
     assert len(_alertas(tmp)) == 1
 
 
-def test_item_de_mais_de_24_horas_nao_vira_alerta_na_hora(ambiente, monkeypatch):
-    # /code-review: a primeira rodada depois do deploy nao manda os itens da semana inteira
+def test_problema_aberto_sai_uma_vez_por_episodio_mesmo_depois_de_reiniciar(ambiente, monkeypatch):
+    # revisor/Sol C1: a data do problema aberto mora na memoria do processo e muda a cada reinicio
     conn, tmp = ambiente
-    _itens(monkeypatch, [_item("Administrador Dono entrou de uma origem nova (10.0.0.1)", "09:00", dia=3)])
+    problema = "Cadeia da auditoria quebrada"
+
+    def aberto(hora):
+        item = _item(problema, hora, "critico")
+        monkeypatch.setattr(seguranca, "_conferencia", [item])
+        _itens(monkeypatch, [item])
+
+    aberto("10:00")
+    alertas_seguranca.rodada(conn, _as(10, 2))
+    aberto("13:00")                                             # reiniciou: a data mudou, o problema e' o mesmo
+    monkeypatch.setattr(alertas_seguranca, "_INICIO", alertas_seguranca.time.monotonic())
+    alertas_seguranca.rodada(conn, _as(13, 2))
+    assert len(_alertas(tmp)) == 1
+    monkeypatch.setattr(seguranca, "_conferencia", [])           # logo depois do reinicio: a conferencia nao rodou
+    _itens(monkeypatch, [])
+    alertas_seguranca.rodada(conn, _as(13, 3))
+    aberto("13:04")
+    alertas_seguranca.rodada(conn, _as(13, 4))
+    assert len(_alertas(tmp)) == 1
+    monkeypatch.setattr(alertas_seguranca, "_INICIO", alertas_seguranca.time.monotonic() - 10 * 3600)
+    monkeypatch.setattr(seguranca, "_conferencia", [])           # o problema sumiu: o episodio fecha
+    _itens(monkeypatch, [])
+    alertas_seguranca.rodada(conn, _as(15, 0))
+    aberto("16:00")                                             # e voltou: sai de novo
+    alertas_seguranca.rodada(conn, _as(16, 2))
+    assert len(_alertas(tmp)) == 2
+
+
+def test_linha_ja_marcada_nao_envia(ambiente, monkeypatch):
+    # revisor: outra rodada (ou outro processo) ja' marcou o envio deste grupo
+    conn, tmp = ambiente
+    item = _item("Tarefa agendada criada por conta", "10:05")
+    with db.mutacao(conn):
+        conn.execute("INSERT INTO alertas_seguranca_envios (chave, tipo, assunto, envio_reservado_em) VALUES (?,?,?,"
+                     "datetime('now'))", ("alerta 2026-11-05 10 Tarefa agendada criada por conta", "alerta", "x"))
+    _itens(monkeypatch, [item])
     alertas_seguranca.rodada(conn, AGORA)
     assert _alertas(tmp) == []
 
@@ -150,8 +238,8 @@ def test_falha_antes_do_envio_solta_e_tenta_de_novo_depois(ambiente, monkeypatch
 
     monkeypatch.setattr(correio, "enviar_e_registrar", falha)
     alertas_seguranca.rodada(conn, AGORA)
-    assert alertas_seguranca.situacao(conn) == "o último envio falhou (o serviço de e-mail não respondeu; tente de " \
-                                              "novo mais tarde)"
+    assert alertas_seguranca.situacao(conn)["erro"] == "o último envio falhou (o serviço de e-mail não respondeu; " \
+                                                       "tente de novo mais tarde)"
     linha = conn.execute("SELECT * FROM alertas_seguranca_envios").fetchone()
     assert linha["envio_id"] is None and linha["envio_reservado_em"] is None
     monkeypatch.setattr(correio, "enviar_e_registrar", original)
@@ -159,7 +247,7 @@ def test_falha_antes_do_envio_solta_e_tenta_de_novo_depois(ambiente, monkeypatch
     assert _alertas(tmp) == []
     alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(minutes=alertas_seguranca.ESPERA_FALHA_MIN))
     assert len(_alertas(tmp)) == 1
-    assert alertas_seguranca.situacao(conn) is None
+    assert alertas_seguranca.situacao(conn) == {"erro": None, "conectar": False}
 
 
 def test_envio_incerto_nao_repete_sozinho(ambiente, monkeypatch):
@@ -171,15 +259,52 @@ def test_envio_incerto_nao_repete_sozinho(ambiente, monkeypatch):
 
     monkeypatch.setattr(correio, "enviar_e_registrar", incerto)
     alertas_seguranca.rodada(conn, AGORA)
-    assert conn.execute("SELECT envio_reservado_em FROM alertas_seguranca_envios").fetchone()[0] is not None
-    assert "confira os Enviados" in alertas_seguranca.situacao(conn)
+    rid = conn.execute("SELECT id FROM alertas_seguranca_envios WHERE envio_reservado_em IS NOT NULL").fetchone()[0]
+    assert f"o e-mail nº {rid} pode não ter saído" in alertas_seguranca.situacao(conn)["erro"]
     chamadas = []
     monkeypatch.setattr(correio, "enviar_e_registrar", lambda *a, **k: chamadas.append(a[5]))
     alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(hours=1))
     assert [assunto for assunto in chamadas if "alerta" in assunto] == []
-    with db.mutacao(conn):                          # passados 15 minutos, a Saude le a marca do banco
-        conn.execute("UPDATE alertas_seguranca_envios SET envio_reservado_em=datetime('now', '-20 minutes')")
-    assert "confira os Enviados" in alertas_seguranca.situacao(conn)
+    # Sol C3: depois de reiniciar (memoria vazia), a marca parada continua na Saude, sem prazo, ate' alguem conferir
+    monkeypatch.setattr(alertas_seguranca, "_INCERTOS", set())
+    with db.mutacao(conn):
+        conn.execute("UPDATE alertas_seguranca_envios SET envio_reservado_em=datetime('now', '-30 days') WHERE id=?",
+                     (rid,))
+    assert f"o e-mail nº {rid} pode não ter saído" in alertas_seguranca.situacao(conn)["erro"]
+    uid = conn.execute("SELECT id FROM usuarios").fetchone()[0]
+    alertas_seguranca.conferir_envio(conn, uid, rid, saiu=True)
+    assert alertas_seguranca.situacao(conn)["erro"] is None
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='seguranca.alerta_envio_conferido'").fetchone()[0] == 1
+
+
+def test_queda_entre_a_marca_e_o_envio_fica_na_saude_e_nao_saiu_manda_de_novo(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    item = _item("Proteção da tabela de usuários removida", "10:00", "critico")
+    with db.mutacao(conn):                          # a marca ficou e o processo caiu antes do e-mail
+        rid = conn.execute("INSERT INTO alertas_seguranca_envios (chave, tipo, assunto, envio_reservado_em) VALUES "
+                           "(?,?,?,datetime('now', '-1 hour'))", ("alerta 2026-11-05 10 " + item["mensagem"], "alerta",
+                                                                  "x")).lastrowid
+    _itens(monkeypatch, [item])
+    alertas_seguranca.rodada(conn, AGORA)
+    assert _alertas(tmp) == []
+    assert f"o e-mail nº {rid} pode não ter saído" in alertas_seguranca.situacao(conn)["erro"]
+    uid = conn.execute("SELECT id FROM usuarios").fetchone()[0]
+    alertas_seguranca.conferir_envio(conn, uid, rid, saiu=False)
+    alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(minutes=1))
+    assert len(_alertas(tmp)) == 1
+    assert alertas_seguranca.situacao(conn)["erro"] is None
+
+
+def test_conferir_envio_recusa_o_que_nao_esta_parado(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    uid = conn.execute("SELECT id FROM usuarios").fetchone()[0]
+    with db.mutacao(conn):
+        recente = conn.execute("INSERT INTO alertas_seguranca_envios (chave, tipo, assunto, envio_reservado_em) VALUES "
+                               "('a', 'alerta', 'x', datetime('now'))").lastrowid
+    with pytest.raises(ValueError, match="pode ainda estar saindo"):
+        alertas_seguranca.conferir_envio(conn, uid, recente, saiu=True)
+    with pytest.raises(ValueError, match="não está parado"):
+        alertas_seguranca.conferir_envio(conn, uid, 999, saiu=True)
 
 
 # --- resumo diario ----------------------------------------------------------------------------------------------
@@ -231,6 +356,19 @@ def test_resumo_cheio_traz_os_itens_das_ultimas_24_horas(ambiente, monkeypatch):
     assert "Proteção da tabela de usuários removida" in m["corpo"]
 
 
+def test_resumo_diz_os_dias_sem_resumo_e_a_copia_ausente(ambiente, monkeypatch):
+    # Sol A1/A3: servidor parado o dia inteiro; nenhuma copia do dono em disco
+    conn, tmp = ambiente
+    _itens(monkeypatch, [])
+    alertas_seguranca.rodada(conn, _as(7, 0, dia=2))
+    alertas_seguranca.rodada(conn, _as(8, 0, dia=5))
+    *_, m = _resumos(tmp)
+    assert "Sem resumo em: 03/11/2026, 04/11/2026" in m["corpo"]
+    assert "Última cópia do dono: nenhuma encontrada" in m["corpo"]
+    alertas_seguranca.rodada(conn, _as(7, 0, dia=6))
+    assert "Sem resumo" not in _resumos(tmp)[-1]["corpo"]
+
+
 def test_resumo_traz_copia_do_dono_e_sentinela(ambiente, monkeypatch):
     conn, tmp = ambiente
     _itens(monkeypatch, [])
@@ -271,8 +409,8 @@ def test_sem_configuracao_nada_sai_so_log_e_saude_mostra(ambiente, monkeypatch, 
     _itens(monkeypatch, [_item("Proteção da tabela de usuários removida", nivel="critico")])
     alertas_seguranca.rodada(conn, _as(7, 0))
     assert _enviados(tmp) == []
-    assert conn.execute("SELECT COUNT(*) FROM alertas_seguranca_envios").fetchone()[0] == 0
-    assert alertas_seguranca.SEM_CADASTRO == alertas_seguranca.situacao(conn)
+    assert conn.execute("SELECT COUNT(*) FROM alertas_seguranca_envios WHERE tipo != 'marco'").fetchone()[0] == 0
+    assert alertas_seguranca.situacao(conn) == {"erro": alertas_seguranca.SEM_CADASTRO, "conectar": False}
     assert "alertas de seguranca" in caplog.text
 
 
@@ -284,7 +422,16 @@ def test_sem_usuario_de_quem_envia_saude_mostra(ambiente, monkeypatch):
     _itens(monkeypatch, [_item("x", nivel="critico")])
     alertas_seguranca.rodada(conn, AGORA)
     assert _enviados(tmp) == []
-    assert alertas_seguranca.situacao(conn) == alertas_seguranca.SEM_USUARIO
+    assert alertas_seguranca.situacao(conn) == {"erro": alertas_seguranca.SEM_USUARIO, "conectar": False}
+
+
+def test_conta_desconectada_leva_a_minha_conta(ambiente, monkeypatch, tmp_path):
+    conn, tmp = ambiente
+    monkeypatch.delenv("DASH_GRAPH_SIMULADOR")
+    monkeypatch.setenv("DASH_GRAPH_CLIENT_ID", "00000000-0000-0000-0000-000000000000")
+    monkeypatch.setenv("DASH_GRAPH_TOKENS_DIR", str(tmp_path / "tokens"))
+    assert alertas_seguranca.situacao(conn) == {
+        "erro": f"nada sai: a conta Microsoft de {DONO} não está conectada", "conectar": True}
 
 
 def test_modo_copia_nada_sai(ambiente, monkeypatch):
@@ -293,10 +440,23 @@ def test_modo_copia_nada_sai(ambiente, monkeypatch):
     _itens(monkeypatch, [_item("x", nivel="critico")])
     alertas_seguranca.rodada(conn, _as(7, 0))
     assert _enviados(tmp) == []
-    assert conn.execute("SELECT COUNT(*) FROM alertas_seguranca_envios").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM alertas_seguranca_envios WHERE tipo != 'marco'").fetchone()[0] == 0
 
 
 def test_saude_traz_o_motivo_dos_alertas(client_admin):
     r = client_admin.get("/api/admin/saude")
     assert r.status_code == 200, r.text
-    assert r.json()["alertas_seguranca"] == {"erro": alertas_seguranca.SEM_CADASTRO}
+    assert r.json()["alertas_seguranca"] == {"erro": alertas_seguranca.SEM_CADASTRO, "conectar": False}
+
+
+def test_linha_de_comando_registra_o_resultado_do_email_parado(ambiente, capsys):
+    from app import cli
+    conn, tmp = ambiente
+    with db.mutacao(conn):
+        rid = conn.execute("INSERT INTO alertas_seguranca_envios (chave, tipo, assunto, envio_reservado_em) VALUES "
+                           "('a', 'alerta', 'x', datetime('now', '-1 hour'))").lastrowid
+    assert cli.main(["alertas", "conferir-envio", "--id", str(rid), "--saiu", "--usuario", "ninguem@exemplo.com.br"]) == 1
+    assert cli.main(["alertas", "conferir-envio", "--id", str(rid), "--saiu", "--usuario", DONO]) == 0
+    assert "o e-mail saiu" in capsys.readouterr().out
+    assert conn.execute("SELECT envio_conferido_em FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()[0]
+    assert cli.main(["alertas", "conferir-envio", "--id", str(rid), "--nao-saiu", "--usuario", DONO]) == 1
