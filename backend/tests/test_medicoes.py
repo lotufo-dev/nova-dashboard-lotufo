@@ -917,6 +917,89 @@ def test_reajuste_antes_do_primeiro_aniversario_e_recusado(conn, contrato_id):
     assert conn.execute("SELECT COUNT(*) FROM medicoes").fetchone()[0] == 0
 
 
+def test_reajuste_ja_lancado_em_outra_medicao_nao_e_sugerido_nem_pedido_de_novo(conn, contrato_id):
+    """Revisor da PR #580, Critico: a medicao 6 de reajuste de 08/2026 ja' pede R$ 50.000,00; a planilha/carta nº 5
+    da mesma competencia nao sugere o reajuste de novo e o registro com valor e' recusado (o pedido contaria duas
+    vezes). Cancelada nao conta."""
+    from app import medicao_planilhas, reajuste
+    _base(conn, contrato_id)
+    _prevista(conn, contrato_id, "2026-08", 50_000_01, "pleito")
+    seis = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 6, "tipo": "reajuste",
+                                    "competencia": "2026-08", "valor_centavos": 50_000_01, "data_base_mes": "2024-06",
+                                    "ciclo": 2026})
+    (b,) = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-08", 5)["bases"]
+    assert (b["valor_centavos"], b["origem_texto"], b["ja_pedido_em"]) == (None, None, [6])
+    assert b["aviso"] == "já pedido na medição 6 de reajuste"
+    with pytest.raises(ValueError, match="já está na medição 6 de reajuste"):
+        medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(5, "2026-08", "2026-08-01", "2026-08-31", 1,
+                                                                     reajuste_centavos=50_000_01), ANEXOS)
+    assert conn.execute("SELECT COUNT(*) FROM medicoes").fetchone()[0] == 1
+    with pytest.raises(ValueError, match="já está na medição 6"):
+        reajuste.base_e_ciclo_da_medicao(conn, contrato_id, "2026-08", None, 7, com_valor=True)
+    # sem valor (complemento a preencher depois) a de reajuste a mao ainda nasce
+    assert reajuste.base_e_ciclo_da_medicao(conn, contrato_id, "2026-08", None, 7) == ("2024-06", 2026)
+    medicoes.mudar_estado(conn, 1, seis, "cancelada", "lançada no nº errado")
+    (b,) = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-08", 5)["bases"]
+    assert (b["valor_centavos"], b["aviso"]) == (50_000_01, None)
+
+
+def test_prevista_do_numero_com_pedido_sugere_o_proprio_pedido(conn, contrato_id):
+    """Revisor da PR #580, Aviso: o pedido digitado na prevista (R$ 10.000,00) nao e' trocado pelo apostilado
+    (R$ 9.876,54) sem a pessoa ver."""
+    from app import reajuste
+    _base(conn, contrato_id)
+    _prevista(conn, contrato_id, "2026-08", 9_876_54, "apostilamento", termo="001/2026")
+    medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 2, "tipo": "reajuste", "competencia": "2026-08",
+                             "valor_centavos": 10_000_00, "data_base_mes": "2024-06", "ciclo": 2026})
+    (b,) = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-08", 2)["bases"]
+    assert (b["valor_centavos"], b["origem"], b["origem_texto"], b["aviso"]) == (
+        10_000_00, "prevista", "pedido já registrado na prevista", None)
+
+
+def test_previsao_negativa_nao_vira_sugestao_e_vai_no_aviso(conn, contrato_id):
+    """Gate Sol da PR #580: a medicao nao guarda pedido negativo (CHECK >= 0, migracao 042); a sugestao negativa
+    aparece so' como aviso, com o valor."""
+    from app import reajuste
+    _base(conn, contrato_id)
+    _prevista(conn, contrato_id, "2026-08", -10_01, "apostilamento", termo="002/2026")
+    s = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-08")
+    (b,) = s["bases"]
+    assert (b["valor_centavos"], b["origem_texto"]) == (None, None)
+    assert b["aviso"] == "apostilado no termo 002/2026 em -R$ 10,01; o sistema não registra reajuste negativo"
+    assert s["data_base_mes"] == "2024-06"
+
+
+def test_ciclo_pela_forca_da_origem_e_empate_em_dois_ciclos_recusa(conn, contrato_id):
+    """Gate Sol da PR #580: com previsoes da competencia em dois ciclos, vale a origem mais forte (o apostilado do
+    ciclo 2026 vence o pleito do ciclo 2025 do aniversario); empate de forca em ciclos diferentes nao sugere e
+    recusa a gravacao."""
+    from app import reajuste
+    _base(conn, contrato_id)
+    _prevista(conn, contrato_id, "2026-05", 1_00, "pleito", ciclo=2025)
+    _prevista(conn, contrato_id, "2026-05", 2_01, "apostilamento", ciclo=2026, termo=None)
+    (b,) = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-05")["bases"]
+    assert (b["ciclo"], b["valor_centavos"], b["origem_texto"]) == (2026, 2_01, "apostilado em termo sem número")
+    _prevista(conn, contrato_id, "2026-04", 3_00, "manual", ciclo=2025)
+    _prevista(conn, contrato_id, "2026-04", 4_00, "manual", ciclo=2026)
+    (b,) = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-04")["bases"]
+    assert (b["ciclo"], b["valor_centavos"], b["ciclos_em_conflito"]) == (None, None, [2025, 2026])
+    assert b["aviso"] == "previsão em mais de um ciclo (2025, 2026)"
+    with pytest.raises(ValueError, match="Escolha o ciclo"):
+        reajuste.base_e_ciclo_da_medicao(conn, contrato_id, "2026-04", None)
+
+
+def test_prevista_de_reajuste_com_pedido_do_espelho_recusa_em_minuscula(conn, contrato_id):
+    from app import medicao_planilhas
+    _base(conn, contrato_id)
+    rid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 2, "tipo": "reajuste",
+                                   "competencia": "2026-08"})
+    conn.execute("UPDATE medicoes SET valor_protocolado_centavos=1, valor_protocolado_origem='espelho' WHERE id=?",
+                 (rid,)); conn.commit()
+    with pytest.raises(ValueError, match="^O pedido da medição 2 de reajuste vem do espelho"):
+        medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(2, "2026-08", "2026-08-01", "2026-08-31", 1,
+                                                                     reajuste_centavos=1), ANEXOS)
+
+
 def test_reajuste_so_acompanha_a_planilha_de_execucao(conn, contrato_id):
     from app import medicao_planilhas
     _base(conn, contrato_id)

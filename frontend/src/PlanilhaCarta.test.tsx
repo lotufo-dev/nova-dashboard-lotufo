@@ -145,6 +145,37 @@ describe("Nova planilha/carta", () => {
     expect(screen.queryByLabelText("Reajuste")).toBeNull();
   });
 
+  it("o valor digitado para uma competência não vai para outra, nem para a outra data-base (gate Sol)", async () => {
+    api.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/contratos/9/reajuste/sugestao?competencia=2026-08")) return { competencia: "2026-08", data_base_mes: "2024-06", bases: [BASE] };
+      if (url.startsWith("/api/contratos/9/reajuste/sugestao")) return { competencia: "2026-09", data_base_mes: null, bases: [
+        { ...BASE, data_base_mes: "2024-04", aplica_a: "itens SICRO", valor_centavos: 500_03, origem: "pleito", origem_texto: "previsto no pleito" },
+        { ...BASE, valor_centavos: null, origem: null, origem_texto: null }] };
+      if (url.startsWith("/api/contratos/9/planilhas/sugestao")) return SUGESTAO;
+      return { avisos: [], acumulado_anterior_centavos: 0, saldo_centavos: 0 };
+    });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    await waitFor(() => expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("1.300,01"));
+    fireEvent.change(screen.getByLabelText("Reajuste"), { target: { value: "2.222,22" } });
+    expect(screen.queryByText("apostilado no termo 001/2026")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Competência"), { target: { value: "092026" } });
+    const base = await screen.findByLabelText("Data-base") as HTMLSelectElement;
+    expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("");
+    fireEvent.change(base, { target: { value: "2024-04" } });
+    expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("500,03");
+    fireEvent.change(screen.getByLabelText("Reajuste"), { target: { value: "7,00" } });
+    fireEvent.change(base, { target: { value: "2024-06" } });
+    expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("");
+  });
+
+  it("o aviso do servidor aparece no lugar da origem: já pedido em outra medição", async () => {
+    responderReajuste({ competencia: "2026-08", data_base_mes: "2024-06", bases: [
+      { ...BASE, valor_centavos: null, origem: null, origem_texto: null, aviso: "já pedido na medição 6 de reajuste" }] });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    expect(await screen.findByText("já pedido na medição 6 de reajuste")).toBeTruthy();
+    expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("");
+  });
+
   it("a leitura da sugestão que falha esconde o campo e não manda o valor de outra competência (code-review)", async () => {
     api.mockImplementation(async (url: string) => {
       if (url.startsWith("/api/contratos/9/reajuste/sugestao?competencia=2026-08")) return { competencia: "2026-08", data_base_mes: "2024-06", bases: [BASE] };

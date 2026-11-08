@@ -1965,7 +1965,8 @@ def test_sugestao_do_reajuste_pela_rota(client_admin):
     assert r.status_code == 200, r.text
     assert r.json() == {"competencia": "2026-07", "data_base_mes": "2024-06", "bases": [
         {"data_base_mes": "2024-06", "aplica_a": "", "ciclo": 2026, "valor_centavos": 4_321_09, "origem": "manual",
-         "origem_texto": "previsto"}]}
+         "origem_texto": "previsto", "aviso": None, "tem_previsao": True, "ciclos_em_conflito": [],
+         "ja_pedido_em": []}]}
     assert client_admin.get(f"/api/contratos/{cid}/reajuste/sugestao",
                             params={"competencia": "2026-13"}).status_code == 422
 

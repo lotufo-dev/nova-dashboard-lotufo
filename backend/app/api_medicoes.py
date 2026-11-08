@@ -207,10 +207,11 @@ def criar(contrato_id: ID, dados: MedicaoIn,
                     "competencia": dados.competencia}
             if dados.tipo == "reajuste":
                 # issue #276: data-base e ciclo gravados na criacao; o pedido, quando digitado
+                com_valor = bool((dados.valor or "").strip())
                 base, ciclo = reajuste.base_e_ciclo_da_medicao(conn, contrato_id, dados.competencia,
-                                                               dados.data_base_mes)
+                                                               dados.data_base_mes, dados.numero, com_valor)
                 novo.update(data_base_mes=base, ciclo=ciclo)
-                if (dados.valor or "").strip():
+                if com_valor:
                     novo["valor_centavos"] = _centavos(dados.valor)
             elif (dados.valor or "").strip() or dados.data_base_mes:
                 raise ValueError("Valor e data-base só acompanham a medição de reajuste")
@@ -441,7 +442,7 @@ def sugestao_reajuste(contrato_id: ID, competencia: str = Query(..., pattern=COM
     base (o campo nao aparece e nada vai sem a pessoa ver); a prevista desse nº traz a data-base que ja' tem. So' le."""
     _contrato_existe(conn, contrato_id)
     with db.leitura(conn):
-        s = reajuste.sugestao_da_medicao(conn, contrato_id, competencia)
+        s = reajuste.sugestao_da_medicao(conn, contrato_id, competencia, numero)
         if numero is None:
             return s
         try:

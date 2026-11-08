@@ -174,7 +174,7 @@ def reajuste_do_numero(conn, contrato_id: int, numero: int, competencia: str):
     if r["competencia"] != competencia:
         raise ValueError(f"{nome} já existe neste contrato com a competência {_mes_br(r['competencia'])}")
     if r["valor_protocolado_origem"] == "espelho":
-        raise ValueError(f"O pedido da {nome} vem do espelho: deixe o reajuste em branco")
+        raise ValueError(f"O pedido da {nome[0].lower()}{nome[1:]} vem do espelho: deixe o reajuste em branco")
     return r
 
 
@@ -192,7 +192,7 @@ def _conferir_reajuste(conn, contrato_id: int, dados: dict):
         raise ValueError("O reajuste acompanha só a planilha/carta de execução")
     r = reajuste_do_numero(conn, contrato_id, numero, competencia)
     escolhida = dados.get("reajuste_data_base") or (r["data_base_mes"] if r is not None else None)
-    base, ciclo = reajuste.base_e_ciclo_da_medicao(conn, contrato_id, competencia, escolhida)
+    base, ciclo = reajuste.base_e_ciclo_da_medicao(conn, contrato_id, competencia, escolhida, numero, com_valor=True)
     return base, ciclo, r
 
 
