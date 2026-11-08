@@ -1,4 +1,4 @@
--- 073: resposta do orgao ao pleito de reajuste (issue #586). So' acrescenta (uma tabela, um indice e dois gatilhos).
+-- 075: resposta do orgao ao pleito de reajuste (issue #586). So' acrescenta (uma tabela, um indice e dois gatilhos).
 --
 -- `pleito_respostas` e' evento: a operacao registra a resposta formal do orgao ao pleito enviado mais recente do
 -- ciclo, com a data, o documento que a traz e o texto. 'indeferido' fecha o ciclo para os avisos de pedido sem

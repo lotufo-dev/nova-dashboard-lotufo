@@ -125,7 +125,7 @@ def justificar_reajuste(contrato_id: ID, dados: JustificativaIn, usuario: dict =
 
 
 class RespostaIn(BaseModel):
-    resultado: Literal["indeferido", "deferido_parcial"]
+    resultado: Literal["indeferido", "deferido_parcial", "sem_efeito"]
     data: str = Field(max_length=10)
     documento: str = Field(max_length=300)
     texto: str = Field(max_length=2000)

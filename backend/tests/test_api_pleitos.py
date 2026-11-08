@@ -1399,3 +1399,10 @@ def test_resposta_do_orgao_ao_pleito_pela_api(api, monkeypatch):
     assert (k["situacao"], k["resposta"]["documento"]) == ("indeferido", "Ofício 77/2026 do órgão")
     [t] = aba["linhas_do_tempo"]
     assert [(x["resultado"], x["data"]) for x in t["respostas"]] == [("indeferido", "2026-09-01")]
+    # revisor-adversarial (rodada 1 da PR #599): o lancamento errado se desfaz pela rota, com "sem efeito"
+    r = cl.post(f"/api/pleitos/{pid}/respostas", json={**corpo, "resultado": "sem_efeito", "data": "2026-09-02",
+                                                       "documento": "Registro errado"})
+    assert r.status_code == 201, r.text
+    aba = cl.get(f"/api/contratos/{cid}/reajuste").json()
+    assert (aba["ciclos"][0]["situacao"], aba["ciclos"][0]["resposta"]) == ("apostilamento_pendente", None)
+    assert [x["resultado"] for x in aba["linhas_do_tempo"][0]["respostas"]] == ["indeferido", "sem_efeito"]

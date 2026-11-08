@@ -1154,7 +1154,7 @@ def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict, aplica: di
 # e' do pleito enviado mais recente do ciclo (`_pleito`): pleito enviado depois dela (recurso, reiteracao, reemissao do
 # cronograma) reabre o ciclo, porque a resposta dele ainda nao veio. Correcao e' resposta nova no mesmo pleito (vale a
 # mais recente); 'sem_efeito' anula a resposta registrada por engano e o ciclo volta a esperar. Nada se altera nem se
-# apaga (migracao 073).
+# apaga (migracao 075).
 RESULTADOS_RESPOSTA = ("indeferido", "deferido_parcial", "sem_efeito")
 _DATA_ISO = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")       # \d casaria digito arabe-indico
 

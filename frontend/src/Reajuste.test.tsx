@@ -652,4 +652,26 @@ describe("Reajuste", () => {
       documento: "Ofício 77/2026 do órgão", texto: "Índice não previsto" });
     await waitFor(() => expect(screen.queryByRole("form", { name: /^Resposta do órgão/ })).toBeNull());
   });
+
+  it("com resposta registrada, a resposta errada fica sem efeito pelo formulário (rodada 1 da PR #599)", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloPendente(10), situacao: "indeferido", dias: null, resposta: indeferimento }],
+          pleitos: [enviado({ id: 10, numero_oficio: "CT-122-LT-2026", enviado_em: "2026-06-15" })] }
+      : caminho.endsWith("/respostas") ? { id: 4 } : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar />);
+    fireEvent.click(await screen.findByRole("button", { name: "Registrar resposta do órgão" }));
+    const form = screen.getByRole("form", { name: "Resposta do órgão ao pleito CT-122-LT-2026" });
+    const select = within(form).getByLabelText("Resposta") as HTMLSelectElement;
+    expect([...select.options].map(o => o.value)).toEqual(["", "indeferido", "deferido_parcial", "sem_efeito"]);
+    fireEvent.change(select, { target: { value: "sem_efeito" } });
+    fireEvent.change(within(form).getByLabelText("Data"), { target: { value: "2026-10-21" } });
+    fireEvent.change(within(form).getByLabelText("Documento"), { target: { value: "Registro errado" } });
+    fireEvent.change(within(form).getByLabelText("Texto"), { target: { value: "Lançado no pleito errado" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Registrar resposta" }));
+    await waitFor(() => expect(api.mock.calls.some(c => c[0] === "/api/pleitos/10/respostas")).toBe(true));
+    const [, opcoes] = api.mock.calls.find(c => c[0] === "/api/pleitos/10/respostas")!;
+    expect(JSON.parse(opcoes.body)).toEqual({ resultado: "sem_efeito", data: "2026-10-21",
+      documento: "Registro errado", texto: "Lançado no pleito errado" });
+  });
 });
