@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, apiForm } from "./api";
-import { FormBoletim } from "./Boletim";
+import { AceiteDiferenca, FormBoletim } from "./Boletim";
 import { brl } from "./formato";
 import { IconeLinkExterno } from "./icones";
 import type { Agir } from "./MedicaoAtos";
@@ -109,10 +109,17 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
         <section className="cartao med-painel" aria-labelledby="orgao-resposta">
           <h3 className="med-painel__titulo" id="orgao-resposta">Resposta do órgão</h3>
           {!esperando && aprovado ? (
-            <dl className="orgao-faixa__dados" aria-label="Aprovação">
-              <div><dt>Valor aprovado</dt><dd>{brl(aprovado.valor_centavos ?? null)}</dd></div>
-              <div><dt>Data da aprovação</dt><dd>{aprovado.atestado_em ? fmtDataPura(aprovado.atestado_em) : "—"}</dd></div>
-            </dl>
+            <>
+              <dl className="orgao-faixa__dados" aria-label="Aprovação">
+                <div><dt>Valor aprovado</dt><dd>{brl(aprovado.valor_centavos ?? null)}</dd></div>
+                <div><dt>Data da aprovação</dt><dd>{aprovado.atestado_em ? fmtDataPura(aprovado.atestado_em) : "—"}</dd></div>
+                {/* #288: a diferenca do aprovado vigente para o pedido, com o aceite ao lado */}
+                {m.valor_atestado_centavos !== null && m.valor_protocolado_centavos !== null && (
+                  <div><dt>Diferença</dt><dd className="num">{brl(m.valor_atestado_centavos - m.valor_protocolado_centavos)}</dd></div>
+                )}
+              </dl>
+              <AceiteDiferenca m={m} podeEditar={podeEditar} salvando={salvando} agir={agir} />
+            </>
           ) : !podeResponder ? <p>{esperando ? "Aguardando a resposta do órgão" : "—"}</p> : (
             <>
               <div className={`resposta${aberta === "aprovou" ? " resposta--aberta" : ""}`}>

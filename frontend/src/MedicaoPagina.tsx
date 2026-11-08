@@ -16,7 +16,7 @@ import type { Usuario } from "./Login";
 import MaisAcoes, { type ItemAcao } from "./MaisAcoes";
 import { DA_PLANILHA, eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, rotuloDoBloco, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type ParDaMedicao } from "./medicao";
-import { FormBoletim } from "./Boletim";
+import { AceiteDiferenca, FormBoletim } from "./Boletim";
 import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
 import { brl, type Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
@@ -39,7 +39,7 @@ import "./passos.css";
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
-type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "boletim" | "sozinha" | "liberar" | null;
+type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "boletim" | "diferenca" | "sozinha" | "liberar" | null;
 
 // Ancoras antigas (#notas, #espelho, #protocolo e as #etapa-N do trilho de cinco setas, que o Inicio, as listas e o
 // SIGA ainda usam) abrem o passo onde a coisa mora hoje.
@@ -272,10 +272,15 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
   const boletimNaEtapa = podeEditar && m.estado === "planilha_enviada" && temPassosPlanilha && atual === 2;
   const podeBoletim = podeEditar && !EXCECOES.includes(m.estado) && m.estado !== "planilha_gerada";
+  const abaixoDoPedido = comBoletim && !EXCECOES.includes(m.estado) && !m.diferenca_aceita
+    && m.valor_atestado_centavos !== null && m.valor_protocolado_centavos !== null
+    && m.valor_atestado_centavos < m.valor_protocolado_centavos;
   const acoes: ItemAcao[] = !podeEditar ? [] : [
     ...(valorEditavel(m, "atestado", podeEditar) ? [{ id: "atestado", rotulo: m.valor_atestado_centavos === null ? "Definir o atestado" : "Editar o atestado" }] : []),
     ...(podeBoletim && !boletimNaEtapa ? [{ id: "boletim", rotulo: comBoletim ? "Registrar boletim novo" : "Registrar boletim" }] : []),
     ...(!EXCECOES.includes(m.estado) && comBoletim ? [{ id: "assinatura", rotulo: "Registrar assinatura" }] : []),
+    // #288: sem o passo 2 (MT-PAR, SES, prefeituras), o aceite da diferenca do boletim mora aqui
+    ...(!temPassosPlanilha && abaixoDoPedido ? [{ id: "diferenca", rotulo: "Aceitar a diferença" }] : []),
     ...(m.final !== 1 && !EXCECOES.includes(m.estado) ? [{ id: "final", rotulo: "Marcar como medição final" }] : []),
     ...(m.final === 1 ? [{ id: "desfinal", rotulo: "Desmarcar a medição final" }] : []),
     ...(PROXIMOS[m.estado] ?? []).filter(e => e !== "recebida").map((e, i) =>
@@ -551,6 +556,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       {painel === "assinatura" && (
         <Janela titulo="Registrar assinatura" aoFechar={fechar}>
           <FormAssinatura m={m} salvando={salvando} agir={agir} aoFechar={fechar} erro={erro} />
+        </Janela>
+      )}
+      {painel === "diferenca" && (
+        <Janela titulo="Aceitar a diferença" aoFechar={fechar}>
+          <AceiteDiferenca m={m} podeEditar={podeEditar} salvando={salvando} agir={agir} aoFechar={fechar} erro={erro} />
         </Janela>
       )}
       {painel === "desfinal" && (

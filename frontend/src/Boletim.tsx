@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
-import { apiForm, mensagemDeErro } from "./api";
+import { api, apiForm, mensagemDeErro } from "./api";
 import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import { brlCampo, type Agir } from "./MedicaoAtos";
@@ -21,6 +21,58 @@ type Campo = "numero" | "data" | "valor";
 
 const MEIOS_BOLETIM: [string, string][] = [
   ["smo", "SMO"], ["oficio", "Ofício"], ["email", "E-mail"], ["carimbo", "Carimbo"], ["ci", "CI"], ["outro", "Outro"]];
+
+const MIN_JUSTIFICATIVA_DIFERENCA = 10;     // medicoes.MIN_JUSTIFICATIVA_DIFERENCA
+
+/** Issue #288: aprovado do boletim vigente abaixo do pedido. Ja' aceita: o selo. Senao, quem edita (operacao e
+ *  engenharia) aceita com justificativa; a diretoria so' le. Sem diferenca abaixo do pedido, nada. */
+export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro }: {
+  m: Medicao; podeEditar: boolean; salvando: boolean; agir: Agir;
+  /** Em janela (Mais acoes): o formulario ja' abre e fechar fecha a janela. */
+  aoFechar?: () => void; erro?: string;
+}) {
+  const [abertoAqui, setAbertoAqui] = useState(false);
+  const aberto = abertoAqui || !!aoFechar;
+  const fechar = () => { setAbertoAqui(false); aoFechar?.(); };
+  const [justificativa, setJustificativa] = useState("");
+  const [tentou, setTentou] = useState(false);
+  const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
+  const pedido = m.valor_protocolado_centavos, aprovado = m.valor_atestado_centavos;
+  if (!comBoletim || pedido === null || aprovado === null || aprovado >= pedido) return null;
+  if (m.diferenca_aceita) return <Selo classe="selo--ok">Diferença aceita</Selo>;
+  if (!podeEditar) return null;
+  if (!aberto) {
+    return <div><button type="button" className="btn btn--pequeno" onClick={() => setAbertoAqui(true)}>Aceitar a diferença</button></div>;
+  }
+  const falta = justificativa.trim().length < MIN_JUSTIFICATIVA_DIFERENCA
+    ? `Informe a justificativa (ao menos ${MIN_JUSTIFICATIVA_DIFERENCA} caracteres).` : undefined;
+  async function salvar(ev: React.FormEvent) {
+    ev.preventDefault();
+    setTentou(true);
+    if (falta) return;
+    const ok = await agir(() => api(`/api/medicoes/${m.id}/diferenca-aceita`, {
+      method: "POST", body: JSON.stringify({ justificativa: justificativa.trim() }),
+    }), "Diferença aceita.");
+    if (ok) fechar();
+  }
+  return (
+    <form className="pilha" onSubmit={salvar} noValidate aria-label="Aceitar a diferença"
+      onKeyDown={ev => ev.key === "Escape" && fechar()}>
+      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      <div className="campo">
+        <label className="campo__rotulo" htmlFor="dif-justificativa">Justificativa</label>
+        <textarea id="dif-justificativa" name="justificativa" className="entrada--larga" rows={2} maxLength={1000} autoFocus
+          value={justificativa} onChange={ev => setJustificativa(ev.target.value)}
+          {...(tentou && falta ? { "aria-invalid": true as const, "aria-describedby": "dif-erro" } : {})} />
+        <ErroCampo id="dif-erro" erro={tentou ? falta : undefined} />
+      </div>
+      <div className="form-inline">
+        <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Aceitando…" : "Aceitar a diferença"}</button>
+        <button type="button" className="btn" onClick={fechar}>Cancelar</button>
+      </div>
+    </form>
+  );
+}
 
 /** "12.345,67" -> 1234567 (centavos inteiros, sem ponto flutuante); vazio -> null. */
 function centavos(valor: string): number | null {
