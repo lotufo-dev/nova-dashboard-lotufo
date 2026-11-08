@@ -366,8 +366,10 @@ def gerar(conn, usuario: dict, contrato_id: int, numero: int, competencia: str,
         eid = cur.lastrowid
         # issue #359: o valor de cada medicao neste espelho, para o aviso de aprovado mudado depois dele
         for tipo, mid in sorted(ids.items(), key=lambda x: x[1]):
-            conn.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id, valor_centavos) VALUES (?,?,?)",
-                         (eid, mid, por_tipo[tipo]))
+            # issue #589: o valor com sinal (078) sempre; o da 065 so' quando nao e' negativo (o CHECK dela)
+            conn.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id, valor_centavos, "
+                         "valor_com_sinal_centavos) VALUES (?,?,?,?)",
+                         (eid, mid, por_tipo[tipo] if por_tipo[tipo] >= 0 else None, por_tipo[tipo]))
         resumo = []
         for s, docx in gerados:
             caminho, sha = arquivos.gravar_bytes("espelhos", docx, "docx")
@@ -455,7 +457,7 @@ def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
     """Medicoes com espelho gerado, enviado ou nota emitida cujo aprovado vigente difere do valor delas no espelho
     vigente mais novo (`situacao` APROVADO_MUDOU, ou NOTA_EMITIDA na nota emitida, onde o espelho nao se gera mais).
 
-    O valor do espelho vem de `espelho_medicoes.valor_centavos` (065). No espelho de antes da coluna: das entradas
+    O valor do espelho vem de `espelho_medicoes.valor_com_sinal_centavos` (078), senao de `valor_centavos` (065). No espelho de antes da coluna: das entradas
     gravadas pela regra da obra, se ela ainda e' a do espelho (mesmo sha256); senao, do que o espelho travou ao ser
     gerado (#284): o aprovado que valia entao (ultimo atesto ate' o espelho), senao o pedido. Sem nenhum dos dois nao
     ha' como comparar: NAO_CONFERIDO (na nota emitida, o texto da nota emitida, que nao pede o espelho).
@@ -471,8 +473,10 @@ def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
         "  JOIN espelhos e ON e.id=em.espelho_id WHERE e.situacao='vigente' GROUP BY em.medicao_id) "
         "SELECT m.id, m.contrato_id, COALESCE(c.nome_curto, c.numero_instrumento) AS obra, m.numero, m.tipo, m.estado, "
         "m.valor_atestado_centavos AS aprovado, m.valor_protocolado_centavos AS pedido, e.id AS espelho_id, "
-        "em.valor_centavos, e.entradas, e.regra_sha256, "
-        "CASE WHEN em.valor_centavos IS NULL THEN (SELECT a.valor_centavos FROM medicao_atestos a "
+        # issue #589: o valor com sinal (078) manda; sem ele, o da 065
+        "COALESCE(em.valor_com_sinal_centavos, em.valor_centavos) AS valor_centavos, e.entradas, e.regra_sha256, "
+        "CASE WHEN COALESCE(em.valor_com_sinal_centavos, em.valor_centavos) IS NULL THEN (SELECT a.valor_centavos "
+        "  FROM medicao_atestos a "
         "  WHERE a.medicao_id=m.id AND a.criado_em <= e.criado_em ORDER BY a.id DESC LIMIT 1) END AS aprovado_no_espelho "
         "FROM vig JOIN medicoes m ON m.id=vig.medicao_id JOIN contratos c ON c.id=m.contrato_id "
         # a versao e' unica por (contrato, numero) (UNIQUE da 020) e a medicao, por (contrato, numero, tipo)

@@ -42,10 +42,11 @@ def _centavos(entradas: dict[str, str]) -> dict[str, int]:
         if len(k) > 40 or len(v) > 40:
             raise HTTPException(422, "entrada ou valor longo demais")
         try:
-            out[k] = dinheiro.parse_brl(v) if v.strip() else 0
+            # issue #589: o reajuste negativo entra com o sinal; quem recusa o sinal fora do reajuste e' o motor
+            out[k] = dinheiro.parse_brl_com_sinal(v) if v.strip() else 0
         except ValueError as e:
             raise HTTPException(422, f"{k}: {e}") from None
-        if out[k] > espelho.TETO_CENTAVOS:
+        if abs(out[k]) > espelho.TETO_CENTAVOS:
             raise HTTPException(422, f"{k}: valor acima do limite")
     return out
 

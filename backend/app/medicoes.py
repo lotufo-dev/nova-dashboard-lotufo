@@ -664,6 +664,45 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         auditoria.registrar(conn, usuario_id, f"medicao.valor_{campo}", "medicao", medicao_id,
                             antes, depois)
 
+# Issue #589 (decisao do Leo de 08/11/2026, item 1): a medicao de reajuste negativa sai so' dentro do espelho da
+# execucao de mesmo numero, que a absorve (abatida na nota da medicao, espelho._valores_das_saidas), e avanca com ela:
+# nota emitida, protocolo e recebimento da execucao valem para ela, com a mesma data. Ela nao tem nota propria.
+ACOMPANHA_A_EXECUCAO = "acompanha a execução que absorveu o reajuste negativo"
+_ABSORVIDAS = ("SELECT DISTINCT r.id, r.estado FROM espelho_medicoes ex JOIN espelhos e ON e.id=ex.espelho_id "
+               "JOIN medicoes x ON x.id=ex.medicao_id JOIN espelho_medicoes er ON er.espelho_id=e.id "
+               "JOIN medicoes r ON r.id=er.medicao_id WHERE e.situacao='vigente' AND x.tipo='execucao' "
+               "AND r.tipo='reajuste' AND er.valor_com_sinal_centavos < 0")
+
+
+def absorvidas(conn, execucao_id: int) -> list[dict]:
+    """As medicoes de reajuste negativas que o espelho vigente desta execucao absorveu (issue #589)."""
+    return [dict(r) for r in conn.execute(_ABSORVIDAS + " AND x.id=? ORDER BY r.id", (execucao_id,))]
+
+
+def absorvida(conn, medicao_id: int) -> bool:
+    """A medicao e' um reajuste negativo absorvido pelo espelho vigente de uma execucao (issue #589)."""
+    return conn.execute(_ABSORVIDAS + " AND r.id=? LIMIT 1", (medicao_id,)).fetchone() is not None
+
+
+def _protocolar_absorvidas(conn, usuario_id: int, execucao_id: int, linha: tuple) -> None:
+    """O protocolo da execucao leva junto o reajuste negativo que ela absorveu (issue #589): mesmo dia, oficio,
+    processo, origem e protocolo do sistema. O checklist e' o da execucao (o reajuste sai dentro da nota dela)."""
+    for r in absorvidas(conn, execucao_id):
+        if r["estado"] not in ESTADOS_PROMOVIDOS_PELO_PROTOCOLO:
+            continue
+        upd = conn.execute("UPDATE medicoes SET estado='protocolada', congelada=1 WHERE id=? AND estado=?",
+                           (r["id"], r["estado"]))
+        db.exigir_uma_linha(upd, "Estado da medição de reajuste mudou concorrentemente; tente novamente")
+        conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_oficio, numero_processo, origem, "
+                     "protocolo_id) VALUES (?,?,?,?,?,?)", (r["id"], *linha))
+        data, oficio, processo, origem, protocolo_id = linha
+        depois = {"estado": "protocolada", "data": data, "numero_oficio": oficio, "numero_processo": processo,
+                  "origem": origem, "motivo": ACOMPANHA_A_EXECUCAO, "execucao_id": execucao_id}
+        if protocolo_id is not None:
+            depois["protocolo_id"] = protocolo_id
+        auditoria.registrar(conn, usuario_id, "medicao.protocolo", "medicao", r["id"], {"estado": r["estado"]}, depois)
+
+
 def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
                         numero_oficio, numero_processo, origem: str,
                         apesar_das_pendencias: bool = False,
@@ -685,6 +724,12 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
     with db.mutacao(conn):
         m = detalhe(conn, medicao_id)
         atual = m["estado"]
+        if protocolo_id is not None and m["tipo"] == "reajuste":
+            # issue #589: o reajuste absorvido ja' protocolado pela execucao no mesmo envio nao ganha outra linha
+            ja = conn.execute("SELECT id FROM medicao_protocolos WHERE medicao_id=? AND protocolo_id=? AND etapa='nota'",
+                              (medicao_id, protocolo_id)).fetchone()
+            if ja is not None:
+                return ja["id"], None
         if atual in ("cancelada", "desistida", "recebida"):
             raise ValueError(f"Medição em estado final ({atual}) não recebe protocolo")
         if atual not in (*ESTADOS_PROMOVIDOS_PELO_PROTOCOLO, *ESTADOS_DE_NOVO_PROTOCOLO):
@@ -756,6 +801,9 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         if ressalva:
             depois["ressalva"] = ressalva
         auditoria.registrar(conn, usuario_id, "medicao.protocolo", "medicao", medicao_id, None, depois)
+        if m["tipo"] == "execucao" and atual in ESTADOS_PROMOVIDOS_PELO_PROTOCOLO:
+            _protocolar_absorvidas(conn, usuario_id, medicao_id,
+                                   (data, numero_oficio, numero_processo, origem, protocolo_id))
     # A ressalva volta ao chamador para a rota devolve-la (a tela mostra o que ficou
     # registrado); `None` quando nao houve pendencia.
     return cur.lastrowid, ressalva
@@ -816,6 +864,11 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
             depois["origem"] = origem
         auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", medicao_id,
                             {"estado": atual, "motivo": motivo_antes}, depois)
+        if m["tipo"] == "execucao" and novo in ("nota_emitida", "recebida"):
+            # issue #589: o reajuste negativo absorvido pelo espelho desta execucao avanca com ela, na mesma data
+            for r in absorvidas(conn, medicao_id):
+                if novo in TRANSICOES.get(r["estado"], set()):
+                    mudar_estado(conn, usuario_id, r["id"], novo, ACOMPANHA_A_EXECUCAO, data, origem)
 
 
 def valor_travado(m) -> tuple[int, str] | None:

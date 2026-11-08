@@ -731,7 +731,8 @@ def _irmas_fora(conn, p: dict, ms: list[dict]) -> list[dict]:
                 "AND NOT EXISTS (SELECT 1 FROM protocolo_medicoes pm JOIN protocolos q ON q.id=pm.protocolo_id "
                 "WHERE pm.medicao_id=x.id AND q.etapa=? AND q.situacao='enviado')",
                 (p["etapa"], p["contrato_id"], m["numero"], m["competencia"], m["tipo"], m["tipo"], p["etapa"])):
-            if r["id"] not in dentro:
+            # issue #589: o reajuste negativo absorvido pela execucao nao tem nota propria e e' protocolado com ela
+            if r["id"] not in dentro and not medicoes.absorvida(conn, r["id"]):
                 achadas[r["id"]] = dict(r)
     return list(achadas.values())
 
