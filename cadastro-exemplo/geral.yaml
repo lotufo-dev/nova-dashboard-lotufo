@@ -25,6 +25,11 @@ cobranca_certidoes:
 copia_dono:
   para: [responsavel@exemplo.com.br]
   enviada_por: [responsavel@exemplo.com.br]
+# Alertas de segurança por e-mail (na hora, críticos e ação) e resumo diário das 07:00: quem recebe e o login de quem
+# envia (o e-mail sai da conta Microsoft do primeiro usuário ativo com um desses logins).
+alertas_seguranca:
+  para: [responsavel@exemplo.com.br]
+  enviada_por: [responsavel@exemplo.com.br]
 # Planilha do quadro de obras (QDOP): modelo neutro com cabeçalho nas linhas 1-13, estilo na linha 14 e
 # rodapé nas linhas 16-17.
 qdop:

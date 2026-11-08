@@ -1113,8 +1113,8 @@ def _geral(raiz: Path, erros: list[str]) -> dict | None:
         else:
             out["qdop"] = {"modelo_caminho": str(modelo)}
     # Issue #110: quem recebe a cobranca de certidao e o login de quem a envia (sai da conta Microsoft dele).
-    # Issue #420: a copia cifrada do dono, no mesmo formato.
-    for chave in ("cobranca_certidoes", "copia_dono"):
+    # Issue #420: a copia cifrada do dono, no mesmo formato. Issue #424: os alertas de seguranca e o resumo diario, idem.
+    for chave in ("cobranca_certidoes", "copia_dono", "alertas_seguranca"):
         cob = g.get(chave)
         if cob is None:
             continue
