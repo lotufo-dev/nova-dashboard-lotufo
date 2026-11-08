@@ -514,6 +514,53 @@ def test_enviado_sem_registro_e_marcacao_que_falha_fica_na_memoria_ate_gravar(am
     assert alertas_seguranca._SAIRAM == set()
 
 
+def _saiu_e_marcacao_falhou(conn, monkeypatch) -> int:
+    """EnvioNaoRegistrado puro e a marcacao como saida falhando (banco ocupado); a marca ja' passou dos 15 minutos."""
+    _itens(monkeypatch, [_item("Proteção da tabela de usuários removida", nivel="critico")])
+    monkeypatch.setattr(correio, "enviar_e_registrar", _sem_registro)
+    original = alertas_seguranca._marcar_saida
+    monkeypatch.setattr(alertas_seguranca, "_marcar_saida", lambda conn, rid, envio_id=None: False)
+    alertas_seguranca.rodada(conn, AGORA)
+    monkeypatch.setattr(alertas_seguranca, "_marcar_saida", original)
+    rid = conn.execute("SELECT id FROM alertas_seguranca_envios WHERE tipo='alerta'").fetchone()[0]
+    with db.mutacao(conn):
+        conn.execute("UPDATE alertas_seguranca_envios SET envio_reservado_em=datetime('now', '-1 hour') WHERE id=?",
+                     (rid,))
+    return rid
+
+
+def test_enviado_sem_registro_grava_no_banco_e_a_linha_de_comando_recusa_nao_saiu(ambiente, monkeypatch, capsys):
+    # issue #588: o comando roda em outro processo, onde `_SAIRAM` esta' vazio; a recusa le' o banco
+    from app import cli
+    conn, tmp = ambiente
+    rid = _saiu_e_marcacao_falhou(conn, monkeypatch)
+    linha = conn.execute("SELECT * FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()
+    assert linha["envio_saiu_sem_registro_em"] is not None
+    assert linha["envio_conferido_em"] is None and linha["envio_reservado_em"] is not None
+    monkeypatch.setattr(alertas_seguranca, "_SAIRAM", set())      # outro processo
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    assert cli.main(["alertas", "conferir-envio", "--id", str(rid), "--nao-saiu", "--usuario", DONO]) == 1
+    assert "saiu" in capsys.readouterr().out
+    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == antes
+    assert conn.execute("SELECT envio_reservado_em FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()[0]
+    erro = alertas_seguranca.situacao(conn)["erro"]
+    assert f"o e-mail nº {rid} saiu sem registro" in erro and "pode não ter saído" not in erro
+
+
+def test_enviado_sem_registro_no_banco_e_marcado_pela_rodada_mesmo_depois_de_reiniciar(ambiente, monkeypatch):
+    conn, tmp = ambiente
+    rid = _saiu_e_marcacao_falhou(conn, monkeypatch)
+    monkeypatch.setattr(alertas_seguranca, "_SAIRAM", set())      # o servidor reiniciou
+    monkeypatch.setattr(alertas_seguranca, "ESTADO", {"erro": None, "falhou_em": None})
+    _itens(monkeypatch, [_item("Proteção da tabela de usuários removida", nivel="critico")])
+    chamadas = []
+    monkeypatch.setattr(correio, "enviar_e_registrar", lambda *a, **k: chamadas.append(a[5]))
+    alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(hours=1))
+    assert conn.execute("SELECT envio_conferido_em FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()[0]
+    assert [x for x in chamadas if "alerta" in x] == []
+    assert alertas_seguranca.situacao(conn)["erro"] is None
+
+
 def _parada(conn, chave, tipo="alerta", mensagem=None, resolvido=None):
     with db.mutacao(conn):
         return conn.execute("INSERT INTO alertas_seguranca_envios (chave, tipo, assunto, mensagem, problema_resolvido_em, "
