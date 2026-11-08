@@ -131,4 +131,14 @@ describe("AceiteDiferenca (issue #288)", () => {
     rerender(<AceiteDiferenca m={{ ...COM_BOLETIM, estado: "cancelada" }} podeEditar salvando={false} agir={agirReal()} />);
     expect(container.textContent).toBe("");
   });
+
+  it("capa do SMO divergente do cadastro com o aprovado igual ao pedido também se aceita (issue #286)", () => {
+    const { container, rerender } = render(<AceiteDiferenca m={{ ...COM_BOLETIM, valor_atestado_centavos: 1234567,
+      capa_divergencias: ["Fim da execução: capa do SMO diz 31/03/2028, cadastro diz 31/12/2027"] }}
+      podeEditar salvando={false} agir={agirReal()} />);
+    expect(screen.getByRole("button", { name: "Aceitar a diferença" })).toBeTruthy();
+    rerender(<AceiteDiferenca m={{ ...COM_BOLETIM, valor_atestado_centavos: 1234567, capa_divergencias: [] }}
+      podeEditar salvando={false} agir={agirReal()} />);
+    expect(container.textContent).toBe("");
+  });
 });

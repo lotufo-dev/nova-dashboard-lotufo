@@ -854,6 +854,23 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
     expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map(x => x.textContent)).not.toContain("Aceitar a diferença");
   });
+
+  it("a capa do SMO divergente do cadastro aparece no detalhe e se aceita em Mais ações (issue #286)", async () => {
+    const frase = "Acumulado a preços iniciais até a 7ª medição: capa do SMO diz R$ 10.001,01, soma das medições diz R$ 10.001,00";
+    responder({ "/api/contratos/1/medicoes": [{ ...COM_BOLETIM, com_envio_planilha: false, valor_atestado_centavos: 1234567,
+      capa_divergencias: [frase] }] });
+    const p = pagina();
+    expect(await screen.findByText(frase)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Mais ações/ }));
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map(x => x.textContent)).toContain("Aceitar a diferença");
+    p.unmount();
+    responder({ "/api/contratos/1/medicoes": [{ ...COM_BOLETIM, com_envio_planilha: false, valor_atestado_centavos: 1234567,
+      capa_divergencias: [] }] });
+    pagina();
+    fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
+    expect(screen.queryByText(frase)).toBeNull();
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map(x => x.textContent)).not.toContain("Aceitar a diferença");
+  });
 });
 
 // issue #508: a pagina da obra em medicao -- cabecalho, barra de passos e os passos 1 e 2

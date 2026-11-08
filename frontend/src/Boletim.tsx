@@ -38,8 +38,10 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
   const [tentou, setTentou] = useState(false);
   const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
   const pedido = m.valor_protocolado_centavos, aprovado = m.valor_atestado_centavos;
+  // #286: a capa do SMO divergente do cadastro tambem se aceita aqui, mesmo com o aprovado igual ao pedido
+  const capaDiverge = (m.capa_divergencias ?? []).length > 0;
   if (!comBoletim || ["cancelada", "desistida"].includes(m.estado) || pedido === null || aprovado === null
-    || aprovado >= pedido) return null;
+    || (aprovado >= pedido && !capaDiverge && !m.diferenca_aceita)) return null;
   if (m.diferenca_aceita) return <Selo classe="selo--ok">Diferença aceita</Selo>;
   if (!podeEditar) return null;
   if (!aberto) {

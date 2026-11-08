@@ -274,7 +274,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const podeBoletim = podeEditar && !EXCECOES.includes(m.estado) && m.estado !== "planilha_gerada";
   const abaixoDoPedido = comBoletim && !EXCECOES.includes(m.estado) && !m.diferenca_aceita
     && m.valor_atestado_centavos !== null && m.valor_protocolado_centavos !== null
-    && m.valor_atestado_centavos < m.valor_protocolado_centavos;
+    && (m.valor_atestado_centavos < m.valor_protocolado_centavos || (m.capa_divergencias ?? []).length > 0);
   // #568: o boletim fora da etapa mora em "Mais ações"; o proximo passo abre a janela dele direto
   const SECAO_DO_PASSO: Record<string, string> = { "enviar a planilha/carta": "passo-1", "registrar o boletim": "passo-2", "gerar o espelho": "espelho" };
   const proximo = linha?.proximo_passo ?? "";
@@ -516,6 +516,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
             </CaixaAviso>
           );
         })}
+
+        {/* #286: a capa do SMO do boletim vigente diverge do cadastro; some com o cadastro corrigido ou a diferenca aceita */}
+        {grupo.flatMap(x => (x.capa_divergencias ?? []).map((frase, i) => (
+          <CaixaAviso key={`capa-${x.id}-${i}`} nivel="atencao">{grupo.length > 1 ? `${tituloMedicao(x)}: ${frase}` : frase}</CaixaAviso>
+        )))}
 
         <Passos passos={passos} atual={atual} vendo={aberta} datas={datas} espera={!!esperaAqui}
           aoIr={n => setVendo(n === atual && atual !== 0 ? null : n)} />
