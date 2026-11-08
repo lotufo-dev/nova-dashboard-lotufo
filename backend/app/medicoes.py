@@ -428,7 +428,7 @@ def diferenca_aceita(conn, medicao_id: int) -> dict | None:
 
 def aceitar_diferenca(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, justificativa: str | None) -> int:
     """Aceita a diferenca do boletim vigente abaixo do pedido, com justificativa: o aviso "aprovado abaixo do pedido"
-    some para a operacao e a diretoria. Evento append-only (migracao 071) ligado ao boletim vigente."""
+    some para a operacao e a diretoria. Evento append-only (migracao 073) ligado ao boletim vigente."""
     justificativa = (justificativa or "").strip()
     if len(justificativa) < MIN_JUSTIFICATIVA_DIFERENCA:
         raise ValueError(f"Informe a justificativa (ao menos {MIN_JUSTIFICATIVA_DIFERENCA} caracteres)")

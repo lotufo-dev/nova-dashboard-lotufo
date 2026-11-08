@@ -566,6 +566,16 @@ def test_planilha_nao_enviada_fora_da_obra_paralisada_da_mtpar_e_inativa(motor):
     assert _meses_sem_planilha(c, D(2026, 11, 8)) == []
 
 
+def test_obra_so_de_projeto_conta_a_serie_de_projeto(motor):
+    # revisor (rodada 1 da PR #582): sem execucao, a obra segue a serie de projeto (medicoes.resumo, #154)
+    c, u, cid = motor
+    for numero, mes in enumerate(("2026-06", "2026-07", "2026-08", "2026-09"), start=1):
+        _med(c, cid, numero, mes, "recebida", tipo="projeto")
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == ["planilha/carta de 10/2026 não enviada"]
+    _med(c, cid, 5, "2026-10", "planilha_enviada", tipo="projeto", enviada_em="2026-11-03")
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == []
+
+
 def test_planilha_nao_enviada_para_no_fim_da_execucao(motor):
     # code-review: depois do fim da execucao (vigente) nao ha' competencia de execucao a medir
     c, u, cid = motor

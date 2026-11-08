@@ -1,4 +1,4 @@
--- 071: "Aceitar a diferença" do boletim do orgao (issue #288, decisao do Leo de 08/11/2026). So' acrescenta (uma
+-- 073: "Aceitar a diferença" do boletim do orgao (issue #288, decisao do Leo de 08/11/2026). So' acrescenta (uma
 -- tabela, um indice e dois gatilhos).
 --
 -- O aviso "aprovado abaixo do pedido" (spec 2026-10-20 §2.1) some quando a operacao ou a engenharia aceita a

@@ -48,8 +48,13 @@ def _planilhas_nao_enviadas(conn, hoje: datetime.date) -> list[dict]:
         reinicio = _ultimo_reinicio(conn, c["id"])
         # depois do fim da execucao nao ha' competencia de execucao a medir (code-review)
         fim = (contratos.vigente(conn, c["id"]).get("execucao_fim_vigente") or "")[:7] or None
-        ultima = conn.execute(f"SELECT MAX(competencia) FROM medicoes WHERE contrato_id=? AND tipo='execucao' "
-                              f"AND estado IN ({marcas})", (c["id"], *ESTADOS_ENVIADA)).fetchone()[0]
+        # a serie da obra: a de execucao; so' a obra que nao tem execucao segue a de projeto (como medicoes.resumo, #154;
+        # revisor, rodada 1 da PR #582)
+        serie = "execucao" if conn.execute(
+            "SELECT 1 FROM medicoes WHERE contrato_id=? AND tipo='execucao' "
+            "AND estado NOT IN ('prevista','cancelada','desistida') LIMIT 1", (c["id"],)).fetchone() else "projeto"
+        ultima = conn.execute(f"SELECT MAX(competencia) FROM medicoes WHERE contrato_id=? AND tipo=? "
+                              f"AND estado IN ({marcas})", (c["id"], serie, *ESTADOS_ENVIADA)).fetchone()[0]
         inicios = [_mes_seguinte(ultima)] if ultima else ([c["execucao_inicio"][:7]] if c.get("execucao_inicio") else [])
         if reinicio:
             inicios.append(reinicio[:7])
