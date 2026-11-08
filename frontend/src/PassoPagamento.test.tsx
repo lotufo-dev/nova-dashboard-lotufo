@@ -146,11 +146,19 @@ describe("Passo Pagamento: nota divergente (#562)", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
   it("o a receber que vem de nota divergente do espelho ganha o selo; sem divergência, não", () => {
-    montar({ grupo: [com({ pagamento_cota: cota(16647772, 0, 16647772, false, { divergente: true }) })] });
+    montar({ grupo: [com({ pagamento_cota: cota(16647772, 0, 16647772, false, { falta_divergente_centavos: 16647772 }) })] });
     expect(screen.getByLabelText("A receber: R$ 166.477,72")).toBeTruthy();
     expect(screen.getByText("Nota divergente do espelho")).toBeTruthy();
     cleanup();
     montar();
+    expect(screen.queryByText("Nota divergente do espelho")).toBeNull();
+  });
+
+  it("nota divergente já paga (falta zero dela) ou resumo incompleto: sem selo (gate Sol, rodada 1 da PR #581)", () => {
+    montar({ grupo: [com({ pagamento_cota: cota(16647772, 100, 16647672, true, { falta_divergente_centavos: 0 }) })] });
+    expect(screen.queryByText("Nota divergente do espelho")).toBeNull();
+    cleanup();
+    montar({ grupo: [com({ pagamento_cota: cota(null, null, null, false, { falta_divergente_centavos: null }) })] });
     expect(screen.queryByText("Nota divergente do espelho")).toBeNull();
   });
 });

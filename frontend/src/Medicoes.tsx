@@ -31,6 +31,7 @@ type Nota = {
   origem_nota?: string; confirmacao?: string; documento_id?: number | null; valor_pdf_centavos?: number | null;
   conferencia?: { campo: string; espelho: number | string | null; nota: number | string | null; grau: string }[];
   justificativa?: string | null; leitura?: string | null;
+  situacao?: string;          // ativa | cancelada (RM)
 };
 type Frescor = { configurado: boolean; ultima_sincronizacao: string | null; ultimo_erro: string | null };
 // Documento de faturamento do consorcio (NF/NFS-e/FATURA do SharePoint, migracao 017) e, do bloco 2, os
@@ -54,8 +55,8 @@ export type Medicao = {
   // null sem espelho vigente. Os valores vem null enquanto `completo` for falso.
   pagamento_cota?: { notas_faltam: number; completo: boolean; total_centavos: number | null;
     recebido_centavos: number | null; falta_centavos: number | null; parcial: boolean;
-    /** issue #562: alguma nota da cota diverge do espelho (o a receber sai dela) */
-    divergente?: boolean } | null;
+    /** issue #562: o que falta receber das notas da cota que divergem do espelho (null enquanto o resumo nao fecha) */
+    falta_divergente_centavos?: number | null } | null;
   documentos?: Documento[];
   final?: number; final_em?: string | null;       // bloco 7: medicao final poe o contrato em encerramento
   // #284: boletins do orgao, do 1o ao vigente (#290: tambem na lista da obra, que a pagina da medicao le)
