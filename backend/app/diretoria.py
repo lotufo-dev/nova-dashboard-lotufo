@@ -183,6 +183,24 @@ def rm_por_mes(conn) -> tuple[dict[str, int], dict[str, int]]:
     return faturado, recebido
 
 
+def baixado_sem_caixa_por_mes(conn) -> dict[str, int]:
+    """Issue #583 (decisao do Leo de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
+    zero, pelo mes da baixa, na cota, pelo valor original. Ele nao entra no recebido (`rm_por_mes`: nao entrou caixa;
+    pode ser glosa, compensacao ou encontro de contas) nem no a receber (`_notas_em_aberto`, #563); a Diretoria o
+    mostra numa linha propria, para faturado - recebido - a receber fechar com a diferenca nomeada. A obra de cada nota
+    e' a de `_notas_do_rm`, como no recebido."""
+    pct_da_nota = {n["id"]: c["pct"] for n, c, _ in _notas_do_rm(conn)}
+    out: dict[str, int] = {}
+    for b in conn.execute("SELECT nota_id, valor_original_centavos, data_baixa FROM baixas WHERE data_baixa IS NOT NULL "
+                          "AND nota_id IS NOT NULL AND status_lan=? AND COALESCE(valor_baixado_centavos, 0)<=0",
+                          (sincronizacao_rm.STATUS_BAIXA_TOTAL,)):
+        if b["nota_id"] not in pct_da_nota:
+            continue
+        mes = b["data_baixa"][:7]
+        out[mes] = out.get(mes, 0) + (contratos.cota(b["valor_original_centavos"] or 0, pct_da_nota[b["nota_id"]]) or 0)
+    return out
+
+
 def complemento_rm(conn) -> dict[int, dict[str, int]]:
     """Medicao que o RM mostra e o sistema ainda nao tem (06/11/2026): por contrato e competencia, em valor CHEIO, quanto
     as notas do RM passam do que esta' lancado. Vale so' de `COMPETENCIA_NOTA_VALE` em diante (a carga do historico
@@ -741,6 +759,9 @@ def a_receber(conn, hoje: datetime.date | None = None) -> dict:
     return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
             "total": {"quantidade": len(abertas), "obras": len(obras), "valor_centavos": valor(abertas)},
             "recebido_ano_centavos": sum(v for m, v in real.items() if m[:4] == f"{hoje.year:04d}" and m <= atual),
+            # #583: o baixado no RM sem caixa no mesmo periodo, fora do recebido e do a receber
+            "baixado_sem_caixa_ano_centavos": sum(v for m, v in baixado_sem_caixa_por_mes(conn).items()
+                                                  if m[:4] == f"{hoje.year:04d}" and m <= atual),
             # o caminho do dinheiro antes do protocolo, como no painel (`_dinheiro`): medido sem nota e nota sem protocolo
             "antes_do_protocolo": {"medido_esperando_nota": _grupo([m for m in ms if m["estado"] in ESPERANDO_NOTA]),
                                    "nota_esperando_protocolo": _grupo([m for m in ms if m["estado"] in ESPERANDO_PROTOCOLO])},

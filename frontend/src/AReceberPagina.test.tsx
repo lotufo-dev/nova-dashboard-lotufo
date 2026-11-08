@@ -55,6 +55,20 @@ describe("A receber", () => {
     expect(screen.queryByRole("link", { name: /^Abrir/ })).toBeNull();
   });
 
+  it("issue #583: o baixado no RM sem caixa no ano ganha numero proprio, so' quando existe", async () => {
+    api.mockResolvedValue({ ...RESPOSTA, baixado_sem_caixa_ano_centavos: 12_345_679 });
+    render(<AReceberPagina />);
+    const resumo = await screen.findByRole("region", { name: "Resumo" });
+    expect(within(resumo).getAllByRole("listitem").map(li => li.firstChild?.textContent)).toEqual(
+      ["A receber, na cota", "Recebido em outubro", "Recebido em 2026", "Baixado sem caixa em 2026"]);
+    expect(within(resumo).getByText("Baixado sem caixa em 2026").nextSibling?.textContent).toMatch(/R\$\s*123\.456,79/);
+    cleanup();
+    api.mockResolvedValue({ ...RESPOSTA, baixado_sem_caixa_ano_centavos: 0 });
+    render(<AReceberPagina />);
+    const vazio = await screen.findByRole("region", { name: "Resumo" });
+    expect(within(vazio).queryByText(/Baixado sem caixa/)).toBeNull();
+  });
+
   it("o grafico e' so' o recebido real dos meses ate' o atual; clicar num mes troca o detalhe", async () => {
     api.mockResolvedValue(RESPOSTA);
     render(<AReceberPagina />);

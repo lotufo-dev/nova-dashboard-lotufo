@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from app import auth, avisos, cadastro_aplicar, db, diretoria, medicoes, qdop, reajuste
+from app import auth, avisos, cadastro_aplicar, db, diretoria, medicoes, qdop, reajuste, sincronizacao_rm
 from tests.test_protocolo import _contrato
 
 D = datetime.date
@@ -650,6 +650,55 @@ def test_a_receber_nota_do_rm_entra_na_lista_e_no_total(cenario):
     nota = [i for i in r["itens"] if i["tipo"] == "nota"]
     assert len(nota) == 1 and nota[0]["medicao_id"] is None and nota[0]["nota_numero"] == "900"
     assert nota[0]["valor_centavos"] == 2_500_000 and r["total"]["valor_centavos"] == 700_000 + 300_000 + 2_500_000
+
+
+def test_titulo_baixado_sem_valor_fica_fora_do_recebido_e_vira_baixado_sem_caixa(cenario):
+    """Issue #583 (decisao do Leo de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
+    zero fica fora do recebido e do a receber, e o A receber da Diretoria mostra o total dele no ano, pelo valor
+    original, na cota, numa linha propria ("baixado sem caixa"). Titulo com baixa de valor, aberto, cancelado ou
+    baixado em outro ano nao entra; a medicao ligada continua sem fechar (regra da #574)."""
+    c, ids = cenario
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (ids["propria"],))
+    def nota(idmov, emissao, valor, coligada=1, medicao=None):
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv, "
+                        "centro_custo) VALUES (?, ?, ?, ?, ?, 'ativa', '2.2.01', ?)",
+                        (coligada, idmov, str(idmov), emissao, valor, None if medicao else "9.001.001")).lastrowid
+        if medicao:
+            c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+                      "VALUES (?, ?, ?, 'detectado', 't')", (medicao, nid, valor))
+        return nid
+    def baixa(nid, idlan, original, baixado, status, data):
+        c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+                  "status_lan, data_baixa) VALUES (1, ?, ?, ?, ?, ?, ?, ?)", (idlan, nid, idlan, original, baixado, status, data))
+    a = nota(941, "2026-07-10", 1_000_001)
+    baixa(a, 9411, 700_001, 0, 1, "2026-08-05")          # baixado sem valor: sem caixa
+    baixa(a, 9412, 300_000, 300_000, 1, "2026-08-05")    # baixado com valor: recebido
+    b = nota(942, "2025-07-10", 500_000)
+    baixa(b, 9421, 500_000, 0, 1, "2025-08-05")          # sem caixa, mas em outro ano
+    d = nota(943, "2026-07-10", 80_000)
+    baixa(d, 9431, 40_000, 0, 0, None)                   # aberto: a receber
+    baixa(d, 9432, 40_000, 0, 2, "2026-08-01")           # cancelado: fora
+    # consorcio: entra pela cota (50% de 333.333 = 166.666,5 -> 166.667, arredondamento unico)
+    c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
+    m_cons = c.execute("SELECT id FROM medicoes WHERE contrato_id=? ORDER BY id LIMIT 1", (ids["consorcio"],)).fetchone()[0]
+    k = nota(944, "2026-07-20", 333_333, coligada=12, medicao=m_cons)
+    baixa(k, 9441, 333_333, 0, 1, "2026-09-02")
+    c.commit()
+    ids["liberar"]()
+    _, recebido = diretoria.rm_por_mes(c)
+    assert {m: v for m, v in recebido.items() if v} == {"2026-08": 300_000}
+    assert diretoria.baixado_sem_caixa_por_mes(c) == {"2026-08": 700_001, "2025-08": 500_000, "2026-09": 166_667}
+    r = diretoria.a_receber(c, HOJE)
+    assert r["recebido_ano_centavos"] == 300_000
+    assert r["baixado_sem_caixa_ano_centavos"] == 700_001 + 166_667
+    assert [i["valor_centavos"] for i in r["itens"] if i["tipo"] == "nota"] == [40_000]
+    # a medicao ligada ao titulo sem caixa nao fecha como recebida
+    m15 = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=15", (ids["propria"],)).fetchone()[0]
+    nid = nota(945, "2026-07-11", 300_000, medicao=m15)
+    baixa(nid, 9451, 300_000, 0, 1, "2026-08-06")
+    c.commit()
+    sincronizacao_rm._recebimentos(c)
+    assert c.execute("SELECT estado FROM medicoes WHERE id=?", (m15,)).fetchone()[0] == "protocolada"
 
 
 @pytest.mark.parametrize("titulos, falta", [

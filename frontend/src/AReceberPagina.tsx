@@ -19,6 +19,8 @@ type Resposta = {
   hoje: string; total_a_receber_liberado: boolean;
   total: { quantidade: number; obras: number; valor_centavos: number | null };
   recebido_ano_centavos?: number;
+  /** Issue #583: titulos do RM com baixa total e valor baixado zero no ano (fora do recebido e do a receber). */
+  baixado_sem_caixa_ano_centavos?: number;
   mes: Mes; meses: Mes[]; por_obra: Obra[]; por_orgao?: Orgao[];
 };
 /** Uma linha do "a receber por": contratante ou obra. */
@@ -166,6 +168,12 @@ export default function AReceberPagina() {
             <li className="cartao ar-numero">
               <span className="ar-numero__rotulo">Recebido em {mes.competencia.slice(0, 4)}</span>
               <span className="ar-numero__valor num">{valor(p.recebido_ano_centavos)}</span>
+            </li>
+          )}
+          {(p.baixado_sem_caixa_ano_centavos ?? 0) > 0 && (
+            <li className="cartao ar-numero">
+              <span className="ar-numero__rotulo">Baixado sem caixa em {mes.competencia.slice(0, 4)}</span>
+              <span className="ar-numero__valor num">{valor(p.baixado_sem_caixa_ano_centavos)}</span>
             </li>
           )}
         </ul>
