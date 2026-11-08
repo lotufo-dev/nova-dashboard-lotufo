@@ -53,7 +53,9 @@ export type Medicao = {
   // #514: o resumo do passo Pagamento, pronto do servidor (a cota da Lotufo nesta medicao + a irma valida do par);
   // null sem espelho vigente. Os valores vem null enquanto `completo` for falso.
   pagamento_cota?: { notas_faltam: number; completo: boolean; total_centavos: number | null;
-    recebido_centavos: number | null; falta_centavos: number | null; parcial: boolean } | null;
+    recebido_centavos: number | null; falta_centavos: number | null; parcial: boolean;
+    /** issue #562: alguma nota da cota diverge do espelho (o a receber sai dela) */
+    divergente?: boolean } | null;
   documentos?: Documento[];
   final?: number; final_em?: string | null;       // bloco 7: medicao final poe o contrato em encerramento
   // #284: boletins do orgao, do 1o ao vigente (#290: tambem na lista da obra, que a pagina da medicao le)

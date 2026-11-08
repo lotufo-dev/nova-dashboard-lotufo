@@ -7,7 +7,7 @@ import { api, apiForm, ApiErro } from "./api";
 import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import { IconeCheck, iniciarEnvio, ItensEnvio, mensagem, notasDe, type Envio, type ListaEnvios } from "./NotasAEnviar";
-import JustificativaEnvio, { conferirJustificativa, erroDaJustificativa } from "./JustificativaEnvio";
+import JustificativaEnvio, { conferirJustificativa, erroDaJustificativa, pedeJustificativa } from "./JustificativaEnvio";
 import "./notas.css";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import { fmtHora } from "./tempo";
@@ -280,7 +280,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
         if (erro instanceof ApiErro && erro.status === 422 && erro.corpo?.codigo === "CONFIRMAR_PENDENCIAS") {
           const itens: string[] = erro.corpo.pendencias ?? [];
           // issue #278: a lista nova pode trazer o reajuste sem apostilamento; sem a justificativa, o campo pede antes
-          const exigeAgora = (erro.corpo.itens ?? []).some((i: { codigo: string }) => i.codigo === "sem_apostilamento");
+          const exigeAgora = pedeJustificativa(erro.corpo.itens ?? []);
           setDet(d => d && { ...d, pendencias: itens, exige_justificativa: exigeAgora });
           if (exigeAgora && erroDaJustificativa(justificativa)) { setTentouJustificativa(true); return; }
           setConfirmar({ m, itens, mudou: confirmadas.length > 0 });
@@ -344,7 +344,8 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
       <ComporEmail key={`${protocoloId}-${det.situacao_protocolo}-${(det.extras ?? []).map(x => x.id).join(".")}-${(det.previa.links ?? []).map(x => x.id).join(".")}-${assinaturaAnexos(anexosVistos)}`} ocupado={ocupado} rotuloEnviar="Enviar o e-mail"
         bloqueado={travado} anexos={det.previa.anexos}
         inicial={{ para: det.previa.para, copia: det.previa.copia, cco: [], assunto: det.previa.assunto, corpo: det.previa.corpo }}
-        antes={exige && <JustificativaEnvio id={idJustificativa} valor={justificativa} aoMudar={setJustificativa} erro={erroJustificativa} />}
+        antes={exige && <JustificativaEnvio id={idJustificativa} valor={justificativa} aoMudar={setJustificativa} erro={erroJustificativa}
+          notaDivergente={(e?.divergencias ?? []).some(d => d.grau === "divergente")} />}
         validarAntes={validarJustificativa}
         aoMexer={setEmailMexido} aoEnviar={enviar} aoDescartar={() => embutido.aoDescartar?.()} />
       {refeita && <CaixaAviso nivel="atencao" role="status">A prévia foi refeita com os anexos de agora e o texto voltou ao padrão; confira antes de enviar.</CaixaAviso>}

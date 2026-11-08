@@ -456,4 +456,38 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     expect(within(notas).getByText("1 de 2")).toBeTruthy();
     expect(within(notas).queryByText(/etapa 3|anexe aqui/)).toBeNull();
   });
+
+  it("#562: nota divergente do espelho: sem “Tudo pronto”, cada campo com o espelho e a nota, e a nota maior que a medição", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({
+      divergencias: [
+        { medicao_id: 631, nota_id: 9, numero: 2275, campo: "valor", espelho: 14800001, nota: 18017069, grau: "divergente" },
+        { medicao_id: 631, nota_id: 9, numero: 2275, campo: "iss", espelho: 296000, nota: 360341, grau: "divergente" },
+        { medicao_id: 631, nota_id: 9, numero: 2275, campo: "inss", espelho: 162800, nota: 162801, grau: "arredondamento" },
+      ],
+      acima_da_medicao: [{ medicao_id: 631, nota_id: 9, numero: 2275, alocado_centavos: 18017069, medicao_centavos: 14800001 }],
+    })]);
+    expect(screen.queryByText("Tudo pronto para enviar")).toBeNull();
+    expect(screen.getByText("NF 2275 diverge do espelho")).toBeTruthy();
+    const conf = screen.getByLabelText("Conferência das notas com o espelho");
+    const valor = within(conf).getByText("Valor").closest("tr")!;
+    expect(within(valor).getByText("R$ 148.000,01")).toBeTruthy();
+    expect(within(valor).getByText("R$ 180.170,69")).toBeTruthy();
+    expect(within(conf).getByText("ISS").closest("tr")!.textContent).toMatch(/R\$\s3\.603,41/);
+    // o arredondamento de 1 centavo nao entra na tabela: avisa em atencao
+    expect(within(conf).queryAllByRole("row").some(r => r.textContent?.includes("INSS"))).toBe(false);
+    expect(within(conf).getByText(/NF 2275: INSS com diferença de arredondamento/)).toBeTruthy();
+    expect(within(conf).getByText("NF 2275 de R$ 180.170,69 é maior que a medição (R$ 148.000,01)")).toBeTruthy();
+    const linha = screen.getAllByRole("row").find(r => r.textContent?.includes("7ª medição"))!;
+    expect(within(linha).getByText("Nota divergente")).toBeTruthy();
+    expect((within(linha).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("#562: só arredondamento de centavos continua “Tudo pronto”, com o aviso leve", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ divergencias: [{ medicao_id: 631, nota_id: 9, numero: 2322, campo: "iss", espelho: 296000, nota: 296001, grau: "arredondamento" }] })]);
+    expect(screen.getByText("Tudo pronto para enviar")).toBeTruthy();
+    expect(screen.getByText(/NF 2322: ISS com diferença de arredondamento/)).toBeTruthy();
+    expect(screen.getByText("Completo")).toBeTruthy();
+  });
 });

@@ -7,7 +7,7 @@ import ConfirmarFaltas from "./ConfirmarFaltas";
 import { api, apiForm, ApiErro, mensagemDeErro } from "./api";
 import { IconeAlerta, IconeSeta } from "./icones";
 import { FormMotivo } from "./MedicaoAtos";
-import JustificativaEnvio, { conferirJustificativa, erroDaJustificativa } from "./JustificativaEnvio";
+import JustificativaEnvio, { conferirJustificativa, erroDaJustificativa, pedeJustificativa } from "./JustificativaEnvio";
 import { fmtTamanho as mb } from "./formato";
 import { protocolosDa } from "./medicao";
 import { Link } from "./Link";
@@ -381,7 +381,7 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
       if (e instanceof ApiErro && e.status === 422 && e.corpo?.codigo === "CONFIRMAR_PENDENCIAS") {
         const itens: Pendencia[] = e.corpo.itens ?? [];
         // issue #278: a lista nova pode trazer o reajuste sem apostilamento; sem a justificativa, o campo pede antes
-        const exigeAgora = itens.some(x => x.codigo === "sem_apostilamento");
+        const exigeAgora = pedeJustificativa(itens);
         setPrevia(p => p && { ...p, pendencias: itens, exige_justificativa: exigeAgora });
         if (exigeAgora && erroDaJustificativa(justificativa)) { setTentouJustificativa(true); return; }
         setConfirmar({ m, itens: itens.map(x => x.mensagem), mudou: confirmadas.length > 0 });
@@ -421,7 +421,7 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
                     </div>
                   )}
                   {exige && <JustificativaEnvio id={idJustificativa} valor={justificativa} aoMudar={setJustificativa}
-                    erro={erroJustificativa} />}
+                    erro={erroJustificativa} notaDivergente={previa.pendencias.some(x => x.codigo === "nota_divergente")} />}
                 </>
               )}
               validarAntes={validarJustificativa}
