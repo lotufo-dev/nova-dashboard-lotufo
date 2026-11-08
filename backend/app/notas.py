@@ -179,7 +179,8 @@ def acima_da_medicao(conn, medicao_id: int) -> list[dict]:
     sinal de nota de outra medicao. Medicao sem valor nao compara."""
     m = conn.execute("SELECT valor_atestado_centavos, valor_protocolado_centavos FROM medicoes WHERE id=?",
                      (medicao_id,)).fetchone()
-    v = valor_da_medicao(m) if m else None
+    # issue #589: a execucao que absorveu reajuste negativo compara com o valor do par (o da nota)
+    v = medicoes.valor_do_par(conn, medicao_id, valor_da_medicao(m)) if m else None
     if v is None:
         return []
     return [{"medicao_id": medicao_id, "nota_id": n["id"], "numero": n["numero_int"] or n["numero"],

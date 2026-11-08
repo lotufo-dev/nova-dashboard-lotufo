@@ -1158,3 +1158,33 @@ def test_reajuste_absorvido_nao_tem_marco_proprio(ambiente_projeto):
         medicoes.mudar_estado(conn, u["id"], rid, "recebida", None, "2026-03-10")
     medicoes.mudar_estado(conn, u["id"], xid, "recebida", None, "2026-03-10")
     assert medicoes.detalhe(conn, rid)["estado"] == "recebida"
+
+
+def test_dois_oficios_da_execucao_no_mesmo_dia_vao_os_dois_para_o_reajuste(ambiente_projeto):
+    """Revisor da PR #608 (rodada 2, sugestao): o segundo oficio da execucao no mesmo dia tambem vai ao reajuste
+    absorvido (ultimo envio e' o vigente); repetir o mesmo oficio nao duplica."""
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-02-05", "CT-9", None, "manual")
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-02-05", "CT-10", None, "manual")
+    assert [p["numero_oficio"] for p in medicoes.detalhe(conn, rid)["protocolos"]] == ["CT-9", "CT-10"]
+
+
+def test_conferencias_com_o_rm_usam_o_valor_do_par(ambiente_projeto):
+    """Revisor da PR #608 (rodada 2): a execucao que absorveu o reajuste e' conferida pelo valor do par (R$ 990,00):
+    a nota de R$ 990,00 nao diverge na reconciliacao, a de R$ 995,00 fica acima da medicao, e o reajuste absorvido nao
+    aparece como medicao sem nota."""
+    from app import notas, sincronizacao_rm
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    assert medicoes.valor_do_par(conn, xid, 1_000_01) == 990_00 and medicoes.valor_do_par(conn, rid, -10_01) == -10_01
+    rec = sincronizacao_rm._reconciliacao(conn, None, None)
+    assert rid not in [x["medicao_id"] for x in rec["medicoes_sem_nf"]]
+    assert xid not in [x["medicao_id"] for x in rec["divergencias"]]
+    assert notas.acima_da_medicao(conn, xid) == []
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) "
+                       "VALUES (1, 903, '903', 99500, '2026-02-04')").lastrowid
+    conn.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) "
+                 "VALUES (?, ?, 99500, 'manual')", (xid, nid))
+    conn.commit()
+    assert [a["medicao_centavos"] for a in notas.acima_da_medicao(conn, xid)] == [990_00]

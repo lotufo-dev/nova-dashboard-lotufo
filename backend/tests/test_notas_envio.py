@@ -2229,10 +2229,11 @@ def test_registro_por_fora_com_o_reajuste_absorvido_antes_da_execucao_protocola_
     # o reajuste ja' protocolado no mesmo dia antes da execucao (como fazia o registro antes desta correcao)
     c.execute("UPDATE medicoes SET estado='protocolada', congelada=1 WHERE id=?", (rj,))
     c.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_oficio, origem) "
-              "VALUES (?, '2026-09-15', 'CT-1', 'manual')", (rj,))
+              "VALUES (?, '2026-09-15', 'CT-360-LT-2026', 'manual')", (rj,))
     c.commit()
     r = cl.post("/api/notas/envio-externo",
-                data={"enviado_em": "2026-09-15", "observacao": "Enviado pelo Outlook", "medicao_ids": [str(ex)]})
+                data={"enviado_em": "2026-09-15", "observacao": "Enviado pelo Outlook", "medicao_ids": [str(ex)],
+                      "numero_oficio": "360"})
     assert r.status_code == 200, r.text
     for mid in (ex, rj):
         assert c.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "protocolada"

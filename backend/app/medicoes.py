@@ -686,6 +686,18 @@ def absorvidas(conn, execucao_id: int) -> list[dict]:
     return [dict(r) for r in conn.execute(_ABSORVIDAS + " AND x.id=? ORDER BY r.id", (execucao_id,))]
 
 
+def valor_do_par(conn, medicao_id: int, valor: int | None) -> int | None:
+    """Issue #589 (revisor da PR #608): o valor que a nota, a fatura, o titulo e a alocacao da execucao cobrem: o
+    dela (`valor`, o aprovado senao o pedido) mais o dos reajustes negativos que o espelho dela absorveu. Fora da
+    execucao que absorveu, o proprio `valor`. Unico ponto da conta: todo lugar que compara a execucao com nota usa
+    este."""
+    if valor is None:
+        return None
+    return valor + sum(conn.execute(
+        "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) FROM medicoes WHERE id=?",
+        (a["id"],)).fetchone()[0] for a in absorvidas(conn, medicao_id))
+
+
 def absorvida(conn, medicao_id: int) -> bool:
     """A medicao e' um reajuste negativo absorvido pelo espelho vigente de uma execucao (issue #589)."""
     return conn.execute(_ABSORVIDAS + " AND r.id=? LIMIT 1", (medicao_id,)).fetchone() is not None
@@ -702,7 +714,8 @@ def _protocolar_absorvidas(conn, usuario_id: int, execucao_id: int, linha: tuple
         elif r["estado"] in ESTADOS_DE_NOVO_PROTOCOLO:
             # revisor da PR #608: o que ja' tem esta linha (mesmo dia e protocolo do sistema) nao ganha outra
             if conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND data=? "
-                            "AND protocolo_id IS ?", (r["id"], linha[0], linha[4])).fetchone():
+                            "AND numero_oficio IS ? AND protocolo_id IS ?",
+                            (r["id"], linha[0], linha[1], linha[4])).fetchone():
                 continue
             upd = conn.execute("UPDATE medicoes SET congelada=1 WHERE id=? AND estado=?", (r["id"], r["estado"]))
         else:
