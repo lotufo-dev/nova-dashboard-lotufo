@@ -100,7 +100,7 @@ describe("Nova planilha/carta", () => {
     render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
     await waitFor(() => expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("1.300,01"));
     expect(screen.getByText("apostilado no termo 001/2026")).toBeTruthy();
-    expect(api).toHaveBeenCalledWith("/api/contratos/9/reajuste/sugestao?competencia=2026-08");
+    expect(api).toHaveBeenCalledWith("/api/contratos/9/reajuste/sugestao?competencia=2026-08&numero=4");
     expect(screen.queryByLabelText("Data-base")).toBeNull();      // uma base so': nada a escolher
     fireEvent.change(screen.getByLabelText("Valor pedido"), { target: { value: "12.345,67" } });
     anexar("Ofício assinado (PDF)", pdf("oficio.pdf"));
@@ -120,7 +120,7 @@ describe("Nova planilha/carta", () => {
     responderReajuste({ competencia: "2026-08", data_base_mes: null, bases: [] });
     render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
     await screen.findByLabelText("Nº da medição");
-    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/contratos/9/reajuste/sugestao?competencia=2026-08"));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/contratos/9/reajuste/sugestao?competencia=2026-08&numero=4"));
     expect(screen.queryByLabelText("Reajuste")).toBeNull();
   });
 
@@ -143,6 +143,27 @@ describe("Nova planilha/carta", () => {
     render(<NovaPlanilhaCarta contratoId={9} tipo="projeto" aoRegistrar={() => {}} />);
     await screen.findByLabelText("Nº da medição");
     expect(screen.queryByLabelText("Reajuste")).toBeNull();
+  });
+
+  it("a leitura da sugestão que falha esconde o campo e não manda o valor de outra competência (code-review)", async () => {
+    api.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/contratos/9/reajuste/sugestao?competencia=2026-08")) return { competencia: "2026-08", data_base_mes: "2024-06", bases: [BASE] };
+      if (url.startsWith("/api/contratos/9/reajuste/sugestao")) throw new Error("falhou");
+      if (url.startsWith("/api/contratos/9/planilhas/sugestao")) return SUGESTAO;
+      return { avisos: [], acumulado_anterior_centavos: 0, saldo_centavos: 0 };
+    });
+    apiForm.mockResolvedValue({ medicao_id: 77, versao: 1, estado: "planilha_gerada", avisos: [] });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    await waitFor(() => expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("1.300,01"));
+    fireEvent.change(screen.getByLabelText("Competência"), { target: { value: "092026" } });
+    await waitFor(() => expect(screen.queryByLabelText("Reajuste")).toBeNull());
+    fireEvent.change(screen.getByLabelText("Valor pedido"), { target: { value: "1,00" } });
+    anexar("Ofício assinado (PDF)", pdf("oficio.pdf"));
+    anexar("Planilha (.xlsx ou PDF)", new File(["PK"], "planilha.xlsx"));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar planilha/carta" }));
+    await waitFor(() => expect(apiForm).toHaveBeenCalled());
+    const fd = apiForm.mock.calls[0][1] as FormData;
+    expect([fd.get("competencia"), fd.get("reajuste_valor")]).toEqual(["2026-09", null]);
   });
 
   it("a medição prevista entra com o nº e a competência dela, sem o nº do órgão de outro nº", async () => {

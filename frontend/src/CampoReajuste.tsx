@@ -27,8 +27,11 @@ function sugerido(s: SugestaoReajuste, dataBase: string): string {
   return b?.valor_centavos != null && b.valor_centavos >= 0 ? digitosParaBrl(String(b.valor_centavos)) : "";
 }
 
-export default function CampoReajuste({ contratoId, competencia, prefixo, valor, aoMudar }: {
-  contratoId: number; competencia: string; prefixo: string; valor: ValorReajuste;
+/** `numero`: o da planilha/carta; se a medicao de reajuste desse nº ja' nao recebe o reajuste, o servidor devolve
+ *  nenhuma base e o campo nao aparece. Campo escondido (sem base, competencia incompleta, leitura que falhou) zera o
+ *  valor: nada vai ao servidor sem a pessoa ver. */
+export default function CampoReajuste({ contratoId, competencia, numero, prefixo, valor, aoMudar }: {
+  contratoId: number; competencia: string; numero?: string; prefixo: string; valor: ValorReajuste;
   aoMudar: (v: ValorReajuste) => void;
 }) {
   const [sug, setSug] = useState<SugestaoReajuste | null>(null);
@@ -40,20 +43,31 @@ export default function CampoReajuste({ contratoId, competencia, prefixo, valor,
   useEffect(() => { atual.current = valor; mudar.current = aoMudar; });
 
   useEffect(() => {
-    if (!/^\d{4}-\d{2}$/.test(competencia)) { setSug(null); return; }
     let vivo = true;
-    api<SugestaoReajuste>(`/api/contratos/${contratoId}/reajuste/sugestao?competencia=${competencia}`)
-      .then(r => {
-        if (!vivo) return;
-        const s = { ...r, bases: r.bases ?? [] };
-        setSug(s);
-        const v = atual.current;
-        const dataBase = s.bases.some(b => b.data_base_mes === v.dataBase) ? v.dataBase : (s.data_base_mes ?? "");
-        mudar.current({ dataBase, valor: editado.current ? v.valor : sugerido(s, dataBase) });
-      })
-      .catch(() => { if (vivo) setSug(null); });   // sem a sugestao, o campo fica vazio para digitar
-    return () => { vivo = false; };
-  }, [contratoId, competencia]);
+    const esconder = () => {
+      if (!vivo) return;
+      setSug(null);
+      editado.current = false;
+      const v = atual.current;
+      if (v.valor || v.dataBase) mudar.current({ valor: "", dataBase: "" });
+    };
+    const num = numero !== undefined && /^\d{1,3}$/.test(numero) ? `&numero=${numero}` : "";
+    if (!/^\d{4}-\d{2}$/.test(competencia)) { esconder(); return () => { vivo = false; }; }
+    const t = setTimeout(() => {
+      api<SugestaoReajuste>(`/api/contratos/${contratoId}/reajuste/sugestao?competencia=${competencia}${num}`)
+        .then(r => {
+          if (!vivo) return;
+          const s = { ...r, bases: r.bases ?? [] };
+          if (s.bases.length === 0) { esconder(); return; }
+          setSug(s);
+          const v = atual.current;
+          const dataBase = s.bases.some(b => b.data_base_mes === v.dataBase) ? v.dataBase : (s.data_base_mes ?? "");
+          mudar.current({ dataBase, valor: editado.current ? v.valor : sugerido(s, dataBase) });
+        })
+        .catch(esconder);
+    }, 250);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [contratoId, competencia, numero]);
 
   if (!sug || sug.bases.length === 0) return null;
   const base = sug.bases.find(b => b.data_base_mes === valor.dataBase);

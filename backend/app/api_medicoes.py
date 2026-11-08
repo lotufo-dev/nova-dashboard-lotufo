@@ -433,13 +433,24 @@ def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "projeto"] = Qu
 
 @router.get("/api/contratos/{contrato_id}/reajuste/sugestao")
 def sugestao_reajuste(contrato_id: ID, competencia: str = Query(..., pattern=COMPETENCIA),
+                      numero: int | None = Query(None, ge=1, le=999),
                       usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
                       conn: sqlite3.Connection = Depends(conexao)):
     """Issue #276: o valor sugerido da medicao de reajuste da competencia, por data-base, com a origem e o ciclo.
-    So' le."""
+    `numero` (o da planilha/carta): se a medicao de reajuste desse nº ja' existe e nao recebe o reajuste, nenhuma
+    base (o campo nao aparece e nada vai sem a pessoa ver); a prevista desse nº traz a data-base que ja' tem. So' le."""
     _contrato_existe(conn, contrato_id)
     with db.leitura(conn):
-        return reajuste.sugestao_da_medicao(conn, contrato_id, competencia)
+        s = reajuste.sugestao_da_medicao(conn, contrato_id, competencia)
+        if numero is None:
+            return s
+        try:
+            r = medicao_planilhas.reajuste_do_numero(conn, contrato_id, numero, competencia)
+        except ValueError:
+            return {**s, "bases": [], "data_base_mes": None}
+        if r is not None and any(b["data_base_mes"] == r["data_base_mes"] for b in s["bases"]):
+            s["data_base_mes"] = r["data_base_mes"]
+        return s
 
 
 @router.get("/api/contratos/{contrato_id}/planilhas/avisos")

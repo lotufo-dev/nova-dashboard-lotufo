@@ -1970,6 +1970,27 @@ def test_sugestao_do_reajuste_pela_rota(client_admin):
                             params={"competencia": "2026-13"}).status_code == 422
 
 
+def test_sugestao_com_o_numero_esconde_o_reajuste_que_ja_nao_recebe(client_admin):
+    """Code-review da #276: o campo vem preenchido sozinho; se a de reajuste do nº da planilha/carta ja' passou de
+    prevista, a sugestao volta sem base (o campo some) para a planilha de execucao nao ser recusada sem a pessoa ver."""
+    from app import db
+    cid = _contrato(client_admin)
+    _datas_base(cid, ("2024-06", ""))
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 3, "tipo": "reajuste", "competencia": "2026-07"}).json()["id"]
+    q = {"competencia": "2026-07", "numero": 3}
+    assert len(client_admin.get(f"/api/contratos/{cid}/reajuste/sugestao", params=q).json()["bases"]) == 1
+    conn = db.get_conn()
+    try:
+        conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=?", (mid,)); conn.commit()
+    finally:
+        conn.close()
+    s = client_admin.get(f"/api/contratos/{cid}/reajuste/sugestao", params=q).json()
+    assert (s["bases"], s["data_base_mes"]) == ([], None)
+    assert len(client_admin.get(f"/api/contratos/{cid}/reajuste/sugestao",
+                                params={**q, "numero": 4}).json()["bases"]) == 1
+
+
 def test_medicao_manual_de_reajuste_grava_pedido_data_base_e_ciclo(client_admin):
     cid = _contrato(client_admin)
     _datas_base(cid, ("2024-06", ""))

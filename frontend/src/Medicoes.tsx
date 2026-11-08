@@ -303,7 +303,7 @@ export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
       {novo.tipo === "reajuste" && (
         <CampoReajuste contratoId={contratoId} competencia={novo.competencia} prefixo="nova" valor={reaj} aoMudar={setReaj} />
       )}
-      {erro &&<p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
       <p className={feito ? "notas__ok" : "sr-only"} role="status">
         {feito && <>Medição criada:{" "}
           <Link para={{ tela: "medicao", obra: contratoId, id: feito.id }}>{tituloMedicao(feito)}</Link>.</>}

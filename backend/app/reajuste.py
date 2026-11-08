@@ -757,6 +757,10 @@ def base_e_ciclo_da_medicao(conn, contrato_id: int, competencia: str,
     b = next((b for b in bases if b["data_base_mes"] == escolhida), None)
     if b is None:
         raise ValueError(f"Data-base {escolhida[5:7]}/{escolhida[:4]} não é deste contrato")
+    if b["ciclo"] is None:
+        # antes do 1o aniversario nao ha' reajuste: a medicao ficaria sem ciclo e fora da aba Reajuste
+        raise ValueError(f"Competência {competencia[5:7]}/{competencia[:4]} é anterior ao primeiro reajuste da "
+                         f"data-base {escolhida[5:7]}/{escolhida[:4]}")
     return b["data_base_mes"], b["ciclo"]
 
 

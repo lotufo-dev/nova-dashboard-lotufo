@@ -890,6 +890,33 @@ def test_planilha_com_reajuste_em_contrato_de_duas_bases_exige_a_escolha(conn, c
     assert (m["data_base_mes"], m["ciclo"], m["valor_protocolado_centavos"]) == ("2024-04", 2026, 10_01)
 
 
+def test_prevista_de_reajuste_com_data_base_gravada_dispensa_a_escolha(conn, contrato_id):
+    """Code-review da #276: com duas bases, a prevista de reajuste que ja' tem data-base nao exige a escolha de novo."""
+    from app import medicao_planilhas
+    _base(conn, contrato_id, "2024-04", "itens SICRO")
+    _base(conn, contrato_id, "2024-06")
+    rid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "reajuste",
+                                   "competencia": "2026-05", "data_base_mes": "2024-06", "ciclo": 2025})
+    r = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-05", "2026-05-01", "2026-05-31", 1,
+                                                                     reajuste_centavos=3_01), ANEXOS)
+    assert r["reajuste_medicao_id"] == rid
+    m = medicoes.detalhe(conn, rid)
+    assert (m["data_base_mes"], m["ciclo"], m["valor_protocolado_centavos"]) == ("2024-06", 2025, 3_01)
+
+
+def test_reajuste_antes_do_primeiro_aniversario_e_recusado(conn, contrato_id):
+    """Code-review da #276: sem ciclo (competencia antes do 1o aniversario da data-base) a medicao de reajuste nao
+    nasce: ficaria fora da aba Reajuste."""
+    from app import medicao_planilhas, reajuste
+    _base(conn, contrato_id, "2025-08")
+    with pytest.raises(ValueError, match="anterior ao primeiro reajuste da data-base 08/2025"):
+        reajuste.base_e_ciclo_da_medicao(conn, contrato_id, "2026-03", None)
+    with pytest.raises(ValueError, match="anterior ao primeiro reajuste"):
+        medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(1, "2026-03", "2026-03-01", "2026-03-31", 1,
+                                                                     reajuste_centavos=1), ANEXOS)
+    assert conn.execute("SELECT COUNT(*) FROM medicoes").fetchone()[0] == 0
+
+
 def test_reajuste_so_acompanha_a_planilha_de_execucao(conn, contrato_id):
     from app import medicao_planilhas
     _base(conn, contrato_id)

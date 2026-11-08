@@ -240,7 +240,7 @@ export function NovaPlanilhaCarta({ contratoId, tipo = "execucao", inicial, aoRe
       </div>
       <CamposDoPedido prefixo="pl" form={form} setForm={setForm} comCompetencia tentou={tentou} />
       {tipo === "execucao" && (
-        <CampoReajuste contratoId={contratoId} competencia={form.competencia} prefixo="pl" valor={reaj} aoMudar={setReaj} />
+        <CampoReajuste contratoId={contratoId} competencia={form.competencia} numero={numero} prefixo="pl" valor={reaj} aoMudar={setReaj} />
       )}
       <dl className="planilha__saldo">
         <div><dt>Acumulado anterior</dt><dd className="num">{brl(saldo.acumulado)}</dd></div>
