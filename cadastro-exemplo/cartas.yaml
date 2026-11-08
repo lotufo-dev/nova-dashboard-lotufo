@@ -7,6 +7,9 @@
 # termo cobre (aí o envio pede justificativa). Num parágrafo próprio, o parágrafo vazio some.
 # Campos opcionais por família: `local` (cidade da carta), `assinatura` (linhas) e o par
 # `reajuste_carta_assunto` + `reajuste_carta_corpo`, usado no protocolo que leva só o reajuste.
+# Emitentes (timbre): `logo` (imagem na pasta do cadastro), `fundo: true` (o "L" cinza do papel da Lotufo, já com
+# o rodapé), `rodape: true` (rodapé com razão social, endereço, CNPJ, IE e contato, sem o "L": papel dos consórcios)
+# e `logo_largura_mm` (largura do logo no topo; padrão 58, de 10 a 190).
 signatario: [CONSTRUTORA EXEMPLO LTDA, Responsável de Exemplo]
 emitentes:
   lotufo:

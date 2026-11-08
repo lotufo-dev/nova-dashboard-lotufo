@@ -109,10 +109,12 @@ class Carta:
     vocativo: str
     corpo: str
     assinatura: list[str]
-    emitente: dict = field(default_factory=dict)   # razao_social, cnpj, endereco, ie, contato, logo, fundo
+    emitente: dict = field(default_factory=dict)   # razao_social, cnpj, endereco, ie, contato, logo, fundo, rodape,
+                                                   # logo_largura_mm
 
 
 CINZA = (204, 204, 204)
+LOGO_LARGURA_MM = 58          # largura padrao do logo no topo (papel da Lotufo)
 
 
 def _arquivo_de_dados(rel: str | None) -> Path | None:
@@ -139,16 +141,24 @@ def textos_do_timbre(emitente: dict | None) -> list[str]:
 class _Doc(FPDF):
     """Papel timbrado da carta real (CT-301, MTPAR, 16/09/2026): logo centralizado no topo, um "L" cinza
     ocupando a margem esquerda e a base, e os dados da empresa no rodape, sobre a faixa cinza. Sem logo
-    no cadastro, cabecalho de texto (razao social, endereco, CNPJ)."""
+    no cadastro, cabecalho de texto (razao social, endereco, CNPJ).
+
+    Os consorcios (#46, issue #566) tem papel proprio: `rodape: true` poe os dados da empresa no pe da pagina sem o
+    "L" (que so' vem com `fundo: true`, e o `fundo` ja' traz o rodape); `logo_largura_mm` muda a largura do logo."""
 
     def __init__(self, emitente: dict | None):
         super().__init__(format="A4")
         self.emitente = emitente or {}
         self.logo = _arquivo_de_dados(self.emitente.get("logo"))
         self.fundo = bool(self.emitente.get("fundo")) and self.logo is not None
+        self.rodape = self.fundo or bool(self.emitente.get("rodape"))
+        self.logo_largura = float(self.emitente.get("logo_largura_mm") or LOGO_LARGURA_MM)
         if self.fundo:
             self.set_margins(33, 20, 20)
             self.set_auto_page_break(True, margin=42)
+        elif self.rodape:
+            self.set_margins(25, 20, 20)
+            self.set_auto_page_break(True, margin=28)     # o rodape comeca em 272 mm
         else:
             self.set_margins(25, 20, 20)
             self.set_auto_page_break(True, margin=22)
@@ -182,8 +192,8 @@ class _Doc(FPDF):
         if self.fundo:
             self._l_cinza()
         if self.logo is not None:
-            self.image(str(self.logo), x=(210 - 58) / 2, y=6, w=58)
-            self.set_y(34)
+            info = self.image(str(self.logo), x=(210 - self.logo_largura) / 2, y=6, w=self.logo_largura)
+            self.set_y(max(34, 6 + info.rendered_height + 4))   # logo alto empurra o corpo para baixo dele
             return
         if self.emitente.get("razao_social"):
             self.set_font(self.fonte, "B", 11)
@@ -197,10 +207,11 @@ class _Doc(FPDF):
             self.ln(6)
 
     def footer(self):
-        if not self.fundo:
+        if not self.rodape:
             return
         e = self.emitente
-        self.set_xy(8, 272)
+        x = 8 if self.fundo else self.l_margin            # sem o "L", alinhado com o corpo
+        self.set_xy(x, 272)
         self.set_font(self.fonte, "B", 8)
         self.cell(0, 3.6, self.t(e.get("razao_social") or ""), new_x="LMARGIN", new_y="NEXT")
         self.set_font(self.fonte, "", 7.5)
@@ -210,7 +221,7 @@ class _Doc(FPDF):
                   e.get("contato")]
         for l in linhas:
             if l:
-                self.set_x(8)
+                self.set_x(x)
                 self.cell(0, 3.4, self.t(l), new_x="LMARGIN", new_y="NEXT")
 
     def linha(self, texto: str, estilo: str = "", align: str = "L"):
