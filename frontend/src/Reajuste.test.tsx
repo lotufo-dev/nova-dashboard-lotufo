@@ -130,6 +130,46 @@ describe("Reajuste", () => {
     expect(visivel(celulas(tabela.querySelectorAll("tbody tr")[4])[4])).toBe("4,125%");
   });
 
+  it("justifica o pedido fora da previsão na linha da competência e mostra o texto depois (issue #274)", async () => {
+    let justificada = false;
+    const linha = () => comp("2026-07", { estado: "pedida", previsto_centavos: 100_01, previsto_origem: "manual",
+      medicoes: [1], pedido_centavos: 150_03, ...(justificada
+        ? { avisos: [], justificativa: { texto: "Índice definitivo saiu maior", usuario: "Engenharia",
+            criado_em: "2026-10-01 12:00:00", pedido_centavos: 150_03, previsto_centavos: 100_01 } }
+        : { avisos: ["fora_da_previsao"], justificativa: null }) });
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho.endsWith("/justificativas")) { justificada = true; return { id: 1 }; }
+      return caminho.endsWith("/reajuste")
+        ? { ciclos: [cicloAberto], pleitos: [],
+            competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026, competencias: [linha()] }] }
+        : { instrumentos: [] };
+    });
+    render(<Reajuste contratoId={7} podeEditar />);
+    fireEvent.click(await screen.findByRole("button", { name: "Justificar o pedido de 07/2026" }));
+    fireEvent.change(screen.getByLabelText("Justificativa do pedido de 07/2026"),
+      { target: { value: "Índice definitivo saiu maior" } });
+    fireEvent.click(screen.getByRole("button", { name: "Gravar justificativa" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Justificar o pedido de 07/2026" })).toBeNull());
+    const post = api.mock.calls.find(([c]) => c === "/api/contratos/7/reajuste/justificativas");
+    expect(post?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ data_base_mes: "2024-06", ciclo: 2026, competencia: "2026-07",
+      texto: "Índice definitivo saiu maior" });
+    const selo = await screen.findByText("justificado");
+    expect(selo.closest(".selo")?.getAttribute("title")).toBe("Índice definitivo saiu maior (Engenharia)");
+    expect(screen.queryByText("fora da previsão")).toBeNull();
+  });
+
+  it("quem só consulta não vê o botão de justificar (issue #274)", async () => {
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [cicloAberto], pleitos: [], competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026,
+          competencias: [comp("2026-07", { estado: "pedida", previsto_centavos: 100_01, medicoes: [1],
+            pedido_centavos: 150_03, avisos: ["fora_da_previsao"] })] }] }
+      : { instrumentos: [] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    expect(await screen.findByText("fora da previsão")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Justificar/ })).toBeNull();
+  });
+
   it("o total apostilado diz que é parcial quando há competência apostilada só por percentual (gate Sol, PR #438)", async () => {
     // spec 2026-10-20 §2.2: o sistema nao calcula valor do percentual da MT-PAR, entao a soma em reais e' so' das
     // competencias com valor; o rodape nao pode mostra-la como se fosse o total apostilado do ciclo
