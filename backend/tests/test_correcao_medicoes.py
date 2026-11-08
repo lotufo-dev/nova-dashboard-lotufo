@@ -381,6 +381,15 @@ def test_cancelar_duplicata_em_consorcio_confere_a_cobertura_por_coligada(cenari
     detalhes = _rodar(c, uid, [{**op, "medicao_id": d2, "duplicata_de": v2}], ensaio=True)["itens"][0]["detalhes"]
     avisos = [d for d in detalhes if d.startswith("AVISO")]
     assert len(avisos) == 1 and "coligada 90" in avisos[0] and "NF 605" in avisos[0] and "NF 604" not in avisos[0]
+    # (c) limite de baixo da cota: 1.000.001 a 50% e' 500.001 (meio para cima, valor escrito aqui e nao tirado de
+    # contratos.cota); a NF da Lotufo da verdadeira com 500.000 nao a cobre: avisa que nao cobre o valor dela
+    assert cota == 500_001
+    v3, d3 = _medicao(c, cons, 51, estado="recebida", valor=cheio), _medicao(c, cons, 47, estado="recebida", valor=cheio)
+    _ligar(c, v3, _nota_col(c, 606, 1, 500_000), valor=500_000)
+    _ligar(c, d3, _nota_col(c, 607, 1, 500_001), valor=500_001)
+    detalhes = _rodar(c, uid, [{**op, "medicao_id": d3, "duplicata_de": v3}], ensaio=True)["itens"][0]["detalhes"]
+    avisos = [d for d in detalhes if d.startswith("AVISO")]
+    assert len(avisos) == 1 and "tem NF da coligada 1 que não cobre o valor dela" in avisos[0] and "NF 607" in avisos[0]
 
 
 def test_cancelar_duplicata_sem_aviso_quando_a_verdadeira_ja_tem_a_nota(cenario):
