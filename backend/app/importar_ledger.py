@@ -76,6 +76,7 @@ def _mapa_obra_contrato(conn, cadastro):
 def importar(conn, usuario_id, itens, cadastro, aplicar: bool = False) -> dict:
     """Liga as NFs do RM do ledger antigo as medicoes. `itens`/`cadastro` = caminho JSON
     ou lista ja carregada. `aplicar=False` = dry-run (nao grava)."""
+    from app import diretoria   # import local: diretoria importa sincronizacao_rm
     itens = _carregar(itens)
     cadastro = _carregar(cadastro)
     obra2ct = _mapa_obra_contrato(conn, cadastro)
@@ -90,7 +91,8 @@ def importar(conn, usuario_id, itens, cadastro, aplicar: bool = False) -> dict:
 
     resumo = {"itens": len(itens), "alocadas": 0, "ja_alocada": 0, "sem_idmov": 0,
               "sem_contrato": 0, "sem_medicao": 0, "sem_nf_rm": 0, "valor_divergente": 0,
-              "chave_ruim": 0, "rotulo_ruim": 0, "medicao_incompat": 0, "recebimentos": 0}
+              "chave_ruim": 0, "rotulo_ruim": 0, "medicao_incompat": 0, "recebimentos": 0,
+              "fora_da_cobranca": 0, "puladas_fora_da_cobranca": []}
     plano = []
 
     def passar():
@@ -126,7 +128,7 @@ def importar(conn, usuario_id, itens, cadastro, aplicar: bool = False) -> dict:
             if len(mids) != 1:
                 resumo["sem_medicao"] += 1
                 continue
-            nf = conn.execute("SELECT id, valor_centavos FROM notas_fiscais "
+            nf = conn.execute("SELECT id, valor_centavos, codtmv FROM notas_fiscais "
                               "WHERE coligada=? AND idmov=? AND situacao='ativa'",
                               (colig, int(idmov))).fetchone() if colig is not None else None
             if not nf:
@@ -140,6 +142,13 @@ def importar(conn, usuario_id, itens, cadastro, aplicar: bool = False) -> dict:
             if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
                             (nf["id"],)).fetchone():
                 resumo["ja_alocada"] += 1
+                continue
+            # Issue #598: so' nota de cobranca ao orgao (`diretoria.CODTMV_COBRANCA`, a lista do a receber, #563)
+            # vira vinculo automatico; nota de outro tipo ou sem tipo fica de fora e vai no relato.
+            if nf["codtmv"] not in diretoria.CODTMV_COBRANCA:
+                resumo["fora_da_cobranca"] += 1
+                resumo["puladas_fora_da_cobranca"].append({"medicao_id": mids[0], "nota_id": nf["id"],
+                                                           "numero_nf": it.get("NumNF"), "codtmv": nf["codtmv"]})
                 continue
             estado = conn.execute("SELECT estado FROM medicoes WHERE id=?", (mids[0],)).fetchone()["estado"]
             if estado not in ("protocolada", "nota_emitida", "nf_emitida"):
@@ -211,7 +220,7 @@ def criar_medicoes_faltantes(conn, usuario_id, itens, cadastro, aplicar: bool = 
     - Montagem do plano e criacao na MESMA transacao (`db.mutacao` = BEGIN IMMEDIATE), pra
       a NF nao ser cancelada entre a conferencia e a gravacao.
     """
-    from app import medicoes
+    from app import diretoria, medicoes   # import local: diretoria importa sincronizacao_rm
     itens = _carregar(itens)
     cadastro = _carregar(cadastro)
 
@@ -219,7 +228,7 @@ def criar_medicoes_faltantes(conn, usuario_id, itens, cadastro, aplicar: bool = 
               "sem_idmov": 0, "sem_contrato": 0, "ja_tem_medicao": 0, "chave_ruim": 0,
               "rotulo_ruim": 0, "sem_nf_rm": 0, "coligada_divergente": 0,
               "valor_divergente": 0, "sem_competencia": 0, "competencia_incoerente": 0,
-              "nf_duplicada": 0, "nf_ja_alocada": 0, "grupo_incompleto": 0}
+              "nf_duplicada": 0, "nf_ja_alocada": 0, "grupo_incompleto": 0, "fora_da_cobranca": 0}
     plano = []
 
     def montar_e_criar():
@@ -280,11 +289,14 @@ def criar_medicoes_faltantes(conn, usuario_id, itens, cadastro, aplicar: bool = 
             # conferencia de valor abaixo e' a trava final contra coligada inferida errada.
             if colig is None or colig != obra2colig.get(it.get("ObraId")):
                 return ("fail", "coligada_divergente")
-            nf = conn.execute("SELECT id, valor_centavos FROM notas_fiscais "
+            nf = conn.execute("SELECT id, valor_centavos, codtmv FROM notas_fiscais "
                               "WHERE coligada=? AND idmov=? AND situacao='ativa'",
                               (colig, int(idmov))).fetchone()
             if not nf:
                 return ("fail", "sem_nf_rm")
+            # Issue #598: nota fora da cobranca ao orgao nao vira medicao (o `importar` tambem nao a ligaria)
+            if nf["codtmv"] not in diretoria.CODTMV_COBRANCA:
+                return ("fail", "fora_da_cobranca")
             if rm.centavos(it.get("ValorBruto")) != nf["valor_centavos"]:
                 return ("fail", "valor_divergente")
             if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",

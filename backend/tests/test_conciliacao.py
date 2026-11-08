@@ -83,6 +83,34 @@ def test_centro_anterior_do_cadastro_vale_para_nota_antiga(conn, cid, tmp_path):
     assert _regras(conn, mid) == [conciliacao.REGRA]
 
 
+def test_nota_fora_da_cobranca_com_valor_exato_nao_vira_opcao(conn, cid, tmp_path):
+    """Issue #598: so' nota de cobranca ao orgao (`diretoria.CODTMV_COBRANCA`) liga. Nota 2.2.15 (fornecedor) do
+    centro da obra, na janela e com o valor exato, nao vira opcao; nem nota sem tipo."""
+    mid = _medicao(conn, cid, 12, 461_900_00, comp="2025-03")
+    fornecedor = dict(_nf(100, 461900.0, emissao=EMISSAO), CODTMV="2.2.15")
+    sem_tipo = {k: v for k, v in _nf(101, 461900.0, emissao=EMISSAO).items() if k != "CODTMV"}
+    _carregar(conn, tmp_path, [fornecedor, sem_tipo], [_baixa(1, 100, 461900.0, 461900.0, 1, PAGO)])
+    rel = conciliacao.conciliar(conn, 1, ensaio=False)
+    assert (rel["ligadas"], rel["sem_nota"]) == (0, 1)
+    m = medicoes.detalhe(conn, mid)
+    assert m["estado"] == "protocolada" and _regras(conn, mid) == []
+
+
+def test_nota_antiga_fora_da_cobranca_nao_liga_nem_entra_no_banco(conn, cid, tmp_path):
+    """Issue #598, fase 2 (DASH12 traz todo 2.2.%): nota 2.2.15 ou sem tipo nao liga; a 2.2.16 do mesmo valor liga."""
+    mid = _medicao(conn, cid, 3, 800_00, comp="2023-03")
+    emissao = "2023-04-12T00:00:00-04:00"
+    nfs = [dict(_nf(200, 800.0, emissao=emissao), CODTMV="2.2.15"),
+           {k: v for k, v in _nf(201, 800.0, emissao=emissao).items() if k != "CODTMV"}]
+    rel = conciliacao.conciliar(conn, 1, ensaio=False, antigas=(nfs, []))
+    assert (rel["ligadas"], rel["sem_nota"]) == (0, 1)
+    assert conn.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0] == 0
+    nfs.append(dict(_nf(202, 800.0, emissao=emissao), CODTMV="2.2.16"))
+    assert conciliacao.conciliar(conn, 1, ensaio=False, antigas=(nfs, []))["ligadas"] == 1
+    assert [r[0] for r in conn.execute("SELECT idmov FROM notas_fiscais")] == [202]
+    assert _regras(conn, mid) == [conciliacao.REGRA]
+
+
 def test_corte_fecha_o_legado_protocolado_ate_a_data(conn, cid, tmp_path):
     antiga = _medicao(conn, cid, 1, 500_00, comp="2025-03")          # protocolo 2025-03-28
     depois = _medicao(conn, cid, 2, 700_00, comp="2026-10")          # competencia depois do corte do RM

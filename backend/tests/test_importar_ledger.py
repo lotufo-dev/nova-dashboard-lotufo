@@ -28,9 +28,9 @@ def _medicao_emitida(conn, cid, numero, valor, tipo="execucao"):
     return mid
 
 
-def _nf_rm(conn, coligada, idmov, valor, numero="0000000001"):
-    conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao, situacao) "
-                 "VALUES (?,?,?,?,?, 'ativa')", (coligada, idmov, numero, valor, "2026-08-10"))
+def _nf_rm(conn, coligada, idmov, valor, numero="0000000001", codtmv="2.2.01"):
+    conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao, situacao, codtmv) "
+                 "VALUES (?,?,?,?,?, 'ativa', ?)", (coligada, idmov, numero, valor, "2026-08-10", codtmv))
     return conn.execute("SELECT id FROM notas_fiscais WHERE coligada=? AND idmov=?", (coligada, idmov)).fetchone()[0]
 
 
@@ -79,6 +79,24 @@ def test_infere_coligada_do_consorcio_quando_chave_e_backfill(conn):
     r = importar_ledger.importar(conn, 1, itens, CAD, aplicar=True)
     assert r["alocadas"] == 1, r
     assert medicoes.detalhe(conn, mid)["notas"][0]["nota_id"] == nf
+
+
+@pytest.mark.parametrize("codtmv", ["2.2.15", "2.2.10", None])
+def test_nf_fora_da_cobranca_nao_cria_vinculo_e_e_relatada(conn, codtmv):
+    """Issue #598: so' nota de cobranca ao orgao (`diretoria.CODTMV_COBRANCA`) vira vinculo automatico; a linha com
+    nota de outro tipo (ou sem tipo) e' pulada e relatada."""
+    cid = _contrato(conn)
+    mid = _medicao_emitida(conn, cid, 1, 500_00)
+    nf = _nf_rm(conn, 1, 100, 500_00, codtmv=codtmv)
+    _baixa(conn, nf, 1, 1, 500_00); conn.commit()
+    itens = [{"ObraId": 1, "TipoDocumento": "Medição", "MedicaoRotulo": "1ª", "IdMovRM": 100,
+              "ChaveIdempotencia": "RM:1:100", "NumNF": "0000000001", "ValorBruto": 500.00}]
+    r = importar_ledger.importar(conn, 1, itens, CAD, aplicar=True)
+    assert (r["alocadas"], r["fora_da_cobranca"], r["plano"]) == (0, 1, []), r
+    assert r["puladas_fora_da_cobranca"] == [{"medicao_id": mid, "nota_id": nf, "numero_nf": "0000000001",
+                                              "codtmv": codtmv}]
+    m = medicoes.detalhe(conn, mid)
+    assert m["estado"] == "protocolada" and m["notas"] == []
 
 
 def test_classifica_sem_idmov_sem_medicao_sem_contrato_sem_nf(conn):
@@ -157,6 +175,35 @@ def test_grupo_parcialmente_invalido_nao_cria_nada(conn):
     r = importar_ledger.criar_medicoes_faltantes(conn, 1, itens, CAD, aplicar=True)
     assert (r["criadas"], r["grupos"], r["valor_divergente"]) == (0, 0, 1), r
     assert r["grupo_incompleto"] == 1 and medicoes.listar(conn, cid) == []
+
+
+def test_nf_fora_da_cobranca_no_grupo_nao_cria_medicao(conn):
+    """Issue #598: uma NF do grupo e' de fornecedor (2.2.15): o grupo inteiro cai, sem medicao nascida dela."""
+    cid = _contrato(conn)
+    _nf_rm(conn, 1, 411, 300_01, "0000000411")
+    _nf_rm(conn, 1, 412, 200_00, "0000000412", codtmv="2.2.15"); conn.commit()
+    itens = [{"ObraId": 1, "TipoDocumento": "Medição", "MedicaoRotulo": "15ª", "IdMovRM": 411,
+              "ChaveIdempotencia": "RM:1:411", "ValorBruto": 300.01, "Competencia": "02/2026"},
+             {"ObraId": 1, "TipoDocumento": "Medição", "MedicaoRotulo": "15ª", "IdMovRM": 412,
+              "ChaveIdempotencia": "RM:1:412", "ValorBruto": 200.00, "Competencia": "02/2026"}]
+    r = importar_ledger.criar_medicoes_faltantes(conn, 1, itens, CAD, aplicar=True)
+    assert (r["criadas"], r["fora_da_cobranca"], r["grupo_incompleto"]) == (0, 1, 1), r
+    assert medicoes.listar(conn, cid) == []
+
+
+def test_nota_ja_ligada_conta_como_ja_alocada_mesmo_fora_da_cobranca(conn):
+    """Issue #598: rodar o importar de novo sobre um vinculo que ja' existe continua relatando `ja_alocada`; o relato
+    de puladas fica so' para vinculo que seria criado agora."""
+    from app import sincronizacao_rm
+    cid = _contrato(conn)
+    mid = _medicao_emitida(conn, cid, 1, 500_00)
+    nf = _nf_rm(conn, 1, 100, 500_00, codtmv="2.2.15"); conn.commit()
+    with db.mutacao(conn):
+        sincronizacao_rm.alocar(conn, 1, nf, mid, "detectado", 1.0, "ledger_rm")
+    itens = [{"ObraId": 1, "TipoDocumento": "Medição", "MedicaoRotulo": "1ª", "IdMovRM": 100,
+              "ChaveIdempotencia": "RM:1:100", "NumNF": "0000000001", "ValorBruto": 500.00}]
+    r = importar_ledger.importar(conn, 1, itens, CAD, aplicar=False)
+    assert (r["ja_alocada"], r["fora_da_cobranca"], r["puladas_fora_da_cobranca"]) == (1, 0, []), r
 
 
 def test_competencia_invalida_recusa_o_grupo(conn):
