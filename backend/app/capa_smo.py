@@ -76,14 +76,14 @@ def _do_boletim_vigente(conn, medicao_id: int) -> dict | None:
 
 def _folga_cota(conn, contrato_id: int, bp: int | None) -> int:
     """Revisor (rodada 1 da PR #606): no consorcio o cadastro guarda cada aditivo na cota, arredondado sozinho, e a capa
-    imprime a soma cheia, que vira cota com um arredondamento so'. Com dois ou mais aditivos somados a diferenca pode
-    chegar a meio centavo por aditivo: essa folga (arredondada para cima) nao e' divergencia. Com um aditivo so' a conta
-    e' a mesma dos dois lados (folga zero); contrato proprio nao arredonda (folga zero)."""
+    imprime a soma cheia, que vira cota com um arredondamento so'. Cada erro do meio para cima fica em [-0,5; 0,5), entao
+    a diferenca e' menor que (n+1)/2 e o maior inteiro possivel e' n // 2 (rodada 2): essa folga nao e' divergencia. Com
+    um aditivo so' a folga e' zero; contrato proprio nao arredonda (folga zero)."""
     if bp is None or bp == contratos.DIREITO_INTEGRAL_BP:
         return 0
     n = conn.execute("SELECT COUNT(*) FROM aditivos WHERE contrato_id=? AND status='assinado' "
                      "AND COALESCE(natureza, '') <> 'reajuste' AND delta_valor_centavos <> 0", (contrato_id,)).fetchone()[0]
-    return (n + 1) // 2 if n >= 2 else 0
+    return n // 2
 
 
 def _contrato(conn, capa: dict) -> list[dict]:

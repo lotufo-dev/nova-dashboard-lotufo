@@ -1258,3 +1258,19 @@ def test_acumulado_com_numeracao_do_orgao_deslocada_conta_o_reajuste_pelo_par(mo
     _bol_capa(c, u, m9, 1_000_01, "a", _capa(acumulado_pi_centavos=2_000_02, acumulado_reajuste_centavos=200_02))
     assert _capa_avisos(c, "todos") == []
     assert medicoes.detalhe(c, m9)["capa_divergencias"] == []
+
+
+def test_valor_aditivo_com_tres_aditivos_no_consorcio_tem_folga_de_um_centavo(motor):
+    # revisor (rodada 2 da PR #606): com n aditivos a diferenca do arredondamento e' no maximo n // 2 centavos
+    c, u, cid = motor
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (cid,))
+    for numero in ("1", "2", "3"):
+        c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, delta_valor_centavos) "
+                  "VALUES (?, 'valor', 'assinado', '2026-09-01', ?, 50_01)", (cid, numero))     # cadastro: R$ 150,03
+    c.commit()
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=300_04))  # 150,02
+    assert _capa_avisos(c, "todos") == []
+    _bol_capa(c, u, mid, 10_000_01, "b", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=300_10))  # 150,05
+    [a] = _capa_avisos(c, "todos")
+    assert (a["tipo"], a["valor_centavos"]) == ("capa_instrumento_ausente", 2)
