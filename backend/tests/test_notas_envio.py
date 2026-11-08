@@ -2103,17 +2103,65 @@ def test_nota_so_com_arredondamento_nao_pede_confirmacao(svc):
     assert [(x["numero"], x["campo"], x["grau"]) for x in sinfra["divergencias"]] == [(2276, "inss", "arredondamento")]
 
 
-def test_registro_por_fora_com_nota_divergente_pede_confirmacao_e_observacao(api):
-    """Issue #562 (code-review): o registro por fora nao contorna a regra; a nota divergente entra no ATENÇÃO e a
-    observacao, que faz as vezes do motivo, precisa de pelo menos 10 caracteres."""
+def _fora_com_motivo(cl, mid, confirmadas, motivo, observacao="Pelo Outlook, ao fiscal do contrato"):
+    return cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(mid)], "enviado_em": "2026-09-15",
+                                                      "observacao": observacao, "confirmadas": confirmadas,
+                                                      "motivo_divergencia": motivo})
+
+
+NF_DIVERGE_MTPAR = "23ª Medição: NF 2275 diverge do espelho em valor, ISS"
+
+
+def test_registro_por_fora_com_nota_divergente_pede_confirmacao_e_motivo_proprio(api):
+    """Issue #562: o registro por fora nao contorna a regra; a nota divergente entra no ATENÇÃO e pede um motivo proprio
+    (gate Sol, rodada 1 da PR #581: a observacao de como e para quem saiu nao faz as vezes dele), gravado na
+    auditoria."""
     cl, c, ids = api
     mid = ids["mtpar_exec"]
     _nota_com_conferencia(c, mid, 2275, DIVERGE)
-    aviso = "23ª Medição: NF 2275 diverge do espelho em valor, ISS"
     r = _fora(cl, mid)
     det = r.json()["detail"]
-    assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS" and det["pendencias"] == [aviso], r.text
-    r = _fora(cl, mid, confirmadas=[aviso], observacao="Outlook")
-    assert r.status_code == 422 and "A nota diverge do espelho" in r.json()["detail"]
+    assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS" and det["pendencias"] == [NF_DIVERGE_MTPAR], r.text
+    r = _fora(cl, mid, confirmadas=[NF_DIVERGE_MTPAR])            # observacao longa, sem motivo: recusa
+    assert r.status_code == 422 and r.json()["detail"] == notas_envio.MOTIVO_NOTA_DIVERGENTE
+    r = _fora_com_motivo(cl, mid, [NF_DIVERGE_MTPAR], "curto")
+    assert r.status_code == 422 and r.json()["detail"] == notas_envio.MOTIVO_NOTA_DIVERGENTE
     _sem_registro(c, mid)
-    assert _fora(cl, mid, confirmadas=[aviso]).status_code == 200
+    motivo = "NF de outra medicao, substituta pedida ao faturamento"
+    assert _fora_com_motivo(cl, mid, [NF_DIVERGE_MTPAR], motivo).status_code == 200
+    conf = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='protocolo.envio_confirmado'").fetchone()[0])
+    assert conf == {"pendencias": [NF_DIVERGE_MTPAR], "motivo_divergencia": motivo}
+    ext = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+    assert ext["motivo_divergencia"] == motivo
+
+
+def test_registro_por_fora_sem_orgao_tambem_pede_o_motivo_da_nota_divergente(api):
+    """Issue #562 (gate Sol, rodada 1 da PR #581): contrato sem orgao no cadastro nao pula a nota divergente."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    c.execute("UPDATE contratos SET orgao_id=NULL WHERE id=?", (ids["mtpar"],)); c.commit()
+    _nota_com_conferencia(c, mid, 2275, DIVERGE)
+    r = _fora(cl, mid)
+    assert r.status_code == 422 and r.json()["detail"]["pendencias"] == [NF_DIVERGE_MTPAR], r.text
+    r = _fora(cl, mid, confirmadas=[NF_DIVERGE_MTPAR])
+    assert r.status_code == 422 and r.json()["detail"] == notas_envio.MOTIVO_NOTA_DIVERGENTE
+
+
+def test_protocolo_feito_fora_com_nota_divergente_exige_assumir_e_justificar(api):
+    """Issue #562 (revisor, rodada 1 da PR #581): o "Registrar protocolo feito fora" da medicao tambem trava com a nota
+    divergente; so' passa assumido e justificado, e a ressalva grava a nota."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _nota_com_conferencia(c, mid, 2275, DIVERGE)
+    r = cl.post(f"/api/medicoes/{mid}/protocolo", json={"data": "2026-09-15"})
+    assert r.status_code == 422 and NF_DIVERGE_MTPAR in r.text, r.text
+    r = cl.post(f"/api/medicoes/{mid}/protocolo", json={"data": "2026-09-15", "apesar_das_pendencias": True,
+                                                        "justificativa": "curta"})
+    assert r.status_code == 422
+    assert c.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "nota_emitida"
+    motivo = "protocolada no balcao com a NF substituta a caminho"
+    r = cl.post(f"/api/medicoes/{mid}/protocolo", json={"data": "2026-09-15", "apesar_das_pendencias": True,
+                                                        "justificativa": motivo})
+    assert r.status_code == 201, r.text
+    assert r.json()["ressalva"]["pendencias"] == [NF_DIVERGE_MTPAR] and r.json()["ressalva"]["justificativa"] == motivo
+    assert c.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "protocolada"

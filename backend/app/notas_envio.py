@@ -545,7 +545,9 @@ def faltas_externo(conn, ms: list[dict], hoje: datetime.date | None = None) -> l
     e a FRC recusada, um por linha ("<item>: <detalhe>"). So' avisa: o registro por fora nao ganha bloqueio novo."""
     c = protocolo._contrato(conn, ms[0]["contrato_id"])
     if not c.get("orgao_id"):
-        return []
+        # issue #562 (gate Sol, rodada 1 da PR #581): sem orgao no cadastro nao ha' itens do envio a conferir, mas a
+        # nota divergente do espelho continua pedindo a confirmacao e o motivo
+        return protocolo.notas_divergentes(conn, ms)
     familia, _, _ = protocolo._orgao(conn, c)
     itens = _itens(conn, c, familia, ms, hoje or tempo.hoje_local())[0]
     # issue #278 (revisor, rodada 1 da PR #435): o reajuste sem termo que cubra a competencia, como no envio pelo
@@ -560,20 +562,29 @@ OBSERVACAO_SEM_APOSTILAMENTO = ("Sem apostilamento que cubra a competência do r
                                 f"justificativa e precisa de pelo menos {protocolo.MIN_JUSTIFICATIVA} caracteres")
 
 
-OBSERVACAO_NOTA_DIVERGENTE = ("A nota diverge do espelho: a observação faz as vezes do motivo e precisa de pelo menos "
-                              f"{protocolo.MIN_JUSTIFICATIVA} caracteres")
+# Issue #562 (gate Sol, rodada 1 da PR #581): a nota divergente pede um motivo proprio, nao a observacao de como e para
+# quem a nota foi enviada (um texto generico passava e a auditoria ficava sem explicar a divergencia)
+MOTIVO_NOTA_DIVERGENTE = ("A nota diverge do espelho: escreva o motivo do registro com a nota divergente, com pelo "
+                          f"menos {protocolo.MIN_JUSTIFICATIVA} caracteres")
 
 
-def _conferir_observacao(faltas: list[dict], obs: str) -> None:
-    if protocolo.exige_justificativa(faltas) and len(obs) < protocolo.MIN_JUSTIFICATIVA:
-        raise ValueError(OBSERVACAO_NOTA_DIVERGENTE if any(x["codigo"] == protocolo.NOTA_DIVERGENTE for x in faltas)
-                         else OBSERVACAO_SEM_APOSTILAMENTO)
+def _diverge(faltas: list[dict]) -> bool:
+    return any(x["codigo"] == protocolo.NOTA_DIVERGENTE for x in faltas)
+
+
+def _conferir_observacao(faltas: list[dict], obs: str, motivo: str | None = None) -> None:
+    if any(x["codigo"] == protocolo.SEM_APOSTILAMENTO for x in faltas) and len(obs) < protocolo.MIN_JUSTIFICATIVA:
+        raise ValueError(OBSERVACAO_SEM_APOSTILAMENTO)
+    if _diverge(faltas) and len((motivo or "").strip()) < protocolo.MIN_JUSTIFICATIVA:
+        raise ValueError(MOTIVO_NOTA_DIVERGENTE)
 
 
 def envio_externo(conn, usuario_id: int, medicao_ids: list[int], enviado_em: str, observacao: str,
                   eml: tuple[str, bytes] | None = None, irma_ids: list[int] | None = None,
-                  confirmadas: list[str] | None = None, numero_oficio: str | None = None) -> None:
-    """`irma_ids` (issue #172): a irma marcada no formulario, alem das medicoes do envio (`medicao_ids`).
+                  confirmadas: list[str] | None = None, numero_oficio: str | None = None,
+                  motivo_divergencia: str | None = None) -> None:
+    """`motivo_divergencia` (issue #562): obrigatorio quando alguma nota diverge do espelho; vai na auditoria.
+    `irma_ids` (issue #172): a irma marcada no formulario, alem das medicoes do envio (`medicao_ids`).
     `confirmadas` (issue #230): o que falta, confirmado no aviso; sem ela ou diferente -> protocolo.ConfirmarPendencias.
     `numero_oficio` (issue #231): o oficio digitado vai para o protocolo da medicao; vazio, o do ultimo envio dela.
     Conferida aqui e de novo sob o lock; a observacao continua obrigatoria."""
@@ -601,10 +612,11 @@ def envio_externo(conn, usuario_id: int, medicao_ids: list[int], enviado_em: str
             raise ValueError(NAO_E_EML)
     faltas = faltas_externo(conn, ms)
     protocolo._conferir_confirmacao(faltas, confirmadas, REGISTRO_EXTERNO)
-    _conferir_observacao(faltas, obs)                    # issue #278
+    motivo = (motivo_divergencia or "").strip() or None
+    _conferir_observacao(faltas, obs, motivo)            # issues #278 e #562
     gravado: dict = {}
     try:
-        _registrar_externo(conn, usuario_id, ids, irmas, data, obs, eml, gravado, confirmadas, oficio)
+        _registrar_externo(conn, usuario_id, ids, irmas, data, obs, eml, gravado, confirmadas, oficio, motivo)
     except BaseException:
         if gravado.get("novo"):
             _remover_eml_sem_registro(conn, gravado["rel"])
@@ -646,7 +658,7 @@ def _remover_eml_sem_registro(conn, rel: str) -> None:
 
 def _registrar_externo(conn, usuario_id: int, ids: list[int], irmas: set[int], data: datetime.date, obs: str,
                        eml: tuple[str, bytes] | None, gravado: dict, confirmadas: list[str] | None = None,
-                       oficio: str | None = None) -> None:
+                       oficio: str | None = None, motivo: str | None = None) -> None:
     rel = sha = None
     with db.mutacao(conn):
         try:
@@ -655,9 +667,10 @@ def _registrar_externo(conn, usuario_id: int, ids: list[int], irmas: set[int], d
             # ressalva, que junta a observacao e a lista
             no_lock = faltas_externo(conn, ms)
             protocolo._conferir_confirmacao(no_lock, confirmadas, REGISTRO_EXTERNO)
-            _conferir_observacao(no_lock, obs)
+            _conferir_observacao(no_lock, obs, motivo)
             faltam = [x["mensagem"] for x in no_lock]
-            ressalva = f"Envio feito por fora: {obs}" + \
+            motivo = motivo if _diverge(no_lock) else None       # sem nota divergente agora, o motivo nao se grava
+            ressalva = f"Envio feito por fora: {obs}" + (f"; motivo da nota divergente: {motivo}" if motivo else "") + \
                 (f"; {protocolo.CONFIRMADO_COM_FALTA}{'; '.join(faltam)}" if faltam else "")
             if eml:     # gate Sol S2 (PR #178): depois das conferencias, para a recusa nao deixar arquivo solto
                 # issue #180: anota se ESTE registro criou o arquivo; o que ja' existia (mesmo hash) nunca e' apagado
@@ -670,7 +683,7 @@ def _registrar_externo(conn, usuario_id: int, ids: list[int], irmas: set[int], d
                                              apesar_das_pendencias=True, justificativa=ressalva)
                 if faltam:      # quem confirmou e quando: o usuario e o carimbo da propria linha da auditoria
                     auditoria.registrar(conn, usuario_id, "protocolo.envio_confirmado", "medicao", m["id"], None,
-                                        {"pendencias": faltam})
+                                        {"pendencias": faltam, **({"motivo_divergencia": motivo} if motivo else {})})
                 conn.execute("UPDATE medicoes SET envio_origem='externo', envio_externo_em=?, envio_externo_obs=? "
                              "WHERE id=?", (data.isoformat(), obs, m["id"]))
                 if rel:
@@ -683,6 +696,7 @@ def _registrar_externo(conn, usuario_id: int, ids: list[int], irmas: set[int], d
             auditoria.registrar(conn, usuario_id, "notas.envio_externo", "medicao", ids[0], None,
                                 {"medicoes": ids, "enviado_em": data.isoformat(), "observacao": obs, "eml": rel,
                                  **({"numero_oficio": oficio} if oficio else {}),       # issue #231
+                                 **({"motivo_divergencia": motivo} if motivo else {}),  # issue #562
                                  # revisor adversarial da PR #237: o registro do protocolo da medicao so' grava a
                                  # justificativa com certidao pendente; a ressalva "<observacao>; <lista>" fica aqui
                                  **({"confirmadas": faltam, "ressalva": f"{obs}; {protocolo.CONFIRMADO_COM_FALTA}"

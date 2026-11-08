@@ -3,6 +3,7 @@ import { api, apiForm, ApiErro } from "./api";
 import ConfirmarFaltas from "./ConfirmarFaltas";
 import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
+import { MIN_JUSTIFICATIVA } from "./JustificativaEnvio";
 import { avisoPorFora, mensagem, notasDe, type Envio, type Irma } from "./NotasAEnviar";
 import { hojeLocal } from "./tempo";
 
@@ -30,6 +31,8 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
   const [oficio, setOficio] = useState("");
   const [processo, setProcesso] = useState("");
   const [obs, setObs] = useState("");
+  // issue #562: com nota divergente do espelho, o motivo vai num campo proprio (a observacao nao faz as vezes dele)
+  const [motivo, setMotivo] = useState("");
   const [eml, setEml] = useState<File | null>(null);
   const dela = envios.filter(e => e.medicao_ids.includes(medicaoId));
   const [marcados, setMarcados] = useState<string[]>((dela.length > 0 ? dela : envios.slice(0, 1)).map(e => e.chave));
@@ -40,6 +43,9 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
   // issue #230: a lista confirmada de cada envio, e o envio esperando a confirmacao no aviso
   const [confirmadas, setConfirmadas] = useState<Record<string, string[]>>({});
   const [confirmar, setConfirmar] = useState<{ chave: string; itens: string[]; mudou: boolean } | null>(null);
+
+  const diverge = envios.some(e => marcados.includes(e.chave) && (e.divergencias ?? []).some(d => d.grau === "divergente"));
+  const motivoCurto = diverge && motivo.trim().length < MIN_JUSTIFICATIVA;
 
   const fechar = () => { if (parcial) aoRecarregar(); aoFechar(); };
 
@@ -67,6 +73,7 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
         for (const i of juntas) fd.append("irma_ids", String(i.medicao_id));
         fd.append("enviado_em", data);
         fd.append("observacao", observacao);
+        if (diverge) fd.append("motivo_divergencia", motivo.trim());
         // como o processo: cada envio tem o seu oficio, entao so' vai com um envio marcado
         if (oficio.trim() && escolhidos.length === 1) fd.append("numero_oficio", oficio.trim());
         if (eml) fd.append("eml", eml);
@@ -137,6 +144,13 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
           <textarea id="porfora-obs" rows={2} maxLength={2000} required value={obs}
             onChange={e => setObs(e.target.value)} />
         </div>
+        {diverge && (
+          <div className="campo">
+            <label className="campo__rotulo" htmlFor="porfora-motivo">Motivo do registro com a nota divergente (obrigatório)</label>
+            <textarea id="porfora-motivo" name="motivo_divergencia" rows={2} maxLength={2000} required value={motivo}
+              onChange={e => setMotivo(e.target.value)} />
+          </div>
+        )}
         <fieldset className="opcoes">
           <legend className="campo__rotulo">O que saiu neste envio</legend>
           {envios.map(e => (
@@ -161,7 +175,7 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
         </fieldset>
         {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
         <div className="iniciar__rodape">
-          <button type="submit" className="btn btn--primario" disabled={ocupado || !data || !obs.trim()}>{ocupado ? "Gravando…" : "Registrar"}</button>
+          <button type="submit" className="btn btn--primario" disabled={ocupado || !data || !obs.trim() || motivoCurto}>{ocupado ? "Gravando…" : "Registrar"}</button>
           <button type="button" className="btn" onClick={fechar}>Cancelar</button>
         </div>
       </form>
