@@ -41,6 +41,8 @@ const contagem = (n: number | null | undefined) => (n == null ? "—" : n.toLoca
 type StatusRm = {
   configurado: boolean; ultima_sincronizacao: string | null; ultimo_erro: string | null;
   em_andamento: boolean; rodadas: Rodada[];
+  // #603: aviso do retrato de custo vigente (linhas puladas), da última rodada que trouxe o custo
+  custo_aviso?: string | null;
 };
 // Bloco 9: fica so' quem conectou a propria conta para enviar e-mail; a conexao e' feita por cada pessoa em Minha conta.
 type Conta = { usuario_id: number; nome: string; email: string; perfil: string; conectada: boolean; token_em: string | null };
@@ -195,6 +197,8 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
         <h2 className="cartao__titulo" id="titulo-rm">Rodadas de sincronização com o RM</h2>
       </div>
       {erroCarga && <Erro texto={erroCarga} />}
+
+      {status?.custo_aviso && <p className="campo__nota situacao__erro" role="status">{status.custo_aviso}</p>}
 
       {status?.configurado && ultima === null && <div className="vazio vazio--curto"><p>Nenhuma rodada.</p></div>}
 

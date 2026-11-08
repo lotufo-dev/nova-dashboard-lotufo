@@ -47,6 +47,7 @@ import re
 import sqlite3
 import threading
 import time
+from collections import Counter
 from decimal import Decimal, InvalidOperation
 
 from app import auditoria, db, medicoes, rm, tempo
@@ -745,7 +746,7 @@ def vinculos_fora_da_cobranca(conn) -> list[dict]:
 # DASH25 devolve dezenas de milhares de linhas: a rodada agendada traz o custo uma vez por dia (a primeira que achar
 # o retrato com mais de INTERVALO_CUSTO_HORAS); o disparo manual sempre traz.
 INTERVALO_CUSTO_HORAS = 23
-_SEM_CUSTO = {"custo_tarefas": None, "estoque_baixas": None, "custo_erro": None}
+_SEM_CUSTO = {"custo_tarefas": None, "estoque_baixas": None, "custo_erro": None, "custo_aviso": None}
 
 
 def _texto(valor) -> str | None:
@@ -771,11 +772,42 @@ def _mes(linha: dict, codigo: str) -> str:
     return f"{ano:04d}-{mes:02d}"
 
 
-def _linhas_custo(linhas: list[dict]) -> list[tuple]:
+def _linhas_custo(linhas: list[dict]) -> tuple[list[tuple], list[tuple]]:
+    """Linhas de custo prontas e (MES, centro de custo) das puladas: mes numerico fora do intervalo, dado do RM que
+    se corrige la', sem adivinhar o mes. Qualquer outro defeito da linha continua derrubando a leitura, e se mais
+    de TETO_PULADAS_PCT das linhas vem sem mes valido (visao mudada) a leitura inteira falha em vez de apagar o
+    retrato anterior."""
     c = rm.CONSULTA_CUSTO
-    return [(_inteiro(x, "CODCOLIGADA", c), _texto(x.get("CODCCUSTO")), _texto(x.get("CODPRJ")),
-             _texto(x.get("CODTRF")), _texto(x.get("NATUREZA")), _mes(x, c), _inteiro(x, "QTD", c, False),
-             rm.centavos(x.get("VALOR"))) for x in linhas]
+    prontas, puladas = [], []
+    for x in linhas:
+        mes_bruto = _inteiro(x, "MES", c)
+        ano, mm = divmod(mes_bruto, 100)
+        if not (rm.ANO_MINIMO <= ano <= 2100 and 1 <= mm <= 12):
+            puladas.append((mes_bruto, _texto(x.get("CODCCUSTO"))))
+            continue
+        prontas.append((_inteiro(x, "CODCOLIGADA", c), _texto(x.get("CODCCUSTO")), _texto(x.get("CODPRJ")),
+                        _texto(x.get("CODTRF")), _texto(x.get("NATUREZA")), _mes(x, c), _inteiro(x, "QTD", c, False),
+                        rm.centavos(x.get("VALOR"))))
+    if puladas and len(puladas) * 100 > len(linhas) * TETO_PULADAS_PCT:
+        raise rm.ErroRM(f"Consulta {c} com {len(puladas)} de {len(linhas)} linhas de mês ilegível "
+                        f"({_resumo_puladas(puladas)}): retrato anterior mantido")
+    return prontas, puladas
+
+
+# Acima disso a visao do RM mudou (nao e' mais uma linha errada): a leitura falha e o retrato anterior fica.
+TETO_PULADAS_PCT = 1
+
+
+def _resumo_puladas(puladas: list[tuple]) -> str:
+    meses = Counter(m for m, _ in puladas).most_common(5)
+    centros = Counter(cc or "sem centro" for _, cc in puladas).most_common(5)
+    return f"mês {', '.join(str(m) for m, _ in meses)}; centro de custo {', '.join(c for c, _ in centros)}"
+
+
+def _aviso_linhas_puladas(puladas: list[tuple]) -> str | None:
+    if not puladas:
+        return None
+    return f"{len(puladas)} linha(s) de custo puladas por mês ilegível ({_resumo_puladas(puladas)})"[:500]
 
 
 def _linhas_estoque(linhas: list[dict]) -> list[tuple]:
@@ -816,7 +848,10 @@ def _sincronizar_custo(conn, cliente, rodada_id: int) -> dict:
     rodada (sucesso ou falha), para que uma escrita a mais com o banco ocupado nao derrube as notas.
     """
     try:
-        custo = _linhas_custo(cliente.consultar(rm.CONSULTA_CUSTO))
+        custo, puladas = _linhas_custo(cliente.consultar(rm.CONSULTA_CUSTO))
+        aviso = _aviso_linhas_puladas(puladas)
+        if aviso:
+            log.warning("custo do RM (rodada %s): %s", rodada_id, aviso)
         estoque = _linhas_estoque(cliente.consultar(rm.CONSULTA_ESTOQUE))
         with db.mutacao(conn):
             _garantir_posse(conn, rodada_id)
@@ -826,9 +861,11 @@ def _sincronizar_custo(conn, cliente, rodada_id: int) -> dict:
             conn.execute("DELETE FROM rm_estoque_baixas")
             conn.executemany("""INSERT INTO rm_estoque_baixas (coligada, centro_custo, tipo_movimento, mes, qtd,
                                 valor_centavos) VALUES (?,?,?,?,?,?)""", estoque)
-            conn.execute("UPDATE rm_sincronizacoes SET custo_tarefas=?, estoque_baixas=? WHERE id=?",
-                         (len(custo), len(estoque), rodada_id))
-        return {"custo_tarefas": len(custo), "estoque_baixas": len(estoque), "custo_erro": None}
+            # o aviso entra junto da contagem: se a rodada morrer ou expirar depois, o retrato vigente ainda o tem
+            conn.execute("UPDATE rm_sincronizacoes SET custo_tarefas=?, estoque_baixas=?, custo_aviso=? WHERE id=?",
+                         (len(custo), len(estoque), aviso, rodada_id))
+        return {"custo_tarefas": len(custo), "estoque_baixas": len(estoque), "custo_erro": None,
+                "custo_aviso": aviso}
     except RodadaPerdida:
         raise
     except rm.ErroRM as e:
@@ -895,10 +932,10 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
                     resumo["sugestoes"] += 1
             resumo["recebimentos"] = _recebimentos(conn)
             conn.execute("""UPDATE rm_sincronizacoes SET estado='success', terminado_em=datetime('now'),
-                            nfs=?, baixas=?, alocacoes=?, sugestoes=?, recebimentos=?, custo_erro=?
-                            WHERE id=? AND estado='running'""",
+                            nfs=?, baixas=?, alocacoes=?, sugestoes=?, recebimentos=?, custo_erro=?,
+                            custo_aviso=? WHERE id=? AND estado='running'""",
                          (resumo["nfs"], resumo["baixas"], resumo["alocacoes"], resumo["sugestoes"],
-                          resumo["recebimentos"], custo["custo_erro"], rodada_id))
+                          resumo["recebimentos"], custo["custo_erro"], custo["custo_aviso"], rodada_id))
             auditoria.registrar(conn, None, "rm.sincronizacao", "rm_sincronizacao", rodada_id, None,
                                 {"disparo": disparo, **resumo, **custo})
         ESTADO["ultima_sincronizacao"] = tempo.para_local(tempo.agora_utc()).isoformat(timespec="seconds")
@@ -911,11 +948,19 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
         with db.mutacao(conn):
             # So' a dona da trava fecha a rodada: expirada por outra execucao, a linha fica como a outra deixou.
             conn.execute("""UPDATE rm_sincronizacoes SET estado='failed', terminado_em=datetime('now'), erro=?,
-                            custo_erro=? WHERE id=? AND estado='running'""", (msg, custo["custo_erro"], rodada_id))
+                            custo_erro=?, custo_aviso=? WHERE id=? AND estado='running'""",
+                         (msg, custo["custo_erro"], custo["custo_aviso"], rodada_id))
         ESTADO["ultimo_erro"] = msg
         return {"id": rodada_id, "estado": "failed", "erro": msg, **custo}
     finally:
         ESTADO["em_andamento"] = False
+
+
+def aviso_do_custo(conn) -> str | None:
+    """Aviso do retrato de custo vigente: o da ultima rodada que o trouxe (as horarias seguintes nao trazem)."""
+    r = conn.execute("""SELECT custo_aviso FROM rm_sincronizacoes WHERE custo_tarefas IS NOT NULL
+                        ORDER BY id DESC LIMIT 1""").fetchone()
+    return r["custo_aviso"] if r else None
 
 
 def rodadas(conn, limite: int = 10) -> list[dict]:
