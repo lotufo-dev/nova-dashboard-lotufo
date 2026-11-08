@@ -541,9 +541,9 @@ def test_lista_traz_a_irma_em_outro_envio_so_onde_medicao_e_reajuste_vao_juntos(
     for obra in ("sinfra", "vg"):
         por_medicao = {x["medicao_ids"][0]: x for x in _por_contrato(lista, ids[obra])}
         assert por_medicao[ids[f"{obra}_exec"]]["irmas"] == [
-            {"medicao_id": ids[f"{obra}_reaj"], "titulo": "Reajuste da 23ª Medição", "tipo": "reajuste"}]
+            {"medicao_id": ids[f"{obra}_reaj"], "titulo": "Reajuste da 23ª Medição", "tipo": "reajuste", "divergencias": []}]
         assert por_medicao[ids[f"{obra}_reaj"]]["irmas"] == [
-            {"medicao_id": ids[f"{obra}_exec"], "titulo": "23ª Medição", "tipo": "execucao"}]
+            {"medicao_id": ids[f"{obra}_exec"], "titulo": "23ª Medição", "tipo": "execucao", "divergencias": []}]
     assert all(x["irmas"] == [] for x in _por_contrato(lista, ids["mtpar"]))       # MTPAR tramita separado
     # irma que nao esta' em nota emitida nao e' oferecida
     c.execute("UPDATE medicoes SET estado='espelho_enviado' WHERE id=?", (ids["sinfra_reaj"],)); c.commit()
@@ -2052,3 +2052,142 @@ def test_pacote_sem_o_texto_guardado_mostra_montar_de_novo(svc):
     protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
     d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
     assert (d["bloqueio"], d["remontar"]) == (None, False)
+
+
+# --- issue #562: nota divergente do espelho no envio ---------------------------------------------------------------
+
+def _nota_com_conferencia(c, mid, numero, conferencia):
+    """Nota da Lotufo alocada a' medicao com a conferencia gravada (como notas._vincular a grava)."""
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, numero, numero_int, valor_centavos, conferencia, origem) "
+                    "VALUES (1,?,?,?,?,'pdf')", (str(numero), numero, 18017069, json.dumps(conferencia))).lastrowid
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+              "VALUES (?,?,?,'manual','teste')", (mid, nid, 18017069))
+    c.commit()
+    return nid
+
+
+DIVERGE = [{"campo": "valor", "espelho": 14800001, "nota": 18017069, "grau": "divergente"},
+           {"campo": "iss", "espelho": 296000, "nota": 360341, "grau": "divergente"},
+           {"campo": "inss", "espelho": 162800, "nota": 162801, "grau": "arredondamento"}]
+NF_DIVERGE = "23ª Medição: NF 2275 diverge do espelho em valor, ISS"
+
+
+def test_envio_com_nota_divergente_pede_confirmacao_e_motivo_que_vai_para_a_auditoria(api):
+    """Issue #562: a nota divergente vira pendencia (so' os campos de grau divergente) e o envio exige confirmacao e
+    motivo escrito; sem o motivo nada sai; com ele, o motivo fica na auditoria gravada antes do e-mail."""
+    cl, c, ids = api
+    _nota_com_conferencia(c, ids["sinfra_exec"], 2275, DIVERGE)
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"], "medicao_ids": [
+        ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    assert d["pendencias"] == [NF_DIVERGE] and d["exige_justificativa"] is True
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d))
+    assert r.status_code == 422 and r.json()["detail"]["codigo"] == "CONFIRMAR_PENDENCIAS"
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"]))
+    assert r.status_code == 422 and "A nota diverge do espelho: escreva o motivo" in r.text
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0 and _confirmacoes(c) == []
+    motivo = "NF de valor maior por erro do faturamento, conferido"
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"], justificativa=motivo))
+    assert r.status_code == 200, r.text
+    depois = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='protocolo.envio_confirmado'").fetchone()[0])
+    assert depois == {"pendencias": [NF_DIVERGE], "justificativa": motivo}
+
+
+def test_nota_so_com_arredondamento_nao_pede_confirmacao(svc):
+    c, ids = svc
+    _nota_com_conferencia(c, ids["sinfra_exec"], 2276, [DIVERGE[2]])
+    pid = notas_envio.iniciar(c, ids["uid"], ids["sinfra"], [ids["sinfra_exec"], ids["sinfra_reaj"]])
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert d["pendencias"] == [] and d["exige_justificativa"] is False
+    sinfra, = _por_contrato(notas_envio.a_enviar(c, HOJE), ids["sinfra"])
+    assert [(x["numero"], x["campo"], x["grau"]) for x in sinfra["divergencias"]] == [(2276, "inss", "arredondamento")]
+
+
+def _fora_com_motivo(cl, mid, confirmadas, motivo, observacao="Pelo Outlook, ao fiscal do contrato"):
+    return cl.post("/api/notas/envio-externo", data={"medicao_ids": [str(mid)], "enviado_em": "2026-09-15",
+                                                      "observacao": observacao, "confirmadas": confirmadas,
+                                                      "motivo_divergencia": motivo})
+
+
+NF_DIVERGE_MTPAR = "23ª Medição: NF 2275 diverge do espelho em valor, ISS"
+
+
+def test_registro_por_fora_com_nota_divergente_pede_confirmacao_e_motivo_proprio(api):
+    """Issue #562: o registro por fora nao contorna a regra; a nota divergente entra no ATENÇÃO e pede um motivo proprio
+    (gate Sol, rodada 1 da PR #581: a observacao de como e para quem saiu nao faz as vezes dele), gravado na
+    auditoria."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _nota_com_conferencia(c, mid, 2275, DIVERGE)
+    r = _fora(cl, mid)
+    det = r.json()["detail"]
+    assert r.status_code == 422 and det["codigo"] == "CONFIRMAR_PENDENCIAS" and det["pendencias"] == [NF_DIVERGE_MTPAR], r.text
+    r = _fora(cl, mid, confirmadas=[NF_DIVERGE_MTPAR])            # observacao longa, sem motivo: recusa
+    assert r.status_code == 422 and r.json()["detail"] == notas_envio.MOTIVO_NOTA_DIVERGENTE
+    r = _fora_com_motivo(cl, mid, [NF_DIVERGE_MTPAR], "curto")
+    assert r.status_code == 422 and r.json()["detail"] == notas_envio.MOTIVO_NOTA_DIVERGENTE
+    _sem_registro(c, mid)
+    motivo = "NF de outra medicao, substituta pedida ao faturamento"
+    assert _fora_com_motivo(cl, mid, [NF_DIVERGE_MTPAR], motivo).status_code == 200
+    conf = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='protocolo.envio_confirmado'").fetchone()[0])
+    assert conf == {"pendencias": [NF_DIVERGE_MTPAR], "motivo_divergencia": motivo}
+    ext = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+    assert ext["motivo_divergencia"] == motivo
+
+
+def test_registro_por_fora_sem_orgao_tambem_pede_o_motivo_da_nota_divergente(api):
+    """Issue #562 (gate Sol, rodada 1 da PR #581): contrato sem orgao no cadastro nao pula a nota divergente."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    c.execute("UPDATE contratos SET orgao_id=NULL WHERE id=?", (ids["mtpar"],)); c.commit()
+    _nota_com_conferencia(c, mid, 2275, DIVERGE)
+    r = _fora(cl, mid)
+    assert r.status_code == 422 and r.json()["detail"]["pendencias"] == [NF_DIVERGE_MTPAR], r.text
+    r = _fora(cl, mid, confirmadas=[NF_DIVERGE_MTPAR])
+    assert r.status_code == 422 and r.json()["detail"] == notas_envio.MOTIVO_NOTA_DIVERGENTE
+
+
+def test_protocolo_feito_fora_com_nota_divergente_exige_assumir_e_justificar(api):
+    """Issue #562 (revisor, rodada 1 da PR #581): o "Registrar protocolo feito fora" da medicao tambem trava com a nota
+    divergente; so' passa assumido e justificado, e a ressalva grava a nota."""
+    cl, c, ids = api
+    mid = ids["mtpar_exec"]
+    _nota_com_conferencia(c, mid, 2275, DIVERGE)
+    r = cl.post(f"/api/medicoes/{mid}/protocolo", json={"data": "2026-09-15"})
+    assert r.status_code == 422 and NF_DIVERGE_MTPAR in r.text, r.text
+    r = cl.post(f"/api/medicoes/{mid}/protocolo", json={"data": "2026-09-15", "apesar_das_pendencias": True,
+                                                        "justificativa": "curta"})
+    assert r.status_code == 422
+    assert c.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "nota_emitida"
+    motivo = "protocolada no balcao com a NF substituta a caminho"
+    r = cl.post(f"/api/medicoes/{mid}/protocolo", json={"data": "2026-09-15", "apesar_das_pendencias": True,
+                                                        "justificativa": motivo})
+    assert r.status_code == 201, r.text
+    assert r.json()["ressalva"]["pendencias"] == [NF_DIVERGE_MTPAR] and r.json()["ressalva"]["justificativa"] == motivo
+    assert c.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "protocolada"
+
+
+def test_irma_com_nota_divergente_traz_a_conferencia_e_o_registro_por_fora_pede_o_motivo(api):
+    """Issue #562 (revisor, rodada 2 da PR #581): na SINFRA a irma (reajuste) fora do envio com a nota divergente vem com
+    a conferencia na lista, para a tela pedir o motivo; registrada junto, o servidor exige o motivo e o grava."""
+    cl, c, ids = api
+    c.execute("UPDATE medicoes SET competencia='2026-08' WHERE id=?", (ids["sinfra_reaj"],)); c.commit()
+    _nota_com_conferencia(c, ids["sinfra_reaj"], 2275, DIVERGE)
+    sinfra = next(x for x in _por_contrato(notas_envio.a_enviar(c, HOJE), ids["sinfra"])
+                  if x["medicao_ids"] == [ids["sinfra_exec"]])
+    assert [d["campo"] for d in sinfra["divergencias"]] == []                       # o envio em si nao diverge
+    irma, = sinfra["irmas"]
+    assert [(d["numero"], d["campo"], d["grau"]) for d in irma["divergencias"]] == [
+        (2275, "valor", "divergente"), (2275, "iss", "divergente"), (2275, "inss", "arredondamento")]
+    base = {"medicao_ids": [str(ids["sinfra_exec"])], "irma_ids": [str(ids["sinfra_reaj"])], "enviado_em": "2026-09-15",
+            "observacao": "Pelo Outlook, ao fiscal do contrato"}
+    r = cl.post("/api/notas/envio-externo", data=base)
+    pend = r.json()["detail"]["pendencias"]
+    assert r.status_code == 422 and "Reajuste da 23ª Medição: NF 2275 diverge do espelho em valor, ISS" in pend, r.text
+    r = cl.post("/api/notas/envio-externo", data={**base, "confirmadas": pend})
+    assert r.status_code == 422 and r.json()["detail"] == notas_envio.MOTIVO_NOTA_DIVERGENTE
+    motivo = "NF do reajuste trocada, substituta pedida"
+    r = cl.post("/api/notas/envio-externo", data={**base, "confirmadas": pend, "motivo_divergencia": motivo})
+    assert r.status_code == 200, r.text
+    ext = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='notas.envio_externo'").fetchone()[0])
+    assert ext["motivo_divergencia"] == motivo

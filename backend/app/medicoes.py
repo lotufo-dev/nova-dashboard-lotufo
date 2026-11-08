@@ -600,6 +600,13 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         pendencias = [*pendentes, NOTA_NAO_EMITIDA] if sem_nota else list(pendentes)
         if sem_nota:
             motivos.append(NOTA_NAO_EMITIDA)
+        if exige_nota:
+            # Issue #562 (revisor, rodada 1 da PR #581): a nota divergente do espelho tambem trava o protocolo feito
+            # fora, como no envio pelo sistema: so' passa assumida e justificada, e a ressalva a registra
+            from app import protocolo as _protocolo   # import local: protocolo importa este modulo
+            divergentes = [x["mensagem"] for x in _protocolo.notas_divergentes(conn, [m])]
+            pendencias += divergentes
+            motivos += divergentes
         ressalva = None
         if pendencias:
             if not apesar_das_pendencias:
