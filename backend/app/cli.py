@@ -515,6 +515,19 @@ def _dono(args) -> int:
     return 0
 
 
+def _auditoria(args) -> int:
+    """`auditoria conferir --linha N --hash H` (issue #424): a linha e o hash do resumo de segurança diário ainda
+    estão na cadeia da auditoria do banco (DASH_DB_PATH)? Só lê."""
+    from app import auditoria
+    conn = db.get_conn()
+    try:
+        confere = auditoria.conferir_linha(conn, args.linha, args.hash)
+    finally:
+        conn.close()
+    print("confere" if confere else "não confere")
+    return 0 if confere else 1
+
+
 def _sentinela(args) -> int:
     """`sentinela antes-da-456 --banco <db>` (issue #478): com o serviço parado e antes de voltar o código para um
     commit anterior à #456, passa o ponto de leitura da sentinela para a auditoria e tira a tabela, os gatilhos e a
@@ -590,6 +603,10 @@ def main(argv: list[str] | None = None) -> int:
     sen = sub.add_parser("sentinela", help="rollback para antes da issue #456 (o deploy.ps1 chama; ver o runbook)")
     sen.add_argument("acao", choices=["antes-da-456"])
     sen.add_argument("--banco", required=True, help="banco da produção, com o serviço parado")
+    aud = sub.add_parser("auditoria", help="confere a linha e o hash do resumo de segurança diário")
+    aud.add_argument("acao", choices=["conferir"])
+    aud.add_argument("--linha", required=True, type=int, help="número da linha da auditoria (o do resumo)")
+    aud.add_argument("--hash", required=True, help="hash da linha (o do resumo)")
     dn = sub.add_parser("dono", help="cópia cifrada para a chave do dono")
     dn.add_argument("acao", choices=["gerar-chave"])
     dn.add_argument("--saida", required=True, help="pasta onde gravar o par de chaves")
@@ -601,6 +618,8 @@ def main(argv: list[str] | None = None) -> int:
         return _conta(args)
     if args.cmd == "dono":
         return _dono(args)
+    if args.cmd == "auditoria":
+        return _auditoria(args)
     if args.cmd == "sentinela":
         return _sentinela(args)
     if args.cmd == "documentos":

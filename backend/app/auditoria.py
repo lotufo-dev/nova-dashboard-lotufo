@@ -55,3 +55,20 @@ def verificar_cadeia(conn: sqlite3.Connection) -> bool:
             return False
         esperado = r["hash"]
     return True
+
+
+def conferir_linha(conn: sqlite3.Connection, linha: int, hash_: str) -> bool:
+    """Issue #424: a linha `linha` da auditoria tem o hash `hash_` (o do resumo diario, ancora fora da VM) e a cadeia
+    do comeco ate' ela confere. Quem reescreve a auditoria inteira recalcula os hashes: o enviado deixa de existir."""
+    esperado = "genesis"
+    for r in conn.execute("SELECT * FROM audit_log WHERE id <= ? ORDER BY id", (linha,)):
+        if r["hash_prev"] != esperado:
+            return False
+        corpo = _payload(r["usuario_id"], r["acao"], r["entidade"], r["entidade_id"],
+                         r["antes"], r["depois"], r["criado_em"])
+        if hashlib.sha256((r["hash_prev"] + corpo).encode()).hexdigest() != r["hash"]:
+            return False
+        esperado = r["hash"]
+        if r["id"] == linha:
+            return r["hash"] == hash_.strip().lower()
+    return False
