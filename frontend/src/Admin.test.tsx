@@ -501,16 +501,18 @@ test("Saúde: a rodada mostra as linhas de custo por tarefa e de baixa de estoqu
   expect(within(primeira).queryByText(/Custos e estoque não atualizados/)).toBeNull();
 });
 
-test("Saúde: a rodada mostra o aviso das linhas de custo puladas por mês ilegível (#603)", async () => {
-  const aviso = "1 linha(s) de custo puladas por mês ilegível (220112)";
-  const comAviso = { ...RODADA_BOA, id: 6, custo_tarefas: 57011, estoque_baixas: 301, custo_erro: null, custo_aviso: aviso };
+test("Saúde: mostra o aviso das linhas de custo puladas mesmo quando a rodada que o gerou saiu da tabela (#603)", async () => {
+  const aviso = "1 linha(s) de custo puladas por mês ilegível (MES 220112; centro de custo 2.001.012)";
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null,
-    rodadas: [comAviso, { ...RODADA_BOA, id: 5, custo_aviso: null }] });
-  const tabela = await screen.findByRole("table", { name: "Últimas rodadas de sincronização com o RM" });
-  const [, primeira, segunda] = within(tabela).getAllByRole("row");
-  expect(within(primeira).getByText(aviso)).toBeTruthy();
-  expect(within(primeira).queryByText(/não atualizados/)).toBeNull();
-  expect(within(segunda).queryByText(/puladas/)).toBeNull();
+    rodadas: [{ ...RODADA_BOA, id: 6, custo_aviso: null }], custo_aviso: aviso });
+  expect(await screen.findByText(aviso)).toBeTruthy();
+});
+
+test("Saúde: sem linha de custo pulada, não há aviso (#603)", async () => {
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null,
+    rodadas: [RODADA_BOA], custo_aviso: null });
+  await screen.findByRole("table", { name: "Últimas rodadas de sincronização com o RM" });
+  expect(document.body.textContent).not.toMatch(/puladas por mês ilegível/);
 });
 
 // Issue #330: o monitor do SIGA ao lado da saúde do RM

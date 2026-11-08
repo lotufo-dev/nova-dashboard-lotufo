@@ -47,6 +47,7 @@ import re
 import sqlite3
 import threading
 import time
+from collections import Counter
 from decimal import Decimal, InvalidOperation
 
 from app import auditoria, db, medicoes, rm, tempo
@@ -763,44 +764,50 @@ def _inteiro(linha: dict, campo: str, codigo: str, obrigatorio: bool = True) -> 
         raise rm.ErroRM(f"Consulta {codigo} com {campo} ilegível: {valor!r}") from None
 
 
-class MesForaDoIntervalo(rm.ErroRM):
-    """MES numerico, mas fora do intervalo aceito (ex.: 220112)."""
-
-    def __init__(self, mensagem: str, valor):
-        super().__init__(mensagem)
-        self.valor = valor
-
-
 def _mes(linha: dict, codigo: str) -> str:
     """MES do RM (AAAAMM, inteiro) -> 'AAAA-MM'."""
     ano, mes = divmod(_inteiro(linha, "MES", codigo), 100)
     if not (rm.ANO_MINIMO <= ano <= 2100 and 1 <= mes <= 12):
-        raise MesForaDoIntervalo(f"Consulta {codigo} com mês ilegível: {linha.get('MES')!r}", linha.get("MES"))
+        raise rm.ErroRM(f"Consulta {codigo} com mês ilegível: {linha.get('MES')!r}")
     return f"{ano:04d}-{mes:02d}"
 
 
-def _linhas_custo(linhas: list[dict]) -> tuple[list[tuple], list]:
-    """Linhas de custo prontas e os valores de MES das puladas (mes numerico fora do intervalo: o dado e' do RM e
-    corrige-se la', sem adivinhar o mes). Qualquer outro defeito da linha continua derrubando a leitura."""
+def _linhas_custo(linhas: list[dict]) -> tuple[list[tuple], list[tuple]]:
+    """Linhas de custo prontas e (MES, centro de custo) das puladas: mes numerico fora do intervalo, dado do RM que
+    se corrige la', sem adivinhar o mes. Qualquer outro defeito da linha continua derrubando a leitura, e se mais
+    de TETO_PULADAS_PCT das linhas vem sem mes valido (visao mudada) a leitura inteira falha em vez de apagar o
+    retrato anterior."""
     c = rm.CONSULTA_CUSTO
     prontas, puladas = [], []
     for x in linhas:
-        try:
-            mes = _mes(x, c)
-        except MesForaDoIntervalo as e:
-            puladas.append(e.valor)
+        mes_bruto = _inteiro(x, "MES", c)
+        ano, mm = divmod(mes_bruto, 100)
+        if not (rm.ANO_MINIMO <= ano <= 2100 and 1 <= mm <= 12):
+            puladas.append((mes_bruto, _texto(x.get("CODCCUSTO"))))
             continue
         prontas.append((_inteiro(x, "CODCOLIGADA", c), _texto(x.get("CODCCUSTO")), _texto(x.get("CODPRJ")),
-                        _texto(x.get("CODTRF")), _texto(x.get("NATUREZA")), mes, _inteiro(x, "QTD", c, False),
+                        _texto(x.get("CODTRF")), _texto(x.get("NATUREZA")), _mes(x, c), _inteiro(x, "QTD", c, False),
                         rm.centavos(x.get("VALOR"))))
+    if puladas and len(puladas) * 100 > len(linhas) * TETO_PULADAS_PCT:
+        raise rm.ErroRM(f"Consulta {c} com {len(puladas)} de {len(linhas)} linhas de mês ilegível "
+                        f"({_resumo_puladas(puladas)}): retrato anterior mantido")
     return prontas, puladas
 
 
-def _aviso_linhas_puladas(puladas: list) -> str | None:
+# Acima disso a visao do RM mudou (nao e' mais uma linha errada): a leitura falha e o retrato anterior fica.
+TETO_PULADAS_PCT = 1
+
+
+def _resumo_puladas(puladas: list[tuple]) -> str:
+    meses = Counter(m for m, _ in puladas).most_common(5)
+    centros = Counter(cc or "sem centro" for _, cc in puladas).most_common(5)
+    return f"MES {', '.join(str(m) for m, _ in meses)}; centro de custo {', '.join(c for c, _ in centros)}"
+
+
+def _aviso_linhas_puladas(puladas: list[tuple]) -> str | None:
     if not puladas:
         return None
-    valores = ", ".join(sorted({str(v) for v in puladas})[:5])
-    return f"{len(puladas)} linha(s) de custo puladas por mês ilegível ({valores})"[:500]
+    return f"{len(puladas)} linha(s) de custo puladas por mês ilegível ({_resumo_puladas(puladas)})"[:500]
 
 
 def _linhas_estoque(linhas: list[dict]) -> list[tuple]:
@@ -940,11 +947,19 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
         with db.mutacao(conn):
             # So' a dona da trava fecha a rodada: expirada por outra execucao, a linha fica como a outra deixou.
             conn.execute("""UPDATE rm_sincronizacoes SET estado='failed', terminado_em=datetime('now'), erro=?,
-                            custo_erro=? WHERE id=? AND estado='running'""", (msg, custo["custo_erro"], rodada_id))
+                            custo_erro=?, custo_aviso=? WHERE id=? AND estado='running'""",
+                         (msg, custo["custo_erro"], custo["custo_aviso"], rodada_id))
         ESTADO["ultimo_erro"] = msg
         return {"id": rodada_id, "estado": "failed", "erro": msg, **custo}
     finally:
         ESTADO["em_andamento"] = False
+
+
+def aviso_do_custo(conn) -> str | None:
+    """Aviso do retrato de custo vigente: o da ultima rodada que o trouxe (as horarias seguintes nao trazem)."""
+    r = conn.execute("""SELECT custo_aviso FROM rm_sincronizacoes WHERE custo_tarefas IS NOT NULL
+                        ORDER BY id DESC LIMIT 1""").fetchone()
+    return r["custo_aviso"] if r else None
 
 
 def rodadas(conn, limite: int = 10) -> list[dict]:

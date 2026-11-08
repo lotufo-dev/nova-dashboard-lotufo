@@ -1300,17 +1300,76 @@ def test_linha_ilegivel_no_custo_vira_erro_da_rodada(conn, tmp_path, linha, trec
     assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 0
 
 
+def _custos_com_ruins(ruins, validas=200):
+    return [_custo(trf=f"T{i}") for i in range(validas)] + ruins
+
+
 @pytest.mark.parametrize("mes", [220112, 202613, 202600])
 def test_linha_de_custo_com_mes_fora_do_intervalo_e_pulada_e_as_outras_gravam(conn, tmp_path, mes):
-    cli = _simulador_custo(tmp_path, [_custo(), _custo(mes=mes, trf="9.9"), _custo(trf="1.03")], [_estoque()])
+    cli = _simulador_custo(tmp_path, _custos_com_ruins([_custo(mes=mes, trf="9.9", cc="9.999.001")]), [_estoque()])
     r = sincronizacao_rm.sincronizar(conn, cli)
     assert r["estado"] == "success" and r["custo_erro"] is None
-    assert r["custo_tarefas"] == 2 and r["estoque_baixas"] == 1
-    assert r["custo_aviso"] == f"1 linha(s) de custo puladas por mês ilegível ({mes})"
-    assert [x[0] for x in conn.execute("SELECT tarefa FROM rm_custo_tarefas ORDER BY id")] == ["1.02", "1.03"]
+    assert r["custo_tarefas"] == 200 and r["estoque_baixas"] == 1
+    assert r["custo_aviso"] == (f"1 linha(s) de custo puladas por mês ilegível (MES {mes}; "
+                                "centro de custo 9.999.001)")
+    assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas WHERE tarefa='9.9'").fetchone()[0] == 0
     rodada = conn.execute("SELECT custo_erro, custo_aviso FROM rm_sincronizacoes WHERE id=?", (r["id"],)).fetchone()
     assert rodada["custo_erro"] is None and rodada["custo_aviso"] == r["custo_aviso"]
-    assert sincronizacao_rm.rodadas(conn)[0]["custo_aviso"] == r["custo_aviso"]
+
+
+def test_aviso_lista_os_meses_mais_frequentes_e_nao_os_primeiros_do_texto(conn, tmp_path):
+    ruins = [_custo(mes=999999, cc="A")] * 2 + [_custo(mes=100000 + i, cc="B") for i in range(6)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador_custo(tmp_path, _custos_com_ruins(ruins, 2000), [_estoque()]))
+    assert r["custo_aviso"].startswith("8 linha(s) de custo puladas por mês ilegível (MES 999999,")
+    assert "centro de custo B, A" in r["custo_aviso"]
+
+
+def test_todas_as_linhas_de_custo_ilegiveis_mantem_o_retrato_anterior(conn, tmp_path):
+    cli = _simulador_custo(tmp_path, [_custo(), _custo(trf="1.03")], [_estoque()])
+    sincronizacao_rm.sincronizar(conn, cli)
+    (cli.pasta / f"{rm.CONSULTA_CUSTO}.json").write_text(
+        json.dumps([_custo(mes=220112), _custo(mes=220112, trf="1.03")]), encoding="utf-8")
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["estado"] == "success" and "mês ilegível" in r["custo_erro"] and "DASH25" in r["custo_erro"]
+    assert r["custo_tarefas"] is None and r["custo_aviso"] is None
+    assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 2     # retrato anterior fica
+
+
+def test_muitas_linhas_ilegiveis_acima_do_teto_tambem_falha(conn, tmp_path):
+    ruins = [_custo(mes=220112, trf=f"R{i}") for i in range(5)]       # 5 de 105 (~4,8%) > 1%
+    r = sincronizacao_rm.sincronizar(conn, _simulador_custo(tmp_path, _custos_com_ruins(ruins, 100), [_estoque()]))
+    assert "5 de 105" in r["custo_erro"] and r["custo_tarefas"] is None
+    assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 0
+
+
+def test_aviso_do_custo_vale_ate_a_proxima_leitura_de_custo_mesmo_com_rodadas_sem_custo(conn, tmp_path, client_admin):
+    cli = _simulador_custo(tmp_path, _custos_com_ruins([_custo(mes=220112)]), [_estoque()])
+    com_aviso = sincronizacao_rm.sincronizar(conn, cli, "agendado")["custo_aviso"]
+    assert com_aviso
+    for _ in range(11):                                                 # horarias: nao trazem custo
+        assert sincronizacao_rm.sincronizar(conn, cli, "agendado")["custo_tarefas"] is None
+    assert all(x["custo_aviso"] is None for x in sincronizacao_rm.rodadas(conn, 10))
+    assert sincronizacao_rm.aviso_do_custo(conn) == com_aviso
+    # a rodada seguinte que traz o custo sem linha ruim limpa o aviso
+    (cli.pasta / f"{rm.CONSULTA_CUSTO}.json").write_text(json.dumps([_custo()]), encoding="utf-8")
+    assert sincronizacao_rm.sincronizar(conn, cli)["custo_aviso"] is None
+    assert sincronizacao_rm.aviso_do_custo(conn) is None
+
+
+def test_status_traz_o_aviso_do_custo_vigente(client_admin, tmp_path, monkeypatch):
+    cli = _simulador_custo(tmp_path, _custos_com_ruins([_custo(mes=220112)]), [_estoque()])
+    monkeypatch.setenv("DASH_RM_SIMULADOR", str(cli.pasta))
+    assert client_admin.get("/api/rm/status").json()["custo_aviso"] is None
+    assert client_admin.post("/api/rm/sincronizar").status_code == 200
+    assert "1 linha(s) de custo puladas" in client_admin.get("/api/rm/status").json()["custo_aviso"]
+
+
+def test_rodada_que_falha_depois_do_custo_guarda_o_aviso(conn, tmp_path):
+    cli = _simulador_custo(tmp_path, _custos_com_ruins([_custo(mes=220112)]), [_estoque()])
+    (cli.pasta / f"{rm.CONSULTA_NF}.json").unlink()
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["estado"] == "failed" and r["custo_aviso"]
+    assert conn.execute("SELECT custo_aviso FROM rm_sincronizacoes WHERE id=?", (r["id"],)).fetchone()[0] == r["custo_aviso"]
 
 
 def test_sem_linha_pulada_nao_ha_aviso(conn, tmp_path):

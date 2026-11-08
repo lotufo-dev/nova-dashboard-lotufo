@@ -24,7 +24,7 @@ def status(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
     # thread nao existe e o ambiente e' a verdade.
     configurado = rm.de_ambiente() is not None
     return {"configurado": configurado, **{k: v for k, v in sincronizacao_rm.ESTADO.items() if k != "configurado"},
-            "rodadas": ultimas}
+            "rodadas": ultimas, "custo_aviso": sincronizacao_rm.aviso_do_custo(conn)}
 
 
 @router.post("/sincronizar")

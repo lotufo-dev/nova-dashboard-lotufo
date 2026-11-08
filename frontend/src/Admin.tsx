@@ -35,12 +35,14 @@ type Rodada = {
   id: number; disparo: string; estado: string; iniciado_em: string; terminado_em: string | null;
   nfs: number; baixas: number; alocacoes: number; sugestoes: number; recebimentos: number; erro: string | null;
   // #488: linhas do custo por tarefa e da baixa de estoque; null quando a rodada nao trouxe (falha em custo_erro)
-  custo_tarefas?: number | null; estoque_baixas?: number | null; custo_erro?: string | null; custo_aviso?: string | null;
+  custo_tarefas?: number | null; estoque_baixas?: number | null; custo_erro?: string | null;
 };
 const contagem = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("pt-BR"));
 type StatusRm = {
   configurado: boolean; ultima_sincronizacao: string | null; ultimo_erro: string | null;
   em_andamento: boolean; rodadas: Rodada[];
+  // #603: aviso do retrato de custo vigente (linhas puladas), da última rodada que trouxe o custo
+  custo_aviso?: string | null;
 };
 // Bloco 9: fica so' quem conectou a propria conta para enviar e-mail; a conexao e' feita por cada pessoa em Minha conta.
 type Conta = { usuario_id: number; nome: string; email: string; perfil: string; conectada: boolean; token_em: string | null };
@@ -196,6 +198,8 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
       </div>
       {erroCarga && <Erro texto={erroCarga} />}
 
+      {status?.custo_aviso && <p className="campo__nota situacao__erro" role="status">{status.custo_aviso}</p>}
+
       {status?.configurado && ultima === null && <div className="vazio vazio--curto"><p>Nenhuma rodada.</p></div>}
 
       {status && status.rodadas.length > 0 && (
@@ -221,7 +225,6 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                     <SeloRodada estado={r.estado} />
                     {r.erro && <div className="campo__nota situacao__erro">{r.erro}</div>}
                     {r.custo_erro && <div className="campo__nota situacao__erro">Custos e estoque não atualizados.</div>}
-                    {r.custo_aviso && <div className="campo__nota">{r.custo_aviso}</div>}
                   </td>
                   <td className="col-num num">{r.nfs.toLocaleString("pt-BR")}</td>
                   <td className="col-num num">{r.baixas.toLocaleString("pt-BR")}</td>
