@@ -45,7 +45,7 @@ describe("CustoObra (#491)", () => {
     const seletor = await screen.findByLabelText("Obra");
     expect(within(seletor).getAllByRole("option").map(o => o.textContent)).toEqual(["Obra Alfa", "Obra Beta"]);
     expect(await screen.findByRole("heading", { name: "Custo lançado no RM" })).toBeTruthy();
-    const tabela = screen.getByRole("table");
+    const tabela = await screen.findByRole("table");
     expect(within(tabela).getAllByText("Terraplenagem").length).toBeGreaterThan(0);
     expect(within(tabela).getByText("Sem grupo")).toBeTruthy();
     expect(within(tabela).getByText("Medido por grupo não lido")).toBeTruthy();
@@ -68,14 +68,14 @@ describe("CustoObra (#491)", () => {
     cleanup();
     responder({ ...CUSTO, rm: { sincronizado_em: "2026-11-07T10:00:00+00:00", desatualizado: false } });
     render(<CustoObra />);
-    await screen.findByRole("heading", { name: "Custo lançado no RM" });
+    await screen.findByRole("table");
     expect(screen.queryByText(/RM sincronizado pela última vez/)).toBeNull();
   });
 
   it("nenhum texto de margem, lucro ou resultado na tela", async () => {
     responder();
     const { container } = render(<CustoObra />);
-    await screen.findByRole("heading", { name: "Custo lançado no RM" });
+    await screen.findByRole("table");
     expect(container.textContent!.toLowerCase()).not.toMatch(/margem|lucro|resultado/);
   });
 
