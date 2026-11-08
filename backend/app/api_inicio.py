@@ -22,9 +22,11 @@ def inicio(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
 
 
 @router.get("/api/inicio/painel")
-def painel(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
-    """Pagina Inicio do redesenho (08/10/2026): cartoes, numeros, medido por contratante e prazos."""
-    return pagina_inicio.painel(conn)
+def painel(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    """Pagina Inicio do redesenho (08/10/2026): cartoes, numeros, medido por contratante e prazos. Os avisos de
+    reajuste seguem o perfil, como em `inicio` (rodada 2 da PR #579)."""
+    publico = "diretoria" if usuario.get("perfil") == "diretoria" else "operacao"
+    return pagina_inicio.painel(conn, publico=publico)
 
 
 @router.get("/api/medicoes/andamento")

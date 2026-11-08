@@ -4,7 +4,7 @@ import { brl, contar, fmtPercentual } from "./formato";
 import type { Usuario } from "./Login";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
-import { fmtMesExtenso } from "./tempo";
+import { fmtCompetencia, fmtMesExtenso } from "./tempo";
 import "./inicio.css";
 
 // Inicio do redesenho de 11/2026 (imagem aprovada pelo Leonardo em 06/11/2026): informacao geral para a diretoria.
@@ -33,7 +33,9 @@ export type PainelInicio = {
   protocolado_mes: { dia: number; atual: Acumulado; anterior: Acumulado; variacao_pct: number | null };
   notas_mes: { mes: string; valor_centavos: number; notas: number; obras: number; acumulado_centavos: number[] };
   avisos_importantes: {
-    reajustes: SecaoAvisos<{ contrato_id: number; obra: string; dias: number }>;
+    // issue #274: o pleito a pedir e os avisos do motor de apostilamento, o mais grave primeiro
+    reajustes: SecaoAvisos<{ contrato_id: number; obra: string; dias: number | null; tipo?: string;
+      nivel?: "critico" | "acao" | "atencao"; competencias?: string[]; datas_base?: string[] }>;
     prazos: SecaoAvisos<{ contrato_id: number; obra: string; tipo: "execucao" | "vigencia"; dias: number }>;
     certidoes: SecaoAvisos<Certidao>;
   };
@@ -134,6 +136,25 @@ const IconeCertidao = () => (
   <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z" />
   </svg>);
+
+// issue #274: o que cada aviso de reajuste diz na linha da secao Reajustes (o tipo vem de `app/reajuste.py`)
+const AVISO_REAJUSTE: Record<string, string> = {
+  reajuste_pleito: "reajuste a pedir",
+  reajuste_fora_da_previsao: "reajuste fora da previsão",
+  reajuste_sem_apostilamento: "reajuste sem apostilamento",
+  reajuste_nota_antes_do_apostilamento: "nota antes do apostilamento",
+  reajuste_reemitir: "cronograma de reajuste a reemitir",
+  reajuste_sem_resposta: "pedido de reajuste sem resposta",
+};
+
+/** O que o item juntou (rodada 2 da PR #579: um item por obra e tipo): a competencia, ou quantas; sem competencia,
+ *  quantas datas-base quando ha' mais de uma. */
+function detalheDoReajuste(x: { competencias?: string[]; datas_base?: string[] }): string {
+  const cs = x.competencias ?? [], bs = x.datas_base ?? [];
+  if (cs.length === 1) return ` (${fmtCompetencia(cs[0])})`;
+  if (cs.length > 1) return ` (${cs.length} competências)`;
+  return bs.length > 1 ? ` (${bs.length} data-bases)` : "";
+}
 
 /** "vencido há 450 dias" / "vence hoje" / "vence em 5 dias" (dias < 0 = vencido). */
 function quando(dias: number | null, vencida: boolean): string {
@@ -282,11 +303,11 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <aside aria-labelledby="ini-avisos" className="ini-painel ini-avisos">
           <h2 id="ini-avisos">Avisos importantes</h2>
           <SecaoAviso id="ini-av-reajustes" titulo="Reajustes" icone={<IconeReajuste />} total={av.reajustes.total} tom="neutro"
-            familia="reajustes" ir={ir} vazio="Nenhum reajuste a pedir.">
+            familia="reajustes" ir={ir} vazio="Nenhum aviso de reajuste.">
             {av.reajustes.itens.map((x, i) => (
               <li key={`${x.contrato_id}-${i}`}>
                 <Link para={{ tela: "obra", id: x.contrato_id, aba: "reajuste" }} ir={ir} className="ini-aviso__linha">
-                  <span className="ini-aviso__nome">{x.obra} · reajuste a pedir</span>
+                  <span className="ini-aviso__nome">{x.obra} · {AVISO_REAJUSTE[x.tipo ?? "reajuste_pleito"] ?? "reajuste"}{detalheDoReajuste(x)}</span>
                 </Link>
               </li>))}
           </SecaoAviso>

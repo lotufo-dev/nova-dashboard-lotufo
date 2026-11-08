@@ -464,8 +464,8 @@ def test_aditivo_depois_do_pleito_poe_o_ciclo_em_reemitir(cenario):
     _aditivo(c, cid, "prazo", "2026-08-01")
     r = reajuste.ciclos(c, cid, D(2026, 9, 10))[0]
     assert (r["situacao"], r["dias"], r["aditivo"]["data_assinatura"]) == ("reemitir", 92, "2026-08-01")
-    # o ciclo continua sem apostilamento: o aviso segue valendo
-    assert [a["tipo"] for a in reajuste.avisos(c, D(2026, 9, 10))] == ["reajuste_apostilamento"]
+    # o ciclo continua sem apostilamento: o aviso segue valendo, e o do cronograma a reemitir entra (issue #274)
+    assert [a["tipo"] for a in reajuste.avisos(c, D(2026, 9, 10))] == ["reajuste_apostilamento", "reajuste_reemitir"]
 
 
 def test_reiteracao_depois_do_aditivo_nao_tira_do_reemitir_e_a_reemissao_tira(cenario):
