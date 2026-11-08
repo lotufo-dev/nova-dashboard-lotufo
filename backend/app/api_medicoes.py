@@ -171,18 +171,20 @@ def _pacote_planilha(conn: sqlite3.Connection, d: dict) -> dict | None:
 def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
            conn: sqlite3.Connection = Depends(conexao)):
     _contrato_existe(conn, contrato_id)
-    lista = medicoes.listar(conn, contrato_id)
-    # issue #508: a barra de passos da pagina da obra so' tem "Planilha e carta" e "Análise do órgão" onde a
-    # planilha/carta vai ao orgao (nunca na MT-PAR, planilha_envio.FAMILIAS_SEM_ENVIO)
-    familia = conn.execute("SELECT o.familia FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
-                           (contrato_id,)).fetchone()["familia"]
-    com_envio = familia not in planilha_envio.FAMILIAS_SEM_ENVIO
-    edicoes =medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
-    sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
-    # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
-    return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
-             "boletins": medicoes.boletins(conn, m["id"]), **_envio_ao_orgao(conn, m),
-             "com_envio_planilha": com_envio} for m in lista]
+    # issue #559: lista e dados complementares (notas, envio ao orgao) de um retrato so' do banco
+    with db.leitura(conn):
+        lista = medicoes.listar(conn, contrato_id)
+        # issue #508: a barra de passos da pagina da obra so' tem "Planilha e carta" e "Análise do órgão" onde a
+        # planilha/carta vai ao orgao (nunca na MT-PAR, planilha_envio.FAMILIAS_SEM_ENVIO)
+        familia = conn.execute("SELECT o.familia FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
+                               (contrato_id,)).fetchone()["familia"]
+        com_envio = familia not in planilha_envio.FAMILIAS_SEM_ENVIO
+        edicoes =medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
+        sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
+        # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
+        return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
+                 "boletins": medicoes.boletins(conn, m["id"]), **_envio_ao_orgao(conn, m),
+                 "com_envio_planilha": com_envio} for m in lista]
 
 
 @router.post("/api/contratos/{contrato_id}/medicoes", status_code=201)
@@ -206,19 +208,20 @@ def criar(contrato_id: ID, dados: MedicaoIn,
 @router.get("/api/medicoes/{medicao_id}")
 def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
             conn: sqlite3.Connection = Depends(conexao)):
-    d = medicoes.detalhe(conn, medicao_id)
-    if d is None:
-        raise HTTPException(404, "Medição não encontrada")
-    d["edicoes_valor"] = medicoes.edicoes_valor(conn, [medicao_id])[medicao_id]   # B-02 (10/10/2026): linha do tempo
-    d["planilhas"] = medicao_planilhas.versoes(conn, medicao_id)   # issue #281: todas as versoes da planilha/carta
-    # issue #282: se a tela oferece "Enviar para protocolo" (nunca na MT-PAR), as versoes enviadas e as pecas
-    d["envio_planilha"] = planilha_envio.situacao(conn, medicao_id)
-    d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
-    d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
-    d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"
-    d.update(_envio_ao_orgao(conn, d))                         # issue #508: passo 2 da pagina da obra
-    d["pacote_planilha"] = _pacote_planilha(conn, d)          # issue #508: medidor do pacote no passo 1
-    return d
+    with db.leitura(conn):      # issue #559: o detalhe inteiro de um retrato so'
+        d = medicoes.detalhe(conn, medicao_id)
+        if d is None:
+            raise HTTPException(404, "Medição não encontrada")
+        d["edicoes_valor"] = medicoes.edicoes_valor(conn, [medicao_id])[medicao_id]   # B-02 (10/10/2026): linha do tempo
+        d["planilhas"] = medicao_planilhas.versoes(conn, medicao_id)   # issue #281: todas as versoes da planilha/carta
+        # issue #282: se a tela oferece "Enviar para protocolo" (nunca na MT-PAR), as versoes enviadas e as pecas
+        d["envio_planilha"] = planilha_envio.situacao(conn, medicao_id)
+        d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
+        d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
+        d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"
+        d.update(_envio_ao_orgao(conn, d))                         # issue #508: passo 2 da pagina da obra
+        d["pacote_planilha"] = _pacote_planilha(conn, d)          # issue #508: medidor do pacote no passo 1
+        return d
 
 
 @router.get("/api/medicoes/{medicao_id}/grupos")

@@ -108,6 +108,13 @@ def criar(conn: sqlite3.Connection, usuario_id: int, dados: dict) -> int:
     return mid
 
 def detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
+    # Issue #559: notas, notas_faltam e pagamento_cota (e o resto) saem de um retrato so': a sincronizacao do RM pode
+    # gravar uma baixa entre as consultas
+    with db.leitura(conn):
+        return _detalhe(conn, medicao_id)
+
+
+def _detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     r = conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
     if r is None:
         return None

@@ -1924,3 +1924,18 @@ def test_pacote_da_planilha_vazio_sem_planilha(client_admin):
     cid = _contrato(client_admin)
     mid = _medicao(client_admin, cid)
     assert client_admin.get(f"/api/medicoes/{mid}").json()["pacote_planilha"] is None
+
+
+def test_lista_e_detalhe_lidos_de_um_retrato_so(client_admin, monkeypatch):
+    """Issue #559: a lista (com os dados complementares) e o detalhe montam-se dentro de `db.leitura`."""
+    from app import api_medicoes
+    cid = _contrato(client_admin)
+    mid = _medicao(client_admin, cid)
+    visto = []
+    envio = api_medicoes._envio_ao_orgao
+    monkeypatch.setattr(api_medicoes, "_envio_ao_orgao", lambda c, m: (visto.append(c.in_transaction), envio(c, m))[1])
+    assert client_admin.get(f"/api/contratos/{cid}/medicoes").status_code == 200
+    assert visto == [True]
+    visto.clear()
+    assert client_admin.get(f"/api/medicoes/{mid}").status_code == 200
+    assert visto == [True]
