@@ -575,9 +575,15 @@ def registrar_boletim(medicao_id: ID,
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     pdf = _pdf_validado(arquivo, TETO_PLANILHA)   # o pacote do SMO (capa, resumo, calculo, cronograma) passa de 10 MB
+    # issue #286: a capa do SMO lida do PDF (so' o texto), gravada com o boletim para a conferencia contra o cadastro;
+    # so' a capa aprovada conta
+    from app import leitura_smo
+    lida = leitura_smo.ler_pdf_texto(pdf)["campos"]
+    capa = lida if lida.get("situacao") == "APROVADA" else None
     caminho, sha = arquivos.gravar_bytes("boletins", pdf, "pdf")
     try:
-        return medicoes.registrar_boletim(conn, usuario["id"], medicao_id, dados, {"arquivo": caminho, "sha256": sha})
+        return medicoes.registrar_boletim(conn, usuario["id"], medicao_id, dados,
+                                          {"arquivo": caminho, "sha256": sha, "capa": capa})
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
 

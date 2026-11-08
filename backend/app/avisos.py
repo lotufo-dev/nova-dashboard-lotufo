@@ -127,7 +127,15 @@ def _de_motor_medicao(conn, hoje: datetime.date) -> list[dict]:
     return avisos_medicao.avisos(conn, hoje)
 
 
-FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga, _de_espelhos, _de_motor_medicao]
+def _de_capa_smo(conn, hoje: datetime.date) -> list[dict]:
+    """Issue #286: a capa do SMO registrada no boletim contra o cadastro (prazos, valor aditivo, valor do contrato e
+    acumulado)."""
+    from app import capa_smo         # import tardio: `capa_smo` importa este modulo (formato do aviso)
+    return capa_smo.avisos(conn, hoje)
+
+
+FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _de_siga, _de_espelhos, _de_motor_medicao,
+          _de_capa_smo]
 
 
 def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao") -> list[dict]:

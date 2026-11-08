@@ -22,6 +22,7 @@ def test_capa_de_texto_aprovada_com_oficio_na_frente():
         "acumulado_pi_centavos": 876543210, "acumulado_reajuste_centavos": 45678901,
         "acumulado_total_centavos": 922222111,
         "vigencia_fim": "2027-02-24", "execucao_fim": "2026-11-06", "dias_paralisados": 12,
+        "valor_contrato_centavos": 2000000000, "valor_aditivo_centavos": 150000000,
     }
     assert r["faltando"] == [] and r["avisos"] == []
 
@@ -480,3 +481,40 @@ def test_pdf_de_verdade_com_a_capa_so_na_pagina_3_nao_e_lido():
     pdf = _pdf_paginas(["Ofício", "Resumo", _txt("capa-texto-aprovada.txt").replace("\n", " ")])
     r = leitura_smo.ler_pdf(pdf)
     assert (r["ok"], r["motivo"], r["fonte"]) == (False, "capa-nao-encontrada", None)
+
+
+# --- issue #286: o valor do contrato e o valor aditivo da capa, para conferir contra o cadastro -----------------
+
+def test_capa_traz_o_valor_do_contrato_e_o_aditivo_no_texto_e_no_ocr():
+    c = leitura_smo.ler(_txt("capa-texto-final-descontos.txt"))["campos"]
+    assert (c["valor_contrato_centavos"], c["valor_aditivo_centavos"]) == (320000000, 0)      # "0,00" e' lido
+    c = _ler_ocr(_ocr_bom())["campos"]
+    assert (c["valor_contrato_centavos"], c["valor_aditivo_centavos"]) == (6000000000, 300000000)
+
+
+def test_capa_sem_as_linhas_do_contrato_nao_as_inventa_nem_as_cobra():
+    texto = _txt("capa-texto-aprovada.txt").replace("Valor Aditivo :", "Outra linha :")
+    r = leitura_smo.ler(texto)
+    assert r["ok"] and "valor_aditivo_centavos" not in r["campos"] and r["faltando"] == []
+    assert r["campos"]["valor_contrato_centavos"] == 2000000000
+
+
+def test_ler_pdf_texto_nao_vai_ao_ocr(monkeypatch):
+    monkeypatch.setattr(leitura_pdf, "primeiras_paginas_com_limite", lambda pdf: _paginas_texto())
+    monkeypatch.setattr(leitura_pdf, "paginas_por_ocr_com_limite", _sem_ocr)
+    r = leitura_smo.ler_pdf_texto(b"%PDF-")
+    assert r["ok"] and r["campos"]["execucao_fim"] == "2026-11-06"
+    monkeypatch.setattr(leitura_pdf, "primeiras_paginas_com_limite", lambda pdf: ["", ""])
+    assert leitura_smo.ler_pdf_texto(b"%PDF-")["motivo"] == "sem-texto"         # PDF imagem: nada, sem OCR
+
+
+def test_ler_pdf_texto_com_pdf_recusado_ou_torto_nao_levanta(monkeypatch):
+    def torto(pdf):
+        raise ValueError("PDF inválido")
+    monkeypatch.setattr(leitura_pdf, "primeiras_paginas_com_limite", torto)
+    assert leitura_smo.ler_pdf_texto(b"x")["motivo"] == "sem-texto"
+
+    def recusa(pdf):
+        raise leitura_pdf.TextoInadequado("O PDF demorou mais de 60 s para ser lido")
+    monkeypatch.setattr(leitura_pdf, "primeiras_paginas_com_limite", recusa)
+    assert leitura_smo.ler_pdf_texto(b"x")["motivo"] == "pdf-recusado"

@@ -40,6 +40,9 @@ CAMPOS = ("numero", "tipo_medicao", "situacao", "periodo", "data_realizacao",
 # em modulo: o SMO imprime ora "-1.500,00", ora "250,00", e sempre os subtrai do total.
 CAMPOS_OPCIONAIS = ("acrescimos_centavos", "descontos_centavos",
                     "acumulado_acrescimos_centavos", "acumulado_descontos_centavos")
+# Issue #286: "Valor informado PI do contrato" e "Valor Aditivo" do resumo financeiro, cheios como impressos, so' para
+# a conferencia contra o cadastro; ausentes nao contam como "faltando" (nao entram na proposta do boletim).
+CAMPOS_CONTRATO = ("valor_contrato_centavos", "valor_aditivo_centavos")
 
 # Os padroes casam sobre o texto SEM ACENTO (`_plano`) e, nos rotulos, em qualquer caixa (re.I).
 _I = re.IGNORECASE
@@ -250,6 +253,11 @@ def ler(texto: str, ocr: bool = False, contexto: str = "") -> dict:
     m = re.search(r"Dias paralisados\s*:?\s*(\d{1,5}|(?-i:O))\b", plano, _I)
     if m:
         c["dias_paralisados"] = 0 if m.group(1) == "O" else int(m.group(1))
+    for campo, rotulo in (("valor_contrato_centavos", r"Valor informado PI do contrato"),
+                          ("valor_aditivo_centavos", r"Valor Aditivo")):
+        m = re.search(rotulo + _NUM, plano, _I)
+        if m:
+            c[campo] = _centavos(m.group(1))
     if ocr:
         avisos.append(_AVISO_OCR)
 
@@ -296,3 +304,16 @@ def ler_pdf(pdf: bytes) -> dict:
         if lido_ocr["motivo"] not in ("sem-texto", "capa-nao-encontrada"):
             return {**lido_ocr, "fonte": "ocr"}
     return {**lido, "fonte": None}
+
+
+def ler_pdf_texto(pdf: bytes) -> dict:
+    """Issue #286: `ler` sobre a capa nas 2 primeiras paginas, SO' pelo texto (sem OCR): a leitura que o registro do
+    boletim faz para guardar os campos da conferencia contra o cadastro. Nunca levanta: PDF que o pypdf nao abre e'
+    `sem-texto`; o recusado pela guarda ou pelo prazo, `pdf-recusado`."""
+    try:
+        paginas = leitura_pdf.primeiras_paginas_com_limite(pdf)
+    except leitura_pdf.TextoInadequado as e:
+        return _resultado("pdf-recusado", {}, [str(e)])
+    except ValueError:
+        return _resultado("sem-texto", {}, [])
+    return _ler_paginas(paginas, ocr=False)
