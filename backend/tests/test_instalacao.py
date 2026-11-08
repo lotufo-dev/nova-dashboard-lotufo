@@ -234,13 +234,14 @@ def test_testes_rodam_como_dev(client):
 # --- na subida: o que liga e o que desliga ----------------------------------------------------------------------
 
 def _subir(monkeypatch, tmp_path, jobs=True):
-    from app import backup, cobranca_certidoes, sincronizacao_rm
+    from app import alertas_seguranca, backup, cobranca_certidoes, sincronizacao_rm
     from app.main import create_app
     chamadas = []
     monkeypatch.setattr(backup, "agendar_backup_horario",
                         lambda banco, local, externa: chamadas.append(("backup", externa)))
     monkeypatch.setattr(sincronizacao_rm, "agendar", lambda: chamadas.append(("rm",)))
     monkeypatch.setattr(cobranca_certidoes, "agendar", lambda: chamadas.append(("cobranca",)))
+    monkeypatch.setattr(alertas_seguranca, "agendar", lambda: chamadas.append(("alertas",)))
     # Issue #457: as conferencias locais (#421, #422, #423) subiam threads de verdade que seguiam vivas no worker e
     # gravavam o estado delas no meio dos testes seguintes
     from app import integridade, seguranca, sentinela
@@ -259,12 +260,13 @@ def _subir(monkeypatch, tmp_path, jobs=True):
 def test_autorizada_agenda_tudo(chave, ambiente, monkeypatch, tmp_path):
     _gravar(ambiente, instalacao.assinar(chave, MAQUINA))
     _, chamadas = _subir(monkeypatch, tmp_path)
-    assert chamadas == [("backup", tmp_path / "externo"), ("rm",), ("cobranca",)]
+    assert chamadas == [("backup", tmp_path / "externo"), ("rm",), ("cobranca",), ("alertas",)]
 
 
 @pytest.mark.instalacao_real
 def test_copia_so_agenda_o_backup_local(chave, ambiente, monkeypatch, tmp_path):
-    """Sem RM, sem cobranca de certidoes e sem a copia externa (que sai da maquina); o backup local continua."""
+    """Sem RM, sem cobranca de certidoes, sem alertas de seguranca por e-mail (#424) e sem a copia externa (que sai
+    da maquina); o backup local continua."""
     _, chamadas = _subir(monkeypatch, tmp_path)
     assert chamadas == [("backup", None)]
     assert instalacao.estado() == COPIA

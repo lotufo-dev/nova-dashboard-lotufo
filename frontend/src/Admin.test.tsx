@@ -701,6 +701,37 @@ test("Saúde: bloco Segurança avisa que a sentinela não roda neste ambiente", 
   expect(await within(bloco).findByText("Sentinela não roda neste ambiente")).toBeTruthy();
 });
 
+// Issue #424: sem cadastro ou sem conta conectada os alertas por e-mail nao saem, e o bloco diz o motivo
+test("Saúde: bloco Segurança mostra por que os alertas por e-mail não saem", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/rm/status") return { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
+    if (url === "/api/admin/backup") return BACKUP_EM_DIA;
+    if (url === "/api/admin/saude") return { siga: SIGA_SEM_LEITURA, seguranca: [], alertas_seguranca: { erro: "nada sai: falta o destinatário no cadastro" } };
+    if (url === "/api/rm/reconciliacao") return {
+      nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
+      totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  const bloco = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(bloco).findByText("Alertas de segurança por e-mail: nada sai: falta o destinatário no cadastro.")).toBeTruthy();
+});
+
+test("Saúde: alerta por e-mail sem conta conectada leva a Minha conta", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/rm/status") return { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
+    if (url === "/api/admin/backup") return BACKUP_EM_DIA;
+    if (url === "/api/admin/saude") return { siga: SIGA_SEM_LEITURA, seguranca: [], alertas_seguranca: { erro: "nada sai: a conta Microsoft de dono@exemplo.com.br não está conectada", conectar: true } };
+    if (url === "/api/rm/reconciliacao") return {
+      nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
+      totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
+    throw new Error(`fora do recorte: ${url}`);
+  });
+  render(<Admin aba="saude" />);
+  const bloco = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(bloco).findByRole("link", { name: "Minha conta" })).toBeTruthy();
+});
+
 test("Saúde: sem ler a Saúde, o bloco Segurança diz que não deu para ler, nunca OK", async () => {
   saudeCom(BACKUP_EM_DIA);   // /api/admin/saude falha
   const bloco = await screen.findByRole("region", { name: "Segurança" });

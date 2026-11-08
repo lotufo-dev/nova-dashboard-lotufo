@@ -502,6 +502,20 @@ def test_copia_dono_no_geral(tmp_path):
         assert "copia_dono.para" in erros and "copia_dono.enviada_por" in erros
 
 
+def test_alertas_seguranca_no_geral(tmp_path):
+    # issue #424: quem recebe os alertas de seguranca e o resumo diario e o login de quem os envia
+    raiz = _escrever(tmp_path)
+    base = {"faturamento": {"para": ["f@exemplo.com.br"], "assunto": "{medicao} {obra}", "corpo": "x"}}
+    (raiz / "geral.yaml").write_text(yaml.safe_dump({**base, "alertas_seguranca": {
+        "para": [" Dono@Exemplo.com.br "], "enviada_por": ["dono@exemplo.com.br"]}}), "utf-8")
+    assert ca.preparar(raiz)["geral"]["alertas_seguranca"] == {
+        "para": ["dono@exemplo.com.br"], "enviada_por": ["dono@exemplo.com.br"]}
+    for invalido in ({"para": [], "enviada_por": ["nao-e-email"]}, "dono@exemplo.com.br"):
+        (raiz / "geral.yaml").write_text(yaml.safe_dump({**base, "alertas_seguranca": invalido}), "utf-8")
+        erros = "\n".join(_erros(raiz))
+        assert "alertas_seguranca.para" in erros and "alertas_seguranca.enviada_por" in erros
+
+
 # --- issue #65: garantia com vigencia, endosso que traz a nova vigencia ----------
 
 def test_garantia_do_contrato_normalizada(tmp_path):

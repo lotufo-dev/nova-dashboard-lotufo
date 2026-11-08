@@ -160,7 +160,7 @@ def test_seguranca_avisa_administrador_que_entra_de_origem_nova(client_admin):
     # o login do client_admin e' o primeiro desse administrador: a origem dele e' nova
     itens = _seguranca(client_admin)
     assert [(i["nivel"], i["mensagem"]) for i in itens] == [
-        ("atencao", "Administrador Admin entrou de uma origem nova (testclient)")]
+        ("acao", "Administrador Admin entrou de uma origem nova (testclient)")]
     assert itens[0]["data"].endswith("+00:00")
     _login_de(client_admin, "10.0.0.51")
     _login_de(client_admin, "10.0.0.51")                    # a segunda vez a origem ja' foi vista: um item so'

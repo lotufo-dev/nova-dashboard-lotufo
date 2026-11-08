@@ -44,14 +44,28 @@ def registrar(conn: sqlite3.Connection, usuario_id, acao: str, entidade=None,
 # LIMITE CONHECIDO: truncagem do FIM da cadeia nao e detectavel dentro do mesmo
 # banco (quem apaga linhas reescreve ancoras); a defesa e a copia periodica do log
 # para destino independente (spec §5), implementada em fase posterior.
-def verificar_cadeia(conn: sqlite3.Connection) -> bool:
-    esperado = "genesis"
-    for r in conn.execute("SELECT * FROM audit_log ORDER BY id"):
+def _conferir_ate(conn: sqlite3.Connection, linha: int | None = None):
+    """(a cadeia confere do comeco ate' `linha` (None = ate' o fim), a ultima linha lida)."""
+    esperado, ultima = "genesis", None
+    sql, args = ("SELECT * FROM audit_log ORDER BY id", ()) if linha is None else (
+        "SELECT * FROM audit_log WHERE id <= ? ORDER BY id", (linha,))
+    for r in conn.execute(sql, args):
         if r["hash_prev"] != esperado:
-            return False
+            return False, r
         corpo = _payload(r["usuario_id"], r["acao"], r["entidade"], r["entidade_id"],
                          r["antes"], r["depois"], r["criado_em"])
         if hashlib.sha256((r["hash_prev"] + corpo).encode()).hexdigest() != r["hash"]:
-            return False
-        esperado = r["hash"]
-    return True
+            return False, r
+        esperado, ultima = r["hash"], r
+    return True, ultima
+
+
+def verificar_cadeia(conn: sqlite3.Connection) -> bool:
+    return _conferir_ate(conn)[0]
+
+
+def conferir_linha(conn: sqlite3.Connection, linha: int, hash_: str) -> bool:
+    """Issue #424: a linha `linha` da auditoria tem o hash `hash_` (o do resumo diario, ancora fora da VM) e a cadeia
+    do comeco ate' ela confere. Quem reescreve a auditoria inteira recalcula os hashes: o enviado deixa de existir."""
+    ok, ultima = _conferir_ate(conn, linha)
+    return ok and ultima is not None and ultima["id"] == linha and ultima["hash"] == hash_.strip().lower()
