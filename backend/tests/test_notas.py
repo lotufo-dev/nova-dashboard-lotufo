@@ -150,7 +150,7 @@ def test_pagamento_cota_consorcio_com_nota_extra_de_outra_coligada(conn, integra
     conn.execute("INSERT INTO baixas (coligada, idlan, nota_id, valor_original_centavos, valor_baixado_centavos, status_lan) "
                  "VALUES (90, 3, ?, 920000007, 920000007, 1)", (fatura,)); conn.commit()
     assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": 460000002,
-                                "recebido_centavos": 276000001, "falta_centavos": 184000001, "parcial": True}
+                                "recebido_centavos": 276000001, "falta_centavos": 184000001, "parcial": True, "divergente": False}
     assert medicoes.detalhe(conn, mid)["pagamento_cota"]["falta_centavos"] == 184000001
 
 
@@ -165,7 +165,7 @@ def test_pagamento_cota_espelho_sem_saida_da_lotufo_e_zero_e_nao_traco(conn, int
     extra = _nf_alocada(conn, mid, 1, 711, 12345, "Cuiabá")
     _titulo(conn, extra, 11, 11000, 11000)
     assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": 0, "recebido_centavos": 0,
-                                "falta_centavos": 0, "parcial": False}
+                                "falta_centavos": 0, "parcial": False, "divergente": False}
     assert notas.faltam(conn, mid) == 0
     assert [n["da_cota"] for n in medicoes.detalhe(conn, mid)["notas"]] == [False]
 
@@ -187,7 +187,7 @@ def test_pagamento_cota_nota_sem_titulo_no_rm(conn, integra):
     _nf_alocada(conn, mid, 1, 722, vg["valor"], "Várzea Grande")
     _titulo(conn, n1, 21, 276000001, 276000001)
     assert _cota(conn, mid) == {"notas_faltam": 0, "completo": False, "total_centavos": None, "recebido_centavos": None,
-                                "falta_centavos": None, "parcial": True}
+                                "falta_centavos": None, "parcial": True, "divergente": False}
 
 
 def test_pagamento_cota_nota_extra_paga_nao_faz_parcial(conn, integra):
@@ -201,7 +201,7 @@ def test_pagamento_cota_nota_extra_paga_nao_faz_parcial(conn, integra):
     _titulo(conn, n2, 32, 184000001, 0, 0)
     _titulo(conn, extra, 33, 11000, 11000)
     assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": 460000002, "recebido_centavos": 0,
-                                "falta_centavos": 460000002, "parcial": False}
+                                "falta_centavos": 460000002, "parcial": False, "divergente": False}
 
 
 def test_pagamento_cota_par_com_a_metade_cancelada(conn, integra):
@@ -215,13 +215,13 @@ def test_pagamento_cota_par_com_a_metade_cancelada(conn, integra):
         _titulo(conn, n, idlan, s["valor"] - 1001, s["valor"] - 1001)
     reaj = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 12, "tipo": "reajuste", "competencia": "2026-06"})
     incompleto = {"notas_faltam": 0, "completo": False, "total_centavos": None, "recebido_centavos": None,
-                  "falta_centavos": None, "parcial": True}
+                  "falta_centavos": None, "parcial": True, "divergente": False}
     assert _cota(conn, mid) == incompleto                                 # irma valida sem espelho: valores nao fecham
     assert _cota(conn, reaj) == incompleto                                # pela pagina do reajuste, o mesmo resumo
     medicoes.mudar_estado(conn, 1, reaj, "cancelada", "teste")
     total = sum(s["valor"] - 1001 for s in saidas)
     assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": total, "recebido_centavos": total,
-                                "falta_centavos": 0, "parcial": False}
+                                "falta_centavos": 0, "parcial": False, "divergente": False}
 
 
 def _espelho_sem_saida_da_lotufo(conn, mid):
@@ -250,7 +250,7 @@ def test_espelho_sem_saida_da_lotufo_espera_a_fatura_e_fecha_com_a_data_dela(con
     assert (m["estado"], m["nota_emitida_em"], m["notas_faltam"]) == ("nota_emitida", "2026-08-30", 0)
     assert [n["da_cota"] for n in m["notas"]] == [False]
     assert m["pagamento_cota"] == {"notas_faltam": 0, "completo": True, "total_centavos": 0, "recebido_centavos": 0,
-                                   "falta_centavos": 0, "parcial": False}
+                                   "falta_centavos": 0, "parcial": False, "divergente": False}
 
 
 def test_sem_coligada_da_lotufo_no_cadastro_nenhuma_nota_atende_a_saida(conn, integra):
@@ -267,7 +267,7 @@ def test_sem_coligada_da_lotufo_no_cadastro_nenhuma_nota_atende_a_saida(conn, in
     assert notas._coligada_lotufo(conn) is None
     assert notas.faltam(conn, mid) == 2
     assert _cota(conn, mid) == {"notas_faltam": 2, "completo": False, "total_centavos": None, "recebido_centavos": None,
-                                "falta_centavos": None, "parcial": False}
+                                "falta_centavos": None, "parcial": False, "divergente": False}
     assert {x["da_cota"] for x in medicoes.detalhe(conn, mid)["notas"]} == {False}
 
 
@@ -567,3 +567,68 @@ def test_liquido_tolera_so_o_efeito_com_sinal_dos_tributos(saida, iss, irrf, liq
             "irrf_centavos": saida["irrf"] + irrf, "liquido_centavos": saida["liquido"] + liquido}
     difs = {d["campo"]: d["grau"] for d in notas.conferir(saida, nota, None)}
     assert difs.get("liquido") == grau
+
+
+# --- issue #562: nota divergente do espelho no envio da nota e no a receber -----------------------------------------
+
+def _envio_da(conn, mid):
+    return next(e for e in notas_envio.a_enviar(conn)["envios"] if mid in e["medicao_ids"])
+
+
+def test_nota_de_outra_medicao_marca_a_etapa_de_envio_como_divergente(conn, usuario, integra, _texto):
+    """Issue #562: a nota de outra medicao (valor e tributos diferentes) no municipio da saida casa, fecha a medicao e
+    a etapa "Envio da nota" traz cada campo divergente com o valor do espelho e o da nota; o a receber diz que vem
+    de nota divergente."""
+    _, mid, saidas = integra
+    cba, vg = saidas
+    _texto(_nota_como(cba, 2224))
+    notas.anexar_pdf(conn, usuario, mid, PDF, "NFS 2224.pdf")
+    outra = {**vg, "valor": vg["valor"] + 3000001, "iss": vg["iss"] + 60001, "inss": vg["inss"] + 3301,
+             "irrf": vg["irrf"] + 4501}
+    _texto(_nota_como(outra, 2275))
+    r = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("outra"), "NFS 2275.pdf")
+    assert r["estado"] == "nota_emitida"
+    env = _envio_da(conn, mid)
+    div = {d["campo"]: (d["espelho"], d["nota"], d["grau"]) for d in env["divergencias"] if d["numero"] == 2275}
+    assert div["valor"] == (vg["valor"], outra["valor"], "divergente")
+    assert div["iss"] == (vg["iss"], outra["iss"], "divergente")
+    assert {"valor", "iss", "inss", "irrf", "liquido"} <= set(div)
+    assert not [d for d in env["divergencias"] if d["numero"] == 2224]
+    from app import sincronizacao_rm
+    assert sincronizacao_rm.pagamento_cota(conn, mid)["divergente"] is True
+
+
+def test_arredondamento_de_um_centavo_aparece_mas_nao_e_divergente(conn, usuario, integra, _texto):
+    _, mid, saidas = integra
+    cba, vg = saidas
+    _texto(_nota_como(cba, 2224))
+    notas.anexar_pdf(conn, usuario, mid, PDF, "NFS 2224.pdf")
+    _texto(_nota_como(vg, 3102).replace("Vl. ISSQN: R$" + espelho._fmt(vg["iss"]), "Vl. ISSQN: R$" + espelho._fmt(vg["iss"] + 1)))
+    notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("vg"), "NFS 3102.pdf")
+    env = _envio_da(conn, mid)
+    assert [(d["campo"], d["grau"]) for d in env["divergencias"]] == [("iss", "arredondamento")]
+    assert env["acima_da_medicao"] == []
+    from app import sincronizacao_rm
+    assert sincronizacao_rm.pagamento_cota(conn, mid)["divergente"] is False
+
+
+def test_nota_maior_que_a_medicao_gera_aviso_na_medicao(conn, usuario, _texto):
+    """Issue #562: nota de R$ 846.788,31 numa medicao de R$ 1.480,01 (centavo impar): aviso critico ligado a' medicao."""
+    cid = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 098/2025", "objeto": "Obra",
+                                    "valor_original_centavos": 10_000_000_00})
+    mid = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 5, "tipo": "execucao", "competencia": "2026-06"})
+    medicoes.definir_valor(conn, 1, mid, "protocolado", 148001, "manual")
+    _texto(_fixture("3102-integra-vg.txt"))
+    r = notas.anexar_pdf(conn, usuario, mid, PDF, "a.pdf")
+    assert [(d["campo"], d["grau"]) for d in r["conferencia"]] == [("valor", "divergente")]
+    assert notas.acima_da_medicao(conn, mid) == [{"medicao_id": mid, "nota_id": r["nota_id"], "numero": 3102,
+                                                  "alocado_centavos": 84678831, "medicao_centavos": 148001}]
+    av = [a for a in notas.avisos(conn, datetime.date(2026, 9, 22)) if a["tipo"] == "nota_acima_da_medicao"]
+    assert [(a["medicao_id"], a["mensagem"]) for a in av] == [
+        (mid, "nota 3102 de R$ 846.788,31 é maior que a medição (R$ 1.480,01)")]
+    assert [a["nivel"] for a in avisos._de_notas(conn, datetime.date(2026, 9, 22))
+            if a["tipo"] == "nota_acima_da_medicao"] == ["critico"]
+    # nota igual ao valor da medicao nao avisa
+    medicoes.definir_valor(conn, 1, mid, "atestado", 84678831, "manual")
+    assert notas.acima_da_medicao(conn, mid) == []
+    assert not [a for a in notas.avisos(conn, datetime.date(2026, 9, 22)) if a["tipo"] == "nota_acima_da_medicao"]

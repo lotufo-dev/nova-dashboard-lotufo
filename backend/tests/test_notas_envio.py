@@ -2052,3 +2052,52 @@ def test_pacote_sem_o_texto_guardado_mostra_montar_de_novo(svc):
     protocolo.montar(c, ids["uid"], pid, refazer_texto=True)
     d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
     assert (d["bloqueio"], d["remontar"]) == (None, False)
+
+
+# --- issue #562: nota divergente do espelho no envio ---------------------------------------------------------------
+
+def _nota_com_conferencia(c, mid, numero, conferencia):
+    """Nota da Lotufo alocada a' medicao com a conferencia gravada (como notas._vincular a grava)."""
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, numero, numero_int, valor_centavos, conferencia, origem) "
+                    "VALUES (1,?,?,?,?,'pdf')", (str(numero), numero, 18017069, json.dumps(conferencia))).lastrowid
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+              "VALUES (?,?,?,'manual','teste')", (mid, nid, 18017069))
+    c.commit()
+    return nid
+
+
+DIVERGE = [{"campo": "valor", "espelho": 14800001, "nota": 18017069, "grau": "divergente"},
+           {"campo": "iss", "espelho": 296000, "nota": 360341, "grau": "divergente"},
+           {"campo": "inss", "espelho": 162800, "nota": 162801, "grau": "arredondamento"}]
+NF_DIVERGE = "23ª Medição: NF 2275 diverge do espelho em valor, ISS"
+
+
+def test_envio_com_nota_divergente_pede_confirmacao_e_motivo_que_vai_para_a_auditoria(api):
+    """Issue #562: a nota divergente vira pendencia (so' os campos de grau divergente) e o envio exige confirmacao e
+    motivo escrito; sem o motivo nada sai; com ele, o motivo fica na auditoria gravada antes do e-mail."""
+    cl, c, ids = api
+    _nota_com_conferencia(c, ids["sinfra_exec"], 2275, DIVERGE)
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"], "medicao_ids": [
+        ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    assert d["pendencias"] == [NF_DIVERGE] and d["exige_justificativa"] is True
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d))
+    assert r.status_code == 422 and r.json()["detail"]["codigo"] == "CONFIRMAR_PENDENCIAS"
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"]))
+    assert r.status_code == 422 and "A nota diverge do espelho: escreva o motivo" in r.text
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0 and _confirmacoes(c) == []
+    motivo = "NF de valor maior por erro do faturamento, conferido"
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"], justificativa=motivo))
+    assert r.status_code == 200, r.text
+    depois = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='protocolo.envio_confirmado'").fetchone()[0])
+    assert depois == {"pendencias": [NF_DIVERGE], "justificativa": motivo}
+
+
+def test_nota_so_com_arredondamento_nao_pede_confirmacao(svc):
+    c, ids = svc
+    _nota_com_conferencia(c, ids["sinfra_exec"], 2276, [DIVERGE[2]])
+    pid = notas_envio.iniciar(c, ids["uid"], ids["sinfra"], [ids["sinfra_exec"], ids["sinfra_reaj"]])
+    d = notas_envio.detalhe_envio(c, pid, hoje=HOJE)
+    assert d["pendencias"] == [] and d["exige_justificativa"] is False
+    sinfra, = _por_contrato(notas_envio.a_enviar(c, HOJE), ids["sinfra"])
+    assert [(x["numero"], x["campo"], x["grau"]) for x in sinfra["divergencias"]] == [(2276, "inss", "arredondamento")]

@@ -338,7 +338,7 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
     nao cobrem outro aberto).
 
     Devolve None quando nenhuma medicao do grupo tem espelho vigente (nao da' para saber o que esperar). Senao
-    {notas_faltam, completo, total_centavos, recebido_centavos, falta_centavos, parcial}: `completo` exige toda
+    {notas_faltam, completo, total_centavos, recebido_centavos, falta_centavos, parcial, divergente}: `completo` exige toda
     medicao do grupo com espelho, toda saida com nota e toda nota com titulo; sem isso os valores vem None. Espelho
     sem saida da Lotufo conta zero. `parcial`: alguma nota da cota ja' teve baixa e ainda falta receber (ou o resumo
     ainda nao fecha); a irma valida ainda sem espelho (reajuste a' espera do indice) nao esconde a baixa da outra
@@ -347,6 +347,7 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
     grupo = [medicao_id] + [i for i in [_irma_valida(conn, medicao_id)] if i is not None]
     faltam, total, recebido, falta, sem_titulo, alguma_baixa = 0, 0, 0, 0, False, False
     com_espelho, sem_espelho = 0, 0
+    divergente = False      # issue #562: alguma nota da cota diverge do espelho (o a receber sai dela)
     for mid in grupo:
         esp = _notas.esperadas_do_espelho(conn, mid)
         if esp is None:
@@ -357,6 +358,8 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
             if e["nota_id"] is None:
                 faltam += 1
                 continue
+            conf = conn.execute("SELECT conferencia FROM notas_fiscais WHERE id=?", (e["nota_id"],)).fetchone()
+            divergente = divergente or _notas.divergente(json.loads((conf["conferencia"] if conf else None) or "[]"))
             rec, devido, _ = _recebido_da_nota(conn, e["nota_id"])
             alguma_baixa = alguma_baixa or rec > 0
             if devido <= 0:
@@ -370,7 +373,7 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
     return {"notas_faltam": faltam, "completo": completo,
             "total_centavos": total if completo else None, "recebido_centavos": recebido if completo else None,
             "falta_centavos": falta if completo else None,
-            "parcial": alguma_baixa and (not completo or falta > 0)}
+            "parcial": alguma_baixa and (not completo or falta > 0), "divergente": divergente}
 
 
 def _recebido_da_nota(conn, nota_id: int) -> tuple[int, int, str | None]:
