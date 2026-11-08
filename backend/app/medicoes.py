@@ -130,6 +130,7 @@ def _detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
         return None
     d = dict(r)
     d["diferenca_centavos"] = diferenca(d)      # issue #284: aprovado do boletim menos o pedido
+    d["diferenca_aceita"] = diferenca_aceita(conn, medicao_id)     # issue #288: a do boletim vigente, ou None
     # Issue #283: `protocolos` e' so' o da nota (o que conta como protocolo nas telas e nos marcos); o nº do SIGA da
     # planilha/carta (etapa 'planilha', migracao 054) vem a' parte
     d["protocolos"] = [dict(p) for p in conn.execute(
@@ -409,6 +410,79 @@ def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int
             "diferenca_centavos": None if pedido is None else valor - pedido}
 
 
+# --- issue #288: "Aceitar a diferença" do boletim abaixo do pedido (decisao do Leo de 08/11/2026) --------------
+MIN_JUSTIFICATIVA_DIFERENCA = 10
+
+
+def _atesto_vigente(conn, medicao_id: int) -> int | None:
+    """O evento de atesto vigente (o ultimo): o aprovado da medicao e' o dele."""
+    return conn.execute("SELECT MAX(id) FROM medicao_atestos WHERE medicao_id=?", (medicao_id,)).fetchone()[0]
+
+
+def diferenca_aceita(conn, medicao_id: int) -> dict | None:
+    """A aceitacao da diferenca do boletim VIGENTE, ou None (sem aceitacao, ou aceitacao de um boletim anterior:
+    o boletim novo ainda abaixo do pedido traz o aviso de volta). Vale so' para o pedido de agora: pedido mudado depois
+    (a prevista do fluxo antigo que recebe o valor do espelho) e' diferenca nova (code-review)."""
+    vigente = _atesto_vigente(conn, medicao_id)
+    if vigente is None:
+        return None
+    r = conn.execute("SELECT d.atesto_id, d.aprovado_centavos, d.pedido_centavos, d.justificativa, d.criado_em, "
+                     "u.nome AS usuario FROM medicao_diferencas_aceitas d LEFT JOIN usuarios u ON u.id=d.usuario_id "
+                     "JOIN medicoes m ON m.id=d.medicao_id WHERE d.medicao_id=? AND d.atesto_id=? "
+                     "AND d.pedido_centavos=m.valor_protocolado_centavos AND d.aprovado_centavos=m.valor_atestado_centavos "
+                     "ORDER BY d.id DESC LIMIT 1", (medicao_id, vigente)).fetchone()
+    if r is None:
+        return None
+    return {**dict(r), "diferenca_centavos": r["aprovado_centavos"] - r["pedido_centavos"]}
+
+
+def aceitar_diferenca(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, justificativa: str | None) -> int:
+    """Aceita a diferenca do boletim vigente abaixo do pedido, com justificativa: o aviso "aprovado abaixo do pedido"
+    some para a operacao e a diretoria. Evento append-only (migracao 073) ligado ao boletim vigente."""
+    justificativa = (justificativa or "").strip()
+    if len(justificativa) < MIN_JUSTIFICATIVA_DIFERENCA:
+        raise ValueError(f"Informe a justificativa (ao menos {MIN_JUSTIFICATIVA_DIFERENCA} caracteres)")
+    with db.mutacao(conn):
+        m = conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+        if m is None:
+            raise ValueError("Medição não encontrada")
+        if m["estado"] in ("cancelada", "desistida"):
+            raise ValueError(f"{nome_medicao(m['numero'], m['tipo'])} está {rotulo_estado(m['estado'])}")
+        if not tem_boletim(conn, medicao_id):
+            raise ValueError("Registre o boletim do órgão antes de aceitar a diferença")
+        dif = diferenca(m)
+        if dif is None or dif >= 0:
+            raise ValueError("O aprovado não está abaixo do pedido: não há diferença a aceitar")
+        vigente = _atesto_vigente(conn, medicao_id)
+        aprovado, pedido = m["valor_atestado_centavos"], m["valor_protocolado_centavos"]
+        if conn.execute("SELECT 1 FROM medicao_diferencas_aceitas WHERE atesto_id=? AND pedido_centavos=?",
+                        (vigente, pedido)).fetchone():
+            raise ValueError("A diferença deste boletim já foi aceita")
+        aid = conn.execute(
+            "INSERT INTO medicao_diferencas_aceitas (medicao_id, atesto_id, aprovado_centavos, pedido_centavos, "
+            "justificativa, usuario_id) VALUES (?,?,?,?,?,?)",
+            (medicao_id, vigente, aprovado, pedido, justificativa, usuario_id)).lastrowid
+        auditoria.registrar(conn, usuario_id, "medicao.diferenca_aceita", "medicao", medicao_id, None, {
+            "atesto_id": vigente, "aprovado_centavos": aprovado, "pedido_centavos": pedido,
+            "justificativa": justificativa})
+    return aid
+
+
+def _eventos_diferenca_aceita(conn: sqlite3.Connection, ids: list[int], out: dict[int, list[dict]]) -> None:
+    """Issue #288: cada aceitacao da diferenca entra na linha do tempo, com a justificativa e o autor."""
+    from app.dinheiro import format_brl
+    for i in range(0, len(ids), LOTE_AUDITORIA):
+        lote = ids[i:i + LOTE_AUDITORIA]
+        for r in conn.execute(
+                "SELECT d.medicao_id, d.aprovado_centavos, d.pedido_centavos, d.justificativa, d.criado_em, u.nome "
+                "FROM medicao_diferencas_aceitas d LEFT JOIN usuarios u ON u.id=d.usuario_id "
+                f"WHERE d.medicao_id IN ({','.join('?' * len(lote))}) ORDER BY d.id", lote):
+            texto = (f"Diferença de {format_brl(r['pedido_centavos'] - r['aprovado_centavos'])} abaixo do pedido "
+                     f"aceita: {r['justificativa']}")
+            out[r["medicao_id"]].append({"data": r["criado_em"],
+                                         "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+
+
 def boletins(conn: sqlite3.Connection, medicao_id: int) -> list[dict]:
     """Os boletins registrados (eventos de atesto com meio ou documento), do primeiro ao vigente."""
     return [{**dict(r), "tem_arquivo": bool(r["tem_arquivo"])} for r in conn.execute(
@@ -468,6 +542,7 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
                                            "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
     _eventos_atesto(conn, list(out), out)
     _eventos_assinatura(conn, list(out), out)
+    _eventos_diferenca_aceita(conn, list(out), out)
     from app import medicao_planilhas     # issue #283: o envio da planilha/carta (import local: ele importa este)
     medicao_planilhas.eventos_geracao(conn, list(out), out)
     medicao_planilhas.eventos_envio(conn, list(out), out)

@@ -1,10 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FormBoletim } from "./Boletim";
+import { AceiteDiferenca, FormBoletim } from "./Boletim";
 import type { Medicao } from "./Medicoes";
 
-const { apiForm } = vi.hoisted(() => ({ apiForm: vi.fn() }));
-vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), apiForm }));
+const { apiForm, api } = vi.hoisted(() => ({ apiForm: vi.fn(), api: vi.fn() }));
+vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), apiForm, api }));
 
 const M = { id: 5, numero: 7, tipo: "execucao", competencia: "2026-07", estado: "planilha_enviada",
   valor_protocolado_centavos: 1234567, valor_protocolado_origem: null, valor_atestado_centavos: null,
@@ -91,5 +91,44 @@ describe("FormBoletim (issue #290)", () => {
       avisos: ["A capa não está aprovada (situação: EM ANÁLISE); digite os valores do boletim"] });
     expect(await screen.findByText(/A capa não está aprovada/)).toBeTruthy();
     expect(campo(/Valor aprovado/).value).toBe("");
+  });
+});
+
+describe("AceiteDiferenca (issue #288)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+  const COM_BOLETIM = { ...M, estado: "boletim_recebido", valor_atestado_centavos: 1200001,
+    boletins: [{ id: 9, tem_arquivo: true, valor_centavos: 1200001 }] } as Medicao;
+  const agirReal = () => vi.fn(async (fn: () => Promise<unknown>) => { await fn(); return true; });
+
+  it("aprovado abaixo do pedido: aceita com justificativa obrigatória", async () => {
+    api.mockResolvedValue({ id: 1 });
+    const agir = agirReal();
+    render(<AceiteDiferenca m={COM_BOLETIM} podeEditar salvando={false} agir={agir} />);
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar a diferença" }));
+    fireEvent.change(screen.getByLabelText("Justificativa"), { target: { value: "curta" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar a diferença" }));
+    expect(screen.getByText("Informe a justificativa (ao menos 10 caracteres).")).toBeTruthy();
+    expect(agir).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Justificativa"), { target: { value: "  glosa de itens não executados " } });
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar a diferença" }));
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(1));
+    expect(api.mock.calls[0][0]).toBe("/api/medicoes/5/diferenca-aceita");
+    expect(JSON.parse(api.mock.calls[0][1].body)).toEqual({ justificativa: "glosa de itens não executados" });
+  });
+
+  it("já aceita mostra o selo; diretoria não vê o botão; sem diferença abaixo, nada", () => {
+    const { container, rerender } = render(<AceiteDiferenca m={{ ...COM_BOLETIM, diferenca_aceita: { atesto_id: 9,
+      justificativa: "glosa", usuario: "Eng", criado_em: "2026-11-08 10:00:00", diferenca_centavos: -34566 } }}
+      podeEditar salvando={false} agir={agirReal()} />);
+    expect(screen.getByText("Diferença aceita")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    rerender(<AceiteDiferenca m={COM_BOLETIM} podeEditar={false} salvando={false} agir={agirReal()} />);
+    expect(container.textContent).toBe("");
+    rerender(<AceiteDiferenca m={{ ...COM_BOLETIM, valor_atestado_centavos: 1234567 }} podeEditar salvando={false} agir={agirReal()} />);
+    expect(container.textContent).toBe("");
+    rerender(<AceiteDiferenca m={{ ...COM_BOLETIM, boletins: [] }} podeEditar salvando={false} agir={agirReal()} />);
+    expect(container.textContent).toBe("");
+    rerender(<AceiteDiferenca m={{ ...COM_BOLETIM, estado: "cancelada" }} podeEditar salvando={false} agir={agirReal()} />);
+    expect(container.textContent).toBe("");
   });
 });

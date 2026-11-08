@@ -478,6 +478,256 @@ def test_medicao_protocolada_nao_avisa_espelho_desatualizado(ambiente):
     assert _desatualizados(conn) == []
 
 
+# --- issue #288: avisos do motor de medicao (spec 2026-10-20 §2.1 e §2.1.1; decisao do Leo de 08/11/2026) ----------
+
+@pytest.fixture
+def motor(tmp_path, monkeypatch):
+    """Obra SINFRA ativa (execucao desde 15/06/2026), orgao com prazo X de 15 dias; hoje = 08/11/2026."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    monkeypatch.setattr(tempo, "hoje_local", lambda: D(2026, 11, 8))
+    c = db.get_conn(); db.migrate(c)
+    uid = auth.criar_usuario(c, "U", "u@l.com", "senha-forte-123", "admin")
+    for chave, familia, regras in (("sinfra-x", "sinfra", {"prazo_boletim_dias": 15}), ("sem-prazo", "sinfra", {}),
+                                   ("mtpar", "mtpar", {})):
+        c.execute("INSERT INTO orgaos (chave, nome, familia, regras) VALUES (?, ?, ?, ?)",
+                  (chave, chave.upper(), familia, json.dumps({"vigencia_automatica": True, **regras})))
+    c.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos, "
+              "orgao_id, execucao_inicio, execucao_fim, vigencia_fim) VALUES ('SINFRA', 'IC 1/2026', 'Obra A', "
+              "'obra', 100, (SELECT id FROM orgaos WHERE chave='sinfra-x'), '2026-06-15', '2027-12-31', '2027-12-31')")
+    cid = c.execute("SELECT MAX(id) FROM contratos").fetchone()[0]
+    c.commit()
+    yield c, {"id": uid}, cid
+    c.close()
+
+
+def _med(c, cid, numero, competencia, estado, pedido=None, inicio=None, fim=None, enviada_em=None, tipo="execucao"):
+    mid = c.execute(
+        "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+        "periodo_inicio, periodo_fim, planilha_enviada_em) VALUES (?,?,?,?,?,?,?,?,?)",
+        (cid, numero, tipo, competencia, estado, pedido, inicio, fim, enviada_em)).lastrowid
+    c.commit()
+    return mid
+
+
+def _do_tipo(c, tipo, hoje, publico="operacao"):
+    return [a for a in avisos.listar(c, hoje, publico=publico) if a["tipo"] == tipo]
+
+
+def _meses_sem_planilha(c, hoje, publico="operacao"):
+    return [a["mensagem"] for a in _do_tipo(c, "planilha_nao_enviada", hoje, publico)]
+
+
+def test_planilha_do_mes_nao_enviada_a_partir_do_dia_5_do_mes_seguinte(motor):
+    c, u, cid = motor
+    _med(c, cid, 1, "2026-06", "protocolada")
+    _med(c, cid, 2, "2026-07", "planilha_enviada", enviada_em="2026-08-03")
+    assert _meses_sem_planilha(c, D(2026, 9, 4)) == []                       # 08/2026 so' avisa em 05/09
+    assert _meses_sem_planilha(c, D(2026, 9, 5)) == ["planilha/carta de 08/2026 não enviada"]
+    [a] = _do_tipo(c, "planilha_nao_enviada", D(2026, 10, 5))[1:]
+    assert (a["contrato_id"], a["obra"], a["nivel"], a["publico"], a["data"], a["sentido"], a["dias"]) == (
+        cid, "Obra A", "acao", ["operacao"], "2026-10-05", "desde", 0)
+    assert _meses_sem_planilha(c, D(2026, 10, 5), publico="diretoria") == []   # so' a operacao
+    # a planilha/carta so' gerada ainda nao foi enviada; enviada (ou etapa seguinte, mesmo do fluxo antigo), sai
+    m8 = _med(c, cid, 3, "2026-08", "planilha_gerada")
+    assert len(_meses_sem_planilha(c, D(2026, 10, 5))) == 2
+    c.execute("UPDATE medicoes SET estado='planilha_enviada', planilha_enviada_em='2026-09-02' WHERE id=?", (m8,))
+    assert _meses_sem_planilha(c, D(2026, 10, 5)) == ["planilha/carta de 09/2026 não enviada"]
+    _med(c, cid, 4, "2026-09", "espelho_gerado")
+    assert _meses_sem_planilha(c, D(2026, 10, 5)) == []
+
+
+def test_planilha_nao_enviada_sem_lacuna_antiga_e_obra_sem_medicao_desde_o_inicio(motor):
+    c, u, cid = motor
+    # obra sem medicao: desde o mes do inicio da execucao (06/2026), ate' o mes anterior a hoje
+    assert _meses_sem_planilha(c, D(2026, 8, 10)) == ["planilha/carta de 06/2026 não enviada",
+                                                      "planilha/carta de 07/2026 não enviada"]
+    # a lacuna antes da ultima medicao enviada (07/2026) nao avisa
+    _med(c, cid, 1, "2026-06", "recebida")
+    _med(c, cid, 2, "2026-08", "protocolada")
+    _med(c, cid, 3, "2026-09", "cancelada")                  # cancelada nao conta como enviada
+    assert _meses_sem_planilha(c, D(2026, 10, 6)) == ["planilha/carta de 09/2026 não enviada"]
+    _med(c, cid, 1, "2026-09", "protocolada", tipo="projeto")   # so' a execucao conta
+    assert _meses_sem_planilha(c, D(2026, 10, 6)) == ["planilha/carta de 09/2026 não enviada"]
+
+
+def test_planilha_nao_enviada_fora_da_obra_paralisada_da_mtpar_e_inativa(motor):
+    c, u, cid = motor
+    _med(c, cid, 1, "2026-06", "protocolada")
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'par-1', 'paralisacao', "
+              "'2026-07-20', '{}')", (cid,)); c.commit()
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == []
+    # reiniciada: desde o mes do reinicio, e os meses parados nao avisam
+    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'rei-1', 'reinicio', "
+              "'2026-10-10', '{}')", (cid,)); c.commit()
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == ["planilha/carta de 10/2026 não enviada"]
+    c.execute("UPDATE contratos SET orgao_id=(SELECT id FROM orgaos WHERE chave='mtpar')"); c.commit()
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == []
+    c.execute("UPDATE contratos SET orgao_id=(SELECT id FROM orgaos WHERE chave='sinfra-x'), estado='encerrado'")
+    c.commit()
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == []
+
+
+def test_obra_so_de_projeto_conta_a_serie_de_projeto(motor):
+    # revisor (rodada 1 da PR #582): sem execucao, a obra segue a serie de projeto (medicoes.resumo, #154)
+    c, u, cid = motor
+    for numero, mes in enumerate(("2026-06", "2026-07", "2026-08", "2026-09"), start=1):
+        _med(c, cid, numero, mes, "recebida", tipo="projeto")
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == ["planilha/carta de 10/2026 não enviada"]
+    _med(c, cid, 5, "2026-10", "planilha_enviada", tipo="projeto", enviada_em="2026-11-03")
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == []
+
+
+def test_planilha_nao_enviada_para_no_fim_da_execucao(motor):
+    # code-review: depois do fim da execucao (vigente) nao ha' competencia de execucao a medir
+    c, u, cid = motor
+    _med(c, cid, 1, "2026-06", "protocolada")
+    c.execute("UPDATE contratos SET execucao_fim='2026-08-12' WHERE id=?", (cid,)); c.commit()
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == ["planilha/carta de 07/2026 não enviada",
+                                                      "planilha/carta de 08/2026 não enviada"]
+
+
+def test_pedido_sem_boletim_x_para_a_operacao_2x_para_a_diretoria_e_some_com_o_boletim(motor):
+    c, u, cid = motor
+    _med(c, cid, 1, "2026-10", "protocolada")        # sem aviso de planilha do mes no caminho
+    mid = _med(c, cid, 2, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-20")
+    assert _do_tipo(c, "pedido_sem_boletim", D(2026, 11, 4)) == []           # 15 dias: ainda no prazo
+    [a] = _do_tipo(c, "pedido_sem_boletim", D(2026, 11, 5))
+    assert (a["medicao_id"], a["nivel"], a["publico"], a["dias"], a["data"], a["sentido"]) == (
+        mid, "atencao", ["operacao"], 16, "2026-10-20", "desde")
+    assert a["mensagem"] == "2ª Medição: pedido enviado há 16 dias sem boletim do órgão (prazo de 15 dias)"
+    assert a["valor_centavos"] == 10_000_01
+    assert _do_tipo(c, "pedido_sem_boletim", D(2026, 11, 19), "diretoria") == []    # 30 dias = 2X: ainda nao
+    [d] = _do_tipo(c, "pedido_sem_boletim", D(2026, 11, 20), "diretoria")
+    assert (d["publico"], d["nivel"]) == (["operacao", "diretoria"], "acao")
+    medicoes.registrar_boletim(c, u["id"], mid, {"valor_centavos": 10_000_01, "data": "2026-11-06",
+                                                 "numero_orgao": "SMO 1"}, {"arquivo": "boletins/a.pdf", "sha256": "a" * 64})
+    assert _do_tipo(c, "pedido_sem_boletim", D(2026, 11, 20), "todos") == []
+
+
+def test_orgao_sem_prazo_boletim_dias_nao_avisa_pedido_sem_boletim(motor):
+    c, u, cid = motor
+    _med(c, cid, 1, "2026-06", "planilha_enviada", pedido=100, enviada_em="2026-07-01")
+    assert len(_do_tipo(c, "pedido_sem_boletim", D(2026, 11, 8))) == 1
+    for chave in ("sem-prazo", "mtpar"):
+        c.execute("UPDATE contratos SET orgao_id=(SELECT id FROM orgaos WHERE chave=?)", (chave,)); c.commit()
+        assert _do_tipo(c, "pedido_sem_boletim", D(2026, 11, 8), "todos") == []
+
+
+def _bol(c, u, mid, valor, sha, data="2026-11-02"):
+    return medicoes.registrar_boletim(c, u["id"], mid, {"valor_centavos": valor, "data": data, "numero_orgao": f"SMO {sha}"},
+                                      {"arquivo": f"boletins/{sha}.pdf", "sha256": sha * 64})
+
+
+def test_aprovado_abaixo_do_pedido_operacao_sempre_diretoria_acima_de_10_por_cento(motor):
+    c, u, cid = motor
+    mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol(c, u, mid, 9_000_01, "a")               # diferenca de 1.000,00 = 9,99990% do pedido (centavo impar)
+    [a] = _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8))
+    assert (a["medicao_id"], a["nivel"], a["publico"], a["valor_centavos"], a["data"]) == (
+        mid, "acao", ["operacao"], 1_000_00, "2026-11-02")
+    assert a["mensagem"] == "1ª Medição: aprovado R$ 9.000,01, abaixo do pedido de R$ 10.000,01 (diferença de R$ 1.000,00)"
+    _bol(c, u, mid, 9_000_00, "b")               # 1.000,01: acima de 10%
+    [d] = _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "diretoria")
+    assert d["publico"] == ["operacao", "diretoria"]
+    _bol(c, u, mid, 10_000_01, "c")              # boletim novo igual ao pedido: some
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+    _bol(c, u, mid, 10_500_00, "d")              # acima do pedido nao avisa
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+
+
+def test_aceitar_a_diferenca_tira_o_aviso_ate_o_proximo_boletim_abaixo(motor):
+    c, u, cid = motor
+    mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    with pytest.raises(ValueError, match="boletim do órgão"):
+        medicoes.aceitar_diferenca(c, u["id"], mid, "glosa de itens não executados")
+    _bol(c, u, mid, 8_000_00, "a")
+    with pytest.raises(ValueError, match="justificativa"):
+        medicoes.aceitar_diferenca(c, u["id"], mid, "   curta ")
+    medicoes.aceitar_diferenca(c, u["id"], mid, "  glosa de itens não executados  ")
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+    aceite = medicoes.detalhe(c, mid)["diferenca_aceita"]
+    assert (aceite["justificativa"], aceite["diferenca_centavos"], aceite["usuario"]) == (
+        "glosa de itens não executados", -2_000_01, "U")
+    with pytest.raises(ValueError, match="já foi aceita"):
+        medicoes.aceitar_diferenca(c, u["id"], mid, "de novo, clique duplo")
+    textos = [e["texto"] for e in medicoes.edicoes_valor(c, [mid])[mid]]
+    assert "Diferença de R$ 2.000,01 abaixo do pedido aceita: glosa de itens não executados por U" in textos
+    acao = c.execute("SELECT acao FROM audit_log WHERE entidade='medicao' AND entidade_id=? ORDER BY id DESC LIMIT 1",
+                     (str(mid),)).fetchone()[0]
+    assert acao == "medicao.diferenca_aceita"
+    # boletim novo (glosa) ainda abaixo: o aviso volta, e a aceitacao antiga nao vale para ele
+    _bol(c, u, mid, 7_000_00, "b")
+    assert len(_do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8))) == 1
+    assert medicoes.detalhe(c, mid)["diferenca_aceita"] is None
+    # sem diferenca nao ha' o que aceitar
+    _bol(c, u, mid, 10_000_01, "c")
+    with pytest.raises(ValueError, match="não está abaixo do pedido"):
+        medicoes.aceitar_diferenca(c, u["id"], mid, "glosa de itens não executados")
+
+
+def test_aceite_vale_so_para_o_pedido_de_quando_foi_aceito(motor):
+    # code-review: o pedido que muda depois (prevista do fluxo antigo que recebe o valor do espelho) e' diferenca nova
+    c, u, cid = motor
+    mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol(c, u, mid, 9_900_00, "a")
+    medicoes.aceitar_diferenca(c, u["id"], mid, "glosa pequena de itens")
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=60_000_00 WHERE id=?", (mid,)); c.commit()
+    assert medicoes.detalhe(c, mid)["diferenca_aceita"] is None
+    [a] = _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "diretoria")
+    assert a["valor_centavos"] == 50_100_00
+    medicoes.aceitar_diferenca(c, u["id"], mid, "pedido novo também conferido")
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+
+
+def test_diferenca_aceita_e_evento_que_nao_se_altera_nem_se_apaga(motor):
+    import sqlite3
+    c, u, cid = motor
+    mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol(c, u, mid, 8_000_00, "a")
+    medicoes.aceitar_diferenca(c, u["id"], mid, "glosa de itens não executados")
+    for sql in ("UPDATE medicao_diferencas_aceitas SET justificativa='x'", "DELETE FROM medicao_diferencas_aceitas"):
+        with pytest.raises(sqlite3.IntegrityError):
+            c.execute(sql)
+    c.rollback()
+
+
+def test_medicao_fora_de_ordem_enquanto_a_planilha_esta_gerada_ou_enviada(motor):
+    c, u, cid = motor
+    _med(c, cid, 1, "2026-09", "protocolada", inicio="2026-09-01", fim="2026-09-30")
+    m2 = _med(c, cid, 2, "2026-10", "planilha_gerada", pedido=100, inicio="2026-10-03", fim="2026-10-31")
+    [a] = _do_tipo(c, "medicao_fora_de_ordem", D(2026, 11, 8))
+    assert (a["medicao_id"], a["nivel"], a["publico"]) == (m2, "atencao", ["operacao"])
+    assert a["mensagem"] == "2ª Medição: o período pula dias (a 1ª medição terminou em 30/09/2026 e esta começa em 03/10/2026)"
+    # sobreposicao, ja' com a planilha enviada
+    c.execute("UPDATE medicoes SET periodo_inicio='2026-09-20', estado='planilha_enviada', planilha_enviada_em='2026-11-01' "
+              "WHERE id=?", (m2,)); c.commit()
+    [a] = _do_tipo(c, "medicao_fora_de_ordem", D(2026, 11, 8))
+    assert a["mensagem"] == "2ª Medição: o período se sobrepõe ao da 1ª medição, que vai até 30/09/2026"
+    # a revisao enviada depois do envio corrige o periodo (a versao vigente manda, nao a coluna congelada)
+    for versao, inicio in ((1, "2026-09-20"), (2, "2026-10-01")):
+        c.execute("INSERT INTO medicao_planilhas (medicao_id, versao, periodo_inicio, periodo_fim, valor_pedido_centavos, "
+                  "acumulado_anterior_centavos, origem, motivo) VALUES (?,?,?,'2026-10-31',100,0,'manual',?)",
+                  (m2, versao, inicio, None if versao == 1 else "Rev01"))
+    c.commit()
+    assert _do_tipo(c, "medicao_fora_de_ordem", D(2026, 11, 8), "todos") == []
+    # com o boletim registrado o aviso some (a revisao nao existe mais)
+    c.execute("INSERT INTO medicao_planilhas (medicao_id, versao, periodo_inicio, periodo_fim, valor_pedido_centavos, "
+              "acumulado_anterior_centavos, origem, motivo) VALUES (?,3,'2026-10-05','2026-10-31',100,0,'manual','Rev02')",
+              (m2,)); c.commit()
+    assert len(_do_tipo(c, "medicao_fora_de_ordem", D(2026, 11, 8))) == 1
+    c.execute("UPDATE medicoes SET estado='boletim_recebido' WHERE id=?", (m2,)); c.commit()
+    assert _do_tipo(c, "medicao_fora_de_ordem", D(2026, 11, 8), "todos") == []
+
+
+def test_periodo_contiguo_ou_anterior_sem_periodo_nao_avisa_fora_de_ordem(motor):
+    c, u, cid = motor
+    m1 = _med(c, cid, 1, "2026-09", "protocolada")                               # historico sem periodo
+    _med(c, cid, 2, "2026-10", "planilha_gerada", pedido=100, inicio="2026-10-03", fim="2026-10-31")
+    assert _do_tipo(c, "medicao_fora_de_ordem", D(2026, 11, 8)) == []
+    c.execute("UPDATE medicoes SET periodo_inicio='2026-09-01', periodo_fim='2026-10-02' WHERE id=?", (m1,)); c.commit()
+    assert _do_tipo(c, "medicao_fora_de_ordem", D(2026, 11, 8)) == []
+
+
 # ---- Avisos do motor de apostilamento (issue #274; spec 2026-10-20 §2.2, decisao do Leo de 08/11/2026) ----
 
 @pytest.fixture
@@ -536,7 +786,7 @@ def _r_termo_do_ciclo(c, cid, ligar_pleito=None):
     c.commit()
 
 
-def _do_tipo(c, tipo, hoje=D(2026, 10, 1), publico="todos"):
+def _r_do_tipo(c, tipo, hoje=D(2026, 10, 1), publico="todos"):
     return [a for a in avisos.listar(c, hoje, publico=publico) if a["tipo"] == tipo]
 
 
@@ -546,16 +796,16 @@ def test_reajuste_fora_da_previsao_com_mais_de_um_real_e_some_com_a_reapresentac
     _r_previsao(c, cid, "2026-08", 100_01)
     _r_medicao(c, cid, 1, "2026-07", "planilha_enviada", pedido=101_01)          # R$ 1,00 acima: dentro da tolerancia
     m2 = _r_medicao(c, cid, 2, "2026-08", "planilha_enviada", pedido=101_02)     # R$ 1,01 acima
-    [a] = _do_tipo(c, "reajuste_fora_da_previsao")
+    [a] = _r_do_tipo(c, "reajuste_fora_da_previsao")
     assert (a["nivel"], a["publico"], a["obra"], a["valor_centavos"], a["competencia"], a["data_base_mes"], a["ciclo"]) \
         == ("atencao", ["operacao"], "Cultural", 101_02, "2026-08", "2024-06", 2026)
     assert a["mensagem"] == ("reajuste de 08/2026 (data-base 06/2024): pedido R$ 101,02, previsto R$ 100,01; "
                              "reajuste fora da previsão")
     assert a["destino"] == {"tela": "contrato", "id": cid, "aba": "reajuste"}
-    assert _do_tipo(c, "reajuste_fora_da_previsao", publico="diretoria") == []
+    assert _r_do_tipo(c, "reajuste_fora_da_previsao", publico="diretoria") == []
     # reapresentacao: o pedido volta para dentro da tolerancia
     c.execute("UPDATE medicoes SET valor_protocolado_centavos=99_01 WHERE id=?", (m2,)); c.commit()
-    assert _do_tipo(c, "reajuste_fora_da_previsao") == []
+    assert _r_do_tipo(c, "reajuste_fora_da_previsao") == []
 
 
 def test_justificativa_tira_o_aviso_enquanto_pedido_e_previsto_nao_mudam(obra_reajuste):
@@ -563,7 +813,7 @@ def test_justificativa_tira_o_aviso_enquanto_pedido_e_previsto_nao_mudam(obra_re
     _r_previsao(c, cid, "2026-08", 100_01)
     m = _r_medicao(c, cid, 1, "2026-08", "planilha_enviada", pedido=101_02)
     reajuste.justificar(c, uid, cid, "2024-06", 2026, "2026-08", "  Índice definitivo saiu maior  ")
-    assert _do_tipo(c, "reajuste_fora_da_previsao") == []
+    assert _r_do_tipo(c, "reajuste_fora_da_previsao") == []
     [g] = reajuste.competencias_por_ciclo(c, cid)
     x = g["competencias"][0]
     assert x["avisos"] == []
@@ -572,12 +822,12 @@ def test_justificativa_tira_o_aviso_enquanto_pedido_e_previsto_nao_mudam(obra_re
     assert c.execute("SELECT COUNT(*) FROM audit_log WHERE acao='reajuste.justificativa'").fetchone()[0] == 1
     # o previsto muda (previsao nova): a justificativa deixa de valer e o aviso volta
     _r_previsao(c, cid, "2026-08", 90_00, criado_em="2026-08-01 10:00:00")
-    assert len(_do_tipo(c, "reajuste_fora_da_previsao")) == 1
+    assert len(_r_do_tipo(c, "reajuste_fora_da_previsao")) == 1
     reajuste.justificar(c, uid, cid, "2024-06", 2026, "2026-08", "Previsão nova, mesmo índice")
-    assert _do_tipo(c, "reajuste_fora_da_previsao") == []
+    assert _r_do_tipo(c, "reajuste_fora_da_previsao") == []
     # o pedido muda: volta de novo
     c.execute("UPDATE medicoes SET valor_protocolado_centavos=105_00 WHERE id=?", (m,)); c.commit()
-    assert len(_do_tipo(c, "reajuste_fora_da_previsao")) == 1
+    assert len(_r_do_tipo(c, "reajuste_fora_da_previsao")) == 1
 
 
 def test_justificativa_curta_ou_sem_aviso_e_recusada(obra_reajuste):
@@ -614,25 +864,25 @@ def test_reajuste_sem_apostilamento_um_aviso_por_ciclo_com_a_soma_medida_na_cota
     _r_medicao(c, cid, 2, "2026-08", "boletim_recebido", pedido=120_000_00, aprovado=110_000_01)   # o aprovado
     m3 = _r_medicao(c, cid, 3, "2026-09", "nota_emitida", pedido=95_000_00, aprovado=94_000_00)
     _r_nota(c, m3, 90_000_02)                                                                # o faturado
-    [a] = _do_tipo(c, "reajuste_sem_apostilamento")
+    [a] = _r_do_tipo(c, "reajuste_sem_apostilamento")
     # 110.000,01 + 90.000,02 = 200.000,03 cheio; a cota (50%) arredonda uma vez, sobre a soma: 100.000,02
     assert (a["nivel"], a["valor_centavos"], a["publico"], a["competencias"], a["ciclo"]) == \
         ("atencao", 100_000_02, ["operacao", "diretoria"], ["2026-08", "2026-09"], 2026)
     assert a["mensagem"] == "data-base 06/2024, ciclo de 2026: reajuste de 08/2026 e 09/2026 sem apostilamento"
-    assert len(_do_tipo(c, "reajuste_sem_apostilamento", publico="diretoria")) == 1
+    assert len(_r_do_tipo(c, "reajuste_sem_apostilamento", publico="diretoria")) == 1
     # o apostilamento carregado cobre as competencias: o aviso some
     _r_termo_do_ciclo(c, cid)
-    assert _do_tipo(c, "reajuste_sem_apostilamento") == []
+    assert _r_do_tipo(c, "reajuste_sem_apostilamento") == []
 
 
 def test_reajuste_sem_apostilamento_so_vai_a_diretoria_acima_de_100_mil(obra_reajuste):
     c, cid, _ = obra_reajuste
     m = _r_medicao(c, cid, 1, "2026-08", "boletim_recebido", pedido=100_000_00, aprovado=100_000_00)
-    [a] = _do_tipo(c, "reajuste_sem_apostilamento")
+    [a] = _r_do_tipo(c, "reajuste_sem_apostilamento")
     assert (a["valor_centavos"], a["publico"]) == (100_000_00, ["operacao"])      # R$ 100 mil exatos: nao passa
-    assert _do_tipo(c, "reajuste_sem_apostilamento", publico="diretoria") == []
+    assert _r_do_tipo(c, "reajuste_sem_apostilamento", publico="diretoria") == []
     c.execute("UPDATE medicoes SET valor_atestado_centavos=100_000_01 WHERE id=?", (m,)); c.commit()
-    [a] = _do_tipo(c, "reajuste_sem_apostilamento")
+    [a] = _r_do_tipo(c, "reajuste_sem_apostilamento")
     assert (a["valor_centavos"], a["publico"]) == (100_000_01, ["operacao", "diretoria"])
 
 
@@ -640,11 +890,11 @@ def test_nota_de_reajuste_antes_do_apostilamento_e_critico_e_some_com_o_termo(ob
     c, cid, _ = obra_reajuste
     m = _r_medicao(c, cid, 1, "2026-09", "nota_emitida", pedido=300_05, aprovado=300_05)
     _r_nota(c, m, 300_05)
-    [a] = _do_tipo(c, "reajuste_nota_antes_do_apostilamento")
+    [a] = _r_do_tipo(c, "reajuste_nota_antes_do_apostilamento")
     assert (a["nivel"], a["publico"], a["valor_centavos"], a["competencia"]) == ("critico", ["operacao"], 300_05, "2026-09")
     assert a["mensagem"] == "nota de reajuste de 09/2026 (data-base 06/2024) emitida antes do apostilamento"
     _r_termo_do_ciclo(c, cid)
-    assert _do_tipo(c, "reajuste_nota_antes_do_apostilamento") == []
+    assert _r_do_tipo(c, "reajuste_nota_antes_do_apostilamento") == []
 
 
 def test_cronograma_de_reajuste_a_reemitir_e_some_com_o_pleito_novo(obra_reajuste):
@@ -652,47 +902,47 @@ def test_cronograma_de_reajuste_a_reemitir_e_some_com_o_pleito_novo(obra_reajust
     p1 = _r_pleito(c, cid, "2026-06-10")
     c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero) "
               "VALUES (?, 'prazo', 'assinado', '2026-08-01', '5º Termo Aditivo')", (cid,)); c.commit()
-    [a] = _do_tipo(c, "reajuste_reemitir")
+    [a] = _r_do_tipo(c, "reajuste_reemitir")
     assert (a["nivel"], a["publico"], a["data"], a["sentido"], a["dias"], a["data_base_mes"]) == \
         ("acao", ["operacao"], "2026-08-01", "desde", 61, "2024-06")
     assert a["mensagem"] == ("data-base 06/2024, ciclo de 2026: aditivo 5º Termo Aditivo assinado em 01/08/2026, "
                              "depois do pleito; cronograma de reajuste a reemitir")
     # a reiteracao nao traz cronograma: o aviso segue
     _r_pleito(c, cid, "2026-09-01", reemite=p1, reemissao="reiteracao", numero="CT-2-LT-2026")
-    assert len(_do_tipo(c, "reajuste_reemitir")) == 1
+    assert len(_r_do_tipo(c, "reajuste_reemitir")) == 1
     # a reemissao do cronograma enviada: some
     _r_pleito(c, cid, "2026-09-10", reemite=p1, reemissao="cronograma", numero="CT-3-LT-2026")
-    assert _do_tipo(c, "reajuste_reemitir") == []
+    assert _r_do_tipo(c, "reajuste_reemitir") == []
 
 
 def test_pedido_de_reajuste_sem_resposta_depois_de_120_dias_do_ultimo_pleito(obra_reajuste):
     c, cid, _ = obra_reajuste
     p1 = _r_pleito(c, cid, "2026-06-10")
-    assert _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 7)) == []              # 119 dias: ainda nao
-    [a] = _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 8))                      # 120 dias: aparece
+    assert _r_do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 7)) == []              # 119 dias: ainda nao
+    [a] = _r_do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 8))                      # 120 dias: aparece
     assert (a["nivel"], a["publico"], a["dias"], a["data"], a["sentido"], a["ciclo"]) == \
         ("acao", ["operacao", "diretoria"], 120, "2026-06-10", "desde", 2026)
     assert a["mensagem"] == ("pedido de reajuste da data-base 06/2024, ciclo de 2026, enviado em 10/06/2026, há 120 "
                              "dias, sem resposta")
-    assert len(_do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 8), publico="diretoria")) == 1
+    assert len(_r_do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 8), publico="diretoria")) == 1
     # a reiteracao enviada zera a contagem, em qualquer orgao
     _r_pleito(c, cid, "2026-10-05", reemite=p1, reemissao="reiteracao", numero="CT-2-LT-2026")
-    assert _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 9)) == []
-    assert _do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 1)) == []              # 119 dias da reiteracao
-    assert len(_do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 2))) == 1          # 120 dias da reiteracao
+    assert _r_do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 9)) == []
+    assert _r_do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 1)) == []              # 119 dias da reiteracao
+    assert len(_r_do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 2))) == 1          # 120 dias da reiteracao
     # o apostilamento ligado ao pedido: some
     _r_termo_do_ciclo(c, cid, ligar_pleito=p1)
-    assert _do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 3)) == []
+    assert _r_do_tipo(c, "reajuste_sem_resposta", D(2027, 2, 3)) == []
 
 
 def test_pleito_nao_enviado_diz_o_valor_previsto_do_ciclo(obra_reajuste):
     c, cid, _ = obra_reajuste
-    [a] = _do_tipo(c, "reajuste_pleito", D(2026, 5, 15))                           # sem previsao: sem valor
+    [a] = _r_do_tipo(c, "reajuste_pleito", D(2026, 5, 15))                           # sem previsao: sem valor
     assert a["valor_centavos"] is None and "previstos" not in a["mensagem"]
     _r_previsao(c, cid, "2026-07", 100_01)
     _r_previsao(c, cid, "2026-08", 200_02)
     _r_previsao(c, cid, "2027-07", 999_99, ciclo=2027)                              # outro ciclo: fora
-    [a] = _do_tipo(c, "reajuste_pleito", D(2026, 5, 15))
+    [a] = _r_do_tipo(c, "reajuste_pleito", D(2026, 5, 15))
     assert a["valor_centavos"] == 300_03
     assert a["mensagem"] == ("data-base 06/2024 faz aniversário em 01/06/2026 (em 17 dias); R$ 300,03 previstos para "
                              "o ciclo de 2026; pleito de reajuste não enviado")
@@ -704,7 +954,7 @@ def test_aviso_da_competencia_diz_a_parte_do_contrato_da_data_base(obra_reajuste
     c.execute("UPDATE contrato_datas_base SET aplica_a='itens SINAPI' WHERE contrato_id=?", (cid,)); c.commit()
     _r_previsao(c, cid, "2026-08", 100_01)
     _r_medicao(c, cid, 1, "2026-08", "planilha_enviada", pedido=200_00)
-    [a] = _do_tipo(c, "reajuste_fora_da_previsao")
+    [a] = _r_do_tipo(c, "reajuste_fora_da_previsao")
     assert a["mensagem"].startswith("reajuste de 08/2026 (data-base 06/2024 (itens SINAPI)): pedido")
 
 
@@ -716,13 +966,13 @@ def test_ciclo_anterior_sem_resposta_nem_termo_segue_avisando_depois_da_janela_d
     c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero) "
               "VALUES (?, 'prazo', 'assinado', '2026-08-01', '5º Termo Aditivo')", (cid,)); c.commit()
     for hoje in (D(2027, 5, 1), D(2027, 5, 2), D(2027, 7, 1)):
-        assert [(a["ciclo"], a["data_base_mes"]) for a in _do_tipo(c, "reajuste_sem_resposta", hoje)] == [(2026, "2024-06")]
-        assert [a["ciclo"] for a in _do_tipo(c, "reajuste_reemitir", hoje)] == [2026]
-    [a] = _do_tipo(c, "reajuste_sem_resposta", D(2027, 5, 2))
+        assert [(a["ciclo"], a["data_base_mes"]) for a in _r_do_tipo(c, "reajuste_sem_resposta", hoje)] == [(2026, "2024-06")]
+        assert [a["ciclo"] for a in _r_do_tipo(c, "reajuste_reemitir", hoje)] == [2026]
+    [a] = _r_do_tipo(c, "reajuste_sem_resposta", D(2027, 5, 2))
     assert a["mensagem"] == "pedido de reajuste da data-base 06/2024, ciclo de 2026, enviado em 10/06/2026, há 326 dias, sem resposta"
     # o termo do ciclo de 2026 ligado ao pedido: os dois somem
     _r_termo_do_ciclo(c, cid, ligar_pleito=c.execute("SELECT MIN(id) FROM pleitos").fetchone()[0])
-    assert _do_tipo(c, "reajuste_sem_resposta", D(2027, 5, 2)) == _do_tipo(c, "reajuste_reemitir", D(2027, 5, 2)) == []
+    assert _r_do_tipo(c, "reajuste_sem_resposta", D(2027, 5, 2)) == _r_do_tipo(c, "reajuste_reemitir", D(2027, 5, 2)) == []
 
 
 def test_justificativa_nao_volta_quando_o_previsto_muda_e_volta_ao_mesmo_valor(obra_reajuste):
@@ -732,17 +982,17 @@ def test_justificativa_nao_volta_quando_o_previsto_muda_e_volta_ao_mesmo_valor(o
     _r_previsao(c, cid, "2026-08", 100_01)
     _r_medicao(c, cid, 1, "2026-08", "planilha_enviada", pedido=150_03)
     reajuste.justificar(c, uid, cid, "2024-06", 2026, "2026-08", "Índice definitivo saiu maior")
-    assert _do_tipo(c, "reajuste_fora_da_previsao") == []
+    assert _r_do_tipo(c, "reajuste_fora_da_previsao") == []
     _r_previsao(c, cid, "2026-08", 90_00, criado_em="2026-08-01 10:00:00")
-    assert len(_do_tipo(c, "reajuste_fora_da_previsao")) == 1
+    assert len(_r_do_tipo(c, "reajuste_fora_da_previsao")) == 1
     _r_previsao(c, cid, "2026-08", 100_01, criado_em="2026-09-01 10:00:00")
-    assert len(_do_tipo(c, "reajuste_fora_da_previsao")) == 1
+    assert len(_r_do_tipo(c, "reajuste_fora_da_previsao")) == 1
     # medicao a mais no pedido (complemento) com o mesmo total tambem e' outro pedido
     reajuste.justificar(c, uid, cid, "2024-06", 2026, "2026-08", "Previsão nova, mesmo índice")
-    assert _do_tipo(c, "reajuste_fora_da_previsao") == []
+    assert _r_do_tipo(c, "reajuste_fora_da_previsao") == []
     c.execute("UPDATE medicoes SET valor_protocolado_centavos=100_00 WHERE numero=1"); c.commit()
     _r_medicao(c, cid, 2, "2026-08", "planilha_enviada", pedido=50_03)
-    assert len(_do_tipo(c, "reajuste_fora_da_previsao")) == 1
+    assert len(_r_do_tipo(c, "reajuste_fora_da_previsao")) == 1
 
 
 def test_sem_apostilamento_soma_o_medido_medicao_a_medicao_com_o_complemento(obra_reajuste):
@@ -752,7 +1002,7 @@ def test_sem_apostilamento_soma_o_medido_medicao_a_medicao_com_o_complemento(obr
     m1 = _r_medicao(c, cid, 1, "2026-08", "nota_emitida", pedido=60_000_00, aprovado=60_000_00)
     _r_nota(c, m1, 60_000_00)
     _r_medicao(c, cid, 2, "2026-08", "boletim_recebido", pedido=55_000_00, aprovado=50_000_01)
-    [a] = _do_tipo(c, "reajuste_sem_apostilamento")
+    [a] = _r_do_tipo(c, "reajuste_sem_apostilamento")
     assert (a["valor_centavos"], a["publico"], a["competencias"]) == (110_000_01, ["operacao", "diretoria"], ["2026-08"])
 
 

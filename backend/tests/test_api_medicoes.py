@@ -1963,6 +1963,33 @@ def test_lista_e_detalhe_lidos_de_um_retrato_so(client_admin, monkeypatch):
     assert visto == [True]
 
 
+# --- issue #288: "Aceitar a diferença" do boletim abaixo do pedido ------------------------------------------------
+
+def test_aceitar_a_diferenca_engenharia_aceita_diretoria_so_le(client_admin):
+    from app import auth, db
+    mid = _planilha_enviada(client_admin)                          # pedido R$ 12.345,67
+    assert _registrar_boletim(client_admin, mid, valor="12.000,01").status_code == 201
+    corpo = {"justificativa": "glosa de itens não executados"}
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@lotufo.com", "senha-forte-123", "diretoria")
+    auth.criar_usuario(conn, "Eng", "eng@lotufo.com", "senha-forte-123", "engenharia")
+    conn.close()
+    _entrar(client_admin, "dir@lotufo.com")
+    assert client_admin.post(f"/api/medicoes/{mid}/diferenca-aceita", json=corpo).status_code == 403
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["diferenca_aceita"] is None
+    _entrar(client_admin, "eng@lotufo.com")
+    assert client_admin.post(f"/api/medicoes/{mid}/diferenca-aceita", json={"justificativa": " "}).status_code == 422
+    assert client_admin.post(f"/api/medicoes/{mid}/diferenca-aceita", json=corpo).status_code == 201
+    r = client_admin.post(f"/api/medicoes/{mid}/diferenca-aceita", json=corpo)
+    assert (r.status_code, r.json()["detail"]) == (422, "A diferença deste boletim já foi aceita")
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["diferenca_aceita"]["justificativa"], d["diferenca_aceita"]["usuario"],
+            d["diferenca_aceita"]["diferenca_centavos"]) == ("glosa de itens não executados", "Eng", -345_66)
+    lista = client_admin.get(f"/api/contratos/{d['contrato_id']}/medicoes").json()
+    assert lista[0]["diferenca_aceita"]["atesto_id"] == d["diferenca_aceita"]["atesto_id"]
+    assert client_admin.post("/api/medicoes/999999/diferenca-aceita", json=corpo).status_code == 404
+
+
 # --- issue #276: medicao de reajuste sugere o valor e grava data-base e ciclo ----------------------------------------
 
 def _datas_base(cid, *bases):

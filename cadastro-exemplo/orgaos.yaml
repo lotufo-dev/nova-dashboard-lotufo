@@ -13,6 +13,9 @@
   limite_mb_por_documento: 25
   folga_vigencia_dias: 90
   vigencia_automatica: true
+  # dias do envio da planilha/carta até o boletim do órgão; passou, aviso à operação (e à diretoria no dobro).
+  # Sem a chave, o órgão não tem o aviso (MT-PAR). Issue #288
+  prazo_boletim_dias: 15
   documentos_medicao: [fgts, federal, trabalhista, estadual, municipal]
   documentos_reajuste: [fgts, federal, trabalhista, estadual, municipal]
   ordem_certidoes: [federal, trabalhista, municipal, estadual, fgts]

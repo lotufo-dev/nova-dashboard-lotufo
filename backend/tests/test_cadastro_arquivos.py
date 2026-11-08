@@ -1148,3 +1148,14 @@ def test_custo_prefixos_parecidos_sem_sobreposicao_e_sem_tarefa_vazio_passam(tmp
 def test_custo_que_nao_e_mapa_e_recusado(tmp_path):
     erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": ["x"]}]))
     assert any(e.startswith("contratos/mt-402.yaml: custo:") for e in erros), erros
+
+
+# --- issue #288: prazo X do boletim no orgao (spec 2026-10-20 §2.1.1) ------------------------------
+
+def test_prazo_boletim_dias_do_orgao_inteiro_positivo(tmp_path):
+    cad = ca.preparar(_escrever(tmp_path / "a", orgaos=[{**ORGAO, "prazo_boletim_dias": 15}]))
+    assert cad["orgaos"][0]["regras"]["prazo_boletim_dias"] == 15
+    assert "prazo_boletim_dias" not in ca.preparar(_escrever(tmp_path / "b"))["orgaos"][0]["regras"]   # opcional
+    for i, ruim in enumerate((0, -3, "15", 1.5, True, None)):
+        erros = _erros(_escrever(tmp_path / f"r{i}", orgaos=[{**ORGAO, "prazo_boletim_dias": ruim}]))
+        assert "orgaos.yaml[0]: prazo_boletim_dias: use um inteiro maior que zero" in erros

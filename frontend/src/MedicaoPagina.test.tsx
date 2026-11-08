@@ -840,6 +840,20 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
     expect(itens).toContain("Registrar boletim novo");
     expect(itens).not.toContain("Editar o atestado");
   });
+
+  it("sem o passo 2 (MT-PAR), “Aceitar a diferença” fica em Mais ações até a diferença ser aceita (issue #288)", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...COM_BOLETIM, com_envio_planilha: false }] });
+    const p = pagina();
+    fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Aceitar a diferença" }));
+    expect(screen.getByRole("form", { name: "Aceitar a diferença" })).toBeTruthy();
+    p.unmount();
+    responder({ "/api/contratos/1/medicoes": [{ ...COM_BOLETIM, com_envio_planilha: false, diferenca_aceita: { atesto_id: 9,
+      justificativa: "glosa de itens", usuario: "Eng", criado_em: "2026-11-08 10:00:00", diferenca_centavos: -34566 } }] });
+    pagina();
+    fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map(x => x.textContent)).not.toContain("Aceitar a diferença");
+  });
 });
 
 // issue #508: a pagina da obra em medicao -- cabecalho, barra de passos e os passos 1 e 2
