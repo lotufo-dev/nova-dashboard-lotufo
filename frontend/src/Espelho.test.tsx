@@ -117,6 +117,26 @@ describe("Espelho", () => {
     expect(JSON.parse(api.mock.lastCall![1].body).entradas).toEqual({ medicao: "50.000,00", reajuste: "" });
   });
 
+  it("issue #589: o reajuste aceita o “-” e vai negativo; a medição não aceita o sinal", async () => {
+    api.mockResolvedValueOnce({ regra: REGRA, espelhos: [] });
+    api.mockResolvedValueOnce(PREVIA);
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Gerar espelho/ }));
+    fireEvent.change(screen.getByLabelText("Nº da medição"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Competência"), { target: { value: "2026-05" } });
+    const digitar = (el: HTMLInputElement, texto: string) => {
+      for (const c of texto) fireEvent.input(el, { target: { value: el.value + c }, inputType: "insertText", data: c });
+    };
+    const medicao = screen.getByLabelText("Valor da medição") as HTMLInputElement;
+    const reajuste = screen.getByLabelText("Valor do reajuste") as HTMLInputElement;
+    digitar(medicao, "-100001");
+    digitar(reajuste, "-1001");
+    expect([medicao.value, reajuste.value]).toEqual(["1.000,01", "-10,01"]);
+    fireEvent.click(screen.getByRole("button", { name: "Conferir" }));
+    await screen.findByRole("button", { name: "Gerar" });
+    expect(JSON.parse(api.mock.lastCall![1].body).entradas).toEqual({ medicao: "1.000,01", reajuste: "-10,01" });
+  });
+
   // rodada 2 da PR #193 (C3): colar invalido segura o Conferir; o campo vazio nao vira zero calado
   it("colar em formato inválido bloqueia o Conferir", async () => {
     api.mockResolvedValueOnce({ regra: REGRA, espelhos: [] });

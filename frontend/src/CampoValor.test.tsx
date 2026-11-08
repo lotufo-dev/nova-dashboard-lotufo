@@ -239,3 +239,37 @@ describe("digitosParaBrl e coladoParaBrl", () => {
     expect(coladoParaBrl("100000000000")).toBeNull();   // R$ 100 bilhoes: acima do teto
   });
 });
+
+// Issue #589: so' o reajuste aceita sinal (apostilamento ou previsao negativos)
+describe("CampoValor com sinal", () => {
+  afterEach(cleanup);
+  function ComSinal({ inicial = "" }: { inicial?: string }) {
+    const [v, setV] = useState(inicial);
+    return <><label htmlFor="v">Valor</label><CampoValor id="v" name="v" value={v} onChange={setV} comSinal /></>;
+  }
+
+  it("o “-” troca o sinal em qualquer ponto; os dígitos e o apagar seguem iguais", () => {
+    render(<ComSinal />);
+    digitar("-"); expect(campo().value).toBe("-");
+    digitar("1001"); expect(campo().value).toBe("-10,01");
+    apagar(); expect(campo().value).toBe("-1,00");
+    digitar("−"); expect(campo().value).toBe("1,00");
+    digitar("-"); expect(campo().value).toBe("-1,00");
+    apagar(); apagar(); apagar(); expect(campo().value).toBe("");
+  });
+
+  it("colar e preencher “-1.234,57” entram negativos; sem sinal, como antes", () => {
+    render(<ComSinal />);
+    colar("-1.234,57"); expect(campo().value).toBe("-1.234,57");
+    colar("−10,01"); expect(campo().value).toBe("-10,01");
+    colar("5,00"); expect(campo().value).toBe("5,00");
+    fireEvent.change(campo(), { target: { value: "-2.222,22" } }); expect(campo().value).toBe("-2.222,22");
+    colar("-12.34"); expect(campo().value).toBe("-2.222,22");
+  });
+
+  it("sem `comSinal` o “-” não entra", () => {
+    render(<Campo inicial="10,00" />);
+    digitar("-"); expect(campo().value).toBe("10,00");
+    colar("-1,00"); expect(campo().value).toBe("10,00");
+  });
+});

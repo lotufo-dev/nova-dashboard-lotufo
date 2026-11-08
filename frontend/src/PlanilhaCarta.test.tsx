@@ -111,6 +111,22 @@ describe("Nova planilha/carta", () => {
     expect([fd.get("reajuste_valor"), fd.get("reajuste_data_base")]).toEqual(["1.300,01", "2024-06"]);
   });
 
+  it("issue #589: o apostilado negativo vem com o sinal no Reajuste e vai assim no registro", async () => {
+    responderReajuste({ competencia: "2026-08", data_base_mes: "2024-06",
+      bases: [{ ...BASE, valor_centavos: -10_01, origem_texto: "apostilado no termo 002/2026" }] });
+    apiForm.mockResolvedValue({ medicao_id: 77, versao: 1, estado: "planilha_gerada", avisos: [] });
+    render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);
+    await waitFor(() => expect((screen.getByLabelText("Reajuste") as HTMLInputElement).value).toBe("-10,01"));
+    expect(screen.getByText("apostilado no termo 002/2026")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Valor pedido"), { target: { value: "12.345,67" } });
+    anexar("Ofício assinado (PDF)", pdf("oficio.pdf"));
+    anexar("Planilha (.xlsx ou PDF)", new File(["PK"], "planilha.xlsx"));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar planilha/carta" }));
+    await waitFor(() => expect(apiForm).toHaveBeenCalled());
+    const fd = apiForm.mock.calls[0][1] as FormData;
+    expect([fd.get("valor"), fd.get("reajuste_valor")]).toEqual(["12.345,67", "-10,01"]);
+  });
+
   it("sem previsão o reajuste fica vazio; contrato sem data-base não mostra o campo", async () => {
     responderReajuste({ competencia: "2026-08", data_base_mes: "2024-06", bases: [{ ...BASE, valor_centavos: null, origem: null, origem_texto: null }] });
     render(<NovaPlanilhaCarta contratoId={9} aoRegistrar={() => {}} />);

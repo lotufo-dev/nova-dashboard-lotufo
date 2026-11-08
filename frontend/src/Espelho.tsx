@@ -451,8 +451,9 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
             {regra.entradas.map(en => (
               <div className="campo" key={en.chave}>
                 <label className="campo__rotulo" htmlFor={`esp-${en.chave}`}>{en.rotulo}</label>
+                {/* issue #589: o reajuste negativo entra com o sinal (abate na nota da medicao) */}
                 <CampoValor id={`esp-${en.chave}`} name={en.chave} className="entrada--media num"
-                  value={form.entradas[en.chave] ?? ""}
+                  comSinal={en.natureza === "reajuste"} value={form.entradas[en.chave] ?? ""}
                   onChange={v => setForm({ ...form, entradas: { ...form.entradas, [en.chave]: v } })} />
               </div>
             ))}
