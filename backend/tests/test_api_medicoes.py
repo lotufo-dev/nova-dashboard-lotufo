@@ -738,6 +738,24 @@ def test_planilha_diretoria_recebe_403(client_admin):
     assert len(client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"]) == 1
 
 
+def test_sugestao_sem_tipo_segue_a_ultima_medicao_e_recusa_reajuste(client_admin):
+    """Issue #567: sem `tipo`, a sugestao vem no tipo da ultima medicao (a obra so' de projeto sugere a de projeto).
+    Reajuste nao e' tipo da planilha/carta (#276: nasce pelo formulario da execucao): 422 em portugues."""
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid, tipo="projeto").status_code == 201
+    s = client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao").json()
+    assert (s["tipo"], s["numero"], s["competencia"]) == ("projeto", 2, "2026-08")
+    assert s["acumulado_anterior_centavos"] == 12_345_67
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao?tipo=execucao").json()["numero"] == 1
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao?tipo=reajuste").status_code == 422
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/avisos?tipo=reajuste&numero=1&competencia=2026-07"
+                            "&periodo_inicio=2026-07-01").status_code == 422
+    r = _nova_planilha(client_admin, cid, tipo="reajuste")
+    assert r.status_code == 422
+    assert [(e["loc"][-1], e["msg"]) for e in r.json()["detail"]] == [("tipo", "valor fora das opções")]
+    assert len(client_admin.get(f"/api/contratos/{cid}/medicoes").json()) == 1   # so' a de projeto
+
+
 # issue #287: assinatura no DocuSign (evento informativo)
 def _com_boletim(cl):
     """Medicao do fluxo antigo com boletim de 10/08/2026 (#290: a assinatura e' a do boletim)."""
@@ -876,7 +894,9 @@ def _evidencias():
 
 
 def _eventos(cl, mid):
-    return [e["texto"] for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]]
+    """A linha do tempo sem os eventos de geracao da planilha/carta (#568), que os testes de envio nao miram."""
+    return [e["texto"] for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+            if "planilha/carta gerada" not in e["texto"].lower()]
 
 
 def _auditoria(acao):
@@ -1310,6 +1330,8 @@ def test_envio_por_fora_poe_em_planilha_enviada_com_origem_externo_e_data(client
     assert d["congelada"] == 0 and d["valor_protocolado_centavos"] == 12_345_67
     assert d["protocolos"] == []      # sem nº do protocolo, nada em medicao_protocolos ainda
     assert _eventos(client_admin, mid) == ["Planilha/carta enviada por fora em 03/08/2026 (E-mail ao protocolo) por Admin"]
+    # #568: a geracao da planilha/carta tambem conta na linha do tempo
+    assert "Planilha/carta gerada por Admin" in [e["texto"] for e in client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]]
     r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1,01"})
     assert r.status_code == 422
     assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 12_345_67

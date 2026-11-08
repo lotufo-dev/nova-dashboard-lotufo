@@ -368,6 +368,25 @@ def test_tolerancia_exige_baixa_no_titulo(conn, cid, tmp_path):
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
 
 
+def test_titulo_com_baixa_total_e_valor_baixado_zero_nao_fecha_a_medicao(conn, cid, tmp_path):
+    """Issue #563: titulo com status de baixa total no RM (1) e valor baixado zero sai do a receber e do aviso da Saude
+    (`baixa_total_quita`), mas nao fecha a medicao sozinho: pode ser glosa, compensacao ou encontro de contas, nao
+    pagamento. Para o recebimento automatico e a pagina da medicao ele continua sem baixa."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 500.0, 500.0, 1, "2026-09-01T00:00:00-04:00"),
+                      _baixa(2, 100, 424.01, 0.0, 1, "2026-09-02T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    assert _eventos_diferenca(conn, mid) == []
+    nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=100").fetchone()[0]
+    assert sincronizacao_rm._falta_por_titulo(conn, nid) is None
+    assert sincronizacao_rm._falta_por_titulo(conn, nid, aberto_inteiro=True) == 424_01
+    assert sincronizacao_rm._falta_por_titulo(conn, nid, aberto_inteiro=True, baixa_total_quita=True) == 0
+    nota = medicoes.detalhe(conn, mid)["notas"][0]          # pagina da medicao: recebido + falta = devido
+    assert (nota["recebido_centavos"], nota["falta_centavos"], nota["devido_centavos"]) == (500_00, 424_01, 924_01)
+
+
 @pytest.mark.parametrize("titulos", [
     [(923.20, 923.20, 1), (0.80, 0.0, 0)],     # NF em dois titulos: o de R$ 0,80 ainda aberto
     [(500.0, 549.50, 1), (50.0, 0.0, 0)],      # juros num titulo nao cobrem o outro, aberto
@@ -455,6 +474,8 @@ def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, t
     ([(500.0, 551.0, 1), (50.0, 20.0, 4)], 30_00),      # ... nem a falta de B com baixa parcial
     ([(500.0, 551.0, 1), (50.0, 50.0, 1)], None),       # todos pagos (um com juros): sem aviso
     ([(500.0, 500.0, 1), (50.0, 49.01, 1)], None),      # ate' R$ 1,00 a menos: sem aviso, como hoje
+    ([(500.0, 500.0, 1), (50.0, 0.0, 1)], None),        # issue #563: baixa total com valor zero, sem aviso
+    ([(500.0, 0.0, 1), (50.01, 0.0, 0)], 50_01),        # ... e o titulo aberto ao lado continua avisando
 ])
 def test_recebida_sem_baixa_conta_a_falta_titulo_a_titulo(conn, cid, tmp_path, titulos, falta):
     """Issue #253: o aviso da Saude (#203) conta a falta da nota titulo a titulo, a conta da #35 e da #251."""

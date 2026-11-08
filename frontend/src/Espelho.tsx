@@ -356,9 +356,18 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
             })}
           </tbody>
           <tfoot>
+            {/* consorcio que emite so' a cota: as notas somam a cota e a medicao e' cheia, entao sao duas linhas e a
+                conferencia fica na do valor da medicao (decisao do Leo, #558) */}
+            {total !== doEspelho && (
+              <tr className="espelho__total">
+                <th scope="row" colSpan={2}>Total das notas</th>
+                <td className="col-num dinheiro num">{brl(total)}</td>
+                <td />
+              </tr>
+            )}
             <tr className="espelho__total">
-              <th scope="row" colSpan={2}>Total</th>
-              <td className="col-num dinheiro num">{brl(total)}</td>
+              <th scope="row" colSpan={2}>{total !== doEspelho ? "Valor da medição" : "Total"}</th>
+              <td className="col-num dinheiro num">{brl(total !== doEspelho ? doEspelho : total)}</td>
               <td>{referencia === null ? null : referencia === doEspelho
                 ? <span className="espelho__confere espelho__confere--ok">igual {fonte}</span>
                 : <span className="espelho__confere espelho__confere--diverge"><IconeAlerta className="icone icone--p" />diferente {fonteDif} ({brl(referencia)})</span>}</td>

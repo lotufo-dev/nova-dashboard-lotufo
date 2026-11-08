@@ -154,6 +154,22 @@ def test_pagamento_cota_consorcio_com_nota_extra_de_outra_coligada(conn, integra
     assert medicoes.detalhe(conn, mid)["pagamento_cota"]["falta_centavos"] == 184000001
 
 
+def test_pagamento_cota_e_notas_coerentes_com_titulo_baixado_sem_valor(conn, integra):
+    """Issue #563: titulo com baixa total (status 1) e valor baixado zero nao e' recebimento na pagina da medicao: o
+    resumo da cota e a linha da nota dizem o mesmo (recebido 0, falta o titulo inteiro), com centavo impar."""
+    _, mid, saidas = integra
+    cuiaba, vg = (next(s for s in saidas if s["municipio"] == m) for m in ("Cuiabá", "Várzea Grande"))
+    n1 = _nf_alocada(conn, mid, 1, 741, cuiaba["valor"], "Cuiabá")
+    n2 = _nf_alocada(conn, mid, 1, 742, vg["valor"], "Várzea Grande")
+    _titulo(conn, n1, 41, 276000001, 0, 1)                  # baixa total sem valor
+    _titulo(conn, n2, 42, 184000001, 184000001)
+    assert _cota(conn, mid) == {"notas_faltam": 0, "completo": True, "total_centavos": 460000002,
+                                "recebido_centavos": 184000001, "falta_centavos": 276000001, "parcial": True}
+    linhas = {n["nota_id"]: (n["recebido_centavos"], n["falta_centavos"]) for n in medicoes.detalhe(conn, mid)["notas"]}
+    assert linhas == {n1: (0, 276000001), n2: (184000001, 0)}
+    assert sum(r for r, _ in linhas.values()) == 184000001 and sum(f for _, f in linhas.values()) == 276000001
+
+
 def test_pagamento_cota_espelho_sem_saida_da_lotufo_e_zero_e_nao_traco(conn, integra):
     """(b) Espelho vigente sem saida da Lotufo nesta natureza: nada a esperar dela (zero), e nenhuma nota alocada
     entra na cota nem conta como esperada (antes caia no caso "sem espelho")."""

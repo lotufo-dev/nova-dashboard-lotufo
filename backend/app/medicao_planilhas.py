@@ -12,6 +12,8 @@ import datetime
 from app import arquivos, auditoria, contratos, db, espelho, tempo
 from app.medicoes import LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
+# o reajuste nao entra pela planilha/carta: nasce pelo campo "Reajuste" do formulario da execucao, em prevista,
+# com data-base e ciclo (decisao do Leo na #276, 08/11/2026)
 TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
 FORA_DO_ACUMULADO = ("prevista", "cancelada", "desistida")
@@ -84,9 +86,29 @@ def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None
             "saldo_apos_pedido_centavos": None if pedido is None else base - acumulado - pedido}
 
 
-def sugestao(conn, contrato_id: int, tipo: str = "execucao") -> dict:
+def tipo_da_ultima(conn, contrato_id: int) -> str:
+    """Issue #567: o tipo da ultima medicao de execucao ou projeto da obra (competencia mais recente; na mesma, a
+    execucao), fora prevista, cancelada e desistida. O reajuste nao conta: acompanha o numero da execucao e sai
+    depois dela (como em medicoes, #154), e pre-seleciona-lo trocaria a serie da proxima medicao. Sem medicao:
+    execucao."""
+    r = conn.execute(
+        "SELECT tipo FROM medicoes WHERE contrato_id=? AND tipo IN ('execucao','projeto') "
+        f"AND estado NOT IN ({','.join('?' * len(FORA_DO_ACUMULADO))}) "
+        "ORDER BY competencia DESC, tipo='execucao' DESC, numero DESC, id DESC LIMIT 1",
+        (contrato_id, *FORA_DO_ACUMULADO)).fetchone()
+    return r["tipo"] if r is not None else "execucao"
+
+
+def sugestao(conn, contrato_id: int, tipo: str | None = None) -> dict:
     """Nº (ultimo + 1; o do orgao tambem, onde ja' difere, D6), competencia (a da 1a prevista, senao o mes
-    seguinte ao da ultima, senao o mes corrente), periodo (o mes civil da competencia), acumulado e saldo."""
+    seguinte ao da ultima, senao o mes corrente), periodo (o mes civil da competencia), acumulado e saldo.
+    Sem tipo, o da ultima medicao da obra (issue #567: a obra so' de projeto sugere a proxima de projeto). Tudo de
+    um retrato so' (db.leitura): uma medicao gravada no meio nao mistura o nº de depois com a competencia de antes."""
+    with db.leitura(conn):
+        return _sugestao(conn, contrato_id, tipo_da_ultima(conn, contrato_id) if tipo is None else tipo)
+
+
+def _sugestao(conn, contrato_id: int, tipo: str) -> dict:
     prevista = conn.execute(
         "SELECT numero, competencia FROM medicoes WHERE contrato_id=? AND tipo=? AND estado='prevista' "
         "ORDER BY competencia, numero LIMIT 1", (contrato_id, tipo)).fetchone()
@@ -420,6 +442,30 @@ def registrar_envio_externo(conn, usuario_id: int, medicao_id: int, dados: dict,
     return {"medicao_id": medicao_id, "estado": "planilha_enviada", "versao": vigente["versao"]}
 
 
+def eventos_geracao(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> None:
+    """Linha do tempo (#568): um evento por versao da planilha/carta gerada (a 1a e as revisoes), na hora do registro."""
+    for i in range(0, len(medicao_ids), LOTE_AUDITORIA):
+        lote = [str(x) for x in medicao_ids[i:i + LOTE_AUDITORIA]]
+        for r in conn.execute(
+                "SELECT a.entidade_id, a.depois, a.criado_em, u.nome FROM audit_log a "
+                "LEFT JOIN usuarios u ON u.id=a.usuario_id "
+                f"WHERE a.entidade='medicao' AND a.acao='medicao.planilha' AND a.entidade_id IN ({','.join('?' * len(lote))}) "
+                "ORDER BY a.id", lote):
+            d = _json_dict(r["depois"]) or {}
+            versao = d.get("versao")
+            if not isinstance(versao, int):
+                versao = 1
+            texto = "Planilha/carta gerada" if versao == 1 else f"Versão {versao} da planilha/carta gerada"
+            if d.get("motivo"):
+                texto += f" (motivo: {d['motivo']})"
+            # so' o dia (de Cuiaba), como os outros marcos do envio: com hora, o "enviada por fora" do mesmo dia
+            # (so' data) ia para antes da geracao na ordenacao por texto
+            dia = tempo.para_local(datetime.datetime.fromisoformat(r["criado_em"])).date().isoformat()
+            out[int(r["entidade_id"])].append({"data": dia,
+                                               "texto": f"{texto} por {r['nome']}" if r["nome"]
+                                               else f"{texto} pelo sistema"})
+
+
 def eventos_envio(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> None:
     """Linha do tempo: um evento por envio da planilha/carta, na data do envio (como a assinatura)."""
     for i in range(0, len(medicao_ids), LOTE_AUDITORIA):
@@ -429,14 +475,24 @@ def eventos_envio(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> N
                 f"WHERE a.entidade='medicao' AND a.acao=? AND a.entidade_id IN ({','.join('?' * len(lote))}) "
                 "ORDER BY a.id", (ENVIO, *lote)):
             d = _json_dict(r["depois"]) or {}
+            envio = None
+            if d.get("enviado_em") is None and isinstance(d.get("envio_id"), int):
+                # envio pelo sistema (#282): a auditoria guarda o e-mail; data e assunto vem de `envios`
+                envio = conn.execute("SELECT enviado_em, assunto FROM envios WHERE id=?", (d["envio_id"],)).fetchone()
             try:
-                versao, data = int(d.get("versao") or 1), datetime.date.fromisoformat(d["enviado_em"]).isoformat()
+                versao = int(d.get("versao") or 1)
+                if envio:
+                    data = tempo.iso_utc(envio["enviado_em"])
+                    dia = tempo.para_local(datetime.datetime.fromisoformat(envio["enviado_em"])).date().isoformat()
+                else:
+                    data = dia = datetime.date.fromisoformat(d["enviado_em"]).isoformat()
             except (ValueError, TypeError, KeyError):
                 continue
             qual = "Planilha/carta" if versao == 1 else f"Versão {versao} da planilha/carta"
             como = "por fora" if d.get("origem") == "externo" else "pelo sistema"
             detalhe = ", ".join(x for x in (d.get("meio"), d.get("numero_protocolo") and
-                                            f"protocolo {d['numero_protocolo']}") if x)
-            texto = f"{qual} enviada {como} em {_data_br(data)}" + (f" ({detalhe})" if detalhe else "")
+                                            f"protocolo {d['numero_protocolo']}",
+                                            envio and f"assunto: {envio['assunto']}") if x)
+            texto = f"{qual} enviada {como} em {_data_br(dia)}" + (f" ({detalhe})" if detalhe else "")
             out[int(r["entidade_id"])].append({"data": data, "texto": f"{texto} por {r['nome']}" if r["nome"]
                                                else f"{texto} pelo sistema"})
