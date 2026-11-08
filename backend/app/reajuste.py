@@ -195,12 +195,16 @@ def apostilamento_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, un
     """O termo que fecha o ciclo, o unico criterio da aba, dos avisos e da recusa de reiterar/reemitir (gate Sol e
     revisor, PR #317): com pleito enviado no ciclo, o termo ligado ao vigente (ou ao pedido que ele reitera); sem
     pleito enviado registrado, o apostilamento do ciclo (`_apostilamento`). O aditivo de valor de reajuste (issue
-    #390) vale como termo nos dois caminhos."""
+    #390) vale como termo nos dois caminhos. Issue #453 (decisao do Leo, 08/11/2026): sem pleito, com apostilamento e
+    aditivo no ciclo, fecha o de data de termo mais antiga (empate: o apostilamento), a regra do `cadastro aplicar`."""
     pl = _pleito(conn, contrato_id, mes_base, ciclo)
     if pl:
         return _termo_do_pedido(conn, contrato_id, pl, unica)
-    return (_apostilamento(conn, contrato_id, mes_base, ciclo, unica)
-            or _aditivo_do_ciclo(conn, contrato_id, mes_base, ciclo, unica))
+    ap = _apostilamento(conn, contrato_id, mes_base, ciclo, unica)
+    ad = _aditivo_do_ciclo(conn, contrato_id, mes_base, ciclo, unica)
+    if ap is not None and ad is not None and ad["data"] < str(ap["data"])[:10]:
+        return ad
+    return ap or ad
 
 
 def _pleito(conn, contrato_id: int, mes_base: str, ciclo: int, sem_reiteracao: bool = False) -> dict | None:
