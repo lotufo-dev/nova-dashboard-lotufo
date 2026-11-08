@@ -502,7 +502,7 @@ test("Saúde: a rodada mostra as linhas de custo por tarefa e de baixa de estoqu
 });
 
 test("Saúde: mostra o aviso das linhas de custo puladas mesmo quando a rodada que o gerou saiu da tabela (#603)", async () => {
-  const aviso = "1 linha(s) de custo puladas por mês ilegível (MES 220112; centro de custo 2.001.012)";
+  const aviso = "1 linha(s) de custo puladas por mês ilegível (mês 220112; centro de custo 2.001.012)";
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null,
     rodadas: [{ ...RODADA_BOA, id: 6, custo_aviso: null }], custo_aviso: aviso });
   expect(await screen.findByText(aviso)).toBeTruthy();

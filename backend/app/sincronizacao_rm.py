@@ -801,7 +801,7 @@ TETO_PULADAS_PCT = 1
 def _resumo_puladas(puladas: list[tuple]) -> str:
     meses = Counter(m for m, _ in puladas).most_common(5)
     centros = Counter(cc or "sem centro" for _, cc in puladas).most_common(5)
-    return f"MES {', '.join(str(m) for m, _ in meses)}; centro de custo {', '.join(c for c, _ in centros)}"
+    return f"mês {', '.join(str(m) for m, _ in meses)}; centro de custo {', '.join(c for c, _ in centros)}"
 
 
 def _aviso_linhas_puladas(puladas: list[tuple]) -> str | None:
@@ -861,8 +861,9 @@ def _sincronizar_custo(conn, cliente, rodada_id: int) -> dict:
             conn.execute("DELETE FROM rm_estoque_baixas")
             conn.executemany("""INSERT INTO rm_estoque_baixas (coligada, centro_custo, tipo_movimento, mes, qtd,
                                 valor_centavos) VALUES (?,?,?,?,?,?)""", estoque)
-            conn.execute("UPDATE rm_sincronizacoes SET custo_tarefas=?, estoque_baixas=? WHERE id=?",
-                         (len(custo), len(estoque), rodada_id))
+            # o aviso entra junto da contagem: se a rodada morrer ou expirar depois, o retrato vigente ainda o tem
+            conn.execute("UPDATE rm_sincronizacoes SET custo_tarefas=?, estoque_baixas=?, custo_aviso=? WHERE id=?",
+                         (len(custo), len(estoque), aviso, rodada_id))
         return {"custo_tarefas": len(custo), "estoque_baixas": len(estoque), "custo_erro": None,
                 "custo_aviso": aviso}
     except RodadaPerdida:

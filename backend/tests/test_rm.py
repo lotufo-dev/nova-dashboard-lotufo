@@ -1310,7 +1310,7 @@ def test_linha_de_custo_com_mes_fora_do_intervalo_e_pulada_e_as_outras_gravam(co
     r = sincronizacao_rm.sincronizar(conn, cli)
     assert r["estado"] == "success" and r["custo_erro"] is None
     assert r["custo_tarefas"] == 200 and r["estoque_baixas"] == 1
-    assert r["custo_aviso"] == (f"1 linha(s) de custo puladas por mês ilegível (MES {mes}; "
+    assert r["custo_aviso"] == (f"1 linha(s) de custo puladas por mês ilegível (mês {mes}; "
                                 "centro de custo 9.999.001)")
     assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas WHERE tarefa='9.9'").fetchone()[0] == 0
     rodada = conn.execute("SELECT custo_erro, custo_aviso FROM rm_sincronizacoes WHERE id=?", (r["id"],)).fetchone()
@@ -1320,7 +1320,7 @@ def test_linha_de_custo_com_mes_fora_do_intervalo_e_pulada_e_as_outras_gravam(co
 def test_aviso_lista_os_meses_mais_frequentes_e_nao_os_primeiros_do_texto(conn, tmp_path):
     ruins = [_custo(mes=999999, cc="A")] * 2 + [_custo(mes=100000 + i, cc="B") for i in range(6)]
     r = sincronizacao_rm.sincronizar(conn, _simulador_custo(tmp_path, _custos_com_ruins(ruins, 2000), [_estoque()]))
-    assert r["custo_aviso"].startswith("8 linha(s) de custo puladas por mês ilegível (MES 999999,")
+    assert r["custo_aviso"].startswith("8 linha(s) de custo puladas por mês ilegível (mês 999999,")
     assert "centro de custo B, A" in r["custo_aviso"]
 
 
@@ -1340,6 +1340,43 @@ def test_muitas_linhas_ilegiveis_acima_do_teto_tambem_falha(conn, tmp_path):
     r = sincronizacao_rm.sincronizar(conn, _simulador_custo(tmp_path, _custos_com_ruins(ruins, 100), [_estoque()]))
     assert "5 de 105" in r["custo_erro"] and r["custo_tarefas"] is None
     assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 0
+
+
+class _ProcessoMorreu(BaseException):
+    """Passa por `except Exception`: a rodada fica `running`, sem o UPDATE final (processo morto)."""
+
+
+def test_aviso_do_custo_sobrevive_a_rodada_que_morre_depois_de_trocar_o_retrato(conn, tmp_path, monkeypatch):
+    cli = _simulador_custo(tmp_path, _custos_com_ruins([_custo(mes=220112)]), [_estoque()])
+    original = sincronizacao_rm._garantir_posse
+    chamadas = {"n": 0}
+
+    def morre_na_segunda(c, rodada_id):          # 1a: transacao do custo; 2a: transacao das notas (nao chega)
+        chamadas["n"] += 1
+        if chamadas["n"] == 2:
+            raise _ProcessoMorreu()
+        original(c, rodada_id)
+
+    monkeypatch.setattr(sincronizacao_rm, "_garantir_posse", morre_na_segunda)
+    with pytest.raises(_ProcessoMorreu):
+        sincronizacao_rm.sincronizar(conn, cli)
+    linha = conn.execute("SELECT estado, custo_tarefas, custo_aviso FROM rm_sincronizacoes").fetchone()
+    assert linha["estado"] == "running" and linha["custo_tarefas"] == 200 and linha["custo_aviso"]
+    assert sincronizacao_rm.aviso_do_custo(conn) == linha["custo_aviso"]
+
+
+@pytest.mark.parametrize("ruins, passa", [(1, True), (2, False)])
+def test_limite_exato_do_teto_de_linhas_puladas(conn, tmp_path, ruins, passa):
+    cli = _simulador_custo(tmp_path, [_custo()], [_estoque()])
+    sincronizacao_rm.sincronizar(conn, cli)
+    novas = [_custo(trf=f"N{i}") for i in range(100 - ruins)] + [_custo(mes=220112, trf=f"R{i}") for i in range(ruins)]
+    (cli.pasta / f"{rm.CONSULTA_CUSTO}.json").write_text(json.dumps(novas), encoding="utf-8")
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    total = conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0]
+    if passa:
+        assert r["custo_erro"] is None and r["custo_tarefas"] == 99 and total == 99
+    else:
+        assert "2 de 100" in r["custo_erro"] and total == 1      # retrato anterior mantido
 
 
 def test_aviso_do_custo_vale_ate_a_proxima_leitura_de_custo_mesmo_com_rodadas_sem_custo(conn, tmp_path, client_admin):
