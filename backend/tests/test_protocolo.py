@@ -1295,3 +1295,26 @@ def test_auditoria_do_descarte_grava_a_situacao_lida_sob_o_lock(cenario, monkeyp
     antes = c.execute("SELECT antes FROM audit_log WHERE acao='protocolo.descartar' AND entidade_id=? "
                       "ORDER BY id DESC LIMIT 1", (str(pid),)).fetchone()[0]
     assert json.loads(antes) == {"situacao": "montado"}
+
+
+def test_enviar_execucao_leva_o_reajuste_negativo_absorvido_no_protocolo_e_no_envio(cenario):
+    """Issue #589: o reajuste negativo absorvido pelo espelho da execucao (sem nota propria) e' protocolado com ela, no
+    mesmo envio: uma linha de protocolo so', com o protocolo do sistema, e o envio ligado a ele."""
+    c, ids = cenario
+    ex, rj = ids["mtpar_exec"], ids["mtpar_reaj"]
+    c.execute("UPDATE medicoes SET valor_protocolado_centavos=-1001 WHERE id=?", (rj,))
+    eid = c.execute("INSERT INTO espelhos (contrato_id, numero, competencia, versao, situacao, entradas, saidas, "
+                    "regra_sha256, criado_por) VALUES (?, 23, '2026-09', 1, 'vigente', '{}', '[]', 'x', ?)",
+                    (ids["mtpar"], ids["uid"])).lastrowid
+    c.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id, valor_centavos, valor_com_sinal_centavos) "
+              "VALUES (?,?,1000000,1000000), (?,?,NULL,-1001)", (eid, ex, eid, rj))
+    c.commit()
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ex], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid], remetente="maria@l.com")
+    envio = protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    r = c.execute("SELECT estado, envio_origem FROM medicoes WHERE id=?", (rj,)).fetchone()
+    assert tuple(r) == ("protocolada", "sistema")
+    assert [tuple(x) for x in c.execute("SELECT protocolo_id, numero_oficio FROM medicao_protocolos WHERE medicao_id=?",
+                                        (rj,))] == [(pid, "CT-301-LT-2026")]
+    assert c.execute("SELECT 1 FROM envio_medicoes WHERE envio_id=? AND medicao_id=?", (envio, rj)).fetchone()

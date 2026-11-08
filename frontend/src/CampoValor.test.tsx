@@ -251,7 +251,9 @@ describe("CampoValor com sinal", () => {
   it("o “-” troca o sinal em qualquer ponto; os dígitos e o apagar seguem iguais", () => {
     render(<ComSinal />);
     digitar("-"); expect(campo().value).toBe("-");
+    expect(campo().validationMessage).toBe("Digite o valor depois do sinal");   // o sinal sozinho nao se envia
     digitar("1001"); expect(campo().value).toBe("-10,01");
+    expect(campo().validationMessage).toBe("");
     apagar(); expect(campo().value).toBe("-1,00");
     digitar("−"); expect(campo().value).toBe("1,00");
     digitar("-"); expect(campo().value).toBe("-1,00");

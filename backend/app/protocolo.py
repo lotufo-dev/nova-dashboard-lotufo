@@ -1455,6 +1455,11 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
                                                      justificativa=longa or JUSTIFICATIVA_POS_ENVIO,
                                                      protocolo_id=x["id"])
                         conn.execute("UPDATE medicoes SET envio_origem='sistema' WHERE id=?", (m["id"],))
+                        # issue #589: o reajuste negativo absorvido foi protocolado com a execucao: o envio e' dele
+                        for r in (medicoes.absorvidas(conn, m["id"]) if m["tipo"] == "execucao" else []):
+                            conn.execute("INSERT OR IGNORE INTO envio_medicoes (envio_id, medicao_id) VALUES (?,?)",
+                                         (envio_id, r["id"]))
+                            conn.execute("UPDATE medicoes SET envio_origem='sistema' WHERE id=?", (r["id"],))
                     except ValueError as erro:
                         nao_marcadas.append({"medicao_id": m["id"], "motivo": str(erro)})
             auditoria.registrar(conn, usuario["id"], "protocolo.enviar", "protocolo", x["id"], None,

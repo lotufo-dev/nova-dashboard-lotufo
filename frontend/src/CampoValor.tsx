@@ -8,6 +8,7 @@ import { coladoParaBrl, digitosParaBrl, MAX_DIGITOS_VALOR } from "./formato";
 // o mesmo formato que as telas ja' mandavam ao servidor.
 
 const ERRO_COLADO = "Valor colado em formato inválido: use vírgula nos centavos, ex.: 1.234,56";
+const ERRO_SO_SINAL = "Digite o valor depois do sinal";
 
 const soDigitos = (texto: string) => texto.replace(/\D/g, "").replace(/^0+/, "");
 
@@ -86,7 +87,8 @@ export default function CampoValor({ id, name, value, onChange, className = "ent
   const aplicar = (r: Resultado) => {
     if (r === null) return;
     if (typeof r === "object") { setErro(ERRO_COLADO); return; }
-    setErro("");
+    // issue #589: o sinal sozinho nao e' valor; o formulario nao envia ate' entrar o digito (ou o sinal sair)
+    setErro(r === "-" ? ERRO_SO_SINAL : "");
     onChange(r);
   };
   return (

@@ -1088,10 +1088,51 @@ def test_reajuste_negativo_abate_no_espelho_da_execucao_e_segue_os_marcos_dela(a
     assert diretoria.da_obra(conn, cid)["a_receber_centavos"] == 0
     motivo = conn.execute("SELECT depois FROM audit_log WHERE acao='medicao.estado' AND entidade_id=? "
                           "ORDER BY id DESC LIMIT 1", (str(rid),)).fetchone()[0]
-    assert json.loads(motivo)["motivo"] == medicoes.ACOMPANHA_A_EXECUCAO
+    assert json.loads(motivo)["origem"] == medicoes.ACOMPANHA_A_EXECUCAO
 
 
 def test_execucao_negativa_no_espelho_e_recusada(ambiente_projeto):
     conn, u, cid = ambiente_projeto
     with pytest.raises(ValueError, match="valor negativo só no reajuste"):
         espelhos.previa(conn, cid, 3, "2026-01", {"medicao": -1_00})
+
+
+def _absorvido_com_nota(conn, u, cid):
+    """Execucao 3 (R$ 1.000,01) e reajuste 3 (-R$ 10,01) no mesmo espelho, as duas com nota emitida."""
+    from app import sincronizacao_rm
+    rid = _reajuste_negativo(conn, cid)
+    conn.execute("UPDATE medicoes SET motivo_represamento='aguardando apostilamento' WHERE id=?", (rid,))
+    conn.commit()
+    eid = espelhos.gerar(conn, u, cid, 3, "2026-01", {"medicao": 1_000_01, "reajuste": -10_01},
+                         justificativa_sem_boletim=JUSTIFICATIVA)
+    xid = _mid(conn, eid, "execucao")
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) "
+                       "VALUES (1, 902, '902', 99000, '2026-02-03')").lastrowid
+    conn.commit()
+    sincronizacao_rm.alocar(conn, u["id"], nid, xid, "manual", None, "teste")
+    return xid, rid
+
+
+def test_reajuste_absorvido_segue_o_novo_protocolo_sem_duplicar_e_guarda_o_motivo(ambiente_projeto):
+    """Code-review da #589: o envio por fora que lista tambem o reajuste nao duplica o protocolo dele; o protocolo
+    seguinte da execucao (novo oficio) vale para ele; o motivo de represamento dele nao e' trocado."""
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-02-05", "CT-9", None, "manual")
+    medicoes.registrar_protocolo(conn, u["id"], rid, "2026-02-05", "CT-9", None, "manual",
+                                 apesar_das_pendencias=True, justificativa=JUSTIFICATIVA)
+    assert len(medicoes.detalhe(conn, rid)["protocolos"]) == 1
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-03-01", "CT-12", None, "manual")
+    r = medicoes.detalhe(conn, rid)
+    assert [(p["data"], p["numero_oficio"]) for p in r["protocolos"]] == [("2026-02-05", "CT-9"),
+                                                                         ("2026-03-01", "CT-12")]
+    assert (r["estado"], r["motivo_represamento"]) == ("protocolada", "aguardando apostilamento")
+
+
+def test_cancelar_a_execucao_encerra_o_reajuste_absorvido(ambiente_projeto):
+    """Code-review da #589: cancelada a execucao com nota emitida, o reajuste negativo absorvido (sem nota propria)
+    nao fica sozinho em nota emitida, contando no faturado."""
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    medicoes.mudar_estado(conn, u["id"], xid, "cancelada", "nota cancelada pela prefeitura")
+    assert medicoes.detalhe(conn, rid)["estado"] == "cancelada"
