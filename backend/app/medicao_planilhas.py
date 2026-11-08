@@ -364,6 +364,33 @@ ESTADOS_ENVIO = ("planilha_gerada", "planilha_enviada")
 # etapa 'planilha' (migracao 054): os paineis, a conciliacao e as telas so' contam a etapa 'nota' como protocolo
 ESTADOS_NUMERO_SIGA = ("planilha_enviada", "boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida")
 TETO_MEIO = 200
+REAJUSTE_CONGELADO = "medicao.reajuste_congelado"
+
+
+def congelar_reajuste_do_envio(conn, usuario_id: int, m: dict, data: str, origem: str) -> int | None:
+    """Issue #590 (spec 2026-10-20 §2.2, "como na execucao"): dentro da transacao do 1o envio da planilha/carta de
+    execucao (pelo sistema ou por fora), a medicao de reajuste de mesmo nº e competencia, em `prevista` e com pedido,
+    tem o pedido congelado. Congela como a execucao, pelo marcador do envio (`planilha_enviada_em`, que
+    `medicoes.definir_valor` recusa), nao por `congelada` (do protocolo da nota; tambem congela o valor original do
+    contrato). A de reajuste continua `prevista` ate' o espelho a promover. Sem pedido, nada muda. Devolve o id dela."""
+    if m["tipo"] != "execucao":
+        return None
+    r = conn.execute(
+        "SELECT id, valor_protocolado_centavos FROM medicoes WHERE contrato_id=? AND numero=? AND tipo='reajuste' "
+        "AND competencia=? AND estado='prevista' AND valor_protocolado_centavos IS NOT NULL "
+        "AND planilha_enviada_em IS NULL", (m["contrato_id"], m["numero"], m["competencia"])).fetchone()
+    if r is None:
+        return None
+    cur = conn.execute("UPDATE medicoes SET planilha_enviada_em=?, planilha_envio_origem=? WHERE id=? "
+                       "AND estado='prevista' AND planilha_enviada_em IS NULL", (data, origem, r["id"]))
+    # nao recusa: no envio pelo sistema isto roda depois do e-mail, onde nada recusa (a leitura acima e' do mesmo lock)
+    if not cur.rowcount:
+        return None
+    auditoria.registrar(conn, usuario_id, REAJUSTE_CONGELADO, "medicao", r["id"],
+                        {"planilha_enviada_em": None, "planilha_envio_origem": None},
+                        {"planilha_enviada_em": data, "planilha_envio_origem": origem,
+                         "valor_protocolado_centavos": r["valor_protocolado_centavos"], "medicao_execucao_id": m["id"]})
+    return r["id"]
 
 
 def _versao_enviada(conn, medicao_id: int) -> int:
@@ -487,6 +514,8 @@ def registrar_envio_externo(conn, usuario_id: int, medicao_id: int, dados: dict,
                         (data, medicao_id))
                     db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
                     m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (medicao_id,)).fetchone())
+                    # issue #590: o pedido do reajuste que nasceu com esta planilha/carta congela junto
+                    congelar_reajuste_do_envio(conn, usuario_id, m, data, "externo")
                 auditoria.registrar(conn, usuario_id, ENVIO, "medicao", medicao_id, antes, {
                     "estado": "planilha_enviada", "origem": "externo", "versao": vigente["versao"],
                     "planilha_id": vigente["id"], "enviado_em": data, "meio": meio,

@@ -943,6 +943,23 @@ def test_planilha_sem_reajuste_nao_cria_a_de_reajuste(conn, contrato_id):
     assert conn.execute("SELECT COUNT(*) FROM medicoes WHERE tipo='reajuste'").fetchone()[0] == 0
 
 
+def test_envio_da_planilha_congela_o_pedido_do_reajuste_e_definir_valor_recusa(conn, contrato_id):
+    """Issue #590: enviada a planilha/carta (aqui por fora), `definir_valor` recusa o pedido do reajuste de mesmo nº
+    e competencia; o atestado (glosa) segue livre e a de reajuste continua prevista."""
+    from app import medicao_planilhas
+    _base(conn, contrato_id)
+    r = medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(3, "2026-07", "2026-07-01", "2026-07-31", 100_00,
+                                                                     reajuste_centavos=1_300_01), ANEXOS)
+    rid = r["reajuste_medicao_id"]
+    medicao_planilhas.registrar_envio_externo(conn, 1, r["medicao_id"], {"enviado_em": "2026-08-03", "meio": "SIGA"})
+    with pytest.raises(ValueError, match="congelou no envio da planilha/carta"):
+        medicoes.definir_valor(conn, 1, rid, "protocolado", 1, "manual")
+    medicoes.definir_valor(conn, 1, rid, "atestado", 1_200_00, "manual")
+    m = medicoes.detalhe(conn, rid)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == (
+        "prevista", 1_300_01, 1_200_00)
+
+
 def test_planilha_com_reajuste_completa_a_prevista_de_reajuste_existente(conn, contrato_id):
     """Issue #276: a de reajuste ja' prevista (sem planilha/carta) recebe o pedido, a data-base e o ciclo, com a
     auditoria do antes; a de outra competencia e' recusada sem gravar nada."""
