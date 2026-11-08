@@ -1218,3 +1218,27 @@ def test_capa_do_boletim_e_evento_que_nao_se_altera_nem_se_apaga(motor):
         with pytest.raises(sqlite3.IntegrityError):
             c.execute(sql)
     c.rollback()
+
+
+def test_valor_aditivo_em_consorcio_tolera_o_arredondamento_de_cada_aditivo(motor):
+    # revisor (rodada 1 da PR #606): dois aditivos de R$ 100,01 cheios, 50%: o cadastro guarda R$ 50,01 + R$ 50,01 =
+    # R$ 100,02; a capa imprime R$ 200,02, que vira cota de R$ 100,01. Meio centavo por aditivo nao e' divergencia.
+    c, u, cid = motor
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (cid,))
+    for numero in ("1", "2"):
+        c.execute("INSERT INTO aditivos (contrato_id, tipo, status, data_assinatura, numero, delta_valor_centavos) "
+                  "VALUES (?, 'valor', 'assinado', '2026-09-01', ?, 50_01)", (cid, numero))
+    c.commit()
+    mid = _med(c, cid, 7, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol_capa(c, u, mid, 10_000_01, "a", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=200_02))
+    assert _capa_avisos(c, "todos") == []
+    # dois centavos de diferenca passam da folga de dois aditivos (1 centavo)
+    _bol_capa(c, u, mid, 10_000_01, "b", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=200_08))
+    [a] = _capa_avisos(c, "todos")
+    assert (a["tipo"], a["valor_centavos"]) == ("capa_instrumento_ausente", 2)
+    # contrato proprio nao arredonda: continua exato
+    c.execute("UPDATE contratos SET percentual_direito_bp=10000, valor_original_centavos=200 WHERE id=?", (cid,))
+    c.commit()
+    _bol_capa(c, u, mid, 10_000_01, "c", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=100_03))
+    [a] = _capa_avisos(c, "todos")
+    assert (a["tipo"], a["valor_centavos"]) == ("capa_instrumento_ausente", 1)

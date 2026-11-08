@@ -74,6 +74,18 @@ def _do_boletim_vigente(conn, medicao_id: int) -> dict | None:
     return dict(r) if r else None
 
 
+def _folga_cota(conn, contrato_id: int, bp: int | None) -> int:
+    """Revisor (rodada 1 da PR #606): no consorcio o cadastro guarda cada aditivo na cota, arredondado sozinho, e a capa
+    imprime a soma cheia, que vira cota com um arredondamento so'. Com dois ou mais aditivos somados a diferenca pode
+    chegar a meio centavo por aditivo: essa folga (arredondada para cima) nao e' divergencia. Com um aditivo so' a conta
+    e' a mesma dos dois lados (folga zero); contrato proprio nao arredonda (folga zero)."""
+    if bp is None or bp == contratos.DIREITO_INTEGRAL_BP:
+        return 0
+    n = conn.execute("SELECT COUNT(*) FROM aditivos WHERE contrato_id=? AND status='assinado' "
+                     "AND COALESCE(natureza, '') <> 'reajuste' AND delta_valor_centavos <> 0", (contrato_id,)).fetchone()[0]
+    return (n + 1) // 2 if n >= 2 else 0
+
+
 def _contrato(conn, capa: dict) -> list[dict]:
     """Prazos, valor aditivo e valor do contrato da capa contra o cadastro."""
     cid = conn.execute("SELECT contrato_id FROM medicoes WHERE id=?", (capa["medicao_id"],)).fetchone()[0]
@@ -89,7 +101,7 @@ def _contrato(conn, capa: dict) -> list[dict]:
     if capa["valor_aditivo_centavos"] is not None:
         lido = contratos.cota(capa["valor_aditivo_centavos"], bp)
         cadastro = v["valor_vigente_execucao_centavos"] - v["valor_original_centavos"]
-        if lido != cadastro:
+        if abs(lido - cadastro) > _folga_cota(conn, cid, bp):
             # code-review: com o cadastro acima da capa, o que falta e' no SMO, nao no cadastro
             frase = ("Capa do SMO cita instrumento que o cadastro não tem" if lido > cadastro
                      else "Cadastro tem aditivo que a capa do SMO não traz")
