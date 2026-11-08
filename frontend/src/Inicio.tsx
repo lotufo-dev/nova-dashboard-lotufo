@@ -4,7 +4,7 @@ import { brl, contar, fmtPercentual } from "./formato";
 import type { Usuario } from "./Login";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
-import { fmtMesExtenso } from "./tempo";
+import { fmtCompetencia, fmtMesExtenso } from "./tempo";
 import "./inicio.css";
 
 // Inicio do redesenho de 11/2026 (imagem aprovada pelo Leonardo em 06/11/2026): informacao geral para a diretoria.
@@ -35,7 +35,7 @@ export type PainelInicio = {
   avisos_importantes: {
     // issue #274: o pleito a pedir e os avisos do motor de apostilamento, o mais grave primeiro
     reajustes: SecaoAvisos<{ contrato_id: number; obra: string; dias: number | null; tipo?: string;
-      nivel?: "critico" | "acao" | "atencao" }>;
+      nivel?: "critico" | "acao" | "atencao"; competencias?: string[]; datas_base?: string[] }>;
     prazos: SecaoAvisos<{ contrato_id: number; obra: string; tipo: "execucao" | "vigencia"; dias: number }>;
     certidoes: SecaoAvisos<Certidao>;
   };
@@ -146,6 +146,15 @@ const AVISO_REAJUSTE: Record<string, string> = {
   reajuste_reemitir: "cronograma de reajuste a reemitir",
   reajuste_sem_resposta: "pedido de reajuste sem resposta",
 };
+
+/** O que o item juntou (rodada 2 da PR #579: um item por obra e tipo): a competencia, ou quantas; sem competencia,
+ *  quantas datas-base quando ha' mais de uma. */
+function detalheDoReajuste(x: { competencias?: string[]; datas_base?: string[] }): string {
+  const cs = x.competencias ?? [], bs = x.datas_base ?? [];
+  if (cs.length === 1) return ` (${fmtCompetencia(cs[0])})`;
+  if (cs.length > 1) return ` (${cs.length} competências)`;
+  return bs.length > 1 ? ` (${bs.length} data-bases)` : "";
+}
 
 /** "vencido há 450 dias" / "vence hoje" / "vence em 5 dias" (dias < 0 = vencido). */
 function quando(dias: number | null, vencida: boolean): string {
@@ -298,7 +307,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
             {av.reajustes.itens.map((x, i) => (
               <li key={`${x.contrato_id}-${i}`}>
                 <Link para={{ tela: "obra", id: x.contrato_id, aba: "reajuste" }} ir={ir} className="ini-aviso__linha">
-                  <span className="ini-aviso__nome">{x.obra} · {AVISO_REAJUSTE[x.tipo ?? "reajuste_pleito"] ?? "reajuste"}</span>
+                  <span className="ini-aviso__nome">{x.obra} · {AVISO_REAJUSTE[x.tipo ?? "reajuste_pleito"] ?? "reajuste"}{detalheDoReajuste(x)}</span>
                 </Link>
               </li>))}
           </SecaoAviso>

@@ -235,23 +235,38 @@ def _avisos_importantes(reajustes: list[dict], prazos_: list[dict], vencidas: li
                           "vencida": vencida})
     certidoes.sort(key=lambda c: (c["dias"] is None, c["dias"] if c["dias"] is not None else 0))
     prazos_ = [p for p in prazos_ if p["tipo"] in ("execucao", "vigencia")]
-    reaj = [{"contrato_id": a["contrato_id"], "obra": a["obra"], "dias": a["dias"], "tipo": a["tipo"],
-             "nivel": a["nivel"], "data_base_mes": a.get("data_base_mes")} for a in reajustes]
+    # rodada 2 da PR #579: um item por obra e tipo (tres competencias da mesma obra nao tomam os tres lugares), na
+    # posicao do mais grave, com as competencias e as datas-base que juntou; o total conta as obras
+    grupos: dict[tuple[int, str], dict] = {}
+    for a in reajustes:
+        g = grupos.setdefault((a["contrato_id"], a["tipo"]), {
+            "contrato_id": a["contrato_id"], "obra": a["obra"], "dias": a["dias"], "tipo": a["tipo"],
+            "nivel": a["nivel"], "data_base_mes": a.get("data_base_mes"), "competencias": [], "datas_base": []})
+        for comp in ([a["competencia"]] if a.get("competencia") else a.get("competencias") or []):
+            if comp not in g["competencias"]:
+                g["competencias"].append(comp)
+        if a.get("data_base_mes") and a["data_base_mes"] not in g["datas_base"]:
+            g["datas_base"].append(a["data_base_mes"])
+    reaj = list(grupos.values())
     return {
-        "reajustes": {"total": len(reaj), "itens": reaj[:AVISOS_VISIVEIS]},
+        "reajustes": {"total": len({x["contrato_id"] for x in reaj}), "itens": reaj[:AVISOS_VISIVEIS]},
         "prazos": {"total": len(prazos_), "itens": [{"contrato_id": p["contrato_id"], "obra": p["obra"], "tipo": p["tipo"],
                                                     "dias": p["dias"]} for p in prazos_[:AVISOS_VISIVEIS]]},
         "certidoes": {"total": len(certidoes), "itens": certidoes[:AVISOS_VISIVEIS]},
     }
 
 
-def painel(conn, hoje: datetime.date | None = None) -> dict:
+def painel(conn, hoje: datetime.date | None = None, publico: str = "operacao") -> dict:
+    """`publico`: o perfil de quem le (`operacao` ou `diretoria`, como `api_inicio.inicio`). Os avisos do motor de
+    apostilamento na secao Reajustes seguem o publico de cada um (rodada 2 da PR #579); o pleito a pedir aparece para
+    todo perfil, como antes."""
     hoje = hoje or tempo.hoje_local()
     vencidas, vencendo = cobranca_certidoes.listas(conn, hoje)
-    reaj = [a for a in reajuste.avisos(conn, hoje) if "operacao" in a["publico"]]
+    reaj = reajuste.avisos(conn, hoje)
     pedir = [a for a in reaj if a["tipo"] == "reajuste_pleito"]
     # issue #274: a secao Reajustes dos avisos importantes traz o pleito a pedir e os avisos do motor de apostilamento
-    reaj_caixa = sorted((a for a in reaj if a["tipo"] in AVISOS_REAJUSTE_NA_CAIXA),
+    reaj_caixa = sorted((a for a in reaj if a["tipo"] in AVISOS_REAJUSTE_NA_CAIXA
+                         and (a["tipo"] == "reajuste_pleito" or publico in a["publico"])),
                         key=lambda a: (avisos.NIVEIS.index(a["nivel"]), avisos._chave_atraso(a, hoje), a["obra"] or ""))
     resumo = avisos.resumo_mes(conn, hoje)
     ultima = conn.execute("SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
