@@ -464,6 +464,7 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
     _eventos_atesto(conn, list(out), out)
     _eventos_assinatura(conn, list(out), out)
     from app import medicao_planilhas     # issue #283: o envio da planilha/carta (import local: ele importa este)
+    medicao_planilhas.eventos_geracao(conn, list(out), out)
     medicao_planilhas.eventos_envio(conn, list(out), out)
     for eventos in out.values():
         eventos.sort(key=lambda e: e["data"] or "")      # estavel: no mesmo segundo, o protocolado vem antes

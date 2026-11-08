@@ -637,11 +637,13 @@ O arquivo é uma lista de operações; cada uma diz a medição (`medicao_id`, o
 - {operacao: trocar_tipo, medicao_id: 12, novo_tipo: reajuste, novo_numero: 2, fonte: boletim}
 - {operacao: desligar_nf, medicao_id: 12, nf: 501, fonte: NF de outra medição}   # coligada opcional
 - {operacao: ligar_nf, medicao_id: 13, nfs: [501, 502], fonte: NFs no RM}        # forcar_centro / parcial: true
+- {operacao: ligar_nf, medicao_id: 15, nfs: [{idmov: 12345}], fonte: NF no RM}   # número repetido: idmov, ou {numero: 501, serie: "2"}
+- {operacao: cancelar, medicao_id: 16, duplicata_de: 20, motivo: carga antiga lançou duas vezes, fonte: planilha consolidada}
 - {operacao: protocolar, medicao_id: 13, data: 2025-07-10, processo: PROC-0001, fonte: recibo do protocolo}
 - {operacao: estado, medicao_id: 14, novo: recebida, data: 2025-09-01, motivo: baixa no extrato, fonte: extrato}
 ```
 
-Tudo numa transação: uma operação inválida recusa o arquivo inteiro e o relatório diz qual e por quê. Nada se apaga (vínculo de NF vira `desfeita_em`); cada operação grava `medicao.correcao_cadastro` no `audit_log` com antes, depois, fonte e origem "correção de cadastro". O ensaio executa e desfaz no fim (relatório do que seria gravado). Rodar de novo o mesmo arquivo sai como "já feito". `ligar_nf` confere coligada, nota ativa e livre e o centro de custo da obra (`forcar_centro: true` registra a exceção) e a cobertura do valor (`parcial: true` dispensa); `reabrir` e `ligar_nf` passam a medição a recebida se o RM já tem a baixa.
+Tudo numa transação: uma operação inválida recusa o arquivo inteiro e o relatório diz qual e por quê. Nada se apaga (vínculo de NF vira `desfeita_em`); cada operação grava `medicao.correcao_cadastro` no `audit_log` com antes, depois, fonte e origem "correção de cadastro". O ensaio executa e desfaz no fim (relatório do que seria gravado). Rodar de novo o mesmo arquivo sai como "já feito". `ligar_nf` confere coligada, nota ativa e livre e o centro de custo da obra (`forcar_centro: true` registra a exceção) e a cobertura do valor (`parcial: true` dispensa); `reabrir` e `ligar_nf` passam a medição a recebida se o RM já tem a baixa. Número de NF que se repete na coligada (outra série, outro movimento) é recusado com a lista das notas (idmov, série, emissão, valor): diga qual com `{idmov: N}` ou `{numero: N, serie: S}`. `cancelar` com `duplicata_de: <id>` e `motivo` cancela também a medição recebida que duplica outra do mesmo contrato (a verdadeira não muda): as notas são desligadas (voltam livres para `ligar_nf`; o casador do RM não as religa sozinho) e o motivo e a verdadeira ficam na auditoria.
 
 ### Regra: competência de medição com planilha ou carta enviada
 

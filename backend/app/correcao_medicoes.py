@@ -27,7 +27,7 @@ TIPOS = ("execucao", "projeto", "reajuste")
 OPERACOES = ("cancelar", "reabrir", "trocar_tipo", "desligar_nf", "ligar_nf", "protocolar", "estado")
 ENCERRADAS = ("cancelada", "desistida")
 # Campos que cada operacao aceita, alem de `operacao`, `fonte`, `medicao_id`, `obra`, `numero` e `tipo`
-CAMPOS = {"cancelar": set(), "reabrir": set(), "trocar_tipo": {"novo_tipo", "novo_numero"},
+CAMPOS = {"cancelar": {"duplicata_de", "motivo"}, "reabrir": set(), "trocar_tipo": {"novo_tipo", "novo_numero"},
           "desligar_nf": {"nf", "coligada"}, "ligar_nf": {"nfs", "coligada", "forcar_centro", "parcial"},
           "protocolar": {"data", "processo", "oficio"}, "estado": {"novo", "motivo", "data", "processo", "oficio"}}
 CAMPOS_COMUNS = {"operacao", "fonte", "medicao_id", "obra", "numero", "tipo"}
@@ -188,19 +188,29 @@ def _notas(conn, coligada: int, nf: str, so_ativas: bool) -> list:
 
 def _nfs_ativas(conn, mid: int) -> list[dict]:
     return [dict(r) for r in conn.execute(
-        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.valor_centavos FROM nf_alocacoes a "
+        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.serie, n.idmov, n.valor_centavos FROM nf_alocacoes a "
         "JOIN notas_fiscais n ON n.id=a.nota_id WHERE a.medicao_id=? AND a.desfeita_em IS NULL ORDER BY a.id", (mid,))]
 
 
 def _fmt_nf(n: dict) -> str:
-    return f"NF {n['numero']} ({dinheiro.format_brl(n['valor_centavos'])})"
+    """Gate Sol da #565: numero repetido no RM se distingue pela serie e pelo idmov, que o ensaio mostra."""
+    ident = (f", série {n['serie']}" if n["serie"] not in (None, "") else "") \
+        + (f", idmov {n['idmov']}" if n["idmov"] is not None else ", sem idmov")
+    return f"NF {n['numero']}{ident} ({dinheiro.format_brl(n['valor_centavos'])})"
+
+
+def _ident_nf(n: dict) -> dict:
+    return {"nota_id": n["nota_id"], "numero": n["numero"], "coligada": n["coligada"], "serie": n["serie"],
+            "idmov": n["idmov"]}
 
 
 def _foto(conn, mid: int) -> dict:
     m = _medicao_por_id(conn, mid)
+    ativas = _nfs_ativas(conn, mid)
     return {"estado": m["estado"], "numero": m["numero"], "tipo": m["tipo"], "congelada": m["congelada"],
             "motivo": m["motivo_represamento"],
-            "nfs": [f"{n['numero']}/{n['coligada']}" for n in _nfs_ativas(conn, mid)],
+            "nfs": [f"{n['numero']}/{n['coligada']}" for n in ativas],
+            "notas": [_ident_nf(n) for n in ativas],
             "protocolos": [r[0] for r in conn.execute("SELECT data FROM medicao_protocolos WHERE medicao_id=? "
                                                       "AND etapa='nota' ORDER BY data, id", (mid,))]}
 
@@ -227,17 +237,90 @@ def _recebimentos(conn, mid: int) -> str:
 # ------------------------------------------------------------------ operacoes
 # Cada uma devolve (estado novo, detalhes) ou levanta _JaFeito / ValueError.
 
+def _verdadeira(conn, m, op):
+    """Issue #565: a medicao de que esta e' duplicata (`duplicata_de`), conferida: existe, e' outra, do mesmo
+    contrato e nao encerrada. Ela nao muda; so' justifica o cancelamento."""
+    vid = _inteiro(op, "duplicata_de")
+    if vid == m["id"]:
+        raise ValueError("duplicata_de aponta para ela mesma")
+    v = _medicao_por_id(conn, vid)
+    if v is None:
+        raise ValueError(f"duplicata_de: medição id {vid} não existe")
+    if v["contrato_id"] != m["contrato_id"]:
+        raise ValueError(f"duplicata_de: a medição id {vid} é de outro contrato")
+    if v["estado"] in ENCERRADAS:
+        raise ValueError(f"duplicata_de: a medição id {vid} está {medicoes.rotulo_estado(v['estado'])}; "
+                         "a verdadeira tem de estar ativa")
+    return v
+
+
 def _cancelar(conn, uid, m, op, fonte):
+    duplicata = op.get("duplicata_de") is not None
+    motivo = _texto(op, "motivo")
+    if motivo is not None and not duplicata:
+        raise ValueError("motivo só vale com duplicata_de (no cancelamento comum, o motivo é a fonte)")
     if m["estado"] == "cancelada":
         raise _JaFeito("já cancelada")
-    if "cancelada" not in medicoes.TRANSICOES.get(m["estado"], set()):
+    # Issue #565: a duplicata da carga antiga pode estar recebida (recebida -> cancelada nao e' transicao da
+    # tela); com `duplicata_de` e motivo, a correcao de cadastro a cancela e desliga as notas
+    recebida_duplicata = duplicata and m["estado"] == "recebida"
+    if "cancelada" not in medicoes.TRANSICOES.get(m["estado"], set()) and not recebida_duplicata:
         raise ValueError(f"medição {medicoes.rotulo_estado(m['estado'])} não se cancela "
-                         f"(transição inválida: {m['estado']} → cancelada)")
-    detalhes = []
-    for a in _nfs_ativas(conn, m["id"]):
-        _desfazer_vinculo(conn, uid, m["id"], a, f"medição cancelada ({fonte})")
+                         f"(transição inválida: {m['estado']} → cancelada)"
+                         + ("; se é duplicata de outra, diga duplicata_de e motivo"
+                            if m["estado"] == "recebida" else ""))
+    detalhes, texto = [], fonte
+    if duplicata:
+        if motivo is None:
+            raise ValueError("cancelar duplicata exige motivo: diga o motivo (motivo: ...)")
+        v = _verdadeira(conn, m, op)
+        rotulo_v = f"{medicoes.nome_medicao(v['numero'], v['tipo']).lower()} (id {v['id']})"
+        texto = f"Duplicata da {rotulo_v}: {motivo}"
+        detalhes.append(f"duplicata da {rotulo_v}, que não muda")
+        # revisao da #565: a verdadeira de outro tipo, ou ainda nao recebida quando a duplicata estava, merece olhar
+        if v["tipo"] != m["tipo"]:
+            detalhes.append(f"AVISO: a verdadeira é de {medicoes.ROTULO_TIPO.get(v['tipo'], v['tipo'])} e esta de "
+                            f"{medicoes.ROTULO_TIPO.get(m['tipo'], m['tipo'])}")
+        if recebida_duplicata and v["estado"] != "recebida":
+            detalhes.append(f"AVISO: a verdadeira está {medicoes.rotulo_estado(v['estado'])}; o recebido desta sai "
+                            "dos totais até a nota ser ligada à verdadeira (ligar_nf)")
+        op["_duplicata"] = {"duplicata_de": v["id"], "motivo_cancelamento": motivo}
+    desligadas = _nfs_ativas(conn, m["id"])
+    for a in desligadas:
+        _desfazer_vinculo(conn, uid, m["id"], a, f"medição cancelada ({texto}; {fonte})" if duplicata
+                          else f"medição cancelada ({fonte})")
         detalhes.append(f"{_fmt_nf(a)} desligada")
-    medicoes.mudar_estado(conn, uid, m["id"], "cancelada", fonte, origem=ORIGEM)
+    if duplicata and desligadas:
+        # Revisor da #565: a nota desligada fica "desfeita à mão" e o casador do RM nao a liga sozinho; se a
+        # verdadeira nao tem nota que cubra o valor dela (qualquer que seja o estado), a nota paga ficaria sem medicao
+        # Conta por coligada (rodada 2 do revisor): em consorcio a medicao tem a fatura do consorcio (valor cheio,
+        # coligada do consorcio) e a NF da Lotufo (a cota, coligada da Lotufo); uma nao cobre a outra
+        from app import contratos, notas   # import local: notas importa medicoes
+        lotufo = notas._coligada_lotufo(conn)
+        pct = conn.execute("SELECT percentual_direito_bp FROM contratos WHERE id=?", (v["contrato_id"],)).fetchone()[0]
+        notas_v = _nfs_ativas(conn, v["id"])
+        valor_v = v["valor_atestado_centavos"] if v["valor_atestado_centavos"] is not None \
+            else v["valor_protocolado_centavos"]
+        for col in dict.fromkeys(a["coligada"] for a in desligadas):
+            da_col = [n for n in notas_v if n["coligada"] == col]
+            alvo = contratos.cota(valor_v, pct) if col == lotufo else valor_v
+            if da_col and (alvo is None or sum(n["valor_centavos"] for n in da_col) >= alvo):
+                continue
+            falta = (f"tem NF da coligada {col} que não cobre o valor dela" if da_col
+                     else f"não tem NF ligada da coligada {col}")
+            detalhes.append(f"AVISO: a verdadeira {falta}; o casador do RM não religa a nota desligada: ligue "
+                            + ", ".join(_fmt_nf(a) for a in desligadas if a["coligada"] == col)
+                            + " à verdadeira (ligar_nf)")
+    if recebida_duplicata:
+        cur = conn.execute("UPDATE medicoes SET estado='cancelada', motivo_represamento=? WHERE id=? AND estado=?",
+                           (texto, m["id"], m["estado"]))
+        db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+        auditoria.registrar(conn, uid, "medicao.estado", "medicao", m["id"],
+                            {"estado": m["estado"], "motivo": m["motivo_represamento"]},
+                            {"estado": "cancelada", "motivo": texto, "origem": ORIGEM, "fonte": fonte,
+                             "duplicata_de": op["_duplicata"]["duplicata_de"]})
+    else:
+        medicoes.mudar_estado(conn, uid, m["id"], "cancelada", texto, origem=ORIGEM)
     return detalhes
 
 
@@ -332,25 +415,69 @@ def _conferir_centro(conn, m, nota, forcar: bool, mapa) -> str | None:
     return problema
 
 
+def _descrever_nota(n) -> str:
+    serie = f"série {n['serie']}" if n["serie"] not in (None, "") else "sem série"
+    ident = f"idmov {n['idmov']}" if n["idmov"] is not None else "sem idmov (lida do PDF)"
+    return f"{ident} ({serie}, emissão {n['emissao'] or '?'}, {dinheiro.format_brl(n['valor_centavos'])})"
+
+
+def _mesma_serie(gravada, pedida: str) -> bool:
+    """A serie do RM ('01') e a do YAML (`serie: 1`, que o YAML le como numero) sao a mesma."""
+    g = (gravada or "").strip()
+    return g == pedida or (g.isdigit() and pedida.isdigit() and int(g) == int(pedida))
+
+
+def _nota_da_referencia(conn, coligada: int, ref):
+    """Issue #565: a nota de um item de `nfs`. O número sozinho (`501`) vale quando é único na coligada; quando se
+    repete no RM (outra série, outro movimento), o item diz qual: `{idmov: N}` ou `{numero: N, serie: S}`."""
+    if isinstance(ref, dict):
+        chaves, forma = set(ref), "{idmov: N} ou {numero: N, serie: S}"
+        if not chaves or chaves - {"idmov", "numero", "serie"}:
+            raise ValueError(f"nota {ref!r} inválida: os campos são idmov, numero e serie ({forma})")
+        if "idmov" in chaves and chaves != {"idmov"}:
+            raise ValueError(f"nota {ref!r} inválida: diga idmov ou numero + serie, não os dois ({forma})")
+        if "idmov" in chaves:
+            idmov = _inteiro(ref, "idmov")
+            achadas = conn.execute("SELECT * FROM notas_fiscais WHERE coligada=? AND idmov=? AND situacao='ativa'",
+                                   (coligada, idmov)).fetchall()
+            if not achadas:
+                raise ValueError(f"NF idmov {idmov} não encontrada (ativa) na coligada {coligada}")
+            return achadas[0]
+        nf, serie = _texto(ref, "numero"), _texto(ref, "serie")
+        if nf is None:
+            raise ValueError(f"nota {ref!r} inválida: falta o numero")
+    elif isinstance(ref, (str, int)) and not isinstance(ref, bool):
+        nf, serie = str(ref).strip(), None
+    else:
+        raise ValueError(f"nota {ref!r} inválida: use o número, {{idmov: N}} ou {{numero: N, serie: S}}")
+    achadas = _notas(conn, coligada, nf, so_ativas=True)
+    if serie is not None:
+        achadas = [n for n in achadas if _mesma_serie(n["serie"], serie)]
+    rotulo = f"NF {nf}" + (f" série {serie}" if serie is not None else "")
+    if not achadas:
+        raise ValueError(f"{rotulo} não encontrada (ativa) na coligada {coligada}")
+    if len(achadas) > 1:
+        raise ValueError(f"{rotulo} é ambígua: {len(achadas)} notas ativas com esse número na coligada {coligada} ("
+                         + "; ".join(_descrever_nota(n) for n in achadas)
+                         + "); diga qual com {idmov: N} ou {numero: N, serie: S}")
+    return achadas[0]
+
+
 def _ligar_nf(conn, uid, m, op, fonte):
     from app import diretoria, sincronizacao_rm   # import local: ambos importam medicoes
     nfs = op.get("nfs")
-    if isinstance(nfs, (str, int)):
+    if isinstance(nfs, (str, int, dict)):
         nfs = [nfs]
     if not isinstance(nfs, list) or not nfs:
         raise ValueError("diga as nfs (lista: nfs: [101, 102])")
-    nfs = [str(n).strip() for n in nfs]
     forcar, parcial = _booleano(op, "forcar_centro"), _booleano(op, "parcial")
     coligada = _coligada(conn, m, op)
     ligadas = {a["nota_id"] for a in _nfs_ativas(conn, m["id"])}
     mapa = diretoria._mapa_contratos(conn)
     novas, ja = [], []
-    for nf in nfs:
-        achadas = _notas(conn, coligada, nf, so_ativas=True)
-        if len(achadas) != 1:
-            raise ValueError(f"NF {nf} não encontrada (ativa) na coligada {coligada}" if not achadas
-                             else f"NF {nf} com mais de uma nota com esse número no RM")
-        nota = achadas[0]
+    for ref in nfs:
+        nota = _nota_da_referencia(conn, coligada, ref)
+        nf = nota["numero"]
         if nota["id"] in ligadas:
             ja.append(nota)
             continue
@@ -468,7 +595,8 @@ def _aplicar(conn, uid: int, op, item: dict) -> None:
     depois = _foto(conn, m["id"])
     auditoria.registrar(conn, uid, "medicao.correcao_cadastro", "medicao", m["id"], antes,
                         {**depois, "operacao": nome, "fonte": fonte, "origem": ORIGEM,
-                         **({"centro_forcado": op["_forcado"]} if op.get("_forcado") else {})})
+                         **({"centro_forcado": op["_forcado"]} if op.get("_forcado") else {}),
+                         **op.get("_duplicata", {})})
     item["depois"], item["detalhes"], item["situacao"] = depois["estado"], detalhes, "feito"
 
 

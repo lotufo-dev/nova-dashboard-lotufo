@@ -649,6 +649,94 @@ def test_sugestao_pula_o_numero_de_medicao_cancelada(conn, contrato_id):
     assert medicao_planilhas.sugestao(conn, contrato_id)["numero"] == 6
 
 
+def _de_tipo(conn, contrato_id, numero, tipo, competencia, estado, valor):
+    conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+                 "VALUES (?,?,?,?,?,?)", (contrato_id, numero, tipo, competencia, estado, valor))
+    conn.commit()
+
+
+def test_sugestao_na_obra_so_de_projeto_segue_a_serie_de_projeto(conn, contrato_id):
+    """Issue #567 (obra so' com medicoes de projeto): sem tipo, a sugestao segue o tipo da ultima medicao; a 3a de
+    projeto, na competencia seguinte, com o acumulado das duas de projeto."""
+    from app import medicao_planilhas
+    _de_tipo(conn, contrato_id, 1, "projeto", "2026-08", "protocolada", 20_693_11)
+    _de_tipo(conn, contrato_id, 2, "projeto", "2026-09", "planilha_enviada", 15_000_03)
+    s = medicao_planilhas.sugestao(conn, contrato_id)
+    assert (s["tipo"], s["numero"], s["competencia"]) == ("projeto", 3, "2026-10")
+    assert (s["periodo_inicio"], s["periodo_fim"]) == ("2026-10-01", "2026-10-31")
+    assert s["acumulado_anterior_centavos"] == 20_693_11 + 15_000_03
+    # com o tipo escolhido, segue o escolhido
+    assert medicao_planilhas.sugestao(conn, contrato_id, "execucao")["numero"] == 1
+
+
+def test_tipo_da_ultima_medicao(conn, contrato_id):
+    """Issue #567: o tipo pre-selecionado e' o da ultima medicao de execucao ou projeto (competencia mais recente; na
+    mesma, a execucao); prevista, cancelada e desistida nao contam; o reajuste, mesmo mais recente, nao troca a
+    serie; obra sem medicao: execucao."""
+    from app import medicao_planilhas
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
+    _de_tipo(conn, contrato_id, 1, "projeto", "2026-08", "protocolada", 1)
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "projeto"
+    _de_tipo(conn, contrato_id, 1, "execucao", "2026-09", "protocolada", 1)
+    _de_tipo(conn, contrato_id, 1, "reajuste", "2026-09", "protocolada", 1)
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
+    _de_tipo(conn, contrato_id, 2, "projeto", "2026-10", "cancelada", 1)
+    _de_tipo(conn, contrato_id, 3, "projeto", "2026-11", "prevista", 1)
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
+    _de_tipo(conn, contrato_id, 2, "reajuste", "2026-12", "planilha_gerada", 1)
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
+    _de_tipo(conn, contrato_id, 4, "projeto", "2026-12", "protocolada", 1)
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "projeto"
+    _de_tipo(conn, contrato_id, 2, "execucao", "2026-12", "protocolada", 1)
+    assert medicao_planilhas.tipo_da_ultima(conn, contrato_id) == "execucao"
+
+
+def test_planilha_de_reajuste_e_recusada(conn, contrato_id):
+    """Issue #567 (rodada 1): o reajuste nasce pelo formulario da execucao, em prevista, com data-base e ciclo (#276);
+    a planilha/carta de reajuste e' recusada e nada e' gravado."""
+    from app import medicao_planilhas
+    with pytest.raises(ValueError, match="A planilha/carta é de medição de execução ou de projeto"):
+        medicao_planilhas.registrar(conn, 1, contrato_id, {**_planilha(1, "2026-07", "2026-07-01", "2026-07-31", 5_00),
+                                                           "tipo": "reajuste"}, ANEXOS)
+    assert medicoes.listar(conn, contrato_id) == []
+
+
+def test_sugestao_sai_de_um_retrato_so(conn, contrato_id):
+    """Issue #567 (gate Sol, rodada 1): a medicao gravada por outra conexao no meio da sugestao nao mistura o nº de
+    depois (MAX) com a competencia de antes (ultima)."""
+    from app import medicao_planilhas
+    _de_tipo(conn, contrato_id, 1, "projeto", "2026-08", "protocolada", 1_00)
+    _de_tipo(conn, contrato_id, 2, "projeto", "2026-09", "protocolada", 1_00)
+    outro = db.get_conn()
+
+    class GravaNoMeio:
+        """Depois da consulta da ultima medicao, outra conexao grava a 3a de projeto."""
+        def __init__(self, real):
+            self._real, self._armada = real, True
+
+        def execute(self, sql, params=()):
+            cur = self._real.execute(sql, params)
+            if self._armada and "NUMERO_ORGAO FROM MEDICOES" in sql.upper():
+                self._armada = False
+                linhas = cur.fetchall()
+                outro.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) "
+                              "VALUES (?, 3, 'projeto', '2026-10', 'planilha_gerada')", (contrato_id,))
+                outro.commit()
+                from tests.apoio_corrida import CursorMaterializado
+                return CursorMaterializado(linhas)
+            return cur
+
+        def __getattr__(self, nome):
+            return getattr(self._real, nome)
+
+    try:
+        s = medicao_planilhas.sugestao(GravaNoMeio(conn), contrato_id)
+    finally:
+        outro.close()
+    assert (s["tipo"], s["numero"], s["competencia"]) == ("projeto", 3, "2026-10")
+    assert not conn.in_transaction
+
+
 def test_numero_do_orgao_nao_e_inventado_nem_apagado_na_prevista(conn, contrato_id):
     from app import medicao_planilhas
     mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 3, "tipo": "execucao", "competencia": "2026-07"})
