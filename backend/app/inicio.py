@@ -236,7 +236,7 @@ def _avisos_importantes(reajustes: list[dict], prazos_: list[dict], vencidas: li
     certidoes.sort(key=lambda c: (c["dias"] is None, c["dias"] if c["dias"] is not None else 0))
     prazos_ = [p for p in prazos_ if p["tipo"] in ("execucao", "vigencia")]
     # rodada 2 da PR #579: um item por obra e tipo (tres competencias da mesma obra nao tomam os tres lugares), na
-    # posicao do mais grave, com as competencias e as datas-base que juntou; o total conta as obras
+    # posicao do mais grave, com as competencias e as datas-base que juntou; o total conta esses itens (mesma unidade das linhas)
     grupos: dict[tuple[int, str], dict] = {}
     for a in reajustes:
         g = grupos.setdefault((a["contrato_id"], a["tipo"]), {
@@ -249,7 +249,7 @@ def _avisos_importantes(reajustes: list[dict], prazos_: list[dict], vencidas: li
             g["datas_base"].append(a["data_base_mes"])
     reaj = list(grupos.values())
     return {
-        "reajustes": {"total": len({x["contrato_id"] for x in reaj}), "itens": reaj[:AVISOS_VISIVEIS]},
+        "reajustes": {"total": len(reaj), "itens": reaj[:AVISOS_VISIVEIS]},
         "prazos": {"total": len(prazos_), "itens": [{"contrato_id": p["contrato_id"], "obra": p["obra"], "tipo": p["tipo"],
                                                     "dias": p["dias"]} for p in prazos_[:AVISOS_VISIVEIS]]},
         "certidoes": {"total": len(certidoes), "itens": certidoes[:AVISOS_VISIVEIS]},
