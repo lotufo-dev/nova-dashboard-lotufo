@@ -787,6 +787,143 @@ def apostilamento_da_medicao(conn, medicao: dict, grupos: list[dict] | None = No
     return None
 
 
+ORIGEM_DA_SUGESTAO = {"pleito": "previsto no pleito", "manual": "previsto"}
+ESCOLHA_A_DATA_BASE = "Escolha a data-base do reajuste"
+
+
+def _outras_medicoes(conn, contrato_id: int, competencia: str, numero: int | None) -> list:
+    """As medicoes de reajuste ativas (fora cancelada e desistida) da competencia, menos a do `numero`."""
+    return conn.execute("SELECT numero, data_base_mes, valor_protocolado_centavos FROM medicoes WHERE contrato_id=? "
+                        "AND tipo='reajuste' AND competencia=? AND estado NOT IN ('cancelada','desistida') "
+                        "AND numero IS NOT ? ORDER BY numero", (contrato_id, competencia, numero)).fetchall()
+
+
+def sugestao_da_medicao(conn, contrato_id: int, competencia: str, numero: int | None = None) -> dict:
+    """Issue #276 (spec 2026-10-20 §2.2, D7): para a medicao de reajuste da competencia, cada data-base do contrato
+    com o ciclo, o valor sugerido e a origem dita na tela. O sistema nao calcula: a sugestao e' a previsao vigente da
+    competencia (`previsoes_vigentes`: o apostilado manda, senao o previsto no pleito, senao o manual); sem previsao,
+    nula. O ciclo e' o da previsao mais forte (a origem decide, nao o aniversario); duas previsoes da mesma forca em
+    ciclos diferentes deixam o ciclo em aberto (`ciclos_em_conflito`) e nada e' sugerido. Sem previsao, o ciclo do
+    aniversario (`_ciclo_da_competencia`).
+
+    `numero`: o da medicao de reajuste que vai nascer (ou ser completada). A prevista desse nº que ja' tem pedido
+    sugere o proprio pedido (nao e' trocado pelo previsto sem a pessoa ver). Outra medicao de reajuste ativa da mesma
+    competencia e data-base (`ja_pedido_em`) tira a sugestao: o pedido contaria duas vezes. Previsao negativa (indice
+    deflacionario) nao vira sugestao: a medicao nao guarda pedido negativo (CHECK >= 0, migracao 042); vai no
+    `aviso`.
+
+    `data_base_mes` e' a base ja' escolhida: a unica do contrato ou, com duas, a unica que tem previsao na
+    competencia; senao nula (a pessoa escolhe). Contrato sem reajuste ou sem data-base: nenhuma base."""
+    c = conn.execute("SELECT sem_reajuste FROM contratos WHERE id=?", (contrato_id,)).fetchone()
+    if c is None or c["sem_reajuste"]:
+        return {"competencia": competencia, "bases": [], "data_base_mes": None}
+    termos = {r["id"]: r["numero"] for r in conn.execute(
+        "SELECT id, numero FROM instrumentos WHERE contrato_id=? AND tipo='apostilamento_reajuste'", (contrato_id,))}
+    vigentes = [p for p in previsoes_vigentes(conn, contrato_id) if p["competencia"] == competencia]
+    linhas = conn.execute("SELECT mes, aplica_a FROM contrato_datas_base WHERE contrato_id=? ORDER BY mes",
+                          (contrato_id,)).fetchall()
+    unica = linhas[0]["mes"] if len(linhas) == 1 else None
+    outras = _outras_medicoes(conn, contrato_id, competencia, numero)
+    propria = None if numero is None else conn.execute(
+        "SELECT data_base_mes, valor_protocolado_centavos FROM medicoes WHERE contrato_id=? AND tipo='reajuste' "
+        "AND numero=? AND competencia=? AND estado='prevista' AND valor_protocolado_centavos IS NOT NULL",
+        (contrato_id, numero, competencia)).fetchone()
+    bases = []
+    for b in linhas:
+        mes = b["mes"]
+        ps = [p for p in vigentes if p["data_base_mes"] == mes]
+        forca = min((ORDEM_ORIGEM.index(p["origem"]) for p in ps), default=None)
+        fortes = [p for p in ps if ORDEM_ORIGEM.index(p["origem"]) == forca]
+        conflito = sorted({p["ciclo"] for p in fortes})
+        p = fortes[0] if len(conflito) == 1 else None
+        ciclo = p["ciclo"] if p is not None else None if conflito else _ciclo_da_competencia(mes, competencia)
+        x = {"data_base_mes": mes, "aplica_a": b["aplica_a"] or "", "ciclo": ciclo, "valor_centavos": None,
+             "origem": None, "origem_texto": None, "aviso": None, "tem_previsao": bool(ps),
+             "ciclos_em_conflito": conflito if len(conflito) > 1 else [],
+             "ja_pedido_em": [m["numero"] for m in outras if (m["data_base_mes"] or unica) in (mes, None)]}
+        if p is not None:
+            x["origem"] = p["origem"]
+            if p["origem"] == "apostilamento":
+                n = termos.get(p["instrumento_id"])
+                x["origem_texto"] = f"apostilado no termo {n}" if n else "apostilado em termo sem número"
+            else:
+                x["origem_texto"] = ORIGEM_DA_SUGESTAO[p["origem"]]
+            x["valor_centavos"] = p["valor_previsto_centavos"]
+        divergente = None
+        if propria is not None and (propria["data_base_mes"] or unica) == mes:
+            if p is not None and p["valor_previsto_centavos"] != propria["valor_protocolado_centavos"]:
+                # o pedido da prevista fica no campo, mas o apostilado (ou previsto) diferente e' dito ao lado
+                divergente = f"{x['origem_texto']} em {dinheiro.format_brl(p['valor_previsto_centavos'])}"
+            x.update(valor_centavos=propria["valor_protocolado_centavos"], origem="prevista",
+                     origem_texto="pedido já registrado na prevista")
+        if divergente:
+            x["aviso"] = f"pedido já registrado na prevista; {divergente}"
+        if x["ciclos_em_conflito"]:
+            x["aviso"] = f"previsão em mais de um ciclo ({', '.join(map(str, x['ciclos_em_conflito']))})"
+        elif x["ja_pedido_em"]:
+            m = next(m for m in outras if m["numero"] == x["ja_pedido_em"][0])
+            x["aviso"] = (f"já pedido na medição {m['numero']} de reajuste" if m["valor_protocolado_centavos"]
+                          is not None else f"já lançado na medição {m['numero']} de reajuste")
+            x.update(valor_centavos=None, origem=None, origem_texto=None)
+        elif x["valor_centavos"] is not None and x["valor_centavos"] < 0:
+            x["aviso"] = (f"{x['origem_texto']} em {dinheiro.format_brl(x['valor_centavos'])}; "
+                          "o sistema não registra reajuste negativo")
+            x.update(valor_centavos=None, origem=None, origem_texto=None)
+        bases.append(x)
+    com_previsao = [x for x in bases if x["tem_previsao"]]
+    escolhida = bases[0] if len(bases) == 1 else com_previsao[0] if len(com_previsao) == 1 else None
+    return {"competencia": competencia, "bases": bases,
+            "data_base_mes": escolhida["data_base_mes"] if escolhida else None}
+
+
+def _ja_esta_em(competencia: str, numero: int) -> str:
+    return f"O reajuste de {_mes(competencia)} já está na medição {numero} de reajuste: o pedido contaria duas vezes"
+
+
+def base_e_ciclo_da_medicao(conn, contrato_id: int, competencia: str, escolhida: str | None,
+                            numero: int | None = None) -> tuple[str | None, int | None]:
+    """Issue #276: a data-base e o ciclo que a medicao de reajuste grava na criacao. Com uma data-base, ela (a
+    escolhida, se vier, tem de ser ela); com duas, a escolhida, e sem escolha a gravacao e' recusada
+    (`ESCOLHA_A_DATA_BASE`). Contrato sem data-base (ou sem reajuste): nada a gravar. O ciclo segue a base, pela
+    mesma leitura da sugestao; ciclo em aberto (previsoes da mesma forca em dois ciclos) e' recusado. Outra medicao
+    de reajuste ativa da competencia e base (fora a do `numero`) recusa, com ou sem valor: vazia, o pedido entraria
+    depois pela edicao de valor e contaria duas vezes (revisor, rodada 2 da PR #580)."""
+    bases = sugestao_da_medicao(conn, contrato_id, competencia, numero)["bases"]
+    if not bases:
+        if escolhida:
+            raise ValueError("Este contrato não tem data-base de reajuste no cadastro")
+        return None, None
+    if escolhida is None and len(bases) == 1:
+        escolhida = bases[0]["data_base_mes"]
+    if escolhida is None:
+        raise ValueError(ESCOLHA_A_DATA_BASE)
+    b = next((b for b in bases if b["data_base_mes"] == escolhida), None)
+    if b is None:
+        raise ValueError(f"Data-base {_mes(escolhida)} não é deste contrato")
+    if b["ciclos_em_conflito"]:
+        raise ValueError(f"A previsão de reajuste de {_mes(competencia)} está nos ciclos "
+                         f"{' e '.join(map(str, b['ciclos_em_conflito']))} da data-base {_mes(escolhida)}; "
+                         "a correção é pelo pleito ou pelo cadastro")
+    if b["ciclo"] is None:
+        # antes do 1o aniversario nao ha' reajuste: a medicao ficaria sem ciclo e fora da aba Reajuste
+        raise ValueError(f"Competência {_mes(competencia)} é anterior ao primeiro reajuste da "
+                         f"data-base {_mes(escolhida)}")
+    if b["ja_pedido_em"]:
+        raise ValueError(_ja_esta_em(competencia, b["ja_pedido_em"][0]))
+    return b["data_base_mes"], b["ciclo"]
+
+
+def conferir_pedido_sem_dobro(conn, m) -> None:
+    """Revisor, rodada 2 da PR #580: o pedido informado depois na medicao de reajuste com data-base gravada (a do
+    motor, issue #276) e' recusado se outra medicao de reajuste ativa da mesma competencia e data-base ja' existe.
+    Medicao sem data-base gravada (anterior ao motor, ou complemento do legado) segue como antes."""
+    if m["tipo"] != "reajuste" or not m["data_base_mes"]:
+        return
+    for o in _outras_medicoes(conn, m["contrato_id"], m["competencia"], m["numero"]):
+        if o["data_base_mes"] in (m["data_base_mes"], None):
+            raise ValueError(_ja_esta_em(m["competencia"], o["numero"]))
+
+
 def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[dict]:
     """Um ciclo por data-base: o corrente (ou o proximo, `futuro`, antes da primeira janela)."""
     hoje = hoje or tempo.hoje_local()

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app import (arquivos, correio, db, espelhos, feriados, medicao_grupos, medicao_planilhas, medicoes, permissoes,
-                 planilha_envio, siga, tempo)
+                 planilha_envio, reajuste, siga, tempo)
 from app.api_auth import conexao
 from app.dinheiro import parse_brl
 from app.permissoes import exigir
@@ -41,6 +41,9 @@ class MedicaoIn(BaseModel):
     numero: int = Field(ge=1, le=999)
     tipo: Literal["execucao", "projeto", "reajuste"]
     competencia: str = Field(pattern=COMPETENCIA)
+    # issue #276: so' na de reajuste: o pedido (vazio = sem pedido) e a data-base escolhida (com duas no contrato)
+    valor: str | None = Field(None, max_length=40)
+    data_base_mes: str | None = Field(None, pattern=COMPETENCIA)
 
 
 class ValorIn(BaseModel):
@@ -199,7 +202,20 @@ def criar(contrato_id: ID, dados: MedicaoIn,
     if regra is not None and regra["situacao"] == "ativa":
         raise HTTPException(422, "Esta obra gera a medição pelo espelho: use “Gerar espelho” na página da obra")
     try:
-        mid = medicoes.criar(conn, usuario["id"], {"contrato_id": contrato_id, **dados.model_dump()})
+        with db.mutacao(conn):
+            novo = {"contrato_id": contrato_id, "numero": dados.numero, "tipo": dados.tipo,
+                    "competencia": dados.competencia}
+            if dados.tipo == "reajuste":
+                # issue #276: data-base e ciclo gravados na criacao; o pedido, quando digitado
+                com_valor = bool((dados.valor or "").strip())
+                base, ciclo = reajuste.base_e_ciclo_da_medicao(conn, contrato_id, dados.competencia,
+                                                               dados.data_base_mes, dados.numero)
+                novo.update(data_base_mes=base, ciclo=ciclo)
+                if com_valor:
+                    novo["valor_centavos"] = _centavos(dados.valor)
+            elif (dados.valor or "").strip() or dados.data_base_mes:
+                raise ValueError("Valor e data-base só acompanham a medição de reajuste")
+            mid = medicoes.criar(conn, usuario["id"], novo)
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     return {"id": mid}
@@ -416,6 +432,28 @@ def sugestao_planilha(contrato_id: ID, tipo: Literal["execucao", "projeto"] | No
     return medicao_planilhas.sugestao(conn, contrato_id, tipo)
 
 
+@router.get("/api/contratos/{contrato_id}/reajuste/sugestao")
+def sugestao_reajuste(contrato_id: ID, competencia: str = Query(..., pattern=COMPETENCIA),
+                      numero: int | None = Query(None, ge=1, le=999),
+                      usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                      conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #276: o valor sugerido da medicao de reajuste da competencia, por data-base, com a origem e o ciclo.
+    `numero` (o da planilha/carta): se a medicao de reajuste desse nº ja' existe e nao recebe o reajuste, nenhuma
+    base (o campo nao aparece e nada vai sem a pessoa ver); a prevista desse nº traz a data-base que ja' tem. So' le."""
+    _contrato_existe(conn, contrato_id)
+    with db.leitura(conn):
+        s = reajuste.sugestao_da_medicao(conn, contrato_id, competencia, numero)
+        if numero is None:
+            return s
+        try:
+            r = medicao_planilhas.reajuste_do_numero(conn, contrato_id, numero, competencia)
+        except ValueError:
+            return {**s, "bases": [], "data_base_mes": None}
+        if r is not None and any(b["data_base_mes"] == r["data_base_mes"] for b in s["bases"]):
+            s["data_base_mes"] = r["data_base_mes"]
+        return s
+
+
 @router.get("/api/contratos/{contrato_id}/planilhas/avisos")
 def avisos_planilha(contrato_id: ID, numero: int = Query(..., ge=1, le=999),
                     competencia: str = Query(..., pattern=COMPETENCIA),
@@ -442,16 +480,21 @@ def registrar_planilha(contrato_id: ID,
                        periodo_fim: datetime.date = Form(...),
                        valor: str = Form(..., max_length=40),
                        numero_orgao: int | None = Form(None, ge=1, le=9999),
+                       reajuste_valor: str | None = Form(None, max_length=40),
+                       reajuste_data_base: str | None = Form(None, pattern=COMPETENCIA),
                        oficio: UploadFile = File(...), planilha: UploadFile = File(...),
                        usuario: dict = Depends(exigir("editar_cadastros")),
                        conn: sqlite3.Connection = Depends(conexao)):
     """"Nova planilha/carta" na obra: a medicao entra em `planilha_gerada` com a versao 1; os avisos de periodo
-    voltam junto com a gravacao (nao a impedem)."""
+    voltam junto com a gravacao (nao a impedem). Issue #276: com `reajuste_valor`, nasce tambem a medicao de reajuste
+    de mesmo nº e competencia, em `prevista` (`medicao_planilhas._conferir_reajuste`)."""
     _contrato_existe(conn, contrato_id)
     try:
         dados = {"numero": numero, "tipo": tipo, "competencia": competencia, "numero_orgao": numero_orgao,
                  "periodo_inicio": periodo_inicio.isoformat(), "periodo_fim": periodo_fim.isoformat(),
-                 "valor_centavos": _centavos(valor)}
+                 "valor_centavos": _centavos(valor),
+                 "reajuste_centavos": _centavos(reajuste_valor) if (reajuste_valor or "").strip() else None,
+                 "reajuste_data_base": reajuste_data_base}
         medicao_planilhas.conferir_registro(conn, contrato_id, dados)   # recusa antes de gravar os anexos
     except ValueError as e:
         raise _erro_do_cliente(conn, e)

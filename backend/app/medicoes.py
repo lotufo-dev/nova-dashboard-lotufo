@@ -93,10 +93,15 @@ def criar(conn: sqlite3.Connection, usuario_id: int, dados: dict) -> int:
         # o UNIQUE (contrato_id, numero, tipo) do schema: entre a leitura e o INSERT outra
         # requisicao pode inserir a mesma medicao. Sem este catch o perdedor da corrida
         # recebia sqlite3.IntegrityError crua dentro do handler -> 500 em vez de 422.
+        # issue #276: a medicao de reajuste grava a data-base e o ciclo (e o pedido, quando veio); quem chama resolve
+        # (`reajuste.base_e_ciclo_da_medicao`). Sem eles, nulos, como na carga do legado e no ledger.
+        valor = dados.get("valor_centavos")
         try:
             cur = conn.execute(
-                "INSERT INTO medicoes (contrato_id, numero, tipo, competencia) VALUES (?,?,?,?)",
-                (dados["contrato_id"], dados["numero"], dados["tipo"], dados["competencia"]))
+                "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, data_base_mes, ciclo, "
+                "valor_protocolado_centavos, valor_protocolado_origem) VALUES (?,?,?,?,?,?,?,?)",
+                (dados["contrato_id"], dados["numero"], dados["tipo"], dados["competencia"],
+                 dados.get("data_base_mes"), dados.get("ciclo"), valor, None if valor is None else "manual"))
         except sqlite3.IntegrityError as e:
             # So a violacao de unicidade vira erro de dominio: FK/CHECK quebrados sao bug
             # nosso e devem continuar subindo como 500 (nao mentir dizendo "ja existe").
@@ -517,6 +522,11 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         # o atesto digitado ficaria fora da lista de boletins e o espelho sairia por ele
         if campo == "atestado" and tem_boletim(conn, medicao_id):
             raise ValueError(APROVADO_PELO_BOLETIM)
+        if campo == "protocolado":
+            # issue #276 (revisor, rodada 2 da PR #580): o pedido nao entra por aqui numa 2a medicao de reajuste da
+            # mesma competencia e data-base. Import local: reajuste le' medicoes pelo banco, nao por este modulo.
+            from app import reajuste
+            reajuste.conferir_pedido_sem_dobro(conn, m)
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []
