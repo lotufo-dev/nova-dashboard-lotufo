@@ -56,6 +56,7 @@ log = logging.getLogger("app.rm")
 # Baixas que contam como recebido (RM: 1 baixado, 3 por acordo, 4 parcial). 0 aberto e
 # 2 cancelado ficam fora.
 STATUS_RECEBIDO = (1, 3, 4)
+STATUS_BAIXA_TOTAL = 1
 # Tolerancia para propor candidato (nao para auto-aplicar): 5% do valor da NF.
 TOLERANCIA_CANDIDATO = 0.05
 INTERVALO_SEG = 3600
@@ -627,11 +628,14 @@ def _falta_por_titulo(conn, nota_id: int, aberto_inteiro: bool = False) -> int |
     cancelados): pagamento a mais num titulo (juros) nao compensa a falta de outro. None quando algum titulo
     nao tem baixa nenhuma (aberto nao e' "pago com diferenca").
     Issue #253: com `aberto_inteiro`, o titulo sem baixa entra pelo valor original inteiro em vez de dar None
-    (o a receber e o aviso da Saude querem quanto falta, nao se a nota fecha com diferenca)."""
+    (o a receber e o aviso da Saude querem quanto falta, nao se a nota fecha com diferenca).
+    Issue #563: titulo com baixa total (status 1) e valor baixado zero conta como quitado (falta zero)."""
     falta = 0
     for b in conn.execute("SELECT status_lan, valor_original_centavos, valor_baixado_centavos FROM baixas "
                           "WHERE nota_id=? AND status_lan<>2", (nota_id,)):
         baixado = (b["valor_baixado_centavos"] or 0) if b["status_lan"] in STATUS_RECEBIDO else 0
+        if b["status_lan"] == STATUS_BAIXA_TOTAL and baixado <= 0:
+            continue                    # #563: baixa total no RM e' titulo quitado, mesmo com valor baixado zero
         if baixado <= 0 and not aberto_inteiro:
             return None
         falta += max(0, (b["valor_original_centavos"] or 0) - baixado)

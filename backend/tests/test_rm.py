@@ -368,6 +368,21 @@ def test_tolerancia_exige_baixa_no_titulo(conn, cid, tmp_path):
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
 
 
+def test_titulo_com_baixa_total_e_valor_baixado_zero_conta_como_quitado(conn, cid, tmp_path):
+    """Issue #563: titulo com status de baixa total no RM (1) e valor baixado zero e' quitado: nao e' falta nem
+    "titulo sem baixa" (a medicao fecha como recebida, sem evento de diferenca)."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+                     [_baixa(1, 100, 500.0, 500.0, 1, "2026-09-01T00:00:00-04:00"),
+                      _baixa(2, 100, 424.0, 0.0, 1, "2026-09-02T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
+    assert medicoes.detalhe(conn, mid)["estado"] == "recebida"
+    assert _eventos_diferenca(conn, mid) == []
+    nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=100").fetchone()[0]
+    assert sincronizacao_rm._falta_por_titulo(conn, nid) == 0
+    assert sincronizacao_rm._falta_por_titulo(conn, nid, aberto_inteiro=True) == 0
+
+
 @pytest.mark.parametrize("titulos", [
     [(923.20, 923.20, 1), (0.80, 0.0, 0)],     # NF em dois titulos: o de R$ 0,80 ainda aberto
     [(500.0, 549.50, 1), (50.0, 0.0, 0)],      # juros num titulo nao cobrem o outro, aberto
