@@ -199,6 +199,134 @@ def test_ligar_nf_recusa_nota_ja_ligada_a_outra_medicao(cenario):
     assert rel["feitos"] == 2 and _ativas(c, m2) == [nid] and _ativas(c, m1) == []
 
 
+def _nota_serie(c, numero, idmov, serie, valor=100_001, centro="9.001.001"):
+    """Nota com numero repetido no RM (outra serie, outro movimento)."""
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, serie, emissao, valor_centavos,"
+                    " situacao, centro_custo) VALUES (1,?,?,?,?,'2025-07-01',?,'ativa',?)",
+                    (idmov, str(numero), numero, serie, valor, centro)).lastrowid
+    c.commit()
+    return nid
+
+
+def test_ligar_nf_numero_repetido_sem_desambiguar_e_recusado(cenario):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1, valor=100_001)
+    _nota_serie(c, 1856, 7001, "1")
+    _nota_serie(c, 1856, 7002, "2")
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [1856], "fonte": "NF"}])
+    erro = rel["itens"][0]["erro"]
+    assert "NF 1856 é ambígua" in erro and "idmov 7001 (série 1" in erro and "idmov 7002 (série 2" in erro
+    assert "{idmov: N}" in erro
+    assert _ativas(c, mid) == []
+
+
+def test_ligar_nf_por_idmov_liga_a_nota_certa(cenario):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1, valor=100_001)
+    _nota_serie(c, 1856, 7001, "1")
+    certa = _nota_serie(c, 1856, 7002, "2")
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"idmov": 7002}],
+                           "fonte": "NF no RM (série 2)"}])
+    assert rel["feitos"] == 1 and _ativas(c, mid) == [certa]
+    assert "NF 1856 (R$ 1.000,01) ligada" in rel["itens"][0]["detalhes"][0]
+    # rodar de novo: ja' feito
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"idmov": 7002}], "fonte": "NF"}])
+    assert rel["itens"][0]["situacao"] == "já feito"
+
+
+def test_ligar_nf_por_numero_e_serie_e_idmov_inexistente(cenario):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1, valor=100_001)
+    certa = _nota_serie(c, 1856, 7001, "1")
+    _nota_serie(c, 1856, 7002, "2")
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"idmov": 9999}], "fonte": "NF"}])
+    assert "idmov 9999 não encontrada (ativa) na coligada 1" in rel["itens"][0]["erro"]
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"numero": 1856, "idmov": 7001}],
+                           "fonte": "NF"}])
+    assert "idmov ou numero + serie" in rel["itens"][0]["erro"]
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"numero": 1856, "serie": "1"}],
+                           "fonte": "NF série 1"}])
+    assert rel["feitos"] == 1 and _ativas(c, mid) == [certa]
+
+
+def test_cancelar_recebida_como_duplicata_desliga_a_nota_e_audita(cenario):
+    c, cid, uid = cenario
+    verdadeira = _medicao(c, cid, 49, estado="recebida")
+    dup = _medicao(c, cid, 45, estado="recebida", valor=233_015)
+    nid = _nota(c, 511, valor=233_015, paga=True)
+    _ligar(c, dup, nid, valor=233_015)
+    op = {"operacao": "cancelar", "medicao_id": dup, "duplicata_de": verdadeira,
+          "motivo": "carga antiga lançou a 49ª duas vezes", "fonte": "planilha consolidada"}
+    # ensaio mostra o que muda e nao grava
+    antes = _foto(c)
+    rel = _rodar(c, uid, [op], ensaio=True)
+    item = rel["itens"][0]
+    assert rel["feitos"] == 1 and item["antes"] == "recebida" and item["depois"] == "cancelada"
+    assert any("NF 511 (R$ 2.330,15) desligada" in d for d in item["detalhes"])
+    assert any("duplicata da medição 49 de execução" in d and f"id {verdadeira}" in d for d in item["detalhes"])
+    assert _foto(c) == antes
+    rel = _rodar(c, uid, [op])
+    assert rel["feitos"] == 1 and _estado(c, dup) == "cancelada" and _ativas(c, dup) == []
+    # a nota volta livre (vinculo desfeito, nada apagado) e a verdadeira nao muda
+    assert c.execute("SELECT COUNT(*) FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
+                     (nid,)).fetchone()[0] == 0
+    assert c.execute("SELECT COUNT(*) FROM nf_alocacoes WHERE nota_id=?", (nid,)).fetchone()[0] == 1
+    assert _estado(c, verdadeira) == "recebida"
+    motivo = c.execute("SELECT motivo_represamento FROM medicoes WHERE id=?", (dup,)).fetchone()[0]
+    assert "carga antiga lançou a 49ª duas vezes" in motivo and f"id {verdadeira}" in motivo
+    antes_a, depois_a = _correcoes(c, dup)[0]
+    assert antes_a["estado"] == "recebida" and antes_a["nfs"] == ["511/1"]
+    assert depois_a["estado"] == "cancelada" and depois_a["duplicata_de"] == verdadeira
+    assert depois_a["motivo_cancelamento"] == "carga antiga lançou a 49ª duas vezes"
+    est = c.execute("SELECT antes, depois FROM audit_log WHERE acao='medicao.estado' AND entidade_id=?",
+                    (str(dup),)).fetchall()
+    assert json.loads(est[-1][0])["estado"] == "recebida" and json.loads(est[-1][1])["estado"] == "cancelada"
+    # rodar de novo: ja' feito
+    assert _rodar(c, uid, [op])["itens"][0]["situacao"] == "já feito"
+
+
+def test_cancelar_duplicata_em_estado_que_ja_se_cancela(cenario):
+    c, cid, uid = cenario
+    verdadeira = _medicao(c, cid, 15)
+    dup = _medicao(c, cid, 11)
+    rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "duplicata_de": verdadeira,
+                           "motivo": "lançada duas vezes", "fonte": "planilha"}])
+    assert rel["feitos"] == 1 and _estado(c, dup) == "cancelada" and _estado(c, verdadeira) == "protocolada"
+    assert _correcoes(c, dup)[0][1]["duplicata_de"] == verdadeira
+
+
+def test_cancelar_recebida_exige_duplicata_e_motivo(cenario):
+    c, cid, uid = cenario
+    verdadeira = _medicao(c, cid, 15, estado="recebida")
+    dup = _medicao(c, cid, 11, estado="recebida")
+    # sem duplicata_de: recebida continua nao se cancelando
+    rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "fonte": "x"}])
+    assert "não se cancela" in rel["itens"][0]["erro"]
+    # sem motivo: recusado
+    rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "duplicata_de": verdadeira, "fonte": "x"}])
+    assert "diga o motivo" in rel["itens"][0]["erro"]
+    # duplicata de si mesma, de medicao inexistente, cancelada ou de outro contrato: recusado
+    rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "duplicata_de": dup, "motivo": "m",
+                           "fonte": "x"}])
+    assert "ela mesma" in rel["itens"][0]["erro"]
+    rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "duplicata_de": 9999, "motivo": "m",
+                           "fonte": "x"}])
+    assert "9999 não existe" in rel["itens"][0]["erro"]
+    cancelada = _medicao(c, cid, 20, estado="cancelada")
+    rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "duplicata_de": cancelada, "motivo": "m",
+                           "fonte": "x"}])
+    assert "está cancelada" in rel["itens"][0]["erro"]
+    outro = c.execute("SELECT id FROM contratos WHERE id<>? LIMIT 1", (cid,)).fetchone()[0]
+    alheia = _medicao(c, outro, 1, estado="recebida")
+    rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "duplicata_de": alheia, "motivo": "m",
+                           "fonte": "x"}])
+    assert "outro contrato" in rel["itens"][0]["erro"]
+    # motivo sem duplicata_de: recusado (o motivo do cancelamento comum e' a fonte)
+    rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "motivo": "m", "fonte": "x"}])
+    assert "motivo só vale com duplicata_de" in rel["itens"][0]["erro"]
+    assert _estado(c, dup) == "recebida"
+
+
 def test_protocolar_promove_congela_e_e_idempotente(cenario):
     c, cid, uid = cenario
     mid = _medicao(c, cid, 1, estado="prevista")
