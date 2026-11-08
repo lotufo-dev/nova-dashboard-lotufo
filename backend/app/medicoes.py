@@ -521,6 +521,11 @@ def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: 
         # o atesto digitado ficaria fora da lista de boletins e o espelho sairia por ele
         if campo == "atestado" and tem_boletim(conn, medicao_id):
             raise ValueError(APROVADO_PELO_BOLETIM)
+        if campo == "protocolado":
+            # issue #276 (revisor, rodada 2 da PR #580): o pedido nao entra por aqui numa 2a medicao de reajuste da
+            # mesma competencia e data-base. Import local: reajuste le' medicoes pelo banco, nao por este modulo.
+            from app import reajuste
+            reajuste.conferir_pedido_sem_dobro(conn, m)
         col_v, col_o = f"valor_{campo}_centavos", f"valor_{campo}_origem"
         antes = {col_v: m[col_v], col_o: m[col_o]}
         extra_sql, extra_par = "", []

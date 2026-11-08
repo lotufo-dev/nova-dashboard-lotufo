@@ -209,7 +209,7 @@ def criar(contrato_id: ID, dados: MedicaoIn,
                 # issue #276: data-base e ciclo gravados na criacao; o pedido, quando digitado
                 com_valor = bool((dados.valor or "").strip())
                 base, ciclo = reajuste.base_e_ciclo_da_medicao(conn, contrato_id, dados.competencia,
-                                                               dados.data_base_mes, dados.numero, com_valor)
+                                                               dados.data_base_mes, dados.numero)
                 novo.update(data_base_mes=base, ciclo=ciclo)
                 if com_valor:
                     novo["valor_centavos"] = _centavos(dados.valor)

@@ -934,26 +934,46 @@ def test_reajuste_ja_lancado_em_outra_medicao_nao_e_sugerido_nem_pedido_de_novo(
         medicao_planilhas.registrar(conn, 1, contrato_id, _planilha(5, "2026-08", "2026-08-01", "2026-08-31", 1,
                                                                      reajuste_centavos=50_000_01), ANEXOS)
     assert conn.execute("SELECT COUNT(*) FROM medicoes").fetchone()[0] == 1
+    # rodada 2: vazia tambem nao nasce (o pedido entraria depois pela edicao de valor)
     with pytest.raises(ValueError, match="já está na medição 6"):
-        reajuste.base_e_ciclo_da_medicao(conn, contrato_id, "2026-08", None, 7, com_valor=True)
-    # sem valor (complemento a preencher depois) a de reajuste a mao ainda nasce
-    assert reajuste.base_e_ciclo_da_medicao(conn, contrato_id, "2026-08", None, 7) == ("2024-06", 2026)
+        reajuste.base_e_ciclo_da_medicao(conn, contrato_id, "2026-08", None, 7)
     medicoes.mudar_estado(conn, 1, seis, "cancelada", "lançada no nº errado")
     (b,) = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-08", 5)["bases"]
     assert (b["valor_centavos"], b["aviso"]) == (50_000_01, None)
+    assert reajuste.base_e_ciclo_da_medicao(conn, contrato_id, "2026-08", None, 7) == ("2024-06", 2026)
+
+
+def test_pedido_informado_depois_nao_contorna_a_trava_do_dobro(conn, contrato_id):
+    """Revisor, rodada 2 da PR #580, Critico: a 2a medicao de reajuste da mesma competencia e data-base, criada vazia
+    por qualquer caminho, nao recebe o pedido pela edicao de valor. A medicao sem data-base gravada (legado) segue."""
+    _base(conn, contrato_id)
+    comum = {"contrato_id": contrato_id, "tipo": "reajuste", "competencia": "2026-08"}
+    seis = medicoes.criar(conn, 1, {**comum, "numero": 6, "valor_centavos": 50_000_01, "data_base_mes": "2024-06",
+                                    "ciclo": 2026})
+    sete = medicoes.criar(conn, 1, {**comum, "numero": 7, "data_base_mes": "2024-06", "ciclo": 2026})
+    with pytest.raises(ValueError, match="já está na medição 6 de reajuste"):
+        medicoes.definir_valor(conn, 1, sete, "protocolado", 50_000_01, "manual")
+    assert medicoes.detalhe(conn, sete)["valor_protocolado_centavos"] is None
+    medicoes.definir_valor(conn, 1, sete, "atestado", 1_00, "manual")      # o aprovado nao e' pedido
+    legado = medicoes.criar(conn, 1, {**comum, "numero": 8})
+    medicoes.definir_valor(conn, 1, legado, "protocolado", 3_01, "manual")
+    medicoes.mudar_estado(conn, 1, seis, "cancelada", "lançada no nº errado")
+    with pytest.raises(ValueError, match="já está na medição 8 de reajuste"):
+        medicoes.definir_valor(conn, 1, sete, "protocolado", 50_000_01, "manual")
 
 
 def test_prevista_do_numero_com_pedido_sugere_o_proprio_pedido(conn, contrato_id):
     """Revisor da PR #580, Aviso: o pedido digitado na prevista (R$ 10.000,00) nao e' trocado pelo apostilado
-    (R$ 9.876,54) sem a pessoa ver."""
+    (R$ 9.876,54) sem a pessoa ver; rodada 2: o apostilado diferente e' dito no aviso (o apostilado manda)."""
     from app import reajuste
     _base(conn, contrato_id)
     _prevista(conn, contrato_id, "2026-08", 9_876_54, "apostilamento", termo="001/2026")
     medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 2, "tipo": "reajuste", "competencia": "2026-08",
                              "valor_centavos": 10_000_00, "data_base_mes": "2024-06", "ciclo": 2026})
     (b,) = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-08", 2)["bases"]
-    assert (b["valor_centavos"], b["origem"], b["origem_texto"], b["aviso"]) == (
-        10_000_00, "prevista", "pedido já registrado na prevista", None)
+    assert (b["valor_centavos"], b["origem"], b["origem_texto"]) == (
+        10_000_00, "prevista", "pedido já registrado na prevista")
+    assert b["aviso"] == "pedido já registrado na prevista; apostilado no termo 001/2026 em R$ 9.876,54"
 
 
 def test_previsao_negativa_nao_vira_sugestao_e_vai_no_aviso(conn, contrato_id):
@@ -984,7 +1004,8 @@ def test_ciclo_pela_forca_da_origem_e_empate_em_dois_ciclos_recusa(conn, contrat
     (b,) = reajuste.sugestao_da_medicao(conn, contrato_id, "2026-04")["bases"]
     assert (b["ciclo"], b["valor_centavos"], b["ciclos_em_conflito"]) == (None, None, [2025, 2026])
     assert b["aviso"] == "previsão em mais de um ciclo (2025, 2026)"
-    with pytest.raises(ValueError, match="Escolha o ciclo"):
+    with pytest.raises(ValueError, match="^A previsão de reajuste de 04/2026 está nos ciclos 2025 e 2026 da data-base "
+                                         "06/2024; a correção é pelo pleito ou pelo cadastro$"):
         reajuste.base_e_ciclo_da_medicao(conn, contrato_id, "2026-04", None)
 
 

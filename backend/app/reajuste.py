@@ -767,9 +767,15 @@ def sugestao_da_medicao(conn, contrato_id: int, competencia: str, numero: int | 
             else:
                 x["origem_texto"] = ORIGEM_DA_SUGESTAO[p["origem"]]
             x["valor_centavos"] = p["valor_previsto_centavos"]
+        divergente = None
         if propria is not None and (propria["data_base_mes"] or unica) == mes:
+            if p is not None and p["valor_previsto_centavos"] != propria["valor_protocolado_centavos"]:
+                # o pedido da prevista fica no campo, mas o apostilado (ou previsto) diferente e' dito ao lado
+                divergente = f"{x['origem_texto']} em {format_brl(p['valor_previsto_centavos'])}"
             x.update(valor_centavos=propria["valor_protocolado_centavos"], origem="prevista",
                      origem_texto="pedido já registrado na prevista")
+        if divergente:
+            x["aviso"] = f"pedido já registrado na prevista; {divergente}"
         if x["ciclos_em_conflito"]:
             x["aviso"] = f"previsão em mais de um ciclo ({', '.join(map(str, x['ciclos_em_conflito']))})"
         elif x["ja_pedido_em"]:
@@ -788,14 +794,18 @@ def sugestao_da_medicao(conn, contrato_id: int, competencia: str, numero: int | 
             "data_base_mes": escolhida["data_base_mes"] if escolhida else None}
 
 
+def _ja_esta_em(competencia: str, numero: int) -> str:
+    return f"O reajuste de {_mes(competencia)} já está na medição {numero} de reajuste: o pedido contaria duas vezes"
+
+
 def base_e_ciclo_da_medicao(conn, contrato_id: int, competencia: str, escolhida: str | None,
-                            numero: int | None = None, com_valor: bool = False) -> tuple[str | None, int | None]:
+                            numero: int | None = None) -> tuple[str | None, int | None]:
     """Issue #276: a data-base e o ciclo que a medicao de reajuste grava na criacao. Com uma data-base, ela (a
     escolhida, se vier, tem de ser ela); com duas, a escolhida, e sem escolha a gravacao e' recusada
     (`ESCOLHA_A_DATA_BASE`). Contrato sem data-base (ou sem reajuste): nada a gravar. O ciclo segue a base, pela
-    mesma leitura da sugestao; ciclo em aberto (previsoes da mesma forca em dois ciclos) e' recusado. `com_valor`: o
-    pedido vai junto, e outra medicao de reajuste ativa da competencia e base (fora a do `numero`) o recusa (o pedido
-    contaria duas vezes)."""
+    mesma leitura da sugestao; ciclo em aberto (previsoes da mesma forca em dois ciclos) e' recusado. Outra medicao
+    de reajuste ativa da competencia e base (fora a do `numero`) recusa, com ou sem valor: vazia, o pedido entraria
+    depois pela edicao de valor e contaria duas vezes (revisor, rodada 2 da PR #580)."""
     bases = sugestao_da_medicao(conn, contrato_id, competencia, numero)["bases"]
     if not bases:
         if escolhida:
@@ -809,17 +819,27 @@ def base_e_ciclo_da_medicao(conn, contrato_id: int, competencia: str, escolhida:
     if b is None:
         raise ValueError(f"Data-base {_mes(escolhida)} não é deste contrato")
     if b["ciclos_em_conflito"]:
-        raise ValueError(f"Escolha o ciclo: a competência {_mes(competencia)} tem previsão de reajuste nos ciclos "
+        raise ValueError(f"A previsão de reajuste de {_mes(competencia)} está nos ciclos "
                          f"{' e '.join(map(str, b['ciclos_em_conflito']))} da data-base {_mes(escolhida)}; "
-                         "corrija a previsão antes")
+                         "a correção é pelo pleito ou pelo cadastro")
     if b["ciclo"] is None:
         # antes do 1o aniversario nao ha' reajuste: a medicao ficaria sem ciclo e fora da aba Reajuste
         raise ValueError(f"Competência {_mes(competencia)} é anterior ao primeiro reajuste da "
                          f"data-base {_mes(escolhida)}")
-    if com_valor and b["ja_pedido_em"]:
-        raise ValueError(f"O reajuste de {_mes(competencia)} já está na medição {b['ja_pedido_em'][0]} de "
-                         "reajuste: o pedido contaria duas vezes")
+    if b["ja_pedido_em"]:
+        raise ValueError(_ja_esta_em(competencia, b["ja_pedido_em"][0]))
     return b["data_base_mes"], b["ciclo"]
+
+
+def conferir_pedido_sem_dobro(conn, m) -> None:
+    """Revisor, rodada 2 da PR #580: o pedido informado depois na medicao de reajuste com data-base gravada (a do
+    motor, issue #276) e' recusado se outra medicao de reajuste ativa da mesma competencia e data-base ja' existe.
+    Medicao sem data-base gravada (anterior ao motor, ou complemento do legado) segue como antes."""
+    if m["tipo"] != "reajuste" or not m["data_base_mes"]:
+        return
+    for o in _outras_medicoes(conn, m["contrato_id"], m["competencia"], m["numero"]):
+        if o["data_base_mes"] in (m["data_base_mes"], None):
+            raise ValueError(_ja_esta_em(m["competencia"], o["numero"]))
 
 
 def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[dict]:

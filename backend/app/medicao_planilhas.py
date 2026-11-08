@@ -192,7 +192,7 @@ def _conferir_reajuste(conn, contrato_id: int, dados: dict):
         raise ValueError("O reajuste acompanha só a planilha/carta de execução")
     r = reajuste_do_numero(conn, contrato_id, numero, competencia)
     escolhida = dados.get("reajuste_data_base") or (r["data_base_mes"] if r is not None else None)
-    base, ciclo = reajuste.base_e_ciclo_da_medicao(conn, contrato_id, competencia, escolhida, numero, com_valor=True)
+    base, ciclo = reajuste.base_e_ciclo_da_medicao(conn, contrato_id, competencia, escolhida, numero)
     return base, ciclo, r
 
 
