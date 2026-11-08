@@ -191,6 +191,45 @@ def _termo_do_pedido(conn, contrato_id: int, pleito: dict, unica: bool) -> dict 
     return None
 
 
+def termos_de_reajuste(conn, contrato_id: int, unica: str | None) -> tuple[dict, dict]:
+    """Issue #453: os apostilamentos e os aditivos de reajuste de cada cadeia de `corrige` (so' dentro da mesma tabela,
+    #442), como chave -> (data-base, ciclo, data, ultimo elo). Data-base, ciclo e data sao os do ultimo elo, o que vale;
+    a data e' a do termo mais antigo da cadeia no mesmo ciclo e data-base, a mesma que escolhe o pleito no `cadastro
+    aplicar` (#414, #409). O elo corrigido aparece com os valores do ultimo elo, para quem o achar ligado a um pleito.
+    Cadeia cujo ultimo elo nao tem base ou ciclo determinavel fica de fora. `unica`: a data-base unica do contrato."""
+    def montar(todos, corrige_de, alvo_de, data_de) -> dict:
+        corretor = {corrige_de(r): k for k, r in todos.items() if corrige_de(r) in todos}
+        out = {}
+        for k in todos:
+            if k in corretor:
+                continue                                            # so' o ultimo elo comeca a cadeia
+            alvo = alvo_de(todos[k])
+            if None in alvo:
+                continue
+            elos, datas, x = [k], [data_de(todos[k])], corrige_de(todos[k])
+            while x in todos and x not in elos:
+                elos.append(x)
+                if alvo_de(todos[x]) == alvo:
+                    datas.append(data_de(todos[x]))
+                x = corrige_de(todos[x])
+            for e in elos:
+                out[e] = (*alvo, min(datas), k)
+        return out
+
+    aps = {r["chave"]: {**dict(r), "dados": json.loads(r["dados"] or "{}")} for r in conn.execute(
+        "SELECT chave, data, dados, data_base_mes FROM instrumentos WHERE contrato_id=? "
+        "AND tipo='apostilamento_reajuste'", (contrato_id,))}
+    ads = {r["chave_cadastro"]: dict(r) for r in conn.execute(
+        f"SELECT * FROM aditivos a WHERE a.contrato_id=? AND a.chave_cadastro IS NOT NULL "
+        f"AND {aditivo_de_reajuste('a', com_corrigido=True)}", (contrato_id,))}
+    return (montar(aps, lambda r: r["dados"].get("corrige"),
+                   lambda r: (base_do_termo(r["dados"], r["data_base_mes"], unica),
+                              ciclo_do_apostilamento(r["dados"], r["data"])),
+                   lambda r: str(r["data"])[:10]),
+            montar(ads, lambda r: r["corrige_chave"], lambda r: base_e_ciclo_do_aditivo(r, unica),
+                   lambda r: r["data_assinatura"][:10]))
+
+
 def apostilamento_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, unica: bool) -> dict | None:
     """O termo que fecha o ciclo, o unico criterio da aba, dos avisos e da recusa de reiterar/reemitir (gate Sol e
     revisor, PR #317): com pleito enviado no ciclo, o termo ligado ao vigente (ou ao pedido que ele reitera); sem
@@ -202,8 +241,12 @@ def apostilamento_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, un
         return _termo_do_pedido(conn, contrato_id, pl, unica)
     ap = _apostilamento(conn, contrato_id, mes_base, ciclo, unica)
     ad = _aditivo_do_ciclo(conn, contrato_id, mes_base, ciclo, unica)
-    if ap is not None and ad is not None and ad["data"] < str(ap["data"])[:10]:
-        return ad
+    if ap is not None and ad is not None:
+        # a data da cadeia, como no `cadastro aplicar`; o termo fora dela (sem base determinavel) conta a propria
+        aps, ads = termos_de_reajuste(conn, contrato_id, mes_base if unica else None)
+        data_ap = aps[ap["chave"]][2] if ap["chave"] in aps else str(ap["data"])[:10]
+        data_ad = ads[ad["chave"]][2] if ad["chave"] in ads else ad["data"]
+        return ad if data_ad < data_ap else ap
     return ap or ad
 
 
