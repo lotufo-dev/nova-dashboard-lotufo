@@ -118,7 +118,7 @@ def _notas_em_aberto(conn) -> list[dict]:
             continue
         # Issue #253: a falta e' contada titulo a titulo (a conta da #35 e da #251): juros num titulo nao
         # escondem outro titulo aberto da mesma nota.
-        falta = sincronizacao_rm._falta_por_titulo(conn, n["id"], aberto_inteiro=True)
+        falta = sincronizacao_rm._falta_por_titulo(conn, n["id"], aberto_inteiro=True, baixa_total_quita=True)
         if falta <= TOLERANCIA_CENTAVOS:
             continue
         out.append({"estado": "protocolada", "tipo": "nota", "numero": n["numero"], "nf": _numero_nf(n["numero"]),
