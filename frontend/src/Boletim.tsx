@@ -62,6 +62,12 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
     <form className="pilha" onSubmit={salvar} noValidate aria-label="Aceitar a diferença"
       onKeyDown={ev => ev.key === "Escape" && fechar()}>
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {/* #286 (revisor, rodada 1 da PR #606): o aceite vale para o boletim inteiro; o que a capa diverge e' aceito junto */}
+      {capaDiverge && (
+        <ul aria-label="Divergências da capa do SMO aceitas junto">
+          {(m.capa_divergencias ?? []).map(frase => <li key={frase}>{frase}</li>)}
+        </ul>
+      )}
       <div className="campo">
         <label className="campo__rotulo" htmlFor="dif-justificativa">Justificativa</label>
         <textarea id="dif-justificativa" name="justificativa" className="entrada--larga" rows={2} maxLength={1000} autoFocus
