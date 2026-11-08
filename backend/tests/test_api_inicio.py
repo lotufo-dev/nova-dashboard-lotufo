@@ -91,7 +91,9 @@ def test_secao_reajustes_um_item_por_obra_e_tipo_e_o_total_conta_obras(client_ad
     notas = [x for x in reaj["itens"] if x["tipo"] == "reajuste_nota_antes_do_apostilamento"]
     assert [(x["contrato_id"], x["competencias"]) for x in notas] == [(a, ["2025-07", "2025-08", "2025-09"]),
                                                                        (b, ["2025-07"])]
-    assert reaj["total"] == 2                                   # duas obras (cada uma tambem com pleito e "sem apostilamento")
+    # issue #587: o total conta os itens (obra x tipo), a mesma unidade das linhas, e nao as obras: cada obra tem
+    # tambem o pleito e o "sem apostilamento", 2 obras x 3 tipos = 6 (antes dava 2)
+    assert reaj["total"] == 6
 
 
 def test_secao_reajustes_da_diretoria_so_traz_os_avisos_dela(client_admin):

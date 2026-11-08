@@ -153,7 +153,7 @@ function detalheDoReajuste(x: { competencias?: string[]; datas_base?: string[] }
   const cs = x.competencias ?? [], bs = x.datas_base ?? [];
   if (cs.length === 1) return ` (${fmtCompetencia(cs[0])})`;
   if (cs.length > 1) return ` (${cs.length} competências)`;
-  return bs.length > 1 ? ` (${bs.length} data-bases)` : "";
+  return bs.length > 1 ? ` (${bs.length} datas-base)` : "";
 }
 
 /** "vencido há 450 dias" / "vence hoje" / "vence em 5 dias" (dias < 0 = vencido). */

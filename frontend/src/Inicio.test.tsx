@@ -119,6 +119,20 @@ describe("Início", () => {
     expect(hrefs).toEqual(["/avisos?familia=reajustes", "/avisos?familia=prazos", "/avisos?familia=certidoes"]);
   });
 
+  it("seção Reajustes: detalhe do item com uma data-base, várias datas-base e várias competências", async () => {
+    api.mockResolvedValue(painel({ avisos_importantes: { ...painel().avisos_importantes, reajustes: { total: 3, itens: [
+      { contrato_id: 1, obra: "Alfa", dias: null, tipo: "reajuste_sem_resposta", nivel: "acao", competencias: ["2026-07"] },
+      { contrato_id: 2, obra: "Beta", dias: null, tipo: "reajuste_sem_resposta", nivel: "acao", datas_base: ["2024-06", "2025-03"] },
+      { contrato_id: 3, obra: "Gama", dias: null, tipo: "reajuste_sem_resposta", nivel: "acao", datas_base: ["2024-06"] }] } } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
+    const reaj = within(caixa.getByRole("region", { name: "Reajustes" }));
+    expect(reaj.getByText("Alfa · pedido de reajuste sem resposta (07/2026)")).toBeTruthy();
+    expect(reaj.getByText("Beta · pedido de reajuste sem resposta (2 datas-base)")).toBeTruthy();
+    expect(reaj.getByText("Gama · pedido de reajuste sem resposta")).toBeTruthy();
+    expect(reaj.getByText("3")).toBeTruthy();
+  });
+
   it("seção de avisos sem item mostra uma linha curta no lugar da lista", async () => {
     api.mockResolvedValue(painel({ avisos_importantes: {
       reajustes: { total: 0, itens: [] }, prazos: { total: 0, itens: [] }, certidoes: { total: 0, itens: [] } } }));
