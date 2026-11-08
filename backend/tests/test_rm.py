@@ -1291,13 +1291,31 @@ def test_falha_no_estoque_nao_troca_o_retrato_anterior(conn, tmp_path):
     assert conn.execute("SELECT COUNT(*) FROM rm_estoque_baixas").fetchone()[0] == 1
 
 
-@pytest.mark.parametrize("linha, trecho", [({"MES": 202613}, "mês ilegível"), ({"MES": "lixo"}, "MES ilegível"),
+@pytest.mark.parametrize("linha, trecho", [({"MES": "lixo"}, "MES ilegível"),
                                            ({"QTD": float("inf")}, "QTD ilegível")])
 def test_linha_ilegivel_no_custo_vira_erro_da_rodada(conn, tmp_path, linha, trecho):
     cli = _simulador_custo(tmp_path, [{**_custo(), **linha}], [])
     r = sincronizacao_rm.sincronizar(conn, cli)
     assert r["estado"] == "success" and trecho in r["custo_erro"] and "DASH25" in r["custo_erro"]
     assert conn.execute("SELECT COUNT(*) FROM rm_custo_tarefas").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("mes", [220112, 202613, 202600])
+def test_linha_de_custo_com_mes_fora_do_intervalo_e_pulada_e_as_outras_gravam(conn, tmp_path, mes):
+    cli = _simulador_custo(tmp_path, [_custo(), _custo(mes=mes, trf="9.9"), _custo(trf="1.03")], [_estoque()])
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["estado"] == "success" and r["custo_erro"] is None
+    assert r["custo_tarefas"] == 2 and r["estoque_baixas"] == 1
+    assert r["custo_aviso"] == f"1 linha(s) de custo puladas por mês ilegível ({mes})"
+    assert [x[0] for x in conn.execute("SELECT tarefa FROM rm_custo_tarefas ORDER BY id")] == ["1.02", "1.03"]
+    rodada = conn.execute("SELECT custo_erro, custo_aviso FROM rm_sincronizacoes WHERE id=?", (r["id"],)).fetchone()
+    assert rodada["custo_erro"] is None and rodada["custo_aviso"] == r["custo_aviso"]
+    assert sincronizacao_rm.rodadas(conn)[0]["custo_aviso"] == r["custo_aviso"]
+
+
+def test_sem_linha_pulada_nao_ha_aviso(conn, tmp_path):
+    r = sincronizacao_rm.sincronizar(conn, _simulador_custo(tmp_path, [_custo()], [_estoque()]))
+    assert r["custo_aviso"] is None
 
 
 def test_rodada_agendada_traz_o_custo_uma_vez_por_dia(conn, tmp_path):

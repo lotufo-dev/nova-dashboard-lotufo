@@ -745,7 +745,7 @@ def vinculos_fora_da_cobranca(conn) -> list[dict]:
 # DASH25 devolve dezenas de milhares de linhas: a rodada agendada traz o custo uma vez por dia (a primeira que achar
 # o retrato com mais de INTERVALO_CUSTO_HORAS); o disparo manual sempre traz.
 INTERVALO_CUSTO_HORAS = 23
-_SEM_CUSTO = {"custo_tarefas": None, "estoque_baixas": None, "custo_erro": None}
+_SEM_CUSTO = {"custo_tarefas": None, "estoque_baixas": None, "custo_erro": None, "custo_aviso": None}
 
 
 def _texto(valor) -> str | None:
@@ -763,19 +763,44 @@ def _inteiro(linha: dict, campo: str, codigo: str, obrigatorio: bool = True) -> 
         raise rm.ErroRM(f"Consulta {codigo} com {campo} ilegível: {valor!r}") from None
 
 
+class MesForaDoIntervalo(rm.ErroRM):
+    """MES numerico, mas fora do intervalo aceito (ex.: 220112)."""
+
+    def __init__(self, mensagem: str, valor):
+        super().__init__(mensagem)
+        self.valor = valor
+
+
 def _mes(linha: dict, codigo: str) -> str:
     """MES do RM (AAAAMM, inteiro) -> 'AAAA-MM'."""
     ano, mes = divmod(_inteiro(linha, "MES", codigo), 100)
     if not (rm.ANO_MINIMO <= ano <= 2100 and 1 <= mes <= 12):
-        raise rm.ErroRM(f"Consulta {codigo} com mês ilegível: {linha.get('MES')!r}")
+        raise MesForaDoIntervalo(f"Consulta {codigo} com mês ilegível: {linha.get('MES')!r}", linha.get("MES"))
     return f"{ano:04d}-{mes:02d}"
 
 
-def _linhas_custo(linhas: list[dict]) -> list[tuple]:
+def _linhas_custo(linhas: list[dict]) -> tuple[list[tuple], list]:
+    """Linhas de custo prontas e os valores de MES das puladas (mes numerico fora do intervalo: o dado e' do RM e
+    corrige-se la', sem adivinhar o mes). Qualquer outro defeito da linha continua derrubando a leitura."""
     c = rm.CONSULTA_CUSTO
-    return [(_inteiro(x, "CODCOLIGADA", c), _texto(x.get("CODCCUSTO")), _texto(x.get("CODPRJ")),
-             _texto(x.get("CODTRF")), _texto(x.get("NATUREZA")), _mes(x, c), _inteiro(x, "QTD", c, False),
-             rm.centavos(x.get("VALOR"))) for x in linhas]
+    prontas, puladas = [], []
+    for x in linhas:
+        try:
+            mes = _mes(x, c)
+        except MesForaDoIntervalo as e:
+            puladas.append(e.valor)
+            continue
+        prontas.append((_inteiro(x, "CODCOLIGADA", c), _texto(x.get("CODCCUSTO")), _texto(x.get("CODPRJ")),
+                        _texto(x.get("CODTRF")), _texto(x.get("NATUREZA")), mes, _inteiro(x, "QTD", c, False),
+                        rm.centavos(x.get("VALOR"))))
+    return prontas, puladas
+
+
+def _aviso_linhas_puladas(puladas: list) -> str | None:
+    if not puladas:
+        return None
+    valores = ", ".join(sorted({str(v) for v in puladas})[:5])
+    return f"{len(puladas)} linha(s) de custo puladas por mês ilegível ({valores})"[:500]
 
 
 def _linhas_estoque(linhas: list[dict]) -> list[tuple]:
@@ -816,7 +841,10 @@ def _sincronizar_custo(conn, cliente, rodada_id: int) -> dict:
     rodada (sucesso ou falha), para que uma escrita a mais com o banco ocupado nao derrube as notas.
     """
     try:
-        custo = _linhas_custo(cliente.consultar(rm.CONSULTA_CUSTO))
+        custo, puladas = _linhas_custo(cliente.consultar(rm.CONSULTA_CUSTO))
+        aviso = _aviso_linhas_puladas(puladas)
+        if aviso:
+            log.warning("custo do RM (rodada %s): %s", rodada_id, aviso)
         estoque = _linhas_estoque(cliente.consultar(rm.CONSULTA_ESTOQUE))
         with db.mutacao(conn):
             _garantir_posse(conn, rodada_id)
@@ -828,7 +856,8 @@ def _sincronizar_custo(conn, cliente, rodada_id: int) -> dict:
                                 valor_centavos) VALUES (?,?,?,?,?,?)""", estoque)
             conn.execute("UPDATE rm_sincronizacoes SET custo_tarefas=?, estoque_baixas=? WHERE id=?",
                          (len(custo), len(estoque), rodada_id))
-        return {"custo_tarefas": len(custo), "estoque_baixas": len(estoque), "custo_erro": None}
+        return {"custo_tarefas": len(custo), "estoque_baixas": len(estoque), "custo_erro": None,
+                "custo_aviso": aviso}
     except RodadaPerdida:
         raise
     except rm.ErroRM as e:
@@ -895,10 +924,10 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
                     resumo["sugestoes"] += 1
             resumo["recebimentos"] = _recebimentos(conn)
             conn.execute("""UPDATE rm_sincronizacoes SET estado='success', terminado_em=datetime('now'),
-                            nfs=?, baixas=?, alocacoes=?, sugestoes=?, recebimentos=?, custo_erro=?
-                            WHERE id=? AND estado='running'""",
+                            nfs=?, baixas=?, alocacoes=?, sugestoes=?, recebimentos=?, custo_erro=?,
+                            custo_aviso=? WHERE id=? AND estado='running'""",
                          (resumo["nfs"], resumo["baixas"], resumo["alocacoes"], resumo["sugestoes"],
-                          resumo["recebimentos"], custo["custo_erro"], rodada_id))
+                          resumo["recebimentos"], custo["custo_erro"], custo["custo_aviso"], rodada_id))
             auditoria.registrar(conn, None, "rm.sincronizacao", "rm_sincronizacao", rodada_id, None,
                                 {"disparo": disparo, **resumo, **custo})
         ESTADO["ultima_sincronizacao"] = tempo.para_local(tempo.agora_utc()).isoformat(timespec="seconds")
