@@ -230,17 +230,27 @@ def _soltar(conn, rid: int) -> None:
 
 def _gravar_saiu_sem_registro(conn, rid: int) -> None:
     """O e-mail saiu e o registro do envio falhou: grava isso na linha, numa transacao propria (a linha de comando,
-    em outro processo, le' daqui para recusar "nao saiu"). Falha fica no log; a proxima rodada tenta de novo."""
+    em outro processo, le' daqui para recusar "nao saiu"). Falha fica no log; a proxima rodada tenta de novo. Ja'
+    gravada, ou linha ja' marcada como saida, nao abre transacao (o banco pode estar ocupado)."""
+    pendente = (f"SELECT 1 FROM {TABELA} WHERE id=? AND envio_saiu_sem_registro_em IS NULL AND envio_id IS NULL "
+                "AND envio_conferido_em IS NULL")
+    if conn.execute(pendente, (rid,)).fetchone() is None:
+        return
     try:
         with db.mutacao(conn):
             conn.execute(f"UPDATE {TABELA} SET envio_saiu_sem_registro_em=datetime('now') WHERE id=? "
-                         "AND envio_saiu_sem_registro_em IS NULL", (rid,))
+                         "AND envio_saiu_sem_registro_em IS NULL AND envio_id IS NULL AND envio_conferido_em IS NULL",
+                         (rid,))
     except Exception:
         log.exception("alerta de seguranca %s ENVIADO e a marca de saida sem registro nao foi gravada", rid)
 
 
 def _sairam(conn) -> set[int]:
-    """As linhas que sairam sem registro e ainda nao foram marcadas como saidas: as deste processo e as do banco."""
+    """As linhas que sairam sem registro e ainda nao foram marcadas como saidas: as do banco e as deste processo. A
+    linha deste processo que outro (a linha de comando) ja' marcou como saida sai da memoria."""
+    abertas = {r[0] for r in conn.execute(f"SELECT id FROM {TABELA} WHERE envio_id IS NULL AND envio_conferido_em IS NULL "
+                                          "AND (envio_saiu_sem_registro_em IS NOT NULL OR envio_reservado_em IS NOT NULL)")}
+    _SAIRAM.intersection_update(abertas)
     return _SAIRAM | {r[0] for r in conn.execute(
         f"SELECT id FROM {TABELA} WHERE envio_saiu_sem_registro_em IS NOT NULL AND envio_id IS NULL "
         "AND envio_conferido_em IS NULL")}
@@ -256,7 +266,8 @@ def _marcar_saida(conn, rid: int, envio_id: int | None = None) -> bool:
                              "WHERE id=?", (envio_id, rid))
             else:
                 conn.execute(f"UPDATE {TABELA} SET envio_conferido_em=datetime('now'), envio_reservado_em=NULL, "
-                             "envio_reservado_por=NULL WHERE id=?", (rid,))
+                             "envio_reservado_por=NULL WHERE id=? AND envio_id IS NULL AND envio_conferido_em IS NULL",
+                             (rid,))
     except Exception:
         log.exception("alerta de seguranca %s ENVIADO e nao marcado", rid)
         _SAIRAM.add(rid)
@@ -381,14 +392,14 @@ def rodada(conn, agora: datetime.datetime | None = None) -> list[str]:
         return []
     if (ESTADO["erro"] or "").startswith("nada sai:"):
         ESTADO["erro"] = None                       # o cadastro ou a conta foram corrigidos
-    falhou = ESTADO["falhou_em"]
-    if falhou is not None and agora - falhou < datetime.timedelta(minutes=ESPERA_FALHA_MIN):
-        return []
-    for rid in sorted(_sairam(conn)):               # saiu e nao foi marcado: tenta de novo antes de tudo
-        if rid in _SAIRAM:
+    for rid in sorted(_sairam(conn)):               # saiu e nao foi marcado: tenta de novo antes de tudo, sem
+        if rid in _SAIRAM:                          # esperar a pausa depois da falha (so' grava no banco)
             _gravar_saiu_sem_registro(conn, rid)
         if not _marcar_saida(conn, rid):
             return []
+    falhou = ESTADO["falhou_em"]
+    if falhou is not None and agora - falhou < datetime.timedelta(minutes=ESPERA_FALHA_MIN):
+        return []
     persistentes = _persistentes()
     _fechar_episodios(conn, persistentes)
     enviados = []

@@ -540,7 +540,7 @@ def test_enviado_sem_registro_grava_no_banco_e_a_linha_de_comando_recusa_nao_sai
     monkeypatch.setattr(alertas_seguranca, "_SAIRAM", set())      # outro processo
     antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
     assert cli.main(["alertas", "conferir-envio", "--id", str(rid), "--nao-saiu", "--usuario", DONO]) == 1
-    assert "saiu" in capsys.readouterr().out
+    assert alertas_seguranca.SAIU_SEM_REGISTRO in capsys.readouterr().out
     assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == antes
     assert conn.execute("SELECT envio_reservado_em FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()[0]
     erro = alertas_seguranca.situacao(conn)["erro"]
@@ -559,6 +559,28 @@ def test_enviado_sem_registro_no_banco_e_marcado_pela_rodada_mesmo_depois_de_rei
     assert conn.execute("SELECT envio_conferido_em FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()[0]
     assert [x for x in chamadas if "alerta" in x] == []
     assert alertas_seguranca.situacao(conn)["erro"] is None
+
+
+def test_saiu_sem_registro_e_marcado_na_rodada_seguinte_sem_esperar_a_pausa_da_falha(ambiente, monkeypatch):
+    # code-review: a marcacao so' grava no banco; esperar os 10 minutos deixaria a linha aberta a "nao saiu"
+    conn, tmp = ambiente
+    rid = _saiu_e_marcacao_falhou(conn, monkeypatch)
+    assert alertas_seguranca.ESTADO["falhou_em"] == AGORA
+    alertas_seguranca.rodada(conn, AGORA + datetime.timedelta(minutes=2))
+    assert conn.execute("SELECT envio_conferido_em FROM alertas_seguranca_envios WHERE id=?", (rid,)).fetchone()[0]
+
+
+def test_saiu_registrado_pela_linha_de_comando_some_da_saude_do_servidor(ambiente, monkeypatch):
+    # code-review: o servidor guarda a linha na memoria; o --saiu de outro processo vale tambem para a Saude dele
+    conn, tmp = ambiente
+    rid = _saiu_e_marcacao_falhou(conn, monkeypatch)
+    alertas_seguranca._SAIRAM.add(rid)
+    uid = conn.execute("SELECT id FROM usuarios").fetchone()[0]
+    with db.mutacao(conn):                          # o que o --saiu da linha de comando grava
+        conn.execute("UPDATE alertas_seguranca_envios SET envio_conferido_em=datetime('now'), envio_conferido_por=?, "
+                     "envio_reservado_em=NULL WHERE id=?", (uid, rid))
+    assert alertas_seguranca.situacao(conn)["erro"] is None
+    assert alertas_seguranca._SAIRAM == set()
 
 
 def _parada(conn, chave, tipo="alerta", mensagem=None, resolvido=None):
