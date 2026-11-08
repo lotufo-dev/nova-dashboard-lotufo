@@ -228,7 +228,10 @@ def test_ligar_nf_por_idmov_liga_a_nota_certa(cenario):
     rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"idmov": 7002}],
                            "fonte": "NF no RM (série 2)"}])
     assert rel["feitos"] == 1 and _ativas(c, mid) == [certa]
-    assert "NF 1856 (R$ 1.000,01) ligada" in rel["itens"][0]["detalhes"][0]
+    # o ensaio e a auditoria dizem qual das duas 1856 entrou (gate Sol da #565)
+    assert "NF 1856, série 2, idmov 7002 (R$ 1.000,01) ligada" in rel["itens"][0]["detalhes"][0]
+    _, depois = _correcoes(c, mid)[0]
+    assert depois["notas"] == [{"nota_id": certa, "numero": "1856", "coligada": 1, "serie": "2", "idmov": 7002}]
     # rodar de novo: ja' feito
     rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"idmov": 7002}], "fonte": "NF"}])
     assert rel["itens"][0]["situacao"] == "já feito"
@@ -277,7 +280,7 @@ def test_cancelar_recebida_como_duplicata_desliga_a_nota_e_audita(cenario):
     rel = _rodar(c, uid, [op], ensaio=True)
     item = rel["itens"][0]
     assert rel["feitos"] == 1 and item["antes"] == "recebida" and item["depois"] == "cancelada"
-    assert any("NF 511 (R$ 2.330,15) desligada" in d for d in item["detalhes"])
+    assert any("NF 511, idmov 1411 (R$ 2.330,15) desligada" in d for d in item["detalhes"])
     assert any("duplicata da medição 49 de execução" in d and f"id {verdadeira}" in d for d in item["detalhes"])
     assert _foto(c) == antes
     rel = _rodar(c, uid, [op])
@@ -320,6 +323,39 @@ def test_cancelar_recebida_duplicata_de_verdadeira_nao_recebida_ou_de_outro_tipo
     detalhes = rel["itens"][0]["detalhes"]
     assert any("AVISO: a verdadeira está protocolada" in d and "ligar_nf" in d for d in detalhes)
     assert any("AVISO: a verdadeira é de reajuste e esta de execução" in d for d in detalhes)
+
+
+def test_cancelar_duplicata_avisa_quando_a_verdadeira_fica_sem_a_nota(cenario):
+    # O caso da issue: a verdadeira foi dada como recebida pela data da baixa, sem NF; a duplicata tem a NF paga.
+    # Desligada a' mao, o casador do RM nao a religa: o ensaio tem de mandar liga-la a' verdadeira.
+    c, cid, uid = cenario
+    verdadeira = _medicao(c, cid, 49, estado="recebida", valor=233_015)
+    dup = _medicao(c, cid, 45, estado="recebida", valor=233_015)
+    nid = _nota(c, 512, valor=233_015, paga=True)
+    _ligar(c, dup, nid, valor=233_015)
+    op = {"operacao": "cancelar", "medicao_id": dup, "duplicata_de": verdadeira, "motivo": "lançada duas vezes",
+          "fonte": "planilha"}
+    detalhes = _rodar(c, uid, [op], ensaio=True)["itens"][0]["detalhes"]
+    assert any("AVISO: a verdadeira não tem NF ligada" in d and "ligue NF 512, idmov 1412 (R$ 2.330,15)" in d
+               and "ligar_nf" in d for d in detalhes)
+    # verdadeira com NF que nao cobre o valor dela: avisa tambem
+    _ligar(c, verdadeira, _nota(c, 513, valor=100_001), valor=100_001)
+    detalhes = _rodar(c, uid, [op], ensaio=True)["itens"][0]["detalhes"]
+    assert any("AVISO: a verdadeira tem NF que não cobre o valor dela" in d for d in detalhes)
+    # cancelar e ligar a nota na verdadeira no mesmo arquivo: a nota paga nao fica sem medicao
+    rel = _rodar(c, uid, [op, {"operacao": "ligar_nf", "medicao_id": verdadeira, "nfs": [512], "fonte": "NF paga"}])
+    assert rel["feitos"] == 2 and nid in _ativas(c, verdadeira)
+
+
+def test_cancelar_duplicata_sem_aviso_quando_a_verdadeira_ja_tem_a_nota(cenario):
+    c, cid, uid = cenario
+    verdadeira = _medicao(c, cid, 49, estado="recebida", valor=100_001)
+    _ligar(c, verdadeira, _nota(c, 514, valor=100_001, paga=True))
+    dup = _medicao(c, cid, 45, estado="recebida", valor=100_001)
+    _ligar(c, dup, _nota(c, 515, valor=100_001, paga=True))
+    detalhes = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "duplicata_de": verdadeira,
+                                "motivo": "lançada duas vezes", "fonte": "planilha"}], ensaio=True)["itens"][0]["detalhes"]
+    assert not any(d.startswith("AVISO") for d in detalhes)
 
 
 def test_cancelar_recebida_exige_duplicata_e_motivo(cenario):
@@ -398,7 +434,7 @@ def test_ensaio_relata_e_nao_grava(cenario):
     rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": mid, "fonte": "ofício"}], ensaio=True)
     assert rel["ensaio"] and rel["feitos"] == 1
     assert rel["itens"][0]["antes"] == "protocolada" and rel["itens"][0]["depois"] == "cancelada"
-    assert any("NF 509 (R$ 1.000,01) desligada" in d for d in rel["itens"][0]["detalhes"])
+    assert any("NF 509, idmov 1409 (R$ 1.000,01) desligada" in d for d in rel["itens"][0]["detalhes"])
     assert _foto(c) == antes
 
 

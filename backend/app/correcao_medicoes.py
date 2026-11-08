@@ -188,19 +188,29 @@ def _notas(conn, coligada: int, nf: str, so_ativas: bool) -> list:
 
 def _nfs_ativas(conn, mid: int) -> list[dict]:
     return [dict(r) for r in conn.execute(
-        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.valor_centavos FROM nf_alocacoes a "
+        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.serie, n.idmov, n.valor_centavos FROM nf_alocacoes a "
         "JOIN notas_fiscais n ON n.id=a.nota_id WHERE a.medicao_id=? AND a.desfeita_em IS NULL ORDER BY a.id", (mid,))]
 
 
 def _fmt_nf(n: dict) -> str:
-    return f"NF {n['numero']} ({dinheiro.format_brl(n['valor_centavos'])})"
+    """Gate Sol da #565: numero repetido no RM se distingue pela serie e pelo idmov, que o ensaio mostra."""
+    ident = (f", série {n['serie']}" if n["serie"] not in (None, "") else "") \
+        + (f", idmov {n['idmov']}" if n["idmov"] is not None else ", sem idmov")
+    return f"NF {n['numero']}{ident} ({dinheiro.format_brl(n['valor_centavos'])})"
+
+
+def _ident_nf(n: dict) -> dict:
+    return {"nota_id": n["nota_id"], "numero": n["numero"], "coligada": n["coligada"], "serie": n["serie"],
+            "idmov": n["idmov"]}
 
 
 def _foto(conn, mid: int) -> dict:
     m = _medicao_por_id(conn, mid)
+    ativas = _nfs_ativas(conn, mid)
     return {"estado": m["estado"], "numero": m["numero"], "tipo": m["tipo"], "congelada": m["congelada"],
             "motivo": m["motivo_represamento"],
-            "nfs": [f"{n['numero']}/{n['coligada']}" for n in _nfs_ativas(conn, mid)],
+            "nfs": [f"{n['numero']}/{n['coligada']}" for n in ativas],
+            "notas": [_ident_nf(n) for n in ativas],
             "protocolos": [r[0] for r in conn.execute("SELECT data FROM medicao_protocolos WHERE medicao_id=? "
                                                       "AND etapa='nota' ORDER BY data, id", (mid,))]}
 
@@ -275,10 +285,22 @@ def _cancelar(conn, uid, m, op, fonte):
             detalhes.append(f"AVISO: a verdadeira está {medicoes.rotulo_estado(v['estado'])}; o recebido desta sai "
                             "dos totais até a nota ser ligada à verdadeira (ligar_nf)")
         op["_duplicata"] = {"duplicata_de": v["id"], "motivo_cancelamento": motivo}
-    for a in _nfs_ativas(conn, m["id"]):
+    desligadas = _nfs_ativas(conn, m["id"])
+    for a in desligadas:
         _desfazer_vinculo(conn, uid, m["id"], a, f"medição cancelada ({texto}; {fonte})" if duplicata
                           else f"medição cancelada ({fonte})")
         detalhes.append(f"{_fmt_nf(a)} desligada")
+    if duplicata and desligadas:
+        # Revisor da #565: a nota desligada fica "desfeita à mão" e o casador do RM nao a liga sozinho; se a
+        # verdadeira nao tem nota que cubra o valor dela (qualquer que seja o estado), a nota paga ficaria sem medicao
+        notas_v = _nfs_ativas(conn, v["id"])
+        valor_v = v["valor_atestado_centavos"] if v["valor_atestado_centavos"] is not None \
+            else v["valor_protocolado_centavos"]
+        if not notas_v or (valor_v is not None and sum(n["valor_centavos"] for n in notas_v) < valor_v):
+            detalhes.append("AVISO: a verdadeira " + ("não tem NF ligada" if not notas_v else
+                                                      "tem NF que não cobre o valor dela")
+                            + "; o casador do RM não religa a nota desligada: ligue "
+                            + ", ".join(_fmt_nf(a) for a in desligadas) + " à verdadeira (ligar_nf)")
     if recebida_duplicata:
         cur = conn.execute("UPDATE medicoes SET estado='cancelada', motivo_represamento=? WHERE id=? AND estado=?",
                            (texto, m["id"], m["estado"]))
