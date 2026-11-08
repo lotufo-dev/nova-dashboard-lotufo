@@ -61,6 +61,7 @@ _INICIO = time.monotonic()
 SEM_CADASTRO = "nada sai: falta o destinatário no cadastro"
 SEM_REMETENTE = "nada sai: falta quem envia no cadastro"
 SEM_USUARIO = "nada sai: nenhum usuário ativo é quem envia; corrija o cadastro"
+SAIU_SEM_REGISTRO = "Este e-mail saiu (sem registro): não registre que ele não saiu"
 SERVICO_NAO_CONFIGURADO = "nada sai: o envio de e-mail não está configurado neste servidor"
 
 # O que a Saude mostra do ultimo envio (`erro`) e quando ele falhou (`falhou_em`, UTC), da memoria do processo
@@ -68,7 +69,9 @@ ESTADO: dict = {"erro": None, "falhou_em": None}
 # As linhas que deram envio incerto ou sem registro neste processo: a Saude as acusa na hora, sem esperar `PRESA_MIN`
 _INCERTOS: set[int] = set()
 # As linhas cujo e-mail SAIU com certeza e cuja marcacao falhou (banco ocupado): cada rodada tenta grava-las como
-# saidas; enquanto isso a Saude as mostra como "saiu sem registro" e `conferir_envio` recusa "nao saiu"
+# saidas; enquanto isso a Saude as mostra como "saiu sem registro" e `conferir_envio` recusa "nao saiu". O banco
+# guarda o mesmo estado em `envio_saiu_sem_registro_em` (issue #588), que vale fora deste processo; a memoria cobre
+# so' o caso em que nem essa gravacao passou
 _SAIRAM: set[int] = set()
 
 
@@ -225,6 +228,37 @@ def _soltar(conn, rid: int) -> None:
         log.exception("alerta de seguranca nao enviado e a marca %s nao foi solta", rid)
 
 
+def _gravar_saiu_sem_registro(conn, rid: int) -> None:
+    """O e-mail saiu e o registro do envio falhou: grava isso na linha, numa transacao propria (a linha de comando,
+    em outro processo, le' daqui para recusar "nao saiu"). Falha fica no log; a proxima rodada tenta de novo. Ja'
+    gravada, ou linha ja' marcada como saida, nao abre transacao (o banco pode estar ocupado)."""
+    pendente = (f"SELECT 1 FROM {TABELA} WHERE id=? AND envio_saiu_sem_registro_em IS NULL AND envio_id IS NULL "
+                "AND envio_conferido_em IS NULL")
+    if conn.execute(pendente, (rid,)).fetchone() is None:
+        return
+    try:
+        with db.mutacao(conn):
+            conn.execute(f"UPDATE {TABELA} SET envio_saiu_sem_registro_em=datetime('now') WHERE id=? "
+                         "AND envio_saiu_sem_registro_em IS NULL AND envio_id IS NULL AND envio_conferido_em IS NULL",
+                         (rid,))
+    except Exception:
+        log.exception("alerta de seguranca %s ENVIADO e a marca de saida sem registro nao foi gravada", rid)
+
+
+def _sairam(conn) -> set[int]:
+    """As linhas que sairam sem registro e ainda nao foram marcadas como saidas: as do banco e as deste processo. A
+    linha deste processo que outro (a linha de comando) ja' marcou como saida sai da memoria; a que so' perdeu a
+    marca (um "nao saiu" registrado de outro processo) fica, para a rodada marca-la como saida antes de enviar."""
+    if _SAIRAM:
+        marcadas = {r[0] for r in conn.execute(
+            f"SELECT id FROM {TABELA} WHERE (envio_id IS NOT NULL OR envio_conferido_em IS NOT NULL) "
+            f"AND id IN ({','.join('?' * len(_SAIRAM))})", sorted(_SAIRAM))}
+        _SAIRAM.difference_update(marcadas)
+    return _SAIRAM | {r[0] for r in conn.execute(
+        f"SELECT id FROM {TABELA} WHERE envio_saiu_sem_registro_em IS NOT NULL AND envio_id IS NULL "
+        "AND envio_conferido_em IS NULL")}
+
+
 def _marcar_saida(conn, rid: int, envio_id: int | None = None) -> bool:
     """O e-mail saiu: grava (o envio, quando registrado, ou a conferencia) e solta a marca. False se nao gravou: a
     linha fica em `_SAIRAM` e a proxima rodada tenta de novo."""
@@ -235,7 +269,8 @@ def _marcar_saida(conn, rid: int, envio_id: int | None = None) -> bool:
                              "WHERE id=?", (envio_id, rid))
             else:
                 conn.execute(f"UPDATE {TABELA} SET envio_conferido_em=datetime('now'), envio_reservado_em=NULL, "
-                             "envio_reservado_por=NULL WHERE id=?", (rid,))
+                             "envio_reservado_por=NULL WHERE id=? AND envio_id IS NULL AND envio_conferido_em IS NULL",
+                             (rid,))
     except Exception:
         log.exception("alerta de seguranca %s ENVIADO e nao marcado", rid)
         _SAIRAM.add(rid)
@@ -260,6 +295,8 @@ def _enviar(conn, usuario: dict, para: list[str], chave: str, tipo: str, assunto
     except correio.EnvioNaoRegistrado as e:          # SAIU com certeza; so' o registro do envio falhou
         log.critical("alerta de seguranca: enviado e sem registro (%s): %s", assunto, e)
         ESTADO["falhou_em"] = agora                  # banco ocupado: a rodada para e espera
+        _SAIRAM.add(rid)                             # ate' gravar, ao menos este processo sabe que saiu
+        _gravar_saiu_sem_registro(conn, rid)
         _marcar_saida(conn, rid)
         return False
     except Exception as e:
@@ -358,12 +395,14 @@ def rodada(conn, agora: datetime.datetime | None = None) -> list[str]:
         return []
     if (ESTADO["erro"] or "").startswith("nada sai:"):
         ESTADO["erro"] = None                       # o cadastro ou a conta foram corrigidos
+    for rid in sorted(_sairam(conn)):               # saiu e nao foi marcado: tenta de novo antes de tudo, sem
+        if rid in _SAIRAM:                          # esperar a pausa depois da falha (so' grava no banco)
+            _gravar_saiu_sem_registro(conn, rid)
+        if not _marcar_saida(conn, rid):
+            return []
     falhou = ESTADO["falhou_em"]
     if falhou is not None and agora - falhou < datetime.timedelta(minutes=ESPERA_FALHA_MIN):
         return []
-    for rid in list(_SAIRAM):                       # saiu e nao foi marcado: tenta de novo antes de tudo
-        if not _marcar_saida(conn, rid):
-            return []
     persistentes = _persistentes()
     _fechar_episodios(conn, persistentes)
     enviados = []
@@ -394,7 +433,8 @@ def _paradas(conn) -> list:
     conferencia), sem prazo: ficam na Saude ate' uma pessoa registrar o resultado."""
     return [r for r in conn.execute(
         f"SELECT id, assunto, envio_reservado_em <= datetime('now', ?) AS velha FROM {TABELA} WHERE envio_id IS NULL "
-        "AND envio_conferido_em IS NULL AND envio_reservado_em IS NOT NULL ORDER BY id", (f"-{PRESA_MIN} minutes",))
+        "AND envio_conferido_em IS NULL AND envio_saiu_sem_registro_em IS NULL AND envio_reservado_em IS NOT NULL "
+        "ORDER BY id", (f"-{PRESA_MIN} minutes",))
         if r["id"] not in _SAIRAM and (r["velha"] or r["id"] in _INCERTOS)]
 
 
@@ -413,7 +453,7 @@ def situacao(conn) -> dict:
     for r in _paradas(conn):
         partes.append(f"o e-mail nº {r['id']} pode não ter saído ({r['assunto']}); confira os Enviados de quem envia "
                       "e registre o resultado no servidor")
-    for rid in sorted(_SAIRAM):
+    for rid in sorted(_sairam(conn)):
         partes.append(f"o e-mail nº {rid} saiu sem registro; não registre que ele não saiu")
     if not partes and ESTADO["erro"]:
         partes.append(ESTADO["erro"])
@@ -440,15 +480,18 @@ def conferir_envio(conn, usuario_id: int, id_: int, saiu: bool) -> bool | None:
     """Uma pessoa conferiu os Enviados de quem envia e registra o resultado do e-mail parado (`_paradas`): saiu (fica
     como enviado, nao se repete) ou nao saiu (a marca solta e a proxima rodada manda, se o item continuar). Auditado.
     Devolve, no "nao saiu", se o e-mail vai sair de novo (`_ainda_sai`); no "saiu", None. O e-mail que saiu com
-    certeza e ficou sem registro (`_SAIRAM`) nao aceita "nao saiu"."""
+    certeza e ficou sem registro (`envio_saiu_sem_registro_em` no banco, ou `_SAIRAM` quando nem isso gravou) nao
+    aceita "nao saiu"."""
     if not saiu and id_ in _SAIRAM:
-        raise ValueError("Este e-mail saiu (sem registro): não registre que ele não saiu")
+        raise ValueError(SAIU_SEM_REGISTRO)
     with db.mutacao(conn):
-        r = conn.execute(f"SELECT assunto, envio_id, envio_reservado_em, envio_conferido_em, "
+        r = conn.execute(f"SELECT assunto, envio_id, envio_reservado_em, envio_conferido_em, envio_saiu_sem_registro_em, "
                          f"envio_reservado_em <= datetime('now', ?) AS parada FROM {TABELA} WHERE id=?",
                          (f"-{PRESA_MIN} minutes", id_)).fetchone()
         if r is None or r["envio_id"] is not None or r["envio_conferido_em"] is not None or r["envio_reservado_em"] is None:
             raise ValueError("Este e-mail não está parado")
+        if not saiu and r["envio_saiu_sem_registro_em"] is not None:
+            raise ValueError(SAIU_SEM_REGISTRO)
         if not r["parada"]:
             raise ValueError(f"Envio iniciado há menos de {PRESA_MIN} minutos: pode ainda estar saindo")
         if saiu:
