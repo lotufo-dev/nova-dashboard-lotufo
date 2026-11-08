@@ -527,15 +527,18 @@ def _casar_soma_dia(conn, nf, candidatas) -> tuple[int, int] | None:
     - ELEGIBILIDADE: uma irma so' entra num par se NAO tiver destino proprio mais forte
       (campo livre valido, ou valor que casa exato com uma medicao candidata) -- senao o
       par a roubaria de um casamento individual que valeria mais."""
+    from app import diretoria   # import local: diretoria importa este modulo
     if not nf["emissao"]:
         return None
     grupo = conn.execute("""
-        SELECT id, valor_centavos, campo_livre1 FROM notas_fiscais
+        SELECT id, valor_centavos, campo_livre1, codtmv FROM notas_fiscais
         WHERE coligada=? AND centro_custo IS NOT NULL AND TRIM(centro_custo)=TRIM(?)
           AND emissao=? AND situacao='ativa'
           AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=notas_fiscais.id AND a.desfeita_em IS NULL)
           AND NOT """ + _SQL_DESFEITA_A_MAO.format(nota="notas_fiscais.id"),
         (nf["coligada"], nf["centro_custo"] or "", nf["emissao"], MOTIVO_A_MAO + "%")).fetchall()
+    # Issue #584: irma so' entre as notas de cobranca ao orgao (nota a fornecedor do mesmo centro e dia nao fecha par)
+    grupo = [r for r in grupo if r["codtmv"] in diretoria.CODTMV_COBRANCA]
     # valor -> medicoes candidatas com aquele valor (a obra ja' esta' estreitada em cands)
     med_por_valor: dict = {}
     for m in candidatas:
@@ -564,8 +567,13 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
     """Tenta alocar a NF; devolve 'alocada', 'ambigua' ou None. `cache` = candidatas por coligada da
     rodada (limpo aqui a cada alocacao, porque a medicao alocada pode deixar de faltar nota)."""
     cache = {} if cache is None else cache
+    from app import diretoria   # import local: diretoria importa este modulo
     nf = conn.execute("SELECT * FROM notas_fiscais WHERE id=?", (nota_id,)).fetchone()
     if nf["situacao"] != "ativa":
+        return None
+    # Issue #584: so' nota de cobranca ao orgao (a mesma lista do a receber, #563) e' candidata. Nota contra
+    # fornecedor (2.2.15) ou pessoa fisica (2.2.10) com centro de obra nao vira nota da medicao, por nenhuma regra.
+    if nf["codtmv"] not in diretoria.CODTMV_COBRANCA:
         return None
     if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL", (nota_id,)).fetchone():
         return None
@@ -660,6 +668,7 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
     if medicao_ids == []:
         return 0                        # "IN ()" nem e' SQL valido
     filtro = f" AND m.id IN ({','.join('?' * len(medicao_ids))})" if medicao_ids is not None else ""
+    cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
     for m in conn.execute("""SELECT m.id, e.coligada_rm,
                                     COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
                              FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
@@ -670,6 +679,13 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
         # (coligada 1, cota, titulo que o consorcio repassa depois): ela nao segura a medicao.
         notas = [x for x in notas_da_medicao(conn, m["id"]) if x["coligada"] == m["coligada_rm"]]
         if not notas:
+            continue
+        # Issue #584: vinculo automatico antigo com nota de tipo fora da cobranca ao orgao (2.2.15, 2.2.10) nao fecha
+        # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o Leo decidir.
+        if conn.execute(f"""SELECT 1 FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+                            WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND a.origem='detectado'
+                              AND n.codtmv IS NOT NULL AND n.codtmv NOT IN ({cobranca})""",
+                        (m["id"], *diretoria.CODTMV_COBRANCA)).fetchone():
             continue
         # Gate Sol S1 (PR #202): vinculo desfeito a' mao pode ter levado parte do faturamento (medicao em duas
         # notas). Ai' so' fecha sozinha se as notas que ficaram cobrem o valor da medicao.
@@ -706,6 +722,22 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
                                      "tolerancia_centavos": tolerancia, "notas": curtas})
         n += 1
     return n
+
+
+def vinculos_fora_da_cobranca(conn) -> list[dict]:
+    """Issue #584: vinculos automaticos vigentes (origem `detectado`) cuja nota nao e' de cobranca ao orgao (tipo fora
+    de `diretoria.CODTMV_COBRANCA`, ou sem tipo). So' le: o Leo decide cada um (correcao e' evento novo)."""
+    from app import diretoria   # import local: diretoria importa este modulo
+    cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
+    return [dict(r) for r in conn.execute(f"""
+        SELECT n.numero, n.idmov, n.coligada, n.codtmv, n.emissao, a.valor_alocado_centavos AS valor_centavos,
+               a.regra, a.medicao_id, c.numero_instrumento, m.numero AS medicao_numero, m.tipo AS medicao_tipo,
+               m.estado AS medicao_estado
+        FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+        JOIN medicoes m ON m.id=a.medicao_id JOIN contratos c ON c.id=m.contrato_id
+        WHERE a.desfeita_em IS NULL AND a.origem='detectado'
+          AND (n.codtmv IS NULL OR n.codtmv NOT IN ({cobranca}))
+        ORDER BY c.numero_instrumento, m.numero, m.tipo, n.emissao, n.id""", diretoria.CODTMV_COBRANCA)]
 
 
 # ------------------------------------------------------------------ custo e estoque (issue #488)

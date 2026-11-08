@@ -435,6 +435,32 @@ def _conciliacao(args) -> int:
     return 0
 
 
+def _rm(args) -> int:
+    """`rm vinculos-fora-da-cobranca` (issue #584): lista os vínculos automáticos de nota com medição cuja nota não é
+    de cobrança ao órgão (tipo de movimento fora da lista). Só lê, com o banco aberto somente para leitura."""
+    from app import sincronizacao_rm
+    banco = db.db_path().resolve()
+    if not banco.is_file():
+        print(f"Banco não encontrado: {banco}")
+        return 1
+    conn = sqlite3.connect(f"{banco.as_uri()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        vinculos = sincronizacao_rm.vinculos_fora_da_cobranca(conn)
+    except sqlite3.DatabaseError:
+        print(f"Banco ilegível ou sem as tabelas do sistema: {banco}")
+        return 1
+    finally:
+        conn.close()
+    print("ENSAIO (nada foi gravado)")
+    print(f"  vínculos automáticos com nota fora da cobrança ao órgão: {len(vinculos)}")
+    for v in vinculos:
+        print(f"    NF {v['numero']} (idmov {v['idmov']}, coligada {v['coligada']}, tipo {v['codtmv'] or 'sem tipo'}) "
+              f"-> medição {v['medicao_id']} ({v['numero_instrumento']} nº {v['medicao_numero']} {v['medicao_tipo']}, "
+              f"{v['medicao_estado']}): {format_brl(v['valor_centavos'])}, regra {v['regra'] or '-'}")
+    return 0
+
+
 def _instalacao(args) -> int:
     """`instalacao gerar-chave --saida <pasta>` e `instalacao assinar --chave <privada> --maquina <nome> --saida
     <arquivo>` (issue #417): rodam no Mac do dono. A chave privada nunca vai ao servidor nem ao repositório; o servidor
@@ -619,6 +645,8 @@ def main(argv: list[str] | None = None) -> int:
     con.add_argument("--data", help="data do corte (AAAA-MM-DD), só em `corte`")
     con.add_argument("--usuario", required=True, help="e-mail de quem aplica")
     con.add_argument("--ensaio", action="store_true", help="mostra o relatório e desfaz")
+    rmp = sub.add_parser("rm", help="relatos do casamento das notas do RM (só leitura)")
+    rmp.add_argument("acao", choices=["vinculos-fora-da-cobranca"])
     ins = sub.add_parser("instalacao", help="chave do dono e arquivo assinado da instalação (no Mac do dono)")
     ins.add_argument("acao", choices=["gerar-chave", "assinar", "verificar"])
     ins.add_argument("--saida", help="pasta das chaves (gerar-chave) ou arquivo assinado (assinar)")
@@ -682,6 +710,8 @@ def main(argv: list[str] | None = None) -> int:
         return _legado(args)
     if args.cmd == "conciliacao":
         return _conciliacao(args)
+    if args.cmd == "rm":
+        return _rm(args)
     senha = getpass.getpass("Senha do administrador: ")
     conn = db.get_conn()
     try:
