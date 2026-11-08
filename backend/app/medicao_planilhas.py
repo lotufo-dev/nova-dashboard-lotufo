@@ -14,10 +14,10 @@ from app.medicoes import ESTADOS_NO_MEDIDO, LOTE_AUDITORIA, _data_br, _json_dict
 
 TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
-# FORA_DO_ACUMULADO segue valendo para o numero e o periodo da medicao anterior; o VALOR acumulado usa a lista unica
-# do medido (#561), a mesma da pagina da obra
 FORA_DO_ACUMULADO = ("prevista", "cancelada", "desistida")
-ESTADOS_NO_ACUMULADO = ESTADOS_NO_MEDIDO
+# #561: o acumulado anterior (congelado na versao da planilha/carta) parte da lista unica do medido e soma a planilha
+# gerada: ela ocupa o numero e, no envio por fora sem registro, o orgao ja' a recebeu. O Medido da obra nao a conta.
+ESTADOS_NO_ACUMULADO = (*ESTADOS_NO_MEDIDO, "planilha_gerada")
 
 
 def _mes_seguinte(competencia: str) -> str:
@@ -31,8 +31,8 @@ def _mes_br(competencia: str) -> str:
 
 def acumulado_anterior(conn, contrato_id: int, tipo: str, numero: int) -> int:
     """Soma das medicoes do mesmo tipo com numero menor: o aprovado (atestado) de cada uma, senao o pedido
-    (protocolado). So' os estados de ESTADOS_NO_ACUMULADO (#561: a partir do envio da planilha/carta; prevista,
-    planilha gerada, cancelada e desistida nao contam). Soma em Python: o SUM do SQLite e' int64 e
+    (protocolado). So' os estados de ESTADOS_NO_ACUMULADO (#561: o medido mais a planilha gerada; prevista,
+    cancelada e desistida nao contam). Soma em Python: o SUM do SQLite e' int64 e
     estoura com valores que cabem um a um na coluna (mesmo motivo de paineis.saldo)."""
     return sum(r["v"] for r in conn.execute(
         "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v FROM medicoes "
@@ -73,7 +73,7 @@ def avisos(conn, contrato_id: int, tipo: str, numero: int, competencia: str, ini
 
 def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None) -> dict:
     """saldo = vigente − acumulado anterior (e − pedido, no `saldo_apos_pedido`). O acumulado conta as medicoes
-    anteriores pela mesma lista do medido de paineis.saldo (#561: a partir do envio da planilha/carta; spec §2.1
+    anteriores pela lista do medido de paineis.saldo mais a planilha gerada (#561, ESTADOS_NO_ACUMULADO; spec §2.1
     passo 1, "soma dos aprovados, senao pedidos").
     So' a execucao tem saldo contra o valor do contrato (como em paineis.saldo); no projeto, os saldos sao nulos."""
     c = contratos.vigente(conn, contrato_id)

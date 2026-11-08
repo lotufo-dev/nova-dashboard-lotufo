@@ -859,7 +859,7 @@ def test_medido_da_tabela_e_da_carteira_vale_o_atestado(cenario):
 def test_carteira_usa_o_percentual_do_vigente_que_a_tabela_reaproveita(cenario, monkeypatch):
     """#262 (gate Sol, rodada 3): a carteira aplica a cota com o percentual do mesmo `contratos.vigente` que a tabela
     reaproveita, nao com o da linha lida antes. O percentual do consorcio muda de 50% para 40% logo depois da lista
-    de contratos da carteira: as duas mostram 40% de (12.000.000,00 - 4.000.000,00) = 3.200.000,00."""
+    de contratos da carteira: as duas mostram 40% de (12.000.000,00 - 4.010.000,00) = 3.196.000,00."""
     c, ids = cenario
     original = diretoria._ativos
 
@@ -1060,3 +1060,33 @@ def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_da_diretoria(cenario):
               "VALUES (?, 40, 'execucao', '2026-07', 'protocolada', 900001)", (ids["propria"],))
     c.commit()
     assert ids["propria"] not in diretoria.complemento_rm(c)
+
+
+def test_planilha_gerada_nao_esconde_a_nota_do_rm(cenario):
+    """#561 (gate Sol): a planilha gerada (ainda nao enviada) nao mede; logo, nao conta como lancada nem representa a
+    nota do RM. Sem isso a nota sumia do complemento e a planilha tambem do medido: a Carteira ficava abaixo."""
+    c, ids = cenario
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (ids["propria"],))
+    gerada = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+                       "VALUES (?, 41, 'execucao', '2026-07', 'planilha_gerada', 5000000)", (ids["propria"],)).lastrowid
+    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo) "
+              "VALUES (1, 801, '801', '2026-08-10', 1000001, 'ativa', '9.001.001')")
+    c.commit()
+    # competencia 07/2026: lancado so' a recebida de 100.000 (a gerada fica fora) -> faltam 900.001
+    assert diretoria.complemento_rm(c) == {ids["propria"]: {"2026-07": 900_001}}
+    # nota ligada a planilha gerada tambem nao e' "representada": entra pelo que passa do lancado
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo) "
+                    "VALUES (1, 802, '802', '2026-08-12', 300000, 'ativa', '9.001.001')").lastrowid
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+              "VALUES (?, ?, 300000, 'detectado', 't')", (gerada, nid))
+    c.commit()
+    assert diretoria.complemento_rm(c) == {ids["propria"]: {"2026-07": 1_200_001}}
+    # e o medido do mes nao soma a planilha gerada por cima da nota: so' a recebida de 100.000 e o complemento
+    serie = {s["competencia"]: s["medido_centavos"] for s in diretoria.painel(c, HOJE)["mes_ano"]["serie"]}
+    assert serie["2026-07"] == 100_000 + 1_200_001
+
+
+def test_fora_do_medido_e_o_complemento_da_lista_unica():
+    """#561: FORA (Diretoria, Inicio, custo da obra) e `medicoes.ESTADOS_NO_MEDIDO` repartem os estados sem sobra."""
+    assert not set(diretoria.FORA) & set(medicoes.ESTADOS_NO_MEDIDO)
+    assert set(diretoria.FORA) | set(medicoes.ESTADOS_NO_MEDIDO) == set(medicoes.TRANSICOES)

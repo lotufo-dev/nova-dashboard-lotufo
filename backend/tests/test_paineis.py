@@ -83,13 +83,14 @@ def test_medido_conta_os_estados_do_fluxo_novo_e_bate_com_o_acumulado_do_formula
     assert paineis.saldo(conn, cid)["atestado_execucao_centavos"] == esperado
     assert paineis.curva(conn, cid)[0]["medido_execucao_centavos"] == esperado
     assert paineis.medido_execucao_por_contrato(conn)[cid] == esperado
-    assert medicao_planilhas.acumulado_anterior(conn, cid, "execucao", 13) == esperado
+    # o acumulado do formulario e' o mesmo medido mais a planilha gerada (decisao da revisao da #561)
+    assert medicao_planilhas.acumulado_anterior(conn, cid, "execucao", 13) == esperado + 2_00
 
 
 def test_lista_unica_de_estados_que_medem():
     from app import medicao_planilhas
     assert paineis.ESTADOS_VALIDOS is medicoes.ESTADOS_NO_MEDIDO
-    assert medicao_planilhas.ESTADOS_NO_ACUMULADO is medicoes.ESTADOS_NO_MEDIDO
+    assert medicao_planilhas.ESTADOS_NO_ACUMULADO == (*medicoes.ESTADOS_NO_MEDIDO, "planilha_gerada")
     assert {"nota_emitida", "espelho_enviado", "boletim_recebido"} <= set(medicoes.ESTADOS_NO_MEDIDO)
     assert not {"prevista", "planilha_gerada", "cancelada", "desistida"} & set(medicoes.ESTADOS_NO_MEDIDO)
 
