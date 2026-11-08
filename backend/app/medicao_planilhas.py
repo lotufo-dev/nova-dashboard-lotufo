@@ -434,7 +434,12 @@ def eventos_geracao(conn, medicao_ids: list[int], out: dict[int, list[dict]]) ->
             if not isinstance(versao, int):
                 versao = 1
             texto = "Planilha/carta gerada" if versao == 1 else f"Versão {versao} da planilha/carta gerada"
-            out[int(r["entidade_id"])].append({"data": tempo.iso_utc(r["criado_em"]),
+            if d.get("motivo"):
+                texto += f" (motivo: {d['motivo']})"
+            # so' o dia (de Cuiaba), como os outros marcos do envio: com hora, o "enviada por fora" do mesmo dia
+            # (so' data) ia para antes da geracao na ordenacao por texto
+            dia = tempo.para_local(datetime.datetime.fromisoformat(r["criado_em"])).date().isoformat()
+            out[int(r["entidade_id"])].append({"data": dia,
                                                "texto": f"{texto} por {r['nome']}" if r["nome"]
                                                else f"{texto} pelo sistema"})
 

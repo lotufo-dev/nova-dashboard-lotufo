@@ -878,7 +878,7 @@ def _evidencias():
 def _eventos(cl, mid):
     """A linha do tempo sem os eventos de geracao da planilha/carta (#568), que os testes de envio nao miram."""
     return [e["texto"] for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
-            if not e["texto"].lower().endswith("planilha/carta gerada por admin")]
+            if "planilha/carta gerada" not in e["texto"].lower()]
 
 
 def _auditoria(acao):

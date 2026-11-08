@@ -277,7 +277,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const proximo = linha?.proximo_passo ?? "";
   const passo: PassoResumo = !passoBase || esperaAqui || passoBase.secao ? passoBase
     : proximo === "registrar o boletim" && podeBoletim && !boletimNaEtapa ? { ...passoBase, acao: "boletim" }
-    : { ...passoBase, secao: SECAO_DO_PASSO[proximo] ?? "" };
+    : { ...passoBase, secao: (temPassosPlanilha || proximo === "gerar o espelho" ? SECAO_DO_PASSO[proximo] : "") ?? "" };
   const acoes: ItemAcao[] = !podeEditar ? [] : [
     ...(valorEditavel(m, "atestado", podeEditar) ? [{ id: "atestado", rotulo: m.valor_atestado_centavos === null ? "Definir o atestado" : "Editar o atestado" }] : []),
     ...(podeBoletim && !boletimNaEtapa ? [{ id: "boletim", rotulo: comBoletim ? "Registrar boletim novo" : "Registrar boletim" }] : []),
