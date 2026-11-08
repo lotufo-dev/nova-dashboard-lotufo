@@ -2,13 +2,14 @@
 --
 -- `pleito_respostas` e' evento: a operacao registra a resposta formal do orgao ao pleito enviado mais recente do
 -- ciclo, com a data, o documento que a traz e o texto. 'indeferido' fecha o ciclo para os avisos de pedido sem
--- resposta e de cronograma a reemitir (app/reajuste.py, `resposta_do_ciclo`); 'deferido_parcial' fica registrado e o
--- ciclo continua esperando o termo. Nunca se altera nem se apaga: a correcao e' resposta nova no mesmo pleito, que
--- aponta a corrigida em `corrige_resposta_id`; vale a mais recente.
+-- resposta e de cronograma a reemitir (app/reajuste.py, `indeferimento_do_ciclo`); 'deferido_parcial' fica registrado
+-- e o ciclo continua esperando o termo; 'sem_efeito' anula a resposta registrada por engano (o ciclo volta a esperar).
+-- Nunca se altera nem se apaga: a correcao e' resposta nova no mesmo pleito, que aponta a corrigida em
+-- `corrige_resposta_id`; vale a mais recente.
 CREATE TABLE IF NOT EXISTS pleito_respostas (
     id INTEGER PRIMARY KEY,
     pleito_id INTEGER NOT NULL REFERENCES pleitos(id),
-    resultado TEXT NOT NULL CHECK (resultado IN ('indeferido','deferido_parcial')),
+    resultado TEXT NOT NULL CHECK (resultado IN ('indeferido','deferido_parcial','sem_efeito')),
     data TEXT NOT NULL CHECK (data GLOB '[0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]'),
     documento TEXT NOT NULL CHECK (length(trim(documento)) >= 1),
     texto TEXT NOT NULL CHECK (length(trim(texto)) >= 10),

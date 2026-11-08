@@ -635,7 +635,12 @@ describe("Reajuste", () => {
     render(<Reajuste contratoId={7} podeEditar />);
     fireEvent.click(await screen.findByRole("button", { name: "Registrar resposta do órgão" }));
     const form = screen.getByRole("form", { name: "Resposta do órgão ao pleito CT-122-LT-2026" });
-    fireEvent.change(within(form).getByLabelText("Resposta"), { target: { value: "indeferido" } });
+    // /code-review (#586): sem escolha previa (o indeferimento fecha o ciclo), e sem "sem efeito" sem resposta anterior
+    const select = within(form).getByLabelText("Resposta") as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect(select.required).toBe(true);
+    expect([...select.options].map(o => o.value)).toEqual(["", "indeferido", "deferido_parcial"]);
+    fireEvent.change(select, { target: { value: "indeferido" } });
     fireEvent.change(within(form).getByLabelText("Data"), { target: { value: "2026-10-20" } });
     fireEvent.change(within(form).getByLabelText("Documento"), { target: { value: "Ofício 77/2026 do órgão" } });
     fireEvent.change(within(form).getByLabelText("Texto"), { target: { value: "Índice não previsto" } });

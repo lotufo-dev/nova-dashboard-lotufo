@@ -1065,9 +1065,10 @@ def _avisos_dos_ciclos(conn, contrato_id: int, hoje: datetime.date, nome: str, d
                                    "ORDER BY data_base_mes, ciclo", (contrato_id,)).fetchall():
         if mes not in bases or apostilamento_do_ciclo(conn, contrato_id, mes, ciclo, len(bases) == 1):
             continue
-        if indeferimento_do_ciclo(conn, contrato_id, mes, ciclo):        # issue #586: o orgao respondeu que nao
-            continue
         pl = _pleito(conn, contrato_id, mes, ciclo)
+        r = resposta_vigente(conn, pl["id"])
+        if r and r["resultado"] == "indeferido":        # issue #586 (`indeferimento_do_ciclo`): o orgao disse que nao
+            continue
         pd = _pleito(conn, contrato_id, mes, ciclo, sem_reiteracao=True) or pl
         out += _avisos_do_ciclo(mes, ciclo, pl, aditivo_depois(conn, contrato_id, pd["enviado_em"]),
                                 _rotulo_base(mes, aplica.get(mes)), hoje, contrato_id, nome, destino)
@@ -1152,8 +1153,9 @@ def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict, aplica: di
 # pendente" da aba e da diretoria); 'deferido_parcial' fica registrado e o ciclo continua esperando o termo. A resposta
 # e' do pleito enviado mais recente do ciclo (`_pleito`): pleito enviado depois dela (recurso, reiteracao, reemissao do
 # cronograma) reabre o ciclo, porque a resposta dele ainda nao veio. Correcao e' resposta nova no mesmo pleito (vale a
-# mais recente); nada se altera nem se apaga (migracao 073).
-RESULTADOS_RESPOSTA = ("indeferido", "deferido_parcial")
+# mais recente); 'sem_efeito' anula a resposta registrada por engano e o ciclo volta a esperar. Nada se altera nem se
+# apaga (migracao 073).
+RESULTADOS_RESPOSTA = ("indeferido", "deferido_parcial", "sem_efeito")
 _DATA_ISO = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")       # \d casaria digito arabe-indico
 
 
@@ -1162,13 +1164,17 @@ def _resposta(r) -> dict:
                               "criado_em")}
 
 
-def resposta_vigente(conn, pleito_id: int | None) -> dict | None:
-    """A resposta do orgao que vale para o pleito: a mais recente (a correcao e' resposta nova)."""
-    if pleito_id is None:
-        return None
+def _ultima_resposta(conn, pleito_id: int) -> dict | None:
     r = conn.execute("SELECT * FROM pleito_respostas WHERE pleito_id=? ORDER BY id DESC LIMIT 1",
                      (pleito_id,)).fetchone()
     return _resposta(r) if r else None
+
+
+def resposta_vigente(conn, pleito_id: int | None) -> dict | None:
+    """A resposta do orgao que vale para o pleito: a mais recente (a correcao e' resposta nova); anulada
+    ('sem_efeito'), nenhuma."""
+    r = _ultima_resposta(conn, pleito_id) if pleito_id is not None else None
+    return r if r and r["resultado"] != "sem_efeito" else None
 
 
 def indeferimento_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int) -> dict | None:
@@ -1206,6 +1212,13 @@ def registrar_resposta(conn, usuario_id: int, pleito_id: int, resultado: str, da
     Havendo resposta anterior no mesmo pleito, a nova a corrige (`corrige_resposta_id`)."""
     hoje = hoje or tempo.hoje_local()
     documento, texto = (documento or "").strip(), (texto or "").strip()
+    # o que nao depende do banco recusa antes de tomar a escrita
+    if resultado not in RESULTADOS_RESPOSTA:
+        raise ValueError("Resposta inválida: indeferido, deferido parcialmente ou registro sem efeito")
+    try:
+        dia = datetime.date.fromisoformat(data) if _DATA_ISO.match(data or "") else None
+    except ValueError:
+        dia = None
     with db.mutacao(conn):
         r = conn.execute("SELECT * FROM pleitos WHERE id=?", (pleito_id,)).fetchone()
         if r is None:
@@ -1213,12 +1226,9 @@ def registrar_resposta(conn, usuario_id: int, pleito_id: int, resultado: str, da
         p = dict(r)
         if (motivo := _recusa_resposta(conn, p)):
             raise ValueError(motivo)
-        if resultado not in RESULTADOS_RESPOSTA:
-            raise ValueError("Resposta inválida: indeferido ou deferido parcialmente")
-        try:
-            dia = datetime.date.fromisoformat(data) if _DATA_ISO.match(data or "") else None
-        except ValueError:
-            dia = None
+        anterior = _ultima_resposta(conn, pleito_id)
+        if resultado == "sem_efeito" and (anterior is None or anterior["resultado"] == "sem_efeito"):
+            raise ValueError("Não há resposta registrada neste pleito para deixar sem efeito")
         if dia is None:
             raise ValueError("Data inválida: use AAAA-MM-DD")
         if dia.isoformat() < str(p["enviado_em"])[:10]:
@@ -1230,7 +1240,6 @@ def registrar_resposta(conn, usuario_id: int, pleito_id: int, resultado: str, da
             raise ValueError("Informe o documento do órgão com a resposta")
         if len(texto) < MIN_JUSTIFICATIVA:
             raise ValueError(f"Escreva o texto da resposta com pelo menos {MIN_JUSTIFICATIVA} caracteres")
-        anterior = resposta_vigente(conn, pleito_id)
         rid = conn.execute("INSERT INTO pleito_respostas (pleito_id, resultado, data, documento, texto, "
                            "corrige_resposta_id, usuario_id) VALUES (?,?,?,?,?,?,?)",
                            (pleito_id, resultado, dia.isoformat(), documento, texto,

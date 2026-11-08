@@ -794,3 +794,20 @@ def test_pleito_enviado_depois_do_indeferimento_reabre_o_ciclo(obra_reajuste):
     assert _do_tipo(c, "reajuste_sem_resposta", D(2026, 10, 20)) == []
     _r_pleito(c, cid, "2026-07-10", reemite=p1, reemissao="reiteracao", numero="CT-2-LT-2026")    # recurso
     assert len(_do_tipo(c, "reajuste_sem_resposta", D(2026, 11, 20))) == 1
+
+
+def test_indeferimento_registrado_por_engano_fica_sem_efeito_e_os_avisos_voltam(obra_reajuste):
+    # /code-review (#586): a resposta errada nao fecha o ciclo para sempre; "sem efeito" e' evento novo
+    c, cid, uid = obra_reajuste
+    p1 = _r_pleito(c, cid, "2026-06-10")
+    hoje = D(2026, 10, 20)
+    with pytest.raises(ValueError, match="Não há resposta registrada"):
+        reajuste.registrar_resposta(c, uid, p1, "sem_efeito", "2026-10-15", "Registro errado",
+                                    "Indeferimento lançado no pleito errado", hoje=hoje)
+    reajuste.registrar_resposta(c, uid, p1, "indeferido", "2026-10-15", "Ofício 123/2026 do órgão",
+                                "Índice não aplicável ao contrato", hoje=hoje)
+    assert _do_tipo(c, "reajuste_sem_resposta", hoje) == []
+    reajuste.registrar_resposta(c, uid, p1, "sem_efeito", "2026-10-16", "Registro errado",
+                                "Indeferimento lançado no pleito errado", hoje=hoje)
+    assert len(_do_tipo(c, "reajuste_sem_resposta", hoje)) == 1
+    assert reajuste.ciclos(c, cid, hoje)[0]["resposta"] is None

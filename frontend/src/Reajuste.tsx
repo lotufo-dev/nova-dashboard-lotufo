@@ -31,10 +31,10 @@ type Ciclo = CicloApi & { situacao: "futuro" | "pleito_pendente" | "apostilament
 
 /** Issue #586: a resposta formal do orgao a um pleito de reajuste (`reajuste.registrar_resposta`). A correcao e' resposta
  *  nova que aponta a corrigida; nada se apaga. */
-type RespostaOrgao = { id: number; pleito_id: number; resultado: "indeferido" | "deferido_parcial"; data: string;
+type RespostaOrgao = { id: number; pleito_id: number; resultado: "indeferido" | "deferido_parcial" | "sem_efeito"; data: string;
   documento: string; texto: string; corrige_resposta_id: number | null; criado_em: string };
 const RESULTADO_RESPOSTA: Record<RespostaOrgao["resultado"], string> = {
-  indeferido: "Indeferido", deferido_parcial: "Deferido parcialmente" };
+  indeferido: "Indeferido", deferido_parcial: "Deferido parcialmente", sem_efeito: "Registro sem efeito" };
 
 // issue #277: o que o botao faz no pleito vigente do ciclo (o servidor diz quais cabem, em `reemissoes_possiveis`)
 const ACAO_REEMISSAO: Record<Reemissao, { botao: string; titulo: string }> = {
@@ -159,8 +159,10 @@ function FormJustificativa({ j, competencia, aoFechar }: { j: Justificar; compet
 }
 
 /** Issue #586: o formulario da resposta do orgao ao pleito vigente do ciclo. */
-function FormResposta({ pleito, aoGravar, aoCancelar }: { pleito: Pleito; aoGravar: () => void; aoCancelar: () => void }) {
-  const [resultado, setResultado] = useState<RespostaOrgao["resultado"]>("indeferido");
+function FormResposta({ pleito, anulavel, aoGravar, aoCancelar }: { pleito: Pleito; anulavel: boolean;
+    aoGravar: () => void; aoCancelar: () => void }) {
+  // sem escolha previa: o indeferimento fecha o ciclo e tem de ser escolhido
+  const [resultado, setResultado] = useState<RespostaOrgao["resultado"] | "">("");
   const [data, setData] = useState("");
   const [documento, setDocumento] = useState("");
   const [texto, setTexto] = useState("");
@@ -181,9 +183,11 @@ function FormResposta({ pleito, aoGravar, aoCancelar }: { pleito: Pleito; aoGrav
       aria-label={`Resposta do órgão ao pleito ${pleito.numero_oficio ?? "sem número"}`}>
       <label htmlFor={`${id}-resultado`}>Resposta</label>
       <select id={`${id}-resultado`} value={resultado}
-        onChange={e => setResultado(e.target.value as RespostaOrgao["resultado"])}>
+        onChange={e => setResultado(e.target.value as RespostaOrgao["resultado"])} required>
+        <option value="">Escolha</option>
         <option value="indeferido">{RESULTADO_RESPOSTA.indeferido}</option>
         <option value="deferido_parcial">{RESULTADO_RESPOSTA.deferido_parcial}</option>
+        {anulavel && <option value="sem_efeito">{RESULTADO_RESPOSTA.sem_efeito}</option>}
       </select>
       <label htmlFor={`${id}-data`}>Data</label>
       <input id={`${id}-data`} type="date" value={data} onChange={e => setData(e.target.value)} required />
@@ -638,7 +642,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
                         Resposta do órgão ao pleito {vigente.numero_oficio ?? "sem número"}
                       </h3>
                     </div>
-                    <FormResposta pleito={vigente}
+                    <FormResposta pleito={vigente} anulavel={!!c.resposta}
                       aoGravar={() => { setRespondendo(null); setFoco(`db-${db.data_base_mes}`); void carregar(); }}
                       aoCancelar={() => { setRespondendo(null); setFoco(`responder-${db.data_base_mes}`); }} />
                   </section>
