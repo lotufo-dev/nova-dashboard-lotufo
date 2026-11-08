@@ -27,7 +27,7 @@ TIPOS = ("execucao", "projeto", "reajuste")
 OPERACOES = ("cancelar", "reabrir", "trocar_tipo", "desligar_nf", "ligar_nf", "protocolar", "estado")
 ENCERRADAS = ("cancelada", "desistida")
 # Campos que cada operacao aceita, alem de `operacao`, `fonte`, `medicao_id`, `obra`, `numero` e `tipo`
-CAMPOS = {"cancelar": {"duplicata_de", "motivo"},"reabrir": set(), "trocar_tipo": {"novo_tipo", "novo_numero"},
+CAMPOS = {"cancelar": {"duplicata_de", "motivo"}, "reabrir": set(), "trocar_tipo": {"novo_tipo", "novo_numero"},
           "desligar_nf": {"nf", "coligada"}, "ligar_nf": {"nfs", "coligada", "forcar_centro", "parcial"},
           "protocolar": {"data", "processo", "oficio"}, "estado": {"novo", "motivo", "data", "processo", "oficio"}}
 CAMPOS_COMUNS = {"operacao", "fonte", "medicao_id", "obra", "numero", "tipo"}
@@ -267,6 +267,13 @@ def _cancelar(conn, uid, m, op, fonte):
         rotulo_v = f"{medicoes.nome_medicao(v['numero'], v['tipo']).lower()} (id {v['id']})"
         texto = f"Duplicata da {rotulo_v}: {motivo}"
         detalhes.append(f"duplicata da {rotulo_v}, que não muda")
+        # revisao da #565: a verdadeira de outro tipo, ou ainda nao recebida quando a duplicata estava, merece olhar
+        if v["tipo"] != m["tipo"]:
+            detalhes.append(f"AVISO: a verdadeira é de {medicoes.ROTULO_TIPO.get(v['tipo'], v['tipo'])} e esta de "
+                            f"{medicoes.ROTULO_TIPO.get(m['tipo'], m['tipo'])}")
+        if recebida_duplicata and v["estado"] != "recebida":
+            detalhes.append(f"AVISO: a verdadeira está {medicoes.rotulo_estado(v['estado'])}; o recebido desta sai "
+                            "dos totais até a nota ser ligada à verdadeira (ligar_nf)")
         op["_duplicata"] = {"duplicata_de": v["id"], "motivo_cancelamento": motivo}
     for a in _nfs_ativas(conn, m["id"]):
         _desfazer_vinculo(conn, uid, m["id"], a, f"medição cancelada ({texto}; {fonte})" if duplicata
@@ -382,15 +389,21 @@ def _descrever_nota(n) -> str:
     return f"{ident} ({serie}, emissão {n['emissao'] or '?'}, {dinheiro.format_brl(n['valor_centavos'])})"
 
 
+def _mesma_serie(gravada, pedida: str) -> bool:
+    """A serie do RM ('01') e a do YAML (`serie: 1`, que o YAML le como numero) sao a mesma."""
+    g = (gravada or "").strip()
+    return g == pedida or (g.isdigit() and pedida.isdigit() and int(g) == int(pedida))
+
+
 def _nota_da_referencia(conn, coligada: int, ref):
     """Issue #565: a nota de um item de `nfs`. O número sozinho (`501`) vale quando é único na coligada; quando se
     repete no RM (outra série, outro movimento), o item diz qual: `{idmov: N}` ou `{numero: N, serie: S}`."""
     if isinstance(ref, dict):
-        chaves = set(ref)
-        if not chaves or chaves - {"idmov", "numero", "serie"} or ("idmov" in chaves and chaves != {"idmov"}) \
-                or ("serie" in chaves and "numero" not in chaves):
-            raise ValueError(f"nota {ref!r} inválida: diga idmov ou numero + serie ({{idmov: N}} ou "
-                             "{numero: N, serie: S}), não os dois")
+        chaves, forma = set(ref), "{idmov: N} ou {numero: N, serie: S}"
+        if not chaves or chaves - {"idmov", "numero", "serie"}:
+            raise ValueError(f"nota {ref!r} inválida: os campos são idmov, numero e serie ({forma})")
+        if "idmov" in chaves and chaves != {"idmov"}:
+            raise ValueError(f"nota {ref!r} inválida: diga idmov ou numero + serie, não os dois ({forma})")
         if "idmov" in chaves:
             idmov = _inteiro(ref, "idmov")
             achadas = conn.execute("SELECT * FROM notas_fiscais WHERE coligada=? AND idmov=? AND situacao='ativa'",
@@ -407,7 +420,7 @@ def _nota_da_referencia(conn, coligada: int, ref):
         raise ValueError(f"nota {ref!r} inválida: use o número, {{idmov: N}} ou {{numero: N, serie: S}}")
     achadas = _notas(conn, coligada, nf, so_ativas=True)
     if serie is not None:
-        achadas = [n for n in achadas if (n["serie"] or "").strip() == serie]
+        achadas = [n for n in achadas if _mesma_serie(n["serie"], serie)]
     rotulo = f"NF {nf}" + (f" série {serie}" if serie is not None else "")
     if not achadas:
         raise ValueError(f"{rotulo} não encontrada (ativa) na coligada {coligada}")
@@ -421,7 +434,7 @@ def _nota_da_referencia(conn, coligada: int, ref):
 def _ligar_nf(conn, uid, m, op, fonte):
     from app import diretoria, sincronizacao_rm   # import local: ambos importam medicoes
     nfs = op.get("nfs")
-    if isinstance(nfs, (str, int)):
+    if isinstance(nfs, (str, int, dict)):
         nfs = [nfs]
     if not isinstance(nfs, list) or not nfs:
         raise ValueError("diga as nfs (lista: nfs: [101, 102])")

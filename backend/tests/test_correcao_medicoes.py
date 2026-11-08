@@ -243,10 +243,25 @@ def test_ligar_nf_por_numero_e_serie_e_idmov_inexistente(cenario):
     assert "idmov 9999 não encontrada (ativa) na coligada 1" in rel["itens"][0]["erro"]
     rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"numero": 1856, "idmov": 7001}],
                            "fonte": "NF"}])
-    assert "idmov ou numero + serie" in rel["itens"][0]["erro"]
+    assert "idmov ou numero + serie, não os dois" in rel["itens"][0]["erro"]
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"nf": 1856}], "fonte": "NF"}])
+    assert "os campos são idmov, numero e serie" in rel["itens"][0]["erro"]
     rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"numero": 1856, "serie": "1"}],
                            "fonte": "NF série 1"}])
     assert rel["feitos"] == 1 and _ativas(c, mid) == [certa]
+
+
+def test_ligar_nf_serie_com_zero_a_esquerda_e_referencia_unica_sem_lista(cenario):
+    c, cid, uid = cenario
+    m1, m2 = _medicao(c, cid, 1, valor=100_001), _medicao(c, cid, 2, valor=100_001)
+    serie01 = _nota_serie(c, 1857, 7101, "01")
+    outra = _nota_serie(c, 1857, 7102, "02")
+    # `serie: 1` sem aspas chega como numero; o RM grava '01'
+    arq = yaml.safe_load("[{operacao: ligar_nf, medicao_id: %d, nfs: [{numero: 1857, serie: 1}], fonte: NF}]" % m1)
+    rel = _rodar(c, uid, arq)
+    assert rel["feitos"] == 1 and _ativas(c, m1) == [serie01]
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": m2, "nfs": {"idmov": 7102}, "fonte": "NF"}])
+    assert rel["feitos"] == 1 and _ativas(c, m2) == [outra]
 
 
 def test_cancelar_recebida_como_duplicata_desliga_a_nota_e_audita(cenario):
@@ -293,6 +308,18 @@ def test_cancelar_duplicata_em_estado_que_ja_se_cancela(cenario):
                            "motivo": "lançada duas vezes", "fonte": "planilha"}])
     assert rel["feitos"] == 1 and _estado(c, dup) == "cancelada" and _estado(c, verdadeira) == "protocolada"
     assert _correcoes(c, dup)[0][1]["duplicata_de"] == verdadeira
+    assert not any(d.startswith("AVISO") for d in rel["itens"][0]["detalhes"])
+
+
+def test_cancelar_recebida_duplicata_de_verdadeira_nao_recebida_ou_de_outro_tipo_avisa(cenario):
+    c, cid, uid = cenario
+    verdadeira = _medicao(c, cid, 15, tipo="reajuste")
+    dup = _medicao(c, cid, 11, estado="recebida")
+    rel = _rodar(c, uid, [{"operacao": "cancelar", "medicao_id": dup, "duplicata_de": verdadeira,
+                           "motivo": "lançada duas vezes", "fonte": "planilha"}], ensaio=True)
+    detalhes = rel["itens"][0]["detalhes"]
+    assert any("AVISO: a verdadeira está protocolada" in d and "ligar_nf" in d for d in detalhes)
+    assert any("AVISO: a verdadeira é de reajuste e esta de execução" in d for d in detalhes)
 
 
 def test_cancelar_recebida_exige_duplicata_e_motivo(cenario):
