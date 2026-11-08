@@ -128,3 +128,42 @@ def test_corte_grava_a_origem_e_nao_conta_como_recebimento_a_mao(conn, cid, tmp_
     conciliacao.cortar(conn, 1, "2026-09-22", ensaio=False)
     assert medicoes.detalhe(conn, antiga)["estado"] == "recebida"
     assert conciliacao.recebidas_a_mao(conn) == set()
+
+
+def _par_absorvido(conn, cid, numero=3, comp="2025-03"):
+    """Issue #589: execucao (R$ 1.000,01) e reajuste negativo (-R$ 10,01) no mesmo espelho vigente; o protocolo da
+    execucao leva o reajuste a protocolada."""
+    ex = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": numero, "tipo": "execucao", "competencia": comp})
+    medicoes.definir_valor(conn, 1, ex, "protocolado", 1_000_01, "manual")
+    rj = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": numero, "tipo": "reajuste", "competencia": comp,
+                                  "valor_centavos": -10_01})
+    eid = conn.execute("INSERT INTO espelhos (contrato_id, numero, competencia, versao, situacao, entradas, saidas, "
+                       "regra_sha256, criado_por) VALUES (?, ?, ?, 1, 'vigente', '{}', '[]', 'x', 1)",
+                       (cid, numero, comp)).lastrowid
+    conn.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id, valor_centavos, valor_com_sinal_centavos) "
+                 "VALUES (?,?,100001,100001), (?,?,NULL,-1001)", (eid, ex, eid, rj))
+    conn.commit()
+    medicoes.registrar_protocolo(conn, 1, ex, f"{comp}-28", "CT-1", None, "manual")
+    assert medicoes.detalhe(conn, rj)["estado"] == "protocolada"
+    return ex, rj
+
+
+def test_corte_fecha_o_reajuste_absorvido_pela_execucao_e_nao_aborta(conn, cid, tmp_path):
+    """Revisor da PR #608 (rodada 2, critico): o reajuste absorvido (pedido manual) entra na consulta do corte, mas fecha
+    pela execucao; o corte nao aborta e conta o valor do par uma vez."""
+    ex, rj = _par_absorvido(conn, cid)
+    rel = conciliacao.cortar(conn, 1, "2026-09-22", ensaio=False)
+    assert (rel["fechadas"], rel["valor_centavos"]) == (1, 990_00)
+    assert [medicoes.detalhe(conn, m)["estado"] for m in (ex, rj)] == ["recebida", "recebida"]
+
+
+def test_corte_com_a_execucao_fora_deixa_o_reajuste_absorvido_com_ela(conn, cid, tmp_path):
+    """Variante: a execucao do espelho fica fora do corte; o reajuste absorvido tambem fica (segue a execucao), sem
+    abortar o corte das outras medicoes."""
+    ex, rj = _par_absorvido(conn, cid)
+    conn.execute("UPDATE medicoes SET valor_protocolado_origem='espelho' WHERE id=?", (ex,))
+    conn.commit()
+    antiga = _medicao(conn, cid, 1, 500_00, comp="2025-03")
+    rel = conciliacao.cortar(conn, 1, "2026-09-22", ensaio=False)
+    assert (rel["fechadas"], rel["valor_centavos"]) == (1, 500_00)
+    assert [medicoes.detalhe(conn, m)["estado"] for m in (ex, rj, antiga)] == ["protocolada", "protocolada", "recebida"]

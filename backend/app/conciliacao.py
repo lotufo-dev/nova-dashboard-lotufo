@@ -249,10 +249,13 @@ def cortar(conn, usuario_id: int, data_corte: str, ensaio: bool) -> dict:
                 (sincronizacao_rm.COMPETENCIA_CORTE_RM, data_corte)).fetchall()
             por_obra = Counter()
             for r in linhas:
+                # issue #589 (revisor da PR #608): o reajuste negativo absorvido fecha com a execucao, nunca sozinho
+                if medicoes.absorvida(conn, r["id"]):
+                    continue
                 medicoes.mudar_estado(conn, usuario_id, r["id"], "recebida", motivo, None, origem="corte")
                 rel["fechadas"] += 1
                 rel["com_nota"] += 1 if r["com_nota"] else 0
-                rel["valor_centavos"] += r["v"] or 0
+                rel["valor_centavos"] += medicoes.valor_do_par(conn, r["id"], r["v"]) or 0
                 por_obra[r["obra"]] += 1
             rel["por_obra"] = dict(sorted(por_obra.items()))
             if ensaio:
