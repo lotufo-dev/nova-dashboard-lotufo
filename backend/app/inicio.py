@@ -244,7 +244,7 @@ def _avisos_importantes(pedir: list[dict], prazos_: list[dict], vencidas: list[d
 def painel(conn, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     vencidas, vencendo = cobranca_certidoes.listas(conn, hoje)
-    pedir = [a for a in reajuste.avisos(conn, hoje) if a["tipo"] == "reajuste_pleito"]
+    pedir = [a for a in reajuste.avisos(conn, hoje, com_competencias=False) if a["tipo"] == "reajuste_pleito"]
     resumo = avisos.resumo_mes(conn, hoje)
     ultima = conn.execute("SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
                           "WHERE mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]

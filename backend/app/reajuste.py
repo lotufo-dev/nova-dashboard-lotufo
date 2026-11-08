@@ -803,14 +803,16 @@ def ciclos(conn, contrato_id: int, hoje: datetime.date | None = None) -> list[di
     return out
 
 
-def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
+def avisos(conn, hoje: datetime.date | None = None, com_competencias: bool = True) -> list[dict]:
     """Pleito nao enviado (atencao antes do aniversario, acao depois) e apostilamento pendente (a diretoria
     ve depois de 90 dias). Contratos ativos ou suspensos; em encerramento o reajuste continua valendo
     (as ultimas medicoes tambem se reajustam). A10 (mapa de 2026-09-28): o aviso diz a data-base, para
     levar ao ciclo dela na aba Reajuste, e nao so' a aba.
 
     Issue #274 (spec 2026-10-20 §2.2 e §4 item 1): o pleito nao enviado diz o valor previsto do ciclo, quando ha'
-    previsao; e entram os avisos do motor de apostilamento (`_avisos_do_ciclo` e `_avisos_das_competencias`)."""
+    previsao; e entram os avisos do motor de apostilamento (`_avisos_do_ciclo` e `_avisos_das_competencias`).
+    `com_competencias=False`: sem os das competencias (a leitura da aba inteira por contrato), para quem so' quer os
+    do ciclo (o "reajuste a pedir" do Inicio)."""
     hoje = hoje or tempo.hoje_local()
     out = []
     for c in conn.execute("SELECT id, nome_curto, numero_instrumento, percentual_direito_bp FROM contratos "
@@ -846,7 +848,9 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                                         data=(k.get("pedido") or k["pleito"])["enviado_em"][:10], sentido="desde"),
                             "data_base_mes": k["data_base_mes"]})
             out += _avisos_do_ciclo(k, base, hoje, c["id"], nome, destino)
-        out += _avisos_das_competencias(conn, dict(c), nome, destino)
+        if com_competencias:
+            aplica = {k["data_base_mes"]: k.get("aplica_a") for k in ks}
+            out += _avisos_das_competencias(conn, dict(c), nome, destino, aplica)
     return out
 
 
@@ -910,7 +914,7 @@ def _medido(x: dict) -> int:
     return 0
 
 
-def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict) -> list[dict]:
+def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict, aplica: dict | None = None) -> list[dict]:
     """Issue #274 (spec 2026-10-20 §2.2), os avisos das competencias do contrato, pelas marcas da aba Reajuste
     (`competencias_por_ciclo`, `avisos_da_competencia`): cada um some quando a marca some.
 
@@ -923,7 +927,7 @@ def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict) -> list[di
     - `reajuste_nota_antes_do_apostilamento`: um por competencia, critico. Operacao. Some com o apostilamento."""
     out = []
     for g in competencias_por_ciclo(conn, c["id"]):
-        base = _rotulo_base(g["data_base_mes"])
+        base = _rotulo_base(g["data_base_mes"], (aplica or {}).get(g["data_base_mes"]))   # D7, como nos do ciclo
         marca = {"data_base_mes": g["data_base_mes"], "ciclo": g["ciclo"]}
         sem_termo = []
         for x in g["competencias"]:

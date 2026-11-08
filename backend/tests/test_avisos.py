@@ -694,3 +694,22 @@ def test_pleito_nao_enviado_diz_o_valor_previsto_do_ciclo(obra_reajuste):
     assert a["valor_centavos"] == 300_03
     assert a["mensagem"] == ("data-base 06/2024 faz aniversário em 01/06/2026 (em 17 dias); R$ 300,03 previstos para "
                              "o ciclo de 2026; pleito de reajuste não enviado")
+
+
+def test_aviso_da_competencia_diz_a_parte_do_contrato_da_data_base(obra_reajuste):
+    # /code-review (#274): com `aplica_a` (D7), o aviso da competencia diz a parte, como os do ciclo
+    c, cid, _ = obra_reajuste
+    c.execute("UPDATE contrato_datas_base SET aplica_a='itens SINAPI' WHERE contrato_id=?", (cid,)); c.commit()
+    _r_previsao(c, cid, "2026-08", 100_01)
+    _r_medicao(c, cid, 1, "2026-08", "planilha_enviada", pedido=200_00)
+    [a] = _do_tipo(c, "reajuste_fora_da_previsao")
+    assert a["mensagem"].startswith("reajuste de 08/2026 (data-base 06/2024 (itens SINAPI)): pedido")
+
+
+def test_avisos_de_reajuste_sem_as_competencias_para_o_inicio(obra_reajuste):
+    # o "reajuste a pedir" do Inicio so' quer o pleito: nao paga a leitura das competencias de cada contrato
+    c, cid, _ = obra_reajuste
+    _r_previsao(c, cid, "2026-08", 100_01)
+    _r_medicao(c, cid, 1, "2026-08", "planilha_enviada", pedido=200_00)
+    assert {a["tipo"] for a in reajuste.avisos(c, D(2026, 10, 1))} == {"reajuste_pleito", "reajuste_fora_da_previsao"}
+    assert [a["tipo"] for a in reajuste.avisos(c, D(2026, 10, 1), com_competencias=False)] == ["reajuste_pleito"]
