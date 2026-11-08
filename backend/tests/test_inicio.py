@@ -71,8 +71,8 @@ def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_do_inicio(cenario):
     col = c.execute("SELECT e.coligada_rm FROM contratos k JOIN entidades e ON e.id=COALESCE(k.entidade_id, 1) WHERE k.id=?",
                     (cid,)).fetchone()[0]
     c.execute("UPDATE contratos SET centro_custo_rm='9.001.002' WHERE id=?", (cid,))
-    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo) "
-              "VALUES (?, 501, '501', '2026-10-06', 700001, 'ativa', '9.001.002')", (col,))
+    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, codtmv) "
+              "VALUES (?, 501, '501', '2026-10-06', 700001, 'ativa', '9.001.002', '2.2.01')", (col,))
     c.commit()
     p = inicio.painel(c, HOJE)
     assert (p["medido"]["valor_centavos"], p["medido"]["anterior_centavos"]) == (700_001, 400_000)
@@ -106,8 +106,8 @@ def test_recebido_no_ano_nulo_com_recebida_sem_data(cenario):
                                                       "real_centavos": 0}
     # o recebido de verdade vem das baixas do RM e nao depende da data gravada na medicao (06/11/2026)
     mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1", (cid,)).fetchone()[0]
-    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
-                    "VALUES (1, 77, '77', '2026-08-05', 300000, 'ativa')").lastrowid
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                    "VALUES (1, 77, '77', '2026-08-05', 300000, 'ativa', '2.2.01')").lastrowid
     c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
               "VALUES (?, ?, 300000, 'detectado', 't')", (mid, nid))
     c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, status_lan, "
@@ -200,8 +200,8 @@ def test_notas_protocoladas_no_mes_contam_notas_e_obras_distintas(cenario):
         _protocolar(c, m, d)
     nota = {}
     for n, valor, situacao in ((1, 3_000, "ativa"), (2, 4_000, "ativa"), (3, 9_000, "cancelada"), (4, 8_000, "ativa")):
-        nota[n] = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao) "
-                            "VALUES (1, ?, ?, '2026-10-01', ?, ?)", (n, str(n), valor, situacao)).lastrowid
+        nota[n] = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                            "VALUES (1, ?, ?, '2026-10-01', ?, ?, '2.2.01')", (n, str(n), valor, situacao)).lastrowid
     for m, n in ((m1, 1), (m2, 1),      # a mesma nota nas duas medicoes da obra A: conta uma vez
                  (m3, 2), (m3, 3),      # cancelada nao entra
                  (m4, 4)):              # medicao protocolada em setembro nao entra

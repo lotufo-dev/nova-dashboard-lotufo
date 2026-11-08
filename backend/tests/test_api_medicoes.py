@@ -738,6 +738,24 @@ def test_planilha_diretoria_recebe_403(client_admin):
     assert len(client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"]) == 1
 
 
+def test_sugestao_sem_tipo_segue_a_ultima_medicao_e_recusa_reajuste(client_admin):
+    """Issue #567: sem `tipo`, a sugestao vem no tipo da ultima medicao (a obra so' de projeto sugere a de projeto).
+    Reajuste nao e' tipo da planilha/carta (#276: nasce pelo formulario da execucao): 422 em portugues."""
+    cid = _contrato(client_admin)
+    assert _nova_planilha(client_admin, cid, tipo="projeto").status_code == 201
+    s = client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao").json()
+    assert (s["tipo"], s["numero"], s["competencia"]) == ("projeto", 2, "2026-08")
+    assert s["acumulado_anterior_centavos"] == 12_345_67
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao?tipo=execucao").json()["numero"] == 1
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/sugestao?tipo=reajuste").status_code == 422
+    assert client_admin.get(f"/api/contratos/{cid}/planilhas/avisos?tipo=reajuste&numero=1&competencia=2026-07"
+                            "&periodo_inicio=2026-07-01").status_code == 422
+    r = _nova_planilha(client_admin, cid, tipo="reajuste")
+    assert r.status_code == 422
+    assert [(e["loc"][-1], e["msg"]) for e in r.json()["detail"]] == [("tipo", "valor fora das opções")]
+    assert len(client_admin.get(f"/api/contratos/{cid}/medicoes").json()) == 1   # so' a de projeto
+
+
 # issue #287: assinatura no DocuSign (evento informativo)
 def _com_boletim(cl):
     """Medicao do fluxo antigo com boletim de 10/08/2026 (#290: a assinatura e' a do boletim)."""
@@ -876,7 +894,9 @@ def _evidencias():
 
 
 def _eventos(cl, mid):
-    return [e["texto"] for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]]
+    """A linha do tempo sem os eventos de geracao da planilha/carta (#568), que os testes de envio nao miram."""
+    return [e["texto"] for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]
+            if "planilha/carta gerada" not in e["texto"].lower()]
 
 
 def _auditoria(acao):
@@ -1310,6 +1330,8 @@ def test_envio_por_fora_poe_em_planilha_enviada_com_origem_externo_e_data(client
     assert d["congelada"] == 0 and d["valor_protocolado_centavos"] == 12_345_67
     assert d["protocolos"] == []      # sem nº do protocolo, nada em medicao_protocolos ainda
     assert _eventos(client_admin, mid) == ["Planilha/carta enviada por fora em 03/08/2026 (E-mail ao protocolo) por Admin"]
+    # #568: a geracao da planilha/carta tambem conta na linha do tempo
+    assert "Planilha/carta gerada por Admin" in [e["texto"] for e in client_admin.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]]
     r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "1,01"})
     assert r.status_code == 422
     assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 12_345_67
@@ -1966,3 +1988,102 @@ def test_aceitar_a_diferenca_engenharia_aceita_diretoria_so_le(client_admin):
     lista = client_admin.get(f"/api/contratos/{d['contrato_id']}/medicoes").json()
     assert lista[0]["diferenca_aceita"]["atesto_id"] == d["diferenca_aceita"]["atesto_id"]
     assert client_admin.post("/api/medicoes/999999/diferenca-aceita", json=corpo).status_code == 404
+
+
+# --- issue #276: medicao de reajuste sugere o valor e grava data-base e ciclo ----------------------------------------
+
+def _datas_base(cid, *bases):
+    from app import db
+    conn = db.get_conn()
+    try:
+        for mes, aplica_a in bases:
+            conn.execute("INSERT INTO contrato_datas_base (contrato_id, mes, indice, aplica_a) VALUES (?,?,'INCC',?)",
+                         (cid, mes, aplica_a))
+        conn.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, "
+                     "valor_previsto_centavos, origem) VALUES (?, ?, 2026, '2026-07', 4_321_09, 'manual')",
+                     (cid, bases[0][0]))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_sugestao_do_reajuste_pela_rota(client_admin):
+    cid = _contrato(client_admin)
+    _datas_base(cid, ("2024-06", ""))
+    r = client_admin.get(f"/api/contratos/{cid}/reajuste/sugestao", params={"competencia": "2026-07"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"competencia": "2026-07", "data_base_mes": "2024-06", "bases": [
+        {"data_base_mes": "2024-06", "aplica_a": "", "ciclo": 2026, "valor_centavos": 4_321_09, "origem": "manual",
+         "origem_texto": "previsto", "aviso": None, "tem_previsao": True, "ciclos_em_conflito": [],
+         "ja_pedido_em": []}]}
+    assert client_admin.get(f"/api/contratos/{cid}/reajuste/sugestao",
+                            params={"competencia": "2026-13"}).status_code == 422
+
+
+def test_sugestao_com_o_numero_esconde_o_reajuste_que_ja_nao_recebe(client_admin):
+    """Code-review da #276: o campo vem preenchido sozinho; se a de reajuste do nº da planilha/carta ja' passou de
+    prevista, a sugestao volta sem base (o campo some) para a planilha de execucao nao ser recusada sem a pessoa ver."""
+    from app import db
+    cid = _contrato(client_admin)
+    _datas_base(cid, ("2024-06", ""))
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 3, "tipo": "reajuste", "competencia": "2026-07"}).json()["id"]
+    q = {"competencia": "2026-07", "numero": 3}
+    assert len(client_admin.get(f"/api/contratos/{cid}/reajuste/sugestao", params=q).json()["bases"]) == 1
+    conn = db.get_conn()
+    try:
+        conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=?", (mid,)); conn.commit()
+    finally:
+        conn.close()
+    s = client_admin.get(f"/api/contratos/{cid}/reajuste/sugestao", params=q).json()
+    assert (s["bases"], s["data_base_mes"]) == ([], None)
+    assert len(client_admin.get(f"/api/contratos/{cid}/reajuste/sugestao",
+                                params={**q, "numero": 4}).json()["bases"]) == 1
+
+
+def test_medicao_manual_de_reajuste_grava_pedido_data_base_e_ciclo(client_admin):
+    cid = _contrato(client_admin)
+    _datas_base(cid, ("2024-06", ""))
+    r = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                          json={"numero": 5, "tipo": "reajuste", "competencia": "2026-07", "valor": "4.321,09"})
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/medicoes/{r.json()['id']}").json()
+    assert (d["estado"], d["valor_protocolado_centavos"], d["data_base_mes"], d["ciclo"]) == (
+        "prevista", 4_321_09, "2024-06", 2026)
+    # sem valor: a medicao nasce sem pedido, mas com a data-base e o ciclo
+    r = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                          json={"numero": 6, "tipo": "reajuste", "competencia": "2026-08", "valor": ""})
+    d = client_admin.get(f"/api/medicoes/{r.json()['id']}").json()
+    assert (d["valor_protocolado_centavos"], d["data_base_mes"], d["ciclo"]) == (None, "2024-06", 2026)
+
+
+def test_medicao_manual_de_reajuste_com_duas_bases_exige_a_escolha(client_admin):
+    cid = _contrato(client_admin)
+    _datas_base(cid, ("2024-04", "itens SICRO"), ("2024-06", ""))
+    corpo = {"numero": 1, "tipo": "reajuste", "competencia": "2026-05"}
+    r = client_admin.post(f"/api/contratos/{cid}/medicoes", json=corpo)
+    assert r.status_code == 422 and r.json()["detail"] == "Escolha a data-base do reajuste"
+    assert client_admin.get(f"/api/contratos/{cid}/medicoes").json() == []
+    r = client_admin.post(f"/api/contratos/{cid}/medicoes", json={**corpo, "data_base_mes": "2024-06"})
+    d = client_admin.get(f"/api/medicoes/{r.json()['id']}").json()
+    assert (d["data_base_mes"], d["ciclo"]) == ("2024-06", 2025)
+
+
+def test_valor_na_criacao_so_na_medicao_de_reajuste(client_admin):
+    cid = _contrato(client_admin)
+    r = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                          json={"numero": 1, "tipo": "execucao", "competencia": "2026-07", "valor": "1,00"})
+    assert r.status_code == 422 and "só acompanham a medição de reajuste" in r.json()["detail"]
+
+
+def test_planilha_com_reajuste_pela_rota(client_admin):
+    cid = _contrato(client_admin)
+    _datas_base(cid, ("2024-04", "itens SICRO"), ("2024-06", ""))
+    r = _nova_planilha(client_admin, cid, reajuste_valor="4.321,09")
+    assert r.status_code == 422 and r.json()["detail"] == "Escolha a data-base do reajuste"
+    assert client_admin.get(f"/api/contratos/{cid}/medicoes").json() == []
+    r = _nova_planilha(client_admin, cid, reajuste_valor="4.321,09", reajuste_data_base="2024-04")
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/medicoes/{r.json()['reajuste_medicao_id']}").json()
+    assert (d["tipo"], d["numero"], d["estado"], d["valor_protocolado_centavos"], d["data_base_mes"], d["ciclo"]) == (
+        "reajuste", 1, "prevista", 4_321_09, "2024-04", 2026)

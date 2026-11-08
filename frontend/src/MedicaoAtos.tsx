@@ -123,13 +123,19 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
   }, [contratoId, m.tipo]);
 
   const pendentes = checklist ? checklist.itens.filter(i => i.situacao === "pendente") : [];
+  // issue #562 (revisor, rodada 1 da PR #581): a nota divergente do espelho tambem trava o protocolo feito fora (o
+  // servidor confere de novo); so' passa assumida e justificada, como a certidao pendente
+  const divergentes = [...new Set((m.notas ?? [])
+    .filter(n => (n.situacao ?? "ativa") === "ativa" && (n.conferencia ?? []).some(d => d.grau === "divergente"))
+    .map(n => n.numero))];
+  const comPendencia = pendentes.length > 0 || divergentes.length > 0;
 
   // O botao nao fica apagado esperando o formulario valer (issue #11): o clique diz o que falta, junto do campo.
   const faltas = {
     data: !proto.data ? "Informe a data do protocolo." : undefined,
-    apesar: pendentes.length > 0 && !apesar
+    apesar: comPendencia && !apesar
       ? "Marque “Protocolar apesar das pendências” e justifique, ou anexe os documentos em Documentos." : undefined,
-    justificativa: pendentes.length > 0 && apesar && justificativa.trim().length < MIN_JUSTIFICATIVA
+    justificativa: comPendencia && apesar && justificativa.trim().length < MIN_JUSTIFICATIVA
       ? `Escreva a justificativa, com pelo menos ${MIN_JUSTIFICATIVA} caracteres.` : undefined,
   };
   const erroDe = (campo: keyof typeof faltas) => tentou ? faltas[campo] : undefined;
@@ -197,13 +203,18 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
         {checklist && pendentes.length === 0 && (
           <Selo classe="selo--ok">Documentos em dia</Selo>
         )}
-        {checklist && pendentes.length > 0 && (
+        {divergentes.length > 0 && (
+          <CaixaAviso nivel="critico" como="span">NF {divergentes.join(", ")} diverge{divergentes.length > 1 ? "m" : ""} do espelho</CaixaAviso>
+        )}
+        {((checklist && pendentes.length > 0) || divergentes.length > 0) && (
           <>
+            {pendentes.length > 0 && (
             <CaixaAviso nivel="critico" como="span">
                 {pendentes.length === 1 ? "1 documento sem validade hoje" : `${pendentes.length} documentos sem validade hoje`} —{" "}
                 {pendentes.map(i => new Set(pendentes.map(x => x.entidade_id)).size > 1 ? `${i.entidade}: ${i.tipo}` : i.tipo).join(", ")}.{" "}
                 <Link className="link" para={{ tela: "documentos" }}>Anexar em Documentos</Link>
             </CaixaAviso>
+            )}
             <label className="marcar">
               <input id="campo-apesar" type="checkbox" name="apesar_das_pendencias" checked={apesar} {...ligacao("apesar", "campo-apesar")}
                 onChange={ev => setApesar(ev.target.checked)} />

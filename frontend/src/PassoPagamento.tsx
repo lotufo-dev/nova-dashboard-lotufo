@@ -95,6 +95,8 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
         <div>
           <p className="pag-numeros__rotulo">A receber{rotuloCota ? " · cota da Lotufo" : ""}</p>
           <p className="pag-numeros__valor pag-numeros__valor--acento num" aria-label={`A receber: ${brl(receber.falta)}`}>{brl(receber.falta)}</p>
+          {/* issue #562: o a receber sai de nota que diverge do espelho */}
+          {(grupo[0]?.pagamento_cota?.falta_divergente_centavos ?? 0) > 0 && <Selo classe="selo--acao">Nota divergente do espelho</Selo>}
         </div>
         <div>
           <p className="pag-numeros__rotulo">Total da medição</p>

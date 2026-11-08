@@ -92,6 +92,25 @@ describe("FormProtocoloManual", () => {
     fireEvent.click(botao);
     expect(agir).toHaveBeenCalledTimes(1);
   });
+
+  // issue #562 (revisor, rodada 1 da PR #581): a nota divergente do espelho trava como a certidao pendente
+  it("com nota divergente do espelho e certidões em dia, avisa a NF e pede para assumir e justificar", async () => {
+    api.mockResolvedValue({ entidade: "Lotufo", pronto: true, itens: [] });
+    const agir = vi.fn(async () => true);
+    const nota = { nota_id: 9, coligada: 1, numero: "2275", serie: null, emissao: null, valor_centavos: 18017069, recebido_centavos: 0,
+      recebido_em: null, origem: "manual", regra: null, situacao: "ativa",
+      conferencia: [{ campo: "valor", espelho: 14800000, nota: 18017069, grau: "divergente" }] };
+    render(<FormProtocoloManual contratoId={1} m={{ ...base, notas: [nota] }} salvando={false} agir={agir} aoFechar={() => {}} />);
+    expect(await screen.findByText("NF 2275 diverge do espelho")).toBeTruthy();
+    const apesar = screen.getByLabelText(/Protocolar apesar das pendências/);
+    fireEvent.change(screen.getByLabelText("Data do protocolo"), { target: { value: "2026-10-13" } });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar protocolo" }));
+    expect(agir).not.toHaveBeenCalled();
+    fireEvent.click(apesar);
+    fireEvent.change(screen.getByLabelText("Justificativa"), { target: { value: "NF substituta a caminho" } });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar protocolo" }));
+    expect(agir).toHaveBeenCalledTimes(1);
+  });
 });
 
 // issue #190: o valor se digita como em caixa registradora e vai ao servidor no mesmo formato de antes

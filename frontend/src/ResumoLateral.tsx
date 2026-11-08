@@ -13,12 +13,13 @@ function quando(iso: string): string {
   return iso.length > 10 ? fmtDataHora(iso) : fmtDataPura(iso);
 }
 
-export type PassoResumo = { rotulo: string; secao: string } | null;
+// `acao`: o passo se resolve numa janela da pagina (ex.: "boletim"), nao numa secao (#568)
+export type PassoResumo = { rotulo: string; secao: string; acao?: string } | null;
 
-export function ResumoMedicao({ m, execucao, reajuste, outras, passo, aqui, contratoId, podeEditar, salvando, aoEditarValor }: {
+export function ResumoMedicao({ m, execucao, reajuste, outras, passo, aqui, contratoId, podeEditar, salvando, aoEditarValor, aoAcao }: {
   m: Medicao; execucao: Medicao | null; reajuste: Medicao | null; outras: Medicao[];
   passo: PassoResumo; aqui: Rota; contratoId: number;
-  podeEditar: boolean; salvando: boolean; aoEditarValor: () => void;
+  podeEditar: boolean; salvando: boolean; aoEditarValor: () => void; aoAcao?: (acao: string) => void;
 }) {
   const doPar = execucao && reajuste;
   const soma = doPar ? (execucao.valor_protocolado_centavos ?? 0) + (reajuste.valor_protocolado_centavos ?? 0) : null;
@@ -31,7 +32,9 @@ export function ResumoMedicao({ m, execucao, reajuste, outras, passo, aqui, cont
           <div><dt>Situação</dt><dd><Estado m={m} /></dd></div>
           {passo && (
             <div><dt>Próximo passo</dt><dd>
-              {passo.secao ? <Link className="link forte" para={aqui} secao={passo.secao}>{passo.rotulo}</Link> : passo.rotulo}
+              {passo.acao && aoAcao ? (
+                <button type="button" className="btn btn--pequeno" onClick={() => aoAcao(passo.acao!)}>{passo.rotulo}</button>
+              ) : passo.secao ? <Link className="link forte" para={aqui} secao={passo.secao}>{passo.rotulo}</Link> : passo.rotulo}
             </dd></div>
           )}
           <div><dt>Competência</dt><dd className="num">{fmtCompetencia(m.competencia)}</dd></div>

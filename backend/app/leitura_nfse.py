@@ -73,7 +73,9 @@ def _descricao(n: dict, desc: str) -> None:
     espacos normalizados). Igual nos dois leiautes: o texto e' o que a Lotufo escreve na nota."""
     if re.search(r"REAJUST", desc):            # REAJUSTE DA / REAJUSTAMENTO / REAJUSTE REFERENTE
         n["natureza"] = "reajuste"
-    elif re.search(r"(EXECUÇÃO|ELABORAÇÃO) DE PROJETO|DE PROJETO DAS OBRAS", desc):
+    # "EXECUÇÃO DE PROJETO DAS OBRAS" e' execucao de obra (Estacoes BRT, com INSS), nao projeto (#564)
+    elif re.search(r"ELABORAÇÃO DE PROJETO|EXECUÇÃO DE PROJETO(?! DAS OBRAS)|(?<!EXECUÇÃO )DE PROJETO DAS OBRAS",
+                   desc):
         n["natureza"] = "projeto"
     else:
         n["natureza"] = "medicao"

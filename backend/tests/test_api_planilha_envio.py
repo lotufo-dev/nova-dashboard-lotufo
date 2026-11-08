@@ -127,6 +127,18 @@ def test_envio_poe_em_planilha_enviada_com_data_e_origem_e_registra_o_email(api)
         {"envio_reservado_em": None}
 
 
+def test_linha_do_tempo_conta_a_geracao_e_o_envio_pelo_sistema(api):
+    """#568: a planilha/carta gerada e o envio pelo sistema (data, quem e assunto) entram na linha do tempo."""
+    cl, cid, _ = api
+    mid, pv = _pronta(cl, cid)
+    assert cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv)).status_code == 200
+    textos = [e["texto"] for e in cl.get(f"/api/medicoes/{mid}").json()["edicoes_valor"]]
+    hoje = tempo.hoje_local().strftime("%d/%m/%Y")
+    assert any(t.startswith("Planilha/carta gerada por ") for t in textos), textos
+    assert any(t.startswith(f"Planilha/carta enviada pelo sistema em {hoje} (assunto: {pv['assunto']}) por ")
+               for t in textos), textos
+
+
 def test_zip_leva_a_planilha_da_versao(api, monkeypatch):
     cl, cid, _ = api
     mid, pv = _pronta(cl, cid)

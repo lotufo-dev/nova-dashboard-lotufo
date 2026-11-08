@@ -105,6 +105,8 @@ def envio_externo(medicao_ids: list[int] = Form(...), enviado_em: str = Form(...
                   confirmadas: list[str] = Form(default=[]),
                   # issue #231: o oficio digitado, com o mesmo teto do `IniciarIn.numero_oficio`
                   numero_oficio: str | None = Form(default=None, max_length=40),
+                  # issue #562: o motivo do registro com a nota divergente do espelho
+                  motivo_divergencia: str | None = Form(default=None, max_length=2000),
                   usuario: dict = Depends(exigir("editar_cadastros")), conn: sqlite3.Connection = Depends(conexao)):
     try:            # os mesmos limites do `Confirmadas` das rotas JSON (api_protocolos)
         TypeAdapter(Confirmadas).validate_python(confirmadas)
@@ -118,7 +120,7 @@ def envio_externo(medicao_ids: list[int] = Form(...), enviado_em: str = Form(...
         arquivo = (eml.filename, dados)
     try:
         notas_envio.envio_externo(conn, usuario["id"], medicao_ids, enviado_em, observacao, arquivo, irma_ids,
-                                  confirmadas or None, numero_oficio)
+                                  confirmadas or None, numero_oficio, motivo_divergencia)
     except protocolo.ConfirmarPendencias as e:
         raise HTTPException(422, detail=e.detalhe()) from None
     except ValueError as e:

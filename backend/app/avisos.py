@@ -54,7 +54,8 @@ def _de_documentos(conn, hoje: datetime.date) -> list[dict]:
 
 
 # D10 (2026-09-26): nota divergente do espelho e' CRITICO, como a aba Notas ja' a mostra.
-_NIVEL_NOTA = {"nota_divergente": "critico", "nota_ausente_rm": "atencao", "nota_cancelada_rm": "acao"}
+_NIVEL_NOTA = {"nota_divergente": "critico", "nota_acima_da_medicao": "critico", "nota_ausente_rm": "atencao",
+               "nota_cancelada_rm": "acao"}
 
 
 def _de_notas(conn, hoje: datetime.date) -> list[dict]:

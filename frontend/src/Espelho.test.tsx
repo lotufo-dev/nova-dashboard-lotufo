@@ -394,6 +394,29 @@ describe("Espelho: o passo Espelhos (#514)", () => {
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
       referencias={{ 1: { valor: 1000001, fonte: "aprovado" } }} />);
     expect(await screen.findByText("igual ao aprovado")).toBeTruthy();
-    expect(screen.getByText("R$ 1.800,00", { selector: "tfoot td" })).toBeTruthy();
+    // duas linhas (#558): a soma das notas e o valor da medição, com a conferência junto deste
+    const linhas = within(screen.getByRole("table", { name: "Espelhos da medição 10" })).getAllByRole("row");
+    const notas = linhas[linhas.length - 2], medicao = linhas[linhas.length - 1];
+    expect(within(notas).getByText("Total das notas")).toBeTruthy();
+    expect(within(notas).getByText("R$ 1.800,00")).toBeTruthy();
+    expect(within(notas).queryByText(/igual|diferente/)).toBeNull();
+    expect(within(medicao).getByText("Valor da medição")).toBeTruthy();
+    expect(within(medicao).getByText("R$ 10.000,01")).toBeTruthy();
+    expect(within(medicao).getByText("igual ao aprovado")).toBeTruthy();
+  });
+
+  it("obra própria ou consórcio que emite o cheio: uma linha só, rotulada Total, com a conferência (#558)", async () => {
+    api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });   // as notas somam o mesmo que as entradas
+    render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
+      referencias={{ 1: { valor: 63452958, fonte: "aprovado" }, 2: { valor: 3865583, fonte: "aprovado" } }} />);
+    const tabela = await screen.findByRole("table", { name: "Espelhos da medição 10" });
+    const linhas = within(tabela).getAllByRole("row");
+    expect(linhas).toHaveLength(6);                        // cabecalho, 4 notas, uma linha de total
+    const total = linhas[5];
+    expect(within(total).getByText("Total")).toBeTruthy();
+    expect(within(total).getByText("R$ 673.185,41")).toBeTruthy();
+    expect(within(total).getByText("igual ao aprovado")).toBeTruthy();
+    expect(within(tabela).queryByText("Total das notas")).toBeNull();
+    expect(within(tabela).queryByText("Valor da medição")).toBeNull();
   });
 });

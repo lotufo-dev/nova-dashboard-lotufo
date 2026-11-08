@@ -9,9 +9,11 @@ Modulo proprio, ao lado de `medicoes.py`: o boletim, a assinatura e a lista em a
 """
 import datetime
 
-from app import arquivos, auditoria, contratos, db, espelho, tempo
+from app import arquivos, auditoria, contratos, db, espelho, medicoes, reajuste, tempo
 from app.medicoes import LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
+# o reajuste nao entra pela planilha/carta: nasce pelo campo "Reajuste" do formulario da execucao, em prevista,
+# com data-base e ciclo (decisao do Leo na #276, 08/11/2026)
 TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
 FORA_DO_ACUMULADO = ("prevista", "cancelada", "desistida")
@@ -84,9 +86,29 @@ def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None
             "saldo_apos_pedido_centavos": None if pedido is None else base - acumulado - pedido}
 
 
-def sugestao(conn, contrato_id: int, tipo: str = "execucao") -> dict:
+def tipo_da_ultima(conn, contrato_id: int) -> str:
+    """Issue #567: o tipo da ultima medicao de execucao ou projeto da obra (competencia mais recente; na mesma, a
+    execucao), fora prevista, cancelada e desistida. O reajuste nao conta: acompanha o numero da execucao e sai
+    depois dela (como em medicoes, #154), e pre-seleciona-lo trocaria a serie da proxima medicao. Sem medicao:
+    execucao."""
+    r = conn.execute(
+        "SELECT tipo FROM medicoes WHERE contrato_id=? AND tipo IN ('execucao','projeto') "
+        f"AND estado NOT IN ({','.join('?' * len(FORA_DO_ACUMULADO))}) "
+        "ORDER BY competencia DESC, tipo='execucao' DESC, numero DESC, id DESC LIMIT 1",
+        (contrato_id, *FORA_DO_ACUMULADO)).fetchone()
+    return r["tipo"] if r is not None else "execucao"
+
+
+def sugestao(conn, contrato_id: int, tipo: str | None = None) -> dict:
     """Nº (ultimo + 1; o do orgao tambem, onde ja' difere, D6), competencia (a da 1a prevista, senao o mes
-    seguinte ao da ultima, senao o mes corrente), periodo (o mes civil da competencia), acumulado e saldo."""
+    seguinte ao da ultima, senao o mes corrente), periodo (o mes civil da competencia), acumulado e saldo.
+    Sem tipo, o da ultima medicao da obra (issue #567: a obra so' de projeto sugere a proxima de projeto). Tudo de
+    um retrato so' (db.leitura): uma medicao gravada no meio nao mistura o nº de depois com a competencia de antes."""
+    with db.leitura(conn):
+        return _sugestao(conn, contrato_id, tipo_da_ultima(conn, contrato_id) if tipo is None else tipo)
+
+
+def _sugestao(conn, contrato_id: int, tipo: str) -> dict:
     prevista = conn.execute(
         "SELECT numero, competencia FROM medicoes WHERE contrato_id=? AND tipo=? AND estado='prevista' "
         "ORDER BY competencia, numero LIMIT 1", (contrato_id, tipo)).fetchone()
@@ -140,7 +162,7 @@ def _evento(dados: dict, versao: int, pid: int, acumulado: int, anexos: dict, av
 def conferir_registro(conn, contrato_id: int, dados: dict):
     """Recusas da 1a versao (ValueError), sem gravar nada: a rota chama ANTES de gravar os anexos, para a recusa
     nao deixar arquivo sem registro, e `registrar` chama de novo dentro da transacao. Devolve a medicao que ja'
-    existe com o mesmo nº e tipo (so' pode ser uma prevista), ou None."""
+    existe com o mesmo nº e tipo (so' pode ser uma prevista), ou None, e o reajuste conferido (`_conferir_reajuste`)."""
     numero, tipo, competencia = dados["numero"], dados["tipo"], dados["competencia"]
     if tipo not in TIPOS:
         raise ValueError("A planilha/carta é de medição de execução ou de projeto")
@@ -157,7 +179,69 @@ def conferir_registro(conn, contrato_id: int, dados: dict):
         dica = ": para corrigir a planilha/carta, registre uma revisão" if ja["estado"] in ESTADOS_REVISAO else ""
         raise ValueError(f"{nome_medicao(numero, tipo)} já existe neste contrato e está "
                          f"{rotulo_estado(ja['estado'])}{dica}")
-    return ja
+    return ja, _conferir_reajuste(conn, contrato_id, dados)
+
+
+def reajuste_do_numero(conn, contrato_id: int, numero: int, competencia: str):
+    """Issue #276: a medicao de reajuste de mesmo nº que a planilha/carta completaria. Devolve a prevista da mesma
+    competencia (sem pedido do espelho) ou None quando nao existe; a que nao recebe o reajuste (outro estado, outra
+    competencia, pedido do espelho) e' recusada (ValueError, com o motivo)."""
+    r = conn.execute("SELECT * FROM medicoes WHERE contrato_id=? AND numero=? AND tipo='reajuste'",
+                     (contrato_id, numero)).fetchone()
+    if r is None:
+        return None
+    nome = nome_medicao(numero, "reajuste")
+    if r["estado"] != "prevista":
+        raise ValueError(f"{nome} já existe neste contrato e está {rotulo_estado(r['estado'])}")
+    if r["competencia"] != competencia:
+        raise ValueError(f"{nome} já existe neste contrato com a competência {_mes_br(r['competencia'])}")
+    if r["valor_protocolado_origem"] == "espelho":
+        raise ValueError(f"O pedido da {nome[0].lower()}{nome[1:]} vem do espelho: deixe o reajuste em branco")
+    return r
+
+
+def _conferir_reajuste(conn, contrato_id: int, dados: dict):
+    """Issue #276 (decisao do Leo, 08/11/2026): com o campo "Reajuste" preenchido, a planilha/carta de execucao faz
+    nascer a medicao de reajuste de mesmo nº e competencia, em `prevista`, com o pedido, a data-base e o ciclo. Ja'
+    existindo a prevista de reajuste desse nº (`reajuste_do_numero`), ela recebe os valores; sem data-base escolhida,
+    vale a que ela ja' tem. Devolve (data-base, ciclo, medicao de reajuste existente ou None); sem o campo, None."""
+    if dados.get("reajuste_centavos") is None:
+        if dados.get("reajuste_data_base"):
+            raise ValueError("Informe o valor do reajuste ou deixe a data-base em branco")
+        return None
+    numero, competencia = dados["numero"], dados["competencia"]
+    if dados["tipo"] != "execucao":
+        raise ValueError("O reajuste acompanha só a planilha/carta de execução")
+    r = reajuste_do_numero(conn, contrato_id, numero, competencia)
+    escolhida = dados.get("reajuste_data_base") or (r["data_base_mes"] if r is not None else None)
+    base, ciclo = reajuste.base_e_ciclo_da_medicao(conn, contrato_id, competencia, escolhida, numero)
+    return base, ciclo, r
+
+
+CAMPOS_REAJUSTE = ("valor_protocolado_centavos", "valor_protocolado_origem", "data_base_mes", "ciclo")
+
+
+def _gravar_reajuste(conn, usuario_id: int, contrato_id: int, dados: dict, conferido) -> int | None:
+    """Issue #276: cria (ou completa a prevista de) a medicao de reajuste que acompanha a planilha/carta, com
+    auditoria. Devolve o id dela, ou None sem o campo."""
+    if conferido is None:
+        return None
+    base, ciclo, ja = conferido
+    numero, competencia, valor = dados["numero"], dados["competencia"], dados["reajuste_centavos"]
+    if ja is None:
+        return medicoes.criar(conn, usuario_id, {"contrato_id": contrato_id, "numero": numero, "tipo": "reajuste",
+                                                 "competencia": competencia, "valor_centavos": valor,
+                                                 "data_base_mes": base, "ciclo": ciclo})
+    rid, antes = ja["id"], {k: ja[k] for k in CAMPOS_REAJUSTE}
+    cur = conn.execute(
+        "UPDATE medicoes SET valor_protocolado_centavos=?, valor_protocolado_origem='manual', data_base_mes=?, "
+        "ciclo=? WHERE id=? AND estado='prevista' AND COALESCE(valor_protocolado_origem, '') <> 'espelho'",
+        (valor, base, ciclo, rid))
+    db.exigir_uma_linha(cur, "Estado da medição de reajuste mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, usuario_id, "medicao.reajuste_da_planilha", "medicao", rid, antes, {
+        "valor_protocolado_centavos": valor, "valor_protocolado_origem": "manual", "data_base_mes": base,
+        "ciclo": ciclo})
+    return rid
 
 
 def conferir_revisao(conn, medicao_id: int, dados: dict):
@@ -183,7 +267,7 @@ def registrar(conn, usuario_id: int, contrato_id: int, dados: dict, anexos: dict
     pedido e nº do orgao. Devolve a medicao, a versao, o acumulado, o saldo e os avisos de periodo."""
     numero, tipo, competencia = dados["numero"], dados["tipo"], dados["competencia"]
     with db.mutacao(conn):
-        ja = conferir_registro(conn, contrato_id, dados)
+        ja, conferido = conferir_registro(conn, contrato_id, dados)
         avisos_ = avisos(conn, contrato_id, tipo, numero, competencia, dados["periodo_inicio"])
         acumulado = acumulado_anterior(conn, contrato_id, tipo, numero)
         valores = (competencia, dados["valor_centavos"], dados["periodo_inicio"], dados["periodo_fim"],
@@ -208,7 +292,9 @@ def registrar(conn, usuario_id: int, contrato_id: int, dados: dict, anexos: dict
             "estado": "planilha_gerada", "numero": numero, "tipo": tipo, "competencia": competencia,
             "numero_orgao": numero_orgao, **_evento(dados, 1, pid, acumulado, anexos, avisos_)})
         saldo = _saldo(conn, contrato_id, tipo, acumulado, dados["valor_centavos"])
-    return {"medicao_id": mid, "versao": 1, "estado": "planilha_gerada", "avisos": avisos_, **saldo}
+        reajuste_id = _gravar_reajuste(conn, usuario_id, contrato_id, dados, conferido)
+    return {"medicao_id": mid, "versao": 1, "estado": "planilha_gerada", "avisos": avisos_,
+            "reajuste_medicao_id": reajuste_id, **saldo}
 
 
 def revisar(conn, usuario_id: int, medicao_id: int, dados: dict, anexos: dict) -> dict:
@@ -420,6 +506,30 @@ def registrar_envio_externo(conn, usuario_id: int, medicao_id: int, dados: dict,
     return {"medicao_id": medicao_id, "estado": "planilha_enviada", "versao": vigente["versao"]}
 
 
+def eventos_geracao(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> None:
+    """Linha do tempo (#568): um evento por versao da planilha/carta gerada (a 1a e as revisoes), na hora do registro."""
+    for i in range(0, len(medicao_ids), LOTE_AUDITORIA):
+        lote = [str(x) for x in medicao_ids[i:i + LOTE_AUDITORIA]]
+        for r in conn.execute(
+                "SELECT a.entidade_id, a.depois, a.criado_em, u.nome FROM audit_log a "
+                "LEFT JOIN usuarios u ON u.id=a.usuario_id "
+                f"WHERE a.entidade='medicao' AND a.acao='medicao.planilha' AND a.entidade_id IN ({','.join('?' * len(lote))}) "
+                "ORDER BY a.id", lote):
+            d = _json_dict(r["depois"]) or {}
+            versao = d.get("versao")
+            if not isinstance(versao, int):
+                versao = 1
+            texto = "Planilha/carta gerada" if versao == 1 else f"Versão {versao} da planilha/carta gerada"
+            if d.get("motivo"):
+                texto += f" (motivo: {d['motivo']})"
+            # so' o dia (de Cuiaba), como os outros marcos do envio: com hora, o "enviada por fora" do mesmo dia
+            # (so' data) ia para antes da geracao na ordenacao por texto
+            dia = tempo.para_local(datetime.datetime.fromisoformat(r["criado_em"])).date().isoformat()
+            out[int(r["entidade_id"])].append({"data": dia,
+                                               "texto": f"{texto} por {r['nome']}" if r["nome"]
+                                               else f"{texto} pelo sistema"})
+
+
 def eventos_envio(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> None:
     """Linha do tempo: um evento por envio da planilha/carta, na data do envio (como a assinatura)."""
     for i in range(0, len(medicao_ids), LOTE_AUDITORIA):
@@ -429,14 +539,24 @@ def eventos_envio(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> N
                 f"WHERE a.entidade='medicao' AND a.acao=? AND a.entidade_id IN ({','.join('?' * len(lote))}) "
                 "ORDER BY a.id", (ENVIO, *lote)):
             d = _json_dict(r["depois"]) or {}
+            envio = None
+            if d.get("enviado_em") is None and isinstance(d.get("envio_id"), int):
+                # envio pelo sistema (#282): a auditoria guarda o e-mail; data e assunto vem de `envios`
+                envio = conn.execute("SELECT enviado_em, assunto FROM envios WHERE id=?", (d["envio_id"],)).fetchone()
             try:
-                versao, data = int(d.get("versao") or 1), datetime.date.fromisoformat(d["enviado_em"]).isoformat()
+                versao = int(d.get("versao") or 1)
+                if envio:
+                    data = tempo.iso_utc(envio["enviado_em"])
+                    dia = tempo.para_local(datetime.datetime.fromisoformat(envio["enviado_em"])).date().isoformat()
+                else:
+                    data = dia = datetime.date.fromisoformat(d["enviado_em"]).isoformat()
             except (ValueError, TypeError, KeyError):
                 continue
             qual = "Planilha/carta" if versao == 1 else f"Versão {versao} da planilha/carta"
             como = "por fora" if d.get("origem") == "externo" else "pelo sistema"
             detalhe = ", ".join(x for x in (d.get("meio"), d.get("numero_protocolo") and
-                                            f"protocolo {d['numero_protocolo']}") if x)
-            texto = f"{qual} enviada {como} em {_data_br(data)}" + (f" ({detalhe})" if detalhe else "")
+                                            f"protocolo {d['numero_protocolo']}",
+                                            envio and f"assunto: {envio['assunto']}") if x)
+            texto = f"{qual} enviada {como} em {_data_br(dia)}" + (f" ({detalhe})" if detalhe else "")
             out[int(r["entidade_id"])].append({"data": data, "texto": f"{texto} por {r['nome']}" if r["nome"]
                                                else f"{texto} pelo sistema"})

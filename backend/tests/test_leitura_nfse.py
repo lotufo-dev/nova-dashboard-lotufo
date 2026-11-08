@@ -90,6 +90,19 @@ def test_tributo_ausente_fica_none_e_nota_de_projeto_sem_inss_e_valida():
     assert n["ok"] and n["inss_centavos"] is None and n["natureza"] == "projeto"
 
 
+@pytest.mark.parametrize("descricao, natureza", [
+    # Estacoes BRT (NF 2315/2318): execucao de obra com INSS retido, apesar de citar "PROJETO DAS OBRAS" (#564)
+    ("7ª MEDIÇÃO DA EXECUÇÃO DE PROJETO DAS OBRAS DAS ESTAÇÕES", "medicao"),
+    ("22ª MEDIÇÃO DA ELABORAÇÃO DE PROJETO DAS OBRAS", "projeto"),
+    ("1ª MEDIÇÃO DA ELABORAÇÃO DE PROJETO", "projeto"),      # Terminais BRT, NF 2325/2326
+    ("22ª MEDIÇÃO DOS SERVIÇOS DE PROJETO DAS OBRAS", "projeto"),   # caso generico da regra anterior continua
+])
+def test_natureza_pela_descricao_execucao_de_projeto_das_obras(descricao, natureza):
+    texto = _txt("3105-cultural-mtpar.txt").replace("22ª MEDIÇÃO DA EXECUÇÃO DAS OBRAS", descricao)
+    assert descricao in texto
+    assert leitura_nfse.ler(texto)["natureza"] == natureza
+
+
 # --- DANFSe v2.0 (emissor nacional): nota 3106 da MT-402, 27a medicao. O texto veio da extracao do anexo pelo
 # Microsoft Graph (o PDF nao pode ser baixado nesta maquina); o perfil normaliza espacos e quebras de linha, e
 # o teste abaixo prova que a leitura nao muda se o extrator do produto (pypdf) quebrar as linhas em outro lugar.

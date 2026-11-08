@@ -8,7 +8,7 @@ Nada aqui muda estado para tras.
 import datetime
 import json
 
-from app import arquivos, auditoria, db, espelho, frc, leitura_nfse, leitura_pdf, medicoes, tempo
+from app import arquivos, auditoria, db, dinheiro, espelho, frc, leitura_nfse, leitura_pdf, medicoes, tempo
 
 EMISSOR_LOTUFO = "lotufo"
 CAMPOS_CONFERIDOS = ("valor", "iss", "inss", "irrf", "ibs", "cbs", "liquido")   # liquido por ultimo: tolera os tributos
@@ -27,7 +27,7 @@ def _espelho_vigente(conn, medicao_id) -> dict | None:
 
 def _alocadas(conn, medicao_id) -> list[dict]:
     return [dict(r) for r in conn.execute("""
-        SELECT n.*, a.id AS alocacao_id FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+        SELECT n.*, a.id AS alocacao_id, a.valor_alocado_centavos FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
         WHERE a.medicao_id=? AND a.desfeita_em IS NULL ORDER BY n.emissao, n.id""", (medicao_id,))]
 
 
@@ -156,6 +156,38 @@ def divergente(conferencia: list[dict]) -> bool:
     return any(d.get("grau") == "divergente" for d in conferencia)
 
 
+def valor_da_medicao(m: dict) -> int | None:
+    """O valor contra o qual a nota sem espelho e' conferida: o aprovado (atestado), senao o pedido (protocolado)."""
+    return m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
+
+
+def divergencias_da_medicao(conn, medicao_id: int) -> list[dict]:
+    """Issue #562: as diferencas gravadas na conferencia das notas ATIVAS alocadas a' medicao, campo a campo, com o
+    valor do espelho e o da nota e o grau (`divergente` pede confirmacao no envio; `arredondamento` so' avisa)."""
+    out = []
+    for n in _alocadas(conn, medicao_id):
+        if (n.get("situacao") or "ativa") != "ativa":
+            continue
+        for d in json.loads(n["conferencia"] or "[]"):
+            out.append({"medicao_id": medicao_id, "nota_id": n["id"], "numero": n["numero_int"] or n["numero"],
+                        "campo": d["campo"], "espelho": d["espelho"], "nota": d["nota"], "grau": d.get("grau")})
+    return out
+
+
+def acima_da_medicao(conn, medicao_id: int) -> list[dict]:
+    """Issue #562: nota ativa alocada com valor maior que o valor da medicao (aprovado, senao pedido; ambos cheios):
+    sinal de nota de outra medicao. Medicao sem valor nao compara."""
+    m = conn.execute("SELECT valor_atestado_centavos, valor_protocolado_centavos FROM medicoes WHERE id=?",
+                     (medicao_id,)).fetchone()
+    v = valor_da_medicao(m) if m else None
+    if v is None:
+        return []
+    return [{"medicao_id": medicao_id, "nota_id": n["id"], "numero": n["numero_int"] or n["numero"],
+             "alocado_centavos": n["valor_alocado_centavos"], "medicao_centavos": v}
+            for n in _alocadas(conn, medicao_id)
+            if (n.get("situacao") or "ativa") == "ativa" and (n["valor_alocado_centavos"] or 0) > v]
+
+
 def _cnpj_do_orgao(conn, contrato_id) -> str | None:
     r = conn.execute("SELECT o.cnpj FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
                      (contrato_id,)).fetchone()
@@ -272,7 +304,7 @@ def _vincular(conn, usuario, m: dict, nota_id: int, lida: dict) -> list[dict]:
         livres = [e for e in esp if e["nota_id"] is None] or esp
         difs = [{"campo": "valor", "espelho": livres[0]["valor"], "nota": lida["valor_centavos"], "grau": "divergente"}]
     else:
-        v = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
+        v = valor_da_medicao(m)
         difs = ([] if v is None or v == lida["valor_centavos"]
                 else [{"campo": "valor", "espelho": v, "nota": lida["valor_centavos"], "grau": "divergente"}])
     conn.execute("UPDATE notas_fiscais SET conferencia=? WHERE id=?", (json.dumps(difs), nota_id))
@@ -417,6 +449,19 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                     "mensagem": f"nota {r['numero']} diverge do espelho: "
                                 + ", ".join(NOME_CAMPO.get(d["campo"], d["campo"]) for d in difs
                                             if d.get("grau") == "divergente")})
+    # issue #562: nota alocada com valor maior que a medicao (nota de outra medicao?), na medicao ainda aberta
+    for r in conn.execute("""
+        SELECT DISTINCT a.medicao_id, m.contrato_id FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+        JOIN medicoes m ON m.id=a.medicao_id
+        WHERE a.desfeita_em IS NULL AND n.situacao='ativa'
+          AND m.estado NOT IN ('cancelada','desistida','recebida')
+          AND a.valor_alocado_centavos > COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos)
+        ORDER BY a.medicao_id"""):
+        for x in acima_da_medicao(conn, r["medicao_id"]):
+            out.append({"tipo": "nota_acima_da_medicao", "nota_id": x["nota_id"], "numero": x["numero"],
+                        "medicao_id": r["medicao_id"], "contrato_id": r["contrato_id"], "dias": None,
+                        "mensagem": f"nota {x['numero']} de {dinheiro.format_brl(x['alocado_centavos'])} é maior que "
+                                    f"a medição ({dinheiro.format_brl(x['medicao_centavos'])})"})
     for r in conn.execute("""
         SELECT n.id AS nota_id, n.numero_int AS numero, a.medicao_id, m.contrato_id,
                (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em

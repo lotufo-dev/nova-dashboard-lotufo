@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { brl } from "./formato";
 import CampoCompetencia from "./CampoCompetencia";
+import CampoReajuste, { type ValorReajuste } from "./CampoReajuste";
 import { IconeAlerta, IconeBaixar, IconeCadeado, IconeMais } from "./icones";
 import { EXCECOES, notasDivergentes, passoDe, resumoNotas, separarMedicoes, tituloMedicao } from "./medicao";
 import { type Busca } from "./rota";
@@ -31,6 +32,7 @@ type Nota = {
   origem_nota?: string; confirmacao?: string; documento_id?: number | null; valor_pdf_centavos?: number | null;
   conferencia?: { campo: string; espelho: number | string | null; nota: number | string | null; grau: string }[];
   justificativa?: string | null; leitura?: string | null;
+  situacao?: string;          // ativa | cancelada (RM)
 };
 type Frescor = { configurado: boolean; ultima_sincronizacao: string | null; ultimo_erro: string | null };
 // Documento de faturamento do consorcio (NF/NFS-e/FATURA do SharePoint, migracao 017) e, do bloco 2, os
@@ -53,7 +55,9 @@ export type Medicao = {
   // #514: o resumo do passo Pagamento, pronto do servidor (a cota da Lotufo nesta medicao + a irma valida do par);
   // null sem espelho vigente. Os valores vem null enquanto `completo` for falso.
   pagamento_cota?: { notas_faltam: number; completo: boolean; total_centavos: number | null;
-    recebido_centavos: number | null; falta_centavos: number | null; parcial: boolean } | null;
+    recebido_centavos: number | null; falta_centavos: number | null; parcial: boolean;
+    /** issue #562: o que falta receber das notas da cota que divergem do espelho (null enquanto o resumo nao fecha) */
+    falta_divergente_centavos?: number | null } | null;
   documentos?: Documento[];
   final?: number; final_em?: string | null;       // bloco 7: medicao final poe o contrato em encerramento
   // #284: boletins do orgao, do 1o ao vigente (#290: tambem na lista da obra, que a pagina da medicao le)
@@ -255,17 +259,22 @@ export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [feito, setFeito] = useState<{ id: number; numero: number; tipo: string } | null>(null);
+  // issue #276: na de reajuste, o pedido sugerido e a data-base (com duas no contrato)
+  const [reaj, setReaj] = useState<ValorReajuste>({ valor: "", dataBase: "" });
 
   async function criar(ev: React.FormEvent) {
     ev.preventDefault();
     setErro(""); setFeito(null); setSalvando(true);
+    const doReajuste = novo.tipo === "reajuste"
+      ? { ...(reaj.valor ? { valor: reaj.valor } : {}), ...(reaj.dataBase ? { data_base_mes: reaj.dataBase } : {}) } : {};
     try {
       const r = await api<{ id: number }>(`/api/contratos/${contratoId}/medicoes`, {
         method: "POST",
-        body: JSON.stringify({ numero: Number(novo.numero), tipo: novo.tipo, competencia: novo.competencia }),
+        body: JSON.stringify({ numero: Number(novo.numero), tipo: novo.tipo, competencia: novo.competencia, ...doReajuste }),
       });
       setFeito({ id: r.id, numero: Number(novo.numero), tipo: novo.tipo });
       setNovo({ numero: "", tipo: "execucao", competencia: "" });
+      setReaj({ valor: "", dataBase: "" });
       aoCriar();
     } catch (e) { setErro(mensagemDeErro(e)); } finally { setSalvando(false); }
   }
@@ -297,6 +306,9 @@ export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
           <IconeMais className="icone icone--p" />{salvando ? "Criando…" : "Nova medição"}
         </button>
       </div>
+      {novo.tipo === "reajuste" && (
+        <CampoReajuste contratoId={contratoId} competencia={novo.competencia} prefixo="nova" valor={reaj} aoMudar={setReaj} />
+      )}
       {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
       <p className={feito ? "notas__ok" : "sr-only"} role="status">
         {feito && <>Medição criada:{" "}

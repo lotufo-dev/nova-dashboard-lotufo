@@ -29,8 +29,16 @@ export type Envio = {
   irmas?: Irma[];   // issue #172: SINFRA e Pref. VG: a medicao/reajuste irma com nota emitida fora deste envio
   // issue #188: onde o orgao junta, a outra metade ainda sem as notas segura o envio (situacao "esperando")
   espera?: { medicao_id: number; titulo: string; tipo: string; texto: string } | null;
+  // issue #562: a conferencia das notas contra o espelho (grau "divergente" pede o motivo no envio; "arredondamento"
+  // so' avisa) e a nota com valor maior que a medicao
+  divergencias?: DivergenciaNota[];
+  acima_da_medicao?: NotaAcimaDaMedicao[];
 };
-export type Irma = { medicao_id: number; titulo: string; tipo: string };
+export type DivergenciaNota = { medicao_id: number; nota_id: number; numero: number | string; campo: string;
+  espelho: number | string | null; nota: number | string | null; grau: string };
+export type NotaAcimaDaMedicao = { medicao_id: number; nota_id: number; numero: number | string; alocado_centavos: number;
+  medicao_centavos: number };
+export type Irma = { medicao_id: number; titulo: string; tipo: string; divergencias?: DivergenciaNota[] };
 export type ListaEnvios = { envios: Envio[]; contadores: Record<string, number> };
 
 const GRUPOS = ["SINFRA", "MTPAR", "SES-MT", "Pref. VG", "Pref. Cuiabá"];
