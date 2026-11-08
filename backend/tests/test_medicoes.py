@@ -728,3 +728,20 @@ def test_protocolo_a_mao_recusado_depois_do_envio_da_planilha(conn, contrato_id,
     d = medicoes.detalhe(conn, mid)
     assert (d["estado"], d["congelada"]) == (estado, 0)
     assert conn.execute("SELECT COUNT(*) FROM medicao_protocolos WHERE medicao_id=?", (mid,)).fetchone()[0] == 0
+
+
+def test_detalhe_le_tudo_de_um_retrato_so(conn, contrato_id, monkeypatch):
+    """Issue #559: notas, notas_faltam e pagamento_cota saem da mesma leitura (a baixa do RM nao entra no meio)."""
+    from app import notas as _notas, sincronizacao_rm
+    mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "execucao", "competencia": "2026-07"})
+    vistas = []
+    for modulo, nome in ((sincronizacao_rm, "notas_da_medicao"), (_notas, "faltam"), (sincronizacao_rm, "pagamento_cota")):
+        original = getattr(modulo, nome)
+
+        def espiao(c, *a, _o=original, _n=nome, **k):
+            vistas.append((_n, c.in_transaction))
+            return _o(c, *a, **k)
+        monkeypatch.setattr(modulo, nome, espiao)
+    medicoes.detalhe(conn, mid)
+    assert vistas == [("notas_da_medicao", True), ("faltam", True), ("pagamento_cota", True)]
+    assert not conn.in_transaction
