@@ -33,9 +33,9 @@ def _simulador(tmp_path, nfs, baixas):
 
 
 def _nf(idmov, valor, coligada=1, numero=None, campo=None, status="F", emissao="2026-08-10T00:00:00-04:00",
-        centro_custo=None):
+        centro_custo=None, codtmv="2.2.01"):
     d = {"IDMOV": idmov, "CODCOLIGADA": coligada, "NUMEROMOV": numero or f"{idmov:010d}", "SERIE": "1",
-         "DATAEMISSAO": emissao, "VALORBRUTO": valor, "CODTMV": "2.2.01", "STATUS": status}
+         "DATAEMISSAO": emissao, "VALORBRUTO": valor, "CODTMV": codtmv, "STATUS": status}
     if campo:
         d["CAMPOLIVRE1"] = campo
     if centro_custo:
@@ -537,6 +537,128 @@ def test_centro_custo_desambigua_obra_da_lotufo(conn, cid, tmp_path):
     assert (nota["regra"], nota["confianca"]) == ("centro_custo_valor", 0.9)
     assert conn.execute("SELECT centro_custo FROM notas_fiscais WHERE idmov=7").fetchone()[0] == "2.001.012"
     assert auditoria.verificar_cadeia(conn)
+
+
+def _obra_com_centro(conn, centro="2.001.012"):
+    return contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "CT 9", "objeto": "Obra 2",
+                                     "valor_original_centavos": 100_000_00, "centro_custo_rm": centro})
+
+
+@pytest.mark.parametrize("codtmv", ["2.2.15", "2.2.10", None])
+def test_casador_nao_liga_nota_fora_da_cobranca(conn, cid, tmp_path, codtmv):
+    """Issue #584: nota contra fornecedor (2.2.15), pessoa fisica (2.2.10) ou sem tipo, com centro de obra e o valor
+    de uma medicao aberta, nao e' nota da medicao: o casador nao a liga nem a conta como ambigua."""
+    c2 = _obra_com_centro(conn)
+    m = _medicao(conn, c2, 1, 500_00)
+    nf = _nf(7, 500.0, centro_custo="2.001.012", codtmv=codtmv)
+    if codtmv is None:
+        del nf["CODTMV"]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [nf], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, m)
+    assert medicoes.detalhe(conn, m)["estado"] == "protocolada"
+
+
+def test_casador_nao_liga_nota_fora_da_cobranca_nem_pelo_campo_livre(conn, cid, tmp_path):
+    """Issue #584: nem o campo livre no formato instituido faz nota 2.2.15 virar nota da medicao."""
+    m = _medicao(conn, cid, 12, 461_900_00)
+    cli = _simulador(tmp_path, [_nf(100, 461900.0, campo="IC 082/2025 - 12", codtmv="2.2.15")], [])
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, m)
+
+
+@pytest.mark.parametrize("codtmv", ["2.2.01", "2.2.02", "2.2.07", "2.2.16"])
+def test_casador_liga_nota_de_cobranca_ao_orgao(conn, cid, tmp_path, codtmv):
+    """Issue #584: nota de cobranca ao orgao nas mesmas condicoes continua ligada pelo centro e valor."""
+    c2 = _obra_com_centro(conn)
+    m = _medicao(conn, c2, 1, 500_00)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(7, 500.0, centro_custo="2.001.012",
+                                                                     codtmv=codtmv)], []))
+    assert r["alocacoes"] == 1, r
+    assert medicoes.detalhe(conn, m)["notas"][0]["regra"] == "centro_custo_valor"
+
+
+def test_soma_do_dia_nao_usa_irma_fora_da_cobranca(conn, cid, tmp_path):
+    """Issue #584: o par do dia so' entre notas de cobranca ao orgao; uma 2.2.15 do mesmo centro e dia que fecharia a
+    soma nao entra no par (nem leva a de cobranca junto)."""
+    c2 = _obra_com_centro(conn, "4.003.025")
+    m = _medicao(conn, c2, 1, 300_00)
+    dia = "2026-08-03T00:00:00-04:00"
+    cli = _simulador(tmp_path, [_nf(1, 120.0, centro_custo="4.003.025", emissao=dia),
+                                _nf(2, 180.0, centro_custo="4.003.025", emissao=dia, codtmv="2.2.15")], [])
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["alocacoes"] == 0, r
+    assert not _tem_nf(conn, m)
+
+
+def _vinculo_antigo_fora_da_cobranca(conn, cid, tmp_path, baixas=()):
+    """Vinculo automatico gravado antes da #584 com uma nota 2.2.15 (o casador de hoje nao o faria)."""
+    c2 = _obra_com_centro(conn)
+    m = _medicao(conn, c2, 3, 500_00)
+    nfs = [_nf(7, 500.0, centro_custo="2.001.012", codtmv="2.2.15", numero="77")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=7").fetchone()[0]
+    with db.mutacao(conn):
+        sincronizacao_rm.alocar(conn, None, nid, m, "detectado", 0.9, "centro_custo_valor")
+    return m, nfs
+
+
+def test_recebimento_nao_fecha_medicao_pelo_vinculo_automatico_fora_da_cobranca(conn, cid, tmp_path):
+    """Issue #584: vinculo automatico antigo com nota fora da cobranca nao fecha a medicao como recebida sozinho;
+    fica para o Leo decidir pelo relato (o vinculo nao e' desfeito)."""
+    m, nfs = _vinculo_antigo_fora_da_cobranca(conn, cid, tmp_path)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 7, 500.0, 500.0, 1,
+                                                                             "2026-09-01T00:00:00-04:00")]))
+    assert r["recebimentos"] == 0, r
+    d = medicoes.detalhe(conn, m)
+    assert d["estado"] != "recebida" and len(d["notas"]) == 1
+
+
+def test_vinculo_fora_da_cobranca_de_outra_coligada_nao_segura_o_recebimento(conn, cid, tmp_path):
+    """Issue #584 (code-review): so' as notas da coligada da entidade do contrato decidem o recebimento; um vinculo
+    automatico antigo com nota 2.2.15 de outra coligada nao segura a medicao do consorcio."""
+    eid = entidades.criar(conn, 1, {"nome": "Consórcio X", "cnpj": "11444777000161",
+                                    "papel": "consorcio", "coligada_rm": 12})
+    c2 = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 9", "objeto": "Obra",
+                                   "valor_original_centavos": 100_00, "entidade_id": eid})
+    m = _medicao(conn, c2, 1, 500_00)
+    nfs = [_nf(7, 500.0, coligada=12), _nf(8, 100.0, codtmv="2.2.15")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=8").fetchone()[0]
+    with db.mutacao(conn):
+        sincronizacao_rm.alocar(conn, None, nid, m, "detectado", 0.9, "valor_exato")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [
+        _baixa(1, 7, 500.0, 500.0, 1, "2026-09-01T00:00:00-04:00", coligada=12)]))
+    assert r["recebimentos"] == 1, r
+    assert medicoes.detalhe(conn, m)["estado"] == "recebida"
+
+
+def test_vinculos_fora_da_cobranca_lista_sem_gravar(conn, cid, tmp_path):
+    """Issue #584: o relato lista os vinculos automaticos vigentes com nota de tipo fora da cobranca ao orgao."""
+    m, _ = _vinculo_antigo_fora_da_cobranca(conn, cid, tmp_path)
+    m_ok = _medicao(conn, cid, 12, 461_900_00)
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 461900.0, campo="IC 082/2025 - 12")], []))
+    assert _tem_nf(conn, m_ok)
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    rel = sincronizacao_rm.vinculos_fora_da_cobranca(conn)
+    assert [(v["numero"], v["idmov"], v["medicao_id"], v["valor_centavos"], v["codtmv"]) for v in rel] == \
+        [("77", 7, m, 500_00, "2.2.15")]
+    assert rel[0]["numero_instrumento"] == "CT 9" and rel[0]["regra"] == "centro_custo_valor"
+    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == antes
+
+
+def test_cli_rm_vinculos_fora_da_cobranca_imprime_e_nao_grava(conn, cid, tmp_path, capsys):
+    from app import cli
+    m, _ = _vinculo_antigo_fora_da_cobranca(conn, cid, tmp_path)
+    conn.commit()
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    assert cli.main(["rm", "vinculos-fora-da-cobranca"]) == 0
+    saida = capsys.readouterr().out
+    assert "ENSAIO (nada foi gravado)" in saida
+    assert "NF 77" in saida and "idmov 7" in saida and f"medição {m}" in saida and "R$ 500,00" in saida
+    assert "2.2.15" in saida
+    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == antes
 
 
 def test_centro_custo_nao_cadastrado_fica_ambiguo(conn, cid, tmp_path):
