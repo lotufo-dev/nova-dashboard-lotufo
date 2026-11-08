@@ -279,7 +279,10 @@ def _irmas(conn, c: dict, familia: str, o: dict, ms: list[dict], hoje: datetime.
             # rodada 3 da PR #179: nem a irma com item que bloqueia (FRC assinada recusada, sem espelho, sem cadastro)
             if any(i["estado"] == "vencida" or i.get("bloqueia") for i in _itens(conn, c, familia, [dict(r)], hoje)[0]):
                 continue
-            achadas[r["id"]] = {"medicao_id": r["id"], "titulo": medicoes.titulo(r), "tipo": r["tipo"]}
+            # issue #562 (revisor, rodada 2 da PR #581): a conferencia da irma, para o registro por fora pedir o motivo
+            # quando so' ela diverge do espelho
+            achadas[r["id"]] = {"medicao_id": r["id"], "titulo": medicoes.titulo(r), "tipo": r["tipo"],
+                                "divergencias": notas.divergencias_da_medicao(conn, r["id"])}
     return list(achadas.values())
 
 

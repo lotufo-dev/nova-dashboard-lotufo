@@ -176,6 +176,20 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
     expect(fd.get("observacao")).toBe("Pelo Outlook, ao fiscal");
   });
 
+  it("#562 (revisor, rodada 2): a irmã marcada com nota divergente também pede o motivo; desmarcada, não", async () => {
+    await abrir([envio({ irmas: [{ ...irmas[0], divergencias: [{ medicao_id: 632, nota_id: 9, numero: 2275, campo: "valor", espelho: 1, nota: 2, grau: "divergente" }] }] })]);
+    const ROTULO = "Motivo do registro com a nota divergente (obrigatório)";
+    fireEvent.change(screen.getByLabelText(ROTULO), { target: { value: "NF do reajuste substituta pedida" } });
+    fireEvent.change(screen.getByLabelText(COMO), { target: { value: "Pelo Outlook, ao fiscal" } });
+    fireEvent.click(screen.getByLabelText("Incluir também o Reajuste da 7ª Medição"));
+    expect(screen.queryByLabelText(ROTULO)).toBeNull();
+    fireEvent.click(screen.getByLabelText("Incluir também o Reajuste da 7ª Medição"));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
+    await waitFor(() => expect(apiForm).toHaveBeenCalled());
+    const [, fd] = apiForm.mock.calls[0] as [string, FormData];
+    expect([fd.getAll("irma_ids"), fd.get("motivo_divergencia")]).toEqual([["632"], "NF do reajuste substituta pedida"]);
+  });
+
   it("a observação é obrigatória (vira a justificativa na auditoria) e não há texto padrão", async () => {
     await abrir([envio()]);
     const botao = screen.getByRole("button", { name: "Registrar" }) as HTMLButtonElement;

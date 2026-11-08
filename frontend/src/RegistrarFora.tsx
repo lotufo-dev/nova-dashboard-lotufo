@@ -44,7 +44,10 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
   const [confirmadas, setConfirmadas] = useState<Record<string, string[]>>({});
   const [confirmar, setConfirmar] = useState<{ chave: string; itens: string[]; mudou: boolean } | null>(null);
 
-  const diverge = envios.some(e => marcados.includes(e.chave) && (e.divergencias ?? []).some(d => d.grau === "divergente"));
+  const divergente = (ds?: { grau: string }[]) => (ds ?? []).some(d => d.grau === "divergente");
+  // #562 (revisor, rodada 2 da PR #581): a irma marcada junto (SINFRA, Pref. VG) tambem pode trazer a nota divergente
+  const diverge = envios.some(e => marcados.includes(e.chave) && (divergente(e.divergencias)
+    || (e.irmas ?? []).some(i => !irmasFora.includes(i.medicao_id) && divergente(i.divergencias))));
   const motivoCurto = diverge && motivo.trim().length < MIN_JUSTIFICATIVA;
 
   const fechar = () => { if (parcial) aoRecarregar(); aoFechar(); };

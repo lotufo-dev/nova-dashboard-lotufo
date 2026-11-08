@@ -38,7 +38,7 @@ export type DivergenciaNota = { medicao_id: number; nota_id: number; numero: num
   espelho: number | string | null; nota: number | string | null; grau: string };
 export type NotaAcimaDaMedicao = { medicao_id: number; nota_id: number; numero: number | string; alocado_centavos: number;
   medicao_centavos: number };
-export type Irma = { medicao_id: number; titulo: string; tipo: string };
+export type Irma = { medicao_id: number; titulo: string; tipo: string; divergencias?: DivergenciaNota[] };
 export type ListaEnvios = { envios: Envio[]; contadores: Record<string, number> };
 
 const GRUPOS = ["SINFRA", "MTPAR", "SES-MT", "Pref. VG", "Pref. Cuiabá"];
