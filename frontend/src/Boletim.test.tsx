@@ -94,6 +94,46 @@ describe("FormBoletim (issue #290)", () => {
   });
 });
 
+describe("confirmação do boletim com o par (issue #625)", () => {
+  afterEach(() => { cleanup(); apiForm.mockReset(); });
+  const LIDA = { lido: true, fonte: "texto", avisos: [], campos: { numero_orgao: "7", data: "2026-08-10", valor_centavos: 1200001 } };
+
+  async function registrar(m: Medicao, resposta: unknown) {
+    apiForm.mockImplementation(async (url: string) => url.endsWith("/leitura") ? LIDA : resposta);
+    let feito: string | undefined;
+    const agir = vi.fn(async (fn: () => Promise<unknown>, msg?: string | ((r: unknown) => string)) => {
+      const r = await fn(); feito = typeof msg === "function" ? msg(r) : msg; return true;
+    });
+    render(<FormBoletim m={m} salvando={false} agir={agir} aoFechar={() => {}} />);
+    fireEvent.drop(screen.getByTestId("soltar-boletim"), { dataTransfer: { files: [PDF] } });
+    await waitFor(() => expect(campo(/Nº no órgão/).value).toBe("7"));
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar e registrar o boletim" }));
+    await waitFor(() => expect(agir).toHaveBeenCalled());
+    await waitFor(() => expect(feito).toBeDefined());
+    return feito;
+  }
+
+  it("registrado também no reajuste: nomeia o par e o valor", async () => {
+    expect(await registrar(M, { id: 1, par: { medicao_id: 6, tipo: "reajuste", numero: 7, aprovado_centavos: 9586401 } }))
+      .toBe("Boletim registrado na 7ª medição e no reajuste (R$ 95.864,01).");
+  });
+
+  it("registrado no reajuste e também na medição", async () => {
+    expect(await registrar({ ...M, tipo: "reajuste" } as Medicao,
+      { id: 1, par: { medicao_id: 4, tipo: "execucao", numero: 7, aprovado_centavos: 151140495 } }))
+      .toBe("Boletim registrado no reajuste e na medição (R$ 1.511.404,95).");
+  });
+
+  it("par de fora: o motivo numa linha", async () => {
+    expect(await registrar(M, { id: 1, par: { motivo: "Reajuste nº 7 sem boletim: registre o envio da planilha/carta antes do boletim do órgão" } }))
+      .toBe("Boletim registrado. Reajuste nº 7 sem boletim: registre o envio da planilha/carta antes do boletim do órgão.");
+  });
+
+  it("sem par: a confirmação de sempre", async () => {
+    expect(await registrar(M, { id: 1, par: null })).toBe("Boletim registrado.");
+  });
+});
+
 describe("AceiteDiferenca (issue #288)", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
   const COM_BOLETIM = { ...M, estado: "boletim_recebido", valor_atestado_centavos: 1200001,

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiErro } from "./api";
+import type { Agir } from "./MedicaoAtos";
 import { ACIMA_DO_TETO, FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados } from "./AssinadosEnvio";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
@@ -28,7 +29,7 @@ const anexar = (rotulo: string, f: File) => fireEvent.change(screen.getByLabelTe
 function montar(s = S, previa = PREVIA) {
   apiForm.mockImplementation(async (url: string) => (url.endsWith("/previa") ? previa : { envio_id: 1 }));
   api.mockResolvedValue({});
-  const agir = vi.fn(async (fn: () => Promise<unknown>, _feito?: string) => { await fn(); return true; });
+  const agir = vi.fn(async (fn: () => Promise<unknown>, _feito?: Parameters<Agir>[1]) => { await fn(); return true; });
   const aoFechar = vi.fn();
   render(<FormEnviarAssinados medicaoId={5} s={s} salvando={false} agir={agir} aoFechar={aoFechar} aoLiberar={() => {}} />);
   return { agir, aoFechar };
@@ -133,7 +134,7 @@ describe("Registrar envio dos assinados por fora", () => {
 
   it("manda a data, o PDF e o .eml, e confirma", async () => {
     apiForm.mockResolvedValue({ id: 1 });
-    const agir = vi.fn(async (fn: () => Promise<unknown>, _feito?: string) => { await fn(); return true; });
+    const agir = vi.fn(async (fn: () => Promise<unknown>, _feito?: Parameters<Agir>[1]) => { await fn(); return true; });
     render(<FormAssinadosPorFora medicaoId={5} s={S} salvando={false} agir={agir} aoFechar={() => {}} aoLiberar={() => {}} />);
     fireEvent.change(screen.getByLabelText("Data do envio"), { target: { value: "2026-11-09" } });
     anexar("PDF assinado da medição", pdf("Medicao.pdf"));

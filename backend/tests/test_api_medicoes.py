@@ -1266,6 +1266,445 @@ def test_capa_com_valor_negativo_nao_propoe_nada(client_admin, monkeypatch):
     assert corpo["avisos"] == ["A capa traz valor negativo; confira o boletim e digite os valores"]
 
 
+# --- issue #625: o boletim do SMO registra tambem o par (execucao <-> reajuste de mesmo nº e competencia) ----------
+
+def _inserir_medicao(cid, numero, tipo, estado, pedido, competencia="2026-07"):
+    from app import db
+    conn = db.get_conn()
+    try:
+        mid = conn.execute(
+            "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+            "valor_protocolado_origem) VALUES (?,?,?,?,?,?,'manual')",
+            (cid, numero, tipo, competencia, estado, pedido)).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+    return mid
+
+
+def _par_da_7a(cl, monkeypatch, estado_par="planilha_enviada", tipo_par="reajuste", competencia_par="2026-07"):
+    """Execucao 7 (planilha enviada) e o par dela; a capa de exemplo (7a, PI R$ 1.234.567,89, reajuste R$ 98.765,43)."""
+    _capa_lida(monkeypatch)
+    cid = _contrato(cl)
+    exe = _inserir_medicao(cid, 7, "execucao", "planilha_enviada", 1_234_567_89)
+    par = _inserir_medicao(cid, 7, tipo_par, estado_par, 90_000_00, competencia_par)
+    return exe, par
+
+
+def _boletim_da_7a(cl, mid, valor="1.234.567,89", meio="smo", **extra):
+    return _registrar_boletim(cl, mid, valor=valor, data="2026-04-14", numero="7", meio=meio, **extra)
+
+
+def _capas(mid):
+    from app import db
+    conn = db.get_conn()
+    try:
+        return [dict(r) for r in conn.execute("SELECT * FROM medicao_boletim_capas WHERE medicao_id=? ORDER BY id", (mid,))]
+    finally:
+        conn.close()
+
+
+def test_boletim_na_execucao_registra_tambem_no_reajuste_com_o_valor_da_capa(client_admin, monkeypatch):
+    exe, rea = _par_da_7a(client_admin, monkeypatch)
+    r = _boletim_da_7a(client_admin, exe, observacao="via SMO")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"medicao_id": rea, "tipo": "reajuste", "numero": 7, "aprovado_centavos": 98_765_43}
+    [a] = _atestos(exe)
+    [b] = _atestos(rea)
+    # mesmo PDF (nao gravado duas vezes), data, nº, meio e observacao; valor = reajustamento da capa (centavo impar)
+    assert (b["arquivo"], b["sha256"], b["atestado_em"], b["numero_orgao"], b["meio"], b["observacao"]) == (
+        a["arquivo"], a["sha256"], "2026-04-14", "7", "smo", "via SMO")
+    assert (b["valor_centavos"], b["origem"], b["pedido_centavos"]) == (98_765_43, "aceito", 90_000_00)
+    d = client_admin.get(f"/api/medicoes/{rea}").json()
+    assert (d["estado"], d["valor_atestado_centavos"], d["valor_protocolado_centavos"], d["atestado_em"]) == (
+        "boletim_recebido", 98_765_43, 90_000_00, "2026-04-14")         # o pedido do reajuste nao muda
+    [bol] = d["boletins"]
+    pdf = client_admin.get(f"/api/medicoes/{rea}/boletins/{bol['id']}")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF-")
+    assert [c["numero"] for c in _capas(rea)] == [7] and _capas(rea)[0]["atesto_id"] == b["id"]
+    [(antes, depois)] = [x for x in _auditoria("medicao.valor_atestado") if f'"atesto_id": {b["id"]}' in x[1]]
+    assert '"valor_atestado_centavos": 9876543' in depois and f'"par_de_medicao_id": {exe}' in depois
+    assert '"estado": "planilha_enviada"' in antes
+
+
+def test_boletim_no_reajuste_registra_tambem_na_execucao_com_os_precos_iniciais(client_admin, monkeypatch):
+    _capa_lida(monkeypatch)
+    cid = _contrato(client_admin)
+    exe = _inserir_medicao(cid, 7, "execucao", "planilha_enviada", 1_234_567_89)
+    rea = _inserir_medicao(cid, 7, "reajuste", "planilha_enviada", 90_000_00)
+    r = _boletim_da_7a(client_admin, rea, valor="98.765,43")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"medicao_id": exe, "tipo": "execucao", "numero": 7, "aprovado_centavos": 1_234_567_89}
+    [b] = _atestos(exe)
+    assert (b["valor_centavos"], b["origem"]) == (1_234_567_89, "aceito")
+    assert client_admin.get(f"/api/medicoes/{exe}").json()["estado"] == "boletim_recebido"
+
+
+def test_acumulado_do_reajustamento_e_espelho_sem_boletim_somem_com_o_par(client_admin, monkeypatch):
+    # o caso da 15a do MT-388: a capa traz o reajustamento da presente medicao; com o par registrado, a soma bate
+    from app import db, espelhos, leitura_smo
+    capa = {"numero": 15, "situacao": "APROVADA", "data_realizacao": "2026-11-05", "valor_centavos": 1_511_404_95,
+            "reajuste_centavos": 95_864_01, "acumulado_pi_centavos": 1_511_404_95,
+            "acumulado_reajuste_centavos": 95_864_01}
+    monkeypatch.setattr(leitura_smo, "ler_pdf_texto", lambda pdf: {"ok": True, "motivo": None, "campos": capa,
+                                                                   "faltando": [], "avisos": []})
+    cid = _contrato(client_admin)
+    exe = _inserir_medicao(cid, 15, "execucao", "planilha_enviada", 1_511_404_95)
+    rea = _inserir_medicao(cid, 15, "reajuste", "planilha_enviada", 90_000_00)
+    r = _registrar_boletim(client_admin, exe, valor="1.511.404,95", data="2026-11-05", numero="15")
+    assert r.status_code == 201, r.text
+    d = client_admin.get(f"/api/medicoes/{exe}").json()
+    assert not any("reajustamento" in f for f in d["capa_divergencias"]), d["capa_divergencias"]
+    conn = db.get_conn()
+    try:
+        m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (rea,)).fetchone())
+        assert espelhos._sem_boletim(conn, {"reajuste": m}, ["reajuste"]) == []
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("caso", ["sem_par", "projeto", "outra_competencia", "cancelada"])
+def test_sem_par_so_a_medicao_aberta_recebe(client_admin, monkeypatch, caso):
+    tipo, competencia, estado = {"sem_par": ("reajuste", "2026-08", "planilha_enviada"),
+                                 "projeto": ("projeto", "2026-07", "planilha_enviada"),
+                                 "outra_competencia": ("reajuste", "2026-08", "planilha_enviada"),
+                                 "cancelada": ("reajuste", "2026-07", "cancelada")}[caso]
+    if caso == "sem_par":
+        _capa_lida(monkeypatch)
+        exe, outra = _inserir_medicao(_contrato(client_admin), 7, "execucao", "planilha_enviada", 1_00), None
+    else:
+        exe, outra = _par_da_7a(client_admin, monkeypatch, estado_par=estado, tipo_par=tipo, competencia_par=competencia)
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] is None
+    assert len(_atestos(exe)) == 1
+    if outra is not None:
+        assert _atestos(outra) == []
+
+
+def test_capa_nao_aprovada_nao_registra_o_par(client_admin, monkeypatch):
+    import pathlib
+    exe, rea = _par_da_7a(client_admin, monkeypatch)
+    texto = (pathlib.Path(__file__).parent / "fixtures" / "smo" / "capa-texto-aprovada.txt").read_text(encoding="utf-8")
+    texto = texto.replace("Provisória - APROVADA", "Provisória - EM ANÁLISE")
+    _capa_lida(monkeypatch, paginas=texto.split("SINFRA - Secretaria de Estado de Infraestrutura e Logística\n"))
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] is None and len(_atestos(exe)) == 1 and _atestos(rea) == []
+
+
+def test_par_em_planilha_gerada_fica_sem_boletim_com_o_motivo(client_admin, monkeypatch):
+    exe, rea = _par_da_7a(client_admin, monkeypatch, estado_par="planilha_gerada")
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: registre o envio da planilha/carta antes do "
+                                         "boletim do órgão"}
+    assert len(_atestos(exe)) == 1 and _atestos(rea) == []
+    assert client_admin.get(f"/api/medicoes/{rea}").json()["estado"] == "planilha_gerada"
+
+
+def test_valor_negativo_do_par_fica_sem_boletim_com_o_motivo(client_admin, monkeypatch):
+    from app import leitura_smo
+    monkeypatch.setattr(leitura_smo, "ler_pdf_texto", lambda pdf: {"ok": True, "motivo": None, "faltando": [],
+        "avisos": [], "campos": {"numero": 7, "situacao": "APROVADA", "data_realizacao": "2026-04-14",
+                                 "valor_centavos": 1_234_567_89, "reajuste_centavos": -12_35}})
+    cid = _contrato(client_admin)
+    exe = _inserir_medicao(cid, 7, "execucao", "planilha_enviada", 1_234_567_89)
+    rea = _inserir_medicao(cid, 7, "reajuste", "planilha_enviada", -12_35)
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: a capa traz valor negativo"}
+    assert _atestos(rea) == []
+
+
+def test_capa_de_outro_numero_nao_vai_ao_par(client_admin, monkeypatch):
+    _capa_lida(monkeypatch)                                       # a capa e' da 7a
+    cid = _contrato(client_admin)
+    exe = _inserir_medicao(cid, 6, "execucao", "planilha_enviada", 1_00)
+    rea = _inserir_medicao(cid, 6, "reajuste", "planilha_enviada", 1_00)
+    r = _registrar_boletim(client_admin, exe, valor="1.234.567,89", data="2026-04-14", numero="7")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 6 sem boletim: a capa é da 7ª medição"}
+    assert _atestos(rea) == []
+
+
+def test_repeticao_na_execucao_da_422_e_o_reajuste_fica_com_um_evento(client_admin, monkeypatch):
+    exe, rea = _par_da_7a(client_admin, monkeypatch)
+    assert _boletim_da_7a(client_admin, exe).status_code == 201
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.status_code == 422 and r.json()["detail"] == "Este boletim já está registrado"
+    assert len(_atestos(exe)) == 1 and len(_atestos(rea)) == 1
+    # o mesmo boletim depois no reajuste tambem e' repeticao
+    assert _boletim_da_7a(client_admin, rea, valor="98.765,43").status_code == 422
+    assert len(_atestos(rea)) == 1 and len(_atestos(exe)) == 1
+
+
+def test_glosa_na_execucao_com_o_par_ja_registrado_avisa_o_motivo(client_admin, monkeypatch):
+    # o mesmo PDF com outro valor na execucao (glosa digitada): o reajuste ja' tem este boletim e nao duplica
+    exe, rea = _par_da_7a(client_admin, monkeypatch)
+    assert _boletim_da_7a(client_admin, exe).status_code == 201
+    r = _boletim_da_7a(client_admin, exe, valor="1.234.567,87")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 já tem boletim"}
+    assert len(_atestos(exe)) == 2 and len(_atestos(rea)) == 1
+
+
+def test_correcao_na_execucao_nao_reescreve_a_glosa_do_reajuste(client_admin, monkeypatch):
+    # code-review: o reajuste com glosa digitada (mesmo PDF) nao volta ao valor da capa quando a execucao e' corrigida
+    exe, rea = _par_da_7a(client_admin, monkeypatch)
+    assert _boletim_da_7a(client_admin, exe).status_code == 201
+    assert _boletim_da_7a(client_admin, rea, valor="95.000,01").status_code == 201          # glosa no reajuste
+    r = _boletim_da_7a(client_admin, exe, observacao="corrigida")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 já tem boletim"}
+    assert [e["valor_centavos"] for e in _atestos(rea)] == [98_765_43, 95_000_01]
+    assert client_admin.get(f"/api/medicoes/{rea}").json()["valor_atestado_centavos"] == 95_000_01
+
+
+def _capa_campos(monkeypatch, **extra):
+    """A capa lida no registro (so' o texto), com os campos da 7a e o que o teste mudar."""
+    from app import leitura_smo
+    campos = {"numero": 7, "situacao": "APROVADA", "data_realizacao": "2026-04-14", "valor_centavos": 1_234_567_89,
+              "reajuste_centavos": 98_765_43, "total_centavos": 1_333_333_32, **extra}
+    campos = {k: v for k, v in campos.items() if v is not None}
+    monkeypatch.setattr(leitura_smo, "ler_pdf_texto", lambda pdf: {"ok": True, "motivo": None, "faltando": [],
+                                                                   "avisos": [], "campos": dict(campos)})
+
+
+def _exe_e_rea(cl, numero=7, pedido_rea=90_000_00):
+    cid = _contrato(cl)
+    return (_inserir_medicao(cid, numero, "execucao", "planilha_enviada", 1_234_567_89),
+            _inserir_medicao(cid, numero, "reajuste", "planilha_enviada", pedido_rea))
+
+
+def test_prazo_divergente_da_capa_fica_na_medicao_onde_o_boletim_foi_registrado(client_admin, monkeypatch):
+    # revisor, R1: a capa copiada ao par (gravada depois) nao vira a "mais recente do contrato"
+    import datetime
+    from app import capa_smo, db
+    _capa_campos(monkeypatch, execucao_fim="2031-01-31")
+    exe, rea = _exe_e_rea(client_admin)
+    assert _boletim_da_7a(client_admin, exe).json()["par"]["medicao_id"] == rea
+    assert any(f.startswith("Fim da execução") for f in client_admin.get(f"/api/medicoes/{exe}").json()["capa_divergencias"])
+
+    def prazos():
+        conn = db.get_conn()
+        try:
+            return [a for a in capa_smo.avisos(conn, datetime.date.today()) if a["tipo"] == "capa_prazo_divergente"]
+        finally:
+            conn.close()
+    assert [a["medicao_id"] for a in prazos()] == [exe]
+    r = client_admin.post(f"/api/medicoes/{exe}/diferenca-aceita", json={"justificativa": "prazo do SMO desatualizado"})
+    assert r.status_code in (200, 201), r.text
+    assert prazos() == []                                   # o aceite da medicao aberta cala o aviso
+
+
+def test_numero_do_orgao_da_execucao_vale_para_o_reajuste_nos_dois_sentidos(client_admin, monkeypatch):
+    # revisor, R2: execucao Lotufo 15 e' a 16a no orgao; o reajuste 15 nao tem nº do orgao proprio
+    from app import db
+    for primeiro in ("reajuste", "execucao"):
+        _capa_campos(monkeypatch, numero=16)
+        exe, rea = _exe_e_rea(client_admin, numero=15)
+        conn = db.get_conn()
+        conn.execute("UPDATE medicoes SET numero_orgao=16 WHERE id=?", (exe,)); conn.commit(); conn.close()
+        aberta, par = (rea, exe) if primeiro == "reajuste" else (exe, rea)
+        valor = "98.765,43" if primeiro == "reajuste" else "1.234.567,89"
+        r = _registrar_boletim(client_admin, aberta, valor=valor, data="2026-04-14", numero="16")
+        assert r.status_code == 201, r.text
+        assert r.json()["par"]["medicao_id"] == par, (primeiro, r.json())
+        assert len(_atestos(par)) == 1
+
+
+def test_mesmo_boletim_baixado_de_novo_nao_cria_evento_no_par_e_a_diferenca_aceita_fica(client_admin, monkeypatch):
+    # revisor R3 + Sol S1: o mesmo SMO com outro sha256 (baixado de novo), mesmos valor, data e nº
+    _capa_campos(monkeypatch)
+    exe, rea = _exe_e_rea(client_admin, pedido_rea=100_000_01)       # aprovado do par abaixo do pedido
+    assert _boletim_da_7a(client_admin, exe).status_code == 201
+    r = client_admin.post(f"/api/medicoes/{rea}/diferenca-aceita", json={"justificativa": "glosa aceita pelo órgão"})
+    assert r.status_code in (200, 201), r.text
+    r = _boletim_da_7a(client_admin, exe, texto="mesmo SMO baixado de novo", meio="email", observacao="outra")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 já tem boletim"}
+    assert len(_atestos(rea)) == 1
+    assert client_admin.get(f"/api/medicoes/{rea}").json()["diferenca_aceita"] is not None
+
+
+def _vigente(cl, mid):
+    d = cl.get(f"/api/medicoes/{mid}").json()
+    return d["valor_atestado_centavos"], d["atestado_em"]
+
+
+@pytest.mark.parametrize("retificado", ["outro_valor", "mesmo_valor_outra_data"])
+def test_pdf_antigo_reenviado_na_execucao_nao_passa_por_cima_do_boletim_novo_do_par(client_admin, monkeypatch,
+                                                                                  retificado):
+    # revisor, rodada 2: P na execucao (vai ao reajuste); SMO retificado Q registrado no reajuste; P reenviado na
+    # execucao so' para corrigir a observacao nao volta o reajuste ao boletim antigo
+    _capa_campos(monkeypatch)
+    exe, rea = _exe_e_rea(client_admin)
+    assert _boletim_da_7a(client_admin, exe).json()["par"]["medicao_id"] == rea
+    if retificado == "outro_valor":
+        _capa_campos(monkeypatch, reajuste_centavos=95_000_01, total_centavos=1_329_567_90)
+        r = _boletim_da_7a(client_admin, rea, valor="95.000,01", texto="SMO retificado")
+        esperado = (95_000_01, "2026-04-14")
+    else:
+        r = _registrar_boletim(client_admin, rea, valor="98.765,43", data="2026-04-20", numero="7", meio="smo",
+                               texto="SMO retificado")
+        esperado = (98_765_43, "2026-04-20")
+    assert r.status_code == 201, r.text
+    _capa_campos(monkeypatch)
+    r = _boletim_da_7a(client_admin, exe, observacao="corrigida")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 já tem boletim"}
+    assert _atestos(exe)[-1]["observacao"] == "corrigida"   # a execucao continua gravada
+    assert _vigente(client_admin, rea) == esperado and len(_atestos(rea)) == 2
+
+
+def test_pdf_antigo_com_outro_sha_nao_passa_por_cima_da_capa_mais_nova_do_par(client_admin, monkeypatch):
+    # revisor, rodada 2 (regra f): o mesmo PDF antigo baixado de novo (outro sha256), capa de data anterior
+    _capa_campos(monkeypatch)
+    exe, rea = _exe_e_rea(client_admin)
+    assert _boletim_da_7a(client_admin, exe).json()["par"]["medicao_id"] == rea
+    _capa_campos(monkeypatch, data_realizacao="2026-05-10", reajuste_centavos=95_000_01, total_centavos=1_329_567_90)
+    assert _boletim_da_7a(client_admin, rea, valor="95.000,01", texto="SMO de maio").status_code == 201
+    _capa_campos(monkeypatch)
+    r = _boletim_da_7a(client_admin, exe, texto="SMO de abril baixado de novo", observacao="outra")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 já tem boletim"}
+    assert len(_atestos(exe)) == 2
+    assert _vigente(client_admin, rea) == (95_000_01, "2026-04-14") and len(_atestos(rea)) == 2
+
+
+def test_correcao_so_da_data_na_execucao_nao_chega_ao_par(client_admin, monkeypatch):
+    # decisao do dono de 09/11/2026 (#636): com boletim, o par fica como esta' (a correcao se faz nele)
+    _capa_campos(monkeypatch)
+    exe, rea = _exe_e_rea(client_admin)
+    assert _boletim_da_7a(client_admin, exe).status_code == 201
+    r = _registrar_boletim(client_admin, exe, valor="1.234.567,89", data="2026-04-15", numero="7", meio="smo")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 já tem boletim"}
+    assert _atestos(exe)[-1]["atestado_em"] == "2026-04-15"
+    assert [(e["atestado_em"], e["valor_centavos"]) for e in _atestos(rea)] == [("2026-04-14", 98_765_43)]
+
+
+def test_pdf_antigo_baixado_de_novo_com_retificado_de_mesma_data_no_par(client_admin, monkeypatch):
+    # revisor, rodada extra (#636): o SMO original com outro sha256, depois do retificado de mesma data no reajuste
+    _capa_campos(monkeypatch)
+    exe, rea = _exe_e_rea(client_admin)
+    assert _boletim_da_7a(client_admin, exe).json()["par"]["medicao_id"] == rea
+    _capa_campos(monkeypatch, reajuste_centavos=95_000_01, total_centavos=1_329_567_90)
+    assert _boletim_da_7a(client_admin, rea, valor="95.000,01", texto="SMO retificado").status_code == 201
+    _capa_campos(monkeypatch)
+    r = _boletim_da_7a(client_admin, exe, texto="SMO de abril baixado de novo", observacao="outra")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 já tem boletim"}
+    assert _vigente(client_admin, rea) == (95_000_01, "2026-04-14")
+
+
+def test_par_com_boletim_sem_capa_mais_novo_nao_recebe(client_admin, monkeypatch):
+    # revisor, rodada extra (#636): o reajuste tem boletim por oficio (sem capa) de maio; o SMO de abril na execucao
+    from app import leitura_smo
+    exe, rea = _exe_e_rea(client_admin)
+    monkeypatch.setattr(leitura_smo, "ler_pdf_texto", lambda pdf: {"ok": False, "motivo": "x", "faltando": [],
+                                                                   "avisos": [], "campos": {}})
+    r = _registrar_boletim(client_admin, rea, valor="95.000,01", data="2026-05-10", numero="7", meio="oficio",
+                           texto="oficio de maio")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] is None
+    _capa_campos(monkeypatch)
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 já tem boletim"}
+    assert len(_atestos(exe)) == 1
+    assert _vigente(client_admin, rea) == (95_000_01, "2026-05-10")
+
+
+def test_execucao_com_boletim_nao_recebe_do_reajuste(client_admin, monkeypatch):
+    # o nome do par no motivo, no sentido inverso
+    _capa_campos(monkeypatch)
+    exe, rea = _exe_e_rea(client_admin)
+    assert _registrar_boletim(client_admin, exe, valor="1.200.000,01", data="2026-04-10", numero="7").json()["par"][
+        "medicao_id"] == rea
+    _capa_campos(monkeypatch, reajuste_centavos=95_000_01, total_centavos=1_329_567_90)
+    r = _boletim_da_7a(client_admin, rea, valor="95.000,01", texto="SMO retificado")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "7ª medição já tem boletim"}
+    assert _vigente(client_admin, exe) == (1_200_000_01, "2026-04-10")
+
+
+def test_total_da_capa_digitado_na_execucao_nao_vai_ao_par(client_admin, monkeypatch):
+    # Sol, S2: o total ja' leva o reajustamento; o par contaria em dobro
+    _capa_campos(monkeypatch)
+    exe, rea = _exe_e_rea(client_admin)
+    r = _boletim_da_7a(client_admin, exe, valor="1.333.333,32")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: o aprovado digitado é o total da capa"}
+    assert _atestos(rea) == []
+
+
+@pytest.mark.parametrize("campo", ["acrescimos_centavos", "descontos_centavos"])
+def test_capa_com_acrescimos_ou_descontos_nao_vai_ao_par(client_admin, monkeypatch, campo):
+    # Sol, S3: o valor bruto do par nao seria conferido por ninguem
+    _capa_campos(monkeypatch, **{campo: 1_500_01})
+    exe, rea = _exe_e_rea(client_admin)
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: a capa traz acréscimos ou descontos"}
+    assert _atestos(rea) == []
+
+
+def test_reajustamento_zero_na_capa_nao_vira_glosa_total_no_par(client_admin, monkeypatch):
+    # revisor, R4
+    _capa_campos(monkeypatch, reajuste_centavos=0, total_centavos=1_234_567_89)
+    exe, rea = _exe_e_rea(client_admin)
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: a capa não traz o valor dele"}
+    assert _atestos(rea) == []
+
+
+def test_par_com_numero_e_data_diferentes_da_capa_fica_manual(client_admin, monkeypatch):
+    # code-review: `aceito` so' com o nº e a data digitados iguais aos da capa (regra da #290)
+    exe, rea = _par_da_7a(client_admin, monkeypatch)
+    r = _registrar_boletim(client_admin, exe, valor="1.234.567,89", data="2026-04-10", numero="SMO 7/2026")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"]["aprovado_centavos"] == 98_765_43
+    assert _atestos(rea)[0]["origem"] == "manual"
+
+
+def test_capa_sem_numero_ou_par_com_outro_numero_no_orgao_nao_vai_ao_par(client_admin, monkeypatch):
+    from app import db, leitura_smo
+    campos = {"numero": 7, "situacao": "APROVADA", "data_realizacao": "2026-04-14", "valor_centavos": 1_234_567_89,
+              "reajuste_centavos": 98_765_43}
+    monkeypatch.setattr(leitura_smo, "ler_pdf_texto", lambda pdf: {"ok": True, "motivo": None, "faltando": [],
+                                                                   "avisos": [], "campos": dict(campos)})
+    cid = _contrato(client_admin)
+    exe = _inserir_medicao(cid, 7, "execucao", "planilha_enviada", 1_234_567_89)
+    rea = _inserir_medicao(cid, 7, "reajuste", "planilha_enviada", 90_000_00)
+    conn = db.get_conn()
+    conn.execute("UPDATE medicoes SET numero_orgao=8 WHERE id=?", (rea,)); conn.commit(); conn.close()
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: a capa é da 7ª medição"}
+    del campos["numero"]
+    r = _boletim_da_7a(client_admin, exe, observacao="outra")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: a capa não traz o nº da medição"}
+    assert _atestos(rea) == []
+
+
+def test_boletim_com_par_diretoria_403_e_engenharia_registra_nos_dois(client_admin, monkeypatch):
+    from app import auth, db
+    exe, rea = _par_da_7a(client_admin, monkeypatch)
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@lotufo.com", "senha-forte-123", "diretoria")
+    auth.criar_usuario(conn, "Eng", "eng@lotufo.com", "senha-forte-123", "engenharia")
+    conn.close()
+    _entrar(client_admin, "dir@lotufo.com")
+    assert _boletim_da_7a(client_admin, exe).status_code == 403
+    assert _atestos(exe) == [] and _atestos(rea) == []
+    _entrar(client_admin, "eng@lotufo.com")
+    assert _boletim_da_7a(client_admin, exe).status_code == 201
+    assert len(_atestos(exe)) == 1 and len(_atestos(rea)) == 1
+
+
 def test_linha_do_tempo_mostra_o_boletim_com_pedido_aprovado_e_diferenca(client_admin):
     mid = _planilha_enviada(client_admin)
     r = _registrar_boletim(client_admin, mid, meio="smo")
