@@ -180,12 +180,12 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    Vermelha de novo, `precisa-do-leo`.
 10. **Depois do merge** de cada PR (e no `PAROU`/`FALHOU` do passo 4): `git -C <pasta principal> pull --ff-only`
     (com `-C`, nunca `cd <pasta> && git`: o Claude Code pede permissão a esse encadeamento, e o diretório do Bash da
-    sessão pode ainda estar dentro de um worktree) e remover o worktree da trabalhadora (e o da trabalhadora de correção, se o passo 6 abriu uma nova), pelo PowerShell na pasta principal (o hook de remoção só
+    sessão pode ainda estar dentro de um worktree) e remover o worktree da trabalhadora (e o da trabalhadora de correção, se o passo 6 abriu uma nova), pelo PowerShell, sempre com `git -C <pasta principal>` (não dependa do diretório da sessão) (o hook de remoção só
     roda quando o Claude remove sozinho). **Só remover caminho que contém `\.claude\worktrees\`**; a produção
     (`C:\DashboardLotufo\app`) também é worktree deste repositório e nunca entra aqui.
-    `git worktree remove "<caminho>"` (se reclamar da junção, antes rode
+    `git -C <pasta principal> worktree remove "<caminho>"` (se reclamar da junção, antes rode
     `cmd /c rmdir "<caminho>\frontend\node_modules"` e `cmd /c rmdir "<caminho>\backend\.venv"`, que apagam só o
-    vínculo) e `git branch -d <branch local que cada uma devolveu>` (se recusar com a PR já `MERGED`, `-D` vale: o commit
+    vínculo) e `git -C <pasta principal> branch -d <branch local que cada uma devolveu>` (se recusar com a PR já `MERGED`, `-D`, também com `-C`, vale: o commit
     está no `master` pelo merge da PR; a remota o GitHub apaga no merge).
 11. **Resumo ao Leo**, em português, uma linha por issue: número com o nome curto ("#231 (ofício no envio
     por fora)"; nunca o número sozinho, aqui nem nos comentários), o que mudou (do ponto de vista dele), estado
