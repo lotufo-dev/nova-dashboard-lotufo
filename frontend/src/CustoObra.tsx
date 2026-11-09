@@ -28,7 +28,7 @@ type ItemChave = {
   grupo: string; item: string; descricao: string | null; unidade: string; quantidade_acumulada: string | null;
   medicao: string | null; custo_centavos: number; custo_unitario_centavos: number | null;
   preco_unitario_centavos: number | null; diferenca_centavos: number | null;
-  situacao: "ok" | "sem_medicao" | "sem_custo";
+  situacao: "ok" | "sem_medicao" | "sem_custo" | "ambiguo";
 };
 type Custo = {
   contrato_id: number; obra: string; grupos: string[]; linhas: Linha[];
@@ -37,7 +37,9 @@ type Custo = {
   rm: { sincronizado_em: string | null; desatualizado: boolean };
 };
 
-const SITUACAO_CHAVE = { sem_medicao: "sem medição", sem_custo: "sem custo lançado" } as const;
+const SITUACAO_CHAVE = {
+  sem_medicao: "sem medição", sem_custo: "sem custo lançado", ambiguo: "item-chave ambíguo",
+} as const;
 
 function ItensChave({ c }: { c: Custo }) {
   const itens = c.itens_chave ?? [];

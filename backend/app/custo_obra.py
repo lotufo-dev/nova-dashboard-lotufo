@@ -173,7 +173,8 @@ def _itens_chave(grupos: list[dict], linhas: list[dict], medido: dict[str, dict]
     Custo do grupo = o acumulado da tela (apontado + rateado, todas as competencias); quantidade acumulada e preco
     unitario = os do item, no grupo dele, na planilha lida mais recente que o tem (o preco de um aditivo vale dali em
     diante). Quantidade ausente ou nao positiva: "sem_medicao"; custo zero ou negativo (estorno maior que o lancado):
-    "sem_custo"; nos dois, sem custo unitario nem diferenca.
+    "sem_custo"; nos dois, sem custo unitario nem diferenca. O item casa pelo nº ou, sem nº (planilha sem ITEM,
+    issue #613), pelo codigo do servico dentro do grupo; o codigo mais de uma vez no grupo: "ambiguo", sem calcular.
     Diferenca = preco do contrato - custo por unidade, em centavos por unidade (o mesmo sentido da tela)."""
     leituras = [lt for mes in sorted(medido) for lt in medido[mes]["leituras"]]
     saida = []
@@ -187,13 +188,22 @@ def _itens_chave(grupos: list[dict], linhas: list[dict], medido: dict[str, dict]
         # so' a planilha da medicao mais recente: sem leitura valida ou sem o item no grupo, "sem_medicao" (uma
         # quantidade antiga contra o custo acumulado de agora daria custo por unidade errado; gate Sol, #492)
         nome_ult, lido_ult = leituras[-1] if leituras else (None, None)
-        medicao, item = next(((nome_ult, it) for gr in (lido_ult["grupos"] if lido_ult else [])
-                              if gr["nome"] == g["nome"] for it in gr["itens"]
-                              if _segmentos(str(it["item"] or "").strip()) == _segmentos(chave["codigo"])),
-                             (None, None))
+        do_grupo = [it for gr in (lido_ult["grupos"] if lido_ult else []) if gr["nome"] == g["nome"]
+                    for it in gr["itens"]]
+        item = next((it for it in do_grupo
+                     if _segmentos(str(it["item"] or "").strip()) == _segmentos(chave["codigo"])), None)
+        ambiguo = False
+        if item is None:
+            # planilha sem nº de item (#613): o codigo do item-chave e' o do servico, que pode se repetir no grupo
+            pelo_codigo = [it for it in do_grupo if not it["item"] and (it["codigo"] or "").strip() == chave["codigo"]]
+            ambiguo = len(pelo_codigo) > 1
+            item = pelo_codigo[0] if len(pelo_codigo) == 1 else None
+        medicao = nome_ult if item else None
         qtd = item["quantidade_acumulada"] if item else None
         preco = item["preco_unitario_centavos"] if item else None
-        if qtd is None or Decimal(qtd) <= 0:
+        if ambiguo:
+            situacao, unitario = "ambiguo", None
+        elif qtd is None or Decimal(qtd) <= 0:
             situacao, unitario = "sem_medicao", None
         elif custo <= 0:
             situacao, unitario = "sem_custo", None
@@ -253,8 +263,8 @@ def _custo_da_obra(conn, contrato_id: int) -> dict:
         partes = dinheiro.ratear_proporcional(r_total, pesos) if sum(pesos) > 0 else [0] * len(nomes)
 
         def medido_de(nome):
-            # so' leitura pelos titulos da planilha (issue #612): o medido do grupo do cadastro e' desconhecido
-            # (ligar titulo a grupo e' outra issue), nunca 0 com a diferenca "-custo"
+            # so' leitura pelos titulos da planilha (issue #612; cadastro sem `titulos_planilha`, #613): o medido do
+            # grupo do cadastro e' desconhecido, nunca 0 com a diferenca "-custo"
             if md is None or not md["por_cadastro"]:
                 return None
             return md["grupos"].get(nome, 0)
