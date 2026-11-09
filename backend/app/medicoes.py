@@ -278,15 +278,20 @@ def _eventos_assinatura(conn: sqlite3.Connection, ids: list[int], out: dict[int,
         lote = ids[i:i + LOTE_AUDITORIA]
         for r in conn.execute(
                 "SELECT e.id, e.medicao_id, e.envelope, e.assinado_em, e.criado_em, e.arquivo, e.envio_origem, "
-                "a.motivo, a.anteriores, u.nome FROM medicao_assinaturas e "
+                "a.motivo, a.anteriores, v.enviado_em, u.nome FROM medicao_assinaturas e "
                 "LEFT JOIN medicao_assinados_envios a ON a.id=e.assinados_envio_id "
+                "LEFT JOIN envios v ON v.id=e.envio_id "
                 "LEFT JOIN usuarios u ON u.id=e.usuario_id "
                 f"WHERE e.medicao_id IN ({','.join('?' * len(lote))}) ORDER BY e.id", lote):
             pdf = " (PDF)" if r["arquivo"] else ""
             if r["envio_origem"]:
                 reenvio = bool(r["anteriores"])
+                # pelo sistema, o dia do e-mail (em Cuiaba); por fora, a data informada (code-review)
+                dia = r["assinado_em"]
+                if r["enviado_em"]:
+                    dia = tempo.para_local(datetime.datetime.fromisoformat(r["enviado_em"])).date().isoformat()
                 texto = (f"Documentos assinados {'reenviados' if reenvio else 'enviados'} em "
-                         f"{_data_br(r['assinado_em'])}{pdf}")
+                         f"{_data_br(dia)}{pdf}")
                 if reenvio and r["motivo"]:
                     texto += f" (motivo: {r['motivo']})"
                 if r["envio_origem"] == "externo":
@@ -378,7 +383,8 @@ def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: 
     with db.mutacao(conn):
         data = conferir_data_assinatura(conn, medicao_id, assinado_em)
         if conn.execute("SELECT 1 FROM medicao_assinaturas WHERE medicao_id=? AND assinado_em=? AND envelope IS ? "
-                        "AND envio_origem IS NULL", (medicao_id, data.isoformat(), envelope)).fetchone():
+                        "AND envio_origem IS NULL AND sha256 IS ?",
+                        (medicao_id, data.isoformat(), envelope, sha256)).fetchone():
             raise ValueError("Esta assinatura já está registrada")     # duplo clique: o registro não se apaga depois
         return gravar_assinatura(conn, usuario_id, medicao_id, data.isoformat(), envelope, arquivo, sha256)
 

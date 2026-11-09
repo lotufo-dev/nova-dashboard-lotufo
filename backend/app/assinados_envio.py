@@ -73,9 +73,22 @@ def limite(regras: dict) -> tuple[int, str]:
     return correio.MAX_TOTAL, f"PDF acima de {teto} MB, o limite do e-mail: divida o arquivo"
 
 
+# o PDF do reajuste que foi no e-mail da execucao (`reajuste_id`) tambem e' envio do reajuste (code-review)
+_DA_MEDICAO = "(medicao_id=? OR reajuste_id=?)"
+
+
 def _concluidos(conn, medicao_id: int) -> int:
-    return conn.execute(f"SELECT COUNT(*) FROM {TABELA} WHERE medicao_id=? AND (envio_id IS NOT NULL OR "
-                        "origem='externo')", (medicao_id,)).fetchone()[0]
+    return conn.execute(f"SELECT COUNT(*) FROM {TABELA} WHERE {_DA_MEDICAO} AND (envio_id IS NOT NULL OR "
+                        "origem='externo')", (medicao_id, medicao_id)).fetchone()[0]
+
+
+def _reservada(conn, medicao_id: int):
+    """A linha com o e-mail saindo (ou preso) desta medicao, como execucao ou como reajuste do par."""
+    return conn.execute(f"SELECT a.id, a.envio_reservado_em, a.envio_reservado_por, u.nome AS reservado_por_nome "
+                        f"FROM {TABELA} a LEFT JOIN usuarios u ON u.id=a.envio_reservado_por "
+                        "WHERE (a.medicao_id=? OR a.reajuste_id=?) AND a.envio_id IS NULL "
+                        "AND a.envio_reservado_em IS NOT NULL ORDER BY a.id DESC LIMIT 1",
+                        (medicao_id, medicao_id)).fetchone()
 
 
 def envios(conn, medicao_id: int) -> list[dict]:
@@ -91,10 +104,9 @@ def envios(conn, medicao_id: int) -> list[dict]:
 
 
 def _reserva(conn, medicao_id: int) -> dict | None:
-    r = conn.execute(f"SELECT a.id, a.envio_reservado_em, u.nome AS reservado_por FROM {TABELA} a "
-                     "LEFT JOIN usuarios u ON u.id=a.envio_reservado_por WHERE a.medicao_id=? AND a.envio_id IS NULL "
-                     "AND a.envio_reservado_em IS NOT NULL ORDER BY a.id DESC LIMIT 1", (medicao_id,)).fetchone()
-    return {"tabela": TABELA, **dict(r)} if r else None
+    r = _reservada(conn, medicao_id)
+    return ({"tabela": TABELA, "id": r["id"], "envio_reservado_em": r["envio_reservado_em"],
+             "reservado_por": r["reservado_por_nome"]} if r else None)
 
 
 def situacao(conn, medicao_id: int) -> dict:
@@ -224,12 +236,10 @@ def _gravar_pdfs(docs: dict) -> dict:
     """Grava os PDFs pelo hash (antes da reserva: o que sobrar de um envio recusado tem o nome do proprio hash e e'
     reaproveitado no proximo, como em api_medicoes._gravar_e_registrar) e le o envelope do DocuSign de cada um."""
     out = {}
-    for chave in ("medicao", "reajuste", "justificativa"):
-        if docs.get(chave):
-            nome, dados = docs[chave]
-            rel, sha = arquivos.gravar_bytes("assinados", dados, "pdf")
-            out[chave] = {"nome": (nome or f"{chave}.pdf")[-200:], "arquivo": rel, "sha256": sha,
-                          "envelope": medicoes.envelope_do_pdf(dados) if chave != "justificativa" else None}
+    for nome, dados, chave in _anexos(docs):      # o nome do anexo que vai no e-mail (unico, sem barra)
+        rel, sha = arquivos.gravar_bytes("assinados", dados, "pdf")
+        out[chave] = {"nome": nome, "arquivo": rel, "sha256": sha,
+                      "envelope": medicoes.envelope_do_pdf(dados) if chave != "justificativa" else None}
     return out
 
 
@@ -271,8 +281,7 @@ def _conferir_motivo(conn, medicao_id: int, motivo: str | None) -> int:
 
 
 def _sem_reserva_ativa(conn, medicao_id: int) -> None:
-    r = conn.execute(f"SELECT envio_reservado_em, envio_reservado_por FROM {TABELA} WHERE medicao_id=? "
-                     "AND envio_id IS NULL AND envio_reservado_em IS NOT NULL LIMIT 1", (medicao_id,)).fetchone()
+    r = _reservada(conn, medicao_id)
     if r is not None:
         raise envio_reserva.reservado(conn, r["envio_reservado_em"], r["envio_reservado_por"])
 
@@ -325,13 +334,22 @@ def enviar(conn, usuario: dict, medicao_id: int, docs: dict, para: list[str], co
     return envio_id
 
 
+def _data_do_envio(conn, medicao_id: int, enviado_em: str) -> str:
+    """As recusas da data da assinatura (o evento grava esta data), com o nome do campo da tela."""
+    try:
+        return medicoes.conferir_data_assinatura(conn, medicao_id, enviado_em).isoformat()
+    except ValueError as e:
+        raise ValueError(str(e).replace("Data da assinatura", "Data do envio")
+                         .replace("data da assinatura", "data do envio")) from None
+
+
 def registrar_por_fora(conn, usuario_id: int, medicao_id: int, docs: dict, enviado_em: str,
                        eml: tuple[str, bytes] | None = None, motivo: str | None = None) -> int:
     """"Registrar envio dos assinados por fora": data (nao futura, nao anterior ao boletim), o PDF assinado, os
     opcionais e o .eml (com a mesma conferencia do envio por fora da planilha/carta). Sem e-mail."""
     from app import notas_envio       # import local: notas_envio importa protocolo, que importa medicoes
     m, _, _, p = conferir(conn, medicao_id, docs)
-    data = medicoes.conferir_data_assinatura(conn, medicao_id, enviado_em).isoformat()
+    data = _data_do_envio(conn, medicao_id, enviado_em)
     if eml:
         if len(eml[1]) > notas_envio.TETO_EML:
             raise ValueError("Arquivo .eml acima de 25 MB")
@@ -342,11 +360,9 @@ def registrar_por_fora(conn, usuario_id: int, medicao_id: int, docs: dict, envia
     rel_eml = arquivos.gravar_bytes("evidencias", eml[1], "eml")[0] if eml else None
     with db.mutacao(conn):
         m, _, _, p = conferir(conn, medicao_id, docs)
-        medicoes.conferir_data_assinatura(conn, medicao_id, data)
+        _data_do_envio(conn, medicao_id, data)
         # o que esta' saindo pelo sistema (reserva ativa) nao se registra por fora: seriam dois envios
-        r = conn.execute(f"SELECT 1 FROM {TABELA} WHERE medicao_id=? AND envio_id IS NULL "
-                         "AND envio_reservado_em IS NOT NULL", (medicao_id,)).fetchone()
-        if r is not None:
+        if _reservada(conn, medicao_id) is not None:
             raise ValueError("Os documentos assinados estão sendo enviados pelo sistema: aguarde o envio terminar (ou "
                              "libere o envio preso) antes de registrar o envio por fora")
         anteriores = _concluidos(conn, medicao_id)

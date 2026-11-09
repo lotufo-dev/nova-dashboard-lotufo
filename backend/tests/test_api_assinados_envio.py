@@ -356,6 +356,54 @@ def test_registrar_assinatura_com_pdf_le_o_envelope(api):
     assert cl.post(f"/api/medicoes/{mid}/assinatura", json={"data": hoje}).status_code == 201
 
 
+# --- achados do code-review ------------------------------------------------------------------------
+
+def test_reajuste_que_foi_com_a_execucao_pede_motivo_para_ir_de_novo_sozinho(api, monkeypatch):
+    cl, cid, _ = api
+    mid, rid, _ = _com_boletim(cl, cid, reajuste=True)
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    pv = _previa(cl, mid, reajuste=True).json()
+    assert _enviar(cl, mid, pv, files=_arquivos(reajuste=True)).status_code == 200
+    pv_r = _previa(cl, rid).json()
+    assert pv_r["reenvio"] is True
+    r = _enviar(cl, rid, pv_r)
+    assert r.status_code == 422 and "motivo do reenvio" in r.json()["detail"]
+    assert [e["vigente"] for e in cl.get(f"/api/medicoes/{rid}").json()["envio_assinados"]["envios"]] == [True]
+
+
+def test_recusa_da_data_do_envio_por_fora_fala_da_data_do_envio(api):
+    cl, cid, _ = api
+    mid, _, _ = _com_boletim(cl, cid)
+    r = cl.post(f"/api/medicoes/{mid}/assinados/envio-externo", data={"enviado_em": "2026-01-02"}, files=_arquivos())
+    assert r.status_code == 422 and r.json()["detail"].startswith("A data do envio não pode ser anterior à do boletim")
+
+
+def test_pdf_registrado_depois_da_assinatura_so_com_a_data(api):
+    cl, cid, _ = api
+    mid, _, _ = _com_boletim(cl, cid)
+    hoje = tempo.hoje_local().isoformat()
+    assert cl.post(f"/api/medicoes/{mid}/assinatura", json={"data": hoje, "envelope": ENVELOPE}).status_code == 201
+    r = cl.post(f"/api/medicoes/{mid}/assinatura-com-pdf", data={"data": hoje}, files=_arquivos())
+    assert r.status_code == 201, r.text
+    assert cl.post(f"/api/medicoes/{mid}/assinatura-com-pdf", data={"data": hoje}, files=_arquivos()).status_code == 422
+    assert [a["arquivo"] is not None for a in _assinaturas(mid)] == [False, True]
+
+
+def test_nome_gravado_e_o_do_anexo_do_email(api, monkeypatch):
+    cl, cid, _ = api
+    mid, _, _ = _com_boletim(cl, cid, reajuste=True)
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    files = _arquivos(reajuste=True)
+    files["arquivo_reajuste"] = ("Medicao assinada.pdf", files["arquivo_reajuste"][1], "application/pdf")
+    r = cl.post(f"/api/medicoes/{mid}/assinados/previa", files=files)
+    assert r.status_code == 200, r.text
+    pv = r.json()
+    assert [a["nome"] for a in pv["anexos"]] == ["Medicao assinada.pdf", "Medicao assinada (2).pdf"]
+    assert _enviar(cl, mid, pv, files=files).status_code == 200
+    assert _linha("SELECT nome, nome_reajuste FROM medicao_assinados_envios WHERE medicao_id=?", mid) == \
+        {"nome": "Medicao assinada.pdf", "nome_reajuste": "Medicao assinada (2).pdf"}
+
+
 def test_diretoria_recebe_403_nos_dois_atos(api):
     cl, cid, _ = api
     mid, _, _ = _com_boletim(cl, cid)
