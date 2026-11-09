@@ -38,7 +38,7 @@ def test_a_receber_so_leitura_e_401_sem_sessao(client):
     c.close()
     _login(client, "dir2@l.com")
     r = client.get("/api/a-receber")
-    assert r.status_code == 200 and set(r.json()) == {"hoje", "total_a_receber_liberado", "total", "recebido_ano_centavos", "antes_do_protocolo", "mes", "meses", "por_obra",
+    assert r.status_code == 200 and set(r.json()) == {"hoje", "total_a_receber_liberado", "total", "recebido_ano_centavos", "baixado_sem_caixa_ano_centavos", "antes_do_protocolo", "mes", "meses", "por_obra",
                                                       "por_orgao", "itens"}
 
 
