@@ -144,6 +144,17 @@ describe("CustoObra (#491)", () => {
     expect(within(base).getByText("R$ 12,35")).toBeTruthy();
   });
 
+  it("item-chave pelo código do serviço repetido no grupo (#613) mostra item-chave ambíguo, sem calcular", async () => {
+    responder({ ...CUSTO, itens_chave: [{
+      grupo: "Preliminares", item: "s/c", descricao: null, unidade: "un", quantidade_acumulada: null, medicao: null,
+      custo_centavos: 50_00, custo_unitario_centavos: null, preco_unitario_centavos: null, diferenca_centavos: null,
+      situacao: "ambiguo" }] });
+    render(<CustoObra />);
+    const tabela = await screen.findByRole("table", { name: /Custo por unidade dos itens-chave/ });
+    const linha = within(tabela).getByText("Preliminares").closest("tr")!;
+    expect(within(linha).getByText("item-chave ambíguo")).toBeTruthy();
+  });
+
   it("sem item-chave cadastrado (#492), a tabela do custo por unidade não aparece", async () => {
     responder({ ...CUSTO, itens_chave: [] });
     render(<CustoObra />);

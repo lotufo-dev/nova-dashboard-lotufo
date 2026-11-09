@@ -11,7 +11,9 @@ A posicao das colunas e' achada pelo texto do cabecalho (quantidade e valor se d
 Outro modelo (issue #612) nao tem a coluna ITEM, so' o CÓDIGO do servico (que se repete: "s/c"). Nele, o titulo de
 grupo ou de subgrupo e' a linha so' com a discriminacao (sem codigo, sem unidade e sem preco), o item cai no titulo
 mais recente, o campo `item` vem vazio, e a leitura para tambem em TOTAL ACUMULADO ou TOTAL DESTA MEDIÇÃO (o rodape
-desse modelo). Sem nº de item, o cadastro de custo (prefixos de nº) nao se aplica: agrupa pelos titulos.
+desse modelo). Sem nº de item, os prefixos de nº do cadastro de custo nao se aplicam: o titulo do item (o mais
+recente) e' procurado nos `titulos_planilha` do cadastro (issue #613; fora deles, "outros"); cadastro sem nenhum
+titulo agrupa pelos titulos da propria planilha.
 
 O grupo do item vem do cadastro de custo da obra quando houver (prefixos de `itens_planilha`, issue #489); sem ele,
 do titulo de grupo mais proximo da propria planilha (o de nº mais longo que prefixa o nº do item). Item que nao cai
@@ -59,6 +61,10 @@ def _texto(v) -> str:
         return ""
     s = unicodedata.normalize("NFKD", v).encode("ascii", "ignore").decode()
     return " ".join(s.upper().split())
+
+
+# o titulo lido contra o `titulos_planilha` do cadastro de custo (issue #613): a mesma comparacao do cabecalho
+titulo_comparavel = _texto
 
 
 def _e_item(h: str) -> bool:
@@ -430,8 +436,13 @@ def _linhas(z: zipfile.ZipFile, caminho: str, textos: list[str]):
 def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
     col, linhas = _achar_cabecalho(iter(linhas))
     sem_item = "item" not in col        # modelo sem ITEM (issue #612): grupo pelo titulo mais recente
+    por_titulo: dict[str, str] = {}     # titulo comparavel -> grupo do cadastro (issue #613)
     if sem_item:
-        cadastro = None                 # os prefixos do cadastro sao de nº de item, que este modelo nao tem
+        # os prefixos do cadastro sao de nº de item, que este modelo nao tem: vale so' o `titulos_planilha`; sem
+        # nenhum titulo no cadastro, agrupa pelos titulos da propria planilha (como antes da #613)
+        por_titulo = {titulo_comparavel(t): g["nome"] for g in cadastro or [] for t in g.get("titulos_planilha") or []}
+        if not por_titulo:
+            cadastro = None
     titulo_atual: str | None = None
     titulos: dict[str, str] = {}
     itens: list[tuple[str, dict]] = []
@@ -481,7 +492,9 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
         pu = _decimal(celula("preco"), "o preço unitário", nome)
         vm = _decimal(celula("valor_medido"), "o valor nesta medição", nome)
         va = _decimal(celula("valor_acumulado"), "o valor acumulado", nome)
-        if sem_item:
+        if sem_item and cadastro:
+            grupo = por_titulo.get(titulo_comparavel(titulo_atual)) if titulo_atual else None
+        elif sem_item:
             grupo = titulo_atual
         elif cadastro:
             grupo = _do_cadastro(numero_item, cadastro)
@@ -551,7 +564,8 @@ def ler(dados: bytes, cadastro: list[dict] | None = None) -> dict:
     """{"grupos": [{nome, unidade, quantidade_medida, quantidade_acumulada, valor_medido_centavos,
     valor_acumulado_centavos, itens: [...]}], "total_centavos", "grupo_por": "cadastro" | "planilha",
     "itens" (os mesmos itens, na ordem da planilha), "total_planilha_centavos" (o total escrito na planilha, ou None)}.
-    `cadastro`: [{"nome", "itens_planilha": [prefixos]}] do cadastro de custo da obra, na ordem do yaml."""
+    `cadastro`: [{"nome", "itens_planilha": [prefixos], "titulos_planilha": [titulos] (opcional)}] do cadastro de
+    custo da obra, na ordem do yaml."""
     try:
         if len(dados) > MAX_BYTES_ARQUIVO:
             raise PlanilhaRecusada(GRANDE_DEMAIS)

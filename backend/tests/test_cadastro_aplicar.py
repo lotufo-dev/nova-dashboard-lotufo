@@ -2051,8 +2051,9 @@ def test_custo_grava_os_grupos_na_ordem_e_o_projeto(conn):
     assert r["custo"]["criados"] == ["MT-402"]
     assert _grupos(conn) == [
         {"ordem": 1, "nome": "Terraplanagem", "tarefas": ["001.03"], "itens_planilha": ["2."],
-         "item_chave": {"codigo": "2.1", "unidade": "m³"}},
-        {"ordem": 2, "nome": "Drenagem", "tarefas": ["001.05", "001.06"], "itens_planilha": ["3."], "item_chave": None}]
+         "titulos_planilha": [], "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+        {"ordem": 2, "nome": "Drenagem", "tarefas": ["001.05", "001.06"], "itens_planilha": ["3."],
+         "titulos_planilha": [], "item_chave": None}]
     c = conn.execute("SELECT projeto_rm, custo_nao_e_custo, custo_sem_tarefa FROM contratos").fetchone()
     assert (c["projeto_rm"], json.loads(c["custo_nao_e_custo"]), c["custo_sem_tarefa"]) == \
         ("GL.C01.P001", ["2.02", "2.01.22"], "proporcional")
