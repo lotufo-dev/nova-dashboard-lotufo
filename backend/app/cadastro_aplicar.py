@@ -344,6 +344,9 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     return cid
 
 
+_CAMPOS_GRUPO = ("nome", "tarefas", "itens_planilha", "titulos_planilha", "item_chave")
+
+
 def _custo(conn, usuario_id, contrato_id, c, rel) -> None:
     """Issue #489: secao `custo:` -> contratos.projeto_rm/custo_* e custo_grupos. Cadastro, nao historico financeiro:
     o yaml e' a verdade. O grupo casa pelo nome (o id fica estavel quando so' a ordem ou as tarefas mudam); o que saiu
@@ -356,8 +359,7 @@ def _custo(conn, usuario_id, contrato_id, c, rel) -> None:
         return
     linha = conn.execute("SELECT projeto_rm, custo_nao_e_custo, custo_sem_tarefa FROM contratos WHERE id=?",
                          (contrato_id,)).fetchone()
-    gravados = [{k: g[k] for k in ("nome", "tarefas", "itens_planilha", "item_chave")}
-                for g in contratos.custo_grupos(conn, contrato_id)]
+    gravados = [{k: g[k] for k in _CAMPOS_GRUPO} for g in contratos.custo_grupos(conn, contrato_id)]
     antes = None
     if linha["projeto_rm"] is not None or gravados:
         antes = {"projeto_rm": linha["projeto_rm"], "sem_tarefa": linha["custo_sem_tarefa"],
@@ -366,7 +368,9 @@ def _custo(conn, usuario_id, contrato_id, c, rel) -> None:
     custo = c.get("custo")
     depois = None if custo is None else {
         "projeto_rm": custo["projeto_rm"], "sem_tarefa": custo["sem_tarefa"], "nao_e_custo": custo["nao_e_custo"],
-        "grupos": [{k: g[k] for k in ("nome", "tarefas", "itens_planilha", "item_chave")} for g in custo["grupos"]]}
+        # titulos_planilha (#613) ausente = lista vazia, como a coluna nasce na 079
+        "grupos": [{**{k: g[k] for k in _CAMPOS_GRUPO if k != "titulos_planilha"},
+                    "titulos_planilha": g.get("titulos_planilha") or []} for g in custo["grupos"]]}
     if antes == depois:
         if depois is not None:
             rel["iguais"] += 1
@@ -380,12 +384,15 @@ def _custo(conn, usuario_id, contrato_id, c, rel) -> None:
         conn.execute("DELETE FROM custo_grupos WHERE contrato_id=? AND nome=?", (contrato_id, antigo))
     for ordem, g in enumerate(d["grupos"], 1):
         chave = g["item_chave"] or {}
-        valores = (ordem, _json(g["tarefas"]), _json(g["itens_planilha"]), chave.get("codigo"), chave.get("unidade"))
-        cur = conn.execute("UPDATE custo_grupos SET ordem=?, tarefas=?, itens_planilha=?, item_chave_codigo=?, "
-                           "item_chave_unidade=? WHERE contrato_id=? AND nome=?", (*valores, contrato_id, g["nome"]))
+        valores = (ordem, _json(g["tarefas"]), _json(g["itens_planilha"]), _json(g["titulos_planilha"]),
+                   chave.get("codigo"), chave.get("unidade"))
+        cur = conn.execute("UPDATE custo_grupos SET ordem=?, tarefas=?, itens_planilha=?, titulos_planilha=?, "
+                           "item_chave_codigo=?, item_chave_unidade=? WHERE contrato_id=? AND nome=?",
+                           (*valores, contrato_id, g["nome"]))
         if not cur.rowcount:
-            conn.execute("INSERT INTO custo_grupos (ordem, tarefas, itens_planilha, item_chave_codigo, item_chave_unidade, "
-                         "contrato_id, nome) VALUES (?,?,?,?,?,?,?)", (*valores, contrato_id, g["nome"]))
+            conn.execute("INSERT INTO custo_grupos (ordem, tarefas, itens_planilha, titulos_planilha, item_chave_codigo, "
+                         "item_chave_unidade, contrato_id, nome) VALUES (?,?,?,?,?,?,?,?)",
+                         (*valores, contrato_id, g["nome"]))
     (rel["criados"] if antes is None else rel["alterados"]).append(c["nome_curto"])
     auditoria.registrar(conn, usuario_id, "cadastro.custo", "contrato", contrato_id, antes, depois)
 

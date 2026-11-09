@@ -1,9 +1,11 @@
 """Issue #491: custo lancado no RM por grupo da planilha, medicao a medicao (aba Custo da Carteira)."""
+import hashlib
 import json
 
 import pytest
 
 from app import auth, contratos, cronograma, custo_obra, db, entidades, medicao_grupos
+from tests.test_leitura_planilha_medicao import TOTAL_SEM_ITEM, planilha_sem_item
 
 
 @pytest.fixture
@@ -520,6 +522,84 @@ def test_custo_acumulado_negativo_do_grupo_nao_vira_custo_unitario(conn):
     k = custo_obra.custo_da_obra(conn, cid)["itens_chave"][0]
     assert k["situacao"] == "sem_custo" and k["custo_centavos"] == -10_01
     assert k["custo_unitario_centavos"] is None and k["diferenca_centavos"] is None
+
+
+# --- issue #613: planilha sem nº de item ligada aos grupos pelos titulos; item-chave pelo codigo do servico --------
+
+def _obra_por_titulos(conn):
+    """Pavimentação junta dois titulos da planilha (PAVIMENTAÇÃO e o subtitulo Revestimento), com o item-chave pelo
+    codigo do servico; Preliminares tem o item-chave "s/c", que aparece duas vezes no grupo."""
+    cid = _obra(conn, grupos=[("Preliminares", ["001.01"]), ("Pavimentação", ["001.02"])])
+    for nome, titulos, codigo, unidade in (("Preliminares", ["Serviços preliminares"], "S/C", "un"),
+                                          ("Pavimentação", ["PAVIMENTACAO", "revestimento"], "4011", "m³")):
+        conn.execute("UPDATE custo_grupos SET itens_planilha='[]', titulos_planilha=?, item_chave_codigo=?, "
+                     "item_chave_unidade=? WHERE contrato_id=? AND nome=?",
+                     (json.dumps(titulos), codigo, unidade, cid, nome))
+    conn.commit()
+    return cid
+
+
+def _ler_sem_item(conn, cid, numero=1, competencia="2026-03"):
+    mid = _medicao(conn, cid, numero, competencia, TOTAL_SEM_ITEM)
+    r = medicao_grupos.ler_e_registrar(conn, None, mid, planilha_sem_item(), origem="carga")
+    assert r["situacao"] == "lida", r
+
+
+def test_planilha_sem_item_lida_cai_nos_grupos_do_cadastro_pelos_titulos(conn):
+    cid = _obra_por_titulos(conn)
+    _ler_sem_item(conn, cid)
+    mar = _linha(custo_obra.custo_da_obra(conn, cid), "2026-03")
+    # 1296,23 + 800,27 no mesmo grupo; 500,55 + 1200,01 em Preliminares (centavo impar, no centavo)
+    assert _grupo(mar, "Pavimentação")["medido_centavos"] == 1296_23 + 800_27
+    assert _grupo(mar, "Preliminares")["medido_centavos"] == 500_55 + 1200_01
+    assert not any(g["tipo"] == "nao_lido" for g in mar["grupos"])
+    assert not any(g["nome"].endswith(custo_obra.SUFIXO_TITULO) for g in mar["grupos"])
+    assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"] == TOTAL_SEM_ITEM
+
+
+def test_planilha_sem_item_titulo_fora_do_cadastro_vai_para_outros(conn):
+    cid = _obra_por_titulos(conn)
+    conn.execute("UPDATE custo_grupos SET titulos_planilha='[\"Pavimentação\"]' WHERE nome='Pavimentação'")
+    conn.commit()
+    _ler_sem_item(conn, cid)
+    mar = _linha(custo_obra.custo_da_obra(conn, cid), "2026-03")
+    assert _grupo(mar, "Pavimentação")["medido_centavos"] == 1296_23
+    assert _grupo(mar, "outros")["medido_centavos"] == 800_27         # o subtitulo Revestimento, fora do cadastro
+
+
+def test_item_chave_pelo_codigo_do_servico_e_codigo_repetido_no_grupo_e_ambiguo(conn):
+    cid = _obra_por_titulos(conn)
+    _ler_sem_item(conn, cid)
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", 50_00),
+                  (1, "2.001.012", P, "001.02", "1.01.003", "2026-03", 100_01)])
+    prel, pav = custo_obra.custo_da_obra(conn, cid)["itens_chave"]
+    # 100,01 / 14,5 = 6,8972... -> 6,90: arredondamento unico, meio para cima
+    assert pav == {"grupo": "Pavimentação", "item": "4011", "descricao": "Base de brita graduada", "unidade": "m³",
+                   "quantidade_acumulada": "14.5", "medicao": "1ª medição", "custo_centavos": 100_01,
+                   "custo_unitario_centavos": 6_90, "preco_unitario_centavos": 123_45,
+                   "diferenca_centavos": 123_45 - 6_90, "situacao": "ok"}
+    assert prel["situacao"] == "ambiguo" and prel["custo_centavos"] == 50_00
+    assert all(prel[c] is None for c in ("quantidade_acumulada", "preco_unitario_centavos", "custo_unitario_centavos",
+                                         "diferenca_centavos", "descricao"))
+
+
+def test_leitura_gravada_antes_da_079_continua_valendo_na_obra_sem_titulos(conn):
+    """Revisor (#613): a assinatura do cadastro sem titulos e' a de antes da migracao 079 (sem a chave
+    titulos_planilha); senao, toda obra com cadastro por itens_planilha perderia as leituras ja' gravadas."""
+    cid = _obra(conn)
+    mid = _medicao(conn, cid, 1, "2026-03", 100_00)
+    antiga = [{"nome": "Terraplenagem", "itens_planilha": ["1."]}, {"nome": "Pavimentação", "itens_planilha": ["2."]}]
+    sha = hashlib.sha256(json.dumps(antiga, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    assert medicao_grupos._assinatura(medicao_grupos.cadastro_de_custo(conn, cid)) == sha
+    lido = {"grupo_por": "cadastro", "grupos": [{"nome": "Terraplenagem", "itens": [_item(100_00)]}]}
+    with db.mutacao(conn):
+        medicao_grupos._gravar(conn, None, mid, "c" * 64, "carga", None, None, "lida", None, lido, sha, 100_00, 100_00)
+    assert medicao_grupos.grupos(conn, mid)["leitura"] is not None
+    # o grupo que ganha titulos muda a assinatura: a leitura antiga sai de vigencia ate' reler
+    conn.execute("UPDATE custo_grupos SET titulos_planilha='[\"TERRAPLENAGEM\"]' WHERE nome='Terraplenagem'")
+    conn.commit()
+    assert medicao_grupos._assinatura(medicao_grupos.cadastro_de_custo(conn, cid)) != sha
+    assert medicao_grupos.grupos(conn, mid)["leitura"] is None
 
 
 def test_grupo_sem_item_chave_fica_fora_do_bloco(conn):
