@@ -66,16 +66,26 @@ def _texto(v) -> str:
 # o titulo lido contra o `titulos_planilha` do cadastro de custo (issue #613): a mesma comparacao do cabecalho
 titulo_comparavel = _texto
 
+OUTRAS_COLUNAS_DE_ITEM = ("SUB", "VALOR", "POR")   # "SUB ITEM", "VALOR ITEM", "POR ITEM": nao sao o nº (issue #617)
+
 
 def _e_item(h: str) -> bool:
-    """A coluna do nº do item: "ITEM", ou ate' duas palavras terminando em ITEM ("Nº ITEM" -> "NO ITEM", "N. ITEM")."""
+    """A coluna do nº do item: "ITEM", ou ate' duas palavras terminando em ITEM ("Nº ITEM" -> "NO ITEM", "N. ITEM",
+    "COD. ITEM"), menos "SUB ITEM", "VALOR ITEM" e "POR ITEM", que sao outra coluna (issue #617)."""
     partes = h.split()
-    return bool(partes) and partes[-1] == "ITEM" and len(partes) <= 2
+    return bool(partes) and partes[-1] == "ITEM" and len(partes) <= 2 and not _outra_coluna_de_item(h)
+
+
+def _outra_coluna_de_item(h: str) -> bool:
+    """"SUB ITEM", "VALOR ITEM", "POR ITEM": coluna que a leitura nao usa e que nao conta como a coluna ITEM."""
+    partes = h.split()
+    return len(partes) == 2 and partes[0] in OUTRAS_COLUNAS_DE_ITEM and partes[1] == "ITEM"
 
 
 def _menciona_item(textos: list[str]) -> bool:
-    """Alguma celula fala de ITEM (mesmo que nao seja reconhecida): nao e' o modelo sem ITEM."""
-    return any("ITEM" in t.split() for t in textos)
+    """Alguma celula fala de ITEM (mesmo que nao seja reconhecida, como "ITEM Nº"): nao e' o modelo sem ITEM.
+    "SUB ITEM" e afins nao contam: sao outra coluna, que a leitura nao usa."""
+    return any("ITEM" in t.split() and not _outra_coluna_de_item(t) for t in textos)
 
 
 def _campo(h: str) -> str | None:
@@ -433,6 +443,49 @@ def _linhas(z: zipfile.ZipFile, caminho: str, textos: list[str]):
             dados_aba.clear()
 
 
+def _codigo_de_verdade(codigo: str) -> bool:
+    """Codigo de servico de verdade tem algum digito: "-", "–", "—", "s/c", "S/C." e vazio nao contam."""
+    return any(ch.isdigit() for ch in codigo)
+
+
+def _unidade_de_verdade(unidade: str) -> bool:
+    """Unidade de medida de verdade tem letra ou digito e nao e' de dinheiro: "-", "–", "—", "%", "R$" e vazio nao
+    contam (sao como a linha de soma aparece)."""
+    u = _texto(unidade)
+    return any(ch.isalnum() for ch in u) and not u.startswith("R$")
+
+
+def _tem_preco(preco) -> bool:
+    """Preco unitario de verdade: numero maior que zero, ou texto que nao e' vazio, "-" nem zero (o texto segue
+    para a leitura do item, que recusa a planilha dizendo que o preco nao e' um numero, em vez de sumir com ele)."""
+    if preco is None or isinstance(preco, bool):
+        return False
+    if isinstance(preco, int | float | Decimal):
+        return preco > 0
+    t = str(preco).strip()
+    return t not in ("", "-") and t.strip("0,.") != ""
+
+
+def _linha_de_soma(textos: list[str], col: dict[str, int], codigo: str, unidade: str, preco) -> bool:
+    """Modelo sem ITEM: linha que comeca com TOTAL, SUB-TOTAL ou SUB TOTAL. So' nao e' soma a linha com cara de item:
+    unidade de verdade e, alem dela, codigo de verdade ou preco unitario ("2003 | Total de bueiros executados | m |
+    ... | 5,01" e' item, issue #617). Codigo sem digito ("-", "–", "s/c"), unidade sem letra nem digito ou de dinheiro
+    ("-", "%", "R$"), preco "-" ou 0 nao contam: o "TOTAL DO GRUPO" assim preenchido continua soma. Rotulo na coluna
+    do codigo e' sempre soma; rotulo noutra coluna (observacao) so' nao e' quando a linha tem codigo, unidade e
+    preco de verdade."""
+    rotulos = [c for c, t in enumerate(textos)
+               if t and (t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL"))]
+    if not rotulos:
+        return False
+    if col.get("codigo") in rotulos:
+        return True
+    codigo_de_verdade = _codigo_de_verdade(codigo)
+    unidade_de_verdade = _unidade_de_verdade(unidade)
+    if any(c != col["descricao"] for c in rotulos):
+        return not (codigo_de_verdade and unidade_de_verdade and _tem_preco(preco))
+    return not (unidade_de_verdade and (codigo_de_verdade or _tem_preco(preco)))
+
+
 def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
     col, linhas = _achar_cabecalho(iter(linhas))
     sem_item = "item" not in col        # modelo sem ITEM (issue #612): grupo pelo titulo mais recente
@@ -459,9 +512,6 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
         if sem_item and any(t.startswith(FIM_SEM_ITEM) for t in textos):
             rodape = linha
             break
-        if sem_item and any(t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL")
-                            for t in textos if t):
-            continue                    # outra linha de soma: nunca titulo nem item
         if any(t.startswith("SUBTOTAL") for t in textos):
             continue
         celula = lambda k: linha[col[k]] if k in col and col[k] < len(linha) else None   # noqa: E731
@@ -472,6 +522,8 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
         descricao = " ".join(descricao.split()) if isinstance(descricao, str) else _nome_item(descricao)
         preco = celula("preco")
         sem_preco = preco is None or (isinstance(preco, str) and not preco.strip())
+        if sem_item and _linha_de_soma(textos, col, codigo, unidade, preco):
+            continue                    # outra linha de soma: nunca titulo nem item
         if sem_item and not codigo and not unidade and sem_preco and descricao:
             titulo_atual = descricao     # titulo de grupo ou de subgrupo, sem nº
             continue
