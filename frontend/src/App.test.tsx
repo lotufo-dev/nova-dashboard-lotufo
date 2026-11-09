@@ -174,7 +174,7 @@ describe("App: o menu lateral largo", () => {
     expect(nav.getAttribute("data-estado")).toBe("largo");
     const links = within(nav).getAllByRole("link");
     expect(links.map(l => l.textContent)).toEqual(
-      ["Início", "Medições", "Obras", "Avisos", "SIGA", "Documentos", "A receber", "Carteira", "Administração"]);
+      ["Início", "Medições", "Obras", "Avisos", "SIGA", "Documentos", "A receber", "Carteira", "Âncoras DocuSign", "Administração"]);
     for (const l of links) expect(l.querySelector("svg")).not.toBeNull();
     expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
     expect(links.filter(l => l.getAttribute("aria-current") === "page")).toHaveLength(1);

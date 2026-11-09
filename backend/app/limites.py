@@ -37,6 +37,7 @@ ROTAS_UPLOAD = tuple((metodo, re.compile(padrao)) for metodo, padrao in (
     ("POST", rf"/api/pleitos/{_ID}/(anexos|assinado)"),
     ("POST", rf"/api/pleitos/{_ID}/previsao/(ler|planilha)"),     # issue #272: ler e aceitar a planilha de previsao
     ("POST", rf"/api/protocolos/{_ID}/(pecas|assinado|numero-orgao)"),
+    ("POST", r"/api/ancoras-docusign/(paginas|pdf)"),              # issue #626: PDFs do pacote para o DocuSign
 ))
 
 
