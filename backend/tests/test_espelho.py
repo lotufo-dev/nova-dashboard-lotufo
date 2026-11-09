@@ -355,3 +355,50 @@ def test_tipo_opcional_sem_nada_digitado_fica_fora_e_digitado_tem_de_bater():
 def test_tipo_sem_valor_ou_que_a_regra_nao_gera_fica_como_esta():
     assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 7}, {}) == {"medicao": 7}
     assert espelho.entradas_pela_medicao(regra_simples(), {"medicao": 7}, {"projeto": (9, "boletim")}) == {"medicao": 7}
+
+
+# --- issue #589: reajuste negativo abate na nota da medicao do mesmo emissor e municipio ---------------------------
+
+def test_reajuste_negativo_abate_na_nota_da_medicao_com_o_sinal():
+    """Decisao do Leo de 08/11/2026: a nota nao sai negativa. O reajuste negativo (centavo impar) soma com o sinal na
+    nota de medicao, que sai com o valor liquido e os tributos sobre ele; a saida de reajuste nao vira nota."""
+    r = regra_simples()
+    s = espelho.calcular(r, {"medicao": 1_000_01, "reajuste": -10_01})
+    assert [x["chave"] for x in s] == ["medicao"]
+    assert s[0]["valor"] == 990_00 and s[0]["reajuste_abatido"] == -10_01
+    (so_liquido,) = espelho.calcular(r, {"medicao": 990_00})
+    assert linha(s[0]) == linha(so_liquido) and s[0]["liquido"] == so_liquido["liquido"]
+    assert "reajuste_abatido" not in so_liquido
+    assert espelho.valor_por_natureza(r, {"medicao": 1_000_01, "reajuste": -10_01}) == {
+        "execucao": 1_000_01, "reajuste": -10_01}
+
+
+def test_espelho_so_de_reajuste_negativo_e_recusado():
+    with pytest.raises(ValueError, match="A nota não sai com valor negativo; inclua a execução do mesmo número"):
+        espelho.calcular(regra_simples(), {"reajuste": -10_01})
+
+
+def test_reajuste_negativo_que_zera_ou_passa_da_medicao_e_recusado():
+    for reajuste in (-1_000_01, -1_000_02):
+        with pytest.raises(ValueError, match="zera a nota de medição"):
+            espelho.calcular(regra_simples(), {"medicao": 1_000_01, "reajuste": reajuste})
+
+
+def test_reajuste_negativo_rateado_abate_em_cada_municipio_e_fecha_no_centavo():
+    """MT-388: o rateio do reajuste negativo (fator 0,8328 com resto) abate em Caceres e em Porto Esperidiao; a soma
+    das notas e' a medicao mais o reajuste, ao centavo."""
+    regra = espelho.normalizar(MT388)
+    s = espelho.calcular(regra, {"medicao": brl("634.529,58"), "reajuste": -brl("38.655,83")})
+    assert [x["chave"] for x in s] == ["caceres-medicao", "porto-medicao"]
+    assert sum(x["valor"] for x in s) == brl("634.529,58") - brl("38.655,83")
+    assert sum(x["reajuste_abatido"] for x in s) == -brl("38.655,83")
+
+
+def test_reajuste_negativo_com_duas_notas_de_medicao_do_mesmo_emissor_e_recusado():
+    with pytest.raises(ValueError, match="mais de uma nota de medição"):
+        espelho.calcular(_regra_duas_fontes(), {"fonte-a": 1_000_00, "fonte-b": 1_000_00, "reajuste": -1_00})
+
+
+def test_medicao_e_projeto_negativos_sao_recusados():
+    with pytest.raises(ValueError, match="Valor da medição: valor negativo só no reajuste"):
+        espelho.calcular(regra_simples(), {"medicao": -1, "reajuste": 0})

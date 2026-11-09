@@ -103,3 +103,17 @@ def test_ratear_proporcional_maiores_restos_e_sinal():
     for ruim in ([], [0, 0], [-1, 2]):
         with pytest.raises(ValueError):
             ratear_proporcional(10, ruim)
+
+
+def test_parse_brl_com_sinal():
+    """Issue #589: o reajuste aceita o sinal (hifen ou o sinal tipografico); sem sinal, igual a parse_brl."""
+    from app.dinheiro import parse_brl_com_sinal
+    assert parse_brl_com_sinal("-10,01") == -1001
+    assert parse_brl_com_sinal("−1.234,57") == -123457
+    assert parse_brl_com_sinal("-R$ 1,00") == -100
+    assert parse_brl_com_sinal("1.234,57") == 123457
+    for ruim in ("--1,00", "1,00-", "- ", "-12.34"):
+        with pytest.raises(ValueError):
+            parse_brl_com_sinal(ruim)
+    with pytest.raises(ValueError):
+        parse_brl("-1,00")

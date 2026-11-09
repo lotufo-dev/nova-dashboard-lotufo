@@ -8,6 +8,7 @@ import { coladoParaBrl, digitosParaBrl, MAX_DIGITOS_VALOR } from "./formato";
 // o mesmo formato que as telas ja' mandavam ao servidor.
 
 const ERRO_COLADO = "Valor colado em formato inválido: use vírgula nos centavos, ex.: 1.234,56";
+const ERRO_SO_SINAL = "Digite o valor depois do sinal";
 
 const soDigitos = (texto: string) => texto.replace(/\D/g, "").replace(/^0+/, "");
 
@@ -44,10 +45,33 @@ function editar(antes: string, depois: string, tipo: string | undefined, dado: s
   return depois ? emReais(depois) : "";
 }
 
+const SINAIS = ["-", "\u2212"];
+const negativo = (texto: string) => SINAIS.includes(texto.charAt(0));
+const semSinal = (texto: string) => (negativo(texto) ? texto.slice(1).trimStart() : texto);
+
+/** Issue #589 (`comSinal`, so' o reajuste): o "-" digitado troca o sinal do valor, em qualquer ponto; colar
+ *  "-1.234,56" entra negativo; o resto da edicao vale sobre os digitos, como sem sinal. O texto que sai leva o "-"
+ *  na frente ("-1.234,56"), o formato que o servidor aceita no reajuste. Apagar todos os digitos volta a vazio. */
+function editarComSinal(antes: string, depois: string, tipo: string | undefined, dado: string | null): Resultado {
+  const neg = negativo(antes);
+  if (tipo === "insertText" && dado !== null && SINAIS.includes(dado)) return neg ? semSinal(antes) : `-${semSinal(antes)}`;
+  const digitado = tipo === "insertText" && (dado?.length ?? 0) === 1;
+  if (digitado || tipo?.startsWith("delete") || tipo?.startsWith("history")) {
+    // um digito no fim ou apagar: vale sobre os digitos, e o sinal fica (apagar tudo volta a vazio)
+    const r = editar(semSinal(antes), semSinal(depois), tipo, dado);
+    return typeof r === "string" && r && neg ? `-${r}` : r;
+  }
+  // texto inteiro (colar, arrastar, preenchimento automatico): o sinal e' o do texto que entrou
+  const texto = (tipo === "insertFromPaste" || tipo === "insertFromDrop" || tipo === "insertText" ? dado || depois : depois).trim();
+  if (!texto) return "";
+  const r = emReais(semSinal(texto));
+  return typeof r === "string" && r && negativo(texto) ? `-${r}` : r;
+}
+
 export default function CampoValor({ id, name, value, onChange, className = "entrada--media entrada--num num",
-  placeholder = "Ex.: 50.000,00…", required, autoFocus }: {
+  placeholder = "Ex.: 50.000,00…", required, autoFocus, comSinal = false }: {
   id: string; name: string; value: string; onChange: (valor: string) => void;
-  className?: string; placeholder?: string; required?: boolean; autoFocus?: boolean;
+  className?: string; placeholder?: string; required?: boolean; autoFocus?: boolean; comSinal?: boolean;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const tudoSelecionado = useRef(false);   // o campo inteiro estava selecionado quando a composicao comecou
@@ -63,18 +87,19 @@ export default function CampoValor({ id, name, value, onChange, className = "ent
   const aplicar = (r: Resultado) => {
     if (r === null) return;
     if (typeof r === "object") { setErro(ERRO_COLADO); return; }
-    setErro("");
+    // issue #589: o sinal sozinho nao e' valor; o formulario nao envia ate' entrar o digito (ou o sinal sair)
+    setErro(r === "-" ? ERRO_SO_SINAL : "");
     onChange(r);
   };
   return (
     <>
-      <input ref={ref} id={id} name={name} autoComplete="off" spellCheck={false} className={className} inputMode="numeric"
+      <input ref={ref} id={id} name={name} autoComplete="off" spellCheck={false} className={className} inputMode={comSinal ? "text" : "numeric"}
         placeholder={placeholder} required={required} autoFocus={autoFocus} value={value}
         aria-invalid={erro ? true : undefined} aria-describedby={erro ? `${id}-erro` : undefined}
         onChange={ev => {
           const nativo = ev.nativeEvent as Partial<InputEvent>;
           if (nativo.isComposing) return;   // composicao (IME): so' no fim dela
-          aplicar(editar(value, ev.target.value, nativo.inputType, nativo.data ?? null));
+          aplicar((comSinal ? editarComSinal : editar)(value, ev.target.value, nativo.inputType, nativo.data ?? null));
         }}
         onCompositionStart={ev => {
           // teclado que manda numeros por composicao (Firefox Android + SwiftKey): o campo inteiro selecionado no
@@ -90,7 +115,8 @@ export default function CampoValor({ id, name, value, onChange, className = "ent
         onPaste={ev => {
           // colar substitui o campo inteiro; texto que o servidor recusaria (ex.: "1234.56") nao entra e avisa
           ev.preventDefault();
-          aplicar(emReais(ev.clipboardData.getData("text")));
+          const colado = ev.clipboardData.getData("text");
+          aplicar(comSinal ? editarComSinal(value, colado, "insertFromPaste", colado) : emReais(colado));
         }} />
       <ErroCampo id={`${id}-erro`} erro={erro} />
     </>

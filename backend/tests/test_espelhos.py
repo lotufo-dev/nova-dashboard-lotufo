@@ -999,3 +999,192 @@ def test_v2_so_do_projeto_nao_volta_a_execucao_enviada(ambiente_projeto, tmp_pat
     espelhos.gerar(conn, u, cid, 23, "2026-01", {"projeto": 7_03}, motivo="corrigido")
     assert medicoes.detalhe(conn, proj)["estado"] == "espelho_gerado"
     assert medicoes.detalhe(conn, exe)["estado"] == "espelho_enviado"
+
+
+# --- issue #589: reajuste negativo sai dentro do espelho da execucao e avanca com ela ------------------------------
+
+def _reajuste_negativo(conn, cid, numero=3, valor=-10_01):
+    return medicoes.criar(conn, 1, {"contrato_id": cid, "numero": numero, "tipo": "reajuste",
+                                    "competencia": "2026-01", "valor_centavos": valor})
+
+
+def test_espelho_so_do_reajuste_negativo_e_recusado(ambiente_projeto):
+    conn, u, cid = ambiente_projeto
+    rid = _reajuste_negativo(conn, cid)
+    with pytest.raises(ValueError, match="A nota não sai com valor negativo; inclua a execução do mesmo número"):
+        espelhos.gerar(conn, u, cid, 3, "2026-01", {"reajuste": -10_01}, justificativa_sem_boletim=JUSTIFICATIVA)
+    assert medicoes.detalhe(conn, rid)["estado"] == "prevista"
+    assert conn.execute("SELECT COUNT(*) FROM espelhos").fetchone()[0] == 0
+
+
+def test_reajuste_negativo_abate_no_espelho_da_execucao_e_segue_os_marcos_dela(ambiente_projeto, tmp_path,
+                                                                                 monkeypatch):
+    """Decisao do Leo de 08/11/2026: o espelho junta execucao (R$ 1.000,01) e reajuste (-R$ 10,01), soma com o sinal
+    numa nota so' (R$ 990,00) e o reajuste avanca com a execucao: espelho enviado, nota emitida, protocolo e
+    recebimento, com as mesmas datas. O a receber e o faturado da obra somam com o sinal (R$ 990,00, sem descontar
+    duas vezes)."""
+    from app import diretoria, sincronizacao_rm
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente_projeto
+    rid = _reajuste_negativo(conn, cid)
+    p = espelhos.previa(conn, cid, 3, "2026-01", {"medicao": 1_000_01, "reajuste": -10_01})
+    assert [(s["chave"], s["valor"], s.get("reajuste_abatido")) for s in p["saidas"]] == [("medicao", 990_00, -10_01)]
+    eid = espelhos.gerar(conn, u, cid, 3, "2026-01", {"medicao": 1_000_01, "reajuste": -10_01},
+                         justificativa_sem_boletim=JUSTIFICATIVA)
+    xid = _mid(conn, eid, "execucao")
+    r = medicoes.detalhe(conn, rid)
+    assert (r["estado"], r["valor_protocolado_centavos"]) == ("espelho_gerado", -10_01)
+    assert medicoes.detalhe(conn, xid)["valor_protocolado_centavos"] == 1_000_01
+    assert tuple(conn.execute("SELECT valor_centavos, valor_com_sinal_centavos FROM espelho_medicoes WHERE medicao_id=?",
+                        (rid,)).fetchone()) == (None, -10_01)
+    assert tuple(conn.execute("SELECT valor_centavos, valor_com_sinal_centavos FROM espelho_medicoes WHERE medicao_id=?",
+                        (xid,)).fetchone()) == (1_000_01, 1_000_01)
+    docs = conn.execute("SELECT medicao_id FROM medicao_documentos WHERE espelho_id=?", (eid,)).fetchall()
+    assert [d[0] for d in docs] == [xid]                         # o reajuste negativo nao tem nota propria
+    assert medicoes.absorvidas(conn, xid) == [{"id": rid, "estado": "espelho_gerado"}]
+    assert medicoes.absorvida(conn, rid) and not medicoes.absorvida(conn, xid)
+
+    pv = espelhos.previa_envio(conn, eid)
+    espelhos.enviar(conn, u, eid, pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert medicoes.detalhe(conn, rid)["estado"] == "espelho_enviado"
+
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) "
+                       "VALUES (1, 901, '901', 99000, '2026-02-03')").lastrowid
+    conn.commit()
+    sincronizacao_rm.alocar(conn, u["id"], nid, xid, "manual", None, "teste")
+    for mid in (xid, rid):
+        m = medicoes.detalhe(conn, mid)
+        assert (m["estado"], m["nota_emitida_em"]) == ("nota_emitida", "2026-02-03")
+    # sem nota propria, o reajuste absorvido nao e' a "irma fora" do envio da execucao (SINFRA e Pref. VG)
+    from app import protocolo
+    assert protocolo._irmas_fora(conn, {"etapa": "nota", "contrato_id": cid},
+                                 [dict(medicoes.detalhe(conn, xid))]) == []
+
+    pid = conn.execute("INSERT INTO protocolos (contrato_id, etapa, natureza, usuario_id) VALUES (?, 'nota', 'execucao', ?)",
+                       (cid, u["id"])).lastrowid
+    conn.commit()
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-02-05", "CT-9", "P-1", "manual", protocolo_id=pid)
+    r = medicoes.detalhe(conn, rid)
+    assert (r["estado"], r["congelada"]) == ("protocolada", 1)
+    assert [(x["data"], x["numero_oficio"], x["numero_processo"], x["protocolo_id"]) for x in r["protocolos"]] == [
+        ("2026-02-05", "CT-9", "P-1", pid)]
+    # o envio pelo sistema que tambem lista o reajuste nao duplica o protocolo dele
+    medicoes.registrar_protocolo(conn, u["id"], rid, "2026-02-05", "CT-9", None, "manual",
+                                 apesar_das_pendencias=True, justificativa=JUSTIFICATIVA, protocolo_id=pid)
+    assert len(medicoes.detalhe(conn, rid)["protocolos"]) == 1
+
+    conn.execute("UPDATE cadastro_geral SET valor=? WHERE chave='diretoria'",
+                 (json.dumps({"total_a_receber_liberado": True}),))
+    if conn.execute("SELECT changes()").fetchone()[0] == 0:
+        conn.execute("INSERT INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)",
+                     (json.dumps({"total_a_receber_liberado": True}),))
+    conn.commit()
+    obra = diretoria.da_obra(conn, cid)
+    assert (obra["faturado_centavos"], obra["a_receber_centavos"]) == (990_00, 990_00)
+
+    medicoes.mudar_estado(conn, u["id"], xid, "recebida", None, "2026-03-10")
+    r = medicoes.detalhe(conn, rid)
+    assert (r["estado"], r["recebida_em"]) == ("recebida", "2026-03-10")
+    assert diretoria.da_obra(conn, cid)["a_receber_centavos"] == 0
+    motivo = conn.execute("SELECT depois FROM audit_log WHERE acao='medicao.estado' AND entidade_id=? "
+                          "ORDER BY id DESC LIMIT 1", (str(rid),)).fetchone()[0]
+    assert json.loads(motivo)["origem"] == medicoes.ACOMPANHA_A_EXECUCAO
+
+
+def test_execucao_negativa_no_espelho_e_recusada(ambiente_projeto):
+    conn, u, cid = ambiente_projeto
+    with pytest.raises(ValueError, match="valor negativo só no reajuste"):
+        espelhos.previa(conn, cid, 3, "2026-01", {"medicao": -1_00})
+
+
+def _absorvido_com_nota(conn, u, cid):
+    """Execucao 3 (R$ 1.000,01) e reajuste 3 (-R$ 10,01) no mesmo espelho, as duas com nota emitida."""
+    from app import sincronizacao_rm
+    rid = _reajuste_negativo(conn, cid)
+    conn.execute("UPDATE medicoes SET motivo_represamento='aguardando apostilamento' WHERE id=?", (rid,))
+    conn.commit()
+    eid = espelhos.gerar(conn, u, cid, 3, "2026-01", {"medicao": 1_000_01, "reajuste": -10_01},
+                         justificativa_sem_boletim=JUSTIFICATIVA)
+    xid = _mid(conn, eid, "execucao")
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) "
+                       "VALUES (1, 902, '902', 99000, '2026-02-03')").lastrowid
+    conn.commit()
+    sincronizacao_rm.alocar(conn, u["id"], nid, xid, "manual", None, "teste")
+    return xid, rid
+
+
+def test_reajuste_absorvido_segue_o_novo_protocolo_sem_duplicar_e_guarda_o_motivo(ambiente_projeto):
+    """Code-review da #589: o envio por fora que lista tambem o reajuste nao duplica o protocolo dele; o protocolo
+    seguinte da execucao (novo oficio) vale para ele; o motivo de represamento dele nao e' trocado."""
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-02-05", "CT-9", None, "manual")
+    medicoes.registrar_protocolo(conn, u["id"], rid, "2026-02-05", "CT-9", None, "manual",
+                                 apesar_das_pendencias=True, justificativa=JUSTIFICATIVA)
+    assert len(medicoes.detalhe(conn, rid)["protocolos"]) == 1
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-03-01", "CT-12", None, "manual")
+    r = medicoes.detalhe(conn, rid)
+    assert [(p["data"], p["numero_oficio"]) for p in r["protocolos"]] == [("2026-02-05", "CT-9"),
+                                                                         ("2026-03-01", "CT-12")]
+    assert (r["estado"], r["motivo_represamento"]) == ("protocolada", "aguardando apostilamento")
+
+
+def test_cancelar_a_execucao_encerra_o_reajuste_absorvido(ambiente_projeto):
+    """Code-review da #589: cancelada a execucao com nota emitida, o reajuste negativo absorvido (sem nota propria)
+    nao fica sozinho em nota emitida, contando no faturado."""
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    medicoes.mudar_estado(conn, u["id"], xid, "cancelada", "nota cancelada pela prefeitura")
+    assert medicoes.detalhe(conn, rid)["estado"] == "cancelada"
+
+
+def test_reajuste_absorvido_nao_tem_marco_proprio(ambiente_projeto):
+    """Revisor da PR #608 (critico 1): cancelar, desistir, receber ou protocolar so' o reajuste absorvido e' recusado;
+    a execucao segue contando com ele (faturado R$ 990,00 = a nota), e a acao feita na execucao o leva junto."""
+    from app import diretoria
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    msg = "Este reajuste acompanha a execução nº 3: faça a ação na execução"
+    for estado in ("cancelada", "desistida"):
+        with pytest.raises(ValueError, match=msg):
+            medicoes.mudar_estado(conn, u["id"], rid, estado, "lançado errado")
+    with pytest.raises(ValueError, match=msg):
+        medicoes.registrar_protocolo(conn, u["id"], rid, "2026-02-05", "CT-9", None, "manual",
+                                     apesar_das_pendencias=True, justificativa=JUSTIFICATIVA)
+    assert medicoes.detalhe(conn, rid)["estado"] == "nota_emitida"
+    assert diretoria.da_obra(conn, cid)["faturado_centavos"] == 990_00
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-02-05", "CT-9", None, "manual")
+    with pytest.raises(ValueError, match=msg):
+        medicoes.mudar_estado(conn, u["id"], rid, "recebida", None, "2026-03-10")
+    medicoes.mudar_estado(conn, u["id"], xid, "recebida", None, "2026-03-10")
+    assert medicoes.detalhe(conn, rid)["estado"] == "recebida"
+
+
+def test_dois_oficios_da_execucao_no_mesmo_dia_vao_os_dois_para_o_reajuste(ambiente_projeto):
+    """Revisor da PR #608 (rodada 2, sugestao): o segundo oficio da execucao no mesmo dia tambem vai ao reajuste
+    absorvido (ultimo envio e' o vigente); repetir o mesmo oficio nao duplica."""
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-02-05", "CT-9", None, "manual")
+    medicoes.registrar_protocolo(conn, u["id"], xid, "2026-02-05", "CT-10", None, "manual")
+    assert [p["numero_oficio"] for p in medicoes.detalhe(conn, rid)["protocolos"]] == ["CT-9", "CT-10"]
+
+
+def test_conferencias_com_o_rm_usam_o_valor_do_par(ambiente_projeto):
+    """Revisor da PR #608 (rodada 2): a execucao que absorveu o reajuste e' conferida pelo valor do par (R$ 990,00):
+    a nota de R$ 990,00 nao diverge na reconciliacao, a de R$ 995,00 fica acima da medicao, e o reajuste absorvido nao
+    aparece como medicao sem nota."""
+    from app import notas, sincronizacao_rm
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    assert medicoes.valor_do_par(conn, xid, 1_000_01) == 990_00 and medicoes.valor_do_par(conn, rid, -10_01) == -10_01
+    rec = sincronizacao_rm._reconciliacao(conn, None, None)
+    assert rid not in [x["medicao_id"] for x in rec["medicoes_sem_nf"]]
+    assert xid not in [x["medicao_id"] for x in rec["divergencias"]]
+    assert notas.acima_da_medicao(conn, xid) == []
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) "
+                       "VALUES (1, 903, '903', 99500, '2026-02-04')").lastrowid
+    conn.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) "
+                 "VALUES (?, ?, 99500, 'manual')", (xid, nid))
+    conn.commit()
+    assert [a["medicao_centavos"] for a in notas.acima_da_medicao(conn, xid)] == [990_00]

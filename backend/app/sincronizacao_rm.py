@@ -436,6 +436,11 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
     out = []
     for r in linhas:
         d = dict(r)
+        # issue #589: o reajuste negativo absorvido pelo espelho da execucao nao tem nota propria (a nota e' a da
+        # execucao, com o valor liquido): nao e' candidato, e a execucao casa pelo valor do par (execucao + reajuste)
+        if d["tipo"] == "reajuste" and medicoes.absorvida(conn, d["id"]):
+            continue
+        d["valor"] = medicoes.valor_do_par(conn, d["id"], d["valor"])
         esp = notas.esperadas(conn, r["id"])
         d["esperadas"] = [e["valor"] for e in esp if e["nota_id"] is None]
         if esp and notas.coligada_esperada(conn, r["id"]) == coligada:
@@ -690,7 +695,9 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
             continue
         # Gate Sol S1 (PR #202): vinculo desfeito a' mao pode ter levado parte do faturamento (medicao em duas
         # notas). Ai' so' fecha sozinha se as notas que ficaram cobrem o valor da medicao.
-        if m["valor"] is None or sum(x["valor_alocado_centavos"] for x in notas) < m["valor"]:
+        # issue #589: a execucao que absorveu reajuste negativo e' coberta pelo valor do par (o da nota)
+        valor = medicoes.valor_do_par(conn, m["id"], m["valor"])
+        if valor is None or sum(x["valor_alocado_centavos"] for x in notas) < valor:
             if conn.execute("SELECT 1 FROM nf_alocacoes WHERE medicao_id=? AND desfeita_em IS NOT NULL "
                             "AND motivo_desfazer LIKE ?", (m["id"], MOTIVO_A_MAO + "%")).fetchone():
                 continue
@@ -1047,7 +1054,8 @@ def _reconciliacao(conn, nfs_apos: int | None, desfeitas_apos: int | None) -> di
         WHERE (m.estado IN ('nota_emitida','nf_emitida','recebida')
                OR EXISTS (SELECT 1 FROM nf_alocacoes d WHERE d.medicao_id=m.id AND d.desfeita_em IS NOT NULL))
           AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.medicao_id=m.id AND a.desfeita_em IS NULL)
-        ORDER BY c.numero_instrumento, m.numero""")]
+        ORDER BY c.numero_instrumento, m.numero""")
+        if not medicoes.absorvida(conn, r["medicao_id"])]     # issue #589: o absorvido nao tem nota propria
     divergencias = []
     for r in conn.execute("""
             SELECT m.id AS medicao_id, m.contrato_id, c.numero_instrumento, m.numero, m.tipo, m.competencia,
@@ -1056,8 +1064,9 @@ def _reconciliacao(conn, nfs_apos: int | None, desfeitas_apos: int | None) -> di
             FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
             JOIN nf_alocacoes a ON a.medicao_id=m.id AND a.desfeita_em IS NULL
             GROUP BY m.id"""):
-        if r["valor_centavos"] is not None and r["alocado_centavos"] != r["valor_centavos"]:
-            divergencias.append(dict(r))
+        valor = medicoes.valor_do_par(conn, r["medicao_id"], r["valor_centavos"])     # issue #589
+        if valor is not None and r["alocado_centavos"] != valor:
+            divergencias.append({**dict(r), "valor_centavos": valor})
     de_desfeitas = """
         FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
         JOIN medicoes m ON m.id=a.medicao_id JOIN contratos c ON c.id=m.contrato_id

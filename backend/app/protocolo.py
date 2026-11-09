@@ -731,7 +731,8 @@ def _irmas_fora(conn, p: dict, ms: list[dict]) -> list[dict]:
                 "AND NOT EXISTS (SELECT 1 FROM protocolo_medicoes pm JOIN protocolos q ON q.id=pm.protocolo_id "
                 "WHERE pm.medicao_id=x.id AND q.etapa=? AND q.situacao='enviado')",
                 (p["etapa"], p["contrato_id"], m["numero"], m["competencia"], m["tipo"], m["tipo"], p["etapa"])):
-            if r["id"] not in dentro:
+            # issue #589: o reajuste negativo absorvido pela execucao nao tem nota propria e e' protocolado com ela
+            if r["id"] not in dentro and not medicoes.absorvida(conn, r["id"]):
                 achadas[r["id"]] = dict(r)
     return list(achadas.values())
 
@@ -1454,6 +1455,11 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
                                                      justificativa=longa or JUSTIFICATIVA_POS_ENVIO,
                                                      protocolo_id=x["id"])
                         conn.execute("UPDATE medicoes SET envio_origem='sistema' WHERE id=?", (m["id"],))
+                        # issue #589: o reajuste negativo absorvido foi protocolado com a execucao: o envio e' dele
+                        for r in (medicoes.absorvidas(conn, m["id"]) if m["tipo"] == "execucao" else []):
+                            conn.execute("INSERT OR IGNORE INTO envio_medicoes (envio_id, medicao_id) VALUES (?,?)",
+                                         (envio_id, r["id"]))
+                            conn.execute("UPDATE medicoes SET envio_origem='sistema' WHERE id=?", (r["id"],))
                     except ValueError as erro:
                         nao_marcadas.append({"medicao_id": m["id"], "motivo": str(erro)})
             auditoria.registrar(conn, usuario["id"], "protocolo.enviar", "protocolo", x["id"], None,

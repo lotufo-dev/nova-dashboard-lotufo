@@ -275,8 +275,12 @@ def _valores(regra: dict, entradas: dict[str, int]) -> dict[str, float]:
     """Celulas de rateio da planilha, em double: o valor digitado, TRUNC/ROUND(base*fator) e o
     resto por subtracoes sucessivas (E4-G5-I5), sem arredondar."""
     c = {e["chave"]: int(entradas.get(e["chave"]) or 0) for e in regra["entradas"]}
-    if any(x > TETO_CENTAVOS for x in c.values()):
+    if any(abs(x) > TETO_CENTAVOS for x in c.values()):
         raise ValueError("valor acima de R$ 99.999.999.999,99")
+    # issue #589: so' o reajuste tem sinal (apostilamento ou previsao negativos); medicao e projeto nao
+    for e in regra["entradas"]:
+        if c[e["chave"]] < 0 and e["natureza"] != "reajuste":
+            raise ValueError(f"{e['rotulo']}: valor negativo só no reajuste")
     v = {k: x / 100 for k, x in c.items()}
     for p in regra["parcelas"]:
         base = v[p["de"]]
@@ -303,13 +307,49 @@ def _vigente(cfg: dict | None, competencia: str | None) -> bool:
     return f"{competencia[:7]}-01" >= desde[:10]
 
 
-def calcular(regra: dict, entradas: dict[str, int], competencia: str | None = None) -> list[dict]:
-    v = _valores(regra, entradas)
-    saidas = []
+NOTA_NEGATIVA = "A nota não sai com valor negativo; inclua a execução do mesmo número"
+
+
+def _valores_das_saidas(regra: dict, v: dict[str, float]) -> tuple[dict[str, float], dict[str, float]]:
+    """O valor (double) de cada saida e o reajuste negativo abatido em cada uma. Issue #589 (decisao do Leo de
+    08/11/2026, item 1): nao existe nota com valor negativo. O reajuste negativo (apostilamento ou previsao negativos)
+    abate na nota de medicao do mesmo emissor e municipio deste espelho, que soma com o sinal; a saida de reajuste
+    negativa nao vira nota. Sem a medicao no espelho (espelho so' de reajuste negativo), ou com o reajuste que zera
+    ou passa dela, a geracao e' recusada. Duas notas de medicao do mesmo emissor e municipio (obra com mais de uma
+    fonte) tambem recusam: o sistema nao escolhe em qual abater."""
+    valores = {}
     for s in regra["saidas"]:
         valor = 0.0
         for k in s["valor"]:
             valor += v[k]
+        valores[s["chave"]] = valor
+    abatido: dict[str, float] = {}
+    for s in regra["saidas"]:
+        valor = valores[s["chave"]]
+        if s["natureza"] != "reajuste" or round(valor * 100) >= 0:
+            continue
+        alvos = [x["chave"] for x in regra["saidas"]
+                 if x["natureza"] == "medicao" and (x["emissor"], x["municipio"]) == (s["emissor"], s["municipio"])]
+        if len(alvos) > 1:
+            raise ValueError("O reajuste negativo tem mais de uma nota de medição do mesmo emissor e município para "
+                             "abater: a regra do espelho desta obra não diz em qual")
+        if not alvos or round(valores[alvos[0]] * 100) <= 0:
+            raise ValueError(NOTA_NEGATIVA)
+        valores[alvos[0]] += valor
+        abatido[alvos[0]] = abatido.get(alvos[0], 0.0) + valor
+        valores[s["chave"]] = 0.0
+        if _leitura(valores[alvos[0]], "trunc") <= 0:
+            raise ValueError(f"O reajuste negativo (R$ {_fmt(round(valor * 100))}) zera a nota de medição: "
+                             "a nota não sai com valor negativo")
+    return valores, abatido
+
+
+def calcular(regra: dict, entradas: dict[str, int], competencia: str | None = None) -> list[dict]:
+    v = _valores(regra, entradas)
+    valores, abatido = _valores_das_saidas(regra, v)
+    saidas = []
+    for s in regra["saidas"]:
+        valor = valores[s["chave"]]
         if _leitura(valor, "trunc") <= 0:
             continue
         ret = s["retencoes"]
@@ -340,17 +380,20 @@ def calcular(regra: dict, entradas: dict[str, int], competencia: str | None = No
         saidas.append({"chave": s["chave"], "natureza": s["natureza"],
                        "rotulo": s["rotulo"] or ROTULO_NATUREZA[s["natureza"]],
                        "emissor": s["emissor"], "municipio": s["municipio"], "modelo": s["modelo"],
-                       **cent, **trib, "liquido": liquido, "extenso": extenso.reais(cent["valor"])})
+                       **cent, **trib, "liquido": liquido, "extenso": extenso.reais(cent["valor"]),
+                       # issue #589: o reajuste negativo abatido nesta nota de medicao (so' quando houve)
+                       **({"reajuste_abatido": round(abatido[s["chave"]] * 100)} if s["chave"] in abatido else {})})
     return saidas
 
 
 def valor_por_natureza(regra: dict, entradas: dict[str, int]) -> dict[str, int]:
     """Valor de cada MEDICAO (tipo do banco) = soma das entradas daquela natureza (o cheio, em
-    consorcio que emite so' a cota)."""
+    consorcio que emite so' a cota), com o sinal no reajuste (issue #589)."""
     soma: dict[str, int] = {}
     for e in regra["entradas"]:
         c = int(entradas.get(e["chave"]) or 0)
-        if c > 0:
+        # issue #589: o reajuste negativo tambem e' medicao deste espelho (abatido na nota da medicao)
+        if c > 0 or (c < 0 and e["natureza"] == "reajuste"):
             t = TIPO_POR_NATUREZA[e["natureza"]]
             soma[t] = soma.get(t, 0) + c
     return soma

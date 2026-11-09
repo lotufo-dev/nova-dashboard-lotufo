@@ -2130,3 +2130,26 @@ def test_capa_nao_aprovada_ou_pdf_sem_capa_nao_grava_capa(client_admin, monkeypa
     _capa_lida(monkeypatch, paginas=["Ofício qualquer sem capa", ""])
     assert _registrar_boletim(client_admin, mid, valor="12.000,02").status_code == 201
     assert _capas(mid) == []
+
+
+def test_reajuste_aceita_valor_negativo_e_execucao_recusa(client_admin):
+    """Issue #589: o pedido da medicao de reajuste aceita o sinal ("-10,01", centavo impar), na criacao e na edicao
+    do valor; execucao e projeto recusam com 422 e mensagem em portugues; o aprovado digitado tambem recusa."""
+    cid = _contrato(client_admin)
+    r = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                          json={"numero": 5, "tipo": "reajuste", "competencia": "2026-07", "valor": "-10,01"})
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    assert client_admin.get(f"/api/medicoes/{rid}").json()["valor_protocolado_centavos"] == -10_01
+    r = client_admin.put(f"/api/medicoes/{rid}/valor", json={"campo": "protocolado", "valor": "−1.234,57"})
+    assert r.status_code == 200, r.text
+    assert client_admin.get(f"/api/medicoes/{rid}").json()["valor_protocolado_centavos"] == -1_234_57
+    r = client_admin.put(f"/api/medicoes/{rid}/valor", json={"campo": "atestado", "valor": "-1,00"})
+    assert r.status_code == 422 and r.json()["detail"] == "O aprovado não aceita valor negativo"
+    for tipo, n in (("execucao", 1), ("projeto", 2)):
+        mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                                json={"numero": n, "tipo": tipo, "competencia": "2026-07"}).json()["id"]
+        r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "-1,00"})
+        assert r.status_code == 422
+        assert r.json()["detail"] == f"Medição de {'execução' if tipo == 'execucao' else 'projeto'} não aceita valor negativo"
+        assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] is None

@@ -7,8 +7,8 @@ import { fmtCompetencia } from "./tempo";
 // Issue #276 (spec 2026-10-20 §2.2, decisao do Leo de 08/11/2026): o campo "Reajuste" da medicao de reajuste, ja'
 // preenchido com a sugestao do servidor (o apostilado da competencia, senao o previsto, senao vazio) e a origem dela.
 // Com duas datas-base (D7), o campo "Data-base" escolhe; vem escolhida quando so' uma tem previsao na competencia. O
-// sistema nao calcula nada: a sugestao, o ciclo e o aviso (ja' pedido em outra medicao, previsao negativa, ciclo em
-// aberto) vem de `/reajuste/sugestao`.
+// sistema nao calcula nada: a sugestao, o ciclo e o aviso (ja' pedido em outra medicao, ciclo em aberto) vem de
+// `/reajuste/sugestao`. Issue #589: o reajuste aceita valor negativo (apostilamento ou previsao negativos).
 
 export type BaseSugerida = {
   data_base_mes: string; aplica_a: string; ciclo: number | null;
@@ -21,10 +21,13 @@ function rotuloBase(b: BaseSugerida): string {
   return b.aplica_a ? `${fmtCompetencia(b.data_base_mes)} (${b.aplica_a})` : fmtCompetencia(b.data_base_mes);
 }
 
-/** O valor que o campo mostra para a base: o sugerido em "1.234,56", ou vazio (o servidor nunca sugere negativo). */
+/** O valor que o campo mostra para a base: o sugerido em "1.234,56" (issue #589: o apostilado negativo com o sinal,
+ *  "-10,01"), ou vazio. */
 function sugerido(s: SugestaoReajuste, dataBase: string): string {
   const b = s.bases.find(x => x.data_base_mes === dataBase);
-  return b?.valor_centavos != null && b.valor_centavos >= 0 ? digitosParaBrl(String(b.valor_centavos)) : "";
+  if (b?.valor_centavos == null) return "";
+  const texto = digitosParaBrl(String(Math.abs(b.valor_centavos)));
+  return b.valor_centavos < 0 ? `-${texto}` : texto;
 }
 
 /** `numero`: o da planilha/carta; se a medicao de reajuste desse nº ja' nao recebe o reajuste, o servidor devolve
@@ -88,7 +91,8 @@ export default function CampoReajuste({ contratoId, competencia, numero, prefixo
       )}
       <div className="campo">
         <label className="campo__rotulo" htmlFor={`${prefixo}-reajuste`}>Reajuste</label>
-        <CampoValor id={`${prefixo}-reajuste`} name="reajuste" value={valor.valor} onChange={v => aoMudar({ ...valor, valor: v })} />
+        <CampoValor id={`${prefixo}-reajuste`} name="reajuste" value={valor.valor} comSinal
+          onChange={v => aoMudar({ ...valor, valor: v })} />
         {nota && <span className="campo__nota" id={`${prefixo}-reajuste-origem`}>{nota}</span>}
       </div>
     </div>

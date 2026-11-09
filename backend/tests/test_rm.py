@@ -1521,3 +1521,70 @@ def test_custo_e_notas_falhando_os_dois_erros_ficam_na_rodada(conn, tmp_path):
     r = sincronizacao_rm.sincronizar(conn, rm.SimuladorRM(pasta))
     rodada = conn.execute("SELECT estado, erro, custo_erro FROM rm_sincronizacoes WHERE id=?", (r["id"],)).fetchone()
     assert rodada["estado"] == "failed" and "DASH10" in rodada["erro"] and "DASH25" in rodada["custo_erro"]
+
+
+def test_fatura_do_consorcio_com_reajuste_negativo_absorvido_casa_pelo_liquido(conn, tmp_path):
+    """Issue #589 (revisor da PR #608): em obra de consorcio, a fatura do consorcio sai com o valor liquido do par
+    (execucao R$ 10.000.000,07 menos o reajuste negativo absorvido de R$ 1.000,01). Casa com a execucao pelo valor
+    exato do par, o reajuste absorvido nao e' candidato, e o a receber da obra conta o liquido uma vez so'."""
+    import json as _json
+    from app import auth, cadastro_aplicar, cadastro_arquivos, diretoria, espelhos
+    auth.criar_usuario(conn, "U", "u@l.com", "senha-forte-123", "engenharia")
+    cadastro_aplicar.aplicar(conn, 1, cadastro_arquivos.preparar(RAIZ), ensaio=False)
+    cid = conn.execute("SELECT id FROM contratos WHERE nome_curto='Obra Consórcio'").fetchone()[0]
+    eid = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 12, "2026-06", {"medicao": 1000000007})
+    mid = conn.execute("SELECT m.id FROM espelho_medicoes em JOIN medicoes m ON m.id=em.medicao_id "
+                       "WHERE em.espelho_id=? AND m.tipo='execucao'", (eid,)).fetchone()[0]
+    # o reajuste negativo absorvido no mesmo espelho (a regra de exemplo nao tem entrada de reajuste)
+    rid = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 12, "tipo": "reajuste", "competencia": "2026-06",
+                                   "valor_centavos": -1_000_01})
+    conn.execute("UPDATE medicoes SET estado='espelho_gerado' WHERE id=?", (rid,))
+    conn.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id, valor_com_sinal_centavos) VALUES (?,?,?)",
+                 (eid, rid, -1_000_01))
+    conn.commit()
+    medicoes.marcar_espelho_enviado(conn, 1, mid)
+    medicoes.registrar_protocolo(conn, 1, mid, "2026-07-20", "CT-1", None, "manual")
+    assert medicoes.detalhe(conn, rid)["estado"] == "protocolada"
+    liquido = 1000000007 - 1_000_01
+    cli = _simulador(tmp_path, [_nf(941, liquido / 100, coligada=90, numero="000000021")], [])
+    sincronizacao_rm.sincronizar(conn, cli)
+    al = conn.execute("SELECT medicao_id, regra FROM nf_alocacoes WHERE desfeita_em IS NULL").fetchall()
+    assert [tuple(a) for a in al] == [(mid, "valor_exato")]
+    conn.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)",
+                 (_json.dumps({"total_a_receber_liberado": True}),))
+    conn.commit()
+    assert diretoria.da_obra(conn, cid)["a_receber_centavos"] == liquido
+
+
+def test_fatura_do_consorcio_pelo_liquido_com_vinculo_desfeito_a_mao_fecha_o_par_recebido(conn, tmp_path):
+    """Revisor da PR #608 (rodada 2, aviso): com um vinculo desfeito a' mao na execucao, o recebimento so' fecha se as
+    notas cobrem o valor dela; com o reajuste negativo absorvido, o valor e' o do par (o liquido da fatura). Titulo
+    quitado: execucao e reajuste viram recebida."""
+    from app import auth, cadastro_aplicar, cadastro_arquivos, espelhos
+    auth.criar_usuario(conn, "U", "u@l.com", "senha-forte-123", "engenharia")
+    cadastro_aplicar.aplicar(conn, 1, cadastro_arquivos.preparar(RAIZ), ensaio=False)
+    cid = conn.execute("SELECT id FROM contratos WHERE nome_curto='Obra Consórcio'").fetchone()[0]
+    eid = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 12, "2026-06", {"medicao": 1000000007})
+    mid = conn.execute("SELECT m.id FROM espelho_medicoes em JOIN medicoes m ON m.id=em.medicao_id "
+                       "WHERE em.espelho_id=? AND m.tipo='execucao'", (eid,)).fetchone()[0]
+    rid = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 12, "tipo": "reajuste", "competencia": "2026-06",
+                                   "valor_centavos": -1_000_01})
+    conn.execute("UPDATE medicoes SET estado='espelho_gerado' WHERE id=?", (rid,))
+    conn.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id, valor_com_sinal_centavos) VALUES (?,?,?)",
+                 (eid, rid, -1_000_01))
+    # o vinculo automatico errado que o operador desfez a' mao
+    errada = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) "
+                          "VALUES (90, 777, '000000007', 123, '2026-07-01')").lastrowid
+    conn.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, desfeita_em, "
+                 "motivo_desfazer) VALUES (?, ?, 123, 'detectado', datetime('now'), ?)",
+                 (mid, errada, sincronizacao_rm.MOTIVO_A_MAO + "nota de outra obra"))
+    conn.commit()
+    medicoes.marcar_espelho_enviado(conn, 1, mid)
+    medicoes.registrar_protocolo(conn, 1, mid, "2026-07-20", "CT-1", None, "manual")
+    liquido = 1000000007 - 1_000_01
+    cli = _simulador(tmp_path, [_nf(941, liquido / 100, coligada=90, numero="000000021")],
+                     [_baixa(1, 941, 9000000.00, 9000000.00, 1, "2026-09-01T00:00:00-04:00", coligada=90)])
+    sincronizacao_rm.sincronizar(conn, cli)
+    for m in (mid, rid):
+        d = medicoes.detalhe(conn, m)
+        assert (d["estado"], d["recebida_em"]) == ("recebida", "2026-09-01")

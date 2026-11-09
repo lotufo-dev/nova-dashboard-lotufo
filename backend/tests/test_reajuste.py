@@ -1479,3 +1479,16 @@ def test_resposta_recusada_fora_do_pleito_vigente_ou_com_dado_invalido(cenario):
     with pytest.raises(ValueError, match="apostilado"):
         reajuste.registrar_resposta(c, 1, p2, hoje=D(2026, 9, 5), **ok)
     assert c.execute("SELECT COUNT(*) FROM pleito_respostas").fetchone()[0] == 0
+
+
+def test_reajuste_negativo_soma_com_o_sinal_no_acumulado_da_competencia(cenario):
+    """Issue #589: a medicao de reajuste negativa (deflacao) e o complemento da mesma competencia somam com o sinal no
+    pedido, no medido e no medido nao recebido da aba Reajuste (centavo impar); a absorvida que acompanhou a nota da
+    execucao fica faturada pelo estado, sem nota propria."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _medicao(c, cid, 1, "2026-08", "planilha_enviada", pedido=300_05)
+    _medicao(c, cid, 2, "2026-08", "nota_emitida", pedido=-10_01)
+    x = _por_competencia(c, cid)["2026-08"]
+    assert (x["pedido_centavos"], x["medido_centavos"], x["medido_nao_recebido_centavos"]) == (290_04, 290_04, 290_04)
+    assert x["estado"] == "faturada" and x["faturado_centavos"] is None

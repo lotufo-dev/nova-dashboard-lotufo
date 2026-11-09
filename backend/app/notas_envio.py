@@ -276,6 +276,9 @@ def _irmas(conn, c: dict, familia: str, o: dict, ms: list[dict], hoje: datetime.
                               "AND estado='nota_emitida' ORDER BY id", (c["id"], m["numero"], outro[m["tipo"]])):
             if r["id"] in dentro or any(p["situacao"] != "rascunho" for p in _ativos(conn, _etapa(familia), r["id"])):
                 continue
+            # issue #589: o reajuste negativo absorvido nao tem nota propria e vai com a execucao, nao como irma
+            if medicoes.absorvida(conn, r["id"]):
+                continue
             # rodada 3 da PR #179: nem a irma com item que bloqueia (FRC assinada recusada, sem espelho, sem cadastro)
             if any(i["estado"] == "vencida" or i.get("bloqueia") for i in _itens(conn, c, familia, [dict(r)], hoje)[0]):
                 continue
@@ -680,7 +683,8 @@ def _registrar_externo(conn, usuario_id: int, ids: list[int], irmas: set[int], d
                 ja_existia = (arquivos.pasta("evidencias") / f"{arquivos.sha_de(eml[1])}.eml").exists()
                 rel, sha = arquivos.gravar_bytes("evidencias", eml[1], "eml")
                 gravado.update(rel=rel, novo=not ja_existia)
-            for m in ms:
+            # issue #589: a execucao antes do reajuste: o reajuste negativo absorvido e' protocolado por ela
+            for m in sorted(ms, key=lambda x: x["tipo"] == "reajuste"):
                 medicoes.registrar_protocolo(conn, usuario_id, m["id"], data.isoformat(),
                                              oficio or protocolo._oficio_da_medicao(conn, m["id"]), None, "manual",
                                              apesar_das_pendencias=True, justificativa=ressalva)
