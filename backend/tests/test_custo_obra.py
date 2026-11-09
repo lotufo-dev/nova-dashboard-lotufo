@@ -336,6 +336,40 @@ def test_titulo_com_o_nome_de_um_grupo_do_cadastro_nao_some(conn):
     assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"] == 300_01
 
 
+def test_mes_com_leitura_pelo_cadastro_e_outra_pelos_titulos_nao_mistura(conn):
+    """Revisor, rodada 2 da #612: a leitura pelo cadastro alimenta o grupo; a pelos titulos, as linhas de titulo. A
+    diferenca do grupo nao existe (o medido do grupo no mes nao e' todo conhecido)."""
+    cid = _obra(conn)
+    m1 = _medicao(conn, cid, 1, "2026-03", 500_00)
+    _leitura(conn, cid, m1, {"Terraplenagem": 500_00})
+    m2 = _medicao(conn, cid, 2, "2026-03", 100_01)
+    lido = {"grupo_por": "planilha", "grupos": [{"nome": "Terraplenagem", "itens": [_item(100_01)]}]}
+    with db.mutacao(conn):
+        medicao_grupos._gravar(conn, None, m2, "e" * 64, "carga", None, None, "lida", None, lido,
+                               medicao_grupos._assinatura(medicao_grupos.cadastro_de_custo(conn, cid)), 100_01, 100_01)
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", 40_00)])
+    mar = _linha(custo_obra.custo_da_obra(conn, cid), "2026-03")
+    t = _grupo(mar, "Terraplenagem")
+    assert t["medido_centavos"] == 500_00 and t["custo_centavos"] == 40_00 and t["diferenca_centavos"] is None
+    assert _grupo(mar, "Pavimentação")["medido_centavos"] == 0
+    assert _grupo(mar, "Terraplenagem (título da planilha)")["medido_centavos"] == 100_01
+    assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"] == 600_01
+
+
+def test_titulo_com_o_nome_de_uma_linha_especial_leva_o_sufixo(conn):
+    """Revisor, rodada 2 da #612: o nome da linha e' a chave na tela; titulo "Ajuste ao medido" nao colide."""
+    cid = _obra(conn)
+    m1 = _medicao(conn, cid, 1, "2026-03", 100_00, atestado=99_00)
+    lido = {"grupo_por": "planilha", "grupos": [{"nome": custo_obra.AJUSTE, "itens": [_item(100_00)]}]}
+    with db.mutacao(conn):
+        medicao_grupos._gravar(conn, None, m1, "f" * 64, "carga", None, None, "lida", None, lido,
+                               medicao_grupos._assinatura(medicao_grupos.cadastro_de_custo(conn, cid)), 100_00, 100_00)
+    mar = _linha(custo_obra.custo_da_obra(conn, cid), "2026-03")
+    assert len({g["nome"] for g in mar["grupos"]}) == len(mar["grupos"])
+    assert _grupo(mar, "Ajuste ao medido (título da planilha)")["medido_centavos"] == 100_00
+    assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"] == 99_00
+
+
 # --- issue #492: custo unitario realizado do item-chave ----------------------------------------------------------
 
 def _chave(conn, cid, grupo, codigo, unidade):
