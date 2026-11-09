@@ -439,3 +439,22 @@ def test_sem_item_com_outra_coluna_faltando_diz_qual():
     with pytest.raises(leitura.PlanilhaRecusada, match="PREÇO UNITÁRIO") as e:
         leitura.ler(planilha_sem_item(cabecalho=sem_preco))
     assert "ITEM" not in str(e.value)
+
+
+# --- issue #610: os itens na ordem da planilha e o total que a propria planilha escreve -------------------------
+
+def test_itens_na_ordem_da_planilha_mesmo_com_outros_no_fim():
+    linhas = [("1.1", "ADML", "Administração local", "un", 1, 1, 1, 10.0, 10.0, 10.0),
+              ("2", None, "DRENAGEM", GRUPO), ("2.1", "2003", "Bueiro", "m", 1, 1, 1, 5.0, 5.0, 5.0)]
+    lido = leitura.ler(planilha(linhas))
+    assert [g["nome"] for g in lido["grupos"]] == ["DRENAGEM", "outros"]
+    assert [i["item"] for i in lido["itens"]] == ["1.1", "2.1"]
+
+
+def test_total_escrito_na_planilha():
+    assert leitura.ler(planilha())["total_planilha_centavos"] is None          # "vinte mil reais": nao e' numero
+    dados = _trocar(planilha(), "Resumo Medição", {(23, 12): 20693.11})          # TOTAL GERAL, NESTA MEDIÇÃO R$
+    lido = leitura.ler(dados)
+    assert lido["total_planilha_centavos"] == 20693_11 and lido["total_centavos"] == TOTAL
+    # sem ITEM: a leitura para no TOTAL ACUMULADO e o TOTAL DESTA MEDIÇÃO vem de baixo (o 12345,67 da fixture)
+    assert leitura.ler(planilha_sem_item())["total_planilha_centavos"] == 12345_67
