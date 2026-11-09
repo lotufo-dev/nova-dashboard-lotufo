@@ -60,7 +60,8 @@ def _texto(v) -> str:
     return " ".join(s.upper().split())
 
 
-NUMERO_DO_ITEM = ("NO", "NO.", "N", "N.", "NUM", "NUM.")   # "Nº" -> "NO"; "N°" -> "N" (o grau some na normalizacao)
+# "Nº" -> "NO", "N.º" -> "N.O", "N°" -> "N" (o grau some na normalizacao)
+NUMERO_DO_ITEM = ("NO", "NO.", "N.O", "N", "N.", "NUM", "NUM.", "NR", "NR.", "NRO", "NRO.", "NUMERO")
 
 
 def _e_item(h: str) -> bool:
@@ -71,9 +72,10 @@ def _e_item(h: str) -> bool:
 
 
 def _outra_coluna_de_item(h: str) -> bool:
-    """Duas palavras terminando em ITEM que nao sao o nº do item ("SUB ITEM", "VALOR ITEM", "POR ITEM")."""
+    """Duas palavras terminando em ITEM que nao sao o nº do item ("SUB ITEM", "VALOR ITEM", "POR ITEM"). Primeira
+    palavra comecando com N que nao se reconhece ("NMR ITEM") fica de fora: pode ser o nº e continua recusando."""
     partes = h.split()
-    return len(partes) == 2 and partes[1] == "ITEM" and not _e_item(h)
+    return len(partes) == 2 and partes[1] == "ITEM" and not _e_item(h) and not partes[0].startswith("N")
 
 
 def _menciona_item(textos: list[str]) -> bool:
@@ -437,6 +439,21 @@ def _linhas(z: zipfile.ZipFile, caminho: str, textos: list[str]):
             dados_aba.clear()
 
 
+def _linha_de_soma(textos: list[str], descricao: int, codigo: str, unidade: str, preco) -> bool:
+    """Modelo sem ITEM: linha que comeca com TOTAL, SUB-TOTAL ou SUB TOTAL. O rotulo fora da DISCRIMINAÇÃO (na
+    coluna do codigo, por exemplo) e' sempre soma; na DISCRIMINAÇÃO, so' nao e' quando a linha tem cara de item,
+    unidade e codigo ou preco unitario de verdade: "2003 | Total de bueiros executados | m | ... | 5,01" e' item
+    (issue #617), e "TOTAL DO GRUPO" com "-" ou 0 no preco, ou "R$" na unidade, continua soma."""
+    rotulos = [c for c, t in enumerate(textos)
+               if t and (t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL"))]
+    if not rotulos:
+        return False
+    if any(c != descricao for c in rotulos):
+        return True
+    preco_de_verdade = isinstance(preco, int | float | Decimal) and not isinstance(preco, bool) and preco > 0
+    return not (unidade and (codigo or preco_de_verdade))
+
+
 def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
     col, linhas = _achar_cabecalho(iter(linhas))
     sem_item = "item" not in col        # modelo sem ITEM (issue #612): grupo pelo titulo mais recente
@@ -465,11 +482,8 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
         descricao = " ".join(descricao.split()) if isinstance(descricao, str) else _nome_item(descricao)
         preco = celula("preco")
         sem_preco = preco is None or (isinstance(preco, str) and not preco.strip())
-        # outra linha de soma: nunca titulo nem item. So' a sem unidade e sem preco (o mesmo criterio do titulo):
-        # o item "Total de bueiros executados", com unidade e preco, e' item (issue #617)
-        if sem_item and not unidade and sem_preco and any(
-                t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL") for t in textos if t):
-            continue
+        if sem_item and _linha_de_soma(textos, col["descricao"], codigo, unidade, preco):
+            continue                    # outra linha de soma: nunca titulo nem item
         if sem_item and not codigo and not unidade and sem_preco and descricao:
             titulo_atual = descricao     # titulo de grupo ou de subgrupo, sem nº
             continue

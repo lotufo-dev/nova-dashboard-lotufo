@@ -468,6 +468,22 @@ def test_sem_item_linha_de_total_com_rotulo_na_coluna_do_codigo_continua_pulada(
                                                                                  ("PONTES", 5_00)]
 
 
+@pytest.mark.parametrize(("unidade", "preco"), [(None, "-"), (None, 0), ("R$", None), ("R$", "-"), ("%", 0)])
+def test_sem_item_linha_de_total_com_traco_zero_ou_r_na_unidade_continua_pulada(unidade, preco):
+    """Code-review #617: o "TOTAL DO GRUPO" com "-" ou 0 no preco, ou "R$" na unidade, nao vira item."""
+    linhas = [(TITULO, "DRENAGEM"), ("2003", "Bueiro", "m", 1, 1, 0, 1, 5.01, 5.01, 5.01, 0, 5.01, 1),
+              (None, "TOTAL DO GRUPO", unidade, None, None, None, None, preco, None, 5.01, 0, 5.01, None),
+              (None, "Sub-total da drenagem", unidade, None, None, None, None, preco, None, 5.01, 0, 5.01, None)]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert [(g["nome"], g["valor_medido_centavos"]) for g in lido["grupos"]] == [("DRENAGEM", 5_01)]
+
+
+def test_sem_item_item_sem_codigo_comecando_com_total_e_lido_pela_unidade_e_preco():
+    linhas = [(TITULO, "DRENAGEM"), (None, "Total de bocas de lobo", "un", 1, 1, 0, 1, 3.0, 3.0, 3.0, 0, 3.0, 1)]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert lido["total_centavos"] == 3_00 and lido["grupos"][0]["itens"][0]["descricao"] == "Total de bocas de lobo"
+
+
 @pytest.mark.parametrize("coluna", ["SUB ITEM", "VALOR ITEM", "POR ITEM"])
 def test_sem_item_coluna_extra_terminada_em_item_nao_vira_a_coluna_item(coluna):
     lido = leitura.ler(planilha_sem_item(cabecalho=CABECALHO_SEM_ITEM + [coluna]))
@@ -476,13 +492,15 @@ def test_sem_item_coluna_extra_terminada_em_item_nao_vira_a_coluna_item(coluna):
     assert lido["total_centavos"] == TOTAL_SEM_ITEM            # parou no TOTAL ACUMULADO
 
 
-@pytest.mark.parametrize("rotulo", ["Nº ITEM", "N. ITEM", "N ITEM", "NUM ITEM", "N° ITEM"])
+@pytest.mark.parametrize("rotulo", ["Nº ITEM", "N. ITEM", "N ITEM", "NUM ITEM", "N° ITEM", "N.º ITEM", "NR. ITEM",
+                                    "NRO ITEM", "NÚMERO ITEM"])
 def test_formas_de_numero_do_item_valem_como_item(rotulo):
     dados = _trocar(planilha(), "Resumo Medição", {(10, 1): rotulo})
     assert leitura.ler(dados) == leitura.ler(planilha())
 
 
-def test_coluna_nº_do_item_continua_recusando_em_vez_de_virar_sem_item():
-    dados = _trocar(planilha(), "Resumo Medição", {(10, 1): "Nº DO ITEM"})
+@pytest.mark.parametrize("rotulo", ["Nº DO ITEM", "NMR ITEM"])
+def test_coluna_de_nº_do_item_que_nao_se_reconhece_continua_recusando(rotulo):
+    dados = _trocar(planilha(), "Resumo Medição", {(10, 1): rotulo})
     with pytest.raises(leitura.PlanilhaRecusada, match="não tem a coluna ITEM"):
         leitura.ler(dados)
