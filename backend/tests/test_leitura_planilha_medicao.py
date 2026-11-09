@@ -392,6 +392,48 @@ def test_linha_com_codigo_da_obra_acima_do_cabecalho_nao_e_o_cabecalho():
     assert leitura.ler(buf.getvalue())["total_centavos"] == TOTAL_SEM_ITEM
 
 
+def _trocar(dados: bytes, aba: str, celulas: dict[tuple[int, int], str]) -> bytes:
+    wb = openpyxl.load_workbook(io.BytesIO(dados))
+    for (r, c), v in celulas.items():
+        wb[aba].cell(r, c, v)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_sem_item_recusa_com_as_colunas_da_linha_mais_perto_do_cabecalho():
+    """Gate Sol, #612: com "CÓDIGO DA OBRA" acima, a recusa diz so' o que falta no cabecalho de verdade."""
+    sem_preco = [c for c in CABECALHO_SEM_ITEM if c != "PREÇO\nUNITÁRIO R$"]
+    dados = _trocar(planilha_sem_item(cabecalho=sem_preco), "Resumo",
+                    {(4, 2): "CÓDIGO DA OBRA", (4, 3): "DISCRIMINAÇÃO DO OBJETO"})
+    with pytest.raises(leitura.PlanilhaRecusada) as e:
+        leitura.ler(dados)
+    assert str(e.value) == "o cabeçalho da aba Resumo não tem a coluna PREÇO UNITÁRIO R$"
+
+
+def test_coluna_n_item_vale_como_item():
+    """Gate Sol, #612: "Nº ITEM" e' a coluna ITEM; a planilha nao cai no modelo sem ITEM."""
+    dados = _trocar(planilha(), "Resumo Medição", {(10, 1): "Nº ITEM"})
+    assert leitura.ler(dados) == leitura.ler(planilha())
+    cadastro = [{"nome": "Drenagem", "itens_planilha": ["3."]}]
+    lido = leitura.ler(dados, cadastro)
+    assert lido["grupo_por"] == "cadastro" and lido == leitura.ler(planilha(), cadastro)
+
+
+def test_coluna_de_item_que_nao_se_reconhece_recusa_em_vez_de_virar_sem_item():
+    dados = _trocar(planilha(), "Resumo Medição", {(10, 1): "ITEM Nº"})
+    with pytest.raises(leitura.PlanilhaRecusada, match="não tem a coluna ITEM"):
+        leitura.ler(dados)
+
+
+def test_sem_item_linha_de_total_fora_do_rodape_nao_vira_titulo():
+    linhas = [(TITULO, "DRENAGEM"), ("2003", "Bueiro", "m", 1, 1, 0, 1, 5.01, 5.01, 5.01, 0, 5.01, 1),
+              (SUB, "TOTAL DO GRUPO"), (SUB, "SUB-TOTAL"),
+              ("2004", "Sarjeta", "m", 1, 1, 0, 1, 2.0, 2.0, 2.0, 0, 2.0, 1)]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert [(g["nome"], g["valor_medido_centavos"]) for g in lido["grupos"]] == [("DRENAGEM", 7_01)]
+
+
 def test_sem_item_com_outra_coluna_faltando_diz_qual():
     sem_preco = [c for c in CABECALHO_SEM_ITEM if c != "PREÇO\nUNITÁRIO R$"]
     with pytest.raises(leitura.PlanilhaRecusada, match="PREÇO UNITÁRIO") as e:

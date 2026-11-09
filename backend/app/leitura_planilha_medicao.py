@@ -60,11 +60,22 @@ def _texto(v) -> str:
     return " ".join(s.upper().split())
 
 
+def _e_item(h: str) -> bool:
+    """A coluna do nº do item: "ITEM", ou ate' duas palavras terminando em ITEM ("Nº ITEM" -> "NO ITEM", "N. ITEM")."""
+    partes = h.split()
+    return bool(partes) and partes[-1] == "ITEM" and len(partes) <= 2
+
+
+def _menciona_item(textos: list[str]) -> bool:
+    """Alguma celula fala de ITEM (mesmo que nao seja reconhecida): nao e' o modelo sem ITEM."""
+    return any("ITEM" in t.split() for t in textos)
+
+
 def _campo(h: str) -> str | None:
     """O campo de uma celula do cabecalho (ja' normalizada), ou None (coluna que a leitura nao usa)."""
     if not h:
         return None
-    if h == "ITEM":
+    if _e_item(h):
         return "item"
     if h.startswith("CODIGO"):
         return "codigo"
@@ -96,19 +107,20 @@ def _campo(h: str) -> str | None:
 def _e_cabecalho(valores: list) -> bool:
     """A linha do cabecalho tem ITEM (ou CÓDIGO, no modelo sem ITEM) e DISCRIMINAÇÃO (ou DESCRIÇÃO)."""
     textos = [_texto(v) for v in valores]
-    return (("ITEM" in textos or any(t.startswith("CODIGO") for t in textos))
+    return ((any(_e_item(t) for t in textos) or any(t.startswith("CODIGO") for t in textos))
             and any(t.startswith(("DISCRIMINACAO", "DESCRICAO")) for t in textos))
 
 
 def _colunas(textos: list[str]) -> tuple[dict[str, int], list[str]]:
-    """(campo -> coluna, rotulos das colunas que faltam). Com CÓDIGO, ITEM nao e' exigido (modelo sem ITEM)."""
+    """(campo -> coluna, rotulos das colunas que faltam). Com CÓDIGO e sem celula nenhuma falando de ITEM, ITEM nao
+    e' exigido (modelo sem ITEM); a coluna de ITEM escrita de um jeito que nao se reconhece continua recusando."""
     colunas: dict[str, int] = {}
     for c, t in enumerate(textos):
         campo = _campo(t)
         if campo and campo not in colunas:
             colunas[campo] = c
-    return colunas, [CAMPOS[k] for k in CAMPOS
-                     if k not in colunas and not (k == "item" and "codigo" in colunas)]
+    sem_item = "codigo" in colunas and not _menciona_item(textos)
+    return colunas, [CAMPOS[k] for k in CAMPOS if k not in colunas and not (k == "item" and sem_item)]
 
 
 def _combinar(pai: list, filho: list) -> list[str]:
@@ -151,8 +163,9 @@ def _achar_cabecalho(linhas) -> tuple[dict[str, int], object]:
         col, faltam = _colunas([_texto(v) for v in valores])
         if not faltam:
             return col, linhas
-        if "ITEM" not in [_texto(v) for v in valores]:
-            pendente = pendente or f"o cabeçalho da aba Resumo não tem a coluna {', '.join(faltam)}"
+        if not any(_e_item(_texto(v)) for v in valores):
+            if pendente is None or len(faltam) < len(pendente):
+                pendente = faltam       # a linha mais perto de ser o cabecalho diz o que falta
             anterior = valores
             continue
         if anterior is not None and _so_texto(anterior):
@@ -166,7 +179,9 @@ def _achar_cabecalho(linhas) -> tuple[dict[str, int], object]:
                 return col2, linhas
             faltam = faltam2 if len(faltam2) < len(faltam) else faltam
         raise PlanilhaRecusada(f"o cabeçalho da aba Resumo não tem a coluna {', '.join(faltam)}")
-    raise PlanilhaRecusada(pendente or "a aba Resumo não tem o cabeçalho com ITEM (ou CÓDIGO) e DISCRIMINAÇÃO")
+    if pendente:
+        raise PlanilhaRecusada(f"o cabeçalho da aba Resumo não tem a coluna {', '.join(pendente)}")
+    raise PlanilhaRecusada("a aba Resumo não tem o cabeçalho com ITEM (ou CÓDIGO) e DISCRIMINAÇÃO")
 
 
 def _nome_item(v) -> str:
@@ -429,6 +444,9 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
             break                       # sem TOTAL GERAL, a tabela acaba no fim da aba
         if sem_item and any(t.startswith(FIM_SEM_ITEM) for t in textos):
             break
+        if sem_item and any(t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL")
+                            for t in textos if t):
+            continue                    # outra linha de soma: nunca titulo nem item
         if any(t.startswith("SUBTOTAL") for t in textos):
             continue
         celula = lambda k: linha[col[k]] if k in col and col[k] < len(linha) else None   # noqa: E731
