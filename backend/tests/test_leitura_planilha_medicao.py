@@ -458,3 +458,11 @@ def test_total_escrito_na_planilha():
     assert lido["total_planilha_centavos"] == 20693_11 and lido["total_centavos"] == TOTAL
     # sem ITEM: a leitura para no TOTAL ACUMULADO e o TOTAL DESTA MEDIÇÃO vem de baixo (o 12345,67 da fixture)
     assert leitura.ler(planilha_sem_item())["total_planilha_centavos"] == 12345_67
+
+
+def test_total_escrito_fora_da_coluna_ou_absurdo_nao_recusa_a_leitura():
+    """Code-review: o total e' opcional; o numero em outra coluna nao vale, e o acima do teto nao recusa a leitura."""
+    so_acumulado = leitura.ler(_trocar(planilha(), "Resumo Medição", {(23, 14): 99999.99}))
+    assert so_acumulado["total_planilha_centavos"] is None and so_acumulado["total_centavos"] == TOTAL
+    absurdo = leitura.ler(_trocar(planilha(), "Resumo Medição", {(23, 12): 1e15}))
+    assert absurdo["total_planilha_centavos"] is None and absurdo["total_centavos"] == TOTAL

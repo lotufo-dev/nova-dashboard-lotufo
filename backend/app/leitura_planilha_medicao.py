@@ -501,37 +501,32 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
             "total_planilha_centavos": _total_da_planilha(rodape, linhas, col)}
 
 
-def _numero_da_celula(v) -> Decimal | None:
-    if isinstance(v, bool) or not isinstance(v, int | float | Decimal):
-        return None
-    d = Decimal(str(v))
-    return d if d.is_finite() else None
-
-
 def _total_da_linha(linha: list, col: dict[str, int]) -> int | None:
-    """O valor da linha do total: o da coluna NESTA MEDIÇÃO R$; sem numero nela, o unico numero da linha (o rodape
-    do modelo sem ITEM pode trazer o valor numa coluna so'); senao None."""
+    """O valor da linha do total na coluna NESTA MEDIÇÃO R$ (sem numero ali, None: outra coluna seria outro total)."""
     c = col["valor_medido"]
-    d = _numero_da_celula(linha[c]) if c < len(linha) else None
-    if d is None:
-        numeros = [n for n in (_numero_da_celula(v) for v in linha) if n is not None]
-        d = numeros[0] if len(numeros) == 1 else None
-    return _centavos(d, "TOTAL") if d is not None else None
+    try:
+        return _centavos(_decimal(linha[c] if c < len(linha) else None, "o total", "TOTAL"), "TOTAL")
+    except PlanilhaRecusada:
+        return None
 
 
 def _total_da_planilha(rodape: list | None, linhas, col: dict[str, int]) -> int | None:
     """Issue #610: o "TOTAL DESTA MEDIÇÃO" (ou TOTAL GERAL) que a propria planilha escreve, em centavos, para quem
     confere se a soma dos itens fecha com ele; None sem a linha ou sem numero nela. No modelo sem ITEM a leitura
-    pode parar no TOTAL ACUMULADO: o TOTAL DESTA MEDIÇÃO e' procurado nas linhas logo abaixo."""
+    pode parar no TOTAL ACUMULADO: o TOTAL DESTA MEDIÇÃO e' procurado nas linhas logo abaixo. E' dado opcional:
+    nada aqui recusa a leitura (o resto da aba, abaixo do rodape, nunca foi exigido)."""
     def e_total(linha):
         return any(t.startswith(("TOTAL GERAL", "TOTAL DESTA MEDICAO")) for t in (_texto(v) for v in linha))
     if rodape is None:
         return None
     if e_total(rodape):
         return _total_da_linha(rodape, col)
-    for _i, (_numero, linha) in zip(range(LINHAS_RODAPE), linhas):
-        if e_total(linha):
-            return _total_da_linha(linha, col)
+    try:
+        for _i, (_numero, linha) in zip(range(LINHAS_RODAPE), linhas):
+            if e_total(linha):
+                return _total_da_linha(linha, col)
+    except Exception:       # teto, texto inexistente ou XML quebrado abaixo do rodape: sem total, como antes
+        return None
     return None
 
 

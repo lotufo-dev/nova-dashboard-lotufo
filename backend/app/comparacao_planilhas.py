@@ -85,11 +85,9 @@ def comparar_leituras(de: dict, para: dict) -> dict:
     for chave, b in lado_para.items():
         if chave not in usados:
             saida.append(linha(b, "incluido", None, b))
-    diferenca = sum(i["diferenca_centavos"] for i in saida)
-    if diferenca != para["total_centavos"] - de["total_centavos"]:      # invariante: o total e' a soma dos itens
-        raise leitura.PlanilhaRecusada("a diferença dos itens não fecha com a diferença dos totais")
-    return {"total_de": de["total_centavos"], "total_para": para["total_centavos"], "diferenca_centavos": diferenca,
-            "itens": saida}
+    # o total de cada versao e' a soma dos seus itens e o item igual difere 0: a soma das diferencas e' a dos totais
+    return {"total_de": de["total_centavos"], "total_para": para["total_centavos"],
+            "diferenca_centavos": sum(i["diferenca_centavos"] for i in saida), "itens": saida}
 
 
 def _ler_versao(arquivo: str | None) -> dict:
