@@ -23,6 +23,8 @@ log = logging.getLogger("app.envio_reserva")
 TABELAS = {"protocolos": "protocolo", "espelhos": "espelho", "pleitos": "pleito",
            # issue #282: uma linha por versao da planilha/carta enviada (migracao 053)
            "medicao_planilha_envios": "medicao_planilha_envio",
+           # issue #627: uma linha por envio dos documentos assinados ao orgao (migracao 080)
+           "medicao_assinados_envios": "medicao_assinados_envio",
            # issue #420: uma linha por e-mail da copia cifrada do dono (migracao 066)
            "copia_dono_envios": "copia_dono_envio"}
 # Liberar antes disto pode soltar um envio que AINDA esta' saindo (gate Sol S1, 10/10/2026): quem recebe o 409
@@ -196,7 +198,7 @@ def liberar_manual(conn, usuario_id: int, tabela: str, id_: int, justificativa: 
                              "(pode ainda estar saindo)")
         liberar(conn, t, id_)
         entidade, objeto, extra = TABELAS[t], id_, {}
-        if t == "medicao_planilha_envios":     # a auditoria aponta a medicao (com link), nao a linha da reserva
+        if t in ("medicao_planilha_envios", "medicao_assinados_envios"):   # a auditoria aponta a medicao (com link)
             entidade, objeto = "medicao", conn.execute(f"SELECT medicao_id FROM {t} WHERE id=?", (id_,)).fetchone()[0]
             extra = {"tabela": t, "reserva_id": id_}
         auditoria.registrar(conn, usuario_id, "envio.liberar", entidade, objeto,

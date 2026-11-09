@@ -33,6 +33,9 @@ ROTAS_UPLOAD = tuple((metodo, re.compile(padrao)) for metodo, padrao in (
     ("POST", rf"/api/medicoes/{_ID}/(documentos|notas)"),         # evidencia do orgao e nota fiscal
     ("POST", rf"/api/medicoes/{_ID}/boletim(/leitura)?"),         # issue #284: PDF do boletim; #290: leitura da capa
     ("POST", rf"/api/medicoes/{_ID}/envio-planilha/pecas"),       # issue #282: pecas do orgao no e-mail da planilha
+    # issue #627: PDFs assinados (previa, envio e por fora) e a assinatura com o PDF
+    ("POST", rf"/api/medicoes/{_ID}/assinados/(previa|enviar|envio-externo)"),
+    ("POST", rf"/api/medicoes/{_ID}/assinatura-com-pdf"),
     ("POST", r"/api/notas/envio-externo"),                        # .eml do envio feito fora
     ("POST", rf"/api/pleitos/{_ID}/(anexos|assinado)"),
     ("POST", rf"/api/pleitos/{_ID}/previsao/(ler|planilha)"),     # issue #272: ler e aceitar a planilha de previsao
