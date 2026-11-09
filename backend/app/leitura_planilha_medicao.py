@@ -60,22 +60,20 @@ def _texto(v) -> str:
     return " ".join(s.upper().split())
 
 
-# "Nº" -> "NO", "N.º" -> "N.O", "N°" -> "N" (o grau some na normalizacao)
-NUMERO_DO_ITEM = ("NO", "NO.", "N.O", "N", "N.", "NUM", "NUM.", "NR", "NR.", "NRO", "NRO.", "NUMERO")
+OUTRAS_COLUNAS_DE_ITEM = ("SUB", "VALOR", "POR")   # "SUB ITEM", "VALOR ITEM", "POR ITEM": nao sao o nº (issue #617)
 
 
 def _e_item(h: str) -> bool:
-    """A coluna do nº do item: "ITEM", ou uma forma de número seguida de ITEM ("Nº ITEM" -> "NO ITEM", "N. ITEM").
-    Outra palavra antes de ITEM ("SUB ITEM", "VALOR ITEM") e' outra coluna (issue #617)."""
+    """A coluna do nº do item: "ITEM", ou ate' duas palavras terminando em ITEM ("Nº ITEM" -> "NO ITEM", "N. ITEM",
+    "COD. ITEM"), menos "SUB ITEM", "VALOR ITEM" e "POR ITEM", que sao outra coluna (issue #617)."""
     partes = h.split()
-    return partes == ["ITEM"] or (len(partes) == 2 and partes[0] in NUMERO_DO_ITEM and partes[1] == "ITEM")
+    return bool(partes) and partes[-1] == "ITEM" and len(partes) <= 2 and not _outra_coluna_de_item(h)
 
 
 def _outra_coluna_de_item(h: str) -> bool:
-    """Duas palavras terminando em ITEM que nao sao o nº do item ("SUB ITEM", "VALOR ITEM", "POR ITEM"). Primeira
-    palavra comecando com N que nao se reconhece ("NMR ITEM") fica de fora: pode ser o nº e continua recusando."""
+    """"SUB ITEM", "VALOR ITEM", "POR ITEM": coluna que a leitura nao usa e que nao conta como a coluna ITEM."""
     partes = h.split()
-    return len(partes) == 2 and partes[1] == "ITEM" and not _e_item(h) and not partes[0].startswith("N")
+    return len(partes) == 2 and partes[0] in OUTRAS_COLUNAS_DE_ITEM and partes[1] == "ITEM"
 
 
 def _menciona_item(textos: list[str]) -> bool:
@@ -439,19 +437,39 @@ def _linhas(z: zipfile.ZipFile, caminho: str, textos: list[str]):
             dados_aba.clear()
 
 
-def _linha_de_soma(textos: list[str], descricao: int, codigo: str, unidade: str, preco) -> bool:
-    """Modelo sem ITEM: linha que comeca com TOTAL, SUB-TOTAL ou SUB TOTAL. O rotulo fora da DISCRIMINAÇÃO (na
-    coluna do codigo, por exemplo) e' sempre soma; na DISCRIMINAÇÃO, so' nao e' quando a linha tem cara de item,
-    unidade e codigo ou preco unitario de verdade: "2003 | Total de bueiros executados | m | ... | 5,01" e' item
-    (issue #617), e "TOTAL DO GRUPO" com "-" ou 0 no preco, ou "R$" na unidade, continua soma."""
+def _preenchido(v: str) -> bool:
+    """Codigo ou unidade de verdade: nao vazio e nao o "-" de preenchimento."""
+    return v not in ("", "-")
+
+
+def _tem_preco(preco) -> bool:
+    """Preco unitario de verdade: numero maior que zero, ou texto que nao e' vazio, "-" nem zero (o texto segue
+    para a leitura do item, que recusa a planilha dizendo que o preco nao e' um numero, em vez de sumir com ele)."""
+    if preco is None or isinstance(preco, bool):
+        return False
+    if isinstance(preco, int | float | Decimal):
+        return preco > 0
+    t = str(preco).strip()
+    return t not in ("", "-") and t.strip("0,.") != ""
+
+
+def _linha_de_soma(textos: list[str], col: dict[str, int], codigo: str, unidade: str, preco) -> bool:
+    """Modelo sem ITEM: linha que comeca com TOTAL, SUB-TOTAL ou SUB TOTAL. So' nao e' soma a linha com cara de item:
+    unidade de verdade e, alem dela, codigo de verdade ou preco unitario ("2003 | Total de bueiros executados | m |
+    ... | 5,01" e' item, issue #617). "-" no codigo ou na unidade, "s/c" no codigo, "-" ou 0 no preco nao contam: o
+    "TOTAL DO GRUPO" assim preenchido continua soma. Rotulo na coluna do codigo e' sempre soma; rotulo noutra coluna
+    (observacao) so' nao e' quando a linha tem codigo, unidade e preco de verdade."""
     rotulos = [c for c, t in enumerate(textos)
                if t and (t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL"))]
     if not rotulos:
         return False
-    if any(c != descricao for c in rotulos):
+    if col.get("codigo") in rotulos:
         return True
-    preco_de_verdade = isinstance(preco, int | float | Decimal) and not isinstance(preco, bool) and preco > 0
-    return not (unidade and (codigo or preco_de_verdade))
+    codigo_de_verdade = _preenchido(codigo) and codigo.upper() != "S/C"
+    unidade_de_verdade = _preenchido(unidade)
+    if any(c != col["descricao"] for c in rotulos):
+        return not (codigo_de_verdade and unidade_de_verdade and _tem_preco(preco))
+    return not (unidade_de_verdade and (codigo_de_verdade or _tem_preco(preco)))
 
 
 def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
@@ -482,7 +500,7 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
         descricao = " ".join(descricao.split()) if isinstance(descricao, str) else _nome_item(descricao)
         preco = celula("preco")
         sem_preco = preco is None or (isinstance(preco, str) and not preco.strip())
-        if sem_item and _linha_de_soma(textos, col["descricao"], codigo, unidade, preco):
+        if sem_item and _linha_de_soma(textos, col, codigo, unidade, preco):
             continue                    # outra linha de soma: nunca titulo nem item
         if sem_item and not codigo and not unidade and sem_preco and descricao:
             titulo_atual = descricao     # titulo de grupo ou de subgrupo, sem nº
