@@ -127,7 +127,7 @@ def situacao(conn, medicao_id: int) -> dict:
     m = _medicao(conn, medicao_id)
     motivo = recusa(conn, m)
     out = {"disponivel": motivo is None, "motivo": motivo, "reajuste": None, "limite": None, "limite_recusa": None,
-           "teto_registro": None,
+           "teto_registro": None, "limite_email": correio.MAX_TOTAL,
            "envios": envios(conn, medicao_id), "reserva": _reserva(conn, medicao_id)}
     if motivo is None:
         _, _, regras = _contexto(conn, m)
@@ -298,6 +298,15 @@ def _conferir_motivo(conn, ids: list[int], motivo: str | None) -> int:
     return anteriores
 
 
+def _conferir_anteriores(conn, ids: list[int], vistos: int | None) -> None:
+    """Outro envio concluido depois da previa (revisao da PR #635): 409, antes de pedir o motivo que a tela de quem
+    abriu a previa de um primeiro envio nem mostra."""
+    if vistos is not None and _concluidos(conn, ids) != vistos:
+        raise envio_reserva.EnvioEmAndamento(
+            "Outro envio dos documentos assinados terminou depois da sua prévia: confira a linha do tempo e abra a "
+            "prévia de novo antes de enviar", "ENVIO_CONCLUIDO_NO_MEIO")
+
+
 def _sem_reserva_ativa(conn, ids: list[int]) -> None:
     r = _reservada(conn, ids)
     if r is not None:
@@ -322,6 +331,7 @@ def enviar(conn, usuario: dict, medicao_id: int, docs: dict, para: list[str], co
     m, _, _, p = conferir(conn, medicao_id, docs)
     ids = _ids(m, p, docs)
     data = _data(conn, ids, assinado_em, hoje)
+    _conferir_anteriores(conn, ids, anteriores_vistos)
     _conferir_motivo(conn, ids, motivo)
     gravados = _gravar_pdfs(docs)
     anexos = [(n, b) for n, b, _ in _anexos(docs)]
@@ -332,11 +342,8 @@ def enviar(conn, usuario: dict, medicao_id: int, docs: dict, para: list[str], co
         ids = _ids(m, p, docs)
         _data(conn, ids, data, hoje)
         _sem_reserva_ativa(conn, ids)
+        _conferir_anteriores(conn, ids, anteriores_vistos)
         anteriores = _conferir_motivo(conn, ids, motivo)
-        if anteriores_vistos is not None and anteriores != anteriores_vistos:
-            raise envio_reserva.EnvioEmAndamento(
-                "Outro envio dos documentos assinados terminou depois da sua prévia: confira a linha do tempo e abra a "
-                "prévia de novo antes de enviar", "ENVIO_CONCLUIDO_NO_MEIO")
         rid = _inserir(conn, usuario["id"], m, p, gravados, "sistema", data, motivo, anteriores)
         envio_reserva.reservar(conn, TABELA, rid, usuario["id"], None)
     try:

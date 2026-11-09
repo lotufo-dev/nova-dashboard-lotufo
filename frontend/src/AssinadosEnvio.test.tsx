@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiErro } from "./api";
 import { ACIMA_DO_TETO, FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados } from "./AssinadosEnvio";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
@@ -8,7 +9,7 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 const MB = 1024 * 1024;
 const RECUSA = "PDF acima de 25 MB, o limite por documento do órgão: divida o arquivo";
 const S: SituacaoAssinados = { disponivel: true, motivo: null, reajuste: { id: 6, numero: 23 }, limite: 25 * MB,
-  limite_recusa: RECUSA, teto_registro: 44 * MB, envios: [], reserva: null };
+  limite_recusa: RECUSA, teto_registro: 44 * MB, limite_email: 25 * MB, envios: [], reserva: null };
 const PREVIA = { para: ["protocolo@orgao.exemplo.com.br"], copia: ["engenharia@lotufo.com"],
   assunto: "RE: CT-337-LT-2026 - 23ª Medição (09_2026) - IC 1/2026 - Obra Alfa",
   corpo: "Encaminho, em anexo, os documentos assinados e a justificativa de atraso do cronograma.",
@@ -92,6 +93,33 @@ describe("Enviar documentos assinados", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
     await vi.waitFor(() => expect(agir).toHaveBeenCalled());
     expect(JSON.parse((apiForm.mock.calls[1][1] as FormData).get("dados") as string).motivo).toBe("faltou o cronograma do pacote");
+  });
+
+  it("outro envio terminado depois da prévia (409) abre a prévia de novo, com o motivo (revisão da PR #635)", async () => {
+    let previas = 0;
+    apiForm.mockImplementation(async (url: string) => {
+      if (url.endsWith("/previa")) return ++previas === 1 ? PREVIA : { ...PREVIA, reenvio: true, anteriores: 1 };
+      throw new ApiErro(409, "Outro envio dos documentos assinados terminou depois da sua prévia",
+        { codigo: "ENVIO_CONCLUIDO_NO_MEIO", mensagem: "Outro envio dos documentos assinados terminou depois da sua prévia" });
+    });
+    const agir = vi.fn(async (fn: () => Promise<unknown>) => { try { await fn(); return true; } catch { return false; } });
+    render(<FormEnviarAssinados medicaoId={5} s={S} salvando={false} agir={agir} aoFechar={() => {}} aoLiberar={() => {}} />);
+    anexar("PDF assinado da medição", pdf("Medicao.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
+    await screen.findByLabelText("Assunto");
+    expect(screen.queryByLabelText("Motivo do reenvio")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    expect(await screen.findByLabelText("Motivo do reenvio")).toBeTruthy();
+    expect(previas).toBe(2);
+  });
+
+  it("anexos acima do limite do e-mail são recusados antes da prévia, sem falar de .eml", () => {
+    montar();
+    anexar("PDF assinado da medição", pdf("Medicao.pdf", 20 * MB));
+    anexar("PDF assinado do reajuste (opcional)", pdf("Reajuste.pdf", 20 * MB));
+    fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
+    expect(screen.getByText("Anexos somam 40 MB, acima do limite do e-mail (25 MB)")).toBeTruthy();
+    expect(apiForm).not.toHaveBeenCalled();
   });
 
   it("sem reajuste com boletim, o campo do PDF do reajuste não aparece", () => {

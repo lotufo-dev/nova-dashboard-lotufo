@@ -502,6 +502,10 @@ def test_envio_concluido_depois_da_previa_recusa_o_reenvio_com_409(api, monkeypa
     assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ENVIO_CONCLUIDO_NO_MEIO"
     assert "Outro envio dos documentos assinados terminou" in r.json()["detail"]["mensagem"]
     assert len(falso.enviados) == 1
+    # rodada 2: sem motivo (a previa de um 1o envio nao tem o campo) tambem e' 409, nao o 422 que pede o motivo
+    r = _enviar(cl, mid, pv)
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ENVIO_CONCLUIDO_NO_MEIO"
+    assert len(falso.enviados) == 1
 
 
 def test_arquivos_acima_do_teto_do_pedido_dizem_o_que_fazer(api):
@@ -512,8 +516,11 @@ def test_arquivos_acima_do_teto_do_pedido_dizem_o_que_fazer(api):
     r = cl.post(f"/api/medicoes/{mid}/assinados/envio-externo", data={"enviado_em": tempo.hoje_local().isoformat()},
                 files={"arquivo": grande})
     assert r.status_code == 413
-    assert r.json()["detail"] == ("Os arquivos somam mais de 44 MB, o limite de um envio: deixe o .eml de fora ou "
-                                  "registre o PDF do reajuste em outro envio")
+    assert r.json()["detail"] == "Os arquivos somam mais de 44 MB, o limite de um envio: deixe o .eml de fora"
+    # no envio pelo sistema nao ha' .eml: a recusa fala do limite do e-mail
+    r = cl.post(f"/api/medicoes/{mid}/assinados/previa", files={"arquivo": grande})
+    assert r.status_code == 413
+    assert r.json()["detail"] == "Os arquivos somam mais de 25 MB, o limite do e-mail: divida o envio"
     assert cl.get(f"/api/medicoes/{mid}").json()["envio_assinados"]["teto_registro"] == 44 * MB
 
 

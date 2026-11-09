@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { apiForm, mensagemDeErro } from "./api";
+import { ApiErro, apiForm, mensagemDeErro } from "./api";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import ErroCampo from "./ErroCampo";
 import { IconeAlerta } from "./icones";
@@ -17,14 +17,16 @@ export type EnvioAssinados = { id: number; origem: "sistema" | "externo"; assina
   envio_id: number | null; vigente: boolean };
 export type SituacaoAssinados = {
   disponivel: boolean; motivo: string | null; reajuste: { id: number; numero: number } | null;
-  limite: number | null; limite_recusa: string | null; teto_registro?: number | null; envios: EnvioAssinados[];
+  limite: number | null; limite_recusa: string | null; teto_registro?: number | null; limite_email?: number;
+  envios: EnvioAssinados[];
   reserva: { id: number; envio_reservado_em: string; reservado_por: string | null } | null;
 };
 type Anexo = { nome: string; tamanho: number; sha256: string; origem: string };
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string; anexos: Anexo[]; total: number;
   limite: number; pendencias: { codigo: string; mensagem: string }[]; reenvio: boolean; anteriores?: number };
 
-const MIN_MOTIVO = 10;     // o servidor recusa menos que isso (assinados_envio.MIN_MOTIVO)
+const MIN_MOTIVO = 10;
+const MB = 1024 * 1024;     // o servidor recusa menos que isso (assinados_envio.MIN_MOTIVO)
 
 type Arquivos = { arquivo: File | null; reajuste: File | null; justificativa: File | null };
 
@@ -39,13 +41,21 @@ function acimaDoLimite(s: SituacaoAssinados, a: Arquivos): string | undefined {
 }
 
 // a mesma frase da recusa do servidor (limites.MENSAGEM_ASSINADOS) para o pedido acima do teto
-export const ACIMA_DO_TETO = "Os arquivos somam mais de 44 MB, o limite de um envio: deixe o .eml de fora ou registre o PDF do reajuste em outro envio";
+export const ACIMA_DO_TETO = "Os arquivos somam mais de 44 MB, o limite de um envio: deixe o .eml de fora";
 
 /** Revisao da PR #635: o pedido com todos os arquivos passa do teto do servidor? A tela diz antes de mandar. */
 function acimaDoTeto(s: SituacaoAssinados, arquivos: (File | null)[]): string | undefined {
   if (!s.teto_registro) return undefined;
   const soma = arquivos.reduce((t, f) => t + (f?.size ?? 0), 0);
   return soma > s.teto_registro ? ACIMA_DO_TETO : undefined;
+}
+
+/** No envio pelo sistema (sem .eml) vale o limite do e-mail, com a frase da pendencia de tamanho da previa. */
+function acimaDoEmail(s: SituacaoAssinados, a: Arquivos): string | undefined {
+  const limite = s.limite_email;
+  if (!limite) return undefined;
+  const soma = [a.arquivo, a.reajuste, a.justificativa].reduce((t, f) => t + (f?.size ?? 0), 0);
+  return soma > limite ? `Anexos somam ${Math.floor(soma / MB)} MB, acima do limite do e-mail (${Math.floor(limite / MB)} MB)` : undefined;
 }
 
 function formDosArquivos(a: Arquivos): FormData {
@@ -91,7 +101,7 @@ export function FormEnviarAssinados({ medicaoId, s, salvando, agir, aoFechar, er
   const [erroPrevia, setErroPrevia] = useState("");
   const [abrindo, setAbrindo] = useState(false);
   const falta = !a.arquivo ? "Anexe o PDF assinado da medição." : acimaDoLimite(s, a)
-    ?? acimaDoTeto(s, [a.arquivo, a.reajuste, a.justificativa]);
+    ?? acimaDoEmail(s, a);
   const faltaMotivo = previa?.reenvio && [...motivo.trim()].length < MIN_MOTIVO
     ? `Escreva o motivo do reenvio, com pelo menos ${MIN_MOTIVO} caracteres.` : undefined;
 
@@ -113,8 +123,19 @@ export function FormEnviarAssinados({ medicaoId, s, salvando, agir, aoFechar, er
     fd.append("dados", JSON.stringify({ para: m.para, copia: m.copia, cco: m.cco, assunto: m.assunto, corpo: m.corpo,
       motivo: motivo.trim() || null, assinado_em: data || null, anteriores: previa.anteriores ?? null,
       anexos_previa: previa.anexos.map(x => ({ nome: x.nome, tamanho: x.tamanho, sha256: x.sha256 })) }));
-    const ok = await agir(() => apiForm(`/api/medicoes/${medicaoId}/assinados/enviar`, fd),
-      `Documentos assinados enviados às ${fmtHora(new Date().toISOString())}.`);
+    const ok = await agir(async () => {
+      try {
+        return await apiForm(`/api/medicoes/${medicaoId}/assinados/enviar`, fd);
+      } catch (e) {
+        // outro envio terminou depois da previa (revisao da PR #635): a previa abre de novo, agora com o motivo
+        if (e instanceof ApiErro && e.status === 409 && e.corpo?.codigo === "ENVIO_CONCLUIDO_NO_MEIO") {
+          setTentouMotivo(false);
+          try { setPrevia(await apiForm<Previa>(`/api/medicoes/${medicaoId}/assinados/previa`, formDosArquivos(a))); }
+          catch { setPrevia(null); }
+        }
+        throw e;
+      }
+    }, `Documentos assinados enviados às ${fmtHora(new Date().toISOString())}.`);
     if (ok) aoFechar();
   }
 

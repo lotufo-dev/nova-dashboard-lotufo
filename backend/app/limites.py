@@ -21,13 +21,17 @@ TETO_OUTROS = 2 * 1024 * 1024
 MENSAGEM = "Pedido acima do tamanho permitido"
 # Revisao da PR #635: o registro dos assinados (dois PDFs de ate' 25 MB e o .eml) passa do teto com facilidade; a
 # recusa diz o que fazer. O teto nao sobe (o servidor e' a producao).
-_ROTA_ASSINADOS = re.compile(r"/api/medicoes/\d+/assinados/(previa|enviar|envio-externo)")
-MENSAGEM_ASSINADOS = ("Os arquivos somam mais de 44 MB, o limite de um envio: deixe o .eml de fora ou registre o PDF "
-                      "do reajuste em outro envio")
+# No envio pelo sistema (sem .eml) a soma ja' passa antes do limite do e-mail, que a previa recusa.
+_ROTA_ASSINADOS_FORA = re.compile(r"/api/medicoes/\d+/assinados/envio-externo")
+_ROTA_ASSINADOS_EMAIL = re.compile(r"/api/medicoes/\d+/assinados/(previa|enviar)")
+MENSAGEM_ASSINADOS = "Os arquivos somam mais de 44 MB, o limite de um envio: deixe o .eml de fora"
+MENSAGEM_ASSINADOS_EMAIL = "Os arquivos somam mais de 25 MB, o limite do e-mail: divida o envio"
 
 
 def mensagem_da_rota(caminho: str) -> str:
-    return MENSAGEM_ASSINADOS if _ROTA_ASSINADOS.fullmatch(caminho) else MENSAGEM
+    if _ROTA_ASSINADOS_FORA.fullmatch(caminho):
+        return MENSAGEM_ASSINADOS
+    return MENSAGEM_ASSINADOS_EMAIL if _ROTA_ASSINADOS_EMAIL.fullmatch(caminho) else MENSAGEM
 
 # Rotas com UploadFile/Form (grep "UploadFile\|File(" em app/api_*.py, 10/10/2026). Rota nova de upload entra aqui;
 # tests/test_limites.py confere que toda rota com formulario esta' na lista.
