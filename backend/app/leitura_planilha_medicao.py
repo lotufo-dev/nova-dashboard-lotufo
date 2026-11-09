@@ -40,6 +40,7 @@ MAX_LINHAS = 5000                       # a aba real tem ~1.500 linhas
 MAX_COLUNAS = 60
 MAX_ITENS = 3000
 FIM_SEM_ITEM = ("TOTAL ACUMULADO", "TOTAL DESTA MEDICAO")   # o rodape do modelo sem ITEM, alem do TOTAL GERAL
+LINHAS_RODAPE = 10                      # abaixo do TOTAL ACUMULADO, onde se procura o TOTAL DESTA MEDIÇÃO
 
 # campo -> como aparece na mensagem quando falta
 CAMPOS = {
@@ -446,14 +447,17 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
     titulos: dict[str, str] = {}
     itens: list[tuple[str, dict]] = []
     lidas = 0
+    rodape = None                       # a linha em que a leitura parou (TOTAL GERAL ou o rodape sem ITEM)
     for _numero, linha in linhas:
         lidas += 1
         if lidas > MAX_LINHAS:
             raise PlanilhaRecusada("a aba Resumo é grande demais para o modelo")
         textos = [_texto(v) for v in linha]
         if any(t.startswith("TOTAL GERAL") for t in textos):
+            rodape = linha
             break                       # sem TOTAL GERAL, a tabela acaba no fim da aba
         if sem_item and any(t.startswith(FIM_SEM_ITEM) for t in textos):
+            rodape = linha
             break
         if sem_item and any(t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL")
                             for t in textos if t):
@@ -506,7 +510,37 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
     ordem = [g["nome"] for g in cadastro] if cadastro else []
     grupos = agrupar(itens, ordem)
     return {"grupos": grupos, "total_centavos": sum(g["valor_medido_centavos"] for g in grupos),
-            "grupo_por": "cadastro" if cadastro else "planilha"}
+            "grupo_por": "cadastro" if cadastro else "planilha", "itens": [it for _g, it in itens],
+            "total_planilha_centavos": _total_da_planilha(rodape, linhas, col)}
+
+
+def _total_da_linha(linha: list, col: dict[str, int]) -> int | None:
+    """O valor da linha do total na coluna NESTA MEDIÇÃO R$ (sem numero ali, None: outra coluna seria outro total)."""
+    c = col["valor_medido"]
+    try:
+        return _centavos(_decimal(linha[c] if c < len(linha) else None, "o total", "TOTAL"), "TOTAL")
+    except PlanilhaRecusada:
+        return None
+
+
+def _total_da_planilha(rodape: list | None, linhas, col: dict[str, int]) -> int | None:
+    """Issue #610: o "TOTAL DESTA MEDIÇÃO" (ou TOTAL GERAL) que a propria planilha escreve, em centavos, para quem
+    confere se a soma dos itens fecha com ele; None sem a linha ou sem numero nela. No modelo sem ITEM a leitura
+    pode parar no TOTAL ACUMULADO: o TOTAL DESTA MEDIÇÃO e' procurado nas linhas logo abaixo. E' dado opcional:
+    nada aqui recusa a leitura (o resto da aba, abaixo do rodape, nunca foi exigido)."""
+    def e_total(linha):
+        return any(t.startswith(("TOTAL GERAL", "TOTAL DESTA MEDICAO")) for t in (_texto(v) for v in linha))
+    if rodape is None:
+        return None
+    if e_total(rodape):
+        return _total_da_linha(rodape, col)
+    try:
+        for _i, (_numero, linha) in zip(range(LINHAS_RODAPE), linhas):
+            if e_total(linha):
+                return _total_da_linha(linha, col)
+    except Exception:       # teto, texto inexistente ou XML quebrado abaixo do rodape: sem total, como antes
+        return None
+    return None
 
 
 def _recusar_indice_grande(dados: bytes) -> None:
@@ -528,7 +562,8 @@ def _recusar_indice_grande(dados: bytes) -> None:
 
 def ler(dados: bytes, cadastro: list[dict] | None = None) -> dict:
     """{"grupos": [{nome, unidade, quantidade_medida, quantidade_acumulada, valor_medido_centavos,
-    valor_acumulado_centavos, itens: [...]}], "total_centavos", "grupo_por": "cadastro" | "planilha"}.
+    valor_acumulado_centavos, itens: [...]}], "total_centavos", "grupo_por": "cadastro" | "planilha",
+    "itens" (os mesmos itens, na ordem da planilha), "total_planilha_centavos" (o total escrito na planilha, ou None)}.
     `cadastro`: [{"nome", "itens_planilha": [prefixos], "titulos_planilha": [titulos] (opcional)}] do cadastro de
     custo da obra, na ordem do yaml."""
     try:
