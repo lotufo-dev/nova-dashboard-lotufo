@@ -365,6 +365,33 @@ def test_sem_item_e_sem_codigo_recusa_dizendo_as_colunas():
         leitura.ler(planilha_sem_item(cabecalho=sem_codigo))
 
 
+def test_sem_item_item_sem_codigo_com_unidade_e_preco_conta():
+    linhas = [(TITULO, "SERVIÇOS FINAIS"), (None, "Limpeza final", "m²", 10, 3, 0, 3, 10.01, 100.1, 30.03, 0, 30.03, 0.3)]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert lido["total_centavos"] == 30_03
+    it = lido["grupos"][0]["itens"][0]
+    assert (lido["grupos"][0]["nome"], it["codigo"], it["descricao"]) == ("SERVIÇOS FINAIS", None, "Limpeza final")
+
+
+def test_linha_com_codigo_da_obra_acima_do_cabecalho_nao_e_o_cabecalho():
+    """Code-review: um dado acima da tabela ("CÓDIGO DA OBRA" | "DESCRIÇÃO DO OBJETO") nao recusa a planilha."""
+    wb = openpyxl.load_workbook(io.BytesIO(planilha()))
+    ws = wb["Resumo Medição"]
+    ws.cell(5, 1, "CÓDIGO DA OBRA: 123")
+    ws.cell(5, 2, "DESCRIÇÃO DO OBJETO: obra fictícia")
+    ws.cell(6, 1, "CÓDIGO DO CONTRATO")             # logo embaixo, outra igual: a busca segue
+    ws.cell(6, 2, "DESCRIÇÃO")
+    buf = io.BytesIO()
+    wb.save(buf)
+    assert leitura.ler(buf.getvalue())["total_centavos"] == TOTAL
+    sem_item = openpyxl.load_workbook(io.BytesIO(planilha_sem_item()))
+    sem_item["Resumo"].cell(4, 2, "CÓDIGO DA OBRA")
+    sem_item["Resumo"].cell(4, 3, "DISCRIMINAÇÃO DO OBJETO")
+    buf = io.BytesIO()
+    sem_item.save(buf)
+    assert leitura.ler(buf.getvalue())["total_centavos"] == TOTAL_SEM_ITEM
+
+
 def test_sem_item_com_outra_coluna_faltando_diz_qual():
     sem_preco = [c for c in CABECALHO_SEM_ITEM if c != "PREÇO\nUNITÁRIO R$"]
     with pytest.raises(leitura.PlanilhaRecusada, match="PREÇO UNITÁRIO") as e:

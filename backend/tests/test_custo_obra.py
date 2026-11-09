@@ -295,6 +295,28 @@ def test_competencia_com_uma_medicao_lida_e_outra_nao_fica_sem_diferenca_por_gru
     assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"]
 
 
+def test_leitura_pelos_titulos_da_planilha_deixa_o_grupo_do_cadastro_sem_medido(conn):
+    """Issue #612: a planilha sem ITEM agrupa pelos titulos mesmo com cadastro de custo; o medido do grupo do cadastro
+    fica desconhecido (sem diferenca, nunca 0 - custo) e os titulos aparecem so' com o medido."""
+    cid = _obra(conn)
+    m1 = _medicao(conn, cid, 1, "2026-03", 300_01)
+    pedido = 300_01
+    lido = {"grupo_por": "planilha", "grupos": [{"nome": "SERVIÇOS PRELIMINARES", "itens": [_item(100_00)]},
+                                                {"nome": "PAVIMENTAÇÃO", "itens": [_item(200_01)]}]}
+    with db.mutacao(conn):
+        medicao_grupos._gravar(conn, None, m1, "c" * 64, "carga", None, None, "lida", None, lido,
+                               medicao_grupos._assinatura(medicao_grupos.cadastro_de_custo(conn, cid)), pedido, pedido)
+    _custo(conn, [(1, "2.001.012", P, "001.01", "1.01.003", "2026-03", 40_00)])
+    mar = _linha(custo_obra.custo_da_obra(conn, cid), "2026-03")
+    t = _grupo(mar, "Terraplenagem")
+    assert t["medido_centavos"] is None and t["custo_centavos"] == 40_00 and t["diferenca_centavos"] is None
+    assert _grupo(mar, "Pavimentação")["medido_centavos"] is None
+    p = _grupo(mar, "PAVIMENTAÇÃO")
+    assert p["medido_centavos"] == 200_01 and p["diferenca_centavos"] is None
+    assert mar["medido_centavos"] == 300_01 and mar["diferenca_centavos"] == 260_01
+    assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"]
+
+
 # --- issue #492: custo unitario realizado do item-chave ----------------------------------------------------------
 
 def _chave(conn, cid, grupo, codigo, unidade):

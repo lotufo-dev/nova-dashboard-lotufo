@@ -137,9 +137,11 @@ def _so_texto(valores: list) -> bool:
 
 
 def _achar_cabecalho(linhas) -> tuple[dict[str, int], object]:
-    """(campo -> coluna, as linhas que sobram). O cabecalho e' a linha com ITEM e DISCRIMINAÇÃO; se nela faltam
-    colunas, junta a linha de cima ou a de baixo (cabecalho em duas linhas)."""
-    anterior = None
+    """(campo -> coluna, as linhas que sobram). O cabecalho e' a linha com ITEM (ou CÓDIGO, no modelo sem ITEM) e
+    DISCRIMINAÇÃO; se na linha com ITEM faltam colunas, junta a linha de cima ou a de baixo (cabecalho em duas
+    linhas). A linha so' com CÓDIGO (modelo sem ITEM, cabecalho numa linha) tem de vir completa; incompleta, pode
+    ser um dado acima da tabela ("CÓDIGO DA OBRA"): a busca segue e so' recusa, com o que faltou, se nenhuma servir."""
+    anterior, pendente = None, None
     for numero, valores in linhas:
         if numero > LINHAS_CABECALHO:
             break
@@ -149,6 +151,10 @@ def _achar_cabecalho(linhas) -> tuple[dict[str, int], object]:
         col, faltam = _colunas([_texto(v) for v in valores])
         if not faltam:
             return col, linhas
+        if "ITEM" not in [_texto(v) for v in valores]:
+            pendente = pendente or f"o cabeçalho da aba Resumo não tem a coluna {', '.join(faltam)}"
+            anterior = valores
+            continue
         if anterior is not None and _so_texto(anterior):
             col2, faltam2 = _colunas(_combinar(anterior, valores))
             if not faltam2:
@@ -160,7 +166,7 @@ def _achar_cabecalho(linhas) -> tuple[dict[str, int], object]:
                 return col2, linhas
             faltam = faltam2 if len(faltam2) < len(faltam) else faltam
         raise PlanilhaRecusada(f"o cabeçalho da aba Resumo não tem a coluna {', '.join(faltam)}")
-    raise PlanilhaRecusada("a aba Resumo não tem o cabeçalho com ITEM (ou CÓDIGO) e DISCRIMINAÇÃO")
+    raise PlanilhaRecusada(pendente or "a aba Resumo não tem o cabeçalho com ITEM (ou CÓDIGO) e DISCRIMINAÇÃO")
 
 
 def _nome_item(v) -> str:
@@ -436,15 +442,15 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
         if sem_item and not codigo and not unidade and sem_preco and descricao:
             titulo_atual = descricao     # titulo de grupo ou de subgrupo, sem nº
             continue
-        if not numero_item and not codigo:
-            continue                    # linha em branco, rodape, subtotal sem rotulo
+        if not numero_item and not codigo and not (sem_item and descricao and (unidade or not sem_preco)):
+            continue                    # linha em branco, rodape, subtotal sem rotulo (sem ITEM: item sem codigo vale)
         # o item tem unidade ou preco unitario; o grupo (e o subgrupo), nem um nem outro, mesmo com codigo ("11.2*")
         # e com a soma dos itens nas colunas de valor (que nao entra: os itens ja' contam)
         if not unidade and sem_preco:
             if numero_item and descricao:
                 titulos[numero_item] = descricao     # linha de grupo
             continue
-        nome = numero_item or codigo
+        nome = numero_item or codigo or descricao
         if len(itens) >= MAX_ITENS:
             raise PlanilhaRecusada("itens demais na aba Resumo")
         qc = _decimal(celula("quantidade_contratada"), "a quantidade contratada", nome)

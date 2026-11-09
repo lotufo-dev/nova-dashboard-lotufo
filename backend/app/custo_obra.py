@@ -123,7 +123,8 @@ def _custo_por_mes(conn, c, grupos: list[dict]) -> tuple[dict, dict, dict]:
 
 
 def _medido_por_mes(conn, contrato_id: int) -> dict[str, dict]:
-    """{mes: {"medicoes", "medido", "lida" (houve leitura), "grupos" {nome: medido}, "nao_lido", "ajuste"}}."""
+    """{mes: {"medicoes", "medido", "lida" (houve leitura), "grupos" {nome: medido}, "nao_lido", "ajuste",
+    "por_planilha" (alguma leitura agrupada pelos titulos da planilha, nao pelo cadastro: issue #612)}}."""
     meses: dict[str, dict] = {}
     for m in conn.execute(
             f"""SELECT id, numero, competencia, COALESCE(valor_atestado_centavos, valor_protocolado_centavos) AS valor
@@ -131,7 +132,7 @@ def _medido_por_mes(conn, contrato_id: int) -> dict[str, dict]:
                   AND COALESCE(valor_atestado_centavos, valor_protocolado_centavos) IS NOT NULL
                 ORDER BY competencia, numero""", (contrato_id, *ESTADOS_FORA)):
         mes = meses.setdefault(m["competencia"], {"medicoes": [], "medido": 0, "lida": False, "grupos": {},
-                                                   "nao_lido": 0, "ajuste": 0, "leituras": []})
+                                                   "nao_lido": 0, "ajuste": 0, "leituras": [], "por_planilha": False})
         mes["medicoes"].append({"id": m["id"], "numero": m["numero"], "nome": f"{m['numero']}ª medição"})
         mes["medido"] += m["valor"]
         lido = medicao_grupos.grupos(conn, m["id"])
@@ -141,6 +142,7 @@ def _medido_por_mes(conn, contrato_id: int) -> dict[str, dict]:
             mes["nao_lido"] += m["valor"]
             continue
         mes["lida"] = True
+        mes["por_planilha"] = mes["por_planilha"] or lido["leitura"]["grupo_por"] != "cadastro"
         soma = 0
         for g in lido["grupos"]:
             mes["grupos"][g["nome"]] = mes["grupos"].get(g["nome"], 0) + g["valor_medido_centavos"]
@@ -245,7 +247,9 @@ def _custo_da_obra(conn, contrato_id: int) -> dict:
         partes = dinheiro.ratear_proporcional(r_total, pesos) if sum(pesos) > 0 else [0] * len(nomes)
 
         def medido_de(nome):
-            if md is None or not md["lida"]:
+            # leitura pelos titulos da planilha (sem nº de item, issue #612): o medido do grupo do cadastro e'
+            # desconhecido (ligar titulo a grupo e' outra issue), nunca 0 com a diferenca "-custo"
+            if md is None or not md["lida"] or md["por_planilha"]:
                 return None
             return md["grupos"].get(nome, 0)
 
@@ -254,7 +258,7 @@ def _custo_da_obra(conn, contrato_id: int) -> dict:
         itens = [_linha_grupo(n, "grupo", medido_de(n), ap.get(n, 0), partes[i], completo)
                  for i, n in enumerate(nomes)]
         # grupo da planilha que o cadastro nao tem (o "outros" da leitura): so' o medido
-        itens += [_linha_grupo(n, "grupo", v, completo=completo)
+        itens += [_linha_grupo(n, "grupo", v, completo=completo and not md["por_planilha"])
                   for n, v in (md["grupos"].items() if md else ()) if n not in nomes]
         if fora.get(mes):
             itens.append(_linha_grupo(FORA_DOS_GRUPOS, "fora", None, fora[mes]))
