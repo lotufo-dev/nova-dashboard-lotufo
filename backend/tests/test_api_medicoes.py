@@ -1449,6 +1449,47 @@ def test_glosa_na_execucao_com_o_par_ja_registrado_avisa_o_motivo(client_admin, 
     assert len(_atestos(exe)) == 2 and len(_atestos(rea)) == 1
 
 
+def test_correcao_na_execucao_nao_reescreve_a_glosa_do_reajuste(client_admin, monkeypatch):
+    # code-review: o reajuste com glosa digitada (mesmo PDF) nao volta ao valor da capa quando a execucao e' corrigida
+    exe, rea = _par_da_7a(client_admin, monkeypatch)
+    assert _boletim_da_7a(client_admin, exe).status_code == 201
+    assert _boletim_da_7a(client_admin, rea, valor="95.000,01").status_code == 201          # glosa no reajuste
+    r = _boletim_da_7a(client_admin, exe, observacao="corrigida")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7: este boletim já está registrado"}
+    assert [e["valor_centavos"] for e in _atestos(rea)] == [98_765_43, 95_000_01]
+    assert client_admin.get(f"/api/medicoes/{rea}").json()["valor_atestado_centavos"] == 95_000_01
+
+
+def test_par_com_numero_e_data_diferentes_da_capa_fica_manual(client_admin, monkeypatch):
+    # code-review: `aceito` so' com o nº e a data digitados iguais aos da capa (regra da #290)
+    exe, rea = _par_da_7a(client_admin, monkeypatch)
+    r = _registrar_boletim(client_admin, exe, valor="1.234.567,89", data="2026-04-10", numero="SMO 7/2026")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"]["aprovado_centavos"] == 98_765_43
+    assert _atestos(rea)[0]["origem"] == "manual"
+
+
+def test_capa_sem_numero_ou_par_com_outro_numero_no_orgao_nao_vai_ao_par(client_admin, monkeypatch):
+    from app import db, leitura_smo
+    campos = {"numero": 7, "situacao": "APROVADA", "data_realizacao": "2026-04-14", "valor_centavos": 1_234_567_89,
+              "reajuste_centavos": 98_765_43}
+    monkeypatch.setattr(leitura_smo, "ler_pdf_texto", lambda pdf: {"ok": True, "motivo": None, "faltando": [],
+                                                                   "avisos": [], "campos": dict(campos)})
+    cid = _contrato(client_admin)
+    exe = _inserir_medicao(cid, 7, "execucao", "planilha_enviada", 1_234_567_89)
+    rea = _inserir_medicao(cid, 7, "reajuste", "planilha_enviada", 90_000_00)
+    conn = db.get_conn()
+    conn.execute("UPDATE medicoes SET numero_orgao=8 WHERE id=?", (rea,)); conn.commit(); conn.close()
+    r = _boletim_da_7a(client_admin, exe)
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: a capa é da 7ª medição"}
+    del campos["numero"]
+    r = _boletim_da_7a(client_admin, exe, observacao="outra")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: a capa não traz o nº da medição"}
+    assert _atestos(rea) == []
+
+
 def test_boletim_com_par_diretoria_403_e_engenharia_registra_nos_dois(client_admin, monkeypatch):
     from app import auth, db
     exe, rea = _par_da_7a(client_admin, monkeypatch)

@@ -471,9 +471,11 @@ def _registrar_no_par(conn, usuario_id: int, m, dia, dados: dict, meio, numero, 
     if b is None:
         return None
     nome = _nome_do_par(b)
-    # a capa de outra medicao nao vira boletim no par (na medicao aberta a leitura ja' avisou)
-    esperado = m["numero_orgao"] or m["numero"]
-    if capa.get("numero") is not None and capa["numero"] != esperado:
+    # a capa de outra medicao nao vira boletim no par (na medicao aberta a leitura ja' avisou); sem o nº lido nao ha'
+    # como saber de qual e' (code-review). O nº do orgao do par, quando ele tem, tambem tem de bater (D6)
+    if capa.get("numero") is None:
+        return {"motivo": f"{nome} sem boletim: a capa não traz o nº da medição"}
+    if capa["numero"] != (m["numero_orgao"] or m["numero"]) or capa["numero"] != (b["numero_orgao"] or capa["numero"]):
         return {"motivo": f"{nome} sem boletim: a capa é da {capa['numero']}ª medição"}
     valor = capa.get("reajuste_centavos" if b["tipo"] == "reajuste" else "valor_centavos")
     if valor is None:
@@ -485,9 +487,14 @@ def _registrar_no_par(conn, usuario_id: int, m, dia, dados: dict, meio, numero, 
     except ValueError as e:
         texto = str(e)
         return {"motivo": f"{nome} sem boletim: {texto[:1].lower()}{texto[1:]}"}
-    if _boletim_repetido(conn, b["id"], valor, dia, anexo["sha256"], numero, meio, observacao):
+    # code-review: o mesmo PDF ja' no par (vindo daqui ou registrado nele, talvez com glosa digitada) nao vai de novo:
+    # corrigir a observacao, o meio ou o nº na medicao aberta nao reescreve o aprovado do par nem duplica o evento
+    if conn.execute("SELECT 1 FROM medicao_atestos WHERE medicao_id=? AND sha256=? LIMIT 1",
+                    (b["id"], anexo["sha256"])).fetchone():
         return {"motivo": f"{nome}: este boletim já está registrado"}
-    _gravar_boletim(conn, usuario_id, b, dia, valor, "aceito", meio, numero, observacao, anexo, par_de=m["id"])
+    # `aceito` so' com o nº e a data digitados iguais aos da capa lida agora (a regra da #290); senao, `manual`
+    origem = "aceito" if numero == str(capa["numero"]) and dia.isoformat() == capa.get("data_realizacao") else "manual"
+    _gravar_boletim(conn, usuario_id, b, dia, valor, origem, meio, numero, observacao, anexo, par_de=m["id"])
     return {"medicao_id": b["id"], "tipo": b["tipo"], "numero": b["numero"], "aprovado_centavos": valor}
 
 
