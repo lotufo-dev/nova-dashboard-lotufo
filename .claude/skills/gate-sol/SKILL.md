@@ -70,23 +70,26 @@ codex exec -m gpt-5.6-sol -o "<scratchpad>/gate-sol-<N>.md" - < "$ENTRADA" > "<s
 ## Sem cota ("usage limit")
 
 O codex usa a cota da assinatura ChatGPT do Leo. Se a saída (o `codex falhou:` do comando, o `.log` ou o arquivo do `-o`) trouxer
-"usage limit" (ou "limite de uso"), **não é veredito inválido e rodar de novo no mesmo dia não adianta**:
-a cota volta no dia seguinte. Não insistir; registrar em `## Gates` da PR:
+"usage limit" (ou "limite de uso"), **não é veredito inválido e rodar de novo no mesmo dia não adianta**.
+Não insistir e não esperar a cota voltar: o gate passa a ser feito por um **subagente Opus independente**, e a
+orquestradora dá o veredito final.
+
+1. Abrir um `Agent` com `model: opus`, `subagent_type` geral, ferramentas só de leitura (Read, Grep, Glob e Bash
+   sem gravar). O prompt é o **mesmo arquivo de entrada** que iria ao codex (pedido desta skill + o diff de
+   `origin/master...HEAD` do worktree), **sem** o parecer do `revisor-adversarial` e sem a conversa da
+   trabalhadora: é um par de olhos novo. Nenhum subagente roda em outro modelo.
+2. A orquestradora confere cada achado contra o código e registra o veredito: confirmado, ou refutado com
+   `arquivo:linha` que prova. Depois desse veredito **não há nova rodada do gate** (nem Opus de novo, nem codex
+   quando a cota voltar).
+3. Achado confirmado (Crítico ou Aviso): uma rodada única de correção pela trabalhadora, conferida só pelo
+   `revisor-adversarial` sobre o diff novo. A PR segue e o auto-merge liga normalmente quando as outras travas passam.
+4. Registrar em `## Gates` da PR:
 
 ```
-- [ ] Gate Sol: sem cota em DD/MM
+- [x] Gate Sol: codex sem cota em DD/MM; coberto por subagente Opus independente + veredito da orquestradora
 ```
 
-O que fazer depende de quanto o Sol já cobriu:
-
-- **A rodada 1 do Sol já rodou sobre o diff inteiro** (só a conferência da correção ficou sem Sol) **e a
-  correção não mexeu em lógica de dinheiro ou de envio de forma grande**: o `revisor-adversarial` cobre o diff
-  novo da correção, e o gate vale como cumprido; anotar "rodada 1 do Sol cobriu o diff inteiro, correção
-  revisada só pelo revisor".
-- **Nem a rodada 1 rodou, ou a correção mexeu nessa lógica de forma grande**: a PR **não mergeia sozinha**
-  (sem auto-merge, `precisa-do-leo` na issue com o motivo). Quando a cota voltar, o Leo pede à orquestradora
-  que rode o gate pela skill (a rodada seguinte não pega issue com `precisa-do-leo`), e só então se liga o
-  auto-merge.
+Na nuvem (sem codex) vale a regra de sempre: "gate Sol: não disponível na nuvem", que não é trava.
 
 ## Depois da resposta: uma rodada de correção
 
