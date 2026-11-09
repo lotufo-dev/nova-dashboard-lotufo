@@ -541,8 +541,8 @@ def _numero_no_orgao(x, par) -> int:
 def _registrar_no_par(conn, usuario_id: int, m, dia, dados: dict, meio, numero, observacao, anexo: dict) -> dict | None:
     """Issue #625: o PDF do SMO com a capa APROVADA vale tambem para o par de `m`: o mesmo evento (arquivo, sha256,
     data, nº, meio, observacao) com o valor do par lido da capa e origem `aceito` (a leitura e' a que o servidor fez
-    agora). Sem capa aprovada ou sem par: None (nada muda). Par que nao pode receber: {"motivo"}, e `m` fica
-    registrada do mesmo jeito."""
+    agora). Sem capa aprovada ou sem par: None (nada muda). Par que ja' tem boletim ou nao pode receber: {"motivo"},
+    e `m` fica registrada do mesmo jeito."""
     capa = anexo.get("capa")
     if not capa or capa.get("situacao") != "APROVADA":
         return None
@@ -550,6 +550,10 @@ def _registrar_no_par(conn, usuario_id: int, m, dia, dados: dict, meio, numero, 
     if b is None:
         return None
     nome = _nome_do_par(b)
+    # decisao do dono de 09/11/2026 (#636): o par so' recebe automaticamente quando ainda nao tem boletim nenhum; com
+    # qualquer evento de atesto, fica como esta' (boletim antigo registrado de novo nao volta o aprovado dele)
+    if conn.execute("SELECT 1 FROM medicao_atestos WHERE medicao_id=? LIMIT 1", (b["id"],)).fetchone():
+        return {"motivo": f"{nome} já tem boletim"}
     # a capa de outra medicao nao vira boletim no par (na medicao aberta a leitura ja' avisou); sem o nº lido nao ha'
     # como saber de qual e' (code-review). O nº do orgao e' o de cada medicao; o reajuste sem nº do orgao usa o da
     # execucao do par, que e' onde a planilha/carta o grava (a regra de `capa_smo._somas_ate`; revisor, R2)
@@ -575,27 +579,6 @@ def _registrar_no_par(conn, usuario_id: int, m, dia, dados: dict, meio, numero, 
     except ValueError as e:
         texto = str(e)
         return {"motivo": f"{nome} sem boletim: {texto[:1].lower()}{texto[1:]}"}
-    # Repeticao no par e' sobre o boletim VIGENTE dele (revisor R3 + Sol S1): mesmo valor, data e nº nao gravam
-    # (qualquer PDF, meio ou observacao: nada material muda e a diferenca aceita da #288 continua valendo); o mesmo PDF
-    # com outro valor e' glosa digitada no par, que nao se reescreve daqui. O resto (correcao de data ou nº, boletim
-    # novo com outro valor) grava, como a glosa da medicao aberta. Boletim mais antigo vindo daqui nao passa por cima do
-    # boletim mais novo do par (revisor, rodada 2): o par que ja' teve este PDF e hoje tem outro vigente, ou cujo
-    # vigente tem capa de data posterior a' desta, fica como esta'.
-    vigente = conn.execute("SELECT id, valor_centavos, atestado_em, numero_orgao, sha256 FROM medicao_atestos "
-                           "WHERE medicao_id=? ORDER BY id DESC LIMIT 1", (b["id"],)).fetchone()
-    if vigente is not None:
-        if (vigente["valor_centavos"], vigente["atestado_em"], vigente["numero_orgao"]) == (valor, dia.isoformat(), numero):
-            return {"motivo": f"{nome}: este boletim já está registrado"}
-        if vigente["sha256"] == anexo["sha256"] and vigente["valor_centavos"] != valor:
-            return {"motivo": f"{nome} sem boletim: o aprovado dele é outro; corrija nele"}
-        if vigente["sha256"] != anexo["sha256"] and conn.execute(
-                "SELECT 1 FROM medicao_atestos WHERE medicao_id=? AND sha256=? LIMIT 1",
-                (b["id"], anexo["sha256"])).fetchone():
-            return {"motivo": f"{nome} sem boletim: o boletim vigente dele é outro"}
-        capa_vigente = conn.execute("SELECT data_realizacao FROM medicao_boletim_capas WHERE atesto_id=?",
-                                    (vigente["id"],)).fetchone()
-        if capa_vigente and capa_vigente[0] and capa.get("data_realizacao") and capa_vigente[0] > capa["data_realizacao"]:
-            return {"motivo": f"{nome} sem boletim: o boletim vigente dele é outro"}
     # `aceito` so' com o nº e a data digitados iguais aos da capa lida agora (a regra da #290); senao, `manual`
     origem = "aceito" if numero == str(capa["numero"]) and dia.isoformat() == capa.get("data_realizacao") else "manual"
     _gravar_boletim(conn, usuario_id, b, dia, valor, origem, meio, numero, observacao, anexo, par_de=m["id"])
