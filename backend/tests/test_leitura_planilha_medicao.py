@@ -257,3 +257,185 @@ def test_arquivo_acima_do_teto_recusa_antes_de_abrir(monkeypatch):
     monkeypatch.setattr(leitura, "MAX_BYTES_ARQUIVO", 100)
     with pytest.raises(leitura.PlanilhaRecusada, match="grande demais"):
         leitura.ler(planilha())
+
+
+# --- issue #612: aba de resumo sem a coluna ITEM (so' o codigo do servico) ------------------------------------
+# A tabela comeca na coluna B, as celulas do cabecalho tem quebra de linha, o titulo de grupo e' so' a discriminacao
+# (sem nº, sem codigo, sem unidade, sem preco), e o rodape e' TOTAL ACUMULADO / A DEDUZIR / TOTAL DESTA MEDIÇÃO.
+CABECALHO_SEM_ITEM = ["CÓDIGO", "DISCRIMINAÇÃO", "UNID.", "QTDADE\nDE\nCONTRATO", "NESTA\nMEDIÇÃO",
+                      "MEDIÇÃO\nANTERIOR", "MEDIDO\nACUMULADO", "PREÇO\nUNITÁRIO R$", "VALOR\nCONTRATO R$",
+                      "NESTA\nMEDIÇÃO R$", "VALOR ACUMULADO\nANTERIOR R$", "VALOR\nACUMULADO R$", "%\nEXE."]
+TITULO, SUB = "titulo", "subtotal"
+# (codigo, descricao, unidade, qtd contrato, nesta, anterior, acumulado, preco, valor contrato, valor nesta,
+#  valor anterior, valor acumulado, % exe.)
+LINHAS_SEM_ITEM = [
+    (TITULO, "SERVIÇOS PRELIMINARES"),
+    ("s/c", "Placa de obra", "un", 1, 1, 0, 1, 500.55, 500.55, 500.55, 0, 500.55, 1),
+    ("s/c", "Mobilização", "vb", 1, 1, 0, 1, 1200.01, 1200.01, 1200.01, 0, 1200.01, 1),
+    (SUB, "SUBTOTAL"),
+    (TITULO, "PAVIMENTAÇÃO"),
+    ("4011", "Base de brita graduada", "m³", 100, 10.5, 4, 14.5, 123.45, 12345.0, 1296.23, 493.8, 1790.03, 0.145),
+    (TITULO, "Revestimento"),
+    ("4100", "Concreto asfáltico", "t", 50, 2, 0, 2, 400.135, 20006.75, 800.27, 0, 800.27, 0.04),
+    (SUB, "SUBTOTAL"),
+    (SUB, "SUBTOTAL"),
+    (SUB, "TOTAL ACUMULADO"),
+    (SUB, "A DEDUZIR DAS MEDIÇÕES ANTERIORES"),
+    (SUB, "TOTAL DESTA MEDIÇÃO"),
+    # abaixo do rodape, outra tabela com cara de item: a leitura ja' parou
+    ("9999", "Resumo por etapa", "un", 1, 1, 0, 1, 7.77, 7.77, 7.77, 0, 7.77, 1),
+]
+# 500,55 + 1200,01 + 1296,23 + 800,27
+TOTAL_SEM_ITEM = 3797_06
+
+
+def planilha_sem_item(linhas=LINHAS_SEM_ITEM, cabecalho=CABECALHO_SEM_ITEM) -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Resumo"
+    ws.cell(2, 2, "PLANILHA DE MEDIÇÃO")
+    ws.cell(3, 2, "Obra: obra fictícia")
+    linha_cab, coluna_b = 6, 2
+    for c, t in enumerate(cabecalho):
+        ws.cell(linha_cab, coluna_b + c, t)
+    desc = cabecalho.index("DISCRIMINAÇÃO") if "DISCRIMINAÇÃO" in cabecalho else 1
+    for r, ln in enumerate(linhas, linha_cab + 1):
+        if ln[0] == TITULO:
+            ws.cell(r, coluna_b + desc, ln[1])
+        elif ln[0] == SUB:
+            ws.cell(r, coluna_b + desc, ln[1])
+            ws.cell(r, coluna_b + 9, 12345.67)          # a soma da propria planilha, que nao entra
+        else:
+            for c, v in enumerate(ln[:len(cabecalho)]):
+                ws.cell(r, coluna_b + c, v)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_sem_item_le_pelos_titulos_da_planilha():
+    lido = leitura.ler(planilha_sem_item())
+    assert lido["grupo_por"] == "planilha"
+    assert [(g["nome"], g["valor_medido_centavos"]) for g in lido["grupos"]] == [
+        ("SERVIÇOS PRELIMINARES", 500_55 + 1200_01), ("PAVIMENTAÇÃO", 1296_23), ("Revestimento", 800_27)]
+    assert lido["total_centavos"] == TOTAL_SEM_ITEM            # centavo impar, no centavo
+    base = _por_nome(lido)["PAVIMENTAÇÃO"]["itens"][0]
+    assert base == {"item": None, "codigo": "4011", "descricao": "Base de brita graduada", "unidade": "m³",
+                    "quantidade_contratada": "100", "quantidade_medida": "10.5", "quantidade_acumulada": "14.5",
+                    "preco_unitario_centavos": 123_45, "valor_medido_centavos": 1296_23,
+                    "valor_acumulado_centavos": 1790_03}
+
+
+def test_sem_item_codigo_s_c_repetido_sao_dois_itens():
+    itens = _por_nome(leitura.ler(planilha_sem_item()))["SERVIÇOS PRELIMINARES"]["itens"]
+    assert [(i["codigo"], i["descricao"], i["valor_medido_centavos"]) for i in itens] == [
+        ("s/c", "Placa de obra", 500_55), ("s/c", "Mobilização", 1200_01)]
+
+
+def test_sem_item_rodape_nao_vira_grupo_nem_item():
+    lido = leitura.ler(planilha_sem_item())
+    nomes = {g["nome"] for g in lido["grupos"]}
+    descricoes = {i["descricao"] for g in lido["grupos"] for i in g["itens"]}
+    for rodape in ("TOTAL ACUMULADO", "A DEDUZIR DAS MEDIÇÕES ANTERIORES", "TOTAL DESTA MEDIÇÃO"):
+        assert rodape not in nomes and rodape not in descricoes
+    assert "Resumo por etapa" not in descricoes and leitura.OUTROS not in nomes
+
+
+def test_sem_item_para_tambem_no_total_acumulado():
+    linhas = [ln for ln in LINHAS_SEM_ITEM if ln[1] not in ("A DEDUZIR DAS MEDIÇÕES ANTERIORES",
+                                                              "TOTAL DESTA MEDIÇÃO")]
+    assert leitura.ler(planilha_sem_item(linhas))["total_centavos"] == TOTAL_SEM_ITEM
+
+
+def test_sem_item_para_tambem_no_total_desta_medicao():
+    linhas = [ln for ln in LINHAS_SEM_ITEM if ln[1] not in ("TOTAL ACUMULADO", "A DEDUZIR DAS MEDIÇÕES ANTERIORES")]
+    assert leitura.ler(planilha_sem_item(linhas))["total_centavos"] == TOTAL_SEM_ITEM
+
+
+def test_sem_item_agrupa_pelos_titulos_mesmo_com_cadastro_de_custo():
+    cadastro = [{"nome": "Pavimento", "itens_planilha": ["2."]}]
+    lido = leitura.ler(planilha_sem_item(), cadastro)
+    assert lido["grupo_por"] == "planilha"
+    assert [g["nome"] for g in lido["grupos"]] == ["SERVIÇOS PRELIMINARES", "PAVIMENTAÇÃO", "Revestimento"]
+
+
+def test_sem_item_e_sem_codigo_recusa_dizendo_as_colunas():
+    sem_codigo = [c for c in CABECALHO_SEM_ITEM if c != "CÓDIGO"]
+    with pytest.raises(leitura.PlanilhaRecusada, match="ITEM.*CÓDIGO.*DISCRIMINAÇÃO"):
+        leitura.ler(planilha_sem_item(cabecalho=sem_codigo))
+
+
+def test_sem_item_item_sem_codigo_com_unidade_e_preco_conta():
+    linhas = [(TITULO, "SERVIÇOS FINAIS"), (None, "Limpeza final", "m²", 10, 3, 0, 3, 10.01, 100.1, 30.03, 0, 30.03, 0.3)]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert lido["total_centavos"] == 30_03
+    it = lido["grupos"][0]["itens"][0]
+    assert (lido["grupos"][0]["nome"], it["codigo"], it["descricao"]) == ("SERVIÇOS FINAIS", None, "Limpeza final")
+
+
+def test_linha_com_codigo_da_obra_acima_do_cabecalho_nao_e_o_cabecalho():
+    """Code-review: um dado acima da tabela ("CÓDIGO DA OBRA" | "DESCRIÇÃO DO OBJETO") nao recusa a planilha."""
+    wb = openpyxl.load_workbook(io.BytesIO(planilha()))
+    ws = wb["Resumo Medição"]
+    ws.cell(5, 1, "CÓDIGO DA OBRA: 123")
+    ws.cell(5, 2, "DESCRIÇÃO DO OBJETO: obra fictícia")
+    ws.cell(6, 1, "CÓDIGO DO CONTRATO")             # logo embaixo, outra igual: a busca segue
+    ws.cell(6, 2, "DESCRIÇÃO")
+    buf = io.BytesIO()
+    wb.save(buf)
+    assert leitura.ler(buf.getvalue())["total_centavos"] == TOTAL
+    sem_item = openpyxl.load_workbook(io.BytesIO(planilha_sem_item()))
+    sem_item["Resumo"].cell(4, 2, "CÓDIGO DA OBRA")
+    sem_item["Resumo"].cell(4, 3, "DISCRIMINAÇÃO DO OBJETO")
+    buf = io.BytesIO()
+    sem_item.save(buf)
+    assert leitura.ler(buf.getvalue())["total_centavos"] == TOTAL_SEM_ITEM
+
+
+def _trocar(dados: bytes, aba: str, celulas: dict[tuple[int, int], str]) -> bytes:
+    wb = openpyxl.load_workbook(io.BytesIO(dados))
+    for (r, c), v in celulas.items():
+        wb[aba].cell(r, c, v)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_sem_item_recusa_com_as_colunas_da_linha_mais_perto_do_cabecalho():
+    """Gate Sol, #612: com "CÓDIGO DA OBRA" acima, a recusa diz so' o que falta no cabecalho de verdade."""
+    sem_preco = [c for c in CABECALHO_SEM_ITEM if c != "PREÇO\nUNITÁRIO R$"]
+    dados = _trocar(planilha_sem_item(cabecalho=sem_preco), "Resumo",
+                    {(4, 2): "CÓDIGO DA OBRA", (4, 3): "DISCRIMINAÇÃO DO OBJETO"})
+    with pytest.raises(leitura.PlanilhaRecusada) as e:
+        leitura.ler(dados)
+    assert str(e.value) == "o cabeçalho da aba Resumo não tem a coluna PREÇO UNITÁRIO R$"
+
+
+def test_coluna_n_item_vale_como_item():
+    """Gate Sol, #612: "Nº ITEM" e' a coluna ITEM; a planilha nao cai no modelo sem ITEM."""
+    dados = _trocar(planilha(), "Resumo Medição", {(10, 1): "Nº ITEM"})
+    assert leitura.ler(dados) == leitura.ler(planilha())
+    cadastro = [{"nome": "Drenagem", "itens_planilha": ["3."]}]
+    lido = leitura.ler(dados, cadastro)
+    assert lido["grupo_por"] == "cadastro" and lido == leitura.ler(planilha(), cadastro)
+
+
+def test_coluna_de_item_que_nao_se_reconhece_recusa_em_vez_de_virar_sem_item():
+    dados = _trocar(planilha(), "Resumo Medição", {(10, 1): "ITEM Nº"})
+    with pytest.raises(leitura.PlanilhaRecusada, match="não tem a coluna ITEM"):
+        leitura.ler(dados)
+
+
+def test_sem_item_linha_de_total_fora_do_rodape_nao_vira_titulo():
+    linhas = [(TITULO, "DRENAGEM"), ("2003", "Bueiro", "m", 1, 1, 0, 1, 5.01, 5.01, 5.01, 0, 5.01, 1),
+              (SUB, "TOTAL DO GRUPO"), (SUB, "SUB-TOTAL"),
+              ("2004", "Sarjeta", "m", 1, 1, 0, 1, 2.0, 2.0, 2.0, 0, 2.0, 1)]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert [(g["nome"], g["valor_medido_centavos"]) for g in lido["grupos"]] == [("DRENAGEM", 7_01)]
+
+
+def test_sem_item_com_outra_coluna_faltando_diz_qual():
+    sem_preco = [c for c in CABECALHO_SEM_ITEM if c != "PREÇO\nUNITÁRIO R$"]
+    with pytest.raises(leitura.PlanilhaRecusada, match="PREÇO UNITÁRIO") as e:
+        leitura.ler(planilha_sem_item(cabecalho=sem_preco))
+    assert "ITEM" not in str(e.value)

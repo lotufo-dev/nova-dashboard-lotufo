@@ -1706,6 +1706,26 @@ def test_revisao_le_a_planilha_nova_e_a_mais_nova_vale(client_admin):
     assert g["situacao"] == "lida" and g["leitura"]["versao"] == 2
 
 
+def test_anexar_xlsx_sem_coluna_item_fica_lida_pelos_titulos(client_admin):
+    """Issue #612: a aba de resumo so' com o codigo do servico (sem ITEM) e' lida, com os grupos pelos titulos."""
+    from tests.test_leitura_planilha_medicao import TOTAL_SEM_ITEM, planilha_sem_item
+    cid = _contrato(client_admin)
+    arquivos_ = {**_arquivos_planilha("oficio sem item"), "planilha": ("planilha.xlsx", planilha_sem_item(), XLSX)}
+    r = client_admin.post(f"/api/contratos/{cid}/planilhas", files=arquivos_, data={
+        "numero": 1, "competencia": "2026-07", "periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-28",
+        "valor": "3.797,06"})
+    assert r.status_code == 201, r.text
+    assert r.json()["leitura_planilha"] == {"situacao": "lida", "aviso": None}
+    g = client_admin.get(f"/api/medicoes/{r.json()['medicao_id']}/grupos").json()
+    assert g["situacao"] == "lida" and g["leitura"]["grupo_por"] == "planilha"
+    assert g["leitura"]["total_centavos"] == TOTAL_SEM_ITEM
+    assert [(x["nome"], x["valor_medido_centavos"]) for x in g["grupos"]] == [
+        ("SERVIÇOS PRELIMINARES", 1700_56), ("PAVIMENTAÇÃO", 1296_23), ("Revestimento", 800_27)]
+    prelim = g["grupos"][0]["itens"]
+    assert [(i["item"], i["codigo"], i["valor_medido_centavos"]) for i in prelim] == [
+        (None, "s/c", 500_55), (None, "s/c", 1200_01)]
+
+
 def test_planilha_de_projeto_nao_e_lida(client_admin):
     from tests.test_leitura_planilha_medicao import planilha
     cid = _contrato(client_admin)

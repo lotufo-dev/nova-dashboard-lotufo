@@ -8,6 +8,11 @@ A posicao das colunas e' achada pelo texto do cabecalho (quantidade e valor se d
 - linha de item: o nº ("1.1", "3.1.2"), o codigo do servico e/ou a unidade, as quantidades, o preco e os valores;
 - SUBTOTAL de cada grupo (pulado) e TOTAL GERAL no fim (a leitura para).
 
+Outro modelo (issue #612) nao tem a coluna ITEM, so' o CÓDIGO do servico (que se repete: "s/c"). Nele, o titulo de
+grupo ou de subgrupo e' a linha so' com a discriminacao (sem codigo, sem unidade e sem preco), o item cai no titulo
+mais recente, o campo `item` vem vazio, e a leitura para tambem em TOTAL ACUMULADO ou TOTAL DESTA MEDIÇÃO (o rodape
+desse modelo). Sem nº de item, o cadastro de custo (prefixos de nº) nao se aplica: agrupa pelos titulos.
+
 O grupo do item vem do cadastro de custo da obra quando houver (prefixos de `itens_planilha`, issue #489); sem ele,
 do titulo de grupo mais proximo da propria planilha (o de nº mais longo que prefixa o nº do item). Item que nao cai
 em grupo nenhum vai para "outros".
@@ -32,6 +37,7 @@ LINHAS_CABECALHO = 40
 MAX_LINHAS = 5000                       # a aba real tem ~1.500 linhas
 MAX_COLUNAS = 60
 MAX_ITENS = 3000
+FIM_SEM_ITEM = ("TOTAL ACUMULADO", "TOTAL DESTA MEDICAO")   # o rodape do modelo sem ITEM, alem do TOTAL GERAL
 
 # campo -> como aparece na mensagem quando falta
 CAMPOS = {
@@ -54,11 +60,22 @@ def _texto(v) -> str:
     return " ".join(s.upper().split())
 
 
+def _e_item(h: str) -> bool:
+    """A coluna do nº do item: "ITEM", ou ate' duas palavras terminando em ITEM ("Nº ITEM" -> "NO ITEM", "N. ITEM")."""
+    partes = h.split()
+    return bool(partes) and partes[-1] == "ITEM" and len(partes) <= 2
+
+
+def _menciona_item(textos: list[str]) -> bool:
+    """Alguma celula fala de ITEM (mesmo que nao seja reconhecida): nao e' o modelo sem ITEM."""
+    return any("ITEM" in t.split() for t in textos)
+
+
 def _campo(h: str) -> str | None:
     """O campo de uma celula do cabecalho (ja' normalizada), ou None (coluna que a leitura nao usa)."""
     if not h:
         return None
-    if h == "ITEM":
+    if _e_item(h):
         return "item"
     if h.startswith("CODIGO"):
         return "codigo"
@@ -88,19 +105,22 @@ def _campo(h: str) -> str | None:
 
 
 def _e_cabecalho(valores: list) -> bool:
-    """A linha do cabecalho tem ITEM e DISCRIMINAÇÃO (ou DESCRIÇÃO)."""
+    """A linha do cabecalho tem ITEM (ou CÓDIGO, no modelo sem ITEM) e DISCRIMINAÇÃO (ou DESCRIÇÃO)."""
     textos = [_texto(v) for v in valores]
-    return "ITEM" in textos and any(t.startswith(("DISCRIMINACAO", "DESCRICAO")) for t in textos)
+    return ((any(_e_item(t) for t in textos) or any(t.startswith("CODIGO") for t in textos))
+            and any(t.startswith(("DISCRIMINACAO", "DESCRICAO")) for t in textos))
 
 
 def _colunas(textos: list[str]) -> tuple[dict[str, int], list[str]]:
-    """(campo -> coluna, rotulos das colunas que faltam)."""
+    """(campo -> coluna, rotulos das colunas que faltam). Com CÓDIGO e sem celula nenhuma falando de ITEM, ITEM nao
+    e' exigido (modelo sem ITEM); a coluna de ITEM escrita de um jeito que nao se reconhece continua recusando."""
     colunas: dict[str, int] = {}
     for c, t in enumerate(textos):
         campo = _campo(t)
         if campo and campo not in colunas:
             colunas[campo] = c
-    return colunas, [CAMPOS[k] for k in CAMPOS if k not in colunas]
+    sem_item = "codigo" in colunas and not _menciona_item(textos)
+    return colunas, [CAMPOS[k] for k in CAMPOS if k not in colunas and not (k == "item" and sem_item)]
 
 
 def _combinar(pai: list, filho: list) -> list[str]:
@@ -129,9 +149,11 @@ def _so_texto(valores: list) -> bool:
 
 
 def _achar_cabecalho(linhas) -> tuple[dict[str, int], object]:
-    """(campo -> coluna, as linhas que sobram). O cabecalho e' a linha com ITEM e DISCRIMINAÇÃO; se nela faltam
-    colunas, junta a linha de cima ou a de baixo (cabecalho em duas linhas)."""
-    anterior = None
+    """(campo -> coluna, as linhas que sobram). O cabecalho e' a linha com ITEM (ou CÓDIGO, no modelo sem ITEM) e
+    DISCRIMINAÇÃO; se na linha com ITEM faltam colunas, junta a linha de cima ou a de baixo (cabecalho em duas
+    linhas). A linha so' com CÓDIGO (modelo sem ITEM, cabecalho numa linha) tem de vir completa; incompleta, pode
+    ser um dado acima da tabela ("CÓDIGO DA OBRA"): a busca segue e so' recusa, com o que faltou, se nenhuma servir."""
+    anterior, pendente = None, None
     for numero, valores in linhas:
         if numero > LINHAS_CABECALHO:
             break
@@ -141,6 +163,11 @@ def _achar_cabecalho(linhas) -> tuple[dict[str, int], object]:
         col, faltam = _colunas([_texto(v) for v in valores])
         if not faltam:
             return col, linhas
+        if not any(_e_item(_texto(v)) for v in valores):
+            if pendente is None or len(faltam) < len(pendente):
+                pendente = faltam       # a linha mais perto de ser o cabecalho diz o que falta
+            anterior = valores
+            continue
         if anterior is not None and _so_texto(anterior):
             col2, faltam2 = _colunas(_combinar(anterior, valores))
             if not faltam2:
@@ -152,7 +179,9 @@ def _achar_cabecalho(linhas) -> tuple[dict[str, int], object]:
                 return col2, linhas
             faltam = faltam2 if len(faltam2) < len(faltam) else faltam
         raise PlanilhaRecusada(f"o cabeçalho da aba Resumo não tem a coluna {', '.join(faltam)}")
-    raise PlanilhaRecusada("a aba Resumo não tem o cabeçalho com ITEM e DISCRIMINAÇÃO")
+    if pendente:
+        raise PlanilhaRecusada(f"o cabeçalho da aba Resumo não tem a coluna {', '.join(pendente)}")
+    raise PlanilhaRecusada("a aba Resumo não tem o cabeçalho com ITEM (ou CÓDIGO) e DISCRIMINAÇÃO")
 
 
 def _nome_item(v) -> str:
@@ -399,6 +428,10 @@ def _linhas(z: zipfile.ZipFile, caminho: str, textos: list[str]):
 
 def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
     col, linhas = _achar_cabecalho(iter(linhas))
+    sem_item = "item" not in col        # modelo sem ITEM (issue #612): grupo pelo titulo mais recente
+    if sem_item:
+        cadastro = None                 # os prefixos do cadastro sao de nº de item, que este modelo nao tem
+    titulo_atual: str | None = None
     titulos: dict[str, str] = {}
     itens: list[tuple[str, dict]] = []
     lidas = 0
@@ -409,24 +442,33 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
         textos = [_texto(v) for v in linha]
         if any(t.startswith("TOTAL GERAL") for t in textos):
             break                       # sem TOTAL GERAL, a tabela acaba no fim da aba
+        if sem_item and any(t.startswith(FIM_SEM_ITEM) for t in textos):
+            break
+        if sem_item and any(t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL")
+                            for t in textos if t):
+            continue                    # outra linha de soma: nunca titulo nem item
         if any(t.startswith("SUBTOTAL") for t in textos):
             continue
-        celula = lambda k: linha[col[k]] if col[k] < len(linha) else None   # noqa: E731
+        celula = lambda k: linha[col[k]] if k in col and col[k] < len(linha) else None   # noqa: E731
         numero_item, codigo = _nome_item(celula("item")), _nome_item(celula("codigo"))
         unidade = celula("unidade")
         unidade = unidade.strip() if isinstance(unidade, str) else _nome_item(unidade)
         descricao = celula("descricao")
         descricao = " ".join(descricao.split()) if isinstance(descricao, str) else _nome_item(descricao)
-        if not numero_item and not codigo:
-            continue                    # linha em branco, rodape, subtotal sem rotulo
+        preco = celula("preco")
+        sem_preco = preco is None or (isinstance(preco, str) and not preco.strip())
+        if sem_item and not codigo and not unidade and sem_preco and descricao:
+            titulo_atual = descricao     # titulo de grupo ou de subgrupo, sem nº
+            continue
+        if not numero_item and not codigo and not (sem_item and descricao and (unidade or not sem_preco)):
+            continue                    # linha em branco, rodape, subtotal sem rotulo (sem ITEM: item sem codigo vale)
         # o item tem unidade ou preco unitario; o grupo (e o subgrupo), nem um nem outro, mesmo com codigo ("11.2*")
         # e com a soma dos itens nas colunas de valor (que nao entra: os itens ja' contam)
-        preco = celula("preco")
-        if not unidade and (preco is None or (isinstance(preco, str) and not preco.strip())):
+        if not unidade and sem_preco:
             if numero_item and descricao:
                 titulos[numero_item] = descricao     # linha de grupo
             continue
-        nome = numero_item or codigo
+        nome = numero_item or codigo or descricao
         if len(itens) >= MAX_ITENS:
             raise PlanilhaRecusada("itens demais na aba Resumo")
         qc = _decimal(celula("quantidade_contratada"), "a quantidade contratada", nome)
@@ -435,7 +477,9 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
         pu = _decimal(celula("preco"), "o preço unitário", nome)
         vm = _decimal(celula("valor_medido"), "o valor nesta medição", nome)
         va = _decimal(celula("valor_acumulado"), "o valor acumulado", nome)
-        if cadastro:
+        if sem_item:
+            grupo = titulo_atual
+        elif cadastro:
             grupo = _do_cadastro(numero_item, cadastro)
         else:
             grupo = _do_prefixo(numero_item, titulos) if numero_item else None
