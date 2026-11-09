@@ -516,6 +516,28 @@ def test_sem_item_linha_de_total_com_traco_no_codigo_ou_na_unidade_continua_pula
     assert [i["descricao"] for i in lido["grupos"][0]["itens"]] == ["Bueiro"]
 
 
+@pytest.mark.parametrize("nesta", [5.01, 0])
+@pytest.mark.parametrize(("codigo", "unidade", "preco"), [
+    ("–", "R$", 0), ("S/C.", "R$", "-"), ("-", "R$", 1234.5), (None, "R$", 100.0), ("—", "R$", 0), ("S/C", "%", 0)])
+def test_sem_item_linha_de_total_com_codigo_sem_digito_ou_unidade_de_dinheiro_continua_pulada(
+        codigo, unidade, preco, nesta):
+    """Revisor #617, rodada 2: codigo sem digito (travessao, "S/C.") e unidade "R$" ou "%" nao fazem da soma um
+    item, mesmo com numero no preco unitario."""
+    linhas = [(TITULO, "DRENAGEM"), ("2003", "Bueiro", "m", 1, nesta and 1, 1, 1, 5.01, 5.01, nesta, 5.01, 5.01, 1),
+              (codigo, "TOTAL DO GRUPO", unidade, None, None, None, None, preco, None, nesta, 5.01, 5.01, None)]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert [(i["descricao"], i["valor_acumulado_centavos"]) for g in lido["grupos"] for i in g["itens"]] == [
+        ("Bueiro", 5_01)]
+    assert lido["total_centavos"] == round(nesta * 100)
+
+
+def test_sem_item_item_total_com_codigo_unidade_e_preco_continua_lido():
+    linhas = [(TITULO, "DRENAGEM"), ("2003", "Total de bueiros", "m", 1, 1, 0, 1, 7.0, 7.0, 7.0, 0, 7.0, 1)]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert lido["total_centavos"] == 7_00
+    assert [(i["codigo"], i["descricao"]) for i in lido["grupos"][0]["itens"]] == [("2003", "Total de bueiros")]
+
+
 def test_sem_item_item_total_com_preco_em_texto_nao_some():
     """Revisor #617: preco gravado como texto nao faz o item virar soma; a leitura recusa dizendo o preco."""
     linhas = [(TITULO, "DRENAGEM"), (None, "Total de bocas de lobo", "un", 1, 1, 0, 1, "3,00", 3.0, 3.0, 0, 3.0, 1)]

@@ -437,9 +437,16 @@ def _linhas(z: zipfile.ZipFile, caminho: str, textos: list[str]):
             dados_aba.clear()
 
 
-def _preenchido(v: str) -> bool:
-    """Codigo ou unidade de verdade: nao vazio e nao o "-" de preenchimento."""
-    return v not in ("", "-")
+def _codigo_de_verdade(codigo: str) -> bool:
+    """Codigo de servico de verdade tem algum digito: "-", "–", "—", "s/c", "S/C." e vazio nao contam."""
+    return any(ch.isdigit() for ch in codigo)
+
+
+def _unidade_de_verdade(unidade: str) -> bool:
+    """Unidade de medida de verdade tem letra ou digito e nao e' de dinheiro: "-", "–", "—", "%", "R$" e vazio nao
+    contam (sao como a linha de soma aparece)."""
+    u = _texto(unidade)
+    return any(ch.isalnum() for ch in u) and not u.startswith("R$")
 
 
 def _tem_preco(preco) -> bool:
@@ -456,17 +463,18 @@ def _tem_preco(preco) -> bool:
 def _linha_de_soma(textos: list[str], col: dict[str, int], codigo: str, unidade: str, preco) -> bool:
     """Modelo sem ITEM: linha que comeca com TOTAL, SUB-TOTAL ou SUB TOTAL. So' nao e' soma a linha com cara de item:
     unidade de verdade e, alem dela, codigo de verdade ou preco unitario ("2003 | Total de bueiros executados | m |
-    ... | 5,01" e' item, issue #617). "-" no codigo ou na unidade, "s/c" no codigo, "-" ou 0 no preco nao contam: o
-    "TOTAL DO GRUPO" assim preenchido continua soma. Rotulo na coluna do codigo e' sempre soma; rotulo noutra coluna
-    (observacao) so' nao e' quando a linha tem codigo, unidade e preco de verdade."""
+    ... | 5,01" e' item, issue #617). Codigo sem digito ("-", "–", "s/c"), unidade sem letra nem digito ou de dinheiro
+    ("-", "%", "R$"), preco "-" ou 0 nao contam: o "TOTAL DO GRUPO" assim preenchido continua soma. Rotulo na coluna
+    do codigo e' sempre soma; rotulo noutra coluna (observacao) so' nao e' quando a linha tem codigo, unidade e
+    preco de verdade."""
     rotulos = [c for c, t in enumerate(textos)
                if t and (t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL"))]
     if not rotulos:
         return False
     if col.get("codigo") in rotulos:
         return True
-    codigo_de_verdade = _preenchido(codigo) and codigo.upper() != "S/C"
-    unidade_de_verdade = _preenchido(unidade)
+    codigo_de_verdade = _codigo_de_verdade(codigo)
+    unidade_de_verdade = _unidade_de_verdade(unidade)
     if any(c != col["descricao"] for c in rotulos):
         return not (codigo_de_verdade and unidade_de_verdade and _tem_preco(preco))
     return not (unidade_de_verdade and (codigo_de_verdade or _tem_preco(preco)))
