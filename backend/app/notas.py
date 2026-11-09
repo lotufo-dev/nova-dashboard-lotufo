@@ -456,8 +456,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
         JOIN medicoes m ON m.id=a.medicao_id
         WHERE a.desfeita_em IS NULL AND n.situacao='ativa'
           AND m.estado NOT IN ('cancelada','desistida','recebida')
-          AND a.valor_alocado_centavos > COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos)
-        ORDER BY a.medicao_id"""):
+        ORDER BY a.medicao_id"""):  # o valor (par, issue #609) e' decidido por acima_da_medicao
         for x in acima_da_medicao(conn, r["medicao_id"]):
             out.append({"tipo": "nota_acima_da_medicao", "nota_id": x["nota_id"], "numero": x["numero"],
                         "medicao_id": r["medicao_id"], "contrato_id": r["contrato_id"], "dias": None,
