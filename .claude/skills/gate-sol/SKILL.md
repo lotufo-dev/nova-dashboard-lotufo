@@ -76,10 +76,11 @@ orquestradora (numa sessão manual, a própria sessão) dá o veredito final.
 
 1. Abrir um `Agent` com `model: opus`, `subagent_type` geral, ferramentas só de leitura (Read, Grep, Glob e Bash
    sem gravar). O prompt é o **mesmo arquivo de entrada** que iria ao codex (pedido desta skill + o diff de
-   `origin/master...HEAD` do worktree), **sem** o parecer do `revisor-adversarial` e sem a conversa da
+   `origin/master...HEAD` do worktree na rodada 1; na segunda rodada, de correção grande de dinheiro ou envio com
+   o codex já sem cota, só o diff novo, `git -C "<worktree>" diff <sha-antes>..HEAD`), **sem** o parecer do `revisor-adversarial` e sem a conversa da
    trabalhadora: é um par de olhos novo. O prompt leva o **caminho absoluto do worktree** e manda ler arquivos e
    rodar `git -C "<worktree>"` só lá (aberto da pasta principal, ele leria o `master`).
-2. Veredito inválido do Opus (resposta vazia, erro, "OK" sem lista sobre diff não vazio): rodar de novo uma vez;
+2. Veredito inválido do Opus (resposta vazia, erro, sem "OK" nem lista de achados, ou "OK" sobre diff vazio): rodar de novo uma vez;
    se continuar inválido, a PR não mergeia sozinha, como no codex (ver a regra de veredito inválido acima).
 3. A orquestradora (ou a própria sessão manual) confere cada achado contra o código e registra o veredito:
    confirmado, ou refutado com `arquivo:linha` que prova. Depois desse veredito **não há nova rodada do gate**
@@ -94,6 +95,10 @@ orquestradora (numa sessão manual, a própria sessão) dá o veredito final.
 - [x] Gate Sol: codex sem cota em DD/MM; coberto por subagente Opus independente + veredito da orquestradora
 ```
 
+(Numa sessão manual, "+ veredito da sessão". Se a rodada 1 foi pelo codex e só a segunda rodada ficou sem cota:
+"Gate Sol: rodada 1 pelo codex; segunda rodada sem cota em DD/MM, coberta por subagente Opus independente +
+veredito da orquestradora".)
+
 Na nuvem (sem codex) vale a regra de sempre: "gate Sol: não disponível na nuvem", que não é trava.
 
 ## Depois da resposta: uma rodada de correção
@@ -106,8 +111,9 @@ Na nuvem (sem codex) vale a regra de sempre: "gate Sol: não disponível na nuve
      sugerida no corpo da PR.
 2. Uma rodada só: corrigir, rodar os testes do módulo, e não rodar o gate de novo, a menos que a correção tenha
    mudado a lógica de dinheiro ou de envio de forma grande; nesse caso, uma segunda rodada só sobre o diff novo
-   (arquivo de entrada com só o diff novo). Exceção: se o gate foi o Opus da seção "Sem cota", nunca há segunda
-   rodada; a correção é conferida só pelo `revisor-adversarial`.
+   (arquivo de entrada com só o diff novo). Sem cota do codex nessa segunda rodada, o Opus da seção "Sem cota" a faz
+   só sobre o diff novo, e depois dela não há nova rodada. Exceção: se o gate da rodada 1 já foi o Opus, nunca há
+   segunda rodada; a correção é conferida só pelo `revisor-adversarial`.
 
 ## Registrar na PR
 
