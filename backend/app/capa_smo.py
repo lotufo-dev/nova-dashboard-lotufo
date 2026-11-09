@@ -57,14 +57,22 @@ def aceita(conn, atesto_id: int) -> bool:
 
 def _mais_recente(conn, contrato_id: int) -> dict | None:
     """A capa mais recente do contrato, pela data de realizacao (sem data, por ultimo), das medicoes que valem. So'
-    a do boletim vigente de cada medicao: a capa de um boletim substituido nao avisa (code-review)."""
+    a do boletim vigente de cada medicao: a capa de um boletim substituido nao avisa (code-review). Issue #625: o mesmo
+    PDF registrado tambem no par (execucao <-> reajuste) grava a capa nas duas; entre elas vale a da medicao que
+    recebeu o PDF primeiro (onde a pessoa registrou), e nao a do par, gravada depois (revisor, R1)."""
     r = conn.execute(
-        "SELECT cap.* FROM medicao_boletim_capas cap JOIN medicoes m ON m.id=cap.medicao_id "
+        "SELECT cap.*, (cap.medicao_id = (SELECT o.medicao_id FROM medicao_atestos o WHERE o.sha256=a.sha256 "
+        "ORDER BY o.id LIMIT 1)) AS _origem FROM medicao_boletim_capas cap JOIN medicoes m ON m.id=cap.medicao_id "
+        "JOIN medicao_atestos a ON a.id=cap.atesto_id "
         f"WHERE m.contrato_id=? AND m.estado NOT IN ({','.join('?' * len(_FORA))}) "
         "AND cap.atesto_id=(SELECT MAX(id) FROM medicao_atestos WHERE medicao_id=cap.medicao_id) "
-        "ORDER BY cap.data_realizacao IS NULL, cap.data_realizacao DESC, cap.id DESC LIMIT 1",
+        "ORDER BY cap.data_realizacao IS NULL, cap.data_realizacao DESC, _origem DESC, cap.id DESC LIMIT 1",
         (contrato_id, *_FORA)).fetchone()
-    return dict(r) if r else None
+    if r is None:
+        return None
+    capa = dict(r)
+    del capa["_origem"]
+    return capa
 
 
 def _do_boletim_vigente(conn, medicao_id: int) -> dict | None:
