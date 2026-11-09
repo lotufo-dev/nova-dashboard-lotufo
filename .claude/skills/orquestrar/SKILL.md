@@ -178,9 +178,9 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    `gh run view <id> --log-failed`) e mandar à trabalhadora (uma rodada de correção, conta nas duas do passo
    6). Quando ela voltar: a conferência do passo 6 (revisor sobre `<sha-antes>..HEAD` no worktree de quem corrigiu, ou sobre `origin/master...HEAD` se a correção incluiu `git merge origin/master`, e Sol só se a correção mexeu de forma grande em dinheiro ou envio) e o passo 8 inteiro de novo antes de religar o auto-merge (e de lançar o vigia de novo).
    Vermelha de novo, `precisa-do-leo`.
-10. **Depois do merge** de cada PR (e no `PAROU`/`FALHOU` do passo 4): `git pull --ff-only` na pasta
-    principal (com `cd` explícito para ela: o diretório do Bash da sessão persiste entre chamadas e pode ainda estar
-    dentro de um worktree) e remover o worktree da trabalhadora (e o da trabalhadora de correção, se o passo 6 abriu uma nova), pelo PowerShell na pasta principal (o hook de remoção só
+10. **Depois do merge** de cada PR (e no `PAROU`/`FALHOU` do passo 4): `git -C <pasta principal> pull --ff-only`
+    (com `-C`, nunca `cd <pasta> && git`: o Claude Code pede permissão a esse encadeamento, e o diretório do Bash da
+    sessão pode ainda estar dentro de um worktree) e remover o worktree da trabalhadora (e o da trabalhadora de correção, se o passo 6 abriu uma nova), pelo PowerShell na pasta principal (o hook de remoção só
     roda quando o Claude remove sozinho). **Só remover caminho que contém `\.claude\worktrees\`**; a produção
     (`C:\DashboardLotufo\app`) também é worktree deste repositório e nunca entra aqui.
     `git worktree remove "<caminho>"` (se reclamar da junção, antes rode
@@ -194,7 +194,7 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
     segurar uma PR com auto-merge ligado, ele comenta nela (a orquestradora desarma na próxima conferência)
     ou, para segurar na hora, converte em draft ou fecha.
 
-"**Até acabar**": terminada a rodada (todas as PRs mergeadas ou paradas), `cd` explícito para a pasta principal, `git pull --ff-only` e voltar ao
+"**Até acabar**": terminada a rodada (todas as PRs mergeadas ou paradas), `git -C <pasta principal> pull --ff-only` (sem `cd && git`) e voltar ao
 passo 1, até a tabela do `listar-issues` vir vazia ou aparecer `PARAR`. Entre rodadas, nada de deploy.
 
 ## Quadro
