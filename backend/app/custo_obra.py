@@ -24,6 +24,7 @@ from decimal import Decimal
 from app import contratos, cronograma, db, dinheiro, medicao_grupos, tempo
 from app.cadastro_arquivos import _dentro_do_prefixo, _segmentos
 from app.diretoria import FORA as ESTADOS_FORA   # fora do medido: o mesmo recorte da Carteira
+from app.leitura_planilha_medicao import titulo_comparavel
 
 DESATUALIZADO_HORAS = 24
 REGRA_PROPORCIONAL = "proporcional"
@@ -195,7 +196,9 @@ def _itens_chave(grupos: list[dict], linhas: list[dict], medido: dict[str, dict]
         ambiguo = False
         if item is None:
             # planilha sem nº de item (#613): o codigo do item-chave e' o do servico, que pode se repetir no grupo
-            pelo_codigo = [it for it in do_grupo if not it["item"] and (it["codigo"] or "").strip() == chave["codigo"]]
+            # sem diferenca de maiusculas nem de espacos ("S/C" e "s/c"), como os titulos
+            pelo_codigo = [it for it in do_grupo if not it["item"] and it["codigo"]
+                           and titulo_comparavel(it["codigo"]) == titulo_comparavel(chave["codigo"])]
             ambiguo = len(pelo_codigo) > 1
             item = pelo_codigo[0] if len(pelo_codigo) == 1 else None
         medicao = nome_ult if item else None

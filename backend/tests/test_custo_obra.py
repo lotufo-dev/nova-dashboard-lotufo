@@ -529,7 +529,7 @@ def _obra_por_titulos(conn):
     """Pavimentação junta dois titulos da planilha (PAVIMENTAÇÃO e o subtitulo Revestimento), com o item-chave pelo
     codigo do servico; Preliminares tem o item-chave "s/c", que aparece duas vezes no grupo."""
     cid = _obra(conn, grupos=[("Preliminares", ["001.01"]), ("Pavimentação", ["001.02"])])
-    for nome, titulos, codigo, unidade in (("Preliminares", ["Serviços preliminares"], "s/c", "un"),
+    for nome, titulos, codigo, unidade in (("Preliminares", ["Serviços preliminares"], "S/C", "un"),
                                           ("Pavimentação", ["PAVIMENTACAO", "revestimento"], "4011", "m³")):
         conn.execute("UPDATE custo_grupos SET itens_planilha='[]', titulos_planilha=?, item_chave_codigo=?, "
                      "item_chave_unidade=? WHERE contrato_id=? AND nome=?",
