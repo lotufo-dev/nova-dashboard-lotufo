@@ -16,6 +16,7 @@ sobreposicao rodam NO SUBPROCESSO com limite de `leitura_pdf` (os PDFs vem de fo
 `leitura_pdf._trabalho`.
 """
 import io
+import threading
 import unicodedata
 
 import pypdf
@@ -51,7 +52,11 @@ FRACAO_ALTO = 0.7
 
 TETO_PAGINAS = 600              # o pacote real da SINFRA tem 467 paginas: o teto do protocolo (400) o recusaria
 TEMPO_LIMITE_S = 120.0
+# Vaga PROPRIA, uma so': a leitura de ate 2 min do pacote nao pode segurar as duas vagas de `leitura_pdf._VAGAS`, de que
+# dependem a certidao, o pacote do protocolo e o boletim. Segundo uso simultaneo recebe a mesma frase de espera.
+_VAGA = threading.BoundedSemaphore(1)
 
+SOMA_DEMAIS = "Os arquivos somam mais de {mb} MB: separe o pacote."
 ACHADO_DEMAIS = "O pacote tem {n} páginas, acima do limite de {teto}: separe em dois."
 
 
@@ -280,8 +285,7 @@ def com_limite(partes: list[bytes], papeis: dict[str, str], marcar=(), desmarcar
                gerar=True) -> dict:
     """`processar` no subprocesso com limite de tempo e a guarda de streams de `leitura_pdf` (PDF vem de fora)."""
     if sum(len(p) for p in partes) > pdfs.TETO_BYTES_PACOTE:
-        raise leitura_pdf.TextoInadequado(f"Os arquivos somam mais de {pdfs.TETO_BYTES_PACOTE // (1024 * 1024)} MB: "
-                                          "separe o pacote.")
+        raise leitura_pdf.TextoInadequado(SOMA_DEMAIS.format(mb=pdfs.TETO_BYTES_PACOTE // (1024 * 1024)))
     return leitura_pdf.com_limite(b"", "ancoras", TEMPO_LIMITE_S, {
         "partes": list(partes), "papeis": papeis, "marcar": sorted(marcar), "desmarcar": sorted(desmarcar),
-        "mostrar": mostrar, "gerar": gerar})
+        "mostrar": mostrar, "gerar": gerar}, vagas=_VAGA)

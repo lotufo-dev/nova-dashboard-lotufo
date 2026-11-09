@@ -42,7 +42,8 @@ export default function AncorasDocusign() {
   const [paginas, setPaginas] = useState<PaginaAncora[] | null>(null);
   const [marcar, setMarcar] = useState<Set<number>>(new Set());
   const [desmarcar, setDesmarcar] = useState<Set<number>>(new Set());
-  const [ocupado, setOcupado] = useState(false);
+  const [acao, setAcao] = useState<"analisar" | "baixar" | null>(null);
+  const ocupado = acao !== null;
   const [erro, setErro] = useState<string | null>(null);
   const [arrastando, setArrastando] = useState(false);
 
@@ -58,17 +59,17 @@ export default function AncorasDocusign() {
   function tirar(i: number) { setArquivos(atual => atual.filter((_, k) => k !== i)); invalidar(); }
 
   async function analisar() {
-    setOcupado(true); setErro(null);
+    setAcao("analisar"); setErro(null);
     try {
       const r = await apiForm<{ paginas: PaginaAncora[] }>(`${URL_BASE}/paginas`, formulario(arquivos, nomes, [], []));
       setPaginas(r.paginas); setMarcar(new Set()); setDesmarcar(new Set());
-    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setAcao(null); }
   }
   async function baixar() {
-    setOcupado(true); setErro(null);
+    setAcao("baixar"); setErro(null);
     try {
       await baixarArquivoForm(`${URL_BASE}/pdf`, formulario(arquivos, nomes, [...marcar], [...desmarcar], mostrar), "pacote-com-ancoras.pdf");
-    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setAcao(null); }
   }
 
   function alternar(conj: Set<number>, set: (s: Set<number>) => void, n: number) {
@@ -96,10 +97,9 @@ export default function AncorasDocusign() {
         <label className="btn" htmlFor="ancoras-arquivos">Escolher PDFs</label>
         <input id="ancoras-arquivos" type="file" multiple accept=".pdf,application/pdf" className="sr-only"
           onChange={ev => { adicionar(ev.currentTarget.files); ev.currentTarget.value = ""; }} />
-        <span className="ancoras__dica">ou solte aqui os PDFs, na ordem do pacote</span>
       </div>
       {arquivos.length > 0 && (
-        <ol className="ancoras__arquivos" aria-label="PDFs do pacote">
+        <ol className="ancoras__arquivos" aria-label="PDFs do pacote, na ordem em que serão juntados">
           {arquivos.map((a, i) => (
             <li key={`${a.name}-${i}`}>{a.name}
               <button type="button" className="btn btn--pequeno" aria-label={`Tirar ${a.name}`} onClick={() => tirar(i)}>Tirar</button>
@@ -126,10 +126,10 @@ export default function AncorasDocusign() {
 
       <div className="ancoras__acoes">
         <button type="button" className="btn btn--primario" disabled={ocupado || arquivos.length === 0} onClick={analisar}>
-          {ocupado && paginas === null ? "Lendo o pacote…" : "Ver as páginas com âncora"}
+          {acao === "analisar" ? "Lendo o pacote…" : "Ver as páginas com âncora"}
         </button>
         <button type="button" className="btn" disabled={ocupado || arquivos.length === 0} onClick={baixar}>
-          <IconeBaixar className="icone" />{ocupado && paginas !== null ? "Montando o PDF…" : "Baixar PDF com âncoras"}
+          <IconeBaixar className="icone" />{acao === "baixar" ? "Montando o PDF…" : "Baixar PDF com âncoras"}
         </button>
       </div>
 

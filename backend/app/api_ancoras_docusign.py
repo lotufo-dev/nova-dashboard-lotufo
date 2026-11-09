@@ -43,7 +43,12 @@ def _pedido(arquivos_up: list[UploadFile], papeis: str, marcar: str, desmarcar: 
     partes, total = [], 0
     for a in arquivos_up:
         # o teto vale para a SOMA, conferida enquanto le: 60 arquivos no teto de um so' nao enchem a memoria
-        parte = b"".join(arquivos.blocos_validados(a, teto_bytes=max(1, pdfs.TETO_BYTES_PACOTE - total)))
+        try:
+            parte = b"".join(arquivos.blocos_validados(a, teto_bytes=max(1, pdfs.TETO_BYTES_PACOTE - total)))
+        except HTTPException as e:
+            if e.status_code == 413 and total:      # estourou pela soma, nao pelo arquivo sozinho
+                raise HTTPException(413, ancoras_docusign.SOMA_DEMAIS.format(mb=pdfs.TETO_BYTES_PACOTE // (1024 * 1024))) from None
+            raise
         total += len(parte)
         partes.append(parte)
     return {"partes": partes, "papeis": {p: n for p, n in nomes.items() if n.strip()}, **paginas}

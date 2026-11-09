@@ -633,7 +633,8 @@ def _matar(proc, ate: float | None = None) -> None:
             proc.join()
 
 
-def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, ate: float | None = None):
+def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, ate: float | None = None,
+               vagas: threading.BoundedSemaphore | None = None):
     """Roda `_trabalho` num subprocesso e devolve o valor -- ou mata o filho no tempo.
 
     E' a garantia de que a leitura de PDF NAO derruba o servidor: o que o pypdf faz com
@@ -679,7 +680,8 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, 
     """
     limite = TEMPO_LIMITE_S if limite is None else limite    # lido na chamada: o teste o troca
     espera = TEMPO_LIMITE_S if ate is None else max(0.0, ate - time.monotonic())
-    if not _VAGAS.acquire(timeout=espera):
+    vagas = _VAGAS if vagas is None else vagas      # ferramenta pesada (ancoras, #626) traz a vaga propria
+    if not vagas.acquire(timeout=espera):
         raise TextoInadequado(_LOTADO)
     def restante() -> float:
         return max(0.0, ate - time.monotonic() - _FOLGA_MATAR_S)
@@ -721,7 +723,7 @@ def com_limite(pdf: bytes, modo: str, limite: float | None = None, opcoes=None, 
                 if proc.exitcode is not None:
                     proc.close()
     finally:
-        _VAGAS.release()
+        vagas.release()
     if resposta is None:
         raise TextoInadequado(_FALHOU)
     if resposta[0] == "ok":
