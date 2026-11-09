@@ -15,6 +15,7 @@ from pathlib import Path
 import yaml
 
 from app import dinheiro, entidades, espelho, espelho_docx, reajuste, tempo
+from app.leitura_planilha_medicao import titulo_comparavel
 
 FAMILIAS = ("mtpar", "sinfra", "ses", "prefeitura")
 LEIS = ("8.666", "14.133", "13.303")
@@ -866,7 +867,19 @@ _PREFIXOS = 'use uma lista de códigos entre aspas (ex.: "001.03"); sem aspas o 
 
 
 _CHAVES_CUSTO = frozenset({"projeto_rm", "grupos", "nao_e_custo", "sem_tarefa"})
-_CHAVES_GRUPO = frozenset({"nome", "tarefas", "itens_planilha", "item_chave"})
+_CHAVES_GRUPO = frozenset({"nome", "tarefas", "itens_planilha", "titulos_planilha", "item_chave"})
+_TITULOS = "use uma lista de títulos em texto, como aparecem na planilha do órgão"
+
+
+def _titulos(valor, campo: str, falha) -> list[str] | None:
+    """Issue #613: titulos de grupo da planilha sem nº de item. Texto nao vazio; guardado como escrito, sem as bordas
+    e com os espacos de dentro normalizados."""
+    if valor is None:
+        return []
+    if not isinstance(valor, list) or any(not isinstance(x, str) or not x.strip() for x in valor):
+        falha(campo, _TITULOS)
+        return None
+    return [" ".join(x.split()) for x in valor]
 
 
 def _segmentos(codigo: str) -> list[str]:
@@ -918,6 +931,7 @@ def _custo(bruto, falha) -> dict | None:
         lista = []
     grupos: list[dict] = []
     donos: dict[str, list[tuple[str, str]]] = {"tarefas": [], "itens_planilha": []}
+    donos_titulo: dict[str, str] = {}    # titulo como a leitura compara (sem acento, maiusculo) -> grupo
     nomes: set[str] = set()
     for i, g in enumerate(lista):
         onde = f"custo.grupos[{i}]"
@@ -946,6 +960,18 @@ def _custo(bruto, falha) -> dict | None:
                                                  f"{dono}; um código só pode cair em um grupo")
                         break
                 donos[campo].append((v, nome))
+        titulos = _titulos(g.get("titulos_planilha"), f"{onde}.titulos_planilha", falha)
+        vistos: set[str] = set()
+        for t in titulos or []:
+            comparavel = titulo_comparavel(t)
+            if comparavel in vistos:
+                falha(f"{onde}.titulos_planilha", f"o título {t} do grupo {nome} aparece duas vezes")
+            elif comparavel in donos_titulo:
+                falha(f"{onde}.titulos_planilha", f"o título {t} do grupo {nome} já está no grupo "
+                                                  f"{donos_titulo[comparavel]}")
+            vistos.add(comparavel)
+        for comparavel in vistos:
+            donos_titulo.setdefault(comparavel, nome)
         chave = g.get("item_chave")
         if chave is not None:
             if (not isinstance(chave, dict) or not isinstance(chave.get("codigo"), str) or not chave["codigo"].strip()
@@ -954,9 +980,11 @@ def _custo(bruto, falha) -> dict | None:
                 chave = None
             else:
                 chave = {"codigo": chave["codigo"].strip(), "unidade": chave["unidade"].strip()}
-                if itens is not None and not any(_dentro_do_prefixo(chave["codigo"], p) for p in itens):
+                # sem itens_planilha (planilha sem nº de item, #613), o codigo e' o do servico: nao se confere
+                if itens and not any(_dentro_do_prefixo(chave["codigo"], p) for p in itens):
                     falha(f"{onde}.item_chave", f"o item {chave['codigo']} não está nos itens_planilha do grupo {nome}")
-        grupos.append({"nome": nome, "tarefas": tarefas or [], "itens_planilha": itens or [], "item_chave": chave})
+        grupos.append({"nome": nome, "tarefas": tarefas or [], "itens_planilha": itens or [],
+                       "titulos_planilha": titulos or [], "item_chave": chave})
     return {"projeto_rm": projeto, "nao_e_custo": nao_e_custo or [], "sem_tarefa": regra, "grupos": grupos}
 
 

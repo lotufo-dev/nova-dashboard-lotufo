@@ -1087,8 +1087,9 @@ def test_custo_normaliza_na_ordem_com_os_padroes(tmp_path):
     assert c["custo"] == {
         "projeto_rm": "GL.C01.P001", "nao_e_custo": ["2.02", "2.01.22"], "sem_tarefa": "proporcional",
         "grupos": [{"nome": "Terraplanagem", "tarefas": ["001.03", "001.04"], "itens_planilha": ["2."],
-                    "item_chave": {"codigo": "2.1", "unidade": "m³"}},
-                   {"nome": "Drenagem", "tarefas": ["001.05"], "itens_planilha": ["3.", "4.1"], "item_chave": None}]}
+                    "titulos_planilha": [], "item_chave": {"codigo": "2.1", "unidade": "m³"}},
+                   {"nome": "Drenagem", "tarefas": ["001.05"], "itens_planilha": ["3.", "4.1"],
+                    "titulos_planilha": [], "item_chave": None}]}
 
 
 def test_custo_ausente_fica_vazio_e_nao_e_custo_explicito_vale(tmp_path):
@@ -1148,6 +1149,47 @@ def test_custo_prefixos_parecidos_sem_sobreposicao_e_sem_tarefa_vazio_passam(tmp
 def test_custo_que_nao_e_mapa_e_recusado(tmp_path):
     erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": ["x"]}]))
     assert any(e.startswith("contratos/mt-402.yaml: custo:") for e in erros), erros
+
+
+# Issue #613: titulos da planilha (sem nº de item) que formam cada grupo, e item-chave pelo codigo do servico
+GRUPOS_TITULOS = [{"nome": "Drenagem", "tarefas": ["001.06"],
+                   "titulos_planilha": [" DRENAGEM ", "Transporte de insumos para Drenagem"],
+                   "item_chave": {"codigo": "1234567", "unidade": "m"}},
+                  {"nome": "Pavimentação", "tarefas": ["001.07"], "itens_planilha": ["2."],
+                   "titulos_planilha": ["PAVIMENTAÇÃO"]}]
+
+
+def test_custo_titulos_planilha_normaliza_e_item_chave_sem_itens_planilha_e_aceito(tmp_path):
+    c = ca.preparar(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": GRUPOS_TITULOS}}]))
+    dren, pav = c["contratos"][0]["custo"]["grupos"]
+    assert dren["titulos_planilha"] == ["DRENAGEM", "Transporte de insumos para Drenagem"]
+    assert dren["itens_planilha"] == [] and dren["item_chave"] == {"codigo": "1234567", "unidade": "m"}
+    assert pav["titulos_planilha"] == ["PAVIMENTAÇÃO"] and pav["itens_planilha"] == ["2."]
+    # o grupo sem o campo fica com a lista vazia
+    c = ca.preparar(_escrever(tmp_path / "b", contratos=[{**CONTRATO, "custo": CUSTO}]))
+    assert all(g["titulos_planilha"] == [] for g in c["contratos"][0]["custo"]["grupos"])
+
+
+def test_custo_titulo_em_dois_grupos_recusa_com_arquivo_campo_e_os_dois_grupos(tmp_path):
+    """Repetido sem acento, sem maiusculas e com espacos diferentes ainda e' o mesmo titulo."""
+    grupos = [GRUPOS_TITULOS[0], {**GRUPOS_TITULOS[1], "titulos_planilha": ["transporte  de insumos para drenagem"]}]
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": grupos}}]))
+    assert ("contratos/mt-402.yaml: custo.grupos[1].titulos_planilha: o título transporte de insumos para drenagem "
+            "do grupo Pavimentação já está no grupo Drenagem") in erros, erros
+
+
+@pytest.mark.parametrize("titulos", [[""], ["  "], [12], "DRENAGEM", [None], [["DRENAGEM"]]])
+def test_custo_titulo_vazio_ou_que_nao_e_texto_recusa(tmp_path, titulos):
+    grupos = [{**GRUPOS_TITULOS[0], "titulos_planilha": titulos}]
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": grupos}}]))
+    assert any(e.startswith("contratos/mt-402.yaml: custo.grupos[0].titulos_planilha:") for e in erros), erros
+
+
+def test_custo_titulo_repetido_no_mesmo_grupo_recusa(tmp_path):
+    grupos = [{**GRUPOS_TITULOS[0], "titulos_planilha": ["Drenagem", "DRENAGEM"]}]
+    erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": grupos}}]))
+    assert ("contratos/mt-402.yaml: custo.grupos[0].titulos_planilha: o título DRENAGEM do grupo Drenagem aparece "
+            "duas vezes") in erros, erros
 
 
 # --- issue #288: prazo X do boletim no orgao (spec 2026-10-20 §2.1.1) ------------------------------

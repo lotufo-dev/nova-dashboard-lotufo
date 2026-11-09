@@ -359,6 +359,24 @@ def test_sem_item_agrupa_pelos_titulos_mesmo_com_cadastro_de_custo():
     assert [g["nome"] for g in lido["grupos"]] == ["SERVIÇOS PRELIMINARES", "PAVIMENTAÇÃO", "Revestimento"]
 
 
+def test_sem_item_cai_no_grupo_do_cadastro_pelo_titulo_e_o_que_sobra_vai_para_outros():
+    """Issue #613: o titulo lido e' procurado nos `titulos_planilha` sem acento, sem maiusculas e com espacos
+    normalizados; dois titulos no mesmo grupo somam; titulo fora do cadastro vai para "outros", com o valor."""
+    cadastro = [{"nome": "Drenagem", "itens_planilha": [], "titulos_planilha": ["DRENAGEM"]},
+                {"nome": "Pavimento", "itens_planilha": [], "titulos_planilha": ["pavimentacao", "  REVESTIMENTO "]}]
+    lido = leitura.ler(planilha_sem_item(), cadastro)
+    assert lido["grupo_por"] == "cadastro"
+    assert [(g["nome"], g["valor_medido_centavos"]) for g in lido["grupos"]] == [
+        ("Pavimento", 1296_23 + 800_27), (leitura.OUTROS, 500_55 + 1200_01)]
+    assert lido["total_centavos"] == TOTAL_SEM_ITEM
+    assert [i["codigo"] for i in _por_nome(lido)["Pavimento"]["itens"]] == ["4011", "4100"]
+
+
+def test_sem_item_com_cadastro_so_de_itens_planilha_continua_pelos_titulos():
+    cadastro = [{"nome": "Pavimento", "itens_planilha": ["2."], "titulos_planilha": []}]
+    assert leitura.ler(planilha_sem_item(), cadastro)["grupo_por"] == "planilha"
+
+
 def test_sem_item_e_sem_codigo_recusa_dizendo_as_colunas():
     sem_codigo = [c for c in CABECALHO_SEM_ITEM if c != "CÓDIGO"]
     with pytest.raises(leitura.PlanilhaRecusada, match="ITEM.*CÓDIGO.*DISCRIMINAÇÃO"):

@@ -30,8 +30,11 @@ CAMPOS_SAIDA = ("situacao", "motivo", "total_centavos", "pedido_centavos", "dife
 
 
 def cadastro_de_custo(conn, contrato_id: int) -> list[dict] | None:
-    """Os grupos do cadastro de custo da obra (`itens_planilha`, issue #489), na ordem do yaml; None sem cadastro."""
-    grupos_ = [{"nome": g["nome"], "itens_planilha": g["itens_planilha"]}
+    """Os grupos do cadastro de custo da obra (`itens_planilha`, issue #489, e `titulos_planilha`, issue #613), na
+    ordem do yaml; None sem cadastro. Os titulos so' entram quando o grupo os tem: a assinatura do cadastro das
+    obras sem titulo continua a mesma (a leitura ja' feita nao vira outra)."""
+    grupos_ = [{"nome": g["nome"], "itens_planilha": g["itens_planilha"],
+                **({"titulos_planilha": g["titulos_planilha"]} if g["titulos_planilha"] else {})}
                for g in contratos.custo_grupos(conn, contrato_id)]
     return grupos_ or None
 

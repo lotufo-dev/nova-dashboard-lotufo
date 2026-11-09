@@ -1327,6 +1327,48 @@ def test_aplicar_custo_grava_e_relata(tmp_path, monkeypatch, capsys):
     assert conn.execute("SELECT nome FROM custo_grupos").fetchone()[0] == "Terraplanagem"
 
 
+# Issue #613: titulos da planilha (sem nº de item) e item-chave pelo codigo do servico
+CUSTO_TITULOS = {"projeto_rm": "GL.C01.P001",
+                 "grupos": [{"nome": "Drenagem", "tarefas": ["001.06"],
+                             "titulos_planilha": ["DRENAGEM", "Transporte de insumos para Drenagem"],
+                             "item_chave": {"codigo": "1234567", "unidade": "m"}}]}
+
+
+def test_aplicar_custo_com_titulos_grava_reaplicar_nao_grava_e_ensaio_mostra_a_mudanca(tmp_path, monkeypatch,
+                                                                                         capsys):
+    conn = _banco(tmp_path, monkeypatch)
+    sem = {"projeto_rm": "GL.C01.P001", "grupos": [{"nome": "Drenagem", "tarefas": ["001.06"]}]}
+    raiz = str(_cadastro(tmp_path / "cad", {**CONTRATO, "custo": sem}))
+    assert cli.main(["cadastro", "aplicar", "--raiz", raiz, "--usuario", "leo@l.com"]) == 0
+    capsys.readouterr()
+    raiz = str(_cadastro(tmp_path / "cad2", {**CONTRATO, "custo": CUSTO_TITULOS}))
+    assert cli.main(["cadastro", "aplicar", "--raiz", raiz, "--usuario", "leo@l.com", "--ensaio"]) == 0
+    saida = capsys.readouterr().out
+    assert "custo: 0 criados, 1 alterados, 0 iguais" in saida and "~ MT-402" in saida
+    assert json.loads(conn.execute("SELECT titulos_planilha FROM custo_grupos").fetchone()[0]) == []
+    assert cli.main(["cadastro", "aplicar", "--raiz", raiz, "--usuario", "leo@l.com"]) == 0
+    capsys.readouterr()
+    g = conn.execute("SELECT titulos_planilha, itens_planilha, item_chave_codigo FROM custo_grupos").fetchone()
+    assert json.loads(g[0]) == ["DRENAGEM", "Transporte de insumos para Drenagem"]
+    assert (json.loads(g[1]), g[2]) == ([], "1234567")
+    trilha = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.custo'").fetchone()[0]
+    assert cli.main(["cadastro", "aplicar", "--raiz", raiz, "--usuario", "leo@l.com"]) == 0
+    assert "custo: 0 criados, 0 alterados, 1 iguais" in capsys.readouterr().out
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.custo'").fetchone()[0] == trilha
+
+
+def test_aplicar_custo_com_titulo_em_dois_grupos_sai_um_e_nao_grava(tmp_path, monkeypatch, capsys):
+    conn = _banco(tmp_path, monkeypatch)
+    custo = {**CUSTO_TITULOS, "grupos": [*CUSTO_TITULOS["grupos"],
+                                         {"nome": "Pavimentação", "tarefas": ["001.07"], "titulos_planilha": ["Drenagem"]}]}
+    raiz = str(_cadastro(tmp_path / "cad", {**CONTRATO, "custo": custo}))
+    assert cli.main(["cadastro", "aplicar", "--raiz", raiz, "--usuario", "leo@l.com"]) == 1
+    saida = capsys.readouterr().out
+    assert ("contratos/mt-402.yaml: custo.grupos[1].titulos_planilha: o título Drenagem do grupo Pavimentação já "
+            "está no grupo Drenagem") in saida, saida
+    assert conn.execute("SELECT COUNT(*) FROM custo_grupos").fetchone()[0] == 0
+
+
 # ---- issue #471: com boletim registrado, o aprovado so' muda por boletim novo (como na tela, #284)
 
 def _com_boletim(conn, mid):

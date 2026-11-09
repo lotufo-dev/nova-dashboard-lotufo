@@ -193,8 +193,9 @@ def cadastro_da_obra(conn: sqlite3.Connection, contrato_id: int) -> dict:
 def custo_grupos(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     """Issue #489: grupos de custo da obra (secao `custo:` do cadastro), na ordem do yaml. Sem cadastro, lista vazia."""
     return [{"ordem": r["ordem"], "nome": r["nome"], "tarefas": json.loads(r["tarefas"]),
-             "itens_planilha": json.loads(r["itens_planilha"]),
+             "itens_planilha": json.loads(r["itens_planilha"]), "titulos_planilha": json.loads(r["titulos_planilha"]),
              "item_chave": {"codigo": r["item_chave_codigo"], "unidade": r["item_chave_unidade"]}
              if r["item_chave_codigo"] else None}
-            for r in conn.execute("SELECT ordem, nome, tarefas, itens_planilha, item_chave_codigo, item_chave_unidade "
-                                  "FROM custo_grupos WHERE contrato_id=? ORDER BY ordem, id", (contrato_id,))]
+            for r in conn.execute("SELECT ordem, nome, tarefas, itens_planilha, titulos_planilha, item_chave_codigo, "
+                                  "item_chave_unidade FROM custo_grupos WHERE contrato_id=? ORDER BY ordem, id",
+                                  (contrato_id,))]
