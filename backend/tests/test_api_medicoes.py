@@ -2173,3 +2173,164 @@ def test_reajuste_aceita_valor_negativo_e_execucao_recusa(client_admin):
         assert r.status_code == 422
         assert r.json()["detail"] == f"Medição de {'execução' if tipo == 'execucao' else 'projeto'} não aceita valor negativo"
         assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] is None
+
+
+# --- issue #610: comparar duas versoes da planilha item a item -------------------------------------------------
+
+def _versoes(cl, *planilhas, nome="planilha.xlsx"):
+    """Medicao com uma versao por planilha (registro e revisoes); devolve (contrato, medicao)."""
+    cid = _contrato(cl)
+    mid = None
+    for n, dados in enumerate(planilhas):
+        tipo = XLSX if nome.endswith(".xlsx") else "application/pdf"
+        files = {**_arquivos_planilha(f"oficio versao {n}"), "planilha": (nome, dados, tipo)}
+        base = {"periodo_inicio": "2026-07-01", "periodo_fim": "2026-07-31", "valor": "26.800,56"}
+        if mid is None:
+            r = cl.post(f"/api/contratos/{cid}/planilhas", files=files,
+                        data={**base, "numero": 1, "competencia": "2026-07"})
+            mid = r.json()["medicao_id"]
+        else:
+            r = cl.post(f"/api/medicoes/{mid}/planilhas", files=files, data={**base, "motivo": f"Rev0{n}"})
+        assert r.status_code == 201, r.text
+    return cid, mid
+
+
+def _comparar(cl, mid, **params):
+    return cl.get(f"/api/medicoes/{mid}/planilhas/comparacao", params=params)
+
+
+def _estado_do_banco(mid):
+    from app import db
+    conn = db.get_conn()
+    try:
+        return ([dict(r) for r in conn.execute("SELECT * FROM medicoes WHERE id=?", (mid,))],
+                [dict(r) for r in conn.execute("SELECT * FROM medicao_planilhas WHERE medicao_id=?", (mid,))],
+                [dict(r) for r in conn.execute("SELECT * FROM medicao_grupos WHERE medicao_id=?", (mid,))],
+                [dict(r) for r in conn.execute("SELECT * FROM audit_log")])
+    finally:
+        conn.close()
+
+
+def test_comparacao_devolve_so_os_itens_que_mudaram_e_nao_grava_nada(client_admin):
+    from tests.test_comparacao_planilhas import BASE, TOTAL_BASE, _trocar, xlsx
+    revisada = _trocar(_trocar(BASE, 0, qm=0, vm=0), 2, qm=7.5, vm=1125.41)
+    _, mid = _versoes(client_admin, xlsx(BASE), xlsx(revisada))
+    antes = _estado_do_banco(mid)
+    r = _comparar(client_admin, mid)
+    assert r.status_code == 200, r.text
+    corpo = r.json()
+    v1, v2 = client_admin.get(f"/api/medicoes/{mid}").json()["planilhas"]
+    assert corpo["comparavel"] is True
+    assert corpo["de"] == {"versao": 1, "planilha_id": v1["id"], "total_centavos": TOTAL_BASE}
+    assert corpo["para"] == {"versao": 2, "planilha_id": v2["id"], "total_centavos": TOTAL_BASE - 20000_01 - 375_14}
+    assert corpo["diferenca_centavos"] == -20000_01 - 375_14
+    assert corpo["itens"] == [
+        {"codigo": "1234567", "discriminacao": "Serviço fictício A", "unidade": "m³", "situacao": "alterado",
+         "quantidade_de": "1250.500", "quantidade_para": "0.000", "valor_de_centavos": 20000_01,
+         "valor_para_centavos": 0, "diferenca_centavos": -20000_01},
+        {"codigo": "7654321", "discriminacao": "Serviço fictício C", "unidade": "m", "situacao": "alterado",
+         "quantidade_de": "10.000", "quantidade_para": "7.500", "valor_de_centavos": 1500_55,
+         "valor_para_centavos": 1125_41, "diferenca_centavos": -375_14}]
+    assert _estado_do_banco(mid) == antes
+
+
+def test_comparacao_incluido_retirado_iguais_e_versoes_escolhidas(client_admin):
+    from tests.test_comparacao_planilhas import BASE, xlsx
+    nova = [BASE[0], BASE[2], BASE[3], ("1.5", "1111111", "Serviço fictício D", "kg", 3, 33.33)]
+    _, mid = _versoes(client_admin, xlsx(BASE), xlsx(nova), xlsx(BASE))
+    corpo = _comparar(client_admin, mid, de=1, para=2).json()
+    assert [(i["situacao"], i["codigo"]) for i in corpo["itens"]] == [("retirado", "s/c"), ("incluido", "1111111")]
+    assert corpo["diferenca_centavos"] == 33_33 - 5000_00 == corpo["para"]["total_centavos"] - corpo["de"]["total_centavos"]
+    iguais = _comparar(client_admin, mid, de=1, para=3).json()
+    assert iguais["comparavel"] is True and iguais["itens"] == [] and iguais["diferenca_centavos"] == 0
+    padrao = _comparar(client_admin, mid).json()                 # sem parametros: a penultima com a ultima
+    assert (padrao["de"]["versao"], padrao["para"]["versao"]) == (2, 3)
+    assert _comparar(client_admin, mid, de=2, para=2).status_code == 422
+
+
+def test_comparacao_nao_reconhecida_devolve_comparavel_falso(client_admin):
+    from tests.test_comparacao_planilhas import BASE, TOTAL_BASE, CAB_ITEM, xlsx
+    import tests.test_comparacao_planilhas as tc
+    boa = xlsx(BASE)
+    msg = "Não reconheci a planilha desta versão para comparar; abra os dois arquivos"
+    ruins = [xlsx(BASE, aba="Boletim"),                                   # sem a aba Resumo
+             xlsx(BASE, total=TOTAL_BASE / 100 + 0.01)]                   # soma que nao fecha
+    tc.CAB_ITEM = [c if c != "UNID." else "OUTRA" for c in CAB_ITEM]     # cabecalho diferente
+    try:
+        ruins.append(xlsx(BASE))
+    finally:
+        tc.CAB_ITEM = CAB_ITEM
+    for ruim in ruins:
+        _, mid = _versoes(client_admin, boa, ruim)
+        r = _comparar(client_admin, mid)
+        assert r.status_code == 200, r.text
+        corpo = r.json()
+        assert corpo["comparavel"] is False and corpo["mensagem"] == msg
+        assert set(corpo) == {"comparavel", "mensagem", "de", "para"}
+        assert set(corpo["de"]) == {"versao", "planilha_id"} and corpo["para"]["versao"] == 2
+
+
+def test_comparacao_planilha_em_pdf_nao_e_comparavel(client_admin):
+    from tests.conftest import _pdf_com_texto
+    _, mid = _versoes(client_admin, _pdf_com_texto("carta 1"), _pdf_com_texto("carta 2"), nome="carta.pdf")
+    r = _comparar(client_admin, mid)
+    assert r.status_code == 200 and r.json()["comparavel"] is False
+
+
+def test_comparacao_quantidade_gigante_nao_da_500(client_admin):
+    """Revisor/gate A1: quantidade 1e30 na versao nova responde 200 com comparavel falso, nao 500."""
+    from tests.test_comparacao_planilhas import BASE, _trocar, xlsx
+    _, mid = _versoes(client_admin, xlsx(BASE), xlsx(_trocar(BASE, 0, qm=1e30)))
+    r = _comparar(client_admin, mid)
+    assert r.status_code == 200, r.text
+    assert r.json()["comparavel"] is False
+
+
+def _zip(partes: dict[str, bytes]) -> bytes:
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for nome, dados in partes.items():
+            z.writestr(nome, dados)
+    return buf.getvalue()
+
+
+def test_comparacao_xlsx_para_estourar_memoria_e_nao_reconhecida(client_admin, monkeypatch):
+    from app import leitura_planilha_medicao as leitura
+    from tests.test_comparacao_planilhas import BASE, xlsx
+    import io
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(xlsx(BASE))) as z:
+        partes = {n: z.read(n) for n in z.namelist()}
+    aba = next(n for n in partes if n.startswith("xl/worksheets/"))
+    inchada = partes[aba].replace(b"<sheetData>", b"<sheetData>" + b" " * (leitura.MAX_BYTES_ABA + 1), 1)
+    assert inchada != partes[aba]
+    bomba = _zip({**partes, aba: inchada})                     # descompacta acima do teto; comprime a poucos KB
+    assert len(bomba) < 1_000_000
+    _, mid = _versoes(client_admin, xlsx(BASE), bomba)
+    assert _comparar(client_admin, mid).json()["comparavel"] is False
+    abas_demais = _zip({**partes, **{f"xl/worksheets/extra{i}.xml": b"<x/>" for i in range(20)}})
+    _, mid = _versoes(client_admin, xlsx(BASE), abas_demais)
+    monkeypatch.setattr(leitura, "MAX_ENTRADAS", 15)
+    assert _comparar(client_admin, mid).json()["comparavel"] is False
+
+
+def test_comparacao_uma_versao_so_outra_medicao_e_permissao(client_admin):
+    from app import auth, db
+    from tests.test_comparacao_planilhas import BASE, xlsx
+    _, mid = _versoes(client_admin, xlsx(BASE))
+    r = _comparar(client_admin, mid)
+    assert r.status_code == 422 and r.json()["detail"] == "Esta medição tem uma versão só da planilha/carta"
+    _, outra = _versoes(client_admin, xlsx(BASE), xlsx(BASE), xlsx(BASE))
+    _, duas = _versoes(client_admin, xlsx(BASE), xlsx(BASE))
+    r = _comparar(client_admin, duas, de=1, para=3)                            # a versao 3 e' so' da outra medicao
+    assert r.status_code == 404 and r.json()["detail"] == "Versão da planilha/carta não encontrada nesta medição"
+    assert _comparar(client_admin, 999999).status_code == 404
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@lotufo.com", "senha-forte-123", "diretoria")
+    conn.close()
+    _entrar(client_admin, "dir@lotufo.com")                                    # quem baixa o anexo compara
+    assert _comparar(client_admin, outra).status_code == 200
+    client_admin.cookies.clear()
+    assert _comparar(client_admin, outra).status_code in (401, 403)
