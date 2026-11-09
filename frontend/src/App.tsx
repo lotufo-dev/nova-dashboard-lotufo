@@ -20,6 +20,7 @@ import MedicaoNova from "./MedicaoNova";
 import Diretoria from "./Diretoria";
 import { entradaDe, itemDe, menuDe, subitemMedicoesDe, tituloDaSecao, tituloDe } from "./navegacao";
 import SigaPagina from "./SigaPagina";
+import AncorasDocusign from "./AncorasDocusign";
 import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
 
 // Menu e entrada por perfil moram em navegacao.ts (NAVEGACAO.md › Perfis e tela de entrada); o trilho e a barra
@@ -67,7 +68,7 @@ export default function App() {
   useEffect(() => {
     if (!usuario) return;
     if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")
-      || (rota.tela === "siga" && usuario.perfil === "diretoria")) {
+      || ((rota.tela === "siga" || rota.tela === "ancoras-docusign") && usuario.perfil === "diretoria")) {
       substituir(entradaDe(usuario.perfil));
     } else if (rota.tela === "avisos") {
       // os Avisos moram dentro de Obras (09/10/2026): o item do menu e o link de antes levam para la'
@@ -133,6 +134,7 @@ export default function App() {
           {rota.tela === "inicio" && <div className="pagina"><Inicio usuario={usuario} ir={ir} /></div>}
           {rota.tela === "medicoes" && <MedicoesPagina aba={rota.aba ?? "iniciar"} usuario={usuario} />}
           {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} />}
+          {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "a-receber" && (
             <div className="pagina">

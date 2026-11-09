@@ -12,7 +12,8 @@ export type MedicaoBase = {
   atestado_em: string | null; recebida_em: string | null; nota_emitida_em?: string | null;
   final?: number; final_em?: string | null; protocolos: MarcoProtocolo[]; notas?: NotaDaMedicao[];
   // B-02 (10/10/2026): da auditoria, texto pronto do servidor; #290: a linha do boletim traz o id do PDF
-  edicoes_valor?: { data: string; texto: string; boletim_id?: number }[];
+  // #627: a assinatura com o PDF assinado traz o id dele
+  edicoes_valor?: { data: string; texto: string; boletim_id?: number; assinatura_id?: number }[];
   siga_registrado_em?: string | null;                  // issue #328: quando o link do SIGA do envio por fora foi gravado
   planilha_siga?: { data: string; numero: string | null } | null;   // issue #283: nº do SIGA da planilha/carta
 };
@@ -170,6 +171,7 @@ export function eventosDaMedicao(m: MedicaoBase, espelhos: EspelhoResumo[], prot
   // #290: o boletim do orgao liga o PDF dele
   for (const e of m.edicoes_valor ?? []) {
     out.push(e.boletim_id ? { data: e.data, texto: e.texto, href: `/api/medicoes/${m.id}/boletins/${e.boletim_id}` }
+      : e.assinatura_id ? { data: e.data, texto: e.texto, href: `/api/medicoes/${m.id}/assinados/${e.assinatura_id}` }
       : { data: e.data, texto: e.texto });
   }
   return out.sort((a, b) => a.data.localeCompare(b.data));

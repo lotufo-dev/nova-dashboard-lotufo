@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import (arquivos, comparacao_planilhas, correio, db, espelhos, feriados, medicao_grupos, medicao_planilhas, medicoes, permissoes,
+from app import (arquivos, assinados_envio, comparacao_planilhas, correio, db, espelhos, feriados, medicao_grupos, medicao_planilhas, medicoes, permissoes,
                  planilha_envio, reajuste, siga, tempo)
 from app.api_auth import conexao
 from app.dinheiro import parse_brl, parse_brl_com_sinal
@@ -232,6 +232,7 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
         d["planilhas"] = medicao_planilhas.versoes(conn, medicao_id)   # issue #281: todas as versoes da planilha/carta
         # issue #282: se a tela oferece "Enviar para protocolo" (nunca na MT-PAR), as versoes enviadas e as pecas
         d["envio_planilha"] = planilha_envio.situacao(conn, medicao_id)
+        d["envio_assinados"] = assinados_envio.situacao(conn, medicao_id)   # issue #627: SINFRA, depois do boletim
         d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
         d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
         d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"

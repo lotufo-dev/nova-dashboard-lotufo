@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
-import { IconeAjustes, IconeAlerta, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
+import { IconeAjustes, IconeAlerta, IconeArquivo, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
   IconeSeta, IconeSino, IconeVoltar } from "./icones";
 import type { Usuario } from "./Login";
 import { menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
@@ -32,7 +32,7 @@ function estadoInicial(): "largo" | "recolhido" {
 
 const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement> = {
   inicio: IconeInicio, medicoes: IconeMedicoes, obras: IconeObras, avisos: IconeSino, siga: IconeSiga, documentos: IconeDocumento,
-  "a-receber": IconeCifrao, carteira: IconeGrade, admin: IconeAjustes,
+  "a-receber": IconeCifrao, carteira: IconeGrade, "ancoras-docusign": IconeArquivo, admin: IconeAjustes,
 };
 
 /** Os dois itens de baixo de "Medições" (#507), cada um com a contagem; aparecem com a seção aberta. */

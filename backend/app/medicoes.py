@@ -8,6 +8,7 @@ import calendar
 import datetime
 import json
 import logging
+import re
 import sqlite3
 import unicodedata
 
@@ -270,53 +271,126 @@ def _texto_boletim(r, dia: str | None) -> str:
 
 
 def _eventos_assinatura(conn: sqlite3.Connection, ids: list[int], out: dict[int, list[dict]]) -> None:
-    """Issue #287: a assinatura no DocuSign e' evento (medicao_assinaturas, append-only), uma linha por registro."""
+    """Issue #287: a assinatura no DocuSign e' evento (medicao_assinaturas, append-only), uma linha por registro.
+    Issue #627: a que nasceu do envio dos documentos assinados ao orgao (pelo sistema ou por fora) diz isso, e a que
+    guarda o PDF leva o id para a tela ligar o arquivo."""
     for i in range(0, len(ids), LOTE_AUDITORIA):
         lote = ids[i:i + LOTE_AUDITORIA]
+        # "reenviados" conta os envios da PROPRIA medicao do evento (revisao da PR #635): a execucao enviada sem o PDF
+        # do reajuste e reenviada com ele da' ao reajuste o primeiro envio, nao um reenvio
+        ja_enviada: set[int] = set()
         for r in conn.execute(
-                "SELECT e.medicao_id, e.envelope, e.assinado_em, e.criado_em, u.nome FROM medicao_assinaturas e "
+                "SELECT e.id, e.medicao_id, e.envelope, e.assinado_em, e.criado_em, e.arquivo, e.envio_origem, "
+                "a.motivo, v.enviado_em, u.nome FROM medicao_assinaturas e "
+                "LEFT JOIN medicao_assinados_envios a ON a.id=e.assinados_envio_id "
+                "LEFT JOIN envios v ON v.id=e.envio_id "
                 "LEFT JOIN usuarios u ON u.id=e.usuario_id "
                 f"WHERE e.medicao_id IN ({','.join('?' * len(lote))}) ORDER BY e.id", lote):
-            texto = f"Boletim assinado no DocuSign em {_data_br(r['assinado_em'])}"
-            if r["envelope"]:
-                texto += f" (envelope {r['envelope']})"
+            pdf = " (PDF)" if r["arquivo"] else ""
+            if r["envio_origem"]:
+                reenvio = r["medicao_id"] in ja_enviada
+                ja_enviada.add(r["medicao_id"])
+                # pelo sistema, o dia do e-mail (em Cuiaba); por fora, a data informada (code-review)
+                dia = r["assinado_em"]
+                if r["enviado_em"]:
+                    dia = tempo.para_local(datetime.datetime.fromisoformat(r["enviado_em"])).date().isoformat()
+                texto = (f"Documentos assinados {'reenviados' if reenvio else 'enviados'} em "
+                         f"{_data_br(dia)}{pdf}")
+                if reenvio and r["motivo"]:
+                    texto += f" (motivo: {r['motivo']})"
+                if r["envio_origem"] == "externo":
+                    texto += ", registrado por fora"
+            else:
+                texto = f"Boletim assinado no DocuSign em {_data_br(r['assinado_em'])}"
+                if r["envelope"]:
+                    texto += f" (envelope {r['envelope']})"
+                texto += pdf
             # a data do evento e' a da assinatura (como o atesto), nao a do registro: registrada depois do protocolo,
             # ela nao pode aparecer depois dele
-            out[r["medicao_id"]].append({"data": r["assinado_em"],
-                                         "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+            evento = {"data": r["assinado_em"],
+                      "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"}
+            if r["arquivo"]:
+                evento["assinatura_id"] = r["id"]
+            out[r["medicao_id"]].append(evento)
 
 
-def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, assinado_em: str,
-                         envelope: str | None) -> int:
-    """Issue #287: registra que o boletim foi assinado no DocuSign (data e nome do envelope do e-mail de
-    conclusao). Evento informativo, sem estado e sem aviso; correcao e' um registro novo."""
+_ENVELOPE_DOCUSIGN = re.compile(r"DOCUSIGN\s+ENVELOPE\s+ID\s*:?\s*([0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-"
+                                r"[0-9A-F]{12})", re.IGNORECASE)
+
+
+def envelope_do_pdf(pdf: bytes) -> str | None:
+    """Issue #627: o "Docusign Envelope ID: <id>" que o DocuSign carimba nas paginas do PDF assinado (o mesmo carimbo
+    que `assinatura.conferir` le), pelo texto das primeiras paginas. PDF sem texto ou que o leitor recusa: None."""
+    from app import leitura_pdf
+    try:
+        paginas = leitura_pdf.primeiras_paginas_com_limite(pdf)
+    except Exception:
+        return None
+    for texto in paginas:
+        achado = _ENVELOPE_DOCUSIGN.search(texto or "")
+        if achado:
+            return achado.group(1).upper()
+    return None
+
+
+def arquivo_assinatura(conn: sqlite3.Connection, medicao_id: int, assinatura_id: int):
+    return conn.execute("SELECT e.arquivo, m.numero FROM medicao_assinaturas e JOIN medicoes m ON m.id=e.medicao_id "
+                        "WHERE e.id=? AND e.medicao_id=?", (assinatura_id, medicao_id)).fetchone()
+
+
+def conferir_data_assinatura(conn: sqlite3.Connection, medicao_id: int, assinado_em: str) -> datetime.date:
+    """A data da assinatura: valida, nao futura, com o boletim do orgao registrado e nao anterior ao primeiro boletim
+    (#290). Tambem e' a recusa do envio dos documentos assinados (#627)."""
     try:
         data = datetime.date.fromisoformat(assinado_em)
     except (TypeError, ValueError):
         raise ValueError("Data da assinatura inválida")
     if data > tempo.hoje_local():
         raise ValueError("A data da assinatura não pode ser futura")
+    if conn.execute("SELECT 1 FROM medicoes WHERE id=?", (medicao_id,)).fetchone() is None:
+        raise ValueError("Medição não encontrada")
+    # Issue #290 (gate Sol, rodada 1): a assinatura e' a do boletim do orgao (spec §2.1, passo 4): sem boletim
+    # registrado nao ha' o que assinar, e ela nao vem antes do primeiro boletim
+    if not tem_boletim(conn, medicao_id):
+        raise ValueError("Registre o boletim do órgão antes da assinatura")
+    primeiro = conn.execute("SELECT MIN(atestado_em) FROM medicao_atestos WHERE medicao_id=? AND arquivo IS NOT NULL",
+                            (medicao_id,)).fetchone()[0]
+    if primeiro and data.isoformat() < primeiro:
+        raise ValueError(f"A data da assinatura não pode ser anterior à do boletim ({_data_br(primeiro)})")
+    return data
+
+
+def gravar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, assinado_em: str,
+                      envelope: str | None, arquivo: str | None = None, sha256: str | None = None,
+                      envio_id: int | None = None, envio_origem: str | None = None,
+                      assinados_envio_id: int | None = None) -> int:
+    """O INSERT do evento e a auditoria, dentro da transacao de quem chama (ja' conferido)."""
+    cur = conn.execute(
+        "INSERT INTO medicao_assinaturas (medicao_id, envelope, assinado_em, origem, usuario_id, arquivo, sha256, "
+        "envio_id, envio_origem, assinados_envio_id) VALUES (?,?,?,'manual',?,?,?,?,?,?)",
+        (medicao_id, envelope, assinado_em, usuario_id, arquivo, sha256, envio_id, envio_origem, assinados_envio_id))
+    depois = {"assinado_em": assinado_em, "envelope": envelope}
+    if arquivo:
+        depois |= {"arquivo": arquivo, "sha256": sha256}
+    if envio_origem:
+        depois |= {"envio_origem": envio_origem, "envio_id": envio_id, "assinados_envio_id": assinados_envio_id}
+    auditoria.registrar(conn, usuario_id, "medicao.assinatura", "medicao", medicao_id, None, depois)
+    return cur.lastrowid
+
+
+def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: int, assinado_em: str,
+                         envelope: str | None, arquivo: str | None = None, sha256: str | None = None) -> int:
+    """Issue #287: registra que o boletim foi assinado no DocuSign (data e nome do envelope do e-mail de
+    conclusao). Evento informativo, sem estado e sem aviso; correcao e' um registro novo. Issue #627: o PDF assinado
+    vai junto, opcional (`arquivo` e `sha256` ja' gravados pela rota)."""
     envelope = (envelope or "").strip() or None
     with db.mutacao(conn):
-        if conn.execute("SELECT 1 FROM medicoes WHERE id=?", (medicao_id,)).fetchone() is None:
-            raise ValueError("Medição não encontrada")
-        # Issue #290 (gate Sol, rodada 1): a assinatura e' a do boletim do orgao (spec §2.1, passo 4): sem boletim
-        # registrado nao ha' o que assinar, e ela nao vem antes do primeiro boletim
-        primeiro = conn.execute("SELECT MIN(atestado_em) FROM medicao_atestos WHERE medicao_id=? AND arquivo IS NOT NULL",
-                                (medicao_id,)).fetchone()[0]
-        if not tem_boletim(conn, medicao_id):
-            raise ValueError("Registre o boletim do órgão antes da assinatura")
-        if primeiro and data.isoformat() < primeiro:
-            raise ValueError(f"A data da assinatura não pode ser anterior à do boletim ({_data_br(primeiro)})")
-        if conn.execute("SELECT 1 FROM medicao_assinaturas WHERE medicao_id=? AND assinado_em=? AND envelope IS ?",
-                        (medicao_id, data.isoformat(), envelope)).fetchone():
+        data = conferir_data_assinatura(conn, medicao_id, assinado_em)
+        if conn.execute("SELECT 1 FROM medicao_assinaturas WHERE medicao_id=? AND assinado_em=? AND envelope IS ? "
+                        "AND envio_origem IS NULL AND sha256 IS ?",
+                        (medicao_id, data.isoformat(), envelope, sha256)).fetchone():
             raise ValueError("Esta assinatura já está registrada")     # duplo clique: o registro não se apaga depois
-        cur = conn.execute(
-            "INSERT INTO medicao_assinaturas (medicao_id, envelope, assinado_em, origem, usuario_id) "
-            "VALUES (?,?,?,'manual',?)", (medicao_id, envelope, data.isoformat(), usuario_id))
-        auditoria.registrar(conn, usuario_id, "medicao.assinatura", "medicao", medicao_id, None,
-                            {"assinado_em": data.isoformat(), "envelope": envelope})
-        return cur.lastrowid
+        return gravar_assinatura(conn, usuario_id, medicao_id, data.isoformat(), envelope, arquivo, sha256)
 
 
 # --- issue #284: boletim do orgao (spec 2026-10-20 §2.1, passo 3; D4) -----------------------------------------

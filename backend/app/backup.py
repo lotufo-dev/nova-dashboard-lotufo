@@ -45,7 +45,8 @@ CAMADAS = {"diarios": 7, "semanais": 5, "mensais": 12}
 # sha256 (`usuario-<id>`, trocada pela pessoa): o backup guarda a ultima de cada um no nome ativo (ver `_copiar_um`)
 # e cada versao pelo sha256 (`usuario-<id>.<sha256>`, ver `_guardar_versao_assinatura`; #479).
 PASTAS_ARQUIVOS = ("notas", "espelhos", "modelos", "evidencias", "certidoes", "regularidades", "protocolos",
-                   "pleitos", "curvas", "planilhas", "frc", "boletins", "anexos", "assinaturas")
+                   "pleitos", "curvas", "planilhas", "frc", "boletins", "anexos", "assinaturas",
+                   "assinados")     # issue #627: PDFs assinados devolvidos ao orgao, pelo sha256
 SUBPASTA_ARQUIVOS = "arquivos"  # dentro da pasta de backups e da pasta externa
 PRAZO_ARQUIVOS_SEG = 2 * 3600  # passada dos arquivos rodando ha mais que isso = acusada no health
 CONFERIR_DESTINO_SEG = 24 * 3600  # releitura completa do destino pelo sha256: uma vez por dia

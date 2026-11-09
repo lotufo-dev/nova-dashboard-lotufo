@@ -245,7 +245,7 @@ def _worker_limpo(monkeypatch):
 PASTAS_DOS_DADOS = (("notas", "pdf"), ("espelhos", "docx"), ("modelos", "docx"), ("evidencias", "eml"),
                     ("certidoes", "pdf"), ("regularidades", "pdf"), ("protocolos", "pdf"), ("pleitos", "pdf"),
                     ("curvas", "xlsx"), ("planilhas", "xlsx"), ("frc", "pdf"), ("boletins", "pdf"),
-                    ("anexos", "pdf"))
+                    ("anexos", "pdf"), ("assinados", "pdf"))   # issue #627
 ASSINATURA = b"\x89PNG\r\n\x1a\n assinatura"
 
 

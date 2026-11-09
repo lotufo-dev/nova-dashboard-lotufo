@@ -10,7 +10,7 @@ com o modelo Opus escolhido no app. Ela **não edita código**: escolhe, abre tr
 liga o auto-merge e relata. Deploy continua sendo pedido do Leo (skill `deploy`).
 
 Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue tem label `risco:*`;
-`revisor-adversarial` em `opus` (fixo no agente); `listar-issues` em `haiku`; gate Sol no codex.
+`revisor-adversarial` em `opus` (fixo no agente); `listar-issues` em `haiku`; gate Sol no codex (sem cota, Agent Opus; ver passo 5).
 
 ## Pré-condições (todas; se uma falhar, parar e dizer ao Leo qual)
 
@@ -50,14 +50,13 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      roda `git -C <worktree> diff origin/master...HEAD`.
    - **Gate Sol**, só se a issue tem label `risco:*`: skill `gate-sol`, passando o caminho do worktree
      (a skill faz o `cd` dentro de um subshell, que não muda o diretório da sessão), pela ferramenta Bash.
-   - **Codex sem cota** ("usage limit" na saída): não é veredito inválido e rodar de novo não adianta (a cota
-     é da assinatura do Leo e volta no dia seguinte). Registrar "Gate Sol: sem cota em DD/MM" em `## Gates`.
-     Se a rodada 1 do Sol já tinha coberto o diff inteiro da PR e a correção não mexeu em lógica de dinheiro
-     ou de envio de forma grande, o `revisor-adversarial` cobre a correção (passo 6) e o gate segue como
-     cumprido. Se nem a rodada 1 rodou, ou a correção mexeu nessa lógica de forma grande, a PR **não mergeia
-     sozinha**: sem auto-merge, `precisa-do-leo` na issue dizendo que falta só o gate Sol, e no resumo ao Leo
-     que o gate roda quando a cota voltar, a pedido dele (skill `gate-sol`; `listar-issues` não devolve
-     issue com `precisa-do-leo`, então a rodada seguinte não a pega sozinha).
+   - **Codex sem cota** ("usage limit" na saída): não é veredito inválido e rodar de novo não adianta. Não
+     esperar a cota: seguir a seção "Sem cota" da skill `gate-sol`. Um `Agent` com `model: opus`, só leitura,
+     recebe o mesmo arquivo de entrada do codex (sem o parecer do revisor), a orquestradora confere cada achado
+     contra o código e registra o veredito (confirmado, ou refutado com `arquivo:linha`), e não há nova rodada do
+     gate. Achado confirmado: uma rodada de correção, conferida só pelo `revisor-adversarial`. Em `## Gates`:
+     "Gate Sol: codex sem cota em DD/MM; coberto por subagente Opus independente + veredito da orquestradora".
+     A PR segue e o auto-merge liga normalmente.
    - Veredito inválido (resposta vazia, erro, sem "OK" nem lista de achados, **ou "OK" sobre diff vazio**:
      conferir antes `git -C "<worktree>" diff --stat origin/master...HEAD` não vazio): rodar de novo uma vez;
      se continuar inválido, a PR não mergeia sozinha (ver Travas).
@@ -88,7 +87,9 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      novo, o original não) e o intervalo `<sha-antes>..HEAD` (se a correção incluiu `git merge origin/master`, esse intervalo traria o
      código de outras PRs: nesse caso o revisor recebe `origin/master...HEAD`). O gate Sol não roda de novo sobre a
      correção, salvo se ela mexeu em lógica de dinheiro ou de envio de forma grande (regra da skill
-     `gate-sol`); nesse caso, havendo cota, roda desse mesmo caminho só sobre o diff novo. **Duas rodadas no
+     `gate-sol`); nesse caso roda desse mesmo caminho só sobre o diff novo, pelo codex ou, se a cota acabou
+     até lá, pelo Opus da skill `gate-sol` (depois dele não há nova rodada). Se o gate da rodada 1 já foi o Opus
+     do caso "Sem cota", não há segunda rodada, nem nessa correção grande: só o revisor. **Duas rodadas no
      máximo**, a menos que o próprio Leo escolha a PR para mais uma correção (só se ele pedir; não é
      automático); a fonte é a decisão do Leo na sessão de 03/11/2026, registrada pela orquestradora na issue #356
      (orquestrar: correção isolada). Quando o revisor (e o Sol, se aplicável) dessa rodada extra volta sem
@@ -113,8 +114,8 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
    - revisor com veredito válido, sem Crítico em aberto e sem Aviso que não tenha virado issue (número em
      `## Gates`, passo 6); gate Sol idem quando se aplica. O gate Sol
      roda quando o codex existe (máquina local). Na nuvem, onde não há codex, não é trava: registrar "gate
-     Sol: não disponível na nuvem" em `## Gates`. Sem cota do codex vale o passo 5 (só mergeia sozinha se a
-     rodada 1 do Sol já cobriu o diff inteiro e a correção não mexeu em dinheiro ou envio de forma grande);
+     Sol: não disponível na nuvem" em `## Gates`. Sem cota do codex vale o passo 5 (Opus independente + veredito da
+     orquestradora cobrem o gate, e a PR segue);
    - **nenhum comentário nem review na PR** (`gh pr view <M> --json comments,reviews`): todo agente posta com
      a conta do Leo, então qualquer comentário na PR conta como dele. Por isso **a orquestradora e a
      trabalhadora nunca comentam na PR**: o que precisam registrar vai no corpo da PR (`gh pr edit`) ou na

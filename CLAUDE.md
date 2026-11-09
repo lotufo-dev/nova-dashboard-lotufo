@@ -63,7 +63,7 @@ digita pouco e confere; regra, cadastro e instrumento são do Leo, em arquivo ve
   (2 rodadas no máximo), e liga o auto-merge em qualquer PR quando as travas passam (CI verde, sem conflito,
   revisor-adversarial sem Crítico em aberto e sem Aviso que não tenha virado issue, sem comentário do Leo pedindo para segurar; vale também
   para redesenho, migração, `risco:*` e PR que toca `.github/`, `scripts/deploy.ps1` ou `.claude/`, decisão do
-  Leo de 16/10/2026). O gate Sol roda quando o codex existe; na nuvem não é trava. A orquestradora não edita
+  Leo de 16/10/2026). O gate Sol roda quando o codex existe (sem cota do codex, Opus independente faz o gate); na nuvem não é trava. A orquestradora não edita
   código e não faz deploy.
 - A trabalhadora não pergunta ao Leo: escolha técnica vira `## Suposições` da PR; regra de negócio sem fonte
   vira pergunta na issue com label `decisao`, e ela para sem PR.
