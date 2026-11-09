@@ -64,18 +64,18 @@ def test_pdf_acima_do_teto_e_recusado_em_portugues(client_admin, dois, monkeypat
 
 def test_arquivos_que_somam_acima_do_teto_sao_recusados(client_admin, dois, monkeypatch):
     monkeypatch.setattr(pdfs, "TETO_BYTES_PACOTE", max(map(len, dois)) + 10)
-    monkeypatch.setattr(pdfs, "TETO_BYTES_PACOTE", max(map(len, dois)) + 10)
     r = client_admin.post("/api/ancoras-docusign/pdf", files=_arquivos(*dois), data={"papeis": PAPEIS})
     assert r.status_code == 413 and r.json()["detail"] == "Os arquivos somam mais de 0 MB: separe o pacote."
 
 
 def test_vaga_propria_das_ancoras_nao_toma_a_das_outras_leituras(client_admin, dois, monkeypatch):
     from app import ancoras_docusign, leitura_pdf
-    monkeypatch.setattr(leitura_pdf, "TEMPO_LIMITE_S", 0.2)
     assert ancoras_docusign._VAGA.acquire(timeout=1)
     try:
-        # leitura comum de PDF segue passando com a vaga das ancoras ocupada
+        # leitura comum de PDF segue passando com a vaga das ancoras ocupada (com o tempo de espera normal)
         assert leitura_pdf.paginas_com_limite(dois[0]) == 1
+        # so' a espera pela vaga das ancoras encurta, para o teste nao esperar 10 s
+        monkeypatch.setattr(leitura_pdf, "TEMPO_LIMITE_S", 0.2)
         r = client_admin.post("/api/ancoras-docusign/pdf", files=_arquivos(*dois), data={"papeis": PAPEIS})
         assert r.status_code == 422 and r.json()["detail"] == leitura_pdf._LOTADO
     finally:

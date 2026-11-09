@@ -65,6 +65,19 @@ describe("AncorasDocusign", () => {
     expect(dados.get("mostrar")).toBe("true");
   });
 
+  it("durante o download, só o botão de baixar mostra que está trabalhando", async () => {
+    let terminar: () => void = () => {};
+    baixarArquivoForm.mockReturnValue(new Promise<void>(r => { terminar = r; }));
+    render(<AncorasDocusign />);
+    fireEvent.change(screen.getByLabelText("Escolher PDFs", { selector: "input" }), { target: { files: [pdf("a.pdf")] } });
+    fireEvent.click(screen.getByRole("button", { name: /Baixar PDF com âncoras/ }));
+    expect(await screen.findByRole("button", { name: /Montando o PDF…/ })).toBeTruthy();
+    expect(screen.queryByText("Lendo o pacote…")).toBeNull();
+    expect(screen.getByRole("button", { name: "Ver as páginas com âncora" })).toBeTruthy();
+    terminar();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Baixar PDF com âncoras/ })).toBeTruthy());
+  });
+
   it("mostra a recusa do servidor em português", async () => {
     const { ApiErro } = await import("./api");
     apiForm.mockRejectedValue(new ApiErro(413, "Arquivo acima do limite de 40 MB"));
