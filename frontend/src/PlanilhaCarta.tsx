@@ -7,7 +7,7 @@ import CampoValor from "./CampoValor";
 import Checklist, { type ItemChecklist } from "./Checklist";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import ErroCampo from "./ErroCampo";
-import { brl, digitosParaBrl, fmtTamanho } from "./formato";
+import { brl, digitosParaBrl, fmtQuantidade, fmtTamanho } from "./formato";
 import { IconeAlerta, IconeSeta } from "./icones";
 import { IconeCheck } from "./NotasAEnviar";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
@@ -347,6 +347,74 @@ function itensDasPecas(s: SituacaoEnvio): ItemChecklist[] {
   });
 }
 
+// ---------------------------------------------------------------------------------- o que mudou entre as versoes
+
+type ItemMudou = { codigo: string; discriminacao: string; unidade: string | null; situacao: "alterado" | "incluido" | "retirado";
+  quantidade_de: string | null; quantidade_para: string | null; valor_de_centavos: number | null; valor_para_centavos: number | null;
+  diferenca_centavos: number };
+type PonteVersao = { versao: number; planilha_id: number; total_centavos?: number };
+/** Resposta de `GET /api/medicoes/{id}/planilhas/comparacao` (issue #610); a tela so' mostra, nao calcula. */
+type Comparacao =
+  | { comparavel: true; de: PonteVersao; para: PonteVersao; diferenca_centavos: number; itens: ItemMudou[] }
+  | { comparavel: false; mensagem: string; de: PonteVersao; para: PonteVersao };
+
+const ROTULO_SITUACAO: Record<string, string> = { incluido: "Incluído", retirado: "Retirado" };
+
+/** O que a revisao mudou em relacao a' versao anterior. So' aparece com 2+ versões e quando a rota responde; qualquer
+ *  falha (403 sem permissao, 404 enquanto a rota nao existe) esconde o bloco sem mostrar erro na pagina. */
+function OQueMudou({ medicaoId, ultimaId, anterior, ultima }: { medicaoId: number; ultimaId: number; anterior: number; ultima: number }) {
+  const [c, setC] = useState<Comparacao | null | "carregando">("carregando");
+  useEffect(() => {
+    let vivo = true;
+    setC("carregando");
+    api<Comparacao>(`/api/medicoes/${medicaoId}/planilhas/comparacao`)
+      .then(x => { if (vivo) setC(x && typeof x.comparavel === "boolean" ? x : null); })
+      .catch(() => { if (vivo) setC(null); });
+    return () => { vivo = false; };
+  }, [medicaoId, ultimaId]);
+  if (c === null) return null;
+  const de = c === "carregando" ? anterior : c.de.versao;
+  const para = c === "carregando" ? ultima : c.para.versao;
+  return (
+    <div>
+      <p className="med-grupo">O que mudou da versão {de} para a versão {para}</p>
+      {c === "carregando" && <p className="texto-2" role="status">Comparando as planilhas…</p>}
+      {c !== "carregando" && !c.comparavel && (
+        <CaixaAviso nivel="atencao">
+          {c.mensagem}{" "}
+          <a className="link" href={`/api/medicoes/${medicaoId}/planilhas/${c.de.planilha_id}/planilha`}>Planilha da versão {c.de.versao}</a>{" "}
+          <a className="link" href={`/api/medicoes/${medicaoId}/planilhas/${c.para.planilha_id}/planilha`}>Planilha da versão {c.para.versao}</a>
+        </CaixaAviso>
+      )}
+      {c !== "carregando" && c.comparavel && c.itens.length === 0 && (
+        <p className="texto-2">A planilha desta revisão tem os mesmos itens e valores da versão anterior</p>
+      )}
+      {c !== "carregando" && c.comparavel && c.itens.length > 0 && (
+        <table className="tabela tabela--densa" aria-label={`O que mudou da versão ${c.de.versao} para a versão ${c.para.versao}`}>
+          <thead><tr><th scope="col">Item</th><th scope="col">Unidade</th><th scope="col" className="num">Quantidade</th>
+            <th scope="col" className="num">Valor</th><th scope="col" className="num">Diferença</th></tr></thead>
+          <tbody>
+            {c.itens.map((i, n) => (
+              <tr key={`${i.codigo}-${n}`}>
+                <td>{i.codigo} · {i.discriminacao}{ROTULO_SITUACAO[i.situacao] && <> <Selo>{ROTULO_SITUACAO[i.situacao]}</Selo></>}</td>
+                <td>{i.unidade ?? "—"}</td>
+                <td className="num">{fmtQuantidade(i.quantidade_de)} → {fmtQuantidade(i.quantidade_para)}</td>
+                <td className="num">{brl(i.valor_de_centavos)} → {brl(i.valor_para_centavos)}</td>
+                <td className="num">{brl(i.diferenca_centavos)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr><th scope="row" colSpan={3}>Total da versão {c.de.versao}</th><td className="num" colSpan={2}>{brl(c.de.total_centavos ?? null)}</td></tr>
+            <tr><th scope="row" colSpan={3}>Total da versão {c.para.versao}</th><td className="num" colSpan={2}>{brl(c.para.total_centavos ?? null)}</td></tr>
+            <tr><th scope="row" colSpan={3}>Diferença</th><td className="num" colSpan={2}>{brl(c.diferenca_centavos)}</td></tr>
+          </tfoot>
+        </table>
+      )}
+    </div>
+  );
+}
+
 /** O cartao da planilha/carta na etapa 1 da medicao. `podeEditar` falso (diretoria): so' le, sem nenhum botao. */
 // `estado`: o da medicao na pagina; quando ele muda por outra etapa (a pagina recarregou), o cartao le de novo
 // `aoRevisaoPendente`: avisa a pagina se ha' revisao registrada e nao enviada (o espelho espera por ela, PR #382)
@@ -551,6 +619,11 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
             </tbody>
           </table>
         )}
+
+        {d.planilhas.length > 1 && (() => {
+          const vs = [...d.planilhas].sort((a, b) => a.versao - b.versao);
+          return <OQueMudou medicaoId={medicaoId} ultimaId={vs[vs.length - 1].id} anterior={vs[vs.length - 2].versao} ultima={vs[vs.length - 1].versao} />;
+        })()}
       </section>
 
       <section className="cartao med-painel email-orgao" aria-labelledby={`${base}-email`}>

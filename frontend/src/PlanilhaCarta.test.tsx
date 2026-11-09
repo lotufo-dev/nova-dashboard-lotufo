@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiErro } from "./api";
 import { CartaoPlanilha, centavosDoTexto, dataDoEnvio, NovaPlanilhaCarta, revisaoPendente, rotuloVersao, seloDoEnvio, type DetalhePlanilha } from "./PlanilhaCarta";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
@@ -632,5 +633,91 @@ describe("Ajudantes da planilha/carta", () => {
     const base = { planilha_id: 1, versao: 1, numero_oficio: null, usuario: null };
     expect(dataDoEnvio({ ...base, enviado_em: "2026-09-04 01:30:00", origem: "sistema" })).toBe("03/09/2026");
     expect(dataDoEnvio({ ...base, enviado_em: "2026-09-02", origem: "externo" })).toBe("02/09/2026");
+  });
+});
+
+describe("O que mudou entre as versões (issue #611)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
+  const DUAS = detalhe({ planilhas: [V1, { ...V1, id: 32, versao: 2, motivo: "Rev01" }] });
+  const URL_COMP = "/api/medicoes/5/planilhas/comparacao";
+  const ITEM_A = { codigo: "1234567", discriminacao: "Serviço fictício A", unidade: "m³", situacao: "alterado",
+    quantidade_de: "1250.500", quantidade_para: "0.000", valor_de_centavos: 2000001, valor_para_centavos: 0, diferenca_centavos: -2000001 };
+  const ITEM_B = { codigo: "s/c", discriminacao: "Serviço fictício B", unidade: "und", situacao: "retirado",
+    quantidade_de: "0.050", quantidade_para: null, valor_de_centavos: 500000, valor_para_centavos: null, diferenca_centavos: -500000 };
+  const ITEM_C = { codigo: "777", discriminacao: "Serviço fictício C", unidade: "und", situacao: "incluido",
+    quantidade_de: null, quantidade_para: "2.000", valor_de_centavos: null, valor_para_centavos: 30000, diferenca_centavos: 30000 };
+  const COMP = { comparavel: true, de: { versao: 1, planilha_id: 31, total_centavos: 10000001 },
+    para: { versao: 2, planilha_id: 32, total_centavos: 7500000 }, diferenca_centavos: -2500001, itens: [ITEM_A, ITEM_B] };
+  const txt = (e: Element) => (e.textContent ?? "").replace(/\u00a0/g, " ");
+  function responder(comp: () => Promise<unknown>, det = DUAS) {
+    api.mockImplementation(async (url: string) => (url === URL_COMP ? comp() : det));
+  }
+
+  it("mostra os itens que mudaram, com antes e depois, e o rodapé com os totais e a diferença", async () => {
+    responder(async () => COMP);
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText("O que mudou da versão 1 para a versão 2")).toBeTruthy();
+    const tabela = await screen.findByRole("table", { name: "O que mudou da versão 1 para a versão 2" });
+    const linhas = within(tabela).getAllByRole("row");
+    expect(txt(linhas[1])).toContain("1234567 · Serviço fictício A");
+    expect(txt(linhas[1])).toContain("m³");
+    expect(txt(linhas[1])).toContain("1.250,500 → 0,000");
+    expect(txt(linhas[1])).toContain("R$ 20.000,01 → R$ 0,00");
+    expect(txt(linhas[1])).toContain("−R$ 20.000,01");
+    expect(txt(tabela.querySelector("tfoot")!)).toContain("R$ 100.000,01");
+    expect(txt(tabela.querySelector("tfoot")!)).toContain("R$ 75.000,00");
+    expect(txt(tabela.querySelector("tfoot")!)).toContain("−R$ 25.000,01");
+  });
+
+  it("item incluído leva a etiqueta Incluído e o retirado, Retirado", async () => {
+    responder(async () => ({ ...COMP, itens: [ITEM_B, ITEM_C] }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    const tabela = await screen.findByRole("table", { name: "O que mudou da versão 1 para a versão 2" });
+    const linhas = within(tabela).getAllByRole("row");
+    expect(linhas[1].textContent).toContain("Retirado");
+    expect(linhas[2].textContent).toContain("Incluído");
+    expect(linhas[2].textContent).toContain("— → 2,000");
+  });
+
+  it("versões com a mesma planilha dizem que os itens e valores são os mesmos", async () => {
+    responder(async () => ({ ...COMP, diferenca_centavos: 0, itens: [] }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText("A planilha desta revisão tem os mesmos itens e valores da versão anterior")).toBeTruthy();
+  });
+
+  it("não comparável mostra a mensagem e os links das duas planilhas", async () => {
+    const msg = "Não reconheci a planilha desta versão para comparar; abra os dois arquivos";
+    responder(async () => ({ comparavel: false, mensagem: msg, de: { versao: 1, planilha_id: 10 }, para: { versao: 2, planilha_id: 11 } }));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText(msg, { exact: false })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Planilha da versão 1" }).getAttribute("href")).toBe("/api/medicoes/5/planilhas/10/planilha");
+    expect(screen.getByRole("link", { name: "Planilha da versão 2" }).getAttribute("href")).toBe("/api/medicoes/5/planilhas/11/planilha");
+  });
+
+  it("uma versão só não mostra o bloco nem chama a rota", async () => {
+    responder(async () => COMP, detalhe());
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText("Gerada")).toBeTruthy();
+    expect(screen.queryByText(/O que mudou/)).toBeNull();
+    expect(api).not.toHaveBeenCalledWith(URL_COMP);
+  });
+
+  it("enquanto compara, mostra Comparando as planilhas… e o resto da página continua", async () => {
+    responder(() => new Promise(() => {}));
+    render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+    expect(await screen.findByText("Comparando as planilhas…")).toBeTruthy();
+    expect(screen.getByRole("table", { name: "Versões da planilha/carta" })).toBeTruthy();
+  });
+
+  it("sem permissão (403) ou rota ausente (404) o bloco some e a página não mostra erro", async () => {
+    for (const status of [403, 404]) {
+      responder(async () => { throw new ApiErro(status, "x"); });
+      const { container } = render(<CartaoPlanilha medicaoId={5} podeEditar aoMudar={() => {}} />);
+      await waitFor(() => expect(api).toHaveBeenCalledWith(URL_COMP));
+      await waitFor(() => expect(screen.queryByText(/Comparando as planilhas/)).toBeNull());
+      expect(screen.queryByText(/O que mudou/)).toBeNull();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      cleanup(); api.mockReset();
+    }
   });
 });
