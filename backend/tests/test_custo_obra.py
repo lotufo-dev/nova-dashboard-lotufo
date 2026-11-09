@@ -317,6 +317,25 @@ def test_leitura_pelos_titulos_da_planilha_deixa_o_grupo_do_cadastro_sem_medido(
     assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"]
 
 
+def test_titulo_com_o_nome_de_um_grupo_do_cadastro_nao_some(conn):
+    """Revisor, rodada 1 da #612: o titulo "Terraplenagem" igual ao grupo do cadastro aparece numa linha propria (com
+    o sufixo), so' com o medido; a soma das linhas fecha com o medido do mes. Vale tambem para a leitura antiga com
+    ITEM gravada pelos titulos antes de a obra ter cadastro de custo."""
+    cid = _obra(conn)
+    m1 = _medicao(conn, cid, 1, "2026-03", 300_01)
+    lido = {"grupo_por": "planilha", "grupos": [{"nome": "Terraplenagem", "itens": [_item(100_00)]},
+                                                {"nome": "PAVIMENTAÇÃO", "itens": [_item(200_01)]}]}
+    with db.mutacao(conn):
+        medicao_grupos._gravar(conn, None, m1, "d" * 64, "carga", None, None, "lida", None, lido,
+                               medicao_grupos._assinatura(medicao_grupos.cadastro_de_custo(conn, cid)), 300_01, 300_01)
+    mar = _linha(custo_obra.custo_da_obra(conn, cid), "2026-03")
+    assert _grupo(mar, "Terraplenagem")["medido_centavos"] is None
+    t = _grupo(mar, "Terraplenagem (título da planilha)")
+    assert t["medido_centavos"] == 100_00 and t["custo_centavos"] == 0 and t["diferenca_centavos"] is None
+    assert len({g["nome"] for g in mar["grupos"]}) == len(mar["grupos"])     # nome unico: a tela usa como chave
+    assert sum(g["medido_centavos"] or 0 for g in mar["grupos"]) == mar["medido_centavos"] == 300_01
+
+
 # --- issue #492: custo unitario realizado do item-chave ----------------------------------------------------------
 
 def _chave(conn, cid, grupo, codigo, unidade):

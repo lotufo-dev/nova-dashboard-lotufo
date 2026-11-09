@@ -31,6 +31,7 @@ NAO_LIDO = "Medido por grupo não lido"
 AJUSTE = "Ajuste ao medido"
 SEM_GRUPO = "Sem grupo"
 FORA_DOS_GRUPOS = "Tarefa fora dos grupos"
+SUFIXO_TITULO = "(título da planilha)"   # titulo lido com o nome de um grupo do cadastro (issue #612)
 MENSAGEM_SEM_CADASTRO = "Esta obra não tem cadastro de custo."
 
 
@@ -257,9 +258,15 @@ def _custo_da_obra(conn, contrato_id: int) -> dict:
         completo = md is None or md["nao_lido"] == 0
         itens = [_linha_grupo(n, "grupo", medido_de(n), ap.get(n, 0), partes[i], completo)
                  for i, n in enumerate(nomes)]
-        # grupo da planilha que o cadastro nao tem (o "outros" da leitura): so' o medido
-        itens += [_linha_grupo(n, "grupo", v, completo=completo and not md["por_planilha"])
-                  for n, v in (md["grupos"].items() if md else ()) if n not in nomes]
+        if md and md["por_planilha"]:
+            # leitura pelos titulos: todo titulo vira linha so' de medido, sem diferenca (o custo nao e' dele), mesmo
+            # o de nome igual a um grupo do cadastro (com o sufixo, para nao colidir com a linha do grupo)
+            itens += [_linha_grupo(f"{n} {SUFIXO_TITULO}" if n in nomes else n, "grupo", v, completo=False)
+                      for n, v in md["grupos"].items()]
+        else:
+            # grupo da planilha que o cadastro nao tem (o "outros" da leitura): so' o medido
+            itens += [_linha_grupo(n, "grupo", v, completo=completo)
+                      for n, v in (md["grupos"].items() if md else ()) if n not in nomes]
         if fora.get(mes):
             itens.append(_linha_grupo(FORA_DOS_GRUPOS, "fora", None, fora[mes]))
         if r_total and sum(pesos) <= 0:
