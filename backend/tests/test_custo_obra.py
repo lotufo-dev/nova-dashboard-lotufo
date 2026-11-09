@@ -1,4 +1,5 @@
 """Issue #491: custo lancado no RM por grupo da planilha, medicao a medicao (aba Custo da Carteira)."""
+import hashlib
 import json
 
 import pytest
@@ -580,6 +581,25 @@ def test_item_chave_pelo_codigo_do_servico_e_codigo_repetido_no_grupo_e_ambiguo(
     assert prel["situacao"] == "ambiguo" and prel["custo_centavos"] == 50_00
     assert all(prel[c] is None for c in ("quantidade_acumulada", "preco_unitario_centavos", "custo_unitario_centavos",
                                          "diferenca_centavos", "descricao"))
+
+
+def test_leitura_gravada_antes_da_079_continua_valendo_na_obra_sem_titulos(conn):
+    """Revisor (#613): a assinatura do cadastro sem titulos e' a de antes da migracao 079 (sem a chave
+    titulos_planilha); senao, toda obra com cadastro por itens_planilha perderia as leituras ja' gravadas."""
+    cid = _obra(conn)
+    mid = _medicao(conn, cid, 1, "2026-03", 100_00)
+    antiga = [{"nome": "Terraplenagem", "itens_planilha": ["1."]}, {"nome": "Pavimentação", "itens_planilha": ["2."]}]
+    sha = hashlib.sha256(json.dumps(antiga, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    assert medicao_grupos._assinatura(medicao_grupos.cadastro_de_custo(conn, cid)) == sha
+    lido = {"grupo_por": "cadastro", "grupos": [{"nome": "Terraplenagem", "itens": [_item(100_00)]}]}
+    with db.mutacao(conn):
+        medicao_grupos._gravar(conn, None, mid, "c" * 64, "carga", None, None, "lida", None, lido, sha, 100_00, 100_00)
+    assert medicao_grupos.grupos(conn, mid)["leitura"] is not None
+    # o grupo que ganha titulos muda a assinatura: a leitura antiga sai de vigencia ate' reler
+    conn.execute("UPDATE custo_grupos SET titulos_planilha='[\"TERRAPLENAGEM\"]' WHERE nome='Terraplenagem'")
+    conn.commit()
+    assert medicao_grupos._assinatura(medicao_grupos.cadastro_de_custo(conn, cid)) != sha
+    assert medicao_grupos.grupos(conn, mid)["leitura"] is None
 
 
 def test_grupo_sem_item_chave_fica_fora_do_bloco(conn):
