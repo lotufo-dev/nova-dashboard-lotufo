@@ -2277,6 +2277,15 @@ def test_comparacao_planilha_em_pdf_nao_e_comparavel(client_admin):
     assert r.status_code == 200 and r.json()["comparavel"] is False
 
 
+def test_comparacao_quantidade_gigante_nao_da_500(client_admin):
+    """Revisor/gate A1: quantidade 1e30 na versao nova responde 200 com comparavel falso, nao 500."""
+    from tests.test_comparacao_planilhas import BASE, _trocar, xlsx
+    _, mid = _versoes(client_admin, xlsx(BASE), xlsx(_trocar(BASE, 0, qm=1e30)))
+    r = _comparar(client_admin, mid)
+    assert r.status_code == 200, r.text
+    assert r.json()["comparavel"] is False
+
+
 def _zip(partes: dict[str, bytes]) -> bytes:
     import io
     import zipfile

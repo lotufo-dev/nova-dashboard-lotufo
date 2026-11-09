@@ -170,3 +170,17 @@ def test_versao_recusada_pelo_leitor_vira_nao_comparavel():
         comp._ler_versao("planilhas/abc.pdf")
     with pytest.raises(leitura.PlanilhaRecusada, match="falta a aba Resumo"):
         leitura.ler(xlsx(aba="Boletim"))
+
+
+def test_quantidade_acima_da_precisao_vira_nao_comparavel():
+    """Revisor/gate A1: quantidade de 26+ digitos (1e30) estourava o quantize (InvalidOperation, erro 500)."""
+    with pytest.raises(leitura.PlanilhaRecusada, match="quantidade"):
+        comparar(BASE, _trocar(BASE, 0, qm=1e30))
+
+
+def test_item_com_numero_e_sem_codigo_mostra_o_numero_no_codigo():
+    """Gate S1: no modelo com ITEM, o item sem codigo e' identificado pelo nº (a tela mostra "codigo · texto")."""
+    de = [("1.1", None, "Serviço sem código", "m", 2, 20.0)] + BASE[1:]
+    para = [("1.1", None, "Serviço sem código", "m", 1, 10.0)] + BASE[1:]
+    r = comparar(de, para)
+    assert [(i["codigo"], i["discriminacao"]) for i in r["itens"]] == [("1.1", "Serviço sem código")]

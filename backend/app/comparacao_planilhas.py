@@ -12,7 +12,7 @@ So' leitura: os dois xlsx ja' guardados com as versoes de `medicao_planilhas` pa
   propria planilha, quando ela o escreve: diferenca que nao fecha nao se mostra.
 - Versao que o leitor recusa, planilha em PDF, sem planilha ou acima do teto do leitor: "nao comparavel".
 """
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from app import arquivos
 from app import leitura_planilha_medicao as leitura
@@ -27,8 +27,12 @@ _MILESIMO = Decimal("0.001")
 
 
 def _quantidade(q: str | None) -> Decimal:
-    """Quantidade desta medicao arredondada a 3 casas (vazia conta zero)."""
-    d = Decimal(q).quantize(_MILESIMO, rounding=ROUND_HALF_UP) if q is not None else Decimal("0.000")
+    """Quantidade desta medicao arredondada a 3 casas (vazia conta zero). Acima da precisao do decimal (26+
+    digitos, arquivo de fora) a versao nao se compara."""
+    try:
+        d = Decimal(q).quantize(_MILESIMO, rounding=ROUND_HALF_UP) if q is not None else Decimal("0.000")
+    except InvalidOperation:
+        raise leitura.PlanilhaRecusada("a quantidade do item passa do máximo aceito") from None
     return d if d != 0 else Decimal("0.000")      # sem "-0.000"
 
 
@@ -69,7 +73,8 @@ def comparar_leituras(de: dict, para: dict) -> dict:
         qb = _quantidade(b["quantidade_medida"]) if b else None
         va = a["valor_medido_centavos"] if a else None
         vb = b["valor_medido_centavos"] if b else None
-        return {"codigo": base["codigo"], "discriminacao": base["descricao"], "unidade": base["unidade"],
+        # sem codigo, o nº do item identifica a linha (a tela mostra "codigo · discriminacao")
+        return {"codigo": base["codigo"] or base["item"], "discriminacao": base["descricao"], "unidade": base["unidade"],
                 "situacao": situacao, "quantidade_de": _texto_qtd(qa), "quantidade_para": _texto_qtd(qb),
                 "valor_de_centavos": va, "valor_para_centavos": vb, "diferenca_centavos": (vb or 0) - (va or 0)}
 
