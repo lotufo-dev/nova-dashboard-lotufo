@@ -1188,3 +1188,18 @@ def test_conferencias_com_o_rm_usam_o_valor_do_par(ambiente_projeto):
                  "VALUES (?, ?, 99500, 'manual')", (xid, nid))
     conn.commit()
     assert [a["medicao_centavos"] for a in notas.acima_da_medicao(conn, xid)] == [990_00]
+
+
+def test_aviso_nota_acima_da_medicao_usa_o_valor_do_par(ambiente_projeto):
+    """#609: nota de R$ 995,00 entre o par (R$ 990,00) e o valor cheio (R$ 1.000,01) aparece nos Avisos."""
+    from app import notas
+    conn, u, cid = ambiente_projeto
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    assert [a for a in notas.avisos(conn) if a["tipo"] == "nota_acima_da_medicao"] == []
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) "
+                       "VALUES (1, 904, '904', 99500, '2026-02-04')").lastrowid
+    conn.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) "
+                 "VALUES (?, ?, 99500, 'manual')", (xid, nid))
+    conn.commit()
+    av = [a for a in notas.avisos(conn) if a["tipo"] == "nota_acima_da_medicao"]
+    assert [(a["medicao_id"], a["nota_id"]) for a in av] == [(xid, nid)]
