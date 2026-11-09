@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app import (arquivos, correio, db, espelhos, feriados, medicao_grupos, medicao_planilhas, medicoes, permissoes,
+from app import (arquivos, comparacao_planilhas, correio, db, espelhos, feriados, medicao_grupos, medicao_planilhas, medicoes, permissoes,
                  planilha_envio, reajuste, siga, tempo)
 from app.api_auth import conexao
 from app.dinheiro import parse_brl, parse_brl_com_sinal
@@ -532,6 +532,22 @@ def revisar_planilha(medicao_id: ID,
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     return _ler_grupos(conn, usuario["id"], r, validados)
+
+
+@router.get("/api/medicoes/{medicao_id}/planilhas/comparacao")
+def comparar_planilhas(medicao_id: ID, de: int | None = Query(None, ge=1, le=9999),
+                       para: int | None = Query(None, ge=1, le=9999),
+                       usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                       conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #610: o que mudou, item a item, entre duas versoes da planilha (sem parametros, a penultima e a
+    ultima). So' le os xlsx guardados; nada se grava. Versao que o leitor nao reconhece: 200 com `comparavel` falso."""
+    _medicao_existe(conn, medicao_id)
+    try:
+        return comparacao_planilhas.comparar(conn, medicao_id, de, para)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
 
 
 @router.get("/api/medicoes/{medicao_id}/planilhas/{planilha_id}/{peca}")
