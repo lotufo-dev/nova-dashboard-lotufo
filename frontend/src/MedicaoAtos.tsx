@@ -15,7 +15,8 @@ import Selo from "./Selo";
 // de antes; quem abre passa `agir`, que grava, recarrega e diz se a gravacao foi aceita.
 
 // `feito`: a frase de sucesso que a tela anuncia (role=status) quando a gravacao e' aceita.
-export type Agir = (fn: () => Promise<unknown>, feito?: string) => Promise<boolean>;
+// `feito` pode depender da resposta da gravacao (issue #625: o boletim que foi tambem ao par)
+export type Agir = (fn: () => Promise<unknown>, feito?: string | ((resposta: unknown) => string)) => Promise<boolean>;
 
 // Valor para o campo de texto: "50.000,00" (sem "R$"), no formato que o parse_brl do servidor aceita.
 export function brlCampo(centavos: number | null): string {

@@ -164,9 +164,9 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     setErro(""); setFeito(""); setSalvando(true);
     let gravou = false;
     try {
-      await fn();
+      const resposta = await fn();
       gravou = true;
-      if (mensagemFeito) setFeito(mensagemFeito);
+      if (mensagemFeito) setFeito(typeof mensagemFeito === "function" ? mensagemFeito(resposta) : mensagemFeito);
       await carregar();
       await protocolos.carregar();
       await envios.carregar();

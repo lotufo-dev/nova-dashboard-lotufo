@@ -83,6 +83,22 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
   );
 }
 
+/** Issue #625: o boletim do SMO vai tambem ao par (execucao <-> reajuste) quando a capa aprovada traz o valor dele;
+ *  senao o servidor diz por que o par ficou de fora. */
+type RespostaBoletim = { par?: { medicao_id: number; tipo: string; numero: number; aprovado_centavos: number }
+  | { motivo: string } | null };
+
+function confirmacaoBoletim(m: Medicao, resposta: unknown): string {
+  const par = (resposta as RespostaBoletim | null)?.par;
+  if (par && "medicao_id" in par) {
+    const valor = brl(par.aprovado_centavos);
+    return m.tipo === "reajuste" ? `Boletim registrado no reajuste e na medição (${valor}).`
+      : `Boletim registrado na ${m.numero}ª medição e no reajuste (${valor}).`;
+  }
+  if (par && par.motivo) return `Boletim registrado. ${par.motivo}.`;
+  return "Boletim registrado.";
+}
+
 /** "12.345,67" -> 1234567 (centavos inteiros, sem ponto flutuante); vazio -> null. */
 function centavos(valor: string): number | null {
   const d = valor.replace(/\D/g, "");
@@ -163,7 +179,7 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
     fd.append("numero_orgao", numero.trim());
     if (meio) fd.append("meio", meio);
     fd.append("arquivo", arquivo);
-    const ok = await agir(() => apiForm(`/api/medicoes/${m.id}/boletim`, fd), "Boletim registrado.");
+    const ok = await agir(() => apiForm(`/api/medicoes/${m.id}/boletim`, fd), r => confirmacaoBoletim(m, r));
     if (ok) aoFechar();
   }
 
