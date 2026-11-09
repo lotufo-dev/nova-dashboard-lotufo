@@ -40,7 +40,12 @@ def _pedido(arquivos_up: list[UploadFile], papeis: str, marcar: str, desmarcar: 
                 isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in lista):
             raise HTTPException(422, f"Campo {campo} inválido")
         paginas[campo] = lista
-    partes = [b"".join(arquivos.blocos_validados(a, teto_bytes=pdfs.TETO_BYTES_PACOTE)) for a in arquivos_up]
+    partes, total = [], 0
+    for a in arquivos_up:
+        # o teto vale para a SOMA, conferida enquanto le: 60 arquivos no teto de um so' nao enchem a memoria
+        parte = b"".join(arquivos.blocos_validados(a, teto_bytes=max(1, pdfs.TETO_BYTES_PACOTE - total)))
+        total += len(parte)
+        partes.append(parte)
     return {"partes": partes, "papeis": {p: n for p, n in nomes.items() if n.strip()}, **paginas}
 
 

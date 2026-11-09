@@ -165,8 +165,8 @@ export default function AncorasDocusign() {
                     <tr key={p.pagina}>
                       <td>{p.pagina}</td>
                       <td><label className="campo--linha">
-                        <input type="checkbox" checked={false} aria-label={`Pôr âncoras no rodapé da página ${p.pagina}`}
-                          onChange={() => p.pagina && (desmarcar.has(p.pagina) ? alternar(desmarcar, setDesmarcar, p.pagina) : alternar(marcar, setMarcar, p.pagina))} />
+                        <input type="checkbox" checked={false} aria-label={desmarcar.has(p.pagina) ? `Restaurar a âncora da página ${p.pagina}` : `Pôr âncoras no rodapé da página ${p.pagina}`}
+                          onChange={() => desmarcar.has(p.pagina) ? alternar(desmarcar, setDesmarcar, p.pagina) : alternar(marcar, setMarcar, p.pagina)} />
                       </label></td>
                     </tr>
                   ))}

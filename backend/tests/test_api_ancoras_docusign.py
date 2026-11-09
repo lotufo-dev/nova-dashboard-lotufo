@@ -65,7 +65,7 @@ def test_pdf_acima_do_teto_e_recusado_em_portugues(client_admin, dois, monkeypat
 def test_arquivos_que_somam_acima_do_teto_sao_recusados(client_admin, dois, monkeypatch):
     monkeypatch.setattr(pdfs, "TETO_BYTES_PACOTE", max(map(len, dois)) + 10)
     r = client_admin.post("/api/ancoras-docusign/pdf", files=_arquivos(*dois), data={"papeis": PAPEIS})
-    assert r.status_code == 422 and "somam mais de" in r.json()["detail"]
+    assert r.status_code == 413 and "acima do limite" in r.json()["detail"]
 
 
 def test_entradas_invalidas(client_admin, dois):

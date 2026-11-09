@@ -54,7 +54,7 @@ describe("AncorasDocusign", () => {
     fireEvent.click(screen.getByLabelText("Pôr âncoras no rodapé da página 3"));
     expect(screen.getByText("Páginas com âncora (2)")).toBeTruthy();       // sai a 1, entra a 3
     expect(screen.getByText("Rodapé (marcada por você)")).toBeTruthy();
-    expect(screen.getByLabelText("Pôr âncoras no rodapé da página 1")).toBeTruthy();
+    expect(screen.getByLabelText("Restaurar a âncora da página 1")).toBeTruthy();
     fireEvent.click(screen.getByLabelText(/Mostrar âncoras/));
     fireEvent.click(screen.getByRole("button", { name: /Baixar PDF com âncoras/ }));
     await waitFor(() => expect(baixarArquivoForm).toHaveBeenCalled());

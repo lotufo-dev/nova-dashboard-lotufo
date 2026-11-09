@@ -98,19 +98,18 @@ def _linhas(chars: list[tuple[str, float, float, float, float]]) -> list[list[di
                 break
         else:
             linhas.append([c[2], c[4], [c]])
-    fundiu = len(linhas) <= 400             # pagina com milhares de linhas (planilha) nao e' bloco de assinatura
-    while fundiu:                           # colunas lidas em outra ordem: junta as linhas que se sobrepoem
-        fundiu = False
-        for i in range(len(linhas)):
-            for j in range(i + 1, len(linhas)):
+    if len(linhas) <= 400:                  # pagina com milhares de linhas (planilha) nao e' bloco de assinatura
+        i = 0                               # colunas lidas em outra ordem: junta as linhas que se sobrepoem
+        while i < len(linhas):
+            j = i + 1
+            while j < len(linhas):
                 if _sobrepoe(linhas[i][0], linhas[i][1], linhas[j][0], linhas[j][1]):
-                    a, b = linhas[i], linhas.pop(j)
-                    a[0], a[1] = min(a[0], b[0]), max(a[1], b[1])
-                    a[2].extend(b[2])
-                    fundiu = True
-                    break
-            if fundiu:
-                break
+                    b = linhas.pop(j)
+                    linhas[i][0], linhas[i][1] = min(linhas[i][0], b[0]), max(linhas[i][1], b[1])
+                    linhas[i][2].extend(b[2])
+                else:
+                    j += 1
+            i += 1
     linhas = [lin[2] for lin in linhas]
     saida = []
     for lin in linhas:
@@ -142,7 +141,9 @@ def _nomes_da_linha(palavras: list[dict], nomes: dict[str, list[str]]) -> list[t
             continue
         for papel, ps in ordem:
             if norm[i:i + len(ps)] == ps:
-                achados.append((papel, uteis[i]["esq"], max(p["topo"] for p in uteis[i:i + len(ps)])))
+                topo = max(p["topo"] for p in uteis[i:i + len(ps)])
+                # a mesma pessoa em dois papeis (fiscal e superior) leva as duas ancoras
+                achados += [(outro, uteis[i]["esq"], topo) for outro, qs in ordem if qs == ps]
                 i += len(ps)
                 break
         else:
