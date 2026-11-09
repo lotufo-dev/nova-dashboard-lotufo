@@ -1528,6 +1528,51 @@ def test_mesmo_boletim_baixado_de_novo_nao_cria_evento_no_par_e_a_diferenca_acei
     assert client_admin.get(f"/api/medicoes/{rea}").json()["diferenca_aceita"] is not None
 
 
+def _vigente(cl, mid):
+    d = cl.get(f"/api/medicoes/{mid}").json()
+    return d["valor_atestado_centavos"], d["atestado_em"]
+
+
+@pytest.mark.parametrize("retificado", ["outro_valor", "mesmo_valor_outra_data"])
+def test_pdf_antigo_reenviado_na_execucao_nao_passa_por_cima_do_boletim_novo_do_par(client_admin, monkeypatch,
+                                                                                  retificado):
+    # revisor, rodada 2: P na execucao (vai ao reajuste); SMO retificado Q registrado no reajuste; P reenviado na
+    # execucao so' para corrigir a observacao nao volta o reajuste ao boletim antigo
+    _capa_campos(monkeypatch)
+    exe, rea = _exe_e_rea(client_admin)
+    assert _boletim_da_7a(client_admin, exe).json()["par"]["medicao_id"] == rea
+    if retificado == "outro_valor":
+        _capa_campos(monkeypatch, reajuste_centavos=95_000_01, total_centavos=1_329_567_90)
+        r = _boletim_da_7a(client_admin, rea, valor="95.000,01", texto="SMO retificado")
+        esperado = (95_000_01, "2026-04-14")
+    else:
+        r = _registrar_boletim(client_admin, rea, valor="98.765,43", data="2026-04-20", numero="7", meio="smo",
+                               texto="SMO retificado")
+        esperado = (98_765_43, "2026-04-20")
+    assert r.status_code == 201, r.text
+    _capa_campos(monkeypatch)
+    r = _boletim_da_7a(client_admin, exe, observacao="corrigida")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: o boletim vigente dele é outro"}
+    assert _atestos(exe)[-1]["observacao"] == "corrigida"   # a execucao continua gravada
+    assert _vigente(client_admin, rea) == esperado and len(_atestos(rea)) == 2
+
+
+def test_pdf_antigo_com_outro_sha_nao_passa_por_cima_da_capa_mais_nova_do_par(client_admin, monkeypatch):
+    # revisor, rodada 2 (regra f): o mesmo PDF antigo baixado de novo (outro sha256), capa de data anterior
+    _capa_campos(monkeypatch)
+    exe, rea = _exe_e_rea(client_admin)
+    assert _boletim_da_7a(client_admin, exe).json()["par"]["medicao_id"] == rea
+    _capa_campos(monkeypatch, data_realizacao="2026-05-10", reajuste_centavos=95_000_01, total_centavos=1_329_567_90)
+    assert _boletim_da_7a(client_admin, rea, valor="95.000,01", texto="SMO de maio").status_code == 201
+    _capa_campos(monkeypatch)
+    r = _boletim_da_7a(client_admin, exe, texto="SMO de abril baixado de novo", observacao="outra")
+    assert r.status_code == 201, r.text
+    assert r.json()["par"] == {"motivo": "Reajuste nº 7 sem boletim: o boletim vigente dele é outro"}
+    assert len(_atestos(exe)) == 2
+    assert _vigente(client_admin, rea) == (95_000_01, "2026-04-14") and len(_atestos(rea)) == 2
+
+
 def test_correcao_so_da_data_na_execucao_chega_ao_par(client_admin, monkeypatch):
     _capa_campos(monkeypatch)
     exe, rea = _exe_e_rea(client_admin)
