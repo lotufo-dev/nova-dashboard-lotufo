@@ -21,7 +21,7 @@ export function envioReservado(e: unknown): e is ApiErro & { corpo: Reserva } {
 const hora = (iso: string | null) => (iso ? iso.slice(11, 16) : "—");     // ISO local: "2026-10-10T10:05:00-04:00"
 
 export default function LiberarEnvio({ tabela, id, reserva, aoLiberar, textoLiberado }: {
-  tabela: "protocolos" | "espelhos" | "pleitos" | "medicao_planilha_envios" | "copia_dono_envios"; id: number;
+  tabela: "protocolos" | "espelhos" | "pleitos" | "medicao_planilha_envios" | "medicao_assinados_envios" | "copia_dono_envios"; id: number;
   aoLiberar: () => void;
   /** Sem a reserva (a pessoa abriu a liberacao pelo menu da medicao), a tela nao sabe quem iniciou nem desde quando:
    *  o servidor decide se ha' o que liberar e se ja' passaram os 15 minutos. */

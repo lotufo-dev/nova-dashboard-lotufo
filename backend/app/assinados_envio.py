@@ -101,13 +101,13 @@ def situacao(conn, medicao_id: int) -> dict:
     """O que a tela precisa para oferecer (ou nao) os dois atos."""
     m = _medicao(conn, medicao_id)
     motivo = recusa(conn, m)
-    out = {"disponivel": motivo is None, "motivo": motivo, "reajuste": None, "limite": None,
+    out = {"disponivel": motivo is None, "motivo": motivo, "reajuste": None, "limite": None, "limite_recusa": None,
            "envios": envios(conn, medicao_id), "reserva": _reserva(conn, medicao_id)}
     if motivo is None:
         _, _, regras = _contexto(conn, m)
         p = par(conn, m)
         out["reajuste"] = {"id": p["id"], "numero": p["numero"]} if p else None
-        out["limite"] = limite(regras)[0]
+        out["limite"], out["limite_recusa"] = limite(regras)
     return out
 
 

@@ -53,7 +53,7 @@ export function rotuloVersao(versao: number): string {
 }
 
 /** Arquivo arrastado ou escolhido: uma area de soltar com o botao de escolher. */
-function CampoArquivo({ id, rotulo, aceita, arquivo, aoEscolher, erro }: {
+export function CampoArquivo({ id, rotulo, aceita, arquivo, aoEscolher, erro }: {
   id: string; rotulo: string; aceita: string; arquivo: File | null; aoEscolher: (f: File | null) => void; erro?: string;
 }) {
   const [sobre, setSobre] = useState(false);

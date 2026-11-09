@@ -92,6 +92,7 @@ def test_so_aparece_na_sinfra_depois_do_boletim(api):
     assert _registrar_boletim(cl, mid, data=tempo.hoje_local().isoformat()).status_code == 201
     s = cl.get(f"/api/medicoes/{mid}").json()["envio_assinados"]
     assert s["disponivel"] is True and s["limite"] == 25 * MB and s["reajuste"] is None
+    assert s["limite_recusa"] == "PDF acima de 25 MB, o limite por documento do órgão: divida o arquivo"
     # MT-PAR nao tem esse passo
     from tests.test_api_planilha_envio import _planilha
     outra = _planilha(cl, cid_mtpar)

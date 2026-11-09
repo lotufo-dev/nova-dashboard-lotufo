@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
-import { api } from "./api";
+import { api, apiForm } from "./api";
 import { IconeAlerta } from "./icones";
 import { Link } from "./Link";
 import { DA_PLANILHA, DO_ESPELHO, EXCECOES, type Metade } from "./medicao";
@@ -435,6 +435,7 @@ function hojeLocal(): string {
 export function FormAssinatura({ m, salvando, agir, aoFechar, erro }: Base) {
   const [data, setData] = useState("");
   const [envelope, setEnvelope] = useState("");
+  const [pdf, setPdf] = useState<File | null>(null);
   const [tentou, setTentou] = useState(false);
   const hoje = hojeLocal();
   const falta = !data ? "Informe a data da assinatura." : data > hoje ? "A data da assinatura não pode ser futura." : undefined;
@@ -443,7 +444,14 @@ export function FormAssinatura({ m, salvando, agir, aoFechar, erro }: Base) {
     ev.preventDefault();
     setTentou(true);
     if (falta) { document.getElementById("campo-data-assinatura")?.focus(); return; }
-    const ok = await agir(() => api(`/api/medicoes/${m.id}/assinatura`, {
+    // #627: com o PDF assinado, o envelope em branco vem do carimbo do DocuSign lido no servidor
+    const fd = new FormData();
+    if (pdf) {
+      fd.append("data", data);
+      if (envelope.trim()) fd.append("envelope", envelope.trim());
+      fd.append("arquivo", pdf);
+    }
+    const ok = await agir(() => pdf ? apiForm(`/api/medicoes/${m.id}/assinatura-com-pdf`, fd) : api(`/api/medicoes/${m.id}/assinatura`, {
       method: "POST", body: JSON.stringify({ data, envelope: envelope.trim() || null }),
     }), "Assinatura registrada.");
     if (ok) aoFechar();
@@ -466,6 +474,14 @@ export function FormAssinatura({ m, salvando, agir, aoFechar, erro }: Base) {
           <input id="campo-envelope-assinatura" name="envelope" autoComplete="off" className="entrada--larga" maxLength={200}
             value={envelope}
             onChange={ev => setEnvelope(ev.target.value)} />
+        </div>
+        <div className="campo">
+          <span className="campo__rotulo">PDF assinado (opcional)</span>
+          <label className="btn btn--pequeno espelho__anexar">
+            {pdf ? pdf.name : "Escolher"}
+            <input type="file" accept="application/pdf,.pdf" className="espelho__arquivo" aria-label="PDF assinado (opcional)"
+              onChange={ev => { setPdf(ev.currentTarget.files?.[0] ?? null); ev.currentTarget.value = ""; }} />
+          </label>
         </div>
         <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Registrando…" : "Registrar assinatura"}</button>
         <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>
