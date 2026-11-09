@@ -83,3 +83,28 @@ def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatc
     monkeypatch.setitem(permissoes.PERFIS, "diretoria", frozenset())
     assert client.get(f"/api/diretoria/custo/{com}").status_code == 403
     assert client.get("/api/diretoria/custo").status_code == 403
+
+
+def test_custo_da_obra_com_planilha_sem_item_lida_pelos_titulos_do_cadastro(client):
+    """Issue #613: o JSON da rota traz o medido nos grupos do cadastro (dois titulos no mesmo grupo), o titulo fora
+    do cadastro em "outros" e nada em "Medido por grupo não lido"."""
+    import json
+    from app import contratos, medicao_grupos
+    from tests.test_leitura_planilha_medicao import TOTAL_SEM_ITEM, planilha_sem_item
+    c = db.get_conn()
+    auth.criar_usuario(c, "Dir", "dir4@l.com", "senha-forte-123", "diretoria")
+    cid = contratos.criar(c, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 4", "objeto": "Obra Delta",
+                                 "valor_original_centavos": 1_000_00, "centro_custo_rm": "2.001.044"})
+    c.execute("UPDATE contratos SET projeto_rm='PRJ', custo_sem_tarefa='proporcional' WHERE id=?", (cid,))
+    c.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha, titulos_planilha) "
+              "VALUES (?,1,'Pavimentação','[\"001\"]','[]',?)", (cid, json.dumps(["pavimentacao", "REVESTIMENTO"])))
+    mid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+                    "VALUES (?,1,'execucao','2026-03','protocolada',?)", (cid, TOTAL_SEM_ITEM)).lastrowid
+    c.commit()
+    assert medicao_grupos.ler_e_registrar(c, None, mid, planilha_sem_item(), origem="carga")["situacao"] == "lida"
+    c.close()
+    _login(client, "dir4@l.com")
+    r = client.get(f"/api/diretoria/custo/{cid}")
+    assert r.status_code == 200
+    grupos = {g["nome"]: g["medido_centavos"] for g in r.json()["linhas"][0]["grupos"]}
+    assert grupos == {"Pavimentação": 1296_23 + 800_27, "outros": 500_55 + 1200_01}
