@@ -10,7 +10,7 @@ com o modelo Opus escolhido no app. Ela **não edita código**: escolhe, abre tr
 liga o auto-merge e relata. Deploy continua sendo pedido do Leo (skill `deploy`).
 
 Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue tem label `risco:*`;
-`revisor-adversarial` em `opus` (fixo no agente); `listar-issues` em `haiku`; gate Sol no codex.
+`revisor-adversarial` em `opus` (fixo no agente); `listar-issues` em `haiku`; gate Sol no codex (sem cota, Agent Opus; ver passo 5).
 
 ## Pré-condições (todas; se uma falhar, parar e dizer ao Leo qual)
 
@@ -87,7 +87,8 @@ Modelos: trabalhadora em `sonnet` (padrão do agente) ou `opus` quando a issue t
      novo, o original não) e o intervalo `<sha-antes>..HEAD` (se a correção incluiu `git merge origin/master`, esse intervalo traria o
      código de outras PRs: nesse caso o revisor recebe `origin/master...HEAD`). O gate Sol não roda de novo sobre a
      correção, salvo se ela mexeu em lógica de dinheiro ou de envio de forma grande (regra da skill
-     `gate-sol`); nesse caso, havendo cota, roda desse mesmo caminho só sobre o diff novo. **Duas rodadas no
+     `gate-sol`); nesse caso, havendo cota, roda desse mesmo caminho só sobre o diff novo. Se o gate foi o Opus
+     do caso "Sem cota", não há segunda rodada, nem nessa correção grande: só o revisor. **Duas rodadas no
      máximo**, a menos que o próprio Leo escolha a PR para mais uma correção (só se ele pedir; não é
      automático); a fonte é a decisão do Leo na sessão de 03/11/2026, registrada pela orquestradora na issue #356
      (orquestrar: correção isolada). Quando o revisor (e o Sol, se aplicável) dessa rodada extra volta sem

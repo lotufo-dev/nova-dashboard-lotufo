@@ -72,18 +72,23 @@ codex exec -m gpt-5.6-sol -o "<scratchpad>/gate-sol-<N>.md" - < "$ENTRADA" > "<s
 O codex usa a cota da assinatura ChatGPT do Leo. Se a saída (o `codex falhou:` do comando, o `.log` ou o arquivo do `-o`) trouxer
 "usage limit" (ou "limite de uso"), **não é veredito inválido e rodar de novo no mesmo dia não adianta**.
 Não insistir e não esperar a cota voltar: o gate passa a ser feito por um **subagente Opus independente**, e a
-orquestradora dá o veredito final.
+orquestradora (numa sessão manual, a própria sessão) dá o veredito final.
 
 1. Abrir um `Agent` com `model: opus`, `subagent_type` geral, ferramentas só de leitura (Read, Grep, Glob e Bash
    sem gravar). O prompt é o **mesmo arquivo de entrada** que iria ao codex (pedido desta skill + o diff de
    `origin/master...HEAD` do worktree), **sem** o parecer do `revisor-adversarial` e sem a conversa da
-   trabalhadora: é um par de olhos novo. Nenhum subagente roda em outro modelo.
-2. A orquestradora confere cada achado contra o código e registra o veredito: confirmado, ou refutado com
-   `arquivo:linha` que prova. Depois desse veredito **não há nova rodada do gate** (nem Opus de novo, nem codex
-   quando a cota voltar).
-3. Achado confirmado (Crítico ou Aviso): uma rodada única de correção pela trabalhadora, conferida só pelo
-   `revisor-adversarial` sobre o diff novo. A PR segue e o auto-merge liga normalmente quando as outras travas passam.
-4. Registrar em `## Gates` da PR:
+   trabalhadora: é um par de olhos novo. O prompt leva o **caminho absoluto do worktree** e manda ler arquivos e
+   rodar `git -C "<worktree>"` só lá (aberto da pasta principal, ele leria o `master`).
+2. Veredito inválido do Opus (resposta vazia, erro, "OK" sem lista sobre diff não vazio): rodar de novo uma vez;
+   se continuar inválido, a PR não mergeia sozinha, como no codex (ver a regra de veredito inválido acima).
+3. A orquestradora (ou a própria sessão manual) confere cada achado contra o código e registra o veredito:
+   confirmado, ou refutado com `arquivo:linha` que prova. Depois desse veredito **não há nova rodada do gate**
+   (nem Opus de novo, nem codex quando a cota voltar), **nem na correção grande de dinheiro ou de envio**: esta é
+   a exceção, nomeada, à segunda rodada de "Depois da resposta".
+4. Achado confirmado (Crítico ou Aviso): uma rodada única de correção pela trabalhadora (ou pela própria sessão),
+   conferida só pelo `revisor-adversarial` sobre o diff novo. A PR segue e o auto-merge liga normalmente quando as
+   outras travas passam.
+5. Registrar em `## Gates` da PR:
 
 ```
 - [x] Gate Sol: codex sem cota em DD/MM; coberto por subagente Opus independente + veredito da orquestradora
@@ -100,7 +105,9 @@ Na nuvem (sem codex) vale a regra de sempre: "gate Sol: não disponível na nuve
    - **registrado**: existe mas está fora do escopo da issue; vira linha em `docs/backlog.md` ou issue nova
      sugerida no corpo da PR.
 2. Uma rodada só: corrigir, rodar os testes do módulo, e não rodar o gate de novo, a menos que a correção tenha
-   mudado a lógica de dinheiro ou de envio de forma grande; nesse caso, uma segunda rodada só sobre o diff novo.
+   mudado a lógica de dinheiro ou de envio de forma grande; nesse caso, uma segunda rodada só sobre o diff novo
+   (arquivo de entrada com só o diff novo). Exceção: se o gate foi o Opus da seção "Sem cota", nunca há segunda
+   rodada; a correção é conferida só pelo `revisor-adversarial`.
 
 ## Registrar na PR
 
