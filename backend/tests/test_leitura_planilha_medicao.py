@@ -561,3 +561,30 @@ def test_coluna_de_nº_do_item_que_nao_se_reconhece_continua_recusando(rotulo):
     dados = _trocar(planilha(), "Resumo Medição", {(10, 1): rotulo})
     with pytest.raises(leitura.PlanilhaRecusada, match="não tem a coluna ITEM"):
         leitura.ler(dados)
+
+
+# --- issue #610: os itens na ordem da planilha e o total que a propria planilha escreve -------------------------
+
+def test_itens_na_ordem_da_planilha_mesmo_com_outros_no_fim():
+    linhas = [("1.1", "ADML", "Administração local", "un", 1, 1, 1, 10.0, 10.0, 10.0),
+              ("2", None, "DRENAGEM", GRUPO), ("2.1", "2003", "Bueiro", "m", 1, 1, 1, 5.0, 5.0, 5.0)]
+    lido = leitura.ler(planilha(linhas))
+    assert [g["nome"] for g in lido["grupos"]] == ["DRENAGEM", "outros"]
+    assert [i["item"] for i in lido["itens"]] == ["1.1", "2.1"]
+
+
+def test_total_escrito_na_planilha():
+    assert leitura.ler(planilha())["total_planilha_centavos"] is None          # "vinte mil reais": nao e' numero
+    dados = _trocar(planilha(), "Resumo Medição", {(23, 12): 20693.11})          # TOTAL GERAL, NESTA MEDIÇÃO R$
+    lido = leitura.ler(dados)
+    assert lido["total_planilha_centavos"] == 20693_11 and lido["total_centavos"] == TOTAL
+    # sem ITEM: a leitura para no TOTAL ACUMULADO e o TOTAL DESTA MEDIÇÃO vem de baixo (o 12345,67 da fixture)
+    assert leitura.ler(planilha_sem_item())["total_planilha_centavos"] == 12345_67
+
+
+def test_total_escrito_fora_da_coluna_ou_absurdo_nao_recusa_a_leitura():
+    """Code-review: o total e' opcional; o numero em outra coluna nao vale, e o acima do teto nao recusa a leitura."""
+    so_acumulado = leitura.ler(_trocar(planilha(), "Resumo Medição", {(23, 14): 99999.99}))
+    assert so_acumulado["total_planilha_centavos"] is None and so_acumulado["total_centavos"] == TOTAL
+    absurdo = leitura.ler(_trocar(planilha(), "Resumo Medição", {(23, 12): 1e15}))
+    assert absurdo["total_planilha_centavos"] is None and absurdo["total_centavos"] == TOTAL
