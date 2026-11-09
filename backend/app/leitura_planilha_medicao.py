@@ -60,15 +60,26 @@ def _texto(v) -> str:
     return " ".join(s.upper().split())
 
 
+NUMERO_DO_ITEM = ("NO", "NO.", "N", "N.", "NUM", "NUM.")   # "Nº" -> "NO"; "N°" -> "N" (o grau some na normalizacao)
+
+
 def _e_item(h: str) -> bool:
-    """A coluna do nº do item: "ITEM", ou ate' duas palavras terminando em ITEM ("Nº ITEM" -> "NO ITEM", "N. ITEM")."""
+    """A coluna do nº do item: "ITEM", ou uma forma de número seguida de ITEM ("Nº ITEM" -> "NO ITEM", "N. ITEM").
+    Outra palavra antes de ITEM ("SUB ITEM", "VALOR ITEM") e' outra coluna (issue #617)."""
     partes = h.split()
-    return bool(partes) and partes[-1] == "ITEM" and len(partes) <= 2
+    return partes == ["ITEM"] or (len(partes) == 2 and partes[0] in NUMERO_DO_ITEM and partes[1] == "ITEM")
+
+
+def _outra_coluna_de_item(h: str) -> bool:
+    """Duas palavras terminando em ITEM que nao sao o nº do item ("SUB ITEM", "VALOR ITEM", "POR ITEM")."""
+    partes = h.split()
+    return len(partes) == 2 and partes[1] == "ITEM" and not _e_item(h)
 
 
 def _menciona_item(textos: list[str]) -> bool:
-    """Alguma celula fala de ITEM (mesmo que nao seja reconhecida): nao e' o modelo sem ITEM."""
-    return any("ITEM" in t.split() for t in textos)
+    """Alguma celula fala de ITEM (mesmo que nao seja reconhecida, como "ITEM Nº"): nao e' o modelo sem ITEM.
+    "SUB ITEM" e afins nao contam: sao outra coluna, que a leitura nao usa."""
+    return any("ITEM" in t.split() and not _outra_coluna_de_item(t) for t in textos)
 
 
 def _campo(h: str) -> str | None:
@@ -444,9 +455,6 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
             break                       # sem TOTAL GERAL, a tabela acaba no fim da aba
         if sem_item and any(t.startswith(FIM_SEM_ITEM) for t in textos):
             break
-        if sem_item and any(t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL")
-                            for t in textos if t):
-            continue                    # outra linha de soma: nunca titulo nem item
         if any(t.startswith("SUBTOTAL") for t in textos):
             continue
         celula = lambda k: linha[col[k]] if k in col and col[k] < len(linha) else None   # noqa: E731
@@ -457,6 +465,11 @@ def _ler_linhas(linhas, cadastro: list[dict] | None) -> dict:
         descricao = " ".join(descricao.split()) if isinstance(descricao, str) else _nome_item(descricao)
         preco = celula("preco")
         sem_preco = preco is None or (isinstance(preco, str) and not preco.strip())
+        # outra linha de soma: nunca titulo nem item. So' a sem unidade e sem preco (o mesmo criterio do titulo):
+        # o item "Total de bueiros executados", com unidade e preco, e' item (issue #617)
+        if sem_item and not unidade and sem_preco and any(
+                t.split()[0] in ("TOTAL", "SUB-TOTAL") or t.startswith("SUB TOTAL") for t in textos if t):
+            continue
         if sem_item and not codigo and not unidade and sem_preco and descricao:
             titulo_atual = descricao     # titulo de grupo ou de subgrupo, sem nº
             continue

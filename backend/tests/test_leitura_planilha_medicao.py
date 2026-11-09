@@ -439,3 +439,50 @@ def test_sem_item_com_outra_coluna_faltando_diz_qual():
     with pytest.raises(leitura.PlanilhaRecusada, match="PREÇO UNITÁRIO") as e:
         leitura.ler(planilha_sem_item(cabecalho=sem_preco))
     assert "ITEM" not in str(e.value)
+
+
+# --- issue #617: no modelo sem ITEM, so' a linha sem unidade e sem preco e' linha de soma ----------------------
+def test_sem_item_item_cuja_discriminacao_comeca_com_total_e_lido():
+    linhas = [(TITULO, "DRENAGEM"),
+              ("2003", "Total de bueiros executados", "m", 1, 1, 0, 1, 5.01, 5.01, 5.01, 0, 5.01, 1),
+              # mediu 0 no mes, so' acumulado: sumir nao mudaria a soma, entao o teste olha o grupo
+              ("2005", "Total de sarjetas", "m", 1, 0, 1, 1, 2.0, 2.0, 0, 2.0, 2.0, 1),
+              (SUB, "TOTAL DO GRUPO"), (SUB, "SUB TOTAL"), (SUB, "SUB-TOTAL")]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert lido["total_centavos"] == 5_01
+    assert [g["nome"] for g in lido["grupos"]] == ["DRENAGEM"]
+    itens = lido["grupos"][0]["itens"]
+    assert [(i["codigo"], i["descricao"], i["valor_medido_centavos"], i["valor_acumulado_centavos"])
+            for i in itens] == [("2003", "Total de bueiros executados", 5_01, 5_01),
+                                ("2005", "Total de sarjetas", 0, 2_00)]
+
+
+def test_sem_item_linha_de_total_com_rotulo_na_coluna_do_codigo_continua_pulada():
+    linhas = [(TITULO, "DRENAGEM"), ("2003", "Bueiro", "m", 1, 1, 0, 1, 5.01, 5.01, 5.01, 0, 5.01, 1),
+              ("TOTAL DO GRUPO", None, None, None, None, None, None, None, None, 5.01, 0, 5.01, None),
+              (TITULO, "PONTES"), ("2004", "Sarjeta", "m", 1, 1, 0, 1, 2.0, 2.0, 2.0, 0, 2.0, 1),
+              (None, "TOTAL DAS PONTES", None, None, None, None, None, None, None, 2.0, 0, 2.0, None),
+              ("2006", "Meio-fio", "m", 1, 1, 0, 1, 3.0, 3.0, 3.0, 0, 3.0, 1)]
+    lido = leitura.ler(planilha_sem_item(linhas))
+    assert [(g["nome"], g["valor_medido_centavos"]) for g in lido["grupos"]] == [("DRENAGEM", 5_01),
+                                                                                 ("PONTES", 5_00)]
+
+
+@pytest.mark.parametrize("coluna", ["SUB ITEM", "VALOR ITEM", "POR ITEM"])
+def test_sem_item_coluna_extra_terminada_em_item_nao_vira_a_coluna_item(coluna):
+    lido = leitura.ler(planilha_sem_item(cabecalho=CABECALHO_SEM_ITEM + [coluna]))
+    assert lido["grupo_por"] == "planilha"
+    assert [g["nome"] for g in lido["grupos"]] == ["SERVIÇOS PRELIMINARES", "PAVIMENTAÇÃO", "Revestimento"]
+    assert lido["total_centavos"] == TOTAL_SEM_ITEM            # parou no TOTAL ACUMULADO
+
+
+@pytest.mark.parametrize("rotulo", ["Nº ITEM", "N. ITEM", "N ITEM", "NUM ITEM", "N° ITEM"])
+def test_formas_de_numero_do_item_valem_como_item(rotulo):
+    dados = _trocar(planilha(), "Resumo Medição", {(10, 1): rotulo})
+    assert leitura.ler(dados) == leitura.ler(planilha())
+
+
+def test_coluna_nº_do_item_continua_recusando_em_vez_de_virar_sem_item():
+    dados = _trocar(planilha(), "Resumo Medição", {(10, 1): "Nº DO ITEM"})
+    with pytest.raises(leitura.PlanilhaRecusada, match="não tem a coluna ITEM"):
+        leitura.ler(dados)
