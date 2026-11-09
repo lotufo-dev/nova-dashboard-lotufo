@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FormAssinatura, FormProtocoloManual, FormRecebimento, FormValor, valorEditavel } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
 
-const { api } = vi.hoisted(() => ({ api: vi.fn() }));
-vi.mock("./api", () => ({ api }));
+const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
+vi.mock("./api", () => ({ api, apiForm }));
 
 const base: Medicao = {
   id: 631, numero: 7, tipo: "execucao", competencia: "2026-09", estado: "nota_emitida",
@@ -215,6 +215,24 @@ describe("FormAssinatura (issue #287)", () => {
     const [url, opcoes] = api.mock.calls[0];
     expect(url).toBe("/api/medicoes/631/assinatura");
     expect(JSON.parse(opcoes.body)).toEqual({ data: "2026-10-01", envelope: "Boletim 7" });
+  });
+
+  it("com o PDF assinado vai pela rota do PDF, e o envelope em branco fica para o servidor ler (issue #627)", async () => {
+    apiForm.mockResolvedValue({});
+    const agir = vi.fn(async (fn: () => Promise<unknown>) => { await fn(); return true; });
+    render(<FormAssinatura m={base} salvando={false} agir={agir} aoFechar={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Data da assinatura"), { target: { value: "2026-10-01" } });
+    fireEvent.change(screen.getByLabelText("PDF assinado (opcional)"),
+      { target: { files: [new File(["%PDF-1.4"], "assinado.pdf", { type: "application/pdf" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar assinatura" }));
+    await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+    const [url, fd] = apiForm.mock.calls[0] as [string, FormData];
+    expect(url).toBe("/api/medicoes/631/assinatura-com-pdf");
+    expect(fd.get("data")).toBe("2026-10-01");
+    expect(fd.get("envelope")).toBeNull();
+    expect(fd.get("arquivo")).toBeTruthy();
+    expect(api).not.toHaveBeenCalled();
+    apiForm.mockReset();
   });
 
   it("recusa data futura e vazia sem chamar o servidor", () => {

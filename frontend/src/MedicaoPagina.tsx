@@ -17,6 +17,7 @@ import MaisAcoes, { type ItemAcao } from "./MaisAcoes";
 import { DA_PLANILHA, eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, rotuloDoBloco, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type ParDaMedicao } from "./medicao";
 import { AceiteDiferenca, FormBoletim } from "./Boletim";
+import { FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados } from "./AssinadosEnvio";
 import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
 import { brl, type Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
@@ -39,7 +40,7 @@ import "./passos.css";
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
-type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "boletim" | "diferenca" | "sozinha" | "liberar" | null;
+type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "boletim" | "diferenca" | "sozinha" | "liberar" | "assinados" | "assinados_fora" | null;
 
 // Ancoras antigas (#notas, #espelho, #protocolo e as #etapa-N do trilho de cinco setas, que o Inicio, as listas e o
 // SIGA ainda usam) abrem o passo onde a coisa mora hoje.
@@ -149,6 +150,32 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     return () => { vivo = false; };
   }, [lerPlanilha, chaveRevisao, medicaoId, leituraLista, tentativa]);
   const planilha = planilhaDe?.chave === chaveRevisao ? planilhaDe.d : null;
+
+  // #627 (SINFRA): os documentos assinados vao ao orgao depois do boletim. No par, o ato e' da execucao (o PDF do
+  // reajuste vai no mesmo e-mail); com a execucao fora do ato (protocolada, sem boletim), o do reajuste (revisao da
+  // PR #635). O servidor diz se ha' o ato (familia, boletim, estado).
+  const candidatosAssinados = (doPar && execucao && reajuste ? [execucao, reajuste] : m ? [m] : [])
+    .filter(x => (x.boletins ?? []).some(b => b.tem_arquivo));
+  const chaveAssinados = podeEditar ? candidatosAssinados.map(x => x.id).join(",") : "";
+  const [assinadosDe, setAssinadosDe] = useState<{ chave: string; id: number; s: SituacaoAssinados } | null>(null);
+  useEffect(() => {
+    if (!chaveAssinados) return;
+    let vivo = true;
+    void (async () => {
+      let achado: { chave: string; id: number; s: SituacaoAssinados } | null = null;
+      for (const id of chaveAssinados.split(",").map(Number)) {
+        const d = await api<{ envio_assinados?: SituacaoAssinados }>(`/api/medicoes/${id}`).catch(() => null);
+        if (!d?.envio_assinados) continue;
+        if (!achado || d.envio_assinados.disponivel) achado = { chave: chaveAssinados, id, s: d.envio_assinados };
+        if (d.envio_assinados.disponivel) break;
+      }
+      if (vivo && achado) setAssinadosDe(achado);
+    })();
+    return () => { vivo = false; };
+  }, [chaveAssinados, leituraLista]);
+  const doAto = chaveAssinados && assinadosDe?.chave === chaveAssinados ? assinadosDe : null;
+  const assinados = doAto?.s ?? null;
+  const alvoAssinados = doAto ? { id: doAto.id } : null;
   const revisao = revisaoDe?.chave === chaveRevisao ? revisaoDe.valor : "conferindo";
 
   // Titulo da aba do navegador: a obra e a medicao.
@@ -291,6 +318,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     ...(valorEditavel(m, "atestado", podeEditar) ? [{ id: "atestado", rotulo: m.valor_atestado_centavos === null ? "Definir o atestado" : "Editar o atestado" }] : []),
     ...(podeBoletim && !boletimNaEtapa ? [{ id: "boletim", rotulo: comBoletim ? "Registrar boletim novo" : "Registrar boletim" }] : []),
     ...(!EXCECOES.includes(m.estado) && comBoletim ? [{ id: "assinatura", rotulo: "Registrar assinatura" }] : []),
+    ...(assinados?.disponivel ? [{ id: "assinados", rotulo: "Enviar documentos assinados" },
+      { id: "assinados_fora", rotulo: "Registrar envio dos assinados por fora" }] : []),
     // #288: sem o passo 2 (MT-PAR, SES, prefeituras), o aceite da diferenca do boletim mora aqui
     ...(!temPassosPlanilha && diferencaAAceitar ? [{ id: "diferenca", rotulo: "Aceitar a diferença" }] : []),
     ...(m.final !== 1 && !EXCECOES.includes(m.estado) ? [{ id: "final", rotulo: "Marcar como medição final" }] : []),
@@ -571,6 +600,18 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       {painel === "assinatura" && (
         <Janela titulo="Registrar assinatura" aoFechar={fechar}>
           <FormAssinatura m={m} salvando={salvando} agir={agir} aoFechar={fechar} erro={erro} />
+        </Janela>
+      )}
+      {painel === "assinados" && assinados && alvoAssinados && (
+        <Janela titulo="Enviar documentos assinados" aoFechar={fechar}>
+          <FormEnviarAssinados medicaoId={alvoAssinados.id} s={assinados} salvando={salvando} agir={agir} aoFechar={fechar}
+            erro={erro} aoLiberar={recarregar} />
+        </Janela>
+      )}
+      {painel === "assinados_fora" && assinados && alvoAssinados && (
+        <Janela titulo="Registrar envio dos assinados por fora" aoFechar={fechar}>
+          <FormAssinadosPorFora medicaoId={alvoAssinados.id} s={assinados} salvando={salvando} agir={agir} aoFechar={fechar}
+            erro={erro} aoLiberar={recarregar} />
         </Janela>
       )}
       {painel === "diferenca" && (

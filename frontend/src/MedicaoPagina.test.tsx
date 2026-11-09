@@ -854,6 +854,65 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
     expect(itens).not.toContain("Editar o atestado");
   });
 
+  // issue #627: o servidor diz se ha' o envio dos assinados (SINFRA, depois do boletim, antes do envio da nota)
+  const ASSINADOS = (disponivel: boolean) => ({ envio_assinados: { disponivel, motivo: disponivel ? null : "Os documentos assinados só vão ao órgão por e-mail na SINFRA",
+    reajuste: null, limite: 25 * 1024 * 1024, limite_recusa: "PDF acima de 25 MB, o limite por documento do órgão: divida o arquivo",
+    envios: [], reserva: null } });
+  const itensDoMenu = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
+    return within(screen.getByRole("menu")).getAllByRole("menuitem").map(x => x.textContent);
+  };
+
+  it("na SINFRA com boletim, “Mais ações” tem o envio dos documentos assinados (issue #627)", async () => {
+    responder({ "/api/contratos/1/medicoes": [COM_BOLETIM], "/api/medicoes/5": ASSINADOS(true) });
+    pagina();
+    await waitFor(() => expect(leituras("/api/medicoes/5").length).toBeGreaterThan(0));
+    await new Promise(r => setTimeout(r, 0));
+    const itens = await itensDoMenu();
+    expect(itens).toContain("Enviar documentos assinados");
+    expect(itens).toContain("Registrar envio dos assinados por fora");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Enviar documentos assinados" }));
+    expect(screen.getByLabelText("PDF assinado da medição")).toBeTruthy();
+  });
+
+  it("no par com a execução protocolada, o envio dos assinados é do reajuste com boletim (revisão da PR #635)", async () => {
+    const REAJ = { ...COM_BOLETIM, id: 6, tipo: "reajuste", boletins: [{ ...COM_BOLETIM.boletins[0], id: 10 }] };
+    responder({ "/api/contratos/1/medicoes": [{ ...COM_BOLETIM, estado: "protocolada" }, REAJ],
+      "/api/medicoes/5": ASSINADOS(false), "/api/medicoes/6": ASSINADOS(true) });
+    apiForm.mockReturnValue(new Promise(() => {}));
+    pagina();
+    await waitFor(() => expect(leituras("/api/medicoes/6").length).toBeGreaterThan(0));
+    await new Promise(r => setTimeout(r, 0));
+    fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Enviar documentos assinados" }));
+    fireEvent.change(screen.getByLabelText("PDF assinado da medição"),
+      { target: { files: [new File(["%PDF-1.4"], "assinado.pdf", { type: "application/pdf" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
+    await waitFor(() => expect(apiForm).toHaveBeenCalled());
+    expect(apiForm.mock.calls[0][0]).toBe("/api/medicoes/6/assinados/previa");
+    apiForm.mockReset();
+  });
+
+  it("fora da SINFRA, antes do boletim e para a diretoria o envio dos assinados não aparece (issue #627)", async () => {
+    responder({ "/api/contratos/1/medicoes": [COM_BOLETIM], "/api/medicoes/5": ASSINADOS(false) });
+    pagina();
+    await waitFor(() => expect(leituras("/api/medicoes/5").length).toBeGreaterThan(0));
+    expect(await itensDoMenu()).not.toContain("Enviar documentos assinados");
+    cleanup();
+    api.mockReset();
+    // sem boletim a pagina nem pergunta ao servidor
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_enviada" }], "/api/medicoes/5": ASSINADOS(true) });
+    pagina();
+    expect(await itensDoMenu()).not.toContain("Enviar documentos assinados");
+    cleanup();
+    api.mockReset();
+    responder({ "/api/contratos/1/medicoes": [COM_BOLETIM], "/api/medicoes/5": ASSINADOS(true) });
+    pagina("diretoria");
+    await screen.findByRole("heading", { level: 1 });
+    await new Promise(r => setTimeout(r, 0));
+    expect(screen.queryByText("Enviar documentos assinados")).toBeNull();
+  });
+
   it("sem o passo 2 (MT-PAR), “Aceitar a diferença” fica em Mais ações até a diferença ser aceita (issue #288)", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...COM_BOLETIM, com_envio_planilha: false }] });
     const p = pagina();

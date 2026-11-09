@@ -19,6 +19,19 @@ TETO_MULTIPART = 45 * 1024 * 1024
 # Todo o resto e' JSON pequeno: o maior legitimo e' o corpo de e-mail (20.000 caracteres) com listas curtas.
 TETO_OUTROS = 2 * 1024 * 1024
 MENSAGEM = "Pedido acima do tamanho permitido"
+# Revisao da PR #635: o registro dos assinados (dois PDFs de ate' 25 MB e o .eml) passa do teto com facilidade; a
+# recusa diz o que fazer. O teto nao sobe (o servidor e' a producao).
+# No envio pelo sistema (sem .eml) a soma ja' passa antes do limite do e-mail, que a previa recusa.
+_ROTA_ASSINADOS_FORA = re.compile(r"/api/medicoes/\d+/assinados/envio-externo")
+_ROTA_ASSINADOS_EMAIL = re.compile(r"/api/medicoes/\d+/assinados/(previa|enviar)")
+MENSAGEM_ASSINADOS = "Os arquivos somam mais de 44 MB, o limite de um envio: deixe o .eml de fora"
+MENSAGEM_ASSINADOS_EMAIL = "Os arquivos somam mais de 25 MB, o limite do e-mail: divida o envio"
+
+
+def mensagem_da_rota(caminho: str) -> str:
+    if _ROTA_ASSINADOS_FORA.fullmatch(caminho):
+        return MENSAGEM_ASSINADOS
+    return MENSAGEM_ASSINADOS_EMAIL if _ROTA_ASSINADOS_EMAIL.fullmatch(caminho) else MENSAGEM
 
 # Rotas com UploadFile/Form (grep "UploadFile\|File(" em app/api_*.py, 10/10/2026). Rota nova de upload entra aqui;
 # tests/test_limites.py confere que toda rota com formulario esta' na lista.
@@ -33,6 +46,9 @@ ROTAS_UPLOAD = tuple((metodo, re.compile(padrao)) for metodo, padrao in (
     ("POST", rf"/api/medicoes/{_ID}/(documentos|notas)"),         # evidencia do orgao e nota fiscal
     ("POST", rf"/api/medicoes/{_ID}/boletim(/leitura)?"),         # issue #284: PDF do boletim; #290: leitura da capa
     ("POST", rf"/api/medicoes/{_ID}/envio-planilha/pecas"),       # issue #282: pecas do orgao no e-mail da planilha
+    # issue #627: PDFs assinados (previa, envio e por fora) e a assinatura com o PDF
+    ("POST", rf"/api/medicoes/{_ID}/assinados/(previa|enviar|envio-externo)"),
+    ("POST", rf"/api/medicoes/{_ID}/assinatura-com-pdf"),
     ("POST", r"/api/notas/envio-externo"),                        # .eml do envio feito fora
     ("POST", rf"/api/pleitos/{_ID}/(anexos|assinado)"),
     ("POST", rf"/api/pleitos/{_ID}/previsao/(ler|planilha)"),     # issue #272: ler e aceitar a planilha de previsao
@@ -47,8 +63,8 @@ def rota_de_upload(metodo: str, caminho: str) -> bool:
 
 class _CorpoGrande(HTTPException):
     """Levantada de dentro do `receive`: o FastAPI repassa HTTPException de middleware sem embrulhar em 400."""
-    def __init__(self):
-        super().__init__(413, MENSAGEM)
+    def __init__(self, texto: str = MENSAGEM):
+        super().__init__(413, texto)
 
 
 class LimiteDeCorpo:
@@ -77,7 +93,7 @@ class LimiteDeCorpo:
             if mensagem["type"] == "http.request":
                 lidos += len(mensagem.get("body", b""))
                 if lidos > teto:
-                    raise _CorpoGrande()
+                    raise _CorpoGrande(mensagem_da_rota(scope["path"]))
             return mensagem
 
         async def send_marcado(mensagem):
@@ -96,4 +112,4 @@ class LimiteDeCorpo:
 
 
 async def _recusar(scope, receive, send):
-    await JSONResponse({"detail": MENSAGEM}, status_code=413)(scope, receive, send)
+    await JSONResponse({"detail": mensagem_da_rota(scope["path"])}, status_code=413)(scope, receive, send)

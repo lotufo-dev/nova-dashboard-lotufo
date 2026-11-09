@@ -195,6 +195,8 @@ def create_app() -> FastAPI:
     app.include_router(ancoras_docusign_router)
     from app.api_planilha_envio import router as planilha_envio_router
     app.include_router(planilha_envio_router)
+    from app.api_assinados_envio import router as assinados_envio_router
+    app.include_router(assinados_envio_router)
     from app.api_diretoria import router as diretoria_router
     app.include_router(diretoria_router)
     app.include_router(notas_router)
