@@ -152,21 +152,30 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const planilha = planilhaDe?.chave === chaveRevisao ? planilhaDe.d : null;
 
   // #627 (SINFRA): os documentos assinados vao ao orgao depois do boletim. No par, o ato e' da execucao (o PDF do
-  // reajuste vai no mesmo e-mail); o servidor diz se ha' o ato (familia, boletim, estado).
-  const alvoAssinados = doPar && execucao ? execucao : m;
-  const lerAssinados = podeEditar && !!alvoAssinados && (alvoAssinados.boletins ?? []).some(b => b.tem_arquivo);
-  const [assinadosDe, setAssinadosDe] = useState<{ id: number; s: SituacaoAssinados } | null>(null);
+  // reajuste vai no mesmo e-mail); com a execucao fora do ato (protocolada, sem boletim), o do reajuste (revisao da
+  // PR #635). O servidor diz se ha' o ato (familia, boletim, estado).
+  const candidatosAssinados = (doPar && execucao && reajuste ? [execucao, reajuste] : m ? [m] : [])
+    .filter(x => (x.boletins ?? []).some(b => b.tem_arquivo));
+  const chaveAssinados = podeEditar ? candidatosAssinados.map(x => x.id).join(",") : "";
+  const [assinadosDe, setAssinadosDe] = useState<{ chave: string; id: number; s: SituacaoAssinados } | null>(null);
   useEffect(() => {
-    if (!lerAssinados || !alvoAssinados) return;
+    if (!chaveAssinados) return;
     let vivo = true;
-    const id = alvoAssinados.id;
-    api<{ envio_assinados?: SituacaoAssinados }>(`/api/medicoes/${id}`).then(d => {
-      if (vivo && d?.envio_assinados) setAssinadosDe({ id, s: d.envio_assinados });
-    }).catch(() => {});
+    void (async () => {
+      let achado: { chave: string; id: number; s: SituacaoAssinados } | null = null;
+      for (const id of chaveAssinados.split(",").map(Number)) {
+        const d = await api<{ envio_assinados?: SituacaoAssinados }>(`/api/medicoes/${id}`).catch(() => null);
+        if (!d?.envio_assinados) continue;
+        if (!achado || d.envio_assinados.disponivel) achado = { chave: chaveAssinados, id, s: d.envio_assinados };
+        if (d.envio_assinados.disponivel) break;
+      }
+      if (vivo && achado) setAssinadosDe(achado);
+    })();
     return () => { vivo = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lerAssinados, alvoAssinados?.id, leituraLista]);
-  const assinados = lerAssinados && assinadosDe && assinadosDe.id === alvoAssinados?.id ? assinadosDe.s : null;
+  }, [chaveAssinados, leituraLista]);
+  const doAto = chaveAssinados && assinadosDe?.chave === chaveAssinados ? assinadosDe : null;
+  const assinados = doAto?.s ?? null;
+  const alvoAssinados = doAto ? { id: doAto.id } : null;
   const revisao = revisaoDe?.chave === chaveRevisao ? revisaoDe.valor : "conferindo";
 
   // Titulo da aba do navegador: a obra e a medicao.

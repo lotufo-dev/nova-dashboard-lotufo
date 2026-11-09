@@ -875,6 +875,24 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
     expect(screen.getByLabelText("PDF assinado da medição")).toBeTruthy();
   });
 
+  it("no par com a execução protocolada, o envio dos assinados é do reajuste com boletim (revisão da PR #635)", async () => {
+    const REAJ = { ...COM_BOLETIM, id: 6, tipo: "reajuste", boletins: [{ ...COM_BOLETIM.boletins[0], id: 10 }] };
+    responder({ "/api/contratos/1/medicoes": [{ ...COM_BOLETIM, estado: "protocolada" }, REAJ],
+      "/api/medicoes/5": ASSINADOS(false), "/api/medicoes/6": ASSINADOS(true) });
+    apiForm.mockReturnValue(new Promise(() => {}));
+    pagina();
+    await waitFor(() => expect(leituras("/api/medicoes/6").length).toBeGreaterThan(0));
+    await new Promise(r => setTimeout(r, 0));
+    fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Enviar documentos assinados" }));
+    fireEvent.change(screen.getByLabelText("PDF assinado da medição"),
+      { target: { files: [new File(["%PDF-1.4"], "assinado.pdf", { type: "application/pdf" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
+    await waitFor(() => expect(apiForm).toHaveBeenCalled());
+    expect(apiForm.mock.calls[0][0]).toBe("/api/medicoes/6/assinados/previa");
+    apiForm.mockReset();
+  });
+
   it("fora da SINFRA, antes do boletim e para a diretoria o envio dos assinados não aparece (issue #627)", async () => {
     responder({ "/api/contratos/1/medicoes": [COM_BOLETIM], "/api/medicoes/5": ASSINADOS(false) });
     pagina();

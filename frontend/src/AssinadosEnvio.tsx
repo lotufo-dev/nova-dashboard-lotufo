@@ -17,12 +17,12 @@ export type EnvioAssinados = { id: number; origem: "sistema" | "externo"; assina
   envio_id: number | null; vigente: boolean };
 export type SituacaoAssinados = {
   disponivel: boolean; motivo: string | null; reajuste: { id: number; numero: number } | null;
-  limite: number | null; limite_recusa: string | null; envios: EnvioAssinados[];
+  limite: number | null; limite_recusa: string | null; teto_registro?: number | null; envios: EnvioAssinados[];
   reserva: { id: number; envio_reservado_em: string; reservado_por: string | null } | null;
 };
 type Anexo = { nome: string; tamanho: number; sha256: string; origem: string };
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string; anexos: Anexo[]; total: number;
-  limite: number; pendencias: { codigo: string; mensagem: string }[]; reenvio: boolean };
+  limite: number; pendencias: { codigo: string; mensagem: string }[]; reenvio: boolean; anteriores?: number };
 
 const MIN_MOTIVO = 10;     // o servidor recusa menos que isso (assinados_envio.MIN_MOTIVO)
 
@@ -36,6 +36,16 @@ function Erro({ erro }: { erro?: string }) {
 function acimaDoLimite(s: SituacaoAssinados, a: Arquivos): string | undefined {
   if (!s.limite) return undefined;
   return [a.arquivo, a.reajuste, a.justificativa].some(f => f && f.size > s.limite!) ? s.limite_recusa ?? undefined : undefined;
+}
+
+// a mesma frase da recusa do servidor (limites.MENSAGEM_ASSINADOS) para o pedido acima do teto
+export const ACIMA_DO_TETO = "Os arquivos somam mais de 44 MB, o limite de um envio: deixe o .eml de fora ou registre o PDF do reajuste em outro envio";
+
+/** Revisao da PR #635: o pedido com todos os arquivos passa do teto do servidor? A tela diz antes de mandar. */
+function acimaDoTeto(s: SituacaoAssinados, arquivos: (File | null)[]): string | undefined {
+  if (!s.teto_registro) return undefined;
+  const soma = arquivos.reduce((t, f) => t + (f?.size ?? 0), 0);
+  return soma > s.teto_registro ? ACIMA_DO_TETO : undefined;
 }
 
 function formDosArquivos(a: Arquivos): FormData {
@@ -80,7 +90,8 @@ export function FormEnviarAssinados({ medicaoId, s, salvando, agir, aoFechar, er
   const [tentouMotivo, setTentouMotivo] = useState(false);
   const [erroPrevia, setErroPrevia] = useState("");
   const [abrindo, setAbrindo] = useState(false);
-  const falta = !a.arquivo ? "Anexe o PDF assinado da medição." : acimaDoLimite(s, a);
+  const falta = !a.arquivo ? "Anexe o PDF assinado da medição." : acimaDoLimite(s, a)
+    ?? acimaDoTeto(s, [a.arquivo, a.reajuste, a.justificativa]);
   const faltaMotivo = previa?.reenvio && [...motivo.trim()].length < MIN_MOTIVO
     ? `Escreva o motivo do reenvio, com pelo menos ${MIN_MOTIVO} caracteres.` : undefined;
 
@@ -100,7 +111,7 @@ export function FormEnviarAssinados({ medicaoId, s, salvando, agir, aoFechar, er
     if (!previa) return;
     const fd = formDosArquivos(a);
     fd.append("dados", JSON.stringify({ para: m.para, copia: m.copia, cco: m.cco, assunto: m.assunto, corpo: m.corpo,
-      motivo: motivo.trim() || null, assinado_em: data || null,
+      motivo: motivo.trim() || null, assinado_em: data || null, anteriores: previa.anteriores ?? null,
       anexos_previa: previa.anexos.map(x => ({ nome: x.nome, tamanho: x.tamanho, sha256: x.sha256 })) }));
     const ok = await agir(() => apiForm(`/api/medicoes/${medicaoId}/assinados/enviar`, fd),
       `Documentos assinados enviados às ${fmtHora(new Date().toISOString())}.`);
@@ -168,7 +179,8 @@ export function FormAssinadosPorFora({ medicaoId, s, salvando, agir, aoFechar, e
   const [tentou, setTentou] = useState(false);
   const hoje = hojeLocal();
   const faltaData = !data ? "Informe a data do envio." : data > hoje ? "A data do envio não pode ser futura." : undefined;
-  const falta = !a.arquivo ? "Anexe o PDF assinado da medição." : acimaDoLimite(s, a);
+  const falta = !a.arquivo ? "Anexe o PDF assinado da medição." : acimaDoLimite(s, a)
+    ?? acimaDoTeto(s, [a.arquivo, a.reajuste, a.justificativa, eml]);
 
   async function registrar(ev: React.FormEvent) {
     ev.preventDefault();

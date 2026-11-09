@@ -61,7 +61,7 @@ def _previa(cl, mid, **kw):
 
 
 def _enviar(cl, mid, pv, files=None, **extra):
-    corpo = {**{k: pv[k] for k in ("para", "copia", "assunto", "corpo")},
+    corpo = {**{k: pv[k] for k in ("para", "copia", "assunto", "corpo")}, "anteriores": pv.get("anteriores"),
              "anexos_previa": [{k: a[k] for k in ("nome", "tamanho", "sha256")} for a in pv["anexos"]], **extra}
     return cl.post(f"/api/medicoes/{mid}/assinados/enviar", data={"dados": json.dumps(corpo)},
                    files=files or _arquivos())
@@ -402,6 +402,144 @@ def test_nome_gravado_e_o_do_anexo_do_email(api, monkeypatch):
     assert _enviar(cl, mid, pv, files=files).status_code == 200
     assert _linha("SELECT nome, nome_reajuste FROM medicao_assinados_envios WHERE medicao_id=?", mid) == \
         {"nome": "Medicao assinada.pdf", "nome_reajuste": "Medicao assinada (2).pdf"}
+
+
+# --- revisao da PR #635 (revisor-adversarial e gate Sol) -----------------------------------------------
+
+def _reservar(mid, uid_email="admin@lotufo.com"):
+    """Uma linha do envio desta medicao com o e-mail saindo (reserva de agora)."""
+    c = db.get_conn()
+    uid = c.execute("SELECT id FROM usuarios WHERE email=?", (uid_email,)).fetchone()[0]
+    c.execute("INSERT INTO medicao_assinados_envios (medicao_id, origem, assinado_em, arquivo, sha256, nome, "
+              "envio_reservado_em, envio_reservado_por) VALUES (?, 'sistema', ?, 'assinados/x.pdf', 'x', 'x.pdf', "
+              "datetime('now'), ?)", (mid, tempo.hoje_local().isoformat(), uid))
+    c.commit(); c.close()
+
+
+def test_reajuste_enviado_sozinho_conta_para_a_execucao_que_leva_o_pdf_dele(api, monkeypatch):
+    """1: o reajuste enviado pela pagina dele (linha com medicao_id=R) e' envio anterior quando a execucao leva o PDF
+    do reajuste: pede motivo; sem o PDF do reajuste, a execucao envia o 1o dela sem motivo."""
+    cl, cid, _ = api
+    mid, rid, _ = _com_boletim(cl, cid, reajuste=True)
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    assert _enviar(cl, rid, _previa(cl, rid).json()).status_code == 200
+    pv = _previa(cl, mid, reajuste=True).json()
+    assert pv["reenvio"] is True and pv["anteriores"] == 1
+    r = _enviar(cl, mid, pv, files=_arquivos(reajuste=True))
+    assert r.status_code == 422 and "motivo do reenvio" in r.json()["detail"]
+    pv = _previa(cl, mid).json()
+    assert pv["reenvio"] is False
+    assert _enviar(cl, mid, pv).status_code == 200
+
+
+def test_reajuste_saindo_sozinho_segura_a_execucao_que_leva_o_pdf_dele(api, monkeypatch):
+    cl, cid, _ = api
+    mid, rid, _ = _com_boletim(cl, cid, reajuste=True)
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    pv = _previa(cl, mid, reajuste=True).json()
+    _reservar(rid)
+    r = _enviar(cl, mid, pv, files=_arquivos(reajuste=True))
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ENVIO_RESERVADO"
+    r = cl.post(f"/api/medicoes/{mid}/assinados/envio-externo", data={"enviado_em": tempo.hoje_local().isoformat()},
+                files=_arquivos(reajuste=True))
+    assert r.status_code == 422 and "sendo enviados pelo sistema" in r.json()["detail"]
+    assert falso.enviados == [] and _assinaturas(mid) == []
+
+
+def _boletins_em_dias(cl, cid, dias_execucao: int, dias_reajuste: int):
+    """Execucao e reajuste com boletins de N dias atras (planilha/carta enviada por fora antes deles)."""
+    import datetime
+    from tests.test_api_planilha_envio import _planilha
+    hoje = tempo.hoje_local()
+    mid = _planilha(cl, cid, reajuste_valor="500,00")
+    _por_fora(cl, mid, (hoje - datetime.timedelta(days=30)).isoformat())
+    rid = _linha("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1 AND tipo='reajuste'", cid)["id"]
+    for x, d, valor in ((mid, dias_execucao, "12.000,01"), (rid, dias_reajuste, "500,00")):
+        r = _registrar_boletim(cl, x, valor=valor, data=(hoje - datetime.timedelta(days=d)).isoformat())
+        assert r.status_code == 201, r.text
+    return mid, rid
+
+
+def test_data_antes_do_boletim_do_reajuste_e_recusada_quando_o_pdf_dele_vai(api, monkeypatch):
+    """3: boletim da execucao ha' 5 dias, do reajuste ha' 1; a data de 3 dias atras so' vale sem o PDF do reajuste."""
+    import datetime
+    cl, cid, _ = api
+    mid, rid = _boletins_em_dias(cl, cid, 5, 1)
+    data = (tempo.hoje_local() - datetime.timedelta(days=3)).isoformat()
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    pv = _previa(cl, mid, reajuste=True).json()
+    r = _enviar(cl, mid, pv, files=_arquivos(reajuste=True), assinado_em=data)
+    assert r.status_code == 422 and "anterior à do boletim" in r.json()["detail"]
+    r = cl.post(f"/api/medicoes/{mid}/assinados/envio-externo", data={"enviado_em": data}, files=_arquivos(reajuste=True))
+    assert r.status_code == 422 and "anterior à do boletim" in r.json()["detail"]
+    assert falso.enviados == [] and _assinaturas(rid) == []
+    r = cl.post(f"/api/medicoes/{mid}/assinados/envio-externo", data={"enviado_em": data}, files=_arquivos())
+    assert r.status_code == 201, r.text
+
+
+def test_registro_por_fora_repetido_e_recusado(api):
+    cl, cid, _ = api
+    mid, _, _ = _com_boletim(cl, cid)
+    dados = {"enviado_em": tempo.hoje_local().isoformat()}
+    assert cl.post(f"/api/medicoes/{mid}/assinados/envio-externo", data=dados, files=_arquivos()).status_code == 201
+    r = cl.post(f"/api/medicoes/{mid}/assinados/envio-externo", data=dados, files=_arquivos())
+    assert r.status_code == 422 and r.json()["detail"] == "Este envio dos documentos assinados já está registrado"
+    assert len(_assinaturas(mid)) == 1 and len(_textos(cl, mid)) == 1
+
+
+def test_envio_concluido_depois_da_previa_recusa_o_reenvio_com_409(api, monkeypatch):
+    """5: duas pessoas com a previa aberta; a primeira envia, a segunda (com motivo escrito) recebe 409."""
+    cl, cid, _ = api
+    mid, _, _ = _com_boletim(cl, cid)
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    pv = _previa(cl, mid).json()
+    assert pv["anteriores"] == 0
+    assert _enviar(cl, mid, pv).status_code == 200
+    r = _enviar(cl, mid, pv, motivo="pacote corrigido pela outra pessoa")
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ENVIO_CONCLUIDO_NO_MEIO"
+    assert "Outro envio dos documentos assinados terminou" in r.json()["detail"]["mensagem"]
+    assert len(falso.enviados) == 1
+
+
+def test_arquivos_acima_do_teto_do_pedido_dizem_o_que_fazer(api):
+    """6: o teto do pedido (45 MB) nao sobe; a recusa diz o que fazer."""
+    cl, cid, _ = api
+    mid, _, _ = _com_boletim(cl, cid)
+    grande = ("grande.pdf", b"%PDF-1.4 " + b"\0" * (46 * MB), "application/pdf")
+    r = cl.post(f"/api/medicoes/{mid}/assinados/envio-externo", data={"enviado_em": tempo.hoje_local().isoformat()},
+                files={"arquivo": grande})
+    assert r.status_code == 413
+    assert r.json()["detail"] == ("Os arquivos somam mais de 44 MB, o limite de um envio: deixe o .eml de fora ou "
+                                  "registre o PDF do reajuste em outro envio")
+    assert cl.get(f"/api/medicoes/{mid}").json()["envio_assinados"]["teto_registro"] == 44 * MB
+
+
+def test_primeiro_envio_do_reajuste_nao_e_reenvio_na_linha_do_tempo(api, monkeypatch):
+    """7: a execucao vai sem o PDF do reajuste e volta com ele: no reajuste e' o primeiro envio."""
+    cl, cid, _ = api
+    mid, rid, _ = _com_boletim(cl, cid, reajuste=True)
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    assert _enviar(cl, mid, _previa(cl, mid).json()).status_code == 200
+    pv = _previa(cl, mid, reajuste=True).json()
+    r = _enviar(cl, mid, pv, files=_arquivos(reajuste=True), motivo="faltou o PDF do reajuste")
+    assert r.status_code == 200, r.text
+    (ev,) = _textos(cl, rid)
+    assert ev["texto"].startswith("Documentos assinados enviados em ")
+    textos = [e["texto"] for e in _textos(cl, mid)]
+    assert textos[1].startswith("Documentos assinados reenviados em ") and "faltou o PDF do reajuste" in textos[1]
+
+
+def test_assinatura_com_pdf_em_medicao_cancelada_e_recusada(api):
+    cl, cid, _ = api
+    mid, _, _ = _com_boletim(cl, cid)
+    assert cl.post(f"/api/medicoes/{mid}/estado", json={"estado": "cancelada"}).status_code == 200
+    r = cl.post(f"/api/medicoes/{mid}/assinatura-com-pdf", data={"data": tempo.hoje_local().isoformat()},
+                files=_arquivos())
+    assert r.status_code == 422 and "cancelada" in r.json()["detail"]
+    assert _assinaturas(mid) == []
 
 
 def test_diretoria_recebe_403_nos_dois_atos(api):

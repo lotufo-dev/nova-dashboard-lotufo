@@ -276,16 +276,20 @@ def _eventos_assinatura(conn: sqlite3.Connection, ids: list[int], out: dict[int,
     guarda o PDF leva o id para a tela ligar o arquivo."""
     for i in range(0, len(ids), LOTE_AUDITORIA):
         lote = ids[i:i + LOTE_AUDITORIA]
+        # "reenviados" conta os envios da PROPRIA medicao do evento (revisao da PR #635): a execucao enviada sem o PDF
+        # do reajuste e reenviada com ele da' ao reajuste o primeiro envio, nao um reenvio
+        ja_enviada: set[int] = set()
         for r in conn.execute(
                 "SELECT e.id, e.medicao_id, e.envelope, e.assinado_em, e.criado_em, e.arquivo, e.envio_origem, "
-                "a.motivo, a.anteriores, v.enviado_em, u.nome FROM medicao_assinaturas e "
+                "a.motivo, v.enviado_em, u.nome FROM medicao_assinaturas e "
                 "LEFT JOIN medicao_assinados_envios a ON a.id=e.assinados_envio_id "
                 "LEFT JOIN envios v ON v.id=e.envio_id "
                 "LEFT JOIN usuarios u ON u.id=e.usuario_id "
                 f"WHERE e.medicao_id IN ({','.join('?' * len(lote))}) ORDER BY e.id", lote):
             pdf = " (PDF)" if r["arquivo"] else ""
             if r["envio_origem"]:
-                reenvio = bool(r["anteriores"])
+                reenvio = r["medicao_id"] in ja_enviada
+                ja_enviada.add(r["medicao_id"])
                 # pelo sistema, o dia do e-mail (em Cuiaba); por fora, a data informada (code-review)
                 dia = r["assinado_em"]
                 if r["enviado_em"]:

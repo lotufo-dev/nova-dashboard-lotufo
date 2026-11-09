@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados } from "./AssinadosEnvio";
+import { ACIMA_DO_TETO, FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados } from "./AssinadosEnvio";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm }));
@@ -8,14 +8,14 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 const MB = 1024 * 1024;
 const RECUSA = "PDF acima de 25 MB, o limite por documento do órgão: divida o arquivo";
 const S: SituacaoAssinados = { disponivel: true, motivo: null, reajuste: { id: 6, numero: 23 }, limite: 25 * MB,
-  limite_recusa: RECUSA, envios: [], reserva: null };
+  limite_recusa: RECUSA, teto_registro: 44 * MB, envios: [], reserva: null };
 const PREVIA = { para: ["protocolo@orgao.exemplo.com.br"], copia: ["engenharia@lotufo.com"],
   assunto: "RE: CT-337-LT-2026 - 23ª Medição (09_2026) - IC 1/2026 - Obra Alfa",
   corpo: "Encaminho, em anexo, os documentos assinados e a justificativa de atraso do cronograma.",
   anexos: [{ nome: "Medicao.pdf", tamanho: 9, sha256: "a".repeat(64), origem: "medicao" },
     { nome: "Reajuste.pdf", tamanho: 9, sha256: "b".repeat(64), origem: "reajuste" },
     { nome: "Justificativa.pdf", tamanho: 9, sha256: "c".repeat(64), origem: "justificativa" }],
-  total: 27, limite: 25 * MB, pendencias: [], reenvio: false };
+  total: 27, limite: 25 * MB, pendencias: [], reenvio: false, anteriores: 0 };
 
 const pdf = (nome: string, tamanho = 9) => {
   const f = new File(["%PDF-1.4"], nome, { type: "application/pdf" });
@@ -59,6 +59,7 @@ describe("Enviar documentos assinados", () => {
     const dados = JSON.parse(fd.get("dados") as string);
     expect(dados.para).toEqual(PREVIA.para);
     expect(dados.assunto).toBe(PREVIA.assunto);
+    expect(dados.anteriores).toBe(0);      // revisao da PR #635: o servidor confere que ninguem enviou no meio
     expect(dados.anexos_previa).toEqual(PREVIA.anexos.map(({ nome, tamanho, sha256 }) => ({ nome, tamanho, sha256 })));
     expect(fd.get("arquivo")).toBeTruthy();
     await vi.waitFor(() => expect(aoFechar).toHaveBeenCalled());
@@ -115,6 +116,16 @@ describe("Registrar envio dos assinados por fora", () => {
     expect(url).toBe("/api/medicoes/5/assinados/envio-externo");
     expect(fd.get("enviado_em")).toBe("2026-11-09");
     expect(fd.get("arquivo")).toBeTruthy();
+  });
+
+  it("arquivos que somam mais que o teto de um envio são recusados antes de mandar (revisão da PR #635)", () => {
+    const agir = vi.fn();
+    render(<FormAssinadosPorFora medicaoId={5} s={S} salvando={false} agir={agir} aoFechar={() => {}} aoLiberar={() => {}} />);
+    anexar("PDF assinado da medição", pdf("Medicao.pdf", 24 * MB));
+    anexar("PDF assinado do reajuste (opcional)", pdf("Reajuste.pdf", 21 * MB));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar envio" }));
+    expect(screen.getByText(ACIMA_DO_TETO)).toBeTruthy();
+    expect(agir).not.toHaveBeenCalled();
   });
 
   it("sem o PDF assinado não registra", () => {

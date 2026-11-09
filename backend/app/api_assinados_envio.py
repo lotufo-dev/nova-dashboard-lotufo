@@ -26,6 +26,8 @@ class EnvioIn(BaseModel):
     motivo: str | None = Field(default=None, max_length=1000)
     assinado_em: datetime.date | None = None
     anexos_previa: list[AnexoConferido] = Field(max_length=10)
+    # os envios concluidos que a previa mostrou (revisao da PR #635): outro envio terminado no meio recusa
+    anteriores: int | None = Field(default=None, ge=0, le=10_000)
 
 
 def _ler(arquivo: UploadFile | None) -> tuple[str, bytes] | None:
@@ -76,7 +78,7 @@ def enviar(mid: ID, dados: str = Form(..., max_length=100_000), arquivo: UploadF
         eid = assinados_envio.enviar(
             conn, {"id": usuario["id"], "email": usuario["email"]}, mid, docs, _emails(d.para), _emails(d.copia),
             d.assunto.strip(), d.corpo, [a.model_dump() for a in d.anexos_previa], d.motivo,
-            d.assinado_em.isoformat() if d.assinado_em else None, cco=_emails(d.cco))
+            d.assinado_em.isoformat() if d.assinado_em else None, cco=_emails(d.cco), anteriores_vistos=d.anteriores)
     except envio_reserva.EnvioEmAndamento as e:
         conn.rollback()
         raise HTTPException(409, detail=e.detalhe()) from None
@@ -112,6 +114,10 @@ def assinatura_com_pdf(mid: ID, data: datetime.date = Form(...), envelope: str |
                        conn: sqlite3.Connection = Depends(conexao)):
     """"Registrar assinatura" com o PDF assinado (opcional na tela): sem envelope digitado, vale o lido do PDF."""
     _medicao_existe(conn, mid)
+    m = conn.execute("SELECT numero, tipo, estado FROM medicoes WHERE id=?", (mid,)).fetchone()
+    if m["estado"] in ("cancelada", "desistida"):       # revisao da PR #635: o servidor recusa, nao so' o menu
+        raise HTTPException(422, f"{medicoes.nome_medicao(m['numero'], m['tipo'])} está "
+                                 f"{medicoes.rotulo_estado(m['estado'])}: não registra assinatura")
     try:
         medicoes.conferir_data_assinatura(conn, mid, data.isoformat())    # recusa antes de gravar o PDF
     except ValueError as e:
