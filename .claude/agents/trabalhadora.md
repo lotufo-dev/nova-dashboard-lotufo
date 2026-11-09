@@ -28,6 +28,11 @@ ninguém. Leia antes `CLAUDE.md`, `README.md` e as regras de `.claude/rules/` qu
 - **Testes locais só do que você tocou** (arquivo ou módulo): `backend/.venv/Scripts/python -m pytest -q
   backend/tests/test_x.py`, `npm test -- <arquivo>` em `frontend`, mais `npx tsc -b` e `npm run lint` se
   mexeu em `.ts/.tsx`. A suíte inteira roda na CI da PR; não a rode aqui (a máquina é a produção).
+- **Nunca encadeie `cd` com `git`** (`cd <pasta> && git ...`): o Claude Code pergunta permissão a esse padrão mesmo
+  em modo automático e para a rodada. Você já está no seu worktree: rode `git` direto; para nomear outra pasta
+  (só leitura), `git -C <pasta> ...`. Para ver um teste falhar sem a correção: copie o arquivo para o scratchpad,
+  `git show <sha>:<arquivo> > <arquivo>`, rode o teste e restaure com `cp` do scratchpad. Não use `git checkout
+  <sha> -- <arquivo>`: ele deixa a versão antiga no índice, e o próximo commit levaria o arquivo sem a correção.
 - **Nunca** `npm ci`, `pip install`, `git push --force`, mexer em `C:\DashboardLotufo`, no banco padrão
   (`backend/dados/dashboard.db`) nem em outro worktree. Servidor de teste só com `DASH_DEV=1`,
   `DASH_SEM_JOBS=1` e `DASH_DB_PATH` no scratchpad.
