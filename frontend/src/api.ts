@@ -96,7 +96,17 @@ export async function apiForm<T = unknown>(caminho: string, dados: FormData): Pr
 /** Download que pode ser recusado (issue #169: FRC desatualizada). Um `<a href>` abriria o JSON do erro no lugar da
  * tela; aqui a recusa vira `ApiErro` com a mensagem do servidor, e o arquivo baixa com o nome que o servidor deu. */
 export async function baixarArquivo(caminho: string, nomePadrao: string): Promise<void> {
-  const r = await pedir(caminho, { credentials: "include" });
+  await salvarResposta(await pedir(caminho, { credentials: "include" }), nomePadrao);
+}
+
+/** Igual a `baixarArquivo`, mas o arquivo nasce de um POST de multipart (ferramentas que recebem PDFs e devolvem um PDF). */
+export async function baixarArquivoForm(caminho: string, dados: FormData, nomePadrao: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+  await salvarResposta(await pedir(caminho, { method: "POST", credentials: "include", body: dados, headers }), nomePadrao);
+}
+
+async function salvarResposta(r: Response, nomePadrao: string): Promise<void> {
   if (!r.ok) {
     const corpo = await r.json().catch(() => ({}));
     throw new ApiErro(r.status, mensagemErro(corpo, padraoDoStatus(r.status), r.status), corpo?.detail);

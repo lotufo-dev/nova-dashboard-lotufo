@@ -9,10 +9,10 @@ describe("navegação por perfil", () => {
   });
 
   it("trilho sem grupos, na ordem do trabalho, com o recorte do perfil; as Notas saíram (viraram abas de Medições)", () => {
-    expect(menuDe("engenharia")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber"]);
+    expect(menuDe("engenharia")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "ancoras-docusign"]);
     // decisão 3: a diretoria sem Medições, com a Carteira
     expect(menuDe("diretoria")).toEqual(["inicio", "obras", "avisos", "documentos", "a-receber", "carteira"]);
-    expect(menuDe("admin")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "carteira", "admin"]);
+    expect(menuDe("admin")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "carteira", "ancoras-docusign", "admin"]);
   });
 
   it("o item fica marcado também abaixo dele na hierarquia", () => {

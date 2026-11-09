@@ -1,0 +1,12 @@
+.ancoras { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+.ancoras__titulo { margin: 0; }
+.ancoras__intro { margin: 0; color: var(--texto-2); }
+.ancoras__soltar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 20px; border: 1px dashed var(--linha); border-radius: var(--raio); }
+.ancoras__soltar--sobre { border-color: var(--acento); }
+.ancoras__dica { color: var(--texto-2); font-size: 13px; }
+.ancoras__arquivos { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.ancoras__arquivos .btn { margin-left: 8px; }
+.ancoras__nomes { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; }
+.ancoras__nomes legend { padding: 0; margin-bottom: 8px; font-weight: 500; }
+.ancoras__acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.ancoras__paginas h2 { font-size: 16px; margin: 16px 0 8px; }

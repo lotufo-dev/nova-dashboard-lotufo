@@ -593,6 +593,9 @@ def _trabalho(pdf: bytes, modo: str, envia, opcoes=None) -> None:
             valor = leitor_de_pdf(pdf, pacote=True).pages[0].extract_text() or ""
         elif modo == "juntar":           # bloco 5: montagem do pacote; `opcoes` = as partes, em ordem
             valor = _juntar(opcoes)
+        elif modo == "ancoras":          # issue #626: ancoras do DocuSign; `opcoes` = o pedido (ver ancoras_docusign)
+            from app import ancoras_docusign
+            valor = ancoras_docusign.processar(opcoes)
         elif modo == "dormir":
             time.sleep(60)
             valor = None
