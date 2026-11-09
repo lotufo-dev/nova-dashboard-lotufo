@@ -375,52 +375,120 @@ def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int
     o aprovado vigente (`valor_atestado_centavos`) e' o do ultimo evento. Na planilha/carta enviada a medicao vai a
     `boletim_recebido`; nos estados seguintes e' glosa (evento novo, estado igual). A prevista vai a
     `boletim_recebido` na obra que gera espelho (o passo seguinte); na do fluxo antigo guarda o evento e fica
-    prevista, porque o protocolo nao recebe `boletim_recebido`. O pedido nao muda."""
+    prevista, porque o protocolo nao recebe `boletim_recebido`. O pedido nao muda.
+    Issue #625: com a capa do SMO aprovada, o mesmo boletim vai tambem ao par (execucao <-> reajuste de mesmo nº e
+    competencia), na mesma transacao, com o valor dele lido da capa (`par` na resposta)."""
     meio = dados.get("meio") or None
     numero = (dados.get("numero_orgao") or "").strip() or None
     observacao = (dados.get("observacao") or "").strip() or None
     valor = dados["valor_centavos"]
     with db.mutacao(conn):
         m, dia = conferir_boletim(conn, medicao_id, dados)
-        atual = m["estado"]
         # issue #290 (gate Sol, rodada 1): `aceito` so' quando o PDF enviado e os tres campos sao exatamente os de uma
         # leitura da capa que o proprio servidor fez para esta medicao; o resto e' `manual`. O cliente nao decide.
         origem = "aceito" if conn.execute(
             "SELECT 1 FROM medicao_boletim_leituras WHERE medicao_id=? AND sha256=? AND numero_orgao IS ? AND data=? "
             "AND valor_centavos=? LIMIT 1", (medicao_id, anexo["sha256"], numero, dia.isoformat(), valor)).fetchone() \
             else "manual"
-        # Repeticao (clique duplo, pedido atrasado) e' o mesmo boletim de QUALQUER evento ja' gravado, com o mesmo
-        # documento, valor, dia, nº, meio e observacao (gate Sol): a repeticao atrasada de A depois da correcao B nao
-        # volta o valor; corrigir so' o nº, o meio ou a observacao e' um evento novo. O evento nao se apaga depois.
-        if conn.execute("SELECT 1 FROM medicao_atestos WHERE medicao_id=? AND valor_centavos=? AND atestado_em=? "
-                        "AND sha256=? AND numero_orgao IS ? AND meio IS ? AND observacao IS ? LIMIT 1",
-                        (medicao_id, valor, dia.isoformat(), anexo["sha256"], numero, meio, observacao)).fetchone():
+        if _boletim_repetido(conn, medicao_id, valor, dia, anexo["sha256"], numero, meio, observacao):
             raise ValueError("Este boletim já está registrado")
-        regra_ativa = conn.execute("SELECT 1 FROM espelho_regras WHERE contrato_id=? AND situacao='ativa'",
-                                   (m["contrato_id"],)).fetchone() is not None
-        novo = ("boletim_recebido" if atual == "planilha_enviada" or (atual == "prevista" and regra_ativa)
-                else atual)
-        cur = conn.execute(
-            "UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem=?, atestado_em=?, estado=? "
-            "WHERE id=? AND estado=?", (valor, origem, dia.isoformat(), novo, medicao_id, atual))
-        db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
-        aid = conn.execute(
-            "INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, meio, "
-            "numero_orgao, arquivo, sha256, observacao, pedido_centavos) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (medicao_id, valor, origem, dia.isoformat(), usuario_id, meio, numero, anexo["arquivo"], anexo["sha256"],
-             observacao, m["valor_protocolado_centavos"])).lastrowid
-        from app import capa_smo    # issue #286: a capa do SMO lida do PDF, para a conferencia contra o cadastro
-        capa_smo.gravar(conn, aid, medicao_id, anexo.get("capa"))
-        antes = {"estado": atual, "valor_atestado_centavos": m["valor_atestado_centavos"],
-                 "valor_atestado_origem": m["valor_atestado_origem"], "atestado_em": m["atestado_em"]}
-        auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", medicao_id, antes, {
-            "estado": novo, "valor_atestado_centavos": valor, "valor_atestado_origem": origem,
-            "atestado_em": dia.isoformat(), "boletim": {"atesto_id": aid, "meio": meio, "numero_orgao": numero,
-                                                       "sha256": anexo["sha256"], "observacao": observacao,
-                                                       "pedido_centavos": m["valor_protocolado_centavos"]}})
+        aid, novo = _gravar_boletim(conn, usuario_id, m, dia, valor, origem, meio, numero, observacao, anexo)
+        par = _registrar_no_par(conn, usuario_id, m, dia, dados, meio, numero, observacao, anexo)
         pedido = m["valor_protocolado_centavos"]
     return {"id": aid, "estado": novo, "pedido_centavos": pedido, "aprovado_centavos": valor,
-            "diferenca_centavos": None if pedido is None else valor - pedido}
+            "diferenca_centavos": None if pedido is None else valor - pedido, "par": par}
+
+
+def _boletim_repetido(conn, medicao_id: int, valor: int, dia, sha256: str, numero, meio, observacao) -> bool:
+    """Repeticao (clique duplo, pedido atrasado) e' o mesmo boletim de QUALQUER evento ja' gravado, com o mesmo
+    documento, valor, dia, nº, meio e observacao (gate Sol): a repeticao atrasada de A depois da correcao B nao
+    volta o valor; corrigir so' o nº, o meio ou a observacao e' um evento novo. O evento nao se apaga depois."""
+    return conn.execute("SELECT 1 FROM medicao_atestos WHERE medicao_id=? AND valor_centavos=? AND atestado_em=? "
+                        "AND sha256=? AND numero_orgao IS ? AND meio IS ? AND observacao IS ? LIMIT 1",
+                        (medicao_id, valor, dia.isoformat(), sha256, numero, meio, observacao)).fetchone() is not None
+
+
+def _gravar_boletim(conn, usuario_id: int, m, dia, valor: int, origem: str, meio, numero, observacao, anexo: dict,
+                    par_de: int | None = None) -> tuple[int, str]:
+    """O evento de atesto, o estado, a capa e a auditoria de uma medicao, dentro da transacao do registro. Devolve o
+    id do evento e o estado novo."""
+    atual = m["estado"]
+    regra_ativa = conn.execute("SELECT 1 FROM espelho_regras WHERE contrato_id=? AND situacao='ativa'",
+                               (m["contrato_id"],)).fetchone() is not None
+    novo = ("boletim_recebido" if atual == "planilha_enviada" or (atual == "prevista" and regra_ativa)
+            else atual)
+    cur = conn.execute(
+        "UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem=?, atestado_em=?, estado=? "
+        "WHERE id=? AND estado=?", (valor, origem, dia.isoformat(), novo, m["id"], atual))
+    db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+    aid = conn.execute(
+        "INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, meio, "
+        "numero_orgao, arquivo, sha256, observacao, pedido_centavos) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (m["id"], valor, origem, dia.isoformat(), usuario_id, meio, numero, anexo["arquivo"], anexo["sha256"],
+         observacao, m["valor_protocolado_centavos"])).lastrowid
+    from app import capa_smo    # issue #286: a capa do SMO lida do PDF, para a conferencia contra o cadastro
+    capa_smo.gravar(conn, aid, m["id"], anexo.get("capa"))
+    antes = {"estado": atual, "valor_atestado_centavos": m["valor_atestado_centavos"],
+             "valor_atestado_origem": m["valor_atestado_origem"], "atestado_em": m["atestado_em"]}
+    boletim = {"atesto_id": aid, "meio": meio, "numero_orgao": numero, "sha256": anexo["sha256"],
+               "observacao": observacao, "pedido_centavos": m["valor_protocolado_centavos"]}
+    if par_de is not None:
+        boletim["par_de_medicao_id"] = par_de       # issue #625: veio do registro na outra medicao do par
+    auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", m["id"], antes, {
+        "estado": novo, "valor_atestado_centavos": valor, "valor_atestado_origem": origem,
+        "atestado_em": dia.isoformat(), "boletim": boletim})
+    return aid, novo
+
+
+_PAR_DO_TIPO = {"execucao": "reajuste", "reajuste": "execucao"}     # projeto nao tem par
+
+
+def _par_do_boletim(conn, m):
+    """Issue #625: a outra medicao do par execucao <-> reajuste (mesmo contrato, nº e competencia), fora as canceladas
+    e desistidas, ou None. UNIQUE (contrato_id, numero, tipo): no maximo uma."""
+    outro = _PAR_DO_TIPO.get(m["tipo"])
+    if outro is None:
+        return None
+    return conn.execute("SELECT * FROM medicoes WHERE contrato_id=? AND numero=? AND tipo=? AND competencia=? "
+                        "AND estado NOT IN ('cancelada', 'desistida')",
+                        (m["contrato_id"], m["numero"], outro, m["competencia"])).fetchone()
+
+
+def _nome_do_par(b) -> str:
+    """"Reajuste nº 15" / "15ª medição": como a confirmacao do boletim chama a outra medicao do par."""
+    return f"Reajuste nº {b['numero']}" if b["tipo"] == "reajuste" else f"{b['numero']}ª medição"
+
+
+def _registrar_no_par(conn, usuario_id: int, m, dia, dados: dict, meio, numero, observacao, anexo: dict) -> dict | None:
+    """Issue #625: o PDF do SMO com a capa APROVADA vale tambem para o par de `m`: o mesmo evento (arquivo, sha256,
+    data, nº, meio, observacao) com o valor do par lido da capa e origem `aceito` (a leitura e' a que o servidor fez
+    agora). Sem capa aprovada ou sem par: None (nada muda). Par que nao pode receber: {"motivo"}, e `m` fica
+    registrada do mesmo jeito."""
+    capa = anexo.get("capa")
+    if not capa or capa.get("situacao") != "APROVADA":
+        return None
+    b = _par_do_boletim(conn, m)
+    if b is None:
+        return None
+    nome = _nome_do_par(b)
+    # a capa de outra medicao nao vira boletim no par (na medicao aberta a leitura ja' avisou)
+    esperado = m["numero_orgao"] or m["numero"]
+    if capa.get("numero") is not None and capa["numero"] != esperado:
+        return {"motivo": f"{nome} sem boletim: a capa é da {capa['numero']}ª medição"}
+    valor = capa.get("reajuste_centavos" if b["tipo"] == "reajuste" else "valor_centavos")
+    if valor is None:
+        return {"motivo": f"{nome} sem boletim: a capa não traz o valor dele"}
+    if valor < 0:
+        return {"motivo": f"{nome} sem boletim: a capa traz valor negativo"}    # #589: aprovado negativo nao e' boletim
+    try:
+        conferir_boletim(conn, b["id"], dados)
+    except ValueError as e:
+        texto = str(e)
+        return {"motivo": f"{nome} sem boletim: {texto[:1].lower()}{texto[1:]}"}
+    if _boletim_repetido(conn, b["id"], valor, dia, anexo["sha256"], numero, meio, observacao):
+        return {"motivo": f"{nome}: este boletim já está registrado"}
+    _gravar_boletim(conn, usuario_id, b, dia, valor, "aceito", meio, numero, observacao, anexo, par_de=m["id"])
+    return {"medicao_id": b["id"], "tipo": b["tipo"], "numero": b["numero"], "aprovado_centavos": valor}
 
 
 # --- issue #288: "Aceitar a diferença" do boletim abaixo do pedido (decisao do Leo de 08/11/2026) --------------
