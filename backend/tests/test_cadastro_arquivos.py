@@ -1185,6 +1185,12 @@ def test_custo_titulo_vazio_ou_que_nao_e_texto_recusa(tmp_path, titulos):
     assert any(e.startswith("contratos/mt-402.yaml: custo.grupos[0].titulos_planilha:") for e in erros), erros
 
 
+def test_custo_ajuda_dos_grupos_cita_titulos_planilha(tmp_path):
+    for i, grupos in enumerate(([], ["x"])):
+        erros = _erros(_escrever(tmp_path / str(i), contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": grupos}}]))
+        assert any("titulos_planilha" in e for e in erros), erros
+
+
 def test_custo_titulo_repetido_no_mesmo_grupo_recusa(tmp_path):
     grupos = [{**GRUPOS_TITULOS[0], "titulos_planilha": ["Drenagem", "DRENAGEM"]}]
     erros = _erros(_escrever(tmp_path, contratos=[{**CONTRATO, "custo": {**CUSTO, "grupos": grupos}}]))

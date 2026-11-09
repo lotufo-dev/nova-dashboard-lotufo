@@ -927,7 +927,7 @@ def _custo(bruto, falha) -> dict | None:
         falha("custo.sem_tarefa", f"use {' ou '.join(REGRAS_SEM_TAREFA)}: {regra!r}")
     lista = bruto.get("grupos")
     if not isinstance(lista, list) or not lista:
-        falha("custo.grupos", "use uma lista com ao menos um grupo (nome, tarefas, itens_planilha)")
+        falha("custo.grupos", "use uma lista com ao menos um grupo (nome, tarefas, itens_planilha, titulos_planilha)")
         lista = []
     grupos: list[dict] = []
     donos: dict[str, list[tuple[str, str]]] = {"tarefas": [], "itens_planilha": []}
@@ -936,7 +936,7 @@ def _custo(bruto, falha) -> dict | None:
     for i, g in enumerate(lista):
         onde = f"custo.grupos[{i}]"
         if not isinstance(g, dict):
-            falha(onde, "use um mapa com nome, tarefas, itens_planilha e, se houver, item_chave")
+            falha(onde, "use um mapa com nome, tarefas, itens_planilha ou titulos_planilha e, se houver, item_chave")
             continue
         for k in sorted(set(g) - _CHAVES_GRUPO, key=str):
             falha(f"{onde}.{k}", f"campo desconhecido; use {', '.join(sorted(_CHAVES_GRUPO))}")

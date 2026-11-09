@@ -55,6 +55,7 @@ copia_extras: []
 #     itens_planilha: ['3.']
 # Planilha sem nº de item (issue #613): titulos_planilha = os títulos de grupo (e de subgrupo) da planilha que formam
 # o grupo, comparados sem acento e sem maiúsculas; item_chave.codigo vira o código do serviço na planilha.
+# Um título só pode estar em um grupo: o mesmo subtítulo sob dois grupos da planilha soma no grupo que o listar.
 #   - nome: Pavimentação
 #     tarefas: ['001.06']
 #     titulos_planilha: ['PAVIMENTAÇÃO', 'Revestimento']
