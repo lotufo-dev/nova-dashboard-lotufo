@@ -4,7 +4,7 @@ import { api, setCsrf } from "./api";
 import AReceberPagina from "./AReceberPagina";
 import { ABAS_ADMIN } from "./administracao";
 import { ABAS_CARTEIRA } from "./carteira";
-import { BarraSuperior, Trilho, type ContagensMedicoes } from "./Casca";
+import { BarraSuperior, Trilho } from "./Casca";
 import Documentos from "./Documentos";
 import DocumentosEmpresa from "./DocumentosEmpresa";
 import AbrirEnvio from "./AbrirEnvio";
@@ -17,7 +17,7 @@ import MedicoesPagina from "./MedicoesPagina";
 import MinhaConta from "./MinhaConta";
 import MedicaoNova from "./MedicaoNova";
 import Diretoria from "./Diretoria";
-import { entradaDe, itemDe, menuDe, subitemMedicoesDe, tituloDaSecao, tituloDe } from "./navegacao";
+import { entradaDe, itemDe, tituloDaSecao, tituloDe } from "./navegacao";
 import SigaPagina from "./SigaPagina";
 import AncorasDocusign from "./AncorasDocusign";
 import { useLeituraDasRespostas } from "./respostasOrgao";
@@ -83,26 +83,12 @@ export default function App() {
   useEffect(() => {
     // A obra e a medicao poem o proprio titulo ("MT-388 · Prazos"), quando o cabecalho delas chega.
     if (rota.tela === "obra" || rota.tela === "medicao" || rota.tela === "documentos-empresa") return;
-    // a aba da Carteira, da Administracao e de Medicoes entram no titulo ("Carteira · QDOP"), como a da obra
+    // a aba da Carteira e a da Administracao entram no titulo ("Carteira · QDOP"), como a da obra
     // ("MT-388 · Prazos")
     const aba = rota.tela === "carteira" && rota.aba && rota.aba !== "resumo" ? ABAS_CARTEIRA.find(a => a.id === rota.aba)?.rotulo
-      : rota.tela === "admin" && rota.aba && rota.aba !== "saude" ? ABAS_ADMIN.find(a => a.id === rota.aba)?.rotulo
-      : rota.tela === "medicoes" ? (rota.aba === "em-andamento" ? "Em andamento" : "Iniciar medição") : undefined;
+      : rota.tela === "admin" && rota.aba && rota.aba !== "saude" ? ABAS_ADMIN.find(a => a.id === rota.aba)?.rotulo : undefined;
     document.title = rota.tela === "raiz" ? tituloDe("raiz") : `${tituloDe(rota.tela)}${aba ? ` · ${aba}` : ""} · grupolotufo`;
   }, [rota]);
-
-  // As contagens do menu (#507): relidas a cada troca de tela (iniciar uma medicao muda as duas). So' quem tem Medicoes no menu.
-  const [contagens, setContagens] = useState<ContagensMedicoes | null>(null);
-  const temMedicoes = !!usuario && menuDe(usuario.perfil).includes("medicoes");
-  const caminhoAtual = caminhoDe(rota);
-  useEffect(() => {
-    if (!temMedicoes) return;
-    let vivo = true;
-    api<{ contagens: { iniciar: number; "em-andamento": number } }>("/api/medicoes/resumo")
-      .then(r => { if (vivo) setContagens({ iniciar: r.contagens.iniciar, andamento: r.contagens["em-andamento"] }); })
-      .catch(() => {});
-    return () => { vivo = false; };
-  }, [temMedicoes, caminhoAtual]);
 
   // #644: quem envia e-mail le as respostas do orgao ao entrar e a cada 5 minutos; quem so' consulta nao dispara leitura.
   useLeituraDasRespostas(!!usuario && usuario.perfil !== "diretoria");
@@ -129,13 +115,13 @@ export default function App() {
         ev.preventDefault();
         document.getElementById("conteudo")?.focus();
       }}>Pular para o conteúdo</a>
-      <Trilho perfil={usuario.perfil} marcado={itemDe(rota, busca)} ir={ir} subitem={subitemMedicoesDe(rota)} contagens={contagens} />
+      <Trilho perfil={usuario.perfil} marcado={itemDe(rota, busca)} ir={ir} />
 
       <div className="coluna">
         <BarraSuperior titulo={tituloDaSecao(rota)} ehH1={!tituloProprio} usuario={usuario} ir={ir} />
         <main className="principal" id="conteudo" tabIndex={-1}>
           {rota.tela === "inicio" && <div className="pagina"><Inicio usuario={usuario} ir={ir} /></div>}
-          {rota.tela === "medicoes" && <MedicoesPagina aba={rota.aba ?? "iniciar"} usuario={usuario} />}
+          {rota.tela === "medicoes" && <MedicoesPagina usuario={usuario} />}
           {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} podeEditar={usuario.perfil !== "diretoria"} />}
           {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}

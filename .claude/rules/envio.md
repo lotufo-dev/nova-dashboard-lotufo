@@ -32,8 +32,14 @@ paths:
   15 dias avisa; link de arquivo grande só de `lotufoengmt-my.sharepoint.com` / `lotufoengmt.sharepoint.com`.
 - Cco é respeitado e chega ao e-mail. Envio registrado por fora (`.eml`) exige From com endereço, Date válida
   e To ou Subject.
-- Cobrança de certidão por e-mail: vencendo (<15 dias) 1×/dia às 08:00; vencida a cada 2 h, 08h–18h Cuiabá;
-  por enquanto só para o e-mail do Leo.
+- Cobrança de certidão por e-mail (issue #665): no máximo um e-mail por dia útil (segunda a sexta, fora feriado de
+  `feriados.py`), na primeira rodada a partir das 08h de Cuiabá, só com a lista "Renovar agora"
+  (`documentos.renovar_agora`: vencida, nunca anexada ou que vence até o próximo protocolo previsto), assunto
+  "Certidões a renovar (N)"; lista vazia não gera e-mail. Destinatários e conta que envia vêm do cadastro
+  (`cobranca_certidoes` do `geral.yaml`). O dia é reservado em `cobranca_certidoes_envios` antes de o e-mail sair
+  (motivo `renovar AAAA-MM-DD`): reinício ou rodadas simultâneas não repetem; a reserva só é desfeita quando o
+  e-mail com certeza não saiu (envio incerto fica sem repetir no dia). A tela Início continua lendo
+  `cobranca_certidoes.listas` (vencidas e vencendo em 15 dias), que não decide mais o e-mail.
 - **Leitura: só a conversa que o sistema enviou** (decisão de 10/11/2026, issue #644). A resposta do órgão à
   planilha/carta é lida pela conversa gravada no envio (`envios.conversa_id`), com a conta Microsoft de quem enviou
   e só com essa pessoa logada (a tela chama ao entrar e a cada 5 minutos; sem job, nada é lido para quem só

@@ -67,24 +67,6 @@
 .medicoes__parada--atencao { color: var(--atencao); font-weight: 600; }
 .medicoes__parada--acao { color: var(--acao); font-weight: 600; }
 
-/* "Em andamento" (#507) */
-.andamento__tabela { min-width: 880px; }
-.andamento__c-obra { width: 22%; }
-.andamento__c-medicao { width: 14%; }
-.andamento__c-passo { width: 19%; }
-.andamento__c-quem { width: 9%; }
-.andamento__c-parada { width: 10%; }
-.andamento__c-valor { width: 16%; }
-.andamento__c-acao { width: 10%; }
-.andamento__lotufo { color: var(--acento); font-weight: 600; }
-.andamento__orgao { color: var(--texto-2); }
-.andamento__acao { text-align: right; }
-.andamento__n {
-  display: inline-block; margin-left: 8px; padding: 0 10px; border-radius: var(--raio-pilula);
-  background: var(--acento-fundo); color: var(--acento-mais); font-size: 14px; line-height: 24px; font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
 /* ------------------------------------------- janela "Iniciar processo de medição" (#151, protótipo de 15/10/2026) */
 .iniciar {
   width: min(600px, calc(100vw - 32px)); max-height: min(820px, calc(100dvh - 64px));
@@ -145,3 +127,61 @@
   .iniciar__botoes { flex-direction: column-reverse; }
   .iniciar__botoes .btn { width: 100%; }
 }
+
+/* ------------------------------------------------------------------- quadro do mês (#643)
+   Uma linha por obra, uma coluna por passo, pedido e aprovado. Tabela de largura fixa em porcentagem, sem largura
+   mínima: a 1024 px (720 px úteis com o menu aberto) cabe sem rolagem horizontal. Abaixo de 768 px cada obra vira um
+   bloco, com o nome do passo ao lado da situação (data-rotulo). */
+.quadro__cabeca { align-items: center; }
+.quadro__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.quadro__c-obra { width: 15%; }
+.quadro__c-passo { width: 8.5%; }
+.quadro__c-valor { width: 17%; }
+.quadro__tabela th, .quadro__tabela td { padding: 10px 4px; border-bottom: 1px solid var(--linha-suave); vertical-align: middle; overflow-wrap: anywhere; }
+.quadro__tabela thead th {
+  background: var(--superficie-2); border-bottom: 1px solid var(--linha); vertical-align: bottom;
+  color: var(--texto-2); font-size: 11px; line-height: 14px; font-weight: 600; text-align: left;
+}
+.quadro__tabela thead th.quadro__th-passo, .quadro__tabela td.quadro__passo { text-align: center; padding-left: 2px; padding-right: 2px; }
+/* o nome do passo quebra entre palavras, nunca no meio de uma */
+.quadro__tabela thead th.quadro__th-passo { overflow-wrap: normal; }
+.quadro__tabela thead th:first-child, .quadro__tabela tbody th.quadro__obra { padding-left: 16px; }
+.quadro__tabela th:last-child, .quadro__tabela td:last-child { padding-right: 10px; }
+.quadro__tabela tbody tr:last-child > * { border-bottom: 0; }
+.quadro__tabela tbody tr:hover > * { background: var(--superficie-2); }
+.quadro__tabela .col-num { text-align: right; white-space: nowrap; font-size: 12px; }
+.quadro__tabela thead .col-num { font-size: 11px; }
+/* o nome da obra quebra entre palavras, nunca no meio de uma */
+.quadro__tabela tbody th.quadro__obra { text-align: left; font-weight: 400; overflow-wrap: normal; word-break: normal; }
+.quadro__medicao { display: block; font-size: 12px; line-height: 16px; color: var(--texto-2); text-decoration: none; }
+.quadro__medicao:hover { color: var(--acento); text-decoration: underline; }
+.quadro__passo { font-size: 12px; line-height: 16px; white-space: nowrap; }
+.quadro__check { width: 12px; height: 12px; margin-right: 2px; vertical-align: -1px; stroke-width: 3; }
+.quadro__passo--futuro { color: var(--texto-fraco); font-size: 11px; }
+.quadro__atual { padding: 2px 8px; font-size: 12px; text-decoration: none; }
+.quadro__atual:hover { text-decoration: underline; }
+.quadro__tabela td.quadro__iniciar { text-align: left; padding-left: 12px; }
+.quadro__acao { text-align: right; }
+.quadro__anteriores { table-layout: auto; }
+
+@media (max-width: 767px) {
+  .quadro__tabela, .quadro__tabela tbody, .quadro__tabela tr, .quadro__tabela th, .quadro__tabela td,
+  .quadro__anteriores, .quadro__anteriores tbody, .quadro__anteriores tr, .quadro__anteriores td { display: block; width: auto; }
+  .quadro__tabela colgroup, .quadro__tabela thead, .quadro__anteriores thead { display: none; }
+  .quadro__tabela tr, .quadro__anteriores tr { padding: 12px 16px; border-bottom: 1px solid var(--linha); }
+  .quadro__tabela tbody tr:last-child, .quadro__anteriores tbody tr:last-child { border-bottom: 0; }
+  .quadro__tabela tbody th, .quadro__tabela tbody td, .quadro__anteriores.medicoes__tabela td {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 3px 0; border: 0;
+    text-align: right; white-space: normal;
+  }
+  .quadro__tabela tbody th.quadro__obra { display: block; padding: 0 0 6px; text-align: left; }
+  .quadro__tabela tbody td::before, .quadro__anteriores td[data-rotulo]::before {
+    content: attr(data-rotulo); flex: none; color: var(--texto-2); font-size: 12px; text-align: left;
+  }
+  .quadro__tabela td.quadro__passo--sem { display: none; }
+  .quadro__tabela .col-num { font-size: 14px; }
+  .quadro__anteriores.medicoes__tabela .quadro__acao { justify-content: flex-end; padding-top: 8px; }
+}
+
+/* o formulário de iniciar dentro da janela: sem a moldura de cartão */
+.janela .iniciar-med__cartao { padding: 0; border: 0; box-shadow: none; background: none; }

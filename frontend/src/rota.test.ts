@@ -17,7 +17,7 @@ describe("rota", () => {
       { tela: "notas-envio", id: 55 },
       { tela: "documentos-empresa", id: 3 }, { tela: "documentos-empresa", id: 3, aba: "regularidade" },
       { tela: "documentos-empresa", id: 3, aba: "garantia" },
-      { tela: "medicoes", aba: "em-andamento" },
+      { tela: "medicoes" },
     ];
     for (const r of rotas) expect(parseRota(caminhoDe(r))).toEqual(r);
   });
@@ -69,25 +69,24 @@ describe("rota", () => {
     expect(hrefDe({ tela: "avisos" }, { familia: "prazo", obra: "7" })).toBe("/avisos?familia=prazo&obra=7");
   });
 
-  it("Medições tem dois itens: Iniciar medição é o padrão e não entra na URL; Em andamento tem o seu (#507)", () => {
+  it("Medições é uma tela só, o quadro do mês; Iniciar medição e Em andamento levam a ela (#643)", () => {
     expect(caminhoDe({ tela: "medicoes" })).toBe("/medicoes");
-    expect(caminhoDe({ tela: "medicoes", aba: "iniciar" })).toBe("/medicoes");
+    expect(parseRota("/medicoes")).toEqual({ tela: "medicoes" });
     expect(parseRota("/medicoes/iniciar")).toEqual({ tela: "medicoes" });
-    expect(caminhoDe({ tela: "medicoes", aba: "em-andamento" })).toBe("/medicoes/em-andamento");
-    expect(parseRota("/medicoes/em-andamento")).toEqual({ tela: "medicoes", aba: "em-andamento" });
+    expect(parseRota("/medicoes/em-andamento")).toEqual({ tela: "medicoes" });
     for (const c of ["/medicoes/x", "/medicoes/enviar-nota/1", "/medicoes/em-andamento/1"]) expect(parseRota(c)).toEqual({ tela: "raiz" });
   });
 
-  it("as oito abas antigas de Medições redirecionam para Em andamento (#507)", () => {
+  it("as abas antigas de Medições levam ao quadro", () => {
     for (const a of ["resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento",
       "aguardando-nota", "enviar-nota", "aguardando-pagamento"]) {
-      expect(parseRota(`/medicoes/${a}`)).toEqual({ tela: "medicoes", aba: "em-andamento" });
+      expect(parseRota(`/medicoes/${a}`)).toEqual({ tela: "medicoes" });
     }
   });
 
-  it("as telas Notas antigas abrem Em andamento; o envio de um protocolo continua", () => {
-    expect(parseRota("/notas")).toEqual({ tela: "medicoes", aba: "em-andamento" });
-    expect(parseRota("/notas/aguardando")).toEqual({ tela: "medicoes", aba: "em-andamento" });
+  it("as telas Notas antigas abrem o quadro; o envio de um protocolo continua", () => {
+    expect(parseRota("/notas")).toEqual({ tela: "medicoes" });
+    expect(parseRota("/notas/aguardando")).toEqual({ tela: "medicoes" });
     expect(caminhoDe({ tela: "notas-envio", id: 55 })).toBe("/notas/envio/55");
     for (const c of ["/notas/envio", "/notas/envio/abc", "/notas/x", "/notas/envio/5/x"]) expect(parseRota(c)).toEqual({ tela: "raiz" });
   });

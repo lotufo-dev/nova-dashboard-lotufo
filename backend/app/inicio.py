@@ -2,7 +2,7 @@
 
 Nada e' calculado de novo aqui: cada numero vem do modulo que ja' o calcula para a tela de origem.
 - notas a enviar: `notas_envio.a_enviar` (Notas › A enviar), o contador "Todas";
-- certidoes vencidas ou vencendo em ate' 15 dias: `cobranca_certidoes.listas` (a mesma lista do e-mail);
+- certidoes vencidas ou vencendo em ate' 15 dias: `cobranca_certidoes.listas` (o e-mail usa outra lista, #665);
 - reajuste a pedir: os avisos `reajuste_pleito` de `reajuste.avisos` (data-base na janela, pleito nao enviado);
 - obras protocoladas: `avisos.resumo_mes` (o mesmo "X de N obras ativas" da fila de Medicoes);
 - a receber: a regra da Carteira (`diretoria`), na COTA da Lotufo, so' com o total liberado;
