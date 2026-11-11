@@ -17,7 +17,7 @@ const PREVIA = { para: ["protocolo@orgao.exemplo.com.br"], copia: ["engenharia@l
   anexos: [{ nome: "Medicao.pdf", tamanho: 9, sha256: "a".repeat(64), origem: "medicao" },
     { nome: "Reajuste.pdf", tamanho: 9, sha256: "b".repeat(64), origem: "reajuste" },
     { nome: "Justificativa.pdf", tamanho: 9, sha256: "c".repeat(64), origem: "justificativa" }],
-  total: 27, limite: 25 * MB, pendencias: [], reenvio: false, anteriores: 0 };
+  total: 27, limite: 25 * MB, pendencias: [] as { codigo: string; mensagem: string }[], reenvio: false, anteriores: 0 };
 
 const pdf = (nome: string, tamanho = 9) => {
   const f = new File(["%PDF-1.4"], nome, { type: "application/pdf" });
@@ -175,6 +175,68 @@ describe("Enviar documentos assinados", () => {
     montar({ ...S, reajuste: null });
     expect(screen.queryByLabelText("PDF assinado do reajuste (opcional)")).toBeNull();
   });
+
+  // issue #628: a conferencia do pacote contra o checklist do orgao e' aviso, e o envio sai com a lista confirmada
+  const FALTA = "Falta no PDF assinado: Relatório de Cronograma Físico-Financeiro de Evolução Mensal";
+  const COM_FALTA = { ...PREVIA, pendencias: [{ codigo: "pacote_falta", mensagem: FALTA }] };
+  const abrirPrevia = async () => {
+    anexar("PDF assinado da medição", pdf("Medicao.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
+    await screen.findByLabelText("Assunto");
+  };
+
+  it("a prévia lista o que falta no PDF e o Enviar pede a confirmação antes de mandar (issue #628)", async () => {
+    const { agir, aoFechar } = montar(S, COM_FALTA);
+    await abrirPrevia();
+    expect(screen.getByText(FALTA)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    const aviso = await screen.findByRole("alertdialog");
+    expect(within(aviso).getByText("Confira o PDF assinado:")).toBeTruthy();
+    expect(within(aviso).getByText(FALTA)).toBeTruthy();
+    expect(agir).not.toHaveBeenCalled();
+    fireEvent.click(within(aviso).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(agir).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Continuar com o envio" }));
+    await vi.waitFor(() => expect(aoFechar).toHaveBeenCalled());
+    const [url, fd] = apiForm.mock.calls[1] as [string, FormData];
+    expect(url).toBe("/api/medicoes/5/assinados/enviar");
+    expect(JSON.parse(fd.get("dados") as string).confirmadas).toEqual([FALTA]);
+  });
+
+  it("sem nada a conferir, o Enviar manda direto, sem confirmação (issue #628)", async () => {
+    const { agir } = montar();
+    await abrirPrevia();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    await vi.waitFor(() => expect(agir).toHaveBeenCalled());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(JSON.parse((apiForm.mock.calls[1][1] as FormData).get("dados") as string).confirmadas).toBeNull();
+  });
+
+  it("a conferência que mudou depois da confirmação (422) abre o aviso de novo com a lista do servidor (issue #628)", async () => {
+    const agir = vi.fn(async (fn: () => Promise<unknown>) => { try { await fn(); return true; } catch { return false; } });
+    const aoFechar = vi.fn();
+    render(<FormEnviarAssinados medicaoId={5} s={S} salvando={false} agir={agir} aoFechar={aoFechar} aoLiberar={() => {}} />);
+    const OUTRA = "A capa dentro do PDF é da 14ª medição";
+    let n = 0;
+    apiForm.mockImplementation(async (url: string) => {
+      if (url.endsWith("/previa")) return COM_FALTA;
+      if (n++ === 0) throw new ApiErro(422, "A conferência do PDF assinado mudou depois da sua confirmação: confira e confirme de novo",
+        { codigo: "CONFIRMAR_PENDENCIAS", pendencias: [OUTRA], itens: [{ codigo: "pacote_capa", mensagem: OUTRA }] });
+      return { envio_id: 1 };
+    });
+    await abrirPrevia();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Continuar com o envio" }));
+    const aviso = await screen.findByRole("alertdialog");
+    await within(aviso).findByText(OUTRA);
+    expect(within(aviso).getByText("A conferência do PDF assinado mudou desde a sua confirmação:")).toBeTruthy();
+    expect(aoFechar).not.toHaveBeenCalled();
+    fireEvent.click(within(aviso).getByRole("button", { name: "Continuar com o envio" }));
+    await vi.waitFor(() => expect(aoFechar).toHaveBeenCalled());
+    expect(JSON.parse((apiForm.mock.calls[2][1] as FormData).get("dados") as string).confirmadas).toEqual([OUTRA]);
+  });
 });
 
 describe("Registrar envio dos assinados por fora", () => {
@@ -221,6 +283,25 @@ describe("Registrar envio dos assinados por fora", () => {
     expect(url).toBe("/api/medicoes/6/assinados/envio-externo");
     expect((fd.get("arquivo") as File).name).toBe("Reajuste.pdf");
     expect(fd.get("arquivo_reajuste")).toBeNull();
+  });
+
+  it("com falta no PDF, o registro pede a confirmação e vai de novo com a lista confirmada (issue #628)", async () => {
+    const FALTA = "Falta no PDF assinado: Boletim de Desempenho";
+    apiForm.mockRejectedValueOnce(new ApiErro(422, "ATENÇÃO: confira o PDF assinado", { codigo: "CONFIRMAR_PENDENCIAS", pendencias: [FALTA] }))
+      .mockResolvedValue({ id: 1 });
+    const agir = vi.fn(async (fn: () => Promise<unknown>) => { try { await fn(); return true; } catch { return false; } });
+    const aoFechar = vi.fn();
+    render(<FormAssinadosPorFora medicaoId={5} s={S} salvando={false} agir={agir} aoFechar={aoFechar} aoLiberar={() => {}} />);
+    anexar("PDF assinado da medição", pdf("Medicao.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar envio" }));
+    const aviso = await screen.findByRole("alertdialog");
+    expect(within(aviso).getByText(FALTA)).toBeTruthy();
+    expect((apiForm.mock.calls[0][1] as FormData).getAll("confirmadas")).toEqual([]);
+    expect(aoFechar).not.toHaveBeenCalled();
+    fireEvent.click(within(aviso).getByRole("button", { name: "Continuar com o registro" }));
+    await vi.waitFor(() => expect(aoFechar).toHaveBeenCalled());
+    expect((apiForm.mock.calls[1][1] as FormData).getAll("confirmadas")).toEqual([FALTA]);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("sem o PDF assinado não registra", () => {
