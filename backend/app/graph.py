@@ -1,8 +1,9 @@
-"""Microsoft Graph: so' o que o ENVIO de e-mail usa (bloco 9; spec 2026-09-21 §5.1).
+"""Microsoft Graph: so' o que o e-mail usa (bloco 9; spec 2026-09-21 §5.1).
 
-A leitura do Outlook e do SharePoint (fase 6) saiu no corte: o sistema nao le caixa nem biblioteca. Fica o
-login delegado por codigo de dispositivo de cada pessoa (Minha conta), o token com renovacao e a guarda que
-nunca segue redirecionamento com o bearer. O envio em si mora em `correio.py`.
+A leitura do Outlook e do SharePoint (fase 6) saiu no corte: o sistema nao le caixa nem biblioteca; de e-mail, le
+so' a conversa que ele mesmo enviou (issue #644, em `correio.py`). Fica o login delegado por codigo de dispositivo
+de cada pessoa (Minha conta), o token com renovacao e a guarda que nunca segue redirecionamento com o bearer. O
+envio em si mora em `correio.py`.
 """
 import json
 import os

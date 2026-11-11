@@ -1006,6 +1006,27 @@ def test_apostilado_e_o_previsto_vigente_da_competencia_apostilada(cenario):
     assert (x["2026-07"]["avisos"], x["2026-08"]["avisos"]) == ([], ["fora_da_previsao"])
 
 
+def test_aba_reajuste_nao_recebe_os_avisos_de_diferenca(cenario):
+    # issue #648: o apostilado e' previsao e o vinculo nota-medicao ainda nao e' confiavel; a aba recebe os valores de
+    # cada fonte, sem a marca de "fora da previsao", "sem apostilamento" e "nota antes do apostilamento"
+    c, ids = cenario
+    cid = ids["contrato"]
+    _previsao(c, cid, "2026-07", 100_01, "manual")
+    _medicao(c, cid, 1, "2026-07", "planilha_enviada", pedido=150_03)                      # fora da previsao
+    m2 = _medicao(c, cid, 2, "2026-08", "nota_emitida", pedido=300_05, aprovado=300_05)    # nota sem termo
+    _nota(c, m2, 300_05)
+    x = _por_competencia(c, cid)
+    assert (x["2026-07"]["avisos"], x["2026-08"]["avisos"]) == (
+        ["fora_da_previsao"], ["sem_apostilamento", "nota_antes_do_apostilamento"])     # a marca que os avisos leem
+    grupo = next(g for g in reajuste.competencias_da_aba(c, cid) if (g["data_base_mes"], g["ciclo"]) == ("2024-06", 2026))
+    aba = {v["competencia"]: v for v in grupo["competencias"]}
+    assert all("avisos" not in v for v in aba.values())
+    # nenhum valor some: o resto da linha e' o de `competencias_por_ciclo`
+    assert aba == {k: {a: b for a, b in v.items() if a != "avisos"} for k, v in x.items()}
+    assert (aba["2026-07"]["previsto_centavos"], aba["2026-07"]["pedido_centavos"]) == (100_01, 150_03)
+    assert (aba["2026-08"]["aprovado_centavos"], aba["2026-08"]["faturado_centavos"]) == (300_05, 300_05)
+
+
 def test_aprovada_ou_faturada_sem_apostilamento_e_nota_antes_do_termo(cenario):
     # spec 2026-10-20 §2.2: "Reajuste sem apostilamento" (aprovada ou faturada sem termo que a cubra) e "Nota de
     # reajuste antes do apostilamento" (nota emitida em competencia nao apostilada)

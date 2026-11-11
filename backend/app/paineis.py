@@ -38,7 +38,8 @@ def _data_cadastro(valor) -> datetime.date | None:
 
 
 def _medido(conn, contrato_id: int) -> dict[str, dict]:
-    """competencia -> {execucao, reajuste, projeto} em centavos + `pendente` por tipo.
+    """competencia -> {execucao, reajuste, projeto} em centavos + `pendente` por tipo + o pedido e o aprovado
+    da execucao em separado.
 
     A pendencia de atestado e por SERIE, nao por competencia: um reajuste ainda nao
     atestado no mesmo mes nao pode marcar como provisoria a execucao ja atestada
@@ -50,7 +51,15 @@ def _medido(conn, contrato_id: int) -> dict[str, dict]:
             (contrato_id, *ESTADOS_VALIDOS)):
         comp = m["competencia"]
         p = out.setdefault(comp, {**{t: 0 for t in TIPOS},
-                                  "pendente": {t: False for t in TIPOS}})
+                                  "pendente": {t: False for t in TIPOS},
+                                  "pedido_execucao": None, "aprovado_execucao": None})
+        # issue #647: o pedido (protocolado) e o aprovado (atestado) da execucao, cada um na sua soma; None
+        # enquanto nenhuma medicao da competencia tem o valor (a tela mostra "—", nunca um zero inventado)
+        if m["tipo"] == "execucao":
+            for chave, campo in (("pedido_execucao", "valor_protocolado_centavos"),
+                                 ("aprovado_execucao", "valor_atestado_centavos")):
+                if m[campo] is not None:
+                    p[chave] = (p[chave] or 0) + m[campo]
         if m["valor_atestado_centavos"] is not None:
             valor = m["valor_atestado_centavos"]
         else:
@@ -75,6 +84,8 @@ def curva(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
                       "medido_execucao_centavos": m["execucao"],
                       "medido_reajuste_centavos": m["reajuste"],
                       "medido_projeto_centavos": m["projeto"],
+                      "pedido_execucao_centavos": m.get("pedido_execucao"),
+                      "aprovado_execucao_centavos": m.get("aprovado_execucao"),
                       # `atestado_pendente` qualifica a EXECUCAO (o numero-titulo, que
                       # tambem alimenta o saldo); as demais series vao em `pendente_por_tipo`.
                       "atestado_pendente": pend.get("execucao", False),

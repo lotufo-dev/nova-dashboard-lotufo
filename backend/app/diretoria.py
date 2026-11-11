@@ -183,6 +183,22 @@ def rm_por_mes(conn) -> tuple[dict[str, int], dict[str, int]]:
     return faturado, recebido
 
 
+def recebido_rm_no_mes(conn, mes: str) -> dict:
+    """Issue #642 (faixa do ciclo no Inicio): o recebido de UM mes pela conta de `rm_por_mes` (baixa com status de
+    `sincronizacao_rm.STATUS_RECEBIDO`, pelo mes da baixa, na cota, nota a nota de `_notas_do_rm`), com quantas notas
+    tiveram baixa com valor no mes (a nota com dois titulos baixados conta uma vez)."""
+    pct_da_nota = {n["id"]: c["pct"] for n, c, _ in _notas_do_rm(conn)}
+    valor, notas = 0, set()
+    for b in conn.execute("SELECT nota_id, valor_baixado_centavos, status_lan FROM baixas "
+                          "WHERE nota_id IS NOT NULL AND substr(data_baixa, 1, 7)=?", (mes,)):
+        if b["status_lan"] not in sincronizacao_rm.STATUS_RECEBIDO or b["nota_id"] not in pct_da_nota:
+            continue
+        valor += contratos.cota(b["valor_baixado_centavos"] or 0, pct_da_nota[b["nota_id"]]) or 0
+        if (b["valor_baixado_centavos"] or 0) > 0:
+            notas.add(b["nota_id"])
+    return {"valor_centavos": valor, "notas": len(notas)}
+
+
 def baixado_sem_caixa_por_mes(conn) -> dict[str, int]:
     """Issue #583 (decisao do Leo de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
     zero, pelo mes da baixa, na cota, pelo valor original. Ele nao entra no recebido (`rm_por_mes`: nao entrou caixa;

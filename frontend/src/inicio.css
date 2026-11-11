@@ -1,102 +1,66 @@
-/* Inicio do redesenho de 11/2026 (imagem aprovada em 06/11/2026). Cores pelos tokens de tokens.css. */
+/* Inicio do redesenho de 11/2026; faixa do ciclo na issue #642. Cores pelos tokens de tokens.css. */
 
 .ini {
   display: flex; flex-direction: column; gap: 20px; min-width: 0;
   color: var(--texto); font-family: var(--fonte); font-size: 14px; line-height: 20px;
 }
+.ini-topo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
 .ini-titulo { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; }
 .ini-carregando, .ini-vazio { margin: 0; color: var(--texto-2); }
 .ini-vazio { padding: 4px 4px 8px; }
-.ini-sub { margin: 2px 0 0; color: var(--texto-2); font-size: 15px; }
-
-/* duas colunas (2/3 e 1/3); a 900px ou menos, empilham */
-.ini-grade { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px; align-items: start; }
-.ini-coluna { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-@media (max-width: 900px) { .ini-grade { grid-template-columns: minmax(0, 1fr); } }
 
 .ini-numero, .ini-painel {
   background: var(--superficie); border-radius: var(--raio); box-shadow: var(--sombra);
 }
 .ini-painel { min-width: 0; display: flex; flex-direction: column; padding: 20px; gap: 14px; }
 .ini-painel h2 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 700; }
-.ini-painel__topo { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 
-/* destaque */
-.ini-destaque__valores { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; }
-.ini-destaque__valor { display: flex; flex-direction: column; min-width: 0; }
-.ini-destaque__valor--anterior { margin-left: auto; padding-left: 24px; border-left: 1px solid var(--linha); }
-.ini-destaque__numero {
-  font-size: clamp(22px, 3.2vw, 38px); line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+/* faixa do ciclo (#642): um trecho por etapa, largura proporcional ao valor (as colunas vem da tela, em
+   --ini-faixa-colunas) com o minimo que mantem o valor numa linha. A 1024px, com o menu lateral aberto (240px), o
+   painel tem 688px por dentro e os cinco trechos cabem (5 x 128 + 4 x 6 = 664); em painel mais estreito que isso a
+   faixa vira lista vertical, sem rolagem. */
+.ini-ciclo { container-type: inline-size; padding: 16px; position: relative; }
+.ini-faixa {
+  --ini-faixa-min: 128px;
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; grid-template-columns: var(--ini-faixa-colunas);
 }
-.ini-destaque__numero--atual { color: var(--acento); }
-.ini-destaque__numero--anterior { color: var(--texto-2); }
-@media (max-width: 560px) {
-  .ini-destaque__valor--anterior { margin-left: 0; padding-left: 0; border-left: 0; }
-  .ini-destaque__numero { font-size: clamp(18px, 6.4vw, 26px); }
+.ini-faixa__etapa {
+  min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 8px 12px;
+  background: var(--andamento-fundo); border-top: 4px solid var(--andamento-ponto); border-radius: var(--raio);
 }
-.ini-variacao { display: inline-block; padding: 2px 12px; border-radius: var(--raio-pilula); font-weight: 600; font-size: 15px; white-space: nowrap; }
-.ini-variacao--ok { background: var(--ok-fundo); color: var(--ok); border: 1px solid var(--ok-linha); }
-.ini-variacao--atencao { background: var(--atencao-fundo); color: var(--atencao); border: 1px solid var(--atencao-linha); }
-.ini-variacao--neutro { background: var(--neutro-fundo); color: var(--texto-2); }
+.ini-faixa__etapa--feito { background: var(--ok-fundo); border-top-color: var(--ok-ponto); }
+.ini-faixa__rotulo { font-size: 13px; line-height: 20px; font-weight: 600; color: var(--andamento); }
+.ini-faixa__etapa--feito .ini-faixa__rotulo { color: var(--ok); }
+.ini-faixa__valor {
+  font-size: clamp(13px, 1.9cqi, 20px); line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ini-faixa__conta { font-size: 13px; line-height: 18px; color: var(--texto-2); }
+@container (max-width: 663px) {
+  .ini-faixa { grid-template-columns: minmax(0, 1fr); }
+  .ini-faixa__etapa {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline;
+    border-top: 0; border-left: 4px solid var(--andamento-ponto);
+  }
+  .ini-faixa__etapa--feito { border-left-color: var(--ok-ponto); }
+  .ini-faixa__valor { grid-column: 2; grid-row: 1; font-size: 16px; line-height: 24px; }
+  .ini-faixa__conta { grid-column: 1 / -1; }
+}
 
-/* grafico acumulado */
-.ini-grafico { margin: 0; }
-.ini-grafico svg { display: block; width: 100%; height: auto; }
-.ini-grafico__grade { stroke: var(--linha); stroke-width: 1; }
-.ini-grafico__eixo { font-size: 14px; fill: var(--texto-2); font-family: var(--fonte); }
-.ini-grafico__area { fill: var(--acento); opacity: .12; }
-.ini-grafico__linha { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.ini-grafico__linha--atual { stroke: var(--acento); }
-.ini-grafico__linha--anterior { stroke: var(--texto-fraco); stroke-dasharray: 6 5; }
-.ini-grafico__ponto { fill: var(--superficie); stroke: var(--acento); stroke-width: 2.5; }
-.ini-grafico .ini-legenda { justify-content: center; margin-top: 6px; font-size: 14px; }
-.ini-traco { display: inline-block; width: 22px; height: 0; border-top: 2.5px solid var(--acento); }
-.ini-traco--anterior { border-top: 2.5px dashed var(--texto-fraco); }
-
-/* tres cartoes */
+/* tres cartoes: so' rotulo e valor */
 .ini-numeros { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 @media (max-width: 700px) { .ini-numeros { grid-template-columns: minmax(0, 1fr); } }
 .ini-numero { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ini-numero__valor ~ * { margin-top: auto; }
-.ini-numero__valor ~ .ini-numero__rotulo { margin-top: 0; }
-.ini-numero__rotulo { font-size: 14px; line-height: 20px; color: var(--texto-2); }
-.ini-numero > .ini-numero__rotulo:first-child { color: var(--texto); font-weight: 600; }
+.ini-numero__rotulo { font-size: 14px; line-height: 20px; font-weight: 600; }
 .ini-numero__valor {
   font-size: clamp(18px, 1.7vw, 26px); line-height: 32px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.ini-numero__valor--acento { color: var(--acento); }
-.ini-mini { display: block; width: 100%; height: 40px; margin-top: 4px; }
-.ini-barra { display: block; height: 8px; border-radius: 999px; background: var(--neutro-fundo); overflow: hidden; }
-.ini-barra > span { display: block; height: 8px; background: var(--acento); }
-.ini-barra--ok > span { background: var(--ok-ponto); }
 
-.ini-legenda { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; line-height: 16px; color: var(--texto-2); }
-.ini-legenda > span { display: flex; align-items: center; gap: 6px; }
-.ini-chave { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
-.ini-chave--anterior { background: var(--acento-linha); }
-.ini-chave--atual { background: var(--acento); }
-
-.ini-sem-medicao {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
-  padding: 10px 12px; border-radius: var(--raio, 8px);
-  background: var(--atencao-fundo, #FFFBEB); border: 1px solid var(--atencao-linha, #FDE68A);
-}
-.ini-sem-medicao__botao { font-weight: 600; text-decoration: none; color: var(--acento, #4F46E5); }
-.ini-sem-medicao__botao:hover { color: var(--acento-forte, #4338CA); }
-
-.ini-barras { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 20px; }
-.ini-barras__linha { display: grid; grid-template-columns: 140px minmax(0, 1fr) 160px; gap: 16px; align-items: center; }
-.ini-barras__nome { font-size: 16px; line-height: 24px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ini-barras__svg { display: block; width: 100%; height: 32px; }
-.ini-barras__atual { fill: var(--acento, #4F46E5); }
-.ini-barras__valor { font-size: 14px; text-align: right; font-variant-numeric: tabular-nums; }
-
-.ini-barras__anterior { fill: var(--acento-linha); }
-
-/* avisos importantes (coluna da direita) */
+/* avisos importantes: tres secoes lado a lado; a 900px ou menos, empilham */
 .ini-avisos { gap: 12px; }
-.ini-aviso { border: 1px solid var(--linha); border-radius: var(--raio); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
-.ini-aviso__topo { display: flex; align-items: center; gap: 10px; }
+.ini-avisos__secoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+@media (max-width: 900px) { .ini-avisos__secoes { grid-template-columns: minmax(0, 1fr); } }
+.ini-aviso { border: 1px solid var(--linha); border-radius: var(--raio); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ini-aviso__topo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .ini-aviso__topo h3 { margin: 0; font-size: 17px; line-height: 24px; font-weight: 700; }
 .ini-aviso__icone { display: inline-flex; color: var(--acento); }
 .ini-aviso--acao .ini-aviso__icone { color: var(--acao); }
@@ -111,7 +75,7 @@
 .ini-ver-todos:hover { color: var(--acento-forte); text-decoration: underline; }
 .ini-aviso__lista { list-style: none; margin: 0; padding: 0; }
 .ini-aviso__linha {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 40px; padding: 4px 4px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; min-height: 40px; padding: 4px 4px;
   color: var(--texto); text-decoration: none; border-top: 1px solid var(--linha-suave);
 }
 .ini-aviso__lista li:first-child .ini-aviso__linha { border-top: 0; }
@@ -124,8 +88,6 @@
 .ini-pilula--atencao { background: var(--atencao-fundo); color: var(--atencao); border: 1px solid var(--atencao-linha); }
 
 @media (max-width: 560px) {
-  .ini-barras__linha { grid-template-columns: 88px minmax(0, 1fr); }
-  .ini-barras__valor { grid-column: 2; text-align: left; }
   .ini-numero__valor { font-size: clamp(16px, 5.8vw, 22px); }
 }
 /* no celular o valor grande fica numa linha so, com a fonte acompanhando a largura (22px a 375px, 18px a 320px) */
