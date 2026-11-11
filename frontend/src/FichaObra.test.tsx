@@ -11,7 +11,7 @@ const FICHA: Ficha = {
   ultima_medicao: { id: 15, titulo: "15ª Medição", rotulo: "15ª", competencia: "2026-09", valor_centavos: 5000011,
     recebida_em: "2026-10-16", dias_apos_nota: 14 },
   em_andamento: { id: 16, titulo: "16ª Medição", rotulo: "16ª", competencia: "2026-10", valor_centavos: 6000022,
-    etapa: "análise do órgão", desde: "2026-11-05", outras: 0 },
+    etapa: "Pagamento", desde: "2026-11-05", outras: 0 },
   // ritmo 50.000,00/mes para 187.654,34 de saldo: conclusao depois do fim da execucao
   ritmo: { ritmo_centavos: 5000000, saldo_centavos: 18765434, conclusao: "2027-03-08", execucao_fim: "2026-11-18",
     situacao: "atrasa", dias_alem: 110 },
@@ -34,7 +34,7 @@ describe("Resumo da obra", () => {
     expect(within(cartao("Última medição")).getByRole("link").textContent).toMatch(/^15ª · set\/2026 · R\$.*50\.000,11$/);
     expect(within(cartao("Última medição")).getByText(/recebida em 16\/10\/2026, 14 dias após a nota/)).toBeTruthy();
     expect(within(cartao("Medição em andamento")).getByRole("link").textContent).toMatch(/^16ª · out\/2026 · R\$.*60\.000,22$/);
-    expect(within(cartao("Medição em andamento")).getByText("análise do órgão desde 05/11")).toBeTruthy();
+    expect(within(cartao("Medição em andamento")).getByText("Pagamento desde 05/11")).toBeTruthy();
   });
 
   it("valor vigente, medido e saldo vêm do topo da ficha, na mesma base, e o percentual usa os dois (#646)", () => {

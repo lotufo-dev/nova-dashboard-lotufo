@@ -10,12 +10,6 @@ from app import contratos, medicoes, paineis, prazos, tempo
 CRITICO_DIAS = 30      # prazo de execucao/vigencia a ate' 30 dias (ou ja' vencido): vermelho
 ATENCAO_DIAS = 90      # ate' 90 dias: ambar
 
-# O passo atual da medicao em andamento, na palavra de quem opera.
-ETAPA = {"planilha_gerada": "planilha gerada", "planilha_enviada": "planilha enviada ao órgão",
-         "boletim_recebido": "boletim recebido", "espelho_gerado": "espelho gerado",
-         "espelho_enviado": "no faturamento", "nota_emitida": "nota emitida",
-         "protocolada": "análise do órgão", "nf_emitida": "análise do órgão"}
-
 
 def nivel_do_prazo(dias: int | None) -> str:
     if dias is None:
@@ -51,7 +45,7 @@ def _em_andamento(conn, contrato_id: int) -> dict | None:
         return None
     m = max(lista, key=lambda x: (x["competencia"], x["numero"], x["id"]))
     return {"id": m["id"], "titulo": m["titulo"], "rotulo": _rotulo(m), "numero": m["numero"], "competencia": m["competencia"],
-            "valor_centavos": m["valor_centavos"], "etapa": ETAPA.get(m["estado"], m["proximo_passo"]),
+            "valor_centavos": m["valor_centavos"], "etapa": m["proximo_passo"],     # #699: o nome do passo da vez
             "desde": m["desde"] or None, "outras": len(lista) - 1}
 
 
