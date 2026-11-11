@@ -775,3 +775,36 @@ test("Saúde: sem ler a Saúde, o bloco Segurança diz que não deu para ler, nu
   expect(await within(semCampo).findByText(/Não foi possível ler a segurança/)).toBeTruthy();
   expect(within(semCampo).queryByText("nenhum alerta")).toBeNull();
 });
+
+// Issue #649: o documento que nao foi achado no cadastro sai dos avisos e vira lista de conferencia do admin
+test("Pendências de cadastro: a aba lista a obra, o que falta e desde quando, com o link para a obra", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/admin/pendencias-cadastro") return [
+      { contrato_id: 7, obra: "Obra Alfa", falta: "Termo de apostilamento da competência 09/2026 não está no cadastro", desde: "2026-09", aba: "reajuste" },
+      { contrato_id: 8, obra: "Obra Beta", falta: "Último registro da garantia venceu em 14/10/2026", desde: "2026-10-14", aba: "prazos" },
+      { contrato_id: 9, obra: "Obra Gama", falta: "Documento sem aba conhecida", desde: null, aba: null }];
+    return {};
+  });
+  render(<Admin aba="pendencias" eu={1} />);
+  expect(screen.getByRole("link", { name: "Pendências de cadastro" }).getAttribute("aria-current")).toBeTruthy();
+  const linhas = within(await screen.findByRole("table", { name: /Pendências de cadastro/ })).getAllByRole("row").slice(1);
+  expect(linhas.map(l => within(l).getAllByRole("cell").map(c => c.textContent))).toEqual([
+    ["Obra Alfa", "Termo de apostilamento da competência 09/2026 não está no cadastro", "09/2026"],
+    ["Obra Beta", "Último registro da garantia venceu em 14/10/2026", "14/10/2026"],
+    ["Obra Gama", "Documento sem aba conhecida", "—"]]);
+  expect(within(linhas[0]).getByRole("link", { name: "Obra Alfa" }).getAttribute("href")).toBe("/obras/7/reajuste");
+  expect(within(linhas[1]).getByRole("link", { name: "Obra Beta" }).getAttribute("href")).toBe("/obras/8/prazos");
+  expect(within(linhas[2]).getByRole("link", { name: "Obra Gama" }).getAttribute("href")).toBe("/obras/9");
+  expect(api).toHaveBeenCalledWith("/api/admin/pendencias-cadastro");
+});
+
+test("Pendências de cadastro: sem pendência, uma linha curta; falha de carga aparece", async () => {
+  api.mockResolvedValueOnce([]);
+  render(<Admin aba="pendencias" eu={1} />);
+  await screen.findByText("Nenhuma pendência de cadastro.");
+  expect(screen.queryByRole("table")).toBeNull();
+  cleanup();
+  api.mockRejectedValueOnce(new ApiErro(500, "Erro interno."));
+  render(<Admin aba="pendencias" eu={1} />);
+  expect((await screen.findByRole("alert")).textContent).toContain("Recarregue a página");
+});

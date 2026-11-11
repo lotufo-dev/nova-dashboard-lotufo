@@ -20,11 +20,11 @@ const usuario = { id: 1, nome: "U", email: "u@lotufo.com", perfil: "engenharia" 
 
 const linhaDe = (nome: string) => screen.getByRole("link", { name: nome }).closest("li")!;
 
-test("três abas com contador: certidões vencendo, regularidade faltando e garantias vencidas", async () => {
+test("três abas com contador: certidões vencendo, regularidade faltando e garantias a conferir", async () => {
   render(<Documentos usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   const abas = screen.getAllByRole("tab").map(t => t.textContent);
-  expect(abas).toEqual(["Certidões · 2 vencendo", "Regularidade mensal · 5 faltando", "Garantias · 1 vencida"]);
+  expect(abas).toEqual(["Certidões · 2 vencendo", "Regularidade mensal · 1 faltando", "Garantias · 1 a conferir"]);
   expect(screen.getByRole("button", { name: /Anexar PDF/ })).toBeTruthy();
 });
 
@@ -49,6 +49,22 @@ test("aba Certidões: uma linha por empresa, chips com os dias e a cor pela situ
   expect(screen.getByRole("link", { name: "Lotufo" }).getAttribute("href")).toBe("/documentos/1");
 });
 
+test("empresa sem certidão exigida sai da aba Certidões e continua no Anexar PDF e na aba Regularidade (#651)", async () => {
+  vi.mocked(apiForm).mockResolvedValueOnce({
+    ok: false, motivo: "datas-implausiveis", digitavel: true, mensagem: "Confira as datas no documento e digite",
+    lidos: { entidade_id: 1, tipo: "trabalhista", emissao: "2026-06-24", validade: "2028-12-21", natureza: "negativa" },
+  });
+  const { rerender } = render(<Documentos usuario={usuario} />);
+  await screen.findByRole("link", { name: "Lotufo" });
+  expect([...screen.getByRole("list", { name: "Certidões por empresa" }).querySelectorAll(".doc-linha__nome a")].map(a => a.textContent))
+    .toEqual(["Beta Ltda", "Consórcio Alfa", "Lotufo"]);
+  fireEvent.change(screen.getByLabelText("Escolher PDFs para anexar"), { target: { files: [new File(["%PDF"], "cndt.pdf", { type: "application/pdf" })] } });
+  await screen.findByText(/Confira as datas/);
+  within(screen.getByLabelText("Empresa")).getByRole("option", { name: /Consórcio Sem Certidão/ });
+  rerender(<Documentos usuario={usuario} busca={{ aba: "regularidade" }} />);
+  screen.getByText(/Não exigida: .*Consórcio Sem Certidão/);
+});
+
 test("vence hoje e vence em até 7 dias são âmbar ou vermelho pelas regras da legenda", () => {
   const l = (dias: number | null, situacao: "ok" | "vencida" | "faltando" = "ok") => ({
     tipo_id: 1, chave: "fgts", tipo: "FGTS", link_emissao: null, exigida: true, situacao, dias,
@@ -64,9 +80,14 @@ test("aba Regularidade: só quem tem folha, seis meses com o estado de cada um",
   await screen.findByRole("link", { name: "Lotufo" });
   expect(screen.queryByRole("link", { name: "Beta Ltda" })).toBeNull();
   const l = within(linhaDe("Lotufo"));
-  expect(l.getAllByRole("img").map(i => i.textContent)).toEqual([
-    "03/2026: faltando", "04/2026: faltando", "05/2026: faltando", "06/2026: anexada", "07/2026: faltando", "08/2026: faltando",
+  // #651: antes do primeiro PDF da empresa (06/2026) o mes nao e' cobrado: "—", sem cor
+  const chips = l.getAllByRole("img");
+  expect(chips.map(i => i.getAttribute("aria-label") ?? i.textContent)).toEqual([
+    "03/2026: sem registro", "04/2026: sem registro", "05/2026: sem registro", "06/2026: anexada", "07/2026: faltando", "08/2026: faltando",
   ]);
+  expect(chips[0].textContent).toBe("—");
+  expect(chips[0].closest(".doc-chip")!.className).toContain("doc-chip--neutro");
+  expect(chips[4].closest(".doc-chip")!.className).toContain("doc-chip--breve");
   l.getByText("última: junho, 08/07");
   screen.getByText(/Não exigida: .*Beta Ltda/);
   screen.getByText("Agosto esperada a partir de 10/09.");
@@ -81,19 +102,36 @@ test("a competência esperada só vale a partir do dia 10 do mês seguinte (ante
   expect(competenciasRegularidade("2027-01-05")[5]).toEqual({ competencia: "2026-12", aguardando: true });
 });
 
-test("aba Garantias: por órgão, com a contagem, e os cinco chips por obra", async () => {
+test("aba Garantias: por órgão, com a contagem, e os quatro chips por obra (sem ART)", async () => {
   render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
   await screen.findByText("Obra Alfa");
   expect(screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent)).toEqual([
     "SINFRA · 2 obras", "MTPAR · 1 obra", "Prefeituras · 1 obra",
   ]);
   const alfa = within(screen.getByText("Obra Alfa").closest("li")!);
-  alfa.getByText("AP-9"); alfa.getByText("05/10/2026"); alfa.getByText("sim"); alfa.getByText("registrada"); alfa.getByText("registrado");
+  alfa.getByText("AP-9"); alfa.getByText("05/10/2026"); alfa.getByText("sim"); alfa.getByText("registrado");
+  expect(alfa.queryByText("registrada")).toBeNull();
+  expect(screen.queryByText("ART")).toBeNull();
+  expect(screen.getAllByText("CNO", { selector: ".doc-linha--cabeca span" }).length).toBeGreaterThan(0);
   const delta = within(screen.getByText("Obra Delta").closest("li")!);
-  expect(delta.getAllByText("sem registro")).toHaveLength(2);     // apólice e ART
+  expect(delta.getAllByText("sem registro")).toHaveLength(1);     // apólice
   expect(delta.getByText("não, até 31/03/2027").closest(".doc-chip")!.className).toContain("doc-chip--breve");
-  expect(delta.getByText("01/09/2026").closest(".doc-chip")!.className).toContain("doc-chip--critico");
-  expect(within(screen.getByText("Obra Beta").closest("li")!).getAllByText("sem registro").length).toBe(5);   // sem garantia: tudo sem registro
+  // #651: o ultimo documento venceu: diz o que se sabe, sem vermelho
+  expect(delta.getByText("Último registro: 01/09/2026").closest(".doc-chip")!.className).toContain("doc-chip--neutro");
+  expect(within(screen.getByText("Obra Beta").closest("li")!).getAllByText("sem registro").length).toBe(4);   // sem garantia: tudo sem registro
+});
+
+test("contrato de contratante privado aparece no grupo Privados (#651)", async () => {
+  const { api } = await import("./api");
+  const base = (await import("./documentosTeste")).PAINEL;
+  vi.mocked(api).mockImplementationOnce(async () => ({ ...base,
+    contratos: base.contratos.map(o => ({ ...o, tipo_contratante: o.contrato_id === 7 ? "PRIVADO" : "PÚBLICO" })) }));
+  render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
+  await screen.findByText("Obra Gama");
+  expect(screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent)).toEqual([
+    "SINFRA · 2 obras", "MTPAR · 1 obra", "Privados · 1 obra",
+  ]);
+  within(screen.getByRole("region", { name: "Garantias de Privados" })).getByText("Obra Gama");
 });
 
 test("grupo grande mostra as primeiras obras e '+N obras'", async () => {
@@ -124,7 +162,9 @@ test("a legenda muda com a aba", async () => {
   render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
   await screen.findByText("Obra Alfa");
   screen.getByText("não cobre");
-  screen.getByText("vencida ou sem registro");
+  const legenda = within(screen.getByRole("list", { name: "Legenda das cores" }));
+  legenda.getByText("sem registro");
+  expect(legenda.queryByText(/vencida/)).toBeNull();
   expect(screen.queryByText("aguardando o DP")).toBeNull();
 });
 

@@ -4,8 +4,9 @@ GARANTIA tem validade: o cadastro traz `garantia: {apolice, vigencia_fim, arquiv
 `endosso_garantia` com `vigencia_fim` e `apolice` (so' vale o da apolice do contrato) substitui a vigencia anterior (o mais recente por data vale; o historico
 fica nos instrumentos).
 
-Aviso de garantia, como o das certidoes: atencao a 30 dias do fim, acao a 15, critico vencida; operacao e
-diretoria. Contrato em encerramento continua avisando ate' o marco `baixa_garantia`; encerrado nao avisa.
+Aviso de garantia, como o das certidoes: atencao a 30 dias do fim, acao a 15; operacao e diretoria. Vencida
+(issue #649): o que se sabe e' que o ultimo documento registrado venceu, entao o aviso e' de natureza "ausencia" e
+vira pendencia de cadastro do admin (`avisos.pendencias_cadastro`), fora da fila de avisos. Contrato em encerramento continua avisando ate' o marco `baixa_garantia`; encerrado nao avisa.
 Contrato sem data de garantia no cadastro nao avisa (nao ha' o que contar).
 
 Segundo aviso (issue #294, D10 de 20/10/2026): `garantia_aquem_execucao`, "Endosso necessario ate' dd/mm", quando a
@@ -60,7 +61,8 @@ def garantia(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict 
 
 
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
-    """[{tipo, nivel, publico, contrato_id, dias, data, mensagem}] dos contratos ativos (inclui em encerramento)."""
+    """[{tipo, nivel, natureza, publico, contrato_id, dias, data, mensagem}] dos contratos ativos (inclui em
+    encerramento)."""
     hoje = hoje or tempo.hoje_local()
     out = []
     for r in conn.execute("SELECT id, encerramento_iniciado_em FROM contratos WHERE estado='ativo' ORDER BY id"):
@@ -70,12 +72,13 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
             br = f"{g['vigencia_fim'][8:10]}/{g['vigencia_fim'][5:7]}/{g['vigencia_fim'][:4]}"
             dias = g["dias"]
             if dias < 0:
-                nivel, msg = "critico", f"garantia vencida há {-dias} dia{'s' if dias < -1 else ''} ({br})"
+                nivel, msg = "critico", f"Último registro da garantia venceu em {br}"
             else:
                 nivel = "acao" if dias <= LIMIAR_ACAO else "atencao"
                 msg = f"garantia vence hoje ({br})" if dias == 0 else \
                     f"garantia vence em {dias} dia{'s' if dias > 1 else ''} ({br})"
-            out.append({"tipo": "garantia_vencendo", "nivel": nivel, "publico": ["operacao", "diretoria"],
+            out.append({"tipo": "garantia_vencendo", "nivel": nivel, "natureza": "ausencia" if dias < 0 else "fato",
+                        "publico": ["operacao", "diretoria"],
                         "contrato_id": cid, "dias": dias, "data": g["vigencia_fim"], "mensagem": msg})
     return out
 

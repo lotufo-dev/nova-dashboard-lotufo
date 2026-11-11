@@ -12,13 +12,16 @@
 .sg__quadro { background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); box-shadow: 0 1px 2px rgba(15, 23, 42, .04); overflow: hidden; }
 
 .sg__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.sg__tabela th { padding: 12px 12px; text-align: left; background: var(--superficie-2); border-bottom: 1px solid var(--linha); color: var(--texto-2); font-size: 12px; line-height: 16px; font-weight: 600; white-space: nowrap; }
+.sg__tabela th { padding: 12px 12px; text-align: left; background: var(--superficie-2); border-bottom: 1px solid var(--linha); color: var(--texto-2); font-size: 12px; line-height: 16px; font-weight: 600; }
 .sg__tabela td { padding: 12px 12px; height: 44px; border-bottom: 1px solid var(--linha-suave); vertical-align: middle; overflow-wrap: anywhere; }
 .sg__tabela tbody:last-child tr:last-child td { border-bottom: 0; }
 .sg__tabela .col-num { text-align: right; }
 .sg__tabela .selo, .sg__tabela .selo__texto { white-space: normal; overflow: visible; }
-.sg__c-proc { width: 24%; } .sg__c-onde { width: 18%; } .sg__c-quem { width: 12%; } .sg__c-setor { width: 14%; }
-.sg__c-ultima { width: 17%; } .sg__c-prot { width: 12%; } .sg__c-seta { width: 3%; }
+/* #650: a 1024 px com o menu aberto a tabela tem ~718 px. O cabecalho quebra entre palavras (nunca invade a coluna
+   vizinha) e a data fica numa linha so': "Protocolado em" precisa de 16% para caber "DD/MM/AAAA". */
+.sg__tabela td.num { white-space: nowrap; overflow-wrap: normal; }
+.sg__c-proc { width: 22%; } .sg__c-onde { width: 16%; } .sg__c-quem { width: 12%; } .sg__c-setor { width: 14%; }
+.sg__c-ultima { width: 17%; } .sg__c-prot { width: 16%; } .sg__c-seta { width: 3%; }
 .sg__seta { text-align: right; color: var(--texto-2); }
 .sg__seta .icone { width: 18px; height: 18px; }
 

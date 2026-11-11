@@ -22,7 +22,7 @@ export type AbaObra = "ficha" | "medicoes" | "prazos" | "reajuste" | "documentos
 // Abas da Carteira (NAVEGACAO.md › Carteira). O Resumo e' a padrao e nao entra na URL.
 export type AbaCarteira = "resumo" | "qdop" | "producao" | "custo";
 // Abas da Administracao (NAVEGACAO.md › Administracao). A Saude e' a padrao e nao entra na URL.
-export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria";
+export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria" | "pendencias";
 // Medicoes (#643): uma tela so', o quadro do mes ("/medicoes"). Os enderecos de antes ("/medicoes/iniciar",
 // "/medicoes/em-andamento", as oito abas antigas e as telas Notas "/notas", "/notas/aguardando") abrem o quadro.
 
@@ -58,7 +58,7 @@ type EstadoHistorico = { origem?: Origem };
 const ABAS: readonly AbaObra[] = ["medicoes", "prazos", "reajuste", "documentos", "contrato"];
 const ABAS_DOCUMENTOS: readonly AbaDocumentos[] = ["certidoes", "regularidade", "garantia"];
 const ABAS_CARTEIRA: readonly AbaCarteira[] = ["resumo", "qdop", "producao", "custo"];
-const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria"];
+const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria", "pendencias"];
 // Os enderecos de Medicoes de antes do quadro (#643): o link guardado em e-mail ou favorito abre o quadro.
 const ABAS_MEDICOES_ANTIGAS: readonly string[] = ["iniciar", "em-andamento", "resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido",
   "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento"];

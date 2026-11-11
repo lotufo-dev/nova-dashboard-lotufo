@@ -151,7 +151,8 @@
 .quadro__tabela tbody tr:hover > * { background: var(--superficie-2); }
 .quadro__tabela .col-num { text-align: right; white-space: nowrap; font-size: 12px; }
 .quadro__tabela thead .col-num { font-size: 11px; }
-.quadro__obra { text-align: left; font-weight: 400; }
+/* o nome da obra quebra entre palavras, nunca no meio de uma */
+.quadro__tabela tbody th.quadro__obra { text-align: left; font-weight: 400; overflow-wrap: normal; word-break: normal; }
 .quadro__medicao { display: block; font-size: 12px; line-height: 16px; color: var(--texto-2); text-decoration: none; }
 .quadro__medicao:hover { color: var(--acento); text-decoration: underline; }
 .quadro__passo { font-size: 12px; line-height: 16px; white-space: nowrap; }

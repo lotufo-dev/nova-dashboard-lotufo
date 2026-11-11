@@ -13,7 +13,7 @@ describe("rota", () => {
       { tela: "obra", id: 12, aba: "prazos" },
       { tela: "obra", id: 12, aba: "contrato" },
       { tela: "a-receber" }, { tela: "carteira", aba: "qdop" }, { tela: "carteira", aba: "producao" },
-      { tela: "admin", aba: "reconciliacao" }, { tela: "admin", aba: "usuarios" }, { tela: "admin", aba: "auditoria" },
+      { tela: "admin", aba: "reconciliacao" }, { tela: "admin", aba: "usuarios" }, { tela: "admin", aba: "auditoria" }, { tela: "admin", aba: "pendencias" },
       { tela: "notas-envio", id: 55 },
       { tela: "documentos-empresa", id: 3 }, { tela: "documentos-empresa", id: 3, aba: "regularidade" },
       { tela: "documentos-empresa", id: 3, aba: "garantia" },

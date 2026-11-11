@@ -6,7 +6,7 @@ import { Link } from "./Link";
 import type { ObraLista } from "./listaObras";
 import { ir, trocarBusca, type Busca } from "./rota";
 import {
-  contagemPorTipo, detalheDoEvento, ehRecebimentoNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe,
+  contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe,
   DIAS_ACAO, DIAS_ATENCAO, roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe, type Movimentacao, type PainelSiga,
   type ProcessoSiga, type Robo, type TipoMovimentacao,
 } from "./siga";
@@ -180,7 +180,7 @@ function Historico({ p, dados, aoPedir }: { p: ProcessoSiga; dados: PainelSiga; 
               <tr><th scope="col">Data e hora</th><th scope="col">Evento</th><th scope="col">De (setor · pessoa)</th><th scope="col">Para (setor · pessoa)</th></tr>
             </thead>
             <tbody>
-              {lista.slice(0, mostrando).map((m, i) => <LinhaMovimentacao key={`${m.data}-${i}`} m={m} destaque={ehRecebimentoNoSetorAtual(p, m)} />)}
+              {lista.slice(0, mostrando).map((m, i) => <LinhaMovimentacao key={`${m.data}-${i}`} m={m} destaque={ehEntradaNoSetorAtual(p, m)} />)}
             </tbody>
           </table>
           <p className="sg__rodape">

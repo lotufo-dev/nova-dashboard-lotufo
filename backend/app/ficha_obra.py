@@ -5,7 +5,7 @@ A cor da informacao (semaforo, decidido em 06/11/2026) e' decidida AQUI, num lug
 import datetime
 import sqlite3
 
-from app import contratos, documentos, entidades, medicoes, tempo
+from app import contratos, documentos, entidades, medicoes, paineis, tempo
 
 CRITICO_DIAS = 30      # prazo de execucao/vigencia a ate' 30 dias (ou ja' vencido): vermelho
 ATENCAO_DIAS = 90      # ate' 90 dias: ambar
@@ -96,8 +96,17 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
                  "dias": cab["dias_execucao"], "nivel": nivel_do_prazo(cab["dias_execucao"])})
     venc.append({"chave": "vigencia", "rotulo": "Fim da vigência", "data": cab["vigencia_fim"],
                  "dias": cab["dias_vigencia"], "nivel": nivel_do_prazo(cab["dias_vigencia"])})
-    return {"contrato": {"original_centavos": v["valor_original_centavos"],
-                         "original_igual": v["valor_original_centavos"] == v["valor_vigente_centavos"],
+    # #646: o topo numa base so'. Valor vigente, medido e saldo na base de execucao (a precos iniciais, sem o aditivo
+    # de reajuste: a mesma de `paineis.saldo`) e na cota da Lotufo. Vigente e medido arredondam uma vez cada e o saldo
+    # e' a diferenca dos dois, para a conta da tela fechar ao centavo. O reajuste contratado vai a parte.
+    bp = v["percentual_direito_bp"]
+    s = paineis.saldo(conn, contrato_id)
+    vigente = contratos.cota(s["vigente_execucao_centavos"], bp)
+    medido = contratos.cota(s["atestado_execucao_centavos"], bp)
+    return {"topo": {"vigente_centavos": vigente, "medido_centavos": medido, "saldo_centavos": vigente - medido,
+                     "reajuste_centavos": contratos.cota(s["reajuste_contratado_centavos"], bp)},
+            "contrato": {"original_centavos": contratos.cota(v["valor_original_centavos"], bp),
+                         "original_igual": v["valor_original_centavos"] == v["valor_vigente_execucao_centavos"],
                          "tas": tas, "data_base": base or None},
             "ultima_medicao": _ultima(conn, contrato_id), "em_andamento": _em_andamento(conn, contrato_id),
             "vencimentos": venc}
