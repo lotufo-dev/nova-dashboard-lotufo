@@ -5,9 +5,11 @@ import time
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from app import correio, graph, instalacao, respostas_orgao
 from app.api_auth import conexao
+from app.api_medicoes import ID, MAX_INT64
 from app.permissoes import exigir
 
 router = APIRouter(prefix="/api/correio")
@@ -124,6 +126,25 @@ def ler_respostas(usuario: dict = Depends(exigir("editar_cadastros")),
     pessoa, com a conta Microsoft dela; quem so' consulta (diretoria) nao tem a permissao e nada e' lido para ela.
     Sem conta conectada ou com o Graph fora do ar: lista vazia, sem erro."""
     return {"novas": respostas_orgao.ler(conn, {"id": usuario["id"], "email": usuario["email"]})}
+
+
+class VistasIn(BaseModel):
+    ate: int = Field(ge=1, le=MAX_INT64)       # a ultima resposta que o aviso mostrou (`ate` de `nao-vistas`)
+
+
+@router.get("/respostas/nao-vistas")
+def respostas_nao_vistas(usuario: dict = Depends(exigir("editar_cadastros", com_csrf=False)),
+                         conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #654: o aviso flutuante de quem enviou. Vem do banco, nao do retorno da leitura: a resposta registrada em
+    outra sessao (ou com a pessoa fora) aparece ao entrar. So' os envios da propria pessoa."""
+    return respostas_orgao.nao_vistas(conn, usuario["id"])
+
+
+@router.post("/respostas/vistas/{mid}")
+def marcar_respostas_vistas(mid: ID, dados: VistasIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                            conn: sqlite3.Connection = Depends(conexao)):
+    """Fechar o aviso ou abrir a resposta: as respostas daquela medicao, dos envios da propria pessoa, nao avisam mais."""
+    return {"marcadas": respostas_orgao.marcar_vistas(conn, usuario["id"], mid, dados.ate)}
 
 
 @router.get("/remetente")

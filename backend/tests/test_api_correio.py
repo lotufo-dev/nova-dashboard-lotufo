@@ -221,3 +221,13 @@ def test_diretoria_nao_dispara_a_leitura(client):
     client.cookies.set("sessao", r.cookies.get("sessao") or client.cookies.get("sessao"))
     client.headers["X-CSRF-Token"] = r.json()["csrf"]
     assert client.post("/api/correio/respostas/ler").status_code == 403
+    # issue #654: o aviso de resposta e' de quem envia; quem so' consulta nao le nem marca
+    assert client.get("/api/correio/respostas/nao-vistas").status_code == 403
+    assert client.post("/api/correio/respostas/vistas/1", json={"ate": 1}).status_code == 403
+
+
+def test_nao_vistas_sem_envio_e_lista_vazia_e_marcar_exige_o_teto(client_admin):
+    assert client_admin.get("/api/correio/respostas/nao-vistas").json() == []
+    assert client_admin.post("/api/correio/respostas/vistas/1", json={}).status_code == 422
+    assert client_admin.post("/api/correio/respostas/vistas/1", json={"ate": 2 ** 63}).status_code == 422
+    assert client_admin.post("/api/correio/respostas/vistas/1", json={"ate": 1}).json() == {"marcadas": 0}

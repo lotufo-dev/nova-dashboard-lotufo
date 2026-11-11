@@ -37,6 +37,36 @@ def da_medicao(conn, medicao_id: int) -> list[dict]:
         (medicao_id,))]
 
 
+def nao_vistas(conn, usuario_id: int) -> list[dict]:
+    """Issue #654: as respostas que quem ENVIOU ainda nao viu, uma linha por medicao (duas respostas da mesma medicao
+    sao um aviso so'), da resposta mais nova para a mais antiga. `ate` e' a ultima resposta da linha: a tela devolve
+    esse numero ao marcar, e a resposta que chegar depois continua avisando. Envio de outra pessoa nao entra."""
+    from app import medicoes
+    saida = []
+    for r in conn.execute(
+            "SELECT r.medicao_id, m.contrato_id, m.numero, m.tipo, c.nome_curto, c.orgao AS orgao_texto, o.familia, "
+            "o.chave, o.nome, COUNT(*) AS respostas, MAX(r.id) AS ate, MAX(r.recebida_em) AS recebida_em "
+            "FROM medicao_respostas_orgao r JOIN envios e ON e.id=r.envio_id JOIN medicoes m ON m.id=r.medicao_id "
+            "JOIN contratos c ON c.id=m.contrato_id LEFT JOIN orgaos o ON o.id=c.orgao_id "
+            "WHERE e.usuario_id=? AND r.vista_em IS NULL GROUP BY r.medicao_id "
+            "ORDER BY MAX(r.recebida_em) DESC, MAX(r.id) DESC", (usuario_id,)):
+        orgao, _ = medicoes.contratante(r["familia"], r["chave"], r["nome"], r["orgao_texto"])
+        saida.append({"medicao_id": r["medicao_id"], "contrato_id": r["contrato_id"], "orgao": orgao,
+                      "obra": r["nome_curto"], "numero": r["numero"], "tipo": r["tipo"], "respostas": r["respostas"],
+                      "ate": r["ate"], "recebida_em": r["recebida_em"]})
+    return saida
+
+
+def marcar_vistas(conn, usuario_id: int, medicao_id: int, ate: int) -> int:
+    """Marca como vistas as respostas da medicao (ate' a de numero `ate`) dos envios da PROPRIA pessoa; devolve
+    quantas marcou. A resposta continua na pagina da medicao; so' o aviso flutuante deixa de aparecer."""
+    with db.mutacao(conn):
+        return conn.execute(
+            "UPDATE medicao_respostas_orgao SET vista_em=datetime('now') WHERE medicao_id=? AND id<=? "
+            "AND vista_em IS NULL AND envio_id IN (SELECT id FROM envios WHERE usuario_id=?)",
+            (medicao_id, ate, usuario_id)).rowcount
+
+
 def conversas_a_ler(conn, usuario_id: int) -> list[dict]:
     """Os envios cuja conversa a pessoa logada pode ler: os DELA, da planilha/carta, com conversa gravada, de medicao
     que nao foi recebida, cancelada nem desistida."""

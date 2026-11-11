@@ -20,6 +20,7 @@ import Diretoria from "./Diretoria";
 import { entradaDe, itemDe, tituloDaSecao, tituloDe } from "./navegacao";
 import SigaPagina from "./SigaPagina";
 import AncorasDocusign from "./AncorasDocusign";
+import AvisoRespostas from "./AvisoRespostas";
 import { useLeituraDasRespostas } from "./respostasOrgao";
 import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
 
@@ -161,6 +162,8 @@ export default function App() {
           )}
         </main>
       </div>
+      {/* #654: o aviso de resposta do orgao e' de quem envia; quem so' consulta (diretoria) nao tem */}
+      {usuario.perfil !== "diretoria" && <AvisoRespostas ir={ir} />}
       {faixa}
     </div>
   );
