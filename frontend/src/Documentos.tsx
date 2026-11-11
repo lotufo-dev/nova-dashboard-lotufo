@@ -3,8 +3,8 @@ import { IconeAlerta, IconeCheck, IconeEnviarNuvem, IconeRelogio, IconeTraco } f
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
-  certidoesVencendo, chipCertidao, competenciasRegularidade, empresasComFolha, estadosRegularidade, garantiasVencidas,
-  obrasPorOrgao, regularidadesFaltando, situacaoGarantia, type CorChip, type EmpresaDoc, type ObraDoc,
+  certidoesVencendo, chipCertidao, chipValidadeGarantia, competenciasRegularidade, empresasComCertidaoExigida, empresasComFolha,
+  estadosRegularidade, garantiasAConferir, obrasPorOrgao, regularidadesFaltando, type CorChip, type EmpresaDoc, type ObraDoc,
 } from "./matriz";
 import { substituir, trocarBusca, type Busca } from "./rota";
 import { fmtCompetencia, fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
@@ -98,15 +98,16 @@ function JanelaZip({ empresas, hoje, aoFechar }: { empresas: EmpresaDoc[]; hoje:
 }
 
 const ABAS = [
-  { id: "certidoes", rotulo: "Certidões", sufixo: (n: number) => `${n} vencendo` },
-  { id: "regularidade", rotulo: "Regularidade mensal", sufixo: (n: number) => `${n} faltando` },
-  { id: "garantias", rotulo: "Garantias", sufixo: (n: number) => `${n} ${n === 1 ? "vencida" : "vencidas"}` },
+  { id: "certidoes", rotulo: "Certidões", sufixo: (n: number) => `${n} vencendo`, cor: "critico" },
+  { id: "regularidade", rotulo: "Regularidade mensal", sufixo: (n: number) => `${n} faltando`, cor: "critico" },
+  // #651: do ultimo documento vencido so' se sabe a data; o contador pede conferencia, sem vermelho
+  { id: "garantias", rotulo: "Garantias", sufixo: (n: number) => `${n} a conferir`, cor: "breve" },
 ] as const;
 type IdAba = (typeof ABAS)[number]["id"];
 
 const ICONE_ESTADO = { anexada: IconeCheck, faltando: IconeTraco, aguardando: IconeRelogio } as const;
-const COR_ESTADO = { anexada: "feito", faltando: "breve", aguardando: "andamento" } as const;
-const TEXTO_ESTADO = { anexada: "anexada", faltando: "faltando", aguardando: "aguardando o DP" } as const;
+const COR_ESTADO = { anexada: "feito", faltando: "breve", aguardando: "andamento", sem: "neutro" } as const;
+const TEXTO_ESTADO = { anexada: "anexada", faltando: "faltando", aguardando: "aguardando o DP", sem: "sem registro" } as const;
 
 function Chip({ cor, rotulo, valor, data, href, titulo, semRotulo }: {
   cor: CorChip; rotulo: string; valor: string; data?: string; href?: string; titulo?: string; semRotulo?: boolean;
@@ -186,12 +187,14 @@ function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: str
               </div>
               <div className="doc-chips doc-chips--6">
                 {estadosRegularidade(e, hoje).map(x => {
-                  const Icone = ICONE_ESTADO[x.estado];
                   const nome = `${fmtCompetencia(x.competencia)}: ${TEXTO_ESTADO[x.estado]}`;
+                  const Icone = x.estado === "sem" ? null : ICONE_ESTADO[x.estado];
                   const interior = (
                     <>
                       <span className="doc-chip__rotulo">{fmtMesCurto(x.competencia)}</span>
-                      <Icone className="icone doc-chip__icone" titulo={nome} />
+                      {/* #651: mes que ninguem cobra (antes do primeiro PDF da empresa) e' so' "—" */}
+                      {Icone ? <Icone className="icone doc-chip__icone" titulo={nome} />
+                        : <b className="doc-chip__icone" role="img" aria-label={nome}>—</b>}
                     </>
                   );
                   return x.id !== undefined
@@ -223,26 +226,23 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
       <div className="doc-linha doc-linha--cabeca">
         <h2 className="doc-grupo__cabeca">{orgao} <span>· {obras.length} {obras.length === 1 ? "obra" : "obras"}</span></h2>
         <div className="doc-chips doc-chips--5" aria-hidden="true">
-          {["Apólice", "Válida até", "Cobre a execução", "ART", "CNO"].map(r => <span key={r}>{r}</span>)}
+          {["Apólice", "Válida até", "Cobre a execução", "CNO"].map(r => <span key={r}>{r}</span>)}
         </div>
       </div>
       <ul className="doc-linhas">
         {vistas.map(o => {
           const g = o.garantia;
-          const sg = g ? situacaoGarantia(g, fmtDataPura(g.vigencia_fim)) : null;
-          const corValida: CorChip = !sg ? "critico" : sg.nivel === "acao" ? "critico" : sg.nivel === "atencao" ? "breve"
-            : sg.nivel === "ok" ? "feito" : "neutro";
+          const valida = chipValidadeGarantia(g, g ? fmtDataPura(g.vigencia_fim) : "");
           const cob = o.cobre_execucao;
           return (
             <li key={o.contrato_id} className="doc-linha doc-linha--obra">
               <div className="doc-linha__nome"><span className="doc-linha__obra">{o.obra}</span></div>
               <div className="doc-chips doc-chips--5">
                 <Chip semRotulo cor={g?.apolice ? "feito" : "critico"} rotulo="Apólice" valor={g?.apolice || "sem registro"} />
-                <Chip semRotulo cor={corValida} rotulo="Válida até" valor={g ? fmtDataPura(g.vigencia_fim) : "sem registro"} />
+                <Chip semRotulo cor={valida.cor} rotulo="Válida até" valor={valida.valor} />
                 <Chip semRotulo cor={!g ? "critico" : cob?.cobre === true ? "feito" : cob?.cobre === false && cob.ate ? "breve" : "neutro"}
                   rotulo="Cobre a execução"
                   valor={!g ? "sem registro" : cob?.cobre === true ? "sim" : cob?.cobre === false && cob.ate ? `não, até ${fmtDataPura(cob.ate)}` : "—"} />
-                <Chip semRotulo cor={o.art ? "feito" : "critico"} rotulo="ART" valor={o.art ? "registrada" : "sem registro"} />
                 <Chip semRotulo cor={o.cno ? "feito" : "critico"} rotulo="CNO" valor={o.cno ? "registrado" : "sem registro"} />
               </div>
             </li>
@@ -261,7 +261,7 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
 const LEGENDAS: Record<IdAba, { classe: string; texto: string }[]> = {
   certidoes: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "vence em até 7 dias" }, { classe: "critico", texto: "vencida" }],
   regularidade: [{ classe: "feito", texto: "anexada" }, { classe: "andamento", texto: "aguardando o DP" }, { classe: "breve", texto: "faltando" }],
-  garantias: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "não cobre" }, { classe: "critico", texto: "vencida ou sem registro" }],
+  garantias: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "não cobre" }, { classe: "critico", texto: "sem registro" }],
 };
 
 function LegendaAba({ aba }: { aba: IdAba }) {
@@ -286,12 +286,14 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
   }, [empresaAntiga]);
 
   const empresas = useMemo(() => painel?.empresas ?? [], [painel]);
+  // #651: a aba Certidoes so' lista quem tem certidao exigida; o "Anexar PDF" e a aba Regularidade seguem com todas
+  const comCertidao = useMemo(() => empresasComCertidaoExigida(empresas), [empresas]);
   const obras = painel?.contratos ?? [];
   const hoje = painel?.hoje ?? "";
   const contadores: Record<IdAba, number> = painel ? {
-    certidoes: certidoesVencendo(empresas),
-    regularidade: regularidadesFaltando(empresas, hoje),
-    garantias: garantiasVencidas(obras),
+    certidoes: certidoesVencendo(comCertidao),
+    regularidade: regularidadesFaltando(empresas),
+    garantias: garantiasAConferir(obras),
   } : { certidoes: 0, regularidade: 0, garantias: 0 };
 
   return (
@@ -316,19 +318,19 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
             <button key={a.id} type="button" role="tab" id={`aba-${a.id}`} aria-selected={aba === a.id}
               aria-controls="painel-documentos" className="doc-aba"
               onClick={() => trocarBusca({ aba: a.id === "certidoes" ? null : a.id })}>
-              {a.rotulo}{contadores[a.id] > 0 && <> · <span className="info--critico">{a.sufixo(contadores[a.id])}</span></>}
+              {a.rotulo}{contadores[a.id] > 0 && <> · <span className={`info--${a.cor}`}>{a.sufixo(contadores[a.id])}</span></>}
             </button>
           ))}
         </div>
       )}
 
       {!painel && !erro && <p className="campo__nota">Carregando…</p>}
-      {painel && empresas.length === 0 && aba !== "garantias" && (
+      {painel && (aba === "certidoes" ? comCertidao : empresas).length === 0 && aba !== "garantias" && (
         <div className="vazio"><p className="vazio__titulo">Nenhuma empresa.</p></div>
       )}
       {painel && (
         <div id="painel-documentos" role="tabpanel" aria-labelledby={`aba-${aba}`} className="doc-painel-aba">
-          {aba === "certidoes" && <AbaCertidoes empresas={empresas} podeBaixar={true} aoZip={setZip} />}
+          {aba === "certidoes" && <AbaCertidoes empresas={comCertidao} podeBaixar={true} aoZip={setZip} />}
           {aba === "regularidade" && <AbaRegularidade empresas={empresas} hoje={hoje} />}
           {aba === "garantias" && (
             obras.length === 0 ? <div className="vazio"><p className="vazio__titulo">Nenhuma obra ativa.</p></div>
