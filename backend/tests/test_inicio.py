@@ -471,3 +471,92 @@ def test_previsao_na_cota_da_lotufo_com_centavo_impar(cenario):
     _protocolada(c, cid, 2, "2026-10-06", 999_999, aprovado=100_001)
     assert _previsao(c) == {**VAZIA, "proximo_mes": (100_002, 2)}
     assert _etapas(c)["protocolado"][0] == 100_002
+
+
+# --- matriz obra por competencia (#659): a etapa da medicao de cada mes, obra a obra ---
+
+def _na_matriz(c, cid, numero, estado, competencia, tipo="execucao", protocolo=None):
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, criado_em) "
+              "VALUES (?, ?, ?, ?, ?, 1000, '2026-01-01 10:00:00')", (cid, numero, tipo, competencia, estado))
+    c.commit()
+    mid = c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
+    if protocolo:
+        _protocolar(c, mid, protocolo)
+    return mid
+
+
+def _matriz(c, hoje=HOJE):
+    return inicio.painel(c, hoje)["matriz"]
+
+
+def _celulas(c, cid, hoje=HOJE):
+    """As celulas pintadas da obra: competencia -> (etapa, medicao)."""
+    m = _matriz(c, hoje)
+    obra = next(o for g in m["grupos"] for o in g["obras"] if o["contrato_id"] == cid)
+    assert len(obra["celulas"]) == len(m["competencias"]) == 12
+    return {comp: (cel["etapa"], cel["medicao_id"]) for comp, cel in zip(m["competencias"], obra["celulas"]) if cel}
+
+
+def test_matriz_tem_12_competencias_ate_o_mes_anterior_e_as_obras_ativas_por_contratante(cenario):
+    c, cid = cenario
+    b = _obra_de(c, "sinfra_b", "SINFRA - SUPU (Pavimentação Urbana)", "sinfra", "CT 4/2025")
+    a = _obra_de(c, "sinfra_a", "SINFRA - SUEF II", "sinfra", "CT 3/2025")
+    encerrada = _obra_de(c, "prefeitura_alfa", "Prefeitura Alfa", "prefeitura", "CT 2/2025")
+    c.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (encerrada,)); c.commit()
+    m = _matriz(c)
+    assert m["competencias"] == ["2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05",
+                                 "2026-06", "2026-07", "2026-08", "2026-09"]
+    # agrupadas pelo contratante (a SINFRA inteira, como na previsao); obra ativa sem medicao tem a linha vazia
+    assert [(g["contratante"], [(o["contrato_id"], o["obra"]) for o in g["obras"]]) for g in m["grupos"]] == [
+        ("MTPAR", [(cid, "Obra A")]), ("SINFRA", [(a, "Obra CT 3/2025"), (b, "Obra CT 4/2025")])]
+    assert all(o["celulas"] == [None] * 12 for g in m["grupos"] for o in g["obras"])
+    assert _matriz(c, D(2027, 1, 5))["competencias"][-2:] == ["2026-11", "2026-12"]      # vira o ano
+
+
+def test_matriz_etapa_de_cada_medicao_pelo_estado(cenario):
+    c, cid = cenario
+    ids = {estado: _na_matriz(c, cid, n, estado, f"2026-{n:02d}") for n, estado in enumerate(
+        ["planilha_enviada", "boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida", "protocolada",
+         "nf_emitida", "recebida"], start=1)}
+    # nao pintam: cancelada e desistida (a issue), e as que ainda nao entraram no ciclo (prevista, planilha gerada)
+    for n, estado in enumerate(["cancelada", "desistida", "prevista", "planilha_gerada"], start=20):
+        _na_matriz(c, cid, n, estado, "2026-09")
+    _na_matriz(c, cid, 30, "recebida", "2025-09")          # competencia fora das 12
+    _na_matriz(c, cid, 31, "recebida", "2026-10")          # o mes corrente nao entra
+    assert _celulas(c, cid) == {
+        "2026-01": ("em_analise", ids["planilha_enviada"]), "2026-02": ("boletim", ids["boletim_recebido"]),
+        "2026-03": ("boletim", ids["espelho_gerado"]), "2026-04": ("boletim", ids["espelho_enviado"]),
+        "2026-05": ("nota", ids["nota_emitida"]), "2026-06": ("protocolado", ids["protocolada"]),
+        "2026-07": ("protocolado", ids["nf_emitida"]), "2026-08": ("recebida", ids["recebida"])}
+
+
+def test_matriz_competencia_com_execucao_e_reajuste_mostra_a_menos_adiantada(cenario):
+    c, cid = cenario
+    _na_matriz(c, cid, 1, "recebida", "2026-08")
+    reajuste_ = _na_matriz(c, cid, 1, "nota_emitida", "2026-08", tipo="reajuste")
+    execucao = _na_matriz(c, cid, 2, "planilha_enviada", "2026-07")
+    _na_matriz(c, cid, 2, "protocolada", "2026-07", tipo="reajuste")
+    so_ela = _na_matriz(c, cid, 3, "recebida", "2026-06")
+    _na_matriz(c, cid, 3, "cancelada", "2026-06", tipo="reajuste")       # a cancelada nao segura a celula
+    assert _celulas(c, cid) == {"2026-08": ("nota", reajuste_), "2026-07": ("em_analise", execucao),
+                                "2026-06": ("recebida", so_ela)}
+
+
+def test_matriz_protocolada_alem_do_prazo_do_contratante_e_atrasada_como_na_previsao(cenario):
+    c, cid = cenario
+    _recebidas(c, cid, [30] * 5)                                         # prazo do contratante: 30 dias
+    sem = _obra_de(c, "autarquia_beta", "Autarquia Beta", "ses", "CT 5/2025")
+    atrasada = _na_matriz(c, cid, 1, "protocolada", "2026-07", protocolo="2026-09-08")    # esperada 08/10: ja' passou
+    no_prazo = _na_matriz(c, cid, 2, "protocolada", "2026-06", protocolo="2026-09-09")    # esperada hoje
+    sem_data = _na_matriz(c, cid, 3, "protocolada", "2026-05")                            # sem data de protocolo
+    sem_prazo = _na_matriz(c, sem, 4, "protocolada", "2026-07", protocolo="2026-01-05")   # contratante sem prazo
+    # duas protocoladas na competencia, uma atrasada: a celula e' a atrasada
+    _na_matriz(c, cid, 5, "protocolada", "2026-04", protocolo="2026-10-01")
+    par = _na_matriz(c, cid, 5, "protocolada", "2026-04", tipo="reajuste", protocolo="2026-08-01")
+    cel = _celulas(c, cid)
+    assert {k: cel[k] for k in ("2026-07", "2026-06", "2026-05", "2026-04")} == {
+        "2026-07": ("atrasado", atrasada), "2026-06": ("protocolado", no_prazo), "2026-05": ("protocolado", sem_data),
+        "2026-04": ("atrasado", par)}
+    assert _celulas(c, sem) == {"2026-07": ("protocolado", sem_prazo)}
+    # a mesma regra da previsao de entrada: as atrasadas da matriz sao as da linha "Atrasado"
+    assert inicio.painel(c, HOJE)["previsao"]["atrasado"]["quantidade"] == 2

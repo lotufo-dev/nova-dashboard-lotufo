@@ -29,18 +29,45 @@ describe("celular", () => {
     expect(bloco).toMatch(/\.ini-numero__valor\s*\{[^}]*font-size:\s*clamp\(/);
   });
 
-  it("Início (#642): a faixa do ciclo cabe a 1024 px e vira lista vertical em painel estreito", () => {
-    // a 1024 px com o menu lateral aberto (240) e o respiro da pagina (2 x 32) e do painel (2 x 16) sobram 688 px
-    const util = 1024 - Number(/--trilho-largo:\s*(\d+)px/.exec(tokensCss)?.[1]) - 2 * 32 - 2 * 16;
-    const minimo = Number(/--ini-faixa-min:\s*(\d+)px/.exec(inicioCss)?.[1]);
+  it("Início (#642, #659): na faixa do ciclo o valor inteiro cabe no próprio trecho de 1024 a 1920 px; em painel estreito, lista vertical", () => {
+    // #659: a 1440 px o trecho de maior valor espremia os outros e o valor em reais vazava para o trecho vizinho. A
+    // regra: o minimo de cada trecho e' o conteudo dele (o valor nao quebra), e a fonte do valor sai da largura do
+    // painel de modo que cinco valores de 11 digitos caibam lado a lado. O jsdom nao mede layout: aqui a conta, com a
+    // largura de "R$ 100.000.000,00" em Lexend 700 medida no Chrome.
+    const EM_MEDIDO = 9.81;
+    const em = Number(/--ini-faixa-valor-em:\s*([\d.]+)/.exec(inicioCss)?.[1]);
+    expect(em).toBeGreaterThanOrEqual(EM_MEDIDO);
     const vao = Number(/\.ini-faixa\s*\{[^}]*gap:\s*(\d+)px/.exec(inicioCss)?.[1]);
+    const respiro = Number(/\.ini-faixa__etapa\s*\{[^}]*padding:\s*\d+px (\d+)px/.exec(inicioCss)?.[1]);
+    const fonte = /\.ini-faixa__valor\s*\{[^}]*font-size:\s*clamp\((\d+)px, calc\(\(100cqi - (\d+)px\) \/ \(5 \* var\(--ini-faixa-valor-em\)\)\), (\d+)px\)/.exec(inicioCss);
+    const [minima, folga, maxima] = [Number(fonte?.[1]), Number(fonte?.[2]), Number(fonte?.[3])];
+    expect(folga).toBe(5 * 2 * respiro + 4 * vao);            // o que nao e' valor: respiros dos cinco trechos e vaos
+    expect(inicioCss).toMatch(/\.ini-faixa__valor\s*\{[^}]*white-space:\s*nowrap/);
+    expect(ler("Inicio.tsx")).toContain("minmax(min-content, ");
+    // com o menu lateral aberto (240), o respiro da pagina (2 x 32) e o do painel (2 x 16)
+    const painel = (largura: number) => largura - Number(/--trilho-largo:\s*(\d+)px/.exec(tokensCss)?.[1]) - 2 * 32 - 2 * 16;
+    const cinco = (f: number) => 5 * (em * f + 2 * respiro) + 4 * vao;
+    for (const largura of [1024, 1280, 1440, 1920]) {
+      const f = Math.min(maxima, Math.max(minima, (painel(largura) - folga) / (5 * em)));
+      expect(cinco(f), `${largura} px`).toBeLessThanOrEqual(painel(largura));     // cabe: sem corte, sem vazar, sem rolagem
+    }
+    // abaixo do que os cinco trechos pedem na fonte minima, uma coluna so'; a 1024 px a faixa continua deitada
     const corte = Number(/@container \(max-width:\s*(\d+)px\)/.exec(inicioCss)?.[1]);
-    const cinco = 5 * minimo + 4 * vao;
-    expect(cinco).toBeLessThanOrEqual(util);        // a faixa inteira cabe: sem rolagem horizontal
-    expect(corte).toBe(cinco - 1);                  // abaixo do que os cinco trechos pedem, uma coluna so'
+    expect(corte).toBe(cinco(minima) - 1);
+    expect(painel(1024)).toBeGreaterThan(corte);
     expect(inicioCss).toMatch(/\.ini-ciclo\s*\{[^}]*container-type:\s*inline-size[^}]*padding:\s*16px/);
     const bloco = inicioCss.slice(inicioCss.indexOf("@container"));
     expect(bloco).toMatch(/\.ini-faixa\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  });
+
+  it("Início (#659): a matriz cabe na largura do painel e, em painel estreito, o nome da obra sobe para a própria linha", () => {
+    // 12 colunas que encolhem (minmax(0, 1fr)) ao lado do nome: nenhuma largura fixa empurra a pagina
+    expect(inicioCss).toMatch(/\.ini-matriz\s*\{[^}]*container-type:\s*inline-size/);
+    expect(inicioCss).toMatch(/\.ini-matriz__linha\s*\{[^}]*grid-template-columns:\s*minmax\(0, \d+px\) repeat\(12, minmax\(0, 1fr\)\)/);
+    expect(inicioCss).toMatch(/\.ini-matriz__obra\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/);
+    const bloco = inicioCss.slice(inicioCss.indexOf(".ini-matriz__cor--atrasado"));
+    expect(bloco).toMatch(/@container \(max-width:\s*\d+px\)\s*\{\s*\.ini-matriz__linha\s*\{\s*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
+    expect(bloco).toMatch(/\.ini-matriz__obra\s*\{\s*grid-column:\s*1 \/ -1/);
   });
 
   it("Medição: abaixo de 600 px a meta desce para baixo do título", () => {

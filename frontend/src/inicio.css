@@ -15,34 +15,40 @@
 .ini-painel { min-width: 0; display: flex; flex-direction: column; padding: 20px; gap: 14px; }
 .ini-painel h2 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 700; }
 
-/* faixa do ciclo (#642): um trecho por etapa, largura proporcional ao valor (as colunas vem da tela, em
-   --ini-faixa-colunas) com o minimo que mantem o valor numa linha. A 1024px, com o menu lateral aberto (240px), o
-   painel tem 688px por dentro e os cinco trechos cabem (5 x 128 + 4 x 6 = 664); em painel mais estreito que isso a
+/* faixa do ciclo (#642): um trecho por etapa (as colunas vem da tela, em --ini-faixa-colunas). #659: o minimo de cada
+   trecho e' o proprio conteudo (`min-content`: o valor inteiro, que nao quebra), e a proporcao pelo valor vale para o
+   que sobra; antes o trecho de maior valor espremia os outros e o valor vazava para o vizinho. A fonte do valor sai da
+   largura do painel para cinco valores de 11 digitos caberem lado a lado: um valor desses mede --ini-faixa-valor-em
+   vezes a fonte no maximo (no navegador, "R$ 800.000.000,00" mede 9,81: o zero e' o algarismo mais largo), e 76px
+   sao os respiros (5 x 2 x 6) mais os vaos (4 x 4). A 1024px, com o menu lateral aberto (240px), o painel tem 688px
+   por dentro e a fonte fica em 12px; em painel onde nem a 12px os cinco cabem (5 x (10 x 12 + 12) + 4 x 4 = 676), a
    faixa vira lista vertical, sem rolagem. */
 .ini-ciclo { container-type: inline-size; padding: 16px; position: relative; }
 .ini-faixa {
-  --ini-faixa-min: 128px;
-  list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; grid-template-columns: var(--ini-faixa-colunas);
+  --ini-faixa-valor-em: 10;
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; grid-template-columns: var(--ini-faixa-colunas);
 }
 .ini-faixa__etapa {
-  min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 8px 12px;
+  min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 6px 12px;
   background: var(--andamento-fundo); border-top: 4px solid var(--andamento-ponto); border-radius: var(--raio);
 }
 .ini-faixa__etapa--feito { background: var(--ok-fundo); border-top-color: var(--ok-ponto); }
 .ini-faixa__rotulo { font-size: 13px; line-height: 20px; font-weight: 600; color: var(--andamento); }
 .ini-faixa__etapa--feito .ini-faixa__rotulo { color: var(--ok); }
 .ini-faixa__valor {
-  font-size: clamp(13px, 1.9cqi, 20px); line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+  font-size: clamp(12px, calc((100cqi - 76px) / (5 * var(--ini-faixa-valor-em))), 20px);
+  line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .ini-faixa__conta { font-size: 13px; line-height: 18px; color: var(--texto-2); }
-@container (max-width: 663px) {
+@container (max-width: 675px) {
   .ini-faixa { grid-template-columns: minmax(0, 1fr); }
   .ini-faixa__etapa {
     display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline;
     border-top: 0; border-left: 4px solid var(--andamento-ponto);
   }
   .ini-faixa__etapa--feito { border-left-color: var(--ok-ponto); }
-  .ini-faixa__valor { grid-column: 2; grid-row: 1; font-size: 16px; line-height: 24px; }
+  /* #659: no celular (painel de 262px a 390px de tela) o valor de 11 digitos a 16px nao deixava lugar para o rotulo */
+  .ini-faixa__valor { grid-column: 2; grid-row: 1; font-size: clamp(13px, 5.2cqi, 16px); line-height: 24px; }
   .ini-faixa__conta { grid-column: 1 / -1; }
 }
 
@@ -84,6 +90,45 @@
   .ini-previsao__linha { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; }
   .ini-previsao__valor { grid-column: 2; grid-row: 1; font-size: 16px; line-height: 24px; }
   .ini-previsao__conta { grid-column: 1 / -1; }
+}
+
+/* matriz obra por competencia (#659): uma linha por obra e uma celula por competencia, so' com a cor da etapa. Os
+   quatro azuis vao do mais claro (em analise) ao mais escuro (protocolado); recebida e' verde e protocolada alem do
+   prazo, vermelha. Cada linha e' uma grade com as mesmas colunas, entao as celulas alinham entre as linhas. Em painel
+   estreito (celular) o nome da obra sobe para uma linha propria e as 12 celulas ocupam a largura toda. */
+.ini-matriz { container-type: inline-size; padding: 16px; position: relative; }
+.ini-matriz__topo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.ini-matriz__legenda {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none;
+  font-size: 12px; line-height: 16px; color: var(--texto-2);
+}
+.ini-matriz__legenda li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ini-matriz__cor { flex: none; width: 12px; height: 12px; border-radius: var(--raio-micro); }
+.ini-matriz__grade { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ini-matriz__linha {
+  display: grid; grid-template-columns: minmax(0, 220px) repeat(12, minmax(0, 1fr)); gap: 3px; align-items: center; min-width: 0;
+}
+.ini-matriz__linha--meses { align-items: start; }
+.ini-matriz__linha--meses > :first-child { grid-column-start: 2; }
+.ini-matriz__mes {
+  min-width: 0; display: flex; flex-direction: column; align-items: center; font-size: 11px; line-height: 14px; color: var(--texto-2);
+}
+.ini-matriz__grupo { margin: 8px 0 0; font-size: 13px; line-height: 20px; font-weight: 600; color: var(--texto-2); overflow-wrap: anywhere; }
+.ini-matriz__obra { min-width: 0; padding-right: 8px; font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
+.ini-matriz__celula { display: block; min-width: 0; height: 22px; border-radius: var(--raio-micro); background: var(--linha-suave); }
+a.ini-matriz__celula:hover { outline: 2px solid var(--linha-hover); outline-offset: 1px; }
+a.ini-matriz__celula:focus-visible { outline: 2px solid var(--foco); outline-offset: 1px; }
+.ini-matriz__cor--em_analise, .ini-matriz__celula--em_analise { background: var(--andamento-linha); }
+.ini-matriz__cor--boletim, .ini-matriz__celula--boletim { background: color-mix(in srgb, var(--andamento-linha), var(--andamento-ponto)); }
+.ini-matriz__cor--nota, .ini-matriz__celula--nota { background: var(--andamento-ponto); }
+.ini-matriz__cor--protocolado, .ini-matriz__celula--protocolado { background: var(--andamento); }
+.ini-matriz__cor--recebida, .ini-matriz__celula--recebida { background: var(--ok-ponto); }
+.ini-matriz__cor--atrasado, .ini-matriz__celula--atrasado { background: var(--acao-ponto); }
+@container (max-width: 559px) {
+  .ini-matriz__linha { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  .ini-matriz__linha--meses > :first-child { grid-column-start: 1; }
+  .ini-matriz__obra { grid-column: 1 / -1; padding-right: 0; }
+  .ini-matriz__mes { font-size: 10px; }
 }
 
 /* dois cartoes: so' rotulo e valor (#652: o recebido no ano virou as barras de 12 meses) */

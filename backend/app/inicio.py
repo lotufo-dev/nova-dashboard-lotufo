@@ -11,7 +11,9 @@ Nada e' calculado de novo aqui: cada numero vem do modulo que ja' o calcula para
 - faixa do ciclo (#642): `_ciclo`, na cota, so' com a data do evento de cada etapa;
 - recebido em 12 meses (#652): as baixas do RM de `diretoria.rm_por_mes`, mes a mes;
 - previsao de entrada (#652): `_previsao`, as protocoladas da faixa do ciclo pela data esperada (protocolo + prazo
-  do orgao, a mediana de `_prazos_do_orgao`).
+  do orgao, a mediana de `_prazos_do_orgao`);
+- matriz obra por competencia (#659): `_matriz`, a etapa da medicao de cada mes pelo estado dela; a atrasada e' a da
+  previsao de entrada (`_esperada`).
 
 Medido no mes: B-01 (10/10/2026) -- a regra da Carteira: medicoes pela COMPETENCIA do mes INTEIRO, em valor CHEIO
 (atestado, senao protocolado), como a pagina da medicao mostra. A data de
@@ -122,6 +124,16 @@ def _prazos_do_orgao(ms: list[dict], hoje: datetime.date) -> dict[str, float]:
     return {k: statistics.median(v) for k, v in dias.items() if len(v) >= PRAZO_MINIMO_CASOS}
 
 
+def _esperada(m: dict, prazos_: dict[str, float]) -> datetime.date | None:
+    """A data esperada do recebimento de uma medicao protocolada: o primeiro protocolo da nota + o prazo do contratante
+    (a parte inteira da mediana). Sem a data do protocolo ou com o contratante sem prazo, nao ha' data esperada.
+    Atrasada e' a medicao com essa data anterior a hoje, na previsao de entrada e na matriz (#659)."""
+    protocolo, prazo = diretoria._d(m["protocolo_em"]), prazos_.get(diretoria._contratante(m))
+    if protocolo is None or prazo is None:
+        return None
+    return protocolo + datetime.timedelta(days=math.floor(prazo))
+
+
 def _previsao(conn, hoje: datetime.date) -> dict:
     """Issue #652: quando o protocolado deve entrar. As medicoes sao as da etapa "Protocolado" da faixa do ciclo
     (estado protocolado e com a data do primeiro protocolo da nota), na cota (`diretoria._cota`), e cada uma cai em
@@ -136,16 +148,53 @@ def _previsao(conn, hoje: datetime.date) -> dict:
         protocolo = diretoria._d(m["protocolo_em"])
         if m["estado"] not in diretoria.PROTOCOLADAS or not protocolo:
             continue
-        prazo = prazos_.get(diretoria._contratante(m))
-        if prazo is None:
+        esperada = _esperada(m, prazos_)
+        if esperada is None:
             linha = "sem_previsao"
         else:
-            esperada = protocolo + datetime.timedelta(days=math.floor(prazo))
             mes = esperada.strftime("%Y-%m")
             linha = "atrasado" if esperada < hoje else "neste_mes" if mes == neste else "proximo_mes" if mes == proximo else "depois"
         out[linha]["valor_centavos"] += diretoria._cota(m)
         out[linha]["quantidade"] += 1
     return out
+
+
+# Issue #659: a etapa de cada estado na matriz, na ordem da menos para a mais adiantada. A protocolada atrasada vem
+# antes da protocolada no prazo: na mesma competencia, a celula e' a atrasada.
+ETAPAS_MATRIZ = ("em_analise", "boletim", "nota", "atrasado", "protocolado", "recebida")
+_ETAPA_DO_ESTADO = {**{estado: etapa for etapa, estados, _ in CICLO for estado in estados}, "recebida": "recebida"}
+
+
+def _matriz(conn, hoje: datetime.date) -> dict:
+    """Issue #659: uma linha por obra ativa, agrupadas pelo contratante (`diretoria._contratante`), e uma celula por
+    competencia, as 12 ultimas terminando no mes anterior a hoje. A celula traz a etapa da medicao daquela competencia,
+    pelo estado dela (os estados de `CICLO`, mais `recebida`), e a medicao para o link; a protocolada com a data
+    esperada (`_esperada`) anterior a hoje e' `atrasado`. Com mais de uma medicao na competencia (execucao e reajuste),
+    vale a menos adiantada. Cancelada, desistida, prevista e planilha so' gerada nao pintam: a celula fica nula."""
+    competencias = [diretoria._mes(hoje, -n) for n in range(12, 0, -1)]
+    ms = diretoria._medicoes(conn)
+    prazos_ = _prazos_do_orgao(ms, hoje)
+    celulas: dict[tuple[int, str], tuple[int, int]] = {}      # (obra, competencia) -> (ordem da etapa, medicao)
+    for m in ms:
+        etapa = _ETAPA_DO_ESTADO.get(m["estado"])
+        if etapa is None or m["competencia"] not in competencias:
+            continue
+        if etapa == "protocolado":
+            esperada = _esperada(m, prazos_)
+            etapa = "atrasado" if esperada is not None and esperada < hoje else etapa
+        chave, nova = (m["contrato_id"], m["competencia"]), (ETAPAS_MATRIZ.index(etapa), m["id"])
+        celulas[chave] = min(celulas.get(chave, nova), nova)
+    grupos: dict[str, list[dict]] = {}
+    for c in conn.execute("SELECT c.id, COALESCE(c.nome_curto, c.numero_instrumento) AS obra, o.nome AS orgao_nome, "
+                          "o.familia AS orgao_familia, o.chave AS orgao_chave FROM contratos c "
+                          "LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.estado='ativo'"):
+        linha = [celulas.get((c["id"], comp)) for comp in competencias]
+        grupos.setdefault(diretoria._contratante(dict(c)), []).append({
+            "contrato_id": c["id"], "obra": c["obra"],
+            "celulas": [x and {"etapa": ETAPAS_MATRIZ[x[0]], "medicao_id": x[1]} for x in linha]})
+    return {"competencias": competencias,
+            "grupos": [{"contratante": k, "obras": sorted(v, key=lambda o: (o["obra"] or "", o["contrato_id"]))}
+                       for k, v in sorted(grupos.items())]}
 
 
 def _recebido_ano(conn, hoje: datetime.date) -> dict:
@@ -310,6 +359,7 @@ def painel(conn, hoje: datetime.date | None = None, publico: str = "operacao") -
         "ciclo": _ciclo(conn, hoje),
         "recebido_12m": _recebido_12m(conn, hoje),
         "previsao": _previsao(conn, hoje),
+        "matriz": _matriz(conn, hoje),
         "notas_mes": _notas_mes(conn, hoje),
         "avisos_importantes": _avisos_importantes(reaj_caixa, prazos_lista, vencidas, vencendo, hoje),
     }
