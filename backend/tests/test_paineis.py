@@ -328,4 +328,33 @@ def test_datas_de_marco_respeitam_a_ordem(conn, cid):
     assert medicoes.detalhe(conn, m)["recebida_em"] == "2026-08-20"
 
 
+# --- issue #647: a evolucao mensal le o pedido e o aprovado em separado, por competencia ---
+def test_curva_devolve_pedido_e_aprovado_da_execucao_em_separado(conn, cid):
+    _medir(conn, cid, 1, "execucao", "2026-07", 250_01, atestado=240_03)
+    p = paineis.curva(conn, cid)[0]
+    assert p["pedido_execucao_centavos"] == 250_01 and p["aprovado_execucao_centavos"] == 240_03
+    assert p["medido_execucao_centavos"] == 240_03          # o medido (saldo, curva S) segue a regra de antes
+
+
+def test_curva_competencia_com_pedido_e_sem_aprovado_traz_aprovado_nulo(conn, cid):
+    cronograma.nova_versao(conn, 1, cid, [("2026-08", 400_00)], "manual")
+    _medir(conn, cid, 1, "execucao", "2026-07", 250_01)
+    pontos = {p["competencia"]: p for p in paineis.curva(conn, cid)}
+    assert pontos["2026-07"]["pedido_execucao_centavos"] == 250_01
+    assert pontos["2026-07"]["aprovado_execucao_centavos"] is None
+    # mes so' com previsto: nem pedido nem aprovado
+    assert pontos["2026-08"]["pedido_execucao_centavos"] is None
+    assert pontos["2026-08"]["aprovado_execucao_centavos"] is None
+
+
+def test_curva_pedido_e_aprovado_somam_as_medicoes_da_competencia_e_ignoram_reajuste(conn, cid):
+    _medir(conn, cid, 1, "execucao", "2026-07", 100_01, atestado=90_01)
+    _medir(conn, cid, 2, "execucao", "2026-07", 50_02)                # pedida, ainda sem aprovado
+    _medir(conn, cid, 1, "reajuste", "2026-07", 10_00, atestado=9_00)  # serie propria: fora do pedido/aprovado
+    p = paineis.curva(conn, cid)[0]
+    assert p["pedido_execucao_centavos"] == 150_03
+    assert p["aprovado_execucao_centavos"] == 90_01
+    assert p["medido_reajuste_centavos"] == 9_00
+
+
 # --- bloco 3: emitido pela nota vinculada; pendencias da nota ---
