@@ -11,6 +11,11 @@ const MESES_12 = ["2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-0
   "2026-09", "2026-10"];
 const RECEBIDO: Record<string, number> = { "2025-11": 120_000_000, "2026-03": 35_000_000, "2026-09": 240_000_000, "2026-10": 60_000_050 };
 
+// #659: as 12 competencias da matriz terminam no mes anterior ao de hoje
+const MESES_MATRIZ = ["2025-10", ...MESES_12.slice(0, 11)];
+type Celula = PainelInicio["matriz"]["grupos"][number]["obras"][number]["celulas"][number];
+const celulas = (ultimas: Celula[]): Celula[] => [...Array<Celula>(12 - ultimas.length).fill(null), ...ultimas];
+
 const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   hoje: "2026-10-09",
   notas_a_enviar: 3,
@@ -36,6 +41,16 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
     atrasado: { valor_centavos: 800_100, quantidade: 2 },
     sem_previsao: { valor_centavos: 0, quantidade: 0 },
     depois: { valor_centavos: 1_584_477_803, quantidade: 1 },     // as cinco somam a etapa "Protocolado" do ciclo
+  },
+  matriz: {
+    competencias: MESES_MATRIZ,
+    grupos: [
+      { contratante: "Contratante A", obras: [
+        { contrato_id: 7, obra: "Obra A", celulas: celulas([{ etapa: "recebida", medicao_id: 81 }, { etapa: "atrasado", medicao_id: 82 },
+          { etapa: "protocolado", medicao_id: 83 }, { etapa: "em_analise", medicao_id: 84 }]) },
+        { contrato_id: 8, obra: "Obra B", celulas: celulas([{ etapa: "nota", medicao_id: 91 }, null, { etapa: "boletim", medicao_id: 92 }]) }] },
+      { contratante: "Contratante B", obras: [{ contrato_id: 9, obra: "Obra C", celulas: celulas([]) }] },
+    ],
   },
   notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2 },
   avisos_importantes: {
@@ -114,7 +129,8 @@ describe("Início", () => {
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: CICLO });
     const faixa = regiao.querySelector<HTMLElement>(".ini-faixa");
-    const m = "minmax(var(--ini-faixa-min), ";
+    // o minimo de cada trecho e' o proprio valor numa linha (`min-content`); a proporcao vale para o que sobra
+    const m = "minmax(min-content, ";
     expect(faixa?.style.getPropertyValue("--ini-faixa-colunas")).toBe(`${m}0fr) ${m}25fr) ${m}0fr) ${m}75fr) ${m}0fr)`);
     expect([...(regiao.querySelector(".ini-faixa__etapa")?.children ?? [])].map(limpo)).toEqual(["Em análise", "R$ 0,00", "0 medições"]);
   });
@@ -124,7 +140,7 @@ describe("Início", () => {
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: CICLO });
     expect(regiao.querySelector<HTMLElement>(".ini-faixa")?.style.getPropertyValue("--ini-faixa-colunas"))
-      .toBe(Array<string>(5).fill("minmax(var(--ini-faixa-min), 1fr)").join(" "));
+      .toBe(Array<string>(5).fill("minmax(min-content, 1fr)").join(" "));
   });
 
   it("#652: recebido em 12 meses, uma barra por mês até o mês corrente, com a altura proporcional ao maior", async () => {
@@ -207,6 +223,72 @@ describe("Início", () => {
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
     expect(regiao.querySelector("[class*='--critico']")).toBeNull();
+  });
+
+  const MATRIZ = "Medições por obra e competência";
+
+  it("#659: matriz com uma linha por obra, agrupada por contratante, 12 competências e a legenda das etapas", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: MATRIZ });
+    const legenda = within(regiao).getByRole("list", { name: "Legenda das etapas" });
+    expect([...legenda.children].map(li => [limpo(li), li.querySelector("span")?.className])).toEqual([
+      ["Em análise", "ini-matriz__cor ini-matriz__cor--em_analise"], ["Boletim", "ini-matriz__cor ini-matriz__cor--boletim"],
+      ["Nota", "ini-matriz__cor ini-matriz__cor--nota"], ["Protocolado", "ini-matriz__cor ini-matriz__cor--protocolado"],
+      ["Recebido", "ini-matriz__cor ini-matriz__cor--recebida"], ["Atrasado", "ini-matriz__cor ini-matriz__cor--atrasado"]]);
+    // o cabecalho: o mes em cada coluna; o ano so' na primeira e em janeiro
+    expect([...regiao.querySelectorAll(".ini-matriz__mes")].map(m => [...m.children].map(limpo).join(" "))).toEqual(
+      ["out 25", "nov", "dez", "jan 26", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set"]);
+    expect(within(regiao).getAllByRole("heading", { level: 3 }).map(limpo)).toEqual(["Contratante A", "Contratante B"]);
+    const linhas = [...regiao.querySelectorAll(".ini-matriz__linha--obra")];
+    expect(linhas.map(l => limpo(l.querySelector(".ini-matriz__obra")))).toEqual(["Obra A", "Obra B", "Obra C"]);
+    expect(linhas.map(l => l.querySelectorAll(".ini-matriz__celula").length)).toEqual([12, 12, 12]);
+  });
+
+  it("#659: cada célula pintada tem a cor da etapa, nome acessível e é um link para a medição; a vazia não", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: MATRIZ });
+    const links = within(regiao).getAllByRole("link");
+    expect(links.map(a => [a.getAttribute("aria-label"), a.getAttribute("href"), a.className.replace("ini-matriz__celula ", "")])).toEqual([
+      ["Obra A, 06/2026: Recebido", "/obras/7/medicoes/81", "ini-matriz__celula--recebida"],
+      ["Obra A, 07/2026: Atrasado", "/obras/7/medicoes/82", "ini-matriz__celula--atrasado"],
+      ["Obra A, 08/2026: Protocolado", "/obras/7/medicoes/83", "ini-matriz__celula--protocolado"],
+      ["Obra A, 09/2026: Em análise", "/obras/7/medicoes/84", "ini-matriz__celula--em_analise"],
+      ["Obra B, 07/2026: Nota", "/obras/8/medicoes/91", "ini-matriz__celula--nota"],
+      ["Obra B, 09/2026: Boletim", "/obras/8/medicoes/92", "ini-matriz__celula--boletim"],
+    ]);
+    expect(links.every(a => a.getAttribute("title") === a.getAttribute("aria-label"))).toBe(true);
+    const vazias = [...regiao.querySelectorAll(".ini-matriz__celula:not(a)")];
+    expect(vazias).toHaveLength(36 - 6);
+    expect(vazias.every(v => v.className === "ini-matriz__celula" && v.getAttribute("aria-hidden") === "true")).toBe(true);
+  });
+
+  it("#659: matriz tem a tabela equivalente, dentro de um div sr-only", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: MATRIZ });
+    const tabela = within(regiao).getByRole("table", { name: "Etapa da medição de cada obra por competência" });
+    expect(tabela.className).toBe("");
+    expect(tabela.parentElement?.tagName).toBe("DIV");
+    expect(tabela.parentElement?.className).toBe("sr-only");
+    expect(regiao.querySelector("table.sr-only")).toBeNull();
+    const t = "—";
+    expect(within(tabela).getAllByRole("row").map(l => [...l.children].map(limpo))).toEqual([
+      ["Obra", "Contratante", "10/2025", "11/2025", "12/2025", "01/2026", "02/2026", "03/2026", "04/2026", "05/2026", "06/2026",
+        "07/2026", "08/2026", "09/2026"],
+      ["Obra A", "Contratante A", t, t, t, t, t, t, t, t, "Recebido", "Atrasado", "Protocolado", "Em análise"],
+      ["Obra B", "Contratante A", t, t, t, t, t, t, t, t, t, "Nota", t, "Boletim"],
+      ["Obra C", "Contratante B", t, t, t, t, t, t, t, t, t, t, t, t],
+    ]);
+  });
+
+  it("#659: sem obra ativa, uma linha curta no lugar da matriz", async () => {
+    api.mockResolvedValue(painel({ matriz: { competencias: MESES_MATRIZ, grupos: [] } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: MATRIZ });
+    expect(within(regiao).getByText("Nenhuma obra ativa.")).toBeTruthy();
+    expect(regiao.querySelector(".ini-matriz__grade, table")).toBeNull();
   });
 
   it("dois cartões só com rótulo e valor: notas protocoladas e medido do mês (#652: o recebido no ano virou as barras)", async () => {

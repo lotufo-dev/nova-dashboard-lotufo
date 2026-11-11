@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { brl, contar } from "./formato";
 import LegendaCor from "./LegendaCor";
@@ -23,6 +23,11 @@ type EtapaCiclo = { etapa: ChaveEtapa; valor_centavos: number; quantidade: numbe
 // #652: o recebido de um mes (baixas do RM, na cota) e uma linha da previsao de entrada
 type MesRecebido = { mes: string; valor_centavos: number };
 type GrupoPrevisao = { valor_centavos: number; quantidade: number };
+// #659: a etapa da medicao de uma competencia; `atrasado` = protocolada alem do prazo do contratante (a regra da
+// previsao de entrada). Celula nula = sem medicao na competencia
+type EtapaMatriz = "em_analise" | "boletim" | "nota" | "protocolado" | "atrasado" | "recebida";
+type CelulaMatriz = { etapa: EtapaMatriz; medicao_id: number } | null;
+type ObraMatriz = { contrato_id: number; obra: string; celulas: CelulaMatriz[] };
 export type PainelInicio = {
   hoje: string;
   notas_a_enviar: number;
@@ -38,6 +43,7 @@ export type PainelInicio = {
   recebido_12m: MesRecebido[];
   // #652: `depois` = data esperada alem do proximo mes
   previsao: Record<"neste_mes" | "proximo_mes" | "atrasado" | "sem_previsao" | "depois", GrupoPrevisao>;
+  matriz: { competencias: string[]; grupos: { contratante: string; obras: ObraMatriz[] }[] };
   notas_mes: { mes: string; valor_centavos: number; notas: number; obras: number };
   avisos_importantes: {
     // issue #274: o pleito a pedir e os avisos do motor de apostilamento, o mais grave primeiro
@@ -70,13 +76,13 @@ const dias = (n: number) => contar(n, "dia", "dias");
 /** A quantidade da etapa: medicoes; no recebido, as notas com baixa no mes. */
 const quantos = (e: EtapaCiclo) => e.etapa === "recebido_mes" ? contar(e.quantidade, "nota", "notas") : contar(e.quantidade, "medição", "medições");
 
-/** Faixa do ciclo (#642): um trecho por etapa, com a largura proporcional ao valor (o minimo de cada trecho, que mantem
- *  o texto legivel, e' `--ini-faixa-min` no CSS). Em container estreito a faixa vira lista vertical (inicio.css). A
- *  faixa e' desenho; quem usa leitor de tela le a tabela equivalente. */
+/** Faixa do ciclo (#642): um trecho por etapa. O minimo de cada trecho e' o proprio conteudo (`min-content`: o valor
+ *  inteiro numa linha, #659); a proporcao pelo valor vale para o espaco que sobra. Em container estreito a faixa vira
+ *  lista vertical (inicio.css). A faixa e' desenho; quem usa leitor de tela le a tabela equivalente. */
 function FaixaCiclo({ etapas }: { etapas: EtapaCiclo[] }) {
   const total = etapas.reduce((s, e) => s + Math.max(0, e.valor_centavos), 0);
   const colunas = etapas.map(e =>
-    `minmax(var(--ini-faixa-min), ${total > 0 ? Math.round(100 * Math.max(0, e.valor_centavos) / total) : 1}fr)`).join(" ");
+    `minmax(min-content, ${total > 0 ? Math.round(100 * Math.max(0, e.valor_centavos) / total) : 1}fr)`).join(" ");
   return (
     <section aria-labelledby="ini-ciclo" className="ini-painel ini-ciclo">
       <h2 id="ini-ciclo">Ciclo da medição (cota da Lotufo)</h2>
@@ -176,6 +182,75 @@ function PrevisaoEntrada({ previsao }: { previsao: PainelInicio["previsao"] }) {
   );
 }
 
+// #659: as etapas da matriz na ordem da legenda: do azul mais claro ao mais escuro, o verde do recebido e o vermelho
+// da protocolada alem do prazo
+const ETAPAS_MATRIZ: { chave: EtapaMatriz; rotulo: string }[] = [
+  { chave: "em_analise", rotulo: "Em análise" },
+  { chave: "boletim", rotulo: "Boletim" },
+  { chave: "nota", rotulo: "Nota" },
+  { chave: "protocolado", rotulo: "Protocolado" },
+  { chave: "recebida", rotulo: "Recebido" },
+  { chave: "atrasado", rotulo: "Atrasado" },
+];
+const ROTULO_MATRIZ = Object.fromEntries(ETAPAS_MATRIZ.map(e => [e.chave, e.rotulo])) as Record<EtapaMatriz, string>;
+
+/** Matriz obra por competencia (#659): uma linha por obra ativa, agrupada por contratante, e uma celula por competencia
+ *  com a cor da etapa da medicao. A celula pintada e' o link para a medicao, com o nome (obra, competencia, etapa) no
+ *  `aria-label` e na dica; a tabela equivalente fica para o leitor de tela. */
+function MatrizObras({ matriz }: { matriz: PainelInicio["matriz"] }) {
+  const { competencias, grupos } = matriz;
+  return (
+    <section aria-labelledby="ini-matriz" className="ini-painel ini-matriz">
+      <div className="ini-matriz__topo">
+        <h2 id="ini-matriz">Medições por obra e competência</h2>
+        <ul className="ini-matriz__legenda" aria-label="Legenda das etapas">
+          {ETAPAS_MATRIZ.map(e => <li key={e.chave}><span className={`ini-matriz__cor ini-matriz__cor--${e.chave}`} />{e.rotulo}</li>)}
+        </ul>
+      </div>
+      {grupos.length === 0 ? <p className="ini-vazio">Nenhuma obra ativa.</p> : <>
+        <div className="ini-matriz__grade">
+          <div className="ini-matriz__linha ini-matriz__linha--meses" aria-hidden="true">
+            {competencias.map((c, i) => {
+              const [mes, ano] = fmtMesCurto(c).split("/");
+              return (
+                <span key={c} className="ini-matriz__mes">
+                  <span>{mes}</span>{(i === 0 || c.endsWith("-01")) && <span className="ini-matriz__ano">{ano}</span>}
+                </span>);
+            })}
+          </div>
+          {grupos.map(g => (
+            <Fragment key={g.contratante}>
+              <h3 className="ini-matriz__grupo">{g.contratante}</h3>
+              {g.obras.map(o => (
+                <div key={o.contrato_id} className="ini-matriz__linha ini-matriz__linha--obra">
+                  <span className="ini-matriz__obra">{o.obra}</span>
+                  {competencias.map((c, i) => {
+                    const cel = o.celulas[i];
+                    if (!cel) return <span key={c} className="ini-matriz__celula" aria-hidden="true" />;
+                    const nome = `${o.obra}, ${fmtCompetencia(c)}: ${ROTULO_MATRIZ[cel.etapa]}`;
+                    return <Link key={c} para={{ tela: "medicao", obra: o.contrato_id, id: cel.medicao_id }}
+                      className={`ini-matriz__celula ini-matriz__celula--${cel.etapa}`} aria-label={nome} title={nome}>{null}</Link>;
+                  })}
+                </div>))}
+            </Fragment>))}
+        </div>
+        <div className="sr-only"><table>
+          <caption>Etapa da medição de cada obra por competência</caption>
+          <thead><tr><th scope="col">Obra</th><th scope="col">Contratante</th>
+            {competencias.map(c => <th key={c} scope="col">{fmtCompetencia(c)}</th>)}</tr></thead>
+          <tbody>
+            {grupos.flatMap(g => g.obras.map(o => (
+              <tr key={o.contrato_id}>
+                <th scope="row">{o.obra}</th><td>{g.contratante}</td>
+                {competencias.map((c, i) => { const cel = o.celulas[i]; return <td key={c}>{cel ? ROTULO_MATRIZ[cel.etapa] : "—"}</td>; })}
+              </tr>)))}
+          </tbody>
+        </table></div>
+      </>}
+    </section>
+  );
+}
+
 const IconeReajuste = () => (
   <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="m3 13 9 5 9-5" /><path d="m3 17.5 9 5 9-5" />
@@ -268,6 +343,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
       <FaixaCiclo etapas={p.ciclo} />
       <Recebido12Meses meses={p.recebido_12m} />
       <PrevisaoEntrada previsao={p.previsao} />
+      <MatrizObras matriz={p.matriz} />
 
       <section aria-label="Números do mês" className="ini-numeros">
         <div className="ini-numero">
