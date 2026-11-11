@@ -500,3 +500,116 @@ def test_obra_sem_a_chave_continua_igual(conn, cenario):
     assert medicoes.resumo(conn, HOJE, mes="2026-09") != antes
     _passos_do_cadastro(conn, cenario["c"], None)
     assert medicoes.resumo(conn, HOJE, mes="2026-09") == antes
+
+
+# --- posicao do SIGA no quadro do mes (#664) -------------------------------------------------------------------
+
+SIGA_HOJE = datetime.date(2026, 10, 30)      # sexta-feira
+
+
+def _processo_siga(c, codigo, medicao_id=None, protocolo_id=None, setor="COFIN", entrada="2026-10-20 09:00:00",
+                   situacao=None, lido=True):
+    """Processo do SIGA ligado a' medicao (ou ao protocolo), com uma leitura e a transferencia de entrada no setor."""
+    pid = c.execute("INSERT INTO siga_processos (codigo, medicao_id, protocolo_id, categoria) VALUES (?,?,?,'medicoes')",
+                    (codigo, medicao_id, protocolo_id)).lastrowid
+    if lido:
+        c.execute("INSERT INTO siga_leituras (processo_id, lido_em, situacao) VALUES (?, '2026-10-30 12:00:00', ?)",
+                  (pid, situacao or f"1º Volume - Aguardando Andamento [{setor}, [X]]"))
+        c.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao) VALUES (?,?,'Transferência',?)",
+                  (pid, entrada, f"{setor}/ORGAO"))
+    return pid
+
+
+def _siga(linha):
+    return {p["numero"]: p["siga"] for p in linha["passos"]}
+
+
+def _linha(conn, obra):
+    return next(x for x in medicoes.resumo(conn, SIGA_HOJE, mes="2026-09")["quadro"] if x["obra"] == obra)
+
+
+def _obra_no_orgao_da(c, nome, contrato_id):
+    return _obra(c, nome, c.execute("SELECT orgao_id FROM contratos WHERE id=?", (contrato_id,)).fetchone()[0])
+
+
+def test_quadro_sem_processo_ligado_traz_o_campo_vazio_em_todo_passo(conn, cenario):
+    # processo que nao esta' ligado a medicao nenhuma nao aparece no quadro
+    _processo_siga(conn, "AVULSO1")
+    quadro = medicoes.resumo(conn, SIGA_HOJE, mes="2026-09")["quadro"]
+    assert all(p["siga"] is None for x in quadro for p in x["passos"])
+    assert any(x["passos"] for x in quadro)
+
+
+def test_quadro_mostra_setor_e_dias_uteis_no_passo_em_que_o_processo_corre(conn, cenario):
+    c, ids = conn, cenario
+    # B: a 15ª protocolada (passo Pagamento), com processo vivo no setor desde 20/10 (terca): 8 dias uteis ate' 30/10
+    pid = _processo_siga(c, "PAG001", medicao_id=ids["b15"])
+    # G: planilha/carta enviada (passo Analise do orgao), no setor desde 28/10: 2 dias uteis
+    g = _obra_no_orgao_da(c, "Obra G", ids["a"])
+    g1 = _medicao(c, g, 1, "execucao", "planilha_enviada", 1001, planilha_enviada_em="2026-10-05 12:00:00")
+    pid_g = _processo_siga(c, "ANA001", medicao_id=g1, setor="SUPE", entrada="2026-10-28 10:00:00")
+    b = _siga(_linha(c, "Obra B"))
+    assert b[6] == {"processo_id": pid, "setor": "COFIN", "dias_uteis": 8, "desde": "2026-10-20T09:00:00-04:00"}
+    assert all(v is None for n, v in b.items() if n != 6)
+    gq = _siga(_linha(c, "Obra G"))
+    assert gq[2] == {"processo_id": pid_g, "setor": "SUPE", "dias_uteis": 2, "desde": "2026-10-28T10:00:00-04:00"}
+    assert all(v is None for n, v in gq.items() if n != 2)
+    # os mesmos setor, dias e entrada da tela SIGA
+    from app import siga
+    agora = datetime.datetime(2026, 10, 30, 16, tzinfo=datetime.timezone.utc)
+    painel = {p["id"]: p for p in siga.painel(c, agora)["processos"]}
+    assert (painel[pid]["setor"], painel[pid]["dias_uteis"], painel[pid]["desde"]) == ("COFIN", 8, b[6]["desde"])
+    # as outras obras continuam sem nada
+    assert all(v is None for v in _siga(_linha(c, "Obra A")).values())
+
+
+def test_quadro_processo_encerrado_ou_sem_leitura_nao_aparece(conn, cenario):
+    c, ids = conn, cenario
+    _processo_siga(c, "ARQ001", medicao_id=ids["b15"], situacao="1º Volume - Arquivado [ARQUIVO, [X]]")
+    _processo_siga(c, "NLIDO1", medicao_id=ids["b15"], lido=False)
+    assert all(v is None for v in _siga(_linha(c, "Obra B")).values())
+    # medicao fora do passo em que o processo corre (a nota emitida da Obra A): nada na linha
+    _processo_siga(c, "FORA01", medicao_id=ids["a24"])
+    assert all(v is None for v in _siga(_linha(c, "Obra A")).values())
+
+
+def test_quadro_com_duas_medicoes_mostra_o_processo_mais_parado(conn, cenario):
+    c, ids = conn, cenario
+    # o reajuste da 15ª ainda no espelho: a celula do Pagamento mostra o processo da execucao, que esta' la'
+    pid = _processo_siga(c, "PAG001", medicao_id=ids["b15"], entrada="2026-10-27 09:00:00")
+    s = _siga(_linha(c, "Obra B"))[6]
+    assert (s["processo_id"], s["dias_uteis"]) == (pid, 3)
+    # as duas no Pagamento, cada uma com processo vivo: o mais parado
+    c.execute("UPDATE medicoes SET estado='protocolada' WHERE id=?", (ids["b15r"],))
+    parado = _processo_siga(c, "PAG002", medicao_id=ids["b15r"], setor="GABIN", entrada="2026-10-13 09:00:00")
+    s = _siga(_linha(c, "Obra B"))[6]
+    assert (s["processo_id"], s["setor"], s["dias_uteis"]) == (parado, "GABIN", 13)
+
+
+def test_quadro_processo_ligado_so_ao_protocolo_vale_para_as_medicoes_dele(conn, cenario):
+    c, ids = conn, cenario
+    uid = c.execute("SELECT id FROM usuarios LIMIT 1").fetchone()[0]
+    prot = c.execute("INSERT INTO protocolos (contrato_id, etapa, natureza, usuario_id, situacao) "
+                     "VALUES (?, 'nota', 'execucao', ?, 'enviado')", (ids["b"], uid)).lastrowid
+    c.execute("INSERT INTO protocolo_medicoes (protocolo_id, medicao_id) VALUES (?,?)", (prot, ids["b15"]))
+    pid = _processo_siga(c, "PROT01", protocolo_id=prot)
+    assert _siga(_linha(c, "Obra B"))[6]["processo_id"] == pid
+
+
+def test_quadro_le_as_movimentacoes_do_siga_de_uma_vez(conn, cenario):
+    """O quadro e' lido a cada entrada na tela: as movimentacoes dos processos de todas as linhas saem numa consulta
+    so', seja qual for o numero de linhas com processo."""
+    c, ids = conn, cenario
+    _processo_siga(c, "PAG001", medicao_id=ids["b15"])
+    _processo_siga(c, "AVULSO1")
+    for n in (1, 2, 3):
+        m = _medicao(c, _obra_no_orgao_da(c, f"Obra G{n}", ids["a"]), 1, "execucao", "protocolada", 1001)
+        _processo_siga(c, f"PAGG0{n}", medicao_id=m)
+    consultas = []
+    c.set_trace_callback(lambda sql: consultas.append(sql) if "siga_movimentacoes" in sql else None)
+    try:
+        quadro = medicoes.resumo(c, SIGA_HOJE, mes="2026-09")["quadro"]
+    finally:
+        c.set_trace_callback(None)
+    assert sum(1 for x in quadro for p in x["passos"] if p["siga"]) == 4
+    assert len(consultas) == 1
