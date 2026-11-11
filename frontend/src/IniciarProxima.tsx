@@ -6,10 +6,11 @@ import { Link } from "./Link";
 import { NovaMedicaoManual, type Medicao } from "./Medicoes";
 
 // Na aba Medicoes da obra, o antigo cartao "Gerar espelho" virou o atalho "Iniciar a Nª medição" (16/10/2026): a
-// medicao se inicia na pagina dela, na etapa 1 (Espelho). Com medicao prevista no cronograma, o atalho abre a pagina
+// medicao se inicia na pagina dela, no primeiro passo. Com medicao prevista no cronograma, o atalho abre a pagina
 // dessa medicao; sem ela, a pagina da medicao nova. Obra do fluxo antigo (sem regra de espelho) continua com a
 // medicao a mao. Issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1), e o atalho diz
-// isso: "Nova planilha/carta da Nª medição".
+// isso: "Nova planilha/carta da Nª medição". #653: os dois destinos abrem o MESMO formulario do "Iniciar" do quadro do
+// mes, a Nova planilha/carta (PlanilhaCarta.tsx); sem competencia pedida, ela abre na sugestao da obra.
 
 export default function IniciarProxima({ contratoId, versao, aoCriar, inicial }: {
   contratoId: number; versao: number; aoCriar: () => void; inicial?: { numero: string; competencia: string; tipo: "projeto" | "" };

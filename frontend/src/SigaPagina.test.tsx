@@ -218,7 +218,7 @@ describe("SigaPagina", () => {
     expect(within(trilha).getByText("Histórico").getAttribute("aria-current")).toBe("page");
     expect(screen.getByText("ORGAO-PRO-2026/00001 · 5 movimentações · 20/10/2026 a 28/10/2026")).toBeTruthy();
     expect(screen.getByRole("link", { name: /Abrir no SIGA/ }).getAttribute("href")).toBe("https://siga.exemplo.com.br/acompanhar?n=ABC123");
-    expect(screen.getByRole("link", { name: "Ver a medição" }).getAttribute("href")).toBe("/obras/7/medicoes/31#etapa-4");
+    expect(screen.getByRole("link", { name: "Ver a medição" }).getAttribute("href")).toBe("/obras/7/medicoes/31#passo-5");
   });
 
   it("histórico: tabela De/Para, a mais recente primeiro, documento na juntada", async () => {

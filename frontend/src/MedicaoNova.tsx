@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import { EtapaCartao, FaixaVendo, Setas } from "./Etapas";
 import type { Usuario } from "./Login";
 import { ir, medicaoDaBusca, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
+import { FaixaPasso, PassoCartao, Passos, passosDa } from "./Passos";
 import { NovaPlanilhaCarta } from "./PlanilhaCarta";
 import { baseDosValores } from "./formato";
 import { Migalhas, VoltarOrigem } from "./Topo";
 import "./etapas.css";
 
-// Medicao que ainda nao existe (#153): a antiga tela "Nova medição" virou a etapa 1 da pagina da medicao. Desde a
-// issue #289 o formulario da etapa 1 e' a "Nova planilha/carta" (antes, o do espelho): registra-la cria a medicao e a
-// pagina dela abre com o cartao da planilha/carta.
-// As outras etapas aparecem no trilho, mas so' liberam depois.
+// Medicao que ainda nao existe (#153): a antiga tela "Nova medição" virou o primeiro passo da pagina da medicao. Desde a
+// issue #289 o formulario dele e' a "Nova planilha/carta" (antes, o do espelho): registra-la cria a medicao e a
+// pagina dela abre com o cartao da planilha/carta. #653: a barra e' a mesma da pagina da medicao (os seis passos de
+// Passos.tsx; a obra sem planilha/carta comeca em Espelhos). Os outros passos aparecem na barra, mas so' liberam depois.
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
 
@@ -32,7 +32,8 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
   const tipoPlanilha = tipo || (inicial ? "execucao" : undefined);
   const podeEditar = usuario.perfil === "engenharia" || usuario.perfil === "admin";
   const [cab, setCab] = useState<Cabecalho | null>(null);
-  const [vendo, setVendo] = useState(1);
+  // o passo aberto no lugar do primeiro (clique na barra); null = o primeiro
+  const [vendo, setVendo] = useState<number | null>(null);
   // issue #289: a planilha/carta e' o 1o passo so' na obra que gera a medicao pelo espelho; a outra lanca a mao
   const [regraAtiva, setRegraAtiva] = useState<boolean | null>(null);
   useEffect(() => {
@@ -42,6 +43,9 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
   }, [contratoId]);
   const obra = cab?.obra ?? "Obra";
   useEffect(() => { document.title = `${obra} · ${nome} · grupolotufo`; }, [obra, nome]);
+  const passos = passosDa(regraAtiva !== false);
+  const atual = passos[0];
+  const aberto = vendo !== null && passos.includes(vendo) ? vendo : atual;
 
   return (
     <>
@@ -66,11 +70,11 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
         </div>
         <div className="med-grade med-grade--so-principal">
           <div className="med-principal">
-            <Setas atual={1} vendo={vendo} aoIr={n => setVendo(n === 1 ? 1 : n)} />
-            <FaixaVendo vendo={vendo} atual={1} aoVoltar={() => setVendo(1)} />
-            <EtapaCartao key={vendo} n={vendo} atual={1}>
-              {/* as outras etapas so' tem o selo "Libera depois da etapa N" */}
-              {vendo === 1 && (
+            <Passos passos={passos} atual={atual} vendo={aberto} datas={{}} aoIr={n => setVendo(n === atual ? null : n)} />
+            <FaixaPasso vendo={aberto} atual={atual} passos={passos} aoVoltar={() => setVendo(null)} />
+            <PassoCartao key={aberto} n={aberto} atual={atual} passos={passos}>
+              {/* os outros passos so' tem o selo "Libera depois do passo N" */}
+              {aberto === atual && (
                 <div className="med-etapa__corpo">
                   {/* issue #289: o primeiro passo da medicao e' a planilha/carta (spec 2026-10-20 §2.1); registrada, a
                       pagina da medicao abre com o cartao dela. Numero, competencia e serie vem da busca da URL (#151) */}
@@ -81,7 +85,7 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
                         busca={Object.keys(buscaManual).length ? buscaManual : undefined}>Lançar a medição à mão</Link></p>}
                 </div>
               )}
-            </EtapaCartao>
+            </PassoCartao>
           </div>
         </div>
       </div>

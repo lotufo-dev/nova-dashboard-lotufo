@@ -16,7 +16,7 @@ describe("Endereço antigo /notas/envio/:id", () => {
     api.mockResolvedValue({ envio: { contrato_id: 20, medicao_ids: [631, 632] } });
     render(<AbrirEnvio protocoloId={3} />);
     await waitFor(() => expect(window.location.pathname).toBe("/obras/20/medicoes/631"));
-    expect(window.location.hash).toBe("#etapa-4");
+    expect(window.location.hash).toBe("#passo-5");
     expect(window.location.search).toBe("");
     expect(window.history.length).toBe(antes);
   });

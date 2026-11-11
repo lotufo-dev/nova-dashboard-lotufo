@@ -366,7 +366,7 @@ def test_em_andamento_lista_do_espelho_ao_pagamento_com_proximo_passo(conn, cont
                      "VALUES (?, ?, 'execucao', '2026-08', ?)", (contrato_id, numero, estado))
     conn.commit()
     lista = medicoes.em_andamento(conn)
-    assert [(m["numero"], m["proximo_passo"]) for m in lista] == [(3, "protocolar"), (2, "aguardando pagamento")]
+    assert [(m["numero"], m["proximo_passo"]) for m in lista] == [(3, "Envio da nota"), (2, "Pagamento")]
     assert [m["titulo"] for m in medicoes.em_andamento(conn, estado="nota_emitida")] == ["3ª Medição"]
 
 

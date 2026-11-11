@@ -20,6 +20,6 @@ def test_resumo_devolve_passo_e_lado_por_medicao(client_admin):
     r = client_admin.get("/api/medicoes/resumo?mes=2026-09")
     assert r.status_code == 200
     linha = next(x for x in r.json()["linhas"] if x["medicao_id"] == mid)
-    assert linha["passo"] == {"numero": 1, "nome": "Espelho"} and linha["com_quem"] == "Órgão"
+    assert linha["passo"] == {"numero": 2, "nome": "Análise do órgão"} and linha["com_quem"] == "Órgão"
     assert r.json()["mes"] == "2026-09" and r.json()["contagens"]["em-andamento"] == 1
     assert client_admin.get("/api/medicoes/resumo?mes=2026-13").status_code == 422

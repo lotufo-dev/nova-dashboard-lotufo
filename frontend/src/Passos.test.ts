@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { frasePrazo, processoDa } from "./PassoAnalise";
-import { diaMes, passoDe, passoInicial, passosDa, situacaoDoPasso } from "./Passos";
+import { diaMes, passoDe, PASSOS, passoInicial, passosDa, situacaoDoPasso } from "./Passos";
 import type { ProcessoSiga } from "./siga";
 
 // issue #508: a barra de passos da pagina da obra em medicao
@@ -53,5 +53,21 @@ describe("textos do passo 2", () => {
     expect(processoDa(lista, 9, null)).toBeNull();
     // o processo ligado a outra medicao nunca aparece, nem pelo mesmo nº (code-review)
     expect(processoDa(lista, 9, "B")).toBeNull();
+  });
+});
+
+// issue #653: um vocabulário só. Os seis nomes valem em toda tela; as cinco etapas antigas (Etapas.tsx) saíram do código.
+describe("vocabulário de passos (#653)", () => {
+  it("são seis passos, com estes nomes e nesta ordem", () => {
+    expect([...PASSOS]).toEqual(["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"]);
+  });
+
+  it("nenhuma tela guarda o trilho de cinco etapas nem link para as âncoras antigas (#etapa-N)", () => {
+    const fontes = import.meta.glob(["./*.tsx", "./*.ts", "!./*.test.tsx", "!./*.test.ts"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+    expect(Object.keys(fontes).length).toBeGreaterThan(50);
+    expect(Object.keys(fontes)).not.toContain("./Etapas.tsx");
+    // texto de tela (entre aspas ou crases) com o nome de etapa antigo, e link ou secao para #etapa-N
+    const antigos = /["'`>](Faturamento|Envio ao órgão)["'`<]|secao[=:]\s*\{?["'`]etapa-\d|#etapa-\d["'`]/;
+    expect(Object.entries(fontes).filter(([, texto]) => antigos.test(texto)).map(([arquivo]) => arquivo)).toEqual([]);
   });
 });
