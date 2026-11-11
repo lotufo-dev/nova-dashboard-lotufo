@@ -5,7 +5,6 @@ import json
 import pytest
 
 from app import db, inicio, tempo
-from tests.test_espelhos import ambiente_projeto  # noqa: F401  (fixture: obra com espelho de execucao e projeto)
 
 D = datetime.date
 HOJE = D(2026, 10, 9)
@@ -77,53 +76,6 @@ def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_do_inicio(cenario):
     assert p["medido"]["valor_centavos"] == 700_001
 
 
-def test_prazos_e_reajuste_a_pedir(cenario):
-    c, cid = cenario
-    p = inicio.painel(c, HOJE)
-    assert [(x["tipo"], x["data"], x["dias"]) for x in p["prazos"]] == [
-        ("execucao", "2026-10-20", 11), ("data_base", "2026-11-01", 23), ("vigencia", "2026-12-30", 82)]
-    assert p["prazos"][0]["contratante"] == "MTPAR"
-    assert p["reajustes"] == [{"contrato_id": cid, "obra": "Obra A", "data_base_mes": "2025-11",
-                               "aniversario": "2026-11-01", "dias": 23}]
-    # apostilado: a data-base sai dos dois
-    c.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, numero, data, dados) "
-              "VALUES (?, 'ap1', 'apostilamento_reajuste', '1', '2026-10-05', ?)", (cid, json.dumps({"ciclo": 2026})))
-    c.commit()
-    p = inicio.painel(c, HOJE)
-    assert p["reajustes"] == [] and "data_base" not in {x["tipo"] for x in p["prazos"]}
-
-
-def test_execucao_sem_prazo_conhecido_sai_da_caixa_de_prazos(cenario):
-    # issue #662: execucao registrada vencida e aditivo posterior so' de vigencia: a caixa nao a traz como vencida
-    c, cid = cenario
-    hoje = D(2026, 12, 1)
-    assert ("execucao", "2026-10-20", -42) in [(x["tipo"], x["data"], x["dias"]) for x in inicio.painel(c, hoje)["prazos"]]
-    c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim, status, data_assinatura) "
-              "VALUES (?, 'prazo', 0, '2027-06-30', 'assinado', '2026-11-10')", (cid,)); c.commit()
-    assert "execucao" not in {x["tipo"] for x in inicio.painel(c, hoje)["prazos"]}
-
-
-def test_recebido_no_ano_nulo_com_recebida_sem_data(cenario):
-    c, cid = cenario
-    _medicao(c, cid, 1, "2026-08-01 12:00:00", 300_000, estado="recebida", competencia="2026-07", recebida_em="2026-10-02")
-    _medicao(c, cid, 2, "2026-06-01 12:00:00", 100_000, estado="recebida", competencia="2026-05", recebida_em="2026-06-20")
-    assert inicio.painel(c, HOJE)["recebido_ano"] == {"valor_centavos": 400_000, "mes_centavos": 300_000, "sem_data": 0,
-                                                      "real_centavos": 0}
-    _medicao(c, cid, 3, "2026-09-25 12:00:00", 50, estado="recebida", competencia="2026-04")
-    assert inicio.painel(c, HOJE)["recebido_ano"] == {"valor_centavos": None, "mes_centavos": 300_000, "sem_data": 1,
-                                                      "real_centavos": 0}
-    # o recebido de verdade vem das baixas do RM e nao depende da data gravada na medicao (06/11/2026)
-    mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1", (cid,)).fetchone()[0]
-    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
-                    "VALUES (1, 77, '77', '2026-08-05', 300000, 'ativa', '2.2.01')").lastrowid
-    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
-              "VALUES (?, ?, 300000, 'detectado', 't')", (mid, nid))
-    c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, status_lan, "
-              "data_baixa) VALUES (1, 77, ?, 77, 280000, 280000, 1, '2026-10-02')", (nid,))
-    c.commit()
-    assert inicio.painel(c, HOJE)["recebido_ano"]["real_centavos"] == 280_000
-
-
 def test_a_receber_so_com_total_liberado_e_na_cota(cenario):
     c, cid = cenario
     c.execute("UPDATE contratos SET percentual_direito_bp=5000")
@@ -137,31 +89,6 @@ def test_a_receber_so_com_total_liberado_e_na_cota(cenario):
               (json.dumps({"total_a_receber_liberado": True}),))
     c.commit()
     assert inicio.painel(c, HOJE)["a_receber"] == {"liberado": True, "valor_centavos": 100_000, "mais_60_centavos": 100_000}
-
-
-def test_cartoes_vazios(cenario):
-    c, _ = cenario
-    p = inicio.painel(c, HOJE)
-    assert p["notas_a_enviar"] == 0
-    assert p["certidoes"] == {"vencidas": 0, "vencendo": 0, "itens": []}
-    assert p["espelhos"] == []
-
-
-def test_espelho_a_conferir_conta_uma_vez_o_espelho_com_duas_medicoes(ambiente_projeto, monkeypatch):
-    # rodada 2 da PR #474 (gate Sol): execucao e projeto do mesmo espelho sao um espelho a conferir; leva a' medicao
-    # cuja situacao pede o ato (a execucao com nota emitida nao esconde o "gere de novo" do projeto)
-    from app import espelhos, medicoes, notas
-    from tests.test_espelhos import _boletim
-    conn, u, cid = ambiente_projeto
-    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100_01, "projeto": 7_01})
-    ids = {m["tipo"]: m["id"] for m in espelhos.detalhe(conn, eid)["medicoes"]}
-    _boletim(conn, u, ids["execucao"], 99_99)
-    _boletim(conn, u, ids["projeto"], 7_03, sha="b")
-    monkeypatch.setattr(notas, "faltam", lambda c, m: 0)
-    assert notas.fechar_se_completa(conn, u["id"], ids["execucao"])
-    assert medicoes.detalhe(conn, ids["execucao"])["estado"] == "nota_emitida"
-    [e] = inicio.painel(conn)["espelhos"]
-    assert (e["espelho_id"], e["medicao_id"], e["situacao"]) == (eid, ids["projeto"], "aprovado_mudou")
 
 
 def _protocolar(c, mid, data, etapa="nota"):
@@ -205,6 +132,15 @@ def test_notas_protocoladas_no_mes_contam_notas_e_obras_distintas(cenario):
     c.commit()
     n = inicio.painel(c, HOJE)["notas_mes"]
     assert n == {"mes": "2026-10", "valor_centavos": 7_000, "notas": 2, "obras": 2}
+
+
+def test_painel_sem_as_chaves_que_nenhuma_tela_le(cenario):
+    # issue #699: os cartoes antigos do Inicio sairam da tela e as chaves deles saem da resposta
+    c, _ = cenario
+    p = inicio.painel(c, HOJE)
+    assert not {"notas_a_enviar", "certidoes", "reajustes", "recebido_ano", "prazos", "espelhos"} & set(p)
+    assert set(p) == {"hoje", "protocoladas", "medido", "a_receber", "ciclo", "recebido_12m", "previsao", "matriz",
+                      "notas_mes"}
 
 
 def test_painel_nao_monta_mais_a_caixa_de_avisos(cenario):
