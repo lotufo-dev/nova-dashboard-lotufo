@@ -154,6 +154,15 @@ def saldo(conn: sqlite3.Connection, contrato_id: int) -> dict:
                        "pedido enviado ao órgão ou protocolado enquanto não atestado); reajustes em série própria"}
 
 
+def posicao_na_cota(vigente_execucao_centavos: int, medido_execucao_centavos: int, percentual_bp: int | None) -> dict:
+    """Valor vigente, medido e saldo de execucao na cota da Lotufo (#646, #645): a conta UNICA do topo da pagina da
+    obra e da lista de Obras. Entram os cheios de `saldo` (a precos iniciais, sem o aditivo de reajuste); vigente e
+    medido arredondam uma vez cada e o saldo e' a diferenca dos dois, para a conta da tela fechar ao centavo."""
+    vigente = contratos.cota(vigente_execucao_centavos, percentual_bp)
+    medido = contratos.cota(medido_execucao_centavos, percentual_bp)
+    return {"vigente_centavos": vigente, "medido_centavos": medido, "saldo_centavos": vigente - medido}
+
+
 # ------------------------------------------------------------------ avisos
 
 def alertas(conn: sqlite3.Connection, hoje: str | None = None) -> list[dict]:
