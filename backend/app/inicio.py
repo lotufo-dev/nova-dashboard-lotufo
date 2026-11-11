@@ -8,7 +8,10 @@ Nada e' calculado de novo aqui: cada numero vem do modulo que ja' o calcula para
 - a receber: a regra da Carteira (`diretoria`), na COTA da Lotufo, so' com o total liberado;
 - recebido no ano: a regra do "recebido no mes" da Carteira (medicao recebida, pela data da baixa, na cota);
 - prazos: `prazos.situacao` (execucao e vigencia) e `reajuste.ciclos` (data-base);
-- faixa do ciclo (#642): `_ciclo`, na cota, so' com a data do evento de cada etapa.
+- faixa do ciclo (#642): `_ciclo`, na cota, so' com a data do evento de cada etapa;
+- recebido em 12 meses (#652): as baixas do RM de `diretoria.rm_por_mes`, mes a mes;
+- previsao de entrada (#652): `_previsao`, as protocoladas da faixa do ciclo pela data esperada (protocolo + prazo
+  do orgao, a mediana de `_prazos_do_orgao`).
 
 Medido no mes: B-01 (10/10/2026) -- a regra da Carteira: medicoes pela COMPETENCIA do mes INTEIRO, em valor CHEIO
 (atestado, senao protocolado), como a pagina da medicao mostra. A data de
@@ -16,6 +19,8 @@ lancamento fazia a carga do legado virar "setembro R$ 765 mi". Cancelada, desist
 mesma exclusao do "medido" da Carteira).
 """
 import datetime
+import math
+import statistics
 
 from app import avisos, cobranca_certidoes, diretoria, notas_envio, prazos, reajuste, tempo
 
@@ -84,6 +89,62 @@ def _ciclo(conn, hoje: datetime.date) -> list[dict]:
     recebido = diretoria.recebido_rm_no_mes(conn, hoje.strftime("%Y-%m"))
     out.append({"etapa": "recebido_mes", "valor_centavos": recebido["valor_centavos"], "quantidade": recebido["notas"],
                 "mais_antigo_dias": None})
+    return out
+
+
+def _ultimos_12_meses(hoje: datetime.date) -> list[str]:
+    return [diretoria._mes(hoje, -n) for n in range(11, -1, -1)]
+
+
+def _recebido_12m(conn, hoje: datetime.date) -> list[dict]:
+    """Issue #652: o recebido de cada um dos 12 ultimos meses, terminando no mes de hoje (parcial). Sao as baixas do
+    RM pela data da baixa, na cota (`diretoria.rm_por_mes`, a conta do recebido por mes da diretoria)."""
+    _, recebido = diretoria.rm_por_mes(conn)
+    return [{"mes": mes, "valor_centavos": recebido.get(mes, 0)} for mes in _ultimos_12_meses(hoje)]
+
+
+PRAZO_MINIMO_CASOS = 5      # #652: com menos recebimentos em 365 dias o contratante fica sem prazo
+PRAZO_JANELA_DIAS = 365
+
+
+def _prazos_do_orgao(ms: list[dict], hoje: datetime.date) -> dict[str, float]:
+    """Issue #652: o prazo de cada contratante (a sigla de `diretoria._contratante`, a SINFRA inteira e nao cada
+    superintendencia) = a mediana dos dias entre o primeiro protocolo da nota e o recebimento, das medicoes recebidas
+    nos ultimos 365 dias. Em amostra par, a media dos dois do meio (pode dar meio dia). Recebimento com data anterior
+    ao protocolo nao e' prazo (como em `diretoria._prazo`). Contratante com menos de PRAZO_MINIMO_CASOS fica fora."""
+    desde = hoje - datetime.timedelta(days=PRAZO_JANELA_DIAS)
+    dias: dict[str, list[int]] = {}
+    for m in ms:
+        recebida, protocolo = diretoria._d(m["recebida_em"]), diretoria._d(m["protocolo_em"])
+        if m["estado"] != "recebida" or not recebida or not protocolo or not desde <= recebida <= hoje or recebida < protocolo:
+            continue
+        dias.setdefault(diretoria._contratante(m), []).append((recebida - protocolo).days)
+    return {k: statistics.median(v) for k, v in dias.items() if len(v) >= PRAZO_MINIMO_CASOS}
+
+
+def _previsao(conn, hoje: datetime.date) -> dict:
+    """Issue #652: quando o protocolado deve entrar. As medicoes sao as da etapa "Protocolado" da faixa do ciclo
+    (estado protocolado e com a data do primeiro protocolo da nota), na cota (`diretoria._cota`), e cada uma cai em
+    uma e so' uma linha, pela data esperada = protocolo + prazo do contratante (a parte inteira da mediana: quem esta'
+    protocolado ha' mais dias que a mediana ja' passou da data): `atrasado` (a data ja' passou), `neste_mes`,
+    `proximo_mes`, `depois` (alem do proximo mes; a tela nao mostra) e `sem_previsao` (contratante sem prazo)."""
+    ms = diretoria._medicoes(conn)
+    prazos_ = _prazos_do_orgao(ms, hoje)
+    neste, proximo = diretoria._mes(hoje), diretoria._mes(hoje, 1)
+    out = {k: {"valor_centavos": 0, "quantidade": 0} for k in ("neste_mes", "proximo_mes", "atrasado", "sem_previsao", "depois")}
+    for m in ms:
+        protocolo = diretoria._d(m["protocolo_em"])
+        if m["estado"] not in diretoria.PROTOCOLADAS or not protocolo:
+            continue
+        prazo = prazos_.get(diretoria._contratante(m))
+        if prazo is None:
+            linha = "sem_previsao"
+        else:
+            esperada = protocolo + datetime.timedelta(days=math.floor(prazo))
+            mes = esperada.strftime("%Y-%m")
+            linha = "atrasado" if esperada < hoje else "neste_mes" if mes == neste else "proximo_mes" if mes == proximo else "depois"
+        out[linha]["valor_centavos"] += diretoria._cota(m)
+        out[linha]["quantidade"] += 1
     return out
 
 
@@ -247,6 +308,8 @@ def painel(conn, hoje: datetime.date | None = None, publico: str = "operacao") -
         "prazos": prazos_lista,
         "espelhos": _espelhos(conn),
         "ciclo": _ciclo(conn, hoje),
+        "recebido_12m": _recebido_12m(conn, hoje),
+        "previsao": _previsao(conn, hoje),
         "notas_mes": _notas_mes(conn, hoje),
         "avisos_importantes": _avisos_importantes(reaj_caixa, prazos_lista, vencidas, vencendo, hoje),
     }
