@@ -21,6 +21,7 @@ from pydantic import AwareDatetime, BaseModel, Field
 
 from app import siga
 from app.api_auth import conexao
+from app.api_medicoes import ID
 from app.permissoes import exigir
 
 router = APIRouter()
@@ -128,11 +129,9 @@ class ClassificacaoIn(BaseModel):
 
 
 @router.post("/api/siga/processos/{processo_id}/classificacao")
-def classificar(processo_id: int, dados: ClassificacaoIn, usuario: dict = Depends(exigir("editar_cadastros")),
+def classificar(processo_id: ID, dados: ClassificacaoIn, usuario: dict = Depends(exigir("editar_cadastros")),
                 conn: sqlite3.Connection = Depends(conexao)):
     """Corrigir categoria, obra e complemento na pagina do historico (issue #663)."""
-    if not 1 <= processo_id <= MAX_INT64:
-        raise HTTPException(404, siga.PROCESSO_INEXISTENTE)
     try:
         siga.classificar(conn, usuario["id"], processo_id, dados.categoria, dados.contrato_id, dados.medicao_id,
                          dados.complemento)

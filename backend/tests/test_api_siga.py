@@ -414,7 +414,8 @@ def test_classificacao_invalida_ou_de_processo_que_nao_existe(api, com_token):
     assert r.status_code == 422 and r.json()["detail"] == "Escolha a medição do processo"
     r = cl.post("/api/siga/processos/9999/classificacao", json={"categoria": "outros"})
     assert r.status_code == 404 and r.json()["detail"] == "Processo do SIGA não encontrado"
-    assert cl.post(f"/api/siga/processos/{2 ** 70}/classificacao", json={"categoria": "outros"}).status_code == 404
+    # id acima de int64 e' recusado na entrada (422), antes de chegar ao banco
+    assert cl.post(f"/api/siga/processos/{2 ** 70}/classificacao", json={"categoria": "outros"}).status_code == 422
 
 
 # --- botao de atualizar e rodadas do robo (issue #342) -----------------------------------------------------
