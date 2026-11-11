@@ -893,6 +893,34 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
     apiForm.mockReset();
   });
 
+  it("no par com execução e reajuste disponíveis, dá para enviar só o PDF do reajuste, pelo reajuste (issue #637)", async () => {
+    const REAJ = { ...COM_BOLETIM, id: 6, tipo: "reajuste", boletins: [{ ...COM_BOLETIM.boletins[0], id: 10 }] };
+    responder({ "/api/contratos/1/medicoes": [COM_BOLETIM, REAJ],
+      "/api/medicoes/5": { envio_assinados: { ...ASSINADOS(true).envio_assinados, reajuste: { id: 6, numero: COM_BOLETIM.numero } } },
+      "/api/medicoes/6": ASSINADOS(true) });
+    apiForm.mockReturnValue(new Promise(() => {}));
+    pagina();
+    await waitFor(() => expect(leituras("/api/medicoes/6").length).toBeGreaterThan(0));
+    await new Promise(r => setTimeout(r, 0));
+    for (const [item, botao, url] of [
+      ["Enviar documentos assinados", "Prévia do e-mail", "/api/medicoes/6/assinados/previa"],
+      ["Registrar envio dos assinados por fora", "Registrar envio", "/api/medicoes/6/assinados/envio-externo"]]) {
+      fireEvent.click(await screen.findByRole("button", { name: /Mais ações/ }));
+      fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: item }));
+      expect(screen.getByLabelText("PDF assinado da medição")).toBeTruthy();
+      fireEvent.click(screen.getByLabelText("Só o PDF do reajuste"));
+      fireEvent.change(screen.getByLabelText("PDF assinado do reajuste"),
+        { target: { files: [new File(["%PDF-1.4"], "reajuste.pdf", { type: "application/pdf" })] } });
+      apiForm.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: botao }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalled());
+      expect(apiForm.mock.calls[0][0]).toBe(url);
+      expect(((apiForm.mock.calls[0][1] as FormData).get("arquivo") as File).name).toBe("reajuste.pdf");
+      fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    }
+    apiForm.mockReset();
+  });
+
   it("fora da SINFRA, antes do boletim e para a diretoria o envio dos assinados não aparece (issue #627)", async () => {
     responder({ "/api/contratos/1/medicoes": [COM_BOLETIM], "/api/medicoes/5": ASSINADOS(false) });
     pagina();

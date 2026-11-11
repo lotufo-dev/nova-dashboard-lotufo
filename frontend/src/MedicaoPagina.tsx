@@ -17,7 +17,7 @@ import MaisAcoes, { type ItemAcao } from "./MaisAcoes";
 import { DA_PLANILHA, eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, rotuloDoBloco, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type ParDaMedicao } from "./medicao";
 import { AceiteDiferenca, FormBoletim } from "./Boletim";
-import { FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados } from "./AssinadosEnvio";
+import { FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados, type SoReajuste } from "./AssinadosEnvio";
 import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
 import { brl, type Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
@@ -157,17 +157,23 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const candidatosAssinados = (doPar && execucao && reajuste ? [execucao, reajuste] : m ? [m] : [])
     .filter(x => (x.boletins ?? []).some(b => b.tem_arquivo));
   const chaveAssinados = podeEditar ? candidatosAssinados.map(x => x.id).join(",") : "";
-  const [assinadosDe, setAssinadosDe] = useState<{ chave: string; id: number; s: SituacaoAssinados } | null>(null);
+  // Issue #637: com a execucao e o reajuste disponiveis, a pessoa pode mandar so' o PDF do reajuste (`so`), pelo
+  // ato do reajuste (PDFs grandes nao cabem juntos num e-mail).
+  type AtoAssinados = { chave: string; id: number; s: SituacaoAssinados; so: SoReajuste | null };
+  const [assinadosDe, setAssinadosDe] = useState<AtoAssinados | null>(null);
   useEffect(() => {
     if (!chaveAssinados) return;
     let vivo = true;
     void (async () => {
-      let achado: { chave: string; id: number; s: SituacaoAssinados } | null = null;
+      let achado: AtoAssinados | null = null;
       for (const id of chaveAssinados.split(",").map(Number)) {
         const d = await api<{ envio_assinados?: SituacaoAssinados }>(`/api/medicoes/${id}`).catch(() => null);
         if (!d?.envio_assinados) continue;
-        if (!achado || d.envio_assinados.disponivel) achado = { chave: chaveAssinados, id, s: d.envio_assinados };
-        if (d.envio_assinados.disponivel) break;
+        const s = d.envio_assinados;
+        const antes = achado as AtoAssinados | null;
+        if (antes?.s.disponivel) {       // o segundo candidato e' o reajuste do par
+          if (s.disponivel) achado = { ...antes, so: { medicaoId: id, s } };
+        } else if (!antes || s.disponivel) achado = { chave: chaveAssinados, id, s, so: null };
       }
       if (vivo && achado) setAssinadosDe(achado);
     })();
@@ -176,6 +182,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const doAto = chaveAssinados && assinadosDe?.chave === chaveAssinados ? assinadosDe : null;
   const assinados = doAto?.s ?? null;
   const alvoAssinados = doAto ? { id: doAto.id } : null;
+  const soReajuste = doAto?.so ?? undefined;
   const revisao = revisaoDe?.chave === chaveRevisao ? revisaoDe.valor : "conferindo";
 
   // Titulo da aba do navegador: a obra e a medicao.
@@ -605,13 +612,13 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       {painel === "assinados" && assinados && alvoAssinados && (
         <Janela titulo="Enviar documentos assinados" aoFechar={fechar}>
           <FormEnviarAssinados medicaoId={alvoAssinados.id} s={assinados} salvando={salvando} agir={agir} aoFechar={fechar}
-            erro={erro} aoLiberar={recarregar} />
+            erro={erro} aoLiberar={recarregar} soReajuste={soReajuste} />
         </Janela>
       )}
       {painel === "assinados_fora" && assinados && alvoAssinados && (
         <Janela titulo="Registrar envio dos assinados por fora" aoFechar={fechar}>
           <FormAssinadosPorFora medicaoId={alvoAssinados.id} s={assinados} salvando={salvando} agir={agir} aoFechar={fechar}
-            erro={erro} aoLiberar={recarregar} />
+            erro={erro} aoLiberar={recarregar} soReajuste={soReajuste} />
         </Janela>
       )}
       {painel === "diferenca" && (
