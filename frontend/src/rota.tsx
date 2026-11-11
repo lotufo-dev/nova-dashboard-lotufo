@@ -22,7 +22,7 @@ export type AbaObra = "ficha" | "medicoes" | "prazos" | "reajuste" | "documentos
 // Abas da Carteira (NAVEGACAO.md › Carteira). O Resumo e' a padrao e nao entra na URL.
 export type AbaCarteira = "resumo" | "qdop" | "producao" | "custo";
 // Abas da Administracao (NAVEGACAO.md › Administracao). A Saude e' a padrao e nao entra na URL.
-export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria";
+export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria" | "pendencias";
 // Medicoes (redesenho 2026-11, #507): so' dois itens no menu. "Iniciar medicao" e' a padrao e nao entra na URL
 // ("/medicoes"); "Em andamento" e' "/medicoes/em-andamento". As oito abas de antes (resumo, sem-medicao, planilha-gerada,
 // ..., aguardando-pagamento) e as telas Notas antigas (/notas, /notas/aguardando) abrem "Em andamento".
@@ -60,7 +60,7 @@ type EstadoHistorico = { origem?: Origem };
 const ABAS: readonly AbaObra[] = ["medicoes", "prazos", "reajuste", "documentos", "contrato"];
 const ABAS_DOCUMENTOS: readonly AbaDocumentos[] = ["certidoes", "regularidade", "garantia"];
 const ABAS_CARTEIRA: readonly AbaCarteira[] = ["resumo", "qdop", "producao", "custo"];
-const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria"];
+const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria", "pendencias"];
 // As abas de Medicoes de antes do redesenho (#507): o link guardado em e-mail ou favorito abre "Em andamento".
 const ABAS_MEDICOES_ANTIGAS: readonly string[] = ["resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido",
   "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento"];

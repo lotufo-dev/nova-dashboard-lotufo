@@ -19,7 +19,7 @@ describe("Avisos: o que vence quando", () => {
 
   it("cada aviso cai em uma seção só: vencido há 3 dias, 5 dias, 20 dias, 60 dias e sem data", () => {
     painel([
-      aviso({ obra: "Vencida", mensagem: "Vencida: garantia vencida", dias: -3, data: "2026-11-04" }),
+      aviso({ obra: "Vencida", mensagem: "Vencida: execução vencida", dias: -3, data: "2026-11-04" }),
       aviso({ obra: "Semana", mensagem: "Semana: FGTS vence", dias: 5, data: "2026-11-12" }),
       aviso({ obra: "Mes", dias: 20, data: "2026-11-27" }),
       aviso({ obra: "Longe", dias: 60, data: "2027-01-06" }),
@@ -37,7 +37,7 @@ describe("Avisos: o que vence quando", () => {
     expect(vencido.getByText("04/11/2026")).toBeTruthy();
     expect(vencido.getByText("há 3 dias")).toBeTruthy();
     expect(within(secao(/^ESTA SEMANA/)).getByText("5 dias")).toBeTruthy();
-    expect(vencido.getByRole("link", { name: /garantia vencida/  }).getAttribute("href")).toContain("/obras/7");
+    expect(vencido.getByRole("link", { name: /execução vencida/  }).getAttribute("href")).toContain("/obras/7");
   });
 
   it("sem aviso sem data, a seção 'Sem data' não aparece; as quatro do tempo aparecem sempre", () => {
