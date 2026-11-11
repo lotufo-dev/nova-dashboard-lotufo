@@ -217,8 +217,9 @@ def _notas_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> d
 AVISOS_VISIVEIS = 3
 # Issue #274: o que a secao Reajustes dos avisos importantes mostra (o pleito a pedir e os avisos do motor de
 # apostilamento; o "apostilamento pendente" de antes continua so' na tela Avisos)
-AVISOS_REAJUSTE_NA_CAIXA = ("reajuste_pleito", "reajuste_fora_da_previsao", "reajuste_sem_apostilamento",
-                            "reajuste_nota_antes_do_apostilamento", "reajuste_reemitir", "reajuste_sem_resposta")
+# Issue #649: o termo que nao esta' no cadastro (natureza "ausencia") e' pendencia de cadastro do admin, e o pedido
+# fora da previsao deixou de ser aviso: nenhum dos tres conta aqui.
+AVISOS_REAJUSTE_NA_CAIXA = ("reajuste_pleito", "reajuste_reemitir", "reajuste_sem_resposta")
 
 
 def _avisos_importantes(reajustes: list[dict], prazos_: list[dict], vencidas: list[dict], vencendo: list[dict],

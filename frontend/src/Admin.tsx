@@ -5,7 +5,7 @@ import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import {
-  ABAS_ADMIN, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pessoaDoEvento,
+  ABAS_ADMIN, type PendenciaCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pessoaDoEvento,
   quantidadeRec,
   reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, rotuloObjeto, rotuloRec, urlPaginaRec,
   type CategoriaRec, type Evento, type Reconciliacao,
@@ -1102,6 +1102,50 @@ function Auditoria({ busca }: { busca: Busca }) {
   );
 }
 
+/* ---------------------------------------------------- pendencias de cadastro */
+
+/** Issue #649: a lista de conferencia do admin, com o documento que nao foi achado no cadastro de cada obra. */
+function PendenciasCadastro() {
+  const [lista, setLista] = useState<PendenciaCadastro[] | null>(null);
+  const [erro, setErro] = useState("");
+  useEffect(() => {
+    api<PendenciaCadastro[]>("/api/admin/pendencias-cadastro").then(setLista).catch(e => setErro(falhaDeCarga(e)));
+  }, []);
+  // `desde` e' o dia (garantia) ou a competencia (termo de apostilamento)
+  const desde = (d: string | null) => (!d ? "—" : d.length === 7 ? fmtCompetencia(d) : fmtDataPura(d));
+  return (
+    <section className="cartao" aria-labelledby="titulo-pendencias">
+      <div className="cartao__cabeca">
+        <h2 className="cartao__titulo" id="titulo-pendencias">Pendências de cadastro</h2>
+      </div>
+      {erro && <Erro texto={erro} />}
+      {!lista && !erro && <div className="vazio"><p>Carregando…</p></div>}
+      {lista && lista.length === 0 && (
+        <div className="vazio vazio--curto"><p className="vazio__titulo">Nenhuma pendência de cadastro.</p></div>
+      )}
+      {lista && lista.length > 0 && (
+        <Rolagem rotulo="Pendências de cadastro" alta>
+          <table className="tabela">
+            <caption className="sr-only">Pendências de cadastro, por obra</caption>
+            <thead>
+              <tr><th scope="col">Obra</th><th scope="col">O que falta</th><th scope="col">Desde</th></tr>
+            </thead>
+            <tbody>
+              {lista.map((p, i) => (
+                <tr key={`${p.contrato_id}-${p.falta}`} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                  <td><Link className="nome-link" para={{ tela: "obra", id: p.contrato_id, aba: p.aba ?? "ficha" }}>{p.obra ?? `Obra ${p.contrato_id}`}</Link></td>
+                  <td>{p.falta}</td>
+                  <td className="num">{desde(p.desde)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Rolagem>
+      )}
+    </section>
+  );
+}
+
 export default function Admin({ aba = "saude", busca = {}, eu }: { aba?: AbaAdmin; busca?: Busca; eu?: number }) {
   return (
     <div className="pilha">
@@ -1111,6 +1155,7 @@ export default function Admin({ aba = "saude", busca = {}, eu }: { aba?: AbaAdmi
       {aba === "reconciliacao" && <ReconciliacaoAba busca={busca} />}
       {aba === "usuarios" && <Usuarios eu={eu} />}
       {aba === "auditoria" && <Auditoria busca={busca} />}
+      {aba === "pendencias" && <PendenciasCadastro />}
     </div>
   );
 }

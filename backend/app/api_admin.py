@@ -1,8 +1,8 @@
 import datetime
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
-from app import (alertas_seguranca, auditoria, backup, copia_dono, copia_dono_envio, correio, envio_reserva, graph,
-                 instalacao, seguranca, sentinela, siga, tempo)
+from app import (alertas_seguranca, auditoria, avisos, backup, copia_dono, copia_dono_envio, correio, envio_reserva,
+                 graph, instalacao, seguranca, sentinela, siga, tempo)
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -94,6 +94,15 @@ def saude(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
     itens, fora = seguranca.bloco(conn)
     return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora, "sentinela": sentinela.situacao(),
             "alertas_seguranca": alertas_seguranca.situacao(conn)}
+
+
+@router.get("/pendencias-cadastro")
+def pendencias_cadastro(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
+                        conn: sqlite3.Connection = Depends(conexao)):
+    """Administracao > Pendencias de cadastro (issue #649): o documento que nao foi achado no cadastro (termo de
+    apostilamento da competencia, garantia cujo ultimo registro venceu). So' admin: a equipe e a diretoria nao veem
+    esses casos em lugar nenhum. `[{contrato_id, obra, falta, desde, aba}]` (`avisos.pendencias_cadastro`)."""
+    return avisos.pendencias_cadastro(conn)
 
 
 @router.get("/contas-microsoft")

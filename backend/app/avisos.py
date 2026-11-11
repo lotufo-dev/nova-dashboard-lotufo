@@ -11,6 +11,10 @@ enviada, instrumento carregado), nunca por "dispensar".
 Alem do formato, cada fonte pode dizer o objeto do aviso: `entidade_id` (documentos), `medicao_id` (nota, A2)
 e `data_base_mes` (reajuste, A10), para o clique levar a empresa, a medicao ou o ciclo, e nao so' a aba.
 
+`natureza` (issue #649, decisao do dono de 10/11/2026): "fato" (nasce de algo registrado) ou "ausencia" (nasce de
+documento que falta no cadastro: so' quer dizer "nao achamos o documento"). A fila de avisos (`listar`, de todo
+perfil) so' traz fato; a ausencia vira linha de `pendencias_cadastro`, a lista de conferencia do admin.
+
 `data` e `sentido` (mapa de navegacao de 2026-09-28, mudanca A8): a data do fato e o que `dias` conta.
 `sentido="prazo"`: `data` e' um prazo e `dias` conta ATE' ele (negativo = vencido). `sentido="desde"`:
 `data` e' um acontecimento e `dias` conta DESDE ele. Nos dois casos, hoje − data e' o atraso, que a tela
@@ -21,12 +25,14 @@ import datetime
 from app import documentos, notas, tempo
 
 NIVEIS = ("critico", "acao", "atencao")
+NATUREZAS = ("fato", "ausencia")
 _ORDEM = {n: i for i, n in enumerate(NIVEIS)}
 
 
 def aviso(tipo, nivel, mensagem, contrato_id=None, obra=None, dias=None, valor_centavos=None,
-          publico=("operacao",), destino=None, data=None, sentido=None) -> dict:
-    return {"tipo": tipo, "nivel": nivel, "publico": list(publico), "contrato_id": contrato_id, "obra": obra,
+          publico=("operacao",), destino=None, data=None, sentido=None, natureza="fato") -> dict:
+    return {"tipo": tipo, "nivel": nivel, "natureza": natureza, "publico": list(publico), "contrato_id": contrato_id,
+            "obra": obra,
             "dias": dias, "valor_centavos": valor_centavos, "mensagem": mensagem,
             "destino": destino or ({"tela": "contrato", "id": contrato_id, "aba": "medicoes"} if contrato_id else None),
             "data": data, "sentido": sentido}
@@ -93,7 +99,7 @@ def _de_garantias(conn, hoje: datetime.date) -> list[dict]:
         # o aviso leva a empresa contratada: a pagina dela em Documentos abre na aba da garantia
         out.append({**aviso(a["tipo"], a["nivel"], a["mensagem"], a["contrato_id"], obra(conn, a["contrato_id"]),
                             dias=a["dias"], publico=a["publico"], destino={"tela": "documentos"}, data=a["data"],
-                            sentido="prazo" if a["data"] else None),
+                            sentido="prazo" if a["data"] else None, natureza=a.get("natureza", "fato")),
                     "entidade_id": contratos.entidade_de(c) if c else None})
     return out
 
@@ -138,13 +144,35 @@ FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _d
           _de_capa_smo]
 
 
-def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao") -> list[dict]:
+def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao", natureza: str = "fato") -> list[dict]:
+    """A fila de avisos do perfil. So' os de `natureza` "fato" (issue #649): os de "ausencia" nao aparecem para
+    ninguem na tela Avisos nem no Inicio; quem os le e' `pendencias_cadastro`."""
     hoje = hoje or tempo.hoje_local()
-    todos = [a for fonte in FONTES for a in fonte(conn, hoje)]
+    todos = [a for fonte in FONTES for a in fonte(conn, hoje) if a.get("natureza", "fato") == natureza]
     if publico != "todos":
         todos = [a for a in todos if publico in a["publico"]]
     # nivel; depois o mais atrasado primeiro (os piores no topo do nivel); sem data nem dias, no fim
     return sorted(todos, key=lambda a: (_ORDEM[a["nivel"]], _chave_atraso(a, hoje), a["obra"] or ""))
+
+
+_ABA_DA_PENDENCIA = {"reajuste": "reajuste", "garantia": "prazos"}     # a aba da obra onde o documento se confere
+
+
+def pendencias_cadastro(conn, hoje: datetime.date | None = None) -> list[dict]:
+    """Issue #649: a lista de conferencia do admin (Administracao > Pendencias de cadastro), com os avisos de natureza
+    "ausencia" de todo publico: [{contrato_id, obra, falta, desde, aba}]. `falta` e' o que nao esta' no cadastro;
+    `desde`, a data (AAAA-MM-DD) ou a competencia (AAAA-MM) do que falta; `aba`, a da obra onde o documento se confere.
+    O aviso que junta varias faltas as traz em `pendencias` ([{falta, desde}]); o mesmo texto na mesma obra entra uma
+    vez (a competencia sem termo tem dois avisos). Por obra e, nela, da mais antiga a mais nova."""
+    out, vistos = [], set()
+    for a in listar(conn, hoje, publico="todos", natureza="ausencia"):
+        for p in a.get("pendencias") or [{"falta": a["mensagem"], "desde": a["data"]}]:
+            if (a["contrato_id"], p["falta"]) in vistos:
+                continue
+            vistos.add((a["contrato_id"], p["falta"]))
+            out.append({"contrato_id": a["contrato_id"], "obra": a["obra"], "falta": p["falta"], "desde": p["desde"],
+                        "aba": _ABA_DA_PENDENCIA.get(a["tipo"].split("_")[0])})
+    return sorted(out, key=lambda p: (p["obra"] or "", p["desde"] or "", p["falta"]))
 
 
 def _chave_atraso(a: dict, hoje: datetime.date):

@@ -49,12 +49,29 @@ def test_garantia_30_15_e_vencida_como_as_certidoes(cenario):
     assert [(a["nivel"], a["dias"]) for a in _g(c)] == [("atencao", 30)]
     ids["garantia"]("2026-10-30")                                     # 15 dias
     assert [(a["nivel"], a["dias"]) for a in _g(c)] == [("acao", 15)]
-    ids["garantia"]("2026-10-14")                                     # vencida ontem
     a = _g(c)[0]
-    assert (a["nivel"], a["dias"], a["sentido"], a["data"]) == ("critico", -1, "prazo", "2026-10-14")
-    assert "vencida" in a["mensagem"] and "14/10/2026" in a["mensagem"]
     assert a["publico"] == ["operacao", "diretoria"] and a["destino"] == {"tela": "documentos"}
-    assert a["obra"] == "Obra A"
+    assert (a["obra"], a["natureza"], a["sentido"], a["data"]) == ("Obra A", "fato", "prazo", "2026-10-30")
+    ids["garantia"]("2026-10-15")                                     # vence hoje: ainda e' prazo, fica na fila
+    assert [(a["nivel"], a["dias"], a["natureza"]) for a in _g(c)] == [("acao", 0, "fato")]
+
+
+def test_garantia_vencida_vira_pendencia_de_cadastro_e_sai_dos_avisos(cenario):
+    # issue #649: o que se sabe e' que o ultimo documento registrado venceu, nao que a obra esta' sem garantia
+    c, ids = cenario
+    ids["garantia"]("2026-10-14")                                     # vencida ontem
+    assert _g(c) == []
+    for publico in ("operacao", "diretoria"):
+        assert not [a for a in avisos.listar(c, HOJE, publico=publico) if a["tipo"] == "garantia_vencendo"]
+    [a] = [a for a in avisos.listar(c, HOJE, publico="todos", natureza="ausencia") if a["tipo"] == "garantia_vencendo"]
+    assert (a["natureza"], a["data"], a["dias"]) == ("ausencia", "2026-10-14", -1)
+    assert a["mensagem"] == "Último registro da garantia venceu em 14/10/2026"
+    assert [p for p in avisos.pendencias_cadastro(c, HOJE) if "garantia" in p["falta"]] == [
+        {"contrato_id": ids["contrato"], "obra": "Obra A", "falta": "Último registro da garantia venceu em 14/10/2026",
+         "desde": "2026-10-14", "aba": "prazos"}]
+    # o endosso carregado com vigencia a frente tira a pendencia
+    ids["instrumento"]("endosso_garantia", "2026-10-15", {"apolice": "AP-1", "vigencia_fim": "2028-03-01"}, "end-1")
+    assert avisos.pendencias_cadastro(c, HOJE) == []
 
 
 def test_endosso_com_vigencia_maior_substitui_e_o_aviso_some(cenario):
