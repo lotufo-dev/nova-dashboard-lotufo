@@ -292,3 +292,36 @@ describe("App: Medições é o quadro do mês (#643)", () => {
     expect(document.title).toBe("Medições · grupolotufo");
   });
 });
+
+describe("App: aviso flutuante de resposta do órgão (issue #654)", () => {
+  const NAO_VISTA = { medicao_id: 31, contrato_id: 7, orgao: "SINFRA", obra: "Granito", numero: 3, tipo: "execucao",
+    respostas: 1, ate: 9, recebida_em: "2026-11-10T14:00:00Z" };
+  const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
+    if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
+    if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+    if (caminho === "/api/correio/respostas/nao-vistas") return [NAO_VISTA];
+    if (caminho === "/api/correio/respostas/ler") return { novas: [] };
+    return [];
+  });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  it("quem envia vê o aviso em qualquer página, fora do conteúdo da tela", async () => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", "/siga");
+    render(<App />);
+    const aviso = (await screen.findByText("SINFRA respondeu:")).closest(".aviso-respostas")!;
+    expect(aviso.textContent).toContain("SINFRA respondeu: Granito, 3ª Medição");
+    expect(document.getElementById("conteudo")!.contains(aviso)).toBe(false);
+  });
+
+  it("a diretoria nunca vê o aviso nem pede as respostas não vistas", async () => {
+    entrar("diretoria");
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Navegação principal" });
+    await act(async () => {});
+    expect(screen.queryByText("SINFRA respondeu:")).toBeNull();
+    expect(api.mock.calls.some(c => String(c[0]).startsWith("/api/correio/respostas"))).toBe(false);
+  });
+});

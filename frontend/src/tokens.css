@@ -342,6 +342,36 @@ td, th { font-variant-numeric: tabular-nums; }
   font-size: 14px; line-height: 20px; font-weight: 600; text-align: center;
 }
 
+/* Aviso flutuante "o orgao respondeu" (issue #654, AvisoRespostas.tsx): preso ao canto de baixo, a' direita, em
+   qualquer pagina. Abaixo do menu (40) e do menu da conta (45), acima da faixa da instalacao (35). A largura desconta
+   o menu recolhido: a 390 px cabe ao lado dele, sem rolagem horizontal; o texto quebra em vez de cortar. A regiao
+   vazia nao pega clique (so' os cartoes pegam). */
+.aviso-respostas {
+  position: fixed; right: 16px; bottom: 16px; z-index: 38;
+  width: min(360px, calc(100vw - var(--trilho) - 32px));
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none;
+}
+.shell:has(.faixa-instalacao) .aviso-respostas { bottom: 76px; }
+.aviso-resposta {
+  pointer-events: auto;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 8px; align-items: start;
+  padding: 12px 12px 12px 16px;
+  background: var(--superficie);
+  border: 1px solid var(--linha); border-radius: var(--raio-sobreposicao);
+  box-shadow: var(--sombra-sobreposicao);
+}
+.aviso-resposta__texto { margin: 0; grid-column: 1; font-size: 14px; line-height: 20px; color: var(--texto); overflow-wrap: anywhere; }
+.aviso-resposta > .btn { grid-column: 1; justify-self: start; }
+.aviso-resposta__fechar {
+  grid-column: 2; grid-row: 1; width: 28px; height: 28px; padding: 0; justify-content: center;
+  border: 0; background: none; box-shadow: none; color: var(--texto-2);
+}
+.aviso-respostas__mais {
+  pointer-events: auto; align-self: flex-end; margin: 0; padding: 2px 10px;
+  background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio-pilula);
+  font-size: 12.5px; color: var(--texto-menu);
+}
 .trilho {
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
   width: var(--trilho);
@@ -449,6 +479,9 @@ td, th { font-variant-numeric: tabular-nums; }
   .barra__titulo { font-size: 18px; line-height: 24px; }
   /* no celular fica o avatar; o nome esta' no rotulo acessivel do botao */
   .conta__nome { display: none; }
+  /* aviso de resposta do orgao (#654): mais perto da borda, e acima da faixa da instalacao, que aqui quebra em linhas */
+  .aviso-respostas { right: 8px; bottom: 8px; width: min(360px, calc(100vw - var(--trilho) - 16px)); }
+  .shell:has(.faixa-instalacao) .aviso-respostas { bottom: 96px; }
 }
 
 /* -------------------------------------------------------------- area central */

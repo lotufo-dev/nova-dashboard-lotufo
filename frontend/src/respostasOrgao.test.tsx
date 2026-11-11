@@ -1,6 +1,6 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EVENTO_RESPOSTAS_LIDAS, useLeituraDasRespostas } from "./respostasOrgao";
+import { EVENTO_LEITURA_FEITA, EVENTO_RESPOSTAS_LIDAS, useLeituraDasRespostas } from "./respostasOrgao";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn(async (): Promise<unknown> => ({ novas: [] })) }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
@@ -40,5 +40,19 @@ describe("Disparo da leitura das respostas do órgão (issue #644)", () => {
     expect(api).toHaveBeenCalledTimes(3);
     expect(ouvir).toHaveBeenCalledTimes(1);
     window.removeEventListener(EVENTO_RESPOSTAS_LIDAS, ouvir);
+  });
+
+  it("toda leitura respondida avisa o aviso flutuante, com ou sem resposta nova; a que falhou, não (issue #654)", async () => {
+    const ouvir = vi.fn();
+    window.addEventListener(EVENTO_LEITURA_FEITA, ouvir);
+    api.mockResolvedValueOnce({ novas: [] }).mockRejectedValueOnce(new Error("fora do ar")).mockResolvedValueOnce({ novas: [{ id: 1 }] });
+    render(<Tela ativo />);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ouvir).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(ouvir).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(ouvir).toHaveBeenCalledTimes(2);
+    window.removeEventListener(EVENTO_LEITURA_FEITA, ouvir);
   });
 });
