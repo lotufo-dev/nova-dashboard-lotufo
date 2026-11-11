@@ -424,3 +424,86 @@ def test_pendencia_de_execucao_sem_prazo_para_no_encerramento(cenario):
     ids["aditivo"]("2026-11-10", None, "2027-06-30")
     c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-11-20' WHERE id=?", (ids["contrato"],)); c.commit()
     assert "execucao_sem_prazo" not in _por_tipo(c, D(2026, 12, 1))
+
+
+def test_ritmo_e_prazo_sem_prazo_de_execucao_conhecido_nao_diz_que_atrasa(cenario):
+    """#662 no cartao "Ritmo e prazo" (#655): sem prazo de execucao conhecido nao ha' com o que comparar a conclusao."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_00)
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)   # ritmo 100,00; saldo 400,00
+    assert prazos.ritmo_e_prazo(c, cid, D(2026, 12, 1))["situacao"] == "atrasa"
+    ids["aditivo"]("2026-11-10", None, "2027-06-30")
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 12, 1))
+    assert r == {"ritmo_centavos": 100_00, "saldo_centavos": 400_00, "conclusao": None,
+                 "execucao_fim": "2026-10-20", "situacao": None, "dias_alem": None}
+
+
+# --- issue #655: cartao "Ritmo e prazo" da pagina da obra (a mesma conta da sugestao, so' mostrada) --------
+
+def test_ritmo_e_prazo_conclusao_depois_do_fim_atrasa_com_os_dias(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2026-12-20")
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)   # ritmo 100,00; saldo 400,00; conclusao 15/02/2027
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert r == {"ritmo_centavos": 100_00, "saldo_centavos": 400_00, "conclusao": "2027-02-15",
+                 "execucao_fim": "2026-12-20", "situacao": "atrasa", "dias_alem": 57}
+
+
+def test_ritmo_e_prazo_conclusao_ate_o_fim_e_no_prazo(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2027-02-15")   # no proprio dia do fim ainda e' no prazo
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == ("2027-02-15", "no_prazo", None)
+
+
+def test_ritmo_e_prazo_acima_do_teto_do_pedido_nao_fecha_a_conta(cenario):
+    """Ritmo muito baixo (obra que mal comecou ou quase parada): a conclusao cairia decadas a frente. Acima do teto
+    do pedido o cartao nao diz conclusao nem situacao; ritmo, saldo e fim da execucao continuam."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_006_00)
+    _medicao(c, cid, 1, "2026-09", atestado=6_00)   # ritmo 1,00; saldo 1.000,00 = 1.000 meses
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert r == {"ritmo_centavos": 1_00, "saldo_centavos": 1_000_00, "conclusao": None,
+                 "execucao_fim": "2026-10-20", "situacao": None, "dias_alem": None}
+
+
+def test_ritmo_e_prazo_no_teto_do_pedido_ainda_atrasa(cenario):
+    """O limite e' o do pedido: exatamente 3.650 dias alem do fim ainda aparece; um dia a mais, nao."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_00)
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)   # ritmo 100,00; saldo 400,00; conclusao 15/02/2027
+    _fim(c, cid, (D(2027, 2, 15) - datetime.timedelta(days=prazos.TETO_DIAS)).isoformat())
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == ("2027-02-15", "atrasa", prazos.TETO_DIAS)
+    _fim(c, cid, (D(2027, 2, 14) - datetime.timedelta(days=prazos.TETO_DIAS)).isoformat())
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (None, None, None)
+
+
+def test_ritmo_e_prazo_sem_medicao_na_janela_sem_ritmo_sem_conclusao_sem_situacao(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 900_00)
+    _medicao(c, cid, 1, "2026-03", atestado=300_00)   # antes da janela
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert r == {"ritmo_centavos": None, "saldo_centavos": 600_00, "conclusao": None,
+                 "execucao_fim": "2026-10-20", "situacao": None, "dias_alem": None}
+
+
+def test_ritmo_e_prazo_sem_saldo_ou_sem_fim_de_execucao_nao_tem_situacao(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 600_00)
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert (r["ritmo_centavos"], r["saldo_centavos"], r["conclusao"], r["situacao"]) == (100_00, 0, None, None)
+    _valor(c, cid, 1_000_00); _fim(c, cid, None)
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert (r["ritmo_centavos"], r["execucao_fim"], r["conclusao"], r["situacao"], r["dias_alem"]) == (
+        100_00, None, None, None, None)

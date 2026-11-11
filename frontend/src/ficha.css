@@ -1,4 +1,4 @@
-/* Ficha executiva da obra (#510): seis cartoes e a curva S numa tela so'. Cores so' dos tokens; a cor e' da informacao. */
+/* Ficha executiva da obra (#510): seis cartoes e o cartao "Ritmo e prazo" (#655). Cores so' dos tokens; a cor e' da informacao. */
 
 .ficha { display: grid; gap: 12px; align-content: start; }
 .ficha > * { min-width: 0; }
@@ -28,14 +28,11 @@
 .ficha__venc-rotulo { color: var(--texto-2); }
 .ficha__venc-data { font-family: var(--fonte-num); font-variant-numeric: tabular-nums; font-weight: 600; }
 .ponto--normal { background: var(--texto); }
-.ficha__curva { display: grid; gap: 4px; padding: 12px 18px; }
-.ficha__curva-cabeca { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.ficha__quadro { min-width: 0; }
-.ficha__quadro svg { display: block; }
-.ficha__previsto { fill: none; stroke: var(--texto-fraco); stroke-width: 2; stroke-dasharray: 6 4; }
-.ficha__medido { fill: none; stroke: var(--acento); stroke-width: 2.5; }
-.ficha__legenda { display: flex; justify-content: center; gap: 24px; font-size: 12px; color: var(--texto-2); }
-.ficha__legenda > span { display: inline-flex; align-items: center; gap: 6px; }
+.ficha__ritmo { display: grid; gap: 10px; padding: 14px 18px; }
+.ficha__ritmo .ficha__cabeca { align-items: center; flex-wrap: wrap; }
+.ficha__ritmo-dados { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 20px; margin: 0; }
+.ficha__ritmo-dados dt { font-size: 13px; color: var(--texto-2); }
+.ficha__ritmo-dados dd { margin: 0; font-family: var(--fonte-num); font-variant-numeric: tabular-nums; font-size: 16px; line-height: 24px; font-weight: 600; white-space: nowrap; }
 
 @media (max-width: 1100px) { .ficha__grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .ficha__grade { grid-template-columns: minmax(0, 1fr); } }

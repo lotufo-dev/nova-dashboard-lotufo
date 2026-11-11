@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react";
 import Alertas, { avisosDaObra, type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
-import CurvaS from "./CurvaS";
 import ExecucaoContrato from "./ExecucaoContrato";
-import FichaObra, { CurvaDaFicha, type Ficha } from "./FichaObra";
+import FichaObra, { RitmoEPrazo, type Ficha } from "./FichaObra";
 import { IconeAlerta, IconeVoltar } from "./icones";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
 import IniciarProxima from "./IniciarProxima";
 import Medicoes from "./Medicoes";
 import { ContratoObra, DocumentosObra } from "./ObraAbas";
-import type { MarcaAditivo, PontoDaCurva, PrevistoAnterior } from "./obra";
 import Prazos from "./Prazos";
 import Reajuste from "./Reajuste";
 import { NovoProtocolo } from "./Protocolo";
@@ -68,7 +66,7 @@ function AvisosDaObra({ contratoId, itens }: { contratoId: number; itens: Aviso[
 
 /* ------------------------------------------------------------------- pagina */
 
-// Pagina unica da obra (#646): o resumo da ficha no alto e, logo abaixo, as abas. A aba vem da URL (rota.tsx): cada
+// Pagina unica da obra (#646): o resumo da ficha no alto, o cartao "Ritmo e prazo" (#655) e as abas. A aba vem da URL (rota.tsx): cada
 // aba tem endereco proprio ("/obras/7/prazos") e e' um link de verdade, entao F5, o link do e-mail e o "abrir em
 // nova aba" abrem a secao certa. "/obras/7" (aba "ficha" na rota) abre a mesma pagina com a primeira aba, Medicoes.
 export default function ContratoPagina({ contratoId, usuario, aba, origem, busca }:
@@ -82,9 +80,6 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
   const [versaoMedicoes, setVersaoMedicoes] = useState(0);
   // os avisos da obra: o cartao da lateral, em qualquer aba
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
-  // a curva (previsto x medido) e o saldo: os indicadores e a curva S leem a mesma resposta.
-  // N04-12: a falha da leitura (null) nao e' o mesmo que obra sem curva.
-  const [curva, setCurva] = useState<{ pontos: PontoDaCurva[]; anterior: PrevistoAnterior | null; aditivos: MarcaAditivo[] } | null | undefined>(undefined);
   // o resumo do alto (contrato, execucao, prazo, medicoes, vencimentos); a falha (null) vira "indisponível" nos cartoes
   const [ficha, setFicha] = useState<Ficha | null | undefined>(undefined);
   const abaAtiva: Exclude<Aba, "ficha"> = aba === "ficha" ? "medicoes" : aba;
@@ -100,15 +95,6 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
       .then(d => { if (vigente) setC(d); })
       .catch(e => { if (vigente) setErro(mensagemDeErro(e)); });
     return () => { vigente = false; };
-  }, [contratoId]);
-
-  useEffect(() => {
-    let vivo = true;
-    setCurva(undefined);
-    api<{ curva?: PontoDaCurva[]; anterior?: PrevistoAnterior | null; aditivos?: MarcaAditivo[] }>(`/api/contratos/${contratoId}/curva`)
-      .then(d => { if (vivo) setCurva({ pontos: d.curva ?? [], anterior: d.anterior ?? null, aditivos: d.aditivos ?? [] }); })
-      .catch(() => { if (vivo) setCurva(null); });
-    return () => { vivo = false; };
   }, [contratoId]);
 
   // O resumo e' lido de novo quando uma medicao nasce ou anda na aba Medicoes (`versaoMedicoes`), sem voltar ao
@@ -180,7 +166,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
           <FichaObra contratoId={contratoId} prazos={c} ficha={ficha} />
           <div className="obra-grade">
             <div className="obra-grade__principal">
-              <div id="curva-resumo"><CurvaDaFicha curva={curva} /></div>
+              <div id="ritmo"><RitmoEPrazo ficha={ficha} /></div>
 
               <section className="cartao" id="secoes" aria-label="Seções da obra">
                 <Abas rotulo="Seções da obra" atual={abaAtiva} classe="abas--obra"
@@ -202,8 +188,6 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
                   {abaAtiva === "contrato" && <ContratoObra contratoId={contratoId} />}
                 </div>
               </section>
-
-              <div id="curva"><CurvaS pontos={curva === undefined ? undefined : curva ? curva.pontos : null} contratoId={contratoId} anterior={curva?.anterior} aditivos={curva?.aditivos} /></div>
             </div>
 
             <aside className="obra-grade__lateral" aria-label="Avisos e prazos da obra">
